@@ -44,6 +44,7 @@ export class FormControls {
 
   static select(options: SelectOption[], value?: string | null): HTMLSelectElement {
     const s = document.createElement("select");
+    s.className = "app-select";   // thème de l'app (sinon rendu natif du navigateur)
     options.forEach((o) => {
       const opt = document.createElement("option");
       opt.value = o.value; opt.textContent = o.label;

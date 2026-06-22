@@ -243,7 +243,7 @@ export class GraphView {
     dm.onchange = () => { this.displayMode = dm.value as any; this.pos = {}; this._moved.clear(); this.rebuild({ recenter: true }); };
     this._displayModeEl = dm; this.toolbarEl.appendChild(dm);
 
-    const lsel = document.createElement("select"); lsel.title = "Disposition active";
+    const lsel = document.createElement("select"); lsel.className = "app-select"; lsel.title = "Disposition active";
     lsel.onchange = () => { const v = lsel.value; if (v === "__default__") this.activateDefaultView(); else this.applyLayout(v); };
     this._layoutSelectEl = lsel; this.toolbarEl.appendChild(lsel);
 
