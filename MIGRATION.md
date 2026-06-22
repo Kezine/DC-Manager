@@ -47,8 +47,9 @@ src/
   models/      Entity + 18 entités + EntityRegistry           ← FAIT
   data/        FieldIndex, DataAdapter, BrowserStorageAdapter, RestAdapter   (à venir)
   store/       Store (CRUD async, index secondaires, undo/redo)              (à venir)
-  geometry/    project3D, géométrie rack/side/wall, painter, …               (à venir)
-  registries/  PortTypes / CableTypes / EquipmentTypes par défaut            (à venir)
+  geometry/    Projection, Box, Painter, RackGeometry, GraphGeometry (purs)  ← FAIT (4a)
+               side/wall slots, occupants, resolvePort3D (couplés store)     (4b)
+  registries/  EquipmentTypes, PortRoles, Depths, EquipFaces, Port/CableTypes ← FAIT
   views/       ListController, GraphView, DatacenterView                     (à venir)
   app/         main.ts (bootstrap)
   index.html   coquille (markup + CSS à migrer en phase « Shell »)
@@ -73,8 +74,15 @@ src/
       régression au niveau MODULES** (`Tests/modules/run.js` via `npm run
       test:modules` : compile en CJS puis exerce modèle + données + store —
       32/32). tsc + build + legacy (213/213) verts.
-- [ ] **Phase 4 — Géométrie & registres** (classes de méthodes statiques) ;
-      promouvoir `defaultCatalogs` en registres OO (`PortTypes`/`CableTypes`).
+- [x] **Phase 4a — Géométrie PURE & registres OO.** `core/Labeler`, `core/ClickGuard` ;
+      `registries/` (EquipmentTypes couleur/icône/libellé, PortRoles, Depths, EquipFaces,
+      + `PortTypes`/`CableTypes` promus depuis `defaultCatalogs`) ; `geometry/`
+      (Projection, Box, Painter, RackGeometry, GraphGeometry). Harnais modules
+      étendu (suites legacy 02/07/09/10/11/12 absorbées) → 86/86.
+- [ ] **Phase 4b — Géométrie couplée au store** : occupants de baie (`rackOccupants`),
+      side/wall (slots libres, boîtes, occupants), `resolvePort3D`, géométrie des
+      waypoints (`waypointPassPoints`/`waypointAnchor` via `brushGeom`/`sidePinGeom`/
+      `capPinGeom`). Absorbe les suites 06 & 08.
 - [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`).
 - [ ] **Phase 6 — Shell / UI.** Migration du `<head>`/`<style>`/`<body>` et du
       bootstrap ; câblage final ; retrait du mono-fichier.
