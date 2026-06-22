@@ -6,7 +6,12 @@ import { Notify } from "../ui/Notify";
 import { Html } from "../core/Html";
 import { Ip } from "../core/Ip";
 import { GroupTypes } from "../domain/GroupTypes";
-import { POWER_SOURCES } from "../domain/constants";
+import { EquipmentTypes } from "../registries/EquipmentTypes";
+import { Depths } from "../registries/Depths";
+import { POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT } from "../domain/constants";
+
+const divider = (txt: string) => { const d = document.createElement("div"); d.className = "section-divider"; d.textContent = txt; return d; };
+const row2 = (...fields: HTMLElement[]) => { const r = document.createElement("div"); r.className = "form-row"; fields.forEach((f) => r.appendChild(f)); return r; };
 
 const ipNetOptions = (store: Store) => store.all("ipNetworks").slice()
   .sort((a: any, b: any) => (a.label || a.cidr || "").localeCompare(b.label || b.cidr || ""))
@@ -106,6 +111,127 @@ export class Forms {
       },
     });
     setTimeout(() => labelI.focus(), 30);
+  }
+
+  /** Équipement — formulaire CŒUR (identité · admin · groupe · dimensions · placement rack).
+      DIFFÉRÉ (incréments suivants) : éditeur de ports/agrégats, breakout, placement
+      latéral/paroi/étage, images de façade. Ces champs sont PRÉSERVÉS à l'édition
+      (store.update applique un patch ; les clés non incluses ne sont pas touchées). */
+  static equipment(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
+    const eq: any = id ? store.get("equipments", id) : null;
+    const root = document.createElement("div");
+
+    // -- identité --
+    const nameI = FormControls.text(eq ? eq.name : "", "ex. sw-core-01");
+    const curType = eq ? (eq.type || EQUIPMENT_TYPE_DEFAULT) : EQUIPMENT_TYPE_DEFAULT;
+    let typeOpts = EquipmentTypes.ALL.map((t) => ({ value: t.id, label: t.label }));
+    if (curType && !EquipmentTypes.ALL.some((t) => t.id === curType)) typeOpts = [{ value: curType, label: curType + " (hors liste)" }, ...typeOpts];
+    const typeI = FormControls.select(typeOpts, curType);
+    root.appendChild(row2(FormControls.fieldRow("Nom", nameI), FormControls.fieldRow("Type", typeI)));
+
+    const invI = FormControls.toggle("Inventaire seul", eq ? !!eq.inventory_only : false, () => sync(), { block: true, title: "Répertorié uniquement : ni placement, ni câblage, ni ports." });
+    root.appendChild(invI);
+    const brandI = FormControls.text(eq ? eq.brand : "", "ex. Cisco, Dell…");
+    const modelI = FormControls.text(eq ? eq.model : "", "ex. Catalyst 2960…");
+    root.appendChild(row2(FormControls.fieldRow("Marque", brandI), FormControls.fieldRow("Modèle", modelI)));
+    const serialI = FormControls.text(eq ? eq.serial : "", "n° de série");
+    root.appendChild(FormControls.fieldRow("Numéro de série", serialI));
+
+    // -- administratif --
+    root.appendChild(divider("Administratif"));
+    const purchaseI = FormControls.date(eq ? eq.purchase_date : "");
+    const warrantyI = FormControls.date(eq ? eq.warranty_end : "");
+    const poI = FormControls.text(eq ? eq.po_ref : "", "réf. bon de commande");
+    root.appendChild(row2(FormControls.fieldRow("Date d'achat", purchaseI), FormControls.fieldRow("Fin de garantie", warrantyI), FormControls.fieldRow("Bon de commande", poI)));
+    const assignDateI = FormControls.date(eq ? eq.assigned_date : "");
+    const assignToI = FormControls.text(eq ? eq.assigned_to : "", "nom de la personne");
+    root.appendChild(row2(FormControls.fieldRow("Date d'attribution", assignDateI), FormControls.fieldRow("Attribué à", assignToI)));
+    const pduI = FormControls.number((eq && eq.pdu_max_a != null) ? eq.pdu_max_a : "", { min: 0, step: 1, placeholder: "ampères" });
+    const pduRow = FormControls.fieldRow("Capacité max PDU (A)", pduI, "Pour les bandeaux d'alimentation.");
+    root.appendChild(pduRow);
+
+    const grpOpts = [{ value: "", label: "— aucun —" }].concat(store.all("groups").slice().sort((a: any, b: any) => (a.label || "").localeCompare(b.label || "")).map((g: any) => ({ value: g.id, label: g.label || "(sans label)" })));
+    const groupI = FormControls.select(grpOpts, eq && eq.group_id ? eq.group_id : "");
+    root.appendChild(FormControls.fieldRow("Groupe", groupI, "Gérés dans l'onglet Groupes."));
+    const descI = FormControls.textArea(eq ? eq.description : "");
+    root.appendChild(FormControls.fieldRow("Description", descI));
+
+    // -- dimensions + placement (sections « avancées », masquées en inventaire) --
+    const adv = document.createElement("div");
+    adv.appendChild(divider("Dimensions"));
+    const dimI = FormControls.select([{ value: "u", label: "En U (rack)" }, { value: "free", label: "Libre (L × l × h en mm)" }], eq ? (eq.dim_mode === "free" ? "free" : "u") : "u");
+    adv.appendChild(FormControls.fieldRow("Dimensionnement", dimI));
+    // U
+    const uBox = document.createElement("div");
+    const uHI = FormControls.number(eq ? eq.u_height : 1, { min: 1, step: 1 });
+    const depthI = FormControls.select(Depths.ALL.map((d) => ({ value: d.id, label: d.label })), eq && ["full", "half", "quarter"].includes(eq.depth) ? eq.depth : "full");
+    uBox.appendChild(row2(FormControls.fieldRow("Hauteur (U)", uHI), FormControls.fieldRow("Profondeur", depthI)));
+    adv.appendChild(uBox);
+    // libre
+    const freeBox = document.createElement("div");
+    const flI = FormControls.number((eq && eq.free_l_mm != null) ? eq.free_l_mm : "", { min: 0, step: 1, placeholder: "longueur" });
+    const fwI = FormControls.number((eq && eq.free_w_mm != null) ? eq.free_w_mm : "", { min: 0, step: 1, placeholder: "largeur" });
+    const fhI = FormControls.number((eq && eq.free_h_mm != null) ? eq.free_h_mm : "", { min: 0, step: 1, placeholder: "hauteur" });
+    freeBox.appendChild(row2(FormControls.fieldRow("Longueur (mm)", flI), FormControls.fieldRow("Largeur (mm)", fwI), FormControls.fieldRow("Hauteur (mm)", fhI)));
+    adv.appendChild(freeBox);
+
+    // placement rack (mode U seulement, dans ce cœur)
+    const placeBox = document.createElement("div");
+    placeBox.appendChild(divider("Placement (rack)"));
+    const rackOpts = [{ value: "", label: "— non placé —" }].concat(store.all("racks").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((r: any) => ({ value: r.id, label: r.name || "(baie)" })));
+    const rackI = FormControls.select(rackOpts, eq && eq.placement_mode === "rack" && eq.rack_id ? eq.rack_id : "");
+    const rackUI = FormControls.number((eq && eq.rack_u != null) ? eq.rack_u : "", { min: 1, step: 1, placeholder: "U de bas (vide = libre)" });
+    placeBox.appendChild(row2(FormControls.fieldRow("Baie", rackI), FormControls.fieldRow("Position (U)", rackUI)));
+    const placeHint = document.createElement("div"); placeHint.className = "form-hint";
+    placeHint.textContent = "Placement latéral / paroi / sur étage : à venir (préservé pour les équipements existants).";
+    placeBox.appendChild(placeHint);
+    adv.appendChild(placeBox);
+    root.appendChild(adv);
+
+    const sync = () => {
+      const inv = (invI as any).checked, u = dimI.value === "u";
+      adv.style.display = inv ? "none" : "";
+      uBox.style.display = u ? "" : "none";
+      freeBox.style.display = u ? "none" : "";
+      placeBox.style.display = u ? "" : "none";   // placement rack du cœur = mode U
+      pduRow.style.display = (typeI.value === "pdu") ? "" : "none";
+    };
+    dimI.addEventListener("change", sync); typeI.addEventListener("change", sync); sync();
+
+    host.openModal({
+      title: eq ? "Modifier l'équipement" : "Nouvel équipement",
+      subtitle: eq ? Html.escape(eq.name || "") : "",
+      body: root,
+      onSave: async () => {
+        const name = nameI.value.trim();
+        if (!name) { Notify.toast("Le nom est obligatoire", "err"); return false; }
+        const inv = (invI as any).checked, free = dimI.value === "free";
+        const payload: any = {
+          name, type: typeI.value, brand: brandI.value.trim(), model: modelI.value.trim(), serial: serialI.value.trim(),
+          inventory_only: inv, group_id: groupI.value || null, description: descI.value.trim(),
+          purchase_date: (purchaseI as any).value || "", warranty_end: (warrantyI as any).value || "", po_ref: poI.value.trim(),
+          assigned_date: (assignDateI as any).value || "", assigned_to: assignToI.value.trim(),
+          pdu_max_a: pduI.value !== "" ? Math.max(0, parseInt(pduI.value, 10) || 0) : null,
+          dim_mode: free ? "free" : "u",
+        };
+        if (free) {
+          payload.free_l_mm = flI.value !== "" ? Math.max(0, parseInt(flI.value, 10) || 0) : null;
+          payload.free_w_mm = fwI.value !== "" ? Math.max(0, parseInt(fwI.value, 10) || 0) : null;
+          payload.free_h_mm = fhI.value !== "" ? Math.max(0, parseInt(fhI.value, 10) || 0) : null;
+          // préserve un placement étage/latéral/paroi existant ; sinon « manuel »
+          if (!eq || !["floor", "side", "wall"].includes(eq.placement_mode)) payload.placement_mode = "manual";
+        } else {
+          payload.u_height = Math.max(1, parseInt(uHI.value, 10) || 1);
+          payload.depth = depthI.value;
+          payload.placement_mode = "rack";
+          payload.rack_id = rackI.value || null;
+          payload.rack_u = rackUI.value !== "" ? Math.max(1, parseInt(rackUI.value, 10) || 1) : null;
+        }
+        if (eq) await store.update("equipments", eq.id, payload); else await store.create("equipments", payload);
+        host.setDirty?.(true); Notify.toast(eq ? "Équipement mis à jour" : "Équipement créé"); onSaved?.(); return true;
+      },
+    });
+    setTimeout(() => nameI.focus(), 30);
   }
 
   /** Réseau IP (sous-réseau CIDR). */

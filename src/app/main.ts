@@ -123,7 +123,7 @@ async function boot(): Promise<void> {
       },
     });
   };
-  addListTab("equipements", "Équipements", ListConfigs.equipments);
+  addListTab("equipements", "Équipements", ListConfigs.equipments, (id, done) => Forms.equipment(store, formHost, id, done));
   addListTab("cables", "Câbles", ListConfigs.cables);
   addListTab("racks", "Racks", ListConfigs.racks);
   addListTab("reseaux", "Réseaux", ListConfigs.networks, (id, done) => Forms.network(store, formHost, id, done));
