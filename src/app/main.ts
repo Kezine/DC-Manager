@@ -9,6 +9,7 @@ import { BrowserStorageAdapter } from "../data";
 import { Store } from "../store";
 import { GraphView } from "../views";
 import { Modal, Notify, FormControls } from "../ui";
+import { Shell } from "./Shell";
 
 const adapter = new BrowserStorageAdapter({ persistent: false });
 const store = new Store(adapter);
@@ -33,19 +34,18 @@ async function boot(): Promise<void> {
 
   const root = document.getElementById("app");
   if (!root) return;
-  root.innerHTML =
-    `<p style="font:13px system-ui;color:#9aa">NetMap — pilote TypeScript : socle (modèle · données · store · géométrie · UI) ` +
-    `+ GraphView (tranche-pilote). ${EntityRegistry.COLLECTIONS.length} collections · ${store.totalCount()} entités.</p>`;
+
+  const shell = new Shell(root);
+  const modal = new Modal();   // modale d'édition partagée
+
+  // ---- Vue Topologie (GraphView pilote) ----
+  let graph: GraphView;
+  const graphContainer = shell.addView({ name: "graph", label: "Topologie", onShow: () => graph.rebuild({ recenter: true }) });
   const stage = document.createElement("div");
-  stage.id = "graph-stage";
   stage.className = "graph-stage";
-  stage.style.cssText = "position:relative;width:100%;height:560px;border:1px solid var(--line);background:var(--bg-2);overflow:hidden";
-  root.appendChild(stage);
-
-  // Shell minimal : modale d'édition partagée.
-  const modal = new Modal();
-
-  const graph = new GraphView(store, stage, {
+  stage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
+  graphContainer.appendChild(stage);
+  graph = new GraphView(store, stage, {
     setDirty: () => { /* dirty global câblé plus tard */ },
     openEquipmentDetail: (id) => {
       const eq = store.get("equipments", id);
@@ -57,8 +57,18 @@ async function boot(): Promise<void> {
       modal.open({ title: eq.name || "(équipement)", subtitle: eq.type, body, hideFooter: true });
     },
   });
-  graph.rebuild({ recenter: true });
+
+  // ---- Onglets placeholder (vues à porter en Phase 5b) ----
+  const placeholder = (label: string) => (c: HTMLElement) => {
+    if (c.dataset.built) return;
+    c.dataset.built = "1";
+    c.innerHTML = `<p style="padding:24px;color:var(--fg-dim)">Vue « ${label} » — à porter (Phase 5b).</p>`;
+  };
+  shell.addView({ name: "equipements", label: "Équipements", onShow: placeholder("Équipements") });
+  shell.addView({ name: "datacenter", label: "Datacenter", onShow: placeholder("Datacenter") });
+
+  shell.switchView("graph");
   Notify.toast("NetMap — pilote prêt (double-clic un nœud)", "ok");
-  (window as any).__NETMAP__ = { EntityRegistry, adapter, store, graph, modal };
+  (window as any).__NETMAP__ = { EntityRegistry, adapter, store, shell, graph, modal };
 }
 boot();

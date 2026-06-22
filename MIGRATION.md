@@ -116,10 +116,14 @@ src/
         `ui/Dialog` (confirm/alert/custom/prompt empilables, Promise), `ui/Modal`
         (modale d'édition unique : open/close/requestClose/markDirty + détection de
         modif par instantané). Démo : double-clic d'un nœud → fiche équipement.
-  - [ ] **Navigation** (switchView) + markup `<body>` (en-tête, onglets, conteneurs
-        de vue) → classes du shell.
-  - [ ] Bootstrap final (remplace le document de démo) ; câblage des `*Host` des vues ;
-        retrait du mono-fichier.
+  - [x] **Navigation + ossature** : `app/Shell` construit en-tête + onglets + conteneurs
+        de vue et porte `switchView` (bascule `.active` → rendu de la vue). Les vues
+        s'enregistrent via `addView`. `main.ts` monte la Topologie (GraphView) +
+        onglets placeholder (Équipements/Datacenter à porter). Tabs/views stylés par
+        le CSS extrait.
+  - [ ] Bootstrap final (remplace le document de démo par un vrai chargement) ;
+        câblage complet des `*Host` ; portage des vues restantes ; retrait du
+        mono-fichier.
 - [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`).
 - [ ] **Phase 6 — Shell / UI.** Migration du `<head>`/`<style>`/`<body>` et du
       bootstrap ; câblage final ; retrait du mono-fichier.
