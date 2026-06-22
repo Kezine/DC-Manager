@@ -8,6 +8,7 @@ import { Notify } from "../ui/Notify";
 import { Dialog } from "../ui/Dialog";
 import type { ModalOptions } from "../ui/Modal";
 import { Id } from "../core/Id";
+import { Html } from "../core/Html";
 import { Text } from "../core/Text";
 import { GraphGeometry } from "../geometry/GraphGeometry";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
@@ -48,11 +49,25 @@ export class GraphView {
   filters = { equip: new Set<string>(), net: new Set<string>(), pt: new Set<string>(), grp: new Set<string>() };
   search = "";
   nodeBarMode: "type" | "network" | "group" = "type";   // couleur de la poignée des nœuds
+  /* Mode d'affichage de la VUE PAR DÉFAUT : "A" = réorganise tout à chaque filtre ;
+     "B" = tout reste en place, les filtres ne font que masquer ; "C" = comme A mais
+     les nœuds déplacés à la main gardent leur position. */
+  displayMode: "A" | "B" | "C" = "A";
+  private layoutMode: "auto" | "manual" = "auto";
+  private _layoutDirty = false;
+  private _hasRendered = false;
   private pos: Record<string, { x: number; y: number }> = {};   // positions vivantes
   private _moved = new Set<string>();     // ids déplacés à la main
+  private unplaced = new Set<string>();   // nœuds visibles absents de la disposition active
+  private _shownEq: Set<string> | null = null;       // null = tout visible ; sinon ids à AFFICHER (masquage)
+  private _shownCable: Set<string> | null = null;
   private scale = 1; private tx = 0; private ty = 0;
   private toolbarEl: HTMLElement;
   private legendEl: HTMLElement;
+  private _layoutSelectEl: HTMLSelectElement | null = null;
+  private _layoutSaveBtn: HTMLButtonElement | null = null;
+  private _displayModeEl: HTMLSelectElement | null = null;
+  private _autoBtn: HTMLButtonElement | null = null;
   private svg: SVGSVGElement | null = null;
   private gRoot: SVGGElement | null = null;
   private _nodeById: Record<string, GNode> = {};
@@ -81,14 +96,27 @@ export class GraphView {
     this.buildToolbar();
   }
 
-  /** Reconstruit tout : modèle → layout → rendu → recadrage + surlignage/légende. */
+  /** Reconstruit tout : modèle → layout → rendu → recadrage + masquage/surlignage/légende. */
   rebuild(opts: { recenter?: boolean } = {}): void {
     this.computeVisible();
     this.layout();
     this.render();
     if (opts.recenter) this.recenter();
+    this.applyFilterVisibility();
     this.applyHighlight();
     this.renderLegend();
+    this.refreshLayoutControls();
+  }
+
+  /** Activation de la vue : (re)construit la barre, charge la disposition active, recadre au 1er rendu. */
+  show(): void {
+    this.buildToolbar();
+    this.selection.clear();
+    this.layoutMode = this._activeLayout() ? "manual" : "auto";
+    if (this._activeLayout() && !Object.keys(this.pos).length) this.pos = Object.assign({}, this._activePositions() || {});
+    const first = !this._hasRendered;
+    this.rebuild({ recenter: first });
+    this._hasRendered = true;
   }
 
   /* ---- modèle de rendu (depuis le store) ---- */
@@ -136,9 +164,23 @@ export class GraphView {
     return { eqIds, cableIds };
   }
 
+  /** Les filtres MASQUENT-ils (tous présents, certains cachés) au lieu de filtrer le jeu ?
+      VRAI si une disposition est active OU en mode B. */
+  private _filtersAsVisibility(): boolean { return !!this._activeLayout() || this.displayMode === "B"; }
+
   computeVisible(): void {
     const s = this.store;
-    const { eqIds, cableIds } = this._filteredSets();
+    const sets = this._filteredSets();
+    let eqIds: Set<string>, cableIds: Set<string>;
+    if (this._filtersAsVisibility()) {
+      eqIds = new Set(); cableIds = new Set();
+      s.all("equipments").forEach((e: any) => { if (!e.inventory_only) eqIds.add(e.id); });
+      this._resolvableCables().forEach((c: any) => cableIds.add(c.id));
+      this._shownEq = sets.eqIds; this._shownCable = sets.cableIds;
+    } else {
+      eqIds = sets.eqIds; cableIds = sets.cableIds;
+      this._shownEq = null; this._shownCable = null;
+    }
     this.nodes = [...eqIds].map((id) => s.get("equipments", id)).filter(Boolean).map((e: any) => ({ id: e.id, name: e.name || "(sans nom)", type: e.type || "", group_id: e.group_id || null, x: 0, y: 0, vx: 0, vy: 0 }));
     this.edges = [...cableIds].map((id) => s.get("cables", id)).filter(Boolean).map((c: any) => {
       const pa = s.get("ports", c.from_port_id), pb = s.get("ports", c.to_port_id);
@@ -190,10 +232,191 @@ export class GraphView {
     reset.type = "button"; reset.className = "btn btn-ghost btn-sm"; reset.textContent = "Tout afficher";
     reset.onclick = () => { this.filters.equip.clear(); this.filters.net.clear(); this.filters.pt.clear(); this.filters.grp.clear(); this.search = ""; this.buildToolbar(); this.onFilterChange(); };
     this.toolbarEl.appendChild(reset);
+
+    // ---- actions de disposition / vue (poussées à droite) ----
+    const spacer = document.createElement("div"); spacer.style.flex = "1 1 auto"; this.toolbarEl.appendChild(spacer);
+
+    const dm = FormControls.select([{ value: "A", label: "Mode A · réorganise" }, { value: "B", label: "Mode B · fige + masque" }, { value: "C", label: "Mode C · garde les déplacés" }], this.displayMode);
+    dm.title = "Mode d'affichage de la vue par défaut";
+    dm.onchange = () => { this.displayMode = dm.value as any; this.pos = {}; this._moved.clear(); this.rebuild({ recenter: true }); };
+    this._displayModeEl = dm; this.toolbarEl.appendChild(dm);
+
+    const lsel = document.createElement("select"); lsel.title = "Disposition active";
+    lsel.onchange = () => { const v = lsel.value; if (v === "__default__") this.activateDefaultView(); else this.applyLayout(v); };
+    this._layoutSelectEl = lsel; this.toolbarEl.appendChild(lsel);
+
+    const mkBtn = (txt: string, title: string, fn: () => void, extra = "") => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm" + (extra ? " " + extra : ""); b.textContent = txt; b.title = title; b.onclick = fn; this.toolbarEl.appendChild(b); return b;
+    };
+    this._layoutSaveBtn = mkBtn("💾", "Enregistrer dans la disposition active", () => { const a = this._activeLayout(); if (a) this.updateLayout(a.id); }, "graph-layout-savecur");
+    mkBtn("Dispositions…", "Gérer les dispositions enregistrées", () => this.openLayoutManager());
+    this._autoBtn = mkBtn("Auto", "Réorganiser automatiquement", () => this.autoArrange());
+    mkBtn("+ Cadre", "Ajouter un cadre de regroupement", () => this.addFrameAt());
+
+    this.refreshLayoutControls();
   }
 
-  /** Un changement de filtre réorganise et recadre (mode auto). */
-  onFilterChange(): void { this.rebuild({ recenter: true }); }
+  /** Routage d'un changement de filtre selon le mode (sans toucher au zoom en B/C). */
+  onFilterChange(): void {
+    if (this._activeLayout() || this.displayMode === "B") this.refreshFilterVisibility();
+    else if (this.displayMode === "C") this.rebuild({ recenter: false });
+    else this.rebuild({ recenter: true });
+  }
+
+  /** Applique le MASQUAGE par filtres (display:none) ; _shownEq null = tout visible. */
+  applyFilterVisibility(): void {
+    if (!this.gRoot) return;
+    const showAll = !this._shownEq;
+    this.gRoot.querySelectorAll("g.gnode").forEach((g) => { (g as any).style.display = (showAll || this._shownEq!.has((g as any).dataset.id)) ? "" : "none"; });
+    const showCable = (id: string) => showAll || (this._shownCable && this._shownCable.has(id));
+    this.gRoot.querySelectorAll("line.gedge").forEach((l) => { (l as any).style.display = showCable((l as any).dataset.id) ? "" : "none"; });
+    this.gRoot.querySelectorAll("text.gedge-label").forEach((t) => { (t as any).style.display = showCable((t as any).dataset.id) ? "" : "none"; });
+  }
+  /** Recalcule les filtres et applique le masquage SANS re-rendre (mode B / disposition). */
+  refreshFilterVisibility(): void {
+    const sets = this._filteredSets();
+    this._shownEq = sets.eqIds; this._shownCable = sets.cableIds;
+    this.applyFilterVisibility(); this.applyHighlight(); this.renderLegend();
+  }
+
+  /* ---- dispositions NOMMÉES ---- */
+
+  private _layouts(): any[] { return this.store.meta.graphLayouts || (this.store.meta.graphLayouts = []); }
+  private _activeLayout(): any { return this._layouts().find((l) => l.id === this.store.meta.activeLayoutId) || null; }
+  private _activePositions(): any { const l = this._activeLayout(); return l ? l.positions : null; }
+
+  private _persistLayouts(): void {
+    const m = this.store.meta;
+    if (m.activeLayoutId && !this._layouts().some((l) => l.id === m.activeLayoutId)) m.activeLayoutId = null;
+    const active = this._activeLayout();
+    m.graphLayout = active ? active.positions : null;
+    this.store.persistMeta(); this.host.setDirty?.(true);
+  }
+  private _capturePositions(base: any): Record<string, { x: number; y: number }> {
+    const pos = Object.assign({}, base || {});
+    this.nodes.forEach((n) => { pos[n.id] = { x: Math.round(n.x), y: Math.round(n.y) }; });
+    return pos;
+  }
+  private _captureFilters(): any { return { equip: [...this.filters.equip], net: [...this.filters.net], pt: [...this.filters.pt], grp: [...this.filters.grp] }; }
+  private _applyFilters(f: any): void { (["equip", "net", "pt", "grp"] as const).forEach((k) => { this.filters[k] = new Set<string>((f && f[k]) || []); }); }
+  private _markDirtyLayout(): void { if (!this._activeLayout()) return; this._layoutDirty = true; if (this._layoutSaveBtn) this._layoutSaveBtn.classList.add("dirty"); }
+
+  refreshLayoutControls(): void {
+    const active = this._activeLayout();
+    if (this._layoutSelectEl) {
+      const opts = ['<option value="__default__">Vue par défaut</option>']
+        .concat(this._layouts().map((l) => `<option value="${l.id}">${Html.escape(l.name || "(sans nom)")}</option>`));
+      this._layoutSelectEl.innerHTML = opts.join("");
+      this._layoutSelectEl.value = active ? active.id : "__default__";
+    }
+    if (this._layoutSaveBtn) { this._layoutSaveBtn.style.display = active ? "" : "none"; this._layoutSaveBtn.classList.toggle("dirty", !!this._layoutDirty); }
+    if (this._displayModeEl) { this._displayModeEl.value = this.displayMode; this._displayModeEl.disabled = !!active; }
+    if (this._autoBtn) this._autoBtn.disabled = !!active;
+  }
+
+  activateDefaultView(): void {
+    this.store.meta.activeLayoutId = null; this._layoutDirty = false; this.layoutMode = "auto";
+    this._persistLayouts(); this.rebuild({ recenter: true }); Notify.toast("Vue par défaut");
+  }
+
+  private _promptName(title: string, initial: string): Promise<string | null> {
+    return Dialog.custom({
+      title, confirmLabel: "OK",
+      build: (root) => {
+        const inp = FormControls.text(initial || "", "ex. Salle serveurs, Vue logique…");
+        root.appendChild(FormControls.fieldRow("Nom", inp));
+        setTimeout(() => { inp.focus(); inp.select(); }, 30);
+        return { validate: () => inp.value.trim() ? true : "Le nom ne peut pas être vide.", collect: () => inp.value.trim() };
+      },
+    });
+  }
+
+  async saveLayout(): Promise<void> {
+    const positions = this._capturePositions(this.pos);
+    const filters = this._captureFilters();
+    const def = "Disposition " + (this._layouts().length + 1);
+    const name = await this._promptName("Enregistrer la disposition", def);
+    if (!name) return;
+    const id = Id.uid();
+    this._layouts().push({ id, name, positions, filters, created_date: Id.nowIso(), updated_date: Id.nowIso() });
+    this.store.meta.activeLayoutId = id; this._layoutDirty = false;
+    this._persistLayouts(); this.layoutMode = "manual"; this._moved.clear();
+    this.pos = Object.assign({}, positions);
+    this.buildToolbar(); this.rebuild({ recenter: true });
+    Notify.toast("Disposition « " + name + " » enregistrée");
+  }
+  applyLayout(id: string): void {
+    const l = this._layouts().find((x) => x.id === id);
+    if (!l) return;
+    this.store.meta.activeLayoutId = id; this._layoutDirty = false;
+    this.pos = Object.assign({}, l.positions || {}); this._moved.clear();
+    this._applyFilters(l.filters); this._persistLayouts(); this.layoutMode = "manual";
+    this.buildToolbar(); this.rebuild({ recenter: true });
+    Notify.toast("Disposition « " + (l.name || "") + " » restaurée");
+  }
+  updateLayout(id: string): void {
+    const l = this._layouts().find((x) => x.id === id);
+    if (!l) return;
+    l.positions = this._capturePositions(this.pos); l.filters = this._captureFilters(); l.updated_date = Id.nowIso();
+    this._layoutDirty = false; this._persistLayouts(); this.refreshLayoutControls();
+    Notify.toast("Disposition « " + l.name + " » enregistrée");
+  }
+  async renameLayout(id: string): Promise<void> {
+    const l = this._layouts().find((x) => x.id === id);
+    if (!l) return;
+    const name = await this._promptName("Renommer la disposition", l.name);
+    if (!name) return;
+    l.name = name; l.updated_date = Id.nowIso(); this._persistLayouts(); this.refreshLayoutControls(); Notify.toast("Disposition renommée");
+  }
+  async deleteLayout(id: string): Promise<void> {
+    const l = this._layouts().find((x) => x.id === id);
+    if (!l) return;
+    const ok = await Dialog.confirm({ title: "Supprimer la disposition ?", message: "« " + (l.name || "") + " » sera supprimée. Les équipements ne sont pas affectés.", confirmLabel: "Supprimer", danger: true });
+    if (!ok) return;
+    const wasActive = this.store.meta.activeLayoutId === id;
+    this.store.meta.graphLayouts = this._layouts().filter((x) => x.id !== id);
+    if (wasActive) { this.store.meta.activeLayoutId = null; this.layoutMode = "auto"; this._layoutDirty = false; }
+    this._persistLayouts(); this.buildToolbar(); this.rebuild({ recenter: wasActive }); Notify.toast("Disposition supprimée");
+  }
+  /** Réorganise tout (force) en ignorant les positions vivantes. */
+  autoArrange(): void { this.pos = {}; this._moved.clear(); this.rebuild({ recenter: true }); }
+
+  openLayoutManager(): void {
+    const fmtDate = (iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch (_) { return ""; } };
+    const root = document.createElement("div");
+    const top = document.createElement("div"); top.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;";
+    const hint = document.createElement("div"); hint.style.cssText = "font-size:11px;color:var(--fg-dim);";
+    const addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "btn btn-primary btn-sm"; addBtn.textContent = "+ Enregistrer la disposition actuelle";
+    top.appendChild(hint); top.appendChild(addBtn);
+    const listEl = document.createElement("div"); listEl.className = "layout-mgr";
+    root.appendChild(top); root.appendChild(listEl);
+    const render = () => {
+      const layouts = this._layouts();
+      hint.textContent = layouts.length ? layouts.length + " disposition(s) enregistrée(s)" : "Aucune disposition enregistrée pour l'instant.";
+      listEl.innerHTML = "";
+      if (!layouts.length) { const e = document.createElement("div"); e.className = "lm-empty"; e.textContent = "Disposez les nœuds, puis « Enregistrer la disposition actuelle »."; listEl.appendChild(e); return; }
+      layouts.forEach((l) => {
+        const active = this.store.meta.activeLayoutId === l.id;
+        const item = document.createElement("div"); item.className = "lm-item" + (active ? " active" : "");
+        const info = document.createElement("div"); info.className = "lm-info";
+        const nameEl = document.createElement("div"); nameEl.className = "lm-name"; nameEl.appendChild(document.createTextNode(l.name || "(sans nom)"));
+        if (active) { const b = document.createElement("span"); b.className = "lm-badge"; b.textContent = "active"; nameEl.appendChild(b); }
+        const sub = document.createElement("div"); sub.className = "lm-sub";
+        sub.textContent = (l.positions ? Object.keys(l.positions).length : 0) + " nœud(s) · maj " + fmtDate(l.updated_date || l.created_date);
+        info.appendChild(nameEl); info.appendChild(sub);
+        const acts = document.createElement("div"); acts.className = "lm-actions";
+        const mk = (label: string, cls: string, title: string, fn: () => any) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn " + cls + " btn-sm"; b.textContent = label; if (title) b.title = title; b.onclick = () => Promise.resolve(fn()).then(render); acts.appendChild(b); };
+        mk("Restaurer", "btn-ghost", "Appliquer cette disposition", () => this.applyLayout(l.id));
+        mk("Mettre à jour", "btn-ghost", "Remplacer ses positions par la vue actuelle", () => this.updateLayout(l.id));
+        mk("Renommer", "btn-ghost", "Renommer cette disposition", () => this.renameLayout(l.id));
+        mk("Supprimer", "btn-danger", "Supprimer cette disposition", () => this.deleteLayout(l.id));
+        item.appendChild(info); item.appendChild(acts); listEl.appendChild(item);
+      });
+    };
+    addBtn.onclick = () => Promise.resolve(this.saveLayout()).then(render);
+    render();
+    this.host.openModal?.({ title: "Dispositions enregistrées", subtitle: "Sauvegardez, restaurez, renommez ou supprimez vos agencements", body: root, hideFooter: true, wide: true });
+  }
 
   /* ---- couleur de la poignée des nœuds ---- */
 
@@ -270,9 +493,45 @@ export class GraphView {
     this.legendEl.innerHTML = html;
   }
 
-  /* ---- layout force-directed (mode « auto ») ---- */
+  /* ---- layout ---- */
 
   layout(): void {
+    this.unplaced = new Set();
+    if (this._activeLayout()) this._applyFixedLayout();          // disposition active → positions figées
+    else if (this.displayMode === "B") this._layoutStable();      // tout reste en place
+    else if (this.displayMode === "C") { this._forceLayout(); this._pinMoved(); }   // réorg. + ré-épingle les déplacés
+    else this._forceLayout();                                     // mode A : réorganise tout
+    this._syncPosFromNodes();
+  }
+
+  private _syncPosFromNodes(): void { this.nodes.forEach((n) => { this.pos[n.id] = { x: Math.round(n.x), y: Math.round(n.y) }; }); }
+  private _pinMoved(): void { this.nodes.forEach((n) => { if (this._moved.has(n.id) && this.pos[n.id]) { n.x = this.pos[n.id].x; n.y = this.pos[n.id].y; n.vx = 0; n.vy = 0; } }); }
+
+  private _applyFixedLayout(): void {
+    const placed: GNode[] = [], missing: GNode[] = [];
+    this.nodes.forEach((n) => { const p = this.pos[n.id]; if (p) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; placed.push(n); } else missing.push(n); });
+    this._placeMissingNearCentroid(missing, placed, true);
+  }
+  private _layoutStable(): void {
+    const placed: GNode[] = [], missing: GNode[] = [];
+    this.nodes.forEach((n) => { const p = this.pos[n.id]; if (p) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; placed.push(n); } else missing.push(n); });
+    if (!placed.length) { this._forceLayout(); return; }
+    this._placeMissingNearCentroid(missing, placed, false);
+  }
+  private _placeMissingNearCentroid(missing: GNode[], placed: GNode[], markUnplaced: boolean): void {
+    if (!missing.length) return;
+    const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
+    let cx = W / 2, cy = H / 2;
+    if (placed.length) { cx = placed.reduce((s, n) => s + n.x, 0) / placed.length; cy = placed.reduce((s, n) => s + n.y, 0) / placed.length; }
+    const colW = 180, rowH = 64, cols = Math.max(1, Math.ceil(Math.sqrt(missing.length)));
+    missing.forEach((n, i) => {
+      const r = Math.floor(i / cols), c = i % cols;
+      n.x = cx + (c - (cols - 1) / 2) * colW; n.y = cy + 120 + r * rowH; n.vx = 0; n.vy = 0;
+      if (markUnplaced) this.unplaced.add(n.id);
+    });
+  }
+
+  private _forceLayout(): void {
     const N = this.nodes.length;
     if (!N) return;
     const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
@@ -397,7 +656,7 @@ export class GraphView {
       const typeLabel = EquipmentTypes.label(n.type);
       const { w, h } = GraphGeometry.nodeSize(n);
       n._w = w; n._h = h;
-      const g = Dom.svg("g") as SVGGElement; g.setAttribute("class", "gnode" + (this.selection.has(n.id) ? " selected" : "")); (g as any).dataset.id = n.id;
+      const g = Dom.svg("g") as SVGGElement; g.setAttribute("class", "gnode" + (this.unplaced.has(n.id) ? " unplaced" : "") + (this.selection.has(n.id) ? " selected" : "")); (g as any).dataset.id = n.id;
       g.setAttribute("transform", `translate(${n.x - w / 2},${n.y - h / 2})`);
       (g as any).style.cursor = "grab";
       g.appendChild(Dom.svg("rect", { x: 0, y: 0, width: w, height: h, rx: 4 }));
@@ -419,6 +678,10 @@ export class GraphView {
       const t1 = Dom.svg("text", { x: TEXT_X, y: 17, "text-anchor": "start", "font-size": 11, "font-weight": 600 }); t1.textContent = n.name;
       const t2 = Dom.svg("text", { x: TEXT_X, y: 31, "text-anchor": "start", "font-size": 9, fill: "var(--fg-dim)" }); t2.textContent = typeLabel;
       g.appendChild(t1); g.appendChild(t2);
+      if (this.unplaced.has(n.id)) {
+        const tag = Dom.svg("text", { x: w - 3, y: -4, "text-anchor": "end" }); tag.setAttribute("class", "unplaced-tag"); tag.textContent = "non placé";
+        g.appendChild(tag);
+      }
       this._gById[n.id] = g;
       g.addEventListener("mousedown", (ev) => this._onNodeMouseDown(ev as MouseEvent, n));
       g.addEventListener("dblclick", () => this.host.openEquipmentDetail?.(n.id));
@@ -685,8 +948,8 @@ export class GraphView {
       (e) => { last = { x: e.clientX, y: e.clientY }; sync(); },
       () => {
         ids.forEach((id) => { const g = this._gById[id]; if (g) (g as any).style.cursor = "grab"; });
-        ids.forEach((id) => { const nd = this._nodeById[id]; if (nd) { this.pos[id] = { x: Math.round(nd.x), y: Math.round(nd.y) }; this._moved.add(id); } });
-        this.host.setDirty?.(true);
+        ids.forEach((id) => { const nd = this._nodeById[id]; if (nd) { this.pos[id] = { x: Math.round(nd.x), y: Math.round(nd.y) }; this._moved.add(id); this.unplaced.delete(id); } });
+        this._markDirtyLayout();
         this._stopEdgePan();
       },
     );

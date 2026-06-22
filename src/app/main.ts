@@ -40,7 +40,7 @@ async function boot(): Promise<void> {
 
   // ---- Vue Topologie (GraphView pilote) ----
   let graph: GraphView;
-  const graphContainer = shell.addView({ name: "graph", label: "Topologie", onShow: () => graph.rebuild({ recenter: true }) });
+  const graphContainer = shell.addView({ name: "graph", label: "Topologie", onShow: () => graph.show() });
   const stage = document.createElement("div");
   stage.className = "graph-stage";
   stage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
