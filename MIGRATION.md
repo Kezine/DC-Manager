@@ -106,8 +106,15 @@ src/
         nommées, modes A/B/C, sélection/marquee, menus, légende, export, toolbar.
   - [ ] GraphView complet, puis `ListController`, puis `DatacenterView`
         (+ machinerie conduit restante).
-- [ ] **Phase 6 — Shell / bootstrap** : migration `<head>`/`<style>`/`<body>`,
-      câblage final, retrait du mono-fichier.
+- [~] **Phase 6 — Shell / bootstrap** :
+  - [x] **CSS** extrait du monolithe → `src/styles/netmap.css` (verbatim, 1423 l.),
+        chargé par webpack (`style-loader`/`css-loader`) → injecté au runtime, donc
+        toujours **inliné** dans le HTML autonome. Le pilote GraphView est désormais
+        correctement thématisé (nœuds/texte/arêtes lisibles).
+  - [ ] Système de **modale** (openModal/closeModal/requestCloseModal), **toast**
+        container, **navigation** (switchView) + markup `<body>` → classes du shell.
+  - [ ] Bootstrap final (remplace le document de démo) ; câblage des `*Host` des vues ;
+        retrait du mono-fichier.
 - [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`).
 - [ ] **Phase 6 — Shell / UI.** Migration du `<head>`/`<style>`/`<body>` et du
       bootstrap ; câblage final ; retrait du mono-fichier.

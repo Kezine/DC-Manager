@@ -3,6 +3,7 @@
    (cf. MIGRATION.md). Le Store et les vues sont encore dans le HTML monolithique
    et seront portés ensuite. Cette entrée instancie le registre + un adapter pour
    prouver la chaîne de compilation webpack → TypeScript et exposer au debug. */
+import "../styles/netmap.css";
 import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter } from "../data";
 import { Store } from "../store";
@@ -36,7 +37,8 @@ async function boot(): Promise<void> {
     `+ GraphView (tranche-pilote). ${EntityRegistry.COLLECTIONS.length} collections · ${store.totalCount()} entités.</p>`;
   const stage = document.createElement("div");
   stage.id = "graph-stage";
-  stage.style.cssText = "position:relative;width:100%;height:560px;border:1px solid #333;background:#111;overflow:hidden";
+  stage.className = "graph-stage";
+  stage.style.cssText = "position:relative;width:100%;height:560px;border:1px solid var(--line);background:var(--bg-2);overflow:hidden";
   root.appendChild(stage);
 
   const graph = new GraphView(store, stage, {

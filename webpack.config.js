@@ -16,6 +16,9 @@ module.exports = (env, argv) => {
     module: {
       rules: [
         { test: /\.ts$/, use: "ts-loader", exclude: /node_modules/ },
+        /* CSS injecté au runtime via style-loader → reste inclus dans le bundle JS,
+           donc dans le HTML autonome (HtmlInlineScriptPlugin). */
+        { test: /\.css$/, use: ["style-loader", "css-loader"] },
       ],
     },
     plugins: [
