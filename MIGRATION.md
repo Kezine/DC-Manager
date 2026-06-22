@@ -48,7 +48,8 @@ src/
   data/        FieldIndex, DataAdapter, BrowserStorageAdapter, RestAdapter   (à venir)
   store/       Store (CRUD async, index secondaires, undo/redo)              (à venir)
   geometry/    Projection, Box, Painter, RackGeometry, GraphGeometry (purs)  ← FAIT (4a)
-               side/wall slots, occupants, resolvePort3D (couplés store)     (4b)
+               RackScene (occupants, side/wall slots — store injecté)        ← FAIT (4b)
+               resolvePort3D, conduits, waypoint geometry (couplés store)    (4c)
   registries/  EquipmentTypes, PortRoles, Depths, EquipFaces, Port/CableTypes ← FAIT
   views/       ListController, GraphView, DatacenterView                     (à venir)
   app/         main.ts (bootstrap)
@@ -79,10 +80,15 @@ src/
       + `PortTypes`/`CableTypes` promus depuis `defaultCatalogs`) ; `geometry/`
       (Projection, Box, Painter, RackGeometry, GraphGeometry). Harnais modules
       étendu (suites legacy 02/07/09/10/11/12 absorbées) → 86/86.
-- [ ] **Phase 4b — Géométrie couplée au store** : occupants de baie (`rackOccupants`),
-      side/wall (slots libres, boîtes, occupants), `resolvePort3D`, géométrie des
-      waypoints (`waypointPassPoints`/`waypointAnchor` via `brushGeom`/`sidePinGeom`/
-      `capPinGeom`). Absorbe les suites 06 & 08.
+- [x] **Phase 4b — Occupation & géométrie side/wall.** `RackGeometry` étendu (helpers
+      dimensionnels + boîtes side/wall/capot, purs) ; `geometry/RackScene` (classe à
+      store injecté : `occupants`, side/wall occupants + slots libres, capots).
+      Harnais modules → 106/106 (volet side/wall de la suite 06 + occupation).
+- [ ] **Phase 4c — Ports 3D & conduits** : `resolvePort3D` (+ sous-système boîte
+      « 6 faces » des équipements libres : `freeEquipPortWorld`/`Normal`/`freeEquipBox`),
+      `brushGeom`/`sidePinGeom`/`capPinGeom`, `waypointAnchor`/`waypointPassPoints`,
+      machinerie conduit (répartition). Absorbe le volet `resolvePort3D` de la suite 06
+      et la suite 08.
 - [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`).
 - [ ] **Phase 6 — Shell / UI.** Migration du `<head>`/`<style>`/`<body>` et du
       bootstrap ; câblage final ; retrait du mono-fichier.

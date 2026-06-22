@@ -19,4 +19,9 @@ export class RackItemKinds {
     const k = BY_ID[id];
     return k && k.icon ? k.icon : "";
   }
+
+  /** Libellé d'un pseudo-élément : son label libre, sinon le libellé de son type. */
+  static itemLabel(it: any): string {
+    return (it.label && it.label.trim()) ? it.label : RackItemKinds.label(it.kind);
+  }
 }

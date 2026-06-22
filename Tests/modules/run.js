@@ -41,6 +41,7 @@ const { Painter } = D("geometry/Painter.js");
 const { RackGeometry } = D("geometry/RackGeometry.js");
 const { GraphGeometry } = D("geometry/GraphGeometry.js");
 const { EquipmentTypes, PortRoles, Depths, EquipFaces } = D("registries/index.js");
+const { RackScene } = D("geometry/RackScene.js");
 const { U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE } = D("domain/constants.js");
 
 async function makeStore() {
@@ -233,6 +234,57 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(PortRoles.label(""), "—", "PortRoles.label(vide) → —");
     ck.eq(EquipFaces.label("__inconnu__"), "Avant", "EquipFaces.label(inconnu) → Avant");
     ck.eq(EquipmentTypes.label(""), "—", "EquipmentTypes.label(vide) → —");
+  }
+
+  console.log("\n• RackScene : occupation des U (rackOccupants)");
+  {
+    const s = await makeStore();
+    const rs = new RackScene(s);
+    const rack = await s.create("racks", { name: "R", u_count: 42, sides: "single" });
+    await s.create("equipments", { name: "sw", placement_mode: "rack", rack_id: rack.id, rack_u: 10, u_height: 2 });
+    const occ = rs.occupants(rack.id);
+    ck(occ.has("10:front") && occ.has("11:front"), "occupants : U10–U11 front occupés");
+    ck(!occ.has("12:front"), "occupants : U12 libre");
+    ck.eq(rs.occupancyCount(rack.id), 1, "occupancyCount = 1");
+    ck.eq(rs.freeUInfo(rack.id).free, 40, "freeUInfo : 40 U libres sur 42");
+  }
+
+  console.log("\n• RackScene + RackGeometry : side-mount");
+  {
+    const s = await makeStore();
+    const rs = new RackScene(s);
+    const dc = await s.create("datacenters", { name: "DC" });
+    const rack = await s.create("racks", { name: "R", width_mm: 800, depth: 1000, u_count: 42, allow_side_front: true, datacenter_id: dc.id, dc_x: 1000, dc_y: 1000 });
+    const eq = await s.create("equipments", { name: "PDU", placement_mode: "side", dim_mode: "free", rack_id: rack.id, side_face: "front", side_lr: "left", side_col: 0, side_u: 5, free_w_mm: 60, free_h_mm: 150, free_l_mm: 300 });
+    ck.eq(rs.sideOccupants(rack.id, "front", "left").length, 1, "sideOccupants(front,left) = 1");
+    ck.eq(rs.sideOccupants(rack.id, "rear", null).length, 0, "sideOccupants(rear) = 0");
+    const box = RackGeometry.sideEquipBoxLocal(rack, eq), h = box.heightU;
+    ck(rs.sideSlotFree(rack.id, "front", "left", 0, 5, h, null) === false, "sideSlotFree : bande occupée = false");
+    ck(rs.sideSlotFree(rack.id, "front", "left", 0, 35, 2, null) === true, "sideSlotFree : bande libre = true");
+    ck(rs.sideSlotFree(rack.id, "front", "left", 0, 5, h, eq.id) === true, "sideSlotFree : exceptId ignore l'occupant");
+    const free = rs.sideFreeSlots(rack);
+    ck(free.length > 0 && free.every((sl) => !(sl.face === "front" && sl.lr === "left" && sl.col === 0 && sl.uTop === 5)), "sideFreeSlots exclut la bande occupée");
+    ck(box.x0 < 0 && box.x1 <= 0, "sideEquipBoxLocal : gauche → x ≤ 0");
+    ck(box.front === true && box.z1 > box.z0, "sideEquipBoxLocal : front + hauteur cohérente");
+    const slotBox = RackGeometry.sideSlotBoxLocal(rack, "front", "left", 0, 5, 2);
+    ck(slotBox.x0 < 0 && slotBox.front === true, "sideSlotBoxLocal : gauche/front cohérent");
+  }
+
+  console.log("\n• RackScene + RackGeometry : wall-mount");
+  {
+    const s = await makeStore();
+    const rs = new RackScene(s);
+    const dc = await s.create("datacenters", { name: "DC" });
+    const rack = await s.create("racks", { name: "R", width_mm: 600, depth: 1200, u_count: 42, front_margin_mm: 200, cage_depth_mm: 700, datacenter_id: dc.id, dc_x: 2000, dc_y: 2000 });
+    ck(RackGeometry.wallEnabled(rack, "front") === true, "wallEnabled(front) avec marge ≥ 1U");
+    const eq = await s.create("equipments", { name: "WALL", placement_mode: "wall", dim_mode: "free", rack_id: rack.id, wall_lr: "left", wall_margin: "front", wall_col: 0, wall_u: 5, wall_orient: "center", free_w_mm: 80, free_h_mm: 150, free_l_mm: 100 });
+    ck.eq(rs.wallOccupants(rack.id, "front", "left").length, 1, "wallOccupants(front,left) = 1");
+    ck(rs.wallSlotFree(rack.id, "left", "front", 0, 5, 2, null) === false, "wallSlotFree : bande occupée = false");
+    ck(rs.wallSlotFree(rack.id, "left", "front", 0, 35, 2, null) === true, "wallSlotFree : bande libre = true");
+    ck(rs.wallFreeSlots(rack).length > 0, "wallFreeSlots non vide");
+    const wbox = RackGeometry.wallEquipBoxLocal(rack, eq);
+    ck(wbox.n && (wbox.n.x !== 0 || wbox.n.y !== 0), "wallEquipBoxLocal : normale définie");
+    ck(wbox.z1 > wbox.z0, "wallEquipBoxLocal : hauteur cohérente");
   }
 
   console.log("\n" + "-".repeat(48));

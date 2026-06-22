@@ -14,6 +14,12 @@ export const RACK_DEPTH_DEFAULT = 1000;       // profondeur EXTÉRIEURE par déf
 export const RACK_DEPTHS = [600, 800, 1000, 1200];
 export const RACK_ORIENTATIONS = [0, 90, 180, 270];   // pas de 90° (sens horaire)
 
+/* ---- montage latéral (side) & mural (wall) ---- */
+export const SIDE_U_STEP = 2;                 // résolution verticale du montage latéral (U)
+export const SIDE_POST_INSET = 8;             // retrait (mm) de la marge utile au-delà du montant 19″
+export const WALL_COL_MIN = SIDE_U_STEP * U_MM;   // largeur mini d'une colonne murale (le long de la profondeur de marge)
+export const EQUIP_FREE_DEFAULT_MM = 400;     // empreinte/hauteur par défaut d'un équipement libre (mm)
+
 /* ---- salle / étage ---- */
 export const DC_CELL_DEFAULT = 600;           // dalle faux-plancher 600×600 → maille grille
 export const DC_WIDTH_DEFAULT = 6000;
