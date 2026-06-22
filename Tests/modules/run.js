@@ -48,6 +48,7 @@ const { Html } = D("core/Html.js");
 const { Color } = D("core/Color.js");
 const { Format } = D("core/Format.js");
 const { GridGeometry } = D("geometry/GridGeometry.js");
+const { GraphView } = D("views/GraphView.js");
 
 async function makeStore() {
   const s = new Store(new BrowserStorageAdapter({ persistent: false }));
@@ -364,6 +365,26 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck(GridGeometry.isCellBlocked(["1,0"], 5, 5) === false, "isCellBlocked : absent");
     ck(GridGeometry.spanHitsBlocked(["1,1"], 600, 600, 1200, 1200, 600) === true, "spanHitsBlocked : touche (1,1)");
     ck(GridGeometry.spanHitsBlocked(["5,5"], 0, 0, 600, 600, 600) === false, "spanHitsBlocked : aucune");
+  }
+
+  console.log("\n• GraphView (pilote) : build + layout (sans DOM)");
+  {
+    const s = await makeStore();
+    const sw = await s.create("equipments", { name: "sw", type: "switch" });
+    const srv = await s.create("equipments", { name: "srv", type: "serveur" });
+    await s.create("equipments", { name: "stock", type: "autre", inventory_only: true });
+    const p1 = await s.create("ports", { equipment_id: sw.id, name: "a" });
+    const p2 = await s.create("ports", { equipment_id: srv.id, name: "b" });
+    await s.create("cables", { name: "lnk", from_port_id: p1.id, to_port_id: p2.id });
+    const fakeStage = { clientWidth: 900, clientHeight: 560 };
+    const gv = new GraphView(s, fakeStage, {});
+    gv.computeVisible();
+    ck.eq(gv.nodes.length, 2, "computeVisible : 2 nœuds (inventory_only exclu)");
+    ck.eq(gv.edges.length, 1, "computeVisible : 1 arête");
+    ck(gv.edges[0].a === sw.id && gv.edges[0].b === srv.id, "arête relie sw↔srv");
+    gv.layout();
+    ck(gv.nodes.every((n) => isFinite(n.x) && isFinite(n.y)), "layout : positions finies");
+    ck(gv.nodes[0].x !== gv.nodes[1].x || gv.nodes[0].y !== gv.nodes[1].y, "layout : nœuds séparés");
   }
 
   console.log("\n" + "-".repeat(48));

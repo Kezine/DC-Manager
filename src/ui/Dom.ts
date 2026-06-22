@@ -8,4 +8,14 @@ export class Dom {
     if (attrs) for (const k in attrs) e.setAttribute(k, String(attrs[k]));
     return e;
   }
+
+  /** Parse un fragment de markup SVG (icône) en nœuds SVG réutilisables. */
+  static parseSvgIcon(inner: string): DocumentFragment | null {
+    if (!inner) return null;
+    const doc = new DOMParser().parseFromString('<svg xmlns="' + Dom.SVGNS + '">' + inner + "</svg>", "image/svg+xml");
+    if (doc.querySelector("parsererror")) return null;
+    const frag = document.createDocumentFragment();
+    Array.from(doc.documentElement.childNodes).forEach((n) => frag.appendChild(document.importNode(n, true)));
+    return frag;
+  }
 }

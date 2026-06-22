@@ -97,8 +97,15 @@ src/
       `geometry/GridGeometry` (cellKey/cellOf/blocked). Composants DOM :
       `ui/Dom` (svg), `ui/Notify` (toast), `ui/FormControls` (fieldRow/text/number/
       select/toggle/date/datalist). Harnais modules → 141/141 (volets purs testés).
-- [ ] **Phase 5b — Contrôleurs de vue** : `GraphView`, `ListController`,
-      `DatacenterView` (un par sous-phase) + machinerie conduit restante.
+- [~] **Phase 5b — Contrôleurs de vue** (un par sous-phase, sur `store` + hôte injecté) :
+  - [x] **GraphView — tranche-pilote** : `views/GraphView` (build depuis le store →
+        layout force-directed → rendu SVG nœuds/arêtes + pan/zoom + glisser de nœud),
+        `GraphHost` injecté (`setDirty`/`openEquipmentDetail`). Câblé dans `main.ts`
+        (document de démo). Build = `dist/netmap.html` exécutable. Tests build+layout
+        (sans DOM, faux stage) → 146/146. RESTE GraphView : cadres, dispositions
+        nommées, modes A/B/C, sélection/marquee, menus, légende, export, toolbar.
+  - [ ] GraphView complet, puis `ListController`, puis `DatacenterView`
+        (+ machinerie conduit restante).
 - [ ] **Phase 6 — Shell / bootstrap** : migration `<head>`/`<style>`/`<body>`,
       câblage final, retrait du mono-fichier.
 - [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`).
