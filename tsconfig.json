@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+
+    /* Migration graduelle : on durcira ces options au fil de l'extraction. */
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+
+    /* Le code historique affecte les champs dans le constructeur (sémantique ES2020,
+       pas de champs « define ») — on conserve ce comportement à l'identique. */
+    "useDefineForClassFields": false,
+
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "sourceMap": true,
+    "declaration": false,
+    "outDir": "dist",
+    "noEmitOnError": false
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -3,3 +3,8 @@ netmap-old-versions.zip
 
 # Scrapped experiments / obsolete smoke-tests (kept untracked)
 Scrapped/
+
+# Node / webpack build
+node_modules/
+dist/
+*.tsbuildinfo
