@@ -49,6 +49,7 @@ const { Color } = D("core/Color.js");
 const { Format } = D("core/Format.js");
 const { GridGeometry } = D("geometry/GridGeometry.js");
 const { GraphView } = D("views/GraphView.js");
+const { Sort } = D("core/Sort.js");
 
 async function makeStore() {
   const s = new Store(new BrowserStorageAdapter({ persistent: false }));
@@ -387,6 +388,15 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck(gv.nodes[0].x !== gv.nodes[1].x || gv.nodes[0].y !== gv.nodes[1].y, "layout : nœuds séparés");
     gv.selectAll();
     ck.eq(gv.selection.size, 2, "selectAll : 2 nœuds sélectionnés");
+  }
+
+  console.log("\n• Sort.compare (tri de liste)");
+  {
+    ck(Sort.compare(1, 2) < 0, "compare : 1 < 2");
+    ck(Sort.compare("b", "a") > 0, "compare : b > a");
+    ck.eq(Sort.compare("a", "a"), 0, "compare : a == a");
+    ck(Sort.compare("", "x") > 0, "compare : vide en dernier");
+    ck(Sort.compare("item2", "item10") < 0, "compare : numérique naturel (2 < 10)");
   }
 
   console.log("\n" + "-".repeat(48));

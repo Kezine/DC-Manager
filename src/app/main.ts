@@ -7,8 +7,10 @@ import "../styles/netmap.css";
 import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter } from "../data";
 import { Store } from "../store";
-import { GraphView } from "../views";
+import { GraphView, ListView, ListConfigs } from "../views";
+import type { ListOptions } from "../views";
 import { Modal, Notify, FormControls, Dialog } from "../ui";
+import { Html } from "../core/Html";
 import { Shell } from "./Shell";
 
 const adapter = new BrowserStorageAdapter({ persistent: false });
@@ -67,14 +69,59 @@ async function boot(): Promise<void> {
     openModal: (opts) => modal.open(opts),
   });
 
-  // ---- Onglets placeholder (vues à porter en Phase 5b) ----
-  const placeholder = (label: string) => (c: HTMLElement) => {
-    if (c.dataset.built) return;
-    c.dataset.built = "1";
-    c.innerHTML = `<p style="padding:24px;color:var(--fg-dim)">Vue « ${label} » — à porter (Phase 5b).</p>`;
+  // ---- fiche détail générique (lecture seule) ----
+  const openDetail = (coll: string, id: string) => {
+    const o: any = store.get(coll, id);
+    if (!o) return;
+    const body = document.createElement("div");
+    const skip = new Set(["id", "created_date", "updated_date"]);
+    Object.keys(o).forEach((k) => {
+      if (skip.has(k)) return;
+      const v = o[k];
+      if (v == null || v === "" || (Array.isArray(v) && !v.length)) return;
+      const row = FormControls.text(Array.isArray(v) ? v.join(", ") : String(v));
+      row.readOnly = true;
+      body.appendChild(FormControls.fieldRow(k, row));
+    });
+    modal.open({ title: Html.escape(o.name || o.label || "(détail)"), subtitle: coll, body, hideFooter: true });
   };
-  shell.addView({ name: "equipements", label: "Équipements", onShow: placeholder("Équipements") });
-  shell.addView({ name: "datacenter", label: "Datacenter", onShow: placeholder("Datacenter") });
+
+  // ---- onglets de LISTE (ListView paramétré par ListConfigs) ----
+  const addListTab = (name: string, label: string, configFn: (s: typeof store) => ListOptions) => {
+    let view: ListView | null = null;
+    const container = shell.addView({
+      name, label,
+      onShow: () => {
+        if (!view) {
+          const cfg = configFn(store);
+          view = new ListView(store, container, {
+            ...cfg,
+            actions: { view: true, clone: true, del: true },
+            onAction: async (act, id) => {
+              if (act === "view") { openDetail(cfg.collection, id); return; }
+              if (act === "clone") {
+                const c = cfg.collection === "equipments" ? await store.cloneEquipment(id) : await store.cloneSimple(cfg.collection, id);
+                if (c) { view!.render(); Notify.toast("Élément cloné"); }
+                return;
+              }
+              if (act === "del") {
+                const o: any = store.get(cfg.collection, id);
+                const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${o?.name || o?.label || "cet élément"} » ?`, confirmLabel: "Supprimer", danger: true });
+                if (!ok) return;
+                await store.remove(cfg.collection, id);
+                view!.render(); Notify.toast("Supprimé");
+              }
+            },
+          });
+        }
+        view.render();
+      },
+    });
+  };
+  addListTab("equipements", "Équipements", ListConfigs.equipments);
+  addListTab("reseaux", "Réseaux", ListConfigs.networks);
+  addListTab("groupes", "Groupes", ListConfigs.groups);
+  shell.addView({ name: "datacenter", label: "Datacenter", onShow: (c) => { if (!c.dataset.built) { c.dataset.built = "1"; c.innerHTML = `<p style="padding:24px;color:var(--fg-dim)">Vue Datacenter — à porter.</p>`; } } });
 
   shell.switchView("graph");
   Notify.toast("NetMap — pilote prêt (double-clic un nœud)", "ok");

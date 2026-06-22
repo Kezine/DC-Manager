@@ -116,7 +116,13 @@ src/
         A/B/C** (masquage par filtres, gestionnaire de dispositions), **export
         SVG/JPEG + plein écran** (`ui/ImageExport`). **GraphView est COMPLET** —
         réplique fonctionnelle du contrôleur du monolithe.
-  - [ ] `ListController`, puis `DatacenterView` (+ machinerie conduit restante).
+  - [~] **ListController → `views/ListView`** : table générique OO (tri colonnes+dates,
+        filtres multi-sélection, recherche, pagination ; état persisté en session ;
+        actions de ligne déléguées). `views/ListConfigs` (colonnes par collection) +
+        `core/Sort`. Câblé : onglets **Équipements / Réseaux / Groupes** (liste + détail
+        + cloner + supprimer). RESTE : autres collections (câbles, racks, IPAM…) +
+        FORMULAIRES d'édition (le gros morceau : openEquipmentForm & co.).
+  - [ ] `DatacenterView` (+ machinerie conduit restante).
 - [~] **Phase 6 — Shell / bootstrap** :
   - [x] **CSS** extrait du monolithe → `src/styles/netmap.css` (verbatim, 1423 l.),
         chargé par webpack (`style-loader`/`css-loader`) → injecté au runtime, donc

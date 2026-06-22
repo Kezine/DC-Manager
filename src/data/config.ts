@@ -3,6 +3,9 @@
 /** Taille de page par défaut des listes. */
 export const PAGE_SIZE_DEFAULT = 25;
 
+/** Tailles de page proposées dans les listes. */
+export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
 /** Profondeur max de la pile undo/redo (snapshots). */
 export const HISTORY_MAX = 50;
 
