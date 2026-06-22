@@ -6,6 +6,7 @@ import { Notify } from "../ui/Notify";
 import { Html } from "../core/Html";
 import { Ip } from "../core/Ip";
 import { GroupTypes } from "../domain/GroupTypes";
+import { CableStatuses } from "../domain/CableStatuses";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { Depths } from "../registries/Depths";
 import { PortRoles } from "../registries/PortRoles";
@@ -14,6 +15,12 @@ import { POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT } from "../domain/constants";
 
 const divider = (txt: string) => { const d = document.createElement("div"); d.className = "section-divider"; d.textContent = txt; return d; };
 const row2 = (...fields: HTMLElement[]) => { const r = document.createElement("div"); r.className = "form-row"; fields.forEach((f) => r.appendChild(f)); return r; };
+/** Remplace les options d'un <select> existant (préserve l'élément + ses handlers). */
+const setOptions = (sel: HTMLSelectElement, opts: { value: string; label: string; disabled?: boolean }[], value?: string) => {
+  sel.innerHTML = "";
+  opts.forEach((o) => { const op = document.createElement("option"); op.value = o.value; op.textContent = o.label; if (o.disabled) op.disabled = true; sel.appendChild(op); });
+  if (value != null) sel.value = value;
+};
 
 const ipNetOptions = (store: Store) => store.all("ipNetworks").slice()
   .sort((a: any, b: any) => (a.label || a.cidr || "").localeCompare(b.label || b.cidr || ""))
@@ -346,6 +353,115 @@ export class Forms {
       },
     });
     setTimeout(() => nameI.focus(), 30);
+  }
+
+  /** Câble — formulaire CŒUR (extrémités · type compatible · réseaux · longueur · statut).
+      DIFFÉRÉ : faisceaux/trunks et points de passage (waypoints) — préservés à l'édition. */
+  static cable(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
+    const cable: any = id ? store.get("cables", id) : null;
+    const root = document.createElement("div");
+    const nameI = FormControls.text(cable ? cable.name : "", "ex. patch-A12");
+    root.appendChild(FormControls.fieldRow("Nom du câble", nameI));
+
+    const eqOpts = () => [{ value: "", label: "— équipement —" }].concat(store.all("equipments").filter((e: any) => !e.inventory_only).slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((e: any) => ({ value: e.id, label: e.name || "(équipement)" })));
+    const portOpts = (eqId: string, selectedId: string | null) => {
+      const opts: { value: string; label: string; disabled?: boolean }[] = [{ value: "", label: "— port —" }];
+      if (eqId) store.portsOf(eqId).filter((p: any) => !store.isBreakoutParent(p)).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).forEach((p: any) => {
+        const occ = store.cableOnPort(p.id, cable ? cable.id : null);
+        opts.push({ value: p.id, label: (p.name || "(port)") + (occ ? " · occupé" : ""), disabled: !!occ && p.id !== selectedId });
+      });
+      return opts;
+    };
+
+    const pa: any = cable && store.get("ports", cable.from_port_id);
+    const pb: any = cable && store.get("ports", cable.to_port_id);
+    const selEqA = FormControls.select(eqOpts(), pa ? pa.equipment_id : "");
+    const selPortA = FormControls.select(portOpts(pa ? pa.equipment_id : "", cable ? cable.from_port_id : null), cable ? (cable.from_port_id || "") : "");
+    root.appendChild(row2(FormControls.fieldRow("Équipement A", selEqA), FormControls.fieldRow("Port A", selPortA)));
+    const selEqB = FormControls.select(eqOpts(), pb ? pb.equipment_id : "");
+    const selPortB = FormControls.select(portOpts(pb ? pb.equipment_id : "", cable ? cable.to_port_id : null), cable ? (cable.to_port_id || "") : "");
+    root.appendChild(row2(FormControls.fieldRow("Équipement B", selEqB), FormControls.fieldRow("Port B", selPortB)));
+
+    const selType = FormControls.select([{ value: "", label: "— type de câble —" }], cable ? (cable.cable_type_id || "") : "");
+    root.appendChild(FormControls.fieldRow("Type de câble", selType, "Seuls les types compatibles avec les ports sont proposés."));
+    const lenI = FormControls.number((cable && cable.length_m != null) ? cable.length_m : "", { min: 0, step: 0.1, placeholder: "ex. 3" });
+    root.appendChild(FormControls.fieldRow("Longueur (m)", lenI, "Optionnelle."));
+
+    // réseaux multiples + principal
+    const netState = { ids: new Set<string>(cable ? ((Array.isArray(cable.network_ids) && cable.network_ids.length) ? cable.network_ids : (cable.network_id ? [cable.network_id] : [])) : []), primary: cable ? (cable.network_id || null) : null as string | null };
+    const netBoxes = document.createElement("div"); netBoxes.style.cssText = "display:flex;flex-wrap:wrap;gap:6px 14px;margin:2px 0;";
+    const primSel = FormControls.select([{ value: "", label: "— aucun —" }], "");
+    const primField = FormControls.fieldRow("Réseau principal", primSel, "Pilote la COULEUR du câble (≥ 2 réseaux).");
+    const cableKind = () => { const t: any = selType.value ? store.get("cableTypes", selType.value) : null; return t ? (t.kind === "power" ? "power" : "data") : null; };
+    const syncPrimary = () => {
+      if (netState.primary && !netState.ids.has(netState.primary)) netState.primary = null;
+      if (!netState.primary && netState.ids.size) netState.primary = [...netState.ids][0];
+      setOptions(primSel, [{ value: "", label: "— aucun —" }].concat([...netState.ids].map((nid) => { const n: any = store.get("networks", nid); return { value: nid, label: n ? (n.label || "(réseau)") : nid }; })), netState.primary || "");
+      primField.style.display = netState.ids.size > 1 ? "" : "none";
+    };
+    const renderNets = () => {
+      const ck = cableKind();
+      if (ck != null) [...netState.ids].forEach((nid) => { const n: any = store.get("networks", nid); if (n && (n.kind === "power" ? "power" : "data") !== ck) netState.ids.delete(nid); });
+      netBoxes.innerHTML = "";
+      const all = store.all("networks").slice().sort((a: any, b: any) => (a.label || "").localeCompare(b.label || ""));
+      const shown = all.filter((n: any) => ck == null || (n.kind === "power" ? "power" : "data") === ck);
+      if (!all.length) { const h = document.createElement("span"); h.className = "form-hint"; h.textContent = "Aucun réseau (onglet Réseaux)."; netBoxes.appendChild(h); }
+      else if (!shown.length) { const h = document.createElement("span"); h.className = "form-hint"; h.textContent = "Aucun réseau « " + (ck === "power" ? "Power" : "Data") + " »."; netBoxes.appendChild(h); }
+      else shown.forEach((n: any) => {
+        const lab = document.createElement("label"); lab.style.cssText = "display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;";
+        const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = netState.ids.has(n.id);
+        cb.onchange = () => { if (cb.checked) netState.ids.add(n.id); else netState.ids.delete(n.id); syncPrimary(); };
+        const sw = document.createElement("span"); sw.className = "swatch-dot"; if (n.color) sw.style.background = n.color;
+        const tx = document.createElement("span"); tx.textContent = (n.kind === "power" ? "⚡ " : "") + (n.label || "(réseau)");
+        lab.append(cb, sw, tx); netBoxes.appendChild(lab);
+      });
+      syncPrimary();
+    };
+    primSel.onchange = () => { netState.primary = primSel.value || null; };
+    root.appendChild(FormControls.fieldRow("Réseaux", netBoxes, "Réseaux du même type que le câble. Cochez-en un ou plusieurs."));
+    root.appendChild(primField);
+
+    const statusSel = FormControls.select(CableStatuses.ALL.filter((s) => s.id !== "brouillon").map((s) => ({ value: s.id, label: s.label })), cable && cable.status !== "brouillon" ? cable.status : "planifie");
+    root.appendChild(FormControls.fieldRow("Statut", statusSel, "Brouillon imposé tant que l'assignation est incomplète."));
+
+    const renderType = () => {
+      const fa = store.portFamily(store.get("ports", selPortA.value)); const fb = store.portFamily(store.get("ports", selPortB.value));
+      let list = store.all("cableTypes").slice().sort((a: any, b: any) => a.name.localeCompare(b.name));
+      if (fa && fb && fa === fb) list = list.filter((t: any) => t.family === fa);
+      setOptions(selType, [{ value: "", label: "— type de câble —" }].concat(list.map((t: any) => ({ value: t.id, label: t.name + " · " + t.family }))), selType.value);
+      renderNets();
+    };
+    selEqA.onchange = () => { setOptions(selPortA, portOpts(selEqA.value, null)); renderType(); };
+    selEqB.onchange = () => { setOptions(selPortB, portOpts(selEqB.value, null)); renderType(); };
+    selPortA.onchange = renderType; selPortB.onchange = renderType;
+    renderType();
+
+    host.openModal({
+      title: cable ? "Modifier le câble" : "Nouveau câble",
+      subtitle: cable ? Html.escape(cable.name || "") : "",
+      body: root, wide: true,
+      onSave: async () => {
+        const from = selPortA.value || null, to = selPortB.value || null, type = selType.value || null;
+        if (from && to && from === to) { Notify.toast("Les deux extrémités doivent être différentes.", "err"); return false; }
+        const complete = !!(from && to && type && from !== to);
+        if (complete) {
+          const compat = store.cableCompatible(type!, from!, to!);
+          if (!compat.ok) { Notify.toast(compat.reason || "Câble incompatible.", "err"); return false; }
+        }
+        const ids = [...netState.ids];
+        let primary = netState.primary; if (primary && !ids.includes(primary)) primary = null; if (!primary && ids.length) primary = ids[0];
+        const len = parseFloat(String(lenI.value));
+        const payload = {
+          name: nameI.value.trim(), cable_type_id: type, from_port_id: from, to_port_id: to,
+          network_ids: ids, network_id: primary,
+          length_m: (isFinite(len) && len >= 0) ? len : null,
+          status: complete ? (statusSel.value || "planifie") : "brouillon",
+        };
+        if (cable) await store.update("cables", cable.id, payload); else await store.create("cables", payload);
+        host.setDirty?.(true); Notify.toast(cable ? "Câble mis à jour" : "Câble créé"); onSaved?.(); return true;
+      },
+    });
+    setTimeout(() => (cable ? nameI : selEqA).focus(), 30);
   }
 
   /** Réseau IP (sous-réseau CIDR). */

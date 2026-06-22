@@ -37,5 +37,8 @@ module.exports = (env, argv) => {
       open: ["/netmap.html"],
     },
     devtool: isProd ? false : "source-map",
+    // sortie mono-fichier (CSS + bundle inlinés) → le seuil de taille webpack
+    // n'a pas de sens ici (pas de chargement réseau séparé).
+    performance: { hints: false },
   };
 };
