@@ -60,18 +60,29 @@ src/
 - [x] **Phase 1 — Modèle de domaine.** `Entity` + 18 sous-classes + registre,
       avec leurs dépendances (constantes, `Id`, `Normalize`, registres). Type-check
       et build verts ; régression legacy intacte (213/213).
-- [ ] **Phase 2 — Couche données.** `FieldIndex`, `DataAdapter` (+ Browser/Rest).
-- [ ] **Phase 3 — Store.** CRUD async, transactions, undo/redo, helpers métier.
-      Recibler `Tests/run.js` sur les modules (remplacer l'extraction du `<script>`
-      par un import du bundle de test).
+- [x] **Phase 2 — Couche données.** `FieldIndex` (+ helpers de match en statiques),
+      `DataAdapter` (base abstraite), `BrowserStorageAdapter`, `RestAdapter` ; types
+      partagés (`Snapshot`/`Transaction`/`ListResult`) ; config (`INDEX_SPEC`, tailles).
+      Le global UI `noteUndoable` devient un callback injecté (`onUndoable`). Porté
+      à l'identique ; tsc + build verts.
+- [ ] **Phase 3 — Store.** CRUD async, transactions, undo/redo, helpers métier,
+      cascade déclarative (`CASCADE_SPEC`). Recibler `Tests/run.js` sur les modules
+      compilés (remplacer l'extraction du `<script>` par un import du bundle de test)
+      → premiers tests de régression au niveau modules (data layer incluse).
 - [ ] **Phase 4 — Géométrie & registres** (classes de méthodes statiques).
 - [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`).
 - [ ] **Phase 6 — Shell / UI.** Migration du `<head>`/`<style>`/`<body>` et du
       bootstrap ; câblage final ; retrait du mono-fichier.
 
-## État actuel (Phase 1)
+## État actuel (Phases 1–2)
 
-Le modèle est extrait **à l'identique** (mêmes normalisations / valeurs par
-défaut / rétro-compat que le HTML v172). `src/app/main.ts` est un point d'entrée
-provisoire qui instancie le registre pour prouver la chaîne — il sera remplacé par
-le vrai bootstrap en phase 6.
+Modèle de domaine **et** couche d'accès aux données extraits **à l'identique**
+(mêmes normalisations / défauts / rétro-compat / logique transactionnelle que le
+HTML v172). `src/app/main.ts` est un point d'entrée provisoire qui instancie le
+registre + un adapter pour prouver la chaîne — il sera remplacé par le vrai
+bootstrap en phase 6.
+
+Le filet de régression au niveau **modules** arrive en phase 3 (le Store est la
+première couche dont le comportement justifie des tests directs ; la couche
+données y sera couverte au passage). D'ici là, `Tests/run.js` continue de valider
+le comportement contre le dernier HTML livré.
