@@ -96,7 +96,7 @@ async function boot(): Promise<void> {
           const cfg = configFn(store);
           view = new ListView(store, container, {
             ...cfg,
-            actions: { view: true, clone: true, del: true },
+            actions: cfg.actions || { view: true, clone: true, del: true },
             onAction: async (act, id) => {
               if (act === "view") { openDetail(cfg.collection, id); return; }
               if (act === "clone") {
@@ -119,8 +119,15 @@ async function boot(): Promise<void> {
     });
   };
   addListTab("equipements", "Équipements", ListConfigs.equipments);
+  addListTab("cables", "Câbles", ListConfigs.cables);
+  addListTab("racks", "Racks", ListConfigs.racks);
   addListTab("reseaux", "Réseaux", ListConfigs.networks);
   addListTab("groupes", "Groupes", ListConfigs.groups);
+  addListTab("ipnetworks", "Réseaux IP", ListConfigs.ipNetworks);
+  addListTab("ipaddresses", "Adresses IP", ListConfigs.ipAddresses);
+  addListTab("dhcp", "DHCP", ListConfigs.dhcpRanges);
+  addListTab("porttypes", "Types port", ListConfigs.portTypes);
+  addListTab("cabletypes", "Types câble", ListConfigs.cableTypes);
   shell.addView({ name: "datacenter", label: "Datacenter", onShow: (c) => { if (!c.dataset.built) { c.dataset.built = "1"; c.innerHTML = `<p style="padding:24px;color:var(--fg-dim)">Vue Datacenter — à porter.</p>`; } } });
 
   shell.switchView("graph");
