@@ -1,5 +1,6 @@
 import type { Store } from "../store";
 import { Dom } from "../ui/Dom";
+import { ContextMenu } from "../ui/ContextMenu";
 import { GraphGeometry } from "../geometry/GraphGeometry";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 
@@ -19,6 +20,7 @@ import { EquipmentTypes } from "../registries/EquipmentTypes";
 export interface GraphHost {
   setDirty?(v: boolean): void;
   openEquipmentDetail?(id: string): void;
+  deleteEquipment?(id: string): void;
 }
 
 interface GNode { id: string; name: string; type: string; group_id: string | null; x: number; y: number; vx: number; vy: number; _w?: number; _h?: number; }
@@ -31,12 +33,17 @@ export class GraphView {
 
   nodes: GNode[] = [];
   edges: GEdge[] = [];
+  selection = new Set<string>();          // ids des nœuds sélectionnés (déplacement groupé)
+  private pos: Record<string, { x: number; y: number }> = {};   // positions vivantes
+  private _moved = new Set<string>();     // ids déplacés à la main
   private scale = 1; private tx = 0; private ty = 0;
   private svg: SVGSVGElement | null = null;
   private gRoot: SVGGElement | null = null;
+  private _nodeById: Record<string, GNode> = {};
   private _gById: Record<string, SVGGElement> = {};
   private _edgeLineById: Record<string, SVGElement> = {};
   private _edgeLabelById: Record<string, SVGElement> = {};
+  private _edgePan: { raf: number } | null = null;
 
   constructor(store: Store, mount: HTMLElement, host: GraphHost = {}) {
     this.store = store;
@@ -158,7 +165,8 @@ export class GraphView {
 
   render(): void {
     if (this.svg) this.svg.remove();
-    this._gById = {}; this._edgeLineById = {}; this._edgeLabelById = {};
+    this._nodeById = {}; this._gById = {}; this._edgeLineById = {}; this._edgeLabelById = {};
+    this.nodes.forEach((n) => { this._nodeById[n.id] = n; });
     const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
     const svg = Dom.svg("svg", { width: W, height: H }) as SVGSVGElement;
     this.svg = svg;
@@ -195,7 +203,7 @@ export class GraphView {
       const typeLabel = EquipmentTypes.label(n.type);
       const { w, h } = GraphGeometry.nodeSize(n);
       n._w = w; n._h = h;
-      const g = Dom.svg("g") as SVGGElement; g.setAttribute("class", "gnode"); (g as any).dataset.id = n.id;
+      const g = Dom.svg("g") as SVGGElement; g.setAttribute("class", "gnode" + (this.selection.has(n.id) ? " selected" : "")); (g as any).dataset.id = n.id;
       g.setAttribute("transform", `translate(${n.x - w / 2},${n.y - h / 2})`);
       (g as any).style.cursor = "grab";
       g.appendChild(Dom.svg("rect", { x: 0, y: 0, width: w, height: h, rx: 4 }));
@@ -218,15 +226,22 @@ export class GraphView {
       this._gById[n.id] = g;
       g.addEventListener("mousedown", (ev) => this._onNodeMouseDown(ev as MouseEvent, n));
       g.addEventListener("dblclick", () => this.host.openEquipmentDetail?.(n.id));
+      g.addEventListener("contextmenu", (ev) => { ev.preventDefault(); ev.stopPropagation(); this._nodeContextMenu(ev as MouseEvent, n); });
       nodeLayer.appendChild(g);
     });
     gRoot.appendChild(nodeLayer);
 
-    svg.addEventListener("mousedown", (ev) => { if (ev.target === svg && ev.button === 0) this._startPan(ev); });
+    svg.addEventListener("mousedown", (ev) => {
+      if (ev.target !== svg || ev.button !== 0) return;
+      if (ev.shiftKey || ev.ctrlKey || ev.metaKey) this._startMarquee(ev);
+      else this._startPan(ev);
+    });
     svg.addEventListener("wheel", (ev) => this._onWheel(ev), { passive: false });
+    svg.addEventListener("contextmenu", (ev) => { if (ev.target === svg) { ev.preventDefault(); this._bgContextMenu(ev); } });
 
     this.stage.insertBefore(svg, this.stage.firstChild);
     this._applyTransform();
+    this._renderSelection();
 
     if (!this.nodes.length) {
       const msg = Dom.svg("text", { x: W / 2, y: H / 2, "text-anchor": "middle", fill: "var(--fg-dim)", "font-size": 13 });
@@ -244,63 +259,204 @@ export class GraphView {
     const r = this.svg!.getBoundingClientRect();
     return { x: (cx - r.left - this.tx) / this.scale, y: (cy - r.top - this.ty) / this.scale };
   }
-  private _zoomBy(factor: number): void {
-    this.scale = Math.max(0.1, Math.min(4, this.scale * factor));
+  /** Zoom centré sur le milieu de la vue. */
+  zoomBy(factor: number): void {
+    const r = this.svg ? this.svg.getBoundingClientRect() : ({ width: 900, height: 560 } as DOMRect);
+    const px = (this.stage.clientWidth || r.width) / 2, py = (this.stage.clientHeight || r.height) / 2;
+    const wx = (px - this.tx) / this.scale, wy = (py - this.ty) / this.scale;
+    this.scale = Math.max(0.15, Math.min(4, this.scale * factor));
+    this.tx = px - wx * this.scale; this.ty = py - wy * this.scale;
     this._applyTransform();
   }
   private _onWheel(ev: WheelEvent): void {
     ev.preventDefault();
-    this._zoomBy(ev.deltaY < 0 ? 1.1 : 1 / 1.1);
+    const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const r = this.svg!.getBoundingClientRect();
+    const px = ev.clientX - r.left, py = ev.clientY - r.top;
+    const wx = (px - this.tx) / this.scale, wy = (py - this.ty) / this.scale;
+    this.scale = Math.max(0.15, Math.min(4, this.scale * factor));
+    this.tx = px - wx * this.scale; this.ty = py - wy * this.scale;
+    this._applyTransform();
   }
   private _startPan(ev: MouseEvent): void {
-    const sx = ev.clientX, sy = ev.clientY, tx0 = this.tx, ty0 = this.ty;
-    const move = (e: MouseEvent) => { this.tx = tx0 + (e.clientX - sx); this.ty = ty0 + (e.clientY - sy); this._applyTransform(); };
-    const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    ev.preventDefault();
+    this.svg!.classList.add("panning");
+    const sx = ev.clientX, sy = ev.clientY, ox = this.tx, oy = this.ty;
+    let moved = false;
+    const move = (e: MouseEvent) => {
+      if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 3) moved = true;
+      this.tx = ox + (e.clientX - sx); this.ty = oy + (e.clientY - sy); this._applyTransform();
+    };
+    const up = () => {
+      this.svg!.classList.remove("panning");
+      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      if (!moved && this.selection.size) this._clearSelection();   // clic à vide = désélectionner
+    };
     document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
   }
 
   /** Recadre l'ensemble des nœuds dans la vue. */
   recenter(): void {
-    if (!this.nodes.length || !this.svg) return;
-    const b = GraphGeometry.nodesBBox(this.nodes, (n) => (n._h || 40) / 2);
+    if (!this.nodes.length || !this.svg) { this.scale = 1; this.tx = 0; this.ty = 0; this._applyTransform(); return; }
+    const { minX, minY, maxX, maxY } = GraphGeometry.nodesBBox(this.nodes, (n) => (n._h || 40) / 2);
     const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
-    const gw = (b.maxX - b.minX) || 1, gh = (b.maxY - b.minY) || 1;
-    this.scale = Math.max(0.1, Math.min(2, 0.9 * Math.min(W / gw, H / gh)));
-    this.tx = W / 2 - this.scale * (b.minX + gw / 2);
-    this.ty = H / 2 - this.scale * (b.minY + gh / 2);
+    const pad = 50;
+    const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
+    const s = Math.min((W - pad * 2) / bw, (H - pad * 2) / bh, 1.6);
+    this.scale = Math.max(0.15, s);
+    this.tx = (W - bw * this.scale) / 2 - minX * this.scale;
+    this.ty = (H - bh * this.scale) / 2 - minY * this.scale;
     this._applyTransform();
   }
 
-  /* ---- glisser de nœud (version pilote : déplacement + maj des arêtes) ---- */
+  /* ---- sélection multiple ---- */
+
+  private _renderSelection(): void {
+    if (!this.gRoot) return;
+    [...this.selection].forEach((id) => { if (!this._nodeById[id]) this.selection.delete(id); });
+    this.gRoot.querySelectorAll("g.gnode").forEach((g) => (g as SVGGElement).classList.toggle("selected", this.selection.has((g as any).dataset.id)));
+  }
+  private _clearSelection(): void { this.selection.clear(); this._renderSelection(); }
+  selectAll(): void { this.selection = new Set(this.nodes.map((n) => n.id)); this._renderSelection(); }
+  private _nodesInRect(x0: number, y0: number, x1: number, y1: number): string[] {
+    const a = Math.min(x0, x1), b = Math.max(x0, x1), c = Math.min(y0, y1), d = Math.max(y0, y1);
+    return this.nodes.filter((n) => n.x >= a && n.x <= b && n.y >= c && n.y <= d).map((n) => n.id);
+  }
+
+  /* ---- déplacement (sélection-aware) ---- */
 
   private _onNodeMouseDown(ev: MouseEvent, n: GNode): void {
     if (ev.button !== 0) return;
-    ev.stopPropagation();
-    const start = this._clientToWorld(ev.clientX, ev.clientY);
-    const x0 = n.x, y0 = n.y;
-    const move = (e: MouseEvent) => {
-      const p = this._clientToWorld(e.clientX, e.clientY);
-      n.x = x0 + (p.x - start.x); n.y = y0 + (p.y - start.y);
-      const g = this._gById[n.id];
-      if (g) g.setAttribute("transform", `translate(${n.x - (n._w || 0) / 2},${n.y - (n._h || 0) / 2})`);
-      this._updateEdgesFor(n.id);
-    };
-    const up = () => {
+    ev.preventDefault(); ev.stopPropagation();
+    const additive = ev.shiftKey || ev.ctrlKey || ev.metaKey;
+    if (additive) {
+      if (this.selection.has(n.id)) this.selection.delete(n.id); else this.selection.add(n.id);
+      this._renderSelection();
+      return;
+    }
+    if (!this.selection.has(n.id)) { this.selection.clear(); this.selection.add(n.id); this._renderSelection(); }
+    this._startNodesDrag(ev);
+  }
+
+  private _dragSession(onMove: (e: MouseEvent) => void, onUp?: (e: MouseEvent) => void): void {
+    const move = (e: MouseEvent) => onMove(e);
+    const up = (e: MouseEvent) => {
       document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
-      this.host.setDirty?.(true);
+      if (onUp) onUp(e);
     };
     document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
   }
 
-  private _updateEdgesFor(nodeId: string): void {
-    const byId: Record<string, GNode> = {}; this.nodes.forEach((n) => { byId[n.id] = n; });
+  /** Déplace tous les nœuds sélectionnés du même delta, avec auto-pan au bord. */
+  private _startNodesDrag(ev: MouseEvent): void {
+    const ids = [...this.selection].filter((id) => this._nodeById[id]);
+    if (!ids.length) return;
+    const idSet = new Set(ids);
+    ids.forEach((id) => { const g = this._gById[id]; if (g) (g as any).style.cursor = "grabbing"; });
+    const startW = this._clientToWorld(ev.clientX, ev.clientY);
+    const orig: Record<string, { x: number; y: number }> = {}; ids.forEach((id) => { const nd = this._nodeById[id]; orig[id] = { x: nd.x, y: nd.y }; });
+    let last = { x: ev.clientX, y: ev.clientY };
+    const sync = () => {
+      const p = this._clientToWorld(last.x, last.y);
+      const dx = p.x - startW.x, dy = p.y - startW.y;
+      ids.forEach((id) => { const nd = this._nodeById[id]; nd.x = orig[id].x + dx; nd.y = orig[id].y + dy; this._placeNodeOnly(nd); });
+      this._updateEdgesForSet(idSet);
+    };
+    this._dragSession(
+      (e) => { last = { x: e.clientX, y: e.clientY }; sync(); },
+      () => {
+        ids.forEach((id) => { const g = this._gById[id]; if (g) (g as any).style.cursor = "grab"; });
+        ids.forEach((id) => { const nd = this._nodeById[id]; if (nd) { this.pos[id] = { x: Math.round(nd.x), y: Math.round(nd.y) }; this._moved.add(id); } });
+        this.host.setDirty?.(true);
+        this._stopEdgePan();
+      },
+    );
+    this._startEdgePan(() => last, sync);
+  }
+
+  private _placeNodeOnly(n: GNode): void {
+    const g = this._gById[n.id]; if (!g) return;
+    const w = n._w || GraphGeometry.nodeSize(n).w, h = n._h || 40;
+    g.setAttribute("transform", `translate(${n.x - w / 2},${n.y - h / 2})`);
+  }
+
+  /** Sélection rectangle (marquee) : ajoute les nœuds couverts à la sélection. */
+  private _startMarquee(ev: MouseEvent): void {
+    ev.preventDefault();
+    const start = this._clientToWorld(ev.clientX, ev.clientY);
+    const base = new Set(this.selection);
+    const rect = Dom.svg("rect", { class: "gmarquee", fill: "var(--accent)", "fill-opacity": 0.08, stroke: "var(--accent)", "stroke-width": 1, "stroke-dasharray": "4 3" });
+    rect.setAttribute("pointer-events", "none");
+    this.gRoot!.appendChild(rect);
+    let cur = start;
+    const draw = () => {
+      const x0 = Math.min(start.x, cur.x), y0 = Math.min(start.y, cur.y), x1 = Math.max(start.x, cur.x), y1 = Math.max(start.y, cur.y);
+      rect.setAttribute("x", String(x0)); rect.setAttribute("y", String(y0)); rect.setAttribute("width", String(x1 - x0)); rect.setAttribute("height", String(y1 - y0));
+      const sel = new Set(base);
+      this._nodesInRect(x0, y0, x1, y1).forEach((id) => sel.add(id));
+      this.selection = sel; this._renderSelection();
+    };
+    const move = (e: MouseEvent) => { cur = this._clientToWorld(e.clientX, e.clientY); draw(); };
+    const up = () => { rect.remove(); document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+  }
+
+  /** Auto-pan quand le pointeur approche un bord pendant un déplacement. */
+  private _startEdgePan(getClient: () => { x: number; y: number }, onPan: () => void): void {
+    this._stopEdgePan();
+    const MARGIN = 60, MAX_SPEED = 16;
+    const state = { raf: 0 };
+    const tick = () => {
+      if (!this.svg) return;
+      const r = this.svg.getBoundingClientRect();
+      const c = getClient();
+      let dx = 0, dy = 0;
+      if (c.x < r.left + MARGIN) dx = (r.left + MARGIN - c.x);
+      else if (c.x > r.right - MARGIN) dx = -(c.x - (r.right - MARGIN));
+      if (c.y < r.top + MARGIN) dy = (r.top + MARGIN - c.y);
+      else if (c.y > r.bottom - MARGIN) dy = -(c.y - (r.bottom - MARGIN));
+      const ease = (v: number) => { const t = Math.max(-1, Math.min(1, v / MARGIN)); return Math.sign(t) * t * t * MAX_SPEED; };
+      const vx = ease(dx), vy = ease(dy);
+      if (vx || vy) { this.tx += vx; this.ty += vy; this._applyTransform(); if (onPan) onPan(); }
+      state.raf = requestAnimationFrame(tick);
+    };
+    state.raf = requestAnimationFrame(tick);
+    this._edgePan = state;
+  }
+  private _stopEdgePan(): void {
+    if (this._edgePan && this._edgePan.raf) cancelAnimationFrame(this._edgePan.raf);
+    this._edgePan = null;
+  }
+
+  private _updateEdgesForSet(idSet: Set<string>): void {
+    if (!this.gRoot) return;
     this.edges.forEach((e) => {
-      if (e.a !== nodeId && e.b !== nodeId) return;
-      const a = byId[e.a], b = byId[e.b]; if (!a || !b) return;
+      if (!idSet.has(e.a) && !idSet.has(e.b)) return;
+      const a = this._nodeById[e.a], b = this._nodeById[e.b]; if (!a || !b) return;
       const line = this._edgeLineById[e.id];
       if (line) { line.setAttribute("x1", String(a.x)); line.setAttribute("y1", String(a.y)); line.setAttribute("x2", String(b.x)); line.setAttribute("y2", String(b.y)); }
       const lbl = this._edgeLabelById[e.id];
       if (lbl) { lbl.setAttribute("x", String((a.x + b.x) / 2)); lbl.setAttribute("y", String((a.y + b.y) / 2 - 3)); }
     });
+  }
+
+  /* ---- menus contextuels ---- */
+
+  private _nodeContextMenu(ev: MouseEvent, n: GNode): void {
+    ContextMenu.show(ev.clientX, ev.clientY, [{
+      head: n.name,
+      items: [
+        { label: "Détails", action: () => this.host.openEquipmentDetail?.(n.id) },
+        { label: "Supprimer", danger: true, action: () => this.host.deleteEquipment?.(n.id) },
+      ],
+    }]);
+  }
+  private _bgContextMenu(ev: MouseEvent): void {
+    const items = [{ label: "Tout sélectionner", action: () => this.selectAll() }];
+    if (this.selection.size) items.push({ label: "Tout désélectionner", action: () => this._clearSelection() });
+    ContextMenu.show(ev.clientX, ev.clientY, [
+      { items: [{ label: "Recentrer la vue", action: () => this.recenter() }] },
+      { head: "Sélection", items },
+    ]);
   }
 }

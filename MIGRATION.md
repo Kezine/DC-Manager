@@ -102,8 +102,13 @@ src/
         layout force-directed → rendu SVG nœuds/arêtes + pan/zoom + glisser de nœud),
         `GraphHost` injecté (`setDirty`/`openEquipmentDetail`). Câblé dans `main.ts`
         (document de démo). Build = `dist/netmap.html` exécutable. Tests build+layout
-        (sans DOM, faux stage) → 146/146. RESTE GraphView : cadres, dispositions
-        nommées, modes A/B/C, sélection/marquee, menus, légende, export, toolbar.
+        (sans DOM, faux stage) → 147/147.
+  - [x] **GraphView — manipulation directe** : sélection multiple (clic/Maj/marquee),
+        déplacement de GROUPE avec auto-pan au bord, zoom-au-curseur, recadrage,
+        menus contextuels (nœud : Détails/Supprimer · fond : sélection/recentrage)
+        via `ui/ContextMenu`. Hôte étendu (`deleteEquipment`). Câblé dans `main.ts`.
+        RESTE GraphView : cadres, dispositions nommées, modes A/B/C, légende, export,
+        toolbar/filtres.
   - [ ] GraphView complet, puis `ListController`, puis `DatacenterView`
         (+ machinerie conduit restante).
 - [~] **Phase 6 — Shell / bootstrap** :

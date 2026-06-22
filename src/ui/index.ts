@@ -5,5 +5,7 @@ export { Dialog } from "./Dialog";
 export type { DialogOptions, DialogBuildApi } from "./Dialog";
 export { Modal } from "./Modal";
 export type { ModalOptions } from "./Modal";
+export { ContextMenu } from "./ContextMenu";
+export type { CtxItem, CtxSection } from "./ContextMenu";
 export { FormControls } from "./FormControls";
 export type { SelectOption, NumberOpts, ToggleOpts, DateOpts } from "./FormControls";

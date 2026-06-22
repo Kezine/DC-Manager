@@ -385,6 +385,8 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     gv.layout();
     ck(gv.nodes.every((n) => isFinite(n.x) && isFinite(n.y)), "layout : positions finies");
     ck(gv.nodes[0].x !== gv.nodes[1].x || gv.nodes[0].y !== gv.nodes[1].y, "layout : nœuds séparés");
+    gv.selectAll();
+    ck.eq(gv.selection.size, 2, "selectAll : 2 nœuds sélectionnés");
   }
 
   console.log("\n" + "-".repeat(48));

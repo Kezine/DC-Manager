@@ -8,7 +8,7 @@ import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter } from "../data";
 import { Store } from "../store";
 import { GraphView } from "../views";
-import { Modal, Notify, FormControls } from "../ui";
+import { Modal, Notify, FormControls, Dialog } from "../ui";
 import { Shell } from "./Shell";
 
 const adapter = new BrowserStorageAdapter({ persistent: false });
@@ -55,6 +55,14 @@ async function boot(): Promise<void> {
       ro("Nom", eq.name); ro("Type", eq.type); ro("Marque", eq.brand || "—");
       ro("Modèle", eq.model || "—"); ro("Série", eq.serial || "—");
       modal.open({ title: eq.name || "(équipement)", subtitle: eq.type, body, hideFooter: true });
+    },
+    deleteEquipment: async (id) => {
+      const eq = store.get("equipments", id);
+      const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${eq?.name || "équipement"} » et ses câbles ?`, confirmLabel: "Supprimer", danger: true });
+      if (!ok) return;
+      await store.remove("equipments", id);
+      graph.rebuild({ recenter: false });
+      Notify.toast("Équipement supprimé");
     },
   });
 
