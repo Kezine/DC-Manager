@@ -135,6 +135,15 @@ async function boot(): Promise<void> {
   addListTab("cabletypes", "Types câble", ListConfigs.cableTypes);
   shell.addView({ name: "datacenter", label: "Datacenter", onShow: (c) => { if (!c.dataset.built) { c.dataset.built = "1"; c.innerHTML = `<p style="padding:24px;color:var(--fg-dim)">Vue Datacenter — à porter.</p>`; } } });
 
+  // cohérence inter-vues : toute mutation du modèle rafraîchit la vue active
+  // (coalescé sur une frame pour absorber les rafales de transactions).
+  let refreshQueued = false;
+  store.onChange(() => {
+    if (refreshQueued) return;
+    refreshQueued = true;
+    requestAnimationFrame(() => { refreshQueued = false; shell.refreshActive(); });
+  });
+
   shell.switchView("graph");
   Notify.toast("NetMap — pilote prêt (double-clic un nœud)", "ok");
   (window as any).__NETMAP__ = { EntityRegistry, adapter, store, shell, graph, modal };

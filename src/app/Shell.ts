@@ -32,7 +32,18 @@ export class Shell {
     brand.style.cssText = "font-weight:700;letter-spacing:.08em;color:var(--accent);margin-right:16px";
     const tabs = document.createElement("nav");
     tabs.className = "tabs"; tabs.id = "tabs";
-    header.appendChild(brand); header.appendChild(tabs);
+
+    // bascule de thème (sombre / clair) poussée à droite
+    const theme = document.createElement("button");
+    theme.type = "button"; theme.className = "btn btn-ghost btn-sm"; theme.title = "Basculer le thème"; theme.textContent = "☾";
+    theme.style.marginLeft = "auto";
+    theme.onclick = () => {
+      const light = document.documentElement.getAttribute("data-theme") === "light";
+      if (light) { document.documentElement.removeAttribute("data-theme"); theme.textContent = "☾"; }
+      else { document.documentElement.setAttribute("data-theme", "light"); theme.textContent = "☀"; }
+    };
+
+    header.appendChild(brand); header.appendChild(tabs); header.appendChild(theme);
 
     const main = document.createElement("main");
     main.style.cssText = "flex:1 1 auto;min-height:0;display:flex;flex-direction:column";
@@ -66,5 +77,12 @@ export class Shell {
     });
     const v = this.views.get(name)!;
     if (v.def.onShow) { try { v.def.onShow(v.container); } catch (e) { console.error(e); } }
+  }
+
+  /** Re-rend la vue active (sur mutation du modèle → cohérence inter-vues). */
+  refreshActive(): void {
+    if (!this.current) return;
+    const v = this.views.get(this.current);
+    if (v && v.def.onShow) { try { v.def.onShow(v.container); } catch (e) { console.error(e); } }
   }
 }
