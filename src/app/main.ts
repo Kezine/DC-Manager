@@ -101,7 +101,7 @@ async function boot(): Promise<void> {
   // === ONGLETS PRINCIPAUX (ordre de l'original ; défaut = Équipements) ===
   addListTab("equipements", "Équipements", ListConfigs.equipments, { form: (id, done) => Forms.equipment(store, formHost, id, done) });
   addListTab("groupes", "Groupes", ListConfigs.groups, { form: (id, done) => Forms.group(store, formHost, id, done) });
-  addListTab("racks", "Racks", ListConfigs.racks);
+  addListTab("racks", "Racks", ListConfigs.racks, { form: (id, done) => Forms.rack(store, formHost, id, done) });
   addListTab("cables", "Câbles", ListConfigs.cables, { form: (id, done) => Forms.cable(store, formHost, id, done) });
   addListTab("ipam", "IPAM", ListConfigs.ipNetworks, { form: (id, done) => Forms.ipNetwork(store, formHost, id, done) });
 

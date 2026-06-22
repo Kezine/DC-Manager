@@ -126,8 +126,12 @@ src/
         + **équipement (CŒUR)** : identité, admin, groupe, dimensions U/libre,
         placement rack simple (champs avancés préservés via patch). Stabilisation :
         `Store.onChange` → rafraîchissement live de la vue active + bascule de thème.
-        RESTE équipement : éditeur de ports/agrégats, breakout, placement
-        latéral/paroi/étage, images de façade. Puis formulaires câble / rack.
+        + **ports/agrégats** (breakout existant en lecture seule, préservé). Formulaires
+        **câble** (extrémités/compat/réseaux/statut) et **rack** (cage/dims/side-mount,
+        garde-fou redimensionnement). Navigation réalignée sur l'original (onglets
+        principaux + sous-vues + compteurs). RESTE : + Breakout & éditeur de façade
+        (équipement), portes & capots (rack), faisceaux & waypoints (câble) ; puis
+        `DatacenterView`.
   - [ ] `DatacenterView` (+ machinerie conduit restante).
 - [~] **Phase 6 — Shell / bootstrap** :
   - [x] **CSS** extrait du monolithe → `src/styles/netmap.css` (verbatim, 1423 l.),

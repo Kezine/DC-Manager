@@ -3,6 +3,7 @@ import type { ModalOptions } from "../ui/Modal";
 import { FormControls } from "../ui/FormControls";
 import { ColorPalette } from "../ui/ColorPalette";
 import { Notify } from "../ui/Notify";
+import { Dialog } from "../ui/Dialog";
 import { Html } from "../core/Html";
 import { Ip } from "../core/Ip";
 import { GroupTypes } from "../domain/GroupTypes";
@@ -11,7 +12,14 @@ import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { Depths } from "../registries/Depths";
 import { PortRoles } from "../registries/PortRoles";
 import { Id } from "../core/Id";
-import { POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT } from "../domain/constants";
+import { RackGeometry } from "../geometry/RackGeometry";
+import {
+  POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT, LOCATIONS, FLOORS, RACK_SIDES, RACK_DEPTHS,
+  RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_MOUNT_MARGIN_DEFAULT, U_MM,
+} from "../domain/constants";
+
+const locOptions = (sel: string) => [{ value: "", label: "— aucun —" }].concat(LOCATIONS.map((l) => ({ value: l.id, label: l.label })));
+const floorOptions = (sel: string) => { const s = String(sel == null ? "" : sel); const o = [{ value: "", label: "— étage —" }].concat(FLOORS.map((f) => ({ value: f, label: "Étage " + f }))); if (s && !FLOORS.includes(s)) o.push({ value: s, label: s + " (hors liste)" }); return o; };
 
 const divider = (txt: string) => { const d = document.createElement("div"); d.className = "section-divider"; d.textContent = txt; return d; };
 const row2 = (...fields: HTMLElement[]) => { const r = document.createElement("div"); r.className = "form-row"; fields.forEach((f) => r.appendChild(f)); return r; };
@@ -462,6 +470,107 @@ export class Forms {
       },
     });
     setTimeout(() => (cable ? nameI : selEqA).focus(), 30);
+  }
+
+  /** Baie (rack) — formulaire CŒUR (identité · localisation · cage · dims · side-mount).
+      DIFFÉRÉ : portes et éditeur de capots (préservés à l'édition). */
+  static rack(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
+    const rk: any = id ? store.get("racks", id) : null;
+    const root = document.createElement("div");
+    const nameI = FormControls.text(rk ? rk.name : "", "ex. Baie A1");
+    root.appendChild(FormControls.fieldRow("Nom", nameI));
+
+    // emplacement asservi au DC si la baie y est placée
+    const rackDc: any = (rk && rk.datacenter_id) ? store.get("datacenters", rk.datacenter_id) : null;
+    const locI = FormControls.select(locOptions(""), rackDc ? (rackDc.location || "") : (rk ? rk.location : ""));
+    const floorI = FormControls.select(floorOptions(rackDc ? (rackDc.floor || "") : (rk ? rk.floor : "")), rackDc ? (rackDc.floor || "") : (rk ? rk.floor : ""));
+    const roomI = FormControls.text(rackDc ? (rackDc.room || "") : (rk ? rk.room : ""), "local");
+    if (rackDc) [locI, floorI, roomI].forEach((el: any) => { el.disabled = true; el.style.opacity = "0.7"; });
+    root.appendChild(row2(FormControls.fieldRow("Lieu", locI), FormControls.fieldRow("Étage", floorI), FormControls.fieldRow("Local", roomI)));
+    if (rackDc) { const h = document.createElement("div"); h.className = "form-hint"; h.innerHTML = "⛓ Emplacement asservi au datacenter « " + Html.escape(rackDc.name || "(salle)") + " ». Retirez la baie de la salle pour l'éditer."; root.appendChild(h); }
+
+    // cage
+    root.appendChild(divider("Dimensions de la cage"));
+    const uI = FormControls.number(rk ? rk.u_count : 42, { min: 1 });
+    const vmI = FormControls.number(rk ? RackGeometry.vMarginTop(rk) : RACK_MOUNT_MARGIN_DEFAULT, { min: 0 });
+    const vmBotI = FormControls.number(rk && rk.vmargin_bottom_mm != null ? rk.vmargin_bottom_mm : "", { min: 0, placeholder: "= marge haute" });
+    const cageI = FormControls.number(rk ? RackGeometry.cageDepth(rk) : RACK_DEPTH_DEFAULT, { min: 1 });
+    const fmI = FormControls.number(rk ? RackGeometry.frontMargin(rk) : 0, { min: 0, placeholder: "0" });
+    const lmI = FormControls.number(rk ? RackGeometry.lMargin(rk) : RACK_MOUNT_MARGIN_DEFAULT, { min: 0 });
+    const sidesI = FormControls.select(RACK_SIDES.map((s) => ({ value: s.id, label: s.label })), rk ? rk.sides : "single");
+    root.appendChild(row2(FormControls.fieldRow("Hauteur (U)", uI), FormControls.fieldRow("Marge verticale (mm)", vmI), FormControls.fieldRow("Marge basse (mm)", vmBotI)));
+    root.appendChild(row2(FormControls.fieldRow("Profondeur cage (mm)", cageI), FormControls.fieldRow("Marge avant (mm)", fmI), FormControls.fieldRow("Marge latérale (mm)", lmI), FormControls.fieldRow("Faces", sidesI)));
+
+    // dimensions extérieures
+    root.appendChild(divider("Dimensions extérieures"));
+    const widthI = FormControls.number(rk ? rk.width_mm : RACK_WIDTH_DEFAULT, { min: 1 });
+    const heightI = FormControls.number(rk && rk.height_mm != null ? rk.height_mm : "", { min: 1, placeholder: "= hauteur mini" });
+    const depthI = FormControls.number(rk ? rk.depth : RACK_DEPTH_DEFAULT, { min: 1 });
+    FormControls.attachDatalist(depthI, "dl-rack-depth", RACK_DEPTHS.map(String));
+    root.appendChild(row2(FormControls.fieldRow("Largeur (mm)", widthI), FormControls.fieldRow("Hauteur (mm)", heightI), FormControls.fieldRow("Profondeur (mm)", depthI)));
+    const geoHint = document.createElement("div"); geoHint.className = "form-hint"; root.appendChild(geoHint);
+
+    // side-mount
+    root.appendChild(divider("Montage latéral (marge)"));
+    const sideFrontI = FormControls.toggle("Side-mount avant", rk ? !!rk.allow_side_front : false, () => {}, { block: true });
+    const sideRearI = FormControls.toggle("Side-mount arrière", rk ? !!rk.allow_side_rear : false, () => {}, { block: true });
+    root.appendChild(row2(sideFrontI, sideRearI));
+    const descI = FormControls.textArea(rk ? rk.description : "");
+    root.appendChild(FormControls.fieldRow("Description", descI));
+
+    const _n = (i: HTMLInputElement, d: number) => { const v = parseInt(i.value, 10); return isFinite(v) ? v : d; };
+    const geo = () => {
+      const u = Math.max(1, _n(uI, 42)), vt = Math.max(0, _n(vmI, 0)), vb = (vmBotI.value !== "") ? Math.max(0, _n(vmBotI, 0)) : Math.max(0, _n(vmI, 0));
+      const lm = Math.max(0, _n(lmI, 0)), cage = Math.max(1, _n(cageI, RACK_DEPTH_DEFAULT)), fm = Math.max(0, _n(fmI, 0));
+      return { u, vt, vb, lm, cage, fm, minH: u * U_MM + vt + vb, minW: RACK_MOUNT_WIDTH + 2 * lm, minD: cage + fm };
+    };
+    const refreshGeo = () => {
+      const g = geo();
+      geoHint.textContent = "Mini : largeur ≥ " + Math.round(g.minW) + " · hauteur ≥ " + Math.round(g.minH) + " · profondeur ≥ " + g.minD + " mm (ajustées à l'enregistrement).";
+      const margin = Math.max(0, (_n(widthI, RACK_WIDTH_DEFAULT) - RACK_MOUNT_WIDTH) / 2);
+      (sideFrontI as any).disabled = margin < U_MM; (sideRearI as any).disabled = margin < U_MM;
+    };
+    [uI, vmI, vmBotI, cageI, fmI, lmI, widthI, heightI, depthI].forEach((i) => i.addEventListener("input", refreshGeo));
+    refreshGeo();
+
+    host.openModal({
+      title: rk ? "Modifier la baie" : "Nouvelle baie",
+      subtitle: rk ? Html.escape(rk.name || "") : "",
+      body: root, wide: true,
+      onSave: async () => {
+        const name = nameI.value.trim();
+        if (!name) { Notify.toast("Le nom est obligatoire", "err"); return false; }
+        const g = geo();
+        const minW = Math.round(g.minW), minH = Math.round(g.minH), minD = g.minD;
+        let width_mm = Math.max(1, _n(widthI, RACK_WIDTH_DEFAULT)); if (width_mm < minW) width_mm = minW;
+        let depth = Math.max(1, _n(depthI, RACK_DEPTH_DEFAULT)); if (depth < minD) depth = minD;
+        let height_mm: number | null = (heightI.value !== "") ? Math.max(1, _n(heightI, minH)) : null;
+        if (height_mm != null && height_mm < minH) height_mm = minH;
+        const sideOk = (width_mm - RACK_MOUNT_WIDTH) / 2 >= U_MM;
+        const payload: any = {
+          name,
+          location: rackDc ? (rk.location || "") : (locI.value || ""), floor: rackDc ? (rk.floor || "") : floorI.value, room: rackDc ? (rk.room || "") : roomI.value.trim(),
+          u_count: g.u, width_mm, depth, sides: sidesI.value === "dual" ? "dual" : "single",
+          lmargin_mm: g.lm, vmargin_mm: g.vt, vmargin_bottom_mm: (vmBotI.value !== "") ? g.vb : null,
+          cage_depth_mm: g.cage, front_margin_mm: g.fm, height_mm, mount_margin_mm: g.lm,
+          allow_side_front: sideOk && (sideFrontI as any).checked, allow_side_rear: sideOk && (sideRearI as any).checked,
+          description: descI.value.trim(),
+        };
+        // redimensionnement d'une baie occupée (nombre de U) → déplace ses équipements
+        if (rk && g.u !== rk.u_count) {
+          const occ = store.equipmentsOfRack(rk.id);
+          if (occ.length) {
+            const ok = await Dialog.confirm({ title: "Redimensionner la baie ?", message: "Cette baie contient " + occ.length + " équipement(s). Changer le nombre de U les passera tous en « Non placé ». Continuer ?", confirmLabel: "Redimensionner", danger: true });
+            if (!ok) return false;
+            await store.updateBatch([{ collection: "racks", id: rk.id, patch: payload }].concat(occ.map((e: any) => ({ collection: "equipments", id: e.id, patch: { placement_mode: "manual", rack_id: null, rack_u: null } }))));
+            host.setDirty?.(true); Notify.toast("Baie redimensionnée"); onSaved?.(); return true;
+          }
+        }
+        if (rk) await store.update("racks", rk.id, payload); else await store.create("racks", payload);
+        host.setDirty?.(true); Notify.toast(rk ? "Baie mise à jour" : "Baie créée"); onSaved?.(); return true;
+      },
+    });
+    setTimeout(() => nameI.focus(), 30);
   }
 
   /** Réseau IP (sous-réseau CIDR). */

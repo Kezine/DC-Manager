@@ -13,6 +13,14 @@ export const RACK_EAR_MM = 15;                // largeur d'une oreille de montag
 export const RACK_DEPTH_DEFAULT = 1000;       // profondeur EXTÉRIEURE par défaut (mm)
 export const RACK_DEPTHS = [600, 800, 1000, 1200];
 export const RACK_ORIENTATIONS = [0, 90, 180, 270];   // pas de 90° (sens horaire)
+/** Faces de baie (simple / double). */
+export const RACK_SIDES = [{ id: "single", label: "Simple face" }, { id: "dual", label: "Double face" }];
+
+/* ---- lieux & étages (listes FERMÉES — éditables ici) ---- */
+export const LOCATIONS = [
+  { id: "liege", label: "Liège" }, { id: "herstal", label: "Herstal" }, { id: "bruxelles", label: "Bruxelles" },
+];
+export const FLOORS = ["-3", "-2", "-1", "0", "1", "2", "3", "4", "5"];
 
 /* ---- montage latéral (side) & mural (wall) ---- */
 export const SIDE_U_STEP = 2;                 // résolution verticale du montage latéral (U)
