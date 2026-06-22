@@ -3,6 +3,11 @@ import { Dom } from "../ui/Dom";
 import { ContextMenu } from "../ui/ContextMenu";
 import { MultiSelect } from "../ui/MultiSelect";
 import { FormControls } from "../ui/FormControls";
+import { ColorPalette } from "../ui/ColorPalette";
+import { Notify } from "../ui/Notify";
+import { Dialog } from "../ui/Dialog";
+import type { ModalOptions } from "../ui/Modal";
+import { Id } from "../core/Id";
 import { Text } from "../core/Text";
 import { GraphGeometry } from "../geometry/GraphGeometry";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
@@ -25,10 +30,12 @@ export interface GraphHost {
   setDirty?(v: boolean): void;
   openEquipmentDetail?(id: string): void;
   deleteEquipment?(id: string): void;
+  openModal?(opts: ModalOptions): void;
 }
 
 interface GNode { id: string; name: string; type: string; group_id: string | null; x: number; y: number; vx: number; vy: number; _w?: number; _h?: number; }
 interface GEdge { id: string; name: string; a: string; b: string; network_id: string | null; status: string; }
+interface GFrame { id: string; label: string; color: string; description: string; x: number; y: number; w: number; h: number; }
 
 export class GraphView {
   private store: Store;
@@ -355,6 +362,11 @@ export class GraphView {
     const gRoot = Dom.svg("g") as SVGGElement; this.gRoot = gRoot; svg.appendChild(gRoot);
     const idx: Record<string, number> = {}; this.nodes.forEach((n, i) => { idx[n.id] = i; });
 
+    // cadres de regroupement (calque le plus bas, derrière arêtes et nœuds)
+    const frameLayer = Dom.svg("g"); frameLayer.setAttribute("class", "gframe-layer");
+    (((this.store.meta.graphFrames as GFrame[]) || [])).forEach((f) => frameLayer.appendChild(this._renderFrame(f)));
+    gRoot.appendChild(frameLayer);
+
     // arêtes
     const edgeLayer = Dom.svg("g");
     this.edges.forEach((e) => {
@@ -427,11 +439,134 @@ export class GraphView {
     this._applyTransform();
     this._renderSelection();
 
-    if (!this.nodes.length) {
+    if (!this.nodes.length && !((this.store.meta.graphFrames as GFrame[]) || []).length) {
       const msg = Dom.svg("text", { x: W / 2, y: H / 2, "text-anchor": "middle", fill: "var(--fg-dim)", "font-size": 13 });
       msg.textContent = "Aucun élément à afficher.";
       gRoot.appendChild(msg);
     }
+  }
+
+  /* ---- cadres de regroupement ---- */
+
+  private _frames(): GFrame[] { return (this.store.meta.graphFrames as GFrame[]) || (this.store.meta.graphFrames = []); }
+  private _nodesInFrame(f: GFrame): string[] { return this._nodesInRect(f.x, f.y, f.x + f.w, f.y + f.h); }
+  private _persistFrames(): void { this.store.persistMeta(); this.host.setDirty?.(true); }
+
+  /* Un cadre : fond translucide, barre de titre (déplacement), poignée de resize. */
+  private _renderFrame(f: GFrame): SVGGElement {
+    const g = Dom.svg("g") as SVGGElement; g.setAttribute("class", "gframe"); (g as any).dataset.id = f.id;
+    const col = f.color || "#ff5500";
+    const bg = Dom.svg("rect", { x: f.x, y: f.y, width: f.w, height: f.h, rx: 8, fill: col, "fill-opacity": 0.1, stroke: col, "stroke-width": 1.5 });
+    bg.setAttribute("class", "frame-bg"); bg.setAttribute("pointer-events", "none");
+    const head = Dom.svg("rect", { x: f.x, y: f.y, width: f.w, height: 22, fill: col, "fill-opacity": 0.22 });
+    head.setAttribute("class", "frame-head"); head.setAttribute("pointer-events", "all"); (head as any).style.cursor = "move";
+    const label = Dom.svg("text", { x: f.x + 10, y: f.y + 15, fill: col }); label.setAttribute("class", "frame-label"); label.setAttribute("pointer-events", "none"); label.textContent = f.label || "Cadre";
+    const handle = Dom.svg("rect", { x: f.x + f.w - 14, y: f.y + f.h - 14, width: 14, height: 14, fill: "var(--bg)", stroke: col }); handle.setAttribute("class", "frame-handle"); handle.setAttribute("pointer-events", "all");
+    if (f.description) { const ti = Dom.svg("title"); ti.textContent = f.description; g.appendChild(ti); }
+    g.appendChild(bg); g.appendChild(head); g.appendChild(label); g.appendChild(handle);
+    head.addEventListener("mousedown", (ev) => this._startFrameDrag(ev as MouseEvent, f, g));
+    handle.addEventListener("mousedown", (ev) => this._startFrameResize(ev as MouseEvent, f, g));
+    const ctx = (ev: Event) => { ev.preventDefault(); ev.stopPropagation(); this._frameContextMenu(ev as MouseEvent, f); };
+    head.addEventListener("contextmenu", ctx); handle.addEventListener("contextmenu", ctx);
+    return g;
+  }
+
+  private _reflowFrame(g: SVGGElement, f: GFrame): void {
+    const bg = g.querySelector("rect.frame-bg")!, head = g.querySelector("rect.frame-head")!,
+      label = g.querySelector("text.frame-label")!, handle = g.querySelector("rect.frame-handle")!;
+    bg.setAttribute("x", String(f.x)); bg.setAttribute("y", String(f.y)); bg.setAttribute("width", String(f.w)); bg.setAttribute("height", String(f.h));
+    head.setAttribute("x", String(f.x)); head.setAttribute("y", String(f.y)); head.setAttribute("width", String(f.w));
+    label.setAttribute("x", String(f.x + 10)); label.setAttribute("y", String(f.y + 15));
+    handle.setAttribute("x", String(f.x + f.w - 14)); handle.setAttribute("y", String(f.y + f.h - 14));
+  }
+
+  /* Glisser un cadre déplace AUSSI les nœuds couverts (Alt = cadre seul). */
+  private _startFrameDrag(ev: MouseEvent, f: GFrame, g: SVGGElement): void {
+    ev.preventDefault(); ev.stopPropagation();
+    const standalone = ev.altKey;
+    const start = this._clientToWorld(ev.clientX, ev.clientY);
+    const ofx = f.x, ofy = f.y;
+    const movers = standalone ? [] : this._nodesInFrame(f);
+    const moverSet = new Set(movers);
+    const orig: Record<string, { x: number; y: number }> = {}; movers.forEach((id) => { const nd = this._nodeById[id]; if (nd) orig[id] = { x: nd.x, y: nd.y }; });
+    let last = { x: ev.clientX, y: ev.clientY };
+    const sync = () => {
+      const p = this._clientToWorld(last.x, last.y);
+      const dx = p.x - start.x, dy = p.y - start.y;
+      f.x = ofx + dx; f.y = ofy + dy; this._reflowFrame(g, f);
+      movers.forEach((id) => { const nd = this._nodeById[id]; if (!nd || !orig[id]) return; nd.x = orig[id].x + dx; nd.y = orig[id].y + dy; this._placeNodeOnly(nd); });
+      if (moverSet.size) this._updateEdgesForSet(moverSet);
+    };
+    this._dragSession((e) => { last = { x: e.clientX, y: e.clientY }; sync(); }, () => { this._stopEdgePan(); this._persistFrames(); });
+    this._startEdgePan(() => last, sync);
+  }
+
+  private _startFrameResize(ev: MouseEvent, f: GFrame, g: SVGGElement): void {
+    ev.preventDefault(); ev.stopPropagation();
+    const start = this._clientToWorld(ev.clientX, ev.clientY);
+    const ow = f.w, oh = f.h;
+    this._dragSession(
+      (e) => { const p = this._clientToWorld(e.clientX, e.clientY); f.w = Math.max(90, ow + (p.x - start.x)); f.h = Math.max(56, oh + (p.y - start.y)); this._reflowFrame(g, f); },
+      () => { this._persistFrames(); },
+    );
+  }
+
+  addFrameAt(wx?: number, wy?: number): void {
+    if (typeof wx !== "number") {
+      const r = this.svg ? this.svg.getBoundingClientRect() : ({ left: 0, top: 0, width: 900, height: 560 } as DOMRect);
+      const c = this._clientToWorld(r.left + r.width / 2, r.top + r.height / 2);
+      wx = c.x - 130; wy = c.y - 90;
+    }
+    this.openFrameForm(null, { x: Math.round(wx), y: Math.round(wy!) });
+  }
+
+  openFrameForm(frame: GFrame | null, pos?: { x: number; y: number }): void {
+    const root = document.createElement("div");
+    const labelI = FormControls.text(frame ? frame.label : "", "ex. Cœur de réseau, Salle A…");
+    root.appendChild(FormControls.fieldRow("Label", labelI));
+    let color: string | null = frame ? frame.color : "#ff5500";
+    root.appendChild(FormControls.fieldRow("Couleur", ColorPalette.build(color, (c) => { color = c; }), "Bordure et teinte du cadre."));
+    const descI = FormControls.textArea(frame ? frame.description : "");
+    root.appendChild(FormControls.fieldRow("Description", descI, "Affichée en infobulle sur le cadre."));
+    this.host.openModal?.({
+      title: frame ? "Modifier le cadre" : "Nouveau cadre",
+      subtitle: frame ? (frame.label || "") : "",
+      body: root,
+      onSave: () => {
+        const label = labelI.value.trim() || "Cadre";
+        const frames = this._frames().slice();
+        if (frame) {
+          const i = frames.findIndex((f) => f.id === frame.id);
+          if (i >= 0) frames[i] = Object.assign({}, frames[i], { label, color: color || "#ff5500", description: descI.value.trim() });
+        } else {
+          frames.push({ id: Id.uid(), label, color: color || "#ff5500", description: descI.value.trim(), x: pos!.x, y: pos!.y, w: 260, h: 180 });
+        }
+        this.store.meta.graphFrames = frames; this.store.persistMeta(); this.host.setDirty?.(true);
+        this.rebuild();
+        Notify.toast(frame ? "Cadre mis à jour" : "Cadre ajouté"); return true;
+      },
+    });
+    setTimeout(() => labelI.focus(), 30);
+  }
+
+  removeFrame(id: string): void {
+    Dialog.confirm({ title: "Supprimer le cadre ?", message: "Le cadre de regroupement sera retiré (les équipements ne sont pas affectés).", confirmLabel: "Supprimer", danger: true }).then((ok) => {
+      if (!ok) return;
+      this.store.meta.graphFrames = this._frames().filter((f) => f.id !== id);
+      this.store.persistMeta(); this.host.setDirty?.(true); this.rebuild(); Notify.toast("Cadre supprimé");
+    });
+  }
+
+  private _frameContextMenu(ev: MouseEvent, f: GFrame): void {
+    const covered = this._nodesInFrame(f);
+    ContextMenu.show(ev.clientX, ev.clientY, [{
+      head: f.label || "Cadre",
+      items: [
+        { label: "Modifier le cadre", action: () => this.openFrameForm(f) },
+        { label: "Sélectionner le contenu (" + covered.length + ")", action: () => { this.selection = new Set(covered); this._renderSelection(); } },
+        { label: "Supprimer le cadre", danger: true, action: () => this.removeFrame(f.id) },
+      ],
+    }]);
   }
 
   /* ---- transform (pan / zoom) ---- */
@@ -636,10 +771,14 @@ export class GraphView {
     }]);
   }
   private _bgContextMenu(ev: MouseEvent): void {
+    const p = this._clientToWorld(ev.clientX, ev.clientY);
     const items = [{ label: "Tout sélectionner", action: () => this.selectAll() }];
     if (this.selection.size) items.push({ label: "Tout désélectionner", action: () => this._clearSelection() });
     ContextMenu.show(ev.clientX, ev.clientY, [
-      { items: [{ label: "Recentrer la vue", action: () => this.recenter() }] },
+      { items: [
+        { label: "Ajouter un cadre ici", action: () => this.addFrameAt(p.x, p.y) },
+        { label: "Recentrer la vue", action: () => this.recenter() },
+      ] },
       { head: "Sélection", items },
     ]);
   }

@@ -64,6 +64,7 @@ async function boot(): Promise<void> {
       graph.rebuild({ recenter: false });
       Notify.toast("Équipement supprimé");
     },
+    openModal: (opts) => modal.open(opts),
   });
 
   // ---- Onglets placeholder (vues à porter en Phase 5b) ----

@@ -7,5 +7,8 @@ export { Modal } from "./Modal";
 export type { ModalOptions } from "./Modal";
 export { ContextMenu } from "./ContextMenu";
 export type { CtxItem, CtxSection } from "./ContextMenu";
+export { MultiSelect } from "./MultiSelect";
+export type { MultiItem } from "./MultiSelect";
+export { ColorPalette } from "./ColorPalette";
 export { FormControls } from "./FormControls";
 export type { SelectOption, NumberOpts, ToggleOpts, DateOpts } from "./FormControls";
