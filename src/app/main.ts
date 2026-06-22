@@ -3,20 +3,26 @@
    (cf. MIGRATION.md). Le Store et les vues sont encore dans le HTML monolithique
    et seront portés ensuite. Cette entrée instancie le registre + un adapter pour
    prouver la chaîne de compilation webpack → TypeScript et exposer au debug. */
-import { EntityRegistry, Equipment } from "../models";
+import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter } from "../data";
+import { Store } from "../store";
 
 const adapter = new BrowserStorageAdapter({ persistent: false });
+const store = new Store(adapter);
 
-const root = document.getElementById("app");
-if (root) {
-  const demo = new Equipment({ name: "demo-switch", type: "switch", u_height: 1 });
-  root.textContent =
-    `NetMap — socle TypeScript prêt. ` +
-    `${EntityRegistry.COLLECTIONS.length} collections de domaine · ` +
-    `adapter « ${adapter.label} » · ` +
-    `entité de démo « ${demo.name} » (id ${demo.id}).`;
+async function boot(): Promise<void> {
+  await store.init();
+  const root = document.getElementById("app");
+  if (root) {
+    root.textContent =
+      `NetMap — socle TypeScript prêt (modèle · données · store). ` +
+      `${EntityRegistry.COLLECTIONS.length} collections · ` +
+      `adapter « ${adapter.label} » · ` +
+      `${store.restored ? "session restaurée" : "aucune session"} · ` +
+      `${store.totalCount()} entités en cache.`;
+  }
 }
+boot();
 
 // Exposé pour inspection en console pendant la migration.
-(window as any).__NETMAP__ = { EntityRegistry, adapter };
+(window as any).__NETMAP__ = { EntityRegistry, adapter, store };

@@ -29,6 +29,7 @@ jamais casser la base existante.
 |---------------------|-------------------------------------------------------------|
 | `npm install`       | installe webpack + TypeScript + loaders                     |
 | `npm run typecheck` | `tsc --noEmit` (porte de type)                              |
+| `npm run test:modules` | compile en CJS (`tsconfig.node.json`) + tests modules    |
 | `npm run build`     | bundle de production → `dist/netmap.html` (un seul fichier) |
 | `npm run dev`       | webpack-dev-server (HMR) — **requiert Node ≥ 20**           |
 | `npm run watch`     | rebuild incrémental (Node 19 OK)                            |
@@ -65,11 +66,15 @@ src/
       partagés (`Snapshot`/`Transaction`/`ListResult`) ; config (`INDEX_SPEC`, tailles).
       Le global UI `noteUndoable` devient un callback injecté (`onUndoable`). Porté
       à l'identique ; tsc + build verts.
-- [ ] **Phase 3 — Store.** CRUD async, transactions, undo/redo, helpers métier,
-      cascade déclarative (`CASCADE_SPEC`). Recibler `Tests/run.js` sur les modules
-      compilés (remplacer l'extraction du `<script>` par un import du bundle de test)
-      → premiers tests de régression au niveau modules (data layer incluse).
-- [ ] **Phase 4 — Géométrie & registres** (classes de méthodes statiques).
+- [x] **Phase 3 — Store.** CRUD async, transactions, undo/redo, helpers métier
+      (résolution inverse par index), cascade déclarative (`CASCADE_SPEC`),
+      (dé)sérialisation + migration des dispositions. Catalogues par défaut tirés
+      en avance (`registries/defaultCatalogs`, données seules). **Filet de
+      régression au niveau MODULES** (`Tests/modules/run.js` via `npm run
+      test:modules` : compile en CJS puis exerce modèle + données + store —
+      32/32). tsc + build + legacy (213/213) verts.
+- [ ] **Phase 4 — Géométrie & registres** (classes de méthodes statiques) ;
+      promouvoir `defaultCatalogs` en registres OO (`PortTypes`/`CableTypes`).
 - [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`).
 - [ ] **Phase 6 — Shell / UI.** Migration du `<head>`/`<style>`/`<body>` et du
       bootstrap ; câblage final ; retrait du mono-fichier.

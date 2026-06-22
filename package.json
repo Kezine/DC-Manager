@@ -8,6 +8,7 @@
     "dev": "webpack serve --mode development",
     "watch": "webpack --mode development --watch",
     "typecheck": "tsc --noEmit",
+    "test:modules": "tsc -p tsconfig.node.json && node Tests/modules/run.js",
     "test:legacy": "node Tests/run.js"
   },
   "devDependencies": {

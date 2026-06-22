@@ -7,4 +7,5 @@ Scrapped/
 # Node / webpack build
 node_modules/
 dist/
+dist-test/
 *.tsbuildinfo

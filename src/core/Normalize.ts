@@ -1,6 +1,11 @@
 import { RACK_ORIENTATIONS } from "../domain/constants";
 
-/** Porte de rack normalisée. */
+/** Porte de rack normalisée (value-object).
+    Définie ICI, et non dans models/Rack, par RESPECT DES COUCHES : c'est la forme
+    PRODUITE par `Normalize.rackDoor()` ci-dessous. Comme `core/` ne doit jamais
+    importer `models/`, on place le type près de sa fabrique ; `Rack` l'importe
+    « vers le bas » (models → core). (Si on préfère regrouper les value-objects,
+    les déplacer dans un `core/valueObjects.ts` — mais surtout pas dans models/.) */
 export interface RackDoor {
   enabled: boolean;
   thickness_mm: number;

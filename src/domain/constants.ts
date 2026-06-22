@@ -41,6 +41,15 @@ export const EQUIP_FACES: FaceDef[] = [
 export const EQUIP_FACE_IDS: string[] = EQUIP_FACES.map((f) => f.id);
 export const EQUIP_ANNEX_FACE_IDS = ["top", "bottom", "left", "right"];
 export const EQUIP_DEPTHS = ["full", "half", "quarter"];
+/** Mapping face d'équipement → champ FK de l'image de façade correspondante. */
+export const EQUIP_FACE_IMG_FIELD: Record<string, string> = {
+  front: "face_image_id", rear: "face_image_rear_id",
+  top: "face_image_top_id", bottom: "face_image_bottom_id",
+  left: "face_image_left_id", right: "face_image_right_id",
+};
+
+/** Numéro de release formel — estampillé dans meta.app_release à la sérialisation. */
+export const APP_RELEASE = "R1";
 
 /* ---- types de groupe ---- */
 export interface GroupTypeDef { id: string; label: string; hint: string; }
