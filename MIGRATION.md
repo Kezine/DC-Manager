@@ -107,8 +107,12 @@ src/
         déplacement de GROUPE avec auto-pan au bord, zoom-au-curseur, recadrage,
         menus contextuels (nœud : Détails/Supprimer · fond : sélection/recentrage)
         via `ui/ContextMenu`. Hôte étendu (`deleteEquipment`). Câblé dans `main.ts`.
-        RESTE GraphView : cadres, dispositions nommées, modes A/B/C, légende, export,
-        toolbar/filtres.
+  - [x] **GraphView — toolbar / filtres / légende** : barre d'outils avec 4 filtres
+        multi-sélection (`ui/MultiSelect` : équipements/réseaux/groupes/types de port),
+        mode de poignée (type/réseau/groupe), recherche-surlignage, « Tout afficher ».
+        Filtrage du jeu de nœuds (`_filteredSets`), couleur de poignée dominante par
+        réseau, légende réseaux/groupes. Garde headless (constructeur sans `document`).
+        RESTE GraphView : cadres, dispositions nommées, modes A/B/C, export.
   - [ ] GraphView complet, puis `ListController`, puis `DatacenterView`
         (+ machinerie conduit restante).
 - [~] **Phase 6 — Shell / bootstrap** :
