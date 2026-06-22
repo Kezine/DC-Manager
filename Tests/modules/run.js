@@ -50,6 +50,7 @@ const { Format } = D("core/Format.js");
 const { GridGeometry } = D("geometry/GridGeometry.js");
 const { GraphView } = D("views/GraphView.js");
 const { Sort } = D("core/Sort.js");
+const { Ip } = D("core/Ip.js");
 
 async function makeStore() {
   const s = new Store(new BrowserStorageAdapter({ persistent: false }));
@@ -397,6 +398,20 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(Sort.compare("a", "a"), 0, "compare : a == a");
     ck(Sort.compare("", "x") > 0, "compare : vide en dernier");
     ck(Sort.compare("item2", "item10") < 0, "compare : numérique naturel (2 < 10)");
+  }
+
+  console.log("\n• Ip (IPv4 / CIDR pur)");
+  {
+    ck.eq(Ip.toInt("10.0.0.1"), 167772161, "toInt(10.0.0.1)");
+    ck.eq(Ip.toInt("256.0.0.1"), null, "toInt invalide → null");
+    ck.eq(Ip.toStr(167772161), "10.0.0.1", "toStr round-trip");
+    const c = Ip.parseCidr("10.0.0.0/24");
+    ck(c && c.networkStr === "10.0.0.0" && c.broadcastStr === "10.0.0.255", "parseCidr /24 network+broadcast");
+    ck.eq(c.hostCount, 254, "parseCidr /24 → 254 hôtes");
+    ck.eq(Ip.parseCidr("10.0.0.0/33"), null, "parseCidr préfixe invalide → null");
+    ck(Ip.inCidr(Ip.toInt("10.0.0.42"), c) === true, "inCidr : 10.0.0.42 ∈ /24");
+    ck(Ip.inCidr(Ip.toInt("10.0.1.1"), c) === false, "inCidr : 10.0.1.1 ∉ /24");
+    ck.eq(Ip.parseCidr("10.0.0.5/24").networkStr, "10.0.0.0", "parseCidr normalise sur l'adresse réseau");
   }
 
   console.log("\n" + "-".repeat(48));

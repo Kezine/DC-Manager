@@ -120,8 +120,10 @@ src/
         filtres multi-sélection, recherche, pagination ; état persisté en session ;
         actions de ligne déléguées). `views/ListConfigs` (colonnes par collection) +
         `core/Sort`. Câblé : onglets **Équipements / Réseaux / Groupes** (liste + détail
-        + cloner + supprimer). RESTE : autres collections (câbles, racks, IPAM…) +
-        FORMULAIRES d'édition (le gros morceau : openEquipmentForm & co.).
+        + cloner + supprimer). Toutes les collections sont listées (câbles, racks,
+        catalogues, IPAM). **Formulaires** (`views/Forms`, modale injectée) : réseau,
+        groupe, et IPAM (réseau IP / adresse / DHCP) via `core/Ip` (CIDR pur testé).
+        RESTE : formulaires équipement / câble / rack (les gros).
   - [ ] `DatacenterView` (+ machinerie conduit restante).
 - [~] **Phase 6 — Shell / bootstrap** :
   - [x] **CSS** extrait du monolithe → `src/styles/netmap.css` (verbatim, 1423 l.),

@@ -128,9 +128,9 @@ async function boot(): Promise<void> {
   addListTab("racks", "Racks", ListConfigs.racks);
   addListTab("reseaux", "Réseaux", ListConfigs.networks, (id, done) => Forms.network(store, formHost, id, done));
   addListTab("groupes", "Groupes", ListConfigs.groups, (id, done) => Forms.group(store, formHost, id, done));
-  addListTab("ipnetworks", "Réseaux IP", ListConfigs.ipNetworks);
-  addListTab("ipaddresses", "Adresses IP", ListConfigs.ipAddresses);
-  addListTab("dhcp", "DHCP", ListConfigs.dhcpRanges);
+  addListTab("ipnetworks", "Réseaux IP", ListConfigs.ipNetworks, (id, done) => Forms.ipNetwork(store, formHost, id, done));
+  addListTab("ipaddresses", "Adresses IP", ListConfigs.ipAddresses, (id, done) => Forms.ipAddress(store, formHost, id, done));
+  addListTab("dhcp", "DHCP", ListConfigs.dhcpRanges, (id, done) => Forms.dhcpRange(store, formHost, id, done));
   addListTab("porttypes", "Types port", ListConfigs.portTypes);
   addListTab("cabletypes", "Types câble", ListConfigs.cableTypes);
   shell.addView({ name: "datacenter", label: "Datacenter", onShow: (c) => { if (!c.dataset.built) { c.dataset.built = "1"; c.innerHTML = `<p style="padding:24px;color:var(--fg-dim)">Vue Datacenter — à porter.</p>`; } } });
