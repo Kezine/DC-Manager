@@ -112,9 +112,11 @@ src/
         mode de poignée (type/réseau/groupe), recherche-surlignage, « Tout afficher ».
         Filtrage du jeu de nœuds (`_filteredSets`), couleur de poignée dominante par
         réseau, légende réseaux/groupes. Garde headless (constructeur sans `document`).
-        RESTE GraphView : cadres, dispositions nommées, modes A/B/C, export.
-  - [ ] GraphView complet, puis `ListController`, puis `DatacenterView`
-        (+ machinerie conduit restante).
+  - [x] **GraphView — cadres** (`ui/ColorPalette`), **dispositions nommées + modes
+        A/B/C** (masquage par filtres, gestionnaire de dispositions), **export
+        SVG/JPEG + plein écran** (`ui/ImageExport`). **GraphView est COMPLET** —
+        réplique fonctionnelle du contrôleur du monolithe.
+  - [ ] `ListController`, puis `DatacenterView` (+ machinerie conduit restante).
 - [~] **Phase 6 — Shell / bootstrap** :
   - [x] **CSS** extrait du monolithe → `src/styles/netmap.css` (verbatim, 1423 l.),
         chargé par webpack (`style-loader`/`css-loader`) → injecté au runtime, donc

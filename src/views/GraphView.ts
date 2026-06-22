@@ -6,6 +6,8 @@ import { FormControls } from "../ui/FormControls";
 import { ColorPalette } from "../ui/ColorPalette";
 import { Notify } from "../ui/Notify";
 import { Dialog } from "../ui/Dialog";
+import { ImageExport } from "../ui/ImageExport";
+import type { ExportOptions } from "../ui/ImageExport";
 import type { ModalOptions } from "../ui/Modal";
 import { Id } from "../core/Id";
 import { Html } from "../core/Html";
@@ -252,6 +254,8 @@ export class GraphView {
     mkBtn("Dispositions…", "Gérer les dispositions enregistrées", () => this.openLayoutManager());
     this._autoBtn = mkBtn("Auto", "Réorganiser automatiquement", () => this.autoArrange());
     mkBtn("+ Cadre", "Ajouter un cadre de regroupement", () => this.addFrameAt());
+    mkBtn("Exporter", "Exporter en image (SVG/JPEG)", () => this.openExportDialog());
+    mkBtn("⛶", "Plein écran", () => this.toggleFullscreen());
 
     this.refreshLayoutControls();
   }
@@ -416,6 +420,58 @@ export class GraphView {
     addBtn.onclick = () => Promise.resolve(this.saveLayout()).then(render);
     render();
     this.host.openModal?.({ title: "Dispositions enregistrées", subtitle: "Sauvegardez, restaurez, renommez ou supprimez vos agencements", body: root, hideFooter: true, wide: true });
+  }
+
+  /* ---- plein écran ---- */
+
+  toggleFullscreen(): void {
+    if (document.fullscreenElement) { document.exitFullscreen(); return; }
+    const el = this.stage.parentElement || this.stage;
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => Notify.toast("Plein écran indisponible", "err"));
+    else Notify.toast("Plein écran non supporté par le navigateur", "err");
+  }
+
+  /* ---- export SVG (fidèle) / JPEG (rasterisé) ---- */
+
+  private _exportName(ext: string): string {
+    return ImageExport.fileBase(this.store.meta.docName || "", "topologie") + "-topologie-" + new Date().toISOString().slice(0, 10) + "." + ext;
+  }
+  private _contentBounds(): { minX: number; minY: number; maxX: number; maxY: number } {
+    let { minX, minY, maxX, maxY } = GraphGeometry.nodesBBox(this.nodes, () => 26);
+    ((this.store.meta.graphFrames as GFrame[]) || []).forEach((f) => { minX = Math.min(minX, f.x); maxX = Math.max(maxX, f.x + f.w); minY = Math.min(minY, f.y); maxY = Math.max(maxY, f.y + f.h); });
+    if (!isFinite(minX)) { minX = 0; minY = 0; maxX = this.stage.clientWidth || 900; maxY = this.stage.clientHeight || 560; }
+    return { minX, minY, maxX, maxY };
+  }
+  /** Rectangle MONDE à exporter : "view" = vue actuelle (écran) ; "all" = tout le contenu. */
+  private _exportWorldRect(scope: string): { x: number; y: number; w: number; h: number } {
+    const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
+    if (scope === "all") { const b = this._contentBounds(), pad = 40; return { x: b.minX - pad, y: b.minY - pad, w: (b.maxX - b.minX) + pad * 2, h: (b.maxY - b.minY) + pad * 2 }; }
+    const s = this.scale || 1;
+    return { x: (-this.tx) / s, y: (-this.ty) / s, w: W / s, h: H / s };
+  }
+  /** SVG autonome et fidèle (styles calculés inlinés), cadré sur `scope`. */
+  private _buildExportSvg(scope: string): string {
+    const rect = this._exportWorldRect(scope);
+    const bgColor = getComputedStyle(document.documentElement).getPropertyValue("--bg-2").trim() || "#111";
+    const clone = this.svg!.cloneNode(true) as SVGSVGElement;
+    ImageExport.inlineComputedStyles(this.svg!, clone);
+    const g = clone.querySelector("g"); if (g) g.setAttribute("transform", "translate(0,0) scale(1)");
+    clone.setAttribute("width", String(Math.round(rect.w)));
+    clone.setAttribute("height", String(Math.round(rect.h)));
+    clone.setAttribute("viewBox", rect.x + " " + rect.y + " " + rect.w + " " + rect.h);
+    clone.setAttribute("xmlns", Dom.SVGNS);
+    clone.insertBefore(Dom.svg("rect", { x: rect.x, y: rect.y, width: rect.w, height: rect.h, fill: bgColor }), clone.firstChild);
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone);
+  }
+  async openExportDialog(): Promise<void> {
+    if (!this.svg) { Notify.toast("Rien à exporter", "err"); return; }
+    const res = await ImageExport.dialog(true);
+    if (res) this.exportImage(res);
+  }
+  exportImage(opts: ExportOptions): void {
+    if (!this.svg) { Notify.toast("Rien à exporter", "err"); return; }
+    const rect = this._exportWorldRect(opts.scope);
+    ImageExport.run(opts, this._buildExportSvg(opts.scope), rect.w, rect.h, (ext) => this._exportName(ext));
   }
 
   /* ---- couleur de la poignée des nœuds ---- */
