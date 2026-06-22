@@ -8,6 +8,8 @@ import { Ip } from "../core/Ip";
 import { GroupTypes } from "../domain/GroupTypes";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { Depths } from "../registries/Depths";
+import { PortRoles } from "../registries/PortRoles";
+import { Id } from "../core/Id";
 import { POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT } from "../domain/constants";
 
 const divider = (txt: string) => { const d = document.createElement("div"); d.className = "section-divider"; d.textContent = txt; return d; };
@@ -119,6 +121,12 @@ export class Forms {
       (store.update applique un patch ; les clés non incluses ne sont pas touchées). */
   static equipment(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
     const eq: any = id ? store.get("equipments", id) : null;
+    // brouillons (ids réels → FK ports↔agrégats tiennent avant l'enregistrement)
+    const draftAggs: any[] = eq ? store.aggregatesOf(eq.id).map((a: any) => ({ id: a.id, name: a.name, description: a.description })) : [];
+    const draftPorts: any[] = eq ? store.portsOf(eq.id).map((p: any) => ({
+      id: p.id, name: p.name, port_type_id: p.port_type_id, role: p.role, aggregate_id: p.aggregate_id, description: p.description,
+      parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: p.face_x, face_y: p.face_y, face_side: p.face_side,
+    })) : [];
     const root = document.createElement("div");
 
     // -- identité --
@@ -186,6 +194,87 @@ export class Forms {
     placeHint.textContent = "Placement latéral / paroi / sur étage : à venir (préservé pour les équipements existants).";
     placeBox.appendChild(placeHint);
     adv.appendChild(placeBox);
+
+    // -- agrégats (LAG / bond) --
+    adv.appendChild(divider("Agrégats (LAG / bond)"));
+    const aggList = document.createElement("div"); aggList.className = "chip-list"; adv.appendChild(aggList);
+    const addAggBtn = document.createElement("button"); addAggBtn.type = "button"; addAggBtn.className = "btn btn-ghost btn-sm"; addAggBtn.textContent = "+ Agrégat"; addAggBtn.style.marginTop = "8px"; adv.appendChild(addAggBtn);
+
+    // -- ports (breakout existant rendu en lecture seule ; + Breakout / Façade à venir) --
+    adv.appendChild(divider("Ports"));
+    const portList = document.createElement("div"); portList.className = "chip-list"; adv.appendChild(portList);
+    const addPortBtn = document.createElement("button"); addPortBtn.type = "button"; addPortBtn.className = "btn btn-ghost btn-sm"; addPortBtn.textContent = "+ Port"; addPortBtn.style.marginTop = "8px"; adv.appendChild(addPortBtn);
+
+    const isDraftTrunk = (p: any) => draftPorts.some((c) => c.parent_port_id === p.id);
+    const ptKind = (t: any) => (t && t.kind === "power") ? "power" : "data";
+    const ptOptions = (selected: string | null, role: string) => {
+      const kind = PortRoles.kind(role);
+      const list = store.all("portTypes").filter((t: any) => ptKind(t) === kind).sort((a: any, b: any) => a.name.localeCompare(b.name));
+      const opts = [{ value: "", label: "— type ? —" }].concat(list.map((t: any) => ({ value: t.id, label: t.name + " · " + t.family })));
+      if (selected && !list.some((t: any) => t.id === selected)) { const cur: any = store.get("portTypes", selected); if (cur) opts.push({ value: cur.id, label: cur.name + " · " + cur.family + " (hors rôle)" }); }
+      return FormControls.select(opts, selected || "");
+    };
+    const aggOptionsFor = (p: any) => FormControls.select([{ value: "", label: "— aucun —" }].concat(draftAggs.map((a) => ({ value: a.id, label: a.name || "(agrégat)" }))), p.aggregate_id || "");
+    const bump = (s: string) => { s = String(s || ""); const m = s.match(/^(.*?)(\d+)(\D*)$/); return m ? m[1] + String(parseInt(m[2], 10) + 1).padStart(m[2].length, "0") + m[3] : (s ? s + "2" : ""); };
+
+    const renderAggs = () => {
+      aggList.innerHTML = "";
+      if (!draftAggs.length) { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = "Aucun agrégat."; aggList.appendChild(e); }
+      draftAggs.forEach((a, idx) => {
+        const r = document.createElement("div"); r.className = "chip-row";
+        const nm = document.createElement("input"); nm.className = "sub-input grow"; nm.value = a.name; nm.placeholder = "nom (ex. bond0)"; nm.oninput = () => { a.name = nm.value; };
+        const rm = document.createElement("button"); rm.type = "button"; rm.className = "btn btn-danger btn-sm"; rm.textContent = "×";
+        rm.onclick = () => { const removed = draftAggs.splice(idx, 1)[0]; draftPorts.forEach((p) => { if (p.aggregate_id === removed.id) p.aggregate_id = null; }); renderAggs(); renderPorts(); };
+        r.appendChild(nm); r.appendChild(rm); aggList.appendChild(r);
+      });
+    };
+    const portRow = (p: any, kind: string) => {
+      const locked = kind === "trunk" || kind === "lane";
+      const r = document.createElement("div"); r.className = "chip-row";
+      if (kind === "lane") r.style.cssText = "margin-left:18px;border-left:2px solid var(--line-2);padding-left:8px;";
+      const nm = document.createElement("input"); nm.className = "sub-input grow"; nm.value = p.name; nm.placeholder = kind === "trunk" ? "trunk" : (kind === "lane" ? "lane" : "ex. Eth1/1"); nm.oninput = () => { p.name = nm.value; };
+      r.appendChild(nm);
+      if (locked) {
+        const rPill = document.createElement("span"); rPill.className = "pill"; rPill.textContent = PortRoles.label(p.role);
+        const tt: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null;
+        const tPill = document.createElement("span"); tPill.className = "pill"; tPill.textContent = tt ? tt.name : "type ?";
+        r.appendChild(rPill); r.appendChild(tPill);
+      } else {
+        const rl = FormControls.select(PortRoles.ALL.map((x) => ({ value: x.id, label: x.label })), p.role || "data"); rl.className = "sub-input app-select";
+        const pt = ptOptions(p.port_type_id, p.role); pt.className = "sub-input app-select";
+        rl.onchange = () => { p.role = rl.value; const cur: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null; if (cur && ptKind(cur) !== PortRoles.kind(p.role)) p.port_type_id = null; if (PortRoles.kind(p.role) === "power") p.aggregate_id = null; renderPorts(); };
+        pt.onchange = () => { p.port_type_id = pt.value || null; renderPorts(); };
+        r.appendChild(rl); r.appendChild(pt);
+      }
+      if (kind === "trunk") {
+        const tag = document.createElement("span"); tag.className = "pill"; tag.textContent = "breakout ×" + draftPorts.filter((c) => c.parent_port_id === p.id).length;
+        const rm = document.createElement("button"); rm.type = "button"; rm.className = "btn btn-danger btn-sm"; rm.textContent = "×"; rm.title = "Supprimer le breakout";
+        rm.onclick = () => { const ids = new Set([p.id, ...draftPorts.filter((c) => c.parent_port_id === p.id).map((c) => c.id)]); for (let i = draftPorts.length - 1; i >= 0; i--) if (ids.has(draftPorts[i].id)) draftPorts.splice(i, 1); renderPorts(); };
+        r.appendChild(tag); r.appendChild(rm);
+      } else if (kind === "lane") {
+        const tag = document.createElement("span"); tag.className = "pill"; tag.textContent = "lane " + (p.lane || "?"); r.appendChild(tag);
+      } else {
+        if (PortRoles.kind(p.role) !== "power") { const ag = aggOptionsFor(p); ag.className = "sub-input app-select"; ag.onchange = () => { p.aggregate_id = ag.value || null; }; r.appendChild(ag); }
+        const dup = document.createElement("button"); dup.type = "button"; dup.className = "btn btn-ghost btn-sm"; dup.textContent = "⎘"; dup.title = "Dupliquer";
+        dup.onclick = () => { const i = draftPorts.indexOf(p); draftPorts.splice(i + 1, 0, Object.assign({}, p, { id: Id.uid(), name: bump(p.name), face_x: null, face_y: null })); renderPorts(); };
+        const rm = document.createElement("button"); rm.type = "button"; rm.className = "btn btn-danger btn-sm"; rm.textContent = "×";
+        rm.onclick = () => { const i = draftPorts.indexOf(p); if (i >= 0) draftPorts.splice(i, 1); renderPorts(); };
+        r.appendChild(dup); r.appendChild(rm);
+      }
+      return r;
+    };
+    const renderPorts = () => {
+      portList.innerHTML = "";
+      if (!draftPorts.length) { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = "Aucun port."; portList.appendChild(e); }
+      draftPorts.filter((p) => !p.parent_port_id).forEach((p) => {
+        if (isDraftTrunk(p)) { portList.appendChild(portRow(p, "trunk")); draftPorts.filter((c) => c.parent_port_id === p.id).sort((a, b) => (a.lane || 0) - (b.lane || 0)).forEach((l) => portList.appendChild(portRow(l, "lane"))); }
+        else portList.appendChild(portRow(p, "normal"));
+      });
+    };
+    addAggBtn.onclick = () => { draftAggs.push({ id: Id.uid(), name: "", description: "" }); renderAggs(); renderPorts(); };
+    addPortBtn.onclick = () => { const firstPt: any = store.all("portTypes").find((t: any) => ptKind(t) !== "power") || store.all("portTypes")[0]; draftPorts.push({ id: Id.uid(), name: "", port_type_id: firstPt ? firstPt.id : null, role: "data", aggregate_id: null, description: "" }); renderPorts(); };
+    renderAggs(); renderPorts();
+
     root.appendChild(adv);
 
     const sync = () => {
@@ -200,8 +289,8 @@ export class Forms {
 
     host.openModal({
       title: eq ? "Modifier l'équipement" : "Nouvel équipement",
-      subtitle: eq ? Html.escape(eq.name || "") : "",
-      body: root,
+      subtitle: eq ? Html.escape(eq.name || "") : "Équipement, ses ports et agrégats",
+      body: root, wide: true,
       onSave: async () => {
         const name = nameI.value.trim();
         if (!name) { Notify.toast("Le nom est obligatoire", "err"); return false; }
@@ -227,7 +316,32 @@ export class Forms {
           payload.rack_id = rackI.value || null;
           payload.rack_u = rackUI.value !== "" ? Math.max(1, parseInt(rackUI.value, 10) || 1) : null;
         }
-        if (eq) await store.update("equipments", eq.id, payload); else await store.create("equipments", payload);
+        let eqId: string;
+        if (eq) { await store.update("equipments", eq.id, payload); eqId = eq.id; }
+        else { const created: any = await store.create("equipments", payload); eqId = created.id; }
+
+        // -- réconciliation agrégats --
+        const draftAggIds = new Set(draftAggs.map((a) => a.id));
+        for (const a of draftAggs) {
+          const ex: any = store.get("aggregates", a.id);
+          if (ex && ex.equipment_id === eqId) await store.update("aggregates", a.id, { name: (a.name || "").trim(), description: (a.description || "").trim() });
+          else await store.create("aggregates", { id: a.id, equipment_id: eqId, name: (a.name || "").trim(), description: (a.description || "").trim() });
+        }
+        for (const a of store.aggregatesOf(eqId)) if (!draftAggIds.has(a.id)) await store.remove("aggregates", a.id);
+
+        // -- réconciliation ports --
+        const draftPortIds = new Set(draftPorts.map((p) => p.id));
+        for (const p of draftPorts) {
+          const agg = p.aggregate_id && draftAggIds.has(p.aggregate_id) ? p.aggregate_id : null;
+          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role: p.role || "data", aggregate_id: agg, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side };
+          const ex: any = store.get("ports", p.id);
+          if (ex) await store.update("ports", p.id, patch); else await store.create("ports", Object.assign({ id: p.id }, patch));
+        }
+        // retirer les lanes AVANT leur trunk (un trunk supprimé cascade ses lanes)
+        const toRemove = store.portsOf(eqId).filter((p: any) => !draftPortIds.has(p.id));
+        for (const p of toRemove) if (p.parent_port_id) await store.remove("ports", p.id);
+        for (const p of toRemove) if (!p.parent_port_id && store.get("ports", p.id)) await store.remove("ports", p.id);
+
         host.setDirty?.(true); Notify.toast(eq ? "Équipement mis à jour" : "Équipement créé"); onSaved?.(); return true;
       },
     });
