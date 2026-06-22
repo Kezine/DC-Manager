@@ -1,0 +1,408 @@
+{
+  "meta": {
+    "docName": "",
+    "theme": "dark"
+  },
+  "equipments": [
+    {
+      "id": "mq74awww9azbmj",
+      "description": "",
+      "created_date": "2026-06-09T20:54:01.760Z",
+      "updated_date": "2026-06-09T20:54:01.760Z",
+      "name": "Test1",
+      "type": "Switch",
+      "brand": "",
+      "model": "",
+      "serial": ""
+    },
+    {
+      "id": "mq74ayejj8ncmk",
+      "description": "",
+      "created_date": "2026-06-09T20:54:03.691Z",
+      "updated_date": "2026-06-09T20:54:12.931Z",
+      "name": "Test2",
+      "type": "Switch",
+      "brand": "",
+      "model": "",
+      "serial": ""
+    },
+    {
+      "id": "mq74b0jwgw5eaq",
+      "description": "",
+      "created_date": "2026-06-09T20:54:06.476Z",
+      "updated_date": "2026-06-09T20:54:23.456Z",
+      "name": "Test3",
+      "type": "Switch",
+      "brand": "",
+      "model": "",
+      "serial": ""
+    },
+    {
+      "id": "mq761j70ojs0e0",
+      "description": "",
+      "created_date": "2026-06-09T21:42:43.308Z",
+      "updated_date": "2026-06-09T21:42:43.308Z",
+      "name": "Test4",
+      "type": "switch",
+      "brand": "",
+      "model": "",
+      "serial": ""
+    },
+    {
+      "id": "mq762pjodu0cj2",
+      "description": "",
+      "created_date": "2026-06-09T21:43:38.196Z",
+      "updated_date": "2026-06-09T21:43:38.196Z",
+      "name": "Test5",
+      "type": "switch",
+      "brand": "",
+      "model": "",
+      "serial": ""
+    },
+    {
+      "id": "mq76tqt6z1s1n1",
+      "description": "",
+      "created_date": "2026-06-09T22:04:39.546Z",
+      "updated_date": "2026-06-09T22:04:39.546Z",
+      "name": "Test5 (copie)",
+      "type": "switch",
+      "brand": "",
+      "model": "",
+      "serial": ""
+    }
+  ],
+  "ports": [
+    {
+      "id": "mq749p5aw0tqee",
+      "description": "",
+      "created_date": "2026-06-09T20:54:01.761Z",
+      "updated_date": "2026-06-09T20:54:01.761Z",
+      "equipment_id": "mq74awww9azbmj",
+      "name": "MGMT",
+      "port_type_id": "mq748xi5mj0l10",
+      "role": "mgmt",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74a0l4quw57f",
+      "description": "",
+      "created_date": "2026-06-09T20:54:01.761Z",
+      "updated_date": "2026-06-09T20:54:01.761Z",
+      "equipment_id": "mq74awww9azbmj",
+      "name": "Eth2",
+      "port_type_id": "mq748xi52ea7h1",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74a31paguwsg",
+      "description": "",
+      "created_date": "2026-06-09T20:54:01.761Z",
+      "updated_date": "2026-06-09T20:54:01.761Z",
+      "equipment_id": "mq74awww9azbmj",
+      "name": "Eth3",
+      "port_type_id": "mq748xi52ea7h1",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74a60u5caueh",
+      "description": "",
+      "created_date": "2026-06-09T20:54:01.762Z",
+      "updated_date": "2026-06-09T20:54:01.762Z",
+      "equipment_id": "mq74awww9azbmj",
+      "name": "Eth4",
+      "port_type_id": "mq748xi52ea7h1",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74app3hcx76i",
+      "description": "",
+      "created_date": "2026-06-09T20:54:01.763Z",
+      "updated_date": "2026-06-09T20:54:01.763Z",
+      "equipment_id": "mq74awww9azbmj",
+      "name": "Fibre",
+      "port_type_id": "mq748xi5r61lp4",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74ayej8ijthl",
+      "description": "",
+      "created_date": "2026-06-09T20:54:03.691Z",
+      "updated_date": "2026-06-09T20:54:12.932Z",
+      "equipment_id": "mq74ayejj8ncmk",
+      "name": "MGMT",
+      "port_type_id": "mq748xi5mj0l10",
+      "role": "mgmt",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74ayejffo6lm",
+      "description": "",
+      "created_date": "2026-06-09T20:54:03.691Z",
+      "updated_date": "2026-06-09T20:54:12.933Z",
+      "equipment_id": "mq74ayejj8ncmk",
+      "name": "Eth2",
+      "port_type_id": "mq748xi52ea7h1",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74ayejrvnpln",
+      "description": "",
+      "created_date": "2026-06-09T20:54:03.691Z",
+      "updated_date": "2026-06-09T20:54:12.933Z",
+      "equipment_id": "mq74ayejj8ncmk",
+      "name": "Eth3",
+      "port_type_id": "mq748xi52ea7h1",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74ayej9psw9o",
+      "description": "",
+      "created_date": "2026-06-09T20:54:03.691Z",
+      "updated_date": "2026-06-09T20:54:12.934Z",
+      "equipment_id": "mq74ayejj8ncmk",
+      "name": "Eth4",
+      "port_type_id": "mq748xi52ea7h1",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74ayeji1boqp",
+      "description": "",
+      "created_date": "2026-06-09T20:54:03.691Z",
+      "updated_date": "2026-06-09T20:54:12.934Z",
+      "equipment_id": "mq74ayejj8ncmk",
+      "name": "Fibre",
+      "port_type_id": "mq748xi5r61lp4",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74b0jwqf3spr",
+      "description": "",
+      "created_date": "2026-06-09T20:54:06.476Z",
+      "updated_date": "2026-06-09T20:54:23.457Z",
+      "equipment_id": "mq74b0jwgw5eaq",
+      "name": "MGMT",
+      "port_type_id": "mq748xi5mj0l10",
+      "role": "mgmt",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74b0jww263us",
+      "description": "",
+      "created_date": "2026-06-09T20:54:06.476Z",
+      "updated_date": "2026-06-09T20:54:23.458Z",
+      "equipment_id": "mq74b0jwgw5eaq",
+      "name": "Eth2",
+      "port_type_id": "mq748xi52ea7h1",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74b0jwbbtd4t",
+      "description": "",
+      "created_date": "2026-06-09T20:54:06.476Z",
+      "updated_date": "2026-06-09T20:54:23.459Z",
+      "equipment_id": "mq74b0jwgw5eaq",
+      "name": "Eth3",
+      "port_type_id": "mq748xi52ea7h1",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74b0jwt9gzeu",
+      "description": "",
+      "created_date": "2026-06-09T20:54:06.476Z",
+      "updated_date": "2026-06-09T20:54:23.459Z",
+      "equipment_id": "mq74b0jwgw5eaq",
+      "name": "Eth4",
+      "port_type_id": "mq748xi52ea7h1",
+      "role": "data",
+      "aggregate_id": null
+    },
+    {
+      "id": "mq74b0jwmna6ev",
+      "description": "",
+      "created_date": "2026-06-09T20:54:06.476Z",
+      "updated_date": "2026-06-09T20:54:23.460Z",
+      "equipment_id": "mq74b0jwgw5eaq",
+      "name": "Fibre",
+      "port_type_id": "mq748xi5r61lp4",
+      "role": "data",
+      "aggregate_id": null
+    }
+  ],
+  "aggregates": [],
+  "cables": [
+    {
+      "id": "mq74das3lfw1b0",
+      "description": "",
+      "created_date": "2026-06-09T20:55:53.043Z",
+      "updated_date": "2026-06-09T20:56:41.074Z",
+      "name": "Cable1",
+      "cable_type_id": "mq748xi54himx6",
+      "from_port_id": "mq74a0l4quw57f",
+      "to_port_id": "mq74ayejffo6lm",
+      "network_id": "mq74dznxh37o51",
+      "status": "cable"
+    },
+    {
+      "id": "mq7786qstjimb0",
+      "description": "",
+      "created_date": "2026-06-09T22:15:53.380Z",
+      "updated_date": "2026-06-09T22:15:53.380Z",
+      "name": "Cable3",
+      "cable_type_id": "mq748xi54himx6",
+      "from_port_id": "mq74a31paguwsg",
+      "to_port_id": "mq74b0jwt9gzeu",
+      "network_id": "mq74dznxh37o51",
+      "status": "planifie"
+    }
+  ],
+  "networks": [
+    {
+      "id": "mq74dznxh37o51",
+      "description": "",
+      "created_date": "2026-06-09T20:56:25.293Z",
+      "updated_date": "2026-06-09T20:56:25.293Z",
+      "label": "Data1",
+      "color": "#a78bfa"
+    }
+  ],
+  "portTypes": [
+    {
+      "id": "mq748xi5mj0l10",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.213Z",
+      "updated_date": "2026-06-09T20:52:29.213Z",
+      "name": "1G RJ45",
+      "family": "RJ45",
+      "speed": "1G"
+    },
+    {
+      "id": "mq748xi52ea7h1",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.213Z",
+      "updated_date": "2026-06-09T20:52:29.213Z",
+      "name": "10G SFP+",
+      "family": "SFP+",
+      "speed": "10G"
+    },
+    {
+      "id": "mq748xi5gr9262",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.213Z",
+      "updated_date": "2026-06-09T20:52:29.213Z",
+      "name": "25G SFP28",
+      "family": "SFP28",
+      "speed": "25G"
+    },
+    {
+      "id": "mq748xi5j23lv3",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.213Z",
+      "updated_date": "2026-06-09T20:52:29.213Z",
+      "name": "SAS",
+      "family": "SAS",
+      "speed": "12G"
+    },
+    {
+      "id": "mq748xi5r61lp4",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.213Z",
+      "updated_date": "2026-06-09T20:52:29.213Z",
+      "name": "FibreChannel 8G",
+      "family": "FC",
+      "speed": "8G"
+    },
+    {
+      "id": "mq748xi5xn3rg5",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.213Z",
+      "updated_date": "2026-06-09T20:52:29.213Z",
+      "name": "USB",
+      "family": "USB",
+      "speed": ""
+    }
+  ],
+  "cableTypes": [
+    {
+      "id": "mq748xi54himx6",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.213Z",
+      "updated_date": "2026-06-09T20:52:29.213Z",
+      "name": "DAC SFP+",
+      "family": "SFP+",
+      "medium": "DAC cuivre"
+    },
+    {
+      "id": "mq748xi5opyhd7",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.214Z",
+      "updated_date": "2026-06-09T20:52:29.214Z",
+      "name": "Fibre SFP+ Monomode",
+      "family": "SFP+",
+      "medium": "Fibre monomode"
+    },
+    {
+      "id": "mq748xi6nsfaw8",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.214Z",
+      "updated_date": "2026-06-09T20:52:29.214Z",
+      "name": "Fibre SFP+ Multimode",
+      "family": "SFP+",
+      "medium": "Fibre multimode"
+    },
+    {
+      "id": "mq748xi6spysn9",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.214Z",
+      "updated_date": "2026-06-09T20:52:29.214Z",
+      "name": "DAC SFP28",
+      "family": "SFP28",
+      "medium": "DAC cuivre"
+    },
+    {
+      "id": "mq748xi629h6na",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.214Z",
+      "updated_date": "2026-06-09T20:52:29.214Z",
+      "name": "Câble SAS",
+      "family": "SAS",
+      "medium": "Cuivre"
+    },
+    {
+      "id": "mq748xi6bmm2wb",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.214Z",
+      "updated_date": "2026-06-09T20:52:29.214Z",
+      "name": "Fibre FC OM3",
+      "family": "FC",
+      "medium": "Fibre multimode"
+    },
+    {
+      "id": "mq748xi6rwk9pc",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.214Z",
+      "updated_date": "2026-06-09T20:52:29.214Z",
+      "name": "RJ45 Cat6",
+      "family": "RJ45",
+      "medium": "Cuivre"
+    },
+    {
+      "id": "mq748xi6y37l5d",
+      "description": "",
+      "created_date": "2026-06-09T20:52:29.214Z",
+      "updated_date": "2026-06-09T20:52:29.214Z",
+      "name": "USB-A ↔ USB-A",
+      "family": "USB",
+      "medium": "USB"
+    }
+  ]
+}
