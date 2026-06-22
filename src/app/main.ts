@@ -7,8 +7,8 @@ import "../styles/netmap.css";
 import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter } from "../data";
 import { Store } from "../store";
-import { GraphView, ListView, ListConfigs } from "../views";
-import type { ListOptions } from "../views";
+import { GraphView, ListView, ListConfigs, Forms } from "../views";
+import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog } from "../ui";
 import { Html } from "../core/Html";
 import { Shell } from "./Shell";
@@ -87,21 +87,26 @@ async function boot(): Promise<void> {
   };
 
   // ---- onglets de LISTE (ListView paramétré par ListConfigs) ----
-  const addListTab = (name: string, label: string, configFn: (s: typeof store) => ListOptions) => {
+  const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { /* dirty global plus tard */ } };
+  type FormFn = (id: string | null, onSaved: () => void) => void;
+  const addListTab = (name: string, label: string, configFn: (s: typeof store) => ListOptions, formFn?: FormFn) => {
     let view: ListView | null = null;
     const container = shell.addView({
       name, label,
       onShow: () => {
         if (!view) {
           const cfg = configFn(store);
+          const reRender = () => view!.render();
           view = new ListView(store, container, {
             ...cfg,
-            actions: cfg.actions || { view: true, clone: true, del: true },
+            actions: cfg.actions || { view: true, edit: !!formFn, clone: true, del: true },
+            onCreate: formFn ? () => formFn(null, reRender) : undefined,
             onAction: async (act, id) => {
               if (act === "view") { openDetail(cfg.collection, id); return; }
+              if (act === "edit") { formFn?.(id, reRender); return; }
               if (act === "clone") {
                 const c = cfg.collection === "equipments" ? await store.cloneEquipment(id) : await store.cloneSimple(cfg.collection, id);
-                if (c) { view!.render(); Notify.toast("Élément cloné"); }
+                if (c) { reRender(); Notify.toast("Élément cloné"); }
                 return;
               }
               if (act === "del") {
@@ -109,7 +114,7 @@ async function boot(): Promise<void> {
                 const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${o?.name || o?.label || "cet élément"} » ?`, confirmLabel: "Supprimer", danger: true });
                 if (!ok) return;
                 await store.remove(cfg.collection, id);
-                view!.render(); Notify.toast("Supprimé");
+                reRender(); Notify.toast("Supprimé");
               }
             },
           });
@@ -121,8 +126,8 @@ async function boot(): Promise<void> {
   addListTab("equipements", "Équipements", ListConfigs.equipments);
   addListTab("cables", "Câbles", ListConfigs.cables);
   addListTab("racks", "Racks", ListConfigs.racks);
-  addListTab("reseaux", "Réseaux", ListConfigs.networks);
-  addListTab("groupes", "Groupes", ListConfigs.groups);
+  addListTab("reseaux", "Réseaux", ListConfigs.networks, (id, done) => Forms.network(store, formHost, id, done));
+  addListTab("groupes", "Groupes", ListConfigs.groups, (id, done) => Forms.group(store, formHost, id, done));
   addListTab("ipnetworks", "Réseaux IP", ListConfigs.ipNetworks);
   addListTab("ipaddresses", "Adresses IP", ListConfigs.ipAddresses);
   addListTab("dhcp", "DHCP", ListConfigs.dhcpRanges);

@@ -4,3 +4,5 @@ export type { GraphHost } from "./GraphView";
 export { ListView } from "./ListView";
 export type { ListOptions, ListColumn, ListActions } from "./ListView";
 export { ListConfigs } from "./ListConfigs";
+export { Forms } from "./Forms";
+export type { FormHost } from "./Forms";

@@ -24,6 +24,8 @@ export interface ListOptions {
   items?: () => any[];          // source CUSTOM (hors store)
   actions?: ListActions;
   onAction?: (act: string, id: string) => void;
+  onCreate?: () => void;        // présent ⇒ bouton « + Nouveau »
+  createLabel?: string;
   stateKey?: string;
 }
 
@@ -42,6 +44,8 @@ export class ListView {
   private emptyText: string;
   private actions: ListActions;
   private onAction?: (act: string, id: string) => void;
+  private onCreate?: () => void;
+  private createLabel: string;
 
   private query = "";
   private page = 1;
@@ -66,6 +70,8 @@ export class ListView {
     this.emptyText = opts.emptyText || "Aucun élément.";
     this.actions = opts.actions || { view: true, edit: true, clone: true, del: true };
     this.onAction = opts.onAction;
+    this.onCreate = opts.onCreate;
+    this.createLabel = opts.createLabel || "+ Nouveau";
     this.sortKey = (opts.defaultSort && opts.defaultSort.key) || "__created__";
     this.sortDir = (opts.defaultSort && opts.defaultSort.dir) || "asc";
     this._stateKey = "netmap.list:" + (opts.stateKey || opts.collection || "list");
@@ -136,8 +142,13 @@ export class ListView {
 
   private _ensureScaffold(): void {
     if (this._scaffold && this.container.querySelector(".list-body")) return;
-    this.container.innerHTML = `<div class="list-search"><input type="search" class="search-input" placeholder="Rechercher…"></div><div class="list-toolbar"></div><div class="list-body"></div>`;
+    this.container.innerHTML = `<div class="list-search" style="display:flex;gap:8px;align-items:center;padding:6px 8px"><input type="search" class="search-input" placeholder="Rechercher…" style="flex:1 1 auto"></div><div class="list-toolbar"></div><div class="list-body"></div>`;
     this._searchEl = this.container.querySelector(".list-search input") as HTMLInputElement;
+    if (this.onCreate) {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary btn-sm"; b.textContent = this.createLabel;
+      b.onclick = () => this.onCreate!();
+      (this.container.querySelector(".list-search") as HTMLElement).appendChild(b);
+    }
     this._toolbarEl = this.container.querySelector(".list-toolbar") as HTMLElement;
     this._bodyEl = this.container.querySelector(".list-body") as HTMLElement;
     this._searchEl.value = this.query;
