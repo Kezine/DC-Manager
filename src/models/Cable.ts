@@ -5,16 +5,27 @@ import { CableStatuses } from "../domain/CableStatuses";
 /** Câble entre deux ports. Peut porter plusieurs réseaux, des waypoints
     ordonnés, et être un brin d'un faisceau (bundle). */
 export class Cable extends Entity {
+  /** Nom libre (optionnel). */
   name: string;
+  /** FK → cableTypes. Verrouillé au type du faisceau si le câble est un brin. */
   cable_type_id: string | null;
+  /** FK → ports : extrémité A. */
   from_port_id: string | null;
+  /** FK → ports : extrémité B. */
   to_port_id: string | null;
+  /** TOUS les réseaux portés (ex. plusieurs VLAN). `network_id` ⊆ `network_ids`. */
   network_ids: string[];
+  /** Réseau PRINCIPAL (miroir de `network_ids`) — pilote la couleur partout. null = aucun. */
   network_id: string | null;
+  /** Waypoints traversés, ORDONNÉS le long du trajet A→B. */
   waypoint_ids: string[];
+  /** Longueur physique (mètres). null = non renseignée. */
   length_m: number | null;
+  /** Statut du cycle de vie (slug ∈ CABLE_STATUSES) : brouillon → planifié → câblé → … */
   status: string;
+  /** FK → cableBundles : si rattaché à un trunk, le câble est un BRIN (type/route/longueur hérités). null = autonome. */
   bundle_id: string | null;
+  /** N° de fibre/brin dans le faisceau. null = non-brin. */
   strand_no: number | null;
 
   constructor(p: Props = {}) {

@@ -4,10 +4,15 @@ import { Normalize } from "../core/Normalize";
 /** Faisceau / trunk (câble multi-fibres). Porte la route et la longueur
     partagées, héritées par ses brins (cf. Cable.bundle_id / strand_no). */
 export class CableBundle extends Entity {
+  /** Nom du faisceau (utile sur ~99 % du tracé). */
   name: string;
+  /** TYPE du trunk (FK → cableTypes) — VERROUILLE le type de ses brins. */
   cable_type_id: string | null;
+  /** Capacité = nombre de brins. */
   fiber_count: number;
+  /** ROUTE partagée (waypoints ordonnés) — héritée par les brins. */
   waypoint_ids: string[];
+  /** Longueur partagée (mètres). null = non renseignée. */
   length_m: number | null;
 
   constructor(p: Props = {}) {

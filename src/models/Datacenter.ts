@@ -4,16 +4,27 @@ import { DC_WIDTH_DEFAULT, DC_DEPTH_DEFAULT, DC_CELL_DEFAULT } from "../domain/c
 
 /** Salle datacenter : grille au sol + dimensions ; pioche dans le pool de racks. */
 export class Datacenter extends Entity {
+  /** Nom de la salle. */
   name: string;
+  /** Largeur salle X (mm). */
   width_mm: number;
+  /** Profondeur salle Y (mm). */
   depth_mm: number;
+  /** Maille de grille / dalle (mm). */
   cell_mm: number;
+  /** Lieu / bâtiment (slug ∈ LOCATIONS) — hérité par les équipements LIBRES posés ici. */
   location: string;
+  /** Étage. */
   floor: string;
+  /** Salle / local. */
   room: string;
+  /** Coin haut-gauche de l'emprise sur le PLAN D'ÉTAGE X (mm). null = auto. */
   floor_x: number | null;
+  /** Coin haut-gauche de l'emprise sur le PLAN D'ÉTAGE Y (mm). */
   floor_y: number | null;
+  /** Orientation de la salle sur le plan d'étage (0/90/180/270). */
   floor_orientation: number;
+  /** Cases INACCESSIBLES de la grille de racks (clés "cx,cy"). */
   blocked_cells: string[];
 
   constructor(p: Props = {}) {

@@ -5,13 +5,21 @@ import { FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT } from "..
 /** Étage : plan du bâtiment (location) à un niveau (floor) où l'on pose
     les salles et les OOB. Clé logique (location, floor). */
 export class Floor extends Entity {
+  /** Bâtiment (slug ∈ LOCATIONS) — 1re partie de la clé logique. */
   location: string;
+  /** Niveau (∈ FLOORS) — 2e partie de la clé logique. */
   floor: string;
+  /** Largeur du plan X (mm). */
   width_mm: number;
+  /** Profondeur du plan Y (mm). */
   depth_mm: number;
+  /** Maille du plan (mm). */
   cell_mm: number;
+  /** Cases inaccessibles de la grille (clés "cx,cy"). */
   blocked_cells: string[];
+  /** Décalage X du plan dans la pile 3D (mm) — n'affecte pas la vue 2D. */
   anchor_x: number;
+  /** Décalage Y du plan dans la pile 3D (mm). */
   anchor_y: number;
 
   constructor(p: Props = {}) {

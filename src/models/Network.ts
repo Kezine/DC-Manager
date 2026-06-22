@@ -2,12 +2,19 @@ import { Entity, Props } from "./Entity";
 
 /** Réseau logique (couleur de câble). Data (VLAN) ou Power (circuit). */
 export class Network extends Entity {
+  /** Nom lisible (ex. "VLAN 10 Prod"). */
   label: string;
+  /** Couleur d'affichage des câbles du réseau. null = auto. */
   color: string | null;
+  /** "data" (logique/VLAN) | "power" (circuit d'alimentation). */
   kind: string;
+  /** Power uniquement : tension (V). null = non renseigné. */
   voltage: number | null;
+  /** Power uniquement : capacité max (A). */
   max_amp: number | null;
+  /** Power uniquement : source — "ups" | "ups_gen" | "grid". */
   power_source: string | null;
+  /** Data uniquement : FK → ipNetworks (vrai sous-réseau IP). null = purement logique. */
   ip_network_id: string | null;
 
   constructor(p: Props = {}) {

@@ -3,8 +3,11 @@ import { GroupTypes } from "../domain/GroupTypes";
 
 /** Groupe d'équipements (stack | system | general). */
 export class Group extends Entity {
+  /** Nom du groupe. */
   label: string;
+  /** Couleur partagée par les membres (héritée par leurs occupants de rack). null = auto. */
   color: string | null;
+  /** Type : "stack" | "system" | "general". */
   type: string;
 
   constructor(p: Props = {}) {

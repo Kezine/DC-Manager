@@ -2,9 +2,13 @@ import { Entity, Props } from "./Entity";
 
 /** Plage d'adresses réservée à un serveur DHCP — IPAM. */
 export class DhcpRange extends Entity {
+  /** FK → ipNetworks (le sous-réseau). */
   network_id: string | null;
+  /** Première adresse de la plage (incluse). */
   start_ip: string;
+  /** Dernière adresse de la plage (incluse). */
   end_ip: string;
+  /** FK → equipments : le serveur DHCP. null = non désigné. */
   server_id: string | null;
 
   constructor(p: Props = {}) {

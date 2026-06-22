@@ -4,58 +4,131 @@ import { EQUIP_DEPTHS } from "../domain/constants";
 
 /** Équipement : matériel répertorié, placé (rack / libre / sol / paroi) et câblé. */
 export class Equipment extends Entity {
+  /** Nom d'affichage. */
   name: string;
+  /** Type d'équipement (switch, router, server, pdu, …) — pilote l'icône/la couleur. */
   type: string;
+  /** Marque. */
   brand: string;
+  /** Modèle. */
   model: string;
+  /** Numéro de série. */
   serial: string;
+
+  /* ---- champs ADMINISTRATIFS (achat / garantie / attribution) ---- */
+  /** Date d'achat (YYYY-MM-DD). */
   purchase_date: string;
+  /** Référence du bon de commande. */
   po_ref: string;
+  /** Date de fin de garantie (YYYY-MM-DD). */
   warranty_end: string;
+  /** Date d'attribution (YYYY-MM-DD). */
   assigned_date: string;
+  /** Personne à qui l'équipement est attribué. */
   assigned_to: string;
+  /** PDU : capacité max en ampères. null = non renseigné (pertinent si `type === "pdu"`). */
   pdu_max_a: number | null;
+  /** « Inventaire seul » : répertorié uniquement (ni placé, ni câblé, ni de ports). */
   inventory_only: boolean;
+  /** FK → groups. null = aucun groupe. */
   group_id: string | null;
+
+  /* ---- dimensions (propres à l'équipement) ---- */
+  /** Nombre de U. */
   u_height: number;
+  /** Profondeur d'occupation (legacy) : "full" | "half" | "quarter" — sert de drapeau de face. */
   depth: string;
+  /** Profondeur RÉELLE (mm). null = équipement legacy → repli sur l'enum `depth`. */
   depth_mm: number | null;
+  /** Verrouille tout le U / les deux faces (toujours vrai si `depth === "full"`). */
   locks_u: boolean;
+
+  /* ---- emplacement ---- */
+  /** "manual" | "rack" | "side" (marge latérale) | "wall" (paroi) | "floor" (plan d'étage). */
   placement_mode: string;
+
+  /* MONTAGE MURAL (paroi latérale d'un rack, dans la marge avant/arrière ; dims LIBRES). */
+  /** Paroi gauche/droite : "left" | "right". */
   wall_lr: string;
+  /** Marge avant/arrière : "front" | "rear". */
   wall_margin: string;
+  /** U de base (bandes de SIDE_U_STEP). */
   wall_u: number;
+  /** Colonne le long de la profondeur de marge. */
   wall_col: number;
+  /** Face vers le "center" (⊥) ou la "facade" de la marge. */
   wall_orient: string;
+
+  /* SIDE-MOUNT : posé dans la marge latérale du rack `rack_id` (dims LIBRES). */
+  /** Face av/ar du montage latéral : "front" | "rear". */
   side_face: string;
+  /** Côté gauche/droite : "left" | "right". */
   side_lr: string;
+  /** Position verticale en U (snap 4U). */
   side_u: number;
+  /** Colonne (0 | 1). */
   side_col: number;
+  /** Accroche : "post" (montant) | "wall" (paroi). */
   side_snap: string;
+
+  /* ---- mode d'édition des dimensions ---- */
+  /** "u" (U + depth → emplacement rack) | "free" (mm L×l×h → emplacement manuel). */
   dim_mode: string;
+  /** Dimensions libres (mm) — longueur (profondeur). null = non renseigné. */
   free_l_mm: number | null;
+  /** Dimensions libres (mm) — largeur. */
   free_w_mm: number | null;
+  /** Dimensions libres (mm) — hauteur. */
   free_h_mm: number | null;
+
+  /* ---- placement PHYSIQUE dans un datacenter (mode « libre », à plat sur la vue du dessus) ---- */
+  /** FK → datacenters. null = non placé. */
   dc_id: string | null;
+  /** Centre au sol X (mm). */
   dc_x: number | null;
+  /** Centre au sol Y (mm). */
   dc_y: number | null;
+  /** Décalage vertical (mm) — NÉGATIF autorisé (sous le faux-plancher). */
   dc_z: number;
+  /** Rotation au sol (0/90/180/270). */
   dc_orientation: number;
+  /** Position sur le PLAN D'ÉTAGE X (mm). null = non localisé. */
   floor_x: number | null;
+  /** Position sur le PLAN D'ÉTAGE Y (mm). */
   floor_y: number | null;
+
+  /* ---- mode MANUEL (lieu libre) ---- */
+  /** Lieu / bâtiment (slug ∈ LOCATIONS). */
   location: string;
+  /** Étage (∈ FLOORS). */
   floor: string;
+  /** Local / salle. */
   room: string;
+
+  /* ---- mode RACK (position asservie au rack) ---- */
+  /** FK → racks. */
   rack_id: string | null;
+  /** U de bas. null = positionnement libre. */
   rack_u: number | null;
+  /** Face (half-depth / dual) : "front" | "rear". */
   rack_side: string;
+
+  /* ---- façade : références vers la bibliothèque d'images ---- */
+  /** FK → faceImages (face avant). */
   face_image_id: string | null;
+  /** FK → faceImages (face arrière). */
   face_image_rear_id: string | null;
+  /** FK → faceImages (dessus) — équipement en dimensionnement libre. */
   face_image_top_id: string | null;
+  /** FK → faceImages (dessous). */
   face_image_bottom_id: string | null;
+  /** FK → faceImages (gauche). */
   face_image_left_id: string | null;
+  /** FK → faceImages (droite). */
   face_image_right_id: string | null;
+  /** Legacy inline (avant) — migré vers la bibliothèque au boot, puis null. */
   face_image: string | null;
+  /** Legacy inline (arrière) — migré au boot, puis null. */
   face_image_rear: string | null;
 
   constructor(p: Props = {}) {

@@ -9,33 +9,61 @@ import {
 /** Point de passage de câbles. Trois formes (kind : point | segment | brush)
     et trois types (wp_type : datacenter | exit | oob). */
 export class Waypoint extends Entity {
+  /** Nom libre. */
   name: string;
+  /** Forme : "point" (pin) | "segment" (rail/chemin de câbles) | "brush" (brosse, contrainte à un rack). */
   kind: string;
+  /** Brush / pin de marge/capot : baie hôte (FK → racks). */
   rack_id: string | null;
+  /** Brush : U de départ (bas). */
   rack_u: number;
+  /** Brush : hauteur en U. */
   u_height: number;
+  /** Brush : profondeur de passage (mm). */
   depth_mm: number;
+  /** Pin monté en marge latérale : face av/ar. null = pas un pin de marge. */
   side_face: string | null;
+  /** Pin de marge : côté "left" | "right". null = pin libre. */
   side_lr: string | null;
+  /** Pin de marge : colonne (0 | 1). */
   side_col: number | null;
+  /** Pin de marge : U. */
   side_u: number | null;
+  /** Pin monté sur un CAPOT : "roof" | "floor". null = pas un pin de capot. */
   cap_face: string | null;
+  /** Pin de capot : index de cellule X. */
   cap_cx: number | null;
+  /** Pin de capot : index de cellule Y. */
   cap_cy: number | null;
+  /** Type : "datacenter" (interne salle) | "exit" (sortie/entrée, par paires) | "oob" (hors salles, gaine bâtiment). */
   wp_type: string;
+  /** FK → datacenters. null = pool (non posé). Toujours null pour un OOB. */
   datacenter_id: string | null;
+  /** Pin : position X (mm) ; segment : 1re extrémité X. */
   dc_x: number | null;
+  /** Pin : position Y (mm) ; segment : 1re extrémité Y. */
   dc_y: number | null;
+  /** Segment : 2e extrémité X (mm). null pour un pin. */
   dc_x2: number | null;
+  /** Segment : 2e extrémité Y (mm). */
   dc_y2: number | null;
+  /** Hauteur (mm) — NÉGATIF autorisé (sous-plancher) ; pour un OOB = sa hauteur (≥ 0). */
   dc_z: number;
+  /** Segment : largeur de section du conduit (mm). */
   width_mm: number;
+  /** Segment : hauteur de section du conduit (mm). */
   height_mm: number;
+  /** Pin : rayon de répartition des câbles (mm). */
   radius: number;
+  /** Pin : répartition activée ? */
   spread: boolean;
+  /** OOB : étage ("" = 0). */
   floor: string;
+  /** OOB : bâtiment (slug ∈ LOCATIONS) — rattache l'OOB à un plan d'étage. */
   location: string;
+  /** OOB localisé : position X sur le plan d'étage (mm). null = centré. */
   floor_x: number | null;
+  /** OOB localisé : position Y sur le plan d'étage (mm). */
   floor_y: number | null;
 
   constructor(p: Props = {}) {
