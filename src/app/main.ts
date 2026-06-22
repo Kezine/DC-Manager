@@ -39,35 +39,7 @@ async function boot(): Promise<void> {
 
   const shell = new Shell(root);
   const modal = new Modal();   // modale d'édition partagée
-
-  // ---- Vue Topologie (GraphView pilote) ----
-  let graph: GraphView;
-  const graphContainer = shell.addView({ name: "graph", label: "Topologie", onShow: () => graph.show() });
-  const stage = document.createElement("div");
-  stage.className = "graph-stage";
-  stage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
-  graphContainer.appendChild(stage);
-  graph = new GraphView(store, stage, {
-    setDirty: () => { /* dirty global câblé plus tard */ },
-    openEquipmentDetail: (id) => {
-      const eq = store.get("equipments", id);
-      if (!eq) return;
-      const body = document.createElement("div");
-      const ro = (label: string, val: string) => body.appendChild(FormControls.fieldRow(label, FormControls.text(val)));
-      ro("Nom", eq.name); ro("Type", eq.type); ro("Marque", eq.brand || "—");
-      ro("Modèle", eq.model || "—"); ro("Série", eq.serial || "—");
-      modal.open({ title: eq.name || "(équipement)", subtitle: eq.type, body, hideFooter: true });
-    },
-    deleteEquipment: async (id) => {
-      const eq = store.get("equipments", id);
-      const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${eq?.name || "équipement"} » et ses câbles ?`, confirmLabel: "Supprimer", danger: true });
-      if (!ok) return;
-      await store.remove("equipments", id);
-      graph.rebuild({ recenter: false });
-      Notify.toast("Équipement supprimé");
-    },
-    openModal: (opts) => modal.open(opts),
-  });
+  const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { /* dirty global plus tard */ } };
 
   // ---- fiche détail générique (lecture seule) ----
   const openDetail = (coll: string, id: string) => {
@@ -87,15 +59,17 @@ async function boot(): Promise<void> {
   };
 
   // ---- onglets de LISTE (ListView paramétré par ListConfigs) ----
-  const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { /* dirty global plus tard */ } };
   type FormFn = (id: string | null, onSaved: () => void) => void;
-  const addListTab = (name: string, label: string, configFn: (s: typeof store) => ListOptions, formFn?: FormFn) => {
+  interface TabOpts { form?: FormFn; kind?: "primary" | "secondary"; parent?: string; }
+  const addListTab = (name: string, label: string, configFn: (s: typeof store) => ListOptions, opts: TabOpts = {}) => {
+    const cfg = configFn(store);
+    const formFn = opts.form;
     let view: ListView | null = null;
     const container = shell.addView({
-      name, label,
+      name, label, kind: opts.kind || "primary", parent: opts.parent,
+      count: () => store.all(cfg.collection).length,
       onShow: () => {
         if (!view) {
-          const cfg = configFn(store);
           const reRender = () => view!.render();
           view = new ListView(store, container, {
             ...cfg,
@@ -123,20 +97,45 @@ async function boot(): Promise<void> {
       },
     });
   };
-  addListTab("equipements", "Équipements", ListConfigs.equipments, (id, done) => Forms.equipment(store, formHost, id, done));
-  addListTab("cables", "Câbles", ListConfigs.cables);
-  addListTab("racks", "Racks", ListConfigs.racks);
-  addListTab("reseaux", "Réseaux", ListConfigs.networks, (id, done) => Forms.network(store, formHost, id, done));
-  addListTab("groupes", "Groupes", ListConfigs.groups, (id, done) => Forms.group(store, formHost, id, done));
-  addListTab("ipnetworks", "Réseaux IP", ListConfigs.ipNetworks, (id, done) => Forms.ipNetwork(store, formHost, id, done));
-  addListTab("ipaddresses", "Adresses IP", ListConfigs.ipAddresses, (id, done) => Forms.ipAddress(store, formHost, id, done));
-  addListTab("dhcp", "DHCP", ListConfigs.dhcpRanges, (id, done) => Forms.dhcpRange(store, formHost, id, done));
-  addListTab("porttypes", "Types port", ListConfigs.portTypes);
-  addListTab("cabletypes", "Types câble", ListConfigs.cableTypes);
-  shell.addView({ name: "datacenter", label: "Datacenter", onShow: (c) => { if (!c.dataset.built) { c.dataset.built = "1"; c.innerHTML = `<p style="padding:24px;color:var(--fg-dim)">Vue Datacenter — à porter.</p>`; } } });
 
-  // cohérence inter-vues : toute mutation du modèle rafraîchit la vue active
-  // (coalescé sur une frame pour absorber les rafales de transactions).
+  // === ONGLETS PRINCIPAUX (ordre de l'original ; défaut = Équipements) ===
+  addListTab("equipements", "Équipements", ListConfigs.equipments, { form: (id, done) => Forms.equipment(store, formHost, id, done) });
+  addListTab("groupes", "Groupes", ListConfigs.groups, { form: (id, done) => Forms.group(store, formHost, id, done) });
+  addListTab("racks", "Racks", ListConfigs.racks);
+  addListTab("cables", "Câbles", ListConfigs.cables);
+  addListTab("ipam", "IPAM", ListConfigs.ipNetworks, { form: (id, done) => Forms.ipNetwork(store, formHost, id, done) });
+
+  // Netmap (GraphView)
+  let graph: GraphView;
+  const graphContainer = shell.addView({ name: "graph", label: "Netmap", onShow: () => graph.show() });
+  const stage = document.createElement("div");
+  stage.className = "graph-stage";
+  stage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
+  graphContainer.appendChild(stage);
+  graph = new GraphView(store, stage, {
+    setDirty: () => {},
+    openEquipmentDetail: (id) => openDetail("equipments", id),
+    deleteEquipment: async (id) => {
+      const eq = store.get("equipments", id);
+      const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${eq?.name || "équipement"} » et ses câbles ?`, confirmLabel: "Supprimer", danger: true });
+      if (!ok) return;
+      await store.remove("equipments", id);
+      Notify.toast("Équipement supprimé");
+    },
+    openModal: (opts) => modal.open(opts),
+  });
+
+  // Datacenters (à porter)
+  shell.addView({ name: "datacenter", label: "Datacenters", onShow: (c) => { if (!c.dataset.built) { c.dataset.built = "1"; c.innerHTML = `<p style="padding:24px;color:var(--fg-dim)">Vue Datacenters — à porter (en dernier).</p>`; } } });
+
+  // === SOUS-VUES (boutons secondaires ; surlignent leur onglet parent) ===
+  addListTab("reseaux", "Réseaux", ListConfigs.networks, { form: (id, done) => Forms.network(store, formHost, id, done), kind: "secondary", parent: "cables" });
+  addListTab("porttypes", "Types de port", ListConfigs.portTypes, { kind: "secondary", parent: "cables" });
+  addListTab("cabletypes", "Types de câble", ListConfigs.cableTypes, { kind: "secondary", parent: "cables" });
+  addListTab("ipaddresses", "Adresses IP", ListConfigs.ipAddresses, { form: (id, done) => Forms.ipAddress(store, formHost, id, done), kind: "secondary", parent: "ipam" });
+  addListTab("dhcpranges", "Plages DHCP", ListConfigs.dhcpRanges, { form: (id, done) => Forms.dhcpRange(store, formHost, id, done), kind: "secondary", parent: "ipam" });
+
+  // cohérence inter-vues : toute mutation du modèle rafraîchit la vue active.
   let refreshQueued = false;
   store.onChange(() => {
     if (refreshQueued) return;
@@ -144,8 +143,7 @@ async function boot(): Promise<void> {
     requestAnimationFrame(() => { refreshQueued = false; shell.refreshActive(); });
   });
 
-  shell.switchView("graph");
-  Notify.toast("NetMap — pilote prêt (double-clic un nœud)", "ok");
+  shell.switchView("equipements");
   (window as any).__NETMAP__ = { EntityRegistry, adapter, store, shell, graph, modal };
 }
 boot();
