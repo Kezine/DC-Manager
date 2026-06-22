@@ -51,7 +51,8 @@ src/
                RackScene (occupants, side/wall slots — store injecté)        ← FAIT (4b)
                FreeEquipGeometry (pur) · Resolver3D (resolvePort3D + waypoints) ← FAIT (4c)
   registries/  EquipmentTypes, PortRoles, Depths, EquipFaces, Port/CableTypes ← FAIT
-  views/       ListController, GraphView, DatacenterView                     (à venir)
+  ui/          Dom, Notify, FormControls (helpers/composants DOM partagés)    ← FAIT (5a)
+  views/       ListController, GraphView, DatacenterView                     (5b)
   app/         main.ts (bootstrap)
   index.html   coquille (markup + CSS à migrer en phase « Shell »)
 ```
@@ -91,8 +92,15 @@ src/
       Harnais modules → 127/127 (toutes les suites géométrie legacy 02/06/07/08/09/
       10/11/12 absorbées). RESTE : la RÉPARTITION conduit (`conduitOffsetFor` & co.,
       offsets dans la section) — non testée, à porter avec les vues si besoin.
-- [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`) +
-      machinerie conduit restante.
+- [x] **Phase 5a — Helpers DOM/UI partagés.** Purs : `core/Html` (escape),
+      `core/Color` (hexToRgb/contrast/pill), `core/Format` (meters/date),
+      `geometry/GridGeometry` (cellKey/cellOf/blocked). Composants DOM :
+      `ui/Dom` (svg), `ui/Notify` (toast), `ui/FormControls` (fieldRow/text/number/
+      select/toggle/date/datalist). Harnais modules → 141/141 (volets purs testés).
+- [ ] **Phase 5b — Contrôleurs de vue** : `GraphView`, `ListController`,
+      `DatacenterView` (un par sous-phase) + machinerie conduit restante.
+- [ ] **Phase 6 — Shell / bootstrap** : migration `<head>`/`<style>`/`<body>`,
+      câblage final, retrait du mono-fichier.
 - [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`).
 - [ ] **Phase 6 — Shell / UI.** Migration du `<head>`/`<style>`/`<body>` et du
       bootstrap ; câblage final ; retrait du mono-fichier.

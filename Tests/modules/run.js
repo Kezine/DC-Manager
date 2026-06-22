@@ -44,6 +44,10 @@ const { EquipmentTypes, PortRoles, Depths, EquipFaces } = D("registries/index.js
 const { RackScene } = D("geometry/RackScene.js");
 const { Resolver3D } = D("geometry/Resolver3D.js");
 const { U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE } = D("domain/constants.js");
+const { Html } = D("core/Html.js");
+const { Color } = D("core/Color.js");
+const { Format } = D("core/Format.js");
+const { GridGeometry } = D("geometry/GridGeometry.js");
 
 async function makeStore() {
   const s = new Store(new BrowserStorageAdapter({ persistent: false }));
@@ -342,6 +346,24 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(r[0].y, 5, "off appliqué au point isolé (y 4→5)");
     const aSeg = r3.waypointAnchor(seg);
     ck.eq(aSeg.x, 5, "waypointAnchor(segment) → milieu x=5"); ck.eq(aSeg.z, 5, "waypointAnchor → z=5");
+  }
+
+  console.log("\n• Helpers partagés purs (Html / Color / Format / GridGeometry)");
+  {
+    ck.eq(Html.escape('<a b="c">&\''), "&lt;a b=&quot;c&quot;&gt;&amp;&#39;", "Html.escape : entités");
+    ck.eq(Html.escape(null), "", "Html.escape(null) → \"\"");
+    ck.eq(JSON.stringify(Color.hexToRgb("#ff8800")), JSON.stringify({ r: 255, g: 136, b: 0 }), "Color.hexToRgb(#ff8800)");
+    ck.eq(Color.hexToRgb("xyz"), null, "Color.hexToRgb(invalide) → null");
+    ck.eq(Color.contrastText("#ffffff"), "#000", "contrastText(blanc) → #000");
+    ck.eq(Color.contrastText("#000000"), "#fff", "contrastText(noir) → #fff");
+    ck.eq(Format.meters(1234), "1.23 m", "Format.meters(1234)");
+    ck.eq(Format.dateTime(""), "—", "Format.dateTime(vide) → —");
+    ck.eq(GridGeometry.cellKey(3, -2), "3,-2", "GridGeometry.cellKey");
+    ck.eq(JSON.stringify(GridGeometry.cellOf(650, 50, 600)), JSON.stringify({ cx: 1, cy: 0 }), "GridGeometry.cellOf");
+    ck(GridGeometry.isCellBlocked(["1,0", "2,3"], 1, 0) === true, "isCellBlocked : présent");
+    ck(GridGeometry.isCellBlocked(["1,0"], 5, 5) === false, "isCellBlocked : absent");
+    ck(GridGeometry.spanHitsBlocked(["1,1"], 600, 600, 1200, 1200, 600) === true, "spanHitsBlocked : touche (1,1)");
+    ck(GridGeometry.spanHitsBlocked(["5,5"], 0, 0, 600, 600, 600) === false, "spanHitsBlocked : aucune");
   }
 
   console.log("\n" + "-".repeat(48));

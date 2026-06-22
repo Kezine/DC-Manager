@@ -15,3 +15,4 @@ export { Resolver3D } from "./Resolver3D";
 export type { Port3D } from "./Resolver3D";
 export { GraphGeometry } from "./GraphGeometry";
 export type { NodeSize, BBox } from "./GraphGeometry";
+export { GridGeometry } from "./GridGeometry";
