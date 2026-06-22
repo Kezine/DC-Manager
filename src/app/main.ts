@@ -8,6 +8,7 @@ import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter } from "../data";
 import { Store } from "../store";
 import { GraphView } from "../views";
+import { Modal, Notify, FormControls } from "../ui";
 
 const adapter = new BrowserStorageAdapter({ persistent: false });
 const store = new Store(adapter);
@@ -41,11 +42,23 @@ async function boot(): Promise<void> {
   stage.style.cssText = "position:relative;width:100%;height:560px;border:1px solid var(--line);background:var(--bg-2);overflow:hidden";
   root.appendChild(stage);
 
+  // Shell minimal : modale d'édition partagée.
+  const modal = new Modal();
+
   const graph = new GraphView(store, stage, {
-    setDirty: () => { /* câblé au shell en Phase 6 */ },
-    openEquipmentDetail: (id) => console.log("openEquipmentDetail", id),
+    setDirty: () => { /* dirty global câblé plus tard */ },
+    openEquipmentDetail: (id) => {
+      const eq = store.get("equipments", id);
+      if (!eq) return;
+      const body = document.createElement("div");
+      const ro = (label: string, val: string) => body.appendChild(FormControls.fieldRow(label, FormControls.text(val)));
+      ro("Nom", eq.name); ro("Type", eq.type); ro("Marque", eq.brand || "—");
+      ro("Modèle", eq.model || "—"); ro("Série", eq.serial || "—");
+      modal.open({ title: eq.name || "(équipement)", subtitle: eq.type, body, hideFooter: true });
+    },
   });
   graph.rebuild({ recenter: true });
-  (window as any).__NETMAP__ = { EntityRegistry, adapter, store, graph };
+  Notify.toast("NetMap — pilote prêt (double-clic un nœud)", "ok");
+  (window as any).__NETMAP__ = { EntityRegistry, adapter, store, graph, modal };
 }
 boot();

@@ -111,8 +111,13 @@ src/
         chargé par webpack (`style-loader`/`css-loader`) → injecté au runtime, donc
         toujours **inliné** dans le HTML autonome. Le pilote GraphView est désormais
         correctement thématisé (nœuds/texte/arêtes lisibles).
-  - [ ] Système de **modale** (openModal/closeModal/requestCloseModal), **toast**
-        container, **navigation** (switchView) + markup `<body>` → classes du shell.
+  - [x] **Modale / dialogues / toasts** en classes auto-construites (DOM créé au
+        besoin, stylé par le CSS extrait) : `ui/Notify` (toast + conteneur lazy),
+        `ui/Dialog` (confirm/alert/custom/prompt empilables, Promise), `ui/Modal`
+        (modale d'édition unique : open/close/requestClose/markDirty + détection de
+        modif par instantané). Démo : double-clic d'un nœud → fiche équipement.
+  - [ ] **Navigation** (switchView) + markup `<body>` (en-tête, onglets, conteneurs
+        de vue) → classes du shell.
   - [ ] Bootstrap final (remplace le document de démo) ; câblage des `*Host` des vues ;
         retrait du mono-fichier.
 - [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`).

@@ -1,9 +1,14 @@
-/** Notifications éphémères (toasts) dans #toast-container. */
+/** Notifications éphémères (toasts). Crée son conteneur au besoin. */
 export class Notify {
+  private static container(): HTMLElement {
+    let cont = document.getElementById("toast-container");
+    if (!cont) { cont = document.createElement("div"); cont.id = "toast-container"; document.body.appendChild(cont); }
+    return cont;
+  }
+
   /** Affiche un toast `msg` ; `type` = "ok" (défaut) | "err" | … (classe CSS). */
   static toast(msg: string, type: string = "ok"): void {
-    const cont = document.getElementById("toast-container");
-    if (!cont) return;
+    const cont = Notify.container();
     const el = document.createElement("div");
     el.className = "toast " + (type === "ok" ? "" : type);
     el.textContent = msg;
