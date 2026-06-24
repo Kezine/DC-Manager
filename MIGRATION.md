@@ -390,14 +390,28 @@ src/
           candidat) ; câblé au clic gauche ET au menu « Créer / affecter un câble… ». **Menu du SOL** (vue Dessus,
           `floorCtx`) : clic droit sur le sol → créer **pin / chemin de câbles / exit** au point (aimanté ½ maille).
           Tests (cableDraftCandidatesForPort) → 279/279.
-    - [ ] RESTE (raffinements, NON bloquants) : rotation « réf. en bas » des vues 2D (flip 180° + `uprightTexts`,
-          cf. monolithe `_floorXf`) · rail d'étages (`_renderFloorRail`) + marqueur d'ancrage déplaçable (vue Étage) ·
-          menu contextuel du **plan d'étage 3D multi** (`_floorPlane3DContextMenu` : activer salle / éditer étage) ·
-          sélection multi-U au Ctrl+clic (assignSlot) · compagnon `.nmfb` séparé (ImageStore prêt) · undo image
-          dans la timeline globale.
+    - [x] **5c.25 — raffinements (TOUS portés)** : (1) **rotation « réf. en bas » des vues 2D** (`floorXf`
+          {angle,cx,cy,flip} : Dessus = orientation+180°, Étage = 180° + miroir → vraie vue « du dessus », cohérente
+          3D ; `applyTransform`/`clientToWorld`/`rotBounds`/`uprightTexts`, cf. monolithe `_floorXf`). (2) **rail
+          d'étages** (`renderFloorRail`, flottant à gauche) + **marqueur d'ancrage déplaçable** (`floorAnchorNode`/
+          `onFloorAnchorPointerDown` → `floors.anchor_x/anchor_y`, toggle `showFloorAnchor` persisté). (3) **menu
+          contextuel du plan d'étage 3D multi** (`floorPlane3DCtx` : éditer le plan / ajouter une salle / vue Étage 2D).
+          (4) **sélection multi-U au Ctrl+clic** (`slotSel`/`toggleSlotSel` : plage contiguë → assignation N U).
+          (5) **undo image dans la timeline GLOBALE** (`noteUndoable`/`doUndo`/`doRedo` dans `main.ts` : un seul
+          Ctrl+Z défait modèle + images dans l'ordre, via `onUndoable` de l'adapter et d'`ImageStore`). (6) **compagnon
+          `.nmfb` SÉPARÉ** : images dissociées du modèle (parité monolithe) — le `.json` FS n'inline plus, le save écrit
+          le `.nmfb` à côté, le load le recharge (appariement `meta.facesKey`/`ImageStore.lastLoadedKey`, rechargement
+          auto au welcome via `HandleStore.getFaces/putFaces`, modale « Ouvrir » JSON/compagnon ; download sans FS reste
+          inline = autonome). **NB** : le comportement runtime FS (permissions, appariement) reste à valider en navigateur
+          (typecheck + test:modules 313 + build verts).
 
-> ### ⏯ REPRISE (état au 5c.24 — DatacenterView ≈ COMPLET — nouvelle conversation)
-> **Vert partout** : `npm run typecheck` (clean) · `npm run test:modules` (**279/279**) · `npm run build` (OK).
+> ### ⏯ REPRISE (état au 5c.25 — DatacenterView COMPLET, raffinements TOUS portés — nouvelle conversation)
+> **Vert partout** : `npm run typecheck` (clean) · `npm run test:modules` (**313/313**) · `npm run build` (OK).
+> **RAFFINEMENTS (5c.25) FAITS** : flip 2D « réf. en bas » (`floorXf`/`uprightTexts`) · rail d'étages + ancrage déplaçable ·
+> menu contextuel plan d'étage 3D · multi-U Ctrl+clic (`slotSel`) · **undo image dans la timeline globale** (`noteUndoable`/
+> `doUndo`/`doRedo`) · **compagnon `.nmfb` SÉPARÉ** (parité monolithe : `.json` FS sans images + `.nmfb` apparié `facesKey`).
+> À VALIDER EN NAVIGATEUR : comportement runtime FS du compagnon (permissions, appariement). RESTE seul : Phase 6 finale
+> (retrait du monolithe legacy + recalage du harnais de régression sur les modules).
 > **CLIC DROIT** : ports/équipements/baies/waypoints/câbles/**sol** → `ContextMenu` (édition/routage/retrait/sélection/créer waypoint).
 > **PORTS** : survol (`.dc-port.hover` via `wirePortNode` `pointer-events:auto`) ; clic libre → `connectPort` (brouillons-candidats / nouveau).
 > **ROUTE** : « 🧵 Créer une route » → clic ports+waypoints (+ aperçu jusqu'au curseur) → form câble prérempli.
