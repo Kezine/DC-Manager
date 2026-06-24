@@ -435,6 +435,20 @@ export class DcInteract extends DcPanels {
     return secs;
   }
 
+  /** Active une salle (devient la salle courante) ; `isolate` repasse en mode SALLE UNIQUE (multiDc off). */
+  protected activateDc(dcId: string, isolate: boolean): void {
+    this.dcId = dcId; this.selRackId = null; this.camTarget = null; this.scale = null;
+    if (isolate) this.multiDc = false;
+    this.buildToolbar(); this.render();
+  }
+  /** Menu d'une SALLE en 3D multi-salles (clic droit sur son sol) : activer ce DC · isoler · modifier. */
+  protected roomCtx(dc: any): CtxSection[] {
+    return [{ head: dc.name || "(salle)", items: [
+      { label: "Activer ce DC", action: () => this.activateDc(dc.id, false) },
+      { label: "Isoler (salle unique)", action: () => this.activateDc(dc.id, true) },
+      { label: "Modifier la salle…", action: () => this.host.openDatacenterForm?.(dc.id) },
+    ] }];
+  }
   protected rackCtx(rack: any): CtxSection[] {
     const hidden = this.hidden3dRacks.has(rack.id), faded = this.fadedRacks.has(rack.id);
     const secs: CtxSection[] = [{ head: rack.name || "(baie)", items: [

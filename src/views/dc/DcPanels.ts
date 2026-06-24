@@ -449,11 +449,13 @@ export class DcPanels extends DcViews2D {
     const selRow = document.createElement("div"); selRow.className = "form-hint"; selRow.style.cssText = "margin-bottom:6px"; selRow.innerHTML = "Salle active : <b>" + Html.escape(dc.name || "(salle)") + "</b>"; box.appendChild(selRow);
     // bascule maître : Vue étage (empilement 3D de plusieurs salles)
     if (all.length) {
-      box.appendChild(FormControls.toggle("Vue étage", this.multiDc, (v) => {
+      const tog = FormControls.toggle("Vue étage", this.multiDc, (v) => {
         this.multiDc = v;
         if (v) { if (!this.visibleDcIds.size) { const b = bldgIds(curLoc); this.visibleDcIds = new Set(b.length ? b : all.map((d: any) => d.id)); } }
         refit();
-      }, { block: true, title: "Empile plusieurs salles / étages en 3D (bâtiments côte à côte). Désactivé : une seule salle active." }));
+      }, { block: true, title: "Empile plusieurs salles / étages en 3D (bâtiments côte à côte). Désactivé : une seule salle active." });
+      if (all.length <= 1) { tog.disabled = true; tog.title = "Une seule salle — rien à empiler"; }   // inutile avec une seule salle
+      box.appendChild(tog);
     }
     // préréglages de portée (actifs en Vue étage)
     const displayed = new Set(this.displayedDcIds(dc));

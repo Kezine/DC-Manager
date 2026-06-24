@@ -83,7 +83,13 @@ export class DcScene3D extends DcCamera {
   protected room3D(dc: any, proj: (p: Vec3) => { h: number; v: number; depth: number }, drawables: Drawable[], skipCables?: Set<string>): void {
     const W = dc.width_mm, D = dc.depth_mm;
     const pts = [[0, 0, 0], [W, 0, 0], [W, D, 0], [0, D, 0]].map(([x, y, z]) => proj({ x, y, z }));
-    drawables.push({ depth: 1e9, node: Dom.svg("polygon", { class: "dc-floor3d", points: pts.map((p) => p.h + "," + p.v).join(" ") }) });
+    const floorPoly = Dom.svg("polygon", { class: "dc-floor3d" + (this._multi && dc.id === this.dcId ? " cur" : ""), points: pts.map((p) => p.h + "," + p.v).join(" ") });
+    if (this._multi) {   // multi-salles : clic sur le SOL = activer ce DC ; clic droit = menu (activer / isoler)
+      (floorPoly as any).style.cursor = "pointer";
+      this.wireClick(floorPoly, () => { this.hideTip(); this.activateDc(dc.id, false); });
+      floorPoly.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.hideTip(); this.ctxMenu(e, this.roomCtx(dc)); });
+    }
+    drawables.push({ depth: 1e9, node: floorPoly });
     // liseré sur le FRONT de la salle (bord local y=0)
     if (this.showOrientMarks) { const a = pts[0], b = pts[1]; drawables.push({ depth: 1e9 - 0.5, node: Dom.svg("line", { class: "dc-orient-front", x1: a.h, y1: a.v, x2: b.h, y2: b.v }) }); }
     this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) drawables.push(this.rackBox3D(r, proj)); });
