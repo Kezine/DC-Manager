@@ -115,6 +115,7 @@ export class DatacenterView {
   hideFrontEq = false; hideRearEq = false; showPlaceholders = true; showRackSides = true;
   showWaypoints = true; showConduits = true; showPorts = true; showEqNames = true;
   showOrientMarks = true; showPivot = false;
+  showFloorAnchor = true;                // vue Étage : marqueur de point d'ancrage (déplaçable, discret) — masquable
   colorMode: "face" | "group" | "type" = "face";   // coloration des équipements 3D
   cableSplineK = CABLE_SPLINE_K;         // arrondi des câbles (slider)
   markerScale = 1;                       // taille des marqueurs de waypoint + connecteurs de port (slider, 1 = défaut/milieu)
@@ -140,6 +141,7 @@ export class DatacenterView {
   private _farCull = false;            // vue « loin » → ports + emplacements libres non rendus (perf)
   private _navMoved = false;           // un glisser (orbite) vient d'avoir lieu → ne pas ouvrir de menu contextuel
   private controlsEl: HTMLElement | null = null;   // overlay zoom / recentrage / points de vue (superposé au stage)
+  private floorRail: HTMLElement | null = null;     // vue Étage : rail de navigation rapide entre étages (flottant à gauche)
 
   constructor(store: Store, mount: HTMLElement, host: DatacenterHost = {}) {
     this.store = store; this.host = host; this.stage = mount; this.scene = new RackScene(store); this.resolver = new Resolver3D(store); this.floor = new FloorLayout(store);
@@ -411,7 +413,7 @@ export class DatacenterView {
   }
 
   /* ---- scène SVG ---- */
-  private clearStage(): void { Array.from(this.stage.childNodes).forEach((n) => { if (n !== this.controlsEl) this.stage.removeChild(n); }); this.coteEl = null; this.ttEl = null; }
+  private clearStage(): void { Array.from(this.stage.childNodes).forEach((n) => { if (n !== this.controlsEl && n !== this.floorRail) this.stage.removeChild(n); }); this.coteEl = null; this.ttEl = null; }
   private newScene(dc: any): SVGGElement {
     this.clearStage();
     const SW = Math.max(50, this.stage.clientWidth || 900), SH = Math.max(50, this.stage.clientHeight || 560);
@@ -577,7 +579,7 @@ export class DatacenterView {
 
   /* ---- persistance de l'état de vue (par fichier, localStorage) ---- */
   private viewStateKey(): string { return "netmap.view3d." + ((this.store.meta && this.store.meta.fileId) ? this.store.meta.fileId : "__nofile"); }
-  private static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFaceImages", "showDoors", "showFloorGrid", "cablePortNormal", "routePreviewToMouse"];
+  private static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showFloorGrid", "cablePortNormal", "routePreviewToMouse"];
   /** Écrit l'état (débouncé 300 ms) — évite une écriture par frame de pan/zoom. */
   private persistView(): void {
     clearTimeout(this._pvTO);
@@ -597,7 +599,7 @@ export class DatacenterView {
     // défauts (état propre par fichier)
     this.az = CAM_PRESETS.iso[0]; this.el = CAM_PRESETS.iso[1]; this.scale = null; this.tx = 0; this.ty = 0; this.camTarget = null;
     this.hideFrontEq = false; this.hideRearEq = false; this.showPlaceholders = true; this.showRackSides = true; this.showPorts = true; this.showEqNames = true; this.showAllCables = true; this.showWaypoints = true; this.showConduits = true;
-    this.showOrientMarks = true; this.showPivot = false; this.showFaceImages = true; this.showDoors = true; this.showFloorGrid = true; this.cablePortNormal = false; this.routePreviewToMouse = true;
+    this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showFloorGrid = true; this.cablePortNormal = false; this.routePreviewToMouse = true;
     this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1; this.cullDistanceM = 15;
     this.multiDc = false; this.visibleDcIds = new Set(); this.fadedRacks = new Set();
     this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeBuild = null;
@@ -639,6 +641,7 @@ export class DatacenterView {
     if (typeof document === "undefined") return;
     const showControls = (on: boolean) => { if (this.controlsEl) this.controlsEl.style.display = on ? "flex" : "none"; };
     this.updateControls();
+    if (this.floorRail && this.view !== "floor") this.floorRail.style.display = "none";   // rail d'étages : vue Étage uniquement
     // VUE ÉTAGE : pilotée par un étage cible (indépendante d'une salle active)
     if (this.view === "floor") {
       const dc = this.current(); this.renderSide(dc);
@@ -930,6 +933,8 @@ export class DatacenterView {
       this.btn("+ Créer un étage…", () => this.editFloor(ft.location, ft.floor, true)),
     );
     box.appendChild(acts);
+    const acfg = this.floor.config(ft.location, ft.floor);
+    box.appendChild(FormControls.toggle("⚓ Afficher le point d'ancrage · " + Format.meters(acfg.anchor_x || 0) + " ; " + Format.meters(acfg.anchor_y || 0), this.showFloorAnchor, (v) => { this.showFloorAnchor = v; this.render(); }));
     box.appendChild(this.btn("Recadrer le plan", () => { this.scale = null; this.render(); }));
     return box;
   }
@@ -2220,8 +2225,77 @@ export class DatacenterView {
     this.store.dcsOfFloor(loc, fl).forEach((d: any) => gRoot.appendChild(this.floorRoomNode(d, curId, cfg)));
     if (this.showWaypoints) this.store.oobWaypoints().filter((w: any) => (w.location || "") === loc && String(w.floor || "") === fl).forEach((wp: any) => gRoot.appendChild(this.floorOobNode(wp, cfg)));
     this.store.floorEquipments().filter((e: any) => (e.location || "") === loc && String(e.floor || "") === fl).forEach((eq: any) => gRoot.appendChild(this.floorEquipNode2D(eq, cfg)));
+    if (this.showFloorAnchor) gRoot.appendChild(this.floorAnchorNode(cfg, loc, fl));   // marqueur d'ancrage déplaçable (discret)
+    this.renderFloorRail(ft);   // rail de navigation rapide entre étages (à gauche du plan)
     this.finishScene();
     this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue
+  }
+
+  /** Marqueur de POINT D'ANCRAGE (vue Étage 2D) — règle graphiquement `floors.anchor_x/anchor_y` (décalage du
+      plan dans la pile 3D multi-salles). Discret (croix pointillée + ⚓), déplaçable, masquable (showFloorAnchor). */
+  private floorAnchorNode(cfg: any, loc: string, fl: string): SVGElement {
+    const ax = cfg.anchor_x || 0, ay = cfg.anchor_y || 0, s = cfg.cell_mm * 0.5;
+    const g = Dom.svg("g", { class: "dc-floor-anchor", "data-anchor": "1", transform: `translate(${ax} ${ay})` });
+    g.appendChild(Dom.svg("circle", { class: "dc-floor-anchor-mark", cx: 0, cy: 0, r: s }));
+    g.appendChild(Dom.svg("line", { class: "dc-floor-anchor-mark", x1: -s * 1.5, y1: 0, x2: s * 1.5, y2: 0 }));
+    g.appendChild(Dom.svg("line", { class: "dc-floor-anchor-mark", x1: 0, y1: -s * 1.5, x2: 0, y2: s * 1.5 }));
+    g.appendChild(Dom.svg("circle", { class: "dc-floor-anchor-dot", cx: 0, cy: 0, r: s * 0.2 }));
+    const label = Dom.svg("text", { class: "dc-floor-anchor-label", x: s * 1.7, y: -s * 1.5, "font-size": cfg.cell_mm * 0.4 });
+    label.textContent = "⚓ ancrage"; g.appendChild(label);
+    const tip = Dom.svg("title"); tip.textContent = "⚓ Point d'ancrage de l'étage — décale ce plan dans la pile 3D (" + Format.meters(ax) + " ; " + Format.meters(ay) + ") · glissez pour régler"; g.appendChild(tip);
+    g.addEventListener("mousedown", (e: any) => this.onFloorAnchorPointerDown(e, cfg, loc, fl));
+    return g;
+  }
+  private onFloorAnchorPointerDown(e: MouseEvent, cfg: any, loc: string, fl: string): void {
+    if (e.button !== 0) return; e.preventDefault(); e.stopPropagation();
+    const grp = e.currentTarget as SVGElement; grp.classList.add("dragging");
+    const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm;
+    const start = { x: cfg.anchor_x || 0, y: cfg.anchor_y || 0 }, w0 = this.clientToWorld(e.clientX, e.clientY);
+    const off = { x: w0.x - start.x, y: w0.y - start.y };
+    const clamp = (p: { x: number; y: number }) => ({ x: Math.min(Math.max(p.x, 0), W), y: Math.min(Math.max(p.y, 0), D) });
+    let cur = { x: start.x, y: start.y }, moved = false;
+    const move = (ev: MouseEvent) => {
+      const wld = this.clientToWorld(ev.clientX, ev.clientY); const nx = wld.x - off.x, ny = wld.y - off.y;
+      if (!moved && Math.abs(nx - start.x) + Math.abs(ny - start.y) < (8 / (this.scale || 1))) return;
+      moved = true;
+      cur = clamp({ x: nx, y: ny }); grp.setAttribute("transform", `translate(${cur.x} ${cur.y})`);
+      this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
+    };
+    const up = async () => {
+      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      grp.classList.remove("dragging"); this.hideCote();
+      if (!moved) return;
+      const c = clamp({ x: this.freePlace ? cur.x : this.snapEdge(cur.x, cell), y: this.freePlace ? cur.y : this.snapEdge(cur.y, cell) });
+      const f = await this.ensureFloor(loc, fl);   // l'ancrage se stocke sur l'entité floors (créée au besoin)
+      await this.store.update("floors", f.id, { anchor_x: Math.round(c.x), anchor_y: Math.round(c.y) }); this.host.setDirty?.(true); this.render();
+    };
+    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+  }
+  /** Rail flottant (à gauche du plan) listant tous les étages connus — navigation rapide entre étages. */
+  private renderFloorRail(ft: { location: string; floor: string }): void {
+    if (!this.floorRail) { const r = document.createElement("div"); r.className = "dc-floor-rail"; this.floorRail = r; this.stage.appendChild(r); }
+    const rail = this.floorRail; rail.innerHTML = "";
+    const keys = this.floor.allFloorKeys();
+    if (!keys.length) { rail.style.display = "none"; return; }
+    rail.style.display = "";
+    const loc = ft.location || "", fl = String(ft.floor || "");
+    const title = document.createElement("div"); title.className = "dc-floor-rail-title"; title.textContent = "Étages"; rail.appendChild(title);
+    const byB = new Map<string, Array<{ location: string; floor: string }>>();
+    keys.forEach((k) => { const b = k.location || ""; if (!byB.has(b)) byB.set(b, []); byB.get(b)!.push(k); });
+    const multiB = byB.size > 1;
+    [...byB.keys()].forEach((b) => {
+      if (multiB) { const h = document.createElement("div"); h.className = "dc-floor-rail-bldg"; h.textContent = FloorLayout.locationLabel(b) || "(bât. ?)"; h.title = FloorLayout.locationLabel(b) || ""; rail.appendChild(h); }
+      byB.get(b)!.slice().sort((a, c) => FloorLayout.floorNum(c.floor) - FloorLayout.floorNum(a.floor)).forEach((k) => {
+        const isCur = (k.location || "") === loc && String(k.floor || "") === fl;
+        const btn = document.createElement("button");
+        btn.className = "btn btn-sm dc-floor-rail-btn " + (isCur ? "btn-primary" : "btn-ghost");
+        btn.textContent = "ét. " + (String(k.floor) || "0");
+        btn.title = (FloorLayout.locationLabel(k.location) || "(bât. ?)") + " · étage " + (String(k.floor) || "0");
+        if (isCur) btn.setAttribute("aria-current", "true");
+        btn.onclick = () => { if (!isCur) { this.floorTarget = { location: k.location, floor: String(k.floor) }; this.scale = null; this.render(); } };
+        rail.appendChild(btn);
+      });
+    });
   }
   /** Un équipement posé sur le plan d'étage : empreinte orientée + libellé. Cliquable / déplaçable. */
   private floorEquipNode2D(eq: any, cfg: any): SVGElement {
