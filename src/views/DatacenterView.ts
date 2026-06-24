@@ -1356,6 +1356,7 @@ export class DatacenterView {
       const base = C.reduce((s, p) => s + p.depth, 0) / 4 + Math.max(W, D) + lvlBias(FloorLayout.floorNum(fp.floor));
       const plane = Dom.svg("polygon", { class: "dc-floorplane3d" + (this.showFloorGrid ? "" : " no-grid"), points: C.map((p) => p.h + "," + p.v).join(" ") });
       const tip = Dom.svg("title"); tip.textContent = "Étage — " + (FloorLayout.locationLabel(fp.loc) || "(bâtiment ?)") + " · ét. " + (fp.floor || "0"); plane.appendChild(tip);
+      plane.addEventListener("contextmenu", (e: any) => { this.hideTip(); this.ctxMenu(e, this.floorPlane3DCtx(fp.loc || "", String(fp.floor || ""))); });   // clic droit dalle 3D → activer salle / éditer étage
       drawables.push({ depth: base + 6, node: plane });
       if (this.showFloorGrid) {
         const g = Dom.svg("g", { class: "dc-floorplane3d-grid" }); (g as any).style.pointerEvents = "none";
@@ -2892,6 +2893,15 @@ export class DatacenterView {
       { label: "+ Ajouter une salle…", action: () => this.host.openDatacenterForm?.("") },
       { label: "◎ Ajouter un pin d'étage ici", action: async () => { const wp: any = await this.store.create("waypoints", { name: "PIN-" + (this.store.oobWaypoints().length + 1), kind: "point", location: loc, floor: fl, floor_x: x, floor_y: y }); this.selWaypointId = wp.id; this.setDirty(); Notify.toast("Pin d'étage créé — glissez-le, éditez sa hauteur (clic droit)"); } },
       { label: "Éditer le plan d'étage…", action: () => this.editFloor(loc, fl, false) },
+    ] }];
+  }
+  /** Menu de la DALLE d'étage en 3D multi-salles (clic droit) : éditer le plan · ajouter une salle · vue Étage 2D. */
+  private floorPlane3DCtx(loc: string, fl: string): CtxSection[] {
+    fl = String(fl || "");
+    return [{ head: "Étage — " + (FloorLayout.locationLabel(loc) || "(bâtiment ?)") + " · ét. " + (fl || "0"), items: [
+      { label: "Éditer le plan d'étage…", action: () => this.editFloor(loc, fl, false) },
+      { label: "+ Ajouter une salle (DC) à cet étage…", action: () => this.host.openDatacenterForm?.("") },
+      { label: "Vue Étage (2D)", action: () => { this.floorTarget = { location: loc, floor: fl }; this.view = "floor"; this.scale = null; this.buildToolbar(); this.render(); } },
     ] }];
   }
   /** Menu d'une salle dans le plan d'étage : pivoter / ouvrir (plan de salle) / modifier / position auto. */
