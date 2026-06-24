@@ -51,6 +51,11 @@ const { GridGeometry } = D("geometry/GridGeometry.js");
 const { GraphView } = D("views/GraphView.js");
 const { Sort } = D("core/Sort.js");
 const { Ip } = D("core/Ip.js");
+const { Prefs } = D("core/Prefs.js");
+const { DatacenterView } = D("views/DatacenterView.js");
+const { FloorLayout } = D("geometry/FloorLayout.js");
+const { ImageStore } = D("data/ImageStore.js");
+const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
 
 async function makeStore() {
   const s = new Store(new BrowserStorageAdapter({ persistent: false }));
@@ -255,6 +260,10 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck(!occ.has("12:front"), "occupants : U12 libre");
     ck.eq(rs.occupancyCount(rack.id), 1, "occupancyCount = 1");
     ck.eq(rs.freeUInfo(rack.id).free, 40, "freeUInfo : 40 U libres sur 42");
+    // occupantsElev (rendu 3D) : un occupant équipement, U10 hauteur 2, face avant.
+    const el = rs.occupantsElev(rack.id);
+    ck.eq(el.length, 1, "occupantsElev : 1 occupant");
+    ck(el[0].kind === "eq" && el[0].u === 10 && el[0].h === 2 && el[0].side === "front", "occupantsElev : eq U10 h2 front");
   }
 
   console.log("\n• RackScene + RackGeometry : side-mount");
@@ -351,6 +360,123 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(aSeg.x, 5, "waypointAnchor(segment) → milieu x=5"); ck.eq(aSeg.z, 5, "waypointAnchor → z=5");
   }
 
+  console.log("\n• Resolver3D : répartition conduit (grille / dims / offsets)");
+  {
+    // grille & cellule (PURS, statiques)
+    ck.eq(JSON.stringify(Resolver3D.conduitGrid(1, 1)), JSON.stringify({ cols: 1, rows: 1 }), "conduitGrid(1) → 1×1");
+    ck.eq(JSON.stringify(Resolver3D.conduitGrid(4, 1)), JSON.stringify({ cols: 2, rows: 2 }), "conduitGrid(4, carré) → 2×2");
+    ck.eq(Resolver3D.conduitGrid(2, 3).cols, 2, "conduitGrid(2, large) → 2 colonnes");
+    const c0 = Resolver3D.conduitCell(0, 4, 1), c3 = Resolver3D.conduitCell(3, 4, 1);
+    ck.eq(c0.col + "," + c0.row, "0,0", "conduitCell(0/4) → (0,0)");
+    ck.eq(c3.col + "," + c3.row, "1,1", "conduitCell(3/4) → (1,1)");
+
+    const s = await makeStore();
+    const r3 = new Resolver3D(s);
+    const dc = await s.create("datacenters", { name: "DC" });
+    // chemin de câbles (segment) : section pleine 300×100, de (0,0,5) à (10,0,5).
+    const seg = await s.create("waypoints", { kind: "segment", datacenter_id: dc.id, dc_x: 0, dc_y: 0, dc_x2: 10, dc_y2: 0, dc_z: 5 });
+    const dims = r3.waypointConduitDims(seg);
+    ck(dims && dims.kind === "segment" && dims.usableW === 300 && dims.usableH === 100, "waypointConduitDims(segment) → 300×100");
+    ck.eq(r3.waypointConduitDims({ kind: "point" }), null, "waypointConduitDims(point sans spread) → null");
+    const pinDims = r3.waypointConduitDims({ kind: "point", spread: true, radius: 200 });
+    ck(pinDims && pinDims.usableW === 300 && pinDims.usableH === 300, "waypointConduitDims(pin spread r=200) → 300×300 (carré inscrit)");
+
+    // 2 câbles routés par CE segment → ids triés + offsets symétriques ⊥ au rail (axe x).
+    const mk = async () => (await s.create("ports", { equipment_id: (await s.create("equipments", { name: "e" })).id, name: "p" })).id;
+    const cabA = await s.create("cables", { name: "A", from_port_id: await mk(), to_port_id: await mk(), waypoint_ids: [seg.id] });
+    const cabB = await s.create("cables", { name: "B", from_port_id: await mk(), to_port_id: await mk(), waypoint_ids: [seg.id] });
+    const ids = r3.conduitCablesOf(seg.id);
+    ck.eq(ids.length, 2, "conduitCablesOf(segment) → 2 câbles");
+    ck.eq(JSON.stringify(ids), JSON.stringify([cabA.id, cabB.id].sort()), "conduitCablesOf → ids triés (ordre stable)");
+    const prev = { x: -5, y: 0, z: 5 }, next = { x: 15, y: 0, z: 5 };
+    const offA = r3.conduitOffsetFor(seg, cabA.id, prev, next);
+    const offB = r3.conduitOffsetFor(seg, cabB.id, prev, next);
+    ck(offA && offB, "conduitOffsetFor(2 câbles) → offsets non nuls");
+    ck(Math.abs(offA.x) < 1e-9 && Math.abs(offA.z) < 1e-9, "offset ⊥ au rail horizontal (x≈0, z≈0)");
+    ck(Math.abs(Math.abs(offA.y) - 75) < 1e-9, "demi-pas de répartition (|y|=75 sur 300/2 colonnes)");
+    ck(Math.abs(offA.y + offB.y) < 1e-9, "offsets symétriques (offA.y = −offB.y)");
+    ck.eq(r3.conduitOffsetFor(seg, "câble-inconnu", prev, next), null, "conduitOffsetFor(câble non routé) → null");
+
+    // 1 seul câble par CE segment → centré (offset null).
+    const seg2 = await s.create("waypoints", { kind: "segment", datacenter_id: dc.id, dc_x: 0, dc_y: 20, dc_x2: 10, dc_y2: 20, dc_z: 5 });
+    await s.create("cables", { name: "solo", from_port_id: await mk(), to_port_id: await mk(), waypoint_ids: [seg2.id] });
+    ck.eq(r3.conduitOffsetFor(seg2, r3.conduitCablesOf(seg2.id)[0], prev, next), null, "conduitOffsetFor(1 seul câble) → null (centré)");
+  }
+
+  console.log("\n• Store : route de câble (grammaire exit/OOB) + faisceaux");
+  {
+    const s = await makeStore();
+    const dcA = await s.create("datacenters", { name: "Salle A" });
+    const dcB = await s.create("datacenters", { name: "Salle B" });
+    const rkA = await s.create("racks", { name: "RA", u_count: 42, datacenter_id: dcA.id, dc_x: 500, dc_y: 500 });
+    const rkB = await s.create("racks", { name: "RB", u_count: 42, datacenter_id: dcB.id, dc_x: 500, dc_y: 500 });
+    const mkEqPort = async (rack, u) => { const e = await s.create("equipments", { name: "e" + u, placement_mode: "rack", rack_id: rack.id, rack_u: u }); return (await s.create("ports", { equipment_id: e.id, name: "p" })).id; };
+    const pA1 = await mkEqPort(rkA, 1), pA2 = await mkEqPort(rkA, 2), pB1 = await mkEqPort(rkB, 1);
+    // waypoints : datacenter (posé), exits (posés), OOB
+    const dcWpA = await s.create("waypoints", { wp_type: "datacenter", datacenter_id: dcA.id, dc_x: 600, dc_y: 600 });
+    const exitA = await s.create("waypoints", { wp_type: "exit", datacenter_id: dcA.id, dc_x: 0, dc_y: 0 });
+    const exitB = await s.create("waypoints", { wp_type: "exit", datacenter_id: dcB.id, dc_x: 0, dc_y: 0 });
+    const oob = await s.create("waypoints", { wp_type: "oob", floor: "1" });
+
+    // intra-salle (2 ports même salle, sans waypoint) → valide, pas d'exit
+    let r = s.cableRoute({ from_port_id: pA1, to_port_id: pA2, waypoint_ids: [] });
+    ck(r.valid && !r.hasExits, "route intra-salle (sans waypoint) → valide, sans exit");
+    // waypoint de salle dans la BONNE salle → valide
+    r = s.cableRoute({ from_port_id: pA1, to_port_id: pA2, waypoint_ids: [dcWpA.id] });
+    ck(r.valid, "waypoint de salle dans la bonne salle → valide");
+    // deux salles SANS exits → invalide
+    r = s.cableRoute({ from_port_id: pA1, to_port_id: pB1, waypoint_ids: [] });
+    ck(!r.valid, "ports dans deux salles sans exits → invalide");
+    // route inter-salles exitA → OOB → exitB → valide, startDc/endDc
+    r = s.cableRoute({ from_port_id: pA1, to_port_id: pB1, waypoint_ids: [exitA.id, oob.id, exitB.id] });
+    ck(r.valid && r.hasExits, "exit A → OOB → exit B → valide, hasExits");
+    ck.eq(r.startDc, dcA.id, "route : startDc = Salle A");
+    ck.eq(r.endDc, dcB.id, "route : endDc = Salle B");
+    // OOB hors d'un tronçon exit → invalide
+    r = s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [oob.id] });
+    ck(!r.valid, "OOB hors d'une paire d'exits → invalide");
+    // exit non appairé → invalide
+    r = s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [exitA.id] });
+    ck(!r.valid, "exit non appairé → invalide");
+    // résumé lisible
+    const okRoute = s.cableRoute({ from_port_id: pA1, to_port_id: pB1, waypoint_ids: [exitA.id, oob.id, exitB.id] });
+    ck(s.cableRouteSummary(okRoute).indexOf("Salle A") >= 0 && s.cableRouteSummary(okRoute).indexOf("ét. 1") >= 0, "cableRouteSummary mentionne Salle A et ét. 1");
+    // statut maximal : incomplet → brouillon ; intra complet+posé → câblé
+    ck.eq(s.cableMaxStatus({ from_port_id: pA1, to_port_id: null, cable_type_id: null, waypoint_ids: [] }), "brouillon", "cableMaxStatus(incomplet) → brouillon");
+    // contrainte de salle d'un bout
+    const k = s.cableSideConstraint({ from_port_id: null, to_port_id: pB1, waypoint_ids: [exitA.id, oob.id, exitB.id] }, "A");
+    ck.eq(k.dcId, dcA.id, "cableSideConstraint(A) impose la salle de départ");
+
+    // faisceaux : un brin hérite la route du trunk ; occupation
+    const ct = s.all("cableTypes")[0];
+    const bundle = await s.create("cableBundles", { name: "T1", cable_type_id: ct ? ct.id : null, fiber_count: 4, waypoint_ids: [exitA.id, oob.id, exitB.id] });
+    const strand = await s.create("cables", { name: "brin1", bundle_id: bundle.id, strand_no: 1 });
+    ck.eq(JSON.stringify(s.effectiveWaypointIds(strand)), JSON.stringify([exitA.id, oob.id, exitB.id]), "effectiveWaypointIds(brin) → route du trunk");
+    const occ = s.bundleOccupancy(bundle.id);
+    ck(occ.used === 1 && occ.capacity === 4 && occ.free === 3 && occ.nextStrand === 2, "bundleOccupancy : 1/4 utilisé, nextStrand=2");
+    // equipmentDcId via baie hôte
+    const eqInA = s.get("ports", pA1) ? s.get("equipments", s.get("ports", pA1).equipment_id) : null;
+    ck.eq(s.equipmentDcId(eqInA.id), dcA.id, "equipmentDcId(équipement racké) → salle de la baie");
+
+    // contrainte de placement (câblage) : un équipement LIBRE câblé intra-salle vers pA1 (Salle A)
+    const eqX = await s.create("equipments", { name: "X" });
+    const pX = (await s.create("ports", { equipment_id: eqX.id, name: "pX" })).id;
+    await s.create("cables", { name: "lien", from_port_id: pX, to_port_id: pA1 });
+    ck.eq(s.equipmentPlacementBlockedReason(eqX.id, dcA.id), null, "blockedReason : pose dans la salle câblée → autorisée");
+    ck(typeof s.equipmentPlacementBlockedReason(eqX.id, dcB.id) === "string", "blockedReason : pose dans une AUTRE salle → bloquée");
+    ck(s.equipmentRequiredDcs(eqX.id).has(dcA.id), "equipmentRequiredDcs : contraint à la Salle A");
+    // applyCableBreaks : deux bouts dans des salles différentes SANS exits → câble cassé (bout distant déconnecté)
+    const eqY = await s.create("equipments", { name: "Y", placement_mode: "rack", rack_id: rkB.id, rack_u: 5 });
+    const pY = (await s.create("ports", { equipment_id: eqY.id, name: "pY" })).id;
+    await s.update("equipments", eqX.id, { placement_mode: "rack", dim_mode: "u", rack_id: rkA.id, rack_u: 5 });
+    const brk = await s.create("cables", { name: "casse-moi", from_port_id: pX, to_port_id: pY, status: "cable" });
+    ck(s.cableContextValid(brk) === false, "cableContextValid : 2 salles sans exits → invalide");
+    const n = await s.applyCableBreaks(eqX.id);
+    ck.eq(n, 1, "applyCableBreaks : 1 câble cassé");
+    const brk2 = s.get("cables", brk.id);
+    ck(brk2.status === "casse" && brk2.to_port_id === null, "applyCableBreaks : statut « cassé » + bout distant déconnecté");
+  }
+
   console.log("\n• Helpers partagés purs (Html / Color / Format / GridGeometry)");
   {
     ck.eq(Html.escape('<a b="c">&\''), "&lt;a b=&quot;c&quot;&gt;&amp;&#39;", "Html.escape : entités");
@@ -412,6 +538,303 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck(Ip.inCidr(Ip.toInt("10.0.0.42"), c) === true, "inCidr : 10.0.0.42 ∈ /24");
     ck(Ip.inCidr(Ip.toInt("10.0.1.1"), c) === false, "inCidr : 10.0.1.1 ∉ /24");
     ck.eq(Ip.parseCidr("10.0.0.5/24").networkStr, "10.0.0.0", "parseCidr normalise sur l'adresse réseau");
+  }
+
+  console.log("\n• Store : portConnectorSize (taille connecteur 3D)");
+  {
+    const s = await makeStore();
+    const e = await s.create("equipments", { name: "x" });
+    const pNoType = await s.create("ports", { equipment_id: e.id, name: "q" });
+    ck.eq(JSON.stringify(s.portConnectorSize(pNoType)), JSON.stringify({ w: 13, h: 12 }), "portConnectorSize sans type → défaut RJ45 13×12");
+    const sfp = s.all("portTypes").find((t) => (t.connector || t.family) === "SFP+");
+    if (sfp) { const p = await s.create("ports", { equipment_id: e.id, name: "p", port_type_id: sfp.id }); const sz = s.portConnectorSize(p); ck(sz.w === 14 && sz.h === 9, "portConnectorSize(SFP+) → 14×9"); }
+  }
+
+  console.log("\n• DatacenterView : persistance de l'état de vue (par fichier)");
+  {
+    const s = await makeStore();
+    s.meta.fileId = "F1";
+    const dv = new DatacenterView(s, {}, {});   // garde headless
+    window.localStorage.setItem("netmap.view3d.F1", JSON.stringify({ az: 1.23, el: 0.5, scale: 2, tx: 10, ty: 20, camTarget: { x: 1, y: 2, z: 3 }, showAllCables: false, showPorts: false, hideFrontEq: true, dcId: "ghost", hidden3dRacks: ["ghost"] }));
+    dv.restoreView();
+    ck(Math.abs(dv.az - 1.23) < 1e-9 && dv.scale === 2 && dv.tx === 10, "restore : caméra (az/scale/tx)");
+    ck(dv.showAllCables === false && dv.showPorts === false && dv.hideFrontEq === true, "restore : toggles d'affichage");
+    ck.eq(dv.hidden3dRacks.size, 0, "restore : baie inexistante ignorée (failsafe)");
+    window.localStorage.removeItem("netmap.view3d.F1");
+    dv.restoreView();
+    ck(Math.abs(dv.az - (-0.62)) < 1e-9 && dv.scale === null && dv.showAllCables === true && dv.hideFrontEq === false, "restore : défauts quand état absent");
+    window.localStorage.clear();
+  }
+
+  console.log("\n• Prefs (préférences globales · localStorage)");
+  {
+    window.localStorage.clear();
+    const p = new Prefs();
+    ck.eq(p.theme, "dark", "défaut : thème dark");
+    ck.eq(p.autosave, false, "défaut : auto-save off");
+    ck.eq(p.autosaveInterval, Prefs.INTERVAL_DEFAULT, "défaut : intervalle = " + Prefs.INTERVAL_DEFAULT);
+    ck.eq(p.dataSource, "local", "défaut : source local");
+    p.theme = "light"; p.autosave = true; p.autosaveInterval = 30;
+    const p2 = new Prefs();   // recharge depuis localStorage
+    ck.eq(p2.theme, "light", "thème persisté (light)");
+    ck.eq(p2.autosave, true, "auto-save persisté (on)");
+    ck.eq(p2.autosaveInterval, 30, "intervalle persisté (30)");
+    p.autosaveInterval = -5;  // valeur invalide → repli sur le défaut
+    ck.eq(p.autosaveInterval, Prefs.INTERVAL_DEFAULT, "intervalle ≤ 0 → repli défaut");
+    window.localStorage.clear();
+  }
+
+  console.log("\n• DatacenterView : projection caméra orbitale (round-trip / presets)");
+  {
+    const s = await makeStore();
+    const dv = new DatacenterView(s, {}, {});   // garde headless (pas de document) → méthodes pures testables
+    dv.az = -0.62; dv.el = 0.46;
+    const c = { x: 1000, y: 800, z: 600 }, p = { x: 1500, y: 200, z: 900 };
+    const q = dv.project3DCam(p, c);
+    ck(isFinite(q.h) && isFinite(q.v) && isFinite(q.depth), "project3DCam → projeté fini (h,v,depth)");
+    const back = dv.unproject3DCam(q.h, q.v, q.depth, c);
+    ck(Math.abs(back.x - p.x) < 1e-6 && Math.abs(back.y - p.y) < 1e-6 && Math.abs(back.z - p.z) < 1e-6, "unproject3DCam = inverse exact de project3DCam");
+    dv.setCamPreset("top"); ck(Math.abs(dv.el - Math.PI / 2) < 1e-9, "preset « Dessus » → élévation π/2");
+    dv.setCamPreset("front"); ck(dv.az === 0 && dv.el === 0, "preset « Face » → az=0, el=0");
+    // vue de dessus (el=π/2, caméra zénithale) : un point plus HAUT (z+) est plus PROCHE → profondeur plus PETITE
+    // (peintre = loin d'abord ⇒ il est peint au-dessus).
+    dv.setCamPreset("top");
+    const low = dv.project3DCam({ x: 0, y: 0, z: 0 }, c), high = dv.project3DCam({ x: 0, y: 0, z: 500 }, c);
+    ck(high.depth < low.depth, "vue Dessus : z plus haut → profondeur plus petite (peint au-dessus)");
+
+    // résolution des câbles INTRA-salle : 2 équipements rackés reliés → 1 câble résolu (2 points).
+    const dc = await s.create("datacenters", { name: "DC" });
+    const rk = await s.create("racks", { name: "R", u_count: 42, datacenter_id: dc.id, dc_x: 500, dc_y: 500 });
+    const mkEqPort = async (u) => { const e = await s.create("equipments", { name: "e" + u, placement_mode: "rack", rack_id: rk.id, rack_u: u }); return (await s.create("ports", { equipment_id: e.id, name: "p", face_x: 0.5, face_y: 0.5 })).id; };
+    const pa = await mkEqPort(1), pb = await mkEqPort(2);
+    await s.create("cables", { name: "patch", from_port_id: pa, to_port_id: pb });
+    const rcs = dv.resolvedCables(dc.id);
+    ck.eq(rcs.length, 1, "resolvedCables : 1 câble intra-salle");
+    ck(rcs[0].pts.length === 2 && rcs[0].pts.every((p) => isFinite(p.x) && isFinite(p.z)), "resolvedCables : 2 points finis (sans waypoint)");
+    // câbles SORTANTS : port local → exit de la salle (un seul bout résolu ici)
+    const dc2 = await s.create("datacenters", { name: "DC2" });
+    const rk2 = await s.create("racks", { name: "R2", u_count: 42, datacenter_id: dc2.id, dc_x: 500, dc_y: 500 });
+    const e2 = await s.create("equipments", { name: "e2", placement_mode: "rack", rack_id: rk2.id, rack_u: 1 });
+    const pc = (await s.create("ports", { equipment_id: e2.id, name: "p", face_x: 0.5, face_y: 0.5 })).id;
+    const exit1 = await s.create("waypoints", { wp_type: "exit", datacenter_id: dc.id, dc_x: 0, dc_y: 0 });
+    const exit2 = await s.create("waypoints", { wp_type: "exit", datacenter_id: dc2.id, dc_x: 0, dc_y: 0 });
+    const outCable = await s.create("cables", { name: "inter", from_port_id: pa, to_port_id: pc, waypoint_ids: [exit1.id, exit2.id] });
+    ck(s.cableRoute(outCable).valid && s.cableRoute(outCable).hasExits, "câble inter-salles : route valide avec exits");
+    const stubs = dv.outgoingCableStubs(dc.id);
+    ck.eq(stubs.length, 1, "outgoingCableStubs : 1 câble sortant de la salle");
+    ck(stubs[0].cable.id === outCable.id && stubs[0].pts.length >= 2 && stubs[0].pts.every((p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z)), "outgoingCableStubs : port → exit, points finis");
+    ck.eq(dv.outgoingCableStubs(dc.id).length + dv.outgoingCableStubs(dc2.id).length, 2, "outgoingCableStubs : tracé dans CHAQUE salle traversée");
+    // routes INTER-DC (multi-salles) : le câble dcA≠dcB est tracé globalement d'une salle à l'autre
+    const mInter = new FloorLayout(s).multiLayout(dc, { visibleDcIds: new Set([dc.id, dc2.id]) });
+    const inter = dv.interDcRoutes(mInter);
+    ck.eq(inter.length, 1, "interDcRoutes : 1 route inter-salles");
+    ck(inter[0].cable.id === outCable.id && inter[0].pts.length >= 2 && inter[0].pts.every((p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z)), "interDcRoutes : port A → port B, points monde finis");
+    // câbles d'équipement d'ÉTAGE : un bout « floor » résolu en point monde
+    const apEq = await s.create("equipments", { name: "AP", placement_mode: "floor", dim_mode: "free", location: "", floor: "", floor_x: 1000, floor_y: 1000, free_w_mm: 200, free_l_mm: 200, free_h_mm: 100 });
+    const apPort = (await s.create("ports", { equipment_id: apEq.id, name: "p", face_side: "top", face_x: 0.5, face_y: 0.5 })).id;
+    ck(dv.isFloorPort(apPort) === true && dv.isFloorPort(pa) === false, "isFloorPort : vrai pour étage, faux pour racké");
+    const mF = new FloorLayout(s).multiLayout(dc, { visibleDcIds: new Set([dc.id]) });
+    const roomByIdF = new Map(mF.rooms.map((r) => [r.dc.id, r]));
+    const shownF = new Set(mF.floorPlanes.map((fp) => (fp.loc || "") + "" + String(fp.floor || "")));
+    const endF = dv.resolveFloorCableEnd(mF, roomByIdF, shownF, apPort);
+    ck(endF && isFinite(endF.x) && isFinite(endF.y) && isFinite(endF.z) && endF.rackId === null, "resolveFloorCableEnd (étage) → point monde fini, sans baie");
+    // route builder : départ port A → waypoint → port B → ouvre le form câble prérempli
+    // (on pose routeBuild directement : routeArm/routeStart émettent un toast → besoin du DOM, absent ici)
+    let routed = null;
+    const dvr = new DatacenterView(s, {}, { openCableForm: (id, opts) => { routed = { id, opts }; } });
+    dvr.routeBuild = { fromPortId: pa, wpIds: [] };
+    dvr.routeAddWp(exit1.id); ck.eq(JSON.stringify(dvr.routeBuild.wpIds), JSON.stringify([exit1.id]), "routeAddWp : waypoint ajouté");
+    dvr.routeFinish(pc);
+    ck(routed && routed.id === null && routed.opts.fromPortId === pa && routed.opts.toPortId === pc && JSON.stringify(routed.opts.waypointIds) === JSON.stringify([exit1.id]), "routeFinish → openCableForm prérempli (from/to/waypoints)");
+    ck.eq(dvr.routeBuild, null, "routeFinish : session terminée");
+    // brouillons-candidats : un câble draft à un seul bout est proposé pour un port compatible
+    const draft = await s.create("cables", { name: "brouillon", from_port_id: pa, to_port_id: null, status: "brouillon" });
+    const cands = s.cableDraftCandidatesForPort(pb);
+    ck(cands.some((c) => c.id === draft.id), "cableDraftCandidatesForPort : draft à un bout proposé");
+    ck(!s.cableDraftCandidatesForPort(pa).some((c) => c.id === draft.id), "cableDraftCandidatesForPort : pas le port déjà branché");
+    // vue Dessus : aimantation au centre de maille + demi-emprise selon l'orientation
+    ck.eq(dv.snap(610, 600), 900, "snap → centre de maille (610 → 900)");
+    ck.eq(dv.snap(290, 600), 300, "snap → centre de maille (290 → 300)");
+    // vue Étage : aimantation au BORD de maille (coin de salle) + résolution de l'étage cible
+    ck.eq(dv.snapEdge(610, 600), 600, "snapEdge → bord de maille (610 → 600)");
+    ck.eq(dv.snapEdge(910, 600), 1200, "snapEdge → bord de maille (910 → 1200)");
+    const dcLoc = await s.create("datacenters", { name: "L1", location: "liege", floor: "2" });
+    dv.dcId = dcLoc.id; dv.floorTarget = null;
+    ck.eq(JSON.stringify(dv.floorTargetResolve()), JSON.stringify({ location: "liege", floor: "2" }), "floorTargetResolve → étage de la salle active");
+    dv.floorTarget = { location: "herstal", floor: "0" };
+    ck.eq(dv.floorTargetResolve().location, "herstal", "floorTargetResolve → cible explicite prioritaire");
+    dv.floorTarget = null; dv.dcId = dc.id;
+    // brosse de brassage : waypoint kind "brush" ancré à la baie → occupe ses U (bloque les emplacements libres)
+    await s.create("waypoints", { wp_type: "datacenter", kind: "brush", datacenter_id: dc.id, rack_id: rk.id, rack_u: 20, u_height: 2 });
+    const scn = new RackScene(s); const occB = scn.occupants(rk.id);
+    ck(occB.has("20:front") && occB.has("21:front"), "brosse : occupe ses U (20–21 front)");
+    ck.eq(scn.occupants(rk.id, { exceptBrushId: s.all("waypoints").find((w) => w.kind === "brush").id }).has("20:front"), false, "brosse : exclue via exceptBrushId");
+    ck.eq(JSON.stringify(dv.rackHalfExtents({ width_mm: 600, depth: 1000, orientation: 0 })), JSON.stringify({ hx: 300, hy: 500 }), "rackHalfExtents 0° → (w/2, d/2)");
+    ck.eq(JSON.stringify(dv.rackHalfExtents({ width_mm: 600, depth: 1000, orientation: 90 })), JSON.stringify({ hx: 500, hy: 300 }), "rackHalfExtents 90° → (d/2, w/2)");
+    // recherche + visibilité câble (panneaux de contrôle)
+    dv.searchTerm = "core"; ck(dv.matchSearch("Core-SW") === true && dv.matchSearch("srv-01") === false, "matchSearch (insensible casse)"); dv.searchTerm = "";
+    dv.showAllCables = true; ck(dv.cableShown({ cable: { id: "x" } }) === true, "cableShown : tout affiché → vrai");
+    dv.showAllCables = false; ck(dv.cableShown({ cable: { id: "x" } }) === false, "cableShown : non sélectionné → faux");
+    dv.selCables = new Set(["x"]); ck(dv.cableShown({ cable: { id: "x" } }) === true, "cableShown : sélectionné → vrai");
+    // coloration des équipements (colorMode)
+    const grp = await s.create("groups", { label: "G", color: "#abcdef" });
+    const eC = await s.create("equipments", { name: "col", type: "switch", group_id: grp.id });
+    dv.colorMode = "face"; ck.eq(dv.eqFill(eC.id), null, "eqFill(face) → null (défaut CSS)");
+    dv.colorMode = "group"; ck.eq(dv.eqFill(eC.id), "#abcdef", "eqFill(group) → couleur du groupe");
+    dv.colorMode = "type"; ck(typeof dv.eqFill(eC.id) === "string" && dv.eqFill(eC.id).length > 0, "eqFill(type) → couleur de type");
+    dv.colorMode = "face";
+    // largeur de vue (culling de distance) : 900 px (défaut headless) / scale → mètres
+    dv.scale = 0.01; ck(Math.abs(dv.camViewWidthM(null) - 90) < 1, "camViewWidthM : 900px / 0.01 → ~90 m"); dv.scale = null;
+    // câbles d'alimentation (éclairs ⚡)
+    const powerCt = s.all("cableTypes").find((t) => t.kind === "power");
+    if (powerCt) { const pc = await s.create("cables", { name: "pwr", cable_type_id: powerCt.id }); ck(dv.cableIsPower(pc) === true, "cableIsPower(type power) → vrai"); }
+    ck(dv.cableIsPower({ cable_type_id: null }) === false, "cableIsPower(sans type) → faux");
+  }
+
+  console.log("\n• FloorLayout : disposition multi-salles (étages empilés, bâtiments côte à côte)");
+  {
+    const s = await makeStore();
+    const fl = new FloorLayout(s);
+    // helpers purs
+    ck.eq(FloorLayout.floorNum("2"), 2, "floorNum(\"2\") → 2");
+    ck.eq(FloorLayout.floorNum(""), 0, "floorNum(vide) → 0");
+    ck.eq(JSON.stringify(FloorLayout.roomFootprint({ width_mm: 600, depth_mm: 1000, floor_orientation: 0 })), JSON.stringify({ w: 600, h: 1000 }), "roomFootprint 0° → (w,d)");
+    ck.eq(JSON.stringify(FloorLayout.roomFootprint({ width_mm: 600, depth_mm: 1000, floor_orientation: 90 })), JSON.stringify({ w: 1000, h: 600 }), "roomFootprint 90° → (d,w)");
+    // config virtuelle quand pas d'entité floors
+    const cfg = fl.config("liege", "0");
+    ck(cfg.id === null && cfg.width_mm > 0 && cfg.cell_mm > 0, "config(sans entité) → défaut virtuel");
+    // deux salles, deux étages d'un même bâtiment → empilées en Z, posées en X
+    const dcA = await s.create("datacenters", { name: "A", location: "liege", floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const dcB = await s.create("datacenters", { name: "B", location: "liege", floor: "1", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const m = fl.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcB.id]) });
+    ck.eq(m.rooms.length, 2, "multiLayout : 2 salles disposées");
+    ck(m.levels.length === 2 && m.levels[0] === 0 && m.levels[1] === 1, "multiLayout : niveaux [0,1]");
+    const rA = m.rooms.find((r) => r.dc.id === dcA.id), rB = m.rooms.find((r) => r.dc.id === dcB.id);
+    ck(rB.off.z > rA.off.z, "multiLayout : étage 1 EMPILÉ au-dessus de l'étage 0 (z plus grand)");
+    ck.eq(m.buildings.length, 1, "multiLayout : 1 bâtiment (Liège)");
+    // roomToWorld / roomToLocal : aller-retour exact
+    const p = { x: 2500, y: 1500, z: 700 };
+    const w = FloorLayout.roomToWorld(rA, p), back = FloorLayout.roomToLocal(rA, w);
+    ck(Math.abs(back.x - p.x) < 1e-6 && Math.abs(back.y - p.y) < 1e-6 && Math.abs(back.z - p.z) < 1e-6, "roomToWorld/roomToLocal : aller-retour exact");
+    // centre local de la salle → centre monde = room.off
+    const ctr = FloorLayout.roomToWorld(rA, { x: dcA.width_mm / 2, y: dcA.depth_mm / 2, z: 0 });
+    ck(Math.abs(ctr.x - rA.off.x) < 1e-6 && Math.abs(ctr.y - rA.off.y) < 1e-6, "roomToWorld(centre salle) = room.off");
+    // levelZ interpolé : niveau intermédiaire entre 0 et 1
+    const z05 = FloorLayout.levelZ(m, 0.5);
+    ck(z05 > rA.off.z && z05 < rB.off.z, "levelZ(0.5) interpolé entre étage 0 et 1");
+    // deux bâtiments → posés côte à côte (x croissant)
+    const dcC = await s.create("datacenters", { name: "C", location: "herstal", floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const m2 = fl.multiLayout(null, { visibleDcIds: new Set([dcA.id, dcC.id]) });
+    ck.eq(m2.buildings.length, 2, "multiLayout : 2 bâtiments côte à côte");
+    ck(m2.buildings[1].x0 >= m2.buildings[0].x1, "multiLayout : bâtiments non chevauchants (x croissant)");
+    // décor (5c.16.3) : plans d'étage (un par bâtiment × étage) + position monde d'un OOB
+    ck(m.floorPlanes.length >= 2, "multiLayout : ≥ 2 plans d'étage (Liège ét.0 + ét.1)");
+    const fpA = m.floorPlanes.find((fp) => fp.floor === "0"); ck(!!fpA && fpA.off.z === 0, "floorPlane ét.0 → z = 0");
+    const fpB = m.floorPlanes.find((fp) => fp.floor === "1"); ck(!!fpB && fpB.off.z > 0, "floorPlane ét.1 → z > 0 (empilé)");
+    const oob = await s.create("waypoints", { wp_type: "oob", location: "liege", floor: "1", floor_x: 500, floor_y: 700, dc_z: 3000 });
+    const m3 = fl.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcB.id]) });
+    const ow = fl.oobWorld(m3, oob);
+    ck(isFinite(ow.x) && isFinite(ow.y) && ow.z > FloorLayout.levelZ(m3, 1), "oobWorld : OOB au-dessus du sol de son étage");
+    // équipement posé sur un étage : position localisée vs centre (auto) + point monde au niveau de l'étage
+    const cfg0 = fl.config("liege", "0");
+    ck.eq(JSON.stringify(FloorLayout.floorEquipPos({ placement_mode: "floor", floor_x: 800, floor_y: 600 }, cfg0)), JSON.stringify({ x: 800, y: 600 }), "floorEquipPos localisé → (floor_x, floor_y)");
+    ck.eq(JSON.stringify(FloorLayout.floorEquipPos({ placement_mode: "floor" }, cfg0)), JSON.stringify({ x: cfg0.width_mm / 2, y: cfg0.depth_mm / 2 }), "floorEquipPos non localisé → centre du plan");
+    const fe = { placement_mode: "floor", location: "liege", floor: "1", floor_x: 500, floor_y: 700, dc_z: 1000 };
+    const ew = fl.equipFloorWorld(m3, fe);
+    ck(isFinite(ew.x) && isFinite(ew.y) && Math.abs(ew.z - (FloorLayout.levelZ(m3, 1) + 1000)) < 1e-6, "equipFloorWorld : base = niveau étage + dc_z");
+  }
+
+  console.log("\n• ImageStore : helpers purs (dataUrl ↔ Blob · bundle .nmfb)");
+  {
+    const blob = ImageStore.dataUrlToBlob("data:text/plain;base64," + Buffer.from("hi").toString("base64"));
+    ck(blob && blob.size === 2 && blob.type === "text/plain", "dataUrlToBlob → Blob (2 octets, type)");
+    ck.eq(ImageStore.dataUrlToBlob("pas-une-data-url"), null, "dataUrlToBlob(invalide) → null");
+    // round-trip bundle .nmfb (manifeste + blobs concaténés)
+    const recs = [{ id: "a", name: "img", u_height: 2, face: "rear", description: "d", type: "image/png", blob: new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }) }];
+    const buf = await ImageStore.buildBundle(recs, "K1").arrayBuffer();
+    const parsed = ImageStore.parseBundle(buf);
+    ck(parsed.key === "K1" && parsed.recs.length === 1 && parsed.recs[0].id === "a" && parsed.recs[0].u_height === 2 && parsed.recs[0].face === "rear", "parseBundle → manifeste restauré");
+    const pb = new Uint8Array(await parsed.recs[0].blob.arrayBuffer());
+    ck(pb.length === 3 && pb[0] === 1 && pb[2] === 3, "parseBundle → blob d'image restauré (3 octets)");
+    let threw = false; try { ImageStore.parseBundle(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]).buffer); } catch (_) { threw = true; }
+    ck(threw, "parseBundle : signature NMFB invalide → exception");
+  }
+
+  console.log("\n• Détection de modifications (dirty) + état de sauvegarde");
+  {
+    // ---- logique PURE de l'état de la pastille ----
+    ck.eq(computeSaveState({ dirty: false, hasFile: false, autosaveOn: false }), "mem", "save: mémoire propre → mem");
+    ck.eq(computeSaveState({ dirty: true, hasFile: false, autosaveOn: false }), "dirty", "save: mémoire modifiée → dirty");
+    ck.eq(computeSaveState({ dirty: false, hasFile: true, autosaveOn: false }), "clean", "save: fichier à jour → clean");
+    ck.eq(computeSaveState({ dirty: true, hasFile: true, autosaveOn: false }), "dirty", "save: fichier modifié (auto-save off) → dirty");
+    ck.eq(computeSaveState({ dirty: true, hasFile: true, autosaveOn: true }), "dirty-on", "save: fichier modifié (auto-save on) → dirty-on");
+    // ---- l'auto-save n'écrit QUE si modifié ET fichier lié ----
+    ck(!shouldAutosave({ dirty: false, hasFile: true }), "auto-save: rien à écrire (propre) → non");
+    ck(!shouldAutosave({ dirty: true, hasFile: false }), "auto-save: pas de fichier lié → non");
+    ck(shouldAutosave({ dirty: true, hasFile: true }), "auto-save: modifié + fichier → oui");
+    // ---- transitions du suivi (changements HORS historique : meta / images) ----
+    const ss = new SaveState();
+    ck(!ss.dirty && ss.state() === "mem", "SaveState initial : propre, mémoire");
+    ss.markDirty(); ck(ss.dirty && ss.state() === "dirty", "markDirty (hors historique) → dirty");
+    ss.markSaved(); ck(!ss.dirty && ss.state() === "mem", "markSaved → propre");
+    ss.setFile(true); ck.eq(ss.state(), "clean", "fichier lié + propre → clean");
+    ss.markDirty(); ss.setAutosave(true); ck.eq(ss.state(), "dirty-on", "fichier + modifié + auto-save → dirty-on");
+    ck(ss.shouldAutosave(), "SaveState.shouldAutosave : modifié + fichier → oui");
+    ss.markLoaded(0); ck(!ss.dirty && ss.state() === "clean", "markLoaded → propre (fichier toujours lié)");
+
+    // ---- dirty par COMPARAISON DE RÉVISION (cœur du correctif undo→propre) ----
+    const rv = new SaveState(); rv.setFile(true); rv.markLoaded(0);   // chargé à la révision 0, fichier lié
+    ck(!rv.dirty && rv.state() === "clean", "révision : chargé (rev 0) → clean");
+    rv.setRevision(1); ck(rv.dirty && rv.state() === "dirty", "révision : mutation (rev 1 ≠ sauvée 0) → dirty");
+    rv.setRevision(2); ck(rv.dirty, "révision : 2e mutation (rev 2) → toujours dirty");
+    rv.setRevision(1); ck(rv.dirty, "révision : undo partiel (rev 1) → encore dirty");
+    rv.setRevision(0); ck(!rv.dirty && rv.state() === "clean", "révision : undo jusqu'au point sauvé (rev 0) → REDEVIENT propre");
+    rv.setRevision(2); rv.markSaved(); ck(!rv.dirty, "révision : save à la rev 2 → propre");
+    rv.setRevision(1); ck(rv.dirty, "révision : undo SOUS le point sauvé (rev 1 ≠ 2) → dirty");
+    // un changement hors historique reste dirty même si la révision retombe sur le point sauvé
+    rv.setRevision(2); ck(!rv.dirty, "révision : retour à la rev sauvée → propre");
+    rv.markDirty(); rv.setRevision(2); ck(rv.dirty, "révision + meta : hors-historique force dirty malgré rev sauvée");
+  }
+
+  console.log("\n• Store : contrat de NOTIFICATION (toute mutation déclenche onChange → dirty)");
+  {
+    // La détection de dirty repose sur store.onChange : on vérifie que create/update/remove le déclenchent.
+    const s = await makeStore();
+    let n = 0; s.onChange(() => { n++; });
+    const before = n;
+    const e = await s.create("equipments", { name: "E1" });
+    ck(n > before, "create → onChange déclenché");
+    const afterCreate = n;
+    await s.update("equipments", e.id, { name: "E2" });
+    ck(n > afterCreate, "update → onChange déclenché");
+    const afterUpdate = n;
+    await s.remove("equipments", e.id);
+    ck(n > afterUpdate, "remove → onChange déclenché");
+    // undo/redo notifient aussi (cohérence de la pastille après annulation)
+    const afterRemove = n;
+    await s.undo();
+    ck(n > afterRemove, "undo → onChange déclenché");
+    const afterUndo = n;
+    await s.redo();
+    ck(n > afterUndo, "redo → onChange déclenché");
+  }
+
+  console.log("\n• Store + SaveState : la révision pilote le dirty (undo ramène au propre)");
+  {
+    // Simule la boucle de main.ts : markLoaded(histIndex) au chargement, setRevision(histIndex) à chaque onChange.
+    const s = await makeStore();
+    const ss = new SaveState(); ss.setFile(true);
+    ss.markLoaded(s.histIndex());                 // état initial = propre, ancré sur la révision courante
+    s.onChange(() => { ss.setRevision(s.histIndex()); });
+    ck(!ss.dirty, "intégration : document chargé → propre");
+    const e = await s.create("equipments", { name: "X1" });
+    ck(ss.dirty, "intégration : création → dirty");
+    ss.markSaved();                               // l'utilisateur sauvegarde
+    ck(!ss.dirty, "intégration : après save → propre");
+    await s.update("equipments", e.id, { name: "X2" });
+    ck(ss.dirty, "intégration : modification après save → dirty");
+    await s.undo();                               // annule la modif → revient au point sauvé
+    ck(!ss.dirty, "intégration : UNDO jusqu'au point sauvé → REDEVIENT propre");
   }
 
   console.log("\n" + "-".repeat(48));
