@@ -1,7 +1,10 @@
 import type { Store } from "../store";
 import { RackGeometry } from "./RackGeometry";
 import { RackItemKinds } from "../domain/RackItemKinds";
-import { SIDE_U_STEP } from "../domain/constants";
+import { SIDE_U_STEP, EQUIP_DEPTHS } from "../domain/constants";
+
+/** Occupant à élévation (pour le rendu 3D) : U de départ, hauteur, face, profondeur, libellé. */
+export interface OccupantElev { u: number; h: number; side: string; depth: string; depth_mm: any; locks_u: boolean; label: string; kind: string; id: string; }
 
 /** Info d'occupation d'une case U:face. */
 export interface OccupantInfo {
@@ -49,6 +52,18 @@ export class RackScene {
       }
     });
     return occ;
+  }
+
+  /** Occupants à ÉLÉVATION (équipements rackés + pseudo-items), pour le rendu 3D. */
+  occupantsElev(rackId: string): OccupantElev[] {
+    const s = this.store;
+    const eqs = s.equipmentsOfRack(rackId)
+      .filter((e: any) => e.rack_u != null)
+      .map((e: any) => ({ u: e.rack_u | 0, h: Math.max(1, e.u_height | 0 || 1), side: (e.rack_side === "rear") ? "rear" : "front", depth: EQUIP_DEPTHS.includes(e.depth) ? e.depth : "full", depth_mm: e.depth_mm, locks_u: RackGeometry.mountLocksU(e), label: e.name || "", kind: "eq", id: e.id }));
+    const items = s.rackItemsOf(rackId)
+      .filter((it: any) => it.u != null)
+      .map((it: any) => ({ u: it.u | 0, h: Math.max(1, it.u_height | 0 || 1), side: (it.side === "rear") ? "rear" : "front", depth: "none", depth_mm: undefined, locks_u: false, label: it.label || "", kind: "item", id: it.id }));
+    return (eqs as OccupantElev[]).concat(items as OccupantElev[]);
   }
 
   occupancyCount(rackId: string): number {

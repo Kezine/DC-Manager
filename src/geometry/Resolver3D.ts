@@ -5,8 +5,13 @@ import { Depths } from "../registries/Depths";
 import { Normalize } from "../core/Normalize";
 import {
   RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM,
-  U_MM, SIDE_U_STEP, BRUSH_PADDING_MM,
+  U_MM, SIDE_U_STEP, BRUSH_PADDING_MM, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT,
 } from "../domain/constants";
+
+/** Vecteur monde (mm). */
+export interface Vec3 { x: number; y: number; z: number; }
+/** Dimensions UTILES de la section d'un conduit (marge d'exclusion déduite). */
+export interface ConduitDims { usableW: number; usableH: number; kind: "segment" | "brush" | "pin"; }
 
 /** Point 3D résolu d'un port : monde (mm) + normale sortante + baie hôte. */
 export interface Port3D { x: number; y: number; z: number; rackId: string | null; n: { x: number; y: number; z: number }; }
@@ -15,8 +20,10 @@ export interface Port3D { x: number; y: number; z: number; rackId: string | null
    Résolution 3D contre le STORE vivant (dépendance injectée) :
      - resolvePort3D : point monde d'un port (rack / side / wall / libre) ;
      - géométrie des waypoints (ancre, points de passage) et des pins/brosses.
-   La machinerie de RÉPARTITION conduit (offsets dans la section) est laissée à une
-   phase ultérieure : `waypointPassPoints` reçoit l'offset déjà calculé via `off`.
+   La machinerie de RÉPARTITION conduit (offsets dans la section) vit désormais ici
+   (`waypointConduitDims`/`conduitGrid`/`conduitCell`/`conduitCablesOf`/`conduitBasis`/
+   `conduitOffsetFor`) : elle produit l'offset monde qu'on passe à `waypointPassPoints`
+   via `off` pour répartir N câbles dans la section d'un chemin/brosse/pin à rayon.
    ============================================================================= */
 export class Resolver3D {
   constructor(private store: Store) {}
@@ -93,15 +100,8 @@ export class Resolver3D {
 
   /* ---- waypoints ---- */
 
-  /** Un waypoint est-il posé (coordonnées complètes pour sa forme) ? */
-  waypointIsPlaced(wp: any): boolean {
-    const s = this.store;
-    if (!wp) return false;
-    if (wp.kind === "brush") { const rk = wp.rack_id ? s.get("racks", wp.rack_id) : null; return !!(rk && rk.datacenter_id); }
-    if (wp.kind === "point" && wp.rack_id && wp.side_lr != null) { const rk = s.get("racks", wp.rack_id); return !!(rk && rk.datacenter_id); }
-    if (wp.kind === "point" && wp.rack_id && wp.cap_face) { const rk = s.get("racks", wp.rack_id); return !!(rk && rk.datacenter_id); }
-    return wp.dc_x != null && wp.dc_y != null && (wp.kind !== "segment" || (wp.dc_x2 != null && wp.dc_y2 != null));
-  }
+  /** Un waypoint est-il posé (coordonnées complètes pour sa forme) ? Délègue au store (source unique). */
+  waypointIsPlaced(wp: any): boolean { return this.store.waypointIsPlaced(wp); }
 
   /** Point représentatif (pin = le point ; segment = milieu ; brush = milieu de traversée). */
   waypointAnchor(wp: any): { x: number; y: number; z: number } {
@@ -179,5 +179,71 @@ export class Resolver3D {
     const cy = (rack.dc_y != null) ? rack.dc_y : (rack.depth || RACK_DEPTH_DEFAULT) / 2;
     return { rack, face: wp.cap_face, cx: wp.cap_cx | 0, cy: wp.cap_cy | 0, dcId: rack.datacenter_id,
       world: { x: cx + c.lx * co - c.ly * so, y: cy + c.lx * so + c.ly * co, z } };
+  }
+
+  /* ---- répartition conduit (offsets dans la section) ---- */
+
+  /** Dimensions UTILES de section d'un waypoint-conduit (marge d'exclusion déduite), ou null si pas un conduit. */
+  waypointConduitDims(w: any): ConduitDims | null {
+    if (w.kind === "segment" && w.dc_x2 != null) {
+      const W = (w.width_mm > 0) ? w.width_mm : CONDUIT_W_DEFAULT, H = (w.height_mm > 0) ? w.height_mm : CONDUIT_H_DEFAULT;
+      // chemin de câbles : section PLEINE (pas de padding — le padding est propre à la brosse).
+      return (W > 1 || H > 1) ? { usableW: W, usableH: H, kind: "segment" } : null;
+    }
+    if (w.kind === "brush") {
+      const g = this.brushGeom(w); return g ? { usableW: g.usableW, usableH: g.usableH, kind: "brush" } : null;
+    }
+    if (w.kind === "point" && w.spread === true && w.radius > 0) {
+      const sq = w.radius * 1.5;   // carré inscrit ~ dans le disque de rayon `radius` (réparti autour du pin)
+      return { usableW: sq, usableH: sq, kind: "pin" };
+    }
+    return null;
+  }
+
+  /** Grille dynamique (cols×rows) pour N éléments, en respectant l'aspect largeur/hauteur de la section. */
+  static conduitGrid(n: number, aspect: number): { cols: number; rows: number } {
+    const cols = Math.max(1, Math.min(n, Math.round(Math.sqrt(n * (aspect > 0 ? aspect : 1))) || 1));
+    return { cols, rows: Math.ceil(n / cols) };
+  }
+
+  /** Affectation d'un câble (index i sur n) à une cellule (col,row). ⚠ POINT D'EXTENSION : ordre
+      STABLE par index (= ordre stable par id de câble, cf. conduitCablesOf). */
+  static conduitCell(i: number, n: number, aspect: number): { col: number; row: number; cols: number; rows: number } {
+    const g = Resolver3D.conduitGrid(n, aspect);
+    return { col: i % g.cols, row: Math.floor(i / g.cols), cols: g.cols, rows: g.rows };
+  }
+
+  /** Câbles (ids triés, ordre stable) routés par CE waypoint — base de l'index de répartition (toutes salles). */
+  conduitCablesOf(wpId: string): string[] {
+    return this.store.all("cables").filter((c: any) => this.store.effectiveWaypointIds(c).includes(wpId)).map((c: any) => c.id).sort();
+  }
+
+  /** Base orthonormée (right, up) de la SECTION d'un conduit : segment → ⊥ horizontale + verticale ;
+      pin → plan ⊥ au FLUX (prev→next) ; brush → repère monde de la baie. */
+  conduitBasis(w: any, prev: Vec3, next: Vec3): { right: Vec3; up: Vec3 } {
+    if (w.kind === "brush") { const g = this.brushGeom(w); if (g) return { right: g.right, up: g.up }; }
+    if (w.kind === "segment" && w.dc_x2 != null) {
+      const ax = w.dc_x2 - w.dc_x, ay = w.dc_y2 - w.dc_y, L = Math.hypot(ax, ay) || 1;
+      return { right: { x: ay / L, y: -ax / L, z: 0 }, up: { x: 0, y: 0, z: 1 } };
+    }
+    const fx = next.x - prev.x, fy = next.y - prev.y, fz = next.z - prev.z, L = Math.hypot(fx, fy, fz) || 1;
+    const axis = { x: fx / L, y: fy / L, z: fz / L };
+    const rl = Math.hypot(axis.y, -axis.x, 0);   // axis × zUp = (axis.y, −axis.x, 0)
+    const right = rl > 1e-6 ? { x: axis.y / rl, y: -axis.x / rl, z: 0 } : { x: 1, y: 0, z: 0 };
+    let up = { x: right.y * axis.z - right.z * axis.y, y: right.z * axis.x - right.x * axis.z, z: right.x * axis.y - right.y * axis.x };
+    const ul = Math.hypot(up.x, up.y, up.z) || 1; up = { x: up.x / ul, y: up.y / ul, z: up.z / ul };
+    return { right, up };
+  }
+
+  /** Offset MONDE (mm) d'un câble dans la section du conduit `w` (null si pas un conduit / 1 seul câble / non routé). */
+  conduitOffsetFor(w: any, cableId: string, prev: Vec3, next: Vec3): Vec3 | null {
+    const dims = this.waypointConduitDims(w); if (!dims) return null;
+    const ids = this.conduitCablesOf(w.id), n = ids.length, i = ids.indexOf(cableId);
+    if (n <= 1 || i < 0) return null;   // 1 câble → centré (offset nul)
+    const cell = Resolver3D.conduitCell(i, n, dims.usableH > 0 ? dims.usableW / dims.usableH : 1);
+    const du = ((cell.col + 0.5) / cell.cols - 0.5) * dims.usableW;
+    const dv = ((cell.row + 0.5) / cell.rows - 0.5) * dims.usableH;
+    const b = this.conduitBasis(w, prev, next);
+    return { x: b.right.x * du + b.up.x * dv, y: b.right.y * du + b.up.y * dv, z: b.right.z * du + b.up.z * dv };
   }
 }

@@ -16,3 +16,5 @@ export type { Port3D } from "./Resolver3D";
 export { GraphGeometry } from "./GraphGeometry";
 export type { NodeSize, BBox } from "./GraphGeometry";
 export { GridGeometry } from "./GridGeometry";
+export { FloorLayout } from "./FloorLayout";
+export type { MultiLayout, RoomPlacement, FloorPlane, BuildingBand, FloorCfg } from "./FloorLayout";
