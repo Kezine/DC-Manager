@@ -286,12 +286,7 @@ export class DatacenterView {
     });
     this.toolbarEl.appendChild(modes);
 
-    // bascule multi-salles (vue 3D seulement) : étages empilés, bâtiments côte à côte
-    // (zoom · recentrage · points de vue caméra → overlay superposé au stage, cf. buildControls)
-    const multiBtn = this.btn("Multi-salles", () => this.setMultiDc(!this.multiDc), "Afficher toutes les salles (étages empilés / bâtiments côte à côte)");
-    multiBtn.classList.toggle("active", this.multiDc);
-    multiBtn.style.display = this.view === "3d" ? "" : "none";
-    this.toolbarEl.appendChild(multiBtn);
+    // (bascule multi-salles retirée de la topbar — pilotée par la carte « Datacenters » du panneau latéral, cf. dcScopeCard)
     // bascules d'édition de grille (plans 2D salle/étage) : placement libre + cases inaccessibles
     if (this.view === "top" || this.view === "floor") {
       this.toolbarEl.appendChild(this.vsep());   // séparateur : contrôles de visualisation | déplacement/exclusion
