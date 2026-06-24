@@ -6,9 +6,11 @@ import { Entity } from "../models/Entity";
 import { EntityRegistry } from "../models/EntityRegistry";
 import { PortType } from "../models/PortType";
 import { CableType } from "../models/CableType";
+import { Waypoint } from "../models/Waypoint";
+import { PortRoles } from "../registries/PortRoles";
 import { Id } from "../core/Id";
 import { Text } from "../core/Text";
-import { APP_RELEASE, EQUIP_FACE_IMG_FIELD } from "../domain/constants";
+import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, CABLE_STATUS_BROKEN, CABLE_STATUS_RANK, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT } from "../domain/constants";
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
 import { CASCADE_SPEC, CascadeDelete, CascadeDetach } from "./cascadeSpec";
 
@@ -204,6 +206,9 @@ export class Store {
   /* ---- UNDO / REDO (délégué à l'adapter) ---- */
   canUndo(): boolean { return typeof this.adapter.canUndo === "function" && this.adapter.canUndo(); }
   canRedo(): boolean { return typeof this.adapter.canRedo === "function" && this.adapter.canRedo(); }
+  /** Révision courante du modèle (position d'historique) — pour recalculer le « dirty » par rapport à la dernière
+      sauvegarde (un undo qui ramène au point sauvegardé → révision identique → propre). */
+  histIndex(): number { return typeof this.adapter.histIndex === "function" ? this.adapter.histIndex() : 0; }
   async undo(): Promise<boolean> {
     if (!this.canUndo()) return false;
     const snap = await this.adapter.undo();
@@ -444,6 +449,13 @@ export class Store {
   waypointsOfDc(datacenterId: string | null): any[] { return this._byFk("waypoints", "datacenter_id", datacenterId || null); }
   floorsOf(location: string | null): any[] { return this._byFk("floors", "location", location || null); }
   floorFor(location: string, floor: any): any { const f = String(floor != null ? floor : ""); return this.floorsOf(location).find((x) => String(x.floor) === f) || null; }
+  /** Salles d'un étage (location + floor). */
+  dcsOfFloor(location: string | null, floor: any): any[] { const f = String(floor != null ? floor : ""); return this.all("datacenters").filter((d) => (d.location || "") === (location || "") && String(d.floor || "") === f); }
+  /** Waypoints hors-salle (OOB). */
+  /** Pins d'ÉTAGE (ex-OOB) : pins hors salle rattachés à un bâtiment/étage. */
+  oobWaypoints(): any[] { return this.all("waypoints").filter((w) => Waypoint.isFloorLevel(w)); }
+  /** Équipements posés sur un plan d'étage (hors salle). */
+  floorEquipments(): any[] { return this.all("equipments").filter((e) => e.placement_mode === "floor"); }
   cablesOfWaypoint(waypointId: string): any[] { return this._byFk("cables", "waypoint_ids", waypointId); }
   ipAddressesOfNetwork(netId: string): any[] { return this._byFk("ipAddresses", "network_id", netId); }
   ipAddressesOfEquipment(eqId: string): any[] { return this._byFk("ipAddresses", "equipment_id", eqId); }
@@ -480,6 +492,294 @@ export class Store {
   equipmentOfPort(portId: string): any {
     const p = this.get("ports", portId);
     return p ? this.get("equipments", p.equipment_id) : null;
+  }
+
+  /** Kind d'un port (data/power) : type de port sinon rôle. null si port absent. */
+  portKind(port: any): "data" | "power" | null {
+    if (!port) return null;
+    const pt = port.port_type_id ? this.get("portTypes", port.port_type_id) : null;
+    return pt ? (pt.kind === "power" ? "power" : "data") : PortRoles.kind(port.role);
+  }
+
+  /** Taille (mm) du connecteur physique émergent. Une LANE de breakout hérite du connecteur du TRUNK. */
+  portConnectorSize(port: any): { w: number; h: number } {
+    if (port && port.parent_port_id) { const par = this.get("ports", port.parent_port_id); if (par) port = par; }
+    const pt = (port && port.port_type_id) ? this.get("portTypes", port.port_type_id) : null;
+    const key = pt ? (pt.connector || pt.family) : null;
+    return (key && PORT_CONNECTOR_MM[key]) ? PORT_CONNECTOR_MM[key] : PORT_CONNECTOR_DEFAULT;
+  }
+
+  /* ---- placement : salle (datacenter) d'un équipement ---- */
+
+  /** Salle (datacenter_id) d'un équipement, via sa baie hôte ou sa pose libre. null = hors salle. */
+  equipmentDcId(eqOrId: any): string | null {
+    const eq = (typeof eqOrId === "object") ? eqOrId : this.get("equipments", eqOrId);
+    if (!eq) return null;
+    if (eq.placement_mode === "floor") return null;   // posé sur un étage (hors DC)
+    if ((eq.placement_mode === "side" || eq.placement_mode === "wall") && eq.rack_id) {
+      const rack = this.get("racks", eq.rack_id);
+      return (rack && rack.datacenter_id) ? rack.datacenter_id : null;
+    }
+    if (eq.dim_mode === "free") return eq.dc_id || null;
+    if (eq.placement_mode === "rack" && eq.rack_id && eq.rack_u != null) {
+      const rack = this.get("racks", eq.rack_id);
+      return (rack && rack.datacenter_id) ? rack.datacenter_id : null;
+    }
+    return null;
+  }
+
+  /* ---- faisceaux (trunks) : un brin hérite type/route/longueur de son trunk ---- */
+
+  cableBundleOf(c: any): any { return (c && c.bundle_id) ? this.get("cableBundles", c.bundle_id) : null; }
+  strandsOfBundle(bundleId: string | null): any[] { return bundleId ? this.all("cables").filter((c) => c.bundle_id === bundleId) : []; }
+  /** waypoint_ids EFFECTIFS d'un câble : ceux de son trunk si c'est un brin, sinon les siens.
+      Accepte un câble OU un draft { bundle_id?, waypoint_ids? }. */
+  effectiveWaypointIds(c: any): string[] {
+    if (c && c.bundle_id) { const b = this.get("cableBundles", c.bundle_id); if (b) return b.waypoint_ids || []; }
+    return c ? (c.waypoint_ids || []) : [];
+  }
+  /** Occupation d'un trunk : { used, capacity, free, nextStrand } (1er n° de fibre libre). */
+  bundleOccupancy(bundleId: string): { used: number; capacity: number; free: number; nextStrand: number } {
+    const b = this.get("cableBundles", bundleId); if (!b) return { used: 0, capacity: 0, free: 0, nextStrand: 1 };
+    const used = new Set(this.strandsOfBundle(bundleId).map((s) => s.strand_no).filter((n) => n != null));
+    let next = 1; while (used.has(next)) next++;
+    return { used: used.size, capacity: b.fiber_count, free: Math.max(0, b.fiber_count - used.size), nextStrand: next };
+  }
+
+  /* ---- câbles : réseaux / complétude ---- */
+
+  /** Réseaux d'un câble (network_ids sinon network_id seul). */
+  cableNetworkIds(c: any): string[] { return (c && Array.isArray(c.network_ids) && c.network_ids.length) ? c.network_ids : (c && c.network_id ? [c.network_id] : []); }
+  /** Câble « complet » : 2 ports distincts + type + compatibilité OK. */
+  cableIsComplete(c: any): boolean {
+    if (!c || !c.from_port_id || !c.to_port_id || !c.cable_type_id || c.from_port_id === c.to_port_id) return false;
+    return this.cableCompatible(c.cable_type_id, c.from_port_id, c.to_port_id).ok;
+  }
+
+  /* ---- waypoints : pose ---- */
+
+  /** Un waypoint est-il posé (coordonnées complètes pour sa forme) ? */
+  waypointIsPlaced(wp: any): boolean {
+    if (!wp) return false;
+    if (wp.kind === "brush") { const rk = wp.rack_id ? this.get("racks", wp.rack_id) : null; return !!(rk && rk.datacenter_id); }
+    if (wp.kind === "point" && wp.rack_id && wp.side_lr != null) { const rk = this.get("racks", wp.rack_id); return !!(rk && rk.datacenter_id); }
+    if (wp.kind === "point" && wp.rack_id && wp.cap_face) { const rk = this.get("racks", wp.rack_id); return !!(rk && rk.datacenter_id); }
+    return wp.dc_x != null && wp.dc_y != null && (wp.kind !== "segment" || (wp.dc_x2 != null && wp.dc_y2 != null));
+  }
+
+  /* ---- route d'un câble (grammaire exit/OOB) ---- */
+
+  /** Waypoints EFFECTIFS d'un câble posés dans `dcId`, dans l'ordre du trajet A→B. */
+  cableWaypointsIn(cable: any, dcId: string): any[] {
+    return this.effectiveWaypointIds(cable)
+      .map((id) => this.get("waypoints", id))
+      .filter((w) => w && w.datacenter_id === dcId && this.waypointIsPlaced(w));
+  }
+
+  /** Salle du bout A|B d'un câble (null = port absent OU équipement non placé). */
+  cableEndDcId(cable: any, side: "A" | "B"): string | null {
+    const pid = side === "A" ? cable.from_port_id : cable.to_port_id;
+    const p = pid ? this.get("ports", pid) : null;
+    return p ? this.equipmentDcId(p.equipment_id) : null;
+  }
+
+  /** Analyse de la route (waypoint_ids EFFECTIFS, ordonnés A→B) : grammaire + cohérence des bouts posés.
+      → { steps[{wp,type,seg}], errors[], valid, hasExits, startDc, endDc, dcA, dcB }. Pure lecture. */
+  cableRoute(cable: any): { steps: any[]; errors: string[]; valid: boolean; hasExits: boolean; startDc: string | null; endDc: string | null; dcA: string | null; dcB: string | null } {
+    const wps = this.effectiveWaypointIds(cable).map((id) => this.get("waypoints", id)).filter(Boolean);
+    const errors: string[] = [], steps: any[] = [];
+    let cur: string | null = null, outside = false, exitFrom: string | null = null, startDc: string | null = null, exits = 0, seg = -1;
+    wps.forEach((wp) => {
+      const nm = wp.name || "(waypoint)";
+      if (Waypoint.isFloorLevel(wp)) {   // pin d'ÉTAGE (ex-OOB) : doit être ENTRE deux exits
+        if (!outside) errors.push("« " + nm + " » (pin d'étage) doit être ENTRE deux exits");
+        steps.push({ wp, type: "floor", seg: outside ? seg : -1 });
+        return;
+      }
+      const t = Waypoint.typeOf(wp);
+      if (!this.waypointIsPlaced(wp)) { errors.push("« " + nm + " » n'est pas posé dans une salle"); steps.push({ wp, type: t, seg: -1 }); return; }
+      const room = wp.datacenter_id;
+      if (t === "datacenter") {
+        if (outside) errors.push("« " + nm + " » (waypoint de salle) au milieu d'un tronçon hors salle");
+        else if (cur == null) { cur = room; if (startDc == null) startDc = room; }
+        else if (room !== cur) errors.push("« " + nm + " » est dans une autre salle que le segment courant");
+      } else {   // exit
+        exits++;
+        if (!outside) {   // SORTIE de la salle courante
+          if (cur == null) { cur = room; if (startDc == null) startDc = room; }
+          if (room !== cur) errors.push("exit « " + nm + " » : la sortie doit être un exit de la salle courante");
+          outside = true; exitFrom = cur; cur = null; seg++;
+        } else {          // ENTRÉE dans une autre salle
+          if (room === exitFrom) errors.push("exit « " + nm + " » : ré-entrée dans la salle quittée — appariez avec un exit d'une AUTRE salle");
+          cur = room; outside = false; exitFrom = null;
+        }
+      }
+      steps.push({ wp, type: t, seg: -1 });
+    });
+    if (outside) errors.push("exit non appairé — ajoutez l'exit d'une autre salle pour fermer le tronçon");
+    const endDc = outside ? null : cur;
+    const dcA = this.cableEndDcId(cable, "A"), dcB = this.cableEndDcId(cable, "B");
+    if (dcA && startDc && dcA !== startDc) errors.push("le port A n'est pas dans la salle où la route commence");
+    if (dcB && endDc && dcB !== endDc) errors.push("le port B n'est pas dans la salle où la route finit");
+    if (!exits && dcA && dcB && dcA !== dcB) errors.push("ports dans deux salles différentes — la route doit sortir par un exit de chaque salle");
+    return { steps, errors, valid: !errors.length, hasExits: exits > 0, startDc, endDc, dcA, dcB };
+  }
+
+  /** Contrainte de salle d'un BOUT ("A"|"B"), évaluée SANS son port : { dcId, onlyUnplaced, route }. */
+  cableSideConstraint(cable: any, side: "A" | "B"): { dcId: string | null; onlyUnplaced: boolean; route: any } {
+    const probe = {
+      from_port_id: side === "A" ? null : cable.from_port_id,
+      to_port_id: side === "B" ? null : cable.to_port_id,
+      waypoint_ids: cable.waypoint_ids || [], bundle_id: cable.bundle_id || null,
+    };
+    const r = this.cableRoute(probe);
+    if (!r.valid) return { dcId: null, onlyUnplaced: true, route: r };
+    const own = side === "A" ? r.startDc : r.endDc;
+    if (own) return { dcId: own, onlyUnplaced: false, route: r };
+    if (!r.hasExits) {
+      const other = side === "A" ? r.dcB : r.dcA;
+      if (other) return { dcId: other, onlyUnplaced: false, route: r };
+    }
+    return { dcId: null, onlyUnplaced: false, route: r };
+  }
+
+  /** Résumé lisible de la route : « ◆ Salle A → ⏏ Salle A → ◎ ét. 1 → ⏏ Salle B ». */
+  cableRouteSummary(r: any): string {
+    if (!r.steps.length) return "";
+    const parts: string[] = [];
+    let lastRoom: string | null = null;
+    r.steps.forEach((s: any) => {
+      if (s.type === "floor") { parts.push("◎ " + Waypoint.floorLabel(s.wp)); return; }
+      const room = s.wp.datacenter_id;
+      if (s.type === "exit") { parts.push("⏏ " + this.dcName(room)); lastRoom = room; }
+      else if (room !== lastRoom) { parts.push("◆ " + this.dcName(room)); lastRoom = room; }
+    });
+    return parts.join(" → ");
+  }
+
+  /** Nom d'une salle (datacenter) — "?" si absente, "(salle)" si sans nom. */
+  dcName(dcId: string | null): string { const d = dcId ? this.get("datacenters", dcId) : null; return d ? (d.name || "(salle)") : "?"; }
+
+  /** Statut MAXIMAL d'un câble : brouillon (incomplet/route invalide) → planifié → câblé (2 bouts posés). */
+  cableMaxStatus(cable: any): string {
+    if (!this.cableIsComplete(cable)) return CABLE_STATUS_DRAFT;
+    const r = this.cableRoute(cable);
+    if (!r.valid) return CABLE_STATUS_DRAFT;
+    return (r.dcA && r.dcB) ? "cable" : "planifie";
+  }
+  /** Le statut `statusId` est-il ≤ au maximum `maxId` ? */
+  cableStatusFits(statusId: string, maxId: string): boolean {
+    return (CABLE_STATUS_RANK[statusId] != null ? CABLE_STATUS_RANK[statusId] : 2) <= (CABLE_STATUS_RANK[maxId] || 0);
+  }
+
+  /* ---- contrainte physique de placement (câblage) ---- */
+
+  /** Salles (datacenter_id) où un câble POSÉ contraint l'équipement à être : Map<dcId, cables[]>.
+      Une route en chantier (onlyUnplaced) ou sans contrainte n'impose rien. */
+  equipmentRequiredDcs(eqId: string): Map<string, any[]> {
+    const req = new Map<string, any[]>(), seen = new Set<string>();
+    this.portsOf(eqId).forEach((p) => {
+      const c = this.cableOnPort(p.id);
+      if (!c || seen.has(c.id)) return; seen.add(c.id);
+      const side = c.from_port_id === p.id ? "A" : "B";
+      const k = this.cableSideConstraint(c, side as "A" | "B");
+      if (k.onlyUnplaced || !k.dcId) return;
+      if (!req.has(k.dcId)) req.set(k.dcId, []);
+      req.get(k.dcId)!.push(c);
+    });
+    return req;
+  }
+  /** Motif de blocage du placement dans la salle cible (null = autorisé) : la cible doit
+      satisfaire TOUTES les contraintes de câblage de l'équipement. */
+  equipmentPlacementBlockedReason(eqId: string, targetDcId: string): string | null {
+    const req = this.equipmentRequiredDcs(eqId);
+    if (!req.size) return null;
+    if (req.size === 1 && req.has(targetDcId)) return null;
+    const names = [...req.keys()].map((id) => this.dcName(id)).join(", ");
+    if (req.size > 1) return "câblé vers plusieurs salles à la fois (" + names + ") — re-routez ou détachez un câble";
+    return "câblé vers « " + names + " » — re-routez le câble (exits) ou détachez-le";
+  }
+  /** Idem pour un RACK entier (vérifie chaque équipement monté en U). null = autorisé. */
+  rackPlacementBlockedReason(rackId: string, targetDcId: string): string | null {
+    const eqs = this.equipmentsOfRack(rackId).filter((e) => e.placement_mode === "rack" && e.rack_u != null);
+    for (const e of eqs) {
+      const why = this.equipmentPlacementBlockedReason(e.id, targetDcId);
+      if (why) return "« " + (e.name || "(équipement)") + " » : " + why;
+    }
+    return null;
+  }
+  /** Contexte physique d'un équipement : id de salle, « floor:loc:étage » (posé hors salle), ou null. */
+  equipmentContext(eq: any): string | null {
+    if (!eq) return null;
+    if (eq.placement_mode === "floor") return "floor:" + (eq.location || "") + ":" + String(eq.floor || "");
+    return this.equipmentDcId(eq) || null;
+  }
+  /** Un câble est-il valide compte tenu des contextes physiques de ses deux bouts ?
+      (deux contextes différents dont au moins une SALLE → route avec exits requise). */
+  cableContextValid(c: any): boolean {
+    const pf = c.from_port_id ? this.get("ports", c.from_port_id) : null, pt = c.to_port_id ? this.get("ports", c.to_port_id) : null;
+    if (!pf || !pt) return true;
+    const ca = this.equipmentContext(this.get("equipments", pf.equipment_id)), cb = this.equipmentContext(this.get("equipments", pt.equipment_id));
+    if (ca == null || cb == null) return true;
+    if (ca === cb) return true;
+    const aSalle = !ca.startsWith("floor:"), bSalle = !cb.startsWith("floor:");
+    if (aSalle || bSalle) { const r = this.cableRoute(c); return r.valid && r.hasExits; }
+    return true;
+  }
+  /** Patchs de CASSE des câbles d'un équipement dont la route n'est plus valide après (dé)placement :
+      déconnecte le bout DISTANT seulement, statut « cassé », raison ajoutée à la description. */
+  cableBreakOps(eqId: string): Array<{ collection: string; id: string; patch: Record<string, any> }> {
+    const eq = this.get("equipments", eqId); if (!eq) return [];
+    const ops: Array<{ collection: string; id: string; patch: Record<string, any> }> = [];
+    this.cablesOfEquipment(eqId).forEach((c) => {
+      if (c.status === CABLE_STATUS_BROKEN || c.status === CABLE_STATUS_DRAFT) return;
+      if (this.cableContextValid(c)) return;
+      const pf = c.from_port_id ? this.get("ports", c.from_port_id) : null;
+      const fromIsEq = !!(pf && pf.equipment_id === eqId);
+      const remotePortId = fromIsEq ? c.to_port_id : c.from_port_id;
+      const remotePort = remotePortId ? this.get("ports", remotePortId) : null;
+      const remoteEq = remotePort ? this.get("equipments", remotePort.equipment_id) : null;
+      const reason = "Suite au déplacement de l'équipement « " + (eq.name || "?") + " », la liaison vers « "
+        + (remoteEq ? (remoteEq.name || "?") : "?") + " » sur le port « " + (remotePort ? (remotePort.name || "?") : "?") + " » n'est plus valide.";
+      const patch: Record<string, any> = { status: CABLE_STATUS_BROKEN, description: (c.description ? c.description.trim() + "\n" : "") + reason };
+      if (fromIsEq) patch.to_port_id = null; else patch.from_port_id = null;
+      ops.push({ collection: "cables", id: c.id, patch });
+    });
+    return ops;
+  }
+  /** Applique `cableBreakOps` en une transaction ; renvoie le nb de câbles cassés. */
+  async applyCableBreaks(eqId: string): Promise<number> {
+    const ops = this.cableBreakOps(eqId);
+    if (ops.length) await this.updateBatch(ops);
+    return ops.length;
+  }
+  /** Patchs de DÉGRADATION (« Câblé / À remplacer » → « Planifié ») des câbles des équipements donnés —
+      quand ils QUITTENT leur salle. À fusionner avec le patch de retrait pour un seul undo. */
+  cableDowngradeOps(eqIds: string[]): Array<{ collection: string; id: string; patch: Record<string, any> }> {
+    const ops: Array<{ collection: string; id: string; patch: Record<string, any> }> = [], seen = new Set<string>();
+    eqIds.forEach((eqId) => this.portsOf(eqId).forEach((p) => {
+      const c = this.cableOnPort(p.id);
+      if (!c || seen.has(c.id)) return; seen.add(c.id);
+      if (c.status === "cable" || c.status === "a-remplacer") ops.push({ collection: "cables", id: c.id, patch: { status: "planifie" } });
+    }));
+    return ops;
+  }
+  /** Brouillons de câble (un seul bout) compatibles avec ce port — candidats à l'affectation au clic. */
+  cableDraftCandidatesForPort(portId: string): any[] {
+    const port = this.get("ports", portId); if (!port) return [];
+    const fam = this.portFamily(port), myDc = this.equipmentDcId(port.equipment_id);
+    return this.all("cables").filter((c: any) => {
+      if (c.status !== CABLE_STATUS_DRAFT) return false;
+      const missA = !c.from_port_id, missB = !c.to_port_id;
+      if (!missA && !missB) return false;
+      if (c.from_port_id === portId || c.to_port_id === portId) return false;
+      const ct = c.cable_type_id ? this.get("cableTypes", c.cable_type_id) : null;
+      if (ct && fam && ct.family !== fam) return false;
+      const otherPid = missA ? c.to_port_id : c.from_port_id;
+      if (otherPid) { const f2 = this.portFamily(this.get("ports", otherPid)); if (f2 && fam && f2 !== fam) return false; }
+      const fits = (side: "A" | "B") => { const k = this.cableSideConstraint(c, side); if (k.onlyUnplaced) return myDc == null; return !k.dcId || !myDc || k.dcId === myDc; };
+      return (missA && fits("A")) || (missB && fits("B"));
+    });
   }
 
   /* ---- import / remplacement complet (BULK légitime) ---- */
