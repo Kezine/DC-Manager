@@ -101,6 +101,7 @@ export class DatacenterView {
   camTarget: Vec3 | null = null;
   hidden3dRacks = new Set<string>();
   selRackId: string | null = null;
+  slotSel: { rackId: string; side: string; lo: number; hi: number } | null = null;   // sélection U multiple (Ctrl+clic) — plage contiguë même baie/face
   multiDc = false;                       // vue 3D multi-salles (étages empilés, bâtiments côte à côte)
   visibleDcIds = new Set<string>();      // salles affichées en multi-salles (∪ salle active)
   fadedRacks = new Set<string>();        // baies estompées (translucides — voir au travers)
@@ -1752,12 +1753,29 @@ export class DatacenterView {
         const tip = Dom.svg("title"); tip.textContent = "Emplacement Waypoint libre (" + (s.face === "floor" ? "sol" : "toit") + ") — cellule (" + s.cx + ", " + s.cy + ") — clic : poser un pin"; poly.appendChild(tip);
         this.wireClick(poly, () => this.host.assignCapSlot?.(r.id, s.face, s.cx, s.cy, () => this.render()));
         eqNodes.push({ depth: BASE - seq, node: poly }); seq++;
-      } else {   // ph : emplacement U libre (voile + bordure pointillée) → assigner un équipement
+      } else {   // ph : emplacement U libre (voile + bordure pointillée) → assigner un équipement (clic = 1 U, Ctrl+clic = plage)
         const { x0e, x1e, fyPlane, z0, z1, u, side } = unit;
         const E2 = [toW(x0e, fyPlane, z0), toW(x1e, fyPlane, z0), toW(x1e, fyPlane, z1), toW(x0e, fyPlane, z1)].map(proj);
-        const poly = Dom.svg("polygon", { class: "dc-empty3d", points: E2.map((p) => p.h + "," + p.v).join(" "), "data-rack": r.id, "data-u": u, "data-side": side });
-        const tip = Dom.svg("title"); tip.textContent = "Emplacement libre — U" + u + (r.sides === "dual" ? " · " + (side === "rear" ? "arrière" : "avant") : "") + " — clic : assigner"; poly.appendChild(tip);
-        this.wireClick(poly, () => this.host.assignSlot?.(r.id, u, side, 1, () => this.render()));
+        const sel = this.slotSel;
+        const inSel = !!sel && sel.rackId === r.id && sel.side === side && u >= sel.lo && u <= sel.hi;
+        const selN = inSel && sel ? (sel.hi - sel.lo + 1) : 0;
+        const poly = Dom.svg("polygon", { class: "dc-empty3d" + (inSel ? " sel" : ""), points: E2.map((p) => p.h + "," + p.v).join(" "), "data-rack": r.id, "data-u": u, "data-side": side });
+        const faceL = r.sides === "dual" ? " · " + (side === "rear" ? "arrière" : "avant") : "";
+        const tip = Dom.svg("title");
+        tip.textContent = inSel && sel
+          ? "Sélection — " + selN + " U (U" + sel.lo + (sel.hi > sel.lo ? "–U" + sel.hi : "") + faceL + ") — clic : assigner · Ctrl+clic : ajuster"
+          : "Emplacement libre — U" + u + faceL + " — clic : assigner · Ctrl+clic : sélection multiple";
+        poly.appendChild(tip);
+        this.wireClick(poly, (e) => {
+          if (e.ctrlKey || e.metaKey) { this.toggleSlotSel(r.id, u, side); return; }   // (dé)sélection multiple
+          const s = this.slotSel;
+          if (s && s.rackId === r.id && s.side === side && u >= s.lo && u <= s.hi) {     // clic dans la sélection → assigner la plage
+            const lo = s.lo, h = s.hi - s.lo + 1; this.slotSel = null; this.host.assignSlot?.(r.id, lo, side, h, () => this.render());
+          } else {
+            if (this.slotSel) this.slotSel = null;   // clic ailleurs → repart à zéro
+            this.host.assignSlot?.(r.id, u, side, 1, () => this.render());
+          }
+        });
         eqNodes.push({ depth: BASE - seq, node: poly }); seq++;
       }
     });
@@ -2550,10 +2568,29 @@ export class DatacenterView {
   }
 
   /** Clic « franc » (pas un glissé de navigation) sur un nœud SVG. */
-  private wireClick(node: SVGElement, fn: () => void): void {
+  private wireClick(node: SVGElement, fn: (e: MouseEvent) => void): void {
     let downX = 0, downY = 0;
     node.addEventListener("mousedown", (e: any) => { downX = e.clientX; downY = e.clientY; });
-    node.addEventListener("click", (e: any) => { if (Math.hypot(e.clientX - downX, e.clientY - downY) > 4) return; e.stopPropagation(); fn(); });
+    node.addEventListener("click", (e: any) => { if (Math.hypot(e.clientX - downX, e.clientY - downY) > 4) return; e.stopPropagation(); fn(e); });
+  }
+
+  /** Ctrl+clic sur un emplacement U libre → construit/ajuste une sélection CONTIGUË (même baie, même face).
+      1er Ctrl+clic = ancre ; les suivants étendent (refus si un U intermédiaire est occupé) ou rétractent.
+      Un clic SIMPLE dans la sélection ouvre l'assignation pré-remplie (hauteur = nb d'U). Réplique du monolithe. */
+  private toggleSlotSel(rackId: string, u: number, side: string): void {
+    const s = this.slotSel;
+    if (!s || s.rackId !== rackId || s.side !== side) {
+      this.slotSel = { rackId, side, lo: u, hi: u };
+    } else if (u >= s.lo && u <= s.hi) {
+      if (s.lo === s.hi) this.slotSel = null;
+      else if (u === s.hi) s.hi--;
+      else this.slotSel = { rackId, side, lo: u, hi: s.hi };
+    } else {
+      const nlo = Math.min(s.lo, u), nhi = Math.max(s.hi, u), occ = this.scene.occupants(rackId);
+      for (let k = nlo; k <= nhi; k++) { if (occ.has(k + ":" + side)) { Notify.toast("Sélection interrompue par un emplacement occupé", "err"); return; } }
+      this.slotSel = { rackId, side, lo: nlo, hi: nhi };
+    }
+    this.render();
   }
 
   private wireRack(poly: SVGElement, r: any): void {
