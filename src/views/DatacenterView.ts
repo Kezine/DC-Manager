@@ -294,6 +294,7 @@ export class DatacenterView {
     this.toolbarEl.appendChild(multiBtn);
     // bascules d'édition de grille (plans 2D salle/étage) : placement libre + cases inaccessibles
     if (this.view === "top" || this.view === "floor") {
+      this.toolbarEl.appendChild(this.vsep());   // séparateur : contrôles de visualisation | déplacement/exclusion
       const edits = document.createElement("div"); edits.className = "dc-subviews"; edits.style.cssText = "display:flex;gap:4px";
       const bFree = this.btn("Placement libre", () => { this.freePlace = !this.freePlace; bFree.classList.toggle("active", this.freePlace); }, "Désactive l'aimantation à la grille pendant le glisser (n'affecte pas les éléments déjà placés)");
       bFree.classList.toggle("active", this.freePlace);
@@ -302,6 +303,12 @@ export class DatacenterView {
       edits.append(bFree, bBlock); this.toolbarEl.appendChild(edits);
     }
     this.updateControls();
+  }
+  /** Séparateur vertical entre groupes de la toolbar (visualisation | déplacement/exclusion). */
+  private vsep(): HTMLElement {
+    const d = document.createElement("div");
+    d.style.cssText = "align-self:stretch;width:1px;min-height:22px;margin:0 4px;background:var(--line)";
+    return d;
   }
   private labeled(label: string, control: HTMLElement): HTMLElement {
     const wrap = document.createElement("label"); wrap.style.cssText = "display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--fg-dim)";
