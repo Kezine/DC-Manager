@@ -20,6 +20,7 @@ import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
+import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Format } from "../../core/Format";
 import { Text } from "../../core/Text";
 import { Waypoint } from "../../models/Waypoint";
@@ -302,6 +303,36 @@ export class DcInteract extends DcPanels {
     node.addEventListener("mouseleave", () => { setHover(false); this.hideTip(); });
     this.wireClick(node, () => { this.hideTip(); this.host.openEquipmentDetail?.(eqId); });
     node.addEventListener("contextmenu", (e: any) => { this.hideTip(); this.ctxMenu(e, this.equipmentCtx(eqId)); });
+  }
+  /** Pseudo-élément (rackItem : blank / tray / keepblank) en 3D : survol (mise en évidence de toutes ses faces),
+      tooltip enrichi, clic / clic droit → menu (retirer). Pendant des occupants pour les éléments non-équipement. */
+  protected wireItem(node: SVGElement, item: any): void {
+    if (!item || !item.id) return;
+    node.setAttribute("data-occ", "item:" + item.id);
+    const setHover = (on: boolean) => { if (this.svg) this.svg.querySelectorAll('[data-occ="item:' + item.id + '"]').forEach((n) => n.classList.toggle("hover", on)); };
+    node.addEventListener("mouseenter", (e: any) => { setHover(true); this.showTip(this.itemTipHtml(item), e); });
+    node.addEventListener("mousemove", (e: any) => this.moveTip(e));
+    node.addEventListener("mouseleave", () => { setHover(false); this.hideTip(); });
+    this.wireClick(node, (e: any) => { this.hideTip(); this.ctxMenu(e, this.itemCtx(item)); });
+    node.addEventListener("contextmenu", (e: any) => { e.preventDefault(); this.hideTip(); this.ctxMenu(e, this.itemCtx(item)); });
+  }
+  /** Tooltip enrichi d'un pseudo-élément. */
+  protected itemTipHtml(item: any): string {
+    const kind = RackItemKinds.label(item.kind), uh = Math.max(1, (item.u_height | 0) || 1);
+    const name = (item.label && item.label.trim()) ? item.label : kind;
+    const rows = [
+      this.tipRow(`<b>${Html.escape(kind)}</b>${item.depth === "none" ? " · sans profondeur" : ""}`),
+      this.tipRow(`U${item.u}${uh > 1 ? "–U" + (item.u + uh - 1) : ""}${item.side === "rear" ? " · arrière" : (item.side === "front" ? " · avant" : "")}`),
+      this.tipRow(`<span style="color:var(--accent)">Clic / clic droit : actions</span>`),
+    ];
+    return `<div class="tt-title">${Html.escape(name)}</div>` + rows.join("");
+  }
+  /** Menu d'un pseudo-élément (rackItem) : le retirer de la baie. */
+  protected itemCtx(item: any): CtxSection[] {
+    const name = (item.label && item.label.trim()) ? item.label : RackItemKinds.label(item.kind);
+    return [{ head: name, items: [
+      { label: "Retirer", danger: true, action: async () => { if (this.store.get("rackItems", item.id)) { await this.store.remove("rackItems", item.id); this.setDirty(); Notify.toast("Élément retiré"); } } },
+    ] }];
   }
 
   /** Clic (route-aware) + clic droit (menu) + tooltip enrichi d'un nœud de waypoint/brosse/OOB. */

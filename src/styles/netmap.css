@@ -664,7 +664,7 @@
   /* v68 â€” plan de grille d'Ã©tage en 3D (sous les salles) */
   .dc-floorplane3d { fill: var(--bg-2); fill-opacity: 0.35; stroke: var(--line-2); stroke-width: 1px; vector-effect: non-scaling-stroke; }
   /* v134 â€” grille masquÃ©e â†’ le plan d'Ã©tage devient 100 % transparent (mais reste cliquable : clic droit = menu). */
-  .dc-floorplane3d.no-grid { fill-opacity: 0; stroke: transparent; pointer-events: all; }
+  .dc-floorplane3d.no-grid { fill-opacity: 0; stroke: transparent; pointer-events: none; }   /* grille masquee -> laisse passer les clics vers les baies/equipements derriere (multi-etage) */
   .dc-floorplane3d-grid line { stroke: var(--line); stroke-width: 1px; vector-effect: non-scaling-stroke; opacity: 0.5; }
   .dc-rack { cursor: grab; }
   .dc-rack.dragging { cursor: grabbing; }

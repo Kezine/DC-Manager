@@ -502,6 +502,7 @@ export class DcScene3D extends DcCamera {
           if (occFill) (poly as any).style.fill = occFill;
           const tt = Dom.svg("title"); tt.textContent = title; poly.appendChild(tt);
           if (oc.kind === "eq") this.wireOccupant(poly, oc.id);
+          else this.wireItem(poly, this.store.get("rackItems", oc.id));   // pseudo-élément : survol + tooltip enrichi + menu (retirer)
           eqNodes.push({ depth: BASE - seq, node: poly }); seq++;
           const href = f.plane ? faceHref(f.plane) : null;
           if (href) {
