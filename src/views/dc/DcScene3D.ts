@@ -38,6 +38,7 @@ export class DcScene3D extends DcCamera {
     this._multi = this.multiDc ? this.floor.multiLayout(this.current(), { visibleDcIds: this.visibleDcIds }) : null;
     this._farCull = this.cullDistanceM > 0 && this.camViewWidthM(dc) > this.cullDistanceM;   // culling de distance (perf)
     const gRoot = this.newScene(dc);
+    if (this.scale == null) this.recenter();   // établit l'échelle AVANT de bâtir → marqueurs écran-constants (ports/waypoints) à la bonne taille dès le 1er rendu
     const c = this.camCenter(dc); this._camC = c;   // mémorisé pour l'aperçu de route → souris
     const proj = (p: Vec3) => this.project3DCam(p, c);
     const drawables: Drawable[] = [];
@@ -939,7 +940,10 @@ export class DcScene3D extends DcCamera {
     drawables.push({ depth, node: g });
     if (this.cableIsPower(rc.cable) && this.showPowerBolts()) this.powerBoltsAlong(rc.linePts, proj, drawables);
     const rDot = DC_DOT_PX * this.markerScale / (this.scale || 1);
-    rc.pts.map(proj).forEach((p) => { const dot = Dom.svg("circle", { class: "dc-cable-end", cx: p.h, cy: p.v, r: rDot }); if (col) (dot as any).style.fill = col; drawables.push({ depth: p.depth - 1e4 - 1, node: dot }); });   // pastilles sur points ORIGINAUX (jamais sur une amorce)
+    // pastille UNIQUEMENT aux EXTRÉMITÉS (port d'équipement / patch) — pas sur les waypoints intermédiaires
+    // (brosse, chemin de câbles) qui portent déjà leur propre marqueur.
+    const ends = (rc.pts.length > 1) ? [rc.pts[0], rc.pts[rc.pts.length - 1]] : rc.pts;
+    ends.map(proj).forEach((p) => { const dot = Dom.svg("circle", { class: "dc-cable-end", cx: p.h, cy: p.v, r: rDot }); if (col) (dot as any).style.fill = col; drawables.push({ depth: p.depth - 1e4 - 1, node: dot }); });
   }
 
   /** Câble d'alimentation (type de câble de genre « power »). */

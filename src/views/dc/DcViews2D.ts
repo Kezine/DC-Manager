@@ -40,6 +40,7 @@ export class DcViews2D extends DcScene3D {
     // vue 2D TOURNÉE pour que la RÉFÉRENCE globale (liseré) soit toujours EN BAS : angle = orientation salle + 180°
     // (0→180, 90→270, 180→0, 270→90) + miroir horizontal → vraie vue « du dessus » (cohérente avec la 3D).
     this.floorXf = { angle: (Normalize.rackOrientation(dc.floor_orientation) + 180) % 360, cx: W / 2, cy: D / 2, flip: true };
+    if (this.scale == null) this.recenter();   // échelle établie AVANT de bâtir → marqueurs (pastilles/waypoints) à la bonne taille dès le 1er rendu
     const room = Dom.svg("rect", { class: "dc-room", x: 0, y: 0, width: W, height: D });
     room.addEventListener("contextmenu", (e: any) => { const w = this.clientToWorld(e.clientX, e.clientY); this.ctxMenu(e, this.floorCtx(dc, w)); });   // clic droit sol → créer un waypoint
     gRoot.appendChild(room);
@@ -62,6 +63,7 @@ export class DcViews2D extends DcScene3D {
     const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm;
     const gRoot = this.newScene(null);
     this.floorXf = { angle: 180, cx: W / 2, cy: D / 2, flip: true };   // bord de réf. EN BAS + miroir → vue « du dessus » réelle
+    if (this.scale == null) this.recenter();   // échelle établie AVANT de bâtir (marqueurs à la bonne taille dès le 1er rendu)
     const bg = Dom.svg("rect", { class: "dc-room", x: 0, y: 0, width: W, height: D });
     bg.addEventListener("contextmenu", (e: any) => { const w = this.clientToWorld(e.clientX, e.clientY); this.ctxMenu(e, this.floorPlaneCtx(loc, fl, w)); });   // clic droit sol → créer salle / OOB / éditer plan
     gRoot.appendChild(bg);
