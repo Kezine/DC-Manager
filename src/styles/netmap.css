@@ -1221,8 +1221,11 @@
     overflow: hidden;
     touch-action: none;
   }
-  .graph-stage svg { width: 100%; height: 100%; display: block; cursor: grab; }
-  .graph-stage svg.panning { cursor: grabbing; }
+  /* `> svg` : ENFANT DIRECT seulement = le SVG du graphe (remplit le stage). Sans le `>`, le sélecteur
+     descendant touchait aussi les <svg> d'icônes des boutons overlay (.graph-actions / .graph-zoom-controls)
+     → icônes recentrage/plein écran surdimensionnées. */
+  .graph-stage > svg { width: 100%; height: 100%; display: block; cursor: grab; }
+  .graph-stage > svg.panning { cursor: grabbing; }
   /* v96 â€” rail de NAVIGATION rapide entre Ã©tages (vue Ã‰tage), Ã  gauche du plan */
   .dc-floor-rail {
     position: absolute; top: 12px; left: 12px; z-index: 10;
