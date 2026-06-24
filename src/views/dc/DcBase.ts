@@ -34,7 +34,6 @@ export class DcBase {
   protected stage: HTMLElement;
   protected toolbarEl!: HTMLElement;
   protected sideEl: HTMLElement | null = null;
-  protected roomSel: HTMLSelectElement | null = null;
 
   view: "3d" | "top" | "floor" = "3d";
   dcId: string | null = null;
@@ -299,7 +298,6 @@ export class DcBase {
     this.renderSide(dc);
     if (!dc) { showControls(false); this.clearStage(); const p = document.createElement("p"); p.style.cssText = "padding:24px;color:var(--fg-dim)"; p.textContent = "Aucune salle (datacenter). Créez-en une pour la visualiser en 3D."; this.stage.appendChild(p); return; }
     showControls(true);
-    if (this.roomSel && this.roomSel.value !== dc.id) this.roomSel.value = dc.id;
     if (this.view === "top") this.renderTop(dc); else this.renderThreeD(dc);
   }
 

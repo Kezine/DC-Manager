@@ -36,13 +36,8 @@ export class DcPanels extends DcViews2D {
   buildToolbar(): void {
     if (!this.toolbarEl) return;
     this.toolbarEl.innerHTML = "";
-    const all = this.dcs();
-    const sel = document.createElement("select"); sel.className = "app-select"; this.roomSel = sel;
-    if (!all.length) { const o = document.createElement("option"); o.textContent = "— aucune salle —"; sel.appendChild(o); sel.disabled = true; }
-    else all.forEach((d) => { const o = document.createElement("option"); o.value = d.id; o.textContent = d.name || "(salle)"; sel.appendChild(o); });
-    const cur = this.current(); if (cur) sel.value = cur.id;
-    sel.onchange = () => { this.dcId = sel.value; this.camTarget = null; this.scale = null; this.selRackId = null; this.render(); };
-    this.toolbarEl.appendChild(this.labeled("Salle", sel));
+    // contrôles alignés à DROITE (la sélection de salle se fait au panneau latéral / au clic, pas ici).
+    const spacer = document.createElement("div"); spacer.style.flex = "1 1 auto"; this.toolbarEl.appendChild(spacer);
 
     // mode de vue : 3D ⟷ Dessus (2D) ⟷ Étage (plan bâtiment 2D)
     const modes = document.createElement("div"); modes.className = "dc-subviews"; modes.style.cssText = "display:flex;gap:4px";
@@ -139,6 +134,7 @@ export class DcPanels extends DcViews2D {
       const ft = this.floorTargetResolve(); const cur = this.current();
       if (ft) {
         const onFloor = (cur && (cur.location || "") === ft.location && String(cur.floor || "") === ft.floor) ? cur : null;
+        side.appendChild(this.collapsible(this.floorCablesCard(ft.location, ft.floor), "floorcables"));
         side.appendChild(this.collapsible(this.waypointsCard(onFloor, ft), "waypoints"));
       }
       return;
@@ -324,6 +320,26 @@ export class DcPanels extends DcViews2D {
     const acfg = this.floor.config(ft.location, ft.floor);
     box.appendChild(FormControls.toggle("⚓ Afficher le point d'ancrage · " + Format.meters(acfg.anchor_x || 0) + " ; " + Format.meters(acfg.anchor_y || 0), this.showFloorAnchor, (v) => { this.showFloorAnchor = v; this.render(); }));
     box.appendChild(this.btn("Recadrer le plan", () => { this.scale = null; this.render(); }));
+    return box;
+  }
+
+  /* ---- carte CÂBLES INTER-DC (vue Étage) : affichage des câbles dont les 2 bouts sont sur cet étage ---- */
+  protected floorCablesCard(loc: string, fl: string): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Câbles inter-DC"; box.appendChild(t);
+    const routes = this.interDcRoutesFloor(loc, fl, this.floor.config(loc, fl));
+    if (!routes.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucun câble inter-DC sur cet étage (route valide avec exits, les deux bouts dans des salles de l'étage)."; box.appendChild(h); return box; }
+    box.appendChild(FormControls.toggle("Tout afficher", this.showAllCables, (v) => { this.showAllCables = v; this.render(); }, { block: true }));
+    const list = document.createElement("div"); list.className = "dc-layers";
+    routes.slice().sort((a, b) => (a.cable.name || "").localeCompare(b.cable.name || "")).forEach((rc) => {
+      const c = rc.cable;
+      const row = document.createElement("div"); row.className = "dc-layer-row";
+      const tog = FormControls.toggle(c.name || "(câble)", this.showAllCables || this.selCables.has(c.id), (v) => { if (v) this.selCables.add(c.id); else this.selCables.delete(c.id); this.render(); }, { title: "Afficher ce câble inter-DC" });
+      tog.style.cssText = "flex:1 1 auto;text-align:left;justify-content:flex-start"; if (this.showAllCables) tog.disabled = true;
+      row.append(tog, this.btn("Modifier", () => this.host.openCableForm?.(c.id)));
+      list.appendChild(row);
+    });
+    box.appendChild(list);
     return box;
   }
 

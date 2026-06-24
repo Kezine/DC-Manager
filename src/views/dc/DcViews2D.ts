@@ -71,12 +71,54 @@ export class DcViews2D extends DcScene3D {
     if (this.showOrientMarks) gRoot.appendChild(Dom.svg("line", { class: "dc-orient-ref-edge", x1: 0, y1: 0, x2: W, y2: 0 }));   // bord de référence (y=0)
     const curId = this.dcId;
     this.store.dcsOfFloor(loc, fl).forEach((d: any) => gRoot.appendChild(this.floorRoomNode(d, curId, cfg)));
+    // câbles inter-DC de l'étage (port → exits/OOB → port, en coords plan) — filtrés par cableShown (panneau « Câbles inter-DC »)
+    const rDot = DC_DOT_PX * this.markerScale / (this.scale || 1);
+    this.interDcRoutesFloor(loc, fl, cfg).forEach((rc) => { if (this.cableShown(rc)) this.drawCable2D(gRoot, { cable: rc.cable, pts: rc.pts, linePts: rc.pts }, rDot); });
+    // exits des salles de l'étage = points de connexion des câbles inter-DC
+    if (this.showWaypoints) this.store.dcsOfFloor(loc, fl).forEach((d: any) => this.store.waypointsOfDc(d.id).forEach((wp: any) => { if (wp.wp_type === "exit" && this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.floorExitNode(d, wp, cfg)); }));
     if (this.showWaypoints) this.store.oobWaypoints().filter((w: any) => (w.location || "") === loc && String(w.floor || "") === fl).forEach((wp: any) => gRoot.appendChild(this.floorOobNode(wp, cfg)));
     this.store.floorEquipments().filter((e: any) => (e.location || "") === loc && String(e.floor || "") === fl).forEach((eq: any) => gRoot.appendChild(this.floorEquipNode2D(eq, cfg)));
     if (this.showFloorAnchor) gRoot.appendChild(this.floorAnchorNode(cfg, loc, fl));   // marqueur d'ancrage déplaçable (discret)
     this.renderFloorRail(ft);   // rail de navigation rapide entre étages (à gauche du plan)
     this.finishScene();
     this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue
+  }
+
+  /** Câbles inter-DC dont les DEUX bouts résolvent dans des salles de CET étage, en coordonnées PLAN :
+      port A → exits/OOB de la route → port B (réplique 2D de interDcRoutes via roomLocalToPlan / oobFloorPos). */
+  protected interDcRoutesFloor(loc: string, fl: string, cfg: any): Array<{ cable: any; pts: Vec3[] }> {
+    const onFloor = new Map<string, any>();
+    this.store.dcsOfFloor(loc, fl).forEach((d: any) => onFloor.set(d.id, d));
+    const planOf = (dc: any, p: Vec3) => FloorLayout.roomLocalToPlan(dc, this.floor.roomPos(dc, cfg), p);
+    const out: Array<{ cable: any; pts: Vec3[] }> = [];
+    this.store.all("cables").forEach((c: any) => {
+      const r = this.store.cableRoute(c);
+      if (!r.valid || !r.hasExits || !r.dcA || !r.dcB) return;
+      const da = onFloor.get(r.dcA), db = onFloor.get(r.dcB);
+      if (!da || !db) return;   // au moins un bout hors de cet étage → non tracé ici
+      const a = this.resolver.resolvePort3D(c.from_port_id, r.dcA), b = this.resolver.resolvePort3D(c.to_port_id, r.dcB);
+      if (!a || !b) return;
+      const pts: Vec3[] = [planOf(da, { x: a.x, y: a.y, z: 0 })];
+      (r.steps || []).forEach((s: any) => {
+        if (s.type === "floor") { const fp = FloorLayout.oobFloorPos(s.wp, cfg); pts.push({ x: fp.x, y: fp.y, z: 0 }); }
+        else { const room = onFloor.get(s.wp.datacenter_id); if (room) { const al = this.resolver.waypointAnchor(s.wp); pts.push(planOf(room, { x: al.x, y: al.y, z: 0 })); } }
+      });
+      pts.push(planOf(db, { x: b.x, y: b.y, z: 0 }));
+      out.push({ cable: c, pts });
+    });
+    return out;
+  }
+
+  /** Exit d'une salle posé sur le plan d'étage (coords PLAN) — point de connexion des câbles inter-DC. */
+  protected floorExitNode(dc: any, wp: any, cfg: any): SVGElement {
+    const al = this.resolver.waypointAnchor(wp);
+    const p = FloorLayout.roomLocalToPlan(dc, this.floor.roomPos(dc, cfg), { x: al.x, y: al.y, z: 0 });
+    const s = Math.max(120, cfg.cell_mm * 0.3) * this.markerScale;
+    const g = Dom.svg("g", { class: "dc-wp wp-exit", "data-wp": wp.id });
+    const dia = Dom.svg("polygon", { class: "dc-wp-body", points: `${p.x},${p.y - s} ${p.x + s},${p.y} ${p.x},${p.y + s} ${p.x - s},${p.y}`, "data-wp": wp.id });
+    const lab = Dom.svg("text", { class: "dc-wp-label", x: p.x, y: p.y - s * 1.4, "text-anchor": "middle", "font-size": cfg.cell_mm * 0.35 }); lab.textContent = (Waypoint.glyph(wp) + " " + (wp.name || "exit")).trim();
+    this.wireWp(dia, wp);
+    g.append(dia, lab); return g;
   }
 
   /** Marqueur de POINT D'ANCRAGE (vue Étage 2D) — règle graphiquement `floors.anchor_x/anchor_y` (décalage du
