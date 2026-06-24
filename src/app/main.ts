@@ -189,7 +189,25 @@ async function boot(): Promise<void> {
       imageStore.setLoadedKey(store.meta.facesKey || null);
     } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non enregistrées : " + (e.message || e), "err"); }
   }
-  /** À l'ouverture : recharge le compagnon SI le .json n'embarquait pas d'images inline (un seul picker). */
+  /** Charge le compagnon depuis `handle`. `interactive` autorise la (re)demande de permission (geste utilisateur) ;
+      à false, ne charge QUE si la permission est DÉJÀ accordée (queryPermission → aucune question). Renvoie true si
+      les images correspondant au document ont bien été chargées. */
+  async function tryLoadCompanion(handle: any, interactive: boolean, docKey: string | null, stillMissing: () => boolean): Promise<boolean> {
+    if (!handle) return false;
+    const perm = await HandleStore.ensureReadPermission(handle, interactive);
+    if (perm !== true) return false;   // null (= « prompt », non accordé) ou false (refusé) → pas de chargement
+    try {
+      const f = await handle.getFile(); await imageStore.loadBundle(await f.arrayBuffer());
+      const bundleKey = imageStore.lastLoadedKey || null;
+      const keyMatch = !!(docKey && bundleKey && docKey === bundleKey), legacyNoKey = (!docKey && !bundleKey);
+      if (keyMatch || (legacyNoKey && !stillMissing())) { currentFacesHandle = handle; shell.refreshActive(); return true; }
+    } catch (_) { /* compagnon illisible */ }
+    return false;
+  }
+  /** À l'ouverture : recharge le compagnon SI le .json n'embarquait pas d'images inline. Ne POSE la question que si
+      on ne peut PAS le faire automatiquement (permission déjà accordée). Si une interaction est requise (le navigateur
+      exige un geste pour (re)donner l'accès), on réutilise le compagnon mémorisé (un simple « Recharger », sans
+      re-sélection) ; sinon on propose de le choisir. */
   async function loadCompanionFacesOnOpen(jsonHandle: any): Promise<void> {
     const refIds = store.faceImageRefIds(), docKey = store.meta.facesKey || null;
     const stillMissing = () => [...refIds].some((id) => !imageStore.has(id));
@@ -197,23 +215,19 @@ async function boot(): Promise<void> {
     if (docKey && imageStore.lastLoadedKey === docKey && imageStore.count() > 0 && !stillMissing()) { shell.refreshActive(); return; }   // déjà à jour pour CE doc
     if (!docKey && !stillMissing()) { shell.refreshActive(); return; }     // legacy : refs déjà présentes (inline)
     if (!HAS_FS_API) { shell.refreshActive(); return; }
-    // 1) tenter le dernier compagnon MÉMORISÉ s'il correspond à CE document
     const rememberedMatches = docKey ? (imageStore.lastLoadedKey === docKey) : true;
-    if (rememberedMatches) {
-      try {
-        const fbRec = await handleStore.getFaces();
-        if (fbRec && fbRec.handle) {
-          const perm = await HandleStore.ensureReadPermission(fbRec.handle, true);
-          if (perm !== false) {
-            const f = await fbRec.handle.getFile(); await imageStore.loadBundle(await f.arrayBuffer());
-            const bundleKey = imageStore.lastLoadedKey || null;
-            const keyMatch = !!(docKey && bundleKey && docKey === bundleKey), legacyNoKey = (!docKey && !bundleKey);
-            if (keyMatch || (legacyNoKey && !stillMissing())) { currentFacesHandle = fbRec.handle; shell.refreshActive(); return; }
-          }
-        }
-      } catch (_) { /* compagnon mémorisé indisponible → on demandera */ }
+    let remembered = rememberedMatches ? await handleStore.getFaces() : null;
+    remembered = (remembered && remembered.handle) ? remembered : null;
+    // 1) AUTOMATIQUE : permission DÉJÀ accordée (aucune (re)demande) → charge sans rien demander
+    if (remembered && await tryLoadCompanion(remembered.handle, false, docKey, stillMissing)) return;
+    // 2) une interaction est requise (geste obligatoire côté navigateur). Compagnon mémorisé → simple « Recharger ».
+    if (remembered) {
+      const ok = await Dialog.confirm({ title: "Images de façade", message: "Recharger les images de façade de ce document depuis « " + (remembered.name || facesNameFor(jsonHandle ? jsonHandle.name : currentName)) + " » ?", confirmLabel: "Recharger", cancelLabel: "Plus tard" });
+      if (ok) { if (await tryLoadCompanion(remembered.handle, true, docKey, stillMissing)) return; Notify.toast("Images non rechargées (accès refusé).", "err"); }
+      else if (docKey && imageStore.lastLoadedKey && imageStore.lastLoadedKey !== docKey) { await imageStore.keepOnly(store.faceImageRefIds()); imageStore.setLoadedKey(null); }
+      currentFacesHandle = null; shell.refreshActive(); return;
     }
-    // 2) proposer de sélectionner le compagnon
+    // 3) aucun compagnon mémorisé → proposer de le sélectionner (un seul picker)
     const ok = await Dialog.confirm({ title: "Images de façade", message: "Ce document est associé à un fichier compagnon d'images « " + facesNameFor(jsonHandle ? jsonHandle.name : currentName) + " ». Le sélectionner maintenant ?", confirmLabel: "Choisir le fichier…", cancelLabel: "Plus tard" });
     if (!ok) {
       if (docKey && imageStore.lastLoadedKey && imageStore.lastLoadedKey !== docKey) { await imageStore.keepOnly(store.faceImageRefIds()); imageStore.setLoadedKey(null); }
