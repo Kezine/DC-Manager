@@ -27,6 +27,7 @@ import { CableStatuses } from "../domain/CableStatuses";
 import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../domain/constants";
 
 const DC_DOT_PX = 5;                 // rayon écran (px) des pastilles de câble
+const WP_HIT_PX = 14;                // rayon écran (px) des zones de clic/glisser des waypoints (vue Dessus)
 const CABLE_PORT_STUB_MM = 20;       // longueur du stub de sortie ⊥ des ports (cablePortNormal)
 const CABLE_SPLINE_K = 1 / 6;        // tension Catmull-Rom (arrondi des câbles routés)
 
@@ -2204,7 +2205,7 @@ export class DatacenterView {
     this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) gRoot.appendChild(this.rackNode(r)); });
     this.store.freeEquipsOfDc(dc.id).forEach((e: any) => { if (e.dc_x != null && e.dc_y != null) gRoot.appendChild(this.equipNode(e)); });
     this.drawCables2D(gRoot, dc);   // filtré par cableShown (showAllCables / selCables) à l'intérieur
-    if (this.showWaypoints) this.store.waypointsOfDc(dc.id).forEach((wp: any) => { if (this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.waypointNode2D(wp)); });
+    if (this.showWaypoints) this.store.waypointsOfDc(dc.id).forEach((wp: any) => { if (this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.waypointNode2D(wp, dc)); });
     this.finishScene();
     this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue
   }
@@ -2350,13 +2351,46 @@ export class DatacenterView {
     return g;
   }
   /** Un OOB posé sur le plan d'étage : losange + libellé, cliquable → form waypoint. */
+  /** OOB sur le plan d'étage — DÉPLAÇABLE dans le plan (affine floor_x/floor_y, snap au bord de maille ; le
+      rattachement bâtiment/étage NE change PAS, l'OOB reste sur l'étage affiché). */
   private floorOobNode(wp: any, cfg: any): SVGElement {
-    const p = FloorLayout.oobFloorPos(wp, cfg), s = Math.max(120, cfg.cell_mm * 0.35) * this.markerScale;
-    const g = Dom.svg("g", { class: "dc-wp wp-oob", "data-wp": wp.id });
-    const dia = Dom.svg("polygon", { class: "dc-wp3d-oob", points: `${p.x},${p.y - s} ${p.x + s},${p.y} ${p.x},${p.y + s} ${p.x - s},${p.y}`, "data-wp": wp.id });
-    const lab = Dom.svg("text", { class: "dc-wp-label", x: p.x, y: p.y - s * 1.4, "text-anchor": "middle", "font-size": cfg.cell_mm * 0.4 }); lab.textContent = (Waypoint.glyph(wp) + " " + (wp.name || "OOB")).trim();
-    this.wireWp(dia, wp);
-    g.append(dia, lab); return g;
+    const pos = FloorLayout.oobFloorPos(wp, cfg), loc = FloorLayout.oobLocalized(wp), s = cfg.cell_mm * 0.4;
+    const g = Dom.svg("g", { class: "dc-floor-oob" + (this.selWaypointId === wp.id ? " sel" : ""), "data-oob": wp.id, "data-wp": wp.id, transform: `translate(${pos.x} ${pos.y})` });
+    g.appendChild(Dom.svg("circle", { class: "dc-floor-oob-body", cx: 0, cy: 0, r: s }));
+    const label = Dom.svg("text", { class: "dc-floor-oob-label", x: 0, y: -s * 1.5, "text-anchor": "middle", "font-size": cfg.cell_mm * 0.42 });
+    label.textContent = "◎ " + (wp.name || "OOB") + " · " + Format.meters(FloorLayout.oobHeight(wp)) + (loc ? "" : " (auto)");
+    g.appendChild(label);
+    this.wireTip(g, () => this.wpTipHtml(wp));
+    g.addEventListener("mousedown", (e: any) => this.onFloorOobPointerDown(e, wp, cfg));
+    g.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.hideTip(); this.ctxMenu(e, this.waypointCtx(wp)); });
+    return g;
+  }
+  private onFloorOobPointerDown(e: MouseEvent, wp: any, cfg: any): void {
+    if (e.button !== 0) return; e.preventDefault(); e.stopPropagation();
+    this.selWaypointId = wp.id; this.selRoomId = null; this.selFloorEquip = null;
+    if (this.svg) this.svg.querySelectorAll(".dc-floor-room,.dc-floor-oob,.dc-floor-equip").forEach((n) => n.classList.remove("sel"));
+    const grp = e.currentTarget as SVGElement; grp.classList.add("sel");
+    const ft = this.floorTargetResolve() || { location: "", floor: "" }, loc = ft.location || "", fl = String(ft.floor || "");   // reste sur l'étage AFFICHÉ
+    const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm;
+    const start = FloorLayout.oobFloorPos(wp, cfg), w0 = this.clientToWorld(e.clientX, e.clientY);
+    const off = { x: w0.x - start.x, y: w0.y - start.y };
+    const clamp = (p: { x: number; y: number }) => ({ x: Math.min(Math.max(p.x, 0), W), y: Math.min(Math.max(p.y, 0), D) });
+    let cur = { x: start.x, y: start.y }, moved = false;
+    const move = (ev: MouseEvent) => {
+      const wld = this.clientToWorld(ev.clientX, ev.clientY); const nx = wld.x - off.x, ny = wld.y - off.y;
+      if (!moved && Math.abs(nx - start.x) + Math.abs(ny - start.y) < (8 / (this.scale || 1))) return;
+      moved = true; grp.classList.add("dragging"); this.hideTip();
+      cur = clamp({ x: nx, y: ny }); grp.setAttribute("transform", `translate(${cur.x} ${cur.y})`);
+      this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
+    };
+    const up = async () => {
+      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      grp.classList.remove("dragging"); this.hideCote();
+      if (!moved) { this.render(); return; }   // simple clic = sélection
+      const c = clamp({ x: this.freePlace ? cur.x : this.snapEdge(cur.x, cell), y: this.freePlace ? cur.y : this.snapEdge(cur.y, cell) });
+      await this.store.update("waypoints", wp.id, { floor_x: c.x, floor_y: c.y, location: loc, floor: fl }); this.host.setDirty?.(true);   // localise (étage inchangé)
+    };
+    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
   }
   private snapEdge(v: number, cell: number): number { return Math.round(v / cell) * cell; }
   /** Glisser une salle sur le plan d'étage (set floor_x/floor_y, aimanté à la maille, borné au plan) ;
@@ -2448,18 +2482,88 @@ export class DatacenterView {
     grp.addEventListener("contextmenu", (ev: any) => this.ctxMenu(ev, this.equipmentCtx(e.id)));
     return grp;
   }
-  private waypointNode2D(wp: any): SVGElement {
-    const a = this.resolver.waypointAnchor(wp);
-    const g = Dom.svg("g", { class: "dc-wp wp-" + Waypoint.typeOf(wp), "data-wp": wp.id });
-    if (a.x == null) return g;
-    const s = 90 * this.markerScale;   // demi-taille du losange (mm monde)
-    if (wp.kind === "segment" && wp.dc_x2 != null) {
-      g.appendChild(Dom.svg("line", { class: "dc-wp3d-rail", x1: wp.dc_x, y1: wp.dc_y, x2: wp.dc_x2, y2: wp.dc_y2, "data-wp": wp.id }));
+  /** Waypoint en vue DESSUS. Pin/rail LIBRES = déplaçables dans la salle (affine dc_x/dc_y, snap demi-maille,
+      le rattachement salle/datacenter NE change PAS) ; brosse / pin latéral / pin de capot = STATIQUES (zone =
+      le slot de la baie, posés par assignation, édités par form). Réplique de `waypointNode` du monolithe. */
+  private waypointNode2D(wp: any, dc: any): SVGElement {
+    const sel = this.selWaypointId === wp.id;
+    const s = Math.max(70, (dc.cell_mm || 600) * 0.18);   // demi-taille du losange / rayon poignée (mm monde)
+    const fontSize = Math.max(40, (dc.cell_mm || 600) * 0.2);
+    // ANCRÉ à une baie (brosse / pin latéral / pin de capot) → marqueur STATIQUE (la position suit le slot)
+    if (wp.kind === "brush" || (wp.kind === "point" && wp.rack_id && (wp.side_lr != null || wp.cap_face))) {
+      const g = Dom.svg("g", { class: "dc-wp wp-" + (wp.kind === "brush" ? "brush" : (wp.cap_face ? "cappin" : "sidepin")) + (sel ? " sel" : ""), "data-wp": wp.id });
+      const a = this.resolver.waypointAnchor(wp); if (a.x == null) return g;
+      const dia = Dom.svg("polygon", { class: "dc-wp-body", points: `${a.x},${a.y - s} ${a.x + s},${a.y} ${a.x},${a.y + s} ${a.x - s},${a.y}`, "data-wp": wp.id });
+      const lab = Dom.svg("text", { class: "dc-wp-label", x: a.x, y: a.y - s * 1.4, "text-anchor": "middle", "font-size": fontSize }); lab.textContent = Waypoint.glyph(wp) + " " + (wp.name || "");
+      this.wireWp(dia, wp); g.append(dia, lab);
+      return g;
     }
-    const dia = Dom.svg("polygon", { class: "dc-wp3d-body", points: `${a.x},${a.y - s} ${a.x + s},${a.y} ${a.x},${a.y + s} ${a.x - s},${a.y}`, "data-wp": wp.id });
-    const lab = Dom.svg("text", { class: "dc-wp-label", x: a.x, y: a.y - s * 1.4, "text-anchor": "middle", "font-size": 120 }); lab.textContent = Waypoint.glyph(wp) + " " + (wp.name || "");
-    this.wireWp(dia, wp);
-    g.append(dia, lab);
+    // LIBRE (pin ou rail de salle) → déplaçable dans la salle
+    const g = Dom.svg("g", { class: "dc-wp wp-" + Waypoint.typeOf(wp) + (sel ? " sel" : ""), "data-wp": wp.id });
+    const isSeg = wp.kind === "segment" && wp.dc_x2 != null;
+    const hitR = WP_HIT_PX * this.markerScale / (this.scale || 1);   // zone de clic ~constante à l'écran
+    const cur: any = { x1: wp.dc_x, y1: wp.dc_y, x2: wp.dc_x2, y2: wp.dc_y2 };
+    let rail: any, h1: any, h2: any, dia: any, label: any, hitDot: any, hitLine: any, hit1: any, hit2: any;
+    const sync = () => {   // répercute `cur` sur les nœuds SVG (drag en direct)
+      if (isSeg) {
+        rail.setAttribute("x1", cur.x1); rail.setAttribute("y1", cur.y1); rail.setAttribute("x2", cur.x2); rail.setAttribute("y2", cur.y2);
+        hitLine.setAttribute("x1", cur.x1); hitLine.setAttribute("y1", cur.y1); hitLine.setAttribute("x2", cur.x2); hitLine.setAttribute("y2", cur.y2);
+        h1.setAttribute("cx", cur.x1); h1.setAttribute("cy", cur.y1); h2.setAttribute("cx", cur.x2); h2.setAttribute("cy", cur.y2);
+        hit1.setAttribute("cx", cur.x1); hit1.setAttribute("cy", cur.y1); hit2.setAttribute("cx", cur.x2); hit2.setAttribute("cy", cur.y2);
+        label.setAttribute("x", (cur.x1 + cur.x2) / 2); label.setAttribute("y", (cur.y1 + cur.y2) / 2 - s * 1.2);
+      } else {
+        dia.setAttribute("points", `${cur.x1},${cur.y1 - s} ${cur.x1 + s},${cur.y1} ${cur.x1},${cur.y1 + s} ${cur.x1 - s},${cur.y1}`);
+        hitDot.setAttribute("cx", cur.x1); hitDot.setAttribute("cy", cur.y1);
+        label.setAttribute("x", cur.x1); label.setAttribute("y", cur.y1 - s * 1.4);
+      }
+    };
+    const startDrag = (ev: MouseEvent, which: string) => {
+      if (ev.button !== 0) return; ev.preventDefault(); ev.stopPropagation();
+      this.selRackId = null; this.selEquipId = null; this.selWaypointId = wp.id;
+      if (this.svg) { this.svg.querySelectorAll(".dc-rack,.dc-equip").forEach((n) => n.classList.remove("sel")); this.svg.querySelectorAll(".dc-wp").forEach((n) => n.classList.toggle("sel", n.getAttribute("data-wp") === wp.id)); }
+      this.renderSide(dc);
+      const w0 = this.clientToWorld(ev.clientX, ev.clientY);
+      const start = { x1: cur.x1, y1: cur.y1, x2: cur.x2, y2: cur.y2 };
+      const half = (dc.cell_mm || 600) / 2, snap = (v: number) => this.freePlace ? v : Math.round(v / half) * half;
+      let moved = false;
+      const move = (e2: MouseEvent) => {
+        const w = this.clientToWorld(e2.clientX, e2.clientY); const dx = w.x - w0.x, dy = w.y - w0.y;
+        if (!moved && Math.abs(dx) + Math.abs(dy) < (8 / (this.scale || 1))) return;
+        moved = true; g.classList.add("dragging"); this.hideTip();
+        if (which === "body") {
+          if (isSeg) { cur.x1 = start.x1 + dx; cur.y1 = start.y1 + dy; cur.x2 = start.x2 + dx; cur.y2 = start.y2 + dy; }   // translation rigide (longueur préservée)
+          else { cur.x1 = start.x1 + dx; cur.y1 = start.y1 + dy; }
+        } else if (which === "p1") { cur.x1 = start.x1 + dx; cur.y1 = start.y1 + dy; }
+        else { cur.x2 = start.x2 + dx; cur.y2 = start.y2 + dy; }
+        sync();
+      };
+      const up = async () => {
+        document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+        g.classList.remove("dragging");
+        if (!moved) { this.render(); return; }   // simple clic = sélection seule
+        if (which === "body" && isSeg) { const dx = snap(cur.x1 - start.x1), dy = snap(cur.y1 - start.y1); cur.x1 = start.x1 + dx; cur.y1 = start.y1 + dy; cur.x2 = start.x2 + dx; cur.y2 = start.y2 + dy; }   // aimante le delta → longueur préservée
+        else if (which === "p2") { cur.x2 = snap(cur.x2); cur.y2 = snap(cur.y2); }
+        else { cur.x1 = snap(cur.x1); cur.y1 = snap(cur.y1); }
+        const payload = isSeg ? { dc_x: cur.x1, dc_y: cur.y1, dc_x2: cur.x2, dc_y2: cur.y2 } : { dc_x: cur.x1, dc_y: cur.y1 };
+        await this.store.update("waypoints", wp.id, payload); this.host.setDirty?.(true);   // datacenter_id INCHANGÉ → reste dans la salle
+      };
+      document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    };
+    const wireTop = (node: SVGElement) => { this.wireTip(node, () => this.wpTipHtml(wp)); node.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.hideTip(); this.ctxMenu(e, this.waypointCtx(wp)); }); };
+    if (isSeg) {
+      rail = Dom.svg("line", { class: "dc-wp-rail" });
+      h1 = Dom.svg("circle", { class: "dc-wp-handle", r: s * 0.55 }); h2 = Dom.svg("circle", { class: "dc-wp-handle", r: s * 0.55 });
+      hitLine = Dom.svg("line", { class: "dc-wp-hit-line" }); hit1 = Dom.svg("circle", { class: "dc-wp-hit", r: hitR }); hit2 = Dom.svg("circle", { class: "dc-wp-hit", r: hitR });
+      label = Dom.svg("text", { class: "dc-wp-label", "text-anchor": "middle", "font-size": fontSize }); label.textContent = Waypoint.glyph(wp) + " " + (wp.name || "");
+      g.append(rail, h1, h2, label, hitLine, hit1, hit2);
+      ([[hitLine, "body"], [hit1, "p1"], [hit2, "p2"]] as Array<[SVGElement, string]>).forEach(([n, which]) => { n.addEventListener("mousedown", (e: any) => startDrag(e, which)); wireTop(n); });
+    } else {
+      dia = Dom.svg("polygon", { class: "dc-wp-body" }); hitDot = Dom.svg("circle", { class: "dc-wp-hit", r: hitR });
+      label = Dom.svg("text", { class: "dc-wp-label", "text-anchor": "middle", "font-size": fontSize }); label.textContent = Waypoint.glyph(wp) + " " + (wp.name || "");
+      g.append(dia, label, hitDot);
+      hitDot.addEventListener("mousedown", (e: any) => startDrag(e, "body")); wireTop(hitDot);
+    }
+    sync();
     return g;
   }
   private drawCables2D(gRoot: SVGElement, dc: any): void {

@@ -404,6 +404,13 @@ src/
           auto au welcome via `HandleStore.getFaces/putFaces`, modale « Ouvrir » JSON/compagnon ; download sans FS reste
           inline = autonome). **NB** : le comportement runtime FS (permissions, appariement) reste à valider en navigateur
           (typecheck + test:modules 313 + build verts).
+    - [x] **5c.26 — waypoints LIBRES déplaçables dans leur zone** (correctif de régression du port — `waypointNode2D`/
+          `floorOobNode` n'avaient que `wireWp` = clic) : pin/rail de salle (vue Dessus) glissables (`startDrag`/`sync`,
+          poignées d'extrémités pour les rails, snap demi-maille, `dc_x/dc_y[/dc_x2/dc_y2]`) et OOB (vue Étage) glissable
+          (`onFloorOobPointerDown`, snap bord de maille, `floor_x/floor_y`). **Le rattachement salle/étage NE change
+          JAMAIS** (datacenter_id / location+floor intacts) — c'est seulement l'AFFINAGE de l'emplacement. Les waypoints
+          ANCRÉS à une baie (brosse / pin latéral / pin de capot) restent STATIQUES (zone = le slot, posés par
+          assignation). Réplique de `waypointNode`/`onFloorOobPointerDown` du monolithe.
 
 > ### ⏯ REPRISE (état au 5c.25 — DatacenterView COMPLET, raffinements TOUS portés — nouvelle conversation)
 > **Vert partout** : `npm run typecheck` (clean) · `npm run test:modules` (**313/313**) · `npm run build` (OK).
