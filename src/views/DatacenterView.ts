@@ -92,6 +92,9 @@ export class DatacenterView {
   private _routeMouseClient: [number, number] | null = null;
   private _routeMouseTO: any = 0;
   floorTarget: { location: string; floor: string } | null = null;   // étage visé (vue Étage), indépendant d'une salle
+  // ROTATION de la vue 2D { angle, cx, cy, flip } : Étage = 180° ; Dessus = orientation salle + 180° → bord de réf. EN BAS.
+  // Le flip horizontal donne une vraie vue « du dessus » (cohérente avec la 3D, et non « via le plancher »). Nul en 3D.
+  private floorXf: { angle: number; cx: number; cy: number; flip: boolean } | null = null;
   private coteEl: HTMLElement | null = null;
   private ttEl: HTMLElement | null = null;   // tooltip enrichi de scène (positionné dans le stage)
   az = CAM_PRESETS.iso[0];
@@ -379,7 +382,8 @@ export class DatacenterView {
   private minScale(dc: any): number {
     let floor = 0.02;
     try {
-      const b = this.sceneBounds(dc), bw = Math.max(1, b.maxH - b.minH), bh = Math.max(1, b.maxV - b.minV);
+      let b = this.sceneBounds(dc); if (this.floorXf) b = this.rotBounds(b, this.floorXf);
+      const bw = Math.max(1, b.maxH - b.minH), bh = Math.max(1, b.maxV - b.minV);
       const SW = this.stage.clientWidth || 900, SH = this.stage.clientHeight || 560;
       floor = Math.min(0.02, Math.min(SW / bw, SH / bh) * 0.4);
     } catch (_) { /* défaut */ }
@@ -388,7 +392,7 @@ export class DatacenterView {
   recenter(keepScale?: boolean): void {
     if (!this.svg) return;
     const dc = this.current(); if (!dc && this.view !== "floor") return;   // vue Étage : cadrage sur l'étage (sans salle)
-    const b = this.sceneBounds(dc);
+    let b = this.sceneBounds(dc); if (this.floorXf) b = this.rotBounds(b, this.floorXf);   // cadrer sur les bornes APRÈS rotation de la vue
     const bw = Math.max(1, b.maxH - b.minH), bh = Math.max(1, b.maxV - b.minV);
     const SW = this.stage.clientWidth || 900, SH = this.stage.clientHeight || 560, pad = 40;
     if (!keepScale || this.scale == null) this.scale = Math.max(this.minScale(dc), Math.min(6, Math.min((SW - pad * 2) / bw, (SH - pad * 2) / bh)));
@@ -455,7 +459,38 @@ export class DatacenterView {
     this.drawRoutePreview3D(dc, proj, drawables);
     drawables.forEach((d) => g.appendChild(d.node));   // ajouté en dernier dans gRoot = au-dessus (et pointer-events:none)
   }
-  private applyTransform(): void { if (this.gRoot) this.gRoot.setAttribute("transform", `translate(${this.tx},${this.ty}) scale(${this.scale})`); }
+  private applyTransform(): void {
+    if (!this.gRoot) return;
+    let xf = "";
+    if (this.floorXf) {   // vue 2D tournée + miroir → vue réellement « du dessus »
+      const f = this.floorXf;
+      xf = ` rotate(${f.angle} ${f.cx} ${f.cy})`;
+      if (f.flip) xf += ` translate(${2 * f.cx} 0) scale(-1 1)`;
+    }
+    this.gRoot.setAttribute("transform", `translate(${this.tx},${this.ty}) scale(${this.scale})${xf}`);
+  }
+  /** AABB d'un rect de bornes après rotation de la vue (autour de cx,cy), pour recadrer. */
+  private rotBounds(b: { minH: number; minV: number; maxH: number; maxV: number }, xf: { angle: number; cx: number; cy: number }): { minH: number; minV: number; maxH: number; maxV: number } {
+    const rad = xf.angle * Math.PI / 180, co = Math.cos(rad), si = Math.sin(rad);
+    let minH = Infinity, minV = Infinity, maxH = -Infinity, maxV = -Infinity;
+    ([[b.minH, b.minV], [b.maxH, b.minV], [b.maxH, b.maxV], [b.minH, b.maxV]] as Array<[number, number]>).forEach(([x, y]) => {
+      const dx = x - xf.cx, dy = y - xf.cy, rx = xf.cx + dx * co - dy * si, ry = xf.cy + dx * si + dy * co;
+      minH = Math.min(minH, rx); maxH = Math.max(maxH, rx); minV = Math.min(minV, ry); maxV = Math.max(maxV, ry);
+    });
+    return { minH, minV, maxH, maxV };
+  }
+  /** Remet les textes À L'ENDROIT malgré la rotation/miroir de la vue 2D (contre-transform autour de l'ancre de chaque texte). */
+  private uprightTexts(): void {
+    if (!this.floorXf || !this.gRoot) return;
+    const f = this.floorXf, ang = (360 - f.angle) % 360;
+    if (!ang && !f.flip) return;
+    this.gRoot.querySelectorAll("text").forEach((t) => {
+      const x = parseFloat(t.getAttribute("x") || "0") || 0, y = parseFloat(t.getAttribute("y") || "0") || 0, pr = t.getAttribute("transform");
+      let k = f.flip ? `translate(${2 * x} 0) scale(-1 1) ` : "";   // contre-miroir autour de l'ancre
+      if (ang) k += `rotate(${ang} ${x} ${y})`;
+      t.setAttribute("transform", (pr ? pr + " " : "") + k.trim());
+    });
+  }
 
   /* ---- interactions ---- */
   private onWheel(ev: WheelEvent): void {
@@ -1190,6 +1225,7 @@ export class DatacenterView {
   }
   renderThreeD(dc: any): void {
     this.persistView();   // capture l'état complet de la vue (débouncé)
+    this.floorXf = null;   // pas de rotation de vue en 3D (réservée aux vues 2D Dessus/Étage)
     // disposition multi-salles (étages empilés / bâtiments côte à côte) — sinon mono-salle (null)
     this._multi = this.multiDc ? this.floor.multiLayout(this.current(), { visibleDcIds: this.visibleDcIds }) : null;
     this._farCull = this.cullDistanceM > 0 && this.camViewWidthM(dc) > this.cullDistanceM;   // culling de distance (perf)
@@ -2151,6 +2187,9 @@ export class DatacenterView {
     this.persistView();
     const gRoot = this.newScene(dc);
     const W = dc.width_mm, D = dc.depth_mm, cell = dc.cell_mm;
+    // vue 2D TOURNÉE pour que la RÉFÉRENCE globale (liseré) soit toujours EN BAS : angle = orientation salle + 180°
+    // (0→180, 90→270, 180→0, 270→90) + miroir horizontal → vraie vue « du dessus » (cohérente avec la 3D).
+    this.floorXf = { angle: (Normalize.rackOrientation(dc.floor_orientation) + 180) % 360, cx: W / 2, cy: D / 2, flip: true };
     const room = Dom.svg("rect", { class: "dc-room", x: 0, y: 0, width: W, height: D });
     room.addEventListener("contextmenu", (e: any) => { const w = this.clientToWorld(e.clientX, e.clientY); this.ctxMenu(e, this.floorCtx(dc, w)); });   // clic droit sol → créer un waypoint
     gRoot.appendChild(room);
@@ -2161,6 +2200,7 @@ export class DatacenterView {
     this.drawCables2D(gRoot, dc);   // filtré par cableShown (showAllCables / selCables) à l'intérieur
     if (this.showWaypoints) this.store.waypointsOfDc(dc.id).forEach((wp: any) => { if (this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.waypointNode2D(wp)); });
     this.finishScene();
+    this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue
   }
 
   /* ============================ VUE ÉTAGE (plan bâtiment 2D) ============================ */
@@ -2170,6 +2210,7 @@ export class DatacenterView {
     const loc = ft.location || "", fl = String(ft.floor || ""), cfg = this.floor.config(loc, fl);
     const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm;
     const gRoot = this.newScene(null);
+    this.floorXf = { angle: 180, cx: W / 2, cy: D / 2, flip: true };   // bord de réf. EN BAS + miroir → vue « du dessus » réelle
     const bg = Dom.svg("rect", { class: "dc-room", x: 0, y: 0, width: W, height: D });
     bg.addEventListener("contextmenu", (e: any) => { const w = this.clientToWorld(e.clientX, e.clientY); this.ctxMenu(e, this.floorPlaneCtx(loc, fl, w)); });   // clic droit sol → créer salle / OOB / éditer plan
     gRoot.appendChild(bg);
@@ -2180,6 +2221,7 @@ export class DatacenterView {
     if (this.showWaypoints) this.store.oobWaypoints().filter((w: any) => (w.location || "") === loc && String(w.floor || "") === fl).forEach((wp: any) => gRoot.appendChild(this.floorOobNode(wp, cfg)));
     this.store.floorEquipments().filter((e: any) => (e.location || "") === loc && String(e.floor || "") === fl).forEach((eq: any) => gRoot.appendChild(this.floorEquipNode2D(eq, cfg)));
     this.finishScene();
+    this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue
   }
   /** Un équipement posé sur le plan d'étage : empreinte orientée + libellé. Cliquable / déplaçable. */
   private floorEquipNode2D(eq: any, cfg: any): SVGElement {
@@ -2368,7 +2410,15 @@ export class DatacenterView {
   private clientToWorld(cx: number, cy: number): { x: number; y: number } {
     if (!this.svg || this.scale == null) return { x: 0, y: 0 };
     const r = this.svg.getBoundingClientRect();
-    return { x: (cx - r.left - this.tx) / this.scale, y: (cy - r.top - this.ty) / this.scale };
+    let x = (cx - r.left - this.tx) / this.scale, y = (cy - r.top - this.ty) / this.scale;
+    if (this.floorXf) {   // vue 2D tournée → inverse la rotation (écran→monde) ; + miroir horizontal
+      const f = this.floorXf, rad = -f.angle * Math.PI / 180, co = Math.cos(rad), si = Math.sin(rad);
+      const dx = x - f.cx, dy = y - f.cy;
+      let wx = f.cx + dx * co - dy * si; const wy = f.cy + dx * si + dy * co;
+      if (f.flip) wx = 2 * f.cx - wx;   // inverse le miroir (après la rotation, comme dans le transform)
+      return { x: wx, y: wy };
+    }
+    return { x, y };
   }
   private snap(v: number, cell: number): number { return (Math.round(v / cell - 0.5) + 0.5) * cell; }
   private rackHalfExtents(r: any): { hx: number; hy: number } {
