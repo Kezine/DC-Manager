@@ -227,13 +227,12 @@
   .save-state-icon.dirty { background: var(--accent); }
   .save-state-icon.clean { background: var(--ok); }
   .save-state-icon.mem { background: var(--warn); }
-  /* modif en attente avec auto-save actif : vert pulsant (vs accent fixe quand off) */
-  .save-state-icon.dirty-on { background: var(--ok); animation: savePulse 1.4s ease-in-out infinite; }
+  /* modif en attente avec auto-save actif : accent PULSANT (vs accent fixe quand off) — jamais vert tant que non sauvé */
+  .save-state-icon.dirty-on { background: var(--accent); animation: savePulse 1.4s ease-in-out infinite; }
   @keyframes savePulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
-  @media (prefers-reduced-motion: reduce) { .save-state-icon.dirty-on { animation: none; } }
 
   /* ============ VIEW / BTN ============ */
-  main { position: relative; z-index: 1; padding: 18px 20px; max-width: min(2400px, 96vw); margin: 0 auto; }
+  main { position: relative; z-index: 1; padding: 18px 20px; max-width: 95vw; margin: 0 auto; }
   /* La vue Visualisation profite des Ã©crans larges ET de toute la hauteur dispo.
      La HAUTEUR exacte est mesurÃ©e en JS (GraphView._fitViewHeight) car plusieurs
      Ã©lÃ©ments en flux la prÃ©cÃ¨dent (topbar + statusbar, cette derniÃ¨re pouvant wrapper) :
@@ -726,7 +725,14 @@
   .dc-wp-mast { stroke: var(--fg-dim); stroke-width: 1px; stroke-dasharray: 4 4; opacity: 0.55; vector-effect: non-scaling-stroke; pointer-events: none; }
   .dc-wp3d-body { fill: var(--bg-3); stroke: var(--accent); stroke-width: 1.5px; vector-effect: non-scaling-stroke; cursor: pointer; }
   .dc-wp3d-rail { stroke: var(--accent); stroke-width: 5px; stroke-linecap: round; opacity: 0.45; vector-effect: non-scaling-stroke; cursor: pointer; }
-  .dc-wp3d-rail:hover, .dc-wp3d-body:hover { opacity: 1; }
+  /* Survol d'un waypoint (pin / rail / OOB) : mise en évidence FRANCHE (le corps d'un pin est déjà opaque,
+     un simple opacity:1 ne se voyait pas) — trait accent épaissi + halo, pour repérer la cible au clic/routage. */
+  .dc-wp3d-body:hover, .dc-wp3d-rail:hover, .dc-wp3d-oob:hover,
+  .dc-wp-body:hover, .dc-wp-rail:hover { stroke: var(--accent) !important; stroke-width: 3px !important; opacity: 1 !important; filter: drop-shadow(0 0 3px var(--accent)); cursor: pointer; }
+  .dc-wp3d-body:hover, .dc-wp3d-oob:hover, .dc-wp-body:hover { fill: var(--accent) !important; fill-opacity: 0.32 !important; }
+  /* Waypoint DÉJÀ choisi dans la route en cours (création de câble au clic) : mise en évidence franche. */
+  .route-pick { stroke: var(--ok, #29c46b) !important; stroke-width: 3px !important; opacity: 1 !important; filter: drop-shadow(0 0 3px var(--ok, #29c46b)); }
+  polygon.route-pick, circle.route-pick { fill: var(--ok, #29c46b) !important; fill-opacity: 0.45 !important; }
   /* v118 â€” BROSSE DE BRASSAGE : corps en FIL DE FER (arÃªtes) + faÃ§ades + MARGE (padding) dessinÃ©e DANS l'espace U.
      v134 : couleur = pseudo-Ã©quipement (var(--line-2), comme .dc-eq3d.item) ; la marge est un cadre plein INTÃ‰RIEUR
      (entre l'enveloppe U et la zone utile), plus de bordure 5 mm dÃ©bordant Ã  l'extÃ©rieur. Translucide â†’ cÃ¢bles visibles. */
@@ -779,7 +785,6 @@
     50%      { stroke-width: 6.5px; filter: drop-shadow(0 0 7px rgba(255,225,77,0.95)); }
   }
   .dc-eq3d.focus-pulse, .dc-equip3d.focus-pulse { animation: focusPulse 1.15s ease-in-out infinite; }
-  @media (prefers-reduced-motion: reduce) { .dc-eq3d.focus-pulse, .dc-equip3d.focus-pulse { animation: none; } }
   .btn-ghost.active { color: var(--accent); border-color: var(--accent); }   /* bascule active (ex. estomper â€” v50) */
   .dc-cable.hit { stroke: #ffe14d !important; stroke-width: 3px; opacity: 1; }
   .dc-eq3d-name { fill: var(--bg); font-family: var(--mono); font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgba(255,255,255,0.55); stroke-width: 2px; }
@@ -821,6 +826,9 @@
   #view-datacenter:-webkit-full-screen { background: var(--bg); padding: 10px; display: flex; flex-direction: column; height: 100vh; }
   #view-datacenter:fullscreen .view-header { display: none; }
   #view-datacenter:fullscreen .dc-layout { flex: 1 1 auto; min-height: 0; }
+  /* portage : la vue 3D met en plein écran la RANGÉE stage|panneau (.dc-row) */
+  .dc-row:fullscreen { background: var(--bg); padding: 10px; height: 100vh; }
+  .dc-row:-webkit-full-screen { background: var(--bg); padding: 10px; height: 100vh; }
   .btn.danger { color: var(--err); }
   .sub-input {
     background: var(--bg-2);
@@ -1409,7 +1417,6 @@
   .welcome-actions { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
   .welcome-btn { width: 100%; justify-content: center; }
   .welcome-mode-hint { color: var(--fg-dimmer); font-size: 10px; line-height: 1.5; margin: 18px 0 0; letter-spacing: 0.02em; }
-  @media (prefers-reduced-motion: reduce) { .welcome-screen { animation: none; } }
 
   /* contrÃ´les tributaires d'un document : neutralisÃ©s tant que l'Ã©cran d'accueil est actif */
   body.welcome-active .statusbar > .status-stat { visibility: hidden; }

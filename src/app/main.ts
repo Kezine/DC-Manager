@@ -1,45 +1,241 @@
-/* Point d'entrée TEMPORAIRE de la migration.
-   À ce stade, le MODÈLE DE DOMAINE et la COUCHE DONNÉES sont extraits
-   (cf. MIGRATION.md). Le Store et les vues sont encore dans le HTML monolithique
-   et seront portés ensuite. Cette entrée instancie le registre + un adapter pour
-   prouver la chaîne de compilation webpack → TypeScript et exposer au debug. */
+/* Point d'entrée. Monte le SHELL (topbar fichier/réglages + barre de statut + onglets +
+   en-têtes de domaine), câble les vues de liste (ListView + ListConfigs + Forms), la
+   topologie (GraphView) et un emplacement Datacenters (à porter). Bootstrap GLOBAL :
+   préférences (thème / source de données / auto-save) via `Prefs`, opérations FICHIER
+   (File System Access API quand dispo, sinon download/upload), auto-save périodique, et
+   verrou d'ouverture exclusive multi-onglets (`TabChannel` sur BroadcastChannel). */
 import "../styles/netmap.css";
 import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter } from "../data";
 import { Store } from "../store";
-import { GraphView, ListView, ListConfigs, Forms } from "../views";
+import { GraphView, ListView, ListConfigs, Forms, DatacenterView } from "../views";
+import { ImageStore } from "../data";
 import type { ListOptions, FormHost } from "../views";
-import { Modal, Notify, FormControls, Dialog } from "../ui";
+import { Modal, Notify, FormControls, Dialog, Fullscreen } from "../ui";
 import { Html } from "../core/Html";
+import { Id } from "../core/Id";
+import { Prefs } from "../core/Prefs";
+import { APP_RELEASE, EQUIP_FACE_IMG_FIELD } from "../domain/constants";
 import { Shell } from "./Shell";
+import type { ShellHost } from "./Shell";
+import { SaveState, shouldAutosave } from "./SaveState";
+import { TabChannel } from "./TabChannel";
+import { HandleStore } from "./HandleStore";
 
 const adapter = new BrowserStorageAdapter({ persistent: false });
 const store = new Store(adapter);
+const prefs = new Prefs();
+const W = window as any;
+const HAS_FS_API = typeof W.showSaveFilePicker === "function" && typeof W.showOpenFilePicker === "function";
+const JSON_TYPES = [{ description: "NetMap JSON", accept: { "application/json": [".json"] } }];
 
-/* Petit document de démonstration (tranche-pilote) si le store est vide :
-   3 équipements reliés par 2 câbles → de quoi voir GraphView rendre/disposer. */
-async function seedDemo(): Promise<void> {
-  if (store.totalCount() > store.all("portTypes").length + store.all("cableTypes").length) return;
-  const sw = await store.create("equipments", { name: "core-sw", type: "switch" });
-  const srv = await store.create("equipments", { name: "srv-01", type: "serveur" });
-  const ap = await store.create("equipments", { name: "ap-hall", type: "ap" });
-  const mk = async (eq: any) => (await store.create("ports", { equipment_id: eq.id, name: "p1" })).id;
-  const [p1, p2, p3, p4] = [await mk(sw), await mk(srv), await mk(sw), await mk(ap)];
-  await store.create("cables", { name: "uplink", from_port_id: p1, to_port_id: p2, status: "cable" });
-  await store.create("cables", { name: "wifi", from_port_id: p3, to_port_id: p4, status: "planifie" });
+/** Le document est-il « non vide » (au-delà des seuls catalogues fermés réinjectés) ? */
+function hasUserData(): boolean { return store.totalCount() > store.all("portTypes").length + store.all("cableTypes").length; }
+
+function applyTheme(theme: string): void {
+  if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.removeAttribute("data-theme");
+}
+function docFileName(): string { return (store.meta.docName || "netmap").replace(/[\\/:*?"<>|]+/g, "_") + ".json"; }
+function downloadJson(filename: string, content: string): void {
+  const blob = new Blob([content], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function boot(): Promise<void> {
   await store.init();
   if (!store.restored) await store.newDocument();
-  await seedDemo();
+  applyTheme(prefs.theme);
 
   const root = document.getElementById("app");
   if (!root) return;
 
-  const shell = new Shell(root);
-  const modal = new Modal();   // modale d'édition partagée
-  const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { /* dirty global plus tard */ } };
+  // ---- état FICHIER / session ----
+  let currentHandle: any = null;        // FileSystemFileHandle lié (FS API) — null = download/mémoire
+  let currentName = "";                 // nom du fichier lié
+  const session = new SaveState();      // suivi dirty/save (révision modèle vs dernière sauvegarde + meta/images)
+  let booted = false;                   // garde : ne suit pas la révision pendant le chargement initial
+  let autosaveTimer: any = null;
+
+  const tabChannel = new TabChannel({
+    enabled: HAS_FS_API,
+    onConflict: () => Notify.toast("Ce fichier est aussi ouvert dans un autre onglet.", "err"),
+  });
+  const handleStore = new HandleStore();
+  let lastRec: { handle: any; name: string } | null = null;   // dernier fichier mémorisé (réouverture)
+  const ensureFileId = (): string => { if (!store.meta.fileId) { store.meta.fileId = Id.uid(); store.persistMeta(); } return store.meta.fileId; };
+  const rememberHandle = (handle: any, name: string) => { if (!handle) return; lastRec = { handle, name: name || handle.name || "" }; void handleStore.putLast(handle, lastRec.name); };
+
+  const modal = new Modal();
+  const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { refreshChrome(); } };   // mutation modèle déjà suivie par la révision (store.onChange)
+  // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
+  const imageStore = new ImageStore({ onDirty: () => { session.markDirty(); refreshChrome(); shell.refreshActive(); } });   // images HORS historique modèle
+  Forms.images = imageStore;   // singleton pour le picker d'image (faceEditor)
+  await imageStore.ready();
+  Fullscreen.install();   // re-parente les overlays (modale/dialogues/toasts/menus) dans l'élément plein écran
+
+  // ---- caché : input d'import (navigateurs sans File System Access API) ----
+  const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = ".json,application/json"; fileInput.style.display = "none";
+  document.body.appendChild(fileInput);
+  fileInput.addEventListener("change", async () => {
+    const f = fileInput.files && fileInput.files[0]; fileInput.value = "";
+    if (!f) return;
+    try { await loadFromText(await f.text(), f.name, null); Notify.toast("Fichier « " + f.name + " » chargé"); }
+    catch (e: any) { if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err"); else Notify.toast("Fichier invalide (JSON attendu).", "err"); }
+  });
+
+  // ---- chargement d'un document depuis du texte JSON (revendique le verrou AVANT mutation) ----
+  async function loadFromText(text: string, name: string | null, handle: any): Promise<void> {
+    const raw = JSON.parse(text);
+    const incomingFileId = (raw && raw.meta && typeof raw.meta.fileId === "string" && raw.meta.fileId) ? raw.meta.fileId : null;
+    await tabChannel.claimIncoming(incomingFileId, store.meta.fileId || null);   // throw FILE_ALREADY_OPEN si occupé
+    await store.replaceAll(raw);
+    // images de façade : embarquées inline (faceImages) → import dans l'ImageStore ; sinon document sans images
+    if (Array.isArray(raw.faceImages)) await imageStore.replaceAllFromLegacy(raw.faceImages);
+    else await imageStore.clearAll();
+    currentHandle = handle || null; currentName = name || "";
+    if (!store.meta.docName && name) { store.meta.docName = name.replace(/\.json$/i, ""); await store.persistMeta(); }
+    tabChannel.claim(store.meta.fileId || null);
+    if (handle) rememberHandle(handle, name || handle.name || "");
+    applyTheme(prefs.theme); session.setFile(!!(currentHandle && HAS_FS_API)); session.markLoaded(store.histIndex());
+    shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome();
+  }
+
+  /* ---- File System Access : permission, écriture, ouverture, enregistrement ---- */
+  async function ensureWritePermission(handle: any): Promise<boolean> {
+    if (!handle || !handle.queryPermission) return true;
+    if ((await handle.queryPermission({ mode: "readwrite" })) === "granted") return true;
+    return (await handle.requestPermission({ mode: "readwrite" })) === "granted";
+  }
+  /** Sérialisation AVEC images de façade inline (document AUTONOME : survit au save/load et au transfert).
+      Les images vivent hors modèle (IndexedDB) ; on les embarque dans le `.json` pour ne rien perdre.
+      (Le compagnon `.nmfb` séparé — optimisation de taille — reste différé ; `ImageStore` est prêt.) */
+  async function snapshotWithImages(): Promise<string> {
+    const obj: any = store.toJSON();
+    if (imageStore.count() > 0) obj.faceImages = await imageStore.toLegacyArray();
+    return JSON.stringify(obj, null, 2);
+  }
+  async function writeToHandle(handle: any): Promise<void> {
+    ensureFileId();
+    const w = await handle.createWritable(); await w.write(await snapshotWithImages()); await w.close();
+    session.markSaved(); rememberHandle(handle, handle.name || currentName);
+  }
+  async function reopenLast(): Promise<void> {
+    let rec = lastRec; if (!rec) rec = await handleStore.getLast();
+    if (!rec || !rec.handle) { Notify.toast("Aucun fichier récent à rouvrir.", "err"); shell.setReopen(null); return; }
+    const handle = rec.handle;
+    try {
+      const perm = await HandleStore.ensureReadPermission(handle, true);
+      if (perm === false) { Notify.toast("Autorisation de lecture refusée.", "err"); return; }
+      const file = await handle.getFile();
+      await loadFromText(await file.text(), handle.name, handle);   // revendique le fileId, raccroche le handle
+      Notify.toast("Rouvert → " + handle.name);
+    } catch (e: any) {
+      if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
+      else if (e && e.name === "NotFoundError") { await handleStore.clearLast(); lastRec = null; shell.setReopen(null); Notify.toast("Fichier introuvable — déplacé ou supprimé.", "err"); }
+      else if (e && e.name !== "AbortError") Notify.toast("Erreur de réouverture : " + (e.message || e), "err");
+    }
+  }
+  async function doOpen(): Promise<void> {
+    if (!HAS_FS_API) { fileInput.click(); return; }
+    try {
+      const [h] = await W.showOpenFilePicker({ types: JSON_TYPES, multiple: false });
+      const f = await h.getFile();
+      await loadFromText(await f.text(), f.name, h);
+      Notify.toast("Fichier « " + f.name + " » ouvert");
+    } catch (e: any) {
+      if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
+      else if (e && e.name !== "AbortError") Notify.toast("Ouverture impossible : " + (e.message || e), "err");
+    }
+  }
+  async function doSave(): Promise<void> {
+    if (!currentHandle) { await doSaveAs(); return; }
+    if (!(await ensureWritePermission(currentHandle))) { Notify.toast("Permission d'écriture refusée.", "err"); return; }
+    try { await writeToHandle(currentHandle); refreshChrome(); Notify.toast("Document enregistré (" + currentName + ")"); }
+    catch (e: any) { Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
+  }
+  async function doSaveAs(): Promise<void> {
+    ensureFileId();
+    if (!HAS_FS_API) { downloadJson(docFileName(), await snapshotWithImages()); Notify.toast("Copie téléchargée (" + docFileName() + ")"); return; }
+    try {
+      const h = await W.showSaveFilePicker({ suggestedName: docFileName(), types: JSON_TYPES });
+      currentHandle = h; currentName = h.name || docFileName(); session.setFile(true);
+      await writeToHandle(h);
+      tabChannel.claim(store.meta.fileId || null);
+      applyAutosave(); refreshChrome(); Notify.toast("Enregistré sous « " + currentName + " »");
+    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
+  }
+
+  /* ---- auto-save : timer d'écriture silencieuse (FS API + fichier lié requis) ---- */
+  function autosaveStatusHtml(): string {
+    if (!HAS_FS_API) return "Indisponible — navigateur sans <strong>File System Access API</strong>.";
+    if (!prefs.autosave) return "État : <strong>off</strong>.";
+    if (!currentHandle) return "État : <strong>en attente d'un fichier</strong> — démarrera à la prochaine (ré)ouverture.";
+    return "État : <strong>actif</strong> · toutes les <strong>" + prefs.autosaveInterval + "s</strong>.";
+  }
+  function applyAutosave(): void {
+    if (autosaveTimer) { clearInterval(autosaveTimer); autosaveTimer = null; }
+    if (prefs.autosave && currentHandle && HAS_FS_API) {
+      autosaveTimer = setInterval(async () => {
+        if (!shouldAutosave({ dirty: session.dirty, hasFile: !!currentHandle })) return;
+        try {
+          if (!(await ensureWritePermission(currentHandle))) { prefs.autosave = false; applyAutosave(); Notify.toast("Auto-save désactivé : permission révoquée", "err"); return; }
+          await writeToHandle(currentHandle); refreshChrome();
+        } catch (e) { console.warn("autosave a échoué", e); }
+      }, prefs.autosaveInterval * 1000);
+    }
+    shell.setAutosave(prefs.autosave, prefs.autosaveInterval);
+    shell.setAutosaveStatus(autosaveStatusHtml());
+    refreshChrome();
+  }
+  async function setAutosave(on: boolean): Promise<void> {
+    if (on) {
+      if (!HAS_FS_API) { Notify.toast("Auto-save indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); shell.setAutosave(false, prefs.autosaveInterval); return; }
+      if (!currentHandle) {
+        const go = await Dialog.confirm({ title: "Activer l'auto-save", message: "Pour l'auto-save, le document doit être lié à un fichier. Choisir maintenant ?", confirmLabel: "Choisir un fichier" });
+        if (!go) { shell.setAutosave(false, prefs.autosaveInterval); return; }
+        await doSaveAs();
+        if (!currentHandle) { shell.setAutosave(false, prefs.autosaveInterval); return; }
+      }
+      prefs.autosave = true; applyAutosave(); Notify.toast("Auto-save activé (toutes les " + prefs.autosaveInterval + "s)");
+    } else { prefs.autosave = false; applyAutosave(); Notify.toast("Auto-save désactivé"); }
+  }
+
+  // ---- services FICHIER / GLOBAUX (topbar) ----
+  const shellHost: ShellHost = {
+    onNew: async () => {
+      if (hasUserData()) {
+        const ok = await Dialog.confirm({ title: "Nouveau document ?", message: "Le document courant (non enregistré) sera remplacé. Continuer ?", confirmLabel: "Nouveau", danger: true });
+        if (!ok) return;
+      }
+      tabChannel.release(store.meta.fileId || null);
+      await store.newDocument(); await imageStore.clearAll(); currentHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
+      applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast("Nouveau document");
+    },
+    onOpen: () => { doOpen(); },
+    onSave: () => { doSave(); },
+    onSaveAs: () => { doSaveAs(); },
+    onUndo: async () => { if (await store.undo()) { shell.refreshActive(); refreshChrome(); Notify.toast("Annulé"); } },   // révision suivie via onChange → dirty recalculé
+    onRedo: async () => { if (await store.redo()) { shell.refreshActive(); refreshChrome(); Notify.toast("Rétabli"); } },
+    onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); },
+    onResetViewPrefs: () => {
+      try { Object.keys(window.localStorage).filter((k) => k.startsWith("netmap.view3d")).forEach((k) => window.localStorage.removeItem(k)); } catch (_) { /* noop */ }
+      dcView.resetView(); shell.refreshActive();   // force une restauration aux défauts à la prochaine activation
+      Notify.toast("Préférences d'affichage 3D réinitialisées");
+    },
+    onRenameDoc: async (name) => { store.meta.docName = name; await store.persistMeta(); session.markDirty(); refreshChrome(); },   // meta HORS historique
+    onDataSource: (value) => {
+      if (value === "api") { Notify.toast("Source « API » pas encore disponible.", "err"); shell.setDataSource("local"); return; }
+      prefs.dataSource = "local"; refreshChrome();
+    },
+    onAutosaveToggle: (on) => { setAutosave(on); },
+    onAutosaveInterval: (sec) => { prefs.autosaveInterval = sec; applyAutosave(); },
+    onReopenLast: () => { reopenLast(); },
+  };
+
+  const shell = new Shell(root, shellHost);
 
   // ---- fiche détail générique (lecture seule) ----
   const openDetail = (coll: string, id: string) => {
@@ -60,23 +256,23 @@ async function boot(): Promise<void> {
 
   // ---- onglets de LISTE (ListView paramétré par ListConfigs) ----
   type FormFn = (id: string | null, onSaved: () => void) => void;
-  interface TabOpts { form?: FormFn; kind?: "primary" | "secondary"; parent?: string; }
+  interface TabOpts { title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; links?: string[]; }
   const addListTab = (name: string, label: string, configFn: (s: typeof store) => ListOptions, opts: TabOpts = {}) => {
     const cfg = configFn(store);
     const formFn = opts.form;
     let view: ListView | null = null;
     const container = shell.addView({
-      name, label, kind: opts.kind || "primary", parent: opts.parent,
+      name, label, title: opts.title, subtitle: opts.subtitle, kind: opts.kind || "primary", parent: opts.parent, links: opts.links,
       count: () => store.all(cfg.collection).length,
+      addLabel: opts.addLabel, onAdd: formFn ? () => formFn(null, () => shell.refreshActive()) : undefined,
       onShow: () => {
         if (!view) {
           const reRender = () => view!.render();
           view = new ListView(store, container, {
             ...cfg,
             actions: cfg.actions || { view: true, edit: !!formFn, clone: true, del: true },
-            onCreate: formFn ? () => formFn(null, reRender) : undefined,
             onAction: async (act, id) => {
-              if (act === "view") { openDetail(cfg.collection, id); return; }
+              if (act === "view") { if (cfg.collection === "equipments") Forms.equipmentDetail(store, formHost, id, reRender); else openDetail(cfg.collection, id); return; }
               if (act === "edit") { formFn?.(id, reRender); return; }
               if (act === "clone") {
                 const c = cfg.collection === "equipments" ? await store.cloneEquipment(id) : await store.cloneSimple(cfg.collection, id);
@@ -98,23 +294,37 @@ async function boot(): Promise<void> {
     });
   };
 
-  // === ONGLETS PRINCIPAUX (ordre de l'original ; défaut = Équipements) ===
-  addListTab("equipements", "Équipements", ListConfigs.equipments, { form: (id, done) => Forms.equipment(store, formHost, id, done) });
-  addListTab("groupes", "Groupes", ListConfigs.groups, { form: (id, done) => Forms.group(store, formHost, id, done) });
-  addListTab("racks", "Racks", ListConfigs.racks, { form: (id, done) => Forms.rack(store, formHost, id, done) });
-  addListTab("cables", "Câbles", ListConfigs.cables, { form: (id, done) => Forms.cable(store, formHost, id, done) });
-  addListTab("ipam", "IPAM", ListConfigs.ipNetworks, { form: (id, done) => Forms.ipNetwork(store, formHost, id, done) });
+  // === ONGLETS PRINCIPAUX (ordre de l'original) ===
+  addListTab("equipements", "Équipements", ListConfigs.equipments, {
+    subtitle: "Switchs, serveurs, caissons, modems… avec leurs ports, rôles et agrégats.",
+    form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: "+ Équipement",
+    links: ["groupes", "faceimages"],
+  });
+  addListTab("racks", "Racks", ListConfigs.racks, {
+    subtitle: "Baies : emplacement, taille (U), profondeur, faces, portes et capots.",
+    form: (id, done) => Forms.rack(store, formHost, id, done), addLabel: "+ Rack",
+  });
+  addListTab("cables", "Câbles", ListConfigs.cables, {
+    subtitle: "Lien nommé entre deux ports — type compatible avec les ports, réseau optionnel.",
+    form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: "+ Câble",
+    links: ["reseaux", "porttypes", "cabletypes", "faisceaux"],
+  });
+  addListTab("ipam", "IPAM", ListConfigs.ipNetworks, {
+    title: "IPAM — Réseaux IP", subtitle: "Registre d'attribution d'IP statiques. Déclarez des sous-réseaux (CIDR IPv4), puis attribuez-y des adresses et réservez des plages DHCP.",
+    form: (id, done) => Forms.ipNetwork(store, formHost, id, done), addLabel: "+ Réseau IP",
+    links: ["ipaddresses", "dhcpranges"],
+  });
 
   // Netmap (GraphView)
   let graph: GraphView;
-  const graphContainer = shell.addView({ name: "graph", label: "Netmap", onShow: () => graph.show() });
+  const graphContainer = shell.addView({ name: "graph", label: "Netmap", subtitle: "Rendu filtré par équipements, réseaux et/ou types de port. Zoom, recentrage, surbrillance.", onShow: () => graph.show() });
   const stage = document.createElement("div");
   stage.className = "graph-stage";
   stage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
   graphContainer.appendChild(stage);
   graph = new GraphView(store, stage, {
-    setDirty: () => {},
-    openEquipmentDetail: (id) => openDetail("equipments", id),
+    setDirty: () => { refreshChrome(); },
+    openEquipmentDetail: (id) => Forms.equipmentDetail(store, formHost, id, () => shell.refreshActive()),
     deleteEquipment: async (id) => {
       const eq = store.get("equipments", id);
       const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${eq?.name || "équipement"} » et ses câbles ?`, confirmLabel: "Supprimer", danger: true });
@@ -125,25 +335,147 @@ async function boot(): Promise<void> {
     openModal: (opts) => modal.open(opts),
   });
 
-  // Datacenters (à porter)
-  shell.addView({ name: "datacenter", label: "Datacenters", onShow: (c) => { if (!c.dataset.built) { c.dataset.built = "1"; c.innerHTML = `<p style="padding:24px;color:var(--fg-dim)">Vue Datacenters — à porter (en dernier).</p>`; } } });
-
-  // === SOUS-VUES (boutons secondaires ; surlignent leur onglet parent) ===
-  addListTab("reseaux", "Réseaux", ListConfigs.networks, { form: (id, done) => Forms.network(store, formHost, id, done), kind: "secondary", parent: "cables" });
-  addListTab("porttypes", "Types de port", ListConfigs.portTypes, { kind: "secondary", parent: "cables" });
-  addListTab("cabletypes", "Types de câble", ListConfigs.cableTypes, { kind: "secondary", parent: "cables" });
-  addListTab("ipaddresses", "Adresses IP", ListConfigs.ipAddresses, { form: (id, done) => Forms.ipAddress(store, formHost, id, done), kind: "secondary", parent: "ipam" });
-  addListTab("dhcpranges", "Plages DHCP", ListConfigs.dhcpRanges, { form: (id, done) => Forms.dhcpRange(store, formHost, id, done), kind: "secondary", parent: "ipam" });
-
-  // cohérence inter-vues : toute mutation du modèle rafraîchit la vue active.
-  let refreshQueued = false;
-  store.onChange(() => {
-    if (refreshQueued) return;
-    refreshQueued = true;
-    requestAnimationFrame(() => { refreshQueued = false; shell.refreshActive(); });
+  // Datacenters (vue 3D — tranche-pilote : caméra orbitale + salle/baies)
+  let dcView: DatacenterView;
+  const dcContainer = shell.addView({ name: "datacenter", label: "Datacenters", subtitle: "Disposition physique des salles : baies en 3D. Glisser = déplacer · Maj/clic droit = orbiter · molette = zoom.", links: ["salles"], onShow: () => dcView.show() });
+  const dcStage = document.createElement("div");
+  dcStage.className = "dc-stage";
+  dcStage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
+  dcContainer.appendChild(dcStage);
+  dcView = new DatacenterView(store, dcStage, {
+    setDirty: () => { refreshChrome(); },
+    openRackForm: (id) => Forms.rack(store, formHost, id, () => shell.refreshActive()),
+    openEquipmentDetail: (id) => Forms.equipmentDetail(store, formHost, id, () => shell.refreshActive()),
+    openCableForm: (id, opts) => Forms.cable(store, formHost, id, () => shell.refreshActive(), opts),
+    assignSlot: (rackId, u, side, height, onDone) => Forms.assignSlot(store, formHost, rackId, u, side, height, onDone),
+    assignSideSlot: (rackId, face, lr, col, uTop, onDone) => Forms.assignSideSlot(store, formHost, rackId, face, lr, col, uTop, onDone),
+    assignWallSlot: (rackId, wall, margin, col, uTop, onDone) => Forms.assignWallSlot(store, formHost, rackId, wall, margin, col, uTop, onDone),
+    assignCapSlot: (rackId, face, cx, cy, onDone) => Forms.assignCapSlot(store, formHost, rackId, face, cx, cy, onDone),
+    openDatacenterForm: (id) => Forms.datacenter(store, formHost, id, () => shell.refreshActive()),
+    openWaypointForm: (id, opts) => Forms.waypoint(store, formHost, id, opts),
+    openFloorForm: (loc, fl, opts) => Forms.floor(store, formHost, loc, fl, opts),
+    faceImageUrl: (eqId, face) => { const e: any = store.get("equipments", eqId); const fld = (EQUIP_FACE_IMG_FIELD as any)[face]; const im: any = e && fld && e[fld] ? imageStore.get(e[fld]) : null; return im ? im.url : null; },
   });
 
+  // === SOUS-VUES (atteintes par les liens d'en-tête ; surlignent leur onglet parent) ===
+  addListTab("groupes", "Groupes", ListConfigs.groups, {
+    subtitle: "Regroupements logiques d'équipements : label + couleur + description.",
+    form: (id, done) => Forms.group(store, formHost, id, done), addLabel: "+ Groupe", kind: "secondary", parent: "equipements",
+  });
+  // Images de façade : bibliothèque hors modèle (ImageStore) → câblage dédié (CRUD via imageStore)
+  {
+    const cfg = ListConfigs.faceImages(store);
+    let view: ListView | null = null;
+    const container = shell.addView({
+      name: "faceimages", label: "Images de façade", subtitle: "Bibliothèque d'images de façade (JPEG/PNG/WebP) partagées par référence. Stockées hors document (IndexedDB).",
+      kind: "secondary", parent: "equipements", links: [],
+      count: () => imageStore.count(),
+      addLabel: "+ Image", onAdd: () => Forms.faceImage(imageStore, store, formHost, null, () => shell.refreshActive()),
+      onShow: () => {
+        if (!view) {
+          const reRender = () => view!.render();
+          view = new ListView(store, container, {
+            ...cfg, items: () => imageStore.list(),
+            actions: { view: false, edit: true, clone: true, del: true },
+            onAction: async (act, id) => {
+              if (act === "edit") { Forms.faceImage(imageStore, store, formHost, id, reRender); return; }
+              if (act === "clone") { const fi: any = imageStore.get(id); if (fi && fi.url) { const blob = await (await fetch(fi.url)).blob(); await imageStore.add({ name: (fi.name || "image") + " (copie)", u_height: fi.u_height, face: fi.face, description: fi.description, blob, type: fi.type }); reRender(); Notify.toast("Image clonée"); } return; }
+              if (act === "del") {
+                const fi: any = imageStore.get(id); const n = store.faceImageUsageCount(id);
+                const ok = await Dialog.confirm({ title: "Supprimer l'image ?", message: `Supprimer « ${fi?.name || "cette image"} » ?` + (n ? ` Elle est référencée par ${n} équipement(s) (les références seront orphelines).` : ""), confirmLabel: "Supprimer", danger: true });
+                if (!ok) return;
+                await imageStore.remove(id); reRender(); Notify.toast("Image supprimée");
+              }
+            },
+          });
+        }
+        view.render();
+      },
+    });
+  }
+  addListTab("reseaux", "Réseaux", ListConfigs.networks, {
+    subtitle: "Réseaux logiques (VLAN…) ou circuits d'alimentation : label, couleur, type.",
+    form: (id, done) => Forms.network(store, formHost, id, done), addLabel: "+ Réseau", kind: "secondary", parent: "cables",
+  });
+  addListTab("faisceaux", "Faisceaux", ListConfigs.cableBundles, {
+    title: "Faisceaux / trunks", subtitle: "Câbles MULTI-FIBRES créés à l'avance. Le type d'un faisceau VERROUILLE le type de ses brins ; route et longueur partagées.",
+    form: (id, done) => Forms.cableBundle(store, formHost, id, done), addLabel: "+ Faisceau", kind: "secondary", parent: "cables",
+  });
+  addListTab("porttypes", "Types de port", ListConfigs.portTypes, {
+    title: "Types de port / liaison", subtitle: "Catalogue STANDARDISÉ (lecture seule). La « famille » lie ports et câbles compatibles ; le « connecteur » est la forme physique.",
+    kind: "secondary", parent: "cables",
+  });
+  addListTab("cabletypes", "Types de câble", ListConfigs.cableTypes, {
+    subtitle: "Catalogue STANDARDISÉ (lecture seule). Rattaché à une « famille » de port.",
+    kind: "secondary", parent: "cables",
+  });
+  addListTab("ipaddresses", "Adresses IP", ListConfigs.ipAddresses, {
+    title: "Adresses IP statiques", subtitle: "Une ligne = une IP attribuée. Liée à un réseau, optionnellement à un équipement. Unicité garantie.",
+    form: (id, done) => Forms.ipAddress(store, formHost, id, done), addLabel: "+ Adresse IP", kind: "secondary", parent: "ipam",
+  });
+  addListTab("salles", "Salles", ListConfigs.datacenters, {
+    title: "Salles (datacenters)", subtitle: "Grille au sol d'une salle : dimensions + maille. Placez-y des baies (onglet Racks → champ Salle) pour les voir en 3D.",
+    form: (id, done) => Forms.datacenter(store, formHost, id, done), addLabel: "+ Salle", kind: "secondary", parent: "datacenter",
+  });
+  addListTab("dhcpranges", "Plages DHCP", ListConfigs.dhcpRanges, {
+    title: "Plages DHCP réservées", subtitle: "Plages (début → fin) attribuées à un serveur DHCP. Pas de chevauchement avec une autre plage ni une IP statique du réseau.",
+    form: (id, done) => Forms.dhcpRange(store, formHost, id, done), addLabel: "+ Plage DHCP", kind: "secondary", parent: "ipam",
+  });
+
+  shell.build();
+  shell.setDataSource(prefs.dataSource);
+
+  // ---- état save-state ----
+  // ---- barre de statut / undo-redo (cohérence avec l'état du store) ----
+  const refreshChrome = () => {
+    session.setFile(!!(currentHandle && HAS_FS_API)); session.setAutosave(prefs.autosave);   // synchronise le contexte de save
+    shell.setDocName(store.meta.docName || "");
+    shell.setStatus({
+      file: currentName || (store.meta.docName ? docFileName() : "— en mémoire —"),
+      release: APP_RELEASE, source: prefs.dataSource === "api" ? "API" : adapter.label, entities: store.totalCount(), lastSave: "—",
+    });
+    shell.setUndoRedo(store.canUndo(), store.canRedo());
+    shell.setSaveState(session.state());
+  };
+
+  // cohérence inter-vues : toute mutation marque dirty + rafraîchit le chrome (pastille/undo) IMMÉDIATEMENT, et
+  // débounce le re-render LOURD de la vue active. Le chrome est DÉCOUPLÉ du re-render : si `refreshActive()` lève
+  // (erreur de rendu d'une vue), la pastille de dirty reste correctement mise à jour.
+  let refreshQueued = false;
+  store.onChange(() => {
+    if (booted) session.setRevision(store.histIndex());   // révision modèle → dirty par comparaison (undo→point sauvé = propre)
+    refreshChrome();   // cheap (pastille save + undo/redo) → toujours synchrone, jamais sauté
+    if (refreshQueued) return;
+    refreshQueued = true;
+    requestAnimationFrame(() => { refreshQueued = false; try { shell.refreshActive(); } catch (e) { console.error(e); } });
+  });
+
+  // raccourcis clavier UNDO / REDO (Ctrl/Cmd+Z · Ctrl/Cmd+Shift+Z ou Ctrl+Y). Ignorés pendant la saisie dans un
+  // champ (undo natif du texte) et sous une modale/dialogue (qui gèrent leurs propres touches).
+  document.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const k = e.key.toLowerCase(); if (k !== "z" && k !== "y") return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName))) return;
+    if (document.querySelector(".modal-overlay, .dialog-overlay, .welcome-screen")) return;
+    e.preventDefault();
+    const redo = (k === "y") || (k === "z" && e.shiftKey);
+    void (async () => {
+      if (redo ? await store.redo() : await store.undo()) { shell.refreshActive(); refreshChrome(); Notify.toast(redo ? "Rétabli" : "Annulé"); }
+    })();
+  });
+
+  applyAutosave();        // initialise l'état auto-save + le popover
+  refreshChrome();
   shell.switchView("equipements");
-  (window as any).__NETMAP__ = { EntityRegistry, adapter, store, shell, graph, modal };
+  booted = true;
+
+  // ÉCRAN D'ACCUEIL : au (re)chargement, le handle FS est perdu → on force une ré-interaction
+  // pour le raccrocher (auto-save). « Rouvrir » si un dernier fichier est mémorisé ; « Continuer »
+  // si une session est restaurée (le document reste utilisable en mémoire).
+  if (HAS_FS_API) { try { lastRec = await handleStore.getLast(); } catch (_) { lastRec = null; } }
+  shell.showWelcome({ reopenName: lastRec ? (lastRec.name || "fichier") : null });
+
+  (window as any).__NETMAP__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
 }
 boot();
