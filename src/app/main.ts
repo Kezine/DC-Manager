@@ -22,7 +22,17 @@ import { SaveState, shouldAutosave } from "./SaveState";
 import { TabChannel } from "./TabChannel";
 import { HandleStore } from "./HandleStore";
 
-const adapter = new BrowserStorageAdapter({ persistent: false });
+// Timeline d'undo UNIFIÉE : le modèle (snapshots, adapter) et les images (ImageStore, opérations inverses) ont
+// chacun leur pile, mais UN SEUL geste (bouton / Ctrl+Z) défait dans l'ordre chronologique. `undoOrder` mémorise la
+// pile concernée par action ("model" | "image") ; toute NOUVELLE action vide le redo unifié. doUndo/doRedo (boot)
+// dépilent la timeline et délèguent à la bonne pile (en sautant les jetons dont la pile est épuisée par le plafond).
+const undoOrder: string[] = [];
+const redoOrder: string[] = [];
+let onTimelineChange: () => void = () => { /* posé au boot → refreshChrome */ };
+function noteUndoable(kind: string): void { undoOrder.push(kind); if (undoOrder.length > 400) undoOrder.shift(); redoOrder.length = 0; try { onTimelineChange(); } catch (_) { /* noop */ } }
+function resetUndoTimeline(): void { undoOrder.length = 0; redoOrder.length = 0; try { onTimelineChange(); } catch (_) { /* noop */ } }
+
+const adapter = new BrowserStorageAdapter({ persistent: false, onUndoable: noteUndoable });
 const store = new Store(adapter);
 const prefs = new Prefs();
 const W = window as any;
@@ -71,7 +81,7 @@ async function boot(): Promise<void> {
   const modal = new Modal();
   const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { refreshChrome(); } };   // mutation modèle déjà suivie par la révision (store.onChange)
   // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
-  const imageStore = new ImageStore({ onDirty: () => { session.markDirty(); refreshChrome(); shell.refreshActive(); } });   // images HORS historique modèle
+  const imageStore = new ImageStore({ onDirty: () => { session.markDirty(); refreshChrome(); shell.refreshActive(); }, onUndoable: noteUndoable });   // images HORS historique modèle, undo intégré à la timeline unifiée
   Forms.images = imageStore;   // singleton pour le picker d'image (faceEditor)
   await imageStore.ready();
   Fullscreen.install();   // re-parente les overlays (modale/dialogues/toasts/menus) dans l'élément plein écran
@@ -95,6 +105,7 @@ async function boot(): Promise<void> {
     // images de façade : embarquées inline (faceImages) → import dans l'ImageStore ; sinon document sans images
     if (Array.isArray(raw.faceImages)) await imageStore.replaceAllFromLegacy(raw.faceImages);
     else await imageStore.clearAll();
+    resetUndoTimeline();   // nouveau document chargé → timeline d'undo unifiée repart de zéro
     currentHandle = handle || null; currentName = name || "";
     if (!store.meta.docName && name) { store.meta.docName = name.replace(/\.json$/i, ""); await store.persistMeta(); }
     tabChannel.claim(store.meta.fileId || null);
@@ -211,14 +222,14 @@ async function boot(): Promise<void> {
         if (!ok) return;
       }
       tabChannel.release(store.meta.fileId || null);
-      await store.newDocument(); await imageStore.clearAll(); currentHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
+      await store.newDocument(); await imageStore.clearAll(); resetUndoTimeline(); currentHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
       applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast("Nouveau document");
     },
     onOpen: () => { doOpen(); },
     onSave: () => { doSave(); },
     onSaveAs: () => { doSaveAs(); },
-    onUndo: async () => { if (await store.undo()) { shell.refreshActive(); refreshChrome(); Notify.toast("Annulé"); } },   // révision suivie via onChange → dirty recalculé
-    onRedo: async () => { if (await store.redo()) { shell.refreshActive(); refreshChrome(); Notify.toast("Rétabli"); } },
+    onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
+    onRedo: () => { void doRedo(); },
     onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); },
     onResetViewPrefs: () => {
       try { Object.keys(window.localStorage).filter((k) => k.startsWith("netmap.view3d")).forEach((k) => window.localStorage.removeItem(k)); } catch (_) { /* noop */ }
@@ -434,9 +445,32 @@ async function boot(): Promise<void> {
       file: currentName || (store.meta.docName ? docFileName() : "— en mémoire —"),
       release: APP_RELEASE, source: prefs.dataSource === "api" ? "API" : adapter.label, entities: store.totalCount(), lastSave: "—",
     });
-    shell.setUndoRedo(store.canUndo(), store.canRedo());
+    shell.setUndoRedo(store.canUndo() || imageStore.canUndo(), redoOrder.length > 0 && (store.canRedo() || imageStore.canRedo()));
     shell.setSaveState(session.state());
   };
+  onTimelineChange = () => refreshChrome();   // noteUndoable/resetUndoTimeline rafraîchissent les boutons undo/redo
+
+  // UNDO / REDO UNIFIÉS : dépile la timeline et délègue à la bonne pile (modèle ou images).
+  const afterUndoRedo = (msg: string) => { shell.refreshActive(); refreshChrome(); Notify.toast(msg); };
+  const doUndo = async (): Promise<void> => {
+    while (undoOrder.length) {
+      const kind = undoOrder[undoOrder.length - 1];
+      if (kind === "image" && imageStore.canUndo()) { undoOrder.pop(); await imageStore.undo(); redoOrder.push(kind); afterUndoRedo("Annulé"); return; }
+      if (kind === "model" && store.canUndo()) { undoOrder.pop(); await store.undo(); redoOrder.push(kind); afterUndoRedo("Annulé"); return; }
+      undoOrder.pop();   // jeton dont la pile est épuisée (plafond atteint) → ignorer
+    }
+    if (store.canUndo()) { await store.undo(); redoOrder.push("model"); afterUndoRedo("Annulé"); }   // filet (timeline désynchronisée)
+    else if (imageStore.canUndo()) { await imageStore.undo(); redoOrder.push("image"); afterUndoRedo("Annulé"); }
+  };
+  const doRedo = async (): Promise<void> => {
+    while (redoOrder.length) {
+      const kind = redoOrder[redoOrder.length - 1];
+      if (kind === "image" && imageStore.canRedo()) { redoOrder.pop(); await imageStore.redo(); undoOrder.push(kind); afterUndoRedo("Rétabli"); return; }
+      if (kind === "model" && store.canRedo()) { redoOrder.pop(); await store.redo(); undoOrder.push(kind); afterUndoRedo("Rétabli"); return; }
+      redoOrder.pop();
+    }
+  };
+  resetUndoTimeline();   // état propre au boot (ignore un éventuel jeton parasite du newDocument initial)
 
   // cohérence inter-vues : toute mutation marque dirty + rafraîchit le chrome (pastille/undo) IMMÉDIATEMENT, et
   // débounce le re-render LOURD de la vue active. Le chrome est DÉCOUPLÉ du re-render : si `refreshActive()` lève
@@ -460,9 +494,7 @@ async function boot(): Promise<void> {
     if (document.querySelector(".modal-overlay, .dialog-overlay, .welcome-screen")) return;
     e.preventDefault();
     const redo = (k === "y") || (k === "z" && e.shiftKey);
-    void (async () => {
-      if (redo ? await store.redo() : await store.undo()) { shell.refreshActive(); refreshChrome(); Notify.toast(redo ? "Rétabli" : "Annulé"); }
-    })();
+    void (redo ? doRedo() : doUndo());   // timeline unifiée (modèle + images)
   });
 
   applyAutosave();        // initialise l'état auto-save + le popover
