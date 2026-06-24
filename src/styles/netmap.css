@@ -1112,6 +1112,8 @@
     gap: 8px;
   }
   .multi-trigger:hover { border-color: var(--fg); }
+  .multi-trigger:disabled { opacity: 0.5; cursor: default; }
+  .multi-trigger:disabled:hover { border-color: var(--line); }
   .multi-trigger .count-badge { color: var(--accent); }
   .multi-panel {
     position: absolute;

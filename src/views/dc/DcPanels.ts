@@ -64,6 +64,10 @@ export class DcPanels extends DcViews2D {
     if (sites.length) {
       this.toolbarEl.appendChild(this.vsep());
       const ms = MultiSelect.build("Sites", sites.map((s: any) => ({ id: s.id, label: s.name || s.id })), this.visibleSites, () => { this.buildToolbar(); this.render(); });
+      if (sites.length <= 1) {   // un seul site → rien à filtrer : bouton désactivé
+        const trig = ms.querySelector(".multi-trigger") as HTMLButtonElement | null;
+        if (trig) { trig.disabled = true; trig.title = "Un seul site — rien à filtrer"; }
+      }
       this.toolbarEl.appendChild(ms);
     }
     this.updateControls();
