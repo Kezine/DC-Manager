@@ -413,6 +413,8 @@ export class Store {
   /* ---- helpers métier (résolution inverse via index secondaires) ---- */
   portsOf(equipmentId: string): any[] { return this._byFk("ports", "equipment_id", equipmentId); }
   aggregatesOf(equipmentId: string): any[] { return this._byFk("aggregates", "equipment_id", equipmentId); }
+  /** Spares (pièces de rechange) attribués à un équipement. */
+  sparesOfEquipment(equipmentId: string): any[] { return this._byFk("spares", "assigned_equipment_id", equipmentId); }
   breakoutLanes(parentPortId: string): any[] { return this._byFk("ports", "parent_port_id", parentPortId).sort((a, b) => (a.lane || 0) - (b.lane || 0)); }
   isBreakoutParent(port: any): boolean { const id = port && port.id ? port.id : port; return !!id && this._byFk("ports", "parent_port_id", id).length > 0; }
   cablesOfPort(portId: string): any[] {

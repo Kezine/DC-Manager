@@ -31,4 +31,5 @@ export const INDEX_SPEC: Record<string, string[]> = {
   ipAddresses: ["network_id", "equipment_id", "address"],
   dhcpRanges:  ["network_id", "server_id"],
   networks:    ["ip_network_id"],
+  spares:      ["assigned_equipment_id"],
 };

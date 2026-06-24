@@ -5,6 +5,8 @@ import { EquipFaces } from "../registries/EquipFaces";
 import { PortRoles } from "../registries/PortRoles";
 import { GroupTypes } from "../domain/GroupTypes";
 import { CableStatuses } from "../domain/CableStatuses";
+import { SpareTypes } from "../domain/SpareTypes";
+import { SpareStatuses } from "../domain/SpareStatuses";
 import { RackScene } from "../geometry/RackScene";
 import { FloorLayout } from "../geometry/FloorLayout";
 import type { ListOptions } from "./ListView";
@@ -351,6 +353,36 @@ export class ListConfigs {
   /** Réseaux (objets) d'un câble. */
   private static _cableNets(store: Store, c: any): any[] {
     return store.cableNetworkIds(c).map((id) => store.get("networks", id)).filter(Boolean);
+  }
+
+  /** Inventaire de SPARES (pièces de rechange, suivi unitaire — hors graphe réseau). */
+  static spares(store: Store): ListOptions {
+    const assignedTo = (o: any): string => {
+      if (o.status !== "assigned") return "";
+      if (o.assigned_equipment_id) { const e: any = store.get("equipments", o.assigned_equipment_id); return e ? (e.name || "(équip.)") : "(équip. supprimé)"; }
+      return o.assigned_free || "";
+    };
+    return {
+      collection: "spares",
+      defaultSort: { key: "name", dir: "asc" },
+      emptyText: "Aucune pièce de rechange. Ajoutez-en une avec « + Spare » (HDD, SSD, transceiver, autre…).",
+      searchFields: (o) => [o.displayName ? o.displayName() : o.name, o.brand, o.model_pn, o.serial, SpareTypes.label(o.type), o.techSummary ? o.techSummary() : "", o.storage_location, o.po_ref, assignedTo(o), o.comment],
+      columns: [
+        { head: "Désignation", cls: "cell-name", sortKey: "name", sort: (o) => (o.displayName ? o.displayName() : (o.name || "")), render: (o) => Html.escape(o.displayName ? o.displayName() : (o.name || "(spare)")) + (o.serial ? " " + dim("· SN " + Html.escape(o.serial)) : "") },
+        {
+          head: "Type", sortKey: "type", sort: (o) => SpareTypes.label(o.type), render: (o) => `<span class="pill">${SpareTypes.icon(o.type)} ${Html.escape(SpareTypes.label(o.type))}</span>`,
+          filter: { label: "Type", options: () => SpareTypes.ALL.map((t) => ({ id: t.id, label: t.label })), valueOf: (o) => o.type },
+        },
+        { head: "Caractéristiques", render: (o) => { const t = o.techSummary ? o.techSummary() : ""; return t ? Html.escape(t) : dim("—"); } },
+        {
+          head: "Statut", sortKey: "status", sort: (o) => SpareStatuses.label(o.status), render: (o) => `<span class="pill">${Html.escape(SpareStatuses.label(o.status))}</span>`,
+          filter: { label: "Statut", options: () => SpareStatuses.ALL.map((s) => ({ id: s.id, label: s.label })), valueOf: (o) => o.status },
+        },
+        { head: "Affecté à", sort: (o) => assignedTo(o), render: (o) => { const t = assignedTo(o); return t ? Html.escape(t) : dim("—"); } },
+        { head: "Stockage", render: (o) => (o.storage_location ? Html.escape(o.storage_location) : dim("—")) },
+        { head: "Achat", cls: "num", sortKey: "purchase", sort: (o) => o.purchase_date || "", render: (o) => (o.purchase_date ? Html.escape(o.purchase_date) : dim("—")) },
+      ],
+    };
   }
 
   /** Familles distinctes d'un catalogue (pour les filtres). */

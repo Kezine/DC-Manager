@@ -166,6 +166,35 @@ export const WAYPOINT_TYPES = [
   { id: "exit",       label: "Exit — sortie / entrée de salle" },
 ];
 
+/* ---- INVENTAIRE DE SPARES (pièces de rechange, hors graphe réseau) ---- */
+export interface SpareTypeDef { id: string; label: string; icon: string; }
+export const SPARE_TYPES: SpareTypeDef[] = [
+  { id: "hdd",         label: "HDD (disque dur)", icon: "💽" },
+  { id: "ssd",         label: "SSD",              icon: "💾" },
+  { id: "transceiver", label: "Transceiver",      icon: "🔌" },
+  { id: "other",       label: "Autre",            icon: "📦" },
+];
+export const SPARE_TYPE_DEFAULT = "other";
+/** Types « disque » partageant le même groupe de champs (capacité/interface/format ; RPM = HDD seul). */
+export const SPARE_DISK_TYPES = ["hdd", "ssd"];
+
+export interface SpareStatusDef { id: string; label: string; }
+export const SPARE_STATUSES: SpareStatusDef[] = [
+  { id: "available",      label: "Disponible" },
+  { id: "assigned",       label: "Attribué" },
+  { id: "decommissioned", label: "Décommissionné" },
+];
+export const SPARE_STATUS_DEFAULT = "available";
+
+// listes d'options (datalists / sélecteurs) des champs spécifiques par type
+export const SPARE_CAP_UNITS = ["GB", "TB"];
+export const SPARE_HDD_INTERFACES = ["SATA", "SAS", "NVMe", "SCSI", "IDE/PATA", "FC"];
+export const SPARE_HDD_FORMATS = ['3.5"', '2.5"', "M.2", "U.2", "mSATA"];
+export const SPARE_HDD_RPM = [5400, 7200, 10000, 15000];
+export const SPARE_TX_FORMS = ["SFP", "SFP+", "SFP28", "QSFP", "QSFP+", "QSFP28", "QSFP-DD", "XFP", "GBIC", "CFP"];
+export const SPARE_TX_SPEEDS = ["1G", "10G", "25G", "40G", "100G", "200G", "400G"];
+export const SPARE_TX_MEDIA = ["LC (fibre)", "RJ45 (cuivre)", "DAC", "AOC", "MPO/MTP", "SC"];
+
 /* ---- pseudo-équipements montables en rack (icône SVG viewBox 24, currentColor) ---- */
 export interface RackItemKindDef { id: string; label: string; icon: string; }
 export const RACK_ITEM_KINDS: RackItemKindDef[] = [

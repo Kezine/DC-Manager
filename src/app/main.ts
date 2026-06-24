@@ -446,7 +446,7 @@ async function boot(): Promise<void> {
   addListTab("equipements", "Équipements", ListConfigs.equipments, {
     subtitle: "Switchs, serveurs, caissons, modems… avec leurs ports, rôles et agrégats.",
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: "+ Équipement",
-    links: ["groupes", "faceimages"],
+    links: ["groupes", "faceimages", "spares"],
   });
   addListTab("racks", "Racks", ListConfigs.racks, {
     subtitle: "Baies : emplacement, taille (U), profondeur, faces, portes et capots.",
@@ -509,6 +509,10 @@ async function boot(): Promise<void> {
   addListTab("groupes", "Groupes", ListConfigs.groups, {
     subtitle: "Regroupements logiques d'équipements : label + couleur + description.",
     form: (id, done) => Forms.group(store, formHost, id, done), addLabel: "+ Groupe", kind: "secondary", parent: "equipements",
+  });
+  addListTab("spares", "Spares", ListConfigs.spares, {
+    subtitle: "Inventaire de pièces de rechange (HDD · SSD · transceiver · autre) : suivi unitaire, statut, attribution.",
+    form: (id, done) => Forms.spare(store, formHost, id, done), addLabel: "+ Spare", kind: "secondary", parent: "equipements",
   });
   // Images de façade : bibliothèque hors modèle (ImageStore) → câblage dédié (CRUD via imageStore)
   {

@@ -14,6 +14,7 @@ export interface CascadeDetach { c: string; id: string; key: string; value: any;
     circulaire de la classe Store ; couplage structurel seulement). */
 export interface CascadeStoreApi {
   _byFk(collection: string, field: string, value: any): any[];
+  get(collection: string, id: string): any;
   cablesOfPort(portId: string): any[];
   cablesOfNetwork(networkId: string): any[];
   cablesOfWaypoint(waypointId: string): any[];
@@ -31,9 +32,16 @@ export const CASCADE_SPEC: Record<string, CascadeRule> = {
     // détache les attributions IP (l'IP reste au registre) et le rôle de serveur DHCP
     detach: [{ coll: "ipAddresses", fk: "equipment_id" }, { coll: "dhcpRanges", fk: "server_id" }],
     // câbles branchés sur les ports supprimés (dédup si les 2 bouts sont sur l'équipement)
-    custom: (s, id, deletes) => {
+    custom: (s, id, deletes, detaches) => {
       const seen = new Set<string>();
       s._byFk("ports", "equipment_id", id).forEach((p) => s.cablesOfPort(p.id).forEach((c) => { if (!seen.has(c.id)) { seen.add(c.id); deletes.push({ c: "cables", id: c.id }); } }));
+      // spares attribués à cet équipement → on PRÉSERVE l'info en la basculant en attribution libre (le nom de l'équipement)
+      const eq = s.get("equipments", id);
+      const nm = (eq && eq.name) ? eq.name : "(équipement supprimé)";
+      s._byFk("spares", "assigned_equipment_id", id).forEach((sp) => {
+        detaches.push({ c: "spares", id: sp.id, key: "assigned_free", value: sp.assigned_free || nm });
+        detaches.push({ c: "spares", id: sp.id, key: "assigned_equipment_id", value: null });
+      });
     },
   },
   ports: {

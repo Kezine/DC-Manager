@@ -837,6 +837,39 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck(!ss.dirty, "intégration : UNDO jusqu'au point sauvé → REDEVIENT propre");
   }
 
+  console.log("\n• Store : inventaire de spares (suivi unitaire + attribution + cascade)");
+  {
+    const s = await makeStore();
+    const { Spare } = D("models/Spare.js");
+    // entité : normalisation au constructeur
+    const d1 = new Spare({ type: "hdd", capacity_value: "4", capacity_unit: "TB", interface: "SATA", form_factor: '3.5"', rpm: "7200" });
+    ck.eq(d1.type, "hdd", "Spare HDD : type conservé");
+    ck.eq(d1.isDisk(), true, "Spare HDD : isDisk()");
+    ck.eq(d1.capacity_value, 4, "Spare HDD : capacité numérisée");
+    ck.eq(d1.techSummary(), "4 TB · SATA · 3.5\" · 7200 rpm", "Spare HDD : résumé technique (avec rpm)");
+    const d2 = new Spare({ type: "ssd", capacity_value: 1, capacity_unit: "TB", interface: "NVMe", form_factor: "M.2", rpm: 7200 });
+    ck.eq(d2.techSummary(), "1 TB · NVMe · M.2", "Spare SSD : résumé SANS rpm (HDD seul)");
+    const tx = new Spare({ type: "transceiver", tx_form: "QSFP28", tx_speed: "100G", tx_media: "LC", brand: "Cisco", model_pn: "QSFP-100G-LR4" });
+    ck.eq(tx.techSummary(), "QSFP28 · 100G · LC", "Spare transceiver : résumé technique");
+    ck.eq(tx.displayName(), "Cisco QSFP-100G-LR4 · QSFP28 · 100G · LC", "Spare : désignation dérivée (marque/modèle + tech)");
+    const def = new Spare({});
+    ck.eq(def.type, "other", "Spare : type défaut = other");
+    ck.eq(def.status, "available", "Spare : statut défaut = available");
+
+    // persistance + index FK + helper
+    const eq = await s.create("equipments", { name: "srv-01" });
+    const sp = await s.create("spares", { type: "ssd", name: "SSD-A", status: "assigned", assigned_equipment_id: eq.id, assigned_date: "2026-01-02" });
+    ck.eq(s.sparesOfEquipment(eq.id).length, 1, "sparesOfEquipment : index FK");
+    ck.eq(s.sparesOfEquipment(eq.id)[0].id, sp.id, "sparesOfEquipment : bon spare");
+
+    // CASCADE : suppression de l'équipement → l'attribution bascule en TEXTE LIBRE (info préservée)
+    await s.remove("equipments", eq.id);
+    const after = s.get("spares", sp.id);
+    ck.eq(after.assigned_equipment_id, null, "cascade : FK équipement détachée");
+    ck.eq(after.assigned_free, "srv-01", "cascade : attribution préservée en texte libre (nom de l'équipement)");
+    ck.eq(after.status, "assigned", "cascade : statut « attribué » conservé");
+  }
+
   console.log("\n" + "-".repeat(48));
   console.log("Résultat : " + pass + " PASS, " + fail + " FAIL");
   if (fail) { console.log("Échecs :\n  - " + failures.join("\n  - ")); process.exit(1); }

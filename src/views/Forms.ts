@@ -13,6 +13,8 @@ import { FloorLayout } from "../geometry/FloorLayout";
 import { Ip } from "../core/Ip";
 import { GroupTypes } from "../domain/GroupTypes";
 import { CableStatuses } from "../domain/CableStatuses";
+import { SpareTypes } from "../domain/SpareTypes";
+import { SpareStatuses } from "../domain/SpareStatuses";
 import { Waypoint } from "../models/Waypoint";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { Depths } from "../registries/Depths";
@@ -31,6 +33,8 @@ import {
   EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, EQUIP_FREE_DEFAULT_MM,
   WAYPOINT_TYPES, OOB_HEIGHT_DEFAULT, WAYPOINT_Z_DEFAULT, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT, BRUSH_PADDING_MM,
   FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT,
+  SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
+  SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
 } from "../domain/constants";
 
 /** Libellés de forme de waypoint (réplique WAYPOINT_KIND_LABELS du monolithe). */
@@ -279,6 +283,16 @@ export class Forms {
       tw.innerHTML = `<table><thead><tr><th>Câble</th><th>Type</th><th>Liaison</th><th>Réseau</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
     } else { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = "Aucun câble connecté."; root.appendChild(e); }
+
+    // spares (pièces de rechange) affectés à cet équipement
+    const spares = store.sparesOfEquipment(eq.id);
+    if (spares.length) {
+      const dS = document.createElement("div"); dS.className = "section-divider"; dS.textContent = "Spares affectés (" + spares.length + ")"; root.appendChild(dS);
+      const tw = document.createElement("div"); tw.className = "table-wrap";
+      const rows = spares.map((s: any) => `<tr><td class="cell-name">${Html.escape(s.displayName())}</td><td><span class="pill">${SpareTypes.icon(s.type)} ${Html.escape(SpareTypes.label(s.type))}</span></td><td>${s.techSummary() ? Html.escape(s.techSummary()) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td>${s.serial ? Html.escape(s.serial) : '<span style="color:var(--fg-dimmer)">—</span>'}</td></tr>`).join("");
+      tw.innerHTML = `<table><thead><tr><th>Désignation</th><th>Type</th><th>Caractéristiques</th><th>N° série</th></tr></thead><tbody>${rows}</tbody></table>`;
+      root.appendChild(tw);
+    }
 
     // Modifier → formulaire d'édition (remplace la fiche par la modale d'édition)
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end";
@@ -644,6 +658,136 @@ export class Forms {
       },
     });
     setTimeout(() => labelI.focus(), 30);
+  }
+
+  /** Spare (pièce de rechange) — formulaire DYNAMIQUE : champs communs + bloc spécifique au type
+      (HDD/SSD · transceiver · autre) + attribution conditionnelle (statut « attribué » → équipement OU texte libre). */
+  static spare(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
+    const sp: any = id ? store.get("spares", id) : null;
+    const root = document.createElement("div");
+    const today = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+
+    // -- type + identité --
+    const typeI = FormControls.select(SpareTypes.ALL.map((t) => ({ value: t.id, label: t.icon + " " + t.label })), sp ? sp.type : SpareTypes.DEFAULT);
+    const nameI = FormControls.text(sp ? sp.name : "", "désignation (sinon dérivée du modèle)");
+    root.appendChild(row2(FormControls.fieldRow("Type", typeI), FormControls.fieldRow("Désignation", nameI)));
+    const brandI = FormControls.text(sp ? sp.brand : "", "ex. Seagate, Cisco, Intel…");
+    const pnI = FormControls.text(sp ? sp.model_pn : "", "modèle / part-number");
+    root.appendChild(row2(FormControls.fieldRow("Marque", brandI), FormControls.fieldRow("Modèle / PN", pnI)));
+    const serialI = FormControls.text(sp ? sp.serial : "", "n° de série (unitaire)");
+    root.appendChild(FormControls.fieldRow("Numéro de série", serialI));
+
+    // -- bloc DISQUE (HDD/SSD) --
+    const diskBlock = document.createElement("div");
+    diskBlock.appendChild(divider("Caractéristiques disque"));
+    const capValI = FormControls.number(sp ? sp.capacity_value : "", { min: 0, step: 1, placeholder: "capacité" });
+    const capUnitI = FormControls.select(SPARE_CAP_UNITS.map((u) => ({ value: u, label: u === "GB" ? "Go" : "To" })), sp ? sp.capacity_unit : "GB");
+    const ifaceI = FormControls.text(sp ? sp.interface : "", "SATA / SAS / NVMe…");
+    root.appendChild(FormControls.attachDatalist(ifaceI, "sp-iface", SPARE_HDD_INTERFACES));
+    const fmtI = FormControls.text(sp ? sp.form_factor : "", '3.5" / 2.5" / M.2…');
+    root.appendChild(FormControls.attachDatalist(fmtI, "sp-fmt", SPARE_HDD_FORMATS));
+    diskBlock.appendChild(row2(FormControls.fieldRow("Capacité", capValI), FormControls.fieldRow("Unité", capUnitI), FormControls.fieldRow("Interface", ifaceI), FormControls.fieldRow("Format", fmtI)));
+    const rpmI = FormControls.select([{ value: "", label: "—" }].concat(SPARE_HDD_RPM.map((r) => ({ value: String(r), label: r + " rpm" }))), sp && sp.rpm != null ? String(sp.rpm) : "");
+    const rpmRow = FormControls.fieldRow("RPM", rpmI, "Vitesse de rotation (HDD uniquement).");
+    diskBlock.appendChild(rpmRow);
+    root.appendChild(diskBlock);
+
+    // -- bloc TRANSCEIVER --
+    const txBlock = document.createElement("div");
+    txBlock.appendChild(divider("Caractéristiques transceiver"));
+    const txFormI = FormControls.select([{ value: "", label: "—" }].concat(SPARE_TX_FORMS.map((f) => ({ value: f, label: f }))), sp ? sp.tx_form : "");
+    const txSpeedI = FormControls.select([{ value: "", label: "—" }].concat(SPARE_TX_SPEEDS.map((s) => ({ value: s, label: s }))), sp ? sp.tx_speed : "");
+    const txMediaI = FormControls.text(sp ? sp.tx_media : "", "LC / RJ45 / DAC / AOC…");
+    root.appendChild(FormControls.attachDatalist(txMediaI, "sp-txmedia", SPARE_TX_MEDIA));
+    txBlock.appendChild(row2(FormControls.fieldRow("Form factor", txFormI), FormControls.fieldRow("Débit", txSpeedI), FormControls.fieldRow("Média / connecteur", txMediaI)));
+    const txReachI = FormControls.text(sp ? sp.tx_reach : "", "ex. SR · LR · 1310nm · 10km");
+    txBlock.appendChild(FormControls.fieldRow("Portée / longueur d'onde", txReachI));
+    root.appendChild(txBlock);
+
+    // -- bloc AUTRE --
+    const otherBlock = document.createElement("div");
+    otherBlock.appendChild(divider("Caractéristiques"));
+    const specsI = FormControls.textArea(sp ? sp.specs : "");
+    otherBlock.appendChild(FormControls.fieldRow("Spécifications", specsI, "Caractéristiques en texte libre."));
+    root.appendChild(otherBlock);
+
+    // -- statut + attribution --
+    root.appendChild(divider("Statut"));
+    const statusI = FormControls.select(SpareStatuses.ALL.map((s) => ({ value: s.id, label: s.label })), sp ? sp.status : SpareStatuses.DEFAULT);
+    root.appendChild(FormControls.fieldRow("Statut", statusI));
+    const assignBlock = document.createElement("div");
+    const eqOpts = [{ value: "", label: "— libre / non précisé —" }].concat(
+      store.all("equipments").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((e: any) => ({ value: e.id, label: e.name || "(équipement)" })),
+    );
+    const eqI = FormControls.select(eqOpts, sp ? (sp.assigned_equipment_id || "") : "");
+    const freeI = FormControls.text(sp ? sp.assigned_free : "", "utilisateur / équipement hors gestion");
+    assignBlock.appendChild(row2(FormControls.fieldRow("Équipement affecté", eqI, "Ou laissez « libre » et renseignez le champ ci-contre."), FormControls.fieldRow("Attribution libre", freeI)));
+    const assignDateI: any = FormControls.date(sp ? sp.assigned_date : "");
+    assignBlock.appendChild(FormControls.fieldRow("Date d'attribution", assignDateI));
+    root.appendChild(assignBlock);
+
+    // -- administratif --
+    root.appendChild(divider("Administratif"));
+    const purchaseI: any = FormControls.date(sp ? sp.purchase_date : "");
+    const poI = FormControls.text(sp ? sp.po_ref : "", "réf. bon de commande");
+    root.appendChild(row2(FormControls.fieldRow("Date d'achat", purchaseI), FormControls.fieldRow("Bon de commande", poI)));
+    const storageI = FormControls.text(sp ? sp.storage_location : "", "ex. Armoire B · étagère 3 · bac 12");
+    root.appendChild(FormControls.fieldRow("Emplacement de stockage", storageI));
+    const commentI = FormControls.textArea(sp ? sp.comment : "");
+    root.appendChild(FormControls.fieldRow("Commentaire", commentI));
+
+    // -- visibilité dynamique --
+    const syncType = () => {
+      const t = typeI.value;
+      const disk = SPARE_DISK_TYPES.includes(t);
+      diskBlock.style.display = disk ? "" : "none";
+      txBlock.style.display = (t === "transceiver") ? "" : "none";
+      otherBlock.style.display = (t === "other") ? "" : "none";
+      rpmRow.style.display = (t === "hdd") ? "" : "none";   // RPM = HDD seulement
+    };
+    const syncStatus = () => {
+      const assigned = statusI.value === "assigned";
+      assignBlock.style.display = assigned ? "" : "none";
+      if (assigned && !assignDateI.value) assignDateI.value = today();   // pose la date d'attribution par défaut
+    };
+    typeI.onchange = syncType; statusI.onchange = syncStatus;
+    eqI.onchange = () => { if (eqI.value) freeI.value = ""; };   // un équipement choisi → vide l'attribution libre
+    syncType(); syncStatus();
+
+    host.openModal({
+      title: sp ? "Modifier la pièce" : "Nouvelle pièce (spare)",
+      subtitle: sp ? Html.escape(sp.displayName ? sp.displayName() : (sp.name || "")) : "",
+      body: root,
+      onSave: async () => {
+        const type = typeI.value || SpareTypes.DEFAULT;
+        const status = statusI.value || SpareStatuses.DEFAULT;
+        const eqId = eqI.value || null;
+        const payload: any = {
+          type, name: nameI.value.trim(), brand: brandI.value.trim(), model_pn: pnI.value.trim(), serial: serialI.value.trim(),
+          status,
+          assigned_equipment_id: status === "assigned" ? eqId : null,
+          assigned_free: status === "assigned" && !eqId ? freeI.value.trim() : "",
+          assigned_date: status === "assigned" ? assignDateI.value : "",
+          purchase_date: purchaseI.value, po_ref: poI.value.trim(), storage_location: storageI.value.trim(), comment: commentI.value.trim(),
+          // disque
+          capacity_value: SPARE_DISK_TYPES.includes(type) && capValI.value !== "" ? +capValI.value : null,
+          capacity_unit: capUnitI.value || "GB",
+          interface: SPARE_DISK_TYPES.includes(type) ? ifaceI.value.trim() : "",
+          form_factor: SPARE_DISK_TYPES.includes(type) ? fmtI.value.trim() : "",
+          rpm: type === "hdd" && rpmI.value ? +rpmI.value : null,
+          // transceiver
+          tx_form: type === "transceiver" ? txFormI.value : "",
+          tx_speed: type === "transceiver" ? txSpeedI.value : "",
+          tx_media: type === "transceiver" ? txMediaI.value.trim() : "",
+          tx_reach: type === "transceiver" ? txReachI.value.trim() : "",
+          // autre
+          specs: type === "other" ? specsI.value.trim() : "",
+        };
+        if (sp) await store.update("spares", sp.id, payload); else await store.create("spares", payload);
+        host.setDirty?.(true); Notify.toast(sp ? "Pièce mise à jour" : "Pièce créée"); onSaved?.(); return true;
+      },
+    });
+    setTimeout(() => nameI.focus(), 30);
   }
 
   /** Équipement — formulaire CŒUR (identité · admin · groupe · dimensions · placement rack ·
