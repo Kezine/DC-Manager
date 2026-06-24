@@ -17,6 +17,7 @@ import { IpNetwork } from "./IpNetwork";
 import { IpAddress } from "./IpAddress";
 import { DhcpRange } from "./DhcpRange";
 import { Spare } from "./Spare";
+import { Site } from "./Site";
 
 type EntityCtor = new (p?: Props) => Entity;
 
@@ -42,6 +43,7 @@ const CLASSES: Record<string, EntityCtor> = {
   ipAddresses: IpAddress,
   dhcpRanges: DhcpRange,
   spares: Spare,
+  sites: Site,
 };
 
 /** Registre des collections d'entités : nom ↔ classe, hydratation. */

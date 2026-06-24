@@ -63,6 +63,7 @@ export class DcBase {
   slotSel: { rackId: string; side: string; lo: number; hi: number } | null = null;   // sélection U multiple (Ctrl+clic) — plage contiguë même baie/face
   multiDc = false;                       // vue 3D multi-salles (étages empilés, bâtiments côte à côte)
   visibleDcIds = new Set<string>();      // salles affichées en multi-salles (∪ salle active)
+  visibleSites = new Set<string>();      // sites/bâtiments accessibles à l'UI (vide = tous) — filtre vue Étage / rail / portée 3D
   fadedRacks = new Set<string>();        // baies estompées (translucides — voir au travers)
   protected expanded = new Set<string>();  // cartes du panneau DÉPLIÉES (repliées par défaut)
   protected _cableEqFilter = "";           // filtre de la liste de câbles par équipement (aide à la sélection)
@@ -140,13 +141,16 @@ export class DcBase {
   current(): any { const all = this.dcs(); if (!all.length) return null; return (this.dcId && this.store.get("datacenters", this.dcId)) || all[0]; }
 
   /** Étage affiché par la vue Étage : floorTarget explicite → salle active → 1re salle → 1er étage connu → null. */
+  /** Un site/bâtiment est-il ACCESSIBLE à l'UI ? (filtre `visibleSites` ; vide = tous accessibles). */
+  protected siteAccessible(loc: string): boolean { return this.visibleSites.size === 0 || this.visibleSites.has(loc || ""); }
+
   protected floorTargetResolve(): { location: string; floor: string } | null {
-    if (this.floorTarget) return this.floorTarget;
+    if (this.floorTarget && this.siteAccessible(this.floorTarget.location)) return this.floorTarget;
     const dc = this.dcId ? this.store.get("datacenters", this.dcId) : null;
-    if (dc) return { location: dc.location || "", floor: String(dc.floor || "") };
-    const all = this.dcs();
+    if (dc && this.siteAccessible(dc.location || "")) return { location: dc.location || "", floor: String(dc.floor || "") };
+    const all = this.dcs().filter((d: any) => this.siteAccessible(d.location || ""));
     if (all.length) return { location: all[0].location || "", floor: String(all[0].floor || "") };
-    const keys = this.floor.allFloorKeys();
+    const keys = this.floor.allFloorKeys().filter((k: any) => this.siteAccessible(k.location));
     return keys.length ? { location: keys[0].location, floor: keys[0].floor } : null;
   }
 
@@ -321,7 +325,7 @@ export class DcBase {
     clearTimeout(this._pvTO);
     this._pvTO = setTimeout(() => {
       try {
-        const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], fadedRacks: [...this.fadedRacks], colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, cullDistanceM: this.cullDistanceM, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], floorTarget: this.floorTarget };
+        const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], fadedRacks: [...this.fadedRacks], colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, cullDistanceM: this.cullDistanceM, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
         DcBase.TOGGLE_KEYS.forEach((k) => { o[k] = (this as any)[k]; });
         window.localStorage.setItem(this.viewStateKey(), JSON.stringify(o));
       } catch (_) { /* quota / indispo → ignoré */ }
@@ -338,7 +342,7 @@ export class DcBase {
     this.hideFrontEq = false; this.hideRearEq = false; this.showPlaceholders = true; this.showRackSides = true; this.showPorts = true; this.showEqNames = true; this.showAllCables = true; this.showWaypoints = true; this.showConduits = true;
     this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showFloorGrid = true; this.cablePortNormal = false; this.routePreviewToMouse = true;
     this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1; this.cullDistanceM = 15;
-    this.multiDc = false; this.visibleDcIds = new Set(); this.fadedRacks = new Set();
+    this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set(); this.fadedRacks = new Set();
     this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeBuild = null;
     this.selCables = new Set(); this.searchTerm = ""; this.focusEqId = null;
     this.view = (o.view === "top" || o.view === "floor") ? o.view : "3d";
@@ -362,6 +366,7 @@ export class DcBase {
     // multi-salles + salles visibles (failsafe : seulement les salles encore présentes)
     this.multiDc = o.multiDc === true;
     this.visibleDcIds = new Set((Array.isArray(o.visibleDcIds) ? o.visibleDcIds : []).filter((id: string) => has("datacenters", id)));
+    this.visibleSites = new Set((Array.isArray(o.visibleSites) ? o.visibleSites : []).filter((id: string) => has("sites", id)));
     if (o.floorTarget && typeof o.floorTarget === "object" && "location" in o.floorTarget) this.floorTarget = { location: o.floorTarget.location || "", floor: String(o.floorTarget.floor != null ? o.floorTarget.floor : "") };
   }
 

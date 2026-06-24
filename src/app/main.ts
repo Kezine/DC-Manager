@@ -502,6 +502,7 @@ async function boot(): Promise<void> {
     openDatacenterForm: (id) => Forms.datacenter(store, formHost, id, () => shell.refreshActive()),
     openWaypointForm: (id, opts) => Forms.waypoint(store, formHost, id, opts),
     openFloorForm: (loc, fl, opts) => Forms.floor(store, formHost, loc, fl, opts),
+    openSiteForm: (id) => Forms.site(store, formHost, id, () => { dcView.buildToolbar(); dcView.render(); }),
     faceImageUrl: (eqId, face) => { const e: any = store.get("equipments", eqId); const fld = (EQUIP_FACE_IMG_FIELD as any)[face]; const im: any = e && fld && e[fld] ? imageStore.get(e[fld]) : null; return im ? im.url : null; },
   });
 

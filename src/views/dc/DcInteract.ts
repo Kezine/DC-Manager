@@ -501,7 +501,7 @@ export class DcInteract extends DcPanels {
   protected floorPlaneCtx(loc: string, fl: string, w: { x: number; y: number }): CtxSection[] {
     const cfg = this.floor.config(loc, fl), half = (cfg.cell_mm || 1000) / 2;
     const x = Math.round(w.x / half) * half, y = Math.round(w.y / half) * half;
-    return [{ head: "Plan d'étage — " + FloorLayout.locationLabel(loc) + " · ét. " + (fl || "0"), items: [
+    return [{ head: "Plan d'étage — " + this.store.siteLabel(loc) + " · ét. " + (fl || "0"), items: [
       { label: "+ Ajouter une salle…", action: () => this.host.openDatacenterForm?.("") },
       { label: "◎ Ajouter un pin d'étage ici", action: async () => { const wp: any = await this.store.create("waypoints", { name: "PIN-" + (this.store.oobWaypoints().length + 1), kind: "point", location: loc, floor: fl, floor_x: x, floor_y: y }); this.selWaypointId = wp.id; this.setDirty(); Notify.toast("Pin d'étage créé — glissez-le, éditez sa hauteur (clic droit)"); } },
       { label: "Éditer le plan d'étage…", action: () => this.editFloor(loc, fl, false) },
@@ -511,7 +511,7 @@ export class DcInteract extends DcPanels {
   /** Menu de la DALLE d'étage en 3D multi-salles (clic droit) : éditer le plan · ajouter une salle · vue Étage 2D. */
   protected floorPlane3DCtx(loc: string, fl: string): CtxSection[] {
     fl = String(fl || "");
-    return [{ head: "Étage — " + (FloorLayout.locationLabel(loc) || "(bâtiment ?)") + " · ét. " + (fl || "0"), items: [
+    return [{ head: "Étage — " + (this.store.siteLabel(loc) || "(bâtiment ?)") + " · ét. " + (fl || "0"), items: [
       { label: "Éditer le plan d'étage…", action: () => this.editFloor(loc, fl, false) },
       { label: "+ Ajouter une salle (DC) à cet étage…", action: () => this.host.openDatacenterForm?.("") },
       { label: "Vue Étage (2D)", action: () => { this.floorTarget = { location: loc, floor: fl }; this.view = "floor"; this.scale = null; this.buildToolbar(); this.render(); } },

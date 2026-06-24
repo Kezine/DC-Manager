@@ -1,6 +1,7 @@
 import type { Store } from "../../store";
 import { Dom } from "../../ui/Dom";
 import { FormControls } from "../../ui/FormControls";
+import { MultiSelect } from "../../ui/MultiSelect";
 import { Dialog } from "../../ui/Dialog";
 import { Notify } from "../../ui/Notify";
 import { ContextMenu } from "../../ui/ContextMenu";
@@ -58,6 +59,13 @@ export class DcPanels extends DcViews2D {
       modes.appendChild(b);
     });
     this.toolbarEl.appendChild(modes);
+    // multi-select des SITES/bâtiments accessibles à l'UI (vide = tous) — filtre la vue Étage / le rail / la portée 3D.
+    const sites = this.store.sitesSorted();
+    if (sites.length) {
+      this.toolbarEl.appendChild(this.vsep());
+      const ms = MultiSelect.build("Sites", sites.map((s: any) => ({ id: s.id, label: s.name || s.id })), this.visibleSites, () => { this.buildToolbar(); this.render(); });
+      this.toolbarEl.appendChild(ms);
+    }
     this.updateControls();
   }
 
@@ -273,12 +281,21 @@ export class DcPanels extends DcViews2D {
       box.appendChild(this.btn("+ Créer un étage…", () => this.editFloor("", "", true)));
       return box;
     }
-    // sélecteur d'étage (tous les couples bâtiment × étage connus)
-    const keys = this.floor.allFloorKeys();
-    const key = (k: { location: string; floor: string }) => (k.location || "") + "" + (k.floor || "");
-    const sel = FormControls.select(keys.map((k) => ({ value: key(k), label: FloorLayout.locationLabel(k.location) + " · ét. " + (k.floor || "0") })), key(ft));
-    sel.onchange = () => { const p = sel.value.split(""); this.floorTarget = { location: p[0], floor: p[1] || "" }; this.scale = null; this.render(); };
-    box.appendChild(FormControls.fieldRow("Bâtiment · étage", sel));
+    // SITE courant + CRUD (la navigation bâtiment/étage se fait via le RAIL en overlay, pas ici).
+    const site: any = ft.location ? this.store.get("sites", ft.location) : null;
+    const st = document.createElement("div"); st.className = "dc-card-title"; st.textContent = "Site — " + this.store.siteLabel(ft.location); box.appendChild(st);
+    if (site && site.address) { const a = document.createElement("div"); a.className = "form-hint"; a.textContent = site.address; box.appendChild(a); }
+    const sacts = document.createElement("div"); sacts.className = "dc-card-acts";
+    sacts.appendChild(this.btn("+ Site", () => this.host.openSiteForm?.(null)));
+    if (site) {
+      sacts.appendChild(this.btn("Modifier le site", () => this.host.openSiteForm?.(site.id)));
+      sacts.appendChild(this.btn("Supprimer le site…", async () => {
+        const ok = await Dialog.confirm({ title: "Supprimer le site « " + (site.name || "") + " » ?", message: "Décommissionnement (déménagement) : salles & étages supprimés, baies → « non placé » (équipements conservés), câbles intra → « planifié », équipements d'étage décâblés, waypoints supprimés, routes inter-DC débranchées. Les liaisons LOGIQUES (port↔port) sont préservées. Continuer ?", confirmLabel: "Supprimer le site", danger: true });
+        if (!ok) return;
+        await this.store.removeSite(site.id); this.visibleSites.delete(site.id); this.setDirty(); Notify.toast("Site décommissionné (liaisons logiques préservées)"); this.floorTarget = null; this.scale = null; this.buildToolbar(); this.render();
+      }));
+    }
+    box.appendChild(sacts);
     // salles de cet étage (clic = activer ; bouton = éditer)
     const dcs = this.store.dcsOfFloor(ft.location, ft.floor).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
     const rt = document.createElement("div"); rt.className = "dc-card-title"; rt.style.marginTop = "8px"; rt.textContent = "Salles (" + dcs.length + ")"; box.appendChild(rt);
@@ -450,11 +467,11 @@ export class DcPanels extends DcViews2D {
     box.appendChild(acts);
     // liste groupée par bâtiment puis étage (mono = sélection radio ; Vue étage = multi-sélection)
     const locs = Array.from(new Set(all.map((d: any) => d.location || "")))
-      .sort((a, b) => (a === curLoc ? -1 : b === curLoc ? 1 : FloorLayout.locationLabel(a).localeCompare(FloorLayout.locationLabel(b))));
+      .sort((a, b) => (a === curLoc ? -1 : b === curLoc ? 1 : this.store.siteLabel(a).localeCompare(this.store.siteLabel(b))));
     locs.forEach((loc) => {
       const inLoc = all.filter((d: any) => (d.location || "") === loc).sort((a: any, b: any) => FloorLayout.floorNum(a.floor) - FloorLayout.floorNum(b.floor) || (a.name || "").localeCompare(b.name || ""));
       if (!inLoc.length) return;
-      const h = document.createElement("div"); h.className = "dc-card-title"; h.style.marginTop = "8px"; h.textContent = FloorLayout.locationLabel(loc) + (loc === curLoc ? " (actif)" : ""); box.appendChild(h);
+      const h = document.createElement("div"); h.className = "dc-card-title"; h.style.marginTop = "8px"; h.textContent = this.store.siteLabel(loc) + (loc === curLoc ? " (actif)" : ""); box.appendChild(h);
       const list = document.createElement("div"); list.className = "dc-layers";
       inLoc.forEach((d: any) => {
         const isCur = d.id === dc.id;

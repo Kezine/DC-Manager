@@ -56,7 +56,7 @@ export class RackForms extends CableForms {
     const posRow = row2(FormControls.fieldRow("Position X (mm)", dcxI), FormControls.fieldRow("Position Y (mm)", dcyI));
     root.appendChild(posRow);
     // lieu/étage/local : manuels hors salle, hérités (verrouillés) si placé dans une salle.
-    const locI = FormControls.select(locOptions(""), rk ? rk.location : "");
+    const locI = FormControls.select(locOptions(store), rk ? rk.location : "");
     const floorI = FormControls.select(floorOptions(rk ? rk.floor : ""), rk ? rk.floor : "");
     const roomI = FormControls.text(rk ? rk.room : "", "local");
     root.appendChild(row2(FormControls.fieldRow("Lieu", locI), FormControls.fieldRow("Étage", floorI), FormControls.fieldRow("Local", roomI)));
@@ -203,6 +203,32 @@ export class RackForms extends CableForms {
     setTimeout(() => nameI.focus(), 30);
   }
 
+  /** SITE (bâtiment) — niveau racine de la hiérarchie physique : nom · adresse · description.
+      La SUPPRESSION (décommissionnement) se fait depuis le panneau latéral (carte Site), via store.removeSite. */
+  static site(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
+    const s: any = id ? store.get("sites", id) : null;
+    const root = document.createElement("div");
+    const nameI = FormControls.text(s ? s.name : "", "ex. Liège, DC Nord…");
+    root.appendChild(FormControls.fieldRow("Nom", nameI));
+    const addrI = FormControls.text(s ? s.address : "", "adresse postale");
+    root.appendChild(FormControls.fieldRow("Adresse", addrI));
+    const descI = FormControls.textArea(s ? s.description : "");
+    root.appendChild(FormControls.fieldRow("Description", descI));
+    host.openModal({
+      title: s ? "Modifier le site" : "Nouveau site",
+      subtitle: s ? Html.escape(s.name) : "",
+      body: root,
+      onSave: async () => {
+        const name = nameI.value.trim();
+        if (!name) { Notify.toast("Le nom est obligatoire", "err"); return false; }
+        const payload = { name, address: addrI.value.trim(), description: descI.value.trim() };
+        if (s) await store.update("sites", s.id, payload); else await store.create("sites", payload);
+        host.setDirty?.(true); Notify.toast(s ? "Site mis à jour" : "Site créé"); onSaved?.(); return true;
+      },
+    });
+    setTimeout(() => nameI.focus(), 30);
+  }
+
   /** Réseau IP (sous-réseau CIDR). */
   /** Salle (datacenter) — grille au sol : nom · dimensions (mm) · maille · localisation. */
   static datacenter(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
@@ -216,7 +242,7 @@ export class RackForms extends CableForms {
     const cI = FormControls.number(dc ? dc.cell_mm : 600, { min: 1, step: 50, placeholder: "maille (mm)" });
     root.appendChild(row2(FormControls.fieldRow("Largeur (mm)", wI), FormControls.fieldRow("Profondeur (mm)", dI), FormControls.fieldRow("Maille (mm)", cI)));
     root.appendChild(divider("Localisation"));
-    const locI = FormControls.select(locOptions(""), dc ? dc.location : "");
+    const locI = FormControls.select(locOptions(store), dc ? dc.location : "");
     const floorI = FormControls.select(floorOptions(dc ? dc.floor : ""), dc ? dc.floor : "");
     const roomI = FormControls.text(dc ? dc.room : "", "local");
     root.appendChild(row2(FormControls.fieldRow("Lieu", locI), FormControls.fieldRow("Étage", floorI), FormControls.fieldRow("Local", roomI)));
@@ -257,7 +283,7 @@ export class RackForms extends CableForms {
     const nameI = FormControls.text(wp.name || "", "ex. Goulotte travée A");
     root.appendChild(FormControls.fieldRow("Nom", nameI));
     // récapitulatif VERROUILLÉ (type + emplacement, non modifiables)
-    const where = floorLvl ? (FloorLayout.locationLabel(wp.location) + " · " + Waypoint.floorLabel(wp))
+    const where = floorLvl ? (store.siteLabel(wp.location) + " · " + Waypoint.floorLabel(wp))
       : wp.rack_id ? ("baie « " + ((store.get("racks", wp.rack_id) || {}).name || "?") + " »")
       : wp.datacenter_id ? ("salle « " + store.dcName(wp.datacenter_id) + " »") : "pool (non posé)";
     const lock = document.createElement("div"); lock.className = "form-hint";
@@ -323,7 +349,7 @@ export class RackForms extends CableForms {
     const floorExists = (L: string, F: string) => !!store.floorFor(L, F) || store.dcsOfFloor(L, F).length > 0
       || store.oobWaypoints().some((w: any) => (w.location || "") === (L || "") && String(w.floor || "") === String(F || ""));
     if (pick) {
-      locSel = FormControls.select(locOptions(""), location || "");
+      locSel = FormControls.select(locOptions(store), location || "");
       flSel = FormControls.select([], "");   // peuplé dynamiquement (étages NON existants du bâtiment choisi)
       root.appendChild(row2(FormControls.fieldRow("Bâtiment", locSel, "Bâtiment (lieu) de l'étage."), FormControls.fieldRow("Étage", flSel)));
       pickStatus = document.createElement("div"); pickStatus.className = "form-hint"; root.appendChild(pickStatus);
@@ -343,7 +369,7 @@ export class RackForms extends CableForms {
       locSel.addEventListener("change", rebuildFloors); rebuildFloors();
     } else {
       const head = document.createElement("div"); head.className = "form-hint";
-      head.textContent = "Plan de l'étage « " + (fl || "0") + " » du bâtiment « " + (FloorLayout.locationLabel(location) || "—") + " ». Dimensions en mm. Les cases inaccessibles se marquent dans le plan d'étage.";
+      head.textContent = "Plan de l'étage « " + (fl || "0") + " » du bâtiment « " + (store.siteLabel(location) || "—") + " ». Dimensions en mm. Les cases inaccessibles se marquent dans le plan d'étage.";
       root.appendChild(head);
     }
     const wI = FormControls.number(f.width_mm, { min: 1, step: 500 });
@@ -357,7 +383,7 @@ export class RackForms extends CableForms {
     root.appendChild(FormControls.fieldRow("Description", descI));
     host.openModal({
       title: pick ? "Nouvel étage" : (existing ? "Modifier le plan d'étage" : "Nouveau plan d'étage"),
-      subtitle: pick ? "" : ((FloorLayout.locationLabel(location) || "") + " · ét. " + (fl || "0")),
+      subtitle: pick ? "" : ((store.siteLabel(location) || "") + " · ét. " + (fl || "0")),
       body: root, wide: true,
       onSave: async () => {
         const L = pick ? (locSel!.value || "") : (location || ""), F = pick ? String(flSel!.value || "").trim() : fl;

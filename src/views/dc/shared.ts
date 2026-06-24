@@ -29,6 +29,7 @@ export interface DatacenterHost {
   openWaypointForm?(id: string | null, opts?: any): void;
   openDatacenterForm?(id: string): void;
   openFloorForm?(location: string, floor: string, opts?: any): void;
+  openSiteForm?(id: string | null): void;
   /** URL (objectURL) de l'image attachée à une face d'un équipement, ou null. */
   faceImageUrl?(eqId: string, face: string): string | null;
   /** Assignation d'un emplacement libre (clic 3D) → dialogue, puis `onDone` rafraîchit la vue. */

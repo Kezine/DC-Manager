@@ -168,7 +168,7 @@ export class DcViews2D extends DcScene3D {
   protected renderFloorRail(ft: { location: string; floor: string }): void {
     if (!this.floorRail) { const r = document.createElement("div"); r.className = "dc-floor-rail"; this.floorRail = r; this.stage.appendChild(r); }
     const rail = this.floorRail; rail.innerHTML = "";
-    const keys = this.floor.allFloorKeys();
+    const keys = this.floor.allFloorKeys().filter((k: any) => this.siteAccessible(k.location));   // sites accessibles seulement
     if (!keys.length) { rail.style.display = "none"; return; }
     rail.style.display = "";
     const loc = ft.location || "", fl = String(ft.floor || "");
@@ -177,13 +177,13 @@ export class DcViews2D extends DcScene3D {
     keys.forEach((k) => { const b = k.location || ""; if (!byB.has(b)) byB.set(b, []); byB.get(b)!.push(k); });
     const multiB = byB.size > 1;
     [...byB.keys()].forEach((b) => {
-      if (multiB) { const h = document.createElement("div"); h.className = "dc-floor-rail-bldg"; h.textContent = FloorLayout.locationLabel(b) || "(bât. ?)"; h.title = FloorLayout.locationLabel(b) || ""; rail.appendChild(h); }
+      if (multiB) { const h = document.createElement("div"); h.className = "dc-floor-rail-bldg"; h.textContent = this.store.siteLabel(b) || "(bât. ?)"; h.title = this.store.siteLabel(b) || ""; rail.appendChild(h); }
       byB.get(b)!.slice().sort((a, c) => FloorLayout.floorNum(c.floor) - FloorLayout.floorNum(a.floor)).forEach((k) => {
         const isCur = (k.location || "") === loc && String(k.floor || "") === fl;
         const btn = document.createElement("button");
         btn.className = "btn btn-sm dc-floor-rail-btn " + (isCur ? "btn-primary" : "btn-ghost");
         btn.textContent = "ét. " + (String(k.floor) || "0");
-        btn.title = (FloorLayout.locationLabel(k.location) || "(bât. ?)") + " · étage " + (String(k.floor) || "0");
+        btn.title = (this.store.siteLabel(k.location) || "(bât. ?)") + " · étage " + (String(k.floor) || "0");
         if (isCur) btn.setAttribute("aria-current", "true");
         btn.onclick = () => { if (!isCur) { this.floorTarget = { location: k.location, floor: String(k.floor) }; this.scale = null; this.render(); } };
         rail.appendChild(btn);

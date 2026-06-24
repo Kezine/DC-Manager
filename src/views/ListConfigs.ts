@@ -339,7 +339,7 @@ export class ListConfigs {
   /** Bits d'emplacement d'une baie (Lieu · Étage · Salle), hérités de son datacenter. */
   private static _rackLocText(store: Store, r: any): string {
     const d: any = r.datacenter_id && store.get("datacenters", r.datacenter_id);
-    if (d) return [FloorLayout.locationLabel(d.location), d.floor ? "ét. " + d.floor : "", d.room || d.name || ""].filter(Boolean).join(" · ");
+    if (d) return [store.siteLabel(d.location), d.floor ? "ét. " + d.floor : "", d.room || d.name || ""].filter(Boolean).join(" · ");
     return [r.room].filter(Boolean).join(" · ");
   }
 

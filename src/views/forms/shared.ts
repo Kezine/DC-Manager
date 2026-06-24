@@ -8,7 +8,7 @@ import { Ip } from "../../core/Ip";
 /** Libellés de forme de waypoint (réplique WAYPOINT_KIND_LABELS du monolithe). */
 export const WAYPOINT_KIND_LABELS: Record<string, string> = { point: "Pin (point de passage)", segment: "Chemin de câbles (rail)", brush: "Brosse de brassage (baie)" };
 
-export const locOptions = (sel: string) => [{ value: "", label: "— aucun —" }].concat(LOCATIONS.map((l) => ({ value: l.id, label: l.label })));
+export const locOptions = (store: Store) => [{ value: "", label: "— aucun —" }].concat(store.sitesSorted().map((s: any) => ({ value: s.id, label: s.name || s.id })));
 export const floorOptions = (sel: string) => { const s = String(sel == null ? "" : sel); const o = [{ value: "", label: "— étage —" }].concat(FLOORS.map((f) => ({ value: f, label: "Étage " + f }))); if (s && !FLOORS.includes(s)) o.push({ value: s, label: s + " (hors liste)" }); return o; };
 
 export const divider = (txt: string) => { const d = document.createElement("div"); d.className = "section-divider"; d.textContent = txt; return d; };

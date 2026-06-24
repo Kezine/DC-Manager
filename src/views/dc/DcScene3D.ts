@@ -164,7 +164,7 @@ export class DcScene3D extends DcCamera {
       const C = [[0, 0], [W, 0], [W, D], [0, D]].map(([x, y]) => proj({ x: ox + x, y: oy + y, z }));
       const base = C.reduce((s, p) => s + p.depth, 0) / 4 + Math.max(W, D) + lvlBias(FloorLayout.floorNum(fp.floor));
       const plane = Dom.svg("polygon", { class: "dc-floorplane3d" + (this.showFloorGrid ? "" : " no-grid"), points: C.map((p) => p.h + "," + p.v).join(" ") });
-      const tip = Dom.svg("title"); tip.textContent = "Étage — " + (FloorLayout.locationLabel(fp.loc) || "(bâtiment ?)") + " · ét. " + (fp.floor || "0"); plane.appendChild(tip);
+      const tip = Dom.svg("title"); tip.textContent = "Étage — " + (this.store.siteLabel(fp.loc) || "(bâtiment ?)") + " · ét. " + (fp.floor || "0"); plane.appendChild(tip);
       plane.addEventListener("contextmenu", (e: any) => { this.hideTip(); this.ctxMenu(e, this.floorPlane3DCtx(fp.loc || "", String(fp.floor || ""))); });   // clic droit dalle 3D → activer salle / éditer étage
       drawables.push({ depth: base + 6, node: plane });
       if (this.showFloorGrid) {
@@ -223,7 +223,7 @@ export class DcScene3D extends DcCamera {
       if (i === 0 && floorLeftEdge != null) { aH = floorLeftEdge - fontL * 1.2; aV = floorMidV; dep = proj({ x: -m.gap * 0.6, y: 0, z: m.topZ / 2 }).depth; }
       else { const pc = proj({ x: b.x0 - m.gap * 0.95, y: 0, z: m.topZ / 2 }); aH = pc.h; aV = pc.v; dep = pc.depth; }
       const t = Dom.svg("text", { class: "dc-bldg-label", x: aH, y: aV, "text-anchor": "middle", "font-size": fontL * 1.3, transform: "rotate(-90 " + aH + " " + aV + ")" });
-      t.textContent = FloorLayout.locationLabel(b.loc); drawables.push({ depth: dep, node: t });
+      t.textContent = this.store.siteLabel(b.loc); drawables.push({ depth: dep, node: t });
       if (i > 0) {
         const xs = b.x0 - m.gap, C = [proj({ x: xs, y: 0, z: 0 }), proj({ x: xs, y: m.maxD, z: 0 }), proj({ x: xs, y: m.maxD, z: m.topZ }), proj({ x: xs, y: 0, z: m.topZ })];
         drawables.push({ depth: C.reduce((s, p) => s + p.depth, 0) / 4, node: Dom.svg("polygon", { class: "dc-bldg-sep", points: C.map((p) => p.h + "," + p.v).join(" ") }) });

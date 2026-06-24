@@ -10,7 +10,7 @@ import { Waypoint } from "../models/Waypoint";
 import { PortRoles } from "../registries/PortRoles";
 import { Id } from "../core/Id";
 import { Text } from "../core/Text";
-import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, CABLE_STATUS_BROKEN, CABLE_STATUS_RANK, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT } from "../domain/constants";
+import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, CABLE_STATUS_BROKEN, CABLE_STATUS_RANK, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT, LOCATIONS } from "../domain/constants";
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
 import { CASCADE_SPEC, CascadeDelete, CascadeDetach } from "./cascadeSpec";
 
@@ -89,7 +89,19 @@ export class Store {
         (Array.isArray(raw[c]) ? raw[c] : []).forEach((o: RawRecord) => this.data[c].push(new Cls(o)));
       });
     }
+    this._ensureSites();
     this._reindex();
+  }
+  /** Garantit l'existence d'entités `sites` : seed des sites par défaut (anciennes LOCATIONS) sur un document
+      vierge/legacy, + MIGRATION de tout `location` référencé qui n'a pas encore d'entité site (docs ≤ avant
+      l'entité Site). Synchrone (en mémoire) — la persistance suit au prochain save. */
+  private _ensureSites(): void {
+    const have = new Set(this.data.sites.map((s: any) => s.id));
+    const Cls = ENTITY_CLASSES.sites;
+    const add = (id: string, name?: string) => { if (id && !have.has(id)) { this.data.sites.push(new Cls({ id, name: name || id })); have.add(id); } };
+    if (!this.data.sites.length) LOCATIONS.forEach((l) => add(l.id, l.label));   // doc vierge/legacy → sites par défaut
+    const lbl = (id: string) => { const l = LOCATIONS.find((x) => x.id === id); return l ? l.label : id; };
+    ["datacenters", "racks", "equipments", "floors", "waypoints"].forEach((coll) => this.data[coll].forEach((o: any) => { if (o.location) add(o.location, lbl(o.location)); }));
   }
   /* Migration → dispositions NOMMÉES. L'ancien meta.graphLayout (objet unique)
      devient une entrée de meta.graphLayouts ; meta.activeLayoutId la désigne.
@@ -451,6 +463,11 @@ export class Store {
   waypointsOfDc(datacenterId: string | null): any[] { return this._byFk("waypoints", "datacenter_id", datacenterId || null); }
   floorsOf(location: string | null): any[] { return this._byFk("floors", "location", location || null); }
   floorFor(location: string, floor: any): any { const f = String(floor != null ? floor : ""); return this.floorsOf(location).find((x) => String(x.floor) === f) || null; }
+  /* ---- SITES (bâtiments) ---- */
+  /** Sites triés par nom. */
+  sitesSorted(): any[] { return this.all("sites").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")); }
+  /** Libellé d'un site : nom de l'entité → libellé legacy (LOCATIONS) → id. */
+  siteLabel(id: string): string { if (!id) return "—"; const s: any = this.get("sites", id); if (s) return s.name || id; const l = LOCATIONS.find((x) => x.id === id); return l ? l.label : id; }
   /** Salles d'un étage (location + floor). */
   dcsOfFloor(location: string | null, floor: any): any[] { const f = String(floor != null ? floor : ""); return this.all("datacenters").filter((d) => (d.location || "") === (location || "") && String(d.floor || "") === f); }
   /** Waypoints hors-salle (OOB). */
@@ -765,6 +782,43 @@ export class Store {
       if (c.status === "cable" || c.status === "a-remplacer") ops.push({ collection: "cables", id: c.id, patch: { status: "planifie" } });
     }));
     return ops;
+  }
+
+  /** SUPPRESSION D'UN SITE (décommissionnement / déménagement) — cascade SCOPÉE au site, conçue pour
+      PRÉSERVER les LIAISONS LOGIQUES (port↔port) afin de re-placer les baies ailleurs sans recâbler :
+      1. câbles des équipements du site (en baie ou libres en salle) « câblé / à-remplacer » → « planifié »
+         (liaison logique conservée) ;
+      2. équipements d'ÉTAGE du site : COMPLÈTEMENT décâblés (câbles SUPPRIMÉS) + dé-placés ;
+      3. tous les WAYPOINTS du site (salles + niveau étage/OOB) SUPPRIMÉS → les routes inter-DC les
+         traversant sont débranchées (la cascade waypoint retire leur id des routes) ;
+      4. ÉTAGES (floors) et SALLES (datacenters) du site SUPPRIMÉS ; supprimer une salle remet ses baies
+         « non placé » (cascade datacenters) et dé-place ses équipements libres ;
+      5. baies encore marquées de ce site (champ location) → location vidée (pool propre) ;
+      6. l'entité site est supprimée.
+      NB : opération en plusieurs étapes (plusieurs entrées d'undo) — choix de cohérence sur la facilité. */
+  async removeSite(siteId: string): Promise<void> {
+    if (!this.get("sites", siteId)) return;
+    const dcIds = new Set(this.all("datacenters").filter((d) => (d.location || "") === siteId).map((d) => d.id));
+    const inSiteRoom = (e: any) => !!((e.rack_id && dcIds.has((this.get("racks", e.rack_id) || {}).datacenter_id)) || (e.dc_id && dcIds.has(e.dc_id)));
+    const floorEq = this.all("equipments").filter((e) => e.placement_mode === "floor" && (e.location || "") === siteId);
+    // 1) liaisons logiques préservées : câbles des équipements en baie/salle du site → « planifié »
+    const preserve = this.all("equipments").filter((e) => e.placement_mode !== "floor" && inSiteRoom(e)).map((e) => e.id);
+    const ops = this.cableDowngradeOps(preserve);
+    if (ops.length) await this.updateBatch(ops);
+    // 2) équipements d'étage : câbles SUPPRIMÉS (décâblés) + dé-placés
+    for (const e of floorEq) {
+      for (const c of this.cablesOfEquipment(e.id)) await this.remove("cables", c.id);
+      await this.update("equipments", e.id, { placement_mode: "manual", location: "", floor: "", floor_x: null, floor_y: null });
+    }
+    // 3) waypoints du site (salles + étage/OOB) → supprimés
+    for (const w of this.all("waypoints").filter((w) => dcIds.has(w.datacenter_id) || ((w.location || "") === siteId))) await this.remove("waypoints", w.id);
+    // 4) étages + salles → supprimés (cascade : baies non-placées, équipements libres dé-placés)
+    for (const f of this.all("floors").filter((f) => (f.location || "") === siteId)) await this.remove("floors", f.id);
+    for (const d of this.all("datacenters").filter((d) => (d.location || "") === siteId)) await this.remove("datacenters", d.id);
+    // 5) baies encore marquées de ce site → location vidée
+    for (const r of this.all("racks").filter((r) => (r.location || "") === siteId)) await this.update("racks", r.id, { location: "" });
+    // 6) le site
+    await this.remove("sites", siteId);
   }
   /** Brouillons de câble (un seul bout) compatibles avec ce port — candidats à l'affectation au clic. */
   cableDraftCandidatesForPort(portId: string): any[] {

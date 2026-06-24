@@ -101,7 +101,7 @@ export class FloorLayout {
     this.store.all("datacenters").forEach((d: any) => add(d.location, d.floor));
     this.store.oobWaypoints().forEach((w: any) => { if (w.location || (w.floor != null && w.floor !== "")) add(w.location, w.floor); });
     this.store.floorEquipments().forEach((e: any) => { if (e.location || (e.floor != null && e.floor !== "")) add(e.location, e.floor); });
-    return [...seen.values()].sort((a, b) => FloorLayout.locationLabel(a.location).localeCompare(FloorLayout.locationLabel(b.location)) || FloorLayout.floorNum(a.floor) - FloorLayout.floorNum(b.floor));
+    return [...seen.values()].sort((a, b) => this.store.siteLabel(a.location).localeCompare(this.store.siteLabel(b.location)) || FloorLayout.floorNum(a.floor) - FloorLayout.floorNum(b.floor));
   }
 
   /** Disposition multi-salles. `cur` = salle active (peut être null = vue d'ensemble).
@@ -122,7 +122,7 @@ export class FloorLayout {
     this.allFloorKeys().forEach((k) => { if (cur == null || dcLocs.has(k.location || "")) addF(k.location, k.floor); });
     const allFloors = [...dispFloors.values()];
     const locs = Array.from(new Set(allFloors.map((f) => f.loc)))
-      .sort((a, b) => (curLoc != null && a === curLoc ? -1 : curLoc != null && b === curLoc ? 1 : FloorLayout.locationLabel(a).localeCompare(FloorLayout.locationLabel(b))));
+      .sort((a, b) => (curLoc != null && a === curLoc ? -1 : curLoc != null && b === curLoc ? 1 : this.store.siteLabel(a).localeCompare(this.store.siteLabel(b))));
     const levels = Array.from(new Set(allFloors.map((f) => FloorLayout.floorNum(f.fl)))).sort((a, b) => a - b);
     const stackH = Math.max(42 * U_MM, ...dcs.map((d: any) => this.zRef(d)));
     const levelZ = (lv: number) => (levels.indexOf(lv) >= 0 ? levels.indexOf(lv) : 0) * (stackH + gap);

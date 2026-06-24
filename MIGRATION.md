@@ -554,3 +554,40 @@ Le filet de régression au niveau **modules** arrive en phase 3 (le Store est la
 première couche dont le comportement justifie des tests directs ; la couche
 données y sera couverte au passage). D'ici là, `Tests/run.js` continue de valider
 le comportement contre le dernier HTML livré.
+
+---
+
+## Concept : SITES (bâtiments) & décommissionnement (déménagement)
+
+**Hiérarchie physique** : `Site › Étage (floors) › Salle (datacenter) › Baie (rack) › Équipement`.
+Au-dessus, l'équipement porte une **topologie LOGIQUE** : `Port ↔ Câble ↔ Port` (indépendante du
+placement physique). L'idée directrice : **un câble est une liaison logique entre deux ports** ; le
+placement (site/salle/baie/U) est une couche séparée, jetable et reconstructible.
+
+**Entité `Site`** (`models/Site` : `name`, `address`, `description`). Son `id` est la valeur référencée
+par le champ `location` des datacenters / floors / racks / equipments / waypoints (remplace l'ancienne
+constante figée `LOCATIONS`, conservée comme **libellé de repli** via `Store.siteLabel`). `Store._ensureSites`
+seede les sites par défaut sur un document vierge et **migre** tout `location` legacy en entité au chargement.
+Statuts de câble pertinents : `cable` (Câblé) · `planifie` (Planifié = « prévisionnel ») · `brouillon`.
+
+**Décommissionnement — `Store.removeSite(siteId)`** (scopé au site, conçu pour un **déménagement** :
+préserver les liaisons LOGIQUES pour re-placer les baies ailleurs sans recâbler) :
+1. **Câbles intra** des équipements du site (en baie / libres en salle) « câblé/à-remplacer » → **« planifié »**
+   (`cableDowngradeOps`) — la liaison port↔port survit, prête à être ré-activée au re-placement.
+2. **Équipements d'ÉTAGE** du site : **complètement décâblés** (leurs câbles SUPPRIMÉS) + dé-placés (mode manuel).
+3. **Tous les WAYPOINTS** du site (salles + niveau étage/OOB) **supprimés** → les **routes inter-DC** qui les
+   traversaient sont **débranchées** (la cascade waypoint retire leur id des routes de câble).
+4. **Étages** et **Salles** du site **supprimés** ; la cascade « datacenters » remet les **baies « non placé »**
+   (gardées avec leurs équipements) et dé-place les équipements libres.
+5. Baies encore marquées du site (champ `location`) → `location` vidée (pool propre).
+6. L'entité `site` est supprimée.
+   *NB cohérence > facilité : opération multi-étapes (plusieurs entrées d'undo).* Couvert par `test:modules`.
+
+**Filtre `visibleSites`** (vue Datacenter) : multi-select en topbar (à droite des modes de vue) des sites
+**accessibles à l'UI** (vide = tous). Filtre la **vue Étage** (cible + rail d'étages via `siteAccessible`).
+Persisté par fichier. Le **sélecteur d'étage** du panneau latéral est retiré (doublon du rail en overlay) ;
+le panneau « Plan d'étage » porte désormais la **gestion du site** (créer / modifier / supprimer).
+
+**Vue Étage — câbles inter-DC** : `DcViews2D.interDcRoutesFloor` trace, en coords plan, les câbles dont les
+deux bouts résolvent dans des salles de l'étage (port → exits/OOB → port) ; les **exits** des salles sont
+rendus comme points de connexion (`floorExitNode`). Carte latérale « Câbles inter-DC » dédiée.

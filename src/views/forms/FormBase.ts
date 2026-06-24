@@ -113,7 +113,7 @@ export class FormBase {
   protected static dd(html: string): HTMLElement { const e = document.createElement("div"); e.className = "dd"; e.innerHTML = html; return e; }
   /** Bits de localisation d'un équipement (hérités du rack / de la salle, ou saisis). */
   protected static equipLocationBits(store: Store, e: any): string[] {
-    const bits = (loc: any, fl: any, rm: any) => [FloorLayout.locationLabel(loc || ""), fl, rm].filter((x) => x && x !== "—");
+    const bits = (loc: any, fl: any, rm: any) => [store.siteLabel(loc || ""), fl, rm].filter((x) => x && x !== "—");
     if ((e.placement_mode === "rack" || e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id) { const rk: any = store.get("racks", e.rack_id); return rk ? bits(rk.location, rk.floor, rk.room) : []; }
     if (e.dim_mode === "free" && e.dc_id) { const dc: any = store.get("datacenters", e.dc_id); if (dc) return bits(dc.location, dc.floor, dc.room); }
     return bits(e.location, e.floor, e.room);

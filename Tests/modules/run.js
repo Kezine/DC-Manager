@@ -870,6 +870,40 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(after.status, "assigned", "cascade : statut « attribué » conservé");
   }
 
+  console.log("\n• Store : sites + removeSite (décommissionnement, liaisons logiques préservées)");
+  {
+    const s = await makeStore();
+    ck.eq(s.siteLabel("liege"), "Liège", "siteLabel : site par défaut seedé");
+    const site = await s.create("sites", { name: "S1" });
+    const dc = await s.create("datacenters", { name: "DC1", location: site.id, floor: "0" });
+    const rack = await s.create("racks", { name: "R1", datacenter_id: dc.id, location: site.id });
+    const eqA = await s.create("equipments", { name: "A", rack_id: rack.id, placement_mode: "rack", rack_u: 1 });
+    const eqB = await s.create("equipments", { name: "B" });   // hors site (pool)
+    const pa = await s.create("ports", { equipment_id: eqA.id, name: "p1" });
+    const pb = await s.create("ports", { equipment_id: eqB.id, name: "p1" });
+    const cab = await s.create("cables", { from_port_id: pa.id, to_port_id: pb.id, status: "cable" });
+    const wp = await s.create("waypoints", { kind: "point", datacenter_id: dc.id, dc_x: 100, dc_y: 100 });
+    const fe = await s.create("equipments", { name: "FE", placement_mode: "floor", location: site.id, floor: "0", dim_mode: "free" });
+    const pf = await s.create("ports", { equipment_id: fe.id, name: "pf" });
+    const pb2 = await s.create("ports", { equipment_id: eqB.id, name: "p2" });
+    const cabF = await s.create("cables", { from_port_id: pf.id, to_port_id: pb2.id, status: "cable" });
+
+    await s.removeSite(site.id);
+
+    ck.eq(s.get("sites", site.id), null, "site supprimé");
+    ck.eq(s.get("datacenters", dc.id), null, "salle du site supprimée");
+    const r2 = s.get("racks", rack.id);
+    ck(!!r2 && r2.datacenter_id == null, "baie repassée « non placée » (datacenter_id null)");
+    ck.eq(r2.location, "", "baie : location vidée");
+    const a2 = s.get("equipments", eqA.id);
+    ck(!!a2 && a2.rack_id === rack.id, "équipement conservé dans sa baie");
+    ck.eq(s.get("cables", cab.id).status, "planifie", "câble intra → planifié (liaison logique préservée)");
+    ck.eq(s.get("waypoints", wp.id), null, "waypoint du site supprimé");
+    const fe2 = s.get("equipments", fe.id);
+    ck(!!fe2 && fe2.placement_mode === "manual", "équipement d'étage dé-placé");
+    ck.eq(s.get("cables", cabF.id), null, "câble d'équipement d'étage supprimé (décâblé)");
+  }
+
   console.log("\n" + "-".repeat(48));
   console.log("Résultat : " + pass + " PASS, " + fail + " FAIL");
   if (fail) { console.log("Échecs :\n  - " + failures.join("\n  - ")); process.exit(1); }
