@@ -6,3 +6,5 @@ export type { ListOptions, ListColumn, ListActions } from "./ListView";
 export { ListConfigs } from "./ListConfigs";
 export { Forms } from "./Forms";
 export type { FormHost } from "./Forms";
+export { DatacenterView } from "./DatacenterView";
+export type { DatacenterHost } from "./DatacenterView";

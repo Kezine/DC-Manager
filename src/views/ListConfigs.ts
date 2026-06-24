@@ -1,6 +1,7 @@
 import type { Store } from "../store";
 import { Html } from "../core/Html";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
+import { EquipFaces } from "../registries/EquipFaces";
 import { GroupTypes } from "../domain/GroupTypes";
 import { CableStatuses } from "../domain/CableStatuses";
 import { RackScene } from "../geometry/RackScene";
@@ -69,6 +70,28 @@ export class ListConfigs {
     };
   }
 
+  /** Bibliothèque d'images de façade — source CUSTOM (ImageStore) injectée via `items` au câblage. */
+  static faceImages(store: Store): ListOptions {
+    const faceLbl = (f: string) => (f === "autre" ? "Autre" : EquipFaces.label(f));
+    return {
+      collection: "faceImages",
+      defaultSort: { key: "name", dir: "asc" },
+      emptyText: "Aucune image de façade. Ajoutez-en une avec « + Image », ou importez-en depuis l'éditeur de façade d'un équipement.",
+      searchFields: (o) => [o.name, faceLbl(o.face), (o.u_height || 1) + "U", o.description],
+      columns: [
+        { head: "Aperçu", render: (o) => o.url ? `<span class="cell-fithumb"><img src="${o.url}" alt="" /></span>` : dim("—") },
+        { head: "Nom", cls: "cell-name", sortKey: "name", sort: (o) => o.name || "", render: (o) => Html.escape(o.name || "(sans nom)") },
+        { head: "Hauteur", cls: "num", sort: (o) => o.u_height || 1, render: (o) => `<span class="pill">${o.u_height || 1} U</span>` },
+        {
+          head: "Face", sortKey: "face", sort: (o) => faceLbl(o.face), render: (o) => `<span class="pill">${Html.escape(faceLbl(o.face))}</span>`,
+          filter: { label: "Face", options: () => [{ id: "front", label: "Avant" }, { id: "rear", label: "Arrière" }, { id: "autre", label: "Autre" }], valueOf: (o) => o.face || "front" },
+        },
+        { head: "Usages", cls: "num", sort: (o) => store.faceImageUsageCount(o.id), render: (o) => `<span class="pill">${store.faceImageUsageCount(o.id)}</span>` },
+        { head: "Description", render: (o) => (o.description ? Html.escape(o.description.slice(0, 80)) : dim("—")) },
+      ],
+    };
+  }
+
   static cables(store: Store): ListOptions {
     const endName = (pid: string) => { const p: any = store.get("ports", pid); const e: any = p && store.get("equipments", p.equipment_id); return e ? (e.name || "?") : "—"; };
     return {
@@ -84,6 +107,38 @@ export class ListConfigs {
           head: "Statut", sortKey: "status", sort: (c) => c.status, render: (c) => Html.escape(CableStatuses.label(c.status)),
           filter: { label: "Statut", options: () => CableStatuses.ALL.map((s) => ({ id: s.id, label: s.label })), valueOf: (c) => c.status },
         },
+      ],
+    };
+  }
+
+  /** Faisceaux (trunks) : multi-fibres, partagent type/route/longueur avec leurs brins. */
+  static cableBundles(store: Store): ListOptions {
+    return {
+      collection: "cableBundles",
+      defaultSort: { key: "name", dir: "asc" },
+      emptyText: "Aucun faisceau.",
+      searchFields: (b) => [b.name],
+      columns: [
+        { head: "Nom", sortKey: "name", sort: (b) => b.name, render: (b) => Html.escape(b.name || "(faisceau)") },
+        { head: "Type", render: (b) => { const t: any = b.cable_type_id && store.get("cableTypes", b.cable_type_id); return t ? Html.escape(t.name) : dim("—"); } },
+        { head: "Brins", cls: "num", render: (b) => { const o = store.bundleOccupancy(b.id); return o.used + " / " + o.capacity; } },
+        { head: "Longueur", cls: "num", render: (b) => (b.length_m != null ? b.length_m + " m" : dim("—")) },
+      ],
+    };
+  }
+
+  /** Salles (datacenters) : grille au sol + nb de baies placées. */
+  static datacenters(store: Store): ListOptions {
+    return {
+      collection: "datacenters",
+      defaultSort: { key: "name", dir: "asc" },
+      emptyText: "Aucune salle.",
+      searchFields: (d) => [d.name, d.room],
+      columns: [
+        { head: "Nom", sortKey: "name", sort: (d) => d.name, render: (d) => Html.escape(d.name || "(salle)") },
+        { head: "Dimensions", render: (d) => (d.width_mm / 1000).toFixed(1) + " × " + (d.depth_mm / 1000).toFixed(1) + " m" },
+        { head: "Local", render: (d) => (d.room ? Html.escape(d.room) : dim("—")) },
+        { head: "Baies", cls: "num", render: (d) => String(store.racksOfDc(d.id).length) },
       ],
     };
   }
