@@ -92,10 +92,67 @@ export class GraphView {
     this.toolbarEl.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 8px;background:var(--bg-2);border-bottom:1px solid var(--line)";
     if (mount.parentElement) mount.parentElement.insertBefore(this.toolbarEl, mount);
     this.legendEl = document.createElement("div");
-    this.legendEl.className = "graph-legend";
-    this.legendEl.style.cssText = "position:absolute;right:8px;top:8px;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:8px;font-size:11px;pointer-events:none;display:none";
+    this.legendEl.className = "graph-legend";   // positionnée par le CSS (coin haut-gauche du stage)
+    this.legendEl.style.cssText = "pointer-events:none;display:none";
     mount.appendChild(this.legendEl);
+    this.buildOverlays();   // overlays sur le stage : actions (haut-droite) + zoom/recentrage/plein écran (bas-droite)
     this.buildToolbar();
+  }
+
+  /** Overlays superposés au stage (réplique de l'app d'origine) : `.graph-actions` (export · cadre · mode
+      d'affichage · dispositions nommées · enregistrer · gérer · auto) en haut-droite, et `.graph-zoom-controls`
+      (zoom ± · recentrage · plein écran) en bas-droite. Construits UNE fois ; persistent aux re-rendus (seul le
+      `<svg>` est recréé). Les sélecteurs disposition/mode sont rafraîchis par refreshLayoutControls. */
+  private buildOverlays(): void {
+    const CAM = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>';
+    const SAVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>';
+    const LIST = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>';
+    const RECENTER = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="12" y1="1.5" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22.5" y2="12"/></svg>';
+    const FS = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>';
+    const DM_TITLE = "Mode d'affichage de la vue par défaut :\nA · Réorganiser — la disposition est recalculée à chaque changement de filtre\nB · Masquer (fixe) — les nœuds restent en place, les filtres ne font qu'afficher/masquer\nC · Réorg. + garder — comme A, mais les nœuds déplacés à la main gardent leur position";
+    // --- actions (haut-droite) ---
+    const actions = document.createElement("div"); actions.className = "graph-actions";
+    actions.innerHTML =
+      `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="export" title="Exporter une image (SVG / JPEG)…">${CAM}</button>`
+      + `<span class="ga-sep"></span>`
+      + `<button class="btn btn-ghost btn-sm" data-act="frame" title="Ajouter un cadre de regroupement">▭ Cadre</button>`
+      + `<span class="ga-sep"></span>`
+      + `<select class="graph-action-select" data-act="dm"><option value="A">A · Réorganiser</option><option value="B">B · Masquer (fixe)</option><option value="C">C · Réorg. + garder</option></select>`
+      + `<span class="ga-sep"></span>`
+      + `<select class="graph-action-select" data-act="lsel" title="Disposition active (« Vue par défaut » = aucune disposition enregistrée)"></select>`
+      + `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="lsave" title="Enregistrer les modifications dans la disposition active" style="display:none;">${SAVE}</button>`
+      + `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="lmanage" title="Gérer les dispositions enregistrées (renommer, mettre à jour, supprimer)…">${LIST}</button>`
+      + `<button class="btn btn-ghost btn-sm" data-act="auto" title="Disposition automatique (force) — réorganise les nœuds affichés">Auto</button>`;
+    this.stage.appendChild(actions);
+    const a = (sel: string) => actions.querySelector('[data-act="' + sel + '"]') as HTMLElement;
+    (a("export")).onclick = () => this.openExportDialog();
+    (a("frame")).onclick = () => this.addFrameAt();
+    const dm = a("dm") as HTMLSelectElement; dm.title = DM_TITLE; dm.value = this.displayMode;
+    dm.onchange = () => { this.displayMode = dm.value as any; this.pos = {}; this._moved.clear(); this.rebuild({ recenter: true }); };
+    this._displayModeEl = dm;
+    const lsel = a("lsel") as HTMLSelectElement;
+    lsel.onchange = () => { const v = lsel.value; if (v === "__default__") this.activateDefaultView(); else this.applyLayout(v); };
+    this._layoutSelectEl = lsel;
+    const lsave = a("lsave") as HTMLButtonElement; lsave.onclick = () => { const act = this._activeLayout(); if (act) this.updateLayout(act.id); };
+    this._layoutSaveBtn = lsave;
+    (a("lmanage")).onclick = () => this.openLayoutManager();
+    const auto = a("auto") as HTMLButtonElement; auto.onclick = () => this.autoArrange();
+    this._autoBtn = auto;
+    // --- zoom / recentrage / plein écran (bas-droite) ---
+    const zoom = document.createElement("div"); zoom.className = "graph-zoom-controls";
+    zoom.innerHTML =
+      `<button class="btn btn-ghost btn-sm" data-act="zin" title="Zoom avant">+</button>`
+      + `<button class="btn btn-ghost btn-sm" data-act="zout" title="Zoom arrière">−</button>`
+      + `<span class="gz-sep"></span>`
+      + `<button class="btn btn-ghost btn-sm" data-act="recenter" title="Recentrer / ajuster la vue" aria-label="Recentrer la vue">${RECENTER}</button>`
+      + `<button class="btn btn-ghost btn-sm" data-act="fs" title="Plein écran" aria-label="Plein écran">${FS}</button>`;
+    this.stage.appendChild(zoom);
+    const z = (sel: string) => zoom.querySelector('[data-act="' + sel + '"]') as HTMLElement;
+    (z("zin")).onclick = () => this.zoomBy(1.2);
+    (z("zout")).onclick = () => this.zoomBy(1 / 1.2);
+    (z("recenter")).onclick = () => this.recenter();
+    (z("fs")).onclick = () => this.toggleFullscreen();
+    this.refreshLayoutControls();
   }
 
   /** Reconstruit tout : modèle → layout → rendu → recadrage + masquage/surlignage/légende. */
@@ -235,28 +292,8 @@ export class GraphView {
     reset.onclick = () => { this.filters.equip.clear(); this.filters.net.clear(); this.filters.pt.clear(); this.filters.grp.clear(); this.search = ""; this.buildToolbar(); this.onFilterChange(); };
     this.toolbarEl.appendChild(reset);
 
-    // ---- actions de disposition / vue (poussées à droite) ----
-    const spacer = document.createElement("div"); spacer.style.flex = "1 1 auto"; this.toolbarEl.appendChild(spacer);
-
-    const dm = FormControls.select([{ value: "A", label: "Mode A · réorganise" }, { value: "B", label: "Mode B · fige + masque" }, { value: "C", label: "Mode C · garde les déplacés" }], this.displayMode);
-    dm.title = "Mode d'affichage de la vue par défaut";
-    dm.onchange = () => { this.displayMode = dm.value as any; this.pos = {}; this._moved.clear(); this.rebuild({ recenter: true }); };
-    this._displayModeEl = dm; this.toolbarEl.appendChild(dm);
-
-    const lsel = document.createElement("select"); lsel.className = "app-select"; lsel.title = "Disposition active";
-    lsel.onchange = () => { const v = lsel.value; if (v === "__default__") this.activateDefaultView(); else this.applyLayout(v); };
-    this._layoutSelectEl = lsel; this.toolbarEl.appendChild(lsel);
-
-    const mkBtn = (txt: string, title: string, fn: () => void, extra = "") => {
-      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm" + (extra ? " " + extra : ""); b.textContent = txt; b.title = title; b.onclick = fn; this.toolbarEl.appendChild(b); return b;
-    };
-    this._layoutSaveBtn = mkBtn("💾", "Enregistrer dans la disposition active", () => { const a = this._activeLayout(); if (a) this.updateLayout(a.id); }, "graph-layout-savecur");
-    mkBtn("Dispositions…", "Gérer les dispositions enregistrées", () => this.openLayoutManager());
-    this._autoBtn = mkBtn("Auto", "Réorganiser automatiquement", () => this.autoArrange());
-    mkBtn("+ Cadre", "Ajouter un cadre de regroupement", () => this.addFrameAt());
-    mkBtn("Exporter", "Exporter en image (SVG/JPEG)", () => this.openExportDialog());
-    mkBtn("⛶", "Plein écran", () => this.toggleFullscreen());
-
+    // Les actions de disposition/vue (export · cadre · mode · dispositions · auto) et les contrôles de
+    // zoom/recentrage/plein écran vivent en OVERLAY sur le stage (cf. buildOverlays), comme l'app d'origine.
     this.refreshLayoutControls();
   }
 
