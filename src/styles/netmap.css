@@ -1056,9 +1056,10 @@
   .toggle-pill .tgl-txt { line-height: 1.2; }
   /* v131 â€” grille 2 colonnes des options 3D : boutons pleine largeur de leur cellule, texte CENTRÃ‰
      (les libellÃ©s longs passent sur 2 lignes proprement, centrÃ©s). */
-  .dc-3d-toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 4px 0 6px; align-items: stretch; }
-  .dc-3d-toggle-grid .toggle-pill.toggle-block { width: 100%; height: 100%; justify-content: center; text-align: center; margin-bottom: 0; }
-  .dc-3d-toggle-grid .toggle-pill .tgl-txt { white-space: normal; }
+  /* boutons-ICÔNES carrés normalisés (le libellé passe en tooltip) */
+  .dc-3d-toggle-grid { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+  .dc-3d-toggle-grid .toggle-pill { width: 36px; height: 36px; padding: 0; gap: 0; justify-content: center; align-items: center; margin: 0; }
+  .dc-3d-toggle-grid .toggle-pill svg { width: 18px; height: 18px; display: block; }
   /* v85 â€” toggle occupant une ligne (listes rack / datacenters affichÃ©s) : grandit + ellipsis */
   .toggle-pill.tgl-row { display: flex; flex: 1 1 auto; min-width: 0; justify-content: flex-start; text-align: left; }
   .toggle-pill.tgl-row .tgl-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

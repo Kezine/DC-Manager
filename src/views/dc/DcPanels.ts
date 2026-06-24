@@ -597,24 +597,43 @@ export class DcPanels extends DcViews2D {
     const r3 = () => this.renderThreeD(this.current());
     const redraw = () => { const d = this.current(); if (!d) return; if (this.view === "top") this.renderTop(d); else this.renderThreeD(d); };
     const tgrid = document.createElement("div"); tgrid.className = "dc-3d-toggle-grid";
-    const tg = (label: string, get: () => boolean, set: (v: boolean) => void, full?: boolean, title?: string) => tgrid.appendChild(FormControls.toggle(label, get(), (v) => { set(v); full ? this.render() : r3(); }, { block: true, title }));
-    tg("Masquer équip. avant", () => this.hideFrontEq, (v) => { this.hideFrontEq = v; });
-    tg("Masquer équip. arrière", () => this.hideRearEq, (v) => { this.hideRearEq = v; });
-    tg("Noms des équipements", () => this.showEqNames, (v) => { this.showEqNames = v; });
-    tg("Ports", () => this.showPorts, (v) => { this.showPorts = v; }, true);
-    tg("Images de façade", () => this.showFaceImages, (v) => { this.showFaceImages = v; });
-    tg("Capots des baies", () => this.showRackSides, (v) => { this.showRackSides = v; });
-    tg("Portes des baies", () => this.showDoors, (v) => { this.showDoors = v; });
-    tg("Emplacements libres", () => this.showPlaceholders, (v) => { this.showPlaceholders = v; });
-    tg("Grilles d'étage", () => this.showFloorGrid, (v) => { this.showFloorGrid = v; });
-    tg("Marqueurs", () => this.showWaypoints, (v) => { this.showWaypoints = v; }, true, "Affiche/masque les MARQUEURS de waypoint (pins, losanges aux extrémités des chemins/brosses, OOB). N'affecte pas le routage des câbles.");
-    tg("Brosses et passe-câbles", () => this.showConduits, (v) => { this.showConduits = v; }, true, "Affiche/masque la GÉOMÉTRIE des conduits : bacs des chemins de câbles (passe-câbles) et coques des brosses de brassage.");
-    tg("Centre de rotation", () => this.showPivot, (v) => { this.showPivot = v; });
-    tg("Repères d'orientation", () => this.showOrientMarks, (v) => { this.showOrientMarks = v; });
-    // sortie ⊥ des ports (stub de 20 mm le long de la normale) — affecte le tracé 3D ET Dessus
-    tgrid.appendChild(FormControls.toggle("Sortie ⊥ des ports (20 mm)", this.cablePortNormal, (v) => { this.cablePortNormal = v; redraw(); }, { block: true, title: "Les câbles quittent leurs ports perpendiculairement à la face sur 20 mm, puis rejoignent le tracé comme via un waypoint." }));
-    // aperçu de route jusqu'à la souris (re-rendu throttlé) — désactiver si souci de perf
-    tgrid.appendChild(FormControls.toggle("Aperçu de route → souris", this.routePreviewToMouse, (v) => { this.routePreviewToMouse = v; if (!v && this.routeBuild) this.routeBuild.mouse = null; r3(); }, { block: true, title: "Pendant la création d'une route, prolonge l'aperçu jusqu'au curseur. Désactivez en cas de souci de performance." }));
+    // boutons-ICÔNES (libellé en tooltip) ; full=true → re-rendu complet, sinon re-rendu 3D seul.
+    const I: Record<string, string> = {
+      hideFront: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg>',
+      hideRear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="14" width="16" height="6" fill="currentColor" stroke="none"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg>',
+      names: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h9M5 18h6"/></svg>',
+      ports: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/></svg>',
+      image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="10" r="1.8"/><path d="M21 16l-5-4-8 7"/></svg>',
+      sides: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18M19 3v18"/><rect x="9" y="6" width="6" height="12" rx="1"/></svg>',
+      door: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v17"/><path d="M4 21h16"/><circle cx="13.5" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg>',
+      slot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="8" rx="1" stroke-dasharray="3 2.5"/></svg>',
+      grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>',
+      marker: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l9 9.5-9 9.5-9-9.5z"/></svg>',
+      conduit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1"/><path d="M3 12h18" stroke-dasharray="2.5 2.5"/></svg>',
+      pivot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>',
+      orient: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 5.5l2.4 8.5L12 12l-2.4 2z" fill="currentColor" stroke="none"/></svg>',
+      perp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v14h14"/><path d="M10.5 18a4.5 4.5 0 0 1 4.5-4.5"/></svg>',
+      mouse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l6 15 2.2-6.2L19.5 9.5z"/></svg>',
+    };
+    const tgi = (icon: string, title: string, get: () => boolean, apply: (v: boolean) => void) => {
+      const b = FormControls.toggle("", get(), (v) => apply(v), { title });
+      b.innerHTML = icon; b.title = title; b.setAttribute("aria-label", title); tgrid.appendChild(b); return b;
+    };
+    tgi(I.hideFront, "Masquer les équipements montés en façade AVANT", () => this.hideFrontEq, (v) => { this.hideFrontEq = v; r3(); });
+    tgi(I.hideRear, "Masquer les équipements montés à l'ARRIÈRE", () => this.hideRearEq, (v) => { this.hideRearEq = v; r3(); });
+    tgi(I.names, "Noms des équipements", () => this.showEqNames, (v) => { this.showEqNames = v; r3(); });
+    tgi(I.ports, "Ports (connecteurs sur les faces)", () => this.showPorts, (v) => { this.showPorts = v; this.render(); });
+    tgi(I.image, "Images de façade", () => this.showFaceImages, (v) => { this.showFaceImages = v; r3(); });
+    tgi(I.sides, "Capots / parois des baies", () => this.showRackSides, (v) => { this.showRackSides = v; r3(); });
+    tgi(I.door, "Portes des baies", () => this.showDoors, (v) => { this.showDoors = v; r3(); });
+    tgi(I.slot, "Emplacements libres", () => this.showPlaceholders, (v) => { this.showPlaceholders = v; r3(); });
+    tgi(I.grid, "Grilles d'étage", () => this.showFloorGrid, (v) => { this.showFloorGrid = v; r3(); });
+    tgi(I.marker, "Marqueurs de waypoint (pins, extrémités de chemins/brosses, OOB). N'affecte pas le routage des câbles.", () => this.showWaypoints, (v) => { this.showWaypoints = v; this.render(); });
+    tgi(I.conduit, "Brosses et passe-câbles (géométrie des conduits : bacs de chemins de câbles, coques des brosses)", () => this.showConduits, (v) => { this.showConduits = v; this.render(); });
+    tgi(I.pivot, "Centre de rotation", () => this.showPivot, (v) => { this.showPivot = v; r3(); });
+    tgi(I.orient, "Repères d'orientation", () => this.showOrientMarks, (v) => { this.showOrientMarks = v; r3(); });
+    tgi(I.perp, "Sortie ⊥ des ports (20 mm) : les câbles quittent la face perpendiculairement sur 20 mm", () => this.cablePortNormal, (v) => { this.cablePortNormal = v; redraw(); });
+    tgi(I.mouse, "Aperçu de route → souris (prolonge l'aperçu jusqu'au curseur pendant la création d'une route)", () => this.routePreviewToMouse, (v) => { this.routePreviewToMouse = v; if (!v && this.routeBuild) this.routeBuild.mouse = null; r3(); });
     box.appendChild(tgrid);
     // coloration des équipements
     const colorRow = document.createElement("div"); colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px";
