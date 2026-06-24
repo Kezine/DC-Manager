@@ -1,3 +1,5 @@
+import { Fullscreen } from "./Fullscreen";
+
 export interface CtxItem { label: string; danger?: boolean; action: () => void; }
 export interface CtxSection { head?: string; items: CtxItem[]; }
 
@@ -8,14 +10,16 @@ export class ContextMenu {
   private static el: HTMLElement | null = null;
 
   private static ensure(): HTMLElement {
-    if (ContextMenu.el && document.contains(ContextMenu.el)) return ContextMenu.el;
-    const m = document.createElement("div");
-    m.className = "graph-ctx";
-    document.body.appendChild(m);
-    ContextMenu.el = m;
-    document.addEventListener("click", () => ContextMenu.hide());
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") ContextMenu.hide(); });
-    return m;
+    if (!ContextMenu.el || !document.contains(ContextMenu.el)) {
+      const m = document.createElement("div");
+      m.className = "graph-ctx";
+      document.body.appendChild(m);
+      ContextMenu.el = m;
+      document.addEventListener("click", () => ContextMenu.hide());
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape") ContextMenu.hide(); });
+    }
+    Fullscreen.home(ContextMenu.el);   // plein écran : dans l'élément FS courant (sinon <body>)
+    return ContextMenu.el;
   }
 
   static show(clientX: number, clientY: number, sections: CtxSection[]): void {

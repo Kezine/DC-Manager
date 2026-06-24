@@ -1,5 +1,6 @@
 import { Html } from "../core/Html";
 import { Notify } from "./Notify";
+import { Fullscreen } from "./Fullscreen";
 
 /** API optionnelle renvoyée par un `build(root)` de dialogue personnalisé. */
 export interface DialogBuildApi {
@@ -65,7 +66,7 @@ export class Dialog {
         try { api = build(root) || null; } catch (e) { console.error(e); }
       }
       overlay.appendChild(box);
-      document.body.appendChild(overlay);
+      Fullscreen.host().appendChild(overlay);   // plein écran : dans l'élément FS courant (sinon <body>)
       let settled = false;
       const entry = { overlay };
       const teardown = () => {

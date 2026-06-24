@@ -1,5 +1,6 @@
 import { Notify } from "./Notify";
 import { Dialog } from "./Dialog";
+import { Fullscreen } from "./Fullscreen";
 
 export interface ModalOptions {
   title?: string;
@@ -56,7 +57,7 @@ export class Modal {
           <button type="button" class="btn btn-primary modal-save">Enregistrer</button>
         </div>
       </div>`;
-    document.body.appendChild(overlay);
+    Fullscreen.host().appendChild(overlay);   // plein écran : dans l'élément FS courant (sinon <body>)
     this.overlay = overlay;
     this.elBox = overlay.querySelector(".modal") as HTMLElement;
     this.elTitle = overlay.querySelector(".modal-title") as HTMLElement;

@@ -1,8 +1,11 @@
+import { Fullscreen } from "./Fullscreen";
+
 /** Notifications éphémères (toasts). Crée son conteneur au besoin. */
 export class Notify {
   private static container(): HTMLElement {
     let cont = document.getElementById("toast-container");
     if (!cont) { cont = document.createElement("div"); cont.id = "toast-container"; document.body.appendChild(cont); }
+    Fullscreen.home(cont);   // plein écran : suit l'élément FS courant (sinon <body>)
     return cont;
   }
 
