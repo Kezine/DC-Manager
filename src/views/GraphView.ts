@@ -64,6 +64,7 @@ export class GraphView {
   private _shownEq: Set<string> | null = null;       // null = tout visible ; sinon ids à AFFICHER (masquage)
   private _shownCable: Set<string> | null = null;
   private scale = 1; private tx = 0; private ty = 0;
+  private _resizeT: any = 0;   // débounce du recalcul de hauteur au resize
   private toolbarEl: HTMLElement;
   private legendEl: HTMLElement;
   private _layoutSelectEl: HTMLSelectElement | null = null;
@@ -97,6 +98,20 @@ export class GraphView {
     mount.appendChild(this.legendEl);
     this.buildOverlays();   // overlays sur le stage : actions (haut-droite) + zoom/recentrage/plein écran (bas-droite)
     this.buildToolbar();
+    // la vue remplit la hauteur du viewport (comme la vue Datacenter) — recalcul au resize (débouncé) si onglet visible.
+    window.addEventListener("resize", () => {
+      clearTimeout(this._resizeT);
+      this._resizeT = setTimeout(() => { if (this.stage.offsetParent !== null) { this.fitHeight(); this.recenter(); } }, 120);
+    });
+    document.addEventListener("fullscreenchange", () => { this.fitHeight(); });
+  }
+
+  /** Étire le stage pour remplir la hauteur restante du viewport (réplique de DatacenterView.fitHeight). */
+  fitHeight(): void {
+    if (!this.stage || this.stage.offsetParent === null) return;   // onglet masqué → on saute
+    if (document.fullscreenElement === this.stage) { this.stage.style.height = ""; return; }   // plein écran : hauteur gérée par le CSS
+    const top = this.stage.getBoundingClientRect().top;
+    this.stage.style.height = Math.max(360, Math.floor(window.innerHeight - top - 18 - 2)) + "px";
   }
 
   /** Overlays superposés au stage (réplique de l'app d'origine) : `.graph-actions` (export · cadre · mode
@@ -171,6 +186,7 @@ export class GraphView {
   /** Activation de la vue : (re)construit la barre, charge la disposition active, recadre au 1er rendu. */
   show(): void {
     this.buildToolbar();
+    this.fitHeight();   // hauteur viewport AVANT le 1er rendu (svg créé à la bonne taille + recadrage correct)
     this.selection.clear();
     this.layoutMode = this._activeLayout() ? "manual" : "auto";
     if (this._activeLayout() && !Object.keys(this.pos).length) this.pos = Object.assign({}, this._activePositions() || {});
