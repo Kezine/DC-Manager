@@ -5,6 +5,8 @@ export { BrowserStorageAdapter } from "./BrowserStorageAdapter";
 export type { BrowserStorageOptions } from "./BrowserStorageAdapter";
 export { RestAdapter } from "./RestAdapter";
 export type { RestOptions } from "./RestAdapter";
+export { ImageStore } from "./ImageStore";
+export type { ImageRec, ImageMirror, LegacyImage } from "./ImageStore";
 export { PAGE_SIZE_DEFAULT, HISTORY_MAX, IDX_NULL, INDEX_SPEC } from "./config";
 export type {
   RawRecord,

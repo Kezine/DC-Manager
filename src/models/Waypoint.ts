@@ -81,7 +81,10 @@ export class Waypoint extends Entity {
     this.cap_face = (p.cap_face === "roof" || p.cap_face === "floor") ? p.cap_face : null;
     this.cap_cx = (p.cap_cx != null) ? (p.cap_cx | 0) : null;
     this.cap_cy = (p.cap_cy != null) ? (p.cap_cy | 0) : null;
-    this.wp_type = (p.wp_type === "exit" || p.wp_type === "oob") ? p.wp_type : "datacenter";
+    // FUSION OOB→PIN : le type « oob » est SUPPRIMÉ. Un ex-OOB devient un pin d'ÉTAGE (hors salle, rattaché à un
+    // bâtiment/étage). Migration : `wp_type:"oob"` (anciennes données) → `"datacenter"` + placement d'étage conservé.
+    const wasOob = p.wp_type === "oob";
+    this.wp_type = (p.wp_type === "exit") ? "exit" : "datacenter";
     this.datacenter_id = p.datacenter_id || null;
     this.dc_x = (p.dc_x != null) ? +p.dc_x : null;
     this.dc_y = (p.dc_y != null) ? +p.dc_y : null;
@@ -96,12 +99,36 @@ export class Waypoint extends Entity {
     this.location = p.location || "";
     this.floor_x = (p.floor_x != null) ? +p.floor_x : null;
     this.floor_y = (p.floor_y != null) ? +p.floor_y : null;
-    if (this.wp_type === "oob") {
-      this.datacenter_id = null; this.dc_x = null; this.dc_y = null;
-      this.dc_x2 = null; this.dc_y2 = null; this.kind = "point";
+    // PIN D'ÉTAGE (ex-OOB) : pin (forme « point ») hors salle, rattaché à un bâtiment/étage. Détecté par l'absence
+    // de salle + la présence d'un placement d'étage (location/floor/floor_x) ; ou par la migration `wasOob`.
+    const floorLevel = this.wp_type !== "exit" && !this.datacenter_id
+      && (wasOob || (this.kind === "point" && (this.location !== "" || (this.floor !== "" ) || this.floor_x != null)));
+    if (floorLevel) {
+      this.kind = "point"; this.datacenter_id = null;
+      this.dc_x = null; this.dc_y = null; this.dc_x2 = null; this.dc_y2 = null;
       this.dc_z = (p.dc_z != null) ? Math.max(0, +p.dc_z) : OOB_HEIGHT_DEFAULT;
     } else {
       this.floor_x = null; this.floor_y = null;
     }
   }
+
+  /** Type normalisé d'un waypoint ("datacenter" | "exit"). Le type « oob » est FUSIONNÉ dans pin (cf. `isFloorLevel`). */
+  static typeOf(wp: any): string { return (wp && wp.wp_type === "exit") ? "exit" : "datacenter"; }
+
+  /** Un PIN D'ÉTAGE (ex-OOB) : pin hors salle rattaché à un bâtiment/étage (jamais posé dans une salle). */
+  static isFloorLevel(wp: any): boolean {
+    return !!wp && wp.kind === "point" && wp.wp_type !== "exit" && !wp.datacenter_id
+      && (!!wp.location || (wp.floor != null && String(wp.floor) !== "") || wp.floor_x != null);
+  }
+
+  /** Glyphe d'affichage selon type/forme (⏏ exit · ◎ pin d'étage · ▦ brosse · ▬ chemin · ◆ pin de salle). */
+  static glyph(wp: any): string {
+    if (Waypoint.typeOf(wp) === "exit") return "⏏";
+    if (Waypoint.isFloorLevel(wp)) return "◎";
+    if (wp.kind === "brush") return "▦";
+    return wp.kind === "segment" ? "▬" : "◆";
+  }
+
+  /** Libellé d'étage d'un pin d'étage ("ét. N", étage vide/libre → niveau 0). */
+  static floorLabel(wp: any): string { const n = parseFloat(wp && wp.floor); return "ét. " + (isFinite(n) ? n : 0); }
 }

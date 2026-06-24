@@ -208,6 +208,9 @@ export class BrowserStorageAdapter extends DataAdapter {
 
   canUndo(): boolean { return this._hidx > 0; }
   canRedo(): boolean { return this._hidx >= 0 && this._hidx < this._history.length - 1; }
+  /** Révision courante = position dans l'historique. Identique tant qu'aucune mutation modèle n'a lieu ; revient à
+      sa valeur d'origine après un undo qui ramène au même point → permet de recalculer le « dirty » par comparaison. */
+  histIndex(): number { return this._hidx; }
   async undo(): Promise<Snapshot | null> {
     if (!this.canUndo()) return null;
     this._hidx--;

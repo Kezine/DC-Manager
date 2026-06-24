@@ -15,6 +15,8 @@ export const RACK_DEPTHS = [600, 800, 1000, 1200];
 export const RACK_ORIENTATIONS = [0, 90, 180, 270];   // pas de 90° (sens horaire)
 /** Faces de baie (simple / double). */
 export const RACK_SIDES = [{ id: "single", label: "Simple face" }, { id: "dual", label: "Double face" }];
+/** Faces portant une porte (avant / arrière). */
+export const RACK_FACES = [{ id: "front", label: "Avant" }, { id: "rear", label: "Arrière" }];
 
 /* ---- lieux & étages (listes FERMÉES — éditables ici) ---- */
 export const LOCATIONS = [
@@ -36,12 +38,18 @@ export const FLOOR_WIDTH_DEFAULT = 20000;     // plan de bâtiment par défaut (
 export const FLOOR_DEPTH_DEFAULT = 20000;
 export const FLOOR_CELL_DEFAULT = 1000;       // maille du plan d'étage (1 m)
 export const OOB_HEIGHT_DEFAULT = 3000;       // hauteur standard d'un OOB (mm)
+export const DC_GAP_DEFAULT = 2000;           // écart (mm) entre salles / niveaux de la vue multi-salles
 
 /* ---- waypoints / conduits ---- */
 export const WAYPOINT_Z_DEFAULT = 2400;       // hauteur par défaut d'un waypoint (mm)
 export const CONDUIT_W_DEFAULT = 300;         // largeur de section d'un chemin de câbles (mm)
 export const CONDUIT_H_DEFAULT = 100;         // hauteur de section (mm)
 export const BRUSH_PADDING_MM = 10;           // brosse : padding interne du pourtour (mm)
+
+/* ---- breakout ----
+   Facteurs de BREAKOUT standard (« spans »). Un breakout impose TOUJOURS débit(trunk) =
+   N × débit(lane), avec N ∈ {2,4,8} : 40G→4×10G; 100G→4×25G ou 2×50G; 400G→8×50G… */
+export const BREAKOUT_SPANS = [2, 4, 8];
 
 /* ---- faces d'équipement ----
    Avant/arrière : tous. Dessus/dessous/gauche/droite : équipements en
@@ -131,6 +139,32 @@ export const CABLE_STATUS_DRAFT = "brouillon";          // imposé tant que l'as
 export const CABLE_STATUS_DEFAULT_NEW = "planifie";     // câble complet créé via le formulaire
 export const CABLE_STATUS_DEFAULT_LEGACY = "cable";     // câble chargé sans statut = déjà câblé
 export const CABLE_STATUS_BROKEN = "casse";
+/** Rang de cycle de vie : brouillon < planifié < (câblé ≡ à remplacer). Sert à borner le statut. */
+export const CABLE_STATUS_RANK: Record<string, number> = { brouillon: 0, planifie: 1, cable: 2, "a-remplacer": 2 };
+
+/** Taille (mm) du connecteur PHYSIQUE par clé `connector`/`family` (rendu des ports en 3D). */
+export const PORT_CONNECTOR_MM: Record<string, { w: number; h: number }> = {
+  RJ45: { w: 13, h: 12 }, ETH: { w: 13, h: 12 },
+  SFP: { w: 14, h: 9 }, "SFP+": { w: 14, h: 9 }, SFP28: { w: 14, h: 9 }, SFP56: { w: 14, h: 9 },
+  QSFP: { w: 18, h: 9 }, "QSFP+": { w: 18, h: 9 }, QSFP28: { w: 18, h: 9 }, QSFP56: { w: 18, h: 9 },
+  "QSFP-DD": { w: 18, h: 10 }, OSFP: { w: 19, h: 11 },
+  SAS: { w: 17, h: 10 }, "SFF-8644": { w: 17, h: 10 }, FC: { w: 14, h: 9 },
+  LC: { w: 12, h: 6 }, ST: { w: 9, h: 9 }, SC: { w: 13, h: 7 }, MPO: { w: 12, h: 6 },
+  USB: { w: 12, h: 5 }, "USB-A": { w: 12, h: 5 }, "USB-B": { w: 12, h: 11 }, "USB-C": { w: 9, h: 3 },
+  DB9: { w: 17, h: 9 }, HDMI: { w: 15, h: 6 }, DP: { w: 16, h: 6 }, VGA: { w: 17, h: 9 },
+  C13: { w: 14, h: 10 }, C14: { w: 14, h: 10 }, C19: { w: 17, h: 12 }, C20: { w: 17, h: 12 },
+  "CEE7/3": { w: 16, h: 16 }, "CEE7/4": { w: 16, h: 16 }, "CEE-16A": { w: 20, h: 20 }, "CEE-32A": { w: 24, h: 24 },
+  BS1363: { w: 18, h: 14 }, "NEMA5-15": { w: 15, h: 10 },
+};
+export const PORT_CONNECTOR_DEFAULT = PORT_CONNECTOR_MM.RJ45;
+
+/** Types de waypoint (passage interne salle · exit · OOB hors salles). */
+// Types de waypoint. Le pin « hors salle » (ex-OOB) est désormais un PIN dont le placement est au niveau ÉTAGE
+// (cf. Waypoint.isFloorLevel) — plus un type à part.
+export const WAYPOINT_TYPES = [
+  { id: "datacenter", label: "Passage interne à la salle (pin / chemin)" },
+  { id: "exit",       label: "Exit — sortie / entrée de salle" },
+];
 
 /* ---- pseudo-équipements montables en rack (icône SVG viewBox 24, currentColor) ---- */
 export interface RackItemKindDef { id: string; label: string; icon: string; }

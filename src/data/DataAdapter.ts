@@ -65,6 +65,8 @@ export abstract class DataAdapter {
   canRedo(): boolean { return false; }
   async undo(): Promise<Snapshot | null> { return null; }
   async redo(): Promise<Snapshot | null> { return null; }
+  /** Révision courante (position d'historique) pour le calcul du « dirty ». Défaut : sans historique. */
+  histIndex(): number { return 0; }
 
   get label(): string { return "abstrait"; }
 }
