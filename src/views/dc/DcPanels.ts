@@ -39,6 +39,17 @@ export class DcPanels extends DcViews2D {
     // contrôles alignés à DROITE (la sélection de salle se fait au panneau latéral / au clic, pas ici).
     const spacer = document.createElement("div"); spacer.style.flex = "1 1 auto"; this.toolbarEl.appendChild(spacer);
 
+    // ORDRE INVERSÉ : bascules d'édition (déplacement/exclusion, plans 2D) À GAUCHE · modes de vue À DROITE.
+    if (this.view === "top" || this.view === "floor") {
+      const edits = document.createElement("div"); edits.className = "dc-subviews"; edits.style.cssText = "display:flex;gap:4px";
+      const bFree = this.btn("Placement libre", () => { this.freePlace = !this.freePlace; bFree.classList.toggle("active", this.freePlace); }, "Désactive l'aimantation à la grille pendant le glisser (n'affecte pas les éléments déjà placés)");
+      bFree.classList.toggle("active", this.freePlace);
+      const bBlock = this.btn("Cases inaccessibles", () => { this.blockEdit = !this.blockEdit; bBlock.classList.toggle("active", this.blockEdit); this.render(); }, "Glissez une sélection sur la grille pour marquer / démarquer les cases (in)accessibles");
+      bBlock.classList.toggle("active", this.blockEdit);
+      edits.append(bFree, bBlock); this.toolbarEl.appendChild(edits);
+      this.toolbarEl.appendChild(this.vsep());   // séparateur : déplacement/exclusion | contrôles de visualisation
+    }
+
     // mode de vue : 3D ⟷ Dessus (2D) ⟷ Étage (plan bâtiment 2D)
     const modes = document.createElement("div"); modes.className = "dc-subviews"; modes.style.cssText = "display:flex;gap:4px";
     ([["3d", "3D"], ["top", "Plan de salle"], ["floor", "Plan d'étage"]] as Array<["3d" | "top" | "floor", string]>).forEach(([m, label]) => {
@@ -47,18 +58,6 @@ export class DcPanels extends DcViews2D {
       modes.appendChild(b);
     });
     this.toolbarEl.appendChild(modes);
-
-    // (bascule multi-salles retirée de la topbar — pilotée par la carte « Datacenters » du panneau latéral, cf. dcScopeCard)
-    // bascules d'édition de grille (plans 2D salle/étage) : placement libre + cases inaccessibles
-    if (this.view === "top" || this.view === "floor") {
-      this.toolbarEl.appendChild(this.vsep());   // séparateur : contrôles de visualisation | déplacement/exclusion
-      const edits = document.createElement("div"); edits.className = "dc-subviews"; edits.style.cssText = "display:flex;gap:4px";
-      const bFree = this.btn("Placement libre", () => { this.freePlace = !this.freePlace; bFree.classList.toggle("active", this.freePlace); }, "Désactive l'aimantation à la grille pendant le glisser (n'affecte pas les éléments déjà placés)");
-      bFree.classList.toggle("active", this.freePlace);
-      const bBlock = this.btn("Cases inaccessibles", () => { this.blockEdit = !this.blockEdit; bBlock.classList.toggle("active", this.blockEdit); this.render(); }, "Glissez une sélection sur la grille pour marquer / démarquer les cases (in)accessibles");
-      bBlock.classList.toggle("active", this.blockEdit);
-      edits.append(bFree, bBlock); this.toolbarEl.appendChild(edits);
-    }
     this.updateControls();
   }
 
