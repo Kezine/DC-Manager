@@ -441,13 +441,33 @@ export class DcInteract extends DcPanels {
     if (isolate) this.multiDc = false;
     this.buildToolbar(); this.render();
   }
-  /** Menu d'une SALLE en 3D multi-salles (clic droit sur son sol) : activer ce DC · isoler · modifier. */
+  /** Bascule de MODE DE VUE pour une salle : 3D / Plan de salle (top) → active le DC ; Plan d'étage → cible son étage. */
+  protected activateView(view: "3d" | "top" | "floor", dc: any): void {
+    this.view = view;
+    if (view === "floor") this.floorTarget = { location: dc.location || "", floor: String(dc.floor || "") };
+    else this.dcId = dc.id;
+    this.selRackId = null; this.camTarget = null; this.scale = null;
+    this.buildToolbar(); this.render();
+  }
+  /** Section « Vue » (3D · Plan de salle · Plan d'étage) — réplique du sélecteur de la toolbar, en menu contextuel. */
+  protected viewSwitchSection(dc: any): CtxSection {
+    const cur = (v: string) => (this.view === v ? "✓ " : "");
+    return { head: "Vue", items: [
+      { label: cur("3d") + "Vue 3D", action: () => this.activateView("3d", dc) },
+      { label: cur("top") + "Plan de salle", action: () => this.activateView("top", dc) },
+      { label: cur("floor") + "Plan d'étage", action: () => this.activateView("floor", dc) },
+    ] };
+  }
+  /** Menu d'une SALLE en 3D multi-salles (clic droit sur son sol) : activer ce DC · isoler · modifier + bascule de vue. */
   protected roomCtx(dc: any): CtxSection[] {
-    return [{ head: dc.name || "(salle)", items: [
-      { label: "Activer ce DC", action: () => this.activateDc(dc.id, false) },
-      { label: "Isoler (salle unique)", action: () => this.activateDc(dc.id, true) },
-      { label: "Modifier la salle…", action: () => this.host.openDatacenterForm?.(dc.id) },
-    ] }];
+    return [
+      { head: dc.name || "(salle)", items: [
+        { label: "Activer ce DC", action: () => this.activateDc(dc.id, false) },
+        { label: "Isoler (salle unique)", action: () => this.activateDc(dc.id, true) },
+        { label: "Modifier la salle…", action: () => this.host.openDatacenterForm?.(dc.id) },
+      ] },
+      this.viewSwitchSection(dc),
+    ];
   }
   protected rackCtx(rack: any): CtxSection[] {
     const hidden = this.hidden3dRacks.has(rack.id), faded = this.fadedRacks.has(rack.id);
