@@ -449,15 +449,18 @@ export class DcInteract extends DcPanels {
     this.selRackId = null; this.camTarget = null; this.scale = null;
     this.buildToolbar(); this.render();
   }
-  /** Section « Vue » (3D · Plan de salle · Plan d'étage) — réplique du sélecteur de la toolbar, en menu contextuel. */
-  protected viewSwitchSection(dc: any): CtxSection {
+  /** Section « Vue » (3D · Plan de salle · Plan d'étage) — réplique du sélecteur de la toolbar, en menu contextuel.
+      `dc` peut être null (plan d'étage sans salle) : 3D / Plan de salle sont alors inertes (toast), Plan d'étage cible loc/fl. */
+  protected viewSwitchSectionAt(dc: any | null, loc: string, fl: string): CtxSection {
     const cur = (v: string) => (this.view === v ? "✓ " : "");
+    const need = () => Notify.toast("Aucune salle ici — activez/placez une salle d'abord", "err");
     return { head: "Vue", items: [
-      { label: cur("3d") + "Vue 3D", action: () => this.activateView("3d", dc) },
-      { label: cur("top") + "Plan de salle", action: () => this.activateView("top", dc) },
-      { label: cur("floor") + "Plan d'étage", action: () => this.activateView("floor", dc) },
+      { label: cur("3d") + "Vue 3D", action: () => (dc ? this.activateView("3d", dc) : need()) },
+      { label: cur("top") + "Plan de salle", action: () => (dc ? this.activateView("top", dc) : need()) },
+      { label: cur("floor") + "Plan d'étage", action: () => { this.floorTarget = { location: loc, floor: fl }; this.view = "floor"; this.selRackId = null; this.camTarget = null; this.scale = null; this.buildToolbar(); this.render(); } },
     ] };
   }
+  protected viewSwitchSection(dc: any): CtxSection { return this.viewSwitchSectionAt(dc, dc.location || "", String(dc.floor || "")); }
   /** Menu d'une SALLE en 3D multi-salles (clic droit sur son sol) : activer ce DC · isoler · modifier + bascule de vue. */
   protected roomCtx(dc: any): CtxSection[] {
     return [
@@ -527,7 +530,7 @@ export class DcInteract extends DcPanels {
       { label: "◆ Ajouter un pin ici", action: async () => { sel(await this.store.create("waypoints", { name: baseName(), kind: "point", datacenter_id: dc.id, dc_x: x, dc_y: y })); Notify.toast("Pin créé — glissez-le pour l'ajuster"); } },
       { label: "▬ Ajouter un chemin de câbles ici", action: async () => { const h = dc.cell_mm; sel(await this.store.create("waypoints", { name: baseName(), kind: "segment", datacenter_id: dc.id, dc_x: Math.max(0, x - h), dc_y: y, dc_x2: Math.min(dc.width_mm, x + h), dc_y2: y })); Notify.toast("Chemin de câbles créé — glissez ses extrémités"); } },
       { label: "⏏ Ajouter un exit (sortie de salle) ici", action: async () => { const nx = this.store.all("waypoints").filter((w2: any) => Waypoint.typeOf(w2) === "exit").length + 1; sel(await this.store.create("waypoints", { name: "EXIT-" + nx, wp_type: "exit", kind: "point", datacenter_id: dc.id, dc_x: x, dc_y: y })); Notify.toast("Exit créé — un câble sort par une PAIRE d'exits"); } },
-    ] }];
+    ] }, this.viewSwitchSection(dc)];
   }
 
   /* ---- menus contextuels du PLAN D'ÉTAGE (sol / salle / équipement) ---- */
@@ -539,7 +542,7 @@ export class DcInteract extends DcPanels {
       { label: "+ Ajouter une salle…", action: () => this.host.openDatacenterForm?.("") },
       { label: "◎ Ajouter un pin d'étage ici", action: async () => { const wp: any = await this.store.create("waypoints", { name: "PIN-" + (this.store.oobWaypoints().length + 1), kind: "point", location: loc, floor: fl, floor_x: x, floor_y: y }); this.selWaypointId = wp.id; this.setDirty(); Notify.toast("Pin d'étage créé — glissez-le, éditez sa hauteur (clic droit)"); } },
       { label: "Éditer le plan d'étage…", action: () => this.editFloor(loc, fl, false) },
-    ] }];
+    ] }, this.viewSwitchSectionAt(this.store.dcsOfFloor(loc, fl)[0] || null, loc, fl)];
   }
 
   /** Menu de la DALLE d'étage en 3D multi-salles (clic droit) : éditer le plan · ajouter une salle · vue Étage 2D. */
