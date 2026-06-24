@@ -10,6 +10,7 @@
 const DB_NAME = "netmap-fs";
 const STORE = "handles";
 const LAST_KEY = "lastFile";
+const FACES_KEY = "facesFile";   // handle du fichier compagnon d'images (.nmfb) du dernier document
 
 export interface HandleRec { handle: any; name: string; }
 
@@ -57,6 +58,33 @@ export class HandleStore {
       const db = await this.open();
       await new Promise<void>((res, rej) => {
         const tx = db.transaction(STORE, "readwrite"); tx.objectStore(STORE).delete(LAST_KEY);
+        tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+      });
+      db.close();
+    } catch (_) { /* noop */ }
+  }
+
+  /** Dernier fichier COMPAGNON d'images (.nmfb) mémorisé { handle, name }, ou null. */
+  async getFaces(): Promise<HandleRec | null> {
+    try {
+      const db = await this.open();
+      if (!db.objectStoreNames.contains(STORE)) { db.close(); return null; }
+      const rec = await new Promise<any>((res, rej) => {
+        const tx = db.transaction(STORE, "readonly"); const r = tx.objectStore(STORE).get(FACES_KEY);
+        r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error);
+      });
+      db.close();
+      return rec && rec.handle ? rec : null;
+    } catch (_) { return null; }
+  }
+
+  /** Mémorise le fichier compagnon d'images (best-effort). */
+  async putFaces(handle: any, name: string): Promise<void> {
+    if (!handle) return;
+    try {
+      const db = await this.open();
+      await new Promise<void>((res, rej) => {
+        const tx = db.transaction(STORE, "readwrite"); tx.objectStore(STORE).put({ handle, name: name || handle.name || "" }, FACES_KEY);
         tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
       });
       db.close();

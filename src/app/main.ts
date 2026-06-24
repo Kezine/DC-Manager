@@ -38,6 +38,7 @@ const prefs = new Prefs();
 const W = window as any;
 const HAS_FS_API = typeof W.showSaveFilePicker === "function" && typeof W.showOpenFilePicker === "function";
 const JSON_TYPES = [{ description: "NetMap JSON", accept: { "application/json": [".json"] } }];
+const FACES_TYPES = [{ description: "NetMap Faces (images)", accept: { "application/octet-stream": [".nmfb"] } }];   // fichier compagnon d'images
 
 /** Le document est-il « non vide » (au-delà des seuls catalogues fermés réinjectés) ? */
 function hasUserData(): boolean { return store.totalCount() > store.all("portTypes").length + store.all("cableTypes").length; }
@@ -64,6 +65,7 @@ async function boot(): Promise<void> {
 
   // ---- état FICHIER / session ----
   let currentHandle: any = null;        // FileSystemFileHandle lié (FS API) — null = download/mémoire
+  let currentFacesHandle: any = null;   // handle du fichier compagnon d'images (.nmfb) du document courant
   let currentName = "";                 // nom du fichier lié
   const session = new SaveState();      // suivi dirty/save (révision modèle vs dernière sauvegarde + meta/images)
   let booted = false;                   // garde : ne suit pas la révision pendant le chargement initial
@@ -83,6 +85,7 @@ async function boot(): Promise<void> {
   // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
   const imageStore = new ImageStore({ onDirty: () => { session.markDirty(); refreshChrome(); shell.refreshActive(); }, onUndoable: noteUndoable });   // images HORS historique modèle, undo intégré à la timeline unifiée
   Forms.images = imageStore;   // singleton pour le picker d'image (faceEditor)
+  imageStore.restoreLoadedKey();   // clé du bundle .nmfb actuellement en IndexedDB (persistée) — appariement json↔compagnon
   await imageStore.ready();
   Fullscreen.install();   // re-parente les overlays (modale/dialogues/toasts/menus) dans l'élément plein écran
 
@@ -106,11 +109,12 @@ async function boot(): Promise<void> {
     if (Array.isArray(raw.faceImages)) await imageStore.replaceAllFromLegacy(raw.faceImages);
     else await imageStore.clearAll();
     resetUndoTimeline();   // nouveau document chargé → timeline d'undo unifiée repart de zéro
-    currentHandle = handle || null; currentName = name || "";
+    currentHandle = handle || null; currentFacesHandle = null; currentName = name || "";
     if (!store.meta.docName && name) { store.meta.docName = name.replace(/\.json$/i, ""); await store.persistMeta(); }
     tabChannel.claim(store.meta.fileId || null);
     if (handle) rememberHandle(handle, name || handle.name || "");
     applyTheme(prefs.theme); session.setFile(!!(currentHandle && HAS_FS_API)); session.markLoaded(store.histIndex());
+    if (!Array.isArray(raw.faceImages)) await loadCompanionFacesOnOpen(handle);   // .json sans images inline → recharge le compagnon .nmfb (auto si mémorisé)
     shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome();
   }
 
@@ -123,6 +127,10 @@ async function boot(): Promise<void> {
   /** Sérialisation AVEC images de façade inline (document AUTONOME : survit au save/load et au transfert).
       Les images vivent hors modèle (IndexedDB) ; on les embarque dans le `.json` pour ne rien perdre.
       (Le compagnon `.nmfb` séparé — optimisation de taille — reste différé ; `ImageStore` est prêt.) */
+  /** Sérialisation FS : `.json` SANS images (les images vivent dans le compagnon `.nmfb` à côté). */
+  function serializeJson(): string { return JSON.stringify(store.toJSON(), null, 2); }
+  /** Repli DOWNLOAD (navigateur sans File System Access API) : fichier AUTONOME, images embarquées inline
+      (aucun compagnon n'est possible sans handle FS → on ne perd rien). */
   async function snapshotWithImages(): Promise<string> {
     const obj: any = store.toJSON();
     if (imageStore.count() > 0) obj.faceImages = await imageStore.toLegacyArray();
@@ -130,8 +138,89 @@ async function boot(): Promise<void> {
   }
   async function writeToHandle(handle: any): Promise<void> {
     ensureFileId();
-    const w = await handle.createWritable(); await w.write(await snapshotWithImages()); await w.close();
+    const w = await handle.createWritable(); await w.write(serializeJson()); await w.close();
     session.markSaved(); rememberHandle(handle, handle.name || currentName);
+  }
+
+  /* ---- FICHIER COMPAGNON d'images (.nmfb) — dissocié du modèle, apparié au .json par meta.facesKey ---- */
+  const facesNameFor = (jsonName: string): string => String(jsonName || "netmap.json").replace(/\.json$/i, "") + ".nmfb";
+  const rememberFacesHandle = (handle: any) => { if (handle) void handleStore.putFaces(handle, handle.name || ""); };
+  async function writeFacesToHandle(handle: any): Promise<void> {
+    if (!(await ensureWritePermission(handle))) throw new Error("permission-refusée");
+    const blob = await imageStore.serializeBundle(store.meta.facesKey || null);
+    const w = await handle.createWritable(); await w.write(blob); await w.close();
+  }
+  /** Clé d'appariement json↔compagnon : générée dès qu'un document a des images ; gravée dans meta.facesKey
+      (sérialisée dans le .json) ET dans le manifeste du .nmfb. */
+  function ensureFacesKey(): string { if (!store.meta.facesKey) { store.meta.facesKey = "fk-" + Id.uid(); void store.persistMeta(); } return store.meta.facesKey; }
+  /** Le document a-t-il des images (bibliothèque chargée OU références d'équipement) ? Justifie un compagnon + une clé. */
+  const docHasFaceImages = (): boolean => imageStore.count() > 0 || store.faceImageRefIds().size > 0;
+  /** Associe un compagnon sélectionné au document : charge ses images, puis (si demandé ou clé non concordante)
+      génère une NOUVELLE clé et la ré-écrit dans le .nmfb ET le .json (appariement durable). */
+  async function associateCompanion(fh: any, opts: { regenKey?: boolean } = {}): Promise<void> {
+    const f = await fh.getFile();
+    await imageStore.loadBundle(await f.arrayBuffer());
+    currentFacesHandle = fh; rememberFacesHandle(fh);
+    const docKey = store.meta.facesKey || null, bundleKey = imageStore.lastLoadedKey || null;
+    const alreadyPaired = !!(docKey && bundleKey && docKey === bundleKey);
+    if (opts.regenKey || !alreadyPaired) {
+      store.meta.facesKey = "fk-" + Id.uid(); await store.persistMeta();
+      try { await writeFacesToHandle(fh); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Clé non écrite dans le compagnon : " + (e.message || e), "err"); }
+      if (currentHandle) { try { await writeToHandle(currentHandle); } catch (e: any) { session.markDirty(); if (e && e.message !== "permission-refusée" && e.name !== "AbortError") Notify.toast("Clé non écrite dans le .json : " + (e.message || e), "err"); } }
+      else session.markDirty();
+    }
+    imageStore.setLoadedKey(store.meta.facesKey || null);   // la bibliothèque en IndexedDB = ce document
+    refreshChrome(); shell.refreshActive(); Notify.toast("Images chargées → " + fh.name);
+  }
+  /** Charge interactivement un compagnon pour le document courant (génère toujours une nouvelle clé). */
+  async function loadCompanionFileInteractive(): Promise<void> {
+    if (!HAS_FS_API) return;
+    try { const [fh] = await W.showOpenFilePicker({ startIn: currentHandle || undefined, types: FACES_TYPES }); await associateCompanion(fh, { regenKey: true }); }
+    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
+  }
+  /** (Ré)écrit le compagnon. Sans handle connu, en demande un (suggéré à côté du .json). */
+  async function saveCompanionFaces(jsonHandle: any): Promise<void> {
+    if (!HAS_FS_API) return;
+    if (!docHasFaceImages() && !currentFacesHandle) return;   // rien à écrire
+    ensureFacesKey();
+    try {
+      if (!currentFacesHandle) currentFacesHandle = await W.showSaveFilePicker({ suggestedName: facesNameFor(jsonHandle ? jsonHandle.name : currentName), startIn: jsonHandle || undefined, types: FACES_TYPES });
+      await writeFacesToHandle(currentFacesHandle); rememberFacesHandle(currentFacesHandle);
+      imageStore.setLoadedKey(store.meta.facesKey || null);
+    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non enregistrées : " + (e.message || e), "err"); }
+  }
+  /** À l'ouverture : recharge le compagnon SI le .json n'embarquait pas d'images inline (un seul picker). */
+  async function loadCompanionFacesOnOpen(jsonHandle: any): Promise<void> {
+    const refIds = store.faceImageRefIds(), docKey = store.meta.facesKey || null;
+    const stillMissing = () => [...refIds].some((id) => !imageStore.has(id));
+    if (!docKey && !refIds.size) { currentFacesHandle = null; return; }   // rien attendu
+    if (docKey && imageStore.lastLoadedKey === docKey && imageStore.count() > 0 && !stillMissing()) { shell.refreshActive(); return; }   // déjà à jour pour CE doc
+    if (!docKey && !stillMissing()) { shell.refreshActive(); return; }     // legacy : refs déjà présentes (inline)
+    if (!HAS_FS_API) { shell.refreshActive(); return; }
+    // 1) tenter le dernier compagnon MÉMORISÉ s'il correspond à CE document
+    const rememberedMatches = docKey ? (imageStore.lastLoadedKey === docKey) : true;
+    if (rememberedMatches) {
+      try {
+        const fbRec = await handleStore.getFaces();
+        if (fbRec && fbRec.handle) {
+          const perm = await HandleStore.ensureReadPermission(fbRec.handle, true);
+          if (perm !== false) {
+            const f = await fbRec.handle.getFile(); await imageStore.loadBundle(await f.arrayBuffer());
+            const bundleKey = imageStore.lastLoadedKey || null;
+            const keyMatch = !!(docKey && bundleKey && docKey === bundleKey), legacyNoKey = (!docKey && !bundleKey);
+            if (keyMatch || (legacyNoKey && !stillMissing())) { currentFacesHandle = fbRec.handle; shell.refreshActive(); return; }
+          }
+        }
+      } catch (_) { /* compagnon mémorisé indisponible → on demandera */ }
+    }
+    // 2) proposer de sélectionner le compagnon
+    const ok = await Dialog.confirm({ title: "Images de façade", message: "Ce document est associé à un fichier compagnon d'images « " + facesNameFor(jsonHandle ? jsonHandle.name : currentName) + " ». Le sélectionner maintenant ?", confirmLabel: "Choisir le fichier…", cancelLabel: "Plus tard" });
+    if (!ok) {
+      if (docKey && imageStore.lastLoadedKey && imageStore.lastLoadedKey !== docKey) { await imageStore.keepOnly(store.faceImageRefIds()); imageStore.setLoadedKey(null); }
+      currentFacesHandle = null; shell.refreshActive(); return;
+    }
+    try { const [fh] = await W.showOpenFilePicker({ startIn: jsonHandle || undefined, types: FACES_TYPES }); await associateCompanion(fh); }
+    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
   }
   async function reopenLast(): Promise<void> {
     let rec = lastRec; if (!rec) rec = await handleStore.getLast();
@@ -149,8 +238,39 @@ async function boot(): Promise<void> {
       else if (e && e.name !== "AbortError") Notify.toast("Erreur de réouverture : " + (e.message || e), "err");
     }
   }
+  /** En mode fichier (un .json est ouvert), « Ouvrir » propose : autre document JSON OU compagnon d'images. */
+  function chooseOpenKind(): Promise<"json" | "companion" | null> {
+    return Dialog.custom({
+      title: "Ouvrir un fichier", cancelLabel: "Annuler",
+      build: (root: HTMLElement) => {
+        let chosen: string | null = null;
+        const confirmBtn = root.closest(".dialog-box")?.querySelector('[data-dlg="confirm"]') as HTMLElement | null;
+        if (confirmBtn) confirmBtn.style.display = "none";   // les choix résolvent eux-mêmes
+        const wrap = document.createElement("div"); wrap.className = "open-kind-choices";
+        const mk = (val: string, icon: string, label: string, desc: string) => {
+          const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
+          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = icon;
+          const tx = document.createElement("span"); tx.className = "ok-tx";
+          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = label;
+          const de = document.createElement("span"); de.className = "ok-desc"; de.textContent = desc;
+          tx.append(ti, de); b.append(ic, tx);
+          b.onclick = () => { chosen = val; confirmBtn?.click(); };
+          wrap.appendChild(b);
+        };
+        mk("json", "📄", "Document JSON", "Ouvrir un autre document (remplace le document courant).");
+        mk("companion", "🖼", "Fichier compagnon d'images", "Charger un .nmfb et l'associer au document courant.");
+        root.appendChild(wrap);
+        return { collect: () => chosen, validate: () => true };
+      },
+    });
+  }
   async function doOpen(): Promise<void> {
     if (!HAS_FS_API) { fileInput.click(); return; }
+    if (currentHandle) {   // un document est ouvert → choisir document JSON ou compagnon d'images
+      const kind = await chooseOpenKind();
+      if (!kind) return;
+      if (kind === "companion") { await loadCompanionFileInteractive(); return; }
+    }
     try {
       const [h] = await W.showOpenFilePicker({ types: JSON_TYPES, multiple: false });
       const f = await h.getFile();
@@ -163,8 +283,9 @@ async function boot(): Promise<void> {
   }
   async function doSave(): Promise<void> {
     if (!currentHandle) { await doSaveAs(); return; }
+    if (docHasFaceImages()) ensureFacesKey();   // la clé d'appariement doit être dans le .json AVANT son écriture
     if (!(await ensureWritePermission(currentHandle))) { Notify.toast("Permission d'écriture refusée.", "err"); return; }
-    try { await writeToHandle(currentHandle); refreshChrome(); Notify.toast("Document enregistré (" + currentName + ")"); }
+    try { await writeToHandle(currentHandle); await saveCompanionFaces(currentHandle); refreshChrome(); Notify.toast("Document enregistré (" + currentName + ")"); }
     catch (e: any) { Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
   }
   async function doSaveAs(): Promise<void> {
@@ -172,8 +293,10 @@ async function boot(): Promise<void> {
     if (!HAS_FS_API) { downloadJson(docFileName(), await snapshotWithImages()); Notify.toast("Copie téléchargée (" + docFileName() + ")"); return; }
     try {
       const h = await W.showSaveFilePicker({ suggestedName: docFileName(), types: JSON_TYPES });
-      currentHandle = h; currentName = h.name || docFileName(); session.setFile(true);
+      if (docHasFaceImages()) ensureFacesKey();   // clé d'appariement dans le .json
+      currentHandle = h; currentName = h.name || docFileName(); currentFacesHandle = null; session.setFile(true);   // nouveau fichier → nouveau compagnon
       await writeToHandle(h);
+      await saveCompanionFaces(h);   // choisit/écrit le fichier compagnon d'images à côté
       tabChannel.claim(store.meta.fileId || null);
       applyAutosave(); refreshChrome(); Notify.toast("Enregistré sous « " + currentName + " »");
     } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
@@ -222,7 +345,7 @@ async function boot(): Promise<void> {
         if (!ok) return;
       }
       tabChannel.release(store.meta.fileId || null);
-      await store.newDocument(); await imageStore.clearAll(); resetUndoTimeline(); currentHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
+      await store.newDocument(); await imageStore.clearAll(); resetUndoTimeline(); currentHandle = null; currentFacesHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
       applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast("Nouveau document");
     },
     onOpen: () => { doOpen(); },
