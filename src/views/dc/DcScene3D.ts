@@ -84,10 +84,11 @@ export class DcScene3D extends DcCamera {
     const W = dc.width_mm, D = dc.depth_mm;
     const pts = [[0, 0, 0], [W, 0, 0], [W, D, 0], [0, D, 0]].map(([x, y, z]) => proj({ x, y, z }));
     const floorPoly = Dom.svg("polygon", { class: "dc-floor3d" + (this._multi && dc.id === this.dcId ? " cur" : ""), points: pts.map((p) => p.h + "," + p.v).join(" ") });
-    if (this._multi) {   // multi-salles : clic sur le SOL = activer ce DC ; clic droit = menu (activer / isoler)
+    // clic droit sur le SOL → menu (bascule de vue partout ; + activer/isoler en multi-salles)
+    floorPoly.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.hideTip(); this.ctxMenu(e, this.roomCtx(dc)); });
+    if (this._multi) {   // multi-salles : clic gauche sur le SOL = activer ce DC
       (floorPoly as any).style.cursor = "pointer";
       this.wireClick(floorPoly, () => { this.hideTip(); this.activateDc(dc.id, false); });
-      floorPoly.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.hideTip(); this.ctxMenu(e, this.roomCtx(dc)); });
     }
     drawables.push({ depth: 1e9, node: floorPoly });
     // liseré sur le FRONT de la salle (bord local y=0)
@@ -181,7 +182,7 @@ export class DcScene3D extends DcCamera {
         drawables.push({ depth: base + 5, node: g });
       }
       if (this.showOrientMarks) { const a = proj({ x: ox, y: oy, z }), bb = proj({ x: ox + W, y: oy, z }); drawables.push({ depth: base + 4.5, node: Dom.svg("line", { class: "dc-orient-ref-edge", x1: a.h, y1: a.v, x2: bb.h, y2: bb.v }) }); }
-      (fp.cfg.blocked_cells || []).forEach((key) => {
+      if (this.showFloorGrid) (fp.cfg.blocked_cells || []).forEach((key) => {   // zones d'exclusion : suivent la visibilité de la grille d'étage
         const pp = key.split(","), cx = +pp[0], cy = +pp[1]; if (!isFinite(cx) || !isFinite(cy)) return;
         const rx = cx * cell, ry = cy * cell; if (rx < 0 || ry < 0 || rx >= W || ry >= D) return;
         const cc = [[rx, ry], [rx + cell, ry], [rx + cell, ry + cell], [rx, ry + cell]].map(([x, y]) => proj({ x: ox + x, y: oy + y, z }));

@@ -463,12 +463,14 @@ export class DcInteract extends DcPanels {
   protected viewSwitchSection(dc: any): CtxSection { return this.viewSwitchSectionAt(dc, dc.location || "", String(dc.floor || "")); }
   /** Menu d'une SALLE en 3D multi-salles (clic droit sur son sol) : activer ce DC · isoler · modifier + bascule de vue. */
   protected roomCtx(dc: any): CtxSection[] {
+    const items: Array<{ label: string; danger?: boolean; action: () => void }> = [];
+    if (this._multi) {   // activer/isoler n'a de sens qu'en multi-salles
+      items.push({ label: "Activer ce DC", action: () => this.activateDc(dc.id, false) });
+      items.push({ label: "Isoler (salle unique)", action: () => this.activateDc(dc.id, true) });
+    }
+    items.push({ label: "Modifier la salle…", action: () => this.host.openDatacenterForm?.(dc.id) });
     return [
-      { head: dc.name || "(salle)", items: [
-        { label: "Activer ce DC", action: () => this.activateDc(dc.id, false) },
-        { label: "Isoler (salle unique)", action: () => this.activateDc(dc.id, true) },
-        { label: "Modifier la salle…", action: () => this.host.openDatacenterForm?.(dc.id) },
-      ] },
+      { head: dc.name || "(salle)", items },
       this.viewSwitchSection(dc),
     ];
   }
