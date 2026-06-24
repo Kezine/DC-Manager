@@ -1,0 +1,603 @@
+import type { Store } from "../../store";
+import { Dom } from "../../ui/Dom";
+import { FormControls } from "../../ui/FormControls";
+import { Dialog } from "../../ui/Dialog";
+import { Notify } from "../../ui/Notify";
+import { ContextMenu } from "../../ui/ContextMenu";
+import type { CtxSection } from "../../ui/ContextMenu";
+import { ImageExport } from "../../ui/ImageExport";
+import type { ExportOptions } from "../../ui/ImageExport";
+import { Html } from "../../core/Html";
+import { Normalize } from "../../core/Normalize";
+import { RackGeometry } from "../../geometry/RackGeometry";
+import { RackScene } from "../../geometry/RackScene";
+import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
+import { Resolver3D } from "../../geometry/Resolver3D";
+import { FloorLayout } from "../../geometry/FloorLayout";
+import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
+import { Box } from "../../geometry/Box";
+import { Painter } from "../../geometry/Painter";
+import { GridGeometry } from "../../geometry/GridGeometry";
+import { Depths } from "../../registries/Depths";
+import { EquipmentTypes } from "../../registries/EquipmentTypes";
+import { Format } from "../../core/Format";
+import { Text } from "../../core/Text";
+import { Waypoint } from "../../models/Waypoint";
+import { CableStatuses } from "../../domain/CableStatuses";
+import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
+import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
+import type { Vec3, Drawable, DatacenterHost } from "./shared";
+import { DcViews2D } from "./DcViews2D";
+
+export class DcPanels extends DcViews2D {
+
+
+  /* ---- toolbar ---- */
+  buildToolbar(): void {
+    if (!this.toolbarEl) return;
+    this.toolbarEl.innerHTML = "";
+    const all = this.dcs();
+    const sel = document.createElement("select"); sel.className = "app-select"; this.roomSel = sel;
+    if (!all.length) { const o = document.createElement("option"); o.textContent = "— aucune salle —"; sel.appendChild(o); sel.disabled = true; }
+    else all.forEach((d) => { const o = document.createElement("option"); o.value = d.id; o.textContent = d.name || "(salle)"; sel.appendChild(o); });
+    const cur = this.current(); if (cur) sel.value = cur.id;
+    sel.onchange = () => { this.dcId = sel.value; this.camTarget = null; this.scale = null; this.selRackId = null; this.render(); };
+    this.toolbarEl.appendChild(this.labeled("Salle", sel));
+
+    // mode de vue : 3D ⟷ Dessus (2D) ⟷ Étage (plan bâtiment 2D)
+    const modes = document.createElement("div"); modes.className = "dc-subviews"; modes.style.cssText = "display:flex;gap:4px";
+    ([["3d", "3D"], ["top", "Plan de salle"], ["floor", "Plan d'étage"]] as Array<["3d" | "top" | "floor", string]>).forEach(([m, label]) => {
+      const b = this.btn(label, () => { if (this.view === m) return; this.view = m; if (m === "3d") this.blockEdit = false; this.scale = null; this.camTarget = null; this.buildToolbar(); this.render(); });
+      b.classList.toggle("active", this.view === m);
+      modes.appendChild(b);
+    });
+    this.toolbarEl.appendChild(modes);
+
+    // (bascule multi-salles retirée de la topbar — pilotée par la carte « Datacenters » du panneau latéral, cf. dcScopeCard)
+    // bascules d'édition de grille (plans 2D salle/étage) : placement libre + cases inaccessibles
+    if (this.view === "top" || this.view === "floor") {
+      this.toolbarEl.appendChild(this.vsep());   // séparateur : contrôles de visualisation | déplacement/exclusion
+      const edits = document.createElement("div"); edits.className = "dc-subviews"; edits.style.cssText = "display:flex;gap:4px";
+      const bFree = this.btn("Placement libre", () => { this.freePlace = !this.freePlace; bFree.classList.toggle("active", this.freePlace); }, "Désactive l'aimantation à la grille pendant le glisser (n'affecte pas les éléments déjà placés)");
+      bFree.classList.toggle("active", this.freePlace);
+      const bBlock = this.btn("Cases inaccessibles", () => { this.blockEdit = !this.blockEdit; bBlock.classList.toggle("active", this.blockEdit); this.render(); }, "Glissez une sélection sur la grille pour marquer / démarquer les cases (in)accessibles");
+      bBlock.classList.toggle("active", this.blockEdit);
+      edits.append(bFree, bBlock); this.toolbarEl.appendChild(edits);
+    }
+    this.updateControls();
+  }
+
+  /** N'affiche que la baie `id` (masque les autres salles affichées), la cible et la sélectionne. */
+  protected isolateRack(id: string): void {
+    const dc = this.current(); if (!dc) return;
+    this.hidden3dRacks = new Set(this.displayedDcIds(dc).flatMap((d) => this.store.racksOfDc(d)).map((r: any) => r.id)); this.hidden3dRacks.delete(id);
+    const r: any = this.store.get("racks", id);
+    if (r) this.camTarget = { x: (r.dc_x != null ? r.dc_x : 0), y: (r.dc_y != null ? r.dc_y : 0), z: RackGeometry.physHeight(r) / 2 };
+    this.selRackId = id; this.scale = null; this.render();
+  }
+
+  /** Racks du pool (sans salle). */
+  protected poolRacks(): any[] { return this.store.all("racks").filter((r: any) => !r.datacenter_id).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")); }
+
+  /** Première maille libre de la salle (placement auto d'une baie/équipement). */
+  protected freeCell(dc: any): { x: number; y: number } {
+    const cell = dc.cell_mm, placed = this.store.racksOfDc(dc.id);
+    const occupied = (x: number, y: number) => placed.some((r: any) => Math.abs((r.dc_x || 0) - x) < cell * 0.5 && Math.abs((r.dc_y || 0) - y) < cell * 0.5);
+    for (let y = cell / 2; y <= dc.depth_mm; y += cell) for (let x = cell / 2; x <= dc.width_mm; x += cell) if (!occupied(x, y)) return { x, y };
+    return { x: cell / 2, y: cell / 2 };
+  }
+
+  /** Câble « inter-DC » : ses deux bouts résolvent dans des salles différentes. */
+  protected isInterDc(c: any): boolean { const a = this.store.cableEndDcId(c, "A"), b = this.store.cableEndDcId(c, "B"); return !!(a && b && a !== b); }
+
+  protected cableLabelShort(c: any): string {
+    if (c.name) return c.name;
+    const pa: any = c.from_port_id ? this.store.get("ports", c.from_port_id) : null, pb: any = c.to_port_id ? this.store.get("ports", c.to_port_id) : null;
+    return (pa ? (pa.name || "?") : "?") + " ↔ " + (pb ? (pb.name || "?") : "?");
+  }
+  /** Câbles candidats de la carte (dessinables dans la vue) : intra-salle des salles affichées
+      + inter-DC (mono : sortants ; multi : un bout résolu dans une salle affichée). */
+
+  protected panelCables(dc: any): Array<{ cable: any }> {
+    const dcIds = this.displayedDcIds(dc), seen = new Set<string>(), out: Array<{ cable: any }> = [];
+    const add = (c: any) => { if (!seen.has(c.id)) { seen.add(c.id); out.push({ cable: c }); } };
+    dcIds.forEach((id) => this.resolvedCables(id).forEach((rc) => add(rc.cable)));
+    if (dcIds.length === 1) this.outgoingCableStubs(dcIds[0]).forEach((st) => add(st.cable));
+    else { const dset = new Set(dcIds); this.store.all("cables").forEach((c: any) => { const da = this.store.cableEndDcId(c, "A"), db = this.store.cableEndDcId(c, "B"); if ((da && dset.has(da)) || (db && dset.has(db))) add(c); }); }
+    return out;
+  }
+
+  protected eqAllowed(c: any): boolean {
+    if (!this._cableEqFilter) return true;
+    const pa: any = this.store.get("ports", c.from_port_id), pb: any = this.store.get("ports", c.to_port_id);
+    return (pa && pa.equipment_id === this._cableEqFilter) || (pb && pb.equipment_id === this._cableEqFilter);
+  }
+
+  protected cableListFiltered(resolved: Array<{ cable: any }>): Array<{ rc: { cable: any }; label: string }> {
+    const q = Text.normSearch(this._cableSearch);
+    return resolved.map((rc) => ({ rc, label: this.cableLabelShort(rc.cable) }))
+      .filter((o) => this.eqAllowed(o.rc.cable) && (!q || Text.normSearch(o.label).includes(q)))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  protected renderCableList(wrap: HTMLElement, resolved: Array<{ cable: any }>): void {
+    wrap.innerHTML = "";
+    this.cableListFiltered(resolved).slice(0, 200).forEach(({ rc, label }) => {
+      const tog = FormControls.toggle(label, this.selCables.has(rc.cable.id), (v) => { if (v) this.selCables.add(rc.cable.id); else this.selCables.delete(rc.cable.id); this.render(); });
+      tog.classList.add("tgl-row"); wrap.appendChild(tog);
+    });
+  }
+
+
+  /** Panneau latéral : orchestrateur (cartes selon la vue). */
+  renderSide(dc: any): void {
+    const side = this.sideEl; if (!side) return;
+    side.innerHTML = "";
+    if (this.routeBuild) side.appendChild(this.routeCard());   // panneau de routage (toutes vues), en tête
+    if (this.view === "floor") {   // plan d'étage : carte étage + panneau Waypoints (scope étage, toutes les salles)
+      side.appendChild(this.collapsible(this.floorCard(), "floor"));
+      const ft = this.floorTargetResolve(); const cur = this.current();
+      if (ft) {
+        const onFloor = (cur && (cur.location || "") === ft.location && String(cur.floor || "") === ft.floor) ? cur : null;
+        side.appendChild(this.collapsible(this.waypointsCard(onFloor, ft), "waypoints"));
+      }
+      return;
+    }
+    if (!dc) { const h = document.createElement("div"); h.className = "dc-card"; h.innerHTML = '<div class="dc-card-title">Datacenter</div><div class="form-hint">Aucune salle. Créez-en une (onglet Datacenters → Salles) pour la visualiser.</div>'; side.appendChild(h); return; }
+    if (this.view === "top") {
+      side.appendChild(this.collapsible(this.selectionCard(dc), "sel"));
+      side.appendChild(this.collapsible(this.poolRacksCard(dc), "pool"));
+      side.appendChild(this.collapsible(this.poolFreeEquipCard(dc), "freepool"));
+      side.appendChild(this.collapsible(this.waypointsCard(dc), "waypoints"));
+      side.appendChild(this.collapsible(this.cableCard(dc), "cables"));
+    } else {
+      side.appendChild(this.collapsible(this.dcScopeCard(dc), "dcscope"));   // Datacenters affichés / Vue étage
+      side.appendChild(this.collapsible(this.racks3dCard(dc), "rack3d"));
+      side.appendChild(this.collapsible(this.cableCard(dc), "cables"));
+      side.appendChild(this.collapsible(this.view3dOptionsCard(), "view3d"));
+    }
+  }
+
+
+  /* ---- carte SÉLECTION (vue Dessus) : baie / équipement libre / waypoint, ou aide ---- */
+  protected selectionCard(dc: any): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const wpSel: any = this.selWaypointId ? this.store.get("waypoints", this.selWaypointId) : null;
+    const fe: any = this.selEquipId ? this.store.get("equipments", this.selEquipId) : null;
+    const r: any = this.selRackId ? this.store.get("racks", this.selRackId) : null;
+    const title = (txt: string) => { const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = txt; box.appendChild(t); };
+    const acts = () => { const a = document.createElement("div"); a.className = "dc-card-acts"; return a; };
+    if (wpSel && wpSel.datacenter_id === dc.id) {
+      title(Waypoint.glyph(wpSel) + " " + (wpSel.name || "(waypoint)"));
+      const a = acts();
+      const bEdit = this.btn("Modifier", () => this.host.openWaypointForm?.(wpSel.id));
+      const bDel = this.btn("Supprimer", async () => {
+        const ok = await Dialog.confirm({ title: "Supprimer le waypoint", danger: true, message: `Supprimer « ${wpSel.name || "(waypoint)"} » ? Les câbles qui le traversent seront détachés (pas supprimés).` });
+        if (!ok) return;
+        await this.store.remove("waypoints", wpSel.id); this.selWaypointId = null; this.host.setDirty?.(true); Notify.toast("Waypoint supprimé");
+      }); bDel.classList.add("danger");
+      a.append(bEdit, bDel); box.appendChild(a);
+    } else if (fe && fe.dim_mode === "free" && fe.dc_id === dc.id) {
+      title(fe.name || "(équipement)");
+      const a = acts();
+      const bRot = this.btn("Pivoter 90°", async () => { await this.store.update("equipments", fe.id, { dc_orientation: Normalize.rackOrientation((fe.dc_orientation || 0) + 90) }); this.host.setDirty?.(true); });
+      const bEdit = this.btn("Détails", () => this.host.openEquipmentDetail?.(fe.id));
+      const bOut = this.btn("Retirer", async () => {
+        const ops: Array<{ collection: string; id: string; patch: Record<string, any> }> = [{ collection: "equipments", id: fe.id, patch: { dc_id: null, dc_x: null, dc_y: null, dc_z: 0 } }];
+        if (fe.dc_id) ops.push(...this.store.cableDowngradeOps([fe.id]));
+        await this.store.updateBatch(ops);
+        this.selEquipId = null; this.host.setDirty?.(true);
+        if (ops.length > 1) Notify.toast("Câble(s) repassé(s) en « Planifié » (équipement plus en salle)");
+      }); bOut.classList.add("danger");
+      a.append(bRot, bEdit, bOut); box.appendChild(a);
+    } else if (r && r.datacenter_id === dc.id) {
+      title(r.name || "(baie)");
+      const info = document.createElement("div"); info.className = "form-hint";
+      info.textContent = (r.width_mm || RACK_WIDTH_DEFAULT) + " × " + (r.depth || RACK_DEPTH_DEFAULT) + " mm · " + r.u_count + " U · orientation " + Normalize.rackOrientation(r.orientation) + "°";
+      box.appendChild(info);
+      const a = acts();
+      a.append(
+        this.btn("Pivoter 90°", async () => { await this.store.update("racks", r.id, { orientation: Normalize.rackOrientation(r.orientation + 90) }); this.host.setDirty?.(true); }),
+        this.btn("Modifier", () => this.host.openRackForm?.(r.id)),
+      );
+      const bOut = this.btn("Retirer", async () => {
+        const eqIds = this.store.equipmentsOfRack(r.id).filter((e: any) => e.placement_mode === "rack" && e.rack_u != null).map((e: any) => e.id);
+        const ops: Array<{ collection: string; id: string; patch: Record<string, any> }> = [{ collection: "racks", id: r.id, patch: { datacenter_id: null, dc_x: null, dc_y: null } }];
+        if (r.datacenter_id) ops.push(...this.store.cableDowngradeOps(eqIds));
+        await this.store.updateBatch(ops);
+        this.selRackId = null; this.host.setDirty?.(true);
+        if (ops.length > 1) Notify.toast("Câble(s) repassé(s) en « Planifié » (contenu plus en salle)");
+      }); bOut.classList.add("danger"); a.appendChild(bOut);
+      box.appendChild(a);
+    } else {
+      title("Sélection");
+      const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Cliquez une baie pour la sélectionner ; glissez-la pour la déplacer (aimantation à la grille).";
+      box.appendChild(h);
+    }
+    return box;
+  }
+
+
+  /* ---- carte RACKS DISPONIBLES (pool) — vue Dessus ---- */
+  protected poolRacksCard(dc: any): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Racks disponibles (pool)"; box.appendChild(t);
+    const pool = this.poolRacks();
+    if (!pool.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucun rack libre. Créez un rack (onglet Racks) ou retirez-en un d'une salle."; box.appendChild(h); return box; }
+    const list = document.createElement("div"); list.className = "dc-pool";
+    pool.forEach((rk: any) => {
+      const row = document.createElement("div"); row.className = "dc-pool-row";
+      const lab = document.createElement("span"); lab.className = "grow"; lab.textContent = (rk.name || "(rack)") + " · " + (rk.width_mm || RACK_WIDTH_DEFAULT) + "×" + (rk.depth || RACK_DEPTH_DEFAULT) + " · " + rk.u_count + "U";
+      const b = this.btn("Placer", async () => {
+        const why = this.store.rackPlacementBlockedReason(rk.id, dc.id);
+        if (why) { Notify.toast("Placement impossible : " + why, "err"); return; }
+        const pos = this.freeCell(dc); this.selRackId = rk.id;
+        await this.store.update("racks", rk.id, { datacenter_id: dc.id, dc_x: pos.x, dc_y: pos.y }); this.host.setDirty?.(true);
+      });
+      row.append(lab, b); list.appendChild(row);
+    });
+    box.appendChild(list); return box;
+  }
+
+
+  /* ---- carte ÉQUIPEMENTS LIBRES (pool) — vue Dessus ---- */
+  protected poolFreeEquipCard(dc: any): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Équipements libres (pool)"; box.appendChild(t);
+    const fpool = this.store.all("equipments").filter((e: any) => e.dim_mode === "free" && !e.dc_id && e.placement_mode !== "floor" && !e.inventory_only).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+    if (!fpool.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucun équipement « libre » non placé. Créez-en un (onglet Équipements, mode Libre)."; box.appendChild(h); return box; }
+    const list = document.createElement("div"); list.className = "dc-pool";
+    fpool.forEach((eq: any) => {
+      const bx = FreeEquipGeometry.box(eq);
+      const row = document.createElement("div"); row.className = "dc-pool-row";
+      const lab = document.createElement("span"); lab.className = "grow"; lab.textContent = (eq.name || "(équipement)") + " · " + bx.w + "×" + bx.d + "×" + bx.h + " mm";
+      const b = this.btn("Placer", async () => {
+        const why = this.store.equipmentPlacementBlockedReason(eq.id, dc.id);
+        if (why) { Notify.toast("Placement impossible : " + why, "err"); return; }
+        const pos = this.freeCell(dc); this.selRackId = null; this.selEquipId = eq.id;
+        await this.store.update("equipments", eq.id, { dc_id: dc.id, dc_x: pos.x, dc_y: pos.y, dc_z: eq.dc_z || 0 }); this.host.setDirty?.(true);
+      });
+      row.append(lab, b); list.appendChild(row);
+    });
+    box.appendChild(list); return box;
+  }
+
+
+  /** Ouvre le form d'étage (création `pick` ou édition) avec navigation vers le plan créé. */
+  protected editFloor(location: string, floor: string, pick: boolean): void {
+    this.host.openFloorForm?.(location, floor, { pick, onPicked: (L: string, F: string) => { this.floorTarget = { location: L, floor: F }; this.view = "floor"; this.scale = null; this.buildToolbar(); this.render(); } });
+  }
+
+  /* ---- carte PLAN D'ÉTAGE (vue Étage) : sélecteur bâtiment/étage + salles de l'étage + OOB ---- */
+  protected floorCard(): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Plan d'étage"; box.appendChild(t);
+    const ft = this.floorTargetResolve();
+    if (!ft) {
+      const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucun étage connu. Créez-en un pour afficher son plan."; box.appendChild(h);
+      box.appendChild(this.btn("+ Créer un étage…", () => this.editFloor("", "", true)));
+      return box;
+    }
+    // sélecteur d'étage (tous les couples bâtiment × étage connus)
+    const keys = this.floor.allFloorKeys();
+    const key = (k: { location: string; floor: string }) => (k.location || "") + "" + (k.floor || "");
+    const sel = FormControls.select(keys.map((k) => ({ value: key(k), label: FloorLayout.locationLabel(k.location) + " · ét. " + (k.floor || "0") })), key(ft));
+    sel.onchange = () => { const p = sel.value.split(""); this.floorTarget = { location: p[0], floor: p[1] || "" }; this.scale = null; this.render(); };
+    box.appendChild(FormControls.fieldRow("Bâtiment · étage", sel));
+    // salles de cet étage (clic = activer ; bouton = éditer)
+    const dcs = this.store.dcsOfFloor(ft.location, ft.floor).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+    const rt = document.createElement("div"); rt.className = "dc-card-title"; rt.style.marginTop = "8px"; rt.textContent = "Salles (" + dcs.length + ")"; box.appendChild(rt);
+    if (!dcs.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucune salle sur cet étage. Posez-en une (onglet Datacenters → Salles · bâtiment/étage)."; box.appendChild(h); }
+    else {
+      const list = document.createElement("div"); list.className = "dc-layers";
+      dcs.forEach((d: any) => {
+        const row = document.createElement("div"); row.className = "dc-layer-row";
+        const nm = this.btn((d.name || "(salle)") + (d.id === this.dcId ? "  ◀ active" : ""), () => { this.selRoomId = d.id; this.dcId = d.id; this.render(); });
+        nm.style.cssText = "flex:1 1 auto;text-align:left;justify-content:flex-start"; nm.classList.toggle("active", this.selRoomId === d.id);
+        row.append(nm, this.btn("Modifier", () => this.host.openDatacenterForm?.(d.id)));
+        list.appendChild(row);
+      });
+      box.appendChild(list);
+    }
+    // (OOB : listés dans le panneau « Waypoints » ci-dessous — pas de doublon ici)
+    // équipements posés sur cet étage (clic = cibler/sélectionner ; bouton = fiche)
+    const feqs = this.store.floorEquipments().filter((e: any) => (e.location || "") === ft.location && String(e.floor || "") === ft.floor).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+    const et = document.createElement("div"); et.className = "dc-card-title"; et.style.marginTop = "8px"; et.textContent = "Équipements de l'étage (" + feqs.length + ")"; box.appendChild(et);
+    if (!feqs.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucun équipement posé sur cet étage (mode « Étage » du formulaire d'équipement)."; box.appendChild(h); }
+    else {
+      const list = document.createElement("div"); list.className = "dc-layers";
+      feqs.forEach((eq: any) => {
+        const row = document.createElement("div"); row.className = "dc-layer-row";
+        const nm = this.btn((eq.name || "(équipement)") + (FloorLayout.floorEquipLocalized(eq) ? "" : " (auto)"), () => { this.selFloorEquip = eq.id; this.render(); });
+        nm.style.cssText = "flex:1 1 auto;text-align:left;justify-content:flex-start"; nm.classList.toggle("active", this.selFloorEquip === eq.id);
+        row.append(nm, this.btn("ⓘ", () => this.host.openEquipmentDetail?.(eq.id)));
+        list.appendChild(row);
+      });
+      box.appendChild(list);
+    }
+    const acts = document.createElement("div"); acts.className = "dc-card-acts"; acts.style.marginTop = "8px";
+    acts.append(
+      this.btn("Éditer le plan…", () => this.editFloor(ft.location, ft.floor, false)),
+      this.btn("+ Créer un étage…", () => this.editFloor(ft.location, ft.floor, true)),
+    );
+    box.appendChild(acts);
+    const acfg = this.floor.config(ft.location, ft.floor);
+    box.appendChild(FormControls.toggle("⚓ Afficher le point d'ancrage · " + Format.meters(acfg.anchor_x || 0) + " ; " + Format.meters(acfg.anchor_y || 0), this.showFloorAnchor, (v) => { this.showFloorAnchor = v; this.render(); }));
+    box.appendChild(this.btn("Recadrer le plan", () => { this.scale = null; this.render(); }));
+    return box;
+  }
+
+  /* ---- carte WAYPOINTS (passage de câbles) — GÉNÉRIQUE (plan de salle OU plan d'étage), types séparés en sections.
+       `dc` = salle active (création in-situ + scope mono-salle) ; `floor` = scope étage (toutes les salles de l'étage). ---- */
+
+  protected waypointsCard(dc: any, floor?: { location: string; floor: string }): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Waypoints (passage de câbles)"; box.appendChild(t);
+    const kindLbl = (k: string) => k === "segment" ? "Chemin" : k === "brush" ? "Brosse" : "Pin";
+    // ---- création (pins/chemins/exits dans la salle active si présente ; OOB toujours) ----
+    const addActs = document.createElement("div"); addActs.className = "dc-card-acts";
+    const mkAdd = (label: string, kind: string, wpType?: string) => this.btn(label, async () => {
+      const pos = this.freeCell(dc), cellW = dc.cell_mm || 600;
+      const props: any = { name: (wpType === "exit" ? "EXIT-" : "WP-") + (this.store.all("waypoints").length + 1), kind, wp_type: wpType || "datacenter", datacenter_id: dc.id, dc_x: pos.x, dc_y: pos.y };
+      if (kind === "segment") { props.dc_x = Math.max(0, pos.x - cellW); props.dc_y = pos.y; props.dc_x2 = Math.min(dc.width_mm, pos.x + cellW); props.dc_y2 = pos.y; }
+      const wp = await this.store.create("waypoints", props);
+      this.selWaypointId = wp.id; this.setDirty();
+      Notify.toast(wpType === "exit" ? "Exit créé — un câble sort par une PAIRE d'exits (salles différentes)" : (kind === "segment" ? "Chemin de câbles créé" : "Pin créé"));
+    });
+    if (dc) addActs.append(mkAdd("+ Pin", "point"), mkAdd("+ Chemin", "segment"), mkAdd("+ Exit", "point", "exit"));
+    addActs.appendChild(this.btn("+ Pin d'étage", async () => {   // ex-OOB : pin hors salle rattaché à un bâtiment/étage
+      const loc = floor ? floor.location : (dc ? (dc.location || "") : ""), fl = floor ? floor.floor : (dc ? String(dc.floor || "") : "");
+      const wp: any = await this.store.create("waypoints", { name: "PIN-" + (this.store.all("waypoints").length + 1), kind: "point", location: loc, floor: fl });
+      this.selWaypointId = wp.id; this.setDirty(); Notify.toast("Pin d'étage créé — glissez-le sur le plan d'étage, éditez sa hauteur");
+    }));
+    box.appendChild(addActs);
+    const hint = document.createElement("div"); hint.className = "form-hint";
+    hint.textContent = dc ? "Astuce : clic droit sur le sol pour créer un waypoint à l'endroit visé. ⏏ exits par paires (salles différentes) · ◎ pin d'étage entre deux exits."
+      : "Sélectionnez une salle de l'étage (liste ci-dessus) pour y créer des pins/chemins. ◎ pin d'étage : hors salles, entre deux exits.";
+    box.appendChild(hint);
+    // ---- scope des waypoints POSÉS : salle active, ou toutes les salles de l'étage ----
+    const scopeIds = floor ? this.store.dcsOfFloor(floor.location, floor.floor).map((d: any) => d.id) : (dc ? [dc.id] : []);
+    const multiRoom = scopeIds.length > 1;
+    const placed = this.store.all("waypoints").filter((w: any) => w.datacenter_id && scopeIds.includes(w.datacenter_id) && this.store.waypointIsPlaced(w) && !Waypoint.isFloorLevel(w));
+    // ---- section par TYPE (réplique de la séparation par sections du form équipement) ----
+    const section = (title: string, items: any[], action: (wp: any) => HTMLElement) => {
+      if (!items.length) return;
+      const st = document.createElement("div"); st.className = "dc-card-title"; st.style.marginTop = "8px"; st.textContent = title + " (" + items.length + ")"; box.appendChild(st);
+      const list = document.createElement("div"); list.className = "dc-pool";
+      items.sort((a, b) => (a.name || "").localeCompare(b.name || "")).forEach((wp) => {
+        const row = document.createElement("div"); row.className = "dc-pool-row";
+        const n = this.store.cablesOfWaypoint(wp.id).length, room = multiRoom ? " · " + this.store.dcName(wp.datacenter_id) : "";
+        const lab = document.createElement("span"); lab.className = "grow"; lab.textContent = Waypoint.glyph(wp) + " " + (wp.name || "(waypoint)") + room + " · " + n + " câble" + (n > 1 ? "s" : "");
+        row.append(lab, action(wp)); list.appendChild(row);
+      });
+      box.appendChild(list);
+    };
+    const edit = (wp: any) => this.btn("Éditer", () => this.host.openWaypointForm?.(wp.id));
+    section("◆ Pins", placed.filter((w: any) => w.kind === "point" && Waypoint.typeOf(w) !== "exit"), edit);
+    section("▬ Chemins de câbles", placed.filter((w: any) => w.kind === "segment" && Waypoint.typeOf(w) !== "exit"), edit);
+    section("▦ Brosses de brassage", placed.filter((w: any) => w.kind === "brush"), edit);
+    section("⏏ Exits (sortie de salle)", placed.filter((w: any) => Waypoint.typeOf(w) === "exit"), edit);
+    // ---- pool du bâtiment (à poser dans la salle active) ----
+    const wpool = dc ? this.store.waypointsOfDc(null).filter((w: any) => !Waypoint.isFloorLevel(w)) : [];
+    section("⏳ Pool du bâtiment (à poser)", wpool, (wp: any) => this.btn("Placer", async () => {
+      const pos = this.freeCell(dc), cellW = dc.cell_mm || 600, patch: any = { datacenter_id: dc.id, dc_x: pos.x, dc_y: pos.y };
+      if (wp.kind === "segment") { patch.dc_x = Math.max(0, pos.x - cellW); patch.dc_x2 = Math.min(dc.width_mm, pos.x + cellW); patch.dc_y2 = pos.y; }
+      this.selWaypointId = wp.id; await this.store.update("waypoints", wp.id, patch); this.setDirty();
+    }));
+    // ---- OOB (étage courant si scope étage, sinon tout le bâtiment) ----
+    const oobs = this.store.oobWaypoints().filter((w: any) => !floor || ((w.location || "") === floor.location && String(w.floor || "") === floor.floor))
+      .sort((a: any, b: any) => (FloorLayout.floorNum(a.floor) - FloorLayout.floorNum(b.floor)) || (a.name || "").localeCompare(b.name || ""));
+    if (oobs.length) {
+      const st = document.createElement("div"); st.className = "dc-card-title"; st.style.marginTop = "8px"; st.textContent = "◎ Pins d'étage — hors salles (" + oobs.length + ")"; box.appendChild(st);
+      const list = document.createElement("div"); list.className = "dc-pool";
+      oobs.forEach((wp: any) => {
+        const row = document.createElement("div"); row.className = "dc-pool-row";
+        const n = this.store.cablesOfWaypoint(wp.id).length;
+        const lab = document.createElement("span"); lab.className = "grow"; lab.textContent = Waypoint.glyph(wp) + " " + (wp.name || "(waypoint)") + " · " + Waypoint.floorLabel(wp) + " · " + n + " câble" + (n > 1 ? "s" : "");
+        row.append(lab, edit(wp)); list.appendChild(row);
+      });
+      box.appendChild(list);
+    }
+    return box;
+  }
+
+
+  /* ---- carte DATACENTERS (portée d'affichage / Vue étage) — vue 3D ---- */
+  protected dcScopeCard(dc: any): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Datacenters"; box.appendChild(t);
+    const refit = () => { this.camTarget = null; this.scale = null; this.buildToolbar(); this.renderSide(this.current()); this.renderThreeD(this.current()); };
+    const all = this.store.all("datacenters");
+    const curLoc = dc ? (dc.location || "") : "";
+    const bldgIds = (loc: string) => all.filter((d: any) => (d.location || "") === loc).map((d: any) => d.id);
+    const selRow = document.createElement("div"); selRow.className = "form-hint"; selRow.style.cssText = "margin-bottom:6px"; selRow.innerHTML = "Salle active : <b>" + Html.escape(dc.name || "(salle)") + "</b>"; box.appendChild(selRow);
+    // bascule maître : Vue étage (empilement 3D de plusieurs salles)
+    if (all.length) {
+      box.appendChild(FormControls.toggle("Vue étage", this.multiDc, (v) => {
+        this.multiDc = v;
+        if (v) { if (!this.visibleDcIds.size) { const b = bldgIds(curLoc); this.visibleDcIds = new Set(b.length ? b : all.map((d: any) => d.id)); } }
+        refit();
+      }, { block: true, title: "Empile plusieurs salles / étages en 3D (bâtiments côte à côte). Désactivé : une seule salle active." }));
+    }
+    // préréglages de portée (actifs en Vue étage)
+    const displayed = new Set(this.displayedDcIds(dc));
+    const sameSet = (arr: string[]) => displayed.size === arr.length && arr.every((id) => displayed.has(id));
+    const acts = document.createElement("div"); acts.className = "dc-card-acts";
+    const scopeBtn = (icon: string, titleTxt: string, active: boolean, onClick: () => void) => {
+      const b = document.createElement("button"); b.type = "button";
+      b.className = "btn btn-ghost btn-sm dc-scope-btn" + (active && this.multiDc ? " active" : "");
+      b.title = this.multiDc ? titleTxt : (titleTxt + " — disponible en Vue étage"); b.disabled = !this.multiDc;
+      b.innerHTML = icon; if (this.multiDc) b.onclick = onClick; return b;
+    };
+    acts.appendChild(scopeBtn(DC_SCOPE_ICONS.self, "Salle active seule", sameSet([dc.id]), () => { this.visibleDcIds = new Set([dc.id]); refit(); }));
+    acts.appendChild(scopeBtn(DC_SCOPE_ICONS.bldg, "Tout le bâtiment", sameSet(bldgIds(curLoc)), () => { this.visibleDcIds = new Set(bldgIds(curLoc)); refit(); }));
+    acts.appendChild(scopeBtn(DC_SCOPE_ICONS.all, "Tous les sites", sameSet(all.map((d: any) => d.id)), () => { this.visibleDcIds = new Set(all.map((d: any) => d.id)); refit(); }));
+    box.appendChild(acts);
+    // liste groupée par bâtiment puis étage (mono = sélection radio ; Vue étage = multi-sélection)
+    const locs = Array.from(new Set(all.map((d: any) => d.location || "")))
+      .sort((a, b) => (a === curLoc ? -1 : b === curLoc ? 1 : FloorLayout.locationLabel(a).localeCompare(FloorLayout.locationLabel(b))));
+    locs.forEach((loc) => {
+      const inLoc = all.filter((d: any) => (d.location || "") === loc).sort((a: any, b: any) => FloorLayout.floorNum(a.floor) - FloorLayout.floorNum(b.floor) || (a.name || "").localeCompare(b.name || ""));
+      if (!inLoc.length) return;
+      const h = document.createElement("div"); h.className = "dc-card-title"; h.style.marginTop = "8px"; h.textContent = FloorLayout.locationLabel(loc) + (loc === curLoc ? " (actif)" : ""); box.appendChild(h);
+      const list = document.createElement("div"); list.className = "dc-layers";
+      inLoc.forEach((d: any) => {
+        const isCur = d.id === dc.id;
+        let tog: HTMLElement;
+        if (this.multiDc) {
+          tog = FormControls.toggle((d.name || "(salle)") + (isCur ? "  ◀ active" : ""), displayed.has(d.id), (v) => { if (v) this.visibleDcIds.add(d.id); else this.visibleDcIds.delete(d.id); refit(); }, { disabled: isCur });
+        } else {
+          tog = FormControls.toggle((d.name || "(salle)") + (isCur ? "  ◀ active" : ""), isCur, () => { if (isCur) return; this.dcId = d.id; this.selRackId = null; refit(); }, { disabled: isCur });
+        }
+        tog.classList.add("tgl-row"); list.appendChild(tog);
+      });
+      box.appendChild(list);
+    });
+    return box;
+  }
+
+
+  /* ---- carte RACKS (visibilité / estomper / isoler — globale sur les salles affichées) — vue 3D ---- */
+  protected racks3dCard(dc: any): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Racks"; box.appendChild(t);
+    const racks = this.displayedDcIds(dc).flatMap((id) => this.store.racksOfDc(id))
+      .sort((a: any, b: any) => (a.datacenter_id !== b.datacenter_id ? this.store.dcName(a.datacenter_id).localeCompare(this.store.dcName(b.datacenter_id)) : 0) || (a.name || "").localeCompare(b.name || ""));
+    if (!racks.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucun rack dans cette salle."; box.appendChild(h); return box; }
+    const quick = document.createElement("div"); quick.className = "dc-card-acts";
+    quick.append(
+      this.btn("Tout afficher", () => { this.hidden3dRacks.clear(); this.render(); }),
+      this.btn("Tout masquer", () => { this.hidden3dRacks = new Set(racks.map((r: any) => r.id)); this.render(); }),
+    );
+    box.appendChild(quick);
+    const list = document.createElement("div"); list.className = "dc-layers";
+    racks.forEach((r: any) => {
+      const row = document.createElement("div"); row.className = "dc-rack-row";
+      const tog = FormControls.toggle(r.name || "(rack)", !this.hidden3dRacks.has(r.id), (v) => { if (v) this.hidden3dRacks.delete(r.id); else this.hidden3dRacks.add(r.id); this.renderThreeD(this.current()); });
+      tog.classList.add("tgl-row");
+      const bFade = this.btn("◐", () => { if (this.fadedRacks.has(r.id)) this.fadedRacks.delete(r.id); else this.fadedRacks.add(r.id); bFade.classList.toggle("active", this.fadedRacks.has(r.id)); this.renderThreeD(this.current()); }, "Estomper (translucide)");
+      bFade.classList.toggle("active", this.fadedRacks.has(r.id));
+      const bIso = this.btn("Isoler", () => this.isolateRack(r.id), "N'afficher que ce rack et le cibler");
+      row.append(tog, bFade, bIso); list.appendChild(row);
+    });
+    box.appendChild(list); return box;
+  }
+
+
+  /* ---- carte CÂBLES (sélection par réseau / inter-DC / liste filtrée) — 3D & Dessus ---- */
+  protected cableCard(dc: any): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const multi = this.displayedDcIds(dc).length > 1;
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Câbles" + (multi ? " (toutes salles affichées)" : ""); box.appendChild(t);
+    const resolved = this.panelCables(dc);
+    const total = this.store.all("cables").length;
+    // créer une route 3D au clic (le prochain clic sur un port libre démarre ; puis waypoints ; puis port terminal)
+    const bRoute = this.btn(this.routeBuild ? "✕ Annuler la route" : "🧵 Créer une route", () => { if (this.routeBuild) this.routeCancel(); else this.routeArm(); }, "Tracer un câble en cliquant les ports + waypoints");
+    bRoute.style.marginBottom = "6px"; box.appendChild(bRoute);
+    box.appendChild(FormControls.toggle("Tout afficher (estompé)", this.showAllCables, (v) => { this.showAllCables = v; this.render(); }, { block: true }));
+    const hint = document.createElement("div"); hint.className = "form-hint";
+    hint.textContent = resolved.length + " câble(s) " + (multi ? "sur les salles affichées" : "raccordable(s) ici") + (total > resolved.length ? " · " + (total - resolved.length) + " hors champ" : "") + ". L'affichage suit la sélection (cases / clic) ; « Tout afficher » montre tout, estompé.";
+    box.appendChild(hint);
+    if (!resolved.length) return box;
+    const addSel = (ids: string[]) => { ids.forEach((id) => this.selCables.add(id)); this.render(); };
+    const delSel = (ids: string[]) => { ids.forEach((id) => this.selCables.delete(id)); this.render(); };
+    const eyePair = (parent: HTMLElement, ids: () => string[], what: string) => {
+      parent.append(
+        this.btn("◉", () => addSel(ids()), "Sélectionner (afficher) " + what),
+        this.btn("◎", () => delSel(ids()), "Désélectionner (masquer) " + what),
+      );
+    };
+    // liens inter-DC
+    const interIds = () => resolved.filter((o) => this.isInterDc(o.cable)).map((o) => o.cable.id);
+    if (interIds().length) {
+      const row = document.createElement("div"); row.className = "dc-layer-row";
+      const itx = document.createElement("span"); itx.className = "grow"; itx.textContent = "Liens inter-DC · " + interIds().length;
+      row.append(itx); eyePair(row, interIds, "les liens inter-DC"); box.appendChild(row);
+    }
+    // réseaux
+    const netsMap = new Map<string, { label: string; color: string | null; count: number }>();
+    resolved.forEach((rc) => { const ids = this.store.cableNetworkIds(rc.cable); (ids.length ? ids : ["__none__"]).forEach((key: string) => { if (!netsMap.has(key)) { const n: any = key !== "__none__" ? this.store.get("networks", key) : null; netsMap.set(key, { label: n ? (n.label || "(réseau)") : "Autre", color: n ? n.color : null, count: 0 }); } netsMap.get(key)!.count++; }); });
+    if (netsMap.size) {
+      const nt = document.createElement("div"); nt.className = "form-hint"; nt.style.marginTop = "6px"; nt.textContent = "Réseaux (◉ sélectionner · ◎ retirer) :"; box.appendChild(nt);
+      const netList = document.createElement("div"); netList.className = "dc-layers";
+      [...netsMap.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label)).forEach(([key, info]) => {
+        const idsOf = () => resolved.filter((rc) => { const ks = this.store.cableNetworkIds(rc.cable); return (ks.length ? ks : ["__none__"]).includes(key); }).map((rc) => rc.cable.id);
+        const row = document.createElement("div"); row.className = "dc-layer-row";
+        const sw = document.createElement("span"); sw.className = "dc-net-sw"; sw.style.background = info.color || "var(--fg-dim)";
+        const txt = document.createElement("span"); txt.className = "grow"; txt.textContent = info.label + " · " + info.count;
+        row.append(sw, txt); eyePair(row, idsOf, "« " + info.label + " »"); netList.appendChild(row);
+      });
+      box.appendChild(netList);
+    }
+    // filtres de liste (équipement + texte) — aident à sélectionner, n'affectent pas l'affichage
+    const eqIds = new Set<string>();
+    resolved.forEach((rc) => { const pa: any = this.store.get("ports", rc.cable.from_port_id), pb: any = this.store.get("ports", rc.cable.to_port_id); if (pa) eqIds.add(pa.equipment_id); if (pb) eqIds.add(pb.equipment_id); });
+    const eqOpts = [...eqIds].map((id) => this.store.get("equipments", id)).filter(Boolean).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+    if (this._cableEqFilter && !eqIds.has(this._cableEqFilter)) this._cableEqFilter = "";
+    const eqSel = FormControls.select([{ value: "", label: "— tous les équipements —" }].concat(eqOpts.map((e: any) => ({ value: e.id, label: (e.name || "(sans nom)") + (multi ? " · " + this.store.dcName(this.store.equipmentDcId(e)) : "") }))), this._cableEqFilter);
+    eqSel.style.cssText = "width:100%;margin-top:8px;font-size:11px"; eqSel.onchange = () => { this._cableEqFilter = eqSel.value; this.render(); };
+    box.appendChild(eqSel);
+    const search = document.createElement("input"); search.type = "text"; search.className = "search-input"; search.placeholder = "Filtrer la liste…"; search.style.cssText = "width:100%;margin:6px 0"; search.value = this._cableSearch;
+    search.oninput = () => { this._cableSearch = search.value; this.renderCableList(listWrap, resolved); };
+    box.appendChild(search);
+    const listActs = document.createElement("div"); listActs.className = "dc-card-acts";
+    listActs.append(
+      this.btn("Sélectionner la liste", () => addSel(this.cableListFiltered(resolved).map((o) => o.rc.cable.id))),
+      this.btn("Retirer la liste", () => delSel(this.cableListFiltered(resolved).map((o) => o.rc.cable.id))),
+    );
+    box.appendChild(listActs);
+    if (this.selCables.size) box.appendChild(this.btn("Effacer la sélection (" + this.selCables.size + ")", () => { this.selCables.clear(); this.render(); }));
+    const listWrap = document.createElement("div"); listWrap.className = "dc-layers"; box.appendChild(listWrap);
+    this.renderCableList(listWrap, resolved);
+    return box;
+  }
+
+
+  /* ---- carte VUE 3D (options d'affichage) ---- */
+  protected view3dOptionsCard(): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Vue 3D";
+    // icône d'aide (navigation 3D) — n'est pas un toggle de repli (collapsible() ignore les clics sur .dc-help)
+    const help = document.createElement("span"); help.className = "settings-help-icon dc-help"; help.textContent = "?";
+    help.setAttribute("role", "img"); help.tabIndex = 0; help.setAttribute("aria-label", "Aide : navigation 3D");
+    help.title = "Glisser GAUCHE = déplacer le modèle · glisser DROIT (ou Maj+glisser) = orbiter (depuis n'importe où) · molette = zoom (vers la souris).\nSurvolez une baie pour son détail, cliquez-la pour l'éditer.\nEn multi-salles : clic GAUCHE sur le SOL d'une salle = l'activer · clic DROIT = menu.\nPoints de vue : boutons Dessus/Face/Arrière/Côté/3D près du recentrage.";
+    t.appendChild(help); box.appendChild(t);
+    const r3 = () => this.renderThreeD(this.current());
+    const redraw = () => { const d = this.current(); if (!d) return; if (this.view === "top") this.renderTop(d); else this.renderThreeD(d); };
+    const tgrid = document.createElement("div"); tgrid.className = "dc-3d-toggle-grid";
+    const tg = (label: string, get: () => boolean, set: (v: boolean) => void, full?: boolean, title?: string) => tgrid.appendChild(FormControls.toggle(label, get(), (v) => { set(v); full ? this.render() : r3(); }, { block: true, title }));
+    tg("Masquer équip. avant", () => this.hideFrontEq, (v) => { this.hideFrontEq = v; });
+    tg("Masquer équip. arrière", () => this.hideRearEq, (v) => { this.hideRearEq = v; });
+    tg("Noms des équipements", () => this.showEqNames, (v) => { this.showEqNames = v; });
+    tg("Ports", () => this.showPorts, (v) => { this.showPorts = v; }, true);
+    tg("Images de façade", () => this.showFaceImages, (v) => { this.showFaceImages = v; });
+    tg("Capots des baies", () => this.showRackSides, (v) => { this.showRackSides = v; });
+    tg("Portes des baies", () => this.showDoors, (v) => { this.showDoors = v; });
+    tg("Emplacements libres", () => this.showPlaceholders, (v) => { this.showPlaceholders = v; });
+    tg("Grilles d'étage", () => this.showFloorGrid, (v) => { this.showFloorGrid = v; });
+    tg("Marqueurs", () => this.showWaypoints, (v) => { this.showWaypoints = v; }, true, "Affiche/masque les MARQUEURS de waypoint (pins, losanges aux extrémités des chemins/brosses, OOB). N'affecte pas le routage des câbles.");
+    tg("Brosses et passe-câbles", () => this.showConduits, (v) => { this.showConduits = v; }, true, "Affiche/masque la GÉOMÉTRIE des conduits : bacs des chemins de câbles (passe-câbles) et coques des brosses de brassage.");
+    tg("Centre de rotation", () => this.showPivot, (v) => { this.showPivot = v; });
+    tg("Repères d'orientation", () => this.showOrientMarks, (v) => { this.showOrientMarks = v; });
+    // sortie ⊥ des ports (stub de 20 mm le long de la normale) — affecte le tracé 3D ET Dessus
+    tgrid.appendChild(FormControls.toggle("Sortie ⊥ des ports (20 mm)", this.cablePortNormal, (v) => { this.cablePortNormal = v; redraw(); }, { block: true, title: "Les câbles quittent leurs ports perpendiculairement à la face sur 20 mm, puis rejoignent le tracé comme via un waypoint." }));
+    // aperçu de route jusqu'à la souris (re-rendu throttlé) — désactiver si souci de perf
+    tgrid.appendChild(FormControls.toggle("Aperçu de route → souris", this.routePreviewToMouse, (v) => { this.routePreviewToMouse = v; if (!v && this.routeBuild) this.routeBuild.mouse = null; r3(); }, { block: true, title: "Pendant la création d'une route, prolonge l'aperçu jusqu'au curseur. Désactivez en cas de souci de performance." }));
+    box.appendChild(tgrid);
+    // coloration des équipements
+    const colorRow = document.createElement("div"); colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px";
+    const colTxt = document.createElement("span"); colTxt.className = "grow"; colTxt.textContent = "Coloration";
+    const colSel = FormControls.select([{ value: "face", label: "Par face" }, { value: "group", label: "Par groupe" }, { value: "type", label: "Par type" }], this.colorMode);
+    colSel.onchange = () => { this.colorMode = colSel.value as any; r3(); };
+    colorRow.append(colTxt, colSel); box.appendChild(colorRow);
+    // arrondi des câbles (slider)
+    box.appendChild(this.slider("Arrondi des câbles", this.cableSplineK, 0, 0.32, 0.01, (v) => v.toFixed(2), (v) => { this.cableSplineK = v; redraw(); }));
+    // taille des marqueurs de waypoint + connecteurs de port (1 = défaut = milieu du range)
+    box.appendChild(this.slider("Taille marqueurs / ports", this.markerScale, 0.25, 1.75, 0.05, (v) => Math.round(v * 100) + " %", (v) => { this.markerScale = v; redraw(); }));
+    // culling de distance (slider)
+    box.appendChild(this.slider("Masquer ports/U au-delà", this.cullDistanceM, 1, 60, 1, (v) => Math.round(v) + " m", (v) => { this.cullDistanceM = Math.max(1, Math.min(60, Math.round(v))); }, () => r3()));
+    box.appendChild(this.btn("Recentrer sur la salle", () => { this.camTarget = null; this.hidden3dRacks.clear(); this.fadedRacks.clear(); this.scale = null; this.render(); }));
+    return box;
+  }
+
+}
