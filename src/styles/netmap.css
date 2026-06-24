@@ -393,7 +393,7 @@
   .palette-swatch:hover { border-color: var(--fg); transform: scale(1.08); }
   .palette-swatch.selected { border-color: var(--fg); }
   .palette-swatch.selected::after {
-    content: "âœ“";
+    content: "✓";
     position: absolute; inset: 0;
     display: flex; align-items: center; justify-content: center;
     color: #fff; font-size: 12px; text-shadow: 0 0 3px #000;
