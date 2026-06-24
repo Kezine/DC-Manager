@@ -547,27 +547,50 @@ export class DatacenterView {
     if (this._raf3d) return;
     this._raf3d = requestAnimationFrame(() => { this._raf3d = 0; this.renderThreeD(dc); });
   }
-  /** Recentre le pivot sur le centroïde visible SANS bouger l'image (orbite naturelle). */
+  /** Recentre le pivot (camTarget) sur le centroïde VISIBLE sans bouger l'image (orbite naturelle).
+      Repli (rien de visible) : point monde au centre de l'écran. Réplique de `_recenterPivot3D` (réf.). */
   private recenterPivot3D(): void {
-    if (!this.svg || this.scale == null) { this.applyTransform(); return; }
-    const dc = this.current(); if (!dc) { this.applyTransform(); return; }
+    if (this.view !== "3d" || !this.svg || this.scale == null) { this.applyTransform(); return; }
+    const dc = this.current();   // peut être null (multi-salles vue d'ensemble) — camCenter gère via _multi
     const target = this.visibleCentroidWorld(dc);
-    if (target) {
-      const c = this.camCenter(dc), q = this.project3DCam(target, c);
-      this.tx = this.tx + q.h * this.scale; this.ty = this.ty + q.v * this.scale;
-      this.camTarget = { x: target.x, y: target.y, z: target.z };
-    }
+    if (target) { this.setPivotKeepingView(target, dc); return; }
+    const SW = this.stage.clientWidth || 900, SH = this.stage.clientHeight || 560;
+    const c = this.camCenter(dc);
+    const Hc = (SW / 2 - this.tx) / this.scale, Vc = (SH / 2 - this.ty) / this.scale;
+    this.camTarget = this.unproject3DCam(Hc, Vc, 0, c);
+    this.tx = SW / 2; this.ty = SH / 2;
     this.renderThreeD(dc);
   }
+  /** Déplace le PIVOT vers le point monde P SANS bouger l'image (recale tx/ty sur sa position écran actuelle). */
+  private setPivotKeepingView(P: Vec3, dc: any): void {
+    const c = this.camCenter(dc), q = this.project3DCam(P, c);
+    this.tx = this.tx + q.h * this.scale!; this.ty = this.ty + q.v * this.scale!;
+    this.camTarget = { x: P.x, y: P.y, z: P.z };
+    this.renderThreeD(dc);
+  }
+  /** Centroïde MONDE des centres de gravité (baies + équipements libres) AFFICHÉS et DANS le viewport.
+      Gère mono (coords locales) ET multi-salles (via roomToWorld par salle). null si rien de visible. */
   private visibleCentroidWorld(dc: any): Vec3 | null {
-    if (this.scale == null) return null;
+    if (this.view !== "3d" || this.scale == null) return null;
     const c = this.camCenter(dc);
     const SW = this.stage.clientWidth || 900, SH = this.stage.clientHeight || 560;
     const inView = (wp: Vec3) => { const q = this.project3DCam(wp, c); const sx = this.tx + q.h * this.scale!, sy = this.ty + q.v * this.scale!; return sx >= 0 && sx <= SW && sy >= 0 && sy <= SH; };
     let ax = 0, ay = 0, az = 0, n = 0;
-    this.racks(dc.id).filter((r) => !this.hidden3dRacks.has(r.id)).forEach((r) => {
-      const wp = { x: (r.dc_x != null ? r.dc_x : (r.width_mm || RACK_WIDTH_DEFAULT) / 2), y: (r.dc_y != null ? r.dc_y : (r.depth || RACK_DEPTH_DEFAULT) / 2), z: RackGeometry.physHeight(r) / 2 };
-      if (inView(wp)) { ax += wp.x; ay += wp.y; az += wp.z; n++; }
+    const add = (wp: Vec3) => { if (inView(wp)) { ax += wp.x; ay += wp.y; az += wp.z; n++; } };
+    const rooms = this._multi ? this._multi.rooms : null;
+    const toWorld = (room: any, p: Vec3) => (room ? FloorLayout.roomToWorld(room, p) : p);
+    this.displayedDcIds(dc).forEach((id) => {
+      const room = rooms ? rooms.find((rm: any) => rm.dc.id === id) : null;
+      if (rooms && !room) return;   // multi : salle non posée (masquée) → ignorée
+      this.store.racksOfDc(id).filter((r: any) => !this.hidden3dRacks.has(r.id)).forEach((r: any) => {
+        const local = { x: (r.dc_x != null ? r.dc_x : (r.width_mm || RACK_WIDTH_DEFAULT) / 2), y: (r.dc_y != null ? r.dc_y : (r.depth || RACK_DEPTH_DEFAULT) / 2), z: RackGeometry.physHeight(r) / 2 };
+        add(toWorld(room, local));
+      });
+      this.store.freeEquipsOfDc(id).forEach((e: any) => {
+        if (e.dc_x == null || e.dc_y == null) return;
+        const bx = FreeEquipGeometry.box(e);
+        add(toWorld(room, { x: e.dc_x, y: e.dc_y, z: (bx.z || 0) + bx.h / 2 }));
+      });
     });
     return n ? { x: ax / n, y: ay / n, z: az / n } : null;
   }
