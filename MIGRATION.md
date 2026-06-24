@@ -15,9 +15,10 @@ jamais casser la base existante.
 3. **Strangler pattern.** On extrait couche par couche, de la plus pure (modèle)
    vers la plus couplée au DOM (vues). À chaque étape, `npm run typecheck` +
    `npm run build` doivent rester verts.
-4. **Filet de régression conservé.** `Tests/run.js` (213 tests) continue de
-   tourner contre le dernier `.html` livré tant que la logique n'est pas portée ;
-   il sera ensuite reciblé sur les modules compilés.
+4. **Filet de régression.** Pendant la migration, `Tests/run.js` (213 tests) tournait contre
+   le dernier `.html` livré. ✅ **Migration terminée → harnais legacy RETIRÉ** ; la référence
+   unique est le filet **MODULES** (`npm run test:modules`, **337 tests** sur le TS compilé).
+   Les `.html` v171/v172 sont **conservés** (archive de référence) mais ne sont plus testés.
 5. **Sortie mono-fichier préservée.** `npm run build` réinjecte le bundle dans le
    HTML (`html-inline-script-webpack-plugin`) → un seul `dist/netmap.html`
    autonome, ce qui garde fonctionnel l'export « viewer standalone » (qui lit
@@ -47,7 +48,6 @@ Les deux sont des RÉÉCRITURES du rendu ; la géométrie pure portée (`Project
 | `npm run build`     | bundle de production → `dist/netmap.html` (un seul fichier) |
 | `npm run dev`       | webpack-dev-server (HMR) — **requiert Node ≥ 20**           |
 | `npm run watch`     | rebuild incrémental (Node 19 OK)                            |
-| `npm run test:legacy` | harnais de régression sur le dernier HTML livré           |
 
 > Node installé ici : v19.9.0. La compilation marche ; `webpack serve` (dev) veut
 > Node ≥ 20 (`npm run watch` reste utilisable en attendant).
@@ -535,12 +535,20 @@ src/
   - [x] **Document de démo retiré** : plus d'auto-seed au boot — l'app démarre sur un document
         propre (vide hors catalogues) derrière l'écran d'accueil ; helper `hasUserData()` pour la
         garde « Nouveau ». **Shell/bootstrap COMPLET** (hors retrait du monolithe, ci-dessous).
-  - [ ] Retrait du mono-fichier legacy : VRAI dernier pas — le monolithe reste la RÉFÉRENCE de
-        portage de `DatacenterView` et la cible du harnais de régression legacy. À supprimer
-        une fois `DatacenterView` portée et la régression recalée sur les modules.
-- [ ] **Phase 5 — Vues** (`ListController`, `GraphView`, `DatacenterView`).
-- [ ] **Phase 6 — Shell / UI.** Migration du `<head>`/`<style>`/`<body>` et du
-      bootstrap ; câblage final ; retrait du mono-fichier.
+  - [x] **Retrait du harnais legacy (régression recalée sur les modules)** : `Tests/run.js` +
+        `Tests/suites/01..12` + script `test:legacy` SUPPRIMÉS ; le filet **modules** (337 tests)
+        est l'unique référence. Les monolithes `netmap-v171/v172.html` sont **CONSERVÉS** (archive
+        de référence, sur décision) mais ne sont plus la cible de tests ni la référence de portage.
+- [x] **Phase 5 — Vues** : `ListView` (ex-ListController), `GraphView`, `DatacenterView` — COMPLÈTES
+      (cf. sous-phases 5b / 5c détaillées ci-dessus).
+- [x] **Phase 6 — Shell / UI** : `<head>`/CSS/`<body>` + bootstrap + chrome migrés ; câblage final
+      fait. (Le retrait du mono-fichier `.html` n'est PAS effectué — fichiers conservés volontairement.)
+
+> ### ✅ MIGRATION TERMINÉE
+> Toutes les phases (0–6) sont portées. Référence de tests : `npm run test:modules` (**337/337**) ;
+> `npm run typecheck` + `npm run build` verts. Les `.html` legacy restent sur disque comme archive
+> (non testés, non référencés par le code). Au-delà du périmètre de migration, des fonctionnalités
+> NET-NEW ont été ajoutées (inventaire de spares, entité Sites + décommissionnement/déménagement).
 
 ## État actuel (Phases 1–2)
 
@@ -550,10 +558,9 @@ HTML v172). `src/app/main.ts` est un point d'entrée provisoire qui instancie le
 registre + un adapter pour prouver la chaîne — il sera remplacé par le vrai
 bootstrap en phase 6.
 
-Le filet de régression au niveau **modules** arrive en phase 3 (le Store est la
-première couche dont le comportement justifie des tests directs ; la couche
-données y sera couverte au passage). D'ici là, `Tests/run.js` continue de valider
-le comportement contre le dernier HTML livré.
+Le filet de régression au niveau **modules** (`npm run test:modules`, 337 tests) est désormais
+**la référence unique** ; l'ancien `Tests/run.js` (qui validait contre le `.html` monolithique) a
+été **retiré** à la fin de la migration.
 
 ---
 
