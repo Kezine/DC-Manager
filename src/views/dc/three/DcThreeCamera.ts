@@ -101,7 +101,10 @@ export class DcThreeCamera extends DcThreeBase {
     if (!cam || !dom || !this.content || this.perspective) return;   // ortho uniquement (en perspective, déplacer la cible re-zoome)
     this.ndc.set(0, 0);   // centre de l'écran (NDC 0,0)
     this.raycaster.setFromCamera(this.ndc, cam);
-    const hits = this.raycaster.intersectObjects(this.content.children, true).filter((h) => this.hitVisible(h.object) && (h as any).face);
+    // pivot = CONTENU de salle (sol de salle, baies, équipements) UNIQUEMENT — on EXCLUT le décor d'étage
+    // (plans/grilles d'étage), qui ne doit jamais influencer le centre de rotation, visible ou masqué.
+    const groups = [this.gDecor, this.gRacks, this.gFree].filter(Boolean) as THREE.Object3D[];
+    const hits = this.raycaster.intersectObjects(groups, true).filter((h) => this.hitVisible(h.object) && (h as any).face);
     const P = new THREE.Vector3();
     if (hits.length) P.copy(hits[0].point);
     else if (!this.raycaster.ray.intersectPlane(this._groundPlane, P)) return;   // repli : intersection avec le sol z=0
