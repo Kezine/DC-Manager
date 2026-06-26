@@ -801,6 +801,10 @@ async function boot(): Promise<void> {
   shell.setFileAccessMode(prefs.fileAccessMode);
   shell.setDebugLog(prefs.debugLog); Log.setEnabled(prefs.debugLog);
   shell.setRestMode(REST_MODE);   // mode API : masque les contrôles fichier (cf. docs/rest-migration.md)
+  // mode API : récupère l'utilisateur courant via le SSO (proxifié par le backend) → pastille « connecté en tant que »
+  if (REST_MODE && adapter instanceof RestAdapter) {
+    adapter.me().then((u) => { shell.setUser(u || null); flog("me()", u); }).catch(() => shell.setUser(null));
+  }
 
   // ---- état save-state ----
   // ---- barre de statut / undo-redo (cohérence avec l'état du store) ----

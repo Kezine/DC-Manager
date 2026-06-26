@@ -83,6 +83,7 @@ export class Shell {
   private debugLogChk!: HTMLInputElement;
   private fileActionsEl!: HTMLElement;            // boutons fichier de la topbar (masqués en mode API)
   private fileOnlySections: HTMLElement[] = [];   // sections de réglages propres au mode fichier (auto-save, accès fichiers)
+  private userChip!: HTMLElement;                 // pastille « connecté en tant que … » (mode API)
   private autosaveChk!: HTMLInputElement;
   private autosaveIntervalSel!: HTMLSelectElement;
   private autosaveStatusEl!: HTMLElement;
@@ -134,6 +135,9 @@ export class Shell {
     this.undoBtn = iconBtn("Annuler (Ctrl+Z)", '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-5"/>', () => this.host.onUndo?.()); this.undoBtn.disabled = true;
     this.redoBtn = iconBtn("Rétablir (Ctrl+Maj+Z)", '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h5"/>', () => this.host.onRedo?.()); this.redoBtn.disabled = true;
     actions.append(this.undoBtn, this.redoBtn);
+    // pastille utilisateur (mode API) : « connecté en tant que … » — masquée par défaut
+    this.userChip = document.createElement("span"); this.userChip.className = "user-chip"; this.userChip.style.display = "none";
+    actions.appendChild(this.userChip);
     actions.appendChild(this.buildSettingsMenu());
 
     topbar.append(brand, tabs, actions);
@@ -386,6 +390,18 @@ export class Shell {
   setDataSource(value: string): void { this.dataSourceSel.value = value; }
   setFileAccessMode(value: string): void { this.fileAccessSel.value = value; }
   setDebugLog(on: boolean): void { this.debugLogChk.checked = on; }
+  /** Pastille utilisateur (mode API). `user` = objet du SSO (name/email/login) ; null = non connecté ; undefined = masquer. */
+  setUser(user: { name?: string; email?: string; login?: string } | null | undefined): void {
+    if (!this.userChip) return;
+    if (user === undefined) { this.userChip.style.display = "none"; return; }
+    this.userChip.style.display = "";
+    if (user) {
+      const who = user.name || user.login || user.email || "utilisateur";
+      this.userChip.textContent = "👤 " + who; this.userChip.title = "Connecté en tant que " + who; this.userChip.classList.remove("user-chip--off");
+    } else {
+      this.userChip.textContent = "👤 non connecté"; this.userChip.title = "Aucune session SSO active"; this.userChip.classList.add("user-chip--off");
+    }
+  }
   /** Mode API : masque les contrôles propres au mode fichier (actions topbar + réglages auto-save/accès fichiers). */
   setRestMode(on: boolean): void {
     if (this.fileActionsEl) this.fileActionsEl.style.display = on ? "none" : "contents";

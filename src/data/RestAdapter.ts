@@ -92,13 +92,22 @@ export class RestAdapter extends DataAdapter {
     await this._send("DELETE", "/" + collection + "/" + encodeURIComponent(id));
   }
 
+  /* Lot APPLIQUÉ ATOMIQUEMENT côté serveur (1 transaction SQLite) — remplace l'ancienne boucle d'appels par
+     entité (non atomique). Le serveur applique deletes → updates → creates → meta en tout-ou-rien. */
   async transact(tx: Transaction): Promise<null> {
-    for (const d of (tx.deletes || [])) await this._send("DELETE", "/" + d.collection + "/" + encodeURIComponent(d.id));
-    for (const u of (tx.updates || [])) await this._send("PUT", "/" + u.collection + "/" + encodeURIComponent(u.id), u.record);
-    for (const c of (tx.creates || [])) await this._send("POST", "/" + c.collection, c.record);
-    if (tx.meta) await this._send("PUT", "/meta", tx.meta);
+    await this._send("POST", "/transact", {
+      creates: tx.creates || [], updates: tx.updates || [], deletes: tx.deletes || [],
+      ...(tx.meta ? { meta: tx.meta } : {}),
+    });
     return null;
   }
   async saveMeta(meta: Record<string, any>): Promise<unknown> { return this._send("PUT", "/meta", meta); }
   async replaceAll(state: Snapshot): Promise<unknown> { return this._send("PUT", "/snapshot", state); }
+
+  /* Utilisateur courant — proxifié au SSO par le backend. Renvoie l'objet user, ou null si non connecté / erreur.
+     L'app ne gère PAS l'auth : c'est le SSO qui valide (cf. docs/rest-migration.md). */
+  async me(): Promise<any | null> {
+    try { return await this._send("GET", "/me", undefined, { allow404: true }); }
+    catch (_) { return null; }
+  }
 }

@@ -94,15 +94,19 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
 
 ## 5. Plan par phases
 
-- **P0 — Rendre REST sélectionnable & instancié** *(en cours)*
+- **P0 — Rendre REST sélectionnable & instancié** ✅ *(fait)*
   - Config injectée (`window.__NETMAP_CONFIG__`) + détection au boot.
   - Branche d'instanciation `RestAdapter` (même origine, `credentials:"include"`)
     vs `BrowserStorageAdapter`.
-  - Drapeau `localMode` qui **conditionne** la machinerie fichier
-    (accueil, ouvrir/enregistrer, auto-save, compagnon, TabChannel).
-  - En mode API : pas de `replaceAll`/snapshot à l'ouverture.
-- **P1 — Cœur du contrat** : `POST /transact` atomique ; ouverture = fetch ;
-  `/me` (auth pass-through) ; figer `q`/`where`/pagination/tri.
+  - Mode API **conditionne** la machinerie fichier (accueil, ouvrir/enregistrer,
+    auto-save, compagnon, TabChannel masqués/désactivés).
+  - En mode API : pas d'ensemencement (`newDocument`) → pas de `/snapshot` à l'ouverture.
+- **P1 — Cœur du contrat** *(client fait ; reste = backend)*
+  - ✅ `RestAdapter.transact` = **un seul `POST /transact`** (lot atomique côté serveur).
+  - ✅ `RestAdapter.me()` → `GET /me` (user SSO) + pastille « connecté en tant que »
+    dans la topbar (mode API).
+  - ⏳ Backend : implémenter `POST /transact` (1 transaction SQLite) et `GET /me`
+    (proxy SSO). Figer `q`/`where`/pagination/tri (cf. §4).
 - **P2 — Images** : backend d'images derrière l'adapter ; `ImageStore`
   délègue ; endpoints blob ; `.nmfb` confiné au mode fichier.
 - **P3 — Concurrence** : ETag/version + conflits UX ; canal live (SSE/WS) ;
