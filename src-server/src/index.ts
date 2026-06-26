@@ -1,11 +1,11 @@
-import express, { type Request, type Response } from "express";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
-import { openDb, type SqliteCtor } from "./db.js";
-import { createApi } from "./api.js";
+import { Repository, type SqliteCtor } from "./db.js";
+import { Server } from "./server.js";
 
+/* Bootstrap : lit l'environnement, ouvre le dépôt (driver better-sqlite3) et démarre le serveur. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, "..", "data", "netmap.db");
@@ -13,31 +13,5 @@ const CLIENT_DIR = process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "d
 const API_BASE = process.env.API_BASE || "/api";
 
 fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
-const db = openDb(DB_FILE, Database as unknown as SqliteCtor);
-
-const app = express();
-app.disable("x-powered-by");
-app.use(express.json({ limit: "128mb" }));   // /snapshot et /transact peuvent être volumineux
-
-app.get("/healthz", (_req, res) => res.json({ ok: true }));
-app.use(API_BASE, createApi(db));
-app.use(API_BASE, (_req, res) => res.status(404).json({ error: "endpoint inconnu" }));   // 404 API (avant le fallback HTML)
-
-/* --- service du CLIENT (HTML autonome) avec injection de window.__NETMAP_CONFIG__ ---
-   La prod webpack produit un seul fichier dist/netmap.html (JS+CSS inlinés) : on injecte
-   la config dans <head> AVANT le bundle pour activer le mode API sans configuration utilisateur. */
-const HTML_FILE = path.join(CLIENT_DIR, "netmap.html");
-function serveClient(_req: Request, res: Response): void {
-  let html: string;
-  try { html = fs.readFileSync(HTML_FILE, "utf8"); }
-  catch { res.status(503).send("Client introuvable (" + HTML_FILE + "). Lancez `npm run build` dans NetMap/."); return; }
-  const cfg = `<script>window.__NETMAP_CONFIG__=${JSON.stringify({ mode: "api", apiBaseUrl: API_BASE })};</script>`;
-  html = html.replace(/<head([^>]*)>/i, (_m, attrs) => `<head${attrs}>${cfg}`);
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.send(html);
-}
-app.get(["/", "/netmap.html", "/index.html"], serveClient);
-app.use(express.static(CLIENT_DIR, { index: false }));   // assets éventuels (build multi-fichiers en dev)
-app.get("*", serveClient);                               // fallback SPA → HTML client
-
-app.listen(PORT, () => console.log(`NetMap server → http://localhost:${PORT}  (api ${API_BASE}, db ${DB_FILE})`));
+const repo = Repository.open(DB_FILE, Database as unknown as SqliteCtor);
+new Server({ repo, clientDir: CLIENT_DIR, apiBase: API_BASE }).listen(PORT);

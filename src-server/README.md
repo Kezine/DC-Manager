@@ -43,6 +43,14 @@ Sans `SSO_URL`, l'auth est en **mode dev** (utilisateur factice `dev`).
   tableaux (`network_ids`, `waypoint_ids`) → appartenance.
 - tri par `created_date` croissant.
 
+## Architecture (OO)
+- **`Schema`** (`constants.ts`) — collections, champs-tableaux, `normSearch` (statique).
+- **`Repository`** (`db.ts`) — TOUT l'accès SQLite (CRUD, list, meta, transact, snapshot,
+  images). Driver injecté (`Repository.open(file, Database)`) → testable sans module natif.
+- **`Api`** (`api.ts`) — couche HTTP : traduit les routes Express vers le `Repository`.
+- **`Server`** (`server.ts`) — application Express (API + service du client) ;
+  `index.ts` = bootstrap (env → `Repository.open` → `Server.listen`).
+
 ## Modèle de données
 Une table SQLite par collection : `(id, data JSON, search, created_date)`. Le
 serveur stocke les enregistrements bruts (le client hydrate). `meta` = 1 ligne.

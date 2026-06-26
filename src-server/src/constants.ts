@@ -1,21 +1,22 @@
-/* Constantes PARTAGÉES avec le client (à garder en phase avec
-   src/models/EntityRegistry.ts, src/data/config.ts, src/core/Text.ts). */
+/* Schéma PARTAGÉ avec le client (à garder en phase avec src/models/EntityRegistry.ts,
+   src/data/config.ts, src/core/Text.ts). Classe utilitaire (membres statiques). */
+export class Schema {
+  // Collections du modèle (= EntityRegistry.COLLECTIONS, même ordre).
+  static readonly COLLECTIONS: readonly string[] = [
+    "equipments", "ports", "aggregates", "cables", "networks", "groups", "racks",
+    "rackItems", "portTypes", "cableTypes", "cableBundles", "datacenters",
+    "waypoints", "floors", "ipNetworks", "ipAddresses", "dhcpRanges", "spares", "sites",
+  ];
+  // Champs TABLEAU indexés (where = appartenance) — cf. INDEX_SPEC côté client.
+  static readonly ARRAY_FIELDS: ReadonlySet<string> = new Set(["network_ids", "waypoint_ids"]);
+  static readonly PAGE_SIZE_DEFAULT = 25;
 
-// Collections du modèle (= EntityRegistry.COLLECTIONS, même ordre).
-export const COLLECTIONS: string[] = [
-  "equipments", "ports", "aggregates", "cables", "networks", "groups", "racks",
-  "rackItems", "portTypes", "cableTypes", "cableBundles", "datacenters",
-  "waypoints", "floors", "ipNetworks", "ipAddresses", "dhcpRanges", "spares", "sites",
-];
-const COLLECTION_SET = new Set(COLLECTIONS);
-export const isCollection = (c: string): boolean => COLLECTION_SET.has(c);
+  private static readonly COLLECTION_SET = new Set(Schema.COLLECTIONS);
+  static isCollection(c: string): boolean { return Schema.COLLECTION_SET.has(c); }
+  static isArrayField(f: string): boolean { return Schema.ARRAY_FIELDS.has(f); }
 
-// Champs TABLEAU indexés (where = appartenance) — cf. INDEX_SPEC côté client.
-export const ARRAY_FIELDS = new Set<string>(["network_ids", "waypoint_ids"]);
-
-export const PAGE_SIZE_DEFAULT = 25;
-
-/** Normalisation de recherche — parité STRICTE avec Text.normSearch (client). */
-export function normSearch(s: unknown): string {
-  return String(s == null ? "" : s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  /** Normalisation de recherche — parité STRICTE avec Text.normSearch (client). */
+  static normSearch(s: unknown): string {
+    return String(s == null ? "" : s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  }
 }
