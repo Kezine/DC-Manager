@@ -18,7 +18,7 @@ import { FloorLayout } from "../../../geometry/FloorLayout";
 import type { DatacenterHost } from "../shared";
 
 /** Couleurs de thème lues une fois depuis les variables CSS (fallbacks si absentes). */
-export interface Theme { bg: number; floor: number; grid: number; line: number; rack: number; fg: number; front: number; }
+export interface Theme { bg: number; floor: number; grid: number; line: number; rack: number; fg: number; front: number; doorMetal: number; doorPanel: number; }
 
 /** Placement d'une salle dans le repère MONDE : centre (ox,oy,oz), orientation o (rad), dims (w×d). */
 export interface RoomDesc { dcId: string; ox: number; oy: number; oz: number; o: number; w: number; d: number; }
@@ -165,7 +165,7 @@ export class DcThreeBase {
 
   /* ---- thème (variables CSS → couleurs Three) ---- */
   protected readTheme(): Theme {
-    const def: Theme = { bg: 0x0e1116, floor: 0x1b2230, grid: 0x2c3647, line: 0x3a4658, rack: 0x445066, fg: 0xc8d2e0, front: 0x4ea1ff };
+    const def: Theme = { bg: 0x0e1116, floor: 0x1b2230, grid: 0x2c3647, line: 0x3a4658, rack: 0x445066, fg: 0xc8d2e0, front: 0x4ea1ff, doorMetal: 0x59616e, doorPanel: 0x767f8d };
     if (typeof document === "undefined") return def;
     const cs = getComputedStyle(document.body);
     const col = (name: string, fallback: number): number => {
@@ -173,14 +173,19 @@ export class DcThreeBase {
       const c = v ? this.parseColor(v) : NaN;
       return isFinite(c) ? c : fallback;
     };
+    const bg = col("--bg", 0x0a0a0a);
+    const light = (((bg >> 16) & 255) + ((bg >> 8) & 255) + (bg & 255)) / 3 > 128;   // thème clair = fond lumineux
     return {
-      bg: col("--bg-1", 0x0e1116),
+      bg,
       floor: col("--bg-2", 0x1b2230),
       grid: col("--line", 0x2c3647),
       line: col("--line", 0x3a4658),
       rack: col("--bg-3", 0x445066),
       fg: col("--fg", 0xc8d2e0),
       front: col("--accent", 0x4ea1ff),
+      // portes de baie : métal + panneau perforé, déclinés clair/sombre (sinon trop sombres sur fond clair).
+      doorMetal: light ? 0x868d97 : 0x59616e,
+      doorPanel: light ? 0x9aa0aa : 0x767f8d,
     };
   }
 

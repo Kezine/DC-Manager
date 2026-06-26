@@ -523,7 +523,7 @@ export class DcThreeScene extends DcThreeCamera {
     const xHinge = left ? (-hw + clr) : (hw - clr);   // charnières décalées de T (axe de rotation)
     const FRAME = Math.min(45, Math.max(20, dw * 0.07));
     const pick = { type: "rack", id: r.id, door: true };
-    const metal = () => new THREE.MeshStandardMaterial({ color: 0x59616e, metalness: 0.65, roughness: 0.45 });
+    const metal = () => new THREE.MeshStandardMaterial({ color: theme.doorMetal, metalness: 0.65, roughness: 0.45 });
     // PAROIS de la CAVITÉ (porte bombée) : caisson reliant la face de baie au vantail → respecte hollow_mm.
     if (cavity > 0) {
       const ymid = sgn * (hd + cavity / 2), WT = Math.min(FRAME, 26);
@@ -546,7 +546,7 @@ export class DcThreeScene extends DcThreeCamera {
     let panelMat: THREE.MeshStandardMaterial;
     if (dr.hollow) {
       const perf = this.perfTexture();
-      panelMat = new THREE.MeshStandardMaterial({ color: 0x767f8d, metalness: 0.7, roughness: 0.5, side: THREE.DoubleSide, alphaMap: perf || undefined, alphaTest: perf ? 0.5 : 0 });
+      panelMat = new THREE.MeshStandardMaterial({ color: theme.doorPanel, metalness: 0.7, roughness: 0.5, side: THREE.DoubleSide, alphaMap: perf || undefined, alphaTest: perf ? 0.5 : 0 });
     } else {
       panelMat = new THREE.MeshStandardMaterial({ color: 0xaecadf, metalness: 0.1, roughness: 0.07, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false });
     }
@@ -927,6 +927,23 @@ export class DcThreeScene extends DcThreeCamera {
 
   /** Recharge la salle (changement de données / de salle). */
   rebuild(dcId: string | null): void { this.build(dcId); this.resize(); this.request(); }
+
+  /** Changement de THÈME sans reconstruction : relit les variables CSS et REMAPPE les couleurs des matériaux
+      dérivées du thème (old→new) + le fond. Les câbles (couleurs réseau) et les textes ne sont pas touchés. */
+  applyThemeChange(): void {
+    if (!this.scene) return;
+    const old = this.theme, neu = this.readTheme();
+    this.scene.background = new THREE.Color(neu.bg);
+    const remap = new Map<number, number>();
+    (["bg", "floor", "grid", "line", "rack", "fg", "front", "doorMetal", "doorPanel"] as const).forEach((k) => remap.set((old as any)[k], (neu as any)[k]));
+    // NB : on IGNORE les matériaux TEXTURÉS BLANCS (étiquettes nom/étage, images de façade) — leur teinte blanche
+    // par défaut entre en collision avec `theme.floor` = #ffffff en thème CLAIR, ce qui les recolorerait à tort.
+    const apply = (m: any) => { if (!m || !m.color) return; if (m.map && m.color.getHex() === 0xffffff) return; if (remap.has(m.color.getHex())) m.color.setHex(remap.get(m.color.getHex()) as number); };
+    // on évite les groupes de CÂBLES (couleurs réseau, indépendantes du thème).
+    [this.gDecor, this.gRacks, this.gFree, this.gWaypoints, this.gFloorDecor].forEach((grp) => grp && grp.traverse((o: any) => { const m = o.material; if (!m) return; (Array.isArray(m) ? m : [m]).forEach(apply); }));
+    this.theme = neu;
+    this.request();
+  }
 
 
   /* ============================ OUTILS interactifs (mesure / routage) ============================

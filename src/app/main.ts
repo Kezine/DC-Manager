@@ -367,7 +367,7 @@ async function boot(): Promise<void> {
     onSaveAs: () => { doSaveAs(); },
     onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
     onRedo: () => { void doRedo(); },
-    onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); },
+    onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); dcView.onThemeChanged(); },
     onResetViewPrefs: () => {
       try { Object.keys(window.localStorage).filter((k) => k.startsWith("netmap.view3d")).forEach((k) => window.localStorage.removeItem(k)); } catch (_) { /* noop */ }
       dcView.resetView(); shell.refreshActive();   // force une restauration aux défauts à la prochaine activation

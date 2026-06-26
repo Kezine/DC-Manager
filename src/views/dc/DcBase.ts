@@ -515,6 +515,10 @@ export class DcBase {
   /** Oublie l'état restauré → la prochaine activation repart des défauts (après reset des préférences). */
   resetView(): void { this._restoredKey = null; }
 
+  /** Changement de thème : les vues 2D (SVG/CSS) se mettent à jour seules ; le moteur 3D WebGL relit le thème et
+      remappe les couleurs de ses matériaux EN PLACE (pas de reconstruction de la scène). */
+  onThemeChanged(): void { if (this._three) this._three.applyThemeChange(); }
+
 
   /* ---- persistance de l'état de vue (par fichier, localStorage) ---- */
   protected viewStateKey(): string { return "netmap.view3d." + ((this.store.meta && this.store.meta.fileId) ? this.store.meta.fileId : "__nofile"); }
