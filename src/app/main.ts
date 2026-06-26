@@ -82,7 +82,7 @@ async function boot(): Promise<void> {
   const rememberHandle = (handle: any, name: string) => { if (!handle) return; lastRec = { handle, name: name || handle.name || "" }; void handleStore.putLast(handle, lastRec.name); };
   /** Mode « accès dossier » actif (réglage + FS API) : un seul grant de dossier couvre le .json et son compagnon .nmfb. */
   const dirMode = (): boolean => prefs.fileAccessMode === "directory" && HAS_FS_API;
-  const rememberDir = (dir: any, jsonName: string) => { currentDirHandle = dir; void handleStore.putDir(dir, jsonName); };
+  const rememberDir = async (dir: any, jsonName: string): Promise<void> => { currentDirHandle = dir; await handleStore.putDir(dir, jsonName); };   // AWAIT : la persistance doit être garantie avant un éventuel reload
 
   const modal = new Modal();
   const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { refreshChrome(); } };   // mutation modèle déjà suivie par la révision (store.onChange)
@@ -264,7 +264,7 @@ async function boot(): Promise<void> {
       const fh = await dirRec.handle.getFileHandle(dirRec.name);
       currentDirHandle = dirRec.handle;   // avant loadFromText → le compagnon est relu via le dossier
       await loadFromText(await (await fh.getFile()).text(), dirRec.name, fh);
-      rememberDir(dirRec.handle, dirRec.name);
+      await rememberDir(dirRec.handle, dirRec.name);
       Notify.toast("Rouvert → " + dirRec.name);
     } catch (e: any) {
       if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
@@ -339,7 +339,7 @@ async function boot(): Promise<void> {
   /** Ouverture en MODE DOSSIER : un seul grant (lecture+écriture) couvre le .json choisi ET son compagnon .nmfb. */
   async function doOpenDir(): Promise<void> {
     let dir: any;
-    try { dir = await W.showDirectoryPicker({ mode: "readwrite" }); }
+    try { dir = await W.showDirectoryPicker({ id: "netmap-dir", mode: "readwrite", startIn: currentDirHandle || undefined }); }   // id/startIn → le navigateur rouvre le sélecteur dans le DERNIER dossier
     catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non ouvert : " + (e.message || e), "err"); return; }
     const names: string[] = [];
     try { for await (const entry of dir.values()) { if (entry.kind === "file" && /\.json$/i.test(entry.name)) names.push(entry.name); } }
@@ -352,7 +352,7 @@ async function boot(): Promise<void> {
       const fh = await dir.getFileHandle(name);
       currentDirHandle = dir;   // posé AVANT loadFromText → loadCompanionFacesOnOpen lit le .nmfb via le dossier
       await loadFromText(await (await fh.getFile()).text(), name, fh);
-      rememberDir(dir, name);
+      await rememberDir(dir, name);
       Notify.toast("Fichier « " + name + " » ouvert");
     } catch (e: any) {
       if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
@@ -387,7 +387,7 @@ async function boot(): Promise<void> {
   /** « Enregistrer sous » en MODE DOSSIER : choisit le dossier (s'il manque) + un nom, écrit .json et .nmfb dedans. */
   async function doSaveAsDir(): Promise<void> {
     let dir = currentDirHandle;
-    if (!dir) { try { dir = await W.showDirectoryPicker({ mode: "readwrite" }); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non choisi : " + (e.message || e), "err"); return; } }
+    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "netmap-dir", mode: "readwrite", startIn: currentDirHandle || undefined }); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non choisi : " + (e.message || e), "err"); return; } }
     const raw = await Dialog.prompt("Nom du fichier", docFileName()); if (!raw) return;
     const name = /\.json$/i.test(raw) ? raw : raw + ".json";
     try {
@@ -396,7 +396,7 @@ async function boot(): Promise<void> {
       currentDirHandle = dir; currentHandle = h; currentName = h.name || name; currentFacesHandle = null; session.setFile(true);
       await writeToHandle(h);
       await saveCompanionFaces(h);
-      rememberDir(dir, name);
+      await rememberDir(dir, name);
       tabChannel.claim(store.meta.fileId || null);
       applyAutosave(); refreshChrome(); Notify.toast("Enregistré sous « " + currentName + " »");
     } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
