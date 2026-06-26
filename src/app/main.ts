@@ -658,7 +658,9 @@ async function boot(): Promise<void> {
     const k = e.key.toLowerCase(); if (k !== "z" && k !== "y") return;
     const t = e.target as HTMLElement | null;
     if (t && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName))) return;
-    if (document.querySelector(".modal-overlay, .dialog-overlay, .welcome-screen")) return;
+    // bloque l'undo SEULEMENT si un overlay est réellement OUVERT (ces nœuds persistent cachés dans le DOM) :
+    // modale = classe `.open` ; dialogue = présence (retiré à la fermeture) ; accueil = classe `welcome-active` sur <body>.
+    if (document.querySelector(".modal-overlay.open, .dialog-overlay") || document.body.classList.contains("welcome-active")) return;
     e.preventDefault();
     const redo = (k === "y") || (k === "z" && e.shiftKey);
     void (redo ? doRedo() : doUndo());   // timeline unifiée (modèle + images)
