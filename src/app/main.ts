@@ -220,12 +220,19 @@ async function boot(): Promise<void> {
     remembered = (remembered && remembered.handle) ? remembered : null;
     // 1) AUTOMATIQUE : permission DÉJÀ accordée (aucune (re)demande) → charge sans rien demander
     if (remembered && await tryLoadCompanion(remembered.handle, false, docKey, stillMissing)) return;
-    // 2) une interaction est requise (geste obligatoire côté navigateur). Compagnon mémorisé → simple « Recharger ».
+    // 2) compagnon mémorisé mais permission non accordée → on tente DIRECTEMENT le popup natif d'autorisation
+    //    (si le geste d'ouverture est encore actif, c'est le SEUL prompt). On n'affiche notre confirmation
+    //    « Recharger » QUE si le navigateur refuse de demander sans geste frais (perm indéterminée).
     if (remembered) {
-      const ok = await Dialog.confirm({ title: "Images de façade", message: "Recharger les images de façade de ce document depuis « " + (remembered.name || facesNameFor(jsonHandle ? jsonHandle.name : currentName)) + " » ?", confirmLabel: "Recharger", cancelLabel: "Plus tard" });
-      if (ok) { if (await tryLoadCompanion(remembered.handle, true, docKey, stillMissing)) return; Notify.toast("Images non rechargées (accès refusé).", "err"); }
-      else if (docKey && imageStore.lastLoadedKey && imageStore.lastLoadedKey !== docKey) { await imageStore.keepOnly(store.faceImageRefIds()); imageStore.setLoadedKey(null); }
-      currentFacesHandle = null; shell.refreshActive(); return;
+      const dropStale = () => { if (docKey && imageStore.lastLoadedKey && imageStore.lastLoadedKey !== docKey) { void imageStore.keepOnly(store.faceImageRefIds()); imageStore.setLoadedKey(null); } };
+      const perm = await HandleStore.ensureReadPermission(remembered.handle, true);   // popup natif direct (geste encore actif)
+      if (perm === true) { if (await tryLoadCompanion(remembered.handle, false, docKey, stillMissing)) return; }   // accordée → charge sans re-demander
+      else if (perm === null) {   // le navigateur exige un geste FRAIS → notre confirmation le fournit, puis on re-demande
+        const ok = await Dialog.confirm({ title: "Images de façade", message: "Recharger les images de façade de ce document depuis « " + (remembered.name || facesNameFor(jsonHandle ? jsonHandle.name : currentName)) + " » ?", confirmLabel: "Recharger", cancelLabel: "Plus tard" });
+        if (ok && await tryLoadCompanion(remembered.handle, true, docKey, stillMissing)) return;
+        if (ok) Notify.toast("Images non rechargées (accès refusé).", "err");
+      } else Notify.toast("Images non rechargées (accès refusé).", "err");   // perm === false : refus explicite → ne pas insister
+      dropStale(); currentFacesHandle = null; shell.refreshActive(); return;
     }
     // 3) aucun compagnon mémorisé → proposer de le sélectionner (un seul picker)
     const ok = await Dialog.confirm({ title: "Images de façade", message: "Ce document est associé à un fichier compagnon d'images « " + facesNameFor(jsonHandle ? jsonHandle.name : currentName) + " ». Le sélectionner maintenant ?", confirmLabel: "Choisir le fichier…", cancelLabel: "Plus tard" });
