@@ -215,7 +215,6 @@ export class Shell {
     const logo = document.createElement("div"); logo.className = "welcome-logo";
     logo.appendChild(svgIcon('<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M5 8.4V12h14V8.4M12 12v3.6"/>'));
     const title = document.createElement("h1"); title.className = "welcome-title"; title.textContent = "NETMAP";
-    const text = document.createElement("p"); text.className = "welcome-text"; text.textContent = "Au rechargement, le lien vers votre fichier est perdu. Rouvrez-le pour raccrocher l'auto-save, ouvrez-en un autre, ou créez un nouveau document.";
     // rappel du mode d'accès actuel (fichier / dossier) — rempli par setWelcomeMode()
     this.welcomeModeEl = document.createElement("p"); this.welcomeModeEl.className = "welcome-mode-badge";
     const acts = document.createElement("div"); acts.className = "welcome-actions";
@@ -227,7 +226,7 @@ export class Shell {
     const newBtn = document.createElement("button"); newBtn.type = "button"; newBtn.className = "btn welcome-btn"; newBtn.textContent = "Créer un nouveau document"; newBtn.onclick = () => this.host.onNew?.();
     acts.append(this.welcomeReopenBtn, this.welcomeOpenFileBtn, this.welcomeOpenDirBtn, newBtn);
     const hint = document.createElement("p"); hint.className = "welcome-mode-hint"; hint.textContent = "Mode local (session) : à la fermeture de l'onglet, les données ne sont pas conservées dans le navigateur — votre fichier reste la référence.";
-    card.append(logo, title, text, this.welcomeModeEl, acts, hint);
+    card.append(logo, title, this.welcomeModeEl, acts, hint);
     screen.appendChild(card);
     this.welcomeEl = screen;
     return screen;
