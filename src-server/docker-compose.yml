@@ -1,0 +1,22 @@
+# NetMap — build du client + serveur, en une commande :
+#   cd src-server && docker compose up --build
+# Puis ouvrir http://localhost:3000 (mode API, utilisateur dev factice).
+services:
+  netmap:
+    build:
+      context: ..                       # racine NetMap/ (le Dockerfile copie client + serveur)
+      dockerfile: src-server/Dockerfile
+    image: netmap
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      API_BASE: /api
+      DEV_USER: dev                      # auth de DEV (utilisateur factice). Mettre SSO_URL pour le vrai SSO.
+      # SSO_URL: https://sso.example.com/userinfo
+    volumes:
+      - netmap-data:/data                # persistance des documents (un .db par document)
+    restart: unless-stopped
+
+volumes:
+  netmap-data:

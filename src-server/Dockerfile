@@ -6,7 +6,7 @@
 FROM node:20-bookworm-slim AS client
 WORKDIR /client
 COPY package*.json ./
-RUN npm ci
+RUN npm ci || npm install
 COPY tsconfig*.json webpack.config.js ./
 COPY src ./src
 RUN npm run build
@@ -23,8 +23,8 @@ COPY src-server/tsconfig.json ./
 COPY src-server/src ./src
 RUN npm run build && npm prune --omit=dev
 COPY --from=client /client/dist /client-dist
-ENV NODE_ENV=production CLIENT_DIR=/client-dist DB_FILE=/data/netmap.db PORT=3000 API_BASE=/api
+ENV NODE_ENV=production CLIENT_DIR=/client-dist DOCS_DIR=/data/documents PORT=3000 API_BASE=/api
 VOLUME ["/data"]
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD node -e "fetch('http://localhost:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "src/index.js"]
+CMD ["node", "dist/index.js"]

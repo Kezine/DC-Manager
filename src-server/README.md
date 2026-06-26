@@ -71,17 +71,31 @@ serveur stocke les enregistrements bruts (le client hydrate). `meta` = 1 ligne.
 > [`src/constants.ts`](src/constants.ts) — garder en phase avec
 > `src/models/EntityRegistry.ts` et `src/data/config.ts` du client.
 
-## Docker
-Un `Dockerfile` (multi-stage : build client → serveur) est fourni comme point de
-départ. Build depuis la racine `NetMap/` :
+## Docker (pas besoin de Node en local)
+
+Le `Dockerfile` (multi-stage : build du client → build du serveur) **construit
+tout dans l'image**. Le plus simple :
 
 ```bash
-docker build -f src-server/Dockerfile -t netmap .
+cd src-server
+docker compose up --build        # build client + serveur, démarre sur :3000
+```
+
+Puis ouvrir **http://localhost:3000** → le client démarre en **mode API**, crée/
+ouvre un document, et tout est persisté dans le volume `netmap-data` (`/data`,
+un fichier `.db` par document).
+
+Sans `SSO_URL`, l'auth est en **mode dev** (utilisateur factice `dev`). Pour le
+vrai SSO : décommenter `SSO_URL` dans `docker-compose.yml`.
+
+Sans compose :
+```bash
+docker build -f src-server/Dockerfile -t netmap .   # depuis la racine NetMap/
 docker run -p 3000:3000 -v netmap-data:/data netmap
 ```
 
-> À finaliser/aligner sur la convention du projet **SmsControl** (packaging,
-> healthcheck, variables d'env, reverse-proxy SSO).
+> Healthcheck `/healthz` intégré. À aligner ensuite sur la convention **SmsControl**
+> (reverse-proxy SSO, variables d'env de prod).
 
 ## Limites connues (cf. docs/rest-migration.md)
 - Logique cascade/clone : **calculée côté client** (le serveur applique le lot tel
