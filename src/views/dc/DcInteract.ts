@@ -881,15 +881,16 @@ export class DcInteract extends DcPanels {
     this.buildToolbar(); this.render();
   }
 
-  /** Angle caméra « en face » du front d'un objet (front local = −Y, tourné de `orientationDeg`).
-      Normale monde = (sin o, −cos o) → on place la caméra de ce côté, légèrement en surplomb (~20°). */
-  protected frontAzimuth(orientationDeg: number): { az: number; el: number } {
-    const o = Normalize.rackOrientation(orientationDeg) * Math.PI / 180;
-    return { az: Math.atan2(-Math.cos(o), Math.sin(o)), el: Math.PI / 9 };
+  /** Angle caméra « en face » d'une face, tournée de `orientationDeg`. Face avant = −Y local (normale monde
+      (sin o, −cos o)) ; `rear` vise la face ARRIÈRE (+Y local). Caméra de ce côté, légèrement en surplomb (~20°). */
+  protected frontAzimuth(orientationDeg: number, rear = false): { az: number; el: number } {
+    const o = Normalize.rackOrientation(orientationDeg) * Math.PI / 180, s = rear ? -1 : 1;
+    return { az: Math.atan2(-s * Math.cos(o), s * Math.sin(o)), el: Math.PI / 9 };
   }
 
   /** Prépare le focus sur un équipement : surbrillance (focusEqId) + isolement de la baie s'il est en baie.
-      Retourne l'angle « en face » (front de la baie, ou du boîtier libre) à passer à `focus3DAt`. */
+      Retourne l'angle « en face de L'ÉQUIPEMENT » (et non de la baie) : un équipement monté à l'arrière (rack_side
+      « rear ») se regarde depuis l'arrière de la baie ; un boîtier libre depuis sa propre orientation. */
   protected aimAtEquip(e: any, dcId: string): { az: number; el: number } {
     this.focusEqId = e.id;
     const inRack = (e.placement_mode === "rack" || e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id;
@@ -898,7 +899,8 @@ export class DcInteract extends DcPanels {
       this.selRackId = e.rack_id;
       // isoler la baie : ne montrer que celle-ci dans la salle (les autres baies sont masquées)
       this.hidden3dRacks = new Set(this.store.racksOfDc(dcId).map((r: any) => r.id)); this.hidden3dRacks.delete(e.rack_id);
-      return this.frontAzimuth(rk ? rk.orientation : 0);
+      const rear = (e.placement_mode === "rack" && e.rack_side === "rear");   // monté à l'arrière → face arrière de la baie
+      return this.frontAzimuth(rk ? rk.orientation : 0, rear);
     }
     this.selRackId = null;
     return this.frontAzimuth(e.dc_orientation);
@@ -918,13 +920,14 @@ export class DcInteract extends DcPanels {
 
   /** « Localiser » : affiche la vue 3D centrée sur l'objet (équipement / baie / câble / port / salle). API publique
       (shell + champ de recherche). Peuple le champ de recherche avec le libellé de l'objet (cohérence boutons « pin »). */
-  locate(kind: "equipment" | "rack" | "cable" | "port" | "room", id: string): void {
+  locate(kind: "equipment" | "rack" | "cable" | "port" | "room" | "waypoint", id: string): void {
     const label = this.locateLabel(kind, id); if (label) this.searchTerm = label;
     if (kind === "equipment") this.locateEquipment(id);
     else if (kind === "rack") this.locateRack(id);
     else if (kind === "cable") this.locateCable(id);
     else if (kind === "port") this.locatePort(id);
     else if (kind === "room") this.locateRoom(id);
+    else if (kind === "waypoint") this.locateWaypoint(id);
   }
 
   /** Libellé d'affichage d'un objet localisable (pour peupler le champ de recherche). */
@@ -934,6 +937,7 @@ export class DcInteract extends DcPanels {
     if (kind === "room") { const d: any = this.store.get("datacenters", id); return d ? (d.name || "(salle)") : ""; }
     if (kind === "cable") { const c: any = this.store.get("cables", id); return c ? this.cableLabelShort(c) : ""; }
     if (kind === "port") { const p: any = this.store.get("ports", id); const e: any = p ? this.store.get("equipments", p.equipment_id) : null; return p ? ((e && e.name ? e.name + " · " : "") + (p.name || "(port)")) : ""; }
+    if (kind === "waypoint") { const w: any = this.store.get("waypoints", id); return w ? (Waypoint.glyph(w) + " " + (w.name || "(waypoint)")) : ""; }
     return "";
   }
 
@@ -981,6 +985,15 @@ export class DcInteract extends DcPanels {
     if (!a) { Notify.toast("Extrémité du câble introuvable dans cette salle", "err"); return; }
     this.selCables.add(cableId); this.showAllCables = true; this.focusEqId = null;
     this.focus3DAt(dcId, { x: a.x, y: a.y, z: a.z }, 2500);
+  }
+
+  locateWaypoint(wpId: string): void {
+    const wp: any = this.store.get("waypoints", wpId); if (!wp) return;
+    const dcId = wp.datacenter_id;
+    if (!dcId || !this.store.waypointIsPlaced(wp)) { Notify.toast("Waypoint non posé dans une salle", "err"); return; }
+    this.focusEqId = null; this.selRackId = null; this.selWaypointId = wpId;
+    const a = this.resolver.waypointAnchor(wp);
+    this.focus3DAt(dcId, { x: a.x, y: a.y, z: a.z }, 1200);
   }
 
   locatePort(portId: string): void {

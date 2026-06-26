@@ -85,7 +85,7 @@ export class DcPanels extends DcViews2D {
   protected buildSearchBox(): HTMLElement {
     const wrap = document.createElement("div"); wrap.style.cssText = "position:relative;display:flex;align-items:center;gap:4px";
     const input = document.createElement("input");
-    input.type = "text"; input.className = "search-input"; input.placeholder = "Rechercher (équipement, baie, câble, salle…)";
+    input.type = "text"; input.className = "search-input"; input.placeholder = "Rechercher (équipement, baie, câble, salle, waypoint…)";
     input.style.cssText = "min-width:220px;max-width:320px;padding:6px 10px;flex:none"; input.value = this.searchTerm;
     const clear = this.btn("✕", () => this.clearHighlight(), "Effacer la mise en évidence");
     const pop = document.createElement("div"); pop.className = "dc-search-pop";
@@ -124,6 +124,7 @@ export class DcPanels extends DcViews2D {
     n = 0; for (const r of this.store.all("racks")) { if (n >= CAP) break; if (!r.datacenter_id) continue; if (m(r.name)) { out.push({ kind: "rack", id: r.id, label: r.name || "(baie)", tag: "Baie" }); n++; } }
     n = 0; for (const e of this.store.all("equipments")) { if (n >= CAP) break; if (!this.store.equipmentDcId(e.id)) continue; if (m(e.name, e.type, e.brand, e.model)) { out.push({ kind: "equipment", id: e.id, label: e.name || "(équipement)", tag: "Équip." }); n++; } }
     n = 0; for (const c of this.store.all("cables")) { if (n >= CAP) break; const lab = this.cableLabelShort(c); if (m(c.name, lab) && (this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id))) { out.push({ kind: "cable", id: c.id, label: lab, tag: "Câble" }); n++; } }
+    n = 0; for (const w of this.store.all("waypoints")) { if (n >= CAP) break; if (!w.datacenter_id || !this.store.waypointIsPlaced(w)) continue; if (m(w.name)) { out.push({ kind: "waypoint", id: w.id, label: Waypoint.glyph(w) + " " + (w.name || "(waypoint)"), tag: "Waypt." }); n++; } }
     return out;
   }
 
