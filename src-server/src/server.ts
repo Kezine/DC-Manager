@@ -20,6 +20,7 @@ export class Server {
     this.app = express();
     this.app.disable("x-powered-by");
     this.app.use(this.requestLogger);                 // trace de chaque requête (niveau selon le code)
+    if (opts.auth.mode === "basic") this.app.use(this.basicGate);   // gate Basic Auth (dev) sur TOUT (sauf /healthz)
     this.app.use(express.json({ limit: "128mb" }));   // /snapshot et /transact peuvent être volumineux
     this.app.get("/healthz", (_req, res) => { res.json({ ok: true }); });
     this.app.use(opts.apiBase, new Api(opts.docs, opts.auth).router());
@@ -42,6 +43,14 @@ export class Server {
       else this.httpLog.info(msg);
     });
     next();
+  };
+
+  /** Gate Basic Auth (dev) : challenge sur tout sauf /healthz. Le navigateur demande user/mdp une fois,
+      puis renvoie l'en-tête Authorization sur TOUTES les requêtes (y compris les fetch de l'app). */
+  private basicGate: RequestHandler = (req, res, next) => {
+    if (req.path === "/healthz" || this.opts.auth.checkBasic(req)) { next(); return; }
+    res.setHeader("WWW-Authenticate", 'Basic realm="NetMap (dev)"');
+    res.status(401).send("Authentification requise (dev).");
   };
 
   private errorHandler: ErrorRequestHandler = (err, req, res, _next) => {

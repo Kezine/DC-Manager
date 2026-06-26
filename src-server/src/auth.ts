@@ -13,24 +13,47 @@ export interface SsoResult { user?: SsoUser; logged: boolean; adminRight?: strin
 
 const ANON: SsoResult = { user: { login: "anonymous", domain: "anonymous" }, logged: false, adminRight: "NONE" };
 
-export interface AuthOptions { ssoUrl?: string; cookieName?: string; devUser?: string | null }
+export type AuthMode = "basic" | "sso" | "dev";
+export interface AuthOptions { ssoUrl?: string; cookieName?: string; devUser?: string | null; basicAuth?: string | null }
 
 export class Auth {
   private readonly cache = new Map<string, { result: SsoResult; expireAt: number }>();
   private readonly ssoUrl: string;
   private readonly cookieName: string;
   private readonly devUser: string | null;
+  private readonly basicUser: string | null = null;
+  private readonly basicPass: string = "";
+  readonly mode: AuthMode;
 
   constructor(private readonly log: Logger, opts: AuthOptions = {}) {
     this.ssoUrl = (opts.ssoUrl || "").trim();
     this.cookieName = (opts.cookieName || "").trim();
     this.devUser = opts.devUser ?? null;
-    this.log.info("auth", this.ssoUrl ? ("SSO " + this.ssoUrl + (this.cookieName ? " (cookie " + this.cookieName + ")" : " (Cookie complet)")) : "mode DEV (pas de SSO_URL)");
+    const ba = (opts.basicAuth || "").trim();   // "user:pass" → gate Basic Auth (dev) PRIORITAIRE sur le SSO
+    if (ba.includes(":")) { const i = ba.indexOf(":"); this.basicUser = ba.slice(0, i); this.basicPass = ba.slice(i + 1); }
+    this.mode = this.basicUser != null ? "basic" : (this.ssoUrl ? "sso" : "dev");
+    this.log.info("auth", this.mode === "basic" ? ("Basic Auth dev (user " + this.basicUser + ")")
+      : this.mode === "sso" ? ("SSO " + this.ssoUrl + (this.cookieName ? " (cookie " + this.cookieName + ")" : " (Cookie complet)"))
+      : "mode DEV (aucune auth)");
+  }
+
+  /** Vérifie l'en-tête Authorization: Basic (mode basic uniquement ; sinon true = pas de gate basic). */
+  checkBasic(req: Request): boolean {
+    if (this.mode !== "basic") return true;
+    const m = /^Basic\s+(.+)$/i.exec(req.headers.authorization || "");
+    if (!m) return false;
+    let dec = ""; try { dec = Buffer.from(m[1], "base64").toString("utf8"); } catch { return false; }
+    const i = dec.indexOf(":");
+    const u = i >= 0 ? dec.slice(0, i) : dec, p = i >= 0 ? dec.slice(i + 1) : "";
+    return u === this.basicUser && p === this.basicPass;
   }
 
   /** Validation de la session (cache par hash de jeton + expireDate). */
   async validate(req: Request): Promise<SsoResult> {
-    if (!this.ssoUrl) return this.devResult();                 // pas de SSO configuré → mode dev
+    if (this.mode === "dev") return this.devResult();
+    if (this.mode === "basic") return this.checkBasic(req)
+      ? { user: { login: this.basicUser || "dev" }, logged: true, adminRight: "SUPER_ADMIN", dev: true }
+      : ANON;
     const token = this.tokenOf(req);
     if (!token) return ANON;                                   // aucun cookie → anonyme
     const key = createHash("sha256").update(token).digest("hex");

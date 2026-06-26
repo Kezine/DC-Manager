@@ -139,6 +139,9 @@ dépassée. **Accès autorisé uniquement si `logged` et `adminRight = "SUPER_AD
 
 - **Mode dev** (offline, défaut du `docker-compose.yml`) : `SSO_URL=""` →
   utilisateur factice `dev` en SUPER_ADMIN, tout est autorisé.
+- **Mode dev + mot de passe** : `BASIC_AUTH=user:pass` (prioritaire sur le SSO) →
+  le navigateur demande un user/mot de passe (HTTP Basic) ; identifiants OK →
+  SUPER_ADMIN. Pratique pour protéger un serveur de dev sans le SSO.
 - **SSO réel** : dans `docker-compose.yml`, mettre
   `SSO_URL: https://sso.example.com/validate` (et `COOKIE_NAME: SsoJWT`,
   qui est déjà le défaut).

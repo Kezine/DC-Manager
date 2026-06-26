@@ -17,6 +17,8 @@ services:
       # MODE DEV par défaut (utilisateur factice SUPER_ADMIN) pour tester hors réseau SSO :
       SSO_URL: ""
       DEV_USER: dev
+      # DEV : pour exiger un mot de passe (Basic Auth navigateur) au lieu de l'accès libre, décommenter :
+      # BASIC_AUTH: "dev:secret"
       # Pour le VRAI SSO (SSO externe) : commenter les 2 lignes ci-dessus et décommenter :
       # SSO_URL: https://sso.example.com/validate
       # COOKIE_NAME: SsoJWT
