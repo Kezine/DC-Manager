@@ -81,7 +81,9 @@ export class Shell {
   private dataSourceSel!: HTMLSelectElement;
   private fileAccessSel!: HTMLSelectElement;
   private debugLogChk!: HTMLInputElement;
-  private fileActionsEl!: HTMLElement;            // boutons fichier de la topbar (masqués en mode API)
+  private newBtn!: HTMLButtonElement;             // « Nouveau » (fichier ou document serveur)
+  private openBtn!: HTMLButtonElement;            // « Ouvrir » (fichier ou sélecteur de documents)
+  private fileActionsEl!: HTMLElement;            // Enregistrer/Enregistrer-sous (masqués en mode API)
   private fileOnlySections: HTMLElement[] = [];   // sections de réglages propres au mode fichier (auto-save, accès fichiers)
   private userChip!: HTMLElement;                 // pastille « connecté en tant que … » (mode API)
   private autosaveChk!: HTMLInputElement;
@@ -128,10 +130,12 @@ export class Shell {
       const b = document.createElement("button"); b.type = "button"; b.className = "icon-btn"; b.title = title;
       b.appendChild(svgIcon(paths)); if (onClick) b.onclick = onClick; return b;
     };
-    // actions FICHIER (masquées en mode API : le serveur fait autorité, la sauvegarde est continue)
+    // Nouveau / Ouvrir : utiles dans LES DEUX modes (fichier → fichier ; API → document serveur). Toujours visibles.
+    this.newBtn = iconBtn("Nouveau document (Ctrl+N)", '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>', () => this.host.onNew?.());
+    this.openBtn = iconBtn("Ouvrir un fichier (Ctrl+O)", '<path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', () => this.host.onOpen?.());
+    actions.append(this.newBtn, this.openBtn);
+    // Enregistrer / Enregistrer-sous : propres au mode FICHIER (masqués en API : sauvegarde continue côté serveur).
     this.fileActionsEl = document.createElement("span"); this.fileActionsEl.style.display = "contents";
-    this.fileActionsEl.appendChild(iconBtn("Nouveau document (Ctrl+N)", '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>', () => this.host.onNew?.()));
-    this.fileActionsEl.appendChild(iconBtn("Ouvrir un fichier (Ctrl+O)", '<path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', () => this.host.onOpen?.()));
     this.saveBtn = iconBtn("Enregistrer (Ctrl+S)", '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>', () => this.host.onSave?.());
     this.fileActionsEl.appendChild(this.saveBtn);
     this.fileActionsEl.appendChild(iconBtn("Enregistrer une copie sous… (Ctrl+Shift+S)", '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><circle cx="18" cy="18" r="3" stroke-dasharray="2 2"/>', () => this.host.onSaveAs?.()));
@@ -426,10 +430,12 @@ export class Shell {
       this.userChip.textContent = "👤 non connecté"; this.userChip.title = "Aucune session SSO active"; this.userChip.classList.add("user-chip--off");
     }
   }
-  /** Mode API : masque les contrôles propres au mode fichier (actions topbar + réglages auto-save/accès fichiers). */
+  /** Mode API : masque Enregistrer/Enregistrer-sous + réglages fichier ; Nouveau/Ouvrir gèrent les documents serveur. */
   setRestMode(on: boolean): void {
     if (this.fileActionsEl) this.fileActionsEl.style.display = on ? "none" : "contents";
     this.fileOnlySections.forEach((s) => { if (s) s.style.display = on ? "none" : ""; });
+    if (this.newBtn) this.newBtn.title = on ? "Nouveau document (Ctrl+N)" : "Nouveau document (Ctrl+N)";
+    if (this.openBtn) this.openBtn.title = on ? "Documents… (ouvrir / créer / supprimer)" : "Ouvrir un fichier (Ctrl+O)";
     if (on) this.dataSourceSel.value = "api";
   }
   /** Reflète l'état auto-save dans le popover (case + fréquence). */
