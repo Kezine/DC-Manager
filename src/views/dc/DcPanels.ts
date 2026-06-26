@@ -37,6 +37,8 @@ export class DcPanels extends DcViews2D {
   buildToolbar(): void {
     if (!this.toolbarEl) return;
     this.toolbarEl.innerHTML = "";
+    // champ de recherche global (équipement / baie / câble / salle) + effacement de la mise en évidence — À GAUCHE.
+    this.toolbarEl.appendChild(this.buildSearchBox());
     // contrôles alignés à DROITE (la sélection de salle se fait au panneau latéral / au clic, pas ici).
     const spacer = document.createElement("div"); spacer.style.flex = "1 1 auto"; this.toolbarEl.appendChild(spacer);
 
@@ -76,6 +78,53 @@ export class DcPanels extends DcViews2D {
       this.toolbarEl.appendChild(ms);
     }
     this.updateControls();
+  }
+
+  /** Champ de recherche global de la toolbar : saisie → résultats (toutes catégories) ; clic → `locate` (mise en
+      évidence identique aux boutons « pin ») ; bouton ✕ → `clearHighlight`. Repeuplé depuis `searchTerm` à chaque build. */
+  protected buildSearchBox(): HTMLElement {
+    const wrap = document.createElement("div"); wrap.style.cssText = "position:relative;display:flex;align-items:center;gap:4px";
+    const input = document.createElement("input");
+    input.type = "text"; input.className = "search-input"; input.placeholder = "Rechercher (équipement, baie, câble, salle…)";
+    input.style.cssText = "min-width:220px;max-width:320px;padding:6px 10px;flex:none"; input.value = this.searchTerm;
+    const clear = this.btn("✕", () => this.clearHighlight(), "Effacer la mise en évidence");
+    const pop = document.createElement("div"); pop.className = "dc-search-pop";
+    const hide = () => { pop.classList.remove("open"); pop.innerHTML = ""; };
+    const renderPop = () => {
+      const res = this.searchResults(input.value); pop.innerHTML = "";
+      if (!res.length) { hide(); return; }
+      res.forEach((r) => {
+        const it = document.createElement("div"); it.className = "dc-search-item";
+        const tag = document.createElement("span"); tag.className = "dc-search-tag"; tag.textContent = r.tag;
+        const lab = document.createElement("span"); lab.textContent = r.label; lab.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+        it.append(tag, lab);
+        it.onmousedown = (e) => { e.preventDefault(); hide(); this.locate(r.kind as any, r.id); };   // mousedown : avant le blur
+        pop.appendChild(it);
+      });
+      pop.classList.add("open");
+    };
+    input.oninput = () => { this.searchTerm = input.value; renderPop(); };
+    input.onfocus = () => { if (input.value.trim()) renderPop(); };
+    input.onblur = () => { window.setTimeout(hide, 150); };
+    input.onkeydown = (e) => {
+      if (e.key === "Escape") { hide(); input.blur(); }
+      else if (e.key === "Enter") { const res = this.searchResults(input.value); if (res.length) { hide(); this.locate(res[0].kind as any, res[0].id); } }
+    };
+    wrap.append(input, clear, pop);
+    return wrap;
+  }
+
+  /** Résultats de recherche, toutes catégories confondues (objets LOCALISABLES uniquement), plafonnés par type. */
+  protected searchResults(q: string): Array<{ kind: string; id: string; label: string; tag: string }> {
+    const nq = Text.normSearch(q); if (!nq) return [];
+    const m = (...vals: any[]) => vals.some((v) => v != null && Text.normSearch(v).includes(nq));
+    const out: Array<{ kind: string; id: string; label: string; tag: string }> = [];
+    const CAP = 6;
+    let n = 0; for (const d of this.store.all("datacenters")) { if (n >= CAP) break; if (m(d.name, d.location)) { out.push({ kind: "room", id: d.id, label: d.name || "(salle)", tag: "Salle" }); n++; } }
+    n = 0; for (const r of this.store.all("racks")) { if (n >= CAP) break; if (!r.datacenter_id) continue; if (m(r.name)) { out.push({ kind: "rack", id: r.id, label: r.name || "(baie)", tag: "Baie" }); n++; } }
+    n = 0; for (const e of this.store.all("equipments")) { if (n >= CAP) break; if (!this.store.equipmentDcId(e.id)) continue; if (m(e.name, e.type, e.brand, e.model)) { out.push({ kind: "equipment", id: e.id, label: e.name || "(équipement)", tag: "Équip." }); n++; } }
+    n = 0; for (const c of this.store.all("cables")) { if (n >= CAP) break; const lab = this.cableLabelShort(c); if (m(c.name, lab) && (this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id))) { out.push({ kind: "cable", id: c.id, label: lab, tag: "Câble" }); n++; } }
+    return out;
   }
 
   /** N'affiche que la baie `id` (masque les autres salles affichées), la cible et la sélectionne. */

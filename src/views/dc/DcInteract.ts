@@ -916,12 +916,41 @@ export class DcInteract extends DcPanels {
   }
   protected goBack(): void { const fn = this._returnAction; this._returnAction = null; this.updateBackBtn(); if (fn) fn(); }
 
-  /** « Localiser » : affiche la vue 3D centrée sur l'objet (équipement / baie / câble / port). API publique (shell). */
-  locate(kind: "equipment" | "rack" | "cable" | "port", id: string): void {
+  /** « Localiser » : affiche la vue 3D centrée sur l'objet (équipement / baie / câble / port / salle). API publique
+      (shell + champ de recherche). Peuple le champ de recherche avec le libellé de l'objet (cohérence boutons « pin »). */
+  locate(kind: "equipment" | "rack" | "cable" | "port" | "room", id: string): void {
+    const label = this.locateLabel(kind, id); if (label) this.searchTerm = label;
     if (kind === "equipment") this.locateEquipment(id);
     else if (kind === "rack") this.locateRack(id);
     else if (kind === "cable") this.locateCable(id);
     else if (kind === "port") this.locatePort(id);
+    else if (kind === "room") this.locateRoom(id);
+  }
+
+  /** Libellé d'affichage d'un objet localisable (pour peupler le champ de recherche). */
+  protected locateLabel(kind: string, id: string): string {
+    if (kind === "equipment") { const e: any = this.store.get("equipments", id); return e ? (e.name || "(équipement)") : ""; }
+    if (kind === "rack") { const r: any = this.store.get("racks", id); return r ? (r.name || "(baie)") : ""; }
+    if (kind === "room") { const d: any = this.store.get("datacenters", id); return d ? (d.name || "(salle)") : ""; }
+    if (kind === "cable") { const c: any = this.store.get("cables", id); return c ? this.cableLabelShort(c) : ""; }
+    if (kind === "port") { const p: any = this.store.get("ports", id); const e: any = p ? this.store.get("equipments", p.equipment_id) : null; return p ? ((e && e.name ? e.name + " · " : "") + (p.name || "(port)")) : ""; }
+    return "";
+  }
+
+  /** Localise une SALLE : bascule en 3D mode simple DC sur cette salle, sans isolement de baie ni cible précise. */
+  locateRoom(dcId: string): void {
+    const d: any = this.store.get("datacenters", dcId); if (!d) return;
+    this.view = "3d"; this.multiDc = false; this.dcId = dcId;
+    this.selRackId = null; this.focusEqId = null; this.hidden3dRacks = new Set();
+    this.camTarget = null; this.scale = null;
+    this.buildToolbar(); this.render();
+  }
+
+  /** Bouton « ✕ » du champ de recherche : efface toute mise en évidence (surbrillance, sélection, isolement de baie). */
+  clearHighlight(): void {
+    this.searchTerm = ""; this.focusEqId = null; this.selRackId = null;
+    this.selCables = new Set(); this.hidden3dRacks = new Set();
+    this.buildToolbar(); this.render();
   }
 
   locateEquipment(eqId: string): void {

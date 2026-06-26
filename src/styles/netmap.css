@@ -1163,6 +1163,27 @@
   .multi-item:hover { background: var(--bg-3); }
   .multi-item input { accent-color: var(--accent); }
 
+  /* champ de recherche de la toolbar Datacenter — liste déroulante de résultats */
+  .dc-search-pop {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 60;
+    background: var(--bg-2); border: 1px solid var(--line-2);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+    min-width: 300px; max-width: 380px; max-height: 340px; overflow-y: auto;
+    display: none; padding: 4px;
+  }
+  .dc-search-pop.open { display: block; }
+  .dc-search-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; cursor: pointer; font-size: 12px; color: var(--fg);
+  }
+  .dc-search-item:hover { background: var(--bg-3); }
+  .dc-search-tag {
+    flex: none; min-width: 46px; text-align: center;
+    font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--accent); border: 1px solid var(--line-2);
+    border-radius: var(--radius-pill); padding: 1px 6px;
+  }
+
   /* v78 â€” barre de tri/filtres au-dessus d'un listing */
   .list-toolbar {
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
