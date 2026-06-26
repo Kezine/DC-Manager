@@ -24,6 +24,8 @@ export class RestAdapter extends DataAdapter {
   headers: Record<string, string>;
   docId: string | null = null;
   docRev = 0;                            // révision connue du document (synchronisée via l'entête X-Doc-Rev)
+  // id de session (par onglet) : tague nos écritures (X-Client-Id) → on ignore NOS propres événements SSE.
+  readonly clientId: string = (typeof crypto !== "undefined" && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : ("c-" + Math.random().toString(36).slice(2) + Date.now().toString(36));
 
   /** URL du flux SSE du document courant (ou "" si aucun document). */
   get eventsUrl(): string { return this.docId ? (this.apiRoot + "/documents/" + encodeURIComponent(this.docId) + "/events") : ""; }
@@ -45,7 +47,7 @@ export class RestAdapter extends DataAdapter {
 
   private async _req(base: string, method: string, path: string, body?: any, { allow404 = false }: { allow404?: boolean } = {}): Promise<any> {
     const res = await fetch(base + path, {
-      method, headers: this.headers,
+      method, headers: { ...this.headers, "X-Client-Id": this.clientId },
       credentials: "include",   // SSO : on transmet les cookies de session (l'app NE gère PAS l'auth — le SSO valide)
       body: body === undefined ? undefined : JSON.stringify(body),
     });

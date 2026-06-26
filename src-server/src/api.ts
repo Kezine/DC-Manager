@@ -95,7 +95,8 @@ export class Api {
     } else {
       const rev = this.docs.markChanged(id);
       res.setHeader("X-Doc-Rev", String(rev));
-      res.on("finish", () => { if (res.statusCode < 300) this.live.publish(id, { rev }); });
+      const origin = (req.headers["x-client-id"] as string) || "";   // qui a écrit → le client source ignore son propre event
+      res.on("finish", () => { if (res.statusCode < 300) this.live.publish(id, { rev, origin }); });
     }
     next();
   };

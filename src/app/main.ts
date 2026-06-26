@@ -552,7 +552,11 @@ async function boot(): Promise<void> {
     const url = (adapter as RestAdapter).eventsUrl; if (!url || typeof EventSource === "undefined") return;
     try {
       const es = new EventSource(url, { withCredentials: true }); restEvents = es;
-      es.onmessage = (e) => { try { const d = JSON.parse(e.data); if (d && typeof d.rev === "number" && d.rev > (adapter as RestAdapter).docRev) { clearTimeout(restReloadTO); restReloadTO = setTimeout(() => void restReloadDocument(), 250); } } catch (_) { /* ignore */ } };
+      es.onmessage = (e) => { try {
+        const d = JSON.parse(e.data); const ra = adapter as RestAdapter;
+        if (!d || (d.origin && d.origin === ra.clientId)) return;   // NOTRE propre écriture → on ignore (pas de reload)
+        if (typeof d.rev === "number" && d.rev > ra.docRev) { clearTimeout(restReloadTO); restReloadTO = setTimeout(() => void restReloadDocument(), 250); }
+      } catch (_) { /* ignore */ } };
       es.onerror = () => { /* reconnexion auto du navigateur (champ retry) */ };
     } catch (e) { flog("SSE indisponible", e); }
   }
