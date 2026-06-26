@@ -73,6 +73,8 @@ serveur stocke les enregistrements bruts (le client hydrate). `meta` = 1 ligne.
 
 ## Docker (pas besoin de Node en local)
 
+> 📘 Guide complet (lancer, logs, persistance, dépannage) : **[RUN.md](RUN.md)**.
+
 Le `Dockerfile` (multi-stage : build du client → build du serveur) **construit
 tout dans l'image**. Le plus simple :
 

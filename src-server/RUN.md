@@ -1,0 +1,126 @@
+# NetMap — Lancer l'image & consulter les logs
+
+Guide d'exploitation du conteneur (client + backend REST). Aucun Node requis en
+local : tout est construit dans l'image. Voir aussi [README.md](README.md).
+
+> Prérequis : **Docker Desktop** démarré (icône baleine active).
+> Toutes les commandes se lancent depuis le dossier `src-server/`.
+
+---
+
+## 1. Lancer
+
+```bash
+cd src-server
+docker compose up -d --build      # construit (client+serveur) et démarre en arrière-plan
+```
+
+- `--build` : reconstruit l'image (à refaire après chaque modif du code).
+- `-d` : détaché (rend la main). Sans `-d`, les logs défilent dans le terminal.
+
+Puis ouvrir **http://localhost:3000** (mode API, utilisateur `dev` factice).
+
+> 1ʳᵉ build ≈ 3-6 min (build du client + deps natives). Les suivants sont en cache.
+
+### Sans docker compose
+```bash
+# depuis la racine NetMap/ :
+docker build -f src-server/Dockerfile -t netmap .
+docker run -d --name netmap -p 3000:3000 -v netmap-data:/data netmap
+```
+
+---
+
+## 2. Vérifier que ça tourne
+
+```bash
+docker compose ps                 # statut + ports (doit être "Up", health "healthy")
+curl http://localhost:3000/healthz       # → {"ok":true}
+curl http://localhost:3000/api/me        # → {"name":"dev","dev":true}
+```
+
+---
+
+## 3. Consulter les logs
+
+```bash
+docker compose logs -f            # logs EN DIRECT (Ctrl+C pour quitter le suivi)
+docker compose logs --tail 100    # les 100 dernières lignes
+docker compose logs --since 10m   # depuis 10 minutes
+```
+
+Sans compose (par nom de conteneur) :
+```bash
+docker logs -f netmap
+docker logs --tail 200 netmap
+```
+
+Au démarrage, le serveur logue une ligne du type :
+```
+NetMap server → http://localhost:3000  (api /api)
+```
+
+### Logs HTTP plus verbeux ?
+Le serveur ne logue pas chaque requête par défaut. Pour diagnostiquer un appel,
+utilise l'onglet **Réseau** du navigateur (F12), ou côté client active les logs
+de debug : **Réglages → Débogage → « Logs de débogage (console) »** (ou en
+console `NetMapLog.enable()`).
+
+---
+
+## 4. Arrêter / redémarrer / reconstruire
+
+```bash
+docker compose restart            # redémarre (garde les données)
+docker compose stop               # arrête (garde conteneur + données)
+docker compose up -d              # relance
+docker compose down               # arrête ET supprime le conteneur (données conservées : volume)
+docker compose up -d --build      # reconstruit après une modif de code
+```
+
+---
+
+## 5. Données & persistance
+
+Les documents vivent dans le volume **`netmap-data`** (monté sur `/data`,
+un fichier `.db` par document + `registry.db`).
+
+```bash
+docker volume ls                  # liste les volumes (cherche *netmap-data)
+docker compose down -v            # ⚠️ SUPPRIME le volume → repart de zéro (perte des documents)
+```
+
+Inspecter le contenu du volume dans le conteneur :
+```bash
+docker compose exec netmap ls -la /data/documents
+```
+
+---
+
+## 6. Configuration (variables d'environnement)
+
+À régler dans `docker-compose.yml` (section `environment`) :
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `PORT` | `3000` | port d'écoute |
+| `API_BASE` | `/api` | préfixe des endpoints REST |
+| `DOCS_DIR` | `/data/documents` | dossier des documents (registre + 1 `.db`/doc) |
+| `SSO_URL` | *(absent)* | endpoint SSO qui valide la session et renvoie l'utilisateur. **Absent → mode dev** |
+| `DEV_USER` | `dev` | utilisateur factice si pas de `SSO_URL` (`DEV_USER=""` simule un 401) |
+
+Après modif du compose : `docker compose up -d` (recrée le conteneur).
+
+---
+
+## 7. Dépannage
+
+| Symptôme | Cause probable / solution |
+|---|---|
+| **404 sur les endpoints dans le navigateur** | Ancien bundle en cache → **Ctrl+Shift+R** (hard refresh). |
+| **Page blanche / vieille version** | Idem : hard refresh, ou vider le cache du site. |
+| **`port is already allocated`** | Le port 3000 est pris : changer `ports: "3001:3000"` dans le compose. |
+| **`Cannot connect to the Docker daemon`** | Docker Desktop n'est pas démarré. |
+| **Conteneur en `Restarting`/`Exited`** | `docker compose logs --tail 50` pour voir l'erreur de démarrage. |
+| **`Client introuvable`** (503 sur `/`) | Le build du client a échoué : `docker compose up --build` et regarder les logs de build. |
+| **Repartir totalement de zéro** | `docker compose down -v && docker compose up -d --build`. |
