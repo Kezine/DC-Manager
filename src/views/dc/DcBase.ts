@@ -97,6 +97,7 @@ export class DcBase {
   cablesOnTop = true;                            // WebGL : câbles dessinés au-dessus des équipements/baies (défaut activé)
   protected _three: any = null;                  // instance DcThreeScene (chargée à la demande)
   protected _focusTarget: { p: Vec3; extent: number } | null = null;   // cible « Localiser » à pousser au moteur après (re)rendu
+  protected _returnAction: (() => void) | null = null;   // action du bouton « Retour » (rouvrir la modale / revenir à l'onglet d'origine)
   protected _webglHost: HTMLElement | null = null;
   protected _webglRev: number | null = null;     // révision du store au dernier (re)build WebGL → éviter un build complet au simple retour de vue
 
@@ -309,6 +310,7 @@ export class DcBase {
     // restaure l'état de vue UNE FOIS par fichier (les re-rendus de données ne réécrasent pas les réglages de session).
     const key = this.viewStateKey();
     if (key !== this._restoredKey) { this.restoreView(); this._restoredKey = key; }
+    this.setReturnAction(null);   // activation normale → pas de bouton « Retour » périmé (le flux « Localiser » le re-définit après)
     this.buildToolbar(); this.fitHeight(); this.render();
   }
 

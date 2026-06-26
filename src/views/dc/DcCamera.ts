@@ -35,6 +35,8 @@ export class DcCamera extends DcBase {
   protected buildControls(): void {
     const c = document.createElement("div"); c.className = "graph-zoom-controls"; this.controlsEl = c;
     c.innerHTML = `
+      <button class="btn btn-ghost btn-sm" data-act="back" title="Retour à la vue précédente" style="display:none">← Retour</button>
+      <span class="gz-sep" data-back-sep style="display:none"></span>
       <button class="btn btn-ghost btn-sm" data-act="in" title="Zoom avant" aria-label="Zoom avant">+</button>
       <button class="btn btn-ghost btn-sm" data-act="out" title="Zoom arrière" aria-label="Zoom arrière">−</button>
       <span class="gz-sep"></span>
@@ -60,6 +62,7 @@ export class DcCamera extends DcBase {
       const gl = this.view === "3d" && this.useWebGL && this._three;   // moteur Three SEULEMENT en vue 3D-WebGL ; en 2D (Dessus/Étage) → caméra SVG (le moteur Three persiste mais est détaché)
       const preset = (b as HTMLElement).dataset.preset; if (preset) { if (gl) this._three.setPreset(preset); else this.setCamPreset(preset); return; }
       const a = (b as HTMLElement).dataset.act;
+      if (a === "back") { this.goBack(); return; }
       if (a === "in") { if (gl) this._three.zoomBy(1.2); else this.zoomBy(1.2); }
       else if (a === "out") { if (gl) this._three.zoomBy(1 / 1.2); else this.zoomBy(1 / 1.2); }
       else if (a === "recenter") { if (gl) this._three.recenter(); else { this.camTarget = null; this.scale = null; this.render(); } }

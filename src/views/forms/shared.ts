@@ -30,6 +30,7 @@ export const eqOptions = (store: Store, none: string) => [{ value: "", label: no
 export interface FormHost {
   openModal(opts: ModalOptions): void;
   setDirty?(v: boolean): void;
-  /** « Localiser » : ferme la modale, bascule en vue 3D et centre la caméra sur l'objet. */
-  locate?(kind: "equipment" | "rack" | "cable" | "port", id: string): void;
+  /** « Localiser » : ferme la modale, bascule en vue 3D et centre la caméra sur l'objet.
+      `returnAction` (optionnel) = ce qu'exécute le bouton « Retour » de la vue 3D (ex. rouvrir la fiche). */
+  locate?(kind: "equipment" | "rack" | "cable" | "port", id: string, returnAction?: () => void): void;
 }

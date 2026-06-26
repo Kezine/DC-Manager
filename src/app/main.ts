@@ -420,7 +420,7 @@ async function boot(): Promise<void> {
             ...cfg,
             actions: { ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }), ...(opts.locate ? { locate: true } : {}) },
             onAction: async (act, id) => {
-              if (act === "locate" && opts.locate) { shell.switchView("datacenter"); dcView.locate(opts.locate, id); return; }
+              if (act === "locate" && opts.locate) { shell.switchView("datacenter"); dcView.locate(opts.locate, id); dcView.setReturnAction(() => shell.switchView(name)); return; }
               if (act === "view") { if (cfg.collection === "equipments") Forms.equipmentDetail(store, formHost, id, reRender); else openDetail(cfg.collection, id); return; }
               if (act === "edit") { formFn?.(id, reRender); return; }
               if (act === "clone") {
@@ -507,8 +507,8 @@ async function boot(): Promise<void> {
     openSiteForm: (id) => Forms.site(store, formHost, id, () => { dcView.buildToolbar(); dcView.render(); }),
     faceImageUrl: (eqId, face) => { const e: any = store.get("equipments", eqId); const fld = (EQUIP_FACE_IMG_FIELD as any)[face]; const im: any = e && fld && e[fld] ? imageStore.get(e[fld]) : null; return im ? im.url : null; },
   });
-  // « Localiser » depuis une fiche (modale) : ferme la modale, bascule en 3D, centre la caméra sur l'objet.
-  formHost.locate = (kind, id) => { modal.close(); shell.switchView("datacenter"); dcView.locate(kind, id); };
+  // « Localiser » depuis une fiche (modale) : ferme la modale, bascule en 3D, centre la caméra ; « Retour » rouvre la fiche.
+  formHost.locate = (kind, id, ret) => { modal.close(); shell.switchView("datacenter"); dcView.locate(kind, id); dcView.setReturnAction(ret || null); };
 
   // === SOUS-VUES (atteintes par les liens d'en-tête ; surlignent leur onglet parent) ===
   addListTab("groupes", "Groupes", ListConfigs.groups, {

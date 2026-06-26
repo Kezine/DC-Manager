@@ -153,7 +153,7 @@ export class EquipmentForms extends FormBase {
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>Port</th><th>Type</th><th>Rôle</th><th>Agrégat</th><th style="text-align:right;">3D</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
-      tw.querySelectorAll("[data-port-locate]").forEach((b) => { (b as HTMLElement).onclick = () => host.locate?.("port", (b as HTMLElement).dataset.portLocate!); });
+      tw.querySelectorAll("[data-port-locate]").forEach((b) => { (b as HTMLElement).onclick = () => host.locate?.("port", (b as HTMLElement).dataset.portLocate!, () => this.equipmentDetail(store, host, eq.id, onChanged)); });
     } else { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = "Aucun port."; root.appendChild(e); }
 
     // câbles connectés
@@ -179,7 +179,7 @@ export class EquipmentForms extends FormBase {
 
     // Modifier → formulaire d'édition (remplace la fiche par la modale d'édition)
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.textContent = "📍 Localiser en 3D"; locBtn.onclick = () => host.locate!("equipment", eq.id); actions.appendChild(locBtn); }
+    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.textContent = "📍 Localiser en 3D"; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); actions.appendChild(locBtn); }
     const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = "Modifier";
     editBtn.onclick = () => this.equipment(store, host, eq.id, onChanged);
     actions.appendChild(editBtn); root.appendChild(actions);

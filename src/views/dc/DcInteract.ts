@@ -837,6 +837,18 @@ export class DcInteract extends DcPanels {
     this.buildToolbar(); this.render();
   }
 
+  /** Action du bouton « Retour » (contrôles 3D) : rouvre la modale / revient à l'onglet d'origine. null = masqué. */
+  setReturnAction(fn: (() => void) | null): void { this._returnAction = fn || null; this.updateBackBtn(); }
+  protected updateBackBtn(): void {
+    if (!this.controlsEl) return;
+    const show = !!this._returnAction;
+    const btn = this.controlsEl.querySelector('[data-act="back"]') as HTMLElement | null;
+    const sep = this.controlsEl.querySelector('[data-back-sep]') as HTMLElement | null;
+    if (btn) btn.style.display = show ? "" : "none";
+    if (sep) sep.style.display = show ? "" : "none";
+  }
+  protected goBack(): void { const fn = this._returnAction; this._returnAction = null; this.updateBackBtn(); if (fn) fn(); }
+
   /** « Localiser » : affiche la vue 3D centrée sur l'objet (équipement / baie / câble / port). API publique (shell). */
   locate(kind: "equipment" | "rack" | "cable" | "port", id: string): void {
     if (kind === "equipment") this.locateEquipment(id);
