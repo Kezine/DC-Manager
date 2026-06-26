@@ -449,7 +449,6 @@ export class DcViews2D extends DcScene3D {
         hitDot.setAttribute("cx", cur.x1); hitDot.setAttribute("cy", cur.y1);
         label.setAttribute("x", cur.x1); label.setAttribute("y", cur.y1 - s * 1.4);
       }
-      this.applyUprightText(label);   // recale le contre-miroir/rotation sur la NOUVELLE ancre (sinon le label part en sens inverse)
     };
     const startDrag = (ev: MouseEvent, which: string) => {
       if (ev.button !== 0) return; ev.preventDefault(); ev.stopPropagation();
@@ -470,6 +469,9 @@ export class DcViews2D extends DcScene3D {
         } else if (which === "p1") { cur.x1 = start.x1 + dx; cur.y1 = start.y1 + dy; }
         else { cur.x2 = start.x2 + dx; cur.y2 = start.y2 + dy; }
         sync();
+        // pendant le glisser, uprightTexts() n'est PAS rejoué → on recale le contre-miroir/rotation du label sur sa
+        // nouvelle ancre (au rendu plein, c'est uprightTexts() qui s'en charge — l'appeler ici aussi le doublerait).
+        this.applyUprightText(label);
       };
       const up = async () => {
         document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
