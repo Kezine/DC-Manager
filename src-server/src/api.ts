@@ -3,6 +3,7 @@ import multer from "multer";
 import { Schema } from "./constants.js";
 import { type Repository, type Rec, type ListOpts } from "./db.js";
 import { DocumentStore } from "./documents.js";
+import { Auth } from "./auth.js";
 
 /** Requête dont le Repository du document a été résolu par le middleware `resolveRepo`. */
 type RepoRequest = Request & { repo?: Repository };
@@ -11,11 +12,12 @@ type RepoRequest = Request & { repo?: Repository };
 export class Api {
   private readonly upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
 
-  constructor(private readonly docs: DocumentStore) {}
+  constructor(private readonly docs: DocumentStore, private readonly auth: Auth) {}
 
   router(): Router {
     const r = express.Router();
-    r.get("/me", this.me);
+    r.get("/me", this.me);                 // état d'auth (accessible sans être autorisé)
+    r.use(this.requireAdmin);              // tout le reste exige une session SSO valide + SUPER_ADMIN
 
     // -- registre des documents --
     r.get("/documents", this.listDocs);
@@ -58,18 +60,14 @@ export class Api {
     };
   }
 
-  /* -- auth (proxy SSO) -- */
-  private me: RequestHandler = async (req, res) => {
-    const ssoUrl = process.env.SSO_URL;
-    if (!ssoUrl) {   // pas de SSO → mode dev (DEV_USER="" pour simuler un 401)
-      if (process.env.DEV_USER === "") { res.status(401).json({ error: "non connecté" }); return; }
-      res.json({ name: process.env.DEV_USER || "dev", dev: true }); return;
-    }
-    try {
-      const r = await fetch(ssoUrl, { headers: { cookie: req.headers.cookie || "", authorization: req.headers.authorization || "" } });
-      if (!r.ok) { res.status(r.status === 401 ? 401 : 502).json({ error: "SSO " + r.status }); return; }
-      res.json(await r.json());
-    } catch (e: any) { res.status(502).json({ error: "SSO injoignable: " + e.message }); }
+  /* -- auth (proxy SSO) : état de session, toujours accessible (le client adapte son UI) -- */
+  private me: RequestHandler = async (req, res) => { res.json(await this.auth.validate(req)); };
+
+  /** Garde d'accès : session SSO valide + SUPER_ADMIN, sinon 403 (le client affiche « accès refusé »). */
+  private requireAdmin: RequestHandler = async (req, res, next) => {
+    const r = await this.auth.validate(req);
+    if (this.auth.isAuthorized(r)) { next(); return; }
+    res.status(403).json({ error: "accès refusé", logged: !!r.logged, adminRight: r.adminRight || "NONE" });
   };
 
   /* -- registre des documents -- */

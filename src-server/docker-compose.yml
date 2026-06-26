@@ -13,8 +13,13 @@ services:
       PORT: "3000"
       API_BASE: /api
       LOG_LEVEL: info                    # error | warn | info | debug | trace
-      DEV_USER: dev                      # auth de DEV (utilisateur factice). Mettre SSO_URL pour le vrai SSO.
-      # SSO_URL: https://sso.example.com/userinfo
+      # --- Auth ---
+      # MODE DEV par défaut (utilisateur factice SUPER_ADMIN) pour tester hors réseau SSO :
+      SSO_URL: ""
+      DEV_USER: dev
+      # Pour le VRAI SSO (SSO externe) : commenter les 2 lignes ci-dessus et décommenter :
+      # SSO_URL: https://sso.example.com/validate
+      # COOKIE_NAME: <nom_du_cookie_jeton>
     volumes:
       - netmap-data:/data                # persistance des documents (un .db par document)
     restart: unless-stopped

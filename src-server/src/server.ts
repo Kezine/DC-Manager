@@ -3,9 +3,10 @@ import path from "node:path";
 import fs from "node:fs";
 import { Api } from "./api.js";
 import { DocumentStore } from "./documents.js";
+import { Auth } from "./auth.js";
 import { Logger } from "./logger.js";
 
-export interface ServerOptions { docs: DocumentStore; clientDir: string; apiBase: string; log?: Logger }
+export interface ServerOptions { docs: DocumentStore; auth: Auth; clientDir: string; apiBase: string; log?: Logger }
 
 /** Application HTTP : API REST sous `apiBase` + service du client (HTML autonome) avec injection de config. */
 export class Server {
@@ -21,7 +22,7 @@ export class Server {
     this.app.use(this.requestLogger);                 // trace de chaque requête (niveau selon le code)
     this.app.use(express.json({ limit: "128mb" }));   // /snapshot et /transact peuvent être volumineux
     this.app.get("/healthz", (_req, res) => { res.json({ ok: true }); });
-    this.app.use(opts.apiBase, new Api(opts.docs).router());
+    this.app.use(opts.apiBase, new Api(opts.docs, opts.auth).router());
     this.app.use(opts.apiBase, (_req, res) => { res.status(404).json({ error: "endpoint inconnu" }); });   // 404 API
     this.app.get(["/", "/netmap.html", "/index.html"], this.serveClient);
     this.app.use(express.static(opts.clientDir, { index: false }));   // assets éventuels (build multi-fichiers en dev)

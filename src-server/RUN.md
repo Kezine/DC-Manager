@@ -125,8 +125,22 @@ docker compose exec netmap ls -la /data/documents
 | `PORT` | `3000` | port d'écoute |
 | `API_BASE` | `/api` | préfixe des endpoints REST |
 | `DOCS_DIR` | `/data/documents` | dossier des documents (registre + 1 `.db`/doc) |
-| `SSO_URL` | *(absent)* | endpoint SSO qui valide la session et renvoie l'utilisateur. **Absent → mode dev** |
-| `DEV_USER` | `dev` | utilisateur factice si pas de `SSO_URL` (`DEV_USER=""` simule un 401) |
+| `SSO_URL` | SSO externe | endpoint SSO qui valide la session (cf. ci-dessous). **`SSO_URL=""` → mode dev** |
+| `COOKIE_NAME` | *(vide)* | nom du cookie contenant le jeton à proxifier au SSO (vide = en-tête `Cookie` complet) |
+| `DEV_USER` | `dev` | nom de l'utilisateur factice en mode dev |
+
+### Authentification (SSO)
+L'app **ne gère pas l'auth** : le serveur **proxifie le jeton** (cookie `COOKIE_NAME`)
+au SSO (`SSO_URL`, défaut **SSO externe**) qui renvoie l'utilisateur
+(`logged`, `adminRight`, `expireDate`). Le résultat est **mis en cache** (clé =
+hash du cookie) tant que le cookie ne change pas et que `expireDate` n'est pas
+dépassée. **Accès autorisé uniquement si `logged` et `adminRight = "SUPER_ADMIN"`**
+(sinon `403` ; le client affiche « accès refusé »).
+
+- **Mode dev** (offline, défaut du `docker-compose.yml`) : `SSO_URL=""` →
+  utilisateur factice `dev` en SUPER_ADMIN, tout est autorisé.
+- **SSO réel** : dans `docker-compose.yml`, mettre
+  `SSO_URL: https://sso.example.com/validate` et `COOKIE_NAME: <cookie_jeton>`.
 
 Après modif du compose : `docker compose up -d` (recrée le conteneur).
 

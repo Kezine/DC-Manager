@@ -605,9 +605,23 @@ async function boot(): Promise<void> {
     }
     if (action !== restDocId) { const d = docs.find((x) => x.id === action); await restOpenDocument(action, d?.name); }
   }
-  /** Au boot (mode API) : ouvre le document le plus récent, ou en crée un si aucun. */
+  /** Au boot (mode API) : valide l'auth SSO, puis ouvre le document le plus récent (ou en crée un). */
   async function restBootstrap(): Promise<void> {
     const ra = adapter as RestAdapter;
+    const me = await ra.me().catch(() => null);
+    shell.setUser(me && me.logged ? me.user : null);
+    const authorized = !!(me && me.logged && me.adminRight === "SUPER_ADMIN");
+    flog("auth", { logged: me && me.logged, adminRight: me && me.adminRight, authorized });
+    if (!authorized) {
+      await Dialog.alert({
+        title: "Accès refusé",
+        message: (me && me.logged)
+          ? "Le compte « " + ((me.user && (me.user.login)) || "?") + " » n'a pas les droits requis (SUPER_ADMIN)."
+          : "Vous n'êtes pas authentifié auprès du SSO. Connectez-vous, puis rechargez la page.",
+        confirmLabel: "OK",
+      });
+      return;   // n'ouvre aucun document tant que l'accès n'est pas autorisé
+    }
     let docs: any[] = []; try { docs = await ra.listDocuments(); } catch { /* serveur injoignable */ }
     if (docs.length) await restOpenDocument(docs[0].id, docs[0].name);
     else await restNewDocument("Document 1");
@@ -888,10 +902,7 @@ async function boot(): Promise<void> {
   shell.setFileAccessMode(prefs.fileAccessMode);
   shell.setDebugLog(prefs.debugLog); Log.setEnabled(prefs.debugLog);
   shell.setRestMode(REST_MODE);   // mode API : masque les contrôles fichier (cf. docs/rest-migration.md)
-  // mode API : récupère l'utilisateur courant via le SSO (proxifié par le backend) → pastille « connecté en tant que »
-  if (REST_MODE && adapter instanceof RestAdapter) {
-    adapter.me().then((u) => { shell.setUser(u || null); flog("me()", u); }).catch(() => shell.setUser(null));
-  }
+  // (l'auth SSO + la pastille utilisateur sont gérées par restBootstrap, au boot)
 
   // ---- état save-state ----
   // ---- barre de statut / undo-redo (cohérence avec l'état du store) ----

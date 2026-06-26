@@ -390,13 +390,13 @@ export class Shell {
   setDataSource(value: string): void { this.dataSourceSel.value = value; }
   setFileAccessMode(value: string): void { this.fileAccessSel.value = value; }
   setDebugLog(on: boolean): void { this.debugLogChk.checked = on; }
-  /** Pastille utilisateur (mode API). `user` = objet du SSO (name/email/login) ; null = non connecté ; undefined = masquer. */
-  setUser(user: { name?: string; email?: string; login?: string } | null | undefined): void {
+  /** Pastille utilisateur (mode API). `user` = objet SSO (login/nom/prénom/eMail…) ; null = non connecté ; undefined = masquer. */
+  setUser(user: { name?: string; prenom?: string; nom?: string; login?: string; email?: string; eMail?: string } | null | undefined): void {
     if (!this.userChip) return;
     if (user === undefined) { this.userChip.style.display = "none"; return; }
     this.userChip.style.display = "";
     if (user) {
-      const who = user.name || user.login || user.email || "utilisateur";
+      const who = user.name || [user.prenom, user.nom].filter(Boolean).join(" ") || user.login || user.eMail || user.email || "utilisateur";
       this.userChip.textContent = "👤 " + who; this.userChip.title = "Connecté en tant que " + who; this.userChip.classList.remove("user-chip--off");
     } else {
       this.userChip.textContent = "👤 non connecté"; this.userChip.title = "Aucune session SSO active"; this.userChip.classList.add("user-chip--off");

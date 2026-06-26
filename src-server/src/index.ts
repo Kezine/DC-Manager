@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { type SqliteCtor } from "./db.js";
 import { DocumentStore } from "./documents.js";
+import { Auth } from "./auth.js";
 import { Server } from "./server.js";
 import { Logger } from "./logger.js";
 
@@ -12,7 +13,12 @@ const PORT = parseInt(process.env.PORT || "3000", 10);
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, "..", "data", "documents");
 const CLIENT_DIR = process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "dist");   // sortie webpack (dist/netmap.html)
 const API_BASE = process.env.API_BASE || "/api";
+// SSO : URL par défaut = SSO externe. SSO_URL="" (vide) → mode dev (utilisateur factice SUPER_ADMIN).
+const SSO_URL = process.env.SSO_URL ?? "https://sso.example.com/validate";
+const COOKIE_NAME = process.env.COOKIE_NAME || "";      // nom du cookie contenant le jeton à proxifier (vide = en-tête Cookie complet)
+const DEV_USER = process.env.DEV_USER ?? null;
 
 const log = Logger.fromEnv();
+const auth = new Auth(log.child("auth"), { ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER });
 const docs = new DocumentStore(DOCS_DIR, Database as unknown as SqliteCtor, log.child("docs"));
-new Server({ docs, clientDir: CLIENT_DIR, apiBase: API_BASE, log }).listen(PORT);
+new Server({ docs, auth, clientDir: CLIENT_DIR, apiBase: API_BASE, log }).listen(PORT);
