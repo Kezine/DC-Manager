@@ -68,7 +68,6 @@ export class DcBase {
   tx = 0; ty = 0;
   camTarget: Vec3 | null = null;
   hidden3dRacks = new Set<string>();
-  hiddenDoorRacks = new Set<string>();   // baies dont les PORTES sont masquées (par baie, menu contextuel)
   selRackId: string | null = null;
   slotSel: { rackId: string; side: string; lo: number; hi: number } | null = null;   // sélection U multiple (Ctrl+clic) — plage contiguë même baie/face
   multiDc = false;                       // vue 3D multi-salles (étages empilés, bâtiments côte à côte)
@@ -375,7 +374,7 @@ export class DcBase {
   /** Options d'affichage poussées au moteur WebGL (sous-ensemble implémenté ; le reste est sans effet). */
   protected webglOptions(): any {
     // COPIE de selCables : applyOptionsDiff compare old vs new ; une même référence (mutée) masquerait le changement.
-    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), hiddenDoors: new Set(this.hiddenDoorRacks), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showPorts: this.showPorts, showDoors: this.showDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, cullDistanceM: this.cullDistanceM };
+    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showPorts: this.showPorts, showDoors: this.showDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, cullDistanceM: this.cullDistanceM };
   }
 
   /** Contexte de scène pour le moteur WebGL : descripteur multi-salles + câbles transversaux (repère MONDE).
@@ -526,7 +525,7 @@ export class DcBase {
     clearTimeout(this._pvTO);
     this._pvTO = setTimeout(() => {
       try {
-        const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], hiddenDoorRacks: [...this.hiddenDoorRacks], colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, cullDistanceM: this.cullDistanceM, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
+        const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, cullDistanceM: this.cullDistanceM, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
         DcBase.TOGGLE_KEYS.forEach((k) => { o[k] = (this as any)[k]; });
         window.localStorage.setItem(this.viewStateKey(), JSON.stringify(o));
       } catch (_) { /* quota / indispo → ignoré */ }
@@ -564,7 +563,6 @@ export class DcBase {
     // salle active + baies masquées (failsafe : seulement ce qui existe encore)
     if (has("datacenters", o.dcId)) this.dcId = o.dcId;
     this.hidden3dRacks = new Set((Array.isArray(o.hidden3dRacks) ? o.hidden3dRacks : []).filter((id: string) => has("racks", id)));
-    this.hiddenDoorRacks = new Set((Array.isArray(o.hiddenDoorRacks) ? o.hiddenDoorRacks : []).filter((id: string) => has("racks", id)));
     // multi-salles + salles visibles (failsafe : seulement les salles encore présentes)
     this.multiDc = o.multiDc === true;
     this.visibleDcIds = new Set((Array.isArray(o.visibleDcIds) ? o.visibleDcIds : []).filter((id: string) => has("datacenters", id)));

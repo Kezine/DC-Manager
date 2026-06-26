@@ -237,7 +237,6 @@ export class DcThreeScene extends DcThreeCamera {
     const on: Record<string, boolean> = { port: !!o.showPorts, name: !!o.showEqNames, door: !!o.showDoors, doorswing: !!o.showDoorSwing, slot: !!o.showPlaceholders, faceImage: !!o.showFaceImages, conduit: !!o.showConduits, marker: !!o.showWaypoints, rail: !!(o.showWaypoints || o.showConduits), floorgrid: !!o.showFloorGrid, orient: !!o.showOrientMarks, rackshell: !!o.showRackSides };
     let v = true;
     if (u.layer && u.layer in on) v = on[u.layer];
-    if (v && u.layer === "door" && u.rackId && o.hiddenDoors && o.hiddenDoors.has(u.rackId)) v = false;   // portes masquées POUR CETTE baie
     if (v && u.eqSide) v = u.eqSide === "rear" ? !o.hideRearEq : !o.hideFrontEq;
     return v;
   }
@@ -275,7 +274,7 @@ export class DcThreeScene extends DcThreeCamera {
     // TOUS les toggles d'affichage sont en VISIBILITÉ (couches taguées, toujours construites) — AUCUN rebuild :
     // ports, noms, portes, débattement, emplacements, images, masquage av/ar, conduits, waypoints, grilles, repères,
     // capots/parois (rackshell) et masquage de baies (hidden3dRacks).
-    const eqVis = old.showPorts !== opts.showPorts || old.showEqNames !== opts.showEqNames || old.showDoors !== opts.showDoors || old.showDoorSwing !== opts.showDoorSwing || old.hideFrontEq !== opts.hideFrontEq || old.hideRearEq !== opts.hideRearEq || old.showPlaceholders !== opts.showPlaceholders || old.showFaceImages !== opts.showFaceImages || old.showConduits !== opts.showConduits || old.showWaypoints !== opts.showWaypoints || old.showFloorGrid !== opts.showFloorGrid || old.showOrientMarks !== opts.showOrientMarks || old.showRackSides !== opts.showRackSides || !this.sameSet(old.hiddenRacks, opts.hiddenRacks) || !this.sameSet(old.hiddenDoors, opts.hiddenDoors);
+    const eqVis = old.showPorts !== opts.showPorts || old.showEqNames !== opts.showEqNames || old.showDoors !== opts.showDoors || old.showDoorSwing !== opts.showDoorSwing || old.hideFrontEq !== opts.hideFrontEq || old.hideRearEq !== opts.hideRearEq || old.showPlaceholders !== opts.showPlaceholders || old.showFaceImages !== opts.showFaceImages || old.showConduits !== opts.showConduits || old.showWaypoints !== opts.showWaypoints || old.showFloorGrid !== opts.showFloorGrid || old.showOrientMarks !== opts.showOrientMarks || old.showRackSides !== opts.showRackSides || !this.sameSet(old.hiddenRacks, opts.hiddenRacks);
     // baies — RECOLORATION en place (mode couleur) : aucun rebuild.
     const eqColor = old.colorMode !== opts.colorMode;
     const cb = old.showAllCables !== opts.showAllCables || old.cableSplineK !== opts.cableSplineK || old.cablePortNormal !== opts.cablePortNormal || !this.sameSet(old.selCables, opts.selCables);   // cablesOnTop NON inclus : géré en place par setCablesOnTop (pas de reconstruction)

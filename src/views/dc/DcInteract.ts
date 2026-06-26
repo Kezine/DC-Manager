@@ -470,14 +470,14 @@ export class DcInteract extends DcPanels {
     ];
   }
   protected rackCtx(rack: any): CtxSection[] {
-    const hidden = this.hidden3dRacks.has(rack.id), doorsHidden = this.hiddenDoorRacks.has(rack.id);
+    const hidden = this.hidden3dRacks.has(rack.id);
     const items: any[] = [
       { label: "Modifier…", action: () => this.host.openRackForm?.(rack.id) },
       { label: "Isoler la baie", action: () => this.isolateRack(rack.id) },
       { label: hidden ? "Afficher la baie" : "Masquer la baie", action: () => { if (hidden) this.hidden3dRacks.delete(rack.id); else this.hidden3dRacks.add(rack.id); this.render(); } },
     ];
-    // masquage des portes : seulement en 3D (en 2D les portes ne sont pas dessinées → aucun effet)
-    if (RackGeometry.hasDoor(rack) && this.view === "3d") items.push({ label: doorsHidden ? "Afficher les portes" : "Masquer les portes", action: () => { if (doorsHidden) this.hiddenDoorRacks.delete(rack.id); else this.hiddenDoorRacks.add(rack.id); this.render(); } });
+    // masquage des portes : bascule GLOBALE (toutes les portes) = même état que le toggle « Portes des baies » du panneau (3D)
+    if (RackGeometry.hasDoor(rack) && this.view === "3d") items.push({ label: this.showDoors ? "Masquer les portes (toutes)" : "Afficher les portes (toutes)", action: () => { this.showDoors = !this.showDoors; this.rerenderView(); } });
     const secs: CtxSection[] = [{ head: rack.name || "(baie)", items: items.concat([
       { label: "Retirer du datacenter", danger: true, action: async () => {
           if (!this.store.get("racks", rack.id)) return;
