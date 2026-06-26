@@ -2,6 +2,7 @@ import express from "express";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
 import { openDb } from "./db.js";
 import { createApi } from "./api.js";
 
@@ -12,7 +13,7 @@ const CLIENT_DIR = process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "d
 const API_BASE = process.env.API_BASE || "/api";
 
 fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
-const db = openDb(DB_FILE);
+const db = openDb(DB_FILE, Database);
 
 const app = express();
 app.disable("x-powered-by");

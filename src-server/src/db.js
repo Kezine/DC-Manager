@@ -1,8 +1,8 @@
-import Database from "better-sqlite3";
 import { COLLECTIONS, ARRAY_FIELDS, isCollection, normSearch, PAGE_SIZE_DEFAULT } from "./constants.js";
 
-/** Ouvre/initialise la base : une table par collection (id, data JSON, search, created_date) + meta + images. */
-export function openDb(file) {
+/** Ouvre/initialise la base : une table par collection (id, data JSON, search, created_date) + meta + images.
+    `Database` est INJECTÉ (better-sqlite3 en prod ; un shim compatible pour les tests) → driver découplé. */
+export function openDb(file, Database) {
   const db = new Database(file);
   db.pragma("journal_mode = WAL");
   for (const c of COLLECTIONS) {
