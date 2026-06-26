@@ -34,6 +34,8 @@ export interface ShellHost {
   onDataSource?(value: string): void;
   /** Bascule du mode d'accès FS ("file" | "directory"). */
   onFileAccessMode?(value: string): void;
+  /** Ouverture en FORÇANT un mode d'accès ("file" | "directory") — depuis l'écran d'accueil. */
+  onOpenMode?(mode: string): void;
   /** Activation/désactivation de l'auto-save (Promise → état effectif appliqué). */
   onAutosaveToggle?(on: boolean): void;
   /** Changement de fréquence d'auto-save (secondes). */
@@ -79,6 +81,9 @@ export class Shell {
   private autosaveStatusEl!: HTMLElement;
   private welcomeEl!: HTMLElement;
   private welcomeReopenBtn!: HTMLButtonElement;
+  private welcomeOpenDirBtn!: HTMLButtonElement;
+  private welcomeOpenFileBtn!: HTMLButtonElement;
+  private welcomeModeEl!: HTMLElement;
   private statusEls: Record<string, HTMLElement> = {};
   private views = new Map<string, ViewEntry>();
   private order: string[] = [];
@@ -211,24 +216,41 @@ export class Shell {
     logo.appendChild(svgIcon('<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M5 8.4V12h14V8.4M12 12v3.6"/>'));
     const title = document.createElement("h1"); title.className = "welcome-title"; title.textContent = "NETMAP";
     const text = document.createElement("p"); text.className = "welcome-text"; text.textContent = "Au rechargement, le lien vers votre fichier est perdu. Rouvrez-le pour raccrocher l'auto-save, ouvrez-en un autre, ou créez un nouveau document.";
+    // rappel du mode d'accès actuel (fichier / dossier) — rempli par setWelcomeMode()
+    this.welcomeModeEl = document.createElement("p"); this.welcomeModeEl.className = "welcome-mode-badge";
     const acts = document.createElement("div"); acts.className = "welcome-actions";
     this.welcomeReopenBtn = document.createElement("button"); this.welcomeReopenBtn.type = "button"; this.welcomeReopenBtn.className = "btn btn-primary welcome-btn"; this.welcomeReopenBtn.style.display = "none";
     this.welcomeReopenBtn.onclick = () => this.host.onReopenLast?.();
-    const openBtn = document.createElement("button"); openBtn.type = "button"; openBtn.className = "btn btn-primary welcome-btn"; openBtn.textContent = "Ouvrir un fichier"; openBtn.onclick = () => this.host.onOpen?.();
+    // deux ouvertures explicites : « Fichier » (1 autorisation par fichier) · « Dossier » (1 autorisation pour tout).
+    this.welcomeOpenFileBtn = document.createElement("button"); this.welcomeOpenFileBtn.type = "button"; this.welcomeOpenFileBtn.className = "btn btn-primary welcome-btn"; this.welcomeOpenFileBtn.textContent = "Ouvrir un fichier"; this.welcomeOpenFileBtn.onclick = () => this.host.onOpenMode?.("file");
+    this.welcomeOpenDirBtn = document.createElement("button"); this.welcomeOpenDirBtn.type = "button"; this.welcomeOpenDirBtn.className = "btn welcome-btn"; this.welcomeOpenDirBtn.textContent = "Ouvrir un dossier"; this.welcomeOpenDirBtn.onclick = () => this.host.onOpenMode?.("directory");
     const newBtn = document.createElement("button"); newBtn.type = "button"; newBtn.className = "btn welcome-btn"; newBtn.textContent = "Créer un nouveau document"; newBtn.onclick = () => this.host.onNew?.();
-    acts.append(this.welcomeReopenBtn, openBtn, newBtn);
+    acts.append(this.welcomeReopenBtn, this.welcomeOpenFileBtn, this.welcomeOpenDirBtn, newBtn);
     const hint = document.createElement("p"); hint.className = "welcome-mode-hint"; hint.textContent = "Mode local (session) : à la fermeture de l'onglet, les données ne sont pas conservées dans le navigateur — votre fichier reste la référence.";
-    card.append(logo, title, text, acts, hint);
+    card.append(logo, title, text, this.welcomeModeEl, acts, hint);
     screen.appendChild(card);
     this.welcomeEl = screen;
     return screen;
   }
 
-  /** Affiche l'écran d'accueil. `reopenName` (≠ null) montre « Rouvrir « … » ». */
-  showWelcome(opts: { reopenName?: string | null } = {}): void {
+  /** Affiche l'écran d'accueil. `reopenName` (≠ null) montre « Rouvrir « … » » ; `mode`/`fsApi` règlent le rappel. */
+  showWelcome(opts: { reopenName?: string | null; mode?: string; fsApi?: boolean } = {}): void {
     this.setReopen(opts.reopenName ?? null);
+    this.setWelcomeMode(opts.mode || "file", opts.fsApi !== false);
     this.welcomeEl.style.display = "";
     document.body.classList.add("welcome-active");
+  }
+  /** Rappel du mode d'accès courant + mise en avant du bouton d'ouverture correspondant. */
+  setWelcomeMode(mode: string, fsApi: boolean): void {
+    if (!this.welcomeModeEl) return;
+    const dir = mode === "directory";
+    this.welcomeModeEl.innerHTML = "Mode d'accès : <strong>" + (dir ? "Dossier" : "Fichier") + "</strong> — "
+      + (dir ? "une autorisation couvre le document et ses images (.nmfb)." : "autorisation par fichier (le .json et son .nmfb séparément).");
+    // bouton « dossier » masqué si le navigateur n'a pas la File System Access API
+    this.welcomeOpenDirBtn.style.display = fsApi ? "" : "none";
+    // met en avant (primaire) l'ouverture du MODE COURANT ; l'autre reste une option secondaire
+    this.welcomeOpenFileBtn.classList.toggle("btn-primary", !dir);
+    this.welcomeOpenDirBtn.classList.toggle("btn-primary", dir);
   }
   hideWelcome(): void { this.welcomeEl.style.display = "none"; document.body.classList.remove("welcome-active"); }
   /** Configure le bouton « Rouvrir » (null = masqué). */

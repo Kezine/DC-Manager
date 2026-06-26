@@ -1450,7 +1450,13 @@
   .welcome-logo { width: 48px; height: 48px; margin: 0 auto 18px; color: var(--accent); }
   .welcome-logo svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
   .welcome-title { color: var(--fg); letter-spacing: 0.22em; font-size: 20px; margin: 0 0 10px; font-weight: 700; }
-  .welcome-text { color: var(--fg-dim); font-size: 12px; line-height: 1.6; margin: 0 0 24px; }
+  .welcome-text { color: var(--fg-dim); font-size: 12px; line-height: 1.6; margin: 0 0 16px; }
+  .welcome-mode-badge {
+    color: var(--fg-dim); font-size: 11px; line-height: 1.5; margin: 0 0 18px;
+    padding: 8px 12px; border: 1px solid var(--line-2); border-left: 3px solid var(--accent);
+    background: var(--bg-2); border-radius: 4px;
+  }
+  .welcome-mode-badge strong { color: var(--accent); }
   .welcome-actions { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
   .welcome-btn { width: 100%; justify-content: center; }
   .welcome-mode-hint { color: var(--fg-dimmer); font-size: 10px; line-height: 1.5; margin: 18px 0 0; letter-spacing: 0.02em; }

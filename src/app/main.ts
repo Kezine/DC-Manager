@@ -482,8 +482,16 @@ async function boot(): Promise<void> {
       if (value === "directory" && !HAS_FS_API) { Notify.toast("Mode dossier indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); shell.setFileAccessMode("file"); return; }
       prefs.fileAccessMode = (value === "directory") ? "directory" : "file";
       if (prefs.fileAccessMode === "file") currentDirHandle = null;   // repasse en mode fichier → on oublie le dossier courant
-      refreshChrome();
+      shell.setWelcomeMode(prefs.fileAccessMode, HAS_FS_API); refreshChrome();
       Notify.toast(prefs.fileAccessMode === "directory" ? "Mode dossier : une seule autorisation couvre le document et ses images." : "Mode fichier : autorisation par fichier.");
+    },
+    onOpenMode: (mode) => {
+      const m = (mode === "directory") ? "directory" : "file";
+      if (m === "directory" && !HAS_FS_API) { Notify.toast("Mode dossier indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); return; }
+      prefs.fileAccessMode = m;
+      if (m === "file") currentDirHandle = null;
+      shell.setFileAccessMode(m); shell.setWelcomeMode(m, HAS_FS_API);
+      doOpen();
     },
     onAutosaveToggle: (on) => { setAutosave(on); },
     onAutosaveInterval: (sec) => { prefs.autosaveInterval = sec; applyAutosave(); },
@@ -789,7 +797,7 @@ async function boot(): Promise<void> {
       if (!reopenName) { lastRec = await handleStore.getLast(); reopenName = lastRec ? (lastRec.name || "fichier") : null; }
     } catch (_) { lastRec = null; }
   }
-  shell.showWelcome({ reopenName });
+  shell.showWelcome({ reopenName, mode: prefs.fileAccessMode, fsApi: HAS_FS_API });
 
   (window as any).__NETMAP__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
 }
