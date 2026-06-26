@@ -148,6 +148,8 @@ export class DcThreeBase {
   protected _groundPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);   // plan du sol z=0 (repli de raycast)
   protected measurePts: { x: number; y: number; z: number }[] = [];
   protected measureCursor: { x: number; y: number; z: number } | null = null;
+  protected measureDone: { x: number; y: number; z: number }[][] = [];   // mesures TERMINÉES conservées (session)
+  protected measureHi: number | null = null;   // index de la mesure terminée mise en évidence (survol listing), ou null
   protected routePts: { x: number; y: number; z: number }[] = [];
   protected routeCursor: { x: number; y: number; z: number } | null = null;
   // callbacks moteur → vue : placement/survol mesure (point monde) ; clic/survol route (cible pick / point monde).

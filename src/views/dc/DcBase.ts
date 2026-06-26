@@ -49,9 +49,10 @@ export class DcBase {
   routeBuild: { fromPortId: string | null; wpIds: string[]; armed?: boolean; mouse?: Vec3 | null } | null = null;   // session de routage 3D
   // Outil de MESURE multipoint (éphémère, exclusif du routage). `pts`/`cursor` en coordonnées du CONTEXTE (`ctx` :
   // salle mono / monde multi / plan d'étage) ; raycast sur les surfaces en 3D, plan du sol en 2D. Voir DcInteract.
-  measure: { active: boolean; ctx: string; pts: Vec3[]; cursor: Vec3 | null } | null = null;
+  measure: { active: boolean; ctx: string; pts: Vec3[]; cursor: Vec3 | null; done: Vec3[][] } | null = null;
   protected _measMouseClient: [number, number] | null = null;
   protected _measMouseTO: any = 0;
+  protected _measHi: number | null = null;   // mesure terminée mise en évidence (survol du listing), ou null
   protected _camC: Vec3 | null = null;   // centre caméra du dernier rendu 3D (pour l'aperçu de route → souris)
   protected _routeMouseClient: [number, number] | null = null;
   protected _routeMouseTO: any = 0;
@@ -147,6 +148,16 @@ export class DcBase {
     });
     // entrée/sortie de plein écran → re-cadrer (la rangée change de taille)
     document.addEventListener("fullscreenchange", () => { this.fitHeight(); this.render(); });
+    // Mode mesure : ENTRÉE valide la mesure en cours (elle reste affichée) · ÉCHAP annule la mesure en cours.
+    // Ignoré dans un champ de saisie ou sous un overlay (modale/dialogue) ouvert.
+    document.addEventListener("keydown", (e) => {
+      if (!this.measure || !this.measure.active || (e.key !== "Escape" && e.key !== "Enter")) return;
+      const tg = e.target as HTMLElement | null;
+      if (tg && (tg.isContentEditable || /^(input|textarea|select)$/i.test(tg.tagName))) return;
+      if (document.querySelector(".modal-overlay.open, .dialog-overlay")) return;
+      e.preventDefault();
+      if (e.key === "Enter") this.measureCommit(); else this.measureCancelCurrent();
+    });
     this.buildControls();
     this.buildToolbar();
   }

@@ -713,8 +713,11 @@
   .dc-measuring * { pointer-events: none !important; }   /* clic = poser un point ; glisser = naviguer (seul le <svg> reÃ§oit les Ã©vÃ©nements) */
   .dc-measure-line { fill: none; stroke: var(--warn); stroke-width: 2.5px; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.95; }
   .dc-measure-line.preview { opacity: 0.6; }   /* segment en cours (curseur) â€” plus discret */
+  .dc-measure-line.hi { stroke-width: 4px; opacity: 1; stroke-dasharray: none; }   /* mesure mise en Ã©vidence (survol listing) */
   .dc-measure-dot { fill: var(--warn); stroke: var(--bg); stroke-width: 1.5px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .dc-measure-dot.hi { fill: var(--fg); stroke: var(--warn); stroke-width: 2.5px; }
   .dc-measure-label { fill: var(--warn); font-family: var(--mono); font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+  .dc-measure-label.name { fill: var(--fg); font-weight: 700; }   /* Ã©tiquette nom+total d'une mesure validÃ©e */
   /* v53 : WAYPOINTS (points de passage de cÃ¢bles) â€” vue Dessus */
   .dc-wp { cursor: grab; }
   .dc-wp.dragging { cursor: grabbing; }

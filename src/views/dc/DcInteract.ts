@@ -648,13 +648,19 @@ export class DcInteract extends DcPanels {
   /** (Ré)arme l'outil de mesure dans le contexte de vue courant (exclusif du routage). */
   measureArm(): void {
     this.routeBuild = null;   // un seul mode de clic à la fois
-    this.measure = { active: true, ctx: this.measureCtxKey(), pts: [], cursor: null };
-    Notify.toast("Mesure : cliquez pour poser des points · glissez pour naviguer", "ok");
+    this._measHi = null;
+    this.measure = { active: true, ctx: this.measureCtxKey(), pts: [], cursor: null, done: [] };
+    Notify.toast("Mesure : cliquez pour poser des points · glissez pour naviguer · ÉCHAP pour effacer", "ok");
     this.buildToolbar(); this.render();
   }
-  measureCancel(): void { this.measure = null; this.hideCote(); this.buildToolbar(); this.render(); }
+  measureCancel(): void { this.measure = null; this._measHi = null; this.hideCote(); this.buildToolbar(); this.render(); }
   protected measureUndo(): void { if (this.measure && this.measure.pts.length) { this.measure.pts.pop(); this.measure.cursor = null; this.render(); } }
-  protected measureClear(): void { if (this.measure) { this.measure.pts = []; this.measure.cursor = null; this.hideCote(); this.render(); } }
+  /** Termine la mesure en cours (≥ 2 points) : elle reste affichée (session), une nouvelle peut démarrer. */
+  protected measureCommit(): void { const m = this.measure; if (m && m.pts.length >= 2) { m.done.push(m.pts.slice()); m.pts = []; m.cursor = null; this._measHi = null; this.hideCote(); this.render(); } }
+  /** Annule la mesure EN COURS (points non validés) en conservant les mesures terminées. Action de « ÉCHAP ». */
+  protected measureCancelCurrent(): void { if (this.measure && (this.measure.pts.length || this.measure.cursor)) { this.measure.pts = []; this.measure.cursor = null; this.hideCote(); this.render(); } }
+  /** Efface TOUTES les mesures (en cours + terminées). Bouton « Tout effacer ». */
+  protected measureClearAll(): void { if (this.measure) { this.measure.pts = []; this.measure.cursor = null; this.measure.done = []; this._measHi = null; this.hideCote(); this.render(); } }
 
   /** Clé du contexte spatial courant : la mesure n'est tracée que là où elle a été prise (repères compatibles).
       NB : la 3D mono et le Plan de salle d'UNE MÊME salle partagent le repère → une mesure y est visible des deux. */
@@ -686,21 +692,43 @@ export class DcInteract extends DcPanels {
     return null;
   }
 
-  /** Tracé 2D (Dessus/Étage) de la mesure — points au niveau du sol (z ignoré). Appelé AVANT uprightTexts. */
+  /** Tracé 2D (Dessus/Étage) des mesures : validées (étiquette nom+total, surbrillance) + en cours (par segment). */
   protected drawMeasure2D(gRoot: SVGGElement): void {
     if (this.view === "3d" || !this.measureActiveHere()) return;
-    const pts = this.measure!.pts; if (!pts.length) return;
+    const m = this.measure!; if (!m.pts.length && !m.done.length) return;
     const g = Dom.svg("g", { class: "dc-measure" }), fMM = 13 / (this.scale || 1);
-    if (pts.length >= 2) {
-      g.appendChild(Dom.svg("polyline", { class: "dc-measure-line", points: pts.map((p) => p.x + "," + p.y).join(" ") }));
-      for (let i = 1; i < pts.length; i++) {
-        const t = Dom.svg("text", { class: "dc-measure-label", x: (pts[i - 1].x + pts[i].x) / 2, y: (pts[i - 1].y + pts[i].y) / 2, "text-anchor": "middle", "font-size": fMM });
-        t.textContent = Format.meters(this.measureLen(pts[i - 1], pts[i])); g.appendChild(t);
-      }
-    }
     const rDot = (DC_DOT_PX + 1) * this.markerScale / (this.scale || 1);
-    pts.forEach((p) => g.appendChild(Dom.svg("circle", { class: "dc-measure-dot", cx: p.x, cy: p.y, r: rDot })));
+    const label = (text: string, x: number, y: number, cls: string) => { const t = Dom.svg("text", { class: cls, x, y, "text-anchor": "middle", "font-size": fMM }); t.textContent = text; g.appendChild(t); };
+    const poly = (pts: Vec3[], hot: boolean, segLabels: boolean) => {
+      if (!pts.length) return;
+      const lineCls = "dc-measure-line" + (hot ? " hi" : "");
+      if (pts.length >= 2) {
+        g.appendChild(Dom.svg("polyline", { class: lineCls, points: pts.map((p) => p.x + "," + p.y).join(" ") }));
+        if (segLabels) for (let i = 1; i < pts.length; i++) label(Format.meters(this.measureLen(pts[i - 1], pts[i])), (pts[i - 1].x + pts[i].x) / 2, (pts[i - 1].y + pts[i].y) / 2, "dc-measure-label");
+      }
+      pts.forEach((p) => g.appendChild(Dom.svg("circle", { class: "dc-measure-dot" + (hot ? " hi" : ""), cx: p.x, cy: p.y, r: rDot })));
+    };
+    m.done.forEach((pts, i) => {   // mesures validées : étiquette nom+total + surbrillance au survol
+      poly(pts, i === this._measHi, false);
+      const c = pts.reduce((a, p) => ({ x: a.x + p.x, y: a.y + p.y, z: 0 }), { x: 0, y: 0, z: 0 });
+      label("Mesure " + (i + 1) + " · " + Format.meters(this.measureTotal(pts)), c.x / pts.length, c.y / pts.length, "dc-measure-label name");
+    });
+    poly(m.pts, false, true);   // mesure en cours : étiquettes par segment
     gRoot.appendChild(g);
+  }
+
+  /** Met en évidence (ou non) la mesure terminée d'index `i` — appelé au survol du listing. Rafraîchit le SEUL overlay. */
+  protected measureSetHi(i: number | null): void {
+    this._measHi = i;
+    if (this.view === "3d") { if (this._three && this.measure) this._three.setMeasureOverlay(this.measure.pts, this.measure.cursor, this.measure.done, i); }
+    else this.refreshMeasure2D();
+  }
+  /** Re-trace le SEUL overlay de mesure 2D (sans reconstruire la scène) — pour la surbrillance au survol. */
+  protected refreshMeasure2D(): void {
+    const g = this.gRoot; if (!g) return;
+    g.querySelectorAll(".dc-measure").forEach((n) => n.remove());
+    this.drawMeasure2D(g);
+    if (this.floorXf) g.querySelectorAll(".dc-measure text").forEach((t) => this.applyUprightText(t));   // textes à l'endroit malgré la rotation 2D
   }
 
   /** APERÇU 2D du segment en cours (dernier point posé → curseur), sans reconstruire la scène. En 3D, l'aperçu est
@@ -724,31 +752,39 @@ export class DcInteract extends DcPanels {
     const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "📏 Mesure"; box.appendChild(t);
     const m = this.measure!, here = this.measureActiveHere();
     const list = document.createElement("div"); list.style.cssText = "font-size:12px;margin:4px 0;display:flex;flex-direction:column;gap:3px";
-    if (!m.pts.length) {
+    // LISTE des mesures : terminées (conservées en session) + celle en cours, avec longueur + nombre de points.
+    const measures = m.done.map((p, i) => ({ name: "Mesure " + (i + 1), pts: p, idx: i as number | null })).concat(m.pts.length ? [{ name: "En cours", pts: m.pts, idx: null }] : []);
+    if (!measures.length) {
       const d = document.createElement("div"); d.innerHTML = '<span style="color:var(--accent)">Cliquez pour poser le premier point…</span>'; list.appendChild(d);
     } else {
-      m.pts.forEach((p, i) => {
-        const d = document.createElement("div");
-        d.innerHTML = i === 0 ? '<span class="pill">1</span> Point de départ'
-          : '<span class="pill">' + (i + 1) + '</span> Segment ' + i + ' : <b>' + Html.escape(Format.meters(this.measureLen(m.pts[i - 1], p))) + '</b>';
+      measures.forEach((meas) => {
+        const np = meas.pts.length, d = document.createElement("div");
+        d.innerHTML = '<b>' + Html.escape(meas.name) + '</b> : <b style="color:var(--accent)">' + Html.escape(Format.meters(this.measureTotal(meas.pts))) + '</b> <span style="color:var(--fg-dim)">· ' + np + ' point' + (np > 1 ? 's' : '') + '</span>';
+        if (meas.idx != null && here) {   // mesure VALIDÉE → survol = mise en évidence dans la vue
+          const idx = meas.idx; d.style.cursor = "pointer";
+          d.addEventListener("mouseenter", () => this.measureSetHi(idx));
+          d.addEventListener("mouseleave", () => this.measureSetHi(null));
+        }
         list.appendChild(d);
       });
     }
     box.appendChild(list);
-    if (m.pts.length >= 2) {
-      const tot = document.createElement("div"); tot.style.cssText = "margin:6px 0;font-size:13px";
-      tot.innerHTML = 'Total : <b style="color:var(--accent)">' + Html.escape(Format.meters(this.measureTotal(m.pts))) + '</b> · ' + (m.pts.length - 1) + ' segment' + (m.pts.length > 2 ? 's' : '');
+    if (measures.length) {   // LONGUEUR TOTALE (toutes mesures)
+      const grand = m.done.reduce((s, p) => s + this.measureTotal(p), 0) + this.measureTotal(m.pts);
+      const tot = document.createElement("div"); tot.style.cssText = "margin:6px 0;font-size:13px;border-top:1px solid var(--line);padding-top:6px";
+      tot.innerHTML = 'Longueur totale : <b style="color:var(--accent)">' + Html.escape(Format.meters(grand)) + '</b>';
       box.appendChild(tot);
     }
     const hint = document.createElement("div"); hint.className = "form-hint";
-    hint.textContent = here ? "Cliquez pour ajouter un point · glissez pour naviguer (fonctionne en 2D comme en 3D)."
+    hint.textContent = here ? "Cliquez pour poser des points · ENTRÉE valide la mesure · ÉCHAP annule la mesure en cours."
       : "Mesure prise dans un autre contexte de vue. Revenez-y pour l'éditer, ou effacez-la.";
     box.appendChild(hint);
     const acts = document.createElement("div"); acts.className = "dc-card-acts";
     const bUndo = this.btn("↩ Annuler point", () => this.measureUndo()); (bUndo as any).disabled = !m.pts.length || !here;
-    const bClear = this.btn("🗑 Effacer", () => this.measureClear()); (bClear as any).disabled = !m.pts.length;
+    const bNew = this.btn("✓ Valider (Entrée)", () => this.measureCommit()); (bNew as any).disabled = m.pts.length < 2 || !here;
+    const bClear = this.btn("🗑 Tout effacer", () => this.measureClearAll()); (bClear as any).disabled = !m.pts.length && !m.done.length;
     const bClose = this.btn("✕ Fermer", () => this.measureCancel()); bClose.classList.add("btn-danger");
-    acts.append(bUndo, bClear, bClose); box.appendChild(acts);
+    acts.append(bUndo, bNew, bClear, bClose); box.appendChild(acts);
     return box;
   }
 
@@ -760,7 +796,7 @@ export class DcInteract extends DcPanels {
   /** (Ré)applique au moteur WebGL le mode outil + l'overlay courant (appelé après chaque (re)rendu 3D-WebGL). */
   protected syncWebglTool(): void {
     const t = this._three; if (!t) return;
-    if (this.measure && this.measure.active && this.measureActiveHere()) { t.setToolMode("measure"); t.setMeasureOverlay(this.measure.pts, this.measure.cursor); }
+    if (this.measure && this.measure.active && this.measureActiveHere()) { t.setToolMode("measure"); t.setMeasureOverlay(this.measure.pts, this.measure.cursor, this.measure.done, this._measHi); }
     else if (this.routeBuild) { t.setToolMode("route"); t.setRouteOverlay(this.webglRouteWorldPts(), this.routeBuild.mouse || null); }
     else t.setToolMode("none");
   }
@@ -770,14 +806,14 @@ export class DcInteract extends DcPanels {
     if (!this.measure || !this.measure.active || !this.measureActiveHere()) return;
     this.measure.pts.push({ x: w.x, y: w.y, z: w.z }); this.measure.cursor = null; this.hideCote();
     this.renderSide(this.current());
-    if (this._three) this._three.setMeasureOverlay(this.measure.pts, null);
+    if (this._three) this._three.setMeasureOverlay(this.measure.pts, null, this.measure.done, this._measHi);
   }
 
   /** Survol mesure (moteur) → aperçu du segment courant + cote flottante (longueur live). */
   protected onWebglMeasureHover(w: Vec3 | null, clientX: number, clientY: number): void {
     if (!this.measure || !this.measure.active || !this.measureActiveHere() || !this.measure.pts.length) { this.hideCote(); return; }
     this.measure.cursor = w;
-    if (this._three) this._three.setMeasureOverlay(this.measure.pts, w);
+    if (this._three) this._three.setMeasureOverlay(this.measure.pts, w, this.measure.done, this._measHi);
     const last = this.measure.pts[this.measure.pts.length - 1];
     if (w) this.showCote(Format.meters(this.measureLen(last, w)), clientX, clientY); else this.hideCote();
   }

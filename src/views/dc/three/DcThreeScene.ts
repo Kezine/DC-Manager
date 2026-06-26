@@ -939,13 +939,13 @@ export class DcThreeScene extends DcThreeCamera {
   setToolMode(mode: "none" | "measure" | "route"): void {
     if (this.toolMode === mode && mode === "none") return;
     this.toolMode = mode;
-    if (mode === "none") { this.measurePts = []; this.measureCursor = null; this.routePts = []; this.routeCursor = null; this.clearOverlay(); }
+    if (mode === "none") { this.measurePts = []; this.measureCursor = null; this.measureDone = []; this.measureHi = null; this.routePts = []; this.routeCursor = null; this.clearOverlay(); }
     const dom = this.renderer?.domElement; if (dom) dom.style.cursor = "default";
     this.request();
   }
 
   /** Données d'overlay poussées par la vue → reconstruit le tracé. */
-  setMeasureOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null): void { this.measurePts = pts || []; this.measureCursor = cursor; this.rebuildToolOverlay(); }
+  setMeasureOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null, done?: { x: number; y: number; z: number }[][], hi?: number | null): void { this.measurePts = pts || []; this.measureCursor = cursor; this.measureDone = done || []; this.measureHi = (hi == null) ? null : hi; this.rebuildToolOverlay(); }
   setRouteOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null): void { this.routePts = pts || []; this.routeCursor = cursor; this.rebuildToolOverlay(); }
 
   /** Point MONDE sous le curseur : 1re surface (mesh) touchée, à défaut intersection du rayon avec le plan du sol z=0. */
@@ -978,16 +978,26 @@ export class DcThreeScene extends DcThreeCamera {
     this.collectScreenObjs(); this.updateScreenScales(); this.request();
   }
 
-  /** Tracé de mesure : polyligne pleine des points posés + segment en cours (pointillé) + pastilles + longueurs. */
+  /** Tracé de mesure : mesures VALIDÉES (étiquette nom+total, surbrillance au survol) + mesure EN COURS (par segment). */
   protected drawMeasureOverlay(g: THREE.Group): void {
-    const COL = 0xffb020;   // orange (warn) — distinct des câbles/route
+    const COL = 0xffb020, HI = 0xffe48a;   // orange (warn) ; surbrillance = orange clair vif
+    (this.measureDone || []).forEach((mp, i) => {
+      const hot = i === this.measureHi, col = hot ? HI : COL;
+      this.drawMeasurePolyline(g, mp, col, false);   // mesure validée : pas d'étiquette par segment
+      const c = this.polyCentroid(mp); if (c) this.addToolLabel(g, "Mesure " + (i + 1) + " · " + Format.meters(this.polyLen(mp)), c);   // étiquette de la mesure
+    });
     const pts = this.measurePts;
-    if (pts.length >= 2) this.addToolLine(g, pts, COL, false);
-    if (this.measureCursor && pts.length) this.addToolLine(g, [pts[pts.length - 1], this.measureCursor], COL, true);
-    for (let i = 1; i < pts.length; i++) this.addToolLabel(g, Format.meters(this.segLen(pts[i - 1], pts[i])), { x: (pts[i - 1].x + pts[i].x) / 2, y: (pts[i - 1].y + pts[i].y) / 2, z: (pts[i - 1].z + pts[i].z) / 2 });
-    pts.forEach((p) => this.addToolDot(g, p, COL));
+    this.drawMeasurePolyline(g, pts, COL, true);   // mesure en cours : étiquettes par segment
+    if (this.measureCursor && pts.length) this.addToolLine(g, [pts[pts.length - 1], this.measureCursor], COL, true);   // segment en cours
     if (this.measureCursor) this.addToolDot(g, this.measureCursor, COL);
   }
+  protected drawMeasurePolyline(g: THREE.Group, pts: { x: number; y: number; z: number }[], col: number, segLabels: boolean): void {
+    if (pts.length >= 2) this.addToolLine(g, pts, col, false);
+    if (segLabels) for (let i = 1; i < pts.length; i++) this.addToolLabel(g, Format.meters(this.segLen(pts[i - 1], pts[i])), { x: (pts[i - 1].x + pts[i].x) / 2, y: (pts[i - 1].y + pts[i].y) / 2, z: (pts[i - 1].z + pts[i].z) / 2 });
+    pts.forEach((p) => this.addToolDot(g, p, col));
+  }
+  protected polyLen(pts: { x: number; y: number; z: number }[]): number { let s = 0; for (let i = 1; i < pts.length; i++) s += this.segLen(pts[i - 1], pts[i]); return s; }
+  protected polyCentroid(pts: { x: number; y: number; z: number }[]): { x: number; y: number; z: number } | null { if (!pts.length) return null; let x = 0, y = 0, z = 0; pts.forEach((p) => { x += p.x; y += p.y; z += p.z; }); const n = pts.length; return { x: x / n, y: y / n, z: z / n }; }
 
   /** Aperçu de route : polyligne (port → waypoints) + segment en cours vers le curseur (pointillé) + pastilles. */
   protected drawRouteOverlay(g: THREE.Group): void {
