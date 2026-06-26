@@ -59,7 +59,6 @@ export interface DcThreeOptions {
   cablesOnTop: boolean;   // câbles toujours au-dessus des équipements/baies (depthTest off) — défaut activé
   showFaceImages: boolean;   // images de façade plaquées sur les faces des équipements
   powerBoltSpacingMm: number;   // espacement des éclairs le long des câbles d'alimentation
-  cullDistanceM: number;        // distance de culling (m) — gouverne la visibilité « de près » des power bolts
 }
 
 export class DcThreeBase {
@@ -123,7 +122,7 @@ export class DcThreeBase {
   protected frameArgs: [number, number, number, number, number, number] | null = null;   // derniers args de cadrage
 
   // options d'affichage (poussées par DcBase ; défauts = tout visible)
-  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cablePortNormal: false, showEqNames: true, showRackSides: false, showPorts: true, showDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300, cullDistanceM: 15 };
+  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cablePortNormal: false, showEqNames: true, showRackSides: false, showPorts: true, showDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
   protected _pivot: THREE.Sprite | null = null;   // marqueur du centre de rotation (sprite billboard, taille écran constante)
   // FOCUS « Localiser » : cible caméra demandée par la vue (centre + emprise). Appliquée juste avant le rendu,
   // donc APRÈS le cadrage par défaut d'un éventuel (re)build → le focus prime. En attente tant que la scène n'est pas prête.

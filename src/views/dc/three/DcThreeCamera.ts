@@ -168,12 +168,9 @@ export class DcThreeCamera extends DcThreeBase {
     const objs = this._screenObjs; if (!objs || !objs.length) return;
     const wpp = this.worldPerPixel(), k = this.opts.markerScale || 1;
     const viewWidthM = (wpp * Math.max(1, this.host_el ? this.host_el.clientWidth : 1)) / 1000;
-    const boltsOn = this.opts.cullDistanceM > 0 && viewWidthM <= this.opts.cullDistanceM * 0.5;
+    const boltsOn = viewWidthM <= 7.5;   // power bolts (⚡) visibles seulement DE PRÈS (vue ≤ 7,5 m de large)
     objs.forEach((o) => { o.scale.setScalar((o.userData.screenSize as number) * wpp * k); if (o.userData.powerBolt) o.visible = boltsOn; });
   }
-
-  /** Met à jour le seuil de culling (slider) — gouverne la visibilité des power bolts — sans reconstruire. */
-  setCullDistance(v: number): void { this.opts.cullDistanceM = v; this.updateScreenScales(); this.request(); }
 
   /** Met à jour le facteur de taille des marqueurs en direct (slider), sans reconstruire. */
   setMarkerScale(v: number): void { this.opts.markerScale = v; this.updateScreenScales(); this.request(); }

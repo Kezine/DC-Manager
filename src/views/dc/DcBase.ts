@@ -53,9 +53,6 @@ export class DcBase {
   protected _measMouseClient: [number, number] | null = null;
   protected _measMouseTO: any = 0;
   protected _measHi: number | null = null;   // mesure terminée mise en évidence (survol du listing), ou null
-  protected _camC: Vec3 | null = null;   // centre caméra du dernier rendu 3D (pour l'aperçu de route → souris)
-  protected _routeMouseClient: [number, number] | null = null;
-  protected _routeMouseTO: any = 0;
   floorTarget: { location: string; floor: string } | null = null;   // étage visé (vue Étage), indépendant d'une salle
   // ROTATION de la vue 2D { angle, cx, cy, flip } : Étage = 180° ; Dessus = orientation salle + 180° → bord de réf. EN BAS.
   // Le flip horizontal donne une vraie vue « du dessus » (cohérente avec la 3D, et non « via le plancher »). Nul en 3D.
@@ -89,7 +86,7 @@ export class DcBase {
   searchTerm = "";                       // surlignage + filtrage des listes (équipements / câbles)
   focusEqId: string | null = null;       // équipement ciblé (surligné + caméra recentrée)
   // contrôles présents mais INERTES tant que la fonctionnalité n'est pas portée (cf. panneau « à venir »).
-  showFaceImages = true; showDoors = true; showDoorSwing = false; showFloorGrid = true; cablePortNormal = false; routePreviewToMouse = true; cullDistanceM = 15;
+  showFaceImages = true; showDoors = true; showDoorSwing = false; showFloorGrid = true; cablePortNormal = false;
   powerBoltSpacingMm = 300;             // espacement (mm) des éclairs ⚡ le long des câbles power
 
   useWebGL = true;                               // moteur 3D = WebGL (Three.js) — unique moteur 3D (le SVG legacy a été retiré)
@@ -105,16 +102,12 @@ export class DcBase {
   protected resolver: Resolver3D;
   protected floor: FloorLayout;
   protected routing: CableRouting;               // service de routage des câbles (agnostique du moteur — SVG + WebGL)
-  protected _multi: MultiLayout | null = null;   // disposition multi-salles du dernier rendu (null = mono)
   protected rowEl: HTMLElement | null = null;   // rangée stage|panneau — dimensionnée pour remplir le viewport
   protected svg: SVGSVGElement | null = null;
   protected gRoot: SVGGElement | null = null;
-  protected _raf3d = 0;
   protected _resizeT: any = 0;
   protected _pvTO: any = 0;              // persistance débouncée
   protected _restoredKey: string | null = null;   // clé (fileId) dont l'état a déjà été restauré
-  protected _farCull = false;            // vue « loin » → ports + emplacements libres non rendus (perf)
-  protected _navMoved = false;           // un glisser (orbite) vient d'avoir lieu → ne pas ouvrir de menu contextuel
   protected controlsEl: HTMLElement | null = null;   // overlay zoom / recentrage / points de vue (superposé au stage)
   protected floorRail: HTMLElement | null = null;     // vue Étage : rail de navigation rapide entre étages (flottant à gauche)
 
@@ -374,7 +367,7 @@ export class DcBase {
   /** Options d'affichage poussées au moteur WebGL (sous-ensemble implémenté ; le reste est sans effet). */
   protected webglOptions(): any {
     // COPIE de selCables : applyOptionsDiff compare old vs new ; une même référence (mutée) masquerait le changement.
-    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showPorts: this.showPorts, showDoors: this.showDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, cullDistanceM: this.cullDistanceM };
+    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showPorts: this.showPorts, showDoors: this.showDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm };
   }
 
   /** Contexte de scène pour le moteur WebGL : descripteur multi-salles + câbles transversaux (repère MONDE).
@@ -466,8 +459,8 @@ export class DcBase {
       case "port": { const p = s.get("ports", desc.id); sections = p ? this.portCtx(p, s.cableOnPort(p.id)) : null; break; }
       case "room": { const d = s.get("datacenters", desc.id); sections = d ? this.roomCtx(d) : null; break; }   // clic droit sur le sol d'un DC
     }
-    // appel DIRECT (pas via `ctxMenu`, qui attend un vrai MouseEvent — `stopPropagation` — et applique la garde
-    // anti-orbite `_navMoved` du moteur SVG) : le moteur WebGL a déjà filtré l'orbite via `_navMovedR` avant ctxCb.
+    // appel DIRECT (pas via `ctxMenu`, qui attend un vrai MouseEvent pour `stopPropagation`) : le moteur WebGL a
+    // déjà filtré l'orbite via `_navMovedR` avant d'appeler ctxCb.
     if (sections && sections.length) { this.hideTip(); this._webglTipId = null; ContextMenu.show(x, y, sections); }
   }
 
@@ -522,14 +515,14 @@ export class DcBase {
 
   /* ---- persistance de l'état de vue (par fichier, localStorage) ---- */
   protected viewStateKey(): string { return "netmap.view3d." + ((this.store.meta && this.store.meta.fileId) ? this.store.meta.fileId : "__nofile"); }
-  protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showDoorSwing", "showFloorGrid", "cablePortNormal", "routePreviewToMouse", "webglPerspective", "cablesOnTop"];
+  protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showDoorSwing", "showFloorGrid", "cablePortNormal", "webglPerspective", "cablesOnTop"];
 
   /** Écrit l'état (débouncé 300 ms) — évite une écriture par frame de pan/zoom. */
   protected persistView(): void {
     clearTimeout(this._pvTO);
     this._pvTO = setTimeout(() => {
       try {
-        const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, cullDistanceM: this.cullDistanceM, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
+        const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
         DcBase.TOGGLE_KEYS.forEach((k) => { o[k] = (this as any)[k]; });
         window.localStorage.setItem(this.viewStateKey(), JSON.stringify(o));
       } catch (_) { /* quota / indispo → ignoré */ }
@@ -544,9 +537,9 @@ export class DcBase {
     // défauts (état propre par fichier)
     this.az = CAM_PRESETS.iso[0]; this.el = CAM_PRESETS.iso[1]; this.scale = null; this.tx = 0; this.ty = 0; this.camTarget = null;
     this.hideFrontEq = false; this.hideRearEq = false; this.showPlaceholders = true; this.showRackSides = true; this.showPorts = true; this.showEqNames = true; this.showAllCables = true; this.showWaypoints = true; this.showConduits = true;
-    this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showDoorSwing = false; this.showFloorGrid = true; this.cablePortNormal = false; this.routePreviewToMouse = true;
+    this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showDoorSwing = false; this.showFloorGrid = true; this.cablePortNormal = false;
     this.useWebGL = true; this.webglPerspective = false; this.cablesOnTop = true;   // WebGL = unique moteur 3D ; projection/cables-on-top restaurés depuis TOGGLE_KEYS
-    this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1; this.cullDistanceM = 15;
+    this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1;
     this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set();
     this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeBuild = null; this.measure = null;
     this.selCables = new Set(); this.searchTerm = ""; this.focusEqId = null;
@@ -556,7 +549,6 @@ export class DcBase {
     if (o.colorMode === "face" || o.colorMode === "group" || o.colorMode === "type") this.colorMode = o.colorMode;
     if (typeof o.cableSplineK === "number") this.cableSplineK = Math.max(0, Math.min(0.32, o.cableSplineK));
     if (typeof o.markerScale === "number") this.markerScale = Math.max(0.25, Math.min(1.75, o.markerScale));
-    if (typeof o.cullDistanceM === "number") this.cullDistanceM = o.cullDistanceM;
     // caméra
     if (typeof o.az === "number") this.az = o.az;
     if (typeof o.el === "number") this.el = o.el;

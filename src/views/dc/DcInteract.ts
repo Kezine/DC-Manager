@@ -369,10 +369,9 @@ export class DcInteract extends DcPanels {
 
 
   /* ---- menus contextuels (clic droit) ---- */
-  /** Ouvre un menu contextuel (sauf si un glisser d'orbite vient d'avoir lieu). */
+  /** Ouvre un menu contextuel (vues 2D ; en 3D-WebGL le moteur gère son propre anti-orbite via `_navMovedR`). */
   protected ctxMenu(e: MouseEvent, sections: CtxSection[]): void {
     e.preventDefault(); e.stopPropagation();
-    if (this._navMoved) { this._navMoved = false; return; }
     if (sections.length) ContextMenu.show(e.clientX, e.clientY, sections);
   }
 

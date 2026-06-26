@@ -656,7 +656,6 @@ export class DcPanels extends DcViews2D {
     section("Câbles");
     tgi(D3, I.onTop, "Câbles toujours au-dessus des équipements / baies (moteur WebGL)", () => this.cablesOnTop, (v) => { this.cablesOnTop = v; if (this.useWebGL && this._three) { this._three.setCablesOnTop(v); this.persistView(); } else r3(); });
     tgi(D3, I.perp, "Sortie ⊥ des ports (20 mm) : les câbles quittent la face perpendiculairement sur 20 mm", () => this.cablePortNormal, (v) => { this.cablePortNormal = v; redraw(); });
-    tgi(D3, I.mouse, "Aperçu de route → souris (prolonge l'aperçu jusqu'au curseur pendant la création d'une route)", () => this.routePreviewToMouse, (v) => { this.routePreviewToMouse = v; if (!v && this.routeBuild) this.routeBuild.mouse = null; r3(); });
     section("Waypoints");
     tgi(ALL, I.marker, "Marqueurs de waypoint (pins, extrémités de chemins/brosses, OOB). N'affecte pas le routage des câbles.", () => this.showWaypoints, (v) => { this.showWaypoints = v; redraw(); });
     tgi(D3, I.conduit, "Brosses et passe-câbles (géométrie des conduits : bacs de chemins de câbles, coques des brosses)", () => this.showConduits, (v) => { this.showConduits = v; r3(); });
@@ -676,8 +675,6 @@ export class DcPanels extends DcViews2D {
       box.appendChild(this.slider("Arrondi des câbles", this.cableSplineK, 0, 0.32, 0.01, (val) => val.toFixed(2), (val) => { this.cableSplineK = val; if (this.useWebGL && this._three) { this._three.setCableSpline(val); this.persistView(); } else redraw(); }));
       // taille des marqueurs de waypoint + connecteurs de port (1 = défaut = milieu du range) — inerte en WebGL (pas de full rebuild).
       box.appendChild(this.slider("Taille marqueurs / ports", this.markerScale, 0.25, 1.75, 0.05, (val) => Math.round(val * 100) + " %", (val) => { this.markerScale = val; if (this.useWebGL && this._three) { this._three.setMarkerScale(val); this.persistView(); } else redraw(); }));
-      // culling de distance (slider)
-      box.appendChild(this.slider("Masquer ports/U au-delà", this.cullDistanceM, 1, 60, 1, (val) => Math.round(val) + " m", (val) => { this.cullDistanceM = Math.max(1, Math.min(60, Math.round(val))); if (this.useWebGL && this._three) this._three.setCullDistance(this.cullDistanceM); }, () => { if (this.useWebGL) this.persistView(); else r3(); }));
       box.appendChild(this.btn("Recentrer sur la salle", () => { this.camTarget = null; this.hidden3dRacks.clear(); this.scale = null; if (this.useWebGL && this._three) this._three.recenter(); else this.render(); }));
     }
     return box;
