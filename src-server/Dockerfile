@@ -11,15 +11,17 @@ COPY tsconfig*.json webpack.config.js ./
 COPY src ./src
 RUN npm run build
 
-# --- 2) backend Node + SQLite ---
+# --- 2) backend Node + SQLite (TypeScript → compilé) ---
 FROM node:20-bookworm-slim AS server
 WORKDIR /app
 # better-sqlite3 = module natif → chaîne de compilation
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 COPY src-server/package*.json ./
-RUN npm ci --omit=dev || npm install --omit=dev
+RUN npm ci || npm install
+COPY src-server/tsconfig.json ./
 COPY src-server/src ./src
+RUN npm run build && npm prune --omit=dev
 COPY --from=client /client/dist /client-dist
 ENV NODE_ENV=production CLIENT_DIR=/client-dist DB_FILE=/data/netmap.db PORT=3000 API_BASE=/api
 VOLUME ["/data"]

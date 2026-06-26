@@ -1,9 +1,9 @@
-import express from "express";
+import express, { type Request, type Response } from "express";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
-import { openDb } from "./db.js";
+import { openDb, type SqliteCtor } from "./db.js";
 import { createApi } from "./api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -13,26 +13,26 @@ const CLIENT_DIR = process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "d
 const API_BASE = process.env.API_BASE || "/api";
 
 fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
-const db = openDb(DB_FILE, Database);
+const db = openDb(DB_FILE, Database as unknown as SqliteCtor);
 
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "128mb" }));   // /snapshot et /transact peuvent être volumineux
 
-app.get("/healthz", (req, res) => res.json({ ok: true }));
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
 app.use(API_BASE, createApi(db));
-app.use(API_BASE, (req, res) => res.status(404).json({ error: "endpoint inconnu" }));   // 404 API (avant le fallback HTML)
+app.use(API_BASE, (_req, res) => res.status(404).json({ error: "endpoint inconnu" }));   // 404 API (avant le fallback HTML)
 
 /* --- service du CLIENT (HTML autonome) avec injection de window.__NETMAP_CONFIG__ ---
    La prod webpack produit un seul fichier dist/netmap.html (JS+CSS inlinés) : on injecte
    la config dans <head> AVANT le bundle pour activer le mode API sans configuration utilisateur. */
 const HTML_FILE = path.join(CLIENT_DIR, "netmap.html");
-function serveClient(req, res) {
-  let html;
+function serveClient(_req: Request, res: Response): void {
+  let html: string;
   try { html = fs.readFileSync(HTML_FILE, "utf8"); }
-  catch (_) { return res.status(503).send("Client introuvable (" + HTML_FILE + "). Lancez `npm run build` dans NetMap/."); }
+  catch { res.status(503).send("Client introuvable (" + HTML_FILE + "). Lancez `npm run build` dans NetMap/."); return; }
   const cfg = `<script>window.__NETMAP_CONFIG__=${JSON.stringify({ mode: "api", apiBaseUrl: API_BASE })};</script>`;
-  html = html.replace(/<head([^>]*)>/i, (m, attrs) => `<head${attrs}>${cfg}`);
+  html = html.replace(/<head([^>]*)>/i, (_m, attrs) => `<head${attrs}>${cfg}`);
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(html);
 }

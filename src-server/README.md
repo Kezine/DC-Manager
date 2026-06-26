@@ -1,4 +1,4 @@
-# NetMap — Backend REST (Node.js + SQLite)
+# NetMap — Backend REST (Node.js + SQLite, TypeScript)
 
 Implémente le contrat de [`docs/rest-migration.md`](../docs/rest-migration.md).
 Sert aussi le client (HTML autonome `dist/netmap.html`) en injectant
@@ -15,7 +15,8 @@ cd ..  &&  npm ci  &&  npm run build      # → dist/netmap.html
 cd src-server
 npm install                                # better-sqlite3 = module natif (compile)
 cp .env.example .env                       # ajuster si besoin
-npm run dev                                # http://localhost:3000
+npm run dev                                # tsx watch (TS direct) → http://localhost:3000
+# prod : npm run build (tsc → dist/) puis npm start
 ```
 
 Sans `SSO_URL`, l'auth est en **mode dev** (utilisateur factice `dev`).
@@ -48,7 +49,7 @@ serveur stocke les enregistrements bruts (le client hydrate). `meta` = 1 ligne.
 `images` = `(id, meta JSON, blob, bytes)`.
 
 > ⚠️ La liste des collections / champs-tableaux est dupliquée dans
-> [`src/constants.js`](src/constants.js) — garder en phase avec
+> [`src/constants.ts`](src/constants.ts) — garder en phase avec
 > `src/models/EntityRegistry.ts` et `src/data/config.ts` du client.
 
 ## Docker
