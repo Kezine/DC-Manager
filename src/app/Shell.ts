@@ -20,6 +20,8 @@ export interface ShellView {
   addLabel?: string;
   /** Action du bouton primaire. */
   onAdd?: () => void;
+  /** Boutons secondaires (ghost) de l'en-tête, avant le bouton primaire. */
+  extraActions?: Array<{ label: string; onClick: () => void; title?: string }>;
   /** Appelé à chaque activation (rendu / rafraîchissement) avec le corps de vue. */
   onShow?: (body: HTMLElement) => void;
 }
@@ -312,6 +314,8 @@ export class Shell {
       if (target.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; b.appendChild(badge); this.countBadges.push({ name: ln, el: badge }); }
       b.onclick = () => this.switchView(ln); acts.appendChild(b);
     });
+    // boutons secondaires (ghost) — ex. « Ouvrir un fichier de faces »
+    (def.extraActions || []).forEach((a) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost"; b.textContent = a.label; if (a.title) b.title = a.title; b.onclick = () => a.onClick(); acts.appendChild(b); });
     // bouton primaire « + … »
     if (def.onAdd) { const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-primary"; add.textContent = def.addLabel || "+ Nouveau"; add.onclick = () => def.onAdd!(); acts.appendChild(add); }
     v.header.append(left, acts);
