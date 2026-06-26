@@ -61,6 +61,15 @@ export class RackGeometry {
   static door(rack: any, face: string): any { return (face === "rear") ? rack.door_rear : rack.door_front; }
   /** Profondeur utile supplémentaire apportée par la cavité d'une porte creuse (0 sinon). */
   static doorExtraDepth(rack: any, face: string): number { const d = RackGeometry.door(rack, face); return (d && d.enabled && d.hollow) ? Math.max(0, d.hollow_mm | 0) : 0; }
+  /** Vrai si la baie porte au moins une porte (avant ou arrière) activée. */
+  static hasDoor(rack: any): boolean { const f = RackGeometry.door(rack, "front"), r = RackGeometry.door(rack, "rear"); return !!((f && f.enabled) || (r && r.enabled)); }
+  /** Profondeur PHYSIQUE disponible pour un montage ancré au plan AVANT (montants en U / brosse) : du plan de
+      montage avant jusqu'à la face arrière (`profondeur − marge avant`) + cavités des portes av/ar. Marge de
+      sécurité NON retranchée (cf. RACK_DEPTH_SAFETY_MM côté formulaire). */
+  static frontMountAvailDepth(rack: any): number {
+    const d = rack.depth || RACK_DEPTH_DEFAULT;
+    return d - RackGeometry.frontMargin(rack) + RackGeometry.doorExtraDepth(rack, "front") + RackGeometry.doorExtraDepth(rack, "rear");
+  }
 
   /* ---- au sol ---- */
 
@@ -196,16 +205,19 @@ export class RackGeometry {
 
   /* ---- capots (toit/sol) ---- */
 
-  /** Grille au pas 1U du capot (largeur × profondeur). */
+  /** Grille au pas 1U du capot (largeur × profondeur), CENTRÉE : la largeur/profondeur n'étant pas un multiple
+      exact de 1U, le reste est réparti en marge ÉGALE de chaque côté (`mx`/`my`) → trous symétriques. La marge
+      n'est pas perçable (hors grille) mais reste couverte par la plaque. `mx`/`my` < 0 si 1U > dimension (rare). */
   static capGrid(rack: any): any {
     const w = rack.width_mm || RACK_WIDTH_DEFAULT, d = rack.depth || RACK_DEPTH_DEFAULT;
-    return { w, d, nx: Math.max(1, Math.round(w / U_MM)), ny: Math.max(1, Math.round(d / U_MM)), cell: U_MM };
+    const nx = Math.max(1, Math.round(w / U_MM)), ny = Math.max(1, Math.round(d / U_MM));
+    return { w, d, nx, ny, cell: U_MM, mx: (w - nx * U_MM) / 2, my: (d - ny * U_MM) / 2 };
   }
   /** Cellules autorisées d'un capot ("roof" | "floor"). */
   static capCells(rack: any, face: string): string[] { const v = (face === "floor") ? rack.floor_cells : rack.roof_cells; return Array.isArray(v) ? v : []; }
-  /** Centre LOCAL (repère baie) d'une cellule (cx,cy) du capot. */
+  /** Centre LOCAL (repère baie) d'une cellule (cx,cy) du capot (grille centrée). */
   static capCellLocalCenter(rack: any, cx: number, cy: number): { lx: number; ly: number } {
     const g = RackGeometry.capGrid(rack);
-    return { lx: -g.w / 2 + ((cx | 0) + 0.5) * g.cell, ly: -g.d / 2 + ((cy | 0) + 0.5) * g.cell };
+    return { lx: -g.w / 2 + g.mx + ((cx | 0) + 0.5) * g.cell, ly: -g.d / 2 + g.my + ((cy | 0) + 0.5) * g.cell };
   }
 }

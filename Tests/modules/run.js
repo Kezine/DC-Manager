@@ -584,23 +584,14 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     window.localStorage.clear();
   }
 
-  console.log("\n• DatacenterView : projection caméra orbitale (round-trip / presets)");
+  console.log("\n• DatacenterView : presets caméra + résolution de câbles (helpers partagés avec la 2D)");
   {
+    // NB : le moteur 3D SVG legacy (projection orbitale, builders) a été retiré — la 3D passe par le moteur WebGL.
+    // Ne subsistent côté vue que les helpers de câbles partagés avec les vues 2D (resolvedCables / outgoingCableStubs).
     const s = await makeStore();
     const dv = new DatacenterView(s, {}, {});   // garde headless (pas de document) → méthodes pures testables
-    dv.az = -0.62; dv.el = 0.46;
-    const c = { x: 1000, y: 800, z: 600 }, p = { x: 1500, y: 200, z: 900 };
-    const q = dv.project3DCam(p, c);
-    ck(isFinite(q.h) && isFinite(q.v) && isFinite(q.depth), "project3DCam → projeté fini (h,v,depth)");
-    const back = dv.unproject3DCam(q.h, q.v, q.depth, c);
-    ck(Math.abs(back.x - p.x) < 1e-6 && Math.abs(back.y - p.y) < 1e-6 && Math.abs(back.z - p.z) < 1e-6, "unproject3DCam = inverse exact de project3DCam");
     dv.setCamPreset("top"); ck(Math.abs(dv.el - Math.PI / 2) < 1e-9, "preset « Dessus » → élévation π/2");
     dv.setCamPreset("front"); ck(dv.az === 0 && dv.el === 0, "preset « Face » → az=0, el=0");
-    // vue de dessus (el=π/2, caméra zénithale) : un point plus HAUT (z+) est plus PROCHE → profondeur plus PETITE
-    // (peintre = loin d'abord ⇒ il est peint au-dessus).
-    dv.setCamPreset("top");
-    const low = dv.project3DCam({ x: 0, y: 0, z: 0 }, c), high = dv.project3DCam({ x: 0, y: 0, z: 500 }, c);
-    ck(high.depth < low.depth, "vue Dessus : z plus haut → profondeur plus petite (peint au-dessus)");
 
     // résolution des câbles INTRA-salle : 2 équipements rackés reliés → 1 câble résolu (2 points).
     const dc = await s.create("datacenters", { name: "DC" });
@@ -624,20 +615,11 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(stubs.length, 1, "outgoingCableStubs : 1 câble sortant de la salle");
     ck(stubs[0].cable.id === outCable.id && stubs[0].pts.length >= 2 && stubs[0].pts.every((p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z)), "outgoingCableStubs : port → exit, points finis");
     ck.eq(dv.outgoingCableStubs(dc.id).length + dv.outgoingCableStubs(dc2.id).length, 2, "outgoingCableStubs : tracé dans CHAQUE salle traversée");
-    // routes INTER-DC (multi-salles) : le câble dcA≠dcB est tracé globalement d'une salle à l'autre
+    // routes INTER-DC (multi-salles) : déléguées au service de routage `CableRouting` (réutilisé par le moteur WebGL).
     const mInter = new FloorLayout(s).multiLayout(dc, { visibleDcIds: new Set([dc.id, dc2.id]) });
-    const inter = dv.interDcRoutes(mInter);
-    ck.eq(inter.length, 1, "interDcRoutes : 1 route inter-salles");
-    ck(inter[0].cable.id === outCable.id && inter[0].pts.length >= 2 && inter[0].pts.every((p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z)), "interDcRoutes : port A → port B, points monde finis");
-    // câbles d'équipement d'ÉTAGE : un bout « floor » résolu en point monde
-    const apEq = await s.create("equipments", { name: "AP", placement_mode: "floor", dim_mode: "free", location: "", floor: "", floor_x: 1000, floor_y: 1000, free_w_mm: 200, free_l_mm: 200, free_h_mm: 100 });
-    const apPort = (await s.create("ports", { equipment_id: apEq.id, name: "p", face_side: "top", face_x: 0.5, face_y: 0.5 })).id;
-    ck(dv.isFloorPort(apPort) === true && dv.isFloorPort(pa) === false, "isFloorPort : vrai pour étage, faux pour racké");
-    const mF = new FloorLayout(s).multiLayout(dc, { visibleDcIds: new Set([dc.id]) });
-    const roomByIdF = new Map(mF.rooms.map((r) => [r.dc.id, r]));
-    const shownF = new Set(mF.floorPlanes.map((fp) => (fp.loc || "") + "" + String(fp.floor || "")));
-    const endF = dv.resolveFloorCableEnd(mF, roomByIdF, shownF, apPort);
-    ck(endF && isFinite(endF.x) && isFinite(endF.y) && isFinite(endF.z) && endF.rackId === null, "resolveFloorCableEnd (étage) → point monde fini, sans baie");
+    const inter = dv.routing.interDcRoutes(mInter, false);
+    ck.eq(inter.length, 1, "routing.interDcRoutes : 1 route inter-salles");
+    ck(inter[0].cable.id === outCable.id && inter[0].pts.length >= 2 && inter[0].pts.every((p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z)), "routing.interDcRoutes : port A → port B, points monde finis");
     // route builder : départ port A → waypoint → port B → ouvre le form câble prérempli
     // (on pose routeBuild directement : routeArm/routeStart émettent un toast → besoin du DOM, absent ici)
     let routed = null;
@@ -676,19 +658,8 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     dv.showAllCables = true; ck(dv.cableShown({ cable: { id: "x" } }) === true, "cableShown : tout affiché → vrai");
     dv.showAllCables = false; ck(dv.cableShown({ cable: { id: "x" } }) === false, "cableShown : non sélectionné → faux");
     dv.selCables = new Set(["x"]); ck(dv.cableShown({ cable: { id: "x" } }) === true, "cableShown : sélectionné → vrai");
-    // coloration des équipements (colorMode)
-    const grp = await s.create("groups", { label: "G", color: "#abcdef" });
-    const eC = await s.create("equipments", { name: "col", type: "switch", group_id: grp.id });
-    dv.colorMode = "face"; ck.eq(dv.eqFill(eC.id), null, "eqFill(face) → null (défaut CSS)");
-    dv.colorMode = "group"; ck.eq(dv.eqFill(eC.id), "#abcdef", "eqFill(group) → couleur du groupe");
-    dv.colorMode = "type"; ck(typeof dv.eqFill(eC.id) === "string" && dv.eqFill(eC.id).length > 0, "eqFill(type) → couleur de type");
-    dv.colorMode = "face";
-    // largeur de vue (culling de distance) : 900 px (défaut headless) / scale → mètres
-    dv.scale = 0.01; ck(Math.abs(dv.camViewWidthM(null) - 90) < 1, "camViewWidthM : 900px / 0.01 → ~90 m"); dv.scale = null;
-    // câbles d'alimentation (éclairs ⚡)
-    const powerCt = s.all("cableTypes").find((t) => t.kind === "power");
-    if (powerCt) { const pc = await s.create("cables", { name: "pwr", cable_type_id: powerCt.id }); ck(dv.cableIsPower(pc) === true, "cableIsPower(type power) → vrai"); }
-    ck(dv.cableIsPower({ cable_type_id: null }) === false, "cableIsPower(sans type) → faux");
+    // NB : coloration d'équipement (eqFill), largeur de vue (camViewWidthM) et éclairs power (cableIsPower) étaient
+    // des helpers du moteur 3D SVG retiré — ils vivent désormais dans le moteur WebGL (occColor / updateScreenScales).
   }
 
   console.log("\n• FloorLayout : disposition multi-salles (étages empilés, bâtiments côte à côte)");

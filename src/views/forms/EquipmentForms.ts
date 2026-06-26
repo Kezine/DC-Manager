@@ -149,10 +149,11 @@ export class EquipmentForms extends FormBase {
         let bk = "";
         if (store.isBreakoutParent(p)) bk = ` <span class="pill">trunk ×${store.breakoutLanes(p.id).length}</span>`;
         else if (p.parent_port_id) { const par: any = store.get("ports", p.parent_port_id); bk = ` <span class="pill">lane ${p.lane || "?"} · ${Html.escape(par ? (par.name || "trunk") : "trunk")}</span>`; }
-        return `<tr><td class="cell-name">${Html.escape(p.name || "(port)")}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : '<span style="color:var(--err)">type ?</span>'}</td><td><span class="pill role-${p.role === "mgmt" ? "mgmt" : (p.role === "power" ? "power" : "data")}">${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || "(agrégat)") : '<span style="color:var(--fg-dimmer)">—</span>'}</td></tr>`;
+        return `<tr><td class="cell-name">${Html.escape(p.name || "(port)")}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : '<span style="color:var(--err)">type ?</span>'}</td><td><span class="pill role-${p.role === "mgmt" ? "mgmt" : (p.role === "power" ? "power" : "data")}">${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || "(agrégat)") : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate ? `<button class="row-btn" data-port-locate="${p.id}" title="Localiser le port en 3D">📍</button>` : ""}</td></tr>`;
       }).join("");
-      tw.innerHTML = `<table><thead><tr><th>Port</th><th>Type</th><th>Rôle</th><th>Agrégat</th></tr></thead><tbody>${rows}</tbody></table>`;
+      tw.innerHTML = `<table><thead><tr><th>Port</th><th>Type</th><th>Rôle</th><th>Agrégat</th><th style="text-align:right;">3D</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
+      tw.querySelectorAll("[data-port-locate]").forEach((b) => { (b as HTMLElement).onclick = () => host.locate?.("port", (b as HTMLElement).dataset.portLocate!); });
     } else { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = "Aucun port."; root.appendChild(e); }
 
     // câbles connectés
@@ -177,7 +178,8 @@ export class EquipmentForms extends FormBase {
     }
 
     // Modifier → formulaire d'édition (remplace la fiche par la modale d'édition)
-    const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end";
+    const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
+    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.textContent = "📍 Localiser en 3D"; locBtn.onclick = () => host.locate!("equipment", eq.id); actions.appendChild(locBtn); }
     const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = "Modifier";
     editBtn.onclick = () => this.equipment(store, host, eq.id, onChanged);
     actions.appendChild(editBtn); root.appendChild(actions);

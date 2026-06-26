@@ -45,6 +45,7 @@ export const WAYPOINT_Z_DEFAULT = 2400;       // hauteur par défaut d'un waypoi
 export const CONDUIT_W_DEFAULT = 300;         // largeur de section d'un chemin de câbles (mm)
 export const CONDUIT_H_DEFAULT = 100;         // hauteur de section (mm)
 export const BRUSH_PADDING_MM = 10;           // brosse : padding interne du pourtour (mm)
+export const RACK_DEPTH_SAFETY_MM = 100;      // marge de sécurité (mm) retranchée de la profondeur dispo derrière une porte (montage en U / brosse). 0 = aucune.
 
 /* ---- breakout ----
    Facteurs de BREAKOUT standard (« spans »). Un breakout impose TOUJOURS débit(trunk) =

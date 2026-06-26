@@ -14,6 +14,7 @@ import { RackScene } from "../../geometry/RackScene";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { Resolver3D } from "../../geometry/Resolver3D";
 import { FloorLayout } from "../../geometry/FloorLayout";
+import { CableRouting } from "../../geometry/CableRouting";
 import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
 import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
@@ -27,6 +28,8 @@ import { CableStatuses } from "../../domain/CableStatuses";
 import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
 import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
 import type { Vec3, Drawable, DatacenterHost } from "./shared";
+// SPIKE : moteur 3D WebGL parallèle — importé DYNAMIQUEMENT (webpackMode "eager" → reste inliné single-file ;
+// et la chaîne require() CJS du harnais de test ne charge pas ses dépendances ESM-only comme Line2).
 
 export class DcBase {
   protected store: Store;
@@ -44,6 +47,11 @@ export class DcBase {
   freePlace = false;                                            // « Placement libre » : désactive l'aimantation à la grille au glisser
   blockEdit = false;                                            // mode « Cases inaccessibles » : glisser pour (dé)marquer des cases
   routeBuild: { fromPortId: string | null; wpIds: string[]; armed?: boolean; mouse?: Vec3 | null } | null = null;   // session de routage 3D
+  // Outil de MESURE multipoint (éphémère, exclusif du routage). `pts`/`cursor` en coordonnées du CONTEXTE (`ctx` :
+  // salle mono / monde multi / plan d'étage) ; raycast sur les surfaces en 3D, plan du sol en 2D. Voir DcInteract.
+  measure: { active: boolean; ctx: string; pts: Vec3[]; cursor: Vec3 | null } | null = null;
+  protected _measMouseClient: [number, number] | null = null;
+  protected _measMouseTO: any = 0;
   protected _camC: Vec3 | null = null;   // centre caméra du dernier rendu 3D (pour l'aperçu de route → souris)
   protected _routeMouseClient: [number, number] | null = null;
   protected _routeMouseTO: any = 0;
@@ -59,12 +67,12 @@ export class DcBase {
   tx = 0; ty = 0;
   camTarget: Vec3 | null = null;
   hidden3dRacks = new Set<string>();
+  hiddenDoorRacks = new Set<string>();   // baies dont les PORTES sont masquées (par baie, menu contextuel)
   selRackId: string | null = null;
   slotSel: { rackId: string; side: string; lo: number; hi: number } | null = null;   // sélection U multiple (Ctrl+clic) — plage contiguë même baie/face
   multiDc = false;                       // vue 3D multi-salles (étages empilés, bâtiments côte à côte)
   visibleDcIds = new Set<string>();      // salles affichées en multi-salles (∪ salle active)
   visibleSites = new Set<string>();      // sites/bâtiments accessibles à l'UI (vide = tous) — filtre vue Étage / rail / portée 3D
-  fadedRacks = new Set<string>();        // baies estompées (translucides — voir au travers)
   protected expanded = new Set<string>();  // cartes du panneau DÉPLIÉES (repliées par défaut)
   protected _cableEqFilter = "";           // filtre de la liste de câbles par équipement (aide à la sélection)
   protected _cableSearch = "";             // filtre texte de la liste de câbles
@@ -81,12 +89,21 @@ export class DcBase {
   searchTerm = "";                       // surlignage + filtrage des listes (équipements / câbles)
   focusEqId: string | null = null;       // équipement ciblé (surligné + caméra recentrée)
   // contrôles présents mais INERTES tant que la fonctionnalité n'est pas portée (cf. panneau « à venir »).
-  showFaceImages = true; showDoors = true; showFloorGrid = true; cablePortNormal = false; routePreviewToMouse = true; cullDistanceM = 15;
+  showFaceImages = true; showDoors = true; showDoorSwing = false; showFloorGrid = true; cablePortNormal = false; routePreviewToMouse = true; cullDistanceM = 15;
   powerBoltSpacingMm = 300;             // espacement (mm) des éclairs ⚡ le long des câbles power
+
+  useWebGL = true;                               // moteur 3D = WebGL (Three.js) — unique moteur 3D (le SVG legacy a été retiré)
+  webglPerspective = false;                      // projection du moteur WebGL : false = ortho · true = perspective
+  cablesOnTop = true;                            // WebGL : câbles dessinés au-dessus des équipements/baies (défaut activé)
+  protected _three: any = null;                  // instance DcThreeScene (chargée à la demande)
+  protected _focusTarget: { p: Vec3; extent: number } | null = null;   // cible « Localiser » à pousser au moteur après (re)rendu
+  protected _webglHost: HTMLElement | null = null;
+  protected _webglRev: number | null = null;     // révision du store au dernier (re)build WebGL → éviter un build complet au simple retour de vue
 
   protected scene: RackScene;
   protected resolver: Resolver3D;
   protected floor: FloorLayout;
+  protected routing: CableRouting;               // service de routage des câbles (agnostique du moteur — SVG + WebGL)
   protected _multi: MultiLayout | null = null;   // disposition multi-salles du dernier rendu (null = mono)
   protected rowEl: HTMLElement | null = null;   // rangée stage|panneau — dimensionnée pour remplir le viewport
   protected svg: SVGSVGElement | null = null;
@@ -103,7 +120,7 @@ export class DcBase {
 
 
   constructor(store: Store, mount: HTMLElement, host: DatacenterHost = {}) {
-    this.store = store; this.host = host; this.stage = mount; this.scene = new RackScene(store); this.resolver = new Resolver3D(store); this.floor = new FloorLayout(store);
+    this.store = store; this.host = host; this.stage = mount; this.scene = new RackScene(store); this.resolver = new Resolver3D(store); this.floor = new FloorLayout(store); this.routing = new CableRouting(store, this.resolver, this.floor);
     // Garde headless : sans `document` (tests Node), projection/cadrage restent utilisables.
     if (typeof document === "undefined") return;
     this.toolbarEl = document.createElement("div");
@@ -223,7 +240,7 @@ export class DcBase {
 
 
   /* ---- scène SVG ---- */
-  protected clearStage(): void { Array.from(this.stage.childNodes).forEach((n) => { if (n !== this.controlsEl && n !== this.floorRail) this.stage.removeChild(n); }); this.coteEl = null; this.ttEl = null; }
+  protected clearStage(): void { Array.from(this.stage.childNodes).forEach((n) => { if (n !== this.controlsEl && n !== this.floorRail && n !== this._webglHost) this.stage.removeChild(n); }); this.coteEl = null; this.ttEl = null; }
 
   protected newScene(dc: any): SVGGElement {
     this.clearStage();
@@ -231,25 +248,34 @@ export class DcBase {
     const svg = Dom.svg("svg", { class: "dc-svg", width: SW, height: SH }) as SVGSVGElement;
     this.svg = svg;
     const gRoot = Dom.svg("g") as SVGGElement; this.gRoot = gRoot; svg.appendChild(gRoot);
-    svg.addEventListener("mousedown", (ev) => {
-      if (this.view === "top" || this.view === "floor") { if (ev.button === 0) this.startPan2D(ev); return; }   // 2D : glisser le fond = pan
-      // 3D : GAUCHE = déplacement du modèle · DROIT/Maj = orbite (boutons inversés, fidèle au monolithe).
-      if (ev.button === 2 || ev.shiftKey) this.startOrbit(ev, dc); else if (ev.button === 0) this.startTargetPan(ev, dc);
+    // MODE MESURE : le contenu de la scène devient inerte au pointeur (CSS `.dc-measuring * { pointer-events:none }`)
+    // → seuls les handlers du <svg> reçoivent les événements : le GLISSER navigue (pan/orbite, non inhibé) et le
+    // CLIC franc pose un point. Les actions de clic normales (édition baie/câble/waypoint) sont ainsi neutralisées.
+    if (this.measure && this.measure.active) svg.classList.add("dc-measuring");
+    let mdX = 0, mdY = 0;   // position du dernier mousedown → distinguer le clic franc du glisser de navigation
+    // newScene ne sert QUE les vues 2D (Plan de salle / Plan d'étage) — la 3D est rendue par le moteur WebGL (canvas).
+    svg.addEventListener("mousedown", (ev) => { mdX = ev.clientX; mdY = ev.clientY; if (ev.button === 0) this.startPan2D(ev); });   // glisser le fond = pan 2D
+    // CLIC franc en mode mesure (≤ 4 px de déplacement = pas un glisser de navigation) → pose un point.
+    svg.addEventListener("click", (ev) => {
+      if (!this.measure || !this.measure.active || ev.button !== 0) return;
+      if (Math.hypot(ev.clientX - mdX, ev.clientY - mdY) > 4) return;
+      this.measurePlaceAt(ev.clientX, ev.clientY);
     });
     svg.addEventListener("contextmenu", (e) => e.preventDefault());
-    // aperçu de route jusqu'à la SOURIS (3D), throttlé
+    // aperçu de MESURE jusqu'à la SOURIS (2D ET 3D), throttlé — segment courant en pointillé + cote (longueur live).
     svg.addEventListener("mousemove", (ev) => {
-      if (this.view !== "3d" || !this.routePreviewToMouse || !this.routeBuild || !this.routeBuild.fromPortId || !this._camC) return;
-      this._routeMouseClient = [ev.clientX, ev.clientY];
-      if (this._routeMouseTO) return;
-      this._routeMouseTO = setTimeout(() => {
-        this._routeMouseTO = 0;
-        const m = this._routeMouseClient; if (!m || !this.svg || !this.routeBuild || this.scale == null || !this._camC) return;
-        const r = this.svg.getBoundingClientRect(), s = this.scale;
-        this.routeBuild.mouse = this.unproject3DCam((m[0] - r.left - this.tx) / s, (m[1] - r.top - this.ty) / s, 0, this._camC);
-        this.refreshRoutePreview3D();   // MAJ du SEUL aperçu (pas de reconstruction de scène → cibles cliquables préservées)
-      }, 45);
-    });
+      if (!this.measure || !this.measure.active || !this.measureActiveHere() || !this.measure.pts.length) return;
+      this._measMouseClient = [ev.clientX, ev.clientY];
+      if (this._measMouseTO) return;
+      this._measMouseTO = setTimeout(() => {
+        this._measMouseTO = 0;
+        const mc = this._measMouseClient; if (!mc || !this.measure || !this.measure.active) return;
+        this.measure.cursor = this.measurePick(mc[0], mc[1]);
+        this.refreshMeasurePreview();
+        const last = this.measure.pts[this.measure.pts.length - 1];
+        if (this.measure.cursor) this.showCote(Format.meters(this.measureLen(last, this.measure.cursor)), mc[0], mc[1]); else this.hideCote();
+      }, 40);
+    }, true);
     svg.addEventListener("wheel", (ev) => this.onWheel(ev), { passive: false });
     this.stage.insertBefore(svg, this.stage.firstChild);
     return gRoot;
@@ -288,6 +314,13 @@ export class DcBase {
 
   render(): void {
     if (typeof document === "undefined") return;
+    // SPIKE WebGL : on NE démonte le moteur Three QUE si on bascule sur la 3D LEGACY (SVG) — qui occupe le même
+    // stage. On le PRÉSERVE en changeant d'onglet ou de sous-vue (Dessus/Étage) : le canvas est détaché par
+    // clearStage mais le contexte/scène persistent (réattachés au retour) → pas de réinitialisation coûteuse.
+    if (this._three && this.view === "3d" && !this.useWebGL) { this._three.dispose(); this._three = null; this._webglHost = null; }
+    // hôte WebGL PERSISTANT : visible seulement en 3D-WebGL, sinon MASQUÉ mais conservé attaché (exclu de clearStage)
+    // → au retour en 3D, la garde de révision évite la reconstruction (pas de re-dessin de toute la scène).
+    if (this._webglHost) this._webglHost.style.display = (this.view === "3d" && this.useWebGL) ? "" : "none";
     const showControls = (on: boolean) => { if (this.controlsEl) this.controlsEl.style.display = on ? "flex" : "none"; };
     this.updateControls();
     if (this.floorRail && this.view !== "floor") this.floorRail.style.display = "none";   // rail d'étages : vue Étage uniquement
@@ -302,7 +335,162 @@ export class DcBase {
     this.renderSide(dc);
     if (!dc) { showControls(false); this.clearStage(); const p = document.createElement("p"); p.style.cssText = "padding:24px;color:var(--fg-dim)"; p.textContent = "Aucune salle (datacenter). Créez-en une pour la visualiser en 3D."; this.stage.appendChild(p); return; }
     showControls(true);
-    if (this.view === "top") this.renderTop(dc); else this.renderThreeD(dc);
+    if (this.view === "top") this.renderTop(dc);
+    else {   // vue 3D : moteur WebGL (unique moteur 3D)
+      if (this.svg) { this.clearStage(); this.svg = null; }   // retire une scène SVG résiduelle (l'hôte WebGL persistant est conservé)
+      // RETOUR DE VUE sans changement de données + hôte toujours attaché → chemin DIFF (souvent un no-op),
+      // pas de build complet. Sinon (1er rendu / données modifiées) → (re)build.
+      const attached = !!(this._three && this._webglHost && this._webglHost.parentElement === this.stage);
+      if (attached && this._webglRev === this.store.histIndex()) this.renderThreeD(dc);
+      else this.renderWebGL(dc);
+    }
+  }
+
+  /** Re-render LÉGER pour un simple changement d'OPTION d'affichage (ex. visibilité d'un câble) : en WebGL 3D,
+      diff (`applyOptionsDiff` → rebuild de la seule catégorie touchée) au lieu d'un full build coûteux
+      (`renderWebGL` reconstruit baies + occupants + textures de noms ≈ 1 s). Panneau latéral rafraîchi normalement
+      (peu coûteux : états de toggles dépendants). Hors WebGL/3D : `render()` complet (chemin inchangé). */
+  protected rerenderView(): void {
+    if (!(this.view === "3d" && this.useWebGL && this._three)) { this.render(); return; }
+    const dc = this.current(); if (!dc) { this.render(); return; }
+    this.renderSide(dc);
+    this.persistView();
+    this._three.applyOptionsDiff(this.webglOptions(), dc.id, this.webglCtx());
+  }
+
+  /* ---- SPIKE : rendu via le moteur WebGL (Three.js) ---- */
+  /** Options d'affichage poussées au moteur WebGL (sous-ensemble implémenté ; le reste est sans effet). */
+  protected webglOptions(): any {
+    // COPIE de selCables : applyOptionsDiff compare old vs new ; une même référence (mutée) masquerait le changement.
+    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), hiddenDoors: new Set(this.hiddenDoorRacks), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showPorts: this.showPorts, showDoors: this.showDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, cullDistanceM: this.cullDistanceM };
+  }
+
+  /** Contexte de scène pour le moteur WebGL : descripteur multi-salles + câbles transversaux (repère MONDE).
+      La logique de routage (inter-DC / stubs sortants) reste ici (réutilise les helpers SVG) ; le moteur ne fait
+      que tracer les tubes — pas de réimplémentation côté Three. */
+  protected webglCtx(): any {
+    if (this.view !== "3d" || !this.useWebGL) return { multi: null, extraCables: [], floorDecor: null };
+    const shown = (c: any) => this.showAllCables || this.selCables.has(c.id);   // visibilité = état de vue
+    const extraCables: any[] = [];
+    const isPower = (c: any) => { const t: any = c && c.cable_type_id ? this.store.get("cableTypes", c.cable_type_id) : null; return !!(t && t.kind === "power"); };
+    const push = (cable: any, linePts: any[], straight?: Set<number>, stubAt?: Set<number>) => {
+      if (!shown(cable)) return;
+      extraCables.push({ id: cable.id, color: this.routing.cableColor(cable), line: linePts.map((p) => ({ x: p.x, y: p.y, z: p.z })), straight: straight ? [...straight] : [], stubAt: stubAt ? [...stubAt] : [], power: isPower(cable) });
+    };
+    let multi: any = null, floorDecor: any = null;
+    if (this.multiDc) {
+      const m = this.floor.multiLayout(this.current(), { visibleDcIds: this.visibleDcIds });
+      if (m.rooms.length) {
+        // CENTROÏDE DYNAMIQUE : boîte englobante des salles VISIBLES (et non la boîte théorique totalW×maxD×topZ,
+        // dominée par la hauteur empilée → caméra mal cadrée). Pivot + cadrage suivent le contenu réellement affiché.
+        const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+        const acc = (p: any) => { for (let k = 0; k < 3; k++) { const v = k === 0 ? p.x : k === 1 ? p.y : p.z; lo[k] = Math.min(lo[k], v); hi[k] = Math.max(hi[k], v); } };
+        m.rooms.forEach((rm: any) => { const W = rm.dc.width_mm || 4000, D = rm.dc.depth_mm || 3000; ([[0, 0], [W, 0], [W, D], [0, D]] as Array<[number, number]>).forEach(([x, y]) => [0, m.stackH].forEach((z: number) => acc(FloorLayout.roomToWorld(rm, { x, y, z })))); });
+        const center = { x: (lo[0] + hi[0]) / 2, y: (lo[1] + hi[1]) / 2, z: (lo[2] + hi[2]) / 2 };
+        const extent = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 2000);
+        multi = {
+          center, extent,
+          rooms: m.rooms.map((rm: any) => ({ dcId: rm.dc.id, ox: rm.off.x, oy: rm.off.y, oz: rm.off.z, o: rm.o, w: rm.dc.width_mm, d: rm.dc.depth_mm })),
+        };
+        this.routing.interDcRoutes(m, this.cablePortNormal).forEach((rc: any) => push(rc.cable, rc.linePts, rc.straight, rc.stubAt));   // routes inter-DC (monde)
+        // décor d'étage (plans/OOB/étiquettes) SEULEMENT en vrai multi (≥ 2 salles) → une seule salle = on ne dessine que la salle.
+        floorDecor = m.rooms.length > 1 ? this.webglFloorDecor(m) : null;
+      }
+    } else {
+      const dc = this.current();
+      if (dc) {
+        // UNIFIÉ : la salle unique est décrite comme un « multi » à 1 salle (repère identité) → MÊME chemin
+        // incrémental (applyRoomDelta + cache chaud) que le Multi-DC → bascule simple↔multi sans rebuild complet.
+        const W = dc.width_mm || 4000, D = dc.depth_mm || 3000, H = Math.max(this.zRef(dc) || 0, 1000);
+        multi = { center: { x: W / 2, y: D / 2, z: H / 2 }, extent: Math.max(W, D, H, 2000), rooms: [{ dcId: dc.id, ox: W / 2, oy: D / 2, oz: 0, o: 0, w: W, d: D }] };
+        this.routing.outgoingCableStubs(dc.id, this.cablePortNormal).forEach((st: any) => { if (!this.hidden3dRacks.has(st.portRackId)) push(st.cable, st.linePts, st.straight, st.stubAt); });   // stubs sortants → mur
+        floorDecor = null;   // une seule salle : pas de décor d'étage
+      }
+    }
+    return { multi, extraCables, floorDecor };
+  }
+
+  /** Décor d'étage (repère MONDE) à partir de la disposition `multiLayout` : plans, OOB posés, étiquettes. */
+  protected webglFloorDecor(m: any): any {
+    const shown = new Set(m.floorPlanes.map((fp: any) => (fp.loc || "") + "" + String(fp.floor || "")));
+    const planes = m.floorPlanes.map((fp: any) => ({ W: fp.cfg.width_mm, D: fp.cfg.depth_mm, cell: fp.cfg.cell_mm || 600, ox: fp.off.x, oy: fp.off.y, z: fp.off.z, blocked: (fp.cfg.blocked_cells || []).slice() }));
+    const oobs = this.store.oobWaypoints()
+      .filter((wp: any) => shown.has((wp.location || "") + "" + String(wp.floor || "")))
+      .map((wp: any) => { const w = this.floor.oobWorld(m, wp); return { id: wp.id, x: w.x, y: w.y, z: w.z, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(String(wp.floor || ""))) }; });
+    const levels = m.levels.map((lv: number, i: number) => ({ label: "Étage " + lv, x: -m.gap * 0.6, y: 0, z: m.levelZs ? m.levelZs[i] : i * (m.stackH + m.gap) }));
+    const buildings = m.buildings.map((b: any, i: number) => ({ label: this.store.siteLabel(b.loc), x: (b.x0 + b.x1) / 2, y: -m.gap * 0.5, z: m.topZ / 2, sepX: i > 0 ? b.x0 - m.gap : null }));
+    return { planes, oobs, levels, buildings, maxD: m.maxD, topZ: m.topZ };
+  }
+
+  /* ---- WebGL : tooltips + menus contextuels (remontés du moteur → réutilisent la machinerie SVG existante) ---- */
+  protected _webglTipId: string | null = null;
+  /** HTML de tooltip pour une cible WebGL (occ · rack · câble · wp · port), via les builders existants. */
+  protected webglTipHtml(desc: any): string | null {
+    const s = this.store;
+    switch (desc.type) {
+      case "occ": return desc.kind === "eq" ? this.equipmentTipHtml(desc.id) : (s.get("rackItems", desc.id) ? this.itemTipHtml(s.get("rackItems", desc.id)) : null);
+      case "rack": { const r = s.get("racks", desc.id); return r ? this.rackTipHtml(r) : null; }
+      case "cable": { const c = s.get("cables", desc.id); return c ? this.cableTipHtml(c) : null; }
+      case "wp": { const w = s.get("waypoints", desc.id); return w ? this.wpTipHtml(w) : null; }
+      case "port": { const p = s.get("ports", desc.id); return p ? this.portTipHtml(p, s.cableOnPort(p.id)) : null; }
+    }
+    return null;
+  }
+  protected webglTip(desc: any, x: number, y: number): void {
+    if (!desc) { this.hideTip(); this._webglTipId = null; return; }
+    const html = this.webglTipHtml(desc);
+    if (!html) { this.hideTip(); this._webglTipId = null; return; }
+    const ev: any = { clientX: x, clientY: y };
+    if (desc.id !== this._webglTipId) { this.showTip(html, ev); this._webglTipId = desc.id; } else this.moveTip(ev);
+  }
+  /** Sections de menu contextuel pour une cible WebGL, via les builders existants. */
+  protected webglContextMenu(desc: any, x: number, y: number): void {
+    const s = this.store; let sections: any = null;
+    switch (desc.type) {
+      case "occ": sections = desc.kind === "eq" ? this.equipmentCtx(desc.id) : (s.get("rackItems", desc.id) ? this.itemCtx(s.get("rackItems", desc.id)) : null); break;
+      case "rack": { const r = s.get("racks", desc.id); sections = r ? this.rackCtx(r) : null; break; }
+      case "cable": { const c = s.get("cables", desc.id); sections = c ? this.cableCtx(c) : null; break; }
+      case "wp": { const w = s.get("waypoints", desc.id); sections = w ? this.waypointCtx(w) : null; break; }
+      case "port": { const p = s.get("ports", desc.id); sections = p ? this.portCtx(p, s.cableOnPort(p.id)) : null; break; }
+      case "room": { const d = s.get("datacenters", desc.id); sections = d ? this.roomCtx(d) : null; break; }   // clic droit sur le sol d'un DC
+    }
+    // appel DIRECT (pas via `ctxMenu`, qui attend un vrai MouseEvent — `stopPropagation` — et applique la garde
+    // anti-orbite `_navMoved` du moteur SVG) : le moteur WebGL a déjà filtré l'orbite via `_navMovedR` avant ctxCb.
+    if (sections && sections.length) { this.hideTip(); this._webglTipId = null; ContextMenu.show(x, y, sections); }
+  }
+
+  protected renderWebGL(dc: any): void {
+    this._webglRev = this.store.histIndex();   // état de données reflété par ce (re)build → repère pour éviter un rebuild au simple retour
+    // hôte PERSISTANT : on garde le même conteneur (et donc le canvas) entre les re-rendus de données,
+    // pour ne pas réinitialiser la caméra ni recréer le contexte WebGL à chaque toggle.
+    let hostDiv = this._webglHost;
+    if (!hostDiv || hostDiv.parentElement !== this.stage) {
+      this.clearStage(); this.svg = null;   // retire l'éventuelle scène SVG
+      hostDiv = document.createElement("div");
+      hostDiv.className = "dc-webgl-host";
+      hostDiv.style.cssText = "position:absolute;inset:0;width:100%;height:100%;overflow:hidden";
+      this.stage.insertBefore(hostDiv, this.stage.firstChild);
+      this._webglHost = hostDiv;
+    }
+    // import DYNAMIQUE eager (cf. en-tête) : inliné dans le bundle, mais non chargé par la chaîne require() CJS des tests.
+    const opts = this.webglOptions(), ctx = this.webglCtx(), persp = this.webglPerspective, dcId = dc.id;
+    import(/* webpackMode: "eager" */ "./three/DcThreeScene").then(({ DcThreeScene }) => {
+      if (this._webglHost !== hostDiv) return;   // un re-rendu a remplacé l'hôte entre-temps → abandon
+      if (!this._three) {
+        this._three = new DcThreeScene(this.store, this.host);
+        this._three.tipCb = (d: any, x: number, y: number) => this.webglTip(d, x, y);            // tooltips
+        this._three.ctxCb = (d: any, x: number, y: number) => this.webglContextMenu(d, x, y);   // menus contextuels
+        // outils interactifs (mesure / routage) — le moteur remonte les clics/survols, la vue tient l'état + le panneau.
+        this._three.measurePlaceCb = (w: any) => this.onWebglMeasurePlace(w);
+        this._three.measureHoverCb = (w: any, x: number, y: number) => this.onWebglMeasureHover(w, x, y);
+        this._three.routePickCb = (desc: any) => this.onWebglRoutePick(desc);
+        this._three.routeHoverCb = (w: any) => this.onWebglRouteHover(w);
+      }
+      this._three.setProjection(persp);                       // projection choisie
+      this._three.mount(hostDiv, dcId, opts, ctx);            // (ré)attache + reconstruit (mono/multi + câbles transversaux)
+      this.syncWebglTool();                                   // (ré)applique le mode outil + l'overlay courant
+      this.applyFocus3D();                                    // « Localiser » : pousse la cible caméra au moteur
+    });
   }
 
   /* =============================================================================
@@ -318,14 +506,14 @@ export class DcBase {
 
   /* ---- persistance de l'état de vue (par fichier, localStorage) ---- */
   protected viewStateKey(): string { return "netmap.view3d." + ((this.store.meta && this.store.meta.fileId) ? this.store.meta.fileId : "__nofile"); }
-  protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showFloorGrid", "cablePortNormal", "routePreviewToMouse"];
+  protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showDoorSwing", "showFloorGrid", "cablePortNormal", "routePreviewToMouse", "webglPerspective", "cablesOnTop"];
 
   /** Écrit l'état (débouncé 300 ms) — évite une écriture par frame de pan/zoom. */
   protected persistView(): void {
     clearTimeout(this._pvTO);
     this._pvTO = setTimeout(() => {
       try {
-        const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], fadedRacks: [...this.fadedRacks], colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, cullDistanceM: this.cullDistanceM, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
+        const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], hiddenDoorRacks: [...this.hiddenDoorRacks], colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, cullDistanceM: this.cullDistanceM, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
         DcBase.TOGGLE_KEYS.forEach((k) => { o[k] = (this as any)[k]; });
         window.localStorage.setItem(this.viewStateKey(), JSON.stringify(o));
       } catch (_) { /* quota / indispo → ignoré */ }
@@ -340,10 +528,11 @@ export class DcBase {
     // défauts (état propre par fichier)
     this.az = CAM_PRESETS.iso[0]; this.el = CAM_PRESETS.iso[1]; this.scale = null; this.tx = 0; this.ty = 0; this.camTarget = null;
     this.hideFrontEq = false; this.hideRearEq = false; this.showPlaceholders = true; this.showRackSides = true; this.showPorts = true; this.showEqNames = true; this.showAllCables = true; this.showWaypoints = true; this.showConduits = true;
-    this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showFloorGrid = true; this.cablePortNormal = false; this.routePreviewToMouse = true;
+    this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showDoorSwing = false; this.showFloorGrid = true; this.cablePortNormal = false; this.routePreviewToMouse = true;
+    this.useWebGL = true; this.webglPerspective = false; this.cablesOnTop = true;   // WebGL = unique moteur 3D ; projection/cables-on-top restaurés depuis TOGGLE_KEYS
     this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1; this.cullDistanceM = 15;
-    this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set(); this.fadedRacks = new Set();
-    this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeBuild = null;
+    this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set();
+    this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeBuild = null; this.measure = null;
     this.selCables = new Set(); this.searchTerm = ""; this.focusEqId = null;
     this.view = (o.view === "top" || o.view === "floor") ? o.view : "3d";
     // toggles persistés
@@ -362,7 +551,7 @@ export class DcBase {
     // salle active + baies masquées (failsafe : seulement ce qui existe encore)
     if (has("datacenters", o.dcId)) this.dcId = o.dcId;
     this.hidden3dRacks = new Set((Array.isArray(o.hidden3dRacks) ? o.hidden3dRacks : []).filter((id: string) => has("racks", id)));
-    this.fadedRacks = new Set((Array.isArray(o.fadedRacks) ? o.fadedRacks : []).filter((id: string) => has("racks", id)));
+    this.hiddenDoorRacks = new Set((Array.isArray(o.hiddenDoorRacks) ? o.hiddenDoorRacks : []).filter((id: string) => has("racks", id)));
     // multi-salles + salles visibles (failsafe : seulement les salles encore présentes)
     this.multiDc = o.multiDc === true;
     this.visibleDcIds = new Set((Array.isArray(o.visibleDcIds) ? o.visibleDcIds : []).filter((id: string) => has("datacenters", id)));

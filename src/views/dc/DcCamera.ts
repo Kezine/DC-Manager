@@ -57,11 +57,12 @@ export class DcCamera extends DcBase {
       </button>`;
     c.addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest("button"); if (!b) return;
-      const preset = (b as HTMLElement).dataset.preset; if (preset) { this.setCamPreset(preset); return; }
+      const gl = this.view === "3d" && this.useWebGL && this._three;   // moteur Three SEULEMENT en vue 3D-WebGL ; en 2D (Dessus/Étage) → caméra SVG (le moteur Three persiste mais est détaché)
+      const preset = (b as HTMLElement).dataset.preset; if (preset) { if (gl) this._three.setPreset(preset); else this.setCamPreset(preset); return; }
       const a = (b as HTMLElement).dataset.act;
-      if (a === "in") this.zoomBy(1.2);
-      else if (a === "out") this.zoomBy(1 / 1.2);
-      else if (a === "recenter") { this.camTarget = null; this.scale = null; this.render(); }
+      if (a === "in") { if (gl) this._three.zoomBy(1.2); else this.zoomBy(1.2); }
+      else if (a === "out") { if (gl) this._three.zoomBy(1 / 1.2); else this.zoomBy(1 / 1.2); }
+      else if (a === "recenter") { if (gl) this._three.recenter(); else { this.camTarget = null; this.scale = null; this.render(); } }
       else if (a === "fs") this.toggleFullscreen();
       else if (a === "eimg") this.openExportDialog();
     });
@@ -112,39 +113,6 @@ export class DcCamera extends DcBase {
   }
 
 
-  /* ---- caméra orbitale (azimut autour de Z, puis élévation) ---- */
-  protected camCenter(dc: any): Vec3 {
-    if (!this.camTarget) {
-      this.camTarget = this._multi
-        ? { x: this._multi.totalW / 2, y: this._multi.maxD / 2, z: this._multi.topZ / 2 }   // centre de l'ensemble multi-salles
-        : (dc ? { x: dc.width_mm / 2, y: dc.depth_mm / 2, z: this.zRef(dc) / 2 } : { x: 0, y: 0, z: 0 });
-    }
-    return this.camTarget;
-  }
-
-  protected camAxes(): { right: Vec3; up: Vec3 } {
-    const ca = Math.cos(this.az), sa = Math.sin(this.az), ce = Math.cos(this.el), se = Math.sin(this.el);
-    return { right: { x: ca, y: -sa, z: 0 }, up: { x: sa * se, y: ca * se, z: ce } };
-  }
-
-  /** Projection orthographique : h/v = écran ; depth = axe vue (tri peintre). */
-  project3DCam(p: Vec3, c: Vec3): { h: number; v: number; depth: number } {
-    const ca = Math.cos(this.az), sa = Math.sin(this.az), ce = Math.cos(this.el), se = Math.sin(this.el);
-    const vx = p.x - c.x, vy = p.y - c.y, vz = p.z - c.z;
-    const x1 = vx * ca - vy * sa, y1 = vx * sa + vy * ca;
-    const y2 = y1 * ce - vz * se, z2 = y1 * se + vz * ce;
-    return { h: x1, v: -z2, depth: y2 };
-  }
-
-  /** Inverse de project3DCam (rotation orthonormale → transposée). */
-  unproject3DCam(h: number, v: number, depth: number, c: Vec3): Vec3 {
-    const ca = Math.cos(this.az), sa = Math.sin(this.az), ce = Math.cos(this.el), se = Math.sin(this.el);
-    const x1 = h, z2 = -v, y2 = depth;
-    const y1 = y2 * ce + z2 * se, z1 = -y2 * se + z2 * ce;
-    const vx = x1 * ca + y1 * sa, vy = -x1 * sa + y1 * ca;
-    return { x: c.x + vx, y: c.y + vy, z: c.z + z1 };
-  }
-
   setCamPreset(name: string): void {
     const p = CAM_PRESETS[name] || CAM_PRESETS.iso; this.az = p[0]; this.el = p[1];
     this.scale = null; this.render();
@@ -160,34 +128,10 @@ export class DcCamera extends DcBase {
   }
 
 
-  /* ---- cadrage ---- */
+  /* ---- cadrage (vues 2D : Plan de salle / Plan d'étage ; la 3D est cadrée par le moteur WebGL) ---- */
   protected sceneBounds(dc: any): { minH: number; minV: number; maxH: number; maxV: number } {
-    if (this.view === "top") return { minH: 0, minV: 0, maxH: dc.width_mm, maxV: dc.depth_mm };   // vue Dessus : la salle (h=x, v=y)
     if (this.view === "floor") { const ft = this.floorTargetResolve(); const cfg = ft ? this.floor.config(ft.location, ft.floor) : null; return { minH: 0, minV: 0, maxH: cfg ? cfg.width_mm : 1000, maxV: cfg ? cfg.depth_mm : 1000 }; }
-    const c = this.camCenter(dc);
-    let minH = Infinity, minV = Infinity, maxH = -Infinity, maxV = -Infinity;
-    const acc = (p: Vec3) => { const q = this.project3DCam(p, c); minH = Math.min(minH, q.h); maxH = Math.max(maxH, q.h); minV = Math.min(minV, q.v); maxV = Math.max(maxV, q.v); };
-    // bornes d'une salle (en coords plan-salle), transformées au monde par `toW` (identité en mono-salle).
-    const accRoom = (rdc: any, toW: (p: Vec3) => Vec3) => {
-      const vis = this.store.racksOfDc(rdc.id).filter((r) => !this.hidden3dRacks.has(r.id));
-      if (vis.length) {
-        vis.forEach((r) => {
-          const w = r.width_mm || RACK_WIDTH_DEFAULT, d = r.depth || RACK_DEPTH_DEFAULT, H = RackGeometry.physHeight(r);
-          const o = Normalize.rackOrientation(r.orientation) * Math.PI / 180, co = Math.cos(o), so = Math.sin(o);
-          const cx = (r.dc_x != null) ? r.dc_x : w / 2, cy = (r.dc_y != null) ? r.dc_y : d / 2, hw = w / 2, hd = d / 2;
-          [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].forEach(([lx, ly]) => { const x = cx + lx * co - ly * so, y = cy + lx * so + ly * co; acc(toW({ x, y, z: 0 })); acc(toW({ x, y, z: H })); });
-        });
-      } else {
-        const W = rdc.width_mm, D = rdc.depth_mm, H = this.zRef(rdc);
-        [[0, 0, 0], [W, 0, 0], [W, D, 0], [0, D, 0], [0, 0, H], [W, 0, H], [W, D, H], [0, D, H]].forEach(([x, y, z]) => acc(toW({ x, y, z })));
-      }
-    };
-    if (this._multi && this._multi.rooms.length) {
-      this._multi.rooms.forEach((room) => accRoom(room.dc, (p) => FloorLayout.roomToWorld(room, p)));
-    } else {
-      accRoom(dc, (p) => p);
-    }
-    return { minH, minV, maxH, maxV };
+    return { minH: 0, minV: 0, maxH: dc ? dc.width_mm : 1000, maxV: dc ? dc.depth_mm : 1000 };   // vue Dessus : la salle (h=x, v=y)
   }
 
   protected minScale(dc: any): number {
@@ -220,7 +164,7 @@ export class DcCamera extends DcBase {
     this.scale = Math.max(this.minScale(this.current()), Math.min(6, this.scale * factor));
     this.tx = px - wx * this.scale; this.ty = py - wy * this.scale;
     // 2D (plan de salle / plan d'étage) : appliquer la transform à la vue courante ; 3D : recadrer le pivot caméra.
-    if (this.view === "top" || this.view === "floor") this.applyTransform(); else this.recenterPivot3D();
+    this.applyTransform();   // 2D (Plan de salle / Plan d'étage) — la 3D (WebGL) gère son propre zoom
   }
 
   /** AABB d'un rect de bornes après rotation de la vue (autour de cx,cy), pour recadrer. */
@@ -247,6 +191,19 @@ export class DcCamera extends DcBase {
     });
   }
 
+  /** Recalcule le transform anti-miroir/rotation d'UN texte à partir de son x/y COURANT (le remplace) — pour
+      les labels SANS transform de base (waypoints) déplacés en direct : sinon le contre-miroir reste figé sur
+      l'ancienne ancre et le label part dans le sens inverse. */
+  protected applyUprightText(t: Element): void {
+    const f = this.floorXf; if (!f) return;
+    const ang = (360 - f.angle) % 360;
+    if (!ang && !f.flip) { t.removeAttribute("transform"); return; }
+    const x = parseFloat(t.getAttribute("x") || "0") || 0, y = parseFloat(t.getAttribute("y") || "0") || 0;
+    let k = f.flip ? `translate(${2 * x} 0) scale(-1 1) ` : "";
+    if (ang) k += `rotate(${ang} ${x} ${y})`;
+    t.setAttribute("transform", k.trim());
+  }
+
 
   /* ---- interactions ---- */
   protected onWheel(ev: WheelEvent): void {
@@ -257,7 +214,7 @@ export class DcCamera extends DcBase {
     const wx = (px - this.tx) / this.scale, wy = (py - this.ty) / this.scale;
     this.scale = Math.max(this.minScale(this.current()), Math.min(6, this.scale * factor));
     this.tx = px - wx * this.scale; this.ty = py - wy * this.scale;
-    if (this.view === "top" || this.view === "floor") this.applyTransform(); else this.recenterPivot3D();
+    this.applyTransform();   // 2D (Plan de salle / Plan d'étage) — la 3D (WebGL) gère son propre zoom
   }
 
   /** Pan 2D (vue Dessus) : translation directe de tx/ty. */
@@ -267,101 +224,6 @@ export class DcCamera extends DcBase {
     const move = (e: MouseEvent) => { this.tx = ox + (e.clientX - sx); this.ty = oy + (e.clientY - sy); this.applyTransform(); };
     const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
     document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
-  }
-
-  protected startOrbit(ev: MouseEvent, dc: any): void {
-    ev.preventDefault();
-    this._navMoved = false;   // nouveau geste : un menu pourra s'ouvrir si pas de glisser
-    let sx = ev.clientX, sy = ev.clientY, az0 = this.az, el0 = this.el, started = false;
-    const move = (e: MouseEvent) => {
-      if (!started) {
-        if (Math.hypot(e.clientX - sx, e.clientY - sy) <= 4) return;
-        started = true; this._navMoved = true; this.recenterPivot3D(); sx = e.clientX; sy = e.clientY; az0 = this.az; el0 = this.el;
-      }
-      this.az = az0 + (e.clientX - sx) * 0.01;
-      this.el = Math.max(-1.5, Math.min(1.5, el0 + (e.clientY - sy) * 0.01));
-      this.scheduleRender(dc);
-    };
-    const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
-    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
-  }
-
-  protected startTargetPan(ev: MouseEvent, dc: any): void {
-    ev.preventDefault();
-    const sx = ev.clientX, sy = ev.clientY, t0 = Object.assign({}, this.camCenter(dc)), ax = this.camAxes();
-    const move = (e: MouseEvent) => {
-      const k = 1 / (this.scale || 1), dx = (e.clientX - sx) * k, dy = (e.clientY - sy) * k;
-      this.camTarget = { x: t0.x - ax.right.x * dx + ax.up.x * dy, y: t0.y - ax.right.y * dx + ax.up.y * dy, z: t0.z - ax.right.z * dx + ax.up.z * dy };
-      this.scheduleRender(dc);
-    };
-    const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
-    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
-  }
-
-  protected scheduleRender(dc: any): void {
-    if (this._raf3d) return;
-    this._raf3d = requestAnimationFrame(() => { this._raf3d = 0; this.renderThreeD(dc); });
-  }
-  /** Recentre le pivot (camTarget) sur le centroïde VISIBLE sans bouger l'image (orbite naturelle).
-      Repli (rien de visible) : point monde au centre de l'écran. Réplique de `_recenterPivot3D` (réf.). */
-
-  protected recenterPivot3D(): void {
-    if (this.view !== "3d" || !this.svg || this.scale == null) { this.applyTransform(); return; }
-    const dc = this.current();   // peut être null (multi-salles vue d'ensemble) — camCenter gère via _multi
-    const target = this.visibleCentroidWorld(dc);
-    if (target) { this.setPivotKeepingView(target, dc); return; }
-    const SW = this.stage.clientWidth || 900, SH = this.stage.clientHeight || 560;
-    const c = this.camCenter(dc);
-    const Hc = (SW / 2 - this.tx) / this.scale, Vc = (SH / 2 - this.ty) / this.scale;
-    this.camTarget = this.unproject3DCam(Hc, Vc, 0, c);
-    this.tx = SW / 2; this.ty = SH / 2;
-    this.renderThreeD(dc);
-  }
-
-  /** Déplace le PIVOT vers le point monde P SANS bouger l'image (recale tx/ty sur sa position écran actuelle). */
-  protected setPivotKeepingView(P: Vec3, dc: any): void {
-    const c = this.camCenter(dc), q = this.project3DCam(P, c);
-    this.tx = this.tx + q.h * this.scale!; this.ty = this.ty + q.v * this.scale!;
-    this.camTarget = { x: P.x, y: P.y, z: P.z };
-    this.renderThreeD(dc);
-  }
-  /** Centroïde MONDE des centres de gravité (baies + équipements libres) AFFICHÉS et DANS le viewport.
-      Gère mono (coords locales) ET multi-salles (via roomToWorld par salle). null si rien de visible. */
-
-  protected visibleCentroidWorld(dc: any): Vec3 | null {
-    if (this.view !== "3d" || this.scale == null) return null;
-    const c = this.camCenter(dc);
-    const SW = this.stage.clientWidth || 900, SH = this.stage.clientHeight || 560;
-    const inView = (wp: Vec3) => { const q = this.project3DCam(wp, c); const sx = this.tx + q.h * this.scale!, sy = this.ty + q.v * this.scale!; return sx >= 0 && sx <= SW && sy >= 0 && sy <= SH; };
-    let ax = 0, ay = 0, az = 0, n = 0;
-    const add = (wp: Vec3) => { if (inView(wp)) { ax += wp.x; ay += wp.y; az += wp.z; n++; } };
-    const rooms = this._multi ? this._multi.rooms : null;
-    const toWorld = (room: any, p: Vec3) => (room ? FloorLayout.roomToWorld(room, p) : p);
-    this.displayedDcIds(dc).forEach((id) => {
-      const room = rooms ? rooms.find((rm: any) => rm.dc.id === id) : null;
-      if (rooms && !room) return;   // multi : salle non posée (masquée) → ignorée
-      this.store.racksOfDc(id).filter((r: any) => !this.hidden3dRacks.has(r.id)).forEach((r: any) => {
-        const local = { x: (r.dc_x != null ? r.dc_x : (r.width_mm || RACK_WIDTH_DEFAULT) / 2), y: (r.dc_y != null ? r.dc_y : (r.depth || RACK_DEPTH_DEFAULT) / 2), z: RackGeometry.physHeight(r) / 2 };
-        add(toWorld(room, local));
-      });
-      this.store.freeEquipsOfDc(id).forEach((e: any) => {
-        if (e.dc_x == null || e.dc_y == null) return;
-        const bx = FreeEquipGeometry.box(e);
-        add(toWorld(room, { x: e.dc_x, y: e.dc_y, z: (bx.z || 0) + bx.h / 2 }));
-      });
-    });
-    return n ? { x: ax / n, y: ay / n, z: az / n } : null;
-  }
-
-  /** Largeur de vue visible (m) — proxy de distance caméra en ortho. Estime le « fit » si scale non encore posé. */
-  protected camViewWidthM(dc: any): number {
-    let sc = this.scale;
-    if (sc == null) {
-      const b = this.sceneBounds(dc), bw = Math.max(1, b.maxH - b.minH), bh = Math.max(1, b.maxV - b.minV);
-      const SW = this.stage.clientWidth || 900, SH = this.stage.clientHeight || 560, pad = 40;
-      sc = Math.max(0.02, Math.min(6, Math.min((SW - pad * 2) / bw, (SH - pad * 2) / bh)));
-    }
-    return ((this.stage.clientWidth || 900) / sc) / 1000;
   }
 
 }

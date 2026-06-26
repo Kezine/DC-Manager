@@ -45,9 +45,13 @@ export class DcPanels extends DcViews2D {
       const edits = document.createElement("div"); edits.className = "dc-subviews"; edits.style.cssText = "display:flex;gap:4px";
       const bFree = this.btn("Placement libre", () => { this.freePlace = !this.freePlace; bFree.classList.toggle("active", this.freePlace); }, "Désactive l'aimantation à la grille pendant le glisser (n'affecte pas les éléments déjà placés)");
       bFree.classList.toggle("active", this.freePlace);
+      // édition contextuelle : étage courant (plan d'étage) · salle courante (plan de salle)
+      const bEdit = (this.view === "floor")
+        ? this.btn("Éditer l'étage", () => { const ft = this.floorTargetResolve(); if (ft) this.editFloor(ft.location, ft.floor, false); else this.editFloor("", "", true); }, "Modifier le plan de l'étage courant")
+        : this.btn("Éditer la salle", () => { if (this.dcId) this.host.openDatacenterForm?.(this.dcId); }, "Modifier la salle courante");
       const bBlock = this.btn("Cases inaccessibles", () => { this.blockEdit = !this.blockEdit; bBlock.classList.toggle("active", this.blockEdit); this.render(); }, "Glissez une sélection sur la grille pour marquer / démarquer les cases (in)accessibles");
       bBlock.classList.toggle("active", this.blockEdit);
-      edits.append(bFree, bBlock); this.toolbarEl.appendChild(edits);
+      edits.append(bFree, bEdit, bBlock); this.toolbarEl.appendChild(edits);
       this.toolbarEl.appendChild(this.vsep());   // séparateur : déplacement/exclusion | contrôles de visualisation
     }
 
@@ -59,6 +63,22 @@ export class DcPanels extends DcViews2D {
       modes.appendChild(b);
     });
     this.toolbarEl.appendChild(modes);
+    // OUTIL DE MESURE multipoint (2D/3D · mono/multi/étage) — clic = poser un point, glisser = naviguer.
+    this.toolbarEl.appendChild(this.vsep());
+    const measOn = !!(this.measure && this.measure.active);
+    const bMeas = this.btn(measOn ? "📏 Mesure…" : "📏 Mesurer", () => { if (this.measure && this.measure.active) this.measureCancel(); else this.measureArm(); }, "Outil de mesure multipoint (2D/3D). Cliquez pour poser des points (chaque segment affiche sa longueur) ; glissez pour naviguer.");
+    bMeas.classList.toggle("active", measOn);
+    this.toolbarEl.appendChild(bMeas);
+    // projection caméra (ortho ⟷ perspective) — vue 3D (moteur WebGL).
+    if (this.view === "3d") {
+      this.toolbarEl.appendChild(this.vsep());
+      const bProj = this.btn(this.webglPerspective ? "Perspective" : "Orthographique", () => {
+        this.webglPerspective = !this.webglPerspective;
+        if (this._three) this._three.setProjection(this.webglPerspective);
+        this.buildToolbar();
+      }, "Bascule la projection de la caméra (orthographique ⟷ perspective)");
+      this.toolbarEl.appendChild(bProj);
+    }
     // multi-select des SITES/bâtiments accessibles à l'UI (vide = tous) — filtre la vue Étage / le rail / la portée 3D.
     const sites = this.store.sitesSorted();
     if (sites.length) {
@@ -129,7 +149,7 @@ export class DcPanels extends DcViews2D {
   protected renderCableList(wrap: HTMLElement, resolved: Array<{ cable: any }>): void {
     wrap.innerHTML = "";
     this.cableListFiltered(resolved).slice(0, 200).forEach(({ rc, label }) => {
-      const tog = FormControls.toggle(label, this.selCables.has(rc.cable.id), (v) => { if (v) this.selCables.add(rc.cable.id); else this.selCables.delete(rc.cable.id); this.render(); });
+      const tog = FormControls.toggle(label, this.selCables.has(rc.cable.id), (v) => { if (v) this.selCables.add(rc.cable.id); else this.selCables.delete(rc.cable.id); this.rerenderView(); });
       tog.classList.add("tgl-row"); wrap.appendChild(tog);
     });
   }
@@ -140,6 +160,7 @@ export class DcPanels extends DcViews2D {
     const side = this.sideEl; if (!side) return;
     side.innerHTML = "";
     if (this.routeBuild) side.appendChild(this.routeCard());   // panneau de routage (toutes vues), en tête
+    if (this.measure && this.measure.active) side.appendChild(this.measureCard());   // panneau de mesure (toutes vues), en tête
     if (this.view === "floor") {   // plan d'étage : carte étage + panneau Waypoints (scope étage, toutes les salles)
       side.appendChild(this.collapsible(this.floorCard(), "floor"));
       const ft = this.floorTargetResolve(); const cur = this.current();
@@ -147,6 +168,7 @@ export class DcPanels extends DcViews2D {
         const onFloor = (cur && (cur.location || "") === ft.location && String(cur.floor || "") === ft.floor) ? cur : null;
         side.appendChild(this.collapsible(this.floorCablesCard(ft.location, ft.floor), "floorcables"));
         side.appendChild(this.collapsible(this.waypointsCard(onFloor, ft), "waypoints"));
+        side.appendChild(this.collapsible(this.view3dOptionsCard(), "view3d"));   // Affichage (waypoints, repères) — view-aware
       }
       return;
     }
@@ -155,8 +177,10 @@ export class DcPanels extends DcViews2D {
       side.appendChild(this.collapsible(this.selectionCard(dc), "sel"));
       side.appendChild(this.collapsible(this.poolRacksCard(dc), "pool"));
       side.appendChild(this.collapsible(this.poolFreeEquipCard(dc), "freepool"));
+      side.appendChild(this.collapsible(this.racks3dCard(dc), "rack3d"));   // visibilité des baies — respectée par renderTop
       side.appendChild(this.collapsible(this.waypointsCard(dc), "waypoints"));
       side.appendChild(this.collapsible(this.cableCard(dc), "cables"));
+      side.appendChild(this.collapsible(this.view3dOptionsCard(), "view3d"));   // Affichage (waypoints, repères) — view-aware
     } else {
       side.appendChild(this.collapsible(this.dcScopeCard(dc), "dcscope"));   // Datacenters affichés / Vue étage
       side.appendChild(this.collapsible(this.racks3dCard(dc), "rack3d"));
@@ -285,21 +309,8 @@ export class DcPanels extends DcViews2D {
       box.appendChild(this.btn("+ Créer un étage…", () => this.editFloor("", "", true)));
       return box;
     }
-    // SITE courant + CRUD (la navigation bâtiment/étage se fait via le RAIL en overlay, pas ici).
-    const site: any = ft.location ? this.store.get("sites", ft.location) : null;
-    const st = document.createElement("div"); st.className = "dc-card-title"; st.textContent = "Site — " + this.store.siteLabel(ft.location); box.appendChild(st);
-    if (site && site.address) { const a = document.createElement("div"); a.className = "form-hint"; a.textContent = site.address; box.appendChild(a); }
-    const sacts = document.createElement("div"); sacts.className = "dc-card-acts";
-    sacts.appendChild(this.btn("+ Site", () => this.host.openSiteForm?.(null)));
-    if (site) {
-      sacts.appendChild(this.btn("Modifier le site", () => this.host.openSiteForm?.(site.id)));
-      sacts.appendChild(this.btn("Supprimer le site…", async () => {
-        const ok = await Dialog.confirm({ title: "Supprimer le site « " + (site.name || "") + " » ?", message: "Décommissionnement (déménagement) : salles & étages supprimés, baies → « non placé » (équipements conservés), câbles intra → « planifié », équipements d'étage décâblés, waypoints supprimés, routes inter-DC débranchées. Les liaisons LOGIQUES (port↔port) sont préservées. Continuer ?", confirmLabel: "Supprimer le site", danger: true });
-        if (!ok) return;
-        await this.store.removeSite(site.id); this.visibleSites.delete(site.id); this.setDirty(); Notify.toast("Site décommissionné (liaisons logiques préservées)"); this.floorTarget = null; this.scale = null; this.buildToolbar(); this.render();
-      }));
-    }
-    box.appendChild(sacts);
+    // (Gestion des SITES/bâtiments : onglet « Sites » — plus dans ce panneau. Repère du site courant ci-dessous.)
+    const st = document.createElement("div"); st.className = "form-hint"; st.textContent = "Bâtiment : " + this.store.siteLabel(ft.location); box.appendChild(st);
     // salles de cet étage (clic = activer ; bouton = éditer)
     const dcs = this.store.dcsOfFloor(ft.location, ft.floor).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
     const rt = document.createElement("div"); rt.className = "dc-card-title"; rt.style.marginTop = "8px"; rt.textContent = "Salles (" + dcs.length + ")"; box.appendChild(rt);
@@ -338,9 +349,8 @@ export class DcPanels extends DcViews2D {
     );
     box.appendChild(acts);
     const acfg = this.floor.config(ft.location, ft.floor);
-    box.appendChild(FormControls.toggle("⚓ Afficher le point d'ancrage · " + Format.meters(acfg.anchor_x || 0) + " ; " + Format.meters(acfg.anchor_y || 0), this.showFloorAnchor, (v) => { this.showFloorAnchor = v; this.render(); }));
-    box.appendChild(this.btn("Recadrer le plan", () => { this.scale = null; this.render(); }));
-    return box;
+    const ah = document.createElement("div"); ah.className = "form-hint"; ah.textContent = "⚓ Ancrage : " + Format.meters(acfg.anchor_x || 0) + " ; " + Format.meters(acfg.anchor_y || 0) + " (affichage : panneau « Affichage »)"; box.appendChild(ah);
+    return box;   // recadrage : bouton ⊕ (recentrer) de l'overlay
   }
 
   /* ---- carte CÂBLES INTER-DC (vue Étage) : affichage des câbles dont les 2 bouts sont sur cet étage ---- */
@@ -420,8 +430,10 @@ export class DcPanels extends DcViews2D {
       if (wp.kind === "segment") { patch.dc_x = Math.max(0, pos.x - cellW); patch.dc_x2 = Math.min(dc.width_mm, pos.x + cellW); patch.dc_y2 = pos.y; }
       this.selWaypointId = wp.id; await this.store.update("waypoints", wp.id, patch); this.setDirty();
     }));
-    // ---- OOB (étage courant si scope étage, sinon tout le bâtiment) ----
-    const oobs = this.store.oobWaypoints().filter((w: any) => !floor || ((w.location || "") === floor.location && String(w.floor || "") === floor.floor))
+    // ---- Pins d'étage (OOB) du MÊME bâtiment + étage : floor courant si scope étage, sinon ceux de la salle ----
+    const oobLoc = floor ? floor.location : (dc ? (dc.location || "") : null);
+    const oobFl = floor ? floor.floor : (dc ? String(dc.floor || "") : null);
+    const oobs = (oobLoc == null ? [] : this.store.oobWaypoints().filter((w: any) => (w.location || "") === oobLoc && String(w.floor || "") === oobFl))
       .sort((a: any, b: any) => (FloorLayout.floorNum(a.floor) - FloorLayout.floorNum(b.floor)) || (a.name || "").localeCompare(b.name || ""));
     if (oobs.length) {
       const st = document.createElement("div"); st.className = "dc-card-title"; st.style.marginTop = "8px"; st.textContent = "◎ Pins d'étage — hors salles (" + oobs.length + ")"; box.appendChild(st);
@@ -449,7 +461,7 @@ export class DcPanels extends DcViews2D {
     const selRow = document.createElement("div"); selRow.className = "form-hint"; selRow.style.cssText = "margin-bottom:6px"; selRow.innerHTML = "Salle active : <b>" + Html.escape(dc.name || "(salle)") + "</b>"; box.appendChild(selRow);
     // bascule maître : Vue étage (empilement 3D de plusieurs salles)
     if (all.length) {
-      const tog = FormControls.toggle("Vue étage", this.multiDc, (v) => {
+      const tog = FormControls.toggle("Multi-DC", this.multiDc, (v) => {
         this.multiDc = v;
         if (v) { if (!this.visibleDcIds.size) { const b = bldgIds(curLoc); this.visibleDcIds = new Set(b.length ? b : all.map((d: any) => d.id)); } }
         refit();
@@ -464,7 +476,7 @@ export class DcPanels extends DcViews2D {
     const scopeBtn = (icon: string, titleTxt: string, active: boolean, onClick: () => void) => {
       const b = document.createElement("button"); b.type = "button";
       b.className = "btn btn-ghost btn-sm dc-scope-btn" + (active && this.multiDc ? " active" : "");
-      b.title = this.multiDc ? titleTxt : (titleTxt + " — disponible en Vue étage"); b.disabled = !this.multiDc;
+      b.title = this.multiDc ? titleTxt : (titleTxt + " — disponible en mode Multi-DC"); b.disabled = !this.multiDc;
       b.innerHTML = icon; if (this.multiDc) b.onclick = onClick; return b;
     };
     acts.appendChild(scopeBtn(DC_SCOPE_ICONS.self, "Salle active seule", sameSet([dc.id]), () => { this.visibleDcIds = new Set([dc.id]); refit(); }));
@@ -511,12 +523,10 @@ export class DcPanels extends DcViews2D {
     const list = document.createElement("div"); list.className = "dc-layers";
     racks.forEach((r: any) => {
       const row = document.createElement("div"); row.className = "dc-rack-row";
-      const tog = FormControls.toggle(r.name || "(rack)", !this.hidden3dRacks.has(r.id), (v) => { if (v) this.hidden3dRacks.delete(r.id); else this.hidden3dRacks.add(r.id); this.renderThreeD(this.current()); });
+      const tog = FormControls.toggle(r.name || "(rack)", !this.hidden3dRacks.has(r.id), (v) => { if (v) this.hidden3dRacks.delete(r.id); else this.hidden3dRacks.add(r.id); this.reflow(); });
       tog.classList.add("tgl-row");
-      const bFade = this.btn("◐", () => { if (this.fadedRacks.has(r.id)) this.fadedRacks.delete(r.id); else this.fadedRacks.add(r.id); bFade.classList.toggle("active", this.fadedRacks.has(r.id)); this.renderThreeD(this.current()); }, "Estomper (translucide)");
-      bFade.classList.toggle("active", this.fadedRacks.has(r.id));
       const bIso = this.btn("Isoler", () => this.isolateRack(r.id), "N'afficher que ce rack et le cibler");
-      row.append(tog, bFade, bIso); list.appendChild(row);
+      row.append(tog, bIso); list.appendChild(row);
     });
     box.appendChild(list); return box;
   }
@@ -532,13 +542,13 @@ export class DcPanels extends DcViews2D {
     // créer une route 3D au clic (le prochain clic sur un port libre démarre ; puis waypoints ; puis port terminal)
     const bRoute = this.btn(this.routeBuild ? "✕ Annuler la route" : "🧵 Créer une route", () => { if (this.routeBuild) this.routeCancel(); else this.routeArm(); }, "Tracer un câble en cliquant les ports + waypoints");
     bRoute.style.marginBottom = "6px"; box.appendChild(bRoute);
-    box.appendChild(FormControls.toggle("Tout afficher (estompé)", this.showAllCables, (v) => { this.showAllCables = v; this.render(); }, { block: true }));
+    box.appendChild(FormControls.toggle("Tout afficher (estompé)", this.showAllCables, (v) => { this.showAllCables = v; this.rerenderView(); }, { block: true }));
     const hint = document.createElement("div"); hint.className = "form-hint";
     hint.textContent = resolved.length + " câble(s) " + (multi ? "sur les salles affichées" : "raccordable(s) ici") + (total > resolved.length ? " · " + (total - resolved.length) + " hors champ" : "") + ". L'affichage suit la sélection (cases / clic) ; « Tout afficher » montre tout, estompé.";
     box.appendChild(hint);
     if (!resolved.length) return box;
-    const addSel = (ids: string[]) => { ids.forEach((id) => this.selCables.add(id)); this.render(); };
-    const delSel = (ids: string[]) => { ids.forEach((id) => this.selCables.delete(id)); this.render(); };
+    const addSel = (ids: string[]) => { ids.forEach((id) => this.selCables.add(id)); this.rerenderView(); };
+    const delSel = (ids: string[]) => { ids.forEach((id) => this.selCables.delete(id)); this.rerenderView(); };
     const eyePair = (parent: HTMLElement, ids: () => string[], what: string) => {
       parent.append(
         this.btn("◉", () => addSel(ids()), "Sélectionner (afficher) " + what),
@@ -584,7 +594,7 @@ export class DcPanels extends DcViews2D {
       this.btn("Retirer la liste", () => delSel(this.cableListFiltered(resolved).map((o) => o.rc.cable.id))),
     );
     box.appendChild(listActs);
-    if (this.selCables.size) box.appendChild(this.btn("Effacer la sélection (" + this.selCables.size + ")", () => { this.selCables.clear(); this.render(); }));
+    if (this.selCables.size) box.appendChild(this.btn("Effacer la sélection (" + this.selCables.size + ")", () => { this.selCables.clear(); this.rerenderView(); }));
     const listWrap = document.createElement("div"); listWrap.className = "dc-layers"; box.appendChild(listWrap);
     this.renderCableList(listWrap, resolved);
     return box;
@@ -592,18 +602,34 @@ export class DcPanels extends DcViews2D {
 
 
   /* ---- carte VUE 3D (options d'affichage) ---- */
+  /** Re-render de la SCÈNE de la vue courante (sans reconstruire le panneau) — view-aware : Dessus→renderTop,
+      Étage→renderFloor, 3D→renderThreeD (diff WebGL). Pour les toggles d'affichage PARTAGÉS entre vues. */
+  protected reflow(): void {
+    if (this.view === "floor") { const ft = this.floorTargetResolve(); if (ft) this.renderFloor(ft); return; }
+    const d = this.current(); if (!d) return;
+    if (this.view === "top") this.renderTop(d); else this.renderThreeD(d);
+  }
+
+  /** Carte « Affichage » VIEW-AWARE : chaque toggle déclare les vues où il s'applique (`["3d","top","floor"]`) ;
+      seuls les pertinents s'affichent. Affichée en 3D (jeu complet) ET en 2D Dessus/Étage (sous-ensemble : ce que
+      le rendu 2D respecte réellement — waypoints, repères d'orientation). Évite que des filtres « 3D » pilotent
+      la 2D sans contrôle. Réglages avancés (coloration, sliders, recentrage) : 3D uniquement. */
   protected view3dOptionsCard(): HTMLElement {
+    const v = this.view;
     const box = document.createElement("div"); box.className = "dc-card";
-    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Vue 3D";
-    // icône d'aide (navigation 3D) — n'est pas un toggle de repli (collapsible() ignore les clics sur .dc-help)
-    const help = document.createElement("span"); help.className = "settings-help-icon dc-help"; help.textContent = "?";
-    help.setAttribute("role", "img"); help.tabIndex = 0; help.setAttribute("aria-label", "Aide : navigation 3D");
-    help.title = "Glisser GAUCHE = déplacer le modèle · glisser DROIT (ou Maj+glisser) = orbiter (depuis n'importe où) · molette = zoom (vers la souris).\nSurvolez une baie pour son détail, cliquez-la pour l'éditer.\nEn multi-salles : clic GAUCHE sur le SOL d'une salle = l'activer · clic DROIT = menu.\nPoints de vue : boutons Dessus/Face/Arrière/Côté/3D près du recentrage.";
-    t.appendChild(help); box.appendChild(t);
-    const r3 = () => this.renderThreeD(this.current());
-    const redraw = () => { const d = this.current(); if (!d) return; if (this.view === "top") this.renderTop(d); else this.renderThreeD(d); };
-    const tgrid = document.createElement("div"); tgrid.className = "dc-3d-toggle-grid";
-    // boutons-ICÔNES (libellé en tooltip) ; full=true → re-rendu complet, sinon re-rendu 3D seul.
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = (v === "3d") ? "Vue 3D" : "Affichage";
+    if (v === "3d") {   // icône d'aide (navigation 3D) — uniquement en 3D
+      const help = document.createElement("span"); help.className = "settings-help-icon dc-help"; help.textContent = "?";
+      help.setAttribute("role", "img"); help.tabIndex = 0; help.setAttribute("aria-label", "Aide : navigation 3D");
+      help.title = "Glisser GAUCHE = déplacer le modèle · glisser DROIT (ou Maj+glisser) = orbiter (depuis n'importe où) · molette = zoom (vers la souris).\nSurvolez une baie pour son détail, cliquez-la pour l'éditer.\nEn multi-salles : clic GAUCHE sur le SOL d'une salle = l'activer · clic DROIT = menu.\nPoints de vue : boutons Dessus/Face/Arrière/Côté/3D près du recentrage.";
+      t.appendChild(help);
+    }
+    box.appendChild(t);
+    const r3 = () => this.reflow();
+    const redraw = () => this.reflow();
+    // toggles GROUPÉS par thème. Section LAZY : l'en-tête n'apparaît que si ≥1 toggle s'applique à la vue courante.
+    let cur: HTMLElement = box; let pending: string | null = null;
+    const section = (label: string) => { pending = label; };
     const I: Record<string, string> = {
       hideFront: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg>',
       hideRear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="14" width="16" height="6" fill="currentColor" stroke="none"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg>',
@@ -612,48 +638,63 @@ export class DcPanels extends DcViews2D {
       image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="10" r="1.8"/><path d="M21 16l-5-4-8 7"/></svg>',
       sides: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18M19 3v18"/><rect x="9" y="6" width="6" height="12" rx="1"/></svg>',
       door: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v17"/><path d="M4 21h16"/><circle cx="13.5" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg>',
+      doorSwing: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V5"/><path d="M5 5a16 16 0 0 1 16 16"/><path d="M5 21h16" stroke-dasharray="2.5 2.5"/></svg>',
       slot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="8" rx="1" stroke-dasharray="3 2.5"/></svg>',
       grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>',
       marker: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l9 9.5-9 9.5-9-9.5z"/></svg>',
       conduit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1"/><path d="M3 12h18" stroke-dasharray="2.5 2.5"/></svg>',
       pivot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>',
       orient: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 5.5l2.4 8.5L12 12l-2.4 2z" fill="currentColor" stroke="none"/></svg>',
+      anchor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.5"/><line x1="12" y1="7.5" x2="12" y2="21"/><path d="M5 13a7 7 0 0 0 14 0"/><line x1="5" y1="13" x2="8.5" y2="13"/><line x1="15.5" y1="13" x2="19" y2="13"/></svg>',
       perp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v14h14"/><path d="M10.5 18a4.5 4.5 0 0 1 4.5-4.5"/></svg>',
       mouse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l6 15 2.2-6.2L19.5 9.5z"/></svg>',
+      onTop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="12" width="14" height="8" rx="1"/><path d="M3 9c3.5 0 4.5-4 9-4s5.5 4 9 4"/></svg>',
     };
-    const tgi = (icon: string, title: string, get: () => boolean, apply: (v: boolean) => void) => {
-      const b = FormControls.toggle("", get(), (v) => apply(v), { title });
-      b.innerHTML = icon; b.title = title; b.setAttribute("aria-label", title); tgrid.appendChild(b); return b;
+    const D3 = ["3d"], ALL = ["3d", "top", "floor"];   // vues d'applicabilité d'un toggle
+    const tgi = (views: string[], icon: string, title: string, get: () => boolean, apply: (v: boolean) => void) => {
+      if (!views.includes(v)) return;   // toggle non pertinent pour la vue courante → masqué
+      if (pending) { const lab = document.createElement("div"); lab.style.cssText = "font-size:10.5px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.05em;margin:9px 0 3px"; lab.textContent = pending; box.appendChild(lab); cur = document.createElement("div"); cur.className = "dc-3d-toggle-grid"; box.appendChild(cur); pending = null; }
+      const b = FormControls.toggle("", get(), (val) => apply(val), { title });
+      b.innerHTML = icon; b.title = title; b.setAttribute("aria-label", title); cur.appendChild(b); return b;
     };
-    tgi(I.hideFront, "Masquer les équipements montés en façade AVANT", () => this.hideFrontEq, (v) => { this.hideFrontEq = v; r3(); });
-    tgi(I.hideRear, "Masquer les équipements montés à l'ARRIÈRE", () => this.hideRearEq, (v) => { this.hideRearEq = v; r3(); });
-    tgi(I.names, "Noms des équipements", () => this.showEqNames, (v) => { this.showEqNames = v; r3(); });
-    tgi(I.ports, "Ports (connecteurs sur les faces)", () => this.showPorts, (v) => { this.showPorts = v; this.render(); });
-    tgi(I.image, "Images de façade", () => this.showFaceImages, (v) => { this.showFaceImages = v; r3(); });
-    tgi(I.sides, "Capots / parois des baies", () => this.showRackSides, (v) => { this.showRackSides = v; r3(); });
-    tgi(I.door, "Portes des baies", () => this.showDoors, (v) => { this.showDoors = v; r3(); });
-    tgi(I.slot, "Emplacements libres", () => this.showPlaceholders, (v) => { this.showPlaceholders = v; r3(); });
-    tgi(I.grid, "Grilles d'étage", () => this.showFloorGrid, (v) => { this.showFloorGrid = v; r3(); });
-    tgi(I.marker, "Marqueurs de waypoint (pins, extrémités de chemins/brosses, OOB). N'affecte pas le routage des câbles.", () => this.showWaypoints, (v) => { this.showWaypoints = v; this.render(); });
-    tgi(I.conduit, "Brosses et passe-câbles (géométrie des conduits : bacs de chemins de câbles, coques des brosses)", () => this.showConduits, (v) => { this.showConduits = v; this.render(); });
-    tgi(I.pivot, "Centre de rotation", () => this.showPivot, (v) => { this.showPivot = v; r3(); });
-    tgi(I.orient, "Repères d'orientation", () => this.showOrientMarks, (v) => { this.showOrientMarks = v; r3(); });
-    tgi(I.perp, "Sortie ⊥ des ports (20 mm) : les câbles quittent la face perpendiculairement sur 20 mm", () => this.cablePortNormal, (v) => { this.cablePortNormal = v; redraw(); });
-    tgi(I.mouse, "Aperçu de route → souris (prolonge l'aperçu jusqu'au curseur pendant la création d'une route)", () => this.routePreviewToMouse, (v) => { this.routePreviewToMouse = v; if (!v && this.routeBuild) this.routeBuild.mouse = null; r3(); });
-    box.appendChild(tgrid);
-    // coloration des équipements
-    const colorRow = document.createElement("div"); colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px";
-    const colTxt = document.createElement("span"); colTxt.className = "grow"; colTxt.textContent = "Coloration";
-    const colSel = FormControls.select([{ value: "face", label: "Par face" }, { value: "group", label: "Par groupe" }, { value: "type", label: "Par type" }], this.colorMode);
-    colSel.onchange = () => { this.colorMode = colSel.value as any; r3(); };
-    colorRow.append(colTxt, colSel); box.appendChild(colorRow);
-    // arrondi des câbles (slider)
-    box.appendChild(this.slider("Arrondi des câbles", this.cableSplineK, 0, 0.32, 0.01, (v) => v.toFixed(2), (v) => { this.cableSplineK = v; redraw(); }));
-    // taille des marqueurs de waypoint + connecteurs de port (1 = défaut = milieu du range)
-    box.appendChild(this.slider("Taille marqueurs / ports", this.markerScale, 0.25, 1.75, 0.05, (v) => Math.round(v * 100) + " %", (v) => { this.markerScale = v; redraw(); }));
-    // culling de distance (slider)
-    box.appendChild(this.slider("Masquer ports/U au-delà", this.cullDistanceM, 1, 60, 1, (v) => Math.round(v) + " m", (v) => { this.cullDistanceM = Math.max(1, Math.min(60, Math.round(v))); }, () => r3()));
-    box.appendChild(this.btn("Recentrer sur la salle", () => { this.camTarget = null; this.hidden3dRacks.clear(); this.fadedRacks.clear(); this.scale = null; this.render(); }));
+    section("Équipements");
+    tgi(D3, I.hideFront, "Masquer les équipements montés en façade AVANT", () => this.hideFrontEq, (v) => { this.hideFrontEq = v; r3(); });
+    tgi(D3, I.hideRear, "Masquer les équipements montés à l'ARRIÈRE", () => this.hideRearEq, (v) => { this.hideRearEq = v; r3(); });
+    tgi(D3, I.ports, "Ports (connecteurs sur les faces)", () => this.showPorts, (v) => { this.showPorts = v; r3(); });
+    tgi(D3, I.names, "Noms des équipements", () => this.showEqNames, (v) => { this.showEqNames = v; r3(); });
+    tgi(D3, I.image, "Images de façade", () => this.showFaceImages, (v) => { this.showFaceImages = v; r3(); });
+    section("Baies");
+    tgi(D3, I.sides, "Capots / parois des baies", () => this.showRackSides, (v) => { this.showRackSides = v; r3(); });
+    tgi(D3, I.door, "Portes des baies", () => this.showDoors, (v) => { this.showDoors = v; r3(); });
+    tgi(["3d", "top"], I.doorSwing, "Débattement des portes : projection du rayon d'ouverture au sol (3D et plan de salle)", () => this.showDoorSwing, (v) => { this.showDoorSwing = v; r3(); });
+    tgi(D3, I.slot, "Emplacements libres", () => this.showPlaceholders, (v) => { this.showPlaceholders = v; r3(); });
+    section("Câbles");
+    tgi(D3, I.onTop, "Câbles toujours au-dessus des équipements / baies (moteur WebGL)", () => this.cablesOnTop, (v) => { this.cablesOnTop = v; if (this.useWebGL && this._three) { this._three.setCablesOnTop(v); this.persistView(); } else r3(); });
+    tgi(D3, I.perp, "Sortie ⊥ des ports (20 mm) : les câbles quittent la face perpendiculairement sur 20 mm", () => this.cablePortNormal, (v) => { this.cablePortNormal = v; redraw(); });
+    tgi(D3, I.mouse, "Aperçu de route → souris (prolonge l'aperçu jusqu'au curseur pendant la création d'une route)", () => this.routePreviewToMouse, (v) => { this.routePreviewToMouse = v; if (!v && this.routeBuild) this.routeBuild.mouse = null; r3(); });
+    section("Waypoints");
+    tgi(ALL, I.marker, "Marqueurs de waypoint (pins, extrémités de chemins/brosses, OOB). N'affecte pas le routage des câbles.", () => this.showWaypoints, (v) => { this.showWaypoints = v; redraw(); });
+    tgi(D3, I.conduit, "Brosses et passe-câbles (géométrie des conduits : bacs de chemins de câbles, coques des brosses)", () => this.showConduits, (v) => { this.showConduits = v; r3(); });
+    section("Étage & repères");
+    tgi(D3, I.grid, "Grilles d'étage", () => this.showFloorGrid, (v) => { this.showFloorGrid = v; r3(); });
+    tgi(ALL, I.orient, "Repères d'orientation", () => this.showOrientMarks, (v) => { this.showOrientMarks = v; redraw(); });
+    tgi(["floor"], I.anchor, "Point d'ancrage de l'étage", () => this.showFloorAnchor, (v) => { this.showFloorAnchor = v; redraw(); });
+    tgi(D3, I.pivot, "Centre de rotation", () => this.showPivot, (v) => { this.showPivot = v; r3(); });
+    // Réglages avancés (coloration / sliders / recentrage) — 3D UNIQUEMENT (pas pertinents en 2D).
+    if (v === "3d") {
+      const colorRow = document.createElement("div"); colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px";
+      const colTxt = document.createElement("span"); colTxt.className = "grow"; colTxt.textContent = "Coloration";
+      const colSel = FormControls.select([{ value: "face", label: "Par face" }, { value: "group", label: "Par groupe" }, { value: "type", label: "Par type" }], this.colorMode);
+      colSel.onchange = () => { this.colorMode = colSel.value as any; r3(); };
+      colorRow.append(colTxt, colSel); box.appendChild(colorRow);
+      // arrondi des câbles (slider) — en WebGL : reconstruction PARTIELLE des seuls câbles (live, coalescée).
+      box.appendChild(this.slider("Arrondi des câbles", this.cableSplineK, 0, 0.32, 0.01, (val) => val.toFixed(2), (val) => { this.cableSplineK = val; if (this.useWebGL && this._three) { this._three.setCableSpline(val); this.persistView(); } else redraw(); }));
+      // taille des marqueurs de waypoint + connecteurs de port (1 = défaut = milieu du range) — inerte en WebGL (pas de full rebuild).
+      box.appendChild(this.slider("Taille marqueurs / ports", this.markerScale, 0.25, 1.75, 0.05, (val) => Math.round(val * 100) + " %", (val) => { this.markerScale = val; if (this.useWebGL && this._three) { this._three.setMarkerScale(val); this.persistView(); } else redraw(); }));
+      // culling de distance (slider)
+      box.appendChild(this.slider("Masquer ports/U au-delà", this.cullDistanceM, 1, 60, 1, (val) => Math.round(val) + " m", (val) => { this.cullDistanceM = Math.max(1, Math.min(60, Math.round(val))); if (this.useWebGL && this._three) this._three.setCullDistance(this.cullDistanceM); }, () => { if (this.useWebGL) this.persistView(); else r3(); }));
+      box.appendChild(this.btn("Recentrer sur la salle", () => { this.camTarget = null; this.hidden3dRacks.clear(); this.scale = null; if (this.useWebGL && this._three) this._three.recenter(); else this.render(); }));
+    }
     return box;
   }
 

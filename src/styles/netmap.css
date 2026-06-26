@@ -708,6 +708,13 @@
   /* v120 â€” aperÃ§u de ROUTE en cours de crÃ©ation (pointillÃ© accent + pastilles) */
   .dc-route-line { fill: none; stroke: var(--accent); stroke-width: 2.5px; stroke-dasharray: 8 5; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.95; }
   .dc-route-dot { fill: var(--accent); stroke: var(--bg); stroke-width: 1px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  /* OUTIL DE MESURE multipoint (2D/3D) : polyligne + pastilles + longueur par segment ; couleur distincte (warn). */
+  .dc-measuring { cursor: default; }   /* pointeur de souris standard (pas la croix) */
+  .dc-measuring * { pointer-events: none !important; }   /* clic = poser un point ; glisser = naviguer (seul le <svg> reÃ§oit les Ã©vÃ©nements) */
+  .dc-measure-line { fill: none; stroke: var(--warn); stroke-width: 2.5px; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.95; }
+  .dc-measure-line.preview { opacity: 0.6; }   /* segment en cours (curseur) â€” plus discret */
+  .dc-measure-dot { fill: var(--warn); stroke: var(--bg); stroke-width: 1.5px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .dc-measure-label { fill: var(--warn); font-family: var(--mono); font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
   /* v53 : WAYPOINTS (points de passage de cÃ¢bles) â€” vue Dessus */
   .dc-wp { cursor: grab; }
   .dc-wp.dragging { cursor: grabbing; }

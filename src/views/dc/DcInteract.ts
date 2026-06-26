@@ -39,18 +39,6 @@ export class DcInteract extends DcPanels {
     this.svg.querySelectorAll("[data-wp]").forEach((n) => n.classList.toggle("route-pick", ids.has(n.getAttribute("data-wp") || "")));
   }
 
-  /** Recalcule le SEUL aperçu de route (suivi de souris) sans reconstruire la scène — préserve les cibles cliquables. */
-  protected refreshRoutePreview3D(): void {
-    const g = this.gRoot, c = this._camC; if (!g) return;
-    g.querySelectorAll(".dc-route-preview").forEach((n) => n.remove());   // retire l'ancien tracé
-    const dc = this.current();
-    if (this.view !== "3d" || !dc || !this.routeBuild || !c) return;
-    const proj = (p: Vec3) => this.project3DCam(p, c);
-    const drawables: Drawable[] = [];
-    this.drawRoutePreview3D(dc, proj, drawables);
-    drawables.forEach((d) => g.appendChild(d.node));   // ajouté en dernier dans gRoot = au-dessus (et pointer-events:none)
-  }
-
   protected showCote(text: string, clientX: number, clientY: number): void {
     if (!this.coteEl) { this.coteEl = document.createElement("div"); this.coteEl.className = "dc-cote"; this.stage.appendChild(this.coteEl); }
     this.coteEl.textContent = text; this.coteEl.style.display = "block";
@@ -393,9 +381,9 @@ export class DcInteract extends DcPanels {
     const u = [...new Set((ids || []).filter(Boolean))]; const n = u.length; if (!n) return [];
     const suf = n > 1 ? " (" + n + ")" : "";
     return [
-      { label: "Afficher " + noun + suf, action: () => { u.forEach((id) => this.selCables.add(id)); this.render(); } },
-      { label: "Isoler " + noun + suf, action: () => { this.selCables = new Set(u); this.render(); } },
-      { label: "Masquer " + noun + suf, action: () => { u.forEach((id) => this.selCables.delete(id)); this.render(); } },
+      { label: "Afficher " + noun + suf, action: () => { u.forEach((id) => this.selCables.add(id)); this.rerenderView(); } },
+      { label: "Isoler " + noun + suf, action: () => { this.selCables = new Set(u); this.rerenderView(); } },
+      { label: "Masquer " + noun + suf, action: () => { u.forEach((id) => this.selCables.delete(id)); this.rerenderView(); } },
     ];
   }
 
@@ -464,9 +452,11 @@ export class DcInteract extends DcPanels {
   /** Menu d'une SALLE en 3D multi-salles (clic droit sur son sol) : activer ce DC · isoler · modifier + bascule de vue. */
   protected roomCtx(dc: any): CtxSection[] {
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [];
-    if (this._multi) {   // activer/isoler n'a de sens qu'en multi-salles
-      items.push({ label: "Activer ce DC", action: () => this.activateDc(dc.id, false) });
-      items.push({ label: "Isoler (salle unique)", action: () => this.activateDc(dc.id, true) });
+    if (this.multiDc) {   // activer / isoler / quitter le multi-DC n'ont de sens qu'en mode Multi-DC
+      items.push({ label: "Activer ce DC", action: () => this.activateDc(dc.id, false) });   // devient la salle active (affichage inchangé)
+      // Isoler : RESTE en Multi-DC mais n'affiche QUE ce DC (visibleDcIds = {ce DC}) — distinct du mode simple.
+      items.push({ label: "Isoler ce DC (afficher seul)", action: () => { this.dcId = dc.id; this.selRackId = null; this.visibleDcIds = new Set([dc.id]); this.camTarget = null; this.scale = null; this.buildToolbar(); this.render(); } });
+      items.push({ label: "Passer en mode simple DC", action: () => this.activateDc(dc.id, true) });   // quitte le Multi-DC, sur ce DC
     }
     items.push({ label: "Modifier la salle…", action: () => this.host.openDatacenterForm?.(dc.id) });
     return [
@@ -475,12 +465,15 @@ export class DcInteract extends DcPanels {
     ];
   }
   protected rackCtx(rack: any): CtxSection[] {
-    const hidden = this.hidden3dRacks.has(rack.id), faded = this.fadedRacks.has(rack.id);
-    const secs: CtxSection[] = [{ head: rack.name || "(baie)", items: [
+    const hidden = this.hidden3dRacks.has(rack.id), doorsHidden = this.hiddenDoorRacks.has(rack.id);
+    const items: any[] = [
       { label: "Modifier…", action: () => this.host.openRackForm?.(rack.id) },
       { label: "Isoler la baie", action: () => this.isolateRack(rack.id) },
       { label: hidden ? "Afficher la baie" : "Masquer la baie", action: () => { if (hidden) this.hidden3dRacks.delete(rack.id); else this.hidden3dRacks.add(rack.id); this.render(); } },
-      { label: faded ? "Ne plus estomper" : "Estomper la baie", action: () => { if (faded) this.fadedRacks.delete(rack.id); else this.fadedRacks.add(rack.id); this.render(); } },
+    ];
+    // masquage des portes : seulement en 3D (en 2D les portes ne sont pas dessinées → aucun effet)
+    if (RackGeometry.hasDoor(rack) && this.view === "3d") items.push({ label: doorsHidden ? "Afficher les portes" : "Masquer les portes", action: () => { if (doorsHidden) this.hiddenDoorRacks.delete(rack.id); else this.hiddenDoorRacks.add(rack.id); this.render(); } });
+    const secs: CtxSection[] = [{ head: rack.name || "(baie)", items: items.concat([
       { label: "Retirer du datacenter", danger: true, action: async () => {
           if (!this.store.get("racks", rack.id)) return;
           const eqIds = this.store.equipmentsOfRack(rack.id).filter((e: any) => e.placement_mode === "rack" && e.rack_u != null).map((e: any) => e.id);
@@ -488,7 +481,7 @@ export class DcInteract extends DcPanels {
           if (rack.datacenter_id) ops.push(...this.store.cableDowngradeOps(eqIds));
           await this.store.updateBatch(ops); this.setDirty(); Notify.toast("Baie retirée — replacée dans le pool");
         } },
-    ] }];
+    ]) }];
     const rackCableIds = this.store.equipmentsOfRack(rack.id).flatMap((e: any) => this.store.cablesOfEquipment(e.id).map((c: any) => c.id));
     const csi = this.cableSelItems(rackCableIds, "les câbles de la baie");
     if (csi.length) secs.push({ items: csi });
@@ -644,33 +637,249 @@ export class DcInteract extends DcPanels {
     acts.append(bBack, bCancel); box.appendChild(acts);
     return box;
   }
-  /** Points MONDE de l'aperçu de route dans la salle `dcId` (port de départ → waypoints de la salle ;
-      conduits dépliés en points d'entrée/sortie). Mono-salle (repère salle = monde). */
 
-  protected routePreviewWorldPts(dcId: string): Vec3[] {
-    const rb = this.routeBuild; if (!rb) return [];
-    const nodes: Array<{ w?: any; p: Vec3 }> = [];
-    if (rb.fromPortId) { const a = this.resolver.resolvePort3D(rb.fromPortId, dcId); if (a) nodes.push({ p: { x: a.x, y: a.y, z: a.z } }); }
-    rb.wpIds.forEach((id) => { const w: any = this.store.get("waypoints", id); if (w && this.store.waypointIsPlaced(w) && w.datacenter_id === dcId) nodes.push({ w, p: this.resolver.waypointAnchor(w) }); });
-    if (rb.mouse) nodes.push({ p: rb.mouse });   // extrémité jusqu'au curseur
+
+  /* ============================ OUTIL DE MESURE multipoint (éphémère) ============================
+     Clic = poser un point ; glisser = navigation (non inhibée — cf. classe `.dc-measuring` posée par newScene).
+     2D (Dessus/Étage) : point au niveau du SOL (z=0) via clientToWorld. 3D : RAYCAST sur les surfaces de la scène
+     (sol, baies, équipements) — l'intersection la plus proche donne le point ; à défaut, projection sur le plan du
+     sol z=0. Les points vivent dans le repère du CONTEXTE courant (salle mono / monde multi / plan d'étage). */
+
+  /** (Ré)arme l'outil de mesure dans le contexte de vue courant (exclusif du routage). */
+  measureArm(): void {
+    this.routeBuild = null;   // un seul mode de clic à la fois
+    this.measure = { active: true, ctx: this.measureCtxKey(), pts: [], cursor: null };
+    Notify.toast("Mesure : cliquez pour poser des points · glissez pour naviguer", "ok");
+    this.buildToolbar(); this.render();
+  }
+  measureCancel(): void { this.measure = null; this.hideCote(); this.buildToolbar(); this.render(); }
+  protected measureUndo(): void { if (this.measure && this.measure.pts.length) { this.measure.pts.pop(); this.measure.cursor = null; this.render(); } }
+  protected measureClear(): void { if (this.measure) { this.measure.pts = []; this.measure.cursor = null; this.hideCote(); this.render(); } }
+
+  /** Clé du contexte spatial courant : la mesure n'est tracée que là où elle a été prise (repères compatibles).
+      NB : la 3D mono et le Plan de salle d'UNE MÊME salle partagent le repère → une mesure y est visible des deux. */
+  protected measureCtxKey(): string {
+    if (this.view === "floor") { const ft = this.floorTargetResolve(); return ft ? "floor:" + ft.location + "/" + ft.floor : "floor:?"; }
+    if (this.view === "3d" && this.multiDc) return "multi";
+    const dc = this.current(); return "room:" + (dc ? dc.id : "?");
+  }
+  /** La mesure en cours appartient-elle au contexte affiché ? (sinon : panneau informatif, pas de tracé/pose). */
+  protected measureActiveHere(): boolean { return !!(this.measure && this.measure.active && this.measure.ctx === this.measureCtxKey()); }
+
+  protected measureLen(a: Vec3, b: Vec3): number { return Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0)); }
+  protected measureTotal(pts: Vec3[]): number { let s = 0; for (let i = 1; i < pts.length; i++) s += this.measureLen(pts[i - 1], pts[i]); return s; }
+
+  /** Pose un point au clic (si le contexte correspond). */
+  protected measurePlaceAt(clientX: number, clientY: number): void {
+    if (!this.measureActiveHere()) { Notify.toast("Mesure prise dans un autre contexte — revenez-y ou effacez-la", "err"); return; }
+    const p = this.measurePick(clientX, clientY);
+    if (!p) { Notify.toast("Vue trop rasante : inclinez la caméra pour poser un point au sol", "err"); return; }
+    this.measure!.pts.push(p); this.measure!.cursor = null; this.hideCote();
+    this.render();
+  }
+
+  /** Point MONDE d'un clic en vue 2D (Dessus / Étage) : au niveau du SOL (z=0). En 3D, le raycast est fait par le
+      moteur WebGL (cf. onWebglMeasurePlace / DcThreeScene.toolRaycast). */
+  protected measurePick(clientX: number, clientY: number): Vec3 | null {
+    if (!this.svg || this.scale == null) return null;
+    if (this.view === "top" || this.view === "floor") { const w = this.clientToWorld(clientX, clientY); return { x: w.x, y: w.y, z: 0 }; }
+    return null;
+  }
+
+  /** Tracé 2D (Dessus/Étage) de la mesure — points au niveau du sol (z ignoré). Appelé AVANT uprightTexts. */
+  protected drawMeasure2D(gRoot: SVGGElement): void {
+    if (this.view === "3d" || !this.measureActiveHere()) return;
+    const pts = this.measure!.pts; if (!pts.length) return;
+    const g = Dom.svg("g", { class: "dc-measure" }), fMM = 13 / (this.scale || 1);
+    if (pts.length >= 2) {
+      g.appendChild(Dom.svg("polyline", { class: "dc-measure-line", points: pts.map((p) => p.x + "," + p.y).join(" ") }));
+      for (let i = 1; i < pts.length; i++) {
+        const t = Dom.svg("text", { class: "dc-measure-label", x: (pts[i - 1].x + pts[i].x) / 2, y: (pts[i - 1].y + pts[i].y) / 2, "text-anchor": "middle", "font-size": fMM });
+        t.textContent = Format.meters(this.measureLen(pts[i - 1], pts[i])); g.appendChild(t);
+      }
+    }
+    const rDot = (DC_DOT_PX + 1) * this.markerScale / (this.scale || 1);
+    pts.forEach((p) => g.appendChild(Dom.svg("circle", { class: "dc-measure-dot", cx: p.x, cy: p.y, r: rDot })));
+    gRoot.appendChild(g);
+  }
+
+  /** APERÇU 2D du segment en cours (dernier point posé → curseur), sans reconstruire la scène. En 3D, l'aperçu est
+      géré par le moteur WebGL (overlay Three.js). Trait pointillé + pastille ; longueur live via la cote flottante. */
+  protected refreshMeasurePreview(): void {
+    const g = this.gRoot; if (!g) return;
+    g.querySelectorAll(".dc-measure-preview").forEach((n) => n.remove());
+    const m = this.measure;
+    if (this.view === "3d" || !this.measureActiveHere() || !m || !m.cursor || !m.pts.length) return;
+    const last = m.pts[m.pts.length - 1], cur = m.cursor;
+    const grp = Dom.svg("g", { class: "dc-measure-preview", style: "pointer-events:none" });
+    grp.appendChild(Dom.svg("line", { class: "dc-measure-line preview", x1: last.x, y1: last.y, x2: cur.x, y2: cur.y }));
+    const rDot = (DC_DOT_PX + 1) * this.markerScale / (this.scale || 1);
+    grp.appendChild(Dom.svg("circle", { class: "dc-measure-dot", cx: cur.x, cy: cur.y, r: rDot }));
+    g.appendChild(grp);
+  }
+
+  /** Carte « Mesure » (panneau latéral) : liste des segments + longueur totale + actions. */
+  protected measureCard(): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "📏 Mesure"; box.appendChild(t);
+    const m = this.measure!, here = this.measureActiveHere();
+    const list = document.createElement("div"); list.style.cssText = "font-size:12px;margin:4px 0;display:flex;flex-direction:column;gap:3px";
+    if (!m.pts.length) {
+      const d = document.createElement("div"); d.innerHTML = '<span style="color:var(--accent)">Cliquez pour poser le premier point…</span>'; list.appendChild(d);
+    } else {
+      m.pts.forEach((p, i) => {
+        const d = document.createElement("div");
+        d.innerHTML = i === 0 ? '<span class="pill">1</span> Point de départ'
+          : '<span class="pill">' + (i + 1) + '</span> Segment ' + i + ' : <b>' + Html.escape(Format.meters(this.measureLen(m.pts[i - 1], p))) + '</b>';
+        list.appendChild(d);
+      });
+    }
+    box.appendChild(list);
+    if (m.pts.length >= 2) {
+      const tot = document.createElement("div"); tot.style.cssText = "margin:6px 0;font-size:13px";
+      tot.innerHTML = 'Total : <b style="color:var(--accent)">' + Html.escape(Format.meters(this.measureTotal(m.pts))) + '</b> · ' + (m.pts.length - 1) + ' segment' + (m.pts.length > 2 ? 's' : '');
+      box.appendChild(tot);
+    }
+    const hint = document.createElement("div"); hint.className = "form-hint";
+    hint.textContent = here ? "Cliquez pour ajouter un point · glissez pour naviguer (fonctionne en 2D comme en 3D)."
+      : "Mesure prise dans un autre contexte de vue. Revenez-y pour l'éditer, ou effacez-la.";
+    box.appendChild(hint);
+    const acts = document.createElement("div"); acts.className = "dc-card-acts";
+    const bUndo = this.btn("↩ Annuler point", () => this.measureUndo()); (bUndo as any).disabled = !m.pts.length || !here;
+    const bClear = this.btn("🗑 Effacer", () => this.measureClear()); (bClear as any).disabled = !m.pts.length;
+    const bClose = this.btn("✕ Fermer", () => this.measureCancel()); bClose.classList.add("btn-danger");
+    acts.append(bUndo, bClear, bClose); box.appendChild(acts);
+    return box;
+  }
+
+
+  /* ============================ PONT OUTILS ↔ moteur WebGL (mesure / routage 3D) ============================
+     En 3D-WebGL il n'y a pas de <svg> : le moteur Three.js intercepte clics/survols et remonte les points monde
+     (raycast natif) à la vue, qui tient l'état (measure / routeBuild) + le panneau, puis repousse l'overlay. */
+
+  /** (Ré)applique au moteur WebGL le mode outil + l'overlay courant (appelé après chaque (re)rendu 3D-WebGL). */
+  protected syncWebglTool(): void {
+    const t = this._three; if (!t) return;
+    if (this.measure && this.measure.active && this.measureActiveHere()) { t.setToolMode("measure"); t.setMeasureOverlay(this.measure.pts, this.measure.cursor); }
+    else if (this.routeBuild) { t.setToolMode("route"); t.setRouteOverlay(this.webglRouteWorldPts(), this.routeBuild.mouse || null); }
+    else t.setToolMode("none");
+  }
+
+  /** Clic mesure (moteur) → pose un point + met à jour panneau et overlay (sans reconstruire la scène). */
+  protected onWebglMeasurePlace(w: Vec3): void {
+    if (!this.measure || !this.measure.active || !this.measureActiveHere()) return;
+    this.measure.pts.push({ x: w.x, y: w.y, z: w.z }); this.measure.cursor = null; this.hideCote();
+    this.renderSide(this.current());
+    if (this._three) this._three.setMeasureOverlay(this.measure.pts, null);
+  }
+
+  /** Survol mesure (moteur) → aperçu du segment courant + cote flottante (longueur live). */
+  protected onWebglMeasureHover(w: Vec3 | null, clientX: number, clientY: number): void {
+    if (!this.measure || !this.measure.active || !this.measureActiveHere() || !this.measure.pts.length) { this.hideCote(); return; }
+    this.measure.cursor = w;
+    if (this._three) this._three.setMeasureOverlay(this.measure.pts, w);
+    const last = this.measure.pts[this.measure.pts.length - 1];
+    if (w) this.showCote(Format.meters(this.measureLen(last, w)), clientX, clientY); else this.hideCote();
+  }
+
+  /** Clic route (moteur) → port de départ / waypoint / port terminal (même machine d'état qu'en SVG). */
+  protected onWebglRoutePick(desc: any): void {
+    const rb = this.routeBuild; if (!rb || !desc) return;
+    if (desc.type === "port") { if (!rb.fromPortId) this.routeStart(desc.id); else if (desc.id !== rb.fromPortId) this.routeFinish(desc.id); }
+    else if (desc.type === "wp") { if (rb.fromPortId) this.routeAddWp(desc.id); }
+  }
+
+  /** Survol route (moteur) → aperçu (rubber-band) jusqu'au curseur. */
+  protected onWebglRouteHover(w: Vec3 | null): void {
+    const rb = this.routeBuild; if (!rb || !rb.fromPortId) return;
+    rb.mouse = w;
+    if (this._three) this._three.setRouteOverlay(this.webglRouteWorldPts(), w);
+  }
+
+  /** Points MONDE de la route en cours (port de départ + waypoints de la salle active) pour l'aperçu WebGL.
+      Mono-salle (repère salle = monde) ; en multi, seuls les waypoints de la salle active sont prévisualisés. */
+  protected webglRouteWorldPts(): Vec3[] {
+    const rb = this.routeBuild, dc = this.current(); if (!rb || !dc) return [];
     const pts: Vec3[] = [];
-    nodes.forEach((nd, i) => {
-      if (nd.w && this.isConduitWp(nd.w)) { const prev = i > 0 ? nodes[i - 1].p : nd.p, next = i < nodes.length - 1 ? nodes[i + 1].p : nd.p; this.resolver.waypointPassPoints(nd.w, prev, next, null).forEach((p: Vec3) => pts.push(p)); }
-      else pts.push(nd.p);
-    });
+    if (rb.fromPortId) { const a = this.resolver.resolvePort3D(rb.fromPortId, dc.id); if (a) pts.push({ x: a.x, y: a.y, z: a.z }); }
+    rb.wpIds.forEach((id) => { const w: any = this.store.get("waypoints", id); if (w && this.store.waypointIsPlaced(w) && w.datacenter_id === dc.id) { const an = this.resolver.waypointAnchor(w); pts.push({ x: an.x, y: an.y, z: an.z }); } });
     return pts;
   }
 
-  /** Aperçu de la route en cours (tracé pointillé + pastilles), au-dessus de tout. */
-  protected drawRoutePreview3D(dc: any, proj: (p: Vec3) => { h: number; v: number; depth: number }, drawables: Drawable[]): void {
-    if (!this.routeBuild || !dc) return;
-    const P = this.routePreviewWorldPts(dc.id).map(proj);
-    if (P.length < 2) return;
-    const g = Dom.svg("g", { class: "dc-route-preview", style: "pointer-events:none" });   // le câble qui suit la souris ne doit JAMAIS capter le clic
-    g.appendChild(Dom.svg("path", { class: "dc-route-line", d: this.splinePath(P) }));
-    const rDot = (DC_DOT_PX + 2) * this.markerScale / (this.scale || 1);
-    P.forEach((p) => g.appendChild(Dom.svg("circle", { class: "dc-route-dot", cx: p.h, cy: p.v, r: rDot })));
-    drawables.push({ depth: -3e4, node: g });
+
+  /* ============================ « LOCALISER » : focus 3D sur un objet (depuis un listing / une fiche) ============================ */
+
+  /** Pousse la cible « Localiser » au moteur WebGL (appelé après chaque (re)rendu 3D). */
+  protected applyFocus3D(): void {
+    if (this._focusTarget && this._three) { this._three.focusOn(this._focusTarget.p, this._focusTarget.extent); this._focusTarget = null; }
+  }
+
+  /** Centre monde (mm) d'un équipement dans la salle `dcId` (repère salle = monde en mode simple DC), ou null. */
+  protected equipCenter(e: any, dcId: string): Vec3 | null {
+    if (e.dim_mode === "free") { if (e.dc_id !== dcId || e.dc_x == null || e.dc_y == null) return null; const b = FreeEquipGeometry.box(e); return { x: e.dc_x, y: e.dc_y, z: b.z + b.h / 2 }; }
+    if (e.placement_mode === "rack" && e.rack_id && e.rack_u != null) {
+      const rk: any = this.store.get("racks", e.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
+      return { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: RackGeometry.uBaseZ(rk) + ((e.rack_u - 1) + Math.max(1, e.u_height | 0 || 1) / 2) * U_MM };
+    }
+    if ((e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id) {
+      const rk: any = this.store.get("racks", e.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
+      return { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: RackGeometry.physHeight(rk) / 2 };
+    }
+    return null;
+  }
+
+  protected portDcId(portId: string): string | null { const p: any = this.store.get("ports", portId); return p ? this.store.equipmentDcId(p.equipment_id) : null; }
+
+  /** Bascule en 3D sur la salle `dcId` (mode simple DC) et programme le focus caméra sur `p` (emprise `extent` mm). */
+  protected focus3DAt(dcId: string, p: Vec3, extent: number): void {
+    this.view = "3d"; this.multiDc = false; this.dcId = dcId;
+    this._focusTarget = { p, extent };
+    this.buildToolbar(); this.render();
+  }
+
+  /** « Localiser » : affiche la vue 3D centrée sur l'objet (équipement / baie / câble / port). API publique (shell). */
+  locate(kind: "equipment" | "rack" | "cable" | "port", id: string): void {
+    if (kind === "equipment") this.locateEquipment(id);
+    else if (kind === "rack") this.locateRack(id);
+    else if (kind === "cable") this.locateCable(id);
+    else if (kind === "port") this.locatePort(id);
+  }
+
+  locateEquipment(eqId: string): void {
+    const e: any = this.store.get("equipments", eqId); if (!e) return;
+    const dcId = this.store.equipmentDcId(eqId);
+    if (!dcId) { Notify.toast("Équipement non placé dans une salle", "err"); return; }
+    this.focusEqId = eqId; this.selRackId = e.rack_id || null;
+    this.focus3DAt(dcId, this.equipCenter(e, dcId) || { x: 0, y: 0, z: 0 }, 1600);
+  }
+
+  locateRack(rackId: string): void {
+    const rk: any = this.store.get("racks", rackId); if (!rk) return;
+    const dcId = rk.datacenter_id;
+    if (!dcId) { Notify.toast("Baie non placée dans une salle", "err"); return; }
+    this.selRackId = rackId; this.focusEqId = null;
+    const H = RackGeometry.physHeight(rk);
+    this.focus3DAt(dcId, { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: H / 2 }, H);
+  }
+
+  locateCable(cableId: string): void {
+    const c: any = this.store.get("cables", cableId); if (!c) return;
+    const dcId = this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id);
+    if (!dcId) { Notify.toast("Câble non raccordé dans une salle", "err"); return; }
+    const a = this.resolver.resolvePort3D(c.from_port_id, dcId) || this.resolver.resolvePort3D(c.to_port_id, dcId);
+    if (!a) { Notify.toast("Extrémité du câble introuvable dans cette salle", "err"); return; }
+    this.selCables.add(cableId); this.showAllCables = true; this.focusEqId = null;
+    this.focus3DAt(dcId, { x: a.x, y: a.y, z: a.z }, 2500);
+  }
+
+  locatePort(portId: string): void {
+    const p: any = this.store.get("ports", portId); if (!p) return;
+    const dcId = this.store.equipmentDcId(p.equipment_id);
+    if (!dcId) { Notify.toast("Port : équipement non placé dans une salle", "err"); return; }
+    const pt = this.resolver.resolvePort3D(portId, dcId);
+    if (!pt) { Notify.toast("Port introuvable en 3D (façade non posée ?)", "err"); return; }
+    this.focusEqId = p.equipment_id; this.selRackId = null;
+    this.focus3DAt(dcId, { x: pt.x, y: pt.y, z: pt.z }, 700);
   }
 
 }

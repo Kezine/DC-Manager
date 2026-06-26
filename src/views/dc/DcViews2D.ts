@@ -46,10 +46,12 @@ export class DcViews2D extends DcScene3D {
     gRoot.appendChild(room);
     gRoot.appendChild(this.gridNode(W, D, cell, dc.blocked_cells, (cx0, cy0, cx1, cy1) => this.toggleCellsRange("datacenters", dc.id, cx0, cy0, cx1, cy1)));
     if (this.showOrientMarks) { const th = Math.max(40, Math.min(W, D) * 0.012); gRoot.appendChild(Dom.svg("rect", { class: "dc-floor-room-front", x: 0, y: 0, width: W, height: th })); }   // liseré FRONT
+    if (this.showDoorSwing) this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) { const sw = this.doorSwingNode(r); if (sw) gRoot.appendChild(sw); } });   // débattement des portes (sous les baies)
     this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) gRoot.appendChild(this.rackNode(r)); });
     this.store.freeEquipsOfDc(dc.id).forEach((e: any) => { if (e.dc_x != null && e.dc_y != null) gRoot.appendChild(this.equipNode(e)); });
     this.drawCables2D(gRoot, dc);   // filtré par cableShown (showAllCables / selCables) à l'intérieur
     if (this.showWaypoints) this.store.waypointsOfDc(dc.id).forEach((wp: any) => { if (this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.waypointNode2D(wp, dc)); });
+    this.drawMeasure2D(gRoot);   // outil de mesure (avant finishScene/uprightTexts → labels redressés)
     this.finishScene();
     this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue
   }
@@ -79,6 +81,7 @@ export class DcViews2D extends DcScene3D {
     if (this.showWaypoints) this.store.oobWaypoints().filter((w: any) => (w.location || "") === loc && String(w.floor || "") === fl).forEach((wp: any) => gRoot.appendChild(this.floorOobNode(wp, cfg)));
     this.store.floorEquipments().filter((e: any) => (e.location || "") === loc && String(e.floor || "") === fl).forEach((eq: any) => gRoot.appendChild(this.floorEquipNode2D(eq, cfg)));
     if (this.showFloorAnchor) gRoot.appendChild(this.floorAnchorNode(cfg, loc, fl));   // marqueur d'ancrage déplaçable (discret)
+    this.drawMeasure2D(gRoot);   // outil de mesure (avant finishScene/uprightTexts → labels redressés)
     this.renderFloorRail(ft);   // rail de navigation rapide entre étages (à gauche du plan)
     this.finishScene();
     this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue
@@ -362,6 +365,31 @@ export class DcViews2D extends DcScene3D {
 
   protected async toggleFloorCellsRange(loc: string, fl: string, cx0: number, cy0: number, cx1: number, cy1: number): Promise<void> { const f = await this.ensureFloor(loc, fl); await this.toggleCellsRange("floors", f.id, cx0, cy0, cx1, cy1); }
 
+  /** Débattement (rayon d'ouverture) des portes d'une baie, en vue DESSUS : secteur quart-de-disque par porte
+      (pivot = charnière décalée de l'épaisseur, rayon = largeur du vantail, 90° vers l'extérieur). Couleurs des
+      emplacements libres (accent). Repère LOCAL de la baie (translate+rotate). null si aucune porte. */
+  protected doorSwingNode(r: any): SVGElement | null {
+    const w = r.width_mm || RACK_WIDTH_DEFAULT, d = r.depth || RACK_DEPTH_DEFAULT;
+    const cx = (r.dc_x != null) ? r.dc_x : w / 2, cy = (r.dc_y != null) ? r.dc_y : d / 2, o = Normalize.rackOrientation(r.orientation);
+    const grp = Dom.svg("g", { transform: `translate(${cx} ${cy}) rotate(${o})`, "pointer-events": "none" });
+    let any = false;
+    (["front", "rear"] as const).forEach((face) => {
+      const dr = RackGeometry.door(r, face); if (!dr || !dr.enabled) return;
+      any = true;
+      const rear = face === "rear", clr = Math.max(6, dr.thickness_mm | 0), R = Math.max(1, w - clr);
+      const sgn = rear ? 1 : -1;                                  // face/ouverture vers l'extérieur (avant −Y · arrière +Y)
+      const left = (dr.hinge !== "right") !== rear;               // gauche vue de la FACE de la porte
+      const dirX = left ? 1 : -1, beta = Math.sign(sgn / dirX) * Math.PI / 2;
+      const hx = left ? (-w / 2 + clr) : (w / 2 - clr), hy = sgn * (d / 2);   // pivot = charnière décalée, au plan de face
+      const seg = [`M ${hx.toFixed(1)} ${hy.toFixed(1)}`];
+      const N = 16;
+      for (let i = 0; i <= N; i++) { const a = beta * (i / N); seg.push(`L ${(hx + dirX * R * Math.cos(a)).toFixed(1)} ${(hy + dirX * R * Math.sin(a)).toFixed(1)}`); }
+      seg.push("Z");
+      grp.appendChild(Dom.svg("path", { d: seg.join(" "), style: "fill:var(--accent);fill-opacity:0.14;stroke:var(--accent);stroke-opacity:0.55;stroke-width:1.5;vector-effect:non-scaling-stroke" }));
+    });
+    return any ? grp : null;
+  }
+
   protected rackNode(r: any): SVGElement {
     const w = r.width_mm || RACK_WIDTH_DEFAULT, d = r.depth || RACK_DEPTH_DEFAULT;
     const cx = (r.dc_x != null) ? r.dc_x : w / 2, cy = (r.dc_y != null) ? r.dc_y : d / 2, o = Normalize.rackOrientation(r.orientation);
@@ -421,6 +449,7 @@ export class DcViews2D extends DcScene3D {
         hitDot.setAttribute("cx", cur.x1); hitDot.setAttribute("cy", cur.y1);
         label.setAttribute("x", cur.x1); label.setAttribute("y", cur.y1 - s * 1.4);
       }
+      this.applyUprightText(label);   // recale le contre-miroir/rotation sur la NOUVELLE ancre (sinon le label part en sens inverse)
     };
     const startDrag = (ev: MouseEvent, which: string) => {
       if (ev.button !== 0) return; ev.preventDefault(); ev.stopPropagation();

@@ -174,6 +174,40 @@ export class ListConfigs {
     };
   }
 
+  /** Sites / bâtiments (CRUD). La suppression passe par `removeSite` (décommissionnement) — câblée dans main. */
+  static sites(store: Store): ListOptions {
+    return {
+      collection: "sites",
+      defaultSort: { key: "name", dir: "asc" },
+      emptyText: "Aucun site / bâtiment.",
+      actions: { view: false, edit: true, clone: false, del: true },
+      searchFields: (s) => [s.name, s.address],
+      columns: [
+        { head: "Nom", cls: "cell-name", sortKey: "name", sort: (s) => s.name, render: (s) => Html.escape(s.name || "(site)") },
+        { head: "Adresse", render: (s) => (s.address ? Html.escape(s.address) : dim("—")) },
+        { head: "Étages", cls: "num", render: (s) => String(store.floorsOf(s.id).length) },
+        { head: "Salles", cls: "num", render: (s) => String(store.all("datacenters").filter((d: any) => (d.location || "") === s.id).length) },
+      ],
+    };
+  }
+
+  /** Plans d'étage (CRUD). Édition/création via `Forms.floor` (location + étage) — câblée dans main. */
+  static floors(store: Store): ListOptions {
+    return {
+      collection: "floors",
+      defaultSort: { key: "loc", dir: "asc" },
+      emptyText: "Aucun étage.",
+      actions: { view: false, edit: true, clone: false, del: true },
+      searchFields: (f) => [store.siteLabel(f.location), String(f.floor)],
+      columns: [
+        { head: "Bâtiment", cls: "cell-name", sortKey: "loc", sort: (f) => store.siteLabel(f.location), render: (f) => Html.escape(store.siteLabel(f.location)) },
+        { head: "Étage", sortKey: "fl", sort: (f) => FloorLayout.floorNum(String(f.floor || "")), render: (f) => "Étage " + (f.floor != null && f.floor !== "" ? f.floor : "0") },
+        { head: "Dimensions", render: (f) => ((f.width_mm || 0) / 1000).toFixed(1) + " × " + ((f.depth_mm || 0) / 1000).toFixed(1) + " m" },
+        { head: "Salles", cls: "num", render: (f) => String(store.dcsOfFloor(f.location, String(f.floor || "")).length) },
+      ],
+    };
+  }
+
   static racks(store: Store): ListOptions {
     const scene = new RackScene(store);
     return {

@@ -31,7 +31,7 @@ import {
   RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_MOUNT_MARGIN_DEFAULT, U_MM, SIDE_U_STEP,
   BREAKOUT_SPANS, CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW,
   EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, EQUIP_FREE_DEFAULT_MM,
-  WAYPOINT_TYPES, OOB_HEIGHT_DEFAULT, WAYPOINT_Z_DEFAULT, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT, BRUSH_PADDING_MM,
+  WAYPOINT_TYPES, OOB_HEIGHT_DEFAULT, WAYPOINT_Z_DEFAULT, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT, BRUSH_PADDING_MM, RACK_DEPTH_SAFETY_MM,
   FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT,
   SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
   SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
@@ -287,8 +287,22 @@ export class RackForms extends CableForms {
       : wp.rack_id ? ("baie « " + ((store.get("racks", wp.rack_id) || {}).name || "?") + " »")
       : wp.datacenter_id ? ("salle « " + store.dcName(wp.datacenter_id) + " »") : "pool (non posé)";
     const lock = document.createElement("div"); lock.className = "form-hint";
-    lock.innerHTML = "Type : <b>" + Html.escape(kindLbl) + "</b> · " + Html.escape(where) + ".<br>Type et emplacement sont fixés à la création — seuls le nom, la hauteur et la grille restent modifiables.";
+    const editable = isBrush ? "le nom, la profondeur et la hauteur" : "le nom, la hauteur et la grille";
+    lock.innerHTML = "Type : <b>" + Html.escape(kindLbl) + "</b> · " + Html.escape(where) + ".<br>Type et emplacement sont fixés à la création — seuls " + editable + " restent modifiables.";
     root.appendChild(lock);
+    // BROSSE : profondeur (traversée par les câbles) + hauteur (U) modifiables ; l'emplacement U de départ reste fixé.
+    // Une PORTE (avant/arrière) borne la profondeur dispo (cage + cavités de porte) ; sans porte, profondeur libre.
+    let bdepthI: HTMLInputElement | null = null, bheightI: HTMLInputElement | null = null;
+    const brushRack: any = isBrush ? store.get("racks", wp.rack_id) : null;
+    const brushHasDoor = !!(brushRack && RackGeometry.hasDoor(brushRack));
+    const brushAvail = brushRack ? RackGeometry.frontMountAvailDepth(brushRack) : Infinity;   // dispo physique (depth − marge avant + cavités)
+    const brushMaxDepth = brushHasDoor ? Math.max(1, brushAvail - RACK_DEPTH_SAFETY_MM) : Infinity;   // − marge de sécurité (app-wide)
+    if (isBrush) {
+      bdepthI = FormControls.number(wp.depth_mm != null ? wp.depth_mm : 100, brushHasDoor ? { min: 1, step: 10, max: Math.round(brushMaxDepth) } : { min: 1, step: 10 });
+      root.appendChild(FormControls.fieldRow("Profondeur (mm)", bdepthI, brushHasDoor ? ("Bornée par la porte : ≤ " + Math.round(brushMaxDepth) + " mm (" + Math.round(brushAvail) + " dispo − " + RACK_DEPTH_SAFETY_MM + " mm de sécurité). Les câbles la traversent.") : "Profondeur libre (pas de porte). Les câbles la traversent."));
+      bheightI = FormControls.number(Math.max(1, wp.u_height | 0), { min: 1, step: 1 });
+      root.appendChild(FormControls.fieldRow("Hauteur (U)", bheightI, "Nombre d'unités occupées à partir de U" + Math.max(1, wp.rack_u | 0) + "."));
+    }
     // HAUTEUR (dc_z) — pin flottant / chemin / pin d'étage uniquement (cap/marge/brosse : hauteur dérivée du slot).
     let zI: HTMLInputElement | null = null;
     if (!isCapPin && !isSidePin && !isBrush) {
@@ -318,6 +332,15 @@ export class RackForms extends CableForms {
         if (!name) { Notify.toast("Le nom est obligatoire", "err"); return false; }
         const payload: any = { name, description: descI.value.trim() };
         if (zI) payload.dc_z = floorLvl ? Math.max(0, parseInt(zI.value, 10) || 0) : (parseInt(zI.value, 10) || 0);
+        if (isBrush) {
+          const rk: any = store.get("racks", wp.rack_id);
+          const uh = Math.max(1, parseInt(bheightI!.value, 10) || 1);
+          const sides = (rk && rk.sides === "dual") ? ["front", "rear"] : ["front"];
+          if (rk && !RackGeometry.canPlace(rk, Math.max(1, wp.rack_u | 0), uh, sides, scene.occupants(wp.rack_id, { exceptBrushId: wp.id }))) { Notify.toast("La hauteur ne tient pas ici (occupé ou dépasse la baie)", "err"); return false; }
+          const depth = Math.max(1, parseInt(bdepthI!.value, 10) || 100);
+          if (brushHasDoor && depth > brushMaxDepth) { Notify.toast("Profondeur > max derrière la porte : ≤ " + Math.round(brushMaxDepth) + " mm (" + Math.round(brushAvail) + " dispo − " + RACK_DEPTH_SAFETY_MM + " mm de sécurité)", "err"); return false; }
+          payload.depth_mm = depth; payload.u_height = uh;
+        }
         if (isCapPin && capChosen) {
           if (scene.capSlotOccupied(wp.rack_id, wp.cap_face, capChosen.cx, capChosen.cy, wp.id)) { Notify.toast("Cet emplacement est déjà occupé", "err"); return false; }
           payload.cap_cx = capChosen.cx; payload.cap_cy = capChosen.cy;
@@ -378,7 +401,8 @@ export class RackForms extends CableForms {
     root.appendChild(row2(FormControls.fieldRow("Largeur (mm)", wI), FormControls.fieldRow("Profondeur (mm)", dI), FormControls.fieldRow("Maille (mm)", cI, "Pas de la grille du plan (défaut 1000 = 1 m).")));
     const axI = FormControls.number(f.anchor_x || 0, { step: 100 });
     const ayI = FormControls.number(f.anchor_y || 0, { step: 100 });
-    root.appendChild(row2(FormControls.fieldRow("Ancrage X (mm)", axI, "Décalage du plan d'étage dans la pile 3D — aligner / décaler les étages entre eux."), FormControls.fieldRow("Ancrage Y (mm)", ayI)));
+    const hI = FormControls.number(f.height_mm || 0, { min: 0, step: 100 });
+    root.appendChild(row2(FormControls.fieldRow("Ancrage X (mm)", axI, "Décalage du plan d'étage dans la pile 3D — aligner / décaler les étages entre eux."), FormControls.fieldRow("Ancrage Y (mm)", ayI), FormControls.fieldRow("Hauteur (mm)", hI, "Hauteur de l'étage dans la pile 3D (0 = auto = hauteur du contenu).")));
     const descI = FormControls.textArea(f.description || "");
     root.appendChild(FormControls.fieldRow("Description", descI));
     host.openModal({
@@ -387,10 +411,11 @@ export class RackForms extends CableForms {
       body: root, wide: true,
       onSave: async () => {
         const L = pick ? (locSel!.value || "") : (location || ""), F = pick ? String(flSel!.value || "").trim() : fl;
+        if (pick && !L) { Notify.toast("Choisissez un bâtiment — créez d'abord un site (onglet Sites) si nécessaire", "err"); return false; }
         if (pick && !F) { Notify.toast("Aucun étage à créer : tous les étages de ce bâtiment existent déjà", "err"); return false; }
         if (pick && floorExists(L, F)) { Notify.toast("Cet étage existe déjà — ouvert"); opts.onPicked?.(L, F); return true; }
         const ex: any = store.floorFor(L, F);
-        const payload = { location: L, floor: F, width_mm: Math.max(1, parseInt(wI.value, 10) || FLOOR_WIDTH_DEFAULT), depth_mm: Math.max(1, parseInt(dI.value, 10) || FLOOR_DEPTH_DEFAULT), cell_mm: Math.max(1, parseInt(cI.value, 10) || FLOOR_CELL_DEFAULT), anchor_x: parseInt(axI.value, 10) || 0, anchor_y: parseInt(ayI.value, 10) || 0, description: descI.value.trim() };
+        const payload = { location: L, floor: F, width_mm: Math.max(1, parseInt(wI.value, 10) || FLOOR_WIDTH_DEFAULT), depth_mm: Math.max(1, parseInt(dI.value, 10) || FLOOR_DEPTH_DEFAULT), cell_mm: Math.max(1, parseInt(cI.value, 10) || FLOOR_CELL_DEFAULT), anchor_x: parseInt(axI.value, 10) || 0, anchor_y: parseInt(ayI.value, 10) || 0, height_mm: Math.max(0, parseInt(hI.value, 10) || 0), description: descI.value.trim() };
         if (ex) await store.update("floors", ex.id, payload); else await store.create("floors", payload);
         host.setDirty?.(true); Notify.toast(pick ? "Étage créé" : "Plan d'étage enregistré");
         if (pick) opts.onPicked?.(L, F);
@@ -409,7 +434,9 @@ export class RackForms extends CableForms {
     const posHint = document.createElement("div"); posHint.className = "form-hint";
     posHint.textContent = "Position : U" + u + (span > 1 ? "–U" + (u + span - 1) + " (" + span + " U)" : "") + (rack.sides === "dual" ? " · " + this.faceLabel(side) : "") + " — " + (rack.name || "rack");
     body.appendChild(posHint);
-    const eqFree = store.unrackedEquipments().filter((e: any) => span === 1 || (e.u_height || 1) === span).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+    // emplacement U → équipements montables en U UNIQUEMENT (les boîtiers à dimensionnement libre `dim_mode:"free"`
+    // ne se rackent pas ; ils restent réservés aux montages latéraux/muraux et au placement libre en salle).
+    const eqFree = store.unrackedEquipments().filter((e: any) => e.dim_mode !== "free" && (span === 1 || (e.u_height || 1) === span)).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
     const noEqLabel = eqFree.length ? "— choisir —" : (span > 1 ? "(aucun équipement de " + span + " U)" : "(aucun équipement libre)");
     const kindOpts = [{ value: "equipment", label: "Équipement…" }].concat(RackItemKinds.ALL.map((k) => ({ value: k.id, label: k.label })));
     if (rack.datacenter_id) kindOpts.push({ value: "brush", label: "▦ Brosse de brassage" });
@@ -426,8 +453,12 @@ export class RackForms extends CableForms {
     const labelI = FormControls.text("", "libellé (optionnel)"); const labelRow = FormControls.fieldRow("Libellé", labelI); body.appendChild(labelRow);
     const pheightI = FormControls.number(String(span), { min: 1, step: 1 });
     const prow = FormControls.fieldRow("Hauteur (U)", pheightI); body.appendChild(prow);
-    const bdepthI = FormControls.number("100", { min: 1, step: 10 });
-    const bdepthRow = FormControls.fieldRow("Profondeur brosse (mm)", bdepthI, "Profondeur de la brosse (≤ cage de la baie). Les câbles la traversent (répartis sur sa section)."); body.appendChild(bdepthRow);
+    // une PORTE borne la profondeur dispo (depth − marge avant + cavités − marge de sécurité) ; sans porte, libre.
+    const brushHasDoor = RackGeometry.hasDoor(rack);
+    const brushAvail = RackGeometry.frontMountAvailDepth(rack);
+    const brushMaxDepth = brushHasDoor ? Math.max(1, brushAvail - RACK_DEPTH_SAFETY_MM) : Infinity;
+    const bdepthI = FormControls.number("100", brushHasDoor ? { min: 1, step: 10, max: Math.round(brushMaxDepth) } : { min: 1, step: 10 });
+    const bdepthRow = FormControls.fieldRow("Profondeur brosse (mm)", bdepthI, brushHasDoor ? ("Bornée par la porte : ≤ " + Math.round(brushMaxDepth) + " mm (" + Math.round(brushAvail) + " dispo − " + RACK_DEPTH_SAFETY_MM + " mm de sécurité). Les câbles la traversent.") : "Profondeur libre (pas de porte). Les câbles la traversent."); body.appendChild(bdepthRow);
     const isEq = () => kindI.value === "equipment";
     const isBrush = () => kindI.value === "brush";
     const selEq = () => store.get("equipments", eqI.value);
@@ -443,6 +474,7 @@ export class RackForms extends CableForms {
           if (isBrush()) {
             if (!rack.datacenter_id) return "La baie doit être posée dans une salle pour y poser une brosse.";
             if (!RackGeometry.canPlace(rack, u, effHeight(), brushSides(), scene.occupants(rack.id))) return "Ça ne tient pas ici (occupé ou dépasse la baie).";
+            if (brushHasDoor && Math.max(1, parseInt(bdepthI.value, 10) || 100) > brushMaxDepth) return "Profondeur > max derrière la porte : ≤ " + Math.round(brushMaxDepth) + " mm (" + Math.round(brushAvail) + " dispo − " + RACK_DEPTH_SAFETY_MM + " mm de sécurité).";
             return true;
           }
           if (isEq() && !eqI.value) return "Choisissez un équipement.";

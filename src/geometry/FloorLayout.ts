@@ -8,7 +8,7 @@ import {
 
 export interface Vec3 { x: number; y: number; z: number; }
 /** Config d'un étage (entité `floors` ou défaut virtuel). */
-export interface FloorCfg { id: string | null; location: string; floor: string; width_mm: number; depth_mm: number; cell_mm: number; blocked_cells: string[]; anchor_x?: number; anchor_y?: number; }
+export interface FloorCfg { id: string | null; location: string; floor: string; width_mm: number; depth_mm: number; cell_mm: number; blocked_cells: string[]; anchor_x?: number; anchor_y?: number; height_mm?: number; }
 /** Salle disposée dans la vue multi-salles : centre monde (off), orientation (o, rad), niveau. */
 export interface RoomPlacement { dc: any; off: Vec3; o: number; level: number; }
 export interface BuildingBand { loc: string; x0: number; x1: number; }
@@ -17,6 +17,8 @@ export interface FloorPlane { loc: string; floor: string; cfg: FloorCfg; off: Ve
 export interface MultiLayout {
   rooms: RoomPlacement[]; levels: number[]; stackH: number; gap: number;
   buildings: BuildingBand[]; floorPlanes: FloorPlane[]; totalW: number; maxD: number; topZ: number; levelStep: number;
+  /** Hauteur (mm) et Z (base, mm) de chaque niveau de `levels`, dans le même ordre — placement vertical NON uniforme. */
+  levelHs: number[]; levelZs: number[];
 }
 
 /* =============================================================================
@@ -37,7 +39,7 @@ export class FloorLayout {
   config(location: string, floor: any): FloorCfg {
     const f = this.store.floorFor(location, floor);
     if (f) return f;
-    return { id: null, location: location || "", floor: String(floor != null ? floor : ""), width_mm: FLOOR_WIDTH_DEFAULT, depth_mm: FLOOR_DEPTH_DEFAULT, cell_mm: FLOOR_CELL_DEFAULT, blocked_cells: [] };
+    return { id: null, location: location || "", floor: String(floor != null ? floor : ""), width_mm: FLOOR_WIDTH_DEFAULT, depth_mm: FLOOR_DEPTH_DEFAULT, cell_mm: FLOOR_CELL_DEFAULT, blocked_cells: [], height_mm: 0 };
   }
   /** Emprise (AABB) d'une salle sur le plan (w/h permutés à 90/270). */
   static roomFootprint(dc: any): { w: number; h: number } {
@@ -124,8 +126,18 @@ export class FloorLayout {
     const locs = Array.from(new Set(allFloors.map((f) => f.loc)))
       .sort((a, b) => (curLoc != null && a === curLoc ? -1 : curLoc != null && b === curLoc ? 1 : this.store.siteLabel(a).localeCompare(this.store.siteLabel(b))));
     const levels = Array.from(new Set(allFloors.map((f) => FloorLayout.floorNum(f.fl)))).sort((a, b) => a - b);
-    const stackH = Math.max(42 * U_MM, ...dcs.map((d: any) => this.zRef(d)));
-    const levelZ = (lv: number) => (levels.indexOf(lv) >= 0 ? levels.indexOf(lv) : 0) * (stackH + gap);
+    const stackH = Math.max(42 * U_MM, ...dcs.map((d: any) => this.zRef(d)));   // hauteur de contenu GLOBALE = hauteur d'étage par défaut
+    // HAUTEUR PAR ÉTAGE : `height_mm` configurée (la plus grande des plans affichés à ce niveau) sinon défaut `stackH`,
+    // bornée au contenu (baies) du niveau. Le Z d'un niveau = somme CUMULÉE des hauteurs des étages inférieurs.
+    const levelHeight = (lv: number): number => {
+      let cfgH = 0;
+      allFloors.filter((f) => FloorLayout.floorNum(f.fl) === lv).forEach((f) => { const c = this.config(f.loc, f.fl); if (c.height_mm) cfgH = Math.max(cfgH, c.height_mm); });
+      const contentH = Math.max(42 * U_MM, 0, ...dcs.filter((d: any) => FloorLayout.floorNum(d.floor) === lv).map((d: any) => this.zRef(d)));
+      return Math.max(cfgH || stackH, contentH);
+    };
+    const levelHs = levels.map((lv) => levelHeight(lv));
+    const levelZs: number[] = []; { let z = 0; levelHs.forEach((h) => { levelZs.push(z); z += h + gap; }); }
+    const levelZ = (lv: number) => { const i = levels.indexOf(lv); return i >= 0 ? levelZs[i] : 0; };
     const rooms: RoomPlacement[] = [], buildings: BuildingBand[] = [], floorPlanes: FloorPlane[] = [];
     let bx = 0, maxD = 0;
     locs.forEach((loc) => {
@@ -143,11 +155,11 @@ export class FloorLayout {
       buildings.push({ loc, x0: bx, x1: bx + bw });
       bx += bw + gap * 2;   // double écart entre bâtiments
     });
-    const topZ = (levels.length - 1) * (stackH + gap) + stackH;
+    const topZ = levels.length ? levelZs[levels.length - 1] + levelHs[levels.length - 1] : stackH;
     const totalW = Math.max(0, bx - gap * 2);
     // pas de profondeur entre niveaux : domine toute variation intra-étage (sinon un étage bas se peint au-dessus d'un haut)
-    const levelStep = (Math.hypot(Math.max(1, totalW), Math.max(1, maxD)) + stackH + gap) * 8;
-    return { rooms, levels, stackH, gap, buildings, floorPlanes, totalW, maxD, topZ, levelStep };
+    const levelStep = (Math.hypot(Math.max(1, totalW), Math.max(1, maxD)) + Math.max(stackH, ...levelHs, 1) + gap) * 8;
+    return { rooms, levels, stackH, gap, buildings, floorPlanes, totalW, maxD, topZ, levelStep, levelHs, levelZs };
   }
 
   /** Point LOCAL de salle → MONDE 3D (pivote autour du centre de la salle puis pose à room.off + niveau Z). */
@@ -161,14 +173,16 @@ export class FloorLayout {
     const rx = pw.x - room.off.x, ry = pw.y - room.off.y;
     return { x: room.dc.width_mm / 2 + (rx * co + ry * so), y: room.dc.depth_mm / 2 + (-rx * so + ry * co), z: pw.z - room.off.z };
   }
-  /** Z (base du niveau) d'un étage, INTERPOLÉ entre niveaux affichés (OOB d'un étage sans salle affichée). */
+  /** Z (base du niveau) d'un étage, INTERPOLÉ entre niveaux affichés (OOB d'un étage sans salle affichée). Tient
+      compte des hauteurs d'étage NON uniformes (levelZs/levelHs) ; extrapole avec la hauteur du niveau extrême. */
   static levelZ(m: MultiLayout, lv: number): number {
-    const L = m.levels; if (!L.length) return 0;
-    let frac: number;
-    if (lv <= L[0]) frac = lv - L[0];
-    else if (lv >= L[L.length - 1]) frac = (L.length - 1) + (lv - L[L.length - 1]);
-    else { let i = 1; while (L[i] < lv) i++; frac = (i - 1) + (lv - L[i - 1]) / (L[i] - L[i - 1]); }
-    return frac * (m.stackH + m.gap);
+    const L = m.levels, Z = m.levelZs, H = m.levelHs; if (!L.length) return 0;
+    const n = L.length;
+    if (lv <= L[0]) return Z[0] - (L[0] - lv) * (H[0] + m.gap);                       // sous le plus bas
+    if (lv >= L[n - 1]) return Z[n - 1] + (lv - L[n - 1]) * (H[n - 1] + m.gap);       // au-dessus du plus haut
+    let i = 1; while (L[i] < lv) i++;
+    const t = (lv - L[i - 1]) / (L[i] - L[i - 1]);
+    return Z[i - 1] + t * (Z[i] - Z[i - 1]);                                          // interpolation linéaire en Z
   }
   /** Point MONDE 3D d'un OOB : localisé (floor_x/floor_y, hauteur dc_z) ou centre du plan à 3 m. */
   oobWorld(m: MultiLayout, wp: any): Vec3 {

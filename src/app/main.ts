@@ -404,7 +404,7 @@ async function boot(): Promise<void> {
 
   // ---- onglets de LISTE (ListView paramétré par ListConfigs) ----
   type FormFn = (id: string | null, onSaved: () => void) => void;
-  interface TabOpts { title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; links?: string[]; }
+  interface TabOpts { title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; links?: string[]; onAdd?: () => void; onDel?: (id: string, reRender: () => void) => void; locate?: "equipment" | "rack" | "cable"; }
   const addListTab = (name: string, label: string, configFn: (s: typeof store) => ListOptions, opts: TabOpts = {}) => {
     const cfg = configFn(store);
     const formFn = opts.form;
@@ -412,14 +412,15 @@ async function boot(): Promise<void> {
     const container = shell.addView({
       name, label, title: opts.title, subtitle: opts.subtitle, kind: opts.kind || "primary", parent: opts.parent, links: opts.links,
       count: () => store.all(cfg.collection).length,
-      addLabel: opts.addLabel, onAdd: formFn ? () => formFn(null, () => shell.refreshActive()) : undefined,
+      addLabel: opts.addLabel, onAdd: opts.onAdd || (formFn ? () => formFn(null, () => shell.refreshActive()) : undefined),
       onShow: () => {
         if (!view) {
           const reRender = () => view!.render();
           view = new ListView(store, container, {
             ...cfg,
-            actions: cfg.actions || { view: true, edit: !!formFn, clone: true, del: true },
+            actions: { ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }), ...(opts.locate ? { locate: true } : {}) },
             onAction: async (act, id) => {
+              if (act === "locate" && opts.locate) { shell.switchView("datacenter"); dcView.locate(opts.locate, id); return; }
               if (act === "view") { if (cfg.collection === "equipments") Forms.equipmentDetail(store, formHost, id, reRender); else openDetail(cfg.collection, id); return; }
               if (act === "edit") { formFn?.(id, reRender); return; }
               if (act === "clone") {
@@ -428,6 +429,7 @@ async function boot(): Promise<void> {
                 return;
               }
               if (act === "del") {
+                if (opts.onDel) { opts.onDel(id, reRender); return; }   // suppression spécifique (ex. site → décommissionnement)
                 const o: any = store.get(cfg.collection, id);
                 const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${o?.name || o?.label || "cet élément"} » ?`, confirmLabel: "Supprimer", danger: true });
                 if (!ok) return;
@@ -446,16 +448,16 @@ async function boot(): Promise<void> {
   addListTab("equipements", "Équipements", ListConfigs.equipments, {
     subtitle: "Switchs, serveurs, caissons, modems… avec leurs ports, rôles et agrégats.",
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: "+ Équipement",
-    links: ["groupes", "faceimages", "spares"],
+    links: ["groupes", "faceimages", "spares"], locate: "equipment",
   });
   addListTab("racks", "Racks", ListConfigs.racks, {
     subtitle: "Baies : emplacement, taille (U), profondeur, faces, portes et capots.",
-    form: (id, done) => Forms.rack(store, formHost, id, done), addLabel: "+ Rack",
+    form: (id, done) => Forms.rack(store, formHost, id, done), addLabel: "+ Rack", locate: "rack",
   });
   addListTab("cables", "Câbles", ListConfigs.cables, {
     subtitle: "Lien nommé entre deux ports — type compatible avec les ports, réseau optionnel.",
     form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: "+ Câble",
-    links: ["reseaux", "porttypes", "cabletypes", "faisceaux"],
+    links: ["reseaux", "porttypes", "cabletypes", "faisceaux"], locate: "cable",
   });
   addListTab("ipam", "IPAM", ListConfigs.ipNetworks, {
     title: "IPAM — Réseaux IP", subtitle: "Registre d'attribution d'IP statiques. Déclarez des sous-réseaux (CIDR IPv4), puis attribuez-y des adresses et réservez des plages DHCP.",
@@ -485,7 +487,7 @@ async function boot(): Promise<void> {
 
   // Datacenters (vue 3D — tranche-pilote : caméra orbitale + salle/baies)
   let dcView: DatacenterView;
-  const dcContainer = shell.addView({ name: "datacenter", label: "Datacenters", subtitle: "Disposition physique des salles : baies en 3D. Glisser = déplacer · Maj/clic droit = orbiter · molette = zoom.", links: ["salles"], onShow: () => dcView.show() });
+  const dcContainer = shell.addView({ name: "datacenter", label: "Datacenters", subtitle: "Disposition physique des salles : baies en 3D. Glisser = déplacer · Maj/clic droit = orbiter · molette = zoom.", links: ["salles", "etages", "sites"], onShow: () => dcView.show() });
   const dcStage = document.createElement("div");
   dcStage.className = "dc-stage";
   dcStage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
@@ -505,6 +507,8 @@ async function boot(): Promise<void> {
     openSiteForm: (id) => Forms.site(store, formHost, id, () => { dcView.buildToolbar(); dcView.render(); }),
     faceImageUrl: (eqId, face) => { const e: any = store.get("equipments", eqId); const fld = (EQUIP_FACE_IMG_FIELD as any)[face]; const im: any = e && fld && e[fld] ? imageStore.get(e[fld]) : null; return im ? im.url : null; },
   });
+  // « Localiser » depuis une fiche (modale) : ferme la modale, bascule en 3D, centre la caméra sur l'objet.
+  formHost.locate = (kind, id) => { modal.close(); shell.switchView("datacenter"); dcView.locate(kind, id); };
 
   // === SOUS-VUES (atteintes par les liens d'en-tête ; surlignent leur onglet parent) ===
   addListTab("groupes", "Groupes", ListConfigs.groups, {
@@ -569,6 +573,27 @@ async function boot(): Promise<void> {
   addListTab("salles", "Salles", ListConfigs.datacenters, {
     title: "Salles (datacenters)", subtitle: "Grille au sol d'une salle : dimensions + maille. Placez-y des baies (onglet Racks → champ Salle) pour les voir en 3D.",
     form: (id, done) => Forms.datacenter(store, formHost, id, done), addLabel: "+ Salle", kind: "secondary", parent: "datacenter",
+  });
+  addListTab("sites", "Sites", ListConfigs.sites, {
+    title: "Sites / bâtiments", subtitle: "Nom + adresse. La suppression décommissionne le site (salles & étages supprimés, baies → non placé, liaisons logiques préservées).",
+    form: (id, done) => Forms.site(store, formHost, id, done), addLabel: "+ Site", kind: "secondary", parent: "datacenter",
+    onDel: async (id, reRender) => {
+      const s: any = store.get("sites", id);
+      const ok = await Dialog.confirm({ title: "Supprimer le site « " + (s?.name || "") + " » ?", message: "Décommissionnement : salles & étages supprimés, baies → « non placé » (équipements conservés), câbles intra → « planifié », équipements d'étage décâblés, waypoints supprimés, routes inter-DC débranchées. Les liaisons LOGIQUES (port↔port) sont préservées. Continuer ?", confirmLabel: "Supprimer le site", danger: true });
+      if (!ok) return;
+      await store.removeSite(id); Notify.toast("Site décommissionné (liaisons logiques préservées)"); reRender();
+    },
+  });
+  addListTab("etages", "Étages", ListConfigs.floors, {
+    title: "Plans d'étage", subtitle: "Dimensions, maille et ancrage d'un étage (bâtiment + niveau). « + Étage » : choisir le bâtiment et le niveau.",
+    form: (id) => { const f: any = store.get("floors", id); Forms.floor(store, formHost, f ? (f.location || "") : "", f ? String(f.floor || "") : "", {}); }, addLabel: "+ Étage", kind: "secondary", parent: "datacenter",
+    onAdd: () => { if (!store.sitesSorted().length) { Notify.toast("Créez d'abord un site / bâtiment (onglet Sites)", "err"); return; } Forms.floor(store, formHost, "", "", { pick: true }); },
+    onDel: async (id, reRender) => {
+      const f: any = store.get("floors", id);
+      const ok = await Dialog.confirm({ title: "Supprimer le plan d'étage ?", message: "Supprime le PLAN de l'étage « " + (f ? f.floor : "?") + " » du bâtiment « " + store.siteLabel(f ? (f.location || "") : "") + " ». Les salles posées sur cet étage restent (éditez-les si besoin).", confirmLabel: "Supprimer le plan", danger: true });
+      if (!ok) return;
+      await store.remove("floors", id); Notify.toast("Plan d'étage supprimé"); reRender();
+    },
   });
   addListTab("dhcpranges", "Plages DHCP", ListConfigs.dhcpRanges, {
     title: "Plages DHCP réservées", subtitle: "Plages (début → fin) attribuées à un serveur DHCP. Pas de chevauchement avec une autre plage ni une IP statique du réseau.",

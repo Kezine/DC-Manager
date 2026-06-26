@@ -14,7 +14,7 @@ export interface ListColumn {
   sortKey?: string;
   filter?: { label?: string; options: () => FilterOption[]; valueOf: (o: any) => any };
 }
-export interface ListActions { view?: boolean; edit?: boolean; clone?: boolean; del?: boolean; }
+export interface ListActions { view?: boolean; edit?: boolean; clone?: boolean; del?: boolean; locate?: boolean; }
 export interface ListOptions {
   collection: string;
   columns: ListColumn[];
@@ -198,6 +198,7 @@ export class ListView {
     const a = this.actions;
     const btn = (act: string, title: string, txt: string, danger = false) => `<button class="row-btn${danger ? " danger" : ""}" data-act="${act}" title="${title}">${txt}</button>`;
     let html = `<span data-id="${id}">`;
+    if (a.locate) html += btn("locate", "Localiser en 3D", "📍");
     if (a.view) html += btn("view", "Détails", "ⓘ");
     if (a.edit) html += btn("edit", "Modifier", "✎");
     if (a.clone) html += btn("clone", "Cloner", "⧉");

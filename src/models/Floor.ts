@@ -21,6 +21,9 @@ export class Floor extends Entity {
   anchor_x: number;
   /** Décalage Y du plan dans la pile 3D (mm). */
   anchor_y: number;
+  /** Hauteur de l'étage (mm) dans la pile 3D : conditionne le placement vertical (Z cumulatif).
+      0 = auto (hauteur du contenu = baies). */
+  height_mm: number;
 
   constructor(p: Props = {}) {
     super(p);
@@ -32,6 +35,7 @@ export class Floor extends Entity {
     this.blocked_cells = Normalize.cellList(p.blocked_cells);
     this.anchor_x = (p.anchor_x != null) ? +p.anchor_x : 0;
     this.anchor_y = (p.anchor_y != null) ? +p.anchor_y : 0;
+    this.height_mm = (p.height_mm != null) ? Math.max(0, p.height_mm | 0) : 0;   // 0 = auto (hauteur du contenu)
     this.description = p.description || "";
   }
 }

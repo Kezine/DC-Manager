@@ -1,7 +1,7 @@
 import { Html } from "../core/Html";
 
 export interface SelectOption { value: string; label: string; disabled?: boolean; }
-export interface NumberOpts { min?: number | string; step?: number | string; placeholder?: string; }
+export interface NumberOpts { min?: number | string; max?: number | string; step?: number | string; placeholder?: string; }
 export interface ToggleOpts { title?: string; block?: boolean; disabled?: boolean; richTip?: string; }
 export interface DateOpts { buttons?: string[]; min?: string; max?: string; }
 
@@ -36,6 +36,7 @@ export class FormControls {
     const i = document.createElement("input");
     i.type = "number";
     if (opts.min != null) i.min = String(opts.min);
+    if (opts.max != null) i.max = String(opts.max);
     i.step = (opts.step != null) ? String(opts.step) : "1";
     if (opts.placeholder) i.placeholder = opts.placeholder;
     if (value != null && value !== "") i.value = String(value);
