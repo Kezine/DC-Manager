@@ -23,19 +23,27 @@ Sans `SSO_URL`, l'auth est en **mode dev** (utilisateur factice `dev`).
 
 ## Endpoints (`/api`)
 
+**Multi-documents** : chaque document est un workspace ISOLÉ (un fichier SQLite
+par document + un registre). Les données sont scopées sous `/documents/{docId}`.
+
 | Méthode | Route | Rôle |
 |---|---|---|
 | GET | `/me` | utilisateur courant (proxy SSO) ou 401 |
-| GET | `/:collection?page=&pageSize=&q=&ids=&{champ}=` | liste paginée `{rows,total,page,pages,pageSize}` |
-| GET/POST | `/:collection` · `/:collection/{id}` | lecture / création (upsert) |
-| PUT/DELETE | `/:collection/{id}` | mise à jour (upsert) / suppression |
-| GET/PUT | `/meta` | méta document |
-| POST | `/transact` | lot `{creates,updates,deletes,meta}` **atomique** (1 transaction SQLite) |
-| PUT | `/snapshot` | import complet (écrase le workspace) |
-| GET | `/images` · `/images/{id}` | métadonnées (liste / une) |
-| GET | `/images/{id}/blob` | binaire de l'image |
-| PUT | `/images/{id}` | `multipart { meta:JSON, blob:file }` (crée/remplace) |
-| DELETE | `/images/{id}` | suppression |
+| GET | `/documents` | liste des documents `{id,name,created_date,updated_date}` |
+| POST | `/documents` `{name}` | crée un document (workspace vide) |
+| PUT/DELETE | `/documents/{docId}` | renomme / supprime un document |
+| GET | `/documents/{docId}/:collection?page=&pageSize=&q=&ids=&{champ}=` | liste paginée |
+| GET/POST | `…/:collection` · `…/:collection/{id}` | lecture / création (upsert) |
+| PUT/DELETE | `…/:collection/{id}` | mise à jour (upsert) / suppression |
+| GET/PUT | `…/meta` | méta document |
+| POST | `…/transact` | lot `{creates,updates,deletes,meta}` **atomique** (1 transaction SQLite) |
+| PUT | `…/snapshot` | import complet (écrase le document) |
+| GET | `…/images` · `…/images/{id}` | métadonnées (liste / une) |
+| GET | `…/images/{id}/blob` | binaire de l'image |
+| PUT | `…/images/{id}` | `multipart { meta:JSON, blob:file }` (crée/remplace) |
+| DELETE | `…/images/{id}` | suppression |
+
+(`…` = `/documents/{docId}`)
 
 ### Sémantique de filtrage (parité client)
 - `q` : recherche plein-texte normalisée (minuscule + sans accents, `normSearch`).
@@ -45,11 +53,14 @@ Sans `SSO_URL`, l'auth est en **mode dev** (utilisateur factice `dev`).
 
 ## Architecture (OO)
 - **`Schema`** (`constants.ts`) — collections, champs-tableaux, `normSearch` (statique).
-- **`Repository`** (`db.ts`) — TOUT l'accès SQLite (CRUD, list, meta, transact, snapshot,
-  images). Driver injecté (`Repository.open(file, Database)`) → testable sans module natif.
-- **`Api`** (`api.ts`) — couche HTTP : traduit les routes Express vers le `Repository`.
+- **`Repository`** (`db.ts`) — TOUT l'accès SQLite d'UN document (CRUD, list, meta,
+  transact, snapshot, images). Driver injecté (`Repository.open(file, Database)`).
+- **`DocumentStore`** (`documents.ts`) — multi-documents : registre + un `Repository`
+  par document (fichier SQLite isolé), ouverts à la demande et mis en cache.
+- **`Api`** (`api.ts`) — couche HTTP : registre `/documents` + données scopées
+  `/documents/:docId/…` (middleware → `Repository` du document).
 - **`Server`** (`server.ts`) — application Express (API + service du client) ;
-  `index.ts` = bootstrap (env → `Repository.open` → `Server.listen`).
+  `index.ts` = bootstrap (env → `DocumentStore` → `Server.listen`).
 
 ## Modèle de données
 Une table SQLite par collection : `(id, data JSON, search, created_date)`. Le

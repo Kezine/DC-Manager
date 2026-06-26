@@ -2,9 +2,9 @@ import express, { type Express, type RequestHandler } from "express";
 import path from "node:path";
 import fs from "node:fs";
 import { Api } from "./api.js";
-import { Repository } from "./db.js";
+import { DocumentStore } from "./documents.js";
 
-export interface ServerOptions { repo: Repository; clientDir: string; apiBase: string }
+export interface ServerOptions { docs: DocumentStore; clientDir: string; apiBase: string }
 
 /** Application HTTP : API REST sous `apiBase` + service du client (HTML autonome) avec injection de config. */
 export class Server {
@@ -15,7 +15,7 @@ export class Server {
     this.app.disable("x-powered-by");
     this.app.use(express.json({ limit: "128mb" }));   // /snapshot et /transact peuvent être volumineux
     this.app.get("/healthz", (_req, res) => { res.json({ ok: true }); });
-    this.app.use(opts.apiBase, new Api(opts.repo).router());
+    this.app.use(opts.apiBase, new Api(opts.docs).router());
     this.app.use(opts.apiBase, (_req, res) => { res.status(404).json({ error: "endpoint inconnu" }); });   // 404 API
     this.app.get(["/", "/netmap.html", "/index.html"], this.serveClient);
     this.app.use(express.static(opts.clientDir, { index: false }));   // assets éventuels (build multi-fichiers en dev)

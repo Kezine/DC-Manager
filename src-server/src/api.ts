@@ -1,35 +1,50 @@
-import express, { type Router, type RequestHandler } from "express";
+import express, { type Router, type RequestHandler, type Request } from "express";
 import multer from "multer";
 import { Schema } from "./constants.js";
-import { Repository, type Rec, type ListOpts } from "./db.js";
+import { type Repository, type Rec, type ListOpts } from "./db.js";
+import { DocumentStore } from "./documents.js";
 
-/** Couche HTTP : traduit les requêtes REST vers le `Repository`. Handlers = propriétés fléchées (this lié). */
+/** Requête dont le Repository du document a été résolu par le middleware `resolveRepo`. */
+type RepoRequest = Request & { repo?: Repository };
+
+/** Couche HTTP : registre de documents + données SCOPÉES par document, déléguées au `Repository`. */
 export class Api {
   private readonly upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
 
-  constructor(private readonly repo: Repository) {}
+  constructor(private readonly docs: DocumentStore) {}
 
-  /** Router Express monté sous `/api`. Routes spécifiques AVANT le générique `/:collection`. */
   router(): Router {
     const r = express.Router();
     r.get("/me", this.me);
-    r.get("/meta", this.getMeta);
-    r.put("/meta", this.putMeta);
-    r.post("/transact", this.transact);
-    r.put("/snapshot", this.snapshot);
-    r.get("/images", this.listImages);
-    r.get("/images/:id", this.getImage);
-    r.get("/images/:id/blob", this.getImageBlob);
-    r.put("/images/:id", this.upload.single("blob"), this.putImage);
-    r.delete("/images/:id", this.deleteImage);
-    r.get("/:collection", this.list);
-    r.get("/:collection/:id", this.getOne);
-    r.post("/:collection", this.create);
-    r.put("/:collection/:id", this.update);
-    r.delete("/:collection/:id", this.remove);
+
+    // -- registre des documents --
+    r.get("/documents", this.listDocs);
+    r.post("/documents", this.createDoc);
+    r.put("/documents/:docId", this.renameDoc);
+    r.delete("/documents/:docId", this.deleteDoc);
+
+    // -- données SCOPÉES par document (/documents/:docId/...) --
+    const data = express.Router({ mergeParams: true });
+    data.use(this.resolveRepo);
+    data.get("/meta", this.getMeta);
+    data.put("/meta", this.putMeta);
+    data.post("/transact", this.transact);
+    data.put("/snapshot", this.snapshot);
+    data.get("/images", this.listImages);
+    data.get("/images/:id", this.getImage);
+    data.get("/images/:id/blob", this.getImageBlob);
+    data.put("/images/:id", this.upload.single("blob"), this.putImage);
+    data.delete("/images/:id", this.deleteImage);
+    data.get("/:collection", this.list);
+    data.get("/:collection/:id", this.getOne);
+    data.post("/:collection", this.create);
+    data.put("/:collection/:id", this.update);
+    data.delete("/:collection/:id", this.remove);
+    r.use("/documents/:docId", data);
     return r;
   }
 
+  private repoOf(req: Request): Repository { return (req as RepoRequest).repo!; }
   private parseList(q: Record<string, any>): ListOpts {
     const { page, pageSize, q: query, ids, ...rest } = q;
     const where: Rec = {};
@@ -43,7 +58,7 @@ export class Api {
     };
   }
 
-  /* -- auth (proxy SSO ; l'app NE gère PAS l'auth, le SSO valide) -- */
+  /* -- auth (proxy SSO) -- */
   private me: RequestHandler = async (req, res) => {
     const ssoUrl = process.env.SSO_URL;
     if (!ssoUrl) {   // pas de SSO → mode dev (DEV_USER="" pour simuler un 401)
@@ -57,28 +72,49 @@ export class Api {
     } catch (e: any) { res.status(502).json({ error: "SSO injoignable: " + e.message }); }
   };
 
+  /* -- registre des documents -- */
+  private listDocs: RequestHandler = (_req, res) => { res.json(this.docs.list()); };
+  private createDoc: RequestHandler = (req, res) => { res.status(201).json(this.docs.create((req.body && req.body.name) || "")); };
+  private renameDoc: RequestHandler = (req, res) => {
+    const m = this.docs.rename(req.params.docId, (req.body && req.body.name) || "");
+    if (m) res.json(m); else res.status(404).json({ error: "document inconnu" });
+  };
+  private deleteDoc: RequestHandler = (req, res) => {
+    if (this.docs.delete(req.params.docId)) res.status(204).end(); else res.status(404).json({ error: "document inconnu" });
+  };
+
+  /** Résout le Repository du document (404 si inconnu) ; toute écriture met à jour son updated_date. */
+  private resolveRepo: RequestHandler = (req, res, next) => {
+    const id = (req.params as any).docId;
+    const repo = this.docs.repo(id);
+    if (!repo) { res.status(404).json({ error: "document inconnu" }); return; }
+    (req as RepoRequest).repo = repo;
+    if (req.method !== "GET") this.docs.touch(id);
+    next();
+  };
+
   /* -- meta -- */
-  private getMeta: RequestHandler = (_req, res) => { res.json(this.repo.getMeta()); };
-  private putMeta: RequestHandler = (req, res) => { this.repo.setMeta(req.body || {}); res.status(204).end(); };
+  private getMeta: RequestHandler = (req, res) => { res.json(this.repoOf(req).getMeta()); };
+  private putMeta: RequestHandler = (req, res) => { this.repoOf(req).setMeta(req.body || {}); res.status(204).end(); };
 
   /* -- lot atomique / import -- */
   private transact: RequestHandler = (req, res) => {
-    try { this.repo.transact(req.body || {}); res.status(204).end(); }
+    try { this.repoOf(req).transact(req.body || {}); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private snapshot: RequestHandler = (req, res) => {
-    try { this.repo.replaceSnapshot(req.body || {}); res.status(204).end(); }
+    try { this.repoOf(req).replaceSnapshot(req.body || {}); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
 
   /* -- images -- */
-  private listImages: RequestHandler = (_req, res) => { res.json(this.repo.listImages()); };
+  private listImages: RequestHandler = (req, res) => { res.json(this.repoOf(req).listImages()); };
   private getImage: RequestHandler = (req, res) => {
-    const m = this.repo.getImageMeta(req.params.id);
+    const m = this.repoOf(req).getImageMeta(req.params.id);
     if (m) res.json(m); else res.status(404).json({ error: "introuvable" });
   };
   private getImageBlob: RequestHandler = (req, res) => {
-    const b = this.repo.getImageBlob(req.params.id);
+    const b = this.repoOf(req).getImageBlob(req.params.id);
     if (!b) { res.status(404).end(); return; }
     res.setHeader("Content-Type", b.type);
     res.setHeader("Cache-Control", "private, max-age=60");
@@ -90,35 +126,35 @@ export class Api {
     const file = (req as { file?: { buffer: Buffer; mimetype: string } }).file;   // posé par multer.single("blob")
     const buf = file ? file.buffer : null;
     if (buf) meta.type = meta.type || file!.mimetype || "application/octet-stream";
-    this.repo.putImage(req.params.id, meta, buf);
+    this.repoOf(req).putImage(req.params.id, meta, buf);
     res.status(204).end();
   };
-  private deleteImage: RequestHandler = (req, res) => { this.repo.deleteImage(req.params.id); res.status(204).end(); };
+  private deleteImage: RequestHandler = (req, res) => { this.repoOf(req).deleteImage(req.params.id); res.status(204).end(); };
 
   /* -- CRUD générique par collection -- */
   private list: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    res.json(this.repo.list(req.params.collection, this.parseList(req.query)));
+    res.json(this.repoOf(req).list(req.params.collection, this.parseList(req.query)));
   };
   private getOne: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    const rec = this.repo.getOne(req.params.collection, req.params.id);
+    const rec = this.repoOf(req).getOne(req.params.collection, req.params.id);
     if (rec) res.json(rec); else res.status(404).json({ error: "introuvable" });
   };
   private create: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    try { this.repo.upsert(req.params.collection, req.body); res.status(201).json(req.body); }
+    try { this.repoOf(req).upsert(req.params.collection, req.body); res.status(201).json(req.body); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private update: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
     const rec = { ...(req.body || {}), id: req.params.id };
-    try { this.repo.upsert(req.params.collection, rec); res.json(rec); }
+    try { this.repoOf(req).upsert(req.params.collection, rec); res.json(rec); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private remove: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    try { this.repo.delete(req.params.collection, req.params.id); res.status(204).end(); }
+    try { this.repoOf(req).delete(req.params.collection, req.params.id); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
 }
