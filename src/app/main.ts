@@ -104,7 +104,8 @@ async function boot(): Promise<void> {
   const imageStore = new ImageStore({ onDirty: () => { session.markDirty(); refreshChrome(); shell.refreshActive(); }, onUndoable: noteUndoable, backend: imageBackend });   // images HORS historique modèle, undo intégré à la timeline unifiée
   Forms.images = imageStore;   // singleton pour le picker d'image (faceEditor)
   imageStore.restoreLoadedKey();   // clé du bundle .nmfb actuellement en IndexedDB (persistée) — appariement json↔compagnon
-  await imageStore.ready();
+  if (!REST_MODE) await imageStore.ready();   // en REST, le miroir est chargé à l'ouverture d'un document
+  let restDocId: string | null = null;   // document serveur courant (mode API)
   Fullscreen.install();   // re-parente les overlays (modale/dialogues/toasts/menus) dans l'élément plein écran
 
   // ---- caché : input d'import (navigateurs sans File System Access API) ----
@@ -532,9 +533,90 @@ async function boot(): Promise<void> {
     } else { prefs.autosave = false; applyAutosave(); Notify.toast("Auto-save désactivé"); }
   }
 
+  /* ---- MODE API : documents serveur (workspaces) ---- */
+  /** Ouvre un document serveur : scope l'adapter + le backend d'images, recharge données & images. */
+  async function restOpenDocument(docId: string, name?: string): Promise<void> {
+    const ra = adapter as RestAdapter;
+    ra.setDocument(docId);
+    if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(ra.dataBase);
+    restDocId = docId;
+    await store.init();                       // charge les collections du document
+    if (name) store.meta.docName = store.meta.docName || name;
+    await imageStore.reloadFromBackend();     // miroir d'images du document
+    resetUndoTimeline();
+    currentName = name || store.meta.docName || "Document";
+    session.setFile(true); session.markLoaded(store.histIndex());
+    shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
+    Notify.toast("Document « " + currentName + " » ouvert");
+  }
+  /** Crée un nouveau document serveur (catalogues semés) puis l'ouvre. */
+  async function restNewDocument(name: string): Promise<void> {
+    const ra = adapter as RestAdapter;
+    let d: any; try { d = await ra.createDocument(name); } catch (e: any) { Notify.toast("Création impossible : " + (e.message || e), "err"); return; }
+    ra.setDocument(d.id);
+    if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(ra.dataBase);
+    restDocId = d.id;
+    await store.newDocument();                // sème les catalogues + pousse le snapshot DANS le nouveau document
+    store.meta.docName = d.name; await store.persistMeta();
+    await imageStore.reloadFromBackend();
+    resetUndoTimeline();
+    currentName = d.name; session.setFile(true); session.markLoaded(store.histIndex());
+    shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
+    Notify.toast("Document « " + d.name + " » créé");
+  }
+  /** Sélecteur de documents (mode API) : liste serveur, ouverture / création / suppression. */
+  async function restOpenChooser(): Promise<void> {
+    const ra = adapter as RestAdapter;
+    let docs: any[]; try { docs = await ra.listDocuments(); } catch { Notify.toast("Serveur injoignable.", "err"); return; }
+    const action = await Dialog.custom({
+      title: "Documents", cancelLabel: "Fermer",
+      build: (root: HTMLElement) => {
+        let chosen: string | null = null;
+        const confirmBtn = root.closest(".dialog-box")?.querySelector('[data-dlg="confirm"]') as HTMLElement | null;
+        if (confirmBtn) confirmBtn.style.display = "none";
+        const wrap = document.createElement("div"); wrap.className = "open-kind-choices";
+        docs.forEach((d) => {
+          const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
+          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = "🗂";
+          const tx = document.createElement("span"); tx.className = "ok-tx";
+          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = d.name + (d.id === restDocId ? "  ◀ ouvert" : "");
+          const de = document.createElement("span"); de.className = "ok-desc"; de.textContent = "maj " + String(d.updated_date || "").slice(0, 10);
+          tx.append(ti, de); b.append(ic, tx);
+          b.onmousedown = (e) => { e.preventDefault(); chosen = d.id; confirmBtn?.click(); };
+          const del = document.createElement("span"); del.textContent = "✕"; del.title = "Supprimer ce document"; del.style.cssText = "margin-left:auto;padding:0 8px;cursor:pointer;color:var(--fg-dimmer)";
+          del.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__del__:" + d.id; confirmBtn?.click(); };
+          b.appendChild(del); wrap.appendChild(b);
+        });
+        const nb = document.createElement("button"); nb.type = "button"; nb.className = "open-kind-btn";
+        const ni = document.createElement("span"); ni.className = "ok-ic"; ni.textContent = "＋"; const nt = document.createElement("span"); nt.className = "ok-tx";
+        const nti = document.createElement("span"); nti.className = "ok-title"; nti.textContent = "Nouveau document"; nt.appendChild(nti);
+        nb.append(ni, nt); nb.onmousedown = (e) => { e.preventDefault(); chosen = "__new__"; confirmBtn?.click(); }; wrap.appendChild(nb);
+        root.appendChild(wrap);
+        return { collect: () => chosen, validate: () => true };
+      },
+    });
+    if (!action) return;
+    if (action === "__new__") { const n = await Dialog.prompt("Nom du document", "Document"); if (n) await restNewDocument(n); return; }
+    if (action.startsWith("__del__:")) {
+      const id = action.slice(8), d = docs.find((x) => x.id === id);
+      const ok = await Dialog.confirm({ title: "Supprimer le document ?", message: "Supprimer « " + (d?.name || id) + " » et toutes ses données ? Irréversible.", confirmLabel: "Supprimer", danger: true });
+      if (ok) { try { await ra.deleteDocument(id); } catch (e: any) { Notify.toast("Suppression impossible : " + (e.message || e), "err"); } if (id === restDocId) restDocId = null; }
+      await restOpenChooser(); return;   // rouvre le sélecteur rafraîchi
+    }
+    if (action !== restDocId) { const d = docs.find((x) => x.id === action); await restOpenDocument(action, d?.name); }
+  }
+  /** Au boot (mode API) : ouvre le document le plus récent, ou en crée un si aucun. */
+  async function restBootstrap(): Promise<void> {
+    const ra = adapter as RestAdapter;
+    let docs: any[] = []; try { docs = await ra.listDocuments(); } catch { /* serveur injoignable */ }
+    if (docs.length) await restOpenDocument(docs[0].id, docs[0].name);
+    else await restNewDocument("Document 1");
+  }
+
   // ---- services FICHIER / GLOBAUX (topbar) ----
   const shellHost: ShellHost = {
     onNew: async () => {
+      if (REST_MODE) { const n = await Dialog.prompt("Nom du nouveau document", "Document"); if (n) await restNewDocument(n); return; }
       if (hasUserData()) {
         const ok = await Dialog.confirm({ title: "Nouveau document ?", message: "Le document courant (non enregistré) sera remplacé. Continuer ?", confirmLabel: "Nouveau", danger: true });
         if (!ok) return;
@@ -543,7 +625,7 @@ async function boot(): Promise<void> {
       await store.newDocument(); await imageStore.clearAll(); resetUndoTimeline(); currentHandle = null; currentFacesHandle = null; currentDirHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
       applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast("Nouveau document");
     },
-    onOpen: () => { doOpen(); },
+    onOpen: () => { if (REST_MODE) restOpenChooser(); else doOpen(); },
     onSave: () => { doSave(); },
     onSaveAs: () => { doSaveAs(); },
     onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
@@ -554,7 +636,10 @@ async function boot(): Promise<void> {
       dcView.resetView(); shell.refreshActive();   // force une restauration aux défauts à la prochaine activation
       Notify.toast("Préférences d'affichage 3D réinitialisées");
     },
-    onRenameDoc: async (name) => { store.meta.docName = name; await store.persistMeta(); session.markDirty(); refreshChrome(); },   // meta HORS historique
+    onRenameDoc: async (name) => {
+      store.meta.docName = name; await store.persistMeta(); session.markDirty(); refreshChrome();   // meta HORS historique
+      if (REST_MODE && restDocId) { currentName = name; try { await (adapter as RestAdapter).renameDocument(restDocId, name); } catch (_) { /* registre best-effort */ } refreshChrome(); }
+    },
     onDataSource: (value) => {
       if (value === "api") { Notify.toast("Source « API » pas encore disponible.", "err"); shell.setDataSource("local"); return; }
       prefs.dataSource = "local"; refreshChrome();
@@ -880,6 +965,7 @@ async function boot(): Promise<void> {
   // ré-interaction pour le raccrocher. En mode API, les données viennent du serveur au boot → pas d'accueil.
   if (REST_MODE) {
     shell.hideWelcome();
+    await restBootstrap();   // ouvre le document le plus récent (ou en crée un) — données chargées du serveur
   } else {
     let reopenName: string | null = null;
     if (HAS_FS_API) {

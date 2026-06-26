@@ -68,8 +68,15 @@ export class ImageStore {
   private getAll(): Promise<ImageRec[]> { return this.backend.getAll(); }
   private clear(): Promise<void> { return this.backend.clear(); }
 
-  /** Peuple le miroir depuis IndexedDB (boot / session restaurée). Idempotent. */
+  /** Peuple le miroir depuis le backend (boot / session restaurée). Idempotent. */
   async ready(): Promise<void> { if (this._ready) return; this._ready = true; try { (await this.getAll()).forEach((r) => this.mirrorPut(r)); } catch (e) { console.warn("ImageStore.ready", e); } }
+
+  /** Recharge entièrement le miroir depuis le backend courant (ex. changement de document en mode REST). */
+  async reloadFromBackend(): Promise<void> {
+    this.mirror.forEach((v) => { if (v.url && v.url.startsWith("blob:")) URL.revokeObjectURL(v.url); });
+    this.mirror.clear(); this._undo = []; this._redo = []; this._ready = true;
+    try { (await this.getAll()).forEach((r) => this.mirrorPut(r)); } catch (e) { console.warn("ImageStore.reloadFromBackend", e); }
+  }
 
   /* ---- LECTURE (synchrone, via miroir) ---- */
   list(): ImageMirror[] { return Array.from(this.mirror.values()).sort((a, b) => (a.name || "").localeCompare(b.name || "")); }

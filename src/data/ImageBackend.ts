@@ -53,6 +53,8 @@ export class IdbImageBackend implements ImageBackend {
    cookies envoyés par le navigateur) : pas de pré-téléchargement des blobs au boot. */
 export class RestImageBackend implements ImageBackend {
   constructor(private baseUrl: string) { this.baseUrl = baseUrl.replace(/\/+$/, ""); }
+  /** Recale la base (scope document : /api/documents/{docId}) quand on ouvre un document. */
+  setBaseUrl(url: string): void { this.baseUrl = url.replace(/\/+$/, ""); }
   private blobUrl(id: string): string { return this.baseUrl + "/images/" + encodeURIComponent(id) + "/blob"; }
 
   async getAll(): Promise<ImageRec[]> {

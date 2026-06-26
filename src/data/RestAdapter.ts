@@ -10,29 +10,37 @@ export interface RestOptions {
   headers?: Record<string, string>;
 }
 
-/* Implémentation REST. NON utilisée par défaut mais COMPLÈTE : l'API sert les
-   ÉLÉMENTS, jamais le modèle entier. transact() traduit le lot en appels HTTP par
-   entité (aucune re-sérialisation globale). L'UNDO/REDO n'est PAS géré côté client
-   (le serveur fait autorité).
-   Endpoints :
-     GET /{collection}?page=&pageSize=&q=&ids=&{champ}={valeur}
-     GET /{collection}/{id} · POST /{collection} · PUT/DELETE /{collection}/{id}
-     GET/PUT /meta · PUT /snapshot (bulk import)
-   Convention `where` : valeur null sérialisée en `{champ}=null` (« non rattaché »). */
+/** Métadonnées d'un document (workspace) côté serveur. */
+export interface DocMeta { id: string; name: string; created_date?: string; updated_date?: string }
+
+/* Implémentation REST MULTI-DOCUMENTS : l'API sert les ÉLÉMENTS d'UN document.
+   - registre des documents (non scopé) : `/me`, `/documents…` via `apiRoot` ;
+   - données (scopées par document) : `/documents/{docId}/…` via `dataBase`.
+   `setDocument(id)` bascule le scope de données. transact() = 1 POST atomique.
+   L'UNDO/REDO n'est PAS géré côté client (le serveur fait autorité). */
 export class RestAdapter extends DataAdapter {
-  baseUrl: string;
+  apiRoot: string;                       // racine API (auth + registre des documents)
+  dataBase: string;                      // base des données du document courant (= apiRoot tant qu'aucun doc)
   headers: Record<string, string>;
+  docId: string | null = null;
 
   constructor({ baseUrl = "/api", headers = {} }: RestOptions = {}) {
     super();
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.apiRoot = baseUrl.replace(/\/+$/, "");
+    this.dataBase = this.apiRoot;
     this.headers = Object.assign({ "Content-Type": "application/json" }, headers);
   }
 
-  get label(): string { return "REST (" + this.baseUrl + ")"; }
+  get label(): string { return "REST (" + this.apiRoot + (this.docId ? " · " + this.docId.slice(0, 10) : "") + ")"; }
 
-  private async _send(method: string, path: string, body?: any, { allow404 = false }: { allow404?: boolean } = {}): Promise<any> {
-    const res = await fetch(this.baseUrl + path, {
+  /** Définit le document courant : lectures/écritures de données scopées sous /documents/{docId}. */
+  setDocument(docId: string | null): void {
+    this.docId = docId || null;
+    this.dataBase = this.docId ? (this.apiRoot + "/documents/" + encodeURIComponent(this.docId)) : this.apiRoot;
+  }
+
+  private async _req(base: string, method: string, path: string, body?: any, { allow404 = false }: { allow404?: boolean } = {}): Promise<any> {
+    const res = await fetch(base + path, {
       method, headers: this.headers,
       credentials: "include",   // SSO : on transmet les cookies de session (l'app NE gère PAS l'auth — le SSO valide)
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -43,6 +51,14 @@ export class RestAdapter extends DataAdapter {
     const txt = await res.text();
     return txt ? JSON.parse(txt) : null;
   }
+  private _send(method: string, path: string, body?: any, opts?: { allow404?: boolean }): Promise<any> { return this._req(this.dataBase, method, path, body, opts); }
+  private _root(method: string, path: string, body?: any, opts?: { allow404?: boolean }): Promise<any> { return this._req(this.apiRoot, method, path, body, opts); }
+
+  /* ---- registre des DOCUMENTS (non scopé) ---- */
+  async listDocuments(): Promise<DocMeta[]> { return (await this._root("GET", "/documents")) || []; }
+  async createDocument(name: string): Promise<DocMeta> { return this._root("POST", "/documents", { name }); }
+  async renameDocument(id: string, name: string): Promise<DocMeta | null> { return this._root("PUT", "/documents/" + encodeURIComponent(id), { name }, { allow404: true }); }
+  async deleteDocument(id: string): Promise<void> { await this._root("DELETE", "/documents/" + encodeURIComponent(id)); }
 
   /* Boot : hydratation par collection (en parallèle). */
   async load(): Promise<Snapshot> {
@@ -107,7 +123,7 @@ export class RestAdapter extends DataAdapter {
   /* Utilisateur courant — proxifié au SSO par le backend. Renvoie l'objet user, ou null si non connecté / erreur.
      L'app ne gère PAS l'auth : c'est le SSO qui valide (cf. docs/rest-migration.md). */
   async me(): Promise<any | null> {
-    try { return await this._send("GET", "/me", undefined, { allow404: true }); }
+    try { return await this._root("GET", "/me", undefined, { allow404: true }); }
     catch (_) { return null; }
   }
 }
