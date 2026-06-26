@@ -458,6 +458,11 @@ export class DcInteract extends DcPanels {
       items.push({ label: "Isoler ce DC (afficher seul)", action: () => { this.dcId = dc.id; this.selRackId = null; this.visibleDcIds = new Set([dc.id]); this.camTarget = null; this.scale = null; this.buildToolbar(); this.render(); } });
       items.push({ label: "Passer en mode simple DC", action: () => this.activateDc(dc.id, true) });   // quitte le Multi-DC, sur ce DC
     }
+    // afficher toutes les baies — seulement si au moins une baie de CE DC est masquée
+    const dcRacks = this.store.racksOfDc(dc.id);
+    if (dcRacks.some((r: any) => this.hidden3dRacks.has(r.id))) {
+      items.push({ label: "Afficher toutes les baies", action: () => { dcRacks.forEach((r: any) => this.hidden3dRacks.delete(r.id)); this.render(); } });
+    }
     items.push({ label: "Modifier la salle…", action: () => this.host.openDatacenterForm?.(dc.id) });
     return [
       { head: dc.name || "(salle)", items },
