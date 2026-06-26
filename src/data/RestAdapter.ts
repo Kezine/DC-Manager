@@ -67,12 +67,16 @@ export class RestAdapter extends DataAdapter {
   async renameDocument(id: string, name: string): Promise<DocMeta | null> { return this._root("PUT", "/documents/" + encodeURIComponent(id), { name }, { allow404: true }); }
   async deleteDocument(id: string): Promise<void> { await this._root("DELETE", "/documents/" + encodeURIComponent(id)); }
 
+  /** Le serveur renvoie les listes paginées `{ rows, total, … }` ; le boot/getMany/findBy veulent le TABLEAU. */
+  private rows(res: any): RawRecord[] { return Array.isArray(res) ? res : (res && Array.isArray(res.rows) ? res.rows : []); }
+
   /* Boot : hydratation par collection (en parallèle). SANS document scopé (au boot, avant le choix d'un document),
      renvoie un snapshot VIDE — le vrai chargement suit `setDocument()` (cf. restBootstrap). */
   async load(): Promise<Snapshot> {
     if (!this.docId) return { meta: {} };
     const snap: Snapshot = { meta: {} };
-    await Promise.all(COLLECTIONS.map(async (c) => { snap[c] = (await this._send("GET", "/" + c)) || []; }));
+    // pageSize très grand → la collection ENTIÈRE (le document complet) en une page.
+    await Promise.all(COLLECTIONS.map(async (c) => { snap[c] = this.rows(await this._send("GET", "/" + c + "?pageSize=1000000000")); }));
     try { snap.meta = (await this._send("GET", "/meta")) || {}; } catch (_) { snap.meta = {}; }
     return snap;
   }
@@ -99,11 +103,11 @@ export class RestAdapter extends DataAdapter {
   }
   async getMany(collection: string, ids: string[]): Promise<RawRecord[]> {
     if (!ids || !ids.length) return [];
-    return (await this._send("GET", "/" + collection + "?ids=" + ids.map(encodeURIComponent).join(","))) || [];
+    return this.rows(await this._send("GET", "/" + collection + "?ids=" + ids.map(encodeURIComponent).join(",")));
   }
   async findBy(collection: string, field: string, value: any): Promise<RawRecord[]> {
     const v = (value === null || value === undefined) ? "null" : String(value);
-    return (await this._send("GET", "/" + collection + "?" + encodeURIComponent(field) + "=" + encodeURIComponent(v))) || [];
+    return this.rows(await this._send("GET", "/" + collection + "?pageSize=1000000000&" + encodeURIComponent(field) + "=" + encodeURIComponent(v)));
   }
 
   /* ---- écritures unitaires (appels directs, sans passer par le lot) ---- */
