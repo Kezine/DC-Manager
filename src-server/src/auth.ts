@@ -14,13 +14,14 @@ export interface SsoResult { user?: SsoUser; logged: boolean; adminRight?: strin
 const ANON: SsoResult = { user: { login: "anonymous", domain: "anonymous" }, logged: false, adminRight: "NONE" };
 
 export type AuthMode = "basic" | "sso" | "dev";
-export interface AuthOptions { ssoUrl?: string; cookieName?: string; devUser?: string | null; basicAuth?: string | null }
+export interface AuthOptions { ssoUrl?: string; cookieName?: string; devUser?: string | null; basicAuth?: string | null; devRight?: string | null }
 
 export class Auth {
   private readonly cache = new Map<string, { result: SsoResult; expireAt: number }>();
   private readonly ssoUrl: string;
   private readonly cookieName: string;
   private readonly devUser: string | null;
+  private readonly devRight: string;   // droit simulé en mode dev : SUPER_ADMIN (défaut) | NONE | ANON (pour tester l'écran d'accès refusé)
   private readonly basicUser: string | null = null;
   private readonly basicPass: string = "";
   readonly mode: AuthMode;
@@ -29,6 +30,7 @@ export class Auth {
     this.ssoUrl = (opts.ssoUrl || "").trim();
     this.cookieName = (opts.cookieName || "").trim();
     this.devUser = opts.devUser ?? null;
+    this.devRight = (opts.devRight || "SUPER_ADMIN").trim().toUpperCase();
     const ba = (opts.basicAuth || "").trim();   // "user:pass" → gate Basic Auth (dev) PRIORITAIRE sur le SSO
     if (ba.includes(":")) { const i = ba.indexOf(":"); this.basicUser = ba.slice(0, i); this.basicPass = ba.slice(i + 1); }
     this.mode = this.basicUser != null ? "basic" : (this.ssoUrl ? "sso" : "dev");
@@ -93,5 +95,8 @@ export class Auth {
     return now + 60_000;                              // sinon mise en cache courte (1 min) pour limiter les appels
   }
   private prune(now: number): void { for (const [k, v] of this.cache) if (now >= v.expireAt) this.cache.delete(k); }
-  private devResult(): SsoResult { return { user: { login: this.devUser || "dev", nom: "Dev", prenom: "" }, logged: true, adminRight: "SUPER_ADMIN", dev: true }; }
+  private devResult(): SsoResult {
+    if (this.devRight === "ANON") return { ...ANON, dev: true };   // simule « non connecté »
+    return { user: { login: this.devUser || "dev", nom: "Dev", prenom: "" }, logged: true, adminRight: this.devRight, dev: true };   // NONE simule « pas les droits »
+  }
 }

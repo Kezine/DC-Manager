@@ -19,6 +19,8 @@ services:
       DEV_USER: dev
       # DEV : pour exiger un mot de passe (Basic Auth navigateur) au lieu de l'accès libre, décommenter :
       # BASIC_AUTH: "dev:secret"
+      # DEV : pour tester l'écran d'accès refusé du client → NONE (pas les droits) ou ANON (non connecté) :
+      # DEV_RIGHT: NONE
       # Pour le VRAI SSO (SSO externe) : commenter les 2 lignes ci-dessus et décommenter :
       # SSO_URL: https://sso.example.com/validate
       # COOKIE_NAME: SsoJWT

@@ -1466,6 +1466,12 @@
   .welcome-actions { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
   .welcome-btn { width: 100%; justify-content: center; }
   .welcome-mode-hint { color: var(--fg-dimmer); font-size: 10px; line-height: 1.5; margin: 18px 0 0; letter-spacing: 0.02em; }
+  .welcome-auth { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
+  .welcome-auth-msg {
+    color: var(--fg-dim); font-size: 13px; line-height: 1.6; margin: 0;
+    padding: 14px 16px; border: 1px solid var(--line-2); border-left: 3px solid var(--danger, #e5534b);
+    background: var(--bg-2); border-radius: 4px; text-align: left;
+  }
 
   /* contrÃ´les tributaires d'un document : neutralisÃ©s tant que l'Ã©cran d'accueil est actif */
   body.welcome-active .statusbar > .status-stat { visibility: hidden; }

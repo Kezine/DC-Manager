@@ -613,13 +613,9 @@ async function boot(): Promise<void> {
     const authorized = !!(me && me.logged && me.adminRight === "SUPER_ADMIN");
     flog("auth", { logged: me && me.logged, adminRight: me && me.adminRight, authorized });
     if (!authorized) {
-      await Dialog.alert({
-        title: "Accès refusé",
-        message: (me && me.logged)
-          ? "Le compte « " + ((me.user && (me.user.login)) || "?") + " » n'a pas les droits requis (SUPER_ADMIN)."
-          : "Vous n'êtes pas authentifié auprès du SSO. Connectez-vous, puis rechargez la page.",
-        confirmLabel: "OK",
-      });
+      // pas une app noire : on AFFICHE l'état sur l'écran d'accueil, avec un bouton Réessayer.
+      const who = (me && me.user && (me.user.login || [me.user.prenom, me.user.nom].filter(Boolean).join(" "))) || "";
+      shell.showAccessDenied({ connected: !!(me && me.logged), user: who, onRetry: () => { void restBootstrap(); } });
       return;   // n'ouvre aucun document tant que l'accès n'est pas autorisé
     }
     let docs: any[] = []; try { docs = await ra.listDocuments(); } catch { /* serveur injoignable */ }

@@ -92,6 +92,10 @@ export class Shell {
   private welcomeOpenDirBtn!: HTMLButtonElement;
   private welcomeOpenFileBtn!: HTMLButtonElement;
   private welcomeModeEl!: HTMLElement;
+  private welcomeAuthEl!: HTMLElement;            // bloc « accès refusé / non connecté » (mode API)
+  private welcomeAuthMsg!: HTMLElement;
+  private welcomeAuthBtn!: HTMLButtonElement;
+  private welcomeNormalEls: HTMLElement[] = [];   // contenu « fichier » du welcome (masqué en accès refusé)
   private statusEls: Record<string, HTMLElement> = {};
   private views = new Map<string, ViewEntry>();
   private order: string[] = [];
@@ -250,14 +254,34 @@ export class Shell {
     const newBtn = document.createElement("button"); newBtn.type = "button"; newBtn.className = "btn welcome-btn"; newBtn.textContent = "Créer un nouveau document"; newBtn.onclick = () => this.host.onNew?.();
     acts.append(this.welcomeReopenBtn, this.welcomeOpenFileBtn, this.welcomeOpenDirBtn, newBtn);
     const hint = document.createElement("p"); hint.className = "welcome-mode-hint"; hint.textContent = "Mode local (session) : à la fermeture de l'onglet, les données ne sont pas conservées dans le navigateur — votre fichier reste la référence.";
-    card.append(logo, title, this.welcomeModeEl, acts, hint);
+    // bloc « auth » (mode API) : message d'accès refusé / non connecté + bouton Réessayer — masqué par défaut
+    this.welcomeAuthEl = document.createElement("div"); this.welcomeAuthEl.className = "welcome-auth"; this.welcomeAuthEl.style.display = "none";
+    this.welcomeAuthMsg = document.createElement("p"); this.welcomeAuthMsg.className = "welcome-auth-msg";
+    this.welcomeAuthBtn = document.createElement("button"); this.welcomeAuthBtn.type = "button"; this.welcomeAuthBtn.className = "btn btn-primary welcome-btn"; this.welcomeAuthBtn.textContent = "Réessayer";
+    this.welcomeAuthEl.append(this.welcomeAuthMsg, this.welcomeAuthBtn);
+    this.welcomeNormalEls = [this.welcomeModeEl, acts, hint];   // contenu « fichier » à masquer en cas d'accès refusé
+    card.append(logo, title, this.welcomeModeEl, acts, hint, this.welcomeAuthEl);
     screen.appendChild(card);
     this.welcomeEl = screen;
     return screen;
   }
 
+  /** Affiche l'écran d'accueil en état « accès refusé / non connecté » (mode API), avec un bouton Réessayer. */
+  showAccessDenied(opts: { connected: boolean; user?: string; onRetry: () => void }): void {
+    this.welcomeNormalEls.forEach((el) => { if (el) el.style.display = "none"; });
+    this.welcomeAuthEl.style.display = "";
+    this.welcomeAuthMsg.textContent = opts.connected
+      ? "Connecté en tant que « " + (opts.user || "?") + " », mais ce compte n'a pas les droits requis (SUPER_ADMIN). Contactez un administrateur."
+      : "Vous n'êtes pas authentifié auprès du SSO. Connectez-vous, puis réessayez.";
+    this.welcomeAuthBtn.onclick = () => opts.onRetry();
+    this.welcomeEl.style.display = "";
+    document.body.classList.add("welcome-active");
+  }
+
   /** Affiche l'écran d'accueil. `reopenName` (≠ null) montre « Rouvrir « … » » ; `mode`/`fsApi` règlent le rappel. */
   showWelcome(opts: { reopenName?: string | null; mode?: string; fsApi?: boolean } = {}): void {
+    this.welcomeAuthEl.style.display = "none";                                  // sort de l'état « accès refusé »
+    this.welcomeNormalEls.forEach((el) => { if (el) el.style.display = ""; });   // restaure le contenu fichier
     this.setReopen(opts.reopenName ?? null);
     this.setWelcomeMode(opts.mode || "file", opts.fsApi !== false);
     this.welcomeEl.style.display = "";

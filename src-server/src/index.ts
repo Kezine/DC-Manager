@@ -18,8 +18,9 @@ const SSO_URL = process.env.SSO_URL ?? "https://sso.example.com/validate";
 const COOKIE_NAME = process.env.COOKIE_NAME ?? "SsoJWT";   // cookie du jeton à proxifier (défaut SSO externe ; "" = en-tête Cookie complet)
 const DEV_USER = process.env.DEV_USER ?? null;
 const BASIC_AUTH = process.env.BASIC_AUTH || null;                // "user:pass" → gate Basic Auth (dev), PRIORITAIRE sur le SSO
+const DEV_RIGHT = process.env.DEV_RIGHT || null;                  // dev : SUPER_ADMIN (défaut) | NONE | ANON (pour tester l'écran d'accès refusé)
 
 const log = Logger.fromEnv();
-const auth = new Auth(log.child("auth"), { ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH });
+const auth = new Auth(log.child("auth"), { ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH, devRight: DEV_RIGHT });
 const docs = new DocumentStore(DOCS_DIR, Database as unknown as SqliteCtor, log.child("docs"));
 new Server({ docs, auth, clientDir: CLIENT_DIR, apiBase: API_BASE, log }).listen(PORT);

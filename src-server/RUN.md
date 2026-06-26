@@ -142,6 +142,9 @@ dépassée. **Accès autorisé uniquement si `logged` et `adminRight = "SUPER_AD
 - **Mode dev + mot de passe** : `BASIC_AUTH=user:pass` (prioritaire sur le SSO) →
   le navigateur demande un user/mot de passe (HTTP Basic) ; identifiants OK →
   SUPER_ADMIN. Pratique pour protéger un serveur de dev sans le SSO.
+- **Tester l'écran « accès refusé »** du client (en dev) : `DEV_RIGHT=NONE`
+  (connecté mais sans droits) ou `DEV_RIGHT=ANON` (non connecté). Le client
+  affiche alors le message sur l'écran d'accueil au lieu d'ouvrir un document.
 - **SSO réel** : dans `docker-compose.yml`, mettre
   `SSO_URL: https://sso.example.com/validate` (et `COOKIE_NAME: SsoJWT`,
   qui est déjà le défaut).
