@@ -15,6 +15,7 @@ import { Modal, Notify, FormControls, Dialog, Fullscreen } from "../ui";
 import { Html } from "../core/Html";
 import { Id } from "../core/Id";
 import { Prefs } from "../core/Prefs";
+import { Log } from "../core/Log";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD } from "../domain/constants";
 import { Shell } from "./Shell";
 import type { ShellHost } from "./Shell";
@@ -82,8 +83,8 @@ async function boot(): Promise<void> {
   const rememberHandle = (handle: any, name: string) => { if (!handle) return; lastRec = { handle, name: name || handle.name || "" }; void handleStore.putLast(handle, lastRec.name); };
   /** Mode « accès dossier » actif (réglage + FS API) : un seul grant de dossier couvre le .json et son compagnon .nmfb. */
   const dirMode = (): boolean => prefs.fileAccessMode === "directory" && HAS_FS_API;
-  /** Trace des opérations fichier / compagnon (console). Préfixe repérable, jamais bloquant. */
-  const flog = (...args: any[]): void => { try { console.log("%c[netmap:fs]", "color:#4ea1ff", ...args); } catch (_) { /* noop */ } };
+  /** Trace des opérations fichier / compagnon — gated par le flag de débogage (Log). */
+  const flog = Log.scope("fs");
   const rememberDir = async (dir: any, jsonName: string): Promise<void> => { currentDirHandle = dir; await handleStore.putDir(dir, jsonName); flog("rememberDir → dossier mémorisé", { dir: dir && dir.name, json: jsonName }); };
 
   const modal = new Modal();
@@ -565,6 +566,7 @@ async function boot(): Promise<void> {
     onAutosaveToggle: (on) => { setAutosave(on); },
     onAutosaveInterval: (sec) => { prefs.autosaveInterval = sec; applyAutosave(); },
     onReopenLast: () => { reopenLast(); },
+    onDebugLog: (on) => { prefs.debugLog = on; Log.setEnabled(on); Notify.toast(on ? "Logs de débogage activés (console)" : "Logs de débogage désactivés"); },
   };
 
   const shell = new Shell(root, shellHost);
@@ -788,6 +790,7 @@ async function boot(): Promise<void> {
   shell.build();
   shell.setDataSource(prefs.dataSource);
   shell.setFileAccessMode(prefs.fileAccessMode);
+  shell.setDebugLog(prefs.debugLog); Log.setEnabled(prefs.debugLog);
 
   // ---- état save-state ----
   // ---- barre de statut / undo-redo (cohérence avec l'état du store) ----

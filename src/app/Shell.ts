@@ -38,6 +38,8 @@ export interface ShellHost {
   onFileAccessMode?(value: string): void;
   /** Ouverture en FORÇANT un mode d'accès ("file" | "directory") — depuis l'écran d'accueil. */
   onOpenMode?(mode: string): void;
+  /** Active/désactive les logs de débogage console. */
+  onDebugLog?(on: boolean): void;
   /** Activation/désactivation de l'auto-save (Promise → état effectif appliqué). */
   onAutosaveToggle?(on: boolean): void;
   /** Changement de fréquence d'auto-save (secondes). */
@@ -78,6 +80,7 @@ export class Shell {
   private saveDot!: HTMLElement;
   private dataSourceSel!: HTMLSelectElement;
   private fileAccessSel!: HTMLSelectElement;
+  private debugLogChk!: HTMLInputElement;
   private autosaveChk!: HTMLInputElement;
   private autosaveIntervalSel!: HTMLSelectElement;
   private autosaveStatusEl!: HTMLElement;
@@ -202,6 +205,15 @@ export class Shell {
     const v3d = section("Affichage 3D");
     const resetBtn = document.createElement("button"); resetBtn.type = "button"; resetBtn.className = "btn btn-ghost btn-sm"; resetBtn.style.width = "100%"; resetBtn.textContent = "Réinitialiser les préférences d'affichage";
     resetBtn.onclick = () => this.host.onResetViewPrefs?.(); v3d.appendChild(resetBtn);
+    // -- Débogage --
+    const dbg = section("Débogage");
+    const dbgRow = document.createElement("div"); dbgRow.className = "settings-toggle-row";
+    const dbgLabel = document.createElement("label"); dbgLabel.className = "settings-toggle";
+    this.debugLogChk = document.createElement("input"); this.debugLogChk.type = "checkbox";
+    this.debugLogChk.onchange = () => this.host.onDebugLog?.(this.debugLogChk.checked);
+    dbgLabel.append(this.debugLogChk, document.createTextNode("Logs de débogage (console)"));
+    dbgRow.appendChild(dbgLabel); dbg.appendChild(dbgRow);
+    const dbgNote = document.createElement("div"); dbgNote.className = "settings-row-note"; dbgNote.textContent = "Trace les opérations (fichier, compagnon, …) dans la console du navigateur. À activer pour diagnostiquer."; dbg.appendChild(dbgNote);
 
     btn.onclick = (e) => { e.stopPropagation(); pop.classList.toggle("open"); };
     document.addEventListener("click", () => pop.classList.remove("open"));
@@ -367,6 +379,7 @@ export class Shell {
   }
   setDataSource(value: string): void { this.dataSourceSel.value = value; }
   setFileAccessMode(value: string): void { this.fileAccessSel.value = value; }
+  setDebugLog(on: boolean): void { this.debugLogChk.checked = on; }
   /** Reflète l'état auto-save dans le popover (case + fréquence). */
   setAutosave(on: boolean, interval: number): void { this.autosaveChk.checked = on; this.autosaveIntervalSel.value = String(interval); }
   setAutosaveStatus(html: string): void { this.autosaveStatusEl.innerHTML = html; }
