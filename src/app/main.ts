@@ -10,7 +10,7 @@ import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
 import { readRuntimeConfig } from "./RuntimeConfig";
 import { GraphView, ListView, ListConfigs, Forms, DatacenterView } from "../views";
-import { ImageStore } from "../data";
+import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen } from "../ui";
 import { Html } from "../core/Html";
@@ -99,7 +99,9 @@ async function boot(): Promise<void> {
   const modal = new Modal();
   const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { refreshChrome(); } };   // mutation modèle déjà suivie par la révision (store.onChange)
   // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
-  const imageStore = new ImageStore({ onDirty: () => { session.markDirty(); refreshChrome(); shell.refreshActive(); }, onUndoable: noteUndoable });   // images HORS historique modèle, undo intégré à la timeline unifiée
+  // backend d'images selon le mode : IndexedDB (fichier, + compagnon .nmfb) · endpoints blob (REST). Cf. P2.
+  const imageBackend = REST_MODE ? new RestImageBackend(RUNTIME.apiBaseUrl) : new IdbImageBackend();
+  const imageStore = new ImageStore({ onDirty: () => { session.markDirty(); refreshChrome(); shell.refreshActive(); }, onUndoable: noteUndoable, backend: imageBackend });   // images HORS historique modèle, undo intégré à la timeline unifiée
   Forms.images = imageStore;   // singleton pour le picker d'image (faceEditor)
   imageStore.restoreLoadedKey();   // clé du bundle .nmfb actuellement en IndexedDB (persistée) — appariement json↔compagnon
   await imageStore.ready();
@@ -722,7 +724,7 @@ async function boot(): Promise<void> {
       name: "faceimages", label: "Images de façade", subtitle: "Bibliothèque d'images de façade (JPEG/PNG/WebP) partagées par référence. Stockées hors document (IndexedDB).",
       kind: "secondary", parent: "equipements", links: [],
       count: () => imageStore.count(),
-      extraActions: [{ label: "Ouvrir un fichier de faces", title: "Charger un compagnon d'images .nmfb (mode dossier : liste le dossier ; mode fichier : sélecteur)", onClick: () => openFacesFile() }],
+      extraActions: REST_MODE ? [] : [{ label: "Ouvrir un fichier de faces", title: "Charger un compagnon d'images .nmfb (mode dossier : liste le dossier ; mode fichier : sélecteur)", onClick: () => openFacesFile() }],
       addLabel: "+ Image", onAdd: () => Forms.faceImage(imageStore, store, formHost, null, () => shell.refreshActive()),
       onShow: () => {
         if (!view) {

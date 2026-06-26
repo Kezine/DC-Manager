@@ -86,8 +86,13 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
 - `GET/PUT /meta`.
 - `POST /transact` `[nouveau]` : `{ creates[], updates[], deletes[], meta? }`
   appliqué **atomiquement**. Remplace la boucle actuelle de `RestAdapter.transact`.
-- Images `[P2]` : `GET /images`, `GET /images/{id}` (binaire/URL signée),
-  `POST /images` (binaire), `PUT/DELETE /images/{id}`.
+- Images `[P2 — figé côté client]` :
+  - `GET /images` → `[{ id, name, u_height, face, description, type, bytes }]` (métadonnées).
+  - `GET /images/{id}` → métadonnées d'une image.
+  - `GET /images/{id}/blob` → binaire (le miroir UI pointe cette URL ; même
+    origine → cookies envoyés ; pas de pré-téléchargement au boot).
+  - `PUT /images/{id}` → `multipart/form-data` `{ meta: JSON, blob: file }` (crée/remplace ; id client).
+  - `DELETE /images/{id}`.
 - **Pas de `PUT /snapshot` à l'ouverture** : en mode API, ouvrir = **fetch**,
   jamais push (sinon on écrase le serveur). `/snapshot` réservé à un import
   explicite dans un workspace vide.
@@ -107,8 +112,16 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
     dans la topbar (mode API).
   - ⏳ Backend : implémenter `POST /transact` (1 transaction SQLite) et `GET /me`
     (proxy SSO). Figer `q`/`where`/pagination/tri (cf. §4).
-- **P2 — Images** : backend d'images derrière l'adapter ; `ImageStore`
-  délègue ; endpoints blob ; `.nmfb` confiné au mode fichier.
+- **P2 — Images** *(client fait ; reste = backend)*
+  - ✅ `ImageBackend` (interface) : `ImageStore` délègue toute la persistance
+    (miroir + undo + bundle `.nmfb` restent dans `ImageStore`, agnostiques).
+  - ✅ `IdbImageBackend` (mode fichier, comportement inchangé) + `RestImageBackend`
+    (endpoints blob ; le miroir UI pointe l'URL serveur, pas de pré-téléchargement).
+  - ✅ Sélection du backend au boot selon le mode ; bouton « Ouvrir un fichier de
+    faces » (compagnon) masqué en mode API.
+  - ⏳ Backend : implémenter les endpoints `/images` (cf. §4). Caveat : l'undo
+    image en REST rejoue des PUT/DELETE (OK mono-utilisateur ; à revoir en P3
+    multi-client).
 - **P3 — Concurrence** : ETag/version + conflits UX ; canal live (SSE/WS) ;
   politique undo (désactivé en API au départ).
 - **P4 — Multi-documents** : décision produit ; éventuelle ressource `/documents`.

@@ -1,4 +1,5 @@
 import { Id } from "../core/Id";
+import { ImageBackend, IdbImageBackend } from "./ImageBackend";
 
 /* =============================================================================
    STOCKAGE DES IMAGES DE FAÇADE — DISSOCIÉ DU MODÈLE (réplique OO du `imageStore`).
@@ -10,12 +11,11 @@ import { Id } from "../core/Id";
    Le modèle ne conserve que des RÉFÉRENCES (equipment.face_image_*_id).
    ============================================================================= */
 
-const DB_NAME = "netmap-images";
-const STORE = "images";
 const HISTORY_MAX = 50;
 
-/** Enregistrement brut (IndexedDB) : métadonnées + Blob binaire. */
-export interface ImageRec { id: string; name: string; u_height: number; face: string; description: string; type: string; blob: Blob | null; }
+/** Enregistrement brut : métadonnées + Blob binaire. `url`/`bytes` (optionnels) servent au mode REST,
+    où le blob n'est pas chargé en mémoire (le miroir pointe l'URL serveur, `bytes` vient du manifeste). */
+export interface ImageRec { id: string; name: string; u_height: number; face: string; description: string; type: string; blob: Blob | null; url?: string; bytes?: number; }
 /** Vue miroir (UI) : métadonnées + objectURL synchrone. */
 export interface ImageMirror { id: string; name: string; u_height: number; face: string; description: string; type: string; url: string | null; bytes: number; }
 /** Image legacy inline (data URL) — import/export de repli. */
@@ -30,8 +30,11 @@ export class ImageStore {
   private _ready = false;
   /** Clé d'appariement du bundle actuellement en base (manifest.key) — persistée par le bootstrap. */
   lastLoadedKey: string | null = null;
+  private backend: ImageBackend;
 
-  constructor(private opts: { onDirty?: () => void; onUndoable?: (kind: string) => void } = {}) {}
+  constructor(private opts: { onDirty?: () => void; onUndoable?: (kind: string) => void; backend?: ImageBackend } = {}) {
+    this.backend = opts.backend || new IdbImageBackend();   // défaut = IndexedDB (mode fichier)
+  }
 
   /* ---- helpers data-url (migration legacy + export de repli) ---- */
   static dataUrlToBlob(dataUrl: string): Blob | null {
@@ -51,27 +54,19 @@ export class ImageStore {
     return { id: rec.id, name: rec.name || "", u_height: Math.max(1, rec.u_height | 0 || 1), face: ImageStore.face(rec.face), description: rec.description || "", type: rec.type || (rec.blob && rec.blob.type) || "", blob: rec.blob || null };
   }
   private mirrorPut(rec: ImageRec): void {
-    const old = this.mirror.get(rec.id); if (old && old.url) URL.revokeObjectURL(old.url);
-    const url = rec.blob ? URL.createObjectURL(rec.blob) : null;
-    this.mirror.set(rec.id, { id: rec.id, name: rec.name || "", u_height: rec.u_height || 1, face: ImageStore.face(rec.face), description: rec.description || "", type: rec.type || "", url, bytes: rec.blob ? rec.blob.size : 0 });
+    const old = this.mirror.get(rec.id); if (old && old.url && old.url.startsWith("blob:")) URL.revokeObjectURL(old.url);
+    // blob en mémoire → objectURL (fichier / image fraîchement ajoutée) ; sinon URL serveur (REST).
+    const url = rec.blob ? URL.createObjectURL(rec.blob) : (rec.url || null);
+    this.mirror.set(rec.id, { id: rec.id, name: rec.name || "", u_height: rec.u_height || 1, face: ImageStore.face(rec.face), description: rec.description || "", type: rec.type || "", url, bytes: rec.blob ? rec.blob.size : (rec.bytes || 0) });
   }
-  private mirrorDel(id: string): void { const old = this.mirror.get(id); if (old && old.url) URL.revokeObjectURL(old.url); this.mirror.delete(id); }
+  private mirrorDel(id: string): void { const old = this.mirror.get(id); if (old && old.url && old.url.startsWith("blob:")) URL.revokeObjectURL(old.url); this.mirror.delete(id); }
 
-  /* ---- IndexedDB bas niveau (base dédiée) ---- */
-  private open(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-      if (typeof indexedDB === "undefined") { reject(new Error("no-idb")); return; }
-      const req = indexedDB.open(DB_NAME, 1);
-      req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "id" }); };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error || new Error("idb-open-failed"));
-    });
-  }
-  private async put(rec: ImageRec): Promise<void> { const db = await this.open(); await new Promise<void>((res, rej) => { const tx = db.transaction(STORE, "readwrite"); tx.objectStore(STORE).put(rec); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); db.close(); }
-  private async del(id: string): Promise<void> { const db = await this.open(); await new Promise<void>((res, rej) => { const tx = db.transaction(STORE, "readwrite"); tx.objectStore(STORE).delete(id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); db.close(); }
-  private async getRaw(id: string): Promise<ImageRec | null> { const db = await this.open(); const rec = await new Promise<ImageRec | null>((res, rej) => { const tx = db.transaction(STORE, "readonly"); const r = tx.objectStore(STORE).get(id); r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error); }); db.close(); return rec; }
-  private async getAll(): Promise<ImageRec[]> { const db = await this.open(); const recs = await new Promise<ImageRec[]>((res, rej) => { const tx = db.transaction(STORE, "readonly"); const r = tx.objectStore(STORE).getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); }); db.close(); return recs; }
-  private async clear(): Promise<void> { const db = await this.open(); await new Promise<void>((res, rej) => { const tx = db.transaction(STORE, "readwrite"); tx.objectStore(STORE).clear(); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); db.close(); }
+  /* ---- persistance déléguée au BACKEND (IndexedDB en fichier · endpoints blob en REST) ---- */
+  private put(rec: ImageRec): Promise<void> { return this.backend.put(rec); }
+  private del(id: string): Promise<void> { return this.backend.del(id); }
+  private getRaw(id: string): Promise<ImageRec | null> { return this.backend.getRaw(id); }
+  private getAll(): Promise<ImageRec[]> { return this.backend.getAll(); }
+  private clear(): Promise<void> { return this.backend.clear(); }
 
   /** Peuple le miroir depuis IndexedDB (boot / session restaurée). Idempotent. */
   async ready(): Promise<void> { if (this._ready) return; this._ready = true; try { (await this.getAll()).forEach((r) => this.mirrorPut(r)); } catch (e) { console.warn("ImageStore.ready", e); } }
