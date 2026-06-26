@@ -63,22 +63,7 @@ export class DcPanels extends DcViews2D {
       modes.appendChild(b);
     });
     this.toolbarEl.appendChild(modes);
-    // OUTIL DE MESURE multipoint (2D/3D · mono/multi/étage) — clic = poser un point, glisser = naviguer.
-    this.toolbarEl.appendChild(this.vsep());
-    const measOn = !!(this.measure && this.measure.active);
-    const bMeas = this.btn(measOn ? "📏 Mesure…" : "📏 Mesurer", () => { if (this.measure && this.measure.active) this.measureCancel(); else this.measureArm(); }, "Outil de mesure multipoint (2D/3D). Cliquez pour poser des points (chaque segment affiche sa longueur) ; glissez pour naviguer.");
-    bMeas.classList.toggle("active", measOn);
-    this.toolbarEl.appendChild(bMeas);
-    // projection caméra (ortho ⟷ perspective) — vue 3D (moteur WebGL).
-    if (this.view === "3d") {
-      this.toolbarEl.appendChild(this.vsep());
-      const bProj = this.btn(this.webglPerspective ? "Perspective" : "Orthographique", () => {
-        this.webglPerspective = !this.webglPerspective;
-        if (this._three) this._three.setProjection(this.webglPerspective);
-        this.buildToolbar();
-      }, "Bascule la projection de la caméra (orthographique ⟷ perspective)");
-      this.toolbarEl.appendChild(bProj);
-    }
+    // NB : les boutons « Mesurer » et « Projection ortho/perspective » sont désormais dans l'overlay de contrôles 3D (cf. buildControls).
     // multi-select des SITES/bâtiments accessibles à l'UI (vide = tous) — filtre la vue Étage / le rail / la portée 3D.
     const sites = this.store.sitesSorted();
     if (sites.length) {
