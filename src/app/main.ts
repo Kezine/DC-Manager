@@ -170,11 +170,17 @@ async function boot(): Promise<void> {
     currentFacesHandle = fh; rememberFacesHandle(fh);
     const docKey = store.meta.facesKey || null, bundleKey = imageStore.lastLoadedKey || null;
     const alreadyPaired = !!(docKey && bundleKey && docKey === bundleKey);
-    flog("associateCompanion", { file: fh.name, docKey, bundleKey, alreadyPaired, regenKey: !!opts.regenKey, images: imageStore.count() });
+    const nameChanged = (store.meta.facesFile || null) !== fh.name;
+    store.meta.facesFile = fh.name;   // MÉMORISE le nom du compagnon → réouverture auto même si nom ≠ <json>.nmfb
+    flog("associateCompanion", { file: fh.name, docKey, bundleKey, alreadyPaired, nameChanged, regenKey: !!opts.regenKey, images: imageStore.count() });
     if (opts.regenKey || !alreadyPaired) {
       store.meta.facesKey = "fk-" + Id.uid(); await store.persistMeta();
       try { await writeFacesToHandle(fh); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Clé non écrite dans le compagnon : " + (e.message || e), "err"); }
       if (currentHandle) { try { await writeToHandle(currentHandle); } catch (e: any) { session.markDirty(); if (e && e.message !== "permission-refusée" && e.name !== "AbortError") Notify.toast("Clé non écrite dans le .json : " + (e.message || e), "err"); } }
+      else session.markDirty();
+    } else if (nameChanged) {   // déjà apparié (clé OK), seul le NOM du compagnon change → on persiste le nom dans le .json
+      await store.persistMeta();
+      if (currentHandle) { try { await writeToHandle(currentHandle); } catch (e: any) { session.markDirty(); if (e && e.message !== "permission-refusée" && e.name !== "AbortError") Notify.toast("Nom du compagnon non écrit dans le .json : " + (e.message || e), "err"); } }
       else session.markDirty();
     }
     imageStore.setLoadedKey(store.meta.facesKey || null);   // la bibliothèque en IndexedDB = ce document
@@ -208,12 +214,14 @@ async function boot(): Promise<void> {
     if (!HAS_FS_API) return;
     if (!docHasFaceImages() && !currentFacesHandle) return;   // rien à écrire
     ensureFacesKey();
-    const wantName = facesNameFor(jsonHandle ? jsonHandle.name : currentName);
+    // nom cible = compagnon ASSOCIÉ (meta.facesFile) si présent, sinon convention <json>.nmfb
+    const wantName = (store.meta.facesFile as string) || facesNameFor(jsonHandle ? jsonHandle.name : currentName);
     flog("saveCompanionFaces", { wantName, dirMode: dirMode(), dir: currentDirHandle && currentDirHandle.name, facesKey: store.meta.facesKey });
     try {
       if (dirMode() && currentDirHandle) currentFacesHandle = await currentDirHandle.getFileHandle(wantName, { create: true });   // dans le dossier, sans picker
       else if (!currentFacesHandle) currentFacesHandle = await W.showSaveFilePicker({ suggestedName: wantName, startIn: jsonHandle || undefined, types: FACES_TYPES });
       await writeFacesToHandle(currentFacesHandle); rememberFacesHandle(currentFacesHandle);
+      if (currentFacesHandle && currentFacesHandle.name) store.meta.facesFile = currentFacesHandle.name;   // garde le nom à jour
       imageStore.setLoadedKey(store.meta.facesKey || null);
       flog("saveCompanionFaces → écrit", currentFacesHandle && currentFacesHandle.name);
     } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non enregistrées : " + (e.message || e), "err"); flog("saveCompanionFaces → échec", e && e.message); }
@@ -249,20 +257,28 @@ async function boot(): Promise<void> {
     if (!HAS_FS_API) { shell.refreshActive(); return; }
     // MODE DOSSIER : le grant du dossier couvre déjà le compagnon → lecture directe, sans permission ni question.
     if (dirMode() && currentDirHandle) {
+      const savedName = (store.meta.facesFile as string) || null;   // nom mémorisé d'un compagnon associé (≠ convention)
       const wantName = facesNameFor(jsonHandle ? jsonHandle.name : currentName);
-      // 1) essai rapide par CONVENTION DE NOM (<json>.nmfb).
-      try {
-        const fh = await currentDirHandle.getFileHandle(wantName);
-        flog("compagnon[dossier]: essai par nom", wantName);
-        if (await tryLoadCompanion(fh, false, docKey, stillMissing)) { flog("compagnon[dossier]: chargé par nom", wantName); return; }
-      } catch (_) { flog("compagnon[dossier]: pas de fichier nommé", wantName); }
+      // 1) essai par NOM : d'abord le nom mémorisé (meta.facesFile), puis la convention <json>.nmfb.
+      const byName = [savedName, wantName].filter((n, i, a) => !!n && a.indexOf(n) === i) as string[];
+      for (const nm of byName) {
+        try {
+          const fh = await currentDirHandle.getFileHandle(nm);
+          flog("compagnon[dossier]: essai par nom", nm);
+          if (await tryLoadCompanion(fh, false, docKey, stillMissing)) { flog("compagnon[dossier]: chargé par nom", nm); return; }
+        } catch (_) { flog("compagnon[dossier]: pas de fichier nommé", nm); }
+      }
       // 2) sinon, on SCANNE les .nmfb du dossier et on apparie par SIGNATURE (facesKey du manifeste == docKey).
       if (docKey) {
         try {
           for await (const entry of currentDirHandle.values()) {
-            if (entry.kind !== "file" || !/\.nmfb$/i.test(entry.name) || entry.name === wantName) continue;
+            if (entry.kind !== "file" || !/\.nmfb$/i.test(entry.name) || byName.includes(entry.name)) continue;
             flog("compagnon[dossier]: essai par signature", entry.name);
-            if (await tryLoadCompanion(entry, false, docKey, stillMissing)) { flog("compagnon[dossier]: apparié par signature", entry.name); return; }
+            if (await tryLoadCompanion(entry, false, docKey, stillMissing)) {
+              flog("compagnon[dossier]: apparié par signature", entry.name);
+              store.meta.facesFile = entry.name; await store.persistMeta();   // mémorise le nom trouvé pour la prochaine fois
+              return;
+            }
           }
         } catch (e: any) { flog("compagnon[dossier]: scan échoué", e && e.message); }
       }
