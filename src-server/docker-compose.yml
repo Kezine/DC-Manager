@@ -19,7 +19,7 @@ services:
       DEV_USER: dev
       # Pour le VRAI SSO (SSO externe) : commenter les 2 lignes ci-dessus et décommenter :
       # SSO_URL: https://sso.example.com/validate
-      # COOKIE_NAME: <nom_du_cookie_jeton>
+      # COOKIE_NAME: SsoJWT
     volumes:
       - netmap-data:/data                # persistance des documents (un .db par document)
     restart: unless-stopped

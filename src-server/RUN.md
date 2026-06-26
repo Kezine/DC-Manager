@@ -126,7 +126,7 @@ docker compose exec netmap ls -la /data/documents
 | `API_BASE` | `/api` | préfixe des endpoints REST |
 | `DOCS_DIR` | `/data/documents` | dossier des documents (registre + 1 `.db`/doc) |
 | `SSO_URL` | SSO externe | endpoint SSO qui valide la session (cf. ci-dessous). **`SSO_URL=""` → mode dev** |
-| `COOKIE_NAME` | *(vide)* | nom du cookie contenant le jeton à proxifier au SSO (vide = en-tête `Cookie` complet) |
+| `COOKIE_NAME` | `SsoJWT` | nom du cookie contenant le jeton à proxifier au SSO (`""` = en-tête `Cookie` complet) |
 | `DEV_USER` | `dev` | nom de l'utilisateur factice en mode dev |
 
 ### Authentification (SSO)
@@ -140,7 +140,8 @@ dépassée. **Accès autorisé uniquement si `logged` et `adminRight = "SUPER_AD
 - **Mode dev** (offline, défaut du `docker-compose.yml`) : `SSO_URL=""` →
   utilisateur factice `dev` en SUPER_ADMIN, tout est autorisé.
 - **SSO réel** : dans `docker-compose.yml`, mettre
-  `SSO_URL: https://sso.example.com/validate` et `COOKIE_NAME: <cookie_jeton>`.
+  `SSO_URL: https://sso.example.com/validate` (et `COOKIE_NAME: SsoJWT`,
+  qui est déjà le défaut).
 
 Après modif du compose : `docker compose up -d` (recrée le conteneur).
 

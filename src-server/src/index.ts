@@ -15,7 +15,7 @@ const CLIENT_DIR = process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "d
 const API_BASE = process.env.API_BASE || "/api";
 // SSO : URL par défaut = SSO externe. SSO_URL="" (vide) → mode dev (utilisateur factice SUPER_ADMIN).
 const SSO_URL = process.env.SSO_URL ?? "https://sso.example.com/validate";
-const COOKIE_NAME = process.env.COOKIE_NAME || "";      // nom du cookie contenant le jeton à proxifier (vide = en-tête Cookie complet)
+const COOKIE_NAME = process.env.COOKIE_NAME ?? "SsoJWT";   // cookie du jeton à proxifier (défaut SSO externe ; "" = en-tête Cookie complet)
 const DEV_USER = process.env.DEV_USER ?? null;
 
 const log = Logger.fromEnv();
