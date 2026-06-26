@@ -59,13 +59,40 @@ export class ImageExport {
     ImageExport.svgToJpeg(svgStr, w, h, Math.max(16, opts.width | 0), Math.max(16, opts.height | 0), bg, nameFn("jpg"));
   }
 
-  /** Dialogue d'export : format (JPEG/SVG), portée optionnelle, résolution JPEG. */
-  static dialog(allowScope: boolean): Promise<ExportOptions | null> {
+  /** Dialogue d'export 3D (JPEG) : MULTIPLICATEUR de la vue actuelle (×1 = résolution affichée, sur-échantillonnage).
+      Granularité ×1 → ×16 (curseur). `baseW × baseH` = résolution ×1 ; `maxDim` = limite GPU (px/côté). */
+  static async scaleDialog(baseW: number, baseH: number, maxDim: number): Promise<number | null> {
+    const res: any = await Dialog.custom({
+      title: "Exporter (JPEG)", confirmLabel: "Exporter",
+      build: (root) => {
+        const hint = document.createElement("div"); hint.className = "form-hint";
+        hint.textContent = "Exporte la VUE ACTUELLE, rendue à une résolution multipliée. ×1 = exactement ce qui est affiché ; au-delà = plus de détails (anti-crénelage).";
+        root.appendChild(hint);
+        const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:10px;margin:8px 0";
+        const lab = document.createElement("span"); lab.style.cssText = "font-size:12px;color:var(--fg-dim)"; lab.textContent = "Échelle";
+        const sl = document.createElement("input"); sl.type = "range"; sl.min = "1"; sl.max = "16"; sl.step = "1"; sl.value = "2"; sl.style.cssText = "flex:1;accent-color:var(--accent);cursor:pointer";
+        const val = document.createElement("span"); val.style.cssText = "font-family:var(--mono);color:var(--accent);min-width:30px;text-align:right";
+        row.append(lab, sl, val); root.appendChild(row);
+        const info = document.createElement("div"); info.className = "form-hint";
+        const upd = () => { const n = parseInt(sl.value, 10) || 1; val.textContent = "×" + n; const w = baseW * n, h = baseH * n; const over = w > maxDim || h > maxDim; info.innerHTML = "Résolution exportée : <b>" + w + " × " + h + "</b> px" + (over ? ' <span style="color:var(--err)">⚠ dépasse la limite GPU (' + maxDim + ' px)</span>' : ""); };
+        sl.addEventListener("input", upd); upd();
+        root.appendChild(info);
+        return {
+          validate: () => { const n = parseInt(sl.value, 10) || 1; if (baseW * n > maxDim || baseH * n > maxDim) return "Résolution trop grande (limite GPU " + maxDim + " px/côté) — réduisez l'échelle."; return true as const; },
+          collect: () => ({ scale: parseInt(sl.value, 10) || 1 }),
+        };
+      },
+    });
+    return res ? res.scale : null;
+  }
+
+  /** Dialogue d'export : format (JPEG/SVG), portée optionnelle, résolution JPEG. `jpegOnly` masque l'option SVG (3D). */
+  static dialog(allowScope: boolean, jpegOnly = false): Promise<ExportOptions | null> {
     return Dialog.custom({
       title: "Exporter", confirmLabel: "Exporter",
       build: (root) => {
         const fmt = FormControls.select([{ value: "jpeg", label: "JPEG (image)" }, { value: "svg", label: "SVG (vectoriel)" }], "jpeg");
-        root.appendChild(FormControls.fieldRow("Format", fmt));
+        if (!jpegOnly) root.appendChild(FormControls.fieldRow("Format", fmt));   // 3D : JPEG uniquement (pas de SVG)
         let scope: HTMLSelectElement | null = null;
         if (allowScope) { scope = FormControls.select([{ value: "view", label: "Vue actuelle (ce qui est affiché)" }, { value: "all", label: "Tout le contenu" }], "view"); root.appendChild(FormControls.fieldRow("Portée", scope)); }
         const wI = FormControls.number(1920, { min: 16, step: 1 }), hI = FormControls.number(1080, { min: 16, step: 1 });

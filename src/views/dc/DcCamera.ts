@@ -107,8 +107,20 @@ export class DcCamera extends DcBase {
   }
 
   async openExportDialog(): Promise<void> {
+    // VUE 3D (WebGL) : JPEG de la VUE ACTUELLE, sur-échantillonnée ×N (×1 = résolution affichée). Pas de SVG en 3D.
+    if (this.view === "3d" && this.useWebGL && this._three) {
+      const base = this._three.exportBaseSize();
+      const scale = await ImageExport.scaleDialog(base.w, base.h, this._three.exportMaxDim());
+      if (!scale) return;
+      this._three.exportJPEG(scale, (b: Blob | null) => {
+        if (b) { ImageExport.download(this.exportName("jpg"), b); Notify.toast("Export JPEG généré (" + (base.w * scale) + "×" + (base.h * scale) + ")"); }
+        else Notify.toast("Échec de l'export JPEG", "err");
+      });
+      return;
+    }
+    // VUES 2D (Plan de salle / Plan d'étage) : SVG vectoriel conservé (ou JPEG rasterisé).
     if (!this.svg) { Notify.toast("Rien à exporter", "err"); return; }
-    const res = await ImageExport.dialog(false);   // vue actuelle (la projection 3D n'a pas de « tout le contenu » trivial)
+    const res = await ImageExport.dialog(false);
     if (res) this.exportImage(res);
   }
 

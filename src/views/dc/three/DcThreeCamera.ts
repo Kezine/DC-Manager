@@ -42,6 +42,41 @@ export class DcThreeCamera extends DcThreeBase {
   /** Réinitialise la caméra sur la salle courante (preset iso). */
   resetCam(): void { this.az = -0.62; this.el = 0.46; this.updateCamera(); this.request(); }
 
+  /** Dimension max (px) d'un côté à l'export = limite de texture du GPU (plafond réel, souvent 16384). */
+  exportMaxDim(): number { return (this.renderer && (this.renderer as any).capabilities) ? (this.renderer as any).capabilities.maxTextureSize || 8192 : 8192; }
+
+  /** Taille (px) du tampon de rendu actuel = export ×1 (résolution réellement affichée, pixelRatio inclus). */
+  exportBaseSize(): { w: number; h: number } {
+    const r = this.renderer, el = this.host_el; if (!r || !el) return { w: 0, h: 0 };
+    const dpr = r.getPixelRatio();
+    return { w: Math.max(1, Math.round(el.clientWidth * dpr)), h: Math.max(1, Math.round(el.clientHeight * dpr)) };
+  }
+
+  /** Export JPEG de la VUE ACTUELLE, SUR-ÉCHANTILLONNÉE ×`scale` (×1 = résolution affichée). La caméra, l'aspect,
+      l'épaisseur des câbles et les marqueurs restent INCHANGÉS → image strictement identique à l'écran, juste plus
+      détaillée (tout est proportionnel). Le render target est encodé en sRGB → couleurs FIDÈLES (sinon « ternes »). */
+  exportJPEG(scale: number, cb: (blob: Blob | null) => void, quality = 0.92): void {
+    const r = this.renderer, cam = this.camera, scene = this.scene;
+    if (!r || !cam || !scene) { cb(null); return; }
+    const s = Math.max(1, scale || 1), base = this.exportBaseSize(), width = base.w * s, height = base.h * s;
+    if (width < 16 || height < 16) { cb(null); return; }
+    const rt = new THREE.WebGLRenderTarget(width, height, { samples: 4 });
+    rt.texture.colorSpace = (THREE as any).SRGBColorSpace;   // encodage sRGB en sortie (comme le canvas) → couleurs identiques
+    try {
+      r.setRenderTarget(rt); r.render(scene, cam);
+      const buf = new Uint8Array(width * height * 4);
+      r.readRenderTargetPixels(rt, 0, 0, width, height, buf);
+      r.setRenderTarget(null);
+      const cv = document.createElement("canvas"); cv.width = width; cv.height = height;
+      const ctx = cv.getContext("2d"); if (!ctx) { cb(null); return; }
+      const img = ctx.createImageData(width, height);
+      for (let y = 0; y < height; y++) { const src = (height - 1 - y) * width * 4; img.data.set(buf.subarray(src, src + width * 4), y * width * 4); }   // WebGL : origine bas-gauche → flip Y
+      ctx.putImageData(img, 0, 0);
+      cv.toBlob((b) => cb(b), "image/jpeg", quality);
+    } catch (e) { cb(null); }
+    finally { rt.dispose(); this.request(); }
+  }
+
   /** « Localiser » : centre la caméra sur un point monde (mm) et cadre à ~`extent` (mm), en conservant l'angle.
       Différé si la scène n'est pas encore construite (appliqué au prochain rendu, après le cadrage du build). */
   focusOn(p: { x: number; y: number; z: number }, extent: number): void {
