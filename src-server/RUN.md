@@ -60,11 +60,30 @@ Au démarrage, le serveur logue une ligne du type :
 NetMap server → http://localhost:3000  (api /api)
 ```
 
-### Logs HTTP plus verbeux ?
-Le serveur ne logue pas chaque requête par défaut. Pour diagnostiquer un appel,
-utilise l'onglet **Réseau** du navigateur (F12), ou côté client active les logs
-de debug : **Réglages → Débogage → « Logs de débogage (console) »** (ou en
-console `NetMapLog.enable()`).
+### Niveau de logs (serveur)
+Le serveur logue **chaque requête** (méthode, URL, code, durée) + les opérations
+sur les documents. Verbosité réglable par **`LOG_LEVEL`** (dans `docker-compose.yml`) :
+
+| `LOG_LEVEL` | Ce qui apparaît |
+|---|---|
+| `error` | uniquement les exceptions / 5xx |
+| `warn`  | + les réponses 4xx |
+| `info` *(défaut)* | + chaque requête réussie + création/suppression de documents |
+| `debug` | + ouverture des dépôts (documents) |
+| `trace` | + le healthcheck `/healthz` |
+
+```bash
+# changer le niveau à chaud :
+#   éditer LOG_LEVEL dans docker-compose.yml puis
+docker compose up -d
+docker compose logs -f            # observer
+```
+
+Format : `2026-… INFO  [http] GET /api/documents → 200 (3ms)`.
+
+Côté **client**, logs console séparés : **Réglages → Débogage → « Logs de
+débogage »** (ou `NetMapLog.enable()` en console) ; l'onglet **Réseau** (F12)
+montre les URL exactes appelées.
 
 ---
 

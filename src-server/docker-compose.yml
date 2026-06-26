@@ -12,6 +12,7 @@ services:
     environment:
       PORT: "3000"
       API_BASE: /api
+      LOG_LEVEL: info                    # error | warn | info | debug | trace
       DEV_USER: dev                      # auth de DEV (utilisateur factice). Mettre SSO_URL pour le vrai SSO.
       # SSO_URL: https://sso.example.com/userinfo
     volumes:

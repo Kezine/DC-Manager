@@ -2,6 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Repository, type SqliteCtor, type SqliteDb } from "./db.js";
+import { Logger } from "./logger.js";
 
 export interface DocMeta { id: string; name: string; created_date: string; updated_date: string }
 
@@ -11,11 +12,12 @@ export class DocumentStore {
   private readonly registry: SqliteDb;
   private readonly repos = new Map<string, Repository>();
 
-  constructor(private readonly dir: string, private readonly Database: SqliteCtor) {
+  constructor(private readonly dir: string, private readonly Database: SqliteCtor, private readonly log: Logger = new Logger("error")) {
     fs.mkdirSync(dir, { recursive: true });
     this.registry = new Database(path.join(dir, "registry.db"));
     this.registry.pragma("journal_mode = WAL");
     this.registry.exec(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_date TEXT, updated_date TEXT)`);
+    this.log.info("registre ouvert", path.join(dir, "registry.db"));
   }
 
   list(): DocMeta[] {
@@ -29,12 +31,14 @@ export class DocumentStore {
     const meta: DocMeta = { id, name: (name || "").trim() || "Sans titre", created_date: t, updated_date: t };
     this.registry.prepare("INSERT INTO documents (id, name, created_date, updated_date) VALUES (@id, @name, @created_date, @updated_date)").run(meta);
     this.repo(id);   // matérialise le fichier du document
+    this.log.info("document créé", meta.id, "«" + meta.name + "»");
     return meta;
   }
   rename(id: string, name: string): DocMeta | null {
     if (!this.get(id)) return null;
     this.registry.prepare("UPDATE documents SET name = @name, updated_date = @t WHERE id = @id")
       .run({ id, name: (name || "").trim() || "Sans titre", t: new Date().toISOString() });
+    this.log.info("document renommé", id, "«" + ((name || "").trim() || "Sans titre") + "»");
     return this.get(id);
   }
   /** Met à jour updated_date (appelé sur écriture dans le document). */
@@ -46,13 +50,14 @@ export class DocumentStore {
     this.repos.delete(id);
     for (const ext of ["", "-wal", "-shm"]) { try { fs.rmSync(path.join(this.dir, id + ".db" + ext), { force: true }); } catch { /* noop */ } }
     this.registry.prepare("DELETE FROM documents WHERE id = ?").run(id);
+    this.log.info("document supprimé", id);
     return true;
   }
   /** Repository du document (ouvert à la demande, mis en cache), ou null si le document n'existe pas. */
   repo(id: string): Repository | null {
     if (!this.get(id)) return null;
     let r = this.repos.get(id);
-    if (!r) { r = Repository.open(path.join(this.dir, id + ".db"), this.Database); this.repos.set(id, r); }
+    if (!r) { r = Repository.open(path.join(this.dir, id + ".db"), this.Database); this.repos.set(id, r); this.log.debug("dépôt ouvert", id); }
     return r;
   }
 }
