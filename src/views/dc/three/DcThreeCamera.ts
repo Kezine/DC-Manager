@@ -79,8 +79,8 @@ export class DcThreeCamera extends DcThreeBase {
 
   /** « Localiser » : centre la caméra sur un point monde (mm) et cadre à ~`extent` (mm), en conservant l'angle.
       Différé si la scène n'est pas encore construite (appliqué au prochain rendu, après le cadrage du build). */
-  focusOn(p: { x: number; y: number; z: number }, extent: number): void {
-    this.pendingFocus = { p: { x: p.x, y: p.y, z: p.z }, extent: extent > 0 ? extent : 2000 };
+  focusOn(p: { x: number; y: number; z: number }, extent: number, face?: { az: number; el: number } | null): void {
+    this.pendingFocus = { p: { x: p.x, y: p.y, z: p.z }, extent: extent > 0 ? extent : 2000, face: face || null };
     this.applyPendingFocus();   // applique tout de suite si la scène est prête, sinon reste en attente (renderFrame)
   }
   protected applyPendingFocus(): void {
@@ -89,8 +89,39 @@ export class DcThreeCamera extends DcThreeBase {
     this.target.set(f.p.x, f.p.y, f.p.z);
     this.baseHalf = Math.max(400, f.extent * 0.7 + 200);
     this.zoom = 1;
+    if (f.face) { this.az = f.face.az; this.el = f.face.el; }   // « se positionner en face » : oriente la caméra vers le front
     this.framedDc = this.builtDc;   // marque comme cadré → un re-rendu (même salle) ne re-cadrera pas
     this.updateCamera(); this.request();
+  }
+
+  /** Surbrillance PERSISTANTE de l'équipement « localisé » (`eqId`) — émissive ambre, distincte du survol (bleu).
+      Réappliquée à chaque (re)rendu via la vue ; null pour l'éteindre. */
+  setFocusEquip(eqId: string | null): void {
+    const had = this._focusObjs.length > 0;
+    this._focusObjs.forEach((o) => this.setFocusHi(o, false));
+    this._focusObjs = [];
+    if (eqId) {
+      [this.gRacks, this.gFree].forEach((g) => g && g.traverse((o: any) => {
+        const p = o.userData && o.userData.pick;
+        if (p && p.type === "occ" && p.id === eqId) this._focusObjs.push(o);
+      }));
+      this._focusObjs.forEach((o) => this.setFocusHi(o, true));
+    }
+    if (had || this._focusObjs.length) this.request();
+  }
+
+  /** Émissive ambre persistante sur un mesh occupant (mono- ou multi-matériau), sans collision avec le survol. */
+  protected setFocusHi(mesh: THREE.Object3D | null, on: boolean): void {
+    if (!mesh) return;
+    const HI = 0xf5a623;
+    const m = (mesh as any).material as any; if (!m) return;
+    if (Array.isArray(m)) {
+      if (on) { if ((mesh as any).userData._focArr == null) (mesh as any).userData._focArr = m.map((x: any) => (x && x.emissive) ? x.emissive.getHex() : -1); m.forEach((x: any) => x && x.emissive && x.emissive.setHex(HI)); }
+      else if ((mesh as any).userData._focArr) { m.forEach((x: any, i: number) => { if (x && x.emissive && (mesh as any).userData._focArr[i] >= 0) x.emissive.setHex((mesh as any).userData._focArr[i]); }); (mesh as any).userData._focArr = null; }
+      return;
+    }
+    if (on) { if (m.emissive) { (mesh as any).userData._focEmi = m.emissive.getHex(); m.emissive.setHex(HI); } }
+    else if ((mesh as any).userData._focEmi != null && m.emissive) { m.emissive.setHex((mesh as any).userData._focEmi); (mesh as any).userData._focEmi = null; }
   }
 
   /** Recentre le PIVOT d'orbite sur le point de scène au CENTRE de l'écran (1re surface, sinon plan du sol). Ce point

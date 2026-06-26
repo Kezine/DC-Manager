@@ -849,9 +849,12 @@ export class DcInteract extends DcPanels {
 
   /* ============================ « LOCALISER » : focus 3D sur un objet (depuis un listing / une fiche) ============================ */
 
-  /** Pousse la cible « Localiser » au moteur WebGL (appelé après chaque (re)rendu 3D). */
+  /** Pousse la cible « Localiser » au moteur WebGL (appelé après chaque (re)rendu 3D). La surbrillance de
+      l'équipement localisé est réappliquée à chaque rendu (suit `focusEqId`) ; le cadrage caméra n'est joué qu'une fois. */
   protected applyFocus3D(): void {
-    if (this._focusTarget && this._three) { this._three.focusOn(this._focusTarget.p, this._focusTarget.extent); this._focusTarget = null; }
+    if (!this._three) return;
+    this._three.setFocusEquip(this.focusEqId);
+    if (this._focusTarget) { this._three.focusOn(this._focusTarget.p, this._focusTarget.extent, this._focusTarget.face); this._focusTarget = null; }
   }
 
   /** Centre monde (mm) d'un équipement dans la salle `dcId` (repère salle = monde en mode simple DC), ou null. */
@@ -870,11 +873,35 @@ export class DcInteract extends DcPanels {
 
   protected portDcId(portId: string): string | null { const p: any = this.store.get("ports", portId); return p ? this.store.equipmentDcId(p.equipment_id) : null; }
 
-  /** Bascule en 3D sur la salle `dcId` (mode simple DC) et programme le focus caméra sur `p` (emprise `extent` mm). */
-  protected focus3DAt(dcId: string, p: Vec3, extent: number): void {
+  /** Bascule en 3D sur la salle `dcId` (mode simple DC) et programme le focus caméra sur `p` (emprise `extent` mm).
+      `face` (optionnel) oriente la caméra face au front de l'objet ; sinon l'angle courant est conservé. */
+  protected focus3DAt(dcId: string, p: Vec3, extent: number, face?: { az: number; el: number } | null): void {
     this.view = "3d"; this.multiDc = false; this.dcId = dcId;
-    this._focusTarget = { p, extent };
+    this._focusTarget = { p, extent, face: face || null };
     this.buildToolbar(); this.render();
+  }
+
+  /** Angle caméra « en face » du front d'un objet (front local = −Y, tourné de `orientationDeg`).
+      Normale monde = (sin o, −cos o) → on place la caméra de ce côté, légèrement en surplomb (~20°). */
+  protected frontAzimuth(orientationDeg: number): { az: number; el: number } {
+    const o = Normalize.rackOrientation(orientationDeg) * Math.PI / 180;
+    return { az: Math.atan2(-Math.cos(o), Math.sin(o)), el: Math.PI / 9 };
+  }
+
+  /** Prépare le focus sur un équipement : surbrillance (focusEqId) + isolement de la baie s'il est en baie.
+      Retourne l'angle « en face » (front de la baie, ou du boîtier libre) à passer à `focus3DAt`. */
+  protected aimAtEquip(e: any, dcId: string): { az: number; el: number } {
+    this.focusEqId = e.id;
+    const inRack = (e.placement_mode === "rack" || e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id;
+    if (inRack) {
+      const rk: any = this.store.get("racks", e.rack_id);
+      this.selRackId = e.rack_id;
+      // isoler la baie : ne montrer que celle-ci dans la salle (les autres baies sont masquées)
+      this.hidden3dRacks = new Set(this.store.racksOfDc(dcId).map((r: any) => r.id)); this.hidden3dRacks.delete(e.rack_id);
+      return this.frontAzimuth(rk ? rk.orientation : 0);
+    }
+    this.selRackId = null;
+    return this.frontAzimuth(e.dc_orientation);
   }
 
   /** Action du bouton « Retour » (contrôles 3D) : rouvre la modale / revient à l'onglet d'origine. null = masqué. */
@@ -901,8 +928,11 @@ export class DcInteract extends DcPanels {
     const e: any = this.store.get("equipments", eqId); if (!e) return;
     const dcId = this.store.equipmentDcId(eqId);
     if (!dcId) { Notify.toast("Équipement non placé dans une salle", "err"); return; }
-    this.focusEqId = eqId; this.selRackId = e.rack_id || null;
-    this.focus3DAt(dcId, this.equipCenter(e, dcId) || { x: 0, y: 0, z: 0 }, 1600);
+    const face = this.aimAtEquip(e, dcId);
+    // en baie : emprise = hauteur de la baie isolée (on la voit entière) ; sinon ~1,6 m autour du boîtier.
+    const rk: any = (this.selRackId) ? this.store.get("racks", this.selRackId) : null;
+    const extent = rk ? Math.max(RackGeometry.physHeight(rk), 1600) : 1600;
+    this.focus3DAt(dcId, this.equipCenter(e, dcId) || { x: 0, y: 0, z: 0 }, extent, face);
   }
 
   locateRack(rackId: string): void {
@@ -911,7 +941,7 @@ export class DcInteract extends DcPanels {
     if (!dcId) { Notify.toast("Baie non placée dans une salle", "err"); return; }
     this.selRackId = rackId; this.focusEqId = null;
     const H = RackGeometry.physHeight(rk);
-    this.focus3DAt(dcId, { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: H / 2 }, H);
+    this.focus3DAt(dcId, { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: H / 2 }, H, this.frontAzimuth(rk.orientation));
   }
 
   locateCable(cableId: string): void {
@@ -930,8 +960,10 @@ export class DcInteract extends DcPanels {
     if (!dcId) { Notify.toast("Port : équipement non placé dans une salle", "err"); return; }
     const pt = this.resolver.resolvePort3D(portId, dcId);
     if (!pt) { Notify.toast("Port introuvable en 3D (façade non posée ?)", "err"); return; }
-    this.focusEqId = p.equipment_id; this.selRackId = null;
-    this.focus3DAt(dcId, { x: pt.x, y: pt.y, z: pt.z }, 700);
+    const e: any = this.store.get("equipments", p.equipment_id);
+    // surbrillance de l'équipement + isolement de sa baie + orientation « en face » ; cadrage serré sur le port.
+    const face = e ? this.aimAtEquip(e, dcId) : null;
+    this.focus3DAt(dcId, { x: pt.x, y: pt.y, z: pt.z }, 700, face);
   }
 
 }

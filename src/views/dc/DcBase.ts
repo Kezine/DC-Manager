@@ -93,7 +93,7 @@ export class DcBase {
   webglPerspective = false;                      // projection du moteur WebGL : false = ortho · true = perspective
   cablesOnTop = true;                            // WebGL : câbles dessinés au-dessus des équipements/baies (défaut activé)
   protected _three: any = null;                  // instance DcThreeScene (chargée à la demande)
-  protected _focusTarget: { p: Vec3; extent: number } | null = null;   // cible « Localiser » à pousser au moteur après (re)rendu
+  protected _focusTarget: { p: Vec3; extent: number; face: { az: number; el: number } | null } | null = null;   // cible « Localiser » à pousser au moteur après (re)rendu
   protected _returnAction: (() => void) | null = null;   // action du bouton « Retour » (rouvrir la modale / revenir à l'onglet d'origine)
   protected _webglHost: HTMLElement | null = null;
   protected _webglRev: number | null = null;     // révision du store au dernier (re)build WebGL → éviter un build complet au simple retour de vue

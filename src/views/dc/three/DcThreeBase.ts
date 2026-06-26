@@ -126,7 +126,8 @@ export class DcThreeBase {
   protected _pivot: THREE.Sprite | null = null;   // marqueur du centre de rotation (sprite billboard, taille écran constante)
   // FOCUS « Localiser » : cible caméra demandée par la vue (centre + emprise). Appliquée juste avant le rendu,
   // donc APRÈS le cadrage par défaut d'un éventuel (re)build → le focus prime. En attente tant que la scène n'est pas prête.
-  protected pendingFocus: { p: { x: number; y: number; z: number }; extent: number } | null = null;
+  protected pendingFocus: { p: { x: number; y: number; z: number }; extent: number; face: { az: number; el: number } | null } | null = null;
+  protected _focusObjs: THREE.Object3D[] = [];   // meshes de l'équipement « localisé » sous surbrillance persistante
 
   // glisser (avec détection clic-vs-glisser pour le picking) — `slotsel` = sélection multiple d'emplacements U libres
   protected drag: { mode: "orbit" | "pan" | "slotsel"; x: number; y: number; downX: number; downY: number; btn: number; moved: boolean } | null = null;
