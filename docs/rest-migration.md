@@ -122,9 +122,15 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
   - ⏳ Backend : implémenter les endpoints `/images` (cf. §4). Caveat : l'undo
     image en REST rejoue des PUT/DELETE (OK mono-utilisateur ; à revoir en P3
     multi-client).
-- **P3 — Concurrence** : ETag/version + conflits UX ; canal live (SSE/WS) ;
-  politique undo (désactivé en API au départ).
-- **P4 — Multi-documents** : décision produit ; éventuelle ressource `/documents`.
+- **P3 — Concurrence** *(fait, base)*
+  - ✅ Révision de document (`rev`) ; entête `X-Doc-Rev` (rev en lecture, rev+1 en
+    écriture) suivie côté client (`RestAdapter.docRev`).
+  - ✅ Canal **SSE** `/documents/:docId/events` : à chaque écriture, les AUTRES
+    clients reçoivent `{ rev }` et **rechargent** (le client ignore sa propre rev).
+    Dernière-écriture-gagne + convergence par reload.
+  - ✅ Undo/redo **désactivés en mode API** (boutons + raccourcis).
+  - ⏳ À durcir : rejet 409 (optimistic-lock strict) + UX de conflit ; undo serveur.
+- **P4 — Multi-documents** : ✅ fait (registre `/documents` + un SQLite par document).
 
 ## 6. État au démarrage du chantier (constat d'analyse)
 

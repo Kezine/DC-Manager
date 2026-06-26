@@ -535,6 +535,27 @@ async function boot(): Promise<void> {
 
   /* ---- MODE API : documents serveur (workspaces) ---- */
   /** Ouvre un document serveur : scope l'adapter + le backend d'images, recharge données & images. */
+  let restEvents: EventSource | null = null;   // flux SSE du document courant (concurrence multi-client)
+  let restReloadTO: any = 0;
+  /** Recharge le document courant depuis le serveur (suite à un changement externe signalé par SSE). */
+  async function restReloadDocument(): Promise<void> {
+    if (!restDocId) return;
+    flog("reload document (changement externe)");
+    await store.init(); await imageStore.reloadFromBackend();
+    session.markLoaded(store.histIndex());
+    shell.refreshActive(); refreshChrome();
+    Notify.toast("Document mis à jour (modifié ailleurs)");
+  }
+  /** Abonnement SSE : recharge si une révision PLUS RÉCENTE que la nôtre arrive (changement d'un autre client). */
+  function restSubscribeLive(): void {
+    if (restEvents) { restEvents.close(); restEvents = null; }
+    const url = (adapter as RestAdapter).eventsUrl; if (!url || typeof EventSource === "undefined") return;
+    try {
+      const es = new EventSource(url, { withCredentials: true }); restEvents = es;
+      es.onmessage = (e) => { try { const d = JSON.parse(e.data); if (d && typeof d.rev === "number" && d.rev > (adapter as RestAdapter).docRev) { clearTimeout(restReloadTO); restReloadTO = setTimeout(() => void restReloadDocument(), 250); } } catch (_) { /* ignore */ } };
+      es.onerror = () => { /* reconnexion auto du navigateur (champ retry) */ };
+    } catch (e) { flog("SSE indisponible", e); }
+  }
   async function restOpenDocument(docId: string, name?: string): Promise<void> {
     const ra = adapter as RestAdapter;
     ra.setDocument(docId);
@@ -547,6 +568,7 @@ async function boot(): Promise<void> {
     currentName = name || store.meta.docName || "Document";
     session.setFile(true); session.markLoaded(store.histIndex());
     shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
+    restSubscribeLive();
     Notify.toast("Document « " + currentName + " » ouvert");
   }
   /** Crée un nouveau document serveur (catalogues semés) puis l'ouvre. */
@@ -562,6 +584,7 @@ async function boot(): Promise<void> {
     resetUndoTimeline();
     currentName = d.name; session.setFile(true); session.markLoaded(store.histIndex());
     shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
+    restSubscribeLive();
     Notify.toast("Document « " + d.name + " » créé");
   }
   /** Sélecteur de documents (mode API) : liste serveur, ouverture / création / suppression. */
@@ -909,7 +932,8 @@ async function boot(): Promise<void> {
       file: currentName || (store.meta.docName ? docFileName() : "— en mémoire —"),
       release: APP_RELEASE, source: prefs.dataSource === "api" ? "API" : adapter.label, entities: store.totalCount(), lastSave: "—",
     });
-    shell.setUndoRedo(store.canUndo() || imageStore.canUndo(), redoOrder.length > 0 && (store.canRedo() || imageStore.canRedo()));
+    // mode API : pas d'undo client (le serveur fait autorité ; écritures immédiates) → boutons désactivés.
+    shell.setUndoRedo(!REST_MODE && (store.canUndo() || imageStore.canUndo()), !REST_MODE && redoOrder.length > 0 && (store.canRedo() || imageStore.canRedo()));
     shell.setSaveState(session.state());
   };
   onTimelineChange = () => refreshChrome();   // noteUndoable/resetUndoTimeline rafraîchissent les boutons undo/redo
@@ -951,6 +975,7 @@ async function boot(): Promise<void> {
   // raccourcis clavier UNDO / REDO (Ctrl/Cmd+Z · Ctrl/Cmd+Shift+Z ou Ctrl+Y). Ignorés pendant la saisie dans un
   // champ (undo natif du texte) et sous une modale/dialogue (qui gèrent leurs propres touches).
   document.addEventListener("keydown", (e) => {
+    if (REST_MODE) return;   // pas d'undo client en mode API (le serveur fait autorité)
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     const k = e.key.toLowerCase(); if (k !== "z" && k !== "y") return;
     const t = e.target as HTMLElement | null;

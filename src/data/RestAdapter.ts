@@ -23,6 +23,10 @@ export class RestAdapter extends DataAdapter {
   dataBase: string;                      // base des données du document courant (= apiRoot tant qu'aucun doc)
   headers: Record<string, string>;
   docId: string | null = null;
+  docRev = 0;                            // révision connue du document (synchronisée via l'entête X-Doc-Rev)
+
+  /** URL du flux SSE du document courant (ou "" si aucun document). */
+  get eventsUrl(): string { return this.docId ? (this.apiRoot + "/documents/" + encodeURIComponent(this.docId) + "/events") : ""; }
 
   constructor({ baseUrl = "/api", headers = {} }: RestOptions = {}) {
     super();
@@ -45,6 +49,7 @@ export class RestAdapter extends DataAdapter {
       credentials: "include",   // SSO : on transmet les cookies de session (l'app NE gère PAS l'auth — le SSO valide)
       body: body === undefined ? undefined : JSON.stringify(body),
     });
+    const rev = res.headers.get("X-Doc-Rev"); if (rev != null && rev !== "") this.docRev = Number(rev);   // synchronise la révision connue
     if (res.status === 404 && allow404) return null;
     if (!res.ok) throw new Error("HTTP " + res.status + " sur " + method + " " + path);
     if (res.status === 204) return null;
