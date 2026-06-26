@@ -60,14 +60,16 @@ export class RestAdapter extends DataAdapter {
   async renameDocument(id: string, name: string): Promise<DocMeta | null> { return this._root("PUT", "/documents/" + encodeURIComponent(id), { name }, { allow404: true }); }
   async deleteDocument(id: string): Promise<void> { await this._root("DELETE", "/documents/" + encodeURIComponent(id)); }
 
-  /* Boot : hydratation par collection (en parallèle). */
+  /* Boot : hydratation par collection (en parallèle). SANS document scopé (au boot, avant le choix d'un document),
+     renvoie un snapshot VIDE — le vrai chargement suit `setDocument()` (cf. restBootstrap). */
   async load(): Promise<Snapshot> {
+    if (!this.docId) return { meta: {} };
     const snap: Snapshot = { meta: {} };
     await Promise.all(COLLECTIONS.map(async (c) => { snap[c] = (await this._send("GET", "/" + c)) || []; }));
     try { snap.meta = (await this._send("GET", "/meta")) || {}; } catch (_) { snap.meta = {}; }
     return snap;
   }
-  async loadMeta(): Promise<Record<string, any>> { return (await this._send("GET", "/meta")) || {}; }
+  async loadMeta(): Promise<Record<string, any>> { return this.docId ? ((await this._send("GET", "/meta")) || {}) : {}; }
 
   /* ---- lectures granulaires ---- */
   async list(collection: string, { page = 1, pageSize = PAGE_SIZE_DEFAULT, query = "", where = null }: ListOptions = {}): Promise<ListResult> {
