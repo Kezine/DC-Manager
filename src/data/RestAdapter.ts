@@ -34,6 +34,7 @@ export class RestAdapter extends DataAdapter {
   private async _send(method: string, path: string, body?: any, { allow404 = false }: { allow404?: boolean } = {}): Promise<any> {
     const res = await fetch(this.baseUrl + path, {
       method, headers: this.headers,
+      credentials: "include",   // SSO : on transmet les cookies de session (l'app NE gère PAS l'auth — le SSO valide)
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (res.status === 404 && allow404) return null;

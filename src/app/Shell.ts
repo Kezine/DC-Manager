@@ -81,6 +81,8 @@ export class Shell {
   private dataSourceSel!: HTMLSelectElement;
   private fileAccessSel!: HTMLSelectElement;
   private debugLogChk!: HTMLInputElement;
+  private fileActionsEl!: HTMLElement;            // boutons fichier de la topbar (masqués en mode API)
+  private fileOnlySections: HTMLElement[] = [];   // sections de réglages propres au mode fichier (auto-save, accès fichiers)
   private autosaveChk!: HTMLInputElement;
   private autosaveIntervalSel!: HTMLSelectElement;
   private autosaveStatusEl!: HTMLElement;
@@ -121,11 +123,14 @@ export class Shell {
       const b = document.createElement("button"); b.type = "button"; b.className = "icon-btn"; b.title = title;
       b.appendChild(svgIcon(paths)); if (onClick) b.onclick = onClick; return b;
     };
-    actions.appendChild(iconBtn("Nouveau document (Ctrl+N)", '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>', () => this.host.onNew?.()));
-    actions.appendChild(iconBtn("Ouvrir un fichier (Ctrl+O)", '<path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', () => this.host.onOpen?.()));
+    // actions FICHIER (masquées en mode API : le serveur fait autorité, la sauvegarde est continue)
+    this.fileActionsEl = document.createElement("span"); this.fileActionsEl.style.display = "contents";
+    this.fileActionsEl.appendChild(iconBtn("Nouveau document (Ctrl+N)", '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>', () => this.host.onNew?.()));
+    this.fileActionsEl.appendChild(iconBtn("Ouvrir un fichier (Ctrl+O)", '<path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', () => this.host.onOpen?.()));
     this.saveBtn = iconBtn("Enregistrer (Ctrl+S)", '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>', () => this.host.onSave?.());
-    actions.appendChild(this.saveBtn);
-    actions.appendChild(iconBtn("Enregistrer une copie sous… (Ctrl+Shift+S)", '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><circle cx="18" cy="18" r="3" stroke-dasharray="2 2"/>', () => this.host.onSaveAs?.()));
+    this.fileActionsEl.appendChild(this.saveBtn);
+    this.fileActionsEl.appendChild(iconBtn("Enregistrer une copie sous… (Ctrl+Shift+S)", '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><circle cx="18" cy="18" r="3" stroke-dasharray="2 2"/>', () => this.host.onSaveAs?.()));
+    actions.appendChild(this.fileActionsEl);
     this.undoBtn = iconBtn("Annuler (Ctrl+Z)", '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-5"/>', () => this.host.onUndo?.()); this.undoBtn.disabled = true;
     this.redoBtn = iconBtn("Rétablir (Ctrl+Maj+Z)", '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h5"/>', () => this.host.onRedo?.()); this.redoBtn.disabled = true;
     actions.append(this.undoBtn, this.redoBtn);
@@ -196,6 +201,7 @@ export class Shell {
     this.autosaveIntervalSel.onchange = () => this.host.onAutosaveInterval?.(parseInt(this.autosaveIntervalSel.value, 10));
     freqRow.append(freqLbl, this.autosaveIntervalSel); as.appendChild(freqRow);
     this.autosaveStatusEl = document.createElement("div"); this.autosaveStatusEl.className = "settings-status-line"; as.appendChild(this.autosaveStatusEl);
+    this.fileOnlySections.push(fa, as);   // sections propres au mode fichier → masquées en mode API
 
     // -- Apparence --
     const app = section("Apparence");
@@ -380,6 +386,12 @@ export class Shell {
   setDataSource(value: string): void { this.dataSourceSel.value = value; }
   setFileAccessMode(value: string): void { this.fileAccessSel.value = value; }
   setDebugLog(on: boolean): void { this.debugLogChk.checked = on; }
+  /** Mode API : masque les contrôles propres au mode fichier (actions topbar + réglages auto-save/accès fichiers). */
+  setRestMode(on: boolean): void {
+    if (this.fileActionsEl) this.fileActionsEl.style.display = on ? "none" : "contents";
+    this.fileOnlySections.forEach((s) => { if (s) s.style.display = on ? "none" : ""; });
+    if (on) this.dataSourceSel.value = "api";
+  }
   /** Reflète l'état auto-save dans le popover (case + fréquence). */
   setAutosave(on: boolean, interval: number): void { this.autosaveChk.checked = on; this.autosaveIntervalSel.value = String(interval); }
   setAutosaveStatus(html: string): void { this.autosaveStatusEl.innerHTML = html; }

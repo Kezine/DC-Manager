@@ -6,8 +6,9 @@
    verrou d'ouverture exclusive multi-onglets (`TabChannel` sur BroadcastChannel). */
 import "../styles/netmap.css";
 import { EntityRegistry } from "../models";
-import { BrowserStorageAdapter } from "../data";
+import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
+import { readRuntimeConfig } from "./RuntimeConfig";
 import { GraphView, ListView, ListConfigs, Forms, DatacenterView } from "../views";
 import { ImageStore } from "../data";
 import type { ListOptions, FormHost } from "../views";
@@ -33,7 +34,13 @@ let onTimelineChange: () => void = () => { /* posé au boot → refreshChrome */
 function noteUndoable(kind: string): void { undoOrder.push(kind); if (undoOrder.length > 400) undoOrder.shift(); redoOrder.length = 0; try { onTimelineChange(); } catch (_) { /* noop */ } }
 function resetUndoTimeline(): void { undoOrder.length = 0; redoOrder.length = 0; try { onTimelineChange(); } catch (_) { /* noop */ } }
 
-const adapter = new BrowserStorageAdapter({ persistent: false, onUndoable: noteUndoable });
+// MODE D'EXÉCUTION : injecté par le backend (config) ou fichier par défaut (cf. docs/rest-migration.md).
+const RUNTIME = readRuntimeConfig();
+const REST_MODE = RUNTIME.mode === "api";
+// API même origine, cookies SSO transmis (l'app NE gère PAS l'auth — le SSO valide).
+const adapter = REST_MODE
+  ? new RestAdapter({ baseUrl: RUNTIME.apiBaseUrl })
+  : new BrowserStorageAdapter({ persistent: false, onUndoable: noteUndoable });
 const store = new Store(adapter);
 const prefs = new Prefs();
 const W = window as any;
@@ -58,7 +65,9 @@ function downloadJson(filename: string, content: string): void {
 
 async function boot(): Promise<void> {
   await store.init();
-  if (!store.restored) await store.newDocument();
+  // En mode API, le SERVEUR fait autorité : on N'ENSEMENCE PAS (un newDocument pousserait un /snapshot
+  // qui écraserait la base). En mode fichier, on sème le document par défaut si rien n'a été restauré.
+  if (!store.restored && !REST_MODE) await store.newDocument();
   applyTheme(prefs.theme);
 
   const root = document.getElementById("app");
@@ -74,7 +83,7 @@ async function boot(): Promise<void> {
   let autosaveTimer: any = null;
 
   const tabChannel = new TabChannel({
-    enabled: HAS_FS_API,
+    enabled: HAS_FS_API && !REST_MODE,   // verrou inter-onglets = concept FICHIER ; en mode API le serveur arbitre (cf. P3)
     onConflict: () => Notify.toast("Ce fichier est aussi ouvert dans un autre onglet.", "err"),
   });
   const handleStore = new HandleStore();
@@ -788,9 +797,10 @@ async function boot(): Promise<void> {
   });
 
   shell.build();
-  shell.setDataSource(prefs.dataSource);
+  shell.setDataSource(REST_MODE ? "api" : prefs.dataSource);
   shell.setFileAccessMode(prefs.fileAccessMode);
   shell.setDebugLog(prefs.debugLog); Log.setEnabled(prefs.debugLog);
+  shell.setRestMode(REST_MODE);   // mode API : masque les contrôles fichier (cf. docs/rest-migration.md)
 
   // ---- état save-state ----
   // ---- barre de statut / undo-redo (cohérence avec l'état du store) ----
@@ -860,17 +870,20 @@ async function boot(): Promise<void> {
   shell.switchView("equipements");
   booted = true;
 
-  // ÉCRAN D'ACCUEIL : au (re)chargement, le handle FS est perdu → on force une ré-interaction
-  // pour le raccrocher (auto-save). « Rouvrir » si un dernier fichier est mémorisé ; « Continuer »
-  // si une session est restaurée (le document reste utilisable en mémoire).
-  let reopenName: string | null = null;
-  if (HAS_FS_API) {
-    try {
-      if (dirMode()) { const d = await handleStore.getDir(); if (d && d.handle && d.name) reopenName = d.name; }
-      if (!reopenName) { lastRec = await handleStore.getLast(); reopenName = lastRec ? (lastRec.name || "fichier") : null; }
-    } catch (_) { lastRec = null; }
+  // ÉCRAN D'ACCUEIL (mode FICHIER uniquement) : au (re)chargement le handle FS est perdu → on force une
+  // ré-interaction pour le raccrocher. En mode API, les données viennent du serveur au boot → pas d'accueil.
+  if (REST_MODE) {
+    shell.hideWelcome();
+  } else {
+    let reopenName: string | null = null;
+    if (HAS_FS_API) {
+      try {
+        if (dirMode()) { const d = await handleStore.getDir(); if (d && d.handle && d.name) reopenName = d.name; }
+        if (!reopenName) { lastRec = await handleStore.getLast(); reopenName = lastRec ? (lastRec.name || "fichier") : null; }
+      } catch (_) { lastRec = null; }
+    }
+    shell.showWelcome({ reopenName, mode: prefs.fileAccessMode, fsApi: HAS_FS_API });
   }
-  shell.showWelcome({ reopenName, mode: prefs.fileAccessMode, fsApi: HAS_FS_API });
 
   (window as any).__NETMAP__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
 }

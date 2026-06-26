@@ -1,0 +1,22 @@
+/* =============================================================================
+   Configuration d'EXÉCUTION injectée par l'hôte (le backend, quand il sert l'app).
+   Permet de fonctionner SANS configuration utilisateur : le backend pose
+   `window.__NETMAP_CONFIG__ = { mode: "api", apiBaseUrl: "/api" }` dans le HTML.
+   Absente → mode FICHIER (build statique autonome, ouverture locale).
+   Voir docs/rest-migration.md.
+   ============================================================================= */
+export type AppMode = "local" | "api";
+
+export interface RuntimeConfig {
+  mode: AppMode;          // "local" = fichier (File System Access) · "api" = backend REST
+  apiBaseUrl: string;     // base des endpoints REST (même origine par défaut)
+}
+
+/** Lit la config injectée (best-effort) ; défaut = mode fichier, API même origine. */
+export function readRuntimeConfig(): RuntimeConfig {
+  let c: any = {};
+  try { c = (window as any).__NETMAP_CONFIG__ || {}; } catch (_) { c = {}; }
+  const mode: AppMode = (c.mode === "api") ? "api" : "local";
+  const apiBaseUrl = (typeof c.apiBaseUrl === "string" && c.apiBaseUrl.trim()) ? c.apiBaseUrl.trim() : "/api";
+  return { mode, apiBaseUrl };
+}
