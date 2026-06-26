@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import { type SqliteCtor } from "./db.js";
 import { DocumentStore } from "./documents.js";
 import { Auth } from "./auth.js";
+import { LiveBus } from "./live.js";
 import { Server } from "./server.js";
 import { Logger } from "./logger.js";
 
@@ -23,4 +24,5 @@ const DEV_RIGHT = process.env.DEV_RIGHT || null;                  // dev : SUPER
 const log = Logger.fromEnv();
 const auth = new Auth(log.child("auth"), { ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH, devRight: DEV_RIGHT });
 const docs = new DocumentStore(DOCS_DIR, Database as unknown as SqliteCtor, log.child("docs"));
-new Server({ docs, auth, clientDir: CLIENT_DIR, apiBase: API_BASE, log }).listen(PORT);
+const live = new LiveBus(log.child("live"));
+new Server({ docs, auth, live, clientDir: CLIENT_DIR, apiBase: API_BASE, log }).listen(PORT);

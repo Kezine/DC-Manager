@@ -4,6 +4,7 @@ import { Schema } from "./constants.js";
 import { type Repository, type Rec, type ListOpts } from "./db.js";
 import { DocumentStore } from "./documents.js";
 import { Auth } from "./auth.js";
+import { LiveBus } from "./live.js";
 
 /** Requête dont le Repository du document a été résolu par le middleware `resolveRepo`. */
 type RepoRequest = Request & { repo?: Repository };
@@ -12,7 +13,7 @@ type RepoRequest = Request & { repo?: Repository };
 export class Api {
   private readonly upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
 
-  constructor(private readonly docs: DocumentStore, private readonly auth: Auth) {}
+  constructor(private readonly docs: DocumentStore, private readonly auth: Auth, private readonly live: LiveBus) {}
 
   router(): Router {
     const r = express.Router();
@@ -28,6 +29,7 @@ export class Api {
     // -- données SCOPÉES par document (/documents/:docId/...) --
     const data = express.Router({ mergeParams: true });
     data.use(this.resolveRepo);
+    data.get("/events", this.events);      // canal live (SSE) — notifie les changements du document
     data.get("/meta", this.getMeta);
     data.put("/meta", this.putMeta);
     data.post("/transact", this.transact);
@@ -81,14 +83,31 @@ export class Api {
     if (this.docs.delete(req.params.docId)) res.status(204).end(); else res.status(404).json({ error: "document inconnu" });
   };
 
-  /** Résout le Repository du document (404 si inconnu) ; toute écriture met à jour son updated_date. */
+  /** Résout le Repository du document (404 si inconnu). En écriture : incrémente la révision (entête X-Doc-Rev)
+      et publie l'événement live aux autres clients à la fin de la requête (si succès). En lecture : expose la rev. */
   private resolveRepo: RequestHandler = (req, res, next) => {
     const id = (req.params as any).docId;
     const repo = this.docs.repo(id);
     if (!repo) { res.status(404).json({ error: "document inconnu" }); return; }
     (req as RepoRequest).repo = repo;
-    if (req.method !== "GET") this.docs.touch(id);
+    if (req.method === "GET") {
+      res.setHeader("X-Doc-Rev", String(this.docs.getRev(id)));
+    } else {
+      const rev = this.docs.markChanged(id);
+      res.setHeader("X-Doc-Rev", String(rev));
+      res.on("finish", () => { if (res.statusCode < 300) this.live.publish(id, { rev }); });
+    }
     next();
+  };
+
+  /** SSE : flux d'événements du document (un message `{ rev }` à chaque écriture par un autre client). */
+  private events: RequestHandler = (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    (res as any).flushHeaders?.();
+    res.write("retry: 5000\n\n");
+    this.live.subscribe(req.params.docId, res);
   };
 
   /* -- meta -- */
