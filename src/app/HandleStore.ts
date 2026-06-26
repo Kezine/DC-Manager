@@ -11,6 +11,7 @@ const DB_NAME = "netmap-fs";
 const STORE = "handles";
 const LAST_KEY = "lastFile";
 const FACES_KEY = "facesFile";   // handle du fichier compagnon d'images (.nmfb) du dernier document
+const DIR_KEY = "lastDir";       // handle du DOSSIER (mode « accès dossier ») + nom du .json courant à l'intérieur
 
 export interface HandleRec { handle: any; name: string; }
 
@@ -85,6 +86,45 @@ export class HandleStore {
       const db = await this.open();
       await new Promise<void>((res, rej) => {
         const tx = db.transaction(STORE, "readwrite"); tx.objectStore(STORE).put({ handle, name: name || handle.name || "" }, FACES_KEY);
+        tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+      });
+      db.close();
+    } catch (_) { /* noop */ }
+  }
+
+  /** Dernier DOSSIER mémorisé (mode « accès dossier ») { handle, name } — `name` = le .json ouvert dedans, ou null. */
+  async getDir(): Promise<HandleRec | null> {
+    try {
+      const db = await this.open();
+      if (!db.objectStoreNames.contains(STORE)) { db.close(); return null; }
+      const rec = await new Promise<any>((res, rej) => {
+        const tx = db.transaction(STORE, "readonly"); const r = tx.objectStore(STORE).get(DIR_KEY);
+        r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error);
+      });
+      db.close();
+      return rec && rec.handle ? rec : null;
+    } catch (_) { return null; }
+  }
+
+  /** Mémorise le dossier courant + le nom du .json ouvert dedans (best-effort). */
+  async putDir(handle: any, name: string): Promise<void> {
+    if (!handle) return;
+    try {
+      const db = await this.open();
+      await new Promise<void>((res, rej) => {
+        const tx = db.transaction(STORE, "readwrite"); tx.objectStore(STORE).put({ handle, name: name || "" }, DIR_KEY);
+        tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+      });
+      db.close();
+    } catch (_) { /* noop */ }
+  }
+
+  /** Oublie le dossier mémorisé (ex. .json introuvable dedans). */
+  async clearDir(): Promise<void> {
+    try {
+      const db = await this.open();
+      await new Promise<void>((res, rej) => {
+        const tx = db.transaction(STORE, "readwrite"); tx.objectStore(STORE).delete(DIR_KEY);
         tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
       });
       db.close();

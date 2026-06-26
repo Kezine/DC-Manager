@@ -66,6 +66,7 @@ async function boot(): Promise<void> {
   // ---- état FICHIER / session ----
   let currentHandle: any = null;        // FileSystemFileHandle lié (FS API) — null = download/mémoire
   let currentFacesHandle: any = null;   // handle du fichier compagnon d'images (.nmfb) du document courant
+  let currentDirHandle: any = null;     // mode « accès dossier » : handle du DOSSIER courant (couvre .json + .nmfb)
   let currentName = "";                 // nom du fichier lié
   const session = new SaveState();      // suivi dirty/save (révision modèle vs dernière sauvegarde + meta/images)
   let booted = false;                   // garde : ne suit pas la révision pendant le chargement initial
@@ -79,6 +80,9 @@ async function boot(): Promise<void> {
   let lastRec: { handle: any; name: string } | null = null;   // dernier fichier mémorisé (réouverture)
   const ensureFileId = (): string => { if (!store.meta.fileId) { store.meta.fileId = Id.uid(); store.persistMeta(); } return store.meta.fileId; };
   const rememberHandle = (handle: any, name: string) => { if (!handle) return; lastRec = { handle, name: name || handle.name || "" }; void handleStore.putLast(handle, lastRec.name); };
+  /** Mode « accès dossier » actif (réglage + FS API) : un seul grant de dossier couvre le .json et son compagnon .nmfb. */
+  const dirMode = (): boolean => prefs.fileAccessMode === "directory" && HAS_FS_API;
+  const rememberDir = (dir: any, jsonName: string) => { currentDirHandle = dir; void handleStore.putDir(dir, jsonName); };
 
   const modal = new Modal();
   const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { refreshChrome(); } };   // mutation modèle déjà suivie par la révision (store.onChange)
@@ -184,7 +188,8 @@ async function boot(): Promise<void> {
     if (!docHasFaceImages() && !currentFacesHandle) return;   // rien à écrire
     ensureFacesKey();
     try {
-      if (!currentFacesHandle) currentFacesHandle = await W.showSaveFilePicker({ suggestedName: facesNameFor(jsonHandle ? jsonHandle.name : currentName), startIn: jsonHandle || undefined, types: FACES_TYPES });
+      if (dirMode() && currentDirHandle) currentFacesHandle = await currentDirHandle.getFileHandle(facesNameFor(jsonHandle ? jsonHandle.name : currentName), { create: true });   // dans le dossier, sans picker
+      else if (!currentFacesHandle) currentFacesHandle = await W.showSaveFilePicker({ suggestedName: facesNameFor(jsonHandle ? jsonHandle.name : currentName), startIn: jsonHandle || undefined, types: FACES_TYPES });
       await writeFacesToHandle(currentFacesHandle); rememberFacesHandle(currentFacesHandle);
       imageStore.setLoadedKey(store.meta.facesKey || null);
     } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non enregistrées : " + (e.message || e), "err"); }
@@ -215,6 +220,15 @@ async function boot(): Promise<void> {
     if (docKey && imageStore.lastLoadedKey === docKey && imageStore.count() > 0 && !stillMissing()) { shell.refreshActive(); return; }   // déjà à jour pour CE doc
     if (!docKey && !stillMissing()) { shell.refreshActive(); return; }     // legacy : refs déjà présentes (inline)
     if (!HAS_FS_API) { shell.refreshActive(); return; }
+    // MODE DOSSIER : le grant du dossier couvre déjà le compagnon → lecture directe, sans permission ni question.
+    if (dirMode() && currentDirHandle) {
+      try {
+        const fh = await currentDirHandle.getFileHandle(facesNameFor(jsonHandle ? jsonHandle.name : currentName));
+        if (await tryLoadCompanion(fh, false, docKey, stillMissing)) return;   // permission héritée du dossier → charge
+      } catch (_) { /* pas de compagnon .nmfb dans le dossier */ }
+      if (docKey && imageStore.lastLoadedKey && imageStore.lastLoadedKey !== docKey) { await imageStore.keepOnly(store.faceImageRefIds()); imageStore.setLoadedKey(null); }
+      currentFacesHandle = null; shell.refreshActive(); return;
+    }
     const rememberedMatches = docKey ? (imageStore.lastLoadedKey === docKey) : true;
     let remembered = rememberedMatches ? await handleStore.getFaces() : null;
     remembered = (remembered && remembered.handle) ? remembered : null;
@@ -243,7 +257,23 @@ async function boot(): Promise<void> {
     try { const [fh] = await W.showOpenFilePicker({ startIn: jsonHandle || undefined, types: FACES_TYPES }); await associateCompanion(fh); }
     catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
   }
+  /** Réouverture en MODE DOSSIER : re-demande l'accès au dossier (un seul geste) puis relit le .json mémorisé. */
+  async function reopenLastDir(dirRec: { handle: any; name: string }): Promise<void> {
+    try {
+      if (!(await ensureWritePermission(dirRec.handle))) { Notify.toast("Autorisation du dossier refusée.", "err"); return; }
+      const fh = await dirRec.handle.getFileHandle(dirRec.name);
+      currentDirHandle = dirRec.handle;   // avant loadFromText → le compagnon est relu via le dossier
+      await loadFromText(await (await fh.getFile()).text(), dirRec.name, fh);
+      rememberDir(dirRec.handle, dirRec.name);
+      Notify.toast("Rouvert → " + dirRec.name);
+    } catch (e: any) {
+      if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
+      else if (e && e.name === "NotFoundError") { await handleStore.clearDir(); shell.setReopen(null); Notify.toast("Document introuvable dans le dossier — déplacé ou supprimé.", "err"); }
+      else if (e && e.name !== "AbortError") Notify.toast("Erreur de réouverture : " + (e.message || e), "err");
+    }
+  }
   async function reopenLast(): Promise<void> {
+    if (dirMode()) { const d = await handleStore.getDir(); if (d && d.handle && d.name) { await reopenLastDir(d as any); return; } }   // dossier mémorisé → réouverture dossier
     let rec = lastRec; if (!rec) rec = await handleStore.getLast();
     if (!rec || !rec.handle) { Notify.toast("Aucun fichier récent à rouvrir.", "err"); shell.setReopen(null); return; }
     const handle = rec.handle;
@@ -285,8 +315,53 @@ async function boot(): Promise<void> {
       },
     });
   }
+  /** Sélection d'un .json parmi ceux trouvés dans un dossier (mode dossier). */
+  function chooseJsonInDir(names: string[]): Promise<string | null> {
+    return Dialog.custom({
+      title: "Choisir un document", cancelLabel: "Annuler",
+      build: (root: HTMLElement) => {
+        let chosen: string | null = null;
+        const confirmBtn = root.closest(".dialog-box")?.querySelector('[data-dlg="confirm"]') as HTMLElement | null;
+        if (confirmBtn) confirmBtn.style.display = "none";
+        const wrap = document.createElement("div"); wrap.className = "open-kind-choices";
+        names.forEach((n) => {
+          const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
+          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = "📄";
+          const tx = document.createElement("span"); tx.className = "ok-tx";
+          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = n; tx.appendChild(ti);
+          b.append(ic, tx); b.onclick = () => { chosen = n; confirmBtn?.click(); }; wrap.appendChild(b);
+        });
+        root.appendChild(wrap);
+        return { collect: () => chosen, validate: () => true };
+      },
+    });
+  }
+  /** Ouverture en MODE DOSSIER : un seul grant (lecture+écriture) couvre le .json choisi ET son compagnon .nmfb. */
+  async function doOpenDir(): Promise<void> {
+    let dir: any;
+    try { dir = await W.showDirectoryPicker({ mode: "readwrite" }); }
+    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non ouvert : " + (e.message || e), "err"); return; }
+    const names: string[] = [];
+    try { for await (const entry of dir.values()) { if (entry.kind === "file" && /\.json$/i.test(entry.name)) names.push(entry.name); } }
+    catch (_) { /* énumération impossible */ }
+    if (!names.length) { Notify.toast("Aucun fichier .json dans ce dossier.", "err"); return; }
+    names.sort((a, b) => a.localeCompare(b));
+    const name = (names.length === 1) ? names[0] : await chooseJsonInDir(names);
+    if (!name) return;
+    try {
+      const fh = await dir.getFileHandle(name);
+      currentDirHandle = dir;   // posé AVANT loadFromText → loadCompanionFacesOnOpen lit le .nmfb via le dossier
+      await loadFromText(await (await fh.getFile()).text(), name, fh);
+      rememberDir(dir, name);
+      Notify.toast("Fichier « " + name + " » ouvert");
+    } catch (e: any) {
+      if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
+      else if (e && e.name !== "AbortError") Notify.toast("Ouverture impossible : " + (e.message || e), "err");
+    }
+  }
   async function doOpen(): Promise<void> {
     if (!HAS_FS_API) { fileInput.click(); return; }
+    if (dirMode()) { await doOpenDir(); return; }
     if (currentHandle) {   // un document est ouvert → choisir document JSON ou compagnon d'images
       const kind = await chooseOpenKind();
       if (!kind) return;
@@ -309,9 +384,27 @@ async function boot(): Promise<void> {
     try { await writeToHandle(currentHandle); await saveCompanionFaces(currentHandle); refreshChrome(); Notify.toast("Document enregistré (" + currentName + ")"); }
     catch (e: any) { Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
   }
+  /** « Enregistrer sous » en MODE DOSSIER : choisit le dossier (s'il manque) + un nom, écrit .json et .nmfb dedans. */
+  async function doSaveAsDir(): Promise<void> {
+    let dir = currentDirHandle;
+    if (!dir) { try { dir = await W.showDirectoryPicker({ mode: "readwrite" }); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non choisi : " + (e.message || e), "err"); return; } }
+    const raw = await Dialog.prompt("Nom du fichier", docFileName()); if (!raw) return;
+    const name = /\.json$/i.test(raw) ? raw : raw + ".json";
+    try {
+      const h = await dir.getFileHandle(name, { create: true });
+      if (docHasFaceImages()) ensureFacesKey();
+      currentDirHandle = dir; currentHandle = h; currentName = h.name || name; currentFacesHandle = null; session.setFile(true);
+      await writeToHandle(h);
+      await saveCompanionFaces(h);
+      rememberDir(dir, name);
+      tabChannel.claim(store.meta.fileId || null);
+      applyAutosave(); refreshChrome(); Notify.toast("Enregistré sous « " + currentName + " »");
+    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
+  }
   async function doSaveAs(): Promise<void> {
     ensureFileId();
     if (!HAS_FS_API) { downloadJson(docFileName(), await snapshotWithImages()); Notify.toast("Copie téléchargée (" + docFileName() + ")"); return; }
+    if (dirMode()) { await doSaveAsDir(); return; }
     try {
       const h = await W.showSaveFilePicker({ suggestedName: docFileName(), types: JSON_TYPES });
       if (docHasFaceImages()) ensureFacesKey();   // clé d'appariement dans le .json
@@ -366,7 +459,7 @@ async function boot(): Promise<void> {
         if (!ok) return;
       }
       tabChannel.release(store.meta.fileId || null);
-      await store.newDocument(); await imageStore.clearAll(); resetUndoTimeline(); currentHandle = null; currentFacesHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
+      await store.newDocument(); await imageStore.clearAll(); resetUndoTimeline(); currentHandle = null; currentFacesHandle = null; currentDirHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
       applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast("Nouveau document");
     },
     onOpen: () => { doOpen(); },
@@ -384,6 +477,13 @@ async function boot(): Promise<void> {
     onDataSource: (value) => {
       if (value === "api") { Notify.toast("Source « API » pas encore disponible.", "err"); shell.setDataSource("local"); return; }
       prefs.dataSource = "local"; refreshChrome();
+    },
+    onFileAccessMode: (value) => {
+      if (value === "directory" && !HAS_FS_API) { Notify.toast("Mode dossier indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); shell.setFileAccessMode("file"); return; }
+      prefs.fileAccessMode = (value === "directory") ? "directory" : "file";
+      if (prefs.fileAccessMode === "file") currentDirHandle = null;   // repasse en mode fichier → on oublie le dossier courant
+      refreshChrome();
+      Notify.toast(prefs.fileAccessMode === "directory" ? "Mode dossier : une seule autorisation couvre le document et ses images." : "Mode fichier : autorisation par fichier.");
     },
     onAutosaveToggle: (on) => { setAutosave(on); },
     onAutosaveInterval: (sec) => { prefs.autosaveInterval = sec; applyAutosave(); },
@@ -609,6 +709,7 @@ async function boot(): Promise<void> {
 
   shell.build();
   shell.setDataSource(prefs.dataSource);
+  shell.setFileAccessMode(prefs.fileAccessMode);
 
   // ---- état save-state ----
   // ---- barre de statut / undo-redo (cohérence avec l'état du store) ----
@@ -681,8 +782,14 @@ async function boot(): Promise<void> {
   // ÉCRAN D'ACCUEIL : au (re)chargement, le handle FS est perdu → on force une ré-interaction
   // pour le raccrocher (auto-save). « Rouvrir » si un dernier fichier est mémorisé ; « Continuer »
   // si une session est restaurée (le document reste utilisable en mémoire).
-  if (HAS_FS_API) { try { lastRec = await handleStore.getLast(); } catch (_) { lastRec = null; } }
-  shell.showWelcome({ reopenName: lastRec ? (lastRec.name || "fichier") : null });
+  let reopenName: string | null = null;
+  if (HAS_FS_API) {
+    try {
+      if (dirMode()) { const d = await handleStore.getDir(); if (d && d.handle && d.name) reopenName = d.name; }
+      if (!reopenName) { lastRec = await handleStore.getLast(); reopenName = lastRec ? (lastRec.name || "fichier") : null; }
+    } catch (_) { lastRec = null; }
+  }
+  shell.showWelcome({ reopenName });
 
   (window as any).__NETMAP__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
 }

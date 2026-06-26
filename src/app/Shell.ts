@@ -32,6 +32,8 @@ export interface ShellHost {
   onRenameDoc?(name: string): void;
   /** Bascule de la source de données ("local" | "api"). */
   onDataSource?(value: string): void;
+  /** Bascule du mode d'accès FS ("file" | "directory"). */
+  onFileAccessMode?(value: string): void;
   /** Activation/désactivation de l'auto-save (Promise → état effectif appliqué). */
   onAutosaveToggle?(on: boolean): void;
   /** Changement de fréquence d'auto-save (secondes). */
@@ -71,6 +73,7 @@ export class Shell {
   private saveBtn!: HTMLButtonElement;
   private saveDot!: HTMLElement;
   private dataSourceSel!: HTMLSelectElement;
+  private fileAccessSel!: HTMLSelectElement;
   private autosaveChk!: HTMLInputElement;
   private autosaveIntervalSel!: HTMLSelectElement;
   private autosaveStatusEl!: HTMLElement;
@@ -155,6 +158,18 @@ export class Shell {
     this.dataSourceSel.onchange = () => this.host.onDataSource?.(this.dataSourceSel.value);
     srcRow.append(srcLbl, this.dataSourceSel); src.appendChild(srcRow);
     const srcNote = document.createElement("div"); srcNote.className = "settings-row-note"; srcNote.textContent = "Local : les données vivent dans le navigateur (session), liables à un fichier JSON sur disque. API : synchronisation serveur — pas encore disponible."; src.appendChild(srcNote);
+
+    // -- Accès aux fichiers (par fichier / par dossier) --
+    const fa = section("Accès aux fichiers");
+    const faRow = document.createElement("div"); faRow.className = "settings-row";
+    const faLbl = document.createElement("label"); faLbl.className = "settings-row-label"; faLbl.textContent = "Mode";
+    this.fileAccessSel = document.createElement("select"); this.fileAccessSel.className = "settings-row-select";
+    const oFile = document.createElement("option"); oFile.value = "file"; oFile.textContent = "Fichier";
+    const oDir = document.createElement("option"); oDir.value = "directory"; oDir.textContent = "Dossier";
+    this.fileAccessSel.append(oFile, oDir);
+    this.fileAccessSel.onchange = () => this.host.onFileAccessMode?.(this.fileAccessSel.value);
+    faRow.append(faLbl, this.fileAccessSel); fa.appendChild(faRow);
+    const faNote = document.createElement("div"); faNote.className = "settings-row-note"; faNote.textContent = "Fichier : on autorise chaque .json et son compagnon d'images .nmfb séparément. Dossier : on autorise un dossier UNE fois — le .json et son .nmfb y sont lus/écrits sans nouvelle demande."; fa.appendChild(faNote);
 
     // -- Auto-save (toggle + fréquence + état) --
     const as = section("Auto-save");
@@ -326,6 +341,7 @@ export class Shell {
     if (this.saveBtn) this.saveBtn.classList.toggle("has-unsaved", state === "dirty" || state === "dirty-on");
   }
   setDataSource(value: string): void { this.dataSourceSel.value = value; }
+  setFileAccessMode(value: string): void { this.fileAccessSel.value = value; }
   /** Reflète l'état auto-save dans le popover (case + fréquence). */
   setAutosave(on: boolean, interval: number): void { this.autosaveChk.checked = on; this.autosaveIntervalSel.value = String(interval); }
   setAutosaveStatus(html: string): void { this.autosaveStatusEl.innerHTML = html; }
