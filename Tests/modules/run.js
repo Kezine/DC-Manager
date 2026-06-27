@@ -1013,6 +1013,30 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(Validation.validateRecord("cables", new Cable({}).toJSON()).length, 0, "Cable() front satisfait la spec");
   }
 
+  console.log("\n• shared : intégrité référentielle (V2 — FK + conscience du lot)");
+  {
+    // résolveur simulé : seuls ces id « existent » (persistés).
+    const persisted = new Set(["ports p1", "networks n1"]);
+    const base = (coll, id) => persisted.has(coll + " " + id);
+    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "p1" }, base).length, 0, "ref : FK existante → 0 erreur");
+    const broken = Validation.validateRecord("cables", { status: "planifie", from_port_id: "pX" }, base);
+    ck.eq(broken.some((e) => e.path === "from_port_id" && e.code === "ref_missing"), true, "ref : FK introuvable → 'ref_missing'");
+    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: null }, base).length, 0, "ref : FK null → ignorée");
+    const arr = Validation.validateRecord("cables", { status: "planifie", network_ids: ["n1", "nX"] }, base);
+    ck.eq(arr.some((e) => e.path === "network_ids" && e.code === "ref_missing"), true, "ref : tableau de FK avec id absent → 'ref_missing'");
+    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "pX" }).length, 0, "ref : SANS résolveur → pas de contrôle référentiel (V1)");
+
+    // résolveur conscient du lot
+    const batch = { creates: [{ collection: "ports", record: { id: "pNew" } }], deletes: [{ collection: "networks", id: "n1" }] };
+    const batchResolver = Validation.buildBatchResolver(base, batch);
+    ck.eq(batchResolver("ports", "pNew"), true, "batch : entité créée dans le lot → existe");
+    ck.eq(batchResolver("networks", "n1"), false, "batch : entité supprimée dans le lot → n'existe plus");
+    ck.eq(batchResolver("ports", "p1"), true, "batch : entité persistée hors lot → existe (base)");
+    ck.eq(batchResolver("ports", "pX"), false, "batch : id inconnu → n'existe pas");
+    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "pNew" }, batchResolver).length, 0,
+      "batch : câble référençant un port créé DANS le lot → accepté (pas de faux rejet)");
+  }
+
   console.log("\n" + "-".repeat(48));
   console.log("Résultat : " + pass + " PASS, " + fail + " FAIL");
   if (fail) { console.log("Échecs :\n  - " + failures.join("\n  - ")); process.exit(1); }

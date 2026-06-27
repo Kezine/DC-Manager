@@ -6,7 +6,7 @@ import { DocumentStore } from "./documents.js";
 import { Auth, type SsoResult } from "./auth.js";
 import { LiveBus } from "./live.js";
 import type { DocumentChangeset } from "../../shared/DocumentChangeset.js";   // type PARTAGÉ front ⇄ back (source unique)
-import { normalizeAndValidate, type ValidationError } from "../../shared/DataValidation.js";   // normalisation + validation PARTAGÉES
+import { normalizeAndValidate, buildBatchResolver, type ValidationError, type EntityResolver } from "../../shared/DataValidation.js";   // normalisation + validation PARTAGÉES
 
 /** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`). */
 type RepoRequest = Request & { repo?: Repository; authUser?: SsoResult; docRev?: number };
@@ -187,11 +187,13 @@ export class Api {
   /* -- lot atomique / import -- */
   private transact: RequestHandler = (req, res) => {
     const body: any = req.body || {};
-    // Normalise + valide CHAQUE création/mise à jour du lot ; le moindre échec rejette TOUT le lot (atomicité).
+    // Résolveur d'intégrité CONSCIENT DU LOT : une FK peut viser une entité créée dans le même lot (ou supprimée).
+    const resolver = buildBatchResolver(this.repoResolver(req), body);
+    // Normalise + valide CHAQUE création/mise à jour ; le moindre échec rejette TOUT le lot (atomicité).
     const errors: ValidationError[] = [];
     const acceptEntry = (entry: any) => {
       if (!entry || !entry.collection || !entry.record) return entry;
-      const { record, errors: entryErrors } = normalizeAndValidate(entry.collection, entry.record);
+      const { record, errors: entryErrors } = normalizeAndValidate(entry.collection, entry.record, resolver);
       errors.push(...entryErrors);
       return { ...entry, record };
     };
@@ -243,21 +245,27 @@ export class Api {
   /** Normalise + valide un enregistrement avant écriture (autorité serveur). Renvoie le record NORMALISÉ à
       persister, ou `null` après avoir répondu `400 { errors }` — le handler doit alors s'arrêter. Collection
       sans spécification (V1 : non pilote) → record inchangé, aucune erreur. */
-  private accept(res: Response, collection: string, record: Record<string, any>): Record<string, any> | null {
-    const { record: normalized, errors } = normalizeAndValidate(collection, record);
+  /** Résolveur d'existence adossé au Repository du document (intégrité référentielle). */
+  private repoResolver(req: Request): EntityResolver {
+    const repo = this.repoOf(req);
+    return (collection, id) => repo.exists(collection, id);
+  }
+
+  private accept(res: Response, collection: string, record: Record<string, any>, resolver?: EntityResolver): Record<string, any> | null {
+    const { record: normalized, errors } = normalizeAndValidate(collection, record, resolver);
     if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return null; }
     return normalized;
   }
 
   private create: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    const record = this.accept(res, req.params.collection, req.body || {}); if (!record) return;
+    const record = this.accept(res, req.params.collection, req.body || {}, this.repoResolver(req)); if (!record) return;
     try { this.repoOf(req).upsert(req.params.collection, record, this.revOf(req)); res.status(201).json(record); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private update: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    const record = this.accept(res, req.params.collection, { ...(req.body || {}), id: req.params.id }); if (!record) return;
+    const record = this.accept(res, req.params.collection, { ...(req.body || {}), id: req.params.id }, this.repoResolver(req)); if (!record) return;
     try { this.repoOf(req).upsert(req.params.collection, record, this.revOf(req)); res.json(record); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };

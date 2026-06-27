@@ -54,9 +54,13 @@ export interface ValidationError {
   collection: string;
   id?: string;
   path: string;            // champ concerné
-  code: "required" | "type" | "enum" | "min";
+  code: "required" | "type" | "enum" | "min" | "ref_missing";
   message: string;         // message humain (français)
 }
+
+/** Résolveur d'existence d'entité (intégrité référentielle V2) : « un id existe-t-il dans cette collection ? ».
+    INJECTÉ pour garder `shared/` pur — l'UI l'adosse au `Store`, le serveur au `Repository`. */
+export type EntityResolver = (collection: string, id: string) => boolean;
 
 /* ---- spécifications des collections PILOTES (V1) ---- */
 export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
@@ -156,9 +160,10 @@ function matchesType(value: unknown, type: FieldType): boolean {
   }
 }
 
-/** Valide un enregistrement (supposé déjà normalisé) contre la spec de sa collection.
-    Renvoie la liste des erreurs (vide = valide). Sans spec pour la collection → aucune erreur. */
-export function validateRecord(collection: string, record: Record<string, any>): ValidationError[] {
+/** Valide un enregistrement (supposé déjà normalisé) contre la spec de sa collection. Renvoie la liste des
+    erreurs (vide = valide). Sans spec → aucune erreur. Si `resolver` est fourni, ajoute l'INTÉGRITÉ
+    RÉFÉRENTIELLE (les FK pointent vers des entités existantes — V2). */
+export function validateRecord(collection: string, record: Record<string, any>, resolver?: EntityResolver): ValidationError[] {
   const spec = COLLECTION_SPECS[collection];
   if (!spec) return [];
   const errors: ValidationError[] = [];
@@ -179,7 +184,7 @@ export function validateRecord(collection: string, record: Record<string, any>):
     }
     if (!matchesType(value, fieldSpec.type)) {
       fail(field, "type", `Le champ « ${field} » doit être de type ${fieldSpec.type}.`);
-      continue;   // mauvais type → enum/min non pertinents
+      continue;   // mauvais type → enum/min/ref non pertinents
     }
     if (fieldSpec.enum && !fieldSpec.enum.includes(value as string)) {
       fail(field, "enum", `Valeur « ${value} » invalide pour « ${field} » (attendu : ${fieldSpec.enum.join(", ")}).`);
@@ -187,12 +192,53 @@ export function validateRecord(collection: string, record: Record<string, any>):
     if (fieldSpec.min != null && typeof value === "number" && value < fieldSpec.min) {
       fail(field, "min", `Le champ « ${field} » doit être ≥ ${fieldSpec.min}.`);
     }
+    // intégrité référentielle (si résolveur) : la (ou les) FK doivent désigner une entité existante.
+    if (resolver && fieldSpec.ref) {
+      const referencedIds = fieldSpec.type === "string[]" ? (value as string[]) : [value as string];
+      for (const referencedId of referencedIds) {
+        if (typeof referencedId === "string" && referencedId && !resolver(fieldSpec.ref, referencedId)) {
+          fail(field, "ref_missing", `Référence « ${referencedId} » introuvable dans « ${fieldSpec.ref} ».`);
+        }
+      }
+    }
   }
   return errors;
 }
 
-/** Normalise PUIS valide — l'enchaînement appliqué au serveur avant écriture. */
-export function normalizeAndValidate(collection: string, record: Record<string, any>): { record: Record<string, any>; errors: ValidationError[] } {
+/** Normalise PUIS valide — l'enchaînement appliqué au serveur avant écriture. `resolver` (optionnel) active
+    l'intégrité référentielle. */
+export function normalizeAndValidate(collection: string, record: Record<string, any>, resolver?: EntityResolver): { record: Record<string, any>; errors: ValidationError[] } {
   const normalized = normalizeRecord(collection, record);
-  return { record: normalized, errors: validateRecord(collection, normalized) };
+  return { record: normalized, errors: validateRecord(collection, normalized, resolver) };
+}
+
+/* ---- intégrité référentielle dans un LOT (transaction) ---- */
+/** Forme minimale d'un lot atomique (mêmes champs que la transaction serveur). */
+export interface BatchOps {
+  creates?: Array<{ collection: string; record: { id?: string } }>;
+  updates?: Array<{ collection: string; record: { id?: string } }>;
+  deletes?: Array<{ collection: string; id: string }>;
+}
+
+const refKey = (collection: string, id: string): string => collection + " " + id;
+
+/** Construit un résolveur d'existence CONSCIENT DU LOT : une FK peut désigner une entité créée dans le MÊME
+    lot (pas encore persistée), ou ne plus exister car supprimée dans le lot. Sans cela, un `/transact` légitime
+    (créer un port ET le câble qui le référence) serait rejeté à tort. L'ordre d'application du lot étant
+    suppressions → mises à jour → créations, un upsert l'emporte sur une suppression du même id. */
+export function buildBatchResolver(base: EntityResolver, batch: BatchOps): EntityResolver {
+  const upsertedInBatch = new Set<string>();
+  const deletedInBatch = new Set<string>();
+  for (const entry of [...(batch.creates || []), ...(batch.updates || [])]) {
+    if (entry && entry.collection && entry.record && entry.record.id) upsertedInBatch.add(refKey(entry.collection, entry.record.id));
+  }
+  for (const entry of (batch.deletes || [])) {
+    if (entry && entry.collection && entry.id) deletedInBatch.add(refKey(entry.collection, entry.id));
+  }
+  return (collection: string, id: string): boolean => {
+    const key = refKey(collection, id);
+    if (upsertedInBatch.has(key)) return true;    // créé/màj dans le lot → existera (appliqué après les deletes)
+    if (deletedInBatch.has(key)) return false;    // supprimé dans le lot → n'existe plus
+    return base(collection, id);                  // sinon : état persisté
+  };
 }

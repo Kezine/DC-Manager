@@ -90,7 +90,7 @@ ValidationError = { collection, id?, path, code, message }
 | V | Contenu | État |
 |---|---|---|
 | **V1** | spec déclarative + normalisation + validation **intrinsèque** ; pilotes `equipments`, `cables`, `racks` ; serveur `400` + filet UI | ✅ |
-| **V2** | intégrité **référentielle** (FK) avec résolveur injecté **batch-aware** | ⏳ |
+| **V2** | intégrité **référentielle** (FK `ref`) avec résolveur injecté **batch-aware** (`buildBatchResolver`) ; serveur : `Repository.exists` + résolveur par requête, `/transact` conscient du lot | ✅ |
 | **V3** | **invariants** inter-champs + convergence des normaliseurs front | ⏳ |
 
 Pilotes V1 choisis pour leur richesse (types, enums, FK, tableaux) : ils exercent toutes
