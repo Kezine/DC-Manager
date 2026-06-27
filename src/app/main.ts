@@ -578,6 +578,11 @@ async function boot(): Promise<void> {
     const head = errors.slice(0, 3).map((e) => e.message).join(" · ");
     Notify.toast("Données refusées par le serveur : " + head + (errors.length > 3 ? " …" : ""), "err");
   };
+  // Validation PARTAGÉE côté client (Store) : SEUL garde-fou en mode fichier, retour immédiat en mode API.
+  store.onInvalid = (errors) => {
+    const head = errors.slice(0, 3).map((e) => e.message).join(" · ");
+    Notify.toast("Données invalides : " + head + (errors.length > 3 ? " …" : ""), "err");
+  };
   /** Planifie un rechargement débouncé en consommant les changesets SSE accumulés (fusionnés). */
   function flushPendingReload(): void {
     const changeset = pendingChangeset || fullChangeset();

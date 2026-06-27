@@ -1037,6 +1037,33 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
       "batch : câble référençant un port créé DANS le lot → accepté (pas de faux rejet)");
   }
 
+  console.log("\n• Store : garde de validation (mode fichier — seul garde-fou, pas de serveur)");
+  {
+    const s = await makeStore();
+    let captured = null;
+    s.onInvalid = (errs) => { captured = errs; };
+    // intrinsèque : équipement sans nom → bloqué + notifié
+    const bad = await s.create("equipments", { type: "switch" });
+    ck.eq(bad, null, "store.create équipement sans nom → bloqué (null)");
+    ck.eq(!!captured && captured.some((e) => e.path === "name" && e.code === "required"), true, "onInvalid notifié (name required)");
+    // valide → accepté, sans notification
+    captured = null;
+    const ok = await s.create("equipments", { name: "sw1" });
+    ck(!!ok && !!ok.id, "store.create équipement nommé → accepté");
+    ck.eq(captured, null, "écriture valide → onInvalid NON appelé");
+    // référentiel : câble vers un port inexistant → bloqué
+    const badRef = await s.create("cables", { status: "planifie", from_port_id: "PORT_INEXISTANT" });
+    ck.eq(badRef, null, "store.create câble → FK port inexistant → bloqué");
+    // update : patch normalisé (u_count '50' → 50)
+    const rack = await s.create("racks", { name: "R1" });
+    await s.update("racks", rack.id, { u_count: "50" });
+    ck.eq(s.get("racks", rack.id).u_count, 50, "store.update : patch normalisé ('50' → 50)");
+    // update invalide (u_count 0 < min) → bloqué, valeur inchangée
+    const before = s.get("racks", rack.id).u_count;
+    await s.update("racks", rack.id, { u_count: 0 });
+    ck.eq(s.get("racks", rack.id).u_count, before, "store.update u_count 0 → bloqué (valeur inchangée)");
+  }
+
   console.log("\n" + "-".repeat(48));
   console.log("Résultat : " + pass + " PASS, " + fail + " FAIL");
   if (fail) { console.log("Échecs :\n  - " + failures.join("\n  - ")); process.exit(1); }

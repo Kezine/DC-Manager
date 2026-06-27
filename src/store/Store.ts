@@ -13,6 +13,8 @@ import { Text } from "../core/Text";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, CABLE_STATUS_BROKEN, CABLE_STATUS_RANK, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT, LOCATIONS } from "../domain/constants";
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
 import { CASCADE_SPEC, CascadeDelete, CascadeDetach } from "./cascadeSpec";
+import { normalizeRecord, validateRecord } from "../../shared/DataValidation";
+import type { ValidationError, EntityResolver } from "../../shared/DataValidation";
 
 const COLLECTIONS = EntityRegistry.COLLECTIONS;
 const ENTITY_CLASSES = EntityRegistry.CLASSES;
@@ -294,9 +296,32 @@ export class Store {
   }
   async countOf(collection: string, where: Record<string, any> | null = null): Promise<number> { return this.adapter.count(collection, where); }
 
+  /* ---- VALIDATION PARTAGÉE (intégrité côté client — cf. shared/DataValidation, docs/validation.md) ----
+     En mode FICHIER il n'y a pas de serveur → c'est le SEUL garde-fou. En mode API, ce contrôle donne un
+     retour immédiat AVANT l'écriture réseau (le serveur reste l'autorité et re-valide). */
+  /** Notifié quand une écriture est BLOQUÉE car non conforme (parité avec le rejet 400 serveur). */
+  onInvalid: ((errors: ValidationError[]) => void) | null = null;
+  /** Résolveur d'existence (intégrité référentielle) adossé au cache hydraté. */
+  private entityResolver: EntityResolver = (collection, id) => !!this.get(collection, id);
+  /** Valide un enregistrement (forme canonique) ; si invalide → notifie et renvoie false (écriture bloquée). */
+  private accepts(collection: string, record: Record<string, any>): boolean {
+    const errors = validateRecord(collection, record, this.entityResolver);
+    if (errors.length) { this.onInvalid?.(errors); return false; }
+    return true;
+  }
+  /** Normalise les CHAMPS PATCHÉS (forme canonique partagée) à partir du résultat fusionné — fixe l'incohérence
+      historique où un patch posait des valeurs brutes (ex. `u_count: "10"`). */
+  private _normalizePatch(collection: string, obj: any, patch: Record<string, any>): Record<string, any> {
+    const merged = normalizeRecord(collection, { ...obj.toJSON(), ...patch });
+    const normalizedPatch: Record<string, any> = {};
+    for (const field of Object.keys(patch)) normalizedPatch[field] = (field in merged) ? merged[field] : patch[field];
+    return normalizedPatch;
+  }
+
   /* ---- ÉCRITURE (1 action logique = 1 transaction) ---- */
   async create(collection: string, props: any): Promise<any> {
     const obj = props instanceof Entity ? props : new ENTITY_CLASSES[collection](props);
+    if (!this.accepts(collection, obj.toJSON())) return null;   // validation partagée (intrinsèque + référentielle)
     this.data[collection].push(obj);
     this._indexAdd(collection, obj);
     await this.adapter.createOne(collection, obj.toJSON());
@@ -313,19 +338,30 @@ export class Store {
   async update(collection: string, id: string, patch: Record<string, any>): Promise<any> {
     const obj = this.get(collection, id);
     if (!obj) return null;
-    this._applyPatch(collection, obj, patch);
+    const normalizedPatch = this._normalizePatch(collection, obj, patch);
+    // valide le RÉSULTAT fusionné AVANT de muter (abort propre, aucune mutation partielle si invalide).
+    if (!this.accepts(collection, { ...obj.toJSON(), ...normalizedPatch })) return null;
+    this._applyPatch(collection, obj, normalizedPatch);
     await this.adapter.updateOne(collection, id, obj.toJSON());
     this._emit();
     return obj;
   }
   /* Plusieurs patchs (multi-collections) en UNE transaction = UN pas d'undo. */
   async updateBatch(ops: Array<{ collection: string; id: string; patch: Record<string, any> }>): Promise<number> {
+    // 1) prépare + VALIDE tout AVANT de muter → le moindre échec annule le lot entier (atomicité).
+    const prepared: Array<{ obj: any; collection: string; id: string; patch: Record<string, any> }> = [];
+    for (const { collection, id, patch } of ops) {
+      const obj = this.get(collection, id); if (!obj) continue;
+      const normalizedPatch = this._normalizePatch(collection, obj, patch);
+      if (!this.accepts(collection, { ...obj.toJSON(), ...normalizedPatch })) return 0;
+      prepared.push({ obj, collection, id, patch: normalizedPatch });
+    }
+    // 2) applique + persiste
     const updates: Transaction["updates"] = [];
-    ops.forEach(({ collection, id, patch }) => {
-      const obj = this.get(collection, id); if (!obj) return;
+    for (const { obj, collection, id, patch } of prepared) {
       this._applyPatch(collection, obj, patch);
       updates!.push({ collection, id, record: obj.toJSON() });
-    });
+    }
     if (updates!.length) { await this.adapter.transact({ updates }); this._emit(); }
     return updates!.length;
   }

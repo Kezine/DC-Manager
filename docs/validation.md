@@ -74,6 +74,13 @@ ValidationError = { collection, id?, path, code, message }
 - **Serveur** : `400 { errors: ValidationError[] }` (autorité). Le client surface les
   erreurs serveur en notification (filet de sécurité, même sans validation UI par champ).
 
+**Points d'application** (mêmes specs / fonctions des deux côtés via `shared/`) :
+- **Client — `Store`** (`create`/`update`/`updateBatch`) : normalise puis valide AVANT
+  d'écrire ; bloque + notifie (`store.onInvalid`) si invalide. C'est le **SEUL garde-fou
+  en mode FICHIER** (pas de serveur), et un retour immédiat en mode API.
+- **Serveur** (`create`/`update`/`transact`) : re-valide en **autorité** → `400` (couvre
+  aussi toute interface tierce qui poste sans passer par le `Store`).
+
 ## 6. Décisions actées
 
 - **Pas de rétro-compatibilité** : uniquement des jeux de test → on rejette directement
