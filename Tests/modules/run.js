@@ -1059,6 +1059,18 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(Validation.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.0.20" }).length, 0, "invariant : plage DHCP fin ≥ début → 0 erreur");
   }
 
+  console.log("\n• shared : dépendance inverse (V5b — re-validation des enfants)");
+  {
+    // findChildren simulé : le réseau "net1" porte une adresse 10.0.0.5.
+    const children = { "ipAddresses network_id net1": [{ id: "a1", address: "10.0.0.5", network_id: "net1" }] };
+    const findChildren = (coll, fk, pid) => children[coll + " " + fk + " " + pid] || [];
+    const fetch = () => null;   // les enfants résolvent le parent via l'injection de validateDependents
+    ck.eq(Validation.validateDependents("ipNetworks", { id: "net1", cidr: "10.0.0.0/24" }, findChildren, fetch).length, 0, "V5b : nouveau CIDR contient l'enfant → 0 erreur");
+    const errs = Validation.validateDependents("ipNetworks", { id: "net1", cidr: "10.0.5.0/24" }, findChildren, fetch);
+    ck.eq(errs.some((e) => e.code === "cross_entity" && e.collection === "ipAddresses" && e.id === "a1"), true, "V5b : nouveau CIDR exclut l'enfant → erreur sur l'adresse");
+    ck.eq(Validation.validateDependents("racks", { id: "r1" }, findChildren, fetch).length, 0, "V5b : collection sans dépendants → 0 erreur");
+  }
+
   console.log("\n• shared : couverture des specs (toutes les collections spécifiées)");
   {
     // INVARIANT : pour CHAQUE collection spécifiée, l'entité par défaut du constructeur front satisfait la spec
@@ -1158,6 +1170,18 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const before = s.get("racks", rack.id).u_count;
     await s.update("racks", rack.id, { u_count: 0 });
     ck.eq(s.get("racks", rack.id).u_count, before, "store.update u_count 0 → bloqué (valeur inchangée)");
+
+    // V5b end-to-end : changer le CIDR d'un réseau qui exclurait une de ses adresses → bloqué.
+    const net = await s.create("ipNetworks", { cidr: "10.0.0.0/24", label: "N" });
+    const ip = await s.create("ipAddresses", { address: "10.0.0.5", network_id: net.id });
+    ck(!!ip, "V5b : adresse créée dans le CIDR");
+    captured = null;
+    await s.update("ipNetworks", net.id, { cidr: "10.0.5.0/24" });   // exclurait 10.0.0.5
+    ck.eq(s.get("ipNetworks", net.id).cidr, "10.0.0.0/24", "V5b : CIDR excluant une adresse → update bloqué (inchangé)");
+    ck.eq(!!captured && captured.some((e) => e.code === "cross_entity"), true, "V5b : onInvalid notifié (cross_entity)");
+    captured = null;
+    await s.update("ipNetworks", net.id, { cidr: "10.0.0.0/16" });   // contient toujours 10.0.0.5
+    ck.eq(s.get("ipNetworks", net.id).cidr, "10.0.0.0/16", "V5b : CIDR contenant l'adresse → accepté");
   }
 
   console.log("\n" + "-".repeat(48));

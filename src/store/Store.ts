@@ -13,8 +13,8 @@ import { Text } from "../core/Text";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, CABLE_STATUS_BROKEN, CABLE_STATUS_RANK, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT, LOCATIONS } from "../domain/constants";
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
 import { CASCADE_SPEC, CascadeDelete, CascadeDetach } from "./cascadeSpec";
-import { normalizeRecord, validateRecord } from "../../shared/DataValidation";
-import type { ValidationError, EntityFetcher } from "../../shared/DataValidation";
+import { normalizeRecord, validateRecord, validateDependents } from "../../shared/DataValidation";
+import type { ValidationError, EntityFetcher, ChildFinder } from "../../shared/DataValidation";
 
 const COLLECTIONS = EntityRegistry.COLLECTIONS;
 const ENTITY_CLASSES = EntityRegistry.CLASSES;
@@ -303,9 +303,13 @@ export class Store {
   onInvalid: ((errors: ValidationError[]) => void) | null = null;
   /** Lecteur d'entité (intégrité référentielle V2 + cross-entité V5) adossé au cache hydraté. */
   private entityFetcher: EntityFetcher = (collection, id) => this.get(collection, id) || null;
-  /** Valide un enregistrement (forme canonique) ; si invalide → notifie et renvoie false (écriture bloquée). */
+  /** Recherche d'enfants par clé étrangère (dépendance inverse V5b) via les index secondaires. */
+  private childFinder: ChildFinder = (collection, fkField, parentId) => this._byFk(collection, fkField, parentId);
+  /** Valide un enregistrement (forme canonique) + ses éventuelles dépendances inverses (V5b) ; si invalide →
+      notifie et renvoie false (écriture bloquée). `record` = état (fusionné) qui SERA écrit. */
   private accepts(collection: string, record: Record<string, any>): boolean {
     const errors = validateRecord(collection, record, this.entityFetcher);
+    if (!errors.length) errors.push(...validateDependents(collection, record, this.childFinder, this.entityFetcher));
     if (errors.length) { this.onInvalid?.(errors); return false; }
     return true;
   }

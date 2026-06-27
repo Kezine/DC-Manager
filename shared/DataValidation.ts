@@ -71,6 +71,10 @@ export interface CollectionSpec {
   fields: Record<string, FieldSpec>;
   invariants?: Invariant[];
   crossEntity?: CrossEntityRule[];
+  /** Dépendances INVERSES (V5b) : collections-enfants à re-valider quand CETTE entité change (ex. un réseau IP
+      dont le `cidr` change → re-vérifier ses adresses/plages). Les enfants sont re-validés via LEURS propres
+      règles cross-entité, contre le nouvel état du parent. */
+  dependents?: Array<{ collection: string; fkField: string }>;
 }
 
 /** Erreur de validation — contrat partagé UI ⇄ serveur. */
@@ -98,6 +102,10 @@ export type EntityFetcher = (collection: string, id: string) => Record<string, a
 /** Règle CROSS-ENTITÉ (V5) : valide un enregistrement d'après les DONNÉES d'une entité liée (lue via `fetch`),
     pas seulement ses propres champs. Renvoie l'erreur (champ + message) ou `null` si respectée / non applicable. */
 export type CrossEntityRule = (record: Record<string, any>, fetch: EntityFetcher) => { path: string; message: string } | null;
+
+/** Recherche des ENFANTS d'une entité (dépendance inverse V5b) : tous les enregistrements de `collection`
+    dont `fkField` vaut `parentId`. INJECTÉ — l'UI l'adosse aux index du `Store`, le serveur à une requête. */
+export type ChildFinder = (collection: string, fkField: string, parentId: string) => Record<string, any>[];
 
 /* ---- spécifications des collections PILOTES (V1) ---- */
 export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
@@ -246,6 +254,11 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       label: { type: "string" },
       cidr:  { type: "string", required: true, format: "cidr" },
     },
+    // V5b : changer le CIDR d'un réseau peut faire sortir ses adresses/plages → re-valider ces enfants.
+    dependents: [
+      { collection: "ipAddresses", fkField: "network_id" },
+      { collection: "dhcpRanges", fkField: "network_id" },
+    ],
   },
   ipAddresses: {
     fields: {
@@ -466,6 +479,29 @@ export function validateRecord(collection: string, record: Record<string, any>, 
 export function normalizeAndValidate(collection: string, record: Record<string, any>, fetch?: EntityFetcher): { record: Record<string, any>; errors: ValidationError[] } {
   const normalized = normalizeRecord(collection, record);
   return { record: normalized, errors: validateRecord(collection, normalized, fetch) };
+}
+
+/** DÉPENDANCE INVERSE (V5b) : écrire `parentRecord` peut invalider ses ENFANTS (ex. réseau dont le `cidr` change
+    → des adresses tombent hors sous-réseau). Pour chaque collection-enfant déclarée (`spec.dependents`), retrouve
+    les enfants (`findChildren`) et re-joue LEURS règles cross-entité CONTRE LE NOUVEL ÉTAT du parent (qui n'est pas
+    encore persisté → on l'injecte via `fetch`). Renvoie les violations (rattachées à l'enfant fautif). Sur une
+    création, l'id du parent est neuf → aucun enfant → no-op. */
+export function validateDependents(parentCollection: string, parentRecord: Record<string, any>, findChildren: ChildFinder, fetch: EntityFetcher): ValidationError[] {
+  const spec = COLLECTION_SPECS[parentCollection];
+  if (!spec || !spec.dependents || !parentRecord.id) return [];
+  // le parent en cours d'écriture n'est pas encore persisté : on le superpose à l'état lu pour que les règles
+  // des enfants voient le NOUVEAU parent (ex. le nouveau `cidr`).
+  const fetchWithNewParent: EntityFetcher = (collection, id) =>
+    (collection === parentCollection && id === parentRecord.id) ? parentRecord : fetch(collection, id);
+  const errors: ValidationError[] = [];
+  for (const dependent of spec.dependents) {
+    for (const child of findChildren(dependent.collection, dependent.fkField, parentRecord.id)) {
+      for (const error of validateRecord(dependent.collection, child, fetchWithNewParent)) {
+        if (error.code === "cross_entity") errors.push({ ...error, message: error.message + ` — incohérent avec la modification de « ${parentCollection} ».` });
+      }
+    }
+  }
+  return errors;
 }
 
 /* ---- intégrité référentielle dans un LOT (transaction) ---- */
