@@ -101,6 +101,7 @@ ValidationError = { collection, id?, path, code, message }
 | **V2** | intégrité **référentielle** (FK `ref`) avec résolveur injecté **batch-aware** (`buildBatchResolver`) ; serveur : `Repository.exists` + résolveur par requête, `/transact` conscient du lot | ✅ |
 | **V3** | **invariants** inter-champs (`CollectionSpec.invariants`, ex. câble : `from ≠ to`, réseau principal ∈ réseaux portés) + **merge des patchs partiels** côté serveur (fusion sur l'existant avant normalisation) | ✅ |
 | **V4** | **convergence des normaliseurs** : les constructeurs d'entités front délèguent à `shared/normalize` (une seule normalisation) — gros refactor des 19 classes, à mener à part | ⏳ |
+| **V5** | **règles cross-entité** : valider un enregistrement d'après les DONNÉES d'une entité liée (ex. IP ∈ CIDR de son réseau) — nouveau mécanisme (cf. §8) | ⏳ |
 
 Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
 FK, tableaux). **Couverture étendue aux 19 collections** : chaque collection a une spec
@@ -108,3 +109,76 @@ FK, tableaux). **Couverture étendue aux 19 collections** : chaque collection a 
 (a) toutes les collections sont couvertes, et (b) l'entité par défaut de chaque constructeur
 front satisfait sa spec (aucune sur-contrainte). Les enums repris du domaine sont gardés
 alignés par des tests anti-divergence.
+
+## 8. V5 — règles cross-entité (cadrage)
+
+> Tranche **distincte** (pas un invariant de plus) : valider un enregistrement à partir des
+> **données d'une autre entité**, pas seulement de ses propres champs. Non implémentée — ce
+> qui suit en fixe le périmètre et les pièges avant tout code.
+
+### 8.1 Le besoin
+
+Règle motrice : une adresse IP doit appartenir au sous-réseau de son réseau —
+`ipAddresses.address ∈ ipNetworks[network_id].cidr`. Aujourd'hui cette règle existe, mais
+**codée à la main dans l'UI** ([`IpamForms.ts`](../src/views/forms/IpamForms.ts) : IP-dans-CIDR
+à la création, et sur changement de CIDR, refus si une IP/plage existante tombe dehors).
+Elle n'est donc enforce ni en mode fichier hors formulaire, ni au serveur, ni pour une
+interface tierce. Autres candidates : plage DHCP ⊂ CIDR du réseau ; `cable.from`/`to`
+pointant des ports d'équipements cohérents ; etc.
+
+### 8.2 Pourquoi c'est un niveau À PART
+
+| Niveau | Ce que la règle peut lire | Capacité injectée |
+|---|---|---|
+| Intrinsèque (V1) | un champ | — |
+| Invariant (V3) | plusieurs champs **du même record** | — (fonction pure `(record) => bool`) |
+| Référentiel (V2) | « l'id pointé existe ? » | `EntityResolver = (coll, id) => boolean` |
+| **Cross-entité (V5)** | **les CHAMPS de l'entité pointée** | `EntityFetcher = (coll, id) => Record \| null` |
+
+Les invariants V3 sont **purs** (record seul) → ne peuvent pas lire le `cidr` du réseau. Le
+résolveur V2 renvoie un **booléen** → ne donne pas accès au `cidr`. V5 a besoin d'un
+**fetcher** (récupère l'enregistrement lié), donc d'une **nouvelle capacité injectée**, qui
+garde `shared/` pur (l'UI l'adosse au `Store`, le serveur au `Repository`).
+
+### 8.3 Forme envisagée
+
+```ts
+// dans la spec d'une collection :
+crossEntity?: Array<(record, fetch: EntityFetcher) => ValidationError | null>
+// ex. ipAddresses :
+(addr, fetch) => {
+  const net = addr.network_id ? fetch("ipNetworks", addr.network_id) : null;
+  if (!net) return null;                       // pas de réseau → la règle ne s'applique pas
+  return Ip.inCidr(Ip.toInt(addr.address), Ip.parseCidr(net.cidr))
+    ? null
+    : { code: "cross_entity", path: "address", message: "L'adresse n'est pas dans le CIDR du réseau." };
+}
+```
+
+### 8.4 Les pièges à traiter (le vrai travail)
+
+1. **Fetcher batch-aware sur le CONTENU.** Dans un `/transact`, l'IP et son réseau peuvent
+   être créés/modifiés ensemble : le fetcher doit renvoyer le réseau **tel qu'après le lot**
+   (y compris un `cidr` modifié dans ce même lot), pas l'état persisté. V2 résolvait
+   l'existence dans le lot ; V5 doit résoudre le **contenu** (étendre `buildBatchResolver`
+   en un `buildBatchFetcher` qui superpose `creates`/`updates` du lot sur le persisté).
+2. **Dépendance INVERSE (parent → enfants).** Changer le `cidr` d'un réseau peut faire sortir
+   ses adresses/plages du sous-réseau. Valider l'IP quand on touche l'IP ne suffit pas : il
+   faut **re-valider les enfants quand on touche le parent**. C'est la logique bidirectionnelle
+   déjà présente dans `IpamForms`. À porter dans `shared` (probablement : une collection
+   déclare les « validations déclenchées par un parent » à rejouer).
+3. **Réutilisation Ip.** La règle s'appuie sur `Ip.inCidr`/`parseCidr` (déjà partiellement
+   partagés : `Ip.toInt` délègue à `shared/ipv4ToInt`). Pour V5, `inCidr`/`parseCidr` devront
+   eux aussi vivre côté partagé (sinon `shared/` importerait `core/` — interdit). À extraire.
+4. **Coût / portée.** La dépendance inverse rend la validation potentiellement O(enfants) sur
+   une écriture de parent → borner et ne déclencher que sur les champs concernés (ex. `cidr`).
+
+### 8.5 Recommandation de découpe
+
+- **V5a** — sens direct seulement : IP ∈ CIDR, plage DHCP ⊂ CIDR, avec `EntityFetcher`
+  batch-aware. Couvre la création/édition d'une IP/plage. Risque modéré.
+- **V5b** — dépendance inverse : re-validation des enfants sur changement de `cidr`. Plus
+  lourd ; à faire seulement si V5a ne suffit pas (le `cidr` change rarement).
+
+Prérequis transverse : extraire `Ip.parseCidr`/`inCidr` vers `shared/` (principe
+réutilisation > duplication), comme déjà amorcé pour `ipv4ToInt`.
