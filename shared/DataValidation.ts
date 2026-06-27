@@ -504,6 +504,24 @@ export class DataValidator {
     };
   }
 
+  /** Lecteur d'enfants CONSCIENT DU LOT (dépendance inverse V5b dans un `/transact`) : renvoie l'ensemble EFFECTIF
+      des enfants APRÈS application du lot — état persisté, moins les enfants supprimés / déplacés hors du parent,
+      plus ceux créés ou déplacés VERS le parent dans le lot. Sans cela, un lot qui change un `cidr` ET crée/déplace
+      des adresses raterait des incohérences (ou en signalerait de fausses). */
+  static buildBatchChildFinder(base: ChildFinder, batch: BatchOps): ChildFinder {
+    return (collection: string, fkField: string, parentId: string): Record<string, any>[] => {
+      const childrenById = new Map<string, Record<string, any>>();
+      for (const child of base(collection, fkField, parentId)) if (child && child.id) childrenById.set(child.id, child);
+      for (const del of (batch.deletes || [])) if (del && del.collection === collection) childrenById.delete(del.id);
+      for (const entry of [...(batch.creates || []), ...(batch.updates || [])]) {
+        if (!entry || entry.collection !== collection || !entry.record || !entry.record.id) continue;
+        if (entry.record[fkField] === parentId) childrenById.set(entry.record.id, entry.record);   // (post-lot) rattaché à ce parent
+        else childrenById.delete(entry.record.id);                                                  // déplacé / détaché du parent
+      }
+      return [...childrenById.values()];
+    };
+  }
+
   /* ---- helpers internes ---- */
   private static isEmpty(value: unknown): boolean {
     return value === undefined || value === null || value === "";

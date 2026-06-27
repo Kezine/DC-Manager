@@ -1069,6 +1069,18 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const errs = Validation.DataValidator.validateDependents("ipNetworks", { id: "net1", cidr: "10.0.5.0/24" }, findChildren, fetch);
     ck.eq(errs.some((e) => e.code === "cross_entity" && e.collection === "ipAddresses" && e.id === "a1"), true, "V5b : nouveau CIDR exclut l'enfant → erreur sur l'adresse");
     ck.eq(Validation.DataValidator.validateDependents("racks", { id: "r1" }, findChildren, fetch).length, 0, "V5b : collection sans dépendants → 0 erreur");
+
+    // lecteur d'enfants CONSCIENT DU LOT (V5b dans /transact) : ensemble effectif des enfants après le lot.
+    const persistedChildren = (coll, fk, pid) => (coll === "ipAddresses" && fk === "network_id" && pid === "net1")
+      ? [{ id: "a1", address: "10.0.0.5", network_id: "net1" }, { id: "a3", address: "10.0.0.9", network_id: "net1" }] : [];
+    const lot = {
+      creates: [{ collection: "ipAddresses", record: { id: "a2", address: "10.0.0.7", network_id: "net1" } }],   // nouvel enfant
+      updates: [{ collection: "ipAddresses", record: { id: "a1", address: "10.0.0.5", network_id: "net2" } }],   // déplacé hors de net1
+      deletes: [{ collection: "ipAddresses", id: "a3" }],                                                          // enfant supprimé
+    };
+    const batchChildFinder = Validation.DataValidator.buildBatchChildFinder(persistedChildren, lot);
+    const effective = batchChildFinder("ipAddresses", "network_id", "net1").map((c) => c.id).sort();
+    ck.eq(JSON.stringify(effective), JSON.stringify(["a2"]), "batch-childFinder : a1 déplacé + a3 supprimé + a2 créé → {a2}");
   }
 
   console.log("\n• shared : couverture des specs (toutes les collections spécifiées)");

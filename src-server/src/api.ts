@@ -200,6 +200,12 @@ export class Api {
     };
     const creates = (body.creates || []).map(acceptEntry);
     const updates = (body.updates || []).map(acceptEntry);
+    // V5b dans le lot : re-valider les ENFANTS des parents créés/modifiés (ex. un réseau dont le CIDR change),
+    // avec un lecteur d'enfants CONSCIENT DU LOT (enfants créés/déplacés/supprimés dans ce même lot).
+    const childFinder = DataValidator.buildBatchChildFinder(this.repoChildFinder(req), body);
+    for (const entry of [...creates, ...updates]) {
+      if (entry && entry.collection && entry.record) errors.push(...DataValidator.validateDependents(entry.collection, entry.record, childFinder, fetch));
+    }
     if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return; }
     try { this.repoOf(req).transact({ ...body, creates, updates }, this.revOf(req)); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
