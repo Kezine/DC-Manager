@@ -111,6 +111,8 @@ ValidationError = { collection, id?, path, code, message }
 | **V4** | **convergence des normaliseurs** : les constructeurs d'entités front délèguent à `shared/normalize` (une seule normalisation) — gros refactor des 19 classes, à mener à part | ⏳ |
 | **V5a** | **règles cross-entité** (sens direct) : `EntityFetcher` injecté (remplace le résolveur d'existence — il le subsume), `buildBatchFetcher` conscient du CONTENU du lot ; IP ∈ CIDR de son réseau, plage DHCP ⊂ CIDR (cf. §8) | ✅ |
 | **V5b** | **dépendance inverse** : `CollectionSpec.dependents` + `ChildFinder` injecté → écrire un parent re-valide ses enfants via LEURS règles cross-entité contre le nouvel état (ex. changer un `cidr` rejette si une adresse/plage en sort). Câblé sur create/update (Store + serveur) ET sur `/transact` (lecteur d'enfants conscient du lot, `buildBatchChildFinder`) | ✅ |
+| **T1/T2** | règles métier supplémentaires : invariants intra-record (équipement racké ⇒ baie ; port X/Y cohérents ; brosse ⇒ baie) + cross-entité (équipement tient dans la baie ; baie dans les bornes de la salle ; port parent/agrégat même équipement) | ✅ |
+| **V6** | contraintes d'**unicité / portée** (scan de pairs dans un périmètre) — ex. adresse IP unique, 1 câble par port, plages DHCP non chevauchantes, occupants de baie sans collision de U (cf. §9) | ⏳ |
 
 Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
 FK, tableaux). **Couverture étendue aux 19 collections** : chaque collection a une spec
@@ -192,3 +194,80 @@ crossEntity?: Array<(record, fetch: EntityFetcher) => ValidationError | null>
 
 Prérequis transverse : extraire `Ip.parseCidr`/`inCidr` vers `shared/` (principe
 réutilisation > duplication), comme déjà amorcé pour `ipv4ToInt`.
+
+## 9. V6 — contraintes d'unicité / portée (cadrage)
+
+> Tranche **distincte** : valider un enregistrement contre l'ENSEMBLE de ses PAIRS dans un
+> périmètre (« aucun AUTRE n'a la même valeur », « ne chevauche aucun autre »), pas juste
+> contre une entité liée. Non implémentée — ce qui suit fixe le périmètre, le mécanisme et
+> les pièges. Ces règles existent aujourd'hui codées à la main dans les formulaires/le Store.
+
+### 9.1 Le besoin (règles « Tier 3 »)
+
+- **ipAddresses** : adresse **unique** dans le document ; pas DANS une plage DHCP du réseau.
+- **dhcpRanges** : pas de **chevauchement** avec une autre plage du même réseau ; pas d'IP
+  statique du réseau dans l'intervalle.
+- **cables** : **1 câble par port** (aucun autre câble ne référence ce port en `from` ou `to`).
+- **occupants de baie** : pas de **collision de U** dans une baie (équipements rackés +
+  `rackItems` + brosses, par côté front/rear).
+
+### 9.2 Pourquoi un niveau À PART
+
+| Niveau | Ce que la règle lit | Capacité injectée |
+|---|---|---|
+| Intrinsèque / invariant (V1/V3) | le record (ses champs) | — |
+| Cross-entité (V5) | UNE entité liée (par id) | `EntityFetcher` |
+| **Portée (V6)** | **TOUS les pairs** d'un périmètre (collection + filtre) | **`RecordFinder`** (par champ, conscient du lot) |
+
+Le `fetch` de V5 renvoie UNE entité ; ici il faut **énumérer un ensemble**. Bonne nouvelle :
+le `ChildFinder` de V5b (`(collection, fkField, parentId) => record[]`) est déjà exactement
+ça — un **recherche par champ** (les champs visés sont indexés : `address`, `from_port_id`,
+`to_port_id`, `network_id`, `rack_id`…). On le **généralise** en `RecordFinder` et on
+réutilise `buildBatchChildFinder` (déjà conscient du lot).
+
+### 9.3 Forme envisagée
+
+```ts
+// nouvelle catégorie de règle dans la spec :
+scope?: Array<(record, find: RecordFinder) => { path; message } | null>
+// ex. unicité d'adresse IP :
+(addr, find) =>
+  find("ipAddresses", "address", addr.address).some((other) => other.id !== addr.id)
+    ? { path: "address", message: "Adresse déjà attribuée." } : null
+```
+
+Le wiring est **symétrique de V5b** : Store (`_byFk`) et serveur (`repo.list(where)`) pour le
+finder ; `buildBatchChildFinder` pour `/transact`.
+
+### 9.4 Les pièges à traiter (le vrai travail)
+
+1. **« Sauf moi-même ».** En update, le record EST persisté → le finder le renvoie → la règle
+   DOIT l'exclure par `id` (sinon il entre en conflit avec lui-même). En création, pas de self
+   (id neuf) ; en lot, le finder conscient du lot renvoie la version post-lot → exclure par id.
+2. **Périmètre multi-champs.** « 1 câble par port » = aucun autre câble en `from_port_id`
+   **OU** `to_port_id` → deux recherches + union. Idem un câble peut référencer le port des
+   deux côtés.
+3. **Intervalles** (DHCP) : pas une égalité mais un **recouvrement** `[s1,e1] ∩ [s2,e2] ≠ ∅` →
+   la règle fait le calcul d'intervalles (réutilise `Ipv4.toInt`).
+4. **Empilement multi-collections** (baie) : les occupants viennent de `equipments` +
+   `rackItems` + brosses (`waypoints`), par **côté** et par **plage de U**. Le plus lourd.
+   ⚠️ `waypoints.rack_id` **n'est pas indexé** (cf. `INDEX_SPEC`) → soit ajouter l'index, soit
+   accepter un scan. C'est ce qui fait de cette règle la plus coûteuse.
+5. **Coût.** Un scan par écriture. Acceptable car les champs sont indexés (sauf le cas baie) ;
+   à surveiller pour les très gros documents.
+
+### 9.5 Découpe proposée
+
+- **V6a — unicité simple (un champ)** : `ipAddresses.address` unique. Réutilise le finder tel
+  quel, seul piège = « sauf moi-même ». Risque faible, valeur immédiate.
+- **V6b — relations & intervalles** : 1 câble par port (multi-champs) ; chevauchement de plages
+  DHCP + IP-dans-plage (intervalles). Risque moyen.
+- **V6c — empilement de baie** (collision de U) : multi-collections + côtés + index manquant
+  sur `waypoints.rack_id`. Le plus lourd ; à faire seulement si on veut retirer la logique
+  correspondante du Store (sinon elle y reste très bien).
+
+### 9.6 Recommandation
+
+Commencer par **V6a** (unicité d'adresse — net, sûr, réutilise tout l'existant), puis **V6b**.
+Laisser **V6c** au Store (`rackPlacementBlockedReason`) tant qu'il n'y a pas de besoin
+multi-client / interface tierce sur le placement en baie.
