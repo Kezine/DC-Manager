@@ -12,19 +12,23 @@ COPY src ./src
 RUN npm run build
 
 # --- 2) backend Node + SQLite (TypeScript → compilé) ---
+# On PRÉSERVE l'arborescence du dépôt (src-server/ + shared/) sous /app : le serveur compile le code
+# PARTAGÉ `shared/` avec lui (rootDir = parent commun) → sortie `src-server/dist/src-server/src/index.js`,
+# identique au build local. Cf. CLAUDE.md « Code partagé ».
 FROM node:20-bookworm-slim AS server
 WORKDIR /app
 # better-sqlite3 = module natif → chaîne de compilation
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
-COPY src-server/package*.json ./
-RUN npm ci || npm install
-COPY src-server/tsconfig.json ./
-COPY src-server/src ./src
-RUN npm run build && npm prune --omit=dev
+COPY src-server/package*.json ./src-server/
+RUN cd src-server && (npm ci || npm install)
+COPY src-server/tsconfig.json ./src-server/
+COPY src-server/src ./src-server/src
+COPY shared ./shared
+RUN cd src-server && npm run build && npm prune --omit=dev
 COPY --from=client /client/dist /client-dist
 ENV NODE_ENV=production CLIENT_DIR=/client-dist DOCS_DIR=/data/documents PORT=3000 API_BASE=/api
 VOLUME ["/data"]
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD node -e "fetch('http://localhost:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "dist/index.js"]
+CMD ["node", "src-server/dist/src-server/src/index.js"]

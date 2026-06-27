@@ -5,18 +5,10 @@ import { type Repository, type Rec, type ListOpts } from "./db.js";
 import { DocumentStore } from "./documents.js";
 import { Auth, type SsoResult } from "./auth.js";
 import { LiveBus } from "./live.js";
+import type { DocumentChangeset } from "../../shared/DocumentChangeset.js";   // type PARTAGÉ front ⇄ back (source unique)
 
 /** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`). */
 type RepoRequest = Request & { repo?: Repository; authUser?: SsoResult; docRev?: number };
-
-/** Périmètre d'une écriture, diffusé aux autres clients pour un rechargement granulaire.
-    DUPLIQUÉ côté front (`src/sync/Changeset.ts`) — garder les deux formes synchronisées. */
-interface DocumentChangeset {
-  full: boolean;          // périmètre indéterminé (import/snapshot/inconnu) → le client recharge tout
-  collections: string[];  // collections touchées (créations + màj + suppressions)
-  meta: boolean;          // méta-document modifiée
-  images: boolean;        // image(s) de façade modifiée(s)
-}
 
 /** Couche HTTP : registre de documents + données SCOPÉES par document, déléguées au `Repository`. */
 export class Api {

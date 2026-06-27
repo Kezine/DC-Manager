@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "description": "Backend REST NetMap (Node.js + SQLite, TypeScript). Conforme à docs/rest-migration.md.",
-  "main": "dist/index.js",
+  "main": "dist/src-server/src/index.js",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/index.js",
+    "start": "node dist/src-server/src/index.js",
     "dev": "tsx watch src/index.ts"
   },
   "engines": { "node": ">=18" },

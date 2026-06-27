@@ -11,7 +11,10 @@
    ============================================================================ */
 "use strict";
 const path = require("path");
-const D = (p) => require(path.join(__dirname, "..", "..", "dist-test", p));
+// Depuis l'ajout du code PARTAGÉ (shared/) au programme, le rootDir inféré devient la racine du dépôt :
+// la sortie de compilation place les modules `src/` sous `dist-test/src/` et `shared/` sous `dist-test/shared/`.
+const D = (p) => require(path.join(__dirname, "..", "..", "dist-test", "src", p));        // modules du front (src/…)
+const SHARED = (p) => require(path.join(__dirname, "..", "..", "dist-test", p));           // code partagé (shared/…)
 
 /* -------- stubs navigateur minimaux (storage en mémoire) -------- */
 const mkStorage = () => {
@@ -60,6 +63,9 @@ const { EntityRegistry } = D("models/index.js");
 const { ReloadPlanner } = D("sync/ReloadPlanner.js");
 const { COLLECTION_THREE_IMPACT, threeImpactOf, worseThreeImpact, unmappedCollections } = D("sync/RenderImpact.js");
 const { emptyChangeset, fullChangeset, coerceChangeset, mergeChangesets } = D("sync/Changeset.js");
+const { Schema: SharedSchema } = SHARED("shared/Schema.js");
+const { Text } = D("core/Text.js");
+const { PAGE_SIZE_DEFAULT } = D("data/config.js");
 
 async function makeStore() {
   const s = new Store(new BrowserStorageAdapter({ persistent: false }));
@@ -937,6 +943,22 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const fullPlan = planner.plan(fullChangeset());
     ck.eq(fullPlan.refetchCollections, null, "plan : full → refetch null (tout le document)");
     ck.eq(fullPlan.threeRebuild, "geometry", "plan : full → geometry");
+  }
+
+  console.log("\n• shared : schéma PARTAGÉ (garde anti-divergence front ⇄ back)");
+  {
+    // La liste canonique de shared/Schema DOIT correspondre EXACTEMENT aux classes du registre front (même ordre).
+    ck.eq(JSON.stringify(SharedSchema.COLLECTIONS), JSON.stringify(EntityRegistry.COLLECTIONS),
+      "shared.COLLECTIONS === EntityRegistry.COLLECTIONS (ordre inclus)");
+    // normSearch : le front délègue au schéma partagé → parité STRICTE avec l'indexation serveur.
+    ck.eq(Text.normSearch("Liège ÉQUIPE"), SharedSchema.normSearch("Liège ÉQUIPE"), "Text.normSearch délègue à shared (accents)");
+    ck.eq(Text.normSearch("Liège"), "liege", "normSearch : minuscules + sans accents");
+    ck.eq(SharedSchema.normSearch(0), "0", "normSearch(0) === '0' (et non '' — parité serveur)");
+    // taille de page : constante partagée, ré-exportée côté front.
+    ck.eq(PAGE_SIZE_DEFAULT, SharedSchema.PAGE_SIZE_DEFAULT, "config.PAGE_SIZE_DEFAULT === shared (source unique)");
+    ck.eq(SharedSchema.isCollection("racks"), true, "isCollection(racks) = true");
+    ck.eq(SharedSchema.isCollection("inconnue"), false, "isCollection(inconnue) = false");
+    ck.eq(SharedSchema.isArrayField("network_ids"), true, "isArrayField(network_ids) = true");
   }
 
   console.log("\n" + "-".repeat(48));

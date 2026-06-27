@@ -17,19 +17,25 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
 2. **Orienté objet, modulaire, testable.** Découper en classes/modules à
    responsabilité unique. Une fonction *pure* (sans DOM, sans réseau, sans état
    global) est préférable dès que possible : elle est testable en isolation.
-3. **Noms de variables PLEINS DE SENS.** Pas d'abréviations, sauf quand le sens coule
+3. **Favoriser la RÉUTILISATION plutôt que la duplication.** Avant de copier une
+   règle, une constante ou un type, se demander où il devrait vivre UNE seule fois.
+   Cette discipline tire naturellement vers une découpe modulaire et réutilisable :
+   ce qui est commun au front ET au back va dans `shared/` (cf. « Code partagé ») ;
+   ce qui est commun à plusieurs vues va dans un module dédié. Une duplication
+   acceptée doit être justifiée (et signalée par un commentaire des deux côtés).
+4. **Noms de variables PLEINS DE SENS.** Pas d'abréviations, sauf quand le sens coule
    de source (`id`, `url`, `db`) ou que la portée est très locale (index de boucle).
    Préférer `collectionsToRefetch` à `cols`, `threeRebuild` à `t3`.
-4. **Commentaires DÉTAILLÉS.** Expliquer le *pourquoi* (intention, piège évité,
+5. **Commentaires DÉTAILLÉS.** Expliquer le *pourquoi* (intention, piège évité,
    invariant), pas seulement le *quoi*. Les zones subtiles (concurrence, rendu,
    invalidation de cache) méritent un paragraphe.
-5. **Documentation profuse dans `docs/`.** Tout pan d'architecture non trivial est
+6. **Documentation profuse dans `docs/`.** Tout pan d'architecture non trivial est
    décrit dans un `.md` de `docs/` (voir l'index plus bas), et référencé depuis le
    code concerné.
-6. **Tests unitaires sur les fonctions isolées.** Tout module pur a des tests dans
+7. **Tests unitaires sur les fonctions isolées.** Tout module pur a des tests dans
    `Tests/modules/run.js`. Le découpage OO doit *faciliter* ces tests — si une logique
    est dure à tester, c'est souvent qu'elle doit être extraite dans un module pur.
-7. **Commits sur les grosses fonctionnalités.** Un commit cohérent par fonctionnalité
+8. **Commits sur les grosses fonctionnalités.** Un commit cohérent par fonctionnalité
    (front + back + doc + tests ensemble), message en français, style *conventional
    commits* (`feat(...)`, `fix(...)`, `chore(...)`). Terminer par la ligne
    `Co-Authored-By` Claude.
@@ -47,11 +53,14 @@ src/            # FRONT (navigateur) — TS compilé par webpack
   sync/         #   rechargement granulaire REST (changeset → plan)  ← cf. docs/render-impact.md
   ui/           #   primitives UI (modale, dialogue, notifications…)
   app/          #   main.ts (bootstrap), Shell, état de sauvegarde
-src-server/src/ # BACK (Node) — TS compilé par tsc
+src-server/src/ # BACK (Node, ESM/NodeNext) — TS compilé par tsc
   api.ts        #   couche HTTP (Express) : routes + verrou optimiste + SSE
   db.ts         #   Repository SQLite (better-sqlite3)
   documents.ts  #   registre multi-documents + révisions
   live.ts       #   bus SSE (notifications de changement)
+shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) — schéma, types d'échange
+  Schema.ts     #   liste canonique des collections + champs tableau + normSearch + page size
+  DocumentChangeset.ts #   type + helpers du changeset (rechargement granulaire)
 docs/           # documentation d'architecture (voir index)
 Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compilés
 ```
@@ -90,11 +99,20 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   écritures envoient `X-Base-Rev` (verrou optimiste → 409). Les autres clients sont
   notifiés par SSE avec un **changeset** ; le `ReloadPlanner` en déduit quoi recharger.
 
-## Code partagé front/back (intention)
+## Code partagé front/back (`shared/`)
 
-Le projet vise un **dépôt unique** pour mutualiser le code entre UI et serveur et
-éviter la duplication (p. ex. **validation/intégrité des données** soumises, type du
-**changeset**). Aujourd'hui ces éléments sont encore DUPLIQUÉS (ex. `DocumentChangeset`
-défini dans `src/sync/Changeset.ts` ET `src-server/src/api.ts`). Cible : un dossier de
-code partagé (`shared/`) compilé par les deux côtés. En attendant, **garder les copies
-synchronisées** et signaler toute divergence.
+Mutualiser le code commun UI ⇄ serveur dans `shared/` plutôt que de le dupliquer
+(principe n°3). Y vit déjà : le **schéma des collections** (`Schema.ts`) et le type du
+**changeset** (`DocumentChangeset.ts`). Cible suivante : la **validation/intégrité des
+données** soumises (aujourd'hui éparpillée dans les formulaires — à extraire en
+fonction pure réutilisée en UI *et* au serveur).
+
+**Contraintes techniques** (deux builds différents) :
+- `shared/` ne contient que du **TS PUR** : aucun accès au DOM (front) ni à Node (back).
+- Chaque côté COMPILE la source partagée : le front via son `include` (résolution
+  *bundler*, imports SANS extension) ; le serveur via son `include` (NodeNext, imports
+  AVEC extension `.js`). Pour rester compatible des deux, **les fichiers de `shared/`
+  sont auto-suffisants** (pas d'import relatif entre eux) — on évite ainsi le conflit
+  d'extensions de module. Une dépendance entre concepts partagés se passe par
+  **injection** (paramètre) plutôt que par import.
+- Le serveur émet désormais sous `dist/src-server/src/` (cf. `package.json` `start`).

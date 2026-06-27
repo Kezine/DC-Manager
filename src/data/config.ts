@@ -1,7 +1,8 @@
 /* Constantes de la couche données (données pures). */
+import { Schema } from "../../shared/Schema";
 
-/** Taille de page par défaut des listes. */
-export const PAGE_SIZE_DEFAULT = 25;
+/** Taille de page par défaut des listes. RÉ-EXPORTÉE du schéma PARTAGÉ (source unique front ⇄ back). */
+export const PAGE_SIZE_DEFAULT = Schema.PAGE_SIZE_DEFAULT;
 
 /** Tailles de page proposées dans les listes. */
 export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
