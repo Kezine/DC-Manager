@@ -1083,6 +1083,33 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(JSON.stringify(effective), JSON.stringify(["a2"]), "batch-childFinder : a1 déplacé + a3 supprimé + a2 créé → {a2}");
   }
 
+  console.log("\n• shared : règles métier T1 (invariants) / T2 (cross-entité)");
+  {
+    const DV = Validation.DataValidator;
+    // T1 — équipement : placement_mode rack ⇒ rack_id requis
+    ck.eq(DV.validateRecord("equipments", { name: "e", placement_mode: "rack", rack_id: null }).some((x) => x.code === "invariant" && x.path === "rack_id"), true, "T1 equip : racké sans baie → invariant");
+    ck.eq(DV.validateRecord("equipments", { name: "e", placement_mode: "manual" }).length, 0, "T1 equip : manuel → OK");
+    // T1 — port : face X/Y cohérents
+    ck.eq(DV.validateRecord("ports", { face_x: 0.5, face_y: null }).some((x) => x.code === "invariant"), true, "T1 port : face X sans Y → invariant");
+    ck.eq(DV.validateRecord("ports", { face_x: 0.5, face_y: 0.5 }).length, 0, "T1 port : X+Y → OK");
+    ck.eq(DV.validateRecord("ports", { }).length, 0, "T1 port : ni X ni Y → OK");
+    // T1 — waypoint : brosse ⇒ rack_id
+    ck.eq(DV.validateRecord("waypoints", { kind: "brush", rack_id: null }).some((x) => x.code === "invariant"), true, "T1 wp : brosse sans baie → invariant");
+    ck.eq(DV.validateRecord("waypoints", { kind: "point" }).length, 0, "T1 wp : point → OK");
+
+    // T2 — équipement racké tient dans la baie (rack u_count = 10)
+    const rackFetch = (c, i) => (c === "racks" && i === "RK") ? { id: "RK", u_count: 10 } : null;
+    ck.eq(DV.validateRecord("equipments", { name: "e", placement_mode: "rack", rack_id: "RK", rack_u: 10, u_height: 2 }, rackFetch).some((x) => x.code === "cross_entity"), true, "T2 equip : U10+2 (→U11) dans baie 10U → dépasse");
+    ck.eq(DV.validateRecord("equipments", { name: "e", placement_mode: "rack", rack_id: "RK", rack_u: 3, u_height: 2 }, rackFetch).length, 0, "T2 equip : U3+2 dans baie 10U → OK");
+    // T2 — baie dans les bornes de la salle (5000 x 4000)
+    const dcFetch = (c, i) => (c === "datacenters" && i === "DC") ? { id: "DC", width_mm: 5000, depth_mm: 4000 } : null;
+    ck.eq(DV.validateRecord("racks", { name: "R", datacenter_id: "DC", dc_x: 6000, dc_y: 100 }, dcFetch).some((x) => x.code === "cross_entity"), true, "T2 rack : x hors salle → cross_entity");
+    ck.eq(DV.validateRecord("racks", { name: "R", datacenter_id: "DC", dc_x: 1000, dc_y: 1000 }, dcFetch).length, 0, "T2 rack : dans la salle → OK");
+    // T2 — port parent d'un autre équipement
+    const portFetch = (c, i) => (c === "ports" && i === "P0") ? { id: "P0", equipment_id: "EQ2" } : null;
+    ck.eq(DV.validateRecord("ports", { equipment_id: "EQ1", parent_port_id: "P0" }, portFetch).some((x) => x.code === "cross_entity" && x.path === "parent_port_id"), true, "T2 port : parent autre équipement → cross_entity");
+  }
+
   console.log("\n• shared : couverture des specs (toutes les collections spécifiées)");
   {
     // INVARIANT : pour CHAQUE collection spécifiée, l'entité par défaut du constructeur front satisfait la spec

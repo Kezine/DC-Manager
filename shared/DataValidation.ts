@@ -170,6 +170,21 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       pdu_max_a:      { type: "number", nullable: true, default: null },
       // NB : les FK face_image_* visent le magasin d'images (hors modèle) → pas de `ref` (collection non modélisée).
     },
+    invariants: [
+      // T1 : placé en baie ⇒ doit référencer une baie.
+      { path: "rack_id", message: "Un équipement placé en baie doit référencer une baie.", holds: (eq) => eq.placement_mode !== "rack" || !!eq.rack_id },
+    ],
+    crossEntity: [
+      // T2 : un équipement racké doit TENIR dans la hauteur de sa baie (U de tête + hauteur ≤ U de la baie).
+      (eq, fetch) => {
+        if (eq.placement_mode !== "rack" || !eq.rack_id || eq.rack_u == null) return null;
+        const rack = fetch("racks", eq.rack_id);
+        if (!rack || !rack.u_count) return null;   // baie absente / sans hauteur → couvert ailleurs
+        const top = eq.rack_u | 0, height = Math.max(1, (eq.u_height | 0) || 1);
+        return (top >= 1 && top + height - 1 <= rack.u_count) ? null
+          : { path: "rack_u", message: `L'équipement (U${top}${height > 1 ? "–" + (top + height - 1) : ""}) dépasse la baie (${rack.u_count} U).` };
+      },
+    ],
   },
   cables: {
     fields: {
@@ -209,6 +224,17 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       dc_x:          { type: "number", nullable: true, default: null },
       dc_y:          { type: "number", nullable: true, default: null },
     },
+    crossEntity: [
+      // T2 : baie posée dans une salle ⇒ sa position doit tomber DANS les bornes de la salle.
+      (rack, fetch) => {
+        if (!rack.datacenter_id || rack.dc_x == null || rack.dc_y == null) return null;
+        const dc = fetch("datacenters", rack.datacenter_id);
+        if (!dc) return null;
+        const width = dc.width_mm || 0, depth = dc.depth_mm || 0;
+        return (rack.dc_x >= 0 && rack.dc_x <= width && rack.dc_y >= 0 && rack.dc_y <= depth) ? null
+          : { path: "dc_x", message: `La position (${rack.dc_x}, ${rack.dc_y}) mm est hors de la salle (${width}×${depth} mm).` };
+      },
+    ],
   },
 
   /* ---- collections ÉTENDUES — specs PARTIELLES : champs d'identité, énumérations, et surtout les FK (`ref`). ---- */
@@ -221,6 +247,26 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       aggregate_id:   { type: "string", nullable: true, default: null, ref: "aggregates" },
       face_side:      { type: "string", enum: EQUIPMENT_FACE_IDS, default: "front" },
     },
+    invariants: [
+      // T1 : position de façade complète (X ET Y) ou absente (aucun des deux).
+      { path: "face_y", message: "La position de façade doit avoir X et Y (ou aucun des deux).", holds: (p) => (p.face_x == null) === (p.face_y == null) },
+    ],
+    crossEntity: [
+      // T2 : un port-lane et son port PARENT (breakout) appartiennent au même équipement.
+      (port, fetch) => {
+        if (!port.parent_port_id || !port.equipment_id) return null;
+        const parent = fetch("ports", port.parent_port_id);
+        return (parent && parent.equipment_id && parent.equipment_id !== port.equipment_id)
+          ? { path: "parent_port_id", message: "Le port parent doit appartenir au même équipement." } : null;
+      },
+      // T2 : un port et son AGRÉGAT (LAG) appartiennent au même équipement.
+      (port, fetch) => {
+        if (!port.aggregate_id || !port.equipment_id) return null;
+        const aggregate = fetch("aggregates", port.aggregate_id);
+        return (aggregate && aggregate.equipment_id && aggregate.equipment_id !== port.equipment_id)
+          ? { path: "aggregate_id", message: "L'agrégat doit appartenir au même équipement." } : null;
+      },
+    ],
   },
   aggregates: {
     fields: {
@@ -289,6 +335,10 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       rack_id:       { type: "string", nullable: true, default: null, ref: "racks" },
       datacenter_id: { type: "string", nullable: true, default: null, ref: "datacenters" },
     },
+    invariants: [
+      // T1 : une brosse est montée DANS une baie (rack_id obligatoire pour ce genre).
+      { path: "rack_id", message: "Une brosse doit être montée dans une baie.", holds: (wp) => wp.kind !== "brush" || !!wp.rack_id },
+    ],
   },
   floors: {
     fields: {
