@@ -104,7 +104,10 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       u_height:       { type: "number", min: 1, default: 1 },
       inventory_only: { type: "boolean", default: false },
       group_id:       { type: "string", nullable: true, default: null, ref: "groups" },
+      rack_id:        { type: "string", nullable: true, default: null, ref: "racks" },        // baie hôte (placement racké)
+      dc_id:          { type: "string", nullable: true, default: null, ref: "datacenters" },  // salle hôte (placement libre)
       pdu_max_a:      { type: "number", nullable: true, default: null },
+      // NB : les FK face_image_* visent le magasin d'images (hors modèle) → pas de `ref` (collection non modélisée).
     },
   },
   cables: {

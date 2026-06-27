@@ -155,7 +155,8 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
   console.log("\n• Store : clone d'équipement (ports + agrégats)");
   {
     const s = await makeStore();
-    const eq = await s.create("equipments", { name: "src", rack_id: "rack-x", placement_mode: "rack", rack_u: 5 });
+    const rack = await s.create("racks", { name: "RK" });   // FK réelle (la validation référentielle exige un rack existant)
+    const eq = await s.create("equipments", { name: "src", rack_id: rack.id, placement_mode: "rack", rack_u: 5 });
     await s.create("ports", { equipment_id: eq.id, name: "a" });
     await s.create("ports", { equipment_id: eq.id, name: "b" });
     const copy = await s.cloneEquipment(eq.id);
@@ -1098,6 +1099,20 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(batchResolver("ports", "pX"), false, "batch : id inconnu → n'existe pas");
     ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "pNew" }, batchResolver).length, 0,
       "batch : câble référençant un port créé DANS le lot → accepté (pas de faux rejet)");
+
+    // couverture référentielle : toute FK déclarée doit cibler une collection RÉELLE (garde anti-typo / anti-oubli).
+    const declaredRefs = [];
+    for (const [coll, spec] of Object.entries(Validation.COLLECTION_SPECS)) {
+      for (const [field, fieldSpec] of Object.entries(spec.fields)) if (fieldSpec.ref) declaredRefs.push({ coll, field, ref: fieldSpec.ref });
+    }
+    const validCollections = new Set(EntityRegistry.COLLECTIONS);
+    ck.eq(declaredRefs.find((r) => !validCollections.has(r.ref)), undefined, "refs : toutes ciblent une collection réelle (" + declaredRefs.length + " FK)");
+
+    // equipments : refs rack_id / dc_id (complétude V2).
+    const eqResolver = (coll, id) => (coll === "racks" && id === "r1") || (coll === "datacenters" && id === "dc1");
+    ck.eq(Validation.validateRecord("equipments", { name: "e", rack_id: "r1" }, eqResolver).length, 0, "equipments : rack_id existant → 0 erreur");
+    ck.eq(Validation.validateRecord("equipments", { name: "e", rack_id: "rX" }, eqResolver).some((x) => x.path === "rack_id" && x.code === "ref_missing"), true, "equipments : rack_id inexistant → ref_missing");
+    ck.eq(Validation.validateRecord("equipments", { name: "e", dc_id: "dc1" }, eqResolver).length, 0, "equipments : dc_id existant → 0 erreur");
   }
 
   console.log("\n• Store : garde de validation (mode fichier — seul garde-fou, pas de serveur)");
