@@ -189,6 +189,35 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(noop.deletes.length + noop.detaches.length, 0, "collection sans règle → plan vide");
   }
 
+  console.log("\n• Store : rechargement granulaire (P2 — reloadCollections / reloadMeta)");
+  {
+    const s = await makeStore();
+    const eq = await s.create("equipments", { name: "A" });
+    await s.create("ports", { equipment_id: eq.id });
+    // simule un AUTRE client : écrit DIRECTEMENT dans l'adapter → le store en mémoire reste périmé
+    await s.adapter.transact({
+      updates: [{ collection: "equipments", id: eq.id, record: Object.assign(eq.toJSON(), { name: "B" }) }],
+      creates: [{ collection: "ports", record: { id: "P_ext", equipment_id: eq.id } }],
+    });
+    ck.eq(s.get("equipments", eq.id).name, "A", "avant reload : équipement périmé (en mémoire)");
+    ck.eq(s.portsOf(eq.id).length, 1, "avant reload : 1 port en mémoire");
+    // rechargement CIBLÉ : équipements seulement
+    const done = await s.reloadCollections(["equipments"]);
+    ck.eq(done.join(","), "equipments", "reloadCollections renvoie les collections rechargées");
+    ck.eq(s.get("equipments", eq.id).name, "B", "équipement rafraîchi depuis l'adapter");
+    ck.eq(s.portsOf(eq.id).length, 1, "ports NON rechargés (granularité) → encore périmés");
+    // recharge les ports → l'index FK est reconstruit (le port externe apparaît)
+    await s.reloadCollections(["ports"]);
+    ck.eq(s.portsOf(eq.id).length, 2, "après reload ports : index FK reconstruit (port externe inclus)");
+    ck.eq(!!s.get("ports", "P_ext"), true, "port externe présent après reload");
+    // dédup + collection inconnue ignorées
+    ck.eq((await s.reloadCollections(["equipments", "equipments", "pasUneCollection"])).length, 1, "dédup + collection inconnue ignorée");
+    // méta rechargée à part (changement externe de nom de document)
+    await s.adapter.saveMeta(Object.assign(s.toJSON().meta, { docName: "Renommé" }));
+    await s.reloadMeta();
+    ck.eq(s.meta.docName, "Renommé", "reloadMeta : méta rafraîchie depuis l'adapter");
+  }
+
   console.log("\n• Store : undo / redo");
   {
     const s = await makeStore();

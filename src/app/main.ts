@@ -556,7 +556,14 @@ async function boot(): Promise<void> {
     // le thread : sans ce double rAF, l'overlay ne s'affiche qu'une fois le freeze terminé (donc jamais visible).
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      await store.init();   // P1 : re-tirage COMPLET du document (P2 affinera via plan.refetchCollections)
+      // P2 : rechargement GRANULAIRE — on ne re-tire QUE les collections du changeset ; le périmètre indéterminé
+      // (`refetchCollections === null` : import/snapshot/conflit 409) impose encore un rechargement TOTAL.
+      if (plan.refetchCollections) {
+        await store.reloadCollections(plan.refetchCollections);   // 0 collection (ex. méta seule) → aucun fetch d'entités
+        if (plan.refreshMeta) await store.reloadMeta();           // la méta (nom, dispositions…) a changé → relue à part
+      } else {
+        await store.init();   // re-tirage COMPLET du document
+      }
       if (plan.refreshImages) await imageStore.reloadFromBackend();   // métadonnées d'images SEULEMENT si une image a changé
       session.markLoaded(store.histIndex());
       // saut de la reconstruction 3D quand AUCUNE collection dessinée n'a changé (ex. adresse IP, spare, réseau IP) :

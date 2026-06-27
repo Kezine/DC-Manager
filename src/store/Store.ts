@@ -122,13 +122,15 @@ export class Store {
     m.graphLayout = active ? active.positions : null;
   }
   private _reindex(): void {
-    COLLECTIONS.forEach((c) => {
-      const m = new Map<string, any>();
-      const fk = new FieldIndex(INDEX_SPEC[c] || []);
-      this.data[c].forEach((o) => { m.set(o.id, o); fk.add(o); });
-      this._idIndex[c] = m;
-      this._fk[c] = fk;
-    });
+    COLLECTIONS.forEach((c) => this._reindexCollection(c));
+  }
+  /** (Re)construit les index (id + secondaires) d'UNE collection à partir de `data[c]`. */
+  private _reindexCollection(c: string): void {
+    const m = new Map<string, any>();
+    const fk = new FieldIndex(INDEX_SPEC[c] || []);
+    this.data[c].forEach((o) => { m.set(o.id, o); fk.add(o); });
+    this._idIndex[c] = m;
+    this._fk[c] = fk;
   }
 
   /* ---- maintenance incrémentale des index (création/maj unitaires) ---- */
@@ -161,6 +163,35 @@ export class Store {
     if (raw) { this._hydrate(raw); this.restored = true; }
     else { this._hydrate(null); this.restored = false; }
     return this;
+  }
+
+  /* ---- rechargement GRANULAIRE (P2 : changement externe ciblé en mode API) ----
+     Re-tire de l'adapter UNIQUEMENT les collections indiquées (au lieu d'un `init()` complet),
+     remplace leurs entités et ré-indexe CES collections seulement. Bien moins coûteux qu'un
+     rechargement total quand un autre client n'a touché qu'une poignée de collections.
+     Pilotée par `ReloadPlanner.plan().refetchCollections` (cf. docs/render-impact.md). */
+  async reloadCollections(collections: string[]): Promise<string[]> {
+    const targets = (collections || []).filter((c, i, a) => COLLECTIONS.indexOf(c) !== -1 && a.indexOf(c) === i);
+    if (!targets.length) return [];
+    // Chaque collection en UNE page (document complet de cette collection). En parallèle : I/O réseau indépendantes.
+    await Promise.all(targets.map(async (c) => {
+      const res = await this.adapter.list(c, { pageSize: 1_000_000_000 });
+      const Cls = ENTITY_CLASSES[c];
+      this.data[c] = (res.rows || []).map((o: RawRecord) => new Cls(o));
+    }));
+    targets.forEach((c) => this._reindexCollection(c));   // index reconstruits pour les seules collections rechargées
+    this.restored = true;
+    return targets;
+  }
+
+  /* Recharge la MÉTA du document (nom, dispositions, thème…) depuis l'adapter, sans toucher aux entités.
+     Utilisé par le rechargement granulaire quand seul `meta` a changé (cf. ReloadPlan.refreshMeta). */
+  async reloadMeta(): Promise<void> {
+    const meta = await this.adapter.loadMeta();
+    if (meta && typeof meta === "object") {
+      this.meta = Object.assign(this.meta, meta);
+      this._migrateLayouts();
+    }
   }
   /* No-op : la migration des images legacy se fait ailleurs (les images de façade
      ne sont plus une collection du modèle). */

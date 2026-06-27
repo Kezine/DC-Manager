@@ -124,7 +124,7 @@ Le client transforme le changeset en **plan** via [`ReloadPlanner`](../src/sync/
 
 ```
 plan = {
-  refetchCollections: string[] | null,  // null = tout le document (P1) ; liste ciblée (P2)
+  refetchCollections: string[] | null,  // null = tout le document (repli) ; liste ciblée = rechargement granulaire
   threeRebuild: "none" | "recolor" | "geometry",
   refreshMeta: boolean,
 }
@@ -133,7 +133,9 @@ plan = {
 - `threeRebuild` = **pire** impact parmi les collections du changeset (`none < recolor <
   geometry`), relevé à `geometry` si des images ont changé. → décide d'appeler ou non
   `dcView.invalidate3D()`.
-- `refetchCollections` = collections à re-tirer (P2 ; en P1 on re-tire encore tout).
+- `refetchCollections` = collections à re-tirer. Liste ciblée → `Store.reloadCollections`
+  ne re-tire QUE celles-ci (rechargement granulaire) ; `null` → `init()` complet (repli :
+  import/snapshot/conflit 409).
 - `refreshMeta` = relire la méta-document.
 
 ## 6. État d'implémentation (par phases)
@@ -141,7 +143,7 @@ plan = {
 | Phase | Contenu | État |
 |---|---|---|
 | **P1** | Changeset serveur + saut de reconstruction 3D quand aucune collection 3D n'a changé | ✅ |
-| **P2** | Re-tirage **partiel** des collections (`store.refreshCollections`) au lieu d'un `init()` global | ⏳ |
+| **P2** | Re-tirage **partiel** des collections (`Store.reloadCollections` + `reloadMeta`) au lieu d'un `init()` global | ✅ |
 | **P3** | Cache de **textures de façade par id** dans le moteur 3D (plus de re-décodage au rebuild) | ✅ |
 | **P4** | Reconstruction 3D **incrémentale** (par salle/baie) + recoloration en place (`recolor`) | ⏳ |
 | **P5** | Grain **champ/état** pour les collections à cheval (`equipments`/`cables`/`networks`) | ⏳ |

@@ -15,7 +15,8 @@ import { ThreeImpact, RenderImpact, COLLECTION_THREE_IMPACT } from "./RenderImpa
 
 /** Plan d'actions de rechargement déduit d'un changeset. */
 export interface ReloadPlan {
-  /** Collections à re-tirer du serveur. `null` = tout le document (repli / P1). Liste ciblée = P2. */
+  /** Collections à re-tirer du serveur (rechargement granulaire). `null` = tout le document (repli :
+      import/snapshot/conflit). Liste ciblée → `Store.reloadCollections` ne re-tire QUE celles-ci. */
   refetchCollections: string[] | null;
   /** Niveau de reconstruction requis pour la scène 3D Datacenter. */
   threeRebuild: ThreeImpact;
@@ -50,7 +51,7 @@ export class ReloadPlanner {
     }
 
     return {
-      // P1 : on re-tire encore tout le document (sûr). P2 affinera en ne re-tirant QUE ces collections.
+      // Rechargement granulaire : on ne re-tire QUE les collections touchées (cf. Store.reloadCollections).
       refetchCollections: changeset.collections.slice(),
       threeRebuild,
       refreshMeta: changeset.meta,

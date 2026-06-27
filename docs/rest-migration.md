@@ -64,7 +64,7 @@ autonome (hébergement statique / ouverture locale).
 | Sujet | Option A | Option B | Statut |
 |---|---|---|---|
 | **`transact` atomique** | Endpoint serveur `POST /transact` appliquant le lot dans UNE transaction SQLite | Boucle d'appels par entité (actuel `RestAdapter`) — non atomique | **A** retenu (SQLite = transaction triviale). `[décidé]` |
-| **Cascade de SUPPRESSION** | Calculée client (lot pré-étendu) ; le serveur applique tel quel | Logique **PARTAGÉE** (`shared/Cascade.ts`) appliquée des DEUX côtés : le `Store` en mode fichier, le serveur sur `DELETE` | **B** retenu `[décidé]` — un `DELETE /{coll}/{id}` naïf laissait des FK pendantes (le serveur n'était pas autorité). La cascade vit désormais une seule fois (principe n°3) et le serveur recompose deletes+détachements en UNE transaction. |
+| **Cascade de SUPPRESSION** | Calculée client (lot pré-étendu) ; le serveur applique tel quel | Logique **PARTAGÉE** (`shared/Cascade.ts`) appliquée des DEUX côtés : le `Store` en mode fichier, le serveur sur `DELETE` | **B** retenu `[décidé]` — un `DELETE /{coll}/{id}` naïf laissait des FK pendantes (le serveur n'était pas autorité). La cascade vit désormais une seule fois (principe n°3) et le serveur recompose deletes+détachements en UNE transaction. **⚠️ Limite : cascade NON récursive** (cf. §6). |
 | **Logique clone/pose** | Reste **calculée client** ; le lot pré-étendu est le contrat ; le serveur applique tel quel | Déplacée **côté serveur** | `[à préciser]` — clone/pose restent client (pas de risque d'incohérence référentielle, contrairement au DELETE) |
 | **Undo/redo en mode API** | Désactivé (boutons grisés) ; le serveur fait autorité | Endpoints serveur `POST /undo` `/redo` | `[à préciser]` — démarrer en **désactivé** |
 | **Mono/multi-document** | **Un seul workspace** par backend (origine) | Ressource `/documents` + collections scopées | `[à préciser]` — démarrer **mono-workspace** |
@@ -107,22 +107,22 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
   - Mode API **conditionne** la machinerie fichier (accueil, ouvrir/enregistrer,
     auto-save, compagnon, TabChannel masqués/désactivés).
   - En mode API : pas d'ensemencement (`newDocument`) → pas de `/snapshot` à l'ouverture.
-- **P1 — Cœur du contrat** *(client fait ; reste = backend)*
+- **P1 — Cœur du contrat** ✅ *(client + backend faits)*
   - ✅ `RestAdapter.transact` = **un seul `POST /transact`** (lot atomique côté serveur).
   - ✅ `RestAdapter.me()` → `GET /me` (user SSO) + pastille « connecté en tant que »
     dans la topbar (mode API).
-  - ⏳ Backend : implémenter `POST /transact` (1 transaction SQLite) et `GET /me`
-    (proxy SSO). Figer `q`/`where`/pagination/tri (cf. §4).
-- **P2 — Images** *(client fait ; reste = backend)*
+  - ✅ Backend : `POST /transact` (1 transaction SQLite, `db.ts transact`) et `GET /me`
+    (proxy SSO, `auth.validate`) ; `q`/`where`/pagination/tri implémentés (`db.ts list`).
+- **P2 — Images** ✅ *(client + backend faits)*
   - ✅ `ImageBackend` (interface) : `ImageStore` délègue toute la persistance
     (miroir + undo + bundle `.nmfb` restent dans `ImageStore`, agnostiques).
   - ✅ `IdbImageBackend` (mode fichier, comportement inchangé) + `RestImageBackend`
     (endpoints blob ; le miroir UI pointe l'URL serveur, pas de pré-téléchargement).
   - ✅ Sélection du backend au boot selon le mode ; bouton « Ouvrir un fichier de
     faces » (compagnon) masqué en mode API.
-  - ⏳ Backend : implémenter les endpoints `/images` (cf. §4). Caveat : l'undo
-    image en REST rejoue des PUT/DELETE (OK mono-utilisateur ; à revoir en P3
-    multi-client).
+  - ✅ Backend : endpoints `/images` implémentés (`api.ts` : list/get/blob/put/delete).
+    Caveat connu : l'undo image en REST rejoue des PUT/DELETE (OK mono-utilisateur ;
+    à revoir en multi-client).
 - **P3 — Concurrence** *(fait, base)*
   - ✅ Révision de document (`rev`) ; entête `X-Doc-Rev` (rev en lecture, rev+1 en
     écriture) suivie côté client (`RestAdapter.docRev`).
@@ -152,4 +152,22 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
   client** dans `Store` → cf. arbitrage §3.
 - État hors-adapter aujourd'hui : images (IndexedDB + `.nmfb`), document fichier
   (`.json`), handles FS, prefs, view-state 3D, TabChannel.
+
+### 6.1 Limites connues / dette
+
+- **⚠️ Cascade NON récursive — À CORRIGER.** `Cascade.plan` ne fait qu'**un seul
+  niveau** : les cas transitifs sont traités à la main dans les hooks `custom` (ex.
+  supprimer un équipement supprime ses ports ET les câbles de ces ports). Mais une
+  branche transitive NON couverte explicitement laisse des orphelins — p. ex. les
+  **lanes de breakout** (`ports.parent_port_id`) d'un port appartenant à un
+  équipement supprimé : l'équipement supprime ses ports, mais la règle des lanes
+  (portée par `ports`, pas par `equipments`) n'est pas rejouée. Conséquence : des
+  enregistrements pendants apparaissent en **usage NORMAL** (sans appel API brut).
+  Le logiciel doit rester cohérent **sans intervention IT** → la cascade doit
+  devenir **réellement récursive** (rejouer `Cascade.plan` sur chaque entité
+  supprimée jusqu'au point fixe, avec garde anti-cycle), au lieu de dépendre de
+  hooks `custom` exhaustifs. Vaut pour les deux modes (fichier + API), puisque la
+  logique est désormais partagée. **Priorité : à planifier.**
+- Conflit *update-after-delete* (résurrection) non détecté faute de tombstone ; undo
+  serveur absent (cf. P3).
 </content>
