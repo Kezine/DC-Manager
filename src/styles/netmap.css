@@ -485,6 +485,13 @@
   .form-hint { font-size: 10px; color: var(--fg-dimmer); margin-top: 4px; letter-spacing: 0.03em; }
   .form-hint.warn { color: var(--warn); }
   .form-hint.err { color: var(--err); }
+  /* validation live (LiveValidation) : champ en erreur + message sous le contrôle */
+  .form-field.invalid input[type="text"],
+  .form-field.invalid input[type="number"],
+  .form-field.invalid textarea,
+  .form-field.invalid select { border-color: var(--err); }
+  .form-field.invalid label { color: var(--err); }
+  .field-error { font-size: 10px; color: var(--err); margin-top: 4px; letter-spacing: 0.03em; }
   .section-divider {
     margin: 18px 0 12px;
     padding-top: 12px;

@@ -39,6 +39,7 @@ import {
 import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS } from "./shared";
 import type { FormHost } from "./shared";
 import { RackForms } from "./RackForms";
+import { LiveValidation } from "./LiveValidation";
 
 export class IpamForms extends RackForms {
 
@@ -60,16 +61,16 @@ export class IpamForms extends RackForms {
     root.appendChild(FormControls.fieldRow("CIDR", cidrI)); root.appendChild(hint);
     const descI = FormControls.textArea(net ? net.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
+    const live = new LiveValidation("ipNetworks", { label: labelI, cidr: cidrI });
+    live.clearOnInput();
 
     host.openModal({
       title: net ? "Modifier le réseau IP" : "Nouveau réseau IP",
       subtitle: net ? Html.escape(Ip.short(net)) : "",
       body: root,
       onSave: async () => {
-        const label = labelI.value.trim();
         const c = Ip.parseCidr(cidrI.value);
-        if (!label) { Notify.toast("Le label est obligatoire", "err"); return false; }
-        if (!c) { Notify.toast("CIDR IPv4 invalide (ex. 10.0.0.0/24)", "err"); return false; }
+        if (live.check({ label: labelI.value.trim(), cidr: cidrI.value.trim() }).length || !c) return false;   // CIDR/label surlignés
         const cidr = c.networkStr + "/" + c.prefix;
         if (net) {
           const bad = store.ipAddressesOfNetwork(net.id).find((a: any) => !Ip.inCidr(Ip.toInt(a.address), c));
@@ -77,7 +78,7 @@ export class IpamForms extends RackForms {
           const badR = store.dhcpRangesOfNetwork(net.id).find((r: any) => !Ip.inCidr(Ip.toInt(r.start_ip), c) || !Ip.inCidr(Ip.toInt(r.end_ip), c));
           if (badR) { Notify.toast(`La plage DHCP ${badR.start_ip}→${badR.end_ip} ne serait plus dans ${cidr}.`, "err"); return false; }
         }
-        const payload = { label, cidr, description: descI.value.trim() };
+        const payload = { label: labelI.value.trim(), cidr, description: descI.value.trim() };
         if (net) await store.update("ipNetworks", net.id, payload); else await store.create("ipNetworks", payload);
         host.setDirty?.(true); Notify.toast(net ? "Réseau IP mis à jour" : "Réseau IP créé"); onSaved?.(); return true;
       },
@@ -107,6 +108,9 @@ export class IpamForms extends RackForms {
     root.appendChild(FormControls.fieldRow("Équipement", eqSel, "Facultatif."));
     const descI = FormControls.textArea(addr ? addr.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
+    // validation live : adresse (format) + appartenance au CIDR du réseau (règle CROSS-ENTITÉ partagée).
+    const live = new LiveValidation("ipAddresses", { address: ipI, network_id: netSel, equipment_id: eqSel }, (coll, i) => store.get(coll, i) || null);
+    live.clearOnInput();
 
     host.openModal({
       title: addr ? "Modifier l'adresse IP" : "Nouvelle adresse IP",
@@ -114,18 +118,17 @@ export class IpamForms extends RackForms {
       body: root,
       onSave: async () => {
         const networkId = netSel.value;
-        const net = store.get("ipNetworks", networkId); const c = Ip.cidrOf(net);
+        const net = store.get("ipNetworks", networkId);
         if (!net) { Notify.toast("Choisissez un réseau IP.", "err"); return false; }
-        if (!c) { Notify.toast("Le réseau choisi a un CIDR invalide.", "err"); return false; }
         const address = ipI.value.trim();
+        const payload = { network_id: networkId, address, hostname: hostI.value.trim(), equipment_id: eqSel.value || null, description: descI.value.trim() };
+        if (live.check(payload).length) return false;   // adresse / réseau surlignés (format + IP ∈ CIDR)
+        // contrôles HORS validateur partagé (unicité, chevauchement DHCP) : restent des toasts.
         const ipInt = Ip.toInt(address);
-        if (ipInt == null) { Notify.toast("Adresse IPv4 invalide.", "err"); return false; }
-        if (!Ip.inCidr(ipInt, c)) { Notify.toast(`${address} n'appartient pas à ${net.cidr}.`, "err"); return false; }
         const dup = store.ipAddressByValue(address);
         if (dup && (!addr || dup.id !== addr.id)) { Notify.toast(`L'adresse ${address} est déjà attribuée.`, "err"); return false; }
         const conflict = Ip.dhcpRangeContaining(store, networkId, ipInt);
         if (conflict) { Notify.toast(`${address} est dans la plage DHCP ${conflict.start_ip}→${conflict.end_ip}.`, "err"); return false; }
-        const payload = { network_id: networkId, address, hostname: hostI.value.trim(), equipment_id: eqSel.value || null, description: descI.value.trim() };
         if (addr) await store.update("ipAddresses", addr.id, payload); else await store.create("ipAddresses", payload);
         host.setDirty?.(true); Notify.toast(addr ? "Adresse mise à jour" : "Adresse attribuée"); onSaved?.(); return true;
       },

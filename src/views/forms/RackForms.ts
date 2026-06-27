@@ -11,6 +11,7 @@ import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
 import { FloorLayout } from "../../geometry/FloorLayout";
 import { Ip } from "../../core/Ip";
+import { LiveValidation } from "./LiveValidation";
 import { GroupTypes } from "../../domain/GroupTypes";
 import { CableStatuses } from "../../domain/CableStatuses";
 import { SpareTypes } from "../../domain/SpareTypes";
@@ -155,13 +156,16 @@ export class RackForms extends CableForms {
     [uI, vmI, vmBotI, cageI, fmI, lmI, widthI, heightI, depthI].forEach((i) => i.addEventListener("input", refreshGeo));
     refreshGeo();
 
+    // validation live (mêmes règles que le Store/serveur) : surligne le(s) champ(s) fautif(s) à l'enregistrement.
+    const live = new LiveValidation("racks", { name: nameI, u_count: uI, width_mm: widthI, depth: depthI, sides: sidesI, datacenter_id: dcSel, dc_x: dcxI, dc_y: dcyI }, (c, i) => store.get(c, i) || null);
+    live.clearOnInput();
+
     host.openModal({
       title: rk ? "Modifier la baie" : "Nouvelle baie",
       subtitle: rk ? Html.escape(rk.name || "") : "",
       body: root, wide: true,
       onSave: async () => {
         const name = nameI.value.trim();
-        if (!name) { Notify.toast("Le nom est obligatoire", "err"); return false; }
         const g = geo();
         const minW = Math.round(g.minW), minH = Math.round(g.minH), minD = g.minD;
         let width_mm = Math.max(1, _n(widthI, RACK_WIDTH_DEFAULT)); if (width_mm < minW) width_mm = minW;
@@ -186,6 +190,7 @@ export class RackForms extends CableForms {
           door_rear: { enabled: (doorInputs.rear.enI as any).checked, thickness_mm: Math.max(1, parseInt(doorInputs.rear.thI.value, 10) || 40), hinge: doorInputs.rear.hingeI.value === "right" ? "right" : "left", hollow: (doorInputs.rear.hollowI as any).checked, hollow_mm: Math.max(0, parseInt(doorInputs.rear.hmI.value, 10) || 0) },
           description: descI.value.trim(),
         };
+        if (live.check(payload).length) return false;   // validation live : champ(s) surligné(s), enregistrement bloqué
         // redimensionnement d'une baie occupée (nombre de U) → déplace ses équipements
         if (rk && g.u !== rk.u_count) {
           const occ = store.equipmentsOfRack(rk.id);

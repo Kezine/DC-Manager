@@ -76,9 +76,13 @@ ValidationError = { collection, id?, path, code, message }
   erreurs serveur en notification (filet de sécurité, même sans validation UI par champ).
 
 **Points d'application** (mêmes specs / fonctions des deux côtés via `shared/`) :
+- **Client — formulaire** (`views/forms/LiveValidation`) : surlignage **par champ** + message
+  inline à l'enregistrement (mappe le `path` de chaque `ValidationError` au contrôle DOM,
+  via la même validation partagée + un `fetch` adossé au `Store` pour le référentiel/cross-entité).
+  Câblé sur les formulaires pilotes (baie, réseau IP, adresse IP) ; extensible aux autres.
 - **Client — `Store`** (`create`/`update`/`updateBatch`) : normalise puis valide AVANT
   d'écrire ; bloque + notifie (`store.onInvalid`) si invalide. C'est le **SEUL garde-fou
-  en mode FICHIER** (pas de serveur), et un retour immédiat en mode API.
+  en mode FICHIER** (pas de serveur), et un filet sous la validation live.
 - **Serveur** (`create`/`update`/`transact`) : re-valide en **autorité** → `400` (couvre
   aussi toute interface tierce qui poste sans passer par le `Store`).
 
