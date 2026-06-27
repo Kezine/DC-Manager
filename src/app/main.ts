@@ -573,6 +573,11 @@ async function boot(): Promise<void> {
   }
   // 409 (verrou optimiste serveur) sur une de nos écritures → recharge + notifie (PAS de rejeu : le serveur fait autorité).
   if (REST_MODE) (adapter as RestAdapter).onConflict = () => { void restReloadDocument({ conflict: true }); };
+  // 400 (validation PARTAGÉE serveur) : données refusées → notifie (les 2-3 premières erreurs, suffisant pour situer le problème).
+  if (REST_MODE) (adapter as RestAdapter).onValidationError = (errors) => {
+    const head = errors.slice(0, 3).map((e) => e.message).join(" · ");
+    Notify.toast("Données refusées par le serveur : " + head + (errors.length > 3 ? " …" : ""), "err");
+  };
   /** Planifie un rechargement débouncé en consommant les changesets SSE accumulés (fusionnés). */
   function flushPendingReload(): void {
     const changeset = pendingChangeset || fullChangeset();

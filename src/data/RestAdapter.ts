@@ -29,6 +29,9 @@ export class RestAdapter extends DataAdapter {
   /** Conflit de version (HTTP 409, verrou optimiste serveur) : une écriture a été refusée car une entité visée a
       changé depuis notre `docRev`. Le hôte (main.ts) recharge le document et notifie — l'écriture n'est PAS rejouée. */
   onConflict: ((info: { conflicts?: Array<{ collection: string; id: string; rev: number }> } | null) => void) | null = null;
+  /** Données refusées par le serveur (HTTP 400, validation PARTAGÉE) : le serveur fait autorité et a rejeté
+      l'écriture. Le hôte (main.ts) notifie l'utilisateur. `errors` = liste `{ collection, path, code, message }`. */
+  onValidationError: ((errors: Array<{ collection: string; path: string; code: string; message: string }>) => void) | null = null;
 
   /** URL du flux SSE du document courant (ou "" si aucun document). */
   get eventsUrl(): string { return this.docId ? (this.apiRoot + "/documents/" + encodeURIComponent(this.docId) + "/events") : ""; }
@@ -63,6 +66,11 @@ export class RestAdapter extends DataAdapter {
       return null;
     }
     if (res.status === 404 && allow404) return null;
+    if (res.status === 400) {   // validation serveur (autorité) : données refusées
+      let info: any = null; try { info = JSON.parse(await res.text()); } catch (_) { /* corps absent/illisible */ }
+      if (info && Array.isArray(info.errors)) { this.onValidationError?.(info.errors); return null; }   // erreurs structurées → notifiées, pas de throw
+      throw new Error("HTTP 400 sur " + method + " " + path + (info && info.error ? " : " + info.error : ""));
+    }
     if (!res.ok) throw new Error("HTTP " + res.status + " sur " + method + " " + path);
     if (res.status === 204) return null;
     const txt = await res.text();

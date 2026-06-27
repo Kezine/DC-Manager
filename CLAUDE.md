@@ -58,9 +58,10 @@ src-server/src/ # BACK (Node, ESM/NodeNext) — TS compilé par tsc
   db.ts         #   Repository SQLite (better-sqlite3)
   documents.ts  #   registre multi-documents + révisions
   live.ts       #   bus SSE (notifications de changement)
-shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) — schéma, types d'échange
+shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) — schéma, types, validation
   Schema.ts     #   liste canonique des collections + champs tableau + normSearch + page size
   DocumentChangeset.ts #   type + helpers du changeset (rechargement granulaire)
+  DataValidation.ts #   normalisation + validation des enregistrements (spec déclarative par collection)
 docs/           # documentation d'architecture (voir index)
 Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compilés
 ```
@@ -85,6 +86,8 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   phases, concurrence (révisions, SSE, **verrou optimiste 409 par entité**).
 - [`render-impact.md`](docs/render-impact.md) — **carte d'impact de rendu** : quelle
   collection impose quelle reconstruction 3D (rechargement granulaire, P1/P3).
+- [`validation.md`](docs/validation.md) — **normalisation & validation** partagées des
+  données (spec déclarative, niveaux intrinsèque/référentiel/invariants, V1/V2/V3).
 
 ## Points d'architecture à connaître
 

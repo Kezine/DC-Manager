@@ -66,6 +66,9 @@ const { emptyChangeset, fullChangeset, coerceChangeset, mergeChangesets } = D("s
 const { Schema: SharedSchema } = SHARED("shared/Schema.js");
 const { Text } = D("core/Text.js");
 const { PAGE_SIZE_DEFAULT } = D("data/config.js");
+const Validation = SHARED("shared/DataValidation.js");
+const { Rack } = D("models/index.js");
+const { CABLE_STATUSES, EQUIP_DEPTHS } = D("domain/constants.js");
 
 async function makeStore() {
   const s = new Store(new BrowserStorageAdapter({ persistent: false }));
@@ -959,6 +962,55 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(SharedSchema.isCollection("racks"), true, "isCollection(racks) = true");
     ck.eq(SharedSchema.isCollection("inconnue"), false, "isCollection(inconnue) = false");
     ck.eq(SharedSchema.isArrayField("network_ids"), true, "isArrayField(network_ids) = true");
+  }
+
+  console.log("\n• shared : normalisation (forme canonique avant écriture)");
+  {
+    const r = Validation.normalizeRecord("racks", { name: "R1", u_count: "10", width_mm: "600" });
+    ck.eq(r.u_count, 10, "normalize racks : u_count '10' → 10 (number)");
+    ck.eq(r.width_mm, 600, "normalize racks : width_mm '600' → 600");
+    ck.eq(r.sides, "single", "normalize racks : sides défaut → 'single'");
+    ck.eq(r.name, "R1", "normalize racks : name préservé");
+    const e = Validation.normalizeRecord("equipments", { name: "sw" });
+    ck.eq(e.type, "switch", "normalize equipments : type défaut → 'switch'");
+    ck.eq(e.placement_mode, "manual", "normalize equipments : placement_mode défaut → 'manual'");
+    ck.eq(e.u_height, 1, "normalize equipments : u_height défaut → 1");
+    ck.eq(e.inventory_only, false, "normalize equipments : inventory_only défaut → false");
+    ck.eq(e.group_id, null, "normalize equipments : group_id vide → null (nullable)");
+    const passthrough = Validation.normalizeRecord("spares", { whatever: 7 });
+    ck.eq(passthrough.whatever, 7, "normalize : collection SANS spec → traversée inchangée");
+  }
+
+  console.log("\n• shared : validation intrinsèque (requis / type / enum / borne)");
+  {
+    ck.eq(Validation.validateRecord("equipments", { name: "sw", type: "switch", depth: "full", placement_mode: "manual", u_height: 1, inventory_only: false, group_id: null }).length, 0,
+      "validate equipments : record valide → 0 erreur");
+    const missingName = Validation.validateRecord("equipments", { name: "", depth: "full" });
+    ck.eq(missingName.some((x) => x.path === "name" && x.code === "required"), true, "validate : name manquant → erreur 'required'");
+    const badStatus = Validation.validateRecord("cables", { status: "inexistant" });
+    ck.eq(badStatus.some((x) => x.path === "status" && x.code === "enum"), true, "validate : status hors enum → erreur 'enum'");
+    const badType = Validation.validateRecord("racks", { name: "R", u_count: "abc" });
+    ck.eq(badType.some((x) => x.path === "u_count" && x.code === "type"), true, "validate : u_count non numérique → erreur 'type'");
+    const belowMin = Validation.validateRecord("racks", { name: "R", u_count: 0 });
+    ck.eq(belowMin.some((x) => x.path === "u_count" && x.code === "min"), true, "validate : u_count 0 → erreur 'min'");
+    ck.eq(Validation.validateRecord("spares", { anything: true }).length, 0, "validate : collection sans spec → 0 erreur");
+    // enchaînement serveur : normalise PUIS valide
+    const nv = Validation.normalizeAndValidate("racks", { name: "R", u_count: "42" });
+    ck.eq(nv.errors.length, 0, "normalizeAndValidate : '42' normalisé → valide");
+    ck.eq(nv.record.u_count, 42, "normalizeAndValidate : record normalisé renvoyé");
+  }
+
+  console.log("\n• shared : validation — garde anti-divergence avec le domaine front");
+  {
+    // les enums de la spec partagée DOIVENT correspondre aux constantes du domaine front.
+    ck.eq(JSON.stringify(Validation.CABLE_STATUS_IDS.slice()), JSON.stringify(CABLE_STATUSES.map((s) => s.id)),
+      "spec.CABLE_STATUS_IDS === domaine CABLE_STATUSES (ids)");
+    ck.eq(JSON.stringify(Validation.EQUIPMENT_DEPTHS.slice()), JSON.stringify(EQUIP_DEPTHS.slice()),
+      "spec.EQUIPMENT_DEPTHS === domaine EQUIP_DEPTHS");
+    // les ENTITÉS produites par les constructeurs front satisfont la spec partagée (normaliseurs alignés).
+    ck.eq(Validation.validateRecord("equipments", new Equipment({ name: "sw" }).toJSON()).length, 0, "Equipment(name) front satisfait la spec");
+    ck.eq(Validation.validateRecord("racks", new Rack({ name: "R" }).toJSON()).length, 0, "Rack(name) front satisfait la spec");
+    ck.eq(Validation.validateRecord("cables", new Cable({}).toJSON()).length, 0, "Cable() front satisfait la spec");
   }
 
   console.log("\n" + "-".repeat(48));

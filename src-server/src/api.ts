@@ -1,4 +1,4 @@
-import express, { type Router, type RequestHandler, type Request } from "express";
+import express, { type Router, type RequestHandler, type Request, type Response } from "express";
 import multer from "multer";
 import { Schema } from "./constants.js";
 import { type Repository, type Rec, type ListOpts } from "./db.js";
@@ -6,6 +6,7 @@ import { DocumentStore } from "./documents.js";
 import { Auth, type SsoResult } from "./auth.js";
 import { LiveBus } from "./live.js";
 import type { DocumentChangeset } from "../../shared/DocumentChangeset.js";   // type PARTAGÉ front ⇄ back (source unique)
+import { normalizeAndValidate, type ValidationError } from "../../shared/DataValidation.js";   // normalisation + validation PARTAGÉES
 
 /** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`). */
 type RepoRequest = Request & { repo?: Repository; authUser?: SsoResult; docRev?: number };
@@ -185,7 +186,19 @@ export class Api {
 
   /* -- lot atomique / import -- */
   private transact: RequestHandler = (req, res) => {
-    try { this.repoOf(req).transact(req.body || {}, this.revOf(req)); res.status(204).end(); }
+    const body: any = req.body || {};
+    // Normalise + valide CHAQUE création/mise à jour du lot ; le moindre échec rejette TOUT le lot (atomicité).
+    const errors: ValidationError[] = [];
+    const acceptEntry = (entry: any) => {
+      if (!entry || !entry.collection || !entry.record) return entry;
+      const { record, errors: entryErrors } = normalizeAndValidate(entry.collection, entry.record);
+      errors.push(...entryErrors);
+      return { ...entry, record };
+    };
+    const creates = (body.creates || []).map(acceptEntry);
+    const updates = (body.updates || []).map(acceptEntry);
+    if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return; }
+    try { this.repoOf(req).transact({ ...body, creates, updates }, this.revOf(req)); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private snapshot: RequestHandler = (req, res) => {
@@ -227,15 +240,25 @@ export class Api {
     const rec = this.repoOf(req).getOne(req.params.collection, req.params.id);
     if (rec) res.json(rec); else res.status(404).json({ error: "introuvable" });
   };
+  /** Normalise + valide un enregistrement avant écriture (autorité serveur). Renvoie le record NORMALISÉ à
+      persister, ou `null` après avoir répondu `400 { errors }` — le handler doit alors s'arrêter. Collection
+      sans spécification (V1 : non pilote) → record inchangé, aucune erreur. */
+  private accept(res: Response, collection: string, record: Record<string, any>): Record<string, any> | null {
+    const { record: normalized, errors } = normalizeAndValidate(collection, record);
+    if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return null; }
+    return normalized;
+  }
+
   private create: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    try { this.repoOf(req).upsert(req.params.collection, req.body, this.revOf(req)); res.status(201).json(req.body); }
+    const record = this.accept(res, req.params.collection, req.body || {}); if (!record) return;
+    try { this.repoOf(req).upsert(req.params.collection, record, this.revOf(req)); res.status(201).json(record); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private update: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    const rec = { ...(req.body || {}), id: req.params.id };
-    try { this.repoOf(req).upsert(req.params.collection, rec, this.revOf(req)); res.json(rec); }
+    const record = this.accept(res, req.params.collection, { ...(req.body || {}), id: req.params.id }); if (!record) return;
+    try { this.repoOf(req).upsert(req.params.collection, record, this.revOf(req)); res.json(record); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private remove: RequestHandler = (req, res) => {
