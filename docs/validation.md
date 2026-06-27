@@ -100,5 +100,9 @@ ValidationError = { collection, id?, path, code, message }
 | **V2** | intégrité **référentielle** (FK `ref`) avec résolveur injecté **batch-aware** (`buildBatchResolver`) ; serveur : `Repository.exists` + résolveur par requête, `/transact` conscient du lot | ✅ |
 | **V3** | **invariants** inter-champs + convergence des normaliseurs front | ⏳ |
 
-Pilotes V1 choisis pour leur richesse (types, enums, FK, tableaux) : ils exercent toutes
-les formes de la spec avant l'extension aux 19 collections.
+Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
+FK, tableaux). **Couverture étendue aux 19 collections** : chaque collection a une spec
+(partielle — identité + énumérations + clés étrangères). Un test d'invariant vérifie que
+(a) toutes les collections sont couvertes, et (b) l'entité par défaut de chaque constructeur
+front satisfait sa spec (aucune sur-contrainte). Les enums repris du domaine sont gardés
+alignés par des tests anti-divergence.

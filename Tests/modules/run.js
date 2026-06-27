@@ -68,7 +68,7 @@ const { Text } = D("core/Text.js");
 const { PAGE_SIZE_DEFAULT } = D("data/config.js");
 const Validation = SHARED("shared/DataValidation.js");
 const { Rack } = D("models/index.js");
-const { CABLE_STATUSES, EQUIP_DEPTHS } = D("domain/constants.js");
+const { CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS } = D("domain/constants.js");
 
 async function makeStore() {
   const s = new Store(new BrowserStorageAdapter({ persistent: false }));
@@ -1011,6 +1011,26 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(Validation.validateRecord("equipments", new Equipment({ name: "sw" }).toJSON()).length, 0, "Equipment(name) front satisfait la spec");
     ck.eq(Validation.validateRecord("racks", new Rack({ name: "R" }).toJSON()).length, 0, "Rack(name) front satisfait la spec");
     ck.eq(Validation.validateRecord("cables", new Cable({}).toJSON()).length, 0, "Cable() front satisfait la spec");
+    // enums étendus alignés au domaine front (mêmes ids, même ordre).
+    ck.eq(JSON.stringify(Validation.GROUP_TYPE_IDS.slice()), JSON.stringify(GROUP_TYPES.map((t) => t.id)), "GROUP_TYPE_IDS === domaine");
+    ck.eq(JSON.stringify(Validation.RACK_ITEM_KIND_IDS.slice()), JSON.stringify(RACK_ITEM_KINDS.map((k) => k.id)), "RACK_ITEM_KIND_IDS === domaine");
+    ck.eq(JSON.stringify(Validation.SPARE_TYPE_IDS.slice()), JSON.stringify(SPARE_TYPES.map((t) => t.id)), "SPARE_TYPE_IDS === domaine");
+    ck.eq(JSON.stringify(Validation.SPARE_STATUS_IDS.slice()), JSON.stringify(SPARE_STATUSES.map((s) => s.id)), "SPARE_STATUS_IDS === domaine");
+    ck.eq(JSON.stringify(Validation.EQUIPMENT_FACE_IDS.slice()), JSON.stringify(EQUIP_FACE_IDS.slice()), "EQUIPMENT_FACE_IDS === domaine");
+  }
+
+  console.log("\n• shared : couverture des specs (toutes les collections spécifiées)");
+  {
+    // INVARIANT : pour CHAQUE collection spécifiée, l'entité par défaut du constructeur front satisfait la spec
+    // (aucune spec ne sur-contraint ce que le front produit → pas de blocage de flux légitime).
+    const requiredSample = { equipments: { name: "x" }, racks: { name: "x" } };   // seules collections à champ requis
+    const specced = Object.keys(Validation.COLLECTION_SPECS);
+    ck.eq(specced.length, EntityRegistry.COLLECTIONS.length, "specs : TOUTES les collections couvertes (" + specced.length + "/" + EntityRegistry.COLLECTIONS.length + ")");
+    for (const collection of specced) {
+      const Cls = EntityRegistry.classOf(collection);
+      const entity = new Cls(requiredSample[collection] || {});
+      ck.eq(Validation.validateRecord(collection, entity.toJSON()).length, 0, collection + " : entité par défaut satisfait la spec");
+    }
   }
 
   console.log("\n• shared : intégrité référentielle (V2 — FK + conscience du lot)");

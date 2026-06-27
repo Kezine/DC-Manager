@@ -22,6 +22,26 @@ export const EQUIPMENT_DEPTHS = ["full", "half", "quarter"] as const;
 export const EQUIPMENT_PLACEMENT_MODES = ["manual", "rack", "side", "wall", "floor"] as const;
 /** Configurations de faces d'une baie. */
 export const RACK_SIDE_CONFIGS = ["single", "dual"] as const;
+/** Faces d'un équipement (où poser un port). = `EQUIP_FACE_IDS` côté front. */
+export const EQUIPMENT_FACE_IDS = ["front", "rear", "top", "bottom", "left", "right"] as const;
+/** Nature « données » vs « énergie » (réseaux, types de port/câble). */
+export const DATA_OR_POWER = ["data", "power"] as const;
+/** Types de groupe. = `GROUP_TYPES.map(t => t.id)` côté front. */
+export const GROUP_TYPE_IDS = ["stack", "system", "general"] as const;
+/** Genres de pseudo-occupant de baie. = `RACK_ITEM_KINDS.map(k => k.id)` côté front. */
+export const RACK_ITEM_KIND_IDS = ["blank", "tray", "keepblank"] as const;
+/** Côtés d'occupation d'une baie. */
+export const RACK_OCCUPANT_SIDES = ["front", "rear"] as const;
+/** Genres de waypoint. */
+export const WAYPOINT_KINDS = ["point", "segment", "brush"] as const;
+/** Catégories de waypoint (en salle vs sortie). */
+export const WAYPOINT_TYPES = ["datacenter", "exit"] as const;
+/** Sources d'alimentation d'un réseau power. */
+export const POWER_SOURCES = ["ups", "ups_gen", "grid"] as const;
+/** Types de pièce de rechange. = `SPARE_TYPES.map(t => t.id)` côté front. */
+export const SPARE_TYPE_IDS = ["hdd", "ssd", "transceiver", "other"] as const;
+/** Statuts de pièce de rechange. = `SPARE_STATUSES.map(s => s.id)` côté front. */
+export const SPARE_STATUS_IDS = ["available", "assigned", "decommissioned"] as const;
 
 /* ---- types de la spécification ---- */
 export type FieldType = "string" | "number" | "boolean" | "string[]";
@@ -101,6 +121,120 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       datacenter_id: { type: "string", nullable: true, default: null, ref: "datacenters" },
       dc_x:          { type: "number", nullable: true, default: null },
       dc_y:          { type: "number", nullable: true, default: null },
+    },
+  },
+
+  /* ---- collections ÉTENDUES (V1 intrinsèque + V2 référentiel) — specs PARTIELLES :
+         champs d'identité (non requis), énumérations, et surtout les CLÉS ÉTRANGÈRES (`ref`). ---- */
+  ports: {
+    fields: {
+      name:           { type: "string" },
+      equipment_id:   { type: "string", nullable: true, default: null, ref: "equipments" },
+      port_type_id:   { type: "string", nullable: true, default: null, ref: "portTypes" },
+      parent_port_id: { type: "string", nullable: true, default: null, ref: "ports" },
+      aggregate_id:   { type: "string", nullable: true, default: null, ref: "aggregates" },
+      face_side:      { type: "string", enum: EQUIPMENT_FACE_IDS, default: "front" },
+    },
+  },
+  aggregates: {
+    fields: {
+      name:         { type: "string" },
+      equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+    },
+  },
+  networks: {
+    fields: {
+      label:         { type: "string" },
+      kind:          { type: "string", enum: DATA_OR_POWER, default: "data" },
+      power_source:  { type: "string", nullable: true, default: null, enum: POWER_SOURCES },
+      ip_network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
+    },
+  },
+  groups: {
+    fields: {
+      label: { type: "string" },
+      type:  { type: "string", enum: GROUP_TYPE_IDS },
+    },
+  },
+  rackItems: {
+    fields: {
+      label:   { type: "string" },
+      rack_id: { type: "string", nullable: true, default: null, ref: "racks" },
+      kind:    { type: "string", enum: RACK_ITEM_KIND_IDS, default: "blank" },
+      side:    { type: "string", enum: RACK_OCCUPANT_SIDES, default: "front" },
+    },
+  },
+  portTypes: {
+    fields: {
+      name: { type: "string" },
+      kind: { type: "string", enum: DATA_OR_POWER, default: "data" },
+    },
+  },
+  cableTypes: {
+    fields: {
+      name: { type: "string" },
+      kind: { type: "string", enum: DATA_OR_POWER, default: "data" },
+    },
+  },
+  cableBundles: {
+    fields: {
+      name:          { type: "string" },
+      cable_type_id: { type: "string", nullable: true, default: null, ref: "cableTypes" },
+      waypoint_ids:  { type: "string[]", default: [], ref: "waypoints" },
+    },
+  },
+  datacenters: {
+    fields: {
+      name: { type: "string" },
+    },
+  },
+  waypoints: {
+    fields: {
+      name:          { type: "string" },
+      kind:          { type: "string", enum: WAYPOINT_KINDS, default: "point" },
+      wp_type:       { type: "string", enum: WAYPOINT_TYPES, default: "datacenter" },
+      rack_id:       { type: "string", nullable: true, default: null, ref: "racks" },
+      datacenter_id: { type: "string", nullable: true, default: null, ref: "datacenters" },
+    },
+  },
+  floors: {
+    fields: {
+      location: { type: "string" },
+    },
+  },
+  ipNetworks: {
+    fields: {
+      label: { type: "string" },
+      cidr:  { type: "string" },
+    },
+  },
+  ipAddresses: {
+    fields: {
+      address:      { type: "string" },
+      network_id:   { type: "string", nullable: true, default: null, ref: "ipNetworks" },
+      equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+    },
+  },
+  dhcpRanges: {
+    fields: {
+      start_ip:   { type: "string" },
+      end_ip:     { type: "string" },
+      network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
+      server_id:  { type: "string", nullable: true, default: null, ref: "equipments" },
+    },
+  },
+  spares: {
+    fields: {
+      name:                  { type: "string" },
+      type:                  { type: "string", enum: SPARE_TYPE_IDS },
+      status:                { type: "string", enum: SPARE_STATUS_IDS },
+      assigned_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+    },
+  },
+  sites: {
+    fields: {
+      name:    { type: "string" },
+      address: { type: "string" },
     },
   },
 };
