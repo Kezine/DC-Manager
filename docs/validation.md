@@ -95,9 +95,23 @@ ValidationError = { collection, id?, path, code, message }
 - **Pas de rétro-compatibilité** : uniquement des jeux de test → on rejette directement
   en `400` (pas de phase « warn »). Les jeux non conformes sont recréés.
 - **Normalisation côté serveur** : oui — pour qu'une interface tierce écrive proprement.
-- **Convergence des normaliseurs** : à terme, les constructeurs d'entités front délèguent
-  à `shared/normalize` (une seule normalisation). En V1, ils coexistent et un test garantit
-  que les entités produites par le front **satisfont** la spec partagée (pas de divergence).
+- **Convergence des normaliseurs (V4) — DIFFÉRÉE PAR CHOIX** : aujourd'hui deux normaliseurs
+  coexistent — les **constructeurs d'entités front** (impératifs, riches : dérivations bespoke
+  comme `network_id ⊆ network_ids`, `dim_mode`, `rackOrientation`…) et `DataValidator.normalizeRecord`
+  (déclaratif, piloté par la spec). « Converger » = faire déléguer les constructeurs à `shared/`
+  pour n'avoir qu'UNE normalisation (l'UI, le serveur et une interface tierce normaliseraient à
+  l'identique). **Non fait, volontairement** :
+  - pas de bug — le client passe par les constructeurs, le serveur normalise+valide ;
+  - la divergence est déjà **empêchée par un test** (toute entité produite par un constructeur
+    front satisfait la spec partagée) ;
+  - bénéfice marginal : ça ferait passer une interface tierce mal formée de « rejetée avec
+    message clair » (400) à « auto-corrigée en silence » — un contrat discutable ;
+  - coût/risque élevés : extraire la logique impérative des 19 constructeurs (voie B : hooks
+    `normalize(record)` par collection), avec risque de régression UI.
+
+  À reconsidérer **seulement** si des interfaces tierces postent du brut et qu'on veut qu'elles
+  soient aussi tolérantes que l'UI. Sinon, le rejet-avec-message-clair actuel est préférable.
+  Détail complet de la réflexion : cf. l'échange « convergence des normaliseurs » (juin 2026).
 - **Collections non encore spécifiées** : tolérées (pas de spec → pas de rejet) → extension
   collection par collection sans bloquer le reste.
 
@@ -108,7 +122,7 @@ ValidationError = { collection, id?, path, code, message }
 | **V1** | spec déclarative + normalisation + validation **intrinsèque** ; pilotes `equipments`, `cables`, `racks` ; serveur `400` + filet UI | ✅ |
 | **V2** | intégrité **référentielle** (FK `ref`) avec résolveur injecté **batch-aware** (`buildBatchResolver`) ; serveur : `Repository.exists` + résolveur par requête, `/transact` conscient du lot | ✅ |
 | **V3** | **invariants** inter-champs (`CollectionSpec.invariants`, ex. câble : `from ≠ to`, réseau principal ∈ réseaux portés) + **merge des patchs partiels** côté serveur (fusion sur l'existant avant normalisation) | ✅ |
-| **V4** | **convergence des normaliseurs** : les constructeurs d'entités front délèguent à `shared/normalize` (une seule normalisation) — gros refactor des 19 classes, à mener à part | ⏳ |
+| **V4** | **convergence des normaliseurs** : les constructeurs d'entités front délégueraient à `shared/normalize` (une seule normalisation) — **différée par choix** (pas de bug, divergence déjà empêchée par test, gros refactor des 19 classes pour un bénéfice marginal ; cf. §6) | 🅿️ différée |
 | **V5a** | **règles cross-entité** (sens direct) : `EntityFetcher` injecté (remplace le résolveur d'existence — il le subsume), `buildBatchFetcher` conscient du CONTENU du lot ; IP ∈ CIDR de son réseau, plage DHCP ⊂ CIDR (cf. §8) | ✅ |
 | **V5b** | **dépendance inverse** : `CollectionSpec.dependents` + `ChildFinder` injecté → écrire un parent re-valide ses enfants via LEURS règles cross-entité contre le nouvel état (ex. changer un `cidr` rejette si une adresse/plage en sort). Câblé sur create/update (Store + serveur) ET sur `/transact` (lecteur d'enfants conscient du lot, `buildBatchChildFinder`) | ✅ |
 | **T1/T2** | règles métier supplémentaires : invariants intra-record (équipement racké ⇒ baie ; port X/Y cohérents ; brosse ⇒ baie) + cross-entité (équipement tient dans la baie ; baie dans les bornes de la salle ; port parent/agrégat même équipement) | ✅ |
