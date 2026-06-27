@@ -265,7 +265,11 @@ export class Api {
   };
   private update: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    const record = this.accept(res, req.params.collection, { ...(req.body || {}), id: req.params.id }, this.repoResolver(req)); if (!record) return;
+    // PATCH PARTIEL (V3) : on fusionne le corps SUR l'enregistrement existant avant de normaliser/valider, sinon
+    // les valeurs par défaut écraseraient les champs absents. (Le client packagé envoie des records complets ;
+    // ce merge protège les interfaces tierces qui posteraient un patch partiel.)
+    const existing = this.repoOf(req).getOne(req.params.collection, req.params.id) || {};
+    const record = this.accept(res, req.params.collection, { ...existing, ...(req.body || {}), id: req.params.id }, this.repoResolver(req)); if (!record) return;
     try { this.repoOf(req).upsert(req.params.collection, record, this.revOf(req)); res.json(record); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };

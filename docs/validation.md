@@ -98,7 +98,8 @@ ValidationError = { collection, id?, path, code, message }
 |---|---|---|
 | **V1** | spec déclarative + normalisation + validation **intrinsèque** ; pilotes `equipments`, `cables`, `racks` ; serveur `400` + filet UI | ✅ |
 | **V2** | intégrité **référentielle** (FK `ref`) avec résolveur injecté **batch-aware** (`buildBatchResolver`) ; serveur : `Repository.exists` + résolveur par requête, `/transact` conscient du lot | ✅ |
-| **V3** | **invariants** inter-champs + convergence des normaliseurs front | ⏳ |
+| **V3** | **invariants** inter-champs (`CollectionSpec.invariants`, ex. câble : `from ≠ to`, réseau principal ∈ réseaux portés) + **merge des patchs partiels** côté serveur (fusion sur l'existant avant normalisation) | ✅ |
+| **V4** | **convergence des normaliseurs** : les constructeurs d'entités front délèguent à `shared/normalize` (une seule normalisation) — gros refactor des 19 classes, à mener à part | ⏳ |
 
 Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
 FK, tableaux). **Couverture étendue aux 19 collections** : chaque collection a une spec

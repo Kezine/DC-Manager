@@ -1019,6 +1019,19 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(JSON.stringify(Validation.EQUIPMENT_FACE_IDS.slice()), JSON.stringify(EQUIP_FACE_IDS.slice()), "EQUIPMENT_FACE_IDS === domaine");
   }
 
+  console.log("\n• shared : invariants inter-champs (V3)");
+  {
+    // câble : port relié à lui-même → interdit
+    const selfLoop = Validation.validateRecord("cables", { status: "planifie", from_port_id: "p1", to_port_id: "p1" });
+    ck.eq(selfLoop.some((e) => e.code === "invariant" && e.path === "to_port_id"), true, "invariant : from === to → erreur");
+    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "p1", to_port_id: "p2" }).length, 0, "invariant : from ≠ to → 0 erreur");
+    // câble : réseau principal hors des réseaux portés → interdit
+    const orphanPrimary = Validation.validateRecord("cables", { status: "planifie", network_id: "n9", network_ids: ["n1", "n2"] });
+    ck.eq(orphanPrimary.some((e) => e.code === "invariant" && e.path === "network_id"), true, "invariant : network_id ∉ network_ids → erreur");
+    ck.eq(Validation.validateRecord("cables", { status: "planifie", network_id: "n1", network_ids: ["n1"] }).length, 0, "invariant : network_id ∈ network_ids → 0 erreur");
+    ck.eq(Validation.validateRecord("cables", { status: "planifie", network_id: null, network_ids: [] }).length, 0, "invariant : pas de réseau principal → ignoré");
+  }
+
   console.log("\n• shared : couverture des specs (toutes les collections spécifiées)");
   {
     // INVARIANT : pour CHAQUE collection spécifiée, l'entité par défaut du constructeur front satisfait la spec

@@ -63,10 +63,11 @@ export interface FieldSpec {
   ref?: string;
 }
 
-/** Spécification d'une collection : ses champs déclarés (partielle en V1 — seuls les champs
-    porteurs de règles sont listés ; les autres traversent sans contrôle ni normalisation). */
+/** Spécification d'une collection : ses champs déclarés (partielle — seuls les champs porteurs de règles
+    sont listés ; les autres traversent) + d'éventuels invariants inter-champs (V3). */
 export interface CollectionSpec {
   fields: Record<string, FieldSpec>;
+  invariants?: Invariant[];
 }
 
 /** Erreur de validation — contrat partagé UI ⇄ serveur. */
@@ -74,8 +75,16 @@ export interface ValidationError {
   collection: string;
   id?: string;
   path: string;            // champ concerné
-  code: "required" | "type" | "enum" | "min" | "ref_missing";
+  code: "required" | "type" | "enum" | "min" | "ref_missing" | "invariant";
   message: string;         // message humain (français)
+}
+
+/** Invariant INTER-CHAMPS d'une collection (V3) : règle qui dépend de PLUSIEURS champs du même
+    enregistrement (impossible à exprimer champ par champ). Pure → testable. */
+export interface Invariant {
+  path: string;            // champ auquel rattacher l'erreur (pour le surlignage UI)
+  message: string;         // message humain (français)
+  holds: (record: Record<string, any>) => boolean;   // true = respecté · false = violé
 }
 
 /** Résolveur d'existence d'entité (intégrité référentielle V2) : « un id existe-t-il dans cette collection ? ».
@@ -109,6 +118,18 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       bundle_id:     { type: "string", nullable: true, default: null, ref: "cableBundles" },
       strand_no:     { type: "number", nullable: true, default: null },
     },
+    invariants: [
+      {
+        path: "to_port_id",
+        message: "Un câble ne peut pas relier un port à lui-même.",
+        holds: (cable) => !(cable.from_port_id && cable.to_port_id && cable.from_port_id === cable.to_port_id),
+      },
+      {
+        path: "network_id",
+        message: "Le réseau principal doit faire partie des réseaux du câble.",
+        holds: (cable) => !cable.network_id || (Array.isArray(cable.network_ids) && cable.network_ids.includes(cable.network_id)),
+      },
+    ],
   },
   racks: {
     fields: {
@@ -335,6 +356,10 @@ export function validateRecord(collection: string, record: Record<string, any>, 
         }
       }
     }
+  }
+  // invariants INTER-CHAMPS (V3) : règles dépendant de plusieurs champs (ex. réseau principal ∈ réseaux du câble).
+  for (const invariant of spec.invariants || []) {
+    if (!invariant.holds(record)) fail(invariant.path, "invariant", invariant.message);
   }
   return errors;
 }
