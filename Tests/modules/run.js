@@ -1045,7 +1045,7 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "10.0.0.5" }).length, 0, "ipAddresses : adresse valide → 0 erreur");
     ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "999.1.1.1" }).some((e) => e.code === "format"), true, "ipAddresses : adresse invalide → 'format'");
     ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "" }).some((e) => e.code === "required"), true, "ipAddresses : adresse vide → 'required'");
-    ck.eq(Validation.DataValidator.validateRecord("ipNetworks", { cidr: "10.0.0.0/24" }).length, 0, "ipNetworks : CIDR valide → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("ipNetworks", { label: "N", cidr: "10.0.0.0/24" }).length, 0, "ipNetworks : CIDR valide → 0 erreur");
     ck.eq(Validation.DataValidator.validateRecord("ipNetworks", { cidr: "nope" }).some((e) => e.code === "format"), true, "ipNetworks : CIDR invalide → 'format'");
   }
 
@@ -1053,7 +1053,7 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
   {
     // réseau power ne peut pas porter d'ip_network_id
     ck.eq(Validation.DataValidator.validateRecord("networks", { kind: "power", ip_network_id: "ipn1" }).some((e) => e.code === "invariant"), true, "invariant : réseau power + ip_network_id → erreur");
-    ck.eq(Validation.DataValidator.validateRecord("networks", { kind: "data", ip_network_id: "ipn1" }).length, 0, "invariant : réseau data + ip_network_id → OK");
+    ck.eq(Validation.DataValidator.validateRecord("networks", { label: "N", kind: "data", ip_network_id: "ipn1" }).length, 0, "invariant : réseau data + ip_network_id → OK");
     // plage DHCP : fin ≥ début
     ck.eq(Validation.DataValidator.validateRecord("dhcpRanges", { start_ip: "10.0.0.20", end_ip: "10.0.0.10" }).some((e) => e.code === "invariant"), true, "invariant : plage DHCP fin < début → erreur");
     ck.eq(Validation.DataValidator.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.0.20" }).length, 0, "invariant : plage DHCP fin ≥ début → 0 erreur");
@@ -1088,8 +1088,9 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     // INVARIANT : pour CHAQUE collection spécifiée, l'entité par défaut du constructeur front satisfait la spec
     // (aucune spec ne sur-contraint ce que le front produit → pas de blocage de flux légitime).
     const requiredSample = {   // collections à champ(s) requis : on fournit des valeurs valides
-      equipments: { name: "x" }, racks: { name: "x" },
-      ipNetworks: { cidr: "10.0.0.0/24" }, ipAddresses: { address: "10.0.0.5" },
+      equipments: { name: "x" }, racks: { name: "x" }, datacenters: { name: "x" }, sites: { name: "x" },
+      networks: { label: "x" }, groups: { label: "x" },
+      ipNetworks: { cidr: "10.0.0.0/24", label: "x" }, ipAddresses: { address: "10.0.0.5" },
       dhcpRanges: { start_ip: "10.0.0.10", end_ip: "10.0.0.20" },
     };
     const specced = Object.keys(Validation.COLLECTION_SPECS);

@@ -74,23 +74,24 @@ export class CableForms extends EquipmentForms {
     kindSel.addEventListener("change", syncKind); syncKind();
     const descI = FormControls.textArea(net ? net.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
+    const live = new LiveValidation("networks", { label: labelI, kind: kindSel, power_source: srcSel, ip_network_id: ipSel }, (c, i) => store.get(c, i) || null);
+    live.clearOnInput();
 
     host.openModal({
       title: net ? "Modifier le réseau" : "Nouveau réseau",
       subtitle: net ? Html.escape(net.label) : "",
       body: root,
       onSave: async () => {
-        const label = labelI.value.trim();
-        if (!label) { Notify.toast("Le label est obligatoire", "err"); return false; }
         const power = kindSel.value === "power";
         const payload = {
-          label, color: color || null, kind: power ? "power" : "data",
+          label: labelI.value.trim(), color: color || null, kind: power ? "power" : "data",
           ip_network_id: power ? null : (ipSel.value || null),
           voltage: power && voltI.value !== "" ? Math.max(0, parseInt(voltI.value, 10) || 0) : null,
           max_amp: power && ampI.value !== "" ? Math.max(0, parseInt(ampI.value, 10) || 0) : null,
           power_source: power ? (srcSel.value || null) : null,
           description: descI.value.trim(),
         };
+        if (live.check(payload).length) return false;   // label requis (surligné)
         if (net) await store.update("networks", net.id, payload); else await store.create("networks", payload);
         host.setDirty?.(true); Notify.toast(net ? "Réseau mis à jour" : "Réseau créé"); onSaved?.(); return true;
       },

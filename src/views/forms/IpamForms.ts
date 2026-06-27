@@ -154,6 +154,9 @@ export class IpamForms extends RackForms {
     root.appendChild(FormControls.fieldRow("Serveur DHCP", srvSel, "Facultatif."));
     const descI = FormControls.textArea(rng ? rng.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
+    // validation live : bornes (format IPv4), fin ≥ début (invariant), bornes ∈ CIDR du réseau (cross-entité).
+    const live = new LiveValidation("dhcpRanges", { start_ip: startI, end_ip: endI, network_id: netSel, server_id: srvSel }, (coll, i) => store.get(coll, i) || null);
+    live.clearOnInput();
 
     host.openModal({
       title: rng ? "Modifier la plage DHCP" : "Nouvelle plage DHCP",
@@ -161,14 +164,12 @@ export class IpamForms extends RackForms {
       body: root,
       onSave: async () => {
         const networkId = netSel.value;
-        const net = store.get("ipNetworks", networkId); const c = Ip.cidrOf(net);
+        const net = store.get("ipNetworks", networkId);
         if (!net) { Notify.toast("Choisissez un réseau IP.", "err"); return false; }
-        if (!c) { Notify.toast("Le réseau choisi a un CIDR invalide.", "err"); return false; }
-        const s = Ip.toInt(startI.value.trim()), e = Ip.toInt(endI.value.trim());
-        if (s == null) { Notify.toast("Adresse de début invalide.", "err"); return false; }
-        if (e == null) { Notify.toast("Adresse de fin invalide.", "err"); return false; }
-        if (e < s) { Notify.toast("La fin de plage doit être ≥ au début.", "err"); return false; }
-        if (!Ip.inCidr(s, c) || !Ip.inCidr(e, c)) { Notify.toast(`Les bornes doivent appartenir à ${net.cidr}.`, "err"); return false; }
+        const record = { network_id: networkId, start_ip: startI.value.trim(), end_ip: endI.value.trim(), server_id: srvSel.value || null };
+        if (live.check(record).length) return false;   // format / fin≥début / bornes ∈ CIDR → surlignés
+        const s = Ip.toInt(record.start_ip)!, e = Ip.toInt(record.end_ip)!;   // valides après la validation live
+        // contrôles HORS validateur partagé (chevauchement, IP statique) : restent des toasts.
         const overlap = store.dhcpRangesOfNetwork(networkId).find((r: any) => {
           if (rng && r.id === rng.id) return false;
           const rs = Ip.toInt(r.start_ip), re = Ip.toInt(r.end_ip);

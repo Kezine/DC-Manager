@@ -79,8 +79,11 @@ ValidationError = { collection, id?, path, code, message }
 - **Client — formulaire** (`views/forms/LiveValidation`) : surlignage **par champ** + message
   inline à l'enregistrement (mappe le `path` de chaque `ValidationError` au contrôle DOM,
   via la même validation partagée + un `fetch` adossé au `Store` pour le référentiel/cross-entité).
-  Câblé sur les formulaires baie, réseau IP, adresse IP, équipement et câble (self-loop) ;
-  extensible aux autres (mapper `path → contrôle`).
+  Câblé sur les formulaires d'édition principaux : baie, équipement, réseau IP, adresse IP,
+  plage DHCP, réseau (logique), groupe, site, salle, câble (self-loop). Extensible aux autres
+  (mapper `path → contrôle`). NB : la live n'apporte de la valeur que sur les champs à
+  contrainte « libre » (texte requis, format IP/CIDR, cross-entité) ; les champs à choix
+  (select) sont déjà contraints par construction.
 - **Client — `Store`** (`create`/`update`/`updateBatch`) : normalise puis valide AVANT
   d'écrire ; bloque + notifie (`store.onInvalid`) si invalide. C'est le **SEUL garde-fou
   en mode FICHIER** (pas de serveur), et un filet sous la validation live.

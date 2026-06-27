@@ -219,14 +219,15 @@ export class RackForms extends CableForms {
     root.appendChild(FormControls.fieldRow("Adresse", addrI));
     const descI = FormControls.textArea(s ? s.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
+    const live = new LiveValidation("sites", { name: nameI });
+    live.clearOnInput();
     host.openModal({
       title: s ? "Modifier le site" : "Nouveau site",
       subtitle: s ? Html.escape(s.name) : "",
       body: root,
       onSave: async () => {
-        const name = nameI.value.trim();
-        if (!name) { Notify.toast("Le nom est obligatoire", "err"); return false; }
-        const payload = { name, address: addrI.value.trim(), description: descI.value.trim() };
+        const payload = { name: nameI.value.trim(), address: addrI.value.trim(), description: descI.value.trim() };
+        if (live.check(payload).length) return false;   // nom requis (surligné)
         if (s) await store.update("sites", s.id, payload); else await store.create("sites", payload);
         host.setDirty?.(true); Notify.toast(s ? "Site mis à jour" : "Site créé"); onSaved?.(); return true;
       },
@@ -251,6 +252,8 @@ export class RackForms extends CableForms {
     const floorI = FormControls.select(floorOptions(dc ? dc.floor : ""), dc ? dc.floor : "");
     const roomI = FormControls.text(dc ? dc.room : "", "local");
     root.appendChild(row2(FormControls.fieldRow("Lieu", locI), FormControls.fieldRow("Étage", floorI), FormControls.fieldRow("Local", roomI)));
+    const live = new LiveValidation("datacenters", { name: nameI });
+    live.clearOnInput();
 
     host.openModal({
       title: dc ? "Modifier la salle" : "Nouvelle salle",
@@ -258,12 +261,12 @@ export class RackForms extends CableForms {
       body: root, wide: true,
       onSave: async () => {
         const name = nameI.value.trim();
-        if (!name) { Notify.toast("Le nom est obligatoire", "err"); return false; }
         const payload = {
           name,
           width_mm: Math.max(1, parseInt(wI.value, 10) || 6000), depth_mm: Math.max(1, parseInt(dI.value, 10) || 4000), cell_mm: Math.max(1, parseInt(cI.value, 10) || 600),
           location: locI.value || "", floor: floorI.value, room: roomI.value.trim(),
         };
+        if (live.check(payload).length) return false;   // nom requis (surligné)
         if (dc) await store.update("datacenters", dc.id, payload); else await store.create("datacenters", payload);
         host.setDirty?.(true); Notify.toast(dc ? "Salle mise à jour" : "Salle créée"); onSaved?.(); return true;
       },

@@ -230,7 +230,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   networks: {
     fields: {
-      label:         { type: "string" },
+      label:         { type: "string", required: true },
       kind:          { type: "string", enum: DATA_OR_POWER, default: "data" },
       power_source:  { type: "string", nullable: true, default: null, enum: POWER_SOURCES },
       ip_network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
@@ -245,7 +245,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   groups: {
     fields: {
-      label: { type: "string" },
+      label: { type: "string", required: true },
       type:  { type: "string", enum: GROUP_TYPE_IDS },
     },
   },
@@ -278,7 +278,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   datacenters: {
     fields: {
-      name: { type: "string" },
+      name: { type: "string", required: true },
     },
   },
   waypoints: {
@@ -297,7 +297,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   ipNetworks: {
     fields: {
-      label: { type: "string" },
+      label: { type: "string", required: true },
       cidr:  { type: "string", required: true, format: "cidr" },
     },
     // V5b : changer le CIDR d'un réseau peut faire sortir ses adresses/plages → re-valider ces enfants.
@@ -365,7 +365,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   sites: {
     fields: {
-      name:    { type: "string" },
+      name:    { type: "string", required: true },
       address: { type: "string" },
     },
   },

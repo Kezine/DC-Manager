@@ -404,15 +404,16 @@ export class EquipmentForms extends FormBase {
     root.appendChild(FormControls.fieldRow("Couleur", ColorPalette.build(color, (c) => { color = c; }), "Identifie le groupe dans les listes et la topologie."));
     const descI = FormControls.textArea(grp ? grp.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
+    const live = new LiveValidation("groups", { label: labelI, type: typeI });
+    live.clearOnInput();
 
     host.openModal({
       title: grp ? "Modifier le groupe" : "Nouveau groupe",
       subtitle: grp ? Html.escape(grp.label) : "",
       body: root,
       onSave: async () => {
-        const label = labelI.value.trim();
-        if (!label) { Notify.toast("Le label est obligatoire", "err"); return false; }
-        const payload = { label, type: typeI.value || GroupTypes.DEFAULT, color: color || null, description: descI.value.trim() };
+        const payload = { label: labelI.value.trim(), type: typeI.value || GroupTypes.DEFAULT, color: color || null, description: descI.value.trim() };
+        if (live.check(payload).length) return false;   // label requis (surligné)
         if (grp) await store.update("groups", grp.id, payload); else await store.create("groups", payload);
         host.setDirty?.(true); Notify.toast(grp ? "Groupe mis à jour" : "Groupe créé"); onSaved?.(); return true;
       },
