@@ -9,6 +9,9 @@ COPY package*.json ./
 RUN npm ci || npm install
 COPY tsconfig*.json webpack.config.js ./
 COPY src ./src
+# Le code PARTAGÉ est importé par le front via `../../shared/...` → il doit exister à /client/shared.
+# (Sans cette copie, le build webpack échoue en TS2307 « Cannot find module '../../shared/...' ».)
+COPY shared ./shared
 RUN npm run build
 
 # --- 2) backend Node + SQLite (TypeScript → compilé) ---
