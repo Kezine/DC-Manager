@@ -17,6 +17,12 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
 2. **Orienté objet, modulaire, testable.** Découper en classes/modules à
    responsabilité unique. Une fonction *pure* (sans DOM, sans réseau, sans état
    global) est préférable dès que possible : elle est testable en isolation.
+   **Pas de fonctions exportées qui « traînent »** : regrouper les fonctions
+   utilitaires apparentées dans une **classe sémantique à méthodes statiques**
+   (`DataValidator.validateRecord(...)`, `Ipv4.parseCidr(...)`), pas un
+   `validateRecord(...)` libre. Le nom de classe porte le contexte et améliore la
+   lisibilité à l'appel. Les **données** (constantes, tables, types/interfaces)
+   restent, elles, de simples exports.
 3. **Favoriser la RÉUTILISATION plutôt que la duplication.** Avant de copier une
    règle, une constante ou un type, se demander où il devrait vivre UNE seule fois.
    Cette discipline tire naturellement vers une découpe modulaire et réutilisable :

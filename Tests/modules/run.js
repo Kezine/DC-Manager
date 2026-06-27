@@ -61,8 +61,8 @@ const { ImageStore } = D("data/ImageStore.js");
 const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
 const { EntityRegistry } = D("models/index.js");
 const { ReloadPlanner } = D("sync/ReloadPlanner.js");
-const { COLLECTION_THREE_IMPACT, threeImpactOf, worseThreeImpact, unmappedCollections } = D("sync/RenderImpact.js");
-const { emptyChangeset, fullChangeset, coerceChangeset, mergeChangesets } = D("sync/Changeset.js");
+const { COLLECTION_THREE_IMPACT, RenderImpact } = D("sync/RenderImpact.js");
+const { Changeset } = D("sync/Changeset.js");
 const { Schema: SharedSchema } = SHARED("shared/Schema.js");
 const { Text } = D("core/Text.js");
 const { PAGE_SIZE_DEFAULT } = D("data/config.js");
@@ -892,7 +892,7 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
   console.log("\n• sync : RenderImpact (carte d'impact 3D)");
   {
     // Invariant CRITIQUE : toute collection du registre a un impact déclaré (sinon défaut prudent, mais on veut un choix EXPLICITE).
-    ck.eq(unmappedCollections().length, 0, "RenderImpact : toutes les collections sont mappées (" + EntityRegistry.COLLECTIONS.length + ")");
+    ck.eq(RenderImpact.unmapped().length, 0, "RenderImpact : toutes les collections sont mappées (" + EntityRegistry.COLLECTIONS.length + ")");
     // Classification (cf. docs/render-impact.md) — quelques ancres représentatives de chaque niveau.
     ck.eq(COLLECTION_THREE_IMPACT.racks, "geometry", "racks → geometry");
     ck.eq(COLLECTION_THREE_IMPACT.portTypes, "geometry", "portTypes → geometry (taille connecteur, dépendance indirecte)");
@@ -901,29 +901,29 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(COLLECTION_THREE_IMPACT.ipAddresses, "none", "ipAddresses → none (hors 3D)");
     ck.eq(COLLECTION_THREE_IMPACT.spares, "none", "spares → none (hors 3D)");
     ck.eq(COLLECTION_THREE_IMPACT.cableBundles, "none", "cableBundles → none (tooltip seul)");
-    ck.eq(threeImpactOf("collection_inexistante"), "geometry", "collection inconnue → défaut PRUDENT geometry");
-    ck.eq(worseThreeImpact("none", "geometry"), "geometry", "worseThreeImpact : none < geometry");
-    ck.eq(worseThreeImpact("recolor", "none"), "recolor", "worseThreeImpact : recolor > none");
+    ck.eq(RenderImpact.of("collection_inexistante"), "geometry", "collection inconnue → défaut PRUDENT geometry");
+    ck.eq(RenderImpact.worst("none", "geometry"), "geometry", "RenderImpact.worst : none < geometry");
+    ck.eq(RenderImpact.worst("recolor", "none"), "recolor", "RenderImpact.worst : recolor > none");
   }
 
   console.log("\n• sync : Changeset (fusion + coercition)");
   {
-    ck.eq(emptyChangeset().full, false, "emptyChangeset : full=false");
-    ck.eq(fullChangeset().full, true, "fullChangeset : full=true");
+    ck.eq(Changeset.empty().full, false, "Changeset.empty : full=false");
+    ck.eq(Changeset.full().full, true, "Changeset.full : full=true");
     // coercition d'une valeur réseau non fiable
-    ck.eq(coerceChangeset(null).full, true, "coerce(null) → full (repli sûr)");
-    ck.eq(coerceChangeset({ full: true }).full, true, "coerce({full:true}) → full");
-    const coerced = coerceChangeset({ collections: ["racks", 42, "cables"], meta: 1, images: 0 });
+    ck.eq(Changeset.coerce(null).full, true, "coerce(null) → full (repli sûr)");
+    ck.eq(Changeset.coerce({ full: true }).full, true, "coerce({full:true}) → full");
+    const coerced = Changeset.coerce({ collections: ["racks", 42, "cables"], meta: 1, images: 0 });
     ck.eq(JSON.stringify(coerced.collections), JSON.stringify(["racks", "cables"]), "coerce : collections filtrées (non-strings retirées)");
     ck.eq(coerced.meta, true, "coerce : meta coercé en booléen");
     // fusion : union des collections, OU des drapeaux
-    const merged = mergeChangesets(
+    const merged = Changeset.merge(
       { full: false, collections: ["racks"], meta: false, images: true },
       { full: false, collections: ["racks", "cables"], meta: true, images: false },
     );
     ck.eq(JSON.stringify(merged.collections), JSON.stringify(["racks", "cables"]), "merge : union dédupliquée des collections");
     ck.eq(merged.meta && merged.images, true, "merge : drapeaux meta/images en OU");
-    ck.eq(mergeChangesets(fullChangeset(), emptyChangeset()).full, true, "merge : full domine");
+    ck.eq(Changeset.merge(Changeset.full(), Changeset.empty()).full, true, "merge : full domine");
   }
 
   console.log("\n• sync : ReloadPlanner (changeset → plan)");
@@ -944,7 +944,7 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(planner.plan({ full: false, collections: ["spares"], meta: false, images: true }).refreshImages, true, "plan : images → refreshImages true");
     ck.eq(planner.plan({ full: false, collections: ["spares"], meta: false, images: false }).refreshImages, false, "plan : pas d'image → refreshImages false");
     // périmètre indéterminé → tout recharger + rebuild complet
-    const fullPlan = planner.plan(fullChangeset());
+    const fullPlan = planner.plan(Changeset.full());
     ck.eq(fullPlan.refetchCollections, null, "plan : full → refetch null (tout le document)");
     ck.eq(fullPlan.threeRebuild, "geometry", "plan : full → geometry");
   }
@@ -967,36 +967,36 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
 
   console.log("\n• shared : normalisation (forme canonique avant écriture)");
   {
-    const r = Validation.normalizeRecord("racks", { name: "R1", u_count: "10", width_mm: "600" });
+    const r = Validation.DataValidator.normalizeRecord("racks", { name: "R1", u_count: "10", width_mm: "600" });
     ck.eq(r.u_count, 10, "normalize racks : u_count '10' → 10 (number)");
     ck.eq(r.width_mm, 600, "normalize racks : width_mm '600' → 600");
     ck.eq(r.sides, "single", "normalize racks : sides défaut → 'single'");
     ck.eq(r.name, "R1", "normalize racks : name préservé");
-    const e = Validation.normalizeRecord("equipments", { name: "sw" });
+    const e = Validation.DataValidator.normalizeRecord("equipments", { name: "sw" });
     ck.eq(e.type, "switch", "normalize equipments : type défaut → 'switch'");
     ck.eq(e.placement_mode, "manual", "normalize equipments : placement_mode défaut → 'manual'");
     ck.eq(e.u_height, 1, "normalize equipments : u_height défaut → 1");
     ck.eq(e.inventory_only, false, "normalize equipments : inventory_only défaut → false");
     ck.eq(e.group_id, null, "normalize equipments : group_id vide → null (nullable)");
-    const passthrough = Validation.normalizeRecord("spares", { whatever: 7 });
+    const passthrough = Validation.DataValidator.normalizeRecord("spares", { whatever: 7 });
     ck.eq(passthrough.whatever, 7, "normalize : collection SANS spec → traversée inchangée");
   }
 
   console.log("\n• shared : validation intrinsèque (requis / type / enum / borne)");
   {
-    ck.eq(Validation.validateRecord("equipments", { name: "sw", type: "switch", depth: "full", placement_mode: "manual", u_height: 1, inventory_only: false, group_id: null }).length, 0,
+    ck.eq(Validation.DataValidator.validateRecord("equipments", { name: "sw", type: "switch", depth: "full", placement_mode: "manual", u_height: 1, inventory_only: false, group_id: null }).length, 0,
       "validate equipments : record valide → 0 erreur");
-    const missingName = Validation.validateRecord("equipments", { name: "", depth: "full" });
+    const missingName = Validation.DataValidator.validateRecord("equipments", { name: "", depth: "full" });
     ck.eq(missingName.some((x) => x.path === "name" && x.code === "required"), true, "validate : name manquant → erreur 'required'");
-    const badStatus = Validation.validateRecord("cables", { status: "inexistant" });
+    const badStatus = Validation.DataValidator.validateRecord("cables", { status: "inexistant" });
     ck.eq(badStatus.some((x) => x.path === "status" && x.code === "enum"), true, "validate : status hors enum → erreur 'enum'");
-    const badType = Validation.validateRecord("racks", { name: "R", u_count: "abc" });
+    const badType = Validation.DataValidator.validateRecord("racks", { name: "R", u_count: "abc" });
     ck.eq(badType.some((x) => x.path === "u_count" && x.code === "type"), true, "validate : u_count non numérique → erreur 'type'");
-    const belowMin = Validation.validateRecord("racks", { name: "R", u_count: 0 });
+    const belowMin = Validation.DataValidator.validateRecord("racks", { name: "R", u_count: 0 });
     ck.eq(belowMin.some((x) => x.path === "u_count" && x.code === "min"), true, "validate : u_count 0 → erreur 'min'");
-    ck.eq(Validation.validateRecord("spares", { anything: true }).length, 0, "validate : collection sans spec → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("spares", { anything: true }).length, 0, "validate : collection sans spec → 0 erreur");
     // enchaînement serveur : normalise PUIS valide
-    const nv = Validation.normalizeAndValidate("racks", { name: "R", u_count: "42" });
+    const nv = Validation.DataValidator.normalizeAndValidate("racks", { name: "R", u_count: "42" });
     ck.eq(nv.errors.length, 0, "normalizeAndValidate : '42' normalisé → valide");
     ck.eq(nv.record.u_count, 42, "normalizeAndValidate : record normalisé renvoyé");
   }
@@ -1009,9 +1009,9 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(JSON.stringify(Validation.EQUIPMENT_DEPTHS.slice()), JSON.stringify(EQUIP_DEPTHS.slice()),
       "spec.EQUIPMENT_DEPTHS === domaine EQUIP_DEPTHS");
     // les ENTITÉS produites par les constructeurs front satisfont la spec partagée (normaliseurs alignés).
-    ck.eq(Validation.validateRecord("equipments", new Equipment({ name: "sw" }).toJSON()).length, 0, "Equipment(name) front satisfait la spec");
-    ck.eq(Validation.validateRecord("racks", new Rack({ name: "R" }).toJSON()).length, 0, "Rack(name) front satisfait la spec");
-    ck.eq(Validation.validateRecord("cables", new Cable({}).toJSON()).length, 0, "Cable() front satisfait la spec");
+    ck.eq(Validation.DataValidator.validateRecord("equipments", new Equipment({ name: "sw" }).toJSON()).length, 0, "Equipment(name) front satisfait la spec");
+    ck.eq(Validation.DataValidator.validateRecord("racks", new Rack({ name: "R" }).toJSON()).length, 0, "Rack(name) front satisfait la spec");
+    ck.eq(Validation.DataValidator.validateRecord("cables", new Cable({}).toJSON()).length, 0, "Cable() front satisfait la spec");
     // enums étendus alignés au domaine front (mêmes ids, même ordre).
     ck.eq(JSON.stringify(Validation.GROUP_TYPE_IDS.slice()), JSON.stringify(GROUP_TYPES.map((t) => t.id)), "GROUP_TYPE_IDS === domaine");
     ck.eq(JSON.stringify(Validation.RACK_ITEM_KIND_IDS.slice()), JSON.stringify(RACK_ITEM_KINDS.map((k) => k.id)), "RACK_ITEM_KIND_IDS === domaine");
@@ -1023,40 +1023,40 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
   console.log("\n• shared : invariants inter-champs (V3)");
   {
     // câble : port relié à lui-même → interdit
-    const selfLoop = Validation.validateRecord("cables", { status: "planifie", from_port_id: "p1", to_port_id: "p1" });
+    const selfLoop = Validation.DataValidator.validateRecord("cables", { status: "planifie", from_port_id: "p1", to_port_id: "p1" });
     ck.eq(selfLoop.some((e) => e.code === "invariant" && e.path === "to_port_id"), true, "invariant : from === to → erreur");
-    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "p1", to_port_id: "p2" }).length, 0, "invariant : from ≠ to → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("cables", { status: "planifie", from_port_id: "p1", to_port_id: "p2" }).length, 0, "invariant : from ≠ to → 0 erreur");
     // câble : réseau principal hors des réseaux portés → interdit
-    const orphanPrimary = Validation.validateRecord("cables", { status: "planifie", network_id: "n9", network_ids: ["n1", "n2"] });
+    const orphanPrimary = Validation.DataValidator.validateRecord("cables", { status: "planifie", network_id: "n9", network_ids: ["n1", "n2"] });
     ck.eq(orphanPrimary.some((e) => e.code === "invariant" && e.path === "network_id"), true, "invariant : network_id ∉ network_ids → erreur");
-    ck.eq(Validation.validateRecord("cables", { status: "planifie", network_id: "n1", network_ids: ["n1"] }).length, 0, "invariant : network_id ∈ network_ids → 0 erreur");
-    ck.eq(Validation.validateRecord("cables", { status: "planifie", network_id: null, network_ids: [] }).length, 0, "invariant : pas de réseau principal → ignoré");
+    ck.eq(Validation.DataValidator.validateRecord("cables", { status: "planifie", network_id: "n1", network_ids: ["n1"] }).length, 0, "invariant : network_id ∈ network_ids → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("cables", { status: "planifie", network_id: null, network_ids: [] }).length, 0, "invariant : pas de réseau principal → ignoré");
   }
 
   console.log("\n• shared : formats IPv4 / CIDR (IPAM)");
   {
-    ck.eq(Validation.ipv4ToInt("10.0.0.5"), 167772165, "ipv4ToInt : 10.0.0.5");
-    ck.eq(Validation.ipv4ToInt("256.0.0.1"), null, "ipv4ToInt : octet > 255 → null");
-    ck.eq(Validation.ipv4ToInt("10.0.0"), null, "ipv4ToInt : incomplet → null");
-    ck.eq(Validation.isCidr("10.0.0.0/24"), true, "isCidr : 10.0.0.0/24 valide");
-    ck.eq(Validation.isCidr("10.0.0.0/40"), false, "isCidr : préfixe > 32 → invalide");
-    ck.eq(Validation.isCidr("10.0.0.0"), false, "isCidr : sans préfixe → invalide");
+    ck.eq(Validation.Ipv4.toInt("10.0.0.5"), 167772165, "ipv4ToInt : 10.0.0.5");
+    ck.eq(Validation.Ipv4.toInt("256.0.0.1"), null, "ipv4ToInt : octet > 255 → null");
+    ck.eq(Validation.Ipv4.toInt("10.0.0"), null, "ipv4ToInt : incomplet → null");
+    ck.eq(Validation.Ipv4.isCidr("10.0.0.0/24"), true, "isCidr : 10.0.0.0/24 valide");
+    ck.eq(Validation.Ipv4.isCidr("10.0.0.0/40"), false, "isCidr : préfixe > 32 → invalide");
+    ck.eq(Validation.Ipv4.isCidr("10.0.0.0"), false, "isCidr : sans préfixe → invalide");
     // appliqué via la spec
-    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.0.5" }).length, 0, "ipAddresses : adresse valide → 0 erreur");
-    ck.eq(Validation.validateRecord("ipAddresses", { address: "999.1.1.1" }).some((e) => e.code === "format"), true, "ipAddresses : adresse invalide → 'format'");
-    ck.eq(Validation.validateRecord("ipAddresses", { address: "" }).some((e) => e.code === "required"), true, "ipAddresses : adresse vide → 'required'");
-    ck.eq(Validation.validateRecord("ipNetworks", { cidr: "10.0.0.0/24" }).length, 0, "ipNetworks : CIDR valide → 0 erreur");
-    ck.eq(Validation.validateRecord("ipNetworks", { cidr: "nope" }).some((e) => e.code === "format"), true, "ipNetworks : CIDR invalide → 'format'");
+    ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "10.0.0.5" }).length, 0, "ipAddresses : adresse valide → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "999.1.1.1" }).some((e) => e.code === "format"), true, "ipAddresses : adresse invalide → 'format'");
+    ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "" }).some((e) => e.code === "required"), true, "ipAddresses : adresse vide → 'required'");
+    ck.eq(Validation.DataValidator.validateRecord("ipNetworks", { cidr: "10.0.0.0/24" }).length, 0, "ipNetworks : CIDR valide → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("ipNetworks", { cidr: "nope" }).some((e) => e.code === "format"), true, "ipNetworks : CIDR invalide → 'format'");
   }
 
   console.log("\n• shared : invariants IPAM / réseaux");
   {
     // réseau power ne peut pas porter d'ip_network_id
-    ck.eq(Validation.validateRecord("networks", { kind: "power", ip_network_id: "ipn1" }).some((e) => e.code === "invariant"), true, "invariant : réseau power + ip_network_id → erreur");
-    ck.eq(Validation.validateRecord("networks", { kind: "data", ip_network_id: "ipn1" }).length, 0, "invariant : réseau data + ip_network_id → OK");
+    ck.eq(Validation.DataValidator.validateRecord("networks", { kind: "power", ip_network_id: "ipn1" }).some((e) => e.code === "invariant"), true, "invariant : réseau power + ip_network_id → erreur");
+    ck.eq(Validation.DataValidator.validateRecord("networks", { kind: "data", ip_network_id: "ipn1" }).length, 0, "invariant : réseau data + ip_network_id → OK");
     // plage DHCP : fin ≥ début
-    ck.eq(Validation.validateRecord("dhcpRanges", { start_ip: "10.0.0.20", end_ip: "10.0.0.10" }).some((e) => e.code === "invariant"), true, "invariant : plage DHCP fin < début → erreur");
-    ck.eq(Validation.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.0.20" }).length, 0, "invariant : plage DHCP fin ≥ début → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("dhcpRanges", { start_ip: "10.0.0.20", end_ip: "10.0.0.10" }).some((e) => e.code === "invariant"), true, "invariant : plage DHCP fin < début → erreur");
+    ck.eq(Validation.DataValidator.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.0.20" }).length, 0, "invariant : plage DHCP fin ≥ début → 0 erreur");
   }
 
   console.log("\n• shared : dépendance inverse (V5b — re-validation des enfants)");
@@ -1065,10 +1065,10 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const children = { "ipAddresses network_id net1": [{ id: "a1", address: "10.0.0.5", network_id: "net1" }] };
     const findChildren = (coll, fk, pid) => children[coll + " " + fk + " " + pid] || [];
     const fetch = () => null;   // les enfants résolvent le parent via l'injection de validateDependents
-    ck.eq(Validation.validateDependents("ipNetworks", { id: "net1", cidr: "10.0.0.0/24" }, findChildren, fetch).length, 0, "V5b : nouveau CIDR contient l'enfant → 0 erreur");
-    const errs = Validation.validateDependents("ipNetworks", { id: "net1", cidr: "10.0.5.0/24" }, findChildren, fetch);
+    ck.eq(Validation.DataValidator.validateDependents("ipNetworks", { id: "net1", cidr: "10.0.0.0/24" }, findChildren, fetch).length, 0, "V5b : nouveau CIDR contient l'enfant → 0 erreur");
+    const errs = Validation.DataValidator.validateDependents("ipNetworks", { id: "net1", cidr: "10.0.5.0/24" }, findChildren, fetch);
     ck.eq(errs.some((e) => e.code === "cross_entity" && e.collection === "ipAddresses" && e.id === "a1"), true, "V5b : nouveau CIDR exclut l'enfant → erreur sur l'adresse");
-    ck.eq(Validation.validateDependents("racks", { id: "r1" }, findChildren, fetch).length, 0, "V5b : collection sans dépendants → 0 erreur");
+    ck.eq(Validation.DataValidator.validateDependents("racks", { id: "r1" }, findChildren, fetch).length, 0, "V5b : collection sans dépendants → 0 erreur");
   }
 
   console.log("\n• shared : couverture des specs (toutes les collections spécifiées)");
@@ -1085,7 +1085,7 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     for (const collection of specced) {
       const Cls = EntityRegistry.classOf(collection);
       const entity = new Cls(requiredSample[collection] || {});
-      ck.eq(Validation.validateRecord(collection, entity.toJSON()).length, 0, collection + " : entité par défaut satisfait la spec");
+      ck.eq(Validation.DataValidator.validateRecord(collection, entity.toJSON()).length, 0, collection + " : entité par défaut satisfait la spec");
     }
   }
 
@@ -1094,22 +1094,22 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     // lecteur d'entité simulé : renvoie un record pour les id « existants », null sinon (subsume « existe ? »).
     const persisted = { "ports p1": { id: "p1" }, "networks n1": { id: "n1" } };
     const base = (coll, id) => persisted[coll + " " + id] || null;
-    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "p1" }, base).length, 0, "ref : FK existante → 0 erreur");
-    const broken = Validation.validateRecord("cables", { status: "planifie", from_port_id: "pX" }, base);
+    ck.eq(Validation.DataValidator.validateRecord("cables", { status: "planifie", from_port_id: "p1" }, base).length, 0, "ref : FK existante → 0 erreur");
+    const broken = Validation.DataValidator.validateRecord("cables", { status: "planifie", from_port_id: "pX" }, base);
     ck.eq(broken.some((e) => e.path === "from_port_id" && e.code === "ref_missing"), true, "ref : FK introuvable → 'ref_missing'");
-    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: null }, base).length, 0, "ref : FK null → ignorée");
-    const arr = Validation.validateRecord("cables", { status: "planifie", network_ids: ["n1", "nX"] }, base);
+    ck.eq(Validation.DataValidator.validateRecord("cables", { status: "planifie", from_port_id: null }, base).length, 0, "ref : FK null → ignorée");
+    const arr = Validation.DataValidator.validateRecord("cables", { status: "planifie", network_ids: ["n1", "nX"] }, base);
     ck.eq(arr.some((e) => e.path === "network_ids" && e.code === "ref_missing"), true, "ref : tableau de FK avec id absent → 'ref_missing'");
-    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "pX" }).length, 0, "ref : SANS lecteur → pas de contrôle référentiel (V1)");
+    ck.eq(Validation.DataValidator.validateRecord("cables", { status: "planifie", from_port_id: "pX" }).length, 0, "ref : SANS lecteur → pas de contrôle référentiel (V1)");
 
     // lecteur conscient du lot (renvoie le CONTENU du lot)
     const batch = { creates: [{ collection: "ports", record: { id: "pNew" } }], deletes: [{ collection: "networks", id: "n1" }] };
-    const batchFetch = Validation.buildBatchFetcher(base, batch);
+    const batchFetch = Validation.DataValidator.buildBatchFetcher(base, batch);
     ck(batchFetch("ports", "pNew") != null, "batch : entité créée dans le lot → existe");
     ck.eq(batchFetch("networks", "n1"), null, "batch : entité supprimée dans le lot → n'existe plus");
     ck(batchFetch("ports", "p1") != null, "batch : entité persistée hors lot → existe (base)");
     ck.eq(batchFetch("ports", "pX"), null, "batch : id inconnu → n'existe pas");
-    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "pNew" }, batchFetch).length, 0,
+    ck.eq(Validation.DataValidator.validateRecord("cables", { status: "planifie", from_port_id: "pNew" }, batchFetch).length, 0,
       "batch : câble référençant un port créé DANS le lot → accepté (pas de faux rejet)");
 
     // couverture référentielle : toute FK déclarée doit cibler une collection RÉELLE (garde anti-typo / anti-oubli).
@@ -1122,27 +1122,27 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
 
     // equipments : refs rack_id / dc_id (complétude V2).
     const eqFetch = (coll, id) => (((coll === "racks" && id === "r1") || (coll === "datacenters" && id === "dc1")) ? { id } : null);
-    ck.eq(Validation.validateRecord("equipments", { name: "e", rack_id: "r1" }, eqFetch).length, 0, "equipments : rack_id existant → 0 erreur");
-    ck.eq(Validation.validateRecord("equipments", { name: "e", rack_id: "rX" }, eqFetch).some((x) => x.path === "rack_id" && x.code === "ref_missing"), true, "equipments : rack_id inexistant → ref_missing");
-    ck.eq(Validation.validateRecord("equipments", { name: "e", dc_id: "dc1" }, eqFetch).length, 0, "equipments : dc_id existant → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("equipments", { name: "e", rack_id: "r1" }, eqFetch).length, 0, "equipments : rack_id existant → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("equipments", { name: "e", rack_id: "rX" }, eqFetch).some((x) => x.path === "rack_id" && x.code === "ref_missing"), true, "equipments : rack_id inexistant → ref_missing");
+    ck.eq(Validation.DataValidator.validateRecord("equipments", { name: "e", dc_id: "dc1" }, eqFetch).length, 0, "equipments : dc_id existant → 0 erreur");
   }
 
   console.log("\n• shared : règles cross-entité (V5 — IP ∈ CIDR de son réseau)");
   {
     // lecteur d'entité : un réseau IP « net1 » en 10.0.0.0/24.
     const fetch = (coll, id) => (coll === "ipNetworks" && id === "net1") ? { id: "net1", cidr: "10.0.0.0/24" } : null;
-    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.0.5", network_id: "net1" }, fetch).length, 0, "IP dans le CIDR du réseau → 0 erreur");
-    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.1.5", network_id: "net1" }, fetch).some((e) => e.code === "cross_entity"), true, "IP hors CIDR du réseau → 'cross_entity'");
-    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.1.5", network_id: null }, fetch).length, 0, "IP sans réseau → règle non applicable");
-    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.1.5", network_id: "net1" }).length, 0, "IP : SANS lecteur → pas de contrôle cross-entité");
+    ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "10.0.0.5", network_id: "net1" }, fetch).length, 0, "IP dans le CIDR du réseau → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "10.0.1.5", network_id: "net1" }, fetch).some((e) => e.code === "cross_entity"), true, "IP hors CIDR du réseau → 'cross_entity'");
+    ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "10.0.1.5", network_id: null }, fetch).length, 0, "IP sans réseau → règle non applicable");
+    ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "10.0.1.5", network_id: "net1" }).length, 0, "IP : SANS lecteur → pas de contrôle cross-entité");
     // plage DHCP ⊂ CIDR
-    ck.eq(Validation.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.0.20", network_id: "net1" }, fetch).length, 0, "plage DHCP dans le CIDR → 0 erreur");
-    ck.eq(Validation.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.9.20", network_id: "net1" }, fetch).some((e) => e.code === "cross_entity"), true, "borne DHCP hors CIDR → 'cross_entity'");
+    ck.eq(Validation.DataValidator.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.0.20", network_id: "net1" }, fetch).length, 0, "plage DHCP dans le CIDR → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.9.20", network_id: "net1" }, fetch).some((e) => e.code === "cross_entity"), true, "borne DHCP hors CIDR → 'cross_entity'");
     // batch-aware : réseau dont le CIDR est MODIFIÉ dans le même lot → la règle voit le nouveau cidr
     const batch = { updates: [{ collection: "ipNetworks", record: { id: "net1", cidr: "10.0.5.0/24" } }] };
-    const batchFetch = Validation.buildBatchFetcher(fetch, batch);
-    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.5.7", network_id: "net1" }, batchFetch).length, 0, "batch : IP dans le NOUVEAU CIDR du lot → acceptée");
-    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.0.7", network_id: "net1" }, batchFetch).some((e) => e.code === "cross_entity"), true, "batch : IP hors du nouveau CIDR → rejetée");
+    const batchFetch = Validation.DataValidator.buildBatchFetcher(fetch, batch);
+    ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "10.0.5.7", network_id: "net1" }, batchFetch).length, 0, "batch : IP dans le NOUVEAU CIDR du lot → acceptée");
+    ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "10.0.0.7", network_id: "net1" }, batchFetch).some((e) => e.code === "cross_entity"), true, "batch : IP hors du nouveau CIDR → rejetée");
   }
 
   console.log("\n• Store : garde de validation (mode fichier — seul garde-fou, pas de serveur)");

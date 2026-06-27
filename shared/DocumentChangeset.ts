@@ -20,44 +20,47 @@ export interface DocumentChangeset {
   images: boolean;
 }
 
-/** Changeset « rien » (élément neutre de la fusion). */
-export function emptyChangeset(): DocumentChangeset {
-  return { full: false, collections: [], meta: false, images: false };
-}
+/** Fabrique / fusion de changesets (méthodes statiques regroupées — cf. CLAUDE.md). */
+export class Changeset {
+  /** Changeset « rien » (élément neutre de la fusion). */
+  static empty(): DocumentChangeset {
+    return { full: false, collections: [], meta: false, images: false };
+  }
 
-/** Changeset « tout » : repli sûr quand le périmètre est inconnu (→ rechargement total). */
-export function fullChangeset(): DocumentChangeset {
-  return { full: true, collections: [], meta: true, images: true };
-}
+  /** Changeset « tout » : repli sûr quand le périmètre est inconnu (→ rechargement total). */
+  static full(): DocumentChangeset {
+    return { full: true, collections: [], meta: true, images: true };
+  }
 
-/** Normalise une valeur reçue (réseau, donc non fiable) en `DocumentChangeset` ; `null`/forme invalide → « tout ». */
-export function coerceChangeset(raw: unknown): DocumentChangeset {
-  if (!raw || typeof raw !== "object") return fullChangeset();
-  const candidate = raw as Partial<DocumentChangeset>;
-  if (candidate.full) return fullChangeset();
-  return {
-    full: false,
-    collections: Array.isArray(candidate.collections) ? candidate.collections.filter((c) => typeof c === "string") : [],
-    meta: !!candidate.meta,
-    images: !!candidate.images,
-  };
-}
+  /** Normalise une valeur reçue (réseau, donc non fiable) en `DocumentChangeset` ; `null`/forme invalide → « tout ». */
+  static coerce(raw: unknown): DocumentChangeset {
+    if (!raw || typeof raw !== "object") return Changeset.full();
+    const candidate = raw as Partial<DocumentChangeset>;
+    if (candidate.full) return Changeset.full();
+    return {
+      full: false,
+      collections: Array.isArray(candidate.collections) ? candidate.collections.filter((c) => typeof c === "string") : [],
+      meta: !!candidate.meta,
+      images: !!candidate.images,
+    };
+  }
 
-/** Fusionne deux changesets (accumulation d'événements rapprochés débouncés) : union des périmètres. */
-export function mergeChangesets(left: DocumentChangeset, right: DocumentChangeset): DocumentChangeset {
-  if (left.full || right.full) return { ...fullChangeset(), collections: unionCollections(left, right) };
-  return {
-    full: false,
-    collections: unionCollections(left, right),
-    meta: left.meta || right.meta,
-    images: left.images || right.images,
-  };
-}
+  /** Fusionne deux changesets (accumulation d'événements rapprochés débouncés) : union des périmètres. */
+  static merge(left: DocumentChangeset, right: DocumentChangeset): DocumentChangeset {
+    if (left.full || right.full) return { ...Changeset.full(), collections: Changeset.unionCollections(left, right) };
+    return {
+      full: false,
+      collections: Changeset.unionCollections(left, right),
+      meta: left.meta || right.meta,
+      images: left.images || right.images,
+    };
+  }
 
-/** Union dédupliquée des collections de deux changesets (ordre stable : gauche puis nouveautés de droite). */
-function unionCollections(left: DocumentChangeset, right: DocumentChangeset): string[] {
-  const seen = new Set(left.collections);
-  const merged = left.collections.slice();
-  for (const collection of right.collections) if (!seen.has(collection)) { seen.add(collection); merged.push(collection); }
-  return merged;
+  /** Union dédupliquée des collections de deux changesets (ordre stable : gauche puis nouveautés de droite). */
+  private static unionCollections(left: DocumentChangeset, right: DocumentChangeset): string[] {
+    const seen = new Set(left.collections);
+    const merged = left.collections.slice();
+    for (const collection of right.collections) if (!seen.has(collection)) { seen.add(collection); merged.push(collection); }
+    return merged;
+  }
 }

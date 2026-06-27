@@ -13,7 +13,7 @@ import { Text } from "../core/Text";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, CABLE_STATUS_BROKEN, CABLE_STATUS_RANK, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT, LOCATIONS } from "../domain/constants";
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
 import { CASCADE_SPEC, CascadeDelete, CascadeDetach } from "./cascadeSpec";
-import { normalizeRecord, validateRecord, validateDependents } from "../../shared/DataValidation";
+import { DataValidator } from "../../shared/DataValidation";
 import type { ValidationError, EntityFetcher, ChildFinder } from "../../shared/DataValidation";
 
 const COLLECTIONS = EntityRegistry.COLLECTIONS;
@@ -308,15 +308,15 @@ export class Store {
   /** Valide un enregistrement (forme canonique) + ses éventuelles dépendances inverses (V5b) ; si invalide →
       notifie et renvoie false (écriture bloquée). `record` = état (fusionné) qui SERA écrit. */
   private accepts(collection: string, record: Record<string, any>): boolean {
-    const errors = validateRecord(collection, record, this.entityFetcher);
-    if (!errors.length) errors.push(...validateDependents(collection, record, this.childFinder, this.entityFetcher));
+    const errors = DataValidator.validateRecord(collection, record, this.entityFetcher);
+    if (!errors.length) errors.push(...DataValidator.validateDependents(collection, record, this.childFinder, this.entityFetcher));
     if (errors.length) { this.onInvalid?.(errors); return false; }
     return true;
   }
   /** Normalise les CHAMPS PATCHÉS (forme canonique partagée) à partir du résultat fusionné — fixe l'incohérence
       historique où un patch posait des valeurs brutes (ex. `u_count: "10"`). */
   private _normalizePatch(collection: string, obj: any, patch: Record<string, any>): Record<string, any> {
-    const merged = normalizeRecord(collection, { ...obj.toJSON(), ...patch });
+    const merged = DataValidator.normalizeRecord(collection, { ...obj.toJSON(), ...patch });
     const normalizedPatch: Record<string, any> = {};
     for (const field of Object.keys(patch)) normalizedPatch[field] = (field in merged) ? merged[field] : patch[field];
     return normalizedPatch;

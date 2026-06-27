@@ -3,10 +3,13 @@
 
    Garantit qu'un enregistrement écrit dans un document respecte le schéma, QUEL QUE
    SOIT le client (UI packagée ou autre interface postant au serveur). Appliqué aux deux
-   points : saisie (UI) et écriture (serveur, autorité → 400). Cf. docs/validation.md.
+   points : saisie (UI, via le Store) et écriture (serveur, autorité → 400). Cf. docs/validation.md.
 
-   V1 = NIVEAU INTRINSÈQUE (record seul : requis / type / enum / borne). L'intégrité
-   référentielle (FK existantes) et les invariants inter-champs viendront en V2 / V3.
+   API publique = DEUX classes sémantiques (méthodes statiques regroupées, cf. CLAUDE.md) :
+     - `Ipv4`          : primitives IPv4 / CIDR pures (parité avec src/core/Ip).
+     - `DataValidator` : normalisation + validation (intrinsèque V1, référentiel V2,
+                         invariants V3, cross-entité V5, dépendance inverse V5b).
+   Les énumérations, types et la table `COLLECTION_SPECS` restent des exports de données.
 
    Contrainte `shared/` : fichier AUTO-SUFFISANT (aucun import) → compile sous le front
    (résolution bundler) ET le serveur (NodeNext). Les enums sont donc déclarés ICI comme
@@ -107,7 +110,51 @@ export type CrossEntityRule = (record: Record<string, any>, fetch: EntityFetcher
     dont `fkField` vaut `parentId`. INJECTÉ — l'UI l'adosse aux index du `Store`, le serveur à une requête. */
 export type ChildFinder = (collection: string, fkField: string, parentId: string) => Record<string, any>[];
 
-/* ---- spécifications des collections PILOTES (V1) ---- */
+/** Forme minimale d'un lot atomique (mêmes champs que la transaction serveur). */
+export interface BatchOps {
+  creates?: Array<{ collection: string; record: Record<string, any> }>;
+  updates?: Array<{ collection: string; record: Record<string, any> }>;
+  deletes?: Array<{ collection: string; id: string }>;
+}
+
+/** Sous-réseau IPv4 analysé (sous-ensemble de `core/Ip.Cidr` : ce dont la validation a besoin). */
+export interface ParsedCidr { base: number; prefix: number; mask: number; network: number; }
+
+/* ============================================================================
+   Ipv4 — primitives IPv4 / CIDR PURES (parité stricte avec src/core/Ip ; `core/Ip` y délègue).
+   ============================================================================ */
+export class Ipv4 {
+  /** « a.b.c.d » → entier non signé, ou `null` si invalide (octets ≤ 255). */
+  static toInt(value: string): number | null {
+    const match = typeof value === "string" ? value.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/) : null;
+    if (!match) return null;
+    let result = 0;
+    for (let i = 1; i <= 4; i++) { const octet = +match[i]; if (octet > 255) return null; result = result * 256 + octet; }
+    return result >>> 0;
+  }
+
+  /** « a.b.c.d/n » → sous-réseau analysé, ou `null` si invalide. */
+  static parseCidr(value: string): ParsedCidr | null {
+    const match = typeof value === "string" ? value.trim().match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/) : null;
+    if (!match) return null;
+    const base = Ipv4.toInt(match[1]); const prefix = +match[2];
+    if (base == null || prefix < 0 || prefix > 32) return null;
+    const mask = prefix === 0 ? 0 : ((0xFFFFFFFF << (32 - prefix)) >>> 0);
+    return { base, prefix, mask, network: (base & mask) >>> 0 };
+  }
+
+  /** Vrai si `value` est un CIDR IPv4 valide (« a.b.c.d/n », n ∈ 0..32). */
+  static isCidr(value: string): boolean {
+    return Ipv4.parseCidr(value) != null;
+  }
+
+  /** L'entier d'IP appartient-il au sous-réseau ? */
+  static inCidr(ipInt: number | null, cidr: ParsedCidr | null): boolean {
+    return cidr != null && ipInt != null && ((ipInt & cidr.mask) >>> 0) === cidr.network;
+  }
+}
+
+/* ---- spécifications des collections (couverture 19/19 — cf. docs/render-impact.md n'est PAS lié ; cf. docs/validation.md) ---- */
 export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   equipments: {
     fields: {
@@ -164,8 +211,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     },
   },
 
-  /* ---- collections ÉTENDUES (V1 intrinsèque + V2 référentiel) — specs PARTIELLES :
-         champs d'identité (non requis), énumérations, et surtout les CLÉS ÉTRANGÈRES (`ref`). ---- */
+  /* ---- collections ÉTENDUES — specs PARTIELLES : champs d'identité, énumérations, et surtout les FK (`ref`). ---- */
   ports: {
     fields: {
       name:           { type: "string" },
@@ -271,9 +317,9 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       (addr, fetch) => {
         if (!addr.network_id) return null;                                  // pas de réseau → règle non applicable
         const network = fetch("ipNetworks", addr.network_id);
-        const cidr = network ? parseCidr(network.cidr) : null;
+        const cidr = network ? Ipv4.parseCidr(network.cidr) : null;
         if (!cidr) return null;                                             // réseau absent / CIDR invalide → déjà couvert ailleurs
-        return inCidr(ipv4ToInt(addr.address), cidr) ? null
+        return Ipv4.inCidr(Ipv4.toInt(addr.address), cidr) ? null
           : { path: "address", message: `L'adresse ${addr.address} n'appartient pas au sous-réseau ${network!.cidr}.` };
       },
     ],
@@ -290,7 +336,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
         path: "end_ip",
         message: "La fin de plage doit être ≥ au début.",
         holds: (range) => {
-          const start = ipv4ToInt(range.start_ip), end = ipv4ToInt(range.end_ip);
+          const start = Ipv4.toInt(range.start_ip), end = Ipv4.toInt(range.end_ip);
           return start == null || end == null || start <= end;   // bornes invalides → déjà signalées par le format
         },
       },
@@ -300,10 +346,10 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       (range, fetch) => {
         if (!range.network_id) return null;
         const network = fetch("ipNetworks", range.network_id);
-        const cidr = network ? parseCidr(network.cidr) : null;
+        const cidr = network ? Ipv4.parseCidr(network.cidr) : null;
         if (!cidr) return null;
         for (const field of ["start_ip", "end_ip"] as const) {
-          if (!inCidr(ipv4ToInt(range[field]), cidr)) return { path: field, message: `La borne ${range[field]} n'appartient pas au sous-réseau ${network!.cidr}.` };
+          if (!Ipv4.inCidr(Ipv4.toInt(range[field]), cidr)) return { path: field, message: `La borne ${range[field]} n'appartient pas au sous-réseau ${network!.cidr}.` };
         }
         return null;
       },
@@ -325,212 +371,183 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
 };
 
-/** `true` si une spécification existe pour cette collection (sinon : ni normalisation ni validation). */
-export function hasSpec(collection: string): boolean {
-  return collection in COLLECTION_SPECS;
-}
-
-/* ---- normalisation ---- */
-const isEmpty = (value: unknown): boolean => value === undefined || value === null || value === "";
-
-/** Met un champ en forme canonique selon sa règle de type. Renvoie la valeur normalisée. */
-function normalizeField(rawValue: unknown, spec: FieldSpec): unknown {
-  // Absent / vide : valeur par défaut si fournie, sinon `null` si nullable, sinon on laisse tel quel
-  // (la validation signalera un éventuel `required`).
-  if (isEmpty(rawValue)) {
-    if ("default" in spec) return spec.default;
-    if (spec.nullable) return null;
-    return rawValue;
+/* ============================================================================
+   DataValidator — normalisation + validation (niveaux V1/V2/V3/V5/V5b).
+   ============================================================================ */
+export class DataValidator {
+  /** `true` si une spécification existe pour cette collection (sinon : ni normalisation ni validation). */
+  static hasSpec(collection: string): boolean {
+    return collection in COLLECTION_SPECS;
   }
-  switch (spec.type) {
-    case "number": {
-      const coerced = Number(rawValue);
-      return Number.isFinite(coerced) ? coerced : rawValue;   // non convertible → laissé (validation → "type")
+
+  /* ---- normalisation ---- */
+  /** Renvoie une COPIE normalisée de `record` selon la spec de `collection`. Les champs non déclarés
+      traversent inchangés (specs partielles) ; sans spec, l'enregistrement est renvoyé tel quel. */
+  static normalizeRecord(collection: string, record: Record<string, any>): Record<string, any> {
+    const spec = COLLECTION_SPECS[collection];
+    if (!spec) return { ...record };
+    const normalized: Record<string, any> = { ...record };
+    for (const [field, fieldSpec] of Object.entries(spec.fields)) {
+      normalized[field] = DataValidator.normalizeField(record[field], fieldSpec);
     }
-    case "boolean":
-      return rawValue === true || rawValue === "true";
-    case "string[]":
-      return Array.isArray(rawValue) ? rawValue.filter((item) => typeof item === "string") : [];
-    case "string":
-    default:
-      return String(rawValue);
+    return normalized;
   }
-}
 
-/** Renvoie une COPIE normalisée de `record` selon la spec de `collection`. Les champs non déclarés
-    traversent inchangés (specs partielles en V1) ; sans spec, l'enregistrement est renvoyé tel quel. */
-export function normalizeRecord(collection: string, record: Record<string, any>): Record<string, any> {
-  const spec = COLLECTION_SPECS[collection];
-  if (!spec) return { ...record };
-  const normalized: Record<string, any> = { ...record };
-  for (const [field, fieldSpec] of Object.entries(spec.fields)) {
-    normalized[field] = normalizeField(record[field], fieldSpec);
-  }
-  return normalized;
-}
+  /* ---- validation ---- */
+  /** Valide un enregistrement (supposé déjà normalisé) contre la spec de sa collection. Renvoie la liste des
+      erreurs (vide = valide). Sans spec → aucune erreur. Si `fetch` est fourni, ajoute l'INTÉGRITÉ RÉFÉRENTIELLE
+      (FK existantes — V2) et les règles CROSS-ENTITÉ (d'après les données de l'entité liée — V5). */
+  static validateRecord(collection: string, record: Record<string, any>, fetch?: EntityFetcher): ValidationError[] {
+    const spec = COLLECTION_SPECS[collection];
+    if (!spec) return [];
+    const errors: ValidationError[] = [];
+    const id = typeof record.id === "string" ? record.id : undefined;
+    const fail = (path: string, code: ValidationError["code"], message: string) =>
+      errors.push({ collection, id, path, code, message });
 
-/* ---- formats (IPv4 / CIDR) — primitives PURES, parité stricte avec src/core/Ip.ts ---- */
-/** « a.b.c.d » → entier non signé, ou `null` si invalide (octets ≤ 255). */
-export function ipv4ToInt(value: string): number | null {
-  const match = typeof value === "string" ? value.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/) : null;
-  if (!match) return null;
-  let result = 0;
-  for (let i = 1; i <= 4; i++) { const octet = +match[i]; if (octet > 255) return null; result = result * 256 + octet; }
-  return result >>> 0;
-}
-/** Vrai si `value` est un CIDR IPv4 valide (« a.b.c.d/n », n ∈ 0..32). */
-export function isCidr(value: string): boolean {
-  return parseCidr(value) != null;
-}
+    for (const [field, fieldSpec] of Object.entries(spec.fields)) {
+      const value = record[field];
 
-/** Sous-réseau IPv4 analysé (sous-ensemble de `core/Ip.Cidr` : ce dont la validation a besoin). */
-export interface ParsedCidr { base: number; prefix: number; mask: number; network: number; }
-
-/** « a.b.c.d/n » → sous-réseau analysé, ou `null` si invalide. Parité stricte avec `core/Ip.parseCidr`. */
-export function parseCidr(value: string): ParsedCidr | null {
-  const match = typeof value === "string" ? value.trim().match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/) : null;
-  if (!match) return null;
-  const base = ipv4ToInt(match[1]); const prefix = +match[2];
-  if (base == null || prefix < 0 || prefix > 32) return null;
-  const mask = prefix === 0 ? 0 : ((0xFFFFFFFF << (32 - prefix)) >>> 0);
-  return { base, prefix, mask, network: (base & mask) >>> 0 };
-}
-
-/** L'entier d'IP appartient-il au sous-réseau ? */
-export function inCidr(ipInt: number | null, cidr: ParsedCidr | null): boolean {
-  return cidr != null && ipInt != null && ((ipInt & cidr.mask) >>> 0) === cidr.network;
-}
-function matchesFormat(value: string, format: NonNullable<FieldSpec["format"]>): boolean {
-  return format === "cidr" ? isCidr(value) : ipv4ToInt(value) != null;
-}
-
-/* ---- validation ---- */
-/** Vrai si la valeur correspond bien au type déclaré (hors `null`, géré à part par `nullable`). */
-function matchesType(value: unknown, type: FieldType): boolean {
-  switch (type) {
-    case "number": return typeof value === "number" && Number.isFinite(value);
-    case "boolean": return typeof value === "boolean";
-    case "string[]": return Array.isArray(value) && value.every((item) => typeof item === "string");
-    case "string": default: return typeof value === "string";
-  }
-}
-
-/** Valide un enregistrement (supposé déjà normalisé) contre la spec de sa collection. Renvoie la liste des
-    erreurs (vide = valide). Sans spec → aucune erreur. Si `fetch` est fourni, ajoute l'INTÉGRITÉ RÉFÉRENTIELLE
-    (FK existantes — V2) et les règles CROSS-ENTITÉ (d'après les données de l'entité liée — V5). */
-export function validateRecord(collection: string, record: Record<string, any>, fetch?: EntityFetcher): ValidationError[] {
-  const spec = COLLECTION_SPECS[collection];
-  if (!spec) return [];
-  const errors: ValidationError[] = [];
-  const id = typeof record.id === "string" ? record.id : undefined;
-  const fail = (path: string, code: ValidationError["code"], message: string) =>
-    errors.push({ collection, id, path, code, message });
-
-  for (const [field, fieldSpec] of Object.entries(spec.fields)) {
-    const value = record[field];
-
-    if (isEmpty(value)) {
-      if (fieldSpec.required) fail(field, "required", `Le champ « ${field} » est obligatoire.`);
-      continue;   // vide non requis → rien d'autre à vérifier
-    }
-    if (value === null) {
-      if (!fieldSpec.nullable) fail(field, "type", `Le champ « ${field} » ne peut pas être null.`);
-      continue;
-    }
-    if (!matchesType(value, fieldSpec.type)) {
-      fail(field, "type", `Le champ « ${field} » doit être de type ${fieldSpec.type}.`);
-      continue;   // mauvais type → enum/min/ref non pertinents
-    }
-    if (fieldSpec.enum && !fieldSpec.enum.includes(value as string)) {
-      fail(field, "enum", `Valeur « ${value} » invalide pour « ${field} » (attendu : ${fieldSpec.enum.join(", ")}).`);
-    }
-    if (fieldSpec.min != null && typeof value === "number" && value < fieldSpec.min) {
-      fail(field, "min", `Le champ « ${field} » doit être ≥ ${fieldSpec.min}.`);
-    }
-    if (fieldSpec.format && typeof value === "string" && !matchesFormat(value, fieldSpec.format)) {
-      fail(field, "format", `Le champ « ${field} » n'est pas ${fieldSpec.format === "cidr" ? "un CIDR IPv4 (ex. 10.0.0.0/24)" : "une adresse IPv4 (ex. 10.0.0.5)"}.`);
-    }
-    // intégrité référentielle (si `fetch`) : la (ou les) FK doivent désigner une entité existante (fetch ≠ null).
-    if (fetch && fieldSpec.ref) {
-      const referencedIds = fieldSpec.type === "string[]" ? (value as string[]) : [value as string];
-      for (const referencedId of referencedIds) {
-        if (typeof referencedId === "string" && referencedId && fetch(fieldSpec.ref, referencedId) == null) {
-          fail(field, "ref_missing", `Référence « ${referencedId} » introuvable dans « ${fieldSpec.ref} ».`);
+      if (DataValidator.isEmpty(value)) {
+        if (fieldSpec.required) fail(field, "required", `Le champ « ${field} » est obligatoire.`);
+        continue;   // vide non requis → rien d'autre à vérifier
+      }
+      if (value === null) {
+        if (!fieldSpec.nullable) fail(field, "type", `Le champ « ${field} » ne peut pas être null.`);
+        continue;
+      }
+      if (!DataValidator.matchesType(value, fieldSpec.type)) {
+        fail(field, "type", `Le champ « ${field} » doit être de type ${fieldSpec.type}.`);
+        continue;   // mauvais type → enum/min/ref non pertinents
+      }
+      if (fieldSpec.enum && !fieldSpec.enum.includes(value as string)) {
+        fail(field, "enum", `Valeur « ${value} » invalide pour « ${field} » (attendu : ${fieldSpec.enum.join(", ")}).`);
+      }
+      if (fieldSpec.min != null && typeof value === "number" && value < fieldSpec.min) {
+        fail(field, "min", `Le champ « ${field} » doit être ≥ ${fieldSpec.min}.`);
+      }
+      if (fieldSpec.format && typeof value === "string" && !DataValidator.matchesFormat(value, fieldSpec.format)) {
+        fail(field, "format", `Le champ « ${field} » n'est pas ${fieldSpec.format === "cidr" ? "un CIDR IPv4 (ex. 10.0.0.0/24)" : "une adresse IPv4 (ex. 10.0.0.5)"}.`);
+      }
+      // intégrité référentielle (si `fetch`) : la (ou les) FK doivent désigner une entité existante (fetch ≠ null).
+      if (fetch && fieldSpec.ref) {
+        const referencedIds = fieldSpec.type === "string[]" ? (value as string[]) : [value as string];
+        for (const referencedId of referencedIds) {
+          if (typeof referencedId === "string" && referencedId && fetch(fieldSpec.ref, referencedId) == null) {
+            fail(field, "ref_missing", `Référence « ${referencedId} » introuvable dans « ${fieldSpec.ref} ».`);
+          }
         }
       }
     }
-  }
-  // invariants INTER-CHAMPS (V3) : règles dépendant de plusieurs champs (ex. réseau principal ∈ réseaux du câble).
-  for (const invariant of spec.invariants || []) {
-    if (!invariant.holds(record)) fail(invariant.path, "invariant", invariant.message);
-  }
-  // règles CROSS-ENTITÉ (V5, si `fetch`) : dépendent des données d'une entité liée (ex. IP ∈ CIDR de son réseau).
-  if (fetch) {
-    for (const rule of spec.crossEntity || []) {
-      const violation = rule(record, fetch);
-      if (violation) fail(violation.path, "cross_entity", violation.message);
+    // invariants INTER-CHAMPS (V3) : règles dépendant de plusieurs champs (ex. réseau principal ∈ réseaux du câble).
+    for (const invariant of spec.invariants || []) {
+      if (!invariant.holds(record)) fail(invariant.path, "invariant", invariant.message);
     }
-  }
-  return errors;
-}
-
-/** Normalise PUIS valide — l'enchaînement appliqué au serveur avant écriture. `fetch` (optionnel) active
-    l'intégrité référentielle (V2) et les règles cross-entité (V5). */
-export function normalizeAndValidate(collection: string, record: Record<string, any>, fetch?: EntityFetcher): { record: Record<string, any>; errors: ValidationError[] } {
-  const normalized = normalizeRecord(collection, record);
-  return { record: normalized, errors: validateRecord(collection, normalized, fetch) };
-}
-
-/** DÉPENDANCE INVERSE (V5b) : écrire `parentRecord` peut invalider ses ENFANTS (ex. réseau dont le `cidr` change
-    → des adresses tombent hors sous-réseau). Pour chaque collection-enfant déclarée (`spec.dependents`), retrouve
-    les enfants (`findChildren`) et re-joue LEURS règles cross-entité CONTRE LE NOUVEL ÉTAT du parent (qui n'est pas
-    encore persisté → on l'injecte via `fetch`). Renvoie les violations (rattachées à l'enfant fautif). Sur une
-    création, l'id du parent est neuf → aucun enfant → no-op. */
-export function validateDependents(parentCollection: string, parentRecord: Record<string, any>, findChildren: ChildFinder, fetch: EntityFetcher): ValidationError[] {
-  const spec = COLLECTION_SPECS[parentCollection];
-  if (!spec || !spec.dependents || !parentRecord.id) return [];
-  // le parent en cours d'écriture n'est pas encore persisté : on le superpose à l'état lu pour que les règles
-  // des enfants voient le NOUVEAU parent (ex. le nouveau `cidr`).
-  const fetchWithNewParent: EntityFetcher = (collection, id) =>
-    (collection === parentCollection && id === parentRecord.id) ? parentRecord : fetch(collection, id);
-  const errors: ValidationError[] = [];
-  for (const dependent of spec.dependents) {
-    for (const child of findChildren(dependent.collection, dependent.fkField, parentRecord.id)) {
-      for (const error of validateRecord(dependent.collection, child, fetchWithNewParent)) {
-        if (error.code === "cross_entity") errors.push({ ...error, message: error.message + ` — incohérent avec la modification de « ${parentCollection} ».` });
+    // règles CROSS-ENTITÉ (V5, si `fetch`) : dépendent des données d'une entité liée (ex. IP ∈ CIDR de son réseau).
+    if (fetch) {
+      for (const rule of spec.crossEntity || []) {
+        const violation = rule(record, fetch);
+        if (violation) fail(violation.path, "cross_entity", violation.message);
       }
     }
+    return errors;
   }
-  return errors;
-}
 
-/* ---- intégrité référentielle dans un LOT (transaction) ---- */
-/** Forme minimale d'un lot atomique (mêmes champs que la transaction serveur). */
-export interface BatchOps {
-  creates?: Array<{ collection: string; record: Record<string, any> }>;
-  updates?: Array<{ collection: string; record: Record<string, any> }>;
-  deletes?: Array<{ collection: string; id: string }>;
-}
-
-const refKey = (collection: string, id: string): string => collection + " " + id;
-
-/** Construit un résolveur d'existence CONSCIENT DU LOT : une FK peut désigner une entité créée dans le MÊME
-    lot (pas encore persistée), ou ne plus exister car supprimée dans le lot. Sans cela, un `/transact` légitime
-    (créer un port ET le câble qui le référence) serait rejeté à tort. L'ordre d'application du lot étant
-    suppressions → mises à jour → créations, un upsert l'emporte sur une suppression du même id. */
-export function buildBatchFetcher(base: EntityFetcher, batch: BatchOps): EntityFetcher {
-  const upsertedInBatch = new Map<string, Record<string, any>>();
-  const deletedInBatch = new Set<string>();
-  for (const entry of [...(batch.creates || []), ...(batch.updates || [])]) {
-    if (entry && entry.collection && entry.record && entry.record.id) upsertedInBatch.set(refKey(entry.collection, entry.record.id), entry.record);
+  /** Normalise PUIS valide — l'enchaînement appliqué au serveur avant écriture. `fetch` (optionnel) active
+      l'intégrité référentielle (V2) et les règles cross-entité (V5). */
+  static normalizeAndValidate(collection: string, record: Record<string, any>, fetch?: EntityFetcher): { record: Record<string, any>; errors: ValidationError[] } {
+    const normalized = DataValidator.normalizeRecord(collection, record);
+    return { record: normalized, errors: DataValidator.validateRecord(collection, normalized, fetch) };
   }
-  for (const entry of (batch.deletes || [])) {
-    if (entry && entry.collection && entry.id) deletedInBatch.add(refKey(entry.collection, entry.id));
+
+  /** DÉPENDANCE INVERSE (V5b) : écrire `parentRecord` peut invalider ses ENFANTS (ex. réseau dont le `cidr` change
+      → des adresses tombent hors sous-réseau). Pour chaque collection-enfant déclarée (`spec.dependents`), retrouve
+      les enfants (`findChildren`) et re-joue LEURS règles cross-entité CONTRE LE NOUVEL ÉTAT du parent (pas encore
+      persisté → on l'injecte via `fetch`). Renvoie les violations (rattachées à l'enfant fautif). Sur une création,
+      l'id du parent est neuf → aucun enfant → no-op. */
+  static validateDependents(parentCollection: string, parentRecord: Record<string, any>, findChildren: ChildFinder, fetch: EntityFetcher): ValidationError[] {
+    const spec = COLLECTION_SPECS[parentCollection];
+    if (!spec || !spec.dependents || !parentRecord.id) return [];
+    // le parent en cours d'écriture n'est pas encore persisté : on le superpose à l'état lu pour que les règles
+    // des enfants voient le NOUVEAU parent (ex. le nouveau `cidr`).
+    const fetchWithNewParent: EntityFetcher = (collection, id) =>
+      (collection === parentCollection && id === parentRecord.id) ? parentRecord : fetch(collection, id);
+    const errors: ValidationError[] = [];
+    for (const dependent of spec.dependents) {
+      for (const child of findChildren(dependent.collection, dependent.fkField, parentRecord.id)) {
+        for (const error of DataValidator.validateRecord(dependent.collection, child, fetchWithNewParent)) {
+          if (error.code === "cross_entity") errors.push({ ...error, message: error.message + ` — incohérent avec la modification de « ${parentCollection} ».` });
+        }
+      }
+    }
+    return errors;
   }
-  return (collection: string, id: string): Record<string, any> | null => {
-    const key = refKey(collection, id);
-    if (upsertedInBatch.has(key)) return upsertedInBatch.get(key)!;   // créé/màj dans le lot → son CONTENU (appliqué après les deletes)
-    if (deletedInBatch.has(key)) return null;                         // supprimé dans le lot → n'existe plus
-    return base(collection, id);                                      // sinon : état persisté
-  };
+
+  /** Construit un lecteur d'entité CONSCIENT DU LOT : une FK / règle cross-entité peut viser une entité créée ou
+      modifiée dans le MÊME lot (on renvoie alors le CONTENU du lot, ex. un `cidr` modifié), ou supprimée (→ `null`).
+      Sans cela, un `/transact` légitime (créer un réseau ET une adresse qui s'y rattache) serait rejeté à tort.
+      Ordre d'application = suppressions → màj → créations, donc un upsert l'emporte sur une suppression du même id. */
+  static buildBatchFetcher(base: EntityFetcher, batch: BatchOps): EntityFetcher {
+    const upsertedInBatch = new Map<string, Record<string, any>>();
+    const deletedInBatch = new Set<string>();
+    for (const entry of [...(batch.creates || []), ...(batch.updates || [])]) {
+      if (entry && entry.collection && entry.record && entry.record.id) upsertedInBatch.set(DataValidator.refKey(entry.collection, entry.record.id), entry.record);
+    }
+    for (const entry of (batch.deletes || [])) {
+      if (entry && entry.collection && entry.id) deletedInBatch.add(DataValidator.refKey(entry.collection, entry.id));
+    }
+    return (collection: string, id: string): Record<string, any> | null => {
+      const key = DataValidator.refKey(collection, id);
+      if (upsertedInBatch.has(key)) return upsertedInBatch.get(key)!;   // créé/màj dans le lot → son CONTENU
+      if (deletedInBatch.has(key)) return null;                         // supprimé dans le lot → n'existe plus
+      return base(collection, id);                                      // sinon : état persisté
+    };
+  }
+
+  /* ---- helpers internes ---- */
+  private static isEmpty(value: unknown): boolean {
+    return value === undefined || value === null || value === "";
+  }
+
+  /** Met un champ en forme canonique selon sa règle de type. */
+  private static normalizeField(rawValue: unknown, spec: FieldSpec): unknown {
+    // Absent / vide : valeur par défaut si fournie, sinon `null` si nullable, sinon on laisse tel quel
+    // (la validation signalera un éventuel `required`).
+    if (DataValidator.isEmpty(rawValue)) {
+      if ("default" in spec) return spec.default;
+      if (spec.nullable) return null;
+      return rawValue;
+    }
+    switch (spec.type) {
+      case "number": {
+        const coerced = Number(rawValue);
+        return Number.isFinite(coerced) ? coerced : rawValue;   // non convertible → laissé (validation → "type")
+      }
+      case "boolean":
+        return rawValue === true || rawValue === "true";
+      case "string[]":
+        return Array.isArray(rawValue) ? rawValue.filter((item) => typeof item === "string") : [];
+      case "string":
+      default:
+        return String(rawValue);
+    }
+  }
+
+  /** Vrai si la valeur correspond bien au type déclaré (hors `null`, géré à part par `nullable`). */
+  private static matchesType(value: unknown, type: FieldType): boolean {
+    switch (type) {
+      case "number": return typeof value === "number" && Number.isFinite(value);
+      case "boolean": return typeof value === "boolean";
+      case "string[]": return Array.isArray(value) && value.every((item) => typeof item === "string");
+      case "string": default: return typeof value === "string";
+    }
+  }
+
+  private static matchesFormat(value: string, format: NonNullable<FieldSpec["format"]>): boolean {
+    return format === "cidr" ? Ipv4.isCidr(value) : Ipv4.toInt(value) != null;
+  }
+
+  private static refKey(collection: string, id: string): string {
+    return collection + " " + id;
+  }
 }

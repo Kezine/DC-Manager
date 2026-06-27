@@ -1,5 +1,5 @@
 import { DocumentChangeset } from "./Changeset";
-import { ThreeImpact, threeImpactOf, worseThreeImpact, COLLECTION_THREE_IMPACT } from "./RenderImpact";
+import { ThreeImpact, RenderImpact, COLLECTION_THREE_IMPACT } from "./RenderImpact";
 
 /* ============================================================================
    PLANIFICATEUR DE RECHARGEMENT — du changeset au plan d'actions.
@@ -31,7 +31,7 @@ export class ReloadPlanner {
 
   /** Impact 3D d'une collection selon la carte injectée (défaut prudent `geometry` si inconnue). */
   private threeImpactOf(collection: string): ThreeImpact {
-    return this.impactByCollection[collection] ?? threeImpactOf(collection);
+    return this.impactByCollection[collection] ?? RenderImpact.of(collection);
   }
 
   /** Calcule le plan de rechargement pour un changeset donné. */
@@ -46,7 +46,7 @@ export class ReloadPlanner {
     // de re-décoder les images inchangées — cf. P3).
     let threeRebuild: ThreeImpact = changeset.images ? "geometry" : "none";
     for (const collection of changeset.collections) {
-      threeRebuild = worseThreeImpact(threeRebuild, this.threeImpactOf(collection));
+      threeRebuild = RenderImpact.worst(threeRebuild, this.threeImpactOf(collection));
     }
 
     return {

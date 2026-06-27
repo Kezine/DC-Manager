@@ -2,4 +2,4 @@
    (source de vérité unique). Ce fichier ne fait que ré-exporter pour préserver les imports
    existants (`from "../sync"`). Cf. shared/DocumentChangeset.ts, CLAUDE.md « Code partagé ». */
 export type { DocumentChangeset } from "../../shared/DocumentChangeset";
-export { emptyChangeset, fullChangeset, coerceChangeset, mergeChangesets } from "../../shared/DocumentChangeset";
+export { Changeset } from "../../shared/DocumentChangeset";

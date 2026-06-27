@@ -20,14 +20,6 @@ import { EntityRegistry } from "../models";
  *  - `geometry` : des meshes/labels/textures changent → reconstruction complète requise. */
 export type ThreeImpact = "none" | "recolor" | "geometry";
 
-/** Ordre de gravité croissante — pour calculer le « pire » impact d'un lot de collections. */
-const THREE_IMPACT_SEVERITY: Record<ThreeImpact, number> = { none: 0, recolor: 1, geometry: 2 };
-
-/** Renvoie l'impact le PLUS GRAVE des deux (none < recolor < geometry). */
-export function worseThreeImpact(left: ThreeImpact, right: ThreeImpact): ThreeImpact {
-  return THREE_IMPACT_SEVERITY[left] >= THREE_IMPACT_SEVERITY[right] ? left : right;
-}
-
 /** Impact 3D par collection. EXHAUSTIF sur `EntityRegistry.COLLECTIONS` (cf. test d'invariant). */
 export const COLLECTION_THREE_IMPACT: Record<string, ThreeImpact> = {
   // ----- Physique : dessiné en 3D → reconstruction géométrique -----
@@ -56,12 +48,23 @@ export const COLLECTION_THREE_IMPACT: Record<string, ThreeImpact> = {
   cableBundles: "none",      // groupage de câbles — lu par le seul tooltip (cableBundleOf)
 };
 
-/** Impact 3D d'une collection ; défaut PRUDENT à `geometry` pour une collection inconnue de la carte. */
-export function threeImpactOf(collection: string): ThreeImpact {
-  return COLLECTION_THREE_IMPACT[collection] ?? "geometry";
-}
+/** Accès à la carte d'impact de rendu (méthodes statiques regroupées — cf. CLAUDE.md). */
+export class RenderImpact {
+  /** Ordre de gravité croissante — pour calculer le « pire » impact d'un lot de collections. */
+  private static readonly SEVERITY: Record<ThreeImpact, number> = { none: 0, recolor: 1, geometry: 2 };
 
-/** Collections de `EntityRegistry` absentes de la carte (doit être vide — vérifié par test d'invariant). */
-export function unmappedCollections(): string[] {
-  return EntityRegistry.COLLECTIONS.filter((collection) => !(collection in COLLECTION_THREE_IMPACT));
+  /** Renvoie l'impact le PLUS GRAVE des deux (none < recolor < geometry). */
+  static worst(left: ThreeImpact, right: ThreeImpact): ThreeImpact {
+    return RenderImpact.SEVERITY[left] >= RenderImpact.SEVERITY[right] ? left : right;
+  }
+
+  /** Impact 3D d'une collection ; défaut PRUDENT à `geometry` pour une collection inconnue de la carte. */
+  static of(collection: string): ThreeImpact {
+    return COLLECTION_THREE_IMPACT[collection] ?? "geometry";
+  }
+
+  /** Collections de `EntityRegistry` absentes de la carte (doit être vide — vérifié par test d'invariant). */
+  static unmapped(): string[] {
+    return EntityRegistry.COLLECTIONS.filter((collection) => !(collection in COLLECTION_THREE_IMPACT));
+  }
 }

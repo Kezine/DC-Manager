@@ -11,7 +11,7 @@ import { Store } from "../store";
 import { readRuntimeConfig } from "./RuntimeConfig";
 import { GraphView, ListView, ListConfigs, Forms, DatacenterView } from "../views";
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
-import { ReloadPlanner, coerceChangeset, mergeChangesets, fullChangeset } from "../sync";
+import { ReloadPlanner, Changeset } from "../sync";
 import type { DocumentChangeset } from "../sync";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen } from "../ui";
@@ -548,7 +548,7 @@ async function boot(): Promise<void> {
   async function restReloadDocument(opts?: { conflict?: boolean; changeset?: DocumentChangeset }): Promise<void> {
     if (!restDocId) return;
     // 409 : on ignore QUELLES entités l'autre client a changées → rechargement total prudent. Sinon : périmètre du changeset.
-    const changeset = opts?.conflict ? fullChangeset() : (opts?.changeset || fullChangeset());
+    const changeset = opts?.conflict ? Changeset.full() : (opts?.changeset || Changeset.full());
     const plan = reloadPlanner.plan(changeset);
     flog("reload document", opts?.conflict ? "(conflit 409)" : "(changement externe)", "→ 3D:" + plan.threeRebuild, restLastBy);
     Notify.busy(opts?.conflict ? "Conflit de version — rechargement…" : "Mise à jour du document…");
@@ -585,7 +585,7 @@ async function boot(): Promise<void> {
   };
   /** Planifie un rechargement débouncé en consommant les changesets SSE accumulés (fusionnés). */
   function flushPendingReload(): void {
-    const changeset = pendingChangeset || fullChangeset();
+    const changeset = pendingChangeset || Changeset.full();
     pendingChangeset = null;
     void restReloadDocument({ changeset });
   }
@@ -602,8 +602,8 @@ async function boot(): Promise<void> {
           restLastBy = d.by || null;
           // accumule le périmètre de CET événement avec ceux déjà en attente (plusieurs écritures peuvent tomber
           // dans la fenêtre de debounce) → une seule reconstruction couvrant l'union des changements.
-          const incoming = coerceChangeset(d.changeset);
-          pendingChangeset = pendingChangeset ? mergeChangesets(pendingChangeset, incoming) : incoming;
+          const incoming = Changeset.coerce(d.changeset);
+          pendingChangeset = pendingChangeset ? Changeset.merge(pendingChangeset, incoming) : incoming;
           clearTimeout(restReloadTO); restReloadTO = setTimeout(flushPendingReload, 250);
         }
       } catch (_) { /* ignore */ } };

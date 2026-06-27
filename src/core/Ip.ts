@@ -1,5 +1,5 @@
 import type { Store } from "../store";
-import { ipv4ToInt, parseCidr as sharedParseCidr, inCidr as sharedInCidr } from "../../shared/DataValidation";
+import { Ipv4 } from "../../shared/DataValidation";
 
 /** CIDR analysé. */
 export interface Cidr {
@@ -16,7 +16,7 @@ export class Ip {
   /** « a.b.c.d » → entier non signé, ou null si invalide. DÉLÉGUÉ au parseur IPv4 PARTAGÉ
       (`shared/DataValidation.ipv4ToInt`) → un seul analyseur, réutilisé par la validation. */
   static toInt(str: string): number | null {
-    return ipv4ToInt(str);
+    return Ipv4.toInt(str);
   }
 
   /** Entier → « a.b.c.d ». */
@@ -28,7 +28,7 @@ export class Ip {
   /** « a.b.c.d/n » → Cidr enrichi, ou null si invalide. Le parsing de BASE (base/prefix/mask/network) est DÉLÉGUÉ
       au parseur PARTAGÉ ; on n'ajoute ici que les champs dérivés (broadcast, hôtes) propres à l'UI. */
   static parseCidr(str: string): Cidr | null {
-    const parsed = sharedParseCidr(str);
+    const parsed = Ipv4.parseCidr(str);
     if (!parsed) return null;
     const { base, prefix, mask, network } = parsed;
     const broadcast = (network | ((~mask) >>> 0)) >>> 0;
@@ -44,7 +44,7 @@ export class Ip {
 
   /** L'entier d'IP appartient-il au CIDR ? DÉLÉGUÉ au prédicat PARTAGÉ (le Cidr enrichi a `mask`+`network`). */
   static inCidr(ipInt: number | null, cidr: Cidr | null): boolean {
-    return sharedInCidr(ipInt, cidr);
+    return Ipv4.inCidr(ipInt, cidr);
   }
 
   /** Libellé court d'un réseau IP (label · cidr). */

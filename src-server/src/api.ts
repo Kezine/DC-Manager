@@ -6,7 +6,7 @@ import { DocumentStore } from "./documents.js";
 import { Auth, type SsoResult } from "./auth.js";
 import { LiveBus } from "./live.js";
 import type { DocumentChangeset } from "../../shared/DocumentChangeset.js";   // type PARTAGÉ front ⇄ back (source unique)
-import { normalizeAndValidate, buildBatchFetcher, validateDependents, type ValidationError, type EntityFetcher, type ChildFinder } from "../../shared/DataValidation.js";   // normalisation + validation PARTAGÉES
+import { DataValidator, type ValidationError, type EntityFetcher, type ChildFinder } from "../../shared/DataValidation.js";   // normalisation + validation PARTAGÉES
 
 /** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`). */
 type RepoRequest = Request & { repo?: Repository; authUser?: SsoResult; docRev?: number };
@@ -189,12 +189,12 @@ export class Api {
     const body: any = req.body || {};
     // Lecteur d'intégrité CONSCIENT DU LOT : une FK / règle cross-entité peut viser une entité créée ou modifiée
     // dans le même lot (ex. une adresse rattachée à un réseau dont le CIDR change dans ce lot), ou supprimée.
-    const fetch = buildBatchFetcher(this.repoFetcher(req), body);
+    const fetch = DataValidator.buildBatchFetcher(this.repoFetcher(req), body);
     // Normalise + valide CHAQUE création/mise à jour ; le moindre échec rejette TOUT le lot (atomicité).
     const errors: ValidationError[] = [];
     const acceptEntry = (entry: any) => {
       if (!entry || !entry.collection || !entry.record) return entry;
-      const { record, errors: entryErrors } = normalizeAndValidate(entry.collection, entry.record, fetch);
+      const { record, errors: entryErrors } = DataValidator.normalizeAndValidate(entry.collection, entry.record, fetch);
       errors.push(...entryErrors);
       return { ...entry, record };
     };
@@ -258,7 +258,7 @@ export class Api {
   }
 
   private accept(res: Response, collection: string, record: Record<string, any>, fetch?: EntityFetcher): Record<string, any> | null {
-    const { record: normalized, errors } = normalizeAndValidate(collection, record, fetch);
+    const { record: normalized, errors } = DataValidator.normalizeAndValidate(collection, record, fetch);
     if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return null; }
     return normalized;
   }
@@ -277,7 +277,7 @@ export class Api {
     const existing = this.repoOf(req).getOne(req.params.collection, req.params.id) || {};
     const record = this.accept(res, req.params.collection, { ...existing, ...(req.body || {}), id: req.params.id }, this.repoFetcher(req)); if (!record) return;
     // V5b : si ce changement invalide des enfants (ex. CIDR d'un réseau → adresses hors sous-réseau), on rejette.
-    const dependentErrors = validateDependents(req.params.collection, record, this.repoChildFinder(req), this.repoFetcher(req));
+    const dependentErrors = DataValidator.validateDependents(req.params.collection, record, this.repoChildFinder(req), this.repoFetcher(req));
     if (dependentErrors.length) { res.status(400).json({ error: "données invalides", errors: dependentErrors }); return; }
     try { this.repoOf(req).upsert(req.params.collection, record, this.revOf(req)); res.json(record); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
