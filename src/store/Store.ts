@@ -14,7 +14,7 @@ import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, CABLE_STATUS_BRO
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
 import { CASCADE_SPEC, CascadeDelete, CascadeDetach } from "./cascadeSpec";
 import { normalizeRecord, validateRecord } from "../../shared/DataValidation";
-import type { ValidationError, EntityResolver } from "../../shared/DataValidation";
+import type { ValidationError, EntityFetcher } from "../../shared/DataValidation";
 
 const COLLECTIONS = EntityRegistry.COLLECTIONS;
 const ENTITY_CLASSES = EntityRegistry.CLASSES;
@@ -301,11 +301,11 @@ export class Store {
      retour immédiat AVANT l'écriture réseau (le serveur reste l'autorité et re-valide). */
   /** Notifié quand une écriture est BLOQUÉE car non conforme (parité avec le rejet 400 serveur). */
   onInvalid: ((errors: ValidationError[]) => void) | null = null;
-  /** Résolveur d'existence (intégrité référentielle) adossé au cache hydraté. */
-  private entityResolver: EntityResolver = (collection, id) => !!this.get(collection, id);
+  /** Lecteur d'entité (intégrité référentielle V2 + cross-entité V5) adossé au cache hydraté. */
+  private entityFetcher: EntityFetcher = (collection, id) => this.get(collection, id) || null;
   /** Valide un enregistrement (forme canonique) ; si invalide → notifie et renvoie false (écriture bloquée). */
   private accepts(collection: string, record: Record<string, any>): boolean {
-    const errors = validateRecord(collection, record, this.entityResolver);
+    const errors = validateRecord(collection, record, this.entityFetcher);
     if (errors.length) { this.onInvalid?.(errors); return false; }
     return true;
   }

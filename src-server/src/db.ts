@@ -80,11 +80,6 @@ export class Repository {
   }
 
   /* ---- lectures ---- */
-  /** Existence d'une entité (intégrité référentielle) — léger : `SELECT 1 … LIMIT 1`. */
-  exists(collection: string, id: string): boolean {
-    if (!Schema.isCollection(collection) || !id) return false;
-    return !!this.db.prepare(`SELECT 1 FROM "${collection}" WHERE id = ? LIMIT 1`).get(id);
-  }
   getOne(collection: string, id: string): Rec | null {
     if (!Schema.isCollection(collection)) return null;
     const row = this.db.prepare(`SELECT data FROM "${collection}" WHERE id = ?`).get(id);

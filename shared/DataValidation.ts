@@ -66,10 +66,11 @@ export interface FieldSpec {
 }
 
 /** Spécification d'une collection : ses champs déclarés (partielle — seuls les champs porteurs de règles
-    sont listés ; les autres traversent) + d'éventuels invariants inter-champs (V3). */
+    sont listés ; les autres traversent) + invariants inter-champs (V3) + règles cross-entité (V5). */
 export interface CollectionSpec {
   fields: Record<string, FieldSpec>;
   invariants?: Invariant[];
+  crossEntity?: CrossEntityRule[];
 }
 
 /** Erreur de validation — contrat partagé UI ⇄ serveur. */
@@ -77,7 +78,7 @@ export interface ValidationError {
   collection: string;
   id?: string;
   path: string;            // champ concerné
-  code: "required" | "type" | "enum" | "min" | "format" | "ref_missing" | "invariant";
+  code: "required" | "type" | "enum" | "min" | "format" | "ref_missing" | "invariant" | "cross_entity";
   message: string;         // message humain (français)
 }
 
@@ -89,9 +90,14 @@ export interface Invariant {
   holds: (record: Record<string, any>) => boolean;   // true = respecté · false = violé
 }
 
-/** Résolveur d'existence d'entité (intégrité référentielle V2) : « un id existe-t-il dans cette collection ? ».
-    INJECTÉ pour garder `shared/` pur — l'UI l'adosse au `Store`, le serveur au `Repository`. */
-export type EntityResolver = (collection: string, id: string) => boolean;
+/** Lecteur d'entité (V2 référentiel + V5 cross-entité) : renvoie l'enregistrement pointé, ou `null` s'il
+    n'existe pas. INJECTÉ pour garder `shared/` pur — l'UI l'adosse au `Store`, le serveur au `Repository`.
+    Subsume l'ancien résolveur d'existence : « existe ? » = `fetch(coll, id) != null`. */
+export type EntityFetcher = (collection: string, id: string) => Record<string, any> | null;
+
+/** Règle CROSS-ENTITÉ (V5) : valide un enregistrement d'après les DONNÉES d'une entité liée (lue via `fetch`),
+    pas seulement ses propres champs. Renvoie l'erreur (champ + message) ou `null` si respectée / non applicable. */
+export type CrossEntityRule = (record: Record<string, any>, fetch: EntityFetcher) => { path: string; message: string } | null;
 
 /* ---- spécifications des collections PILOTES (V1) ---- */
 export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
@@ -247,6 +253,17 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       network_id:   { type: "string", nullable: true, default: null, ref: "ipNetworks" },
       equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
     },
+    crossEntity: [
+      // CROSS-ENTITÉ (V5) : l'adresse doit appartenir au sous-réseau de SON réseau IP (lecture du `cidr` du réseau lié).
+      (addr, fetch) => {
+        if (!addr.network_id) return null;                                  // pas de réseau → règle non applicable
+        const network = fetch("ipNetworks", addr.network_id);
+        const cidr = network ? parseCidr(network.cidr) : null;
+        if (!cidr) return null;                                             // réseau absent / CIDR invalide → déjà couvert ailleurs
+        return inCidr(ipv4ToInt(addr.address), cidr) ? null
+          : { path: "address", message: `L'adresse ${addr.address} n'appartient pas au sous-réseau ${network!.cidr}.` };
+      },
+    ],
   },
   dhcpRanges: {
     fields: {
@@ -263,6 +280,19 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
           const start = ipv4ToInt(range.start_ip), end = ipv4ToInt(range.end_ip);
           return start == null || end == null || start <= end;   // bornes invalides → déjà signalées par le format
         },
+      },
+    ],
+    crossEntity: [
+      // CROSS-ENTITÉ (V5) : les deux bornes doivent appartenir au sous-réseau du réseau IP rattaché.
+      (range, fetch) => {
+        if (!range.network_id) return null;
+        const network = fetch("ipNetworks", range.network_id);
+        const cidr = network ? parseCidr(network.cidr) : null;
+        if (!cidr) return null;
+        for (const field of ["start_ip", "end_ip"] as const) {
+          if (!inCidr(ipv4ToInt(range[field]), cidr)) return { path: field, message: `La borne ${range[field]} n'appartient pas au sous-réseau ${network!.cidr}.` };
+        }
+        return null;
       },
     ],
   },
@@ -337,10 +367,25 @@ export function ipv4ToInt(value: string): number | null {
 }
 /** Vrai si `value` est un CIDR IPv4 valide (« a.b.c.d/n », n ∈ 0..32). */
 export function isCidr(value: string): boolean {
+  return parseCidr(value) != null;
+}
+
+/** Sous-réseau IPv4 analysé (sous-ensemble de `core/Ip.Cidr` : ce dont la validation a besoin). */
+export interface ParsedCidr { base: number; prefix: number; mask: number; network: number; }
+
+/** « a.b.c.d/n » → sous-réseau analysé, ou `null` si invalide. Parité stricte avec `core/Ip.parseCidr`. */
+export function parseCidr(value: string): ParsedCidr | null {
   const match = typeof value === "string" ? value.trim().match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/) : null;
-  if (!match) return false;
-  const prefix = +match[2];
-  return ipv4ToInt(match[1]) != null && prefix >= 0 && prefix <= 32;
+  if (!match) return null;
+  const base = ipv4ToInt(match[1]); const prefix = +match[2];
+  if (base == null || prefix < 0 || prefix > 32) return null;
+  const mask = prefix === 0 ? 0 : ((0xFFFFFFFF << (32 - prefix)) >>> 0);
+  return { base, prefix, mask, network: (base & mask) >>> 0 };
+}
+
+/** L'entier d'IP appartient-il au sous-réseau ? */
+export function inCidr(ipInt: number | null, cidr: ParsedCidr | null): boolean {
+  return cidr != null && ipInt != null && ((ipInt & cidr.mask) >>> 0) === cidr.network;
 }
 function matchesFormat(value: string, format: NonNullable<FieldSpec["format"]>): boolean {
   return format === "cidr" ? isCidr(value) : ipv4ToInt(value) != null;
@@ -358,9 +403,9 @@ function matchesType(value: unknown, type: FieldType): boolean {
 }
 
 /** Valide un enregistrement (supposé déjà normalisé) contre la spec de sa collection. Renvoie la liste des
-    erreurs (vide = valide). Sans spec → aucune erreur. Si `resolver` est fourni, ajoute l'INTÉGRITÉ
-    RÉFÉRENTIELLE (les FK pointent vers des entités existantes — V2). */
-export function validateRecord(collection: string, record: Record<string, any>, resolver?: EntityResolver): ValidationError[] {
+    erreurs (vide = valide). Sans spec → aucune erreur. Si `fetch` est fourni, ajoute l'INTÉGRITÉ RÉFÉRENTIELLE
+    (FK existantes — V2) et les règles CROSS-ENTITÉ (d'après les données de l'entité liée — V5). */
+export function validateRecord(collection: string, record: Record<string, any>, fetch?: EntityFetcher): ValidationError[] {
   const spec = COLLECTION_SPECS[collection];
   if (!spec) return [];
   const errors: ValidationError[] = [];
@@ -392,11 +437,11 @@ export function validateRecord(collection: string, record: Record<string, any>, 
     if (fieldSpec.format && typeof value === "string" && !matchesFormat(value, fieldSpec.format)) {
       fail(field, "format", `Le champ « ${field} » n'est pas ${fieldSpec.format === "cidr" ? "un CIDR IPv4 (ex. 10.0.0.0/24)" : "une adresse IPv4 (ex. 10.0.0.5)"}.`);
     }
-    // intégrité référentielle (si résolveur) : la (ou les) FK doivent désigner une entité existante.
-    if (resolver && fieldSpec.ref) {
+    // intégrité référentielle (si `fetch`) : la (ou les) FK doivent désigner une entité existante (fetch ≠ null).
+    if (fetch && fieldSpec.ref) {
       const referencedIds = fieldSpec.type === "string[]" ? (value as string[]) : [value as string];
       for (const referencedId of referencedIds) {
-        if (typeof referencedId === "string" && referencedId && !resolver(fieldSpec.ref, referencedId)) {
+        if (typeof referencedId === "string" && referencedId && fetch(fieldSpec.ref, referencedId) == null) {
           fail(field, "ref_missing", `Référence « ${referencedId} » introuvable dans « ${fieldSpec.ref} ».`);
         }
       }
@@ -406,21 +451,28 @@ export function validateRecord(collection: string, record: Record<string, any>, 
   for (const invariant of spec.invariants || []) {
     if (!invariant.holds(record)) fail(invariant.path, "invariant", invariant.message);
   }
+  // règles CROSS-ENTITÉ (V5, si `fetch`) : dépendent des données d'une entité liée (ex. IP ∈ CIDR de son réseau).
+  if (fetch) {
+    for (const rule of spec.crossEntity || []) {
+      const violation = rule(record, fetch);
+      if (violation) fail(violation.path, "cross_entity", violation.message);
+    }
+  }
   return errors;
 }
 
-/** Normalise PUIS valide — l'enchaînement appliqué au serveur avant écriture. `resolver` (optionnel) active
-    l'intégrité référentielle. */
-export function normalizeAndValidate(collection: string, record: Record<string, any>, resolver?: EntityResolver): { record: Record<string, any>; errors: ValidationError[] } {
+/** Normalise PUIS valide — l'enchaînement appliqué au serveur avant écriture. `fetch` (optionnel) active
+    l'intégrité référentielle (V2) et les règles cross-entité (V5). */
+export function normalizeAndValidate(collection: string, record: Record<string, any>, fetch?: EntityFetcher): { record: Record<string, any>; errors: ValidationError[] } {
   const normalized = normalizeRecord(collection, record);
-  return { record: normalized, errors: validateRecord(collection, normalized, resolver) };
+  return { record: normalized, errors: validateRecord(collection, normalized, fetch) };
 }
 
 /* ---- intégrité référentielle dans un LOT (transaction) ---- */
 /** Forme minimale d'un lot atomique (mêmes champs que la transaction serveur). */
 export interface BatchOps {
-  creates?: Array<{ collection: string; record: { id?: string } }>;
-  updates?: Array<{ collection: string; record: { id?: string } }>;
+  creates?: Array<{ collection: string; record: Record<string, any> }>;
+  updates?: Array<{ collection: string; record: Record<string, any> }>;
   deletes?: Array<{ collection: string; id: string }>;
 }
 
@@ -430,19 +482,19 @@ const refKey = (collection: string, id: string): string => collection + " " + id
     lot (pas encore persistée), ou ne plus exister car supprimée dans le lot. Sans cela, un `/transact` légitime
     (créer un port ET le câble qui le référence) serait rejeté à tort. L'ordre d'application du lot étant
     suppressions → mises à jour → créations, un upsert l'emporte sur une suppression du même id. */
-export function buildBatchResolver(base: EntityResolver, batch: BatchOps): EntityResolver {
-  const upsertedInBatch = new Set<string>();
+export function buildBatchFetcher(base: EntityFetcher, batch: BatchOps): EntityFetcher {
+  const upsertedInBatch = new Map<string, Record<string, any>>();
   const deletedInBatch = new Set<string>();
   for (const entry of [...(batch.creates || []), ...(batch.updates || [])]) {
-    if (entry && entry.collection && entry.record && entry.record.id) upsertedInBatch.add(refKey(entry.collection, entry.record.id));
+    if (entry && entry.collection && entry.record && entry.record.id) upsertedInBatch.set(refKey(entry.collection, entry.record.id), entry.record);
   }
   for (const entry of (batch.deletes || [])) {
     if (entry && entry.collection && entry.id) deletedInBatch.add(refKey(entry.collection, entry.id));
   }
-  return (collection: string, id: string): boolean => {
+  return (collection: string, id: string): Record<string, any> | null => {
     const key = refKey(collection, id);
-    if (upsertedInBatch.has(key)) return true;    // créé/màj dans le lot → existera (appliqué après les deletes)
-    if (deletedInBatch.has(key)) return false;    // supprimé dans le lot → n'existe plus
-    return base(collection, id);                  // sinon : état persisté
+    if (upsertedInBatch.has(key)) return upsertedInBatch.get(key)!;   // créé/màj dans le lot → son CONTENU (appliqué après les deletes)
+    if (deletedInBatch.has(key)) return null;                         // supprimé dans le lot → n'existe plus
+    return base(collection, id);                                      // sinon : état persisté
   };
 }

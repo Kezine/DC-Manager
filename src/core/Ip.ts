@@ -1,5 +1,5 @@
 import type { Store } from "../store";
-import { ipv4ToInt } from "../../shared/DataValidation";
+import { ipv4ToInt, parseCidr as sharedParseCidr, inCidr as sharedInCidr } from "../../shared/DataValidation";
 
 /** CIDR analysé. */
 export interface Cidr {
@@ -25,15 +25,12 @@ export class Ip {
     return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
   }
 
-  /** « a.b.c.d/n » → Cidr, ou null si invalide. */
+  /** « a.b.c.d/n » → Cidr enrichi, ou null si invalide. Le parsing de BASE (base/prefix/mask/network) est DÉLÉGUÉ
+      au parseur PARTAGÉ ; on n'ajoute ici que les champs dérivés (broadcast, hôtes) propres à l'UI. */
   static parseCidr(str: string): Cidr | null {
-    if (typeof str !== "string") return null;
-    const m = str.trim().match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/);
-    if (!m) return null;
-    const base = Ip.toInt(m[1]); const prefix = +m[2];
-    if (base == null || prefix < 0 || prefix > 32) return null;
-    const mask = prefix === 0 ? 0 : ((0xFFFFFFFF << (32 - prefix)) >>> 0);
-    const network = (base & mask) >>> 0;
+    const parsed = sharedParseCidr(str);
+    if (!parsed) return null;
+    const { base, prefix, mask, network } = parsed;
     const broadcast = (network | ((~mask) >>> 0)) >>> 0;
     const firstHost = prefix >= 31 ? network : ((network + 1) >>> 0);
     const lastHost = prefix >= 31 ? broadcast : ((broadcast - 1) >>> 0);
@@ -45,9 +42,9 @@ export class Ip {
   /** CIDR canonique d'un réseau IP (objet) — null si non parsable. */
   static cidrOf(net: any): Cidr | null { return net ? Ip.parseCidr(net.cidr) : null; }
 
-  /** L'entier d'IP appartient-il au CIDR ? */
+  /** L'entier d'IP appartient-il au CIDR ? DÉLÉGUÉ au prédicat PARTAGÉ (le Cidr enrichi a `mask`+`network`). */
   static inCidr(ipInt: number | null, cidr: Cidr | null): boolean {
-    return cidr != null && ipInt != null && ((ipInt & cidr.mask) >>> 0) === cidr.network;
+    return sharedInCidr(ipInt, cidr);
   }
 
   /** Libellé court d'un réseau IP (label · cidr). */

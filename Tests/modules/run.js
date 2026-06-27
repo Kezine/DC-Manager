@@ -1079,25 +1079,25 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
 
   console.log("\n• shared : intégrité référentielle (V2 — FK + conscience du lot)");
   {
-    // résolveur simulé : seuls ces id « existent » (persistés).
-    const persisted = new Set(["ports p1", "networks n1"]);
-    const base = (coll, id) => persisted.has(coll + " " + id);
+    // lecteur d'entité simulé : renvoie un record pour les id « existants », null sinon (subsume « existe ? »).
+    const persisted = { "ports p1": { id: "p1" }, "networks n1": { id: "n1" } };
+    const base = (coll, id) => persisted[coll + " " + id] || null;
     ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "p1" }, base).length, 0, "ref : FK existante → 0 erreur");
     const broken = Validation.validateRecord("cables", { status: "planifie", from_port_id: "pX" }, base);
     ck.eq(broken.some((e) => e.path === "from_port_id" && e.code === "ref_missing"), true, "ref : FK introuvable → 'ref_missing'");
     ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: null }, base).length, 0, "ref : FK null → ignorée");
     const arr = Validation.validateRecord("cables", { status: "planifie", network_ids: ["n1", "nX"] }, base);
     ck.eq(arr.some((e) => e.path === "network_ids" && e.code === "ref_missing"), true, "ref : tableau de FK avec id absent → 'ref_missing'");
-    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "pX" }).length, 0, "ref : SANS résolveur → pas de contrôle référentiel (V1)");
+    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "pX" }).length, 0, "ref : SANS lecteur → pas de contrôle référentiel (V1)");
 
-    // résolveur conscient du lot
+    // lecteur conscient du lot (renvoie le CONTENU du lot)
     const batch = { creates: [{ collection: "ports", record: { id: "pNew" } }], deletes: [{ collection: "networks", id: "n1" }] };
-    const batchResolver = Validation.buildBatchResolver(base, batch);
-    ck.eq(batchResolver("ports", "pNew"), true, "batch : entité créée dans le lot → existe");
-    ck.eq(batchResolver("networks", "n1"), false, "batch : entité supprimée dans le lot → n'existe plus");
-    ck.eq(batchResolver("ports", "p1"), true, "batch : entité persistée hors lot → existe (base)");
-    ck.eq(batchResolver("ports", "pX"), false, "batch : id inconnu → n'existe pas");
-    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "pNew" }, batchResolver).length, 0,
+    const batchFetch = Validation.buildBatchFetcher(base, batch);
+    ck(batchFetch("ports", "pNew") != null, "batch : entité créée dans le lot → existe");
+    ck.eq(batchFetch("networks", "n1"), null, "batch : entité supprimée dans le lot → n'existe plus");
+    ck(batchFetch("ports", "p1") != null, "batch : entité persistée hors lot → existe (base)");
+    ck.eq(batchFetch("ports", "pX"), null, "batch : id inconnu → n'existe pas");
+    ck.eq(Validation.validateRecord("cables", { status: "planifie", from_port_id: "pNew" }, batchFetch).length, 0,
       "batch : câble référençant un port créé DANS le lot → accepté (pas de faux rejet)");
 
     // couverture référentielle : toute FK déclarée doit cibler une collection RÉELLE (garde anti-typo / anti-oubli).
@@ -1109,10 +1109,28 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(declaredRefs.find((r) => !validCollections.has(r.ref)), undefined, "refs : toutes ciblent une collection réelle (" + declaredRefs.length + " FK)");
 
     // equipments : refs rack_id / dc_id (complétude V2).
-    const eqResolver = (coll, id) => (coll === "racks" && id === "r1") || (coll === "datacenters" && id === "dc1");
-    ck.eq(Validation.validateRecord("equipments", { name: "e", rack_id: "r1" }, eqResolver).length, 0, "equipments : rack_id existant → 0 erreur");
-    ck.eq(Validation.validateRecord("equipments", { name: "e", rack_id: "rX" }, eqResolver).some((x) => x.path === "rack_id" && x.code === "ref_missing"), true, "equipments : rack_id inexistant → ref_missing");
-    ck.eq(Validation.validateRecord("equipments", { name: "e", dc_id: "dc1" }, eqResolver).length, 0, "equipments : dc_id existant → 0 erreur");
+    const eqFetch = (coll, id) => (((coll === "racks" && id === "r1") || (coll === "datacenters" && id === "dc1")) ? { id } : null);
+    ck.eq(Validation.validateRecord("equipments", { name: "e", rack_id: "r1" }, eqFetch).length, 0, "equipments : rack_id existant → 0 erreur");
+    ck.eq(Validation.validateRecord("equipments", { name: "e", rack_id: "rX" }, eqFetch).some((x) => x.path === "rack_id" && x.code === "ref_missing"), true, "equipments : rack_id inexistant → ref_missing");
+    ck.eq(Validation.validateRecord("equipments", { name: "e", dc_id: "dc1" }, eqFetch).length, 0, "equipments : dc_id existant → 0 erreur");
+  }
+
+  console.log("\n• shared : règles cross-entité (V5 — IP ∈ CIDR de son réseau)");
+  {
+    // lecteur d'entité : un réseau IP « net1 » en 10.0.0.0/24.
+    const fetch = (coll, id) => (coll === "ipNetworks" && id === "net1") ? { id: "net1", cidr: "10.0.0.0/24" } : null;
+    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.0.5", network_id: "net1" }, fetch).length, 0, "IP dans le CIDR du réseau → 0 erreur");
+    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.1.5", network_id: "net1" }, fetch).some((e) => e.code === "cross_entity"), true, "IP hors CIDR du réseau → 'cross_entity'");
+    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.1.5", network_id: null }, fetch).length, 0, "IP sans réseau → règle non applicable");
+    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.1.5", network_id: "net1" }).length, 0, "IP : SANS lecteur → pas de contrôle cross-entité");
+    // plage DHCP ⊂ CIDR
+    ck.eq(Validation.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.0.20", network_id: "net1" }, fetch).length, 0, "plage DHCP dans le CIDR → 0 erreur");
+    ck.eq(Validation.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.9.20", network_id: "net1" }, fetch).some((e) => e.code === "cross_entity"), true, "borne DHCP hors CIDR → 'cross_entity'");
+    // batch-aware : réseau dont le CIDR est MODIFIÉ dans le même lot → la règle voit le nouveau cidr
+    const batch = { updates: [{ collection: "ipNetworks", record: { id: "net1", cidr: "10.0.5.0/24" } }] };
+    const batchFetch = Validation.buildBatchFetcher(fetch, batch);
+    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.5.7", network_id: "net1" }, batchFetch).length, 0, "batch : IP dans le NOUVEAU CIDR du lot → acceptée");
+    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.0.7", network_id: "net1" }, batchFetch).some((e) => e.code === "cross_entity"), true, "batch : IP hors du nouveau CIDR → rejetée");
   }
 
   console.log("\n• Store : garde de validation (mode fichier — seul garde-fou, pas de serveur)");
