@@ -593,6 +593,50 @@ async function boot(): Promise<void> {
     restSubscribeLive();
     Notify.toast("Document « " + d.name + " » créé");
   }
+  /** Importe un export `.json` (format mode-fichier) DANS UN NOUVEAU document serveur : crée le document,
+      pousse le snapshot (meta + collections) puis les images de façade (compagnon `.nmfb` prioritaire, sinon
+      `faceImages` inline), et l'ouvre. Réutilise exactement la logique d'écriture du DataAdapter REST. */
+  async function restImportJson(text: string, nmfbBuf: ArrayBuffer | null, suggestedName: string): Promise<void> {
+    const ra = adapter as RestAdapter;
+    let raw: any; try { raw = JSON.parse(text); } catch { Notify.toast("Fichier invalide (JSON attendu).", "err"); return; }
+    const name = String((raw && raw.meta && raw.meta.docName) || suggestedName || "Document").replace(/\.json$/i, "") || "Document";
+    let d: any; try { d = await ra.createDocument(name); } catch (e: any) { Notify.toast("Création impossible : " + (e.message || e), "err"); return; }
+    ra.setDocument(d.id);
+    if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(ra.dataBase);
+    restDocId = d.id;
+    try {
+      await store.replaceAll(raw);                                              // meta + collections → PUT /snapshot du nouveau document
+      let nImg = 0;
+      if (nmfbBuf) nImg = await imageStore.loadBundle(nmfbBuf);                  // compagnon d'images .nmfb (prioritaire)
+      else if (Array.isArray(raw.faceImages)) nImg = await imageStore.replaceAllFromLegacy(raw.faceImages);   // images inline (legacy ≤ v51)
+      else await imageStore.clearAll();
+      store.meta.docName = name; await store.persistMeta();
+      await imageStore.reloadFromBackend();
+      resetUndoTimeline();
+      currentName = name; session.setFile(true); session.markLoaded(store.histIndex());
+      shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
+      restSubscribeLive();
+      const nbEnt = Object.keys(raw).filter((k) => k !== "faceImages" && Array.isArray((raw as any)[k])).reduce((n, k) => n + (raw as any)[k].length, 0);
+      Notify.toast("Importé « " + name + " » (" + nbEnt + " entités, " + nImg + " image(s))");
+    } catch (e: any) { Notify.toast("Import échoué : " + (e.message || e), "err"); }
+  }
+  /** Sélectionne un `.json` (+ compagnon `.nmfb` facultatif) puis l'importe dans un nouveau document serveur. */
+  async function restImportFromPicker(): Promise<void> {
+    let jsonFile: File | null = null, nmfbBuf: ArrayBuffer | null = null;
+    if (HAS_FS_API) {
+      try {
+        const handles = await W.showOpenFilePicker({ multiple: true, types: [{ description: "Document NetMap (.json) + images (.nmfb)", accept: { "application/json": [".json"], "application/octet-stream": [".nmfb"] } }] });
+        for (const h of handles) { const f = await h.getFile(); if (/\.nmfb$/i.test(f.name)) nmfbBuf = await f.arrayBuffer(); else if (!jsonFile) jsonFile = f; }
+      } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Sélection impossible : " + (e.message || e), "err"); return; }
+    } else {
+      jsonFile = await new Promise<File | null>((resolve) => {
+        const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,application/json";
+        inp.onchange = () => resolve((inp.files && inp.files[0]) || null); inp.click();
+      });
+    }
+    if (!jsonFile) { Notify.toast("Aucun fichier .json sélectionné.", "err"); return; }
+    await restImportJson(await jsonFile.text(), nmfbBuf, jsonFile.name);
+  }
   /** Sélecteur de documents (mode API) : liste serveur, ouverture / création / suppression. */
   async function restOpenChooser(): Promise<void> {
     const ra = adapter as RestAdapter;
@@ -620,12 +664,18 @@ async function boot(): Promise<void> {
         const ni = document.createElement("span"); ni.className = "ok-ic"; ni.textContent = "＋"; const nt = document.createElement("span"); nt.className = "ok-tx";
         const nti = document.createElement("span"); nti.className = "ok-title"; nti.textContent = "Nouveau document"; nt.appendChild(nti);
         nb.append(ni, nt); nb.onmousedown = (e) => { e.preventDefault(); chosen = "__new__"; confirmBtn?.click(); }; wrap.appendChild(nb);
+        const ib = document.createElement("button"); ib.type = "button"; ib.className = "open-kind-btn";
+        const ii = document.createElement("span"); ii.className = "ok-ic"; ii.textContent = "📥"; const itx = document.createElement("span"); itx.className = "ok-tx";
+        const iti = document.createElement("span"); iti.className = "ok-title"; iti.textContent = "Importer un fichier .json…";
+        const ide = document.createElement("span"); ide.className = "ok-desc"; ide.textContent = "crée un nouveau document depuis un export .json (+ .nmfb d'images)";
+        itx.append(iti, ide); ib.append(ii, itx); ib.onmousedown = (e) => { e.preventDefault(); chosen = "__import__"; confirmBtn?.click(); }; wrap.appendChild(ib);
         root.appendChild(wrap);
         return { collect: () => chosen, validate: () => true };
       },
     });
     if (!action) return;
     if (action === "__new__") { const n = await Dialog.prompt("Nom du document", "Document"); if (n) await restNewDocument(n); return; }
+    if (action === "__import__") { await restImportFromPicker(); return; }
     if (action.startsWith("__del__:")) {
       const id = action.slice(8), d = docs.find((x) => x.id === id);
       const ok = await Dialog.confirm({ title: "Supprimer le document ?", message: "Supprimer « " + (d?.name || id) + " » et toutes ses données ? Irréversible.", confirmLabel: "Supprimer", danger: true });
