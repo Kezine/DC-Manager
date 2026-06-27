@@ -113,7 +113,8 @@ ValidationError = { collection, id?, path, code, message }
 | **V5b** | **dépendance inverse** : `CollectionSpec.dependents` + `ChildFinder` injecté → écrire un parent re-valide ses enfants via LEURS règles cross-entité contre le nouvel état (ex. changer un `cidr` rejette si une adresse/plage en sort). Câblé sur create/update (Store + serveur) ET sur `/transact` (lecteur d'enfants conscient du lot, `buildBatchChildFinder`) | ✅ |
 | **T1/T2** | règles métier supplémentaires : invariants intra-record (équipement racké ⇒ baie ; port X/Y cohérents ; brosse ⇒ baie) + cross-entité (équipement tient dans la baie ; baie dans les bornes de la salle ; port parent/agrégat même équipement) | ✅ |
 | **V6a** | contraintes de **portée — unicité simple** : `ScopeRule` + `RecordFinder` injecté (recherche par champ indexé, conscient du lot via `buildBatchChildFinder`) ; `ipAddresses.address` unique (« sauf moi-même »). Câblé Store + serveur + live | ✅ |
-| **V6b/c** | portée — relations & intervalles (1 câble/port, chevauchement DHCP, IP-dans-plage) ; empilement de baie (collision de U, le plus lourd) (cf. §9) | ⏳ |
+| **V6b** | portée — relations & intervalles : **1 câble par port** (périmètre `from`/`to`), **chevauchement** de plages DHCP, **IP ∈ plage** (exclusion bidirectionnelle adresse ↔ plage). Câblé Store + serveur + live (IPAM) | ✅ |
+| **V6c** | portée — **empilement de baie** (collision de U : équipements + rackItems + brosses) — le plus lourd, laissé au Store (`rackPlacementBlockedReason`) sauf besoin tiers (cf. §9) | ⏳ |
 
 Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
 FK, tableaux). **Couverture étendue aux 19 collections** : chaque collection a une spec

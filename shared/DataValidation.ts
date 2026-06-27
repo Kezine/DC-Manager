@@ -219,6 +219,17 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
         holds: (cable) => !cable.network_id || (Array.isArray(cable.network_ids) && cable.network_ids.includes(cable.network_id)),
       },
     ],
+    scope: [
+      // PORTÉE (V6b) : 1 câble par port — aucun AUTRE câble ne référence ce port (côté `from` OU `to`).
+      (cable, find) => {
+        for (const [path, portId] of [["from_port_id", cable.from_port_id], ["to_port_id", cable.to_port_id]] as const) {
+          if (!portId) continue;
+          const usingPort = [...find("cables", "from_port_id", portId), ...find("cables", "to_port_id", portId)];
+          if (usingPort.some((other) => other.id !== cable.id)) return { path, message: "Ce port est déjà relié par un autre câble (1 câble par port)." };
+        }
+        return null;
+      },
+    ],
   },
   racks: {
     fields: {
@@ -388,6 +399,17 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
         const duplicate = find("ipAddresses", "address", addr.address).some((other) => other.id !== addr.id);
         return duplicate ? { path: "address", message: `L'adresse ${addr.address} est déjà attribuée.` } : null;
       },
+      // PORTÉE (V6b) : l'adresse statique ne doit pas tomber DANS une plage DHCP de son réseau.
+      (addr, find) => {
+        if (!addr.network_id) return null;
+        const ip = Ipv4.toInt(addr.address);
+        if (ip == null) return null;
+        for (const range of find("dhcpRanges", "network_id", addr.network_id)) {
+          const start = Ipv4.toInt(range.start_ip), end = Ipv4.toInt(range.end_ip);
+          if (start != null && end != null && ip >= start && ip <= end) return { path: "address", message: `L'adresse est dans la plage DHCP ${range.start_ip}→${range.end_ip}.` };
+        }
+        return null;
+      },
     ],
   },
   dhcpRanges: {
@@ -416,6 +438,24 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
         if (!cidr) return null;
         for (const field of ["start_ip", "end_ip"] as const) {
           if (!Ipv4.inCidr(Ipv4.toInt(range[field]), cidr)) return { path: field, message: `La borne ${range[field]} n'appartient pas au sous-réseau ${network!.cidr}.` };
+        }
+        return null;
+      },
+    ],
+    scope: [
+      // PORTÉE (V6b) : pas de CHEVAUCHEMENT avec une autre plage du même réseau ; pas d'IP STATIQUE dans l'intervalle.
+      (range, find) => {
+        if (!range.network_id) return null;
+        const start = Ipv4.toInt(range.start_ip), end = Ipv4.toInt(range.end_ip);
+        if (start == null || end == null) return null;   // format déjà signalé en amont
+        for (const other of find("dhcpRanges", "network_id", range.network_id)) {
+          if (other.id === range.id) continue;
+          const os = Ipv4.toInt(other.start_ip), oe = Ipv4.toInt(other.end_ip);
+          if (os != null && oe != null && start <= oe && os <= end) return { path: "start_ip", message: `Chevauche la plage ${other.start_ip}→${other.end_ip}.` };
+        }
+        for (const addr of find("ipAddresses", "network_id", range.network_id)) {
+          const ip = Ipv4.toInt(addr.address);
+          if (ip != null && ip >= start && ip <= end) return { path: "start_ip", message: `L'adresse statique ${addr.address} est dans cette plage.` };
         }
         return null;
       },

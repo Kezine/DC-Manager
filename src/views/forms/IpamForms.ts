@@ -122,12 +122,10 @@ export class IpamForms extends RackForms {
         const net = store.get("ipNetworks", networkId);
         if (!net) { Notify.toast("Choisissez un réseau IP.", "err"); return false; }
         const address = ipI.value.trim();
-        const payload = { network_id: networkId, address, hostname: hostI.value.trim(), equipment_id: eqSel.value || null, description: descI.value.trim() };
-        if (live.check(payload).length) return false;   // surlignés : format + IP ∈ CIDR + adresse déjà attribuée (unicité)
-        // contrôle HORS validateur partagé (chevauchement plage DHCP — V6b à venir) : reste un toast.
-        const ipInt = Ip.toInt(address);
-        const conflict = Ip.dhcpRangeContaining(store, networkId, ipInt);
-        if (conflict) { Notify.toast(`${address} est dans la plage DHCP ${conflict.start_ip}→${conflict.end_ip}.`, "err"); return false; }
+        // `id` inclus → la validation de PORTÉE exclut l'adresse en cours d'édition (« sauf moi-même »).
+        const payload = { id: addr ? addr.id : undefined, network_id: networkId, address, hostname: hostI.value.trim(), equipment_id: eqSel.value || null, description: descI.value.trim() };
+        // surlignés par la validation live : format + IP ∈ CIDR + unicité (V6a) + pas dans une plage DHCP (V6b).
+        if (live.check(payload).length) return false;
         if (addr) await store.update("ipAddresses", addr.id, payload); else await store.create("ipAddresses", payload);
         host.setDirty?.(true); Notify.toast(addr ? "Adresse mise à jour" : "Adresse attribuée"); onSaved?.(); return true;
       },
@@ -153,8 +151,9 @@ export class IpamForms extends RackForms {
     root.appendChild(FormControls.fieldRow("Serveur DHCP", srvSel, "Facultatif."));
     const descI = FormControls.textArea(rng ? rng.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
-    // validation live : bornes (format IPv4), fin ≥ début (invariant), bornes ∈ CIDR du réseau (cross-entité).
-    const live = new LiveValidation("dhcpRanges", { start_ip: startI, end_ip: endI, network_id: netSel, server_id: srvSel }, (coll, i) => store.get(coll, i) || null);
+    // validation live : format, fin ≥ début, bornes ∈ CIDR (cross-entité), chevauchement + IP statique (portée V6b).
+    const live = new LiveValidation("dhcpRanges", { start_ip: startI, end_ip: endI, network_id: netSel, server_id: srvSel },
+      (coll, i) => store.get(coll, i) || null, (coll, f, v) => store.findByField(coll, f, v));
     live.clearOnInput();
 
     host.openModal({
@@ -165,18 +164,11 @@ export class IpamForms extends RackForms {
         const networkId = netSel.value;
         const net = store.get("ipNetworks", networkId);
         if (!net) { Notify.toast("Choisissez un réseau IP.", "err"); return false; }
-        const record = { network_id: networkId, start_ip: startI.value.trim(), end_ip: endI.value.trim(), server_id: srvSel.value || null };
-        if (live.check(record).length) return false;   // format / fin≥début / bornes ∈ CIDR → surlignés
+        // « sauf moi-même » : on passe l'id à la validation de portée pour exclure la plage en cours d'édition.
+        const record = { id: rng ? rng.id : undefined, network_id: networkId, start_ip: startI.value.trim(), end_ip: endI.value.trim(), server_id: srvSel.value || null };
+        // surlignés : format, fin≥début, bornes ∈ CIDR, chevauchement de plage, IP statique dans la plage (V6b).
+        if (live.check(record).length) return false;
         const s = Ip.toInt(record.start_ip)!, e = Ip.toInt(record.end_ip)!;   // valides après la validation live
-        // contrôles HORS validateur partagé (chevauchement, IP statique) : restent des toasts.
-        const overlap = store.dhcpRangesOfNetwork(networkId).find((r: any) => {
-          if (rng && r.id === rng.id) return false;
-          const rs = Ip.toInt(r.start_ip), re = Ip.toInt(r.end_ip);
-          return rs != null && re != null && s <= re && rs <= e;
-        });
-        if (overlap) { Notify.toast(`Chevauche la plage ${overlap.start_ip}→${overlap.end_ip}.`, "err"); return false; }
-        const staticHit = store.ipAddressesOfNetwork(networkId).find((a: any) => { const n = Ip.toInt(a.address); return n != null && n >= s && n <= e; });
-        if (staticHit) { Notify.toast(`L'IP statique ${staticHit.address} est dans cette plage.`, "err"); return false; }
         const payload = { network_id: networkId, start_ip: Ip.toStr(s), end_ip: Ip.toStr(e), server_id: srvSel.value || null, description: descI.value.trim() };
         if (rng) await store.update("dhcpRanges", rng.id, payload); else await store.create("dhcpRanges", payload);
         host.setDirty?.(true); Notify.toast(rng ? "Plage DHCP mise à jour" : "Plage DHCP réservée"); onSaved?.(); return true;

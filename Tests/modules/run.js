@@ -482,8 +482,9 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     // applyCableBreaks : deux bouts dans des salles différentes SANS exits → câble cassé (bout distant déconnecté)
     const eqY = await s.create("equipments", { name: "Y", placement_mode: "rack", rack_id: rkB.id, rack_u: 5 });
     const pY = (await s.create("ports", { equipment_id: eqY.id, name: "pY" })).id;
+    const pX2 = (await s.create("ports", { equipment_id: eqX.id, name: "pX2" })).id;   // pX porte déjà « lien » (1 câble/port)
     await s.update("equipments", eqX.id, { placement_mode: "rack", dim_mode: "u", rack_id: rkA.id, rack_u: 5 });
-    const brk = await s.create("cables", { name: "casse-moi", from_port_id: pX, to_port_id: pY, status: "cable" });
+    const brk = await s.create("cables", { name: "casse-moi", from_port_id: pX2, to_port_id: pY, status: "cable" });
     ck(s.cableContextValid(brk) === false, "cableContextValid : 2 salles sans exits → invalide");
     const n = await s.applyCableBreaks(eqX.id);
     ck.eq(n, 1, "applyCableBreaks : 1 câble cassé");
@@ -623,7 +624,8 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const pc = (await s.create("ports", { equipment_id: e2.id, name: "p", face_x: 0.5, face_y: 0.5 })).id;
     const exit1 = await s.create("waypoints", { wp_type: "exit", datacenter_id: dc.id, dc_x: 0, dc_y: 0 });
     const exit2 = await s.create("waypoints", { wp_type: "exit", datacenter_id: dc2.id, dc_x: 0, dc_y: 0 });
-    const outCable = await s.create("cables", { name: "inter", from_port_id: pa, to_port_id: pc, waypoint_ids: [exit1.id, exit2.id] });
+    const paOut = await mkEqPort(3);   // pa porte déjà « patch » (1 câble/port) → port distinct pour le câble inter
+    const outCable = await s.create("cables", { name: "inter", from_port_id: paOut, to_port_id: pc, waypoint_ids: [exit1.id, exit2.id] });
     ck(s.cableRoute(outCable).valid && s.cableRoute(outCable).hasExits, "câble inter-salles : route valide avec exits");
     const stubs = dv.outgoingCableStubs(dc.id);
     ck.eq(stubs.length, 1, "outgoingCableStubs : 1 câble sortant de la salle");
@@ -644,10 +646,11 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck(routed && routed.id === null && routed.opts.fromPortId === pa && routed.opts.toPortId === pc && JSON.stringify(routed.opts.waypointIds) === JSON.stringify([exit1.id]), "routeFinish → openCableForm prérempli (from/to/waypoints)");
     ck.eq(dvr.routeBuild, null, "routeFinish : session terminée");
     // brouillons-candidats : un câble draft à un seul bout est proposé pour un port compatible
-    const draft = await s.create("cables", { name: "brouillon", from_port_id: pa, to_port_id: null, status: "brouillon" });
+    const pDraft = await mkEqPort(4);   // port libre distinct pour le brouillon (pa porte déjà « patch »)
+    const draft = await s.create("cables", { name: "brouillon", from_port_id: pDraft, to_port_id: null, status: "brouillon" });
     const cands = s.cableDraftCandidatesForPort(pb);
     ck(cands.some((c) => c.id === draft.id), "cableDraftCandidatesForPort : draft à un bout proposé");
-    ck(!s.cableDraftCandidatesForPort(pa).some((c) => c.id === draft.id), "cableDraftCandidatesForPort : pas le port déjà branché");
+    ck(!s.cableDraftCandidatesForPort(pDraft).some((c) => c.id === draft.id), "cableDraftCandidatesForPort : pas le port déjà branché");
     // vue Dessus : aimantation au centre de maille + demi-emprise selon l'orientation
     ck.eq(dv.snap(610, 600), 900, "snap → centre de maille (610 → 900)");
     ck.eq(dv.snap(290, 600), 300, "snap → centre de maille (290 → 300)");
@@ -1101,6 +1104,31 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const batch = { creates: [{ collection: "ipAddresses", record: { id: "n1", address: "10.0.0.50" } }, { collection: "ipAddresses", record: { id: "n2", address: "10.0.0.50" } }] };
     const batchFind = DV.buildBatchChildFinder(find, batch);
     ck.eq(DV.validateRecord("ipAddresses", { id: "n1", address: "10.0.0.50" }, undefined, batchFind).some((e) => e.code === "scope"), true, "V6a batch : doublon créé dans le lot → 'scope'");
+  }
+
+  console.log("\n• shared : portée V6b (1 câble/port, intervalles DHCP)");
+  {
+    const DV = Validation.DataValidator;
+    // 1 câble par port : C0 utilise P1 (from) et P2 (to).
+    const cables = [{ id: "C0", from_port_id: "P1", to_port_id: "P2" }];
+    const cableFind = (coll, field, value) => coll === "cables" ? cables.filter((c) => c[field] === value) : [];
+    ck.eq(DV.validateRecord("cables", { id: "CX", status: "planifie", from_port_id: "P1" }, undefined, cableFind).some((e) => e.code === "scope"), true, "V6b câble : port déjà relié → scope");
+    ck.eq(DV.validateRecord("cables", { id: "C0", status: "planifie", from_port_id: "P1", to_port_id: "P2" }, undefined, cableFind).length, 0, "V6b câble : même câble garde ses ports → OK");
+    ck.eq(DV.validateRecord("cables", { id: "CX", status: "planifie", from_port_id: "P9" }, undefined, cableFind).length, 0, "V6b câble : port libre → OK");
+
+    // intervalles DHCP : réseau N → plage R0=[.10,.20] + IP statique .30
+    const ranges = [{ id: "R0", network_id: "N", start_ip: "10.0.0.10", end_ip: "10.0.0.20" }];
+    const addrs = [{ id: "A0", network_id: "N", address: "10.0.0.30" }];
+    const ipamFind = (coll, field, value) => {
+      if (coll === "dhcpRanges" && field === "network_id") return ranges.filter((r) => r.network_id === value);
+      if (coll === "ipAddresses" && field === "network_id") return addrs.filter((a) => a.network_id === value);
+      if (coll === "ipAddresses" && field === "address") return addrs.filter((a) => a.address === value);
+      return [];
+    };
+    ck.eq(DV.validateRecord("dhcpRanges", { id: "RX", network_id: "N", start_ip: "10.0.0.15", end_ip: "10.0.0.25" }, undefined, ipamFind).some((e) => e.code === "scope"), true, "V6b DHCP : chevauchement → scope");
+    ck.eq(DV.validateRecord("dhcpRanges", { id: "RX", network_id: "N", start_ip: "10.0.0.28", end_ip: "10.0.0.35" }, undefined, ipamFind).some((e) => e.code === "scope"), true, "V6b DHCP : IP statique dans la plage → scope");
+    ck.eq(DV.validateRecord("dhcpRanges", { id: "RX", network_id: "N", start_ip: "10.0.0.40", end_ip: "10.0.0.50" }, undefined, ipamFind).length, 0, "V6b DHCP : plage disjointe → OK");
+    ck.eq(DV.validateRecord("ipAddresses", { id: "AX", network_id: "N", address: "10.0.0.15" }, undefined, ipamFind).some((e) => e.code === "scope"), true, "V6b IP : adresse dans une plage DHCP → scope");
   }
 
   console.log("\n• shared : règles métier T1 (invariants) / T2 (cross-entité)");
