@@ -153,7 +153,25 @@ Après modif du compose : `docker compose up -d` (recrée le conteneur).
 
 ---
 
-## 7. Dépannage
+## 7. Importer un document `.json` dans la base
+
+Script `scripts/import-json.mjs` : crée un document serveur depuis un export
+`.json` (format mode-fichier), pousse les données, et importe les images de
+façade (inline `faceImages` **ou** compagnon `.nmfb`).
+
+```bash
+# serveur lancé (dev) :
+node scripts/import-json.mjs ../Samples/mondoc.json --name "Mon doc"
+# avec compagnon d'images :
+node scripts/import-json.mjs ../Samples/mondoc.json ../Samples/mondoc.nmfb --name "Mon doc"
+# serveur distant + auth :
+node scripts/import-json.mjs doc.json --url https://dc-manager.example.com --cookie "SsoJWT=…"
+node scripts/import-json.mjs doc.json --url http://host:3000 --basic dev:secret
+```
+
+(`node` requis sur la machine qui lance le script ; le serveur, lui, tourne dans Docker.)
+
+## 8. Dépannage
 
 | Symptôme | Cause probable / solution |
 |---|---|
