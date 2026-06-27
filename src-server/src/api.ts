@@ -7,7 +7,16 @@ import { Auth, type SsoResult } from "./auth.js";
 import { LiveBus } from "./live.js";
 
 /** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`). */
-type RepoRequest = Request & { repo?: Repository; authUser?: SsoResult };
+type RepoRequest = Request & { repo?: Repository; authUser?: SsoResult; docRev?: number };
+
+/** Périmètre d'une écriture, diffusé aux autres clients pour un rechargement granulaire.
+    DUPLIQUÉ côté front (`src/sync/Changeset.ts`) — garder les deux formes synchronisées. */
+interface DocumentChangeset {
+  full: boolean;          // périmètre indéterminé (import/snapshot/inconnu) → le client recharge tout
+  collections: string[];  // collections touchées (créations + màj + suppressions)
+  meta: boolean;          // méta-document modifiée
+  images: boolean;        // image(s) de façade modifiée(s)
+}
 
 /** Couche HTTP : registre de documents + données SCOPÉES par document, déléguées au `Repository`. */
 export class Api {
@@ -49,6 +58,8 @@ export class Api {
   }
 
   private repoOf(req: Request): Repository { return (req as RepoRequest).repo!; }
+  /** Révision portée par l'écriture courante (posée par `resolveRepo`) → estampillée sur les lignes (`updated_rev`). */
+  private revOf(req: Request): number { return (req as RepoRequest).docRev || 0; }
   private parseList(q: Record<string, any>): ListOpts {
     const { page, pageSize, q: query, ids, ...rest } = q;
     const where: Rec = {};
@@ -94,22 +105,75 @@ export class Api {
     if (this.docs.delete(req.params.docId)) res.status(204).end(); else res.status(404).json({ error: "document inconnu" });
   };
 
-  /** Résout le Repository du document (404 si inconnu). En écriture : incrémente la révision (entête X-Doc-Rev)
-      et publie l'événement live aux autres clients à la fin de la requête (si succès). En lecture : expose la rev. */
+  /** Entités VISÉES par une écriture (pour le verrou optimiste) : lot `/transact` (updates + deletes) ou CRUD
+      unitaire `/:collection/:id`. Les créations (id neuf) et les écritures globales (meta / snapshot / images)
+      ne ciblent aucune ligne existante → liste vide → pas de garde. */
+  private writeTargets(req: Request): Array<{ collection: string; id: string }> {
+    const out: Array<{ collection: string; id: string }> = [];
+    const body: any = req.body || {};
+    if (Array.isArray(body.updates) || Array.isArray(body.deletes)) {
+      for (const u of body.updates || []) if (u && u.collection && u.record && u.record.id) out.push({ collection: u.collection, id: u.record.id });
+      for (const d of body.deletes || []) if (d && d.collection && d.id) out.push({ collection: d.collection, id: d.id });
+      return out;
+    }
+    const { collection, id } = req.params as any;
+    if (collection && id) out.push({ collection, id });
+    return out;
+  }
+
+  /** Périmètre d'une écriture, pour le rechargement granulaire des autres clients. Déduit du corps (`/transact`),
+      des paramètres de route (CRUD `/:collection/:id`) ou du chemin (`/meta`, `/snapshot`, `/images`). Périmètre
+      non reconnu → `full` (repli sûr : le client recharge tout). */
+  private buildChangeset(req: Request): DocumentChangeset {
+    const body: any = req.body || {};
+    // Lot atomique : union des collections de creates + updates + deletes.
+    if (Array.isArray(body.creates) || Array.isArray(body.updates) || Array.isArray(body.deletes)) {
+      const collections = new Set<string>();
+      for (const entry of [...(body.creates || []), ...(body.updates || []), ...(body.deletes || [])]) {
+        if (entry && entry.collection) collections.add(entry.collection);
+      }
+      return { full: false, collections: [...collections], meta: !!body.meta, images: false };
+    }
+    // CRUD unitaire : la collection est dans les paramètres de route.
+    const collection = (req.params as any).collection as string | undefined;
+    if (collection) return { full: false, collections: [collection], meta: false, images: false };
+    // Routes globales (sans paramètre de collection) — reconnues par le chemin (relatif au sous-routeur du document).
+    const path = req.path || "";
+    if (path.startsWith("/snapshot")) return { full: true, collections: [], meta: true, images: true };
+    if (path.startsWith("/meta")) return { full: false, collections: [], meta: true, images: false };
+    if (path.startsWith("/images")) return { full: false, collections: [], meta: false, images: true };
+    return { full: true, collections: [], meta: true, images: true };   // inconnu → repli sûr
+  }
+
+  /** Résout le Repository du document (404 si inconnu). En écriture : VERROU OPTIMISTE par entité (409 si une entité
+      visée a été modifiée après la révision de base du client, en-tête `X-Base-Rev`), sinon incrémente la révision
+      (entête `X-Doc-Rev`), estampille `docRev` pour les handlers, et publie l'événement live (si succès).
+      En lecture : expose la rev. */
   private resolveRepo: RequestHandler = (req, res, next) => {
     const id = (req.params as any).docId;
     const repo = this.docs.repo(id);
     if (!repo) { res.status(404).json({ error: "document inconnu" }); return; }
     (req as RepoRequest).repo = repo;
-    if (req.method === "GET") {
-      res.setHeader("X-Doc-Rev", String(this.docs.getRev(id)));
-    } else {
-      const rev = this.docs.markChanged(id);
-      res.setHeader("X-Doc-Rev", String(rev));
-      const origin = (req.headers["x-client-id"] as string) || "";   // qui a écrit → le client source ignore son propre event
-      const by = this.writerInfo(req);                               // nom (SSO) + IP de l'auteur, pour la notif live
-      res.on("finish", () => { if (res.statusCode < 300) this.live.publish(id, { rev, origin, by }); });
+    if (req.method === "GET") { res.setHeader("X-Doc-Rev", String(this.docs.getRev(id))); next(); return; }
+    // verrou optimiste : `baseRev` = snapshot sur lequel le client s'appuie. Rejet AVANT toute mutation /
+    // incrément de rev / publication SSE → l'écriture refusée ne consomme pas de révision et ne réveille personne.
+    const baseRev = parseInt(String(req.headers["x-base-rev"] ?? ""), 10);
+    const targets = this.writeTargets(req);
+    if (Number.isFinite(baseRev) && targets.length) {
+      const conflicts = repo.conflicts(targets, baseRev);
+      if (conflicts.length) {
+        res.setHeader("X-Doc-Rev", String(this.docs.getRev(id)));
+        res.status(409).json({ error: "conflit de version", conflicts });
+        return;
+      }
     }
+    const rev = this.docs.markChanged(id);
+    (req as RepoRequest).docRev = rev;   // les handlers estampillent `updated_rev = rev` sur les lignes écrites
+    res.setHeader("X-Doc-Rev", String(rev));
+    const origin = (req.headers["x-client-id"] as string) || "";   // qui a écrit → le client source ignore son propre event
+    const by = this.writerInfo(req);                               // nom (SSO) + IP de l'auteur, pour la notif live
+    const changeset = this.buildChangeset(req);                    // périmètre → rechargement granulaire chez les autres clients
+    res.on("finish", () => { if (res.statusCode < 300) this.live.publish(id, { rev, origin, by, changeset }); });
     next();
   };
 
@@ -129,11 +193,11 @@ export class Api {
 
   /* -- lot atomique / import -- */
   private transact: RequestHandler = (req, res) => {
-    try { this.repoOf(req).transact(req.body || {}); res.status(204).end(); }
+    try { this.repoOf(req).transact(req.body || {}, this.revOf(req)); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private snapshot: RequestHandler = (req, res) => {
-    try { this.repoOf(req).replaceSnapshot(req.body || {}); res.status(204).end(); }
+    try { this.repoOf(req).replaceSnapshot(req.body || {}, this.revOf(req)); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
 
@@ -173,13 +237,13 @@ export class Api {
   };
   private create: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    try { this.repoOf(req).upsert(req.params.collection, req.body); res.status(201).json(req.body); }
+    try { this.repoOf(req).upsert(req.params.collection, req.body, this.revOf(req)); res.status(201).json(req.body); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private update: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
     const rec = { ...(req.body || {}), id: req.params.id };
-    try { this.repoOf(req).upsert(req.params.collection, rec); res.json(rec); }
+    try { this.repoOf(req).upsert(req.params.collection, rec, this.revOf(req)); res.json(rec); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private remove: RequestHandler = (req, res) => {

@@ -129,7 +129,13 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
     clients reçoivent `{ rev }` et **rechargent** (le client ignore sa propre rev).
     Dernière-écriture-gagne + convergence par reload.
   - ✅ Undo/redo **désactivés en mode API** (boutons + raccourcis).
-  - ⏳ À durcir : rejet 409 (optimistic-lock strict) + UX de conflit ; undo serveur.
+  - ✅ **Verrou optimiste par entité (409)** : chaque ligne porte `updated_rev` (rev
+    du document à son dernier écrit) ; le client envoie `X-Base-Rev` (= son `docRev`)
+    sur chaque écriture ; le serveur rejette en **409** si une entité visée a
+    `updated_rev > base` (rejet AVANT incrément de rev / SSE). Grain ENTITÉ → deux
+    éditions disjointes ne se gênent pas. UX : reload + toast conflit, **sans rejeu**.
+  - ⏳ Reste : conflit *update-after-delete* (résurrection — non détecté faute de
+    tombstone) ; undo serveur.
 - **P4 — Multi-documents** : ✅ fait (registre `/documents` + un SQLite par document).
 
 ## 6. État au démarrage du chantier (constat d'analyse)

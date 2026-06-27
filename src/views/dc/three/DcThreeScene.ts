@@ -39,6 +39,7 @@ export class DcThreeScene extends DcThreeCamera {
   protected build(dcId: string | null): void {
     if (!this.scene) return;
     this._forceBuild = false;   // ce build absorbe la péremption en attente
+    this.faceUrlsInLastBuild.clear();   // build COMPLET → on re-collecte l'ensemble exact des URLs d'images posées (base de l'éviction)
     const theme = this.readTheme();
     this.scene.background = new THREE.Color(theme.bg);
     // (ré)éclairage : nettoyé puis reposé à chaque build
@@ -55,7 +56,7 @@ export class DcThreeScene extends DcThreeCamera {
     const dc = dcId ? this.store.get("datacenters", dcId) : null;
     this.builtDc = dc ? dc.id : null;
     this.rooms = this.computeRooms(dc);
-    if (!this.rooms.length) { this.frameOnce("∅", 2000, 2000, 1000, 1000, 500, 500); return; }
+    if (!this.rooms.length) { this.pruneFaceTextureCache(); this.frameOnce("∅", 2000, 2000, 1000, 1000, 500, 500); return; }   // aucune salle → aucune image posée → tout devient périmé
 
     // sous-groupes par catégorie → reconstruction partielle (chacun contient un sous-groupe TRANSFORMÉ par salle)
     this.gDecor = new THREE.Group(); root.add(this.gDecor);
@@ -78,6 +79,7 @@ export class DcThreeScene extends DcThreeCamera {
     else { const W = dc!.width_mm || 4000, D = dc!.depth_mm || 3000; this.frameOnce(dc!.id, W, D, maxH, W / 2, D / 2, maxH / 2); }
     this.collectScreenObjs();   // marqueurs à taille écran
     this.applyLayerVisibility();   // couches ports/noms/portes : visibilité initiale selon les options
+    this.pruneFaceTextureCache();   // libère les textures d'images plus utilisées (image remplacée/supprimée, autre document)
   }
 
   /** Salles à construire : multi = descripteur fourni ; mono = la salle courante posée à l'IDENTITÉ. */

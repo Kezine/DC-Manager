@@ -26,6 +26,9 @@ export class RestAdapter extends DataAdapter {
   docRev = 0;                            // révision connue du document (synchronisée via l'entête X-Doc-Rev)
   // id de session (par onglet) : tague nos écritures (X-Client-Id) → on ignore NOS propres événements SSE.
   readonly clientId: string = (typeof crypto !== "undefined" && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : ("c-" + Math.random().toString(36).slice(2) + Date.now().toString(36));
+  /** Conflit de version (HTTP 409, verrou optimiste serveur) : une écriture a été refusée car une entité visée a
+      changé depuis notre `docRev`. Le hôte (main.ts) recharge le document et notifie — l'écriture n'est PAS rejouée. */
+  onConflict: ((info: { conflicts?: Array<{ collection: string; id: string; rev: number }> } | null) => void) | null = null;
 
   /** URL du flux SSE du document courant (ou "" si aucun document). */
   get eventsUrl(): string { return this.docId ? (this.apiRoot + "/documents/" + encodeURIComponent(this.docId) + "/events") : ""; }
@@ -46,12 +49,19 @@ export class RestAdapter extends DataAdapter {
   }
 
   private async _req(base: string, method: string, path: string, body?: any, { allow404 = false }: { allow404?: boolean } = {}): Promise<any> {
+    const isWrite = method !== "GET";
     const res = await fetch(base + path, {
-      method, headers: { ...this.headers, "X-Client-Id": this.clientId },
+      // X-Base-Rev : révision sur laquelle s'appuie cette écriture → le serveur la compare aux entités visées (verrou optimiste).
+      method, headers: { ...this.headers, "X-Client-Id": this.clientId, ...(isWrite ? { "X-Base-Rev": String(this.docRev) } : {}) },
       credentials: "include",   // SSO : on transmet les cookies de session (l'app NE gère PAS l'auth — le SSO valide)
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const rev = res.headers.get("X-Doc-Rev"); if (rev != null && rev !== "") this.docRev = Number(rev);   // synchronise la révision connue
+    if (res.status === 409) {   // verrou optimiste : une autre écriture a précédé la nôtre sur ces entités
+      let info: any = null; try { info = JSON.parse(await res.text()); } catch (_) { /* corps absent/illisible */ }
+      this.onConflict?.(info);   // le hôte recharge + notifie ; on NE throw PAS → le reload resynchronise l'état optimiste local
+      return null;
+    }
     if (res.status === 404 && allow404) return null;
     if (!res.ok) throw new Error("HTTP " + res.status + " sur " + method + " " + path);
     if (res.status === 204) return null;

@@ -11,6 +11,8 @@ import { Store } from "../store";
 import { readRuntimeConfig } from "./RuntimeConfig";
 import { GraphView, ListView, ListConfigs, Forms, DatacenterView } from "../views";
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
+import { ReloadPlanner, coerceChangeset, mergeChangesets, fullChangeset } from "../sync";
+import type { DocumentChangeset } from "../sync";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen } from "../ui";
 import { Html } from "../core/Html";
@@ -538,22 +540,44 @@ async function boot(): Promise<void> {
   let restEvents: EventSource | null = null;   // flux SSE du document courant (concurrence multi-client)
   let restReloadTO: any = 0;
   let restLastBy: { name?: string; ip?: string } | null = null;   // auteur du dernier changement externe (pour le toast)
-  /** Recharge le document courant depuis le serveur (suite à un changement externe signalé par SSE). */
-  async function restReloadDocument(): Promise<void> {
+  const reloadPlanner = new ReloadPlanner();   // changeset → plan (quoi reconstruire) — cf. src/sync, docs/render-impact.md
+  // Changesets des événements SSE rapprochés, ACCUMULÉS pendant la fenêtre de debounce puis planifiés en une fois.
+  let pendingChangeset: DocumentChangeset | null = null;
+  /** Recharge le document courant depuis le serveur. `changeset` (SSE) cible la reconstruction (3D sautée si aucune
+      collection dessinée n'a changé) ; `conflict` (409 sur NOTRE écriture) force un rechargement total + notifie le rejet. */
+  async function restReloadDocument(opts?: { conflict?: boolean; changeset?: DocumentChangeset }): Promise<void> {
     if (!restDocId) return;
-    flog("reload document (changement externe)", restLastBy);
-    Notify.busy("Mise à jour du document…");
+    // 409 : on ignore QUELLES entités l'autre client a changées → rechargement total prudent. Sinon : périmètre du changeset.
+    const changeset = opts?.conflict ? fullChangeset() : (opts?.changeset || fullChangeset());
+    const plan = reloadPlanner.plan(changeset);
+    flog("reload document", opts?.conflict ? "(conflit 409)" : "(changement externe)", "→ 3D:" + plan.threeRebuild, restLastBy);
+    Notify.busy(opts?.conflict ? "Conflit de version — rechargement…" : "Mise à jour du document…");
     // laisse le navigateur PEINDRE l'overlay AVANT le travail synchrone lourd (fetch + rebuild 3D ≈ 1 s) qui gèle
     // le thread : sans ce double rAF, l'overlay ne s'affiche qu'une fois le freeze terminé (donc jamais visible).
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      await store.init(); await imageStore.reloadFromBackend();
+      await store.init();   // P1 : re-tirage COMPLET du document (P2 affinera via plan.refetchCollections)
+      if (plan.refreshImages) await imageStore.reloadFromBackend();   // métadonnées d'images SEULEMENT si une image a changé
       session.markLoaded(store.histIndex());
-      dcView.invalidate3D();   // données changées hors timeline locale (REST : histIndex reste 0) → force un rebuild COMPLET de la scène 3D
+      // saut de la reconstruction 3D quand AUCUNE collection dessinée n'a changé (ex. adresse IP, spare, réseau IP) :
+      // c'est tout l'intérêt du plan — éviter le gel d'UI pour un changement sans impact géométrique. Cf. RenderImpact.
+      if (plan.threeRebuild !== "none") dcView.invalidate3D();
       shell.refreshActive(); refreshChrome();
     } finally { Notify.idle(); }
-    const by = restLastBy ? (" par " + (restLastBy.name || "?") + (restLastBy.ip ? " (" + restLastBy.ip + ")" : "")) : "";
-    Notify.toast("Document mis à jour" + by);
+    if (opts?.conflict) {
+      Notify.toast("Modification refusée : le document a changé entre-temps. Données rechargées — refais ta modification.", "conflict");
+    } else {
+      const by = restLastBy ? (" par " + (restLastBy.name || "?") + (restLastBy.ip ? " (" + restLastBy.ip + ")" : "")) : "";
+      Notify.toast("Document mis à jour" + by);
+    }
+  }
+  // 409 (verrou optimiste serveur) sur une de nos écritures → recharge + notifie (PAS de rejeu : le serveur fait autorité).
+  if (REST_MODE) (adapter as RestAdapter).onConflict = () => { void restReloadDocument({ conflict: true }); };
+  /** Planifie un rechargement débouncé en consommant les changesets SSE accumulés (fusionnés). */
+  function flushPendingReload(): void {
+    const changeset = pendingChangeset || fullChangeset();
+    pendingChangeset = null;
+    void restReloadDocument({ changeset });
   }
   /** Abonnement SSE : recharge si une révision PLUS RÉCENTE que la nôtre arrive (changement d'un autre client). */
   function restSubscribeLive(): void {
@@ -564,7 +588,14 @@ async function boot(): Promise<void> {
       es.onmessage = (e) => { try {
         const d = JSON.parse(e.data); const ra = adapter as RestAdapter;
         if (!d || (d.origin && d.origin === ra.clientId)) return;   // NOTRE propre écriture → on ignore (pas de reload)
-        if (typeof d.rev === "number" && d.rev > ra.docRev) { restLastBy = d.by || null; clearTimeout(restReloadTO); restReloadTO = setTimeout(() => void restReloadDocument(), 250); }
+        if (typeof d.rev === "number" && d.rev > ra.docRev) {
+          restLastBy = d.by || null;
+          // accumule le périmètre de CET événement avec ceux déjà en attente (plusieurs écritures peuvent tomber
+          // dans la fenêtre de debounce) → une seule reconstruction couvrant l'union des changements.
+          const incoming = coerceChangeset(d.changeset);
+          pendingChangeset = pendingChangeset ? mergeChangesets(pendingChangeset, incoming) : incoming;
+          clearTimeout(restReloadTO); restReloadTO = setTimeout(flushPendingReload, 250);
+        }
       } catch (_) { /* ignore */ } };
       es.onerror = () => { /* reconnexion auto du navigateur (champ retry) */ };
     } catch (e) { flog("SSE indisponible", e); }
@@ -883,7 +914,16 @@ async function boot(): Promise<void> {
     openWaypointForm: (id, opts) => Forms.waypoint(store, formHost, id, opts),
     openFloorForm: (loc, fl, opts) => Forms.floor(store, formHost, loc, fl, opts),
     openSiteForm: (id) => Forms.site(store, formHost, id, () => { dcView.buildToolbar(); dcView.render(); }),
-    faceImageUrl: (eqId, face) => { const e: any = store.get("equipments", eqId); const fld = (EQUIP_FACE_IMG_FIELD as any)[face]; const im: any = e && fld && e[fld] ? imageStore.get(e[fld]) : null; return im ? im.url : null; },
+    faceImageUrl: (eqId, face) => {
+      const e: any = store.get("equipments", eqId);
+      const fld = (EQUIP_FACE_IMG_FIELD as any)[face];
+      const im: any = e && fld && e[fld] ? imageStore.get(e[fld]) : null;
+      if (!im || !im.url) return null;
+      // REST : l'URL serveur (/images/{id}/blob) est STABLE par id → on y ajoute une version (octets) qui change quand
+      // l'image est remplacée. Sans ce jeton, l'image remplacée resterait périmée (cache navigateur max-age + cache de
+      // textures 3D, tous deux indexés par URL). En mode fichier, l'URL est déjà un objectURL unique par chargement.
+      return im.url.startsWith("blob:") ? im.url : (im.url + "?v=" + (im.bytes || 0));
+    },
   });
   // « Localiser » depuis une fiche (modale) : ferme la modale, bascule en 3D, centre la caméra ; « Retour » rouvre la fiche.
   formHost.locate = (kind, id, ret) => { modal.close(); shell.switchView("datacenter"); dcView.locate(kind, id); dcView.setReturnAction(ret || null); };

@@ -33,8 +33,10 @@ export class Repository {
     db.pragma("journal_mode = WAL");
     for (const c of Schema.COLLECTIONS) {
       db.exec(`CREATE TABLE IF NOT EXISTS "${c}" (
-        id TEXT PRIMARY KEY, data TEXT NOT NULL, search TEXT NOT NULL DEFAULT '', created_date TEXT
+        id TEXT PRIMARY KEY, data TEXT NOT NULL, search TEXT NOT NULL DEFAULT '', created_date TEXT, updated_rev INTEGER NOT NULL DEFAULT 0
       )`);
+      // migration : `updated_rev` = révision du document au dernier écrit de CETTE ligne (verrou optimiste par entité).
+      try { db.exec(`ALTER TABLE "${c}" ADD COLUMN updated_rev INTEGER NOT NULL DEFAULT 0`); } catch { /* colonne déjà présente */ }
     }
     db.exec(`CREATE TABLE IF NOT EXISTS meta (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL)`);
     db.exec(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, meta TEXT NOT NULL, blob BLOB, bytes INTEGER NOT NULL DEFAULT 0)`);
@@ -49,16 +51,32 @@ export class Repository {
   }
 
   /* ---- écritures (CRUD unitaire ET /transact) ---- */
-  upsert(collection: string, record: Rec): void {
+  /** `rev` = révision du document portée par cette écriture → estampillée sur la ligne (`updated_rev`) pour le
+      verrou optimiste par entité (cf. `conflicts`). 0 = écriture non versionnée (import/seed). */
+  upsert(collection: string, record: Rec, rev = 0): void {
     if (!Schema.isCollection(collection)) throw new Error("collection inconnue: " + collection);
     if (!record || !record.id) throw new Error("record sans id");
-    this.db.prepare(`INSERT INTO "${collection}" (id, data, search, created_date) VALUES (@id, @data, @search, @created)
-                     ON CONFLICT(id) DO UPDATE SET data = @data, search = @search, created_date = @created`)
-      .run({ id: record.id, data: JSON.stringify(record), search: this.searchText(record), created: record.created_date || null });
+    this.db.prepare(`INSERT INTO "${collection}" (id, data, search, created_date, updated_rev) VALUES (@id, @data, @search, @created, @rev)
+                     ON CONFLICT(id) DO UPDATE SET data = @data, search = @search, created_date = @created, updated_rev = @rev`)
+      .run({ id: record.id, data: JSON.stringify(record), search: this.searchText(record), created: record.created_date || null, rev });
   }
   delete(collection: string, id: string): void {
     if (!Schema.isCollection(collection)) throw new Error("collection inconnue: " + collection);
     this.db.prepare(`DELETE FROM "${collection}" WHERE id = ?`).run(id);
+  }
+
+  /** VERROU OPTIMISTE (par entité) : parmi `targets`, renvoie celles MODIFIÉES après `baseRev`
+      (`updated_rev > baseRev`) — c.-à-d. qu'un autre client a écrit dessus depuis le snapshot du client courant.
+      Liste vide = aucune collision → l'écriture peut s'appliquer. Les entités absentes (création / déjà supprimée)
+      ne comptent pas comme conflit (résurrection sur update-after-delete = limite connue, hors périmètre). */
+  conflicts(targets: Array<{ collection: string; id: string }>, baseRev: number): Array<{ collection: string; id: string; rev: number }> {
+    const out: Array<{ collection: string; id: string; rev: number }> = [];
+    for (const t of targets) {
+      if (!Schema.isCollection(t.collection) || !t.id) continue;
+      const row = this.db.prepare(`SELECT updated_rev FROM "${t.collection}" WHERE id = ?`).get(t.id);
+      if (row && (row.updated_rev as number) > baseRev) out.push({ collection: t.collection, id: t.id, rev: row.updated_rev as number });
+    }
+    return out;
   }
 
   /* ---- lectures ---- */
@@ -110,21 +128,21 @@ export class Repository {
   setMeta(meta: Rec): void { this.db.prepare(`INSERT INTO meta (id, data) VALUES (1, @d) ON CONFLICT(id) DO UPDATE SET data = @d`).run({ d: JSON.stringify(meta || {}) }); }
 
   /* ---- lot atomique (POST /transact) ---- */
-  transact({ creates = [], updates = [], deletes = [], meta }: Tx = {}): void {
+  transact({ creates = [], updates = [], deletes = [], meta }: Tx = {}, rev = 0): void {
     this.db.transaction(() => {
       for (const d of deletes) this.delete(d.collection, d.id);
-      for (const u of updates) this.upsert(u.collection, u.record);
-      for (const c of creates) this.upsert(c.collection, c.record);
+      for (const u of updates) this.upsert(u.collection, u.record, rev);
+      for (const c of creates) this.upsert(c.collection, c.record, rev);
       if (meta) this.setMeta(meta);
     })();
   }
 
   /* ---- import complet (PUT /snapshot) ---- */
-  replaceSnapshot(snapshot: Snapshot): void {
+  replaceSnapshot(snapshot: Snapshot, rev = 0): void {
     this.db.transaction(() => {
       for (const c of Schema.COLLECTIONS) {
         this.db.prepare(`DELETE FROM "${c}"`).run();
-        for (const rec of (snapshot[c] || [])) this.upsert(c, rec);
+        for (const rec of (snapshot[c] || [])) this.upsert(c, rec, rev);
       }
       if (snapshot.meta) this.setMeta(snapshot.meta);
     })();

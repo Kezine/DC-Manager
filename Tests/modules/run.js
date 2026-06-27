@@ -56,6 +56,10 @@ const { DatacenterView } = D("views/DatacenterView.js");
 const { FloorLayout } = D("geometry/FloorLayout.js");
 const { ImageStore } = D("data/ImageStore.js");
 const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
+const { EntityRegistry } = D("models/index.js");
+const { ReloadPlanner } = D("sync/ReloadPlanner.js");
+const { COLLECTION_THREE_IMPACT, threeImpactOf, worseThreeImpact, unmappedCollections } = D("sync/RenderImpact.js");
+const { emptyChangeset, fullChangeset, coerceChangeset, mergeChangesets } = D("sync/Changeset.js");
 
 async function makeStore() {
   const s = new Store(new BrowserStorageAdapter({ persistent: false }));
@@ -873,6 +877,66 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const fe2 = s.get("equipments", fe.id);
     ck(!!fe2 && fe2.placement_mode === "manual", "équipement d'étage dé-placé");
     ck.eq(s.get("cables", cabF.id), null, "câble d'équipement d'étage supprimé (décâblé)");
+  }
+
+  console.log("\n• sync : RenderImpact (carte d'impact 3D)");
+  {
+    // Invariant CRITIQUE : toute collection du registre a un impact déclaré (sinon défaut prudent, mais on veut un choix EXPLICITE).
+    ck.eq(unmappedCollections().length, 0, "RenderImpact : toutes les collections sont mappées (" + EntityRegistry.COLLECTIONS.length + ")");
+    // Classification (cf. docs/render-impact.md) — quelques ancres représentatives de chaque niveau.
+    ck.eq(COLLECTION_THREE_IMPACT.racks, "geometry", "racks → geometry");
+    ck.eq(COLLECTION_THREE_IMPACT.portTypes, "geometry", "portTypes → geometry (taille connecteur, dépendance indirecte)");
+    ck.eq(COLLECTION_THREE_IMPACT.networks, "recolor", "networks → recolor (couleur câbles)");
+    ck.eq(COLLECTION_THREE_IMPACT.groups, "recolor", "groups → recolor (couleur occupants)");
+    ck.eq(COLLECTION_THREE_IMPACT.ipAddresses, "none", "ipAddresses → none (hors 3D)");
+    ck.eq(COLLECTION_THREE_IMPACT.spares, "none", "spares → none (hors 3D)");
+    ck.eq(COLLECTION_THREE_IMPACT.cableBundles, "none", "cableBundles → none (tooltip seul)");
+    ck.eq(threeImpactOf("collection_inexistante"), "geometry", "collection inconnue → défaut PRUDENT geometry");
+    ck.eq(worseThreeImpact("none", "geometry"), "geometry", "worseThreeImpact : none < geometry");
+    ck.eq(worseThreeImpact("recolor", "none"), "recolor", "worseThreeImpact : recolor > none");
+  }
+
+  console.log("\n• sync : Changeset (fusion + coercition)");
+  {
+    ck.eq(emptyChangeset().full, false, "emptyChangeset : full=false");
+    ck.eq(fullChangeset().full, true, "fullChangeset : full=true");
+    // coercition d'une valeur réseau non fiable
+    ck.eq(coerceChangeset(null).full, true, "coerce(null) → full (repli sûr)");
+    ck.eq(coerceChangeset({ full: true }).full, true, "coerce({full:true}) → full");
+    const coerced = coerceChangeset({ collections: ["racks", 42, "cables"], meta: 1, images: 0 });
+    ck.eq(JSON.stringify(coerced.collections), JSON.stringify(["racks", "cables"]), "coerce : collections filtrées (non-strings retirées)");
+    ck.eq(coerced.meta, true, "coerce : meta coercé en booléen");
+    // fusion : union des collections, OU des drapeaux
+    const merged = mergeChangesets(
+      { full: false, collections: ["racks"], meta: false, images: true },
+      { full: false, collections: ["racks", "cables"], meta: true, images: false },
+    );
+    ck.eq(JSON.stringify(merged.collections), JSON.stringify(["racks", "cables"]), "merge : union dédupliquée des collections");
+    ck.eq(merged.meta && merged.images, true, "merge : drapeaux meta/images en OU");
+    ck.eq(mergeChangesets(fullChangeset(), emptyChangeset()).full, true, "merge : full domine");
+  }
+
+  console.log("\n• sync : ReloadPlanner (changeset → plan)");
+  {
+    const planner = new ReloadPlanner();
+    // collections HORS 3D → aucune reconstruction (le gain : pas de gel d'UI pour une IP / un spare / un réseau IP)
+    const ipPlan = planner.plan({ full: false, collections: ["ipAddresses", "spares"], meta: false, images: false });
+    ck.eq(ipPlan.threeRebuild, "none", "plan : IP+spare → threeRebuild none (PAS de rebuild 3D)");
+    ck.eq(JSON.stringify(ipPlan.refetchCollections), JSON.stringify(["ipAddresses", "spares"]), "plan : refetch ciblé (P2)");
+    // collection géométrique → reconstruction complète
+    ck.eq(planner.plan({ full: false, collections: ["racks"], meta: false, images: false }).threeRebuild, "geometry", "plan : racks → geometry");
+    // collection couleur seule → recolor
+    ck.eq(planner.plan({ full: false, collections: ["networks"], meta: false, images: false }).threeRebuild, "recolor", "plan : networks → recolor");
+    // pire impact d'un lot mixte
+    ck.eq(planner.plan({ full: false, collections: ["spares", "networks", "racks"], meta: false, images: false }).threeRebuild, "geometry", "plan : lot mixte → pire impact (geometry)");
+    // image changée → au moins geometry (textures dessinées)
+    ck.eq(planner.plan({ full: false, collections: [], meta: false, images: true }).threeRebuild, "geometry", "plan : image changée → geometry");
+    ck.eq(planner.plan({ full: false, collections: ["spares"], meta: false, images: true }).refreshImages, true, "plan : images → refreshImages true");
+    ck.eq(planner.plan({ full: false, collections: ["spares"], meta: false, images: false }).refreshImages, false, "plan : pas d'image → refreshImages false");
+    // périmètre indéterminé → tout recharger + rebuild complet
+    const fullPlan = planner.plan(fullChangeset());
+    ck.eq(fullPlan.refetchCollections, null, "plan : full → refetch null (tout le document)");
+    ck.eq(fullPlan.threeRebuild, "geometry", "plan : full → geometry");
   }
 
   console.log("\n" + "-".repeat(48));

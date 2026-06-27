@@ -79,6 +79,7 @@ export class DcThreeBase {
   protected raf = 0;                                  // RAF en attente (0 = aucune) — rendu à la demande
   protected texCache = new Map<string, THREE.CanvasTexture>();   // textures de libellés mises en cache (clé texte+dims)
   protected imgTexCache = new Map<string, THREE.Texture>();      // textures d'IMAGES de façade par URL → réutilisées d'un build à l'autre (pas de rechargement), libérées au dispose
+  protected faceUrlsInLastBuild = new Set<string>();            // URLs d'images RÉELLEMENT posées au dernier build() COMPLET → base de l'éviction des textures périmées
 
   // sous-groupes DÉDIÉS par catégorie → reconstruction PARTIELLE (un toggle ne refait que sa catégorie).
   protected gDecor: THREE.Group | null = null;        // sols + grilles (par salle) — rebuild plein seulement
@@ -438,6 +439,7 @@ export class DcThreeBase {
       mesh.visible = this.layerVisible(extra);
       group.add(mesh);
     };
+    this.faceUrlsInLastBuild.add(url);   // marque cette URL « utilisée » (l'URL porte une version REST → change si l'image est remplacée)
     const cached = this.imgTexCache.get(url);
     if (cached) { place(cached); return; }   // déjà chargée → pose SYNCHRONE, aucun rechargement (rebuild instantané)
     if (!this._texLoader) this._texLoader = new THREE.TextureLoader();
@@ -448,6 +450,19 @@ export class DcThreeBase {
       if (this._epoch !== epoch || !group.parent) return;   // (re)build entre-temps : texture conservée pour le prochain build
       place(tex); this.request();
     }, undefined, () => { /* échec de chargement → ignoré */ });
+  }
+
+  /** Éviction des textures de façade PÉRIMÉES après un build() COMPLET : libère (dispose) et retire du cache toute
+      texture dont l'URL n'a pas été reposée par ce build. Couvre l'image remplacée (l'URL versionnée a changé →
+      l'ancienne n'est plus demandée), l'image supprimée, et le changement de document. À n'appeler QU'APRÈS un build
+      complet (toutes les faces reconstruites) : `faceUrlsInLastBuild` y est exhaustif. Les chemins INCRÉMENTAUX
+      (applyRoomDelta) ne touchent pas au contenu d'image et ne doivent PAS élaguer (ensemble partiel). */
+  protected pruneFaceTextureCache(): void {
+    for (const [url, texture] of this.imgTexCache) {
+      if (this.faceUrlsInLastBuild.has(url)) continue;
+      texture.dispose();
+      this.imgTexCache.delete(url);
+    }
   }
 
   /** Pose un libellé À PLAT sur une face verticale (avant = normale −Y ; arrière = +Y), en coords LOCALES. */
