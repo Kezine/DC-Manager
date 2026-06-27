@@ -2,6 +2,7 @@ import type { Store } from "../../store";
 import type { ImageStore } from "../../data/ImageStore";
 import type { ModalOptions } from "../../ui/Modal";
 import { FormControls } from "../../ui/FormControls";
+import { LiveValidation } from "./LiveValidation";
 import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
@@ -751,13 +752,16 @@ export class EquipmentForms extends FormBase {
     };
     dimI.addEventListener("change", sync); typeI.addEventListener("change", sync); sync();
 
+    // validation live (mêmes règles que le Store/serveur) : surligne le(s) champ(s) fautif(s) à l'enregistrement.
+    const live = new LiveValidation("equipments", { name: nameI, type: typeI, u_height: uHI, group_id: groupI, rack_id: rackI, pdu_max_a: pduI }, (c, i) => store.get(c, i) || null);
+    live.clearOnInput();
+
     host.openModal({
       title: eq ? "Modifier l'équipement" : "Nouvel équipement",
       subtitle: eq ? Html.escape(eq.name || "") : "Équipement, ses ports et agrégats",
       body: root, wide: true,
       onSave: async () => {
         const name = nameI.value.trim();
-        if (!name) { Notify.toast("Le nom est obligatoire", "err"); return false; }
         const inv = (invI as any).checked, free = dimI.value === "free";
         const payload: any = {
           name, type: typeI.value, brand: brandI.value.trim(), model: modelI.value.trim(), serial: serialI.value.trim(),
@@ -782,6 +786,7 @@ export class EquipmentForms extends FormBase {
           payload.rack_id = rackI.value || null;
           payload.rack_u = rackUI.value !== "" ? Math.max(1, parseInt(rackUI.value, 10) || 1) : null;
         }
+        if (live.check(payload).length) return false;   // validation live : champ(s) surligné(s), enregistrement bloqué
         let eqId: string;
         if (eq) { await store.update("equipments", eq.id, payload); eqId = eq.id; }
         else { const created: any = await store.create("equipments", payload); eqId = created.id; }

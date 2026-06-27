@@ -2,6 +2,7 @@ import type { Store } from "../../store";
 import type { ImageStore } from "../../data/ImageStore";
 import type { ModalOptions } from "../../ui/Modal";
 import { FormControls } from "../../ui/FormControls";
+import { LiveValidation } from "./LiveValidation";
 import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
@@ -382,6 +383,10 @@ export class CableForms extends EquipmentForms {
 
     refresh(); syncBundleUI(); renderNets(); syncPrimary(); syncRoute(); syncStatus(false);
 
+    // validation live (invariant câble partagé : un port ne se relie pas à lui-même) — surligne le port B.
+    const cableLive = new LiveValidation("cables", { from_port_id: selPortA, to_port_id: selPortB, status: statusSel });
+    cableLive.clearOnInput();
+
     host.openModal({
       title: cable ? "Modifier le câble" : "Nouveau câble",
       subtitle: cable ? Html.escape(cable.name || "") : "Relier deux ports",
@@ -402,7 +407,8 @@ export class CableForms extends EquipmentForms {
           if (!reuse && occ.free <= 0) { Notify.toast("Faisceau « " + (bnd.name || "trunk") + " » COMPLET (" + occ.used + "/" + bnd.fiber_count + ")", "err"); return false; }
           strandNo = reuse ? cable.strand_no : occ.nextStrand;
         }
-        if (fromP && toP && fromP === toP) { Notify.toast("Un câble ne peut pas relier un port à lui-même", "err"); return false; }
+        // self-loop (invariant cable partagé) : surligné directement sur le port B au lieu d'un toast.
+        if (cableLive.check({ from_port_id: fromP, to_port_id: toP, status: statusSel.value || "planifie" }).some((e) => e.code === "invariant")) return false;
         if (fromP && store.cableOnPort(fromP, cable ? cable.id : null)) { Notify.toast("Le port A est déjà relié (1 câble par port)", "err"); return false; }
         if (toP && store.cableOnPort(toP, cable ? cable.id : null)) { Notify.toast("Le port B est déjà relié (1 câble par port)", "err"); return false; }
         [fromP, toP] = orientEnds(fromP, toP);
