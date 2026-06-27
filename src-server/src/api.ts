@@ -3,11 +3,11 @@ import multer from "multer";
 import { Schema } from "./constants.js";
 import { type Repository, type Rec, type ListOpts } from "./db.js";
 import { DocumentStore } from "./documents.js";
-import { Auth } from "./auth.js";
+import { Auth, type SsoResult } from "./auth.js";
 import { LiveBus } from "./live.js";
 
-/** Requête dont le Repository du document a été résolu par le middleware `resolveRepo`. */
-type RepoRequest = Request & { repo?: Repository };
+/** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`). */
+type RepoRequest = Request & { repo?: Repository; authUser?: SsoResult };
 
 /** Couche HTTP : registre de documents + données SCOPÉES par document, déléguées au `Repository`. */
 export class Api {
@@ -68,9 +68,20 @@ export class Api {
   /** Garde d'accès : session SSO valide + SUPER_ADMIN, sinon 403 (le client affiche « accès refusé »). */
   private requireAdmin: RequestHandler = async (req, res, next) => {
     const r = await this.auth.validate(req);
+    (req as RepoRequest).authUser = r;   // réutilisé par resolveRepo (qui a écrit, pour le live)
     if (this.auth.isAuthorized(r)) { next(); return; }
     res.status(403).json({ error: "accès refusé", logged: !!r.logged, adminRight: r.adminRight || "NONE" });
   };
+
+  /** Identité de l'auteur d'une écriture (pour la notif live) : nom (SSO) + IP. */
+  private writerInfo(req: Request): { name: string; ip: string } {
+    const r = (req as RepoRequest).authUser;
+    const u = (r && r.user) || {};
+    const name = [u.prenom, u.nom].filter(Boolean).join(" ") || u.login || "?";
+    const fwd = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+    const ip = (r && (r as any).ip) || fwd || req.ip || "";
+    return { name, ip };
+  }
 
   /* -- registre des documents -- */
   private listDocs: RequestHandler = (_req, res) => { res.json(this.docs.list()); };
@@ -96,7 +107,8 @@ export class Api {
       const rev = this.docs.markChanged(id);
       res.setHeader("X-Doc-Rev", String(rev));
       const origin = (req.headers["x-client-id"] as string) || "";   // qui a écrit → le client source ignore son propre event
-      res.on("finish", () => { if (res.statusCode < 300) this.live.publish(id, { rev, origin }); });
+      const by = this.writerInfo(req);                               // nom (SSO) + IP de l'auteur, pour la notif live
+      res.on("finish", () => { if (res.statusCode < 300) this.live.publish(id, { rev, origin, by }); });
     }
     next();
   };

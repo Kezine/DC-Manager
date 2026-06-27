@@ -537,14 +537,16 @@ async function boot(): Promise<void> {
   /** Ouvre un document serveur : scope l'adapter + le backend d'images, recharge données & images. */
   let restEvents: EventSource | null = null;   // flux SSE du document courant (concurrence multi-client)
   let restReloadTO: any = 0;
+  let restLastBy: { name?: string; ip?: string } | null = null;   // auteur du dernier changement externe (pour le toast)
   /** Recharge le document courant depuis le serveur (suite à un changement externe signalé par SSE). */
   async function restReloadDocument(): Promise<void> {
     if (!restDocId) return;
-    flog("reload document (changement externe)");
+    flog("reload document (changement externe)", restLastBy);
     await store.init(); await imageStore.reloadFromBackend();
     session.markLoaded(store.histIndex());
     shell.refreshActive(); refreshChrome();
-    Notify.toast("Document mis à jour (modifié ailleurs)");
+    const by = restLastBy ? (" par " + (restLastBy.name || "?") + (restLastBy.ip ? " (" + restLastBy.ip + ")" : "")) : "";
+    Notify.toast("Document mis à jour" + by);
   }
   /** Abonnement SSE : recharge si une révision PLUS RÉCENTE que la nôtre arrive (changement d'un autre client). */
   function restSubscribeLive(): void {
@@ -555,7 +557,7 @@ async function boot(): Promise<void> {
       es.onmessage = (e) => { try {
         const d = JSON.parse(e.data); const ra = adapter as RestAdapter;
         if (!d || (d.origin && d.origin === ra.clientId)) return;   // NOTRE propre écriture → on ignore (pas de reload)
-        if (typeof d.rev === "number" && d.rev > ra.docRev) { clearTimeout(restReloadTO); restReloadTO = setTimeout(() => void restReloadDocument(), 250); }
+        if (typeof d.rev === "number" && d.rev > ra.docRev) { restLastBy = d.by || null; clearTimeout(restReloadTO); restReloadTO = setTimeout(() => void restReloadDocument(), 250); }
       } catch (_) { /* ignore */ } };
       es.onerror = () => { /* reconnexion auto du navigateur (champ retry) */ };
     } catch (e) { flog("SSE indisponible", e); }
