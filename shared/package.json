@@ -1,0 +1,4 @@
+{
+  "//": "Marque le code PARTAGÉ comme module ESM. NÉCESSAIRE pour le build serveur (NodeNext) : sans ce fichier, tsc rattacherait shared/ au package racine (front, sans 'type') et compilerait shared/*.ts en CommonJS, alors que le serveur (src-server, 'type: module') et son runtime les chargent en ESM → 'does not provide an export named ...'. Sans effet sur le front (résolution bundler) ni sur les tests (module: commonjs explicite).",
+  "type": "module"
+}
