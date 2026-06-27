@@ -114,7 +114,7 @@ ValidationError = { collection, id?, path, code, message }
 | **T1/T2** | règles métier supplémentaires : invariants intra-record (équipement racké ⇒ baie ; port X/Y cohérents ; brosse ⇒ baie) + cross-entité (équipement tient dans la baie ; baie dans les bornes de la salle ; port parent/agrégat même équipement) | ✅ |
 | **V6a** | contraintes de **portée — unicité simple** : `ScopeRule` + `RecordFinder` injecté (recherche par champ indexé, conscient du lot via `buildBatchChildFinder`) ; `ipAddresses.address` unique (« sauf moi-même »). Câblé Store + serveur + live | ✅ |
 | **V6b** | portée — relations & intervalles : **1 câble par port** (périmètre `from`/`to`), **chevauchement** de plages DHCP, **IP ∈ plage** (exclusion bidirectionnelle adresse ↔ plage). Câblé Store + serveur + live (IPAM) | ✅ |
-| **V6c** | portée — **empilement de baie** (collision de U : équipements + rackItems + brosses) — le plus lourd, laissé au Store (`rackPlacementBlockedReason`) sauf besoin tiers (cf. §9) | ⏳ |
+| **V6c** | portée — **empilement de baie** : pas de collision de cellule `U:face` entre occupants (équipements rackés + rackItems + brosses), via `RackOccupancy` (réplique fidèle de `RackGeometry.mountSides`/`RackScene.occupants`) ; index `waypoints.rack_id` ajouté ; les règles `scope` reçoivent aussi `fetch` (lecture de la baie) | ✅ |
 
 Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
 FK, tableaux). **Couverture étendue aux 19 collections** : chaque collection a une spec

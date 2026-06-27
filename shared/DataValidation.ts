@@ -115,8 +115,9 @@ export type RecordFinder = (collection: string, field: string, value: string) =>
 export type ChildFinder = RecordFinder;
 
 /** Règle de PORTÉE (V6) : valide un enregistrement contre l'ENSEMBLE de ses pairs (unicité, non-chevauchement),
-    via un `find` par champ. Doit EXCLURE l'enregistrement lui-même (par `id`). Renvoie l'erreur ou `null`. */
-export type ScopeRule = (record: Record<string, any>, find: RecordFinder) => { path: string; message: string } | null;
+    via un `find` par champ (+ `fetch` optionnel pour lire une entité de contexte, ex. la baie). Doit EXCLURE
+    l'enregistrement lui-même (par `id`). Renvoie l'erreur ou `null`. */
+export type ScopeRule = (record: Record<string, any>, find: RecordFinder, fetch?: EntityFetcher) => { path: string; message: string } | null;
 
 /** Forme minimale d'un lot atomique (mêmes champs que la transaction serveur). */
 export interface BatchOps {
@@ -162,6 +163,74 @@ export class Ipv4 {
   }
 }
 
+/* ============================================================================
+   RackOccupancy — empilement en baie (V6c). Réplique FIDÈLE de RackGeometry.mountSides /
+   RackScene.occupants : un occupant (équipement racké, rackItem, brosse) occupe des cellules
+   « U:face » ; deux occupants entrent en COLLISION s'ils partagent une cellule.
+   ============================================================================ */
+type RackSpan = { top: number; height: number; sides: string[] };
+
+class RackOccupancy {
+  /** Faces occupées par un occupant selon le type de baie (réplique `RackGeometry.mountSides`). */
+  private static sides(record: Record<string, any>, collection: string, rack: Record<string, any>): string[] {
+    if (rack.sides !== "dual") return ["front"];                                  // baie simple face → tout sur « front »
+    if (collection === "rackItems") return [record.side === "rear" ? "rear" : "front"];
+    if (collection === "waypoints") return ["front", "rear"];                     // brosse → pleine profondeur
+    const locksU = record.depth === "full" || record.locks_u === true;            // équipement pleine profondeur → 2 faces
+    return locksU ? ["front", "rear"] : [record.rack_side === "rear" ? "rear" : "front"];
+  }
+
+  /** Étendue U×faces d'un occupant de baie, ou `null` si l'enregistrement n'occupe pas de U dans une baie. */
+  private static span(record: Record<string, any>, collection: string, rack: Record<string, any>): RackSpan | null {
+    let top: number | null = null, height = 1;
+    if (collection === "equipments") {
+      if (record.placement_mode !== "rack" || record.rack_u == null) return null;
+      top = record.rack_u | 0; height = Math.max(1, (record.u_height | 0) || 1);
+    } else if (collection === "rackItems") {
+      if (record.u == null) return null;
+      top = record.u | 0; height = Math.max(1, (record.u_height | 0) || 1);
+    } else if (collection === "waypoints") {
+      if (record.kind !== "brush" || !record.rack_id) return null;
+      top = Math.max(1, record.rack_u | 0); height = Math.max(1, record.u_height | 0);
+    } else return null;
+    if (top == null || top < 1) return null;
+    return { top, height, sides: RackOccupancy.sides(record, collection, rack) };
+  }
+
+  /** Cellules « U:face » couvertes par une étendue. */
+  private static cells(span: RackSpan): Set<string> {
+    const set = new Set<string>();
+    for (let i = 0; i < span.height; i++) for (const side of span.sides) set.add((span.top + i) + ":" + side);
+    return set;
+  }
+
+  /** Règle de PORTÉE : l'occupant ne doit pas COLLIDER (même cellule U:face) avec un autre occupant de SA baie. */
+  static collision(record: Record<string, any>, collection: string, find: RecordFinder, fetch?: EntityFetcher): { path: string; message: string } | null {
+    const rackId = record.rack_id;
+    if (!rackId || !fetch) return null;
+    const rack = fetch("racks", rackId);
+    if (!rack) return null;                                                        // baie absente → l'intégrité réf. le signale
+    const self = RackOccupancy.span(record, collection, rack);
+    if (!self) return null;                                                        // pas un occupant de baie
+    const selfCells = RackOccupancy.cells(self);
+    const path = collection === "rackItems" ? "u" : "rack_u";
+    const others: Array<[string, Record<string, any>]> = [
+      ...find("equipments", "rack_id", rackId).map((o) => ["equipments", o] as [string, Record<string, any>]),
+      ...find("rackItems", "rack_id", rackId).map((o) => ["rackItems", o] as [string, Record<string, any>]),
+      ...find("waypoints", "rack_id", rackId).map((o) => ["waypoints", o] as [string, Record<string, any>]),
+    ];
+    for (const [otherCollection, other] of others) {
+      if (other.id === record.id) continue;                                        // « sauf moi-même »
+      const span = RackOccupancy.span(other, otherCollection, rack);
+      if (!span) continue;
+      for (const cell of RackOccupancy.cells(span)) {
+        if (selfCells.has(cell)) return { path, message: `Emplacement en collision avec « ${other.name || other.label || other.id} » (U${span.top}${span.height > 1 ? "–" + (span.top + span.height - 1) : ""}).` };
+      }
+    }
+    return null;
+  }
+}
+
 /* ---- spécifications des collections (couverture 19/19 — cf. docs/render-impact.md n'est PAS lié ; cf. docs/validation.md) ---- */
 export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   equipments: {
@@ -193,6 +262,8 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
           : { path: "rack_u", message: `L'équipement (U${top}${height > 1 ? "–" + (top + height - 1) : ""}) dépasse la baie (${rack.u_count} U).` };
       },
     ],
+    // V6c : pas de collision de U avec un autre occupant de la baie.
+    scope: [(eq, find, fetch) => RackOccupancy.collision(eq, "equipments", find, fetch)],
   },
   cables: {
     fields: {
@@ -321,6 +392,8 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       kind:    { type: "string", enum: RACK_ITEM_KIND_IDS, default: "blank" },
       side:    { type: "string", enum: RACK_OCCUPANT_SIDES, default: "front" },
     },
+    // V6c : pas de collision de U avec un autre occupant de la baie.
+    scope: [(item, find, fetch) => RackOccupancy.collision(item, "rackItems", find, fetch)],
   },
   portTypes: {
     fields: {
@@ -358,6 +431,8 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       // T1 : une brosse est montée DANS une baie (rack_id obligatoire pour ce genre).
       { path: "rack_id", message: "Une brosse doit être montée dans une baie.", holds: (wp) => wp.kind !== "brush" || !!wp.rack_id },
     ],
+    // V6c : une brosse ne doit pas collisionner d'autres occupants de la baie.
+    scope: [(wp, find, fetch) => RackOccupancy.collision(wp, "waypoints", find, fetch)],
   },
   floors: {
     fields: {
@@ -559,7 +634,7 @@ export class DataValidator {
     // règles de PORTÉE (V6, si `find`) : unicité / non-chevauchement contre les pairs (ex. adresse IP unique).
     if (find) {
       for (const rule of spec.scope || []) {
-        const violation = rule(record, find);
+        const violation = rule(record, find, fetch);
         if (violation) fail(violation.path, "scope", violation.message);
       }
     }

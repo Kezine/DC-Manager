@@ -1131,6 +1131,21 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(DV.validateRecord("ipAddresses", { id: "AX", network_id: "N", address: "10.0.0.15" }, undefined, ipamFind).some((e) => e.code === "scope"), true, "V6b IP : adresse dans une plage DHCP → scope");
   }
 
+  console.log("\n• shared : portée V6c (collision de U en baie)");
+  {
+    const DV = Validation.DataValidator;
+    const rack = { id: "RK", u_count: 42, sides: "dual" };
+    const fetch = (c, i) => (c === "racks" && i === "RK") ? rack : null;
+    const occ = { eq: [{ id: "E0", placement_mode: "rack", rack_id: "RK", rack_u: 1, u_height: 2, depth: "half", rack_side: "front", name: "E0" }] };
+    const find = (c, f, v) => (c === "equipments" && f === "rack_id" && v === "RK") ? occ.eq : [];
+    ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 2, u_height: 1, depth: "half", rack_side: "front" }, fetch, find).some((e) => e.code === "scope"), true, "V6c : chevauchement U2 front → collision");
+    ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 2, u_height: 1, depth: "half", rack_side: "rear" }, fetch, find).length, 0, "V6c : même U, face REAR → OK (faces distinctes en baie double)");
+    ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 3, u_height: 1, depth: "half", rack_side: "front" }, fetch, find).length, 0, "V6c : U libre → OK");
+    ck.eq(DV.validateRecord("equipments", { id: "E0", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 1, u_height: 2, depth: "half", rack_side: "front" }, fetch, find).length, 0, "V6c : même occupant garde sa place → OK");
+    ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 2, u_height: 1, depth: "full", rack_side: "rear" }, fetch, find).some((e) => e.code === "scope"), true, "V6c : full depth (2 faces) chevauche U2 → collision");
+    ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 2, u_height: 1, depth: "half", rack_side: "front" }, fetch).length, 0, "V6c : sans find → pas de contrôle de collision");
+  }
+
   console.log("\n• shared : règles métier T1 (invariants) / T2 (cross-entité)");
   {
     const DV = Validation.DataValidator;

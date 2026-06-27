@@ -27,7 +27,7 @@ export const INDEX_SPEC: Record<string, string[]> = {
   aggregates:  ["equipment_id"],
   racks:       ["datacenter_id"],
   rackItems:   ["rack_id"],
-  waypoints:   ["datacenter_id"],
+  waypoints:   ["datacenter_id", "rack_id"],
   floors:      ["location"],
   ipAddresses: ["network_id", "equipment_id", "address"],
   dhcpRanges:  ["network_id", "server_id"],
