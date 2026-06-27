@@ -59,6 +59,8 @@ export interface FieldSpec {
   enum?: readonly string[];
   /** Borne inférieure (type `number`). */
   min?: number;
+  /** Format attendu (chaîne) : `ipv4` (« a.b.c.d ») ou `cidr` (« a.b.c.d/n », n ∈ 0..32). */
+  format?: "ipv4" | "cidr";
   /** Collection cible d'une clé étrangère (exploité par l'intégrité référentielle — V2). */
   ref?: string;
 }
@@ -75,7 +77,7 @@ export interface ValidationError {
   collection: string;
   id?: string;
   path: string;            // champ concerné
-  code: "required" | "type" | "enum" | "min" | "ref_missing" | "invariant";
+  code: "required" | "type" | "enum" | "min" | "format" | "ref_missing" | "invariant";
   message: string;         // message humain (français)
 }
 
@@ -170,6 +172,13 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       power_source:  { type: "string", nullable: true, default: null, enum: POWER_SOURCES },
       ip_network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
     },
+    invariants: [
+      {
+        path: "ip_network_id",
+        message: "Un réseau d'énergie (power) ne peut pas être rattaché à un réseau IP.",
+        holds: (network) => network.kind !== "power" || !network.ip_network_id,
+      },
+    ],
   },
   groups: {
     fields: {
@@ -226,23 +235,33 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   ipNetworks: {
     fields: {
       label: { type: "string" },
-      cidr:  { type: "string" },
+      cidr:  { type: "string", required: true, format: "cidr" },
     },
   },
   ipAddresses: {
     fields: {
-      address:      { type: "string" },
+      address:      { type: "string", required: true, format: "ipv4" },
       network_id:   { type: "string", nullable: true, default: null, ref: "ipNetworks" },
       equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
     },
   },
   dhcpRanges: {
     fields: {
-      start_ip:   { type: "string" },
-      end_ip:     { type: "string" },
+      start_ip:   { type: "string", required: true, format: "ipv4" },
+      end_ip:     { type: "string", required: true, format: "ipv4" },
       network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
       server_id:  { type: "string", nullable: true, default: null, ref: "equipments" },
     },
+    invariants: [
+      {
+        path: "end_ip",
+        message: "La fin de plage doit être ≥ au début.",
+        holds: (range) => {
+          const start = ipv4ToInt(range.start_ip), end = ipv4ToInt(range.end_ip);
+          return start == null || end == null || start <= end;   // bornes invalides → déjà signalées par le format
+        },
+      },
+    ],
   },
   spares: {
     fields: {
@@ -304,6 +323,26 @@ export function normalizeRecord(collection: string, record: Record<string, any>)
   return normalized;
 }
 
+/* ---- formats (IPv4 / CIDR) — primitives PURES, parité stricte avec src/core/Ip.ts ---- */
+/** « a.b.c.d » → entier non signé, ou `null` si invalide (octets ≤ 255). */
+export function ipv4ToInt(value: string): number | null {
+  const match = typeof value === "string" ? value.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/) : null;
+  if (!match) return null;
+  let result = 0;
+  for (let i = 1; i <= 4; i++) { const octet = +match[i]; if (octet > 255) return null; result = result * 256 + octet; }
+  return result >>> 0;
+}
+/** Vrai si `value` est un CIDR IPv4 valide (« a.b.c.d/n », n ∈ 0..32). */
+export function isCidr(value: string): boolean {
+  const match = typeof value === "string" ? value.trim().match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/) : null;
+  if (!match) return false;
+  const prefix = +match[2];
+  return ipv4ToInt(match[1]) != null && prefix >= 0 && prefix <= 32;
+}
+function matchesFormat(value: string, format: NonNullable<FieldSpec["format"]>): boolean {
+  return format === "cidr" ? isCidr(value) : ipv4ToInt(value) != null;
+}
+
 /* ---- validation ---- */
 /** Vrai si la valeur correspond bien au type déclaré (hors `null`, géré à part par `nullable`). */
 function matchesType(value: unknown, type: FieldType): boolean {
@@ -346,6 +385,9 @@ export function validateRecord(collection: string, record: Record<string, any>, 
     }
     if (fieldSpec.min != null && typeof value === "number" && value < fieldSpec.min) {
       fail(field, "min", `Le champ « ${field} » doit être ≥ ${fieldSpec.min}.`);
+    }
+    if (fieldSpec.format && typeof value === "string" && !matchesFormat(value, fieldSpec.format)) {
+      fail(field, "format", `Le champ « ${field} » n'est pas ${fieldSpec.format === "cidr" ? "un CIDR IPv4 (ex. 10.0.0.0/24)" : "une adresse IPv4 (ex. 10.0.0.5)"}.`);
     }
     // intégrité référentielle (si résolveur) : la (ou les) FK doivent désigner une entité existante.
     if (resolver && fieldSpec.ref) {

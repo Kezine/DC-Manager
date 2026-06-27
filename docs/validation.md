@@ -54,6 +54,7 @@ FieldSpec = {
   default?: unknown,      // valeur posée par la normalisation si absent
   enum?: readonly string[], // valeurs autorisées
   min?: number,           // borne basse (number)
+  format?: "ipv4" | "cidr", // format de chaîne (IPAM) — parseur PARTAGÉ avec core/Ip
   ref?: string,           // collection cible (FK) — utilisé en V2
 }
 CollectionSpec = { fields: Record<string, FieldSpec> }   // + invariants[] en V3
@@ -68,7 +69,7 @@ constantes front restent alignées.
 
 ```ts
 ValidationError = { collection, id?, path, code, message }
-// code ∈ "required" | "type" | "enum" | "min" | "ref_missing" | "invariant"
+// code ∈ "required" | "type" | "enum" | "min" | "format" | "ref_missing" | "invariant"
 ```
 - **UI** : `path` → champ de formulaire (surlignage, blocage de soumission).
 - **Serveur** : `400 { errors: ValidationError[] }` (autorité). Le client surface les

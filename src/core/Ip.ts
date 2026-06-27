@@ -1,4 +1,5 @@
 import type { Store } from "../store";
+import { ipv4ToInt } from "../../shared/DataValidation";
 
 /** CIDR analysé. */
 export interface Cidr {
@@ -12,14 +13,10 @@ export interface Cidr {
    libres ipv4ToInt / intToIpv4 / parseCidr / ipNetCidr / ipIntInCidr /
    nextFreeIp / dhcpRangeContaining / ipNetworkShort. */
 export class Ip {
-  /** « a.b.c.d » → entier non signé, ou null si invalide. */
+  /** « a.b.c.d » → entier non signé, ou null si invalide. DÉLÉGUÉ au parseur IPv4 PARTAGÉ
+      (`shared/DataValidation.ipv4ToInt`) → un seul analyseur, réutilisé par la validation. */
   static toInt(str: string): number | null {
-    if (typeof str !== "string") return null;
-    const m = str.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-    if (!m) return null;
-    let n = 0;
-    for (let i = 1; i <= 4; i++) { const o = +m[i]; if (o > 255) return null; n = n * 256 + o; }
-    return n >>> 0;
+    return ipv4ToInt(str);
   }
 
   /** Entier → « a.b.c.d ». */

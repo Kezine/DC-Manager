@@ -1032,11 +1032,41 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(Validation.validateRecord("cables", { status: "planifie", network_id: null, network_ids: [] }).length, 0, "invariant : pas de réseau principal → ignoré");
   }
 
+  console.log("\n• shared : formats IPv4 / CIDR (IPAM)");
+  {
+    ck.eq(Validation.ipv4ToInt("10.0.0.5"), 167772165, "ipv4ToInt : 10.0.0.5");
+    ck.eq(Validation.ipv4ToInt("256.0.0.1"), null, "ipv4ToInt : octet > 255 → null");
+    ck.eq(Validation.ipv4ToInt("10.0.0"), null, "ipv4ToInt : incomplet → null");
+    ck.eq(Validation.isCidr("10.0.0.0/24"), true, "isCidr : 10.0.0.0/24 valide");
+    ck.eq(Validation.isCidr("10.0.0.0/40"), false, "isCidr : préfixe > 32 → invalide");
+    ck.eq(Validation.isCidr("10.0.0.0"), false, "isCidr : sans préfixe → invalide");
+    // appliqué via la spec
+    ck.eq(Validation.validateRecord("ipAddresses", { address: "10.0.0.5" }).length, 0, "ipAddresses : adresse valide → 0 erreur");
+    ck.eq(Validation.validateRecord("ipAddresses", { address: "999.1.1.1" }).some((e) => e.code === "format"), true, "ipAddresses : adresse invalide → 'format'");
+    ck.eq(Validation.validateRecord("ipAddresses", { address: "" }).some((e) => e.code === "required"), true, "ipAddresses : adresse vide → 'required'");
+    ck.eq(Validation.validateRecord("ipNetworks", { cidr: "10.0.0.0/24" }).length, 0, "ipNetworks : CIDR valide → 0 erreur");
+    ck.eq(Validation.validateRecord("ipNetworks", { cidr: "nope" }).some((e) => e.code === "format"), true, "ipNetworks : CIDR invalide → 'format'");
+  }
+
+  console.log("\n• shared : invariants IPAM / réseaux");
+  {
+    // réseau power ne peut pas porter d'ip_network_id
+    ck.eq(Validation.validateRecord("networks", { kind: "power", ip_network_id: "ipn1" }).some((e) => e.code === "invariant"), true, "invariant : réseau power + ip_network_id → erreur");
+    ck.eq(Validation.validateRecord("networks", { kind: "data", ip_network_id: "ipn1" }).length, 0, "invariant : réseau data + ip_network_id → OK");
+    // plage DHCP : fin ≥ début
+    ck.eq(Validation.validateRecord("dhcpRanges", { start_ip: "10.0.0.20", end_ip: "10.0.0.10" }).some((e) => e.code === "invariant"), true, "invariant : plage DHCP fin < début → erreur");
+    ck.eq(Validation.validateRecord("dhcpRanges", { start_ip: "10.0.0.10", end_ip: "10.0.0.20" }).length, 0, "invariant : plage DHCP fin ≥ début → 0 erreur");
+  }
+
   console.log("\n• shared : couverture des specs (toutes les collections spécifiées)");
   {
     // INVARIANT : pour CHAQUE collection spécifiée, l'entité par défaut du constructeur front satisfait la spec
     // (aucune spec ne sur-contraint ce que le front produit → pas de blocage de flux légitime).
-    const requiredSample = { equipments: { name: "x" }, racks: { name: "x" } };   // seules collections à champ requis
+    const requiredSample = {   // collections à champ(s) requis : on fournit des valeurs valides
+      equipments: { name: "x" }, racks: { name: "x" },
+      ipNetworks: { cidr: "10.0.0.0/24" }, ipAddresses: { address: "10.0.0.5" },
+      dhcpRanges: { start_ip: "10.0.0.10", end_ip: "10.0.0.20" },
+    };
     const specced = Object.keys(Validation.COLLECTION_SPECS);
     ck.eq(specced.length, EntityRegistry.COLLECTIONS.length, "specs : TOUTES les collections couvertes (" + specced.length + "/" + EntityRegistry.COLLECTIONS.length + ")");
     for (const collection of specced) {
