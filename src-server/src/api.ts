@@ -7,9 +7,12 @@ import { Auth, type SsoResult } from "./auth.js";
 import { LiveBus } from "./live.js";
 import type { DocumentChangeset } from "../../shared/DocumentChangeset.js";   // type PARTAGÉ front ⇄ back (source unique)
 import { DataValidator, type ValidationError, type EntityFetcher, type ChildFinder } from "../../shared/DataValidation.js";   // normalisation + validation PARTAGÉES
+import { Cascade } from "../../shared/Cascade.js";   // cascade de suppression PARTAGÉE (intégrité référentielle en DELETE)
 
-/** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`). */
-type RepoRequest = Request & { repo?: Repository; authUser?: SsoResult; docRev?: number };
+/** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`).
+    `changeset` : périmètre SSE, posé par défaut par `resolveRepo` et ÉLARGISSABLE par un handler (ex. la cascade
+    de suppression touche plusieurs collections) — la publication live le lit au moment du `finish`. */
+type RepoRequest = Request & { repo?: Repository; authUser?: SsoResult; docRev?: number; changeset?: DocumentChangeset };
 
 /** Couche HTTP : registre de documents + données SCOPÉES par document, déléguées au `Repository`. */
 export class Api {
@@ -165,8 +168,8 @@ export class Api {
     res.setHeader("X-Doc-Rev", String(rev));
     const origin = (req.headers["x-client-id"] as string) || "";   // qui a écrit → le client source ignore son propre event
     const by = this.writerInfo(req);                               // nom (SSO) + IP de l'auteur, pour la notif live
-    const changeset = this.buildChangeset(req);                    // périmètre → rechargement granulaire chez les autres clients
-    res.on("finish", () => { if (res.statusCode < 300) this.live.publish(id, { rev, origin, by, changeset }); });
+    (req as RepoRequest).changeset = this.buildChangeset(req);     // périmètre par défaut → rechargement granulaire ; un handler peut l'élargir (cascade DELETE)
+    res.on("finish", () => { if (res.statusCode < 300) this.live.publish(id, { rev, origin, by, changeset: (req as RepoRequest).changeset! }); });
     next();
   };
 
@@ -292,7 +295,34 @@ export class Api {
   };
   private remove: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    try { this.repoOf(req).delete(req.params.collection, req.params.id); res.status(204).end(); }
+    const repo = this.repoOf(req);
+    const collection = req.params.collection, id = req.params.id;
+    // CASCADE DE SUPPRESSION (intégrité référentielle, autorité serveur) : on calcule via la logique PARTAGÉE
+    // `Cascade.plan` — la même qu'en mode fichier — les entités à supprimer (enfants) et les FK à détacher.
+    // Sans ça, un `DELETE` naïf laisserait des FK pendantes (orphelins) que rien ne rattraperait côté serveur.
+    const find = this.repoChildFinder(req);
+    const fetch = this.repoFetcher(req);
+    const plan = Cascade.plan(collection, id, find, fetch);
+    // Détachements : FUSIONNÉS par enregistrement (un même record peut recevoir plusieurs clés — ex. spares :
+    // `assigned_free` + `assigned_equipment_id`) pour produire UN seul update complet (sinon le dernier upsert
+    // écraserait les clés des précédents, chacun étant bâti sur l'original).
+    const patched = new Map<string, { collection: string; record: Record<string, any> }>();
+    for (const d of plan.detaches) {
+      const mapKey = d.c + " " + d.id;
+      let entry = patched.get(mapKey);
+      if (!entry) { const rec = fetch(d.c, d.id); if (!rec) continue; entry = { collection: d.c, record: { ...rec } }; patched.set(mapKey, entry); }
+      entry.record[d.key] = d.value;
+    }
+    const updates = [...patched.values()];
+    const deletes = [...plan.deletes.map((x) => ({ collection: x.c, id: x.id })), { collection, id }];
+    // Périmètre SSE ÉLARGI : la cascade touche d'autres collections → les autres clients doivent les recharger.
+    const touched = new Set<string>([collection]);
+    updates.forEach((u) => touched.add(u.collection));
+    deletes.forEach((x) => touched.add(x.collection));
+    (req as RepoRequest).changeset = { full: false, collections: [...touched], meta: false, images: false };
+    // UNE transaction atomique : détachements (updates) + suppressions enfants + cible (transact applique deletes
+    // puis updates → les enregistrements détachés survivent et voient leur FK nettoyée).
+    try { repo.transact({ updates, deletes }, this.revOf(req)); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
 }

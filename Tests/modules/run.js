@@ -67,6 +67,7 @@ const { Schema: SharedSchema } = SHARED("shared/Schema.js");
 const { Text } = D("core/Text.js");
 const { PAGE_SIZE_DEFAULT } = D("data/config.js");
 const Validation = SHARED("shared/DataValidation.js");
+const { Cascade } = SHARED("shared/Cascade.js");
 const { Rack } = D("models/index.js");
 const { CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS } = D("domain/constants.js");
 
@@ -135,6 +136,57 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(s.get("ports", p1.id), null, "port 1 supprimé (cascade)");
     ck.eq(s.get("ports", p2.id), null, "port 2 supprimé (cascade)");
     ck.eq(s.get("cables", cab.id), null, "câble supprimé (cascade, dédup)");
+  }
+
+  console.log("\n• shared : Cascade.plan (intégrité référentielle PARTAGÉE — front ⇄ back)");
+  {
+    // Jeu de données en mémoire + capacités injectées (find/fetch), comme côté serveur (repo) ou Store (_byFk).
+    const db = {
+      racks: [{ id: "R1" }],
+      rackItems: [{ id: "ri1", rack_id: "R1" }, { id: "ri2", rack_id: "R2" }],
+      equipments: [{ id: "E1", name: "srv", rack_id: "R1", placement_mode: "rack" }, { id: "E2", rack_id: "R1" }],
+      ports: [{ id: "P1", equipment_id: "E1" }, { id: "P2", equipment_id: "E1" }],
+      aggregates: [{ id: "A1", equipment_id: "E1" }],
+      cables: [{ id: "C1", from_port_id: "P1", to_port_id: "P2" }],
+      ipAddresses: [{ id: "IP1", equipment_id: "E1" }],
+      dhcpRanges: [{ id: "D1", server_id: "E1" }],
+      spares: [{ id: "S1", assigned_equipment_id: "E1", status: "assigned" }],
+      datacenters: [{ id: "DC1" }],
+      waypoints: [{ id: "W1", datacenter_id: "DC1" }],
+    };
+    const find = (coll, field, value) => (db[coll] || []).filter((o) => {
+      const v = o[field];
+      return Array.isArray(v) ? v.includes(value) : v === value;
+    });
+    const fetch = (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
+
+    // -- rack : enfants supprimés (rackItems) + équipements détachés (rack_id null, placement manuel) --
+    const rackPlan = Cascade.plan("racks", "R1", find, fetch);
+    ck.eq(rackPlan.deletes.some((d) => d.c === "rackItems" && d.id === "ri1"), true, "rack : rackItem enfant supprimé");
+    ck.eq(rackPlan.deletes.some((d) => d.id === "ri2"), false, "rack : rackItem d'une AUTRE baie épargné");
+    const detachE1 = rackPlan.detaches.filter((d) => d.c === "equipments" && d.id === "E1");
+    ck.eq(detachE1.some((d) => d.key === "rack_id" && d.value === null), true, "rack : équipement détaché (rack_id null)");
+    ck.eq(detachE1.some((d) => d.key === "placement_mode" && d.value === "manual"), true, "rack : équipement repassé en manuel");
+
+    // -- équipement : ports + agrégats supprimés, câble des ports supprimé, IP/DHCP détachés --
+    const eqPlan = Cascade.plan("equipments", "E1", find, fetch);
+    ck.eq(eqPlan.deletes.some((d) => d.c === "ports" && d.id === "P1"), true, "équip. : port supprimé");
+    ck.eq(eqPlan.deletes.some((d) => d.c === "aggregates" && d.id === "A1"), true, "équip. : agrégat supprimé");
+    ck.eq(eqPlan.deletes.some((d) => d.c === "cables" && d.id === "C1"), true, "équip. : câble des ports supprimé");
+    ck.eq(eqPlan.detaches.some((d) => d.c === "ipAddresses" && d.key === "equipment_id" && d.value === null), true, "équip. : IP détachée (registre conservé)");
+    ck.eq(eqPlan.detaches.some((d) => d.c === "dhcpRanges" && d.key === "server_id" && d.value === null), true, "équip. : rôle serveur DHCP détaché");
+    // spare : bascule en texte libre (info préservée) + FK détachée
+    ck.eq(eqPlan.detaches.some((d) => d.c === "spares" && d.key === "assigned_free" && d.value === "srv"), true, "équip. : spare préservé en texte libre (nom)");
+    ck.eq(eqPlan.detaches.some((d) => d.c === "spares" && d.key === "assigned_equipment_id" && d.value === null), true, "équip. : spare FK détachée");
+
+    // -- datacenter : waypoints (et racks/équipements) détachés, jamais supprimés --
+    const dcPlan = Cascade.plan("datacenters", "DC1", find, fetch);
+    ck.eq(dcPlan.deletes.length, 0, "datacenter : aucune suppression (que des détachements)");
+    ck.eq(dcPlan.detaches.some((d) => d.c === "waypoints" && d.key === "datacenter_id" && d.value === null), true, "datacenter : waypoint détaché");
+
+    // -- collection sans règle de cascade : plan vide --
+    const noop = Cascade.plan("floors", "F1", find, fetch);
+    ck.eq(noop.deletes.length + noop.detaches.length, 0, "collection sans règle → plan vide");
   }
 
   console.log("\n• Store : undo / redo");

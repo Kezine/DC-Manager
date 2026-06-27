@@ -12,7 +12,7 @@ import { Id } from "../core/Id";
 import { Text } from "../core/Text";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, CABLE_STATUS_BROKEN, CABLE_STATUS_RANK, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT, LOCATIONS } from "../domain/constants";
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
-import { CASCADE_SPEC, CascadeDelete, CascadeDetach } from "./cascadeSpec";
+import { Cascade, CascadeDelete, CascadeDetach } from "./cascadeSpec";
 import { DataValidator } from "../../shared/DataValidation";
 import type { ValidationError, EntityFetcher, ChildFinder } from "../../shared/DataValidation";
 
@@ -397,21 +397,11 @@ export class Store {
     this._emit();
   }
 
-  /* Plan de cascade (intégrité référentielle) : entités à SUPPRIMER + à DÉTACHER.
-     Pur calcul ; toutes les résolutions inverses via les index secondaires. */
+  /* Plan de cascade (intégrité référentielle) : entités à SUPPRIMER + à DÉTACHER. Délègue au calcul
+     PARTAGÉ `Cascade.plan` (même logique côté serveur sur `DELETE`), alimenté par nos capacités
+     injectées : résolutions inverses via les index secondaires (`recordFinder`), lecture via `entityFetcher`. */
   private _cascadePlan(collection: string, id: string): { deletes: CascadeDelete[]; detaches: CascadeDetach[] } {
-    const deletes: CascadeDelete[] = [];
-    const detaches: CascadeDetach[] = [];
-    const spec = CASCADE_SPEC[collection];
-    if (spec) {
-      (spec.delete || []).forEach((r) => this._byFk(r.coll, r.fk, id).forEach((o) => deletes.push({ c: r.coll, id: o.id })));
-      (spec.detach || []).forEach((r) => {
-        const set = r.set || { [r.fk]: null };
-        this._byFk(r.coll, r.fk, id).forEach((o) => Object.keys(set).forEach((k) => detaches.push({ c: r.coll, id: o.id, key: k, value: set[k] })));
-      });
-      if (spec.custom) spec.custom(this, id, deletes, detaches);
-    }
-    return { deletes, detaches };
+    return Cascade.plan(collection, id, this.recordFinder, this.entityFetcher);
   }
 
   /* ---- CLONAGE ---- */

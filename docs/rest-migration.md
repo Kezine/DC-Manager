@@ -64,7 +64,8 @@ autonome (hébergement statique / ouverture locale).
 | Sujet | Option A | Option B | Statut |
 |---|---|---|---|
 | **`transact` atomique** | Endpoint serveur `POST /transact` appliquant le lot dans UNE transaction SQLite | Boucle d'appels par entité (actuel `RestAdapter`) — non atomique | **A** retenu (SQLite = transaction triviale). `[décidé]` |
-| **Logique cascade/clone/pose** | Reste **calculée client** ; le lot pré-étendu est le contrat ; le serveur applique tel quel | Déplacée **côté serveur** (le serveur connaît l'intégrité référentielle) | `[à préciser]` — A plus rapide à livrer ; B plus robuste aux appels directs |
+| **Cascade de SUPPRESSION** | Calculée client (lot pré-étendu) ; le serveur applique tel quel | Logique **PARTAGÉE** (`shared/Cascade.ts`) appliquée des DEUX côtés : le `Store` en mode fichier, le serveur sur `DELETE` | **B** retenu `[décidé]` — un `DELETE /{coll}/{id}` naïf laissait des FK pendantes (le serveur n'était pas autorité). La cascade vit désormais une seule fois (principe n°3) et le serveur recompose deletes+détachements en UNE transaction. |
+| **Logique clone/pose** | Reste **calculée client** ; le lot pré-étendu est le contrat ; le serveur applique tel quel | Déplacée **côté serveur** | `[à préciser]` — clone/pose restent client (pas de risque d'incohérence référentielle, contrairement au DELETE) |
 | **Undo/redo en mode API** | Désactivé (boutons grisés) ; le serveur fait autorité | Endpoints serveur `POST /undo` `/redo` | `[à préciser]` — démarrer en **désactivé** |
 | **Mono/multi-document** | **Un seul workspace** par backend (origine) | Ressource `/documents` + collections scopées | `[à préciser]` — démarrer **mono-workspace** |
 | **Dirty / révision** | Jeton de révision **serveur** (remplace `histIndex`) | — | `[à préciser]` |
@@ -144,8 +145,11 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
   `Store`). Côté lecture, mappe proprement sur REST.
 - `RestAdapter` existe mais : `transact` **non atomique** (boucle HTTP) ;
   undo/`histIndex` non gérés (no-op) → casse le « dirty » en l'état.
-- Logique métier (cascade delete, `cloneEquipment`, `removeSite`, ruptures de
-  câbles) **calculée côté client** dans `Store` → cf. arbitrage §3.
+- Logique métier : la **cascade de suppression** est désormais PARTAGÉE
+  (`shared/Cascade.ts`) — appliquée par le `Store` (fichier) ET par le serveur sur
+  `DELETE` (autorité référentielle, plus de FK pendantes par appel API direct).
+  Le reste (`cloneEquipment`, `removeSite`, ruptures de câbles) reste **calculé côté
+  client** dans `Store` → cf. arbitrage §3.
 - État hors-adapter aujourd'hui : images (IndexedDB + `.nmfb`), document fichier
   (`.json`), handles FS, prefs, view-state 3D, TabChannel.
 </content>
