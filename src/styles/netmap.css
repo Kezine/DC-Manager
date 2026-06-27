@@ -1052,6 +1052,32 @@
   @keyframes pulseConflict { 0%,100% { box-shadow: 0 8px 24px rgba(0,0,0,0.4); } 50% { box-shadow: 0 0 0 2px var(--err), 0 8px 24px rgba(0,0,0,0.4); } }
   @keyframes toastIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
+  /* overlay « occupÃ© » : recouvre l'app pendant un traitement bloquant (reload SSE + rebuild 3D) â€”
+     capte les clics et affiche un spinner au lieu de laisser l'UI paraÃ®tre figÃ©e. */
+  .busy-overlay {
+    position: fixed; inset: 0;
+    z-index: 2500;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.35);
+    cursor: progress;
+  }
+  .busy-box {
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    background: var(--bg-3);
+    border: 1px solid var(--line-2);
+    padding: 20px 28px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .busy-spinner {
+    width: 28px; height: 28px;
+    border: 3px solid var(--line-2);
+    border-top-color: var(--accent, #4a9eff);
+    border-radius: 50%;
+    animation: busySpin .8s linear infinite;
+  }
+  .busy-msg { font-size: 12px; color: var(--fg); }
+  @keyframes busySpin { to { transform: rotate(360deg); } }
+
   /* ============ GRAPH ============ */
   .graph-toolbar {
     display: flex;

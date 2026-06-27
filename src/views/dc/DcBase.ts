@@ -351,6 +351,12 @@ export class DcBase {
     }
   }
 
+  /** Invalide le cache de (re)build WebGL : force une RECONSTRUCTION COMPLÈTE de la scène 3D au prochain
+      `render()` (au lieu du diff léger `renderThreeD`). À appeler quand les DONNÉES ont changé hors timeline
+      locale — typiquement un reload SSE d'un document modifié par un autre client : en mode REST `histIndex()`
+      vaut toujours 0, donc la garde de révision (`_webglRev === histIndex()`) croirait la scène à jour. */
+  invalidate3D(): void { this._webglRev = null; if (this._three) this._three.markStale(); }
+
   /** Re-render LÉGER pour un simple changement d'OPTION d'affichage (ex. visibilité d'un câble) : en WebGL 3D,
       diff (`applyOptionsDiff` → rebuild de la seule catégorie touchée) au lieu d'un full build coûteux
       (`renderWebGL` reconstruit baies + occupants + textures de noms ≈ 1 s). Panneau latéral rafraîchi normalement

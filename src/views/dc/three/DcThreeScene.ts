@@ -28,9 +28,17 @@ const DOT_PX = 5;            // rayon ÉCRAN (px) d'une pastille d'extrémité d
 const BOLT_PX = 3.25;        // demi-taille ÉCRAN (px) d'un éclair power bolt (−75 %)
 
 export class DcThreeScene extends DcThreeCamera {
+  // Forçage de RECONSTRUCTION complète au prochain rendu : armé quand les DONNÉES ont changé sans que l'ensemble
+  // des salles ni les options ne bougent (ex. suppression d'un occupant / blanking plate). applyOptionsDiff ne sait
+  // diffuser que les salles + options ; sans ce drapeau, une mutation intra-salle ne reconstruirait RIEN (mesh périmé).
+  protected _forceBuild = false;
+  /** Marque la scène comme PÉRIMÉE : le prochain rendu (diff léger OU mount) repassera par un build() complet. */
+  markStale(): void { this._forceBuild = true; }
+
   /* ---- construction de la scène (mono- ou multi-salles) ---- */
   protected build(dcId: string | null): void {
     if (!this.scene) return;
+    this._forceBuild = false;   // ce build absorbe la péremption en attente
     const theme = this.readTheme();
     this.scene.background = new THREE.Color(theme.bg);
     // (ré)éclairage : nettoyé puis reposé à chaque build
@@ -270,6 +278,9 @@ export class DcThreeScene extends DcThreeCamera {
     const wasMulti = !!this.multiInfo;
     const curKey = wasMulti ? "M:" + this.roomsKey() : (this.builtDc || "∅");
     this.multiInfo = multi; this.extraCables = ctx ? ctx.extraCables : []; this.floorDecor = ctx ? ctx.floorDecor : null;   // FIX : sinon décor d'étage périmé sur bascule multi↔mono
+    // données périmées (mutation intra-salle : occupant supprimé, etc.) → reconstruction COMPLÈTE, le diff par
+    // catégorie ne couvre pas les changements de contenu d'une salle conservée (mêmes salles + mêmes options).
+    if (this._forceBuild) { this.build(dcId); this.request(); return; }
     if (old.showPivot !== opts.showPivot) { this.updatePivot(); this.request(); }   // centre de rotation : simple (dé)masquage, aucun rebuild
     // TOUS les toggles d'affichage sont en VISIBILITÉ (couches taguées, toujours construites) — AUCUN rebuild :
     // ports, noms, portes, débattement, emplacements, images, masquage av/ar, conduits, waypoints, grilles, repères,

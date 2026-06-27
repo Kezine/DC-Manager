@@ -542,9 +542,16 @@ async function boot(): Promise<void> {
   async function restReloadDocument(): Promise<void> {
     if (!restDocId) return;
     flog("reload document (changement externe)", restLastBy);
-    await store.init(); await imageStore.reloadFromBackend();
-    session.markLoaded(store.histIndex());
-    shell.refreshActive(); refreshChrome();
+    Notify.busy("Mise à jour du document…");
+    // laisse le navigateur PEINDRE l'overlay AVANT le travail synchrone lourd (fetch + rebuild 3D ≈ 1 s) qui gèle
+    // le thread : sans ce double rAF, l'overlay ne s'affiche qu'une fois le freeze terminé (donc jamais visible).
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      await store.init(); await imageStore.reloadFromBackend();
+      session.markLoaded(store.histIndex());
+      dcView.invalidate3D();   // données changées hors timeline locale (REST : histIndex reste 0) → force un rebuild COMPLET de la scène 3D
+      shell.refreshActive(); refreshChrome();
+    } finally { Notify.idle(); }
     const by = restLastBy ? (" par " + (restLastBy.name || "?") + (restLastBy.ip ? " (" + restLastBy.ip + ")" : "")) : "";
     Notify.toast("Document mis à jour" + by);
   }
@@ -1022,6 +1029,11 @@ async function boot(): Promise<void> {
   let refreshQueued = false;
   store.onChange(() => {
     if (booted) session.setRevision(store.histIndex());   // révision modèle → dirty par comparaison (undo→point sauvé = propre)
+    // REST : histIndex() est figé à 0 (le serveur fait autorité, pas d'historique client) → la garde de révision
+    // du rendu 3D croirait toujours la scène à jour et ne ferait qu'un diff d'options (ex. suppression d'un cache /
+    // blanking plate jamais répercutée). Toute mutation invalide donc explicitement le cache de build WebGL → rebuild
+    // COMPLET au prochain refresh (cohérent avec le mode fichier, où histIndex change à chaque mutation).
+    if (REST_MODE) dcView.invalidate3D();
     refreshChrome();   // cheap (pastille save + undo/redo) → toujours synchrone, jamais sauté
     if (refreshQueued) return;
     refreshQueued = true;

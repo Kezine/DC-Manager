@@ -7,7 +7,7 @@
    l'élément plein écran courant (à la création ET à chaque `fullscreenchange`) ; retour au
    <body> hors plein écran. (position:fixed reste relatif à l'écran dans un élément fullscreen.)
    ============================================================================= */
-const FLOATING_SELECTOR = ".modal-overlay, .dialog-overlay, #toast-container, .graph-ctx";
+const FLOATING_SELECTOR = ".modal-overlay, .dialog-overlay, #toast-container, .graph-ctx, .busy-overlay";
 
 export class Fullscreen {
   private static installed = false;
