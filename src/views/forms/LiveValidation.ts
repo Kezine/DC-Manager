@@ -1,5 +1,5 @@
 import { DataValidator } from "../../../shared/DataValidation";
-import type { ValidationError, EntityFetcher } from "../../../shared/DataValidation";
+import type { ValidationError, EntityFetcher, RecordFinder } from "../../../shared/DataValidation";
 
 /* ============================================================================
    VALIDATION LIVE D'UN FORMULAIRE — surlignage des champs en erreur + messages.
@@ -19,12 +19,13 @@ export class LiveValidation {
     /** chemin de validation → contrôle DOM (input/select/wrapper situé dans une rangée `.form-field`). */
     private readonly fieldsByPath: Record<string, HTMLElement>,
     private readonly fetch?: EntityFetcher,
+    private readonly find?: RecordFinder,   // pour les règles de PORTÉE (V6, ex. unicité d'adresse)
   ) {}
 
   /** Valide `record` : efface l'état précédent, surligne les champs fautifs + messages, renvoie les erreurs. */
   check(record: Record<string, any>): ValidationError[] {
     this.clear();
-    const errors = DataValidator.validateRecord(this.collection, record, this.fetch);
+    const errors = DataValidator.validateRecord(this.collection, record, this.fetch, this.find);
     for (const error of errors) {
       const row = this.rowOf(error.path);
       if (!row) continue;   // chemin non relié à un champ → non surligné ici (l'autorité le signalera)

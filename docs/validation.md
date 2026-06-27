@@ -112,7 +112,8 @@ ValidationError = { collection, id?, path, code, message }
 | **V5a** | **règles cross-entité** (sens direct) : `EntityFetcher` injecté (remplace le résolveur d'existence — il le subsume), `buildBatchFetcher` conscient du CONTENU du lot ; IP ∈ CIDR de son réseau, plage DHCP ⊂ CIDR (cf. §8) | ✅ |
 | **V5b** | **dépendance inverse** : `CollectionSpec.dependents` + `ChildFinder` injecté → écrire un parent re-valide ses enfants via LEURS règles cross-entité contre le nouvel état (ex. changer un `cidr` rejette si une adresse/plage en sort). Câblé sur create/update (Store + serveur) ET sur `/transact` (lecteur d'enfants conscient du lot, `buildBatchChildFinder`) | ✅ |
 | **T1/T2** | règles métier supplémentaires : invariants intra-record (équipement racké ⇒ baie ; port X/Y cohérents ; brosse ⇒ baie) + cross-entité (équipement tient dans la baie ; baie dans les bornes de la salle ; port parent/agrégat même équipement) | ✅ |
-| **V6** | contraintes d'**unicité / portée** (scan de pairs dans un périmètre) — ex. adresse IP unique, 1 câble par port, plages DHCP non chevauchantes, occupants de baie sans collision de U (cf. §9) | ⏳ |
+| **V6a** | contraintes de **portée — unicité simple** : `ScopeRule` + `RecordFinder` injecté (recherche par champ indexé, conscient du lot via `buildBatchChildFinder`) ; `ipAddresses.address` unique (« sauf moi-même »). Câblé Store + serveur + live | ✅ |
+| **V6b/c** | portée — relations & intervalles (1 câble/port, chevauchement DHCP, IP-dans-plage) ; empilement de baie (collision de U, le plus lourd) (cf. §9) | ⏳ |
 
 Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
 FK, tableaux). **Couverture étendue aux 19 collections** : chaque collection a une spec
@@ -258,8 +259,10 @@ finder ; `buildBatchChildFinder` pour `/transact`.
 
 ### 9.5 Découpe proposée
 
-- **V6a — unicité simple (un champ)** : `ipAddresses.address` unique. Réutilise le finder tel
-  quel, seul piège = « sauf moi-même ». Risque faible, valeur immédiate.
+- **V6a — unicité simple (un champ)** : `ipAddresses.address` unique. ✅ **Fait** — nouvelle
+  catégorie de règle `CollectionSpec.scope` + `RecordFinder` injecté (généralisation du
+  `ChildFinder`), code d'erreur `scope`, « sauf moi-même » par `id`, conscient du lot
+  (`buildBatchChildFinder`). Câblé Store + serveur + live (formulaire adresse IP).
 - **V6b — relations & intervalles** : 1 câble par port (multi-champs) ; chevauchement de plages
   DHCP + IP-dans-plage (intervalles). Risque moyen.
 - **V6c — empilement de baie** (collision de U) : multi-collections + côtés + index manquant

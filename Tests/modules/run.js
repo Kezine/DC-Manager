@@ -1083,6 +1083,26 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(JSON.stringify(effective), JSON.stringify(["a2"]), "batch-childFinder : a1 déplacé + a3 supprimé + a2 créé → {a2}");
   }
 
+  console.log("\n• shared : portée V6a (unicité d'adresse IP)");
+  {
+    const DV = Validation.DataValidator;
+    // find simulé : deux adresses persistées (a1=10.0.0.5, a2=10.0.0.6).
+    const persisted = [{ id: "a1", address: "10.0.0.5" }, { id: "a2", address: "10.0.0.6" }];
+    const find = (coll, field, value) => (coll === "ipAddresses" && field === "address") ? persisted.filter((r) => r[field] === value) : [];
+    // SANS find → pas de contrôle de portée (V1-V5 inchangés)
+    ck.eq(DV.validateRecord("ipAddresses", { id: "aX", address: "10.0.0.5" }).length, 0, "V6a : sans find → pas de contrôle d'unicité");
+    // création d'une adresse déjà prise → conflit
+    ck.eq(DV.validateRecord("ipAddresses", { id: "aX", address: "10.0.0.5" }, undefined, find).some((e) => e.code === "scope"), true, "V6a : adresse déjà attribuée → 'scope'");
+    // « sauf moi-même » : ré-enregistrer a1 avec sa propre adresse → OK
+    ck.eq(DV.validateRecord("ipAddresses", { id: "a1", address: "10.0.0.5" }, undefined, find).length, 0, "V6a : même entité (a1) garde son adresse → OK");
+    // adresse libre → OK
+    ck.eq(DV.validateRecord("ipAddresses", { id: "aX", address: "10.0.0.9" }, undefined, find).length, 0, "V6a : adresse libre → OK");
+    // conscient du lot : deux créations avec la MÊME adresse dans un /transact → conflit
+    const batch = { creates: [{ collection: "ipAddresses", record: { id: "n1", address: "10.0.0.50" } }, { collection: "ipAddresses", record: { id: "n2", address: "10.0.0.50" } }] };
+    const batchFind = DV.buildBatchChildFinder(find, batch);
+    ck.eq(DV.validateRecord("ipAddresses", { id: "n1", address: "10.0.0.50" }, undefined, batchFind).some((e) => e.code === "scope"), true, "V6a batch : doublon créé dans le lot → 'scope'");
+  }
+
   console.log("\n• shared : règles métier T1 (invariants) / T2 (cross-entité)");
   {
     const DV = Validation.DataValidator;

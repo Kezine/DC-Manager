@@ -303,13 +303,15 @@ export class Store {
   onInvalid: ((errors: ValidationError[]) => void) | null = null;
   /** Lecteur d'entité (intégrité référentielle V2 + cross-entité V5) adossé au cache hydraté. */
   private entityFetcher: EntityFetcher = (collection, id) => this.get(collection, id) || null;
-  /** Recherche d'enfants par clé étrangère (dépendance inverse V5b) via les index secondaires. */
-  private childFinder: ChildFinder = (collection, fkField, parentId) => this._byFk(collection, fkField, parentId);
-  /** Valide un enregistrement (forme canonique) + ses éventuelles dépendances inverses (V5b) ; si invalide →
+  /** Recherche d'enregistrements par champ INDEXÉ (dépendance inverse V5b + portée V6) via les index secondaires. */
+  private recordFinder: ChildFinder = (collection, field, value) => this._byFk(collection, field, value);
+  /** Recherche publique par champ indexé — pour la validation de PORTÉE (V6) en live dans les formulaires. */
+  findByField(collection: string, field: string, value: any): any[] { return this._byFk(collection, field, value); }
+  /** Valide un enregistrement (forme canonique) + portée (V6) + dépendances inverses (V5b) ; si invalide →
       notifie et renvoie false (écriture bloquée). `record` = état (fusionné) qui SERA écrit. */
   private accepts(collection: string, record: Record<string, any>): boolean {
-    const errors = DataValidator.validateRecord(collection, record, this.entityFetcher);
-    if (!errors.length) errors.push(...DataValidator.validateDependents(collection, record, this.childFinder, this.entityFetcher));
+    const errors = DataValidator.validateRecord(collection, record, this.entityFetcher, this.recordFinder);
+    if (!errors.length) errors.push(...DataValidator.validateDependents(collection, record, this.recordFinder, this.entityFetcher));
     if (errors.length) { this.onInvalid?.(errors); return false; }
     return true;
   }

@@ -108,8 +108,9 @@ export class IpamForms extends RackForms {
     root.appendChild(FormControls.fieldRow("Équipement", eqSel, "Facultatif."));
     const descI = FormControls.textArea(addr ? addr.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
-    // validation live : adresse (format) + appartenance au CIDR du réseau (règle CROSS-ENTITÉ partagée).
-    const live = new LiveValidation("ipAddresses", { address: ipI, network_id: netSel, equipment_id: eqSel }, (coll, i) => store.get(coll, i) || null);
+    // validation live : adresse (format) + IP ∈ CIDR du réseau (cross-entité) + adresse UNIQUE (portée V6).
+    const live = new LiveValidation("ipAddresses", { address: ipI, network_id: netSel, equipment_id: eqSel },
+      (coll, i) => store.get(coll, i) || null, (coll, f, v) => store.findByField(coll, f, v));
     live.clearOnInput();
 
     host.openModal({
@@ -122,11 +123,9 @@ export class IpamForms extends RackForms {
         if (!net) { Notify.toast("Choisissez un réseau IP.", "err"); return false; }
         const address = ipI.value.trim();
         const payload = { network_id: networkId, address, hostname: hostI.value.trim(), equipment_id: eqSel.value || null, description: descI.value.trim() };
-        if (live.check(payload).length) return false;   // adresse / réseau surlignés (format + IP ∈ CIDR)
-        // contrôles HORS validateur partagé (unicité, chevauchement DHCP) : restent des toasts.
+        if (live.check(payload).length) return false;   // surlignés : format + IP ∈ CIDR + adresse déjà attribuée (unicité)
+        // contrôle HORS validateur partagé (chevauchement plage DHCP — V6b à venir) : reste un toast.
         const ipInt = Ip.toInt(address);
-        const dup = store.ipAddressByValue(address);
-        if (dup && (!addr || dup.id !== addr.id)) { Notify.toast(`L'adresse ${address} est déjà attribuée.`, "err"); return false; }
         const conflict = Ip.dhcpRangeContaining(store, networkId, ipInt);
         if (conflict) { Notify.toast(`${address} est dans la plage DHCP ${conflict.start_ip}→${conflict.end_ip}.`, "err"); return false; }
         if (addr) await store.update("ipAddresses", addr.id, payload); else await store.create("ipAddresses", payload);

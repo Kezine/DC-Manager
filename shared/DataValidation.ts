@@ -74,6 +74,8 @@ export interface CollectionSpec {
   fields: Record<string, FieldSpec>;
   invariants?: Invariant[];
   crossEntity?: CrossEntityRule[];
+  /** Règles de PORTÉE (V6) : unicité / non-chevauchement contre les pairs (nécessitent le `find`). */
+  scope?: ScopeRule[];
   /** Dépendances INVERSES (V5b) : collections-enfants à re-valider quand CETTE entité change (ex. un réseau IP
       dont le `cidr` change → re-vérifier ses adresses/plages). Les enfants sont re-validés via LEURS propres
       règles cross-entité, contre le nouvel état du parent. */
@@ -85,7 +87,7 @@ export interface ValidationError {
   collection: string;
   id?: string;
   path: string;            // champ concerné
-  code: "required" | "type" | "enum" | "min" | "format" | "ref_missing" | "invariant" | "cross_entity";
+  code: "required" | "type" | "enum" | "min" | "format" | "ref_missing" | "invariant" | "cross_entity" | "scope";
   message: string;         // message humain (français)
 }
 
@@ -106,9 +108,15 @@ export type EntityFetcher = (collection: string, id: string) => Record<string, a
     pas seulement ses propres champs. Renvoie l'erreur (champ + message) ou `null` si respectée / non applicable. */
 export type CrossEntityRule = (record: Record<string, any>, fetch: EntityFetcher) => { path: string; message: string } | null;
 
-/** Recherche des ENFANTS d'une entité (dépendance inverse V5b) : tous les enregistrements de `collection`
-    dont `fkField` vaut `parentId`. INJECTÉ — l'UI l'adosse aux index du `Store`, le serveur à une requête. */
-export type ChildFinder = (collection: string, fkField: string, parentId: string) => Record<string, any>[];
+/** Recherche d'enregistrements par champ INDEXÉ (dépendance inverse V5b + portée V6) : tous les enregistrements
+    de `collection` dont `field` vaut `value`. INJECTÉ — l'UI l'adosse aux index du `Store`, le serveur à une
+    requête. `ChildFinder` (V5b, recherche par FK) en est un cas particulier — même signature. */
+export type RecordFinder = (collection: string, field: string, value: string) => Record<string, any>[];
+export type ChildFinder = RecordFinder;
+
+/** Règle de PORTÉE (V6) : valide un enregistrement contre l'ENSEMBLE de ses pairs (unicité, non-chevauchement),
+    via un `find` par champ. Doit EXCLURE l'enregistrement lui-même (par `id`). Renvoie l'erreur ou `null`. */
+export type ScopeRule = (record: Record<string, any>, find: RecordFinder) => { path: string; message: string } | null;
 
 /** Forme minimale d'un lot atomique (mêmes champs que la transaction serveur). */
 export interface BatchOps {
@@ -373,6 +381,14 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
           : { path: "address", message: `L'adresse ${addr.address} n'appartient pas au sous-réseau ${network!.cidr}.` };
       },
     ],
+    scope: [
+      // PORTÉE (V6a) : adresse UNIQUE dans le document (aucune autre adresse n'a la même valeur).
+      (addr, find) => {
+        if (!addr.address) return null;
+        const duplicate = find("ipAddresses", "address", addr.address).some((other) => other.id !== addr.id);
+        return duplicate ? { path: "address", message: `L'adresse ${addr.address} est déjà attribuée.` } : null;
+      },
+    ],
   },
   dhcpRanges: {
     fields: {
@@ -447,7 +463,7 @@ export class DataValidator {
   /** Valide un enregistrement (supposé déjà normalisé) contre la spec de sa collection. Renvoie la liste des
       erreurs (vide = valide). Sans spec → aucune erreur. Si `fetch` est fourni, ajoute l'INTÉGRITÉ RÉFÉRENTIELLE
       (FK existantes — V2) et les règles CROSS-ENTITÉ (d'après les données de l'entité liée — V5). */
-  static validateRecord(collection: string, record: Record<string, any>, fetch?: EntityFetcher): ValidationError[] {
+  static validateRecord(collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: RecordFinder): ValidationError[] {
     const spec = COLLECTION_SPECS[collection];
     if (!spec) return [];
     const errors: ValidationError[] = [];
@@ -500,14 +516,21 @@ export class DataValidator {
         if (violation) fail(violation.path, "cross_entity", violation.message);
       }
     }
+    // règles de PORTÉE (V6, si `find`) : unicité / non-chevauchement contre les pairs (ex. adresse IP unique).
+    if (find) {
+      for (const rule of spec.scope || []) {
+        const violation = rule(record, find);
+        if (violation) fail(violation.path, "scope", violation.message);
+      }
+    }
     return errors;
   }
 
   /** Normalise PUIS valide — l'enchaînement appliqué au serveur avant écriture. `fetch` (optionnel) active
       l'intégrité référentielle (V2) et les règles cross-entité (V5). */
-  static normalizeAndValidate(collection: string, record: Record<string, any>, fetch?: EntityFetcher): { record: Record<string, any>; errors: ValidationError[] } {
+  static normalizeAndValidate(collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: RecordFinder): { record: Record<string, any>; errors: ValidationError[] } {
     const normalized = DataValidator.normalizeRecord(collection, record);
-    return { record: normalized, errors: DataValidator.validateRecord(collection, normalized, fetch) };
+    return { record: normalized, errors: DataValidator.validateRecord(collection, normalized, fetch, find) };
   }
 
   /** DÉPENDANCE INVERSE (V5b) : écrire `parentRecord` peut invalider ses ENFANTS (ex. réseau dont le `cidr` change
