@@ -1,5 +1,5 @@
 /* ============================================================================
-   NetMap — Tests AU NIVEAU MODULES (TypeScript compilé, sans navigateur).
+   DC Manager — Tests AU NIVEAU MODULES (TypeScript compilé, sans navigateur).
    ----------------------------------------------------------------------------
    Filet de régression de la migration : exerce les couches DÉJÀ portées
    (modèle de domaine, couche données, Store) directement sur les modules
@@ -84,7 +84,7 @@ const ck = (cond, name) => { if (cond) pass++; else { fail++; failures.push(name
 ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + ", obtenu " + JSON.stringify(a) + ")");
 
 (async () => {
-  console.log("NetMap — Tests modules (TypeScript compilé)\n");
+  console.log("DC Manager — Tests modules (TypeScript compilé)\n");
 
   console.log("• Entités : normalisation au constructeur");
   {
@@ -651,12 +651,12 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const s = await makeStore();
     s.meta.fileId = "F1";
     const dv = new DatacenterView(s, {}, {});   // garde headless
-    window.localStorage.setItem("netmap.view3d.F1", JSON.stringify({ az: 1.23, el: 0.5, scale: 2, tx: 10, ty: 20, camTarget: { x: 1, y: 2, z: 3 }, showAllCables: false, showPorts: false, hideFrontEq: true, dcId: "ghost", hidden3dRacks: ["ghost"] }));
+    window.localStorage.setItem("dcmanager.view3d.F1", JSON.stringify({ az: 1.23, el: 0.5, scale: 2, tx: 10, ty: 20, camTarget: { x: 1, y: 2, z: 3 }, showAllCables: false, showPorts: false, hideFrontEq: true, dcId: "ghost", hidden3dRacks: ["ghost"] }));
     dv.restoreView();
     ck(Math.abs(dv.az - 1.23) < 1e-9 && dv.scale === 2 && dv.tx === 10, "restore : caméra (az/scale/tx)");
     ck(dv.showAllCables === false && dv.showPorts === false && dv.hideFrontEq === true, "restore : toggles d'affichage");
     ck.eq(dv.hidden3dRacks.size, 0, "restore : baie inexistante ignorée (failsafe)");
-    window.localStorage.removeItem("netmap.view3d.F1");
+    window.localStorage.removeItem("dcmanager.view3d.F1");
     dv.restoreView();
     ck(Math.abs(dv.az - (-0.62)) < 1e-9 && dv.scale === null && dv.showAllCables === true && dv.hideFrontEq === false, "restore : défauts quand état absent");
     window.localStorage.clear();

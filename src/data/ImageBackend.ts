@@ -23,7 +23,7 @@ export interface ImageBackend {
 }
 
 /* ---------- IndexedDB (mode fichier) — comportement historique d'ImageStore ---------- */
-const DB_NAME = "netmap-images";
+const DB_NAME = "dc-manager-images";
 const STORE = "images";
 
 export class IdbImageBackend implements ImageBackend {

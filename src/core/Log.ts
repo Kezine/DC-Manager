@@ -1,8 +1,8 @@
 /* =============================================================================
    Logger de débogage GÉNÉRALISÉ — sortie console gated par un flag global.
    Désactivé par défaut (aucun bruit en usage normal). Activable via le réglage
-   « Logs de débogage » (Prefs.debugLog) ou en console : `NetMapLog.enable()`.
-   Usage : Log.d("fs", "message", obj)  →  [netmap:fs] message obj
+   « Logs de débogage » (Prefs.debugLog) ou en console : `DcManagerLog.enable()`.
+   Usage : Log.d("fs", "message", obj)  →  [dcmanager:fs] message obj
    ============================================================================= */
 export class Log {
   static enabled = false;
@@ -13,7 +13,7 @@ export class Log {
   /** Log de débogage catégorisé (no-op si désactivé). `category` préfixe la ligne. */
   static d(category: string, ...args: any[]): void {
     if (!Log.enabled) return;
-    try { console.log("%c[netmap:" + category + "]", "color:#4ea1ff", ...args); } catch (_) { /* console indisponible */ }
+    try { console.log("%c[dcmanager:" + category + "]", "color:#4ea1ff", ...args); } catch (_) { /* console indisponible */ }
   }
 
   /** Fabrique un logger lié à une catégorie : `const flog = Log.scope("fs")`. */
@@ -23,4 +23,4 @@ export class Log {
 }
 
 // Petit accès console pour (dés)activer à la volée sans passer par l'UI.
-try { (window as any).NetMapLog = { enable: () => Log.setEnabled(true), disable: () => Log.setEnabled(false), get on() { return Log.enabled; } }; } catch (_) { /* hors navigateur */ }
+try { (window as any).DcManagerLog = { enable: () => Log.setEnabled(true), disable: () => Log.setEnabled(false), get on() { return Log.enabled; } }; } catch (_) { /* hors navigateur */ }

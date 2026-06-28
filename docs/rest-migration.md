@@ -1,11 +1,11 @@
-# NetMap — Migration vers un backend REST (Node.js + SQLite)
+# DC Manager — Migration vers un backend REST (Node.js + SQLite)
 
 > Document de design vivant. On l'affine au fur et à mesure. Sections marquées
 > `[décidé]` = arbitrage pris ; `[à préciser]` = ouvert.
 
 ## 1. Objectif
 
-Permettre à NetMap de fonctionner soit en **mode fichier** (actuel : un `.json`
+Permettre à DC Manager de fonctionner soit en **mode fichier** (actuel : un `.json`
 sur disque + compagnon `.nmfb` d'images, via File System Access API), soit en
 **mode API/REST** (données servies par un backend Node.js + SQLite). Les deux
 modes coexistent ; le mode fichier reste le comportement par défaut en usage
@@ -18,7 +18,7 @@ autonome (hébergement statique / ouverture locale).
 - **L'app sera probablement servie par le backend** et doit alors fonctionner
   **sans configuration utilisateur**.
 - Détection au boot via une **config injectée** par le backend dans le HTML
-  servi : `window.__NETMAP_CONFIG__ = { mode: "api", apiBaseUrl: "/api" }`.
+  servi : `window.__DCMANAGER_CONFIG__ = { mode: "api", apiBaseUrl: "/api" }`.
   - Config absente → **mode `local`** (build statique autonome, double-clic).
   - Config `mode: "api"` → mode REST, `apiBaseUrl` **même origine** par défaut
     (`/api`), aucune saisie utilisateur.
@@ -29,7 +29,7 @@ autonome (hébergement statique / ouverture locale).
 - **L'app ne gère PAS l'auth.** Un **SSO personnalisé externe** s'en charge.
 - L'app **n'a pas de flux de login**. Elle transmet simplement les
   identifiants de session (cookies) au backend : `fetch(..., { credentials: "include" })`.
-- La **validation est faite par le SSO**. Le backend NetMap peut soit valider
+- La **validation est faite par le SSO**. Le backend DC Manager peut soit valider
   lui-même via un endpoint SSO, soit **proxy le token** au SSO qui répond avec
   les infos utilisateur si la session est valide.
 - Côté app : un appel type `GET /api/me` (proxifié au SSO par le backend)
@@ -101,7 +101,7 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
 ## 5. Plan par phases
 
 - **P0 — Rendre REST sélectionnable & instancié** ✅ *(fait)*
-  - Config injectée (`window.__NETMAP_CONFIG__`) + détection au boot.
+  - Config injectée (`window.__DCMANAGER_CONFIG__`) + détection au boot.
   - Branche d'instanciation `RestAdapter` (même origine, `credentials:"include"`)
     vs `BrowserStorageAdapter`.
   - Mode API **conditionne** la machinerie fichier (accueil, ouvrir/enregistrer,

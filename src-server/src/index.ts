@@ -12,7 +12,7 @@ import { Logger } from "./logger.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, "..", "data", "documents");
-const CLIENT_DIR = process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "dist");   // sortie webpack (dist/netmap.html)
+const CLIENT_DIR = process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "dist");   // sortie webpack (dist/dc-manager.html)
 const API_BASE = process.env.API_BASE || "/api";
 // URL de connexion SSO injectée au client (bouton « Connexion » du welcome quand non authentifié). Vide = pas de
 // bouton. La macro ${clbkUrl} y est remplacée côté client par l'URL courante encodée (retour après connexion).

@@ -7,7 +7,7 @@
    refresh, ce qui permet de raccrocher au handle (et de relancer l'auto-save).
    Tout est best-effort : si IndexedDB est indisponible, on dégrade silencieusement.
    ============================================================================= */
-const DB_NAME = "netmap-fs";
+const DB_NAME = "dc-manager-fs";
 const STORE = "handles";
 const LAST_KEY = "lastFile";
 const FACES_KEY = "facesFile";   // handle du fichier compagnon d'images (.nmfb) du dernier document

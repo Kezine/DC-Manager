@@ -1,8 +1,8 @@
 {
-  "name": "netmap",
+  "name": "dc-manager",
   "version": "0.1.0",
   "private": true,
-  "description": "NetMap — cartographie réseau / datacenter (migration du HTML monolithique vers TypeScript orienté objet).",
+  "description": "DC Manager — cartographie réseau / datacenter (migration du HTML monolithique vers TypeScript orienté objet).",
   "scripts": {
     "build": "webpack --mode production",
     "dev": "webpack serve --mode development",

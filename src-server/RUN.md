@@ -1,4 +1,4 @@
-# NetMap — Lancer l'image & consulter les logs
+# DC Manager — Lancer l'image & consulter les logs
 
 Guide d'exploitation du conteneur (client + backend REST). Aucun Node requis en
 local : tout est construit dans l'image. Voir aussi [README.md](README.md).
@@ -25,8 +25,8 @@ Puis ouvrir **http://localhost:3000** (mode API, utilisateur `dev` factice).
 ### Sans docker compose
 ```bash
 # depuis la racine NetMap/ :
-docker build -f src-server/Dockerfile -t netmap .
-docker run -d --name netmap -p 3000:3000 -v netmap-data:/data netmap
+docker build -f src-server/Dockerfile -t dc-manager .
+docker run -d --name dc-manager -p 3000:3000 -v dc-manager-data:/data dc-manager
 ```
 
 ---
@@ -51,13 +51,13 @@ docker compose logs --since 10m   # depuis 10 minutes
 
 Sans compose (par nom de conteneur) :
 ```bash
-docker logs -f netmap
-docker logs --tail 200 netmap
+docker logs -f dc-manager
+docker logs --tail 200 dc-manager
 ```
 
 Au démarrage, le serveur logue une ligne du type :
 ```
-NetMap server → http://localhost:3000  (api /api)
+DC Manager server → http://localhost:3000  (api /api)
 ```
 
 ### Niveau de logs (serveur)
@@ -82,7 +82,7 @@ docker compose logs -f            # observer
 Format : `2026-… INFO  [http] GET /api/documents → 200 (3ms)`.
 
 Côté **client**, logs console séparés : **Réglages → Débogage → « Logs de
-débogage »** (ou `NetMapLog.enable()` en console) ; l'onglet **Réseau** (F12)
+débogage »** (ou `DcManagerLog.enable()` en console) ; l'onglet **Réseau** (F12)
 montre les URL exactes appelées.
 
 ---
@@ -101,17 +101,17 @@ docker compose up -d --build      # reconstruit après une modif de code
 
 ## 5. Données & persistance
 
-Les documents vivent dans le volume **`netmap-data`** (monté sur `/data`,
+Les documents vivent dans le volume **`dc-manager-data`** (monté sur `/data`,
 un fichier `.db` par document + `registry.db`).
 
 ```bash
-docker volume ls                  # liste les volumes (cherche *netmap-data)
+docker volume ls                  # liste les volumes (cherche *dc-manager-data)
 docker compose down -v            # ⚠️ SUPPRIME le volume → repart de zéro (perte des documents)
 ```
 
 Inspecter le contenu du volume dans le conteneur :
 ```bash
-docker compose exec netmap ls -la /data/documents
+docker compose exec dc-manager ls -la /data/documents
 ```
 
 ---

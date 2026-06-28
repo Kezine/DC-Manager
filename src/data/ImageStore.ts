@@ -3,7 +3,7 @@ import { ImageBackend, IdbImageBackend } from "./ImageBackend";
 
 /* =============================================================================
    STOCKAGE DES IMAGES DE FAÇADE — DISSOCIÉ DU MODÈLE (réplique OO du `imageStore`).
-   - IndexedDB (base `netmap-images`, store « images ») = stockage VIVANT, Blob binaire
+   - IndexedDB (base `dc-manager-images`, store « images ») = stockage VIVANT, Blob binaire
      (hors undo modèle, hors cache de session).
    - Miroir mémoire SYNCHRONE (id → métadonnées + objectURL) pour la lecture par l'UI.
    - Pile d'undo/redo DISTINCTE (opérations inverses ; `onUndoable` alimente la timeline unifiée).
@@ -154,9 +154,9 @@ export class ImageStore {
   /* ---- FICHIER COMPAGNON binaire .nmfb (entête NMFB + manifeste JSON + blobs concaténés) ---- */
   setLoadedKey(k: string | null): void {
     this.lastLoadedKey = k || null;
-    try { if (this.lastLoadedKey) localStorage.setItem("netmap.facesLoadedKey", this.lastLoadedKey); else localStorage.removeItem("netmap.facesLoadedKey"); } catch (_) { /* noop */ }
+    try { if (this.lastLoadedKey) localStorage.setItem("dcmanager.facesLoadedKey", this.lastLoadedKey); else localStorage.removeItem("dcmanager.facesLoadedKey"); } catch (_) { /* noop */ }
   }
-  restoreLoadedKey(): void { try { this.lastLoadedKey = localStorage.getItem("netmap.facesLoadedKey") || null; } catch (_) { this.lastLoadedKey = null; } }
+  restoreLoadedKey(): void { try { this.lastLoadedKey = localStorage.getItem("dcmanager.facesLoadedKey") || null; } catch (_) { this.lastLoadedKey = null; } }
   /** Construit le Blob `.nmfb` à partir d'enregistrements + clé (pur ; testable). */
   static buildBundle(recs: ImageRec[], key: string | null): Blob {
     const manifest = { v: 1, key: key || null, images: recs.map((r) => ({ id: r.id, name: r.name || "", u_height: r.u_height || 1, face: ImageStore.face(r.face), description: r.description || "", type: r.type || (r.blob && r.blob.type) || "", bytes: r.blob ? r.blob.size : 0 })) };

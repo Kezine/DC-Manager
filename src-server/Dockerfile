@@ -1,8 +1,8 @@
-# NetMap — image Docker (client buildé + backend Node/SQLite).
-# Contexte de build = racine NetMap/ :  docker build -f src-server/Dockerfile -t netmap .
+# DC Manager — image Docker (client buildé + backend Node/SQLite).
+# Contexte de build = racine NetMap/ :  docker build -f src-server/Dockerfile -t dc-manager .
 # (point de départ — à aligner ensuite sur la convention du projet SmsControl)
 
-# --- 1) build du client (HTML autonome dist/netmap.html) ---
+# --- 1) build du client (HTML autonome dist/dc-manager.html) ---
 FROM node:20-bookworm-slim AS client
 WORKDIR /client
 COPY package*.json ./

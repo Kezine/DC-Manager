@@ -1,4 +1,4 @@
-# NetMap — guide de contribution (Claude)
+# DC Manager — guide de contribution (Claude)
 
 Outil de cartographie réseau / datacenter : inventaire d'équipements, baies, câblage,
 adressage IP, et **visualisation 3D** des salles (Three.js / WebGL). Deux modes de

@@ -9,7 +9,7 @@ import { EquipmentTypes } from "../registries/EquipmentTypes";
      · localisation : Bât. › Étage › Salle › Rack › U   (+ variante abrégée Rack · U)
    Les icônes d'ÉQUIPEMENT proviennent du registre existant (EquipmentTypes) ; les
    icônes de structure (bâtiment, étage, salle, rack, U, lien, flèches, chevron) sont
-   définies ici. Couleurs pilotées par le thème (cf. classes .viz-* dans netmap.css).
+   définies ici. Couleurs pilotées par le thème (cf. classes .viz-* dans dc-manager.css).
    ============================================================================= */
 
 /** Icône SVG « trait » (stroke) — bâtiment, étage, etc. (24×24, currentColor). */

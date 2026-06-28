@@ -1,12 +1,12 @@
-/* Service Worker NetMap — émis tel quel dans dist/ par webpack (cf. webpack.config.js, EmitStaticAssetsPlugin),
+/* Service Worker DC Manager — émis tel quel dans dist/ par webpack (cf. webpack.config.js, EmitStaticAssetsPlugin),
    servi à /sw.js par le backend (express.static). Volontairement MINIMAL et CONSERVATEUR :
      · l'API (/api/*) n'est JAMAIS interceptée ni mise en cache → données toujours fraîches, SSE (live) intacte ;
      · les requêtes non-GET et cross-origin passent au réseau sans toucher au cache ;
-     · NAVIGATIONS (document HTML) : network-first → repli cache hors-ligne (la config __NETMAP_CONFIG__ étant
+     · NAVIGATIONS (document HTML) : network-first → repli cache hors-ligne (la config __DCMANAGER_CONFIG__ étant
        injectée côté serveur, on privilégie toujours le réseau pour ne pas figer un mode local/api périmé) ;
      · ASSETS statiques same-origin (icônes, manifest) : stale-while-revalidate (rapide + rafraîchi en fond).
    Versionner CACHE à chaque changement de stratégie pour purger l'ancien au activate. */
-const CACHE = "netmap-shell-v1";
+const CACHE = "dc-manager-shell-v1";
 const API_PREFIX = "/api";
 
 self.addEventListener("install", (event) => {

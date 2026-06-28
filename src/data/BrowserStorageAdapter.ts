@@ -32,7 +32,7 @@ export class BrowserStorageAdapter extends DataAdapter {
   private _index: Record<string, Map<string, RawRecord>>;
   private _fk: Record<string, FieldIndex>;
 
-  constructor({ key = "netmap.store", persistent = false, onUndoable }: BrowserStorageOptions = {}) {
+  constructor({ key = "dcmanager.store", persistent = false, onUndoable }: BrowserStorageOptions = {}) {
     super();
     this.key = key;
     this.store = persistent ? window.localStorage : window.sessionStorage;

@@ -1,4 +1,4 @@
-/* Génère les icônes PWA (PNG) à partir du logo NetMap (3 nœuds reliés), SANS dépendance externe :
+/* Génère les icônes PWA (PNG) à partir du logo DC Manager (3 nœuds reliés), SANS dépendance externe :
    encodeur PNG minimal (zlib), rendu supersamplé ×2 pour un anti-aliasing correct.
    À relancer si le logo ou les tailles changent :  node scripts/gen-pwa-icons.mjs
    Sortie : src/pwa/icon-192.png · icon-512.png · icon-maskable-512.png (réémis tels quels par webpack). */

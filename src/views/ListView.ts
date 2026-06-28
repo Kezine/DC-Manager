@@ -79,7 +79,7 @@ export class ListView {
     this.createLabel = opts.createLabel || "+ Nouveau";
     this.sortKey = (opts.defaultSort && opts.defaultSort.key) || "__created__";
     this.sortDir = (opts.defaultSort && opts.defaultSort.dir) || "asc";
-    this._stateKey = "netmap.list:" + (opts.stateKey || opts.collection || "list");
+    this._stateKey = "dcmanager.list:" + (opts.stateKey || opts.collection || "list");
     // défaut COMPACT sur petit écran (mobile/tablette) ; surchargé par le choix utilisateur persisté (_loadState).
     this._compact = (typeof window !== "undefined" && window.innerWidth < 760);
     this._loadState();

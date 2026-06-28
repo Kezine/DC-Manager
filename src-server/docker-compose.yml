@@ -1,12 +1,12 @@
-# NetMap — build du client + serveur, en une commande :
+# DC Manager — build du client + serveur, en une commande :
 #   cd src-server && docker compose up --build
 # Puis ouvrir http://localhost:3000 (mode API, utilisateur dev factice).
 services:
-  netmap:
+  dc-manager:
     build:
       context: ..                       # racine NetMap/ (le Dockerfile copie client + serveur)
       dockerfile: src-server/Dockerfile
-    image: netmap
+    image: dc-manager
     ports:
       - "3000:3000"
     environment:
@@ -25,8 +25,8 @@ services:
       # SSO_URL: https://sso.example.com/validate
       # COOKIE_NAME: SsoJWT
     volumes:
-      - netmap-data:/data                # persistance des documents (un .db par document)
+      - dc-manager-data:/data            # persistance des documents (un .db par document)
     restart: unless-stopped
 
 volumes:
-  netmap-data:
+  dc-manager-data:

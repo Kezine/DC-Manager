@@ -31,7 +31,7 @@ module.exports = (env, argv) => {
     entry: "./src/app/main.ts",
     output: {
       path: path.resolve(__dirname, "dist"),
-      filename: "netmap.[contenthash].js",
+      filename: "dc-manager.[contenthash].js",
       clean: true,
     },
     resolve: { extensions: [".ts", ".js"] },
@@ -46,7 +46,7 @@ module.exports = (env, argv) => {
     plugins: [
       new HtmlWebpackPlugin({
         template: "./src/index.html",
-        filename: "netmap.html",
+        filename: "dc-manager.html",
         inject: "body",
       }),
       /* En production : on RÉINJECTE le bundle dans le HTML → un seul fichier
@@ -66,7 +66,7 @@ module.exports = (env, argv) => {
     devServer: {
       static: { directory: path.resolve(__dirname, "dist") },
       hot: true,
-      open: ["/netmap.html"],
+      open: ["/dc-manager.html"],
     },
     devtool: isProd ? false : "source-map",
     // sortie mono-fichier (CSS + bundle inlinés) → le seuil de taille webpack

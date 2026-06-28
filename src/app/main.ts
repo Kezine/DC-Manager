@@ -4,7 +4,7 @@
    préférences (thème / source de données / auto-save) via `Prefs`, opérations FICHIER
    (File System Access API quand dispo, sinon download/upload), auto-save périodique, et
    verrou d'ouverture exclusive multi-onglets (`TabChannel` sur BroadcastChannel). */
-import "../styles/netmap.css";
+import "../styles/dc-manager.css";
 import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
@@ -44,7 +44,7 @@ const prefs = new Prefs();
 const INJECTED = readRuntimeConfig();
 // VISUALISEUR AUTONOME : un document EMBARQUÉ dans le HTML (export readonly hors-ligne) → on l'ouvre en LOCAL,
 // en lecture seule, sans réseau ni écran d'accueil (cf. exportStandalone / branche VIEWER au boot).
-const EMBED: any = (() => { try { return (window as any).__NETMAP_EMBED__ || null; } catch (_) { return null; } })();
+const EMBED: any = (() => { try { return (window as any).__DCMANAGER_EMBED__ || null; } catch (_) { return null; } })();
 const VIEWER = !!EMBED;
 // Mode EFFECTIF : le choix EXPLICITE de l'utilisateur prime ; sinon on suit la config injectée par le backend
 // (défaut). Ainsi : 1er run servi par le backend → API ; et l'utilisateur peut repasser en LOCAL (mémorisé) même
@@ -58,8 +58,8 @@ const adapter = REST_MODE
 const store = new Store(adapter);
 const W = window as any;
 const HAS_FS_API = typeof W.showSaveFilePicker === "function" && typeof W.showOpenFilePicker === "function";
-const JSON_TYPES = [{ description: "NetMap JSON", accept: { "application/json": [".json"] } }];
-const FACES_TYPES = [{ description: "NetMap Faces (images)", accept: { "application/octet-stream": [".nmfb"] } }];   // fichier compagnon d'images
+const JSON_TYPES = [{ description: "DC Manager JSON", accept: { "application/json": [".json"] } }];
+const FACES_TYPES = [{ description: "DC Manager Faces (images)", accept: { "application/octet-stream": [".nmfb"] } }];   // fichier compagnon d'images
 
 /** Le document est-il « non vide » (au-delà des seuls catalogues fermés réinjectés) ? */
 function hasUserData(): boolean { return store.totalCount() > store.all("portTypes").length + store.all("cableTypes").length; }
@@ -68,11 +68,11 @@ function applyTheme(theme: string): void {
   if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
   else document.documentElement.removeAttribute("data-theme");
 }
-/** Applique l'échelle d'interface (zoom global piloté par --ui-scale, cf. netmap.css `body { zoom }`). */
+/** Applique l'échelle d'interface (zoom global piloté par --ui-scale, cf. dc-manager.css `body { zoom }`). */
 function applyUiScale(scale: number): void {
   document.documentElement.style.setProperty("--ui-scale", String(scale || 1));
 }
-function docFileName(): string { return (store.meta.docName || "netmap").replace(/[\\/:*?"<>|]+/g, "_") + ".json"; }
+function docFileName(): string { return (store.meta.docName || "dc-manager").replace(/[\\/:*?"<>|]+/g, "_") + ".json"; }
 function downloadJson(filename: string, content: string): void {
   const blob = new Blob([content], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -189,17 +189,17 @@ async function boot(): Promise<void> {
   }
   /** EXPORT VISUALISEUR AUTONOME : récupère l'app (HTML mono-fichier inliné) et y EMBARQUE le document courant →
       fichier .html LECTURE SEULE, consultable hors-ligne sans serveur (ouverture en file://). On retire la config
-      API et on injecte `window.__NETMAP_EMBED__` (le bundle bascule alors en mode viewer, cf. EMBED/VIEWER). */
+      API et on injecte `window.__DCMANAGER_EMBED__` (le bundle bascule alors en mode viewer, cf. EMBED/VIEWER). */
   async function exportStandalone(): Promise<void> {
     let html: string;
     try { html = await (await fetch(location.href, { cache: "no-store" })).text(); }
     catch (e: any) { Notify.toast("Export HTML impossible (récupération de l'app) : " + ((e && e.message) || e), "err"); return; }
-    if (!/__NETMAP_EMBED__|<script/i.test(html)) { Notify.toast("Export HTML indisponible : l'app n'est pas en build autonome.", "err"); return; }
+    if (!/__DCMANAGER_EMBED__|<script/i.test(html)) { Notify.toast("Export HTML indisponible : l'app n'est pas en build autonome.", "err"); return; }
     const json = (await snapshotWithImages()).split("</").join("<\\/");           // neutralise un éventuel </script> dans les données
-    html = html.replace(/<script>\s*window\.__NETMAP_CONFIG__[\s\S]*?<\/script>/i, "");   // retire la config API injectée par le serveur
-    const embed = "<script>window.__NETMAP_EMBED__=" + json + ";</script>";
+    html = html.replace(/<script>\s*window\.__DCMANAGER_CONFIG__[\s\S]*?<\/script>/i, "");   // retire la config API injectée par le serveur
+    const embed = "<script>window.__DCMANAGER_EMBED__=" + json + ";</script>";
     html = html.replace(/<head([^>]*)>/i, (_m, a) => `<head${a}>${embed}`);
-    const fname = (store.meta.docName || "netmap").replace(/[\\/:*?"<>|]+/g, "_") + "-viewer.html";
+    const fname = (store.meta.docName || "dc-manager").replace(/[\\/:*?"<>|]+/g, "_") + "-viewer.html";
     downloadFile(fname, html, "text/html");
     Notify.toast("Visualiseur autonome exporté (" + fname + ")");
   }
@@ -210,7 +210,7 @@ async function boot(): Promise<void> {
   }
 
   /* ---- FICHIER COMPAGNON d'images (.nmfb) — dissocié du modèle, apparié au .json par meta.facesKey ---- */
-  const facesNameFor = (jsonName: string): string => String(jsonName || "netmap.json").replace(/\.json$/i, "") + ".nmfb";
+  const facesNameFor = (jsonName: string): string => String(jsonName || "dc-manager.json").replace(/\.json$/i, "") + ".nmfb";
   const rememberFacesHandle = (handle: any) => { if (handle) void handleStore.putFaces(handle, handle.name || ""); };
   async function writeFacesToHandle(handle: any): Promise<void> {
     if (!(await ensureWritePermission(handle))) throw new Error("permission-refusée");
@@ -258,7 +258,7 @@ async function boot(): Promise<void> {
     if (!HAS_FS_API) { Notify.toast("Indisponible : navigateur sans File System Access API.", "err"); return; }
     if (!dirMode()) { await loadCompanionFileInteractive(); return; }   // mode fichier → sélecteur de fichier
     let dir = currentDirHandle;
-    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "netmap-dir", mode: "readwrite", startIn: await startDirHandle() }); currentDirHandle = dir; } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non ouvert : " + (e.message || e), "err"); return; } }
+    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn: await startDirHandle() }); currentDirHandle = dir; } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non ouvert : " + (e.message || e), "err"); return; } }
     const names: string[] = [];
     try { for await (const entry of dir.values()) { if (entry.kind === "file" && /\.nmfb$/i.test(entry.name)) names.push(entry.name); } } catch (_) { /* énumération impossible */ }
     flog("openFacesFile: .nmfb du dossier", names);
@@ -466,7 +466,7 @@ async function boot(): Promise<void> {
     let dir: any;
     const startIn = await startDirHandle();
     flog("doOpenDir: ouverture du sélecteur de dossier", { startIn: startIn && startIn.name });
-    try { dir = await W.showDirectoryPicker({ id: "netmap-dir", mode: "readwrite", startIn }); }   // id + startIn → le navigateur rouvre dans le DERNIER dossier
+    try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn }); }   // id + startIn → le navigateur rouvre dans le DERNIER dossier
     catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non ouvert : " + (e.message || e), "err"); flog("doOpenDir: annulé/erreur", e && e.name); return; }
     const names: string[] = [];
     try { for await (const entry of dir.values()) { if (entry.kind === "file" && /\.json$/i.test(entry.name)) names.push(entry.name); } }
@@ -516,7 +516,7 @@ async function boot(): Promise<void> {
   /** « Enregistrer sous » en MODE DOSSIER : choisit le dossier (s'il manque) + un nom, écrit .json et .nmfb dedans. */
   async function doSaveAsDir(): Promise<void> {
     let dir = currentDirHandle;
-    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "netmap-dir", mode: "readwrite", startIn: await startDirHandle() }); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non choisi : " + (e.message || e), "err"); return; } }
+    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn: await startDirHandle() }); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non choisi : " + (e.message || e), "err"); return; } }
     const raw = await Dialog.prompt("Nom du fichier", docFileName()); if (!raw) return;
     const name = /\.json$/i.test(raw) ? raw : raw + ".json";
     try {
@@ -725,7 +725,7 @@ async function boot(): Promise<void> {
     let jsonFile: File | null = null, nmfbBuf: ArrayBuffer | null = null;
     if (HAS_FS_API) {
       try {
-        const handles = await W.showOpenFilePicker({ multiple: true, types: [{ description: "Document NetMap (.json) + images (.nmfb)", accept: { "application/json": [".json"], "application/octet-stream": [".nmfb"] } }] });
+        const handles = await W.showOpenFilePicker({ multiple: true, types: [{ description: "Document DC Manager (.json) + images (.nmfb)", accept: { "application/json": [".json"], "application/octet-stream": [".nmfb"] } }] });
         for (const h of handles) { const f = await h.getFile(); if (/\.nmfb$/i.test(f.name)) nmfbBuf = await f.arrayBuffer(); else if (!jsonFile) jsonFile = f; }
       } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Sélection impossible : " + (e.message || e), "err"); return; }
     } else {
@@ -838,7 +838,7 @@ async function boot(): Promise<void> {
     onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); dcView.onThemeChanged(); },
     onUiScale: (value) => { prefs.uiScale = value; applyUiScale(prefs.uiScale); shell.setUiScale(prefs.uiScale); },
     onResetViewPrefs: () => {
-      try { Object.keys(window.localStorage).filter((k) => k.startsWith("netmap.view3d")).forEach((k) => window.localStorage.removeItem(k)); } catch (_) { /* noop */ }
+      try { Object.keys(window.localStorage).filter((k) => k.startsWith("dcmanager.view3d")).forEach((k) => window.localStorage.removeItem(k)); } catch (_) { /* noop */ }
       dcView.resetView(); shell.refreshActive();   // force une restauration aux défauts à la prochaine activation
       Notify.toast("Préférences d'affichage 3D réinitialisées");
     },
@@ -1225,11 +1225,11 @@ async function boot(): Promise<void> {
       if (Array.isArray(EMBED.faceImages)) await imageStore.replaceAllFromLegacy(EMBED.faceImages); else await imageStore.clearAll();
     } catch (e) { console.error(e); Notify.toast("Document embarqué illisible", "err"); }
     resetUndoTimeline();
-    document.body.classList.add("viewer-mode");   // interface allégée (cf. netmap.css) + édition bloquée
+    document.body.classList.add("viewer-mode");   // interface allégée (cf. dc-manager.css) + édition bloquée
     modal.editLocked = true;                       // bloque toute modale d'ÉDITION (les fiches restent consultables)
     if (store.meta.docName) shell.setDocName(store.meta.docName);
     refreshChrome(); shell.refreshActive();
-    (window as any).__NETMAP__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
+    (window as any).__DCMANAGER__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
     return;
   }
   // ÉCRAN D'ACCUEIL (mode FICHIER uniquement) : au (re)chargement le handle FS est perdu → on force une
@@ -1248,6 +1248,6 @@ async function boot(): Promise<void> {
     shell.showWelcome({ reopenName, mode: prefs.fileAccessMode, fsApi: HAS_FS_API });
   }
 
-  (window as any).__NETMAP__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
+  (window as any).__DCMANAGER__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
 }
 boot();

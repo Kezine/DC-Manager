@@ -1,4 +1,4 @@
-# NetMap — migration du HTML monolithique vers TypeScript (orienté objet)
+# DC Manager — migration du HTML monolithique vers TypeScript (orienté objet)
 
 But : sortir **doucement** de l'app mono-fichier
 (`netmap-vNNN-*.html`, ~19 000 lignes dont un seul `<script>` de ~15 000) vers
@@ -20,7 +20,7 @@ jamais casser la base existante.
    unique est le filet **MODULES** (`npm run test:modules`, **337 tests** sur le TS compilé).
    Les `.html` v171/v172 sont **conservés** (archive de référence) mais ne sont plus testés.
 5. **Sortie mono-fichier préservée.** `npm run build` réinjecte le bundle dans le
-   HTML (`html-inline-script-webpack-plugin`) → un seul `dist/netmap.html`
+   HTML (`html-inline-script-webpack-plugin`) → un seul `dist/dc-manager.html`
    autonome, ce qui garde fonctionnel l'export « viewer standalone » (qui lit
    `document.documentElement.outerHTML`).
 
@@ -45,7 +45,7 @@ Les deux sont des RÉÉCRITURES du rendu ; la géométrie pure portée (`Project
 | `npm install`       | installe webpack + TypeScript + loaders                     |
 | `npm run typecheck` | `tsc --noEmit` (porte de type)                              |
 | `npm run test:modules` | compile en CJS (`tsconfig.node.json`) + tests modules    |
-| `npm run build`     | bundle de production → `dist/netmap.html` (un seul fichier) |
+| `npm run build`     | bundle de production → `dist/dc-manager.html` (un seul fichier) |
 | `npm run dev`       | webpack-dev-server (HMR) — **requiert Node ≥ 20**           |
 | `npm run watch`     | rebuild incrémental (Node 19 OK)                            |
 
@@ -74,7 +74,7 @@ src/
 ## Feuille de route
 
 - [x] **Phase 0 — Socle build.** package.json, tsconfig, webpack (sortie
-      mono-fichier), `dist/netmap.html` qui compile.
+      mono-fichier), `dist/dc-manager.html` qui compile.
 - [x] **Phase 1 — Modèle de domaine.** `Entity` + 18 sous-classes + registre,
       avec leurs dépendances (constantes, `Id`, `Normalize`, registres). Type-check
       et build verts ; régression legacy intacte (213/213).
@@ -120,7 +120,7 @@ src/
   - [x] **GraphView — tranche-pilote** : `views/GraphView` (build depuis le store →
         layout force-directed → rendu SVG nœuds/arêtes + pan/zoom + glisser de nœud),
         `GraphHost` injecté (`setDirty`/`openEquipmentDetail`). Câblé dans `main.ts`
-        (document de démo). Build = `dist/netmap.html` exécutable. Tests build+layout
+        (document de démo). Build = `dist/dc-manager.html` exécutable. Tests build+layout
         (sans DOM, faux stage) → 147/147.
   - [x] **GraphView — manipulation directe** : sélection multiple (clic/Maj/marquee),
         déplacement de GROUPE avec auto-pan au bord, zoom-au-curseur, recadrage,
@@ -205,7 +205,7 @@ src/
           boîte) ; toggle « Noms d'équipement » au panneau. Lecture de la baie nettement améliorée.
     - [x] **5c.7 — persistance de l'état de vue** : caméra (az/el/scale/tx/ty/camTarget) · salle
           active · baies masquées · toggles d'affichage écrits (débouncé 300 ms) en localStorage,
-          **par fichier** (`netmap.view3d.<fileId>`). Restauration UNE FOIS par fichier (les
+          **par fichier** (`dcmanager.view3d.<fileId>`). Restauration UNE FOIS par fichier (les
           re-rendus de données ne réécrasent pas les réglages de session) avec failsafes
           (références disparues ignorées, défauts sinon). « Réinitialiser les préférences 3D »
           (réglages) efface et réapplique les défauts. Tests round-trip → 214/214.
@@ -451,7 +451,7 @@ src/
 > `cableWaypointsIn`/`waypointIsPlaced`, `Resolver3D` (resolvePort3D/waypoint/conduit), `RackScene`,
 > `RackGeometry`, `Box.faces`, `Painter.farFirst`.
 - [x] **Bibliothèque d'images de façade** (sous-système à part — COMPLÈTE, modèle inline ; compagnon `.nmfb` différé) :
-  - [x] **5d.1 — `data/ImageStore` (cœur).** Réplique OO du `imageStore` : IndexedDB DÉDIÉE (`netmap-images`,
+  - [x] **5d.1 — `data/ImageStore` (cœur).** Réplique OO du `imageStore` : IndexedDB DÉDIÉE (`dc-manager-images`,
         store « images », keyPath id) ; **miroir mémoire synchrone** (id → métadonnées + objectURL) pour l'UI ;
         **pile d'undo/redo DISTINCTE** (`onUndoable` injecté) ; CRUD `add/update/remove` (Blob), `list/get/has/
         count`, `ready()` (peuple le miroir), `replaceAll`/`clearAll`/`keepOnly` ; **legacy** `replaceAllFromLegacy`/
@@ -494,7 +494,7 @@ src/
         welcome) — `ImageStore.serializeBundle`/`loadBundle`/`buildBundle`/`parseBundle` sont prêts pour ce jour.
   > **BIBLIOTHÈQUE D'IMAGES DE FAÇADE — COMPLÈTE** (modèle inline). Reste optionnel : compagnon `.nmfb` séparé.
 - [~] **Phase 6 — Shell / bootstrap** :
-  - [x] **CSS** extrait du monolithe → `src/styles/netmap.css` (verbatim, 1423 l.),
+  - [x] **CSS** extrait du monolithe → `src/styles/dc-manager.css` (verbatim, 1423 l.),
         chargé par webpack (`style-loader`/`css-loader`) → injecté au runtime, donc
         toujours **inliné** dans le HTML autonome. Le pilote GraphView est désormais
         correctement thématisé (nœuds/texte/arêtes lisibles).
@@ -512,7 +512,7 @@ src/
         (liens `Réseaux/Types de port/…/Faisceaux` sous Câbles ; `Adresses IP/Plages DHCP`
         sous IPAM ; bouton « ← retour » sur les sous-vues). Onglets/badges/headers reconstruits
         en `build()` (indépendant de l'ordre). `addView` rend le **corps** (`.view-body`),
-        la mise en page reste pilotée par `netmap.css`.
+        la mise en page reste pilotée par `dc-manager.css`.
   - [x] **Bootstrap fichier / global** : `main.ts` câble le `ShellHost` au `Store`.
         **Préférences globales** `core/Prefs` (localStorage, hors document) : thème · source de
         données · auto-save + fréquence (8 tests). **Fichier** : ouvrir / enregistrer / copie via

@@ -548,7 +548,7 @@ export class DcBase {
 
 
   /* ---- persistance de l'état de vue (par fichier, localStorage) ---- */
-  protected viewStateKey(): string { return "netmap.view3d." + ((this.store.meta && this.store.meta.fileId) ? this.store.meta.fileId : "__nofile"); }
+  protected viewStateKey(): string { return "dcmanager.view3d." + ((this.store.meta && this.store.meta.fileId) ? this.store.meta.fileId : "__nofile"); }
   protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showDoorSwing", "showFloorGrid", "cablePortNormal", "webglPerspective", "cablesOnTop"];
 
   /** Écrit l'état (débouncé 300 ms) — évite une écriture par frame de pan/zoom. */

@@ -1,6 +1,6 @@
 {
-  "name": "NetMap — cartographie réseau / datacenter",
-  "short_name": "NetMap",
+  "name": "DC Manager — cartographie réseau / datacenter",
+  "short_name": "DC Manager",
   "description": "Inventaire d'équipements, baies, câblage, adressage IP et visualisation 3D des salles.",
   "id": "/",
   "start_url": "/",

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Importe un document NetMap (.json export mode-fichier) dans un document SERVEUR via l'API REST.
+/* Importe un document DC Manager (.json export mode-fichier) dans un document SERVEUR via l'API REST.
    Crée le document, pousse le snapshot (meta + collections), puis importe les images de façade
    (inline `faceImages` data-URL OU compagnon .nmfb).
 

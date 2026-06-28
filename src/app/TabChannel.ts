@@ -10,7 +10,7 @@ import { Id } from "../core/Id";
    Dégradable : sans BroadcastChannel (vieux navigateur) ou en mode download,
    tout est considéré « libre » (aucun verrou).
    ============================================================================= */
-const CHANNEL_NAME = "netmap-tabs";
+const CHANNEL_NAME = "dc-manager-tabs";
 const CLAIM_TIMEOUT_MS = 300;
 
 interface ClaimMsg { type: "claim" | "claimed" | "bye"; from: string; to?: string; fileId?: string; fileIds?: string[]; }

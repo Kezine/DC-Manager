@@ -26,7 +26,7 @@ export class Server {
     this.app.get("/healthz", (_req, res) => { res.json({ ok: true }); });
     this.app.use(opts.apiBase, new Api(opts.docs, opts.auth, opts.live).router());
     this.app.use(opts.apiBase, (_req, res) => { res.status(404).json({ error: "endpoint inconnu" }); });   // 404 API
-    this.app.get(["/", "/netmap.html", "/index.html"], this.serveClient);
+    this.app.get(["/", "/dc-manager.html", "/index.html"], this.serveClient);
     this.app.use(express.static(opts.clientDir, { index: false }));   // assets éventuels (build multi-fichiers en dev)
     this.app.get("*", this.serveClient);                              // fallback SPA → HTML client
     this.app.use(this.errorHandler);                                  // exceptions non gérées → 500 + log
@@ -50,7 +50,7 @@ export class Server {
       puis renvoie l'en-tête Authorization sur TOUTES les requêtes (y compris les fetch de l'app). */
   private basicGate: RequestHandler = (req, res, next) => {
     if (req.path === "/healthz" || this.opts.auth.checkBasic(req)) { next(); return; }
-    res.setHeader("WWW-Authenticate", 'Basic realm="NetMap (dev)"');
+    res.setHeader("WWW-Authenticate", 'Basic realm="DC Manager (dev)"');
     res.status(401).send("Authentification requise (dev).");
   };
 
@@ -59,14 +59,14 @@ export class Server {
     if (!res.headersSent) res.status(500).json({ error: "erreur interne" });
   };
 
-  /* Sert dist/netmap.html (JS+CSS inlinés) en injectant window.__NETMAP_CONFIG__ dans <head> AVANT le bundle :
+  /* Sert dist/dc-manager.html (JS+CSS inlinés) en injectant window.__DCMANAGER_CONFIG__ dans <head> AVANT le bundle :
      le client passe en mode API sans configuration utilisateur. */
   private serveClient: RequestHandler = (_req, res) => {
-    const htmlFile = path.join(this.opts.clientDir, "netmap.html");
+    const htmlFile = path.join(this.opts.clientDir, "dc-manager.html");
     let html: string;
     try { html = fs.readFileSync(htmlFile, "utf8"); }
     catch { res.status(503).send("Client introuvable (" + htmlFile + "). Lancez `npm run build` dans NetMap/."); return; }
-    const cfg = `<script>window.__NETMAP_CONFIG__=${JSON.stringify({ mode: "api", apiBaseUrl: this.opts.apiBase, loginUrl: this.opts.loginUrl || "" })};</script>`;
+    const cfg = `<script>window.__DCMANAGER_CONFIG__=${JSON.stringify({ mode: "api", apiBaseUrl: this.opts.apiBase, loginUrl: this.opts.loginUrl || "" })};</script>`;
     html = html.replace(/<head([^>]*)>/i, (_m, attrs) => `<head${attrs}>${cfg}`);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(html);

@@ -1,4 +1,4 @@
-# NetMap
+# DC Manager
 
 Outil de cartographie réseau / datacenter : inventaire d'équipements, baies, câblage,
 adressage IP (IPAM) et **visualisation 3D** des salles (Three.js / WebGL).
@@ -42,19 +42,19 @@ npm install
 npm run build          # webpack --mode production
 ```
 
-Sortie : **`dist/netmap.html`** — un **HTML autonome** (le bundle JS et le CSS sont
+Sortie : **`dist/dc-manager.html`** — un **HTML autonome** (le bundle JS et le CSS sont
 *inlinés* dans la page, cf. `webpack.config.js`). Ouvrable directement (mode fichier) ou
 servi par le backend (mode API).
 
 ### Développement (rechargement à chaud)
 
 ```bash
-npm run dev            # webpack serve --mode development → ouvre /netmap.html
+npm run dev            # webpack serve --mode development → ouvre /dc-manager.html
 ```
 
 > Le serveur de dev webpack sert le client **sans config API injectée** → il démarre en
 > **mode fichier**. Pour tester le **mode API**, lancer le backend (section 3 ou Docker),
-> qui injecte `window.__NETMAP_CONFIG__ = { mode: "api", apiBaseUrl: "/api" }` dans le HTML.
+> qui injecte `window.__DCMANAGER_CONFIG__ = { mode: "api", apiBaseUrl: "/api" }` dans le HTML.
 
 ### Vérifications
 
@@ -144,16 +144,16 @@ docker compose up --build
 # → http://localhost:3000  (mode API, utilisateur dev factice)
 ```
 
-Les documents sont persistés dans le volume nommé `netmap-data` (monté sur `/data` ;
+Les documents sont persistés dans le volume nommé `dc-manager-data` (monté sur `/data` ;
 un fichier SQLite `.db` par document).
 
 ### Option B — docker build / run manuels
 
 ```bash
 # depuis la racine NetMap/ (le contexte = ".")
-docker build -f src-server/Dockerfile -t netmap .
+docker build -f src-server/Dockerfile -t dc-manager .
 
-docker run --rm -p 3000:3000 -v netmap-data:/data netmap
+docker run --rm -p 3000:3000 -v dc-manager-data:/data dc-manager
 # → http://localhost:3000
 ```
 

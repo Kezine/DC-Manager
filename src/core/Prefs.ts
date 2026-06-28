@@ -10,7 +10,7 @@ export type FileAccessMode = "file" | "directory";   // accès FS : 1 autorisati
 export interface AppPrefs { theme: ThemeName; autosave: boolean; autosaveInterval: number; dataSource: DataSource; dataSourceUserSet: boolean; apiBaseUrl: string; loginUrl: string; fileAccessMode: FileAccessMode; debugLog: boolean; uiScale: number; }
 
 export class Prefs {
-  static readonly KEY = "netmap.prefs";
+  static readonly KEY = "dcmanager.prefs";
   static readonly INTERVAL_DEFAULT = 60;                 // secondes
   static readonly INTERVAL_OPTIONS = [5, 10, 30, 60, 90, 120];
   // échelle d'interface (zoom global) — réglable pour compenser les mobiles qui grossissent les polices.

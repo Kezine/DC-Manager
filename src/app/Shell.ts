@@ -137,7 +137,7 @@ export class Shell {
     const brand = document.createElement("div"); brand.className = "brand";
     const logo = document.createElement("div"); logo.className = "brand-logo";
     logo.appendChild(svgIcon('<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M5 8.4V12h14V8.4M12 12v3.6"/>'));
-    const name = document.createElement("span"); name.className = "brand-name"; name.textContent = "NETMAP";
+    const name = document.createElement("span"); name.className = "brand-name"; name.textContent = "DC Manager";
     const docName = document.createElement("input"); docName.type = "text"; docName.className = "doc-name"; docName.placeholder = "Nom du document"; docName.maxLength = 64;
     docName.addEventListener("change", () => this.host.onRenameDoc?.(docName.value.trim()));
     brand.append(logo, name, docName);
@@ -181,7 +181,7 @@ export class Shell {
     this.statusEls.entities = stat('ENTITÉS <strong>0</strong>').querySelector("strong")!;
     this.statusEls.lastSave = stat('DERNIÈRE SAUVEGARDE <strong>—</strong>').querySelector("strong")!;
 
-    const main = document.createElement("main");   // styles pilotés par netmap.css (padding, max-width, :has full-bleed)
+    const main = document.createElement("main");   // styles pilotés par dc-manager.css (padding, max-width, :has full-bleed)
 
     root.append(topbar, statusbar, main, this.buildWelcome());
     this.tabsEl = tabs; this.mainEl = main; this.actionsEl = actions; this.docNameEl = docName;
@@ -299,7 +299,7 @@ export class Shell {
     const card = document.createElement("div"); card.className = "welcome-card";
     const logo = document.createElement("div"); logo.className = "welcome-logo";
     logo.appendChild(svgIcon('<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M5 8.4V12h14V8.4M12 12v3.6"/>'));
-    const title = document.createElement("h1"); title.className = "welcome-title"; title.textContent = "NETMAP";
+    const title = document.createElement("h1"); title.className = "welcome-title"; title.textContent = "DC Manager";
     // rappel du mode d'accès actuel (fichier / dossier) — rempli par setWelcomeMode()
     this.welcomeModeEl = document.createElement("p"); this.welcomeModeEl.className = "welcome-mode-badge";
     const acts = document.createElement("div"); acts.className = "welcome-actions";

@@ -1,9 +1,9 @@
 {
-  "name": "netmap-server",
+  "name": "dc-manager-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Backend REST NetMap (Node.js + SQLite, TypeScript). Conforme à docs/rest-migration.md.",
+  "description": "Backend REST DC Manager (Node.js + SQLite, TypeScript). Conforme à docs/rest-migration.md.",
   "main": "dist/src-server/src/index.js",
   "scripts": {
     "build": "tsc",

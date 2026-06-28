@@ -1,15 +1,15 @@
-# NetMap — Backend REST (Node.js + SQLite, TypeScript)
+# DC Manager — Backend REST (Node.js + SQLite, TypeScript)
 
 Implémente le contrat de [`docs/rest-migration.md`](../docs/rest-migration.md).
-Sert aussi le client (HTML autonome `dist/netmap.html`) en injectant
-`window.__NETMAP_CONFIG__ = { mode: "api", apiBaseUrl: "/api" }` → le client passe
+Sert aussi le client (HTML autonome `dist/dc-manager.html`) en injectant
+`window.__DCMANAGER_CONFIG__ = { mode: "api", apiBaseUrl: "/api" }` → le client passe
 en mode API **sans configuration utilisateur**.
 
 ## Démarrage (dev)
 
 ```bash
 # 1) builder le client (depuis NetMap/)
-cd ..  &&  npm ci  &&  npm run build      # → dist/netmap.html
+cd ..  &&  npm ci  &&  npm run build      # → dist/dc-manager.html
 
 # 2) lancer le serveur
 cd src-server
@@ -84,7 +84,7 @@ docker compose up --build        # build client + serveur, démarre sur :3000
 ```
 
 Puis ouvrir **http://localhost:3000** → le client démarre en **mode API**, crée/
-ouvre un document, et tout est persisté dans le volume `netmap-data` (`/data`,
+ouvre un document, et tout est persisté dans le volume `dc-manager-data` (`/data`,
 un fichier `.db` par document).
 
 Sans `SSO_URL`, l'auth est en **mode dev** (utilisateur factice `dev`). Pour le
@@ -92,8 +92,8 @@ vrai SSO : décommenter `SSO_URL` dans `docker-compose.yml`.
 
 Sans compose :
 ```bash
-docker build -f src-server/Dockerfile -t netmap .   # depuis la racine NetMap/
-docker run -p 3000:3000 -v netmap-data:/data netmap
+docker build -f src-server/Dockerfile -t dc-manager .   # depuis la racine NetMap/
+docker run -p 3000:3000 -v dc-manager-data:/data dc-manager
 ```
 
 > Healthcheck `/healthz` intégré. À aligner ensuite sur la convention **SmsControl**

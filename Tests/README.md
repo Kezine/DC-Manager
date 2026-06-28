@@ -1,4 +1,4 @@
-# NetMap — Tests
+# DC Manager — Tests
 
 Filet de régression **au niveau MODULES** : il exerce le **TypeScript compilé** (le code
 réel de l'app), sans navigateur. C'est désormais **LA** référence de tests — l'ancien
