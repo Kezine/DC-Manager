@@ -50,18 +50,32 @@ export class EquipmentForms extends FormBase {
       title: "Image de façade — " + (annex ? "face " + faceLbl.toLowerCase() + " (catégorie « autre »)" : ((u || 1) + "U · face " + faceLbl.toLowerCase())), confirmLabel: "Choisir",
       build: (root: HTMLElement) => {
         let selected: string | null = current || null, query = "";
+        // Toggle OREILLES (faces avant/arrière) : (a) FILTRE les images proposées ; (b) sert de DÉFAUT à l'image
+        // importée inline. Valeur initiale : avant = avec oreilles · arrière = sans (cf. demande).
+        let earMode = (face !== "rear");
         const note = document.createElement("div"); note.className = "form-hint"; note.style.marginBottom = "8px";
         note.textContent = annex ? "Faces annexes (équipement libre) : seules les images marquées « autre » sont éligibles (sans contrainte de U)." : "Seules les images " + (u || 1) + "U marquées « " + faceLbl + " » sont éligibles ici.";
+        const earRow = document.createElement("div"); earRow.style.cssText = "display:flex;align-items:center;gap:6px;margin-bottom:8px;";
+        const earLab = document.createElement("span"); earLab.className = "form-hint"; earLab.style.margin = "0"; earLab.textContent = "Oreilles :";
+        const segWith = document.createElement("button"); segWith.type = "button"; segWith.textContent = "Avec oreilles";
+        const segWithout = document.createElement("button"); segWithout.type = "button"; segWithout.textContent = "Sans oreilles";
+        segWith.onclick = () => { earMode = true; renderGrid(); };
+        segWithout.onclick = () => { earMode = false; renderGrid(); };
+        earRow.append(earLab, segWith, segWithout);
         const search = document.createElement("input"); search.type = "text"; search.className = "search-input"; search.placeholder = "Rechercher une image (nom, description)…"; search.style.cssText = "width:100%;max-width:none;margin-bottom:8px;";
         const grid = document.createElement("div"); grid.className = "fi-grid";
-        root.append(note, search, grid);
+        if (annex) root.append(note, search, grid); else root.append(note, earRow, search, grid);
         const renderGrid = () => {
+          segWith.className = "btn btn-sm " + (earMode ? "btn-primary" : "btn-ghost");
+          segWithout.className = "btn btn-sm " + (!earMode ? "btn-primary" : "btn-ghost");
           grid.innerHTML = "";
           const none = document.createElement("button"); none.type = "button"; none.className = "fi-tile fi-none" + (selected == null ? " sel" : ""); none.textContent = "Aucune"; none.onclick = () => { selected = null; renderGrid(); }; grid.appendChild(none);
           const eligible = this.eligibleImages(u, face), cur: any = current ? images.get(current) : null;
           const list = eligible.slice(); if (cur && !eligible.some((fi: any) => fi.id === cur.id)) list.push(cur);
           const q = Text.normSearch(query);
-          const shown = q ? list.filter((fi: any) => Text.normSearch((fi.name || "") + " " + (fi.description || "")).includes(q)) : list;
+          const searched = q ? list.filter((fi: any) => Text.normSearch((fi.name || "") + " " + (fi.description || "")).includes(q)) : list;
+          // FILTRE par mode d'oreilles (front/rear) ; l'image SÉLECTIONNÉE reste toujours visible.
+          const shown = annex ? searched : searched.filter((fi: any) => fi.id === selected || ((fi.with_ears !== false) === earMode));
           shown.forEach((fi: any) => {
             const offFilter = annex ? (fi.face !== "autre") : !(fi.u_height === (u || 1) && fi.face === face);
             const t = document.createElement("button"); t.type = "button"; t.className = "fi-tile" + (selected === fi.id ? " sel" : "");
@@ -70,12 +84,12 @@ export class EquipmentForms extends FormBase {
             cap.textContent = (fi.name || "(image)") + (offFilter ? " · " + (fi.face === "autre" ? "autre" : fi.u_height + "U/" + EquipFaces.label(fi.face)) : "") + " · " + store.faceImageUsageCount(fi.id) + "×";
             t.append(im, cap); t.onclick = () => { selected = fi.id; renderGrid(); }; grid.appendChild(t);
           });
-          if (q && shown.length === 0) { const empty = document.createElement("div"); empty.className = "fi-grid-empty"; empty.textContent = "Aucune image ne correspond à « " + query.trim() + " »."; grid.appendChild(empty); }
-          const imp = document.createElement("button"); imp.type = "button"; imp.className = "fi-tile fi-import"; imp.innerHTML = "<span>+ Importer<br>image " + (annex ? "« autre »" : (u || 1) + "U · " + faceLbl) + "</span>";
+          if (shown.length === 0) { const empty = document.createElement("div"); empty.className = "fi-grid-empty"; empty.textContent = q ? ("Aucune image ne correspond à « " + query.trim() + " ».") : ("Aucune image " + (annex ? "« autre »" : (faceLbl + (earMode ? " avec oreilles" : " sans oreilles"))) + " — importez-en une ci-dessous."); grid.appendChild(empty); }
+          const imp = document.createElement("button"); imp.type = "button"; imp.className = "fi-tile fi-import"; imp.innerHTML = "<span>+ Importer<br>image " + (annex ? "« autre »" : ((u || 1) + "U · " + faceLbl + (earMode ? " · avec oreilles" : " · sans oreilles"))) + "</span>";
           imp.onclick = async () => {
             const f = this.validImageFile(await this.promptImageFile()); if (!f) return;
             const nm = f.name ? f.name.replace(/\.[^.]+$/, "") : ("Image " + (annex ? "autre" : (u || 1) + "U"));
-            const fi = await images.add({ name: nm, u_height: annex ? 1 : (u || 1), face: annex ? "autre" : face, blob: f, type: f.type });
+            const fi = await images.add({ name: nm, u_height: annex ? 1 : (u || 1), face: annex ? "autre" : face, with_ears: annex ? false : earMode, blob: f, type: f.type });
             if (fi) { selected = fi.id; query = ""; search.value = ""; renderGrid(); }
           };
           grid.appendChild(imp);
@@ -447,14 +461,16 @@ export class EquipmentForms extends FormBase {
     const uI = FormControls.number(fi ? (fi.u_height || 1) : 1, { min: 1, step: 1 });
     const uRow = FormControls.fieldRow("Hauteur (U)", uI, "Éligibilité : l'image n'est proposée que sur les équipements de ce nombre de U.");
     root.appendChild(uRow);
-    // Oreilles 19″ : pertinent UNIQUEMENT pour avant/arrière (faces montées en baie). Défaut = avec oreilles.
-    const earsI = FormControls.select([{ value: "ears", label: "Face avec oreilles (19″)" }, { value: "face", label: "Face seule (corps)" }], (fi && fi.with_ears === false) ? "face" : "ears");
+    // Oreilles 19″ : pertinent UNIQUEMENT pour avant/arrière. Défaut DÉPENDANT de la face : avant = avec, arrière = sans.
+    const earDefault = (f: string) => (f === "rear" ? "face" : "ears");
+    const earsI = FormControls.select([{ value: "ears", label: "Face avec oreilles (19″)" }, { value: "face", label: "Face seule (corps)" }], fi ? (fi.with_ears === false ? "face" : "ears") : earDefault(faceI.value));
     const earRow = FormControls.fieldRow("Rendu", earsI, "« Avec oreilles » : l'image couvre le corps + les oreilles de montage (largeur panneau 19″). « Face seule » : le corps seul (largeur U). Le placement des ports reste sur le corps dans les deux cas.");
     root.appendChild(earRow);
     const descI = FormControls.textArea(fi ? fi.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
-    // « Autre » : ni U ni oreilles → on masque les deux lignes.
-    const syncFaceDeps = () => { const isAutre = faceI.value === "autre"; uRow.style.display = isAutre ? "none" : ""; earRow.style.display = isAutre ? "none" : ""; };
+    // « Autre » : ni U ni oreilles → on masque les deux lignes. Pour une NOUVELLE image, on recale aussi le défaut
+    // oreilles sur la face choisie (avant = avec, arrière = sans) ; pour une image existante, on respecte sa valeur.
+    const syncFaceDeps = () => { const isAutre = faceI.value === "autre"; uRow.style.display = isAutre ? "none" : ""; earRow.style.display = isAutre ? "none" : ""; if (!fi && !isAutre) earsI.value = earDefault(faceI.value); };
     faceI.onchange = syncFaceDeps; syncFaceDeps();
     if (fi) { const uses = store.faceImageUsageCount(fi.id); const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Utilisée par " + uses + " équipement" + (uses > 1 ? "s" : "") + ". Modifier U/face n'affecte que les futurs choix ; les références existantes restent."; root.appendChild(h); }
     syncPreview();

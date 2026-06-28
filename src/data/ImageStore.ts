@@ -50,8 +50,13 @@ export class ImageStore {
 
   /** Face valide : front (défaut) · rear · autre (faces annexes des équipements libres). */
   private static face(f: any): string { return (f === "rear" || f === "autre") ? f : "front"; }
-  /** Inclut les oreilles 19″ ? Défaut `true` (corps + oreilles). INAPPLICABLE à la face « autre » → `false`. */
-  private static ears(f: string, v: any): boolean { return (f === "autre") ? false : (v !== false); }
+  /** Inclut les oreilles 19″ ? Valeur explicite respectée ; à défaut, DÉPEND DE LA FACE : avant = avec oreilles,
+      arrière = sans. INAPPLICABLE à la face « autre » (annexe) → toujours `false`. */
+  private static ears(f: string, v: any): boolean {
+    if (f === "autre") return false;
+    if (v === true) return true; if (v === false) return false;
+    return f !== "rear";   // défaut : front (et tout sauf rear) = avec oreilles · rear = sans
+  }
   private norm(rec: any): ImageRec {
     const face = ImageStore.face(rec.face);
     // « autre » : pas de U (forcé à 1) ni d'oreilles.
