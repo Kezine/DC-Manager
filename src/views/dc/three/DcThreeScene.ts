@@ -350,9 +350,11 @@ export class DcThreeScene extends DcThreeCamera {
     occ.forEach((u) => {
       const front = u.side !== "rear", eqSide = front ? "front" : "rear";   // côté → bascule hideAv/Ar EN VISIBILITÉ
       const span = Depths.mountSpanMm(u, cageY + (front ? frontExtra : rearExtra));
-      // avant : du plan avant (−Y) vers l'intérieur · arrière : du plan arrière (+Y) vers l'intérieur (cf. SVG y0/y1).
-      const y0 = front ? fpY + 2 : rpY - Math.max(6, span);
-      const y1 = front ? fpY + Math.max(6, span) : rpY - 2;
+      // La face de l'équipement (et ses oreilles) est posée LÉGÈREMENT EN AVANT du plan de montage → elle passe DEVANT
+      // les montants (dessinés vers l'intérieur, cf. plus bas) et les oreilles reposent à ~1 mm de ceux-ci. La face
+      // EXTÉRIEURE opposée (rear pour un équip. avant) reste alignée sur le port résolu (profondeur = mountSpanMm).
+      const y0 = front ? fpY - 0.5 : rpY - Math.max(6, span);
+      const y1 = front ? fpY + Math.max(6, span) : rpY + 0.5;
       const bw = RACK_MOUNT_WIDTH * 0.96;
       const bd = y1 - y0, yc = (y0 + y1) / 2;
       const bh = Math.max(2, u.h * U_MM - 2);
@@ -403,11 +405,14 @@ export class DcThreeScene extends DcThreeCamera {
       this.localBox(group, b.x0, b.x1, b.y0, b.y1, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
     });
 
-    // montants 19″ (rails) : barres verticales à l'entraxe ±RACK_MOUNT_WIDTH/2 (cf. rackInterior3D).
-    const postX = RACK_MOUNT_WIDTH / 2, pw = Math.min(RACK_EAR_MM * 0.8, 8);
+    // montants 19″ : à l'entraxe ±RACK_MOUNT_WIDTH/2, leur face EXTÉRIEURE au plan de montage RÉEL (fpY/rpY, =
+    // dimensions EXTÉRIEURES de la cage − marge avant) et dessinés VERS L'INTÉRIEUR → ils passent DERRIÈRE la façade
+    // et les oreilles des équipements (posés ~1 mm devant), sans plus les masquer.
+    const postX = RACK_MOUNT_WIDTH / 2, pw = Math.min(RACK_EAR_MM * 0.8, 8), RAIL_D = 6;
     const pz1 = baseZ + (r.u_count || 42) * U_MM;
-    const posts = (r.sides === "dual") ? [fpY, rpY] : [fpY];
-    posts.forEach((ly) => [postX, -postX].forEach((px) => this.localBox(group, px - pw, px + pw, ly - 2, ly + 2, baseZ, pz1, theme.line)));
+    const rails = (r.sides === "dual") ? [{ y: fpY, dir: 1 }, { y: rpY, dir: -1 }] : [{ y: fpY, dir: 1 }];
+    rails.forEach(({ y, dir }) => { const lo = Math.min(y, y + dir * RAIL_D), hi = Math.max(y, y + dir * RAIL_D);
+      [postX, -postX].forEach((px) => this.localBox(group, px - pw, px + pw, lo, hi, baseZ, pz1, theme.line)); });
 
     // BROSSES de brassage ancrées à cette baie : coque creuse + tunnel av→ar. TOUJOURS construites → couche
     // "conduit" basculable (showConduits) en visibilité, sans reconstruction.
