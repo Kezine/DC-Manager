@@ -161,6 +161,13 @@ docker run --rm -p 3000:3000 -v dc-manager-data:/data dc-manager
 
 Endpoint `GET /healthz` (utilisé par le `HEALTHCHECK` de l'image).
 
+### Derrière un reverse-proxy / sous un sous-dossier
+
+L'app fonctionne **à la racine ou sous n'importe quel sous-dossier**
+(`https://host/dc-manager/`) **sans reconfiguration** : toutes ses URLs sont relatives.
+Configuration du proxy (stripping de préfixe, `X-Forwarded-Prefix`, slash final) :
+voir [`docs/reverse-proxy.md`](docs/reverse-proxy.md).
+
 ---
 
 ## 4. Configuration (variables d'environnement)
@@ -192,3 +199,5 @@ renseigner `SSO_URL` / `COOKIE_NAME` (cf. exemples commentés dans le `docker-co
   (révisions, SSE, verrou optimiste 409), cascade de suppression, limites connues.
 - [`docs/render-impact.md`](docs/render-impact.md) — rechargement granulaire et impact 3D.
 - [`docs/validation.md`](docs/validation.md) — normalisation & validation partagées.
+- [`docs/reverse-proxy.md`](docs/reverse-proxy.md) — servir l'app **sous un sous-dossier**
+  derrière un reverse-proxy (URLs relatives, `X-Forwarded-Prefix`), sans reconfiguration.

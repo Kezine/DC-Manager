@@ -2,17 +2,22 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
+  <!-- Ancre des URLs RELATIVES (API, manifest, icônes, service worker) → l'app fonctionne à la racine OU sous un
+       sous-dossier derrière un reverse-proxy, sans reconfiguration. Le backend remplace ce href par le préfixe réel
+       s'il est annoncé via l'en-tête X-Forwarded-Prefix (cf. src-server/src/server.ts, serveClient). Aucune
+       référence SVG `url(#…)` dans l'app → pas de conflit <base>. -->
+  <base href="./" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>DC Manager</title>
   <!-- PWA : manifeste + couleurs. Les fichiers (manifest, icônes, sw.js) sont émis séparément dans dist/ par
        webpack et servis par le backend ; inertes pour l'export mono-fichier ouvert en file:// (404 sans effet). -->
-  <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+  <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
   <meta name="theme-color" content="#0a0a0a" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="DC Manager" />
-  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
 </head>
 <body>
   <!-- Coquille minimale. La migration du <head>/<style>/<body> du HTML

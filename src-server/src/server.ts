@@ -60,13 +60,24 @@ export class Server {
   };
 
   /* Sert dist/dc-manager.html (JS+CSS inlinés) en injectant window.__DCMANAGER_CONFIG__ dans <head> AVANT le bundle :
-     le client passe en mode API sans configuration utilisateur. */
-  private serveClient: RequestHandler = (_req, res) => {
+     le client passe en mode API sans configuration utilisateur.
+     SOUS-DOSSIER / REVERSE-PROXY : toutes les URLs du client (API, manifest, icônes, SW) sont RELATIVES et ancrées
+     sur le <base> du HTML. apiBaseUrl est donc injecté SANS slash initial ("/api" → "api"). Si le proxy annonce le
+     préfixe réel via l'en-tête X-Forwarded-Prefix (ex. "/dc-manager"), on fixe <base href="/dc-manager/"> — ce qui
+     couvre l'URL sans slash final et le proxy qui NE retire PAS le préfixe. Sans en-tête, on garde le <base href="./">
+     du template (le cas nominal = proxy qui retire le préfixe + URL avec slash final fonctionne tel quel). */
+  private serveClient: RequestHandler = (req, res) => {
     const htmlFile = path.join(this.opts.clientDir, "dc-manager.html");
     let html: string;
     try { html = fs.readFileSync(htmlFile, "utf8"); }
     catch { res.status(503).send("Client introuvable (" + htmlFile + "). Lancez `npm run build` dans NetMap/."); return; }
-    const cfg = `<script>window.__DCMANAGER_CONFIG__=${JSON.stringify({ mode: "api", apiBaseUrl: this.opts.apiBase, loginUrl: this.opts.loginUrl || "" })};</script>`;
+    // En-tête réfléchi dans le HTML → on n'accepte qu'un chemin absolu au charset sûr (pas de quote/chevron) :
+    // un X-Forwarded-Prefix malveillant ne peut pas s'évader de l'attribut href (anti-XSS). Sinon, ignoré.
+    const rawPrefix = String(req.headers["x-forwarded-prefix"] || "");
+    const prefix = /^\/[A-Za-z0-9._~/-]*$/.test(rawPrefix) ? rawPrefix.replace(/\/+$/, "") : "";   // ex. "/dc-manager"
+    if (prefix) html = html.replace(/<base\b[^>]*>/i, `<base href="${prefix}/">`);          // ancre absolue ; sinon on garde <base href="./">
+    const apiBaseUrl = this.opts.apiBase.replace(/^\/+/, "");                               // "/api" → "api" : relatif, résolu contre <base>
+    const cfg = `<script>window.__DCMANAGER_CONFIG__=${JSON.stringify({ mode: "api", apiBaseUrl, loginUrl: this.opts.loginUrl || "" })};</script>`;
     html = html.replace(/<head([^>]*)>/i, (_m, attrs) => `<head${attrs}>${cfg}`);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(html);

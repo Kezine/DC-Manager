@@ -36,7 +36,7 @@ export class RestAdapter extends DataAdapter {
   /** URL du flux SSE du document courant (ou "" si aucun document). */
   get eventsUrl(): string { return this.docId ? (this.apiRoot + "/documents/" + encodeURIComponent(this.docId) + "/events") : ""; }
 
-  constructor({ baseUrl = "/api", headers = {} }: RestOptions = {}) {
+  constructor({ baseUrl = "api", headers = {} }: RestOptions = {}) {   // défaut RELATIF (résolu contre <base>) → compatible sous-dossier / reverse-proxy
     super();
     this.apiRoot = baseUrl.replace(/\/+$/, "");
     this.dataBase = this.apiRoot;

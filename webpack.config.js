@@ -32,6 +32,7 @@ module.exports = (env, argv) => {
     output: {
       path: path.resolve(__dirname, "dist"),
       filename: "dc-manager.[contenthash].js",
+      publicPath: "auto",   // URLs d'assets RELATIVES → l'app se charge à la racine ou sous un sous-dossier (reverse-proxy)
       clean: true,
     },
     resolve: { extensions: [".ts", ".js"] },

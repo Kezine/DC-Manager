@@ -1,7 +1,7 @@
 /* =============================================================================
    Configuration d'EXÉCUTION injectée par l'hôte (le backend, quand il sert l'app).
    Permet de fonctionner SANS configuration utilisateur : le backend pose
-   `window.__DCMANAGER_CONFIG__ = { mode: "api", apiBaseUrl: "/api" }` dans le HTML.
+   `window.__DCMANAGER_CONFIG__ = { mode: "api", apiBaseUrl: "api" }` dans le HTML.
    Absente → mode FICHIER (build statique autonome, ouverture locale).
    Voir docs/rest-migration.md.
    ============================================================================= */
@@ -9,7 +9,7 @@ export type AppMode = "local" | "api";
 
 export interface RuntimeConfig {
   mode: AppMode;          // "local" = fichier (File System Access) · "api" = backend REST
-  apiBaseUrl: string;     // base des endpoints REST (même origine par défaut)
+  apiBaseUrl: string;     // base des endpoints REST — RELATIVE par défaut (résolue contre <base>), compatible sous-dossier
   loginUrl: string;       // URL de connexion SSO (bouton « Connexion » du welcome) — macro ${clbkUrl} = URL courante encodée
 }
 
@@ -18,7 +18,7 @@ export function readRuntimeConfig(): RuntimeConfig {
   let c: any = {};
   try { c = (window as any).__DCMANAGER_CONFIG__ || {}; } catch (_) { c = {}; }
   const mode: AppMode = (c.mode === "api") ? "api" : "local";
-  const apiBaseUrl = (typeof c.apiBaseUrl === "string" && c.apiBaseUrl.trim()) ? c.apiBaseUrl.trim() : "/api";
+  const apiBaseUrl = (typeof c.apiBaseUrl === "string" && c.apiBaseUrl.trim()) ? c.apiBaseUrl.trim() : "api";
   const loginUrl = (typeof c.loginUrl === "string") ? c.loginUrl.trim() : "";
   return { mode, apiBaseUrl, loginUrl };
 }

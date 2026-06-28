@@ -50,7 +50,7 @@ const VIEWER = !!EMBED;
 // (défaut). Ainsi : 1er run servi par le backend → API ; et l'utilisateur peut repasser en LOCAL (mémorisé) même
 // servi par le backend — ce qui était impossible avant (le mode était fixé par la config à chaque boot).
 const REST_MODE = !VIEWER && (prefs.dataSourceUserSet ? (prefs.dataSource === "api") : (INJECTED.mode === "api"));
-const API_BASE_URL = (prefs.apiBaseUrl && prefs.apiBaseUrl.trim()) || INJECTED.apiBaseUrl || "/api";
+const API_BASE_URL = (prefs.apiBaseUrl && prefs.apiBaseUrl.trim()) || INJECTED.apiBaseUrl || "api";   // défaut RELATIF (cf. <base>) → compatible sous-dossier
 // API même origine, cookies SSO transmis (l'app NE gère PAS l'auth — le SSO valide).
 const adapter = REST_MODE
   ? new RestAdapter({ baseUrl: API_BASE_URL })
@@ -860,7 +860,7 @@ async function boot(): Promise<void> {
       window.location.reload();
     },
     onApiBaseUrl: async (url) => {
-      const clean = (url || "").trim() || "/api";
+      const clean = (url || "").trim() || "api";
       if (clean === ((prefs.apiBaseUrl && prefs.apiBaseUrl.trim()) || API_BASE_URL)) return;
       prefs.apiBaseUrl = clean; shell.setApiBaseUrl(clean);
       if (prefs.dataSource !== "api") return;   // sans effet tant qu'on n'est pas en mode API

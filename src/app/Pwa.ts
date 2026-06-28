@@ -16,8 +16,11 @@ export class Pwa {
     const proto = location.protocol;
     if (proto !== "https:" && proto !== "http:") return;                      // file:// (standalone) → pas de SW
     // enregistrement différé au `load` pour ne pas concurrencer le rendu initial.
+    // URL + scope RELATIFS (résolus contre <base>) → l'app peut être servie sous un sous-dossier (reverse-proxy)
+    // sans rien changer : le SW s'enregistre alors sous /<prefixe>/sw.js avec scope /<prefixe>/. Le scope demandé
+    // (./ = dossier du script) est ⊆ au dossier du SW → pas besoin de l'en-tête Service-Worker-Allowed.
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/sw.js", { scope: "/" })
+      navigator.serviceWorker.register("sw.js", { scope: "./" })
         .then(() => Log.d("pwa", "service worker enregistré"))
         .catch((err) => Log.d("pwa", "échec d'enregistrement du service worker", err));
     });
