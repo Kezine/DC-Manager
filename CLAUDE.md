@@ -45,6 +45,10 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
    (front + back + doc + tests ensemble), message en français, style *conventional
    commits* (`feat(...)`, `fix(...)`, `chore(...)`). Terminer par la ligne
    `Co-Authored-By` Claude.
+9. **NE JAMAIS pousser sur le remote.** Claude commit en local uniquement ; le
+   `git push` (et la gestion des identifiants GitHub) est **toujours** réservé à
+   l'utilisateur. Ne pas exécuter `git push` même si l'arbre est prêt — proposer,
+   puis laisser l'utilisateur pousser.
 
 ## Structure du projet
 
