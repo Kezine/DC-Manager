@@ -18,9 +18,7 @@ l'emplacement réel où la page a été chargée :
 | Icônes | `icons/…` | `/icons/…` | `/dc-manager/icons/…` |
 | Service worker | `sw.js` (scope `./`) | `/sw.js` (scope `/`) | `/dc-manager/sw.js` (scope `/dc-manager/`) |
 
-> Pourquoi pas un `#` dans l'URL ? Un fragment n'est **jamais** envoyé au serveur et
-> n'influence donc pas le routage réseau. L'app connaît déjà son emplacement via l'URL
-> de chargement — les URLs relatives suffisent et sont le mécanisme correct.
+
 
 L'app **ne fait aucun routing par l'URL** (les documents se choisissent dans l'app,
 `location.pathname` ne change jamais) → l'ancre `<base>` reste stable et la résolution
@@ -41,9 +39,7 @@ Le backend qui sert le client ([`src-server/src/server.ts`](../src-server/src/se
 L'en-tête est **filtré** (chemin absolu, charset sûr uniquement) avant injection : un
 `X-Forwarded-Prefix` malveillant ne peut pas s'évader de l'attribut `href` (anti-XSS).
 
-## 3. Modes de proxy
-
-### Mode A — le proxy RETIRE le préfixe (recommandé, zéro config backend)
+## 3. Configuration proxy
 
 Le backend ne voit jamais le préfixe : il reçoit `/`, `/api`, `/sw.js` à la racine. La
 seule condition est que le **navigateur** émette ses requêtes sous `/dc-manager/…`, ce
@@ -62,19 +58,7 @@ location /dc-manager/ {
 location = /dc-manager { return 308 /dc-manager/; }
 ```
 
-**Traefik** (labels) — `StripPrefix` retire le préfixe, l'en-tête est posé à part :
-```yaml
-- "traefik.http.routers.dcm.rule=PathPrefix(`/dc-manager`)"
-- "traefik.http.routers.dcm.middlewares=dcm-strip,dcm-prefix"
-- "traefik.http.middlewares.dcm-strip.stripprefix.prefixes=/dc-manager"
-- "traefik.http.middlewares.dcm-prefix.headers.customrequestheaders.X-Forwarded-Prefix=/dc-manager"
-```
 
-### Mode B — le proxy CONSERVE le préfixe
-
-Le backend reçoit `/dc-manager/api`, `/dc-manager/sw.js`… Il faudrait alors monter les
-routes Express **sous le préfixe** : non géré aujourd'hui. **Préférer le Mode A.** Si le
-Mode B est imposé, retirer le préfixe au niveau du proxy reste la voie la plus simple.
 
 ## 4. Le piège du slash final
 
