@@ -93,11 +93,20 @@ export class Api {
   /* -- registre des documents -- */
   private listDocs: RequestHandler = (_req, res) => { res.json(this.docs.list()); };
   private createDoc: RequestHandler = (req, res) => { res.status(201).json(this.docs.create((req.body && req.body.name) || "")); };
+  /** Met à jour la méta-registre d'un document : renommage et/ou (dé)verrouillage. Corps : `{ name?, locked? }`. */
   private renameDoc: RequestHandler = (req, res) => {
-    const m = this.docs.rename(req.params.docId, (req.body && req.body.name) || "");
-    if (m) res.json(m); else res.status(404).json({ error: "document inconnu" });
+    const body: any = req.body || {};
+    if (!this.docs.get(req.params.docId)) { res.status(404).json({ error: "document inconnu" }); return; }
+    if (typeof body.name === "string") this.docs.rename(req.params.docId, body.name);
+    if (typeof body.locked === "boolean") this.docs.setLocked(req.params.docId, body.locked);
+    res.json(this.docs.get(req.params.docId));
   };
   private deleteDoc: RequestHandler = (req, res) => {
+    const doc = this.docs.get(req.params.docId);
+    if (!doc) { res.status(404).json({ error: "document inconnu" }); return; }
+    // Document VERROUILLÉ → suppression conventionnelle refusée (423 Locked). L'échappatoire est explicite :
+    // déverrouiller d'abord (PUT { locked: false }), puis re-supprimer.
+    if (doc.locked) { res.status(423).json({ error: "document verrouillé", locked: true }); return; }
     if (this.docs.delete(req.params.docId)) res.status(204).end(); else res.status(404).json({ error: "document inconnu" });
   };
 

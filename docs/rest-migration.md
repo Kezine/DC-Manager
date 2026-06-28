@@ -138,6 +138,11 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
   - ⏳ Reste : conflit *update-after-delete* (résurrection — non détecté faute de
     tombstone) ; undo serveur.
 - **P4 — Multi-documents** : ✅ fait (registre `/documents` + un SQLite par document).
+  - **Document VERROUILLÉ** (anti-suppression accidentelle) : attribut `locked` sur la
+    ligne du registre (`DocMeta.locked`, pas une config externe). Bascule via
+    `PUT /documents/:id { locked }` ; `DELETE` d'un document verrouillé → **423 Locked**.
+    Échappatoire délibérée : déverrouiller (`{ locked: false }`) puis supprimer. UI : cadenas
+    🔒 dans le sélecteur de documents, bouton Supprimer masqué tant que verrouillé.
 
 ## 6. État au démarrage du chantier (constat d'analyse)
 

@@ -707,13 +707,23 @@ async function boot(): Promise<void> {
           const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
           const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = "🗂";
           const tx = document.createElement("span"); tx.className = "ok-tx";
-          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = d.name + (d.id === restDocId ? "  ◀ ouvert" : "");
+          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = (d.locked ? "🔒 " : "") + d.name + (d.id === restDocId ? "  ◀ ouvert" : "");
           const de = document.createElement("span"); de.className = "ok-desc"; de.textContent = "maj " + String(d.updated_date || "").slice(0, 10);
           tx.append(ti, de); b.append(ic, tx);
           b.onmousedown = (e) => { e.preventDefault(); chosen = d.id; confirmBtn?.click(); };
-          const del = document.createElement("span"); del.textContent = "✕"; del.title = "Supprimer ce document"; del.style.cssText = "margin-left:auto;padding:0 8px;cursor:pointer;color:var(--fg-dimmer)";
-          del.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__del__:" + d.id; confirmBtn?.click(); };
-          b.appendChild(del); wrap.appendChild(b);
+          // Cadenas : bascule de verrouillage (protège d'une suppression accidentelle). Verrouillé = 🔒 net ; libre = 🔓 estompé.
+          const lock = document.createElement("span"); lock.textContent = d.locked ? "🔒" : "🔓";
+          lock.title = d.locked ? "Déverrouiller (réautorise la suppression)" : "Verrouiller (protège de la suppression)";
+          lock.style.cssText = "margin-left:auto;padding:0 6px;cursor:pointer;opacity:" + (d.locked ? "1" : "0.4");
+          lock.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__lock__:" + d.id; confirmBtn?.click(); };
+          b.appendChild(lock);
+          // Suppression proposée UNIQUEMENT si non verrouillé → flux délibéré « déverrouiller d'abord » (le serveur refuse en 423 par sécurité).
+          if (!d.locked) {
+            const del = document.createElement("span"); del.textContent = "✕"; del.title = "Supprimer ce document"; del.style.cssText = "padding:0 8px;cursor:pointer;color:var(--fg-dimmer)";
+            del.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__del__:" + d.id; confirmBtn?.click(); };
+            b.appendChild(del);
+          }
+          wrap.appendChild(b);
         });
         const nb = document.createElement("button"); nb.type = "button"; nb.className = "open-kind-btn";
         const ni = document.createElement("span"); ni.className = "ok-ic"; ni.textContent = "＋"; const nt = document.createElement("span"); nt.className = "ok-tx";
@@ -731,6 +741,12 @@ async function boot(): Promise<void> {
     if (!action) return;
     if (action === "__new__") { const n = await Dialog.prompt("Nom du document", "Document"); if (n) await restNewDocument(n); return; }
     if (action === "__import__") { await restImportFromPicker(); return; }
+    if (action.startsWith("__lock__:")) {
+      const id = action.slice(9), d = docs.find((x) => x.id === id);
+      try { await ra.setDocumentLocked(id, !d?.locked); Notify.toast(d?.locked ? "Document déverrouillé." : "Document verrouillé."); }
+      catch (e: any) { Notify.toast("Action impossible : " + (e.message || e), "err"); }
+      await restOpenChooser(); return;   // rouvre le sélecteur rafraîchi
+    }
     if (action.startsWith("__del__:")) {
       const id = action.slice(8), d = docs.find((x) => x.id === id);
       const ok = await Dialog.confirm({ title: "Supprimer le document ?", message: "Supprimer « " + (d?.name || id) + " » et toutes ses données ? Irréversible.", confirmLabel: "Supprimer", danger: true });

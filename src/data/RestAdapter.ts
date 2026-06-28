@@ -11,7 +11,7 @@ export interface RestOptions {
 }
 
 /** Métadonnées d'un document (workspace) côté serveur. */
-export interface DocMeta { id: string; name: string; created_date?: string; updated_date?: string }
+export interface DocMeta { id: string; name: string; created_date?: string; updated_date?: string; locked?: boolean }
 
 /* Implémentation REST MULTI-DOCUMENTS : l'API sert les ÉLÉMENTS d'UN document.
    - registre des documents (non scopé) : `/me`, `/documents…` via `apiRoot` ;
@@ -83,6 +83,8 @@ export class RestAdapter extends DataAdapter {
   async listDocuments(): Promise<DocMeta[]> { return (await this._root("GET", "/documents")) || []; }
   async createDocument(name: string): Promise<DocMeta> { return this._root("POST", "/documents", { name }); }
   async renameDocument(id: string, name: string): Promise<DocMeta | null> { return this._root("PUT", "/documents/" + encodeURIComponent(id), { name }, { allow404: true }); }
+  /** Verrouille / déverrouille un document (protection anti-suppression accidentelle ; cf. serveur `Api.deleteDoc` → 423). */
+  async setDocumentLocked(id: string, locked: boolean): Promise<DocMeta | null> { return this._root("PUT", "/documents/" + encodeURIComponent(id), { locked }, { allow404: true }); }
   async deleteDocument(id: string): Promise<void> { await this._root("DELETE", "/documents/" + encodeURIComponent(id)); }
 
   /** Le serveur renvoie les listes paginées `{ rows, total, … }` ; le boot/getMany/findBy veulent le TABLEAU. */
