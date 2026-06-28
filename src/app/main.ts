@@ -120,7 +120,10 @@ async function boot(): Promise<void> {
   // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
   // backend d'images selon le mode : IndexedDB (fichier, + compagnon .nmfb) · endpoints blob (REST). Cf. P2.
   const imageBackend = REST_MODE ? new RestImageBackend(API_BASE_URL) : new IdbImageBackend();
-  const imageStore = new ImageStore({ onDirty: () => { session.markDirty(); refreshChrome(); shell.refreshActive(); }, onUndoable: noteUndoable, backend: imageBackend });   // images HORS historique modèle, undo intégré à la timeline unifiée
+  // Hook tardif (dcView n'existe pas encore) : toute mutation d'image (y c. le mode d'oreilles, qui ne change PAS
+  // l'URL) doit forcer une reconstruction 3D — sinon la scène garderait l'ancien gabarit de plan de façade.
+  let onImageMutated: () => void = () => {};
+  const imageStore = new ImageStore({ onDirty: () => { onImageMutated(); session.markDirty(); refreshChrome(); shell.refreshActive(); }, onUndoable: noteUndoable, backend: imageBackend });   // images HORS historique modèle, undo intégré à la timeline unifiée
   Forms.images = imageStore;   // singleton pour le picker d'image (faceEditor)
   imageStore.restoreLoadedKey();   // clé du bundle .nmfb actuellement en IndexedDB (persistée) — appariement json↔compagnon
   if (!REST_MODE) await imageStore.ready();   // en REST, le miroir est chargé à l'ouverture d'un document
@@ -1072,12 +1075,16 @@ async function boot(): Promise<void> {
       const fld = (EQUIP_FACE_IMG_FIELD as any)[face];
       const im: any = e && fld && e[fld] ? imageStore.get(e[fld]) : null;
       if (!im || !im.url) return null;
+      const withEars = !!im.with_ears;   // arrière/« autre » : toujours false (coercé par le miroir)
       // REST : l'URL serveur (/images/{id}/blob) est STABLE par id → on y ajoute une version (octets) qui change quand
       // l'image est remplacée. Sans ce jeton, l'image remplacée resterait périmée (cache navigateur max-age + cache de
       // textures 3D, tous deux indexés par URL). En mode fichier, l'URL est déjà un objectURL unique par chargement.
-      return im.url.startsWith("blob:") ? im.url : (im.url + "?v=" + (im.bytes || 0));
+      const url = im.url.startsWith("blob:") ? im.url : (im.url + "?v=" + (im.bytes || 0));
+      return { url, withEars };
     },
   });
+  // dcView existe désormais : une mutation d'image invalide la scène 3D (rebuild au prochain rendu de la vue DC).
+  onImageMutated = () => dcView.invalidate3D();
   // « Localiser » depuis une fiche (modale) : ferme la modale, bascule en 3D, centre la caméra ; « Retour » rouvre la fiche.
   formHost.locate = (kind, id, ret) => { modal.close(); shell.switchView("datacenter"); dcView.locate(kind, id); dcView.setReturnAction(ret || null); };
 

@@ -371,12 +371,23 @@ export class DcThreeScene extends DcThreeCamera {
         this.faceLabel(group, u.label, 0, y0 - 0.5, zc, bw * 0.94, bh * 0.9, true, { eqSide });    // face −Y (avant)
         this.faceLabel(group, u.label, 0, y1 + 0.5, zc, bw * 0.94, bh * 0.9, false, { eqSide });   // face +Y (arrière)
       }
-      // images de façade : TOUJOURS construites (couche "faceImage" + côté) → bascule en visibilité sans rebuild.
+      // FAÇADES + OREILLES 19″. La face AVANT du device (u0 si monté-avant, sinon u1) porte des oreilles : 2 flasques
+      // métal TOUJOURS dessinés (du corps ±bodyHW aux montants ±mountHW) ; l'image ne les recouvre QUE si elle est
+      // « avec oreilles » (plan élargi au panneau). Sinon image au CORPS (= portée latérale des ports). Arrière : jamais d'oreilles.
       if (u.kind === "eq") {
-        const u0 = this.host.faceImageUrl?.(u.id, front ? "front" : "rear");
-        if (u0) this.faceImagePlane(group, u0, 0, y0 - 0.5, zc, bw, bh, true, { layer: "faceImage", eqSide });
-        const u1 = this.host.faceImageUrl?.(u.id, front ? "rear" : "front");
-        if (u1) this.faceImagePlane(group, u1, 0, y1 + 0.5, zc, bw, bh, false, { layer: "faceImage", eqSide });
+        const mountHW = RACK_MOUNT_WIDTH / 2, bodyHW = mountHW - RACK_EAR_MM;
+        const drawFace = (img: { url: string; withEars: boolean } | null | undefined, planeY: number, planeFront: boolean, deviceFront: boolean): void => {
+          if (deviceFront) {   // flasques : fin liseré JUSTE DERRIÈRE le plan d'image (caché par une image « avec oreilles »)
+            const yA = planeFront ? planeY + 0.1 : planeY - 0.4, yB = planeFront ? planeY + 0.4 : planeY - 0.1;
+            [[-mountHW, -bodyHW], [bodyHW, mountHW]].forEach((xr) => this.localBox(group, xr[0], xr[1], yA, yB, zc - bh / 2, zc + bh / 2, theme.rack, { type: "occ", kind: u.kind, id: u.id }, { eqSide }));
+          }
+          if (img) {
+            const w = (deviceFront && img.withEars) ? RACK_MOUNT_WIDTH : 2 * bodyHW;   // avec oreilles → panneau 19″ · sinon corps
+            this.faceImagePlane(group, img.url, 0, planeY, zc, w, bh, planeFront, { layer: "faceImage", eqSide });
+          }
+        };
+        drawFace(this.host.faceImageUrl?.(u.id, front ? "front" : "rear"), y0 - 0.5, true, front);
+        drawFace(this.host.faceImageUrl?.(u.id, front ? "rear" : "front"), y1 + 0.5, false, !front);
       }
     });
 

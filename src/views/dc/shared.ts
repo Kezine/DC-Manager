@@ -31,8 +31,9 @@ export interface DatacenterHost {
   openDatacenterForm?(id: string): void;
   openFloorForm?(location: string, floor: string, opts?: any): void;
   openSiteForm?(id: string | null): void;
-  /** URL (objectURL) de l'image attachée à une face d'un équipement, ou null. */
-  faceImageUrl?(eqId: string, face: string): string | null;
+  /** Image attachée à une face d'un équipement, ou null. `url` = objectURL/endpoint ; `withEars` = l'image
+      couvre les oreilles 19″ (avant uniquement) → le rendu 3D élargit alors le plan jusqu'aux montants. */
+  faceImageUrl?(eqId: string, face: string): { url: string; withEars: boolean } | null;
   /** Assignation d'un emplacement libre (clic 3D) → dialogue, puis `onDone` rafraîchit la vue. */
   assignSlot?(rackId: string, u: number, side: string, height: number, onDone: () => void): void;
   assignSideSlot?(rackId: string, face: string, lr: string, col: number, uTop: number, onDone: () => void): void;
