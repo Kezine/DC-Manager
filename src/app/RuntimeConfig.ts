@@ -10,13 +10,15 @@ export type AppMode = "local" | "api";
 export interface RuntimeConfig {
   mode: AppMode;          // "local" = fichier (File System Access) · "api" = backend REST
   apiBaseUrl: string;     // base des endpoints REST (même origine par défaut)
+  loginUrl: string;       // URL de connexion SSO (bouton « Connexion » du welcome) — macro ${clbkUrl} = URL courante encodée
 }
 
-/** Lit la config injectée (best-effort) ; défaut = mode fichier, API même origine. */
+/** Lit la config injectée (best-effort) ; défaut = mode fichier, API même origine, pas d'URL de connexion. */
 export function readRuntimeConfig(): RuntimeConfig {
   let c: any = {};
   try { c = (window as any).__NETMAP_CONFIG__ || {}; } catch (_) { c = {}; }
   const mode: AppMode = (c.mode === "api") ? "api" : "local";
   const apiBaseUrl = (typeof c.apiBaseUrl === "string" && c.apiBaseUrl.trim()) ? c.apiBaseUrl.trim() : "/api";
-  return { mode, apiBaseUrl };
+  const loginUrl = (typeof c.loginUrl === "string") ? c.loginUrl.trim() : "";
+  return { mode, apiBaseUrl, loginUrl };
 }

@@ -244,7 +244,9 @@ export class DcThreeScene extends DcThreeCamera {
     if (!u) return true;
     const o = this.opts;
     if (u.rackId && o.hiddenRacks && o.hiddenRacks.has(u.rackId)) return false;   // baie masquée → tout son contenu (groupe + ports)
-    const on: Record<string, boolean> = { port: !!o.showPorts, name: !!o.showEqNames, door: !!o.showDoors, doorswing: !!o.showDoorSwing, slot: !!o.showPlaceholders, faceImage: !!o.showFaceImages, conduit: !!o.showConduits, marker: !!o.showWaypoints, rail: !!(o.showWaypoints || o.showConduits), floorgrid: !!o.showFloorGrid, orient: !!o.showOrientMarks, rackshell: !!o.showRackSides };
+    const on: Record<string, boolean> = { port: !!o.showPorts, name: !!o.showEqNames, door: !!o.showDoors, doorswing: !!o.showDoorSwing, slot: !!o.showPlaceholders, faceImage: !!o.showFaceImages, conduit: !!o.showConduits, marker: !!o.showWaypoints, rail: !!(o.showWaypoints || o.showConduits), floorgrid: !!o.showFloorGrid, orient: !!o.showOrientMarks, rackshell: !!o.showRackSides,
+      // numéro d'U sur les emplacements LIBRES : visible seulement si les emplacements libres ET les noms d'équipement sont affichés.
+      slotlabel: !!o.showPlaceholders && !!o.showEqNames };
     let v = true;
     if (u.layer && u.layer in on) v = on[u.layer];
     if (v && u.eqSide) v = u.eqSide === "rear" ? !o.hideRearEq : !o.hideFrontEq;
@@ -414,6 +416,8 @@ export class DcThreeScene extends DcThreeCamera {
           if (occMap.has(u + ":" + side)) continue;
           const zc = baseZ + (u - 0.5) * U_MM;
           this.slotPlane(group, 2 * bodyHW * 0.96, U_MM - 3, 0, yPlane, zc, side === "front", { type: "slotU", rackId: r.id, u, side, height: 1 }, { layer: "slot", eqSide: side });
+          // NUMÉRO D'U au centre de l'emplacement libre (couche "slotlabel", légèrement en avant du plan du slot).
+          this.faceLabel(group, "U" + u, 0, yPlane + (side === "front" ? -4 : 4), zc, Math.min(2 * bodyHW * 0.96, 120), Math.min(U_MM - 6, 28), side === "front", { layer: "slotlabel", eqSide: side });
         }
       });
       // emplacements LATÉRAUX libres (marges) → cibles d'assignation (équipement / pin latéral).

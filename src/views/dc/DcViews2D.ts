@@ -137,7 +137,7 @@ export class DcViews2D extends DcScene3D {
     const label = Dom.svg("text", { class: "dc-floor-anchor-label", x: s * 1.7, y: -s * 1.5, "font-size": cfg.cell_mm * 0.4 });
     label.textContent = "⚓ ancrage"; g.appendChild(label);
     const tip = Dom.svg("title"); tip.textContent = "⚓ Point d'ancrage de l'étage — décale ce plan dans la pile 3D (" + Format.meters(ax) + " ; " + Format.meters(ay) + ") · glissez pour régler"; g.appendChild(tip);
-    g.addEventListener("mousedown", (e: any) => this.onFloorAnchorPointerDown(e, cfg, loc, fl));
+    g.addEventListener("pointerdown", (e: any) => this.onFloorAnchorPointerDown(e, cfg, loc, fl));
     return g;
   }
 
@@ -157,14 +157,14 @@ export class DcViews2D extends DcScene3D {
       this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
     };
     const up = async () => {
-      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       grp.classList.remove("dragging"); this.hideCote();
       if (!moved) return;
       const c = clamp({ x: this.freePlace ? cur.x : this.snapEdge(cur.x, cell), y: this.freePlace ? cur.y : this.snapEdge(cur.y, cell) });
       const f = await this.ensureFloor(loc, fl);   // l'ancrage se stocke sur l'entité floors (créée au besoin)
       await this.store.update("floors", f.id, { anchor_x: Math.round(c.x), anchor_y: Math.round(c.y) }); this.host.setDirty?.(true); this.render();
     };
-    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }
 
   /** Rail flottant (à gauche du plan) listant tous les étages connus — navigation rapide entre étages. */
@@ -202,7 +202,7 @@ export class DcViews2D extends DcScene3D {
     const fs = Math.max(40, s * 0.22), yLab = -b.d / 2 - fs * 0.55;
     const label = Dom.svg("text", { class: "dc-floor-equip-label", x: 0, y: yLab, "text-anchor": "middle", "font-size": fs, transform: `rotate(${(360 - o) % 360} 0 ${yLab})` });
     label.textContent = (eq.name || "équipement") + (FloorLayout.floorEquipLocalized(eq) ? "" : " (auto)"); g.appendChild(label);
-    g.addEventListener("mousedown", (e: any) => this.onFloorEquipPointerDown(e, eq, cfg));
+    g.addEventListener("pointerdown", (e: any) => this.onFloorEquipPointerDown(e, eq, cfg));
     g.addEventListener("contextmenu", (e: any) => this.ctxMenu(e, this.floorEquipCtx(eq)));
     return g;
   }
@@ -224,13 +224,13 @@ export class DcViews2D extends DcScene3D {
       this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
     };
     const up = async () => {
-      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       grp.classList.remove("dragging"); this.hideCote();
       if (!moved) { this.selFloorEquip = eq.id; this.render(); return; }
       const c = this.freePlace ? clampP(cur) : clampP({ x: this.snapEdge(cur.x, cell), y: this.snapEdge(cur.y, cell) });
       await this.store.update("equipments", eq.id, { floor_x: Math.round(c.x), floor_y: Math.round(c.y), location: loc, floor: fl }); this.host.setDirty?.(true);
     };
-    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }
 
   /** Une salle sur le plan d'étage : emprise (rect orienté + liseré front) + libellé. Cliquable / déplaçable. */
@@ -243,7 +243,7 @@ export class DcViews2D extends DcScene3D {
     g.appendChild(inner);
     const label = Dom.svg("text", { class: "dc-floor-room-label", x: fp.w / 2, y: fp.h / 2, "text-anchor": "middle", "dominant-baseline": "central", "font-size": Math.max(200, Math.min(fp.w, fp.h) * 0.12) });
     label.textContent = (d.name || "(salle)") + (d.room ? " · " + d.room : ""); g.appendChild(label);
-    g.addEventListener("mousedown", (e: any) => this.onFloorRoomPointerDown(e, d, cfg));
+    g.addEventListener("pointerdown", (e: any) => this.onFloorRoomPointerDown(e, d, cfg));
     g.addEventListener("contextmenu", (e: any) => this.ctxMenu(e, this.floorRoomCtx(d)));
     return g;
   }
@@ -259,7 +259,7 @@ export class DcViews2D extends DcScene3D {
     label.textContent = "◎ " + (wp.name || "OOB") + " · " + Format.meters(FloorLayout.oobHeight(wp)) + (loc ? "" : " (auto)");
     g.appendChild(label);
     this.wireTip(g, () => this.wpTipHtml(wp));
-    g.addEventListener("mousedown", (e: any) => this.onFloorOobPointerDown(e, wp, cfg));
+    g.addEventListener("pointerdown", (e: any) => this.onFloorOobPointerDown(e, wp, cfg));
     g.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.hideTip(); this.ctxMenu(e, this.waypointCtx(wp)); });
     return g;
   }
@@ -283,13 +283,13 @@ export class DcViews2D extends DcScene3D {
       this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
     };
     const up = async () => {
-      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       grp.classList.remove("dragging"); this.hideCote();
       if (!moved) { this.render(); return; }   // simple clic = sélection
       const c = clamp({ x: this.freePlace ? cur.x : this.snapEdge(cur.x, cell), y: this.freePlace ? cur.y : this.snapEdge(cur.y, cell) });
       await this.store.update("waypoints", wp.id, { floor_x: c.x, floor_y: c.y, location: loc, floor: fl }); this.host.setDirty?.(true);   // localise (étage inchangé)
     };
-    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }
 
   protected snapEdge(v: number, cell: number): number { return Math.round(v / cell) * cell; }
@@ -312,13 +312,13 @@ export class DcViews2D extends DcScene3D {
       this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
     };
     const up = async () => {
-      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       grp.classList.remove("dragging"); this.hideCote();
       if (!moved) { this.selRoomId = d.id; this.dcId = d.id; this.render(); return; }   // simple clic = sélection + activation
       const c = this.freePlace ? clampP(cur) : clampP({ x: this.snapEdge(cur.x, cell), y: this.snapEdge(cur.y, cell) });
       await this.store.update("datacenters", d.id, { floor_x: Math.round(c.x), floor_y: Math.round(c.y) }); this.host.setDirty?.(true);
     };
-    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }
   /** Grille + cases INACCESSIBLES (hachurées). En mode `blockEdit`, un overlay capte un GLISSÉ de sélection
       (rectangle) → `onRange(cx0,cy0,cx1,cy1)` sur les cases couvertes (clic simple = 1 case). Aperçu en direct. */
@@ -335,7 +335,7 @@ export class DcViews2D extends DcScene3D {
     if (this.blockEdit && onRange) {
       const ov = Dom.svg("rect", { class: "dc-cell-edit", x: 0, y: 0, width: W, height: D });
       const clampCell = (v: number, max: number) => Math.min(Math.max(v, 0), max - 1);
-      ov.addEventListener("mousedown", (e: any) => {
+      ov.addEventListener("pointerdown", (e: any) => {
         if (e.button !== 0) return; e.preventDefault(); e.stopPropagation();
         const s = this.clientToWorld(e.clientX, e.clientY), nx = Math.ceil(W / cell), ny = Math.ceil(D / cell);
         const c0 = { cx: clampCell(Math.floor(s.x / cell), nx), cy: clampCell(Math.floor(s.y / cell), ny) };
@@ -343,8 +343,8 @@ export class DcViews2D extends DcScene3D {
         const draw = (c1: { cx: number; cy: number }) => { const x0 = Math.min(c0.cx, c1.cx) * cell, y0 = Math.min(c0.cy, c1.cy) * cell; prev.setAttribute("x", String(x0)); prev.setAttribute("y", String(y0)); prev.setAttribute("width", String((Math.abs(c1.cx - c0.cx) + 1) * cell)); prev.setAttribute("height", String((Math.abs(c1.cy - c0.cy) + 1) * cell)); };
         let c1 = c0; draw(c0);
         const move = (ev: MouseEvent) => { const w = this.clientToWorld(ev.clientX, ev.clientY); c1 = { cx: clampCell(Math.floor(w.x / cell), nx), cy: clampCell(Math.floor(w.y / cell), ny) }; draw(c1); };
-        const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); prev.remove(); onRange(c0.cx, c0.cy, c1.cx, c1.cy); };
-        document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+        const up = () => { document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); prev.remove(); onRange(c0.cx, c0.cy, c1.cx, c1.cy); };
+        document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
       });
       g.appendChild(ov);
     }
@@ -398,7 +398,7 @@ export class DcViews2D extends DcScene3D {
     grp.appendChild(Dom.svg("rect", { class: "dc-rack-face", x: -w / 2, y: -d / 2, width: w, height: Math.max(20, d * 0.12) }));
     const t = Dom.svg("text", { class: "dc-rack-label", x: 0, y: 0, "text-anchor": "middle", "dominant-baseline": "central", transform: `rotate(${-o})`, "font-size": Math.max(40, Math.min(w, d) * 0.14) });
     t.textContent = r.name || "(baie)"; grp.appendChild(t);
-    grp.addEventListener("mousedown", (e: any) => this.onRackPointerDown(e, r));
+    grp.addEventListener("pointerdown", (e: any) => this.onRackPointerDown(e, r));
     grp.addEventListener("contextmenu", (e: any) => this.ctxMenu(e, this.rackCtx(r)));
     return grp;
   }
@@ -410,7 +410,7 @@ export class DcViews2D extends DcScene3D {
     grp.appendChild(Dom.svg("rect", { class: "dc-equip-body", x: -b.w / 2, y: -b.d / 2, width: b.w, height: b.d, rx: Math.min(b.w, b.d) * 0.04 }));
     const t = Dom.svg("text", { class: "dc-equip-label", x: 0, y: 0, "text-anchor": "middle", "dominant-baseline": "central", transform: `rotate(${-o})`, "font-size": Math.max(40, Math.min(b.w, b.d) * 0.16) });
     t.textContent = e.name || "(équipement)"; grp.appendChild(t);
-    grp.addEventListener("mousedown", (ev: any) => this.onEquipPointerDown(ev, e));
+    grp.addEventListener("pointerdown", (ev: any) => this.onEquipPointerDown(ev, e));
     grp.addEventListener("contextmenu", (ev: any) => this.ctxMenu(ev, this.equipmentCtx(e.id)));
     return grp;
   }
@@ -474,7 +474,7 @@ export class DcViews2D extends DcScene3D {
         this.applyUprightText(label);
       };
       const up = async () => {
-        document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+        document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
         g.classList.remove("dragging");
         if (!moved) { this.render(); return; }   // simple clic = sélection seule
         if (which === "body" && isSeg) { const dx = snap(cur.x1 - start.x1), dy = snap(cur.y1 - start.y1); cur.x1 = start.x1 + dx; cur.y1 = start.y1 + dy; cur.x2 = start.x2 + dx; cur.y2 = start.y2 + dy; }   // aimante le delta → longueur préservée
@@ -483,7 +483,7 @@ export class DcViews2D extends DcScene3D {
         const payload = isSeg ? { dc_x: cur.x1, dc_y: cur.y1, dc_x2: cur.x2, dc_y2: cur.y2 } : { dc_x: cur.x1, dc_y: cur.y1 };
         await this.store.update("waypoints", wp.id, payload); this.host.setDirty?.(true);   // datacenter_id INCHANGÉ → reste dans la salle
       };
-      document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+      document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
     };
     const wireTop = (node: SVGElement) => { this.wireTip(node, () => this.wpTipHtml(wp)); node.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.hideTip(); this.ctxMenu(e, this.waypointCtx(wp)); }); };
     if (isSeg) {
@@ -492,12 +492,12 @@ export class DcViews2D extends DcScene3D {
       hitLine = Dom.svg("line", { class: "dc-wp-hit-line" }); hit1 = Dom.svg("circle", { class: "dc-wp-hit", r: hitR }); hit2 = Dom.svg("circle", { class: "dc-wp-hit", r: hitR });
       label = Dom.svg("text", { class: "dc-wp-label", "text-anchor": "middle", "font-size": fontSize }); label.textContent = Waypoint.glyph(wp) + " " + (wp.name || "");
       g.append(rail, h1, h2, label, hitLine, hit1, hit2);
-      ([[hitLine, "body"], [hit1, "p1"], [hit2, "p2"]] as Array<[SVGElement, string]>).forEach(([n, which]) => { n.addEventListener("mousedown", (e: any) => startDrag(e, which)); wireTop(n); });
+      ([[hitLine, "body"], [hit1, "p1"], [hit2, "p2"]] as Array<[SVGElement, string]>).forEach(([n, which]) => { n.addEventListener("pointerdown", (e: any) => startDrag(e, which)); wireTop(n); });
     } else {
       dia = Dom.svg("polygon", { class: "dc-wp-body" }); hitDot = Dom.svg("circle", { class: "dc-wp-hit", r: hitR });
       label = Dom.svg("text", { class: "dc-wp-label", "text-anchor": "middle", "font-size": fontSize }); label.textContent = Waypoint.glyph(wp) + " " + (wp.name || "");
       g.append(dia, label, hitDot);
-      hitDot.addEventListener("mousedown", (e: any) => startDrag(e, "body")); wireTop(hitDot);
+      hitDot.addEventListener("pointerdown", (e: any) => startDrag(e, "body")); wireTop(hitDot);
     }
     sync();
     return g;

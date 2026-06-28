@@ -7,7 +7,7 @@ import { Auth } from "./auth.js";
 import { LiveBus } from "./live.js";
 import { Logger } from "./logger.js";
 
-export interface ServerOptions { docs: DocumentStore; auth: Auth; live: LiveBus; clientDir: string; apiBase: string; log?: Logger }
+export interface ServerOptions { docs: DocumentStore; auth: Auth; live: LiveBus; clientDir: string; apiBase: string; loginUrl?: string; log?: Logger }
 
 /** Application HTTP : API REST sous `apiBase` + service du client (HTML autonome) avec injection de config. */
 export class Server {
@@ -66,7 +66,7 @@ export class Server {
     let html: string;
     try { html = fs.readFileSync(htmlFile, "utf8"); }
     catch { res.status(503).send("Client introuvable (" + htmlFile + "). Lancez `npm run build` dans NetMap/."); return; }
-    const cfg = `<script>window.__NETMAP_CONFIG__=${JSON.stringify({ mode: "api", apiBaseUrl: this.opts.apiBase })};</script>`;
+    const cfg = `<script>window.__NETMAP_CONFIG__=${JSON.stringify({ mode: "api", apiBaseUrl: this.opts.apiBase, loginUrl: this.opts.loginUrl || "" })};</script>`;
     html = html.replace(/<head([^>]*)>/i, (_m, attrs) => `<head${attrs}>${cfg}`);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(html);

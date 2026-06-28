@@ -31,9 +31,15 @@ export interface ShellHost {
   onNew?(): void; onOpen?(): void; onSave?(): void; onSaveAs?(): void;
   onUndo?(): void; onRedo?(): void;
   onToggleTheme?(): void; onResetViewPrefs?(): void;
+  /** Changement d'échelle d'interface (zoom global, taille du texte). */
+  onUiScale?(value: number): void;
   onRenameDoc?(name: string): void;
-  /** Bascule de la source de données ("local" | "api"). */
+  /** Bascule de la source de données ("local" | "api") — applique au rechargement. */
   onDataSource?(value: string): void;
+  /** Changement de l'URL de base de l'API (mode API) — applique au rechargement. */
+  onApiBaseUrl?(value: string): void;
+  /** Changement de l'URL de connexion SSO (bouton « Connexion » du welcome). */
+  onLoginUrl?(value: string): void;
   /** Bascule du mode d'accès FS ("file" | "directory"). */
   onFileAccessMode?(value: string): void;
   /** Ouverture en FORÇANT un mode d'accès ("file" | "directory") — depuis l'écran d'accueil. */
@@ -46,6 +52,10 @@ export interface ShellHost {
   onAutosaveInterval?(seconds: number): void;
   /** Réouverture du dernier fichier (raccroche au handle FS — geste utilisateur). */
   onReopenLast?(): void;
+  /** Export du document en JSON autonome (téléchargement) — tous modes. */
+  onExportJson?(): void;
+  /** Export en VISUALISEUR autonome (HTML lecture seule, document embarqué). */
+  onExportStandalone?(): void;
 }
 
 /** Champs de la barre de statut. */
@@ -71,6 +81,8 @@ interface ViewEntry { def: ShellView; section: HTMLElement; header: HTMLElement;
    ============================================================================= */
 export class Shell {
   private tabsEl: HTMLElement;
+  private tabsDdEl: HTMLElement | null = null;        // menu déroulant des onglets (responsive)
+  private tabsDdLabelEl: HTMLElement | null = null;   // libellé de l'onglet actif dans le déclencheur du menu
   private mainEl: HTMLElement;
   private actionsEl: HTMLElement;
   private docNameEl: HTMLInputElement;
@@ -78,9 +90,14 @@ export class Shell {
   private redoBtn!: HTMLButtonElement;
   private saveBtn!: HTMLButtonElement;
   private saveDot!: HTMLElement;
-  private dataSourceSel!: HTMLSelectElement;
+  private dataSourceSwitch!: HTMLInputElement;     // toggle slider Local ⟷ API (coché = API)
+  private apiUrlInput!: HTMLInputElement;          // URL de base de l'API (mode API)
+  private apiUrlRow!: HTMLElement;                 // ligne URL (masquée en mode Local)
+  private apiLoginInput!: HTMLInputElement;        // URL de connexion SSO (bouton « Connexion » du welcome)
+  private apiLoginRow!: HTMLElement;
   private fileAccessSel!: HTMLSelectElement;
   private debugLogChk!: HTMLInputElement;
+  private uiScaleSel!: HTMLSelectElement;          // échelle d'interface (taille du texte)
   private newBtn!: HTMLButtonElement;             // « Nouveau » (fichier ou document serveur)
   private openBtn!: HTMLButtonElement;            // « Ouvrir » (fichier ou sélecteur de documents)
   private fileActionsEl!: HTMLElement;            // Enregistrer/Enregistrer-sous (masqués en mode API)
@@ -97,8 +114,10 @@ export class Shell {
   private welcomeAuthEl!: HTMLElement;            // bloc « accès refusé / non connecté » (mode API)
   private welcomeAuthMsg!: HTMLElement;
   private welcomeAuthBtn!: HTMLButtonElement;
+  private welcomeLoginBtn!: HTMLButtonElement;     // bouton « Connexion » (SSO) — visible si non connecté + URL configurée
   private welcomeNormalEls: HTMLElement[] = [];   // contenu « fichier » du welcome (masqué en accès refusé)
   private statusEls: Record<string, HTMLElement> = {};
+  private statusbarEl!: HTMLElement;              // barre de statut (masquée en mode API — inutile)
   private views = new Map<string, ViewEntry>();
   private order: string[] = [];
   private countBadges: Array<{ name: string; el: HTMLElement }> = [];
@@ -152,6 +171,7 @@ export class Shell {
 
     // ---- STATUSBAR ----
     const statusbar = document.createElement("div"); statusbar.className = "statusbar";
+    this.statusbarEl = statusbar;
     const stat = (html: string) => { const d = document.createElement("div"); d.className = "status-stat"; d.innerHTML = html; statusbar.appendChild(d); return d; };
     this.saveDot = document.createElement("span"); this.saveDot.className = "save-state-icon mem";
     const sd = document.createElement("div"); sd.className = "status-stat"; sd.appendChild(this.saveDot); statusbar.appendChild(sd);
@@ -165,6 +185,10 @@ export class Shell {
 
     root.append(topbar, statusbar, main, this.buildWelcome());
     this.tabsEl = tabs; this.mainEl = main; this.actionsEl = actions; this.docNameEl = docName;
+    // fermeture du menu déroulant d'onglets au clic à l'extérieur (un seul écouteur, lit le champ courant)
+    document.addEventListener("click", (e) => { if (this.tabsDdEl && !this.tabsDdEl.contains(e.target as Node)) this.tabsDdEl.classList.remove("open"); });
+    // navigation par l'URL (#nom) : back/forward du navigateur ou hash édité → bascule d'onglet (si ≠ courant).
+    window.addEventListener("hashchange", () => { const v = decodeURIComponent(location.hash.replace(/^#/, "")); if (v && this.views.has(v) && v !== this.current) this.switchView(v); });
   }
 
   private buildSettingsMenu(): HTMLElement {
@@ -174,17 +198,31 @@ export class Shell {
     const pop = document.createElement("div"); pop.className = "settings-popover"; pop.setAttribute("role", "menu");
     const section = (title: string) => { const s = document.createElement("div"); s.className = "settings-section"; const t = document.createElement("div"); t.className = "settings-section-title"; t.textContent = title; s.appendChild(t); pop.appendChild(s); return s; };
 
-    // -- Source de données (Local / API désactivé) --
+    // -- Source de données : toggle SLIDER Local ⟷ API (+ URL d'API en mode API) --
     const src = section("Source de données");
-    const srcRow = document.createElement("div"); srcRow.className = "settings-row";
-    const srcLbl = document.createElement("label"); srcLbl.className = "settings-row-label"; srcLbl.textContent = "Mode";
-    this.dataSourceSel = document.createElement("select"); this.dataSourceSel.className = "settings-row-select";
-    const oLocal = document.createElement("option"); oLocal.value = "local"; oLocal.textContent = "Local (session)";
-    const oApi = document.createElement("option"); oApi.value = "api"; oApi.textContent = "API (serveur) — bientôt"; oApi.disabled = true;
-    this.dataSourceSel.append(oLocal, oApi);
-    this.dataSourceSel.onchange = () => this.host.onDataSource?.(this.dataSourceSel.value);
-    srcRow.append(srcLbl, this.dataSourceSel); src.appendChild(srcRow);
-    const srcNote = document.createElement("div"); srcNote.className = "settings-row-note"; srcNote.textContent = "Local : les données vivent dans le navigateur (session), liables à un fichier JSON sur disque. API : synchronisation serveur — pas encore disponible."; src.appendChild(srcNote);
+    const srcRow = document.createElement("div"); srcRow.className = "mode-switch-row";
+    const lblLocal = document.createElement("span"); lblLocal.className = "mode-switch-side"; lblLocal.textContent = "Local";
+    const sw = document.createElement("label"); sw.className = "mode-switch";
+    this.dataSourceSwitch = document.createElement("input"); this.dataSourceSwitch.type = "checkbox";
+    this.dataSourceSwitch.onchange = () => { this.updateApiUrlVisibility(); this.host.onDataSource?.(this.dataSourceSwitch.checked ? "api" : "local"); };
+    const track = document.createElement("span"); track.className = "mode-switch-track"; track.setAttribute("aria-hidden", "true");
+    sw.append(this.dataSourceSwitch, track);
+    const lblApi = document.createElement("span"); lblApi.className = "mode-switch-side"; lblApi.textContent = "API";
+    srcRow.append(lblLocal, sw, lblApi); src.appendChild(srcRow);
+    // ligne URL d'API (visible en mode API uniquement)
+    this.apiUrlRow = document.createElement("div"); this.apiUrlRow.className = "settings-row"; this.apiUrlRow.style.marginTop = "10px";
+    const urlLbl = document.createElement("label"); urlLbl.className = "settings-row-label"; urlLbl.textContent = "URL de l'API";
+    this.apiUrlInput = document.createElement("input"); this.apiUrlInput.type = "text"; this.apiUrlInput.className = "settings-row-select"; this.apiUrlInput.placeholder = "/api"; this.apiUrlInput.spellcheck = false;
+    this.apiUrlInput.onchange = () => this.host.onApiBaseUrl?.(this.apiUrlInput.value);
+    this.apiUrlRow.append(urlLbl, this.apiUrlInput); src.appendChild(this.apiUrlRow);
+    // ligne URL de CONNEXION (SSO) — utilisée pour le bouton « Connexion » de l'écran d'accueil (non connecté)
+    this.apiLoginRow = document.createElement("div"); this.apiLoginRow.className = "settings-row"; this.apiLoginRow.style.marginTop = "10px";
+    const loginLbl = document.createElement("label"); loginLbl.className = "settings-row-label"; loginLbl.textContent = "URL de connexion";
+    this.apiLoginInput = document.createElement("input"); this.apiLoginInput.type = "text"; this.apiLoginInput.className = "settings-row-select"; this.apiLoginInput.placeholder = "https://sso…/login?back=${clbkUrl}"; this.apiLoginInput.spellcheck = false;
+    this.apiLoginInput.onchange = () => this.host.onLoginUrl?.(this.apiLoginInput.value);
+    this.apiLoginRow.append(loginLbl, this.apiLoginInput); src.appendChild(this.apiLoginRow);
+    const loginNote = document.createElement("div"); loginNote.className = "settings-row-note"; loginNote.textContent = "URL de connexion SSO affichée à l'écran d'accueil quand l'utilisateur n'est pas authentifié. La macro ${clbkUrl} est remplacée par l'URL courante (encodée) pour le retour après connexion."; src.appendChild(loginNote);
+    const srcNote = document.createElement("div"); srcNote.className = "settings-row-note"; srcNote.textContent = "Local : les données vivent dans le navigateur (session), liables à un fichier JSON sur disque. API : synchronisation avec un serveur REST. Changer de mode (ou d'URL) recharge l'application."; src.appendChild(srcNote);
 
     // -- Accès aux fichiers (par fichier / par dossier) --
     const fa = section("Accès aux fichiers");
@@ -215,14 +253,29 @@ export class Shell {
     this.autosaveStatusEl = document.createElement("div"); this.autosaveStatusEl.className = "settings-status-line"; as.appendChild(this.autosaveStatusEl);
     this.fileOnlySections.push(fa, as);   // sections propres au mode fichier → masquées en mode API
 
-    // -- Apparence --
-    const app = section("Apparence");
+    // -- Apparence -- (seule section « cosmétique » conservée en mode visualiseur ; cf. body.viewer-mode)
+    const app = section("Apparence"); app.classList.add("settings-cosmetic");
     const themeBtn = document.createElement("button"); themeBtn.type = "button"; themeBtn.className = "btn btn-ghost btn-sm"; themeBtn.style.width = "100%"; themeBtn.textContent = "Basculer le thème clair / sombre";
     themeBtn.onclick = () => this.host.onToggleTheme?.(); app.appendChild(themeBtn);
+    // -- Taille du texte (échelle d'interface) : compense les mobiles qui grossissent les polices --
+    const fsRow = document.createElement("div"); fsRow.className = "settings-row"; fsRow.style.marginTop = "10px";
+    const fsLbl = document.createElement("label"); fsLbl.className = "settings-row-label"; fsLbl.textContent = "Taille du texte";
+    this.uiScaleSel = document.createElement("select"); this.uiScaleSel.className = "settings-row-select";
+    Prefs.UI_SCALE_OPTIONS.forEach((o) => { const op = document.createElement("option"); op.value = String(o.value); op.textContent = o.label; this.uiScaleSel.appendChild(op); });
+    this.uiScaleSel.onchange = () => this.host.onUiScale?.(parseFloat(this.uiScaleSel.value));
+    fsRow.append(fsLbl, this.uiScaleSel); app.appendChild(fsRow);
     // -- Affichage 3D --
     const v3d = section("Affichage 3D");
     const resetBtn = document.createElement("button"); resetBtn.type = "button"; resetBtn.className = "btn btn-ghost btn-sm"; resetBtn.style.width = "100%"; resetBtn.textContent = "Réinitialiser les préférences d'affichage";
     resetBtn.onclick = () => this.host.onResetViewPrefs?.(); v3d.appendChild(resetBtn);
+    // -- Export (tous modes, y compris API) : JSON autonome + visualiseur HTML hors-ligne --
+    const exp = section("Export");
+    const expJsonBtn = document.createElement("button"); expJsonBtn.type = "button"; expJsonBtn.className = "btn btn-ghost btn-sm"; expJsonBtn.style.width = "100%"; expJsonBtn.textContent = "Exporter le document (JSON)";
+    expJsonBtn.onclick = () => this.host.onExportJson?.();
+    const expHtmlBtn = document.createElement("button"); expHtmlBtn.type = "button"; expHtmlBtn.className = "btn btn-ghost btn-sm"; expHtmlBtn.style.cssText = "width:100%;margin-top:8px"; expHtmlBtn.textContent = "Exporter en visualiseur autonome (HTML)";
+    expHtmlBtn.onclick = () => this.host.onExportStandalone?.();
+    exp.append(expJsonBtn, expHtmlBtn);
+    const expNote = document.createElement("div"); expNote.className = "settings-row-note"; expNote.textContent = "JSON : document complet (images incluses), réimportable. Visualiseur autonome : un fichier .html LECTURE SEULE consultable hors-ligne (sans serveur)."; exp.appendChild(expNote);
     // -- Débogage --
     const dbg = section("Débogage");
     const dbgRow = document.createElement("div"); dbgRow.className = "settings-toggle-row";
@@ -261,8 +314,10 @@ export class Shell {
     // bloc « auth » (mode API) : message d'accès refusé / non connecté + bouton Réessayer — masqué par défaut
     this.welcomeAuthEl = document.createElement("div"); this.welcomeAuthEl.className = "welcome-auth"; this.welcomeAuthEl.style.display = "none";
     this.welcomeAuthMsg = document.createElement("p"); this.welcomeAuthMsg.className = "welcome-auth-msg";
-    this.welcomeAuthBtn = document.createElement("button"); this.welcomeAuthBtn.type = "button"; this.welcomeAuthBtn.className = "btn btn-primary welcome-btn"; this.welcomeAuthBtn.textContent = "Réessayer";
-    this.welcomeAuthEl.append(this.welcomeAuthMsg, this.welcomeAuthBtn);
+    // bouton « Connexion » (SSO) — primaire, affiché si non connecté + URL configurée (cf. showAccessDenied)
+    this.welcomeLoginBtn = document.createElement("button"); this.welcomeLoginBtn.type = "button"; this.welcomeLoginBtn.className = "btn btn-primary welcome-btn"; this.welcomeLoginBtn.textContent = "Connexion"; this.welcomeLoginBtn.style.display = "none";
+    this.welcomeAuthBtn = document.createElement("button"); this.welcomeAuthBtn.type = "button"; this.welcomeAuthBtn.className = "btn welcome-btn"; this.welcomeAuthBtn.textContent = "Réessayer";
+    this.welcomeAuthEl.append(this.welcomeAuthMsg, this.welcomeLoginBtn, this.welcomeAuthBtn);
     this.welcomeNormalEls = [this.welcomeModeEl, acts, hint];   // contenu « fichier » à masquer en cas d'accès refusé
     card.append(logo, title, this.welcomeModeEl, acts, hint, this.welcomeAuthEl);
     screen.appendChild(card);
@@ -270,13 +325,20 @@ export class Shell {
     return screen;
   }
 
-  /** Affiche l'écran d'accueil en état « accès refusé / non connecté » (mode API), avec un bouton Réessayer. */
-  showAccessDenied(opts: { connected: boolean; user?: string; onRetry: () => void }): void {
+  /** Affiche l'écran d'accueil en état « accès refusé / non connecté » (mode API). Bouton « Connexion » (si NON
+      connecté ET une `loginUrl` est configurée) + bouton « Réessayer ». Dans `loginUrl`, la macro `${clbkUrl}`
+      est remplacée par l'URL COURANTE encodée (retour après authentification SSO). */
+  showAccessDenied(opts: { connected: boolean; user?: string; onRetry: () => void; loginUrl?: string }): void {
     this.welcomeNormalEls.forEach((el) => { if (el) el.style.display = "none"; });
     this.welcomeAuthEl.style.display = "";
     this.welcomeAuthMsg.textContent = opts.connected
       ? "Connecté en tant que « " + (opts.user || "?") + " », mais ce compte n'a pas les droits requis (SUPER_ADMIN). Contactez un administrateur."
       : "Vous n'êtes pas authentifié auprès du SSO. Connectez-vous, puis réessayez.";
+    const loginUrl = (opts.loginUrl || "").trim();
+    const showLogin = !opts.connected && !!loginUrl;
+    this.welcomeLoginBtn.style.display = showLogin ? "" : "none";
+    this.welcomeAuthBtn.classList.toggle("btn-primary", !showLogin);   // « Réessayer » devient primaire s'il n'y a pas de Connexion
+    if (showLogin) this.welcomeLoginBtn.onclick = () => { window.location.href = loginUrl.split("${clbkUrl}").join(encodeURIComponent(window.location.href)); };
     this.welcomeAuthBtn.onclick = () => opts.onRetry();
     this.welcomeEl.style.display = "";
     document.body.classList.add("welcome-active");
@@ -336,9 +398,34 @@ export class Shell {
       btn.onclick = () => this.switchView(nm);
       v.tabBtn = btn; this.tabsEl.appendChild(btn);
     });
+    this.buildTabsDropdown();   // version « menu déroulant » des mêmes onglets (affichée en responsive)
     // en-têtes de vue
     this.views.forEach((v) => this.buildHeader(v));
     this.refreshCounts();
+  }
+
+  /** Menu déroulant CUSTOM (pas un <select> natif) reprenant les onglets principaux — affiché à la place de la
+      barre d'onglets en responsive (gain de place, accessible au pouce). Synchronisé par switchView/refreshCounts. */
+  private buildTabsDropdown(): void {
+    if (this.tabsDdEl) { this.tabsDdEl.remove(); this.tabsDdEl = null; this.tabsDdLabelEl = null; }
+    const dd = document.createElement("div"); dd.className = "tabs-dd";
+    const trigger = document.createElement("button"); trigger.type = "button"; trigger.className = "tabs-dd-trigger"; trigger.setAttribute("aria-haspopup", "menu");
+    const lbl = document.createElement("span"); lbl.className = "tabs-dd-label"; lbl.textContent = "Menu";
+    const caret = document.createElement("span"); caret.className = "tabs-dd-caret"; caret.textContent = "▾";
+    trigger.append(lbl, caret);
+    const menu = document.createElement("div"); menu.className = "tabs-dd-menu"; menu.setAttribute("role", "menu");
+    this.order.forEach((nm) => {
+      const v = this.views.get(nm)!; if (v.def.kind === "secondary") return;
+      const it = document.createElement("button"); it.type = "button"; it.className = "tabs-dd-item"; it.dataset.view = nm; it.setAttribute("role", "menuitem");
+      it.appendChild(document.createTextNode(v.def.label + " "));
+      if (v.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; it.appendChild(badge); this.countBadges.push({ name: nm, el: badge }); }
+      it.onclick = () => { dd.classList.remove("open"); this.switchView(nm); };
+      menu.appendChild(it);
+    });
+    trigger.onclick = (e) => { e.stopPropagation(); dd.classList.toggle("open"); };
+    dd.append(trigger, menu);
+    this.tabsEl.insertAdjacentElement("afterend", dd);
+    this.tabsDdEl = dd; this.tabsDdLabelEl = lbl;
   }
 
   private buildHeader(v: ViewEntry): void {
@@ -348,7 +435,8 @@ export class Shell {
     const title = document.createElement("div"); title.className = "view-title";
     const caret = document.createElement("span"); caret.textContent = "▸"; title.append(caret, document.createTextNode(" " + (def.title || def.label)));
     left.appendChild(title);
-    if (def.subtitle) { const sub = document.createElement("div"); sub.className = "view-sub"; sub.textContent = def.subtitle; left.appendChild(sub); }
+    // Légendes d'onglet (sous-titres) RETIRÉES de l'UI : elles surchargeaient l'en-tête. Le `subtitle` reste
+    // disponible dans la définition (documentation des vues) mais n'est plus affiché sous le titre.
     const acts = document.createElement("div"); acts.className = "view-actions";
     // bouton « ← retour » (sous-vue → parent)
     if (def.parent && this.views.has(def.parent)) {
@@ -381,9 +469,19 @@ export class Shell {
       if (v.tabBtn) v.tabBtn.classList.toggle("active", n === activeTab);
       v.section.classList.toggle("active", n === name);
     });
+    // synchronise le menu déroulant (responsive) : libellé du déclencheur + item actif
+    const av = this.views.get(activeTab);
+    if (this.tabsDdLabelEl && av) this.tabsDdLabelEl.textContent = av.def.label;
+    if (this.tabsDdEl) this.tabsDdEl.querySelectorAll(".tabs-dd-item").forEach((it) => it.classList.toggle("active", (it as HTMLElement).dataset.view === activeTab));
     if (active.def.onShow) { try { active.def.onShow(active.body); } catch (e) { console.error(e); } }
     this.refreshCounts();
+    // reflète l'onglet ACTIF dans l'URL (#nom) → bookmarkable. Le listener hashchange (constructeur) ne re-switche
+    // que si la cible DIFFÈRE de l'onglet courant → pas de boucle ni de double rendu.
+    try { if (typeof location !== "undefined" && decodeURIComponent(location.hash.replace(/^#/, "")) !== name) location.hash = "#" + name; } catch (_) { /* noop */ }
   }
+
+  /** Une vue de ce nom est-elle enregistrée ? (pour restaurer l'onglet depuis l'URL au boot). */
+  hasView(name: string): boolean { return this.views.has(name); }
 
   /** Re-rend la vue active (cohérence inter-vues sur mutation du modèle). */
   refreshActive(): void {
@@ -415,9 +513,17 @@ export class Shell {
     // (dirty ou dirty-on), comme la référence — pour signaler qu'un save est en attente même avec auto-save actif.
     if (this.saveBtn) this.saveBtn.classList.toggle("has-unsaved", state === "dirty" || state === "dirty-on");
   }
-  setDataSource(value: string): void { this.dataSourceSel.value = value; }
+  setDataSource(value: string): void { if (this.dataSourceSwitch) this.dataSourceSwitch.checked = (value === "api"); this.updateApiUrlVisibility(); }
+  /** Reflète l'URL de l'API dans le champ des réglages. */
+  setApiBaseUrl(url: string): void { if (this.apiUrlInput) this.apiUrlInput.value = url || ""; }
+  /** Reflète l'URL de connexion SSO dans le champ des réglages. */
+  setLoginUrl(url: string): void { if (this.apiLoginInput) this.apiLoginInput.value = url || ""; }
+  /** Affiche les lignes API (URL + connexion) uniquement quand le mode API est sélectionné. */
+  private updateApiUrlVisibility(): void { const on = (this.dataSourceSwitch && this.dataSourceSwitch.checked) ? "" : "none"; if (this.apiUrlRow) this.apiUrlRow.style.display = on; if (this.apiLoginRow) this.apiLoginRow.style.display = on; }
   setFileAccessMode(value: string): void { this.fileAccessSel.value = value; }
   setDebugLog(on: boolean): void { this.debugLogChk.checked = on; }
+  /** Reflète l'échelle d'interface dans le sélecteur des réglages (sans déclencher onUiScale). */
+  setUiScale(v: number): void { if (this.uiScaleSel) this.uiScaleSel.value = String(v); }
   /** Pastille utilisateur (mode API). `user` = objet SSO (login/nom/prénom/eMail…) ; null = non connecté ; undefined = masquer. */
   setUser(user: { name?: string; prenom?: string; nom?: string; login?: string; email?: string; eMail?: string } | null | undefined): void {
     if (!this.userChip) return;
@@ -432,11 +538,21 @@ export class Shell {
   }
   /** Mode API : masque Enregistrer/Enregistrer-sous + réglages fichier ; Nouveau/Ouvrir gèrent les documents serveur. */
   setRestMode(on: boolean): void {
+    // Barre de statut MASQUÉE en mode API : ses champs (fichier, source, dernière sauvegarde) n'ont pas de sens
+    // côté serveur (sauvegarde continue, pas de fichier local) → on libère l'espace vertical. Elle n'est plus
+    // peuplée non plus (cf. refreshChrome dans main.ts, qui saute setStatus en mode API).
+    if (this.statusbarEl) this.statusbarEl.style.display = on ? "none" : "";
     if (this.fileActionsEl) this.fileActionsEl.style.display = on ? "none" : "contents";
+    // Annuler / Rétablir MASQUÉS en mode API : l'undo client n'est pas supporté (le serveur fait autorité,
+    // écritures immédiates) → des boutons en permanence désactivés n'apportent rien. À réafficher si l'undo
+    // serveur est implémenté un jour.
+    if (this.undoBtn) this.undoBtn.style.display = on ? "none" : "";
+    if (this.redoBtn) this.redoBtn.style.display = on ? "none" : "";
     this.fileOnlySections.forEach((s) => { if (s) s.style.display = on ? "none" : ""; });
     if (this.newBtn) this.newBtn.title = on ? "Nouveau document (Ctrl+N)" : "Nouveau document (Ctrl+N)";
     if (this.openBtn) this.openBtn.title = on ? "Documents… (ouvrir / créer / supprimer)" : "Ouvrir un fichier (Ctrl+O)";
-    if (on) this.dataSourceSel.value = "api";
+    if (on && this.dataSourceSwitch) this.dataSourceSwitch.checked = true;
+    this.updateApiUrlVisibility();
   }
   /** Reflète l'état auto-save dans le popover (case + fréquence). */
   setAutosave(on: boolean, interval: number): void { this.autosaveChk.checked = on; this.autosaveIntervalSel.value = String(interval); }

@@ -132,9 +132,12 @@ export class EquipmentForms extends FormBase {
     // façade : bouton éditer + aperçus des faces avec contenu
     const dF = document.createElement("div"); dF.className = "section-divider"; dF.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px";
     const dFlabel = document.createElement("span"); dFlabel.textContent = "Façade"; dF.appendChild(dFlabel);
-    const editFaceBtn = document.createElement("button"); editFaceBtn.type = "button"; editFaceBtn.className = "btn btn-ghost btn-sm"; editFaceBtn.textContent = "Éditer la façade";
-    editFaceBtn.onclick = () => this.faceEditor(store, host, eq.id, { onApply: undefined });
-    dF.appendChild(editFaceBtn); root.appendChild(dF);
+    if (!this.isViewer()) {   // viewer (lecture seule) : pas d'édition de façade
+      const editFaceBtn = document.createElement("button"); editFaceBtn.type = "button"; editFaceBtn.className = "btn btn-ghost btn-sm"; editFaceBtn.textContent = "Éditer la façade";
+      editFaceBtn.onclick = () => this.faceEditor(store, host, eq.id, { onApply: undefined });
+      dF.appendChild(editFaceBtn);
+    }
+    root.appendChild(dF);
     const faces = eq.dim_mode === "free" ? EQUIP_FACE_IDS.slice() : ["front", "rear"];
     const previews = faces.map((f) => ({ f, pv: this.facePreview(store, eq, f) })).filter((x) => x.pv);
     if (previews.length) previews.forEach(({ f, pv }) => { const cap = document.createElement("div"); cap.className = "form-hint"; cap.style.margin = "2px 0 4px"; cap.textContent = "Face " + EquipFaces.label(f).toLowerCase(); root.appendChild(cap); root.appendChild(pv!); });
@@ -181,9 +184,12 @@ export class EquipmentForms extends FormBase {
     // Modifier → formulaire d'édition (remplace la fiche par la modale d'édition)
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
     if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.textContent = "📍 Localiser en 3D"; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); actions.appendChild(locBtn); }
-    const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = "Modifier";
-    editBtn.onclick = () => this.equipment(store, host, eq.id, onChanged);
-    actions.appendChild(editBtn); root.appendChild(actions);
+    if (!this.isViewer()) {   // viewer : pas de bouton « Modifier »
+      const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = "Modifier";
+      editBtn.onclick = () => this.equipment(store, host, eq.id, onChanged);
+      actions.appendChild(editBtn);
+    }
+    root.appendChild(actions);
 
     host.openModal({ title: "Détail de l'équipement", subtitle: Html.escape(eq.name || ""), body: root, hideFooter: true, wide: true });
   }

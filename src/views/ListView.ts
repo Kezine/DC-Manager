@@ -3,6 +3,7 @@ import { Html } from "../core/Html";
 import { Text } from "../core/Text";
 import { Sort } from "../core/Sort";
 import { MultiSelect } from "../ui/MultiSelect";
+import { RowMenu } from "../ui/RowMenu";
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from "../data/config";
 
 export interface FilterOption { id: string; label: string; color?: string | null; }
@@ -13,6 +14,9 @@ export interface ListColumn {
   sort?: (o: any) => any;       // présent ⇒ colonne triable
   sortKey?: string;
   filter?: { label?: string; options: () => FilterOption[]; valueOf: (o: any) => any };
+  /** Colonne ESSENTIELLE : seule conservée en mode « Compact » (cf. ListView). À défaut de toute colonne
+      essentielle pour une collection, le mode compact retombe sur les 3 premières colonnes. */
+  essential?: boolean;
 }
 export interface ListActions { view?: boolean; edit?: boolean; clone?: boolean; del?: boolean; locate?: boolean; }
 export interface ListOptions {
@@ -53,6 +57,7 @@ export class ListView {
   private sortKey: string;
   private sortDir: "asc" | "desc";
   private filterState: Record<string, Set<string>> = {};
+  private _compact = false;       // mode compact : n'affiche que les colonnes essentielles (auto sur petit écran)
   private _stateKey: string;
   private _scaffold = false;
   private _toolbarSig: string | null = null;
@@ -75,7 +80,16 @@ export class ListView {
     this.sortKey = (opts.defaultSort && opts.defaultSort.key) || "__created__";
     this.sortDir = (opts.defaultSort && opts.defaultSort.dir) || "asc";
     this._stateKey = "netmap.list:" + (opts.stateKey || opts.collection || "list");
+    // défaut COMPACT sur petit écran (mobile/tablette) ; surchargé par le choix utilisateur persisté (_loadState).
+    this._compact = (typeof window !== "undefined" && window.innerWidth < 760);
     this._loadState();
+  }
+
+  /** Colonnes AFFICHÉES : toutes en mode normal ; en compact, les colonnes `essential` (repli : 3 premières). */
+  private _visibleColumns(): ListColumn[] {
+    if (!this._compact) return this.columns;
+    const essential = this.columns.filter((c) => c.essential);
+    return essential.length ? essential : this.columns.slice(0, 3);
   }
 
   private _loadState(): void {
@@ -85,6 +99,7 @@ export class ListView {
       if (s.sortKey && this._sortOptions().some((o) => o.key === s.sortKey)) this.sortKey = s.sortKey;
       if (s.sortDir === "asc" || s.sortDir === "desc") this.sortDir = s.sortDir;
       if (typeof s.query === "string") this.query = s.query;
+      if (typeof s.compact === "boolean") this._compact = s.compact;   // choix utilisateur prioritaire sur le défaut écran
       this.filterState = {};
       if (s.filters && typeof s.filters === "object") {
         Object.keys(s.filters).forEach((k) => { const arr = s.filters[k]; if (Array.isArray(arr) && arr.length) this.filterState[k] = new Set(arr.map(String)); });
@@ -95,7 +110,7 @@ export class ListView {
     try {
       const filters: Record<string, string[]> = {};
       Object.keys(this.filterState).forEach((k) => { const set = this.filterState[k]; if (set && set.size) filters[k] = [...set]; });
-      sessionStorage.setItem(this._stateKey, JSON.stringify({ sortKey: this.sortKey, sortDir: this.sortDir, query: this.query, filters }));
+      sessionStorage.setItem(this._stateKey, JSON.stringify({ sortKey: this.sortKey, sortDir: this.sortDir, query: this.query, filters, compact: this._compact }));
     } catch (_) { /* non bloquant */ }
   }
 
@@ -174,6 +189,12 @@ export class ListView {
     setDir();
     dirBtn.onclick = () => { this.sortDir = this.sortDir === "desc" ? "asc" : "desc"; setDir(); this.page = 1; this.render(); };
     sg.appendChild(lbl); sg.appendChild(sortSel); sg.appendChild(dirBtn);
+    // bascule COMPACT (colonnes essentielles seulement). Persiste son état ; persiste à travers les re-rendus du body.
+    const compactBtn = document.createElement("button"); compactBtn.type = "button"; compactBtn.className = "lt-compact btn btn-ghost btn-sm";
+    const setC = () => { compactBtn.textContent = "Compact"; compactBtn.classList.toggle("active", this._compact); compactBtn.title = this._compact ? "Afficher toutes les colonnes" : "N'afficher que les colonnes essentielles"; };
+    setC();
+    compactBtn.onclick = () => { this._compact = !this._compact; setC(); this.page = 1; this.render(); };
+    sg.appendChild(compactBtn);
     this._toolbarEl.appendChild(sg);
     if (filterCols.length) {
       const fg = document.createElement("div"); fg.className = "lt-filters";
@@ -194,31 +215,44 @@ export class ListView {
     }
   }
 
+  /** Actions de ligne RÉDUITES à 3 boutons : Détails (ⓘ) · Modifier (✎) · « plus d'actions » (⋮ → menu overflow
+      regroupant les actions secondaires : localiser, cloner, supprimer). Le ⋮ n'apparaît que s'il y a au moins une
+      action secondaire active. Inspiré du listing des dépenses de l'app Compta. */
   private _rowActions(id: string): string {
     const a = this.actions;
-    const btn = (act: string, title: string, txt: string, danger = false) => `<button class="row-btn${danger ? " danger" : ""}" data-act="${act}" title="${title}">${txt}</button>`;
+    const btn = (act: string, title: string, txt: string) => `<button class="row-btn" data-act="${act}" title="${title}">${txt}</button>`;
     let html = `<span data-id="${id}">`;
-    if (a.locate) html += btn("locate", "Localiser en 3D", "📍");
     if (a.view) html += btn("view", "Détails", "ⓘ");
     if (a.edit) html += btn("edit", "Modifier", "✎");
-    if (a.clone) html += btn("clone", "Cloner", "⧉");
-    if (a.del) html += btn("del", "Supprimer", "×", true);
+    if (a.locate || a.clone || a.del) html += `<button class="row-btn row-overflow" data-act="__more__" title="Plus d'actions" aria-haspopup="menu" aria-expanded="false">⋮</button>`;
     return html + "</span>";
   }
 
+  /** Ouvre le menu « plus d'actions » (overflow) d'une ligne : actions secondaires actives, déléguées à onAction. */
+  private _openRowMenu(trigger: HTMLElement, id: string): void {
+    const a = this.actions;
+    const items: { label: string; icon?: string; danger?: boolean; onClick: () => void }[] = [];
+    if (a.locate) items.push({ label: "Localiser en 3D", icon: "📍", onClick: () => this.onAction && this.onAction("locate", id) });
+    if (a.clone) items.push({ label: "Cloner", icon: "⧉", onClick: () => this.onAction && this.onAction("clone", id) });
+    if (a.del) items.push({ label: "Supprimer", icon: "×", danger: true, onClick: () => this.onAction && this.onAction("del", id) });
+    RowMenu.open(trigger, items);
+  }
+
   private _paintBody(rows: any[], total: number, pages: number, page: number): void {
-    const head = this.columns.map((c) => {
+    this._bodyEl.classList.toggle("compact", this._compact);   // cellules plus denses en mode compact (CSS)
+    const cols = this._visibleColumns();   // mode compact : sous-ensemble essentiel
+    const head = cols.map((c) => {
       if (!c.sort) return `<th>${Html.escape(c.head)}</th>`;
       const key = this._colKey(c); const active = this.sortKey === key;
       const ind = active ? `<span class="sort-ind"> ${this.sortDir === "desc" ? "▼" : "▲"}</span>` : "";
       return `<th class="sortable" data-sortkey="${key}">${Html.escape(c.head)}${ind}</th>`;
-    }).join("") + `<th style="text-align:right;">Actions</th>`;
+    }).join("") + `<th>Actions</th>`;
     let bodyHtml: string;
     if (rows.length === 0) {
-      bodyHtml = `<tr class="empty-row"><td colspan="${this.columns.length + 1}">${Html.escape(this.emptyText)}</td></tr>`;
+      bodyHtml = `<tr class="empty-row"><td colspan="${cols.length + 1}">${Html.escape(this.emptyText)}</td></tr>`;
     } else {
       bodyHtml = rows.map((o) => {
-        const cells = this.columns.map((c) => `<td class="${c.cls || ""}">${c.render(o)}</td>`).join("");
+        const cells = cols.map((c) => `<td class="${c.cls || ""}">${c.render(o)}</td>`).join("");
         return `<tr>${cells}<td class="cell-actions">${this._rowActions(o.id)}</td></tr>`;
       }).join("");
     }
@@ -256,11 +290,13 @@ export class ListView {
     if (sel) sel.onchange = () => { this.pageSize = parseInt(sel.value, 10); this.page = 1; this.render(); };
     // délégation des actions de ligne → onAction(act, id)
     this._bodyEl.querySelectorAll(".row-btn").forEach((b) => {
-      (b as HTMLElement).onclick = () => {
+      (b as HTMLElement).onclick = (ev) => {
         const span = (b as HTMLElement).closest("[data-id]") as HTMLElement | null;
         const id = span ? (span as any).dataset.id : null;
         const act = (b as any).dataset.act;
-        if (id && act && this.onAction) this.onAction(act, id);
+        if (!id || !act) return;
+        if (act === "__more__") { ev.stopPropagation(); this._openRowMenu(b as HTMLElement, id); return; }   // ouvre le menu overflow
+        if (this.onAction) this.onAction(act, id);
       };
     });
   }

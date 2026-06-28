@@ -42,8 +42,8 @@ export class DcInteract extends DcPanels {
   protected showCote(text: string, clientX: number, clientY: number): void {
     if (!this.coteEl) { this.coteEl = document.createElement("div"); this.coteEl.className = "dc-cote"; this.stage.appendChild(this.coteEl); }
     this.coteEl.textContent = text; this.coteEl.style.display = "block";
-    const r = this.stage.getBoundingClientRect();
-    this.coteEl.style.left = (clientX - r.left + 14) + "px"; this.coteEl.style.top = (clientY - r.top + 14) + "px";
+    const r = this.stage.getBoundingClientRect(), z = this.uiZoom();   // /z : repère local zoomé du stage (cf. uiZoom)
+    this.coteEl.style.left = ((clientX - r.left + 14) / z) + "px"; this.coteEl.style.top = ((clientY - r.top + 14) / z) + "px";
   }
 
   protected hideCote(): void { if (this.coteEl) this.coteEl.style.display = "none"; }
@@ -55,14 +55,19 @@ export class DcInteract extends DcPanels {
     this.ttEl.innerHTML = html; this.ttEl.style.display = "block"; this.moveTip(ev);
   }
 
+  /** Facteur de zoom CSS effectif de l'interface (`#app { zoom: var(--ui-scale) }`, réglage « Taille du texte »).
+      `clientX`/`getBoundingClientRect()` sont en px ÉCRAN (post-zoom) ; les overlays positionnés DANS le stage le
+      sont dans son repère LOCAL (zoomé) → il faut diviser par ce facteur, sinon décalage proportionnel au zoom. */
+  protected uiZoom(): number { const z = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ui-scale")); return (z && z > 0) ? z : 1; }
+
   protected moveTip(ev: MouseEvent): void {
     if (!this.ttEl) return;
-    const host = this.stage.getBoundingClientRect();
-    let x = ev.clientX - host.left + 14, y = ev.clientY - host.top + 14;
-    const tw = this.ttEl.offsetWidth, th = this.ttEl.offsetHeight;
-    if (x + tw > host.width) x = ev.clientX - host.left - tw - 14;
-    if (y + th > host.height) y = host.height - th - 6;
-    this.ttEl.style.left = Math.max(4, x) + "px"; this.ttEl.style.top = Math.max(4, y) + "px";
+    const host = this.stage.getBoundingClientRect(), z = this.uiZoom();
+    const tt = this.ttEl.getBoundingClientRect();   // taille VISUELLE (déjà zoomée) → cohérente avec host
+    let vx = (ev.clientX - host.left) + 14, vy = (ev.clientY - host.top) + 14;   // décalage VISUEL dans le stage
+    if (vx + tt.width > host.width) vx = (ev.clientX - host.left) - tt.width - 14;
+    if (vy + tt.height > host.height) vy = host.height - tt.height - 6;
+    this.ttEl.style.left = Math.max(4, vx / z) + "px"; this.ttEl.style.top = Math.max(4, vy / z) + "px";   // → repère local
   }
 
   protected hideTip(): void { if (this.ttEl) this.ttEl.style.display = "none"; }
@@ -171,14 +176,14 @@ export class DcInteract extends DcPanels {
       this.showCote(Format.meters(cur.x) + " × " + Format.meters(cur.y), ev.clientX, ev.clientY);
     };
     const up = async () => {
-      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       grp.classList.remove("dragging"); this.hideCote();
       if (!moved) return;   // simple clic = sélection
       const c = this.freePlace ? clampC(cur) : clampC({ x: this.snap(cur.x, dc.cell_mm), y: this.snap(cur.y, dc.cell_mm) });
       if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); this.render(); return; }
       await this.store.update("racks", r.id, { dc_x: c.x, dc_y: c.y }); this.host.setDirty?.(true);
     };
-    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }
 
   protected onEquipPointerDown(ev: MouseEvent, eq: any): void {
@@ -203,14 +208,14 @@ export class DcInteract extends DcPanels {
       this.showCote(Format.meters(cur.x) + " × " + Format.meters(cur.y), e2.clientX, e2.clientY);
     };
     const up = async () => {
-      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       grp.classList.remove("dragging"); this.hideCote();
       if (!moved) return;
       const c = this.freePlace ? clampC(cur) : clampC({ x: this.snap(cur.x, dc.cell_mm), y: this.snap(cur.y, dc.cell_mm) });
       if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); this.render(); return; }
       await this.store.update("equipments", eq.id, { dc_x: c.x, dc_y: c.y }); this.host.setDirty?.(true);
     };
-    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }
 
 
@@ -278,7 +283,7 @@ export class DcInteract extends DcPanels {
 
   protected wireRack(poly: SVGElement, r: any): void {
     this.wireTip(poly, () => this.rackTipHtml(r));
-    this.wireClick(poly, () => { this.hideTip(); this.selRackId = r.id; if (this.host.openRackForm) this.host.openRackForm(r.id); else this.render(); });
+    this.wireClick(poly, () => { this.hideTip(); this.selRackId = r.id; const open = this.host.openRackDetail || this.host.openRackForm; if (open) open(r.id); else this.render(); });
     poly.addEventListener("contextmenu", (e: any) => { this.hideTip(); this.ctxMenu(e, this.rackCtx(r)); });
   }
 
@@ -853,7 +858,7 @@ export class DcInteract extends DcPanels {
       l'équipement localisé est réappliquée à chaque rendu (suit `focusEqId`) ; le cadrage caméra n'est joué qu'une fois. */
   protected applyFocus3D(): void {
     if (!this._three) return;
-    this._three.setFocusEquip(this.focusEqId);
+    this._three.setFocusEquip(this.focusEqId, this.focusPortId);
     if (this._focusTarget) { this._three.focusOn(this._focusTarget.p, this._focusTarget.extent, this._focusTarget.face); this._focusTarget = null; }
   }
 
@@ -922,6 +927,8 @@ export class DcInteract extends DcPanels {
       (shell + champ de recherche). Peuple le champ de recherche avec le libellé de l'objet (cohérence boutons « pin »). */
   locate(kind: "equipment" | "rack" | "cable" | "port" | "room" | "waypoint", id: string): void {
     const label = this.locateLabel(kind, id); if (label) this.searchTerm = label;
+    this.focusPortId = null;   // réinitialisé ; seul locatePort le repositionne
+
     if (kind === "equipment") this.locateEquipment(id);
     else if (kind === "rack") this.locateRack(id);
     else if (kind === "cable") this.locateCable(id);
@@ -1003,8 +1010,9 @@ export class DcInteract extends DcPanels {
     const pt = this.resolver.resolvePort3D(portId, dcId);
     if (!pt) { Notify.toast("Port introuvable en 3D (façade non posée ?)", "err"); return; }
     const e: any = this.store.get("equipments", p.equipment_id);
-    // surbrillance de l'équipement + isolement de sa baie + orientation « en face » ; cadrage serré sur le port.
+    // surbrillance de l'équipement ET du PORT + isolement de sa baie + orientation « en face » ; cadrage serré.
     const face = e ? this.aimAtEquip(e, dcId) : null;
+    this.focusPortId = portId;   // le port lui-même est mis en évidence (même ambre que l'équipement)
     this.focus3DAt(dcId, { x: pt.x, y: pt.y, z: pt.z }, 700, face);
   }
 

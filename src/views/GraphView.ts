@@ -1,6 +1,7 @@
 import type { Store } from "../store";
 import { Dom } from "../ui/Dom";
 import { ContextMenu } from "../ui/ContextMenu";
+import { TouchNav } from "../ui/TouchNav";
 import { MultiSelect } from "../ui/MultiSelect";
 import { FormControls } from "../ui/FormControls";
 import { ColorPalette } from "../ui/ColorPalette";
@@ -793,7 +794,7 @@ export class GraphView {
         g.appendChild(tag);
       }
       this._gById[n.id] = g;
-      g.addEventListener("mousedown", (ev) => this._onNodeMouseDown(ev as MouseEvent, n));
+      g.addEventListener("pointerdown", (ev) => this._onNodeMouseDown(ev as MouseEvent, n));
       g.addEventListener("dblclick", () => this.host.openEquipmentDetail?.(n.id));
       g.addEventListener("contextmenu", (ev) => { ev.preventDefault(); ev.stopPropagation(); this._nodeContextMenu(ev as MouseEvent, n); });
       nodeLayer.appendChild(g);
@@ -807,6 +808,14 @@ export class GraphView {
     });
     svg.addEventListener("wheel", (ev) => this._onWheel(ev), { passive: false });
     svg.addEventListener("contextmenu", (ev) => { if (ev.target === svg) { ev.preventDefault(); this._bgContextMenu(ev); } });
+    // navigation TACTILE : 1 doigt (sur le fond) = pan · 2 doigts = pinch-zoom. Le tap d'1 doigt n'est pas
+    // intercepté → la sélection/édition des nœuds passe par les events souris de compatibilité.
+    TouchNav.attach(svg, {
+      panBy: (dx, dy) => this.panByClient(dx, dy),
+      zoomAt: (f, x, y) => this.zoomAtClient(f, x, y),
+      panStart: () => svg.classList.add("panning"),
+      panEnd: () => svg.classList.remove("panning"),
+    });
 
     this.stage.insertBefore(svg, this.stage.firstChild);
     this._applyTransform();
@@ -837,8 +846,8 @@ export class GraphView {
     const handle = Dom.svg("rect", { x: f.x + f.w - 14, y: f.y + f.h - 14, width: 14, height: 14, fill: "var(--bg)", stroke: col }); handle.setAttribute("class", "frame-handle"); handle.setAttribute("pointer-events", "all");
     if (f.description) { const ti = Dom.svg("title"); ti.textContent = f.description; g.appendChild(ti); }
     g.appendChild(bg); g.appendChild(head); g.appendChild(label); g.appendChild(handle);
-    head.addEventListener("mousedown", (ev) => this._startFrameDrag(ev as MouseEvent, f, g));
-    handle.addEventListener("mousedown", (ev) => this._startFrameResize(ev as MouseEvent, f, g));
+    head.addEventListener("pointerdown", (ev) => this._startFrameDrag(ev as MouseEvent, f, g));
+    handle.addEventListener("pointerdown", (ev) => this._startFrameResize(ev as MouseEvent, f, g));
     const ctx = (ev: Event) => { ev.preventDefault(); ev.stopPropagation(); this._frameContextMenu(ev as MouseEvent, f); };
     head.addEventListener("contextmenu", ctx); handle.addEventListener("contextmenu", ctx);
     return g;
@@ -962,13 +971,23 @@ export class GraphView {
   }
   private _onWheel(ev: WheelEvent): void {
     ev.preventDefault();
-    const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
-    const r = this.svg!.getBoundingClientRect();
-    const px = ev.clientX - r.left, py = ev.clientY - r.top;
+    this.zoomAtClient(ev.deltaY < 0 ? 1.1 : 1 / 1.1, ev.clientX, ev.clientY);
+  }
+
+  /** Zoom autour d'un point écran (molette OU pinch tactile). */
+  zoomAtClient(factor: number, clientX: number, clientY: number): void {
+    if (!this.svg) return;
+    const r = this.svg.getBoundingClientRect();
+    const px = clientX - r.left, py = clientY - r.top;
     const wx = (px - this.tx) / this.scale, wy = (py - this.ty) / this.scale;
     this.scale = Math.max(0.15, Math.min(4, this.scale * factor));
     this.tx = px - wx * this.scale; this.ty = py - wy * this.scale;
     this._applyTransform();
+  }
+
+  /** Pan incrémental (glisser tactile à 1 doigt / centroïde à 2 doigts). */
+  panByClient(dx: number, dy: number): void {
+    this.tx += dx; this.ty += dy; this._applyTransform();
   }
   private _startPan(ev: MouseEvent): void {
     ev.preventDefault();
@@ -1031,12 +1050,14 @@ export class GraphView {
   }
 
   private _dragSession(onMove: (e: MouseEvent) => void, onUp?: (e: MouseEvent) => void): void {
-    const move = (e: MouseEvent) => onMove(e);
-    const up = (e: MouseEvent) => {
-      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+    // Pointer Events → drag unifié souris + TACTILE (les nœuds/cadres se déplacent au doigt). `pointerdown` des
+    // éléments appelle preventDefault → pas d'event souris de compat (donc pas de pan de fond parasite).
+    const move = (e: PointerEvent) => onMove(e);
+    const up = (e: PointerEvent) => {
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       if (onUp) onUp(e);
     };
-    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }
 
   /** Déplace tous les nœuds sélectionnés du même delta, avec auto-pan au bord. */

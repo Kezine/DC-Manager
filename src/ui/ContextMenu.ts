@@ -16,6 +16,10 @@ export class ContextMenu {
       document.body.appendChild(m);
       ContextMenu.el = m;
       document.addEventListener("click", () => ContextMenu.hide());
+      // `pointerdown` (et non `click`) → ferme dès qu'on INTERAGIT avec la scène (3D/Netmap) : le canvas capture la
+      // souris/tactile (preventDefault) et ne génère pas toujours de `click`, d'où un menu qui restait ouvert. On
+      // ignore les pointerdown SUR le menu lui-même (les boutons gèrent leur propre clic).
+      document.addEventListener("pointerdown", (e) => { if (ContextMenu.el && !ContextMenu.el.contains(e.target as Node)) ContextMenu.hide(); }, true);
       document.addEventListener("keydown", (e) => { if (e.key === "Escape") ContextMenu.hide(); });
     }
     Fullscreen.home(ContextMenu.el);   // plein écran : dans l'élément FS courant (sinon <body>)

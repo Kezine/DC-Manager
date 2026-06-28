@@ -4,8 +4,15 @@
 import * as THREE from "three";
 import { CAM_PRESETS } from "../shared";
 import { DcThreeBase } from "./DcThreeBase";
+import { Haptics } from "../../../core/Haptics";
 
 export class DcThreeCamera extends DcThreeBase {
+  /** Dernière position (clientX, clientY) du geste TACTILE — sert de point de picking au `touchend` (qui ne
+      porte pas de coordonnées de doigt actif), et de centroïde mémorisé entre deux `touchmove`. */
+  protected _touchPos: [number, number] | null = null;
+  /** Distance (px) entre les deux doigts au dernier `touchmove` — base du PINCH/ZOOM (facteur = d/dPrécédent). */
+  protected _pinchDist: number | null = null;
+
   /* ---- cadrage ---- */
   /** Cadre la salle : fixe la cible + la demi-hauteur de frustum pour tout voir (réinitialise zoom + cible). */
   protected frame(W: number, D: number, H: number, tx: number, ty: number, tz: number): void {
@@ -94,16 +101,17 @@ export class DcThreeCamera extends DcThreeBase {
     this.updateCamera(); this.request();
   }
 
-  /** Surbrillance PERSISTANTE de l'équipement « localisé » (`eqId`) — émissive ambre, distincte du survol (bleu).
-      Réappliquée à chaque (re)rendu via la vue ; null pour l'éteindre. */
-  setFocusEquip(eqId: string | null): void {
+  /** Surbrillance PERSISTANTE de l'équipement « localisé » (`eqId`) ET, optionnellement, du PORT localisé (`portId`)
+      — même émissive ambre, distincte du survol (bleu). Réappliquée à chaque (re)rendu ; null pour l'éteindre. */
+  setFocusEquip(eqId: string | null, portId: string | null = null): void {
     const had = this._focusObjs.length > 0;
     this._focusObjs.forEach((o) => this.setFocusHi(o, false));
     this._focusObjs = [];
-    if (eqId) {
+    if (eqId || portId) {
       [this.gRacks, this.gFree].forEach((g) => g && g.traverse((o: any) => {
-        const p = o.userData && o.userData.pick;
-        if (p && p.type === "occ" && p.id === eqId) this._focusObjs.push(o);
+        const p = o.userData && o.userData.pick; if (!p) return;
+        if (eqId && p.type === "occ" && p.id === eqId) this._focusObjs.push(o);          // équipement
+        else if (portId && p.type === "port" && p.id === portId) this._focusObjs.push(o);  // port (même surbrillance ambre)
       }));
       this._focusObjs.forEach((o) => this.setFocusHi(o, true));
     }
@@ -214,23 +222,9 @@ export class DcThreeCamera extends DcThreeBase {
       const desc = this.targetAt(e.clientX, e.clientY);
       if (desc && this.ctxCb) { if (this.tipCb) this.tipCb(null, 0, 0); this.ctxCb(desc, e.clientX, e.clientY); }
     });
+    dom.style.touchAction = "none";   // gestes tactiles capturés par l'appli (pas de scroll/pinch-zoom natif du navigateur)
     dom.addEventListener("mousedown", (e) => {
-      // GAUCHE sur un emplacement U LIBRE → sélection multiple (glisser vertical contigu) ; sinon pan.
-      // DROIT/Maj = orbite (cohérent avec le moteur SVG).
-      // mode OUTIL (mesure/route) : pas de sélection d'emplacement au glisser → le glisser navigue, le clic pose/choisit.
-      const slot = (this.toolMode === "none" && e.button === 0 && !e.shiftKey) ? this.slotUnder(e.clientX, e.clientY) : null;
-      if (slot) {
-        this.clearHover(); this.hovered = null;   // évite un double setHover(true) sur l'emplacement déjà survolé
-        this.slotSel = { rackId: slot.rackId, side: slot.side, anchor: slot.u, lo: slot.u, hi: slot.u, slots: this.collectFreeSlots(slot.rackId, slot.side), meshes: [] };
-        this.drag = { mode: "slotsel", x: e.clientX, y: e.clientY, downX: e.clientX, downY: e.clientY, btn: 0, moved: false };
-        this.applySlotSel();
-        if (this.tipCb) this.tipCb(null, 0, 0);
-        e.preventDefault();
-        return;
-      }
-      const mode: "orbit" | "pan" = (e.button === 2 || e.shiftKey) ? "orbit" : "pan";
-      this.drag = { mode, x: e.clientX, y: e.clientY, downX: e.clientX, downY: e.clientY, btn: e.button, moved: false };
-      if (this.tipCb) this.tipCb(null, 0, 0);   // masque le tooltip pendant un glisser
+      if (this.beginPointer(e.clientX, e.clientY, e.button, e.shiftKey)) { e.preventDefault(); return; }   // sélection d'emplacements
       if (e.button !== 2) e.preventDefault();   // PAS sur le bouton droit → l'event `contextmenu` peut se déclencher
     });
     dom.addEventListener("mouseleave", () => { if (this.tipCb) this.tipCb(null, 0, 0); });
@@ -241,6 +235,164 @@ export class DcThreeCamera extends DcThreeBase {
       e.preventDefault();
       this.zoomToCursor(Math.pow(1.0015, -e.deltaY), e.clientX, e.clientY);   // zoom VERS LE CURSEUR (cf. zoom-souris du moteur SVG)
     }, { passive: false });
+    this.bindTouch(dom);
+  }
+
+  /** AMORCE d'un geste de navigation/sélection, PARTAGÉE souris ⇄ tactile. `button` : 0 = pan (ou sélection
+      d'un emplacement U sur un slot libre), 2 = orbite ; `shift` force l'orbite (cohérent avec le moteur SVG).
+      Le mode OUTIL (mesure/route) inhibe la sélection d'emplacement (le glisser navigue, le clic pose/choisit).
+      Renvoie true si une SÉLECTION d'emplacements a démarré (l'appelant doit alors `preventDefault`). */
+  protected beginPointer(clientX: number, clientY: number, button: number, shift: boolean): boolean {
+    const slot = (this.toolMode === "none" && button === 0 && !shift) ? this.slotUnder(clientX, clientY) : null;
+    if (slot) {
+      this.clearHover(); this.hovered = null;   // évite un double setHover(true) sur l'emplacement déjà survolé
+      this.slotSel = { rackId: slot.rackId, side: slot.side, anchor: slot.u, lo: slot.u, hi: slot.u, slots: this.collectFreeSlots(slot.rackId, slot.side), meshes: [] };
+      this.drag = { mode: "slotsel", x: clientX, y: clientY, downX: clientX, downY: clientY, btn: 0, moved: false };
+      this.applySlotSel();
+      if (this.tipCb) this.tipCb(null, 0, 0);
+      return true;
+    }
+    const mode: "orbit" | "pan" = (button === 2 || shift) ? "orbit" : "pan";
+    this.drag = { mode, x: clientX, y: clientY, downX: clientX, downY: clientY, btn: button, moved: false };
+    if (this.tipCb) this.tipCb(null, 0, 0);   // masque le tooltip pendant un glisser
+    return false;
+  }
+
+  /** NAVIGATION TACTILE (responsive). Mapping demandé : 1 doigt glissé = glissé CLIC GAUCHE (pan, ou sélection
+      d'emplacement) ; 2 doigts glissés = glissé CLIC DROIT (orbite), le pivot suivant le CENTROÏDE des deux doigts.
+      Un appui simple SANS déplacement = clic (picking : édition baie/câble, ou pose de point en mode outil).
+      On réutilise la machine d'état souris (`onMove`/`onUp`) en lui passant des coordonnées synthétiques. */
+  protected bindTouch(dom: HTMLElement): void {
+    // Seuils du geste 2 doigts : le mode (ORBITE ou ZOOM) se VERROUILLE au 1er franchissement et reste figé
+    // jusqu'au décollage COMPLET des doigts (jamais pan+zoom en même temps). Le zoom exige un écart de pinch
+    // nettement plus marqué que l'orbite → un simple glissé à 2 doigts oriente vers l'orbite, un vrai
+    // pincement vers le zoom.
+    const ORBIT_LOCK = 12;   // px de déplacement du centroïde pour verrouiller l'orbite
+    const PINCH_LOCK = 28;   // px de variation d'écartement pour verrouiller le zoom
+    const centroid = (tl: TouchList): { x: number; y: number } => {
+      const n = Math.min(2, tl.length); let sx = 0, sy = 0;
+      for (let i = 0; i < n; i++) { sx += tl[i].clientX; sy += tl[i].clientY; }
+      return { x: sx / n, y: sy / n };
+    };
+    const pinchDist = (tl: TouchList): number => Math.hypot(tl[0].clientX - tl[1].clientX, tl[0].clientY - tl[1].clientY);
+
+    let twoMode: "none" | "orbit" | "zoom" = "none";   // mode du geste 2 doigts, verrouillé une fois décidé
+    let pinchStart = 0, centroidStart = { x: 0, y: 0 };
+    let multiTouch = false;   // le geste a impliqué ≥2 doigts → AUCUN clic au relâchement (pas de pick parasite)
+
+    // DOUBLE-TAP (1 doigt) → menu contextuel. Le 1er tap programme un pick DIFFÉRÉ (annulable) ; un 2e tap rapproché
+    // l'annule et ouvre le menu contextuel. Tout nouveau geste annule le pick en attente.
+    let lastTapTime = 0, lastTapX = 0, lastTapY = 0, tapTimer = 0;
+    const TAP_GAP = 320, TAP_NEAR = 28, TAP_DELAY = 280;
+    const openCtxAt = (x: number, y: number) => {
+      const desc = this.targetAt(x, y);
+      if (desc && this.ctxCb) { if (this.tipCb) this.tipCb(null, 0, 0); this.ctxCb(desc, x, y); }
+    };
+    const handleTap = (x: number, y: number, ts: number) => {
+      if (lastTapTime && (ts - lastTapTime) < TAP_GAP && Math.hypot(x - lastTapX, y - lastTapY) < TAP_NEAR) {
+        if (tapTimer) { clearTimeout(tapTimer); tapTimer = 0; }
+        lastTapTime = 0; Haptics.tick(); openCtxAt(x, y); return;   // DOUBLE TAP → menu contextuel
+      }
+      lastTapTime = ts; lastTapX = x; lastTapY = y;
+      if (tapTimer) clearTimeout(tapTimer);
+      tapTimer = window.setTimeout(() => { tapTimer = 0; lastTapTime = 0; this.pick(x, y); }, TAP_DELAY);   // 1er tap → pick différé
+    };
+
+    // APPUI LONG (1 doigt immobile sur un objet) → met l'objet EN ÉVIDENCE (comme un survol) + TOOLTIP épinglé. N'ouvre
+    // PAS la fiche (la levée après long-press ne pick pas). La mise en évidence + le tooltip restent jusqu'au prochain
+    // contact (ou un pan), qui les ferment (`dismissLongPress`). Annulé si le doigt bouge (> seuil) ou si 2e doigt.
+    let pressTimer = 0, longPressed = false, pressX = 0, pressY = 0;
+    const LONG_PRESS_MS = 450, LONG_PRESS_MOVE = 12;
+    const cancelLongPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = 0; } };
+    const dismissLongPress = () => {   // annule un long-press en attente ET ferme la mise en évidence + tooltip épinglés
+      cancelLongPress();
+      if (longPressed) { longPressed = false; this.clearHoverAndTip(); }
+    };
+    const armLongPress = (x: number, y: number) => {
+      pressX = x; pressY = y; longPressed = false; cancelLongPress();
+      pressTimer = window.setTimeout(() => {
+        pressTimer = 0;
+        const target = this.hoverApply(pressX, pressY);   // highlight (émissive bleue) + tooltip, comme un survol
+        if (target) { longPressed = true; Haptics.select(); } else if (this.tipCb) this.tipCb(null, 0, 0);
+      }, LONG_PRESS_MS);
+    };
+
+    dom.addEventListener("touchstart", (e) => {
+      if (tapTimer) { clearTimeout(tapTimer); tapTimer = 0; }   // un nouveau geste annule un pick simple en attente
+      dismissLongPress();   // tout nouveau contact ferme un tooltip d'appui long épinglé (+ sa mise en évidence)
+      if (e.touches.length === 1 && !multiTouch) {   // démarrage à 1 doigt = pan/sélection (pick possible au tap)
+        const t = e.touches[0]; this._touchPos = [t.clientX, t.clientY]; this._pinchDist = null;
+        this.beginPointer(t.clientX, t.clientY, 0, false);
+        if (this.drag && this.drag.mode === "pan") armLongPress(t.clientX, t.clientY);   // pas sur une sélection d'emplacement
+      } else if (e.touches.length >= 2) {   // 2e doigt → geste 2 doigts : ANNULE toute sélection d'emplacement amorcée
+        multiTouch = true; twoMode = "none"; longPressed = false;
+        this.abortSlotSel();   // un geste 2 doigts ne sélectionne JAMAIS de zone de placement (cf. bug U bloqué)
+        this.drag = null;
+        const c = centroid(e.touches); centroidStart = c; pinchStart = pinchDist(e.touches);
+        this._pinchDist = pinchStart; this._touchPos = [c.x, c.y];
+        this.beginPointer(c.x, c.y, 2, false);
+      } else return;
+      e.preventDefault();
+    }, { passive: false });
+
+    dom.addEventListener("touchmove", (e) => {
+      if (!this.drag) return;
+      if (this.drag.btn === 2) {   // ---- geste 2 doigts : ORBITE *ou* ZOOM, exclusif et verrouillé ----
+        if (e.touches.length < 2) return;   // 2→1 : on attend le décollage complet (pas de bascule en pan)
+        const c = centroid(e.touches), d = pinchDist(e.touches);
+        if (twoMode === "none") {
+          const dPinch = Math.abs(d - pinchStart), dPan = Math.hypot(c.x - centroidStart.x, c.y - centroidStart.y);
+          if (dPinch >= PINCH_LOCK && dPinch >= dPan) twoMode = "zoom";
+          else if (dPan >= ORBIT_LOCK) twoMode = "orbit";
+          // indécis : on garde les références à jour pour ne pas « sauter » au verrouillage
+          this.drag.x = c.x; this.drag.y = c.y; this._pinchDist = d; this._touchPos = [c.x, c.y];
+          e.preventDefault(); return;
+        }
+        if (twoMode === "zoom") {   // pan/orbite DÉSACTIVÉ
+          const base = this._pinchDist || d, factor = d / base;
+          if (Math.abs(factor - 1) > 0.002) this.zoomToCursor(factor, c.x, c.y);
+          this._pinchDist = d; this.drag.x = c.x; this.drag.y = c.y; this._touchPos = [c.x, c.y];
+        } else {   // orbit : zoom DÉSACTIVÉ
+          this._pinchDist = d; this._touchPos = [c.x, c.y];
+          this.onMove({ clientX: c.x, clientY: c.y } as MouseEvent);
+        }
+        e.preventDefault(); return;
+      }
+      // ---- 1 doigt : pan / sélection d'emplacements ----
+      if (!e.touches.length) return;
+      const t = e.touches[0];
+      if ((pressTimer || longPressed) && Math.hypot(t.clientX - pressX, t.clientY - pressY) > LONG_PRESS_MOVE) dismissLongPress();   // pan → ferme le long-press
+      this._touchPos = [t.clientX, t.clientY];
+      this.onMove({ clientX: t.clientX, clientY: t.clientY } as MouseEvent);
+      e.preventDefault();
+    }, { passive: false });
+
+    const endTouch = (e: TouchEvent) => {
+      if (e.touches.length > 0) {   // décollage PARTIEL : on reste verrouillé jusqu'au décollage complet (pas de pan mono)
+        const c = e.touches.length >= 2 ? centroid(e.touches) : { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        this._touchPos = [c.x, c.y];
+        if (this.drag) this.drag.moved = true;   // neutralise tout pick résiduel
+        e.preventDefault(); return;
+      }
+      // décollage COMPLET
+      this._pinchDist = null;
+      cancelLongPress();
+      const d = this.drag, p = this._touchPos || [0, 0];
+      // TAP franc d'1 doigt en mode normal → géré par la détection double-tap (menu vs pick différé). Tout le reste
+      // (glisser, slotsel, mesure/route, geste multi-doigts) → onUp standard.
+      const isTap = !multiTouch && !!d && d.btn === 0 && !d.moved && d.mode === "pan" && this.toolMode === "none";
+      if (isTap) {
+        this.drag = null;
+        if (!longPressed) handleTap(p[0], p[1], e.timeStamp);   // long-press : highlight + tooltip restent épinglés (PAS de pick)
+      } else {
+        if (multiTouch && d) d.moved = true;   // geste multi-doigts → jamais de pick parasite (slotsel déjà annulé)
+        this.onUp({ clientX: p[0], clientY: p[1] } as MouseEvent);   // slotsel commit / mesure / route / fin de glisser
+      }
+      multiTouch = false; twoMode = "none";
+      e.preventDefault();
+    };
+    dom.addEventListener("touchend", endTouch, { passive: false });
+    dom.addEventListener("touchcancel", endTouch, { passive: false });
   }
 
   /** Zoom VERS LE CURSEUR : garde le point monde sous le curseur fixe à l'écran (au plan de la cible) en décalant
@@ -300,7 +452,13 @@ export class DcThreeCamera extends DcThreeBase {
   protected slotUnder(clientX: number, clientY: number): { rackId: string; side: string; u: number } | null {
     for (const h of this.rayHits(clientX, clientY)) {
       const p: any = h.object.userData && h.object.userData.pick;
-      if (p && p.type === "slotU" && p.rackId) return { rackId: p.rackId, side: p.side, u: p.u };
+      if (!p) continue;
+      if (p.type === "slotU" && p.rackId) return { rackId: p.rackId, side: p.side, u: p.u };
+      // Un OCCUPANT (équipement / pseudo-élément) ou une PAROI OPAQUE de baie DEVANT capture le geste → on
+      // n'attrape PAS un emplacement libre situé DERRIÈRE (corrige : drag sur un pseudo-équipement → sélection
+      // « à travers » des emplacements vides à l'arrière). Le tap/clic sera traité par l'occupant (pick).
+      if (p.type === "occ") return null;
+      if (p.type === "rack" && this.frontFacing(h) && this.rackSolid(h)) return null;
     }
     return null;
   }
@@ -340,7 +498,15 @@ export class DcThreeCamera extends DcThreeBase {
   protected commitSlotSel(): void {
     const sel = this.slotSel; this.slotSel = null; if (!sel) return;
     sel.meshes.forEach((m) => this.setHover(m, false)); this.request();
+    Haptics.confirm();   // validation d'une plage d'emplacements → confirmation tactile
     this.host.assignSlot?.(sel.rackId, sel.lo, sel.side, sel.hi - sel.lo + 1, () => this.rebuild(this.builtDc));
+  }
+
+  /** ANNULE une sélection d'emplacements en cours SANS valider (retire la surbrillance) — utilisé quand un 2e doigt
+      arrive : un geste 2 doigts ne doit jamais sélectionner ni laisser une zone de placement surlignée. */
+  protected abortSlotSel(): void {
+    const sel = this.slotSel; this.slotSel = null; if (!sel) return;
+    sel.meshes.forEach((m) => this.setHover(m, false)); this.request();
   }
 
   /* ---- picking (raycasting) ---- */
@@ -432,12 +598,12 @@ export class DcThreeCamera extends DcThreeBase {
       if (p.type === "rack" && this.frontFacing(h)) {
         // capot/paroi OPAQUE : occlut → gagne à sa profondeur (l'occupant DERRIÈRE est masqué) ;
         // coque/porte translucide : repli basse priorité (clic-through vers occupants visibles à travers).
-        if (this.rackSolid(h)) { if (cableTop) { this.host.openCableForm?.(cableId!); return; } this.host.openRackForm?.(p.id); return; }
+        if (this.rackSolid(h)) { if (cableTop) { this.host.openCableForm?.(cableId!); return; } (this.host.openRackDetail || this.host.openRackForm)?.(p.id); return; }
         if (!rackId) rackId = p.id;   // 1re coque (face extérieure), en repli
       }
     }
     if (cableTop) { this.host.openCableForm?.(cableId!); return; }   // câble au-dessus prime sur la baie de repli
-    if (rackId) this.host.openRackForm?.(rackId);
+    if (rackId) (this.host.openRackDetail || this.host.openRackForm)?.(rackId);
   }
 
   /** Résout la cible sous (clientX,clientY) pour TOOLTIP/MENU : renvoie son `pick` (occ · rack · câble · wp · port),
@@ -466,37 +632,52 @@ export class DcThreeCamera extends DcThreeBase {
   }
 
   /** Survol : met en évidence l'occupant-équipement sous le curseur (emissive) + curseur pointer. */
-  protected onHover = (e: MouseEvent): void => {
-    if (this.drag) return;   // pas de survol pendant un glisser
-    if (this.toolMode !== "none") { this.toolHover(e.clientX, e.clientY); return; }   // mode outil : aperçu du segment, pas de highlight/tooltip
-    const hits = this.rayHits(e.clientX, e.clientY);
-    // câble le plus PROCHE DU RAYON (proximité latérale, pas profondeur) — même éligibilité qu'au clic
+  /** Mesh à mettre en évidence au survol sous (clientX,clientY) — cible PRÉCISE (waypoint · port · slots) d'abord,
+      puis câble (proximité latérale), puis occupant (câble au-dessus prime), puis baie opaque. Réutilisé par le
+      survol souris ET l'appui long tactile. */
+  protected hoverTargetAt(clientX: number, clientY: number): THREE.Object3D | null {
+    const hits = this.rayHits(clientX, clientY);
     let cableObj: THREE.Object3D | null = null, bestD = Infinity;
     for (const h of hits) {
       const pp: any = h.object.userData && h.object.userData.pick;
       if (pp && pp.type === "cable" && h.point) { const dd = this.raycaster.ray.distanceToPoint(h.point); if (dd < bestD) { bestD = dd; cableObj = h.object; } }
     }
     const cableTop = this.opts.cablesOnTop && cableObj;
-    let target: THREE.Object3D | null = null;
-    // cibles PRÉCISES (waypoint · port · slots) en premier ; puis câble (proximité) ; puis occupant (câble au-dessus prime).
     for (const h of hits) {
       const p: any = h.object.userData && h.object.userData.pick;
       if (!p) continue;
-      if (p.type === "wp" || p.type === "port" || p.type === "slotU" || p.type === "slotSide" || p.type === "slotWall" || p.type === "slotCap") { target = h.object; break; }
-      if (p.type === "cable") { target = cableObj; break; }
-      if (p.type === "occ" && (p.kind === "eq" || p.kind === "item")) { target = cableTop ? cableObj : h.object; break; }   // équipement OU pseudo-élément (item) : highlight + tooltip
-      // capot/paroi OPAQUE : surligné comme la baie (et occlut l'occupant derrière, traité en ordre de profondeur).
-      if (p.type === "rack" && this.frontFacing(h) && this.rackSolid(h)) { target = cableTop ? cableObj : h.object; break; }
+      if (p.type === "wp" || p.type === "port" || p.type === "slotU" || p.type === "slotSide" || p.type === "slotWall" || p.type === "slotCap") return h.object;
+      if (p.type === "cable") return cableObj;
+      if (p.type === "occ" && (p.kind === "eq" || p.kind === "item")) return cableTop ? cableObj : h.object;   // équipement / pseudo-élément
+      if (p.type === "rack" && this.frontFacing(h) && this.rackSolid(h)) return cableTop ? cableObj : h.object;   // capot/paroi opaque = baie
     }
-    // tooltip (remonté à la vue) : suit la souris à chaque déplacement
-    if (this.tipCb) this.tipCb(target ? (target.userData && target.userData.pick) : null, e.clientX, e.clientY);
-    if (target === this.hovered) return;
+    return null;
+  }
+
+  /** Applique le survol (highlight + tooltip + curseur) sur la cible sous (clientX,clientY). Renvoie la cible. */
+  protected hoverApply(clientX: number, clientY: number): THREE.Object3D | null {
+    const target = this.hoverTargetAt(clientX, clientY);
+    if (this.tipCb) this.tipCb(target ? (target.userData && target.userData.pick) : null, clientX, clientY);
+    if (target === this.hovered) return target;
     this.clearHover();
     this.hovered = target;
     this.applyHover(target);
     const dom = this.renderer?.domElement; if (dom) dom.style.cursor = target ? "pointer" : "default";
     this.request();
+    return target;
+  }
+
+  protected onHover = (e: MouseEvent): void => {
+    if (this.drag) return;   // pas de survol pendant un glisser
+    if (this.toolMode !== "none") { this.toolHover(e.clientX, e.clientY); return; }   // mode outil : aperçu du segment, pas de highlight/tooltip
+    this.hoverApply(e.clientX, e.clientY);
   };
+
+  /** Éteint la mise en évidence de survol + le tooltip (utilisé à la fermeture d'un tooltip d'appui long tactile). */
+  protected clearHoverAndTip(): void {
+    if (this.tipCb) this.tipCb(null, 0, 0);
+    this.clearHover(); this.hovered = null; this.request();
+  }
 
   /** Applique le survol : un CÂBLE illumine TOUS ses objets (ligne + pastilles) ; une BAIE illumine TOUTES ses
       surfaces (coque + capots + portes, réparties en plusieurs meshes) ; sinon le seul objet visé. */

@@ -9,6 +9,7 @@ import { SpareTypes } from "../domain/SpareTypes";
 import { SpareStatuses } from "../domain/SpareStatuses";
 import { RackScene } from "../geometry/RackScene";
 import { FloorLayout } from "../geometry/FloorLayout";
+import { EntityViz } from "./EntityViz";
 import type { ListOptions } from "./ListView";
 
 const dim = (s: string) => `<span style="color:var(--fg-dimmer)">${s}</span>`;
@@ -33,9 +34,9 @@ export class ListConfigs {
       emptyText: "Aucun équipement.",
       searchFields: (e) => { const g: any = e.group_id && store.get("groups", e.group_id); return [e.name, e.type, EquipmentTypes.label(e.type), e.brand, e.model, e.serial, g && g.label, e.description]; },
       columns: [
-        { head: "Nom", cls: "cell-name", sortKey: "name", sort: (e) => e.name, render: (e) => Html.escape(e.name || "(sans nom)") },
+        { head: "Nom", essential: true, cls: "cell-name", sortKey: "name", sort: (e) => e.name, render: (e) => Html.escape(e.name || "(sans nom)") },
         {
-          head: "Type", sortKey: "type", sort: (e) => EquipmentTypes.label(e.type),
+          head: "Type", essential: true, sortKey: "type", sort: (e) => EquipmentTypes.label(e.type),
           render: (e) => `<span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span>`,
           filter: { label: "Type", options: () => EquipmentTypes.ALL.map((t) => ({ id: t.id, label: t.label })), valueOf: (e) => e.type },
         },
@@ -46,7 +47,7 @@ export class ListConfigs {
           filter: { label: "Groupe", options: () => store.all("groups").map((g: any) => ({ id: g.id, label: g.label || "(groupe)" })), valueOf: (e) => e.group_id || "__none__" },
         },
         { head: "U", cls: "num", sortKey: "u", sort: (e) => (e.dim_mode === "u" ? (e.u_height || 1) : -1), render: (e) => (e.dim_mode === "u" ? `<span class="pill">${e.u_height || 1} U</span>` : dim("libre")) },
-        { head: "Emplacement", sortKey: "place", sort: (e) => ListConfigs._placeText(store, e), render: (e) => { const t = ListConfigs._placeText(store, e); return t ? Html.escape(t) : dim("—"); } },
+        { head: "Emplacement", essential: true, sortKey: "place", sort: (e) => ListConfigs._placeText(store, e), render: (e) => EntityViz.equipmentLocation(store, e) },
         { head: "Ports", cls: "num", sort: (e) => store.portsOf(e.id).length, render: (e) => `<span class="pill">${store.portsOf(e.id).length}</span>` },
         { head: "Agrégats", cls: "num", sort: (e) => store.aggregatesOf(e.id).length, render: (e) => `<span class="pill">${store.aggregatesOf(e.id).length}</span>` },
         { head: "Description", cls: "cell-desc", sort: (e) => e.description || "", render: descCell },
@@ -116,19 +117,18 @@ export class ListConfigs {
   }
 
   static cables(store: Store): ListOptions {
-    const endName = (pid: string) => { const p: any = store.get("ports", pid); const e: any = p && store.get("equipments", p.equipment_id); return e ? (e.name || "?") : "—"; };
     return {
       collection: "cables",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: "Aucun câble.",
       searchFields: (c) => [c.name, c.description],
       columns: [
-        { head: "Nom", cls: "cell-name", sortKey: "name", sort: (c) => c.name, render: (c) => Html.escape(c.name || "(câble)") },
+        { head: "Nom", essential: true, cls: "cell-name", sortKey: "name", sort: (c) => c.name, render: (c) => Html.escape(c.name || "(câble)") },
         { head: "Type", render: (c) => { const t: any = c.cable_type_id && store.get("cableTypes", c.cable_type_id); return t ? `<span class="pill">${Html.escape(t.name)}</span>` : dim("—"); } },
-        { head: "Liaison", render: (c) => Html.escape(endName(c.from_port_id)) + " → " + Html.escape(endName(c.to_port_id)) },
+        { head: "Liaison", essential: true, render: (c) => EntityViz.cableLink(store, c) },
         { head: "Long.", cls: "num", sort: (c) => { const L = ListConfigs._cableLen(store, c); return L != null ? L : -1; }, render: (c) => { const L = ListConfigs._cableLen(store, c); return L != null ? L + " m" : dim("—"); } },
         {
-          head: "Statut", sortKey: "status", sort: (c) => c.status, render: (c) => Html.escape(CableStatuses.label(c.status)),
+          head: "Statut", essential: true, sortKey: "status", sort: (c) => c.status, render: (c) => Html.escape(CableStatuses.label(c.status)),
           filter: { label: "Statut", options: () => CableStatuses.ALL.map((s) => ({ id: s.id, label: s.label })), valueOf: (c) => c.status },
         },
         {
@@ -219,7 +219,7 @@ export class ListConfigs {
         { head: "Nom", cls: "cell-name", sortKey: "name", sort: (r) => r.name, render: (r) => Html.escape(r.name || "(baie)") },
         {
           head: "Emplacement", sortKey: "loc", sort: (r) => ListConfigs._rackLocText(store, r),
-          render: (r) => { const t = ListConfigs._rackLocText(store, r); return t ? Html.escape(t) : dim("— pool —"); },
+          render: (r) => EntityViz.rackLocation(store, r),
           filter: { label: "Salle", options: () => store.all("datacenters").map((d: any) => ({ id: d.id, label: d.name || "(salle)" })), valueOf: (r) => r.datacenter_id || "__none__" },
         },
         { head: "Taille", cls: "num", sortKey: "u", sort: (r) => r.u_count, render: (r) => `<span class="pill">${r.u_count} U</span>` },
@@ -311,15 +311,15 @@ export class ListConfigs {
       emptyText: "Aucune adresse IP.",
       searchFields: (a) => [a.address, a.hostname, a.description],
       columns: [
-        { head: "Adresse", cls: "cell-name", sortKey: "address", sort: (a) => { const v = ipToInt(a.address); return v != null ? v : a.address; }, render: (a) => `<code>${Html.escape(a.address || "—")}</code>` },
+        { head: "Adresse", essential: true, cls: "cell-name", sortKey: "address", sort: (a) => { const v = ipToInt(a.address); return v != null ? v : a.address; }, render: (a) => `<code>${Html.escape(a.address || "—")}</code>` },
         {
-          head: "Réseau", sortKey: "net", sort: (a) => { const n: any = a.network_id && store.get("ipNetworks", a.network_id); return n ? (n.label || n.cidr || "") : ""; },
+          head: "Réseau", essential: true, sortKey: "net", sort: (a) => { const n: any = a.network_id && store.get("ipNetworks", a.network_id); return n ? (n.label || n.cidr || "") : ""; },
           render: (a) => { const n: any = a.network_id && store.get("ipNetworks", a.network_id); return n ? Html.escape(n.label || n.cidr || "(réseau)") : dim("—"); },
           filter: { label: "Réseau", options: () => store.all("ipNetworks").map((n: any) => ({ id: n.id, label: n.label || n.cidr || "(réseau)" })), valueOf: (a) => a.network_id || "__none__" },
         },
         { head: "Hostname", sort: (a) => a.hostname || "", render: (a) => (a.hostname ? `<span style="font-family:var(--mono)">${Html.escape(a.hostname)}</span>` : dim("—")) },
         {
-          head: "Équipement", sortKey: "eq", sort: (a) => { const e: any = a.equipment_id && store.get("equipments", a.equipment_id); return e ? (e.name || "") : ""; },
+          head: "Équipement", essential: true, sortKey: "eq", sort: (a) => { const e: any = a.equipment_id && store.get("equipments", a.equipment_id); return e ? (e.name || "") : ""; },
           render: (a) => { const e: any = a.equipment_id && store.get("equipments", a.equipment_id); return e ? Html.escape(e.name || "(équip.)") : dim("— libre —"); },
           filter: { label: "Équipement", options: () => store.all("equipments").map((e: any) => ({ id: e.id, label: e.name || "(équip.)" })), valueOf: (a) => a.equipment_id || "__none__" },
         },
@@ -335,15 +335,15 @@ export class ListConfigs {
       emptyText: "Aucune plage DHCP.",
       searchFields: (d) => [d.start_ip, d.end_ip, d.description],
       columns: [
-        { head: "Plage", cls: "cell-name", sort: (d) => { const v = ipToInt(d.start_ip); return v != null ? v : (d.start_ip || ""); }, render: (d) => `<code>${Html.escape(d.start_ip || "?")}</code> → <code>${Html.escape(d.end_ip || "?")}</code>` },
+        { head: "Plage", essential: true, cls: "cell-name", sort: (d) => { const v = ipToInt(d.start_ip); return v != null ? v : (d.start_ip || ""); }, render: (d) => `<code>${Html.escape(d.start_ip || "?")}</code> → <code>${Html.escape(d.end_ip || "?")}</code>` },
         {
-          head: "Réseau", sortKey: "net", sort: (d) => { const n: any = d.network_id && store.get("ipNetworks", d.network_id); return n ? (n.label || n.cidr || "") : ""; },
+          head: "Réseau", essential: true, sortKey: "net", sort: (d) => { const n: any = d.network_id && store.get("ipNetworks", d.network_id); return n ? (n.label || n.cidr || "") : ""; },
           render: (d) => { const n: any = d.network_id && store.get("ipNetworks", d.network_id); return n ? Html.escape(n.label || n.cidr || "(réseau)") : dim("—"); },
           filter: { label: "Réseau", options: () => store.all("ipNetworks").map((n: any) => ({ id: n.id, label: n.label || n.cidr || "(réseau)" })), valueOf: (d) => d.network_id || "__none__" },
         },
         { head: "Taille", cls: "num", sort: (d) => { const a = ipToInt(d.start_ip), b = ipToInt(d.end_ip); return (a != null && b != null && b >= a) ? (b - a + 1) : -1; }, render: (d) => { const a = ipToInt(d.start_ip), b = ipToInt(d.end_ip); return (a != null && b != null && b >= a) ? `<span class="pill">${b - a + 1} adr.</span>` : dim("—"); } },
         {
-          head: "Serveur DHCP", sortKey: "srv", sort: (d) => { const e: any = d.server_id && store.get("equipments", d.server_id); return e ? (e.name || "") : ""; },
+          head: "Serveur DHCP", essential: true, sortKey: "srv", sort: (d) => { const e: any = d.server_id && store.get("equipments", d.server_id); return e ? (e.name || "") : ""; },
           render: (d) => { const e: any = d.server_id && store.get("equipments", d.server_id); return e ? Html.escape(e.name || "(serveur)") : dim("— non désigné —"); },
           filter: { label: "Serveur", options: () => store.all("equipments").map((e: any) => ({ id: e.id, label: e.name || "(équip.)" })), valueOf: (d) => d.server_id || "__none__" },
         },
@@ -402,14 +402,14 @@ export class ListConfigs {
       emptyText: "Aucune pièce de rechange. Ajoutez-en une avec « + Spare » (HDD, SSD, transceiver, autre…).",
       searchFields: (o) => [o.displayName ? o.displayName() : o.name, o.brand, o.model_pn, o.serial, SpareTypes.label(o.type), o.techSummary ? o.techSummary() : "", o.storage_location, o.po_ref, assignedTo(o), o.comment],
       columns: [
-        { head: "Désignation", cls: "cell-name", sortKey: "name", sort: (o) => (o.displayName ? o.displayName() : (o.name || "")), render: (o) => Html.escape(o.displayName ? o.displayName() : (o.name || "(spare)")) + (o.serial ? " " + dim("· SN " + Html.escape(o.serial)) : "") },
+        { head: "Désignation", essential: true, cls: "cell-name", sortKey: "name", sort: (o) => (o.displayName ? o.displayName() : (o.name || "")), render: (o) => Html.escape(o.displayName ? o.displayName() : (o.name || "(spare)")) + (o.serial ? " " + dim("· SN " + Html.escape(o.serial)) : "") },
         {
-          head: "Type", sortKey: "type", sort: (o) => SpareTypes.label(o.type), render: (o) => `<span class="pill">${SpareTypes.icon(o.type)} ${Html.escape(SpareTypes.label(o.type))}</span>`,
+          head: "Type", essential: true, sortKey: "type", sort: (o) => SpareTypes.label(o.type), render: (o) => `<span class="pill">${SpareTypes.icon(o.type)} ${Html.escape(SpareTypes.label(o.type))}</span>`,
           filter: { label: "Type", options: () => SpareTypes.ALL.map((t) => ({ id: t.id, label: t.label })), valueOf: (o) => o.type },
         },
         { head: "Caractéristiques", render: (o) => { const t = o.techSummary ? o.techSummary() : ""; return t ? Html.escape(t) : dim("—"); } },
         {
-          head: "Statut", sortKey: "status", sort: (o) => SpareStatuses.label(o.status), render: (o) => `<span class="pill">${Html.escape(SpareStatuses.label(o.status))}</span>`,
+          head: "Statut", essential: true, sortKey: "status", sort: (o) => SpareStatuses.label(o.status), render: (o) => `<span class="pill">${Html.escape(SpareStatuses.label(o.status))}</span>`,
           filter: { label: "Statut", options: () => SpareStatuses.ALL.map((s) => ({ id: s.id, label: s.label })), valueOf: (o) => o.status },
         },
         { head: "Affecté à", sort: (o) => assignedTo(o), render: (o) => { const t = assignedTo(o); return t ? Html.escape(t) : dim("—"); } },

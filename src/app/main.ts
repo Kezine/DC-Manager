@@ -22,6 +22,7 @@ import { Log } from "../core/Log";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD } from "../domain/constants";
 import { Shell } from "./Shell";
 import type { ShellHost } from "./Shell";
+import { Pwa } from "./Pwa";
 import { SaveState, shouldAutosave } from "./SaveState";
 import { TabChannel } from "./TabChannel";
 import { HandleStore } from "./HandleStore";
@@ -36,15 +37,25 @@ let onTimelineChange: () => void = () => { /* posé au boot → refreshChrome */
 function noteUndoable(kind: string): void { undoOrder.push(kind); if (undoOrder.length > 400) undoOrder.shift(); redoOrder.length = 0; try { onTimelineChange(); } catch (_) { /* noop */ } }
 function resetUndoTimeline(): void { undoOrder.length = 0; redoOrder.length = 0; try { onTimelineChange(); } catch (_) { /* noop */ } }
 
-// MODE D'EXÉCUTION : injecté par le backend (config) ou fichier par défaut (cf. docs/rest-migration.md).
-const RUNTIME = readRuntimeConfig();
-const REST_MODE = RUNTIME.mode === "api";
+// MODE D'EXÉCUTION : piloté par les PRÉFÉRENCES utilisateur (réglages → Source de données), initialisées au 1er
+// run depuis la config injectée par le backend. L'utilisateur peut basculer local⟷api et changer l'URL d'API ;
+// le changement est appliqué au RECHARGEMENT (adapter/store recréés). Cf. docs/rest-migration.md.
+const prefs = new Prefs();
+const INJECTED = readRuntimeConfig();
+// VISUALISEUR AUTONOME : un document EMBARQUÉ dans le HTML (export readonly hors-ligne) → on l'ouvre en LOCAL,
+// en lecture seule, sans réseau ni écran d'accueil (cf. exportStandalone / branche VIEWER au boot).
+const EMBED: any = (() => { try { return (window as any).__NETMAP_EMBED__ || null; } catch (_) { return null; } })();
+const VIEWER = !!EMBED;
+// Mode EFFECTIF : le choix EXPLICITE de l'utilisateur prime ; sinon on suit la config injectée par le backend
+// (défaut). Ainsi : 1er run servi par le backend → API ; et l'utilisateur peut repasser en LOCAL (mémorisé) même
+// servi par le backend — ce qui était impossible avant (le mode était fixé par la config à chaque boot).
+const REST_MODE = !VIEWER && (prefs.dataSourceUserSet ? (prefs.dataSource === "api") : (INJECTED.mode === "api"));
+const API_BASE_URL = (prefs.apiBaseUrl && prefs.apiBaseUrl.trim()) || INJECTED.apiBaseUrl || "/api";
 // API même origine, cookies SSO transmis (l'app NE gère PAS l'auth — le SSO valide).
 const adapter = REST_MODE
-  ? new RestAdapter({ baseUrl: RUNTIME.apiBaseUrl })
+  ? new RestAdapter({ baseUrl: API_BASE_URL })
   : new BrowserStorageAdapter({ persistent: false, onUndoable: noteUndoable });
 const store = new Store(adapter);
-const prefs = new Prefs();
 const W = window as any;
 const HAS_FS_API = typeof W.showSaveFilePicker === "function" && typeof W.showOpenFilePicker === "function";
 const JSON_TYPES = [{ description: "NetMap JSON", accept: { "application/json": [".json"] } }];
@@ -57,6 +68,10 @@ function applyTheme(theme: string): void {
   if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
   else document.documentElement.removeAttribute("data-theme");
 }
+/** Applique l'échelle d'interface (zoom global piloté par --ui-scale, cf. netmap.css `body { zoom }`). */
+function applyUiScale(scale: number): void {
+  document.documentElement.style.setProperty("--ui-scale", String(scale || 1));
+}
 function docFileName(): string { return (store.meta.docName || "netmap").replace(/[\\/:*?"<>|]+/g, "_") + ".json"; }
 function downloadJson(filename: string, content: string): void {
   const blob = new Blob([content], { type: "application/json" });
@@ -66,11 +81,13 @@ function downloadJson(filename: string, content: string): void {
 }
 
 async function boot(): Promise<void> {
+  Pwa.register();   // app installable + chargement hors-ligne (service worker) — no-op en file:// / build dev
   await store.init();
   // En mode API, le SERVEUR fait autorité : on N'ENSEMENCE PAS (un newDocument pousserait un /snapshot
   // qui écraserait la base). En mode fichier, on sème le document par défaut si rien n'a été restauré.
-  if (!store.restored && !REST_MODE) await store.newDocument();
+  if (!store.restored && !REST_MODE && !VIEWER) await store.newDocument();
   applyTheme(prefs.theme);
+  applyUiScale(prefs.uiScale);   // échelle d'interface persistée (taille du texte)
 
   const root = document.getElementById("app");
   if (!root) return;
@@ -102,7 +119,7 @@ async function boot(): Promise<void> {
   const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { refreshChrome(); } };   // mutation modèle déjà suivie par la révision (store.onChange)
   // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
   // backend d'images selon le mode : IndexedDB (fichier, + compagnon .nmfb) · endpoints blob (REST). Cf. P2.
-  const imageBackend = REST_MODE ? new RestImageBackend(RUNTIME.apiBaseUrl) : new IdbImageBackend();
+  const imageBackend = REST_MODE ? new RestImageBackend(API_BASE_URL) : new IdbImageBackend();
   const imageStore = new ImageStore({ onDirty: () => { session.markDirty(); refreshChrome(); shell.refreshActive(); }, onUndoable: noteUndoable, backend: imageBackend });   // images HORS historique modèle, undo intégré à la timeline unifiée
   Forms.images = imageStore;   // singleton pour le picker d'image (faceEditor)
   imageStore.restoreLoadedKey();   // clé du bundle .nmfb actuellement en IndexedDB (persistée) — appariement json↔compagnon
@@ -157,6 +174,34 @@ async function boot(): Promise<void> {
     const obj: any = store.toJSON();
     if (imageStore.count() > 0) obj.faceImages = await imageStore.toLegacyArray();
     return JSON.stringify(obj, null, 2);
+  }
+  /** Déclenche le téléchargement d'un contenu (blob) sous `filename`. */
+  function downloadFile(filename: string, content: string, mime: string): void {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  /** EXPORT du document en JSON autonome (images inline) — disponible dans TOUS les modes (y compris API : version offline). */
+  async function exportJsonDownload(): Promise<void> {
+    downloadFile(docFileName(), await snapshotWithImages(), "application/json");
+    Notify.toast("Document exporté (" + docFileName() + ")");
+  }
+  /** EXPORT VISUALISEUR AUTONOME : récupère l'app (HTML mono-fichier inliné) et y EMBARQUE le document courant →
+      fichier .html LECTURE SEULE, consultable hors-ligne sans serveur (ouverture en file://). On retire la config
+      API et on injecte `window.__NETMAP_EMBED__` (le bundle bascule alors en mode viewer, cf. EMBED/VIEWER). */
+  async function exportStandalone(): Promise<void> {
+    let html: string;
+    try { html = await (await fetch(location.href, { cache: "no-store" })).text(); }
+    catch (e: any) { Notify.toast("Export HTML impossible (récupération de l'app) : " + ((e && e.message) || e), "err"); return; }
+    if (!/__NETMAP_EMBED__|<script/i.test(html)) { Notify.toast("Export HTML indisponible : l'app n'est pas en build autonome.", "err"); return; }
+    const json = (await snapshotWithImages()).split("</").join("<\\/");           // neutralise un éventuel </script> dans les données
+    html = html.replace(/<script>\s*window\.__NETMAP_CONFIG__[\s\S]*?<\/script>/i, "");   // retire la config API injectée par le serveur
+    const embed = "<script>window.__NETMAP_EMBED__=" + json + ";</script>";
+    html = html.replace(/<head([^>]*)>/i, (_m, a) => `<head${a}>${embed}`);
+    const fname = (store.meta.docName || "netmap").replace(/[\\/:*?"<>|]+/g, "_") + "-viewer.html";
+    downloadFile(fname, html, "text/html");
+    Notify.toast("Visualiseur autonome exporté (" + fname + ")");
   }
   async function writeToHandle(handle: any): Promise<void> {
     ensureFileId();
@@ -765,7 +810,7 @@ async function boot(): Promise<void> {
     if (!authorized) {
       // pas une app noire : on AFFICHE l'état sur l'écran d'accueil, avec un bouton Réessayer.
       const who = (me && me.user && (me.user.login || [me.user.prenom, me.user.nom].filter(Boolean).join(" "))) || "";
-      shell.showAccessDenied({ connected: !!(me && me.logged), user: who, onRetry: () => { void restBootstrap(); } });
+      shell.showAccessDenied({ connected: !!(me && me.logged), user: who, onRetry: () => { void restBootstrap(); }, loginUrl: (prefs.loginUrl && prefs.loginUrl.trim()) || INJECTED.loginUrl });
       return;   // n'ouvre aucun document tant que l'accès n'est pas autorisé
     }
     let docs: any[] = []; try { docs = await ra.listDocuments(); } catch { /* serveur injoignable */ }
@@ -791,6 +836,7 @@ async function boot(): Promise<void> {
     onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
     onRedo: () => { void doRedo(); },
     onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); dcView.onThemeChanged(); },
+    onUiScale: (value) => { prefs.uiScale = value; applyUiScale(prefs.uiScale); shell.setUiScale(prefs.uiScale); },
     onResetViewPrefs: () => {
       try { Object.keys(window.localStorage).filter((k) => k.startsWith("netmap.view3d")).forEach((k) => window.localStorage.removeItem(k)); } catch (_) { /* noop */ }
       dcView.resetView(); shell.refreshActive();   // force une restauration aux défauts à la prochaine activation
@@ -800,10 +846,28 @@ async function boot(): Promise<void> {
       store.meta.docName = name; await store.persistMeta(); session.markDirty(); refreshChrome();   // meta HORS historique
       if (REST_MODE && restDocId) { currentName = name; try { await (adapter as RestAdapter).renameDocument(restDocId, name); } catch (_) { /* registre best-effort */ } refreshChrome(); }
     },
-    onDataSource: (value) => {
-      if (value === "api") { Notify.toast("Source « API » pas encore disponible.", "err"); shell.setDataSource("local"); return; }
-      prefs.dataSource = "local"; refreshChrome();
+    onDataSource: async (value) => {
+      // Changement de mode = redémarrage de l'app (adapter/store recréés) → on persiste puis on RECHARGE.
+      const target = (value === "api") ? "api" : "local";
+      if (target === (REST_MODE ? "api" : "local")) { prefs.dataSource = target; return; }   // déjà ce mode → on mémorise juste le choix
+      const ok = await Dialog.confirm({
+        title: "Changer de mode de données ?",
+        message: "Passer en mode « " + (target === "api" ? "API (serveur)" : "Local (fichier)") + " » recharge l'application. Les modifications non enregistrées seront perdues.",
+        confirmLabel: "Changer et recharger", cancelLabel: "Annuler", danger: true,
+      });
+      if (!ok) { shell.setDataSource(prefs.dataSource); return; }   // rétablit la position du toggle
+      prefs.dataSource = target;
+      window.location.reload();
     },
+    onApiBaseUrl: async (url) => {
+      const clean = (url || "").trim() || "/api";
+      if (clean === ((prefs.apiBaseUrl && prefs.apiBaseUrl.trim()) || API_BASE_URL)) return;
+      prefs.apiBaseUrl = clean; shell.setApiBaseUrl(clean);
+      if (prefs.dataSource !== "api") return;   // sans effet tant qu'on n'est pas en mode API
+      const ok = await Dialog.confirm({ title: "Appliquer la nouvelle URL d'API ?", message: "Modifier l'URL de l'API (" + clean + ") recharge l'application.", confirmLabel: "Recharger", cancelLabel: "Plus tard" });
+      if (ok) window.location.reload();
+    },
+    onLoginUrl: (url) => { prefs.loginUrl = url; shell.setLoginUrl(prefs.loginUrl); },   // utilisée par le bouton « Connexion » du welcome
     onFileAccessMode: (value) => {
       if (value === "directory" && !HAS_FS_API) { Notify.toast("Mode dossier indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); shell.setFileAccessMode("file"); return; }
       prefs.fileAccessMode = (value === "directory") ? "directory" : "file";
@@ -822,6 +886,8 @@ async function boot(): Promise<void> {
     onAutosaveToggle: (on) => { setAutosave(on); },
     onAutosaveInterval: (sec) => { prefs.autosaveInterval = sec; applyAutosave(); },
     onReopenLast: () => { reopenLast(); },
+    onExportJson: () => { void exportJsonDownload(); },
+    onExportStandalone: () => { void exportStandalone(); },
     onDebugLog: (on) => { prefs.debugLog = on; Log.setEnabled(on); Notify.toast(on ? "Logs de débogage activés (console)" : "Logs de débogage désactivés"); },
   };
 
@@ -854,16 +920,23 @@ async function boot(): Promise<void> {
     const container = shell.addView({
       name, label, title: opts.title, subtitle: opts.subtitle, kind: opts.kind || "primary", parent: opts.parent, links: opts.links,
       count: () => store.all(cfg.collection).length,
-      addLabel: opts.addLabel, onAdd: opts.onAdd || (formFn ? () => formFn(null, () => shell.refreshActive()) : undefined),
+      addLabel: VIEWER ? undefined : opts.addLabel, onAdd: VIEWER ? undefined : (opts.onAdd || (formFn ? () => formFn(null, () => shell.refreshActive()) : undefined)),   // viewer : pas de création
       onShow: () => {
         if (!view) {
           const reRender = () => view!.render();
           view = new ListView(store, container, {
             ...cfg,
-            actions: { ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }), ...(opts.locate ? { locate: true } : {}) },
+            actions: VIEWER
+              ? { view: true, locate: !!opts.locate }   // viewer : consultation + localisation seulement (pas d'édition/clone/suppression)
+              : { ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }), ...(opts.locate ? { locate: true } : {}) },
             onAction: async (act, id) => {
               if (act === "locate" && opts.locate) { shell.switchView("datacenter"); dcView.locate(opts.locate, id); dcView.setReturnAction(() => shell.switchView(name)); return; }
-              if (act === "view") { if (cfg.collection === "equipments") Forms.equipmentDetail(store, formHost, id, reRender); else openDetail(cfg.collection, id); return; }
+              if (act === "view") {
+                if (cfg.collection === "equipments") Forms.equipmentDetail(store, formHost, id, reRender);
+                else if (cfg.collection === "racks") Forms.rackDetail(store, formHost, id, reRender);
+                else openDetail(cfg.collection, id);
+                return;
+              }
               if (act === "edit") { formFn?.(id, reRender); return; }
               if (act === "clone") {
                 const c = cfg.collection === "equipments" ? await store.cloneEquipment(id) : await store.cloneSimple(cfg.collection, id);
@@ -937,6 +1010,7 @@ async function boot(): Promise<void> {
   dcView = new DatacenterView(store, dcStage, {
     setDirty: () => { refreshChrome(); },
     openRackForm: (id) => Forms.rack(store, formHost, id, () => shell.refreshActive()),
+    openRackDetail: (id) => Forms.rackDetail(store, formHost, id, () => shell.refreshActive()),
     openEquipmentDetail: (id) => Forms.equipmentDetail(store, formHost, id, () => shell.refreshActive()),
     openCableForm: (id, opts) => Forms.cable(store, formHost, id, () => shell.refreshActive(), opts),
     assignSlot: (rackId, u, side, height, onDone) => Forms.assignSlot(store, formHost, rackId, u, side, height, onDone),
@@ -1053,9 +1127,12 @@ async function boot(): Promise<void> {
   });
 
   shell.build();
-  shell.setDataSource(REST_MODE ? "api" : prefs.dataSource);
+  shell.setDataSource(REST_MODE ? "api" : "local");   // position du toggle = mode EFFECTIF
+  shell.setApiBaseUrl((prefs.apiBaseUrl && prefs.apiBaseUrl.trim()) || API_BASE_URL);
+  shell.setLoginUrl(prefs.loginUrl);
   shell.setFileAccessMode(prefs.fileAccessMode);
   shell.setDebugLog(prefs.debugLog); Log.setEnabled(prefs.debugLog);
+  shell.setUiScale(prefs.uiScale);
   shell.setRestMode(REST_MODE);   // mode API : masque les contrôles fichier (cf. docs/rest-migration.md)
   // (l'auth SSO + la pastille utilisateur sont gérées par restBootstrap, au boot)
 
@@ -1064,10 +1141,14 @@ async function boot(): Promise<void> {
   const refreshChrome = () => {
     session.setFile(!!(currentHandle && HAS_FS_API)); session.setAutosave(prefs.autosave);   // synchronise le contexte de save
     shell.setDocName(store.meta.docName || "");
-    shell.setStatus({
-      file: currentName || (store.meta.docName ? docFileName() : "— en mémoire —"),
-      release: APP_RELEASE, source: prefs.dataSource === "api" ? "API" : adapter.label, entities: store.totalCount(), lastSave: "—",
-    });
+    // Mode API : la barre de statut est masquée (cf. Shell.setRestMode) → inutile de la peupler. On saute donc
+    // setStatus, qui n'aurait aucun effet visible (champs fichier/source/sauvegarde sans objet côté serveur).
+    if (!REST_MODE) {
+      shell.setStatus({
+        file: currentName || (store.meta.docName ? docFileName() : "— en mémoire —"),
+        release: APP_RELEASE, source: prefs.dataSource === "api" ? "API" : adapter.label, entities: store.totalCount(), lastSave: "—",
+      });
+    }
     // mode API : pas d'undo client (le serveur fait autorité ; écritures immédiates) → boutons désactivés.
     shell.setUndoRedo(!REST_MODE && (store.canUndo() || imageStore.canUndo()), !REST_MODE && redoOrder.length > 0 && (store.canRedo() || imageStore.canRedo()));
     shell.setSaveState(session.state());
@@ -1131,9 +1212,26 @@ async function boot(): Promise<void> {
 
   applyAutosave();        // initialise l'état auto-save + le popover
   refreshChrome();
-  shell.switchView("equipements");
+  // restaure l'onglet BOOKMARKÉ depuis l'URL (#nom) si valide, sinon l'onglet par défaut.
+  const bookmarkedView = (typeof location !== "undefined") ? decodeURIComponent(location.hash.replace(/^#/, "")) : "";
+  shell.switchView(shell.hasView(bookmarkedView) ? bookmarkedView : "equipements");
   booted = true;
 
+  // VISUALISEUR AUTONOME : charge le document EMBARQUÉ et passe en LECTURE SEULE (ni réseau ni accueil).
+  if (VIEWER) {
+    shell.hideWelcome();
+    try {
+      await store.replaceAll(EMBED);
+      if (Array.isArray(EMBED.faceImages)) await imageStore.replaceAllFromLegacy(EMBED.faceImages); else await imageStore.clearAll();
+    } catch (e) { console.error(e); Notify.toast("Document embarqué illisible", "err"); }
+    resetUndoTimeline();
+    document.body.classList.add("viewer-mode");   // interface allégée (cf. netmap.css) + édition bloquée
+    modal.editLocked = true;                       // bloque toute modale d'ÉDITION (les fiches restent consultables)
+    if (store.meta.docName) shell.setDocName(store.meta.docName);
+    refreshChrome(); shell.refreshActive();
+    (window as any).__NETMAP__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
+    return;
+  }
   // ÉCRAN D'ACCUEIL (mode FICHIER uniquement) : au (re)chargement le handle FS est perdu → on force une
   // ré-interaction pour le raccrocher. En mode API, les données viennent du serveur au boot → pas d'accueil.
   if (REST_MODE) {

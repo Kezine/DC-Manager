@@ -40,6 +40,7 @@ import {
 import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS } from "./shared";
 import type { FormHost } from "./shared";
 import { CableForms } from "./CableForms";
+import { EntityViz } from "../EntityViz";
 
 export class RackForms extends CableForms {
   static rack(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
@@ -206,6 +207,64 @@ export class RackForms extends CableForms {
       },
     });
     setTimeout(() => nameI.focus(), 30);
+  }
+
+  /** FICHE D'INFO d'une BAIE (lecture seule, riche) — en miroir de equipmentDetail : identité, emplacement,
+      dimensions, portes, occupation (U libres/contigus), liste des équipements montés, puis « Localiser » /
+      « Modifier ». Remplace l'ancien listing de champs générique. */
+  static rackDetail(store: Store, host: FormHost, id: string, onChanged?: () => void): void {
+    const rk: any = store.get("racks", id);
+    if (!rk) { Notify.toast("Baie introuvable", "err"); return; }
+    const scene = new RackScene(store);
+    const root = document.createElement("div");
+    const grid = document.createElement("div"); grid.className = "detail-grid";
+    const add = (label: string, html: string) => { grid.appendChild(this.dt(label)); grid.appendChild(this.dd(html)); };
+
+    add("Nom", Html.escape(rk.name || "(sans nom)"));
+    const dc: any = rk.datacenter_id ? store.get("datacenters", rk.datacenter_id) : null;
+    add("Emplacement", EntityViz.rackLocation(store, rk));   // même fil d'Ariane (icônes Bât. › Étage › Salle) que les listings
+    if (dc && (rk.dc_x != null || rk.dc_y != null)) add("Position en salle", `${rk.dc_x != null ? rk.dc_x : "?"} ; ${rk.dc_y != null ? rk.dc_y : "?"} mm · orientation ${Normalize.rackOrientation(rk.orientation)}°`);
+    add("Taille", `<span class="pill">${rk.u_count} U</span> · ${rk.sides === "dual" ? "Double face" : "Simple face"}`);
+    add("Dimensions", `${rk.width_mm || RACK_WIDTH_DEFAULT} × ${RackGeometry.physHeight(rk)} × ${rk.depth || RACK_DEPTH_DEFAULT} mm <span style="color:var(--fg-dimmer)">(l × h × p)</span> · cage ${RackGeometry.cageDepth(rk)} mm`);
+    const doors: string[] = [];
+    if (rk.door_front && rk.door_front.enabled) doors.push("avant");
+    if (rk.door_rear && rk.door_rear.enabled) doors.push("arrière");
+    add("Portes", doors.length ? doors.map((d) => `<span class="pill">${d}</span>`).join(" ") : `<span style="color:var(--fg-dimmer)">aucune</span>`);
+    const free = scene.freeUInfo(rk.id);
+    add("Occupation", `<span class="pill">${scene.occupancyCount(rk.id)} occupé(s)</span> · <span class="pill">${free.free} U libres</span> · <span class="pill">${free.contig} U contigus</span> <span style="color:var(--fg-dimmer)">/ ${free.total} U</span>`);
+    add("Description", rk.description ? Html.escape(rk.description) : "—");
+    add("Créé", Html.escape(Format.dateTime(rk.created_date)));
+    add("Modifié", Html.escape(Format.dateTime(rk.updated_date)));
+    root.appendChild(grid);
+
+    // équipements montés dans la baie (triés par U)
+    const eqs = store.equipmentsOfRack(rk.id).slice().sort((a: any, b: any) => (a.rack_u || 0) - (b.rack_u || 0));
+    const dE = document.createElement("div"); dE.className = "section-divider"; dE.textContent = "Équipements (" + eqs.length + ")"; root.appendChild(dE);
+    if (eqs.length) {
+      const tw = document.createElement("div"); tw.className = "table-wrap";
+      const rows = eqs.map((e: any) => {
+        const uPos = (e.placement_mode === "rack" && e.rack_u != null)
+          ? ("U" + e.rack_u + ((e.u_height || 1) > 1 ? "–U" + (e.rack_u + (e.u_height || 1) - 1) : ""))
+          : (e.placement_mode === "side" ? "latéral" : e.placement_mode === "wall" ? "mural" : "—");
+        return `<tr><td class="cell-name">${Html.escape(e.name || "(équip.)")}</td><td><span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span></td><td style="font-family:var(--mono)">${Html.escape(uPos)}</td><td class="cell-actions">${host.locate ? `<button class="row-btn" data-eq-loc="${e.id}" title="Localiser en 3D">📍</button>` : ""}<button class="row-btn" data-eq-view="${e.id}" title="Détails">ⓘ</button></td></tr>`;
+      }).join("");
+      tw.innerHTML = `<table><thead><tr><th>Équipement</th><th>Type</th><th>U</th><th style="text-align:right;">Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+      root.appendChild(tw);
+      tw.querySelectorAll("[data-eq-view]").forEach((b) => { (b as HTMLElement).onclick = () => this.equipmentDetail(store, host, (b as HTMLElement).dataset.eqView!, onChanged); });
+      tw.querySelectorAll("[data-eq-loc]").forEach((b) => { (b as HTMLElement).onclick = () => host.locate?.("equipment", (b as HTMLElement).dataset.eqLoc!, () => this.rackDetail(store, host, rk.id, onChanged)); });
+    } else { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = "Baie vide."; root.appendChild(e); }
+
+    // actions : Localiser en 3D + Modifier
+    const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
+    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.textContent = "📍 Localiser en 3D"; locBtn.onclick = () => host.locate!("rack", rk.id, () => this.rackDetail(store, host, rk.id, onChanged)); actions.appendChild(locBtn); }
+    if (!this.isViewer()) {   // viewer : pas de bouton « Modifier »
+      const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = "Modifier";
+      editBtn.onclick = () => this.rack(store, host, rk.id, onChanged);
+      actions.appendChild(editBtn);
+    }
+    root.appendChild(actions);
+
+    host.openModal({ title: "Détail de la baie", subtitle: Html.escape(rk.name || ""), body: root, hideFooter: true, wide: true });
   }
 
   /** SITE (bâtiment) — niveau racine de la hiérarchie physique : nom · adresse · description.

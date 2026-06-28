@@ -111,6 +111,8 @@ export class FormBase {
   /* ---- détail d'équipement (fiche riche : identité · façade · ports · agrégats · câbles + Modifier) ---- */
   protected static dt(label: string): HTMLElement { const e = document.createElement("div"); e.className = "dt"; e.textContent = label; return e; }
   protected static dd(html: string): HTMLElement { const e = document.createElement("div"); e.className = "dd"; e.innerHTML = html; return e; }
+  /** Mode VISUALISEUR autonome (lecture seule) ? → on retire les entrées d'ÉDITION des fiches (façade, « Modifier »…). */
+  protected static isViewer(): boolean { return typeof document !== "undefined" && document.body.classList.contains("viewer-mode"); }
   /** Bits de localisation d'un équipement (hérités du rack / de la salle, ou saisis). */
   protected static equipLocationBits(store: Store, e: any): string[] {
     const bits = (loc: any, fl: any, rm: any) => [store.siteLabel(loc || ""), fl, rm].filter((x) => x && x !== "—");

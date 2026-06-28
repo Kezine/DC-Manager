@@ -5,6 +5,7 @@ import { Dialog } from "../../ui/Dialog";
 import { Notify } from "../../ui/Notify";
 import { ContextMenu } from "../../ui/ContextMenu";
 import type { CtxSection } from "../../ui/ContextMenu";
+import { TouchNav } from "../../ui/TouchNav";
 import { ImageExport } from "../../ui/ImageExport";
 import type { ExportOptions } from "../../ui/ImageExport";
 import { Html } from "../../core/Html";
@@ -85,6 +86,7 @@ export class DcBase {
   selCables = new Set<string>();         // câbles explicitement affichés quand showAllCables = false
   searchTerm = "";                       // surlignage + filtrage des listes (équipements / câbles)
   focusEqId: string | null = null;       // équipement ciblé (surligné + caméra recentrée)
+  focusPortId: string | null = null;     // port ciblé (surligné comme l'équipement) lors d'une localisation de port
   // contrôles présents mais INERTES tant que la fonctionnalité n'est pas portée (cf. panneau « à venir »).
   showFaceImages = true; showDoors = true; showDoorSwing = false; showFloorGrid = true; cablePortNormal = false;
   powerBoltSpacingMm = 300;             // espacement (mm) des éclairs ⚡ le long des câbles power
@@ -130,13 +132,31 @@ export class DcBase {
       parent.insertBefore(row, mount);
       row.appendChild(mount);
       this.sideEl = document.createElement("div"); this.sideEl.className = "dc-side";
-      row.appendChild(this.sideEl);
+      // En GRAND écran : `.dc-side-modal` est `display:contents` → `.dc-side` reste la colonne latérale inline
+      // (rendu inchangé). En RESPONSIVE : `.dc-row.show-side` la transforme en MODALE centrée (backdrop + bouton
+      // fermer), ouverte par l'icône « réglages 3D » de l'overlay — sans empiéter sur le rendu de la vue.
+      const sideModal = document.createElement("div"); sideModal.className = "dc-side-modal";
+      const closeBtn = document.createElement("button"); closeBtn.type = "button"; closeBtn.className = "btn btn-ghost btn-sm dc-side-close"; closeBtn.textContent = "✕"; closeBtn.title = "Fermer";
+      closeBtn.onclick = () => this.rowEl && this.rowEl.classList.remove("show-side");
+      sideModal.append(closeBtn, this.sideEl);
+      const backdrop = document.createElement("div"); backdrop.className = "dc-side-backdrop";
+      backdrop.onclick = () => this.rowEl && this.rowEl.classList.remove("show-side");
+      row.append(sideModal, backdrop);
       this.rowEl = row;
     }
     // remplir le viewport verticalement (sans déborder) ; recalcul au redimensionnement.
     window.addEventListener("resize", () => {
       clearTimeout(this._resizeT);
-      this._resizeT = setTimeout(() => { if (this.stage.offsetParent !== null) { this.fitHeight(); this.render(); } }, 120);
+      this._resizeT = setTimeout(() => {
+        if (this.stage.offsetParent === null) return;
+        // MOBILE : l'apparition du clavier virtuel déclenche un `resize`. Reconstruire le panneau (render →
+        // renderSide) détruirait le champ EN COURS DE SAISIE (perte du focus + du texte, en boucle). Si un champ
+        // est focalisé, on se contente de re-dimensionner la rangée sans reconstruire la scène/le panneau.
+        const ae = document.activeElement as HTMLElement | null;
+        const typing = !!(ae && (ae.isContentEditable || /^(input|textarea|select)$/i.test(ae.tagName)));
+        this.fitHeight();
+        if (!typing) this.render();
+      }, 120);
     });
     // entrée/sortie de plein écran → re-cadrer (la rangée change de taille)
     document.addEventListener("fullscreenchange", () => { this.fitHeight(); this.render(); });
@@ -281,6 +301,14 @@ export class DcBase {
       }, 40);
     }, true);
     svg.addEventListener("wheel", (ev) => this.onWheel(ev), { passive: false });
+    // navigation TACTILE 2D (Plan de salle / Plan d'étage) : 1 doigt = pan · 2 doigts = pinch-zoom.
+    // Le tap d'1 doigt n'est pas intercepté → la sélection (baie/équipement) passe par les events souris de compat.
+    TouchNav.attach(svg, {
+      panBy: (dx, dy) => this.panByClient(dx, dy),
+      zoomAt: (f, x, y) => this.zoomAtClient(f, x, y),
+      panStart: () => svg.classList.add("panning"),
+      panEnd: () => svg.classList.remove("panning"),
+    });
     this.stage.insertBefore(svg, this.stage.firstChild);
     return gRoot;
   }
@@ -548,7 +576,7 @@ export class DcBase {
     this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1;
     this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set();
     this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeBuild = null; this.measure = null;
-    this.selCables = new Set(); this.searchTerm = ""; this.focusEqId = null;
+    this.selCables = new Set(); this.searchTerm = ""; this.focusEqId = null; this.focusPortId = null;
     this.view = (o.view === "top" || o.view === "floor") ? o.view : "3d";
     // toggles persistés
     DcBase.TOGGLE_KEYS.forEach((k) => { if (typeof o[k] === "boolean") (this as any)[k] = o[k]; });

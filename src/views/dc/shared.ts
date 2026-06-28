@@ -24,6 +24,7 @@ export interface Drawable { depth: number; node: SVGElement; }
 export interface DatacenterHost {
   setDirty?(v: boolean): void;
   openRackForm?(id: string): void;
+  openRackDetail?(id: string): void;          // fiche d'INFO d'une baie (clic) — l'édition reste openRackForm
   openEquipmentDetail?(id: string): void;
   openCableForm?(id: string | null, opts?: any): void;
   openWaypointForm?(id: string | null, opts?: any): void;

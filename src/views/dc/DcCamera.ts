@@ -33,14 +33,31 @@ import { DcBase } from "./DcBase";
 const ICON_RULER = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="8.5" width="19" height="7" rx="1"/><line x1="6.5" y1="8.5" x2="6.5" y2="12"/><line x1="10.5" y1="8.5" x2="10.5" y2="13"/><line x1="14.5" y1="8.5" x2="14.5" y2="12"/><line x1="18.5" y1="8.5" x2="18.5" y2="13"/></svg>';
 const ICON_ORTHO = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="4" x2="6" y2="20"/><line x1="18" y1="4" x2="18" y2="20"/><line x1="6" y1="9" x2="18" y2="9"/><line x1="6" y1="15" x2="18" y2="15"/></svg>';
 const ICON_PERSP = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><line x1="9" y1="4" x2="3" y2="20"/><line x1="15" y1="4" x2="21" y2="20"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="5.5" y1="15" x2="18.5" y2="15"/></svg>';
+/* Toggles RESPONSIVE (mobile/tablette) : « réglages 3D » (ouvre le panneau latéral en drawer) et « outils »
+   (révèle l'overlay zoom/mesure/export, centré verticalement). Masqués en grand écran (cf. .gz-resp-toggle). */
+const ICON_GEAR = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+/* Icônes des POINTS DE VUE caméra : un CUBE 3D (isométrique) dont la FACE regardée est soulignée d'un liseré
+   ORANGE (accent) — indique le sens de visualisation. Dessus / Face / Arrière (face du fond) / Côté (face droite).
+   Le filaire du cube est en `currentColor` atténué ; la face active est tracée + teintée à l'accent. */
+const CUBE_WIRE = "M4 9L14 9L14 19L4 19Z M4 9L9 4L19 4L14 9 M14 19L19 14L19 4";
+const cubeIcon = (faceD: string): string =>
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+  + '<path opacity="0.45" d="' + CUBE_WIRE + '"/>'
+  + '<path d="' + faceD + '" stroke-width="2" style="stroke:var(--accent);fill:var(--accent);fill-opacity:0.22"/></svg>';
+const ICON_VIEW_TOP = cubeIcon("M4 9L9 4L19 4L14 9Z");     // face du dessus (losange supérieur)
+const ICON_VIEW_FRONT = cubeIcon("M4 9L14 9L14 19L4 19Z"); // face avant (carré frontal)
+const ICON_VIEW_SIDE = cubeIcon("M14 9L19 4L19 14L14 19Z"); // face droite (losange latéral)
+const ICON_VIEW_BACK = cubeIcon("M9 4L19 4L19 14L9 14Z");   // face arrière (panneau du fond)
 
 export class DcCamera extends DcBase {
 
-  /** Overlay de contrôles SUPERPOSÉ au stage (zoom · recentrage · points de vue caméra). Réplique de la source. */
+  /** BANDEAU de contrôles en HAUT du canevas (zoom · recentrage · points de vue caméra · outils). Disposé en
+      ligne (cf. .dc-control-bar) ; défilable horizontalement sur petit écran. L'icône « réglages 3D » (responsive)
+      ouvre le panneau latéral en modale. */
   protected buildControls(): void {
-    const c = document.createElement("div"); c.className = "graph-zoom-controls"; this.controlsEl = c;
+    const c = document.createElement("div"); c.className = "graph-zoom-controls dc-control-bar"; this.controlsEl = c;
     c.innerHTML = `
-      <button class="btn btn-ghost btn-sm" data-act="back" title="Retour à la vue précédente" style="display:none">← Retour</button>
+      <button class="btn btn-sm dc-back-btn" data-act="back" title="Retour à la vue précédente" aria-label="Retour" style="display:none"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M11 18l-6-6 6-6"/></svg></button>
       <span class="gz-sep" data-back-sep style="display:none"></span>
       <button class="btn btn-ghost btn-sm" data-act="in" title="Zoom avant" aria-label="Zoom avant">+</button>
       <button class="btn btn-ghost btn-sm" data-act="out" title="Zoom arrière" aria-label="Zoom arrière">−</button>
@@ -49,11 +66,10 @@ export class DcCamera extends DcBase {
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="12" y1="1.5" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22.5" y2="12"/></svg>
       </button>
       <div class="dc-cam-presets" data-cam-presets title="Point de vue">
-        <button class="btn btn-ghost btn-sm" data-preset="top" title="Vue de dessus">Dessus</button>
-        <button class="btn btn-ghost btn-sm" data-preset="front" title="Vue de face">Face</button>
-        <button class="btn btn-ghost btn-sm" data-preset="back" title="Vue de l'arrière">Arrière</button>
-        <button class="btn btn-ghost btn-sm" data-preset="side" title="Vue de côté">Côté</button>
-        <button class="btn btn-ghost btn-sm" data-preset="iso" title="Vue 3D isométrique">3D</button>
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="top" title="Vue de dessus" aria-label="Vue de dessus">${ICON_VIEW_TOP}</button>
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="front" title="Vue de face" aria-label="Vue de face">${ICON_VIEW_FRONT}</button>
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="back" title="Vue de l'arrière" aria-label="Vue de l'arrière">${ICON_VIEW_BACK}</button>
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="side" title="Vue de côté" aria-label="Vue de côté">${ICON_VIEW_SIDE}</button>
       </div>
       <button class="btn btn-ghost btn-sm" data-act="fs" title="Plein écran" aria-label="Plein écran">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>
@@ -64,9 +80,12 @@ export class DcCamera extends DcBase {
       <span class="gz-sep"></span>
       <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="eimg" title="Exporter une image (SVG / JPEG)…" aria-label="Exporter une image">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-      </button>`;
+      </button>
+      <button class="btn btn-ghost btn-sm gz-resp-toggle" data-act="resp-opts" title="Réglages 3D / panneau latéral" aria-label="Réglages 3D">${ICON_GEAR}</button>`;
     c.addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest("button"); if (!b) return;
+      // Toggle RESPONSIVE : « réglages 3D » → ouvre/ferme le panneau latéral en modale (cf. .dc-row.show-side).
+      if ((b as HTMLElement).dataset.act === "resp-opts") { if (this.rowEl) this.rowEl.classList.toggle("show-side"); return; }
       const gl = this.view === "3d" && this.useWebGL && this._three;   // moteur Three SEULEMENT en vue 3D-WebGL ; en 2D (Dessus/Étage) → caméra SVG (le moteur Three persiste mais est détaché)
       const preset = (b as HTMLElement).dataset.preset; if (preset) { if (gl) this._three.setPreset(preset); else this.setCamPreset(preset); return; }
       const a = (b as HTMLElement).dataset.act;
@@ -240,13 +259,23 @@ export class DcCamera extends DcBase {
   /* ---- interactions ---- */
   protected onWheel(ev: WheelEvent): void {
     ev.preventDefault();
+    this.zoomAtClient(ev.deltaY < 0 ? 1.1 : 1 / 1.1, ev.clientX, ev.clientY);
+  }
+
+  /** Zoom 2D autour d'un point écran (molette OU pinch tactile). Mêmes bornes que la molette. */
+  protected zoomAtClient(factor: number, clientX: number, clientY: number): void {
     if (this.scale == null || !this.svg) return;
-    const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
-    const r = this.svg.getBoundingClientRect(), px = ev.clientX - r.left, py = ev.clientY - r.top;
+    const r = this.svg.getBoundingClientRect(), px = clientX - r.left, py = clientY - r.top;
     const wx = (px - this.tx) / this.scale, wy = (py - this.ty) / this.scale;
     this.scale = Math.max(this.minScale(this.current()), Math.min(6, this.scale * factor));
     this.tx = px - wx * this.scale; this.ty = py - wy * this.scale;
     this.applyTransform();   // 2D (Plan de salle / Plan d'étage) — la 3D (WebGL) gère son propre zoom
+  }
+
+  /** Pan 2D incrémental (glisser tactile à 1 doigt / centroïde à 2 doigts). */
+  protected panByClient(dx: number, dy: number): void {
+    if (this.scale == null) return;
+    this.tx += dx; this.ty += dy; this.applyTransform();
   }
 
   /** Pan 2D (vue Dessus) : translation directe de tx/ty. */
