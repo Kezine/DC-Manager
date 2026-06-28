@@ -177,7 +177,10 @@ async function boot(): Promise<void> {
   }
   /** Déclenche le téléchargement d'un contenu (blob) sous `filename`. */
   function downloadFile(filename: string, content: string, mime: string): void {
-    const blob = new Blob([content], { type: mime });
+    downloadBlob(filename, new Blob([content], { type: mime }));
+  }
+  /** Déclenche le téléchargement d'un Blob déjà construit (export binaire : bundle d'images .nmfb…). */
+  function downloadBlob(filename: string, blob: Blob): void {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -268,6 +271,49 @@ async function boot(): Promise<void> {
     if (!name) return;
     try { const fh = await dir.getFileHandle(name); await associateCompanion(fh); }
     catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
+  }
+
+  /* ---- IMPORT / EXPORT EXPLICITE de la BIBLIOTHÈQUE d'images (.nmfb) — portage manuel, disponible dans TOUS les
+         modes (fichier ET API). Distinct du compagnon (mode fichier) qui, lui, s'apparie au document et s'enregistre
+         automatiquement à côté du .json. Ici : un export téléchargeable + un import qui ÉCRASE la bibliothèque. ---- */
+  /** EXPORT : télécharge toute la bibliothèque au format `.nmfb` (blobs hydratés, donc fonctionne aussi en REST). */
+  async function exportFacesLibrary(): Promise<void> {
+    if (imageStore.count() === 0) { Notify.toast("Aucune image de façade à exporter.", "err"); return; }
+    try {
+      const blob = await imageStore.serializeBundle(store.meta.facesKey || null);
+      const base = (store.meta.docName || "dc-manager").replace(/[\\/:*?"<>|]+/g, "_");
+      downloadBlob(base + "-faces.nmfb", blob);
+      Notify.toast(imageStore.count() + " image(s) exportée(s) → " + base + "-faces.nmfb");
+    } catch (e: any) { Notify.toast("Export des images impossible : " + ((e && e.message) || e), "err"); }
+  }
+  /** IMPORT : ÉCRASE la bibliothèque par le contenu d'un `.nmfb` (ids conservés). Avertit AVANT : les références
+      d'équipement vers des images absentes du fichier importé deviennent orphelines → faces à ré-assigner. */
+  async function importFacesLibrary(): Promise<void> {
+    const existing = imageStore.count();
+    const ok = await Dialog.confirm({
+      title: "Importer des images (écrase la bibliothèque) ?",
+      message: (existing ? `La bibliothèque actuelle (${existing} image(s)) sera ENTIÈREMENT REMPLACÉE par le contenu du fichier. ` : "")
+        + "Les équipements dont l'image n'existe pas dans le fichier importé perdront leur face : il faudra RÉ-ASSIGNER ces faces ensuite. Continuer ?",
+      confirmLabel: "Importer et écraser", cancelLabel: "Annuler", danger: true,
+    });
+    if (!ok) return;
+    let buf: ArrayBuffer | null = null;
+    if (HAS_FS_API) {
+      try { const [fh] = await W.showOpenFilePicker({ startIn: currentHandle || undefined, types: FACES_TYPES }); buf = await (await fh.getFile()).arrayBuffer(); }
+      catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Fichier non ouvert : " + (e.message || e), "err"); return; }
+    } else {
+      const file = await new Promise<File | null>((resolve) => {
+        const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".nmfb,application/octet-stream";
+        inp.onchange = () => resolve((inp.files && inp.files[0]) || null); inp.click();
+      });
+      if (!file) return; buf = await file.arrayBuffer();
+    }
+    if (!buf) return;
+    try {
+      const n = await imageStore.importBundle(buf);   // remplace + conserve les ids + marque modifié
+      shell.refreshActive();
+      Notify.toast(n + " image(s) importée(s). Ré-assignez les faces des équipements concernés.");
+    } catch (e: any) { Notify.toast("Import des images impossible : " + ((e && e.message) || e), "err"); }
   }
   /** (Ré)écrit le compagnon. Sans handle connu, en demande un (suggéré à côté du .json). */
   async function saveCompanionFaces(jsonHandle: any): Promise<void> {
@@ -1052,7 +1098,12 @@ async function boot(): Promise<void> {
       name: "faceimages", label: "Images de façade", subtitle: "Bibliothèque d'images de façade (JPEG/PNG/WebP) partagées par référence. Stockées hors document (IndexedDB).",
       kind: "secondary", parent: "equipements", links: [],
       count: () => imageStore.count(),
-      extraActions: REST_MODE ? [] : [{ label: "Ouvrir un fichier de faces", title: "Charger un compagnon d'images .nmfb (mode dossier : liste le dossier ; mode fichier : sélecteur)", onClick: () => openFacesFile() }],
+      extraActions: [
+        { label: "Importer des images…", title: "Charger une bibliothèque d'images .nmfb — ÉCRASE la bibliothèque actuelle ; les faces des équipements concernés seront à ré-assigner", onClick: () => importFacesLibrary() },
+        { label: "Exporter les images", title: "Télécharger toute la bibliothèque d'images au format .nmfb (portable, ré-importable dans un autre document)", onClick: () => exportFacesLibrary() },
+        // Compagnon (mode fichier uniquement) : .nmfb APPARIÉ au document, rechargé/enregistré automatiquement à côté du .json.
+        ...(REST_MODE ? [] : [{ label: "Ouvrir un fichier de faces", title: "Charger le compagnon d'images .nmfb apparié au document (mode dossier : liste le dossier ; mode fichier : sélecteur)", onClick: () => openFacesFile() }]),
+      ],
       addLabel: "+ Image", onAdd: () => Forms.faceImage(imageStore, store, formHost, null, () => shell.refreshActive()),
       onShow: () => {
         if (!view) {

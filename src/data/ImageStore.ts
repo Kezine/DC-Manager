@@ -176,12 +176,39 @@ export class ImageStore {
     (manifest.images || []).forEach((im: any) => { const n = im.bytes || 0; const blob = new Blob([buf.slice(off, off + n)], { type: im.type || "application/octet-stream" }); off += n; recs.push({ id: im.id, name: im.name || "", u_height: im.u_height || 1, face: im.face, description: im.description || "", type: im.type || "", blob }); });
     return { key: manifest.key || null, recs };
   }
-  async serializeBundle(key: string | null): Promise<Blob> { return ImageStore.buildBundle(await this.getAll(), key); }
+  /** Récupère TOUS les enregistrements avec leur blob HYDRATÉ. En mode REST, `getAll()` ne ramène que les
+      métadonnées (blob null, `url` = endpoint serveur) → on télécharge ici les binaires manquants pour pouvoir
+      les sérialiser. En mode fichier, les blobs sont déjà présents (IndexedDB) → aucun téléchargement. */
+  private async getAllWithBlobs(): Promise<ImageRec[]> {
+    const recs = await this.getAll();
+    for (const r of recs) {
+      if (!r.blob && r.url) {
+        try { const res = await fetch(r.url, { credentials: "include" }); if (res.ok) { r.blob = await res.blob(); if (!r.type) r.type = r.blob.type; } }
+        catch (_) { /* binaire illisible → l'image sera absente du bundle (manifeste cohérent : bytes = 0) */ }
+      }
+    }
+    return recs;
+  }
+  /** Sérialise la bibliothèque en bundle `.nmfb` (blobs hydratés, donc valable AUSSI en mode REST). Sert le
+      compagnon (mode fichier) ET l'export EXPLICITE de la bibliothèque (portage manuel, tous modes). */
+  async serializeBundle(key: string | null): Promise<Blob> { return ImageStore.buildBundle(await this.getAllWithBlobs(), key); }
   async loadBundle(source: ArrayBuffer | Blob): Promise<number> {
     const buf = (source instanceof ArrayBuffer) ? source : await source.arrayBuffer();
     const { key, recs } = ImageStore.parseBundle(buf);
     this.setLoadedKey(key);
     await this.replaceAll(recs);
+    return recs.length;
+  }
+  /** IMPORT EXPLICITE (portage manuel, tous modes) : REMPLACE toute la bibliothèque par le contenu du bundle, en
+      CONSERVANT les ids des images. Découplé du compagnon : ne touche PAS la clé d'appariement (lastLoadedKey) du
+      document courant. Conséquence assumée : les références d'équipement (face_image_*_id) vers des images ABSENTES
+      du bundle deviennent orphelines → l'appelant doit avertir que les faces concernées sont à RÉ-ASSIGNER.
+      Marque l'état « modifié » (en mode fichier, le compagnon sera réécrit à la prochaine sauvegarde). */
+  async importBundle(source: ArrayBuffer | Blob): Promise<number> {
+    const buf = (source instanceof ArrayBuffer) ? source : await source.arrayBuffer();
+    const { recs } = ImageStore.parseBundle(buf);   // lève si signature NMFB invalide
+    await this.replaceAll(recs);
+    this.markDirty();
     return recs.length;
   }
 }

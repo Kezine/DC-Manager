@@ -829,6 +829,49 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck(threw, "parseBundle : signature NMFB invalide → exception");
   }
 
+  console.log("\n• ImageStore : import/export EXPLICITE de la bibliothèque (.nmfb)");
+  {
+    // Stubs navigateur manquants pour exercer les méthodes d'INSTANCE (miroir → objectURL) hors navigateur.
+    global.URL = global.URL || {};
+    global.URL.createObjectURL = () => "blob:stub"; global.URL.revokeObjectURL = () => {};
+    // Backend mémoire (remplace IndexedDB/REST) : Map id → ImageRec (blob conservé).
+    const mkMemBackend = () => { const m = new Map(); return {
+      put: async (rec) => { m.set(rec.id, rec); },
+      del: async (id) => { m.delete(id); },
+      getRaw: async (id) => m.get(id) || null,
+      getAll: async () => Array.from(m.values()),
+      clear: async () => { m.clear(); },
+      _map: m,
+    }; };
+    const backend = mkMemBackend();
+    const store = new ImageStore({ backend });
+    // état de départ : une image "old" en bibliothèque
+    await store.add({ id: "old", name: "ancienne", u_height: 1, face: "front", blob: new Blob([new Uint8Array([9])], { type: "image/png" }) });
+    ck(store.has("old") && store.count() === 1, "pré-import : bibliothèque contient « old »");
+
+    // bundle importé : 2 images aux ids "x"/"y" (issu d'un AUTRE document)
+    const bundleRecs = [
+      { id: "x", name: "x", u_height: 2, face: "rear", description: "", type: "image/png", blob: new Blob([new Uint8Array([1, 2])], { type: "image/png" }) },
+      { id: "y", name: "y", u_height: 1, face: "front", description: "", type: "image/jpeg", blob: new Blob([new Uint8Array([7, 7, 7])], { type: "image/jpeg" }) },
+    ];
+    const bundle = ImageStore.buildBundle(bundleRecs, "OTHER");
+    const n = await store.importBundle(bundle);
+    ck.eq(n, 2, "importBundle → nombre d'images importées");
+    ck(!store.has("old"), "import ÉCRASE : « old » a disparu (références orphelines → ré-assignation)");
+    ck(store.has("x") && store.has("y"), "import : ids CONSERVÉS (x, y présents)");
+    ck.eq(store.get("x").u_height, 2, "import : métadonnées conservées (u_height de x)");
+    ck.eq(backend._map.size, 2, "import : backend remplacé (2 enregistrements)");
+    ck(store.lastLoadedKey == null, "importBundle NE touche PAS la clé d'appariement du compagnon");
+
+    // round-trip : ré-export → reparse rend les mêmes ids/blobs (blobs déjà présents → pas de fetch)
+    const out = await store.serializeBundle("RT");
+    const reparsed = ImageStore.parseBundle(await out.arrayBuffer());
+    const ids = reparsed.recs.map((r) => r.id).sort();
+    ck(reparsed.key === "RT" && ids.join(",") === "x,y", "serializeBundle → round-trip (clé + ids)");
+    const yblob = new Uint8Array(await reparsed.recs.find((r) => r.id === "y").blob.arrayBuffer());
+    ck(yblob.length === 3 && yblob[0] === 7, "serializeBundle → blobs hydratés dans le bundle");
+  }
+
   console.log("\n• Détection de modifications (dirty) + état de sauvegarde");
   {
     // ---- logique PURE de l'état de la pastille ----
