@@ -15,11 +15,11 @@ const HISTORY_MAX = 50;
 
 /** Enregistrement brut : métadonnées + Blob binaire. `url`/`bytes` (optionnels) servent au mode REST,
     où le blob n'est pas chargé en mémoire (le miroir pointe l'URL serveur, `bytes` vient du manifeste). */
-export interface ImageRec { id: string; name: string; u_height: number; face: string; description: string; type: string; blob: Blob | null; url?: string; bytes?: number; }
+export interface ImageRec { id: string; name: string; u_height: number; face: string; with_ears: boolean; description: string; type: string; blob: Blob | null; url?: string; bytes?: number; }
 /** Vue miroir (UI) : métadonnées + objectURL synchrone. */
-export interface ImageMirror { id: string; name: string; u_height: number; face: string; description: string; type: string; url: string | null; bytes: number; }
+export interface ImageMirror { id: string; name: string; u_height: number; face: string; with_ears: boolean; description: string; type: string; url: string | null; bytes: number; }
 /** Image legacy inline (data URL) — import/export de repli. */
-export interface LegacyImage { id: string; name: string; u_height: number; face: string; description: string; data: string; }
+export interface LegacyImage { id: string; name: string; u_height: number; face: string; with_ears?: boolean; description: string; data: string; }
 
 interface UndoEntry { undo: () => Promise<void>; redo: () => Promise<void>; }
 
@@ -50,14 +50,19 @@ export class ImageStore {
 
   /** Face valide : front (défaut) · rear · autre (faces annexes des équipements libres). */
   private static face(f: any): string { return (f === "rear" || f === "autre") ? f : "front"; }
+  /** Inclut les oreilles 19″ ? Défaut `true` (corps + oreilles). INAPPLICABLE à la face « autre » → `false`. */
+  private static ears(f: string, v: any): boolean { return (f === "autre") ? false : (v !== false); }
   private norm(rec: any): ImageRec {
-    return { id: rec.id, name: rec.name || "", u_height: Math.max(1, rec.u_height | 0 || 1), face: ImageStore.face(rec.face), description: rec.description || "", type: rec.type || (rec.blob && rec.blob.type) || "", blob: rec.blob || null };
+    const face = ImageStore.face(rec.face);
+    // « autre » : pas de U (forcé à 1) ni d'oreilles.
+    return { id: rec.id, name: rec.name || "", u_height: (face === "autre") ? 1 : Math.max(1, rec.u_height | 0 || 1), face, with_ears: ImageStore.ears(face, rec.with_ears), description: rec.description || "", type: rec.type || (rec.blob && rec.blob.type) || "", blob: rec.blob || null };
   }
   private mirrorPut(rec: ImageRec): void {
     const old = this.mirror.get(rec.id); if (old && old.url && old.url.startsWith("blob:")) URL.revokeObjectURL(old.url);
     // blob en mémoire → objectURL (fichier / image fraîchement ajoutée) ; sinon URL serveur (REST).
     const url = rec.blob ? URL.createObjectURL(rec.blob) : (rec.url || null);
-    this.mirror.set(rec.id, { id: rec.id, name: rec.name || "", u_height: rec.u_height || 1, face: ImageStore.face(rec.face), description: rec.description || "", type: rec.type || "", url, bytes: rec.blob ? rec.blob.size : (rec.bytes || 0) });
+    const face = ImageStore.face(rec.face);
+    this.mirror.set(rec.id, { id: rec.id, name: rec.name || "", u_height: (face === "autre") ? 1 : (rec.u_height || 1), face, with_ears: ImageStore.ears(face, rec.with_ears), description: rec.description || "", type: rec.type || "", url, bytes: rec.blob ? rec.blob.size : (rec.bytes || 0) });
   }
   private mirrorDel(id: string): void { const old = this.mirror.get(id); if (old && old.url && old.url.startsWith("blob:")) URL.revokeObjectURL(old.url); this.mirror.delete(id); }
 
@@ -134,20 +139,20 @@ export class ImageStore {
   /* ---- legacy (faceImages inline data-URL d'un .json ≤ v51) ---- */
   async replaceAllFromLegacy(arr: LegacyImage[]): Promise<number> {
     const recs: Partial<ImageRec>[] = [];
-    (arr || []).forEach((fi) => { const blob = fi.data ? ImageStore.dataUrlToBlob(fi.data) : null; if (blob) recs.push({ id: fi.id, name: fi.name || "", u_height: fi.u_height || 1, face: fi.face, description: fi.description || "", type: blob.type, blob }); });
+    (arr || []).forEach((fi) => { const blob = fi.data ? ImageStore.dataUrlToBlob(fi.data) : null; if (blob) recs.push({ id: fi.id, name: fi.name || "", u_height: fi.u_height || 1, face: fi.face, with_ears: fi.with_ears, description: fi.description || "", type: blob.type, blob }); });
     await this.replaceAll(recs); return recs.length;
   }
   /** VISUALISEUR : peuple SEULEMENT le miroir (objectURL) depuis des images legacy, sans IndexedDB. */
   loadMirrorFromLegacy(arr: LegacyImage[]): number {
     this.mirror.forEach((v) => { if (v.url) URL.revokeObjectURL(v.url); }); this.mirror.clear();
     let n = 0;
-    (arr || []).forEach((fi) => { const blob = fi.data ? ImageStore.dataUrlToBlob(fi.data) : null; if (blob) { this.mirrorPut(this.norm({ id: fi.id, name: fi.name, u_height: fi.u_height, face: fi.face, blob })); n++; } });
+    (arr || []).forEach((fi) => { const blob = fi.data ? ImageStore.dataUrlToBlob(fi.data) : null; if (blob) { this.mirrorPut(this.norm({ id: fi.id, name: fi.name, u_height: fi.u_height, face: fi.face, with_ears: fi.with_ears, blob })); n++; } });
     return n;
   }
   /** Sauvegarde de repli (download) : images inline en data URL. */
   async toLegacyArray(): Promise<LegacyImage[]> {
     const all = await this.getAll(), out: LegacyImage[] = [];
-    for (const r of all) out.push({ id: r.id, name: r.name || "", u_height: r.u_height || 1, face: ImageStore.face(r.face), description: r.description || "", data: r.blob ? await ImageStore.blobToDataUrl(r.blob) : "" });
+    for (const r of all) { const face = ImageStore.face(r.face); out.push({ id: r.id, name: r.name || "", u_height: (face === "autre") ? 1 : (r.u_height || 1), face, with_ears: ImageStore.ears(face, r.with_ears), description: r.description || "", data: r.blob ? await ImageStore.blobToDataUrl(r.blob) : "" }); }
     return out;
   }
 
@@ -159,7 +164,7 @@ export class ImageStore {
   restoreLoadedKey(): void { try { this.lastLoadedKey = localStorage.getItem("dcmanager.facesLoadedKey") || null; } catch (_) { this.lastLoadedKey = null; } }
   /** Construit le Blob `.nmfb` à partir d'enregistrements + clé (pur ; testable). */
   static buildBundle(recs: ImageRec[], key: string | null): Blob {
-    const manifest = { v: 1, key: key || null, images: recs.map((r) => ({ id: r.id, name: r.name || "", u_height: r.u_height || 1, face: ImageStore.face(r.face), description: r.description || "", type: r.type || (r.blob && r.blob.type) || "", bytes: r.blob ? r.blob.size : 0 })) };
+    const manifest = { v: 1, key: key || null, images: recs.map((r) => { const face = ImageStore.face(r.face); return { id: r.id, name: r.name || "", u_height: (face === "autre") ? 1 : (r.u_height || 1), face, with_ears: ImageStore.ears(face, r.with_ears), description: r.description || "", type: r.type || (r.blob && r.blob.type) || "", bytes: r.blob ? r.blob.size : 0 }; }) };
     const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
     const head = new Uint8Array(9); head.set([0x4E, 0x4D, 0x46, 0x42], 0); head[4] = 1;
     new DataView(head.buffer).setUint32(5, manifestBytes.length, true);
@@ -173,7 +178,7 @@ export class ImageStore {
     const mlen = dv.getUint32(5, true);
     const manifest = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 9, mlen)));
     let off = 9 + mlen; const recs: ImageRec[] = [];
-    (manifest.images || []).forEach((im: any) => { const n = im.bytes || 0; const blob = new Blob([buf.slice(off, off + n)], { type: im.type || "application/octet-stream" }); off += n; recs.push({ id: im.id, name: im.name || "", u_height: im.u_height || 1, face: im.face, description: im.description || "", type: im.type || "", blob }); });
+    (manifest.images || []).forEach((im: any) => { const n = im.bytes || 0; const blob = new Blob([buf.slice(off, off + n)], { type: im.type || "application/octet-stream" }); off += n; const face = ImageStore.face(im.face); recs.push({ id: im.id, name: im.name || "", u_height: (face === "autre") ? 1 : (im.u_height || 1), face, with_ears: ImageStore.ears(face, im.with_ears), description: im.description || "", type: im.type || "", blob }); });
     return { key: manifest.key || null, recs };
   }
   /** Récupère TOUS les enregistrements avec leur blob HYDRATÉ. En mode REST, `getAll()` ne ramène que les

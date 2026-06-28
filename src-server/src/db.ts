@@ -20,7 +20,7 @@ export interface Tx {
 }
 export interface ListOpts { page?: number; pageSize?: number; query?: string; where?: Rec | null; ids?: string[] | null }
 export interface ListResult { rows: Rec[]; total: number; page: number; pages: number; pageSize: number }
-export interface ImageMeta { id: string; name?: string; u_height?: number; face?: string; description?: string; type?: string; bytes?: number }
+export interface ImageMeta { id: string; name?: string; u_height?: number; face?: string; with_ears?: boolean; description?: string; type?: string; bytes?: number }
 
 /** Accès aux données : une table par collection (id, data JSON, search, created_date) + meta + images.
     Toute la logique SQL vit ici ; l'API n'en dépend que par cette classe. */

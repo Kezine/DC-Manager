@@ -658,10 +658,15 @@
   .side-grid th.side-mid, .side-grid td.side-mid { width: 30px; background: var(--bg-3); color: var(--fg-dimmer); font-size: 9px; text-align: center; border-left: 1px solid var(--line-2); border-right: 1px solid var(--line-2); }
   /* Ã©diteur de faÃ§ade d'Ã©quipement */
   .face-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-  .face-stage { position: relative; width: 100%; max-height: 70vh; margin: 0 auto; background: var(--bg); border: 1px solid var(--line-2); overflow: hidden; user-select: none; }
-  .face-stage.empty { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 22px 22px; }
+  /* viewport (fenêtre de clipping pour le zoom) → frame (transformé par zoom/pan) → stage (corps : placement) */
+  .face-viewport { position: relative; overflow: hidden; margin: 0 auto; touch-action: none; }
+  .face-frame { position: relative; width: 100%; max-height: 70vh; margin: 0 auto; transform-origin: 0 0; will-change: transform; }
+  .face-stage { position: absolute; inset: 0; background: transparent; border: 1px solid var(--line-2); overflow: hidden; user-select: none; z-index: 2; }
+  .face-stage.empty { background-color: var(--bg); background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 22px 22px; }
   .face-stage .face-empty-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px; color: var(--fg-dim); font-size: 11px; }
-  .face-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+  .face-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; z-index: 0; }
+  /* oreilles de montage 19″ : zone NON cliquable, matérialisée par des hachures */
+  .face-ear { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; opacity: 0.55; background: repeating-linear-gradient(45deg, var(--line-2) 0 1px, transparent 1px 7px); border-inline: 1px dashed var(--line-2); }
   /* grille de positionnement (overlay) â€” sous les marqueurs, au-dessus de l'image (v35) */
   .face-grid-ov { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
   .face-grid-ov line { stroke: var(--accent); stroke-opacity: 0.35; stroke-width: 1px; vector-effect: non-scaling-stroke; }

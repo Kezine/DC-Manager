@@ -62,7 +62,7 @@ export class RestImageBackend implements ImageBackend {
     if (!res.ok) throw new Error("HTTP " + res.status + " sur GET /images");
     const list = (await res.json()) || [];
     // métadonnées seules : blob null, url = endpoint serveur (chargé à l'affichage par le navigateur).
-    return (list as any[]).map((m) => ({ id: m.id, name: m.name || "", u_height: m.u_height || 1, face: m.face || "front", description: m.description || "", type: m.type || "", blob: null, bytes: m.bytes || 0, url: this.blobUrl(m.id) }));
+    return (list as any[]).map((m) => ({ id: m.id, name: m.name || "", u_height: m.u_height || 1, face: m.face || "front", with_ears: m.with_ears !== false, description: m.description || "", type: m.type || "", blob: null, bytes: m.bytes || 0, url: this.blobUrl(m.id) }));
   }
   async getRaw(id: string): Promise<ImageRec | null> {
     const meta = await fetch(this.baseUrl + "/images/" + encodeURIComponent(id), { credentials: "include" });
@@ -71,11 +71,11 @@ export class RestImageBackend implements ImageBackend {
     const m = await meta.json();
     const br = await fetch(this.blobUrl(id), { credentials: "include" });
     const blob = br.ok ? await br.blob() : null;
-    return { id: m.id, name: m.name || "", u_height: m.u_height || 1, face: m.face || "front", description: m.description || "", type: m.type || (blob && blob.type) || "", blob, bytes: m.bytes || (blob ? blob.size : 0), url: this.blobUrl(id) };
+    return { id: m.id, name: m.name || "", u_height: m.u_height || 1, face: m.face || "front", with_ears: m.with_ears !== false, description: m.description || "", type: m.type || (blob && blob.type) || "", blob, bytes: m.bytes || (blob ? blob.size : 0), url: this.blobUrl(id) };
   }
   async put(rec: ImageRec): Promise<void> {
     const fd = new FormData();
-    fd.append("meta", JSON.stringify({ id: rec.id, name: rec.name || "", u_height: rec.u_height || 1, face: rec.face, description: rec.description || "", type: rec.type || (rec.blob && rec.blob.type) || "" }));
+    fd.append("meta", JSON.stringify({ id: rec.id, name: rec.name || "", u_height: rec.u_height || 1, face: rec.face, with_ears: rec.with_ears !== false, description: rec.description || "", type: rec.type || (rec.blob && rec.blob.type) || "" }));
     if (rec.blob) fd.append("blob", rec.blob, rec.name || rec.id);
     const res = await fetch(this.baseUrl + "/images/" + encodeURIComponent(rec.id), { method: "PUT", credentials: "include", body: fd });
     if (!res.ok) throw new Error("HTTP " + res.status + " sur PUT /images/" + rec.id);

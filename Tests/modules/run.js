@@ -58,6 +58,7 @@ const { Prefs } = D("core/Prefs.js");
 const { DatacenterView } = D("views/DatacenterView.js");
 const { FloorLayout } = D("geometry/FloorLayout.js");
 const { ImageStore } = D("data/ImageStore.js");
+const { FaceImage } = D("models/index.js");
 const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
 const { EntityRegistry } = D("models/index.js");
 const { ReloadPlanner } = D("sync/ReloadPlanner.js");
@@ -870,6 +871,39 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck(reparsed.key === "RT" && ids.join(",") === "x,y", "serializeBundle → round-trip (clé + ids)");
     const yblob = new Uint8Array(await reparsed.recs.find((r) => r.id === "y").blob.arrayBuffer());
     ck(yblob.length === 3 && yblob[0] === 7, "serializeBundle → blobs hydratés dans le bundle");
+  }
+
+  console.log("\n• Images de façade : oreilles (with_ears) + règle « autre »");
+  {
+    // ---- modèle FaceImage ----
+    ck(new FaceImage({ face: "front" }).with_ears === true, "FaceImage : défaut = avec oreilles (front)");
+    ck(new FaceImage({ face: "rear", with_ears: false }).with_ears === false, "FaceImage : with_ears=false respecté (rear)");
+    const autre = new FaceImage({ face: "autre", u_height: 5, with_ears: true });
+    ck(autre.u_height === 1 && autre.with_ears === false, "FaceImage : « autre » → pas de U (1) ni d'oreilles");
+
+    // ---- bundle .nmfb : with_ears round-trip + normalisation « autre » au parse ----
+    const recs = [
+      { id: "a", name: "a", u_height: 2, face: "front", with_ears: false, type: "image/png", blob: new Blob([new Uint8Array([1])], { type: "image/png" }) },
+      { id: "b", name: "b", u_height: 7, face: "autre", with_ears: true, type: "image/png", blob: new Blob([new Uint8Array([2])], { type: "image/png" }) },
+    ];
+    const parsed = ImageStore.parseBundle(await ImageStore.buildBundle(recs, null).arrayBuffer());
+    const a = parsed.recs.find((r) => r.id === "a"), b = parsed.recs.find((r) => r.id === "b");
+    ck(a.with_ears === false, "bundle : with_ears=false conservé (front)");
+    ck(b.with_ears === false && b.u_height === 1, "bundle : « autre » normalisé (pas d'oreilles, U=1)");
+
+    // ---- normaliseur d'INSTANCE (ImageStore.norm via add/update) ----
+    global.URL = global.URL || {}; global.URL.createObjectURL = () => "blob:stub"; global.URL.revokeObjectURL = () => {};
+    const m = new Map();
+    const store = new ImageStore({ backend: {
+      put: async (r) => { m.set(r.id, r); }, del: async (id) => { m.delete(id); },
+      getRaw: async (id) => m.get(id) || null, getAll: async () => Array.from(m.values()), clear: async () => { m.clear(); },
+    } });
+    const f1 = await store.add({ id: "f1", name: "f", face: "front", u_height: 3, blob: new Blob([new Uint8Array([9])], { type: "image/png" }) });
+    ck(f1.with_ears === true && f1.u_height === 3, "ImageStore.add : front → avec oreilles, U conservé");
+    const f2 = await store.add({ id: "f2", name: "g", face: "autre", u_height: 4, with_ears: true, blob: new Blob([new Uint8Array([8])], { type: "image/png" }) });
+    ck(f2.with_ears === false && f2.u_height === 1, "ImageStore.add : « autre » → pas d'oreilles, U=1");
+    const f1b = await store.update("f1", { with_ears: false });
+    ck(f1b.with_ears === false, "ImageStore.update : with_ears modifiable");
   }
 
   console.log("\n• Détection de modifications (dirty) + état de sauvegarde");
