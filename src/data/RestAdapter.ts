@@ -87,6 +87,13 @@ export class RestAdapter extends DataAdapter {
   async setDocumentLocked(id: string, locked: boolean): Promise<DocMeta | null> { return this._root("PUT", "/documents/" + encodeURIComponent(id), { locked }, { allow404: true }); }
   async deleteDocument(id: string): Promise<void> { await this._root("DELETE", "/documents/" + encodeURIComponent(id)); }
 
+  /* ---- réglages globaux (doc par défaut…) ---- */
+  /** Document par DÉFAUT (réglage serveur global) — ouvert au boot quand le navigateur n'a aucun « dernier doc
+      ouvert » mémorisé. `defaultDocId` est null si non défini ou si le document a été supprimé. */
+  async getDefaultDocId(): Promise<string | null> { const s = await this._root("GET", "/settings"); return (s && typeof s.defaultDocId === "string") ? s.defaultDocId : null; }
+  /** Définit (ou efface si null) le document par défaut global. */
+  async setDefaultDocId(id: string | null): Promise<string | null> { const s = await this._root("PUT", "/settings", { defaultDocId: id }); return (s && typeof s.defaultDocId === "string") ? s.defaultDocId : null; }
+
   /** Le serveur renvoie les listes paginées `{ rows, total, … }` ; le boot/getMany/findBy veulent le TABLEAU. */
   private rows(res: any): RawRecord[] { return Array.isArray(res) ? res : (res && Array.isArray(res.rows) ? res.rows : []); }
 

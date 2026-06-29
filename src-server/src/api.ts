@@ -25,6 +25,10 @@ export class Api {
     r.get("/me", this.me);                 // état d'auth (accessible sans être autorisé)
     r.use(this.requireAdmin);              // tout le reste exige une session SSO valide + SUPER_ADMIN
 
+    // -- réglages globaux (doc par défaut…) --
+    r.get("/settings", this.getSettings);
+    r.put("/settings", this.putSettings);
+
     // -- registre des documents --
     r.get("/documents", this.listDocs);
     r.post("/documents", this.createDoc);
@@ -89,6 +93,21 @@ export class Api {
     const ip = (r && (r as any).ip) || fwd || req.ip || "";
     return { name, ip };
   }
+
+  /* -- réglages globaux -- */
+  /** Réglages globaux partagés (aujourd'hui : `defaultDocId`, document ouvert au boot d'un client sans « dernier
+      doc ouvert » mémorisé). `defaultDocId` est null si non défini OU si le document a été supprimé entre-temps. */
+  private getSettings: RequestHandler = (_req, res) => { res.json({ defaultDocId: this.docs.getDefaultDocId() }); };
+  /** Met à jour les réglages globaux. Corps : `{ defaultDocId: string | null }` (id inconnu → 400). */
+  private putSettings: RequestHandler = (req, res) => {
+    const body: any = req.body || {};
+    if ("defaultDocId" in body) {
+      const id = body.defaultDocId;
+      if (id !== null && typeof id !== "string") { res.status(400).json({ error: "defaultDocId invalide" }); return; }
+      if (!this.docs.setDefaultDocId(id)) { res.status(400).json({ error: "document inconnu" }); return; }
+    }
+    res.json({ defaultDocId: this.docs.getDefaultDocId() });
+  };
 
   /* -- registre des documents -- */
   private listDocs: RequestHandler = (_req, res) => { res.json(this.docs.list()); };

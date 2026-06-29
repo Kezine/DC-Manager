@@ -716,6 +716,7 @@ async function boot(): Promise<void> {
     ra.setDocument(docId);
     if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(ra.dataBase);
     restDocId = docId;
+    prefs.lastRestDocId = docId;              // mémorise le DERNIER doc ouvert → rouvert au prochain lancement (cf. restBootstrap)
     await store.init();                       // charge les collections du document
     if (name) store.meta.docName = store.meta.docName || name;
     await imageStore.reloadFromBackend();     // miroir d'images du document
@@ -733,6 +734,7 @@ async function boot(): Promise<void> {
     ra.setDocument(d.id);
     if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(ra.dataBase);
     restDocId = d.id;
+    prefs.lastRestDocId = d.id;               // un doc fraîchement créé devient le « dernier ouvert »
     await store.newDocument();                // sème les catalogues + pousse le snapshot DANS le nouveau document
     store.meta.docName = d.name; await store.persistMeta();
     await imageStore.reloadFromBackend();
@@ -753,6 +755,7 @@ async function boot(): Promise<void> {
     ra.setDocument(d.id);
     if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(ra.dataBase);
     restDocId = d.id;
+    prefs.lastRestDocId = d.id;               // le doc importé devient le « dernier ouvert »
     try {
       await store.replaceAll(raw);                                              // meta + collections → PUT /snapshot du nouveau document
       let nImg = 0;
@@ -790,6 +793,7 @@ async function boot(): Promise<void> {
   async function restOpenChooser(): Promise<void> {
     const ra = adapter as RestAdapter;
     let docs: any[]; try { docs = await ra.listDocuments(); } catch { Notify.toast("Serveur injoignable.", "err"); return; }
+    const defaultDocId = await ra.getDefaultDocId().catch(() => null);   // doc par défaut global (best-effort) → mis en évidence + bascule par étoile
     const action = await Dialog.custom({
       title: "Documents", cancelLabel: "Fermer",
       build: (root: HTMLElement) => {
@@ -801,14 +805,22 @@ async function boot(): Promise<void> {
           const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
           const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = "🗂";
           const tx = document.createElement("span"); tx.className = "ok-tx";
-          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = (d.locked ? "🔒 " : "") + d.name + (d.id === restDocId ? "  ◀ ouvert" : "");
+          const isDefault = d.id === defaultDocId;
+          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = (d.locked ? "🔒 " : "") + d.name + (d.id === restDocId ? "  ◀ ouvert" : "") + (isDefault ? "  ★ défaut" : "");
           const de = document.createElement("span"); de.className = "ok-desc"; de.textContent = "maj " + String(d.updated_date || "").slice(0, 10);
           tx.append(ti, de); b.append(ic, tx);
           b.onmousedown = (e) => { e.preventDefault(); chosen = d.id; confirmBtn?.click(); };
+          // Étoile : bascule du DOC PAR DÉFAUT global (ouvert au boot d'un client sans « dernier doc ouvert »).
+          // Cliquer l'étoile du défaut courant l'efface ; cliquer une autre la déplace. Défaut = ★ net ; sinon ☆ estompé.
+          const star = document.createElement("span"); star.textContent = isDefault ? "★" : "☆";
+          star.title = isDefault ? "Retirer comme document par défaut" : "Définir comme document par défaut (ouvert au démarrage)";
+          star.style.cssText = "margin-left:auto;padding:0 6px;cursor:pointer;opacity:" + (isDefault ? "1" : "0.4");
+          star.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__default__:" + (isDefault ? "" : d.id); confirmBtn?.click(); };
+          b.appendChild(star);
           // Cadenas : bascule de verrouillage (protège d'une suppression accidentelle). Verrouillé = 🔒 net ; libre = 🔓 estompé.
           const lock = document.createElement("span"); lock.textContent = d.locked ? "🔒" : "🔓";
           lock.title = d.locked ? "Déverrouiller (réautorise la suppression)" : "Verrouiller (protège de la suppression)";
-          lock.style.cssText = "margin-left:auto;padding:0 6px;cursor:pointer;opacity:" + (d.locked ? "1" : "0.4");
+          lock.style.cssText = "padding:0 6px;cursor:pointer;opacity:" + (d.locked ? "1" : "0.4");
           lock.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__lock__:" + d.id; confirmBtn?.click(); };
           b.appendChild(lock);
           // Suppression proposée UNIQUEMENT si non verrouillé → flux délibéré « déverrouiller d'abord » (le serveur refuse en 423 par sécurité).
@@ -835,6 +847,12 @@ async function boot(): Promise<void> {
     if (!action) return;
     if (action === "__new__") { const n = await Dialog.prompt("Nom du document", "Document"); if (n) await restNewDocument(n); return; }
     if (action === "__import__") { await restImportFromPicker(); return; }
+    if (action.startsWith("__default__:")) {
+      const id = action.slice(12) || null;   // "" → efface le défaut ; sinon le déplace sur ce doc
+      try { await ra.setDefaultDocId(id); Notify.toast(id ? "Document par défaut défini." : "Document par défaut retiré."); }
+      catch (e: any) { Notify.toast("Action impossible : " + (e.message || e), "err"); }
+      await restOpenChooser(); return;   // rouvre le sélecteur rafraîchi
+    }
     if (action.startsWith("__lock__:")) {
       const id = action.slice(9), d = docs.find((x) => x.id === id);
       try { await ra.setDocumentLocked(id, !d?.locked); Notify.toast(d?.locked ? "Document déverrouillé." : "Document verrouillé."); }
@@ -844,12 +862,16 @@ async function boot(): Promise<void> {
     if (action.startsWith("__del__:")) {
       const id = action.slice(8), d = docs.find((x) => x.id === id);
       const ok = await Dialog.confirm({ title: "Supprimer le document ?", message: "Supprimer « " + (d?.name || id) + " » et toutes ses données ? Irréversible.", confirmLabel: "Supprimer", danger: true });
-      if (ok) { try { await ra.deleteDocument(id); } catch (e: any) { Notify.toast("Suppression impossible : " + (e.message || e), "err"); } if (id === restDocId) restDocId = null; }
+      if (ok) { try { await ra.deleteDocument(id); } catch (e: any) { Notify.toast("Suppression impossible : " + (e.message || e), "err"); } if (id === restDocId) restDocId = null; if (id === prefs.lastRestDocId) prefs.lastRestDocId = ""; }
       await restOpenChooser(); return;   // rouvre le sélecteur rafraîchi
     }
     if (action !== restDocId) { const d = docs.find((x) => x.id === action); await restOpenDocument(action, d?.name); }
   }
-  /** Au boot (mode API) : valide l'auth SSO, puis ouvre le document le plus récent (ou en crée un). */
+  /** Au boot (mode API) : valide l'auth SSO, puis ouvre le document selon cette PRIORITÉ :
+      1) le DERNIER doc ouvert sur ce navigateur (prefs.lastRestDocId), s'il existe encore ;
+      2) sinon le doc par DÉFAUT (réglage serveur global), s'il est défini ;
+      3) sinon le plus récemment modifié (1er de la liste, triée DESC côté serveur) ;
+      4) sinon (aucun document) on en crée un. */
   async function restBootstrap(): Promise<void> {
     const ra = adapter as RestAdapter;
     const me = await ra.me().catch(() => null);
@@ -863,7 +885,15 @@ async function boot(): Promise<void> {
       return;   // n'ouvre aucun document tant que l'accès n'est pas autorisé
     }
     let docs: any[] = []; try { docs = await ra.listDocuments(); } catch { /* serveur injoignable */ }
-    if (docs.length) await restOpenDocument(docs[0].id, docs[0].name);
+    const exists = (id: string | null | undefined) => !!id && docs.some((d) => d.id === id);
+    // 1) dernier doc ouvert (s'il n'a pas été supprimé entre-temps)
+    let targetId = exists(prefs.lastRestDocId) ? prefs.lastRestDocId : null;
+    // 2) sinon doc par défaut global (best-effort : ignore une erreur réseau/serveur)
+    if (!targetId) { const def = await ra.getDefaultDocId().catch(() => null); if (exists(def)) targetId = def; }
+    // 3) sinon le plus récent ; 4) sinon création
+    if (!targetId && docs.length) targetId = docs[0].id;
+    flog("boot: doc choisi", { targetId, last: prefs.lastRestDocId, total: docs.length });
+    if (targetId) { const d = docs.find((x) => x.id === targetId); await restOpenDocument(targetId, d?.name); }
     else await restNewDocument("Document 1");
   }
 
@@ -1294,7 +1324,7 @@ async function boot(): Promise<void> {
   // ré-interaction pour le raccrocher. En mode API, les données viennent du serveur au boot → pas d'accueil.
   if (REST_MODE) {
     shell.hideWelcome();
-    await restBootstrap();   // ouvre le document le plus récent (ou en crée un) — données chargées du serveur
+    await restBootstrap();   // ouvre le dernier doc ouvert → défaut global → plus récent (ou en crée un) — cf. restBootstrap
   } else {
     let reopenName: string | null = null;
     if (HAS_FS_API) {

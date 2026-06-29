@@ -20,7 +20,29 @@ export class DocumentStore {
     try { this.registry.exec("ALTER TABLE documents ADD COLUMN rev INTEGER NOT NULL DEFAULT 0"); } catch { /* colonne déjà présente */ }      // migration
     // `locked` : document VERROUILLÉ → protégé d'une suppression conventionnelle (cf. setLocked / Api.deleteDoc). 0 = libre.
     try { this.registry.exec("ALTER TABLE documents ADD COLUMN locked INTEGER NOT NULL DEFAULT 0"); } catch { /* colonne déjà présente */ }   // migration
+    // RÉGLAGES GLOBAUX (clé/valeur), INDÉPENDANTS d'un document : ex. `defaultDocId` = document ouvert au boot d'un
+    // NOUVEAU client (aucun « dernier doc ouvert » mémorisé côté navigateur). Partagé entre tous les clients.
+    this.registry.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
     this.log.info("registre ouvert", path.join(dir, "registry.db"));
+  }
+
+  /* -- réglages globaux (clé/valeur) -- */
+  /** Lit un réglage global (null si absent). */
+  getSetting(key: string): string | null { const r = this.registry.prepare("SELECT value FROM settings WHERE key = ?").get(key); return r ? (r.value as string) : null; }
+  /** Écrit (ou efface si `value === null`) un réglage global. */
+  setSetting(key: string, value: string | null): void {
+    if (value === null) this.registry.prepare("DELETE FROM settings WHERE key = ?").run(key);
+    else this.registry.prepare("INSERT INTO settings (key, value) VALUES (@k, @v) ON CONFLICT(key) DO UPDATE SET value = @v").run({ k: key, v: value });
+  }
+  /** Document par DÉFAUT (ouvert au boot quand le client n'a aucun « dernier doc ouvert »). Renvoie null si non
+      défini OU si le document a depuis été supprimé (réglage périmé ignoré → le boot retombe sur le plus récent). */
+  getDefaultDocId(): string | null { const id = this.getSetting("defaultDocId"); return id && this.get(id) ? id : null; }
+  /** Définit (ou efface si null) le document par défaut. L'id inconnu est refusé (renvoie false). */
+  setDefaultDocId(id: string | null): boolean {
+    if (id !== null && !this.get(id)) return false;
+    this.setSetting("defaultDocId", id);
+    this.log.info(id ? "document par défaut défini" : "document par défaut effacé", id || "");
+    return true;
   }
 
   /** Coercition de la ligne registre → DocMeta (l'entier SQLite `locked` 0/1 devient booléen). */
@@ -71,6 +93,7 @@ export class DocumentStore {
     this.repos.delete(id);
     for (const ext of ["", "-wal", "-shm"]) { try { fs.rmSync(path.join(this.dir, id + ".db" + ext), { force: true }); } catch { /* noop */ } }
     this.registry.prepare("DELETE FROM documents WHERE id = ?").run(id);
+    if (this.getSetting("defaultDocId") === id) this.setSetting("defaultDocId", null);   // le doc par défaut vient d'être supprimé → on efface le réglage périmé
     this.log.info("document supprimé", id);
     return true;
   }

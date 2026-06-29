@@ -7,7 +7,7 @@
 export type ThemeName = "dark" | "light";
 export type DataSource = "local" | "api";
 export type FileAccessMode = "file" | "directory";   // accès FS : 1 autorisation par fichier · 1 autorisation pour le dossier
-export interface AppPrefs { theme: ThemeName; autosave: boolean; autosaveInterval: number; dataSource: DataSource; dataSourceUserSet: boolean; apiBaseUrl: string; loginUrl: string; fileAccessMode: FileAccessMode; debugLog: boolean; uiScale: number; }
+export interface AppPrefs { theme: ThemeName; autosave: boolean; autosaveInterval: number; dataSource: DataSource; dataSourceUserSet: boolean; apiBaseUrl: string; loginUrl: string; fileAccessMode: FileAccessMode; debugLog: boolean; uiScale: number; lastRestDocId: string; }
 
 export class Prefs {
   static readonly KEY = "dcmanager.prefs";
@@ -23,7 +23,7 @@ export class Prefs {
     { value: 1.1, label: "Agrandi (110 %)" },
   ];
 
-  private data: AppPrefs = { theme: "dark", autosave: false, autosaveInterval: Prefs.INTERVAL_DEFAULT, dataSource: "local", dataSourceUserSet: false, apiBaseUrl: "", loginUrl: "", fileAccessMode: "file", debugLog: false, uiScale: Prefs.UI_SCALE_DEFAULT };
+  private data: AppPrefs = { theme: "dark", autosave: false, autosaveInterval: Prefs.INTERVAL_DEFAULT, dataSource: "local", dataSourceUserSet: false, apiBaseUrl: "", loginUrl: "", fileAccessMode: "file", debugLog: false, uiScale: Prefs.UI_SCALE_DEFAULT, lastRestDocId: "" };
 
   constructor() { this.load(); }
 
@@ -41,6 +41,7 @@ export class Prefs {
       if (p.fileAccessMode === "file" || p.fileAccessMode === "directory") this.data.fileAccessMode = p.fileAccessMode;
       this.data.debugLog = !!p.debugLog;
       if (typeof p.uiScale === "number" && p.uiScale >= 0.5 && p.uiScale <= 2) this.data.uiScale = p.uiScale;
+      if (typeof p.lastRestDocId === "string") this.data.lastRestDocId = p.lastRestDocId;
     } catch (e) { console.warn("Prefs.load a échoué", e); }
   }
   save(): void { try { window.localStorage.setItem(Prefs.KEY, JSON.stringify(this.data)); } catch (e) { console.warn("Prefs.save a échoué", e); } }
@@ -65,4 +66,8 @@ export class Prefs {
   set debugLog(v: boolean) { this.data.debugLog = !!v; this.save(); }
   get uiScale(): number { return this.data.uiScale; }
   set uiScale(v: number) { this.data.uiScale = (typeof v === "number" && v >= 0.5 && v <= 2) ? v : Prefs.UI_SCALE_DEFAULT; this.save(); }
+  // DERNIER document serveur OUVERT (mode API) — mémorisé par navigateur pour le rouvrir au prochain lancement.
+  // "" = aucun (le boot retombe alors sur le doc par défaut global, puis sur le plus récent). Cf. restBootstrap.
+  get lastRestDocId(): string { return this.data.lastRestDocId; }
+  set lastRestDocId(v: string) { this.data.lastRestDocId = (typeof v === "string") ? v : ""; this.save(); }
 }

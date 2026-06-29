@@ -159,6 +159,21 @@ Base : `apiBaseUrl` (défaut même origine `/api`). Tous les appels en
     `PUT /documents/:id { locked }` ; `DELETE` d'un document verrouillé → **423 Locked**.
     Échappatoire délibérée : déverrouiller (`{ locked: false }`) puis supprimer. UI : cadenas
     🔒 dans le sélecteur de documents, bouton Supprimer masqué tant que verrouillé.
+  - **Document ouvert au DÉMARRAGE** (`restBootstrap`) — priorité :
+    1. le **dernier doc ouvert** sur CE navigateur (`Prefs.lastRestDocId`, localStorage —
+       écrit par `restOpenDocument`/`restNewDocument`/`restImportJson`), s'il existe encore ;
+    2. sinon le **doc par défaut GLOBAL** (réglage serveur partagé, cf. ci-dessous) ;
+    3. sinon le **plus récemment modifié** (1er de `/documents`, trié `updated_date DESC`) ;
+    4. sinon (base vide) création d'un document.
+
+    Avant : on ouvrait toujours le plus récent (2). Le « dernier ouvert » est volontairement
+    par NAVIGATEUR (pas une notion serveur) ; le « défaut » est le repli partagé pour un
+    nouveau poste/onglet vierge.
+  - **Réglages GLOBAUX** : table `settings` (clé/valeur) dans `registry.db`, exposée par
+    `GET/PUT /settings`. Aujourd'hui une seule clé : `defaultDocId`. Le getter serveur
+    (`DocumentStore.getDefaultDocId`) renvoie `null` si l'id pointe vers un document
+    supprimé (réglage périmé ignoré), et `delete(id)` efface le réglage si c'était le défaut.
+    UI : étoile ★/☆ par document dans le sélecteur (bascule via `setDefaultDocId`).
 
 ## 6. État au démarrage du chantier (constat d'analyse)
 
