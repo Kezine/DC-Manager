@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Request } from "express";
 import { Logger } from "./logger.js";
 
-/* Authentification déléguée au SSO (SSO externe). L'app NE gère PAS l'auth :
+/* Authentification déléguée à un SSO externe. L'app NE gère PAS l'auth :
    on proxifie le JETON (cookie nommé `cookieName`) au SSO `ssoUrl` qui répond
    avec l'utilisateur. On met en cache le résultat (clé = hash du jeton) tant
    que le cookie ne change pas ET que `expireDate` n'est pas dépassée.

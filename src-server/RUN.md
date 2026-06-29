@@ -125,13 +125,13 @@ docker compose exec dc-manager ls -la /data/documents
 | `PORT` | `3000` | port d'écoute |
 | `API_BASE` | `/api` | préfixe des endpoints REST |
 | `DOCS_DIR` | `/data/documents` | dossier des documents (registre + 1 `.db`/doc) |
-| `SSO_URL` | SSO externe | endpoint SSO qui valide la session (cf. ci-dessous). **`SSO_URL=""` → mode dev** |
-| `COOKIE_NAME` | `SsoJWT` | nom du cookie contenant le jeton à proxifier au SSO (`""` = en-tête `Cookie` complet) |
+| `SSO_URL` | *(vide)* | endpoint SSO externe qui valide la session (cf. ci-dessous). **vide → mode dev** |
+| `COOKIE_NAME` | *(vide)* | nom du cookie contenant le jeton à proxifier au SSO (`""` = en-tête `Cookie` complet) |
 | `DEV_USER` | `dev` | nom de l'utilisateur factice en mode dev |
 
 ### Authentification (SSO)
 L'app **ne gère pas l'auth** : le serveur **proxifie le jeton** (cookie `COOKIE_NAME`)
-au SSO (`SSO_URL`, défaut **SSO externe**) qui renvoie l'utilisateur
+au SSO externe (`SSO_URL`) qui renvoie l'utilisateur
 (`logged`, `adminRight`, `expireDate`). Le résultat est **mis en cache** (clé =
 hash du cookie) tant que le cookie ne change pas et que `expireDate` n'est pas
 dépassée. **Accès autorisé uniquement si `logged` et `adminRight = "SUPER_ADMIN"`**
@@ -145,9 +145,9 @@ dépassée. **Accès autorisé uniquement si `logged` et `adminRight = "SUPER_AD
 - **Tester l'écran « accès refusé »** du client (en dev) : `DEV_RIGHT=NONE`
   (connecté mais sans droits) ou `DEV_RIGHT=ANON` (non connecté). Le client
   affiche alors le message sur l'écran d'accueil au lieu d'ouvrir un document.
-- **SSO réel** : dans `docker-compose.yml`, mettre
-  `SSO_URL: https://sso.example.com/validate` (et `COOKIE_NAME: SsoJWT`,
-  qui est déjà le défaut).
+- **SSO réel** : dans `docker-compose.yml`, renseigner `SSO_URL` (endpoint de validation
+  de votre SSO) et, si besoin, `COOKIE_NAME` (nom du cookie portant le jeton ; vide =
+  en-tête `Cookie` complet). Ex. `SSO_URL: https://sso.example.com/validate`.
 
 Après modif du compose : `docker compose up -d` (recrée le conteneur).
 

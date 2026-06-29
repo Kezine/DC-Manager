@@ -17,9 +17,9 @@ const API_BASE = process.env.API_BASE || "/api";
 // URL de connexion SSO injectée au client (bouton « Connexion » du welcome quand non authentifié). Vide = pas de
 // bouton. La macro ${clbkUrl} y est remplacée côté client par l'URL courante encodée (retour après connexion).
 const LOGIN_URL = process.env.LOGIN_URL || "";
-// SSO : URL par défaut = SSO externe. SSO_URL="" (vide) → mode dev (utilisateur factice SUPER_ADMIN).
-const SSO_URL = process.env.SSO_URL ?? "https://sso.example.com/validate";
-const COOKIE_NAME = process.env.COOKIE_NAME ?? "SsoJWT";   // cookie du jeton à proxifier (défaut SSO externe ; "" = en-tête Cookie complet)
+// SSO externe : configurer SSO_URL (+ COOKIE_NAME) via l'environnement. Défaut VIDE → mode dev (utilisateur factice SUPER_ADMIN).
+const SSO_URL = process.env.SSO_URL ?? "";
+const COOKIE_NAME = process.env.COOKIE_NAME ?? "";   // cookie du jeton à proxifier au SSO ("" = en-tête Cookie complet)
 const DEV_USER = process.env.DEV_USER ?? null;
 const BASIC_AUTH = process.env.BASIC_AUTH || null;                // "user:pass" → gate Basic Auth (dev), PRIORITAIRE sur le SSO
 const DEV_RIGHT = process.env.DEV_RIGHT || null;                  // dev : SUPER_ADMIN (défaut) | NONE | ANON (pour tester l'écran d'accès refusé)

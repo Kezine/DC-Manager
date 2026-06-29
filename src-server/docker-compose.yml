@@ -21,7 +21,7 @@ services:
       # BASIC_AUTH: "dev:secret"
       # DEV : pour tester l'écran d'accès refusé du client → NONE (pas les droits) ou ANON (non connecté) :
       # DEV_RIGHT: NONE
-      # Pour le VRAI SSO (SSO externe) : commenter les 2 lignes ci-dessus et décommenter :
+      # Pour un VRAI SSO externe : commenter les 2 lignes ci-dessus et décommenter (adapter URL + cookie) :
       # SSO_URL: https://sso.example.com/validate
       # COOKIE_NAME: SsoJWT
     volumes:

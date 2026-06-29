@@ -181,8 +181,8 @@ Lues par le serveur au démarrage ([`src-server/src/index.ts`](src-server/src/in
 | `CLIENT_DIR` | `../../dist` | Dossier du client buildé à servir (dans l'image : `/client-dist`). |
 | `DOCS_DIR` | `../data/documents` | Dossier des bases SQLite (dans l'image : `/data/documents`). |
 | `LOG_LEVEL` | `info` | `error` \| `warn` \| `info` \| `debug` \| `trace`. |
-| `SSO_URL` | SSO externe | URL du SSO à proxifier. **`""` (vide) → mode dev** (utilisateur factice). |
-| `COOKIE_NAME` | `SsoJWT` | Cookie du jeton à transmettre au SSO (`""` = en-tête `Cookie` complet). |
+| `SSO_URL` | *(vide)* | URL du SSO externe à proxifier. **`""` (vide) → mode dev** (utilisateur factice). |
+| `COOKIE_NAME` | *(vide)* | Cookie du jeton à transmettre au SSO (`""` = en-tête `Cookie` complet). |
 | `DEV_USER` | — | Nom de l'utilisateur factice (mode dev). |
 | `BASIC_AUTH` | — | `"user:pass"` → impose une Basic Auth navigateur (dev). Prioritaire sur le SSO. |
 | `DEV_RIGHT` | `SUPER_ADMIN` | Dev : `SUPER_ADMIN` \| `NONE` \| `ANON` (pour tester l'écran d'accès refusé). |
