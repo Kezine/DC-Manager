@@ -11,6 +11,16 @@ sur disque + compagnon `.nmfb` d'images, via File System Access API), soit en
 modes coexistent ; le mode fichier reste le comportement par défaut en usage
 autonome (hébergement statique / ouverture locale).
 
+> **Périmètre assumé (et un brin sur-dimensionné).** Le backend — persistance **SQLite** (une table
+> par collection) et **API granulaire** (CRUD par entité, pagination, filtrage, transactions
+> atomiques) — dépasse délibérément le besoin *actuel* : aujourd'hui le client **hydrate l'intégralité
+> du document en un seul passage** (aucune pagination ni chargement partiel côté UI). Pour ce seul
+> usage, un simple *blob store* JSON (un endpoint servant de cible de sauvegarde du fichier complet)
+> suffirait. Ce contrat plus fin est un **socle préparatoire** : il rend possibles les optimisations de
+> *fetch* à venir — pagination, chargement paresseux/partiel, filtrage côté serveur, rechargement
+> granulaire (déjà exploité en P2/SSE) — **sans refondre** ni la persistance ni le contrat HTTP plus
+> tard. La complexité apparente est donc un investissement assumé, pas une fin en soi.
+
 ## 2. Décisions de design
 
 ### 2.1 Modes & détection `[décidé]`
@@ -26,6 +36,12 @@ autonome (hébergement statique / ouverture locale).
   **prime** quand elle est présente.
 
 ### 2.2 Authentification `[décidé]`
+> ⚠️ **Spécifique à un besoin personnel.** Le contrat SSO décrit ici (proxy d'un cookie de
+> session vers un endpoint renvoyant `{ logged, adminRight, expireDate }`, accès `SUPER_ADMIN`)
+> est sur-mesure et **peu réutilisable**. Tant qu'une intégration standard (OIDC / OAuth2 + gestion
+> d'utilisateurs) n'est pas faite, le mode recommandé pour un déploiement réel est la **Basic Auth**
+> (`BASIC_AUTH`). À terme : remplacer ce SSO sur-mesure par un standard.
+
 - **L'app ne gère PAS l'auth.** Un **SSO personnalisé externe** s'en charge.
 - L'app **n'a pas de flux de login**. Elle transmet simplement les
   identifiants de session (cookies) au backend : `fetch(..., { credentials: "include" })`.

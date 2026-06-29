@@ -71,6 +71,12 @@ serveur stocke les enregistrements bruts (le client hydrate). `meta` = 1 ligne.
 > [`src/constants.ts`](src/constants.ts) — garder en phase avec
 > `src/models/EntityRegistry.ts` et `src/data/config.ts` du client.
 
+> ℹ️ **Pourquoi SQLite + une API aussi granulaire ?** C'est sciemment plus riche que le besoin
+> actuel : le client charge aujourd'hui **tout le document d'un coup** (ni pagination ni chargement
+> partiel), un simple *blob store* JSON suffirait. C'est un **socle assumé** pour les optimisations de
+> *fetch* à venir (pagination, chargement partiel/paresseux, filtrage serveur, rechargement granulaire)
+> sans refonte ultérieure — cf. [`docs/rest-migration.md`](../docs/rest-migration.md) § Périmètre.
+
 ## Docker (pas besoin de Node en local)
 
 > 📘 Guide complet (lancer, logs, persistance, dépannage) : **[RUN.md](RUN.md)**.
@@ -87,8 +93,11 @@ Puis ouvrir **http://localhost:3000** → le client démarre en **mode API**, cr
 ouvre un document, et tout est persisté dans le volume `dc-manager-data` (`/data`,
 un fichier `.db` par document).
 
-Sans `SSO_URL`, l'auth est en **mode dev** (utilisateur factice `dev`). Pour le
-vrai SSO : décommenter `SSO_URL` dans `docker-compose.yml`.
+Sans `SSO_URL`, l'auth est en **mode dev** (utilisateur factice `dev`). Pour protéger
+un déploiement réel, **privilégier la Basic Auth** (`BASIC_AUTH=user:pass`) : l'intégration
+SSO est spécifique à un besoin personnel et **peu pertinente pour la plupart des usages**
+(cf. [RUN.md](RUN.md) § Authentification). Pour quand même brancher le SSO : décommenter
+`SSO_URL` dans `docker-compose.yml`.
 
 Sans compose :
 ```bash

@@ -130,6 +130,14 @@ docker compose exec dc-manager ls -la /data/documents
 | `DEV_USER` | `dev` | nom de l'utilisateur factice en mode dev |
 
 ### Authentification (SSO)
+
+> ⚠️ **L'implémentation SSO actuelle répond à un besoin PERSONNEL** et attend un contrat très
+> spécifique (proxifier un cookie de session vers un endpoint qui renvoie `{ logged, adminRight,
+> expireDate }`, accès réservé à `adminRight = "SUPER_ADMIN"`). Elle n'est **probablement pas
+> pertinente pour la plupart des déploiements**. En attendant une intégration plus standard
+> (OIDC / OAuth2, vraie gestion d'utilisateurs), **privilégiez la Basic Auth** (`BASIC_AUTH=user:pass`,
+> voir ci-dessous) pour protéger le serveur — ou le mode dev en réseau de confiance.
+
 L'app **ne gère pas l'auth** : le serveur **proxifie le jeton** (cookie `COOKIE_NAME`)
 au SSO externe (`SSO_URL`) qui renvoie l'utilisateur
 (`logged`, `adminRight`, `expireDate`). Le résultat est **mis en cache** (clé =
@@ -142,9 +150,6 @@ dépassée. **Accès autorisé uniquement si `logged` et `adminRight = "SUPER_AD
 - **Mode dev + mot de passe** : `BASIC_AUTH=user:pass` (prioritaire sur le SSO) →
   le navigateur demande un user/mot de passe (HTTP Basic) ; identifiants OK →
   SUPER_ADMIN. Pratique pour protéger un serveur de dev sans le SSO.
-- **Tester l'écran « accès refusé »** du client (en dev) : `DEV_RIGHT=NONE`
-  (connecté mais sans droits) ou `DEV_RIGHT=ANON` (non connecté). Le client
-  affiche alors le message sur l'écran d'accueil au lieu d'ouvrir un document.
 - **SSO réel** : dans `docker-compose.yml`, renseigner `SSO_URL` (endpoint de validation
   de votre SSO) et, si besoin, `COOKIE_NAME` (nom du cookie portant le jeton ; vide =
   en-tête `Cookie` complet). Ex. `SSO_URL: https://sso.example.com/validate`.

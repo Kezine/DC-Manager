@@ -185,11 +185,16 @@ Lues par le serveur au démarrage ([`src-server/src/index.ts`](src-server/src/in
 | `COOKIE_NAME` | *(vide)* | Cookie du jeton à transmettre au SSO (`""` = en-tête `Cookie` complet). |
 | `DEV_USER` | — | Nom de l'utilisateur factice (mode dev). |
 | `BASIC_AUTH` | — | `"user:pass"` → impose une Basic Auth navigateur (dev). Prioritaire sur le SSO. |
-| `DEV_RIGHT` | `SUPER_ADMIN` | Dev : `SUPER_ADMIN` \| `NONE` \| `ANON` (pour tester l'écran d'accès refusé). |
 
 **Authentification.** L'app **ne gère pas le login** : elle transmet les cookies de
-session au backend, qui valide via le SSO (ou le proxifie). Pour brancher le vrai SSO,
-renseigner `SSO_URL` / `COOKIE_NAME` (cf. exemples commentés dans le `docker-compose.yml`).
+session au backend, qui valide via un SSO externe (ou le proxifie).
+
+> ⚠️ L'intégration SSO actuelle répond à un **besoin personnel** (contrat spécifique : cookie de
+> session proxifié vers un endpoint renvoyant `{ logged, adminRight, expireDate }`, accès réservé à
+> `SUPER_ADMIN`) et n'est **probablement pas adaptée à la plupart des usages**. En attendant une
+> implémentation plus standard (OIDC / OAuth2, gestion d'utilisateurs), **utilisez de préférence la
+> Basic Auth** (`BASIC_AUTH=user:pass`) pour protéger le serveur. Pour quand même brancher le SSO,
+> renseigner `SSO_URL` / `COOKIE_NAME` (cf. `docker-compose.yml`).
 
 ---
 
