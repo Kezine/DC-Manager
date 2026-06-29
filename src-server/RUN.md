@@ -127,6 +127,7 @@ docker compose exec dc-manager ls -la /data/documents
 | `DOCS_DIR` | `/data/documents` | dossier des documents (registre + 1 `.db`/doc) |
 | `SSO_URL` | *(vide)* | endpoint SSO externe qui valide la session (cf. ci-dessous). **vide → mode dev** |
 | `COOKIE_NAME` | *(vide)* | nom du cookie contenant le jeton à proxifier au SSO (`""` = en-tête `Cookie` complet) |
+| `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié) ; macro `${clbkUrl}` → URL courante encodée. Vide = pas de bouton |
 | `DEV_USER` | `dev` | nom de l'utilisateur factice en mode dev |
 
 ### Authentification (SSO)

@@ -16,7 +16,7 @@ const CLIENT_DIR = process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "d
 const API_BASE = process.env.API_BASE || "/api";
 // URL de connexion SSO injectée au client (bouton « Connexion » du welcome quand non authentifié). Vide = pas de
 // bouton. La macro ${clbkUrl} y est remplacée côté client par l'URL courante encodée (retour après connexion).
-const LOGIN_URL = process.env.LOGIN_URL || "";
+const SSO_LOGIN_URL = process.env.SSO_LOGIN_URL || "";
 // SSO externe : configurer SSO_URL (+ COOKIE_NAME) via l'environnement. Défaut VIDE → mode dev (utilisateur factice SUPER_ADMIN).
 const SSO_URL = process.env.SSO_URL ?? "";
 const COOKIE_NAME = process.env.COOKIE_NAME ?? "";   // cookie du jeton à proxifier au SSO ("" = en-tête Cookie complet)
@@ -27,4 +27,4 @@ const log = Logger.fromEnv();
 const auth = new Auth(log.child("auth"), { ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH });
 const docs = new DocumentStore(DOCS_DIR, Database as unknown as SqliteCtor, log.child("docs"));
 const live = new LiveBus(log.child("live"));
-new Server({ docs, auth, live, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: LOGIN_URL, log }).listen(PORT);
+new Server({ docs, auth, live, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log }).listen(PORT);
