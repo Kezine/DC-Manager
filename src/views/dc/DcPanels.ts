@@ -196,6 +196,7 @@ export class DcPanels extends DcViews2D {
     side.innerHTML = "";
     if (this.routeBuild) side.appendChild(this.routeCard());   // panneau de routage (toutes vues), en tête
     if (this.measure && this.measure.active) side.appendChild(this.measureCard());   // panneau de mesure (toutes vues), en tête
+    if (this.positioning && this.positioning.active) side.appendChild(this.positioningCard());   // panneau d'aide au positionnement (vue Plan de salle)
     if (this.view === "floor") {   // plan d'étage : carte étage + panneau Waypoints (scope étage, toutes les salles)
       side.appendChild(this.collapsible(this.floorCard(), "floor"));
       const ft = this.floorTargetResolve(); const cur = this.current();

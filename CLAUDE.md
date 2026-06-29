@@ -101,6 +101,9 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   données (spec déclarative, niveaux intrinsèque/référentiel/invariants, V1/V2/V3).
 - [`reverse-proxy.md`](docs/reverse-proxy.md) — servir l'app **sous un sous-dossier**
   (URLs relatives + `<base>` + `X-Forwarded-Prefix`), sans reconfiguration.
+- [`positioning-toolkit.md`](docs/positioning-toolkit.md) — **aide au positionnement** :
+  placer une baie par ses coins (murs / coins d'autres baies, cotes ⟂) ; cœur pur
+  `geometry/Positioning.ts` réutilisable, glue de vue dans `DcInteract` (portable à la vue Étage).
 
 ## Points d'architecture à connaître
 

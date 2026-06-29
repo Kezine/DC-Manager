@@ -51,6 +51,7 @@ export class DcViews2D extends DcScene3D {
     this.store.freeEquipsOfDc(dc.id).forEach((e: any) => { if (e.dc_x != null && e.dc_y != null) gRoot.appendChild(this.equipNode(e)); });
     this.drawCables2D(gRoot, dc);   // filtré par cableShown (showAllCables / selCables) à l'intérieur
     if (this.showWaypoints) this.store.waypointsOfDc(dc.id).forEach((wp: any) => { if (this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.waypointNode2D(wp, dc)); });
+    this.drawPositioning2D(gRoot);   // aide au positionnement (coins/cotes ⟂) — avant la mesure et le redressement des labels
     this.drawMeasure2D(gRoot);   // outil de mesure (avant finishScene/uprightTexts → labels redressés)
     this.finishScene();
     this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue

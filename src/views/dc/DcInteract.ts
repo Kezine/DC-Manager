@@ -18,6 +18,8 @@ import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
 import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
+import { Positioning, CORNER_IDS, WALL_IDS } from "../../geometry/Positioning";
+import type { Frame, Rect, CornerId, WallId, Axis, Ref as PosRef, Cote } from "../../geometry/Positioning";
 import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { RackItemKinds } from "../../domain/RackItemKinds";
@@ -156,6 +158,7 @@ export class DcInteract extends DcPanels {
   /** Glisser-déposer une baie (vue Dessus) : aimantation à la maille, bornée à la salle. */
   protected onRackPointerDown(e: MouseEvent, r: any): void {
     if (e.button !== 0) return;
+    if (this.positionActiveHere()) { this.positionDragRack(e, r); return; }   // mode positionnement : glisser aimanté + sélection mover
     e.preventDefault(); e.stopPropagation();
     const dc = this.current(); if (!dc) return;
     this.selRackId = r.id; this.selEquipId = null; this.selWaypointId = null;
@@ -592,7 +595,7 @@ export class DcInteract extends DcPanels {
   }
 
   /* ---- routage interactif (création d'une route de câble au clic) ---- */
-  routeArm(): void { this.routeBuild = { fromPortId: null, wpIds: [], armed: true }; Notify.toast("Routage : cliquez le PORT de départ", "ok"); this.render(); }
+  routeArm(): void { this.routeBuild = { fromPortId: null, wpIds: [], armed: true }; this.positioning = null; Notify.toast("Routage : cliquez le PORT de départ", "ok"); this.render(); }
 
   protected routeStart(portId: string): void { this.routeBuild = { fromPortId: portId, wpIds: [] }; Notify.toast("Route démarrée — cliquez des waypoints/brosses puis un PORT terminal"); this.render(); }
 
@@ -648,6 +651,238 @@ export class DcInteract extends DcPanels {
   }
 
 
+  /* ===================== OUTIL DE POSITIONNEMENT (aide au placement par COINS) =====================
+     Place une baie via ses COINS, par rapport aux MURS de la salle ou aux COINS d'autres baies (ancres), avec des
+     cotes PERPENDICULAIRES aux côtés. C'est une AIDE : on déplace la baie « mover » et on écrit dc_x/dc_y UNE fois —
+     AUCUNE relation (coin ↔ référence) n'est mémorisée (cf. geometry/Positioning, cœur pur). Deux modes complémentaires :
+     SAISIE numérique (édite une cote dans le panneau) et GLISSER aimanté (snap aux murs/coins voisins). Conçu PORTABLE
+     vers la vue Plan d'étage : tout passe par le seul accès `posScene()` — fournir une variante « salles sur étage » suffit. */
+
+  /** Scène de positionnement courante : CADRE (salle), RECTANGLES déplaçables (baies) + écriture de la position.
+      UNIQUE point d'adaptation pour porter l'outil (ex. salles sur un plan d'étage). null hors vue Plan de salle. */
+  protected posScene(): { frame: Frame; rects: Array<{ id: string; name: string; rect: Rect }>; commit: (id: string, cx: number, cy: number) => Promise<void> } | null {
+    if (this.view !== "top") return null;            // porté à la vue Dessus pour l'instant (cf. en-tête)
+    const dc = this.current(); if (!dc) return null;
+    const rects = this.racks(dc.id).map((r) => {
+      const ext = this.rackHalfExtents(r);
+      return { id: r.id, name: r.name || "(baie)", rect: { cx: (r.dc_x != null ? r.dc_x : ext.hx), cy: (r.dc_y != null ? r.dc_y : ext.hy), hx: ext.hx, hy: ext.hy } as Rect };
+    });
+    const frame: Frame = { w: dc.width_mm, h: dc.depth_mm };
+    const commit = async (id: string, cx: number, cy: number): Promise<void> => {
+      const r = this.store.get("racks", id); if (!r) return;
+      const ext = this.rackHalfExtents(r);
+      const c = { x: Math.min(Math.max(cx, ext.hx), frame.w - ext.hx), y: Math.min(Math.max(cy, ext.hy), frame.h - ext.hy) };   // borné à la salle
+      if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); return; }
+      await this.store.update("racks", id, { dc_x: Math.round(c.x), dc_y: Math.round(c.y) }); this.host.setDirty?.(true);
+    };
+    return { frame, rects, commit };
+  }
+  /** Map id → Rect (entrée du cœur pur). */
+  protected posRectMap(scene: { rects: Array<{ id: string; rect: Rect }> }): Record<string, Rect> { const m: Record<string, Rect> = {}; scene.rects.forEach((e) => { m[e.id] = e.rect; }); return m; }
+  /** Rect de la baie « mover » courante, ou null. */
+  protected posMoverRect(scene: { rects: Array<{ id: string; rect: Rect }> }): Rect | null { const e = scene.rects.find((x) => x.id === (this.positioning && this.positioning.moverId)); return e ? e.rect : null; }
+
+  /** Arme l'outil dans le contexte courant (exclusif de la mesure / du routage). */
+  positionArm(): void {
+    this.measure = null; this.routeBuild = null;   // un seul mode de clic à la fois
+    this.positioning = { active: true, ctx: this.positionCtxKey(), moverId: null, corner: null, refX: null, refY: null };
+    Notify.toast("Positionnement : cliquez une baie à déplacer, son coin, puis un mur ou le coin d'une autre baie · glissez pour aimanter", "ok");
+    this.buildToolbar(); this.render();
+  }
+  positionCancel(): void { this.positioning = null; this.hideCote(); this.positionClearDragGuides(); this.buildToolbar(); this.render(); }
+  /** Même portée que la mesure (salle / étage) — l'outil ne vit que là où il a été armé. */
+  protected positionCtxKey(): string { return this.measureCtxKey(); }
+  protected positionActiveHere(): boolean { return !!(this.positioning && this.positioning.active && this.view === "top" && this.positioning.ctx === this.positionCtxKey()); }
+
+  /** ÉCHAP : efface par paliers (références → coin → mover). */
+  protected positionEscape(): void {
+    const p = this.positioning; if (!p) return;
+    if (p.refX || p.refY) { p.refX = null; p.refY = null; }
+    else if (p.corner) { p.corner = null; }
+    else if (p.moverId) { p.moverId = null; }
+    this.hideCote(); this.render();
+  }
+  /** Sélectionne la baie à déplacer (réinitialise coin + références). */
+  protected positionSetMover(id: string): void { const p = this.positioning; if (!p) return; if (p.moverId !== id) { p.moverId = id; p.corner = null; p.refX = null; p.refY = null; } }
+  protected positionSetCorner(c: CornerId): void { const p = this.positioning; if (!p) return; p.corner = c; this.render(); }
+  /** Pose une référence : un MUR fixe l'axe correspondant ; un COIN d'ancrage fixe les DEUX axes (cote X et Y). */
+  protected positionSetRef(ref: PosRef): void {
+    const p = this.positioning, scene = this.posScene(); if (!p || !scene) return;
+    if (!p.moverId) { Notify.toast("Choisissez d'abord une baie à déplacer.", "err"); return; }
+    if (ref.kind === "corner" && ref.rectId === p.moverId) { Notify.toast("La référence doit être un MUR ou le coin d'une AUTRE baie.", "err"); return; }
+    if (!p.corner) p.corner = "TL";   // coin par défaut si non choisi
+    const axis = Positioning.refAxis(ref, scene.frame);
+    if (axis === "x") p.refX = ref;
+    else if (axis === "y") p.refY = ref;
+    else { p.refX = ref; p.refY = ref; }   // coin d'ancrage → cote sur les deux axes
+    this.render();
+  }
+  /** Cotes ⟂ courantes (coin actif → références) pour l'overlay et le panneau. */
+  protected positionCotes(scene: { frame: Frame; rects: Array<{ id: string; rect: Rect }> }): { x: Cote | null; y: Cote | null } {
+    const p = this.positioning; if (!p || !p.moverId || !p.corner) return { x: null, y: null };
+    const mover = this.posMoverRect(scene); if (!mover) return { x: null, y: null };
+    const corner = Positioning.corner(mover, p.corner), rects = this.posRectMap(scene);
+    return {
+      x: p.refX ? Positioning.cote(corner, p.refX, "x", scene.frame, rects) : null,
+      y: p.refY ? Positioning.cote(corner, p.refY, "y", scene.frame, rects) : null,
+    };
+  }
+  /** SAISIE numérique : place le coin actif à `value` mm de la référence sur `axis`, puis écrit la position. */
+  protected async positionApplyAxis(axis: Axis, value: number): Promise<void> {
+    const p = this.positioning, scene = this.posScene(); if (!p || !scene || !p.moverId || !p.corner) return;
+    const ref = axis === "x" ? p.refX : p.refY; if (!ref) return;
+    const mover = this.posMoverRect(scene); if (!mover) return;
+    const nc = Positioning.placeAxis(mover, p.corner, axis, ref, value, scene.frame, this.posRectMap(scene));
+    if (nc == null) return;
+    await scene.commit(p.moverId, axis === "x" ? nc : mover.cx, axis === "y" ? nc : mover.cy);
+    this.render();
+  }
+  /** Étiquette lisible d'une référence (mur / baie+coin). */
+  protected positionRefLabel(ref: PosRef, scene: { rects: Array<{ id: string; name: string }> }): string {
+    if (ref.kind === "wall") { const w: Record<WallId, string> = { left: "mur gauche", right: "mur droit", top: "mur haut", bottom: "mur bas" }; return w[ref.wall]; }
+    const e = scene.rects.find((x) => x.id === ref.rectId), cl: Record<CornerId, string> = { TL: "H-G", TR: "H-D", BR: "B-D", BL: "B-G" };
+    return "« " + (e ? e.name : "?") + " » " + cl[ref.corner];
+  }
+
+  /** GLISSER aimanté de la baie « mover » (snap aux murs + coins voisins). Appelé par onRackPointerDown si l'outil est actif. */
+  protected positionDragRack(e: MouseEvent, r: any): void {
+    if (e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const p = this.positioning, scene = this.posScene(), dc = this.current(); if (!p || !scene || !dc) return;
+    this.positionSetMover(r.id);   // la baie cliquée devient la mover (sans render → on garde le nœud `grp` vivant)
+    const grp = e.currentTarget as SVGElement;
+    const ext = this.rackHalfExtents(r), o = Normalize.rackOrientation(r.orientation);
+    const w0 = this.clientToWorld(e.clientX, e.clientY);
+    const cx0 = (r.dc_x != null) ? r.dc_x : w0.x, cy0 = (r.dc_y != null) ? r.dc_y : w0.y, off = { x: w0.x - cx0, y: w0.y - cy0 };
+    const moverRect: Rect = { cx: cx0, cy: cy0, hx: ext.hx, hy: ext.hy };
+    const others = scene.rects.map((x) => x.rect), moverIdx = scene.rects.findIndex((x) => x.id === r.id);
+    const tol = Positioning.SNAP_PX / (this.scale || 1);
+    const clampC = (c: { x: number; y: number }) => ({ x: Math.min(Math.max(c.x, ext.hx), dc.width_mm - ext.hx), y: Math.min(Math.max(c.y, ext.hy), dc.depth_mm - ext.hy) });
+    let cur = { x: cx0, y: cy0 }, moved = false;
+    const move = (ev: MouseEvent) => {
+      const w = this.clientToWorld(ev.clientX, ev.clientY), nx = w.x - off.x, ny = w.y - off.y;
+      if (!moved && Math.abs(nx - cx0) + Math.abs(ny - cy0) < (8 / (this.scale || 1))) return;
+      moved = true; grp.classList.add("dragging");
+      const snapped = Positioning.snapCenter(moverRect, nx, ny, scene.frame, others, moverIdx, tol);
+      cur = clampC({ x: snapped.cx, y: snapped.cy });
+      grp.setAttribute("transform", `translate(${cur.x} ${cur.y}) rotate(${o})`);
+      this.positionDrawDragGuides(snapped);
+      this.showCote(Format.meters(cur.x) + " × " + Format.meters(cur.y), ev.clientX, ev.clientY);
+    };
+    const up = async () => {
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+      grp.classList.remove("dragging"); this.hideCote(); this.positionClearDragGuides();
+      if (moved) await scene.commit(r.id, cur.x, cur.y);
+      this.render();   // (re)dessine l'overlay : mover sélectionnée (clic) ou déplacée (glisser)
+    };
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+  }
+  /** Lignes-guides d'accrochage (pleine hauteur/largeur) tracées EN DIRECT pendant le glisser. */
+  protected positionDrawDragGuides(snapped: { snapX: number | null; snapY: number | null }): void {
+    const g = this.gRoot, scene = this.posScene(); if (!g || !scene) return;
+    this.positionClearDragGuides();
+    const grp = Dom.svg("g", { class: "dc-pos-drag", style: "pointer-events:none" });
+    if (snapped.snapX != null) grp.appendChild(Dom.svg("line", { class: "dc-pos-guide", x1: snapped.snapX, y1: 0, x2: snapped.snapX, y2: scene.frame.h }));
+    if (snapped.snapY != null) grp.appendChild(Dom.svg("line", { class: "dc-pos-guide", x1: 0, y1: snapped.snapY, x2: scene.frame.w, y2: snapped.snapY }));
+    g.appendChild(grp);
+  }
+  protected positionClearDragGuides(): void { if (this.gRoot) this.gRoot.querySelectorAll(".dc-pos-drag").forEach((n) => n.remove()); }
+
+  /** Overlay SVG de l'outil (murs cliquables, poignées de coin, ancres, cotes ⟂) — appelé par renderTop. */
+  protected drawPositioning2D(gRoot: SVGGElement): void {
+    if (!this.positionActiveHere()) return;
+    const scene = this.posScene(), p = this.positioning; if (!scene || !p) return;
+    const g = Dom.svg("g", { class: "dc-positioning" });
+    const inv = 1 / (this.scale || 1), rPx = 6 * inv, tick = 5 * inv, strip = 10 * inv;
+    const handle = (pt: { x: number; y: number }, cls: string, onDown: () => void): SVGElement => {
+      const c = Dom.svg("circle", { class: cls, cx: pt.x, cy: pt.y, r: rPx });
+      c.addEventListener("pointerdown", (ev: any) => { ev.preventDefault(); ev.stopPropagation(); onDown(); });
+      return c;
+    };
+    // MURS cliquables : bandes le long des 4 bords (référence d'axe au clic).
+    const wallBox: Record<WallId, any> = {
+      left: { x: 0, y: 0, width: strip, height: scene.frame.h },
+      right: { x: scene.frame.w - strip, y: 0, width: strip, height: scene.frame.h },
+      top: { x: 0, y: 0, width: scene.frame.w, height: strip },
+      bottom: { x: 0, y: scene.frame.h - strip, width: scene.frame.w, height: strip },
+    };
+    WALL_IDS.forEach((wid) => {
+      const active = (p.refX && p.refX.kind === "wall" && p.refX.wall === wid) || (p.refY && p.refY.kind === "wall" && p.refY.wall === wid);
+      const rect = Dom.svg("rect", { class: "dc-pos-wall" + (active ? " active" : ""), ...wallBox[wid] });
+      rect.addEventListener("pointerdown", (ev: any) => { ev.preventDefault(); ev.stopPropagation(); this.positionSetRef({ kind: "wall", wall: wid }); });
+      g.appendChild(rect);
+    });
+    // COINS des AUTRES baies : poignées « ancre » (référence coin → cote X et Y).
+    scene.rects.forEach((entry) => {
+      if (entry.id === p.moverId) return;
+      const cs = Positioning.corners(entry.rect);
+      CORNER_IDS.forEach((cid) => g.appendChild(handle(cs[cid], "dc-pos-anchor", () => this.positionSetRef({ kind: "corner", rectId: entry.id, corner: cid }))));
+    });
+    // MOVER : contour + poignées de coin (choix du coin actif) + cotes ⟂.
+    const mover = this.posMoverRect(scene);
+    if (mover) {
+      g.appendChild(Dom.svg("rect", { class: "dc-pos-mover", x: mover.cx - mover.hx, y: mover.cy - mover.hy, width: mover.hx * 2, height: mover.hy * 2 }));
+      const cs = Positioning.corners(mover);
+      CORNER_IDS.forEach((cid) => g.appendChild(handle(cs[cid], "dc-pos-corner" + (p.corner === cid ? " active" : ""), () => this.positionSetCorner(cid))));
+      const cotes = this.positionCotes(scene);
+      (["x", "y"] as Axis[]).forEach((ax) => {
+        const co = ax === "x" ? cotes.x : cotes.y; if (!co) return;
+        g.appendChild(Dom.svg("line", { class: "dc-pos-cote", x1: co.from.x, y1: co.from.y, x2: co.to.x, y2: co.to.y }));
+        const ends = [co.from, co.to];
+        if (ax === "x") ends.forEach((pt) => g.appendChild(Dom.svg("line", { class: "dc-pos-cote-tick", x1: pt.x, y1: pt.y - tick, x2: pt.x, y2: pt.y + tick })));
+        else ends.forEach((pt) => g.appendChild(Dom.svg("line", { class: "dc-pos-cote-tick", x1: pt.x - tick, y1: pt.y, x2: pt.x + tick, y2: pt.y })));
+        const t = Dom.svg("text", { class: "dc-pos-cote-label", x: (co.from.x + co.to.x) / 2, y: (co.from.y + co.to.y) / 2 - (ax === "x" ? 4 * inv : 0), "text-anchor": "middle" });
+        t.textContent = Format.meters(co.value);
+        g.appendChild(t);
+      });
+    }
+    gRoot.appendChild(g);
+  }
+
+  /** Carte de panneau latéral de l'outil de positionnement. */
+  protected positioningCard(): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const title = document.createElement("div"); title.className = "dc-card-title"; title.textContent = "📐 Positionnement"; box.appendChild(title);
+    const scene = this.posScene(), p = this.positioning!;
+    if (!scene) {
+      const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Disponible en vue Plan de salle (revenez-y pour positionner)."; box.appendChild(h);
+      const acts = document.createElement("div"); acts.className = "dc-card-acts"; const bc = this.btn("✕ Fermer", () => this.positionCancel()); bc.classList.add("btn-danger"); acts.appendChild(bc); box.appendChild(acts);
+      return box;
+    }
+    const moverEntry = scene.rects.find((x) => x.id === p.moverId);
+    const moverLine = document.createElement("div"); moverLine.style.cssText = "font-size:12px;margin:4px 0";
+    moverLine.innerHTML = moverEntry ? 'Baie à déplacer : <b style="color:var(--accent)">' + Html.escape(moverEntry.name) + "</b>" : '<span style="color:var(--accent)">Cliquez une baie à déplacer.</span>';
+    box.appendChild(moverLine);
+    if (moverEntry) {
+      const cornerRow = document.createElement("div"); cornerRow.className = "dc-card-acts"; cornerRow.style.marginTop = "2px";
+      const labels: Record<CornerId, string> = { TL: "◰ H-G", TR: "◳ H-D", BR: "◲ B-D", BL: "◱ B-G" };
+      CORNER_IDS.forEach((cid) => { const b = this.btn(labels[cid], () => this.positionSetCorner(cid)); if (p.corner === cid) b.classList.add("active"); cornerRow.appendChild(b); });
+      box.appendChild(cornerRow);
+      const ch = document.createElement("div"); ch.className = "form-hint"; ch.textContent = "Coin actif, puis cliquez un mur (cote ⟂) ou le coin d'une autre baie (cote X et Y)."; box.appendChild(ch);
+      const cotes = this.positionCotes(scene);
+      (["x", "y"] as Axis[]).forEach((ax) => {
+        const ref = ax === "x" ? p.refX : p.refY, co = ax === "x" ? cotes.x : cotes.y;
+        if (!ref || !co) return;
+        const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:6px;margin:5px 0;font-size:12px";
+        const lab = document.createElement("span"); lab.style.cssText = "color:var(--fg-dim);min-width:80px"; lab.textContent = (ax === "x" ? "↔ X" : "↕ Y") + " → " + this.positionRefLabel(ref, scene);
+        const inp = document.createElement("input"); inp.type = "number"; inp.step = "1"; inp.min = "0"; inp.value = String(Math.round(co.value)); inp.style.cssText = "width:88px";
+        const unit = document.createElement("span"); unit.style.color = "var(--fg-dim)"; unit.textContent = "mm";
+        const apply = () => { const v = parseFloat(inp.value); if (isFinite(v) && v >= 0) void this.positionApplyAxis(ax, v); };
+        inp.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); apply(); } };
+        inp.onchange = apply;
+        row.append(lab, inp, unit); box.appendChild(row);
+      });
+      if (!p.refX && !p.refY) { const hint = document.createElement("div"); hint.className = "form-hint"; hint.textContent = "Aucune référence. Cliquez un mur ou le coin d'une autre baie."; box.appendChild(hint); }
+    }
+    const dragHint = document.createElement("div"); dragHint.className = "form-hint"; dragHint.textContent = "Astuce : glissez la baie pour l'aimanter aux murs et aux coins voisins."; box.appendChild(dragHint);
+    const acts = document.createElement("div"); acts.className = "dc-card-acts";
+    const bClear = this.btn("Effacer réf.", () => { p.refX = null; p.refY = null; this.render(); }); (bClear as any).disabled = !p.refX && !p.refY;
+    const bClose = this.btn("✕ Fermer", () => this.positionCancel()); bClose.classList.add("btn-danger");
+    acts.append(bClear, bClose); box.appendChild(acts);
+    return box;
+  }
+
+
   /* ============================ OUTIL DE MESURE multipoint (éphémère) ============================
      Clic = poser un point ; glisser = navigation (non inhibée — cf. classe `.dc-measuring` posée par newScene).
      2D (Dessus/Étage) : point au niveau du SOL (z=0) via clientToWorld. 3D : RAYCAST sur les surfaces de la scène
@@ -656,7 +891,7 @@ export class DcInteract extends DcPanels {
 
   /** (Ré)arme l'outil de mesure dans le contexte de vue courant (exclusif du routage). */
   measureArm(): void {
-    this.routeBuild = null;   // un seul mode de clic à la fois
+    this.routeBuild = null; this.positioning = null;   // un seul mode de clic à la fois
     this._measHi = null;
     this.measure = { active: true, ctx: this.measureCtxKey(), pts: [], cursor: null, done: [] };
     Notify.toast("Mesure : cliquez pour poser des points · glissez pour naviguer · ÉCHAP pour effacer", "ok");
