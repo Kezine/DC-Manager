@@ -1,0 +1,31 @@
+# À chaque tag vX.Y.Z : build du front et publication d'une Release GitHub avec le HTML autonome
+# `dc-manager.html` en pièce jointe → téléchargeable depuis l'onglet « Releases », directement utilisable
+# (double-clic, mode fichier, hors-ligne). Déclenchement : `git tag v1.0.0 && git push origin v1.0.0`.
+name: Release — front DC Manager
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # nécessaire pour créer la Release / téléverser l'asset
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Publier la Release (HTML autonome en pièce jointe)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # crée la Release (notes auto) ; si elle existe déjà (re-run), remplace juste l'asset.
+          gh release create "$TAG" dist/dc-manager.html --title "DC Manager $TAG" --generate-notes \
+            || gh release upload "$TAG" dist/dc-manager.html --clobber

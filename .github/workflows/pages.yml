@@ -1,0 +1,44 @@
+# Déploie le front (HTML autonome) sur GitHub Pages → app utilisable en ligne, installable en PWA.
+# Compatible avec le sous-dossier de projet (/DC-Manager/) grâce aux URLs relatives + <base href="./">.
+# Prérequis (une seule fois) : Settings → Pages → Source = "GitHub Actions".
+name: Pages — front DC Manager
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Permissions minimales pour publier sur Pages via OIDC.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Un seul déploiement Pages à la fois ; annule un run précédent encore en cours.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # Pages sert index.html à la racine → on y copie le HTML autonome (les assets PWA restent dans dist/).
+      - name: index.html (point d'entrée Pages)
+        run: cp dist/dc-manager.html dist/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deploy
+        uses: actions/deploy-pages@v4
