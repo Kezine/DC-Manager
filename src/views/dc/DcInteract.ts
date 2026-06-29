@@ -32,6 +32,12 @@ import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, 
 import type { Vec3, Drawable, DatacenterHost } from "./shared";
 import { DcPanels } from "./DcPanels";
 
+/** Une entité DÉPLAÇABLE par l'outil de positionnement (baie / équipement libre / salle d'étage), abstraite de son
+    repère d'écriture. `rect` est TOUJOURS centre + demi-extents (repère monde de la vue) ; `anchor` indique comment
+    le nœud SVG est ancré ("center" + rotation, ou "topleft" pour une salle d'étage) ; `commit(cx,cy)` écrit la
+    nouvelle position dans le modèle (conversion centre → champs de l'entité + bornage + garde éventuelle). */
+type PosEntry = { id: string; name: string; rect: Rect; orient: number; anchor: "center" | "topleft"; commit: (cx: number, cy: number) => Promise<void> };
+
 export class DcInteract extends DcPanels {
 
   /** Met en évidence (`.route-pick`) les waypoints DÉJÀ choisis dans la route en cours, sur tous les nœuds `[data-wp]`. */
@@ -158,7 +164,7 @@ export class DcInteract extends DcPanels {
   /** Glisser-déposer une baie (vue Dessus) : aimantation à la maille, bornée à la salle. */
   protected onRackPointerDown(e: MouseEvent, r: any): void {
     if (e.button !== 0) return;
-    if (this.positionActiveHere()) { this.positionDragRack(e, r); return; }   // mode positionnement : glisser aimanté + sélection mover
+    if (this.positionActiveHere()) { this.positionDragEntity(e, r.id); return; }   // mode positionnement : glisser aimanté + sélection mover
     e.preventDefault(); e.stopPropagation();
     const dc = this.current(); if (!dc) return;
     this.selRackId = r.id; this.selEquipId = null; this.selWaypointId = null;
@@ -191,6 +197,7 @@ export class DcInteract extends DcPanels {
 
   protected onEquipPointerDown(ev: MouseEvent, eq: any): void {
     if (ev.button !== 0) return;
+    if (this.positionActiveHere()) { this.positionDragEntity(ev, eq.id); return; }   // mode positionnement
     ev.preventDefault(); ev.stopPropagation();
     const dc = this.current(); if (!dc) return;
     this.selRackId = null; this.selEquipId = eq.id; this.selWaypointId = null;
@@ -652,47 +659,90 @@ export class DcInteract extends DcPanels {
 
 
   /* ===================== OUTIL DE POSITIONNEMENT (aide au placement par COINS) =====================
-     Place une baie via ses COINS, par rapport aux MURS de la salle ou aux COINS d'autres baies (ancres), avec des
-     cotes PERPENDICULAIRES aux côtés. C'est une AIDE : on déplace la baie « mover » et on écrit dc_x/dc_y UNE fois —
+     Place un élément via ses COINS, par rapport aux MURS du cadre ou aux COINS d'autres éléments (ancres), avec des
+     cotes PERPENDICULAIRES aux côtés. C'est une AIDE : on déplace l'élément « mover » et on écrit sa position UNE fois —
      AUCUNE relation (coin ↔ référence) n'est mémorisée (cf. geometry/Positioning, cœur pur). Deux modes complémentaires :
-     SAISIE numérique (édite une cote dans le panneau) et GLISSER aimanté (snap aux murs/coins voisins). Conçu PORTABLE
-     vers la vue Plan d'étage : tout passe par le seul accès `posScene()` — fournir une variante « salles sur étage » suffit. */
+     SAISIE numérique (édite une cote dans le panneau) et GLISSER aimanté (snap aux murs/coins voisins). Disponible dans
+     LES DEUX vues 2D : Plan de salle (baies + équipements libres) et Plan d'étage (salles + équipements d'étage). Tout
+     passe par le seul accès `posScene()` qui déclare les entités déplaçables de la vue courante — le reste est agnostique. */
 
-  /** Scène de positionnement courante : CADRE (salle), RECTANGLES déplaçables (baies) + écriture de la position.
-      UNIQUE point d'adaptation pour porter l'outil (ex. salles sur un plan d'étage). null hors vue Plan de salle. */
-  protected posScene(): { frame: Frame; rects: Array<{ id: string; name: string; rect: Rect }>; commit: (id: string, cx: number, cy: number) => Promise<void> } | null {
-    if (this.view !== "top") return null;            // porté à la vue Dessus pour l'instant (cf. en-tête)
-    const dc = this.current(); if (!dc) return null;
-    const rects = this.racks(dc.id).map((r) => {
-      const ext = this.rackHalfExtents(r);
-      return { id: r.id, name: r.name || "(baie)", rect: { cx: (r.dc_x != null ? r.dc_x : ext.hx), cy: (r.dc_y != null ? r.dc_y : ext.hy), hx: ext.hx, hy: ext.hy } as Rect };
-    });
-    const frame: Frame = { w: dc.width_mm, h: dc.depth_mm };
-    const commit = async (id: string, cx: number, cy: number): Promise<void> => {
-      const r = this.store.get("racks", id); if (!r) return;
-      const ext = this.rackHalfExtents(r);
-      const c = { x: Math.min(Math.max(cx, ext.hx), frame.w - ext.hx), y: Math.min(Math.max(cy, ext.hy), frame.h - ext.hy) };   // borné à la salle
-      if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); return; }
-      await this.store.update("racks", id, { dc_x: Math.round(c.x), dc_y: Math.round(c.y) }); this.host.setDirty?.(true);
-    };
-    return { frame, rects, commit };
+  /** Scène de positionnement courante : le CADRE + les ENTITÉS déplaçables (avec leur écriture propre). UNIQUE point
+      d'adaptation de l'outil — chaque vue 2D y déclare ses entités déplaçables :
+      • Plan de SALLE (top)  : baies (centre dc_x/dc_y) + équipements libres de la salle (centre dc_x/dc_y).
+      • Plan d'ÉTAGE (floor) : salles (coin haut-gauche floor_x/floor_y, emprise orientée) + équipements d'étage (centre floor_x/floor_y).
+      Bornage à la salle + garde « case inaccessible » (baies/équipements en salle) sont portés par chaque `commit`. */
+  protected posScene(): { frame: Frame; rects: PosEntry[] } | null {
+    const clamp = (cx: number, cy: number, hx: number, hy: number, frame: Frame) => ({ x: Math.min(Math.max(cx, hx), frame.w - hx), y: Math.min(Math.max(cy, hy), frame.h - hy) });
+    if (this.view === "top") {
+      const dc = this.current(); if (!dc) return null;
+      const frame: Frame = { w: dc.width_mm, h: dc.depth_mm };
+      const rects: PosEntry[] = [];
+      this.racks(dc.id).forEach((r: any) => {
+        if (this.hidden3dRacks.has(r.id)) return;
+        const ext = this.rackHalfExtents(r), o = Normalize.rackOrientation(r.orientation);
+        rects.push({ id: r.id, name: r.name || "(baie)", orient: o, anchor: "center", rect: { cx: (r.dc_x != null ? r.dc_x : ext.hx), cy: (r.dc_y != null ? r.dc_y : ext.hy), hx: ext.hx, hy: ext.hy },
+          commit: async (cx, cy) => {
+            const c = clamp(cx, cy, ext.hx, ext.hy, frame);
+            if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); return; }
+            await this.store.update("racks", r.id, { dc_x: Math.round(c.x), dc_y: Math.round(c.y) }); this.host.setDirty?.(true);
+          } });
+      });
+      this.store.freeEquipsOfDc(dc.id).forEach((eq: any) => {
+        if (eq.dc_x == null || eq.dc_y == null) return;   // seulement les équipements PLACÉS au sol
+        const ext = FreeEquipGeometry.halfExtents(eq), o = Normalize.rackOrientation(eq.dc_orientation);
+        rects.push({ id: eq.id, name: eq.name || "(équipement)", orient: o, anchor: "center", rect: { cx: eq.dc_x, cy: eq.dc_y, hx: ext.hx, hy: ext.hy },
+          commit: async (cx, cy) => {
+            const c = clamp(cx, cy, ext.hx, ext.hy, frame);
+            if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); return; }
+            await this.store.update("equipments", eq.id, { dc_x: Math.round(c.x), dc_y: Math.round(c.y) }); this.host.setDirty?.(true);
+          } });
+      });
+      return { frame, rects };
+    }
+    if (this.view === "floor") {
+      const ft = this.floorTargetResolve(); if (!ft) return null;
+      const loc = ft.location || "", fl = String(ft.floor || ""), cfg = this.floor.config(loc, fl);
+      const frame: Frame = { w: cfg.width_mm, h: cfg.depth_mm };
+      const rects: PosEntry[] = [];
+      this.store.dcsOfFloor(loc, fl).forEach((d: any) => {
+        const fp = FloorLayout.roomFootprint(d), pos = this.floor.roomPos(d, cfg), hx = fp.w / 2, hy = fp.h / 2;
+        rects.push({ id: d.id, name: (d.name || "(salle)") + (d.room ? " · " + d.room : ""), orient: 0, anchor: "topleft", rect: { cx: pos.x + hx, cy: pos.y + hy, hx, hy },
+          commit: async (cx, cy) => {
+            const c = clamp(cx, cy, hx, hy, frame);
+            await this.store.update("datacenters", d.id, { floor_x: Math.round(c.x - hx), floor_y: Math.round(c.y - hy) }); this.host.setDirty?.(true);
+          } });
+      });
+      this.store.floorEquipments().filter((e: any) => (e.location || "") === loc && String(e.floor || "") === fl).forEach((eq: any) => {
+        const ext = FreeEquipGeometry.halfExtents(eq), o = Normalize.rackOrientation(eq.dc_orientation), pos = FloorLayout.floorEquipPos(eq, cfg);
+        rects.push({ id: eq.id, name: eq.name || "(équipement)", orient: o, anchor: "center", rect: { cx: pos.x, cy: pos.y, hx: ext.hx, hy: ext.hy },
+          commit: async (cx, cy) => {
+            const c = clamp(cx, cy, ext.hx, ext.hy, frame);
+            await this.store.update("equipments", eq.id, { floor_x: Math.round(c.x), floor_y: Math.round(c.y), location: loc, floor: fl }); this.host.setDirty?.(true);
+          } });
+      });
+      return { frame, rects };
+    }
+    return null;
   }
   /** Map id → Rect (entrée du cœur pur). */
-  protected posRectMap(scene: { rects: Array<{ id: string; rect: Rect }> }): Record<string, Rect> { const m: Record<string, Rect> = {}; scene.rects.forEach((e) => { m[e.id] = e.rect; }); return m; }
-  /** Rect de la baie « mover » courante, ou null. */
-  protected posMoverRect(scene: { rects: Array<{ id: string; rect: Rect }> }): Rect | null { const e = scene.rects.find((x) => x.id === (this.positioning && this.positioning.moverId)); return e ? e.rect : null; }
+  protected posRectMap(scene: { rects: PosEntry[] }): Record<string, Rect> { const m: Record<string, Rect> = {}; scene.rects.forEach((e) => { m[e.id] = e.rect; }); return m; }
+  /** Entrée « mover » courante (entité + rect + écriture), ou null. */
+  protected posMoverEntry(scene: { rects: PosEntry[] }): PosEntry | null { return scene.rects.find((x) => x.id === (this.positioning && this.positioning.moverId)) || null; }
+  /** Rect de la « mover » courante, ou null. */
+  protected posMoverRect(scene: { rects: PosEntry[] }): Rect | null { const e = this.posMoverEntry(scene); return e ? e.rect : null; }
 
   /** Arme l'outil dans le contexte courant (exclusif de la mesure / du routage). */
   positionArm(): void {
     this.measure = null; this.routeBuild = null;   // un seul mode de clic à la fois
     this.positioning = { active: true, ctx: this.positionCtxKey(), moverId: null, corner: null, refX: null, refY: null };
-    Notify.toast("Positionnement : cliquez une baie à déplacer, son coin, puis un mur ou le coin d'une autre baie · glissez pour aimanter", "ok");
+    Notify.toast("Positionnement : cliquez un élément à déplacer, son coin, puis un mur ou le coin d'un autre élément · glissez pour aimanter", "ok");
     this.buildToolbar(); this.render();
   }
   positionCancel(): void { this.positioning = null; this.hideCote(); this.positionClearDragGuides(); this.buildToolbar(); this.render(); }
   /** Même portée que la mesure (salle / étage) — l'outil ne vit que là où il a été armé. */
   protected positionCtxKey(): string { return this.measureCtxKey(); }
-  protected positionActiveHere(): boolean { return !!(this.positioning && this.positioning.active && this.view === "top" && this.positioning.ctx === this.positionCtxKey()); }
+  /** Actif dans les vues 2D (Plan de salle ET Plan d'étage), là où il a été armé. */
+  protected positionActiveHere(): boolean { return !!(this.positioning && this.positioning.active && (this.view === "top" || this.view === "floor") && this.positioning.ctx === this.positionCtxKey()); }
 
   /** ÉCHAP : efface par paliers (références → coin → mover). */
   protected positionEscape(): void {
@@ -702,14 +752,14 @@ export class DcInteract extends DcPanels {
     else if (p.moverId) { p.moverId = null; }
     this.hideCote(); this.render();
   }
-  /** Sélectionne la baie à déplacer (réinitialise coin + références). */
+  /** Sélectionne l'élément à déplacer (réinitialise coin + références). */
   protected positionSetMover(id: string): void { const p = this.positioning; if (!p) return; if (p.moverId !== id) { p.moverId = id; p.corner = null; p.refX = null; p.refY = null; } }
   protected positionSetCorner(c: CornerId): void { const p = this.positioning; if (!p) return; p.corner = c; this.render(); }
   /** Pose une référence : un MUR fixe l'axe correspondant ; un COIN d'ancrage fixe les DEUX axes (cote X et Y). */
   protected positionSetRef(ref: PosRef): void {
     const p = this.positioning, scene = this.posScene(); if (!p || !scene) return;
-    if (!p.moverId) { Notify.toast("Choisissez d'abord une baie à déplacer.", "err"); return; }
-    if (ref.kind === "corner" && ref.rectId === p.moverId) { Notify.toast("La référence doit être un MUR ou le coin d'une AUTRE baie.", "err"); return; }
+    if (!p.moverId) { Notify.toast("Choisissez d'abord un élément à déplacer.", "err"); return; }
+    if (ref.kind === "corner" && ref.rectId === p.moverId) { Notify.toast("La référence doit être un MUR ou le coin d'un AUTRE élément.", "err"); return; }
     if (!p.corner) p.corner = "TL";   // coin par défaut si non choisi
     const axis = Positioning.refAxis(ref, scene.frame);
     if (axis === "x") p.refX = ref;
@@ -718,7 +768,7 @@ export class DcInteract extends DcPanels {
     this.render();
   }
   /** Cotes ⟂ courantes (coin actif → références) pour l'overlay et le panneau. */
-  protected positionCotes(scene: { frame: Frame; rects: Array<{ id: string; rect: Rect }> }): { x: Cote | null; y: Cote | null } {
+  protected positionCotes(scene: { frame: Frame; rects: PosEntry[] }): { x: Cote | null; y: Cote | null } {
     const p = this.positioning; if (!p || !p.moverId || !p.corner) return { x: null, y: null };
     const mover = this.posMoverRect(scene); if (!mover) return { x: null, y: null };
     const corner = Positioning.corner(mover, p.corner), rects = this.posRectMap(scene);
@@ -731,48 +781,55 @@ export class DcInteract extends DcPanels {
   protected async positionApplyAxis(axis: Axis, value: number): Promise<void> {
     const p = this.positioning, scene = this.posScene(); if (!p || !scene || !p.moverId || !p.corner) return;
     const ref = axis === "x" ? p.refX : p.refY; if (!ref) return;
-    const mover = this.posMoverRect(scene); if (!mover) return;
-    const nc = Positioning.placeAxis(mover, p.corner, axis, ref, value, scene.frame, this.posRectMap(scene));
+    const entry = this.posMoverEntry(scene); if (!entry) return;
+    const nc = Positioning.placeAxis(entry.rect, p.corner, axis, ref, value, scene.frame, this.posRectMap(scene));
     if (nc == null) return;
-    await scene.commit(p.moverId, axis === "x" ? nc : mover.cx, axis === "y" ? nc : mover.cy);
+    await entry.commit(axis === "x" ? nc : entry.rect.cx, axis === "y" ? nc : entry.rect.cy);
     this.render();
   }
-  /** Étiquette lisible d'une référence (mur / baie+coin). */
-  protected positionRefLabel(ref: PosRef, scene: { rects: Array<{ id: string; name: string }> }): string {
+  /** Étiquette lisible d'une référence (mur / élément+coin). */
+  protected positionRefLabel(ref: PosRef, scene: { rects: PosEntry[] }): string {
     if (ref.kind === "wall") { const w: Record<WallId, string> = { left: "mur gauche", right: "mur droit", top: "mur haut", bottom: "mur bas" }; return w[ref.wall]; }
     const e = scene.rects.find((x) => x.id === ref.rectId), cl: Record<CornerId, string> = { TL: "H-G", TR: "H-D", BR: "B-D", BL: "B-G" };
     return "« " + (e ? e.name : "?") + " » " + cl[ref.corner];
   }
 
-  /** GLISSER aimanté de la baie « mover » (snap aux murs + coins voisins). Appelé par onRackPointerDown si l'outil est actif. */
-  protected positionDragRack(e: MouseEvent, r: any): void {
+  /** Transform SVG du nœud d'une entité pour un centre donné (selon son ancrage : centre+rotation, ou coin haut-gauche). */
+  protected positionNodeTransform(entry: PosEntry, cx: number, cy: number): string {
+    return entry.anchor === "topleft"
+      ? `translate(${cx - entry.rect.hx} ${cy - entry.rect.hy})`        // salle d'étage : nœud ancré au coin haut-gauche de l'emprise
+      : `translate(${cx} ${cy}) rotate(${entry.orient || 0})`;          // baie / équipement : centre + rotation
+  }
+  /** GLISSER aimanté de l'élément cliqué (baie / équipement / salle) : snap aux murs + coins voisins, cote live.
+      GÉNÉRIQUE — toute la spécificité d'entité (repère, écriture) est portée par l'entrée `posScene()`. Appelé par
+      les handlers de pointerdown des nœuds (onRackPointerDown / onEquipPointerDown / onFloorRoom/EquipPointerDown). */
+  protected positionDragEntity(e: MouseEvent, id: string): void {
     if (e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
-    const p = this.positioning, scene = this.posScene(), dc = this.current(); if (!p || !scene || !dc) return;
-    this.positionSetMover(r.id);   // la baie cliquée devient la mover (sans render → on garde le nœud `grp` vivant)
+    const p = this.positioning, scene = this.posScene(); if (!p || !scene) return;
+    const moverIdx = scene.rects.findIndex((x) => x.id === id); if (moverIdx < 0) return;
+    const entry = scene.rects[moverIdx], rect = entry.rect;
+    this.positionSetMover(id);   // l'élément cliqué devient la mover (sans render → on garde le nœud `grp` vivant)
     const grp = e.currentTarget as SVGElement;
-    const ext = this.rackHalfExtents(r), o = Normalize.rackOrientation(r.orientation);
-    const w0 = this.clientToWorld(e.clientX, e.clientY);
-    const cx0 = (r.dc_x != null) ? r.dc_x : w0.x, cy0 = (r.dc_y != null) ? r.dc_y : w0.y, off = { x: w0.x - cx0, y: w0.y - cy0 };
-    const moverRect: Rect = { cx: cx0, cy: cy0, hx: ext.hx, hy: ext.hy };
-    const others = scene.rects.map((x) => x.rect), moverIdx = scene.rects.findIndex((x) => x.id === r.id);
+    const w0 = this.clientToWorld(e.clientX, e.clientY), off = { x: w0.x - rect.cx, y: w0.y - rect.cy };
+    const others = scene.rects.map((x) => x.rect);
     const tol = Positioning.SNAP_PX / (this.scale || 1);
-    const clampC = (c: { x: number; y: number }) => ({ x: Math.min(Math.max(c.x, ext.hx), dc.width_mm - ext.hx), y: Math.min(Math.max(c.y, ext.hy), dc.depth_mm - ext.hy) });
-    let cur = { x: cx0, y: cy0 }, moved = false;
+    const clampC = (c: { x: number; y: number }) => ({ x: Math.min(Math.max(c.x, rect.hx), scene.frame.w - rect.hx), y: Math.min(Math.max(c.y, rect.hy), scene.frame.h - rect.hy) });
+    let cur = { x: rect.cx, y: rect.cy }, moved = false;
     const move = (ev: MouseEvent) => {
       const w = this.clientToWorld(ev.clientX, ev.clientY), nx = w.x - off.x, ny = w.y - off.y;
-      if (!moved && Math.abs(nx - cx0) + Math.abs(ny - cy0) < (8 / (this.scale || 1))) return;
+      if (!moved && Math.abs(nx - rect.cx) + Math.abs(ny - rect.cy) < (8 / (this.scale || 1))) return;
       moved = true; grp.classList.add("dragging");
-      const snapped = Positioning.snapCenter(moverRect, nx, ny, scene.frame, others, moverIdx, tol);
+      const snapped = Positioning.snapCenter(rect, nx, ny, scene.frame, others, moverIdx, tol);
       cur = clampC({ x: snapped.cx, y: snapped.cy });
-      grp.setAttribute("transform", `translate(${cur.x} ${cur.y}) rotate(${o})`);
+      grp.setAttribute("transform", this.positionNodeTransform(entry, cur.x, cur.y));
       this.positionDrawDragGuides(snapped);
       this.showCote(Format.meters(cur.x) + " × " + Format.meters(cur.y), ev.clientX, ev.clientY);
     };
     const up = async () => {
       document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       grp.classList.remove("dragging"); this.hideCote(); this.positionClearDragGuides();
-      if (moved) await scene.commit(r.id, cur.x, cur.y);
+      if (moved) await entry.commit(cur.x, cur.y);
       this.render();   // (re)dessine l'overlay : mover sélectionnée (clic) ou déplacée (glisser)
     };
     document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
@@ -788,7 +845,7 @@ export class DcInteract extends DcPanels {
   }
   protected positionClearDragGuides(): void { if (this.gRoot) this.gRoot.querySelectorAll(".dc-pos-drag").forEach((n) => n.remove()); }
 
-  /** Overlay SVG de l'outil (murs cliquables, poignées de coin, ancres, cotes ⟂) — appelé par renderTop. */
+  /** Overlay SVG de l'outil (murs cliquables, poignées de coin, ancres, cotes ⟂) — appelé par renderTop / renderFloor. */
   protected drawPositioning2D(gRoot: SVGGElement): void {
     if (!this.positionActiveHere()) return;
     const scene = this.posScene(), p = this.positioning; if (!scene || !p) return;
@@ -845,20 +902,21 @@ export class DcInteract extends DcPanels {
     const title = document.createElement("div"); title.className = "dc-card-title"; title.textContent = "📐 Positionnement"; box.appendChild(title);
     const scene = this.posScene(), p = this.positioning!;
     if (!scene) {
-      const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Disponible en vue Plan de salle (revenez-y pour positionner)."; box.appendChild(h);
+      const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Disponible en vue 2D (Plan de salle ou Plan d'étage)."; box.appendChild(h);
       const acts = document.createElement("div"); acts.className = "dc-card-acts"; const bc = this.btn("✕ Fermer", () => this.positionCancel()); bc.classList.add("btn-danger"); acts.appendChild(bc); box.appendChild(acts);
       return box;
     }
     const moverEntry = scene.rects.find((x) => x.id === p.moverId);
+    const what = this.view === "floor" ? "une salle / un équipement" : "une baie / un équipement";
     const moverLine = document.createElement("div"); moverLine.style.cssText = "font-size:12px;margin:4px 0";
-    moverLine.innerHTML = moverEntry ? 'Baie à déplacer : <b style="color:var(--accent)">' + Html.escape(moverEntry.name) + "</b>" : '<span style="color:var(--accent)">Cliquez une baie à déplacer.</span>';
+    moverLine.innerHTML = moverEntry ? 'À déplacer : <b style="color:var(--accent)">' + Html.escape(moverEntry.name) + "</b>" : '<span style="color:var(--accent)">Cliquez ' + what + " à déplacer.</span>";
     box.appendChild(moverLine);
     if (moverEntry) {
       const cornerRow = document.createElement("div"); cornerRow.className = "dc-card-acts"; cornerRow.style.marginTop = "2px";
       const labels: Record<CornerId, string> = { TL: "◰ H-G", TR: "◳ H-D", BR: "◲ B-D", BL: "◱ B-G" };
       CORNER_IDS.forEach((cid) => { const b = this.btn(labels[cid], () => this.positionSetCorner(cid)); if (p.corner === cid) b.classList.add("active"); cornerRow.appendChild(b); });
       box.appendChild(cornerRow);
-      const ch = document.createElement("div"); ch.className = "form-hint"; ch.textContent = "Coin actif, puis cliquez un mur (cote ⟂) ou le coin d'une autre baie (cote X et Y)."; box.appendChild(ch);
+      const ch = document.createElement("div"); ch.className = "form-hint"; ch.textContent = "Coin actif, puis cliquez un mur (cote ⟂) ou le coin d'un autre élément (cote X et Y)."; box.appendChild(ch);
       const cotes = this.positionCotes(scene);
       (["x", "y"] as Axis[]).forEach((ax) => {
         const ref = ax === "x" ? p.refX : p.refY, co = ax === "x" ? cotes.x : cotes.y;
@@ -872,9 +930,9 @@ export class DcInteract extends DcPanels {
         inp.onchange = apply;
         row.append(lab, inp, unit); box.appendChild(row);
       });
-      if (!p.refX && !p.refY) { const hint = document.createElement("div"); hint.className = "form-hint"; hint.textContent = "Aucune référence. Cliquez un mur ou le coin d'une autre baie."; box.appendChild(hint); }
+      if (!p.refX && !p.refY) { const hint = document.createElement("div"); hint.className = "form-hint"; hint.textContent = "Aucune référence. Cliquez un mur ou le coin d'un autre élément."; box.appendChild(hint); }
     }
-    const dragHint = document.createElement("div"); dragHint.className = "form-hint"; dragHint.textContent = "Astuce : glissez la baie pour l'aimanter aux murs et aux coins voisins."; box.appendChild(dragHint);
+    const dragHint = document.createElement("div"); dragHint.className = "form-hint"; dragHint.textContent = "Astuce : glissez l'élément pour l'aimanter aux murs et aux coins voisins."; box.appendChild(dragHint);
     const acts = document.createElement("div"); acts.className = "dc-card-acts";
     const bClear = this.btn("Effacer réf.", () => { p.refX = null; p.refY = null; this.render(); }); (bClear as any).disabled = !p.refX && !p.refY;
     const bClose = this.btn("✕ Fermer", () => this.positionCancel()); bClose.classList.add("btn-danger");
