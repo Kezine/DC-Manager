@@ -24,6 +24,7 @@ import { PortTypes } from "../../registries/PortTypes";
 import { EquipFaces } from "../../registries/EquipFaces";
 import { Id } from "../../core/Id";
 import { RackGeometry } from "../../geometry/RackGeometry";
+import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { RackScene } from "../../geometry/RackScene";
 import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Normalize } from "../../core/Normalize";
@@ -300,12 +301,7 @@ export class EquipmentForms extends FormBase {
       if (!grid || !grid.cols || !grid.rows) return { x: clamp01(x), y: clamp01(y) };
       return { x: clamp01((Math.round(x * grid.cols - 0.5) + 0.5) / grid.cols), y: clamp01((Math.round(y * grid.rows - 0.5) + 0.5) / grid.rows) };
     };
-    const faceWH = (f: string) => {
-      const w = Math.max(1, eq.free_w_mm || EQUIP_FREE_DEFAULT_MM), d = Math.max(1, eq.free_l_mm || EQUIP_FREE_DEFAULT_MM), h = Math.max(1, eq.free_h_mm || EQUIP_FREE_DEFAULT_MM);
-      if (f === "left" || f === "right") return { W: d, H: h };
-      if (f === "top" || f === "bottom") return { W: w, H: d };
-      return { W: w, H: h };
-    };
+    const faceWH = (f: string) => FreeEquipGeometry.faceWH(eq, f);   // dimensions par face (mutualisé, cf. FreeEquipGeometry)
     // Dimensionne le FRAME (panneau 19″ complet en mode baie ; face réelle en mode libre). La largeur 19″ inclut les
     // oreilles ; le STAGE (corps) en occupe la fraction centrale (cf. render). Le zoom s'applique PAR-DESSUS (transform).
     const applyFrameSize = (f: string) => {

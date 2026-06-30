@@ -101,11 +101,12 @@ export class ListConfigs {
       collection: "faceImages",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: "Aucune image de façade. Ajoutez-en une avec « + Image », ou importez-en depuis l'éditeur de façade d'un équipement.",
-      searchFields: (o) => [o.name, faceLbl(o.face), (o.u_height || 1) + "U", o.description],
+      // « autre » = image de face LIBRE (équipement non-rack) : la hauteur en U n'a pas de sens → on ne l'affiche pas.
+      searchFields: (o) => [o.name, faceLbl(o.face), o.face === "autre" ? "libre" : (o.u_height || 1) + "U", o.description],
       columns: [
         { head: "Aperçu", render: (o) => o.url ? `<span class="cell-fithumb"><img src="${o.url}" alt="" /></span>` : dim("—") },
         { head: "Nom", cls: "cell-name", sortKey: "name", sort: (o) => o.name || "", render: (o) => Html.escape(o.name || "(sans nom)") },
-        { head: "Hauteur", cls: "num", sort: (o) => o.u_height || 1, render: (o) => `<span class="pill">${o.u_height || 1} U</span>` },
+        { head: "Hauteur", cls: "num", sort: (o) => (o.face === "autre" ? -1 : (o.u_height || 1)), render: (o) => o.face === "autre" ? dim("libre") : `<span class="pill">${o.u_height || 1} U</span>` },
         {
           head: "Face", sortKey: "face", sort: (o) => faceLbl(o.face), render: (o) => `<span class="pill">${Html.escape(faceLbl(o.face))}</span>`,
           filter: { label: "Face", options: () => [{ id: "front", label: "Avant" }, { id: "rear", label: "Arrière" }, { id: "autre", label: "Autre" }], valueOf: (o) => o.face || "front" },

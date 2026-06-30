@@ -27,6 +27,16 @@ export class FreeEquipGeometry {
     return (o === 90 || o === 270) ? { hx: b.d / 2, hy: b.w / 2 } : { hx: b.w / 2, hy: b.d / 2 };
   }
 
+  /** Dimensions (W × H, mm) d'une FACE pour l'aspect-ratio des aperçus/éditeurs : avant/arrière = largeur × hauteur,
+      gauche/droite = profondeur × hauteur, dessus/dessous = largeur × profondeur. (≥ 1 pour éviter un ratio nul.) */
+  static faceWH(e: any, face: string): { W: number; H: number } {
+    const b = FreeEquipGeometry.box(e), w = Math.max(1, b.w), d = Math.max(1, b.d), h = Math.max(1, b.h);
+    const f = EquipFaces.norm(face);
+    if (f === "left" || f === "right") return { W: d, H: h };
+    if (f === "top" || f === "bottom") return { W: w, H: d };
+    return { W: w, H: h };   // front / rear (et défaut)
+  }
+
   /** Point LOCAL (origine au centre de l'empreinte, base z0) d'un point (fx,fy) d'une FACE.
       fy=0 ⇒ haut (z1) pour les faces verticales ; dessus/dessous : fy = profondeur (0 = avant −Y). */
   static faceLocal(eq: any, face: string, fx: number, fy: number, z0: number): { lx: number; ly: number; lz: number } {

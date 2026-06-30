@@ -23,6 +23,7 @@ import { PortTypes } from "../../registries/PortTypes";
 import { EquipFaces } from "../../registries/EquipFaces";
 import { Id } from "../../core/Id";
 import { RackGeometry } from "../../geometry/RackGeometry";
+import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { RackScene } from "../../geometry/RackScene";
 import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Normalize } from "../../core/Normalize";
@@ -126,7 +127,10 @@ export class FormBase {
     const ports = store.portsOf(eq.id).filter((p: any) => p.face_x != null && p.face_y != null && EquipFaces.norm(p.face_side) === face);
     if (!url && !ports.length) return null;
     const isFree = eq.dim_mode === "free";
-    const ar = isFree ? (Math.max(1, eq.free_w_mm || 100) + " / " + Math.max(1, eq.free_h_mm || 100)) : ("19 / " + (1.75 * Math.max(1, eq.u_height || 1)));
+    // Aspect-ratio PAR FACE (libre) : dessus/dessous = l×p, gauche/droite = p×h, etc. — sinon toutes les faces
+    // prenaient les proportions avant/arrière. En mode U : panneau 19″ × hauteur en U.
+    const wh = FreeEquipGeometry.faceWH(eq, face);
+    const ar = isFree ? (wh.W + " / " + wh.H) : ("19 / " + (1.75 * Math.max(1, eq.u_height || 1)));
     const stage = document.createElement("div"); stage.className = "face-preview"; stage.style.aspectRatio = ar;
     if (url) { const im = document.createElement("img"); im.className = "face-bg"; im.src = url; im.alt = ""; stage.appendChild(im); }
     ports.forEach((p: any) => { const mk = document.createElement("div"); mk.className = "face-marker" + (p.role === "mgmt" ? " role-mgmt" : (p.role === "power" ? " role-power" : "")); mk.style.left = (p.face_x * 100) + "%"; mk.style.top = (p.face_y * 100) + "%"; mk.textContent = p.name || "(port)"; stage.appendChild(mk); });
