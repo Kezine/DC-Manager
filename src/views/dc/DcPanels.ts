@@ -50,7 +50,7 @@ export class DcPanels extends DcViews2D {
       // édition contextuelle : étage courant (plan d'étage) · salle courante (plan de salle)
       const bEdit = (this.view === "floor")
         ? this.btn("Éditer l'étage", () => { const ft = this.floorTargetResolve(); if (ft) this.editFloor(ft.location, ft.floor, false); else this.editFloor("", "", true); }, "Modifier le plan de l'étage courant")
-        : this.btn("Éditer la salle", () => { if (this.dcId) this.host.openDatacenterForm?.(this.dcId); }, "Modifier la salle courante");
+        : this.btn("Éditer la salle", () => { const d = this.current(); if (d) this.host.openDatacenterForm?.(d.id); }, "Modifier la salle courante");   // current() (pas this.dcId, qui peut être null alors qu'une salle par défaut est affichée)
       const bBlock = this.btn("Cases inaccessibles", () => { this.blockEdit = !this.blockEdit; bBlock.classList.toggle("active", this.blockEdit); this.render(); }, "Glissez une sélection sur la grille pour marquer / démarquer les cases (in)accessibles");
       bBlock.classList.toggle("active", this.blockEdit);
       edits.append(bFree, bEdit, bBlock); this.toolbarEl.appendChild(edits);
@@ -277,8 +277,21 @@ export class DcPanels extends DcViews2D {
       }); bOut.classList.add("danger"); a.appendChild(bOut);
       box.appendChild(a);
     } else {
-      title("Sélection");
-      const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Cliquez une baie pour la sélectionner ; glissez-la pour la déplacer (aimantation à la grille).";
+      // Rien de sélectionné → carte de la SALLE courante : édition fiable depuis le panneau (indépendante de la
+      // barre d'outils). Conforme au principe « tout éditable hors vue 2D/3D ».
+      title(dc.name || "(salle)");
+      const info = document.createElement("div"); info.className = "form-hint";
+      info.textContent = (dc.width_mm / 1000).toFixed(1) + " × " + (dc.depth_mm / 1000).toFixed(1) + " m · maille " + dc.cell_mm + " mm"
+        + (dc.location ? " · " + (this.store.siteLabel(dc.location) || dc.location) : "") + (dc.floor !== "" && dc.floor != null ? " · ét. " + dc.floor : "");
+      box.appendChild(info);
+      const a = acts();
+      a.append(
+        this.btn("Modifier la salle…", () => this.host.openDatacenterForm?.(dc.id)),
+        this.btn("Éditer le plan d'étage…", () => this.editFloor(dc.location || "", String(dc.floor || ""), false)),
+      );
+      box.appendChild(a);
+      const h = document.createElement("div"); h.className = "form-hint"; h.style.marginTop = "6px";
+      h.textContent = "Cliquez une baie / un équipement pour le sélectionner ; glissez pour déplacer.";
       box.appendChild(h);
     }
     return box;

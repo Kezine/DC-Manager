@@ -37,7 +37,7 @@ import {
   SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
   SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
 } from "../../domain/constants";
-import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS } from "./shared";
+import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS, ORIENT_OPTS } from "./shared";
 import type { FormHost } from "./shared";
 import { CableForms } from "./CableForms";
 import { EntityViz } from "../EntityViz";
@@ -55,7 +55,8 @@ export class RackForms extends CableForms {
     root.appendChild(FormControls.fieldRow("Salle (datacenter)", dcSel, "Placer la baie dans une salle 3D. Le lieu/étage/local est alors hérité de la salle."));
     const dcxI = FormControls.number((rk && rk.dc_x != null) ? rk.dc_x : "", { min: 0, step: 10, placeholder: "centre X (mm)" });
     const dcyI = FormControls.number((rk && rk.dc_y != null) ? rk.dc_y : "", { min: 0, step: 10, placeholder: "centre Y (mm)" });
-    const posRow = row2(FormControls.fieldRow("Position X (mm)", dcxI), FormControls.fieldRow("Position Y (mm)", dcyI));
+    const orientI = FormControls.select(ORIENT_OPTS, String(Normalize.rackOrientation(rk ? rk.orientation : 0)));
+    const posRow = row2(FormControls.fieldRow("Position X (mm)", dcxI), FormControls.fieldRow("Position Y (mm)", dcyI), FormControls.fieldRow("Orientation (face avant)", orientI));
     root.appendChild(posRow);
     // lieu/étage/local : manuels hors salle, hérités (verrouillés) si placé dans une salle.
     const locI = FormControls.select(locOptions(store), rk ? rk.location : "");
@@ -181,7 +182,7 @@ export class RackForms extends CableForms {
         const dc_y = placeDc ? (dcyI.value !== "" ? Math.max(0, parseInt(dcyI.value, 10) || 0) : Math.round(placeDc.depth_mm / 2)) : null;
         const payload: any = {
           name,
-          datacenter_id, dc_x, dc_y,
+          datacenter_id, dc_x, dc_y, orientation: Normalize.rackOrientation(parseInt(orientI.value, 10) || 0),
           location: placeDc ? (placeDc.location || "") : (locI.value || ""), floor: placeDc ? (placeDc.floor || "") : floorI.value, room: placeDc ? (placeDc.room || "") : roomI.value.trim(),
           u_count: g.u, width_mm, depth, sides: sidesI.value === "dual" ? "dual" : "single",
           lmargin_mm: g.lm, vmargin_mm: g.vt, vmargin_bottom_mm: (vmBotI.value !== "") ? g.vb : null,

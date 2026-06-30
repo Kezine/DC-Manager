@@ -11,6 +11,9 @@ export const WAYPOINT_KIND_LABELS: Record<string, string> = { point: "Pin (point
 export const locOptions = (store: Store) => [{ value: "", label: "— aucun —" }].concat(store.sitesSorted().map((s: any) => ({ value: s.id, label: s.name || s.id })));
 export const floorOptions = (sel: string) => { const s = String(sel == null ? "" : sel); const o = [{ value: "", label: "— étage —" }].concat(FLOORS.map((f) => ({ value: f, label: "Étage " + f }))); if (s && !FLOORS.includes(s)) o.push({ value: s, label: s + " (hors liste)" }); return o; };
 
+/** Options d'orientation au sol (0/90/180/270) — partagées par les formulaires baie / équipement libre. */
+export const ORIENT_OPTS = [{ value: "0", label: "0°" }, { value: "90", label: "90°" }, { value: "180", label: "180°" }, { value: "270", label: "270°" }];
+
 export const divider = (txt: string) => { const d = document.createElement("div"); d.className = "section-divider"; d.textContent = txt; return d; };
 export const row2 = (...fields: HTMLElement[]) => { const r = document.createElement("div"); r.className = "form-row"; fields.forEach((f) => r.appendChild(f)); return r; };
 /** Remplace les options d'un <select> existant (préserve l'élément + ses handlers). */

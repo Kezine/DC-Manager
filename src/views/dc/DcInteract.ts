@@ -420,12 +420,18 @@ export class DcInteract extends DcPanels {
       await this.store.updateBatch(ops); this.setDirty();
       Notify.toast("Équipement retiré du datacenter" + (ops.length > 1 ? " — câble(s) en « Planifié »" : ""));
     };
-    const secs: CtxSection[] = [{ head: e.name || "(équipement)", items: [
+    const rotate = (deg: number) => async () => { const o: any = this.store.get("equipments", eqId); if (!o) return; await this.store.update("equipments", eqId, { dc_orientation: Normalize.rackOrientation((o.dc_orientation || 0) + deg) }); this.setDirty(); };
+    const items: Array<{ label: string; danger?: boolean; action: () => void }> = [
       { label: "Détails…", action: () => this.host.openEquipmentDetail?.(eqId) },
       { label: "Modifier…", action: () => this.host.openEquipmentDetail?.(eqId) },
+    ];
+    // rotation au sol : pertinente pour un équipement LIBRE (boîtier orienté). En U, l'orientation suit la baie.
+    if (e.dim_mode === "free") items.push({ label: "↻ Pivoter 90°", action: rotate(90) }, { label: "⟲ Pivoter 180°", action: rotate(180) });
+    items.push(
       { label: "Créer un câble…", action: () => this.host.openCableForm?.(null, { fromEqId: eqId }) },
       { label: placed ? "Retirer du datacenter" : "Renvoyer en « Non placé »", danger: true, action: removeAction },
-    ] }];
+    );
+    const secs: CtxSection[] = [{ head: e.name || "(équipement)", items }];
     const csi = this.cableSelItems(this.store.cablesOfEquipment(eqId).map((c: any) => c.id), "les câbles de l'équipement");
     if (csi.length) secs.push({ items: csi });
     return secs;
@@ -575,9 +581,12 @@ export class DcInteract extends DcPanels {
 
   /** Menu d'un équipement posé sur le plan d'étage : modifier / fiche / délocaliser / retirer de l'étage. */
   protected floorEquipCtx(eq: any): CtxSection[] {
+    const rotate = (deg: number) => async () => { const o: any = this.store.get("equipments", eq.id); if (!o) return; await this.store.update("equipments", eq.id, { dc_orientation: Normalize.rackOrientation((o.dc_orientation || 0) + deg) }); this.selFloorEquip = eq.id; this.setDirty(); };
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [
       { label: "Modifier…", action: () => this.host.openEquipmentDetail?.(eq.id) },
       { label: "Fiche / détails…", action: () => this.host.openEquipmentDetail?.(eq.id) },
+      { label: "↻ Pivoter 90°", action: rotate(90) },
+      { label: "⟲ Pivoter 180°", action: rotate(180) },
     ];
     if (FloorLayout.floorEquipLocalized(eq)) items.push({ label: "Délocaliser (centre du plan)", danger: true, action: async () => { await this.store.update("equipments", eq.id, { floor_x: null, floor_y: null }); this.selFloorEquip = null; this.setDirty(); } });
     items.push({ label: "Retirer de l'étage (→ non placé)", danger: true, action: async () => {

@@ -37,7 +37,7 @@ import {
   SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
   SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
 } from "../../domain/constants";
-import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS } from "./shared";
+import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS, ORIENT_OPTS } from "./shared";
 import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
 
@@ -723,6 +723,28 @@ export class EquipmentForms extends FormBase {
     freeBox.appendChild(row2(FormControls.fieldRow("Longueur (mm)", flI), FormControls.fieldRow("Largeur (mm)", fwI), FormControls.fieldRow("Hauteur (mm)", fhI)));
     adv.appendChild(freeBox);
 
+    // placement EN SALLE (au sol) — mode LIBRE : équivalent FORMULAIRE du glisser/positionnement en vue 2D/3D
+    // (principe « tout éditable hors vue »). Salle + centre X/Y + hauteur Z (négatif = sous le faux-plancher) + orientation.
+    const salleBox = document.createElement("div");
+    salleBox.appendChild(divider("Placement en salle (au sol)"));
+    const dcEqOpts = [{ value: "", label: "— non placé —" }].concat(store.all("datacenters").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((d: any) => ({ value: d.id, label: d.name || "(salle)" })));
+    const dcSelE = FormControls.select(dcEqOpts, eq && eq.dc_id ? eq.dc_id : "");
+    salleBox.appendChild(FormControls.fieldRow("Salle (datacenter)", dcSelE, "Pose l'équipement au SOL d'une salle. Position vide = centre."));
+    const exI = FormControls.number((eq && eq.dc_x != null) ? eq.dc_x : "", { min: 0, step: 10, placeholder: "centre X (mm)" });
+    const eyI = FormControls.number((eq && eq.dc_y != null) ? eq.dc_y : "", { min: 0, step: 10, placeholder: "centre Y (mm)" });
+    const ezI = FormControls.number((eq && eq.dc_z != null) ? eq.dc_z : 0, { step: 10, placeholder: "0" });   // hauteur Z : négatif autorisé (pas de min)
+    const eoI = FormControls.select(ORIENT_OPTS, String(Normalize.rackOrientation(eq ? eq.dc_orientation : 0)));
+    const sallePos = row2(FormControls.fieldRow("Position X (mm)", exI), FormControls.fieldRow("Position Y (mm)", eyI), FormControls.fieldRow("Hauteur Z (mm)", ezI), FormControls.fieldRow("Orientation", eoI));
+    salleBox.appendChild(sallePos);
+    const salleHint = document.createElement("div"); salleHint.className = "form-hint"; salleBox.appendChild(salleHint);
+    const syncSalle = () => {
+      const d: any = dcSelE.value ? store.get("datacenters", dcSelE.value) : null;
+      sallePos.style.display = d ? "" : "none";
+      salleHint.textContent = d ? "Hauteur Z = décalage vertical (mm) ; négatif = sous le faux-plancher." : "Non placé en salle. Choisissez une salle pour le poser au sol.";
+    };
+    dcSelE.onchange = syncSalle; syncSalle();
+    adv.appendChild(salleBox);
+
     // placement rack (mode U seulement, dans ce cœur)
     const placeBox = document.createElement("div");
     placeBox.appendChild(divider("Placement (rack)"));
@@ -850,6 +872,8 @@ export class EquipmentForms extends FormBase {
       uBox.style.display = u ? "" : "none";
       freeBox.style.display = u ? "none" : "";
       placeBox.style.display = u ? "" : "none";   // placement rack du cœur = mode U
+      salleBox.style.display = u ? "none" : "";    // placement en salle (au sol) = mode Libre
+      if (!u) syncSalle();
       pduRow.style.display = (typeI.value === "pdu") ? "" : "none";
     };
     dimI.addEventListener("change", sync); typeI.addEventListener("change", sync); sync();
@@ -879,8 +903,20 @@ export class EquipmentForms extends FormBase {
           payload.free_l_mm = flI.value !== "" ? Math.max(0, parseInt(flI.value, 10) || 0) : null;
           payload.free_w_mm = fwI.value !== "" ? Math.max(0, parseInt(fwI.value, 10) || 0) : null;
           payload.free_h_mm = fhI.value !== "" ? Math.max(0, parseInt(fhI.value, 10) || 0) : null;
-          // préserve un placement étage/latéral/paroi existant ; sinon « manuel »
-          if (!eq || !["floor", "side", "wall"].includes(eq.placement_mode)) payload.placement_mode = "manual";
+          // placement EN SALLE (au sol) : si une salle est choisie, on pose au sol (mode manuel) ; sinon non placé.
+          const placeDcE: any = dcSelE.value ? store.get("datacenters", dcSelE.value) : null;
+          if (placeDcE) {
+            payload.dc_id = placeDcE.id;
+            payload.dc_x = exI.value !== "" ? Math.max(0, parseInt(exI.value, 10) || 0) : Math.round(placeDcE.width_mm / 2);
+            payload.dc_y = eyI.value !== "" ? Math.max(0, parseInt(eyI.value, 10) || 0) : Math.round(placeDcE.depth_mm / 2);
+            payload.dc_z = ezI.value !== "" ? (parseInt(ezI.value, 10) || 0) : 0;   // négatif autorisé
+            payload.dc_orientation = Normalize.rackOrientation(parseInt(eoI.value, 10) || 0);
+            payload.placement_mode = "manual"; payload.floor_x = null; payload.floor_y = null;   // au sol d'une salle (exclusif du placement étage)
+          } else {
+            payload.dc_id = null; payload.dc_x = null; payload.dc_y = null;
+            // préserve un placement étage/latéral/paroi existant ; sinon « manuel »
+            if (!eq || !["floor", "side", "wall"].includes(eq.placement_mode)) payload.placement_mode = "manual";
+          }
         } else {
           payload.u_height = Math.max(1, parseInt(uHI.value, 10) || 1);
           payload.depth = depthI.value;

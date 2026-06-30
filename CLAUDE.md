@@ -57,6 +57,15 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
    `git push` (et la gestion des identifiants GitHub) est **toujours** réservé à
    l'utilisateur. Ne pas exécuter `git push` même si l'arbre est prêt — proposer,
    puis laisser l'utilisateur pousser.
+10. **TOUT est éditable SANS les vues 2D/3D.** Les vues Datacenter (Plan de salle, Plan
+    d'étage, 3D) sont une **aide à l'encodage**, jamais le SEUL moyen d'agir. Tout attribut
+    — y compris le placement (rattachement salle/étage/baie), la **position X/Y**, la
+    **hauteur Z**, l'**orientation**, les dimensions — DOIT être éditable via les
+    **FORMULAIRES** (onglets Équipements / Racks / Salles…). Un device à capacités limitées
+    (sans WebGL/3D, petit écran) doit pouvoir gérer **l'ensemble** de l'application par les
+    formulaires et les listes. Donc : toute action offerte dans une vue 2D/3D (déplacer,
+    pivoter, placer, régler une hauteur…) a un **équivalent dans un formulaire**. Quand on
+    ajoute un champ de placement au modèle, on ajoute le champ correspondant au formulaire.
 
 ## Structure du projet
 
