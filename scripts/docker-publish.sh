@@ -8,8 +8,13 @@
 #   ex. : scripts/docker-publish.sh kezine/dc-manager 1.0.0 ghcr.io
 #
 # Options :
-#   SKIP_PUSH=1   → build seulement (pas de login/push)
-#   SKIP_LATEST=1 → ne pas (re)taguer/pousser :latest
+#   SKIP_PUSH=1    → build seulement (pas de login/push)
+#   SKIP_LATEST=1  → ne pas (re)taguer/pousser :latest
+#   REBUILD_APP=1  → force le rebuild de la layer CLIENT (webpack) SANS toucher au reste
+#                    (deps serveur + module natif better-sqlite3 restent en cache). Pratique
+#                    quand le cache n'a pas vu un changement de sources. Implémenté via le
+#                    `--no-cache-filter` de BuildKit (étage `client` du Dockerfile).
+#   Pour tout reconstruire de zéro : NO_CACHE=1 (équivaut à `docker build --no-cache`).
 #
 # Registres : laisser REGISTRY vide pour le Docker Hub officiel ; sinon ghcr.io,
 # registry.exemple.com, etc. Le login se fait de manière interactive (ou via un
@@ -29,8 +34,17 @@ command -v docker >/dev/null || { echo "✗ docker introuvable (Docker Desktop d
 TAGS=(-t "$REF:$TAG")
 [ "${SKIP_LATEST:-}" = "1" ] || TAGS+=(-t "$REF:latest")
 
+# BuildKit requis pour --no-cache-filter (défaut sur Docker récent ; on le force pour être sûr).
+export DOCKER_BUILDKIT=1
+BUILD_OPTS=()
+if [ "${NO_CACHE:-}" = "1" ]; then
+  BUILD_OPTS+=(--no-cache); echo "  ↳ NO_CACHE=1 : reconstruction COMPLÈTE (aucun cache)"
+elif [ "${REBUILD_APP:-}" = "1" ]; then
+  BUILD_OPTS+=(--no-cache-filter client); echo "  ↳ REBUILD_APP=1 : rebuild forcé de la layer client (webpack) — serveur/natif gardés en cache"
+fi
+
 echo "→ build  $REF:$TAG$([ "${SKIP_LATEST:-}" = "1" ] || echo "  (+ :latest)")   [contexte: $PWD]"
-docker build -f src-server/Dockerfile "${TAGS[@]}" .
+docker build -f src-server/Dockerfile "${BUILD_OPTS[@]}" "${TAGS[@]}" .
 
 if [ "${SKIP_PUSH:-}" = "1" ]; then
   echo "✓ build OK (push ignoré : SKIP_PUSH=1) — $REF:$TAG"
