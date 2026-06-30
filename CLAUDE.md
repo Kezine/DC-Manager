@@ -23,6 +23,14 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
    `validateRecord(...)` libre. Le nom de classe porte le contexte et améliore la
    lisibilité à l'appel. Les **données** (constantes, tables, types/interfaces)
    restent, elles, de simples exports.
+   **RÈGLE (application-wide) : tout code MODULAIRE et RÉUTILISABLE vit dans sa PROPRE
+   classe, dans son PROPRE fichier.** Dès qu'un comportement a une responsabilité
+   identifiable et est (ou pourra être) réutilisé/testé séparément, il sort dans un
+   module dédié — on ne l'empile PAS dans un fichier/une classe déjà gros (« monolithe »).
+   Le couplage à un contexte (vue, store, serveur…) passe par une **interface/des
+   paramètres injectés** (cf. `PositioningTool` ↔ `PositioningHost`, ou les modules
+   `shared/` auto-suffisants), pas par des imports en dur. Vaut PARTOUT : front, back,
+   géométrie, vues, données — pas seulement la vue Datacenter.
 3. **Favoriser la RÉUTILISATION plutôt que la duplication.** Avant de copier une
    règle, une constante ou un type, se demander où il devrait vivre UNE seule fois.
    Cette discipline tire naturellement vers une découpe modulaire et réutilisable :
@@ -119,13 +127,13 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 - **Mode REST** : `RestAdapter.docRev` suit la révision serveur (`X-Doc-Rev`). Les
   écritures envoient `X-Base-Rev` (verrou optimiste → 409). Les autres clients sont
   notifiés par SSE avec un **changeset** ; le `ReloadPlanner` en déduit quoi recharger.
-- **Nouvel OUTIL de vue 2D/3D (mesure, routage, positionnement, futurs…) → MODULE DÉDIÉ, pas inline.**
-  `DcInteract`/`DcBase` sont déjà des monolithes ; n'y ajoute PAS la logique d'un nouvel outil. Crée une
-  classe outil dans `src/views/dc/` (état + overlay + panneau + interactions) pilotée par une **interface hôte**
-  (cf. `PositioningTool` + `PositioningHost`), instanciée dans `DcBase`, et ne laisse dans la chaîne de vues que
-  de **fins branchements** (un point de rendu, le routage des événements, l'ajout de la carte) + l'**adaptation**
-  spécifique (l'équivalent de `posScene()`). La géométrie PURE va dans `src/geometry/` (testable, réutilisable).
-  Les outils `measure`/`route`, encore inline dans `DcInteract`, sont de la DETTE — ne pas les prendre pour modèle.
+- **Nouvel OUTIL de vue 2D/3D (mesure, routage, positionnement, futurs…)** = cas d'application du principe n°2.
+  `DcInteract`/`DcBase` sont déjà des monolithes ; n'y empile PAS la logique d'un nouvel outil. Crée une classe
+  outil dans `src/views/dc/` (état + overlay + panneau + interactions) pilotée par une **interface hôte**
+  (cf. `PositioningTool` + `PositioningHost`), instanciée dans `DcBase` ; ne laisse dans la chaîne de vues que de
+  **fins branchements** (un point de rendu, le routage des événements, l'ajout de la carte) + l'**adaptation**
+  spécifique (l'équivalent de `posScene()`). La géométrie PURE va dans `src/geometry/`. Les outils `measure`/`route`,
+  encore inline dans `DcInteract`, sont de la DETTE — ne pas les prendre pour modèle.
 
 ## Code partagé front/back (`shared/`)
 
