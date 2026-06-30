@@ -43,12 +43,13 @@ import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
 
 export class EquipmentForms extends FormBase {
-  /** Sélecteur d'image éligible (même U ET même face ; image courante toujours visible) → { id } ou null. */
-  static faceImagePicker(store: Store, u: number, face: string, current: string | null): Promise<{ id: string | null } | null> {
+  /** Sélecteur d'image éligible (même face ; filtre U seulement en mode baie — cf. `anyU`) → { id } ou null. */
+  static faceImagePicker(store: Store, u: number, face: string, current: string | null, anyU = false): Promise<{ id: string | null } | null> {
     const images = this.images; if (!images) return Promise.resolve(null);
-    const annex = this.faceAnnex(face), faceLbl = annex ? EquipFaces.label(face) : EquipFaces.label(face);
+    const annex = this.faceAnnex(face), faceLbl = EquipFaces.label(face);
+    const uTag = !annex && !anyU;   // étiquette/filtre par U : front/rear d'un équipement BAIE seulement
     return Dialog.custom({
-      title: "Image de façade — " + (annex ? "face " + faceLbl.toLowerCase() + " (catégorie « autre »)" : ((u || 1) + "U · face " + faceLbl.toLowerCase())), confirmLabel: "Choisir",
+      title: "Image de façade — " + (annex ? "face " + faceLbl.toLowerCase() + " (catégorie « autre »)" : (uTag ? (u || 1) + "U · " : "") + "face " + faceLbl.toLowerCase() + (anyU ? " (équipement libre)" : "")), confirmLabel: "Choisir",
       build: (root: HTMLElement) => {
         let selected: string | null = current || null, query = "";
         // Toggle OREILLES — UNIQUEMENT pour la face AVANT (l'arrière n'a jamais d'oreilles) : (a) FILTRE les images
@@ -56,7 +57,9 @@ export class EquipmentForms extends FormBase {
         const hasEarToggle = (face === "front");
         let earMode = true;
         const note = document.createElement("div"); note.className = "form-hint"; note.style.marginBottom = "8px";
-        note.textContent = annex ? "Faces annexes (équipement libre) : seules les images marquées « autre » sont éligibles (sans contrainte de U)." : "Seules les images " + (u || 1) + "U marquées « " + faceLbl + " » sont éligibles ici.";
+        note.textContent = annex ? "Faces annexes (équipement libre) : seules les images marquées « autre » sont éligibles (sans contrainte de U)."
+          : anyU ? "Équipement libre : images marquées « " + faceLbl + " » éligibles, sans contrainte de U."
+          : "Seules les images " + (u || 1) + "U marquées « " + faceLbl + " » sont éligibles ici.";
         const earRow = document.createElement("div"); earRow.style.cssText = "display:flex;align-items:center;gap:6px;margin-bottom:8px;";
         const earLab = document.createElement("span"); earLab.className = "form-hint"; earLab.style.margin = "0"; earLab.textContent = "Oreilles :";
         const segWith = document.createElement("button"); segWith.type = "button"; segWith.textContent = "Avec oreilles";
@@ -72,14 +75,14 @@ export class EquipmentForms extends FormBase {
           segWithout.className = "btn btn-sm " + (!earMode ? "btn-primary" : "btn-ghost");
           grid.innerHTML = "";
           const none = document.createElement("button"); none.type = "button"; none.className = "fi-tile fi-none" + (selected == null ? " sel" : ""); none.textContent = "Aucune"; none.onclick = () => { selected = null; renderGrid(); }; grid.appendChild(none);
-          const eligible = this.eligibleImages(u, face), cur: any = current ? images.get(current) : null;
+          const eligible = this.eligibleImages(u, face, anyU), cur: any = current ? images.get(current) : null;
           const list = eligible.slice(); if (cur && !eligible.some((fi: any) => fi.id === cur.id)) list.push(cur);
           const q = Text.normSearch(query);
           const searched = q ? list.filter((fi: any) => Text.normSearch((fi.name || "") + " " + (fi.description || "")).includes(q)) : list;
           // FILTRE par mode d'oreilles (AVANT uniquement) ; l'image SÉLECTIONNÉE reste toujours visible.
           const shown = hasEarToggle ? searched.filter((fi: any) => fi.id === selected || ((fi.with_ears !== false) === earMode)) : searched;
           shown.forEach((fi: any) => {
-            const offFilter = annex ? (fi.face !== "autre") : !(fi.u_height === (u || 1) && fi.face === face);
+            const offFilter = annex ? (fi.face !== "autre") : !(fi.face === face && (anyU || fi.u_height === (u || 1)));
             const t = document.createElement("button"); t.type = "button"; t.className = "fi-tile" + (selected === fi.id ? " sel" : "");
             const im = document.createElement("img"); im.src = fi.url; im.alt = "";
             const cap = document.createElement("span"); cap.className = "fi-cap";
@@ -87,10 +90,10 @@ export class EquipmentForms extends FormBase {
             t.append(im, cap); t.onclick = () => { selected = fi.id; renderGrid(); }; grid.appendChild(t);
           });
           if (shown.length === 0) { const empty = document.createElement("div"); empty.className = "fi-grid-empty"; empty.textContent = q ? ("Aucune image ne correspond à « " + query.trim() + " ».") : ("Aucune image " + (annex ? "« autre »" : (faceLbl + (hasEarToggle ? (earMode ? " avec oreilles" : " sans oreilles") : ""))) + " — importez-en une ci-dessous."); grid.appendChild(empty); }
-          const imp = document.createElement("button"); imp.type = "button"; imp.className = "fi-tile fi-import"; imp.innerHTML = "<span>+ Importer<br>image " + (annex ? "« autre »" : ((u || 1) + "U · " + faceLbl + (hasEarToggle ? (earMode ? " · avec oreilles" : " · sans oreilles") : ""))) + "</span>";
+          const imp = document.createElement("button"); imp.type = "button"; imp.className = "fi-tile fi-import"; imp.innerHTML = "<span>+ Importer<br>image " + (annex ? "« autre »" : ((uTag ? (u || 1) + "U · " : "") + faceLbl + (hasEarToggle ? (earMode ? " · avec oreilles" : " · sans oreilles") : ""))) + "</span>";
           imp.onclick = async () => {
             const f = this.validImageFile(await this.promptImageFile()); if (!f) return;
-            const nm = f.name ? f.name.replace(/\.[^.]+$/, "") : ("Image " + (annex ? "autre" : (u || 1) + "U"));
+            const nm = f.name ? f.name.replace(/\.[^.]+$/, "") : ("Image " + (annex ? "autre" : (uTag ? (u || 1) + "U" : faceLbl)));
             const fi = await images.add({ name: nm, u_height: annex ? 1 : (u || 1), face: annex ? "autre" : face, with_ears: hasEarToggle && earMode, blob: f, type: f.type });
             if (fi) { selected = fi.id; query = ""; search.value = ""; renderGrid(); }
           };
@@ -264,7 +267,7 @@ export class EquipmentForms extends FormBase {
     tools.append(attachBtn, detachBtn, addAllBtn, removeAllBtn, gridLab, gridSel, gridShowBtn, zoomGroup); root.appendChild(tools);
 
     const hint = document.createElement("div"); hint.className = "form-hint";
-    hint.textContent = "Cliquez un port pour le poser, puis glissez-le. Molette / +/− = zoom · glisser le fond = déplacer. « Grille » contraint le glisser (elle peut être masquée tout en restant active). « Attacher une image » : fond de façade (filtré par U + face).";
+    hint.textContent = "Cliquez un port pour le poser, puis glissez-le. Molette / +/− = zoom · glisser le fond = déplacer. « Grille » contraint le glisser (elle peut être masquée tout en restant active). « Attacher une image » : fond de façade (filtré par face ; contrainte de U en mode baie seulement).";
     root.appendChild(hint);
     // VIEWPORT (clipping) → FRAME (zoom/pan) → STAGE (corps : grille + marqueurs). L'image et les oreilles vivent
     // dans le FRAME (l'image « avec oreilles » déborde sur les bandes latérales) ; le STAGE est au-dessus (z-index).
@@ -304,13 +307,16 @@ export class EquipmentForms extends FormBase {
     const faceWH = (f: string) => FreeEquipGeometry.faceWH(eq, f);   // dimensions par face (mutualisé, cf. FreeEquipGeometry)
     // Dimensionne le FRAME (panneau 19″ complet en mode baie ; face réelle en mode libre). La largeur 19″ inclut les
     // oreilles ; le STAGE (corps) en occupe la fraction centrale (cf. render). Le zoom s'applique PAR-DESSUS (transform).
+    // Dimensionne le FRAME en PRÉSERVANT le ratio de la face (libre = dims réelles ; baie = 19″ × hauteur U). On borne la
+    // HAUTEUR à MAXVH et la LARGEUR à MAXVH×ratio : sinon `width:100% + max-height` casse le ratio (largeur pleine, hauteur
+    // bornée → la face carrée/haute s'aplatissait, l'overflow du stage la rognait). Centré, jamais plus large que nécessaire.
     const applyFrameSize = (f: string) => {
-      const el = frame, u = Math.max(1, (eq.u_height | 0) || 1);
-      if (isFree) {
-        const wh = faceWH(f); el.style.aspectRatio = wh.W + " / " + wh.H;
-        if (wh.H > wh.W) { el.style.width = "auto"; el.style.height = "50vh"; el.style.maxWidth = "100%"; el.style.maxHeight = "50vh"; el.style.margin = "0 auto"; }
-        else { el.style.width = "100%"; el.style.height = ""; el.style.maxWidth = ""; el.style.maxHeight = "50vh"; el.style.margin = "0 auto"; }
-      } else { el.style.aspectRatio = "19 / " + (1.75 * u); el.style.width = ""; el.style.height = ""; el.style.maxWidth = ""; el.style.maxHeight = ""; el.style.margin = ""; }
+      const el = frame, MAXVH = 60;
+      const wh = isFree ? faceWH(f) : { W: 19, H: 1.75 * Math.max(1, (eq.u_height | 0) || 1) };
+      el.style.aspectRatio = wh.W + " / " + wh.H;
+      el.style.width = "100%"; el.style.height = "auto"; el.style.margin = "0 auto";
+      el.style.maxHeight = MAXVH + "vh";
+      el.style.maxWidth = "calc(" + MAXVH + "vh * " + (wh.W / wh.H).toFixed(4) + ")";   // largeur bornée → hauteur ≤ MAXVH, ratio préservé
     };
     const layoutUniform = (list: any[]) => {
       const n = list.length; if (!n) return;
@@ -398,7 +404,7 @@ export class EquipmentForms extends FormBase {
     detachBtn.onclick = () => { markDirty(); fids[side] = null; render(); };
     attachBtn.onclick = async () => {
       const u = this.faceAnnex(side) ? 1 : Math.max(1, (eq.u_height | 0) || 1);
-      const res = await this.faceImagePicker(store, u, side, fids[side]);
+      const res = await this.faceImagePicker(store, u, side, fids[side], isFree);   // libre → front/rear sans contrainte de U
       if (res) { markDirty(); fids[side] = res.id; render(); }
     };
     render();

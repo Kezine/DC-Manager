@@ -46,12 +46,13 @@ export class FormBase {
 
   /** Catégorie de bibliothèque d'une face : annexe (top/bottom/left/right) → « autre » ; sinon front/rear. */
   protected static faceAnnex(face: string): boolean { return face !== "front" && face !== "rear"; }
-  /** Images éligibles pour une face : annexe → « autre » (sans filtre U) ; front/rear → même U + même face. */
-  protected static eligibleImages(u: number, face: string): any[] {
+  /** Images éligibles pour une face : annexe → « autre » (sans filtre U) ; front/rear → même face, filtrées par U
+      SEULEMENT en mode baie (`anyU` faux). En mode LIBRE (`anyU` vrai), le U n'a pas de sens → on n'y filtre pas. */
+  protected static eligibleImages(u: number, face: string, anyU = false): any[] {
     const im = this.images; if (!im) return [];
     if (this.faceAnnex(face)) return im.list().filter((fi: any) => fi.face === "autre");
     const f = (face === "rear") ? "rear" : "front";
-    return im.list().filter((fi: any) => fi.u_height === (u || 1) && fi.face === f);
+    return im.list().filter((fi: any) => fi.face === f && (anyU || fi.u_height === (u || 1)));
   }
   protected static configureBreakout(store: Store): Promise<{ name: string; trunkTypeId: string; laneTypeId: string; count: number } | null> {
     const types = store.all("portTypes").slice().sort((a: any, b: any) => a.name.localeCompare(b.name));
@@ -128,10 +129,15 @@ export class FormBase {
     if (!url && !ports.length) return null;
     const isFree = eq.dim_mode === "free";
     // Aspect-ratio PAR FACE (libre) : dessus/dessous = l×p, gauche/droite = p×h, etc. — sinon toutes les faces
-    // prenaient les proportions avant/arrière. En mode U : panneau 19″ × hauteur en U.
-    const wh = FreeEquipGeometry.faceWH(eq, face);
-    const ar = isFree ? (wh.W + " / " + wh.H) : ("19 / " + (1.75 * Math.max(1, eq.u_height || 1)));
-    const stage = document.createElement("div"); stage.className = "face-preview"; stage.style.aspectRatio = ar;
+    // prenaient les proportions avant/arrière. En mode U : panneau 19″ × hauteur en U. Largeur bornée par MAXVH×ratio
+    // pour PRÉSERVER le ratio (width:100% + max-height seul l'aplatissait).
+    const wh = isFree ? FreeEquipGeometry.faceWH(eq, face) : { W: 19, H: 1.75 * Math.max(1, eq.u_height || 1) };
+    const MAXVH = 60;
+    const stage = document.createElement("div"); stage.className = "face-preview";
+    stage.style.aspectRatio = wh.W + " / " + wh.H;
+    stage.style.maxHeight = MAXVH + "vh";
+    stage.style.maxWidth = "calc(" + MAXVH + "vh * " + (wh.W / wh.H).toFixed(4) + ")";
+    stage.style.margin = "0 auto";
     if (url) { const im = document.createElement("img"); im.className = "face-bg"; im.src = url; im.alt = ""; stage.appendChild(im); }
     ports.forEach((p: any) => { const mk = document.createElement("div"); mk.className = "face-marker" + (p.role === "mgmt" ? " role-mgmt" : (p.role === "power" ? " role-power" : "")); mk.style.left = (p.face_x * 100) + "%"; mk.style.top = (p.face_y * 100) + "%"; mk.textContent = p.name || "(port)"; stage.appendChild(mk); });
     return stage;
