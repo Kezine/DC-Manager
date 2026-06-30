@@ -94,7 +94,7 @@ export class DcCamera extends DcBase {
       const a = (b as HTMLElement).dataset.act;
       if (a === "back") { this.goBack(); return; }
       if (a === "measure") { if (this.measure && this.measure.active) this.measureCancel(); else this.measureArm(); return; }
-      if (a === "position") { if (this.positioning && this.positioning.active) this.positionCancel(); else this.positionArm(); return; }
+      if (a === "position") { if (this.posTool.active) this.posTool.cancel(); else this.posTool.arm(); return; }
       if (a === "proj") { this.webglPerspective = !this.webglPerspective; if (this._three) this._three.setProjection(this.webglPerspective); this.persistView(); this.updateControls(); return; }
       if (a === "in") { if (gl) this._three.zoomBy(1.2); else this.zoomBy(1.2); }
       else if (a === "out") { if (gl) this._three.zoomBy(1 / 1.2); else this.zoomBy(1 / 1.2); }
@@ -164,7 +164,7 @@ export class DcCamera extends DcBase {
     if (meas) meas.classList.toggle("active", !!(this.measure && this.measure.active));
     // outil de POSITIONNEMENT : vues 2D (Plan de salle ET Plan d'étage) — masqué en 3D + état actif
     const pos = this.controlsEl.querySelector('[data-act="position"]') as HTMLElement | null;
-    if (pos) { pos.style.display = (this.view === "top" || this.view === "floor") ? "" : "none"; pos.classList.toggle("active", !!(this.positioning && this.positioning.active)); }
+    if (pos) { pos.style.display = (this.view === "top" || this.view === "floor") ? "" : "none"; pos.classList.toggle("active", this.posTool.active); }
     // PROJECTION (3D uniquement) : icône (ortho = lignes parallèles · perspective = lignes fuyantes) + visibilité
     const proj = this.controlsEl.querySelector('[data-act="proj"]') as HTMLElement | null;
     if (proj) { proj.style.display = is3d ? "" : "none"; proj.innerHTML = this.webglPerspective ? ICON_PERSP : ICON_ORTHO; proj.title = this.webglPerspective ? "Projection : perspective (cliquer pour orthographique)" : "Projection : orthographique (cliquer pour perspective)"; }

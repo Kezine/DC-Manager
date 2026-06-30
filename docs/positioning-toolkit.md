@@ -18,18 +18,19 @@ Disponible dans **les deux vues 2D**, sur tous les éléments déplaçables au s
 | Couche | Fichier | Rôle |
 |---|---|---|
 | **Cœur PUR** | [`src/geometry/Positioning.ts`](../src/geometry/Positioning.ts) | Géométrie sans DOM/store/vue : coins d'un rectangle, murs d'un cadre, distances/cotes ⟂, placement (`placeAxis`), accrochage (`snapCenter`). **Testé** (`Tests/modules/run.js`, section « Positioning »). |
-| **Glue de vue** | [`src/views/dc/DcInteract.ts`](../src/views/dc/DcInteract.ts) (section « OUTIL DE POSITIONNEMENT ») | État + overlay SVG (poignées de coin, murs cliquables, cotes ⟂) + carte de panneau + glisser aimanté **générique** (`positionDragEntity`). Délègue toute la géométrie au cœur pur. |
-| **État** | [`src/views/dc/DcBase.ts`](../src/views/dc/DcBase.ts) | Champ `positioning` (mover, coin actif, références X/Y, contexte). |
+| **Contrôleur d'outil** | [`src/views/dc/PositioningTool.ts`](../src/views/dc/PositioningTool.ts) | Module DÉDIÉ : état + overlay SVG (poignées de coin, murs cliquables, cotes ⟂) + carte de panneau + glisser aimanté générique (`dragEntity`). Ne dépend que de l'interface `PositioningHost` + du cœur pur. |
+| **Adaptation de vue** | [`src/views/dc/DcInteract.ts`](../src/views/dc/DcInteract.ts) | Implémente `PositioningHost` : `posScene()` (entités déplaçables de la vue — UNIQUE point spécifique) + services (`posScale`, `posGRoot`, `posCtxKey`…). Branche `posTool` dans le rendu (`drawOverlay`), les handlers de drag et le panneau. |
+| **Instance** | [`src/views/dc/DcBase.ts`](../src/views/dc/DcBase.ts) | Champ `posTool: PositioningTool`, instancié avec `this` comme hôte. |
 
-Le cœur est **générique** (rectangles alignés aux axes + un cadre), pas spécifique aux
-racks. Côté vue, **tout passe par un seul accès** : `DcInteract.posScene()` renvoie le
-**cadre** + la liste des entités déplaçables, chacune avec un `rect` (centre + demi-extents
-en repère monde), un `anchor` (`"center"` + rotation, ou `"topleft"` pour une salle) et un
-`commit(cx, cy)` qui écrit la position dans le modèle (conversion centre → champs de
-l'entité + bornage + garde « case inaccessible » pour les éléments en salle). Ajouter un
-type déplaçable = ajouter une entrée dans `posScene()` ; le reste (overlay, cotes, snap,
-panneau, drag) est agnostique. `positionDragEntity` et `positionNodeTransform` gèrent les
-deux ancrages de nœud SVG.
+Le cœur ET le contrôleur sont **génériques** (rectangles alignés aux axes + un cadre), pas
+spécifiques aux racks. Côté vue, **tout passe par un seul accès** : `DcInteract.posScene()`
+renvoie le **cadre** + la liste des entités déplaçables, chacune avec un `rect` (centre +
+demi-extents en repère monde), un `anchor` (`"center"` + rotation, ou `"topleft"` pour une
+salle) et un `commit(cx, cy)` qui écrit la position dans le modèle (conversion centre →
+champs de l'entité + bornage + garde « case inaccessible » pour les éléments en salle).
+Ajouter un type déplaçable = ajouter une entrée dans `posScene()` ; le reste (overlay,
+cotes, snap, panneau, drag) est agnostique. **Porter l'outil à une nouvelle vue** = fournir
+un hôte implémentant `PositioningHost` (notamment son `posScene()`).
 
 ## Repère & invariants
 

@@ -51,7 +51,7 @@ export class DcViews2D extends DcScene3D {
     this.store.freeEquipsOfDc(dc.id).forEach((e: any) => { if (e.dc_x != null && e.dc_y != null) gRoot.appendChild(this.equipNode(e)); });
     this.drawCables2D(gRoot, dc);   // filtré par cableShown (showAllCables / selCables) à l'intérieur
     if (this.showWaypoints) this.store.waypointsOfDc(dc.id).forEach((wp: any) => { if (this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.waypointNode2D(wp, dc)); });
-    this.drawPositioning2D(gRoot);   // aide au positionnement (coins/cotes ⟂) — avant la mesure et le redressement des labels
+    this.posTool.drawOverlay(gRoot);   // aide au positionnement (coins/cotes ⟂) — avant la mesure et le redressement des labels
     this.drawMeasure2D(gRoot);   // outil de mesure (avant finishScene/uprightTexts → labels redressés)
     this.finishScene();
     this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue
@@ -82,7 +82,7 @@ export class DcViews2D extends DcScene3D {
     if (this.showWaypoints) this.store.oobWaypoints().filter((w: any) => (w.location || "") === loc && String(w.floor || "") === fl).forEach((wp: any) => gRoot.appendChild(this.floorOobNode(wp, cfg)));
     this.store.floorEquipments().filter((e: any) => (e.location || "") === loc && String(e.floor || "") === fl).forEach((eq: any) => gRoot.appendChild(this.floorEquipNode2D(eq, cfg)));
     if (this.showFloorAnchor) gRoot.appendChild(this.floorAnchorNode(cfg, loc, fl));   // marqueur d'ancrage déplaçable (discret)
-    this.drawPositioning2D(gRoot);   // aide au positionnement (salles / équipements d'étage) — avant la mesure et le redressement des labels
+    this.posTool.drawOverlay(gRoot);   // aide au positionnement (salles / équipements d'étage) — avant la mesure et le redressement des labels
     this.drawMeasure2D(gRoot);   // outil de mesure (avant finishScene/uprightTexts → labels redressés)
     this.renderFloorRail(ft);   // rail de navigation rapide entre étages (à gauche du plan)
     this.finishScene();
@@ -212,7 +212,7 @@ export class DcViews2D extends DcScene3D {
   /** Glisser un équipement d'étage (localise floor_x/floor_y + rattache bâtiment/étage) ; clic = sélection. */
   protected onFloorEquipPointerDown(e: MouseEvent, eq: any, cfg: any): void {
     if (e.button !== 0) return;
-    if (this.positionActiveHere()) { this.positionDragEntity(e, eq.id); return; }   // mode positionnement (aide au placement)
+    if (this.posTool.activeHere()) { this.posTool.dragEntity(e, eq.id); return; }   // mode positionnement (aide au placement)
     e.preventDefault(); e.stopPropagation();
     const ft = this.floorTargetResolve() || { location: "", floor: "" }, loc = ft.location || "", fl = String(ft.floor || "");
     const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm, o = Normalize.rackOrientation(eq.dc_orientation);
@@ -302,7 +302,7 @@ export class DcViews2D extends DcScene3D {
 
   protected onFloorRoomPointerDown(e: MouseEvent, d: any, cfg: any): void {
     if (e.button !== 0) return;
-    if (this.positionActiveHere()) { this.positionDragEntity(e, d.id); return; }   // mode positionnement (aide au placement)
+    if (this.posTool.activeHere()) { this.posTool.dragEntity(e, d.id); return; }   // mode positionnement (aide au placement)
     e.preventDefault(); e.stopPropagation();
     const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm, fp = FloorLayout.roomFootprint(d);
     const grp = e.currentTarget as SVGElement;

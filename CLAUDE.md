@@ -104,7 +104,8 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 - [`positioning-toolkit.md`](docs/positioning-toolkit.md) — **aide au positionnement** :
   placer un élément par ses coins (murs / coins d'autres éléments, cotes ⟂) dans les **deux
   vues 2D** (baies & équipements en salle ; salles & équipements sur l'étage) ; cœur pur
-  `geometry/Positioning.ts` réutilisable, glue de vue générique dans `DcInteract` (`posScene`).
+  `geometry/Positioning.ts` + contrôleur dédié `views/dc/PositioningTool.ts` (interface `PositioningHost`,
+  adaptation par `DcInteract.posScene()`).
 
 ## Points d'architecture à connaître
 
@@ -118,6 +119,13 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 - **Mode REST** : `RestAdapter.docRev` suit la révision serveur (`X-Doc-Rev`). Les
   écritures envoient `X-Base-Rev` (verrou optimiste → 409). Les autres clients sont
   notifiés par SSE avec un **changeset** ; le `ReloadPlanner` en déduit quoi recharger.
+- **Nouvel OUTIL de vue 2D/3D (mesure, routage, positionnement, futurs…) → MODULE DÉDIÉ, pas inline.**
+  `DcInteract`/`DcBase` sont déjà des monolithes ; n'y ajoute PAS la logique d'un nouvel outil. Crée une
+  classe outil dans `src/views/dc/` (état + overlay + panneau + interactions) pilotée par une **interface hôte**
+  (cf. `PositioningTool` + `PositioningHost`), instanciée dans `DcBase`, et ne laisse dans la chaîne de vues que
+  de **fins branchements** (un point de rendu, le routage des événements, l'ajout de la carte) + l'**adaptation**
+  spécifique (l'équivalent de `posScene()`). La géométrie PURE va dans `src/geometry/` (testable, réutilisable).
+  Les outils `measure`/`route`, encore inline dans `DcInteract`, sont de la DETTE — ne pas les prendre pour modèle.
 
 ## Code partagé front/back (`shared/`)
 
