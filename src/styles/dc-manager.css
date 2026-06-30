@@ -848,6 +848,21 @@
   .dc-measure-dot.hi { fill: var(--fg); stroke: var(--warn); stroke-width: 2.5px; }
   .dc-measure-label { fill: var(--warn); font-family: var(--mono); font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
   .dc-measure-label.name { fill: var(--fg); font-weight: 700; }   /* Ã©tiquette nom+total d'une mesure validÃ©e */
+  /* AIDE AU POSITIONNEMENT (vue Plan de salle) : overlay coins/cotes ⟂. Traits constants à l'écran (non-scaling). */
+  .dc-pos-mover { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: var(--accent); stroke-width: 2px; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .dc-pos-corner { fill: var(--bg); stroke: var(--accent); stroke-width: 2px; vector-effect: non-scaling-stroke; cursor: pointer; }
+  .dc-pos-corner:hover { fill: var(--accent); }
+  .dc-pos-corner.active { fill: var(--accent); stroke: var(--fg); stroke-width: 2.5px; }
+  .dc-pos-anchor { fill: var(--bg-3); stroke: var(--fg-dim); stroke-width: 1.5px; vector-effect: non-scaling-stroke; cursor: crosshair; opacity: 0.85; }
+  .dc-pos-anchor:hover { fill: var(--accent-2); stroke: var(--accent-2); opacity: 1; }
+  .dc-pos-wall { fill: transparent; stroke: none; cursor: pointer; }
+  .dc-pos-wall:hover { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .dc-pos-wall.active { fill: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .dc-pos-cote { stroke: var(--accent); stroke-width: 2px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .dc-pos-cote-tick { stroke: var(--accent); stroke-width: 2px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .dc-pos-cote-label { fill: var(--accent); font-family: var(--mono); font-weight: 700; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+  .dc-pos-guide { stroke: var(--accent-2); stroke-width: 1.5px; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.8; }
+  .dc-card-acts .btn.active { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
   /* v53 : WAYPOINTS (points de passage de cÃ¢bles) â€” vue Dessus */
   .dc-wp { cursor: grab; }
   .dc-wp.dragging { cursor: grabbing; }

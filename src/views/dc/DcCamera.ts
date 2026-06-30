@@ -31,6 +31,8 @@ import { DcBase } from "./DcBase";
 
 /* Icônes des contrôles 3D : règle graduée (mesure), projection orthographique (lignes parallèles) / perspective (lignes fuyantes). */
 const ICON_RULER = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="8.5" width="19" height="7" rx="1"/><line x1="6.5" y1="8.5" x2="6.5" y2="12"/><line x1="10.5" y1="8.5" x2="10.5" y2="13"/><line x1="14.5" y1="8.5" x2="14.5" y2="12"/><line x1="18.5" y1="8.5" x2="18.5" y2="13"/></svg>';
+/* Outil de POSITIONNEMENT : un rectangle (baie) avec une poignée de coin et une cote ⟂ vers un bord. */
+const ICON_POSITION = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="1"/><circle cx="9" cy="9" r="2" fill="currentColor" stroke="none"/><line x1="2.5" y1="9" x2="7" y2="9"/><line x1="2.5" y1="6.5" x2="2.5" y2="11.5"/><line x1="9" y1="2.5" x2="9" y2="7"/><line x1="6.5" y1="2.5" x2="11.5" y2="2.5"/></svg>';
 const ICON_ORTHO = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="4" x2="6" y2="20"/><line x1="18" y1="4" x2="18" y2="20"/><line x1="6" y1="9" x2="18" y2="9"/><line x1="6" y1="15" x2="18" y2="15"/></svg>';
 const ICON_PERSP = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><line x1="9" y1="4" x2="3" y2="20"/><line x1="15" y1="4" x2="21" y2="20"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="5.5" y1="15" x2="18.5" y2="15"/></svg>';
 /* Toggles RESPONSIVE (mobile/tablette) : « réglages 3D » (ouvre le panneau latéral en drawer) et « outils »
@@ -77,6 +79,7 @@ export class DcCamera extends DcBase {
       <span class="gz-sep" data-tools-sep></span>
       <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="proj" title="Projection : orthographique / perspective" style="display:none"></button>
       <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="measure" title="Outil de mesure multipoint (cliquer pour poser des points)">${ICON_RULER}</button>
+      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="position" title="Aide au positionnement : placer un élément par ses coins (murs / coins d'autres éléments, cotes ⟂) — baies & équipements en salle, salles & équipements sur l'étage" style="display:none">${ICON_POSITION}</button>
       <span class="gz-sep"></span>
       <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="eimg" title="Exporter une image (SVG / JPEG)…" aria-label="Exporter une image">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -91,6 +94,7 @@ export class DcCamera extends DcBase {
       const a = (b as HTMLElement).dataset.act;
       if (a === "back") { this.goBack(); return; }
       if (a === "measure") { if (this.measure && this.measure.active) this.measureCancel(); else this.measureArm(); return; }
+      if (a === "position") { if (this.positioning && this.positioning.active) this.positionCancel(); else this.positionArm(); return; }
       if (a === "proj") { this.webglPerspective = !this.webglPerspective; if (this._three) this._three.setProjection(this.webglPerspective); this.persistView(); this.updateControls(); return; }
       if (a === "in") { if (gl) this._three.zoomBy(1.2); else this.zoomBy(1.2); }
       else if (a === "out") { if (gl) this._three.zoomBy(1 / 1.2); else this.zoomBy(1 / 1.2); }
@@ -158,6 +162,9 @@ export class DcCamera extends DcBase {
     // outil de MESURE (toutes vues) : état actif
     const meas = this.controlsEl.querySelector('[data-act="measure"]') as HTMLElement | null;
     if (meas) meas.classList.toggle("active", !!(this.measure && this.measure.active));
+    // outil de POSITIONNEMENT : vues 2D (Plan de salle ET Plan d'étage) — masqué en 3D + état actif
+    const pos = this.controlsEl.querySelector('[data-act="position"]') as HTMLElement | null;
+    if (pos) { pos.style.display = (this.view === "top" || this.view === "floor") ? "" : "none"; pos.classList.toggle("active", !!(this.positioning && this.positioning.active)); }
     // PROJECTION (3D uniquement) : icône (ortho = lignes parallèles · perspective = lignes fuyantes) + visibilité
     const proj = this.controlsEl.querySelector('[data-act="proj"]') as HTMLElement | null;
     if (proj) { proj.style.display = is3d ? "" : "none"; proj.innerHTML = this.webglPerspective ? ICON_PERSP : ICON_ORTHO; proj.title = this.webglPerspective ? "Projection : perspective (cliquer pour orthographique)" : "Projection : orthographique (cliquer pour perspective)"; }

@@ -19,6 +19,7 @@ import { CableRouting } from "../../geometry/CableRouting";
 import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
 import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
+import type { CornerId, Ref as PosRef } from "../../geometry/Positioning";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
@@ -54,6 +55,11 @@ export class DcBase {
   protected _measMouseClient: [number, number] | null = null;
   protected _measMouseTO: any = 0;
   protected _measHi: number | null = null;   // mesure terminée mise en évidence (survol du listing), ou null
+  // Outil de POSITIONNEMENT (aide au placement par COINS + cotes ⟂ aux murs / coins d'autres baies). ÉPHÉMÈRE :
+  // déplace la baie « mover » puis écrit dc_x/dc_y UNE fois — aucune relation (coin ↔ référence) n'est mémorisée
+  // (cf. geometry/Positioning, cœur pur réutilisable). `corner` = coin actif de la mover ; refX/refY = références par
+  // axe (un mur OU le coin d'une autre baie-ancre). `ctx` scope l'outil à la salle/l'étage où il a été armé.
+  positioning: { active: boolean; ctx: string; moverId: string | null; corner: CornerId | null; refX: PosRef | null; refY: PosRef | null } | null = null;
   floorTarget: { location: string; floor: string } | null = null;   // étage visé (vue Étage), indépendant d'une salle
   // ROTATION de la vue 2D { angle, cx, cy, flip } : Étage = 180° ; Dessus = orientation salle + 180° → bord de réf. EN BAS.
   // Le flip horizontal donne une vraie vue « du dessus » (cohérente avec la 3D, et non « via le plancher »). Nul en 3D.
@@ -163,10 +169,13 @@ export class DcBase {
     // Mode mesure : ENTRÉE valide la mesure en cours (elle reste affichée) · ÉCHAP annule la mesure en cours.
     // Ignoré dans un champ de saisie ou sous un overlay (modale/dialogue) ouvert.
     document.addEventListener("keydown", (e) => {
-      if (!this.measure || !this.measure.active || (e.key !== "Escape" && e.key !== "Enter")) return;
+      if (e.key !== "Escape" && e.key !== "Enter") return;
       const tg = e.target as HTMLElement | null;
       if (tg && (tg.isContentEditable || /^(input|textarea|select)$/i.test(tg.tagName))) return;
       if (document.querySelector(".modal-overlay.open, .dialog-overlay")) return;
+      // ÉCHAP en mode POSITIONNEMENT : efface la sélection courante (références → coin → mover) par paliers.
+      if (this.positioning && this.positioning.active && e.key === "Escape" && this.positionActiveHere()) { e.preventDefault(); this.positionEscape(); return; }
+      if (!this.measure || !this.measure.active) return;
       e.preventDefault();
       if (e.key === "Enter") this.measureCommit(); else this.measureCancelCurrent();
     });

@@ -57,6 +57,7 @@ const { Ip } = D("core/Ip.js");
 const { Prefs } = D("core/Prefs.js");
 const { DatacenterView } = D("views/DatacenterView.js");
 const { FloorLayout } = D("geometry/FloorLayout.js");
+const { Positioning } = D("geometry/Positioning.js");
 const { ImageStore } = D("data/ImageStore.js");
 const { FaceImage } = D("models/index.js");
 const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
@@ -812,6 +813,57 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const fe = { placement_mode: "floor", location: "liege", floor: "1", floor_x: 500, floor_y: 700, dc_z: 1000 };
     const ew = fl.equipFloorWorld(m3, fe);
     ck(isFinite(ew.x) && isFinite(ew.y) && Math.abs(ew.z - (FloorLayout.levelZ(m3, 1) + 1000)) < 1e-6, "equipFloorWorld : base = niveau étage + dc_z");
+  }
+
+  console.log("\n• Positioning : aide au positionnement (cœur pur — coins, cotes ⟂, placement, accrochage)");
+  {
+    const approx = (a, b, name, eps) => ck(Math.abs(a - b) <= (eps || 1e-6), name + "  (attendu ≈" + b + ", obtenu " + a + ")");
+    const frame = { w: 6000, h: 4000 };
+    // rack 600×1000 centré en (1000,1000), orientation 0 → hx=300, hy=500
+    const A = { cx: 1000, cy: 1000, hx: 300, hy: 500 };
+    const cA = Positioning.corners(A);
+    ck.eq(JSON.stringify(cA.TL), JSON.stringify({ x: 700, y: 500 }), "corners TL = (cx−hx, cy−hy)");
+    ck.eq(JSON.stringify(cA.BR), JSON.stringify({ x: 1300, y: 1500 }), "corners BR = (cx+hx, cy+hy)");
+    // murs
+    ck.eq(JSON.stringify(Positioning.wallLine(frame, "left")), JSON.stringify({ axis: "x", value: 0 }), "wallLine left → x=0");
+    ck.eq(JSON.stringify(Positioning.wallLine(frame, "bottom")), JSON.stringify({ axis: "y", value: 4000 }), "wallLine bottom → y=h");
+    // distance ⟂ d'un coin au mur gauche
+    approx(Positioning.distance(cA.TL, { kind: "wall", wall: "left" }, "x", frame, {}), 700, "distance TL → mur gauche = 700");
+    // un mur horizontal ne porte pas l'axe x
+    ck.eq(Positioning.distance(cA.TL, { kind: "wall", wall: "top" }, "x", frame, {}), null, "mur top ne porte pas l'axe x → null");
+    // cote ⟂ : segment porté par l'axe (de la référence jusqu'au coin)
+    const coteX = Positioning.cote(cA.TL, { kind: "wall", wall: "left" }, "x", frame, {});
+    ck(coteX && coteX.from.x === 0 && coteX.from.y === cA.TL.y && coteX.to.x === cA.TL.x, "cote ⟂ mur gauche : segment horizontal jusqu'au coin");
+    // placement : coin TL du mover à 500 mm du mur gauche → cx tel que (cx−hx)=500 → cx=800
+    const nx = Positioning.placeAxis(A, "TL", "x", { kind: "wall", wall: "left" }, 500, frame, {});
+    approx(nx, 800, "placeAxis : TL à 500 du mur gauche → cx=800");
+    // côté CONSERVÉ : le coin reste à droite du mur (pas de saut), valeur négative traitée en abs
+    const nx2 = Positioning.placeAxis(A, "TL", "x", { kind: "wall", wall: "left" }, -500, frame, {});
+    approx(nx2, 800, "placeAxis : |valeur| utilisée, côté conservé");
+    // référence COIN d'un autre rect (ancre) : B centré (3000,1000), hx=300 → BL.x = 2700
+    const B = { cx: 3000, cy: 1000, hx: 300, hy: 500 };
+    const rects = { rb: B };
+    approx(Positioning.refValue({ kind: "corner", rectId: "rb", corner: "BL" }, "x", frame, rects), 2700, "refValue coin BL de B sur x = 2700");
+    // placer le coin TR de A à 100 mm à GAUCHE du coin BL de B (A est à gauche → côté conservé) :
+    // coin TR cible = 2700 − 100 = 2600 ; cx = 2600 − hx = 2300
+    const nx3 = Positioning.placeAxis(A, "TR", "x", { kind: "corner", rectId: "rb", corner: "BL" }, 100, frame, rects);
+    approx(nx3, 2300, "placeAxis : TR de A à 100 du coin BL de B (côté gauche) → cx=2300");
+    // ACCROCHAGE : centre candidat dont un bord est à 5 mm d'un mur → accroché (tol 9)
+    const snapped = Positioning.snapCenter(A, 305, 1000, frame, [A], 0, 9);   // bord gauche = 305−300 = 5 ⟶ mur 0
+    approx(snapped.cx, 300, "snapCenter : bord gauche accroché au mur 0 (cx=300)");
+    ck.eq(snapped.snapX, 0, "snapCenter : ligne X accrochée = mur 0");
+    // hors tolérance → pas d'accrochage
+    const noSnap = Positioning.snapCenter(A, 400, 1000, frame, [A], 0, 9);
+    ck.eq(noSnap.snapX, null, "snapCenter : hors tolérance → aucun accrochage X");
+    // accrochage à un BORD d'un autre rect (alignement de coins). Cas NON ambigu : C (hx=200) → bords 2800/3200 ;
+    // candidat cx=3103 → bord gauche 2803 ≈ 2800 ; bord droit 3403 loin de tout → seul le bord gauche s'aligne.
+    const C = { cx: 3000, cy: 1000, hx: 200, hy: 500 };
+    const snapAlign = Positioning.snapCenter(A, 3103, 1000, frame, [A, C], 0, 9);
+    approx(snapAlign.cx, 3100, "snapCenter : bord gauche de A aligné sur le bord gauche de C");
+    ck.eq(snapAlign.snapX, 2800, "snapCenter : ligne accrochée = bord gauche de C (2800)");
+    // orientation 90 : hx/hy permutés en amont (responsabilité de la couche vue) — on vérifie juste le calcul de coins
+    const R90 = { cx: 0, cy: 0, hx: 500, hy: 300 };   // ex. rack 600×1000 tourné à 90°
+    ck.eq(JSON.stringify(Positioning.corners(R90).TR), JSON.stringify({ x: 500, y: -300 }), "corners d'un rect permuté (orientation 90 en amont)");
   }
 
   console.log("\n• ImageStore : helpers purs (dataUrl ↔ Blob · bundle .nmfb)");
