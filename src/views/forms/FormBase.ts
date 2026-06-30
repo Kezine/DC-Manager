@@ -46,13 +46,14 @@ export class FormBase {
 
   /** Catégorie de bibliothèque d'une face : annexe (top/bottom/left/right) → « autre » ; sinon front/rear. */
   protected static faceAnnex(face: string): boolean { return face !== "front" && face !== "rear"; }
-  /** Images éligibles pour une face : annexe → « autre » (sans filtre U) ; front/rear → même face, filtrées par U
-      SEULEMENT en mode baie (`anyU` faux). En mode LIBRE (`anyU` vrai), le U n'a pas de sens → on n'y filtre pas. */
-  protected static eligibleImages(u: number, face: string, anyU = false): any[] {
+  /** Images éligibles pour une face. En mode LIBRE (`free`), AUCUN filtre : toute la bibliothèque (toute face, tout U).
+      Sinon : annexe → « autre » ; front/rear → même face + même U (contrainte de baie 19″). */
+  protected static eligibleImages(u: number, face: string, free = false): any[] {
     const im = this.images; if (!im) return [];
+    if (free) return im.list();
     if (this.faceAnnex(face)) return im.list().filter((fi: any) => fi.face === "autre");
     const f = (face === "rear") ? "rear" : "front";
-    return im.list().filter((fi: any) => fi.face === f && (anyU || fi.u_height === (u || 1)));
+    return im.list().filter((fi: any) => fi.face === f && fi.u_height === (u || 1));
   }
   protected static configureBreakout(store: Store): Promise<{ name: string; trunkTypeId: string; laneTypeId: string; count: number } | null> {
     const types = store.all("portTypes").slice().sort((a: any, b: any) => a.name.localeCompare(b.name));

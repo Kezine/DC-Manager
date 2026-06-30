@@ -43,22 +43,23 @@ import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
 
 export class EquipmentForms extends FormBase {
-  /** Sélecteur d'image éligible (même face ; filtre U seulement en mode baie — cf. `anyU`) → { id } ou null. */
-  static faceImagePicker(store: Store, u: number, face: string, current: string | null, anyU = false): Promise<{ id: string | null } | null> {
+  /** Sélecteur d'image éligible → { id } ou null. `free` (équipement en dimensionnement libre) = AUCUN filtre :
+      toute image de la bibliothèque est éligible sur toute face (ni catégorie « autre », ni contrainte de U). */
+  static faceImagePicker(store: Store, u: number, face: string, current: string | null, free = false): Promise<{ id: string | null } | null> {
     const images = this.images; if (!images) return Promise.resolve(null);
     const annex = this.faceAnnex(face), faceLbl = EquipFaces.label(face);
-    const uTag = !annex && !anyU;   // étiquette/filtre par U : front/rear d'un équipement BAIE seulement
+    const uTag = !annex && !free;   // étiquette/filtre par U : front/rear d'un équipement BAIE seulement
     return Dialog.custom({
-      title: "Image de façade — " + (annex ? "face " + faceLbl.toLowerCase() + " (catégorie « autre »)" : (uTag ? (u || 1) + "U · " : "") + "face " + faceLbl.toLowerCase() + (anyU ? " (équipement libre)" : "")), confirmLabel: "Choisir",
+      title: "Image de façade — " + (free ? "face " + faceLbl.toLowerCase() + " (équipement libre)" : annex ? "face " + faceLbl.toLowerCase() + " (catégorie « autre »)" : (uTag ? (u || 1) + "U · " : "") + "face " + faceLbl.toLowerCase()), confirmLabel: "Choisir",
       build: (root: HTMLElement) => {
         let selected: string | null = current || null, query = "";
         // Toggle OREILLES — UNIQUEMENT pour la face AVANT (l'arrière n'a jamais d'oreilles) : (a) FILTRE les images
         // proposées ; (b) sert de DÉFAUT à l'image importée inline. Défaut avant = avec oreilles.
-        const hasEarToggle = (face === "front");
+        const hasEarToggle = (face === "front") && !free;   // oreilles = concept BAIE (19″) ; pas en libre
         let earMode = true;
         const note = document.createElement("div"); note.className = "form-hint"; note.style.marginBottom = "8px";
-        note.textContent = annex ? "Faces annexes (équipement libre) : seules les images marquées « autre » sont éligibles (sans contrainte de U)."
-          : anyU ? "Équipement libre : images marquées « " + faceLbl + " » éligibles, sans contrainte de U."
+        note.textContent = free ? "Équipement libre : toutes les images de la bibliothèque sont éligibles (aucun filtre de face ni de U)."
+          : annex ? "Faces annexes (équipement libre) : seules les images marquées « autre » sont éligibles (sans contrainte de U)."
           : "Seules les images " + (u || 1) + "U marquées « " + faceLbl + " » sont éligibles ici.";
         const earRow = document.createElement("div"); earRow.style.cssText = "display:flex;align-items:center;gap:6px;margin-bottom:8px;";
         const earLab = document.createElement("span"); earLab.className = "form-hint"; earLab.style.margin = "0"; earLab.textContent = "Oreilles :";
@@ -75,14 +76,14 @@ export class EquipmentForms extends FormBase {
           segWithout.className = "btn btn-sm " + (!earMode ? "btn-primary" : "btn-ghost");
           grid.innerHTML = "";
           const none = document.createElement("button"); none.type = "button"; none.className = "fi-tile fi-none" + (selected == null ? " sel" : ""); none.textContent = "Aucune"; none.onclick = () => { selected = null; renderGrid(); }; grid.appendChild(none);
-          const eligible = this.eligibleImages(u, face, anyU), cur: any = current ? images.get(current) : null;
+          const eligible = this.eligibleImages(u, face, free), cur: any = current ? images.get(current) : null;
           const list = eligible.slice(); if (cur && !eligible.some((fi: any) => fi.id === cur.id)) list.push(cur);
           const q = Text.normSearch(query);
           const searched = q ? list.filter((fi: any) => Text.normSearch((fi.name || "") + " " + (fi.description || "")).includes(q)) : list;
           // FILTRE par mode d'oreilles (AVANT uniquement) ; l'image SÉLECTIONNÉE reste toujours visible.
           const shown = hasEarToggle ? searched.filter((fi: any) => fi.id === selected || ((fi.with_ears !== false) === earMode)) : searched;
           shown.forEach((fi: any) => {
-            const offFilter = annex ? (fi.face !== "autre") : !(fi.face === face && (anyU || fi.u_height === (u || 1)));
+            const offFilter = free ? false : annex ? (fi.face !== "autre") : !(fi.face === face && fi.u_height === (u || 1));
             const t = document.createElement("button"); t.type = "button"; t.className = "fi-tile" + (selected === fi.id ? " sel" : "");
             const im = document.createElement("img"); im.src = fi.url; im.alt = "";
             const cap = document.createElement("span"); cap.className = "fi-cap";
