@@ -19,7 +19,8 @@ import { CableRouting } from "../../geometry/CableRouting";
 import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
 import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
-import type { CornerId, Ref as PosRef } from "../../geometry/Positioning";
+import { PositioningTool } from "./PositioningTool";
+import type { PositioningHost } from "./PositioningTool";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
@@ -55,11 +56,10 @@ export class DcBase {
   protected _measMouseClient: [number, number] | null = null;
   protected _measMouseTO: any = 0;
   protected _measHi: number | null = null;   // mesure terminée mise en évidence (survol du listing), ou null
-  // Outil de POSITIONNEMENT (aide au placement par COINS + cotes ⟂ aux murs / coins d'autres baies). ÉPHÉMÈRE :
-  // déplace la baie « mover » puis écrit dc_x/dc_y UNE fois — aucune relation (coin ↔ référence) n'est mémorisée
-  // (cf. geometry/Positioning, cœur pur réutilisable). `corner` = coin actif de la mover ; refX/refY = références par
-  // axe (un mur OU le coin d'une autre baie-ancre). `ctx` scope l'outil à la salle/l'étage où il a été armé.
-  positioning: { active: boolean; ctx: string; moverId: string | null; corner: CornerId | null; refX: PosRef | null; refY: PosRef | null } | null = null;
+  // Outil de POSITIONNEMENT (aide au placement par COINS + cotes ⟂). Module dédié `PositioningTool` (état + overlay
+  // + panneau + glisser), piloté via l'interface PositioningHost que cette chaîne de vues implémente (cf. DcInteract
+  // posScene/posCtxKey/…). Instancié dans le constructeur. ÉPHÉMÈRE : déplace l'élément puis écrit sa position UNE fois.
+  posTool!: PositioningTool;
   floorTarget: { location: string; floor: string } | null = null;   // étage visé (vue Étage), indépendant d'une salle
   // ROTATION de la vue 2D { angle, cx, cy, flip } : Étage = 180° ; Dessus = orientation salle + 180° → bord de réf. EN BAS.
   // Le flip horizontal donne une vraie vue « du dessus » (cohérente avec la 3D, et non « via le plancher »). Nul en 3D.
@@ -123,6 +123,8 @@ export class DcBase {
 
   constructor(store: Store, mount: HTMLElement, host: DatacenterHost = {}) {
     this.store = store; this.host = host; this.stage = mount; this.scene = new RackScene(store); this.resolver = new Resolver3D(store); this.floor = new FloorLayout(store); this.routing = new CableRouting(store, this.resolver, this.floor);
+    // Outil de positionnement : cette chaîne de vues EST son hôte (implémente PositioningHost via DcInteract).
+    this.posTool = new PositioningTool(this as unknown as PositioningHost);
     // Garde headless : sans `document` (tests Node), projection/cadrage restent utilisables.
     if (typeof document === "undefined") return;
     this.toolbarEl = document.createElement("div");
@@ -174,7 +176,7 @@ export class DcBase {
       if (tg && (tg.isContentEditable || /^(input|textarea|select)$/i.test(tg.tagName))) return;
       if (document.querySelector(".modal-overlay.open, .dialog-overlay")) return;
       // ÉCHAP en mode POSITIONNEMENT : efface la sélection courante (références → coin → mover) par paliers.
-      if (this.positioning && this.positioning.active && e.key === "Escape" && this.positionActiveHere()) { e.preventDefault(); this.positionEscape(); return; }
+      if (this.posTool.active && e.key === "Escape" && this.posTool.activeHere()) { e.preventDefault(); this.posTool.escape(); return; }
       if (!this.measure || !this.measure.active) return;
       e.preventDefault();
       if (e.key === "Enter") this.measureCommit(); else this.measureCancelCurrent();
