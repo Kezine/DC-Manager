@@ -37,4 +37,7 @@ export class Notify {
     Notify.busyEl = ov;
   }
   static idle(): void { if (Notify.busyEl) { Notify.busyEl.remove(); Notify.busyEl = null; } }
+  /** Un overlay « occupé » est-il déjà affiché ? (Permet à un sous-traitant de NE PAS en (re)gérer un s'il est
+      déjà couvert par son appelant — ex. le build 3D pendant un reload SSE qui affiche/efface déjà l'overlay.) */
+  static isBusy(): boolean { return !!Notify.busyEl; }
 }

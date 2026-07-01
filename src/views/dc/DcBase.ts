@@ -524,7 +524,7 @@ export class DcBase {
     }
     // import DYNAMIQUE eager (cf. en-tête) : inliné dans le bundle, mais non chargé par la chaîne require() CJS des tests.
     const opts = this.webglOptions(), ctx = this.webglCtx(), persp = this.webglPerspective, dcId = dc.id;
-    import(/* webpackMode: "eager" */ "./three/DcThreeScene").then(({ DcThreeScene }) => {
+    const doMount = (): Promise<void> => import(/* webpackMode: "eager" */ "./three/DcThreeScene").then(({ DcThreeScene }) => {
       if (this._webglHost !== hostDiv) return;   // un re-rendu a remplacé l'hôte entre-temps → abandon
       if (!this._three) {
         this._three = new DcThreeScene(this.store, this.host);
@@ -541,6 +541,35 @@ export class DcBase {
       this.syncWebglTool();                                   // (ré)applique le mode outil + l'overlay courant
       this.applyFocus3D();                                    // « Localiser » : pousse la cible caméra au moteur
     });
+    // INDICATEUR DE CHARGEMENT généralisé pour les (re)builds 3D COÛTEUX. Le build (mount) est SYNCHRONE et gèle le
+    // thread (≈ plusieurs centaines de ms sur une grosse salle) → un simple clic « changer de vue » paraît figé. On
+    // affiche l'overlay AVANT le gel, on laisse le navigateur PEINDRE (double rAF), puis on construit, et on efface.
+    // Même mécanique que le reload SSE. Sauté pour les petites scènes (build imperceptible → pas de flash inutile) ;
+    // TOUJOURS montré au 1er passage en 3D (chargement du moteur + build initial, le plus lent).
+    if (Notify.isBusy()) {
+      doMount();   // un appelant gère déjà l'overlay (ex. reload SSE : il l'affiche et l'efface lui-même) → ne pas doubler
+    } else if (!this._three || this.build3DIsHeavy(dc)) {
+      Notify.busy("Rendu 3D…");
+      requestAnimationFrame(() => requestAnimationFrame(() => { doMount().finally(() => Notify.idle()); }));
+    } else {
+      doMount();
+    }
+  }
+
+  /** Le prochain (re)build 3D vaut-il un indicateur de chargement ? Coût estimé bon marché (baies + occupants +
+      équipements libres des salles affichées) : au-delà du seuil, le build synchrone se voit à l'écran. Seuil ajustable. */
+  protected build3DIsHeavy(dc: any): boolean {
+    try {
+      let cost = 0;
+      for (const id of this.displayedDcIds(dc)) {
+        const racks = this.racks(id);
+        cost += racks.length * 2;
+        for (const r of racks) cost += this.store.equipmentsOfRack(r.id).length;   // occupants = le gros du coût de build
+        cost += this.store.freeEquipsOfDc(id).length * 2;
+        if (cost >= 12) return true;
+      }
+      return false;
+    } catch { return false; }
   }
 
   /* =============================================================================
