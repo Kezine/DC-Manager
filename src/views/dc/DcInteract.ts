@@ -55,6 +55,9 @@ export class DcInteract extends DcPanels {
 
   /* ---- tooltips enrichis de scène (réplique de _showTip/_moveTip/_hideTip + builders HTML) ---- */
   protected showTip(html: string, ev: MouseEvent): void {
+    // html VIDE = plus rien à décrire (ex. entité supprimée entre le rendu et le survol) : ne pas afficher une
+    // bulle vide — parité avec le chemin WebGL (DcBase.webglTip) qui garde déjà `if (!html)`.
+    if (!html) { this.hideTip(); return; }
     if (!this.ttEl || !this.ttEl.isConnected) { this.ttEl = document.createElement("div"); this.ttEl.className = "dc-tooltip"; this.stage.appendChild(this.ttEl); }
     this.ttEl.innerHTML = html; this.ttEl.style.display = "block"; this.moveTip(ev);
   }
