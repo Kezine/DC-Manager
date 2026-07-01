@@ -158,19 +158,21 @@ export class DcInteract extends DcPanels {
   }
 
 
-  /** Glisser-déposer une baie (vue Dessus) : aimantation à la maille, bornée à la salle. */
-  protected onRackPointerDown(e: MouseEvent, r: any): void {
+  /** Glisser-déposer COMMUN (baie / équipement libre) en vue Dessus : aimantation à la maille (ou libre si
+      `freePlace`), bornée à la salle, refus des cases inaccessibles, cote live. Les seules différences entre baie
+      et équipement — extents, orientation, collection cible et logique de sélection (classes SVG) — sont fournies
+      par `opts` ; le reste (drag, snap, clamp, garde, persistance) est mutualisé ici. */
+  protected dragPlaced(e: MouseEvent, ent: any, opts: { ext: { hx: number; hy: number }; orient: number; collection: string; select: (grp: SVGElement) => void }): void {
     if (e.button !== 0) return;
-    if (this.posTool.activeHere()) { this.posTool.dragEntity(e, r.id); return; }   // mode positionnement : glisser aimanté + sélection mover
+    if (this.posTool.activeHere()) { this.posTool.dragEntity(e, ent.id); return; }   // mode positionnement : glisser aimanté + sélection mover
     e.preventDefault(); e.stopPropagation();
     const dc = this.current(); if (!dc) return;
-    this.selRackId = r.id; this.selEquipId = null; this.selWaypointId = null;
-    if (this.svg) { this.svg.querySelectorAll(".dc-equip,.dc-wp").forEach((n) => n.classList.remove("sel")); this.svg.querySelectorAll(".dc-rack").forEach((n) => n.classList.toggle("sel", n.getAttribute("data-rack") === r.id)); }
-    this.renderSide(dc);
     const grp = e.currentTarget as SVGElement;
-    const ext = this.rackHalfExtents(r), o = Normalize.rackOrientation(r.orientation);
+    opts.select(grp);   // sélection spécifique (baie : par data-rack ; équipement : classe sur le nœud)
+    this.renderSide(dc);
+    const ext = opts.ext, o = opts.orient;
     const w0 = this.clientToWorld(e.clientX, e.clientY);
-    const cx0 = (r.dc_x != null) ? r.dc_x : w0.x, cy0 = (r.dc_y != null) ? r.dc_y : w0.y, off = { x: w0.x - cx0, y: w0.y - cy0 };
+    const cx0 = (ent.dc_x != null) ? ent.dc_x : w0.x, cy0 = (ent.dc_y != null) ? ent.dc_y : w0.y, off = { x: w0.x - cx0, y: w0.y - cy0 };
     const clampC = (c: { x: number; y: number }) => ({ x: Math.min(Math.max(c.x, ext.hx), dc.width_mm - ext.hx), y: Math.min(Math.max(c.y, ext.hy), dc.depth_mm - ext.hy) });
     let cur = { x: cx0, y: cy0 }, moved = false;
     const move = (ev: MouseEvent) => {
@@ -187,42 +189,31 @@ export class DcInteract extends DcPanels {
       if (!moved) return;   // simple clic = sélection
       const c = this.freePlace ? clampC(cur) : clampC({ x: this.snap(cur.x, dc.cell_mm), y: this.snap(cur.y, dc.cell_mm) });
       if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); this.render(); return; }
-      await this.store.update("racks", r.id, { dc_x: c.x, dc_y: c.y }); this.host.setDirty?.(true);
+      await this.store.update(opts.collection, ent.id, { dc_x: c.x, dc_y: c.y }); this.host.setDirty?.(true);
     };
     document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }
 
+  /** Glisser-déposer une baie (vue Dessus). */
+  protected onRackPointerDown(e: MouseEvent, r: any): void {
+    this.dragPlaced(e, r, {
+      ext: this.rackHalfExtents(r), orient: Normalize.rackOrientation(r.orientation), collection: "racks",
+      select: () => {
+        this.selRackId = r.id; this.selEquipId = null; this.selWaypointId = null;
+        if (this.svg) { this.svg.querySelectorAll(".dc-equip,.dc-wp").forEach((n) => n.classList.remove("sel")); this.svg.querySelectorAll(".dc-rack").forEach((n) => n.classList.toggle("sel", n.getAttribute("data-rack") === r.id)); }
+      },
+    });
+  }
+
+  /** Glisser-déposer un équipement LIBRE (vue Dessus). */
   protected onEquipPointerDown(ev: MouseEvent, eq: any): void {
-    if (ev.button !== 0) return;
-    if (this.posTool.activeHere()) { this.posTool.dragEntity(ev, eq.id); return; }   // mode positionnement
-    ev.preventDefault(); ev.stopPropagation();
-    const dc = this.current(); if (!dc) return;
-    this.selRackId = null; this.selEquipId = eq.id; this.selWaypointId = null;
-    const grp = ev.currentTarget as SVGElement;
-    if (this.svg) { this.svg.querySelectorAll(".dc-rack,.dc-equip,.dc-wp").forEach((n) => n.classList.remove("sel")); grp.classList.add("sel"); }
-    this.renderSide(dc);
-    const ext = FreeEquipGeometry.halfExtents(eq), o = Normalize.rackOrientation(eq.dc_orientation);
-    const w0 = this.clientToWorld(ev.clientX, ev.clientY);
-    const cx0 = (eq.dc_x != null) ? eq.dc_x : w0.x, cy0 = (eq.dc_y != null) ? eq.dc_y : w0.y, off = { x: w0.x - cx0, y: w0.y - cy0 };
-    const clampC = (c: { x: number; y: number }) => ({ x: Math.min(Math.max(c.x, ext.hx), dc.width_mm - ext.hx), y: Math.min(Math.max(c.y, ext.hy), dc.depth_mm - ext.hy) });
-    let cur = { x: cx0, y: cy0 }, moved = false;
-    const move = (e2: MouseEvent) => {
-      const w = this.clientToWorld(e2.clientX, e2.clientY), nx = w.x - off.x, ny = w.y - off.y;
-      if (!moved && Math.abs(nx - cx0) + Math.abs(ny - cy0) < (8 / (this.scale || 1))) return;
-      moved = true; grp.classList.add("dragging");
-      cur = clampC({ x: nx, y: ny });
-      grp.setAttribute("transform", `translate(${cur.x} ${cur.y}) rotate(${o})`);
-      this.showCote(Format.meters(cur.x) + " × " + Format.meters(cur.y), e2.clientX, e2.clientY);
-    };
-    const up = async () => {
-      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
-      grp.classList.remove("dragging"); this.hideCote();
-      if (!moved) return;
-      const c = this.freePlace ? clampC(cur) : clampC({ x: this.snap(cur.x, dc.cell_mm), y: this.snap(cur.y, dc.cell_mm) });
-      if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); this.render(); return; }
-      await this.store.update("equipments", eq.id, { dc_x: c.x, dc_y: c.y }); this.host.setDirty?.(true);
-    };
-    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+    this.dragPlaced(ev, eq, {
+      ext: FreeEquipGeometry.halfExtents(eq), orient: Normalize.rackOrientation(eq.dc_orientation), collection: "equipments",
+      select: (grp) => {
+        this.selRackId = null; this.selEquipId = eq.id; this.selWaypointId = null;
+        if (this.svg) { this.svg.querySelectorAll(".dc-rack,.dc-equip,.dc-wp").forEach((n) => n.classList.remove("sel")); grp.classList.add("sel"); }
+      },
+    });
   }
 
 
