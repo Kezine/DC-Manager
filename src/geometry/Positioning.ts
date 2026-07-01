@@ -151,7 +151,10 @@ export class Positioning {
     const fit = (center: number, half: number, lines: number[]): { delta: number; line: number } | null => {
       let best: { delta: number; line: number } | null = null, bestD = tol;
       for (const edge of [center - half, center + half]) {
-        for (const L of lines) { const d = Math.abs(edge - L); if (d <= bestD) { bestD = d; best = { delta: L - edge, line: L }; } }
+        // Tolérance INCLUSIVE (`d <= tol`) mais on ne remplace que si STRICTEMENT plus proche (`d < bestD`) : à
+        // distance égale, la PREMIÈRE ligne rencontrée gagne → accrochage déterministe (priorité par l'ordre des
+        // lignes : murs du cadre d'abord, puis bords des rects dans l'ordre ; cf. snapLines).
+        for (const L of lines) { const d = Math.abs(edge - L); if (d <= tol && (best === null || d < bestD)) { bestD = d; best = { delta: L - edge, line: L }; } }
       }
       return best;
     };
