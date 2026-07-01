@@ -18,6 +18,7 @@ import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
 import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
+import { DoorGeometry } from "../../geometry/DoorGeometry";
 import { Id } from "../../core/Id";
 import type { Frame } from "../../geometry/Positioning";
 import type { PosEntry, PosScene } from "./PositioningTool";
@@ -739,6 +740,20 @@ export class DcInteract extends DcPanels {
             const c = clamp(cx, cy, ext.hx, ext.hy, frame);
             if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); return; }
             await this.store.update("equipments", eq.id, { dc_x: Math.round(c.x), dc_y: Math.round(c.y) }); this.host.setDirty?.(true);
+          } });
+      });
+      // PORTES : déplaçables MAIS contraintes à leur mur. La demi-emprise le long du mur = largeur/2 ; ⟂ au mur = fine.
+      // Le commit RÉ-ANCRE au mur (on ignore la coord perpendiculaire) et n'écrit que l'`offset` (centre le long du mur).
+      (dc.doors || []).forEach((door: any) => {
+        const onSide = door.wall === "left" || door.wall === "right";   // mur vertical → l'axe libre est y
+        const along = DoorGeometry.clampOffset(door, { w: dc.width_mm, h: dc.depth_mm });
+        const cx = door.wall === "right" ? dc.width_mm : (door.wall === "left" ? 0 : along);
+        const cy = door.wall === "bottom" ? dc.depth_mm : (door.wall === "top" ? 0 : along);
+        const hw = Math.max(1, (door.width_mm || 900) / 2), hx = onSide ? 30 : hw, hy = onSide ? hw : 30;
+        rects.push({ id: door.id, name: "🚪 " + (door.wall || "porte"), orient: 0, anchor: "center", rect: { cx, cy, hx, hy },
+          commit: async (nx, ny) => {
+            const off = DoorGeometry.clampOffset({ ...door, offset: onSide ? ny : nx }, { w: dc.width_mm, h: dc.depth_mm });
+            await this.updateDoor(dc, door.id, { offset: Math.round(off) });
           } });
       });
       return { frame, rects };

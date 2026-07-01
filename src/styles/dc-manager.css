@@ -817,10 +817,11 @@
   .dc-door { cursor: grab; }
   .dc-door.static { cursor: default; }
   .dc-door-hit { stroke: transparent; stroke-width: 16px; vector-effect: non-scaling-stroke; pointer-events: stroke; }
-  .dc-door-frame { stroke: var(--fg); stroke-width: 3.5px; vector-effect: non-scaling-stroke; stroke-linecap: round; pointer-events: none; }
+  .dc-door-frame { fill: var(--fg); fill-opacity: 0.85; stroke: none; pointer-events: none; }   /* listel = butée pleine qui rentre dans l'ouverture (le « stop ») */
+  .dc-door-jamb { stroke: var(--fg); stroke-width: 2px; vector-effect: non-scaling-stroke; stroke-linecap: round; pointer-events: none; }   /* bord de l'ouverture (jambage) */
   .dc-door-clear { stroke: var(--accent); stroke-width: 2.5px; vector-effect: non-scaling-stroke; pointer-events: none; }
   .dc-door-leaf { stroke: var(--fg); stroke-width: 2px; vector-effect: non-scaling-stroke; pointer-events: none; }
-  .dc-door-swing { fill: none; stroke: var(--accent); stroke-width: 1.5px; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; opacity: 0.6; pointer-events: none; }
+  .dc-door-swing { fill: var(--accent); fill-opacity: 0.14; stroke: var(--accent); stroke-opacity: 0.55; stroke-width: 1.5px; vector-effect: non-scaling-stroke; pointer-events: none; }   /* débattement = secteur rempli, comme les baies */
   .dc-door-label { fill: var(--accent); font-family: var(--mono); font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
   .dc-equip:hover .dc-equip-body { stroke: var(--fg); }
   .dc-equip.sel .dc-equip-body { stroke: var(--accent); stroke-width: 2.5px; stroke-dasharray: none; }

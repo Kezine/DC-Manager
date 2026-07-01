@@ -477,9 +477,17 @@ export class DcViews2D extends DcScene3D {
       while (g.firstChild) g.removeChild(g.firstChild);
       const gg = DoorGeometry.geom(cur, room);
       g.appendChild(Dom.svg("line", { class: "dc-door-hit", x1: gg.a.x, y1: gg.a.y, x2: gg.b.x, y2: gg.b.y }));   // zone de clic (le long de l'ouverture)
-      g.appendChild(Dom.svg("polyline", { class: "dc-door-swing", points: DoorGeometry.arcPoints(gg, 16).map((p) => p.x + "," + p.y).join(" ") }));   // débattement
-      g.appendChild(Dom.svg("line", { class: "dc-door-frame", x1: gg.hinge.x, y1: gg.hinge.y, x2: gg.clearHinge.x, y2: gg.clearHinge.y }));   // listel (jambage charnière)
-      g.appendChild(Dom.svg("line", { class: "dc-door-frame", x1: gg.latch.x, y1: gg.latch.y, x2: gg.clearLatch.x, y2: gg.clearLatch.y }));   // listel (jambage loquet)
+      // débattement = SECTEUR rempli (quart de disque), même style que les baies (pivot inséré, rayon = passage libre)
+      const seg = ["M " + gg.clearHinge.x + " " + gg.clearHinge.y];
+      DoorGeometry.arcPoints(gg, 16).forEach((p) => seg.push("L " + p.x.toFixed(1) + " " + p.y.toFixed(1)));
+      seg.push("Z");
+      g.appendChild(Dom.svg("path", { class: "dc-door-swing", d: seg.join(" ") }));
+      // LISTEL = BUTÉES qui RENTRENT dans l'ouverture (côté ouverture, ⟂ au mur) : c'est le « stop » de la porte ;
+      // elles réduisent le passage libre. Dessinées en « négatif » (bloc plein qui empiète sur l'ouverture).
+      const sw = gg.swing, dep = Math.max(cur.frame_mm || 0, 90);
+      const stopBlock = (pOpen: any, pClear: any) => Dom.svg("polygon", { class: "dc-door-frame", points: [pOpen, pClear, { x: pClear.x + sw.x * dep, y: pClear.y + sw.y * dep }, { x: pOpen.x + sw.x * dep, y: pOpen.y + sw.y * dep }].map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" ") });
+      if ((cur.frame_mm || 0) > 0) { g.appendChild(stopBlock(gg.hinge, gg.clearHinge)); g.appendChild(stopBlock(gg.latch, gg.clearLatch)); }
+      [gg.a, gg.b].forEach((p) => g.appendChild(Dom.svg("line", { class: "dc-door-jamb", x1: p.x, y1: p.y, x2: p.x + sw.x * dep, y2: p.y + sw.y * dep })));   // bords de l'ouverture (jambages)
       g.appendChild(Dom.svg("line", { class: "dc-door-clear", x1: gg.clearHinge.x, y1: gg.clearHinge.y, x2: gg.clearLatch.x, y2: gg.clearLatch.y }));   // passage LIBRE (seuil)
       g.appendChild(Dom.svg("line", { class: "dc-door-leaf", x1: gg.clearHinge.x, y1: gg.clearHinge.y, x2: gg.leafOpen.x, y2: gg.leafOpen.y }));   // vantail (ouvert 90°)
       const mx = (gg.clearHinge.x + gg.clearLatch.x) / 2, my = (gg.clearHinge.y + gg.clearLatch.y) / 2;
@@ -495,6 +503,7 @@ export class DcViews2D extends DcScene3D {
   protected onDoorPointerDown(e: MouseEvent, dc: any, door: any, cur: any, room: { w: number; h: number }, fill: () => void): void {
     if (e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
+    if (this.posTool.activeHere()) { this.posTool.dragEntity(e, door.id); return; }   // mode assisté : glisser aimanté + cotes (contraint au mur par le commit)
     const along = (door.wall === "left" || door.wall === "right");   // mur vertical → glisse en y ; horizontal → en x
     const startCoord = along ? this.clientToWorld(e.clientX, e.clientY).y : this.clientToWorld(e.clientX, e.clientY).x;
     const off0 = door.offset; let moved = false;

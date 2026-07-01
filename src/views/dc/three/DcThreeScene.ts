@@ -197,20 +197,27 @@ export class DcThreeScene extends DcThreeCamera {
     const frameCol = 0x9aa2ab, leafCol = 0xc6ccd2;
     doors.forEach((door: any) => {
       const g = DoorGeometry.geom(door, room), H = Math.max(100, door.height_mm || 2100), u = g.wallDir;
-      const fd = Math.max(80, Math.min(300, (door.frame_mm || 0) * 2 || 120));   // profondeur visuelle (traversée du mur)
-      const perpWall = { x: Math.abs(u.y), y: Math.abs(u.x) };   // axe ⟂ au mur (straddle du cadre)
       const alongWall = { x: Math.abs(u.x), y: Math.abs(u.y) };  // axe du mur (épaisseur du vantail)
       const pick = { type: "door", dcId: dc.id, id: door.id };
-      // boîte entre pA et pB (le long d'un axe), ± ep/2 sur l'axe `axP`, de z0 à z1
-      const seg = (pA: any, pB: any, axP: any, ep: number, z0: number, z1: number, col: number) => {
-        const x0 = Math.min(pA.x, pB.x) - axP.x * ep / 2, x1 = Math.max(pA.x, pB.x) + axP.x * ep / 2;
-        const y0 = Math.min(pA.y, pB.y) - axP.y * ep / 2, y1 = Math.max(pA.y, pB.y) + axP.y * ep / 2;
-        this.localBox(group, x0, x1, y0, y1, z0, z1, col, pick);
+      // LISTEL = BUTÉES qui RENTRENT dans l'ouverture (côté ouverture, ⟂ au mur) : c'est le « stop » de la porte.
+      // Forme en ⊓ : 2 montants (charnière + loquet) sur toute la hauteur + un linteau en haut ; PAS de seuil au SOL.
+      const dep = Math.max(50, door.frame_mm || 40);   // saillie de la butée DANS l'ouverture
+      const topThick = Math.max(80, door.frame_mm || 100);   // épaisseur du linteau (depuis le haut)
+      // bloc plein entre deux points de bord (le long du mur) et leur projection de `depth` dans l'ouverture (sens g.swing)
+      const stop = (pA: any, pB: any, depth: number, z0: number, z1: number, col: number) => {
+        const xs = [pA.x, pB.x, pA.x + g.swing.x * depth, pB.x + g.swing.x * depth];
+        const ys = [pA.y, pB.y, pA.y + g.swing.y * depth, pB.y + g.swing.y * depth];
+        this.localBox(group, Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), z0, z1, col, pick);
       };
-      seg(g.hinge, g.clearHinge, perpWall, fd, 0, H, frameCol);   // jambage charnière (largeur = listel)
-      seg(g.latch, g.clearLatch, perpWall, fd, 0, H, frameCol);   // jambage loquet
-      seg(g.a, g.b, perpWall, fd, H - Math.max(80, door.frame_mm || 100), H, frameCol);   // linteau (haut)
-      seg(g.clearHinge, g.leafOpen, alongWall, 40, 0, H, leafCol);   // vantail ouvert 90° (panneau fin)
+      if ((door.frame_mm || 0) > 0) {
+        stop(g.hinge, g.clearHinge, dep, 0, H, frameCol);          // montant charnière (largeur = listel)
+        stop(g.latch, g.clearLatch, dep, 0, H, frameCol);          // montant loquet
+        stop(g.a, g.b, dep, H - topThick, H, frameCol);            // linteau (haut) — pas de sol
+      }
+      // vantail ouvert 90° (panneau fin), entre le montant charnière et sa position ouverte
+      const lx = [g.clearHinge.x, g.leafOpen.x, g.clearHinge.x + alongWall.x * 40, g.leafOpen.x + alongWall.x * 40];
+      const ly = [g.clearHinge.y, g.leafOpen.y, g.clearHinge.y + alongWall.y * 40, g.leafOpen.y + alongWall.y * 40];
+      this.localBox(group, Math.min(...lx) - alongWall.x * 20, Math.max(...lx) + alongWall.x * 20, Math.min(...ly) - alongWall.y * 20, Math.max(...ly) + alongWall.y * 20, 0, H, leafCol, pick);
     });
   }
 
