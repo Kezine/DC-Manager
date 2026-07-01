@@ -687,9 +687,12 @@ export class DcThreeScene extends DcThreeCamera {
       // 6 matériaux (un par face de la BoxGeometry) : image de façade si présente (non éclairée, couleurs vraies),
       // sinon le corps coloré/éclairé. Ordre BoxGeometry : +X,−X,+Y,−Y,+Z,−Z ↔ droite/gauche/arrière/AVANT(−Y)/dessus/dessous.
       const FACE_BY_MAT = ["right", "left", "rear", "front", "top", "bottom"];
+      let hasFrontImg = false;
       const mats = FACE_BY_MAT.map((face) => {
         const img = this.host.faceImageUrl?.(e.id, face);
-        if (img && img.url) { const m = new THREE.MeshBasicMaterial({ color: 0xffffff }); this.applyFaceTexture(m, img.url); return m; }
+        const has = !!(img && img.url);
+        if (face === "front") hasFrontImg = has;
+        if (has) { const m = new THREE.MeshBasicMaterial({ color: 0xffffff }); this.applyFaceTexture(m, img!.url); return m; }
         return new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 });
       });
       const mesh = new THREE.Mesh(geo, mats);
@@ -698,13 +701,21 @@ export class DcThreeScene extends DcThreeCamera {
       grp.add(mesh);
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
       edges.position.copy(mesh.position); grp.add(edges);
-      // LISERÉ de face AVANT (−Y local) : fine bande à l'accent le long de l'arête basse avant → repère d'orientation
-      // (comme les baies). Couche "orient" (basculable via showOrientMarks).
-      const lis = Math.max(6, Math.min(b.w, b.h) * 0.06);
-      const strip = new THREE.Mesh(new THREE.BoxGeometry(Math.max(1, b.w * 0.98), lis, lis), new THREE.MeshBasicMaterial({ color: this.theme.front }));
-      strip.position.set(0, -b.d / 2 - lis / 2 + 1, b.z + lis / 2);
-      strip.userData = { pick: { type: "occ", kind: "eq", id: e.id }, layer: "orient" };
-      grp.add(strip);
+      // Mise en évidence de la FACE AVANT (−Y local) : ses 4 ARÊTES à l'accent → repère d'orientation. INUTILE quand une
+      // image de face avant est posée (elle indique déjà l'avant). Couche "orient" (basculable via showOrientMarks).
+      if (!hasFrontImg) {
+        const hw = b.w / 2, yF = -b.d / 2 - 1, z0 = b.z, z1 = b.z + b.h;   // yF : 1 mm en saillie → pas de z-fighting avec les arêtes noires
+        const fg = new THREE.BufferGeometry();
+        fg.setAttribute("position", new THREE.Float32BufferAttribute([
+          -hw, yF, z0, hw, yF, z0,   // arête basse
+          -hw, yF, z1, hw, yF, z1,   // arête haute
+          -hw, yF, z0, -hw, yF, z1,  // arête gauche
+          hw, yF, z0, hw, yF, z1,    // arête droite
+        ], 3));
+        const frontEdges = new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: this.theme.front }));
+        frontEdges.userData = { layer: "orient" };
+        grp.add(frontEdges);
+      }
       // nom posé à plat sur la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild.
       if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2 + 1, b.z + b.h / 2, b.w * 0.9, b.h * 0.9, true);
       // ports en coords MONDE → ajoutés au groupe identité (root = gFree) ; couche "port" basculable (showPorts).
