@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { Request } from "express";
 import { Logger } from "./logger.js";
 
@@ -42,6 +42,16 @@ export class Auth {
       : "mode DEV (aucune auth)");
   }
 
+  /** Comparaison à TEMPS CONSTANT (anti-timing-attack). On hash les deux chaînes en SHA-256 → deux buffers de MÊME
+      taille (32 o), condition requise par `timingSafeEqual`, ce qui évite AUSSI de fuiter la longueur du secret par
+      la durée. Contrairement à `===` (court-circuit au 1er caractère divergent), le temps ne dépend plus du nombre
+      de caractères de tête corrects → un attaquant ne peut plus deviner le secret caractère par caractère au chrono. */
+  private static safeEq(a: string, b: string): boolean {
+    const ha = createHash("sha256").update(a).digest();
+    const hb = createHash("sha256").update(b).digest();
+    return timingSafeEqual(ha, hb);
+  }
+
   /** Vérifie l'en-tête Authorization: Basic (mode basic uniquement ; sinon true = pas de gate basic). */
   checkBasic(req: Request): boolean {
     if (this.mode !== "basic") return true;
@@ -50,7 +60,11 @@ export class Auth {
     let dec = ""; try { dec = Buffer.from(m[1], "base64").toString("utf8"); } catch { return false; }
     const i = dec.indexOf(":");
     const u = i >= 0 ? dec.slice(0, i) : dec, p = i >= 0 ? dec.slice(i + 1) : "";
-    return u === this.basicUser && p === this.basicPass;
+    // Les DEUX comparaisons sont évaluées avant le `&&` (pas de court-circuit qui distinguerait « login faux » de
+    // « mot de passe faux » au temps de réponse), chacune à temps constant.
+    const okUser = Auth.safeEq(u, this.basicUser || "");
+    const okPass = Auth.safeEq(p, this.basicPass);
+    return okUser && okPass;
   }
 
   /** Validation de la session (cache par hash de jeton + expireDate). */
