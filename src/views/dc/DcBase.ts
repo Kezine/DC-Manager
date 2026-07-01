@@ -258,6 +258,13 @@ export class DcBase {
   async persistDoors(dcId: string, doors: any[]): Promise<void> { await this.store.update("datacenters", dcId, { doors }); this.setDirty(); }
   /** Ouvre le formulaire d'édition d'une porte (délégué à l'hôte applicatif — optionnel). */
   openDoorForm(dcId: string, doorId: string): void { this.host.openDoorForm?.(dcId, doorId); }
+  /** Toggle d'affichage du débattement (option de vue partagée 2D/3D). */
+  doorShowSwing(): boolean { return this.showDoorSwing; }
+  /** Échelle mm→px courante (1 par défaut). */
+  doorScale(): number { return this.scale || 1; }
+  /** Positionnement assisté actif ici ? / délégation du glisser aimanté (contraint au mur par le commit `posScene`). */
+  posActiveHere(): boolean { return this.posTool.activeHere(); }
+  posDragEntity(e: MouseEvent, id: string): void { this.posTool.dragEntity(e, id); }
 
   protected btn(text: string, onClick: () => void, title?: string): HTMLButtonElement {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = text; if (title) b.title = title; b.onclick = onClick; return b;

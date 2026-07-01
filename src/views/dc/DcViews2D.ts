@@ -18,7 +18,6 @@ import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
 import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
-import { DoorGeometry } from "../../geometry/DoorGeometry";
 import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Format } from "../../core/Format";
@@ -47,7 +46,7 @@ export class DcViews2D extends DcScene3D {
     gRoot.appendChild(room);
     gRoot.appendChild(this.gridNode(W, D, cell, dc.blocked_cells, (cx0, cy0, cx1, cy1) => this.toggleCellsRange("datacenters", dc.id, cx0, cy0, cx1, cy1)));
     if (this.showOrientMarks) { const th = Math.max(40, Math.min(W, D) * 0.012); gRoot.appendChild(Dom.svg("rect", { class: "dc-floor-room-front", x: 0, y: 0, width: W, height: th })); }   // liseré FRONT
-    (dc.doors || []).forEach((d: any) => gRoot.appendChild(this.doorNode2D(dc, d, { w: W, h: D })));   // portes collées aux murs (ouverture + passage libre + débattement)
+    (dc.doors || []).forEach((d: any) => gRoot.appendChild(this.doorTool.node2D(dc, d, { w: W, h: D })));   // portes collées aux murs (ouverture + passage libre + débattement)
     if (this.showDoorSwing) this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) { const sw = this.doorSwingNode(r); if (sw) gRoot.appendChild(sw); } });   // débattement des portes (sous les baies)
     this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) gRoot.appendChild(this.rackNode(r)); });
     this.store.freeEquipsOfDc(dc.id).forEach((e: any) => { if (e.dc_x != null && e.dc_y != null && !this.hidden3dEquips.has(e.id)) gRoot.appendChild(this.equipNode(e)); });
@@ -248,7 +247,7 @@ export class DcViews2D extends DcScene3D {
     const inner = Dom.svg("g", { transform: `translate(${fp.w / 2} ${fp.h / 2}) rotate(${o}) translate(${-w / 2} ${-h / 2})` });
     inner.appendChild(Dom.svg("rect", { class: "dc-floor-room-body", x: 0, y: 0, width: w, height: h }));
     if (this.showOrientMarks) inner.appendChild(Dom.svg("rect", { class: "dc-floor-room-front", x: 0, y: 0, width: w, height: Math.max(40, h * 0.022) }));
-    (d.doors || []).forEach((door: any) => inner.appendChild(this.doorNode2D(d, door, { w, h }, false)));   // portes (affichage seul en étage ; placement en Plan de salle)
+    (d.doors || []).forEach((door: any) => inner.appendChild(this.doorTool.node2D(d, door, { w, h }, false)));   // portes (affichage seul en étage ; placement en Plan de salle)
     g.appendChild(inner);
     const label = Dom.svg("text", { class: "dc-floor-room-label", x: fp.w / 2, y: fp.h / 2, "text-anchor": "middle", "dominant-baseline": "central", "font-size": Math.max(200, Math.min(fp.w, fp.h) * 0.12) });
     label.textContent = (d.name || "(salle)") + (d.room ? " · " + d.room : ""); g.appendChild(label);
@@ -471,68 +470,7 @@ export class DcViews2D extends DcScene3D {
     document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }
 
-  /** PORTE de salle en 2D : ouverture + listel + PASSAGE LIBRE (largeur max d'équipement) + vantail + débattement,
-      collée au mur. Déplaçable LE LONG de son mur. `room` = repère salle courant (salle : coords salle ; étage :
-      coords locales de la salle, appliquées par le groupe transformé). */
-  protected doorNode2D(dc: any, door: any, room: { w: number; h: number }, draggable = true): SVGElement {
-    const g = Dom.svg("g", { class: "dc-door" + (draggable ? "" : " static"), "data-door": door.id });
-    const cur = { ...door };
-    const fill = (): void => {
-      while (g.firstChild) g.removeChild(g.firstChild);
-      const gg = DoorGeometry.geom(cur, room);
-      const sw = gg.swing, th = Math.max(cur.frame_mm || 0, 60);   // épaisseur schématique de la PORTE (⟂ au mur, côté ouverture)
-      // bloc rectangulaire le long du mur (p1→p2) prolongé de `th` côté ouverture
-      const rectPoly = (p1: any, p2: any, cls: string) => Dom.svg("polygon", { class: cls, points: [p1, p2, { x: p2.x + sw.x * th, y: p2.y + sw.y * th }, { x: p1.x + sw.x * th, y: p1.y + sw.y * th }].map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" ") });
-      g.appendChild(Dom.svg("line", { class: "dc-door-hit", x1: gg.a.x, y1: gg.a.y, x2: gg.b.x, y2: gg.b.y }));   // zone de clic (le long de l'ouverture)
-      // DÉBATTEMENT = SECTEUR rempli (quart de disque), même style ET même toggle (showDoorSwing) que les portes de baie
-      if (this.showDoorSwing) {
-        const seg = ["M " + gg.clearHinge.x + " " + gg.clearHinge.y];
-        DoorGeometry.arcPoints(gg, 16).forEach((p) => seg.push("L " + p.x.toFixed(1) + " " + p.y.toFixed(1)));
-        seg.push("Z");
-        g.appendChild(Dom.svg("path", { class: "dc-door-swing", d: seg.join(" ") }));
-      }
-      // VANTAIL à la PLEINE largeur du formulaire (a→b) = surface de la PORTE (fermée, à plat sur le mur).
-      g.appendChild(rectPoly(gg.a, gg.b, "dc-door-leaf"));
-      // LISTEL = RÉSERVATION dessinée À L'INTÉRIEUR de la surface de la porte, aux 2 extrémités (a→clearHinge,
-      // clearLatch→b). C'est la butée de fermeture → le passage libre au milieu est TOUJOURS plus petit que la porte.
-      if ((cur.frame_mm || 0) > 0) {
-        g.appendChild(rectPoly(gg.a, gg.clearHinge, "dc-door-frame"));
-        g.appendChild(rectPoly(gg.clearLatch, gg.b, "dc-door-frame"));
-      }
-      g.appendChild(Dom.svg("line", { class: "dc-door-clear", x1: gg.clearHinge.x, y1: gg.clearHinge.y, x2: gg.clearLatch.x, y2: gg.clearLatch.y }));   // passage LIBRE (largeur max d'équipement) au ras du mur
-      // vantail OUVERT à 90° : fait partie du débattement → même toggle
-      if (this.showDoorSwing) g.appendChild(Dom.svg("line", { class: "dc-door-leaf-open", x1: gg.clearHinge.x, y1: gg.clearHinge.y, x2: gg.leafOpen.x, y2: gg.leafOpen.y }));
-      const mx = (gg.clearHinge.x + gg.clearLatch.x) / 2, my = (gg.clearHinge.y + gg.clearLatch.y) / 2;
-      const t = Dom.svg("text", { class: "dc-door-label", x: mx + gg.swing.x * 170, y: my + gg.swing.y * 170, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 190 });
-      t.textContent = Math.round(gg.clear) + " mm"; g.appendChild(t);
-    };
-    fill();
-    if (draggable) g.addEventListener("pointerdown", (e: any) => this.onDoorPointerDown(e, dc, door, cur, room, fill));   // drag = Plan de salle (coords salle) ; en étage la salle est transformée → affichage seul
-    g.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.ctxMenu(e, this.doorTool.ctx(dc, door)); });
-    return g;
-  }
-  /** Glisser une porte LE LONG de son mur (met à jour `offset`, borné). `cur` = copie d'aperçu ; persiste au relâcher. */
-  protected onDoorPointerDown(e: MouseEvent, dc: any, door: any, cur: any, room: { w: number; h: number }, fill: () => void): void {
-    if (e.button !== 0) return;
-    e.preventDefault(); e.stopPropagation();
-    if (this.posTool.activeHere()) { this.posTool.dragEntity(e, door.id); return; }   // mode assisté : glisser aimanté + cotes (contraint au mur par le commit)
-    const along = (door.wall === "left" || door.wall === "right");   // mur vertical → glisse en y ; horizontal → en x
-    const startCoord = along ? this.clientToWorld(e.clientX, e.clientY).y : this.clientToWorld(e.clientX, e.clientY).x;
-    const off0 = door.offset; let moved = false;
-    const move = (ev: MouseEvent) => {
-      const w = this.clientToWorld(ev.clientX, ev.clientY), coord = along ? w.y : w.x;
-      if (!moved && Math.abs(coord - startCoord) < (8 / (this.scale || 1))) return;
-      moved = true;
-      cur.offset = Math.round(DoorGeometry.clampOffset({ ...cur, offset: off0 + (coord - startCoord) }, room));
-      fill(); this.showCote(Format.meters(cur.offset), ev.clientX, ev.clientY);
-    };
-    const up = async () => {
-      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
-      this.hideCote();
-      if (moved) await this.doorTool.update(dc, door.id, { offset: cur.offset });
-    };
-    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
-  }
+  /* PORTES de salle : rendu 2D + drag = DoorTool.node2D (cf. DoorTool.ts). Appelé depuis renderTop / renderFloor. */
   /** Waypoint en vue DESSUS. Pin/rail LIBRES = déplaçables dans la salle (affine dc_x/dc_y, snap demi-maille,
       le rattachement salle/datacenter NE change PAS) ; brosse / pin latéral / pin de capot = STATIQUES (zone =
       le slot de la baie, posés par assignation, édités par form). Réplique de `waypointNode` du monolithe. */
