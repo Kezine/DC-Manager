@@ -60,6 +60,7 @@ const { FloorLayout } = D("geometry/FloorLayout.js");
 const { Positioning } = D("geometry/Positioning.js");
 const { DoorGeometry } = D("geometry/DoorGeometry.js");
 const { Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM } = D("domain/Doors.js");
+const { DoorTool } = D("views/dc/DoorTool.js");
 const { ImageStore } = D("data/ImageStore.js");
 const { FaceImage } = D("models/index.js");
 const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
@@ -980,6 +981,35 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(def.hinge, "left", "defaults : charnière gauche");
     ck.eq("id" in def, false, "defaults : SANS id (ajouté par l'appelant)");
     ck.eq(DOOR_WALLS.length, 4, "DOOR_WALLS : 4 murs");
+  }
+
+  console.log("\n• DoorTool : contrôleur des portes (CRUD + menu, via hôte injecté — testable en isolation)");
+  {
+    let saved = null;
+    const host = { persistDoors: async (dcId, doors) => { saved = { dcId, doors }; }, openDoorForm: () => {} };
+    const tool = new DoorTool(host);
+    // add : porte par défaut centrée, persistée sur la salle
+    const dc = { id: "DC1", width_mm: 6000, depth_mm: 4000, doors: [] };
+    const id = await tool.add(dc, "top");
+    ck(saved && saved.dcId === "DC1" && saved.doors.length === 1, "DoorTool.add : porte persistée sur la salle");
+    ck.eq(saved.doors[0].offset, 3000, "DoorTool.add : offset centré (width/2)");
+    ck.eq(saved.doors[0].wall, "top", "DoorTool.add : mur demandé");
+    ck(typeof id === "string" && !!id, "DoorTool.add : renvoie l'id de la porte");
+    // mur vertical → centré sur la profondeur
+    await tool.add({ id: "DC1", width_mm: 6000, depth_mm: 4000, doors: [] }, "left");
+    ck.eq(saved.doors[0].offset, 2000, "DoorTool.add : mur vertical → offset = depth/2");
+    // update : patch partiel sur la BONNE porte, les autres inchangées
+    const dc2 = { id: "DC1", doors: [{ id: "d1", wall: "top", hinge: "left" }, { id: "d2", wall: "left", hinge: "left" }] };
+    await tool.update(dc2, "d1", { hinge: "right" });
+    ck.eq(saved.doors.find((d) => d.id === "d1").hinge, "right", "DoorTool.update : patch sur la bonne porte");
+    ck.eq(saved.doors.find((d) => d.id === "d2").hinge, "left", "DoorTool.update : autres portes inchangées");
+    // remove
+    await tool.remove(dc2, "d1");
+    ck(saved.doors.length === 1 && saved.doors[0].id === "d2", "DoorTool.remove : porte retirée");
+    // ctx : menu (passage libre dans l'en-tête + 4 actions)
+    const sections = tool.ctx(dc2, { id: "d2", width_mm: 900, frame_mm: 40, hinge: "left", opening: "interior" });
+    ck(sections[0].head.indexOf("820") >= 0, "DoorTool.ctx : en-tête montre le passage libre (820 mm)");
+    ck.eq(sections[0].items.length, 4, "DoorTool.ctx : 4 actions (modifier/charnière/ouverture/supprimer)");
   }
 
   console.log("\n• ImageStore : helpers purs (dataUrl ↔ Blob · bundle .nmfb)");

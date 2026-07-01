@@ -21,6 +21,8 @@ import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
 import { PositioningTool } from "./PositioningTool";
 import type { PositioningHost } from "./PositioningTool";
+import { DoorTool } from "./DoorTool";
+import type { DoorHost } from "./DoorTool";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
@@ -60,6 +62,7 @@ export class DcBase {
   // + panneau + glisser), piloté via l'interface PositioningHost que cette chaîne de vues implémente (cf. DcInteract
   // posScene/posCtxKey/…). Instancié dans le constructeur. ÉPHÉMÈRE : déplace l'élément puis écrit sa position UNE fois.
   posTool!: PositioningTool;
+  doorTool!: DoorTool;
   floorTarget: { location: string; floor: string } | null = null;   // étage visé (vue Étage), indépendant d'une salle
   // ROTATION de la vue 2D { angle, cx, cy, flip } : Étage = 180° ; Dessus = orientation salle + 180° → bord de réf. EN BAS.
   // Le flip horizontal donne une vraie vue « du dessus » (cohérente avec la 3D, et non « via le plancher »). Nul en 3D.
@@ -135,6 +138,7 @@ export class DcBase {
     this.store = store; this.host = host; this.stage = mount; this.scene = new RackScene(store); this.resolver = new Resolver3D(store); this.floor = new FloorLayout(store); this.routing = new CableRouting(store, this.resolver, this.floor);
     // Outil de positionnement : cette chaîne de vues EST son hôte (implémente PositioningHost via DcInteract).
     this.posTool = new PositioningTool(this as unknown as PositioningHost);
+    this.doorTool = new DoorTool(this as unknown as DoorHost);
     // Garde headless : sans `document` (tests Node), projection/cadrage restent utilisables.
     if (typeof document === "undefined") return;
     this.toolbarEl = document.createElement("div");
@@ -248,6 +252,12 @@ export class DcBase {
   }
 
   protected setDirty(): void { this.host.setDirty?.(true); }
+
+  /* ---- DoorHost : services fournis au DoorTool (cf. DoorTool.ts) ---- */
+  /** Persiste la liste de portes d'une salle + marque le document modifié. */
+  async persistDoors(dcId: string, doors: any[]): Promise<void> { await this.store.update("datacenters", dcId, { doors }); this.setDirty(); }
+  /** Ouvre le formulaire d'édition d'une porte (délégué à l'hôte applicatif — optionnel). */
+  openDoorForm(dcId: string, doorId: string): void { this.host.openDoorForm?.(dcId, doorId); }
 
   protected btn(text: string, onClick: () => void, title?: string): HTMLButtonElement {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = text; if (title) b.title = title; b.onclick = onClick; return b;
@@ -538,7 +548,7 @@ export class DcBase {
       case "wp": { const w = s.get("waypoints", desc.id); sections = w ? this.waypointCtx(w) : null; break; }
       case "port": { const p = s.get("ports", desc.id); sections = p ? this.portCtx(p, s.cableOnPort(p.id)) : null; break; }
       case "room": { const d = s.get("datacenters", desc.id); sections = d ? this.roomCtx(d) : null; break; }   // clic droit sur le sol d'un DC
-      case "door": { const d = s.get("datacenters", desc.dcId); const dr = d && (d.doors || []).find((x: any) => x.id === desc.id); sections = (d && dr) ? this.doorCtx(d, dr) : null; break; }
+      case "door": { const d = s.get("datacenters", desc.dcId); const dr = d && (d.doors || []).find((x: any) => x.id === desc.id); sections = (d && dr) ? this.doorTool.ctx(d, dr) : null; break; }
     }
     // appel DIRECT (pas via `ctxMenu`, qui attend un vrai MouseEvent pour `stopPropagation`) : le moteur WebGL a
     // déjà filtré l'orbite via `_navMovedR` avant d'appeler ctxCb.

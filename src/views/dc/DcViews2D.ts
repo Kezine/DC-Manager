@@ -508,7 +508,7 @@ export class DcViews2D extends DcScene3D {
     };
     fill();
     if (draggable) g.addEventListener("pointerdown", (e: any) => this.onDoorPointerDown(e, dc, door, cur, room, fill));   // drag = Plan de salle (coords salle) ; en étage la salle est transformée → affichage seul
-    g.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.ctxMenu(e, this.doorCtx(dc, door)); });
+    g.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.ctxMenu(e, this.doorTool.ctx(dc, door)); });
     return g;
   }
   /** Glisser une porte LE LONG de son mur (met à jour `offset`, borné). `cur` = copie d'aperçu ; persiste au relâcher. */
@@ -529,7 +529,7 @@ export class DcViews2D extends DcScene3D {
     const up = async () => {
       document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       this.hideCote();
-      if (moved) await this.updateDoor(dc, door.id, { offset: cur.offset });
+      if (moved) await this.doorTool.update(dc, door.id, { offset: cur.offset });
     };
     document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }

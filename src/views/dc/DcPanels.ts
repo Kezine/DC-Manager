@@ -360,13 +360,13 @@ export class DcPanels extends DcViews2D {
         const lab = document.createElement("span"); lab.className = "grow"; lab.style.fontSize = "12px";
         lab.textContent = "Mur " + Doors.wallLabel(d.wall) + " · ouv. " + d.width_mm + " · passage " + Doors.freeWidth(d) + " mm";
         const bEdit = this.btn("Modifier", () => this.host.openDoorForm?.(dc.id, d.id));
-        const bDel = this.btn("✕", () => this.removeDoor(dc, d.id)); bDel.classList.add("btn-danger");
+        const bDel = this.btn("✕", () => this.doorTool.remove(dc, d.id)); bDel.classList.add("btn-danger");
         row.append(lab, bEdit, bDel); list.appendChild(row);
       });
       box.appendChild(list);
     }
     const acts = document.createElement("div"); acts.className = "dc-card-acts"; acts.style.marginTop = "6px";
-    DOOR_WALLS.forEach((w) => acts.appendChild(this.btn("＋ " + Doors.wallLabel(w), async () => { await this.addDoor(dc, w); this.renderSide(this.current()); }, "Ajouter une porte sur le mur " + Doors.wallLabel(w))));
+    DOOR_WALLS.forEach((w) => acts.appendChild(this.btn("＋ " + Doors.wallLabel(w), async () => { await this.doorTool.add(dc, w); this.renderSide(this.current()); }, "Ajouter une porte sur le mur " + Doors.wallLabel(w))));
     box.appendChild(acts);
     const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginTop = "4px"; hint.textContent = "Après ajout, glissez la porte le long de son mur ; clic droit / « Modifier » pour ses réglages.";
     box.appendChild(hint);

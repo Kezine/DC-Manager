@@ -19,8 +19,6 @@ import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import { DoorGeometry } from "../../geometry/DoorGeometry";
-import { Doors, type DoorWall } from "../../domain/Doors";
-import { Id } from "../../core/Id";
 import type { Frame } from "../../geometry/Positioning";
 import type { PosEntry, PosScene } from "./PositioningTool";
 import { Depths } from "../../registries/Depths";
@@ -452,29 +450,8 @@ export class DcInteract extends DcPanels {
     return secs;
   }
 
-  /* ---- PORTES de salle (value-objects stockés sur le datacenter) ---- */
-  /** Nouvelle porte par défaut (cf. `Doors.defaults`) sur le mur donné, centrée le long de ce mur. */
-  protected async addDoor(dc: any, wall: DoorWall = "top"): Promise<void> {
-    const wallLen = Doors.isVerticalWall(wall) ? dc.depth_mm : dc.width_mm;
-    const door = { id: Id.uid(), ...Doors.defaults(wall, wallLen) };
-    await this.store.update("datacenters", dc.id, { doors: [...(dc.doors || []), door] }); this.setDirty();
-    return door.id as any;
-  }
-  protected async updateDoor(dc: any, id: string, patch: Record<string, any>): Promise<void> {
-    await this.store.update("datacenters", dc.id, { doors: (dc.doors || []).map((d: any) => (d.id === id ? { ...d, ...patch } : d)) }); this.setDirty();
-  }
-  protected async removeDoor(dc: any, id: string): Promise<void> {
-    await this.store.update("datacenters", dc.id, { doors: (dc.doors || []).filter((d: any) => d.id !== id) }); this.setDirty();
-  }
-  /** Menu contextuel d'une porte : modifier (form) · basculer charnière / sens d'ouverture · supprimer. */
-  protected doorCtx(dc: any, door: any): CtxSection[] {
-    return [{ head: "🚪 Porte — passage " + Math.round(Doors.freeWidth(door)) + " mm", items: [
-      { label: "Modifier…", action: () => this.host.openDoorForm?.(dc.id, door.id) },
-      { label: "Charnière : " + (door.hinge === "left" ? "→ droite" : "→ gauche"), action: () => this.updateDoor(dc, door.id, { hinge: Doors.toggleHinge(door.hinge) }) },
-      { label: "Ouverture : " + (door.opening === "interior" ? "→ extérieur" : "→ intérieur"), action: () => this.updateDoor(dc, door.id, { opening: Doors.toggleOpening(door.opening) }) },
-      { label: "Supprimer la porte", danger: true, action: () => this.removeDoor(dc, door.id) },
-    ] }];
-  }
+  /* ---- PORTES de salle : CRUD + menu = DoorTool (cf. DoorTool.ts). Le rendu 2D / drag / posScene / carte
+         restent (transitoirement) dans la chaîne de vues et appellent `this.doorTool`. ---- */
 
   /** Menu contextuel du PERSONNAGE d'échelle (repère de vue) : pivoter · masquer. Aucune mutation du document. */
   protected figureCtx(): CtxSection[] {
@@ -754,7 +731,7 @@ export class DcInteract extends DcPanels {
         rects.push({ id: door.id, name: "🚪 " + (door.wall || "porte"), orient: 0, anchor: "center", rect: { cx, cy, hx, hy },
           commit: async (nx, ny) => {
             const off = DoorGeometry.clampOffset({ ...door, offset: onSide ? ny : nx }, { w: dc.width_mm, h: dc.depth_mm });
-            await this.updateDoor(dc, door.id, { offset: Math.round(off) });
+            await this.doorTool.update(dc, door.id, { offset: Math.round(off) });
           } });
       });
       return { frame, rects };
