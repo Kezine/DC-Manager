@@ -484,7 +484,7 @@ export class DcViews2D extends DcScene3D {
       g.appendChild(Dom.svg("path", { class: "dc-door-swing", d: seg.join(" ") }));
       // LISTEL = BUTÉES qui RENTRENT dans l'ouverture (côté ouverture, ⟂ au mur) : c'est le « stop » de la porte ;
       // elles réduisent le passage libre. Dessinées en « négatif » (bloc plein qui empiète sur l'ouverture).
-      const sw = gg.swing, dep = Math.max(cur.frame_mm || 0, 90);
+      const sw = gg.swing, dep = Math.max(cur.frame_mm || 0, 40);   // saillie = épaisseur du listel (« à l'intérieur » de l'ouverture, pas une profondeur arbitraire)
       const stopBlock = (pOpen: any, pClear: any) => Dom.svg("polygon", { class: "dc-door-frame", points: [pOpen, pClear, { x: pClear.x + sw.x * dep, y: pClear.y + sw.y * dep }, { x: pOpen.x + sw.x * dep, y: pOpen.y + sw.y * dep }].map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" ") });
       if ((cur.frame_mm || 0) > 0) { g.appendChild(stopBlock(gg.hinge, gg.clearHinge)); g.appendChild(stopBlock(gg.latch, gg.clearLatch)); }
       [gg.a, gg.b].forEach((p) => g.appendChild(Dom.svg("line", { class: "dc-door-jamb", x1: p.x, y1: p.y, x2: p.x + sw.x * dep, y2: p.y + sw.y * dep })));   // bords de l'ouverture (jambages)

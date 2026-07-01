@@ -9,6 +9,7 @@ import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { RackGeometry } from "../../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
+import type { DoorPt } from "../../../geometry/DoorGeometry";
 import { Normalize } from "../../../core/Normalize";
 import { EquipmentTypes } from "../../../registries/EquipmentTypes";
 import { Depths } from "../../../registries/Depths";
@@ -189,36 +190,58 @@ export class DcThreeScene extends DcThreeCamera {
     this.buildDoors(dc, group);   // portes collées aux murs (cadre/listel + vantail + passage)
   }
 
-  /** Portes de salle en 3D : cadre (2 jambages + linteau) + vantail OUVERT à 90°, debout sur les murs (coords salle
-      locales). Géométrie 2D de `DoorGeometry` EXTRUDÉE en hauteur. Cliquable (clic droit → édition). */
+  /** Portes de salle en 3D : porte FERMÉE (vantail plein sur le PASSAGE LIBRE, debout dans le plan du mur) + LISTEL
+      dessiné EN POINTILLÉ (le listel est « à l'intérieur » de l'ouverture : largeur = width, listel de chaque côté,
+      passage libre = width − 2·listel au milieu). Le DÉBATTEMENT (rayon) est projeté au SOL sur la couche `doorswing`,
+      pilotée par le MÊME toggle que les portes de baie (showDoorSwing). Cliquable (clic droit → édition). */
   protected buildDoors(dc: any, group: THREE.Group): void {
     const doors = dc.doors || []; if (!doors.length) return;
     const room = { w: dc.width_mm || 4000, h: dc.depth_mm || 3000 };
-    const frameCol = 0x9aa2ab, leafCol = 0xc6ccd2;
+    const leafCol = 0xc6ccd2;
     doors.forEach((door: any) => {
-      const g = DoorGeometry.geom(door, room), H = Math.max(100, door.height_mm || 2100), u = g.wallDir;
-      const alongWall = { x: Math.abs(u.x), y: Math.abs(u.y) };  // axe du mur (épaisseur du vantail)
+      const g = DoorGeometry.geom(door, room), H = Math.max(100, door.height_mm || 2100), sw = g.swing;
       const pick = { type: "door", dcId: dc.id, id: door.id };
-      // LISTEL = BUTÉES qui RENTRENT dans l'ouverture (côté ouverture, ⟂ au mur) : c'est le « stop » de la porte.
-      // Forme en ⊓ : 2 montants (charnière + loquet) sur toute la hauteur + un linteau en haut ; PAS de seuil au SOL.
-      const dep = Math.max(50, door.frame_mm || 40);   // saillie de la butée DANS l'ouverture
       const topThick = Math.max(80, door.frame_mm || 100);   // épaisseur du linteau (depuis le haut)
-      // bloc plein entre deux points de bord (le long du mur) et leur projection de `depth` dans l'ouverture (sens g.swing)
-      const stop = (pA: any, pB: any, depth: number, z0: number, z1: number, col: number) => {
-        const xs = [pA.x, pB.x, pA.x + g.swing.x * depth, pB.x + g.swing.x * depth];
-        const ys = [pA.y, pB.y, pA.y + g.swing.y * depth, pB.y + g.swing.y * depth];
-        this.localBox(group, Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), z0, z1, col, pick);
-      };
+      // --- PORTE FERMÉE : vantail plein remplissant le PASSAGE LIBRE (clearHinge → clearLatch), fin selon `swing`. ---
+      const th = 40;   // épaisseur du vantail
+      const lx = [g.clearHinge.x, g.clearLatch.x, g.clearHinge.x + sw.x * th, g.clearLatch.x + sw.x * th];
+      const ly = [g.clearHinge.y, g.clearLatch.y, g.clearHinge.y + sw.y * th, g.clearLatch.y + sw.y * th];
+      this.localBox(group, Math.min(...lx), Math.max(...lx), Math.min(...ly), Math.max(...ly), 0, H, leafCol, pick);
+      // --- LISTEL en POINTILLÉ : contour des 2 montants (largeur = listel) + linteau, dans le plan du mur. ---
       if ((door.frame_mm || 0) > 0) {
-        stop(g.hinge, g.clearHinge, dep, 0, H, frameCol);          // montant charnière (largeur = listel)
-        stop(g.latch, g.clearLatch, dep, 0, H, frameCol);          // montant loquet
-        stop(g.a, g.b, dep, H - topThick, H, frameCol);            // linteau (haut) — pas de sol
+        this.dashedLoop(group, [[g.hinge, 0], [g.clearHinge, 0], [g.clearHinge, H], [g.hinge, H]], pick);        // montant charnière
+        this.dashedLoop(group, [[g.latch, 0], [g.clearLatch, 0], [g.clearLatch, H], [g.latch, H]], pick);        // montant loquet
+        this.dashedLoop(group, [[g.a, H - topThick], [g.b, H - topThick], [g.b, H], [g.a, H]], pick);            // linteau (haut) — pas de sol
       }
-      // vantail ouvert 90° (panneau fin), entre le montant charnière et sa position ouverte
-      const lx = [g.clearHinge.x, g.leafOpen.x, g.clearHinge.x + alongWall.x * 40, g.leafOpen.x + alongWall.x * 40];
-      const ly = [g.clearHinge.y, g.leafOpen.y, g.clearHinge.y + alongWall.y * 40, g.leafOpen.y + alongWall.y * 40];
-      this.localBox(group, Math.min(...lx) - alongWall.x * 20, Math.max(...lx) + alongWall.x * 20, Math.min(...ly) - alongWall.y * 20, Math.max(...ly) + alongWall.y * 20, 0, H, leafCol, pick);
+      // --- DÉBATTEMENT (rayon) projeté au SOL — couche "doorswing" (même toggle que les portes de baie). ---
+      this.buildRoomDoorSwing(group, g);
     });
+  }
+
+  /** Boucle en POINTILLÉ (LineLoop tiretée) dans le plan du mur, à partir de points 2D salle + hauteur z.
+      Rend le LISTEL visible même porte fermée ; `pick` pour l'édition au clic droit. */
+  protected dashedLoop(group: THREE.Group, pts: [DoorPt, number][], pick: any): void {
+    const flat: number[] = [];
+    pts.forEach(([p, z]) => flat.push(p.x, p.y, z));
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(flat, 3));
+    const line = new THREE.LineLoop(geo, new THREE.LineDashedMaterial({ color: 0x9aa2ab, dashSize: 70, gapSize: 45, transparent: true, opacity: 0.9 }));
+    line.computeLineDistances(); line.userData = { pick }; group.add(line);
+  }
+
+  /** Débattement 3D d'une porte de SALLE : secteur rempli (quart de disque) projeté au sol (z≈1), centré sur
+      `clearHinge`, rayon = passage libre. Couche "doorswing" (non interactive) → basculée par showDoorSwing, comme
+      le débattement des portes de baie (buildDoorSwing). Même style visuel (remplissage translucide + contour). */
+  protected buildRoomDoorSwing(group: THREE.Group, g: any): void {
+    const Z = 1, arc = DoorGeometry.arcPoints(g, 20), cx = g.clearHinge.x, cy = g.clearHinge.y;
+    const fill: number[] = [];
+    for (let i = 0; i < arc.length - 1; i++) fill.push(cx, cy, Z, arc[i].x, arc[i].y, Z, arc[i + 1].x, arc[i + 1].y, Z);
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(fill, 3)); geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: this.theme.front, transparent: true, opacity: 0.16, emissive: 0x16314e, side: THREE.DoubleSide, depthWrite: false }));
+    mesh.userData = { layer: "doorswing" }; group.add(mesh);
+    const pts: number[] = [cx, cy, Z]; arc.forEach((p) => pts.push(p.x, p.y, Z));
+    const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    const loop = new THREE.LineLoop(bg, new THREE.LineBasicMaterial({ color: this.theme.front, transparent: true, opacity: 0.6 }));
+    loop.userData = { layer: "doorswing" }; group.add(loop);
   }
 
   /** Remplit le groupe des baies d'une salle ; renvoie la hauteur max (cadrage). */
