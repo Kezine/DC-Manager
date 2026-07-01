@@ -201,14 +201,22 @@ export class DcThreeScene extends DcThreeCamera {
     doors.forEach((door: any) => {
       const g = DoorGeometry.geom(door, room), H = Math.max(100, door.height_mm || 2100), sw = g.swing, fr = door.frame_mm || 0;
       const pick = { type: "door", dcId: dc.id, id: door.id };
-      // --- PORTE FERMÉE : vantail plein remplissant le PASSAGE LIBRE (clearHinge → clearLatch), fin selon `swing`. ---
+      // --- PORTE FERMÉE : vantail à la PLEINE TAILLE du formulaire (largeur `a→b` × hauteur `H`), fin selon `swing`.
+      //     Semi-transparent SANS écrire la profondeur (depthWrite:false) → laisse voir la réservation du passage au
+      //     travers, sans masquer le listel dans le tampon de profondeur. ---
       const th = 40;   // épaisseur du vantail
-      const lx = [g.clearHinge.x, g.clearLatch.x, g.clearHinge.x + sw.x * th, g.clearLatch.x + sw.x * th];
-      const ly = [g.clearHinge.y, g.clearLatch.y, g.clearHinge.y + sw.y * th, g.clearLatch.y + sw.y * th];
-      this.localBox(group, Math.min(...lx), Math.max(...lx), Math.min(...ly), Math.max(...ly), 0, H, leafCol, pick);
-      // --- LISTEL en POINTILLÉ = contour ⊓ du PASSAGE LIBRE : montants AUX BORDS DU PASSAGE (clearHinge / clearLatch,
-      //     ex. X5 et X25 pour 30 de large × listel 5), du SOL jusqu'à H − listel ; linteau horizontal à H − listel.
-      //     PAS de seuil au sol. Ce sont bien les bords INTÉRIEURS (passage), pas l'encadrement extérieur. ---
+      const lx = [g.a.x, g.b.x, g.a.x + sw.x * th, g.b.x + sw.x * th];
+      const ly = [g.a.y, g.b.y, g.a.y + sw.y * th, g.b.y + sw.y * th];
+      const x0 = Math.min(...lx), x1 = Math.max(...lx), y0 = Math.min(...ly), y1 = Math.max(...ly);
+      const leafGeo = new THREE.BoxGeometry(Math.max(1, x1 - x0), Math.max(1, y1 - y0), H);
+      const leaf = new THREE.Mesh(leafGeo, new THREE.MeshStandardMaterial({ color: leafCol, roughness: 0.6, metalness: 0.15, transparent: true, opacity: 0.5, depthWrite: false }));
+      leaf.position.set((x0 + x1) / 2, (y0 + y1) / 2, H / 2); leaf.renderOrder = 2; leaf.userData = { pick }; group.add(leaf);
+      const leafEdges = new THREE.LineSegments(new THREE.EdgesGeometry(leafGeo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 }));
+      leafEdges.position.copy(leaf.position); group.add(leafEdges);
+      // --- LISTEL en POINTILLÉ = RÉSERVATION du passage À L'INTÉRIEUR de la surface de la porte : contour ⊓ aux bords
+      //     du passage (clearHinge / clearLatch, ex. X5 et X25 pour 30 de large × listel 5), du SOL jusqu'à H − listel ;
+      //     linteau à H − listel. Toujours plus PETIT que la porte (le listel est la butée de fermeture). Occulté par
+      //     la géométrie de la pièce (depthTest normal), visible seulement au travers du vantail (depthWrite:false). ---
       if (fr > 0) {
         const zTop = Math.max(0, H - fr);
         this.dashedPath(group, [[g.clearHinge, 0], [g.clearHinge, zTop], [g.clearLatch, zTop], [g.clearLatch, 0]], pick);
@@ -219,12 +227,13 @@ export class DcThreeScene extends DcThreeCamera {
   }
 
   /** Polyligne OUVERTE en POINTILLÉ (⊓, pas de fermeture) dans le plan du mur, à partir de points 2D salle + hauteur z.
-      `depthTest:false` → le listel reste visible même « derrière » le vantail fermé. `pick` pour l'édition au clic droit. */
+      Test de profondeur NORMAL (occulté par les murs/baies) mais dessiné APRÈS le vantail (renderOrder) qui n'écrit pas
+      la profondeur → visible seulement AU TRAVERS de la porte, pas à travers toute la pièce. `pick` pour l'édition. */
   protected dashedPath(group: THREE.Group, pts: [DoorPt, number][], pick: any): void {
     const flat: number[] = [];
     pts.forEach(([p, z]) => flat.push(p.x, p.y, z));
     const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(flat, 3));
-    const line = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: 0x9aa2ab, dashSize: 70, gapSize: 45, transparent: true, opacity: 0.95, depthTest: false }));
+    const line = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: 0x9aa2ab, dashSize: 70, gapSize: 45, transparent: true, opacity: 0.95 }));
     line.computeLineDistances(); line.renderOrder = 3; line.userData = { pick }; group.add(line);
   }
 
