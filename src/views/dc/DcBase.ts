@@ -123,6 +123,11 @@ export class DcBase {
   protected _restoredKey: string | null = null;   // clé (fileId) dont l'état a déjà été restauré
   protected controlsEl: HTMLElement | null = null;   // overlay zoom / recentrage / points de vue (superposé au stage)
   protected floorRail: HTMLElement | null = null;     // vue Étage : rail de navigation rapide entre étages (flottant à gauche)
+  // Handlers GLOBAUX (window/document) mémorisés pour pouvoir les retirer dans `dispose()` — sinon une éventuelle
+  // ré-instanciation de la vue laisserait des handlers fantômes appelant `render()` sur une instance morte.
+  private _onWinResize: (() => void) | null = null;
+  private _onFullscreen: (() => void) | null = null;
+  private _onKeydown: ((e: KeyboardEvent) => void) | null = null;
 
 
 
@@ -158,7 +163,7 @@ export class DcBase {
       this.rowEl = row;
     }
     // remplir le viewport verticalement (sans déborder) ; recalcul au redimensionnement.
-    window.addEventListener("resize", () => {
+    this._onWinResize = () => {
       clearTimeout(this._resizeT);
       this._resizeT = setTimeout(() => {
         if (this.stage.offsetParent === null) return;
@@ -170,12 +175,14 @@ export class DcBase {
         this.fitHeight();
         if (!typing) this.render();
       }, 120);
-    });
+    };
+    window.addEventListener("resize", this._onWinResize);
     // entrée/sortie de plein écran → re-cadrer (la rangée change de taille)
-    document.addEventListener("fullscreenchange", () => { this.fitHeight(); this.render(); });
+    this._onFullscreen = () => { this.fitHeight(); this.render(); };
+    document.addEventListener("fullscreenchange", this._onFullscreen);
     // Mode mesure : ENTRÉE valide la mesure en cours (elle reste affichée) · ÉCHAP annule la mesure en cours.
     // Ignoré dans un champ de saisie ou sous un overlay (modale/dialogue) ouvert.
-    document.addEventListener("keydown", (e) => {
+    this._onKeydown = (e: KeyboardEvent) => {
       if (e.key !== "Escape" && e.key !== "Enter") return;
       const tg = e.target as HTMLElement | null;
       if (tg && (tg.isContentEditable || /^(input|textarea|select)$/i.test(tg.tagName))) return;
@@ -185,9 +192,23 @@ export class DcBase {
       if (!this.measure || !this.measure.active) return;
       e.preventDefault();
       if (e.key === "Enter") this.measureCommit(); else this.measureCancelCurrent();
-    });
+    };
+    document.addEventListener("keydown", this._onKeydown);
     this.buildControls();
     this.buildToolbar();
+  }
+
+  /** Libère les ressources de la vue : handlers GLOBAUX (window/document), timers débouncés et moteur 3D.
+      Actuellement la vue est un quasi-singleton (créée une fois ; les bascules de mode passent par un
+      `window.location.reload()` qui purge tout) → non appelé en pratique. Fourni pour rendre la classe HONNÊTE sur
+      ses ressources et SÛRE si elle venait à être ré-instanciée/démontée (sinon : handlers fantômes → `render()`
+      sur une instance morte). Cf. `DcThreeBase.dispose()` pour la libération GPU. */
+  dispose(): void {
+    if (this._onWinResize) { window.removeEventListener("resize", this._onWinResize); this._onWinResize = null; }
+    if (this._onFullscreen) { document.removeEventListener("fullscreenchange", this._onFullscreen); this._onFullscreen = null; }
+    if (this._onKeydown) { document.removeEventListener("keydown", this._onKeydown); this._onKeydown = null; }
+    clearTimeout(this._resizeT); clearTimeout(this._pvTO);
+    if (this._three) { this._three.dispose(); this._three = null; this._webglHost = null; }
   }
 
 

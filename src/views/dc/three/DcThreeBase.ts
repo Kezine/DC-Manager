@@ -250,7 +250,15 @@ export class DcThreeBase {
       if (el.parentElement) el.parentElement.removeChild(el);
       this.renderer = null;
     }
-    this.scene = null; this.camera = null; this.host_el = null; this._pivot = null;
+    // Le marqueur de pivot vit sous `scene` (PAS sous `content`) → non couvert par disposeContent : on libère son
+    // matériau ET sa texture (CanvasTexture propre) ici, sinon fuite GPU à chaque unmount/remount de la vue 3D.
+    if (this._pivot) {
+      this.scene?.remove(this._pivot);
+      const m: any = this._pivot.material;
+      if (m) { if (m.map) m.map.dispose(); m.dispose?.(); }
+      this._pivot = null;
+    }
+    this.scene = null; this.camera = null; this.host_el = null;
   }
 
   protected disposeContent(): void {
