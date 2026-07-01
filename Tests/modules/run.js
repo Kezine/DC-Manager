@@ -150,12 +150,21 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
       equipments: [{ id: "E1", name: "srv", rack_id: "R1", placement_mode: "rack" }, { id: "E2", rack_id: "R1" }],
       ports: [{ id: "P1", equipment_id: "E1" }, { id: "P2", equipment_id: "E1" }],
       aggregates: [{ id: "A1", equipment_id: "E1" }],
-      cables: [{ id: "C1", from_port_id: "P1", to_port_id: "P2" }],
+      cables: [
+        { id: "C1", from_port_id: "P1", to_port_id: "P2" },
+        // route traversant DEUX brosses de la baie R1 (+ un waypoint tiers "X") → doit être nettoyée EN UNE FOIS
+        { id: "C2", from_port_id: null, to_port_id: null, waypoint_ids: ["WB1", "X", "WB2"] },
+      ],
       ipAddresses: [{ id: "IP1", equipment_id: "E1" }],
       dhcpRanges: [{ id: "D1", server_id: "E1" }],
       spares: [{ id: "S1", assigned_equipment_id: "E1", status: "assigned" }],
       datacenters: [{ id: "DC1" }],
-      waypoints: [{ id: "W1", datacenter_id: "DC1" }],
+      waypoints: [
+        { id: "W1", datacenter_id: "DC1" },
+        // brosses MONTÉES dans R1 (rack_id) : la suppression de la baie doit les supprimer (invariant T1).
+        { id: "WB1", kind: "brush", datacenter_id: "DC1", rack_id: "R1", rack_u: 10 },
+        { id: "WB2", kind: "brush", datacenter_id: "DC1", rack_id: "R1", rack_u: 12 },
+      ],
     };
     const find = (coll, field, value) => (db[coll] || []).filter((o) => {
       const v = o[field];
@@ -170,6 +179,13 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const detachE1 = rackPlan.detaches.filter((d) => d.c === "equipments" && d.id === "E1");
     ck.eq(detachE1.some((d) => d.key === "rack_id" && d.value === null), true, "rack : équipement détaché (rack_id null)");
     ck.eq(detachE1.some((d) => d.key === "placement_mode" && d.value === "manual"), true, "rack : équipement repassé en manuel");
+    // brosses montées : SUPPRIMÉES avec la baie (sinon rack_id pend / invariant T1 bloque le nullage → doc invalide)
+    ck.eq(rackPlan.deletes.some((d) => d.c === "waypoints" && d.id === "WB1"), true, "rack : brosse montée WB1 supprimée");
+    ck.eq(rackPlan.deletes.some((d) => d.c === "waypoints" && d.id === "WB2"), true, "rack : brosse montée WB2 supprimée");
+    // route de câble : UN SEUL détachement waypoint_ids retirant les DEUX brosses d'un coup (pas d'écrasement)
+    const c2det = rackPlan.detaches.filter((d) => d.c === "cables" && d.id === "C2" && d.key === "waypoint_ids");
+    ck.eq(c2det.length, 1, "rack : câble touché → 1 seul détachement waypoint_ids (dédup, pas de dernier-gagne)");
+    ck.eq(JSON.stringify(c2det[0] && c2det[0].value), JSON.stringify(["X"]), "rack : les 2 brosses retirées de la route en une passe");
 
     // -- équipement : ports + agrégats supprimés, câble des ports supprimé, IP/DHCP détachés --
     const eqPlan = Cascade.plan("equipments", "E1", find, fetch);

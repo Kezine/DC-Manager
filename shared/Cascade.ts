@@ -48,6 +48,21 @@ export class Cascade {
     return out;
   }
 
+  /** Retire un ENSEMBLE de waypoints des ROUTES (`waypoint_ids`) des câbles ET faisceaux qui les référencent.
+      UN SEUL détachement par câble/faisceau touché, retirant TOUS les ids d'un coup : plusieurs détachements
+      sur le même `waypoint_ids` s'ÉCRASERAIENT (Store comme serveur fusionnent par clé — le dernier gagne, chacun
+      étant calculé sur la route ORIGINALE) et ne retireraient qu'un seul waypoint. On déduplique donc par câble. */
+  private static pruneWaypointsFromRoutes(find: Find, ids: Set<string>, detaches: CascadeDetach[]): void {
+    const cables = new Map<string, Record<string, any>>();
+    const bundles = new Map<string, Record<string, any>>();
+    for (const id of ids) {
+      for (const c of find("cables", "waypoint_ids", id)) cables.set(c.id, c);
+      for (const b of find("cableBundles", "waypoint_ids", id)) bundles.set(b.id, b);
+    }
+    for (const c of cables.values()) detaches.push({ c: "cables", id: c.id, key: "waypoint_ids", value: (c.waypoint_ids || []).filter((x: string) => !ids.has(x)) });
+    for (const b of bundles.values()) detaches.push({ c: "cableBundles", id: b.id, key: "waypoint_ids", value: (b.waypoint_ids || []).filter((x: string) => !ids.has(x)) });
+  }
+
   /** Règles de cascade par collection supprimée. */
   private static readonly SPEC: Record<string, CascadeRule> = {
     equipments: {
@@ -90,6 +105,16 @@ export class Cascade {
     racks: {
       delete: [{ coll: "rackItems", fk: "rack_id" }],
       detach: [{ coll: "equipments", fk: "rack_id", set: { rack_id: null, placement_mode: "manual" } }],
+      // Les BROSSES (waypoints kind:"brush") sont MONTÉES dans la baie (`rack_id` obligatoire — invariant T1
+      // « une brosse doit être montée dans une baie »). Supprimer la baie DOIT donc les supprimer AUSSI : sinon
+      // `rack_id` pend (V2 ref_missing) et l'invariant interdit de simplement le nullifier → document invalide.
+      // On nettoie en plus les routes de câbles/faisceaux qui traversaient ces brosses (`waypoint_ids`).
+      custom: (find, _fetch, id, deletes, detaches) => {
+        const mounted = find("waypoints", "rack_id", id);   // seules les brosses portent `rack_id`
+        if (!mounted.length) return;
+        for (const w of mounted) deletes.push({ c: "waypoints", id: w.id });
+        Cascade.pruneWaypointsFromRoutes(find, new Set(mounted.map((w) => w.id)), detaches);
+      },
     },
     portTypes: { detach: [{ coll: "ports", fk: "port_type_id" }] },
     cableTypes: { detach: [{ coll: "cables", fk: "cable_type_id" }, { coll: "cableBundles", fk: "cable_type_id" }] },
@@ -106,10 +131,8 @@ export class Cascade {
       detach: [{ coll: "networks", fk: "ip_network_id" }],
     },
     waypoints: {
-      custom: (find, _fetch, id, _deletes, detaches) => {   // retire l'id des routes (waypoint_ids) des câbles ET faisceaux
-        find("cables", "waypoint_ids", id).forEach((c) => detaches.push({ c: "cables", id: c.id, key: "waypoint_ids", value: (c.waypoint_ids || []).filter((x: string) => x !== id) }));
-        find("cableBundles", "waypoint_ids", id).forEach((b) => detaches.push({ c: "cableBundles", id: b.id, key: "waypoint_ids", value: (b.waypoint_ids || []).filter((x: string) => x !== id) }));
-      },
+      // retire l'id des routes (waypoint_ids) des câbles ET faisceaux (helper partagé avec la cascade `racks`).
+      custom: (find, _fetch, id, _deletes, detaches) => Cascade.pruneWaypointsFromRoutes(find, new Set([id]), detaches),
     },
   };
 
