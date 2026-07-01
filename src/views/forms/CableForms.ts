@@ -235,13 +235,13 @@ export class CableForms extends EquipmentForms {
       wpRouteHint.classList.remove("err");
       const r = store.cableRoute({ from_port_id: selPortA.value || null, to_port_id: selPortB.value || null, waypoint_ids: wpState.ids, bundle_id: bundleSel.value || null });
       if (!wpState.ids.length && !bundleSel.value) {
-        wpRouteHint.textContent = r.valid ? "Aucun point de passage — le câble reste dans sa salle." : "⚠ " + r.errors[0] + " — pour relier deux salles : ⏏ exit → (◎ pin d'étage…) → ⏏ exit.";
+        wpRouteHint.textContent = r.valid ? "Aucun point de passage — le câble reste dans sa salle." : "⚠ " + r.errors[0].message + " — pour relier deux salles : ⏏ exit → (◎ pin d'étage…) → ⏏ exit.";
         if (!r.valid) wpRouteHint.classList.add("err");
         return;
       }
       const sum = store.cableRouteSummary(r);
       if (r.valid) wpRouteHint.textContent = "Route : " + sum + " ✓";
-      else { wpRouteHint.textContent = "Route : " + (sum ? sum + " — " : "") + "⚠ " + r.errors[0]; wpRouteHint.classList.add("err"); }
+      else { wpRouteHint.textContent = "Route : " + (sum ? sum + " — " : "") + "⚠ " + r.errors[0].message; wpRouteHint.classList.add("err"); }
     };
     const syncWpOrder = () => {
       wpOrderBox.innerHTML = "";
@@ -263,10 +263,7 @@ export class CableForms extends EquipmentForms {
       cb.onchange = () => {
         if (cb.checked) {
           // EXIT TERMINAL : refuse d'ajouter un waypoint de salle après l'exit de cette salle (le câble doit sortir).
-          const bad = store.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [...wpState.ids, wp.id] }).errors.find((e: string) =>
-            e.includes("au milieu d'un tronçon hors salle") || e.includes("ré-entrée dans la salle quittée")
-            || e.includes("dans une autre salle que le segment courant") || e.includes("la sortie doit être un exit de la salle courante"));
-          if (bad) { cb.checked = false; Notify.toast("Un exit est TERMINAL pour sa salle — le câble doit sortir avant tout autre waypoint de salle.", "err"); return; }
+          if (store.routeHasRoomBreak({ from_port_id: null, to_port_id: null, waypoint_ids: [...wpState.ids, wp.id] })) { cb.checked = false; Notify.toast("Un exit est TERMINAL pour sa salle — le câble doit sortir avant tout autre waypoint de salle.", "err"); return; }
           if (!wpState.ids.includes(wp.id)) wpState.ids.push(wp.id);
         } else wpState.ids = wpState.ids.filter((x: string) => x !== wp.id);
         syncWpOrder(); syncRoute(); refresh(); syncStatus(true);
@@ -362,7 +359,7 @@ export class CableForms extends EquipmentForms {
       if (a && b && a === b) { hint.textContent = "Un câble ne peut pas relier un port à lui-même."; hint.classList.add("err"); return; }
       if (a && b && fa && fb && fa !== fb) { hint.textContent = "Familles différentes (« " + fa + " » vs « " + fb + " ») — incompatible : le câble restera un BROUILLON."; hint.classList.add("warn"); return; }
       const r = store.cableRoute(curDraft());
-      if (!r.valid) { hint.textContent = "Route invalide (" + r.errors[0] + ") → enregistré en « Brouillon »."; hint.classList.add("warn"); return; }
+      if (!r.valid) { hint.textContent = "Route invalide (" + r.errors[0].message + ") → enregistré en « Brouillon »."; hint.classList.add("warn"); return; }
       if (max === CABLE_STATUS_DRAFT) { hint.textContent = "Assignation incomplète → « Brouillon ». Renseignez les 2 ports + un type compatible pour le planifier."; hint.classList.add("warn"); return; }
       if (max === "planifie") { hint.textContent = "Équipement(s) non placé(s) → statut maximal « Planifié » ; « Câblé » attendra la pose des deux bouts."; return; }
       hint.textContent = "Assignation complète (« " + (fa || "?") + " ») et route cohérente. Vous pouvez définir le statut.";
@@ -415,11 +412,8 @@ export class CableForms extends EquipmentForms {
         [fromP, toP] = orientEnds(fromP, toP);
         // EXIT TERMINAL & cohérence de route : refuse d'enregistrer une route de waypoints incohérente.
         if (wpIds.length) {
-          const bad = store.cableRoute({ from_port_id: fromP, to_port_id: toP, waypoint_ids: wpIds, bundle_id: bnd ? bnd.id : null }).errors.find((e: string) =>
-            e.includes("au milieu d'un tronçon hors salle") || e.includes("ré-entrée dans la salle quittée")
-            || e.includes("dans une autre salle que le segment courant") || e.includes("la sortie doit être un exit de la salle courante")
-            || e.includes("doit être ENTRE deux exits") || e.includes("exit non appairé"));
-          if (bad) { Notify.toast("Route invalide : " + bad, "err"); return false; }
+          const bad = store.routeStructuralError({ from_port_id: fromP, to_port_id: toP, waypoint_ids: wpIds, bundle_id: bnd ? bnd.id : null });
+          if (bad) { Notify.toast("Route invalide : " + bad.message, "err"); return false; }
         }
         const max = store.cableMaxStatus({ from_port_id: fromP, to_port_id: toP, cable_type_id: ctId, waypoint_ids: wpIds, bundle_id: bnd ? bnd.id : null });
         let status = statusSel.value;
@@ -472,10 +466,7 @@ export class CableForms extends EquipmentForms {
       const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = wpState.ids.includes(wp.id);
       cb.onchange = () => {
         if (cb.checked) {   // EXIT TERMINAL : refuse un waypoint de salle après l'exit de cette salle
-          const bad = store.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [...wpState.ids, wp.id] }).errors.find((e: string) =>
-            e.includes("au milieu d'un tronçon hors salle") || e.includes("ré-entrée dans la salle quittée")
-            || e.includes("dans une autre salle que le segment courant") || e.includes("la sortie doit être un exit de la salle courante"));
-          if (bad) { cb.checked = false; Notify.toast("Un exit est TERMINAL pour sa salle — le câble doit sortir.", "err"); return; }
+          if (store.routeHasRoomBreak({ from_port_id: null, to_port_id: null, waypoint_ids: [...wpState.ids, wp.id] })) { cb.checked = false; Notify.toast("Un exit est TERMINAL pour sa salle — le câble doit sortir.", "err"); return; }
           if (!wpState.ids.includes(wp.id)) wpState.ids.push(wp.id);
         } else wpState.ids = wpState.ids.filter((x: string) => x !== wp.id);
         renderOrder();

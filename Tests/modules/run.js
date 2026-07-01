@@ -552,6 +552,17 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     // exit non appairé → invalide
     r = s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [exitA.id] });
     ck(!r.valid, "exit non appairé → invalide");
+    // -- CODES STABLES d'erreur + helpers (les appelants réagissent au code, PAS au libellé) --
+    ck.eq(s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [oob.id] }).errors[0].code, "floor_outside", "code : pin d'étage hors tronçon → floor_outside");
+    ck.eq(r.errors.some((e) => e.code === "exit_unpaired"), true, "code : exit seul → exit_unpaired");
+    // routeHasRoomBreak : waypoint de salle APRÈS l'exit de sa salle (exit terminal) → rupture de cohérence
+    ck.eq(s.routeHasRoomBreak({ from_port_id: null, to_port_id: null, waypoint_ids: [exitA.id, dcWpA.id] }), true, "routeHasRoomBreak : wp de salle après son exit → true");
+    ck.eq(s.routeHasRoomBreak({ from_port_id: pA1, to_port_id: pA2, waypoint_ids: [dcWpA.id] }), false, "routeHasRoomBreak : route intra-salle cohérente → false");
+    ck.eq(s.routeHasRoomBreak({ from_port_id: null, to_port_id: null, waypoint_ids: [exitA.id] }), false, "routeHasRoomBreak : exit non appairé n'est PAS un room break (toléré au fil de l'eau)");
+    // routeStructuralError : exit non appairé = STRUCTUREL (bloque l'enregistrement) ; 2 salles sans exit = incomplétude (brouillon OK)
+    const se = s.routeStructuralError({ from_port_id: null, to_port_id: null, waypoint_ids: [exitA.id] });
+    ck.eq(se && se.code, "exit_unpaired", "routeStructuralError : exit non appairé → structurel");
+    ck.eq(s.routeStructuralError({ from_port_id: pA1, to_port_id: pB1, waypoint_ids: [] }), null, "routeStructuralError : ports 2 salles sans exit = incomplétude, PAS structurel");
     // résumé lisible
     const okRoute = s.cableRoute({ from_port_id: pA1, to_port_id: pB1, waypoint_ids: [exitA.id, oob.id, exitB.id] });
     ck(s.cableRouteSummary(okRoute).indexOf("Salle A") >= 0 && s.cableRouteSummary(okRoute).indexOf("ét. 1") >= 0, "cableRouteSummary mentionne Salle A et ét. 1");
@@ -878,6 +889,11 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const snapAlign = Positioning.snapCenter(A, 3103, 1000, frame, [A, C], 0, 9);
     approx(snapAlign.cx, 3100, "snapCenter : bord gauche de A aligné sur le bord gauche de C");
     ck.eq(snapAlign.snapX, 2800, "snapCenter : ligne accrochée = bord gauche de C (2800)");
+    // accrochage DÉTERMINISTE à égalité : bord équidistant du mur 0 ET d'un bord de rect → la 1re ligne (mur) gagne.
+    const D = { cx: 300, cy: 1000, hx: 200, hy: 500 };   // bord gauche de D = 100
+    const tie = Positioning.snapCenter(A, 350, 1000, frame, [A, D], 0, 60);   // bord gauche = 50 : à 50 du mur 0 ET du bord 100
+    ck.eq(tie.snapX, 0, "snapCenter : égalité mur/bord → le mur (1re ligne) l'emporte (déterministe)");
+    approx(tie.cx, 300, "snapCenter : accroché au mur 0 (cx=300)");
     // orientation 90 : hx/hy permutés en amont (responsabilité de la couche vue) — on vérifie juste le calcul de coins
     const R90 = { cx: 0, cy: 0, hx: 500, hy: 300 };   // ex. rack 600×1000 tourné à 90°
     ck.eq(JSON.stringify(Positioning.corners(R90).TR), JSON.stringify({ x: 500, y: -300 }), "corners d'un rect permuté (orientation 90 en amont)");
@@ -918,6 +934,13 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const gl = DoorGeometry.geom(dl, room);
     ck.eq(JSON.stringify(gl.a), JSON.stringify({ x: 0, y: 1500 }), "mur gauche : ouverture le long de y");
     ck(Math.abs(gl.leafOpen.x - gl.clear) < 1e-6, "mur gauche intérieur : vantail balaie vers +x (dans la salle)");
+    // listel borné à [0, demi-largeur] et réutilisé partout (clear + inset des extrémités du passage)
+    const gNeg = DoorGeometry.geom({ ...d, frame_mm: -30 }, room);   // frame négatif → 0
+    approx(gNeg.clear, 900, "listel négatif → borné à 0 (passage = pleine largeur)");
+    ck.eq(JSON.stringify(gNeg.clearHinge), JSON.stringify(gNeg.hinge), "listel négatif → aucun inset (clearHinge = hinge)");
+    const gBig = DoorGeometry.geom({ ...d, frame_mm: 999999 }, room);   // frame > w/2 (=450)
+    approx(gBig.clear, 0, "listel > demi-largeur → passage borné à 0 (jamais négatif)");
+    approx(Math.hypot(gBig.clearHinge.x - g.hinge.x, gBig.clearHinge.y - g.hinge.y), 450, "listel surdimensionné borné à la demi-largeur (extrémités non croisées)");
   }
 
   console.log("\n• ImageStore : helpers purs (dataUrl ↔ Blob · bundle .nmfb)");
@@ -1187,6 +1210,10 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const coerced = Changeset.coerce({ collections: ["racks", 42, "cables"], meta: 1, images: 0 });
     ck.eq(JSON.stringify(coerced.collections), JSON.stringify(["racks", "cables"]), "coerce : collections filtrées (non-strings retirées)");
     ck.eq(coerced.meta, true, "coerce : meta coercé en booléen");
+    // prédicat INJECTÉ (garde `shared/` auto-suffisant) : filtre les collections inconnues
+    const filtered = Changeset.coerce({ collections: ["racks", "bidon", "cables"] }, (c) => c === "racks" || c === "cables");
+    ck.eq(JSON.stringify(filtered.collections), JSON.stringify(["racks", "cables"]), "coerce : collection inconnue retirée via prédicat");
+    ck.eq(Changeset.coerce({ collections: ["racks", "bidon"] }).collections.length, 2, "coerce : sans prédicat → aucun filtre (compat)");
     // fusion : union des collections, OU des drapeaux
     const merged = Changeset.merge(
       { full: false, collections: ["racks"], meta: false, images: true },

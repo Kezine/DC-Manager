@@ -661,10 +661,7 @@ export class DcInteract extends DcPanels {
     // EXIT TERMINAL : un exit FERME sa salle au niveau de la route → interdit d'ajouter ensuite un waypoint de cette
     // salle (le câble DOIT sortir). On éprouve la route prospective et on rejette les violations de cohérence salle.
     const probe = { from_port_id: this.routeBuild.fromPortId, to_port_id: null, waypoint_ids: [...this.routeBuild.wpIds, wpId] };
-    const bad = this.store.cableRoute(probe).errors.find((e) =>
-      e.includes("au milieu d'un tronçon hors salle") || e.includes("ré-entrée dans la salle quittée")
-      || e.includes("dans une autre salle que le segment courant") || e.includes("la sortie doit être un exit de la salle courante"));
-    if (bad) { Notify.toast("Un exit est TERMINAL pour sa salle — le câble doit sortir avant tout autre waypoint de salle.", "err"); return; }
+    if (this.store.routeHasRoomBreak(probe)) { Notify.toast("Un exit est TERMINAL pour sa salle — le câble doit sortir avant tout autre waypoint de salle.", "err"); return; }
     this.routeBuild.wpIds.push(wpId); this.render();
   }
 

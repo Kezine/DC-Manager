@@ -19,6 +19,28 @@ import type { ValidationError, EntityFetcher, ChildFinder } from "../../shared/D
 const COLLECTIONS = EntityRegistry.COLLECTIONS;
 const ENTITY_CLASSES = EntityRegistry.CLASSES;
 
+/** Codes STABLES des erreurs de route de câble (`Store.cableRoute`). Le libellé (`message`) peut être reformulé
+    librement ; les appelants qui RÉAGISSENT à une erreur précise s'appuient sur le `code`, jamais sur le texte. */
+export type RouteErrorCode =
+  | "floor_outside"     // pin d'étage hors d'un tronçon inter-salles (entre deux exits)
+  | "unplaced"          // waypoint non posé dans une salle
+  | "room_wp_outside"   // waypoint de salle au milieu d'un tronçon hors-salle
+  | "wrong_room"        // waypoint de salle dans une autre salle que le segment courant
+  | "exit_wrong_room"   // exit qui n'est pas de la salle courante
+  | "exit_reentry"      // exit ré-entrant dans la salle tout juste quittée
+  | "exit_unpaired"     // exit ouvrant un tronçon jamais refermé
+  | "portA_room"        // port A hors de la salle où la route commence
+  | "portB_room"        // port B hors de la salle où la route finit
+  | "ports_split";      // deux ports dans deux salles sans exits pour les relier
+export interface RouteError { code: RouteErrorCode; message: string }
+/** Sous-ensemble « EXIT TERMINAL » (cohérence de salle) : un exit ferme sa salle → tout waypoint/exit de salle
+    mal placé ensuite viole la route. Sert à refuser l'ajout d'un waypoint au fil de l'eau (UI routage + formulaire). */
+const ROUTE_ROOM_BREAK_CODES: ReadonlySet<RouteErrorCode> = new Set<RouteErrorCode>(["room_wp_outside", "wrong_room", "exit_wrong_room", "exit_reentry"]);
+/** Erreurs STRUCTURELLES (grammaire des tronçons) = ruptures de salle + pin d'étage hors tronçon + exit non
+    appairé. Elles interdisent l'enregistrement MÊME en brouillon (route mal formée), contrairement aux erreurs
+    d'INCOMPLÉTUDE (ports/bouts pas encore posés) qui restent tolérées en brouillon. Sur-ensemble des « room break ». */
+const ROUTE_STRUCTURAL_CODES: ReadonlySet<RouteErrorCode> = new Set<RouteErrorCode>([...ROUTE_ROOM_BREAK_CODES, "floor_outside", "exit_unpaired"]);
+
 /** Disposition de graphe NOMMÉE (positions des nœuds). */
 export interface GraphLayout {
   id: string; name: string; positions: Record<string, any>;
@@ -667,44 +689,59 @@ export class Store {
 
   /** Analyse de la route (waypoint_ids EFFECTIFS, ordonnés A→B) : grammaire + cohérence des bouts posés.
       → { steps[{wp,type,seg}], errors[], valid, hasExits, startDc, endDc, dcA, dcB }. Pure lecture. */
-  cableRoute(cable: any): { steps: any[]; errors: string[]; valid: boolean; hasExits: boolean; startDc: string | null; endDc: string | null; dcA: string | null; dcB: string | null } {
+  cableRoute(cable: any): { steps: any[]; errors: RouteError[]; valid: boolean; hasExits: boolean; startDc: string | null; endDc: string | null; dcA: string | null; dcB: string | null } {
     const wps = this.effectiveWaypointIds(cable).map((id) => this.get("waypoints", id)).filter(Boolean);
-    const errors: string[] = [], steps: any[] = [];
+    const errors: RouteError[] = [], steps: any[] = [];
+    const err = (code: RouteErrorCode, message: string) => { errors.push({ code, message }); };
     let cur: string | null = null, outside = false, exitFrom: string | null = null, startDc: string | null = null, exits = 0, seg = -1;
     wps.forEach((wp) => {
       const nm = wp.name || "(waypoint)";
       if (Waypoint.isFloorLevel(wp)) {   // pin d'ÉTAGE (ex-OOB) : doit être ENTRE deux exits
-        if (!outside) errors.push("« " + nm + " » (pin d'étage) doit être ENTRE deux exits");
+        if (!outside) err("floor_outside", "« " + nm + " » (pin d'étage) doit être ENTRE deux exits");
         steps.push({ wp, type: "floor", seg: outside ? seg : -1 });
         return;
       }
       const t = Waypoint.typeOf(wp);
-      if (!this.waypointIsPlaced(wp)) { errors.push("« " + nm + " » n'est pas posé dans une salle"); steps.push({ wp, type: t, seg: -1 }); return; }
+      if (!this.waypointIsPlaced(wp)) { err("unplaced", "« " + nm + " » n'est pas posé dans une salle"); steps.push({ wp, type: t, seg: -1 }); return; }
       const room = wp.datacenter_id;
       if (t === "datacenter") {
-        if (outside) errors.push("« " + nm + " » (waypoint de salle) au milieu d'un tronçon hors salle");
+        if (outside) err("room_wp_outside", "« " + nm + " » (waypoint de salle) au milieu d'un tronçon hors salle");
         else if (cur == null) { cur = room; if (startDc == null) startDc = room; }
-        else if (room !== cur) errors.push("« " + nm + " » est dans une autre salle que le segment courant");
+        else if (room !== cur) err("wrong_room", "« " + nm + " » est dans une autre salle que le segment courant");
       } else {   // exit
         exits++;
         if (!outside) {   // SORTIE de la salle courante
           if (cur == null) { cur = room; if (startDc == null) startDc = room; }
-          if (room !== cur) errors.push("exit « " + nm + " » : la sortie doit être un exit de la salle courante");
+          if (room !== cur) err("exit_wrong_room", "exit « " + nm + " » : la sortie doit être un exit de la salle courante");
           outside = true; exitFrom = cur; cur = null; seg++;
         } else {          // ENTRÉE dans une autre salle
-          if (room === exitFrom) errors.push("exit « " + nm + " » : ré-entrée dans la salle quittée — appariez avec un exit d'une AUTRE salle");
+          if (room === exitFrom) err("exit_reentry", "exit « " + nm + " » : ré-entrée dans la salle quittée — appariez avec un exit d'une AUTRE salle");
           cur = room; outside = false; exitFrom = null;
         }
       }
       steps.push({ wp, type: t, seg: -1 });
     });
-    if (outside) errors.push("exit non appairé — ajoutez l'exit d'une autre salle pour fermer le tronçon");
+    if (outside) err("exit_unpaired", "exit non appairé — ajoutez l'exit d'une autre salle pour fermer le tronçon");
     const endDc = outside ? null : cur;
     const dcA = this.cableEndDcId(cable, "A"), dcB = this.cableEndDcId(cable, "B");
-    if (dcA && startDc && dcA !== startDc) errors.push("le port A n'est pas dans la salle où la route commence");
-    if (dcB && endDc && dcB !== endDc) errors.push("le port B n'est pas dans la salle où la route finit");
-    if (!exits && dcA && dcB && dcA !== dcB) errors.push("ports dans deux salles différentes — la route doit sortir par un exit de chaque salle");
+    if (dcA && startDc && dcA !== startDc) err("portA_room", "le port A n'est pas dans la salle où la route commence");
+    if (dcB && endDc && dcB !== endDc) err("portB_room", "le port B n'est pas dans la salle où la route finit");
+    if (!exits && dcA && dcB && dcA !== dcB) err("ports_split", "ports dans deux salles différentes — la route doit sortir par un exit de chaque salle");
     return { steps, errors, valid: !errors.length, hasExits: exits > 0, startDc, endDc, dcA, dcB };
+  }
+
+  /** La route contient-elle une violation de COHÉRENCE DE SALLE (« exit terminal ») ? Un exit ferme sa salle → un
+      waypoint/exit de salle mal placé ensuite casse la route. Testé sur les CODES stables (pas le libellé) → sert à
+      refuser l'ajout d'un waypoint au fil de l'eau (UI routage + formulaire câble), sans couplage fragile au texte. */
+  routeHasRoomBreak(cable: any): boolean {
+    return this.cableRoute(cable).errors.some((e) => ROUTE_ROOM_BREAK_CODES.has(e.code));
+  }
+
+  /** Première erreur STRUCTURELLE de route (cf. `ROUTE_STRUCTURAL_CODES` : cohérence de salle + pin d'étage hors
+      tronçon + exit non appairé), ou null. Ces erreurs interdisent l'enregistrement même en brouillon (route mal
+      formée) ; on renvoie l'erreur COMPLÈTE pour pouvoir afficher son `message`. */
+  routeStructuralError(cable: any): RouteError | null {
+    return this.cableRoute(cable).errors.find((e) => ROUTE_STRUCTURAL_CODES.has(e.code)) || null;
   }
 
   /** Contrainte de salle d'un BOUT ("A"|"B"), évaluée SANS son port : { dcId, onlyUnplaced, route }. */
