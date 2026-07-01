@@ -1460,6 +1460,23 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     }
   }
 
+  console.log("\n• serveur : PUT /snapshot valide le document COMPLET (autorité — le semis de catalogues doit passer)");
+  {
+    // Simule EXACTEMENT la validation serveur du snapshot (api.ts `snapshot`) sur un NOUVEAU document : lecteur
+    // d'entité + chercheur d'enfants adossés au snapshot lui-même. GARDE-FOU : la création de document
+    // (newDocument → PUT /snapshot) ne doit JAMAIS être rejetée par la validation (catalogues semés = valides).
+    const s = await makeStore();   // newDocument() → sème les catalogues
+    const snap = s.toJSON();
+    const byId = new Map();
+    for (const c of SharedSchema.COLLECTIONS) { const m = new Map(); for (const r of (snap[c] || [])) if (r && r.id) m.set(String(r.id), r); byId.set(c, m); }
+    const fetch = (c, id) => (byId.get(c) && byId.get(c).get(String(id))) || null;
+    const find = (c, fk, pid) => (snap[c] || []).filter((r) => { const v = r ? r[fk] : undefined; return Array.isArray(v) ? v.includes(pid) : v === pid; });
+    const errs = [];
+    for (const c of SharedSchema.COLLECTIONS) for (const rec of (snap[c] || [])) errs.push(...Validation.DataValidator.normalizeAndValidate(c, rec, fetch, find).errors);
+    for (const c of SharedSchema.COLLECTIONS) for (const rec of (snap[c] || [])) errs.push(...Validation.DataValidator.validateDependents(c, rec, find, fetch));
+    ck.eq(errs.length, 0, "snapshot d'un nouveau document (catalogues semés) → 0 erreur" + (errs.length ? " : " + JSON.stringify(errs.slice(0, 3)) : ""));
+  }
+
   console.log("\n• shared : intégrité référentielle (V2 — FK + conscience du lot)");
   {
     // lecteur d'entité simulé : renvoie un record pour les id « existants », null sinon (subsume « existe ? »).

@@ -243,8 +243,42 @@ export class Api {
     try { this.repoOf(req).transact({ ...body, creates, updates }, this.revOf(req)); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
+  /** Remplacement COMPLET du document (import `.json`). Comme `/transact` et le CRUD, le serveur fait AUTORITÉ :
+      on normalise + valide CHAQUE enregistrement avant d'écrire, sinon un export corrompu/forgé injecterait des
+      données invalides. Particularité du snapshot : c'est un remplacement TOTAL → les FK doivent se résoudre DANS
+      le snapshot lui-même (la base courante va être écrasée), pas dans le dépôt. On adosse donc lecteur d'entité
+      et chercheur d'enfants au CONTENU du snapshot. Le moindre échec rejette TOUT l'import (atomicité). */
   private snapshot: RequestHandler = (req, res) => {
-    try { this.repoOf(req).replaceSnapshot(req.body || {}, this.revOf(req)); res.status(204).end(); }
+    const snap: any = req.body || {};
+    // Index par id (par collection) → lecteur d'entité O(1) sur le snapshot (intégrité référentielle V2 + V5).
+    const byId = new Map<string, Map<string, Record<string, any>>>();
+    for (const c of Schema.COLLECTIONS) {
+      if (!Array.isArray(snap[c])) continue;
+      const m = new Map<string, Record<string, any>>();
+      for (const r of snap[c]) if (r && r.id) m.set(String(r.id), r);
+      byId.set(c, m);
+    }
+    const fetch: EntityFetcher = (collection, id) => byId.get(collection)?.get(String(id)) || null;
+    // Chercheur d'enfants (dépendance inverse V5b / portée V6) : scan du snapshot, appartenance pour les champs tableaux.
+    const find: ChildFinder = (collection, fkField, parentId) => (Array.isArray(snap[collection]) ? snap[collection] : []).filter((r: any) => {
+      const v = r ? r[fkField] : undefined;
+      return Array.isArray(v) ? v.includes(parentId) : v === parentId;
+    });
+    const errors: ValidationError[] = [];
+    const out: Record<string, any> = {};
+    if (snap.meta) out.meta = snap.meta;
+    for (const c of Schema.COLLECTIONS) {
+      if (!Array.isArray(snap[c])) continue;
+      out[c] = snap[c].map((rec: any) => {
+        const { record, errors: errs } = DataValidator.normalizeAndValidate(c, rec || {}, fetch, find);
+        errors.push(...errs);
+        return record;
+      });
+    }
+    // V5b : cohérence enfants ⇄ parent AU SEIN du snapshot normalisé (ex. adresse ∈ CIDR de son réseau).
+    for (const c of Schema.COLLECTIONS) for (const rec of (out[c] || [])) errors.push(...DataValidator.validateDependents(c, rec, find, fetch));
+    if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return; }
+    try { this.repoOf(req).replaceSnapshot(out, this.revOf(req)); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
 
