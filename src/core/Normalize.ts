@@ -1,4 +1,5 @@
 import { RACK_ORIENTATIONS } from "../domain/constants";
+import { DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DOOR_DEFAULT_HEIGHT_MM, DOOR_DEFAULT_FRAME_MM } from "../domain/Doors";
 import { Id } from "./Id";
 
 /** Porte de rack normalisée (value-object).
@@ -56,14 +57,13 @@ export class Normalize {
       l'intérieur, sur le mur haut). L'id est conservé s'il existe, sinon généré. */
   static dcDoors(v: unknown): DcDoor[] {
     if (!Array.isArray(v)) return [];
-    const walls = ["left", "right", "top", "bottom"];
     return v.filter((d: unknown): d is any => !!d && typeof d === "object").map((d: any) => ({
       id: (typeof d.id === "string" && d.id) ? d.id : Id.uid(),
-      wall: walls.includes(d.wall) ? d.wall : "top",
+      wall: (DOOR_WALLS as readonly string[]).includes(d.wall) ? d.wall : "top",
       offset: Math.max(0, Math.round(+d.offset || 0)),
-      width_mm: Math.max(100, Math.round(+d.width_mm || 900)),
-      height_mm: Math.max(100, Math.round(+d.height_mm || 2100)),
-      frame_mm: Math.max(0, Math.round(+d.frame_mm || 40)),
+      width_mm: Math.max(100, Math.round(+d.width_mm || DOOR_DEFAULT_WIDTH_MM)),
+      height_mm: Math.max(100, Math.round(+d.height_mm || DOOR_DEFAULT_HEIGHT_MM)),
+      frame_mm: Math.max(0, Math.round(+d.frame_mm || DOOR_DEFAULT_FRAME_MM)),
       hinge: (d.hinge === "right") ? "right" : "left",
       opening: (d.opening === "exterior") ? "exterior" : "interior",
     }));

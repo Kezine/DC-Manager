@@ -59,6 +59,7 @@ const { DatacenterView } = D("views/DatacenterView.js");
 const { FloorLayout } = D("geometry/FloorLayout.js");
 const { Positioning } = D("geometry/Positioning.js");
 const { DoorGeometry } = D("geometry/DoorGeometry.js");
+const { Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM } = D("domain/Doors.js");
 const { ImageStore } = D("data/ImageStore.js");
 const { FaceImage } = D("models/index.js");
 const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
@@ -959,6 +960,26 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     approx(arcR[0].y, gr2.clearLatch.y, "arc mur droit démarre au vantail FERMÉ (y)");
     approx(arcR[8].x, gr2.leafOpen.x, "arc mur droit finit au vantail OUVERT (x)");
     approx(arcR[8].y, gr2.leafOpen.y, "arc mur droit finit au vantail OUVERT (y)");
+  }
+
+  console.log("\n• Doors : domaine des portes de salle (valeurs canoniques, libellés, défauts, règles pures)");
+  {
+    ck.eq(Doors.wallLabel("top"), "avant", "wallLabel(top) = avant");
+    ck.eq(Doors.wallLabel("bottom"), "arrière", "wallLabel(bottom) = arrière");
+    ck.eq(Doors.wallLabel("inconnu"), "inconnu", "wallLabel : mur inconnu → renvoyé tel quel");
+    ck.eq(Doors.isVerticalWall("left"), true, "isVerticalWall(left) = true");
+    ck.eq(Doors.isVerticalWall("top"), false, "isVerticalWall(top) = false");
+    ck.eq(Doors.freeWidth({ width_mm: 900, frame_mm: 40 }), 820, "freeWidth = width − 2·frame");
+    ck.eq(Doors.freeWidth({ width_mm: 60, frame_mm: 40 }), 0, "freeWidth borné à 0 (listel > demi-largeur)");
+    ck.eq(Doors.toggleHinge("left"), "right", "toggleHinge(left) = right");
+    ck.eq(Doors.toggleOpening("interior"), "exterior", "toggleOpening(interior) = exterior");
+    // defaults : porte centrée le long du mur, dimensions par défaut, SANS id
+    const def = Doors.defaults("top", 6000);
+    ck.eq(def.offset, 3000, "defaults : offset centré (wallLen/2)");
+    ck.eq(def.width_mm, DOOR_DEFAULT_WIDTH_MM, "defaults : largeur par défaut");
+    ck.eq(def.hinge, "left", "defaults : charnière gauche");
+    ck.eq("id" in def, false, "defaults : SANS id (ajouté par l'appelant)");
+    ck.eq(DOOR_WALLS.length, 4, "DOOR_WALLS : 4 murs");
   }
 
   console.log("\n• ImageStore : helpers purs (dataUrl ↔ Blob · bundle .nmfb)");

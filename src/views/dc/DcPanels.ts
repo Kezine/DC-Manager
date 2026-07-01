@@ -25,6 +25,7 @@ import { Format } from "../../core/Format";
 import { Text } from "../../core/Text";
 import { Waypoint } from "../../models/Waypoint";
 import { CableStatuses } from "../../domain/CableStatuses";
+import { Doors, DOOR_WALLS } from "../../domain/Doors";
 import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
 import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
 import type { Vec3, Drawable, DatacenterHost } from "./shared";
@@ -348,7 +349,6 @@ export class DcPanels extends DcViews2D {
 
   /* ---- carte PORTES (value-objects sur le datacenter) — vue Plan de salle ---- */
   protected doorsCard(dc: any): HTMLElement {
-    const wallLbl: Record<string, string> = { top: "avant", bottom: "arrière", left: "gauche", right: "droit" };
     const box = document.createElement("div"); box.className = "dc-card";
     const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Portes"; box.appendChild(t);
     const doors = dc.doors || [];
@@ -358,7 +358,7 @@ export class DcPanels extends DcViews2D {
       doors.forEach((d: any) => {
         const row = document.createElement("div"); row.className = "dc-rack-row";
         const lab = document.createElement("span"); lab.className = "grow"; lab.style.fontSize = "12px";
-        lab.textContent = "Mur " + (wallLbl[d.wall] || d.wall) + " · ouv. " + d.width_mm + " · passage " + Math.max(0, d.width_mm - 2 * (d.frame_mm || 0)) + " mm";
+        lab.textContent = "Mur " + Doors.wallLabel(d.wall) + " · ouv. " + d.width_mm + " · passage " + Doors.freeWidth(d) + " mm";
         const bEdit = this.btn("Modifier", () => this.host.openDoorForm?.(dc.id, d.id));
         const bDel = this.btn("✕", () => this.removeDoor(dc, d.id)); bDel.classList.add("btn-danger");
         row.append(lab, bEdit, bDel); list.appendChild(row);
@@ -366,7 +366,7 @@ export class DcPanels extends DcViews2D {
       box.appendChild(list);
     }
     const acts = document.createElement("div"); acts.className = "dc-card-acts"; acts.style.marginTop = "6px";
-    (["top", "bottom", "left", "right"] as const).forEach((w) => acts.appendChild(this.btn("＋ " + wallLbl[w], async () => { await this.addDoor(dc, w); this.renderSide(this.current()); }, "Ajouter une porte sur le mur " + wallLbl[w])));
+    DOOR_WALLS.forEach((w) => acts.appendChild(this.btn("＋ " + Doors.wallLabel(w), async () => { await this.addDoor(dc, w); this.renderSide(this.current()); }, "Ajouter une porte sur le mur " + Doors.wallLabel(w))));
     box.appendChild(acts);
     const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginTop = "4px"; hint.textContent = "Après ajout, glissez la porte le long de son mur ; clic droit / « Modifier » pour ses réglages.";
     box.appendChild(hint);

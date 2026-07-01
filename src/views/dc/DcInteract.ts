@@ -19,6 +19,7 @@ import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import { DoorGeometry } from "../../geometry/DoorGeometry";
+import { Doors, type DoorWall } from "../../domain/Doors";
 import { Id } from "../../core/Id";
 import type { Frame } from "../../geometry/Positioning";
 import type { PosEntry, PosScene } from "./PositioningTool";
@@ -452,10 +453,10 @@ export class DcInteract extends DcPanels {
   }
 
   /* ---- PORTES de salle (value-objects stockés sur le datacenter) ---- */
-  /** Nouvelle porte par défaut (900×2100, listel 40, charnière gauche, ouvre à l'intérieur) sur le mur donné. */
-  protected async addDoor(dc: any, wall: "left" | "right" | "top" | "bottom" = "top"): Promise<void> {
-    const L = (wall === "left" || wall === "right") ? dc.depth_mm : dc.width_mm;
-    const door = { id: Id.uid(), wall, offset: Math.round(L / 2), width_mm: 900, height_mm: 2100, frame_mm: 40, hinge: "left", opening: "interior" };
+  /** Nouvelle porte par défaut (cf. `Doors.defaults`) sur le mur donné, centrée le long de ce mur. */
+  protected async addDoor(dc: any, wall: DoorWall = "top"): Promise<void> {
+    const wallLen = Doors.isVerticalWall(wall) ? dc.depth_mm : dc.width_mm;
+    const door = { id: Id.uid(), ...Doors.defaults(wall, wallLen) };
     await this.store.update("datacenters", dc.id, { doors: [...(dc.doors || []), door] }); this.setDirty();
     return door.id as any;
   }
@@ -467,10 +468,10 @@ export class DcInteract extends DcPanels {
   }
   /** Menu contextuel d'une porte : modifier (form) · basculer charnière / sens d'ouverture · supprimer. */
   protected doorCtx(dc: any, door: any): CtxSection[] {
-    return [{ head: "🚪 Porte — passage " + Math.round(Math.max(0, door.width_mm - 2 * (door.frame_mm || 0))) + " mm", items: [
+    return [{ head: "🚪 Porte — passage " + Math.round(Doors.freeWidth(door)) + " mm", items: [
       { label: "Modifier…", action: () => this.host.openDoorForm?.(dc.id, door.id) },
-      { label: "Charnière : " + (door.hinge === "left" ? "→ droite" : "→ gauche"), action: () => this.updateDoor(dc, door.id, { hinge: door.hinge === "left" ? "right" : "left" }) },
-      { label: "Ouverture : " + (door.opening === "interior" ? "→ extérieur" : "→ intérieur"), action: () => this.updateDoor(dc, door.id, { opening: door.opening === "interior" ? "exterior" : "interior" }) },
+      { label: "Charnière : " + (door.hinge === "left" ? "→ droite" : "→ gauche"), action: () => this.updateDoor(dc, door.id, { hinge: Doors.toggleHinge(door.hinge) }) },
+      { label: "Ouverture : " + (door.opening === "interior" ? "→ extérieur" : "→ intérieur"), action: () => this.updateDoor(dc, door.id, { opening: Doors.toggleOpening(door.opening) }) },
       { label: "Supprimer la porte", danger: true, action: () => this.removeDoor(dc, door.id) },
     ] }];
   }
