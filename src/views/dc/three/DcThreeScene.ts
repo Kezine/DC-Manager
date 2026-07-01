@@ -199,33 +199,33 @@ export class DcThreeScene extends DcThreeCamera {
     const room = { w: dc.width_mm || 4000, h: dc.depth_mm || 3000 };
     const leafCol = 0xc6ccd2;
     doors.forEach((door: any) => {
-      const g = DoorGeometry.geom(door, room), H = Math.max(100, door.height_mm || 2100), sw = g.swing;
+      const g = DoorGeometry.geom(door, room), H = Math.max(100, door.height_mm || 2100), sw = g.swing, fr = door.frame_mm || 0;
       const pick = { type: "door", dcId: dc.id, id: door.id };
-      const topThick = Math.max(80, door.frame_mm || 100);   // épaisseur du linteau (depuis le haut)
       // --- PORTE FERMÉE : vantail plein remplissant le PASSAGE LIBRE (clearHinge → clearLatch), fin selon `swing`. ---
       const th = 40;   // épaisseur du vantail
       const lx = [g.clearHinge.x, g.clearLatch.x, g.clearHinge.x + sw.x * th, g.clearLatch.x + sw.x * th];
       const ly = [g.clearHinge.y, g.clearLatch.y, g.clearHinge.y + sw.y * th, g.clearLatch.y + sw.y * th];
       this.localBox(group, Math.min(...lx), Math.max(...lx), Math.min(...ly), Math.max(...ly), 0, H, leafCol, pick);
-      // --- LISTEL en POINTILLÉ : contour des 2 montants (largeur = listel) + linteau, dans le plan du mur. ---
-      if ((door.frame_mm || 0) > 0) {
-        this.dashedLoop(group, [[g.hinge, 0], [g.clearHinge, 0], [g.clearHinge, H], [g.hinge, H]], pick);        // montant charnière
-        this.dashedLoop(group, [[g.latch, 0], [g.clearLatch, 0], [g.clearLatch, H], [g.latch, H]], pick);        // montant loquet
-        this.dashedLoop(group, [[g.a, H - topThick], [g.b, H - topThick], [g.b, H], [g.a, H]], pick);            // linteau (haut) — pas de sol
+      // --- LISTEL en POINTILLÉ = contour ⊓ du PASSAGE LIBRE : montants AUX BORDS DU PASSAGE (clearHinge / clearLatch,
+      //     ex. X5 et X25 pour 30 de large × listel 5), du SOL jusqu'à H − listel ; linteau horizontal à H − listel.
+      //     PAS de seuil au sol. Ce sont bien les bords INTÉRIEURS (passage), pas l'encadrement extérieur. ---
+      if (fr > 0) {
+        const zTop = Math.max(0, H - fr);
+        this.dashedPath(group, [[g.clearHinge, 0], [g.clearHinge, zTop], [g.clearLatch, zTop], [g.clearLatch, 0]], pick);
       }
       // --- DÉBATTEMENT (rayon) projeté au SOL — couche "doorswing" (même toggle que les portes de baie). ---
       this.buildRoomDoorSwing(group, g);
     });
   }
 
-  /** Boucle en POINTILLÉ (LineLoop tiretée) dans le plan du mur, à partir de points 2D salle + hauteur z.
-      Rend le LISTEL visible même porte fermée ; `pick` pour l'édition au clic droit. */
-  protected dashedLoop(group: THREE.Group, pts: [DoorPt, number][], pick: any): void {
+  /** Polyligne OUVERTE en POINTILLÉ (⊓, pas de fermeture) dans le plan du mur, à partir de points 2D salle + hauteur z.
+      `depthTest:false` → le listel reste visible même « derrière » le vantail fermé. `pick` pour l'édition au clic droit. */
+  protected dashedPath(group: THREE.Group, pts: [DoorPt, number][], pick: any): void {
     const flat: number[] = [];
     pts.forEach(([p, z]) => flat.push(p.x, p.y, z));
     const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(flat, 3));
-    const line = new THREE.LineLoop(geo, new THREE.LineDashedMaterial({ color: 0x9aa2ab, dashSize: 70, gapSize: 45, transparent: true, opacity: 0.9 }));
-    line.computeLineDistances(); line.userData = { pick }; group.add(line);
+    const line = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: 0x9aa2ab, dashSize: 70, gapSize: 45, transparent: true, opacity: 0.95, depthTest: false }));
+    line.computeLineDistances(); line.renderOrder = 3; line.userData = { pick }; group.add(line);
   }
 
   /** Débattement 3D d'une porte de SALLE : secteur rempli (quart de disque) projeté au sol (z≈1), centré sur
