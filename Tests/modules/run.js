@@ -941,6 +941,24 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const gBig = DoorGeometry.geom({ ...d, frame_mm: 999999 }, room);   // frame > w/2 (=450)
     approx(gBig.clear, 0, "listel > demi-largeur → passage borné à 0 (jamais négatif)");
     approx(Math.hypot(gBig.clearHinge.x - g.hinge.x, gBig.clearHinge.y - g.hinge.y), 450, "listel surdimensionné borné à la demi-largeur (extrémités non croisées)");
+    // mur BAS (y=h) : ouverture le long de x, charnière/vantail vers l'INTÉRIEUR (y décroît) — couvre la branche `bottom`
+    const db = { wall: "bottom", offset: 2000, width_mm: 900, frame_mm: 40, hinge: "left", opening: "interior" };
+    const gb = DoorGeometry.geom(db, room);
+    ck.eq(JSON.stringify(gb.hinge), JSON.stringify({ x: 1550, y: 4000 }), "mur bas, charnière gauche intérieur → extrémité −x");
+    ck.eq(JSON.stringify(gb.leafOpen), JSON.stringify({ x: 1590, y: 3180 }), "mur bas intérieur : vantail vers l'intérieur (y décroît)");
+    ck.eq(JSON.stringify(DoorGeometry.geom({ ...db, hinge: "right" }, room).hinge), JSON.stringify({ x: 2450, y: 4000 }), "mur bas, charnière droite → extrémité opposée");
+    // mur DROIT (x=w) : ouverture le long de y — couvre la branche `right` (normale, charnière, signe de l'arc)
+    const dr = { wall: "right", offset: 2000, width_mm: 1000, frame_mm: 50, hinge: "left", opening: "interior" };
+    const gr2 = DoorGeometry.geom(dr, room);
+    ck.eq(JSON.stringify(gr2.hinge), JSON.stringify({ x: 6000, y: 2500 }), "mur droit, charnière gauche intérieur → extrémité +y");
+    ck.eq(JSON.stringify(gr2.leafOpen), JSON.stringify({ x: 5100, y: 2450 }), "mur droit intérieur : vantail vers l'intérieur (x décroît)");
+    ck(DoorGeometry.geom({ ...dr, opening: "exterior" }, room).leafOpen.x > 6000, "mur droit extérieur : vantail hors salle (x > w)");
+    // arc sur mur droit : couvre le `sign` de rotation hors du seul cas « mur haut »
+    const arcR = DoorGeometry.arcPoints(gr2, 8);
+    approx(arcR[0].x, gr2.clearLatch.x, "arc mur droit démarre au vantail FERMÉ (x)");
+    approx(arcR[0].y, gr2.clearLatch.y, "arc mur droit démarre au vantail FERMÉ (y)");
+    approx(arcR[8].x, gr2.leafOpen.x, "arc mur droit finit au vantail OUVERT (x)");
+    approx(arcR[8].y, gr2.leafOpen.y, "arc mur droit finit au vantail OUVERT (y)");
   }
 
   console.log("\n• ImageStore : helpers purs (dataUrl ↔ Blob · bundle .nmfb)");
