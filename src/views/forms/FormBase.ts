@@ -173,6 +173,16 @@ export class FormBase {
       if (skipped) Notify.toast(skipped + " cellule(s) conservée(s) : un pin y est posé.", "err");
       draw();
     };
+    // « Supprimer tout » : retire tous les trous de ce capot. Les cellules portant un PIN sont conservées (comme la
+    // suppression au glisser) — un pin exige un trou sous lui.
+    const clearAll = async () => {
+      const occ = occSet();
+      if (!cellsSet().size) return;   // rien à retirer
+      await store.update("racks", rack.id, (face === "floor") ? { floor_cells: [...occ] } : { roof_cells: [...occ] });
+      host.setDirty?.(true);
+      if (occ.size) Notify.toast(occ.size + " cellule(s) conservée(s) : un pin y est posé.", "err");
+      draw();
+    };
     const onDown = (e: MouseEvent) => {
       if (e.button !== 0) return; e.preventDefault();
       const c0 = cellAt(e.clientX, e.clientY);
@@ -197,6 +207,11 @@ export class FormBase {
       svg.appendChild(ov);
     }
     draw();
+    const bar = document.createElement("div"); bar.style.cssText = "display:flex;justify-content:center;margin-top:6px";
+    const clearBtn = document.createElement("button"); clearBtn.type = "button"; clearBtn.className = "btn btn-ghost btn-sm";
+    clearBtn.textContent = "Supprimer tout"; clearBtn.title = "Retirer tous les trous de ce capot (les cellules portant un pin sont conservées)";
+    clearBtn.onclick = () => { void clearAll(); };
+    bar.appendChild(clearBtn); wrap.appendChild(bar);
     return { el: wrap, refresh: draw };
   }
 
