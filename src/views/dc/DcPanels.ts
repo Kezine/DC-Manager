@@ -215,6 +215,7 @@ export class DcPanels extends DcViews2D {
       side.appendChild(this.collapsible(this.poolFreeEquipCard(dc), "freepool"));
       side.appendChild(this.collapsible(this.racks3dCard(dc), "rack3d"));   // visibilité des baies — respectée par renderTop
       side.appendChild(this.collapsible(this.freeEquip3dCard(dc), "freeeq3d"));   // visibilité des équipements libres (par équip. / type / groupe)
+      side.appendChild(this.collapsible(this.doorsCard(dc), "doors"));   // portes de la salle (collées aux murs)
       side.appendChild(this.collapsible(this.waypointsCard(dc), "waypoints"));
       side.appendChild(this.collapsible(this.cableCard(dc), "cables"));
       side.appendChild(this.collapsible(this.view3dOptionsCard(), "view3d"));   // Affichage (waypoints, repères) — view-aware
@@ -344,6 +345,33 @@ export class DcPanels extends DcViews2D {
     box.appendChild(list); return box;
   }
 
+
+  /* ---- carte PORTES (value-objects sur le datacenter) — vue Plan de salle ---- */
+  protected doorsCard(dc: any): HTMLElement {
+    const wallLbl: Record<string, string> = { top: "avant", bottom: "arrière", left: "gauche", right: "droit" };
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Portes"; box.appendChild(t);
+    const doors = dc.doors || [];
+    if (!doors.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucune porte. Ajoutez-en une (collée à un mur)."; box.appendChild(h); }
+    else {
+      const list = document.createElement("div"); list.className = "dc-layers";
+      doors.forEach((d: any) => {
+        const row = document.createElement("div"); row.className = "dc-rack-row";
+        const lab = document.createElement("span"); lab.className = "grow"; lab.style.fontSize = "12px";
+        lab.textContent = "Mur " + (wallLbl[d.wall] || d.wall) + " · ouv. " + d.width_mm + " · passage " + Math.max(0, d.width_mm - 2 * (d.frame_mm || 0)) + " mm";
+        const bEdit = this.btn("Modifier", () => this.host.openDoorForm?.(dc.id, d.id));
+        const bDel = this.btn("✕", () => this.removeDoor(dc, d.id)); bDel.classList.add("btn-danger");
+        row.append(lab, bEdit, bDel); list.appendChild(row);
+      });
+      box.appendChild(list);
+    }
+    const acts = document.createElement("div"); acts.className = "dc-card-acts"; acts.style.marginTop = "6px";
+    (["top", "bottom", "left", "right"] as const).forEach((w) => acts.appendChild(this.btn("＋ " + wallLbl[w], async () => { await this.addDoor(dc, w); this.renderSide(this.current()); }, "Ajouter une porte sur le mur " + wallLbl[w])));
+    box.appendChild(acts);
+    const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginTop = "4px"; hint.textContent = "Après ajout, glissez la porte le long de son mur ; clic droit / « Modifier » pour ses réglages.";
+    box.appendChild(hint);
+    return box;
+  }
 
   /** Ouvre le form d'étage (création `pick` ou édition) avec navigation vers le plan créé. */
   protected editFloor(location: string, floor: string, pick: boolean): void {

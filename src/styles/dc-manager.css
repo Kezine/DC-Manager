@@ -813,6 +813,15 @@
   .dc-figure.dragging { cursor: grabbing; }
   .dc-figure-foot { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: var(--accent); stroke-width: 1.5px; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
   .dc-figure-body, .dc-figure-head { fill: var(--accent); fill-opacity: 0.9; stroke: var(--bg); stroke-width: 2px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  /* portes de salle (2D) : ouverture + listel + passage libre + vantail + débattement */
+  .dc-door { cursor: grab; }
+  .dc-door.static { cursor: default; }
+  .dc-door-hit { stroke: transparent; stroke-width: 16px; vector-effect: non-scaling-stroke; pointer-events: stroke; }
+  .dc-door-frame { stroke: var(--fg); stroke-width: 3.5px; vector-effect: non-scaling-stroke; stroke-linecap: round; pointer-events: none; }
+  .dc-door-clear { stroke: var(--accent); stroke-width: 2.5px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .dc-door-leaf { stroke: var(--fg); stroke-width: 2px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .dc-door-swing { fill: none; stroke: var(--accent); stroke-width: 1.5px; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; opacity: 0.6; pointer-events: none; }
+  .dc-door-label { fill: var(--accent); font-family: var(--mono); font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
   .dc-equip:hover .dc-equip-body { stroke: var(--fg); }
   .dc-equip.sel .dc-equip-body { stroke: var(--accent); stroke-width: 2.5px; stroke-dasharray: none; }
   .dc-equip-label { fill: var(--fg); font-family: var(--mono); pointer-events: none; }

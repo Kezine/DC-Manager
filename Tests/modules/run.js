@@ -58,6 +58,7 @@ const { Prefs } = D("core/Prefs.js");
 const { DatacenterView } = D("views/DatacenterView.js");
 const { FloorLayout } = D("geometry/FloorLayout.js");
 const { Positioning } = D("geometry/Positioning.js");
+const { DoorGeometry } = D("geometry/DoorGeometry.js");
 const { ImageStore } = D("data/ImageStore.js");
 const { FaceImage } = D("models/index.js");
 const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
@@ -864,6 +865,43 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     // orientation 90 : hx/hy permutés en amont (responsabilité de la couche vue) — on vérifie juste le calcul de coins
     const R90 = { cx: 0, cy: 0, hx: 500, hy: 300 };   // ex. rack 600×1000 tourné à 90°
     ck.eq(JSON.stringify(Positioning.corners(R90).TR), JSON.stringify({ x: 500, y: -300 }), "corners d'un rect permuté (orientation 90 en amont)");
+  }
+
+  console.log("\n• DoorGeometry : portes de salle (ouverture, listel, passage libre, débattement)");
+  {
+    const approx = (a, b, name, eps) => ck(Math.abs(a - b) <= (eps || 1e-6), name + "  (attendu ≈" + b + ", obtenu " + a + ")");
+    const room = { w: 6000, h: 4000 };
+    // porte mur HAUT, 900 mm, listel 40, charnière gauche, ouvre vers l'intérieur, centrée à x=2000
+    const d = { wall: "top", offset: 2000, width_mm: 900, frame_mm: 40, hinge: "left", opening: "interior" };
+    const g = DoorGeometry.geom(d, room);
+    ck.eq(JSON.stringify(g.a), JSON.stringify({ x: 1550, y: 0 }), "ouverture a = (offset−w/2, 0)");
+    ck.eq(JSON.stringify(g.b), JSON.stringify({ x: 2450, y: 0 }), "ouverture b = (offset+w/2, 0)");
+    approx(g.clear, 820, "passage libre = width − 2·listel");
+    // charnière côté GAUCHE de l'observateur intérieur regardant le mur → extrémité +x (cf. convention)
+    ck.eq(JSON.stringify(g.hinge), JSON.stringify({ x: 2450, y: 0 }), "charnière (gauche, intérieur, mur haut) → +x");
+    ck.eq(JSON.stringify(g.leafOpen), JSON.stringify({ x: 2410, y: 820 }), "vantail ouvert 90° → vers l'intérieur (+y), longueur = passage");
+    // ouvre vers l'EXTÉRIEUR → le vantail balaie de l'autre côté (y négatif)
+    const gExt = DoorGeometry.geom({ ...d, opening: "exterior" }, room);
+    ck(gExt.leafOpen.y < 0, "ouverture extérieure → vantail vers y négatif (hors salle)");
+    // charnière DROITE → l'autre extrémité
+    const gR = DoorGeometry.geom({ ...d, hinge: "right" }, room);
+    ck.eq(JSON.stringify(gR.hinge), JSON.stringify({ x: 1550, y: 0 }), "charnière droite → extrémité opposée");
+    // bornage de l'offset : trop près du coin → ramené à w/2
+    ck.eq(DoorGeometry.clampOffset({ wall: "top", offset: 100, width_mm: 900 }, room), 450, "clampOffset : borné à w/2 du coin");
+    ck.eq(DoorGeometry.wallLen("left", room), 4000, "wallLen(left) = profondeur");
+    ck.eq(DoorGeometry.wallLen("top", room), 6000, "wallLen(top) = largeur");
+    // arc de débattement : 15 points, du vantail fermé (clearLatch) à l'ouvert (leafOpen)
+    const arc = DoorGeometry.arcPoints(g, 14);
+    ck.eq(arc.length, 15, "arcPoints : n+1 points");
+    approx(arc[0].x, g.clearLatch.x, "arc démarre au vantail FERMÉ (x)");
+    approx(arc[0].y, g.clearLatch.y, "arc démarre au vantail FERMÉ (y)");
+    approx(arc[14].x, g.leafOpen.x, "arc finit au vantail OUVERT (x)", 1e-6);
+    approx(arc[14].y, g.leafOpen.y, "arc finit au vantail OUVERT (y)", 1e-6);
+    // porte sur mur GAUCHE : ouverture le long de y
+    const dl = { wall: "left", offset: 2000, width_mm: 1000, frame_mm: 50, hinge: "left", opening: "interior" };
+    const gl = DoorGeometry.geom(dl, room);
+    ck.eq(JSON.stringify(gl.a), JSON.stringify({ x: 0, y: 1500 }), "mur gauche : ouverture le long de y");
+    ck(Math.abs(gl.leafOpen.x - gl.clear) < 1e-6, "mur gauche intérieur : vantail balaie vers +x (dans la salle)");
   }
 
   console.log("\n• ImageStore : helpers purs (dataUrl ↔ Blob · bundle .nmfb)");

@@ -18,6 +18,7 @@ import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
 import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
+import { DoorGeometry } from "../../geometry/DoorGeometry";
 import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Format } from "../../core/Format";
@@ -46,6 +47,7 @@ export class DcViews2D extends DcScene3D {
     gRoot.appendChild(room);
     gRoot.appendChild(this.gridNode(W, D, cell, dc.blocked_cells, (cx0, cy0, cx1, cy1) => this.toggleCellsRange("datacenters", dc.id, cx0, cy0, cx1, cy1)));
     if (this.showOrientMarks) { const th = Math.max(40, Math.min(W, D) * 0.012); gRoot.appendChild(Dom.svg("rect", { class: "dc-floor-room-front", x: 0, y: 0, width: W, height: th })); }   // liseré FRONT
+    (dc.doors || []).forEach((d: any) => gRoot.appendChild(this.doorNode2D(dc, d, { w: W, h: D })));   // portes collées aux murs (ouverture + passage libre + débattement)
     if (this.showDoorSwing) this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) { const sw = this.doorSwingNode(r); if (sw) gRoot.appendChild(sw); } });   // débattement des portes (sous les baies)
     this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) gRoot.appendChild(this.rackNode(r)); });
     this.store.freeEquipsOfDc(dc.id).forEach((e: any) => { if (e.dc_x != null && e.dc_y != null && !this.hidden3dEquips.has(e.id)) gRoot.appendChild(this.equipNode(e)); });
@@ -246,6 +248,7 @@ export class DcViews2D extends DcScene3D {
     const inner = Dom.svg("g", { transform: `translate(${fp.w / 2} ${fp.h / 2}) rotate(${o}) translate(${-w / 2} ${-h / 2})` });
     inner.appendChild(Dom.svg("rect", { class: "dc-floor-room-body", x: 0, y: 0, width: w, height: h }));
     if (this.showOrientMarks) inner.appendChild(Dom.svg("rect", { class: "dc-floor-room-front", x: 0, y: 0, width: w, height: Math.max(40, h * 0.022) }));
+    (d.doors || []).forEach((door: any) => inner.appendChild(this.doorNode2D(d, door, { w, h }, false)));   // portes (affichage seul en étage ; placement en Plan de salle)
     g.appendChild(inner);
     const label = Dom.svg("text", { class: "dc-floor-room-label", x: fp.w / 2, y: fp.h / 2, "text-anchor": "middle", "dominant-baseline": "central", "font-size": Math.max(200, Math.min(fp.w, fp.h) * 0.12) });
     label.textContent = (d.name || "(salle)") + (d.room ? " · " + d.room : ""); g.appendChild(label);
@@ -460,6 +463,52 @@ export class DcViews2D extends DcScene3D {
       if (!moved || !this.figure) return;
       if (mode === "top") { this.figure.dcX = Math.round(cur.x); this.figure.dcY = Math.round(cur.y); } else { this.figure.floorX = Math.round(cur.x); this.figure.floorY = Math.round(cur.y); }
       this.persistView();   // repère de vue → pas de mutation du document
+    };
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+  }
+
+  /** PORTE de salle en 2D : ouverture + listel + PASSAGE LIBRE (largeur max d'équipement) + vantail + débattement,
+      collée au mur. Déplaçable LE LONG de son mur. `room` = repère salle courant (salle : coords salle ; étage :
+      coords locales de la salle, appliquées par le groupe transformé). */
+  protected doorNode2D(dc: any, door: any, room: { w: number; h: number }, draggable = true): SVGElement {
+    const g = Dom.svg("g", { class: "dc-door" + (draggable ? "" : " static"), "data-door": door.id });
+    const cur = { ...door };
+    const fill = (): void => {
+      while (g.firstChild) g.removeChild(g.firstChild);
+      const gg = DoorGeometry.geom(cur, room);
+      g.appendChild(Dom.svg("line", { class: "dc-door-hit", x1: gg.a.x, y1: gg.a.y, x2: gg.b.x, y2: gg.b.y }));   // zone de clic (le long de l'ouverture)
+      g.appendChild(Dom.svg("polyline", { class: "dc-door-swing", points: DoorGeometry.arcPoints(gg, 16).map((p) => p.x + "," + p.y).join(" ") }));   // débattement
+      g.appendChild(Dom.svg("line", { class: "dc-door-frame", x1: gg.hinge.x, y1: gg.hinge.y, x2: gg.clearHinge.x, y2: gg.clearHinge.y }));   // listel (jambage charnière)
+      g.appendChild(Dom.svg("line", { class: "dc-door-frame", x1: gg.latch.x, y1: gg.latch.y, x2: gg.clearLatch.x, y2: gg.clearLatch.y }));   // listel (jambage loquet)
+      g.appendChild(Dom.svg("line", { class: "dc-door-clear", x1: gg.clearHinge.x, y1: gg.clearHinge.y, x2: gg.clearLatch.x, y2: gg.clearLatch.y }));   // passage LIBRE (seuil)
+      g.appendChild(Dom.svg("line", { class: "dc-door-leaf", x1: gg.clearHinge.x, y1: gg.clearHinge.y, x2: gg.leafOpen.x, y2: gg.leafOpen.y }));   // vantail (ouvert 90°)
+      const mx = (gg.clearHinge.x + gg.clearLatch.x) / 2, my = (gg.clearHinge.y + gg.clearLatch.y) / 2;
+      const t = Dom.svg("text", { class: "dc-door-label", x: mx + gg.swing.x * 170, y: my + gg.swing.y * 170, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 190 });
+      t.textContent = Math.round(gg.clear) + " mm"; g.appendChild(t);
+    };
+    fill();
+    if (draggable) g.addEventListener("pointerdown", (e: any) => this.onDoorPointerDown(e, dc, door, cur, room, fill));   // drag = Plan de salle (coords salle) ; en étage la salle est transformée → affichage seul
+    g.addEventListener("contextmenu", (e: any) => { e.preventDefault(); e.stopPropagation(); this.ctxMenu(e, this.doorCtx(dc, door)); });
+    return g;
+  }
+  /** Glisser une porte LE LONG de son mur (met à jour `offset`, borné). `cur` = copie d'aperçu ; persiste au relâcher. */
+  protected onDoorPointerDown(e: MouseEvent, dc: any, door: any, cur: any, room: { w: number; h: number }, fill: () => void): void {
+    if (e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const along = (door.wall === "left" || door.wall === "right");   // mur vertical → glisse en y ; horizontal → en x
+    const startCoord = along ? this.clientToWorld(e.clientX, e.clientY).y : this.clientToWorld(e.clientX, e.clientY).x;
+    const off0 = door.offset; let moved = false;
+    const move = (ev: MouseEvent) => {
+      const w = this.clientToWorld(ev.clientX, ev.clientY), coord = along ? w.y : w.x;
+      if (!moved && Math.abs(coord - startCoord) < (8 / (this.scale || 1))) return;
+      moved = true;
+      cur.offset = Math.round(DoorGeometry.clampOffset({ ...cur, offset: off0 + (coord - startCoord) }, room));
+      fill(); this.showCote(Format.meters(cur.offset), ev.clientX, ev.clientY);
+    };
+    const up = async () => {
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+      this.hideCote();
+      if (moved) await this.updateDoor(dc, door.id, { offset: cur.offset });
     };
     document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }

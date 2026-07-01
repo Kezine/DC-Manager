@@ -334,6 +334,35 @@ export class RackForms extends CableForms {
     setTimeout(() => nameI.focus(), 30);
   }
 
+  /** Édition d'une PORTE de salle (value-object stocké sur le datacenter). Mur, position, largeur/hauteur, listel
+      (→ passage libre = largeur max d'équipement), côté charnière et sens d'ouverture. */
+  static door(store: Store, host: FormHost, dcId: string, doorId: string, onSaved?: () => void): void {
+    const dc: any = store.get("datacenters", dcId); if (!dc) { Notify.toast("Salle introuvable", "err"); return; }
+    const door: any = (dc.doors || []).find((d: any) => d.id === doorId); if (!door) { Notify.toast("Porte introuvable", "err"); return; }
+    const root = document.createElement("div");
+    const wallI = FormControls.select([{ value: "top", label: "Mur avant (haut)" }, { value: "bottom", label: "Mur arrière (bas)" }, { value: "left", label: "Mur gauche" }, { value: "right", label: "Mur droit" }], door.wall);
+    const offI = FormControls.number(door.offset, { min: 0, step: 10, placeholder: "centre le long du mur" });
+    root.appendChild(row2(FormControls.fieldRow("Mur", wallI), FormControls.fieldRow("Position sur le mur (mm)", offI)));
+    const wI = FormControls.number(door.width_mm, { min: 100, step: 10 });
+    const hI = FormControls.number(door.height_mm, { min: 100, step: 10 });
+    const fI = FormControls.number(door.frame_mm, { min: 0, step: 5 });
+    root.appendChild(row2(FormControls.fieldRow("Largeur d'ouverture (mm)", wI), FormControls.fieldRow("Hauteur (mm)", hI), FormControls.fieldRow("Épaisseur du listel (mm)", fI)));
+    const hinI = FormControls.select([{ value: "left", label: "Gauche" }, { value: "right", label: "Droite" }], door.hinge);
+    const opI = FormControls.select([{ value: "interior", label: "Vers l'intérieur" }, { value: "exterior", label: "Vers l'extérieur" }], door.opening);
+    root.appendChild(row2(FormControls.fieldRow("Côté charnière", hinI), FormControls.fieldRow("Sens d'ouverture", opI)));
+    const hint = document.createElement("div"); hint.className = "form-hint"; root.appendChild(hint);
+    const sync = () => { const w = Math.max(100, parseInt(wI.value, 10) || 900), f = Math.max(0, parseInt(fI.value, 10) || 0); hint.innerHTML = "Passage LIBRE (largeur max d'équipement) : <b style=\"color:var(--accent)\">" + Math.max(0, w - 2 * f) + " mm</b>.<br>Le côté charnière se définit depuis le côté d'OUVERTURE : observateur placé du côté où la porte s'ouvre, regardant le mur → charnière à sa gauche / droite."; };
+    wI.oninput = sync; fI.oninput = sync; sync();
+    host.openModal({
+      title: "Porte de salle", subtitle: Html.escape(dc.name || ""), body: root, wide: true,
+      onSave: async () => {
+        const patch = { wall: wallI.value, offset: Math.max(0, parseInt(offI.value, 10) || 0), width_mm: Math.max(100, parseInt(wI.value, 10) || 900), height_mm: Math.max(100, parseInt(hI.value, 10) || 2100), frame_mm: Math.max(0, parseInt(fI.value, 10) || 0), hinge: hinI.value === "right" ? "right" : "left", opening: opI.value === "exterior" ? "exterior" : "interior" };
+        await store.update("datacenters", dcId, { doors: (dc.doors || []).map((d: any) => (d.id === doorId ? { ...d, ...patch } : d)) });
+        host.setDirty?.(true); Notify.toast("Porte mise à jour"); onSaved?.(); return true;
+      },
+    });
+  }
+
   /** Édition d'un waypoint. CONTRAINTE : seuls le NOM, le positionnement LOCAL (hauteur + grille capot/marge) et la
       description restent modifiables. Le type, la forme, la salle/baie et les sections sont FIXÉS à la création
       (création via panneaux / menus contextuels). Fusion OOB→pin : pin de salle vs pin d'étage selon le placement. */

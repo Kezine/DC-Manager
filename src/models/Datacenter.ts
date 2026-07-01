@@ -1,5 +1,6 @@
 import { Entity, Props } from "./Entity";
 import { Normalize } from "../core/Normalize";
+import type { DcDoor } from "../core/Normalize";
 import { DC_WIDTH_DEFAULT, DC_DEPTH_DEFAULT, DC_CELL_DEFAULT } from "../domain/constants";
 
 /** Salle datacenter : grille au sol + dimensions ; pioche dans le pool de racks. */
@@ -26,6 +27,8 @@ export class Datacenter extends Entity {
   floor_orientation: number;
   /** Cases INACCESSIBLES de la grille de racks (clés "cx,cy"). */
   blocked_cells: string[];
+  /** PORTES de la salle (collées aux murs) — value-objects ; la porte « vit dans la salle » (pas de collection externe). */
+  doors: DcDoor[];
 
   constructor(p: Props = {}) {
     super(p);
@@ -40,5 +43,6 @@ export class Datacenter extends Entity {
     this.floor_y = (p.floor_y != null) ? +p.floor_y : null;
     this.floor_orientation = Normalize.rackOrientation(p.floor_orientation);
     this.blocked_cells = Normalize.cellList(p.blocked_cells);
+    this.doors = Normalize.dcDoors(p.doors);
   }
 }

@@ -30,6 +30,7 @@ export interface DatacenterHost {
   openCableForm?(id: string | null, opts?: any): void;
   openWaypointForm?(id: string | null, opts?: any): void;
   openDatacenterForm?(id: string): void;
+  openDoorForm?(dcId: string, doorId: string): void;   // édition d'une porte de salle (value-object sur le datacenter)
   openFloorForm?(location: string, floor: string, opts?: any): void;
   openSiteForm?(id: string | null): void;
   /** Image attachée à une face d'un équipement, ou null. `url` = objectURL/endpoint ; `withEars` = l'image

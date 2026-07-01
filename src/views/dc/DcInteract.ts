@@ -18,6 +18,7 @@ import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
 import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
+import { Id } from "../../core/Id";
 import type { Frame } from "../../geometry/Positioning";
 import type { PosEntry, PosScene } from "./PositioningTool";
 import { Depths } from "../../registries/Depths";
@@ -444,6 +445,30 @@ export class DcInteract extends DcPanels {
     const csi = this.cableSelItems(this.store.cablesOfEquipment(eqId).map((c: any) => c.id), "les câbles de l'équipement");
     if (csi.length) secs.push({ items: csi });
     return secs;
+  }
+
+  /* ---- PORTES de salle (value-objects stockés sur le datacenter) ---- */
+  /** Nouvelle porte par défaut (900×2100, listel 40, charnière gauche, ouvre à l'intérieur) sur le mur donné. */
+  protected async addDoor(dc: any, wall: "left" | "right" | "top" | "bottom" = "top"): Promise<void> {
+    const L = (wall === "left" || wall === "right") ? dc.depth_mm : dc.width_mm;
+    const door = { id: Id.uid(), wall, offset: Math.round(L / 2), width_mm: 900, height_mm: 2100, frame_mm: 40, hinge: "left", opening: "interior" };
+    await this.store.update("datacenters", dc.id, { doors: [...(dc.doors || []), door] }); this.setDirty();
+    return door.id as any;
+  }
+  protected async updateDoor(dc: any, id: string, patch: Record<string, any>): Promise<void> {
+    await this.store.update("datacenters", dc.id, { doors: (dc.doors || []).map((d: any) => (d.id === id ? { ...d, ...patch } : d)) }); this.setDirty();
+  }
+  protected async removeDoor(dc: any, id: string): Promise<void> {
+    await this.store.update("datacenters", dc.id, { doors: (dc.doors || []).filter((d: any) => d.id !== id) }); this.setDirty();
+  }
+  /** Menu contextuel d'une porte : modifier (form) · basculer charnière / sens d'ouverture · supprimer. */
+  protected doorCtx(dc: any, door: any): CtxSection[] {
+    return [{ head: "🚪 Porte — passage " + Math.round(Math.max(0, door.width_mm - 2 * (door.frame_mm || 0))) + " mm", items: [
+      { label: "Modifier…", action: () => this.host.openDoorForm?.(dc.id, door.id) },
+      { label: "Charnière : " + (door.hinge === "left" ? "→ droite" : "→ gauche"), action: () => this.updateDoor(dc, door.id, { hinge: door.hinge === "left" ? "right" : "left" }) },
+      { label: "Ouverture : " + (door.opening === "interior" ? "→ extérieur" : "→ intérieur"), action: () => this.updateDoor(dc, door.id, { opening: door.opening === "interior" ? "exterior" : "interior" }) },
+      { label: "Supprimer la porte", danger: true, action: () => this.removeDoor(dc, door.id) },
+    ] }];
   }
 
   /** Menu contextuel du PERSONNAGE d'échelle (repère de vue) : pivoter · masquer. Aucune mutation du document. */

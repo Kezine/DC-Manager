@@ -18,5 +18,7 @@ export type { NodeSize, BBox } from "./GraphGeometry";
 export { GridGeometry } from "./GridGeometry";
 export { FloorLayout } from "./FloorLayout";
 export type { MultiLayout, RoomPlacement, FloorPlane, BuildingBand, FloorCfg } from "./FloorLayout";
+export { DoorGeometry } from "./DoorGeometry";
+export type { DoorPt, DoorRoom, DoorLike, DoorGeom } from "./DoorGeometry";
 export { Positioning, CORNER_IDS, WALL_IDS } from "./Positioning";
 export type { Pt, Rect, Frame, CornerId, WallId, Axis, Ref, Cote, SnapResult } from "./Positioning";

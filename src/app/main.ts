@@ -1098,6 +1098,7 @@ async function boot(): Promise<void> {
     assignWallSlot: (rackId, wall, margin, col, uTop, onDone) => Forms.assignWallSlot(store, formHost, rackId, wall, margin, col, uTop, onDone),
     assignCapSlot: (rackId, face, cx, cy, onDone) => Forms.assignCapSlot(store, formHost, rackId, face, cx, cy, onDone),
     openDatacenterForm: (id) => Forms.datacenter(store, formHost, id, () => shell.refreshActive()),
+    openDoorForm: (dcId, doorId) => Forms.door(store, formHost, dcId, doorId, () => shell.refreshActive()),
     openWaypointForm: (id, opts) => Forms.waypoint(store, formHost, id, opts),
     openFloorForm: (loc, fl, opts) => Forms.floor(store, formHost, loc, fl, opts),
     openSiteForm: (id) => Forms.site(store, formHost, id, () => { dcView.buildToolbar(); dcView.render(); }),
