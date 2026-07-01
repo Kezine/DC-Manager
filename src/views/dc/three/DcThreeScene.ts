@@ -684,7 +684,15 @@ export class DcThreeScene extends DcThreeCamera {
       const color = this.occColor({ kind: "eq", id: e.id });
       const grp = new THREE.Group(); grp.position.set(e.dc_x, e.dc_y, 0); grp.rotation.z = o; root.add(grp);
       const geo = new THREE.BoxGeometry(b.w, b.d, b.h);
-      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 }));
+      // 6 matériaux (un par face de la BoxGeometry) : image de façade si présente (non éclairée, couleurs vraies),
+      // sinon le corps coloré/éclairé. Ordre BoxGeometry : +X,−X,+Y,−Y,+Z,−Z ↔ droite/gauche/arrière/AVANT(−Y)/dessus/dessous.
+      const FACE_BY_MAT = ["right", "left", "rear", "front", "top", "bottom"];
+      const mats = FACE_BY_MAT.map((face) => {
+        const img = this.host.faceImageUrl?.(e.id, face);
+        if (img && img.url) { const m = new THREE.MeshBasicMaterial({ color: 0xffffff }); this.applyFaceTexture(m, img.url); return m; }
+        return new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 });
+      });
+      const mesh = new THREE.Mesh(geo, mats);
       mesh.position.set(0, 0, b.z + b.h / 2);
       mesh.userData = { pick: { type: "occ", kind: "eq", id: e.id } };   // même traitement que les occupants (détail + survol)
       grp.add(mesh);
@@ -695,6 +703,23 @@ export class DcThreeScene extends DcThreeCamera {
       // ports en coords MONDE → ajoutés au groupe identité (root = gFree) ; couche "port" basculable (showPorts).
       this.store.portsOf(e.id).forEach((p: any) => this.addPort(root, p, dcId));
     });
+  }
+
+  /** Pose (async) une image de façade sur un MATÉRIAU (face d'une BoxGeometry d'équipement libre) — même cache/loader
+      que `faceImagePlane`. Le chargement périmé (rebuild entre-temps) est ignoré ; la texture reste en cache. */
+  protected applyFaceTexture(material: any, url: string): void {
+    if (typeof document === "undefined") return;
+    this.faceUrlsInLastBuild.add(url);   // URL versionnée (REST) → marquée « utilisée » pour l'éviction des textures périmées
+    const cached = this.imgTexCache.get(url);
+    if (cached) { material.map = cached; material.needsUpdate = true; return; }
+    if (!this._texLoader) this._texLoader = new THREE.TextureLoader();
+    const epoch = this._epoch;
+    this._texLoader.load(url, (tex) => {
+      (tex as any).colorSpace = (THREE as any).SRGBColorSpace;
+      this.imgTexCache.set(url, tex);
+      if (this._epoch !== epoch) return;   // (re)build entre-temps : texture conservée pour le prochain build
+      material.map = tex; material.needsUpdate = true; this.request();
+    }, undefined, () => { /* échec de chargement → ignoré */ });
   }
 
   /** Marqueur de waypoint : SPRITE 2D (losange billboard, centre noir, teinté accent), à taille écran constante. */
