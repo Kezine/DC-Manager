@@ -250,6 +250,10 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     invariants: [
       // T1 : placé en baie ⇒ doit référencer une baie.
       { path: "rack_id", message: "Un équipement placé en baie doit référencer une baie.", holds: (eq) => eq.placement_mode !== "rack" || !!eq.rack_id },
+      // T1b : monté sur le FLANC (side) ou la PAROI (wall) d'une baie ⇒ doit référencer cette baie (rack_id).
+      // Parité avec T1 : ces deux modes sont ancrés aux marges latérales d'une baie précise (cf. Equipment.ts) ;
+      // un rack_id manquant est un état incohérent. (floor = plan d'étage via floor_x/y ; manual/dc_id = autres modes.)
+      { path: "rack_id", message: "Un équipement monté sur le flanc ou la paroi d'une baie doit référencer une baie.", holds: (eq) => !["side", "wall"].includes(eq.placement_mode) || !!eq.rack_id },
     ],
     crossEntity: [
       // T2 : un équipement racké doit TENIR dans la hauteur de sa baie (U de tête + hauteur ≤ U de la baie).

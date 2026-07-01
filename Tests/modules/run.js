@@ -1420,6 +1420,11 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     // T1 — équipement : placement_mode rack ⇒ rack_id requis
     ck.eq(DV.validateRecord("equipments", { name: "e", placement_mode: "rack", rack_id: null }).some((x) => x.code === "invariant" && x.path === "rack_id"), true, "T1 equip : racké sans baie → invariant");
     ck.eq(DV.validateRecord("equipments", { name: "e", placement_mode: "manual" }).length, 0, "T1 equip : manuel → OK");
+    // T1b — équipement : side/wall (flanc/paroi d'une baie) ⇒ rack_id requis
+    ck.eq(DV.validateRecord("equipments", { name: "e", placement_mode: "side", rack_id: null }).some((x) => x.code === "invariant" && x.path === "rack_id"), true, "T1b equip : side sans baie → invariant");
+    ck.eq(DV.validateRecord("equipments", { name: "e", placement_mode: "wall", rack_id: null }).some((x) => x.code === "invariant" && x.path === "rack_id"), true, "T1b equip : wall sans baie → invariant");
+    ck.eq(DV.validateRecord("equipments", { name: "e", placement_mode: "side", rack_id: "RK" }).some((x) => x.code === "invariant" && x.path === "rack_id"), false, "T1b equip : side AVEC baie → OK");
+    ck.eq(DV.validateRecord("equipments", { name: "e", placement_mode: "floor" }).some((x) => x.code === "invariant" && x.path === "rack_id"), false, "T1b equip : floor (plan d'étage) → pas concerné");
     // T1 — port : face X/Y cohérents
     ck.eq(DV.validateRecord("ports", { face_x: 0.5, face_y: null }).some((x) => x.code === "invariant"), true, "T1 port : face X sans Y → invariant");
     ck.eq(DV.validateRecord("ports", { face_x: 0.5, face_y: 0.5 }).length, 0, "T1 port : X+Y → OK");
