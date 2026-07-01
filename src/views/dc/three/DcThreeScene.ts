@@ -322,7 +322,7 @@ export class DcThreeScene extends DcThreeCamera {
   /** Applique la visibilité des couches taguées (ports/noms/portes/débattement/emplacements/images de façade)
       et des côtés (hideAv/Ar) — sans reconstruction ; le picking ignore déjà les meshes masqués. */
   protected applyLayerVisibility(): void {
-    [this.gRacks, this.gFree, this.gWaypoints, this.gFloorDecor].forEach((g) => g && g.traverse((o: any) => { const u = o.userData; if (u && (u.layer || u.eqSide || u.rackId)) o.visible = this.layerVisible(u); }));
+    [this.gRacks, this.gFree, this.gWaypoints, this.gFloorDecor, this.gDecor].forEach((g) => g && g.traverse((o: any) => { const u = o.userData; if (u && (u.layer || u.eqSide || u.rackId)) o.visible = this.layerVisible(u); }));
   }
 
   /** Recolore EN PLACE les occupants selon `colorMode` (face/groupe/type) — sans reconstruction. */
