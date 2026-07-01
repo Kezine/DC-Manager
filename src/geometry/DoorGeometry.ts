@@ -60,12 +60,15 @@ export class DoorGeometry {
     const leftEnd = bIsLeft ? b : a, rightEnd = bIsLeft ? a : b;
     const hinge = (door.hinge === "left") ? leftEnd : rightEnd;
     const latch = (door.hinge === "left") ? rightEnd : leftEnd;
-    // passage libre (inset du listel de chaque côté)
-    const clear = Math.max(0, door.width_mm - 2 * Math.max(0, door.frame_mm));
+    // passage libre (inset du listel de chaque côté). Le listel est borné à [0, demi-largeur] UNE fois et réutilisé
+    // partout : sinon un `frame_mm` négatif inverserait l'inset, et un `frame_mm > width/2` ferait se CROISER les
+    // extrémités du passage (clearLatch avant clearHinge) → vantail/arc incohérents. Borné → `clear` reste ≥ 0.
+    const frame = Math.min(Math.max(0, door.frame_mm), hw);
+    const clear = door.width_mm - 2 * frame;
     const dx = latch.x - hinge.x, dy = latch.y - hinge.y, len = Math.hypot(dx, dy) || 1;
     const u: DoorPt = { x: dx / len, y: dy / len };   // charnière → loquet, le long du mur
-    const clearHinge: DoorPt = { x: hinge.x + u.x * door.frame_mm, y: hinge.y + u.y * door.frame_mm };
-    const clearLatch: DoorPt = { x: latch.x - u.x * door.frame_mm, y: latch.y - u.y * door.frame_mm };
+    const clearHinge: DoorPt = { x: hinge.x + u.x * frame, y: hinge.y + u.y * frame };
+    const clearLatch: DoorPt = { x: latch.x - u.x * frame, y: latch.y - u.y * frame };
     const leafOpen: DoorPt = { x: clearHinge.x + swing.x * clear, y: clearHinge.y + swing.y * clear };
     return { a, b, hinge, latch, clearHinge, clearLatch, swing, wallDir: u, clear, leafOpen };
   }
