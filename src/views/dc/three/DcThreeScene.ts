@@ -698,6 +698,13 @@ export class DcThreeScene extends DcThreeCamera {
       grp.add(mesh);
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
       edges.position.copy(mesh.position); grp.add(edges);
+      // LISERÉ de face AVANT (−Y local) : fine bande à l'accent le long de l'arête basse avant → repère d'orientation
+      // (comme les baies). Couche "orient" (basculable via showOrientMarks).
+      const lis = Math.max(6, Math.min(b.w, b.h) * 0.06);
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(Math.max(1, b.w * 0.98), lis, lis), new THREE.MeshBasicMaterial({ color: this.theme.front }));
+      strip.position.set(0, -b.d / 2 - lis / 2 + 1, b.z + lis / 2);
+      strip.userData = { pick: { type: "occ", kind: "eq", id: e.id }, layer: "orient" };
+      grp.add(strip);
       // nom posé à plat sur la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild.
       if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2 + 1, b.z + b.h / 2, b.w * 0.9, b.h * 0.9, true);
       // ports en coords MONDE → ajoutés au groupe identité (root = gFree) ; couche "port" basculable (showPorts).

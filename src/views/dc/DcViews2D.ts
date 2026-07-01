@@ -414,6 +414,7 @@ export class DcViews2D extends DcScene3D {
     const cx = (e.dc_x != null) ? e.dc_x : b.w / 2, cy = (e.dc_y != null) ? e.dc_y : b.d / 2;
     const grp = Dom.svg("g", { class: "dc-equip" + (this.selEquipId === e.id ? " sel" : ""), transform: `translate(${cx} ${cy}) rotate(${o})`, "data-equip": e.id });
     grp.appendChild(Dom.svg("rect", { class: "dc-equip-body", x: -b.w / 2, y: -b.d / 2, width: b.w, height: b.d, rx: Math.min(b.w, b.d) * 0.04 }));
+    grp.appendChild(Dom.svg("rect", { class: "dc-equip-face", x: -b.w / 2, y: -b.d / 2, width: b.w, height: Math.max(15, b.d * 0.1) }));   // liseré = face AVANT (−Y)
     const t = Dom.svg("text", { class: "dc-equip-label", x: 0, y: 0, "text-anchor": "middle", "dominant-baseline": "central", transform: `rotate(${-o})`, "font-size": Math.max(40, Math.min(b.w, b.d) * 0.16) });
     t.textContent = e.name || "(équipement)"; grp.appendChild(t);
     grp.addEventListener("pointerdown", (ev: any) => this.onEquipPointerDown(ev, e));

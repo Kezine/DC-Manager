@@ -807,6 +807,7 @@
   .dc-equip { cursor: grab; }
   .dc-equip.dragging { cursor: grabbing; }
   .dc-equip-body { fill: var(--bg-2); stroke: var(--accent-2); stroke-width: 1.5px; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; fill-opacity: 0.85; }
+  .dc-equip-face { fill: var(--accent); opacity: 0.85; pointer-events: none; }   /* liseré = face avant (équipement libre) */
   .dc-equip:hover .dc-equip-body { stroke: var(--fg); }
   .dc-equip.sel .dc-equip-body { stroke: var(--accent); stroke-width: 2.5px; stroke-dasharray: none; }
   .dc-equip-label { fill: var(--fg); font-family: var(--mono); pointer-events: none; }
