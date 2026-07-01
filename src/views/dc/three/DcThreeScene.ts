@@ -276,7 +276,7 @@ export class DcThreeScene extends DcThreeCamera {
     if (p.face_x == null || p.face_y == null) return;
     const pt: any = this.resolver.resolvePort3D(p.id, dcId); if (!pt) return;
     const cab = this.store.cableOnPort(p.id);
-    const col = cab ? this.cableColor(cab) : 0x8893a5;
+    const col = cab ? this.cableColorHex(cab) : 0x8893a5;
     const csz = this.store.portConnectorSize(p);
     const w = Math.max(2, csz.w), h = Math.max(2, csz.h);
     const n = new THREE.Vector3(pt.n ? pt.n.x : 0, pt.n ? pt.n.y : 0, pt.n ? pt.n.z : 1);
@@ -940,7 +940,7 @@ export class DcThreeScene extends DcThreeCamera {
       const rc = this.cableVia(c, dcId);
       if (!rc) return;
       const sp = this.routing.cableLine(rc.a, rc.b, rc.via, this.opts.cablePortNormal);
-      this.emitCableTube(root, sp.linePts, sp.straight, this.cableColor(c), c.id, this.cableIsPower(c), sp.stubAt);
+      this.emitCableTube(root, sp.linePts, sp.straight, this.cableColorHex(c), c.id, this.cableIsPower(c), sp.stubAt);
     });
   }
 
@@ -1095,8 +1095,10 @@ export class DcThreeScene extends DcThreeCamera {
     });
   }
 
-  /** Couleur d'un câble = couleur de son réseau principal (gris neutre sinon). */
-  protected cableColor(c: any): number {
+  /** Couleur d'un câble = couleur de son réseau principal (gris neutre sinon), en HEX Three.js (`number`).
+      NB : distinct de `cableColor` (chaîne CSS `string|null`) des vues SVG (`DcScene3D`/`CableRouting`) — d'où le
+      suffixe `Hex` pour lever l'ambiguïté entre les deux chaînes d'héritage parallèles. */
+  protected cableColorHex(c: any): number {
     const n: any = c && c.network_id ? this.store.get("networks", c.network_id) : null;
     const hex = n && n.color ? this.parseColor(n.color) : NaN;
     return isFinite(hex) ? hex : 0x9aa6b8;
