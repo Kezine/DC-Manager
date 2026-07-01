@@ -32,14 +32,16 @@ export class Changeset {
     return { full: true, collections: [], meta: true, images: true };
   }
 
-  /** Normalise une valeur reçue (réseau, donc non fiable) en `DocumentChangeset` ; `null`/forme invalide → « tout ». */
-  static coerce(raw: unknown): DocumentChangeset {
+  /** Normalise une valeur reçue (réseau, donc non fiable) en `DocumentChangeset` ; `null`/forme invalide → « tout ».
+      `isCollection` (INJECTÉ pour garder `shared/` auto-suffisant — pas d'import de Schema) filtre les collections
+      INCONNUES : une collection factice propagée déclencherait un refetch inutile côté client. Absent → aucun filtre. */
+  static coerce(raw: unknown, isCollection?: (c: string) => boolean): DocumentChangeset {
     if (!raw || typeof raw !== "object") return Changeset.full();
     const candidate = raw as Partial<DocumentChangeset>;
     if (candidate.full) return Changeset.full();
     return {
       full: false,
-      collections: Array.isArray(candidate.collections) ? candidate.collections.filter((c) => typeof c === "string") : [],
+      collections: Array.isArray(candidate.collections) ? candidate.collections.filter((c): c is string => typeof c === "string" && (!isCollection || isCollection(c))) : [],
       meta: !!candidate.meta,
       images: !!candidate.images,
     };

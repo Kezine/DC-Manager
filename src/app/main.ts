@@ -703,7 +703,7 @@ async function boot(): Promise<void> {
           restLastBy = d.by || null;
           // accumule le périmètre de CET événement avec ceux déjà en attente (plusieurs écritures peuvent tomber
           // dans la fenêtre de debounce) → une seule reconstruction couvrant l'union des changements.
-          const incoming = Changeset.coerce(d.changeset);
+          const incoming = Changeset.coerce(d.changeset, EntityRegistry.isCollection);   // filtre les collections inconnues (évite un refetch inutile)
           pendingChangeset = pendingChangeset ? Changeset.merge(pendingChangeset, incoming) : incoming;
           clearTimeout(restReloadTO); restReloadTO = setTimeout(flushPendingReload, 250);
         }

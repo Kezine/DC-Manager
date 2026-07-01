@@ -56,6 +56,11 @@ export class EntityRegistry {
     return CLASSES[collection];
   }
 
+  /** La chaîne désigne-t-elle une collection connue ? (garde pour les entrées non fiables : réseau, import…). */
+  static isCollection(collection: string): boolean {
+    return Object.prototype.hasOwnProperty.call(CLASSES, collection);
+  }
+
   /** Hydrate un enregistrement brut en instance de la bonne classe. */
   static hydrate(collection: string, props: Props): Entity {
     const Ctor = CLASSES[collection];
