@@ -385,7 +385,7 @@ export class DcThreeScene extends DcThreeCamera {
           }
           if (img) {
             const w = (deviceFront && img.withEars) ? RACK_MOUNT_WIDTH : 2 * bodyHW;   // avec oreilles → panneau 19″ · sinon corps
-            this.faceImagePlane(group, img.url, 0, planeY, zc, w, bh, planeFront, { layer: "faceImage", eqSide });
+            this.faceImagePlane(group, img.url, 0, planeY, zc, w, bh, planeFront, { layer: "faceImage", eqSide, eqId: u.id });   // eqId → inclus dans le survol/localisation de l'équipement
           }
         };
         drawFace(this.host.faceImageUrl?.(u.id, front ? "front" : "rear"), y0 - 0.5, true, front);

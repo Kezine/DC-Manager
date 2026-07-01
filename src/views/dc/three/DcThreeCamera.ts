@@ -109,9 +109,10 @@ export class DcThreeCamera extends DcThreeBase {
     this._focusObjs = [];
     if (eqId || portId) {
       [this.gRacks, this.gFree].forEach((g) => g && g.traverse((o: any) => {
-        const p = o.userData && o.userData.pick; if (!p) return;
-        if (eqId && p.type === "occ" && p.id === eqId) this._focusObjs.push(o);          // équipement
-        else if (portId && p.type === "port" && p.id === portId) this._focusObjs.push(o);  // port (même surbrillance ambre)
+        const ud = o.userData; if (!ud) return;
+        const p = ud.pick;
+        if (eqId && ((p && p.type === "occ" && p.id === eqId) || ud.eqId === eqId)) this._focusObjs.push(o);   // équipement (+ ses plans d'image, tagués eqId)
+        else if (portId && p && p.type === "port" && p.id === portId) this._focusObjs.push(o);                 // port (même surbrillance ambre)
       }));
       this._focusObjs.forEach((o) => this.setFocusHi(o, true));
     }
@@ -141,8 +142,13 @@ export class DcThreeCamera extends DcThreeBase {
       }
       return;
     }
-    if (on) { if (m.emissive) { (mesh as any).userData._focEmi = m.emissive.getHex(); m.emissive.setHex(HI); } }
-    else if ((mesh as any).userData._focEmi != null && m.emissive) { m.emissive.setHex((mesh as any).userData._focEmi); (mesh as any).userData._focEmi = null; }
+    if (on) {
+      if (m.emissive) { (mesh as any).userData._focEmi = m.emissive.getHex(); m.emissive.setHex(HI); }
+      else if (m.color) { (mesh as any).userData._focCol = m.color.getHex(); m.color.setHex(0xffce8a); }   // plan d'image (MeshBasic) → teinte ambre
+    } else {
+      if ((mesh as any).userData._focEmi != null && m.emissive) { m.emissive.setHex((mesh as any).userData._focEmi); (mesh as any).userData._focEmi = null; }
+      if ((mesh as any).userData._focCol != null && m.color) { m.color.setHex((mesh as any).userData._focCol); (mesh as any).userData._focCol = null; }
+    }
   }
 
   /** Recentre le PIVOT d'orbite sur le point de scène au CENTRE de l'écran (1re surface, sinon plan du sol). Ce point
@@ -704,6 +710,11 @@ export class DcThreeCamera extends DcThreeBase {
       this.gRacks && this.gRacks.traverse((o: any) => { if (o.userData && o.userData.pick && o.userData.pick.type === "rack" && o.userData.pick.id === p.id) this._hoverObjs.push(o); });
     } else {
       this._hoverObjs = [target];
+      // Équipement EN RACK : son image de face est un PLAN séparé (MeshBasic) posé devant la boîte → l'inclure pour
+      // qu'il réagisse aussi au survol (sinon la boîte se surligne mais l'image, la partie visible, non).
+      if (p && p.type === "occ" && p.id) {
+        [this.gRacks, this.gFree].forEach((g) => g && g.traverse((o: any) => { if (o.userData && o.userData.eqId === p.id && o !== target) this._hoverObjs.push(o); }));
+      }
     }
     this._hoverObjs.forEach((o: THREE.Object3D) => this.setHover(o, true));
   }
