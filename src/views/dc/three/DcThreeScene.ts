@@ -8,6 +8,7 @@ import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { RackGeometry } from "../../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
+import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import { Normalize } from "../../../core/Normalize";
 import { EquipmentTypes } from "../../../registries/EquipmentTypes";
 import { Depths } from "../../../registries/Depths";
@@ -185,6 +186,32 @@ export class DcThreeScene extends DcThreeCamera {
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ color: this.theme.floor, roughness: 0.95, metalness: 0 }));
     floor.position.set(W / 2, D / 2, -1); floor.userData = { pick: { type: "room", id: dc.id } }; group.add(floor);   // clic droit sol → menu salle (activer / isoler / simple DC)
     group.add(this.gridLines(W, D, dc.cell_mm || 600, this.theme.grid));
+    this.buildDoors(dc, group);   // portes collées aux murs (cadre/listel + vantail + passage)
+  }
+
+  /** Portes de salle en 3D : cadre (2 jambages + linteau) + vantail OUVERT à 90°, debout sur les murs (coords salle
+      locales). Géométrie 2D de `DoorGeometry` EXTRUDÉE en hauteur. Cliquable (clic droit → édition). */
+  protected buildDoors(dc: any, group: THREE.Group): void {
+    const doors = dc.doors || []; if (!doors.length) return;
+    const room = { w: dc.width_mm || 4000, h: dc.depth_mm || 3000 };
+    const frameCol = 0x9aa2ab, leafCol = 0xc6ccd2;
+    doors.forEach((door: any) => {
+      const g = DoorGeometry.geom(door, room), H = Math.max(100, door.height_mm || 2100), u = g.wallDir;
+      const fd = Math.max(80, Math.min(300, (door.frame_mm || 0) * 2 || 120));   // profondeur visuelle (traversée du mur)
+      const perpWall = { x: Math.abs(u.y), y: Math.abs(u.x) };   // axe ⟂ au mur (straddle du cadre)
+      const alongWall = { x: Math.abs(u.x), y: Math.abs(u.y) };  // axe du mur (épaisseur du vantail)
+      const pick = { type: "door", dcId: dc.id, id: door.id };
+      // boîte entre pA et pB (le long d'un axe), ± ep/2 sur l'axe `axP`, de z0 à z1
+      const seg = (pA: any, pB: any, axP: any, ep: number, z0: number, z1: number, col: number) => {
+        const x0 = Math.min(pA.x, pB.x) - axP.x * ep / 2, x1 = Math.max(pA.x, pB.x) + axP.x * ep / 2;
+        const y0 = Math.min(pA.y, pB.y) - axP.y * ep / 2, y1 = Math.max(pA.y, pB.y) + axP.y * ep / 2;
+        this.localBox(group, x0, x1, y0, y1, z0, z1, col, pick);
+      };
+      seg(g.hinge, g.clearHinge, perpWall, fd, 0, H, frameCol);   // jambage charnière (largeur = listel)
+      seg(g.latch, g.clearLatch, perpWall, fd, 0, H, frameCol);   // jambage loquet
+      seg(g.a, g.b, perpWall, fd, H - Math.max(80, door.frame_mm || 100), H, frameCol);   // linteau (haut)
+      seg(g.clearHinge, g.leafOpen, alongWall, 40, 0, H, leafCol);   // vantail ouvert 90° (panneau fin)
+    });
   }
 
   /** Remplit le groupe des baies d'une salle ; renvoie la hauteur max (cadrage). */

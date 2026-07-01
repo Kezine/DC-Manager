@@ -517,6 +517,7 @@ export class DcBase {
       case "wp": { const w = s.get("waypoints", desc.id); sections = w ? this.waypointCtx(w) : null; break; }
       case "port": { const p = s.get("ports", desc.id); sections = p ? this.portCtx(p, s.cableOnPort(p.id)) : null; break; }
       case "room": { const d = s.get("datacenters", desc.id); sections = d ? this.roomCtx(d) : null; break; }   // clic droit sur le sol d'un DC
+      case "door": { const d = s.get("datacenters", desc.dcId); const dr = d && (d.doors || []).find((x: any) => x.id === desc.id); sections = (d && dr) ? this.doorCtx(d, dr) : null; break; }
     }
     // appel DIRECT (pas via `ctxMenu`, qui attend un vrai MouseEvent pour `stopPropagation`) : le moteur WebGL a
     // déjà filtré l'orbite via `_navMovedR` avant d'appeler ctxCb.
