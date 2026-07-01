@@ -43,6 +43,7 @@ export interface DcThreeOptions {
   colorMode: "face" | "group" | "type";
   showAllCables: boolean; selCables: Set<string>;
   hiddenRacks: Set<string>;   // baies masquées (hidden3dRacks) — bascule de visibilité du groupe de baie + ses ports
+  hiddenEquips: Set<string>;  // équipements LIBRES masqués (hidden3dEquips) — non construits (rebuildFree au changement)
   showWaypoints: boolean; showConduits: boolean;
   cableSplineK: number;   // tension du spline cardinal des câbles (1/6 ≈ défaut)
   cablePortNormal: boolean;   // sortie ⊥ des ports : amorce droite de 20 mm le long de la normale avant l'arrondi
@@ -123,7 +124,7 @@ export class DcThreeBase {
   protected frameArgs: [number, number, number, number, number, number] | null = null;   // derniers args de cadrage
 
   // options d'affichage (poussées par DcBase ; défauts = tout visible)
-  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cablePortNormal: false, showEqNames: true, showRackSides: false, showPorts: true, showDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
+  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), hiddenEquips: new Set(), showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cablePortNormal: false, showEqNames: true, showRackSides: false, showPorts: true, showDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
   protected _pivot: THREE.Sprite | null = null;   // marqueur du centre de rotation (sprite billboard, taille écran constante)
   // FOCUS « Localiser » : cible caméra demandée par la vue (centre + emprise). Appliquée juste avant le rendu,
   // donc APRÈS le cadrage par défaut d'un éventuel (re)build → le focus prime. En attente tant que la scène n'est pas prête.

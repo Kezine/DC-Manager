@@ -1091,6 +1091,7 @@ async function boot(): Promise<void> {
     openRackForm: (id) => Forms.rack(store, formHost, id, () => shell.refreshActive()),
     openRackDetail: (id) => Forms.rackDetail(store, formHost, id, () => shell.refreshActive()),
     openEquipmentDetail: (id) => Forms.equipmentDetail(store, formHost, id, () => shell.refreshActive()),
+    openEquipmentForm: (id) => Forms.equipment(store, formHost, id, () => shell.refreshActive()),   // modale d'ÉDITION (≠ détail)
     openCableForm: (id, opts) => Forms.cable(store, formHost, id, () => shell.refreshActive(), opts),
     assignSlot: (rackId, u, side, height, onDone) => Forms.assignSlot(store, formHost, rackId, u, side, height, onDone),
     assignSideSlot: (rackId, face, lr, col, uTop, onDone) => Forms.assignSideSlot(store, formHost, rackId, face, lr, col, uTop, onDone),
@@ -1271,11 +1272,11 @@ async function boot(): Promise<void> {
   let refreshQueued = false;
   store.onChange(() => {
     if (booted) session.setRevision(store.histIndex());   // révision modèle → dirty par comparaison (undo→point sauvé = propre)
-    // REST : histIndex() est figé à 0 (le serveur fait autorité, pas d'historique client) → la garde de révision
-    // du rendu 3D croirait toujours la scène à jour et ne ferait qu'un diff d'options (ex. suppression d'un cache /
-    // blanking plate jamais répercutée). Toute mutation invalide donc explicitement le cache de build WebGL → rebuild
-    // COMPLET au prochain refresh (cohérent avec le mode fichier, où histIndex change à chaque mutation).
-    if (REST_MODE) dcView.invalidate3D();
+    // Toute mutation de données invalide EXPLICITEMENT le cache de build WebGL → rebuild COMPLET au prochain refresh.
+    // Indispensable en REST (histIndex() figé à 0, la garde de révision croirait la scène à jour) ET robuste en mode
+    // fichier — sinon certaines mutations déclenchées hors drag (menu contextuel : retrait, rotation…) pouvaient ne
+    // pas se répercuter en 3D. markStale est bon marché ; le rebuild n'a lieu qu'au render suivant (déjà planifié).
+    dcView.invalidate3D();
     refreshChrome();   // cheap (pastille save + undo/redo) → toujours synchrone, jamais sauté
     if (refreshQueued) return;
     refreshQueued = true;

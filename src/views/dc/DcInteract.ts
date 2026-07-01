@@ -423,10 +423,19 @@ export class DcInteract extends DcPanels {
     const rotate = (deg: number) => async () => { const o: any = this.store.get("equipments", eqId); if (!o) return; await this.store.update("equipments", eqId, { dc_orientation: Normalize.rackOrientation((o.dc_orientation || 0) + deg) }); this.setDirty(); };
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [
       { label: "Détails…", action: () => this.host.openEquipmentDetail?.(eqId) },
-      { label: "Modifier…", action: () => this.host.openEquipmentDetail?.(eqId) },
+      { label: "Modifier…", action: () => this.host.openEquipmentForm?.(eqId) },   // modale d'ÉDITION (pas la fiche d'info)
     ];
     // rotation au sol : pertinente pour un équipement LIBRE (boîtier orienté). En U, l'orientation suit la baie.
     if (e.dim_mode === "free") items.push({ label: "↻ Pivoter 90°", action: rotate(90) }, { label: "⟲ Pivoter 180°", action: rotate(180) });
+    // masquage 3D/2D par ÉQUIPEMENT / TYPE / GROUPE (équipements libres) — piloté aussi depuis le panneau « Équipements libres ».
+    if (e.dim_mode === "free") {
+      const dcIds = this.displayedDcIds(this.current());
+      const setHidden = (ids: string[], hide: boolean) => { ids.forEach((id) => { if (hide) this.hidden3dEquips.add(id); else this.hidden3dEquips.delete(id); }); this.reflow(); this.renderSide(this.current()); };
+      const matching = (pred: (x: any) => boolean) => this.store.all("equipments").filter((x: any) => x.dim_mode === "free" && x.dc_x != null && dcIds.includes(x.dc_id) && pred(x)).map((x: any) => x.id);
+      items.push({ label: this.hidden3dEquips.has(eqId) ? "Afficher cet équipement" : "Masquer cet équipement", action: () => setHidden([eqId], !this.hidden3dEquips.has(eqId)) });
+      items.push({ label: "Masquer le type « " + EquipmentTypes.label(e.type) + " »", action: () => setHidden(matching((x) => x.type === e.type), true) });
+      if (e.group_id) { const g: any = this.store.get("groups", e.group_id); items.push({ label: "Masquer le groupe « " + ((g && g.label) || "?") + " »", action: () => setHidden(matching((x) => x.group_id === e.group_id), true) }); }
+    }
     items.push(
       { label: "Créer un câble…", action: () => this.host.openCableForm?.(null, { fromEqId: eqId }) },
       { label: placed ? "Retirer du datacenter" : "Renvoyer en « Non placé »", danger: true, action: removeAction },
@@ -583,7 +592,7 @@ export class DcInteract extends DcPanels {
   protected floorEquipCtx(eq: any): CtxSection[] {
     const rotate = (deg: number) => async () => { const o: any = this.store.get("equipments", eq.id); if (!o) return; await this.store.update("equipments", eq.id, { dc_orientation: Normalize.rackOrientation((o.dc_orientation || 0) + deg) }); this.selFloorEquip = eq.id; this.setDirty(); };
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [
-      { label: "Modifier…", action: () => this.host.openEquipmentDetail?.(eq.id) },
+      { label: "Modifier…", action: () => this.host.openEquipmentForm?.(eq.id) },   // modale d'ÉDITION
       { label: "Fiche / détails…", action: () => this.host.openEquipmentDetail?.(eq.id) },
       { label: "↻ Pivoter 90°", action: rotate(90) },
       { label: "⟲ Pivoter 180°", action: rotate(180) },

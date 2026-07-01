@@ -262,8 +262,12 @@ export class DcThreeScene extends DcThreeCamera {
   /** Recolore EN PLACE les occupants selon `colorMode` (face/groupe/type) — sans reconstruction. */
   protected applyColorMode(): void {
     [this.gRacks, this.gFree].forEach((g) => g && g.traverse((o: any) => {
-      const p = o.userData && o.userData.pick, m: any = (o as any).material;
-      if (p && p.type === "occ" && m && m.color) m.color.setHex(this.occColor({ kind: p.kind, id: p.id }));
+      const p = o.userData && o.userData.pick; if (!(p && p.type === "occ")) return;
+      const col = this.occColor({ kind: p.kind, id: p.id }), m: any = (o as any).material;
+      // multi-matériaux (boîte d'équip. libre à 6 faces) : recolorer chaque face SANS image (les texturées gardent
+      // leur blanc pour afficher l'image fidèlement). Mono-matériau (occupant de baie) : recolorer si pas de texture.
+      if (Array.isArray(m)) m.forEach((x: any) => { if (x && x.color && !x.map) x.color.setHex(col); });
+      else if (m && m.color && !m.map) m.color.setHex(col);
     }));
   }
   protected rebuildWaypoints(): void { if (this.gWaypoints) this.eachRoom(this.gWaypoints, (dc, g) => this.buildWaypoints(dc.id, g)); this.collectScreenObjs(); this.applyLayerVisibility(); }
@@ -299,8 +303,12 @@ export class DcThreeScene extends DcThreeCamera {
     }
     if (!this.content || curKey !== newKey) { this.build(dcId); this.request(); return; }
     if (eqVis) this.applyLayerVisibility(); if (eqColor) this.applyColorMode();   // visibilité / recoloration en place (jamais de rebuild)
+    // équipements LIBRES masqués : ils sont SAUTÉS à la construction (pas de couche de visibilité) → reconstruire le
+    // seul groupe des équipements libres (peu coûteux). Distinct de hiddenRacks (visibilité en place).
+    const freeVis = !this.sameSet(old.hiddenEquips || new Set(), opts.hiddenEquips || new Set());
+    if (freeVis) this.rebuildFree();
     if (cb) this.rebuildCables();
-    if (eqVis || eqColor || cb) this.request();
+    if (eqVis || eqColor || cb || freeVis) this.request();
   }
 
   private sameSet(a: Set<string>, b: Set<string>): boolean { if (a.size !== b.size) return false; for (const x of a) if (!b.has(x)) return false; return true; }
@@ -670,8 +678,11 @@ export class DcThreeScene extends DcThreeCamera {
       const g: any = e.group_id ? this.store.get("groups", e.group_id) : null;
       const c = g && g.color ? this.parseColor(g.color) : NaN; return isFinite(c) ? c : 0x6c7a8c;
     }
-    if (this.opts.colorMode === "type") { const c = this.parseColor(EquipmentTypes.color(e.type)); return isFinite(c) ? c : 0x6c7a8c; }
-    return 0x6c7a8c;   // mode « face » : couleur neutre (le moteur SVG s'appuie sur le CSS, non porté ici)
+    // « type » explicite ; ou « face » sur un équipement LIBRE (pas de panneau 19″ coloré par face → repli sur le type).
+    if (this.opts.colorMode === "type" || (this.opts.colorMode === "face" && e.dim_mode === "free")) {
+      const c = this.parseColor(EquipmentTypes.color(e.type)); return isFinite(c) ? c : 0x6c7a8c;
+    }
+    return 0x6c7a8c;   // mode « face » (baie) : couleur neutre (le moteur SVG s'appuie sur le CSS, non porté ici)
   }
 
   /* ---- équipements libres + waypoints de salle ---- */
@@ -679,6 +690,7 @@ export class DcThreeScene extends DcThreeCamera {
   protected buildFreeEquip(dcId: string, root: THREE.Group): void {
     this.store.freeEquipsOfDc(dcId).forEach((e: any) => {
       if (e.dc_x == null || e.dc_y == null) return;
+      if (this.opts.hiddenEquips && this.opts.hiddenEquips.has(e.id)) return;   // équipement libre masqué (panneau / menu contextuel)
       const b = FreeEquipGeometry.box(e);
       const o = Normalize.rackOrientation(e.dc_orientation) * Math.PI / 180;
       const color = this.occColor({ kind: "eq", id: e.id });

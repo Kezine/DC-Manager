@@ -214,12 +214,14 @@ export class DcPanels extends DcViews2D {
       side.appendChild(this.collapsible(this.poolRacksCard(dc), "pool"));
       side.appendChild(this.collapsible(this.poolFreeEquipCard(dc), "freepool"));
       side.appendChild(this.collapsible(this.racks3dCard(dc), "rack3d"));   // visibilité des baies — respectée par renderTop
+      side.appendChild(this.collapsible(this.freeEquip3dCard(dc), "freeeq3d"));   // visibilité des équipements libres (par équip. / type / groupe)
       side.appendChild(this.collapsible(this.waypointsCard(dc), "waypoints"));
       side.appendChild(this.collapsible(this.cableCard(dc), "cables"));
       side.appendChild(this.collapsible(this.view3dOptionsCard(), "view3d"));   // Affichage (waypoints, repères) — view-aware
     } else {
       side.appendChild(this.collapsible(this.dcScopeCard(dc), "dcscope"));   // Datacenters affichés / Vue étage
       side.appendChild(this.collapsible(this.racks3dCard(dc), "rack3d"));
+      side.appendChild(this.collapsible(this.freeEquip3dCard(dc), "freeeq3d"));   // visibilité des équipements libres (par équip. / type / groupe)
       side.appendChild(this.collapsible(this.cableCard(dc), "cables"));
       side.appendChild(this.collapsible(this.view3dOptionsCard(), "view3d"));
     }
@@ -576,6 +578,53 @@ export class DcPanels extends DcViews2D {
       tog.classList.add("tgl-row");
       const bIso = this.btn("Isoler", () => this.isolateRack(r.id), "N'afficher que ce rack et le cibler");
       row.append(tog, bIso); list.appendChild(row);
+    });
+    box.appendChild(list); return box;
+  }
+
+  /* ---- carte ÉQUIPEMENTS LIBRES (visibilité par équipement / type / groupe) — vues 3D + Dessus ---- */
+  protected freeEquip3dCard(dc: any): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Équipements libres"; box.appendChild(t);
+    const equips = this.displayedDcIds(dc).flatMap((id) => this.store.freeEquipsOfDc(id))
+      .filter((e: any) => e.dc_x != null && e.dc_y != null)
+      .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+    if (!equips.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucun équipement libre placé dans cette salle."; box.appendChild(h); return box; }
+    const apply = () => { this.reflow(); this.renderSide(this.current()); };   // rebuild du groupe libre + rafraîchit les états du panneau
+    const quick = document.createElement("div"); quick.className = "dc-card-acts";
+    quick.append(
+      this.btn("Tout afficher", () => { equips.forEach((e: any) => this.hidden3dEquips.delete(e.id)); apply(); }),
+      this.btn("Tout masquer", () => { equips.forEach((e: any) => this.hidden3dEquips.add(e.id)); apply(); }),
+    );
+    box.appendChild(quick);
+    // Masquage GROUPÉ (par type / par groupe) : un bouton par catégorie ; masque/affiche TOUS ses équipements.
+    const bulkRow = (label: string, entries: Array<{ label: string; list: any[] }>) => {
+      if (entries.length < 2) return;   // 0/1 catégorie → rien à filtrer
+      const wrap = document.createElement("div"); wrap.style.cssText = "margin:6px 0";
+      const lab = document.createElement("div"); lab.className = "form-hint"; lab.style.cssText = "margin:0 0 3px"; lab.textContent = label; wrap.appendChild(lab);
+      const chips = document.createElement("div"); chips.style.cssText = "display:flex;flex-wrap:wrap;gap:4px";
+      entries.forEach((en) => {
+        const shown = en.list.some((e: any) => !this.hidden3dEquips.has(e.id));
+        const b = this.btn(en.label + " (" + en.list.length + ")", () => {
+          const hide = en.list.some((e: any) => !this.hidden3dEquips.has(e.id));   // au moins un visible → on masque tout ; sinon on affiche tout
+          en.list.forEach((e: any) => { if (hide) this.hidden3dEquips.add(e.id); else this.hidden3dEquips.delete(e.id); });
+          apply();
+        }, "Masquer / afficher tous les équipements de cette catégorie");
+        if (shown) b.classList.add("active");
+        chips.appendChild(b);
+      });
+      wrap.appendChild(chips); box.appendChild(wrap);
+    };
+    const byType = new Map<string, any[]>(); equips.forEach((e: any) => { const k = e.type || "?"; (byType.get(k) || byType.set(k, []).get(k))!.push(e); });
+    bulkRow("Par type", [...byType.entries()].map(([k, list]) => ({ label: EquipmentTypes.label(k), list })));
+    const byGroup = new Map<string, any[]>(); equips.forEach((e: any) => { const k = e.group_id || ""; if (!k) return; (byGroup.get(k) || byGroup.set(k, []).get(k))!.push(e); });
+    bulkRow("Par groupe", [...byGroup.entries()].map(([k, list]) => ({ label: (this.store.get("groups", k) as any)?.label || "(groupe)", list })));
+    // liste par équipement (comme le panneau des baies)
+    const list = document.createElement("div"); list.className = "dc-layers";
+    equips.forEach((e: any) => {
+      const row = document.createElement("div"); row.className = "dc-rack-row";
+      const tog = FormControls.toggle(e.name || "(équipement)", !this.hidden3dEquips.has(e.id), (v: boolean) => { if (v) this.hidden3dEquips.delete(e.id); else this.hidden3dEquips.add(e.id); this.reflow(); });
+      tog.classList.add("tgl-row"); row.append(tog); list.appendChild(row);
     });
     box.appendChild(list); return box;
   }

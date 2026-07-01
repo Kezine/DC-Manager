@@ -48,7 +48,7 @@ export class DcViews2D extends DcScene3D {
     if (this.showOrientMarks) { const th = Math.max(40, Math.min(W, D) * 0.012); gRoot.appendChild(Dom.svg("rect", { class: "dc-floor-room-front", x: 0, y: 0, width: W, height: th })); }   // liseré FRONT
     if (this.showDoorSwing) this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) { const sw = this.doorSwingNode(r); if (sw) gRoot.appendChild(sw); } });   // débattement des portes (sous les baies)
     this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) gRoot.appendChild(this.rackNode(r)); });
-    this.store.freeEquipsOfDc(dc.id).forEach((e: any) => { if (e.dc_x != null && e.dc_y != null) gRoot.appendChild(this.equipNode(e)); });
+    this.store.freeEquipsOfDc(dc.id).forEach((e: any) => { if (e.dc_x != null && e.dc_y != null && !this.hidden3dEquips.has(e.id)) gRoot.appendChild(this.equipNode(e)); });
     this.drawCables2D(gRoot, dc);   // filtré par cableShown (showAllCables / selCables) à l'intérieur
     if (this.showWaypoints) this.store.waypointsOfDc(dc.id).forEach((wp: any) => { if (this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.waypointNode2D(wp, dc)); });
     this.posTool.drawOverlay(gRoot);   // aide au positionnement (coins/cotes ⟂) — avant la mesure et le redressement des labels
