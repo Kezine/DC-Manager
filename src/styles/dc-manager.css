@@ -817,10 +817,10 @@
   .dc-door { cursor: grab; }
   .dc-door.static { cursor: default; }
   .dc-door-hit { stroke: transparent; stroke-width: 16px; vector-effect: non-scaling-stroke; pointer-events: stroke; }
-  .dc-door-frame { fill: var(--fg); fill-opacity: 0.85; stroke: none; pointer-events: none; }   /* listel = butée pleine qui rentre dans l'ouverture (le « stop ») */
-  .dc-door-jamb { stroke: var(--fg); stroke-width: 2px; vector-effect: non-scaling-stroke; stroke-linecap: round; pointer-events: none; }   /* bord de l'ouverture (jambage) */
+  .dc-door-frame { fill: var(--fg); fill-opacity: 0.85; stroke: none; pointer-events: none; }   /* listel = RÉSERVATION pleine aux extrémités (butée de fermeture) → réduit le passage */
+  .dc-door-leaf { fill: var(--fg); fill-opacity: 0.16; stroke: var(--fg); stroke-opacity: 0.45; stroke-width: 1.5px; vector-effect: non-scaling-stroke; pointer-events: none; }   /* surface PLEINE de la porte (largeur × épaisseur schématique) */
   .dc-door-clear { stroke: var(--accent); stroke-width: 2.5px; vector-effect: non-scaling-stroke; pointer-events: none; }
-  .dc-door-leaf { stroke: var(--fg); stroke-width: 2px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .dc-door-leaf-open { stroke: var(--fg); stroke-width: 2px; vector-effect: non-scaling-stroke; pointer-events: none; }   /* vantail ouvert 90° (débattement) */
   .dc-door-swing { fill: var(--accent); fill-opacity: 0.14; stroke: var(--accent); stroke-opacity: 0.55; stroke-width: 1.5px; vector-effect: non-scaling-stroke; pointer-events: none; }   /* débattement = secteur rempli, comme les baies */
   .dc-door-label { fill: var(--accent); font-family: var(--mono); font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
   .dc-equip:hover .dc-equip-body { stroke: var(--fg); }

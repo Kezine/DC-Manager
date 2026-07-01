@@ -476,20 +476,28 @@ export class DcViews2D extends DcScene3D {
     const fill = (): void => {
       while (g.firstChild) g.removeChild(g.firstChild);
       const gg = DoorGeometry.geom(cur, room);
+      const sw = gg.swing, th = Math.max(cur.frame_mm || 0, 60);   // épaisseur schématique de la PORTE (⟂ au mur, côté ouverture)
+      // bloc rectangulaire le long du mur (p1→p2) prolongé de `th` côté ouverture
+      const rectPoly = (p1: any, p2: any, cls: string) => Dom.svg("polygon", { class: cls, points: [p1, p2, { x: p2.x + sw.x * th, y: p2.y + sw.y * th }, { x: p1.x + sw.x * th, y: p1.y + sw.y * th }].map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" ") });
       g.appendChild(Dom.svg("line", { class: "dc-door-hit", x1: gg.a.x, y1: gg.a.y, x2: gg.b.x, y2: gg.b.y }));   // zone de clic (le long de l'ouverture)
-      // débattement = SECTEUR rempli (quart de disque), même style que les baies (pivot inséré, rayon = passage libre)
-      const seg = ["M " + gg.clearHinge.x + " " + gg.clearHinge.y];
-      DoorGeometry.arcPoints(gg, 16).forEach((p) => seg.push("L " + p.x.toFixed(1) + " " + p.y.toFixed(1)));
-      seg.push("Z");
-      g.appendChild(Dom.svg("path", { class: "dc-door-swing", d: seg.join(" ") }));
-      // LISTEL = BUTÉES qui RENTRENT dans l'ouverture (côté ouverture, ⟂ au mur) : c'est le « stop » de la porte ;
-      // elles réduisent le passage libre. Dessinées en « négatif » (bloc plein qui empiète sur l'ouverture).
-      const sw = gg.swing, dep = Math.max(cur.frame_mm || 0, 40);   // saillie = épaisseur du listel (« à l'intérieur » de l'ouverture, pas une profondeur arbitraire)
-      const stopBlock = (pOpen: any, pClear: any) => Dom.svg("polygon", { class: "dc-door-frame", points: [pOpen, pClear, { x: pClear.x + sw.x * dep, y: pClear.y + sw.y * dep }, { x: pOpen.x + sw.x * dep, y: pOpen.y + sw.y * dep }].map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" ") });
-      if ((cur.frame_mm || 0) > 0) { g.appendChild(stopBlock(gg.hinge, gg.clearHinge)); g.appendChild(stopBlock(gg.latch, gg.clearLatch)); }
-      [gg.a, gg.b].forEach((p) => g.appendChild(Dom.svg("line", { class: "dc-door-jamb", x1: p.x, y1: p.y, x2: p.x + sw.x * dep, y2: p.y + sw.y * dep })));   // bords de l'ouverture (jambages)
-      g.appendChild(Dom.svg("line", { class: "dc-door-clear", x1: gg.clearHinge.x, y1: gg.clearHinge.y, x2: gg.clearLatch.x, y2: gg.clearLatch.y }));   // passage LIBRE (seuil)
-      g.appendChild(Dom.svg("line", { class: "dc-door-leaf", x1: gg.clearHinge.x, y1: gg.clearHinge.y, x2: gg.leafOpen.x, y2: gg.leafOpen.y }));   // vantail (ouvert 90°)
+      // DÉBATTEMENT = SECTEUR rempli (quart de disque), même style ET même toggle (showDoorSwing) que les portes de baie
+      if (this.showDoorSwing) {
+        const seg = ["M " + gg.clearHinge.x + " " + gg.clearHinge.y];
+        DoorGeometry.arcPoints(gg, 16).forEach((p) => seg.push("L " + p.x.toFixed(1) + " " + p.y.toFixed(1)));
+        seg.push("Z");
+        g.appendChild(Dom.svg("path", { class: "dc-door-swing", d: seg.join(" ") }));
+      }
+      // VANTAIL à la PLEINE largeur du formulaire (a→b) = surface de la PORTE (fermée, à plat sur le mur).
+      g.appendChild(rectPoly(gg.a, gg.b, "dc-door-leaf"));
+      // LISTEL = RÉSERVATION dessinée À L'INTÉRIEUR de la surface de la porte, aux 2 extrémités (a→clearHinge,
+      // clearLatch→b). C'est la butée de fermeture → le passage libre au milieu est TOUJOURS plus petit que la porte.
+      if ((cur.frame_mm || 0) > 0) {
+        g.appendChild(rectPoly(gg.a, gg.clearHinge, "dc-door-frame"));
+        g.appendChild(rectPoly(gg.clearLatch, gg.b, "dc-door-frame"));
+      }
+      g.appendChild(Dom.svg("line", { class: "dc-door-clear", x1: gg.clearHinge.x, y1: gg.clearHinge.y, x2: gg.clearLatch.x, y2: gg.clearLatch.y }));   // passage LIBRE (largeur max d'équipement) au ras du mur
+      // vantail OUVERT à 90° : fait partie du débattement → même toggle
+      if (this.showDoorSwing) g.appendChild(Dom.svg("line", { class: "dc-door-leaf-open", x1: gg.clearHinge.x, y1: gg.clearHinge.y, x2: gg.leafOpen.x, y2: gg.leafOpen.y }));
       const mx = (gg.clearHinge.x + gg.clearLatch.x) / 2, my = (gg.clearHinge.y + gg.clearLatch.y) / 2;
       const t = Dom.svg("text", { class: "dc-door-label", x: mx + gg.swing.x * 170, y: my + gg.swing.y * 170, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 190 });
       t.textContent = Math.round(gg.clear) + " mm"; g.appendChild(t);
