@@ -305,7 +305,8 @@ export class DcThreeScene extends DcThreeCamera {
     if (eqVis) this.applyLayerVisibility(); if (eqColor) this.applyColorMode();   // visibilité / recoloration en place (jamais de rebuild)
     // équipements LIBRES masqués : ils sont SAUTÉS à la construction (pas de couche de visibilité) → reconstruire le
     // seul groupe des équipements libres (peu coûteux). Distinct de hiddenRacks (visibilité en place).
-    const freeVis = !this.sameSet(old.hiddenEquips || new Set(), opts.hiddenEquips || new Set());
+    const figChanged = old.showFigure !== opts.showFigure || JSON.stringify(old.figure || null) !== JSON.stringify(opts.figure || null);
+    const freeVis = !this.sameSet(old.hiddenEquips || new Set(), opts.hiddenEquips || new Set()) || figChanged;   // le personnage vit dans le groupe libre
     if (freeVis) this.rebuildFree();
     if (cb) this.rebuildCables();
     if (eqVis || eqColor || cb || freeVis) this.request();
@@ -733,6 +734,28 @@ export class DcThreeScene extends DcThreeCamera {
       // ports en coords MONDE → ajoutés au groupe identité (root = gFree) ; couche "port" basculable (showPorts).
       this.store.portsOf(e.id).forEach((p: any) => this.addPort(root, p, dcId));
     });
+    // PERSONNAGE d'échelle (repère personnel, vue seule) : dans la salle ACTIVE uniquement, aux coords salle.
+    if (dcId === this.builtDc && this.opts.showFigure && this.opts.figure) this.buildHumanFigure(root, this.opts.figure.dcX, this.opts.figure.dcY, this.opts.figure.orient || 0);
+  }
+
+  /** Humanoïde procédural (~1,75 m) = repère d'échelle. Primitives Three.js (autonome, hors-ligne) ; posé debout
+      sur z=0 aux coords (x,y) de la salle. Non interactif (positionné via les vues 2D). */
+  protected buildHumanFigure(group: THREE.Group, x: number, y: number, orient: number): void {
+    const fig = new THREE.Group(); fig.position.set(x, y, 0); fig.rotation.z = (orient || 0) * Math.PI / 180;
+    const mat = new THREE.MeshStandardMaterial({ color: 0x5b8cc4, roughness: 0.75, metalness: 0.05 });   // teinte « mannequin » distincte
+    const cyl = (rt: number, rb: number, h: number, cx: number, cz: number): void => {
+      const g = new THREE.CylinderGeometry(rt, rb, h, 16); g.rotateX(Math.PI / 2);   // axe Y → Z (debout)
+      const m = new THREE.Mesh(g, mat); m.position.set(cx, 0, cz); fig.add(m);
+    };
+    cyl(75, 70, 900, -110, 450);   // jambe gauche (0→900)
+    cyl(75, 70, 900, 110, 450);    // jambe droite
+    cyl(150, 200, 560, 0, 1180);   // torse (900→1460)
+    cyl(60, 55, 640, -235, 1140);  // bras gauche
+    cyl(60, 55, 640, 235, 1140);   // bras droit
+    cyl(55, 55, 70, 0, 1495);      // cou
+    const head = new THREE.Mesh(new THREE.SphereGeometry(115, 20, 16), mat); head.position.set(0, 0, 1635); fig.add(head);   // tête (top ≈ 1750)
+    fig.userData = { figure: true };   // pas de `pick` → non survolable/cliquable en 3D
+    group.add(fig);
   }
 
   /** Pose (async) une image de façade sur un MATÉRIAU (face d'une BoxGeometry d'équipement libre) — même cache/loader

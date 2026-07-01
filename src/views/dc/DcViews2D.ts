@@ -49,6 +49,7 @@ export class DcViews2D extends DcScene3D {
     if (this.showDoorSwing) this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) { const sw = this.doorSwingNode(r); if (sw) gRoot.appendChild(sw); } });   // débattement des portes (sous les baies)
     this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) gRoot.appendChild(this.rackNode(r)); });
     this.store.freeEquipsOfDc(dc.id).forEach((e: any) => { if (e.dc_x != null && e.dc_y != null && !this.hidden3dEquips.has(e.id)) gRoot.appendChild(this.equipNode(e)); });
+    if (this.showFigure) { this.figureEnsure(dc); gRoot.appendChild(this.figureNode2D(this.figure!.dcX, this.figure!.dcY, this.figure!.orient || 0, "top")); }   // personnage d'échelle (repère de vue)
     this.drawCables2D(gRoot, dc);   // filtré par cableShown (showAllCables / selCables) à l'intérieur
     if (this.showWaypoints) this.store.waypointsOfDc(dc.id).forEach((wp: any) => { if (this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.waypointNode2D(wp, dc)); });
     this.posTool.drawOverlay(gRoot);   // aide au positionnement (coins/cotes ⟂) — avant la mesure et le redressement des labels
@@ -82,6 +83,7 @@ export class DcViews2D extends DcScene3D {
     if (this.showWaypoints) this.store.oobWaypoints().filter((w: any) => (w.location || "") === loc && String(w.floor || "") === fl).forEach((wp: any) => gRoot.appendChild(this.floorOobNode(wp, cfg)));
     this.store.floorEquipments().filter((e: any) => (e.location || "") === loc && String(e.floor || "") === fl).forEach((eq: any) => gRoot.appendChild(this.floorEquipNode2D(eq, cfg)));
     if (this.showFloorAnchor) gRoot.appendChild(this.floorAnchorNode(cfg, loc, fl));   // marqueur d'ancrage déplaçable (discret)
+    if (this.showFigure) { this.figureEnsure(this.current()); gRoot.appendChild(this.figureNode2D(this.figure!.floorX, this.figure!.floorY, this.figure!.orient || 0, "floor")); }   // personnage d'échelle
     this.posTool.drawOverlay(gRoot);   // aide au positionnement (salles / équipements d'étage) — avant la mesure et le redressement des labels
     this.drawMeasure2D(gRoot);   // outil de mesure (avant finishScene/uprightTexts → labels redressés)
     this.renderFloorRail(ft);   // rail de navigation rapide entre étages (à gauche du plan)
@@ -420,6 +422,46 @@ export class DcViews2D extends DcScene3D {
     grp.addEventListener("pointerdown", (ev: any) => this.onEquipPointerDown(ev, e));
     grp.addEventListener("contextmenu", (ev: any) => this.ctxMenu(ev, this.equipmentCtx(e.id)));
     return grp;
+  }
+
+  /** PERSONNAGE d'échelle (repère personnel) en 2D : silhouette (tête + épaules) orientée vers l'avant (−Y),
+      déplaçable. `mode` = "top" (coords salle dcX/dcY) · "floor" (coords étage floorX/floorY). */
+  protected figureNode2D(x: number, y: number, orient: number, mode: "top" | "floor"): SVGElement {
+    const g = Dom.svg("g", { class: "dc-figure", transform: `translate(${x} ${y}) rotate(${orient})`, "data-figure": mode });
+    g.appendChild(Dom.svg("circle", { class: "dc-figure-foot", cx: 0, cy: 0, r: 320 }));         // empreinte / zone de clic
+    g.appendChild(Dom.svg("ellipse", { class: "dc-figure-body", cx: 0, cy: 40, rx: 210, ry: 135 }));   // épaules / torse
+    g.appendChild(Dom.svg("circle", { class: "dc-figure-head", cx: 0, cy: -150, r: 110 }));      // tête (vers l'avant −Y)
+    g.addEventListener("pointerdown", (e: any) => this.onFigurePointerDown(e, mode));
+    g.addEventListener("contextmenu", (e: any) => this.ctxMenu(e, this.figureCtx()));
+    return g;
+  }
+  /** Glisser le personnage d'échelle (met à jour la position de vue + persiste ; aucune écriture dans le document). */
+  protected onFigurePointerDown(e: MouseEvent, mode: "top" | "floor"): void {
+    if (e.button !== 0 || !this.figure) return;
+    e.preventDefault(); e.stopPropagation();
+    const grp = e.currentTarget as SVGElement, orient = this.figure.orient || 0;
+    const curX = mode === "top" ? this.figure.dcX : this.figure.floorX, curY = mode === "top" ? this.figure.dcY : this.figure.floorY;
+    const w0 = this.clientToWorld(e.clientX, e.clientY), off = { x: w0.x - curX, y: w0.y - curY };
+    let W: number, D: number;
+    if (mode === "top") { const dc = this.current(); W = dc ? dc.width_mm : 4000; D = dc ? dc.depth_mm : 3000; }
+    else { const ft = this.floorTargetResolve(); const cfg = ft ? this.floor.config(ft.location, ft.floor) : null; W = cfg ? cfg.width_mm : 20000; D = cfg ? cfg.depth_mm : 20000; }
+    const clampP = (c: { x: number; y: number }) => ({ x: Math.min(Math.max(c.x, 0), W), y: Math.min(Math.max(c.y, 0), D) });
+    let cur = { x: curX, y: curY }, moved = false;
+    const move = (ev: MouseEvent) => {
+      const wld = this.clientToWorld(ev.clientX, ev.clientY), nx = wld.x - off.x, ny = wld.y - off.y;
+      if (!moved && Math.abs(nx - curX) + Math.abs(ny - curY) < (8 / (this.scale || 1))) return;
+      moved = true; grp.classList.add("dragging");
+      cur = clampP({ x: nx, y: ny }); grp.setAttribute("transform", `translate(${cur.x} ${cur.y}) rotate(${orient})`);
+      this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+      grp.classList.remove("dragging"); this.hideCote();
+      if (!moved || !this.figure) return;
+      if (mode === "top") { this.figure.dcX = Math.round(cur.x); this.figure.dcY = Math.round(cur.y); } else { this.figure.floorX = Math.round(cur.x); this.figure.floorY = Math.round(cur.y); }
+      this.persistView();   // repère de vue → pas de mutation du document
+    };
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   }
   /** Waypoint en vue DESSUS. Pin/rail LIBRES = déplaçables dans la salle (affine dc_x/dc_y, snap demi-maille,
       le rattachement salle/datacenter NE change PAS) ; brosse / pin latéral / pin de capot = STATIQUES (zone =

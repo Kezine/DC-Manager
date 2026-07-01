@@ -86,6 +86,10 @@ export class DcBase {
   showWaypoints = true; showConduits = true; showPorts = true; showEqNames = true;
   showOrientMarks = true; showPivot = false;
   showFloorAnchor = true;                // vue Étage : marqueur de point d'ancrage (déplaçable, discret) — masquable
+  // PERSONNAGE d'échelle (repère PERSONNEL, vue seule — NON enregistré dans le document) : humanoïde ~1,75 m
+  // positionnable en salle (dcX/dcY) et sur l'étage (floorX/floorY). Persisté dans l'état de vue (localStorage).
+  showFigure = false;
+  figure: { dcX: number; dcY: number; orient: number; floorX: number; floorY: number } | null = null;
   colorMode: "face" | "group" | "type" = "face";   // coloration des équipements 3D
   cableSplineK = CABLE_SPLINE_K;         // arrondi des câbles (slider)
   markerScale = 1;                       // taille des marqueurs de waypoint + connecteurs de port (slider, 1 = défaut/milieu)
@@ -413,7 +417,16 @@ export class DcBase {
   /** Options d'affichage poussées au moteur WebGL (sous-ensemble implémenté ; le reste est sans effet). */
   protected webglOptions(): any {
     // COPIE de selCables : applyOptionsDiff compare old vs new ; une même référence (mutée) masquerait le changement.
-    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), hiddenEquips: new Set(this.hidden3dEquips), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showPorts: this.showPorts, showDoors: this.showDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm };
+    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), hiddenEquips: new Set(this.hidden3dEquips), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showPorts: this.showPorts, showDoors: this.showDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, showFigure: this.showFigure, figure: this.figure ? { ...this.figure } : null };
+  }
+
+  /** Personnage d'échelle : garantit une position (centre de la salle courante / de l'étage) au 1er affichage. */
+  protected figureEnsure(dc: any): void {
+    if (this.figure) return;
+    const cx = dc ? (dc.width_mm || 4000) / 2 : 2000, cy = dc ? (dc.depth_mm || 3000) / 2 : 1500;
+    let fx = cx, fy = cy;
+    try { const ft = this.floorTargetResolve && this.floorTargetResolve(); if (ft) { const cfg = this.floor.config(ft.location, ft.floor); fx = (cfg.width_mm || 20000) / 2; fy = (cfg.depth_mm || 20000) / 2; } } catch (_) { /* défaut */ }
+    this.figure = { dcX: cx, dcY: cy, orient: 0, floorX: fx, floorY: fy };
   }
 
   /** Contexte de scène pour le moteur WebGL : descripteur multi-salles + câbles transversaux (repère MONDE).
@@ -590,14 +603,14 @@ export class DcBase {
 
   /* ---- persistance de l'état de vue (par fichier, localStorage) ---- */
   protected viewStateKey(): string { return "dcmanager.view3d." + ((this.store.meta && this.store.meta.fileId) ? this.store.meta.fileId : "__nofile"); }
-  protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showDoorSwing", "showFloorGrid", "cablePortNormal", "webglPerspective", "cablesOnTop"];
+  protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showDoorSwing", "showFloorGrid", "cablePortNormal", "webglPerspective", "cablesOnTop", "showFigure"];
 
   /** Écrit l'état (débouncé 300 ms) — évite une écriture par frame de pan/zoom. */
   protected persistView(): void {
     clearTimeout(this._pvTO);
     this._pvTO = setTimeout(() => {
       try {
-        const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], hidden3dEquips: [...this.hidden3dEquips], colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
+        const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], hidden3dEquips: [...this.hidden3dEquips], figure: this.figure, colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
         DcBase.TOGGLE_KEYS.forEach((k) => { o[k] = (this as any)[k]; });
         window.localStorage.setItem(this.viewStateKey(), JSON.stringify(o));
       } catch (_) { /* quota / indispo → ignoré */ }
@@ -635,6 +648,9 @@ export class DcBase {
     if (has("datacenters", o.dcId)) this.dcId = o.dcId;
     this.hidden3dRacks = new Set((Array.isArray(o.hidden3dRacks) ? o.hidden3dRacks : []).filter((id: string) => has("racks", id)));
     this.hidden3dEquips = new Set((Array.isArray(o.hidden3dEquips) ? o.hidden3dEquips : []).filter((id: string) => has("equipments", id)));
+    // personnage d'échelle (repère personnel) : position restaurée si présente et bien formée
+    const f = o.figure;
+    this.figure = (f && typeof f === "object" && typeof f.dcX === "number") ? { dcX: +f.dcX, dcY: +f.dcY, orient: Normalize.rackOrientation(f.orient), floorX: typeof f.floorX === "number" ? +f.floorX : 0, floorY: typeof f.floorY === "number" ? +f.floorY : 0 } : null;
     // multi-salles + salles visibles (failsafe : seulement les salles encore présentes)
     this.multiDc = o.multiDc === true;
     this.visibleDcIds = new Set((Array.isArray(o.visibleDcIds) ? o.visibleDcIds : []).filter((id: string) => has("datacenters", id)));

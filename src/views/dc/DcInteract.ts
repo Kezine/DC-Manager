@@ -446,6 +446,14 @@ export class DcInteract extends DcPanels {
     return secs;
   }
 
+  /** Menu contextuel du PERSONNAGE d'échelle (repère de vue) : pivoter · masquer. Aucune mutation du document. */
+  protected figureCtx(): CtxSection[] {
+    return [{ head: "🧍 Personnage (échelle)", items: [
+      { label: "↻ Pivoter 90°", action: () => { if (this.figure) { this.figure.orient = Normalize.rackOrientation((this.figure.orient || 0) + 90); this.persistView(); this.reflow(); } } },
+      { label: "Masquer le personnage", danger: true, action: () => { this.showFigure = false; this.persistView(); this.buildToolbar(); this.render(); } },
+    ] }];
+  }
+
   /** Active une salle (devient la salle courante) ; `isolate` repasse en mode SALLE UNIQUE (multiDc off). */
   protected activateDc(dcId: string, isolate: boolean): void {
     this.dcId = dcId; this.selRackId = null; this.camTarget = null; this.scale = null;

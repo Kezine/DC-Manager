@@ -747,6 +747,7 @@ export class DcPanels extends DcViews2D {
       perp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v14h14"/><path d="M10.5 18a4.5 4.5 0 0 1 4.5-4.5"/></svg>',
       mouse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l6 15 2.2-6.2L19.5 9.5z"/></svg>',
       onTop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="12" width="14" height="8" rx="1"/><path d="M3 9c3.5 0 4.5-4 9-4s5.5 4 9 4"/></svg>',
+      person: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="6" r="3"/><path d="M6 21v-1.5a6 6 0 0 1 12 0V21"/></svg>',
     };
     const D3 = ["3d"], ALL = ["3d", "top", "floor"];   // vues d'applicabilité d'un toggle
     const tgi = (views: string[], icon: string, title: string, get: () => boolean, apply: (v: boolean) => void) => {
@@ -776,6 +777,7 @@ export class DcPanels extends DcViews2D {
     tgi(D3, I.grid, "Grilles d'étage", () => this.showFloorGrid, (v) => { this.showFloorGrid = v; r3(); });
     tgi(ALL, I.orient, "Repères d'orientation", () => this.showOrientMarks, (v) => { this.showOrientMarks = v; redraw(); });
     tgi(["floor"], I.anchor, "Point d'ancrage de l'étage", () => this.showFloorAnchor, (v) => { this.showFloorAnchor = v; redraw(); });
+    tgi(ALL, I.person, "Personnage d'échelle (~1,75 m) — repère de vue, non enregistré ; déplaçable en salle et sur l'étage", () => this.showFigure, (v) => { this.showFigure = v; if (v) this.figureEnsure(this.current()); this.persistView(); redraw(); });
     tgi(D3, I.pivot, "Centre de rotation", () => this.showPivot, (v) => { this.showPivot = v; r3(); });
     // Réglages avancés (coloration / sliders / recentrage) — 3D UNIQUEMENT (pas pertinents en 2D).
     if (v === "3d") {
