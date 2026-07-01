@@ -12,10 +12,11 @@
    ============================================================================= */
 import { Id } from "../../core/Id";
 import { Format } from "../../core/Format";
-import { Doors, type DoorWall } from "../../domain/Doors";
+import { Doors, DOOR_WALLS, type DoorWall } from "../../domain/Doors";
 import { DoorGeometry } from "../../geometry/DoorGeometry";
 import { Dom } from "../../ui/Dom";
 import type { CtxSection } from "../../ui/ContextMenu";
+import type { PosEntry } from "./PositioningTool";
 
 /** Services dont l'outil a besoin de sa vue hôte (agnostique de la chaîne de vues). */
 export interface DoorHost {
@@ -39,6 +40,8 @@ export interface DoorHost {
   posActiveHere(): boolean;
   /** Délègue le glisser à l'outil de positionnement (aimantation + cotes). */
   posDragEntity(e: MouseEvent, id: string): void;
+  /** Reconstruit le panneau latéral de la salle courante (après un ajout de porte). */
+  refreshSide(): void;
 }
 
 export class DoorTool {
@@ -133,5 +136,57 @@ export class DoorTool {
       if (moved) await this.update(dc, door.id, { offset: cur.offset });
     };
     document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+  }
+
+  /* ---- positionnement assisté ---- */
+  /** Entités déplaçables des PORTES d'une salle pour l'outil de positionnement : déplaçables MAIS contraintes à leur
+      mur (emprise ⟂ fine, le long = largeur/2). Le commit RÉ-ANCRE au mur (ignore la coord ⟂) et n'écrit que
+      l'`offset` (centre le long du mur). Injecté dans `posScene()` par la vue (unique point d'adaptation). */
+  posEntries(dc: any): PosEntry[] {
+    const room = { w: dc.width_mm, h: dc.depth_mm };
+    return (dc.doors || []).map((door: any): PosEntry => {
+      const onSide = Doors.isVerticalWall(door.wall);   // mur vertical → l'axe libre est y
+      const along = DoorGeometry.clampOffset(door, room);
+      const cx = door.wall === "right" ? dc.width_mm : (door.wall === "left" ? 0 : along);
+      const cy = door.wall === "bottom" ? dc.depth_mm : (door.wall === "top" ? 0 : along);
+      const hw = Math.max(1, (door.width_mm || 900) / 2), hx = onSide ? 30 : hw, hy = onSide ? hw : 30;
+      return {
+        id: door.id, name: "🚪 " + Doors.wallLabel(door.wall), orient: 0, anchor: "center", rect: { cx, cy, hx, hy },
+        commit: async (nx: number, ny: number) => {
+          const off = DoorGeometry.clampOffset({ ...door, offset: onSide ? ny : nx }, room);
+          await this.update(dc, door.id, { offset: Math.round(off) });
+        },
+      };
+    });
+  }
+
+  /* ---- carte de panneau latéral (Plan de salle) ---- */
+  private btn(text: string, onClick: () => void, title?: string): HTMLButtonElement {
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = text; if (title) b.title = title; b.onclick = onClick; return b;
+  }
+  /** Carte PORTES : liste (mur · ouverture · passage libre) + éditer/supprimer + ajout par mur. */
+  card(dc: any): HTMLElement {
+    const box = document.createElement("div"); box.className = "dc-card";
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Portes"; box.appendChild(t);
+    const doors = dc.doors || [];
+    if (!doors.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucune porte. Ajoutez-en une (collée à un mur)."; box.appendChild(h); }
+    else {
+      const list = document.createElement("div"); list.className = "dc-layers";
+      doors.forEach((d: any) => {
+        const row = document.createElement("div"); row.className = "dc-rack-row";
+        const lab = document.createElement("span"); lab.className = "grow"; lab.style.fontSize = "12px";
+        lab.textContent = "Mur " + Doors.wallLabel(d.wall) + " · ouv. " + d.width_mm + " · passage " + Doors.freeWidth(d) + " mm";
+        const bEdit = this.btn("Modifier", () => this.host.openDoorForm(dc.id, d.id));
+        const bDel = this.btn("✕", () => this.remove(dc, d.id)); bDel.classList.add("btn-danger");
+        row.append(lab, bEdit, bDel); list.appendChild(row);
+      });
+      box.appendChild(list);
+    }
+    const acts = document.createElement("div"); acts.className = "dc-card-acts"; acts.style.marginTop = "6px";
+    DOOR_WALLS.forEach((w) => acts.appendChild(this.btn("＋ " + Doors.wallLabel(w), async () => { await this.add(dc, w); this.host.refreshSide(); }, "Ajouter une porte sur le mur " + Doors.wallLabel(w))));
+    box.appendChild(acts);
+    const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginTop = "4px"; hint.textContent = "Après ajout, glissez la porte le long de son mur ; clic droit / « Modifier » pour ses réglages.";
+    box.appendChild(hint);
+    return box;
   }
 }

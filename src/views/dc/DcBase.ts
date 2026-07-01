@@ -265,6 +265,8 @@ export class DcBase {
   /** Positionnement assisté actif ici ? / délégation du glisser aimanté (contraint au mur par le commit `posScene`). */
   posActiveHere(): boolean { return this.posTool.activeHere(); }
   posDragEntity(e: MouseEvent, id: string): void { this.posTool.dragEntity(e, id); }
+  /** Reconstruit le panneau latéral de la salle courante (après un ajout de porte via la carte). */
+  refreshSide(): void { this.renderSide(this.current()); }
 
   protected btn(text: string, onClick: () => void, title?: string): HTMLButtonElement {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = text; if (title) b.title = title; b.onclick = onClick; return b;

@@ -25,7 +25,6 @@ import { Format } from "../../core/Format";
 import { Text } from "../../core/Text";
 import { Waypoint } from "../../models/Waypoint";
 import { CableStatuses } from "../../domain/CableStatuses";
-import { Doors, DOOR_WALLS } from "../../domain/Doors";
 import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
 import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
 import type { Vec3, Drawable, DatacenterHost } from "./shared";
@@ -216,7 +215,7 @@ export class DcPanels extends DcViews2D {
       side.appendChild(this.collapsible(this.poolFreeEquipCard(dc), "freepool"));
       side.appendChild(this.collapsible(this.racks3dCard(dc), "rack3d"));   // visibilité des baies — respectée par renderTop
       side.appendChild(this.collapsible(this.freeEquip3dCard(dc), "freeeq3d"));   // visibilité des équipements libres (par équip. / type / groupe)
-      side.appendChild(this.collapsible(this.doorsCard(dc), "doors"));   // portes de la salle (collées aux murs)
+      side.appendChild(this.collapsible(this.doorTool.card(dc), "doors"));   // portes de la salle (collées aux murs) — cf. DoorTool
       side.appendChild(this.collapsible(this.waypointsCard(dc), "waypoints"));
       side.appendChild(this.collapsible(this.cableCard(dc), "cables"));
       side.appendChild(this.collapsible(this.view3dOptionsCard(), "view3d"));   // Affichage (waypoints, repères) — view-aware
@@ -347,31 +346,7 @@ export class DcPanels extends DcViews2D {
   }
 
 
-  /* ---- carte PORTES (value-objects sur le datacenter) — vue Plan de salle ---- */
-  protected doorsCard(dc: any): HTMLElement {
-    const box = document.createElement("div"); box.className = "dc-card";
-    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Portes"; box.appendChild(t);
-    const doors = dc.doors || [];
-    if (!doors.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucune porte. Ajoutez-en une (collée à un mur)."; box.appendChild(h); }
-    else {
-      const list = document.createElement("div"); list.className = "dc-layers";
-      doors.forEach((d: any) => {
-        const row = document.createElement("div"); row.className = "dc-rack-row";
-        const lab = document.createElement("span"); lab.className = "grow"; lab.style.fontSize = "12px";
-        lab.textContent = "Mur " + Doors.wallLabel(d.wall) + " · ouv. " + d.width_mm + " · passage " + Doors.freeWidth(d) + " mm";
-        const bEdit = this.btn("Modifier", () => this.host.openDoorForm?.(dc.id, d.id));
-        const bDel = this.btn("✕", () => this.doorTool.remove(dc, d.id)); bDel.classList.add("btn-danger");
-        row.append(lab, bEdit, bDel); list.appendChild(row);
-      });
-      box.appendChild(list);
-    }
-    const acts = document.createElement("div"); acts.className = "dc-card-acts"; acts.style.marginTop = "6px";
-    DOOR_WALLS.forEach((w) => acts.appendChild(this.btn("＋ " + Doors.wallLabel(w), async () => { await this.doorTool.add(dc, w); this.renderSide(this.current()); }, "Ajouter une porte sur le mur " + Doors.wallLabel(w))));
-    box.appendChild(acts);
-    const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginTop = "4px"; hint.textContent = "Après ajout, glissez la porte le long de son mur ; clic droit / « Modifier » pour ses réglages.";
-    box.appendChild(hint);
-    return box;
-  }
+  /* ---- carte PORTES (value-objects sur le datacenter) = DoorTool.card (cf. DoorTool.ts) ---- */
 
   /** Ouvre le form d'étage (création `pick` ou édition) avec navigation vers le plan créé. */
   protected editFloor(location: string, floor: string, pick: boolean): void {

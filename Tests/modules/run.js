@@ -1010,6 +1010,21 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const sections = tool.ctx(dc2, { id: "d2", width_mm: 900, frame_mm: 40, hinge: "left", opening: "interior" });
     ck(sections[0].head.indexOf("820") >= 0, "DoorTool.ctx : en-tête montre le passage libre (820 mm)");
     ck.eq(sections[0].items.length, 4, "DoorTool.ctx : 4 actions (modifier/charnière/ouverture/supprimer)");
+    // posEntries : entités déplaçables contraintes à leur mur (emprise le long = w/2, ⟂ fine ; commit = offset seul)
+    const dc3 = { id: "DC1", width_mm: 6000, depth_mm: 4000, doors: [
+      { id: "dt", wall: "top", offset: 2000, width_mm: 900, frame_mm: 40 },
+      { id: "dl", wall: "left", offset: 1000, width_mm: 800, frame_mm: 40 },
+    ] };
+    const entries = tool.posEntries(dc3);
+    ck.eq(entries.length, 2, "posEntries : une entrée par porte");
+    const et = entries.find((e) => e.id === "dt");
+    ck(et.rect.cy === 0 && Math.abs(et.rect.cx - 2000) < 1, "posEntries : mur haut → cy=0, cx=offset");
+    ck(et.rect.hx === 450 && et.rect.hy === 30, "posEntries : mur haut → emprise le long = w/2, ⟂ fine (30)");
+    const el = entries.find((e) => e.id === "dl");
+    ck(el.rect.cx === 0 && Math.abs(el.rect.cy - 1000) < 1, "posEntries : mur gauche → cx=0, cy=offset");
+    ck(el.rect.hx === 30 && el.rect.hy === 400, "posEntries : mur gauche → emprise le long = w/2 en y");
+    await et.commit(2500, 999);   // mur horizontal → n'écrit que l'offset = nx (coord ⟂ ignorée), borné
+    ck.eq(saved.doors.find((d) => d.id === "dt").offset, 2500, "posEntries.commit : mur haut → offset = nx (⟂ ignorée)");
   }
 
   console.log("\n• ImageStore : helpers purs (dataUrl ↔ Blob · bundle .nmfb)");
