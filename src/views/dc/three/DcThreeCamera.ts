@@ -124,8 +124,21 @@ export class DcThreeCamera extends DcThreeBase {
     const HI = 0xf5a623;
     const m = (mesh as any).material as any; if (!m) return;
     if (Array.isArray(m)) {
-      if (on) { if ((mesh as any).userData._focArr == null) (mesh as any).userData._focArr = m.map((x: any) => (x && x.emissive) ? x.emissive.getHex() : -1); m.forEach((x: any) => x && x.emissive && x.emissive.setHex(HI)); }
-      else if ((mesh as any).userData._focArr) { m.forEach((x: any, i: number) => { if (x && x.emissive && (mesh as any).userData._focArr[i] >= 0) x.emissive.setHex((mesh as any).userData._focArr[i]); }); (mesh as any).userData._focArr = null; }
+      const HIC = 0xffce8a;   // teinte ambre pour les faces texturées (MeshBasic sans emissive)
+      if (on) {
+        if ((mesh as any).userData._focArr == null) {
+          (mesh as any).userData._focArr = m.map((x: any) => (x && x.emissive) ? x.emissive.getHex() : -1);
+          (mesh as any).userData._focColArr = m.map((x: any) => (x && !x.emissive && x.color) ? x.color.getHex() : -1);
+        }
+        m.forEach((x: any) => { if (!x) return; if (x.emissive) x.emissive.setHex(HI); else if (x.color) x.color.setHex(HIC); });
+      } else if ((mesh as any).userData._focArr) {
+        m.forEach((x: any, i: number) => {
+          if (!x) return;
+          if (x.emissive && (mesh as any).userData._focArr[i] >= 0) x.emissive.setHex((mesh as any).userData._focArr[i]);
+          else if (x.color && (mesh as any).userData._focColArr && (mesh as any).userData._focColArr[i] >= 0) x.color.setHex((mesh as any).userData._focColArr[i]);
+        });
+        (mesh as any).userData._focArr = null; (mesh as any).userData._focColArr = null;
+      }
       return;
     }
     if (on) { if (m.emissive) { (mesh as any).userData._focEmi = m.emissive.getHex(); m.emissive.setHex(HI); } }
@@ -700,9 +713,23 @@ export class DcThreeCamera extends DcThreeBase {
   protected setHover(mesh: THREE.Object3D | null, on: boolean): void {
     if (!mesh) return;
     const m = (mesh as any).material as any; if (!m) return;
-    if (Array.isArray(m)) {   // coque multi-matériaux (BoxGeometry : parois ±X opaques + faces ouvertes) → emissive par sous-matériau
-      if (on) { if (mesh.userData._emiArr == null) mesh.userData._emiArr = m.map((x: any) => (x && x.emissive) ? x.emissive.getHex() : -1); m.forEach((x: any) => x && x.emissive && x.emissive.setHex(0x4a90e2)); }
-      else if (mesh.userData._emiArr) { m.forEach((x: any, i: number) => { if (x && x.emissive && mesh.userData._emiArr[i] >= 0) x.emissive.setHex(mesh.userData._emiArr[i]); }); mesh.userData._emiArr = null; }
+    if (Array.isArray(m)) {   // multi-matériaux (coque de baie · boîte d'équip. libre à 6 faces) → par sous-matériau
+      // emissive quand le matériau en a (MeshStandard) ; sinon TEINTE de la couleur (MeshBasic texturé des faces
+      // d'équipement libre : pas d'emissive → sans ça, une boîte ENTIÈREMENT texturée ne réagirait pas au survol).
+      if (on) {
+        if (mesh.userData._emiArr == null) {
+          mesh.userData._emiArr = m.map((x: any) => (x && x.emissive) ? x.emissive.getHex() : -1);
+          mesh.userData._colArr = m.map((x: any) => (x && !x.emissive && x.color) ? x.color.getHex() : -1);
+        }
+        m.forEach((x: any) => { if (!x) return; if (x.emissive) x.emissive.setHex(0x4a90e2); else if (x.color) x.color.setHex(0x9fd0ff); });
+      } else if (mesh.userData._emiArr) {
+        m.forEach((x: any, i: number) => {
+          if (!x) return;
+          if (x.emissive && mesh.userData._emiArr[i] >= 0) x.emissive.setHex(mesh.userData._emiArr[i]);
+          else if (x.color && mesh.userData._colArr && mesh.userData._colArr[i] >= 0) x.color.setHex(mesh.userData._colArr[i]);
+        });
+        mesh.userData._emiArr = null; mesh.userData._colArr = null;
+      }
       return;
     }
     if (on) {
