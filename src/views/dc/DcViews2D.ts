@@ -350,11 +350,15 @@ export class DcViews2D extends DcScene3D {
         if (e.button !== 0) return; e.preventDefault(); e.stopPropagation();
         const s = this.clientToWorld(e.clientX, e.clientY), nx = Math.ceil(W / cell), ny = Math.ceil(D / cell);
         const c0 = { cx: clampCell(Math.floor(s.x / cell), nx), cy: clampCell(Math.floor(s.y / cell), ny) };
-        const prev = Dom.svg("rect", { class: "dc-cell-sel-preview" }); if (this.gRoot) this.gRoot.appendChild(prev);
+        // Garde de version : on capture le groupe racine au début du glissé. Un re-render CONCURRENT (ex. reload SSE)
+        // remplace `this.gRoot` → le glissé porte sur une scène périmée : on annule (l'aperçu est détaché, on
+        // n'applique PAS onRange sur des coordonnées qui ne correspondent plus à l'affichage courant).
+        const rootAtStart = this.gRoot;
+        const prev = Dom.svg("rect", { class: "dc-cell-sel-preview" }); if (rootAtStart) rootAtStart.appendChild(prev);
         const draw = (c1: { cx: number; cy: number }) => { const x0 = Math.min(c0.cx, c1.cx) * cell, y0 = Math.min(c0.cy, c1.cy) * cell; prev.setAttribute("x", String(x0)); prev.setAttribute("y", String(y0)); prev.setAttribute("width", String((Math.abs(c1.cx - c0.cx) + 1) * cell)); prev.setAttribute("height", String((Math.abs(c1.cy - c0.cy) + 1) * cell)); };
         let c1 = c0; draw(c0);
         const move = (ev: MouseEvent) => { const w = this.clientToWorld(ev.clientX, ev.clientY); c1 = { cx: clampCell(Math.floor(w.x / cell), nx), cy: clampCell(Math.floor(w.y / cell), ny) }; draw(c1); };
-        const up = () => { document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); prev.remove(); onRange(c0.cx, c0.cy, c1.cx, c1.cy); };
+        const up = () => { document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); prev.remove(); if (this.gRoot === rootAtStart) onRange(c0.cx, c0.cy, c1.cx, c1.cy); };
         document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
       });
       g.appendChild(ov);
