@@ -110,6 +110,12 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 
 ## Documentation d'architecture (`docs/`)
 
+> **`docs/` = documentation PÉRENNE d'architecture UNIQUEMENT.** Les documents de SUIVI (checklists de
+> refactor, plans d'avancement, notes de session, TODO temporaires, rapports d'audit en cours) NE vont
+> PAS dans `docs/` ni dans le dépôt : les écrire dans un dossier NON VERSIONNÉ — `.notes/` (ajouté au
+> `.gitignore`) ou le répertoire scratchpad de la session. Un fichier de `docs/` doit décrire un pan
+> d'architecture stable, référencé depuis le code ; s'il ne survit pas à la tâche en cours, il n'y a pas sa place.
+
 - [`rest-migration.md`](docs/rest-migration.md) — migration vers le backend REST,
   phases, concurrence (révisions, SSE, **verrou optimiste 409 par entité**).
 - [`render-impact.md`](docs/render-impact.md) — **carte d'impact de rendu** : quelle
