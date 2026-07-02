@@ -24,6 +24,7 @@ import type { PositioningHost } from "./PositioningTool";
 import { DoorTool } from "./DoorTool";
 import type { DoorHost } from "./DoorTool";
 import { GridGeometry } from "../../geometry/GridGeometry";
+import { Measure } from "../../geometry/Measure";
 import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Format } from "../../core/Format";
@@ -353,7 +354,7 @@ export class DcBase {
         this.measure.cursor = this.measurePick(mc[0], mc[1]);
         this.refreshMeasurePreview();
         const last = this.measure.pts[this.measure.pts.length - 1];
-        if (this.measure.cursor) this.showCote(Format.meters(this.measureLen(last, this.measure.cursor)), mc[0], mc[1]); else this.hideCote();
+        if (this.measure.cursor) this.showCote(Format.meters(Measure.dist(last, this.measure.cursor)), mc[0], mc[1]); else this.hideCote();
       }, 40);
     }, true);
     svg.addEventListener("wheel", (ev) => this.onWheel(ev), { passive: false });
