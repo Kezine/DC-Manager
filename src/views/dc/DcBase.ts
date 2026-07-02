@@ -23,6 +23,8 @@ import { PositioningTool } from "./PositioningTool";
 import type { PositioningHost } from "./PositioningTool";
 import { DoorTool } from "./DoorTool";
 import type { DoorHost } from "./DoorTool";
+import { MeasureTool } from "./MeasureTool";
+import type { MeasureHost, MeasureState } from "./MeasureTool";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import { Measure } from "../../geometry/Measure";
 import { Depths } from "../../registries/Depths";
@@ -53,12 +55,16 @@ export class DcBase {
   freePlace = false;                                            // « Placement libre » : désactive l'aimantation à la grille au glisser
   blockEdit = false;                                            // mode « Cases inaccessibles » : glisser pour (dé)marquer des cases
   routeBuild: { fromPortId: string | null; wpIds: string[]; armed?: boolean; mouse?: Vec3 | null } | null = null;   // session de routage 3D
-  // Outil de MESURE multipoint (éphémère, exclusif du routage). `pts`/`cursor` en coordonnées du CONTEXTE (`ctx` :
-  // salle mono / monde multi / plan d'étage) ; raycast sur les surfaces en 3D, plan du sol en 2D. Voir DcInteract.
-  measure: { active: boolean; ctx: string; pts: Vec3[]; cursor: Vec3 | null; done: Vec3[][] } | null = null;
+  // Outil de MESURE multipoint (éphémère, exclusif du routage) — module dédié `MeasureTool` (état + overlays 2D/3D
+  // + panneau + pont WebGL), piloté via `MeasureHost`. L'ÉTAT vit dans le tool ; `measure`/`_measHi` sont des PONTS
+  // d'accès (getters/setters) pour que les sites existants (`this.measure.pts`…) restent inchangés. Instancié au ctor.
+  measureTool!: MeasureTool;
+  get measure(): MeasureState | null { return this.measureTool.state; }
+  set measure(v: MeasureState | null) { this.measureTool.state = v; }
+  get _measHi(): number | null { return this.measureTool.hi; }
+  set _measHi(v: number | null) { this.measureTool.hi = v; }
   protected _measMouseClient: [number, number] | null = null;
   protected _measMouseTO: any = 0;
-  protected _measHi: number | null = null;   // mesure terminée mise en évidence (survol du listing), ou null
   // Outil de POSITIONNEMENT (aide au placement par COINS + cotes ⟂). Module dédié `PositioningTool` (état + overlay
   // + panneau + glisser), piloté via l'interface PositioningHost que cette chaîne de vues implémente (cf. DcInteract
   // posScene/posCtxKey/…). Instancié dans le constructeur. ÉPHÉMÈRE : déplace l'élément puis écrit sa position UNE fois.
@@ -140,6 +146,7 @@ export class DcBase {
     // Outil de positionnement : cette chaîne de vues EST son hôte (implémente PositioningHost via DcInteract).
     this.posTool = new PositioningTool(this as unknown as PositioningHost);
     this.doorTool = new DoorTool(this as unknown as DoorHost);
+    this.measureTool = new MeasureTool(this as unknown as MeasureHost);
     // Garde headless : sans `document` (tests Node), projection/cadrage restent utilisables.
     if (typeof document === "undefined") return;
     this.toolbarEl = document.createElement("div");
@@ -194,9 +201,9 @@ export class DcBase {
       if (document.querySelector(".modal-overlay.open, .dialog-overlay")) return;
       // ÉCHAP en mode POSITIONNEMENT : efface la sélection courante (références → coin → mover) par paliers.
       if (this.posTool.active && e.key === "Escape" && this.posTool.activeHere()) { e.preventDefault(); this.posTool.escape(); return; }
-      if (!this.measure || !this.measure.active) return;
+      if (!this.measureTool.hasActive()) return;
       e.preventDefault();
-      if (e.key === "Enter") this.measureCommit(); else this.measureCancelCurrent();
+      if (e.key === "Enter") this.measureTool.commit(); else this.measureTool.cancelCurrent();
     };
     document.addEventListener("keydown", this._onKeydown);
     this.buildControls();
@@ -269,6 +276,20 @@ export class DcBase {
   /** Reconstruit le panneau latéral de la salle courante (après un ajout de porte via la carte). */
   refreshSide(): void { this.renderSide(this.current()); }
 
+  /* ---- MeasureHost : services fournis au MeasureTool (cf. MeasureTool.ts). Noms distincts des CHAMPS homonymes
+         (`overlayRoot`≠`gRoot`, `dotScale`≠`markerScale`) pour éviter les collisions champ/méthode. ---- */
+  viewKind(): "top" | "floor" | "3d" { return this.view; }
+  isMultiDc(): boolean { return this.multiDc; }
+  currentDc(): any | null { return this.current(); }
+  scaleOrNull(): number | null { return this.scale; }
+  hasSvg(): boolean { return !!this.svg; }
+  overlayRoot(): SVGGElement | null { return this.gRoot; }
+  dotScale(): number { return this.markerScale; }
+  isFloorTransformed(): boolean { return !!this.floorXf; }
+  three(): any | null { return this._three; }
+  disarmPositioning(): void { this.posTool.disarm(); }
+  clearRoute(): void { this.routeBuild = null; }
+
   protected btn(text: string, onClick: () => void, title?: string): HTMLButtonElement {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = text; if (title) b.title = title; b.onclick = onClick; return b;
   }
@@ -332,29 +353,29 @@ export class DcBase {
     // MODE MESURE : le contenu de la scène devient inerte au pointeur (CSS `.dc-measuring * { pointer-events:none }`)
     // → seuls les handlers du <svg> reçoivent les événements : le GLISSER navigue (pan/orbite, non inhibé) et le
     // CLIC franc pose un point. Les actions de clic normales (édition baie/câble/waypoint) sont ainsi neutralisées.
-    if (this.measure && this.measure.active) svg.classList.add("dc-measuring");
+    if (this.measureTool.hasActive()) svg.classList.add("dc-measuring");
     let mdX = 0, mdY = 0;   // position du dernier mousedown → distinguer le clic franc du glisser de navigation
     // newScene ne sert QUE les vues 2D (Plan de salle / Plan d'étage) — la 3D est rendue par le moteur WebGL (canvas).
     svg.addEventListener("mousedown", (ev) => { mdX = ev.clientX; mdY = ev.clientY; if (ev.button === 0) this.startPan2D(ev); });   // glisser le fond = pan 2D
     // CLIC franc en mode mesure (≤ 4 px de déplacement = pas un glisser de navigation) → pose un point.
     svg.addEventListener("click", (ev) => {
-      if (!this.measure || !this.measure.active || ev.button !== 0) return;
+      if (!this.measureTool.hasActive() || ev.button !== 0) return;
       if (Math.hypot(ev.clientX - mdX, ev.clientY - mdY) > 4) return;
-      this.measurePlaceAt(ev.clientX, ev.clientY);
+      this.measureTool.placeAt(ev.clientX, ev.clientY);
     });
     svg.addEventListener("contextmenu", (e) => e.preventDefault());
     // aperçu de MESURE jusqu'à la SOURIS (2D ET 3D), throttlé — segment courant en pointillé + cote (longueur live).
     svg.addEventListener("mousemove", (ev) => {
-      if (!this.measure || !this.measure.active || !this.measureActiveHere() || !this.measure.pts.length) return;
+      const m = this.measure;
+      if (!m || !m.active || !this.measureTool.activeHere() || !m.pts.length) return;
       this._measMouseClient = [ev.clientX, ev.clientY];
       if (this._measMouseTO) return;
       this._measMouseTO = setTimeout(() => {
         this._measMouseTO = 0;
-        const mc = this._measMouseClient; if (!mc || !this.measure || !this.measure.active) return;
-        this.measure.cursor = this.measurePick(mc[0], mc[1]);
-        this.refreshMeasurePreview();
-        const last = this.measure.pts[this.measure.pts.length - 1];
-        if (this.measure.cursor) this.showCote(Format.meters(Measure.dist(last, this.measure.cursor)), mc[0], mc[1]); else this.hideCote();
+        const mc = this._measMouseClient; if (!mc || !this.measureTool.hasActive()) return;
+        // met à jour le curseur + l'aperçu 2D et renvoie la longueur du segment courant (cote live), ou null.
+        const len = this.measureTool.updateCursor(mc[0], mc[1]);
+        if (len != null) this.showCote(Format.meters(len), mc[0], mc[1]); else this.hideCote();
       }, 40);
     }, true);
     svg.addEventListener("wheel", (ev) => this.onWheel(ev), { passive: false });
@@ -587,14 +608,14 @@ export class DcBase {
         this._three.tipCb = (d: any, x: number, y: number) => this.webglTip(d, x, y);            // tooltips
         this._three.ctxCb = (d: any, x: number, y: number) => this.webglContextMenu(d, x, y);   // menus contextuels
         // outils interactifs (mesure / routage) — le moteur remonte les clics/survols, la vue tient l'état + le panneau.
-        this._three.measurePlaceCb = (w: any) => this.onWebglMeasurePlace(w);
-        this._three.measureHoverCb = (w: any, x: number, y: number) => this.onWebglMeasureHover(w, x, y);
+        this._three.measurePlaceCb = (w: any) => this.measureTool.onWebglPlace(w);
+        this._three.measureHoverCb = (w: any, x: number, y: number) => this.measureTool.onWebglHover(w, x, y);
         this._three.routePickCb = (desc: any) => this.onWebglRoutePick(desc);
         this._three.routeHoverCb = (w: any) => this.onWebglRouteHover(w);
       }
       this._three.setProjection(persp);                       // projection choisie
       this._three.mount(hostDiv, dcId, opts, ctx);            // (ré)attache + reconstruit (mono/multi + câbles transversaux)
-      this.syncWebglTool();                                   // (ré)applique le mode outil + l'overlay courant
+      this.syncWebglTool();                                   // (ré)applique le mode outil (mesure/route) + l'overlay courant
       this.applyFocus3D();                                    // « Localiser » : pousse la cible caméra au moteur
     });
     // INDICATEUR DE CHARGEMENT généralisé pour les (re)builds 3D COÛTEUX. Le build (mount) est SYNCHRONE et gèle le

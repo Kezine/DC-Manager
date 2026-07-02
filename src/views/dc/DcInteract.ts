@@ -18,7 +18,6 @@ import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
 import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
-import { Measure } from "../../geometry/Measure";
 import type { Frame } from "../../geometry/Positioning";
 import type { PosEntry, PosScene } from "./PositioningTool";
 import { Depths } from "../../registries/Depths";
@@ -29,7 +28,7 @@ import { Text } from "../../core/Text";
 import { Waypoint } from "../../models/Waypoint";
 import { CableStatuses } from "../../domain/CableStatuses";
 import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
-import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
+import { WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
 import type { Vec3, Drawable, DatacenterHost } from "./shared";
 import { DcPanels } from "./DcPanels";
 
@@ -741,7 +740,7 @@ export class DcInteract extends DcPanels {
     return null;
   }
   /* -- autres services fournis à PositioningTool (cf. PositioningHost) -- */
-  posCtxKey(): string { return this.measureCtxKey(); }                                   // même portée que la mesure (salle / étage)
+  posCtxKey(): string { return this.measureTool.ctxKey(); }                              // même portée que la mesure (salle / étage)
   posIs2D(): boolean { return this.view === "top" || this.view === "floor"; }
   posViewKind(): "top" | "floor" | "3d" { return this.view; }
   posScale(): number { return this.scale || 1; }
@@ -749,183 +748,21 @@ export class DcInteract extends DcPanels {
   posClearOtherTools(): void { this.measure = null; this.routeBuild = null; }             // exclusivité : un seul outil de clic à la fois
 
 
-  /* ============================ OUTIL DE MESURE multipoint (éphémère) ============================
-     Clic = poser un point ; glisser = navigation (non inhibée — cf. classe `.dc-measuring` posée par newScene).
-     2D (Dessus/Étage) : point au niveau du SOL (z=0) via clientToWorld. 3D : RAYCAST sur les surfaces de la scène
-     (sol, baies, équipements) — l'intersection la plus proche donne le point ; à défaut, projection sur le plan du
-     sol z=0. Les points vivent dans le repère du CONTEXTE courant (salle mono / monde multi / plan d'étage). */
-
-  /** (Ré)arme l'outil de mesure dans le contexte de vue courant (exclusif du routage). */
-  measureArm(): void {
-    this.routeBuild = null; this.posTool.disarm();   // un seul mode de clic à la fois
-    this._measHi = null;
-    this.measure = { active: true, ctx: this.measureCtxKey(), pts: [], cursor: null, done: [] };
-    Notify.toast("Mesure : cliquez pour poser des points · glissez pour naviguer · ÉCHAP pour effacer", "ok");
-    this.buildToolbar(); this.render();
-  }
-  measureCancel(): void { this.measure = null; this._measHi = null; this.hideCote(); this.buildToolbar(); this.render(); }
-  protected measureUndo(): void { if (this.measure && this.measure.pts.length) { this.measure.pts.pop(); this.measure.cursor = null; this.render(); } }
-  /** Termine la mesure en cours (≥ 2 points) : elle reste affichée (session), une nouvelle peut démarrer. */
-  protected measureCommit(): void { const m = this.measure; if (m && m.pts.length >= 2) { m.done.push(m.pts.slice()); m.pts = []; m.cursor = null; this._measHi = null; this.hideCote(); this.render(); } }
-  /** Annule la mesure EN COURS (points non validés) en conservant les mesures terminées. Action de « ÉCHAP ». */
-  protected measureCancelCurrent(): void { if (this.measure && (this.measure.pts.length || this.measure.cursor)) { this.measure.pts = []; this.measure.cursor = null; this.hideCote(); this.render(); } }
-  /** Efface TOUTES les mesures (en cours + terminées). Bouton « Tout effacer ». */
-  protected measureClearAll(): void { if (this.measure) { this.measure.pts = []; this.measure.cursor = null; this.measure.done = []; this._measHi = null; this.hideCote(); this.render(); } }
-
-  /** Clé du contexte spatial courant : la mesure n'est tracée que là où elle a été prise (repères compatibles).
-      NB : la 3D mono et le Plan de salle d'UNE MÊME salle partagent le repère → une mesure y est visible des deux. */
-  protected measureCtxKey(): string {
-    if (this.view === "floor") { const ft = this.floorTargetResolve(); return ft ? "floor:" + ft.location + "/" + ft.floor : "floor:?"; }
-    if (this.view === "3d" && this.multiDc) return "multi";
-    const dc = this.current(); return "room:" + (dc ? dc.id : "?");
-  }
-  /** La mesure en cours appartient-elle au contexte affiché ? (sinon : panneau informatif, pas de tracé/pose). */
-  protected measureActiveHere(): boolean { return !!(this.measure && this.measure.active && this.measure.ctx === this.measureCtxKey()); }
-
-  /* Longueur / total de mesure = géométrie PURE `Measure` (cf. geometry/Measure.ts). */
-
-  /** Pose un point au clic (si le contexte correspond). */
-  protected measurePlaceAt(clientX: number, clientY: number): void {
-    if (!this.measureActiveHere()) { Notify.toast("Mesure prise dans un autre contexte — revenez-y ou effacez-la", "err"); return; }
-    const p = this.measurePick(clientX, clientY);
-    if (!p) { Notify.toast("Vue trop rasante : inclinez la caméra pour poser un point au sol", "err"); return; }
-    this.measure!.pts.push(p); this.measure!.cursor = null; this.hideCote();
-    this.render();
-  }
-
-  /** Point MONDE d'un clic en vue 2D (Dessus / Étage) : au niveau du SOL (z=0). En 3D, le raycast est fait par le
-      moteur WebGL (cf. onWebglMeasurePlace / DcThreeScene.toolRaycast). */
-  protected measurePick(clientX: number, clientY: number): Vec3 | null {
-    if (!this.svg || this.scale == null) return null;
-    if (this.view === "top" || this.view === "floor") { const w = this.clientToWorld(clientX, clientY); return { x: w.x, y: w.y, z: 0 }; }
-    return null;
-  }
-
-  /** Tracé 2D (Dessus/Étage) des mesures : validées (étiquette nom+total, surbrillance) + en cours (par segment). */
-  protected drawMeasure2D(gRoot: SVGGElement): void {
-    if (this.view === "3d" || !this.measureActiveHere()) return;
-    const m = this.measure!; if (!m.pts.length && !m.done.length) return;
-    const g = Dom.svg("g", { class: "dc-measure" }), fMM = 13 / (this.scale || 1);
-    const rDot = (DC_DOT_PX + 1) * this.markerScale / (this.scale || 1);
-    const label = (text: string, x: number, y: number, cls: string) => { const t = Dom.svg("text", { class: cls, x, y, "text-anchor": "middle", "font-size": fMM }); t.textContent = text; g.appendChild(t); };
-    const poly = (pts: Vec3[], hot: boolean, segLabels: boolean) => {
-      if (!pts.length) return;
-      const lineCls = "dc-measure-line" + (hot ? " hi" : "");
-      if (pts.length >= 2) {
-        g.appendChild(Dom.svg("polyline", { class: lineCls, points: pts.map((p) => p.x + "," + p.y).join(" ") }));
-        if (segLabels) for (let i = 1; i < pts.length; i++) label(Format.meters(Measure.dist(pts[i - 1], pts[i])), (pts[i - 1].x + pts[i].x) / 2, (pts[i - 1].y + pts[i].y) / 2, "dc-measure-label");
-      }
-      pts.forEach((p) => g.appendChild(Dom.svg("circle", { class: "dc-measure-dot" + (hot ? " hi" : ""), cx: p.x, cy: p.y, r: rDot })));
-    };
-    m.done.forEach((pts, i) => {   // mesures validées : étiquette nom+total + surbrillance au survol
-      poly(pts, i === this._measHi, false);
-      const c = pts.reduce((a, p) => ({ x: a.x + p.x, y: a.y + p.y, z: 0 }), { x: 0, y: 0, z: 0 });
-      label("Mesure " + (i + 1) + " · " + Format.meters(Measure.total(pts)), c.x / pts.length, c.y / pts.length, "dc-measure-label name");
-    });
-    poly(m.pts, false, true);   // mesure en cours : étiquettes par segment
-    gRoot.appendChild(g);
-  }
-
-  /** Met en évidence (ou non) la mesure terminée d'index `i` — appelé au survol du listing. Rafraîchit le SEUL overlay. */
-  protected measureSetHi(i: number | null): void {
-    this._measHi = i;
-    if (this.view === "3d") { if (this._three && this.measure) this._three.setMeasureOverlay(this.measure.pts, this.measure.cursor, this.measure.done, i); }
-    else this.refreshMeasure2D();
-  }
-  /** Re-trace le SEUL overlay de mesure 2D (sans reconstruire la scène) — pour la surbrillance au survol. */
-  protected refreshMeasure2D(): void {
-    const g = this.gRoot; if (!g) return;
-    g.querySelectorAll(".dc-measure").forEach((n) => n.remove());
-    this.drawMeasure2D(g);
-    if (this.floorXf) g.querySelectorAll(".dc-measure text").forEach((t) => this.applyUprightText(t));   // textes à l'endroit malgré la rotation 2D
-  }
-
-  /** APERÇU 2D du segment en cours (dernier point posé → curseur), sans reconstruire la scène. En 3D, l'aperçu est
-      géré par le moteur WebGL (overlay Three.js). Trait pointillé + pastille ; longueur live via la cote flottante. */
-  protected refreshMeasurePreview(): void {
-    const g = this.gRoot; if (!g) return;
-    g.querySelectorAll(".dc-measure-preview").forEach((n) => n.remove());
-    const m = this.measure;
-    if (this.view === "3d" || !this.measureActiveHere() || !m || !m.cursor || !m.pts.length) return;
-    const last = m.pts[m.pts.length - 1], cur = m.cursor;
-    const grp = Dom.svg("g", { class: "dc-measure-preview", style: "pointer-events:none" });
-    grp.appendChild(Dom.svg("line", { class: "dc-measure-line preview", x1: last.x, y1: last.y, x2: cur.x, y2: cur.y }));
-    const rDot = (DC_DOT_PX + 1) * this.markerScale / (this.scale || 1);
-    grp.appendChild(Dom.svg("circle", { class: "dc-measure-dot", cx: cur.x, cy: cur.y, r: rDot }));
-    g.appendChild(grp);
-  }
-
-  /** Carte « Mesure » (panneau latéral) : liste des segments + longueur totale + actions. */
-  protected measureCard(): HTMLElement {
-    const box = document.createElement("div"); box.className = "dc-card";
-    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "📏 Mesure"; box.appendChild(t);
-    const m = this.measure!, here = this.measureActiveHere();
-    const list = document.createElement("div"); list.style.cssText = "font-size:12px;margin:4px 0;display:flex;flex-direction:column;gap:3px";
-    // LISTE des mesures : terminées (conservées en session) + celle en cours, avec longueur + nombre de points.
-    const measures = m.done.map((p, i) => ({ name: "Mesure " + (i + 1), pts: p, idx: i as number | null })).concat(m.pts.length ? [{ name: "En cours", pts: m.pts, idx: null }] : []);
-    if (!measures.length) {
-      const d = document.createElement("div"); d.innerHTML = '<span style="color:var(--accent)">Cliquez pour poser le premier point…</span>'; list.appendChild(d);
-    } else {
-      measures.forEach((meas) => {
-        const np = meas.pts.length, d = document.createElement("div");
-        d.innerHTML = '<b>' + Html.escape(meas.name) + '</b> : <b style="color:var(--accent)">' + Html.escape(Format.meters(Measure.total(meas.pts))) + '</b> <span style="color:var(--fg-dim)">· ' + np + ' point' + (np > 1 ? 's' : '') + '</span>';
-        if (meas.idx != null && here) {   // mesure VALIDÉE → survol = mise en évidence dans la vue
-          const idx = meas.idx; d.style.cursor = "pointer";
-          d.addEventListener("mouseenter", () => this.measureSetHi(idx));
-          d.addEventListener("mouseleave", () => this.measureSetHi(null));
-        }
-        list.appendChild(d);
-      });
-    }
-    box.appendChild(list);
-    if (measures.length) {   // LONGUEUR TOTALE (toutes mesures)
-      const grand = m.done.reduce((s, p) => s + Measure.total(p), 0) + Measure.total(m.pts);
-      const tot = document.createElement("div"); tot.style.cssText = "margin:6px 0;font-size:13px;border-top:1px solid var(--line);padding-top:6px";
-      tot.innerHTML = 'Longueur totale : <b style="color:var(--accent)">' + Html.escape(Format.meters(grand)) + '</b>';
-      box.appendChild(tot);
-    }
-    const hint = document.createElement("div"); hint.className = "form-hint";
-    hint.textContent = here ? "Cliquez pour poser des points · ENTRÉE valide la mesure · ÉCHAP annule la mesure en cours."
-      : "Mesure prise dans un autre contexte de vue. Revenez-y pour l'éditer, ou effacez-la.";
-    box.appendChild(hint);
-    const acts = document.createElement("div"); acts.className = "dc-card-acts";
-    const bUndo = this.btn("↩ Annuler point", () => this.measureUndo()); (bUndo as any).disabled = !m.pts.length || !here;
-    const bNew = this.btn("✓ Valider (Entrée)", () => this.measureCommit()); (bNew as any).disabled = m.pts.length < 2 || !here;
-    const bClear = this.btn("🗑 Tout effacer", () => this.measureClearAll()); (bClear as any).disabled = !m.pts.length && !m.done.length;
-    const bClose = this.btn("✕ Fermer", () => this.measureCancel()); bClose.classList.add("btn-danger");
-    acts.append(bUndo, bNew, bClear, bClose); box.appendChild(acts);
-    return box;
-  }
 
 
   /* ============================ PONT OUTILS ↔ moteur WebGL (mesure / routage 3D) ============================
      En 3D-WebGL il n'y a pas de <svg> : le moteur Three.js intercepte clics/survols et remonte les points monde
      (raycast natif) à la vue, qui tient l'état (measure / routeBuild) + le panneau, puis repousse l'overlay. */
 
-  /** (Ré)applique au moteur WebGL le mode outil + l'overlay courant (appelé après chaque (re)rendu 3D-WebGL). */
+  /** (Ré)applique au moteur WebGL le mode outil + l'overlay courant (appelé après chaque (re)rendu 3D-WebGL).
+      DISPATCHER des outils de clic 3D : mesure (délégué à MeasureTool) OU routage, sinon aucun. */
   protected syncWebglTool(): void {
     const t = this._three; if (!t) return;
-    if (this.measure && this.measure.active && this.measureActiveHere()) { t.setToolMode("measure"); t.setMeasureOverlay(this.measure.pts, this.measure.cursor, this.measure.done, this._measHi); }
+    if (this.measureTool.activeHere()) this.measureTool.syncWebgl();   // mode « measure » + overlay (cf. MeasureTool)
     else if (this.routeBuild) { t.setToolMode("route"); t.setRouteOverlay(this.webglRouteWorldPts(), this.routeBuild.mouse || null); }
     else t.setToolMode("none");
   }
-
-  /** Clic mesure (moteur) → pose un point + met à jour panneau et overlay (sans reconstruire la scène). */
-  protected onWebglMeasurePlace(w: Vec3): void {
-    if (!this.measure || !this.measure.active || !this.measureActiveHere()) return;
-    this.measure.pts.push({ x: w.x, y: w.y, z: w.z }); this.measure.cursor = null; this.hideCote();
-    this.renderSide(this.current());
-    if (this._three) this._three.setMeasureOverlay(this.measure.pts, null, this.measure.done, this._measHi);
-  }
-
-  /** Survol mesure (moteur) → aperçu du segment courant + cote flottante (longueur live). */
-  protected onWebglMeasureHover(w: Vec3 | null, clientX: number, clientY: number): void {
-    if (!this.measure || !this.measure.active || !this.measureActiveHere() || !this.measure.pts.length) { this.hideCote(); return; }
-    this.measure.cursor = w;
-    if (this._three) this._three.setMeasureOverlay(this.measure.pts, w, this.measure.done, this._measHi);
-    const last = this.measure.pts[this.measure.pts.length - 1];
-    if (w) this.showCote(Format.meters(Measure.dist(last, w)), clientX, clientY); else this.hideCote();
-  }
+  /* Clic / survol MESURE en 3D-WebGL = MeasureTool.onWebglPlace / onWebglHover (câblés dans DcBase). */
 
   /** Clic route (moteur) → port de départ / waypoint / port terminal (même machine d'état qu'en SVG). */
   protected onWebglRoutePick(desc: any): void {

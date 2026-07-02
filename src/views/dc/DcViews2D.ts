@@ -54,7 +54,7 @@ export class DcViews2D extends DcScene3D {
     this.drawCables2D(gRoot, dc);   // filtré par cableShown (showAllCables / selCables) à l'intérieur
     if (this.showWaypoints) this.store.waypointsOfDc(dc.id).forEach((wp: any) => { if (this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.waypointNode2D(wp, dc)); });
     this.posTool.drawOverlay(gRoot);   // aide au positionnement (coins/cotes ⟂) — avant la mesure et le redressement des labels
-    this.drawMeasure2D(gRoot);   // outil de mesure (avant finishScene/uprightTexts → labels redressés)
+    this.measureTool.drawOverlay(gRoot);   // outil de mesure (avant finishScene/uprightTexts → labels redressés)
     this.finishScene();
     this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue
   }
@@ -86,7 +86,7 @@ export class DcViews2D extends DcScene3D {
     if (this.showFloorAnchor) gRoot.appendChild(this.floorAnchorNode(cfg, loc, fl));   // marqueur d'ancrage déplaçable (discret)
     if (this.showFigure) { this.figureEnsure(this.current()); gRoot.appendChild(this.figureNode2D(this.figure!.floorX, this.figure!.floorY, this.figure!.orient || 0, "floor")); }   // personnage d'échelle
     this.posTool.drawOverlay(gRoot);   // aide au positionnement (salles / équipements d'étage) — avant la mesure et le redressement des labels
-    this.drawMeasure2D(gRoot);   // outil de mesure (avant finishScene/uprightTexts → labels redressés)
+    this.measureTool.drawOverlay(gRoot);   // outil de mesure (avant finishScene/uprightTexts → labels redressés)
     this.renderFloorRail(ft);   // rail de navigation rapide entre étages (à gauche du plan)
     this.finishScene();
     this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue

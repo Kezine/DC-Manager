@@ -62,6 +62,7 @@ const { DoorGeometry } = D("geometry/DoorGeometry.js");
 const { Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM } = D("domain/Doors.js");
 const { DoorTool } = D("views/dc/DoorTool.js");
 const { Measure } = D("geometry/Measure.js");
+const { MeasureTool } = D("views/dc/MeasureTool.js");
 const { ImageStore } = D("data/ImageStore.js");
 const { FaceImage } = D("models/index.js");
 const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
@@ -971,6 +972,38 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(Measure.total([{ x: 0, y: 0 }]), 0, "total : < 2 points → 0");
     ck.eq(Measure.total([{ x: 0, y: 0 }, { x: 3, y: 4 }, { x: 3, y: 4 }]), 5, "total : somme des segments (dernier nul)");
     ck.eq(Measure.total([{ x: 0, y: 0 }, { x: 0, y: 4 }, { x: 3, y: 4 }]), 7, "total : polyligne 4 + 3 = 7");
+  }
+
+  console.log("\n• MeasureTool : machine d'état de la mesure (via hôte injecté — testable en isolation)");
+  {
+    const host = {
+      render: () => {}, buildToolbar: () => {}, showCote: () => {}, hideCote: () => {},
+      viewKind: () => "top", isMultiDc: () => false, currentDc: () => ({ id: "DC1" }),
+      floorTargetResolve: () => null, scaleOrNull: () => 1, hasSvg: () => true,
+      clientToWorld: (x, y) => ({ x, y }), overlayRoot: () => null, dotScale: () => 1,
+      isFloorTransformed: () => false, applyUprightText: () => {}, three: () => null,
+      btn: () => ({}), disarmPositioning: () => {}, clearRoute: () => {}, refreshSide: () => {},
+    };
+    const tool = new MeasureTool(host);
+    ck.eq(tool.hasActive(), false, "MeasureTool : inactif au départ");
+    ck.eq(tool.ctxKey(), "room:DC1", "ctxKey : salle courante (top mono)");
+    // on arme l'ÉTAT à la main (arm() passe par Notify.toast → DOM, hors périmètre de ce test unitaire)
+    tool.state = { active: true, ctx: tool.ctxKey(), pts: [], cursor: null, done: [] };
+    ck.eq(tool.hasActive() && tool.activeHere(), true, "état actif dans le contexte courant");
+    ck.eq(tool.state.ctx, "room:DC1", "contexte capturé");
+    tool.placeAt(100, 200); tool.placeAt(400, 600);
+    ck.eq(tool.state.pts.length, 2, "placeAt : 2 points posés (2D, sol z=0)");
+    ck.eq(tool.state.pts[0].z, 0, "placeAt : point au niveau du sol (z=0)");
+    tool.commit();
+    ck.eq(tool.state.done.length === 1 && tool.state.pts.length === 0, true, "commit : mesure archivée, points en cours vidés");
+    tool.placeAt(10, 10); tool.placeAt(20, 20); tool.undo();
+    ck.eq(tool.state.pts.length, 1, "undo : retire le dernier point");
+    tool.clearAll();
+    ck.eq(tool.state.pts.length === 0 && tool.state.done.length === 0, true, "clearAll : tout effacé");
+    host.currentDc = () => ({ id: "DC2" });   // le contexte de vue change → la mesure (figée sur DC1) n'est plus « ici »
+    ck.eq(tool.activeHere(), false, "activeHere : false si le contexte a changé");
+    tool.cancel();
+    ck.eq(tool.hasActive(), false, "cancel : outil désarmé");
   }
 
   console.log("\n• Doors : domaine des portes de salle (valeurs canoniques, libellés, défauts, règles pures)");
