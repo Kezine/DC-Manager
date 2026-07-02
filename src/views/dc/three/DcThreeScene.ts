@@ -11,6 +11,7 @@ import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
 import { CableSpline } from "../../../geometry/CableSpline";
+import { Measure } from "../../../geometry/Measure";
 import { Normalize } from "../../../core/Normalize";
 import { EquipmentTypes } from "../../../registries/EquipmentTypes";
 import { Depths } from "../../../registries/Depths";
@@ -1137,7 +1138,7 @@ export class DcThreeScene extends DcThreeCamera {
     (this.measureDone || []).forEach((mp, i) => {
       const hot = i === this.measureHi, col = hot ? HI : COL;
       this.drawMeasurePolyline(g, mp, col, false);   // mesure validée : pas d'étiquette par segment
-      const c = this.polyCentroid(mp); if (c) this.addToolLabel(g, "Mesure " + (i + 1) + " · " + Format.meters(this.polyLen(mp)), c);   // étiquette de la mesure
+      const c = Measure.centroid(mp); if (c) this.addToolLabel(g, "Mesure " + (i + 1) + " · " + Format.meters(Measure.total(mp)), c);   // étiquette de la mesure
     });
     const pts = this.measurePts;
     this.drawMeasurePolyline(g, pts, COL, true);   // mesure en cours : étiquettes par segment
@@ -1146,11 +1147,9 @@ export class DcThreeScene extends DcThreeCamera {
   }
   protected drawMeasurePolyline(g: THREE.Group, pts: { x: number; y: number; z: number }[], col: number, segLabels: boolean): void {
     if (pts.length >= 2) this.addToolLine(g, pts, col, false);
-    if (segLabels) for (let i = 1; i < pts.length; i++) this.addToolLabel(g, Format.meters(this.segLen(pts[i - 1], pts[i])), { x: (pts[i - 1].x + pts[i].x) / 2, y: (pts[i - 1].y + pts[i].y) / 2, z: (pts[i - 1].z + pts[i].z) / 2 });
+    if (segLabels) for (let i = 1; i < pts.length; i++) this.addToolLabel(g, Format.meters(Measure.dist(pts[i - 1], pts[i])), { x: (pts[i - 1].x + pts[i].x) / 2, y: (pts[i - 1].y + pts[i].y) / 2, z: (pts[i - 1].z + pts[i].z) / 2 });
     pts.forEach((p) => this.addToolDot(g, p, col));
   }
-  protected polyLen(pts: { x: number; y: number; z: number }[]): number { let s = 0; for (let i = 1; i < pts.length; i++) s += this.segLen(pts[i - 1], pts[i]); return s; }
-  protected polyCentroid(pts: { x: number; y: number; z: number }[]): { x: number; y: number; z: number } | null { if (!pts.length) return null; let x = 0, y = 0, z = 0; pts.forEach((p) => { x += p.x; y += p.y; z += p.z; }); const n = pts.length; return { x: x / n, y: y / n, z: z / n }; }
 
   /** Aperçu de route : polyligne (port → waypoints) + segment en cours vers le curseur (pointillé) + pastilles. */
   protected drawRouteOverlay(g: THREE.Group): void {
@@ -1160,8 +1159,6 @@ export class DcThreeScene extends DcThreeCamera {
     if (this.routeCursor && pts.length) this.addToolLine(g, [pts[pts.length - 1], this.routeCursor], COL, true);
     pts.forEach((p) => this.addToolDot(g, p, COL));
   }
-
-  protected segLen(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number { return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z); }
 
   /** Polyligne d'overlay (au-dessus de tout, depthTest off) ; `dashed` → pointillé (segment en cours). */
   protected addToolLine(g: THREE.Group, pts: { x: number; y: number; z: number }[], color: number, dashed: boolean): void {

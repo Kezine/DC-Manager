@@ -974,6 +974,9 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(Measure.total([{ x: 0, y: 0 }]), 0, "total : < 2 points → 0");
     ck.eq(Measure.total([{ x: 0, y: 0 }, { x: 3, y: 4 }, { x: 3, y: 4 }]), 5, "total : somme des segments (dernier nul)");
     ck.eq(Measure.total([{ x: 0, y: 0 }, { x: 0, y: 4 }, { x: 3, y: 4 }]), 7, "total : polyligne 4 + 3 = 7");
+    ck.eq(Measure.centroid([]), null, "centroid : nuage vide → null");
+    ck.eq(JSON.stringify(Measure.centroid([{ x: 0, y: 0, z: 0 }, { x: 4, y: 2, z: 0 }])), JSON.stringify({ x: 2, y: 1, z: 0 }), "centroid : moyenne des points");
+    ck.eq(Measure.centroid([{ x: 3, y: 3 }]).z, 0, "centroid : z absent → 0");
   }
 
   console.log("\n• CableSpline : échantillonnage pur du spline de câble (droit / courbe / amorces)");

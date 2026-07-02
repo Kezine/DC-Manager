@@ -20,4 +20,12 @@ export class Measure {
     for (let i = 1; i < pts.length; i++) s += Measure.dist(pts[i - 1], pts[i]);
     return s;
   }
+  /** Centroïde (moyenne des points) d'un nuage/polyligne, ou null si vide. z absent traité comme 0. */
+  static centroid(pts: MeasurePt[]): { x: number; y: number; z: number } | null {
+    if (!pts.length) return null;
+    let x = 0, y = 0, z = 0;
+    for (const p of pts) { x += p.x; y += p.y; z += (p.z || 0); }
+    const n = pts.length;
+    return { x: x / n, y: y / n, z: z / n };
+  }
 }
