@@ -615,6 +615,10 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(Html.escape(null), "", "Html.escape(null) → \"\"");
     ck.eq(JSON.stringify(Color.hexToRgb("#ff8800")), JSON.stringify({ r: 255, g: 136, b: 0 }), "Color.hexToRgb(#ff8800)");
     ck.eq(Color.hexToRgb("xyz"), null, "Color.hexToRgb(invalide) → null");
+    ck.eq(Color.cssToHex("#ff8800"), 0xff8800, "Color.cssToHex(#rrggbb)");
+    ck.eq(Color.cssToHex("#f80"), 0xff8800, "Color.cssToHex(#rgb → étendu)");
+    ck.eq(Color.cssToHex("rgb(255, 136, 0)"), 0xff8800, "Color.cssToHex(rgb(...))");
+    ck.eq(Number.isNaN(Color.cssToHex("bleu")), true, "Color.cssToHex(inconnu) → NaN");
     ck.eq(Color.contrastText("#ffffff"), "#000", "contrastText(blanc) → #000");
     ck.eq(Color.contrastText("#000000"), "#fff", "contrastText(noir) → #fff");
     ck.eq(Format.meters(1234), "1.23 m", "Format.meters(1234)");

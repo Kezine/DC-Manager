@@ -12,6 +12,7 @@ import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
 import { CableSpline } from "../../../geometry/CableSpline";
 import { Measure } from "../../../geometry/Measure";
+import { Color } from "../../../core/Color";
 import { Normalize } from "../../../core/Normalize";
 import { EquipmentTypes } from "../../../registries/EquipmentTypes";
 import { Depths } from "../../../registries/Depths";
@@ -745,11 +746,11 @@ export class DcThreeScene extends DcThreeCamera {
     if (!e) return 0x6c7a8c;
     if (this.opts.colorMode === "group") {
       const g: any = e.group_id ? this.store.get("groups", e.group_id) : null;
-      const c = g && g.color ? this.parseColor(g.color) : NaN; return isFinite(c) ? c : 0x6c7a8c;
+      const c = g && g.color ? Color.cssToHex(g.color) : NaN; return isFinite(c) ? c : 0x6c7a8c;
     }
     // « type » explicite ; ou « face » sur un équipement LIBRE (pas de panneau 19″ coloré par face → repli sur le type).
     if (this.opts.colorMode === "type" || (this.opts.colorMode === "face" && e.dim_mode === "free")) {
-      const c = this.parseColor(EquipmentTypes.color(e.type)); return isFinite(c) ? c : 0x6c7a8c;
+      const c = Color.cssToHex(EquipmentTypes.color(e.type)); return isFinite(c) ? c : 0x6c7a8c;
     }
     return 0x6c7a8c;   // mode « face » (baie) : couleur neutre (le moteur SVG s'appuie sur le CSS, non porté ici)
   }
@@ -979,7 +980,7 @@ export class DcThreeScene extends DcThreeCamera {
   protected buildExtraCables(root: THREE.Group): void {
     this.extraCables.forEach((ec) => {
       const line = ec.line as Vec3[];
-      const col = ec.color ? this.parseColor(ec.color) : NaN;
+      const col = ec.color ? Color.cssToHex(ec.color) : NaN;
       this.emitCableTube(root, line, new Set(ec.straight), isFinite(col) ? col : 0x9aa6b8, ec.id, !!ec.power, ec.stubAt ? new Set(ec.stubAt) : undefined);
     });
   }
@@ -1059,7 +1060,7 @@ export class DcThreeScene extends DcThreeCamera {
       suffixe `Hex` pour lever l'ambiguïté entre les deux chaînes d'héritage parallèles. */
   protected cableColorHex(c: any): number {
     const n: any = c && c.network_id ? this.store.get("networks", c.network_id) : null;
-    const hex = n && n.color ? this.parseColor(n.color) : NaN;
+    const hex = n && n.color ? Color.cssToHex(n.color) : NaN;
     return isFinite(hex) ? hex : 0x9aa6b8;
   }
 

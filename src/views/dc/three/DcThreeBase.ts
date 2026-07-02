@@ -11,6 +11,7 @@
    ============================================================================= */
 import * as THREE from "three";
 import type { Store } from "../../../store";
+import { Color } from "../../../core/Color";
 import { RackScene } from "../../../geometry/RackScene";
 import { Resolver3D } from "../../../geometry/Resolver3D";
 import { CableRouting } from "../../../geometry/CableRouting";
@@ -174,7 +175,7 @@ export class DcThreeBase {
     const cs = getComputedStyle(document.body);
     const col = (name: string, fallback: number): number => {
       const v = cs.getPropertyValue(name).trim();
-      const c = v ? this.parseColor(v) : NaN;
+      const c = v ? Color.cssToHex(v) : NaN;
       return isFinite(c) ? c : fallback;
     };
     const bg = col("--bg", 0x0a0a0a);
@@ -193,18 +194,6 @@ export class DcThreeBase {
     };
   }
 
-  /** Convertit `#rrggbb`, `#rgb` ou `rgb(r,g,b)` en entier 0xRRGGBB ; NaN si inconnu. */
-  protected parseColor(v: string): number {
-    if (v.startsWith("#")) {
-      let h = v.slice(1);
-      if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-      if (h.length >= 6) return parseInt(h.slice(0, 6), 16);
-      return NaN;
-    }
-    const m = v.match(/rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i);
-    if (m) return (parseInt(m[1]) << 16) | (parseInt(m[2]) << 8) | parseInt(m[3]);
-    return NaN;
-  }
 
   /* ---- cycle de vie ---- */
   mount(container: HTMLElement, dcId: string | null, opts?: DcThreeOptions, ctx?: SceneCtx): void {
