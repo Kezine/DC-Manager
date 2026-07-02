@@ -28,8 +28,11 @@ export interface RouteHost {
   svgEl(): SVGElement | null;
   /** Salle courante (mono), ou null. */
   currentDc(): any | null;
-  /** Ouvre le formulaire de câblage prérempli (fin de route). */
-  openCableForm(prefill: { fromPortId: string; toPortId: string; waypointIds: string[] }): void;
+  /** Ouvre le formulaire de câblage prérempli (fin de route). `onCreated` est appelé avec l'id du câble
+      RÉELLEMENT créé (après enregistrement du formulaire) → on peut alors le rendre visible. */
+  openCableForm(prefill: { fromPortId: string; toPortId: string; waypointIds: string[]; onCreated?: (cableId: string) => void }): void;
+  /** Rend un câble visible dans la vue (sélection), ex. juste après sa création par routage. */
+  showCable(cableId: string): void;
   /** Désarme l'outil de positionnement (exclusivité des outils de clic). */
   disarmPositioning(): void;
   /** Moteur 3D-WebGL courant (overlay de route), ou null. */
@@ -76,7 +79,8 @@ export class RouteTool {
     if (endPortId === rb.fromPortId) { Notify.toast("Le port terminal doit différer du port de départ", "err"); return; }
     const fromPortId = rb.fromPortId, wpIds = rb.wpIds.slice();
     this.state = null; this.host.render();
-    this.host.openCableForm({ fromPortId, toPortId: endPortId, waypointIds: wpIds });   // dialogue de câblage prérempli
+    // dialogue de câblage prérempli ; à la création effective, on rend le câble visible dans la vue.
+    this.host.openCableForm({ fromPortId, toPortId: endPortId, waypointIds: wpIds, onCreated: (id) => this.host.showCable(id) });
   }
 
   /* ---- surbrillance 2D ---- */

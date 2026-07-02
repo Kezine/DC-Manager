@@ -298,7 +298,9 @@ export class DcBase {
   clearRoute(): void { this.routeBuild = null; }
   /* ---- RouteHost : services fournis au RouteTool ---- */
   svgEl(): SVGElement | null { return this.svg; }
-  openCableForm(prefill: { fromPortId: string; toPortId: string; waypointIds: string[] }): void { this.host.openCableForm?.(null, prefill); }
+  openCableForm(prefill: { fromPortId: string; toPortId: string; waypointIds: string[]; onCreated?: (cableId: string) => void }): void { this.host.openCableForm?.(null, prefill); }
+  /** Rend un câble visible (sélection explicite) — ex. juste après sa création par routage. */
+  showCable(cableId: string): void { if (cableId) { this.selCables.add(cableId); this.rerenderView(); } }
 
   protected btn(text: string, onClick: () => void, title?: string): HTMLButtonElement {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = text; if (title) b.title = title; b.onclick = onClick; return b;
@@ -364,6 +366,7 @@ export class DcBase {
     // → seuls les handlers du <svg> reçoivent les événements : le GLISSER navigue (pan/orbite, non inhibé) et le
     // CLIC franc pose un point. Les actions de clic normales (édition baie/câble/waypoint) sont ainsi neutralisées.
     if (this.measureTool.hasActive()) svg.classList.add("dc-measuring");
+    if (this.routeTool.active) svg.classList.add("dc-routing");   // survol des ports/waypoints mis en évidence (cibles cliquables)
     let mdX = 0, mdY = 0;   // position du dernier mousedown → distinguer le clic franc du glisser de navigation
     // newScene ne sert QUE les vues 2D (Plan de salle / Plan d'étage) — la 3D est rendue par le moteur WebGL (canvas).
     svg.addEventListener("mousedown", (ev) => { mdX = ev.clientX; mdY = ev.clientY; if (ev.button === 0) this.startPan2D(ev); });   // glisser le fond = pan 2D

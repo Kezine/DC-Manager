@@ -907,6 +907,11 @@
   /* Waypoint DÉJÀ choisi dans la route en cours (création de câble au clic) : mise en évidence franche. */
   .route-pick { stroke: var(--ok, #29c46b) !important; stroke-width: 3px !important; opacity: 1 !important; filter: drop-shadow(0 0 3px var(--ok, #29c46b)); }
   polygon.route-pick, circle.route-pick { fill: var(--ok, #29c46b) !important; fill-opacity: 0.45 !important; }
+  /* Mode ROUTAGE : le SURVOL d'un port / waypoint le met en évidence en VERT-route (cible cliquable) — plus explicite
+     que le survol accent normal, et cohérent avec les waypoints déjà choisis (.route-pick). */
+  .dc-routing .dc-port.hover { fill: var(--ok, #29c46b) !important; fill-opacity: 1 !important; stroke: var(--ok, #29c46b) !important; stroke-width: 2.5px !important; }
+  .dc-routing .dc-wp-body:hover, .dc-routing .dc-wp-rail:hover { stroke: var(--ok, #29c46b) !important; stroke-width: 3px !important; opacity: 1 !important; filter: drop-shadow(0 0 3px var(--ok, #29c46b)); }
+  .dc-routing .dc-wp-body:hover { fill: var(--ok, #29c46b) !important; fill-opacity: 0.32 !important; }
   /* v118 â€” BROSSE DE BRASSAGE : corps en FIL DE FER (arÃªtes) + faÃ§ades + MARGE (padding) dessinÃ©e DANS l'espace U.
      v134 : couleur = pseudo-Ã©quipement (var(--line-2), comme .dc-eq3d.item) ; la marge est un cadre plein INTÃ‰RIEUR
      (entre l'enveloppe U et la zone utile), plus de bordure 5 mm dÃ©bordant Ã  l'extÃ©rieur. Translucide â†’ cÃ¢bles visibles. */

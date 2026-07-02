@@ -423,7 +423,8 @@ export class CableForms extends EquipmentForms {
         const network_ids = [...netState.ids].filter((nid) => { if (ck == null) return true; const n: any = store.get("networks", nid); return !n || ((n.kind === "power" ? "power" : "data") === ck); });
         let primary = netState.primary; if (primary && !network_ids.includes(primary)) primary = null; if (!primary && network_ids.length) primary = network_ids[0];
         const payload = { name, cable_type_id: ctId, from_port_id: fromP, to_port_id: toP, network_ids, network_id: primary, waypoint_ids: wpIds, length_m: lenOut, bundle_id: bnd ? bnd.id : null, strand_no: strandNo, status, description: descI.value.trim() };
-        if (cable) await store.update("cables", cable.id, payload); else await store.create("cables", payload);
+        if (cable) await store.update("cables", cable.id, payload);
+        else { const created: any = await store.create("cables", payload); if (created && created.id) opts.onCreated?.(created.id); }   // ex. routage : rend le câble tout juste créé visible
         host.setDirty?.(true); Notify.toast(cable ? "Câble mis à jour" : (bnd ? "Brin créé (faisceau « " + (bnd.name || "trunk") + " »)" : (max !== CABLE_STATUS_DRAFT ? "Câble créé" : "Brouillon créé"))); onSaved?.(); return true;
       },
     });
