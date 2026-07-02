@@ -18,6 +18,7 @@ import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
 import { Box } from "../../geometry/Box";
 import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
+import { Measure } from "../../geometry/Measure";
 import type { Frame } from "../../geometry/Positioning";
 import type { PosEntry, PosScene } from "./PositioningTool";
 import { Depths } from "../../registries/Depths";
@@ -781,8 +782,7 @@ export class DcInteract extends DcPanels {
   /** La mesure en cours appartient-elle au contexte affiché ? (sinon : panneau informatif, pas de tracé/pose). */
   protected measureActiveHere(): boolean { return !!(this.measure && this.measure.active && this.measure.ctx === this.measureCtxKey()); }
 
-  protected measureLen(a: Vec3, b: Vec3): number { return Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0)); }
-  protected measureTotal(pts: Vec3[]): number { let s = 0; for (let i = 1; i < pts.length; i++) s += this.measureLen(pts[i - 1], pts[i]); return s; }
+  /* Longueur / total de mesure = géométrie PURE `Measure` (cf. geometry/Measure.ts). */
 
   /** Pose un point au clic (si le contexte correspond). */
   protected measurePlaceAt(clientX: number, clientY: number): void {
@@ -813,14 +813,14 @@ export class DcInteract extends DcPanels {
       const lineCls = "dc-measure-line" + (hot ? " hi" : "");
       if (pts.length >= 2) {
         g.appendChild(Dom.svg("polyline", { class: lineCls, points: pts.map((p) => p.x + "," + p.y).join(" ") }));
-        if (segLabels) for (let i = 1; i < pts.length; i++) label(Format.meters(this.measureLen(pts[i - 1], pts[i])), (pts[i - 1].x + pts[i].x) / 2, (pts[i - 1].y + pts[i].y) / 2, "dc-measure-label");
+        if (segLabels) for (let i = 1; i < pts.length; i++) label(Format.meters(Measure.dist(pts[i - 1], pts[i])), (pts[i - 1].x + pts[i].x) / 2, (pts[i - 1].y + pts[i].y) / 2, "dc-measure-label");
       }
       pts.forEach((p) => g.appendChild(Dom.svg("circle", { class: "dc-measure-dot" + (hot ? " hi" : ""), cx: p.x, cy: p.y, r: rDot })));
     };
     m.done.forEach((pts, i) => {   // mesures validées : étiquette nom+total + surbrillance au survol
       poly(pts, i === this._measHi, false);
       const c = pts.reduce((a, p) => ({ x: a.x + p.x, y: a.y + p.y, z: 0 }), { x: 0, y: 0, z: 0 });
-      label("Mesure " + (i + 1) + " · " + Format.meters(this.measureTotal(pts)), c.x / pts.length, c.y / pts.length, "dc-measure-label name");
+      label("Mesure " + (i + 1) + " · " + Format.meters(Measure.total(pts)), c.x / pts.length, c.y / pts.length, "dc-measure-label name");
     });
     poly(m.pts, false, true);   // mesure en cours : étiquettes par segment
     gRoot.appendChild(g);
@@ -868,7 +868,7 @@ export class DcInteract extends DcPanels {
     } else {
       measures.forEach((meas) => {
         const np = meas.pts.length, d = document.createElement("div");
-        d.innerHTML = '<b>' + Html.escape(meas.name) + '</b> : <b style="color:var(--accent)">' + Html.escape(Format.meters(this.measureTotal(meas.pts))) + '</b> <span style="color:var(--fg-dim)">· ' + np + ' point' + (np > 1 ? 's' : '') + '</span>';
+        d.innerHTML = '<b>' + Html.escape(meas.name) + '</b> : <b style="color:var(--accent)">' + Html.escape(Format.meters(Measure.total(meas.pts))) + '</b> <span style="color:var(--fg-dim)">· ' + np + ' point' + (np > 1 ? 's' : '') + '</span>';
         if (meas.idx != null && here) {   // mesure VALIDÉE → survol = mise en évidence dans la vue
           const idx = meas.idx; d.style.cursor = "pointer";
           d.addEventListener("mouseenter", () => this.measureSetHi(idx));
@@ -879,7 +879,7 @@ export class DcInteract extends DcPanels {
     }
     box.appendChild(list);
     if (measures.length) {   // LONGUEUR TOTALE (toutes mesures)
-      const grand = m.done.reduce((s, p) => s + this.measureTotal(p), 0) + this.measureTotal(m.pts);
+      const grand = m.done.reduce((s, p) => s + Measure.total(p), 0) + Measure.total(m.pts);
       const tot = document.createElement("div"); tot.style.cssText = "margin:6px 0;font-size:13px;border-top:1px solid var(--line);padding-top:6px";
       tot.innerHTML = 'Longueur totale : <b style="color:var(--accent)">' + Html.escape(Format.meters(grand)) + '</b>';
       box.appendChild(tot);
@@ -924,7 +924,7 @@ export class DcInteract extends DcPanels {
     this.measure.cursor = w;
     if (this._three) this._three.setMeasureOverlay(this.measure.pts, w, this.measure.done, this._measHi);
     const last = this.measure.pts[this.measure.pts.length - 1];
-    if (w) this.showCote(Format.meters(this.measureLen(last, w)), clientX, clientY); else this.hideCote();
+    if (w) this.showCote(Format.meters(Measure.dist(last, w)), clientX, clientY); else this.hideCote();
   }
 
   /** Clic route (moteur) → port de départ / waypoint / port terminal (même machine d'état qu'en SVG). */

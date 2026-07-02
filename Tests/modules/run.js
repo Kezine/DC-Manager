@@ -61,6 +61,7 @@ const { Positioning } = D("geometry/Positioning.js");
 const { DoorGeometry } = D("geometry/DoorGeometry.js");
 const { Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM } = D("domain/Doors.js");
 const { DoorTool } = D("views/dc/DoorTool.js");
+const { Measure } = D("geometry/Measure.js");
 const { ImageStore } = D("data/ImageStore.js");
 const { FaceImage } = D("models/index.js");
 const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
@@ -961,6 +962,15 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     approx(arcR[0].y, gr2.clearLatch.y, "arc mur droit démarre au vantail FERMÉ (y)");
     approx(arcR[8].x, gr2.leafOpen.x, "arc mur droit finit au vantail OUVERT (x)");
     approx(arcR[8].y, gr2.leafOpen.y, "arc mur droit finit au vantail OUVERT (y)");
+  }
+
+  console.log("\n• Measure : géométrie pure de mesure (longueur segment · total polyligne, 3D)");
+  {
+    ck.eq(Measure.dist({ x: 0, y: 0 }, { x: 3, y: 4 }), 5, "dist : 3-4-5 en 2D (z absent → 0)");
+    ck.eq(Measure.dist({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 2 }), 2, "dist : composante z prise en compte");
+    ck.eq(Measure.total([{ x: 0, y: 0 }]), 0, "total : < 2 points → 0");
+    ck.eq(Measure.total([{ x: 0, y: 0 }, { x: 3, y: 4 }, { x: 3, y: 4 }]), 5, "total : somme des segments (dernier nul)");
+    ck.eq(Measure.total([{ x: 0, y: 0 }, { x: 0, y: 4 }, { x: 3, y: 4 }]), 7, "total : polyligne 4 + 3 = 7");
   }
 
   console.log("\n• Doors : domaine des portes de salle (valeurs canoniques, libellés, défauts, règles pures)");
