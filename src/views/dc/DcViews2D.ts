@@ -146,30 +146,55 @@ export class DcViews2D extends DcScene3D {
     return g;
   }
 
-  protected onFloorAnchorPointerDown(e: MouseEvent, cfg: any, loc: string, fl: string): void {
-    if (e.button !== 0) return; e.preventDefault(); e.stopPropagation();
-    const grp = e.currentTarget as SVGElement; grp.classList.add("dragging");
-    const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm;
-    const start = { x: cfg.anchor_x || 0, y: cfg.anchor_y || 0 }, w0 = this.clientToWorld(e.clientX, e.clientY);
-    const off = { x: w0.x - start.x, y: w0.y - start.y };
-    const clamp = (p: { x: number; y: number }) => ({ x: Math.min(Math.max(p.x, 0), W), y: Math.min(Math.max(p.y, 0), D) });
-    let cur = { x: start.x, y: start.y }, moved = false;
+  /** Squelette COMMUN d'un glisser sur le plan d'étage (salle / équipement / OOB / ancre / figure) : seuil de
+      déplacement, classe `.dragging`, transform live (translate [+ rotate]), cote flottante, nettoyage des
+      listeners, distinction clic simple / glissé. Les SPÉCIFICITÉS (délégation au positionnement, sélection,
+      position initiale, bornage, aimantation/arrondi, cible du commit) restent EXPLICITES via `opts` — notamment
+      `commit(cur)`, qui reçoit le centre courant (déjà borné par `clamp`) et applique sa propre aimantation/écriture. */
+  protected floorDrag(e: MouseEvent, opts: {
+    entityId?: string; delegatePos?: boolean;
+    preselect?: (grp: SVGElement) => void;
+    start: { x: number; y: number };
+    clamp: (p: { x: number; y: number }) => { x: number; y: number };
+    rotate?: number; hideTipOnMove?: boolean;
+    onClick?: () => void;
+    commit: (cur: { x: number; y: number }) => void | Promise<void>;
+  }): void {
+    if (e.button !== 0) return;
+    if (opts.delegatePos && opts.entityId && this.posTool.activeHere()) { this.posTool.dragEntity(e, opts.entityId); return; }   // mode positionnement assisté
+    e.preventDefault(); e.stopPropagation();
+    const grp = e.currentTarget as SVGElement;
+    opts.preselect?.(grp);
+    const w0 = this.clientToWorld(e.clientX, e.clientY), off = { x: w0.x - opts.start.x, y: w0.y - opts.start.y };
+    const rot = opts.rotate != null ? ` rotate(${opts.rotate})` : "";
+    let cur = { x: opts.start.x, y: opts.start.y }, moved = false;
     const move = (ev: MouseEvent) => {
-      const wld = this.clientToWorld(ev.clientX, ev.clientY); const nx = wld.x - off.x, ny = wld.y - off.y;
-      if (!moved && Math.abs(nx - start.x) + Math.abs(ny - start.y) < (8 / (this.scale || 1))) return;
-      moved = true;
-      cur = clamp({ x: nx, y: ny }); grp.setAttribute("transform", `translate(${cur.x} ${cur.y})`);
+      const w = this.clientToWorld(ev.clientX, ev.clientY), nx = w.x - off.x, ny = w.y - off.y;
+      if (!moved && Math.abs(nx - opts.start.x) + Math.abs(ny - opts.start.y) < (8 / (this.scale || 1))) return;
+      moved = true; grp.classList.add("dragging"); if (opts.hideTipOnMove) this.hideTip();
+      cur = opts.clamp({ x: nx, y: ny }); grp.setAttribute("transform", `translate(${cur.x} ${cur.y})${rot}`);
       this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
     };
     const up = async () => {
       document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       grp.classList.remove("dragging"); this.hideCote();
-      if (!moved) return;
-      const c = clamp({ x: this.freePlace ? cur.x : this.snapEdge(cur.x, cell), y: this.freePlace ? cur.y : this.snapEdge(cur.y, cell) });
-      const f = await this.ensureFloor(loc, fl);   // l'ancrage se stocke sur l'entité floors (créée au besoin)
-      await this.store.update("floors", f.id, { anchor_x: Math.round(c.x), anchor_y: Math.round(c.y) }); this.host.setDirty?.(true); this.render();
+      if (!moved) { opts.onClick?.(); return; }   // simple clic (sous le seuil) = pas de déplacement
+      await opts.commit(cur);
     };
     document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+  }
+
+  protected onFloorAnchorPointerDown(e: MouseEvent, cfg: any, loc: string, fl: string): void {
+    const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm;
+    const clamp = (p: { x: number; y: number }) => ({ x: Math.min(Math.max(p.x, 0), W), y: Math.min(Math.max(p.y, 0), D) });
+    this.floorDrag(e, {
+      start: { x: cfg.anchor_x || 0, y: cfg.anchor_y || 0 }, clamp,
+      commit: async (cur) => {
+        const c = clamp({ x: this.freePlace ? cur.x : this.snapEdge(cur.x, cell), y: this.freePlace ? cur.y : this.snapEdge(cur.y, cell) });
+        const f = await this.ensureFloor(loc, fl);   // l'ancrage se stocke sur l'entité floors (créée au besoin)
+        await this.store.update("floors", f.id, { anchor_x: Math.round(c.x), anchor_y: Math.round(c.y) }); this.host.setDirty?.(true); this.render();
+      },
+    });
   }
 
   /** Rail flottant (à gauche du plan) listant tous les étages connus — navigation rapide entre étages. */
@@ -214,30 +239,18 @@ export class DcViews2D extends DcScene3D {
 
   /** Glisser un équipement d'étage (localise floor_x/floor_y + rattache bâtiment/étage) ; clic = sélection. */
   protected onFloorEquipPointerDown(e: MouseEvent, eq: any, cfg: any): void {
-    if (e.button !== 0) return;
-    if (this.posTool.activeHere()) { this.posTool.dragEntity(e, eq.id); return; }   // mode positionnement (aide au placement)
-    e.preventDefault(); e.stopPropagation();
     const ft = this.floorTargetResolve() || { location: "", floor: "" }, loc = ft.location || "", fl = String(ft.floor || "");
     const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm, o = Normalize.rackOrientation(eq.dc_orientation);
-    const grp = e.currentTarget as SVGElement;
-    const start = FloorLayout.floorEquipPos(eq, cfg), w0 = this.clientToWorld(e.clientX, e.clientY), off = { x: w0.x - start.x, y: w0.y - start.y };
     const clampP = (p: { x: number; y: number }) => ({ x: Math.min(Math.max(p.x, 0), W), y: Math.min(Math.max(p.y, 0), D) });
-    let cur = { x: start.x, y: start.y }, moved = false;
-    const move = (ev: MouseEvent) => {
-      const w = this.clientToWorld(ev.clientX, ev.clientY), nx = w.x - off.x, ny = w.y - off.y;
-      if (!moved && Math.abs(nx - start.x) + Math.abs(ny - start.y) < (8 / (this.scale || 1))) return;
-      moved = true; grp.classList.add("dragging");
-      cur = clampP({ x: nx, y: ny }); grp.setAttribute("transform", `translate(${cur.x} ${cur.y}) rotate(${o})`);
-      this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
-    };
-    const up = async () => {
-      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
-      grp.classList.remove("dragging"); this.hideCote();
-      if (!moved) { this.selFloorEquip = eq.id; this.render(); return; }
-      const c = this.freePlace ? clampP(cur) : clampP({ x: this.snapEdge(cur.x, cell), y: this.snapEdge(cur.y, cell) });
-      await this.store.update("equipments", eq.id, { floor_x: Math.round(c.x), floor_y: Math.round(c.y), location: loc, floor: fl }); this.host.setDirty?.(true);
-    };
-    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+    this.floorDrag(e, {
+      entityId: eq.id, delegatePos: true, rotate: o,
+      start: FloorLayout.floorEquipPos(eq, cfg), clamp: clampP,
+      onClick: () => { this.selFloorEquip = eq.id; this.render(); },
+      commit: async (cur) => {
+        const c = this.freePlace ? clampP(cur) : clampP({ x: this.snapEdge(cur.x, cell), y: this.snapEdge(cur.y, cell) });
+        await this.store.update("equipments", eq.id, { floor_x: Math.round(c.x), floor_y: Math.round(c.y), location: loc, floor: fl }); this.host.setDirty?.(true);
+      },
+    });
   }
 
   /** Une salle sur le plan d'étage : emprise (rect orienté + liseré front) + libellé. Cliquable / déplaçable. */
@@ -273,31 +286,22 @@ export class DcViews2D extends DcScene3D {
   }
 
   protected onFloorOobPointerDown(e: MouseEvent, wp: any, cfg: any): void {
-    if (e.button !== 0) return; e.preventDefault(); e.stopPropagation();
-    this.selWaypointId = wp.id; this.selRoomId = null; this.selFloorEquip = null;
-    if (this.svg) this.svg.querySelectorAll(".dc-floor-room,.dc-floor-oob,.dc-floor-equip").forEach((n) => n.classList.remove("sel"));
-    const grp = e.currentTarget as SVGElement; grp.classList.add("sel");
     const ft = this.floorTargetResolve() || { location: "", floor: "" }, loc = ft.location || "", fl = String(ft.floor || "");   // reste sur l'étage AFFICHÉ
     const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm;
-    const start = FloorLayout.oobFloorPos(wp, cfg), w0 = this.clientToWorld(e.clientX, e.clientY);
-    const off = { x: w0.x - start.x, y: w0.y - start.y };
     const clamp = (p: { x: number; y: number }) => ({ x: Math.min(Math.max(p.x, 0), W), y: Math.min(Math.max(p.y, 0), D) });
-    let cur = { x: start.x, y: start.y }, moved = false;
-    const move = (ev: MouseEvent) => {
-      const wld = this.clientToWorld(ev.clientX, ev.clientY); const nx = wld.x - off.x, ny = wld.y - off.y;
-      if (!moved && Math.abs(nx - start.x) + Math.abs(ny - start.y) < (8 / (this.scale || 1))) return;
-      moved = true; grp.classList.add("dragging"); this.hideTip();
-      cur = clamp({ x: nx, y: ny }); grp.setAttribute("transform", `translate(${cur.x} ${cur.y})`);
-      this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
-    };
-    const up = async () => {
-      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
-      grp.classList.remove("dragging"); this.hideCote();
-      if (!moved) { this.render(); return; }   // simple clic = sélection
-      const c = clamp({ x: this.freePlace ? cur.x : this.snapEdge(cur.x, cell), y: this.freePlace ? cur.y : this.snapEdge(cur.y, cell) });
-      await this.store.update("waypoints", wp.id, { floor_x: c.x, floor_y: c.y, location: loc, floor: fl }); this.host.setDirty?.(true);   // localise (étage inchangé)
-    };
-    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+    this.floorDrag(e, {
+      start: FloorLayout.oobFloorPos(wp, cfg), clamp, hideTipOnMove: true,
+      preselect: (grp) => {
+        this.selWaypointId = wp.id; this.selRoomId = null; this.selFloorEquip = null;
+        if (this.svg) this.svg.querySelectorAll(".dc-floor-room,.dc-floor-oob,.dc-floor-equip").forEach((n) => n.classList.remove("sel"));
+        grp.classList.add("sel");
+      },
+      onClick: () => this.render(),   // simple clic = sélection
+      commit: async (cur) => {
+        const c = clamp({ x: this.freePlace ? cur.x : this.snapEdge(cur.x, cell), y: this.freePlace ? cur.y : this.snapEdge(cur.y, cell) });
+        await this.store.update("waypoints", wp.id, { floor_x: c.x, floor_y: c.y, location: loc, floor: fl }); this.host.setDirty?.(true);   // localise (étage inchangé)
+      },
+    });
   }
 
   protected snapEdge(v: number, cell: number): number { return Math.round(v / cell) * cell; }
@@ -305,30 +309,17 @@ export class DcViews2D extends DcScene3D {
       simple clic = sélection + activation de la salle. */
 
   protected onFloorRoomPointerDown(e: MouseEvent, d: any, cfg: any): void {
-    if (e.button !== 0) return;
-    if (this.posTool.activeHere()) { this.posTool.dragEntity(e, d.id); return; }   // mode positionnement (aide au placement)
-    e.preventDefault(); e.stopPropagation();
     const W = cfg.width_mm, D = cfg.depth_mm, cell = cfg.cell_mm, fp = FloorLayout.roomFootprint(d);
-    const grp = e.currentTarget as SVGElement;
-    const start = this.floor.roomPos(d, cfg), w0 = this.clientToWorld(e.clientX, e.clientY);
-    const off = { x: w0.x - start.x, y: w0.y - start.y };
     const clampP = (p: { x: number; y: number }) => ({ x: Math.min(Math.max(p.x, 0), Math.max(0, W - fp.w)), y: Math.min(Math.max(p.y, 0), Math.max(0, D - fp.h)) });
-    let cur = { x: start.x, y: start.y }, moved = false;
-    const move = (ev: MouseEvent) => {
-      const w = this.clientToWorld(ev.clientX, ev.clientY), nx = w.x - off.x, ny = w.y - off.y;
-      if (!moved && Math.abs(nx - start.x) + Math.abs(ny - start.y) < (8 / (this.scale || 1))) return;
-      moved = true; grp.classList.add("dragging");
-      cur = clampP({ x: nx, y: ny }); grp.setAttribute("transform", `translate(${cur.x} ${cur.y})`);
-      this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
-    };
-    const up = async () => {
-      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
-      grp.classList.remove("dragging"); this.hideCote();
-      if (!moved) { this.selRoomId = d.id; this.dcId = d.id; this.render(); return; }   // simple clic = sélection + activation
-      const c = this.freePlace ? clampP(cur) : clampP({ x: this.snapEdge(cur.x, cell), y: this.snapEdge(cur.y, cell) });
-      await this.store.update("datacenters", d.id, { floor_x: Math.round(c.x), floor_y: Math.round(c.y) }); this.host.setDirty?.(true);
-    };
-    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+    this.floorDrag(e, {
+      entityId: d.id, delegatePos: true,
+      start: this.floor.roomPos(d, cfg), clamp: clampP,
+      onClick: () => { this.selRoomId = d.id; this.dcId = d.id; this.render(); },   // simple clic = sélection + activation
+      commit: async (cur) => {
+        const c = this.freePlace ? clampP(cur) : clampP({ x: this.snapEdge(cur.x, cell), y: this.snapEdge(cur.y, cell) });
+        await this.store.update("datacenters", d.id, { floor_x: Math.round(c.x), floor_y: Math.round(c.y) }); this.host.setDirty?.(true);
+      },
+    });
   }
   /** Grille + cases INACCESSIBLES (hachurées). En mode `blockEdit`, un overlay capte un GLISSÉ de sélection
       (rectangle) → `onRange(cx0,cy0,cx1,cy1)` sur les cases couvertes (clic simple = 1 case). Aperçu en direct. */
@@ -443,31 +434,21 @@ export class DcViews2D extends DcScene3D {
   }
   /** Glisser le personnage d'échelle (met à jour la position de vue + persiste ; aucune écriture dans le document). */
   protected onFigurePointerDown(e: MouseEvent, mode: "top" | "floor"): void {
-    if (e.button !== 0 || !this.figure) return;
-    e.preventDefault(); e.stopPropagation();
-    const grp = e.currentTarget as SVGElement, orient = this.figure.orient || 0;
+    if (!this.figure) return;
+    const orient = this.figure.orient || 0;
     const curX = mode === "top" ? this.figure.dcX : this.figure.floorX, curY = mode === "top" ? this.figure.dcY : this.figure.floorY;
-    const w0 = this.clientToWorld(e.clientX, e.clientY), off = { x: w0.x - curX, y: w0.y - curY };
     let W: number, D: number;
     if (mode === "top") { const dc = this.current(); W = dc ? dc.width_mm : 4000; D = dc ? dc.depth_mm : 3000; }
     else { const ft = this.floorTargetResolve(); const cfg = ft ? this.floor.config(ft.location, ft.floor) : null; W = cfg ? cfg.width_mm : 20000; D = cfg ? cfg.depth_mm : 20000; }
-    const clampP = (c: { x: number; y: number }) => ({ x: Math.min(Math.max(c.x, 0), W), y: Math.min(Math.max(c.y, 0), D) });
-    let cur = { x: curX, y: curY }, moved = false;
-    const move = (ev: MouseEvent) => {
-      const wld = this.clientToWorld(ev.clientX, ev.clientY), nx = wld.x - off.x, ny = wld.y - off.y;
-      if (!moved && Math.abs(nx - curX) + Math.abs(ny - curY) < (8 / (this.scale || 1))) return;
-      moved = true; grp.classList.add("dragging");
-      cur = clampP({ x: nx, y: ny }); grp.setAttribute("transform", `translate(${cur.x} ${cur.y}) rotate(${orient})`);
-      this.showCote(Format.meters(cur.x) + " ; " + Format.meters(cur.y), ev.clientX, ev.clientY);
-    };
-    const up = () => {
-      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
-      grp.classList.remove("dragging"); this.hideCote();
-      if (!moved || !this.figure) return;
-      if (mode === "top") { this.figure.dcX = Math.round(cur.x); this.figure.dcY = Math.round(cur.y); } else { this.figure.floorX = Math.round(cur.x); this.figure.floorY = Math.round(cur.y); }
-      this.persistView();   // repère de vue → pas de mutation du document
-    };
-    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+    this.floorDrag(e, {
+      start: { x: curX, y: curY }, rotate: orient,
+      clamp: (c) => ({ x: Math.min(Math.max(c.x, 0), W), y: Math.min(Math.max(c.y, 0), D) }),
+      commit: (cur) => {   // repère de vue (figure d'échelle) → PAS d'aimantation, PAS de mutation du document (persistView)
+        if (!this.figure) return;
+        if (mode === "top") { this.figure.dcX = Math.round(cur.x); this.figure.dcY = Math.round(cur.y); } else { this.figure.floorX = Math.round(cur.x); this.figure.floorY = Math.round(cur.y); }
+        this.persistView();
+      },
+    });
   }
 
   /* PORTES de salle : rendu 2D + drag = DoorTool.node2D (cf. DoorTool.ts). Appelé depuis renderTop / renderFloor. */
