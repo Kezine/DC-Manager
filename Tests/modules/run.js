@@ -62,6 +62,7 @@ const { DoorGeometry } = D("geometry/DoorGeometry.js");
 const { Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM } = D("domain/Doors.js");
 const { DoorTool } = D("views/dc/DoorTool.js");
 const { Measure } = D("geometry/Measure.js");
+const { CableSpline } = D("geometry/CableSpline.js");
 const { MeasureTool } = D("views/dc/MeasureTool.js");
 const { RouteTool } = D("views/dc/RouteTool.js");
 const { ImageStore } = D("data/ImageStore.js");
@@ -973,6 +974,25 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(Measure.total([{ x: 0, y: 0 }]), 0, "total : < 2 points → 0");
     ck.eq(Measure.total([{ x: 0, y: 0 }, { x: 3, y: 4 }, { x: 3, y: 4 }]), 5, "total : somme des segments (dernier nul)");
     ck.eq(Measure.total([{ x: 0, y: 0 }, { x: 0, y: 4 }, { x: 3, y: 4 }]), 7, "total : polyligne 4 + 3 = 7");
+  }
+
+  console.log("\n• CableSpline : échantillonnage pur du spline de câble (droit / courbe / amorces)");
+  {
+    const A = { x: 0, y: 0, z: 0 }, B = { x: 100, y: 0, z: 0 };
+    // < 2 points → renvoyé tel quel (copie)
+    ck.eq(CableSpline.sample([{ x: 1, y: 2, z: 3 }], new Set(), 0.25).length, 1, "sample : < 2 points → inchangé");
+    // segment DROIT (index 0 dans `straight`) → 2 points, aux extrémités
+    const straight = CableSpline.sample([A, B], new Set([0]), 0.25);
+    ck.eq(JSON.stringify(straight), JSON.stringify([A, B]), "sample : segment droit → 2 points inchangés");
+    // segment COURBE → densifié, commence à A, finit à B
+    const curve = CableSpline.sample([A, B], new Set(), 0.25);
+    ck(curve.length > 2, "sample : segment courbe → densifié (> 2 points)");
+    ck.eq(JSON.stringify(curve[0]), JSON.stringify(A), "sample : commence exactement à P0");
+    const last = curve[curve.length - 1];
+    ck(Math.abs(last.x - 100) < 1e-6 && Math.abs(last.y) < 1e-6 && Math.abs(last.z) < 1e-6, "sample : finit exactement à P1");
+    // 3 points ALIGNÉS sur l'axe x, courbes → la courbe reste sur l'axe (y=z=0)
+    const collinear = CableSpline.sample([A, { x: 50, y: 0, z: 0 }, B], new Set(), 0.25);
+    ck(collinear.every((p) => Math.abs(p.y) < 1e-6 && Math.abs(p.z) < 1e-6), "sample : points alignés → courbe reste sur l'axe");
   }
 
   console.log("\n• MeasureTool : machine d'état de la mesure (via hôte injecté — testable en isolation)");

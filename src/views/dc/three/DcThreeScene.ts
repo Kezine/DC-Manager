@@ -10,6 +10,7 @@ import { RackGeometry } from "../../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
+import { CableSpline } from "../../../geometry/CableSpline";
 import { Normalize } from "../../../core/Normalize";
 import { EquipmentTypes } from "../../../registries/EquipmentTypes";
 import { Depths } from "../../../registries/Depths";
@@ -888,49 +889,6 @@ export class DcThreeScene extends DcThreeCamera {
     return { a, b, via };
   }
 
-  /** Échantillonne le SPLINE CARDINAL du moteur SVG (tension `k`) en polyligne dense 3D ; les segments de
-      `straight` restent des CHORDES DROITES. Aux points d'amorce `stubAt` (sortie ⊥), la tangente est IMPOSÉE =
-      axe du segment droit adjacent (continuité G1, comme `cablePath` du SVG → la courbe part/arrive dans l'axe,
-      aucun « kink » → la sortie reste perpendiculaire). Contrôles intérieurs : C1 = P[i]+(P[i+1]−P[i−1])·k. */
-  protected cardinalSample(P: Vec3[], straight: Set<number>, k: number, stubAt?: Set<number>): THREE.Vector3[] {
-    const V = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
-    if (P.length < 2) return P.map(V);
-    const n = P.length, hk = k * 2.5;
-    const dist = (a: Vec3, b: Vec3) => Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
-    const unit = (a: Vec3, b: Vec3) => { const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, L = Math.hypot(dx, dy, dz) || 1; return { x: dx / L, y: dy / L, z: dz / L }; };
-    // direction d'amorce imposée à i = axe de SON segment droit adjacent (G1 avec le segment droit)
-    const stubDir = (i: number): { x: number; y: number; z: number } | null => {
-      if (!stubAt || !stubAt.has(i)) return null;
-      if (straight.has(i)) return unit(P[i], P[i + 1]);             // segment droit APRÈS i
-      if (i > 0 && straight.has(i - 1)) return unit(P[i - 1], P[i]); // segment droit AVANT i
-      return null;
-    };
-    const tan = (i: number, segLen: number): THREE.Vector3 => {
-      const d = stubDir(i);
-      if (d) return new THREE.Vector3(d.x * segLen * hk, d.y * segLen * hk, d.z * segLen * hk);   // amorce : alignée sur l'axe
-      const p0 = P[Math.max(0, i - 1)], p1 = P[Math.min(n - 1, i + 1)];
-      return new THREE.Vector3((p1.x - p0.x) * k, (p1.y - p0.y) * k, (p1.z - p0.z) * k);          // intérieur : Catmull-Rom
-    };
-    const out: THREE.Vector3[] = [V(P[0])];
-    for (let i = 0; i < n - 1; i++) {
-      const p1 = V(P[i]), p2 = V(P[i + 1]);
-      if (straight.has(i)) { out.push(p2); continue; }   // chorde droite (corps de conduit / amorce ⊥)
-      const segLen = dist(P[i], P[i + 1]);
-      const c1 = p1.clone().add(tan(i, segLen)), c2 = p2.clone().sub(tan(i + 1, segLen));
-      // densité adaptée à la longueur de la corde (~1 point / 5 mm), pour des courbes franchement lisses.
-      const perSeg = Math.max(16, Math.min(260, Math.round(p1.distanceTo(p2) / 5)));
-      for (let s = 1; s <= perSeg; s++) {
-        const t = s / perSeg, u = 1 - t;
-        // Bézier cubique B(t) = u³P1 + 3u²t C1 + 3ut² C2 + t³P2
-        const x = u * u * u * p1.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p2.x;
-        const y = u * u * u * p1.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p2.y;
-        const z = u * u * u * p1.z + 3 * u * u * t * c1.z + 3 * u * t * t * c2.z + t * t * t * p2.z;
-        out.push(new THREE.Vector3(x, y, z));
-      }
-    }
-    return out;
-  }
-
   /** Trace tous les câbles intra-salle en tubes (couleur = réseau) + pastilles d'extrémité, cliquables.
       Le tracé (corps de conduit droits + amorces ⊥ selon `cablePortNormal`) vient de la couche partagée
       `CableRouting.cableLine` — même mécanique que le moteur SVG. */
@@ -1029,9 +987,9 @@ export class DcThreeScene extends DcThreeCamera {
       épaisseur CONSTANTE quel que soit le zoom (comme le stroke SVG). Cliquable → form câble. */
   protected emitCableTube(root: THREE.Group, line: Vec3[], straight: Set<number>, color: number, id: string, power = false, stubAt?: Set<number>): void {
     if (!line || line.length < 2) return;
-    const dense = this.cardinalSample(line, straight, this.opts.cableSplineK, stubAt);
+    const dense = CableSpline.sample(line, straight, this.opts.cableSplineK, stubAt);
     // dédoublonne les points coïncidents (segments de longueur nulle inutiles)
-    const pl = dense.filter((v, i) => i === 0 || v.distanceToSquared(dense[i - 1]) > 0.25);
+    const pl = dense.filter((v, i) => { if (i === 0) return true; const q = dense[i - 1]; return (v.x - q.x) ** 2 + (v.y - q.y) ** 2 + (v.z - q.z) ** 2 > 0.25; });
     if (pl.length < 2) return;
     const positions: number[] = [];
     pl.forEach((v) => positions.push(v.x, v.y, v.z));
@@ -1059,7 +1017,7 @@ export class DcThreeScene extends DcThreeCamera {
       const tex = this.boltTexture(), spacing = Math.max(50, this.opts.powerBoltSpacingMm || 300);
       let dist = spacing * 0.5;
       for (let i = 0; i < pl.length - 1; i++) {
-        const a = pl[i], b = pl[i + 1], seg = a.distanceTo(b); if (seg < 1e-6) continue;
+        const a = pl[i], b = pl[i + 1], seg = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z); if (seg < 1e-6) continue;
         while (dist <= seg) {
           const t = dist / seg;
           const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }));
