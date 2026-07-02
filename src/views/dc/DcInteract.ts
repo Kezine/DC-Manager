@@ -34,13 +34,6 @@ import { DcPanels } from "./DcPanels";
 
 export class DcInteract extends DcPanels {
 
-  /** Met en évidence (`.route-pick`) les waypoints DÉJÀ choisis dans la route en cours, sur tous les nœuds `[data-wp]`. */
-  protected markRouteWaypoints(): void {
-    if (!this.svg) return;
-    const ids = new Set(this.routeBuild ? this.routeBuild.wpIds : []);
-    this.svg.querySelectorAll("[data-wp]").forEach((n) => n.classList.toggle("route-pick", ids.has(n.getAttribute("data-wp") || "")));
-  }
-
   protected showCote(text: string, clientX: number, clientY: number): void {
     if (!this.coteEl) { this.coteEl = document.createElement("div"); this.coteEl.className = "dc-cote"; this.stage.appendChild(this.coteEl); }
     this.coteEl.textContent = text; this.coteEl.style.display = "block";
@@ -344,8 +337,8 @@ export class DcInteract extends DcPanels {
     this.wireClick(node, () => {
       this.hideTip();
       if (this.routeBuild) {   // routage : port de départ, puis port terminal
-        if (!this.routeBuild.fromPortId) this.routeStart(port.id);
-        else if (port.id !== this.routeBuild.fromPortId) this.routeFinish(port.id);
+        if (!this.routeBuild.fromPortId) this.routeTool.start(port.id);
+        else if (port.id !== this.routeBuild.fromPortId) this.routeTool.finish(port.id);
         return;
       }
       if (cab) this.host.openCableForm?.(cab.id); else this.connectPort(port);
@@ -393,8 +386,8 @@ export class DcInteract extends DcPanels {
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [cab
       ? { label: "Éditer le câble…", action: () => this.host.openCableForm?.(cab.id) }
       : { label: "Créer / affecter un câble…", action: () => this.connectPort(port) }];
-    if (this.routeBuild) { if (this.routeBuild.fromPortId && port.id !== this.routeBuild.fromPortId) items.push({ label: "Terminer la route ici", action: () => this.routeFinish(port.id) }); }
-    else if (!cab) items.push({ label: "Démarrer une route ici", action: () => this.routeStart(port.id) });
+    if (this.routeBuild) { if (this.routeBuild.fromPortId && port.id !== this.routeBuild.fromPortId) items.push({ label: "Terminer la route ici", action: () => this.routeTool.finish(port.id) }); }
+    else if (!cab) items.push({ label: "Démarrer une route ici", action: () => this.routeTool.start(port.id) });
     const secs: CtxSection[] = [{ head: port.name || "(port)", items }];
     const csi = this.cableSelItems(this.store.cablesOfPorts([port.id]).map((c: any) => c.id), "le câble du port");
     if (csi.length) secs.push({ items: csi });
@@ -524,7 +517,7 @@ export class DcInteract extends DcPanels {
   protected waypointCtx(wp: any): CtxSection[] {
     const nCab = this.store.cablesOfWaypoint(wp.id).length;
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [];
-    if (this.routeBuild && this.routeBuild.fromPortId) items.push({ label: "Ajouter à la route", action: () => this.routeAddWp(wp.id) });
+    if (this.routeBuild && this.routeBuild.fromPortId) items.push({ label: "Ajouter à la route", action: () => this.routeTool.addWp(wp.id) });
     items.push({ label: "Modifier…", action: () => this.host.openWaypointForm?.(wp.id) });
     items.push({ label: "Retirer de la salle", danger: true, action: async () => { if (!this.store.get("waypoints", wp.id)) return; await this.store.update("waypoints", wp.id, { datacenter_id: null, dc_x: null, dc_y: null, dc_x2: null, dc_y2: null }); this.setDirty(); } });
     items.push({ label: "Supprimer", danger: true, action: async () => {
@@ -614,62 +607,15 @@ export class DcInteract extends DcPanels {
 
   /** Clic sur un waypoint/brosse/OOB de la scène : ajout à la route en cours (si démarrée) sinon édition. */
   protected onWaypointClick(wp: any): void {
-    if (this.routeBuild && this.routeBuild.fromPortId) { this.routeAddWp(wp.id); return; }
+    if (this.routeBuild && this.routeBuild.fromPortId) { this.routeTool.addWp(wp.id); return; }
     this.host.openWaypointForm?.(wp.id);
   }
 
-  /* ---- routage interactif (création d'une route de câble au clic) ---- */
-  routeArm(): void { this.routeBuild = { fromPortId: null, wpIds: [], armed: true }; this.posTool.disarm(); Notify.toast("Routage : cliquez le PORT de départ", "ok"); this.render(); }
+  /* ---- routage interactif = RouteTool (état + machine d'état + panneau + pont WebGL — cf. RouteTool.ts).
+         Déclenché par les clics ports/waypoints (this.routeTool.start/finish/addWp) ; armé par la barre d'outils. ---- */
 
-  protected routeStart(portId: string): void { this.routeBuild = { fromPortId: portId, wpIds: [] }; Notify.toast("Route démarrée — cliquez des waypoints/brosses puis un PORT terminal"); this.render(); }
-
-  protected routeAddWp(wpId: string): void {
-    if (!this.routeBuild) return;
-    if (this.routeBuild.wpIds.includes(wpId)) { Notify.toast("Ce point de passage est déjà dans la route", "err"); return; }   // pas deux fois le même
-    // EXIT TERMINAL : un exit FERME sa salle au niveau de la route → interdit d'ajouter ensuite un waypoint de cette
-    // salle (le câble DOIT sortir). On éprouve la route prospective et on rejette les violations de cohérence salle.
-    const probe = { from_port_id: this.routeBuild.fromPortId, to_port_id: null, waypoint_ids: [...this.routeBuild.wpIds, wpId] };
-    if (this.store.routeHasRoomBreak(probe)) { Notify.toast("Un exit est TERMINAL pour sa salle — le câble doit sortir avant tout autre waypoint de salle.", "err"); return; }
-    this.routeBuild.wpIds.push(wpId); this.render();
-  }
-
-  protected routeBack(): void { const rb = this.routeBuild; if (!rb) return; if (rb.wpIds.length) rb.wpIds.pop(); else if (rb.fromPortId) { rb.fromPortId = null; rb.armed = true; } this.render(); }
-
-  routeCancel(): void { this.routeBuild = null; this.render(); }
-
-  protected routeFinish(endPortId: string): void {
-    const rb = this.routeBuild; if (!rb || !rb.fromPortId) return;
-    if (endPortId === rb.fromPortId) { Notify.toast("Le port terminal doit différer du port de départ", "err"); return; }
-    const fromPortId = rb.fromPortId, wpIds = rb.wpIds.slice();
-    this.routeBuild = null; this.render();
-    this.host.openCableForm?.(null, { fromPortId, toPortId: endPortId, waypointIds: wpIds });   // dialogue de câblage prérempli
-  }
-
-  /** Libellé court d'un port (équipement : port). */
+  /** Libellé court d'un port (équipement : port) — PARTAGÉ avec les tooltips de câble et le panneau de route. */
   protected portShort(portId: string): string { const p: any = this.store.get("ports", portId); if (!p) return "(port ?)"; const e: any = this.store.get("equipments", p.equipment_id); return (e ? (e.name || "(équip.)") + " : " : "") + (p.name || "(port)"); }
-
-  /** Un waypoint « conduit » (brosse / chemin de câbles posé) : le câble le TRAVERSE par ses extrémités. */
-  protected isConduitWp(w: any): boolean { return !!w && (w.kind === "brush" || (w.kind === "segment" && w.dc_x2 != null && w.dc_y2 != null)); }
-
-  /** Carte « Route en cours » (panneau latéral) : étapes + retour + annuler. */
-  protected routeCard(): HTMLElement {
-    const rb = this.routeBuild!, box = document.createElement("div"); box.className = "dc-card";
-    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "🧵 Route en cours"; box.appendChild(t);
-    const list = document.createElement("div"); list.style.cssText = "font-size:12px;margin:4px 0;display:flex;flex-direction:column;gap:3px";
-    const step = (html: string, n?: number) => { const d = document.createElement("div"); d.innerHTML = (n != null ? '<span class="pill">' + n + "</span> " : "") + html; return d; };
-    if (rb.fromPortId) list.appendChild(step("Départ : <b>" + Html.escape(this.portShort(rb.fromPortId)) + "</b>", 1));
-    else list.appendChild(step('<span style="color:var(--accent)">Cliquez le PORT de départ…</span>'));
-    rb.wpIds.forEach((id, i) => { const w: any = this.store.get("waypoints", id); list.appendChild(step(w ? Html.escape(Waypoint.glyph(w) + " " + (w.name || "(waypoint)")) : "(waypoint ?)", i + 2)); });
-    box.appendChild(list);
-    const hint = document.createElement("div"); hint.className = "form-hint";
-    hint.textContent = rb.fromPortId ? "Cliquez des waypoints/brosses (changez de salle/étage si besoin), puis un PORT terminal pour finir." : "Cliquez un port libre pour démarrer la route.";
-    box.appendChild(hint);
-    const acts = document.createElement("div"); acts.className = "dc-card-acts";
-    const bBack = this.btn("↩ Retour", () => this.routeBack()); (bBack as any).disabled = !rb.fromPortId && !rb.wpIds.length;
-    const bCancel = this.btn("✕ Annuler", () => this.routeCancel()); bCancel.classList.add("btn-danger");
-    acts.append(bBack, bCancel); box.appendChild(acts);
-    return box;
-  }
 
 
   /* ===================== OUTIL DE POSITIONNEMENT — adaptation de VUE =====================
@@ -759,34 +705,10 @@ export class DcInteract extends DcPanels {
   protected syncWebglTool(): void {
     const t = this._three; if (!t) return;
     if (this.measureTool.activeHere()) this.measureTool.syncWebgl();   // mode « measure » + overlay (cf. MeasureTool)
-    else if (this.routeBuild) { t.setToolMode("route"); t.setRouteOverlay(this.webglRouteWorldPts(), this.routeBuild.mouse || null); }
+    else if (this.routeTool.active) this.routeTool.syncWebgl();        // mode « route » + overlay (cf. RouteTool)
     else t.setToolMode("none");
   }
-  /* Clic / survol MESURE en 3D-WebGL = MeasureTool.onWebglPlace / onWebglHover (câblés dans DcBase). */
-
-  /** Clic route (moteur) → port de départ / waypoint / port terminal (même machine d'état qu'en SVG). */
-  protected onWebglRoutePick(desc: any): void {
-    const rb = this.routeBuild; if (!rb || !desc) return;
-    if (desc.type === "port") { if (!rb.fromPortId) this.routeStart(desc.id); else if (desc.id !== rb.fromPortId) this.routeFinish(desc.id); }
-    else if (desc.type === "wp") { if (rb.fromPortId) this.routeAddWp(desc.id); }
-  }
-
-  /** Survol route (moteur) → aperçu (rubber-band) jusqu'au curseur. */
-  protected onWebglRouteHover(w: Vec3 | null): void {
-    const rb = this.routeBuild; if (!rb || !rb.fromPortId) return;
-    rb.mouse = w;
-    if (this._three) this._three.setRouteOverlay(this.webglRouteWorldPts(), w);
-  }
-
-  /** Points MONDE de la route en cours (port de départ + waypoints de la salle active) pour l'aperçu WebGL.
-      Mono-salle (repère salle = monde) ; en multi, seuls les waypoints de la salle active sont prévisualisés. */
-  protected webglRouteWorldPts(): Vec3[] {
-    const rb = this.routeBuild, dc = this.current(); if (!rb || !dc) return [];
-    const pts: Vec3[] = [];
-    if (rb.fromPortId) { const a = this.resolver.resolvePort3D(rb.fromPortId, dc.id); if (a) pts.push({ x: a.x, y: a.y, z: a.z }); }
-    rb.wpIds.forEach((id) => { const w: any = this.store.get("waypoints", id); if (w && this.store.waypointIsPlaced(w) && w.datacenter_id === dc.id) { const an = this.resolver.waypointAnchor(w); pts.push({ x: an.x, y: an.y, z: an.z }); } });
-    return pts;
-  }
+  /* Clic / survol MESURE = MeasureTool.onWebglPlace/onWebglHover ; ROUTE = RouteTool.onWebglPick/onWebglHover (câblés dans DcBase). */
 
 
   /* ============================ « LOCALISER » : focus 3D sur un objet (depuis un listing / une fiche) ============================ */

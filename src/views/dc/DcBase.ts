@@ -25,6 +25,8 @@ import { DoorTool } from "./DoorTool";
 import type { DoorHost } from "./DoorTool";
 import { MeasureTool } from "./MeasureTool";
 import type { MeasureHost, MeasureState } from "./MeasureTool";
+import { RouteTool } from "./RouteTool";
+import type { RouteHost, RouteState } from "./RouteTool";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import { Measure } from "../../geometry/Measure";
 import { Depths } from "../../registries/Depths";
@@ -54,7 +56,11 @@ export class DcBase {
   selFloorEquip: string | null = null;                          // équipement d'étage sélectionné
   freePlace = false;                                            // « Placement libre » : désactive l'aimantation à la grille au glisser
   blockEdit = false;                                            // mode « Cases inaccessibles » : glisser pour (dé)marquer des cases
-  routeBuild: { fromPortId: string | null; wpIds: string[]; armed?: boolean; mouse?: Vec3 | null } | null = null;   // session de routage 3D
+  // Outil de ROUTAGE (création d'un câble au clic) — module dédié `RouteTool`, piloté via `RouteHost` (+ store/resolver
+  // injectés). ÉTAT via PONT d'accès (getter/setter) pour laisser inchangés les sites existants (`this.routeBuild.wpIds`…).
+  routeTool!: RouteTool;
+  get routeBuild(): RouteState | null { return this.routeTool.state; }
+  set routeBuild(v: RouteState | null) { this.routeTool.state = v; }
   // Outil de MESURE multipoint (éphémère, exclusif du routage) — module dédié `MeasureTool` (état + overlays 2D/3D
   // + panneau + pont WebGL), piloté via `MeasureHost`. L'ÉTAT vit dans le tool ; `measure`/`_measHi` sont des PONTS
   // d'accès (getters/setters) pour que les sites existants (`this.measure.pts`…) restent inchangés. Instancié au ctor.
@@ -147,6 +153,7 @@ export class DcBase {
     this.posTool = new PositioningTool(this as unknown as PositioningHost);
     this.doorTool = new DoorTool(this as unknown as DoorHost);
     this.measureTool = new MeasureTool(this as unknown as MeasureHost);
+    this.routeTool = new RouteTool(this as unknown as RouteHost, this.store, this.resolver);
     // Garde headless : sans `document` (tests Node), projection/cadrage restent utilisables.
     if (typeof document === "undefined") return;
     this.toolbarEl = document.createElement("div");
@@ -289,6 +296,9 @@ export class DcBase {
   three(): any | null { return this._three; }
   disarmPositioning(): void { this.posTool.disarm(); }
   clearRoute(): void { this.routeBuild = null; }
+  /* ---- RouteHost : services fournis au RouteTool ---- */
+  svgEl(): SVGElement | null { return this.svg; }
+  openCableForm(prefill: { fromPortId: string; toPortId: string; waypointIds: string[] }): void { this.host.openCableForm?.(null, prefill); }
 
   protected btn(text: string, onClick: () => void, title?: string): HTMLButtonElement {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = text; if (title) b.title = title; b.onclick = onClick; return b;
@@ -391,7 +401,7 @@ export class DcBase {
     return gRoot;
   }
 
-  protected finishScene(): void { if (this.scale == null) this.recenter(); else this.applyTransform(); this.markRouteWaypoints(); }
+  protected finishScene(): void { if (this.scale == null) this.recenter(); else this.applyTransform(); this.routeTool.markWaypoints(); }
 
   protected applyTransform(): void {
     if (!this.gRoot) return;
@@ -610,8 +620,8 @@ export class DcBase {
         // outils interactifs (mesure / routage) — le moteur remonte les clics/survols, la vue tient l'état + le panneau.
         this._three.measurePlaceCb = (w: any) => this.measureTool.onWebglPlace(w);
         this._three.measureHoverCb = (w: any, x: number, y: number) => this.measureTool.onWebglHover(w, x, y);
-        this._three.routePickCb = (desc: any) => this.onWebglRoutePick(desc);
-        this._three.routeHoverCb = (w: any) => this.onWebglRouteHover(w);
+        this._three.routePickCb = (desc: any) => this.routeTool.onWebglPick(desc);
+        this._three.routeHoverCb = (w: any) => this.routeTool.onWebglHover(w);
       }
       this._three.setProjection(persp);                       // projection choisie
       this._three.mount(hostDiv, dcId, opts, ctx);            // (ré)attache + reconstruit (mono/multi + câbles transversaux)

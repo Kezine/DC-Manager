@@ -63,6 +63,7 @@ const { Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM } = D("domain/Doors.js");
 const { DoorTool } = D("views/dc/DoorTool.js");
 const { Measure } = D("geometry/Measure.js");
 const { MeasureTool } = D("views/dc/MeasureTool.js");
+const { RouteTool } = D("views/dc/RouteTool.js");
 const { ImageStore } = D("data/ImageStore.js");
 const { FaceImage } = D("models/index.js");
 const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
@@ -751,15 +752,15 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const inter = dv.routing.interDcRoutes(mInter, false);
     ck.eq(inter.length, 1, "routing.interDcRoutes : 1 route inter-salles");
     ck(inter[0].cable.id === outCable.id && inter[0].pts.length >= 2 && inter[0].pts.every((p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z)), "routing.interDcRoutes : port A → port B, points monde finis");
-    // route builder : départ port A → waypoint → port B → ouvre le form câble prérempli
-    // (on pose routeBuild directement : routeArm/routeStart émettent un toast → besoin du DOM, absent ici)
+    // route builder : départ port A → waypoint → port B → ouvre le form câble prérempli. Machine d'état = RouteTool
+    // (on pose l'état directement : arm/start émettent un toast → besoin du DOM, absent ici). `routeBuild` = pont d'accès.
     let routed = null;
     const dvr = new DatacenterView(s, {}, { openCableForm: (id, opts) => { routed = { id, opts }; } });
     dvr.routeBuild = { fromPortId: pa, wpIds: [] };
-    dvr.routeAddWp(exit1.id); ck.eq(JSON.stringify(dvr.routeBuild.wpIds), JSON.stringify([exit1.id]), "routeAddWp : waypoint ajouté");
-    dvr.routeFinish(pc);
-    ck(routed && routed.id === null && routed.opts.fromPortId === pa && routed.opts.toPortId === pc && JSON.stringify(routed.opts.waypointIds) === JSON.stringify([exit1.id]), "routeFinish → openCableForm prérempli (from/to/waypoints)");
-    ck.eq(dvr.routeBuild, null, "routeFinish : session terminée");
+    dvr.routeTool.addWp(exit1.id); ck.eq(JSON.stringify(dvr.routeBuild.wpIds), JSON.stringify([exit1.id]), "RouteTool.addWp : waypoint ajouté");
+    dvr.routeTool.finish(pc);
+    ck(routed && routed.id === null && routed.opts.fromPortId === pa && routed.opts.toPortId === pc && JSON.stringify(routed.opts.waypointIds) === JSON.stringify([exit1.id]), "RouteTool.finish → openCableForm prérempli (from/to/waypoints)");
+    ck.eq(dvr.routeBuild, null, "RouteTool.finish : session terminée");
     // brouillons-candidats : un câble draft à un seul bout est proposé pour un port compatible
     const pDraft = await mkEqPort(4);   // port libre distinct pour le brouillon (pa porte déjà « patch »)
     const draft = await s.create("cables", { name: "brouillon", from_port_id: pDraft, to_port_id: null, status: "brouillon" });
@@ -1004,6 +1005,20 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(tool.activeHere(), false, "activeHere : false si le contexte a changé");
     tool.cancel();
     ck.eq(tool.hasActive(), false, "cancel : outil désarmé");
+  }
+
+  console.log("\n• RouteTool : machine d'état du routage (back/cancel, via hôte injecté)");
+  {
+    const host = { render: () => {}, svgEl: () => null, currentDc: () => null, openCableForm: () => {}, disarmPositioning: () => {}, three: () => null, btn: () => ({}), portShort: () => "" };
+    const tool = new RouteTool(host, {}, {});   // store/resolver non sollicités par back/cancel
+    ck.eq(tool.active, false, "RouteTool : inactif au départ");
+    tool.state = { fromPortId: "P1", wpIds: ["w1", "w2"] };   // départ + 2 waypoints (pont d'accès de la vue)
+    ck.eq(tool.active && tool.started, true, "démarré (port + waypoints)");
+    tool.back(); ck.eq(JSON.stringify(tool.state.wpIds), JSON.stringify(["w1"]), "back : retire le dernier waypoint");
+    tool.back(); ck.eq(tool.state.wpIds.length, 0, "back : retire le 2e waypoint");
+    tool.back(); ck.eq(tool.state.fromPortId, null, "back : plus de waypoint → efface le port de départ (retour armement)");
+    ck.eq(tool.started, false, "après back complet : plus démarré (encore armé)");
+    tool.cancel(); ck.eq(tool.active, false, "cancel : outil désarmé");
   }
 
   console.log("\n• Doors : domaine des portes de salle (valeurs canoniques, libellés, défauts, règles pures)");

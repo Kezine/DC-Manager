@@ -194,7 +194,7 @@ export class DcPanels extends DcViews2D {
   renderSide(dc: any): void {
     const side = this.sideEl; if (!side) return;
     side.innerHTML = "";
-    if (this.routeBuild) side.appendChild(this.routeCard());   // panneau de routage (toutes vues), en tête
+    if (this.routeTool.active) side.appendChild(this.routeTool.card());   // panneau de routage (toutes vues), en tête
     if (this.measureTool.hasActive()) side.appendChild(this.measureTool.card());   // panneau de mesure (toutes vues), en tête
     if (this.posTool.active) side.appendChild(this.posTool.card());   // panneau d'aide au positionnement (vues 2D)
     if (this.view === "floor") {   // plan d'étage : carte étage + panneau Waypoints (scope étage, toutes les salles)
@@ -641,7 +641,7 @@ export class DcPanels extends DcViews2D {
     const resolved = this.panelCables(dc);
     const total = this.store.all("cables").length;
     // créer une route 3D au clic (le prochain clic sur un port libre démarre ; puis waypoints ; puis port terminal)
-    const bRoute = this.btn(this.routeBuild ? "✕ Annuler la route" : "🧵 Créer une route", () => { if (this.routeBuild) this.routeCancel(); else this.routeArm(); }, "Tracer un câble en cliquant les ports + waypoints");
+    const bRoute = this.btn(this.routeTool.active ? "✕ Annuler la route" : "🧵 Créer une route", () => { if (this.routeTool.active) this.routeTool.cancel(); else this.routeTool.arm(); }, "Tracer un câble en cliquant les ports + waypoints");
     bRoute.style.marginBottom = "6px"; box.appendChild(bRoute);
     box.appendChild(FormControls.toggle("Tout afficher (estompé)", this.showAllCables, (v) => { this.showAllCables = v; this.rerenderView(); }, { block: true }));
     const hint = document.createElement("div"); hint.className = "form-hint";
