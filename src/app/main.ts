@@ -19,6 +19,7 @@ import { Html } from "../core/Html";
 import { Id } from "../core/Id";
 import { Prefs } from "../core/Prefs";
 import { Log } from "../core/Log";
+import { Download } from "../core/Download";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD } from "../domain/constants";
 import { Shell } from "./Shell";
 import type { ShellHost } from "./Shell";
@@ -72,13 +73,7 @@ function applyTheme(theme: string): void {
 function applyUiScale(scale: number): void {
   document.documentElement.style.setProperty("--ui-scale", String(scale || 1));
 }
-function docFileName(): string { return (store.meta.docName || "dc-manager").replace(/[\\/:*?"<>|]+/g, "_") + ".json"; }
-function downloadJson(filename: string, content: string): void {
-  const blob = new Blob([content], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+function docFileName(): string { return Download.safeName(store.meta.docName || "dc-manager") + ".json"; }
 
 async function boot(): Promise<void> {
   Pwa.register();   // app installable + chargement hors-ligne (service worker) — no-op en file:// / build dev
@@ -178,19 +173,9 @@ async function boot(): Promise<void> {
     if (imageStore.count() > 0) obj.faceImages = await imageStore.toLegacyArray();
     return JSON.stringify(obj, null, 2);
   }
-  /** Déclenche le téléchargement d'un contenu (blob) sous `filename`. */
-  function downloadFile(filename: string, content: string, mime: string): void {
-    downloadBlob(filename, new Blob([content], { type: mime }));
-  }
-  /** Déclenche le téléchargement d'un Blob déjà construit (export binaire : bundle d'images .nmfb…). */
-  function downloadBlob(filename: string, blob: Blob): void {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
   /** EXPORT du document en JSON autonome (images inline) — disponible dans TOUS les modes (y compris API : version offline). */
   async function exportJsonDownload(): Promise<void> {
-    downloadFile(docFileName(), await snapshotWithImages(), "application/json");
+    Download.text(docFileName(), await snapshotWithImages(), "application/json");
     Notify.toast("Document exporté (" + docFileName() + ")");
   }
   /** EXPORT VISUALISEUR AUTONOME : récupère l'app (HTML mono-fichier inliné) et y EMBARQUE le document courant →
@@ -205,8 +190,8 @@ async function boot(): Promise<void> {
     html = html.replace(/<script>\s*window\.__DCMANAGER_CONFIG__[\s\S]*?<\/script>/i, "");   // retire la config API injectée par le serveur
     const embed = "<script>window.__DCMANAGER_EMBED__=" + json + ";</script>";
     html = html.replace(/<head([^>]*)>/i, (_m, a) => `<head${a}>${embed}`);
-    const fname = (store.meta.docName || "dc-manager").replace(/[\\/:*?"<>|]+/g, "_") + "-viewer.html";
-    downloadFile(fname, html, "text/html");
+    const fname = Download.safeName(store.meta.docName || "dc-manager") + "-viewer.html";
+    Download.text(fname, html, "text/html");
     Notify.toast("Visualiseur autonome exporté (" + fname + ")");
   }
   async function writeToHandle(handle: any): Promise<void> {
@@ -285,7 +270,7 @@ async function boot(): Promise<void> {
     try {
       const blob = await imageStore.serializeBundle(store.meta.facesKey || null);
       const base = (store.meta.docName || "dc-manager").replace(/[\\/:*?"<>|]+/g, "_");
-      downloadBlob(base + "-faces.nmfb", blob);
+      Download.blob(base + "-faces.nmfb", blob);
       Notify.toast(imageStore.count() + " image(s) exportée(s) → " + base + "-faces.nmfb");
     } catch (e: any) { Notify.toast("Export des images impossible : " + ((e && e.message) || e), "err"); }
   }
@@ -581,7 +566,7 @@ async function boot(): Promise<void> {
   }
   async function doSaveAs(): Promise<void> {
     ensureFileId();
-    if (!HAS_FS_API) { downloadJson(docFileName(), await snapshotWithImages()); Notify.toast("Copie téléchargée (" + docFileName() + ")"); return; }
+    if (!HAS_FS_API) { Download.text(docFileName(), await snapshotWithImages(), "application/json"); Notify.toast("Copie téléchargée (" + docFileName() + ")"); return; }
     if (dirMode()) { await doSaveAsDir(); return; }
     try {
       const h = await W.showSaveFilePicker({ suggestedName: docFileName(), types: JSON_TYPES });

@@ -18,15 +18,16 @@ import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { GroupTypes } from "../domain/GroupTypes";
 
 /* =============================================================================
-   GraphView — TRANCHE-PILOTE (Phase 5b).
-   Valide le pattern d'une VUE orientée objet : une classe qui prend le `store` +
-   un hôte injecté (services app), construit son modèle de rendu depuis le store,
-   le dispose (force-directed) et le rend en SVG via les helpers ui/geometry.
-   PORTÉE PILOTE : nœuds + arêtes + layout + pan/zoom + glisser de nœud. NON inclus
-   (à porter ensuite) : cadres, dispositions nommées, modes A/B/C, sélection/
-   marquee, menus contextuels, légende, export, barre d'outils, couleurs réseau/
-   groupe de la poignée. Le couplage au global `store`/`setDirty`/modale devient
-   une injection (store + GraphHost).
+   GraphView — vue GRAPHE du câblage (SVG).
+   Une classe qui prend le `store` + un hôte injecté (services app, `GraphHost`),
+   construit son modèle de rendu depuis le store, le dispose (force-directed) et
+   le rend en SVG via les helpers ui/geometry. Couvre : nœuds + arêtes + layout +
+   pan/zoom + glisser de nœud, filtres, cadres, dispositions nommées (persistées
+   dans `store.meta`), sélection/marquee, menus contextuels, légende, export
+   image, barre d'outils.
+   DETTE (cf. audit) : la classe cumule beaucoup de responsabilités — la
+   simulation force-directed (pure) devrait migrer vers `geometry/GraphGeometry`,
+   et « cadres » + « dispositions nommées » sont deux contrôleurs extractibles.
    ============================================================================= */
 
 /** Services applicatifs dont la vue dépend (câblés par le shell en Phase 6). */
@@ -198,11 +199,6 @@ export class GraphView {
 
   /* ---- modèle de rendu (depuis le store) ---- */
 
-  /** Ids réseau d'un câble (network_ids, repli network_id ≤ v35). */
-  private static netIds(c: any): string[] {
-    return (Array.isArray(c.network_ids) && c.network_ids.length) ? c.network_ids : (c.network_id ? [c.network_id] : []);
-  }
-
   private _resolvableCables(): any[] {
     const s = this.store;
     return s.all("cables").filter((c: any) => {
@@ -228,7 +224,7 @@ export class GraphView {
       const ea = pa.equipment_id, eb = pb.equipment_id;
       let include = false;
       if (this.filters.equip.size && (this.filters.equip.has(ea) || this.filters.equip.has(eb))) include = true;
-      if (this.filters.net.size && GraphView.netIds(c).some((nid) => this.filters.net.has(nid))) include = true;
+      if (this.filters.net.size && this.store.cableNetworkIds(c).some((nid) => this.filters.net.has(nid))) include = true;
       if (this.filters.pt.size && ((pa.port_type_id && this.filters.pt.has(pa.port_type_id)) || (pb.port_type_id && this.filters.pt.has(pb.port_type_id)))) include = true;
       if (this.filters.grp.size) {
         const ga = s.get("equipments", ea), gb = s.get("equipments", eb);
@@ -546,7 +542,7 @@ export class GraphView {
     const s = this.store;
     const counts = new Map<string, number>(), nets = new Map<string, any>();
     s.cablesOfEquipment(eqId).forEach((c: any) => {
-      GraphView.netIds(c).forEach((nid) => { const nw = s.get("networks", nid); if (nw && nw.color) { counts.set(nid, (counts.get(nid) || 0) + 1); nets.set(nid, nw); } });
+      this.store.cableNetworkIds(c).forEach((nid) => { const nw = s.get("networks", nid); if (nw && nw.color) { counts.set(nid, (counts.get(nid) || 0) + 1); nets.set(nid, nw); } });
     });
     let best: string | null = null, bestN = 0; counts.forEach((cnt, nid) => { if (cnt > bestN) { bestN = cnt; best = nid; } });
     if (!best) return null;

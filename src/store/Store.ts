@@ -534,8 +534,7 @@ export class Store {
   cablesOfNetwork(networkId: string): any[] {
     const out = this._byFk("cables", "network_ids", networkId);
     this._byFk("cables", "network_id", networkId).forEach((c) => { if (!out.includes(c)) out.push(c); });
-    const ids = (c: any) => (Array.isArray(c.network_ids) && c.network_ids.length) ? c.network_ids : (c.network_id ? [c.network_id] : []);
-    return out.filter((c) => ids(c).includes(networkId));
+    return out.filter((c) => this.cableNetworkIds(c).includes(networkId));
   }
   equipmentsOfGroup(groupId: string): any[] { return this._byFk("equipments", "group_id", groupId); }
   portsOfType(portTypeId: string): any[] { return this._byFk("ports", "port_type_id", portTypeId); }
