@@ -147,8 +147,10 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   outil dans `src/views/dc/` (état + overlay + panneau + interactions) pilotée par une **interface hôte**
   (cf. `PositioningTool` + `PositioningHost`), instanciée dans `DcBase` ; ne laisse dans la chaîne de vues que de
   **fins branchements** (un point de rendu, le routage des événements, l'ajout de la carte) + l'**adaptation**
-  spécifique (l'équivalent de `posScene()`). La géométrie PURE va dans `src/geometry/`. Les outils `measure`/`route`,
-  encore inline dans `DcInteract`, sont de la DETTE — ne pas les prendre pour modèle.
+  spécifique (l'équivalent de `posScene()`). La géométrie PURE va dans `src/geometry/`. Les outils `PositioningTool`,
+  `MeasureTool`, `RouteTool` et `DoorTool` suivent tous ce modèle — de BONS exemples à imiter. Dette résiduelle :
+  les PONTS d'accès transitoires dans `DcBase` (`measure`/`routeBuild`/`_measHi`, aperçu souris throttlé) que les
+  sites historiques utilisent encore — à résorber au fil de l'eau, pas à étendre.
 
 ## Code partagé front/back (`shared/`)
 
