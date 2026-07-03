@@ -32,7 +32,7 @@ import { WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_IC
 import type { Vec3, Drawable, DatacenterHost } from "./shared";
 import { DcPanels } from "./DcPanels";
 
-export class DcInteract extends DcPanels {
+export abstract class DcInteract extends DcPanels {
 
   protected showCote(text: string, clientX: number, clientY: number): void {
     if (!this.coteEl) { this.coteEl = document.createElement("div"); this.coteEl.className = "dc-cote"; this.stage.appendChild(this.coteEl); }

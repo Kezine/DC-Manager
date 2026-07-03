@@ -29,7 +29,7 @@ import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, 
 import type { Vec3, Drawable, DatacenterHost } from "./shared";
 import { DcScene3D } from "./DcScene3D";
 
-export class DcViews2D extends DcScene3D {
+export abstract class DcViews2D extends DcScene3D {
 
 
   /* ============================ VUE DESSUS (2D) ============================ */

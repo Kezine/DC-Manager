@@ -6,7 +6,7 @@ import { CAM_PRESETS } from "../shared";
 import { DcThreeBase } from "./DcThreeBase";
 import { Haptics } from "../../../core/Haptics";
 
-export class DcThreeCamera extends DcThreeBase {
+export abstract class DcThreeCamera extends DcThreeBase {
   /** Dernière position (clientX, clientY) du geste TACTILE — sert de point de picking au `touchend` (qui ne
       porte pas de coordonnées de doigt actif), et de centroïde mémorisé entre deux `touchmove`. */
   protected _touchPos: [number, number] | null = null;

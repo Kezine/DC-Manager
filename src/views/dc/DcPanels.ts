@@ -30,7 +30,7 @@ import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, 
 import type { Vec3, Drawable, DatacenterHost } from "./shared";
 import { DcViews2D } from "./DcViews2D";
 
-export class DcPanels extends DcViews2D {
+export abstract class DcPanels extends DcViews2D {
 
 
   /* ---- toolbar ---- */

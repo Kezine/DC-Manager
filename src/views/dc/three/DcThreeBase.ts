@@ -65,7 +65,7 @@ export interface DcThreeOptions {
   powerBoltSpacingMm: number;   // espacement des éclairs le long des câbles d'alimentation
 }
 
-export class DcThreeBase {
+export abstract class DcThreeBase {
   protected store: Store;
   protected host: DatacenterHost;
   protected scene3d: RackScene;
@@ -481,9 +481,26 @@ export class DcThreeBase {
     mesh.userData = Object.assign({ layer: "name" }, extra);   // couche "name" (showEqNames) + côté éventuel (hideAv/Ar)
     group.add(mesh);
   }
+
+  /* ---- CONTRAT CROISÉ (membres définis dans les couches SUPÉRIEURES, appelés d'ici) --------------
+     La chaîne DcThreeBase → DcThreeCamera → DcThreeScene répartit un même objet en tranches : la base
+     appelle des membres définis plus haut. Ils sont déclarés `abstract` ICI (l'ancienne signature
+     d'index `[key: string]: any` désactivait TOUT le contrôle de type — chaque `this.x` compilait,
+     fautes de frappe comprises). Tout NOUVEL appel croisé doit ajouter sa déclaration dans ce bloc. */
+  // Définis dans DcThreeCamera :
+  protected abstract makeCamera(): void;
+  protected abstract bindEvents(dom: HTMLElement): void;
+  protected abstract updateCamera(): void;
+  protected abstract worldPerPixel(): number;
+  protected abstract applyPendingFocus(): void;
+  protected abstract onMove: (e: MouseEvent) => void;
+  protected abstract onUp: (e: MouseEvent) => void;
+  // Définis dans DcThreeScene :
+  protected abstract build(dcId: string | null): void;
+  abstract rebuild(dcId: string | null): void;
+  protected abstract layerVisible(u: any): boolean;
+  protected abstract measureClick(clientX: number, clientY: number): void;
+  protected abstract routeClick(clientX: number, clientY: number): void;
+  protected abstract toolHover(clientX: number, clientY: number): void;
 }
 
-/* Fusion de déclaration : la chaîne d'héritage répartit les méthodes sur plusieurs classes mais à
-   l'exécution `this` est l'instance finale `DcThreeScene` qui les possède toutes. Cette signature
-   d'index autorise les appels croisés `this.x()` entre couches (cf. moteur SVG `DcBase`). */
-export interface DcThreeBase { [key: string]: any; }

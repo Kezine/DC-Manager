@@ -41,7 +41,7 @@ import type { Vec3, Drawable, DatacenterHost } from "./shared";
 // SPIKE : moteur 3D WebGL parallèle — importé DYNAMIQUEMENT (webpackMode "eager" → reste inliné single-file ;
 // et la chaîne require() CJS du harnais de test ne charge pas ses dépendances ESM-only comme Line2).
 
-export class DcBase {
+export abstract class DcBase {
   protected store: Store;
   protected host: DatacenterHost;
   protected stage: HTMLElement;
@@ -734,9 +734,65 @@ export class DcBase {
     if (o.floorTarget && typeof o.floorTarget === "object" && "location" in o.floorTarget) this.floorTarget = { location: o.floorTarget.location || "", floor: String(o.floorTarget.floor != null ? o.floorTarget.floor : "") };
   }
 
+  /* ---- CONTRAT CROISÉ (membres définis dans les couches SUPÉRIEURES, appelés d'ici ou entre couches) ----
+     La chaîne DcBase → DcCamera → DcScene3D → DcViews2D → DcPanels → DcInteract → DatacenterView répartit
+     un même objet en tranches : les couches basses appellent des membres définis plus haut. Ils sont
+     déclarés `abstract` ICI (l'ancienne signature d'index `[key: string]: any` désactivait TOUT le contrôle
+     de type sur ~4 600 lignes — chaque `this.x` compilait, fautes de frappe comprises). Tout NOUVEL appel
+     croisé doit ajouter sa déclaration dans ce bloc — si ça devient fréquent, c'est le signe qu'un OUTIL
+     dédié (modèle PositioningTool/MeasureTool, cf. CLAUDE.md) est préférable. */
+  // Définis dans DcCamera (caméra 2D : contrôles, zoom, pan) :
+  protected abstract buildControls(): void;
+  protected abstract updateControls(): void;
+  abstract recenter(keepScale?: boolean): void;
+  protected abstract onWheel(ev: WheelEvent): void;
+  protected abstract zoomAtClient(factor: number, clientX: number, clientY: number): void;
+  protected abstract panByClient(dx: number, dy: number): void;
+  protected abstract startPan2D(ev: MouseEvent): void;
+  // Définis dans DcScene3D / DcViews2D / DcPanels (points d'entrée de rendu par vue + toolbar) :
+  abstract renderThreeD(dc: any): void;
+  abstract renderTop(dc: any): void;
+  abstract renderFloor(ft: { location: string; floor: string }): void;
+  abstract renderSide(dc: any): void;
+  abstract buildToolbar(): void;
+  // Définis dans DcInteract — tooltips + cotes :
+  protected abstract showTip(html: string, ev: MouseEvent): void;
+  protected abstract moveTip(ev: MouseEvent): void;
+  protected abstract hideTip(): void;
+  protected abstract wireTip(node: SVGElement, htmlFn: () => string): void;
+  protected abstract showCote(text: string, clientX: number, clientY: number): void;
+  protected abstract hideCote(): void;
+  protected abstract rackTipHtml(r: any): string;
+  protected abstract equipmentTipHtml(eqId: string): string;
+  protected abstract portTipHtml(port: any, cab: any): string;
+  protected abstract cableTipHtml(c: any): string;
+  protected abstract itemTipHtml(item: any): string;
+  protected abstract wpTipHtml(wp: any): string;
+  // Définis dans DcInteract — menus contextuels :
+  protected abstract ctxMenu(e: MouseEvent, sections: CtxSection[]): void;
+  protected abstract roomCtx(dc: any): CtxSection[];
+  protected abstract rackCtx(rack: any): CtxSection[];
+  protected abstract equipmentCtx(eqId: string): CtxSection[];
+  protected abstract portCtx(port: any, cab: any): CtxSection[];
+  protected abstract cableCtx(cable: any): CtxSection[];
+  protected abstract itemCtx(item: any): CtxSection[];
+  protected abstract waypointCtx(wp: any): CtxSection[];
+  protected abstract figureCtx(): CtxSection[];
+  protected abstract floorCtx(dc: any, w: { x: number; y: number }): CtxSection[];
+  protected abstract floorPlaneCtx(loc: string, fl: string, w: { x: number; y: number }): CtxSection[];
+  protected abstract floorRoomCtx(d: any): CtxSection[];
+  protected abstract floorEquipCtx(eq: any): CtxSection[];
+  // Définis dans DcInteract — interactions, outils, navigation :
+  protected abstract wireClick(node: SVGElement, fn: (e: MouseEvent) => void): void;
+  protected abstract wireWp(node: SVGElement, wp: any): void;
+  protected abstract onRackPointerDown(e: MouseEvent, r: any): void;
+  protected abstract onEquipPointerDown(ev: MouseEvent, eq: any): void;
+  protected abstract syncWebglTool(): void;
+  protected abstract applyFocus3D(): void;
+  protected abstract portDcId(portId: string): string | null;
+  abstract locate(kind: "equipment" | "rack" | "cable" | "port" | "room" | "waypoint", id: string): void;
+  abstract clearHighlight(): void;
+  abstract setReturnAction(fn: (() => void) | null): void;
+  protected abstract goBack(): void;
 }
 
-/* Fusion de déclaration : la chaîne d'héritage répartit les méthodes sur plusieurs classes, mais à
-   l'exécution `this` est l'instance finale `DatacenterView` qui les possède toutes. Cette signature
-   d'index (héritée par toutes les couches) autorise les appels croisés `this.x()` entre couches. */
-export interface DcBase { [key: string]: any; }

@@ -51,7 +51,7 @@ const ICON_VIEW_FRONT = cubeIcon("M4 9L14 9L14 19L4 19Z"); // face avant (carré
 const ICON_VIEW_SIDE = cubeIcon("M14 9L19 4L19 14L14 19Z"); // face droite (losange latéral)
 const ICON_VIEW_BACK = cubeIcon("M9 4L19 4L19 14L9 14Z");   // face arrière (panneau du fond)
 
-export class DcCamera extends DcBase {
+export abstract class DcCamera extends DcBase {
 
   /** BANDEAU de contrôles en HAUT du canevas (zoom · recentrage · points de vue caméra · outils). Disposé en
       ligne (cf. .dc-control-bar) ; défilable horizontalement sur petit écran. L'icône « réglages 3D » (responsive)

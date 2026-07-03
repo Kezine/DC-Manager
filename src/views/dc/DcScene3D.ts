@@ -32,7 +32,7 @@ import { DcCamera } from "./DcCamera";
 /* Couche « rendu 3D » de la vue Datacenter. Le moteur 3D SVG legacy (painter) a été RETIRÉ : la 3D est rendue
    exclusivement par le moteur WebGL (Three.js, cf. ./three/). Ne subsistent ici que les HELPERS de câbles partagés
    avec les vues 2D (Plan de salle / Plan d'étage) — résolution de tracé, couleur, filtres d'affichage, spline. */
-export class DcScene3D extends DcCamera {
+export abstract class DcScene3D extends DcCamera {
 
   /** Entrée de rendu 3D : déléguée au moteur WebGL (diff léger si la scène existe, sinon construction complète). */
   renderThreeD(dc: any): void {

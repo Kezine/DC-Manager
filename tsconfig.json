@@ -5,10 +5,13 @@
     "moduleResolution": "bundler",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
 
-    /* Migration graduelle : on durcira ces options au fil de l'extraction. */
+    /* Migration graduelle : on durcira ces options au fil de l'extraction.
+       ACQUIS (2026-07, le code passait déjà — verrouillés pour empêcher toute régression) :
+       `strictNullChecks` + `noImplicitAny`. Prochaines cibles : `noUnusedLocals` (≈380 imports
+       morts à purger d'abord), puis `strict` complet (strictFunctionTypes, strictPropertyInit…). */
     "strict": false,
-    "noImplicitAny": false,
-    "strictNullChecks": false,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
 
     /* Le code historique affecte les champs dans le constructeur (sémantique ES2020,
        pas de champs « define ») — on conserve ce comportement à l'identique. */
