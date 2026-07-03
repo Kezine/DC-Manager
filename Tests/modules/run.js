@@ -1778,6 +1778,29 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(s.get("ipNetworks", net.id).cidr, "10.0.0.0/16", "V5b : CIDR contenant l'adresse → accepté");
   }
 
+  console.log("\n• RackDoorGeometry : débattement des portes de baie (partagé 2D/3D)");
+  {
+    const { RackDoorGeometry } = D("geometry/RackDoorGeometry.js");
+    const w = 800, d = 1000;
+    // porte AVANT, charnière gauche, pleine : pivot sur l'arête EXTÉRIEURE (d/2 + épaisseur), ouverture vers −Y.
+    const s = RackDoorGeometry.swingSector(w, d, false, { thickness_mm: 40, hinge: "left" });
+    ck.eq(s.hx, -w / 2 + 40, "pivot X = bord gauche + épaisseur");
+    ck.eq(s.hy, -(d / 2 + 40), "pivot Y = arête extérieure (face + épaisseur), côté avant (−Y)");
+    ck.eq(s.R, w - 40, "rayon = largeur du vantail (largeur − épaisseur)");
+    // fin d'arc = vantail OUVERT : R(beta)·(dirX·R, 0) = (0, sgn·R) → pointe vers l'extérieur (−Y devant)
+    const pts = RackDoorGeometry.sectorPoints(w, d, false, { thickness_mm: 40, hinge: "left" }, 4);
+    const last = pts[pts.length - 1];
+    ck(Math.abs(last.x - s.hx) < 1e-6 && Math.abs(last.y - (s.hy - s.R)) < 1e-6, "fin d'arc : vantail ouvert perpendiculaire, vers l'extérieur");
+    // CAVITÉ (porte creuse) : le pivot recule d'autant — c'était la DIVERGENCE 2D/3D tranchée par la mutualisation.
+    const sc = RackDoorGeometry.swingSector(w, d, false, { thickness_mm: 40, hinge: "left", hollow: true, hollow_mm: 60 });
+    ck.eq(sc.hy, -(d / 2 + 60 + 40), "cavité : pivot décalé de hollow_mm en plus (parité 2D = 3D)");
+    // porte ARRIÈRE, charnière droite : miroir complet (pivot +Y, charnière inversée vue de la face).
+    const sr = RackDoorGeometry.swingSector(w, d, true, { thickness_mm: 40, hinge: "right" });
+    ck.eq(sr.hy, d / 2 + 40, "arrière : pivot +Y");
+    ck.eq(sr.hx, -w / 2 + 40, "arrière + charnière droite : côté inversé vue de la face");
+    ck.eq(RackDoorGeometry.swingSector(w, d, false, { thickness_mm: 2, hinge: "left" }).hx, -w / 2 + 6, "épaisseur plancher 6 mm");
+  }
+
   /* ================= SERVEUR : règles pures de la couche HTTP ================= */
   console.log("\n• Serveur : ApiRules — ciblage du verrou optimiste (writeTargets)");
   {

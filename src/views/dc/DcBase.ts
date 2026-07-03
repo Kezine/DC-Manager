@@ -191,6 +191,9 @@ export abstract class DcBase {
       if (document.querySelector(".modal-overlay.open, .dialog-overlay")) return;
       // ÉCHAP en mode POSITIONNEMENT : efface la sélection courante (références → coin → mover) par paliers.
       if (this.posTool.active && e.key === "Escape" && this.posTool.activeHere()) { e.preventDefault(); this.posTool.escape(); return; }
+      // ÉCHAP en mode ROUTAGE : annule la route en cours (cohérence d'ergonomie avec mesure/positionnement —
+      // avant, seuls le bouton et le panneau permettaient d'annuler).
+      if (this.routeTool.active && e.key === "Escape") { e.preventDefault(); this.routeTool.cancel(); return; }
       if (!this.measureTool.hasActive()) return;
       e.preventDefault();
       if (e.key === "Enter") this.measureTool.commit(); else this.measureTool.cancelCurrent();

@@ -1,6 +1,7 @@
 import { Dom } from "../../ui/Dom";
 import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
+import { RackDoorGeometry } from "../../geometry/RackDoorGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { FloorLayout } from "../../geometry/FloorLayout";
 import { Format } from "../../core/Format";
@@ -351,9 +352,9 @@ export abstract class DcViews2D extends DcScene3D {
 
   protected async toggleFloorCellsRange(loc: string, fl: string, cx0: number, cy0: number, cx1: number, cy1: number): Promise<void> { const f = await this.ensureFloor(loc, fl); await this.toggleCellsRange("floors", f.id, cx0, cy0, cx1, cy1); }
 
-  /** Débattement (rayon d'ouverture) des portes d'une baie, en vue DESSUS : secteur quart-de-disque par porte
-      (pivot = charnière décalée de l'épaisseur, rayon = largeur du vantail, 90° vers l'extérieur). Couleurs des
-      emplacements libres (accent). Repère LOCAL de la baie (translate+rotate). null si aucune porte. */
+  /** Débattement (rayon d'ouverture) des portes d'une baie, en vue DESSUS : secteur quart-de-disque par porte.
+      Géométrie PARTAGÉE avec le moteur WebGL (RackDoorGeometry — pivot sur l'arête extérieure du vantail,
+      cavité comprise : les deux vues montrent désormais le MÊME débattement). Repère LOCAL de la baie. */
   protected doorSwingNode(r: any): SVGElement | null {
     const w = r.width_mm || RACK_WIDTH_DEFAULT, d = r.depth || RACK_DEPTH_DEFAULT;
     const cx = (r.dc_x != null) ? r.dc_x : w / 2, cy = (r.dc_y != null) ? r.dc_y : d / 2, o = Normalize.rackOrientation(r.orientation);
@@ -362,14 +363,8 @@ export abstract class DcViews2D extends DcScene3D {
     (["front", "rear"] as const).forEach((face) => {
       const dr = RackGeometry.door(r, face); if (!dr || !dr.enabled) return;
       any = true;
-      const rear = face === "rear", clr = Math.max(6, dr.thickness_mm | 0), R = Math.max(1, w - clr);
-      const sgn = rear ? 1 : -1;                                  // face/ouverture vers l'extérieur (avant −Y · arrière +Y)
-      const left = (dr.hinge !== "right") !== rear;               // gauche vue de la FACE de la porte
-      const dirX = left ? 1 : -1, beta = Math.sign(sgn / dirX) * Math.PI / 2;
-      const hx = left ? (-w / 2 + clr) : (w / 2 - clr), hy = sgn * (d / 2);   // pivot = charnière décalée, au plan de face
-      const seg = [`M ${hx.toFixed(1)} ${hy.toFixed(1)}`];
-      const N = 16;
-      for (let i = 0; i <= N; i++) { const a = beta * (i / N); seg.push(`L ${(hx + dirX * R * Math.cos(a)).toFixed(1)} ${(hy + dirX * R * Math.sin(a)).toFixed(1)}`); }
+      const pts = RackDoorGeometry.sectorPoints(w, d, face === "rear", dr, 16);
+      const seg = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`);
       seg.push("Z");
       grp.appendChild(Dom.svg("path", { d: seg.join(" "), style: "fill:var(--accent);fill-opacity:0.14;stroke:var(--accent);stroke-opacity:0.55;stroke-width:1.5;vector-effect:non-scaling-stroke" }));
     });

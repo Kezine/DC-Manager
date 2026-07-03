@@ -7,6 +7,7 @@ import { Line2 } from "three/examples/jsm/lines/Line2.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { RackGeometry } from "../../../geometry/RackGeometry";
+import { RackDoorGeometry } from "../../../geometry/RackDoorGeometry";
 import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
@@ -768,19 +769,11 @@ export class DcThreeScene extends DcThreeCamera {
       l'extérieur de la baie. Couleurs des EMPLACEMENTS LIBRES (remplissage + cadre accent). Couche basculable
       "doorswing" (showDoorSwing), non interactive. */
   protected buildDoorSwing(group: THREE.Group, rear: boolean, dr: any, w: number, d: number, theme: Theme): void {
-    const hd = d / 2, hw = w / 2, clr = Math.max(6, dr.thickness_mm | 0), R = w - clr, N = 18, Z = 1;   // rayon = largeur réelle du vantail
-    const cavity = dr.hollow ? Math.max(0, dr.hollow_mm | 0) : 0;
-    const sgn = rear ? 1 : -1;                                   // face/ouverture vers l'extérieur (avant −Y / arrière +Y)
-    const left = (dr.hinge !== "right") !== rear;                // gauche vue DE LA FACE de la porte (inversé à l'arrière)
-    const dirX = left ? 1 : -1;                                  // sens du vantail fermé le long de la face
-    const beta = (Math.sign(sgn / dirX)) * Math.PI / 2;        // angle d'ouverture (90°) — R(beta)·(dirX,0) = (0,sgn)
-    const hx = left ? (-hw + clr) : (hw - clr), hy = sgn * (hd + cavity + clr);   // pivot = axe de rotation (arête charnière, face extérieure)
-    const pts: number[] = [hx, hy, Z];                          // centre du secteur
-    for (let i = 0; i <= N; i++) {
-      const a = beta * (i / N), c = Math.cos(a), s = Math.sin(a);
-      const vx = dirX * R, vy = 0;                              // vantail fermé (le long de la face)
-      pts.push(hx + (vx * c - vy * s), hy + (vx * s + vy * c), Z);   // rotation du vantail autour du pivot
-    }
+    // Géométrie PARTAGÉE avec la vue Dessus SVG (RackDoorGeometry) — un seul calcul de pivot/rayon/angle.
+    const N = 18, Z = 1;
+    const sector = RackDoorGeometry.sectorPoints(w, d, rear, dr, N);
+    const pts: number[] = [];
+    sector.forEach((p) => pts.push(p.x, p.y, Z));
     const fill: number[] = [];
     for (let i = 0; i < N; i++) { const o = 3 * (i + 1); fill.push(pts[0], pts[1], pts[2], pts[o], pts[o + 1], pts[o + 2], pts[o + 3], pts[o + 4], pts[o + 5]); }
     const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(fill, 3)); geo.computeVertexNormals();
