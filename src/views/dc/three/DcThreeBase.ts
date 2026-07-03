@@ -386,8 +386,11 @@ export abstract class DcThreeBase {
     const s = 64, cv = document.createElement("canvas"); cv.width = cv.height = s;
     const g = cv.getContext("2d"); if (!g) return null;
     const dia = (cx: number, cy: number, r: number, fill: string) => { g.beginPath(); g.moveTo(cx, cy - r); g.lineTo(cx + r, cy); g.lineTo(cx, cy + r); g.lineTo(cx - r, cy); g.closePath(); g.fillStyle = fill; g.fill(); };
-    dia(s / 2, s / 2, s / 2 - 2, "#ffffff");   // losange blanc (teinté par la couleur du sprite)
-    dia(s / 2, s / 2, s * 0.24, "#000000");    // centre noir
+    const R = s / 2 - 2;                            // rayon extérieur du losange (inchangé)
+    dia(s / 2, s / 2, R, "#ffffff");                // losange blanc (teinté par la couleur du sprite)
+    // Centre noir AGRANDI pour que le liseré teinté (la « marge » orange) soit 50 % plus FIN qu'à l'origine
+    // (centre historique : 0.24·s), SANS changer la taille extérieure du losange.
+    dia(s / 2, s / 2, R - (R - s * 0.24) / 2, "#000000");
     const tex = new THREE.CanvasTexture(cv); tex.needsUpdate = true; this.texCache.set(key, tex); return tex;
   }
 

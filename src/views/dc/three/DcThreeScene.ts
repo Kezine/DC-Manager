@@ -30,7 +30,6 @@ const CABLE_PX_SEL = 2.5;    // .dc-cable.sel stroke-width: 2.5px (sélectionné
 const MARK_PX = 27;          // rayon ÉCRAN (px) d'un marqueur de waypoint — base SVG (DC_DOT_PX+4 = 9) ×3 (+200 %, lisibilité/cliquabilité au routage) ; modulable par le réglage markerScale
 const OOB_PX = 33;           // rayon ÉCRAN (px) d'un marqueur OOB — base 11 ×3 (idem)
 const DOT_PX = 5;            // rayon ÉCRAN (px) d'une pastille d'extrémité de câble (cf. SVG DC_DOT_PX)
-const PORT_DRAW_SCALE = 3;   // facteur d'AFFICHAGE des connecteurs de port en 3D (+200 % vs taille physique — lisibilité/cliquabilité)
 const BOLT_PX = 3.25;        // demi-taille ÉCRAN (px) d'un éclair power bolt (−75 %)
 
 export class DcThreeScene extends DcThreeCamera {
@@ -282,10 +281,8 @@ export class DcThreeScene extends DcThreeCamera {
     const cab = this.store.cableOnPort(p.id);
     const col = cab ? this.cableColorHex(cab) : 0x8893a5;
     const csz = this.store.portConnectorSize(p);
-    // Connecteurs AGRANDIS ×3 (+200 %) à l'AFFICHAGE 3D : à taille physique réelle ils sont difficiles à voir et
-    // à cliquer (routage). Le modèle (portConnectorSize) reste à l'échelle réelle ; peut se chevaucher sur une
-    // face très dense — assumé (lisibilité prime).
-    const w = Math.max(2, csz.w) * PORT_DRAW_SCALE, h = Math.max(2, csz.h) * PORT_DRAW_SCALE;
+    // Taille PHYSIQUE réelle du connecteur (SFP/RJ45/C13…) — la fidélité dimensionnelle prime, PAS d'agrandissement.
+    const w = Math.max(2, csz.w), h = Math.max(2, csz.h);
     const n = new THREE.Vector3(pt.n ? pt.n.x : 0, pt.n ? pt.n.y : 0, pt.n ? pt.n.z : 1);
     if (n.lengthSq() < 1e-6) n.set(0, 0, 1);
     n.normalize();
