@@ -16,10 +16,8 @@ import type { DocumentChangeset } from "../sync";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen } from "../ui";
 import { Html } from "../core/Html";
-import { Id } from "../core/Id";
 import { Prefs } from "../core/Prefs";
 import { Log } from "../core/Log";
-import { Download } from "../core/Download";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD } from "../domain/constants";
 import { Shell } from "./Shell";
 import type { ShellHost } from "./Shell";
@@ -29,6 +27,7 @@ import { TabChannel } from "./TabChannel";
 import { HandleStore } from "./HandleStore";
 import { UndoTimeline } from "./UndoTimeline";
 import { AutoSave } from "./AutoSave";
+import { FileDocumentController } from "./FileDocuments";
 
 // Timeline d'undo UNIFIÉE (modèle + images) : UN SEUL geste défait dans l'ordre chronologique, quelle que soit
 // la pile d'origine. Logique EXTRAITE dans `UndoTimeline` (pure, testée) ; les piles sont enregistrées au boot.
@@ -56,8 +55,6 @@ const adapter = REST_MODE
 const store = new Store(adapter);
 const W = window as any;
 const HAS_FS_API = typeof W.showSaveFilePicker === "function" && typeof W.showOpenFilePicker === "function";
-const JSON_TYPES = [{ description: "DC Manager JSON", accept: { "application/json": [".json"] } }];
-const FACES_TYPES = [{ description: "DC Manager Faces (images)", accept: { "application/octet-stream": [".nmfb"] } }];   // fichier compagnon d'images
 
 /** Le document est-il « non vide » (au-delà des seuls catalogues fermés réinjectés) ? */
 function hasUserData(): boolean { return store.totalCount() > store.all("portTypes").length + store.all("cableTypes").length; }
@@ -70,7 +67,6 @@ function applyTheme(theme: string): void {
 function applyUiScale(scale: number): void {
   document.documentElement.style.setProperty("--ui-scale", String(scale || 1));
 }
-function docFileName(): string { return Download.safeName(store.meta.docName || "dc-manager") + ".json"; }
 
 async function boot(): Promise<void> {
   Pwa.register();   // app installable + chargement hors-ligne (service worker) — no-op en file:// / build dev
@@ -85,10 +81,8 @@ async function boot(): Promise<void> {
   if (!root) return;
 
   // ---- état FICHIER / session ----
-  let currentHandle: any = null;        // FileSystemFileHandle lié (FS API) — null = download/mémoire
-  let currentFacesHandle: any = null;   // handle du fichier compagnon d'images (.nmfb) du document courant
-  let currentDirHandle: any = null;     // mode « accès dossier » : handle du DOSSIER courant (couvre .json + .nmfb)
-  let currentName = "";                 // nom du fichier lié
+  // L'état fichier (handles, nom) et tout le cycle de vie fichier/compagnon vivent dans `FileDocumentController`
+  // (cf. app/FileDocuments — découpage P4 de boot()). Ici : la session de save + les dépendances qu'on lui injecte.
   const session = new SaveState();      // suivi dirty/save (révision modèle vs dernière sauvegarde + meta/images)
   let booted = false;                   // garde : ne suit pas la révision pendant le chargement initial
 
@@ -97,14 +91,6 @@ async function boot(): Promise<void> {
     onConflict: () => Notify.toast("Ce fichier est aussi ouvert dans un autre onglet.", "err"),
   });
   const handleStore = new HandleStore();
-  let lastRec: { handle: any; name: string } | null = null;   // dernier fichier mémorisé (réouverture)
-  const ensureFileId = (): string => { if (!store.meta.fileId) { store.meta.fileId = Id.uid(); store.persistMeta(); } return store.meta.fileId; };
-  const rememberHandle = (handle: any, name: string) => { if (!handle) return; lastRec = { handle, name: name || handle.name || "" }; void handleStore.putLast(handle, lastRec.name); };
-  /** Mode « accès dossier » actif (réglage + FS API) : un seul grant de dossier couvre le .json et son compagnon .nmfb. */
-  const dirMode = (): boolean => prefs.fileAccessMode === "directory" && HAS_FS_API;
-  /** Trace des opérations fichier / compagnon — gated par le flag de débogage (Log). */
-  const flog = Log.scope("fs");
-  const rememberDir = async (dir: any, jsonName: string): Promise<void> => { currentDirHandle = dir; await handleStore.putDir(dir, jsonName); flog("rememberDir → dossier mémorisé", { dir: dir && dir.name, json: jsonName }); };
 
   const modal = new Modal();
   const formHost: FormHost = { openModal: (o) => modal.open(o), setDirty: () => { refreshChrome(); } };   // mutation modèle déjà suivie par la révision (store.onChange)
@@ -121,468 +107,30 @@ async function boot(): Promise<void> {
   let restDocId: string | null = null;   // document serveur courant (mode API)
   Fullscreen.install();   // re-parente les overlays (modale/dialogues/toasts/menus) dans l'élément plein écran
 
-  // ---- caché : input d'import (navigateurs sans File System Access API) ----
-  const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = ".json,application/json"; fileInput.style.display = "none";
-  document.body.appendChild(fileInput);
-  fileInput.addEventListener("change", async () => {
-    const f = fileInput.files && fileInput.files[0]; fileInput.value = "";
-    if (!f) return;
-    try { await loadFromText(await f.text(), f.name, null); Notify.toast("Fichier « " + f.name + " » chargé"); }
-    catch (e: any) { if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err"); else Notify.toast("Fichier invalide (JSON attendu).", "err"); }
+  /* ---- documents FICHIER : cycle de vie EXTRAIT dans `FileDocumentController` (ouvrir/enregistrer/rouvrir,
+     mode dossier, compagnon .nmfb, exports) ; ici, seule l'adhérence à la boucle applicative. Les closures de
+     l'hôte capturent des consts définies PLUS BAS (shell, refreshChrome, applyAutosave) — appelées après le boot. */
+  const files = new FileDocumentController({
+    store, imageStore, session, prefs, handleStore, tabChannel, hasFsApi: HAS_FS_API,
+    host: {
+      refreshChrome: () => refreshChrome(),
+      refreshActive: () => shell.refreshActive(),
+      documentOpened: () => { shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); },
+      applyTheme: () => applyTheme(prefs.theme),
+      applyAutosave: () => applyAutosave(),
+      setReopen: (name: string | null) => shell.setReopen(name),
+      resetUndo: () => undoTimeline.reset(),
+    },
   });
-
-  // ---- chargement d'un document depuis du texte JSON (revendique le verrou AVANT mutation) ----
-  async function loadFromText(text: string, name: string | null, handle: any): Promise<void> {
-    const raw = JSON.parse(text);
-    flog("loadFromText", { name, handle: handle && handle.name, inlineImages: Array.isArray(raw.faceImages), facesKey: raw && raw.meta && raw.meta.facesKey, dirMode: dirMode() });
-    const incomingFileId = (raw && raw.meta && typeof raw.meta.fileId === "string" && raw.meta.fileId) ? raw.meta.fileId : null;
-    await tabChannel.claimIncoming(incomingFileId, store.meta.fileId || null);   // throw FILE_ALREADY_OPEN si occupé
-    await store.replaceAll(raw);
-    // images de façade : embarquées inline (faceImages) → import dans l'ImageStore ; sinon document sans images
-    if (Array.isArray(raw.faceImages)) await imageStore.replaceAllFromLegacy(raw.faceImages);
-    else await imageStore.clearAll();
-    undoTimeline.reset();   // nouveau document chargé → timeline d'undo unifiée repart de zéro
-    currentHandle = handle || null; currentFacesHandle = null; currentName = name || "";
-    if (!store.meta.docName && name) { store.meta.docName = name.replace(/\.json$/i, ""); await store.persistMeta(); }
-    tabChannel.claim(store.meta.fileId || null);
-    if (handle) rememberHandle(handle, name || handle.name || "");
-    applyTheme(prefs.theme); session.setFile(!!(currentHandle && HAS_FS_API)); session.markLoaded(store.histIndex());
-    if (!Array.isArray(raw.faceImages)) await loadCompanionFacesOnOpen(handle);   // .json sans images inline → recharge le compagnon .nmfb (auto si mémorisé)
-    shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome();
-  }
-
-  /* ---- File System Access : permission, écriture, ouverture, enregistrement ---- */
-  async function ensureWritePermission(handle: any): Promise<boolean> {
-    if (!handle || !handle.queryPermission) return true;
-    if ((await handle.queryPermission({ mode: "readwrite" })) === "granted") return true;
-    return (await handle.requestPermission({ mode: "readwrite" })) === "granted";
-  }
-  /** Sérialisation AVEC images de façade inline (document AUTONOME : survit au save/load et au transfert).
-      Les images vivent hors modèle (IndexedDB) ; on les embarque dans le `.json` pour ne rien perdre.
-      (Le compagnon `.nmfb` séparé — optimisation de taille — reste différé ; `ImageStore` est prêt.) */
-  /** Sérialisation FS : `.json` SANS images (les images vivent dans le compagnon `.nmfb` à côté). */
-  function serializeJson(): string { return JSON.stringify(store.toJSON(), null, 2); }
-  /** Repli DOWNLOAD (navigateur sans File System Access API) : fichier AUTONOME, images embarquées inline
-      (aucun compagnon n'est possible sans handle FS → on ne perd rien). */
-  async function snapshotWithImages(): Promise<string> {
-    const obj: any = store.toJSON();
-    if (imageStore.count() > 0) obj.faceImages = await imageStore.toLegacyArray();
-    return JSON.stringify(obj, null, 2);
-  }
-  /** EXPORT du document en JSON autonome (images inline) — disponible dans TOUS les modes (y compris API : version offline). */
-  async function exportJsonDownload(): Promise<void> {
-    Download.text(docFileName(), await snapshotWithImages(), "application/json");
-    Notify.toast("Document exporté (" + docFileName() + ")");
-  }
-  /** EXPORT VISUALISEUR AUTONOME : récupère l'app (HTML mono-fichier inliné) et y EMBARQUE le document courant →
-      fichier .html LECTURE SEULE, consultable hors-ligne sans serveur (ouverture en file://). On retire la config
-      API et on injecte `window.__DCMANAGER_EMBED__` (le bundle bascule alors en mode viewer, cf. EMBED/VIEWER). */
-  async function exportStandalone(): Promise<void> {
-    let html: string;
-    try { html = await (await fetch(location.href, { cache: "no-store" })).text(); }
-    catch (e: any) { Notify.toast("Export HTML impossible (récupération de l'app) : " + ((e && e.message) || e), "err"); return; }
-    if (!/__DCMANAGER_EMBED__|<script/i.test(html)) { Notify.toast("Export HTML indisponible : l'app n'est pas en build autonome.", "err"); return; }
-    const json = (await snapshotWithImages()).split("</").join("<\\/");           // neutralise un éventuel </script> dans les données
-    html = html.replace(/<script>\s*window\.__DCMANAGER_CONFIG__[\s\S]*?<\/script>/i, "");   // retire la config API injectée par le serveur
-    const embed = "<script>window.__DCMANAGER_EMBED__=" + json + ";</script>";
-    html = html.replace(/<head([^>]*)>/i, (_m, a) => `<head${a}>${embed}`);
-    const fname = Download.safeName(store.meta.docName || "dc-manager") + "-viewer.html";
-    Download.text(fname, html, "text/html");
-    Notify.toast("Visualiseur autonome exporté (" + fname + ")");
-  }
-  async function writeToHandle(handle: any): Promise<void> {
-    ensureFileId();
-    const w = await handle.createWritable(); await w.write(serializeJson()); await w.close();
-    session.markSaved(); rememberHandle(handle, handle.name || currentName);
-  }
-
-  /* ---- FICHIER COMPAGNON d'images (.nmfb) — dissocié du modèle, apparié au .json par meta.facesKey ---- */
-  const facesNameFor = (jsonName: string): string => String(jsonName || "dc-manager.json").replace(/\.json$/i, "") + ".nmfb";
-  const rememberFacesHandle = (handle: any) => { if (handle) void handleStore.putFaces(handle, handle.name || ""); };
-  async function writeFacesToHandle(handle: any): Promise<void> {
-    if (!(await ensureWritePermission(handle))) throw new Error("permission-refusée");
-    const blob = await imageStore.serializeBundle(store.meta.facesKey || null);
-    const w = await handle.createWritable(); await w.write(blob); await w.close();
-  }
-  /** Clé d'appariement json↔compagnon : générée dès qu'un document a des images ; gravée dans meta.facesKey
-      (sérialisée dans le .json) ET dans le manifeste du .nmfb. */
-  function ensureFacesKey(): string { if (!store.meta.facesKey) { store.meta.facesKey = "fk-" + Id.uid(); void store.persistMeta(); } return store.meta.facesKey; }
-  /** Le document a-t-il des images (bibliothèque chargée OU références d'équipement) ? Justifie un compagnon + une clé. */
-  const docHasFaceImages = (): boolean => imageStore.count() > 0 || store.faceImageRefIds().size > 0;
-  /** Associe un compagnon sélectionné au document : charge ses images, puis (si demandé ou clé non concordante)
-      génère une NOUVELLE clé et la ré-écrit dans le .nmfb ET le .json (appariement durable). */
-  async function associateCompanion(fh: any, opts: { regenKey?: boolean } = {}): Promise<void> {
-    const f = await fh.getFile();
-    await imageStore.loadBundle(await f.arrayBuffer());
-    currentFacesHandle = fh; rememberFacesHandle(fh);
-    const docKey = store.meta.facesKey || null, bundleKey = imageStore.lastLoadedKey || null;
-    const alreadyPaired = !!(docKey && bundleKey && docKey === bundleKey);
-    const nameChanged = (store.meta.facesFile || null) !== fh.name;
-    store.meta.facesFile = fh.name;   // MÉMORISE le nom du compagnon → réouverture auto même si nom ≠ <json>.nmfb
-    flog("associateCompanion", { file: fh.name, docKey, bundleKey, alreadyPaired, nameChanged, regenKey: !!opts.regenKey, images: imageStore.count() });
-    if (opts.regenKey || !alreadyPaired) {
-      store.meta.facesKey = "fk-" + Id.uid(); await store.persistMeta();
-      try { await writeFacesToHandle(fh); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Clé non écrite dans le compagnon : " + (e.message || e), "err"); }
-      if (currentHandle) { try { await writeToHandle(currentHandle); } catch (e: any) { session.markDirty(); if (e && e.message !== "permission-refusée" && e.name !== "AbortError") Notify.toast("Clé non écrite dans le .json : " + (e.message || e), "err"); } }
-      else session.markDirty();
-    } else if (nameChanged) {   // déjà apparié (clé OK), seul le NOM du compagnon change → on persiste le nom dans le .json
-      await store.persistMeta();
-      if (currentHandle) { try { await writeToHandle(currentHandle); } catch (e: any) { session.markDirty(); if (e && e.message !== "permission-refusée" && e.name !== "AbortError") Notify.toast("Nom du compagnon non écrit dans le .json : " + (e.message || e), "err"); } }
-      else session.markDirty();
-    }
-    imageStore.setLoadedKey(store.meta.facesKey || null);   // la bibliothèque en IndexedDB = ce document
-    refreshChrome(); shell.refreshActive(); Notify.toast("Images chargées → " + fh.name);
-  }
-  /** Charge interactivement un compagnon pour le document courant (génère toujours une nouvelle clé). */
-  async function loadCompanionFileInteractive(): Promise<void> {
-    if (!HAS_FS_API) return;
-    try { const [fh] = await W.showOpenFilePicker({ startIn: currentHandle || undefined, types: FACES_TYPES }); await associateCompanion(fh, { regenKey: true }); }
-    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
-  }
-  /** « Ouvrir un fichier de faces » (onglet Images) : mode FICHIER → picker natif ; mode DOSSIER → liste les .nmfb du dossier. */
-  async function openFacesFile(): Promise<void> {
-    flog("openFacesFile", { dirMode: dirMode(), dir: currentDirHandle && currentDirHandle.name });
-    if (!HAS_FS_API) { Notify.toast("Indisponible : navigateur sans File System Access API.", "err"); return; }
-    if (!dirMode()) { await loadCompanionFileInteractive(); return; }   // mode fichier → sélecteur de fichier
-    let dir = currentDirHandle;
-    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn: await startDirHandle() }); currentDirHandle = dir; } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non ouvert : " + (e.message || e), "err"); return; } }
-    const names: string[] = [];
-    try { for await (const entry of dir.values()) { if (entry.kind === "file" && /\.nmfb$/i.test(entry.name)) names.push(entry.name); } } catch (_) { /* énumération impossible */ }
-    flog("openFacesFile: .nmfb du dossier", names);
-    if (!names.length) { Notify.toast("Aucun fichier de faces (.nmfb) dans ce dossier.", "err"); return; }
-    names.sort((a, b) => a.localeCompare(b));
-    const name = (names.length === 1) ? names[0] : await chooseFileInDir(names, "Choisir un fichier de faces", "🖼");
-    if (!name) return;
-    try { const fh = await dir.getFileHandle(name); await associateCompanion(fh); }
-    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
-  }
-
-  /* ---- IMPORT / EXPORT EXPLICITE de la BIBLIOTHÈQUE d'images (.nmfb) — portage manuel, disponible dans TOUS les
-         modes (fichier ET API). Distinct du compagnon (mode fichier) qui, lui, s'apparie au document et s'enregistre
-         automatiquement à côté du .json. Ici : un export téléchargeable + un import qui ÉCRASE la bibliothèque. ---- */
-  /** EXPORT : télécharge toute la bibliothèque au format `.nmfb` (blobs hydratés, donc fonctionne aussi en REST). */
-  async function exportFacesLibrary(): Promise<void> {
-    if (imageStore.count() === 0) { Notify.toast("Aucune image de façade à exporter.", "err"); return; }
-    try {
-      const blob = await imageStore.serializeBundle(store.meta.facesKey || null);
-      const base = (store.meta.docName || "dc-manager").replace(/[\\/:*?"<>|]+/g, "_");
-      Download.blob(base + "-faces.nmfb", blob);
-      Notify.toast(imageStore.count() + " image(s) exportée(s) → " + base + "-faces.nmfb");
-    } catch (e: any) { Notify.toast("Export des images impossible : " + ((e && e.message) || e), "err"); }
-  }
-  /** IMPORT : ÉCRASE la bibliothèque par le contenu d'un `.nmfb` (ids conservés). Avertit AVANT : les références
-      d'équipement vers des images absentes du fichier importé deviennent orphelines → faces à ré-assigner. */
-  async function importFacesLibrary(): Promise<void> {
-    const existing = imageStore.count();
-    const ok = await Dialog.confirm({
-      title: "Importer des images (écrase la bibliothèque) ?",
-      message: (existing ? `La bibliothèque actuelle (${existing} image(s)) sera ENTIÈREMENT REMPLACÉE par le contenu du fichier. ` : "")
-        + "Les équipements dont l'image n'existe pas dans le fichier importé perdront leur face : il faudra RÉ-ASSIGNER ces faces ensuite. Continuer ?",
-      confirmLabel: "Importer et écraser", cancelLabel: "Annuler", danger: true,
-    });
-    if (!ok) return;
-    let buf: ArrayBuffer | null = null;
-    if (HAS_FS_API) {
-      try { const [fh] = await W.showOpenFilePicker({ startIn: currentHandle || undefined, types: FACES_TYPES }); buf = await (await fh.getFile()).arrayBuffer(); }
-      catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Fichier non ouvert : " + (e.message || e), "err"); return; }
-    } else {
-      const file = await new Promise<File | null>((resolve) => {
-        const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".nmfb,application/octet-stream";
-        inp.onchange = () => resolve((inp.files && inp.files[0]) || null); inp.click();
-      });
-      if (!file) return; buf = await file.arrayBuffer();
-    }
-    if (!buf) return;
-    try {
-      const n = await imageStore.importBundle(buf);   // remplace + conserve les ids + marque modifié
-      shell.refreshActive();
-      Notify.toast(n + " image(s) importée(s). Ré-assignez les faces des équipements concernés.");
-    } catch (e: any) { Notify.toast("Import des images impossible : " + ((e && e.message) || e), "err"); }
-  }
-  /** (Ré)écrit le compagnon. Sans handle connu, en demande un (suggéré à côté du .json). */
-  async function saveCompanionFaces(jsonHandle: any): Promise<void> {
-    if (!HAS_FS_API) return;
-    if (!docHasFaceImages() && !currentFacesHandle) return;   // rien à écrire
-    ensureFacesKey();
-    // nom cible = compagnon ASSOCIÉ (meta.facesFile) si présent, sinon convention <json>.nmfb
-    const wantName = (store.meta.facesFile as string) || facesNameFor(jsonHandle ? jsonHandle.name : currentName);
-    flog("saveCompanionFaces", { wantName, dirMode: dirMode(), dir: currentDirHandle && currentDirHandle.name, facesKey: store.meta.facesKey });
-    try {
-      if (dirMode() && currentDirHandle) currentFacesHandle = await currentDirHandle.getFileHandle(wantName, { create: true });   // dans le dossier, sans picker
-      else if (!currentFacesHandle) currentFacesHandle = await W.showSaveFilePicker({ suggestedName: wantName, startIn: jsonHandle || undefined, types: FACES_TYPES });
-      await writeFacesToHandle(currentFacesHandle); rememberFacesHandle(currentFacesHandle);
-      if (currentFacesHandle && currentFacesHandle.name) store.meta.facesFile = currentFacesHandle.name;   // garde le nom à jour
-      imageStore.setLoadedKey(store.meta.facesKey || null);
-      flog("saveCompanionFaces → écrit", currentFacesHandle && currentFacesHandle.name);
-    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non enregistrées : " + (e.message || e), "err"); flog("saveCompanionFaces → échec", e && e.message); }
-  }
-  /** Charge le compagnon depuis `handle`. `interactive` autorise la (re)demande de permission (geste utilisateur) ;
-      à false, ne charge QUE si la permission est DÉJÀ accordée (queryPermission → aucune question). Renvoie true si
-      les images correspondant au document ont bien été chargées. */
-  async function tryLoadCompanion(handle: any, interactive: boolean, docKey: string | null, stillMissing: () => boolean): Promise<boolean> {
-    if (!handle) return false;
-    const perm = await HandleStore.ensureReadPermission(handle, interactive);
-    flog("tryLoadCompanion", { file: handle.name, interactive, perm, docKey });
-    if (perm !== true) return false;   // null (= « prompt », non accordé) ou false (refusé) → pas de chargement
-    try {
-      const f = await handle.getFile(); await imageStore.loadBundle(await f.arrayBuffer());
-      const bundleKey = imageStore.lastLoadedKey || null;
-      const keyMatch = !!(docKey && bundleKey && docKey === bundleKey), legacyNoKey = (!docKey && !bundleKey);
-      flog("tryLoadCompanion → bundle lu", { file: handle.name, bundleKey, keyMatch, legacyNoKey, images: imageStore.count() });
-      if (keyMatch || (legacyNoKey && !stillMissing())) { currentFacesHandle = handle; shell.refreshActive(); return true; }
-    } catch (e: any) { flog("tryLoadCompanion → illisible", handle.name, e && e.message); }
-    return false;
-  }
-  /** À l'ouverture : recharge le compagnon SI le .json n'embarquait pas d'images inline. Ne POSE la question que si
-      on ne peut PAS le faire automatiquement (permission déjà accordée). Si une interaction est requise (le navigateur
-      exige un geste pour (re)donner l'accès), on réutilise le compagnon mémorisé (un simple « Recharger », sans
-      re-sélection) ; sinon on propose de le choisir. */
-  async function loadCompanionFacesOnOpen(jsonHandle: any): Promise<void> {
-    const refIds = store.faceImageRefIds(), docKey = store.meta.facesKey || null;
-    const stillMissing = () => [...refIds].some((id) => !imageStore.has(id));
-    flog("loadCompanionFacesOnOpen", { docKey, refs: refIds.size, lastLoadedKey: imageStore.lastLoadedKey, images: imageStore.count(), dirMode: dirMode(), dir: currentDirHandle && currentDirHandle.name });
-    if (!docKey && !refIds.size) { currentFacesHandle = null; flog("compagnon: rien attendu"); return; }   // rien attendu
-    if (docKey && imageStore.lastLoadedKey === docKey && imageStore.count() > 0 && !stillMissing()) { flog("compagnon: déjà à jour"); shell.refreshActive(); return; }   // déjà à jour pour CE doc
-    if (!docKey && !stillMissing()) { shell.refreshActive(); return; }     // legacy : refs déjà présentes (inline)
-    if (!HAS_FS_API) { shell.refreshActive(); return; }
-    // MODE DOSSIER : le grant du dossier couvre déjà le compagnon → lecture directe, sans permission ni question.
-    if (dirMode() && currentDirHandle) {
-      const savedName = (store.meta.facesFile as string) || null;   // nom mémorisé d'un compagnon associé (≠ convention)
-      const wantName = facesNameFor(jsonHandle ? jsonHandle.name : currentName);
-      // 1) essai par NOM : d'abord le nom mémorisé (meta.facesFile), puis la convention <json>.nmfb.
-      const byName = [savedName, wantName].filter((n, i, a) => !!n && a.indexOf(n) === i) as string[];
-      for (const nm of byName) {
-        try {
-          const fh = await currentDirHandle.getFileHandle(nm);
-          flog("compagnon[dossier]: essai par nom", nm);
-          if (await tryLoadCompanion(fh, false, docKey, stillMissing)) { flog("compagnon[dossier]: chargé par nom", nm); return; }
-        } catch (_) { flog("compagnon[dossier]: pas de fichier nommé", nm); }
-      }
-      // 2) sinon, on SCANNE les .nmfb du dossier et on apparie par SIGNATURE (facesKey du manifeste == docKey).
-      if (docKey) {
-        try {
-          for await (const entry of currentDirHandle.values()) {
-            if (entry.kind !== "file" || !/\.nmfb$/i.test(entry.name) || byName.includes(entry.name)) continue;
-            flog("compagnon[dossier]: essai par signature", entry.name);
-            if (await tryLoadCompanion(entry, false, docKey, stillMissing)) {
-              flog("compagnon[dossier]: apparié par signature", entry.name);
-              store.meta.facesFile = entry.name; await store.persistMeta();   // mémorise le nom trouvé pour la prochaine fois
-              return;
-            }
-          }
-        } catch (e: any) { flog("compagnon[dossier]: scan échoué", e && e.message); }
-      }
-      flog("compagnon[dossier]: AUCUN compagnon correspondant trouvé dans", currentDirHandle.name);
-      if (docKey && imageStore.lastLoadedKey && imageStore.lastLoadedKey !== docKey) { await imageStore.keepOnly(store.faceImageRefIds()); imageStore.setLoadedKey(null); }
-      currentFacesHandle = null; shell.refreshActive(); return;
-    }
-    const rememberedMatches = docKey ? (imageStore.lastLoadedKey === docKey) : true;
-    let remembered = rememberedMatches ? await handleStore.getFaces() : null;
-    remembered = (remembered && remembered.handle) ? remembered : null;
-    // 1) AUTOMATIQUE : permission DÉJÀ accordée (aucune (re)demande) → charge sans rien demander
-    if (remembered && await tryLoadCompanion(remembered.handle, false, docKey, stillMissing)) return;
-    // 2) compagnon mémorisé mais permission non accordée → on tente DIRECTEMENT le popup natif d'autorisation
-    //    (si le geste d'ouverture est encore actif, c'est le SEUL prompt). On n'affiche notre confirmation
-    //    « Recharger » QUE si le navigateur refuse de demander sans geste frais (perm indéterminée).
-    if (remembered) {
-      const dropStale = () => { if (docKey && imageStore.lastLoadedKey && imageStore.lastLoadedKey !== docKey) { void imageStore.keepOnly(store.faceImageRefIds()); imageStore.setLoadedKey(null); } };
-      const perm = await HandleStore.ensureReadPermission(remembered.handle, true);   // popup natif direct (geste encore actif)
-      if (perm === true) { if (await tryLoadCompanion(remembered.handle, false, docKey, stillMissing)) return; }   // accordée → charge sans re-demander
-      else if (perm === null) {   // le navigateur exige un geste FRAIS → notre confirmation le fournit, puis on re-demande
-        const ok = await Dialog.confirm({ title: "Images de façade", message: "Recharger les images de façade de ce document depuis « " + (remembered.name || facesNameFor(jsonHandle ? jsonHandle.name : currentName)) + " » ?", confirmLabel: "Recharger", cancelLabel: "Plus tard" });
-        if (ok && await tryLoadCompanion(remembered.handle, true, docKey, stillMissing)) return;
-        if (ok) Notify.toast("Images non rechargées (accès refusé).", "err");
-      } else Notify.toast("Images non rechargées (accès refusé).", "err");   // perm === false : refus explicite → ne pas insister
-      dropStale(); currentFacesHandle = null; shell.refreshActive(); return;
-    }
-    // 3) aucun compagnon mémorisé → proposer de le sélectionner (un seul picker)
-    const ok = await Dialog.confirm({ title: "Images de façade", message: "Ce document est associé à un fichier compagnon d'images « " + facesNameFor(jsonHandle ? jsonHandle.name : currentName) + " ». Le sélectionner maintenant ?", confirmLabel: "Choisir le fichier…", cancelLabel: "Plus tard" });
-    if (!ok) {
-      if (docKey && imageStore.lastLoadedKey && imageStore.lastLoadedKey !== docKey) { await imageStore.keepOnly(store.faceImageRefIds()); imageStore.setLoadedKey(null); }
-      currentFacesHandle = null; shell.refreshActive(); return;
-    }
-    try { const [fh] = await W.showOpenFilePicker({ startIn: jsonHandle || undefined, types: FACES_TYPES }); await associateCompanion(fh); }
-    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
-  }
-  /** Réouverture en MODE DOSSIER : re-demande l'accès au dossier (un seul geste) puis relit le .json mémorisé. */
-  async function reopenLastDir(dirRec: { handle: any; name: string }): Promise<void> {
-    flog("reopenLastDir", { dir: dirRec.handle && dirRec.handle.name, json: dirRec.name });
-    try {
-      const granted = await ensureWritePermission(dirRec.handle);
-      flog("reopenLastDir: permission dossier", granted);
-      if (!granted) { Notify.toast("Autorisation du dossier refusée.", "err"); return; }
-      const fh = await dirRec.handle.getFileHandle(dirRec.name);
-      currentDirHandle = dirRec.handle;   // avant loadFromText → le compagnon est relu via le dossier
-      await loadFromText(await (await fh.getFile()).text(), dirRec.name, fh);
-      await rememberDir(dirRec.handle, dirRec.name);
-      Notify.toast("Rouvert → " + dirRec.name);
-    } catch (e: any) {
-      if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
-      else if (e && e.name === "NotFoundError") { await handleStore.clearDir(); shell.setReopen(null); Notify.toast("Document introuvable dans le dossier — déplacé ou supprimé.", "err"); }
-      else if (e && e.name !== "AbortError") Notify.toast("Erreur de réouverture : " + (e.message || e), "err");
-    }
-  }
-  async function reopenLast(): Promise<void> {
-    if (dirMode()) { const d = await handleStore.getDir(); flog("reopenLast: mode dossier", { found: !!(d && d.handle), json: d && d.name }); if (d && d.handle && d.name) { await reopenLastDir(d as any); return; } }   // dossier mémorisé → réouverture dossier
-    let rec = lastRec; if (!rec) rec = await handleStore.getLast();
-    if (!rec || !rec.handle) { Notify.toast("Aucun fichier récent à rouvrir.", "err"); shell.setReopen(null); return; }
-    const handle = rec.handle;
-    try {
-      const perm = await HandleStore.ensureReadPermission(handle, true);
-      if (perm === false) { Notify.toast("Autorisation de lecture refusée.", "err"); return; }
-      const file = await handle.getFile();
-      await loadFromText(await file.text(), handle.name, handle);   // revendique le fileId, raccroche le handle
-      Notify.toast("Rouvert → " + handle.name);
-    } catch (e: any) {
-      if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
-      else if (e && e.name === "NotFoundError") { await handleStore.clearLast(); lastRec = null; shell.setReopen(null); Notify.toast("Fichier introuvable — déplacé ou supprimé.", "err"); }
-      else if (e && e.name !== "AbortError") Notify.toast("Erreur de réouverture : " + (e.message || e), "err");
-    }
-  }
-  /** En mode fichier (un .json est ouvert), « Ouvrir » propose : autre document JSON OU compagnon d'images. */
-  function chooseOpenKind(): Promise<"json" | "companion" | null> {
-    return Dialog.custom({
-      title: "Ouvrir un fichier", cancelLabel: "Annuler",
-      build: (root: HTMLElement) => {
-        let chosen: string | null = null;
-        const confirmBtn = root.closest(".dialog-box")?.querySelector('[data-dlg="confirm"]') as HTMLElement | null;
-        if (confirmBtn) confirmBtn.style.display = "none";   // les choix résolvent eux-mêmes
-        const wrap = document.createElement("div"); wrap.className = "open-kind-choices";
-        const mk = (val: string, icon: string, label: string, desc: string) => {
-          const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
-          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = icon;
-          const tx = document.createElement("span"); tx.className = "ok-tx";
-          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = label;
-          const de = document.createElement("span"); de.className = "ok-desc"; de.textContent = desc;
-          tx.append(ti, de); b.append(ic, tx);
-          b.onclick = () => { chosen = val; confirmBtn?.click(); };
-          wrap.appendChild(b);
-        };
-        mk("json", "📄", "Document JSON", "Ouvrir un autre document (remplace le document courant).");
-        mk("companion", "🖼", "Fichier compagnon d'images", "Charger un .nmfb et l'associer au document courant.");
-        root.appendChild(wrap);
-        return { collect: () => chosen, validate: () => true };
-      },
-    });
-  }
-  /** Sélection d'un nom de fichier parmi une liste (mode dossier) — listing du contenu pertinent du dossier. */
-  function chooseFileInDir(names: string[], title: string, icon: string): Promise<string | null> {
-    return Dialog.custom({
-      title, cancelLabel: "Annuler",
-      build: (root: HTMLElement) => {
-        let chosen: string | null = null;
-        const confirmBtn = root.closest(".dialog-box")?.querySelector('[data-dlg="confirm"]') as HTMLElement | null;
-        if (confirmBtn) confirmBtn.style.display = "none";
-        const wrap = document.createElement("div"); wrap.className = "open-kind-choices";
-        names.forEach((n) => {
-          const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
-          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = icon;
-          const tx = document.createElement("span"); tx.className = "ok-tx";
-          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = n; tx.appendChild(ti);
-          b.append(ic, tx); b.onclick = () => { chosen = n; confirmBtn?.click(); }; wrap.appendChild(b);
-        });
-        root.appendChild(wrap);
-        return { collect: () => chosen, validate: () => true };
-      },
-    });
-  }
-  /** Dossier de DÉPART du sélecteur : dossier courant, sinon le dernier mémorisé (le navigateur y rouvre le picker). */
-  async function startDirHandle(): Promise<any> {
-    if (currentDirHandle) return currentDirHandle;
-    try { const d = await handleStore.getDir(); return (d && d.handle) ? d.handle : undefined; } catch (_) { return undefined; }
-  }
-  /** Ouverture en MODE DOSSIER : un seul grant (lecture+écriture) couvre le .json choisi ET son compagnon .nmfb. */
-  async function doOpenDir(): Promise<void> {
-    let dir: any;
-    const startIn = await startDirHandle();
-    flog("doOpenDir: ouverture du sélecteur de dossier", { startIn: startIn && startIn.name });
-    try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn }); }   // id + startIn → le navigateur rouvre dans le DERNIER dossier
-    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non ouvert : " + (e.message || e), "err"); flog("doOpenDir: annulé/erreur", e && e.name); return; }
-    const names: string[] = [];
-    try { for await (const entry of dir.values()) { if (entry.kind === "file" && /\.json$/i.test(entry.name)) names.push(entry.name); } }
-    catch (_) { /* énumération impossible */ }
-    flog("doOpenDir: dossier choisi", { dir: dir && dir.name, jsons: names });
-    if (!names.length) { Notify.toast("Aucun fichier .json dans ce dossier.", "err"); return; }
-    names.sort((a, b) => a.localeCompare(b));
-    const name = (names.length === 1) ? names[0] : await chooseFileInDir(names, "Choisir un document", "📄");
-    if (!name) return;
-    try {
-      const fh = await dir.getFileHandle(name);
-      currentDirHandle = dir;   // posé AVANT loadFromText → loadCompanionFacesOnOpen lit le .nmfb via le dossier
-      await loadFromText(await (await fh.getFile()).text(), name, fh);
-      await rememberDir(dir, name);
-      Notify.toast("Fichier « " + name + " » ouvert");
-    } catch (e: any) {
-      if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
-      else if (e && e.name !== "AbortError") Notify.toast("Ouverture impossible : " + (e.message || e), "err");
-    }
-  }
-  async function doOpen(): Promise<void> {
-    flog("doOpen", { hasFsApi: HAS_FS_API, dirMode: dirMode(), fileAccessMode: prefs.fileAccessMode });
-    if (!HAS_FS_API) { fileInput.click(); return; }
-    if (dirMode()) { await doOpenDir(); return; }
-    if (currentHandle) {   // un document est ouvert → choisir document JSON ou compagnon d'images
-      const kind = await chooseOpenKind();
-      if (!kind) return;
-      if (kind === "companion") { await loadCompanionFileInteractive(); return; }
-    }
-    try {
-      const [h] = await W.showOpenFilePicker({ types: JSON_TYPES, multiple: false });
-      const f = await h.getFile();
-      await loadFromText(await f.text(), f.name, h);
-      Notify.toast("Fichier « " + f.name + " » ouvert");
-    } catch (e: any) {
-      if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
-      else if (e && e.name !== "AbortError") Notify.toast("Ouverture impossible : " + (e.message || e), "err");
-    }
-  }
-  async function doSave(): Promise<void> {
-    if (!currentHandle) { await doSaveAs(); return; }
-    if (docHasFaceImages()) ensureFacesKey();   // la clé d'appariement doit être dans le .json AVANT son écriture
-    if (!(await ensureWritePermission(currentHandle))) { Notify.toast("Permission d'écriture refusée.", "err"); return; }
-    try { await writeToHandle(currentHandle); await saveCompanionFaces(currentHandle); refreshChrome(); Notify.toast("Document enregistré (" + currentName + ")"); }
-    catch (e: any) { Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
-  }
-  /** « Enregistrer sous » en MODE DOSSIER : choisit le dossier (s'il manque) + un nom, écrit .json et .nmfb dedans. */
-  async function doSaveAsDir(): Promise<void> {
-    let dir = currentDirHandle;
-    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn: await startDirHandle() }); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non choisi : " + (e.message || e), "err"); return; } }
-    const raw = await Dialog.prompt("Nom du fichier", docFileName()); if (!raw) return;
-    const name = /\.json$/i.test(raw) ? raw : raw + ".json";
-    try {
-      const h = await dir.getFileHandle(name, { create: true });
-      if (docHasFaceImages()) ensureFacesKey();
-      currentDirHandle = dir; currentHandle = h; currentName = h.name || name; currentFacesHandle = null; session.setFile(true);
-      await writeToHandle(h);
-      await saveCompanionFaces(h);
-      await rememberDir(dir, name);
-      tabChannel.claim(store.meta.fileId || null);
-      applyAutosave(); refreshChrome(); Notify.toast("Enregistré sous « " + currentName + " »");
-    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
-  }
-  async function doSaveAs(): Promise<void> {
-    ensureFileId();
-    if (!HAS_FS_API) { Download.text(docFileName(), await snapshotWithImages(), "application/json"); Notify.toast("Copie téléchargée (" + docFileName() + ")"); return; }
-    if (dirMode()) { await doSaveAsDir(); return; }
-    try {
-      const h = await W.showSaveFilePicker({ suggestedName: docFileName(), types: JSON_TYPES });
-      if (docHasFaceImages()) ensureFacesKey();   // clé d'appariement dans le .json
-      currentHandle = h; currentName = h.name || docFileName(); currentFacesHandle = null; session.setFile(true);   // nouveau fichier → nouveau compagnon
-      await writeToHandle(h);
-      await saveCompanionFaces(h);   // choisit/écrit le fichier compagnon d'images à côté
-      tabChannel.claim(store.meta.fileId || null);
-      applyAutosave(); refreshChrome(); Notify.toast("Enregistré sous « " + currentName + " »");
-    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
-  }
 
   /* ---- auto-save : mécanique EXTRAITE dans `AutoSave` (testée) ; ici, seule l'adhérence à l'app ---- */
   const autoSave = new AutoSave(prefs, {
     hasFsApi: () => HAS_FS_API,
-    hasFile: () => !!currentHandle,
+    hasFile: () => !!files.handle,
     dirty: () => session.dirty,
-    ensureWritePermission: () => ensureWritePermission(currentHandle),
-    write: async () => { await writeToHandle(currentHandle); refreshChrome(); },
-    pickFile: () => doSaveAs(),
+    ensureWritePermission: () => files.ensureCurrentWritePermission(),
+    write: async () => { await files.writeCurrent(); refreshChrome(); },
+    pickFile: () => files.doSaveAs(),
     confirmEnable: () => Dialog.confirm({ title: "Activer l'auto-save", message: "Pour l'auto-save, le document doit être lié à un fichier. Choisir maintenant ?", confirmLabel: "Choisir un fichier" }),
     onStateChange: (on, intervalS, statusHtml) => { shell.setAutosave(on, intervalS); shell.setAutosaveStatus(statusHtml); refreshChrome(); },
     notify: (msg, kind) => Notify.toast(msg, kind),
@@ -595,6 +143,7 @@ async function boot(): Promise<void> {
   let restEvents: EventSource | null = null;   // flux SSE du document courant (concurrence multi-client)
   let restReloadTO: any = 0;
   let restLastBy: { name?: string; ip?: string } | null = null;   // auteur du dernier changement externe (pour le toast)
+  const flog = Log.scope("fs");   // trace fichier/REST (flag de débogage) — le contrôleur fichier a la sienne
   const reloadPlanner = new ReloadPlanner();   // changeset → plan (quoi reconstruire) — cf. src/sync/RenderImpact.ts
   // Changesets des événements SSE rapprochés, ACCUMULÉS pendant la fenêtre de debounce puis planifiés en une fois.
   let pendingChangeset: DocumentChangeset | null = null;
@@ -688,11 +237,11 @@ async function boot(): Promise<void> {
     if (name) store.meta.docName = store.meta.docName || name;
     await imageStore.reloadFromBackend();     // miroir d'images du document
     undoTimeline.reset();
-    currentName = name || store.meta.docName || "Document";
+    files.name = name || store.meta.docName || "Document";
     session.setFile(true); session.markLoaded(store.histIndex());
     shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
     restSubscribeLive();
-    Notify.toast("Document « " + currentName + " » ouvert");
+    Notify.toast("Document « " + files.name + " » ouvert");
   }
   /** Crée un nouveau document serveur (catalogues semés) puis l'ouvre. */
   async function restNewDocument(name: string): Promise<void> {
@@ -706,7 +255,7 @@ async function boot(): Promise<void> {
     store.meta.docName = d.name; await store.persistMeta();
     await imageStore.reloadFromBackend();
     undoTimeline.reset();
-    currentName = d.name; session.setFile(true); session.markLoaded(store.histIndex());
+    files.name = d.name; session.setFile(true); session.markLoaded(store.histIndex());
     shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
     restSubscribeLive();
     Notify.toast("Document « " + d.name + " » créé");
@@ -732,7 +281,7 @@ async function boot(): Promise<void> {
       store.meta.docName = name; await store.persistMeta();
       await imageStore.reloadFromBackend();
       undoTimeline.reset();
-      currentName = name; session.setFile(true); session.markLoaded(store.histIndex());
+      files.name = name; session.setFile(true); session.markLoaded(store.histIndex());
       shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
       restSubscribeLive();
       const nbEnt = Object.keys(raw).filter((k) => k !== "faceImages" && Array.isArray((raw as any)[k])).reduce((n, k) => n + (raw as any)[k].length, 0);
@@ -873,12 +422,12 @@ async function boot(): Promise<void> {
         if (!ok) return;
       }
       tabChannel.release(store.meta.fileId || null);
-      await store.newDocument(); await imageStore.clearAll(); undoTimeline.reset(); currentHandle = null; currentFacesHandle = null; currentDirHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
+      await store.newDocument(); await imageStore.clearAll(); undoTimeline.reset(); files.detach(); session.markLoaded(store.histIndex());
       applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast("Nouveau document");
     },
-    onOpen: () => { if (REST_MODE) restOpenChooser(); else doOpen(); },
-    onSave: () => { doSave(); },
-    onSaveAs: () => { doSaveAs(); },
+    onOpen: () => { if (REST_MODE) restOpenChooser(); else void files.doOpen(); },
+    onSave: () => { void files.doSave(); },
+    onSaveAs: () => { void files.doSaveAs(); },
     onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
     onRedo: () => { void doRedo(); },
     onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); dcView.onThemeChanged(); },
@@ -890,7 +439,7 @@ async function boot(): Promise<void> {
     },
     onRenameDoc: async (name) => {
       store.meta.docName = name; await store.persistMeta(); session.markDirty(); refreshChrome();   // meta HORS historique
-      if (REST_MODE && restDocId) { currentName = name; try { await (adapter as RestAdapter).renameDocument(restDocId, name); } catch (_) { /* registre best-effort */ } refreshChrome(); }
+      if (REST_MODE && restDocId) { files.name = name; try { await (adapter as RestAdapter).renameDocument(restDocId, name); } catch (_) { /* registre best-effort */ } refreshChrome(); }
     },
     onDataSource: async (value) => {
       // Changement de mode = redémarrage de l'app (adapter/store recréés) → on persiste puis on RECHARGE.
@@ -917,7 +466,7 @@ async function boot(): Promise<void> {
     onFileAccessMode: (value) => {
       if (value === "directory" && !HAS_FS_API) { Notify.toast("Mode dossier indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); shell.setFileAccessMode("file"); return; }
       prefs.fileAccessMode = (value === "directory") ? "directory" : "file";
-      if (prefs.fileAccessMode === "file") currentDirHandle = null;   // repasse en mode fichier → on oublie le dossier courant
+      if (prefs.fileAccessMode === "file") files.dirHandle = null;   // repasse en mode fichier → on oublie le dossier courant
       shell.setWelcomeMode(prefs.fileAccessMode, HAS_FS_API); refreshChrome();
       Notify.toast(prefs.fileAccessMode === "directory" ? "Mode dossier : une seule autorisation couvre le document et ses images." : "Mode fichier : autorisation par fichier.");
     },
@@ -925,15 +474,15 @@ async function boot(): Promise<void> {
       const m = (mode === "directory") ? "directory" : "file";
       if (m === "directory" && !HAS_FS_API) { Notify.toast("Mode dossier indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); return; }
       prefs.fileAccessMode = m;
-      if (m === "file") currentDirHandle = null;
+      if (m === "file") files.dirHandle = null;
       shell.setFileAccessMode(m); shell.setWelcomeMode(m, HAS_FS_API);
-      doOpen();
+      void files.doOpen();
     },
     onAutosaveToggle: (on) => { setAutosave(on); },
     onAutosaveInterval: (sec) => { prefs.autosaveInterval = sec; applyAutosave(); },
-    onReopenLast: () => { reopenLast(); },
-    onExportJson: () => { void exportJsonDownload(); },
-    onExportStandalone: () => { void exportStandalone(); },
+    onReopenLast: () => { void files.reopenLast(); },
+    onExportJson: () => { void files.exportJsonDownload(); },
+    onExportStandalone: () => { void files.exportStandalone(); },
     onDebugLog: (on) => { prefs.debugLog = on; Log.setEnabled(on); Notify.toast(on ? "Logs de débogage activés (console)" : "Logs de débogage désactivés"); },
   };
 
@@ -1105,10 +654,10 @@ async function boot(): Promise<void> {
       kind: "secondary", parent: "equipements", links: [],
       count: () => imageStore.count(),
       extraActions: [
-        { label: "Importer des images…", title: "Charger une bibliothèque d'images .nmfb — ÉCRASE la bibliothèque actuelle ; les faces des équipements concernés seront à ré-assigner", onClick: () => importFacesLibrary() },
-        { label: "Exporter les images", title: "Télécharger toute la bibliothèque d'images au format .nmfb (portable, ré-importable dans un autre document)", onClick: () => exportFacesLibrary() },
+        { label: "Importer des images…", title: "Charger une bibliothèque d'images .nmfb — ÉCRASE la bibliothèque actuelle ; les faces des équipements concernés seront à ré-assigner", onClick: () => files.importFacesLibrary() },
+        { label: "Exporter les images", title: "Télécharger toute la bibliothèque d'images au format .nmfb (portable, ré-importable dans un autre document)", onClick: () => files.exportFacesLibrary() },
         // Compagnon (mode fichier uniquement) : .nmfb APPARIÉ au document, rechargé/enregistré automatiquement à côté du .json.
-        ...(REST_MODE ? [] : [{ label: "Ouvrir un fichier de faces", title: "Charger le compagnon d'images .nmfb apparié au document (mode dossier : liste le dossier ; mode fichier : sélecteur)", onClick: () => openFacesFile() }]),
+        ...(REST_MODE ? [] : [{ label: "Ouvrir un fichier de faces", title: "Charger le compagnon d'images .nmfb apparié au document (mode dossier : liste le dossier ; mode fichier : sélecteur)", onClick: () => files.openFacesFile() }]),
       ],
       addLabel: "+ Image", onAdd: () => Forms.faceImage(imageStore, store, formHost, null, () => shell.refreshActive()),
       onShow: () => {
@@ -1196,13 +745,13 @@ async function boot(): Promise<void> {
   // ---- état save-state ----
   // ---- barre de statut / undo-redo (cohérence avec l'état du store) ----
   const refreshChrome = () => {
-    session.setFile(!!(currentHandle && HAS_FS_API)); session.setAutosave(prefs.autosave);   // synchronise le contexte de save
+    session.setFile(files.hasLinkedFile); session.setAutosave(prefs.autosave);   // synchronise le contexte de save
     shell.setDocName(store.meta.docName || "");
     // Mode API : la barre de statut est masquée (cf. Shell.setRestMode) → inutile de la peupler. On saute donc
     // setStatus, qui n'aurait aucun effet visible (champs fichier/source/sauvegarde sans objet côté serveur).
     if (!REST_MODE) {
       shell.setStatus({
-        file: currentName || (store.meta.docName ? docFileName() : "— en mémoire —"),
+        file: files.name || (store.meta.docName ? files.docFileName() : "— en mémoire —"),
         release: APP_RELEASE, source: prefs.dataSource === "api" ? "API" : adapter.label, entities: store.totalCount(), lastSave: "—",
       });
     }
@@ -1273,7 +822,7 @@ async function boot(): Promise<void> {
     modal.editLocked = true;                       // bloque toute modale d'ÉDITION (les fiches restent consultables)
     if (store.meta.docName) shell.setDocName(store.meta.docName);
     refreshChrome(); shell.refreshActive();
-    (window as any).__DCMANAGER__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
+    (window as any).__DCMANAGER__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, files, imageStore };
     return;
   }
   // ÉCRAN D'ACCUEIL (mode FICHIER uniquement) : au (re)chargement le handle FS est perdu → on force une
@@ -1282,16 +831,10 @@ async function boot(): Promise<void> {
     shell.hideWelcome();
     await restBootstrap();   // ouvre le dernier doc ouvert → défaut global → plus récent (ou en crée un) — cf. restBootstrap
   } else {
-    let reopenName: string | null = null;
-    if (HAS_FS_API) {
-      try {
-        if (dirMode()) { const d = await handleStore.getDir(); if (d && d.handle && d.name) reopenName = d.name; }
-        if (!reopenName) { lastRec = await handleStore.getLast(); reopenName = lastRec ? (lastRec.name || "fichier") : null; }
-      } catch (_) { lastRec = null; }
-    }
+    const reopenName: string | null = HAS_FS_API ? await files.lastOpenName() : null;
     shell.showWelcome({ reopenName, mode: prefs.fileAccessMode, fsApi: HAS_FS_API });
   }
 
-  (window as any).__DCMANAGER__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, reopenLast, imageStore };
+  (window as any).__DCMANAGER__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, files, imageStore };
 }
 boot();
