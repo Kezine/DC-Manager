@@ -717,6 +717,29 @@ export abstract class DcThreeCamera extends DcThreeBase {
     });
   };
 
+  /** Couleur de surbrillance SURCHARGÉE le temps d'un applyHover (mode routage → vert « ok ») ; null = accent bleu. */
+  protected _hoverColor: { emissive: number; tint: number } | null = null;
+
+  /** Mode ROUTAGE : met en évidence la CIBLE cliquable (port ou waypoint) sous le curseur — équivalent WebGL du
+      CSS 2D `.dc-routing …:hover` (vert --ok, plus explicite que l'accent normal) + curseur pointer. Les autres
+      objets (baies, occupants, câbles) ne sont PAS des cibles de routage → jamais surlignés dans ce mode. */
+  protected routeHoverHighlight(clientX: number, clientY: number): void {
+    let target: THREE.Object3D | null = null;
+    for (const h of this.rayHits(clientX, clientY)) {
+      const p: any = h.object.userData && h.object.userData.pick;
+      if (p && (p.type === "port" || p.type === "wp")) { target = h.object; break; }
+    }
+    if (target !== this.hovered) {
+      this.clearHover();
+      this.hovered = target;
+      this._hoverColor = { emissive: 0x29c46b, tint: 0x7fe3a8 };   // vert « ok » (cf. CSS var(--ok, #29c46b))
+      this.applyHover(target);
+      this._hoverColor = null;
+      this.request();
+    }
+    const dom = this.renderer?.domElement; if (dom) dom.style.cursor = target ? "pointer" : "default";
+  }
+
   /** Éteint la mise en évidence de survol + le tooltip (utilisé à la fermeture d'un tooltip d'appui long tactile). */
   protected clearHoverAndTip(): void {
     if (this.tipCb) this.tipCb(null, 0, 0);
@@ -749,6 +772,11 @@ export abstract class DcThreeCamera extends DcThreeBase {
   protected setHover(mesh: THREE.Object3D | null, on: boolean): void {
     if (!mesh) return;
     const m = (mesh as any).material as any; if (!m) return;
+    // Couleurs de surbrillance : accent BLEU par défaut ; surchargées par `_hoverColor` (mode routage → vert
+    // « ok », parité avec le CSS 2D `.dc-routing …:hover`). La restauration (off) relit les valeurs SAUVÉES,
+    // indépendantes de la couleur appliquée.
+    const hiEmissive = this._hoverColor ? this._hoverColor.emissive : 0x4a90e2;
+    const hiTint = this._hoverColor ? this._hoverColor.tint : 0x9fd0ff;
     if (Array.isArray(m)) {   // multi-matériaux (coque de baie · boîte d'équip. libre à 6 faces) → par sous-matériau
       // emissive quand le matériau en a (MeshStandard) ; sinon TEINTE de la couleur (MeshBasic texturé des faces
       // d'équipement libre : pas d'emissive → sans ça, une boîte ENTIÈREMENT texturée ne réagirait pas au survol).
@@ -757,7 +785,7 @@ export abstract class DcThreeCamera extends DcThreeBase {
           mesh.userData._emiArr = m.map((x: any) => (x && x.emissive) ? x.emissive.getHex() : -1);
           mesh.userData._colArr = m.map((x: any) => (x && !x.emissive && x.color) ? x.color.getHex() : -1);
         }
-        m.forEach((x: any) => { if (!x) return; if (x.emissive) x.emissive.setHex(0x4a90e2); else if (x.color) x.color.setHex(0x9fd0ff); });
+        m.forEach((x: any) => { if (!x) return; if (x.emissive) x.emissive.setHex(hiEmissive); else if (x.color) x.color.setHex(hiTint); });
       } else if (mesh.userData._emiArr) {
         m.forEach((x: any, i: number) => {
           if (!x) return;
@@ -770,8 +798,8 @@ export abstract class DcThreeCamera extends DcThreeBase {
     }
     if (on) {
       if (m.isLineMaterial) { mesh.userData._lw = m.linewidth; mesh.userData._lop = m.opacity; m.linewidth = m.linewidth * 2; m.opacity = 1; }   // câble : + épais + opaque
-      else if (m.emissive) { mesh.userData._emissive = m.emissive.getHex(); m.emissive.setHex(0x4a90e2); }
-      else if (m.color) { mesh.userData._color = m.color.getHex(); m.color.setHex(0x9fd0ff); }   // sprites (marqueurs/pastilles) → teinte
+      else if (m.emissive) { mesh.userData._emissive = m.emissive.getHex(); m.emissive.setHex(hiEmissive); }
+      else if (m.color) { mesh.userData._color = m.color.getHex(); m.color.setHex(hiTint); }   // sprites (marqueurs/pastilles) → teinte
       if (m.transparent && !m.map && !m.isLineMaterial) { mesh.userData._opacity = m.opacity; m.opacity = 0.9; }   // emplacements libres → ↑ opacité
     } else {
       if (mesh.userData._lw != null) { m.linewidth = mesh.userData._lw; m.opacity = mesh.userData._lop; }
