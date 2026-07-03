@@ -1778,6 +1778,55 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(s.get("ipNetworks", net.id).cidr, "10.0.0.0/16", "V5b : CIDR contenant l'adresse → accepté");
   }
 
+  console.log("\n• CableSpline.controls : tangentes PARTAGÉES 2D/3D (path SVG ⇄ échantillonnage)");
+  {
+    const k = 1 / 6;
+    // segment droit → null (chorde) ; intérieur → Catmull-Rom (P[i+1]−P[i−1])·k
+    const P = [[0, 0], [100, 0], [200, 100], [300, 100]];
+    const cs = CableSpline.controls(P, new Set([0]), k);
+    ck.eq(cs[0], null, "segment droit → pas de contrôles (chorde)");
+    ck(!!cs[1] && Math.abs(cs[1].c1[0] - (100 + (200 - 0) * k)) < 1e-9, "intérieur : C1 = P + (P[i+1]−P[i−1])·k (Catmull-Rom)");
+    // amorce ⟂ : la tangente au point d'amorce est ALIGNÉE sur l'axe du segment droit adjacent (G1)
+    const P2 = [[0, 0], [0, 20], [150, 220]];   // segment 0 droit vertical, amorce au point 1
+    const c2 = CableSpline.controls(P2, new Set([0]), k, new Set([1]));
+    ck(!!c2[1] && Math.abs(c2[1].c1[0] - 0) < 1e-9 && c2[1].c1[1] > 20, "amorce : C1 part le long de l'axe du segment droit (x inchangé)");
+    // PARITÉ 3D : sample() consomme les mêmes contrôles — un point échantillonné juste après l'amorce reste sur l'axe
+    const P3 = [{ x: 0, y: 0, z: 0 }, { x: 0, y: 20, z: 0 }, { x: 150, y: 220, z: 0 }];
+    const line = CableSpline.sample(P3, new Set([0]), k, new Set([1]));
+    const justAfter = line[2];   // 1er point de la courbe après le point d'amorce
+    ck(Math.abs(justAfter.x) < 2, "parité 3D : la courbe part de l'amorce le long de l'axe (x ≈ 0)");
+  }
+
+  console.log("\n• GraphGeometry : disposition force-directed (extraite de GraphView, déterministe)");
+  {
+    const mkN = (id) => ({ id, name: id, type: "", x: 0, y: 0, vx: 0, vy: 0 });
+    // nœud isolé : centré à l'origine par la simulation, puis ancré ≥ 0 par le packing
+    const solo = [mkN("s")];
+    GraphGeometry.forceLayout(solo, [], 900, 560);
+    ck(isFinite(solo[0].x) && isFinite(solo[0].y), "nœud isolé : position finie");
+    // paire connectée : les deux nœuds s'écartent (répulsion) mais restent liés (attraction) — distance saine
+    const pair = [mkN("a"), mkN("b")];
+    GraphGeometry.forceLayout(pair, [{ a: "a", b: "b" }], 900, 560);
+    const d = Math.hypot(pair[0].x - pair[1].x, pair[0].y - pair[1].y);
+    ck(d > 10 && d < 3000, "paire connectée : distance d'équilibre saine (" + Math.round(d) + " px)");
+    // DÉTERMINISME : mêmes entrées → même disposition (aucune source aléatoire)
+    const pair2 = [mkN("a"), mkN("b")];
+    GraphGeometry.forceLayout(pair2, [{ a: "a", b: "b" }], 900, 560);
+    ck(Math.abs(pair[0].x - pair2[0].x) < 1e-9 && Math.abs(pair[1].y - pair2[1].y) < 1e-9, "déterministe : deux exécutions identiques");
+    // packing : le composant principal est ANCRÉ à l'origine (bbox min ≈ 0), le satellite rangé DESSOUS
+    const nodes = [mkN("m1"), mkN("m2"), mkN("m3"), mkN("iso")];
+    GraphGeometry.forceLayout(nodes, [{ a: "m1", b: "m2" }, { a: "m2", b: "m3" }], 900, 560);
+    const main = nodes.slice(0, 3), iso = nodes[3];
+    const bb = GraphGeometry.nodesBBox(main, () => 24);
+    ck(bb.minX > -1 && bb.minY > -1, "packing : composant principal ancré à l'origine");
+    ck(iso.y > bb.maxY, "packing : le composant satellite est rangé SOUS le principal");
+    // placement des nœuds sans position : en grille sous le centroïde des nœuds placés
+    const placed = [{ id: "p1", x: 100, y: 100, vx: 0, vy: 0 }, { id: "p2", x: 300, y: 100, vx: 0, vy: 0 }];
+    const missing = [mkN("x1"), mkN("x2")];
+    GraphGeometry.placeMissingNearCentroid(missing, placed, 450, 280);
+    ck(missing.every((n) => n.y === 220) && missing[0].x < missing[1].x, "nœuds manquants : grille sous le centroïde (y = 100 + 120)");
+  }
+
   console.log("\n• UndoTimeline : timeline d'undo unifiée (piles simulées)");
   {
     // Logique extraite de main.ts/boot (où elle était intestable) : deux piles, jetons chronologiques, plafond.

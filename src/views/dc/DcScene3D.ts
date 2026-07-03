@@ -1,4 +1,5 @@
 import { Text } from "../../core/Text";
+import { CableSpline } from "../../geometry/CableSpline";
 import type { Vec3 } from "./shared";
 import { DcCamera } from "./DcCamera";
 
@@ -45,27 +46,15 @@ export abstract class DcScene3D extends DcCamera {
     if (!P || P.length < 2) return "";
     const M = "M" + P[0].h + "," + P[0].v;
     if (P.length === 2) return M + " L" + P[1].h + "," + P[1].v;
-    const n = P.length, k = this.cableSplineK, hk = k * 2.5;
-    const dist = (p: any, q: any) => Math.hypot(q.h - p.h, q.v - p.v);
-    const unit = (p: any, q: any) => { const dh = q.h - p.h, dv = q.v - p.v, L = Math.hypot(dh, dv) || 1; return { h: dh / L, v: dv / L }; };
-    // tangente imposée à un point d'amorce = sens de SON segment droit adjacent (G1 avec le segment droit)
-    const stubDir = (i: number): { h: number; v: number } | null => {
-      if (!stubAt || !stubAt.has(i)) return null;
-      if (straight && straight.has(i)) return unit(P[i], P[i + 1]);          // segment droit APRÈS i
-      if (i > 0 && straight && straight.has(i - 1)) return unit(P[i - 1], P[i]); // segment droit AVANT i
-      return null;
-    };
-    const tanAt = (i: number, segLen: number): { h: number; v: number } => {
-      const d = stubDir(i);
-      if (d) return { h: d.h * segLen * hk, v: d.v * segLen * hk };   // amorce : tangente alignée sur l'axe
-      const p0 = P[Math.max(0, i - 1)], p1 = P[Math.min(n - 1, i + 1)];
-      return { h: (p1.h - p0.h) * k, v: (p1.v - p0.v) * k };          // intérieur : Catmull-Rom
-    };
+    // TANGENTES PARTAGÉES avec l'échantillonnage 3D (CableSpline.controls) : UN seul calcul d'amorces ⟂ et
+    // de Catmull-Rom pour les DEUX moteurs — toute évolution du routage vaut partout, sans divergence
+    // visuelle 2D/3D. Ici il ne reste que la sérialisation en path SVG.
+    const ctrls = CableSpline.controls(P.map((p) => [p.h, p.v]), straight, this.cableSplineK, stubAt);
     let d = M;
-    for (let i = 0; i < n - 1; i++) {
-      if (straight && straight.has(i)) { d += " L" + P[i + 1].h + "," + P[i + 1].v; continue; }   // segment droit
-      const segLen = dist(P[i], P[i + 1]), m0 = tanAt(i, segLen), m1 = tanAt(i + 1, segLen);
-      d += " C" + (P[i].h + m0.h) + "," + (P[i].v + m0.v) + " " + (P[i + 1].h - m1.h) + "," + (P[i + 1].v - m1.v) + " " + P[i + 1].h + "," + P[i + 1].v;
+    for (let i = 0; i < P.length - 1; i++) {
+      const c = ctrls[i];
+      if (!c) { d += " L" + P[i + 1].h + "," + P[i + 1].v; continue; }   // segment droit
+      d += " C" + c.c1[0] + "," + c.c1[1] + " " + c.c2[0] + "," + c.c2[1] + " " + P[i + 1].h + "," + P[i + 1].v;
     }
     return d;
   }

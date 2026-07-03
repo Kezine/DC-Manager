@@ -11,35 +11,53 @@
 export interface SplinePt { x: number; y: number; z: number }
 
 export class CableSpline {
+  /** Points de contrôle Bézier PAR SEGMENT (null = segment laissé droit), pour un polyligne de dimension
+      QUELCONQUE (2D h/v du tracé SVG · 3D x/y/z de l'échantillonnage) — LE calcul de tangentes vit ici,
+      UNE seule fois, pour les deux moteurs (auparavant dupliqué dans DcScene3D.cablePath) :
+      • amorce ⟂ (`stubAt`) : tangente IMPOSÉE le long du segment droit adjacent (continuité G1) ;
+      • point intérieur : Catmull-Rom C1 = (P[i+1] − P[i−1])·k. */
+  static controls(P: number[][], straight: Set<number> | undefined, k: number, stubAt?: Set<number>): Array<{ c1: number[]; c2: number[] } | null> {
+    const n = P.length, hk = k * 2.5;
+    const sub = (a: number[], b: number[]) => a.map((v, d) => v - b[d]);
+    const len = (v: number[]) => Math.hypot(...v);
+    const unit = (a: number[], b: number[]) => { const d = sub(b, a), L = len(d) || 1; return d.map((v) => v / L); };
+    const isStraight = (i: number) => !!(straight && straight.has(i));
+    // direction d'amorce imposée à i = axe de SON segment droit adjacent (G1 avec le segment droit)
+    const stubDir = (i: number): number[] | null => {
+      if (!stubAt || !stubAt.has(i)) return null;
+      if (isStraight(i)) return unit(P[i], P[i + 1]);              // segment droit APRÈS i
+      if (i > 0 && isStraight(i - 1)) return unit(P[i - 1], P[i]); // segment droit AVANT i
+      return null;
+    };
+    const tan = (i: number, segLen: number): number[] => {
+      const d = stubDir(i);
+      if (d) return d.map((v) => v * segLen * hk);                 // amorce : alignée sur l'axe
+      const p0 = P[Math.max(0, i - 1)], p1 = P[Math.min(n - 1, i + 1)];
+      return sub(p1, p0).map((v) => v * k);                        // intérieur : Catmull-Rom
+    };
+    const out: Array<{ c1: number[]; c2: number[] } | null> = [];
+    for (let i = 0; i < n - 1; i++) {
+      if (isStraight(i)) { out.push(null); continue; }
+      const segLen = len(sub(P[i + 1], P[i]));
+      const t1 = tan(i, segLen), t2 = tan(i + 1, segLen);
+      out.push({ c1: P[i].map((v, d) => v + t1[d]), c2: P[i + 1].map((v, d) => v - t2[d]) });
+    }
+    return out;
+  }
+
   /** Échantillonne le spline en polyligne dense. `P` = points de contrôle ; `straight` = index des segments
       laissés droits ; `k` = tension ; `stubAt` = index des points d'amorce (tangente imposée). */
   static sample(P: SplinePt[], straight: Set<number>, k: number, stubAt?: Set<number>): SplinePt[] {
     const copy = (p: SplinePt): SplinePt => ({ x: p.x, y: p.y, z: p.z });
     if (P.length < 2) return P.map(copy);
-    const n = P.length, hk = k * 2.5;
-    const dist = (a: SplinePt, b: SplinePt) => Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
-    const unit = (a: SplinePt, b: SplinePt): SplinePt => { const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, L = Math.hypot(dx, dy, dz) || 1; return { x: dx / L, y: dy / L, z: dz / L }; };
-    // direction d'amorce imposée à i = axe de SON segment droit adjacent (G1 avec le segment droit)
-    const stubDir = (i: number): SplinePt | null => {
-      if (!stubAt || !stubAt.has(i)) return null;
-      if (straight.has(i)) return unit(P[i], P[i + 1]);              // segment droit APRÈS i
-      if (i > 0 && straight.has(i - 1)) return unit(P[i - 1], P[i]); // segment droit AVANT i
-      return null;
-    };
-    const tan = (i: number, segLen: number): SplinePt => {
-      const d = stubDir(i);
-      if (d) return { x: d.x * segLen * hk, y: d.y * segLen * hk, z: d.z * segLen * hk };   // amorce : alignée sur l'axe
-      const p0 = P[Math.max(0, i - 1)], p1 = P[Math.min(n - 1, i + 1)];
-      return { x: (p1.x - p0.x) * k, y: (p1.y - p0.y) * k, z: (p1.z - p0.z) * k };            // intérieur : Catmull-Rom
-    };
+    const ctrls = CableSpline.controls(P.map((p) => [p.x, p.y, p.z]), straight, k, stubAt);
     const out: SplinePt[] = [copy(P[0])];
-    for (let i = 0; i < n - 1; i++) {
-      const p1 = P[i], p2 = P[i + 1];
-      if (straight.has(i)) { out.push(copy(p2)); continue; }   // chorde droite (corps de conduit / amorce ⟂)
-      const segLen = dist(p1, p2);
-      const t1 = tan(i, segLen), t2 = tan(i + 1, segLen);
-      const c1: SplinePt = { x: p1.x + t1.x, y: p1.y + t1.y, z: p1.z + t1.z };
-      const c2: SplinePt = { x: p2.x - t2.x, y: p2.y - t2.y, z: p2.z - t2.z };
+    for (let i = 0; i < P.length - 1; i++) {
+      const p1 = P[i], p2 = P[i + 1], c = ctrls[i];
+      if (!c) { out.push(copy(p2)); continue; }   // chorde droite (corps de conduit / amorce ⟂)
+      const segLen = Math.hypot(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
+      const c1: SplinePt = { x: c.c1[0], y: c.c1[1], z: c.c1[2] };
+      const c2: SplinePt = { x: c.c2[0], y: c.c2[1], z: c.c2[2] };
       // densité adaptée à la longueur de la corde (~1 point / 5 mm), pour des courbes franchement lisses.
       const perSeg = Math.max(16, Math.min(260, Math.round(segLen / 5)));
       for (let s = 1; s <= perSeg; s++) {

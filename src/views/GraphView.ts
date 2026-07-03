@@ -626,95 +626,19 @@ export class GraphView {
     if (!placed.length) { this._forceLayout(); return; }
     this._placeMissingNearCentroid(missing, placed, false);
   }
+  /* Disposition force-directed : géométrie PURE extraite dans GraphGeometry (forceLayout /
+     simulateComponent / placeMissingNearCentroid) — la vue ne garde que l'adaptation (dimensions
+     du stage, marquage « non placé »). */
   private _placeMissingNearCentroid(missing: GNode[], placed: GNode[], markUnplaced: boolean): void {
     if (!missing.length) return;
     const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
-    let cx = W / 2, cy = H / 2;
-    if (placed.length) { cx = placed.reduce((s, n) => s + n.x, 0) / placed.length; cy = placed.reduce((s, n) => s + n.y, 0) / placed.length; }
-    const colW = 180, rowH = 64, cols = Math.max(1, Math.ceil(Math.sqrt(missing.length)));
-    missing.forEach((n, i) => {
-      const r = Math.floor(i / cols), c = i % cols;
-      n.x = cx + (c - (cols - 1) / 2) * colW; n.y = cy + 120 + r * rowH; n.vx = 0; n.vy = 0;
-      if (markUnplaced) this.unplaced.add(n.id);
-    });
+    GraphGeometry.placeMissingNearCentroid(missing, placed, W / 2, H / 2);
+    if (markUnplaced) missing.forEach((n) => this.unplaced.add(n.id));
   }
 
   private _forceLayout(): void {
-    const N = this.nodes.length;
-    if (!N) return;
     const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
-    const byId: Record<string, GNode> = {}; this.nodes.forEach((n) => { byId[n.id] = n; });
-
-    // composants connexes (sur les nœuds visibles)
-    const adj: Record<string, string[]> = {}; this.nodes.forEach((n) => { adj[n.id] = []; });
-    this.edges.forEach((e) => { if (e.a !== e.b && byId[e.a] && byId[e.b]) { adj[e.a].push(e.b); adj[e.b].push(e.a); } });
-    const seen = new Set<string>(); const comps: GNode[][] = [];
-    this.nodes.forEach((n) => {
-      if (seen.has(n.id)) return;
-      const stack = [n.id], comp: GNode[] = []; seen.add(n.id);
-      while (stack.length) { const id = stack.pop()!; comp.push(byId[id]); adj[id].forEach((m) => { if (!seen.has(m)) { seen.add(m); stack.push(m); } }); }
-      comps.push(comp);
-    });
-    comps.sort((a, b) => b.length - a.length);
-
-    const k = Math.max(80, Math.sqrt((W * H) / N) * 0.8);
-    comps.forEach((comp) => this._simulateComponent(comp, k));
-
-    const bboxOf = (comp: GNode[]) => {
-      const b = GraphGeometry.nodesBBox(comp, () => 24);
-      return { mnx: b.minX, mny: b.minY, mxx: b.maxX, mxy: b.maxY, w: b.maxX - b.minX, h: b.maxY - b.minY };
-    };
-    const moveComp = (comp: GNode[], dx: number, dy: number) => comp.forEach((n) => { n.x += dx; n.y += dy; });
-
-    // packing : composant principal en haut, satellites rangés dessous
-    const gap = 64;
-    const main = comps[0];
-    let bb = bboxOf(main);
-    moveComp(main, -bb.mnx, -bb.mny);
-    const mainW = bb.w;
-    let cursorY = bb.h + gap;
-    const maxRowW = Math.max(mainW, 700);
-    let cx = 0, rowH = 0;
-    for (let i = 1; i < comps.length; i++) {
-      const c = comps[i];
-      const cb = bboxOf(c);
-      if (cx > 0 && cx + cb.w > maxRowW) { cx = 0; cursorY += rowH + gap; rowH = 0; }
-      moveComp(c, -cb.mnx + cx, -cb.mny + cursorY);
-      cx += cb.w + gap;
-      rowH = Math.max(rowH, cb.h);
-    }
-  }
-
-  /* Simulation force-directed d'UN composant, centrée autour de l'origine. */
-  private _simulateComponent(comp: GNode[], k: number): void {
-    const M = comp.length;
-    if (M === 1) { comp[0].x = 0; comp[0].y = 0; comp[0].vx = 0; comp[0].vy = 0; return; }
-    const ids = new Set(comp.map((n) => n.id));
-    const cedges = this.edges.filter((e) => e.a !== e.b && ids.has(e.a) && ids.has(e.b));
-    const idx: Record<string, number> = {}; comp.forEach((n, i) => { idx[n.id] = i; });
-    const R = 50 + M * 6;
-    comp.forEach((n, i) => { const a = (i / M) * Math.PI * 2; n.x = R * Math.cos(a); n.y = R * Math.sin(a); n.vx = 0; n.vy = 0; });
-    let temp = R * 0.9; const iters = 300;
-    for (let it = 0; it < iters; it++) {
-      for (let i = 0; i < M; i++) {
-        let fx = 0, fy = 0; const a = comp[i];
-        for (let j = 0; j < M; j++) {
-          if (i === j) continue; const b = comp[j];
-          const dx = a.x - b.x, dy = a.y - b.y; const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-          const rep = (k * k) / d; fx += (dx / d) * rep; fy += (dy / d) * rep;
-        }
-        fx += (0 - a.x) * 0.012; fy += (0 - a.y) * 0.012;
-        a.vx = fx; a.vy = fy;
-      }
-      cedges.forEach((e) => {
-        const a = comp[idx[e.a]], b = comp[idx[e.b]]; if (!a || !b || a === b) return;
-        const dx = a.x - b.x, dy = a.y - b.y; const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        const att = (d * d) / k; const ux = dx / d, uy = dy / d;
-        a.vx -= ux * att; a.vy -= uy * att; b.vx += ux * att; b.vy += uy * att;
-      });
-      for (let i = 0; i < M; i++) { const a = comp[i]; const dl = Math.sqrt(a.vx * a.vx + a.vy * a.vy) || 0.01; a.x += (a.vx / dl) * Math.min(dl, temp); a.y += (a.vy / dl) * Math.min(dl, temp); }
-      temp *= 0.985;
-    }
+    GraphGeometry.forceLayout(this.nodes, this.edges, W, H);
   }
 
   /* ---- rendu SVG ---- */
