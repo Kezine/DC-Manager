@@ -1801,6 +1801,37 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(RackDoorGeometry.swingSector(w, d, false, { thickness_mm: 2, hinge: "left" }).hx, -w / 2 + 6, "épaisseur plancher 6 mm");
   }
 
+  console.log("\n• CableRouteAnalyzer : grammaire de route EN ISOLATION (hôte RouteStoreView simulé)");
+  {
+    // L'automate est déjà couvert de bout en bout via le Store (qui délègue) ; ici on prouve la TESTABILITÉ
+    // EN ISOLATION apportée par l'extraction : un hôte minimal simulé suffit, sans Store ni adapter.
+    const { CableRouteAnalyzer } = D("store/CableRouteAnalyzer.js");
+    const data = {
+      waypoints: {
+        w1: { id: "w1", name: "WP1", kind: "point", wp_type: "datacenter", datacenter_id: "dc1", dc_x: 1, dc_y: 1 },
+        x1: { id: "x1", name: "X1", kind: "point", wp_type: "exit", datacenter_id: "dc1", dc_x: 2, dc_y: 2 },
+        x2: { id: "x2", name: "X2", kind: "point", wp_type: "exit", datacenter_id: "dc2", dc_x: 3, dc_y: 3 },
+      },
+      datacenters: { dc1: { id: "dc1", name: "Salle A" }, dc2: { id: "dc2", name: "Salle B" } },
+    };
+    const view = {
+      get: (c, id) => (data[c] && data[c][id]) || null,
+      waypointIsPlaced: (wp) => wp.dc_x != null,
+      equipmentDcId: () => null,
+      effectiveWaypointIds: (cable) => cable.waypoint_ids || [],
+      portsOf: () => [], cableOnPort: () => null, cablesOfEquipment: () => [], equipmentsOfRack: () => [],
+      cableIsComplete: () => false,
+    };
+    const ra = new CableRouteAnalyzer(view);
+    const ok = ra.cableRoute({ waypoint_ids: ["w1", "x1", "x2"] });
+    ck(ok.valid && ok.hasExits && ok.startDc === "dc1" && ok.endDc === "dc2", "salle A → exit A → exit B : valide, bouts déduits");
+    ck(ra.cableRoute({ waypoint_ids: ["x1"] }).errors.some((e) => e.code === "exit_unpaired"), "exit seul → exit_unpaired");
+    ck(ra.cableRoute({ waypoint_ids: ["x1", "w1"] }).errors.some((e) => e.code === "room_wp_outside"), "waypoint de salle dans le tronçon hors salle → room_wp_outside");
+    ck.eq(ra.routeHasRoomBreak({ waypoint_ids: ["x1", "w1"] }), true, "routeHasRoomBreak (codes stables) via l'hôte simulé");
+    ck.eq(ra.dcName("dc2"), "Salle B", "dcName lu via l'hôte injecté");
+    ck.eq(ra.cableRouteSummary(ok), "◆ Salle A → ⏏ Salle A → ⏏ Salle B", "résumé lisible de la route");
+  }
+
   /* ================= SERVEUR : règles pures de la couche HTTP ================= */
   console.log("\n• Serveur : ApiRules — ciblage du verrou optimiste (writeTargets)");
   {
