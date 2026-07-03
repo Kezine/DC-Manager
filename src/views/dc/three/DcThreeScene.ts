@@ -511,16 +511,15 @@ export class DcThreeScene extends DcThreeCamera {
       const sides = (r.sides === "dual") ? ["front", "rear"] : ["front"];
       sides.forEach((side) => {
         const yPlane = side === "rear" ? rpY - 2 : fpY + 2;
-        const lblU = (uu: number) => this.faceLabel(group, "U" + uu, 0, yPlane + (side === "front" ? -4 : 4), baseZ + (uu - 0.5) * U_MM, Math.min(2 * bodyHW * 0.96, 120), Math.min(U_MM - 6, 28), side === "front", { layer: "slotlabel", eqSide: side });
         let u = 1;
         while (u <= uMax) {
           if (occMap.has(u + ":" + side)) { u++; continue; }
           let uHi = u; while (uHi + 1 <= uMax && !occMap.has((uHi + 1) + ":" + side)) uHi++;   // bande contiguë [u..uHi]
           const nU = uHi - u + 1, zc = baseZ + (u - 1 + nU / 2) * U_MM;
+          // quadrillage par U (séparateurs dans la géométrie de cadre) + numéros d'U en UNE texture par bande.
           this.slotPlane(group, 2 * bodyHW * 0.96, nU * U_MM - 3, 0, yPlane, zc, side === "front",
-            { type: "slotU", rackId: r.id, u, side, height: 1, uLo: u, uHi, rowStep: 1 }, { layer: "slot", eqSide: side });
-          // NUMÉROS D'U aux EXTRÉMITÉS de la bande (pas un par U : sur une baie vide ce serait 42 étiquettes/face).
-          lblU(u); if (uHi !== u) lblU(uHi);
+            { type: "slotU", rackId: r.id, u, side, height: 1, uLo: u, uHi, rowStep: 1 }, { layer: "slot", eqSide: side }, { pitch: U_MM, count: nU });
+          this.bandULabels(group, u, uHi, yPlane, baseZ, side, 2 * bodyHW * 0.96);
           u = uHi + 1;
         }
       });
@@ -553,7 +552,8 @@ export class DcThreeScene extends DcThreeCamera {
         if (x1 <= x0) return;
         const yp = bLo.yPlane + (front ? SLOT_OFF : -SLOT_OFF);   // vers l'EXTÉRIEUR (décalage av/ar)
         this.slotPlane(group, x1 - x0, z1 - z0, (x0 + x1) / 2, yp, (z0 + z1) / 2, front,
-          { type: "slotSide", rackId: r.id, face: s.face, lr: s.lr, col: s.col, uTop: run.uLo, uLo: run.uLo, uHi: run.uHi, rowStep: SIDE_U_STEP, zLo: z0, zHi: z1 }, { layer: "slot", eqSide: front ? "front" : "rear" });
+          { type: "slotSide", rackId: r.id, face: s.face, lr: s.lr, col: s.col, uTop: run.uLo, uLo: run.uLo, uHi: run.uHi, rowStep: SIDE_U_STEP, zLo: z0, zHi: z1 }, { layer: "slot", eqSide: front ? "front" : "rear" },
+          { pitch: SIDE_U_STEP * U_MM, count: (run.uHi - run.uLo) / SIDE_U_STEP + 1 });
       });
       // emplacements MURAUX libres (parois ±X) → monter équipement en paroi (décalés vers l'INTÉRIEUR de la baie).
       mergeRuns(this.scene3d.wallFreeSlots(r), (s) => s.wall + "|" + s.margin + "|" + s.col).forEach((run) => {
@@ -563,7 +563,8 @@ export class DcThreeScene extends DcThreeCamera {
         const z0 = Math.min(bLo.z0, bLo.z1, bHi.z0, bHi.z1), z1 = Math.max(bLo.z0, bLo.z1, bHi.z0, bHi.z1);
         const xp = bLo.xPlane - Math.sign(bLo.xPlane || 1) * SLOT_OFF;   // vers le centre (intérieur)
         this.slotQuad(group, [[xp, bLo.y0, z0], [xp, bLo.y1, z0], [xp, bLo.y1, z1], [xp, bLo.y0, z1]],
-          { type: "slotWall", rackId: r.id, wall: s.wall, margin: s.margin, col: s.col, uTop: run.uLo, uLo: run.uLo, uHi: run.uHi, rowStep: SIDE_U_STEP, zLo: z0, zHi: z1 }, { layer: "slot", eqSide: front ? "front" : "rear" });
+          { type: "slotWall", rackId: r.id, wall: s.wall, margin: s.margin, col: s.col, uTop: run.uLo, uLo: run.uLo, uHi: run.uHi, rowStep: SIDE_U_STEP, zLo: z0, zHi: z1 }, { layer: "slot", eqSide: front ? "front" : "rear" },
+          { pitch: SIDE_U_STEP * U_MM, count: (run.uHi - run.uLo) / SIDE_U_STEP + 1 });
       });
       // TROUS DE CAPOT libres (toit + sol) → poser un pin. Toujours construits, couche "slot" (pilotée par le seul
       // toggle « emplacements libres », indépendamment de l'affichage des capots).
@@ -589,31 +590,84 @@ export class DcThreeScene extends DcThreeCamera {
 
   /** Plan plat (emplacement libre) au plan de montage, orienté ±Y : remplissage translucide + CADRE accent
       (visible au repos) ; surligné (emissive) au survol. */
-  protected slotPlane(group: THREE.Group, w: number, h: number, x: number, y: number, z: number, front: boolean, pick: any, extra?: any): void {
+  protected slotPlane(group: THREE.Group, w: number, h: number, x: number, y: number, z: number, front: boolean, pick: any, extra?: any, rows?: { pitch: number; count: number }): void {
     const mat = new THREE.MeshStandardMaterial({ color: this.theme.front, transparent: true, opacity: 0.16, emissive: 0x16314e, side: THREE.DoubleSide, depthWrite: false });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
     mesh.position.set(x, y, z);
     mesh.rotation.x = front ? Math.PI / 2 : -Math.PI / 2;
     mesh.userData = Object.assign({ pick }, extra);   // cadre = enfant (suit la visibilité du mesh)
-    // cadre (rectangle fermé) — délimite clairement la case, hérite de la pose du plan
-    const hw = w / 2, hh = h / 2;
+    // cadre (bordure) + SÉPARATEURS de rangées en UNE seule géométrie de lignes : la bande fusionnée garde le
+    // quadrillage visuel « une case par U/rangée » sans recréer un objet par case (1 draw call de lignes/bande).
+    const hw = w / 2, hh = h / 2, pts: number[] = [];
+    const seg = (x1: number, y1: number, x2: number, y2: number) => pts.push(x1, y1, 0, x2, y2, 0);
+    seg(-hw, -hh, hw, -hh); seg(hw, -hh, hw, hh); seg(hw, hh, -hw, hh); seg(-hw, hh, -hw, -hh);
+    if (rows && rows.count > 1) {
+      for (let k = 1; k < rows.count; k++) {
+        const yk = -hh + k * rows.pitch - 1.5;   // −1.5 : le plan est rogné de 3 mm (1,5 par bout) vs n×pas
+        if (yk > -hh && yk < hh) seg(-hw, yk, hw, yk);
+      }
+    }
     const bg = new THREE.BufferGeometry();
-    bg.setAttribute("position", new THREE.Float32BufferAttribute([-hw, -hh, 0, hw, -hh, 0, hw, hh, 0, -hw, hh, 0], 3));
-    mesh.add(new THREE.LineLoop(bg, new THREE.LineBasicMaterial({ color: this.theme.front, transparent: true, opacity: 0.6 })));
+    bg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    mesh.add(new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: this.theme.front, transparent: true, opacity: 0.6 })));
     group.add(mesh);
   }
 
   /** Emplacement libre QUELCONQUE défini par 4 coins (coords locales) : remplissage translucide + cadre accent,
-      surligné au survol. Pour les faces que `slotPlane` ne couvre pas (mural ±X, capot ±Z horizontal). */
-  protected slotQuad(group: THREE.Group, corners: number[][], pick: any, extra?: any): void {
+      surligné au survol. Pour les faces que `slotPlane` ne couvre pas (mural ±X, capot ±Z horizontal).
+      `rows` : séparateurs horizontaux (axe z) aux multiples de `pitch` depuis z0 — quadrillage des couloirs muraux. */
+  protected slotQuad(group: THREE.Group, corners: number[][], pick: any, extra?: any, rows?: { pitch: number; count: number }): void {
     const [a, b, c, d] = corners;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute([...a, ...b, ...c, ...a, ...c, ...d], 3));
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: this.theme.front, transparent: true, opacity: 0.16, emissive: 0x16314e, side: THREE.DoubleSide, depthWrite: false }));
     mesh.userData = Object.assign({ pick }, extra); group.add(mesh);
-    const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.Float32BufferAttribute([...a, ...b, ...c, ...d], 3));
-    mesh.add(new THREE.LineLoop(bg, new THREE.LineBasicMaterial({ color: this.theme.front, transparent: true, opacity: 0.6 })));
+    const pts: number[] = [...a, ...b, ...b, ...c, ...c, ...d, ...d, ...a];   // bordure (segments)
+    if (rows && rows.count > 1) {
+      // séparateurs entre rangées : le quad mural est rectangulaire dans le plan x=cst, z de a/b (bas) à c/d (haut)
+      const zLo = Math.min(a[2], c[2]);
+      for (let k = 1; k < rows.count; k++) { const zk = zLo + k * rows.pitch; pts.push(a[0], a[1], zk, b[0], b[1], zk); }
+    }
+    const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    mesh.add(new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: this.theme.front, transparent: true, opacity: 0.6 })));
+  }
+
+  /** NUMÉROS D'U d'une bande d'emplacements libres, en UNE SEULE texture / UN SEUL mesh (une étiquette par U
+      recréait le problème de draw calls que la fusion en bandes vient d'éliminer — 42 étiquettes/face sur une
+      baie vide). Canvas : une ligne « U n » par U, haut du canvas = U le plus HAUT (l'orientation front/rear de
+      faceLabel conserve le haut vers +Z). Texture au cache LRU (texCache). */
+  protected bandULabels(group: THREE.Group, uLo: number, uHi: number, yPlane: number, baseZ: number, side: string, widthMm: number): void {
+    if (typeof document === "undefined") return;
+    const nU = uHi - uLo + 1, front = side === "front";
+    const key = "Uband|" + uLo + "-" + uHi;
+    this.texCacheTicks.set(key, ++this.texCacheTick);
+    let tex = this.texCache.get(key) || null;
+    if (!tex) {
+      const rowPx = 40, cw = 128, ch = Math.min(4096, nU * rowPx);
+      const cv = document.createElement("canvas"); cv.width = cw; cv.height = ch;
+      const g = cv.getContext("2d"); if (!g) return;
+      g.textAlign = "center"; g.textBaseline = "middle"; g.font = "600 22px system-ui, sans-serif";
+      const rh = ch / nU;
+      for (let i = 0; i < nU; i++) {
+        const u = uHi - i, cy = (i + 0.5) * rh;   // haut du canvas = U le plus haut
+        g.fillStyle = "rgba(12,16,22,0.55)";
+        const pw = 74, phh = Math.min(15, rh / 2 - 2);
+        g.beginPath(); (g as any).roundRect ? (g as any).roundRect(cw / 2 - pw / 2, cy - phh, pw, 2 * phh, 8) : g.rect(cw / 2 - pw / 2, cy - phh, pw, 2 * phh); g.fill();
+        g.fillStyle = "#e8eef7"; g.fillText("U" + u, cw / 2, cy);
+      }
+      tex = new THREE.CanvasTexture(cv); tex.anisotropy = 4; tex.needsUpdate = true;
+      this.texCache.set(key, tex);
+      this.pruneLabelTextureCache();
+    }
+    const w = Math.min(widthMm, 120), h = nU * U_MM - 6;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+    mesh.position.set(0, yPlane + (front ? -4 : 4), baseZ + (uLo - 1 + nU / 2) * U_MM);
+    // même pose que faceLabel : avant = normale −Y ; arrière = 180° autour de (0,1,1) → texte droit, haut vers +Z.
+    if (front) mesh.rotation.x = Math.PI / 2;
+    else mesh.setRotationFromAxisAngle(new THREE.Vector3(0, 1, 1).normalize(), Math.PI);
+    mesh.userData = { layer: "slotlabel", eqSide: side };
+    group.add(mesh);
   }
 
   /** Plaque de capot (toit/sol) horizontale RÉELLEMENT PERCÉE : construite par CELLULES (grille `nx×ny` au pas
