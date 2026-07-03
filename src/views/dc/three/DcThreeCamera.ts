@@ -716,39 +716,73 @@ export abstract class DcThreeCamera extends DcThreeBase {
   }
 
   /** Survol : met en évidence l'occupant-équipement sous le curseur (emissive) + curseur pointer. */
-  /** Mesh à mettre en évidence au survol sous (clientX,clientY) — cible PRÉCISE (waypoint · port · slots) d'abord,
-      puis câble (proximité latérale), puis occupant (câble au-dessus prime), puis baie opaque. Réutilisé par le
-      survol souris ET l'appui long tactile. */
-  protected hoverTargetAt(clientX: number, clientY: number): THREE.Object3D | null {
+  /** Cible à mettre en évidence au survol sous (clientX,clientY) — cible PRÉCISE (waypoint · port · slots) d'abord,
+      puis câble (proximité latérale), puis occupant (câble au-dessus prime), puis baie opaque. Renvoie AUSSI
+      l'intersection (le point d'impact identifie la RANGÉE dans une bande d'emplacements fusionnée). */
+  protected hoverHitAt(clientX: number, clientY: number): { target: THREE.Object3D | null; hit: THREE.Intersection | null } {
     const hits = this.rayHits(clientX, clientY);
-    let cableObj: THREE.Object3D | null = null, bestD = Infinity;
+    let cableObj: THREE.Object3D | null = null, cableHit: THREE.Intersection | null = null, bestD = Infinity;
     for (const h of hits) {
       const pp: any = h.object.userData && h.object.userData.pick;
-      if (pp && pp.type === "cable" && h.point) { const dd = this.raycaster.ray.distanceToPoint(h.point); if (dd < bestD) { bestD = dd; cableObj = h.object; } }
+      if (pp && pp.type === "cable" && h.point) { const dd = this.raycaster.ray.distanceToPoint(h.point); if (dd < bestD) { bestD = dd; cableObj = h.object; cableHit = h; } }
     }
     const cableTop = this.opts.cablesOnTop && cableObj;
     for (const h of hits) {
       const p: any = h.object.userData && h.object.userData.pick;
       if (!p) continue;
-      if (p.type === "wp" || p.type === "port" || p.type === "slotU" || p.type === "slotSide" || p.type === "slotWall" || p.type === "slotCap") return h.object;
-      if (p.type === "cable") return cableObj;
-      if (p.type === "occ" && (p.kind === "eq" || p.kind === "item")) return cableTop ? cableObj : h.object;   // équipement / pseudo-élément
-      if (p.type === "rack" && this.frontFacing(h) && this.rackSolid(h)) return cableTop ? cableObj : h.object;   // capot/paroi opaque = baie
+      if (p.type === "wp" || p.type === "port" || p.type === "slotU" || p.type === "slotSide" || p.type === "slotWall" || p.type === "slotCap") return { target: h.object, hit: h };
+      if (p.type === "cable") return { target: cableObj, hit: cableHit };
+      if (p.type === "occ" && (p.kind === "eq" || p.kind === "item")) return cableTop ? { target: cableObj, hit: cableHit } : { target: h.object, hit: h };   // équipement / pseudo-élément
+      if (p.type === "rack" && this.frontFacing(h) && this.rackSolid(h)) return cableTop ? { target: cableObj, hit: cableHit } : { target: h.object, hit: h };   // capot/paroi opaque = baie
     }
-    return null;
+    return { target: null, hit: null };
   }
+  /** Variante « objet seul » (appui long tactile). */
+  protected hoverTargetAt(clientX: number, clientY: number): THREE.Object3D | null { return this.hoverHitAt(clientX, clientY).target; }
 
   /** Applique le survol (highlight + tooltip + curseur) sur la cible sous (clientX,clientY). Renvoie la cible. */
   protected hoverApply(clientX: number, clientY: number): THREE.Object3D | null {
-    const target = this.hoverTargetAt(clientX, clientY);
+    const { target, hit } = this.hoverHitAt(clientX, clientY);
     if (this.tipCb) this.tipCb(target ? (target.userData && target.userData.pick) : null, clientX, clientY);
-    if (target === this.hovered) return target;
+    // BANDE d'emplacements fusionnée : teinter son matériau allumerait TOUTE la bande — on surligne la seule
+    // RANGÉE survolée par un plan dédié (cf. applySlotSel), suivi d'un rAF à l'autre (même cible, autre rangée).
+    const p: any = target && target.userData && target.userData.pick;
+    const banded = !!(p && (p.type === "slotU" || p.type === "slotSide" || p.type === "slotWall") && p.uLo != null && p.uHi !== p.uLo);
+    const row = (banded && hit) ? this.slotRowFromHit(hit, p) : null;
+    if (target === this.hovered && row === this._slotRowHoverRow) return target;
     this.clearHover();
     this.hovered = target;
-    this.applyHover(target);
+    if (banded && row != null) this.showSlotRowHover(target as THREE.Mesh, p, row);
+    else this.applyHover(target);
     const dom = this.renderer?.domElement; if (dom) dom.style.cursor = target ? "pointer" : "default";
     this.request();
     return target;
+  }
+
+  /** Plan de surbrillance de la RANGÉE survolée dans une bande d'emplacements (enfant de la bande : hérite de sa
+      pose et de sa visibilité). Recréé à chaque changement de rangée (rAF-throttlé) et détruit par clearHover. */
+  protected showSlotRowHover(band: THREE.Mesh, p: any, row: number): void {
+    const step = p.rowStep || 1;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ color: 0x4a90e2, transparent: true, opacity: 0.35, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+    mesh.renderOrder = 6;
+    if (p.type === "slotWall") {
+      // quad mural : géométrie en coords LOCALES de baie (mesh à l'origine) → plan ⟂ X posé dans le même repère.
+      const pos = band.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const xp = pos.getX(0), y0 = pos.getY(0), y1 = pos.getY(1);
+      const pitch = step * U_MM;
+      mesh.rotation.y = Math.PI / 2;   // normale ±X ; l'axe local x devient l'axe z monde (hauteur)
+      mesh.scale.set(pitch - 3, Math.abs(y1 - y0), 1);
+      mesh.position.set(xp - Math.sign(xp || 1) * 0.5, (y0 + y1) / 2, p.zLo + ((row - p.uLo) / step) * pitch + pitch / 2);
+    } else {
+      // slotPlane (U / latéral) : plan centré sur la bande, axe local y = hauteur (±z monde selon la face).
+      const front = (p.side || p.face) !== "rear";
+      const geoW = ((band.geometry as any).parameters?.width) || 1;
+      mesh.scale.set(geoW, step * U_MM - 3, 1);
+      mesh.position.set(0, (front ? 1 : -1) * (row - (p.uLo + p.uHi) / 2) * U_MM, 0.5);
+    }
+    band.add(mesh);
+    this._slotRowHover = mesh; this._slotRowHoverRow = row;
   }
 
   protected onHover = (e: MouseEvent): void => {
@@ -816,7 +850,15 @@ export abstract class DcThreeCamera extends DcThreeBase {
     this._hoverObjs.forEach((o: THREE.Object3D) => this.setHover(o, true));
   }
 
-  protected clearHover(): void { this._hoverObjs.forEach((o: THREE.Object3D) => this.setHover(o, false)); this._hoverObjs = []; }
+  protected clearHover(): void {
+    this._hoverObjs.forEach((o: THREE.Object3D) => this.setHover(o, false)); this._hoverObjs = [];
+    if (this._slotRowHover) {   // plan de rangée survolée (bandes d'emplacements) : détaché ET libéré
+      this._slotRowHover.parent?.remove(this._slotRowHover);
+      this._slotRowHover.geometry.dispose(); (this._slotRowHover.material as THREE.Material).dispose();
+      this._slotRowHover = null;
+    }
+    this._slotRowHoverRow = null;
+  }
 
   protected setHover(mesh: THREE.Object3D | null, on: boolean): void {
     if (!mesh) return;

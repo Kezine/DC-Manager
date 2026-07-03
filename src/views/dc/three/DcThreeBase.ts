@@ -144,6 +144,9 @@ export abstract class DcThreeBase {
   // `overlay` : plan de SURBRILLANCE de la plage sélectionnée (les emplacements sont fusionnés en BANDES —
   // un mesh couvre toute une bande contiguë ; on ne peut plus surligner « par U » via le matériau du mesh).
   protected slotSel: { rackId: string; side: string; anchor: number; lo: number; hi: number; slots: Map<number, THREE.Object3D>; overlay: THREE.Mesh | null } | null = null;
+  // Plan de surbrillance de la RANGÉE SURVOLÉE d'une bande d'emplacements (même raison que `slotSel.overlay`).
+  protected _slotRowHover: THREE.Mesh | null = null;
+  protected _slotRowHoverRow: number | null = null;
   // picking
   protected raycaster = new THREE.Raycaster();
   protected ndc = new THREE.Vector2();
