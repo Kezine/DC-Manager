@@ -141,7 +141,9 @@ export abstract class DcThreeBase {
   // glisser (avec détection clic-vs-glisser pour le picking) — `slotsel` = sélection multiple d'emplacements U libres
   protected drag: { mode: "orbit" | "pan" | "slotsel"; x: number; y: number; downX: number; downY: number; btn: number; moved: boolean } | null = null;
   // sélection multiple d'emplacements U libres (glisser vertical) : plage CONTIGUË [lo,hi] de la même baie+face.
-  protected slotSel: { rackId: string; side: string; anchor: number; lo: number; hi: number; slots: Map<number, THREE.Object3D>; meshes: THREE.Object3D[] } | null = null;
+  // `overlay` : plan de SURBRILLANCE de la plage sélectionnée (les emplacements sont fusionnés en BANDES —
+  // un mesh couvre toute une bande contiguë ; on ne peut plus surligner « par U » via le matériau du mesh).
+  protected slotSel: { rackId: string; side: string; anchor: number; lo: number; hi: number; slots: Map<number, THREE.Object3D>; overlay: THREE.Mesh | null } | null = null;
   // picking
   protected raycaster = new THREE.Raycaster();
   protected ndc = new THREE.Vector2();

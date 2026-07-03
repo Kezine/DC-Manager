@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { CAM_PRESETS } from "../shared";
 import { DcThreeBase } from "./DcThreeBase";
 import { Haptics } from "../../../core/Haptics";
+import { U_MM } from "../../../domain/constants";
 
 export abstract class DcThreeCamera extends DcThreeBase {
   /** Dernière position (clientX, clientY) du geste TACTILE — sert de point de picking au `touchend` (qui ne
@@ -265,7 +266,7 @@ export abstract class DcThreeCamera extends DcThreeBase {
     const slot = (this.toolMode === "none" && button === 0 && !shift) ? this.slotUnder(clientX, clientY) : null;
     if (slot) {
       this.clearHover(); this.hovered = null;   // évite un double setHover(true) sur l'emplacement déjà survolé
-      this.slotSel = { rackId: slot.rackId, side: slot.side, anchor: slot.u, lo: slot.u, hi: slot.u, slots: this.collectFreeSlots(slot.rackId, slot.side), meshes: [] };
+      this.slotSel = { rackId: slot.rackId, side: slot.side, anchor: slot.u, lo: slot.u, hi: slot.u, slots: this.collectFreeSlots(slot.rackId, slot.side), overlay: null };
       this.drag = { mode: "slotsel", x: clientX, y: clientY, downX: clientX, downY: clientY, btn: 0, moved: false };
       this.applySlotSel();
       if (this.tipCb) this.tipCb(null, 0, 0);
@@ -467,12 +468,35 @@ export abstract class DcThreeCamera extends DcThreeBase {
   };
 
   /* ---- sélection multiple d'emplacements U libres (glisser vertical) ---- */
+  /** Rangée PRÉCISE (U bas / uTop) dans une BANDE d'emplacements libres FUSIONNÉE : les emplacements contigus
+      sont UN seul mesh (perf iGPU — cf. DcThreeScene, un mesh par U mettait les petits GPU à genoux) ; la rangée
+      visée est retrouvée depuis la position LOCALE du point d'impact. slotU/slotSide = plan `slotPlane` tourné
+      ±π/2 (axe local y ↔ ±z monde selon la face) ; slotWall = quad en coordonnées locales de baie (z direct,
+      bornes zLo/zHi portées par le descripteur). Bande d'une seule rangée → renvoi direct. */
+  protected slotRowFromHit(h: THREE.Intersection, p: any): number {
+    const base = (p.uLo != null) ? p.uLo : (p.uTop != null ? p.uTop : p.u);
+    if (p.uLo == null || p.uHi == null || p.uHi === p.uLo || !h.point) return base;
+    const step = p.rowStep || 1, nRows = Math.floor((p.uHi - p.uLo) / step) + 1;
+    const mesh = h.object as THREE.Mesh;
+    let f = 0;   // fraction 0 (bas de bande) → 1 (haut)
+    if (p.type === "slotWall") {
+      const z = mesh.worldToLocal(h.point.clone()).z;
+      f = (z - p.zLo) / Math.max(1e-6, p.zHi - p.zLo);
+    } else {
+      const local = mesh.worldToLocal(h.point.clone());
+      const geoH = ((mesh.geometry as any).parameters?.height) || 1;
+      const front = (p.side || p.face) !== "rear";   // slotPlane : Rx(+π/2) → +y local = +z monde ; Rx(−π/2) → −z
+      f = ((front ? local.y : -local.y) + geoH / 2) / geoH;
+    }
+    return p.uLo + step * Math.min(nRows - 1, Math.max(0, Math.floor(f * nRows)));
+  }
+
   /** Emplacement U LIBRE sous le curseur (le plus proche), ou null. */
   protected slotUnder(clientX: number, clientY: number): { rackId: string; side: string; u: number } | null {
     for (const h of this.rayHits(clientX, clientY)) {
       const p: any = h.object.userData && h.object.userData.pick;
       if (!p) continue;
-      if (p.type === "slotU" && p.rackId) return { rackId: p.rackId, side: p.side, u: p.u };
+      if (p.type === "slotU" && p.rackId) return { rackId: p.rackId, side: p.side, u: this.slotRowFromHit(h, p) };
       // Un OCCUPANT (équipement / pseudo-élément) ou une PAROI OPAQUE de baie DEVANT capture le geste → on
       // n'attrape PAS un emplacement libre situé DERRIÈRE (corrige : drag sur un pseudo-équipement → sélection
       // « à travers » des emplacements vides à l'arrière). Le tap/clic sera traité par l'occupant (pick).
@@ -482,10 +506,16 @@ export abstract class DcThreeCamera extends DcThreeBase {
     return null;
   }
 
-  /** Carte u→mesh des emplacements U LIBRES d'une (baie, face) — bornes de contiguïté + surbrillance. */
+  /** Carte u→mesh des emplacements U LIBRES d'une (baie, face) — bornes de contiguïté de la sélection.
+      Les emplacements sont FUSIONNÉS en bandes : chaque U d'une bande pointe vers le MÊME mesh. */
   protected collectFreeSlots(rackId: string, side: string): Map<number, THREE.Object3D> {
     const map = new Map<number, THREE.Object3D>();
-    this.gRacks && this.gRacks.traverse((o: any) => { const p = o.userData && o.userData.pick; if (p && p.type === "slotU" && p.rackId === rackId && p.side === side) map.set(p.u, o); });
+    this.gRacks && this.gRacks.traverse((o: any) => {
+      const p = o.userData && o.userData.pick;
+      if (!p || p.type !== "slotU" || p.rackId !== rackId || p.side !== side) return;
+      const lo = (p.uLo != null) ? p.uLo : p.u, hi = (p.uHi != null) ? p.uHi : lo;
+      for (let u = lo; u <= hi; u++) map.set(u, o);
+    });
     return map;
   }
 
@@ -502,21 +532,39 @@ export abstract class DcThreeCamera extends DcThreeBase {
     if (lo !== sel.lo || hi !== sel.hi) { sel.lo = lo; sel.hi = hi; this.applySlotSel(); }
   }
 
-  /** Surligne les emplacements de la plage [lo,hi] (emissive), en nettoyant la surbrillance précédente. */
+  /** Surligne la plage [lo,hi] via un PLAN DE SÉLECTION dédié, enfant de la bande (hérite de sa pose/visibilité).
+      Les emplacements étant fusionnés en bandes, teinter le matériau du mesh surlignerait TOUTE la bande —
+      le plan dédié couvre exactement la plage, mutée en place pendant le glisser. La sélection reste dans UNE
+      bande par construction (extendSlotSel s'arrête au 1er U manquant = bord de bande). */
   protected applySlotSel(): void {
     const sel = this.slotSel; if (!sel) return;
-    sel.meshes.forEach((m) => this.setHover(m, false));
-    const meshes: THREE.Object3D[] = [];
-    for (let u = sel.lo; u <= sel.hi; u++) { const m = sel.slots.get(u); if (m) { this.setHover(m, true); meshes.push(m); } }
-    sel.meshes = meshes;
+    const band = sel.slots.get(sel.anchor) as THREE.Mesh | undefined; if (!band) return;
+    if (!sel.overlay) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0x4a90e2, transparent: true, opacity: 0.35, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+      sel.overlay = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);   // plan UNITAIRE, redimensionné par scale
+      sel.overlay.renderOrder = 6;
+      band.add(sel.overlay);
+    }
+    const pb: any = band.userData.pick;
+    const front = pb.side !== "rear";
+    const geoW = ((band.geometry as any).parameters?.width) || 1;
+    sel.overlay.scale.set(geoW, Math.max(1, (sel.hi - sel.lo + 1) * U_MM - 3), 1);
+    sel.overlay.position.set(0, (front ? 1 : -1) * (((sel.lo + sel.hi) / 2) - ((pb.uLo + pb.uHi) / 2)) * U_MM, 0.5);
     this.request();
+  }
+
+  /** Détruit le plan de sélection (géométrie + matériau dédiés). */
+  protected disposeSlotSelOverlay(sel: { overlay: THREE.Mesh | null }): void {
+    const ov = sel.overlay; sel.overlay = null; if (!ov) return;
+    ov.parent?.remove(ov);
+    ov.geometry.dispose(); (ov.material as THREE.Material).dispose();
   }
 
   /** Relâche : ouvre l'assignation pour la plage sélectionnée (hauteur = nb d'U) → la liste d'équipements
       est filtrée à cette hauteur par le formulaire (pré-sélection). Le rebuild rétablit la scène au retour. */
   protected commitSlotSel(): void {
     const sel = this.slotSel; this.slotSel = null; if (!sel) return;
-    sel.meshes.forEach((m) => this.setHover(m, false)); this.request();
+    this.disposeSlotSelOverlay(sel); this.request();
     Haptics.confirm();   // validation d'une plage d'emplacements → confirmation tactile
     this.host.assignSlot?.(sel.rackId, sel.lo, sel.side, sel.hi - sel.lo + 1, () => this.rebuild(this.builtDc));
   }
@@ -525,7 +573,7 @@ export abstract class DcThreeCamera extends DcThreeBase {
       arrive : un geste 2 doigts ne doit jamais sélectionner ni laisser une zone de placement surlignée. */
   protected abortSlotSel(): void {
     const sel = this.slotSel; this.slotSel = null; if (!sel) return;
-    sel.meshes.forEach((m) => this.setHover(m, false)); this.request();
+    this.disposeSlotSelOverlay(sel); this.request();
   }
 
   /* ---- picking (raycasting) ---- */
@@ -599,16 +647,17 @@ export abstract class DcThreeCamera extends DcThreeBase {
     for (const h of hits) {
       const p = (h.object.userData && h.object.userData.pick) as { type: string; kind?: string; id: string; cable?: string | null; rackId?: string; u?: number; side?: string; height?: number; face?: string; lr?: string; col?: number; uTop?: number; wall?: string; margin?: string; cx?: number; cy?: number } | undefined;
       if (!p) continue;
+      // Emplacements libres FUSIONNÉS en bandes : le U / uTop précis est recalculé depuis le point d'impact.
       if (p.type === "slotU" && p.rackId) {   // emplacement U libre → dialogue d'assignation (rebuild au retour)
-        this.host.assignSlot?.(p.rackId, p.u!, p.side!, p.height || 1, () => this.rebuild(this.builtDc));
+        this.host.assignSlot?.(p.rackId, this.slotRowFromHit(h, p), p.side!, p.height || 1, () => this.rebuild(this.builtDc));
         return;
       }
       if (p.type === "slotSide" && p.rackId) {   // emplacement LATÉRAL libre → assignation (équipement / pin latéral)
-        this.host.assignSideSlot?.(p.rackId, p.face!, p.lr!, p.col!, p.uTop!, () => this.rebuild(this.builtDc));
+        this.host.assignSideSlot?.(p.rackId, p.face!, p.lr!, p.col!, this.slotRowFromHit(h, p), () => this.rebuild(this.builtDc));
         return;
       }
       if (p.type === "slotWall" && p.rackId) {   // emplacement MURAL libre → équipement en paroi
-        this.host.assignWallSlot?.(p.rackId, p.wall!, p.margin!, p.col!, p.uTop!, () => this.rebuild(this.builtDc));
+        this.host.assignWallSlot?.(p.rackId, p.wall!, p.margin!, p.col!, this.slotRowFromHit(h, p), () => this.rebuild(this.builtDc));
         return;
       }
       if (p.type === "slotCap" && p.rackId) {   // trou de capot libre → poser un pin

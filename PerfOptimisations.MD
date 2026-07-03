@@ -46,6 +46,13 @@
   mode mesure/route, seuls le segment pointillé et la pastille du curseur sont MUTÉS en place — l'overlay complet
   (polylignes, étiquettes, pastilles posées + `collectScreenObjs`) n'est reconstruit qu'aux changements
   STRUCTURELS (point posé, mesure terminée/supprimée, surbrillance).
+- **Emplacements libres FUSIONNÉS en bandes** : un mesh par U / rangée latérale mettait les iGPU à genoux dès
+  quelques baies vides (~3 200 plans transparents + cadres + étiquettes pour 7 baies 42U à latéraux av+ar →
+  ~250 après fusion). Les emplacements CONTIGUS forment UN seul mesh (`slotU` par bande de U, `slotSide`/
+  `slotWall` par couloir de colonne) ; le U / uTop précis est recalculé AU CLIC depuis le point d'impact
+  (`DcThreeCamera.slotRowFromHit`, coordonnées locales du plan). Étiquettes « U n » aux extrémités de bande
+  seulement. La sélection multi-U au glisser surligne la plage via un PLAN dédié enfant de la bande
+  (`applySlotSel`), muté en place.
 
 ## ⏳ À faire (consigné, NON implémenté)
 

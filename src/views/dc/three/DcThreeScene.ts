@@ -502,38 +502,68 @@ export class DcThreeScene extends DcThreeCamera {
 
     // emplacements LIBRES (cibles d'assignation) — TOUJOURS construits → couche "slot" (showPlaceholders) + côté
     // (hideAv/Ar) basculables EN VISIBILITÉ sans reconstruction (le picking ignore les emplacements masqués).
+    // FUSION EN BANDES : les emplacements CONTIGUS (U consécutifs · rangées latérales/murales consécutives)
+    // forment UN SEUL mesh — un par U/rangée mettait les iGPU à genoux (une baie vide ≈ 500 objets transparents ;
+    // 6 baies ≈ 3 000 draw calls). Le U / uTop PRÉCIS est recalculé AU CLIC depuis le point d'impact
+    // (cf. DcThreeCamera.slotRowFromHit) : le descripteur de pick porte la plage (uLo/uHi + rowStep).
     {
       const occMap = this.scene3d.occupants(r.id), uMax = r.u_count || 42, bodyHW = RACK_MOUNT_WIDTH / 2 - RACK_EAR_MM;
       const sides = (r.sides === "dual") ? ["front", "rear"] : ["front"];
       sides.forEach((side) => {
         const yPlane = side === "rear" ? rpY - 2 : fpY + 2;
-        for (let u = 1; u <= uMax; u++) {
-          if (occMap.has(u + ":" + side)) continue;
-          const zc = baseZ + (u - 0.5) * U_MM;
-          this.slotPlane(group, 2 * bodyHW * 0.96, U_MM - 3, 0, yPlane, zc, side === "front", { type: "slotU", rackId: r.id, u, side, height: 1 }, { layer: "slot", eqSide: side });
-          // NUMÉRO D'U au centre de l'emplacement libre (couche "slotlabel", légèrement en avant du plan du slot).
-          this.faceLabel(group, "U" + u, 0, yPlane + (side === "front" ? -4 : 4), zc, Math.min(2 * bodyHW * 0.96, 120), Math.min(U_MM - 6, 28), side === "front", { layer: "slotlabel", eqSide: side });
+        const lblU = (uu: number) => this.faceLabel(group, "U" + uu, 0, yPlane + (side === "front" ? -4 : 4), baseZ + (uu - 0.5) * U_MM, Math.min(2 * bodyHW * 0.96, 120), Math.min(U_MM - 6, 28), side === "front", { layer: "slotlabel", eqSide: side });
+        let u = 1;
+        while (u <= uMax) {
+          if (occMap.has(u + ":" + side)) { u++; continue; }
+          let uHi = u; while (uHi + 1 <= uMax && !occMap.has((uHi + 1) + ":" + side)) uHi++;   // bande contiguë [u..uHi]
+          const nU = uHi - u + 1, zc = baseZ + (u - 1 + nU / 2) * U_MM;
+          this.slotPlane(group, 2 * bodyHW * 0.96, nU * U_MM - 3, 0, yPlane, zc, side === "front",
+            { type: "slotU", rackId: r.id, u, side, height: 1, uLo: u, uHi, rowStep: 1 }, { layer: "slot", eqSide: side });
+          // NUMÉROS D'U aux EXTRÉMITÉS de la bande (pas un par U : sur une baie vide ce serait 42 étiquettes/face).
+          lblU(u); if (uHi !== u) lblU(uHi);
+          u = uHi + 1;
         }
       });
+      // Regroupe des rangées LIBRES en couloirs contigus (clé de colonne + uTop consécutifs au pas SIDE_U_STEP).
+      const mergeRuns = (rows: any[], keyOf: (s: any) => string): Array<{ first: any; uLo: number; uHi: number }> => {
+        const byCol = new Map<string, any[]>();
+        rows.forEach((s) => { const k = keyOf(s); const a = byCol.get(k) || []; a.push(s); byCol.set(k, a); });
+        const runs: Array<{ first: any; uLo: number; uHi: number }> = [];
+        byCol.forEach((list) => {
+          list.sort((a, b) => a.uTop - b.uTop);
+          let i = 0;
+          while (i < list.length) {
+            let j = i; while (j + 1 < list.length && list[j + 1].uTop === list[j].uTop + SIDE_U_STEP) j++;
+            runs.push({ first: list[i], uLo: list[i].uTop, uHi: list[j].uTop });
+            i = j + 1;
+          }
+        });
+        return runs;
+      };
       // emplacements LATÉRAUX libres (marges) → cibles d'assignation (équipement / pin latéral).
       // décalés très légèrement vers l'EXTÉRIEUR (le long de la normale de face) pour ne pas cliper dans la coque.
       const SLOT_OFF = 2;
       const xLim = w / 2 - SLOT_OFF;   // bord latéral max = position des slots de paroi (s'arrête avant le capot/la paroi)
-      this.scene3d.sideFreeSlots(r).forEach((s: any) => {
-        const front = s.face !== "rear";
-        const b = RackGeometry.sideSlotBoxLocal(r, s.face, s.lr, s.col, s.uTop, SIDE_U_STEP);
-        const x0 = Math.max(Math.min(b.x0, b.x1), -xLim), x1 = Math.min(Math.max(b.x0, b.x1), xLim);   // borné au plan de paroi
-        const z0 = Math.min(b.z0, b.z1), z1 = Math.max(b.z0, b.z1);
+      mergeRuns(this.scene3d.sideFreeSlots(r), (s) => s.face + "|" + s.lr + "|" + s.col).forEach((run) => {
+        const s = run.first, front = s.face !== "rear";
+        const bLo = RackGeometry.sideSlotBoxLocal(r, s.face, s.lr, s.col, run.uLo, SIDE_U_STEP);
+        const bHi = RackGeometry.sideSlotBoxLocal(r, s.face, s.lr, s.col, run.uHi, SIDE_U_STEP);
+        const x0 = Math.max(Math.min(bLo.x0, bLo.x1), -xLim), x1 = Math.min(Math.max(bLo.x0, bLo.x1), xLim);   // borné au plan de paroi
+        const z0 = Math.min(bLo.z0, bLo.z1, bHi.z0, bHi.z1), z1 = Math.max(bLo.z0, bLo.z1, bHi.z0, bHi.z1);
         if (x1 <= x0) return;
-        const yp = b.yPlane + (front ? SLOT_OFF : -SLOT_OFF);   // vers l'EXTÉRIEUR (décalage av/ar)
-        this.slotPlane(group, x1 - x0, z1 - z0, (x0 + x1) / 2, yp, (z0 + z1) / 2, front, { type: "slotSide", rackId: r.id, face: s.face, lr: s.lr, col: s.col, uTop: s.uTop }, { layer: "slot", eqSide: front ? "front" : "rear" });
+        const yp = bLo.yPlane + (front ? SLOT_OFF : -SLOT_OFF);   // vers l'EXTÉRIEUR (décalage av/ar)
+        this.slotPlane(group, x1 - x0, z1 - z0, (x0 + x1) / 2, yp, (z0 + z1) / 2, front,
+          { type: "slotSide", rackId: r.id, face: s.face, lr: s.lr, col: s.col, uTop: run.uLo, uLo: run.uLo, uHi: run.uHi, rowStep: SIDE_U_STEP, zLo: z0, zHi: z1 }, { layer: "slot", eqSide: front ? "front" : "rear" });
       });
       // emplacements MURAUX libres (parois ±X) → monter équipement en paroi (décalés vers l'INTÉRIEUR de la baie).
-      this.scene3d.wallFreeSlots(r).forEach((s: any) => {
-        const front = s.margin !== "rear";
-        const b = RackGeometry.wallSlotBoxLocal(r, s.wall, s.margin, s.col, s.uTop, SIDE_U_STEP);
-        const xp = b.xPlane - Math.sign(b.xPlane || 1) * SLOT_OFF;   // vers le centre (intérieur)
-        this.slotQuad(group, [[xp, b.y0, b.z0], [xp, b.y1, b.z0], [xp, b.y1, b.z1], [xp, b.y0, b.z1]], { type: "slotWall", rackId: r.id, wall: s.wall, margin: s.margin, col: s.col, uTop: s.uTop }, { layer: "slot", eqSide: front ? "front" : "rear" });
+      mergeRuns(this.scene3d.wallFreeSlots(r), (s) => s.wall + "|" + s.margin + "|" + s.col).forEach((run) => {
+        const s = run.first, front = s.margin !== "rear";
+        const bLo = RackGeometry.wallSlotBoxLocal(r, s.wall, s.margin, s.col, run.uLo, SIDE_U_STEP);
+        const bHi = RackGeometry.wallSlotBoxLocal(r, s.wall, s.margin, s.col, run.uHi, SIDE_U_STEP);
+        const z0 = Math.min(bLo.z0, bLo.z1, bHi.z0, bHi.z1), z1 = Math.max(bLo.z0, bLo.z1, bHi.z0, bHi.z1);
+        const xp = bLo.xPlane - Math.sign(bLo.xPlane || 1) * SLOT_OFF;   // vers le centre (intérieur)
+        this.slotQuad(group, [[xp, bLo.y0, z0], [xp, bLo.y1, z0], [xp, bLo.y1, z1], [xp, bLo.y0, z1]],
+          { type: "slotWall", rackId: r.id, wall: s.wall, margin: s.margin, col: s.col, uTop: run.uLo, uLo: run.uLo, uHi: run.uHi, rowStep: SIDE_U_STEP, zLo: z0, zHi: z1 }, { layer: "slot", eqSide: front ? "front" : "rear" });
       });
       // TROUS DE CAPOT libres (toit + sol) → poser un pin. Toujours construits, couche "slot" (pilotée par le seul
       // toggle « emplacements libres », indépendamment de l'affichage des capots).
