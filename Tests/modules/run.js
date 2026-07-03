@@ -413,8 +413,12 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     const s = await makeStore();
     const rs = new RackScene(s);
     const dc = await s.create("datacenters", { name: "DC" });
-    const rack = await s.create("racks", { name: "R", width_mm: 600, depth: 1200, u_count: 42, front_margin_mm: 200, cage_depth_mm: 700, datacenter_id: dc.id, dc_x: 2000, dc_y: 2000 });
-    ck(RackGeometry.wallEnabled(rack, "front") === true, "wallEnabled(front) avec marge ≥ 1U");
+    // `allow_side_front` REQUIS depuis l'unification latéral/paroi : le toggle side-mount gouverne AUSSI les parois.
+    const rack = await s.create("racks", { name: "R", width_mm: 600, depth: 1200, u_count: 42, front_margin_mm: 200, cage_depth_mm: 700, allow_side_front: true, datacenter_id: dc.id, dc_x: 2000, dc_y: 2000 });
+    ck(RackGeometry.wallEnabled(rack, "front") === true, "wallEnabled(front) avec marge ≥ 1U ET side-mount avant autorisé");
+    // UNIFICATION latéral/paroi : les emplacements en paroi sont gouvernés par le MÊME toggle que la marge.
+    ck(RackGeometry.wallEnabled(rack, "rear") === false, "wallEnabled(rear) faux SANS allow_side_rear (unifié avec le side-mount)");
+    ck(RackGeometry.wallEnabled({ ...rack, allow_side_front: false }, "front") === false, "wallEnabled(front) faux sans allow_side_front");
     const eq = await s.create("equipments", { name: "WALL", placement_mode: "wall", dim_mode: "free", rack_id: rack.id, wall_lr: "left", wall_margin: "front", wall_col: 0, wall_u: 5, wall_orient: "center", free_w_mm: 80, free_h_mm: 150, free_l_mm: 100 });
     ck.eq(rs.wallOccupants(rack.id, "front", "left").length, 1, "wallOccupants(front,left) = 1");
     ck(rs.wallSlotFree(rack.id, "left", "front", 0, 5, 2, null) === false, "wallSlotFree : bande occupée = false");

@@ -74,8 +74,8 @@ export class RackForms extends CableForms {
     root.appendChild(row2(FormControls.fieldRow("Largeur (mm)", widthI), FormControls.fieldRow("Hauteur (mm)", heightI), FormControls.fieldRow("Profondeur (mm)", depthI)));
     const geoHint = document.createElement("div"); geoHint.className = "form-hint"; root.appendChild(geoHint);
 
-    // side-mount
-    root.appendChild(divider("Montage latéral (marge)"));
+    // side-mount — gouverne les emplacements de la MARGE **et** ceux contre les PAROIS (unifiés : cf. RackGeometry.wallEnabled)
+    root.appendChild(divider("Montage latéral (marge + parois)"));
     const sideFrontI = FormControls.toggle("Side-mount avant", rk ? !!rk.allow_side_front : false, () => {}, { block: true });
     const sideRearI = FormControls.toggle("Side-mount arrière", rk ? !!rk.allow_side_rear : false, () => {}, { block: true });
     root.appendChild(row2(sideFrontI, sideRearI));
@@ -103,18 +103,21 @@ export class RackForms extends CableForms {
     });
     root.appendChild(doorsWrap); syncDoors();
 
-    // -- capots : emplacements waypoint (toit/sol), grilles multi-sélection, SAUVE IMMÉDIAT --
+    // -- capots : emplacements waypoint (toit/sol), grilles multi-sélection, TAMPON local --
     // (réservé à un rack EXISTANT : la grille dépend des dimensions enregistrées)
+    // Les cellules sont éditées LOCALEMENT et appliquées au clic sur « Enregistrer », comme tous les autres
+    // champs — l'ancienne sauvegarde immédiate écrivait DEUX fois (au changement de capot + au bouton).
+    const capBuf: Record<string, string[]> = { roof: rk ? [...RackGeometry.capCells(rk, "roof")] : [], floor: rk ? [...RackGeometry.capCells(rk, "floor")] : [] };
     if (rk) {
       root.appendChild(divider("Capots — emplacements Waypoint (toit / sol)"));
       const capHint = document.createElement("div"); capHint.className = "form-hint"; capHint.style.textAlign = "center";
-      capHint.textContent = "Vue de dessus (maille 1U, bord supérieur = face avant). Glissez pour (dé)autoriser des cellules : elles deviennent des TROUS où poser un Waypoint Pin (clic du trou en 3D). Une cellule portant un pin (◆) n'est pas retirable. Enregistré immédiatement.";
+      capHint.textContent = "Vue de dessus (maille 1U, bord supérieur = face avant). Glissez pour (dé)autoriser des cellules : elles deviennent des TROUS où poser un Waypoint Pin (clic du trou en 3D). Une cellule portant un pin (◆) n'est pas retirable. Appliqué au clic sur « Enregistrer ».";
       root.appendChild(capHint);
       const capRow = document.createElement("div"); capRow.style.cssText = "display:flex;gap:22px;flex-wrap:wrap;justify-content:center;align-items:flex-start;margin-top:8px;";
       [{ face: "roof", label: "Toit (dessus)" }, { face: "floor", label: "Sol (dessous)" }].forEach((cf) => {
         const col = document.createElement("div"); col.style.textAlign = "center";
         const t = document.createElement("div"); t.className = "form-hint"; t.style.cssText = "font-weight:600;color:var(--fg);margin-bottom:4px;"; t.textContent = cf.label;
-        col.appendChild(t); col.appendChild(this.capEditor(store, host, rk, cf.face).el);
+        col.appendChild(t); col.appendChild(this.capEditor(store, rk, cf.face, { get: () => capBuf[cf.face], set: (v) => { capBuf[cf.face] = v; } }).el);
         capRow.appendChild(col);
       });
       root.appendChild(capRow);
@@ -172,6 +175,9 @@ export class RackForms extends CableForms {
           door_rear: { enabled: (doorInputs.rear.enI as any).checked, thickness_mm: Math.max(1, parseInt(doorInputs.rear.thI.value, 10) || 40), hinge: doorInputs.rear.hingeI.value === "right" ? "right" : "left", hollow: (doorInputs.rear.hollowI as any).checked, hollow_mm: Math.max(0, parseInt(doorInputs.rear.hmI.value, 10) || 0) },
           description: descI.value.trim(),
         };
+        // Cellules de capot ÉDITÉES DANS LE TAMPON (rack existant seulement — pas d'éditeur sur une baie neuve) :
+        // appliquées ICI, en une seule écriture avec le reste du formulaire.
+        if (rk) { payload.roof_cells = capBuf.roof; payload.floor_cells = capBuf.floor; }
         if (live.check(payload).length) return false;   // validation live : champ(s) surligné(s), enregistrement bloqué
         // redimensionnement d'une baie occupée (nombre de U) → déplace ses équipements
         if (rk && g.u !== rk.u_count) {
@@ -635,7 +641,7 @@ export class RackForms extends CableForms {
   /** Monter un équipement dans un emplacement MURAL libre (paroi, face vers le centre ou la façade). */
   static async assignWallSlot(store: Store, host: FormHost, rackId: string, wall: string, margin: string, col: number, uTop: number, onDone?: () => void): Promise<void> {
     const rack = store.get("racks", rackId); if (!rack) { Notify.toast("Baie introuvable", "err"); return; }
-    if (!RackGeometry.wallEnabled(rack, margin)) { Notify.toast("Montage en paroi indisponible (marge insuffisante).", "err"); return; }
+    if (!RackGeometry.wallEnabled(rack, margin)) { Notify.toast("Montage en paroi indisponible (marge insuffisante ou montage latéral non autorisé sur cette face).", "err"); return; }
     const scene = new RackScene(store);
     const g = RackGeometry.wallGeo(rack, margin);
     const effHeightU = (e: any) => Math.max(1, Math.ceil(((e.free_h_mm != null) ? e.free_h_mm : (e.u_height ? e.u_height * U_MM : SIDE_U_STEP * U_MM)) / U_MM));

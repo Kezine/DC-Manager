@@ -16,7 +16,6 @@ import {
   BREAKOUT_SPANS,
   EQUIP_FACE_IMG_FIELD
 } from "../../domain/constants";
-import type { FormHost } from "./shared";
 
 export class FormBase {
   /** Bibliothèque d'images de façade (injectée au boot) — singleton applicatif (hors modèle). */
@@ -121,7 +120,12 @@ export class FormBase {
     ports.forEach((p: any) => { const mk = document.createElement("div"); mk.className = "face-marker" + (p.role === "mgmt" ? " role-mgmt" : (p.role === "power" ? " role-power" : "")); mk.style.left = (p.face_x * 100) + "%"; mk.style.top = (p.face_y * 100) + "%"; mk.textContent = p.name || "(port)"; stage.appendChild(mk); });
     return stage;
   }
-  protected static capEditor(store: Store, host: FormHost, rack: any, face: string): { el: HTMLElement; refresh: () => void } {
+  /** Éditeur de CAPOT (toit/sol) : grille SVG multi-sélection au glisser. Les cellules sont éditées dans un
+      TAMPON fourni par l'appelant (`cells`) et ne sont PERSISTÉES qu'à l'enregistrement du formulaire de baie —
+      l'ancienne sauvegarde immédiate doublait l'écriture (un save au changement de capot + un au bouton
+      « Enregistrer ») et créait des pas d'undo/écritures REST parasites. Une cellule portant un pin (◆, waypoint
+      posé) n'est pas retirable. */
+  protected static capEditor(store: Store, rack: any, face: string, cells: { get: () => string[]; set: (v: string[]) => void }): { el: HTMLElement; refresh: () => void } {
     const NS = "http://www.w3.org/2000/svg";
     const wrap = document.createElement("div"); wrap.className = "cap-grid-wrap";
     const g = RackGeometry.capGrid(rack), nx = g.nx, ny = g.ny;
@@ -132,12 +136,12 @@ export class FormBase {
     svg.setAttribute("class", "cap-grid"); svg.style.cssText = "display:block;background:var(--bg-1,#15171c);border:1px solid var(--line-2,#333);border-radius:6px;touch-action:none;";
     wrap.appendChild(svg);
     const mk = (tag: string, attrs: Record<string, string | number>): SVGElement => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, String(attrs[k])); return n; };
-    const cellsSet = () => new Set(RackGeometry.capCells(rack, face));
+    const cellsSet = () => new Set(cells.get());
     const occSet = () => { const s = new Set<string>(); store.all("waypoints").forEach((w: any) => { if (w.kind === "point" && w.rack_id === rack.id && w.cap_face === face) s.add((w.cap_cx | 0) + "," + (w.cap_cy | 0)); }); return s; };
     let prevRect: SVGElement | null = null;
     const clamp = (v: number, max: number) => Math.min(Math.max(v, 0), max - 1);
     const cellAt = (clientX: number, clientY: number) => { const rb = svg.getBoundingClientRect(); return { cx: clamp(Math.floor((clientX - rb.left) / cellPx), nx), cy: clamp(Math.floor((clientY - rb.top) / cellPx), ny) }; };
-    const applyRange = async (cx0: number, cy0: number, cx1: number, cy1: number) => {
+    const applyRange = (cx0: number, cy0: number, cx1: number, cy1: number): void => {
       const set = cellsSet(), occ = occSet();
       const add = !set.has(cx0 + "," + cy0);   // mode déduit de la 1re cellule
       let skipped = 0;
@@ -146,18 +150,16 @@ export class FormBase {
           const k = cx + "," + cy;
           if (add) set.add(k); else { if (occ.has(k)) { skipped++; continue; } set.delete(k); }
         }
-      await store.update("racks", rack.id, (face === "floor") ? { floor_cells: [...set] } : { roof_cells: [...set] });
-      host.setDirty?.(true);
+      cells.set([...set]);   // TAMPON local — persisté au clic sur « Enregistrer » du formulaire de baie
       if (skipped) Notify.toast(skipped + " cellule(s) conservée(s) : un pin y est posé.", "err");
       draw();
     };
     // « Supprimer tout » : retire tous les trous de ce capot. Les cellules portant un PIN sont conservées (comme la
     // suppression au glisser) — un pin exige un trou sous lui.
-    const clearAll = async () => {
+    const clearAll = (): void => {
       const occ = occSet();
       if (!cellsSet().size) return;   // rien à retirer
-      await store.update("racks", rack.id, (face === "floor") ? { floor_cells: [...occ] } : { roof_cells: [...occ] });
-      host.setDirty?.(true);
+      cells.set([...occ]);   // TAMPON local — persisté au clic sur « Enregistrer » du formulaire de baie
       if (occ.size) Notify.toast(occ.size + " cellule(s) conservée(s) : un pin y est posé.", "err");
       draw();
     };
@@ -188,7 +190,7 @@ export class FormBase {
     const bar = document.createElement("div"); bar.style.cssText = "display:flex;justify-content:center;margin-top:6px";
     const clearBtn = document.createElement("button"); clearBtn.type = "button"; clearBtn.className = "btn btn-ghost btn-sm";
     clearBtn.textContent = "Supprimer tout"; clearBtn.title = "Retirer tous les trous de ce capot (les cellules portant un pin sont conservées)";
-    clearBtn.onclick = () => { void clearAll(); };
+    clearBtn.onclick = () => { clearAll(); };
     bar.appendChild(clearBtn); wrap.appendChild(bar);
     return { el: wrap, refresh: draw };
   }

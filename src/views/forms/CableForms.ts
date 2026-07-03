@@ -476,5 +476,5 @@ export class CableForms extends EquipmentForms {
   }
 
   /** Baie (rack) — identité · localisation · cage · dims · side-mount · portes (avant/arrière) ·
-      capots (emplacements waypoint toit/sol, sauvegarde immédiate sur un rack existant). */
+      capots (emplacements waypoint toit/sol, tamponnés et appliqués à l.enregistrement). */
 }

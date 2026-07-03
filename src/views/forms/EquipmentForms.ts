@@ -417,9 +417,10 @@ export class EquipmentForms extends FormBase {
     }).then(async (res) => { if (res) await applyResult(); });
   }
 
-  /** Éditeur de capot (toit/sol) : grille SVG au pas 1U, multi-sélection au glisser,
-      sauvegarde IMMÉDIATE des cellules autorisées (roof_cells/floor_cells). Une cellule
-      portant un pin (◆) ne peut être retirée. Réservé à un rack EXISTANT. */
+  /** Éditeur de capot (toit/sol) : grille SVG au pas 1U, multi-sélection au glisser. Les cellules
+      (roof_cells/floor_cells) sont éditées dans un TAMPON et appliquées au clic sur « Enregistrer »
+      du formulaire de baie (cf. FormBase.capEditor). Une cellule portant un pin (◆) ne peut être
+      retirée. Réservé à un rack EXISTANT. */
 
   /** Image de façade (bibliothèque IndexedDB hors modèle) : import/remplacement + métadonnées (U, face). */
   static faceImage(images: ImageStore, store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
