@@ -27,16 +27,12 @@ import { Pwa } from "./Pwa";
 import { SaveState } from "./SaveState";
 import { TabChannel } from "./TabChannel";
 import { HandleStore } from "./HandleStore";
+import { UndoTimeline } from "./UndoTimeline";
 
-// Timeline d'undo UNIFIÉE : le modèle (snapshots, adapter) et les images (ImageStore, opérations inverses) ont
-// chacun leur pile, mais UN SEUL geste (bouton / Ctrl+Z) défait dans l'ordre chronologique. `undoOrder` mémorise la
-// pile concernée par action ("model" | "image") ; toute NOUVELLE action vide le redo unifié. doUndo/doRedo (boot)
-// dépilent la timeline et délèguent à la bonne pile (en sautant les jetons dont la pile est épuisée par le plafond).
-const undoOrder: string[] = [];
-const redoOrder: string[] = [];
-let onTimelineChange: () => void = () => { /* posé au boot → refreshChrome */ };
-function noteUndoable(kind: string): void { undoOrder.push(kind); if (undoOrder.length > 400) undoOrder.shift(); redoOrder.length = 0; try { onTimelineChange(); } catch (_) { /* noop */ } }
-function resetUndoTimeline(): void { undoOrder.length = 0; redoOrder.length = 0; try { onTimelineChange(); } catch (_) { /* noop */ } }
+// Timeline d'undo UNIFIÉE (modèle + images) : UN SEUL geste défait dans l'ordre chronologique, quelle que soit
+// la pile d'origine. Logique EXTRAITE dans `UndoTimeline` (pure, testée) ; les piles sont enregistrées au boot.
+const undoTimeline = new UndoTimeline();
+const noteUndoable = (kind: string): void => undoTimeline.note(kind);
 
 // MODE D'EXÉCUTION : piloté par les PRÉFÉRENCES utilisateur (réglages → Source de données), initialisées au 1er
 // run depuis la config injectée par le backend. L'utilisateur peut basculer local⟷api et changer l'URL d'API ;
@@ -145,7 +141,7 @@ async function boot(): Promise<void> {
     // images de façade : embarquées inline (faceImages) → import dans l'ImageStore ; sinon document sans images
     if (Array.isArray(raw.faceImages)) await imageStore.replaceAllFromLegacy(raw.faceImages);
     else await imageStore.clearAll();
-    resetUndoTimeline();   // nouveau document chargé → timeline d'undo unifiée repart de zéro
+    undoTimeline.reset();   // nouveau document chargé → timeline d'undo unifiée repart de zéro
     currentHandle = handle || null; currentFacesHandle = null; currentName = name || "";
     if (!store.meta.docName && name) { store.meta.docName = name.replace(/\.json$/i, ""); await store.persistMeta(); }
     tabChannel.claim(store.meta.fileId || null);
@@ -711,7 +707,7 @@ async function boot(): Promise<void> {
     await store.init();                       // charge les collections du document
     if (name) store.meta.docName = store.meta.docName || name;
     await imageStore.reloadFromBackend();     // miroir d'images du document
-    resetUndoTimeline();
+    undoTimeline.reset();
     currentName = name || store.meta.docName || "Document";
     session.setFile(true); session.markLoaded(store.histIndex());
     shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
@@ -729,7 +725,7 @@ async function boot(): Promise<void> {
     await store.newDocument();                // sème les catalogues + pousse le snapshot DANS le nouveau document
     store.meta.docName = d.name; await store.persistMeta();
     await imageStore.reloadFromBackend();
-    resetUndoTimeline();
+    undoTimeline.reset();
     currentName = d.name; session.setFile(true); session.markLoaded(store.histIndex());
     shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
     restSubscribeLive();
@@ -755,7 +751,7 @@ async function boot(): Promise<void> {
       else await imageStore.clearAll();
       store.meta.docName = name; await store.persistMeta();
       await imageStore.reloadFromBackend();
-      resetUndoTimeline();
+      undoTimeline.reset();
       currentName = name; session.setFile(true); session.markLoaded(store.histIndex());
       shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
       restSubscribeLive();
@@ -897,7 +893,7 @@ async function boot(): Promise<void> {
         if (!ok) return;
       }
       tabChannel.release(store.meta.fileId || null);
-      await store.newDocument(); await imageStore.clearAll(); resetUndoTimeline(); currentHandle = null; currentFacesHandle = null; currentDirHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
+      await store.newDocument(); await imageStore.clearAll(); undoTimeline.reset(); currentHandle = null; currentFacesHandle = null; currentDirHandle = null; currentName = ""; session.setFile(false); session.markLoaded(store.histIndex());
       applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast("Nouveau document");
     },
     onOpen: () => { if (REST_MODE) restOpenChooser(); else doOpen(); },
@@ -1231,32 +1227,19 @@ async function boot(): Promise<void> {
       });
     }
     // mode API : pas d'undo client (le serveur fait autorité ; écritures immédiates) → boutons désactivés.
-    shell.setUndoRedo(!REST_MODE && (store.canUndo() || imageStore.canUndo()), !REST_MODE && redoOrder.length > 0 && (store.canRedo() || imageStore.canRedo()));
+    shell.setUndoRedo(!REST_MODE && (store.canUndo() || imageStore.canUndo()), !REST_MODE && undoTimeline.redoDepth > 0 && (store.canRedo() || imageStore.canRedo()));
     shell.setSaveState(session.state());
   };
-  onTimelineChange = () => refreshChrome();   // noteUndoable/resetUndoTimeline rafraîchissent les boutons undo/redo
+  undoTimeline.onChange = () => refreshChrome();   // note/reset de la timeline rafraîchissent les boutons undo/redo
 
-  // UNDO / REDO UNIFIÉS : dépile la timeline et délègue à la bonne pile (modèle ou images).
+  // UNDO / REDO UNIFIÉS : la timeline délègue à la bonne pile (modèle ou images) — cf. UndoTimeline.
+  // Ordre d'enregistrement = priorité du filet de sécurité (modèle d'abord, comme historiquement).
+  undoTimeline.register("model", store);
+  undoTimeline.register("image", imageStore);
   const afterUndoRedo = (msg: string) => { shell.refreshActive(); refreshChrome(); Notify.toast(msg); };
-  const doUndo = async (): Promise<void> => {
-    while (undoOrder.length) {
-      const kind = undoOrder[undoOrder.length - 1];
-      if (kind === "image" && imageStore.canUndo()) { undoOrder.pop(); await imageStore.undo(); redoOrder.push(kind); afterUndoRedo("Annulé"); return; }
-      if (kind === "model" && store.canUndo()) { undoOrder.pop(); await store.undo(); redoOrder.push(kind); afterUndoRedo("Annulé"); return; }
-      undoOrder.pop();   // jeton dont la pile est épuisée (plafond atteint) → ignorer
-    }
-    if (store.canUndo()) { await store.undo(); redoOrder.push("model"); afterUndoRedo("Annulé"); }   // filet (timeline désynchronisée)
-    else if (imageStore.canUndo()) { await imageStore.undo(); redoOrder.push("image"); afterUndoRedo("Annulé"); }
-  };
-  const doRedo = async (): Promise<void> => {
-    while (redoOrder.length) {
-      const kind = redoOrder[redoOrder.length - 1];
-      if (kind === "image" && imageStore.canRedo()) { redoOrder.pop(); await imageStore.redo(); undoOrder.push(kind); afterUndoRedo("Rétabli"); return; }
-      if (kind === "model" && store.canRedo()) { redoOrder.pop(); await store.redo(); undoOrder.push(kind); afterUndoRedo("Rétabli"); return; }
-      redoOrder.pop();
-    }
-  };
-  resetUndoTimeline();   // état propre au boot (ignore un éventuel jeton parasite du newDocument initial)
+  const doUndo = async (): Promise<void> => { if (await undoTimeline.undo()) afterUndoRedo("Annulé"); };
+  const doRedo = async (): Promise<void> => { if (await undoTimeline.redo()) afterUndoRedo("Rétabli"); };
+  undoTimeline.reset();   // état propre au boot (ignore un éventuel jeton parasite du newDocument initial)
 
   // cohérence inter-vues : toute mutation marque dirty + rafraîchit le chrome (pastille/undo) IMMÉDIATEMENT, et
   // débounce le re-render LOURD de la vue active. Le chrome est DÉCOUPLÉ du re-render : si `refreshActive()` lève
@@ -1305,7 +1288,7 @@ async function boot(): Promise<void> {
       await store.replaceAll(EMBED);
       if (Array.isArray(EMBED.faceImages)) await imageStore.replaceAllFromLegacy(EMBED.faceImages); else await imageStore.clearAll();
     } catch (e) { console.error(e); Notify.toast("Document embarqué illisible", "err"); }
-    resetUndoTimeline();
+    undoTimeline.reset();
     document.body.classList.add("viewer-mode");   // interface allégée (cf. dc-manager.css) + édition bloquée
     modal.editLocked = true;                       // bloque toute modale d'ÉDITION (les fiches restent consultables)
     if (store.meta.docName) shell.setDocName(store.meta.docName);

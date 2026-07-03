@@ -1778,6 +1778,38 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(s.get("ipNetworks", net.id).cidr, "10.0.0.0/16", "V5b : CIDR contenant l'adresse → accepté");
   }
 
+  console.log("\n• UndoTimeline : timeline d'undo unifiée (piles simulées)");
+  {
+    // Logique extraite de main.ts/boot (où elle était intestable) : deux piles, jetons chronologiques, plafond.
+    const { UndoTimeline } = D("app/UndoTimeline.js");
+    const mkStack = () => { const s = { u: 0, r: 0, canUndo: () => s.u > 0, canRedo: () => s.r > 0, undo: () => { s.u--; s.r++; }, redo: () => { s.r--; s.u++; } }; return s; };
+    const model = mkStack(), image = mkStack();
+    const t = new UndoTimeline();
+    t.register("model", model); t.register("image", image);
+    let changes = 0; t.onChange = () => { changes++; };
+    model.u++; t.note("model"); image.u++; t.note("image"); model.u++; t.note("model");   // chronologie : M, I, M
+    ck.eq(changes, 3, "onChange notifié à chaque note()");
+    await t.undo(); ck.eq(model.u, 1, "undo 1 → dernière action (modèle) défaite");
+    await t.undo(); ck.eq(image.u, 0, "undo 2 → image défaite (ordre chronologique inverse)");
+    ck.eq(t.redoDepth, 2, "redoDepth suit les undos");
+    await t.redo(); ck.eq(image.u, 1, "redo → image rétablie");
+    model.u++; t.note("model");
+    ck.eq(t.redoDepth, 0, "toute NOUVELLE action vide le redo unifié");
+    // jeton dont la pile est épuisée (plafond côté pile) → sauté sans casser la timeline
+    const t2 = new UndoTimeline(), m2 = mkStack(), i2 = mkStack();
+    t2.register("model", m2); t2.register("image", i2);
+    t2.note("model");   // jeton SANS undo réel (pile déjà épuisée)
+    i2.u++; t2.note("image");
+    ck.eq(await t2.undo(), true, "pile réelle défaite malgré le jeton fantôme en dessous");
+    ck.eq(i2.u, 0, "…et c'est bien l'image qui a été défaite");
+    ck.eq(await t2.undo(), false, "jeton épuisé sauté, plus rien à défaire → false");
+    // filet de sécurité : timeline désynchronisée (vide) mais une pile encore dépilable
+    const t3 = new UndoTimeline(), m3 = mkStack(); m3.u = 1;
+    t3.register("model", m3);
+    ck.eq(await t3.undo(), true, "filet : timeline vide mais pile dépilable → undo quand même");
+    ck.eq(m3.u, 0, "…le filet a bien dépilé le modèle");
+  }
+
   console.log("\n• RackDoorGeometry : débattement des portes de baie (partagé 2D/3D)");
   {
     const { RackDoorGeometry } = D("geometry/RackDoorGeometry.js");
