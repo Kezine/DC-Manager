@@ -28,6 +28,7 @@ import { SaveState } from "./SaveState";
 import { TabChannel } from "./TabChannel";
 import { HandleStore } from "./HandleStore";
 import { UndoTimeline } from "./UndoTimeline";
+import { AutoSave } from "./AutoSave";
 
 // Timeline d'undo UNIFIÉE (modèle + images) : UN SEUL geste défait dans l'ordre chronologique, quelle que soit
 // la pile d'origine. Logique EXTRAITE dans `UndoTimeline` (pure, testée) ; les piles sont enregistrées au boot.
@@ -90,7 +91,6 @@ async function boot(): Promise<void> {
   let currentName = "";                 // nom du fichier lié
   const session = new SaveState();      // suivi dirty/save (révision modèle vs dernière sauvegarde + meta/images)
   let booted = false;                   // garde : ne suit pas la révision pendant le chargement initial
-  let autosaveTimer: any = null;
 
   const tabChannel = new TabChannel({
     enabled: HAS_FS_API && !REST_MODE,   // verrou inter-onglets = concept FICHIER ; en mode API le serveur arbitre (cf. P3)
@@ -575,40 +575,20 @@ async function boot(): Promise<void> {
     } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
   }
 
-  /* ---- auto-save : timer d'écriture silencieuse (FS API + fichier lié requis) ---- */
-  function autosaveStatusHtml(): string {
-    if (!HAS_FS_API) return "Indisponible — navigateur sans <strong>File System Access API</strong>.";
-    if (!prefs.autosave) return "État : <strong>off</strong>.";
-    if (!currentHandle) return "État : <strong>en attente d'un fichier</strong> — démarrera à la prochaine (ré)ouverture.";
-    return "État : <strong>actif</strong> · toutes les <strong>" + prefs.autosaveInterval + "s</strong>.";
-  }
-  function applyAutosave(): void {
-    if (autosaveTimer) { clearInterval(autosaveTimer); autosaveTimer = null; }
-    if (prefs.autosave && currentHandle && HAS_FS_API) {
-      autosaveTimer = setInterval(async () => {
-        if (!SaveState.shouldAutosave({ dirty: session.dirty, hasFile: !!currentHandle })) return;
-        try {
-          if (!(await ensureWritePermission(currentHandle))) { prefs.autosave = false; applyAutosave(); Notify.toast("Auto-save désactivé : permission révoquée", "err"); return; }
-          await writeToHandle(currentHandle); refreshChrome();
-        } catch (e) { console.warn("autosave a échoué", e); }
-      }, prefs.autosaveInterval * 1000);
-    }
-    shell.setAutosave(prefs.autosave, prefs.autosaveInterval);
-    shell.setAutosaveStatus(autosaveStatusHtml());
-    refreshChrome();
-  }
-  async function setAutosave(on: boolean): Promise<void> {
-    if (on) {
-      if (!HAS_FS_API) { Notify.toast("Auto-save indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); shell.setAutosave(false, prefs.autosaveInterval); return; }
-      if (!currentHandle) {
-        const go = await Dialog.confirm({ title: "Activer l'auto-save", message: "Pour l'auto-save, le document doit être lié à un fichier. Choisir maintenant ?", confirmLabel: "Choisir un fichier" });
-        if (!go) { shell.setAutosave(false, prefs.autosaveInterval); return; }
-        await doSaveAs();
-        if (!currentHandle) { shell.setAutosave(false, prefs.autosaveInterval); return; }
-      }
-      prefs.autosave = true; applyAutosave(); Notify.toast("Auto-save activé (toutes les " + prefs.autosaveInterval + "s)");
-    } else { prefs.autosave = false; applyAutosave(); Notify.toast("Auto-save désactivé"); }
-  }
+  /* ---- auto-save : mécanique EXTRAITE dans `AutoSave` (testée) ; ici, seule l'adhérence à l'app ---- */
+  const autoSave = new AutoSave(prefs, {
+    hasFsApi: () => HAS_FS_API,
+    hasFile: () => !!currentHandle,
+    dirty: () => session.dirty,
+    ensureWritePermission: () => ensureWritePermission(currentHandle),
+    write: async () => { await writeToHandle(currentHandle); refreshChrome(); },
+    pickFile: () => doSaveAs(),
+    confirmEnable: () => Dialog.confirm({ title: "Activer l'auto-save", message: "Pour l'auto-save, le document doit être lié à un fichier. Choisir maintenant ?", confirmLabel: "Choisir un fichier" }),
+    onStateChange: (on, intervalS, statusHtml) => { shell.setAutosave(on, intervalS); shell.setAutosaveStatus(statusHtml); refreshChrome(); },
+    notify: (msg, kind) => Notify.toast(msg, kind),
+  });
+  const applyAutosave = (): void => autoSave.apply();
+  const setAutosave = (on: boolean): Promise<void> => autoSave.setEnabled(on);
 
   /* ---- MODE API : documents serveur (workspaces) ---- */
   /** Ouvre un document serveur : scope l'adapter + le backend d'images, recharge données & images. */

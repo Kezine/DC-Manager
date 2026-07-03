@@ -1810,6 +1810,53 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(m3.u, 0, "…le filet a bien dépilé le modèle");
   }
 
+  console.log("\n• AutoSave : mécanique d'auto-save (hôte simulé, battement testé directement)");
+  {
+    const { AutoSave } = D("app/AutoSave.js");
+    const mkHost = (over = {}) => {
+      const h = {
+        writes: 0, notices: [], states: [],
+        fsApi: true, file: true, isDirty: true, perm: true,
+        hasFsApi() { return h.fsApi; }, hasFile() { return h.file; }, dirty() { return h.isDirty; },
+        ensureWritePermission: async () => h.perm,
+        write: async () => { h.writes++; },
+        pickFile: async () => {}, confirmEnable: async () => true,
+        onStateChange: (on, i, s) => { h.states.push([on, i, s]); },
+        notify: (m, k) => { h.notices.push([m, k]); },
+      };
+      return Object.assign(h, over);
+    };
+    // battement nominal : modifié + fichier lié → écrit
+    const h1 = mkHost(); const a1 = new AutoSave({ autosave: true, autosaveInterval: 60 }, h1);
+    await a1.tick(); ck.eq(h1.writes, 1, "tick : modifié + fichier → écrit");
+    h1.isDirty = false; await a1.tick(); ck.eq(h1.writes, 1, "tick : propre → n'écrit PAS");
+    // permission révoquée : désactive + notifie, n'écrit pas
+    const p2 = { autosave: true, autosaveInterval: 60 };
+    const h2 = mkHost({ perm: false }); const a2 = new AutoSave(p2, h2);
+    await a2.tick();
+    ck(h2.writes === 0 && p2.autosave === false, "tick : permission révoquée → désactivé, rien d'écrit");
+    ck(h2.notices.some((n) => /permission/.test(n[0])), "tick : permission révoquée → notifié");
+    a2.dispose();
+    // activation sans FS API → refus notifié, préférence inchangée
+    const p3 = { autosave: false, autosaveInterval: 30 };
+    const h3 = mkHost({ fsApi: false }); const a3 = new AutoSave(p3, h3);
+    await a3.setEnabled(true);
+    ck(p3.autosave === false && h3.notices.some((n) => n[1] === "err"), "setEnabled(on) sans FS API → refusé + notifié");
+    // activation sans fichier : dialogue accepté mais « Enregistrer sous » annulé → refus silencieux
+    const p4 = { autosave: false, autosaveInterval: 30 };
+    const h4 = mkHost({ file: false }); const a4 = new AutoSave(p4, h4);
+    await a4.setEnabled(true);
+    ck(p4.autosave === false && h4.states.length > 0 && h4.states[h4.states.length - 1][0] === false, "setEnabled(on) : « Enregistrer sous » annulé → chrome repassé à off");
+    // désactivation
+    const p5 = { autosave: true, autosaveInterval: 30 };
+    const a5 = new AutoSave(p5, mkHost()); await a5.setEnabled(false); a5.dispose();
+    ck.eq(p5.autosave, false, "setEnabled(off) → préférence coupée");
+    // statut lisible
+    ck(/File System Access/.test(new AutoSave(p5, mkHost({ fsApi: false })).statusHtml()), "statusHtml : navigateur sans FS API");
+    ck(/off/.test(new AutoSave({ autosave: false, autosaveInterval: 30 }, mkHost()).statusHtml()), "statusHtml : off");
+    ck(/actif/.test(new AutoSave({ autosave: true, autosaveInterval: 30 }, mkHost()).statusHtml()), "statusHtml : actif + intervalle");
+  }
+
   console.log("\n• RackDoorGeometry : débattement des portes de baie (partagé 2D/3D)");
   {
     const { RackDoorGeometry } = D("geometry/RackDoorGeometry.js");
