@@ -367,6 +367,9 @@ export abstract class DcViews2D extends DcScene3D {
       const seg = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`);
       seg.push("Z");
       grp.appendChild(Dom.svg("path", { d: seg.join(" "), style: "fill:var(--accent);fill-opacity:0.14;stroke:var(--accent);stroke-opacity:0.55;stroke-width:1.5;vector-effect:non-scaling-stroke" }));
+      // GOND : point de pivot RÉEL marqué au coin du secteur (même axe que la quincaillerie 3D) — repère de validation.
+      const s = RackDoorGeometry.swingSector(w, d, face === "rear", dr);
+      grp.appendChild(Dom.svg("circle", { cx: s.hx.toFixed(1), cy: s.hy.toFixed(1), r: 16, style: "fill:var(--accent);fill-opacity:0.85;stroke:var(--bg-1,#15171c);stroke-width:1.2;vector-effect:non-scaling-stroke" }));
     });
     return any ? grp : null;
   }

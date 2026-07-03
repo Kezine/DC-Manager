@@ -715,9 +715,12 @@ export class DcThreeScene extends DcThreeCamera {
     // vantail PLEINE LARGEUR ; le DÉGAGEMENT de rotation est juste un DÉCALAGE des charnières de T vers l'intérieur
     // (et donc du rayon d'ouverture, cf. buildDoorSwing). Pas de panneau de comblement.
     // « gauche/droite » = vu DE LA FACE de la porte : avant (−Y) gauche = −X ; arrière (+Y) gauche = +X (inversé).
-    const left = (dr.hinge !== "right") !== rear, clr = T;
+    const left = (dr.hinge !== "right") !== rear;
     const xL = -hw, xR = hw, cx = 0, dw = w;
-    const xHinge = left ? (-hw + clr) : (hw - clr);   // charnières décalées de T (axe de rotation)
+    // AXE DE PIVOT partagé avec le débattement au sol (RackDoorGeometry) : les gonds sont posés PAR CONSTRUCTION
+    // sur le MÊME axe (hx, hy) que le secteur → valider le placement d'une porte = vérifier visuellement que le
+    // coin du secteur s'ancre sur les gonds.
+    const pivot = RackDoorGeometry.swingSector(w, d, rear, dr);
     const FRAME = Math.min(45, Math.max(20, dw * 0.07));
     const pick = { type: "rack", id: r.id, door: true };
     const metal = () => new THREE.MeshStandardMaterial({ color: theme.doorMetal, metalness: 0.65, roughness: 0.45 });
@@ -750,17 +753,29 @@ export class DcThreeScene extends DcThreeCamera {
     const panel = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), panelMat);
     panel.position.set(cx, yLeaf, H / 2); panel.rotation.x = rear ? -Math.PI / 2 : Math.PI / 2;   // normale ±Y (vers l'extérieur)
     panel.userData = { pick, layer: "door", rackId: r.id }; group.add(panel);
-    // POIGNÉE (barre verticale en saillie, côté OPPOSÉ à la charnière).
+    // POIGNÉE en U (design porte de baie : barre verticale DÉPORTÉE + 2 pattes), côté OPPOSÉ aux gonds.
     const latchX = left ? (xR - FRAME - 18) : (xL + FRAME + 18);
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(14, Math.max(4, T * 0.7), Math.min(180, H * 0.12)), metal());
-    handle.position.set(latchX, yOut + sgn * 5, H / 2); handle.userData = { pick, layer: "door", rackId: r.id }; group.add(handle);
-    // GONDS (2 cylindres verticaux) — placés sur l'AXE DE ROTATION théorique du vantail = arête charnière, sur la
-    // face extérieure (yOut), pivot d'un battant qui s'ouvre vers l'extérieur. Couleur des repères de FAÇADE.
-    const hingeMat = new THREE.MeshStandardMaterial({ color: theme.front, metalness: 0.4, roughness: 0.5 });
-    [H * 0.22, H * 0.78].forEach((hz) => {
-      const k = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 46, 12), hingeMat);
-      k.rotation.x = Math.PI / 2; k.position.set(xHinge, yOut, hz);   // axe Y → Z (vertical), sur l'axe de rotation
-      k.userData = { layer: "door", rackId: r.id }; group.add(k);
+    const gripH = Math.min(220, Math.max(120, H * 0.14));
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(16, 10, gripH), metal());
+    grip.position.set(latchX, yOut + sgn * 24, H / 2); grip.userData = { pick, layer: "door", rackId: r.id }; group.add(grip);
+    [-1, 1].forEach((k) => {   // pattes de déport (fixent la barre au vantail)
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(12, 24, 14), metal());
+      leg.position.set(latchX, yOut + sgn * 12, H / 2 + k * (gripH / 2 - 10));
+      leg.userData = { pick, layer: "door", rackId: r.id }; group.add(leg);
+    });
+    // GONDS — quincaillerie de CHARNIÈRE À BROCHE posée sur l'AXE DE ROTATION RÉEL (pivot.hx / pivot.hy, le même
+    // que le secteur de débattement) : canon vertical + broche traversante saillante + patte vissée sur le montant
+    // du vantail. Métal des portes (design de la quincaillerie — l'orientation a ses propres repères de façade).
+    [H * 0.18, H * 0.82].forEach((hz) => {
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 84, 14), metal());    // canon de charnière
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(pivot.hx, pivot.hy, hz);        // axe Y → Z (vertical)
+      barrel.userData = { pick, layer: "door", rackId: r.id }; group.add(barrel);
+      const pin = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 3.5, 116, 10), metal());  // broche (dépasse du canon)
+      pin.rotation.x = Math.PI / 2; pin.position.set(pivot.hx, pivot.hy, hz);
+      pin.userData = { layer: "door", rackId: r.id }; group.add(pin);
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(FRAME, 8, 56), metal());          // patte vissée sur le montant
+      plate.position.set(pivot.hx + pivot.dirX * (FRAME / 2), pivot.hy - sgn * 4, hz);
+      plate.userData = { pick, layer: "door", rackId: r.id }; group.add(plate);
     });
   }
 
