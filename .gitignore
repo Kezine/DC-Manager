@@ -12,3 +12,6 @@ dist-test/
 
 # Documents de SUIVI (tracking de refactor, checklists, notes de session) — cf. CLAUDE.md
 .notes/
+
+# Jeux de données locaux (peuvent contenir des données client réelles) — jamais versionnés
+Samples/
