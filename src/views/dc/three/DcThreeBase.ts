@@ -81,7 +81,11 @@ export abstract class DcThreeBase {
   protected content: THREE.Group | null = null;       // contenu de la salle (jeté/reconstruit par build)
   protected ro: ResizeObserver | null = null;
   protected raf = 0;                                  // RAF en attente (0 = aucune) — rendu à la demande
+  protected _hoverRaf = 0;                            // rAF de SURVOL en attente (0 = aucun) — au plus un raycast par frame
+  protected _hoverClient: [number, number] | null = null;   // dernière position souris, consommée par le rAF de survol
   protected texCache = new Map<string, THREE.CanvasTexture>();   // textures de libellés mises en cache (clé texte+dims)
+  protected texCacheTicks = new Map<string, number>();           // LRU des étiquettes : clé → tick du dernier usage (cf. pruneLabelTextureCache)
+  protected texCacheTick = 0;
   protected imgTexCache = new Map<string, THREE.Texture>();      // textures d'IMAGES de façade par URL → réutilisées d'un build à l'autre (pas de rechargement), libérées au dispose
   protected faceUrlsInLastBuild = new Set<string>();            // URLs d'images RÉELLEMENT posées au dernier build() COMPLET → base de l'éviction des textures périmées
 
@@ -156,6 +160,11 @@ export abstract class DcThreeBase {
   protected measureHi: number | null = null;   // index de la mesure terminée mise en évidence (survol listing), ou null
   protected routePts: { x: number; y: number; z: number }[] = [];
   protected routeCursor: { x: number; y: number; z: number } | null = null;
+  // Overlay outil scindé STATIQUE/DYNAMIQUE : la signature détecte un changement STRUCTUREL (points posés,
+  // mesures terminées, surbrillance) → rebuild complet ; sinon (seul le curseur bouge) on MUTE ces deux objets.
+  protected _toolSig = "";
+  protected _cursorLine: THREE.Line | null = null;     // segment pointillé « dernier point → curseur » (persistant)
+  protected _cursorDot: THREE.Sprite | null = null;    // pastille du curseur (persistante, taille écran constante)
   // callbacks moteur → vue : placement/survol mesure (point monde) ; clic/survol route (cible pick / point monde).
   measurePlaceCb: ((world: { x: number; y: number; z: number }) => void) | null = null;
   measureHoverCb: ((world: { x: number; y: number; z: number } | null, clientX: number, clientY: number) => void) | null = null;
@@ -227,6 +236,7 @@ export abstract class DcThreeBase {
   dispose(): void {
     cancelAnimationFrame(this.raf); this.raf = 0;
     cancelAnimationFrame(this.cableRaf); this.cableRaf = 0;
+    cancelAnimationFrame(this._hoverRaf); this._hoverRaf = 0; this._hoverClient = null;   // rAF de survol en attente
     window.removeEventListener("mousemove", this.onMove);
     window.removeEventListener("mouseup", this.onUp);
     if (this.ro) { this.ro.disconnect(); this.ro = null; }
@@ -234,7 +244,7 @@ export abstract class DcThreeBase {
     // L'overlay d'outils (mesure/route) vit sous `scene`, PAS sous `content` → non couvert par disposeContent :
     // on libère ses géométries/matériaux ici (ses textures, détenues par texCache, sont libérées juste après).
     if (this.gOverlay) { this.disposeGroup(this.gOverlay); this.scene?.remove(this.gOverlay); this.gOverlay = null; }
-    this.texCache.forEach((t) => t.dispose()); this.texCache.clear();   // libère les textures de libellés mises en cache
+    this.texCache.forEach((t) => t.dispose()); this.texCache.clear(); this.texCacheTicks.clear();   // libère les textures de libellés mises en cache
     this.imgTexCache.forEach((t) => t.dispose()); this.imgTexCache.clear();   // libère les textures d'images de façade
     if (this.renderer) {
       this.renderer.dispose();
@@ -329,6 +339,7 @@ export abstract class DcThreeBase {
     if (typeof document === "undefined") return null;
     const cw = 512, ch = Math.max(64, Math.min(512, Math.round(cw * hMm / Math.max(1, wMm))));
     const key = text + "|" + ch;   // même texte + même hauteur de canvas → texture réutilisée (pas de re-rasterisation)
+    this.texCacheTicks.set(key, ++this.texCacheTick);   // LRU : marque la clé comme récemment utilisée
     const cached = this.texCache.get(key);
     if (cached) return cached;
     const cv = document.createElement("canvas"); cv.width = cw; cv.height = ch;
@@ -347,7 +358,25 @@ export abstract class DcThreeBase {
     g.fillText(text, cw / 2, ch / 2);
     const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 4; tex.needsUpdate = true;
     this.texCache.set(key, tex);
+    this.pruneLabelTextureCache();   // borne le cache (chaque libellé distinct = ~0,1-1 Mo GPU)
     return tex;
+  }
+
+  /** ÉVICTION LRU des textures d'ÉTIQUETTES. Contrairement à `imgTexCache` (élagué à chaque build complet via
+      `pruneFaceTextureCache`), `texCache` n'était JAMAIS élagué en cours de session : chaque libellé distinct —
+      nom d'équipement, numéro d'U, et surtout chaque COTE de mesure (« 12,34 m ») — créait une CanvasTexture GPU
+      conservée à vie, y compris après changement de document. Plafond LRU ; les clés « ##… » (textures MUTUALISÉES :
+      pastille, losange, éclair, pivot) sont permanentes. Une texture évincée encore posée sur un sprite vivant est
+      simplement RE-TÉLÉVERSÉE par three au prochain rendu (dispose ne casse pas la référence JS) — pas d'artefact. */
+  protected pruneLabelTextureCache(cap = 256): void {
+    const evictable = [...this.texCache.keys()].filter((k) => !k.startsWith("##"));
+    if (evictable.length <= cap) return;
+    evictable.sort((a, b) => (this.texCacheTicks.get(a) || 0) - (this.texCacheTicks.get(b) || 0));   // plus ancien d'abord
+    for (const key of evictable.slice(0, evictable.length - cap)) {
+      this.texCache.get(key)?.dispose();
+      this.texCache.delete(key);
+      this.texCacheTicks.delete(key);
+    }
   }
 
   /** Texture (mutualisée) d'un LOSANGE blanc à CENTRE NOIR — teintée par la couleur du sprite (marqueur waypoint). */

@@ -1099,13 +1099,26 @@ export class DcThreeScene extends DcThreeCamera {
     this.request();
   }
 
-  /** Données d'overlay poussées par la vue → reconstruit le tracé. */
-  setMeasureOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null, done?: { x: number; y: number; z: number }[][], hi?: number | null): void { this.measurePts = pts || []; this.measureCursor = cursor; this.measureDone = done || []; this.measureHi = (hi == null) ? null : hi; this.rebuildToolOverlay(); }
-  setRouteOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null): void { this.routePts = pts || []; this.routeCursor = cursor; this.rebuildToolOverlay(); }
+  /** Données d'overlay poussées par la vue. La partie STRUCTURELLE (points posés, mesures terminées, surbrillance)
+      ne change qu'aux clics ; au simple SURVOL, seul le CURSEUR bouge → on ne reconstruit PAS tout l'overlay
+      (dispose + re-création des polylignes/étiquettes/pastilles + re-collecte des screenObjs À CHAQUE mousemove),
+      on mute la ligne pointillée et la pastille persistantes (`updateToolCursor`). */
+  setMeasureOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null, done?: { x: number; y: number; z: number }[][], hi?: number | null): void {
+    this.measurePts = pts || []; this.measureCursor = cursor; this.measureDone = done || []; this.measureHi = (hi == null) ? null : hi;
+    const sig = "m:" + this.measurePts.length + ":" + this.measureDone.map((d) => d.length).join(",") + ":" + this.measureHi;
+    if (sig !== this._toolSig) { this._toolSig = sig; this.rebuildToolOverlay(); } else this.updateToolCursor();
+  }
+  setRouteOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null): void {
+    this.routePts = pts || []; this.routeCursor = cursor;
+    const sig = "r:" + this.routePts.length;
+    if (sig !== this._toolSig) { this._toolSig = sig; this.rebuildToolOverlay(); } else this.updateToolCursor();
+  }
 
-  /** Point MONDE sous le curseur : 1re surface (mesh) touchée, à défaut intersection du rayon avec le plan du sol z=0. */
+  /** Point MONDE sous le curseur : 1re surface (mesh) touchée, à défaut intersection du rayon avec le plan du sol z=0.
+      `pickablesOnly=false` : la MESURE doit accrocher N'IMPORTE QUELLE surface visible (plan d'étage à z>0, décor…),
+      pas seulement les cibles cliquables. */
   protected toolRaycast(clientX: number, clientY: number): { x: number; y: number; z: number } | null {
-    const hits = this.rayHits(clientX, clientY);
+    const hits = this.rayHits(clientX, clientY, false);
     for (const h of hits) { if ((h as any).face && h.point) return { x: h.point.x, y: h.point.y, z: h.point.z }; }
     const pt = new THREE.Vector3();
     if (this.raycaster.ray.intersectPlane(this._groundPlane, pt)) return { x: pt.x, y: pt.y, z: pt.z };
@@ -1124,13 +1137,57 @@ export class DcThreeScene extends DcThreeCamera {
     if (!this.gOverlay || this.gOverlay.parent !== this.scene) { this.gOverlay = new THREE.Group(); this.gOverlay.renderOrder = 20; if (this.scene) this.scene.add(this.gOverlay); }
     return this.gOverlay;
   }
-  protected clearOverlay(): void { if (this.gOverlay) this.disposeGroup(this.gOverlay); this.request(); }
+  protected clearOverlay(): void {
+    if (this.gOverlay) this.disposeGroup(this.gOverlay);
+    this._cursorLine = null; this._cursorDot = null; this._toolSig = "";   // enfants du groupe → détruits avec lui
+    this.request();
+  }
 
   protected rebuildToolOverlay(): void {
     const g = this.ensureOverlay(); this.disposeGroup(g);
+    this._cursorLine = null; this._cursorDot = null;   // enfants du groupe → détruits par disposeGroup
     if (this.toolMode === "measure") this.drawMeasureOverlay(g);
     else if (this.toolMode === "route") this.drawRouteOverlay(g);
+    this.ensureToolCursor(g);   // segment pointillé + pastille PERSISTANTS, mutés au survol (updateToolCursor)
+    this.updateToolCursor();
     this.collectScreenObjs(); this.updateScreenScales(); this.request();
+  }
+
+  /** Crée les objets PERSISTANTS du curseur d'outil : le segment pointillé « dernier point → curseur » et la
+      pastille du curseur. Ils sont MUTÉS en place à chaque survol (updateToolCursor) au lieu d'être détruits et
+      recréés par mousemove comme le reste de l'overlay (qui, lui, ne change qu'aux clics). */
+  protected ensureToolCursor(g: THREE.Group): void {
+    if (this.toolMode === "none") return;
+    const color = this.toolMode === "measure" ? 0xffb020 : this.theme.front;   // mêmes couleurs que draw*Overlay
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(6), 3));
+    const line = new THREE.Line(geo, new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.85, depthTest: false, dashSize: 90, gapSize: 55 }));
+    // positions mutées en continu → la bounding sphere n'est jamais à jour : on désactive le frustum culling.
+    line.renderOrder = 21; line.visible = false; line.frustumCulled = false;
+    g.add(line); this._cursorLine = line;
+    const tex = this.circleTexture();
+    if (tex && this.toolMode === "measure") {   // la route n'affiche pas de pastille au curseur
+      const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color, transparent: true, depthWrite: false, depthTest: false }));
+      spr.userData = { screenSize: 6 }; spr.renderOrder = 23; spr.visible = false;
+      g.add(spr); this._cursorDot = spr;
+    }
+  }
+
+  /** Met à jour le SEGMENT EN COURS (dernier point posé → curseur) et la pastille du curseur — mutation en place. */
+  protected updateToolCursor(): void {
+    const pts = this.toolMode === "measure" ? this.measurePts : this.routePts;
+    const cur = this.toolMode === "measure" ? this.measureCursor : this.routeCursor;
+    const last = pts.length ? pts[pts.length - 1] : null;
+    const line = this._cursorLine, dot = this._cursorDot;
+    if (dot) { dot.visible = !!cur; if (cur) dot.position.set(cur.x, cur.y, cur.z); }
+    if (line) {
+      line.visible = !!(cur && last);
+      if (cur && last) {
+        const pos = line.geometry.getAttribute("position") as THREE.BufferAttribute;
+        pos.setXYZ(0, last.x, last.y, last.z); pos.setXYZ(1, cur.x, cur.y, cur.z); pos.needsUpdate = true;
+        line.computeLineDistances();   // requis par le pointillé (LineDashedMaterial)
+      }
+    }
+    this.updateScreenScales(); this.request();   // la pastille a bougé → rescale taille-écran + re-rendu
   }
 
   /** Tracé de mesure : mesures VALIDÉES (étiquette nom+total, surbrillance au survol) + mesure EN COURS (par segment). */
@@ -1143,8 +1200,7 @@ export class DcThreeScene extends DcThreeCamera {
     });
     const pts = this.measurePts;
     this.drawMeasurePolyline(g, pts, COL, true);   // mesure en cours : étiquettes par segment
-    if (this.measureCursor && pts.length) this.addToolLine(g, [pts[pts.length - 1], this.measureCursor], COL, true);   // segment en cours
-    if (this.measureCursor) this.addToolDot(g, this.measureCursor, COL);
+    // (segment en cours + pastille du curseur : objets PERSISTANTS gérés par ensureToolCursor/updateToolCursor)
   }
   protected drawMeasurePolyline(g: THREE.Group, pts: { x: number; y: number; z: number }[], col: number, segLabels: boolean): void {
     if (pts.length >= 2) this.addToolLine(g, pts, col, false);
@@ -1157,7 +1213,7 @@ export class DcThreeScene extends DcThreeCamera {
     const COL = this.theme.front;   // accent
     const pts = this.routePts;
     if (pts.length >= 2) this.addToolLine(g, pts, COL, false);
-    if (this.routeCursor && pts.length) this.addToolLine(g, [pts[pts.length - 1], this.routeCursor], COL, true);
+    // (segment en cours vers le curseur : objet PERSISTANT géré par ensureToolCursor/updateToolCursor)
     pts.forEach((p) => this.addToolDot(g, p, COL));
   }
 

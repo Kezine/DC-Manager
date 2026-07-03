@@ -529,15 +529,31 @@ export abstract class DcThreeCamera extends DcThreeBase {
   }
 
   /* ---- picking (raycasting) ---- */
-  /** Cibles cliquables sous (clientX,clientY) triées du plus proche au plus lointain. */
-  protected rayHits(clientX: number, clientY: number): THREE.Intersection[] {
+  /** Cibles cliquables sous (clientX,clientY) triées du plus proche au plus lointain.
+      `pickablesOnly` (défaut) : n'intersecte QUE les objets porteurs de `userData.pick` — tous les consommateurs
+      (pick / targetAt / hoverTargetAt) ne lisent que ça, et les objets SANS pick (arêtes EdgesGeometry testées
+      segment PAR segment, étiquettes, sprites, grilles) ne faisaient que payer leur géométrie au raycast à chaque
+      survol. `false` = toutes les SURFACES visibles (outil mesure : accrocher n'importe quelle surface). */
+  protected rayHits(clientX: number, clientY: number, pickablesOnly = true): THREE.Intersection[] {
     const cam = this.camera, dom = this.renderer?.domElement; if (!cam || !dom || !this.content) return [];
     const r = dom.getBoundingClientRect();
     this.ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(this.ndc, cam);
-    // three NE filtre PAS les objets masqués (.visible=false) au raycast → on les écarte (ex. couches ports/noms/portes
-    // basculées en visibilité sans reconstruction : un mesh masqué ne doit ni être survolé ni cliqué).
-    return this.raycaster.intersectObjects(this.content.children, true).filter((h) => this.hitVisible(h.object));
+    if (!pickablesOnly) {
+      // three NE filtre PAS les objets masqués (.visible=false) au raycast → on les écarte (ex. couches ports/noms/portes
+      // basculées en visibilité sans reconstruction : un mesh masqué ne doit ni être survolé ni cliqué).
+      return this.raycaster.intersectObjects(this.content.children, true).filter((h) => this.hitVisible(h.object));
+    }
+    // Collecte des cibles ÉLAGUÉE par visibilité (un sous-arbre masqué est ignoré → le filtre hitVisible
+    // a posteriori devient inutile) ; la traversée est un simple parcours d'objets, sans aucun calcul d'intersection.
+    const targets: THREE.Object3D[] = [];
+    const collect = (o: THREE.Object3D): void => {
+      if (o.visible === false) return;
+      if (o.userData && o.userData.pick) targets.push(o);
+      for (const c of o.children) collect(c);
+    };
+    collect(this.content);
+    return this.raycaster.intersectObjects(targets, false);
   }
 
   /** Vrai si l'objet ET tous ses ancêtres sont visibles (la visibilité three ne cascade pas dans le raycast). */
@@ -688,8 +704,17 @@ export abstract class DcThreeCamera extends DcThreeBase {
 
   protected onHover = (e: MouseEvent): void => {
     if (this.drag) return;   // pas de survol pendant un glisser
-    if (this.toolMode !== "none") { this.toolHover(e.clientX, e.clientY); return; }   // mode outil : aperçu du segment, pas de highlight/tooltip
-    this.hoverApply(e.clientX, e.clientY);
+    // THROTTLE rAF : mousemove peut dépasser 100 Hz alors qu'au plus UN raycast par frame AFFICHÉE est utile
+    // (le rendu est de toute façon à la demande). On mémorise la dernière position, résolue au prochain rAF.
+    this._hoverClient = [e.clientX, e.clientY];
+    if (this._hoverRaf) return;
+    this._hoverRaf = requestAnimationFrame(() => {
+      this._hoverRaf = 0;
+      const c = this._hoverClient; this._hoverClient = null;
+      if (!c || this.drag) return;
+      if (this.toolMode !== "none") { this.toolHover(c[0], c[1]); return; }   // mode outil : aperçu du segment, pas de highlight/tooltip
+      this.hoverApply(c[0], c[1]);
+    });
   };
 
   /** Éteint la mise en évidence de survol + le tooltip (utilisé à la fermeture d'un tooltip d'appui long tactile). */
