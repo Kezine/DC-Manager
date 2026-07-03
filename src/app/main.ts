@@ -8,7 +8,7 @@ import "../styles/dc-manager.css";
 import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
-import { readRuntimeConfig } from "./RuntimeConfig";
+import { RuntimeConfigLoader } from "./RuntimeConfig";
 import { GraphView, ListView, ListConfigs, Forms, DatacenterView } from "../views";
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import { ReloadPlanner, Changeset } from "../sync";
@@ -24,7 +24,7 @@ import { APP_RELEASE, EQUIP_FACE_IMG_FIELD } from "../domain/constants";
 import { Shell } from "./Shell";
 import type { ShellHost } from "./Shell";
 import { Pwa } from "./Pwa";
-import { SaveState, shouldAutosave } from "./SaveState";
+import { SaveState } from "./SaveState";
 import { TabChannel } from "./TabChannel";
 import { HandleStore } from "./HandleStore";
 
@@ -42,7 +42,7 @@ function resetUndoTimeline(): void { undoOrder.length = 0; redoOrder.length = 0;
 // run depuis la config injectée par le backend. L'utilisateur peut basculer local⟷api et changer l'URL d'API ;
 // le changement est appliqué au RECHARGEMENT (adapter/store recréés).
 const prefs = new Prefs();
-const INJECTED = readRuntimeConfig();
+const INJECTED = RuntimeConfigLoader.read();
 // VISUALISEUR AUTONOME : un document EMBARQUÉ dans le HTML (export readonly hors-ligne) → on l'ouvre en LOCAL,
 // en lecture seule, sans réseau ni écran d'accueil (cf. exportStandalone / branche VIEWER au boot).
 const EMBED: any = (() => { try { return (window as any).__DCMANAGER_EMBED__ || null; } catch (_) { return null; } })();
@@ -590,7 +590,7 @@ async function boot(): Promise<void> {
     if (autosaveTimer) { clearInterval(autosaveTimer); autosaveTimer = null; }
     if (prefs.autosave && currentHandle && HAS_FS_API) {
       autosaveTimer = setInterval(async () => {
-        if (!shouldAutosave({ dirty: session.dirty, hasFile: !!currentHandle })) return;
+        if (!SaveState.shouldAutosave({ dirty: session.dirty, hasFile: !!currentHandle })) return;
         try {
           if (!(await ensureWritePermission(currentHandle))) { prefs.autosave = false; applyAutosave(); Notify.toast("Auto-save désactivé : permission révoquée", "err"); return; }
           await writeToHandle(currentHandle); refreshChrome();

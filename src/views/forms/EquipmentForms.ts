@@ -26,7 +26,7 @@ import {
   SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
   SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA
 } from "../../domain/constants";
-import { row2, divider, ORIENT_OPTS } from "./shared";
+import { FormUi, ORIENT_OPTS } from "./shared";
 import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
 
@@ -524,23 +524,23 @@ export class EquipmentForms extends FormBase {
     // -- type + identité --
     const typeI = FormControls.select(SpareTypes.ALL.map((t) => ({ value: t.id, label: t.icon + " " + t.label })), sp ? sp.type : SpareTypes.DEFAULT);
     const nameI = FormControls.text(sp ? sp.name : "", "désignation (sinon dérivée du modèle)");
-    root.appendChild(row2(FormControls.fieldRow("Type", typeI), FormControls.fieldRow("Désignation", nameI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Type", typeI), FormControls.fieldRow("Désignation", nameI)));
     const brandI = FormControls.text(sp ? sp.brand : "", "ex. Seagate, Cisco, Intel…");
     const pnI = FormControls.text(sp ? sp.model_pn : "", "modèle / part-number");
-    root.appendChild(row2(FormControls.fieldRow("Marque", brandI), FormControls.fieldRow("Modèle / PN", pnI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Marque", brandI), FormControls.fieldRow("Modèle / PN", pnI)));
     const serialI = FormControls.text(sp ? sp.serial : "", "n° de série (unitaire)");
     root.appendChild(FormControls.fieldRow("Numéro de série", serialI));
 
     // -- bloc DISQUE (HDD/SSD) --
     const diskBlock = document.createElement("div");
-    diskBlock.appendChild(divider("Caractéristiques disque"));
+    diskBlock.appendChild(FormUi.divider("Caractéristiques disque"));
     const capValI = FormControls.number(sp ? sp.capacity_value : "", { min: 0, step: 1, placeholder: "capacité" });
     const capUnitI = FormControls.select(SPARE_CAP_UNITS.map((u) => ({ value: u, label: u === "GB" ? "Go" : "To" })), sp ? sp.capacity_unit : "GB");
     const ifaceI = FormControls.text(sp ? sp.interface : "", "SATA / SAS / NVMe…");
     root.appendChild(FormControls.attachDatalist(ifaceI, "sp-iface", SPARE_HDD_INTERFACES));
     const fmtI = FormControls.text(sp ? sp.form_factor : "", '3.5" / 2.5" / M.2…');
     root.appendChild(FormControls.attachDatalist(fmtI, "sp-fmt", SPARE_HDD_FORMATS));
-    diskBlock.appendChild(row2(FormControls.fieldRow("Capacité", capValI), FormControls.fieldRow("Unité", capUnitI), FormControls.fieldRow("Interface", ifaceI), FormControls.fieldRow("Format", fmtI)));
+    diskBlock.appendChild(FormUi.row2(FormControls.fieldRow("Capacité", capValI), FormControls.fieldRow("Unité", capUnitI), FormControls.fieldRow("Interface", ifaceI), FormControls.fieldRow("Format", fmtI)));
     const rpmI = FormControls.select([{ value: "", label: "—" }].concat(SPARE_HDD_RPM.map((r) => ({ value: String(r), label: r + " rpm" }))), sp && sp.rpm != null ? String(sp.rpm) : "");
     const rpmRow = FormControls.fieldRow("RPM", rpmI, "Vitesse de rotation (HDD uniquement).");
     diskBlock.appendChild(rpmRow);
@@ -548,25 +548,25 @@ export class EquipmentForms extends FormBase {
 
     // -- bloc TRANSCEIVER --
     const txBlock = document.createElement("div");
-    txBlock.appendChild(divider("Caractéristiques transceiver"));
+    txBlock.appendChild(FormUi.divider("Caractéristiques transceiver"));
     const txFormI = FormControls.select([{ value: "", label: "—" }].concat(SPARE_TX_FORMS.map((f) => ({ value: f, label: f }))), sp ? sp.tx_form : "");
     const txSpeedI = FormControls.select([{ value: "", label: "—" }].concat(SPARE_TX_SPEEDS.map((s) => ({ value: s, label: s }))), sp ? sp.tx_speed : "");
     const txMediaI = FormControls.text(sp ? sp.tx_media : "", "LC / RJ45 / DAC / AOC…");
     root.appendChild(FormControls.attachDatalist(txMediaI, "sp-txmedia", SPARE_TX_MEDIA));
-    txBlock.appendChild(row2(FormControls.fieldRow("Form factor", txFormI), FormControls.fieldRow("Débit", txSpeedI), FormControls.fieldRow("Média / connecteur", txMediaI)));
+    txBlock.appendChild(FormUi.row2(FormControls.fieldRow("Form factor", txFormI), FormControls.fieldRow("Débit", txSpeedI), FormControls.fieldRow("Média / connecteur", txMediaI)));
     const txReachI = FormControls.text(sp ? sp.tx_reach : "", "ex. SR · LR · 1310nm · 10km");
     txBlock.appendChild(FormControls.fieldRow("Portée / longueur d'onde", txReachI));
     root.appendChild(txBlock);
 
     // -- bloc AUTRE --
     const otherBlock = document.createElement("div");
-    otherBlock.appendChild(divider("Caractéristiques"));
+    otherBlock.appendChild(FormUi.divider("Caractéristiques"));
     const specsI = FormControls.textArea(sp ? sp.specs : "");
     otherBlock.appendChild(FormControls.fieldRow("Spécifications", specsI, "Caractéristiques en texte libre."));
     root.appendChild(otherBlock);
 
     // -- statut + attribution --
-    root.appendChild(divider("Statut"));
+    root.appendChild(FormUi.divider("Statut"));
     const statusI = FormControls.select(SpareStatuses.ALL.map((s) => ({ value: s.id, label: s.label })), sp ? sp.status : SpareStatuses.DEFAULT);
     root.appendChild(FormControls.fieldRow("Statut", statusI));
     const assignBlock = document.createElement("div");
@@ -575,16 +575,16 @@ export class EquipmentForms extends FormBase {
     );
     const eqI = FormControls.select(eqOpts, sp ? (sp.assigned_equipment_id || "") : "");
     const freeI = FormControls.text(sp ? sp.assigned_free : "", "utilisateur / équipement hors gestion");
-    assignBlock.appendChild(row2(FormControls.fieldRow("Équipement affecté", eqI, "Ou laissez « libre » et renseignez le champ ci-contre."), FormControls.fieldRow("Attribution libre", freeI)));
+    assignBlock.appendChild(FormUi.row2(FormControls.fieldRow("Équipement affecté", eqI, "Ou laissez « libre » et renseignez le champ ci-contre."), FormControls.fieldRow("Attribution libre", freeI)));
     const assignDateI: any = FormControls.date(sp ? sp.assigned_date : "");
     assignBlock.appendChild(FormControls.fieldRow("Date d'attribution", assignDateI));
     root.appendChild(assignBlock);
 
     // -- administratif --
-    root.appendChild(divider("Administratif"));
+    root.appendChild(FormUi.divider("Administratif"));
     const purchaseI: any = FormControls.date(sp ? sp.purchase_date : "");
     const poI = FormControls.text(sp ? sp.po_ref : "", "réf. bon de commande");
-    root.appendChild(row2(FormControls.fieldRow("Date d'achat", purchaseI), FormControls.fieldRow("Bon de commande", poI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Date d'achat", purchaseI), FormControls.fieldRow("Bon de commande", poI)));
     const storageI = FormControls.text(sp ? sp.storage_location : "", "ex. Armoire B · étagère 3 · bac 12");
     root.appendChild(FormControls.fieldRow("Emplacement de stockage", storageI));
     const commentI = FormControls.textArea(sp ? sp.comment : "");
@@ -667,25 +667,25 @@ export class EquipmentForms extends FormBase {
     let typeOpts = EquipmentTypes.ALL.map((t) => ({ value: t.id, label: t.label }));
     if (curType && !EquipmentTypes.ALL.some((t) => t.id === curType)) typeOpts = [{ value: curType, label: curType + " (hors liste)" }, ...typeOpts];
     const typeI = FormControls.select(typeOpts, curType);
-    root.appendChild(row2(FormControls.fieldRow("Nom", nameI), FormControls.fieldRow("Type", typeI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Nom", nameI), FormControls.fieldRow("Type", typeI)));
 
     const invI = FormControls.toggle("Inventaire seul", eq ? !!eq.inventory_only : false, () => sync(), { block: true, title: "Répertorié uniquement : ni placement, ni câblage, ni ports." });
     root.appendChild(invI);
     const brandI = FormControls.text(eq ? eq.brand : "", "ex. Cisco, Dell…");
     const modelI = FormControls.text(eq ? eq.model : "", "ex. Catalyst 2960…");
-    root.appendChild(row2(FormControls.fieldRow("Marque", brandI), FormControls.fieldRow("Modèle", modelI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Marque", brandI), FormControls.fieldRow("Modèle", modelI)));
     const serialI = FormControls.text(eq ? eq.serial : "", "n° de série");
     root.appendChild(FormControls.fieldRow("Numéro de série", serialI));
 
     // -- administratif --
-    root.appendChild(divider("Administratif"));
+    root.appendChild(FormUi.divider("Administratif"));
     const purchaseI = FormControls.date(eq ? eq.purchase_date : "");
     const warrantyI = FormControls.date(eq ? eq.warranty_end : "");
     const poI = FormControls.text(eq ? eq.po_ref : "", "réf. bon de commande");
-    root.appendChild(row2(FormControls.fieldRow("Date d'achat", purchaseI), FormControls.fieldRow("Fin de garantie", warrantyI), FormControls.fieldRow("Bon de commande", poI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Date d'achat", purchaseI), FormControls.fieldRow("Fin de garantie", warrantyI), FormControls.fieldRow("Bon de commande", poI)));
     const assignDateI = FormControls.date(eq ? eq.assigned_date : "");
     const assignToI = FormControls.text(eq ? eq.assigned_to : "", "nom de la personne");
-    root.appendChild(row2(FormControls.fieldRow("Date d'attribution", assignDateI), FormControls.fieldRow("Attribué à", assignToI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Date d'attribution", assignDateI), FormControls.fieldRow("Attribué à", assignToI)));
     const pduI = FormControls.number((eq && eq.pdu_max_a != null) ? eq.pdu_max_a : "", { min: 0, step: 1, placeholder: "ampères" });
     const pduRow = FormControls.fieldRow("Capacité max PDU (A)", pduI, "Pour les bandeaux d'alimentation.");
     root.appendChild(pduRow);
@@ -698,27 +698,27 @@ export class EquipmentForms extends FormBase {
 
     // -- dimensions + placement (sections « avancées », masquées en inventaire) --
     const adv = document.createElement("div");
-    adv.appendChild(divider("Dimensions"));
+    adv.appendChild(FormUi.divider("Dimensions"));
     const dimI = FormControls.select([{ value: "u", label: "En U (rack)" }, { value: "free", label: "Libre (L × l × h en mm)" }], eq ? (eq.dim_mode === "free" ? "free" : "u") : "u");
     adv.appendChild(FormControls.fieldRow("Dimensionnement", dimI));
     // U
     const uBox = document.createElement("div");
     const uHI = FormControls.number(eq ? eq.u_height : 1, { min: 1, step: 1 });
     const depthI = FormControls.select(Depths.ALL.map((d) => ({ value: d.id, label: d.label })), eq && ["full", "half", "quarter"].includes(eq.depth) ? eq.depth : "full");
-    uBox.appendChild(row2(FormControls.fieldRow("Hauteur (U)", uHI), FormControls.fieldRow("Profondeur", depthI)));
+    uBox.appendChild(FormUi.row2(FormControls.fieldRow("Hauteur (U)", uHI), FormControls.fieldRow("Profondeur", depthI)));
     adv.appendChild(uBox);
     // libre
     const freeBox = document.createElement("div");
     const flI = FormControls.number((eq && eq.free_l_mm != null) ? eq.free_l_mm : "", { min: 0, step: 1, placeholder: "longueur" });
     const fwI = FormControls.number((eq && eq.free_w_mm != null) ? eq.free_w_mm : "", { min: 0, step: 1, placeholder: "largeur" });
     const fhI = FormControls.number((eq && eq.free_h_mm != null) ? eq.free_h_mm : "", { min: 0, step: 1, placeholder: "hauteur" });
-    freeBox.appendChild(row2(FormControls.fieldRow("Longueur (mm)", flI), FormControls.fieldRow("Largeur (mm)", fwI), FormControls.fieldRow("Hauteur (mm)", fhI)));
+    freeBox.appendChild(FormUi.row2(FormControls.fieldRow("Longueur (mm)", flI), FormControls.fieldRow("Largeur (mm)", fwI), FormControls.fieldRow("Hauteur (mm)", fhI)));
     adv.appendChild(freeBox);
 
     // placement EN SALLE (au sol) — mode LIBRE : équivalent FORMULAIRE du glisser/positionnement en vue 2D/3D
     // (principe « tout éditable hors vue »). Salle + centre X/Y + hauteur Z (négatif = sous le faux-plancher) + orientation.
     const salleBox = document.createElement("div");
-    salleBox.appendChild(divider("Placement en salle (au sol)"));
+    salleBox.appendChild(FormUi.divider("Placement en salle (au sol)"));
     const dcEqOpts = [{ value: "", label: "— non placé —" }].concat(store.all("datacenters").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((d: any) => ({ value: d.id, label: d.name || "(salle)" })));
     const dcSelE = FormControls.select(dcEqOpts, eq && eq.dc_id ? eq.dc_id : "");
     salleBox.appendChild(FormControls.fieldRow("Salle (datacenter)", dcSelE, "Pose l'équipement au SOL d'une salle. Position vide = centre."));
@@ -726,7 +726,7 @@ export class EquipmentForms extends FormBase {
     const eyI = FormControls.number((eq && eq.dc_y != null) ? eq.dc_y : "", { min: 0, step: 10, placeholder: "centre Y (mm)" });
     const ezI = FormControls.number((eq && eq.dc_z != null) ? eq.dc_z : 0, { step: 10, placeholder: "0" });   // hauteur Z : négatif autorisé (pas de min)
     const eoI = FormControls.select(ORIENT_OPTS, String(Normalize.rackOrientation(eq ? eq.dc_orientation : 0)));
-    const sallePos = row2(FormControls.fieldRow("Position X (mm)", exI), FormControls.fieldRow("Position Y (mm)", eyI), FormControls.fieldRow("Hauteur Z (mm)", ezI), FormControls.fieldRow("Orientation", eoI));
+    const sallePos = FormUi.row2(FormControls.fieldRow("Position X (mm)", exI), FormControls.fieldRow("Position Y (mm)", eyI), FormControls.fieldRow("Hauteur Z (mm)", ezI), FormControls.fieldRow("Orientation", eoI));
     salleBox.appendChild(sallePos);
     const salleHint = document.createElement("div"); salleHint.className = "form-hint"; salleBox.appendChild(salleHint);
     const syncSalle = () => {
@@ -739,18 +739,18 @@ export class EquipmentForms extends FormBase {
 
     // placement rack (mode U seulement, dans ce cœur)
     const placeBox = document.createElement("div");
-    placeBox.appendChild(divider("Placement (rack)"));
+    placeBox.appendChild(FormUi.divider("Placement (rack)"));
     const rackOpts = [{ value: "", label: "— non placé —" }].concat(store.all("racks").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((r: any) => ({ value: r.id, label: r.name || "(baie)" })));
     const rackI = FormControls.select(rackOpts, eq && eq.placement_mode === "rack" && eq.rack_id ? eq.rack_id : "");
     const rackUI = FormControls.number((eq && eq.rack_u != null) ? eq.rack_u : "", { min: 1, step: 1, placeholder: "U de bas (vide = libre)" });
-    placeBox.appendChild(row2(FormControls.fieldRow("Baie", rackI), FormControls.fieldRow("Position (U)", rackUI)));
+    placeBox.appendChild(FormUi.row2(FormControls.fieldRow("Baie", rackI), FormControls.fieldRow("Position (U)", rackUI)));
     const placeHint = document.createElement("div"); placeHint.className = "form-hint";
     placeHint.textContent = "Placement latéral / paroi / sur étage : à venir (préservé pour les équipements existants).";
     placeBox.appendChild(placeHint);
     adv.appendChild(placeBox);
 
     // -- agrégats (LAG / bond) --
-    adv.appendChild(divider("Agrégats (LAG / bond)"));
+    adv.appendChild(FormUi.divider("Agrégats (LAG / bond)"));
     const aggList = document.createElement("div"); aggList.className = "chip-list"; adv.appendChild(aggList);
     const addAggBtn = document.createElement("button"); addAggBtn.type = "button"; addAggBtn.className = "btn btn-ghost btn-sm"; addAggBtn.textContent = "+ Agrégat"; addAggBtn.style.marginTop = "8px"; adv.appendChild(addAggBtn);
 

@@ -68,7 +68,7 @@ const { MeasureTool } = D("views/dc/MeasureTool.js");
 const { RouteTool } = D("views/dc/RouteTool.js");
 const { ImageStore } = D("data/ImageStore.js");
 const { FaceImage } = D("models/index.js");
-const { SaveState, computeSaveState, shouldAutosave } = D("app/SaveState.js");
+const { SaveState } = D("app/SaveState.js");
 const { EntityRegistry } = D("models/index.js");
 const { ReloadPlanner } = D("sync/ReloadPlanner.js");
 const { COLLECTION_THREE_IMPACT, RenderImpact } = D("sync/RenderImpact.js");
@@ -1216,15 +1216,15 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
   console.log("\n• Détection de modifications (dirty) + état de sauvegarde");
   {
     // ---- logique PURE de l'état de la pastille ----
-    ck.eq(computeSaveState({ dirty: false, hasFile: false, autosaveOn: false }), "mem", "save: mémoire propre → mem");
-    ck.eq(computeSaveState({ dirty: true, hasFile: false, autosaveOn: false }), "dirty", "save: mémoire modifiée → dirty");
-    ck.eq(computeSaveState({ dirty: false, hasFile: true, autosaveOn: false }), "clean", "save: fichier à jour → clean");
-    ck.eq(computeSaveState({ dirty: true, hasFile: true, autosaveOn: false }), "dirty", "save: fichier modifié (auto-save off) → dirty");
-    ck.eq(computeSaveState({ dirty: true, hasFile: true, autosaveOn: true }), "dirty-on", "save: fichier modifié (auto-save on) → dirty-on");
+    ck.eq(SaveState.compute({ dirty: false, hasFile: false, autosaveOn: false }), "mem", "save: mémoire propre → mem");
+    ck.eq(SaveState.compute({ dirty: true, hasFile: false, autosaveOn: false }), "dirty", "save: mémoire modifiée → dirty");
+    ck.eq(SaveState.compute({ dirty: false, hasFile: true, autosaveOn: false }), "clean", "save: fichier à jour → clean");
+    ck.eq(SaveState.compute({ dirty: true, hasFile: true, autosaveOn: false }), "dirty", "save: fichier modifié (auto-save off) → dirty");
+    ck.eq(SaveState.compute({ dirty: true, hasFile: true, autosaveOn: true }), "dirty-on", "save: fichier modifié (auto-save on) → dirty-on");
     // ---- l'auto-save n'écrit QUE si modifié ET fichier lié ----
-    ck(!shouldAutosave({ dirty: false, hasFile: true }), "auto-save: rien à écrire (propre) → non");
-    ck(!shouldAutosave({ dirty: true, hasFile: false }), "auto-save: pas de fichier lié → non");
-    ck(shouldAutosave({ dirty: true, hasFile: true }), "auto-save: modifié + fichier → oui");
+    ck(!SaveState.shouldAutosave({ dirty: false, hasFile: true }), "auto-save: rien à écrire (propre) → non");
+    ck(!SaveState.shouldAutosave({ dirty: true, hasFile: false }), "auto-save: pas de fichier lié → non");
+    ck(SaveState.shouldAutosave({ dirty: true, hasFile: true }), "auto-save: modifié + fichier → oui");
     // ---- transitions du suivi (changements HORS historique : meta / images) ----
     const ss = new SaveState();
     ck(!ss.dirty && ss.state() === "mem", "SaveState initial : propre, mémoire");

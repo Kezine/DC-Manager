@@ -12,12 +12,15 @@ export interface RuntimeConfig {
   loginUrl: string;       // URL de connexion SSO (bouton « Connexion » du welcome) — macro ${clbkUrl} = URL courante encodée
 }
 
-/** Lit la config injectée (best-effort) ; défaut = mode fichier, API même origine, pas d'URL de connexion. */
-export function readRuntimeConfig(): RuntimeConfig {
-  let c: any = {};
-  try { c = (window as any).__DCMANAGER_CONFIG__ || {}; } catch (_) { c = {}; }
-  const mode: AppMode = (c.mode === "api") ? "api" : "local";
-  const apiBaseUrl = (typeof c.apiBaseUrl === "string" && c.apiBaseUrl.trim()) ? c.apiBaseUrl.trim() : "api";
-  const loginUrl = (typeof c.loginUrl === "string") ? c.loginUrl.trim() : "";
-  return { mode, apiBaseUrl, loginUrl };
+/** Lecture de la config d'exécution — classe sémantique à méthode statique (principe n°2). */
+export class RuntimeConfigLoader {
+  /** Lit la config injectée (best-effort) ; défaut = mode fichier, API même origine, pas d'URL de connexion. */
+  static read(): RuntimeConfig {
+    let c: any = {};
+    try { c = (window as any).__DCMANAGER_CONFIG__ || {}; } catch (_) { c = {}; }
+    const mode: AppMode = (c.mode === "api") ? "api" : "local";
+    const apiBaseUrl = (typeof c.apiBaseUrl === "string" && c.apiBaseUrl.trim()) ? c.apiBaseUrl.trim() : "api";
+    const loginUrl = (typeof c.loginUrl === "string") ? c.loginUrl.trim() : "";
+    return { mode, apiBaseUrl, loginUrl };
+  }
 }

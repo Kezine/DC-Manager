@@ -3,7 +3,7 @@ import { FormControls } from "../../ui/FormControls";
 import { Notify } from "../../ui/Notify";
 import { Html } from "../../core/Html";
 import { Ip } from "../../core/Ip";
-import { ipNetOptions, eqOptions } from "./shared";
+import { FormUi } from "./shared";
 import type { FormHost } from "./shared";
 import { RackForms } from "./RackForms";
 import { LiveValidation } from "./LiveValidation";
@@ -58,7 +58,7 @@ export class IpamForms extends RackForms {
     const addr: any = id ? store.get("ipAddresses", id) : null;
     if (!addr && !store.all("ipNetworks").length) { Notify.toast("Créez d'abord un réseau IP.", "err"); return; }
     const root = document.createElement("div");
-    const netSel = FormControls.select(ipNetOptions(store), addr ? addr.network_id : "");
+    const netSel = FormControls.select(FormUi.ipNetOptions(store), addr ? addr.network_id : "");
     root.appendChild(FormControls.fieldRow("Réseau IP", netSel));
     const ipWrap = document.createElement("div"); ipWrap.style.display = "flex"; ipWrap.style.gap = "8px";
     const ipI = FormControls.text(addr ? addr.address : "", "ex. 10.0.0.10"); ipI.style.flex = "1"; ipI.style.fontFamily = "var(--mono)";
@@ -71,7 +71,7 @@ export class IpamForms extends RackForms {
     root.appendChild(FormControls.fieldRow("Adresse IP", ipWrap)); root.appendChild(hint);
     const hostI = FormControls.text(addr ? addr.hostname : "", "ex. srv-web-01.lan"); hostI.style.fontFamily = "var(--mono)";
     root.appendChild(FormControls.fieldRow("Hostname", hostI, "Facultatif."));
-    const eqSel = FormControls.select(eqOptions(store, "— aucun —"), addr ? (addr.equipment_id || "") : "");
+    const eqSel = FormControls.select(FormUi.eqOptions(store, "— aucun —"), addr ? (addr.equipment_id || "") : "");
     root.appendChild(FormControls.fieldRow("Équipement", eqSel, "Facultatif."));
     const descI = FormControls.textArea(addr ? addr.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
@@ -105,7 +105,7 @@ export class IpamForms extends RackForms {
     const rng: any = id ? store.get("dhcpRanges", id) : null;
     if (!rng && !store.all("ipNetworks").length) { Notify.toast("Créez d'abord un réseau IP.", "err"); return; }
     const root = document.createElement("div");
-    const netSel = FormControls.select(ipNetOptions(store), rng ? rng.network_id : "");
+    const netSel = FormControls.select(FormUi.ipNetOptions(store), rng ? rng.network_id : "");
     root.appendChild(FormControls.fieldRow("Réseau IP", netSel));
     const startI = FormControls.text(rng ? rng.start_ip : "", "ex. 10.0.0.100"); startI.style.fontFamily = "var(--mono)";
     const endI = FormControls.text(rng ? rng.end_ip : "", "ex. 10.0.0.200"); endI.style.fontFamily = "var(--mono)";
@@ -114,7 +114,7 @@ export class IpamForms extends RackForms {
     netSel.addEventListener("change", refresh); refresh();
     root.appendChild(FormControls.fieldRow("Début de plage", startI));
     root.appendChild(FormControls.fieldRow("Fin de plage", endI)); root.appendChild(hint);
-    const srvSel = FormControls.select(eqOptions(store, "— non désigné —"), rng ? (rng.server_id || "") : "");
+    const srvSel = FormControls.select(FormUi.eqOptions(store, "— non désigné —"), rng ? (rng.server_id || "") : "");
     root.appendChild(FormControls.fieldRow("Serveur DHCP", srvSel, "Facultatif."));
     const descI = FormControls.textArea(rng ? rng.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));

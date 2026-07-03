@@ -11,7 +11,7 @@ import {
   POWER_SOURCES,
   CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW
 } from "../../domain/constants";
-import { row2, setOptions } from "./shared";
+import { FormUi } from "./shared";
 import type { FormHost } from "./shared";
 import { EquipmentForms } from "./EquipmentForms";
 
@@ -135,10 +135,10 @@ export class CableForms extends EquipmentForms {
 
     const selEqA = FormControls.select(eqOpts(null, eqA, null), eqA);
     const selPortA = FormControls.select(portOpts(eqA, initPortA || null, null), initPortA);
-    root.appendChild(row2(FormControls.fieldRow("Équipement A", selEqA), FormControls.fieldRow("Port A", selPortA)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Équipement A", selEqA), FormControls.fieldRow("Port A", selPortA)));
     const selEqB = FormControls.select(eqOpts(null, eqB, null), eqB);
     const selPortB = FormControls.select(portOpts(eqB, initPortB || null, null), initPortB);
-    root.appendChild(row2(FormControls.fieldRow("Équipement B", selEqB), FormControls.fieldRow("Port B", selPortB)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Équipement B", selEqB), FormControls.fieldRow("Port B", selPortB)));
 
     const selType = FormControls.select([{ value: "", label: "— type de câble —" }], cable ? (cable.cable_type_id || "") : "");
     root.appendChild(FormControls.fieldRow("Type de câble", selType, "Déduit du port choisi ; seuls les types COMPATIBLES sont proposés."));
@@ -165,7 +165,7 @@ export class CableForms extends EquipmentForms {
     const syncPrimary = () => {
       if (netState.primary && !netState.ids.has(netState.primary)) netState.primary = null;
       if (!netState.primary && netState.ids.size) netState.primary = [...netState.ids][0];
-      setOptions(primSel, [{ value: "", label: "— aucun —" }].concat([...netState.ids].map((nid) => { const n: any = store.get("networks", nid); return { value: nid, label: n ? (n.label || "(réseau)") : nid }; })), netState.primary || "");
+      FormUi.setOptions(primSel, [{ value: "", label: "— aucun —" }].concat([...netState.ids].map((nid) => { const n: any = store.get("networks", nid); return { value: nid, label: n ? (n.label || "(réseau)") : nid }; })), netState.primary || "");
       primField.style.display = netState.ids.size > 1 ? "" : "none";
     };
     const renderNets = () => {
@@ -292,7 +292,7 @@ export class CableForms extends EquipmentForms {
     };
     const rebuildTypeSelect = () => {
       const bnd: any = selectedBundle();
-      if (bnd) { const ct: any = bnd.cable_type_id ? store.get("cableTypes", bnd.cable_type_id) : null; setOptions(selType, [{ value: bnd.cable_type_id || "", label: ct ? (ct.name + " · " + ct.family) : "(type du faisceau ?)" }], bnd.cable_type_id || ""); selType.disabled = true; selType.style.opacity = "0.7"; return; }
+      if (bnd) { const ct: any = bnd.cable_type_id ? store.get("cableTypes", bnd.cable_type_id) : null; FormUi.setOptions(selType, [{ value: bnd.cable_type_id || "", label: ct ? (ct.name + " · " + ct.family) : "(type du faisceau ?)" }], bnd.cable_type_id || ""); selType.disabled = true; selType.style.opacity = "0.7"; return; }
       selType.disabled = false; selType.style.opacity = "";
       const fam = typeFilterFamily();
       const kindTarget = store.portKind(store.get("ports", selPortA.value)) || store.portKind(store.get("ports", selPortB.value)) || null;
@@ -304,15 +304,15 @@ export class CableForms extends EquipmentForms {
       if (cur && !list.some((ct: any) => ct.id === cur)) { const c: any = store.get("cableTypes", cur); if (c) list.push(c); }
       let next = cur;
       if (fam) { const cc: any = cur ? store.get("cableTypes", cur) : null; if (!cc || cc.family !== fam) { const f = list.find((ct: any) => ct.family === fam); next = f ? f.id : ""; } }
-      setOptions(selType, [{ value: "", label: "— type de câble —" }].concat(list.map((ct: any) => ({ value: ct.id, label: ct.name + " · " + ct.family }))), next);
+      FormUi.setOptions(selType, [{ value: "", label: "— type de câble —" }].concat(list.map((ct: any) => ({ value: ct.id, label: ct.name + " · " + ct.family }))), next);
     };
     const refresh = () => {
       rebuildTypeSelect();
-      setOptions(selEqA, eqOpts(constraintFor("A"), selEqA.value, dcConstraintFor("A")), selEqA.value);
-      setOptions(selEqB, eqOpts(constraintFor("B"), selEqB.value, dcConstraintFor("B")), selEqB.value);
+      FormUi.setOptions(selEqA, eqOpts(constraintFor("A"), selEqA.value, dcConstraintFor("A")), selEqA.value);
+      FormUi.setOptions(selEqB, eqOpts(constraintFor("B"), selEqB.value, dcConstraintFor("B")), selEqB.value);
       const pa = selPortA.value, pb = selPortB.value;
-      setOptions(selPortA, portOpts(selEqA.value, pa, constraintFor("A")), pa);
-      setOptions(selPortB, portOpts(selEqB.value, pb, constraintFor("B")), pb);
+      FormUi.setOptions(selPortA, portOpts(selEqA.value, pa, constraintFor("A")), pa);
+      FormUi.setOptions(selPortB, portOpts(selEqB.value, pb, constraintFor("B")), pb);
     };
     const syncBundleUI = () => {
       const bnd: any = selectedBundle();
@@ -347,8 +347,8 @@ export class CableForms extends EquipmentForms {
     };
 
     bundleSel.onchange = () => { syncBundleUI(); refresh(); syncRoute(); syncStatus(true); renderNets(); };
-    selEqA.onchange = () => { setOptions(selPortA, portOpts(selEqA.value, null, constraintFor("A"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
-    selEqB.onchange = () => { setOptions(selPortB, portOpts(selEqB.value, null, constraintFor("B"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
+    selEqA.onchange = () => { FormUi.setOptions(selPortA, portOpts(selEqA.value, null, constraintFor("A"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
+    selEqB.onchange = () => { FormUi.setOptions(selPortB, portOpts(selEqB.value, null, constraintFor("B"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
     selPortA.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
     selPortB.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
     selType.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
@@ -416,7 +416,7 @@ export class CableForms extends EquipmentForms {
     const typeI = FormControls.select(typeOpts, bnd ? (bnd.cable_type_id || "") : "");
     const fcI = FormControls.number(bnd ? bnd.fiber_count : 12, { min: 1, step: 1 });
     const lenI = FormControls.number((bnd && bnd.length_m != null) ? bnd.length_m : "", { min: 0, step: 0.1, placeholder: "ex. 25" });
-    root.appendChild(row2(FormControls.fieldRow("Type (verrouille les brins)", typeI, "Impose le type des câbles associés."), FormControls.fieldRow("Nombre de brins", fcI, "Capacité (plafond)."), FormControls.fieldRow("Longueur (m)", lenI, "Partagée par les brins.")));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Type (verrouille les brins)", typeI, "Impose le type des câbles associés."), FormControls.fieldRow("Nombre de brins", fcI, "Capacité (plafond)."), FormControls.fieldRow("Longueur (m)", lenI, "Partagée par les brins.")));
 
     // route PARTAGÉE (ordonnée) — picker compact (exits/OOB)
     const wpState = { ids: bnd ? (bnd.waypoint_ids || []).slice() : [] as string[] };
