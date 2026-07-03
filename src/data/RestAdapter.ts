@@ -1,6 +1,6 @@
 import { DataAdapter } from "./DataAdapter";
 import { PAGE_SIZE_DEFAULT } from "./config";
-import { RawRecord, Snapshot, Transaction, Where, ListOptions, ListResult } from "./types";
+import { RawRecord, Snapshot, Transaction, ListOptions, ListResult } from "./types";
 import { EntityRegistry } from "../models";
 import { RestProtocol } from "./RestProtocol";
 

@@ -57,7 +57,6 @@ export class GraphView {
      "B" = tout reste en place, les filtres ne font que masquer ; "C" = comme A mais
      les nœuds déplacés à la main gardent leur position. */
   displayMode: "A" | "B" | "C" = "A";
-  private layoutMode: "auto" | "manual" = "auto";
   private _layoutDirty = false;
   private _hasRendered = false;
   private pos: Record<string, { x: number; y: number }> = {};   // positions vivantes
@@ -190,7 +189,7 @@ export class GraphView {
     this.buildToolbar();
     this.fitHeight();   // hauteur viewport AVANT le 1er rendu (svg créé à la bonne taille + recadrage correct)
     this.selection.clear();
-    this.layoutMode = this._activeLayout() ? "manual" : "auto";
+
     if (this._activeLayout() && !Object.keys(this.pos).length) this.pos = Object.assign({}, this._activePositions() || {});
     const first = !this._hasRendered;
     this.rebuild({ recenter: first });
@@ -221,6 +220,7 @@ export class GraphView {
     this.filters.equip.forEach((id) => eqIds.add(id));
     cables.forEach((c: any) => {
       const pa = s.get("ports", c.from_port_id), pb = s.get("ports", c.to_port_id);
+      if (!pa || !pb || !pa.equipment_id || !pb.equipment_id) return;   // garanti par _resolvableCables — garde de typage/robustesse
       const ea = pa.equipment_id, eb = pb.equipment_id;
       let include = false;
       if (this.filters.equip.size && (this.filters.equip.has(ea) || this.filters.equip.has(eb))) include = true;
@@ -255,9 +255,10 @@ export class GraphView {
       this._shownEq = null; this._shownCable = null;
     }
     this.nodes = [...eqIds].map((id) => s.get("equipments", id)).filter(Boolean).map((e: any) => ({ id: e.id, name: e.name || "(sans nom)", type: e.type || "", group_id: e.group_id || null, x: 0, y: 0, vx: 0, vy: 0 }));
-    this.edges = [...cableIds].map((id) => s.get("cables", id)).filter(Boolean).map((c: any) => {
+    this.edges = [...cableIds].map((id) => s.get("cables", id)).filter(Boolean).flatMap((c: any) => {
       const pa = s.get("ports", c.from_port_id), pb = s.get("ports", c.to_port_id);
-      return { id: c.id, name: c.name || "", a: pa.equipment_id, b: pb.equipment_id, network_id: c.network_id, status: c.status };
+      if (!pa || !pb || !pa.equipment_id || !pb.equipment_id) return [];   // garanti par _resolvableCables — garde de typage/robustesse
+      return [{ id: c.id, name: c.name || "", a: pa.equipment_id, b: pb.equipment_id, network_id: c.network_id, status: c.status }];
     });
   }
 
@@ -370,7 +371,7 @@ export class GraphView {
   }
 
   activateDefaultView(): void {
-    this.store.meta.activeLayoutId = null; this._layoutDirty = false; this.layoutMode = "auto";
+    this.store.meta.activeLayoutId = null; this._layoutDirty = false;
     this._persistLayouts(); this.rebuild({ recenter: true }); Notify.toast("Vue par défaut");
   }
 
@@ -395,7 +396,7 @@ export class GraphView {
     const id = Id.uid();
     this._layouts().push({ id, name, positions, filters, created_date: Id.nowIso(), updated_date: Id.nowIso() });
     this.store.meta.activeLayoutId = id; this._layoutDirty = false;
-    this._persistLayouts(); this.layoutMode = "manual"; this._moved.clear();
+    this._persistLayouts(); this._moved.clear();
     this.pos = Object.assign({}, positions);
     this.buildToolbar(); this.rebuild({ recenter: true });
     Notify.toast("Disposition « " + name + " » enregistrée");
@@ -405,7 +406,7 @@ export class GraphView {
     if (!l) return;
     this.store.meta.activeLayoutId = id; this._layoutDirty = false;
     this.pos = Object.assign({}, l.positions || {}); this._moved.clear();
-    this._applyFilters(l.filters); this._persistLayouts(); this.layoutMode = "manual";
+    this._applyFilters(l.filters); this._persistLayouts();
     this.buildToolbar(); this.rebuild({ recenter: true });
     Notify.toast("Disposition « " + (l.name || "") + " » restaurée");
   }
@@ -430,7 +431,7 @@ export class GraphView {
     if (!ok) return;
     const wasActive = this.store.meta.activeLayoutId === id;
     this.store.meta.graphLayouts = this._layouts().filter((x) => x.id !== id);
-    if (wasActive) { this.store.meta.activeLayoutId = null; this.layoutMode = "auto"; this._layoutDirty = false; }
+    if (wasActive) { this.store.meta.activeLayoutId = null; this._layoutDirty = false; }
     this._persistLayouts(); this.buildToolbar(); this.rebuild({ recenter: wasActive }); Notify.toast("Disposition supprimée");
   }
   /** Réorganise tout (force) en ignorant les positions vivantes. */

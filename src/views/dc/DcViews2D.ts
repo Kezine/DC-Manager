@@ -1,32 +1,13 @@
-import type { Store } from "../../store";
 import { Dom } from "../../ui/Dom";
-import { FormControls } from "../../ui/FormControls";
-import { Dialog } from "../../ui/Dialog";
-import { Notify } from "../../ui/Notify";
-import { ContextMenu } from "../../ui/ContextMenu";
-import type { CtxSection } from "../../ui/ContextMenu";
-import { ImageExport } from "../../ui/ImageExport";
-import type { ExportOptions } from "../../ui/ImageExport";
-import { Html } from "../../core/Html";
 import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
-import { RackScene } from "../../geometry/RackScene";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
-import { Resolver3D } from "../../geometry/Resolver3D";
 import { FloorLayout } from "../../geometry/FloorLayout";
-import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
-import { Box } from "../../geometry/Box";
-import { Painter } from "../../geometry/Painter";
-import { GridGeometry } from "../../geometry/GridGeometry";
-import { Depths } from "../../registries/Depths";
-import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Format } from "../../core/Format";
-import { Text } from "../../core/Text";
 import { Waypoint } from "../../models/Waypoint";
-import { CableStatuses } from "../../domain/CableStatuses";
-import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
-import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
-import type { Vec3, Drawable, DatacenterHost } from "./shared";
+import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT } from "../../domain/constants";
+import { DC_DOT_PX, WP_HIT_PX } from "./shared";
+import type { Vec3 } from "./shared";
 import { DcScene3D } from "./DcScene3D";
 
 export abstract class DcViews2D extends DcScene3D {

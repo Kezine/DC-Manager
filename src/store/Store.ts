@@ -3,6 +3,7 @@ import { FieldIndex } from "../data/FieldIndex";
 import { INDEX_SPEC, PAGE_SIZE_DEFAULT } from "../data/config";
 import { RawRecord, Snapshot, Transaction } from "../data/types";
 import { Entity } from "../models/Entity";
+import type { CollectionName, EntityOf } from "../models/EntityRegistry";
 import { EntityRegistry } from "../models/EntityRegistry";
 import { PortType } from "../models/PortType";
 import { CableType } from "../models/CableType";
@@ -293,10 +294,18 @@ export class Store {
     this._hydrate(snap); this._emit(); return true;
   }
 
-  /* ---- LECTURE (cache hydraté, synchrone) ---- */
-  get(collection: string, id: string): any {
-    return this._idIndex[collection] ? this._idIndex[collection].get(id) || null : null;
+  /* ---- LECTURE (cache hydraté, synchrone) ----
+     SURCHARGES TYPÉES : une collection LITTÉRALE (`store.get("racks", id)`) renvoie le type d'entité
+     réel (`Rack | null`) — le compilateur impose alors la garde null et connaît les champs. Une
+     collection VARIABLE (chaîne quelconque) retombe sur `any` (compat. code générique / historique). */
+  get<C extends CollectionName>(collection: C, id: string | null | undefined): EntityOf<C> | null;
+  get(collection: string, id: string | null | undefined): any;
+  get(collection: string, id: string | null | undefined): any {
+    // id nullable ACCEPTÉ (FK optionnelle → null), comme depuis toujours (Map.get(undefined) → undefined → null).
+    return this._idIndex[collection] ? this._idIndex[collection].get(id as string) || null : null;
   }
+  all<C extends CollectionName>(collection: C): EntityOf<C>[];
+  all(collection: string): any[];
   all(collection: string): any[] { return this.data[collection].slice(); }
 
   /* Ré-hydrate une entité depuis un enregistrement adapter (identité préservée si
@@ -693,7 +702,7 @@ export class Store {
   /** Analyse de la route (waypoint_ids EFFECTIFS, ordonnés A→B) : grammaire + cohérence des bouts posés.
       → { steps[{wp,type,seg}], errors[], valid, hasExits, startDc, endDc, dcA, dcB }. Pure lecture. */
   cableRoute(cable: any): { steps: any[]; errors: RouteError[]; valid: boolean; hasExits: boolean; startDc: string | null; endDc: string | null; dcA: string | null; dcB: string | null } {
-    const wps = this.effectiveWaypointIds(cable).map((id) => this.get("waypoints", id)).filter(Boolean);
+    const wps = this.effectiveWaypointIds(cable).map((id) => this.get("waypoints", id)).filter((w): w is NonNullable<typeof w> => w != null);
     const errors: RouteError[] = [], steps: any[] = [];
     const err = (code: RouteErrorCode, message: string) => { errors.push({ code, message }); };
     let cur: string | null = null, outside = false, exitFrom: string | null = null, startDc: string | null = null, exits = 0, seg = -1;
@@ -902,7 +911,7 @@ export class Store {
   async removeSite(siteId: string): Promise<void> {
     if (!this.get("sites", siteId)) return;
     const dcIds = new Set(this.all("datacenters").filter((d) => (d.location || "") === siteId).map((d) => d.id));
-    const inSiteRoom = (e: any) => !!((e.rack_id && dcIds.has((this.get("racks", e.rack_id) || {}).datacenter_id)) || (e.dc_id && dcIds.has(e.dc_id)));
+    const inSiteRoom = (e: any) => { const rackDc = e.rack_id ? (this.get("racks", e.rack_id)?.datacenter_id ?? null) : null; return !!((rackDc && dcIds.has(rackDc)) || (e.dc_id && dcIds.has(e.dc_id))); };
     const floorEq = this.all("equipments").filter((e) => e.placement_mode === "floor" && (e.location || "") === siteId);
     // 1) liaisons logiques préservées : câbles des équipements en baie/salle du site → « planifié »
     const preserve = this.all("equipments").filter((e) => e.placement_mode !== "floor" && inSiteRoom(e)).map((e) => e.id);
@@ -914,7 +923,7 @@ export class Store {
       await this.update("equipments", e.id, { placement_mode: "manual", location: "", floor: "", floor_x: null, floor_y: null });
     }
     // 3) waypoints du site (salles + étage/OOB) → supprimés
-    for (const w of this.all("waypoints").filter((w) => dcIds.has(w.datacenter_id) || ((w.location || "") === siteId))) await this.remove("waypoints", w.id);
+    for (const w of this.all("waypoints").filter((w) => (w.datacenter_id != null && dcIds.has(w.datacenter_id)) || ((w.location || "") === siteId))) await this.remove("waypoints", w.id);
     // 4) étages + salles → supprimés (cascade : baies non-placées, équipements libres dé-placés)
     for (const f of this.all("floors").filter((f) => (f.location || "") === siteId)) await this.remove("floors", f.id);
     for (const d of this.all("datacenters").filter((d) => (d.location || "") === siteId)) await this.remove("datacenters", d.id);

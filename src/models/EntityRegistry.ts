@@ -23,8 +23,10 @@ type EntityCtor = new (p?: Props) => Entity;
 
 /* Table collection → classe (pour (dé)sérialisation et fabrique).
    faceImages N'EST PLUS une collection du modèle (les images vivent dans
-   imageStore / IndexedDB) ; la classe FaceImage reste utile au boot. */
-const CLASSES: Record<string, EntityCtor> = {
+   imageStore / IndexedDB) ; la classe FaceImage reste utile au boot.
+   Déclarée SANS annotation `Record<…>` pour préserver les types LITTÉRAUX
+   (clés + classes) dont dérivent `CollectionName` / `EntityOf` ci-dessous. */
+const CLASSES_TYPED = {
   equipments: Equipment,
   ports: Port,
   aggregates: Aggregate,
@@ -45,6 +47,12 @@ const CLASSES: Record<string, EntityCtor> = {
   spares: Spare,
   sites: Site,
 };
+const CLASSES: Record<string, EntityCtor> = CLASSES_TYPED;   // vue « indexable par chaîne » (entrées non fiables)
+
+/** Nom de collection CONNU (type littéral) — permet aux lectures du Store d'être typées. */
+export type CollectionName = keyof typeof CLASSES_TYPED;
+/** Type d'entité d'une collection (ex. `EntityOf<"racks">` = `Rack`). */
+export type EntityOf<C extends CollectionName> = InstanceType<(typeof CLASSES_TYPED)[C]>;
 
 /** Registre des collections d'entités : nom ↔ classe, hydratation. */
 export class EntityRegistry {

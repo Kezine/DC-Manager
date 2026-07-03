@@ -1,22 +1,14 @@
-import type { Store } from "../../store";
 import { Dom } from "../../ui/Dom";
 import { FormControls } from "../../ui/FormControls";
 import { Dialog } from "../../ui/Dialog";
 import { Notify } from "../../ui/Notify";
 import { ContextMenu } from "../../ui/ContextMenu";
 import type { CtxSection } from "../../ui/ContextMenu";
-import { ImageExport } from "../../ui/ImageExport";
-import type { ExportOptions } from "../../ui/ImageExport";
 import { Html } from "../../core/Html";
 import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
-import { RackScene } from "../../geometry/RackScene";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
-import { Resolver3D } from "../../geometry/Resolver3D";
 import { FloorLayout } from "../../geometry/FloorLayout";
-import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
-import { Box } from "../../geometry/Box";
-import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import type { Frame } from "../../geometry/Positioning";
 import type { PosEntry, PosScene } from "./PositioningTool";
@@ -24,12 +16,10 @@ import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Format } from "../../core/Format";
-import { Text } from "../../core/Text";
 import { Waypoint } from "../../models/Waypoint";
 import { CableStatuses } from "../../domain/CableStatuses";
-import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
-import { WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
-import type { Vec3, Drawable, DatacenterHost } from "./shared";
+import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, U_MM } from "../../domain/constants";
+import type { Vec3 } from "./shared";
 import { DcPanels } from "./DcPanels";
 
 export abstract class DcInteract extends DcPanels {
@@ -735,7 +725,7 @@ export abstract class DcInteract extends DcPanels {
     return null;
   }
 
-  protected portDcId(portId: string): string | null { const p: any = this.store.get("ports", portId); return p ? this.store.equipmentDcId(p.equipment_id) : null; }
+  protected portDcId(portId: string | null): string | null { const p: any = this.store.get("ports", portId); return p ? this.store.equipmentDcId(p.equipment_id) : null; }
 
   /** Bascule en 3D sur la salle `dcId` (mode simple DC) et programme le focus caméra sur `p` (emprise `extent` mm).
       `face` (optionnel) oriente la caméra face au front de l'objet ; sinon l'angle courant est conservé. */

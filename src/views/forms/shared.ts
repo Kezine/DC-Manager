@@ -1,6 +1,6 @@
 import type { Store } from "../../store";
 import type { ModalOptions } from "../../ui/Modal";
-import { LOCATIONS, FLOORS } from "../../domain/constants";
+import { FLOORS } from "../../domain/constants";
 import { Ip } from "../../core/Ip";
 
 /* Helpers et types PARTAGÉS par les formulaires (extraits de l'ancien Forms.ts monolithique). */

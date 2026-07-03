@@ -1,43 +1,23 @@
 import type { Store } from "../../store";
-import type { ImageStore } from "../../data/ImageStore";
-import type { ModalOptions } from "../../ui/Modal";
 import { FormControls } from "../../ui/FormControls";
-import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
-import { Text } from "../../core/Text";
-import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
-import { FloorLayout } from "../../geometry/FloorLayout";
-import { Ip } from "../../core/Ip";
 import { LiveValidation } from "./LiveValidation";
-import { GroupTypes } from "../../domain/GroupTypes";
-import { CableStatuses } from "../../domain/CableStatuses";
-import { SpareTypes } from "../../domain/SpareTypes";
-import { SpareStatuses } from "../../domain/SpareStatuses";
 import { Waypoint } from "../../models/Waypoint";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
-import { Depths } from "../../registries/Depths";
-import { PortRoles } from "../../registries/PortRoles";
-import { PortTypes } from "../../registries/PortTypes";
-import { EquipFaces } from "../../registries/EquipFaces";
-import { Id } from "../../core/Id";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { RackScene } from "../../geometry/RackScene";
 import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Normalize } from "../../core/Normalize";
 import {
-  POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT, LOCATIONS, FLOORS, RACK_SIDES, RACK_FACES, RACK_DEPTHS,
+  FLOORS, RACK_SIDES, RACK_FACES, RACK_DEPTHS,
   RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_MOUNT_MARGIN_DEFAULT, U_MM, SIDE_U_STEP,
-  BREAKOUT_SPANS, CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW,
-  EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, EQUIP_FREE_DEFAULT_MM,
-  WAYPOINT_TYPES, OOB_HEIGHT_DEFAULT, WAYPOINT_Z_DEFAULT, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT, BRUSH_PADDING_MM, RACK_DEPTH_SAFETY_MM,
-  FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT,
-  SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
-  SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
+  RACK_DEPTH_SAFETY_MM,
+  FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT
 } from "../../domain/constants";
-import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS, ORIENT_OPTS } from "./shared";
+import { row2, divider, locOptions, floorOptions, setOptions, ORIENT_OPTS } from "./shared";
 import type { FormHost } from "./shared";
 import { CableForms } from "./CableForms";
 import { EntityViz } from "../EntityViz";
@@ -559,8 +539,8 @@ export class RackForms extends CableForms {
     const isEq = () => kindI.value === "equipment";
     const isBrush = () => kindI.value === "brush";
     const selEq = () => store.get("equipments", eqI.value);
-    const effMount = () => isEq() ? { depth: (selEq() ? selEq().depth : "full"), side, locks_u: (selEq() ? RackGeometry.mountLocksU(selEq()) : false) } : { side, isItem: true };
-    const effHeight = () => isEq() ? (selEq() ? Math.max(1, selEq().u_height || 1) : 1) : Math.max(1, parseInt(pheightI.value, 10) || 1);
+    const effMount = () => { const eq = selEq(); return isEq() ? { depth: (eq ? eq.depth : "full"), side, locks_u: (eq ? RackGeometry.mountLocksU(eq) : false) } : { side, isItem: true }; };
+    const effHeight = () => { const eq = selEq(); return isEq() ? (eq ? Math.max(1, eq.u_height || 1) : 1) : Math.max(1, parseInt(pheightI.value, 10) || 1); };
     const brushSides = () => (rack.sides === "dual") ? ["front", "rear"] : ["front"];
     const syncVis = () => { const e = isEq(), b = isBrush(); eqRow.style.display = e ? "" : "none"; labelRow.style.display = e ? "none" : ""; prow.style.display = e ? "none" : ""; bdepthRow.style.display = b ? "" : "none"; };
     kindI.onchange = syncVis; syncVis();

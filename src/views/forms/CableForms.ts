@@ -1,43 +1,17 @@
 import type { Store } from "../../store";
-import type { ImageStore } from "../../data/ImageStore";
-import type { ModalOptions } from "../../ui/Modal";
 import { FormControls } from "../../ui/FormControls";
 import { LiveValidation } from "./LiveValidation";
 import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
-import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
-import { Text } from "../../core/Text";
-import { Color } from "../../core/Color";
-import { Format } from "../../core/Format";
-import { FloorLayout } from "../../geometry/FloorLayout";
-import { Ip } from "../../core/Ip";
-import { GroupTypes } from "../../domain/GroupTypes";
 import { CableStatuses } from "../../domain/CableStatuses";
-import { SpareTypes } from "../../domain/SpareTypes";
-import { SpareStatuses } from "../../domain/SpareStatuses";
 import { Waypoint } from "../../models/Waypoint";
-import { EquipmentTypes } from "../../registries/EquipmentTypes";
-import { Depths } from "../../registries/Depths";
 import { PortRoles } from "../../registries/PortRoles";
-import { PortTypes } from "../../registries/PortTypes";
-import { EquipFaces } from "../../registries/EquipFaces";
-import { Id } from "../../core/Id";
-import { RackGeometry } from "../../geometry/RackGeometry";
-import { RackScene } from "../../geometry/RackScene";
-import { RackItemKinds } from "../../domain/RackItemKinds";
-import { Normalize } from "../../core/Normalize";
 import {
-  POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT, LOCATIONS, FLOORS, RACK_SIDES, RACK_FACES, RACK_DEPTHS,
-  RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_MOUNT_MARGIN_DEFAULT, U_MM, SIDE_U_STEP,
-  BREAKOUT_SPANS, CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW,
-  EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, EQUIP_FREE_DEFAULT_MM,
-  WAYPOINT_TYPES, OOB_HEIGHT_DEFAULT, WAYPOINT_Z_DEFAULT, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT, BRUSH_PADDING_MM,
-  FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT,
-  SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
-  SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
+  POWER_SOURCES,
+  CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW
 } from "../../domain/constants";
-import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS } from "./shared";
+import { row2, setOptions } from "./shared";
 import type { FormHost } from "./shared";
 import { EquipmentForms } from "./EquipmentForms";
 

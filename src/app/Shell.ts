@@ -84,7 +84,6 @@ export class Shell {
   private tabsDdEl: HTMLElement | null = null;        // menu déroulant des onglets (responsive)
   private tabsDdLabelEl: HTMLElement | null = null;   // libellé de l'onglet actif dans le déclencheur du menu
   private mainEl: HTMLElement;
-  private actionsEl: HTMLElement;
   private docNameEl: HTMLInputElement;
   private undoBtn!: HTMLButtonElement;
   private redoBtn!: HTMLButtonElement;
@@ -184,7 +183,7 @@ export class Shell {
     const main = document.createElement("main");   // styles pilotés par dc-manager.css (padding, max-width, :has full-bleed)
 
     root.append(topbar, statusbar, main, this.buildWelcome());
-    this.tabsEl = tabs; this.mainEl = main; this.actionsEl = actions; this.docNameEl = docName;
+    this.tabsEl = tabs; this.mainEl = main; this.docNameEl = docName;
     // fermeture du menu déroulant d'onglets au clic à l'extérieur (un seul écouteur, lit le champ courant)
     document.addEventListener("click", (e) => { if (this.tabsDdEl && !this.tabsDdEl.contains(e.target as Node)) this.tabsDdEl.classList.remove("open"); });
     // navigation par l'URL (#nom) : back/forward du navigateur ou hash édité → bascule d'onglet (si ≠ courant).

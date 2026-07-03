@@ -1,33 +1,18 @@
-import type { Store } from "../../store";
-import { Dom } from "../../ui/Dom";
 import { FormControls } from "../../ui/FormControls";
 import { MultiSelect } from "../../ui/MultiSelect";
 import { Dialog } from "../../ui/Dialog";
 import { Notify } from "../../ui/Notify";
-import { ContextMenu } from "../../ui/ContextMenu";
-import type { CtxSection } from "../../ui/ContextMenu";
-import { ImageExport } from "../../ui/ImageExport";
-import type { ExportOptions } from "../../ui/ImageExport";
 import { Html } from "../../core/Html";
 import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
-import { RackScene } from "../../geometry/RackScene";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
-import { Resolver3D } from "../../geometry/Resolver3D";
 import { FloorLayout } from "../../geometry/FloorLayout";
-import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
-import { Box } from "../../geometry/Box";
-import { Painter } from "../../geometry/Painter";
-import { GridGeometry } from "../../geometry/GridGeometry";
-import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Format } from "../../core/Format";
 import { Text } from "../../core/Text";
 import { Waypoint } from "../../models/Waypoint";
-import { CableStatuses } from "../../domain/CableStatuses";
-import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
-import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
-import type { Vec3, Drawable, DatacenterHost } from "./shared";
+import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT } from "../../domain/constants";
+import { DC_SCOPE_ICONS } from "./shared";
 import { DcViews2D } from "./DcViews2D";
 
 export abstract class DcPanels extends DcViews2D {
@@ -433,7 +418,6 @@ export abstract class DcPanels extends DcViews2D {
   protected waypointsCard(dc: any, floor?: { location: string; floor: string }): HTMLElement {
     const box = document.createElement("div"); box.className = "dc-card";
     const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Waypoints (passage de câbles)"; box.appendChild(t);
-    const kindLbl = (k: string) => k === "segment" ? "Chemin" : k === "brush" ? "Brosse" : "Pin";
     // ---- création (pins/chemins/exits dans la salle active si présente ; OOB toujours) ----
     const addActs = document.createElement("div"); addActs.className = "dc-card-acts";
     const mkAdd = (label: string, kind: string, wpType?: string) => this.btn(label, async () => {
