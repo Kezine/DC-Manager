@@ -231,6 +231,9 @@ export class DcThreeBase {
     window.removeEventListener("mouseup", this.onUp);
     if (this.ro) { this.ro.disconnect(); this.ro = null; }
     this.disposeContent();
+    // L'overlay d'outils (mesure/route) vit sous `scene`, PAS sous `content` → non couvert par disposeContent :
+    // on libère ses géométries/matériaux ici (ses textures, détenues par texCache, sont libérées juste après).
+    if (this.gOverlay) { this.disposeGroup(this.gOverlay); this.scene?.remove(this.gOverlay); this.gOverlay = null; }
     this.texCache.forEach((t) => t.dispose()); this.texCache.clear();   // libère les textures de libellés mises en cache
     this.imgTexCache.forEach((t) => t.dispose()); this.imgTexCache.clear();   // libère les textures d'images de façade
     if (this.renderer) {
@@ -252,6 +255,7 @@ export class DcThreeBase {
 
   protected disposeContent(): void {
     this.hovered = null; this._hoverObjs = []; this.cablesGroup = null; this.gRacks = null; this.gFree = null; this.gWaypoints = null; this.gDecor = null; this.gExtra = null; this.gFloorDecor = null;
+    this._focusObjs = []; this._screenObjs = [];   // références vers des meshes qu'on va disposer → sinon GC retardé jusqu'au prochain collectScreenObjs/setFocusEquip
     this._warm.clear();   // les groupes de salle vivent sous `content` (détruit ici) → cache chaud réinitialisé
     if (this.content && this.scene) this.scene.remove(this.content);
     // NB : on ne libère PAS les textures (`material.map`) ici — elles sont détenues par `texCache` et

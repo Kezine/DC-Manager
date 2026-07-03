@@ -226,7 +226,7 @@ export class DcBase {
     if (this._onWinResize) { window.removeEventListener("resize", this._onWinResize); this._onWinResize = null; }
     if (this._onFullscreen) { document.removeEventListener("fullscreenchange", this._onFullscreen); this._onFullscreen = null; }
     if (this._onKeydown) { document.removeEventListener("keydown", this._onKeydown); this._onKeydown = null; }
-    clearTimeout(this._resizeT); clearTimeout(this._pvTO);
+    clearTimeout(this._resizeT); clearTimeout(this._pvTO); clearTimeout(this._measMouseTO);   // _measMouseTO : throttle de l'aperçu mesure 2D
     if (this._three) { this._three.dispose(); this._three = null; this._webglHost = null; }
   }
 
