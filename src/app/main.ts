@@ -11,8 +11,6 @@ import { Store } from "../store";
 import { RuntimeConfigLoader } from "./RuntimeConfig";
 import { GraphView, ListView, ListConfigs, Forms, DatacenterView } from "../views";
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
-import { ReloadPlanner, Changeset } from "../sync";
-import type { DocumentChangeset } from "../sync";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen } from "../ui";
 import { Html } from "../core/Html";
@@ -28,6 +26,7 @@ import { HandleStore } from "./HandleStore";
 import { UndoTimeline } from "./UndoTimeline";
 import { AutoSave } from "./AutoSave";
 import { FileDocumentController } from "./FileDocuments";
+import { RestDocumentController } from "./RestDocuments";
 
 // Timeline d'undo UNIFIÉE (modèle + images) : UN SEUL geste défait dans l'ordre chronologique, quelle que soit
 // la pile d'origine. Logique EXTRAITE dans `UndoTimeline` (pure, testée) ; les piles sont enregistrées au boot.
@@ -104,7 +103,6 @@ async function boot(): Promise<void> {
   Forms.images = imageStore;   // singleton pour le picker d'image (faceEditor)
   imageStore.restoreLoadedKey();   // clé du bundle .nmfb actuellement en IndexedDB (persistée) — appariement json↔compagnon
   if (!REST_MODE) await imageStore.ready();   // en REST, le miroir est chargé à l'ouverture d'un document
-  let restDocId: string | null = null;   // document serveur courant (mode API)
   Fullscreen.install();   // re-parente les overlays (modale/dialogues/toasts/menus) dans l'élément plein écran
 
   /* ---- documents FICHIER : cycle de vie EXTRAIT dans `FileDocumentController` (ouvrir/enregistrer/rouvrir,
@@ -138,57 +136,25 @@ async function boot(): Promise<void> {
   const applyAutosave = (): void => autoSave.apply();
   const setAutosave = (on: boolean): Promise<void> => autoSave.setEnabled(on);
 
-  /* ---- MODE API : documents serveur (workspaces) ---- */
-  /** Ouvre un document serveur : scope l'adapter + le backend d'images, recharge données & images. */
-  let restEvents: EventSource | null = null;   // flux SSE du document courant (concurrence multi-client)
-  let restReloadTO: any = 0;
-  let restLastBy: { name?: string; ip?: string } | null = null;   // auteur du dernier changement externe (pour le toast)
-  const flog = Log.scope("fs");   // trace fichier/REST (flag de débogage) — le contrôleur fichier a la sienne
-  const reloadPlanner = new ReloadPlanner();   // changeset → plan (quoi reconstruire) — cf. src/sync/RenderImpact.ts
-  // Changesets des événements SSE rapprochés, ACCUMULÉS pendant la fenêtre de debounce puis planifiés en une fois.
-  let pendingChangeset: DocumentChangeset | null = null;
-  /** Recharge le document courant depuis le serveur. `changeset` (SSE) cible la reconstruction (3D sautée si aucune
-      collection dessinée n'a changé) ; `conflict` (409 sur NOTRE écriture) force un rechargement total + notifie le rejet. */
-  async function restReloadDocument(opts?: { conflict?: boolean; changeset?: DocumentChangeset }): Promise<void> {
-    if (!restDocId) return;
-    // 409 : on ignore QUELLES entités l'autre client a changées → rechargement total prudent. Sinon : périmètre du changeset.
-    const changeset = opts?.conflict ? Changeset.full() : (opts?.changeset || Changeset.full());
-    const plan = reloadPlanner.plan(changeset);
-    flog("reload document", opts?.conflict ? "(conflit 409)" : "(changement externe)", "→ 3D:" + plan.threeRebuild, restLastBy);
-    Notify.busy(opts?.conflict ? "Conflit de version — rechargement…" : "Mise à jour du document…");
-    // laisse le navigateur PEINDRE l'overlay AVANT le travail synchrone lourd (fetch + rebuild 3D ≈ 1 s) qui gèle
-    // le thread : sans ce double rAF, l'overlay ne s'affiche qu'une fois le freeze terminé (donc jamais visible).
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    try {
-      // P2 : rechargement GRANULAIRE — on ne re-tire QUE les collections du changeset ; le périmètre indéterminé
-      // (`refetchCollections === null` : import/snapshot/conflit 409) impose encore un rechargement TOTAL.
-      if (plan.refetchCollections) {
-        await store.reloadCollections(plan.refetchCollections);   // 0 collection (ex. méta seule) → aucun fetch d'entités
-        if (plan.refreshMeta) await store.reloadMeta();           // la méta (nom, dispositions…) a changé → relue à part
-      } else {
-        await store.init();   // re-tirage COMPLET du document
-      }
-      if (plan.refreshImages) await imageStore.reloadFromBackend();   // métadonnées d'images SEULEMENT si une image a changé
-      session.markLoaded(store.histIndex());
-      // saut de la reconstruction 3D quand AUCUNE collection dessinée n'a changé (ex. adresse IP, spare, réseau IP) :
-      // c'est tout l'intérêt du plan — éviter le gel d'UI pour un changement sans impact géométrique. Cf. RenderImpact.
-      if (plan.threeRebuild !== "none") dcView.invalidate3D();
-      shell.refreshActive(); refreshChrome();
-    } finally { Notify.idle(); }
-    if (opts?.conflict) {
-      Notify.toast("Modification refusée : le document a changé entre-temps. Données rechargées — refais ta modification.", "conflict");
-    } else {
-      const by = restLastBy ? (" par " + (restLastBy.name || "?") + (restLastBy.ip ? " (" + restLastBy.ip + ")" : "")) : "";
-      Notify.toast("Document mis à jour" + by);
-    }
-  }
-  // 409 (verrou optimiste serveur) sur une de nos écritures → recharge + notifie (PAS de rejeu : le serveur fait autorité).
-  if (REST_MODE) (adapter as RestAdapter).onConflict = () => { void restReloadDocument({ conflict: true }); };
-  // 400 (validation PARTAGÉE serveur) : données refusées → notifie (les 2-3 premières erreurs, suffisant pour situer le problème).
-  if (REST_MODE) (adapter as RestAdapter).onValidationError = (errors) => {
-    const head = errors.slice(0, 3).map((e) => e.message).join(" · ");
-    Notify.toast("Données refusées par le serveur : " + head + (errors.length > 3 ? " …" : ""), "err");
-  };
+  /* ---- MODE API : cycle de vie des documents SERVEUR extrait dans `RestDocumentController` (bootstrap SSO,
+     ouverture/création/import/sélecteur, SSE + debounce/fusion des changesets, rechargement granulaire).
+     Construit UNIQUEMENT en mode REST (les callbacks 409/400 de l'adapter sont câblés à la construction). */
+  const rest = REST_MODE ? new RestDocumentController({
+    adapter: adapter as RestAdapter, store, imageStore, session, prefs, hasFsApi: HAS_FS_API,
+    setImagesBase: (base) => { if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(base); },
+    injectedLoginUrl: INJECTED.loginUrl,
+    host: {
+      refreshChrome: () => refreshChrome(),
+      refreshActive: () => shell.refreshActive(),
+      documentOpened: () => { shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive(); },
+      resetUndo: () => undoTimeline.reset(),
+      setDisplayName: (name) => { files.name = name; },
+      invalidate3D: () => dcView.invalidate3D(),
+      setUser: (user) => shell.setUser(user),
+      showAccessDenied: (opts) => shell.showAccessDenied(opts),
+    },
+  }) : null;
+
   // Validation PARTAGÉE côté client (Store) : SEUL garde-fou en mode fichier, retour immédiat en mode API.
   store.onInvalid = (errors) => {
     const head = errors.slice(0, 3).map((e) => e.message).join(" · ");
@@ -200,223 +166,11 @@ async function boot(): Promise<void> {
     const what = op === "meta" ? "métadonnées non enregistrées" : "document non enregistré";
     Notify.toast("Échec de persistance (" + what + ") : " + ((e && e.message) || e), "err");
   };
-  /** Planifie un rechargement débouncé en consommant les changesets SSE accumulés (fusionnés). */
-  function flushPendingReload(): void {
-    const changeset = pendingChangeset || Changeset.full();
-    pendingChangeset = null;
-    void restReloadDocument({ changeset });
-  }
-  /** Abonnement SSE : recharge si une révision PLUS RÉCENTE que la nôtre arrive (changement d'un autre client). */
-  function restSubscribeLive(): void {
-    if (restEvents) { restEvents.close(); restEvents = null; }
-    const url = (adapter as RestAdapter).eventsUrl; if (!url || typeof EventSource === "undefined") return;
-    try {
-      const es = new EventSource(url, { withCredentials: true }); restEvents = es;
-      es.onmessage = (e) => { try {
-        const d = JSON.parse(e.data); const ra = adapter as RestAdapter;
-        if (!d || (d.origin && d.origin === ra.clientId)) return;   // NOTRE propre écriture → on ignore (pas de reload)
-        if (typeof d.rev === "number" && d.rev > ra.docRev) {
-          restLastBy = d.by || null;
-          // accumule le périmètre de CET événement avec ceux déjà en attente (plusieurs écritures peuvent tomber
-          // dans la fenêtre de debounce) → une seule reconstruction couvrant l'union des changements.
-          const incoming = Changeset.coerce(d.changeset, EntityRegistry.isCollection);   // filtre les collections inconnues (évite un refetch inutile)
-          pendingChangeset = pendingChangeset ? Changeset.merge(pendingChangeset, incoming) : incoming;
-          clearTimeout(restReloadTO); restReloadTO = setTimeout(flushPendingReload, 250);
-        }
-      } catch (_) { /* ignore */ } };
-      es.onerror = () => { /* reconnexion auto du navigateur (champ retry) */ };
-    } catch (e) { flog("SSE indisponible", e); }
-  }
-  async function restOpenDocument(docId: string, name?: string): Promise<void> {
-    const ra = adapter as RestAdapter;
-    ra.setDocument(docId);
-    if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(ra.dataBase);
-    restDocId = docId;
-    prefs.lastRestDocId = docId;              // mémorise le DERNIER doc ouvert → rouvert au prochain lancement (cf. restBootstrap)
-    await store.init();                       // charge les collections du document
-    if (name) store.meta.docName = store.meta.docName || name;
-    await imageStore.reloadFromBackend();     // miroir d'images du document
-    undoTimeline.reset();
-    files.name = name || store.meta.docName || "Document";
-    session.setFile(true); session.markLoaded(store.histIndex());
-    shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
-    restSubscribeLive();
-    Notify.toast("Document « " + files.name + " » ouvert");
-  }
-  /** Crée un nouveau document serveur (catalogues semés) puis l'ouvre. */
-  async function restNewDocument(name: string): Promise<void> {
-    const ra = adapter as RestAdapter;
-    let d: any; try { d = await ra.createDocument(name); } catch (e: any) { Notify.toast("Création impossible : " + (e.message || e), "err"); return; }
-    ra.setDocument(d.id);
-    if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(ra.dataBase);
-    restDocId = d.id;
-    prefs.lastRestDocId = d.id;               // un doc fraîchement créé devient le « dernier ouvert »
-    await store.newDocument();                // sème les catalogues + pousse le snapshot DANS le nouveau document
-    store.meta.docName = d.name; await store.persistMeta();
-    await imageStore.reloadFromBackend();
-    undoTimeline.reset();
-    files.name = d.name; session.setFile(true); session.markLoaded(store.histIndex());
-    shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
-    restSubscribeLive();
-    Notify.toast("Document « " + d.name + " » créé");
-  }
-  /** Importe un export `.json` (format mode-fichier) DANS UN NOUVEAU document serveur : crée le document,
-      pousse le snapshot (meta + collections) puis les images de façade (compagnon `.nmfb` prioritaire, sinon
-      `faceImages` inline), et l'ouvre. Réutilise exactement la logique d'écriture du DataAdapter REST. */
-  async function restImportJson(text: string, nmfbBuf: ArrayBuffer | null, suggestedName: string): Promise<void> {
-    const ra = adapter as RestAdapter;
-    let raw: any; try { raw = JSON.parse(text); } catch { Notify.toast("Fichier invalide (JSON attendu).", "err"); return; }
-    const name = String((raw && raw.meta && raw.meta.docName) || suggestedName || "Document").replace(/\.json$/i, "") || "Document";
-    let d: any; try { d = await ra.createDocument(name); } catch (e: any) { Notify.toast("Création impossible : " + (e.message || e), "err"); return; }
-    ra.setDocument(d.id);
-    if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(ra.dataBase);
-    restDocId = d.id;
-    prefs.lastRestDocId = d.id;               // le doc importé devient le « dernier ouvert »
-    try {
-      await store.replaceAll(raw);                                              // meta + collections → PUT /snapshot du nouveau document
-      let nImg = 0;
-      if (nmfbBuf) nImg = await imageStore.loadBundle(nmfbBuf);                  // compagnon d'images .nmfb (prioritaire)
-      else if (Array.isArray(raw.faceImages)) nImg = await imageStore.replaceAllFromLegacy(raw.faceImages);   // images inline (legacy ≤ v51)
-      else await imageStore.clearAll();
-      store.meta.docName = name; await store.persistMeta();
-      await imageStore.reloadFromBackend();
-      undoTimeline.reset();
-      files.name = name; session.setFile(true); session.markLoaded(store.histIndex());
-      shell.hideWelcome(); shell.switchView("equipements"); refreshChrome(); shell.refreshActive();
-      restSubscribeLive();
-      const nbEnt = Object.keys(raw).filter((k) => k !== "faceImages" && Array.isArray((raw as any)[k])).reduce((n, k) => n + (raw as any)[k].length, 0);
-      Notify.toast("Importé « " + name + " » (" + nbEnt + " entités, " + nImg + " image(s))");
-    } catch (e: any) { Notify.toast("Import échoué : " + (e.message || e), "err"); }
-  }
-  /** Sélectionne un `.json` (+ compagnon `.nmfb` facultatif) puis l'importe dans un nouveau document serveur. */
-  async function restImportFromPicker(): Promise<void> {
-    let jsonFile: File | null = null, nmfbBuf: ArrayBuffer | null = null;
-    if (HAS_FS_API) {
-      try {
-        const handles = await W.showOpenFilePicker({ multiple: true, types: [{ description: "Document DC Manager (.json) + images (.nmfb)", accept: { "application/json": [".json"], "application/octet-stream": [".nmfb"] } }] });
-        for (const h of handles) { const f = await h.getFile(); if (/\.nmfb$/i.test(f.name)) nmfbBuf = await f.arrayBuffer(); else if (!jsonFile) jsonFile = f; }
-      } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Sélection impossible : " + (e.message || e), "err"); return; }
-    } else {
-      jsonFile = await new Promise<File | null>((resolve) => {
-        const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,application/json";
-        inp.onchange = () => resolve((inp.files && inp.files[0]) || null); inp.click();
-      });
-    }
-    if (!jsonFile) { Notify.toast("Aucun fichier .json sélectionné.", "err"); return; }
-    await restImportJson(await jsonFile.text(), nmfbBuf, jsonFile.name);
-  }
-  /** Sélecteur de documents (mode API) : liste serveur, ouverture / création / suppression. */
-  async function restOpenChooser(): Promise<void> {
-    const ra = adapter as RestAdapter;
-    let docs: any[]; try { docs = await ra.listDocuments(); } catch { Notify.toast("Serveur injoignable.", "err"); return; }
-    const defaultDocId = await ra.getDefaultDocId().catch(() => null);   // doc par défaut global (best-effort) → mis en évidence + bascule par étoile
-    const action = await Dialog.custom({
-      title: "Documents", cancelLabel: "Fermer",
-      build: (root: HTMLElement) => {
-        let chosen: string | null = null;
-        const confirmBtn = root.closest(".dialog-box")?.querySelector('[data-dlg="confirm"]') as HTMLElement | null;
-        if (confirmBtn) confirmBtn.style.display = "none";
-        const wrap = document.createElement("div"); wrap.className = "open-kind-choices";
-        docs.forEach((d) => {
-          const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
-          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = "🗂";
-          const tx = document.createElement("span"); tx.className = "ok-tx";
-          const isDefault = d.id === defaultDocId;
-          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = (d.locked ? "🔒 " : "") + d.name + (d.id === restDocId ? "  ◀ ouvert" : "") + (isDefault ? "  ★ défaut" : "");
-          const de = document.createElement("span"); de.className = "ok-desc"; de.textContent = "maj " + String(d.updated_date || "").slice(0, 10);
-          tx.append(ti, de); b.append(ic, tx);
-          b.onmousedown = (e) => { e.preventDefault(); chosen = d.id; confirmBtn?.click(); };
-          // Étoile : bascule du DOC PAR DÉFAUT global (ouvert au boot d'un client sans « dernier doc ouvert »).
-          // Cliquer l'étoile du défaut courant l'efface ; cliquer une autre la déplace. Défaut = ★ net ; sinon ☆ estompé.
-          const star = document.createElement("span"); star.textContent = isDefault ? "★" : "☆";
-          star.title = isDefault ? "Retirer comme document par défaut" : "Définir comme document par défaut (ouvert au démarrage)";
-          star.style.cssText = "margin-left:auto;padding:0 6px;cursor:pointer;opacity:" + (isDefault ? "1" : "0.4");
-          star.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__default__:" + (isDefault ? "" : d.id); confirmBtn?.click(); };
-          b.appendChild(star);
-          // Cadenas : bascule de verrouillage (protège d'une suppression accidentelle). Verrouillé = 🔒 net ; libre = 🔓 estompé.
-          const lock = document.createElement("span"); lock.textContent = d.locked ? "🔒" : "🔓";
-          lock.title = d.locked ? "Déverrouiller (réautorise la suppression)" : "Verrouiller (protège de la suppression)";
-          lock.style.cssText = "padding:0 6px;cursor:pointer;opacity:" + (d.locked ? "1" : "0.4");
-          lock.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__lock__:" + d.id; confirmBtn?.click(); };
-          b.appendChild(lock);
-          // Suppression proposée UNIQUEMENT si non verrouillé → flux délibéré « déverrouiller d'abord » (le serveur refuse en 423 par sécurité).
-          if (!d.locked) {
-            const del = document.createElement("span"); del.textContent = "✕"; del.title = "Supprimer ce document"; del.style.cssText = "padding:0 8px;cursor:pointer;color:var(--fg-dimmer)";
-            del.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__del__:" + d.id; confirmBtn?.click(); };
-            b.appendChild(del);
-          }
-          wrap.appendChild(b);
-        });
-        const nb = document.createElement("button"); nb.type = "button"; nb.className = "open-kind-btn";
-        const ni = document.createElement("span"); ni.className = "ok-ic"; ni.textContent = "＋"; const nt = document.createElement("span"); nt.className = "ok-tx";
-        const nti = document.createElement("span"); nti.className = "ok-title"; nti.textContent = "Nouveau document"; nt.appendChild(nti);
-        nb.append(ni, nt); nb.onmousedown = (e) => { e.preventDefault(); chosen = "__new__"; confirmBtn?.click(); }; wrap.appendChild(nb);
-        const ib = document.createElement("button"); ib.type = "button"; ib.className = "open-kind-btn";
-        const ii = document.createElement("span"); ii.className = "ok-ic"; ii.textContent = "📥"; const itx = document.createElement("span"); itx.className = "ok-tx";
-        const iti = document.createElement("span"); iti.className = "ok-title"; iti.textContent = "Importer un fichier .json…";
-        const ide = document.createElement("span"); ide.className = "ok-desc"; ide.textContent = "crée un nouveau document depuis un export .json (+ .nmfb d'images)";
-        itx.append(iti, ide); ib.append(ii, itx); ib.onmousedown = (e) => { e.preventDefault(); chosen = "__import__"; confirmBtn?.click(); }; wrap.appendChild(ib);
-        root.appendChild(wrap);
-        return { collect: () => chosen, validate: () => true };
-      },
-    });
-    if (!action) return;
-    if (action === "__new__") { const n = await Dialog.prompt("Nom du document", "Document"); if (n) await restNewDocument(n); return; }
-    if (action === "__import__") { await restImportFromPicker(); return; }
-    if (action.startsWith("__default__:")) {
-      const id = action.slice(12) || null;   // "" → efface le défaut ; sinon le déplace sur ce doc
-      try { await ra.setDefaultDocId(id); Notify.toast(id ? "Document par défaut défini." : "Document par défaut retiré."); }
-      catch (e: any) { Notify.toast("Action impossible : " + (e.message || e), "err"); }
-      await restOpenChooser(); return;   // rouvre le sélecteur rafraîchi
-    }
-    if (action.startsWith("__lock__:")) {
-      const id = action.slice(9), d = docs.find((x) => x.id === id);
-      try { await ra.setDocumentLocked(id, !d?.locked); Notify.toast(d?.locked ? "Document déverrouillé." : "Document verrouillé."); }
-      catch (e: any) { Notify.toast("Action impossible : " + (e.message || e), "err"); }
-      await restOpenChooser(); return;   // rouvre le sélecteur rafraîchi
-    }
-    if (action.startsWith("__del__:")) {
-      const id = action.slice(8), d = docs.find((x) => x.id === id);
-      const ok = await Dialog.confirm({ title: "Supprimer le document ?", message: "Supprimer « " + (d?.name || id) + " » et toutes ses données ? Irréversible.", confirmLabel: "Supprimer", danger: true });
-      if (ok) { try { await ra.deleteDocument(id); } catch (e: any) { Notify.toast("Suppression impossible : " + (e.message || e), "err"); } if (id === restDocId) restDocId = null; if (id === prefs.lastRestDocId) prefs.lastRestDocId = ""; }
-      await restOpenChooser(); return;   // rouvre le sélecteur rafraîchi
-    }
-    if (action !== restDocId) { const d = docs.find((x) => x.id === action); await restOpenDocument(action, d?.name); }
-  }
-  /** Au boot (mode API) : valide l'auth SSO, puis ouvre le document selon cette PRIORITÉ :
-      1) le DERNIER doc ouvert sur ce navigateur (prefs.lastRestDocId), s'il existe encore ;
-      2) sinon le doc par DÉFAUT (réglage serveur global), s'il est défini ;
-      3) sinon le plus récemment modifié (1er de la liste, triée DESC côté serveur) ;
-      4) sinon (aucun document) on en crée un. */
-  async function restBootstrap(): Promise<void> {
-    const ra = adapter as RestAdapter;
-    const me = await ra.me().catch(() => null);
-    shell.setUser(me && me.logged ? me.user : null);
-    const authorized = !!(me && me.logged && me.adminRight === "SUPER_ADMIN");
-    flog("auth", { logged: me && me.logged, adminRight: me && me.adminRight, authorized });
-    if (!authorized) {
-      // pas une app noire : on AFFICHE l'état sur l'écran d'accueil, avec un bouton Réessayer.
-      const who = (me && me.user && (me.user.login || [me.user.prenom, me.user.nom].filter(Boolean).join(" "))) || "";
-      shell.showAccessDenied({ connected: !!(me && me.logged), user: who, onRetry: () => { void restBootstrap(); }, loginUrl: (prefs.loginUrl && prefs.loginUrl.trim()) || INJECTED.loginUrl });
-      return;   // n'ouvre aucun document tant que l'accès n'est pas autorisé
-    }
-    let docs: any[] = []; try { docs = await ra.listDocuments(); } catch { /* serveur injoignable */ }
-    const exists = (id: string | null | undefined) => !!id && docs.some((d) => d.id === id);
-    // 1) dernier doc ouvert (s'il n'a pas été supprimé entre-temps)
-    let targetId = exists(prefs.lastRestDocId) ? prefs.lastRestDocId : null;
-    // 2) sinon doc par défaut global (best-effort : ignore une erreur réseau/serveur)
-    if (!targetId) { const def = await ra.getDefaultDocId().catch(() => null); if (exists(def)) targetId = def; }
-    // 3) sinon le plus récent ; 4) sinon création
-    if (!targetId && docs.length) targetId = docs[0].id;
-    flog("boot: doc choisi", { targetId, last: prefs.lastRestDocId, total: docs.length });
-    if (targetId) { const d = docs.find((x) => x.id === targetId); await restOpenDocument(targetId, d?.name); }
-    else await restNewDocument("Document 1");
-  }
 
   // ---- services FICHIER / GLOBAUX (topbar) ----
   const shellHost: ShellHost = {
     onNew: async () => {
-      if (REST_MODE) { const n = await Dialog.prompt("Nom du nouveau document", "Document"); if (n) await restNewDocument(n); return; }
+      if (REST_MODE) { const n = await Dialog.prompt("Nom du nouveau document", "Document"); if (n) await rest!.newDocument(n); return; }
       if (hasUserData()) {
         const ok = await Dialog.confirm({ title: "Nouveau document ?", message: "Le document courant (non enregistré) sera remplacé. Continuer ?", confirmLabel: "Nouveau", danger: true });
         if (!ok) return;
@@ -425,7 +179,7 @@ async function boot(): Promise<void> {
       await store.newDocument(); await imageStore.clearAll(); undoTimeline.reset(); files.detach(); session.markLoaded(store.histIndex());
       applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast("Nouveau document");
     },
-    onOpen: () => { if (REST_MODE) restOpenChooser(); else void files.doOpen(); },
+    onOpen: () => { if (rest) void rest.openChooser(); else void files.doOpen(); },
     onSave: () => { void files.doSave(); },
     onSaveAs: () => { void files.doSaveAs(); },
     onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
@@ -439,7 +193,7 @@ async function boot(): Promise<void> {
     },
     onRenameDoc: async (name) => {
       store.meta.docName = name; await store.persistMeta(); session.markDirty(); refreshChrome();   // meta HORS historique
-      if (REST_MODE && restDocId) { files.name = name; try { await (adapter as RestAdapter).renameDocument(restDocId, name); } catch (_) { /* registre best-effort */ } refreshChrome(); }
+      if (rest && rest.docId) { files.name = name; try { await (adapter as RestAdapter).renameDocument(rest.docId, name); } catch (_) { /* registre best-effort */ } refreshChrome(); }
     },
     onDataSource: async (value) => {
       // Changement de mode = redémarrage de l'app (adapter/store recréés) → on persiste puis on RECHARGE.
@@ -829,7 +583,7 @@ async function boot(): Promise<void> {
   // ré-interaction pour le raccrocher. En mode API, les données viennent du serveur au boot → pas d'accueil.
   if (REST_MODE) {
     shell.hideWelcome();
-    await restBootstrap();   // ouvre le dernier doc ouvert → défaut global → plus récent (ou en crée un) — cf. restBootstrap
+    await rest!.bootstrap();   // ouvre le dernier doc ouvert → défaut global → plus récent (ou en crée un) — cf. RestDocumentController.bootstrap
   } else {
     const reopenName: string | null = HAS_FS_API ? await files.lastOpenName() : null;
     shell.showWelcome({ reopenName, mode: prefs.fileAccessMode, fsApi: HAS_FS_API });
