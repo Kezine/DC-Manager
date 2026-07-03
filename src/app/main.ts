@@ -40,7 +40,7 @@ function resetUndoTimeline(): void { undoOrder.length = 0; redoOrder.length = 0;
 
 // MODE D'EXÉCUTION : piloté par les PRÉFÉRENCES utilisateur (réglages → Source de données), initialisées au 1er
 // run depuis la config injectée par le backend. L'utilisateur peut basculer local⟷api et changer l'URL d'API ;
-// le changement est appliqué au RECHARGEMENT (adapter/store recréés). Cf. docs/rest-migration.md.
+// le changement est appliqué au RECHARGEMENT (adapter/store recréés).
 const prefs = new Prefs();
 const INJECTED = readRuntimeConfig();
 // VISUALISEUR AUTONOME : un document EMBARQUÉ dans le HTML (export readonly hors-ligne) → on l'ouvre en LOCAL,
@@ -619,7 +619,7 @@ async function boot(): Promise<void> {
   let restEvents: EventSource | null = null;   // flux SSE du document courant (concurrence multi-client)
   let restReloadTO: any = 0;
   let restLastBy: { name?: string; ip?: string } | null = null;   // auteur du dernier changement externe (pour le toast)
-  const reloadPlanner = new ReloadPlanner();   // changeset → plan (quoi reconstruire) — cf. src/sync, docs/render-impact.md
+  const reloadPlanner = new ReloadPlanner();   // changeset → plan (quoi reconstruire) — cf. src/sync/RenderImpact.ts
   // Changesets des événements SSE rapprochés, ACCUMULÉS pendant la fenêtre de debounce puis planifiés en une fois.
   let pendingChangeset: DocumentChangeset | null = null;
   /** Recharge le document courant depuis le serveur. `changeset` (SSE) cible la reconstruction (3D sautée si aucune
@@ -1208,7 +1208,7 @@ async function boot(): Promise<void> {
   shell.setFileAccessMode(prefs.fileAccessMode);
   shell.setDebugLog(prefs.debugLog); Log.setEnabled(prefs.debugLog);
   shell.setUiScale(prefs.uiScale);
-  shell.setRestMode(REST_MODE);   // mode API : masque les contrôles fichier (cf. docs/rest-migration.md)
+  shell.setRestMode(REST_MODE);   // mode API : masque les contrôles fichier
   // (l'auth SSO + la pastille utilisateur sont gérées par restBootstrap, au boot)
 
   // ---- état save-state ----

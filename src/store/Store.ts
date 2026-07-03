@@ -191,7 +191,7 @@ export class Store {
      Re-tire de l'adapter UNIQUEMENT les collections indiquées (au lieu d'un `init()` complet),
      remplace leurs entités et ré-indexe CES collections seulement. Bien moins coûteux qu'un
      rechargement total quand un autre client n'a touché qu'une poignée de collections.
-     Pilotée par `ReloadPlanner.plan().refetchCollections` (cf. docs/render-impact.md). */
+     Pilotée par `ReloadPlanner.plan().refetchCollections`. */
   async reloadCollections(collections: string[]): Promise<string[]> {
     const targets = (collections || []).filter((c, i, a) => COLLECTIONS.indexOf(c) !== -1 && a.indexOf(c) === i);
     if (!targets.length) return [];

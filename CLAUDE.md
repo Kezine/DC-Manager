@@ -77,7 +77,7 @@ src/            # FRONT (navigateur) — TS compilé par webpack
   geometry/     #   calculs 3D/2D purs (layout, projection, géométrie de baies)
   views/        #   vues UI ; views/dc/ = vue Datacenter (chaîne d'héritage en couches)
   views/dc/three/ #   moteur 3D WebGL (Three.js)
-  sync/         #   rechargement granulaire REST (changeset → plan)  ← cf. docs/render-impact.md
+  sync/         #   rechargement granulaire REST (changeset → plan, carte d'impact 3D)
   ui/           #   primitives UI (modale, dialogue, notifications…)
   app/          #   main.ts (bootstrap), Shell, état de sauvegarde
 src-server/src/ # BACK (Node, ESM/NodeNext) — TS compilé par tsc
@@ -116,19 +116,10 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 > `.gitignore`) ou le répertoire scratchpad de la session. Un fichier de `docs/` doit décrire un pan
 > d'architecture stable, référencé depuis le code ; s'il ne survit pas à la tâche en cours, il n'y a pas sa place.
 
-- [`rest-migration.md`](docs/rest-migration.md) — migration vers le backend REST,
-  phases, concurrence (révisions, SSE, **verrou optimiste 409 par entité**).
-- [`render-impact.md`](docs/render-impact.md) — **carte d'impact de rendu** : quelle
-  collection impose quelle reconstruction 3D (rechargement granulaire, P1/P3).
 - [`validation.md`](docs/validation.md) — **normalisation & validation** partagées des
   données (spec déclarative, niveaux intrinsèque/référentiel/invariants, V1/V2/V3).
 - [`reverse-proxy.md`](docs/reverse-proxy.md) — servir l'app **sous un sous-dossier**
   (URLs relatives + `<base>` + `X-Forwarded-Prefix`), sans reconfiguration.
-- [`positioning-toolkit.md`](docs/positioning-toolkit.md) — **aide au positionnement** :
-  placer un élément par ses coins (murs / coins d'autres éléments, cotes ⟂) dans les **deux
-  vues 2D** (baies & équipements en salle ; salles & équipements sur l'étage) ; cœur pur
-  `geometry/Positioning.ts` + contrôleur dédié `views/dc/PositioningTool.ts` (interface `PositioningHost`,
-  adaptation par `DcInteract.posScene()`).
 
 ## Points d'architecture à connaître
 

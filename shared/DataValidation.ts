@@ -231,7 +231,7 @@ class RackOccupancy {
   }
 }
 
-/* ---- spécifications des collections (couverture 19/19 — cf. docs/render-impact.md n'est PAS lié ; cf. docs/validation.md) ---- */
+/* ---- spécifications des collections (couverture 19/19 — cf. docs/validation.md) ---- */
 export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   equipments: {
     fields: {

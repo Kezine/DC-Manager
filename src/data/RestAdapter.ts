@@ -161,7 +161,7 @@ export class RestAdapter extends DataAdapter {
   async replaceAll(state: Snapshot): Promise<unknown> { return this._send("PUT", "/snapshot", state); }
 
   /* Utilisateur courant — proxifié au SSO par le backend. Renvoie l'objet user, ou null si non connecté / erreur.
-     L'app ne gère PAS l'auth : c'est le SSO qui valide (cf. docs/rest-migration.md). */
+     L'app ne gère PAS l'auth : c'est le SSO qui valide. */
   async me(): Promise<any | null> {
     try { return await this._root("GET", "/me", undefined, { allow404: true }); }
     catch (_) { return null; }
