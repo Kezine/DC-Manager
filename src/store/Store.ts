@@ -261,13 +261,17 @@ export class Store {
   totalCount(): number { return COLLECTIONS.reduce((n, c) => n + this.data[c].length, 0); }
 
   /* ---- persistance (hors système transactionnel) ---- */
+  /** Notifié quand une persistance HORS transaction échoue (saveMeta / replaceAll). Sans lui, un échec réseau en
+      mode REST (renommage, import, dispositions de graphe…) finissait en console.warn et l'UI croyait au succès —
+      contrairement aux écritures d'entités, couvertes par onConflict/onValidationError. Le hôte (main.ts) notifie. */
+  onPersistError: ((op: "meta" | "all", error: unknown) => void) | null = null;
   async persistMeta(): Promise<void> {
     try { await this.adapter.saveMeta(this.meta); }
-    catch (e) { console.warn("saveMeta a échoué", e); }
+    catch (e) { console.warn("saveMeta a échoué", e); this.onPersistError?.("meta", e); }
   }
   private async _persistAll(): Promise<void> {
     try { await this.adapter.replaceAll(this.toJSON()); }
-    catch (e) { console.warn("replaceAll a échoué", e); }
+    catch (e) { console.warn("replaceAll a échoué", e); this.onPersistError?.("all", e); }
   }
 
   /* ---- UNDO / REDO (délégué à l'adapter) ---- */

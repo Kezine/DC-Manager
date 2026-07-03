@@ -669,6 +669,12 @@ async function boot(): Promise<void> {
     const head = errors.slice(0, 3).map((e) => e.message).join(" · ");
     Notify.toast("Données invalides : " + head + (errors.length > 3 ? " …" : ""), "err");
   };
+  // Échec de persistance HORS transaction (meta / snapshot) : sans ce câblage, un échec réseau (renommage,
+  // import, dispositions de graphe) finissait en console.warn et l'UI croyait au succès.
+  store.onPersistError = (op, e: any) => {
+    const what = op === "meta" ? "métadonnées non enregistrées" : "document non enregistré";
+    Notify.toast("Échec de persistance (" + what + ") : " + ((e && e.message) || e), "err");
+  };
   /** Planifie un rechargement débouncé en consommant les changesets SSE accumulés (fusionnés). */
   function flushPendingReload(): void {
     const changeset = pendingChangeset || Changeset.full();

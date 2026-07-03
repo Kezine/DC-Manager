@@ -7,5 +7,10 @@
     "noEmit": false,
     "sourceMap": false
   },
-  "include": ["src/**/*.ts", "shared/**/*.ts"]
+  "include": [
+    "src/**/*.ts", "shared/**/*.ts",
+    // Modules SERVEUR testables sans Express (tests dans Tests/modules/run.js, driver SQLite injecté) :
+    // ApiRules (règles pures de la couche HTTP), Repository/db et DocumentStore (+ constants/logger transitifs).
+    "src-server/src/ApiRules.ts", "src-server/src/db.ts", "src-server/src/documents.ts"
+  ]
 }

@@ -8,6 +8,7 @@ import { LiveBus } from "./live.js";
 import type { DocumentChangeset } from "../../shared/DocumentChangeset.js";   // type PARTAGÉ front ⇄ back (source unique)
 import { DataValidator, type ValidationError, type EntityFetcher, type ChildFinder } from "../../shared/DataValidation.js";   // normalisation + validation PARTAGÉES
 import { Cascade } from "../../shared/Cascade.js";   // cascade de suppression PARTAGÉE (intégrité référentielle en DELETE)
+import { ApiRules } from "./ApiRules.js";             // règles PURES de la couche HTTP (verrou, changeset, lot) — testables sans Express
 
 /** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`).
     `changeset` : périmètre SSE, posé par défaut par `resolveRepo` et ÉLARGISSABLE par un handler (ex. la cascade
@@ -129,44 +130,14 @@ export class Api {
     if (this.docs.delete(req.params.docId)) res.status(204).end(); else res.status(404).json({ error: "document inconnu" });
   };
 
-  /** Entités VISÉES par une écriture (pour le verrou optimiste) : lot `/transact` (updates + deletes) ou CRUD
-      unitaire `/:collection/:id`. Les créations (id neuf) et les écritures globales (meta / snapshot / images)
-      ne ciblent aucune ligne existante → liste vide → pas de garde. */
+  /** Entités VISÉES par une écriture (verrou optimiste) — logique pure dans `ApiRules.writeTargets`. */
   private writeTargets(req: Request): Array<{ collection: string; id: string }> {
-    const out: Array<{ collection: string; id: string }> = [];
-    const body: any = req.body || {};
-    if (Array.isArray(body.updates) || Array.isArray(body.deletes)) {
-      for (const u of body.updates || []) if (u && u.collection && u.record && u.record.id) out.push({ collection: u.collection, id: u.record.id });
-      for (const d of body.deletes || []) if (d && d.collection && d.id) out.push({ collection: d.collection, id: d.id });
-      return out;
-    }
-    const { collection, id } = req.params as any;
-    if (collection && id) out.push({ collection, id });
-    return out;
+    return ApiRules.writeTargets(req.body, req.params as any);
   }
 
-  /** Périmètre d'une écriture, pour le rechargement granulaire des autres clients. Déduit du corps (`/transact`),
-      des paramètres de route (CRUD `/:collection/:id`) ou du chemin (`/meta`, `/snapshot`, `/images`). Périmètre
-      non reconnu → `full` (repli sûr : le client recharge tout). */
+  /** Périmètre d'une écriture (rechargement granulaire) — logique pure dans `ApiRules.buildChangeset`. */
   private buildChangeset(req: Request): DocumentChangeset {
-    const body: any = req.body || {};
-    // Lot atomique : union des collections de creates + updates + deletes.
-    if (Array.isArray(body.creates) || Array.isArray(body.updates) || Array.isArray(body.deletes)) {
-      const collections = new Set<string>();
-      for (const entry of [...(body.creates || []), ...(body.updates || []), ...(body.deletes || [])]) {
-        if (entry && entry.collection) collections.add(entry.collection);
-      }
-      return { full: false, collections: [...collections], meta: !!body.meta, images: false };
-    }
-    // CRUD unitaire : la collection est dans les paramètres de route.
-    const collection = (req.params as any).collection as string | undefined;
-    if (collection) return { full: false, collections: [collection], meta: false, images: false };
-    // Routes globales (sans paramètre de collection) — reconnues par le chemin (relatif au sous-routeur du document).
-    const path = req.path || "";
-    if (path.startsWith("/snapshot")) return { full: true, collections: [], meta: true, images: true };
-    if (path.startsWith("/meta")) return { full: false, collections: [], meta: true, images: false };
-    if (path.startsWith("/images")) return { full: false, collections: [], meta: false, images: true };
-    return { full: true, collections: [], meta: true, images: true };   // inconnu → repli sûr
+    return ApiRules.buildChangeset(req.body, (req.params as any).collection, req.path || "");
   }
 
   /** Résout le Repository du document (404 si inconnu). En écriture : VERROU OPTIMISTE par entité (409 si une entité
@@ -240,57 +211,27 @@ export class Api {
       if (entry && entry.collection && entry.record) errors.push(...DataValidator.validateDependents(entry.collection, entry.record, childFinder, fetch));
     }
     if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return; }
-    // CRÉATION STRICTE dans le lot : un `create` dont l'id existe DÉJÀ en base (et que le lot ne supprime pas
-    // au préalable — transact applique deletes puis creates) écraserait l'enregistrement HORS verrou optimiste
-    // (`writeTargets` ne cible pas les créations, un id « neuf » n'ayant pas de ligne à protéger). → 409.
-    const deletedInBatch = new Set<string>((body.deletes || []).filter((d: any) => d && d.collection && d.id).map((d: any) => d.collection + " " + d.id));
-    const repoFetch = this.repoFetcher(req);
-    const clashes = creates.filter((entry: any) => entry && entry.collection && entry.record && entry.record.id
-      && !deletedInBatch.has(entry.collection + " " + entry.record.id)
-      && repoFetch(entry.collection, entry.record.id));
-    if (clashes.length) {
-      res.status(409).json({ error: "création refusée : l'id existe déjà", conflicts: clashes.map((e: any) => ({ collection: e.collection, id: e.record.id })) });
-      return;
-    }
-    // CASCADE RÉSIDUELLE (autorité serveur — même garantie que le DELETE unitaire) : le client packagé envoie
-    // la cascade calculée sur SON instantané ; si le document a bougé entre-temps (ex. un câble branché par un
-    // autre client sur un port que ce lot supprime), le lot laisserait des FK pendantes. Les lecteurs CONSCIENTS
-    // DU LOT reflètent l'état POST-lot → `Cascade.plan` ne renvoie ici que le travail MANQUANT, fusionné au lot.
-    const batchDeletes: Array<{ collection: string; id: string }> = (body.deletes || []).filter((d: any) => d && d.collection && d.id);
-    const extraDeletes: Array<{ collection: string; id: string }> = [];
-    const extraDeleted = new Set<string>(deletedInBatch);
-    // Détachements FUSIONNÉS par enregistrement (cf. `remove`) : un même record peut recevoir plusieurs clés.
-    const patched = new Map<string, { collection: string; record: Record<string, any> }>();
-    for (const d of batchDeletes) {
-      const plan = Cascade.plan(d.collection, d.id, childFinder, fetch);
-      for (const x of plan.deletes) {
-        const key = x.c + " " + x.id;
-        if (extraDeleted.has(key)) continue;
-        extraDeleted.add(key);
-        extraDeletes.push({ collection: x.c, id: x.id });
-      }
-      for (const det of plan.detaches) {
-        const key = det.c + " " + det.id;
-        let entry = patched.get(key);
-        if (!entry) { const rec = fetch(det.c, det.id); if (!rec) continue; entry = { collection: det.c, record: { ...rec } }; patched.set(key, entry); }
-        entry.record[det.key] = det.value;
-      }
-    }
-    // GARDE ANTI-RÉSURRECTION : transact applique deletes PUIS updates — un update sur un record supprimé par
-    // le lot (ou par la cascade résiduelle) le RECRÉERAIT. On écarte donc tout détachement d'un record supprimé.
-    const extraUpdates = [...patched.entries()].filter(([key]) => !extraDeleted.has(key)).map(([, entry]) => entry);
-    if (extraDeletes.length || extraUpdates.length) {
+    // CRÉATION STRICTE dans le lot (logique pure : ApiRules.createConflicts) : un `create` dont l'id existe DÉJÀ
+    // en base écraserait l'enregistrement HORS verrou optimiste (`writeTargets` ne cible pas les créations). → 409.
+    // Le lecteur passé est l'état PERSISTÉ (repoFetcher), pas le lecteur conscient du lot qui masquerait la ligne.
+    const clashes = ApiRules.createConflicts(creates, body.deletes, this.repoFetcher(req));
+    if (clashes.length) { res.status(409).json({ error: "création refusée : l'id existe déjà", conflicts: clashes }); return; }
+    // CASCADE RÉSIDUELLE (autorité serveur — logique pure : ApiRules.residualCascade) : fusionne au lot le travail
+    // de cascade MANQUANT (document modifié entre l'instantané du client et cette écriture), avec garde
+    // anti-résurrection. Les lecteurs CONSCIENTS DU LOT reflètent l'état post-lot → seul le résidu est produit.
+    const residual = ApiRules.residualCascade(body.deletes, childFinder, fetch);
+    if (residual.deletes.length || residual.updates.length) {
       // Périmètre SSE ÉLARGI : la cascade résiduelle touche d'autres collections → les autres clients les rechargent.
       const cs = (req as RepoRequest).changeset;
       if (cs && !cs.full) {
         const touched = new Set<string>(cs.collections);
-        extraDeletes.forEach((x) => touched.add(x.collection));
-        extraUpdates.forEach((u) => touched.add(u.collection));
+        residual.deletes.forEach((x) => touched.add(x.collection));
+        residual.updates.forEach((u) => touched.add(u.collection));
         cs.collections = [...touched];
       }
     }
     try {
-      this.repoOf(req).transact({ ...body, creates, updates: [...updates, ...extraUpdates], deletes: [...(body.deletes || []), ...extraDeletes] }, this.revOf(req));
+      this.repoOf(req).transact({ ...body, creates, updates: [...updates, ...residual.updates], deletes: [...(body.deletes || []), ...residual.deletes] }, this.revOf(req));
       res.status(204).end();
     }
     catch (e: any) { res.status(400).json({ error: e.message }); }

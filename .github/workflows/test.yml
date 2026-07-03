@@ -22,13 +22,16 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm ci
+      # Dépendances SERVEUR d'abord : les tests exercent Repository/DocumentStore sur le VRAI better-sqlite3
+      # (src-server/node_modules) — sans lui ces tests seraient silencieusement sautés.
+      - name: Dépendances serveur
+        working-directory: src-server
+        run: npm ci
       # Typecheck FRONT (src/ + shared/, résolution bundler)
       - run: npx tsc --noEmit
-      # Tests unitaires (compile dist-test/ puis exécute le harnais Node)
+      # Tests unitaires (compile dist-test/ — y compris les modules serveur purs — puis exécute le harnais Node)
       - run: npm run test
-      # Typecheck SERVEUR (NodeNext ; dépendances propres à src-server/)
+      # Typecheck SERVEUR (NodeNext)
       - name: Typecheck serveur
         working-directory: src-server
-        run: |
-          npm ci
-          npx tsc --noEmit
+        run: npx tsc --noEmit
