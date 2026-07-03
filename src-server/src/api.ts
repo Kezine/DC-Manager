@@ -240,7 +240,59 @@ export class Api {
       if (entry && entry.collection && entry.record) errors.push(...DataValidator.validateDependents(entry.collection, entry.record, childFinder, fetch));
     }
     if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return; }
-    try { this.repoOf(req).transact({ ...body, creates, updates }, this.revOf(req)); res.status(204).end(); }
+    // CRÉATION STRICTE dans le lot : un `create` dont l'id existe DÉJÀ en base (et que le lot ne supprime pas
+    // au préalable — transact applique deletes puis creates) écraserait l'enregistrement HORS verrou optimiste
+    // (`writeTargets` ne cible pas les créations, un id « neuf » n'ayant pas de ligne à protéger). → 409.
+    const deletedInBatch = new Set<string>((body.deletes || []).filter((d: any) => d && d.collection && d.id).map((d: any) => d.collection + " " + d.id));
+    const repoFetch = this.repoFetcher(req);
+    const clashes = creates.filter((entry: any) => entry && entry.collection && entry.record && entry.record.id
+      && !deletedInBatch.has(entry.collection + " " + entry.record.id)
+      && repoFetch(entry.collection, entry.record.id));
+    if (clashes.length) {
+      res.status(409).json({ error: "création refusée : l'id existe déjà", conflicts: clashes.map((e: any) => ({ collection: e.collection, id: e.record.id })) });
+      return;
+    }
+    // CASCADE RÉSIDUELLE (autorité serveur — même garantie que le DELETE unitaire) : le client packagé envoie
+    // la cascade calculée sur SON instantané ; si le document a bougé entre-temps (ex. un câble branché par un
+    // autre client sur un port que ce lot supprime), le lot laisserait des FK pendantes. Les lecteurs CONSCIENTS
+    // DU LOT reflètent l'état POST-lot → `Cascade.plan` ne renvoie ici que le travail MANQUANT, fusionné au lot.
+    const batchDeletes: Array<{ collection: string; id: string }> = (body.deletes || []).filter((d: any) => d && d.collection && d.id);
+    const extraDeletes: Array<{ collection: string; id: string }> = [];
+    const extraDeleted = new Set<string>(deletedInBatch);
+    // Détachements FUSIONNÉS par enregistrement (cf. `remove`) : un même record peut recevoir plusieurs clés.
+    const patched = new Map<string, { collection: string; record: Record<string, any> }>();
+    for (const d of batchDeletes) {
+      const plan = Cascade.plan(d.collection, d.id, childFinder, fetch);
+      for (const x of plan.deletes) {
+        const key = x.c + " " + x.id;
+        if (extraDeleted.has(key)) continue;
+        extraDeleted.add(key);
+        extraDeletes.push({ collection: x.c, id: x.id });
+      }
+      for (const det of plan.detaches) {
+        const key = det.c + " " + det.id;
+        let entry = patched.get(key);
+        if (!entry) { const rec = fetch(det.c, det.id); if (!rec) continue; entry = { collection: det.c, record: { ...rec } }; patched.set(key, entry); }
+        entry.record[det.key] = det.value;
+      }
+    }
+    // GARDE ANTI-RÉSURRECTION : transact applique deletes PUIS updates — un update sur un record supprimé par
+    // le lot (ou par la cascade résiduelle) le RECRÉERAIT. On écarte donc tout détachement d'un record supprimé.
+    const extraUpdates = [...patched.entries()].filter(([key]) => !extraDeleted.has(key)).map(([, entry]) => entry);
+    if (extraDeletes.length || extraUpdates.length) {
+      // Périmètre SSE ÉLARGI : la cascade résiduelle touche d'autres collections → les autres clients les rechargent.
+      const cs = (req as RepoRequest).changeset;
+      if (cs && !cs.full) {
+        const touched = new Set<string>(cs.collections);
+        extraDeletes.forEach((x) => touched.add(x.collection));
+        extraUpdates.forEach((u) => touched.add(u.collection));
+        cs.collections = [...touched];
+      }
+    }
+    try {
+      this.repoOf(req).transact({ ...body, creates, updates: [...updates, ...extraUpdates], deletes: [...(body.deletes || []), ...extraDeletes] }, this.revOf(req));
+      res.status(204).end();
+    }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   /** Remplacement COMPLET du document (import `.json`). Comme `/transact` et le CRUD, le serveur fait AUTORITÉ :
@@ -297,7 +349,9 @@ export class Api {
   };
   private putImage: RequestHandler = (req, res) => {
     let meta: Rec = {};
-    try { meta = req.body && req.body.meta ? JSON.parse(req.body.meta) : {}; } catch { /* ignore */ }
+    // meta malformée → 400 : l'ignorer silencieusement écraserait la méta existante par `{ id }` seul.
+    try { meta = req.body && req.body.meta ? JSON.parse(req.body.meta) : {}; }
+    catch { res.status(400).json({ error: "meta invalide (JSON attendu)" }); return; }
     const file = (req as { file?: { buffer: Buffer; mimetype: string } }).file;   // posé par multer.single("blob")
     const buf = file ? file.buffer : null;
     if (buf) meta.type = meta.type || file!.mimetype || "application/octet-stream";
@@ -339,6 +393,13 @@ export class Api {
   private create: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
     const record = this.accept(res, req.params.collection, req.body || {}, this.repoFetcher(req), this.repoChildFinder(req)); if (!record) return;
+    // CRÉATION STRICTE (pas d'upsert silencieux) : un POST avec un id EXISTANT écraserait l'enregistrement en
+    // CONTOURNANT le verrou optimiste (`writeTargets` ne cible pas les créations — un id neuf n'a pas de ligne
+    // à protéger). Réécrire une entité existante = PUT /:collection/:id, gardé par X-Base-Rev. → 409.
+    if (record.id && this.repoOf(req).getOne(req.params.collection, record.id)) {
+      res.status(409).json({ error: "création refusée : l'id existe déjà", collection: req.params.collection, id: record.id });
+      return;
+    }
     try { this.repoOf(req).upsert(req.params.collection, record, this.revOf(req)); res.status(201).json(record); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };

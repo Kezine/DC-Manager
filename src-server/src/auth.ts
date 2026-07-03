@@ -37,9 +37,12 @@ export class Auth {
     const ba = (opts.basicAuth || "").trim();   // "user:pass" → gate Basic Auth (dev) PRIORITAIRE sur le SSO
     if (ba.includes(":")) { const i = ba.indexOf(":"); this.basicUser = ba.slice(0, i); this.basicPass = ba.slice(i + 1); }
     this.mode = this.basicUser != null ? "basic" : (this.ssoUrl ? "sso" : "dev");
-    this.log.info("auth", this.mode === "basic" ? ("Basic Auth dev (user " + this.basicUser + ")")
-      : this.mode === "sso" ? ("SSO " + this.ssoUrl + (this.cookieName ? " (cookie " + this.cookieName + ")" : " (Cookie complet)"))
-      : "mode DEV (aucune auth)");
+    // Mode dev = AUCUNE authentification (tout appelant est SUPER_ADMIN, lecture/écriture/suppression comprises).
+    // C'est le DÉFAUT quand ni SSO_URL ni BASIC_AUTH ne sont configurés → un déploiement réel démarré sans ces
+    // variables serait grand ouvert : on le signale en WARN bien visible au boot, pas en simple info.
+    if (this.mode === "dev") this.log.warn("auth", "⚠ mode DEV : AUCUNE authentification — tout appelant est SUPER_ADMIN. Configurer SSO_URL ou BASIC_AUTH pour un déploiement réel.");
+    else this.log.info("auth", this.mode === "basic" ? ("Basic Auth dev (user " + this.basicUser + ")")
+      : ("SSO " + this.ssoUrl + (this.cookieName ? " (cookie " + this.cookieName + ")" : " (Cookie complet)")));
   }
 
   /** Comparaison à TEMPS CONSTANT (anti-timing-attack). On hash les deux chaînes en SHA-256 → deux buffers de MÊME

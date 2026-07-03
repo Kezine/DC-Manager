@@ -90,8 +90,16 @@ export class DocumentStore {
       (`Api.deleteDoc` → 423) pour distinguer « verrouillé » de « inconnu » ; cf. setLocked. */
   delete(id: string): boolean {
     if (!this.get(id)) return false;
-    this.repos.delete(id);
-    for (const ext of ["", "-wal", "-shm"]) { try { fs.rmSync(path.join(this.dir, id + ".db" + ext), { force: true }); } catch { /* noop */ } }
+    // FERMER le handle SQLite AVANT de supprimer les fichiers : sous Windows, `rmSync` sur un fichier encore
+    // ouvert échoue (EBUSY/EPERM) — le contenu du document « supprimé » resterait sur disque, avec fuite de
+    // descripteur. Un échec de suppression est LOGUÉ (et non avalé) : la ligne registre disparaît quand même,
+    // le fichier orphelin est alors du déchet inerte signalé, pas une fuite silencieuse.
+    const repo = this.repos.get(id);
+    if (repo) { try { repo.close(); } catch { /* handle déjà fermé */ } this.repos.delete(id); }
+    for (const ext of ["", "-wal", "-shm"]) {
+      try { fs.rmSync(path.join(this.dir, id + ".db" + ext), { force: true }); }
+      catch (e: any) { this.log.warn("fichier non supprimé", id + ".db" + ext, e && e.message); }
+    }
     this.registry.prepare("DELETE FROM documents WHERE id = ?").run(id);
     if (this.getSetting("defaultDocId") === id) this.setSetting("defaultDocId", null);   // le doc par défaut vient d'être supprimé → on efface le réglage périmé
     this.log.info("document supprimé", id);
