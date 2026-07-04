@@ -81,6 +81,27 @@ export class MeasureTool {
   }
   cancel(): void { this.state = null; this.hi = null; this.host.hideCote(); this.host.buildToolbar(); this.host.render(); }
   undo(): void { if (this.state && this.state.pts.length) { this.state.pts.pop(); this.state.cursor = null; this.host.render(); } }
+
+  /* ---- aperçu SOURIS 2D (throttlé) — vivait dans la vue (DcBase.newScene), rapatrié DANS l'outil ---- */
+  private _mouseClient: [number, number] | null = null;
+  private _mouseTO: ReturnType<typeof setTimeout> | 0 = 0;
+  /** Aperçu de mesure jusqu'à la SOURIS (segment courant pointillé + cote live), THROTTLÉ à 40 ms.
+      À câbler sur le `mousemove` du <svg> 2D ; inerte hors mesure active. */
+  onSvgMouseMove(ev: MouseEvent): void {
+    const m = this.state;
+    if (!m || !m.active || !this.activeHere() || !m.pts.length) return;
+    this._mouseClient = [ev.clientX, ev.clientY];
+    if (this._mouseTO) return;
+    this._mouseTO = setTimeout(() => {
+      this._mouseTO = 0;
+      const mc = this._mouseClient; if (!mc || !this.hasActive()) return;
+      // met à jour le curseur + l'aperçu 2D et renvoie la longueur du segment courant (cote live), ou null.
+      const len = this.updateCursor(mc[0], mc[1]);
+      if (len != null) this.host.showCote(Format.meters(len), mc[0], mc[1]); else this.host.hideCote();
+    }, 40);
+  }
+  /** Purge le throttle d'aperçu (démontage de la vue). */
+  disposeTimers(): void { clearTimeout(this._mouseTO); this._mouseTO = 0; this._mouseClient = null; }
   /** Termine la mesure en cours (≥ 2 points) : elle reste affichée (session), une nouvelle peut démarrer. */
   commit(): void { const m = this.state; if (m && m.pts.length >= 2) { m.done.push(m.pts.slice()); m.pts = []; m.cursor = null; this.hi = null; this.host.hideCote(); this.host.render(); } }
   /** Annule la mesure EN COURS (points non validés) en conservant les mesures terminées. Action de « ÉCHAP ». */

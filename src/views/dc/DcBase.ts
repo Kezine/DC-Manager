@@ -14,10 +14,9 @@ import type { PositioningHost } from "./PositioningTool";
 import { DoorTool } from "./DoorTool";
 import type { DoorHost } from "./DoorTool";
 import { MeasureTool } from "./MeasureTool";
-import type { MeasureHost, MeasureState } from "./MeasureTool";
+import type { MeasureHost } from "./MeasureTool";
 import { RouteTool } from "./RouteTool";
-import type { RouteHost, RouteState } from "./RouteTool";
-import { Format } from "../../core/Format";
+import type { RouteHost } from "./RouteTool";
 import { U_MM } from "../../domain/constants";
 import { CABLE_SPLINE_K, CAM_PRESETS } from "./shared";
 import type { Vec3, DatacenterHost } from "./shared";
@@ -40,20 +39,11 @@ export abstract class DcBase {
   freePlace = false;                                            // « Placement libre » : désactive l'aimantation à la grille au glisser
   blockEdit = false;                                            // mode « Cases inaccessibles » : glisser pour (dé)marquer des cases
   // Outil de ROUTAGE (création d'un câble au clic) — module dédié `RouteTool`, piloté via `RouteHost` (+ store/resolver
-  // injectés). ÉTAT via PONT d'accès (getter/setter) pour laisser inchangés les sites existants (`this.routeBuild.wpIds`…).
+  // injectés). L'ÉTAT vit DANS l'outil (`routeTool.state`) — les anciens ponts d'accès sont résorbés.
   routeTool!: RouteTool;
-  get routeBuild(): RouteState | null { return this.routeTool.state; }
-  set routeBuild(v: RouteState | null) { this.routeTool.state = v; }
   // Outil de MESURE multipoint (éphémère, exclusif du routage) — module dédié `MeasureTool` (état + overlays 2D/3D
-  // + panneau + pont WebGL), piloté via `MeasureHost`. L'ÉTAT vit dans le tool ; `measure`/`_measHi` sont des PONTS
-  // d'accès (getters/setters) pour que les sites existants (`this.measure.pts`…) restent inchangés. Instancié au ctor.
+  // + panneau + pont WebGL + aperçu souris throttlé), piloté via `MeasureHost`. Instancié au constructeur.
   measureTool!: MeasureTool;
-  get measure(): MeasureState | null { return this.measureTool.state; }
-  set measure(v: MeasureState | null) { this.measureTool.state = v; }
-  get _measHi(): number | null { return this.measureTool.hi; }
-  set _measHi(v: number | null) { this.measureTool.hi = v; }
-  protected _measMouseClient: [number, number] | null = null;
-  protected _measMouseTO: any = 0;
   // Outil de POSITIONNEMENT (aide au placement par COINS + cotes ⟂). Module dédié `PositioningTool` (état + overlay
   // + panneau + glisser), piloté via l'interface PositioningHost que cette chaîne de vues implémente (cf. DcInteract
   // posScene/posCtxKey/…). Instancié dans le constructeur. ÉPHÉMÈRE : déplace l'élément puis écrit sa position UNE fois.
@@ -212,7 +202,7 @@ export abstract class DcBase {
     if (this._onWinResize) { window.removeEventListener("resize", this._onWinResize); this._onWinResize = null; }
     if (this._onFullscreen) { document.removeEventListener("fullscreenchange", this._onFullscreen); this._onFullscreen = null; }
     if (this._onKeydown) { document.removeEventListener("keydown", this._onKeydown); this._onKeydown = null; }
-    clearTimeout(this._resizeT); clearTimeout(this._pvTO); clearTimeout(this._measMouseTO);   // _measMouseTO : throttle de l'aperçu mesure 2D
+    clearTimeout(this._resizeT); clearTimeout(this._pvTO); this.measureTool.disposeTimers();   // throttle de l'aperçu mesure 2D (dans l'outil)
     if (this._three) { this._three.dispose(); this._three = null; this._webglHost = null; }
   }
 
@@ -281,7 +271,7 @@ export abstract class DcBase {
   isFloorTransformed(): boolean { return !!this.floorXf; }
   three(): any | null { return this._three; }
   disarmPositioning(): void { this.posTool.disarm(); }
-  clearRoute(): void { this.routeBuild = null; }
+  clearRoute(): void { this.routeTool.state = null; }
   /* ---- RouteHost : services fournis au RouteTool ---- */
   svgEl(): SVGElement | null { return this.svg; }
   openCableForm(prefill: { fromPortId: string; toPortId: string; waypointIds: string[]; onCreated?: (cableId: string) => void }): void { this.host.openCableForm?.(null, prefill); }
@@ -363,20 +353,8 @@ export abstract class DcBase {
       this.measureTool.placeAt(ev.clientX, ev.clientY);
     });
     svg.addEventListener("contextmenu", (e) => e.preventDefault());
-    // aperçu de MESURE jusqu'à la SOURIS (2D ET 3D), throttlé — segment courant en pointillé + cote (longueur live).
-    svg.addEventListener("mousemove", (ev) => {
-      const m = this.measure;
-      if (!m || !m.active || !this.measureTool.activeHere() || !m.pts.length) return;
-      this._measMouseClient = [ev.clientX, ev.clientY];
-      if (this._measMouseTO) return;
-      this._measMouseTO = setTimeout(() => {
-        this._measMouseTO = 0;
-        const mc = this._measMouseClient; if (!mc || !this.measureTool.hasActive()) return;
-        // met à jour le curseur + l'aperçu 2D et renvoie la longueur du segment courant (cote live), ou null.
-        const len = this.measureTool.updateCursor(mc[0], mc[1]);
-        if (len != null) this.showCote(Format.meters(len), mc[0], mc[1]); else this.hideCote();
-      }, 40);
-    }, true);
+    // aperçu de MESURE jusqu'à la SOURIS (2D), throttlé — géré PAR L'OUTIL (MeasureTool.onSvgMouseMove).
+    svg.addEventListener("mousemove", (ev) => this.measureTool.onSvgMouseMove(ev), true);
     svg.addEventListener("wheel", (ev) => this.onWheel(ev), { passive: false });
     // navigation TACTILE 2D (Plan de salle / Plan d'étage) : 1 doigt = pan · 2 doigts = pinch-zoom.
     // Le tap d'1 doigt n'est pas intercepté → la sélection (baie/équipement) passe par les events souris de compat.
@@ -691,7 +669,7 @@ export abstract class DcBase {
     this.useWebGL = true; this.webglPerspective = false; this.cablesOnTop = true;   // WebGL = unique moteur 3D ; projection/cables-on-top restaurés depuis TOGGLE_KEYS
     this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1;
     this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set();
-    this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeBuild = null; this.measure = null;
+    this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeTool.state = null; this.measureTool.state = null;
     this.selCables = new Set(); this.searchTerm = ""; this.focusEqId = null; this.focusPortId = null;
     this.view = (o.view === "top" || o.view === "floor") ? o.view : "3d";
     // toggles persistés

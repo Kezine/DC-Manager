@@ -763,14 +763,14 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(inter.length, 1, "routing.interDcRoutes : 1 route inter-salles");
     ck(inter[0].cable.id === outCable.id && inter[0].pts.length >= 2 && inter[0].pts.every((p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z)), "routing.interDcRoutes : port A → port B, points monde finis");
     // route builder : départ port A → waypoint → port B → ouvre le form câble prérempli. Machine d'état = RouteTool
-    // (on pose l'état directement : arm/start émettent un toast → besoin du DOM, absent ici). `routeBuild` = pont d'accès.
+    // (on pose l'état directement : arm/start émettent un toast → besoin du DOM, absent ici). L'état vit DANS l'outil.
     let routed = null;
     const dvr = new DatacenterView(s, {}, { openCableForm: (id, opts) => { routed = { id, opts }; } });
-    dvr.routeBuild = { fromPortId: pa, wpIds: [] };
-    dvr.routeTool.addWp(exit1.id); ck.eq(JSON.stringify(dvr.routeBuild.wpIds), JSON.stringify([exit1.id]), "RouteTool.addWp : waypoint ajouté");
+    dvr.routeTool.state = { fromPortId: pa, wpIds: [] };
+    dvr.routeTool.addWp(exit1.id); ck.eq(JSON.stringify(dvr.routeTool.state.wpIds), JSON.stringify([exit1.id]), "RouteTool.addWp : waypoint ajouté");
     dvr.routeTool.finish(pc);
     ck(routed && routed.id === null && routed.opts.fromPortId === pa && routed.opts.toPortId === pc && JSON.stringify(routed.opts.waypointIds) === JSON.stringify([exit1.id]), "RouteTool.finish → openCableForm prérempli (from/to/waypoints)");
-    ck.eq(dvr.routeBuild, null, "RouteTool.finish : session terminée");
+    ck.eq(dvr.routeTool.state, null, "RouteTool.finish : session terminée");
     // brouillons-candidats : un câble draft à un seul bout est proposé pour un port compatible
     const pDraft = await mkEqPort(4);   // port libre distinct pour le brouillon (pa porte déjà « patch »)
     const draft = await s.create("cables", { name: "brouillon", from_port_id: pDraft, to_port_id: null, status: "brouillon" });
