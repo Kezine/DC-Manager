@@ -120,6 +120,9 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   données (spec déclarative, niveaux intrinsèque/référentiel/invariants, V1/V2/V3).
 - [`reverse-proxy.md`](docs/reverse-proxy.md) — servir l'app **sous un sous-dossier**
   (URLs relatives + `<base>` + `X-Forwarded-Prefix`), sans reconfiguration.
+- [`perf-3d.md`](docs/perf-3d.md) — **optimisations du moteur 3D WebGL** (visibilité vs
+  rebuild, diff d'options, instancing…) : le fait sert de contexte, les idées « à faire »
+  y sont consignées (à ne PAS coder sans demande).
 
 ## Points d'architecture à connaître
 

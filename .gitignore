@@ -15,3 +15,6 @@ dist-test/
 
 # Jeux de données locaux (peuvent contenir des données client réelles) — jamais versionnés
 Samples/
+
+# artefact legacy v172 (comparateur Painter) — conservé localement, hors dépôt
+netmap-v172-painter-comparator.html
