@@ -1,5 +1,5 @@
 import { DataAdapter } from "./DataAdapter";
-import { PAGE_SIZE_DEFAULT } from "./config";
+import { PAGE_SIZE_DEFAULT, PAGE_SIZE_ALL } from "./config";
 import { RawRecord, Snapshot, Transaction, ListOptions, ListResult } from "./types";
 import { EntityRegistry } from "../models";
 import { RestProtocol } from "./RestProtocol";
@@ -93,7 +93,7 @@ export class RestAdapter extends DataAdapter {
     if (!this.docId) return { meta: {} };
     const snap: Snapshot = { meta: {} };
     // pageSize très grand → la collection ENTIÈRE (le document complet) en une page.
-    await Promise.all(COLLECTIONS.map(async (c) => { snap[c] = this.rows(await this._send("GET", "/" + c + "?pageSize=1000000000")); }));
+    await Promise.all(COLLECTIONS.map(async (c) => { snap[c] = this.rows(await this._send("GET", "/" + c + "?pageSize=" + PAGE_SIZE_ALL)); }));
     try { snap.meta = (await this._send("GET", "/meta")) || {}; } catch (_) { snap.meta = {}; }
     return snap;
   }
@@ -124,7 +124,7 @@ export class RestAdapter extends DataAdapter {
   }
   async findBy(collection: string, field: string, value: any): Promise<RawRecord[]> {
     const v = (value === null || value === undefined) ? "null" : String(value);
-    return this.rows(await this._send("GET", "/" + collection + "?pageSize=1000000000&" + encodeURIComponent(field) + "=" + encodeURIComponent(v)));
+    return this.rows(await this._send("GET", "/" + collection + "?pageSize=" + PAGE_SIZE_ALL + "&" + encodeURIComponent(field) + "=" + encodeURIComponent(v)));
   }
 
   /* ---- écritures unitaires (appels directs, sans passer par le lot) ---- */

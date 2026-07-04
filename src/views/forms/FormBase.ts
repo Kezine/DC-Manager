@@ -16,6 +16,7 @@ import {
   BREAKOUT_SPANS,
   EQUIP_FACE_IMG_FIELD
 } from "../../domain/constants";
+import { Schema } from "../../../shared/Schema";   // types MIME d'images acceptés — liste PARTAGÉE (le serveur applique la même)
 
 export class FormBase {
   /** Bibliothèque d'images de façade (injectée au boot) — singleton applicatif (hors modèle). */
@@ -198,14 +199,14 @@ export class FormBase {
   /** Demande un fichier image à l'utilisateur (input file, JPEG/PNG/WebP). */
   protected static promptImageFile(): Promise<File | null> {
     return new Promise((resolve) => {
-      const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/png,image/jpeg,image/webp"; inp.style.display = "none";
+      const inp = document.createElement("input"); inp.type = "file"; inp.accept = Schema.IMAGE_MIME_TYPES.join(","); inp.style.display = "none";
       inp.onchange = () => { const f = inp.files && inp.files[0] ? inp.files[0] : null; inp.remove(); resolve(f); };
       document.body.appendChild(inp); inp.click();
     });
   }
   protected static validImageFile(f: File | null): File | null {
     if (!f) return null;
-    if (!/^image\/(png|jpeg|webp)$/.test(f.type)) { Notify.toast("Format non supporté (PNG / JPEG / WebP).", "err"); return null; }
+    if (!Schema.isImageMime(f.type)) { Notify.toast("Format non supporté (PNG / JPEG / WebP).", "err"); return null; }
     return f;
   }
   protected static sideGrid(store: Store, scene: RackScene, rack: any, opts: any): { el: HTMLElement; refresh: () => void } {

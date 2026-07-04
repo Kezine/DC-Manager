@@ -1,6 +1,6 @@
 import { DataAdapter } from "../data/DataAdapter";
 import { FieldIndex } from "../data/FieldIndex";
-import { INDEX_SPEC, PAGE_SIZE_DEFAULT } from "../data/config";
+import { INDEX_SPEC, PAGE_SIZE_DEFAULT, PAGE_SIZE_ALL } from "../data/config";
 import { RawRecord, Snapshot, Transaction } from "../data/types";
 import { Entity } from "../models/Entity";
 import type { CollectionName, EntityOf } from "../models/EntityRegistry";
@@ -183,7 +183,7 @@ export class Store {
     if (!targets.length) return [];
     // Chaque collection en UNE page (document complet de cette collection). En parallèle : I/O réseau indépendantes.
     await Promise.all(targets.map(async (c) => {
-      const res = await this.adapter.list(c, { pageSize: 1_000_000_000 });
+      const res = await this.adapter.list(c, { pageSize: PAGE_SIZE_ALL });
       const Cls = ENTITY_CLASSES[c];
       this.data[c] = (res.rows || []).map((o: RawRecord) => new Cls(o));
     }));

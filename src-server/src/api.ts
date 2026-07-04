@@ -152,6 +152,10 @@ export class Api {
     if (req.method === "GET") { res.setHeader("X-Doc-Rev", String(this.docs.getRev(id))); next(); return; }
     // verrou optimiste : `baseRev` = snapshot sur lequel le client s'appuie. Rejet AVANT toute mutation /
     // incrément de rev / publication SSE → l'écriture refusée ne consomme pas de révision et ne réveille personne.
+    // DÉCISION (audit P5) : l'en-tête `X-Base-Rev` reste FACULTATIF — le client de l'app l'envoie toujours
+    // (RestProtocol.writeHeaders), mais l'exiger (400 si absent) casserait les écritures scriptées (curl,
+    // imports) et la première écriture d'un client sans lecture préalable. Sans en-tête : dernier-écrit-gagne,
+    // assumé pour ces usages hors app.
     const baseRev = parseInt(String(req.headers["x-base-rev"] ?? ""), 10);
     const targets = this.writeTargets(req);
     if (Number.isFinite(baseRev) && targets.length) {
@@ -184,7 +188,13 @@ export class Api {
 
   /* -- meta -- */
   private getMeta: RequestHandler = (req, res) => { res.json(this.repoOf(req).getMeta()); };
-  private putMeta: RequestHandler = (req, res) => { this.repoOf(req).setMeta(req.body || {}); res.status(204).end(); };
+  private putMeta: RequestHandler = (req, res) => {
+    // validation minimale : la méta est un OBJET JSON simple (options du document). Un scalaire / tableau
+    // stocké tel quel serait resservi par GET /meta et casserait les consommateurs (`meta.xxx`).
+    const body = req.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) { res.status(400).json({ error: "meta invalide (objet JSON attendu)" }); return; }
+    this.repoOf(req).setMeta(body); res.status(204).end();
+  };
 
   /* -- lot atomique / import -- */
   private transact: RequestHandler = (req, res) => {
@@ -296,6 +306,10 @@ export class Api {
     const file = (req as { file?: { buffer: Buffer; mimetype: string } }).file;   // posé par multer.single("blob")
     const buf = file ? file.buffer : null;
     if (buf) meta.type = meta.type || file!.mimetype || "application/octet-stream";
+    // liste blanche PARTAGÉE (Schema.IMAGE_MIME_TYPES, même filtre que le front) : le blob est resservi avec
+    // son Content-Type stocké — accepter un type arbitraire (text/html, image/svg+xml scripté…) ouvrirait un
+    // XSS stocké servi par l'origine de l'app. Vaut pour le blob ET pour une méta déclarant un `type` seule.
+    if ((buf || meta.type !== undefined) && !Schema.isImageMime(meta.type)) { res.status(400).json({ error: "type d'image non supporté (" + Schema.IMAGE_MIME_TYPES.join(", ") + ")" }); return; }
     this.repoOf(req).putImage(req.params.id, meta, buf);
     res.status(204).end();
   };
@@ -322,7 +336,7 @@ export class Api {
   /** Recherche d'enfants par clé étrangère (dépendance inverse V5b) adossée au Repository. */
   private repoChildFinder(req: Request): ChildFinder {
     const repo = this.repoOf(req);
-    return (collection, fkField, parentId) => repo.list(collection, { where: { [fkField]: parentId }, pageSize: 1_000_000_000 }).rows;
+    return (collection, fkField, parentId) => repo.list(collection, { where: { [fkField]: parentId }, pageSize: Schema.PAGE_SIZE_ALL }).rows;
   }
 
   private accept(res: Response, collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: ChildFinder): Record<string, any> | null {
@@ -372,7 +386,7 @@ export class Api {
     // écraserait les clés des précédents, chacun étant bâti sur l'original).
     const patched = new Map<string, { collection: string; record: Record<string, any> }>();
     for (const d of plan.detaches) {
-      const mapKey = d.c + " " + d.id;
+      const mapKey = d.c + "\u0000" + d.id;
       let entry = patched.get(mapKey);
       if (!entry) { const rec = fetch(d.c, d.id); if (!rec) continue; entry = { collection: d.c, record: { ...rec } }; patched.set(mapKey, entry); }
       entry.record[d.key] = d.value;

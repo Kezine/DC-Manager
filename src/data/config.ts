@@ -4,6 +4,9 @@ import { Schema } from "../../shared/Schema";
 /** Taille de page par défaut des listes. RÉ-EXPORTÉE du schéma PARTAGÉ (source unique front ⇄ back). */
 export const PAGE_SIZE_DEFAULT = Schema.PAGE_SIZE_DEFAULT;
 
+/** Taille de page « TOUT » (document complet en une page). RÉ-EXPORTÉE du schéma PARTAGÉ. */
+export const PAGE_SIZE_ALL = Schema.PAGE_SIZE_ALL;
+
 /** Tailles de page proposées dans les listes. */
 export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 

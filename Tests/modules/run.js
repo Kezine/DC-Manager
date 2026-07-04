@@ -1435,6 +1435,13 @@ ck.eq = (a, b, name) => ck(a === b, name + "  (attendu " + JSON.stringify(b) + "
     ck.eq(SharedSchema.isCollection("racks"), true, "isCollection(racks) = true");
     ck.eq(SharedSchema.isCollection("inconnue"), false, "isCollection(inconnue) = false");
     ck.eq(SharedSchema.isArrayField("network_ids"), true, "isArrayField(network_ids) = true");
+    // types MIME d'images : liste blanche PARTAGÉE (le front filtre à la sélection, le serveur rejette à l'upload).
+    ck.eq(SharedSchema.isImageMime("image/png"), true, "isImageMime(image/png) = true");
+    ck.eq(SharedSchema.isImageMime("image/webp"), true, "isImageMime(image/webp) = true");
+    ck.eq(SharedSchema.isImageMime("image/svg+xml"), false, "isImageMime(image/svg+xml) = false (risque XSS stocké)");
+    ck.eq(SharedSchema.isImageMime("text/html"), false, "isImageMime(text/html) = false");
+    ck.eq(SharedSchema.isImageMime(null), false, "isImageMime(null) = false");
+    ck.eq(SharedSchema.PAGE_SIZE_ALL >= 1e9, true, "PAGE_SIZE_ALL couvre un document complet (pas de plafond serveur — décision actée)");
   }
 
   console.log("\n• shared : normalisation (forme canonique avant écriture)");
