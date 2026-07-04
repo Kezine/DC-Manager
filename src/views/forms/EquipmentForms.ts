@@ -430,26 +430,89 @@ export class EquipmentForms extends FormBase {
     freeBox.appendChild(FormUi.row2(FormControls.fieldRow("Longueur (mm)", flI), FormControls.fieldRow("Largeur (mm)", fwI), FormControls.fieldRow("Hauteur (mm)", fhI)));
     adv.appendChild(freeBox);
 
-    // placement EN SALLE (au sol) — mode LIBRE : équivalent FORMULAIRE du glisser/positionnement en vue 2D/3D
-    // (principe « tout éditable hors vue »). Salle + centre X/Y + hauteur Z (négatif = sous le faux-plancher) + orientation.
+    // placement en MODE LIBRE — principe n°10 : TOUT placement offert par les vues 2D/3D (poser au sol d'une
+    // salle, monter en LATÉRAL ou en PAROI de baie, poser sur un PLAN D'ÉTAGE) a son équivalent FORMULAIRE.
+    // Un sélecteur de MODE expose les champs propres à chaque placement ; à l'enregistrement, le mode choisi
+    // pilote `placement_mode` et remet à zéro les champs des autres modes (les placements sont exclusifs).
+    const rackChoices = store.all("racks").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((r: any) => ({ value: r.id, label: r.name || "(baie)" }));
     const salleBox = document.createElement("div");
-    salleBox.appendChild(FormUi.divider("Placement en salle (au sol)"));
-    const dcEqOpts = [{ value: "", label: "— non placé —" }].concat(store.all("datacenters").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((d: any) => ({ value: d.id, label: d.name || "(salle)" })));
+    salleBox.appendChild(FormUi.divider("Placement (dimensionnement libre)"));
+    const initPlaceMode = eq ? (["side", "wall", "floor"].includes(eq.placement_mode) ? eq.placement_mode : (eq.dc_id ? "sol" : "")) : "";
+    const placeModeI = FormControls.select([
+      { value: "", label: "— non placé —" },
+      { value: "sol", label: "Au sol d'une salle" },
+      { value: "side", label: "Latéral (marge de baie)" },
+      { value: "wall", label: "Paroi de baie (mural)" },
+      { value: "floor", label: "Sur un plan d'étage" },
+    ], initPlaceMode);
+    salleBox.appendChild(FormControls.fieldRow("Mode de placement", placeModeI, "Équivalent formulaire des placements des vues 2D/3D — tout est éditable sans les vues."));
+
+    // — au sol d'une salle (placement_mode « manual » + dc_id) : centre X/Y + hauteur Z + orientation —
+    const solBox = document.createElement("div");
+    const dcEqOpts = [{ value: "", label: "— salle ? —" }].concat(store.all("datacenters").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((d: any) => ({ value: d.id, label: d.name || "(salle)" })));
     const dcSelE = FormControls.select(dcEqOpts, eq && eq.dc_id ? eq.dc_id : "");
-    salleBox.appendChild(FormControls.fieldRow("Salle (datacenter)", dcSelE, "Pose l'équipement au SOL d'une salle. Position vide = centre."));
+    solBox.appendChild(FormControls.fieldRow("Salle (datacenter)", dcSelE, "Pose l'équipement au SOL de la salle. Position vide = centre."));
     const exI = FormControls.number((eq && eq.dc_x != null) ? eq.dc_x : "", { min: 0, step: 10, placeholder: "centre X (mm)" });
     const eyI = FormControls.number((eq && eq.dc_y != null) ? eq.dc_y : "", { min: 0, step: 10, placeholder: "centre Y (mm)" });
     const ezI = FormControls.number((eq && eq.dc_z != null) ? eq.dc_z : 0, { step: 10, placeholder: "0" });   // hauteur Z : négatif autorisé (pas de min)
     const eoI = FormControls.select(ORIENT_OPTS, String(Normalize.rackOrientation(eq ? eq.dc_orientation : 0)));
     const sallePos = FormUi.row2(FormControls.fieldRow("Position X (mm)", exI), FormControls.fieldRow("Position Y (mm)", eyI), FormControls.fieldRow("Hauteur Z (mm)", ezI), FormControls.fieldRow("Orientation", eoI));
-    salleBox.appendChild(sallePos);
-    const salleHint = document.createElement("div"); salleHint.className = "form-hint"; salleBox.appendChild(salleHint);
-    const syncSalle = () => {
-      const d: any = dcSelE.value ? store.get("datacenters", dcSelE.value) : null;
-      sallePos.style.display = d ? "" : "none";
-      salleHint.textContent = d ? "Hauteur Z = décalage vertical (mm) ; négatif = sous le faux-plancher." : "Non placé en salle. Choisissez une salle pour le poser au sol.";
+    solBox.appendChild(sallePos);
+    salleBox.appendChild(solBox);
+
+    // — latéral (placement_mode « side ») : marge av/ar d'une baie, côté G/D, accroche, colonne, U du bord HAUT —
+    const sideBox = document.createElement("div");
+    const sideRackI = FormControls.select([{ value: "", label: "— baie ? —" }].concat(rackChoices), eq && eq.placement_mode === "side" && eq.rack_id ? eq.rack_id : "");
+    const sideFaceI = FormControls.select([{ value: "front", label: "Marge avant" }, { value: "rear", label: "Marge arrière" }], eq && eq.side_face === "rear" ? "rear" : "front");
+    const sideLrI = FormControls.select([{ value: "left", label: "Gauche" }, { value: "right", label: "Droite" }], eq && eq.side_lr === "right" ? "right" : "left");
+    const sideSnapI = FormControls.select([{ value: "post", label: "Montant (rack)" }, { value: "wall", label: "Paroi" }], eq && eq.side_snap === "wall" ? "wall" : "post");
+    const sideColI = FormControls.select([{ value: "0", label: "Colonne 1" }, { value: "1", label: "Colonne 2" }], String(eq && eq.side_col === 1 ? 1 : 0));
+    const sideUI = FormControls.number((eq && eq.side_u != null) ? eq.side_u : 1, { min: 1, step: 1, placeholder: "U (bord haut)" });
+    sideBox.appendChild(FormUi.row2(FormControls.fieldRow("Baie", sideRackI), FormControls.fieldRow("Marge", sideFaceI), FormControls.fieldRow("Côté", sideLrI)));
+    sideBox.appendChild(FormUi.row2(FormControls.fieldRow("Accroche", sideSnapI), FormControls.fieldRow("Colonne", sideColI), FormControls.fieldRow("Position U (haut)", sideUI)));
+    salleBox.appendChild(sideBox);
+
+    // — paroi de baie (placement_mode « wall ») : paroi G/D, marge av/ar, colonne, U de base, orientation de face —
+    const wallBox = document.createElement("div");
+    const wallRackI = FormControls.select([{ value: "", label: "— baie ? —" }].concat(rackChoices), eq && eq.placement_mode === "wall" && eq.rack_id ? eq.rack_id : "");
+    const wallLrI = FormControls.select([{ value: "left", label: "Paroi gauche" }, { value: "right", label: "Paroi droite" }], eq && eq.wall_lr === "right" ? "right" : "left");
+    const wallMarginI = FormControls.select([{ value: "front", label: "Marge avant" }, { value: "rear", label: "Marge arrière" }], eq && eq.wall_margin === "rear" ? "rear" : "front");
+    const wallColI = FormControls.number((eq && eq.wall_col != null) ? eq.wall_col : 0, { min: 0, step: 1, placeholder: "0" });
+    const wallUI = FormControls.number((eq && eq.wall_u != null) ? eq.wall_u : 1, { min: 1, step: 1, placeholder: "U (base)" });
+    const wallOrientI = FormControls.select([{ value: "center", label: "Vers le centre (⊥ paroi)" }, { value: "facade", label: "Vers la façade de la marge" }], eq && eq.wall_orient === "facade" ? "facade" : "center");
+    wallBox.appendChild(FormUi.row2(FormControls.fieldRow("Baie", wallRackI), FormControls.fieldRow("Paroi", wallLrI), FormControls.fieldRow("Marge", wallMarginI)));
+    wallBox.appendChild(FormUi.row2(FormControls.fieldRow("Colonne", wallColI), FormControls.fieldRow("Position U (base)", wallUI), FormControls.fieldRow("Face orientée", wallOrientI)));
+    salleBox.appendChild(wallBox);
+
+    // — plan d'étage (placement_mode « floor ») : bâtiment + étage, centre X/Y (vide = à localiser), orientation —
+    const floorBox = document.createElement("div");
+    const fLocI = FormControls.select(FormUi.locOptions(store), eq && eq.placement_mode === "floor" ? (eq.location || "") : "");
+    const fFloorI = FormControls.select(FormUi.floorOptions(eq ? String(eq.floor ?? "") : ""), eq && eq.placement_mode === "floor" ? String(eq.floor ?? "") : "");
+    floorBox.appendChild(FormUi.row2(FormControls.fieldRow("Bâtiment (lieu)", fLocI), FormControls.fieldRow("Étage", fFloorI)));
+    const fxI = FormControls.number((eq && eq.floor_x != null) ? eq.floor_x : "", { min: 0, step: 10, placeholder: "centre X (mm)" });
+    const fyI = FormControls.number((eq && eq.floor_y != null) ? eq.floor_y : "", { min: 0, step: 10, placeholder: "centre Y (mm)" });
+    const fOrI = FormControls.select(ORIENT_OPTS, String(Normalize.rackOrientation(eq ? eq.dc_orientation : 0)));
+    floorBox.appendChild(FormUi.row2(FormControls.fieldRow("Position X (mm)", fxI), FormControls.fieldRow("Position Y (mm)", fyI), FormControls.fieldRow("Orientation", fOrI)));
+    salleBox.appendChild(floorBox);
+
+    const placeFreeHint = document.createElement("div"); placeFreeHint.className = "form-hint"; salleBox.appendChild(placeFreeHint);
+    const PLACE_HINTS: Record<string, string> = {
+      "": "Non placé. Choisissez un mode pour poser l'équipement (équivalent des placements en vue 2D/3D).",
+      sol: "Hauteur Z = décalage vertical (mm) ; négatif = sous le faux-plancher. Position vide = centre de la salle.",
+      side: "Monté dans la marge latérale de la baie ; Position U = bord HAUT de l'équipement. La baie doit offrir des emplacements latéraux.",
+      wall: "Fixé sur la paroi gauche/droite de la baie, dans sa marge avant ou arrière ; Position U = base de l'équipement.",
+      floor: "Posé sur le plan d'étage du bâtiment. Position vide = à localiser en glissant sur le plan (vue Étage).",
     };
-    dcSelE.onchange = syncSalle; syncSalle();
+    const syncSalle = () => {
+      const m = placeModeI.value;
+      solBox.style.display = m === "sol" ? "" : "none";
+      sideBox.style.display = m === "side" ? "" : "none";
+      wallBox.style.display = m === "wall" ? "" : "none";
+      floorBox.style.display = m === "floor" ? "" : "none";
+      if (m === "sol") sallePos.style.display = dcSelE.value ? "" : "none";
+      placeFreeHint.textContent = (m === "sol" && !dcSelE.value) ? "Choisissez la salle où poser l'équipement au sol." : PLACE_HINTS[m] || "";
+    };
+    placeModeI.onchange = syncSalle; dcSelE.onchange = syncSalle; syncSalle();
     adv.appendChild(salleBox);
 
     // placement rack (mode U seulement, dans ce cœur)
@@ -460,7 +523,7 @@ export class EquipmentForms extends FormBase {
     const rackUI = FormControls.number((eq && eq.rack_u != null) ? eq.rack_u : "", { min: 1, step: 1, placeholder: "U de bas (vide = libre)" });
     placeBox.appendChild(FormUi.row2(FormControls.fieldRow("Baie", rackI), FormControls.fieldRow("Position (U)", rackUI)));
     const placeHint = document.createElement("div"); placeHint.className = "form-hint";
-    placeHint.textContent = "Placement latéral / paroi / sur étage : à venir (préservé pour les équipements existants).";
+    placeHint.textContent = "Placements latéral / paroi / plan d'étage : disponibles en dimensionnement « Libre » (ces montages utilisent les dimensions en mm).";
     placeBox.appendChild(placeHint);
     adv.appendChild(placeBox);
 
@@ -610,19 +673,41 @@ export class EquipmentForms extends FormBase {
           payload.free_l_mm = flI.value !== "" ? Math.max(0, parseInt(flI.value, 10) || 0) : null;
           payload.free_w_mm = fwI.value !== "" ? Math.max(0, parseInt(fwI.value, 10) || 0) : null;
           payload.free_h_mm = fhI.value !== "" ? Math.max(0, parseInt(fhI.value, 10) || 0) : null;
-          // placement EN SALLE (au sol) : si une salle est choisie, on pose au sol (mode manuel) ; sinon non placé.
-          const placeDcE: any = dcSelE.value ? store.get("datacenters", dcSelE.value) : null;
-          if (placeDcE) {
+          // placement (principe n°10) : le MODE choisi pilote les champs persistés ; les champs des AUTRES
+          // modes sont remis à zéro — les placements sont exclusifs (comme les actions des vues 2D/3D).
+          const pm = placeModeI.value;
+          const placeDcE: any = (pm === "sol" && dcSelE.value) ? store.get("datacenters", dcSelE.value) : null;
+          // garde-fou explicite : latéral/paroi exigent une baie (invariant partagé) — le sélecteur de baie
+          // n'est pas couvert par la validation live (champ propre au mode), on le signale ici.
+          if ((pm === "side" && !sideRackI.value) || (pm === "wall" && !wallRackI.value)) { Notify.toast("Choisissez la baie du montage " + (pm === "side" ? "latéral" : "en paroi"), "err"); return false; }
+          if (pm === "floor" && !fLocI.value) { Notify.toast("Choisissez le bâtiment du plan d'étage", "err"); return false; }
+          payload.dc_id = null; payload.dc_x = null; payload.dc_y = null;
+          payload.rack_id = null; payload.rack_u = null;
+          payload.floor_x = null; payload.floor_y = null;
+          payload.placement_mode = "manual";
+          if (placeDcE) {   // au sol d'une salle (mode « manual » + dc_id)
             payload.dc_id = placeDcE.id;
             payload.dc_x = exI.value !== "" ? Math.max(0, parseInt(exI.value, 10) || 0) : Math.round(placeDcE.width_mm / 2);
             payload.dc_y = eyI.value !== "" ? Math.max(0, parseInt(eyI.value, 10) || 0) : Math.round(placeDcE.depth_mm / 2);
             payload.dc_z = ezI.value !== "" ? (parseInt(ezI.value, 10) || 0) : 0;   // négatif autorisé
             payload.dc_orientation = Normalize.rackOrientation(parseInt(eoI.value, 10) || 0);
-            payload.placement_mode = "manual"; payload.floor_x = null; payload.floor_y = null;   // au sol d'une salle (exclusif du placement étage)
-          } else {
-            payload.dc_id = null; payload.dc_x = null; payload.dc_y = null;
-            // préserve un placement étage/latéral/paroi existant ; sinon « manuel »
-            if (!eq || !["floor", "side", "wall"].includes(eq.placement_mode)) payload.placement_mode = "manual";
+          } else if (pm === "side") {
+            payload.placement_mode = "side"; payload.rack_id = sideRackI.value;
+            payload.side_face = sideFaceI.value; payload.side_lr = sideLrI.value; payload.side_snap = sideSnapI.value;
+            payload.side_col = parseInt(sideColI.value, 10) || 0;
+            payload.side_u = Math.max(1, parseInt(sideUI.value, 10) || 1);
+          } else if (pm === "wall") {
+            payload.placement_mode = "wall"; payload.rack_id = wallRackI.value;
+            payload.wall_lr = wallLrI.value; payload.wall_margin = wallMarginI.value;
+            payload.wall_col = wallColI.value !== "" ? Math.max(0, parseInt(wallColI.value, 10) || 0) : 0;
+            payload.wall_u = Math.max(1, parseInt(wallUI.value, 10) || 1);
+            payload.wall_orient = wallOrientI.value === "facade" ? "facade" : "center";
+          } else if (pm === "floor") {
+            payload.placement_mode = "floor";
+            payload.location = fLocI.value; payload.floor = fFloorI.value;
+            payload.floor_x = fxI.value !== "" ? Math.max(0, parseInt(fxI.value, 10) || 0) : null;
+            payload.floor_y = fyI.value !== "" ? Math.max(0, parseInt(fyI.value, 10) || 0) : null;
+            payload.dc_orientation = Normalize.rackOrientation(parseInt(fOrI.value, 10) || 0);
           }
         } else {
           payload.u_height = Math.max(1, parseInt(uHI.value, 10) || 1);
@@ -633,7 +718,12 @@ export class EquipmentForms extends FormBase {
         }
         if (live.check(payload).length) return false;   // validation live : champ(s) surligné(s), enregistrement bloqué
         let eqId: string;
-        if (eq) { await store.update("equipments", eq.id, payload); eqId = eq.id; }
+        if (eq) {
+          await store.update("equipments", eq.id, payload); eqId = eq.id;
+          // le (dé)placement peut invalider des routes de câbles — même casse contrôlée que les actions
+          // des vues 2D/3D (assignSideSlot/assignWallSlot…) ; no-op si les routes restent valides.
+          await store.applyCableBreaks(eqId);
+        }
         else { const created: any = await store.create("equipments", payload); eqId = created.id; }
 
         // -- réconciliation agrégats --
