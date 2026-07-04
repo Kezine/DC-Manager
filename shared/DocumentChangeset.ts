@@ -3,7 +3,7 @@
 
    Décrit CE QUI a changé lors d'une (ou plusieurs) écriture(s). Le serveur le CONSTRUIT
    et le joint à l'événement SSE ; le client le CONSOMME pour planifier un rechargement
-   granulaire (cf. src/sync/ReloadPlanner.ts, docs/render-impact.md).
+   granulaire (cf. src/sync/ReloadPlanner.ts).
 
    Contrainte `shared/` : fichier AUTO-SUFFISANT (aucun import relatif).
    ============================================================================ */

@@ -13,7 +13,11 @@ export class LiveBus {
     let set = this.subs.get(docId);
     if (!set) { set = new Set(); this.subs.set(docId, set); }
     set.add(res);
-    const drop = () => { const s = this.subs.get(docId); if (s) { s.delete(res); if (!s.size) this.subs.delete(docId); } };
+    // HEARTBEAT : un commentaire SSE périodique (ligne « : … », ignorée par EventSource). Sans trafic, les
+    // proxys/keep-alive coupent les connexions muettes, et un socket mort côté client resterait compté ici
+    // jusqu'au timeout TCP ; le ping maintient le flux vivant ET fait détecter la fermeture (write → close).
+    const ping = setInterval(() => { try { res.write(": ping\n\n"); } catch { /* le close() qui suit désabonne */ } }, 30_000);
+    const drop = () => { clearInterval(ping); const s = this.subs.get(docId); if (s) { s.delete(res); if (!s.size) this.subs.delete(docId); } };
     res.on("close", drop);
     this.log.debug("SSE abonné", docId, "(" + set.size + ")");
   }

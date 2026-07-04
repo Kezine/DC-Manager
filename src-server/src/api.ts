@@ -8,6 +8,7 @@ import { LiveBus } from "./live.js";
 import type { DocumentChangeset } from "../../shared/DocumentChangeset.js";   // type PARTAGÉ front ⇄ back (source unique)
 import { DataValidator, type ValidationError, type EntityFetcher, type ChildFinder } from "../../shared/DataValidation.js";   // normalisation + validation PARTAGÉES
 import { Cascade } from "../../shared/Cascade.js";   // cascade de suppression PARTAGÉE (intégrité référentielle en DELETE)
+import { ApiRules } from "./ApiRules.js";             // règles PURES de la couche HTTP (verrou, changeset, lot) — testables sans Express
 
 /** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`).
     `changeset` : périmètre SSE, posé par défaut par `resolveRepo` et ÉLARGISSABLE par un handler (ex. la cascade
@@ -129,44 +130,14 @@ export class Api {
     if (this.docs.delete(req.params.docId)) res.status(204).end(); else res.status(404).json({ error: "document inconnu" });
   };
 
-  /** Entités VISÉES par une écriture (pour le verrou optimiste) : lot `/transact` (updates + deletes) ou CRUD
-      unitaire `/:collection/:id`. Les créations (id neuf) et les écritures globales (meta / snapshot / images)
-      ne ciblent aucune ligne existante → liste vide → pas de garde. */
+  /** Entités VISÉES par une écriture (verrou optimiste) — logique pure dans `ApiRules.writeTargets`. */
   private writeTargets(req: Request): Array<{ collection: string; id: string }> {
-    const out: Array<{ collection: string; id: string }> = [];
-    const body: any = req.body || {};
-    if (Array.isArray(body.updates) || Array.isArray(body.deletes)) {
-      for (const u of body.updates || []) if (u && u.collection && u.record && u.record.id) out.push({ collection: u.collection, id: u.record.id });
-      for (const d of body.deletes || []) if (d && d.collection && d.id) out.push({ collection: d.collection, id: d.id });
-      return out;
-    }
-    const { collection, id } = req.params as any;
-    if (collection && id) out.push({ collection, id });
-    return out;
+    return ApiRules.writeTargets(req.body, req.params as any);
   }
 
-  /** Périmètre d'une écriture, pour le rechargement granulaire des autres clients. Déduit du corps (`/transact`),
-      des paramètres de route (CRUD `/:collection/:id`) ou du chemin (`/meta`, `/snapshot`, `/images`). Périmètre
-      non reconnu → `full` (repli sûr : le client recharge tout). */
+  /** Périmètre d'une écriture (rechargement granulaire) — logique pure dans `ApiRules.buildChangeset`. */
   private buildChangeset(req: Request): DocumentChangeset {
-    const body: any = req.body || {};
-    // Lot atomique : union des collections de creates + updates + deletes.
-    if (Array.isArray(body.creates) || Array.isArray(body.updates) || Array.isArray(body.deletes)) {
-      const collections = new Set<string>();
-      for (const entry of [...(body.creates || []), ...(body.updates || []), ...(body.deletes || [])]) {
-        if (entry && entry.collection) collections.add(entry.collection);
-      }
-      return { full: false, collections: [...collections], meta: !!body.meta, images: false };
-    }
-    // CRUD unitaire : la collection est dans les paramètres de route.
-    const collection = (req.params as any).collection as string | undefined;
-    if (collection) return { full: false, collections: [collection], meta: false, images: false };
-    // Routes globales (sans paramètre de collection) — reconnues par le chemin (relatif au sous-routeur du document).
-    const path = req.path || "";
-    if (path.startsWith("/snapshot")) return { full: true, collections: [], meta: true, images: true };
-    if (path.startsWith("/meta")) return { full: false, collections: [], meta: true, images: false };
-    if (path.startsWith("/images")) return { full: false, collections: [], meta: false, images: true };
-    return { full: true, collections: [], meta: true, images: true };   // inconnu → repli sûr
+    return ApiRules.buildChangeset(req.body, (req.params as any).collection, req.path || "");
   }
 
   /** Résout le Repository du document (404 si inconnu). En écriture : VERROU OPTIMISTE par entité (409 si une entité
@@ -181,6 +152,10 @@ export class Api {
     if (req.method === "GET") { res.setHeader("X-Doc-Rev", String(this.docs.getRev(id))); next(); return; }
     // verrou optimiste : `baseRev` = snapshot sur lequel le client s'appuie. Rejet AVANT toute mutation /
     // incrément de rev / publication SSE → l'écriture refusée ne consomme pas de révision et ne réveille personne.
+    // DÉCISION (audit P5) : l'en-tête `X-Base-Rev` reste FACULTATIF — le client de l'app l'envoie toujours
+    // (RestProtocol.writeHeaders), mais l'exiger (400 si absent) casserait les écritures scriptées (curl,
+    // imports) et la première écriture d'un client sans lecture préalable. Sans en-tête : dernier-écrit-gagne,
+    // assumé pour ces usages hors app.
     const baseRev = parseInt(String(req.headers["x-base-rev"] ?? ""), 10);
     const targets = this.writeTargets(req);
     if (Number.isFinite(baseRev) && targets.length) {
@@ -213,7 +188,13 @@ export class Api {
 
   /* -- meta -- */
   private getMeta: RequestHandler = (req, res) => { res.json(this.repoOf(req).getMeta()); };
-  private putMeta: RequestHandler = (req, res) => { this.repoOf(req).setMeta(req.body || {}); res.status(204).end(); };
+  private putMeta: RequestHandler = (req, res) => {
+    // validation minimale : la méta est un OBJET JSON simple (options du document). Un scalaire / tableau
+    // stocké tel quel serait resservi par GET /meta et casserait les consommateurs (`meta.xxx`).
+    const body = req.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) { res.status(400).json({ error: "meta invalide (objet JSON attendu)" }); return; }
+    this.repoOf(req).setMeta(body); res.status(204).end();
+  };
 
   /* -- lot atomique / import -- */
   private transact: RequestHandler = (req, res) => {
@@ -240,7 +221,29 @@ export class Api {
       if (entry && entry.collection && entry.record) errors.push(...DataValidator.validateDependents(entry.collection, entry.record, childFinder, fetch));
     }
     if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return; }
-    try { this.repoOf(req).transact({ ...body, creates, updates }, this.revOf(req)); res.status(204).end(); }
+    // CRÉATION STRICTE dans le lot (logique pure : ApiRules.createConflicts) : un `create` dont l'id existe DÉJÀ
+    // en base écraserait l'enregistrement HORS verrou optimiste (`writeTargets` ne cible pas les créations). → 409.
+    // Le lecteur passé est l'état PERSISTÉ (repoFetcher), pas le lecteur conscient du lot qui masquerait la ligne.
+    const clashes = ApiRules.createConflicts(creates, body.deletes, this.repoFetcher(req));
+    if (clashes.length) { res.status(409).json({ error: "création refusée : l'id existe déjà", conflicts: clashes }); return; }
+    // CASCADE RÉSIDUELLE (autorité serveur — logique pure : ApiRules.residualCascade) : fusionne au lot le travail
+    // de cascade MANQUANT (document modifié entre l'instantané du client et cette écriture), avec garde
+    // anti-résurrection. Les lecteurs CONSCIENTS DU LOT reflètent l'état post-lot → seul le résidu est produit.
+    const residual = ApiRules.residualCascade(body.deletes, childFinder, fetch);
+    if (residual.deletes.length || residual.updates.length) {
+      // Périmètre SSE ÉLARGI : la cascade résiduelle touche d'autres collections → les autres clients les rechargent.
+      const cs = (req as RepoRequest).changeset;
+      if (cs && !cs.full) {
+        const touched = new Set<string>(cs.collections);
+        residual.deletes.forEach((x) => touched.add(x.collection));
+        residual.updates.forEach((u) => touched.add(u.collection));
+        cs.collections = [...touched];
+      }
+    }
+    try {
+      this.repoOf(req).transact({ ...body, creates, updates: [...updates, ...residual.updates], deletes: [...(body.deletes || []), ...residual.deletes] }, this.revOf(req));
+      res.status(204).end();
+    }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   /** Remplacement COMPLET du document (import `.json`). Comme `/transact` et le CRUD, le serveur fait AUTORITÉ :
@@ -297,10 +300,16 @@ export class Api {
   };
   private putImage: RequestHandler = (req, res) => {
     let meta: Rec = {};
-    try { meta = req.body && req.body.meta ? JSON.parse(req.body.meta) : {}; } catch { /* ignore */ }
+    // meta malformée → 400 : l'ignorer silencieusement écraserait la méta existante par `{ id }` seul.
+    try { meta = req.body && req.body.meta ? JSON.parse(req.body.meta) : {}; }
+    catch { res.status(400).json({ error: "meta invalide (JSON attendu)" }); return; }
     const file = (req as { file?: { buffer: Buffer; mimetype: string } }).file;   // posé par multer.single("blob")
     const buf = file ? file.buffer : null;
     if (buf) meta.type = meta.type || file!.mimetype || "application/octet-stream";
+    // liste blanche PARTAGÉE (Schema.IMAGE_MIME_TYPES, même filtre que le front) : le blob est resservi avec
+    // son Content-Type stocké — accepter un type arbitraire (text/html, image/svg+xml scripté…) ouvrirait un
+    // XSS stocké servi par l'origine de l'app. Vaut pour le blob ET pour une méta déclarant un `type` seule.
+    if ((buf || meta.type !== undefined) && !Schema.isImageMime(meta.type)) { res.status(400).json({ error: "type d'image non supporté (" + Schema.IMAGE_MIME_TYPES.join(", ") + ")" }); return; }
     this.repoOf(req).putImage(req.params.id, meta, buf);
     res.status(204).end();
   };
@@ -327,7 +336,7 @@ export class Api {
   /** Recherche d'enfants par clé étrangère (dépendance inverse V5b) adossée au Repository. */
   private repoChildFinder(req: Request): ChildFinder {
     const repo = this.repoOf(req);
-    return (collection, fkField, parentId) => repo.list(collection, { where: { [fkField]: parentId }, pageSize: 1_000_000_000 }).rows;
+    return (collection, fkField, parentId) => repo.list(collection, { where: { [fkField]: parentId }, pageSize: Schema.PAGE_SIZE_ALL }).rows;
   }
 
   private accept(res: Response, collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: ChildFinder): Record<string, any> | null {
@@ -339,6 +348,13 @@ export class Api {
   private create: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
     const record = this.accept(res, req.params.collection, req.body || {}, this.repoFetcher(req), this.repoChildFinder(req)); if (!record) return;
+    // CRÉATION STRICTE (pas d'upsert silencieux) : un POST avec un id EXISTANT écraserait l'enregistrement en
+    // CONTOURNANT le verrou optimiste (`writeTargets` ne cible pas les créations — un id neuf n'a pas de ligne
+    // à protéger). Réécrire une entité existante = PUT /:collection/:id, gardé par X-Base-Rev. → 409.
+    if (record.id && this.repoOf(req).getOne(req.params.collection, record.id)) {
+      res.status(409).json({ error: "création refusée : l'id existe déjà", collection: req.params.collection, id: record.id });
+      return;
+    }
     try { this.repoOf(req).upsert(req.params.collection, record, this.revOf(req)); res.status(201).json(record); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
@@ -370,7 +386,7 @@ export class Api {
     // écraserait les clés des précédents, chacun étant bâti sur l'original).
     const patched = new Map<string, { collection: string; record: Record<string, any> }>();
     for (const d of plan.detaches) {
-      const mapKey = d.c + " " + d.id;
+      const mapKey = d.c + "\u0000" + d.id;
       let entry = patched.get(mapKey);
       if (!entry) { const rec = fetch(d.c, d.id); if (!rec) continue; entry = { collection: d.c, record: { ...rec } }; patched.set(mapKey, entry); }
       entry.record[d.key] = d.value;

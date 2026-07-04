@@ -8,8 +8,7 @@ import { EntityRegistry } from "../models";
    associe à chaque collection l'impact d'une de ses modifications sur la scène 3D
    du Datacenter (le seul rendu réellement coûteux).
 
-   Doc de référence + justification collection par collection :
-   docs/render-impact.md. Règle de classification : CONSERVATRICE — dans le doute,
+   Règle de classification : CONSERVATRICE — dans le doute,
    `geometry`. Un faux `geometry` ne coûte qu'un rebuild inutile (lent mais correct) ;
    un faux `none` laisse des données fausses à l'écran (rapide mais FAUX).
    ============================================================================ */

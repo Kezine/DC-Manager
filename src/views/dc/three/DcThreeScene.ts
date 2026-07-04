@@ -7,6 +7,7 @@ import { Line2 } from "three/examples/jsm/lines/Line2.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { RackGeometry } from "../../../geometry/RackGeometry";
+import { RackDoorGeometry } from "../../../geometry/RackDoorGeometry";
 import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
@@ -27,8 +28,8 @@ export type { DcThreeOptions } from "./DcThreeBase";
 const CABLE_PX = 1;          // épaisseur ÉCRAN (px) des câbles — alignée sur .dc-cable du SVG (1px), constante au zoom
 const CABLE_OPACITY = 0.5;   // .dc-cable opacity: 0.5
 const CABLE_PX_SEL = 2.5;    // .dc-cable.sel stroke-width: 2.5px (sélectionné)
-const MARK_PX = 9;           // rayon ÉCRAN (px) d'un marqueur de waypoint (cf. SVG (DC_DOT_PX+4))
-const OOB_PX = 11;           // rayon ÉCRAN (px) d'un marqueur OOB
+const MARK_PX = 27;          // rayon ÉCRAN (px) d'un marqueur de waypoint — base SVG (DC_DOT_PX+4 = 9) ×3 (+200 %, lisibilité/cliquabilité au routage) ; modulable par le réglage markerScale
+const OOB_PX = 33;           // rayon ÉCRAN (px) d'un marqueur OOB — base 11 ×3 (idem)
 const DOT_PX = 5;            // rayon ÉCRAN (px) d'une pastille d'extrémité de câble (cf. SVG DC_DOT_PX)
 const BOLT_PX = 3.25;        // demi-taille ÉCRAN (px) d'un éclair power bolt (−75 %)
 
@@ -281,6 +282,7 @@ export class DcThreeScene extends DcThreeCamera {
     const cab = this.store.cableOnPort(p.id);
     const col = cab ? this.cableColorHex(cab) : 0x8893a5;
     const csz = this.store.portConnectorSize(p);
+    // Taille PHYSIQUE réelle du connecteur (SFP/RJ45/C13…) — la fidélité dimensionnelle prime, PAS d'agrandissement.
     const w = Math.max(2, csz.w), h = Math.max(2, csz.h);
     const n = new THREE.Vector3(pt.n ? pt.n.x : 0, pt.n ? pt.n.y : 0, pt.n ? pt.n.z : 1);
     if (n.lengthSq() < 1e-6) n.set(0, 0, 1);
@@ -501,38 +503,69 @@ export class DcThreeScene extends DcThreeCamera {
 
     // emplacements LIBRES (cibles d'assignation) — TOUJOURS construits → couche "slot" (showPlaceholders) + côté
     // (hideAv/Ar) basculables EN VISIBILITÉ sans reconstruction (le picking ignore les emplacements masqués).
+    // FUSION EN BANDES : les emplacements CONTIGUS (U consécutifs · rangées latérales/murales consécutives)
+    // forment UN SEUL mesh — un par U/rangée mettait les iGPU à genoux (une baie vide ≈ 500 objets transparents ;
+    // 6 baies ≈ 3 000 draw calls). Le U / uTop PRÉCIS est recalculé AU CLIC depuis le point d'impact
+    // (cf. DcThreeCamera.slotRowFromHit) : le descripteur de pick porte la plage (uLo/uHi + rowStep).
     {
       const occMap = this.scene3d.occupants(r.id), uMax = r.u_count || 42, bodyHW = RACK_MOUNT_WIDTH / 2 - RACK_EAR_MM;
       const sides = (r.sides === "dual") ? ["front", "rear"] : ["front"];
       sides.forEach((side) => {
         const yPlane = side === "rear" ? rpY - 2 : fpY + 2;
-        for (let u = 1; u <= uMax; u++) {
-          if (occMap.has(u + ":" + side)) continue;
-          const zc = baseZ + (u - 0.5) * U_MM;
-          this.slotPlane(group, 2 * bodyHW * 0.96, U_MM - 3, 0, yPlane, zc, side === "front", { type: "slotU", rackId: r.id, u, side, height: 1 }, { layer: "slot", eqSide: side });
-          // NUMÉRO D'U au centre de l'emplacement libre (couche "slotlabel", légèrement en avant du plan du slot).
-          this.faceLabel(group, "U" + u, 0, yPlane + (side === "front" ? -4 : 4), zc, Math.min(2 * bodyHW * 0.96, 120), Math.min(U_MM - 6, 28), side === "front", { layer: "slotlabel", eqSide: side });
+        let u = 1;
+        while (u <= uMax) {
+          if (occMap.has(u + ":" + side)) { u++; continue; }
+          let uHi = u; while (uHi + 1 <= uMax && !occMap.has((uHi + 1) + ":" + side)) uHi++;   // bande contiguë [u..uHi]
+          const nU = uHi - u + 1, zc = baseZ + (u - 1 + nU / 2) * U_MM;
+          // quadrillage par U (séparateurs dans la géométrie de cadre) + numéros d'U en UNE texture par bande.
+          this.slotPlane(group, 2 * bodyHW * 0.96, nU * U_MM - 3, 0, yPlane, zc, side === "front",
+            { type: "slotU", rackId: r.id, u, side, height: 1, uLo: u, uHi, rowStep: 1 }, { layer: "slot", eqSide: side }, { pitch: U_MM, count: nU });
+          this.bandULabels(group, u, uHi, yPlane, baseZ, side, 2 * bodyHW * 0.96);
+          u = uHi + 1;
         }
       });
+      // Regroupe des rangées LIBRES en couloirs contigus (clé de colonne + uTop consécutifs au pas SIDE_U_STEP).
+      const mergeRuns = (rows: any[], keyOf: (s: any) => string): Array<{ first: any; uLo: number; uHi: number }> => {
+        const byCol = new Map<string, any[]>();
+        rows.forEach((s) => { const k = keyOf(s); const a = byCol.get(k) || []; a.push(s); byCol.set(k, a); });
+        const runs: Array<{ first: any; uLo: number; uHi: number }> = [];
+        byCol.forEach((list) => {
+          list.sort((a, b) => a.uTop - b.uTop);
+          let i = 0;
+          while (i < list.length) {
+            let j = i; while (j + 1 < list.length && list[j + 1].uTop === list[j].uTop + SIDE_U_STEP) j++;
+            runs.push({ first: list[i], uLo: list[i].uTop, uHi: list[j].uTop });
+            i = j + 1;
+          }
+        });
+        return runs;
+      };
       // emplacements LATÉRAUX libres (marges) → cibles d'assignation (équipement / pin latéral).
       // décalés très légèrement vers l'EXTÉRIEUR (le long de la normale de face) pour ne pas cliper dans la coque.
       const SLOT_OFF = 2;
       const xLim = w / 2 - SLOT_OFF;   // bord latéral max = position des slots de paroi (s'arrête avant le capot/la paroi)
-      this.scene3d.sideFreeSlots(r).forEach((s: any) => {
-        const front = s.face !== "rear";
-        const b = RackGeometry.sideSlotBoxLocal(r, s.face, s.lr, s.col, s.uTop, SIDE_U_STEP);
-        const x0 = Math.max(Math.min(b.x0, b.x1), -xLim), x1 = Math.min(Math.max(b.x0, b.x1), xLim);   // borné au plan de paroi
-        const z0 = Math.min(b.z0, b.z1), z1 = Math.max(b.z0, b.z1);
+      mergeRuns(this.scene3d.sideFreeSlots(r), (s) => s.face + "|" + s.lr + "|" + s.col).forEach((run) => {
+        const s = run.first, front = s.face !== "rear";
+        const bLo = RackGeometry.sideSlotBoxLocal(r, s.face, s.lr, s.col, run.uLo, SIDE_U_STEP);
+        const bHi = RackGeometry.sideSlotBoxLocal(r, s.face, s.lr, s.col, run.uHi, SIDE_U_STEP);
+        const x0 = Math.max(Math.min(bLo.x0, bLo.x1), -xLim), x1 = Math.min(Math.max(bLo.x0, bLo.x1), xLim);   // borné au plan de paroi
+        const z0 = Math.min(bLo.z0, bLo.z1, bHi.z0, bHi.z1), z1 = Math.max(bLo.z0, bLo.z1, bHi.z0, bHi.z1);
         if (x1 <= x0) return;
-        const yp = b.yPlane + (front ? SLOT_OFF : -SLOT_OFF);   // vers l'EXTÉRIEUR (décalage av/ar)
-        this.slotPlane(group, x1 - x0, z1 - z0, (x0 + x1) / 2, yp, (z0 + z1) / 2, front, { type: "slotSide", rackId: r.id, face: s.face, lr: s.lr, col: s.col, uTop: s.uTop }, { layer: "slot", eqSide: front ? "front" : "rear" });
+        const yp = bLo.yPlane + (front ? SLOT_OFF : -SLOT_OFF);   // vers l'EXTÉRIEUR (décalage av/ar)
+        this.slotPlane(group, x1 - x0, z1 - z0, (x0 + x1) / 2, yp, (z0 + z1) / 2, front,
+          { type: "slotSide", rackId: r.id, face: s.face, lr: s.lr, col: s.col, uTop: run.uLo, uLo: run.uLo, uHi: run.uHi, rowStep: SIDE_U_STEP, zLo: z0, zHi: z1 }, { layer: "slot", eqSide: front ? "front" : "rear" },
+          { pitch: SIDE_U_STEP * U_MM, count: (run.uHi - run.uLo) / SIDE_U_STEP + 1 });
       });
       // emplacements MURAUX libres (parois ±X) → monter équipement en paroi (décalés vers l'INTÉRIEUR de la baie).
-      this.scene3d.wallFreeSlots(r).forEach((s: any) => {
-        const front = s.margin !== "rear";
-        const b = RackGeometry.wallSlotBoxLocal(r, s.wall, s.margin, s.col, s.uTop, SIDE_U_STEP);
-        const xp = b.xPlane - Math.sign(b.xPlane || 1) * SLOT_OFF;   // vers le centre (intérieur)
-        this.slotQuad(group, [[xp, b.y0, b.z0], [xp, b.y1, b.z0], [xp, b.y1, b.z1], [xp, b.y0, b.z1]], { type: "slotWall", rackId: r.id, wall: s.wall, margin: s.margin, col: s.col, uTop: s.uTop }, { layer: "slot", eqSide: front ? "front" : "rear" });
+      mergeRuns(this.scene3d.wallFreeSlots(r), (s) => s.wall + "|" + s.margin + "|" + s.col).forEach((run) => {
+        const s = run.first, front = s.margin !== "rear";
+        const bLo = RackGeometry.wallSlotBoxLocal(r, s.wall, s.margin, s.col, run.uLo, SIDE_U_STEP);
+        const bHi = RackGeometry.wallSlotBoxLocal(r, s.wall, s.margin, s.col, run.uHi, SIDE_U_STEP);
+        const z0 = Math.min(bLo.z0, bLo.z1, bHi.z0, bHi.z1), z1 = Math.max(bLo.z0, bLo.z1, bHi.z0, bHi.z1);
+        const xp = bLo.xPlane - Math.sign(bLo.xPlane || 1) * SLOT_OFF;   // vers le centre (intérieur)
+        this.slotQuad(group, [[xp, bLo.y0, z0], [xp, bLo.y1, z0], [xp, bLo.y1, z1], [xp, bLo.y0, z1]],
+          { type: "slotWall", rackId: r.id, wall: s.wall, margin: s.margin, col: s.col, uTop: run.uLo, uLo: run.uLo, uHi: run.uHi, rowStep: SIDE_U_STEP, zLo: z0, zHi: z1 }, { layer: "slot", eqSide: front ? "front" : "rear" },
+          { pitch: SIDE_U_STEP * U_MM, count: (run.uHi - run.uLo) / SIDE_U_STEP + 1 });
       });
       // TROUS DE CAPOT libres (toit + sol) → poser un pin. Toujours construits, couche "slot" (pilotée par le seul
       // toggle « emplacements libres », indépendamment de l'affichage des capots).
@@ -558,31 +591,84 @@ export class DcThreeScene extends DcThreeCamera {
 
   /** Plan plat (emplacement libre) au plan de montage, orienté ±Y : remplissage translucide + CADRE accent
       (visible au repos) ; surligné (emissive) au survol. */
-  protected slotPlane(group: THREE.Group, w: number, h: number, x: number, y: number, z: number, front: boolean, pick: any, extra?: any): void {
+  protected slotPlane(group: THREE.Group, w: number, h: number, x: number, y: number, z: number, front: boolean, pick: any, extra?: any, rows?: { pitch: number; count: number }): void {
     const mat = new THREE.MeshStandardMaterial({ color: this.theme.front, transparent: true, opacity: 0.16, emissive: 0x16314e, side: THREE.DoubleSide, depthWrite: false });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
     mesh.position.set(x, y, z);
     mesh.rotation.x = front ? Math.PI / 2 : -Math.PI / 2;
     mesh.userData = Object.assign({ pick }, extra);   // cadre = enfant (suit la visibilité du mesh)
-    // cadre (rectangle fermé) — délimite clairement la case, hérite de la pose du plan
-    const hw = w / 2, hh = h / 2;
+    // cadre (bordure) + SÉPARATEURS de rangées en UNE seule géométrie de lignes : la bande fusionnée garde le
+    // quadrillage visuel « une case par U/rangée » sans recréer un objet par case (1 draw call de lignes/bande).
+    const hw = w / 2, hh = h / 2, pts: number[] = [];
+    const seg = (x1: number, y1: number, x2: number, y2: number) => pts.push(x1, y1, 0, x2, y2, 0);
+    seg(-hw, -hh, hw, -hh); seg(hw, -hh, hw, hh); seg(hw, hh, -hw, hh); seg(-hw, hh, -hw, -hh);
+    if (rows && rows.count > 1) {
+      for (let k = 1; k < rows.count; k++) {
+        const yk = -hh + k * rows.pitch - 1.5;   // −1.5 : le plan est rogné de 3 mm (1,5 par bout) vs n×pas
+        if (yk > -hh && yk < hh) seg(-hw, yk, hw, yk);
+      }
+    }
     const bg = new THREE.BufferGeometry();
-    bg.setAttribute("position", new THREE.Float32BufferAttribute([-hw, -hh, 0, hw, -hh, 0, hw, hh, 0, -hw, hh, 0], 3));
-    mesh.add(new THREE.LineLoop(bg, new THREE.LineBasicMaterial({ color: this.theme.front, transparent: true, opacity: 0.6 })));
+    bg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    mesh.add(new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: this.theme.front, transparent: true, opacity: 0.6 })));
     group.add(mesh);
   }
 
   /** Emplacement libre QUELCONQUE défini par 4 coins (coords locales) : remplissage translucide + cadre accent,
-      surligné au survol. Pour les faces que `slotPlane` ne couvre pas (mural ±X, capot ±Z horizontal). */
-  protected slotQuad(group: THREE.Group, corners: number[][], pick: any, extra?: any): void {
+      surligné au survol. Pour les faces que `slotPlane` ne couvre pas (mural ±X, capot ±Z horizontal).
+      `rows` : séparateurs horizontaux (axe z) aux multiples de `pitch` depuis z0 — quadrillage des couloirs muraux. */
+  protected slotQuad(group: THREE.Group, corners: number[][], pick: any, extra?: any, rows?: { pitch: number; count: number }): void {
     const [a, b, c, d] = corners;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute([...a, ...b, ...c, ...a, ...c, ...d], 3));
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: this.theme.front, transparent: true, opacity: 0.16, emissive: 0x16314e, side: THREE.DoubleSide, depthWrite: false }));
     mesh.userData = Object.assign({ pick }, extra); group.add(mesh);
-    const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.Float32BufferAttribute([...a, ...b, ...c, ...d], 3));
-    mesh.add(new THREE.LineLoop(bg, new THREE.LineBasicMaterial({ color: this.theme.front, transparent: true, opacity: 0.6 })));
+    const pts: number[] = [...a, ...b, ...b, ...c, ...c, ...d, ...d, ...a];   // bordure (segments)
+    if (rows && rows.count > 1) {
+      // séparateurs entre rangées : le quad mural est rectangulaire dans le plan x=cst, z de a/b (bas) à c/d (haut)
+      const zLo = Math.min(a[2], c[2]);
+      for (let k = 1; k < rows.count; k++) { const zk = zLo + k * rows.pitch; pts.push(a[0], a[1], zk, b[0], b[1], zk); }
+    }
+    const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    mesh.add(new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: this.theme.front, transparent: true, opacity: 0.6 })));
+  }
+
+  /** NUMÉROS D'U d'une bande d'emplacements libres, en UNE SEULE texture / UN SEUL mesh (une étiquette par U
+      recréait le problème de draw calls que la fusion en bandes vient d'éliminer — 42 étiquettes/face sur une
+      baie vide). Canvas : une ligne « U n » par U, haut du canvas = U le plus HAUT (l'orientation front/rear de
+      faceLabel conserve le haut vers +Z). Texture au cache LRU (texCache). */
+  protected bandULabels(group: THREE.Group, uLo: number, uHi: number, yPlane: number, baseZ: number, side: string, widthMm: number): void {
+    if (typeof document === "undefined") return;
+    const nU = uHi - uLo + 1, front = side === "front";
+    const key = "Uband|" + uLo + "-" + uHi;
+    this.texCacheTicks.set(key, ++this.texCacheTick);
+    let tex = this.texCache.get(key) || null;
+    if (!tex) {
+      const rowPx = 40, cw = 128, ch = Math.min(4096, nU * rowPx);
+      const cv = document.createElement("canvas"); cv.width = cw; cv.height = ch;
+      const g = cv.getContext("2d"); if (!g) return;
+      g.textAlign = "center"; g.textBaseline = "middle"; g.font = "600 22px system-ui, sans-serif";
+      const rh = ch / nU;
+      for (let i = 0; i < nU; i++) {
+        const u = uHi - i, cy = (i + 0.5) * rh;   // haut du canvas = U le plus haut
+        g.fillStyle = "rgba(12,16,22,0.55)";
+        const pw = 74, phh = Math.min(15, rh / 2 - 2);
+        g.beginPath(); (g as any).roundRect ? (g as any).roundRect(cw / 2 - pw / 2, cy - phh, pw, 2 * phh, 8) : g.rect(cw / 2 - pw / 2, cy - phh, pw, 2 * phh); g.fill();
+        g.fillStyle = "#e8eef7"; g.fillText("U" + u, cw / 2, cy);
+      }
+      tex = new THREE.CanvasTexture(cv); tex.anisotropy = 4; tex.needsUpdate = true;
+      this.texCache.set(key, tex);
+      this.pruneLabelTextureCache();
+    }
+    const w = Math.min(widthMm, 120), h = nU * U_MM - 6;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+    mesh.position.set(0, yPlane + (front ? -4 : 4), baseZ + (uLo - 1 + nU / 2) * U_MM);
+    // même pose que faceLabel : avant = normale −Y ; arrière = 180° autour de (0,1,1) → texte droit, haut vers +Z.
+    if (front) mesh.rotation.x = Math.PI / 2;
+    else mesh.setRotationFromAxisAngle(new THREE.Vector3(0, 1, 1).normalize(), Math.PI);
+    mesh.userData = { layer: "slotlabel", eqSide: side };
+    group.add(mesh);
   }
 
   /** Plaque de capot (toit/sol) horizontale RÉELLEMENT PERCÉE : construite par CELLULES (grille `nx×ny` au pas
@@ -629,9 +715,12 @@ export class DcThreeScene extends DcThreeCamera {
     // vantail PLEINE LARGEUR ; le DÉGAGEMENT de rotation est juste un DÉCALAGE des charnières de T vers l'intérieur
     // (et donc du rayon d'ouverture, cf. buildDoorSwing). Pas de panneau de comblement.
     // « gauche/droite » = vu DE LA FACE de la porte : avant (−Y) gauche = −X ; arrière (+Y) gauche = +X (inversé).
-    const left = (dr.hinge !== "right") !== rear, clr = T;
+    const left = (dr.hinge !== "right") !== rear;
     const xL = -hw, xR = hw, cx = 0, dw = w;
-    const xHinge = left ? (-hw + clr) : (hw - clr);   // charnières décalées de T (axe de rotation)
+    // AXE DE PIVOT partagé avec le débattement au sol (RackDoorGeometry) : les gonds sont posés PAR CONSTRUCTION
+    // sur le MÊME axe (hx, hy) que le secteur → valider le placement d'une porte = vérifier visuellement que le
+    // coin du secteur s'ancre sur les gonds.
+    const pivot = RackDoorGeometry.swingSector(w, d, rear, dr);
     const FRAME = Math.min(45, Math.max(20, dw * 0.07));
     const pick = { type: "rack", id: r.id, door: true };
     const metal = () => new THREE.MeshStandardMaterial({ color: theme.doorMetal, metalness: 0.65, roughness: 0.45 });
@@ -664,17 +753,29 @@ export class DcThreeScene extends DcThreeCamera {
     const panel = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), panelMat);
     panel.position.set(cx, yLeaf, H / 2); panel.rotation.x = rear ? -Math.PI / 2 : Math.PI / 2;   // normale ±Y (vers l'extérieur)
     panel.userData = { pick, layer: "door", rackId: r.id }; group.add(panel);
-    // POIGNÉE (barre verticale en saillie, côté OPPOSÉ à la charnière).
+    // POIGNÉE en U (design porte de baie : barre verticale DÉPORTÉE + 2 pattes), côté OPPOSÉ aux gonds.
     const latchX = left ? (xR - FRAME - 18) : (xL + FRAME + 18);
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(14, Math.max(4, T * 0.7), Math.min(180, H * 0.12)), metal());
-    handle.position.set(latchX, yOut + sgn * 5, H / 2); handle.userData = { pick, layer: "door", rackId: r.id }; group.add(handle);
-    // GONDS (2 cylindres verticaux) — placés sur l'AXE DE ROTATION théorique du vantail = arête charnière, sur la
-    // face extérieure (yOut), pivot d'un battant qui s'ouvre vers l'extérieur. Couleur des repères de FAÇADE.
-    const hingeMat = new THREE.MeshStandardMaterial({ color: theme.front, metalness: 0.4, roughness: 0.5 });
-    [H * 0.22, H * 0.78].forEach((hz) => {
-      const k = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 46, 12), hingeMat);
-      k.rotation.x = Math.PI / 2; k.position.set(xHinge, yOut, hz);   // axe Y → Z (vertical), sur l'axe de rotation
-      k.userData = { layer: "door", rackId: r.id }; group.add(k);
+    const gripH = Math.min(220, Math.max(120, H * 0.14));
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(16, 10, gripH), metal());
+    grip.position.set(latchX, yOut + sgn * 24, H / 2); grip.userData = { pick, layer: "door", rackId: r.id }; group.add(grip);
+    [-1, 1].forEach((k) => {   // pattes de déport (fixent la barre au vantail)
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(12, 24, 14), metal());
+      leg.position.set(latchX, yOut + sgn * 12, H / 2 + k * (gripH / 2 - 10));
+      leg.userData = { pick, layer: "door", rackId: r.id }; group.add(leg);
+    });
+    // GONDS — quincaillerie de CHARNIÈRE À BROCHE posée sur l'AXE DE ROTATION RÉEL (pivot.hx / pivot.hy, le même
+    // que le secteur de débattement) : canon vertical + broche traversante saillante + patte vissée sur le montant
+    // du vantail. Métal des portes (design de la quincaillerie — l'orientation a ses propres repères de façade).
+    [H * 0.18, H * 0.82].forEach((hz) => {
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 84, 14), metal());    // canon de charnière
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(pivot.hx, pivot.hy, hz);        // axe Y → Z (vertical)
+      barrel.userData = { pick, layer: "door", rackId: r.id }; group.add(barrel);
+      const pin = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 3.5, 116, 10), metal());  // broche (dépasse du canon)
+      pin.rotation.x = Math.PI / 2; pin.position.set(pivot.hx, pivot.hy, hz);
+      pin.userData = { layer: "door", rackId: r.id }; group.add(pin);
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(FRAME, 8, 56), metal());          // patte vissée sur le montant
+      plate.position.set(pivot.hx + pivot.dirX * (FRAME / 2), pivot.hy - sgn * 4, hz);
+      plate.userData = { pick, layer: "door", rackId: r.id }; group.add(plate);
     });
   }
 
@@ -683,19 +784,11 @@ export class DcThreeScene extends DcThreeCamera {
       l'extérieur de la baie. Couleurs des EMPLACEMENTS LIBRES (remplissage + cadre accent). Couche basculable
       "doorswing" (showDoorSwing), non interactive. */
   protected buildDoorSwing(group: THREE.Group, rear: boolean, dr: any, w: number, d: number, theme: Theme): void {
-    const hd = d / 2, hw = w / 2, clr = Math.max(6, dr.thickness_mm | 0), R = w - clr, N = 18, Z = 1;   // rayon = largeur réelle du vantail
-    const cavity = dr.hollow ? Math.max(0, dr.hollow_mm | 0) : 0;
-    const sgn = rear ? 1 : -1;                                   // face/ouverture vers l'extérieur (avant −Y / arrière +Y)
-    const left = (dr.hinge !== "right") !== rear;                // gauche vue DE LA FACE de la porte (inversé à l'arrière)
-    const dirX = left ? 1 : -1;                                  // sens du vantail fermé le long de la face
-    const beta = (Math.sign(sgn / dirX)) * Math.PI / 2;        // angle d'ouverture (90°) — R(beta)·(dirX,0) = (0,sgn)
-    const hx = left ? (-hw + clr) : (hw - clr), hy = sgn * (hd + cavity + clr);   // pivot = axe de rotation (arête charnière, face extérieure)
-    const pts: number[] = [hx, hy, Z];                          // centre du secteur
-    for (let i = 0; i <= N; i++) {
-      const a = beta * (i / N), c = Math.cos(a), s = Math.sin(a);
-      const vx = dirX * R, vy = 0;                              // vantail fermé (le long de la face)
-      pts.push(hx + (vx * c - vy * s), hy + (vx * s + vy * c), Z);   // rotation du vantail autour du pivot
-    }
+    // Géométrie PARTAGÉE avec la vue Dessus SVG (RackDoorGeometry) — un seul calcul de pivot/rayon/angle.
+    const N = 18, Z = 1;
+    const sector = RackDoorGeometry.sectorPoints(w, d, rear, dr, N);
+    const pts: number[] = [];
+    sector.forEach((p) => pts.push(p.x, p.y, Z));
     const fill: number[] = [];
     for (let i = 0; i < N; i++) { const o = 3 * (i + 1); fill.push(pts[0], pts[1], pts[2], pts[o], pts[o + 1], pts[o + 2], pts[o + 3], pts[o + 4], pts[o + 5]); }
     const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(fill, 3)); geo.computeVertexNormals();
@@ -1094,18 +1187,32 @@ export class DcThreeScene extends DcThreeCamera {
   setToolMode(mode: "none" | "measure" | "route"): void {
     if (this.toolMode === mode && mode === "none") return;
     this.toolMode = mode;
+    this.clearHover(); this.hovered = null;   // aucune surbrillance héritée de l'ancien mode (ex. cible verte de routage)
     if (mode === "none") { this.measurePts = []; this.measureCursor = null; this.measureDone = []; this.measureHi = null; this.routePts = []; this.routeCursor = null; this.clearOverlay(); }
     const dom = this.renderer?.domElement; if (dom) dom.style.cursor = "default";
     this.request();
   }
 
-  /** Données d'overlay poussées par la vue → reconstruit le tracé. */
-  setMeasureOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null, done?: { x: number; y: number; z: number }[][], hi?: number | null): void { this.measurePts = pts || []; this.measureCursor = cursor; this.measureDone = done || []; this.measureHi = (hi == null) ? null : hi; this.rebuildToolOverlay(); }
-  setRouteOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null): void { this.routePts = pts || []; this.routeCursor = cursor; this.rebuildToolOverlay(); }
+  /** Données d'overlay poussées par la vue. La partie STRUCTURELLE (points posés, mesures terminées, surbrillance)
+      ne change qu'aux clics ; au simple SURVOL, seul le CURSEUR bouge → on ne reconstruit PAS tout l'overlay
+      (dispose + re-création des polylignes/étiquettes/pastilles + re-collecte des screenObjs À CHAQUE mousemove),
+      on mute la ligne pointillée et la pastille persistantes (`updateToolCursor`). */
+  setMeasureOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null, done?: { x: number; y: number; z: number }[][], hi?: number | null): void {
+    this.measurePts = pts || []; this.measureCursor = cursor; this.measureDone = done || []; this.measureHi = (hi == null) ? null : hi;
+    const sig = "m:" + this.measurePts.length + ":" + this.measureDone.map((d) => d.length).join(",") + ":" + this.measureHi;
+    if (sig !== this._toolSig) { this._toolSig = sig; this.rebuildToolOverlay(); } else this.updateToolCursor();
+  }
+  setRouteOverlay(pts: { x: number; y: number; z: number }[], cursor: { x: number; y: number; z: number } | null): void {
+    this.routePts = pts || []; this.routeCursor = cursor;
+    const sig = "r:" + this.routePts.length;
+    if (sig !== this._toolSig) { this._toolSig = sig; this.rebuildToolOverlay(); } else this.updateToolCursor();
+  }
 
-  /** Point MONDE sous le curseur : 1re surface (mesh) touchée, à défaut intersection du rayon avec le plan du sol z=0. */
+  /** Point MONDE sous le curseur : 1re surface (mesh) touchée, à défaut intersection du rayon avec le plan du sol z=0.
+      `pickablesOnly=false` : la MESURE doit accrocher N'IMPORTE QUELLE surface visible (plan d'étage à z>0, décor…),
+      pas seulement les cibles cliquables. */
   protected toolRaycast(clientX: number, clientY: number): { x: number; y: number; z: number } | null {
-    const hits = this.rayHits(clientX, clientY);
+    const hits = this.rayHits(clientX, clientY, false);
     for (const h of hits) { if ((h as any).face && h.point) return { x: h.point.x, y: h.point.y, z: h.point.z }; }
     const pt = new THREE.Vector3();
     if (this.raycaster.ray.intersectPlane(this._groundPlane, pt)) return { x: pt.x, y: pt.y, z: pt.z };
@@ -1117,20 +1224,67 @@ export class DcThreeScene extends DcThreeCamera {
   protected toolHover(clientX: number, clientY: number): void {
     const dom = this.renderer?.domElement; if (dom) dom.style.cursor = "default";
     if (this.toolMode === "measure") { if (this.measureHoverCb) this.measureHoverCb(this.toolRaycast(clientX, clientY), clientX, clientY); }
-    else if (this.toolMode === "route") { if (this.routeHoverCb) this.routeHoverCb(this.toolRaycast(clientX, clientY)); }
+    else if (this.toolMode === "route") {
+      this.routeHoverHighlight(clientX, clientY);   // cible cliquable (port/waypoint) en évidence — parité 2D `.dc-routing`
+      if (this.routeHoverCb) this.routeHoverCb(this.toolRaycast(clientX, clientY));
+    }
   }
 
   protected ensureOverlay(): THREE.Group {
     if (!this.gOverlay || this.gOverlay.parent !== this.scene) { this.gOverlay = new THREE.Group(); this.gOverlay.renderOrder = 20; if (this.scene) this.scene.add(this.gOverlay); }
     return this.gOverlay;
   }
-  protected clearOverlay(): void { if (this.gOverlay) this.disposeGroup(this.gOverlay); this.request(); }
+  protected clearOverlay(): void {
+    if (this.gOverlay) this.disposeGroup(this.gOverlay);
+    this._cursorLine = null; this._cursorDot = null; this._toolSig = "";   // enfants du groupe → détruits avec lui
+    this.request();
+  }
 
   protected rebuildToolOverlay(): void {
     const g = this.ensureOverlay(); this.disposeGroup(g);
+    this._cursorLine = null; this._cursorDot = null;   // enfants du groupe → détruits par disposeGroup
     if (this.toolMode === "measure") this.drawMeasureOverlay(g);
     else if (this.toolMode === "route") this.drawRouteOverlay(g);
+    this.ensureToolCursor(g);   // segment pointillé + pastille PERSISTANTS, mutés au survol (updateToolCursor)
+    this.updateToolCursor();
     this.collectScreenObjs(); this.updateScreenScales(); this.request();
+  }
+
+  /** Crée les objets PERSISTANTS du curseur d'outil : le segment pointillé « dernier point → curseur » et la
+      pastille du curseur. Ils sont MUTÉS en place à chaque survol (updateToolCursor) au lieu d'être détruits et
+      recréés par mousemove comme le reste de l'overlay (qui, lui, ne change qu'aux clics). */
+  protected ensureToolCursor(g: THREE.Group): void {
+    if (this.toolMode === "none") return;
+    const color = this.toolMode === "measure" ? 0xffb020 : this.theme.front;   // mêmes couleurs que draw*Overlay
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(6), 3));
+    const line = new THREE.Line(geo, new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.85, depthTest: false, dashSize: 90, gapSize: 55 }));
+    // positions mutées en continu → la bounding sphere n'est jamais à jour : on désactive le frustum culling.
+    line.renderOrder = 21; line.visible = false; line.frustumCulled = false;
+    g.add(line); this._cursorLine = line;
+    const tex = this.circleTexture();
+    if (tex && this.toolMode === "measure") {   // la route n'affiche pas de pastille au curseur
+      const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color, transparent: true, depthWrite: false, depthTest: false }));
+      spr.userData = { screenSize: 6 }; spr.renderOrder = 23; spr.visible = false;
+      g.add(spr); this._cursorDot = spr;
+    }
+  }
+
+  /** Met à jour le SEGMENT EN COURS (dernier point posé → curseur) et la pastille du curseur — mutation en place. */
+  protected updateToolCursor(): void {
+    const pts = this.toolMode === "measure" ? this.measurePts : this.routePts;
+    const cur = this.toolMode === "measure" ? this.measureCursor : this.routeCursor;
+    const last = pts.length ? pts[pts.length - 1] : null;
+    const line = this._cursorLine, dot = this._cursorDot;
+    if (dot) { dot.visible = !!cur; if (cur) dot.position.set(cur.x, cur.y, cur.z); }
+    if (line) {
+      line.visible = !!(cur && last);
+      if (cur && last) {
+        const pos = line.geometry.getAttribute("position") as THREE.BufferAttribute;
+        pos.setXYZ(0, last.x, last.y, last.z); pos.setXYZ(1, cur.x, cur.y, cur.z); pos.needsUpdate = true;
+        line.computeLineDistances();   // requis par le pointillé (LineDashedMaterial)
+      }
+    }
+    this.updateScreenScales(); this.request();   // la pastille a bougé → rescale taille-écran + re-rendu
   }
 
   /** Tracé de mesure : mesures VALIDÉES (étiquette nom+total, surbrillance au survol) + mesure EN COURS (par segment). */
@@ -1143,8 +1297,7 @@ export class DcThreeScene extends DcThreeCamera {
     });
     const pts = this.measurePts;
     this.drawMeasurePolyline(g, pts, COL, true);   // mesure en cours : étiquettes par segment
-    if (this.measureCursor && pts.length) this.addToolLine(g, [pts[pts.length - 1], this.measureCursor], COL, true);   // segment en cours
-    if (this.measureCursor) this.addToolDot(g, this.measureCursor, COL);
+    // (segment en cours + pastille du curseur : objets PERSISTANTS gérés par ensureToolCursor/updateToolCursor)
   }
   protected drawMeasurePolyline(g: THREE.Group, pts: { x: number; y: number; z: number }[], col: number, segLabels: boolean): void {
     if (pts.length >= 2) this.addToolLine(g, pts, col, false);
@@ -1157,7 +1310,7 @@ export class DcThreeScene extends DcThreeCamera {
     const COL = this.theme.front;   // accent
     const pts = this.routePts;
     if (pts.length >= 2) this.addToolLine(g, pts, COL, false);
-    if (this.routeCursor && pts.length) this.addToolLine(g, [pts[pts.length - 1], this.routeCursor], COL, true);
+    // (segment en cours vers le curseur : objet PERSISTANT géré par ensureToolCursor/updateToolCursor)
     pts.forEach((p) => this.addToolDot(g, p, COL));
   }
 

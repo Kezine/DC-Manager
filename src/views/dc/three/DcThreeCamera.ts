@@ -5,8 +5,9 @@ import * as THREE from "three";
 import { CAM_PRESETS } from "../shared";
 import { DcThreeBase } from "./DcThreeBase";
 import { Haptics } from "../../../core/Haptics";
+import { U_MM } from "../../../domain/constants";
 
-export class DcThreeCamera extends DcThreeBase {
+export abstract class DcThreeCamera extends DcThreeBase {
   /** Dernière position (clientX, clientY) du geste TACTILE — sert de point de picking au `touchend` (qui ne
       porte pas de coordonnées de doigt actif), et de centroïde mémorisé entre deux `touchmove`. */
   protected _touchPos: [number, number] | null = null;
@@ -265,7 +266,7 @@ export class DcThreeCamera extends DcThreeBase {
     const slot = (this.toolMode === "none" && button === 0 && !shift) ? this.slotUnder(clientX, clientY) : null;
     if (slot) {
       this.clearHover(); this.hovered = null;   // évite un double setHover(true) sur l'emplacement déjà survolé
-      this.slotSel = { rackId: slot.rackId, side: slot.side, anchor: slot.u, lo: slot.u, hi: slot.u, slots: this.collectFreeSlots(slot.rackId, slot.side), meshes: [] };
+      this.slotSel = { rackId: slot.rackId, side: slot.side, anchor: slot.u, lo: slot.u, hi: slot.u, slots: this.collectFreeSlots(slot.rackId, slot.side), overlay: null };
       this.drag = { mode: "slotsel", x: clientX, y: clientY, downX: clientX, downY: clientY, btn: 0, moved: false };
       this.applySlotSel();
       if (this.tipCb) this.tipCb(null, 0, 0);
@@ -467,12 +468,35 @@ export class DcThreeCamera extends DcThreeBase {
   };
 
   /* ---- sélection multiple d'emplacements U libres (glisser vertical) ---- */
+  /** Rangée PRÉCISE (U bas / uTop) dans une BANDE d'emplacements libres FUSIONNÉE : les emplacements contigus
+      sont UN seul mesh (perf iGPU — cf. DcThreeScene, un mesh par U mettait les petits GPU à genoux) ; la rangée
+      visée est retrouvée depuis la position LOCALE du point d'impact. slotU/slotSide = plan `slotPlane` tourné
+      ±π/2 (axe local y ↔ ±z monde selon la face) ; slotWall = quad en coordonnées locales de baie (z direct,
+      bornes zLo/zHi portées par le descripteur). Bande d'une seule rangée → renvoi direct. */
+  protected slotRowFromHit(h: THREE.Intersection, p: any): number {
+    const base = (p.uLo != null) ? p.uLo : (p.uTop != null ? p.uTop : p.u);
+    if (p.uLo == null || p.uHi == null || p.uHi === p.uLo || !h.point) return base;
+    const step = p.rowStep || 1, nRows = Math.floor((p.uHi - p.uLo) / step) + 1;
+    const mesh = h.object as THREE.Mesh;
+    let f = 0;   // fraction 0 (bas de bande) → 1 (haut)
+    if (p.type === "slotWall") {
+      const z = mesh.worldToLocal(h.point.clone()).z;
+      f = (z - p.zLo) / Math.max(1e-6, p.zHi - p.zLo);
+    } else {
+      const local = mesh.worldToLocal(h.point.clone());
+      const geoH = ((mesh.geometry as any).parameters?.height) || 1;
+      const front = (p.side || p.face) !== "rear";   // slotPlane : Rx(+π/2) → +y local = +z monde ; Rx(−π/2) → −z
+      f = ((front ? local.y : -local.y) + geoH / 2) / geoH;
+    }
+    return p.uLo + step * Math.min(nRows - 1, Math.max(0, Math.floor(f * nRows)));
+  }
+
   /** Emplacement U LIBRE sous le curseur (le plus proche), ou null. */
   protected slotUnder(clientX: number, clientY: number): { rackId: string; side: string; u: number } | null {
     for (const h of this.rayHits(clientX, clientY)) {
       const p: any = h.object.userData && h.object.userData.pick;
       if (!p) continue;
-      if (p.type === "slotU" && p.rackId) return { rackId: p.rackId, side: p.side, u: p.u };
+      if (p.type === "slotU" && p.rackId) return { rackId: p.rackId, side: p.side, u: this.slotRowFromHit(h, p) };
       // Un OCCUPANT (équipement / pseudo-élément) ou une PAROI OPAQUE de baie DEVANT capture le geste → on
       // n'attrape PAS un emplacement libre situé DERRIÈRE (corrige : drag sur un pseudo-équipement → sélection
       // « à travers » des emplacements vides à l'arrière). Le tap/clic sera traité par l'occupant (pick).
@@ -482,10 +506,16 @@ export class DcThreeCamera extends DcThreeBase {
     return null;
   }
 
-  /** Carte u→mesh des emplacements U LIBRES d'une (baie, face) — bornes de contiguïté + surbrillance. */
+  /** Carte u→mesh des emplacements U LIBRES d'une (baie, face) — bornes de contiguïté de la sélection.
+      Les emplacements sont FUSIONNÉS en bandes : chaque U d'une bande pointe vers le MÊME mesh. */
   protected collectFreeSlots(rackId: string, side: string): Map<number, THREE.Object3D> {
     const map = new Map<number, THREE.Object3D>();
-    this.gRacks && this.gRacks.traverse((o: any) => { const p = o.userData && o.userData.pick; if (p && p.type === "slotU" && p.rackId === rackId && p.side === side) map.set(p.u, o); });
+    this.gRacks && this.gRacks.traverse((o: any) => {
+      const p = o.userData && o.userData.pick;
+      if (!p || p.type !== "slotU" || p.rackId !== rackId || p.side !== side) return;
+      const lo = (p.uLo != null) ? p.uLo : p.u, hi = (p.uHi != null) ? p.uHi : lo;
+      for (let u = lo; u <= hi; u++) map.set(u, o);
+    });
     return map;
   }
 
@@ -502,21 +532,39 @@ export class DcThreeCamera extends DcThreeBase {
     if (lo !== sel.lo || hi !== sel.hi) { sel.lo = lo; sel.hi = hi; this.applySlotSel(); }
   }
 
-  /** Surligne les emplacements de la plage [lo,hi] (emissive), en nettoyant la surbrillance précédente. */
+  /** Surligne la plage [lo,hi] via un PLAN DE SÉLECTION dédié, enfant de la bande (hérite de sa pose/visibilité).
+      Les emplacements étant fusionnés en bandes, teinter le matériau du mesh surlignerait TOUTE la bande —
+      le plan dédié couvre exactement la plage, mutée en place pendant le glisser. La sélection reste dans UNE
+      bande par construction (extendSlotSel s'arrête au 1er U manquant = bord de bande). */
   protected applySlotSel(): void {
     const sel = this.slotSel; if (!sel) return;
-    sel.meshes.forEach((m) => this.setHover(m, false));
-    const meshes: THREE.Object3D[] = [];
-    for (let u = sel.lo; u <= sel.hi; u++) { const m = sel.slots.get(u); if (m) { this.setHover(m, true); meshes.push(m); } }
-    sel.meshes = meshes;
+    const band = sel.slots.get(sel.anchor) as THREE.Mesh | undefined; if (!band) return;
+    if (!sel.overlay) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0x4a90e2, transparent: true, opacity: 0.35, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+      sel.overlay = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);   // plan UNITAIRE, redimensionné par scale
+      sel.overlay.renderOrder = 6;
+      band.add(sel.overlay);
+    }
+    const pb: any = band.userData.pick;
+    const front = pb.side !== "rear";
+    const geoW = ((band.geometry as any).parameters?.width) || 1;
+    sel.overlay.scale.set(geoW, Math.max(1, (sel.hi - sel.lo + 1) * U_MM - 3), 1);
+    sel.overlay.position.set(0, (front ? 1 : -1) * (((sel.lo + sel.hi) / 2) - ((pb.uLo + pb.uHi) / 2)) * U_MM, 0.5);
     this.request();
+  }
+
+  /** Détruit le plan de sélection (géométrie + matériau dédiés). */
+  protected disposeSlotSelOverlay(sel: { overlay: THREE.Mesh | null }): void {
+    const ov = sel.overlay; sel.overlay = null; if (!ov) return;
+    ov.parent?.remove(ov);
+    ov.geometry.dispose(); (ov.material as THREE.Material).dispose();
   }
 
   /** Relâche : ouvre l'assignation pour la plage sélectionnée (hauteur = nb d'U) → la liste d'équipements
       est filtrée à cette hauteur par le formulaire (pré-sélection). Le rebuild rétablit la scène au retour. */
   protected commitSlotSel(): void {
     const sel = this.slotSel; this.slotSel = null; if (!sel) return;
-    sel.meshes.forEach((m) => this.setHover(m, false)); this.request();
+    this.disposeSlotSelOverlay(sel); this.request();
     Haptics.confirm();   // validation d'une plage d'emplacements → confirmation tactile
     this.host.assignSlot?.(sel.rackId, sel.lo, sel.side, sel.hi - sel.lo + 1, () => this.rebuild(this.builtDc));
   }
@@ -525,19 +573,35 @@ export class DcThreeCamera extends DcThreeBase {
       arrive : un geste 2 doigts ne doit jamais sélectionner ni laisser une zone de placement surlignée. */
   protected abortSlotSel(): void {
     const sel = this.slotSel; this.slotSel = null; if (!sel) return;
-    sel.meshes.forEach((m) => this.setHover(m, false)); this.request();
+    this.disposeSlotSelOverlay(sel); this.request();
   }
 
   /* ---- picking (raycasting) ---- */
-  /** Cibles cliquables sous (clientX,clientY) triées du plus proche au plus lointain. */
-  protected rayHits(clientX: number, clientY: number): THREE.Intersection[] {
+  /** Cibles cliquables sous (clientX,clientY) triées du plus proche au plus lointain.
+      `pickablesOnly` (défaut) : n'intersecte QUE les objets porteurs de `userData.pick` — tous les consommateurs
+      (pick / targetAt / hoverTargetAt) ne lisent que ça, et les objets SANS pick (arêtes EdgesGeometry testées
+      segment PAR segment, étiquettes, sprites, grilles) ne faisaient que payer leur géométrie au raycast à chaque
+      survol. `false` = toutes les SURFACES visibles (outil mesure : accrocher n'importe quelle surface). */
+  protected rayHits(clientX: number, clientY: number, pickablesOnly = true): THREE.Intersection[] {
     const cam = this.camera, dom = this.renderer?.domElement; if (!cam || !dom || !this.content) return [];
     const r = dom.getBoundingClientRect();
     this.ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(this.ndc, cam);
-    // three NE filtre PAS les objets masqués (.visible=false) au raycast → on les écarte (ex. couches ports/noms/portes
-    // basculées en visibilité sans reconstruction : un mesh masqué ne doit ni être survolé ni cliqué).
-    return this.raycaster.intersectObjects(this.content.children, true).filter((h) => this.hitVisible(h.object));
+    if (!pickablesOnly) {
+      // three NE filtre PAS les objets masqués (.visible=false) au raycast → on les écarte (ex. couches ports/noms/portes
+      // basculées en visibilité sans reconstruction : un mesh masqué ne doit ni être survolé ni cliqué).
+      return this.raycaster.intersectObjects(this.content.children, true).filter((h) => this.hitVisible(h.object));
+    }
+    // Collecte des cibles ÉLAGUÉE par visibilité (un sous-arbre masqué est ignoré → le filtre hitVisible
+    // a posteriori devient inutile) ; la traversée est un simple parcours d'objets, sans aucun calcul d'intersection.
+    const targets: THREE.Object3D[] = [];
+    const collect = (o: THREE.Object3D): void => {
+      if (o.visible === false) return;
+      if (o.userData && o.userData.pick) targets.push(o);
+      for (const c of o.children) collect(c);
+    };
+    collect(this.content);
+    return this.raycaster.intersectObjects(targets, false);
   }
 
   /** Vrai si l'objet ET tous ses ancêtres sont visibles (la visibilité three ne cascade pas dans le raycast). */
@@ -583,16 +647,17 @@ export class DcThreeCamera extends DcThreeBase {
     for (const h of hits) {
       const p = (h.object.userData && h.object.userData.pick) as { type: string; kind?: string; id: string; cable?: string | null; rackId?: string; u?: number; side?: string; height?: number; face?: string; lr?: string; col?: number; uTop?: number; wall?: string; margin?: string; cx?: number; cy?: number } | undefined;
       if (!p) continue;
+      // Emplacements libres FUSIONNÉS en bandes : le U / uTop précis est recalculé depuis le point d'impact.
       if (p.type === "slotU" && p.rackId) {   // emplacement U libre → dialogue d'assignation (rebuild au retour)
-        this.host.assignSlot?.(p.rackId, p.u!, p.side!, p.height || 1, () => this.rebuild(this.builtDc));
+        this.host.assignSlot?.(p.rackId, this.slotRowFromHit(h, p), p.side!, p.height || 1, () => this.rebuild(this.builtDc));
         return;
       }
       if (p.type === "slotSide" && p.rackId) {   // emplacement LATÉRAL libre → assignation (équipement / pin latéral)
-        this.host.assignSideSlot?.(p.rackId, p.face!, p.lr!, p.col!, p.uTop!, () => this.rebuild(this.builtDc));
+        this.host.assignSideSlot?.(p.rackId, p.face!, p.lr!, p.col!, this.slotRowFromHit(h, p), () => this.rebuild(this.builtDc));
         return;
       }
       if (p.type === "slotWall" && p.rackId) {   // emplacement MURAL libre → équipement en paroi
-        this.host.assignWallSlot?.(p.rackId, p.wall!, p.margin!, p.col!, p.uTop!, () => this.rebuild(this.builtDc));
+        this.host.assignWallSlot?.(p.rackId, p.wall!, p.margin!, p.col!, this.slotRowFromHit(h, p), () => this.rebuild(this.builtDc));
         return;
       }
       if (p.type === "slotCap" && p.rackId) {   // trou de capot libre → poser un pin
@@ -651,46 +716,112 @@ export class DcThreeCamera extends DcThreeBase {
   }
 
   /** Survol : met en évidence l'occupant-équipement sous le curseur (emissive) + curseur pointer. */
-  /** Mesh à mettre en évidence au survol sous (clientX,clientY) — cible PRÉCISE (waypoint · port · slots) d'abord,
-      puis câble (proximité latérale), puis occupant (câble au-dessus prime), puis baie opaque. Réutilisé par le
-      survol souris ET l'appui long tactile. */
-  protected hoverTargetAt(clientX: number, clientY: number): THREE.Object3D | null {
+  /** Cible à mettre en évidence au survol sous (clientX,clientY) — cible PRÉCISE (waypoint · port · slots) d'abord,
+      puis câble (proximité latérale), puis occupant (câble au-dessus prime), puis baie opaque. Renvoie AUSSI
+      l'intersection (le point d'impact identifie la RANGÉE dans une bande d'emplacements fusionnée). */
+  protected hoverHitAt(clientX: number, clientY: number): { target: THREE.Object3D | null; hit: THREE.Intersection | null } {
     const hits = this.rayHits(clientX, clientY);
-    let cableObj: THREE.Object3D | null = null, bestD = Infinity;
+    let cableObj: THREE.Object3D | null = null, cableHit: THREE.Intersection | null = null, bestD = Infinity;
     for (const h of hits) {
       const pp: any = h.object.userData && h.object.userData.pick;
-      if (pp && pp.type === "cable" && h.point) { const dd = this.raycaster.ray.distanceToPoint(h.point); if (dd < bestD) { bestD = dd; cableObj = h.object; } }
+      if (pp && pp.type === "cable" && h.point) { const dd = this.raycaster.ray.distanceToPoint(h.point); if (dd < bestD) { bestD = dd; cableObj = h.object; cableHit = h; } }
     }
     const cableTop = this.opts.cablesOnTop && cableObj;
     for (const h of hits) {
       const p: any = h.object.userData && h.object.userData.pick;
       if (!p) continue;
-      if (p.type === "wp" || p.type === "port" || p.type === "slotU" || p.type === "slotSide" || p.type === "slotWall" || p.type === "slotCap") return h.object;
-      if (p.type === "cable") return cableObj;
-      if (p.type === "occ" && (p.kind === "eq" || p.kind === "item")) return cableTop ? cableObj : h.object;   // équipement / pseudo-élément
-      if (p.type === "rack" && this.frontFacing(h) && this.rackSolid(h)) return cableTop ? cableObj : h.object;   // capot/paroi opaque = baie
+      if (p.type === "wp" || p.type === "port" || p.type === "slotU" || p.type === "slotSide" || p.type === "slotWall" || p.type === "slotCap") return { target: h.object, hit: h };
+      if (p.type === "cable") return { target: cableObj, hit: cableHit };
+      if (p.type === "occ" && (p.kind === "eq" || p.kind === "item")) return cableTop ? { target: cableObj, hit: cableHit } : { target: h.object, hit: h };   // équipement / pseudo-élément
+      if (p.type === "rack" && this.frontFacing(h) && this.rackSolid(h)) return cableTop ? { target: cableObj, hit: cableHit } : { target: h.object, hit: h };   // capot/paroi opaque = baie
     }
-    return null;
+    return { target: null, hit: null };
   }
+  /** Variante « objet seul » (appui long tactile). */
+  protected hoverTargetAt(clientX: number, clientY: number): THREE.Object3D | null { return this.hoverHitAt(clientX, clientY).target; }
 
   /** Applique le survol (highlight + tooltip + curseur) sur la cible sous (clientX,clientY). Renvoie la cible. */
   protected hoverApply(clientX: number, clientY: number): THREE.Object3D | null {
-    const target = this.hoverTargetAt(clientX, clientY);
+    const { target, hit } = this.hoverHitAt(clientX, clientY);
     if (this.tipCb) this.tipCb(target ? (target.userData && target.userData.pick) : null, clientX, clientY);
-    if (target === this.hovered) return target;
+    // BANDE d'emplacements fusionnée : teinter son matériau allumerait TOUTE la bande — on surligne la seule
+    // RANGÉE survolée par un plan dédié (cf. applySlotSel), suivi d'un rAF à l'autre (même cible, autre rangée).
+    const p: any = target && target.userData && target.userData.pick;
+    const banded = !!(p && (p.type === "slotU" || p.type === "slotSide" || p.type === "slotWall") && p.uLo != null && p.uHi !== p.uLo);
+    const row = (banded && hit) ? this.slotRowFromHit(hit, p) : null;
+    if (target === this.hovered && row === this._slotRowHoverRow) return target;
     this.clearHover();
     this.hovered = target;
-    this.applyHover(target);
+    if (banded && row != null) this.showSlotRowHover(target as THREE.Mesh, p, row);
+    else this.applyHover(target);
     const dom = this.renderer?.domElement; if (dom) dom.style.cursor = target ? "pointer" : "default";
     this.request();
     return target;
   }
 
+  /** Plan de surbrillance de la RANGÉE survolée dans une bande d'emplacements (enfant de la bande : hérite de sa
+      pose et de sa visibilité). Recréé à chaque changement de rangée (rAF-throttlé) et détruit par clearHover. */
+  protected showSlotRowHover(band: THREE.Mesh, p: any, row: number): void {
+    const step = p.rowStep || 1;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ color: 0x4a90e2, transparent: true, opacity: 0.35, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+    mesh.renderOrder = 6;
+    if (p.type === "slotWall") {
+      // quad mural : géométrie en coords LOCALES de baie (mesh à l'origine) → plan ⟂ X posé dans le même repère.
+      const pos = band.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const xp = pos.getX(0), y0 = pos.getY(0), y1 = pos.getY(1);
+      const pitch = step * U_MM;
+      mesh.rotation.y = Math.PI / 2;   // normale ±X ; l'axe local x devient l'axe z monde (hauteur)
+      mesh.scale.set(pitch - 3, Math.abs(y1 - y0), 1);
+      mesh.position.set(xp - Math.sign(xp || 1) * 0.5, (y0 + y1) / 2, p.zLo + ((row - p.uLo) / step) * pitch + pitch / 2);
+    } else {
+      // slotPlane (U / latéral) : plan centré sur la bande, axe local y = hauteur (±z monde selon la face).
+      const front = (p.side || p.face) !== "rear";
+      const geoW = ((band.geometry as any).parameters?.width) || 1;
+      mesh.scale.set(geoW, step * U_MM - 3, 1);
+      mesh.position.set(0, (front ? 1 : -1) * (row - (p.uLo + p.uHi) / 2) * U_MM, 0.5);
+    }
+    band.add(mesh);
+    this._slotRowHover = mesh; this._slotRowHoverRow = row;
+  }
+
   protected onHover = (e: MouseEvent): void => {
     if (this.drag) return;   // pas de survol pendant un glisser
-    if (this.toolMode !== "none") { this.toolHover(e.clientX, e.clientY); return; }   // mode outil : aperçu du segment, pas de highlight/tooltip
-    this.hoverApply(e.clientX, e.clientY);
+    // THROTTLE rAF : mousemove peut dépasser 100 Hz alors qu'au plus UN raycast par frame AFFICHÉE est utile
+    // (le rendu est de toute façon à la demande). On mémorise la dernière position, résolue au prochain rAF.
+    this._hoverClient = [e.clientX, e.clientY];
+    if (this._hoverRaf) return;
+    this._hoverRaf = requestAnimationFrame(() => {
+      this._hoverRaf = 0;
+      const c = this._hoverClient; this._hoverClient = null;
+      if (!c || this.drag) return;
+      if (this.toolMode !== "none") { this.toolHover(c[0], c[1]); return; }   // mode outil : aperçu du segment, pas de highlight/tooltip
+      this.hoverApply(c[0], c[1]);
+    });
   };
+
+  /** Couleur de surbrillance SURCHARGÉE le temps d'un applyHover (mode routage → vert « ok ») ; null = accent bleu. */
+  protected _hoverColor: { emissive: number; tint: number } | null = null;
+
+  /** Mode ROUTAGE : met en évidence la CIBLE cliquable (port ou waypoint) sous le curseur — équivalent WebGL du
+      CSS 2D `.dc-routing …:hover` (vert --ok, plus explicite que l'accent normal) + curseur pointer. Les autres
+      objets (baies, occupants, câbles) ne sont PAS des cibles de routage → jamais surlignés dans ce mode. */
+  protected routeHoverHighlight(clientX: number, clientY: number): void {
+    let target: THREE.Object3D | null = null;
+    for (const h of this.rayHits(clientX, clientY)) {
+      const p: any = h.object.userData && h.object.userData.pick;
+      if (p && (p.type === "port" || p.type === "wp")) { target = h.object; break; }
+    }
+    if (target !== this.hovered) {
+      this.clearHover();
+      this.hovered = target;
+      this._hoverColor = { emissive: 0x29c46b, tint: 0x7fe3a8 };   // vert « ok » (cf. CSS var(--ok, #29c46b))
+      this.applyHover(target);
+      this._hoverColor = null;
+      this.request();
+    }
+    const dom = this.renderer?.domElement; if (dom) dom.style.cursor = target ? "pointer" : "default";
+  }
 
   /** Éteint la mise en évidence de survol + le tooltip (utilisé à la fermeture d'un tooltip d'appui long tactile). */
   protected clearHoverAndTip(): void {
@@ -719,11 +850,24 @@ export class DcThreeCamera extends DcThreeBase {
     this._hoverObjs.forEach((o: THREE.Object3D) => this.setHover(o, true));
   }
 
-  protected clearHover(): void { this._hoverObjs.forEach((o: THREE.Object3D) => this.setHover(o, false)); this._hoverObjs = []; }
+  protected clearHover(): void {
+    this._hoverObjs.forEach((o: THREE.Object3D) => this.setHover(o, false)); this._hoverObjs = [];
+    if (this._slotRowHover) {   // plan de rangée survolée (bandes d'emplacements) : détaché ET libéré
+      this._slotRowHover.parent?.remove(this._slotRowHover);
+      this._slotRowHover.geometry.dispose(); (this._slotRowHover.material as THREE.Material).dispose();
+      this._slotRowHover = null;
+    }
+    this._slotRowHoverRow = null;
+  }
 
   protected setHover(mesh: THREE.Object3D | null, on: boolean): void {
     if (!mesh) return;
     const m = (mesh as any).material as any; if (!m) return;
+    // Couleurs de surbrillance : accent BLEU par défaut ; surchargées par `_hoverColor` (mode routage → vert
+    // « ok », parité avec le CSS 2D `.dc-routing …:hover`). La restauration (off) relit les valeurs SAUVÉES,
+    // indépendantes de la couleur appliquée.
+    const hiEmissive = this._hoverColor ? this._hoverColor.emissive : 0x4a90e2;
+    const hiTint = this._hoverColor ? this._hoverColor.tint : 0x9fd0ff;
     if (Array.isArray(m)) {   // multi-matériaux (coque de baie · boîte d'équip. libre à 6 faces) → par sous-matériau
       // emissive quand le matériau en a (MeshStandard) ; sinon TEINTE de la couleur (MeshBasic texturé des faces
       // d'équipement libre : pas d'emissive → sans ça, une boîte ENTIÈREMENT texturée ne réagirait pas au survol).
@@ -732,7 +876,7 @@ export class DcThreeCamera extends DcThreeBase {
           mesh.userData._emiArr = m.map((x: any) => (x && x.emissive) ? x.emissive.getHex() : -1);
           mesh.userData._colArr = m.map((x: any) => (x && !x.emissive && x.color) ? x.color.getHex() : -1);
         }
-        m.forEach((x: any) => { if (!x) return; if (x.emissive) x.emissive.setHex(0x4a90e2); else if (x.color) x.color.setHex(0x9fd0ff); });
+        m.forEach((x: any) => { if (!x) return; if (x.emissive) x.emissive.setHex(hiEmissive); else if (x.color) x.color.setHex(hiTint); });
       } else if (mesh.userData._emiArr) {
         m.forEach((x: any, i: number) => {
           if (!x) return;
@@ -745,8 +889,8 @@ export class DcThreeCamera extends DcThreeBase {
     }
     if (on) {
       if (m.isLineMaterial) { mesh.userData._lw = m.linewidth; mesh.userData._lop = m.opacity; m.linewidth = m.linewidth * 2; m.opacity = 1; }   // câble : + épais + opaque
-      else if (m.emissive) { mesh.userData._emissive = m.emissive.getHex(); m.emissive.setHex(0x4a90e2); }
-      else if (m.color) { mesh.userData._color = m.color.getHex(); m.color.setHex(0x9fd0ff); }   // sprites (marqueurs/pastilles) → teinte
+      else if (m.emissive) { mesh.userData._emissive = m.emissive.getHex(); m.emissive.setHex(hiEmissive); }
+      else if (m.color) { mesh.userData._color = m.color.getHex(); m.color.setHex(hiTint); }   // sprites (marqueurs/pastilles) → teinte
       if (m.transparent && !m.map && !m.isLineMaterial) { mesh.userData._opacity = m.opacity; m.opacity = 0.9; }   // emplacements libres → ↑ opacité
     } else {
       if (mesh.userData._lw != null) { m.linewidth = mesh.userData._lw; m.opacity = mesh.userData._lop; }

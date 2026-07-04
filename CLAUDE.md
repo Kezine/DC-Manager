@@ -77,7 +77,7 @@ src/            # FRONT (navigateur) — TS compilé par webpack
   geometry/     #   calculs 3D/2D purs (layout, projection, géométrie de baies)
   views/        #   vues UI ; views/dc/ = vue Datacenter (chaîne d'héritage en couches)
   views/dc/three/ #   moteur 3D WebGL (Three.js)
-  sync/         #   rechargement granulaire REST (changeset → plan)  ← cf. docs/render-impact.md
+  sync/         #   rechargement granulaire REST (changeset → plan, carte d'impact 3D)
   ui/           #   primitives UI (modale, dialogue, notifications…)
   app/          #   main.ts (bootstrap), Shell, état de sauvegarde
 src-server/src/ # BACK (Node, ESM/NodeNext) — TS compilé par tsc
@@ -116,19 +116,13 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 > `.gitignore`) ou le répertoire scratchpad de la session. Un fichier de `docs/` doit décrire un pan
 > d'architecture stable, référencé depuis le code ; s'il ne survit pas à la tâche en cours, il n'y a pas sa place.
 
-- [`rest-migration.md`](docs/rest-migration.md) — migration vers le backend REST,
-  phases, concurrence (révisions, SSE, **verrou optimiste 409 par entité**).
-- [`render-impact.md`](docs/render-impact.md) — **carte d'impact de rendu** : quelle
-  collection impose quelle reconstruction 3D (rechargement granulaire, P1/P3).
 - [`validation.md`](docs/validation.md) — **normalisation & validation** partagées des
   données (spec déclarative, niveaux intrinsèque/référentiel/invariants, V1/V2/V3).
 - [`reverse-proxy.md`](docs/reverse-proxy.md) — servir l'app **sous un sous-dossier**
   (URLs relatives + `<base>` + `X-Forwarded-Prefix`), sans reconfiguration.
-- [`positioning-toolkit.md`](docs/positioning-toolkit.md) — **aide au positionnement** :
-  placer un élément par ses coins (murs / coins d'autres éléments, cotes ⟂) dans les **deux
-  vues 2D** (baies & équipements en salle ; salles & équipements sur l'étage) ; cœur pur
-  `geometry/Positioning.ts` + contrôleur dédié `views/dc/PositioningTool.ts` (interface `PositioningHost`,
-  adaptation par `DcInteract.posScene()`).
+- [`perf-3d.md`](docs/perf-3d.md) — **optimisations du moteur 3D WebGL** (visibilité vs
+  rebuild, diff d'options, instancing…) : le fait sert de contexte, les idées « à faire »
+  y sont consignées (à ne PAS coder sans demande).
 
 ## Points d'architecture à connaître
 
@@ -147,8 +141,10 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   outil dans `src/views/dc/` (état + overlay + panneau + interactions) pilotée par une **interface hôte**
   (cf. `PositioningTool` + `PositioningHost`), instanciée dans `DcBase` ; ne laisse dans la chaîne de vues que de
   **fins branchements** (un point de rendu, le routage des événements, l'ajout de la carte) + l'**adaptation**
-  spécifique (l'équivalent de `posScene()`). La géométrie PURE va dans `src/geometry/`. Les outils `measure`/`route`,
-  encore inline dans `DcInteract`, sont de la DETTE — ne pas les prendre pour modèle.
+  spécifique (l'équivalent de `posScene()`). La géométrie PURE va dans `src/geometry/`. Les outils `PositioningTool`,
+  `MeasureTool`, `RouteTool` et `DoorTool` suivent tous ce modèle — de BONS exemples à imiter. Dette résiduelle :
+  les PONTS d'accès transitoires dans `DcBase` (`measure`/`routeBuild`/`_measHi`, aperçu souris throttlé) que les
+  sites historiques utilisent encore — à résorber au fil de l'eau, pas à étendre.
 
 ## Code partagé front/back (`shared/`)
 

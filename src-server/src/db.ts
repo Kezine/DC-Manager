@@ -7,6 +7,7 @@ export interface SqliteDb {
   exec(sql: string): void;
   pragma(source: string): unknown;
   transaction<A extends any[]>(fn: (...a: A) => void): (...a: A) => void;
+  close(): void;
 }
 export type SqliteCtor = new (file: string) => SqliteDb;
 
@@ -42,6 +43,10 @@ export class Repository {
     db.exec(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, meta TEXT NOT NULL, blob BLOB, bytes INTEGER NOT NULL DEFAULT 0)`);
     return new Repository(db);
   }
+
+  /** Ferme le handle SQLite. INDISPENSABLE avant de supprimer le fichier du document : sous Windows,
+      supprimer un fichier encore ouvert échoue (EBUSY/EPERM) — cf. `DocumentStore.delete`. */
+  close(): void { this.db.close(); }
 
   /** Texte de recherche normalisé (parité Schema.normSearch sur toutes les valeurs). */
   private searchText(rec: Rec): string {

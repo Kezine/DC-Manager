@@ -31,8 +31,28 @@
   révision (`_webglRev`) prend le chemin diff (no-op si données inchangées) → **aucune reconstruction**. (Avant : le
   canvas était détaché → `mount→build` complet au retour = re-dessin de toute la scène multi-salles.)
 - **Cache de textures d'images de façade** (`imgTexCache`, par URL) : réutilisées synchroniquement d'un build à
-  l'autre (plus de rechargement TextureLoader à chaque reconstruction), libérées uniquement au `dispose` final.
+  l'autre (plus de rechargement TextureLoader à chaque reconstruction), élaguées après chaque build COMPLET
+  (`pruneFaceTextureCache` : toute URL non reposée par ce build est libérée) + libération au `dispose` final.
 - **Réglages en place sans rebuild** : `setCablesOnTop`, `setMarkerScale`, `setCullDistance`, `setCableSpline`.
+- **Picking restreint aux CIBLES utiles + throttle rAF** (`rayHits`/`onHover`) : le survol n'intersecte plus toute
+  la scène (les arêtes `EdgesGeometry` se testent segment PAR segment, pure perte : tous les consommateurs ne
+  lisent que `userData.pick`) mais une collecte élaguée par visibilité des seuls objets pickables ; et `mousemove`
+  (>100 Hz possible) est résolu au plus UNE fois par frame (rAF). L'outil mesure garde l'accrochage à TOUTE
+  surface via `rayHits(x, y, false)`.
+- **Éviction LRU des textures d'étiquettes** (`texCache`, `pruneLabelTextureCache`, plafond 256) : chaque libellé
+  distinct (noms, U, cotes de mesure) créait une CanvasTexture GPU conservée à vie, y compris après changement de
+  document. Les textures mutualisées (clés « ##… ») sont permanentes.
+- **Overlay outil scindé statique/dynamique** (`_toolSig` + `ensureToolCursor`/`updateToolCursor`) : au survol en
+  mode mesure/route, seuls le segment pointillé et la pastille du curseur sont MUTÉS en place — l'overlay complet
+  (polylignes, étiquettes, pastilles posées + `collectScreenObjs`) n'est reconstruit qu'aux changements
+  STRUCTURELS (point posé, mesure terminée/supprimée, surbrillance).
+- **Emplacements libres FUSIONNÉS en bandes** : un mesh par U / rangée latérale mettait les iGPU à genoux dès
+  quelques baies vides (~3 200 plans transparents + cadres + étiquettes pour 7 baies 42U à latéraux av+ar →
+  ~250 après fusion). Les emplacements CONTIGUS forment UN seul mesh (`slotU` par bande de U, `slotSide`/
+  `slotWall` par couloir de colonne) ; le U / uTop précis est recalculé AU CLIC depuis le point d'impact
+  (`DcThreeCamera.slotRowFromHit`, coordonnées locales du plan). Étiquettes « U n » aux extrémités de bande
+  seulement. La sélection multi-U au glisser surligne la plage via un PLAN dédié enfant de la bande
+  (`applySlotSel`), muté en place.
 
 ## ⏳ À faire (consigné, NON implémenté)
 

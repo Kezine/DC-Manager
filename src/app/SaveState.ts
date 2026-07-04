@@ -6,21 +6,22 @@ export type SaveStateKind = "mem" | "clean" | "dirty" | "dirty-on";
 
 export interface SaveStateInput { dirty: boolean; hasFile: boolean; autosaveOn: boolean; }
 
-/** Pastille d'état : fichier lié → clean / dirty / dirty-on (auto-save) ; sinon mémoire → mem / dirty. */
-export function computeSaveState(o: SaveStateInput): SaveStateKind {
-  if (o.hasFile) return !o.dirty ? "clean" : (o.autosaveOn ? "dirty-on" : "dirty");
-  return o.dirty ? "dirty" : "mem";
-}
-
-/** L'auto-save n'écrit QUE s'il y a des modifications ET un fichier lié. */
-export function shouldAutosave(o: { dirty: boolean; hasFile: boolean }): boolean {
-  return o.dirty && o.hasFile;
-}
-
 /** Suivi mutable du « dirty » + état de save d'un document. `revision` = index d'historique du modèle (change à
     chaque mutation/undo/redo) ; `savedRevision` = révision à la dernière sauvegarde. `otherDirty` = changements
-    non couverts par l'historique modèle (renommage du document, bibliothèque d'images). */
+    non couverts par l'historique modèle (renommage du document, bibliothèque d'images).
+    Les règles PURES (`compute`, `shouldAutosave`) sont des STATIQUES de la classe (principe n°2 —
+    anciennement des fonctions libres exportées). */
 export class SaveState {
+  /** Pastille d'état : fichier lié → clean / dirty / dirty-on (auto-save) ; sinon mémoire → mem / dirty. */
+  static compute(o: SaveStateInput): SaveStateKind {
+    if (o.hasFile) return !o.dirty ? "clean" : (o.autosaveOn ? "dirty-on" : "dirty");
+    return o.dirty ? "dirty" : "mem";
+  }
+  /** L'auto-save n'écrit QUE s'il y a des modifications ET un fichier lié. */
+  static shouldAutosave(o: { dirty: boolean; hasFile: boolean }): boolean {
+    return o.dirty && o.hasFile;
+  }
+
   private revision = 0;        // révision modèle courante (index d'historique)
   private savedRevision = 0;   // révision à la dernière sauvegarde / au dernier chargement
   private otherDirty = false;  // changements HORS historique (meta / images)
@@ -41,6 +42,6 @@ export class SaveState {
 
   /** Modifié si la révision a bougé depuis la sauvegarde OU s'il y a un changement hors historique. */
   get dirty(): boolean { return this.revision !== this.savedRevision || this.otherDirty; }
-  state(): SaveStateKind { return computeSaveState({ dirty: this.dirty, hasFile: this.hasFile, autosaveOn: this.autosaveOn }); }
-  shouldAutosave(): boolean { return shouldAutosave({ dirty: this.dirty, hasFile: this.hasFile }); }
+  state(): SaveStateKind { return SaveState.compute({ dirty: this.dirty, hasFile: this.hasFile, autosaveOn: this.autosaveOn }); }
+  shouldAutosave(): boolean { return SaveState.shouldAutosave({ dirty: this.dirty, hasFile: this.hasFile }); }
 }

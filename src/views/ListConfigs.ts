@@ -1,5 +1,6 @@
 import type { Store } from "../store";
 import { Html } from "../core/Html";
+import { Ip } from "../core/Ip";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { EquipFaces } from "../registries/EquipFaces";
 import { PortRoles } from "../registries/PortRoles";
@@ -18,10 +19,6 @@ const kindPill = (k: string) => (k === "power"
   ? '<span class="pill" style="border-color:var(--accent-2);color:var(--accent-2)">⚡ alim.</span>'
   : '<span class="pill">data</span>');
 const descCell = (o: any) => (o.description ? Html.escape(String(o.description).slice(0, 80)) : dim("—"));
-const ipToInt = (s: string): number | null => {
-  if (!s) return null; const p = s.split("."); if (p.length !== 4) return null;
-  let n = 0; for (const x of p) { const v = +x; if (!(v >= 0 && v <= 255 && x !== "")) return null; n = n * 256 + v; } return n;
-};
 
 /* Configurations de colonnes par collection (paramètrent ListView). Classe de méthodes
    statiques ; chaque méthode renvoie les options d'une liste. Le JEU de colonnes est aligné
@@ -312,7 +309,7 @@ export class ListConfigs {
       emptyText: "Aucune adresse IP.",
       searchFields: (a) => [a.address, a.hostname, a.description],
       columns: [
-        { head: "Adresse", essential: true, cls: "cell-name", sortKey: "address", sort: (a) => { const v = ipToInt(a.address); return v != null ? v : a.address; }, render: (a) => `<code>${Html.escape(a.address || "—")}</code>` },
+        { head: "Adresse", essential: true, cls: "cell-name", sortKey: "address", sort: (a) => { const v = Ip.toInt(a.address); return v != null ? v : a.address; }, render: (a) => `<code>${Html.escape(a.address || "—")}</code>` },
         {
           head: "Réseau", essential: true, sortKey: "net", sort: (a) => { const n: any = a.network_id && store.get("ipNetworks", a.network_id); return n ? (n.label || n.cidr || "") : ""; },
           render: (a) => { const n: any = a.network_id && store.get("ipNetworks", a.network_id); return n ? Html.escape(n.label || n.cidr || "(réseau)") : dim("—"); },
@@ -336,13 +333,13 @@ export class ListConfigs {
       emptyText: "Aucune plage DHCP.",
       searchFields: (d) => [d.start_ip, d.end_ip, d.description],
       columns: [
-        { head: "Plage", essential: true, cls: "cell-name", sort: (d) => { const v = ipToInt(d.start_ip); return v != null ? v : (d.start_ip || ""); }, render: (d) => `<code>${Html.escape(d.start_ip || "?")}</code> → <code>${Html.escape(d.end_ip || "?")}</code>` },
+        { head: "Plage", essential: true, cls: "cell-name", sort: (d) => { const v = Ip.toInt(d.start_ip); return v != null ? v : (d.start_ip || ""); }, render: (d) => `<code>${Html.escape(d.start_ip || "?")}</code> → <code>${Html.escape(d.end_ip || "?")}</code>` },
         {
           head: "Réseau", essential: true, sortKey: "net", sort: (d) => { const n: any = d.network_id && store.get("ipNetworks", d.network_id); return n ? (n.label || n.cidr || "") : ""; },
           render: (d) => { const n: any = d.network_id && store.get("ipNetworks", d.network_id); return n ? Html.escape(n.label || n.cidr || "(réseau)") : dim("—"); },
           filter: { label: "Réseau", options: () => store.all("ipNetworks").map((n: any) => ({ id: n.id, label: n.label || n.cidr || "(réseau)" })), valueOf: (d) => d.network_id || "__none__" },
         },
-        { head: "Taille", cls: "num", sort: (d) => { const a = ipToInt(d.start_ip), b = ipToInt(d.end_ip); return (a != null && b != null && b >= a) ? (b - a + 1) : -1; }, render: (d) => { const a = ipToInt(d.start_ip), b = ipToInt(d.end_ip); return (a != null && b != null && b >= a) ? `<span class="pill">${b - a + 1} adr.</span>` : dim("—"); } },
+        { head: "Taille", cls: "num", sort: (d) => { const a = Ip.toInt(d.start_ip), b = Ip.toInt(d.end_ip); return (a != null && b != null && b >= a) ? (b - a + 1) : -1; }, render: (d) => { const a = Ip.toInt(d.start_ip), b = Ip.toInt(d.end_ip); return (a != null && b != null && b >= a) ? `<span class="pill">${b - a + 1} adr.</span>` : dim("—"); } },
         {
           head: "Serveur DHCP", essential: true, sortKey: "srv", sort: (d) => { const e: any = d.server_id && store.get("equipments", d.server_id); return e ? (e.name || "") : ""; },
           render: (d) => { const e: any = d.server_id && store.get("equipments", d.server_id); return e ? Html.escape(e.name || "(serveur)") : dim("— non désigné —"); },

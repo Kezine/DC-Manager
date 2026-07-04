@@ -65,7 +65,7 @@ export interface DcThreeOptions {
   powerBoltSpacingMm: number;   // espacement des éclairs le long des câbles d'alimentation
 }
 
-export class DcThreeBase {
+export abstract class DcThreeBase {
   protected store: Store;
   protected host: DatacenterHost;
   protected scene3d: RackScene;
@@ -81,7 +81,11 @@ export class DcThreeBase {
   protected content: THREE.Group | null = null;       // contenu de la salle (jeté/reconstruit par build)
   protected ro: ResizeObserver | null = null;
   protected raf = 0;                                  // RAF en attente (0 = aucune) — rendu à la demande
+  protected _hoverRaf = 0;                            // rAF de SURVOL en attente (0 = aucun) — au plus un raycast par frame
+  protected _hoverClient: [number, number] | null = null;   // dernière position souris, consommée par le rAF de survol
   protected texCache = new Map<string, THREE.CanvasTexture>();   // textures de libellés mises en cache (clé texte+dims)
+  protected texCacheTicks = new Map<string, number>();           // LRU des étiquettes : clé → tick du dernier usage (cf. pruneLabelTextureCache)
+  protected texCacheTick = 0;
   protected imgTexCache = new Map<string, THREE.Texture>();      // textures d'IMAGES de façade par URL → réutilisées d'un build à l'autre (pas de rechargement), libérées au dispose
   protected faceUrlsInLastBuild = new Set<string>();            // URLs d'images RÉELLEMENT posées au dernier build() COMPLET → base de l'éviction des textures périmées
 
@@ -137,7 +141,12 @@ export class DcThreeBase {
   // glisser (avec détection clic-vs-glisser pour le picking) — `slotsel` = sélection multiple d'emplacements U libres
   protected drag: { mode: "orbit" | "pan" | "slotsel"; x: number; y: number; downX: number; downY: number; btn: number; moved: boolean } | null = null;
   // sélection multiple d'emplacements U libres (glisser vertical) : plage CONTIGUË [lo,hi] de la même baie+face.
-  protected slotSel: { rackId: string; side: string; anchor: number; lo: number; hi: number; slots: Map<number, THREE.Object3D>; meshes: THREE.Object3D[] } | null = null;
+  // `overlay` : plan de SURBRILLANCE de la plage sélectionnée (les emplacements sont fusionnés en BANDES —
+  // un mesh couvre toute une bande contiguë ; on ne peut plus surligner « par U » via le matériau du mesh).
+  protected slotSel: { rackId: string; side: string; anchor: number; lo: number; hi: number; slots: Map<number, THREE.Object3D>; overlay: THREE.Mesh | null } | null = null;
+  // Plan de surbrillance de la RANGÉE SURVOLÉE d'une bande d'emplacements (même raison que `slotSel.overlay`).
+  protected _slotRowHover: THREE.Mesh | null = null;
+  protected _slotRowHoverRow: number | null = null;
   // picking
   protected raycaster = new THREE.Raycaster();
   protected ndc = new THREE.Vector2();
@@ -156,6 +165,11 @@ export class DcThreeBase {
   protected measureHi: number | null = null;   // index de la mesure terminée mise en évidence (survol listing), ou null
   protected routePts: { x: number; y: number; z: number }[] = [];
   protected routeCursor: { x: number; y: number; z: number } | null = null;
+  // Overlay outil scindé STATIQUE/DYNAMIQUE : la signature détecte un changement STRUCTUREL (points posés,
+  // mesures terminées, surbrillance) → rebuild complet ; sinon (seul le curseur bouge) on MUTE ces deux objets.
+  protected _toolSig = "";
+  protected _cursorLine: THREE.Line | null = null;     // segment pointillé « dernier point → curseur » (persistant)
+  protected _cursorDot: THREE.Sprite | null = null;    // pastille du curseur (persistante, taille écran constante)
   // callbacks moteur → vue : placement/survol mesure (point monde) ; clic/survol route (cible pick / point monde).
   measurePlaceCb: ((world: { x: number; y: number; z: number }) => void) | null = null;
   measureHoverCb: ((world: { x: number; y: number; z: number } | null, clientX: number, clientY: number) => void) | null = null;
@@ -227,11 +241,15 @@ export class DcThreeBase {
   dispose(): void {
     cancelAnimationFrame(this.raf); this.raf = 0;
     cancelAnimationFrame(this.cableRaf); this.cableRaf = 0;
+    cancelAnimationFrame(this._hoverRaf); this._hoverRaf = 0; this._hoverClient = null;   // rAF de survol en attente
     window.removeEventListener("mousemove", this.onMove);
     window.removeEventListener("mouseup", this.onUp);
     if (this.ro) { this.ro.disconnect(); this.ro = null; }
     this.disposeContent();
-    this.texCache.forEach((t) => t.dispose()); this.texCache.clear();   // libère les textures de libellés mises en cache
+    // L'overlay d'outils (mesure/route) vit sous `scene`, PAS sous `content` → non couvert par disposeContent :
+    // on libère ses géométries/matériaux ici (ses textures, détenues par texCache, sont libérées juste après).
+    if (this.gOverlay) { this.disposeGroup(this.gOverlay); this.scene?.remove(this.gOverlay); this.gOverlay = null; }
+    this.texCache.forEach((t) => t.dispose()); this.texCache.clear(); this.texCacheTicks.clear();   // libère les textures de libellés mises en cache
     this.imgTexCache.forEach((t) => t.dispose()); this.imgTexCache.clear();   // libère les textures d'images de façade
     if (this.renderer) {
       this.renderer.dispose();
@@ -252,6 +270,7 @@ export class DcThreeBase {
 
   protected disposeContent(): void {
     this.hovered = null; this._hoverObjs = []; this.cablesGroup = null; this.gRacks = null; this.gFree = null; this.gWaypoints = null; this.gDecor = null; this.gExtra = null; this.gFloorDecor = null;
+    this._focusObjs = []; this._screenObjs = [];   // références vers des meshes qu'on va disposer → sinon GC retardé jusqu'au prochain collectScreenObjs/setFocusEquip
     this._warm.clear();   // les groupes de salle vivent sous `content` (détruit ici) → cache chaud réinitialisé
     if (this.content && this.scene) this.scene.remove(this.content);
     // NB : on ne libère PAS les textures (`material.map`) ici — elles sont détenues par `texCache` et
@@ -325,6 +344,7 @@ export class DcThreeBase {
     if (typeof document === "undefined") return null;
     const cw = 512, ch = Math.max(64, Math.min(512, Math.round(cw * hMm / Math.max(1, wMm))));
     const key = text + "|" + ch;   // même texte + même hauteur de canvas → texture réutilisée (pas de re-rasterisation)
+    this.texCacheTicks.set(key, ++this.texCacheTick);   // LRU : marque la clé comme récemment utilisée
     const cached = this.texCache.get(key);
     if (cached) return cached;
     const cv = document.createElement("canvas"); cv.width = cw; cv.height = ch;
@@ -343,7 +363,25 @@ export class DcThreeBase {
     g.fillText(text, cw / 2, ch / 2);
     const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 4; tex.needsUpdate = true;
     this.texCache.set(key, tex);
+    this.pruneLabelTextureCache();   // borne le cache (chaque libellé distinct = ~0,1-1 Mo GPU)
     return tex;
+  }
+
+  /** ÉVICTION LRU des textures d'ÉTIQUETTES. Contrairement à `imgTexCache` (élagué à chaque build complet via
+      `pruneFaceTextureCache`), `texCache` n'était JAMAIS élagué en cours de session : chaque libellé distinct —
+      nom d'équipement, numéro d'U, et surtout chaque COTE de mesure (« 12,34 m ») — créait une CanvasTexture GPU
+      conservée à vie, y compris après changement de document. Plafond LRU ; les clés « ##… » (textures MUTUALISÉES :
+      pastille, losange, éclair, pivot) sont permanentes. Une texture évincée encore posée sur un sprite vivant est
+      simplement RE-TÉLÉVERSÉE par three au prochain rendu (dispose ne casse pas la référence JS) — pas d'artefact. */
+  protected pruneLabelTextureCache(cap = 256): void {
+    const evictable = [...this.texCache.keys()].filter((k) => !k.startsWith("##"));
+    if (evictable.length <= cap) return;
+    evictable.sort((a, b) => (this.texCacheTicks.get(a) || 0) - (this.texCacheTicks.get(b) || 0));   // plus ancien d'abord
+    for (const key of evictable.slice(0, evictable.length - cap)) {
+      this.texCache.get(key)?.dispose();
+      this.texCache.delete(key);
+      this.texCacheTicks.delete(key);
+    }
   }
 
   /** Texture (mutualisée) d'un LOSANGE blanc à CENTRE NOIR — teintée par la couleur du sprite (marqueur waypoint). */
@@ -353,8 +391,11 @@ export class DcThreeBase {
     const s = 64, cv = document.createElement("canvas"); cv.width = cv.height = s;
     const g = cv.getContext("2d"); if (!g) return null;
     const dia = (cx: number, cy: number, r: number, fill: string) => { g.beginPath(); g.moveTo(cx, cy - r); g.lineTo(cx + r, cy); g.lineTo(cx, cy + r); g.lineTo(cx - r, cy); g.closePath(); g.fillStyle = fill; g.fill(); };
-    dia(s / 2, s / 2, s / 2 - 2, "#ffffff");   // losange blanc (teinté par la couleur du sprite)
-    dia(s / 2, s / 2, s * 0.24, "#000000");    // centre noir
+    const R = s / 2 - 2;                            // rayon extérieur du losange (inchangé)
+    dia(s / 2, s / 2, R, "#ffffff");                // losange blanc (teinté par la couleur du sprite)
+    // Centre noir AGRANDI pour que le liseré teinté (la « marge » orange) soit 50 % plus FIN qu'à l'origine
+    // (centre historique : 0.24·s), SANS changer la taille extérieure du losange.
+    dia(s / 2, s / 2, R - (R - s * 0.24) / 2, "#000000");
     const tex = new THREE.CanvasTexture(cv); tex.needsUpdate = true; this.texCache.set(key, tex); return tex;
   }
 
@@ -477,9 +518,26 @@ export class DcThreeBase {
     mesh.userData = Object.assign({ layer: "name" }, extra);   // couche "name" (showEqNames) + côté éventuel (hideAv/Ar)
     group.add(mesh);
   }
+
+  /* ---- CONTRAT CROISÉ (membres définis dans les couches SUPÉRIEURES, appelés d'ici) --------------
+     La chaîne DcThreeBase → DcThreeCamera → DcThreeScene répartit un même objet en tranches : la base
+     appelle des membres définis plus haut. Ils sont déclarés `abstract` ICI (l'ancienne signature
+     d'index `[key: string]: any` désactivait TOUT le contrôle de type — chaque `this.x` compilait,
+     fautes de frappe comprises). Tout NOUVEL appel croisé doit ajouter sa déclaration dans ce bloc. */
+  // Définis dans DcThreeCamera :
+  protected abstract makeCamera(): void;
+  protected abstract bindEvents(dom: HTMLElement): void;
+  protected abstract updateCamera(): void;
+  protected abstract worldPerPixel(): number;
+  protected abstract applyPendingFocus(): void;
+  protected abstract onMove: (e: MouseEvent) => void;
+  protected abstract onUp: (e: MouseEvent) => void;
+  // Définis dans DcThreeScene :
+  protected abstract build(dcId: string | null): void;
+  abstract rebuild(dcId: string | null): void;
+  protected abstract layerVisible(u: any): boolean;
+  protected abstract measureClick(clientX: number, clientY: number): void;
+  protected abstract routeClick(clientX: number, clientY: number): void;
+  protected abstract toolHover(clientX: number, clientY: number): void;
 }
 
-/* Fusion de déclaration : la chaîne d'héritage répartit les méthodes sur plusieurs classes mais à
-   l'exécution `this` est l'instance finale `DcThreeScene` qui les possède toutes. Cette signature
-   d'index autorise les appels croisés `this.x()` entre couches (cf. moteur SVG `DcBase`). */
-export interface DcThreeBase { [key: string]: any; }

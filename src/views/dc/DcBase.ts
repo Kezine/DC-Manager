@@ -1,47 +1,29 @@
 import type { Store } from "../../store";
 import { Dom } from "../../ui/Dom";
-import { FormControls } from "../../ui/FormControls";
-import { Dialog } from "../../ui/Dialog";
 import { Notify } from "../../ui/Notify";
 import { ContextMenu } from "../../ui/ContextMenu";
 import type { CtxSection } from "../../ui/ContextMenu";
 import { TouchNav } from "../../ui/TouchNav";
-import { ImageExport } from "../../ui/ImageExport";
-import type { ExportOptions } from "../../ui/ImageExport";
-import { Html } from "../../core/Html";
 import { Normalize } from "../../core/Normalize";
-import { RackGeometry } from "../../geometry/RackGeometry";
 import { RackScene } from "../../geometry/RackScene";
-import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { Resolver3D } from "../../geometry/Resolver3D";
 import { FloorLayout } from "../../geometry/FloorLayout";
 import { CableRouting } from "../../geometry/CableRouting";
-import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
-import { Box } from "../../geometry/Box";
-import { Painter } from "../../geometry/Painter";
 import { PositioningTool } from "./PositioningTool";
 import type { PositioningHost } from "./PositioningTool";
 import { DoorTool } from "./DoorTool";
 import type { DoorHost } from "./DoorTool";
 import { MeasureTool } from "./MeasureTool";
-import type { MeasureHost, MeasureState } from "./MeasureTool";
+import type { MeasureHost } from "./MeasureTool";
 import { RouteTool } from "./RouteTool";
-import type { RouteHost, RouteState } from "./RouteTool";
-import { GridGeometry } from "../../geometry/GridGeometry";
-import { Measure } from "../../geometry/Measure";
-import { Depths } from "../../registries/Depths";
-import { EquipmentTypes } from "../../registries/EquipmentTypes";
-import { Format } from "../../core/Format";
-import { Text } from "../../core/Text";
-import { Waypoint } from "../../models/Waypoint";
-import { CableStatuses } from "../../domain/CableStatuses";
-import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
-import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
-import type { Vec3, Drawable, DatacenterHost } from "./shared";
+import type { RouteHost } from "./RouteTool";
+import { U_MM } from "../../domain/constants";
+import { CABLE_SPLINE_K, CAM_PRESETS } from "./shared";
+import type { Vec3, DatacenterHost } from "./shared";
 // SPIKE : moteur 3D WebGL parallèle — importé DYNAMIQUEMENT (webpackMode "eager" → reste inliné single-file ;
 // et la chaîne require() CJS du harnais de test ne charge pas ses dépendances ESM-only comme Line2).
 
-export class DcBase {
+export abstract class DcBase {
   protected store: Store;
   protected host: DatacenterHost;
   protected stage: HTMLElement;
@@ -57,20 +39,11 @@ export class DcBase {
   freePlace = false;                                            // « Placement libre » : désactive l'aimantation à la grille au glisser
   blockEdit = false;                                            // mode « Cases inaccessibles » : glisser pour (dé)marquer des cases
   // Outil de ROUTAGE (création d'un câble au clic) — module dédié `RouteTool`, piloté via `RouteHost` (+ store/resolver
-  // injectés). ÉTAT via PONT d'accès (getter/setter) pour laisser inchangés les sites existants (`this.routeBuild.wpIds`…).
+  // injectés). L'ÉTAT vit DANS l'outil (`routeTool.state`) — les anciens ponts d'accès sont résorbés.
   routeTool!: RouteTool;
-  get routeBuild(): RouteState | null { return this.routeTool.state; }
-  set routeBuild(v: RouteState | null) { this.routeTool.state = v; }
   // Outil de MESURE multipoint (éphémère, exclusif du routage) — module dédié `MeasureTool` (état + overlays 2D/3D
-  // + panneau + pont WebGL), piloté via `MeasureHost`. L'ÉTAT vit dans le tool ; `measure`/`_measHi` sont des PONTS
-  // d'accès (getters/setters) pour que les sites existants (`this.measure.pts`…) restent inchangés. Instancié au ctor.
+  // + panneau + pont WebGL + aperçu souris throttlé), piloté via `MeasureHost`. Instancié au constructeur.
   measureTool!: MeasureTool;
-  get measure(): MeasureState | null { return this.measureTool.state; }
-  set measure(v: MeasureState | null) { this.measureTool.state = v; }
-  get _measHi(): number | null { return this.measureTool.hi; }
-  set _measHi(v: number | null) { this.measureTool.hi = v; }
-  protected _measMouseClient: [number, number] | null = null;
-  protected _measMouseTO: any = 0;
   // Outil de POSITIONNEMENT (aide au placement par COINS + cotes ⟂). Module dédié `PositioningTool` (état + overlay
   // + panneau + glisser), piloté via l'interface PositioningHost que cette chaîne de vues implémente (cf. DcInteract
   // posScene/posCtxKey/…). Instancié dans le constructeur. ÉPHÉMÈRE : déplace l'élément puis écrit sa position UNE fois.
@@ -208,6 +181,9 @@ export class DcBase {
       if (document.querySelector(".modal-overlay.open, .dialog-overlay")) return;
       // ÉCHAP en mode POSITIONNEMENT : efface la sélection courante (références → coin → mover) par paliers.
       if (this.posTool.active && e.key === "Escape" && this.posTool.activeHere()) { e.preventDefault(); this.posTool.escape(); return; }
+      // ÉCHAP en mode ROUTAGE : annule la route en cours (cohérence d'ergonomie avec mesure/positionnement —
+      // avant, seuls le bouton et le panneau permettaient d'annuler).
+      if (this.routeTool.active && e.key === "Escape") { e.preventDefault(); this.routeTool.cancel(); return; }
       if (!this.measureTool.hasActive()) return;
       e.preventDefault();
       if (e.key === "Enter") this.measureTool.commit(); else this.measureTool.cancelCurrent();
@@ -226,7 +202,7 @@ export class DcBase {
     if (this._onWinResize) { window.removeEventListener("resize", this._onWinResize); this._onWinResize = null; }
     if (this._onFullscreen) { document.removeEventListener("fullscreenchange", this._onFullscreen); this._onFullscreen = null; }
     if (this._onKeydown) { document.removeEventListener("keydown", this._onKeydown); this._onKeydown = null; }
-    clearTimeout(this._resizeT); clearTimeout(this._pvTO);
+    clearTimeout(this._resizeT); clearTimeout(this._pvTO); this.measureTool.disposeTimers();   // throttle de l'aperçu mesure 2D (dans l'outil)
     if (this._three) { this._three.dispose(); this._three = null; this._webglHost = null; }
   }
 
@@ -295,7 +271,7 @@ export class DcBase {
   isFloorTransformed(): boolean { return !!this.floorXf; }
   three(): any | null { return this._three; }
   disarmPositioning(): void { this.posTool.disarm(); }
-  clearRoute(): void { this.routeBuild = null; }
+  clearRoute(): void { this.routeTool.state = null; }
   /* ---- RouteHost : services fournis au RouteTool ---- */
   svgEl(): SVGElement | null { return this.svg; }
   openCableForm(prefill: { fromPortId: string; toPortId: string; waypointIds: string[]; onCreated?: (cableId: string) => void }): void { this.host.openCableForm?.(null, prefill); }
@@ -377,20 +353,8 @@ export class DcBase {
       this.measureTool.placeAt(ev.clientX, ev.clientY);
     });
     svg.addEventListener("contextmenu", (e) => e.preventDefault());
-    // aperçu de MESURE jusqu'à la SOURIS (2D ET 3D), throttlé — segment courant en pointillé + cote (longueur live).
-    svg.addEventListener("mousemove", (ev) => {
-      const m = this.measure;
-      if (!m || !m.active || !this.measureTool.activeHere() || !m.pts.length) return;
-      this._measMouseClient = [ev.clientX, ev.clientY];
-      if (this._measMouseTO) return;
-      this._measMouseTO = setTimeout(() => {
-        this._measMouseTO = 0;
-        const mc = this._measMouseClient; if (!mc || !this.measureTool.hasActive()) return;
-        // met à jour le curseur + l'aperçu 2D et renvoie la longueur du segment courant (cote live), ou null.
-        const len = this.measureTool.updateCursor(mc[0], mc[1]);
-        if (len != null) this.showCote(Format.meters(len), mc[0], mc[1]); else this.hideCote();
-      }, 40);
-    }, true);
+    // aperçu de MESURE jusqu'à la SOURIS (2D), throttlé — géré PAR L'OUTIL (MeasureTool.onSvgMouseMove).
+    svg.addEventListener("mousemove", (ev) => this.measureTool.onSvgMouseMove(ev), true);
     svg.addEventListener("wheel", (ev) => this.onWheel(ev), { passive: false });
     // navigation TACTILE 2D (Plan de salle / Plan d'étage) : 1 doigt = pan · 2 doigts = pinch-zoom.
     // Le tap d'1 doigt n'est pas intercepté → la sélection (baie/équipement) passe par les events souris de compat.
@@ -705,7 +669,7 @@ export class DcBase {
     this.useWebGL = true; this.webglPerspective = false; this.cablesOnTop = true;   // WebGL = unique moteur 3D ; projection/cables-on-top restaurés depuis TOGGLE_KEYS
     this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1;
     this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set();
-    this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeBuild = null; this.measure = null;
+    this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeTool.state = null; this.measureTool.state = null;
     this.selCables = new Set(); this.searchTerm = ""; this.focusEqId = null; this.focusPortId = null;
     this.view = (o.view === "top" || o.view === "floor") ? o.view : "3d";
     // toggles persistés
@@ -734,9 +698,65 @@ export class DcBase {
     if (o.floorTarget && typeof o.floorTarget === "object" && "location" in o.floorTarget) this.floorTarget = { location: o.floorTarget.location || "", floor: String(o.floorTarget.floor != null ? o.floorTarget.floor : "") };
   }
 
+  /* ---- CONTRAT CROISÉ (membres définis dans les couches SUPÉRIEURES, appelés d'ici ou entre couches) ----
+     La chaîne DcBase → DcCamera → DcScene3D → DcViews2D → DcPanels → DcInteract → DatacenterView répartit
+     un même objet en tranches : les couches basses appellent des membres définis plus haut. Ils sont
+     déclarés `abstract` ICI (l'ancienne signature d'index `[key: string]: any` désactivait TOUT le contrôle
+     de type sur ~4 600 lignes — chaque `this.x` compilait, fautes de frappe comprises). Tout NOUVEL appel
+     croisé doit ajouter sa déclaration dans ce bloc — si ça devient fréquent, c'est le signe qu'un OUTIL
+     dédié (modèle PositioningTool/MeasureTool, cf. CLAUDE.md) est préférable. */
+  // Définis dans DcCamera (caméra 2D : contrôles, zoom, pan) :
+  protected abstract buildControls(): void;
+  protected abstract updateControls(): void;
+  abstract recenter(keepScale?: boolean): void;
+  protected abstract onWheel(ev: WheelEvent): void;
+  protected abstract zoomAtClient(factor: number, clientX: number, clientY: number): void;
+  protected abstract panByClient(dx: number, dy: number): void;
+  protected abstract startPan2D(ev: MouseEvent): void;
+  // Définis dans DcScene3D / DcViews2D / DcPanels (points d'entrée de rendu par vue + toolbar) :
+  abstract renderThreeD(dc: any): void;
+  abstract renderTop(dc: any): void;
+  abstract renderFloor(ft: { location: string; floor: string }): void;
+  abstract renderSide(dc: any): void;
+  abstract buildToolbar(): void;
+  // Définis dans DcInteract — tooltips + cotes :
+  protected abstract showTip(html: string, ev: MouseEvent): void;
+  protected abstract moveTip(ev: MouseEvent): void;
+  protected abstract hideTip(): void;
+  protected abstract wireTip(node: SVGElement, htmlFn: () => string): void;
+  protected abstract showCote(text: string, clientX: number, clientY: number): void;
+  protected abstract hideCote(): void;
+  protected abstract rackTipHtml(r: any): string;
+  protected abstract equipmentTipHtml(eqId: string): string;
+  protected abstract portTipHtml(port: any, cab: any): string;
+  protected abstract cableTipHtml(c: any): string;
+  protected abstract itemTipHtml(item: any): string;
+  protected abstract wpTipHtml(wp: any): string;
+  // Définis dans DcInteract — menus contextuels :
+  protected abstract ctxMenu(e: MouseEvent, sections: CtxSection[]): void;
+  protected abstract roomCtx(dc: any): CtxSection[];
+  protected abstract rackCtx(rack: any): CtxSection[];
+  protected abstract equipmentCtx(eqId: string): CtxSection[];
+  protected abstract portCtx(port: any, cab: any): CtxSection[];
+  protected abstract cableCtx(cable: any): CtxSection[];
+  protected abstract itemCtx(item: any): CtxSection[];
+  protected abstract waypointCtx(wp: any): CtxSection[];
+  protected abstract figureCtx(): CtxSection[];
+  protected abstract floorCtx(dc: any, w: { x: number; y: number }): CtxSection[];
+  protected abstract floorPlaneCtx(loc: string, fl: string, w: { x: number; y: number }): CtxSection[];
+  protected abstract floorRoomCtx(d: any): CtxSection[];
+  protected abstract floorEquipCtx(eq: any): CtxSection[];
+  // Définis dans DcInteract — interactions, outils, navigation :
+  protected abstract wireClick(node: SVGElement, fn: (e: MouseEvent) => void): void;
+  protected abstract wireWp(node: SVGElement, wp: any): void;
+  protected abstract onRackPointerDown(e: MouseEvent, r: any): void;
+  protected abstract onEquipPointerDown(ev: MouseEvent, eq: any): void;
+  protected abstract syncWebglTool(): void;
+  protected abstract applyFocus3D(): void;
+  protected abstract portDcId(portId: string | null): string | null;
+  abstract locate(kind: "equipment" | "rack" | "cable" | "port" | "room" | "waypoint", id: string): void;
+  abstract clearHighlight(): void;
+  abstract setReturnAction(fn: (() => void) | null): void;
+  protected abstract goBack(): void;
 }
 
-/* Fusion de déclaration : la chaîne d'héritage répartit les méthodes sur plusieurs classes, mais à
-   l'exécution `this` est l'instance finale `DatacenterView` qui les possède toutes. Cette signature
-   d'index (héritée par toutes les couches) autorise les appels croisés `this.x()` entre couches. */
-export interface DcBase { [key: string]: any; }

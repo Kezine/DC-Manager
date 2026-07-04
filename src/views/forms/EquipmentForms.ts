@@ -1,116 +1,34 @@
 import type { Store } from "../../store";
 import type { ImageStore } from "../../data/ImageStore";
-import type { ModalOptions } from "../../ui/Modal";
 import { FormControls } from "../../ui/FormControls";
 import { LiveValidation } from "./LiveValidation";
 import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
-import { Text } from "../../core/Text";
 import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
-import { FloorLayout } from "../../geometry/FloorLayout";
-import { Ip } from "../../core/Ip";
 import { GroupTypes } from "../../domain/GroupTypes";
-import { CableStatuses } from "../../domain/CableStatuses";
 import { SpareTypes } from "../../domain/SpareTypes";
 import { SpareStatuses } from "../../domain/SpareStatuses";
-import { Waypoint } from "../../models/Waypoint";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Depths } from "../../registries/Depths";
 import { PortRoles } from "../../registries/PortRoles";
-import { PortTypes } from "../../registries/PortTypes";
 import { EquipFaces } from "../../registries/EquipFaces";
 import { Id } from "../../core/Id";
-import { RackGeometry } from "../../geometry/RackGeometry";
-import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
-import { RackScene } from "../../geometry/RackScene";
-import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Normalize } from "../../core/Normalize";
 import {
-  POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT, LOCATIONS, FLOORS, RACK_SIDES, RACK_FACES, RACK_DEPTHS,
-  RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, RACK_MOUNT_MARGIN_DEFAULT, U_MM, SIDE_U_STEP,
-  BREAKOUT_SPANS, CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW,
-  EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, EQUIP_FREE_DEFAULT_MM,
-  WAYPOINT_TYPES, OOB_HEIGHT_DEFAULT, WAYPOINT_Z_DEFAULT, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT, BRUSH_PADDING_MM,
-  FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT,
+  EQUIPMENT_TYPE_DEFAULT,
+  EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD,
   SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
-  SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
+  SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA
 } from "../../domain/constants";
-import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS, ORIENT_OPTS } from "./shared";
+import { FormUi, ORIENT_OPTS } from "./shared";
 import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
+import { FaceEditor } from "./FaceEditor";
 
 export class EquipmentForms extends FormBase {
-  /** Sélecteur d'image éligible → { id } ou null. `free` (équipement en dimensionnement libre) = AUCUN filtre :
-      toute image de la bibliothèque est éligible sur toute face (ni catégorie « autre », ni contrainte de U). */
-  static faceImagePicker(store: Store, u: number, face: string, current: string | null, free = false): Promise<{ id: string | null } | null> {
-    const images = this.images; if (!images) return Promise.resolve(null);
-    const annex = this.faceAnnex(face), faceLbl = EquipFaces.label(face);
-    const uTag = !annex && !free;   // étiquette/filtre par U : front/rear d'un équipement BAIE seulement
-    return Dialog.custom({
-      title: "Image de façade — " + (free ? "face " + faceLbl.toLowerCase() + " (équipement libre)" : annex ? "face " + faceLbl.toLowerCase() + " (catégorie « autre »)" : (uTag ? (u || 1) + "U · " : "") + "face " + faceLbl.toLowerCase()), confirmLabel: "Choisir",
-      build: (root: HTMLElement) => {
-        let selected: string | null = current || null, query = "";
-        // Toggle OREILLES — UNIQUEMENT pour la face AVANT (l'arrière n'a jamais d'oreilles) : (a) FILTRE les images
-        // proposées ; (b) sert de DÉFAUT à l'image importée inline. Défaut avant = avec oreilles.
-        const hasEarToggle = (face === "front") && !free;   // oreilles = concept BAIE (19″) ; pas en libre
-        let earMode = true;
-        const note = document.createElement("div"); note.className = "form-hint"; note.style.marginBottom = "8px";
-        note.textContent = free ? "Équipement libre : toutes les images de la bibliothèque sont éligibles (aucun filtre de face ni de U)."
-          : annex ? "Faces annexes (équipement libre) : seules les images marquées « autre » sont éligibles (sans contrainte de U)."
-          : "Seules les images " + (u || 1) + "U marquées « " + faceLbl + " » sont éligibles ici.";
-        const earRow = document.createElement("div"); earRow.style.cssText = "display:flex;align-items:center;gap:6px;margin-bottom:8px;";
-        const earLab = document.createElement("span"); earLab.className = "form-hint"; earLab.style.margin = "0"; earLab.textContent = "Oreilles :";
-        const segWith = document.createElement("button"); segWith.type = "button"; segWith.textContent = "Avec oreilles";
-        const segWithout = document.createElement("button"); segWithout.type = "button"; segWithout.textContent = "Sans oreilles";
-        segWith.onclick = () => { earMode = true; renderGrid(); };
-        segWithout.onclick = () => { earMode = false; renderGrid(); };
-        earRow.append(earLab, segWith, segWithout);
-        const search = document.createElement("input"); search.type = "text"; search.className = "search-input"; search.placeholder = "Rechercher une image (nom, description)…"; search.style.cssText = "width:100%;max-width:none;margin-bottom:8px;";
-        const grid = document.createElement("div"); grid.className = "fi-grid";
-        if (hasEarToggle) root.append(note, earRow, search, grid); else root.append(note, search, grid);
-        const renderGrid = () => {
-          segWith.className = "btn btn-sm " + (earMode ? "btn-primary" : "btn-ghost");
-          segWithout.className = "btn btn-sm " + (!earMode ? "btn-primary" : "btn-ghost");
-          grid.innerHTML = "";
-          const none = document.createElement("button"); none.type = "button"; none.className = "fi-tile fi-none" + (selected == null ? " sel" : ""); none.textContent = "Aucune"; none.onclick = () => { selected = null; renderGrid(); }; grid.appendChild(none);
-          const eligible = this.eligibleImages(u, face, free), cur: any = current ? images.get(current) : null;
-          const list = eligible.slice(); if (cur && !eligible.some((fi: any) => fi.id === cur.id)) list.push(cur);
-          const q = Text.normSearch(query);
-          const searched = q ? list.filter((fi: any) => Text.normSearch((fi.name || "") + " " + (fi.description || "")).includes(q)) : list;
-          // FILTRE par mode d'oreilles (AVANT uniquement) ; l'image SÉLECTIONNÉE reste toujours visible.
-          const shown = hasEarToggle ? searched.filter((fi: any) => fi.id === selected || ((fi.with_ears !== false) === earMode)) : searched;
-          shown.forEach((fi: any) => {
-            const offFilter = free ? false : annex ? (fi.face !== "autre") : !(fi.face === face && fi.u_height === (u || 1));
-            const t = document.createElement("button"); t.type = "button"; t.className = "fi-tile" + (selected === fi.id ? " sel" : "");
-            const im = document.createElement("img"); im.src = fi.url; im.alt = "";
-            const cap = document.createElement("span"); cap.className = "fi-cap";
-            cap.textContent = (fi.name || "(image)") + (offFilter ? " · " + (fi.face === "autre" ? "autre" : fi.u_height + "U/" + EquipFaces.label(fi.face)) : "") + " · " + store.faceImageUsageCount(fi.id) + "×";
-            t.append(im, cap); t.onclick = () => { selected = fi.id; renderGrid(); }; grid.appendChild(t);
-          });
-          if (shown.length === 0) { const empty = document.createElement("div"); empty.className = "fi-grid-empty"; empty.textContent = q ? ("Aucune image ne correspond à « " + query.trim() + " ».") : ("Aucune image " + (annex ? "« autre »" : (faceLbl + (hasEarToggle ? (earMode ? " avec oreilles" : " sans oreilles") : ""))) + " — importez-en une ci-dessous."); grid.appendChild(empty); }
-          const imp = document.createElement("button"); imp.type = "button"; imp.className = "fi-tile fi-import"; imp.innerHTML = "<span>+ Importer<br>image " + (annex ? "« autre »" : ((uTag ? (u || 1) + "U · " : "") + faceLbl + (hasEarToggle ? (earMode ? " · avec oreilles" : " · sans oreilles") : ""))) + "</span>";
-          imp.onclick = async () => {
-            const f = this.validImageFile(await this.promptImageFile()); if (!f) return;
-            const nm = f.name ? f.name.replace(/\.[^.]+$/, "") : ("Image " + (annex ? "autre" : (uTag ? (u || 1) + "U" : faceLbl)));
-            const fi = await images.add({ name: nm, u_height: annex ? 1 : (u || 1), face: annex ? "autre" : face, with_ears: hasEarToggle && earMode, blob: f, type: f.type });
-            if (fi) { selected = fi.id; query = ""; search.value = ""; renderGrid(); }
-          };
-          grid.appendChild(imp);
-        };
-        search.addEventListener("input", () => { query = search.value; renderGrid(); });
-        renderGrid(); setTimeout(() => search.focus(), 30);
-        return { validate: () => true as const, collect: () => ({ id: selected }) };
-      },
-    });
-  }
-
-  /** Dialogue de configuration d'un BREAKOUT (trunk + N lanes). Résout
-      `{ name, trunkTypeId, laneTypeId, count }` ou null si annulé. Le nombre de
-      lanes (span) est dérivé des débits (trunk = N × lane, N ∈ BREAKOUT_SPANS) ;
-      à débit absent, choix manuel parmi les spans standard. */
   /** Fiche DÉTAIL d'un équipement (lecture) + bouton « Modifier » → formulaire d'édition. */
   static equipmentDetail(store: Store, host: FormHost, id: string, onChanged?: () => void): void {
     const eq: any = store.get("equipments", id);
@@ -154,7 +72,7 @@ export class EquipmentForms extends FormBase {
     const dFlabel = document.createElement("span"); dFlabel.textContent = "Façade"; dF.appendChild(dFlabel);
     if (!this.isViewer()) {   // viewer (lecture seule) : pas d'édition de façade
       const editFaceBtn = document.createElement("button"); editFaceBtn.type = "button"; editFaceBtn.className = "btn btn-ghost btn-sm"; editFaceBtn.textContent = "Éditer la façade";
-      editFaceBtn.onclick = () => this.faceEditor(store, host, eq.id, { onApply: undefined });
+      editFaceBtn.onclick = () => FaceEditor.open(store, host, eq.id, { onApply: undefined });
       dF.appendChild(editFaceBtn);
     }
     root.appendChild(dF);
@@ -214,224 +132,10 @@ export class EquipmentForms extends FormBase {
     host.openModal({ title: "Détail de l'équipement", subtitle: Html.escape(eq.name || ""), body: root, hideFooter: true, wide: true });
   }
 
-  /** Éditeur de FAÇADE (sous-éditeur empilé) : pose les ports sur les faces de l'équipement
-      (face_x/face_y/face_side) — onglets de face, glisser, snap de grille, « Tout poser / enlever »,
-      palette des ports non posés. `opts.onApply({fids,place})` reporte sur le brouillon du formulaire
-      parent ; sinon écrit dans le store. Les IMAGES de façade (bibliothèque IndexedDB) sont d'une phase
-      ultérieure : on PRÉSERVE les références d'image existantes (fids) et on permet de les détacher. */
-  static faceEditor(store: Store, host: FormHost, eqId: string, opts: any = {}): void {
-    const eq: any = store.get("equipments", eqId);
-    if (!eq) { Notify.toast("Équipement introuvable", "err"); return; }
-    const isFree = eq.dim_mode === "free";
-    const faces: string[] = isFree ? EQUIP_FACE_IDS.slice() : ["front", "rear"];
-    const srcPorts: any[] = opts.ports || store.portsOf(eq.id);
-    const ports = srcPorts.filter((p) => !p.parent_port_id);   // lanes : position héritée du trunk
-    const fids: Record<string, string | null> = {};
-    faces.forEach((f) => { fids[f] = (opts.fids && (f in opts.fids)) ? opts.fids[f] : (eq[EQUIP_FACE_IMG_FIELD[f]] || null); });
-    let side = "front";
-    const place: Record<string, { x: number; y: number; side: string }> = {};
-    ports.forEach((p) => { if (p.face_x != null && p.face_y != null) { const f = EquipFaces.norm(p.face_side); if (faces.includes(f)) place[p.id] = { x: p.face_x, y: p.face_y, side: f }; } });
-    const markDirty = opts.onApply ? () => {} : () => host.setDirty?.(true);
-
-    const root = document.createElement("div");
-    const tabs = document.createElement("div"); tabs.className = "face-toolbar"; tabs.style.flexWrap = "wrap";
-    const tabBtns: Record<string, HTMLButtonElement> = {};
-    faces.forEach((f) => { const b = document.createElement("button"); b.type = "button"; b.textContent = EquipFaces.label(f); b.onclick = () => { side = f; setZoom(1); render(); }; tabBtns[f] = b; tabs.appendChild(b); });
-    root.appendChild(tabs);
-
-    const FACE_GRID_PRESETS = [
-      { id: "free", label: "Libre (sans grille)", cols: 0, rows: 0 }, { id: "g6x1", label: "Grille 6 × 1", cols: 6, rows: 1 },
-      { id: "g12x1", label: "Grille 12 × 1", cols: 12, rows: 1 }, { id: "g12x2", label: "Grille 12 × 2", cols: 12, rows: 2 },
-      { id: "g24x1", label: "Grille 24 × 1", cols: 24, rows: 1 }, { id: "g24x2", label: "Grille 24 × 2", cols: 24, rows: 2 },
-      { id: "g24x4", label: "Grille 24 × 4", cols: 24, rows: 4 }, { id: "g48x2", label: "Grille 48 × 2", cols: 48, rows: 2 },
-    ];
-    let grid: { cols: number; rows: number } | null = null;
-    let gridVisible = true;   // la grille peut être MASQUÉE tout en restant ACTIVE (le snap continue).
-    // Oreilles 19″ : le CORPS (zone de placement des ports) = fraction centrale BODY_FRAC du panneau ; une oreille
-    // EAR_FRAC de chaque côté (non cliquable). Pertinent uniquement en montage baie (avant/arrière, équipement !libre).
-    const EAR_FRAC = RACK_EAR_MM / RACK_MOUNT_WIDTH, BODY_FRAC = 1 - 2 * EAR_FRAC;
-    const panelMode = !isFree;
-    const tools = document.createElement("div"); tools.className = "face-toolbar";
-    const attachBtn = document.createElement("button"); attachBtn.type = "button"; attachBtn.className = "btn btn-ghost btn-sm"; attachBtn.textContent = "Attacher une image…";
-    const detachBtn = document.createElement("button"); detachBtn.type = "button"; detachBtn.className = "btn btn-ghost btn-sm"; detachBtn.textContent = "Détacher l'image";
-    const addAllBtn = document.createElement("button"); addAllBtn.type = "button"; addAllBtn.className = "btn btn-ghost btn-sm"; addAllBtn.textContent = "Tout poser"; addAllBtn.title = "Disposer uniformément tous les ports sur cette face (suit la grille si active)";
-    const removeAllBtn = document.createElement("button"); removeAllBtn.type = "button"; removeAllBtn.className = "btn btn-ghost btn-sm"; removeAllBtn.textContent = "Tout enlever";
-    const gridLab = document.createElement("span"); gridLab.style.cssText = "font-size:11px;color:var(--fg-dim);margin-left:6px;"; gridLab.textContent = "Grille :";
-    const gridSel = FormControls.select(FACE_GRID_PRESETS.map((g) => ({ value: g.id, label: g.label })), "free"); gridSel.style.cssText = "font-size:11px;padding:4px 6px;";
-    const gridShowBtn = document.createElement("button"); gridShowBtn.type = "button"; gridShowBtn.className = "btn btn-ghost btn-sm"; gridShowBtn.title = "Afficher/masquer le quadrillage — la grille reste ACTIVE (le snap continue).";
-    // Zoom (molette + boutons ; glisser le fond = déplacer) : utile sur les faces denses / gros équipements.
-    const zoomOutBtn = document.createElement("button"); zoomOutBtn.type = "button"; zoomOutBtn.className = "btn btn-ghost btn-sm"; zoomOutBtn.textContent = "−"; zoomOutBtn.title = "Dézoomer";
-    const zoomLab = document.createElement("span"); zoomLab.style.cssText = "font-size:11px;color:var(--fg-dim);min-width:36px;text-align:center;";
-    const zoomInBtn = document.createElement("button"); zoomInBtn.type = "button"; zoomInBtn.className = "btn btn-ghost btn-sm"; zoomInBtn.textContent = "+"; zoomInBtn.title = "Zoomer";
-    const zoomResetBtn = document.createElement("button"); zoomResetBtn.type = "button"; zoomResetBtn.className = "btn btn-ghost btn-sm"; zoomResetBtn.textContent = "Ajuster"; zoomResetBtn.title = "Réinitialiser le zoom (100 %)";
-    const zoomGroup = document.createElement("span"); zoomGroup.style.cssText = "display:inline-flex;align-items:center;gap:4px;margin-left:6px;"; zoomGroup.append(zoomOutBtn, zoomLab, zoomInBtn, zoomResetBtn);
-    tools.append(attachBtn, detachBtn, addAllBtn, removeAllBtn, gridLab, gridSel, gridShowBtn, zoomGroup); root.appendChild(tools);
-
-    const hint = document.createElement("div"); hint.className = "form-hint";
-    hint.textContent = "Cliquez un port pour le poser, puis glissez-le. Molette / +/− = zoom · glisser le fond = déplacer. « Grille » contraint le glisser (elle peut être masquée tout en restant active). « Attacher une image » : fond de façade (filtré par face ; contrainte de U en mode baie seulement).";
-    root.appendChild(hint);
-    // VIEWPORT (clipping) → FRAME (zoom/pan) → STAGE (corps : grille + marqueurs). L'image et les oreilles vivent
-    // dans le FRAME (l'image « avec oreilles » déborde sur les bandes latérales) ; le STAGE est au-dessus (z-index).
-    const viewport = document.createElement("div"); viewport.className = "face-viewport";
-    const frame = document.createElement("div"); frame.className = "face-frame";
-    const stage = document.createElement("div"); frame.appendChild(stage); viewport.appendChild(frame); root.appendChild(viewport);
-    const palette = document.createElement("div"); palette.className = "face-palette"; root.appendChild(palette);
-
-    // ---- zoom / pan : transform sur le frame, le viewport clippe. transform-origin: 0 0 (cf. CSS). ----
-    let zoom = 1, panX = 0, panY = 0; const ZMIN = 1, ZMAX = 6;
-    const applyZoom = () => {
-      frame.style.transform = "translate(" + panX + "px," + panY + "px) scale(" + zoom + ")";
-      zoomLab.textContent = Math.round(zoom * 100) + " %";
-      zoomOutBtn.disabled = zoom <= ZMIN + 1e-3; zoomInBtn.disabled = zoom >= ZMAX - 1e-3;
-    };
-    const setZoom = (z: number, cx?: number, cy?: number) => {
-      const z0 = zoom, z1 = Math.max(ZMIN, Math.min(ZMAX, z));
-      if (cx != null && cy != null && z1 !== z0) { panX = cx - (cx - panX) * (z1 / z0); panY = cy - (cy - panY) * (z1 / z0); }   // zoom centré sur le pointeur
-      zoom = z1; if (zoom <= 1) { panX = 0; panY = 0; } applyZoom();
-    };
-    zoomInBtn.onclick = () => setZoom(zoom * 1.25); zoomOutBtn.onclick = () => setZoom(zoom / 1.25); zoomResetBtn.onclick = () => setZoom(1);
-    viewport.addEventListener("wheel", (e) => { e.preventDefault(); const r = viewport.getBoundingClientRect(); setZoom(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - r.left, e.clientY - r.top); }, { passive: false });
-    // glisser le FOND (hors marqueur, qui stoppe la propagation) → pan. Actif seulement si zoomé.
-    viewport.addEventListener("pointerdown", (e) => {
-      const ev = e as PointerEvent; if (zoom <= 1 || ev.button !== 0) return;
-      ev.preventDefault(); const sx = ev.clientX - panX, sy = ev.clientY - panY;
-      const mv = (m: PointerEvent) => { panX = m.clientX - sx; panY = m.clientY - sy; applyZoom(); };
-      const up = () => { document.removeEventListener("pointermove", mv); document.removeEventListener("pointerup", up); };
-      document.addEventListener("pointermove", mv); document.addEventListener("pointerup", up);
-    });
-
-    const clamp01 = (v: number) => v < 0 ? 0 : v > 1 ? 1 : v;
-    const snapToGrid = (x: number, y: number) => {
-      if (!grid || !grid.cols || !grid.rows) return { x: clamp01(x), y: clamp01(y) };
-      return { x: clamp01((Math.round(x * grid.cols - 0.5) + 0.5) / grid.cols), y: clamp01((Math.round(y * grid.rows - 0.5) + 0.5) / grid.rows) };
-    };
-    const faceWH = (f: string) => FreeEquipGeometry.faceWH(eq, f);   // dimensions par face (mutualisé, cf. FreeEquipGeometry)
-    // Dimensionne le FRAME (panneau 19″ complet en mode baie ; face réelle en mode libre). La largeur 19″ inclut les
-    // oreilles ; le STAGE (corps) en occupe la fraction centrale (cf. render). Le zoom s'applique PAR-DESSUS (transform).
-    // Dimensionne le FRAME en PRÉSERVANT le ratio de la face (libre = dims réelles ; baie = 19″ × hauteur U). On borne la
-    // HAUTEUR à MAXVH et la LARGEUR à MAXVH×ratio : sinon `width:100% + max-height` casse le ratio (largeur pleine, hauteur
-    // bornée → la face carrée/haute s'aplatissait, l'overflow du stage la rognait). Centré, jamais plus large que nécessaire.
-    const applyFrameSize = (f: string) => {
-      const el = frame, MAXVH = 60;
-      const wh = isFree ? faceWH(f) : { W: 19, H: 1.75 * Math.max(1, (eq.u_height | 0) || 1) };
-      el.style.aspectRatio = wh.W + " / " + wh.H;
-      el.style.width = "100%"; el.style.height = "auto"; el.style.margin = "0 auto";
-      el.style.maxHeight = MAXVH + "vh";
-      el.style.maxWidth = "calc(" + MAXVH + "vh * " + (wh.W / wh.H).toFixed(4) + ")";   // largeur bornée → hauteur ≤ MAXVH, ratio préservé
-    };
-    const layoutUniform = (list: any[]) => {
-      const n = list.length; if (!n) return;
-      let cols: number, rows: number;
-      if (grid && grid.cols && grid.rows) { cols = grid.cols; rows = Math.max(grid.rows, Math.ceil(n / cols)); }
-      else { const wh = faceWH(side); const aspect = isFree ? (wh.W / wh.H) : (19 / (1.75 * (eq.u_height || 1))); cols = Math.max(1, Math.round(Math.sqrt(n * aspect))); rows = Math.ceil(n / cols); }
-      list.forEach((p, i) => { const c = i % cols, r = Math.floor(i / cols); place[p.id] = { x: clamp01((c + 0.5) / cols), y: clamp01((r + 0.5) / rows), side }; });
-    };
-    const startDrag = (ev: PointerEvent, id: string, markerEl: HTMLElement) => {
-      ev.preventDefault(); markerEl.classList.add("dragging");
-      const move = (e: PointerEvent) => { markDirty(); const rect = stage.getBoundingClientRect(); const s = snapToGrid((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height); place[id].x = s.x; place[id].y = s.y; markerEl.style.left = (s.x * 100) + "%"; markerEl.style.top = (s.y * 100) + "%"; };
-      const up = () => { markerEl.classList.remove("dragging"); document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); };
-      document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
-    };
-    const render = (): void => {
-      faces.forEach((f) => { tabBtns[f].className = "btn btn-sm " + (side === f ? "btn-primary" : "btn-ghost"); });
-      const hasImg = !!fids[side];
-      const mir: any = hasImg && this.images ? this.images.get(fids[side]) : null;
-      const imgUrl: string | null = mir ? (mir.url || null) : null;
-      // Oreilles : UNIQUEMENT la face AVANT en a (l'arrière jamais). L'image « avec oreilles » couvre corps + oreilles ;
-      // sinon le corps seul. Sans image (avant), on matérialise quand même les oreilles (zone non plaçable).
-      const faceHasEars = panelMode && side === "front";
-      const withEars = faceHasEars && (mir ? mir.with_ears !== false : true);
-      attachBtn.style.display = this.images ? "" : "none";
-      attachBtn.textContent = hasImg ? "Changer l'image…" : "Attacher une image…";
-      detachBtn.style.display = hasImg ? "" : "none";
-      gridShowBtn.style.display = grid ? "" : "none";
-      gridShowBtn.textContent = gridVisible ? "Masquer la grille" : "Afficher la grille";
-
-      applyFrameSize(side);
-      frame.querySelectorAll(".face-bg, .face-ear").forEach((n) => n.remove());   // image + bandes reconstruites à chaque rendu
-      // STAGE = corps (placement des ports). Mode baie : fraction CENTRALE entre les oreilles ; sinon plein cadre.
-      stage.className = "face-stage" + (imgUrl ? "" : " empty");
-      stage.style.cssText = panelMode ? ("position:absolute;top:0;bottom:0;left:" + (EAR_FRAC * 100) + "%;right:auto;width:" + (BODY_FRAC * 100) + "%;") : "position:absolute;inset:0;";
-      stage.innerHTML = "";
-
-      // IMAGE de fond — placée dans le FRAME pour pouvoir déborder sur les oreilles (mode « avec oreilles »).
-      if (imgUrl) {
-        const im = document.createElement("img"); im.className = "face-bg"; im.src = imgUrl; im.alt = "";
-        im.style.cssText = (panelMode && !withEars) ? ("left:" + (EAR_FRAC * 100) + "%;right:auto;width:" + (BODY_FRAC * 100) + "%;") : "";   // face seule → confinée au corps
-        frame.appendChild(im);
-      } else {
-        const h = document.createElement("div"); h.className = "face-empty-hint"; h.textContent = "Face " + EquipFaces.label(side).toLowerCase() + (hasImg ? " — image introuvable (référence orpheline)" : " — aucune image (positionnement possible)"); stage.appendChild(h);
-      }
-      // OREILLES de montage 19″ (AVANT uniquement) : bandes latérales NON cliquables (le placement reste sur le corps).
-      if (faceHasEars) {
-        [0, 1 - EAR_FRAC].forEach((x) => { const e = document.createElement("div"); e.className = "face-ear"; e.style.left = (x * 100) + "%"; e.style.width = (EAR_FRAC * 100) + "%"; frame.appendChild(e); });
-      }
-
-      // GRILLE (overlay) — affichée seulement si ACTIVE et NON masquée ; le SNAP suit `grid` quel que soit l'affichage.
-      if (grid && grid.cols && grid.rows && gridVisible) {
-        const NS = "http://www.w3.org/2000/svg";
-        const ov = document.createElementNS(NS, "svg"); ov.setAttribute("class", "face-grid-ov"); ov.setAttribute("viewBox", "0 0 " + grid.cols + " " + grid.rows); ov.setAttribute("preserveAspectRatio", "none");
-        const line = (x1: number, y1: number, x2: number, y2: number) => { const l = document.createElementNS(NS, "line"); l.setAttribute("x1", String(x1)); l.setAttribute("y1", String(y1)); l.setAttribute("x2", String(x2)); l.setAttribute("y2", String(y2)); ov.appendChild(l); };
-        for (let i = 1; i < grid.cols; i++) line(i, 0, i, grid.rows);
-        for (let j = 1; j < grid.rows; j++) line(0, j, grid.cols, j);
-        stage.appendChild(ov);
-      }
-      ports.forEach((p) => {
-        const pos = place[p.id]; if (!pos || pos.side !== side) return;
-        const mk = document.createElement("div"); mk.className = "face-marker" + (p.role === "mgmt" ? " role-mgmt" : (p.role === "power" ? " role-power" : ""));
-        mk.style.left = (pos.x * 100) + "%"; mk.style.top = (pos.y * 100) + "%";
-        const lab = document.createElement("span"); lab.textContent = p.name || "(port)"; mk.appendChild(lab);
-        const x = document.createElement("span"); x.className = "fm-x"; x.textContent = "×"; x.title = "Retirer de la façade";
-        x.addEventListener("pointerdown", (e) => e.stopPropagation());
-        x.addEventListener("click", (e) => { e.stopPropagation(); markDirty(); delete place[p.id]; render(); });
-        mk.appendChild(x);
-        // stopPropagation → le glisser de marqueur n'enclenche PAS le pan du fond (cf. viewport pointerdown).
-        mk.addEventListener("pointerdown", (e) => { e.stopPropagation(); startDrag(e as PointerEvent, p.id, mk); });
-        stage.appendChild(mk);
-      });
-      palette.innerHTML = "";
-      const unplaced = ports.filter((p) => !place[p.id]);
-      const onOther = ports.filter((p) => place[p.id] && place[p.id].side !== side).length;
-      const ph = document.createElement("div"); ph.className = "face-palette-hint";
-      ph.textContent = (unplaced.length ? "Ports à poser (" + unplaced.length + ") — cliquez pour les ajouter à la face " + EquipFaces.label(side).toLowerCase() + " :" : (ports.length ? "Tous les ports sont posés." : "Cet équipement n'a aucun port.")) + (onOther ? "  (" + onOther + " sur " + (faces.length > 2 ? "d'autres faces" : "l'autre face") + ")" : "");
-      palette.appendChild(ph);
-      unplaced.forEach((p) => { const c = document.createElement("button"); c.type = "button"; c.className = "face-chip"; c.textContent = p.name || "(port)"; c.onclick = () => { markDirty(); const s = snapToGrid(0.5, 0.5); place[p.id] = { x: s.x, y: s.y, side }; render(); }; palette.appendChild(c); });
-      applyZoom();   // ré-applique zoom/pan au frame reconstruit
-    }
-    gridSel.onchange = () => { const g = FACE_GRID_PRESETS.find((x) => x.id === gridSel.value); grid = (g && g.cols) ? { cols: g.cols, rows: g.rows } : null; render(); };
-    gridShowBtn.onclick = () => { gridVisible = !gridVisible; render(); };
-    addAllBtn.onclick = () => { markDirty(); layoutUniform(ports.filter((p) => !place[p.id] || place[p.id].side === side)); render(); };
-    removeAllBtn.onclick = () => { markDirty(); ports.forEach((p) => { if (place[p.id] && place[p.id].side === side) delete place[p.id]; }); render(); };
-    detachBtn.onclick = () => { markDirty(); fids[side] = null; render(); };
-    attachBtn.onclick = async () => {
-      const u = this.faceAnnex(side) ? 1 : Math.max(1, (eq.u_height | 0) || 1);
-      const res = await this.faceImagePicker(store, u, side, fids[side], isFree);   // libre → front/rear sans contrainte de U
-      if (res) { markDirty(); fids[side] = res.id; render(); }
-    };
-    render();
-
-    const subtitle = (isFree
-      ? "Boîtier libre · " + (eq.free_w_mm || "?") + " × " + (eq.free_l_mm || "?") + " × " + (eq.free_h_mm || "?") + " mm (l × p × h) — 6 faces"
-      : "Panneau 19″ · " + (eq.u_height || 1) + "U — faces avant et arrière");
-    const applyResult = async () => {
-      if (opts.onApply) { opts.onApply({ fids, place }); return; }
-      const facePatch: any = {};
-      faces.forEach((f) => { facePatch[EQUIP_FACE_IMG_FIELD[f]] = fids[f] || null; });
-      const ops: any[] = [{ collection: "equipments", id: eq.id, patch: facePatch }];
-      ports.forEach((p) => { const pos = place[p.id]; ops.push({ collection: "ports", id: p.id, patch: pos ? { face_x: pos.x, face_y: pos.y, face_side: pos.side } : { face_x: null, face_y: null } }); });
-      await store.updateBatch(ops);
-      host.setDirty?.(true); Notify.toast("Façade enregistrée");
-    };
-    Dialog.custom({
-      title: "Façade — " + Html.escape(eq.name || "équipement"), message: subtitle, wide: true,
-      confirmLabel: opts.onApply ? "Appliquer" : "Enregistrer", cancelLabel: "Fermer",
-      build: (h2) => { h2.appendChild(root); return { validate: () => true as const, collect: () => true }; },
-    }).then(async (res) => { if (res) await applyResult(); });
-  }
-
-  /** Éditeur de capot (toit/sol) : grille SVG au pas 1U, multi-sélection au glisser,
-      sauvegarde IMMÉDIATE des cellules autorisées (roof_cells/floor_cells). Une cellule
-      portant un pin (◆) ne peut être retirée. Réservé à un rack EXISTANT. */
+  /** Éditeur de capot (toit/sol) : grille SVG au pas 1U, multi-sélection au glisser. Les cellules
+      (roof_cells/floor_cells) sont éditées dans un TAMPON et appliquées au clic sur « Enregistrer »
+      du formulaire de baie (cf. FormBase.capEditor). Une cellule portant un pin (◆) ne peut être
+      retirée. Réservé à un rack EXISTANT. */
 
   /** Image de façade (bibliothèque IndexedDB hors modèle) : import/remplacement + métadonnées (U, face). */
   static faceImage(images: ImageStore, store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
@@ -535,23 +239,23 @@ export class EquipmentForms extends FormBase {
     // -- type + identité --
     const typeI = FormControls.select(SpareTypes.ALL.map((t) => ({ value: t.id, label: t.icon + " " + t.label })), sp ? sp.type : SpareTypes.DEFAULT);
     const nameI = FormControls.text(sp ? sp.name : "", "désignation (sinon dérivée du modèle)");
-    root.appendChild(row2(FormControls.fieldRow("Type", typeI), FormControls.fieldRow("Désignation", nameI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Type", typeI), FormControls.fieldRow("Désignation", nameI)));
     const brandI = FormControls.text(sp ? sp.brand : "", "ex. Seagate, Cisco, Intel…");
     const pnI = FormControls.text(sp ? sp.model_pn : "", "modèle / part-number");
-    root.appendChild(row2(FormControls.fieldRow("Marque", brandI), FormControls.fieldRow("Modèle / PN", pnI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Marque", brandI), FormControls.fieldRow("Modèle / PN", pnI)));
     const serialI = FormControls.text(sp ? sp.serial : "", "n° de série (unitaire)");
     root.appendChild(FormControls.fieldRow("Numéro de série", serialI));
 
     // -- bloc DISQUE (HDD/SSD) --
     const diskBlock = document.createElement("div");
-    diskBlock.appendChild(divider("Caractéristiques disque"));
+    diskBlock.appendChild(FormUi.divider("Caractéristiques disque"));
     const capValI = FormControls.number(sp ? sp.capacity_value : "", { min: 0, step: 1, placeholder: "capacité" });
     const capUnitI = FormControls.select(SPARE_CAP_UNITS.map((u) => ({ value: u, label: u === "GB" ? "Go" : "To" })), sp ? sp.capacity_unit : "GB");
     const ifaceI = FormControls.text(sp ? sp.interface : "", "SATA / SAS / NVMe…");
     root.appendChild(FormControls.attachDatalist(ifaceI, "sp-iface", SPARE_HDD_INTERFACES));
     const fmtI = FormControls.text(sp ? sp.form_factor : "", '3.5" / 2.5" / M.2…');
     root.appendChild(FormControls.attachDatalist(fmtI, "sp-fmt", SPARE_HDD_FORMATS));
-    diskBlock.appendChild(row2(FormControls.fieldRow("Capacité", capValI), FormControls.fieldRow("Unité", capUnitI), FormControls.fieldRow("Interface", ifaceI), FormControls.fieldRow("Format", fmtI)));
+    diskBlock.appendChild(FormUi.row2(FormControls.fieldRow("Capacité", capValI), FormControls.fieldRow("Unité", capUnitI), FormControls.fieldRow("Interface", ifaceI), FormControls.fieldRow("Format", fmtI)));
     const rpmI = FormControls.select([{ value: "", label: "—" }].concat(SPARE_HDD_RPM.map((r) => ({ value: String(r), label: r + " rpm" }))), sp && sp.rpm != null ? String(sp.rpm) : "");
     const rpmRow = FormControls.fieldRow("RPM", rpmI, "Vitesse de rotation (HDD uniquement).");
     diskBlock.appendChild(rpmRow);
@@ -559,25 +263,25 @@ export class EquipmentForms extends FormBase {
 
     // -- bloc TRANSCEIVER --
     const txBlock = document.createElement("div");
-    txBlock.appendChild(divider("Caractéristiques transceiver"));
+    txBlock.appendChild(FormUi.divider("Caractéristiques transceiver"));
     const txFormI = FormControls.select([{ value: "", label: "—" }].concat(SPARE_TX_FORMS.map((f) => ({ value: f, label: f }))), sp ? sp.tx_form : "");
     const txSpeedI = FormControls.select([{ value: "", label: "—" }].concat(SPARE_TX_SPEEDS.map((s) => ({ value: s, label: s }))), sp ? sp.tx_speed : "");
     const txMediaI = FormControls.text(sp ? sp.tx_media : "", "LC / RJ45 / DAC / AOC…");
     root.appendChild(FormControls.attachDatalist(txMediaI, "sp-txmedia", SPARE_TX_MEDIA));
-    txBlock.appendChild(row2(FormControls.fieldRow("Form factor", txFormI), FormControls.fieldRow("Débit", txSpeedI), FormControls.fieldRow("Média / connecteur", txMediaI)));
+    txBlock.appendChild(FormUi.row2(FormControls.fieldRow("Form factor", txFormI), FormControls.fieldRow("Débit", txSpeedI), FormControls.fieldRow("Média / connecteur", txMediaI)));
     const txReachI = FormControls.text(sp ? sp.tx_reach : "", "ex. SR · LR · 1310nm · 10km");
     txBlock.appendChild(FormControls.fieldRow("Portée / longueur d'onde", txReachI));
     root.appendChild(txBlock);
 
     // -- bloc AUTRE --
     const otherBlock = document.createElement("div");
-    otherBlock.appendChild(divider("Caractéristiques"));
+    otherBlock.appendChild(FormUi.divider("Caractéristiques"));
     const specsI = FormControls.textArea(sp ? sp.specs : "");
     otherBlock.appendChild(FormControls.fieldRow("Spécifications", specsI, "Caractéristiques en texte libre."));
     root.appendChild(otherBlock);
 
     // -- statut + attribution --
-    root.appendChild(divider("Statut"));
+    root.appendChild(FormUi.divider("Statut"));
     const statusI = FormControls.select(SpareStatuses.ALL.map((s) => ({ value: s.id, label: s.label })), sp ? sp.status : SpareStatuses.DEFAULT);
     root.appendChild(FormControls.fieldRow("Statut", statusI));
     const assignBlock = document.createElement("div");
@@ -586,16 +290,16 @@ export class EquipmentForms extends FormBase {
     );
     const eqI = FormControls.select(eqOpts, sp ? (sp.assigned_equipment_id || "") : "");
     const freeI = FormControls.text(sp ? sp.assigned_free : "", "utilisateur / équipement hors gestion");
-    assignBlock.appendChild(row2(FormControls.fieldRow("Équipement affecté", eqI, "Ou laissez « libre » et renseignez le champ ci-contre."), FormControls.fieldRow("Attribution libre", freeI)));
+    assignBlock.appendChild(FormUi.row2(FormControls.fieldRow("Équipement affecté", eqI, "Ou laissez « libre » et renseignez le champ ci-contre."), FormControls.fieldRow("Attribution libre", freeI)));
     const assignDateI: any = FormControls.date(sp ? sp.assigned_date : "");
     assignBlock.appendChild(FormControls.fieldRow("Date d'attribution", assignDateI));
     root.appendChild(assignBlock);
 
     // -- administratif --
-    root.appendChild(divider("Administratif"));
+    root.appendChild(FormUi.divider("Administratif"));
     const purchaseI: any = FormControls.date(sp ? sp.purchase_date : "");
     const poI = FormControls.text(sp ? sp.po_ref : "", "réf. bon de commande");
-    root.appendChild(row2(FormControls.fieldRow("Date d'achat", purchaseI), FormControls.fieldRow("Bon de commande", poI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Date d'achat", purchaseI), FormControls.fieldRow("Bon de commande", poI)));
     const storageI = FormControls.text(sp ? sp.storage_location : "", "ex. Armoire B · étagère 3 · bac 12");
     root.appendChild(FormControls.fieldRow("Emplacement de stockage", storageI));
     const commentI = FormControls.textArea(sp ? sp.comment : "");
@@ -678,25 +382,25 @@ export class EquipmentForms extends FormBase {
     let typeOpts = EquipmentTypes.ALL.map((t) => ({ value: t.id, label: t.label }));
     if (curType && !EquipmentTypes.ALL.some((t) => t.id === curType)) typeOpts = [{ value: curType, label: curType + " (hors liste)" }, ...typeOpts];
     const typeI = FormControls.select(typeOpts, curType);
-    root.appendChild(row2(FormControls.fieldRow("Nom", nameI), FormControls.fieldRow("Type", typeI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Nom", nameI), FormControls.fieldRow("Type", typeI)));
 
     const invI = FormControls.toggle("Inventaire seul", eq ? !!eq.inventory_only : false, () => sync(), { block: true, title: "Répertorié uniquement : ni placement, ni câblage, ni ports." });
     root.appendChild(invI);
     const brandI = FormControls.text(eq ? eq.brand : "", "ex. Cisco, Dell…");
     const modelI = FormControls.text(eq ? eq.model : "", "ex. Catalyst 2960…");
-    root.appendChild(row2(FormControls.fieldRow("Marque", brandI), FormControls.fieldRow("Modèle", modelI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Marque", brandI), FormControls.fieldRow("Modèle", modelI)));
     const serialI = FormControls.text(eq ? eq.serial : "", "n° de série");
     root.appendChild(FormControls.fieldRow("Numéro de série", serialI));
 
     // -- administratif --
-    root.appendChild(divider("Administratif"));
+    root.appendChild(FormUi.divider("Administratif"));
     const purchaseI = FormControls.date(eq ? eq.purchase_date : "");
     const warrantyI = FormControls.date(eq ? eq.warranty_end : "");
     const poI = FormControls.text(eq ? eq.po_ref : "", "réf. bon de commande");
-    root.appendChild(row2(FormControls.fieldRow("Date d'achat", purchaseI), FormControls.fieldRow("Fin de garantie", warrantyI), FormControls.fieldRow("Bon de commande", poI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Date d'achat", purchaseI), FormControls.fieldRow("Fin de garantie", warrantyI), FormControls.fieldRow("Bon de commande", poI)));
     const assignDateI = FormControls.date(eq ? eq.assigned_date : "");
     const assignToI = FormControls.text(eq ? eq.assigned_to : "", "nom de la personne");
-    root.appendChild(row2(FormControls.fieldRow("Date d'attribution", assignDateI), FormControls.fieldRow("Attribué à", assignToI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Date d'attribution", assignDateI), FormControls.fieldRow("Attribué à", assignToI)));
     const pduI = FormControls.number((eq && eq.pdu_max_a != null) ? eq.pdu_max_a : "", { min: 0, step: 1, placeholder: "ampères" });
     const pduRow = FormControls.fieldRow("Capacité max PDU (A)", pduI, "Pour les bandeaux d'alimentation.");
     root.appendChild(pduRow);
@@ -709,59 +413,122 @@ export class EquipmentForms extends FormBase {
 
     // -- dimensions + placement (sections « avancées », masquées en inventaire) --
     const adv = document.createElement("div");
-    adv.appendChild(divider("Dimensions"));
+    adv.appendChild(FormUi.divider("Dimensions"));
     const dimI = FormControls.select([{ value: "u", label: "En U (rack)" }, { value: "free", label: "Libre (L × l × h en mm)" }], eq ? (eq.dim_mode === "free" ? "free" : "u") : "u");
     adv.appendChild(FormControls.fieldRow("Dimensionnement", dimI));
     // U
     const uBox = document.createElement("div");
     const uHI = FormControls.number(eq ? eq.u_height : 1, { min: 1, step: 1 });
     const depthI = FormControls.select(Depths.ALL.map((d) => ({ value: d.id, label: d.label })), eq && ["full", "half", "quarter"].includes(eq.depth) ? eq.depth : "full");
-    uBox.appendChild(row2(FormControls.fieldRow("Hauteur (U)", uHI), FormControls.fieldRow("Profondeur", depthI)));
+    uBox.appendChild(FormUi.row2(FormControls.fieldRow("Hauteur (U)", uHI), FormControls.fieldRow("Profondeur", depthI)));
     adv.appendChild(uBox);
     // libre
     const freeBox = document.createElement("div");
     const flI = FormControls.number((eq && eq.free_l_mm != null) ? eq.free_l_mm : "", { min: 0, step: 1, placeholder: "longueur" });
     const fwI = FormControls.number((eq && eq.free_w_mm != null) ? eq.free_w_mm : "", { min: 0, step: 1, placeholder: "largeur" });
     const fhI = FormControls.number((eq && eq.free_h_mm != null) ? eq.free_h_mm : "", { min: 0, step: 1, placeholder: "hauteur" });
-    freeBox.appendChild(row2(FormControls.fieldRow("Longueur (mm)", flI), FormControls.fieldRow("Largeur (mm)", fwI), FormControls.fieldRow("Hauteur (mm)", fhI)));
+    freeBox.appendChild(FormUi.row2(FormControls.fieldRow("Longueur (mm)", flI), FormControls.fieldRow("Largeur (mm)", fwI), FormControls.fieldRow("Hauteur (mm)", fhI)));
     adv.appendChild(freeBox);
 
-    // placement EN SALLE (au sol) — mode LIBRE : équivalent FORMULAIRE du glisser/positionnement en vue 2D/3D
-    // (principe « tout éditable hors vue »). Salle + centre X/Y + hauteur Z (négatif = sous le faux-plancher) + orientation.
+    // placement en MODE LIBRE — principe n°10 : TOUT placement offert par les vues 2D/3D (poser au sol d'une
+    // salle, monter en LATÉRAL ou en PAROI de baie, poser sur un PLAN D'ÉTAGE) a son équivalent FORMULAIRE.
+    // Un sélecteur de MODE expose les champs propres à chaque placement ; à l'enregistrement, le mode choisi
+    // pilote `placement_mode` et remet à zéro les champs des autres modes (les placements sont exclusifs).
+    const rackChoices = store.all("racks").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((r: any) => ({ value: r.id, label: r.name || "(baie)" }));
     const salleBox = document.createElement("div");
-    salleBox.appendChild(divider("Placement en salle (au sol)"));
-    const dcEqOpts = [{ value: "", label: "— non placé —" }].concat(store.all("datacenters").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((d: any) => ({ value: d.id, label: d.name || "(salle)" })));
+    salleBox.appendChild(FormUi.divider("Placement (dimensionnement libre)"));
+    const initPlaceMode = eq ? (["side", "wall", "floor"].includes(eq.placement_mode) ? eq.placement_mode : (eq.dc_id ? "sol" : "")) : "";
+    const placeModeI = FormControls.select([
+      { value: "", label: "— non placé —" },
+      { value: "sol", label: "Au sol d'une salle" },
+      { value: "side", label: "Latéral (marge de baie)" },
+      { value: "wall", label: "Paroi de baie (mural)" },
+      { value: "floor", label: "Sur un plan d'étage" },
+    ], initPlaceMode);
+    salleBox.appendChild(FormControls.fieldRow("Mode de placement", placeModeI, "Équivalent formulaire des placements des vues 2D/3D — tout est éditable sans les vues."));
+
+    // — au sol d'une salle (placement_mode « manual » + dc_id) : centre X/Y + hauteur Z + orientation —
+    const solBox = document.createElement("div");
+    const dcEqOpts = [{ value: "", label: "— salle ? —" }].concat(store.all("datacenters").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((d: any) => ({ value: d.id, label: d.name || "(salle)" })));
     const dcSelE = FormControls.select(dcEqOpts, eq && eq.dc_id ? eq.dc_id : "");
-    salleBox.appendChild(FormControls.fieldRow("Salle (datacenter)", dcSelE, "Pose l'équipement au SOL d'une salle. Position vide = centre."));
+    solBox.appendChild(FormControls.fieldRow("Salle (datacenter)", dcSelE, "Pose l'équipement au SOL de la salle. Position vide = centre."));
     const exI = FormControls.number((eq && eq.dc_x != null) ? eq.dc_x : "", { min: 0, step: 10, placeholder: "centre X (mm)" });
     const eyI = FormControls.number((eq && eq.dc_y != null) ? eq.dc_y : "", { min: 0, step: 10, placeholder: "centre Y (mm)" });
     const ezI = FormControls.number((eq && eq.dc_z != null) ? eq.dc_z : 0, { step: 10, placeholder: "0" });   // hauteur Z : négatif autorisé (pas de min)
     const eoI = FormControls.select(ORIENT_OPTS, String(Normalize.rackOrientation(eq ? eq.dc_orientation : 0)));
-    const sallePos = row2(FormControls.fieldRow("Position X (mm)", exI), FormControls.fieldRow("Position Y (mm)", eyI), FormControls.fieldRow("Hauteur Z (mm)", ezI), FormControls.fieldRow("Orientation", eoI));
-    salleBox.appendChild(sallePos);
-    const salleHint = document.createElement("div"); salleHint.className = "form-hint"; salleBox.appendChild(salleHint);
-    const syncSalle = () => {
-      const d: any = dcSelE.value ? store.get("datacenters", dcSelE.value) : null;
-      sallePos.style.display = d ? "" : "none";
-      salleHint.textContent = d ? "Hauteur Z = décalage vertical (mm) ; négatif = sous le faux-plancher." : "Non placé en salle. Choisissez une salle pour le poser au sol.";
+    const sallePos = FormUi.row2(FormControls.fieldRow("Position X (mm)", exI), FormControls.fieldRow("Position Y (mm)", eyI), FormControls.fieldRow("Hauteur Z (mm)", ezI), FormControls.fieldRow("Orientation", eoI));
+    solBox.appendChild(sallePos);
+    salleBox.appendChild(solBox);
+
+    // — latéral (placement_mode « side ») : marge av/ar d'une baie, côté G/D, accroche, colonne, U du bord HAUT —
+    const sideBox = document.createElement("div");
+    const sideRackI = FormControls.select([{ value: "", label: "— baie ? —" }].concat(rackChoices), eq && eq.placement_mode === "side" && eq.rack_id ? eq.rack_id : "");
+    const sideFaceI = FormControls.select([{ value: "front", label: "Marge avant" }, { value: "rear", label: "Marge arrière" }], eq && eq.side_face === "rear" ? "rear" : "front");
+    const sideLrI = FormControls.select([{ value: "left", label: "Gauche" }, { value: "right", label: "Droite" }], eq && eq.side_lr === "right" ? "right" : "left");
+    const sideSnapI = FormControls.select([{ value: "post", label: "Montant (rack)" }, { value: "wall", label: "Paroi" }], eq && eq.side_snap === "wall" ? "wall" : "post");
+    const sideColI = FormControls.select([{ value: "0", label: "Colonne 1" }, { value: "1", label: "Colonne 2" }], String(eq && eq.side_col === 1 ? 1 : 0));
+    const sideUI = FormControls.number((eq && eq.side_u != null) ? eq.side_u : 1, { min: 1, step: 1, placeholder: "U (bord haut)" });
+    sideBox.appendChild(FormUi.row2(FormControls.fieldRow("Baie", sideRackI), FormControls.fieldRow("Marge", sideFaceI), FormControls.fieldRow("Côté", sideLrI)));
+    sideBox.appendChild(FormUi.row2(FormControls.fieldRow("Accroche", sideSnapI), FormControls.fieldRow("Colonne", sideColI), FormControls.fieldRow("Position U (haut)", sideUI)));
+    salleBox.appendChild(sideBox);
+
+    // — paroi de baie (placement_mode « wall ») : paroi G/D, marge av/ar, colonne, U de base, orientation de face —
+    const wallBox = document.createElement("div");
+    const wallRackI = FormControls.select([{ value: "", label: "— baie ? —" }].concat(rackChoices), eq && eq.placement_mode === "wall" && eq.rack_id ? eq.rack_id : "");
+    const wallLrI = FormControls.select([{ value: "left", label: "Paroi gauche" }, { value: "right", label: "Paroi droite" }], eq && eq.wall_lr === "right" ? "right" : "left");
+    const wallMarginI = FormControls.select([{ value: "front", label: "Marge avant" }, { value: "rear", label: "Marge arrière" }], eq && eq.wall_margin === "rear" ? "rear" : "front");
+    const wallColI = FormControls.number((eq && eq.wall_col != null) ? eq.wall_col : 0, { min: 0, step: 1, placeholder: "0" });
+    const wallUI = FormControls.number((eq && eq.wall_u != null) ? eq.wall_u : 1, { min: 1, step: 1, placeholder: "U (base)" });
+    const wallOrientI = FormControls.select([{ value: "center", label: "Vers le centre (⊥ paroi)" }, { value: "facade", label: "Vers la façade de la marge" }], eq && eq.wall_orient === "facade" ? "facade" : "center");
+    wallBox.appendChild(FormUi.row2(FormControls.fieldRow("Baie", wallRackI), FormControls.fieldRow("Paroi", wallLrI), FormControls.fieldRow("Marge", wallMarginI)));
+    wallBox.appendChild(FormUi.row2(FormControls.fieldRow("Colonne", wallColI), FormControls.fieldRow("Position U (base)", wallUI), FormControls.fieldRow("Face orientée", wallOrientI)));
+    salleBox.appendChild(wallBox);
+
+    // — plan d'étage (placement_mode « floor ») : bâtiment + étage, centre X/Y (vide = à localiser), orientation —
+    const floorBox = document.createElement("div");
+    const fLocI = FormControls.select(FormUi.locOptions(store), eq && eq.placement_mode === "floor" ? (eq.location || "") : "");
+    const fFloorI = FormControls.select(FormUi.floorOptions(eq ? String(eq.floor ?? "") : ""), eq && eq.placement_mode === "floor" ? String(eq.floor ?? "") : "");
+    floorBox.appendChild(FormUi.row2(FormControls.fieldRow("Bâtiment (lieu)", fLocI), FormControls.fieldRow("Étage", fFloorI)));
+    const fxI = FormControls.number((eq && eq.floor_x != null) ? eq.floor_x : "", { min: 0, step: 10, placeholder: "centre X (mm)" });
+    const fyI = FormControls.number((eq && eq.floor_y != null) ? eq.floor_y : "", { min: 0, step: 10, placeholder: "centre Y (mm)" });
+    const fOrI = FormControls.select(ORIENT_OPTS, String(Normalize.rackOrientation(eq ? eq.dc_orientation : 0)));
+    floorBox.appendChild(FormUi.row2(FormControls.fieldRow("Position X (mm)", fxI), FormControls.fieldRow("Position Y (mm)", fyI), FormControls.fieldRow("Orientation", fOrI)));
+    salleBox.appendChild(floorBox);
+
+    const placeFreeHint = document.createElement("div"); placeFreeHint.className = "form-hint"; salleBox.appendChild(placeFreeHint);
+    const PLACE_HINTS: Record<string, string> = {
+      "": "Non placé. Choisissez un mode pour poser l'équipement (équivalent des placements en vue 2D/3D).",
+      sol: "Hauteur Z = décalage vertical (mm) ; négatif = sous le faux-plancher. Position vide = centre de la salle.",
+      side: "Monté dans la marge latérale de la baie ; Position U = bord HAUT de l'équipement. La baie doit offrir des emplacements latéraux.",
+      wall: "Fixé sur la paroi gauche/droite de la baie, dans sa marge avant ou arrière ; Position U = base de l'équipement.",
+      floor: "Posé sur le plan d'étage du bâtiment. Position vide = à localiser en glissant sur le plan (vue Étage).",
     };
-    dcSelE.onchange = syncSalle; syncSalle();
+    const syncSalle = () => {
+      const m = placeModeI.value;
+      solBox.style.display = m === "sol" ? "" : "none";
+      sideBox.style.display = m === "side" ? "" : "none";
+      wallBox.style.display = m === "wall" ? "" : "none";
+      floorBox.style.display = m === "floor" ? "" : "none";
+      if (m === "sol") sallePos.style.display = dcSelE.value ? "" : "none";
+      placeFreeHint.textContent = (m === "sol" && !dcSelE.value) ? "Choisissez la salle où poser l'équipement au sol." : PLACE_HINTS[m] || "";
+    };
+    placeModeI.onchange = syncSalle; dcSelE.onchange = syncSalle; syncSalle();
     adv.appendChild(salleBox);
 
     // placement rack (mode U seulement, dans ce cœur)
     const placeBox = document.createElement("div");
-    placeBox.appendChild(divider("Placement (rack)"));
+    placeBox.appendChild(FormUi.divider("Placement (rack)"));
     const rackOpts = [{ value: "", label: "— non placé —" }].concat(store.all("racks").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((r: any) => ({ value: r.id, label: r.name || "(baie)" })));
     const rackI = FormControls.select(rackOpts, eq && eq.placement_mode === "rack" && eq.rack_id ? eq.rack_id : "");
     const rackUI = FormControls.number((eq && eq.rack_u != null) ? eq.rack_u : "", { min: 1, step: 1, placeholder: "U de bas (vide = libre)" });
-    placeBox.appendChild(row2(FormControls.fieldRow("Baie", rackI), FormControls.fieldRow("Position (U)", rackUI)));
+    placeBox.appendChild(FormUi.row2(FormControls.fieldRow("Baie", rackI), FormControls.fieldRow("Position (U)", rackUI)));
     const placeHint = document.createElement("div"); placeHint.className = "form-hint";
-    placeHint.textContent = "Placement latéral / paroi / sur étage : à venir (préservé pour les équipements existants).";
+    placeHint.textContent = "Placements latéral / paroi / plan d'étage : disponibles en dimensionnement « Libre » (ces montages utilisent les dimensions en mm).";
     placeBox.appendChild(placeHint);
     adv.appendChild(placeBox);
 
     // -- agrégats (LAG / bond) --
-    adv.appendChild(divider("Agrégats (LAG / bond)"));
+    adv.appendChild(FormUi.divider("Agrégats (LAG / bond)"));
     const aggList = document.createElement("div"); aggList.className = "chip-list"; adv.appendChild(aggList);
     const addAggBtn = document.createElement("button"); addAggBtn.type = "button"; addAggBtn.className = "btn btn-ghost btn-sm"; addAggBtn.textContent = "+ Agrégat"; addAggBtn.style.marginTop = "8px"; adv.appendChild(addAggBtn);
 
@@ -771,7 +538,7 @@ export class EquipmentForms extends FormBase {
     if (eq) {   // sous-éditeur empilé opérant sur le brouillon (ports en cours d'ajout présents)
       const faceBtn = document.createElement("button"); faceBtn.type = "button"; faceBtn.className = "btn btn-ghost btn-sm"; faceBtn.textContent = "Façade…";
       faceBtn.title = "Disposer les ports sur la façade (y compris ceux que vous venez d'ajouter)";
-      faceBtn.onclick = () => this.faceEditor(store, host, eq.id, {
+      faceBtn.onclick = () => FaceEditor.open(store, host, eq.id, {
         ports: draftPorts, fids: faceFids,
         onApply: ({ fids, place }: any) => {
           EQUIP_FACE_IDS.forEach((f) => { if (f in fids) faceFids[f] = fids[f]; });
@@ -906,19 +673,41 @@ export class EquipmentForms extends FormBase {
           payload.free_l_mm = flI.value !== "" ? Math.max(0, parseInt(flI.value, 10) || 0) : null;
           payload.free_w_mm = fwI.value !== "" ? Math.max(0, parseInt(fwI.value, 10) || 0) : null;
           payload.free_h_mm = fhI.value !== "" ? Math.max(0, parseInt(fhI.value, 10) || 0) : null;
-          // placement EN SALLE (au sol) : si une salle est choisie, on pose au sol (mode manuel) ; sinon non placé.
-          const placeDcE: any = dcSelE.value ? store.get("datacenters", dcSelE.value) : null;
-          if (placeDcE) {
+          // placement (principe n°10) : le MODE choisi pilote les champs persistés ; les champs des AUTRES
+          // modes sont remis à zéro — les placements sont exclusifs (comme les actions des vues 2D/3D).
+          const pm = placeModeI.value;
+          const placeDcE: any = (pm === "sol" && dcSelE.value) ? store.get("datacenters", dcSelE.value) : null;
+          // garde-fou explicite : latéral/paroi exigent une baie (invariant partagé) — le sélecteur de baie
+          // n'est pas couvert par la validation live (champ propre au mode), on le signale ici.
+          if ((pm === "side" && !sideRackI.value) || (pm === "wall" && !wallRackI.value)) { Notify.toast("Choisissez la baie du montage " + (pm === "side" ? "latéral" : "en paroi"), "err"); return false; }
+          if (pm === "floor" && !fLocI.value) { Notify.toast("Choisissez le bâtiment du plan d'étage", "err"); return false; }
+          payload.dc_id = null; payload.dc_x = null; payload.dc_y = null;
+          payload.rack_id = null; payload.rack_u = null;
+          payload.floor_x = null; payload.floor_y = null;
+          payload.placement_mode = "manual";
+          if (placeDcE) {   // au sol d'une salle (mode « manual » + dc_id)
             payload.dc_id = placeDcE.id;
             payload.dc_x = exI.value !== "" ? Math.max(0, parseInt(exI.value, 10) || 0) : Math.round(placeDcE.width_mm / 2);
             payload.dc_y = eyI.value !== "" ? Math.max(0, parseInt(eyI.value, 10) || 0) : Math.round(placeDcE.depth_mm / 2);
             payload.dc_z = ezI.value !== "" ? (parseInt(ezI.value, 10) || 0) : 0;   // négatif autorisé
             payload.dc_orientation = Normalize.rackOrientation(parseInt(eoI.value, 10) || 0);
-            payload.placement_mode = "manual"; payload.floor_x = null; payload.floor_y = null;   // au sol d'une salle (exclusif du placement étage)
-          } else {
-            payload.dc_id = null; payload.dc_x = null; payload.dc_y = null;
-            // préserve un placement étage/latéral/paroi existant ; sinon « manuel »
-            if (!eq || !["floor", "side", "wall"].includes(eq.placement_mode)) payload.placement_mode = "manual";
+          } else if (pm === "side") {
+            payload.placement_mode = "side"; payload.rack_id = sideRackI.value;
+            payload.side_face = sideFaceI.value; payload.side_lr = sideLrI.value; payload.side_snap = sideSnapI.value;
+            payload.side_col = parseInt(sideColI.value, 10) || 0;
+            payload.side_u = Math.max(1, parseInt(sideUI.value, 10) || 1);
+          } else if (pm === "wall") {
+            payload.placement_mode = "wall"; payload.rack_id = wallRackI.value;
+            payload.wall_lr = wallLrI.value; payload.wall_margin = wallMarginI.value;
+            payload.wall_col = wallColI.value !== "" ? Math.max(0, parseInt(wallColI.value, 10) || 0) : 0;
+            payload.wall_u = Math.max(1, parseInt(wallUI.value, 10) || 1);
+            payload.wall_orient = wallOrientI.value === "facade" ? "facade" : "center";
+          } else if (pm === "floor") {
+            payload.placement_mode = "floor";
+            payload.location = fLocI.value; payload.floor = fFloorI.value;
+            payload.floor_x = fxI.value !== "" ? Math.max(0, parseInt(fxI.value, 10) || 0) : null;
+            payload.floor_y = fyI.value !== "" ? Math.max(0, parseInt(fyI.value, 10) || 0) : null;
+            payload.dc_orientation = Normalize.rackOrientation(parseInt(fOrI.value, 10) || 0);
           }
         } else {
           payload.u_height = Math.max(1, parseInt(uHI.value, 10) || 1);
@@ -929,7 +718,12 @@ export class EquipmentForms extends FormBase {
         }
         if (live.check(payload).length) return false;   // validation live : champ(s) surligné(s), enregistrement bloqué
         let eqId: string;
-        if (eq) { await store.update("equipments", eq.id, payload); eqId = eq.id; }
+        if (eq) {
+          await store.update("equipments", eq.id, payload); eqId = eq.id;
+          // le (dé)placement peut invalider des routes de câbles — même casse contrôlée que les actions
+          // des vues 2D/3D (assignSideSlot/assignWallSlot…) ; no-op si les routes restent valides.
+          await store.applyCableBreaks(eqId);
+        }
         else { const created: any = await store.create("equipments", payload); eqId = created.id; }
 
         // -- réconciliation agrégats --

@@ -1,22 +1,14 @@
-import type { Store } from "../../store";
 import { Dom } from "../../ui/Dom";
 import { FormControls } from "../../ui/FormControls";
 import { Dialog } from "../../ui/Dialog";
 import { Notify } from "../../ui/Notify";
 import { ContextMenu } from "../../ui/ContextMenu";
 import type { CtxSection } from "../../ui/ContextMenu";
-import { ImageExport } from "../../ui/ImageExport";
-import type { ExportOptions } from "../../ui/ImageExport";
 import { Html } from "../../core/Html";
 import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
-import { RackScene } from "../../geometry/RackScene";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
-import { Resolver3D } from "../../geometry/Resolver3D";
 import { FloorLayout } from "../../geometry/FloorLayout";
-import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
-import { Box } from "../../geometry/Box";
-import { Painter } from "../../geometry/Painter";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import type { Frame } from "../../geometry/Positioning";
 import type { PosEntry, PosScene } from "./PositioningTool";
@@ -24,15 +16,13 @@ import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Format } from "../../core/Format";
-import { Text } from "../../core/Text";
 import { Waypoint } from "../../models/Waypoint";
 import { CableStatuses } from "../../domain/CableStatuses";
-import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
-import { WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
-import type { Vec3, Drawable, DatacenterHost } from "./shared";
+import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, U_MM } from "../../domain/constants";
+import type { Vec3 } from "./shared";
 import { DcPanels } from "./DcPanels";
 
-export class DcInteract extends DcPanels {
+export abstract class DcInteract extends DcPanels {
 
   protected showCote(text: string, clientX: number, clientY: number): void {
     if (!this.coteEl) { this.coteEl = document.createElement("div"); this.coteEl.className = "dc-cote"; this.stage.appendChild(this.coteEl); }
@@ -336,9 +326,10 @@ export class DcInteract extends DcPanels {
     node.addEventListener("mouseleave", () => { node.classList.remove("hover"); this.hideTip(); });
     this.wireClick(node, () => {
       this.hideTip();
-      if (this.routeBuild) {   // routage : port de départ, puis port terminal
-        if (!this.routeBuild.fromPortId) this.routeTool.start(port.id);
-        else if (port.id !== this.routeBuild.fromPortId) this.routeTool.finish(port.id);
+      const rb = this.routeTool.state;
+      if (rb) {   // routage : port de départ, puis port terminal
+        if (!rb.fromPortId) this.routeTool.start(port.id);
+        else if (port.id !== rb.fromPortId) this.routeTool.finish(port.id);
         return;
       }
       if (cab) this.host.openCableForm?.(cab.id); else this.connectPort(port);
@@ -386,7 +377,7 @@ export class DcInteract extends DcPanels {
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [cab
       ? { label: "Éditer le câble…", action: () => this.host.openCableForm?.(cab.id) }
       : { label: "Créer / affecter un câble…", action: () => this.connectPort(port) }];
-    if (this.routeBuild) { if (this.routeBuild.fromPortId && port.id !== this.routeBuild.fromPortId) items.push({ label: "Terminer la route ici", action: () => this.routeTool.finish(port.id) }); }
+    if (this.routeTool.state) { if (this.routeTool.state.fromPortId && port.id !== this.routeTool.state.fromPortId) items.push({ label: "Terminer la route ici", action: () => this.routeTool.finish(port.id) }); }
     else if (!cab) items.push({ label: "Démarrer une route ici", action: () => this.routeTool.start(port.id) });
     const secs: CtxSection[] = [{ head: port.name || "(port)", items }];
     const csi = this.cableSelItems(this.store.cablesOfPorts([port.id]).map((c: any) => c.id), "le câble du port");
@@ -517,7 +508,7 @@ export class DcInteract extends DcPanels {
   protected waypointCtx(wp: any): CtxSection[] {
     const nCab = this.store.cablesOfWaypoint(wp.id).length;
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [];
-    if (this.routeBuild && this.routeBuild.fromPortId) items.push({ label: "Ajouter à la route", action: () => this.routeTool.addWp(wp.id) });
+    if (this.routeTool.state && this.routeTool.state.fromPortId) items.push({ label: "Ajouter à la route", action: () => this.routeTool.addWp(wp.id) });
     items.push({ label: "Modifier…", action: () => this.host.openWaypointForm?.(wp.id) });
     items.push({ label: "Retirer de la salle", danger: true, action: async () => { if (!this.store.get("waypoints", wp.id)) return; await this.store.update("waypoints", wp.id, { datacenter_id: null, dc_x: null, dc_y: null, dc_x2: null, dc_y2: null }); this.setDirty(); } });
     items.push({ label: "Supprimer", danger: true, action: async () => {
@@ -607,7 +598,7 @@ export class DcInteract extends DcPanels {
 
   /** Clic sur un waypoint/brosse/OOB de la scène : ajout à la route en cours (si démarrée) sinon édition. */
   protected onWaypointClick(wp: any): void {
-    if (this.routeBuild && this.routeBuild.fromPortId) { this.routeTool.addWp(wp.id); return; }
+    if (this.routeTool.state && this.routeTool.state.fromPortId) { this.routeTool.addWp(wp.id); return; }
     this.host.openWaypointForm?.(wp.id);
   }
 
@@ -691,14 +682,14 @@ export class DcInteract extends DcPanels {
   posViewKind(): "top" | "floor" | "3d" { return this.view; }
   posScale(): number { return this.scale || 1; }
   posGRoot(): SVGGElement | null { return this.gRoot; }
-  posClearOtherTools(): void { this.measure = null; this.routeBuild = null; }             // exclusivité : un seul outil de clic à la fois
+  posClearOtherTools(): void { this.measureTool.state = null; this.routeTool.state = null; }   // exclusivité : un seul outil de clic à la fois
 
 
 
 
   /* ============================ PONT OUTILS ↔ moteur WebGL (mesure / routage 3D) ============================
      En 3D-WebGL il n'y a pas de <svg> : le moteur Three.js intercepte clics/survols et remonte les points monde
-     (raycast natif) à la vue, qui tient l'état (measure / routeBuild) + le panneau, puis repousse l'overlay. */
+     (raycast natif) aux OUTILS (measureTool.state / routeTool.state) + le panneau, puis repousse l'overlay. */
 
   /** (Ré)applique au moteur WebGL le mode outil + l'overlay courant (appelé après chaque (re)rendu 3D-WebGL).
       DISPATCHER des outils de clic 3D : mesure (délégué à MeasureTool) OU routage, sinon aucun. */
@@ -735,7 +726,7 @@ export class DcInteract extends DcPanels {
     return null;
   }
 
-  protected portDcId(portId: string): string | null { const p: any = this.store.get("ports", portId); return p ? this.store.equipmentDcId(p.equipment_id) : null; }
+  protected portDcId(portId: string | null): string | null { const p: any = this.store.get("ports", portId); return p ? this.store.equipmentDcId(p.equipment_id) : null; }
 
   /** Bascule en 3D sur la salle `dcId` (mode simple DC) et programme le focus caméra sur `p` (emprise `extent` mm).
       `face` (optionnel) oriente la caméra face au front de l'objet ; sinon l'angle courant est conservé. */

@@ -1,7 +1,8 @@
 import { DataAdapter } from "./DataAdapter";
-import { PAGE_SIZE_DEFAULT } from "./config";
-import { RawRecord, Snapshot, Transaction, Where, ListOptions, ListResult } from "./types";
+import { PAGE_SIZE_DEFAULT, PAGE_SIZE_ALL } from "./config";
+import { RawRecord, Snapshot, Transaction, ListOptions, ListResult } from "./types";
 import { EntityRegistry } from "../models";
+import { RestProtocol } from "./RestProtocol";
 
 const COLLECTIONS = EntityRegistry.COLLECTIONS;
 
@@ -23,15 +24,18 @@ export class RestAdapter extends DataAdapter {
   dataBase: string;                      // base des données du document courant (= apiRoot tant qu'aucun doc)
   headers: Record<string, string>;
   docId: string | null = null;
-  docRev = 0;                            // révision connue du document (synchronisée via l'entête X-Doc-Rev)
+  /** Cœur PUR du protocole (X-Doc-Rev, 409, 400 structuré) — extrait pour être testable sans réseau. */
+  readonly protocol = new RestProtocol();
   // id de session (par onglet) : tague nos écritures (X-Client-Id) → on ignore NOS propres événements SSE.
   readonly clientId: string = (typeof crypto !== "undefined" && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : ("c-" + Math.random().toString(36).slice(2) + Date.now().toString(36));
-  /** Conflit de version (HTTP 409, verrou optimiste serveur) : une écriture a été refusée car une entité visée a
-      changé depuis notre `docRev`. Le hôte (main.ts) recharge le document et notifie — l'écriture n'est PAS rejouée. */
-  onConflict: ((info: { conflicts?: Array<{ collection: string; id: string; rev: number }> } | null) => void) | null = null;
-  /** Données refusées par le serveur (HTTP 400, validation PARTAGÉE) : le serveur fait autorité et a rejeté
-      l'écriture. Le hôte (main.ts) notifie l'utilisateur. `errors` = liste `{ collection, path, code, message }`. */
-  onValidationError: ((errors: Array<{ collection: string; path: string; code: string; message: string }>) => void) | null = null;
+
+  /* Révision connue + callbacks : DÉLÉGUÉS au protocole (les sites existants — main.ts — restent inchangés). */
+  get docRev(): number { return this.protocol.docRev; }
+  set docRev(v: number) { this.protocol.docRev = v; }
+  get onConflict(): RestProtocol["onConflict"] { return this.protocol.onConflict; }
+  set onConflict(fn: RestProtocol["onConflict"]) { this.protocol.onConflict = fn; }
+  get onValidationError(): RestProtocol["onValidationError"] { return this.protocol.onValidationError; }
+  set onValidationError(fn: RestProtocol["onValidationError"]) { this.protocol.onValidationError = fn; }
 
   /** URL du flux SSE du document courant (ou "" si aucun document). */
   get eventsUrl(): string { return this.docId ? (this.apiRoot + "/documents/" + encodeURIComponent(this.docId) + "/events") : ""; }
@@ -55,26 +59,12 @@ export class RestAdapter extends DataAdapter {
     const isWrite = method !== "GET";
     const res = await fetch(base + path, {
       // X-Base-Rev : révision sur laquelle s'appuie cette écriture → le serveur la compare aux entités visées (verrou optimiste).
-      method, headers: { ...this.headers, "X-Client-Id": this.clientId, ...(isWrite ? { "X-Base-Rev": String(this.docRev) } : {}) },
+      method, headers: { ...this.headers, "X-Client-Id": this.clientId, ...(isWrite ? this.protocol.writeHeaders() : {}) },
       credentials: "include",   // SSO : on transmet les cookies de session (l'app NE gère PAS l'auth — le SSO valide)
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    const rev = res.headers.get("X-Doc-Rev"); if (rev != null && rev !== "") this.docRev = Number(rev);   // synchronise la révision connue
-    if (res.status === 409) {   // verrou optimiste : une autre écriture a précédé la nôtre sur ces entités
-      let info: any = null; try { info = JSON.parse(await res.text()); } catch (_) { /* corps absent/illisible */ }
-      this.onConflict?.(info);   // le hôte recharge + notifie ; on NE throw PAS → le reload resynchronise l'état optimiste local
-      return null;
-    }
-    if (res.status === 404 && allow404) return null;
-    if (res.status === 400) {   // validation serveur (autorité) : données refusées
-      let info: any = null; try { info = JSON.parse(await res.text()); } catch (_) { /* corps absent/illisible */ }
-      if (info && Array.isArray(info.errors)) { this.onValidationError?.(info.errors); return null; }   // erreurs structurées → notifiées, pas de throw
-      throw new Error("HTTP 400 sur " + method + " " + path + (info && info.error ? " : " + info.error : ""));
-    }
-    if (!res.ok) throw new Error("HTTP " + res.status + " sur " + method + " " + path);
-    if (res.status === 204) return null;
-    const txt = await res.text();
-    return txt ? JSON.parse(txt) : null;
+    // Interprétation (X-Doc-Rev, 409, 400 structuré, 404 toléré, 204, JSON) : déléguée au protocole pur.
+    return this.protocol.interpret({ status: res.status, ok: res.ok, header: (n) => res.headers.get(n), text: () => res.text() }, method, path, { allow404 });
   }
   private _send(method: string, path: string, body?: any, opts?: { allow404?: boolean }): Promise<any> { return this._req(this.dataBase, method, path, body, opts); }
   private _root(method: string, path: string, body?: any, opts?: { allow404?: boolean }): Promise<any> { return this._req(this.apiRoot, method, path, body, opts); }
@@ -103,7 +93,7 @@ export class RestAdapter extends DataAdapter {
     if (!this.docId) return { meta: {} };
     const snap: Snapshot = { meta: {} };
     // pageSize très grand → la collection ENTIÈRE (le document complet) en une page.
-    await Promise.all(COLLECTIONS.map(async (c) => { snap[c] = this.rows(await this._send("GET", "/" + c + "?pageSize=1000000000")); }));
+    await Promise.all(COLLECTIONS.map(async (c) => { snap[c] = this.rows(await this._send("GET", "/" + c + "?pageSize=" + PAGE_SIZE_ALL)); }));
     try { snap.meta = (await this._send("GET", "/meta")) || {}; } catch (_) { snap.meta = {}; }
     return snap;
   }
@@ -134,7 +124,7 @@ export class RestAdapter extends DataAdapter {
   }
   async findBy(collection: string, field: string, value: any): Promise<RawRecord[]> {
     const v = (value === null || value === undefined) ? "null" : String(value);
-    return this.rows(await this._send("GET", "/" + collection + "?pageSize=1000000000&" + encodeURIComponent(field) + "=" + encodeURIComponent(v)));
+    return this.rows(await this._send("GET", "/" + collection + "?pageSize=" + PAGE_SIZE_ALL + "&" + encodeURIComponent(field) + "=" + encodeURIComponent(v)));
   }
 
   /* ---- écritures unitaires (appels directs, sans passer par le lot) ---- */
@@ -161,7 +151,7 @@ export class RestAdapter extends DataAdapter {
   async replaceAll(state: Snapshot): Promise<unknown> { return this._send("PUT", "/snapshot", state); }
 
   /* Utilisateur courant — proxifié au SSO par le backend. Renvoie l'objet user, ou null si non connecté / erreur.
-     L'app ne gère PAS l'auth : c'est le SSO qui valide (cf. docs/rest-migration.md). */
+     L'app ne gère PAS l'auth : c'est le SSO qui valide. */
   async me(): Promise<any | null> {
     try { return await this._root("GET", "/me", undefined, { allow404: true }); }
     catch (_) { return null; }

@@ -3,7 +3,7 @@
 
    Trace une route de câble au CLIC : port de départ → waypoints/brosses (éventuellement
    dans d'autres salles/étages) → port terminal, qui ouvre le formulaire de câblage prérempli.
-   Machine d'état minimale (`routeBuild`) partagée par les interactions SVG (2D) ET le moteur
+   Machine d'état minimale (`state`) partagée par les interactions SVG (2D) ET le moteur
    3D-WebGL (raycast → onWebglPick/onWebglHover). Exclusif de la mesure / du positionnement.
 
    Découplé de la chaîne de vues : services de vue via `RouteHost` ; `store` + `resolver`
@@ -44,7 +44,7 @@ export interface RouteHost {
 }
 
 export class RouteTool {
-  /** État courant (null = inactif). Exposé pour le pont d'accès de la vue (`get routeBuild()`). */
+  /** État courant (null = inactif). Consommé directement par la chaîne de vues (`routeTool.state`). */
   state: RouteState | null = null;
 
   constructor(private readonly host: RouteHost, private readonly store: Store, private readonly resolver: Resolver3D) {}

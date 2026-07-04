@@ -18,15 +18,16 @@ import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { GroupTypes } from "../domain/GroupTypes";
 
 /* =============================================================================
-   GraphView — TRANCHE-PILOTE (Phase 5b).
-   Valide le pattern d'une VUE orientée objet : une classe qui prend le `store` +
-   un hôte injecté (services app), construit son modèle de rendu depuis le store,
-   le dispose (force-directed) et le rend en SVG via les helpers ui/geometry.
-   PORTÉE PILOTE : nœuds + arêtes + layout + pan/zoom + glisser de nœud. NON inclus
-   (à porter ensuite) : cadres, dispositions nommées, modes A/B/C, sélection/
-   marquee, menus contextuels, légende, export, barre d'outils, couleurs réseau/
-   groupe de la poignée. Le couplage au global `store`/`setDirty`/modale devient
-   une injection (store + GraphHost).
+   GraphView — vue GRAPHE du câblage (SVG).
+   Une classe qui prend le `store` + un hôte injecté (services app, `GraphHost`),
+   construit son modèle de rendu depuis le store, le dispose (force-directed) et
+   le rend en SVG via les helpers ui/geometry. Couvre : nœuds + arêtes + layout +
+   pan/zoom + glisser de nœud, filtres, cadres, dispositions nommées (persistées
+   dans `store.meta`), sélection/marquee, menus contextuels, légende, export
+   image, barre d'outils.
+   DETTE (cf. audit) : la classe cumule beaucoup de responsabilités — la
+   simulation force-directed (pure) devrait migrer vers `geometry/GraphGeometry`,
+   et « cadres » + « dispositions nommées » sont deux contrôleurs extractibles.
    ============================================================================= */
 
 /** Services applicatifs dont la vue dépend (câblés par le shell en Phase 6). */
@@ -56,7 +57,6 @@ export class GraphView {
      "B" = tout reste en place, les filtres ne font que masquer ; "C" = comme A mais
      les nœuds déplacés à la main gardent leur position. */
   displayMode: "A" | "B" | "C" = "A";
-  private layoutMode: "auto" | "manual" = "auto";
   private _layoutDirty = false;
   private _hasRendered = false;
   private pos: Record<string, { x: number; y: number }> = {};   // positions vivantes
@@ -189,7 +189,7 @@ export class GraphView {
     this.buildToolbar();
     this.fitHeight();   // hauteur viewport AVANT le 1er rendu (svg créé à la bonne taille + recadrage correct)
     this.selection.clear();
-    this.layoutMode = this._activeLayout() ? "manual" : "auto";
+
     if (this._activeLayout() && !Object.keys(this.pos).length) this.pos = Object.assign({}, this._activePositions() || {});
     const first = !this._hasRendered;
     this.rebuild({ recenter: first });
@@ -197,11 +197,6 @@ export class GraphView {
   }
 
   /* ---- modèle de rendu (depuis le store) ---- */
-
-  /** Ids réseau d'un câble (network_ids, repli network_id ≤ v35). */
-  private static netIds(c: any): string[] {
-    return (Array.isArray(c.network_ids) && c.network_ids.length) ? c.network_ids : (c.network_id ? [c.network_id] : []);
-  }
 
   private _resolvableCables(): any[] {
     const s = this.store;
@@ -225,10 +220,11 @@ export class GraphView {
     this.filters.equip.forEach((id) => eqIds.add(id));
     cables.forEach((c: any) => {
       const pa = s.get("ports", c.from_port_id), pb = s.get("ports", c.to_port_id);
+      if (!pa || !pb || !pa.equipment_id || !pb.equipment_id) return;   // garanti par _resolvableCables — garde de typage/robustesse
       const ea = pa.equipment_id, eb = pb.equipment_id;
       let include = false;
       if (this.filters.equip.size && (this.filters.equip.has(ea) || this.filters.equip.has(eb))) include = true;
-      if (this.filters.net.size && GraphView.netIds(c).some((nid) => this.filters.net.has(nid))) include = true;
+      if (this.filters.net.size && this.store.cableNetworkIds(c).some((nid) => this.filters.net.has(nid))) include = true;
       if (this.filters.pt.size && ((pa.port_type_id && this.filters.pt.has(pa.port_type_id)) || (pb.port_type_id && this.filters.pt.has(pb.port_type_id)))) include = true;
       if (this.filters.grp.size) {
         const ga = s.get("equipments", ea), gb = s.get("equipments", eb);
@@ -259,9 +255,10 @@ export class GraphView {
       this._shownEq = null; this._shownCable = null;
     }
     this.nodes = [...eqIds].map((id) => s.get("equipments", id)).filter(Boolean).map((e: any) => ({ id: e.id, name: e.name || "(sans nom)", type: e.type || "", group_id: e.group_id || null, x: 0, y: 0, vx: 0, vy: 0 }));
-    this.edges = [...cableIds].map((id) => s.get("cables", id)).filter(Boolean).map((c: any) => {
+    this.edges = [...cableIds].map((id) => s.get("cables", id)).filter(Boolean).flatMap((c: any) => {
       const pa = s.get("ports", c.from_port_id), pb = s.get("ports", c.to_port_id);
-      return { id: c.id, name: c.name || "", a: pa.equipment_id, b: pb.equipment_id, network_id: c.network_id, status: c.status };
+      if (!pa || !pb || !pa.equipment_id || !pb.equipment_id) return [];   // garanti par _resolvableCables — garde de typage/robustesse
+      return [{ id: c.id, name: c.name || "", a: pa.equipment_id, b: pb.equipment_id, network_id: c.network_id, status: c.status }];
     });
   }
 
@@ -374,7 +371,7 @@ export class GraphView {
   }
 
   activateDefaultView(): void {
-    this.store.meta.activeLayoutId = null; this._layoutDirty = false; this.layoutMode = "auto";
+    this.store.meta.activeLayoutId = null; this._layoutDirty = false;
     this._persistLayouts(); this.rebuild({ recenter: true }); Notify.toast("Vue par défaut");
   }
 
@@ -399,7 +396,7 @@ export class GraphView {
     const id = Id.uid();
     this._layouts().push({ id, name, positions, filters, created_date: Id.nowIso(), updated_date: Id.nowIso() });
     this.store.meta.activeLayoutId = id; this._layoutDirty = false;
-    this._persistLayouts(); this.layoutMode = "manual"; this._moved.clear();
+    this._persistLayouts(); this._moved.clear();
     this.pos = Object.assign({}, positions);
     this.buildToolbar(); this.rebuild({ recenter: true });
     Notify.toast("Disposition « " + name + " » enregistrée");
@@ -409,7 +406,7 @@ export class GraphView {
     if (!l) return;
     this.store.meta.activeLayoutId = id; this._layoutDirty = false;
     this.pos = Object.assign({}, l.positions || {}); this._moved.clear();
-    this._applyFilters(l.filters); this._persistLayouts(); this.layoutMode = "manual";
+    this._applyFilters(l.filters); this._persistLayouts();
     this.buildToolbar(); this.rebuild({ recenter: true });
     Notify.toast("Disposition « " + (l.name || "") + " » restaurée");
   }
@@ -434,7 +431,7 @@ export class GraphView {
     if (!ok) return;
     const wasActive = this.store.meta.activeLayoutId === id;
     this.store.meta.graphLayouts = this._layouts().filter((x) => x.id !== id);
-    if (wasActive) { this.store.meta.activeLayoutId = null; this.layoutMode = "auto"; this._layoutDirty = false; }
+    if (wasActive) { this.store.meta.activeLayoutId = null; this._layoutDirty = false; }
     this._persistLayouts(); this.buildToolbar(); this.rebuild({ recenter: wasActive }); Notify.toast("Disposition supprimée");
   }
   /** Réorganise tout (force) en ignorant les positions vivantes. */
@@ -546,7 +543,7 @@ export class GraphView {
     const s = this.store;
     const counts = new Map<string, number>(), nets = new Map<string, any>();
     s.cablesOfEquipment(eqId).forEach((c: any) => {
-      GraphView.netIds(c).forEach((nid) => { const nw = s.get("networks", nid); if (nw && nw.color) { counts.set(nid, (counts.get(nid) || 0) + 1); nets.set(nid, nw); } });
+      this.store.cableNetworkIds(c).forEach((nid) => { const nw = s.get("networks", nid); if (nw && nw.color) { counts.set(nid, (counts.get(nid) || 0) + 1); nets.set(nid, nw); } });
     });
     let best: string | null = null, bestN = 0; counts.forEach((cnt, nid) => { if (cnt > bestN) { bestN = cnt; best = nid; } });
     if (!best) return null;
@@ -629,95 +626,19 @@ export class GraphView {
     if (!placed.length) { this._forceLayout(); return; }
     this._placeMissingNearCentroid(missing, placed, false);
   }
+  /* Disposition force-directed : géométrie PURE extraite dans GraphGeometry (forceLayout /
+     simulateComponent / placeMissingNearCentroid) — la vue ne garde que l'adaptation (dimensions
+     du stage, marquage « non placé »). */
   private _placeMissingNearCentroid(missing: GNode[], placed: GNode[], markUnplaced: boolean): void {
     if (!missing.length) return;
     const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
-    let cx = W / 2, cy = H / 2;
-    if (placed.length) { cx = placed.reduce((s, n) => s + n.x, 0) / placed.length; cy = placed.reduce((s, n) => s + n.y, 0) / placed.length; }
-    const colW = 180, rowH = 64, cols = Math.max(1, Math.ceil(Math.sqrt(missing.length)));
-    missing.forEach((n, i) => {
-      const r = Math.floor(i / cols), c = i % cols;
-      n.x = cx + (c - (cols - 1) / 2) * colW; n.y = cy + 120 + r * rowH; n.vx = 0; n.vy = 0;
-      if (markUnplaced) this.unplaced.add(n.id);
-    });
+    GraphGeometry.placeMissingNearCentroid(missing, placed, W / 2, H / 2);
+    if (markUnplaced) missing.forEach((n) => this.unplaced.add(n.id));
   }
 
   private _forceLayout(): void {
-    const N = this.nodes.length;
-    if (!N) return;
     const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
-    const byId: Record<string, GNode> = {}; this.nodes.forEach((n) => { byId[n.id] = n; });
-
-    // composants connexes (sur les nœuds visibles)
-    const adj: Record<string, string[]> = {}; this.nodes.forEach((n) => { adj[n.id] = []; });
-    this.edges.forEach((e) => { if (e.a !== e.b && byId[e.a] && byId[e.b]) { adj[e.a].push(e.b); adj[e.b].push(e.a); } });
-    const seen = new Set<string>(); const comps: GNode[][] = [];
-    this.nodes.forEach((n) => {
-      if (seen.has(n.id)) return;
-      const stack = [n.id], comp: GNode[] = []; seen.add(n.id);
-      while (stack.length) { const id = stack.pop()!; comp.push(byId[id]); adj[id].forEach((m) => { if (!seen.has(m)) { seen.add(m); stack.push(m); } }); }
-      comps.push(comp);
-    });
-    comps.sort((a, b) => b.length - a.length);
-
-    const k = Math.max(80, Math.sqrt((W * H) / N) * 0.8);
-    comps.forEach((comp) => this._simulateComponent(comp, k));
-
-    const bboxOf = (comp: GNode[]) => {
-      const b = GraphGeometry.nodesBBox(comp, () => 24);
-      return { mnx: b.minX, mny: b.minY, mxx: b.maxX, mxy: b.maxY, w: b.maxX - b.minX, h: b.maxY - b.minY };
-    };
-    const moveComp = (comp: GNode[], dx: number, dy: number) => comp.forEach((n) => { n.x += dx; n.y += dy; });
-
-    // packing : composant principal en haut, satellites rangés dessous
-    const gap = 64;
-    const main = comps[0];
-    let bb = bboxOf(main);
-    moveComp(main, -bb.mnx, -bb.mny);
-    const mainW = bb.w;
-    let cursorY = bb.h + gap;
-    const maxRowW = Math.max(mainW, 700);
-    let cx = 0, rowH = 0;
-    for (let i = 1; i < comps.length; i++) {
-      const c = comps[i];
-      const cb = bboxOf(c);
-      if (cx > 0 && cx + cb.w > maxRowW) { cx = 0; cursorY += rowH + gap; rowH = 0; }
-      moveComp(c, -cb.mnx + cx, -cb.mny + cursorY);
-      cx += cb.w + gap;
-      rowH = Math.max(rowH, cb.h);
-    }
-  }
-
-  /* Simulation force-directed d'UN composant, centrée autour de l'origine. */
-  private _simulateComponent(comp: GNode[], k: number): void {
-    const M = comp.length;
-    if (M === 1) { comp[0].x = 0; comp[0].y = 0; comp[0].vx = 0; comp[0].vy = 0; return; }
-    const ids = new Set(comp.map((n) => n.id));
-    const cedges = this.edges.filter((e) => e.a !== e.b && ids.has(e.a) && ids.has(e.b));
-    const idx: Record<string, number> = {}; comp.forEach((n, i) => { idx[n.id] = i; });
-    const R = 50 + M * 6;
-    comp.forEach((n, i) => { const a = (i / M) * Math.PI * 2; n.x = R * Math.cos(a); n.y = R * Math.sin(a); n.vx = 0; n.vy = 0; });
-    let temp = R * 0.9; const iters = 300;
-    for (let it = 0; it < iters; it++) {
-      for (let i = 0; i < M; i++) {
-        let fx = 0, fy = 0; const a = comp[i];
-        for (let j = 0; j < M; j++) {
-          if (i === j) continue; const b = comp[j];
-          const dx = a.x - b.x, dy = a.y - b.y; const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-          const rep = (k * k) / d; fx += (dx / d) * rep; fy += (dy / d) * rep;
-        }
-        fx += (0 - a.x) * 0.012; fy += (0 - a.y) * 0.012;
-        a.vx = fx; a.vy = fy;
-      }
-      cedges.forEach((e) => {
-        const a = comp[idx[e.a]], b = comp[idx[e.b]]; if (!a || !b || a === b) return;
-        const dx = a.x - b.x, dy = a.y - b.y; const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        const att = (d * d) / k; const ux = dx / d, uy = dy / d;
-        a.vx -= ux * att; a.vy -= uy * att; b.vx += ux * att; b.vy += uy * att;
-      });
-      for (let i = 0; i < M; i++) { const a = comp[i]; const dl = Math.sqrt(a.vx * a.vx + a.vy * a.vy) || 0.01; a.x += (a.vx / dl) * Math.min(dl, temp); a.y += (a.vy / dl) * Math.min(dl, temp); }
-      temp *= 0.985;
-    }
+    GraphGeometry.forceLayout(this.nodes, this.edges, W, H);
   }
 
   /* ---- rendu SVG ---- */

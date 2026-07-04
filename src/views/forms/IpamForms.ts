@@ -1,42 +1,9 @@
 import type { Store } from "../../store";
-import type { ImageStore } from "../../data/ImageStore";
-import type { ModalOptions } from "../../ui/Modal";
 import { FormControls } from "../../ui/FormControls";
-import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
-import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
-import { Text } from "../../core/Text";
-import { Color } from "../../core/Color";
-import { Format } from "../../core/Format";
-import { FloorLayout } from "../../geometry/FloorLayout";
 import { Ip } from "../../core/Ip";
-import { GroupTypes } from "../../domain/GroupTypes";
-import { CableStatuses } from "../../domain/CableStatuses";
-import { SpareTypes } from "../../domain/SpareTypes";
-import { SpareStatuses } from "../../domain/SpareStatuses";
-import { Waypoint } from "../../models/Waypoint";
-import { EquipmentTypes } from "../../registries/EquipmentTypes";
-import { Depths } from "../../registries/Depths";
-import { PortRoles } from "../../registries/PortRoles";
-import { PortTypes } from "../../registries/PortTypes";
-import { EquipFaces } from "../../registries/EquipFaces";
-import { Id } from "../../core/Id";
-import { RackGeometry } from "../../geometry/RackGeometry";
-import { RackScene } from "../../geometry/RackScene";
-import { RackItemKinds } from "../../domain/RackItemKinds";
-import { Normalize } from "../../core/Normalize";
-import {
-  POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT, LOCATIONS, FLOORS, RACK_SIDES, RACK_FACES, RACK_DEPTHS,
-  RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_MOUNT_MARGIN_DEFAULT, U_MM, SIDE_U_STEP,
-  BREAKOUT_SPANS, CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW,
-  EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, EQUIP_FREE_DEFAULT_MM,
-  WAYPOINT_TYPES, OOB_HEIGHT_DEFAULT, WAYPOINT_Z_DEFAULT, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT, BRUSH_PADDING_MM,
-  FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT,
-  SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
-  SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
-} from "../../domain/constants";
-import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS } from "./shared";
+import { FormUi } from "./shared";
 import type { FormHost } from "./shared";
 import { RackForms } from "./RackForms";
 import { LiveValidation } from "./LiveValidation";
@@ -91,7 +58,7 @@ export class IpamForms extends RackForms {
     const addr: any = id ? store.get("ipAddresses", id) : null;
     if (!addr && !store.all("ipNetworks").length) { Notify.toast("Créez d'abord un réseau IP.", "err"); return; }
     const root = document.createElement("div");
-    const netSel = FormControls.select(ipNetOptions(store), addr ? addr.network_id : "");
+    const netSel = FormControls.select(FormUi.ipNetOptions(store), addr ? addr.network_id : "");
     root.appendChild(FormControls.fieldRow("Réseau IP", netSel));
     const ipWrap = document.createElement("div"); ipWrap.style.display = "flex"; ipWrap.style.gap = "8px";
     const ipI = FormControls.text(addr ? addr.address : "", "ex. 10.0.0.10"); ipI.style.flex = "1"; ipI.style.fontFamily = "var(--mono)";
@@ -104,7 +71,7 @@ export class IpamForms extends RackForms {
     root.appendChild(FormControls.fieldRow("Adresse IP", ipWrap)); root.appendChild(hint);
     const hostI = FormControls.text(addr ? addr.hostname : "", "ex. srv-web-01.lan"); hostI.style.fontFamily = "var(--mono)";
     root.appendChild(FormControls.fieldRow("Hostname", hostI, "Facultatif."));
-    const eqSel = FormControls.select(eqOptions(store, "— aucun —"), addr ? (addr.equipment_id || "") : "");
+    const eqSel = FormControls.select(FormUi.eqOptions(store, "— aucun —"), addr ? (addr.equipment_id || "") : "");
     root.appendChild(FormControls.fieldRow("Équipement", eqSel, "Facultatif."));
     const descI = FormControls.textArea(addr ? addr.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));
@@ -138,7 +105,7 @@ export class IpamForms extends RackForms {
     const rng: any = id ? store.get("dhcpRanges", id) : null;
     if (!rng && !store.all("ipNetworks").length) { Notify.toast("Créez d'abord un réseau IP.", "err"); return; }
     const root = document.createElement("div");
-    const netSel = FormControls.select(ipNetOptions(store), rng ? rng.network_id : "");
+    const netSel = FormControls.select(FormUi.ipNetOptions(store), rng ? rng.network_id : "");
     root.appendChild(FormControls.fieldRow("Réseau IP", netSel));
     const startI = FormControls.text(rng ? rng.start_ip : "", "ex. 10.0.0.100"); startI.style.fontFamily = "var(--mono)";
     const endI = FormControls.text(rng ? rng.end_ip : "", "ex. 10.0.0.200"); endI.style.fontFamily = "var(--mono)";
@@ -147,7 +114,7 @@ export class IpamForms extends RackForms {
     netSel.addEventListener("change", refresh); refresh();
     root.appendChild(FormControls.fieldRow("Début de plage", startI));
     root.appendChild(FormControls.fieldRow("Fin de plage", endI)); root.appendChild(hint);
-    const srvSel = FormControls.select(eqOptions(store, "— non désigné —"), rng ? (rng.server_id || "") : "");
+    const srvSel = FormControls.select(FormUi.eqOptions(store, "— non désigné —"), rng ? (rng.server_id || "") : "");
     root.appendChild(FormControls.fieldRow("Serveur DHCP", srvSel, "Facultatif."));
     const descI = FormControls.textArea(rng ? rng.description : "");
     root.appendChild(FormControls.fieldRow("Description", descI));

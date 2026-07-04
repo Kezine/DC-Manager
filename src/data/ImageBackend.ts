@@ -7,7 +7,6 @@ import type { ImageRec } from "./ImageStore";
      - mode FICHIER  → IndexedDB (base dédiée) ; le compagnon .nmfb reste géré
        par ImageStore.serializeBundle/loadBundle (artefact fichier).
      - mode API      → endpoints blob REST (`/images`) ; pas de .nmfb.
-   Voir docs/rest-migration.md (P2).
    ============================================================================= */
 export interface ImageBackend {
   /** Hydrate la totalité (boot / session). En REST, `blob` peut être null et `url` pointe le serveur. */
@@ -44,7 +43,7 @@ export class IdbImageBackend implements ImageBackend {
 }
 
 /* ---------- REST (mode API) — endpoints blob ; cookies SSO transmis ----------
-   Contrat (cf. docs/rest-migration.md §4) :
+   Contrat :
      GET    /images              → [{ id, name, u_height, face, description, type, bytes }]
      GET    /images/{id}/blob    → binaire
      PUT    /images/{id}         → multipart { meta: JSON, blob: file } (crée/remplace)

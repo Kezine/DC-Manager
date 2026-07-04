@@ -2,7 +2,7 @@
    Préférences GLOBALES de l'application (localStorage) — INDÉPENDANTES du document
    et du cache de session : thème, auto-save (+ fréquence), source de données.
    Le mode "local" utilise le BrowserStorageAdapter (+ fichier) ; le mode "api"
-   (RestAdapter) n'est pas encore implémenté et reste désactivé dans l'UI.
+   utilise le RestAdapter (serveur REST multi-documents, cf. main.ts restBootstrap).
    ============================================================================= */
 export type ThemeName = "dark" | "light";
 export type DataSource = "local" | "api";

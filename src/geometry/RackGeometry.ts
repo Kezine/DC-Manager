@@ -159,8 +159,14 @@ export class RackGeometry {
     const d = rack.depth || RACK_DEPTH_DEFAULT, cage = Math.min(d, RackGeometry.cageDepth(rack)), fm = RackGeometry.frontMargin(rack);
     return (margin === "rear") ? Math.max(0, d - fm - cage) : fm;
   }
-  /** Wall-mount possible sur cette marge ? (profondeur ≥ 1U). */
-  static wallEnabled(rack: any, margin: string): boolean { return RackGeometry.marginDepth(rack, margin) >= U_MM; }
+  /** Montage en PAROI possible dans cette marge ? Profondeur ≥ 1U ET même AUTORISATION que le side-mount
+      (avant/arrière) : les emplacements en paroi sont des emplacements LATÉRAUX au même titre que la marge —
+      le toggle « Side-mount » du formulaire de baie gouverne les DEUX (unifiés). Ne gate que l'OFFRE de
+      nouveaux emplacements ; les équipements déjà montés en paroi restent rendus/édités. */
+  static wallEnabled(rack: any, margin: string): boolean {
+    return RackGeometry.marginDepth(rack, margin) >= U_MM
+      && (margin === "rear" ? rack.allow_side_rear === true : rack.allow_side_front === true);
+  }
   /** Repère de la marge : face extérieure, sens vers les montants, colonnes. */
   static wallGeo(rack: any, margin: string): WallGeo {
     const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2, dep = RackGeometry.marginDepth(rack, margin);

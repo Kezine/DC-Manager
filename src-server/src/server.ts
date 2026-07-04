@@ -20,6 +20,9 @@ export class Server {
     this.httpLog = this.log.child("http");
     this.app = express();
     this.app.disable("x-powered-by");
+    // Anti MIME-sniffing : le navigateur ne doit jamais « deviner » un type exécutable sur une réponse
+    // (ex. un blob d'image au Content-Type fourni par le client) — défense en profondeur contre le XSS stocké.
+    this.app.use((_req, res, next) => { res.setHeader("X-Content-Type-Options", "nosniff"); next(); });
     this.app.use(this.requestLogger);                 // trace de chaque requête (niveau selon le code)
     if (opts.auth.mode === "basic") this.app.use(this.basicGate);   // gate Basic Auth (dev) sur TOUT (sauf /healthz)
     this.app.use(express.json({ limit: "128mb" }));   // /snapshot et /transact peuvent être volumineux
@@ -55,8 +58,12 @@ export class Server {
   };
 
   private errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
-    this.log.error("exception", req.method, req.originalUrl, (err && err.stack) || err);
-    if (!res.headersSent) res.status(500).json({ error: "erreur interne" });
+    // `err.status` est posé par les middlewares Express (ex. express.json → 400 sur JSON malformé, 413 sur corps
+    // trop gros) : l'honorer évite de requalifier une erreur CLIENT en 500. Sans statut → vraie erreur interne.
+    const code = (err && (err.status || err.statusCode)) || 500;
+    if (code >= 500) this.log.error("exception", req.method, req.originalUrl, (err && err.stack) || err);
+    else this.log.warn("requête invalide", req.method, req.originalUrl, code, (err && err.message) || "");
+    if (!res.headersSent) res.status(code).json({ error: code >= 500 ? "erreur interne" : "requête invalide" });
   };
 
   /* Sert dist/dc-manager.html (JS+CSS inlinés) en injectant window.__DCMANAGER_CONFIG__ dans <head> AVANT le bundle :

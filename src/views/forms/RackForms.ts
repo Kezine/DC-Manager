@@ -1,43 +1,23 @@
 import type { Store } from "../../store";
-import type { ImageStore } from "../../data/ImageStore";
-import type { ModalOptions } from "../../ui/Modal";
 import { FormControls } from "../../ui/FormControls";
-import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
-import { Text } from "../../core/Text";
-import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
-import { FloorLayout } from "../../geometry/FloorLayout";
-import { Ip } from "../../core/Ip";
 import { LiveValidation } from "./LiveValidation";
-import { GroupTypes } from "../../domain/GroupTypes";
-import { CableStatuses } from "../../domain/CableStatuses";
-import { SpareTypes } from "../../domain/SpareTypes";
-import { SpareStatuses } from "../../domain/SpareStatuses";
 import { Waypoint } from "../../models/Waypoint";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
-import { Depths } from "../../registries/Depths";
-import { PortRoles } from "../../registries/PortRoles";
-import { PortTypes } from "../../registries/PortTypes";
-import { EquipFaces } from "../../registries/EquipFaces";
-import { Id } from "../../core/Id";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { RackScene } from "../../geometry/RackScene";
 import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Normalize } from "../../core/Normalize";
 import {
-  POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT, LOCATIONS, FLOORS, RACK_SIDES, RACK_FACES, RACK_DEPTHS,
+  FLOORS, RACK_SIDES, RACK_FACES, RACK_DEPTHS,
   RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_MOUNT_MARGIN_DEFAULT, U_MM, SIDE_U_STEP,
-  BREAKOUT_SPANS, CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW,
-  EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, EQUIP_FREE_DEFAULT_MM,
-  WAYPOINT_TYPES, OOB_HEIGHT_DEFAULT, WAYPOINT_Z_DEFAULT, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT, BRUSH_PADDING_MM, RACK_DEPTH_SAFETY_MM,
-  FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT,
-  SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
-  SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
+  RACK_DEPTH_SAFETY_MM,
+  FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT
 } from "../../domain/constants";
-import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS, ORIENT_OPTS } from "./shared";
+import { FormUi, ORIENT_OPTS } from "./shared";
 import type { FormHost } from "./shared";
 import { CableForms } from "./CableForms";
 import { EntityViz } from "../EntityViz";
@@ -56,25 +36,25 @@ export class RackForms extends CableForms {
     const dcxI = FormControls.number((rk && rk.dc_x != null) ? rk.dc_x : "", { min: 0, step: 10, placeholder: "centre X (mm)" });
     const dcyI = FormControls.number((rk && rk.dc_y != null) ? rk.dc_y : "", { min: 0, step: 10, placeholder: "centre Y (mm)" });
     const orientI = FormControls.select(ORIENT_OPTS, String(Normalize.rackOrientation(rk ? rk.orientation : 0)));
-    const posRow = row2(FormControls.fieldRow("Position X (mm)", dcxI), FormControls.fieldRow("Position Y (mm)", dcyI), FormControls.fieldRow("Orientation (face avant)", orientI));
+    const posRow = FormUi.row2(FormControls.fieldRow("Position X (mm)", dcxI), FormControls.fieldRow("Position Y (mm)", dcyI), FormControls.fieldRow("Orientation (face avant)", orientI));
     root.appendChild(posRow);
     // lieu/étage/local : manuels hors salle, hérités (verrouillés) si placé dans une salle.
-    const locI = FormControls.select(locOptions(store), rk ? rk.location : "");
-    const floorI = FormControls.select(floorOptions(rk ? rk.floor : ""), rk ? rk.floor : "");
+    const locI = FormControls.select(FormUi.locOptions(store), rk ? rk.location : "");
+    const floorI = FormControls.select(FormUi.floorOptions(rk ? rk.floor : ""), rk ? rk.floor : "");
     const roomI = FormControls.text(rk ? rk.room : "", "local");
-    root.appendChild(row2(FormControls.fieldRow("Lieu", locI), FormControls.fieldRow("Étage", floorI), FormControls.fieldRow("Local", roomI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Lieu", locI), FormControls.fieldRow("Étage", floorI), FormControls.fieldRow("Local", roomI)));
     const dcHint = document.createElement("div"); dcHint.className = "form-hint"; root.appendChild(dcHint);
     const syncDc = () => {
       const d: any = dcSel.value ? store.get("datacenters", dcSel.value) : null;
       posRow.style.display = d ? "" : "none";
       [locI, floorI, roomI].forEach((el: any) => { el.disabled = !!d; el.style.opacity = d ? "0.7" : ""; });
-      if (d) { locI.value = d.location || ""; setOptions(floorI, floorOptions(d.floor || ""), d.floor || ""); roomI.value = d.room || ""; }
+      if (d) { locI.value = d.location || ""; FormUi.setOptions(floorI, FormUi.floorOptions(d.floor || ""), d.floor || ""); roomI.value = d.room || ""; }
       dcHint.innerHTML = d ? "⛓ Lieu/étage/local hérités de « " + Html.escape(d.name || "(salle)") + " » (" + (d.width_mm / 1000).toFixed(1) + "×" + (d.depth_mm / 1000).toFixed(1) + " m). Position vide = centre." : "";
     };
     dcSel.onchange = syncDc; syncDc();
 
     // cage
-    root.appendChild(divider("Dimensions de la cage"));
+    root.appendChild(FormUi.divider("Dimensions de la cage"));
     const uI = FormControls.number(rk ? rk.u_count : 42, { min: 1 });
     const vmI = FormControls.number(rk ? RackGeometry.vMarginTop(rk) : RACK_MOUNT_MARGIN_DEFAULT, { min: 0 });
     const vmBotI = FormControls.number(rk && rk.vmargin_bottom_mm != null ? rk.vmargin_bottom_mm : "", { min: 0, placeholder: "= marge haute" });
@@ -82,26 +62,26 @@ export class RackForms extends CableForms {
     const fmI = FormControls.number(rk ? RackGeometry.frontMargin(rk) : 0, { min: 0, placeholder: "0" });
     const lmI = FormControls.number(rk ? RackGeometry.lMargin(rk) : RACK_MOUNT_MARGIN_DEFAULT, { min: 0 });
     const sidesI = FormControls.select(RACK_SIDES.map((s) => ({ value: s.id, label: s.label })), rk ? rk.sides : "single");
-    root.appendChild(row2(FormControls.fieldRow("Hauteur (U)", uI), FormControls.fieldRow("Marge verticale (mm)", vmI), FormControls.fieldRow("Marge basse (mm)", vmBotI)));
-    root.appendChild(row2(FormControls.fieldRow("Profondeur cage (mm)", cageI), FormControls.fieldRow("Marge avant (mm)", fmI), FormControls.fieldRow("Marge latérale (mm)", lmI), FormControls.fieldRow("Faces", sidesI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Hauteur (U)", uI), FormControls.fieldRow("Marge verticale (mm)", vmI), FormControls.fieldRow("Marge basse (mm)", vmBotI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Profondeur cage (mm)", cageI), FormControls.fieldRow("Marge avant (mm)", fmI), FormControls.fieldRow("Marge latérale (mm)", lmI), FormControls.fieldRow("Faces", sidesI)));
 
     // dimensions extérieures
-    root.appendChild(divider("Dimensions extérieures"));
+    root.appendChild(FormUi.divider("Dimensions extérieures"));
     const widthI = FormControls.number(rk ? rk.width_mm : RACK_WIDTH_DEFAULT, { min: 1 });
     const heightI = FormControls.number(rk && rk.height_mm != null ? rk.height_mm : "", { min: 1, placeholder: "= hauteur mini" });
     const depthI = FormControls.number(rk ? rk.depth : RACK_DEPTH_DEFAULT, { min: 1 });
     FormControls.attachDatalist(depthI, "dl-rack-depth", RACK_DEPTHS.map(String));
-    root.appendChild(row2(FormControls.fieldRow("Largeur (mm)", widthI), FormControls.fieldRow("Hauteur (mm)", heightI), FormControls.fieldRow("Profondeur (mm)", depthI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Largeur (mm)", widthI), FormControls.fieldRow("Hauteur (mm)", heightI), FormControls.fieldRow("Profondeur (mm)", depthI)));
     const geoHint = document.createElement("div"); geoHint.className = "form-hint"; root.appendChild(geoHint);
 
-    // side-mount
-    root.appendChild(divider("Montage latéral (marge)"));
+    // side-mount — gouverne les emplacements de la MARGE **et** ceux contre les PAROIS (unifiés : cf. RackGeometry.wallEnabled)
+    root.appendChild(FormUi.divider("Montage latéral (marge + parois)"));
     const sideFrontI = FormControls.toggle("Side-mount avant", rk ? !!rk.allow_side_front : false, () => {}, { block: true });
     const sideRearI = FormControls.toggle("Side-mount arrière", rk ? !!rk.allow_side_rear : false, () => {}, { block: true });
-    root.appendChild(row2(sideFrontI, sideRearI));
+    root.appendChild(FormUi.row2(sideFrontI, sideRearI));
 
     // -- portes (avant/arrière) en saillie : épaisseur, charnière, pleine/creuse --
-    root.appendChild(divider("Portes (avant / arrière)"));
+    root.appendChild(FormUi.divider("Portes (avant / arrière)"));
     const doorInputs: Record<string, any> = {};
     const syncDoors = () => RACK_FACES.forEach((f) => { const di = doorInputs[f.id]; if (!di) return; di.ctrls.style.display = di.enI.checked ? "" : "none"; di.hmRow.style.display = (di.enI.checked && di.hollowI.checked) ? "" : "none"; });
     const doorsWrap = document.createElement("div"); doorsWrap.style.cssText = "display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;";
@@ -123,18 +103,21 @@ export class RackForms extends CableForms {
     });
     root.appendChild(doorsWrap); syncDoors();
 
-    // -- capots : emplacements waypoint (toit/sol), grilles multi-sélection, SAUVE IMMÉDIAT --
+    // -- capots : emplacements waypoint (toit/sol), grilles multi-sélection, TAMPON local --
     // (réservé à un rack EXISTANT : la grille dépend des dimensions enregistrées)
+    // Les cellules sont éditées LOCALEMENT et appliquées au clic sur « Enregistrer », comme tous les autres
+    // champs — l'ancienne sauvegarde immédiate écrivait DEUX fois (au changement de capot + au bouton).
+    const capBuf: Record<string, string[]> = { roof: rk ? [...RackGeometry.capCells(rk, "roof")] : [], floor: rk ? [...RackGeometry.capCells(rk, "floor")] : [] };
     if (rk) {
-      root.appendChild(divider("Capots — emplacements Waypoint (toit / sol)"));
+      root.appendChild(FormUi.divider("Capots — emplacements Waypoint (toit / sol)"));
       const capHint = document.createElement("div"); capHint.className = "form-hint"; capHint.style.textAlign = "center";
-      capHint.textContent = "Vue de dessus (maille 1U, bord supérieur = face avant). Glissez pour (dé)autoriser des cellules : elles deviennent des TROUS où poser un Waypoint Pin (clic du trou en 3D). Une cellule portant un pin (◆) n'est pas retirable. Enregistré immédiatement.";
+      capHint.textContent = "Vue de dessus (maille 1U, bord supérieur = face avant). Glissez pour (dé)autoriser des cellules : elles deviennent des TROUS où poser un Waypoint Pin (clic du trou en 3D). Une cellule portant un pin (◆) n'est pas retirable. Appliqué au clic sur « Enregistrer ».";
       root.appendChild(capHint);
       const capRow = document.createElement("div"); capRow.style.cssText = "display:flex;gap:22px;flex-wrap:wrap;justify-content:center;align-items:flex-start;margin-top:8px;";
       [{ face: "roof", label: "Toit (dessus)" }, { face: "floor", label: "Sol (dessous)" }].forEach((cf) => {
         const col = document.createElement("div"); col.style.textAlign = "center";
         const t = document.createElement("div"); t.className = "form-hint"; t.style.cssText = "font-weight:600;color:var(--fg);margin-bottom:4px;"; t.textContent = cf.label;
-        col.appendChild(t); col.appendChild(this.capEditor(store, host, rk, cf.face).el);
+        col.appendChild(t); col.appendChild(this.capEditor(store, rk, cf.face, { get: () => capBuf[cf.face], set: (v) => { capBuf[cf.face] = v; } }).el);
         capRow.appendChild(col);
       });
       root.appendChild(capRow);
@@ -192,6 +175,9 @@ export class RackForms extends CableForms {
           door_rear: { enabled: (doorInputs.rear.enI as any).checked, thickness_mm: Math.max(1, parseInt(doorInputs.rear.thI.value, 10) || 40), hinge: doorInputs.rear.hingeI.value === "right" ? "right" : "left", hollow: (doorInputs.rear.hollowI as any).checked, hollow_mm: Math.max(0, parseInt(doorInputs.rear.hmI.value, 10) || 0) },
           description: descI.value.trim(),
         };
+        // Cellules de capot ÉDITÉES DANS LE TAMPON (rack existant seulement — pas d'éditeur sur une baie neuve) :
+        // appliquées ICI, en une seule écriture avec le reste du formulaire.
+        if (rk) { payload.roof_cells = capBuf.roof; payload.floor_cells = capBuf.floor; }
         if (live.check(payload).length) return false;   // validation live : champ(s) surligné(s), enregistrement bloqué
         // redimensionnement d'une baie occupée (nombre de U) → déplace ses équipements
         if (rk && g.u !== rk.u_count) {
@@ -302,16 +288,16 @@ export class RackForms extends CableForms {
     const root = document.createElement("div");
     const nameI = FormControls.text(dc ? dc.name : "", "ex. Salle A");
     root.appendChild(FormControls.fieldRow("Nom", nameI));
-    root.appendChild(divider("Dimensions de la salle"));
+    root.appendChild(FormUi.divider("Dimensions de la salle"));
     const wI = FormControls.number(dc ? dc.width_mm : 6000, { min: 1, step: 100, placeholder: "largeur (mm)" });
     const dI = FormControls.number(dc ? dc.depth_mm : 4000, { min: 1, step: 100, placeholder: "profondeur (mm)" });
     const cI = FormControls.number(dc ? dc.cell_mm : 600, { min: 1, step: 50, placeholder: "maille (mm)" });
-    root.appendChild(row2(FormControls.fieldRow("Largeur (mm)", wI), FormControls.fieldRow("Profondeur (mm)", dI), FormControls.fieldRow("Maille (mm)", cI)));
-    root.appendChild(divider("Localisation"));
-    const locI = FormControls.select(locOptions(store), dc ? dc.location : "");
-    const floorI = FormControls.select(floorOptions(dc ? dc.floor : ""), dc ? dc.floor : "");
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Largeur (mm)", wI), FormControls.fieldRow("Profondeur (mm)", dI), FormControls.fieldRow("Maille (mm)", cI)));
+    root.appendChild(FormUi.divider("Localisation"));
+    const locI = FormControls.select(FormUi.locOptions(store), dc ? dc.location : "");
+    const floorI = FormControls.select(FormUi.floorOptions(dc ? dc.floor : ""), dc ? dc.floor : "");
     const roomI = FormControls.text(dc ? dc.room : "", "local");
-    root.appendChild(row2(FormControls.fieldRow("Lieu", locI), FormControls.fieldRow("Étage", floorI), FormControls.fieldRow("Local", roomI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Lieu", locI), FormControls.fieldRow("Étage", floorI), FormControls.fieldRow("Local", roomI)));
     const live = new LiveValidation("datacenters", { name: nameI });
     live.clearOnInput();
 
@@ -342,14 +328,14 @@ export class RackForms extends CableForms {
     const root = document.createElement("div");
     const wallI = FormControls.select([{ value: "top", label: "Mur avant (haut)" }, { value: "bottom", label: "Mur arrière (bas)" }, { value: "left", label: "Mur gauche" }, { value: "right", label: "Mur droit" }], door.wall);
     const offI = FormControls.number(door.offset, { min: 0, step: 10, placeholder: "centre le long du mur" });
-    root.appendChild(row2(FormControls.fieldRow("Mur", wallI), FormControls.fieldRow("Position sur le mur (mm)", offI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Mur", wallI), FormControls.fieldRow("Position sur le mur (mm)", offI)));
     const wI = FormControls.number(door.width_mm, { min: 100, step: 10 });
     const hI = FormControls.number(door.height_mm, { min: 100, step: 10 });
     const fI = FormControls.number(door.frame_mm, { min: 0, step: 5 });
-    root.appendChild(row2(FormControls.fieldRow("Largeur d'ouverture (mm)", wI), FormControls.fieldRow("Hauteur (mm)", hI), FormControls.fieldRow("Épaisseur du listel (mm)", fI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Largeur d'ouverture (mm)", wI), FormControls.fieldRow("Hauteur (mm)", hI), FormControls.fieldRow("Épaisseur du listel (mm)", fI)));
     const hinI = FormControls.select([{ value: "left", label: "Gauche" }, { value: "right", label: "Droite" }], door.hinge);
     const opI = FormControls.select([{ value: "interior", label: "Vers l'intérieur" }, { value: "exterior", label: "Vers l'extérieur" }], door.opening);
-    root.appendChild(row2(FormControls.fieldRow("Côté charnière", hinI), FormControls.fieldRow("Sens d'ouverture", opI)));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Côté charnière", hinI), FormControls.fieldRow("Sens d'ouverture", opI)));
     const hint = document.createElement("div"); hint.className = "form-hint"; root.appendChild(hint);
     const sync = () => { const w = Math.max(100, parseInt(wI.value, 10) || 900), f = Math.max(0, parseInt(fI.value, 10) || 0); hint.innerHTML = "Passage LIBRE (largeur max d'équipement) : <b style=\"color:var(--accent)\">" + Math.max(0, w - 2 * f) + " mm</b>.<br>Le côté charnière se définit depuis le côté d'OUVERTURE : observateur placé du côté où la porte s'ouvre, regardant le mur → charnière à sa gauche / droite."; };
     wI.oninput = sync; fI.oninput = sync; sync();
@@ -410,14 +396,14 @@ export class RackForms extends CableForms {
     let capChosen: any = isCapPin ? { cx: wp.cap_cx | 0, cy: wp.cap_cy | 0 } : null;
     if (isCapPin) {
       const rk: any = store.get("racks", wp.rack_id);
-      if (rk) { root.appendChild(divider("Emplacement sur le capot (" + (wp.cap_face === "floor" ? "sol" : "toit") + ")"));
+      if (rk) { root.appendChild(FormUi.divider("Emplacement sur le capot (" + (wp.cap_face === "floor" ? "sol" : "toit") + ")"));
         root.appendChild(this.capPickGrid(store, rk, wp.cap_face, { exceptId: wp.id, selected: capChosen, onPick: (cx: number, cy: number) => { capChosen = { cx, cy }; } }).el); }
     }
     // GRILLE de marge (pin latéral) : déplacer dans un autre slot de la même marge.
     let pinChosen: any = isSidePin ? { lr: (wp.side_lr === "right" ? "right" : "left"), col: (wp.side_col === 1 ? 1 : 0), u: Math.max(1, wp.side_u | 0) } : null;
     if (isSidePin) {
       const rk: any = store.get("racks", wp.rack_id);
-      if (rk) { root.appendChild(divider("Emplacement en marge (" + this.faceLabel(wp.side_face === "rear" ? "rear" : "front") + ")"));
+      if (rk) { root.appendChild(FormUi.divider("Emplacement en marge (" + this.faceLabel(wp.side_face === "rear" ? "rear" : "front") + ")"));
         root.appendChild(this.sideGrid(store, scene, rk, { face: wp.side_face === "rear" ? "rear" : "front", heightU: SIDE_U_STEP, width: 0, exceptEqId: wp.id, selected: pinChosen, onPick: (lr: string, col: number, u: number) => { pinChosen = { lr, col, u }; } }).el); }
     }
     const descI = FormControls.textArea(wp.description || "");
@@ -469,9 +455,9 @@ export class RackForms extends CableForms {
     const floorExists = (L: string, F: string) => !!store.floorFor(L, F) || store.dcsOfFloor(L, F).length > 0
       || store.oobWaypoints().some((w: any) => (w.location || "") === (L || "") && String(w.floor || "") === String(F || ""));
     if (pick) {
-      locSel = FormControls.select(locOptions(store), location || "");
+      locSel = FormControls.select(FormUi.locOptions(store), location || "");
       flSel = FormControls.select([], "");   // peuplé dynamiquement (étages NON existants du bâtiment choisi)
-      root.appendChild(row2(FormControls.fieldRow("Bâtiment", locSel, "Bâtiment (lieu) de l'étage."), FormControls.fieldRow("Étage", flSel)));
+      root.appendChild(FormUi.row2(FormControls.fieldRow("Bâtiment", locSel, "Bâtiment (lieu) de l'étage."), FormControls.fieldRow("Étage", flSel)));
       pickStatus = document.createElement("div"); pickStatus.className = "form-hint"; root.appendChild(pickStatus);
       const rebuildFloors = () => {
         const L = locSel!.value || "", keep = flSel!.value;
@@ -495,11 +481,11 @@ export class RackForms extends CableForms {
     const wI = FormControls.number(f.width_mm, { min: 1, step: 500 });
     const dI = FormControls.number(f.depth_mm, { min: 1, step: 500 });
     const cI = FormControls.number(f.cell_mm, { min: 1, step: 100 });
-    root.appendChild(row2(FormControls.fieldRow("Largeur (mm)", wI), FormControls.fieldRow("Profondeur (mm)", dI), FormControls.fieldRow("Maille (mm)", cI, "Pas de la grille du plan (défaut 1000 = 1 m).")));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Largeur (mm)", wI), FormControls.fieldRow("Profondeur (mm)", dI), FormControls.fieldRow("Maille (mm)", cI, "Pas de la grille du plan (défaut 1000 = 1 m).")));
     const axI = FormControls.number(f.anchor_x || 0, { step: 100 });
     const ayI = FormControls.number(f.anchor_y || 0, { step: 100 });
     const hI = FormControls.number(f.height_mm || 0, { min: 0, step: 100 });
-    root.appendChild(row2(FormControls.fieldRow("Ancrage X (mm)", axI, "Décalage du plan d'étage dans la pile 3D — aligner / décaler les étages entre eux."), FormControls.fieldRow("Ancrage Y (mm)", ayI), FormControls.fieldRow("Hauteur (mm)", hI, "Hauteur de l'étage dans la pile 3D (0 = auto = hauteur du contenu).")));
+    root.appendChild(FormUi.row2(FormControls.fieldRow("Ancrage X (mm)", axI, "Décalage du plan d'étage dans la pile 3D — aligner / décaler les étages entre eux."), FormControls.fieldRow("Ancrage Y (mm)", ayI), FormControls.fieldRow("Hauteur (mm)", hI, "Hauteur de l'étage dans la pile 3D (0 = auto = hauteur du contenu).")));
     const descI = FormControls.textArea(f.description || "");
     root.appendChild(FormControls.fieldRow("Description", descI));
     host.openModal({
@@ -559,8 +545,8 @@ export class RackForms extends CableForms {
     const isEq = () => kindI.value === "equipment";
     const isBrush = () => kindI.value === "brush";
     const selEq = () => store.get("equipments", eqI.value);
-    const effMount = () => isEq() ? { depth: (selEq() ? selEq().depth : "full"), side, locks_u: (selEq() ? RackGeometry.mountLocksU(selEq()) : false) } : { side, isItem: true };
-    const effHeight = () => isEq() ? (selEq() ? Math.max(1, selEq().u_height || 1) : 1) : Math.max(1, parseInt(pheightI.value, 10) || 1);
+    const effMount = () => { const eq = selEq(); return isEq() ? { depth: (eq ? eq.depth : "full"), side, locks_u: (eq ? RackGeometry.mountLocksU(eq) : false) } : { side, isItem: true }; };
+    const effHeight = () => { const eq = selEq(); return isEq() ? (eq ? Math.max(1, eq.u_height || 1) : 1) : Math.max(1, parseInt(pheightI.value, 10) || 1); };
     const brushSides = () => (rack.sides === "dual") ? ["front", "rear"] : ["front"];
     const syncVis = () => { const e = isEq(), b = isBrush(); eqRow.style.display = e ? "" : "none"; labelRow.style.display = e ? "none" : ""; prow.style.display = e ? "none" : ""; bdepthRow.style.display = b ? "" : "none"; };
     kindI.onchange = syncVis; syncVis();
@@ -655,7 +641,7 @@ export class RackForms extends CableForms {
   /** Monter un équipement dans un emplacement MURAL libre (paroi, face vers le centre ou la façade). */
   static async assignWallSlot(store: Store, host: FormHost, rackId: string, wall: string, margin: string, col: number, uTop: number, onDone?: () => void): Promise<void> {
     const rack = store.get("racks", rackId); if (!rack) { Notify.toast("Baie introuvable", "err"); return; }
-    if (!RackGeometry.wallEnabled(rack, margin)) { Notify.toast("Montage en paroi indisponible (marge insuffisante).", "err"); return; }
+    if (!RackGeometry.wallEnabled(rack, margin)) { Notify.toast("Montage en paroi indisponible (marge insuffisante ou montage latéral non autorisé sur cette face).", "err"); return; }
     const scene = new RackScene(store);
     const g = RackGeometry.wallGeo(rack, margin);
     const effHeightU = (e: any) => Math.max(1, Math.ceil(((e.free_h_mm != null) ? e.free_h_mm : (e.u_height ? e.u_height * U_MM : SIDE_U_STEP * U_MM)) / U_MM));

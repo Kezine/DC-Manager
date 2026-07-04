@@ -1,44 +1,22 @@
 import type { Store } from "../../store";
 import type { ImageStore } from "../../data/ImageStore";
-import type { ModalOptions } from "../../ui/Modal";
 import { FormControls } from "../../ui/FormControls";
-import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
-import { Text } from "../../core/Text";
-import { Color } from "../../core/Color";
-import { Format } from "../../core/Format";
-import { FloorLayout } from "../../geometry/FloorLayout";
-import { Ip } from "../../core/Ip";
-import { GroupTypes } from "../../domain/GroupTypes";
-import { CableStatuses } from "../../domain/CableStatuses";
-import { SpareTypes } from "../../domain/SpareTypes";
-import { SpareStatuses } from "../../domain/SpareStatuses";
-import { Waypoint } from "../../models/Waypoint";
-import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Depths } from "../../registries/Depths";
-import { PortRoles } from "../../registries/PortRoles";
 import { PortTypes } from "../../registries/PortTypes";
 import { EquipFaces } from "../../registries/EquipFaces";
-import { Id } from "../../core/Id";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { RackScene } from "../../geometry/RackScene";
-import { RackItemKinds } from "../../domain/RackItemKinds";
-import { Normalize } from "../../core/Normalize";
 import {
-  POWER_SOURCES, EQUIPMENT_TYPE_DEFAULT, LOCATIONS, FLOORS, RACK_SIDES, RACK_FACES, RACK_DEPTHS,
-  RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_MOUNT_MARGIN_DEFAULT, U_MM, SIDE_U_STEP,
-  BREAKOUT_SPANS, CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW,
-  EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, EQUIP_FREE_DEFAULT_MM,
-  WAYPOINT_TYPES, OOB_HEIGHT_DEFAULT, WAYPOINT_Z_DEFAULT, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT, BRUSH_PADDING_MM,
-  FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT,
-  SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
-  SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
+  RACK_FACES,
+  SIDE_U_STEP,
+  BREAKOUT_SPANS,
+  EQUIP_FACE_IMG_FIELD
 } from "../../domain/constants";
-import { row2, divider, locOptions, floorOptions, setOptions, ipNetOptions, eqOptions, WAYPOINT_KIND_LABELS } from "./shared";
-import type { FormHost } from "./shared";
+import { Schema } from "../../../shared/Schema";   // types MIME d'images acceptés — liste PARTAGÉE (le serveur applique la même)
 
 export class FormBase {
   /** Bibliothèque d'images de façade (injectée au boot) — singleton applicatif (hors modèle). */
@@ -143,7 +121,12 @@ export class FormBase {
     ports.forEach((p: any) => { const mk = document.createElement("div"); mk.className = "face-marker" + (p.role === "mgmt" ? " role-mgmt" : (p.role === "power" ? " role-power" : "")); mk.style.left = (p.face_x * 100) + "%"; mk.style.top = (p.face_y * 100) + "%"; mk.textContent = p.name || "(port)"; stage.appendChild(mk); });
     return stage;
   }
-  protected static capEditor(store: Store, host: FormHost, rack: any, face: string): { el: HTMLElement; refresh: () => void } {
+  /** Éditeur de CAPOT (toit/sol) : grille SVG multi-sélection au glisser. Les cellules sont éditées dans un
+      TAMPON fourni par l'appelant (`cells`) et ne sont PERSISTÉES qu'à l'enregistrement du formulaire de baie —
+      l'ancienne sauvegarde immédiate doublait l'écriture (un save au changement de capot + un au bouton
+      « Enregistrer ») et créait des pas d'undo/écritures REST parasites. Une cellule portant un pin (◆, waypoint
+      posé) n'est pas retirable. */
+  protected static capEditor(store: Store, rack: any, face: string, cells: { get: () => string[]; set: (v: string[]) => void }): { el: HTMLElement; refresh: () => void } {
     const NS = "http://www.w3.org/2000/svg";
     const wrap = document.createElement("div"); wrap.className = "cap-grid-wrap";
     const g = RackGeometry.capGrid(rack), nx = g.nx, ny = g.ny;
@@ -154,12 +137,12 @@ export class FormBase {
     svg.setAttribute("class", "cap-grid"); svg.style.cssText = "display:block;background:var(--bg-1,#15171c);border:1px solid var(--line-2,#333);border-radius:6px;touch-action:none;";
     wrap.appendChild(svg);
     const mk = (tag: string, attrs: Record<string, string | number>): SVGElement => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, String(attrs[k])); return n; };
-    const cellsSet = () => new Set(RackGeometry.capCells(rack, face));
+    const cellsSet = () => new Set(cells.get());
     const occSet = () => { const s = new Set<string>(); store.all("waypoints").forEach((w: any) => { if (w.kind === "point" && w.rack_id === rack.id && w.cap_face === face) s.add((w.cap_cx | 0) + "," + (w.cap_cy | 0)); }); return s; };
     let prevRect: SVGElement | null = null;
     const clamp = (v: number, max: number) => Math.min(Math.max(v, 0), max - 1);
     const cellAt = (clientX: number, clientY: number) => { const rb = svg.getBoundingClientRect(); return { cx: clamp(Math.floor((clientX - rb.left) / cellPx), nx), cy: clamp(Math.floor((clientY - rb.top) / cellPx), ny) }; };
-    const applyRange = async (cx0: number, cy0: number, cx1: number, cy1: number) => {
+    const applyRange = (cx0: number, cy0: number, cx1: number, cy1: number): void => {
       const set = cellsSet(), occ = occSet();
       const add = !set.has(cx0 + "," + cy0);   // mode déduit de la 1re cellule
       let skipped = 0;
@@ -168,18 +151,16 @@ export class FormBase {
           const k = cx + "," + cy;
           if (add) set.add(k); else { if (occ.has(k)) { skipped++; continue; } set.delete(k); }
         }
-      await store.update("racks", rack.id, (face === "floor") ? { floor_cells: [...set] } : { roof_cells: [...set] });
-      host.setDirty?.(true);
+      cells.set([...set]);   // TAMPON local — persisté au clic sur « Enregistrer » du formulaire de baie
       if (skipped) Notify.toast(skipped + " cellule(s) conservée(s) : un pin y est posé.", "err");
       draw();
     };
     // « Supprimer tout » : retire tous les trous de ce capot. Les cellules portant un PIN sont conservées (comme la
     // suppression au glisser) — un pin exige un trou sous lui.
-    const clearAll = async () => {
+    const clearAll = (): void => {
       const occ = occSet();
       if (!cellsSet().size) return;   // rien à retirer
-      await store.update("racks", rack.id, (face === "floor") ? { floor_cells: [...occ] } : { roof_cells: [...occ] });
-      host.setDirty?.(true);
+      cells.set([...occ]);   // TAMPON local — persisté au clic sur « Enregistrer » du formulaire de baie
       if (occ.size) Notify.toast(occ.size + " cellule(s) conservée(s) : un pin y est posé.", "err");
       draw();
     };
@@ -210,7 +191,7 @@ export class FormBase {
     const bar = document.createElement("div"); bar.style.cssText = "display:flex;justify-content:center;margin-top:6px";
     const clearBtn = document.createElement("button"); clearBtn.type = "button"; clearBtn.className = "btn btn-ghost btn-sm";
     clearBtn.textContent = "Supprimer tout"; clearBtn.title = "Retirer tous les trous de ce capot (les cellules portant un pin sont conservées)";
-    clearBtn.onclick = () => { void clearAll(); };
+    clearBtn.onclick = () => { clearAll(); };
     bar.appendChild(clearBtn); wrap.appendChild(bar);
     return { el: wrap, refresh: draw };
   }
@@ -218,14 +199,14 @@ export class FormBase {
   /** Demande un fichier image à l'utilisateur (input file, JPEG/PNG/WebP). */
   protected static promptImageFile(): Promise<File | null> {
     return new Promise((resolve) => {
-      const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/png,image/jpeg,image/webp"; inp.style.display = "none";
+      const inp = document.createElement("input"); inp.type = "file"; inp.accept = Schema.IMAGE_MIME_TYPES.join(","); inp.style.display = "none";
       inp.onchange = () => { const f = inp.files && inp.files[0] ? inp.files[0] : null; inp.remove(); resolve(f); };
       document.body.appendChild(inp); inp.click();
     });
   }
   protected static validImageFile(f: File | null): File | null {
     if (!f) return null;
-    if (!/^image\/(png|jpeg|webp)$/.test(f.type)) { Notify.toast("Format non supporté (PNG / JPEG / WebP).", "err"); return null; }
+    if (!Schema.isImageMime(f.type)) { Notify.toast("Format non supporté (PNG / JPEG / WebP).", "err"); return null; }
     return f;
   }
   protected static sideGrid(store: Store, scene: RackScene, rack: any, opts: any): { el: HTMLElement; refresh: () => void } {

@@ -1,32 +1,8 @@
-import type { Store } from "../../store";
 import { Dom } from "../../ui/Dom";
-import { FormControls } from "../../ui/FormControls";
-import { Dialog } from "../../ui/Dialog";
 import { Notify } from "../../ui/Notify";
-import { ContextMenu } from "../../ui/ContextMenu";
-import type { CtxSection } from "../../ui/ContextMenu";
 import { ImageExport } from "../../ui/ImageExport";
 import type { ExportOptions } from "../../ui/ImageExport";
-import { Html } from "../../core/Html";
-import { Normalize } from "../../core/Normalize";
-import { RackGeometry } from "../../geometry/RackGeometry";
-import { RackScene } from "../../geometry/RackScene";
-import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
-import { Resolver3D } from "../../geometry/Resolver3D";
-import { FloorLayout } from "../../geometry/FloorLayout";
-import type { MultiLayout, RoomPlacement } from "../../geometry/FloorLayout";
-import { Box } from "../../geometry/Box";
-import { Painter } from "../../geometry/Painter";
-import { GridGeometry } from "../../geometry/GridGeometry";
-import { Depths } from "../../registries/Depths";
-import { EquipmentTypes } from "../../registries/EquipmentTypes";
-import { Format } from "../../core/Format";
-import { Text } from "../../core/Text";
-import { Waypoint } from "../../models/Waypoint";
-import { CableStatuses } from "../../domain/CableStatuses";
-import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, U_MM, SIDE_U_STEP, BRUSH_PADDING_MM } from "../../domain/constants";
-import { DC_DOT_PX, WP_HIT_PX, CABLE_PORT_STUB_MM, CABLE_SPLINE_K, CAM_PRESETS, DC_SCOPE_ICONS } from "./shared";
-import type { Vec3, Drawable, DatacenterHost } from "./shared";
+import { CAM_PRESETS } from "./shared";
 import { DcBase } from "./DcBase";
 
 /* Icônes des contrôles 3D : règle graduée (mesure), projection orthographique (lignes parallèles) / perspective (lignes fuyantes). */
@@ -51,7 +27,7 @@ const ICON_VIEW_FRONT = cubeIcon("M4 9L14 9L14 19L4 19Z"); // face avant (carré
 const ICON_VIEW_SIDE = cubeIcon("M14 9L19 4L19 14L14 19Z"); // face droite (losange latéral)
 const ICON_VIEW_BACK = cubeIcon("M9 4L19 4L19 14L9 14Z");   // face arrière (panneau du fond)
 
-export class DcCamera extends DcBase {
+export abstract class DcCamera extends DcBase {
 
   /** BANDEAU de contrôles en HAUT du canevas (zoom · recentrage · points de vue caméra · outils). Disposé en
       ligne (cf. .dc-control-bar) ; défilable horizontalement sur petit écran. L'icône « réglages 3D » (responsive)
