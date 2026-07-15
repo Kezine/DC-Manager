@@ -353,22 +353,29 @@ export class CertsAdminView {
 
     // PKI INITIALISÉE → déverrouillage par phrase secrète (input password STANDARD .form-field).
     const title = document.createElement("div"); title.style.cssText = "font-weight:600;color:var(--fg);margin-bottom:6px";
-    title.textContent = "Déverrouiller la clé maître";
+    title.textContent = "Déverrouiller le coffre de certificat";
     const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "8px";
     hint.textContent = "Saisissez la phrase secrète maître pour créer, émettre ou exporter des clés. La liste ci-dessous reste consultable sans déverrouiller.";
 
+    // Le bouton est frère de l'INPUT SEUL (pas du .form-field label+input) : posé à côté du champ
+    // ENTIER, `align-items:flex-end` collait son bas à celui de l'input alors qu'il est ~15 px plus
+    // court (input : padding 8px/13px ≈ 37 px · .btn-sm : padding 4px/10px ≈ 22 px) → il paraissait
+    // excentré. Ici `stretch` lui fait épouser la hauteur EXACTE de l'input, sans hauteur en dur.
     const passField = document.createElement("div"); passField.className = "form-field"; passField.style.margin = "0";
     const label = document.createElement("label"); label.textContent = "Phrase secrète maître";
     const input = document.createElement("input"); input.type = "password"; input.autocomplete = "current-password"; input.placeholder = "phrase secrète";
-    passField.append(label, input);
-
+    input.style.cssText = "flex:1 1 auto;min-width:0";   // min-width:0 : sans lui, un flex item ne descend pas sous sa largeur intrinsèque
     const errBox = this.errBox();
-    const row = document.createElement("div"); row.style.cssText = "display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px";
     const btn = this.actionButton("Déverrouiller", "Dériver la clé maître et vérifier la phrase", () => void this.attemptUnlock(input.value, errBox), "btn-primary");
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); void this.attemptUnlock(input.value, errBox); } });
-    row.append(passField, btn);
+    btn.classList.remove("btn-sm");   // hauteur d'un .btn plein pour matcher l'input
+    btn.style.flex = "none";
+    const inputRow = document.createElement("div"); inputRow.style.cssText = "display:flex;gap:8px;align-items:stretch";
+    inputRow.append(input, btn);
+    passField.append(label, inputRow);
 
-    box.append(title, hint, row, errBox);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); void this.attemptUnlock(input.value, errBox); } });
+
+    box.append(title, hint, passField, errBox);
     setTimeout(() => input.focus(), 30);
     return box;
   }
