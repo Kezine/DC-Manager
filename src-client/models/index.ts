@@ -1,0 +1,22 @@
+/* Barrel du modèle de domaine. */
+export { Entity } from "./Entity";
+export type { Props } from "./Entity";
+export { Equipment } from "./Equipment";
+export { Port } from "./Port";
+export { FaceImage } from "./FaceImage";
+export { Aggregate } from "./Aggregate";
+export { Cable } from "./Cable";
+export { Network } from "./Network";
+export { Group } from "./Group";
+export { Rack } from "./Rack";
+export { RackItem } from "./RackItem";
+export { Datacenter } from "./Datacenter";
+export { Floor } from "./Floor";
+export { Waypoint } from "./Waypoint";
+export { PortType } from "./PortType";
+export { CableType } from "./CableType";
+export { CableBundle } from "./CableBundle";
+export { IpNetwork } from "./IpNetwork";
+export { IpAddress } from "./IpAddress";
+export { DhcpRange } from "./DhcpRange";
+export { EntityRegistry } from "./EntityRegistry";

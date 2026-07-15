@@ -1,0 +1,25 @@
+/* Barrel de la géométrie pure (sans store). */
+export { Projection } from "./Projection";
+export type { WorldPoint, ScreenPoint } from "./Projection";
+export { Box } from "./Box";
+export type { BoxFace } from "./Box";
+export { Painter } from "./Painter";
+export type { LocalBox } from "./Painter";
+export { RackGeometry } from "./RackGeometry";
+export type { HalfExtents, WallGeo } from "./RackGeometry";
+export { RackScene } from "./RackScene";
+export type { OccupantInfo } from "./RackScene";
+export { FreeEquipGeometry } from "./FreeEquipGeometry";
+export type { FreeBox } from "./FreeEquipGeometry";
+export { Resolver3D, TRUNK_UPLINK_GEO } from "./Resolver3D";
+export type { Port3D, FaceGeo } from "./Resolver3D";
+export { TrunkRouting } from "./TrunkRouting";
+export { GraphGeometry } from "./GraphGeometry";
+export type { NodeSize, BBox } from "./GraphGeometry";
+export { GridGeometry } from "./GridGeometry";
+export { FloorLayout } from "./FloorLayout";
+export type { MultiLayout, RoomPlacement, FloorPlane, BuildingBand, FloorCfg } from "./FloorLayout";
+export { DoorGeometry } from "./DoorGeometry";
+export type { DoorPt, DoorRoom, DoorLike, DoorGeom } from "./DoorGeometry";
+export { Positioning, CORNER_IDS, WALL_IDS } from "./Positioning";
+export type { Pt, Rect, Frame, CornerId, WallId, Axis, Ref, Cote, SnapResult } from "./Positioning";

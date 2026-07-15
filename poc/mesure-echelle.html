@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Règle d'échelle — mesure sur image</title>
+<style>
+  :root{
+    --bg:#0f1319;
+    --workspace:#141a22;
+    --panel:#1a222c;
+    --panel-2:#212b37;
+    --line:#2c3947;
+    --line-soft:#232e3a;
+    --ink:#dfe6ee;
+    --ink-dim:#8b98a6;
+    --ink-faint:#5c6976;
+    --cal:#f5a623;      /* référence connue */
+    --cal-soft:rgba(245,166,35,.14);
+    --meas:#39d7c7;     /* mesures */
+    --meas-soft:rgba(57,215,199,.14);
+    --danger:#ec5b6a;
+    --radius:10px;
+    --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:"Space Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--sans);
+    background:var(--bg);
+    color:var(--ink);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  #app{display:flex;height:100vh;width:100vw}
+
+  /* ---------- Barre latérale ---------- */
+  aside{
+    width:320px;flex:0 0 320px;
+    background:var(--panel);
+    border-right:1px solid var(--line);
+    display:flex;flex-direction:column;
+    z-index:5;
+  }
+  .brand{
+    padding:20px 20px 16px;
+    border-bottom:1px solid var(--line);
+  }
+  .brand h1{
+    font-size:15px;font-weight:600;letter-spacing:.02em;
+    display:flex;align-items:center;gap:9px;
+  }
+  .brand .tick{
+    width:22px;height:22px;flex:0 0 22px;
+    display:block;
+  }
+  .brand p{
+    margin-top:6px;font-size:11.5px;color:var(--ink-faint);
+    line-height:1.5;letter-spacing:.01em;
+  }
+  .scroll{flex:1;overflow-y:auto;padding:6px 0 20px}
+  .scroll::-webkit-scrollbar{width:8px}
+  .scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+
+  .step{
+    padding:16px 20px;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .step-head{
+    display:flex;align-items:baseline;gap:10px;margin-bottom:12px;
+  }
+  .step-num{
+    font-family:var(--mono);font-size:11px;color:var(--ink-faint);
+    border:1px solid var(--line);border-radius:5px;
+    padding:2px 6px;line-height:1;letter-spacing:.05em;
+    flex:0 0 auto;
+  }
+  .step-num.on-cal{color:var(--cal);border-color:var(--cal)}
+  .step-num.on-meas{color:var(--meas);border-color:var(--meas)}
+  .step-title{font-size:12.5px;font-weight:600;letter-spacing:.02em}
+  .step-sub{font-size:11px;color:var(--ink-faint);margin-top:2px}
+
+  /* ---------- Contrôles ---------- */
+  .btn{
+    font-family:var(--sans);font-size:12.5px;font-weight:500;
+    color:var(--ink);background:var(--panel-2);
+    border:1px solid var(--line);border-radius:8px;
+    padding:9px 12px;cursor:pointer;width:100%;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    transition:.15s border-color,.15s background,.15s color;letter-spacing:.01em;
+  }
+  .btn:hover{border-color:var(--ink-faint);background:#28333f}
+  .btn svg{width:15px;height:15px;flex:0 0 15px}
+  .btn.active{background:var(--cal-soft);border-color:var(--cal);color:var(--cal)}
+  .btn.active.meas{background:var(--meas-soft);border-color:var(--meas);color:var(--meas)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn.ghost{background:transparent}
+  .btn.mini{width:auto;padding:6px 9px;font-size:11px}
+
+  .field{margin-top:10px}
+  .field label{
+    display:block;font-size:10.5px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--ink-faint);margin-bottom:5px;
+  }
+  .dist-row{display:flex;gap:8px}
+  .dist-row input{
+    flex:1;min-width:0;
+    font-family:var(--mono);font-size:14px;
+    background:var(--workspace);color:var(--ink);
+    border:1px solid var(--line);border-radius:7px;
+    padding:9px 11px;letter-spacing:.02em;
+  }
+  .dist-row input:focus{outline:none;border-color:var(--cal)}
+  .dist-row select{
+    flex:0 0 78px;
+    font-family:var(--mono);font-size:13px;
+    background:var(--workspace);color:var(--ink);
+    border:1px solid var(--line);border-radius:7px;
+    padding:9px 8px;cursor:pointer;
+  }
+  .dist-row select:focus{outline:none;border-color:var(--cal)}
+
+  .scale-readout{
+    margin-top:12px;padding:11px 12px;
+    background:var(--workspace);border:1px solid var(--line-soft);
+    border-radius:8px;font-family:var(--mono);font-size:11.5px;
+    color:var(--ink-dim);line-height:1.7;
+  }
+  .scale-readout .val{color:var(--cal);font-weight:500}
+  .scale-readout.set{border-color:var(--cal);border-left-width:3px}
+
+  /* ---------- Liste mesures ---------- */
+  .m-empty{
+    font-size:11.5px;color:var(--ink-faint);line-height:1.6;
+    padding:4px 0;
+  }
+  .m-item{
+    display:flex;align-items:center;gap:10px;
+    padding:9px 10px;margin-top:8px;
+    background:var(--workspace);border:1px solid var(--line-soft);
+    border-radius:8px;border-left:3px solid var(--meas);
+    cursor:pointer;transition:.12s background;
+  }
+  .m-item:hover{background:#1e2833}
+  .m-item.sel{background:var(--meas-soft);border-color:var(--meas)}
+  .m-swatch{
+    width:10px;height:10px;border-radius:3px;flex:0 0 10px;
+    background:var(--meas);
+  }
+  .m-body{flex:1;min-width:0}
+  .m-val{font-family:var(--mono);font-size:14px;font-weight:500;letter-spacing:.01em}
+  .m-meta{font-size:10.5px;color:var(--ink-faint);font-family:var(--mono);margin-top:2px}
+  .m-del{
+    flex:0 0 auto;width:24px;height:24px;border-radius:6px;
+    display:flex;align-items:center;justify-content:center;
+    background:transparent;border:1px solid transparent;color:var(--ink-faint);
+    cursor:pointer;transition:.12s;
+  }
+  .m-del:hover{color:var(--danger);border-color:var(--danger);background:rgba(236,91,106,.1)}
+  .m-del svg{width:13px;height:13px}
+
+  .foot{
+    padding:14px 20px;border-top:1px solid var(--line);
+    display:flex;gap:8px;
+  }
+
+  /* ---------- Espace de travail ---------- */
+  main{flex:1;position:relative;background:var(--workspace);overflow:hidden}
+  #stage{
+    position:absolute;inset:0;
+    background-image:
+      linear-gradient(var(--line-soft) 1px,transparent 1px),
+      linear-gradient(90deg,var(--line-soft) 1px,transparent 1px);
+    background-size:26px 26px;
+    background-position:center;
+  }
+  canvas{position:absolute;inset:0;display:block}
+  #canvas{cursor:crosshair}
+  #canvas.panning{cursor:grabbing}
+  #canvas.pan-ready{cursor:grab}
+
+  /* Zone d'accueil */
+  #drop{
+    position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:18px;
+    text-align:center;padding:40px;pointer-events:none;
+  }
+  #drop.hide{display:none}
+  .drop-card{
+    pointer-events:auto;
+    border:1.5px dashed var(--line);border-radius:16px;
+    padding:44px 48px;max-width:420px;
+    background:rgba(20,26,34,.6);backdrop-filter:blur(2px);
+    transition:.2s border-color,.2s background;
+  }
+  #stage.dragover .drop-card{border-color:var(--meas);background:var(--meas-soft)}
+  .drop-card svg{width:44px;height:44px;color:var(--ink-faint);margin-bottom:16px}
+  .drop-card h2{font-size:16px;font-weight:600;margin-bottom:8px}
+  .drop-card p{font-size:12.5px;color:var(--ink-dim);line-height:1.6;margin-bottom:20px}
+
+  /* HUD flottant */
+  #hud{
+    position:absolute;left:16px;bottom:16px;
+    display:flex;gap:8px;align-items:center;pointer-events:none;
+  }
+  #hud.hide{display:none}
+  .hud-chip{
+    font-family:var(--mono);font-size:11px;color:var(--ink-dim);
+    background:rgba(15,19,25,.85);border:1px solid var(--line);
+    border-radius:7px;padding:6px 10px;backdrop-filter:blur(4px);
+    letter-spacing:.02em;
+  }
+  .hud-chip b{color:var(--ink);font-weight:500}
+  #zoombar{
+    position:absolute;right:16px;bottom:16px;pointer-events:auto;
+    display:flex;gap:4px;background:rgba(15,19,25,.85);
+    border:1px solid var(--line);border-radius:9px;padding:4px;
+    backdrop-filter:blur(4px);
+  }
+  #zoombar.hide{display:none}
+  .zb{
+    width:30px;height:30px;border-radius:6px;border:none;background:transparent;
+    color:var(--ink-dim);cursor:pointer;display:flex;align-items:center;justify-content:center;
+    transition:.12s;font-family:var(--mono);font-size:12px;
+  }
+  .zb:hover{background:var(--panel-2);color:var(--ink)}
+  .zb svg{width:15px;height:15px}
+
+  /* Bandeau d'instruction contextuel */
+  #hint{
+    position:absolute;top:16px;left:50%;transform:translateX(-50%);
+    font-size:12px;letter-spacing:.02em;
+    background:rgba(15,19,25,.9);border:1px solid var(--line);
+    border-radius:8px;padding:8px 16px;backdrop-filter:blur(4px);
+    display:none;align-items:center;gap:9px;pointer-events:none;
+    max-width:calc(100% - 32px);
+  }
+  #hint.show{display:flex}
+  #hint .dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}
+  #hint.cal .dot{background:var(--cal)}
+  #hint.meas .dot{background:var(--meas)}
+  #hint kbd{
+    font-family:var(--mono);font-size:10.5px;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--ink-dim);
+  }
+
+  @media (max-width:720px){
+    aside{width:280px;flex-basis:280px}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ===== Panneau latéral ===== -->
+  <aside>
+    <div class="brand">
+      <h1>
+        <svg class="tick" viewBox="0 0 24 24" fill="none" stroke="var(--meas)" stroke-width="1.6" stroke-linecap="round">
+          <path d="M3 17 L17 3 L21 7 L7 21 Z"/>
+          <path d="M7.5 12.5 l2 2 M11 9 l2.5 2.5 M14.5 5.5 l2 2" stroke="var(--cal)"/>
+        </svg>
+        Règle d'échelle
+      </h1>
+      <p>Calibre une distance connue, puis mesure n'importe quelle longueur sur l'image.</p>
+    </div>
+
+    <div class="scroll">
+      <!-- Étape 1 : image -->
+      <div class="step">
+        <div class="step-head">
+          <span class="step-num">01</span>
+          <div>
+            <div class="step-title">Image</div>
+            <div class="step-sub">Charge un plan, une photo, une carte…</div>
+          </div>
+        </div>
+        <button class="btn" id="loadBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16l4.5-4.5a2 2 0 0 1 2.8 0L16 16"/><path d="M14 14l1.5-1.5a2 2 0 0 1 2.8 0L20 14"/><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.3"/></svg>
+          Ouvrir une image
+        </button>
+        <input type="file" id="fileInput" accept="image/*" hidden>
+      </div>
+
+      <!-- Étape 2 : calibration -->
+      <div class="step">
+        <div class="step-head">
+          <span class="step-num" id="calNum">02</span>
+          <div>
+            <div class="step-title">Calibrer l'échelle</div>
+            <div class="step-sub">Deux points, une distance réelle connue</div>
+          </div>
+        </div>
+        <button class="btn" id="calBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M6.5 17.5 17.5 6.5" stroke-dasharray="2 2.5"/></svg>
+          <span id="calBtnLabel">Placer les 2 points de référence</span>
+        </button>
+
+        <div class="field">
+          <label>Distance réelle entre les 2 points</label>
+          <div class="dist-row">
+            <input type="number" id="realDist" placeholder="0" step="any" min="0" disabled>
+            <select id="unit" disabled>
+              <option value="mm">mm</option>
+              <option value="cm" selected>cm</option>
+              <option value="m">m</option>
+              <option value="km">km</option>
+              <option value="in">in</option>
+              <option value="ft">ft</option>
+              <option value="px">px</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="scale-readout" id="scaleOut">
+          En attente&nbsp;: place les deux points puis saisis la distance.
+        </div>
+      </div>
+
+      <!-- Étape 3 : mesures -->
+      <div class="step" style="border-bottom:none">
+        <div class="step-head">
+          <span class="step-num" id="measNum">03</span>
+          <div>
+            <div class="step-title">Mesurer</div>
+            <div class="step-sub">Clic pour tracer, double-clic pour finir</div>
+          </div>
+        </div>
+        <button class="btn meas" id="measBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 20 4"/><path d="M4 20l1.5-4M20 4l-4 1.5"/><path d="M8 16l1.5 1.5M12 12l1.5 1.5M16 8l1.5 1.5"/></svg>
+          <span id="measBtnLabel">Nouvelle mesure</span>
+        </button>
+
+        <div id="mList" style="margin-top:14px">
+          <div class="m-empty">Aucune mesure. Calibre l'échelle, puis lance une mesure&nbsp;— chaque segment et le total s'affichent dans ton unité.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <button class="btn ghost mini" id="clearBtn" style="flex:1">Tout effacer</button>
+      <button class="btn ghost mini" id="fitBtn" style="flex:1" disabled>Recadrer</button>
+    </div>
+  </aside>
+
+  <!-- ===== Espace de travail ===== -->
+  <main>
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+
+      <div id="hint" class="cal">
+        <span class="dot"></span>
+        <span id="hintText"></span>
+      </div>
+
+      <div id="drop">
+        <div class="drop-card" id="dropCard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16l4.5-4.5a2 2 0 0 1 2.8 0L16 16"/><path d="M14 14l1.5-1.5a2 2 0 0 1 2.8 0L20 14"/><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.3"/></svg>
+          <h2>Dépose une image ici</h2>
+          <p>ou clique pour parcourir. L'outil fonctionne entièrement dans ton navigateur&nbsp;— rien n'est envoyé en ligne.</p>
+          <button class="btn" id="loadBtn2" style="max-width:220px;margin:0 auto">Choisir une image</button>
+        </div>
+      </div>
+
+      <div id="hud" class="hide">
+        <div class="hud-chip">Zoom <b id="zoomVal">100%</b></div>
+        <div class="hud-chip" id="cursorChip">x&nbsp;<b>—</b>&nbsp;y&nbsp;<b>—</b></div>
+      </div>
+
+      <div id="zoombar" class="hide">
+        <button class="zb" id="zoomOut" title="Dézoomer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+        <button class="zb" id="zoomReset" title="100%">1:1</button>
+        <button class="zb" id="zoomIn" title="Zoomer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const cv   = document.getElementById('canvas');
+  const ctx  = cv.getContext('2d');
+  const stage= document.getElementById('stage');
+  const dropEl = document.getElementById('drop');
+
+  // ---- État ----
+  const S = {
+    img:null,
+    view:{scale:1, tx:0, ty:0},   // image -> écran : screen = img*scale + t
+    mode:'idle',                  // idle | calibrate | measure
+    cal:{a:null, b:null, real:null, unit:'cm', px:null}, // points en coords image
+    measures:[],                  // [{id, pts:[{x,y}], unit}]
+    draft:null,                   // mesure en cours {pts:[...]}
+    selected:null,                // id mesure sélectionnée
+    mouse:{x:0, y:0, inside:false},
+    drag:null,                    // {type:'cal'|'meas', ref, idx}
+    pan:null,                     // {sx,sy,tx,ty}
+    spaceDown:false,
+    dpr: Math.max(1, Math.min(2, window.devicePixelRatio||1)),
+  };
+  let idSeq = 1;
+
+  // ---- Conversion d'unités ----
+  const UNIT_M = {mm:.001, cm:.01, m:1, km:1000, in:.0254, ft:.3048}; // px géré à part
+  function fmtLen(realUnitsPerPx, px, unit){
+    // realUnitsPerPx exprimé dans l'unité de calibration
+    const v = px * realUnitsPerPx;
+    return formatValue(v, unit);
+  }
+  function formatValue(v, unit){
+    let dec = 2;
+    if(unit==='km'||unit==='m') dec = (v<1?3:2);
+    if(unit==='mm'||unit==='px') dec = (v<10?1:0);
+    const rounded = Number(v.toFixed(dec));
+    return rounded.toLocaleString('fr-FR',{maximumFractionDigits:dec}) + '\u00A0' + unit;
+  }
+
+  // ---- Transformations de coordonnées ----
+  function toScreen(p){ return {x:p.x*S.view.scale + S.view.tx, y:p.y*S.view.scale + S.view.ty}; }
+  function toImage(sx,sy){ return {x:(sx - S.view.tx)/S.view.scale, y:(sy - S.view.ty)/S.view.scale}; }
+
+  // ---- Dimensionnement du canvas ----
+  function resize(){
+    const r = stage.getBoundingClientRect();
+    cv.width  = Math.round(r.width * S.dpr);
+    cv.height = Math.round(r.height* S.dpr);
+    cv.style.width = r.width+'px';
+    cv.style.height= r.height+'px';
+    ctx.setTransform(S.dpr,0,0,S.dpr,0,0);
+    render();
+  }
+  window.addEventListener('resize', resize);
+
+  function stageSize(){ const r = stage.getBoundingClientRect(); return {w:r.width, h:r.height}; }
+
+  // ---- Recadrage ----
+  function fit(){
+    if(!S.img) return;
+    const {w,h} = stageSize();
+    const pad = 48;
+    const sc = Math.min((w-pad)/S.img.width, (h-pad)/S.img.height);
+    S.view.scale = sc;
+    S.view.tx = (w - S.img.width*sc)/2;
+    S.view.ty = (h - S.img.height*sc)/2;
+    render();
+  }
+
+  // ---- Zoom ----
+  function zoomAt(sx, sy, factor){
+    if(!S.img) return;
+    const before = toImage(sx,sy);
+    S.view.scale = Math.max(0.02, Math.min(60, S.view.scale*factor));
+    S.view.tx = sx - before.x*S.view.scale;
+    S.view.ty = sy - before.y*S.view.scale;
+    render();
+  }
+
+  cv.addEventListener('wheel', e=>{
+    if(!S.img) return;
+    e.preventDefault();
+    const r = cv.getBoundingClientRect();
+    const f = Math.pow(1.0015, -e.deltaY);
+    zoomAt(e.clientX-r.left, e.clientY-r.top, f);
+  }, {passive:false});
+
+  // ---- Géométrie ----
+  function segLen(p,q){ return Math.hypot(p.x-q.x, p.y-q.y); }
+  function polyLen(pts){ let s=0; for(let i=1;i<pts.length;i++) s+=segLen(pts[i-1],pts[i]); return s; }
+  function realPerPx(){
+    if(!S.cal.px || !S.cal.real) return null;
+    if(S.cal.unit==='px') return 1; // 1px réel = px image? on garde px bruts si unité px
+    return S.cal.real / S.cal.px;   // unités de calibration par pixel-image
+  }
+
+  // ---- Rendu ----
+  function render(){
+    const {w,h} = stageSize();
+    ctx.clearRect(0,0,w,h);
+    if(!S.img) return;
+
+    // image
+    ctx.imageSmoothingEnabled = S.view.scale < 4;
+    const o = toScreen({x:0,y:0});
+    ctx.drawImage(S.img, o.x, o.y, S.img.width*S.view.scale, S.img.height*S.view.scale);
+
+    const rpp = realPerPx();
+
+    // mesures existantes
+    for(const m of S.measures){
+      drawPolyline(m.pts, 'meas', m.id===S.selected, rpp, true);
+    }
+    // brouillon de mesure
+    if(S.draft){
+      const pts = S.draft.pts.slice();
+      if(S.mouse.inside && S.mode==='measure'){
+        pts.push(toImage(S.mouse.x, S.mouse.y));
+      }
+      drawPolyline(pts, 'meas', true, rpp, false);
+    }
+
+    // calibration
+    drawCalibration();
+  }
+
+  function color(kind){ return kind==='cal' ? getVar('--cal') : getVar('--meas'); }
+  function getVar(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+  function drawPolyline(pts, kind, emphasized, rpp, showTotal){
+    if(pts.length===0) return;
+    const c = color(kind);
+    const sp = pts.map(toScreen);
+
+    // ligne
+    ctx.lineWidth = emphasized?2.4:1.8;
+    ctx.strokeStyle = c;
+    ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(sp[0].x, sp[0].y);
+    for(let i=1;i<sp.length;i++) ctx.lineTo(sp[i].x, sp[i].y);
+    ctx.stroke();
+
+    // étiquettes de segment
+    if(rpp!==null){
+      for(let i=1;i<pts.length;i++){
+        const pxLen = segLen(pts[i-1],pts[i]);
+        const mid = {x:(sp[i-1].x+sp[i].x)/2, y:(sp[i-1].y+sp[i].y)/2};
+        const label = S.cal.unit==='px'
+          ? formatValue(pxLen, 'px')
+          : formatValue(pxLen*rpp, S.cal.unit);
+        // n'afficher les segments individuels que si >1 segment
+        if(pts.length>2) drawTag(mid.x, mid.y, label, c, .78, false);
+      }
+    }
+
+    // points
+    for(let i=0;i<sp.length;i++){
+      drawHandle(sp[i].x, sp[i].y, c, emphasized);
+    }
+
+    // total (au dernier point)
+    if(showTotal && rpp!==null && pts.length>=2){
+      const total = polyLen(pts);
+      const label = S.cal.unit==='px' ? formatValue(total,'px') : formatValue(total*rpp, S.cal.unit);
+      const last = sp[sp.length-1];
+      drawTag(last.x, last.y-16, label, c, 1, true);
+    }
+  }
+
+  function drawCalibration(){
+    const {a,b} = S.cal;
+    const c = color('cal');
+    if(a){
+      const sa = toScreen(a);
+      if(b){
+        const sb = toScreen(b);
+        ctx.strokeStyle=c; ctx.lineWidth=2.2; ctx.lineCap='round';
+        ctx.setLineDash([1,6]); ctx.lineWidth=2.6;
+        ctx.beginPath(); ctx.moveTo(sa.x,sa.y); ctx.lineTo(sb.x,sb.y); ctx.stroke();
+        ctx.setLineDash([]);
+        // étiquette
+        const mid={x:(sa.x+sb.x)/2,y:(sa.y+sb.y)/2};
+        if(S.cal.real){
+          const lbl = S.cal.unit==='px' ? formatValue(S.cal.px,'px') : formatValue(S.cal.real, S.cal.unit);
+          drawTag(mid.x, mid.y-16, lbl+'  (réf.)', c, 1, true);
+        } else {
+          drawTag(mid.x, mid.y-16, 'distance ?', c, .9, true);
+        }
+        drawHandle(sb.x,sb.y,c,true,'B');
+      }
+      drawHandle(sa.x,sa.y,c,true,'A');
+    }
+  }
+
+  function drawHandle(x,y,c,big,letter){
+    const r = big?5.5:4.5;
+    ctx.beginPath(); ctx.arc(x,y,r+2,0,7); ctx.fillStyle=getVar('--workspace'); ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fillStyle=c; ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y,r-2.2,0,7); ctx.fillStyle=getVar('--workspace'); ctx.fill();
+    if(letter){
+      ctx.fillStyle=c; ctx.font='600 10px var(--sans)'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(letter, x, y-13);
+    }
+  }
+
+  function drawTag(x,y,text,c,alpha,strong){
+    ctx.save();
+    ctx.font = (strong?'600 ':'500 ')+ (strong?12:10.5) +'px var(--mono),monospace';
+    const padX=7, padY=4;
+    const w = ctx.measureText(text).width + padX*2;
+    const h = (strong?18:16);
+    let rx = x - w/2, ry = y - h/2;
+    ctx.globalAlpha = alpha;
+    roundRect(rx,ry,w,h,5);
+    ctx.fillStyle='rgba(15,19,25,.92)'; ctx.fill();
+    ctx.lineWidth=1; ctx.strokeStyle=c; ctx.globalAlpha=alpha*.9; ctx.stroke();
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle=strong?c:getVar('--ink');
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(text, x, ry+h/2+.5);
+    ctx.restore();
+  }
+  function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  }
+
+  // ---- Détection de poignée sous le curseur ----
+  const HIT = 10;
+  function hitTest(sx,sy){
+    // calibration d'abord
+    for(const key of ['b','a']){
+      if(S.cal[key]){
+        const s = toScreen(S.cal[key]);
+        if(Math.hypot(s.x-sx,s.y-sy)<=HIT) return {type:'cal', key};
+      }
+    }
+    // mesures
+    for(let mi=S.measures.length-1; mi>=0; mi--){
+      const m=S.measures[mi];
+      for(let i=0;i<m.pts.length;i++){
+        const s=toScreen(m.pts[i]);
+        if(Math.hypot(s.x-sx,s.y-sy)<=HIT) return {type:'meas', id:m.id, idx:i};
+      }
+    }
+    return null;
+  }
+
+  // ---- Souris ----
+  function localXY(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; }
+
+  cv.addEventListener('mousedown', e=>{
+    if(!S.img) return;
+    const {x,y}=localXY(e);
+
+    // pan : espace enfoncé, molette, ou clic droit
+    if(S.spaceDown || e.button===1 || e.button===2){
+      S.pan={sx:x, sy:y, tx:S.view.tx, ty:S.view.ty};
+      cv.classList.add('panning');
+      e.preventDefault();
+      return;
+    }
+    if(e.button!==0) return;
+
+    // saisir une poignée existante ?
+    const hit = hitTest(x,y);
+    if(hit){
+      S.drag = hit;
+      if(hit.type==='meas'){ selectMeasure(hit.id); }
+      return;
+    }
+
+    // sinon, action selon le mode
+    if(S.mode==='calibrate'){
+      placeCalibration(toImage(x,y));
+    } else if(S.mode==='measure'){
+      addMeasurePoint(toImage(x,y));
+    }
+  });
+
+  window.addEventListener('mousemove', e=>{
+    const {x,y}=localXY(e);
+    S.mouse.x=x; S.mouse.y=y;
+
+    if(S.pan){
+      S.view.tx = S.pan.tx + (x-S.pan.sx);
+      S.view.ty = S.pan.ty + (y-S.pan.sy);
+      render();
+      return;
+    }
+    if(S.drag){
+      const p = toImage(x,y);
+      if(S.drag.type==='cal'){
+        S.cal[S.drag.key] = p;
+        recomputeScale();
+      } else {
+        const m = S.measures.find(m=>m.id===S.drag.id);
+        if(m){ m.pts[S.drag.idx]=p; refreshList(); }
+      }
+      render();
+      return;
+    }
+    updateCursorChip();
+    if(S.mode==='measure' && S.draft) render();
+    // curseur survol poignée
+    if(S.img && !S.spaceDown){
+      const over = hitTest(x,y);
+      cv.style.cursor = over ? 'move' : (S.mode==='idle'?'default':'crosshair');
+    }
+  });
+
+  window.addEventListener('mouseup', ()=>{
+    if(S.pan){ S.pan=null; cv.classList.remove('panning'); }
+    S.drag=null;
+  });
+
+  cv.addEventListener('mouseenter', ()=>{ S.mouse.inside=true; });
+  cv.addEventListener('mouseleave', ()=>{ S.mouse.inside=false; render(); document.getElementById('cursorChip').innerHTML='x&nbsp;<b>—</b>&nbsp;y&nbsp;<b>—</b>'; });
+  cv.addEventListener('contextmenu', e=>e.preventDefault());
+
+  cv.addEventListener('dblclick', e=>{
+    if(S.mode==='measure' && S.draft){ finishMeasure(); }
+  });
+
+  // pan au clavier (espace)
+  window.addEventListener('keydown', e=>{
+    if(e.code==='Space' && !e.repeat && document.activeElement.tagName!=='INPUT'){
+      S.spaceDown=true; cv.classList.add('pan-ready'); e.preventDefault();
+    }
+    if(e.key==='Enter' && S.mode==='measure' && S.draft){ finishMeasure(); }
+    if(e.key==='Escape'){ cancelDraft(); }
+    if((e.key==='Delete'||e.key==='Backspace') && S.selected!=null && document.activeElement.tagName!=='INPUT'){
+      deleteMeasure(S.selected);
+    }
+  });
+  window.addEventListener('keyup', e=>{
+    if(e.code==='Space'){ S.spaceDown=false; cv.classList.remove('pan-ready'); }
+  });
+
+  function updateCursorChip(){
+    if(!S.img){ return; }
+    const p = toImage(S.mouse.x, S.mouse.y);
+    const el = document.getElementById('cursorChip');
+    if(p.x>=0 && p.y>=0 && p.x<=S.img.width && p.y<=S.img.height){
+      el.innerHTML = `x&nbsp;<b>${Math.round(p.x)}</b>&nbsp;y&nbsp;<b>${Math.round(p.y)}</b>`;
+    } else {
+      el.innerHTML = 'x&nbsp;<b>—</b>&nbsp;y&nbsp;<b>—</b>';
+    }
+    document.getElementById('zoomVal').textContent = Math.round(S.view.scale*100)+'%';
+  }
+
+  // ---- Calibration ----
+  function placeCalibration(p){
+    if(!S.cal.a || (S.cal.a && S.cal.b)){
+      // (re)commencer
+      S.cal.a = p; S.cal.b = null;
+    } else {
+      S.cal.b = p;
+    }
+    recomputeScale();
+    if(S.cal.a && S.cal.b){
+      // les deux points posés : quitter le mode placement, activer la saisie
+      setMode('idle');
+      const inp = document.getElementById('realDist');
+      inp.focus(); inp.select();
+    }
+    render();
+    updateStepUI();
+  }
+
+  function recomputeScale(){
+    if(S.cal.a && S.cal.b){
+      S.cal.px = segLen(S.cal.a, S.cal.b);
+    } else {
+      S.cal.px = null;
+    }
+    const rv = parseFloat(document.getElementById('realDist').value);
+    S.cal.real = (isFinite(rv) && rv>0) ? rv : null;
+    S.cal.unit = document.getElementById('unit').value;
+    updateScaleReadout();
+    refreshList();
+  }
+
+  function updateScaleReadout(){
+    const el = document.getElementById('scaleOut');
+    if(S.cal.px && S.cal.real){
+      const rpp = S.cal.unit==='px' ? 1 : S.cal.real / S.cal.px;
+      const pxPerUnit = S.cal.px / S.cal.real;
+      el.classList.add('set');
+      el.innerHTML =
+        `Réf.&nbsp;: <span class="val">${S.cal.px.toFixed(1)} px</span> = <span class="val">${formatValue(S.cal.real,S.cal.unit)}</span><br>`+
+        `Échelle&nbsp;: <span class="val">${formatValue(rpp,S.cal.unit)}</span> / px<br>`+
+        `<span style="color:var(--ink-faint)">${pxPerUnit.toFixed(2)} px par ${S.cal.unit}</span>`;
+      enableMeasure(true);
+    } else {
+      el.classList.remove('set');
+      if(S.cal.px && !S.cal.real){
+        el.innerHTML = `Points posés&nbsp;: <span class="val">${S.cal.px.toFixed(1)} px</span>.<br>Saisis maintenant la distance réelle.`;
+      } else {
+        el.innerHTML = `En attente&nbsp;: place les deux points puis saisis la distance.`;
+      }
+      enableMeasure(false);
+    }
+  }
+
+  document.getElementById('realDist').addEventListener('input', ()=>{ recomputeScale(); render(); });
+  document.getElementById('unit').addEventListener('change', ()=>{ recomputeScale(); render(); refreshList(); });
+
+  // ---- Mesures ----
+  function addMeasurePoint(p){
+    if(!S.draft){ S.draft={pts:[p]}; }
+    else { S.draft.pts.push(p); }
+    render();
+    updateHint();
+  }
+  function finishMeasure(){
+    if(S.draft && S.draft.pts.length>=2){
+      const m = {id:idSeq++, pts:S.draft.pts.slice(), unit:S.cal.unit};
+      S.measures.push(m);
+      selectMeasure(m.id);
+    }
+    S.draft=null;
+    setMode('idle');
+    refreshList(); render();
+  }
+  function cancelDraft(){
+    if(S.draft){ S.draft=null; setMode('idle'); render(); }
+  }
+  function deleteMeasure(id){
+    S.measures = S.measures.filter(m=>m.id!==id);
+    if(S.selected===id) S.selected=null;
+    refreshList(); render();
+  }
+  function selectMeasure(id){
+    S.selected=id; refreshList(); render();
+  }
+
+  function refreshList(){
+    const wrap = document.getElementById('mList');
+    const rpp = realPerPx();
+    if(S.measures.length===0){
+      wrap.innerHTML = `<div class="m-empty">Aucune mesure. Calibre l'échelle, puis lance une mesure&nbsp;— chaque segment et le total s'affichent dans ton unité.</div>`;
+      return;
+    }
+    wrap.innerHTML='';
+    S.measures.forEach((m,i)=>{
+      const px = polyLen(m.pts);
+      let valTxt = '—';
+      if(rpp!==null){
+        valTxt = S.cal.unit==='px' ? formatValue(px,'px') : formatValue(px*rpp, S.cal.unit);
+      }
+      const segCount = m.pts.length-1;
+      const el = document.createElement('div');
+      el.className = 'm-item'+(m.id===S.selected?' sel':'');
+      el.innerHTML =
+        `<span class="m-swatch"></span>`+
+        `<div class="m-body">`+
+          `<div class="m-val">${valTxt}</div>`+
+          `<div class="m-meta">Mesure ${i+1} · ${segCount} segment${segCount>1?'s':''} · ${px.toFixed(0)} px</div>`+
+        `</div>`+
+        `<button class="m-del" title="Supprimer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+      el.addEventListener('click',(ev)=>{
+        if(ev.target.closest('.m-del')){ deleteMeasure(m.id); return; }
+        selectMeasure(m.id);
+      });
+      wrap.appendChild(el);
+    });
+  }
+
+  // ---- Modes & UI d'étapes ----
+  function setMode(mode){
+    S.mode = mode;
+    document.getElementById('calBtn').classList.toggle('active', mode==='calibrate');
+    document.getElementById('measBtn').classList.toggle('active', mode==='measure');
+    cv.style.cursor = mode==='idle' ? 'default' : 'crosshair';
+    updateHint();
+    updateStepUI();
+  }
+
+  function updateStepUI(){
+    const done = !!(S.cal.px && S.cal.real);
+    document.getElementById('calNum').classList.toggle('on-cal', S.mode==='calibrate' || (S.cal.a&&!done));
+    document.getElementById('measNum').classList.toggle('on-meas', S.mode==='measure' || done);
+    document.getElementById('calBtnLabel').textContent =
+      (S.cal.a && S.cal.b) ? 'Replacer les points de référence' : 'Placer les 2 points de référence';
+  }
+
+  function enableMeasure(on){
+    document.getElementById('measBtn').disabled = !on;
+  }
+
+  function updateHint(){
+    const h = document.getElementById('hint');
+    const t = document.getElementById('hintText');
+    h.className='';
+    if(S.mode==='calibrate'){
+      h.classList.add('show','cal');
+      const step = (!S.cal.a || (S.cal.a&&S.cal.b)) ? 'premier' : 'second';
+      t.innerHTML = `Calibration — clique le <b>${step} point</b> de la distance connue`;
+    } else if(S.mode==='measure'){
+      h.classList.add('show','meas');
+      const n = S.draft?S.draft.pts.length:0;
+      if(n===0) t.innerHTML = `Mesure — clique le point de départ`;
+      else t.innerHTML = `Mesure — clique pour ajouter · <kbd>double-clic</kbd> ou <kbd>Entrée</kbd> pour finir · <kbd>Échap</kbd> annuler`;
+    } else {
+      h.classList.remove('show');
+    }
+  }
+
+  // ---- Boutons ----
+  document.getElementById('calBtn').addEventListener('click', ()=>{
+    if(S.mode==='calibrate'){ setMode('idle'); return; }
+    S.cal.a=null; S.cal.b=null; S.cal.px=null;
+    setMode('calibrate'); recomputeScale(); render();
+  });
+  document.getElementById('measBtn').addEventListener('click', ()=>{
+    if(S.mode==='measure'){ finishMeasure(); return; }
+    S.draft=null; setMode('measure'); render();
+  });
+  document.getElementById('fitBtn').addEventListener('click', fit);
+  document.getElementById('clearBtn').addEventListener('click', ()=>{
+    S.measures=[]; S.draft=null; S.selected=null;
+    S.cal={a:null,b:null,real:null,unit:document.getElementById('unit').value,px:null};
+    document.getElementById('realDist').value='';
+    setMode('idle'); recomputeScale(); refreshList(); render();
+  });
+
+  // ---- Chargement image ----
+  function openPicker(){ document.getElementById('fileInput').click(); }
+  document.getElementById('loadBtn').addEventListener('click', openPicker);
+  document.getElementById('loadBtn2').addEventListener('click', openPicker);
+  document.getElementById('fileInput').addEventListener('change', e=>{
+    const f=e.target.files[0]; if(f) loadFile(f);
+    e.target.value='';
+  });
+
+  function loadFile(file){
+    if(!file.type.startsWith('image/')) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      S.img=img;
+      // réinitialiser mesures/calibration à la nouvelle image
+      S.measures=[]; S.draft=null; S.selected=null;
+      S.cal={a:null,b:null,real:null,unit:document.getElementById('unit').value,px:null};
+      document.getElementById('realDist').value='';
+      dropEl.classList.add('hide');
+      document.getElementById('hud').classList.remove('hide');
+      document.getElementById('zoombar').classList.remove('hide');
+      // activer contrôles
+      document.getElementById('calBtn').disabled=false;
+      document.getElementById('realDist').disabled=false;
+      document.getElementById('unit').disabled=false;
+      document.getElementById('fitBtn').disabled=false;
+      setMode('idle'); recomputeScale(); refreshList();
+      fit();
+    };
+    img.src=url;
+  }
+
+  // drag & drop
+  ['dragenter','dragover'].forEach(ev=>stage.addEventListener(ev, e=>{
+    e.preventDefault(); stage.classList.add('dragover');
+  }));
+  ['dragleave','drop'].forEach(ev=>stage.addEventListener(ev, e=>{
+    e.preventDefault();
+    if(ev==='dragleave' && e.relatedTarget && stage.contains(e.relatedTarget)) return;
+    stage.classList.remove('dragover');
+  }));
+  stage.addEventListener('drop', e=>{
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f) loadFile(f);
+  });
+
+  // ---- Zoom bar ----
+  document.getElementById('zoomIn').addEventListener('click', ()=>{ const {w,h}=stageSize(); zoomAt(w/2,h/2,1.25); });
+  document.getElementById('zoomOut').addEventListener('click', ()=>{ const {w,h}=stageSize(); zoomAt(w/2,h/2,0.8); });
+  document.getElementById('zoomReset').addEventListener('click', ()=>{
+    if(!S.img) return;
+    const {w,h}=stageSize();
+    const before = toImage(w/2,h/2);
+    S.view.scale=1;
+    S.view.tx = w/2 - before.x; S.view.ty = h/2 - before.y;
+    render();
+  });
+
+  // init
+  resize();
+})();
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</body>
+</html>

@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Redresseur — correction de perspective</title>
+<style>
+  :root{
+    --bg:#15171b;
+    --canvas-bg:#0e0f12;
+    --panel:#1e2126;
+    --panel-2:#23262c;
+    --line:#33373f;
+    --line-soft:#2a2d34;
+    --text:#dde1e7;
+    --muted:#8b929c;
+    --muted-2:#646b75;
+    --amber:#ffb020;
+    --amber-dim:#c98711;
+    --teal:#2fd1bb;
+    --danger:#ff6b5e;
+    --focus:#6aa8ff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bg);color:var(--text);font-family:var(--sans);
+    font-size:14px;line-height:1.45;overflow:hidden;
+    display:grid;grid-template-columns:1fr 312px;height:100vh;
+  }
+  /* ---------- Stage ---------- */
+  .stage{position:relative;background:
+      radial-gradient(120% 120% at 50% 0%,#1a1c21 0%,var(--canvas-bg) 70%);
+    overflow:hidden}
+  #view{position:absolute;inset:0;width:100%;height:100%;display:block;
+    touch-action:none;cursor:grab}
+  #view.grabbing{cursor:grabbing}
+  #view.placing{cursor:crosshair}
+
+  .stage-empty{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:18px;text-align:center;padding:32px;pointer-events:none}
+  .drop{
+    pointer-events:auto;border:1.5px dashed var(--line);border-radius:14px;
+    padding:40px 48px;max-width:440px;background:rgba(255,255,255,.012);
+    transition:border-color .15s,background .15s}
+  .drop.over{border-color:var(--amber);background:rgba(255,176,32,.06)}
+  .drop h1{font-size:15px;font-weight:600;letter-spacing:.02em;margin:0 0 6px}
+  .drop p{color:var(--muted);font-size:13px;margin:0 0 18px}
+  .drop .ic{font-size:30px;opacity:.5;margin-bottom:10px}
+
+  /* HUD top-left */
+  .hud{position:absolute;top:14px;left:14px;display:flex;gap:8px;align-items:center;
+    pointer-events:none}
+  .chip{background:rgba(20,22,26,.82);border:1px solid var(--line-soft);
+    border-radius:7px;padding:5px 9px;font-family:var(--mono);font-size:11.5px;
+    color:var(--muted);backdrop-filter:blur(6px);pointer-events:auto}
+  .chip b{color:var(--text);font-weight:600}
+  .hud .hint{color:var(--muted-2)}
+
+  .zoomctl{position:absolute;bottom:14px;left:14px;display:flex;gap:1px;
+    background:var(--line-soft);border-radius:8px;overflow:hidden;border:1px solid var(--line-soft)}
+  .zoomctl button{all:unset;cursor:pointer;background:rgba(20,22,26,.86);
+    color:var(--text);width:30px;height:30px;display:grid;place-items:center;
+    font-size:15px;font-family:var(--mono);backdrop-filter:blur(6px)}
+  .zoomctl button:hover{background:var(--panel-2)}
+  .zoomctl .lvl{width:auto;padding:0 10px;font-size:11px;color:var(--muted);cursor:default}
+  .zoomctl button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+
+  /* ---------- Panel ---------- */
+  .panel{background:var(--panel);border-left:1px solid var(--line);
+    display:flex;flex-direction:column;min-height:0}
+  .brand{padding:16px 18px 14px;border-bottom:1px solid var(--line)}
+  .brand .ticks{height:7px;margin-bottom:11px;
+    background:repeating-linear-gradient(90deg,var(--line) 0 1px,transparent 1px 11px);
+    -webkit-mask:linear-gradient(90deg,#000 60%,transparent);mask:linear-gradient(90deg,#000 60%,transparent)}
+  .brand h2{margin:0;font-size:13px;letter-spacing:.18em;text-transform:uppercase;
+    font-weight:600;color:var(--text)}
+  .brand span{display:block;color:var(--muted-2);font-size:11px;letter-spacing:.03em;margin-top:3px}
+
+  .scroll{overflow-y:auto;flex:1;min-height:0}
+  .scroll::-webkit-scrollbar{width:10px}
+  .scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px;border:3px solid var(--panel)}
+
+  .sec{padding:16px 18px;border-bottom:1px solid var(--line-soft)}
+  .sec .lab{display:flex;align-items:center;justify-content:space-between;
+    font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted-2);
+    margin:0 0 12px;font-weight:600}
+  .sec .lab .v{font-family:var(--mono);color:var(--teal);letter-spacing:0;
+    text-transform:none;font-weight:600}
+
+  .field{margin-bottom:13px}
+  .field:last-child{margin-bottom:0}
+  .field>label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+
+  .seg{display:flex;background:var(--canvas-bg);border:1px solid var(--line-soft);
+    border-radius:8px;padding:3px;gap:3px}
+  .seg button{all:unset;flex:1;text-align:center;cursor:pointer;font-size:12px;
+    padding:7px 4px;border-radius:5px;color:var(--muted);transition:.12s}
+  .seg button[aria-pressed=true]{background:var(--panel-2);color:var(--text);
+    box-shadow:0 1px 0 rgba(255,255,255,.03) inset}
+  .seg button:focus-visible{outline:2px solid var(--focus);outline-offset:-1px}
+
+  .rowin{display:flex;gap:8px;align-items:center}
+  input[type=text],select{
+    width:100%;background:var(--canvas-bg);border:1px solid var(--line-soft);
+    color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;
+    font-family:var(--mono);outline:none}
+  input[type=text]:focus,select:focus{border-color:var(--focus)}
+  input[type=text]:disabled{opacity:.4}
+  select{font-family:var(--sans);appearance:none;cursor:pointer;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%238b929c'/></svg>");
+    background-repeat:no-repeat;background-position:right 10px center;padding-right:26px}
+
+  .stepper{display:flex;align-items:center;gap:0;background:var(--canvas-bg);
+    border:1px solid var(--line-soft);border-radius:8px;overflow:hidden}
+  .stepper button{all:unset;cursor:pointer;width:34px;height:34px;display:grid;
+    place-items:center;color:var(--text);font-size:17px;font-family:var(--mono)}
+  .stepper button:hover{background:var(--panel-2)}
+  .stepper button:disabled{color:var(--muted-2);cursor:not-allowed}
+  .stepper .val{flex:1;text-align:center;font-family:var(--mono);font-size:13px}
+  .stepper button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+
+  .note{font-size:11.5px;color:var(--muted-2);margin-top:8px;line-height:1.5}
+
+  /* actions */
+  .actions{padding:16px 18px;border-top:1px solid var(--line);
+    display:flex;flex-direction:column;gap:9px;background:var(--panel)}
+  .btn{all:unset;cursor:pointer;text-align:center;border-radius:9px;padding:11px 14px;
+    font-size:13.5px;font-weight:600;transition:.12s;border:1px solid transparent}
+  .btn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+  .btn.primary{background:var(--amber);color:#1a1300}
+  .btn.primary:hover{background:#ffbe40}
+  .btn.primary:disabled{background:var(--line);color:var(--muted-2);cursor:not-allowed}
+  .btn.ghost{border-color:var(--line);color:var(--text);font-weight:500}
+  .btn.ghost:hover{background:var(--panel-2)}
+  .btn.ghost:disabled{color:var(--muted-2);cursor:not-allowed;border-color:var(--line-soft)}
+
+  .file-row{display:flex;gap:8px}
+  .file-row .btn{flex:1;padding:9px}
+
+  /* ---------- Result overlay ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(8,9,11,.82);backdrop-filter:blur(3px);
+    display:none;align-items:center;justify-content:center;z-index:40;padding:28px}
+  .overlay.show{display:flex}
+  .resbox{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    max-width:min(94vw,1100px);max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
+  .resbox header{display:flex;align-items:center;justify-content:space-between;
+    padding:13px 16px;border-bottom:1px solid var(--line)}
+  .resbox header h3{margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--text)}
+  .resbox header .dim{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .resbox .canvaswrap{padding:16px;overflow:auto;background:
+    repeating-conic-gradient(#1a1c21 0% 25%,#15171b 0% 50%) 50%/22px 22px;display:flex;justify-content:center}
+  .resbox .canvaswrap canvas{max-width:100%;max-height:64vh;
+    box-shadow:0 8px 40px rgba(0,0,0,.5);border-radius:2px}
+  .resbox footer{display:flex;gap:9px;padding:13px 16px;border-top:1px solid var(--line)}
+  .resbox footer .btn{flex:1}
+
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--panel-2);border:1px solid var(--line);color:var(--text);
+    padding:9px 15px;border-radius:9px;font-size:12.5px;opacity:0;pointer-events:none;
+    transition:.25s;z-index:60}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  @media (max-width:760px){
+    body{grid-template-columns:1fr}
+    .panel{position:fixed;right:0;top:0;bottom:0;width:300px;transform:translateX(100%);
+      transition:transform .2s;z-index:30;box-shadow:-12px 0 40px rgba(0,0,0,.4)}
+    body.panelopen .panel{transform:none}
+    .panel-toggle{position:absolute;top:14px;right:14px;z-index:20}
+  }
+  .panel-toggle{display:none}
+  @media (max-width:760px){.panel-toggle{display:grid}}
+</style>
+</head>
+<body>
+  <!-- ===== STAGE ===== -->
+  <main class="stage">
+    <canvas id="view"></canvas>
+
+    <div class="hud" id="hud" hidden>
+      <div class="chip"><b id="ptcount">4</b> points</div>
+      <div class="chip hint">Molette&nbsp;: zoom · Glisser&nbsp;: déplacer · Glisser un point&nbsp;: ajuster</div>
+    </div>
+
+    <div class="zoomctl" id="zoomctl" hidden>
+      <button id="zoomout" title="Dézoomer">−</button>
+      <button class="lvl" id="zoomlvl" tabindex="-1">100%</button>
+      <button id="zoomin" title="Zoomer">+</button>
+      <button id="zoomfit" title="Ajuster à l'écran" style="width:auto;padding:0 9px;font-size:11px">Ajuster</button>
+    </div>
+
+    <button class="chip panel-toggle" id="paneltoggle">Réglages</button>
+
+    <div class="stage-empty" id="empty">
+      <label class="drop" id="drop" for="file">
+        <div class="ic">⌖</div>
+        <h1>Déposez une image</h1>
+        <p>Glissez-déposez ou cliquez pour choisir. Posez ensuite les points sur les coins du rectangle déformé.</p>
+        <span class="btn ghost" style="display:inline-block;padding:8px 18px">Choisir une image</span>
+      </label>
+    </div>
+  </main>
+
+  <!-- ===== PANEL ===== -->
+  <aside class="panel">
+    <div class="brand">
+      <div class="ticks"></div>
+      <h2>Redresseur</h2>
+      <span>Correction de perspective par homographie</span>
+    </div>
+
+    <div class="scroll">
+      <div class="sec">
+        <div class="lab">Image</div>
+        <div class="field">
+          <div class="file-row">
+            <button class="btn ghost" id="pickbtn">Ouvrir…</button>
+            <button class="btn ghost" id="clearbtn" disabled>Retirer</button>
+          </div>
+          <div class="note" id="imginfo">Aucune image chargée.</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="lab">Points de contrôle <span class="v" id="ptcount2">4</span></div>
+        <div class="field">
+          <label>Points supplémentaires par côté</label>
+          <div class="stepper">
+            <button id="subminus" disabled>−</button>
+            <div class="val" id="subval">0</div>
+            <button id="subplus" disabled>+</button>
+          </div>
+          <div class="note">4 coins par défaut. Ajoutez des points sur chaque bord pour mieux suivre une déformation non rectiligne (le total reste pair&nbsp;: 4 + 4×n).</div>
+        </div>
+        <div class="field">
+          <button class="btn ghost" id="resetpts" disabled>Replacer les points</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="lab">Rectangle de sortie</div>
+        <div class="field">
+          <label>Proportions (largeur / hauteur)</label>
+          <div class="seg" role="group" aria-label="Mode de proportions">
+            <button id="ar-auto" aria-pressed="true">Auto</button>
+            <button id="ar-manual" aria-pressed="false">Manuel</button>
+            <button id="ar-square" aria-pressed="false">1:1</button>
+          </div>
+        </div>
+        <div class="field" id="manualfield">
+          <div class="rowin">
+            <input type="text" id="arinput" value="A4 · 210:297" disabled
+                   placeholder="ex. 16:9, 210:297, 1.41" inputmode="text">
+          </div>
+          <div class="note" id="arnote">Le ratio est estimé automatiquement depuis la forme posée.</div>
+        </div>
+        <div class="field">
+          <label>Résolution (côté le plus long)</label>
+          <select id="res">
+            <option value="1000">1000 px</option>
+            <option value="1600" selected>1600 px</option>
+            <option value="2400">2400 px</option>
+            <option value="3600">3600 px</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="correct" disabled>Redresser l'image</button>
+    </div>
+  </aside>
+
+  <!-- ===== RESULT ===== -->
+  <div class="overlay" id="overlay">
+    <div class="resbox">
+      <header>
+        <h3>Image redressée</h3>
+        <span class="dim" id="resdim"></span>
+      </header>
+      <div class="canvaswrap"><canvas id="result"></canvas></div>
+      <footer>
+        <button class="btn ghost" id="closeres">Fermer</button>
+        <button class="btn primary" id="download">Télécharger en PNG</button>
+      </footer>
+    </div>
+  </div>
+
+  <input type="file" id="file" accept="image/*" hidden>
+  <div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+(function(){
+/* ============================================================
+   ÉTAT
+   ============================================================ */
+const S = {
+  img:null, imgW:0, imgH:0,
+  srcData:null,            // ImageData des pixels source (échantillonnage)
+  view:{scale:1, tx:0, ty:0},
+  points:[],               // {type:'corner'|'edge', edge,f, x,y}  (x,y en px image)
+  sub:0,                   // points additionnels par côté
+  dragPt:-1, panning:false,
+  last:{x:0,y:0},
+  selected:-1,
+  arMode:'auto',           // 'auto' | 'manual' | 'square'
+};
+const EDGE_NAMES=['haut','droite','bas','gauche'];
+
+/* ============================================================
+   ÉLÉMENTS
+   ============================================================ */
+const $=id=>document.getElementById(id);
+const cv=$('view'), ctx=cv.getContext('2d');
+const fileInput=$('file');
+
+/* ============================================================
+   CANVAS / DPI
+   ============================================================ */
+let DPR=Math.min(window.devicePixelRatio||1,2);
+function resize(){
+  const r=cv.getBoundingClientRect();
+  cv.width=Math.round(r.width*DPR); cv.height=Math.round(r.height*DPR);
+  render();
+}
+window.addEventListener('resize',resize);
+
+/* ============================================================
+   CHARGEMENT IMAGE
+   ============================================================ */
+function loadFile(file){
+  if(!file||!file.type.startsWith('image/')){toast("Fichier non reconnu comme image.");return;}
+  const url=URL.createObjectURL(file);
+  const im=new Image();
+  im.onload=()=>{
+    URL.revokeObjectURL(url);
+    S.img=im; S.imgW=im.naturalWidth; S.imgH=im.naturalHeight;
+    // pixels source pour l'échantillonnage
+    const off=document.createElement('canvas');
+    off.width=S.imgW; off.height=S.imgH;
+    const octx=off.getContext('2d',{willReadFrequently:true});
+    octx.drawImage(im,0,0);
+    try{ S.srcData=octx.getImageData(0,0,S.imgW,S.imgH); }
+    catch(e){ S.srcData=null; toast("Lecture des pixels impossible (CORS)."); }
+    S.sub=0; buildPoints(); fitView();
+    onImageReady();
+    render();
+  };
+  im.onerror=()=>toast("Impossible de charger l'image.");
+  im.src=url;
+}
+
+function onImageReady(){
+  $('empty').style.display='none';
+  $('hud').hidden=false; $('zoomctl').hidden=false;
+  $('imginfo').textContent=`${S.imgW} × ${S.imgH} px`;
+  ['clearbtn','resetpts','correct','subplus','subminus'].forEach(id=>$(id).disabled=false);
+  updateSubDisabled();
+  refreshCounts();
+}
+
+function clearImage(){
+  S.img=null;S.srcData=null;S.points=[];
+  $('empty').style.display='flex';
+  $('hud').hidden=true; $('zoomctl').hidden=true;
+  $('imginfo').textContent='Aucune image chargée.';
+  ['clearbtn','resetpts','correct','subplus','subminus'].forEach(id=>$(id).disabled=true);
+  render();
+}
+
+/* ============================================================
+   POINTS
+   ============================================================ */
+// quad par défaut : encart à 18% des bords de l'image
+function defaultCorners(){
+  const mx=S.imgW*0.18, my=S.imgH*0.18;
+  return [
+    [mx,my],                 // TL
+    [S.imgW-mx,my],          // TR
+    [S.imgW-mx,S.imgH-my],   // BR
+    [mx,S.imgH-my],          // BL
+  ];
+}
+function buildPoints(){
+  const c=defaultCorners();
+  const pts=[];
+  // 4 coins
+  for(let i=0;i<4;i++) pts.push({type:'corner',edge:i,f:0,x:c[i][0],y:c[i][1]});
+  // points de bord intermédiaires, placés à leur position PROJECTIVE correcte
+  if(S.sub>0){
+    const H4=solveHomography([[0,0],[1,0],[1,1],[0,1]], c); // carré unité -> image
+    const uv=(e,f)=>{
+      switch(e){case 0:return[f,0];case 1:return[1,f];case 2:return[1-f,1];case 3:return[0,1-f];}
+    };
+    for(let e=0;e<4;e++){
+      for(let k=1;k<=S.sub;k++){
+        const f=k/(S.sub+1);
+        const [ux,uy]=uv(e,f);
+        const [ix,iy]=applyH(H4,ux,uy);
+        pts.push({type:'edge',edge:e,f,x:ix,y:iy});
+      }
+    }
+  }
+  S.points=pts;
+  S.selected=-1;
+  refreshCounts();
+}
+// ordre périmétrique (pour tracer le contour) : coin e, puis edge-points du côté e
+function perimeterOrder(){
+  const order=[];
+  for(let e=0;e<4;e++){
+    const ci=S.points.findIndex(p=>p.type==='corner'&&p.edge===e);
+    order.push(ci);
+    const eps=S.points
+      .map((p,i)=>({p,i}))
+      .filter(o=>o.p.type==='edge'&&o.p.edge===e)
+      .sort((a,b)=>a.p.f-b.p.f);
+    eps.forEach(o=>order.push(o.i));
+  }
+  return order;
+}
+function refreshCounts(){
+  const n=S.points.length;
+  $('ptcount').textContent=n; $('ptcount2').textContent=n;
+  $('subval').textContent=S.sub;
+}
+function updateSubDisabled(){
+  $('subminus').disabled=(S.sub<=0)||!S.img;
+  $('subplus').disabled=(S.sub>=4)||!S.img;
+}
+
+/* ============================================================
+   VUE (zoom / pan)
+   ============================================================ */
+function viewSize(){return {w:cv.width/DPR,h:cv.height/DPR};}
+function fitView(){
+  const {w,h}=viewSize();
+  const pad=48;
+  const s=Math.min((w-pad)/S.imgW,(h-pad)/S.imgH);
+  S.view.scale=s;
+  S.view.tx=(w-S.imgW*s)/2;
+  S.view.ty=(h-S.imgH*s)/2;
+  updateZoomLabel();
+}
+function imgToScreen(x,y){return [x*S.view.scale+S.view.tx, y*S.view.scale+S.view.ty];}
+function screenToImg(x,y){return [(x-S.view.tx)/S.view.scale,(y-S.view.ty)/S.view.scale];}
+function zoomAt(sx,sy,factor){
+  const [ix,iy]=screenToImg(sx,sy);
+  S.view.scale=Math.max(0.02,Math.min(40,S.view.scale*factor));
+  S.view.tx=sx-ix*S.view.scale;
+  S.view.ty=sy-iy*S.view.scale;
+  updateZoomLabel(); render();
+}
+function updateZoomLabel(){$('zoomlvl').textContent=Math.round(S.view.scale*100)+'%';}
+
+/* ============================================================
+   RENDU
+   ============================================================ */
+function render(){
+  ctx.save();
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  const {w,h}=viewSize();
+  ctx.clearRect(0,0,w,h);
+  if(!S.img){ctx.restore();return;}
+
+  // image
+  ctx.imageSmoothingEnabled=S.view.scale<3;
+  ctx.drawImage(S.img,S.view.tx,S.view.ty,S.imgW*S.view.scale,S.imgH*S.view.scale);
+
+  // assombrir l'extérieur du quad (coins uniquement)
+  const corners=[0,1,2,3].map(e=>{
+    const p=S.points.find(q=>q.type==='corner'&&q.edge===e);return imgToScreen(p.x,p.y);
+  });
+  ctx.save();
+  ctx.beginPath();ctx.rect(0,0,w,h);
+  ctx.moveTo(corners[0][0],corners[0][1]);
+  for(let i=1;i<4;i++)ctx.lineTo(corners[i][0],corners[i][1]);
+  ctx.closePath();
+  ctx.fillStyle='rgba(8,9,11,.45)';ctx.fill('evenodd');
+  ctx.restore();
+
+  // contour périmétrique
+  const ord=perimeterOrder();
+  ctx.beginPath();
+  ord.forEach((pi,k)=>{
+    const p=S.points[pi];const [sx,sy]=imgToScreen(p.x,p.y);
+    k?ctx.lineTo(sx,sy):ctx.moveTo(sx,sy);
+  });
+  ctx.closePath();
+  ctx.lineWidth=1.5;ctx.strokeStyle='rgba(255,176,32,.85)';ctx.stroke();
+
+  // points
+  const cornerLabels=['1','2','3','4'];
+  S.points.forEach((p,i)=>{
+    const [sx,sy]=imgToScreen(p.x,p.y);
+    const isCorner=p.type==='corner';
+    const sel=i===S.selected;
+    const r=isCorner?7:5;
+    // halo
+    ctx.beginPath();ctx.arc(sx,sy,r+3,0,7);ctx.fillStyle='rgba(0,0,0,.35)';ctx.fill();
+    // disque
+    ctx.beginPath();ctx.arc(sx,sy,r,0,7);
+    ctx.fillStyle= sel?'#ffffff':(isCorner?'#ffb020':'#2fd1bb');
+    ctx.fill();
+    ctx.lineWidth=2;ctx.strokeStyle='#0e0f12';ctx.stroke();
+    // croix centrale
+    ctx.beginPath();
+    ctx.moveTo(sx-r-3,sy);ctx.lineTo(sx-2,sy);ctx.moveTo(sx+2,sy);ctx.lineTo(sx+r+3,sy);
+    ctx.moveTo(sx,sy-r-3);ctx.lineTo(sx,sy-2);ctx.moveTo(sx,sy+2);ctx.lineTo(sx,sy+r+3);
+    ctx.lineWidth=1;ctx.strokeStyle='rgba(255,255,255,.5)';ctx.stroke();
+    // libellé des coins
+    if(isCorner){
+      ctx.font='600 11px var(--mono)';ctx.fillStyle='#fff';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(cornerLabels[p.edge],sx,sy-r-9);
+    }
+  });
+  ctx.restore();
+}
+
+/* ============================================================
+   INTERACTION
+   ============================================================ */
+function evtPos(e){const r=cv.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top];}
+function hitPoint(sx,sy){
+  let best=-1,bd=14*14;
+  S.points.forEach((p,i)=>{
+    const [px,py]=imgToScreen(p.x,p.y);
+    const d=(px-sx)*(px-sx)+(py-sy)*(py-sy);
+    if(d<bd){bd=d;best=i;}
+  });
+  return best;
+}
+cv.addEventListener('pointerdown',e=>{
+  if(!S.img)return;
+  cv.setPointerCapture(e.pointerId);
+  const [sx,sy]=evtPos(e);
+  const hit=hitPoint(sx,sy);
+  if(hit>=0){S.dragPt=hit;S.selected=hit;cv.classList.add('placing');render();}
+  else{S.panning=true;S.selected=-1;cv.classList.add('grabbing');render();}
+  S.last={x:sx,y:sy};
+});
+cv.addEventListener('pointermove',e=>{
+  if(!S.img)return;
+  const [sx,sy]=evtPos(e);
+  if(S.dragPt>=0){
+    const [ix,iy]=screenToImg(sx,sy);
+    S.points[S.dragPt].x=ix;S.points[S.dragPt].y=iy;
+    render();
+  }else if(S.panning){
+    S.view.tx+=sx-S.last.x;S.view.ty+=sy-S.last.y;
+    S.last={x:sx,y:sy};render();
+  }
+});
+function endPointer(e){
+  if(S.dragPt>=0)cv.classList.remove('placing');
+  if(S.panning)cv.classList.remove('grabbing');
+  S.dragPt=-1;S.panning=false;
+}
+cv.addEventListener('pointerup',endPointer);
+cv.addEventListener('pointercancel',endPointer);
+
+cv.addEventListener('wheel',e=>{
+  if(!S.img)return;
+  e.preventDefault();
+  const [sx,sy]=evtPos(e);
+  const f=Math.pow(1.0015,-e.deltaY);
+  zoomAt(sx,sy,f);
+},{passive:false});
+
+// flèches : ajustement fin du point sélectionné
+window.addEventListener('keydown',e=>{
+  if(S.selected<0||!S.img)return;
+  const step=e.shiftKey?10:1;let dx=0,dy=0;
+  if(e.key==='ArrowLeft')dx=-step;else if(e.key==='ArrowRight')dx=step;
+  else if(e.key==='ArrowUp')dy=-step;else if(e.key==='ArrowDown')dy=step;else return;
+  e.preventDefault();
+  S.points[S.selected].x += dx;
+  S.points[S.selected].y += dy;
+  render();
+});
+
+/* ============================================================
+   HOMOGRAPHIE (DLT + Jacobi)
+   ============================================================ */
+function solveHomography(src,dst){
+  const n=src.length,A=[];
+  for(let i=0;i<n;i++){
+    const X=src[i][0],Y=src[i][1],x=dst[i][0],y=dst[i][1];
+    A.push([-X,-Y,-1,0,0,0,x*X,x*Y,x]);
+    A.push([0,0,0,-X,-Y,-1,y*X,y*Y,y]);
+  }
+  const M=Array.from({length:9},()=>new Array(9).fill(0));
+  for(const row of A)for(let i=0;i<9;i++)for(let j=0;j<9;j++)M[i][j]+=row[i]*row[j];
+  const {vectors,values}=jacobi(M);
+  let idx=0;for(let i=1;i<9;i++)if(values[i]<values[idx])idx=i;
+  return vectors.map(r=>r[idx]);
+}
+function jacobi(Ain){
+  const n=Ain.length,A=Ain.map(r=>r.slice());
+  const V=Array.from({length:n},(_,i)=>Array.from({length:n},(_,j)=>i===j?1:0));
+  for(let sweep=0;sweep<100;sweep++){
+    let off=0;for(let p=0;p<n;p++)for(let q=p+1;q<n;q++)off+=A[p][q]*A[p][q];
+    if(off<1e-22)break;
+    for(let p=0;p<n;p++)for(let q=p+1;q<n;q++){
+      if(Math.abs(A[p][q])<1e-20)continue;
+      const phi=0.5*Math.atan2(2*A[p][q],A[q][q]-A[p][p]);
+      const c=Math.cos(phi),s=Math.sin(phi);
+      for(let k=0;k<n;k++){const a=A[k][p],b=A[k][q];A[k][p]=c*a-s*b;A[k][q]=s*a+c*b;}
+      for(let k=0;k<n;k++){const a=A[p][k],b=A[q][k];A[p][k]=c*a-s*b;A[q][k]=s*a+c*b;}
+      for(let k=0;k<n;k++){const a=V[k][p],b=V[k][q];V[k][p]=c*a-s*b;V[k][q]=s*a+c*b;}
+    }
+  }
+  return {vectors:V,values:A.map((r,i)=>r[i])};
+}
+function applyH(h,x,y){
+  const X=h[0]*x+h[1]*y+h[2],Y=h[3]*x+h[4]*y+h[5],W=h[6]*x+h[7]*y+h[8];
+  return [X/W,Y/W];
+}
+
+/* estimation du ratio largeur/hauteur d'un rectangle vu en perspective */
+function cross(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];}
+function dot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];}
+function estimateAspect(corners){
+  const cx=S.imgW/2,cy=S.imgH/2;
+  const m=corners.map(c=>[c[0]-cx,c[1]-cy,1]);
+  const [m1,m2,m3,m4]=m;
+  try{
+    const k2=dot(cross(m1,m4),m3)/dot(cross(m2,m4),m3);
+    const k3=dot(cross(m1,m4),m2)/dot(cross(m3,m4),m2);
+    const n2=[k2*m2[0]-m1[0],k2*m2[1]-m1[1],k2*m2[2]-m1[2]];
+    const n3=[k3*m3[0]-m1[0],k3*m3[1]-m1[1],k3*m3[2]-m1[2]];
+    const f2=-(n2[0]*n3[0]+n2[1]*n3[1])/(n2[2]*n3[2]);
+    if(!(f2>0))throw 0;
+    const num=n2[0]*n2[0]+n2[1]*n2[1]+f2*n2[2]*n2[2];
+    const den=n3[0]*n3[0]+n3[1]*n3[1]+f2*n3[2]*n3[2];
+    const r=Math.sqrt(num/den);
+    if(!isFinite(r)||r<=0)throw 0;
+    return r;
+  }catch(e){
+    // repli : moyenne des longueurs de côtés opposés
+    const d=(a,b)=>Math.hypot(corners[a][0]-corners[b][0],corners[a][1]-corners[b][1]);
+    const wAvg=(d(0,1)+d(3,2))/2, hAvg=(d(1,2)+d(0,3))/2;
+    return wAvg/hAvg;
+  }
+}
+
+/* ============================================================
+   REDRESSEMENT
+   ============================================================ */
+function getAspect(){
+  const corners=[0,1,2,3].map(e=>{const p=S.points.find(q=>q.type==='corner'&&q.edge===e);return [p.x,p.y];});
+  if(S.arMode==='square')return 1;
+  if(S.arMode==='auto')return estimateAspect(corners);
+  // manuel
+  const raw=$('arinput').value.trim();
+  const m=raw.match(/(\d+(?:\.\d+)?)\s*[:\/xX]\s*(\d+(?:\.\d+)?)/);
+  if(m)return parseFloat(m[1])/parseFloat(m[2]);
+  const num=parseFloat(raw.replace(',','.'));
+  if(isFinite(num)&&num>0)return num;
+  return estimateAspect(corners);
+}
+
+function destFor(p,outW,outH){
+  if(p.type==='corner'){
+    return [[0,0],[outW,0],[outW,outH],[0,outH]][p.edge];
+  }
+  switch(p.edge){
+    case 0:return [p.f*outW,0];
+    case 1:return [outW,p.f*outH];
+    case 2:return [(1-p.f)*outW,outH];
+    case 3:return [0,(1-p.f)*outH];
+  }
+}
+
+function correct(){
+  if(!S.img)return;
+  if(!S.srcData){toast("Pixels de l'image inaccessibles.");return;}
+  let aspect=getAspect();
+  if(!isFinite(aspect)||aspect<=0)aspect=1;
+  const res=parseInt($('res').value,10);
+  let outW,outH;
+  if(aspect>=1){outW=res;outH=Math.round(res/aspect);}
+  else{outH=res;outW=Math.round(res*aspect);}
+  outW=Math.max(2,outW);outH=Math.max(2,outH);
+
+  // H : sortie(rectangle) -> source(image)
+  const src=S.points.map(p=>destFor(p,outW,outH)); // "depuis" = rectangle
+  const dst=S.points.map(p=>[p.x,p.y]);             // "vers"   = image
+  const H=solveHomography(src,dst);
+
+  const sd=S.srcData.data, sw=S.imgW, sh=S.imgH;
+  const out=document.createElement('canvas');out.width=outW;out.height=outH;
+  const octx=out.getContext('2d');
+  const od=octx.createImageData(outW,outH);const o=od.data;
+
+  for(let y=0;y<outH;y++){
+    for(let x=0;x<outW;x++){
+      const X=H[0]*x+H[1]*y+H[2],Y=H[3]*x+H[4]*y+H[5],W=H[6]*x+H[7]*y+H[8];
+      const ux=X/W, uy=Y/W;
+      const oi=(y*outW+x)*4;
+      if(ux<0||uy<0||ux>=sw-1||uy>=sh-1){o[oi+3]=0;continue;}
+      // bilinéaire
+      const x0=ux|0,y0=uy|0,fx=ux-x0,fy=uy-y0;
+      const i00=(y0*sw+x0)*4,i10=i00+4,i01=i00+sw*4,i11=i01+4;
+      const w00=(1-fx)*(1-fy),w10=fx*(1-fy),w01=(1-fx)*fy,w11=fx*fy;
+      o[oi  ]=sd[i00]*w00+sd[i10]*w10+sd[i01]*w01+sd[i11]*w11;
+      o[oi+1]=sd[i00+1]*w00+sd[i10+1]*w10+sd[i01+1]*w01+sd[i11+1]*w11;
+      o[oi+2]=sd[i00+2]*w00+sd[i10+2]*w10+sd[i01+2]*w01+sd[i11+2]*w11;
+      o[oi+3]=255;
+    }
+  }
+  octx.putImageData(od,0,0);
+  showResult(out,outW,outH);
+}
+
+/* ============================================================
+   RÉSULTAT
+   ============================================================ */
+let lastResult=null;
+function showResult(canvas,w,h){
+  lastResult=canvas;
+  const rc=$('result');rc.width=w;rc.height=h;
+  rc.getContext('2d').drawImage(canvas,0,0);
+  $('resdim').textContent=`${w} × ${h} px`;
+  $('overlay').classList.add('show');
+}
+$('closeres').onclick=()=>$('overlay').classList.remove('show');
+$('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))$('overlay').classList.remove('show');});
+$('download').onclick=()=>{
+  if(!lastResult)return;
+  lastResult.toBlob(b=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(b);a.download='image-redressee.png';a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  },'image/png');
+};
+
+/* ============================================================
+   CONTRÔLES UI
+   ============================================================ */
+$('pickbtn').onclick=()=>fileInput.click();
+$('drop').addEventListener('click',e=>{if(e.target.tagName!=='INPUT')fileInput.click();});
+fileInput.addEventListener('change',e=>{if(e.target.files[0])loadFile(e.target.files[0]);});
+$('clearbtn').onclick=clearImage;
+$('resetpts').onclick=()=>{buildPoints();render();};
+$('correct').onclick=correct;
+
+$('subplus').onclick=()=>{if(S.sub<4){S.sub++;buildPoints();updateSubDisabled();render();}};
+$('subminus').onclick=()=>{if(S.sub>0){S.sub--;buildPoints();updateSubDisabled();render();}};
+
+$('zoomin').onclick=()=>{const{w,h}=viewSize();zoomAt(w/2,h/2,1.25);};
+$('zoomout').onclick=()=>{const{w,h}=viewSize();zoomAt(w/2,h/2,.8);};
+$('zoomfit').onclick=()=>{fitView();render();};
+
+// proportions
+function setAR(mode){
+  S.arMode=mode;
+  $('ar-auto').setAttribute('aria-pressed',mode==='auto');
+  $('ar-manual').setAttribute('aria-pressed',mode==='manual');
+  $('ar-square').setAttribute('aria-pressed',mode==='square');
+  $('arinput').disabled=mode!=='manual';
+  $('arnote').textContent = mode==='auto'
+    ? "Le ratio est estimé automatiquement depuis la forme posée."
+    : mode==='square' ? "Sortie carrée 1:1."
+    : "Saisissez un ratio (16:9, 210:297…) ou un nombre (1.41).";
+}
+$('ar-auto').onclick=()=>setAR('auto');
+$('ar-manual').onclick=()=>setAR('manual');
+$('ar-square').onclick=()=>setAR('square');
+
+// toggle panneau mobile
+$('paneltoggle').onclick=()=>document.body.classList.toggle('panelopen');
+
+// drag & drop fichier
+const stage=document.querySelector('.stage');
+['dragenter','dragover'].forEach(ev=>stage.addEventListener(ev,e=>{
+  e.preventDefault();$('drop')&&$('drop').classList.add('over');
+}));
+['dragleave','drop'].forEach(ev=>stage.addEventListener(ev,e=>{
+  e.preventDefault();$('drop')&&$('drop').classList.remove('over');
+}));
+stage.addEventListener('drop',e=>{
+  const f=e.dataTransfer.files[0];if(f)loadFile(f);
+});
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+let toastT;
+function toast(msg){
+  const t=$('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2600);
+}
+
+/* init */
+resize();
+})();
+</script>
+</body>
+</html>

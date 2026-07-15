@@ -1,0 +1,8 @@
+**/node_modules
+dist
+src-server/data
+src-server/.env
+.git
+Samples
+Tests
+*.md

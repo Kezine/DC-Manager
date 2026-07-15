@@ -1,0 +1,32 @@
+# DC Manager — build du client + serveur, en une commande :
+#   cd src-server && docker compose up --build
+# Puis ouvrir http://localhost:3000 (mode API, utilisateur dev factice).
+services:
+  dc-manager:
+    build:
+      context: ..                       # racine DcManager/ (le Dockerfile copie client + serveur)
+      dockerfile: src-server/Dockerfile
+    image: dc-manager
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      API_BASE: /api
+      LOG_LEVEL: info                    # error | warn | info | debug | trace
+      # --- Auth ---
+      # Pour un déploiement réel, préférez la Basic Auth (BASIC_AUTH ci-dessous) : le SSO est spécifique
+      # à un besoin personnel et peu pertinent pour la plupart des usages (cf. RUN.md § Authentification).
+      # MODE DEV par défaut (utilisateur factice SUPER_ADMIN) pour tester hors réseau SSO :
+      SSO_URL: ""
+      DEV_USER: dev
+      # DEV : pour exiger un mot de passe (Basic Auth navigateur) au lieu de l'accès libre, décommenter :
+      # BASIC_AUTH: "dev:secret"
+      # Pour un VRAI SSO externe : commenter les 2 lignes ci-dessus et décommenter (adapter URL + cookie) :
+      # SSO_URL: https://sso.example.com/validate
+      # COOKIE_NAME: SsoJWT
+    volumes:
+      - dc-manager-data:/data            # persistance des documents (un .db par document)
+    restart: unless-stopped
+
+volumes:
+  dc-manager-data:

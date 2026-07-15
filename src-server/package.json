@@ -1,0 +1,28 @@
+{
+  "name": "dc-manager-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Backend REST DC Manager (Node.js + SQLite, TypeScript). Conforme à docs/rest-migration.md.",
+  "main": "dist/src-server/src/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/src-server/src/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2",
+    "multer": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

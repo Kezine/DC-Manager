@@ -1,0 +1,1284 @@
+import type { Store } from "../store";
+import { Dom } from "../ui/Dom";
+import { ContextMenu } from "../ui/ContextMenu";
+import { TouchNav } from "../ui/TouchNav";
+import { MultiSelect } from "../ui/MultiSelect";
+import { FormControls } from "../ui/FormControls";
+import { ColorPalette } from "../ui/ColorPalette";
+import { Notify } from "../ui/Notify";
+import { Dialog } from "../ui/Dialog";
+import { ImageExport } from "../ui/ImageExport";
+import type { ExportOptions } from "../ui/ImageExport";
+import type { ModalOptions } from "../ui/Modal";
+import { Id } from "../core/Id";
+import { Html } from "../core/Html";
+import { Text } from "../core/Text";
+import { VmNetMapping } from "../core/VmNetMapping";
+import { GraphGeometry } from "../geometry/GraphGeometry";
+import { EquipmentTypes } from "../registries/EquipmentTypes";
+import { GroupTypes } from "../domain/GroupTypes";
+
+/* =============================================================================
+   GraphView — vue GRAPHE du câblage (SVG).
+   Une classe qui prend le `store` + un hôte injecté (services app, `GraphHost`),
+   construit son modèle de rendu depuis le store, le dispose (force-directed) et
+   le rend en SVG via les helpers ui/geometry. Couvre : nœuds + arêtes + layout +
+   pan/zoom + glisser de nœud, filtres, cadres, dispositions nommées (persistées
+   dans `store.meta`), sélection/marquee, menus contextuels, légende, export
+   image, barre d'outils.
+   DETTE (cf. audit) : la classe cumule beaucoup de responsabilités — la
+   simulation force-directed (pure) devrait migrer vers `geometry/GraphGeometry`,
+   et « cadres » + « dispositions nommées » sont deux contrôleurs extractibles.
+   ============================================================================= */
+
+/** Services applicatifs dont la vue dépend (câblés par le shell en Phase 6). */
+export interface GraphHost {
+  setDirty?(v: boolean): void;
+  openEquipmentDetail?(id: string): void;
+  deleteEquipment?(id: string): void;
+  openModal?(opts: ModalOptions): void;
+  // Overlay « VMs » : fiches détail des nouvelles catégories (câblées dans main.ts vers Forms.vmDetail /
+  // Forms.networkDetail — mêmes conventions qu'openEquipmentDetail). Optionnelles → l'overlay reste inerte
+  // si l'hôte ne les fournit pas (jamais d'action d'équipement proposée sur un nœud vm/net).
+  openVmDetail?(id: string): void;
+  openNetworkDetail?(id: string): void;
+}
+
+/** `kind` distingue les catégories de nœud : `equip` (historique — un équipement câblable), `vm` (machine
+    virtuelle, overlay opt-in) et `net` (réseau logique MATÉRIALISÉ à la demande, référencé par ≥ 1 vNIC). */
+interface GNode { id: string; name: string; type: string; group_id: string | null; kind: "equip" | "vm" | "net"; orphan?: boolean; x: number; y: number; vx: number; vy: number; _w?: number; _h?: number; }
+interface GEdge { id: string; name: string; a: string; b: string; network_id: string | null; status: string; }
+interface GFrame { id: string; label: string; color: string; description: string; x: number; y: number; w: number; h: number; }
+
+export class GraphView {
+  private store: Store;
+  private host: GraphHost;
+  private stage: HTMLElement;
+
+  nodes: GNode[] = [];
+  edges: GEdge[] = [];
+  selection = new Set<string>();          // ids des nœuds sélectionnés (déplacement groupé)
+  filters = { equip: new Set<string>(), net: new Set<string>(), pt: new Set<string>(), grp: new Set<string>() };
+  search = "";
+  nodeBarMode: "type" | "network" | "group" = "type";   // couleur de la poignée des nœuds
+  /* Overlay « VMs » (opt-in) : matérialise les VMs et leurs réseaux logiques comme nœuds. DÉSACTIVÉ par
+     défaut (le graphe reste inchangé). Préférence d'affichage PERSONNELLE (par navigateur/fichier, comme
+     les toggles de la vue Datacenter) → persistée en localStorage, PAS dans le document. */
+  showVms = false;
+  /* Mode d'affichage de la VUE PAR DÉFAUT : "A" = réorganise tout à chaque filtre ;
+     "B" = tout reste en place, les filtres ne font que masquer ; "C" = comme A mais
+     les nœuds déplacés à la main gardent leur position. */
+  displayMode: "A" | "B" | "C" = "A";
+  private _layoutDirty = false;
+  private _hasRendered = false;
+  private pos: Record<string, { x: number; y: number }> = {};   // positions vivantes
+  private _moved = new Set<string>();     // ids déplacés à la main
+  private unplaced = new Set<string>();   // nœuds visibles absents de la disposition active
+  private _shownEq: Set<string> | null = null;       // null = tout visible ; sinon ids à AFFICHER (masquage)
+  private _shownCable: Set<string> | null = null;
+  private scale = 1; private tx = 0; private ty = 0;
+  private _resizeT: any = 0;   // débounce du recalcul de hauteur au resize
+  private toolbarEl: HTMLElement;
+  private legendEl: HTMLElement;
+  private _layoutSelectEl: HTMLSelectElement | null = null;
+  private _layoutSaveBtn: HTMLButtonElement | null = null;
+  private _displayModeEl: HTMLSelectElement | null = null;
+  private _autoBtn: HTMLButtonElement | null = null;
+  private svg: SVGSVGElement | null = null;
+  private gRoot: SVGGElement | null = null;
+  private _nodeById: Record<string, GNode> = {};
+  private _gById: Record<string, SVGGElement> = {};
+  private _edgeById: Record<string, GEdge> = {};
+  private _edgeLineById: Record<string, SVGElement> = {};
+  private _edgeLabelById: Record<string, SVGElement> = {};
+  private _edgePan: { raf: number } | null = null;
+
+  constructor(store: Store, mount: HTMLElement, host: GraphHost = {}) {
+    this.store = store;
+    this.host = host;
+    this.stage = mount;
+    // Préférence « VMs » restaurée AVANT la garde headless : l'état doit être cohérent même sans DOM
+    // (tests) — computeVisible s'appuie dessus. Défaut OFF si absente/illisible.
+    this._loadPrefs();
+    // barre d'outils (au-dessus du stage) + légende (coin du stage).
+    // Garde headless : sans `document` (tests Node), on saute la construction DOM —
+    // computeVisible/layout restent utilisables (testables sans navigateur).
+    if (typeof document === "undefined") return;
+    this.toolbarEl = document.createElement("div");
+    this.toolbarEl.className = "graph-toolbar";
+    this.toolbarEl.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 8px;background:var(--bg-2);border-bottom:1px solid var(--line)";
+    if (mount.parentElement) mount.parentElement.insertBefore(this.toolbarEl, mount);
+    this.legendEl = document.createElement("div");
+    this.legendEl.className = "graph-legend";   // positionnée par le CSS (coin haut-gauche du stage)
+    this.legendEl.style.cssText = "pointer-events:none;display:none";
+    mount.appendChild(this.legendEl);
+    this.buildOverlays();   // overlays sur le stage : actions (haut-droite) + zoom/recentrage/plein écran (bas-droite)
+    this.buildToolbar();
+    // la vue remplit la hauteur du viewport (comme la vue Datacenter) — recalcul au resize (débouncé) si onglet visible.
+    window.addEventListener("resize", () => {
+      clearTimeout(this._resizeT);
+      this._resizeT = setTimeout(() => { if (this.stage.offsetParent !== null) { this.fitHeight(); this.recenter(); } }, 120);
+    });
+    document.addEventListener("fullscreenchange", () => { this.fitHeight(); });
+  }
+
+  /** Étire le stage pour remplir la hauteur restante du viewport (réplique de DatacenterView.fitHeight). */
+  fitHeight(): void {
+    if (!this.stage || this.stage.offsetParent === null) return;   // onglet masqué → on saute
+    if (document.fullscreenElement === this.stage) { this.stage.style.height = ""; return; }   // plein écran : hauteur gérée par le CSS
+    const top = this.stage.getBoundingClientRect().top;
+    this.stage.style.height = Math.max(360, Math.floor(window.innerHeight - top - 18 - 2)) + "px";
+  }
+
+  /** Overlays superposés au stage (réplique de l'app d'origine) : `.graph-actions` (export · cadre · mode
+      d'affichage · dispositions nommées · enregistrer · gérer · auto) en haut-droite, et `.graph-zoom-controls`
+      (zoom ± · recentrage · plein écran) en bas-droite. Construits UNE fois ; persistent aux re-rendus (seul le
+      `<svg>` est recréé). Les sélecteurs disposition/mode sont rafraîchis par refreshLayoutControls. */
+  private buildOverlays(): void {
+    const CAM = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>';
+    const SAVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>';
+    const LIST = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>';
+    // recentrer/ajuster + plein écran : MÊMES icônes que l'overlay de la vue 3D (DatacenterView.buildControls)
+    const RECENTER = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="12" y1="1.5" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22.5" y2="12"/></svg>';
+    const FS = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>';
+    const DM_TITLE = "Mode d'affichage de la vue par défaut :\nA · Réorganiser — la disposition est recalculée à chaque changement de filtre\nB · Masquer (fixe) — les nœuds restent en place, les filtres ne font qu'afficher/masquer\nC · Réorg. + garder — comme A, mais les nœuds déplacés à la main gardent leur position";
+    // --- actions (haut-droite) ---
+    const actions = document.createElement("div"); actions.className = "graph-actions";
+    actions.innerHTML =
+      `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="export" title="Exporter une image (SVG / JPEG)…">${CAM}</button>`
+      + `<span class="ga-sep"></span>`
+      + `<button class="btn btn-ghost btn-sm" data-act="frame" title="Ajouter un cadre de regroupement">▭ Cadre</button>`
+      + `<span class="ga-sep"></span>`
+      + `<select class="graph-action-select" data-act="dm"><option value="A">A · Réorganiser</option><option value="B">B · Masquer (fixe)</option><option value="C">C · Réorg. + garder</option></select>`
+      + `<span class="ga-sep"></span>`
+      + `<select class="graph-action-select" data-act="lsel" title="Disposition active (« Vue par défaut » = aucune disposition enregistrée)"></select>`
+      + `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="lsave" title="Enregistrer les modifications dans la disposition active" style="display:none;">${SAVE}</button>`
+      + `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="lmanage" title="Gérer les dispositions enregistrées (renommer, mettre à jour, supprimer)…">${LIST}</button>`
+      + `<button class="btn btn-ghost btn-sm" data-act="auto" title="Disposition automatique (force) — réorganise les nœuds affichés">Auto</button>`;
+    this.stage.appendChild(actions);
+    const a = (sel: string) => actions.querySelector('[data-act="' + sel + '"]') as HTMLElement;
+    (a("export")).onclick = () => this.openExportDialog();
+    (a("frame")).onclick = () => this.addFrameAt();
+    const dm = a("dm") as HTMLSelectElement; dm.title = DM_TITLE; dm.value = this.displayMode;
+    dm.onchange = () => { this.displayMode = dm.value as any; this.pos = {}; this._moved.clear(); this.rebuild({ recenter: true }); };
+    this._displayModeEl = dm;
+    const lsel = a("lsel") as HTMLSelectElement;
+    lsel.onchange = () => { const v = lsel.value; if (v === "__default__") this.activateDefaultView(); else this.applyLayout(v); };
+    this._layoutSelectEl = lsel;
+    const lsave = a("lsave") as HTMLButtonElement; lsave.onclick = () => { const act = this._activeLayout(); if (act) this.updateLayout(act.id); };
+    this._layoutSaveBtn = lsave;
+    (a("lmanage")).onclick = () => this.openLayoutManager();
+    const auto = a("auto") as HTMLButtonElement; auto.onclick = () => this.autoArrange();
+    this._autoBtn = auto;
+    // --- zoom / recentrage / plein écran (bas-droite) ---
+    const zoom = document.createElement("div"); zoom.className = "graph-zoom-controls";
+    zoom.innerHTML =
+      `<button class="btn btn-ghost btn-sm" data-act="zin" title="Zoom avant">+</button>`
+      + `<button class="btn btn-ghost btn-sm" data-act="zout" title="Zoom arrière">−</button>`
+      + `<span class="gz-sep"></span>`
+      + `<button class="btn btn-ghost btn-sm" data-act="recenter" title="Recentrer / ajuster la vue" aria-label="Recentrer la vue">${RECENTER}</button>`
+      + `<button class="btn btn-ghost btn-sm" data-act="fs" title="Plein écran" aria-label="Plein écran">${FS}</button>`;
+    this.stage.appendChild(zoom);
+    const z = (sel: string) => zoom.querySelector('[data-act="' + sel + '"]') as HTMLElement;
+    (z("zin")).onclick = () => this.zoomBy(1.2);
+    (z("zout")).onclick = () => this.zoomBy(1 / 1.2);
+    (z("recenter")).onclick = () => this.recenter();
+    (z("fs")).onclick = () => this.toggleFullscreen();
+    this.refreshLayoutControls();
+  }
+
+  /** Reconstruit tout : modèle → layout → rendu → recadrage + masquage/surlignage/légende. */
+  rebuild(opts: { recenter?: boolean } = {}): void {
+    this.computeVisible();
+    this.layout();
+    this.render();
+    if (opts.recenter) this.recenter();
+    this.applyFilterVisibility();
+    this.applyHighlight();
+    this.renderLegend();
+    this.refreshLayoutControls();
+  }
+
+  /** Activation de la vue : (re)construit la barre, charge la disposition active, recadre au 1er rendu. */
+  show(): void {
+    this.buildToolbar();
+    this.fitHeight();   // hauteur viewport AVANT le 1er rendu (svg créé à la bonne taille + recadrage correct)
+    this.selection.clear();
+
+    if (this._activeLayout() && !Object.keys(this.pos).length) this.pos = Object.assign({}, this._activePositions() || {});
+    const first = !this._hasRendered;
+    this.rebuild({ recenter: first });
+    this._hasRendered = true;
+  }
+
+  /* ---- modèle de rendu (depuis le store) ---- */
+
+  private _resolvableCables(): any[] {
+    const s = this.store;
+    return s.all("cables").filter((c: any) => {
+      const pa = s.get("ports", c.from_port_id), pb = s.get("ports", c.to_port_id);
+      return pa && pb && s.get("equipments", pa.equipment_id) && s.get("equipments", pb.equipment_id);
+    });
+  }
+
+  /** Figure au graphe ? Un équipement SANS PORT ne peut être câblé → jamais de nœud sur la carte du câblage
+      (nœud isolé sans intérêt), même sélectionné explicitement ; écarté aussi du sélecteur « Équipements ». */
+  private _hasPorts(e: any): boolean { return !!e && this.store.portsOf(e.id).length > 0; }
+
+  /** Jeu retenu PAR LES FILTRES → { eqIds, cableIds }. Aucun filtre = tout. */
+  private _filteredSets(): { eqIds: Set<string>; cableIds: Set<string> } {
+    const s = this.store;
+    const eqIds = new Set<string>(), cableIds = new Set<string>();
+    const cables = this._resolvableCables();
+    const anyFilter = this.filters.equip.size || this.filters.net.size || this.filters.pt.size || this.filters.grp.size;
+    if (!anyFilter) {
+      s.all("equipments").forEach((e: any) => { if (!e.inventory_only && this._hasPorts(e)) eqIds.add(e.id); });
+      cables.forEach((c: any) => cableIds.add(c.id));
+      return { eqIds, cableIds };
+    }
+    this.filters.equip.forEach((id) => { if (this._hasPorts(s.get("equipments", id))) eqIds.add(id); });
+    cables.forEach((c: any) => {
+      const pa = s.get("ports", c.from_port_id), pb = s.get("ports", c.to_port_id);
+      if (!pa || !pb || !pa.equipment_id || !pb.equipment_id) return;   // garanti par _resolvableCables — garde de typage/robustesse
+      const ea = pa.equipment_id, eb = pb.equipment_id;
+      let include = false;
+      if (this.filters.equip.size && (this.filters.equip.has(ea) || this.filters.equip.has(eb))) include = true;
+      if (this.filters.net.size && this.store.cableNetworkIds(c).some((nid) => this.filters.net.has(nid))) include = true;
+      if (this.filters.pt.size && ((pa.port_type_id && this.filters.pt.has(pa.port_type_id)) || (pb.port_type_id && this.filters.pt.has(pb.port_type_id)))) include = true;
+      if (this.filters.grp.size) {
+        // APPARTENANCE multi-groupes (primaire + secondaires — equipmentGroupIds), pas le seul primaire :
+        // sinon les câbles entre membres SECONDAIRES du groupe filtré n'étaient pas inclus.
+        const ga = s.get("equipments", ea), gb = s.get("equipments", eb);
+        if ((ga && s.equipmentGroupIds(ga).some((gid: string) => this.filters.grp.has(gid)))
+          || (gb && s.equipmentGroupIds(gb).some((gid: string) => this.filters.grp.has(gid)))) include = true;
+      }
+      if (include) { cableIds.add(c.id); eqIds.add(ea); eqIds.add(eb); }
+    });
+    if (this.filters.pt.size) this.filters.pt.forEach((ptId) => s.portsOfType(ptId).forEach((p: any) => eqIds.add(p.equipment_id)));
+    if (this.filters.grp.size) this.filters.grp.forEach((gid) => s.equipmentsOfGroup(gid).forEach((e: any) => { if (this._hasPorts(e)) eqIds.add(e.id); }));
+    return { eqIds, cableIds };
+  }
+
+  /** Les filtres MASQUENT-ils (tous présents, certains cachés) au lieu de filtrer le jeu ?
+      VRAI si une disposition est active OU en mode B. */
+  private _filtersAsVisibility(): boolean { return !!this._activeLayout() || this.displayMode === "B"; }
+
+  computeVisible(): void {
+    const s = this.store;
+    const sets = this._filteredSets();
+    let eqIds: Set<string>, cableIds: Set<string>;
+    if (this._filtersAsVisibility()) {
+      eqIds = new Set(); cableIds = new Set();
+      s.all("equipments").forEach((e: any) => { if (!e.inventory_only && this._hasPorts(e)) eqIds.add(e.id); });
+      this._resolvableCables().forEach((c: any) => cableIds.add(c.id));
+      this._shownEq = sets.eqIds; this._shownCable = sets.cableIds;
+    } else {
+      eqIds = sets.eqIds; cableIds = sets.cableIds;
+      this._shownEq = null; this._shownCable = null;
+    }
+    this.nodes = [...eqIds].map((id) => s.get("equipments", id)).filter(Boolean).map((e: any): GNode => ({ id: e.id, name: e.name || "(sans nom)", type: e.type || "", group_id: e.group_id || null, kind: "equip", x: 0, y: 0, vx: 0, vy: 0 }));
+    this.edges = [...cableIds].map((id) => s.get("cables", id)).filter(Boolean).flatMap((c: any) => {
+      const pa = s.get("ports", c.from_port_id), pb = s.get("ports", c.to_port_id);
+      if (!pa || !pb || !pa.equipment_id || !pb.equipment_id) return [];   // garanti par _resolvableCables — garde de typage/robustesse
+      return [{ id: c.id, name: c.name || "", a: pa.equipment_id, b: pb.equipment_id, network_id: s.cablePrimaryNetworkId(c), status: c.status }];
+    });
+    this._augmentVms();   // overlay opt-in : ajoute (au besoin) les nœuds vm:/net: et les arêtes VM→réseau
+  }
+
+  /* ---- overlay « VMs » (opt-in) : VMs + réseaux logiques matérialisés ---- */
+
+  // Préfixes d'id de nœud/arête pour les catégories NON-équipement : garantissent l'UNICITÉ face aux ids
+  // d'équipement — pos/_moved/sélection/_nodeById/_gById et les dispositions nommées sont TOUS indexés par
+  // id de nœud (un id de nœud n'est donc PAS supposé être un id d'équipement).
+  private static readonly VM_PREFIX = "vm:";
+  private static readonly NET_PREFIX = "net:";
+  private static readonly VMNET_EDGE_PREFIX = "vmnet:";
+  private _vmNodeId(realId: string): string { return GraphView.VM_PREFIX + realId; }
+  private _netNodeId(realId: string): string { return GraphView.NET_PREFIX + realId; }
+  private _vmRealId(nodeId: string): string { return nodeId.slice(GraphView.VM_PREFIX.length); }
+  private _netRealId(nodeId: string): string { return nodeId.slice(GraphView.NET_PREFIX.length); }
+  private _isVmEdge(edgeId: string): boolean { return edgeId.startsWith(GraphView.VMNET_EDGE_PREFIX); }
+
+  /** Ajoute au modèle (si `showVms`) : un nœud `vm:<id>` par VM du document (les VM isolées participent aussi),
+      un nœud `net:<network_id>` par réseau RÉFÉRENCÉ par au moins une vNIC mappée (pas tous les réseaux du
+      document), et une arête VM→réseau par couple (VM, réseau) résolu via `VmNetMapping`. Le filtre « Réseaux »
+      s'applique aux nœuds `net:` et aux arêtes (JAMAIS aux nœuds VM, toujours affichés) : en mode MASQUAGE tout
+      est matérialisé puis masqué via `_shownEq`/`_shownCable` (parité câbles), en mode FILTRE seul le
+      sous-ensemble retenu est matérialisé. Une vNIC non mappée n'ajoute aucune arête (VM éventuellement isolée). */
+  private _augmentVms(): void {
+    if (!this.showVms) return;
+    const s = this.store;
+    const mapEntries = VmNetMapping.read(s.meta);
+    const netAllowed = (nid: string) => !this.filters.net.size || this.filters.net.has(nid);
+    const vmNodes: GNode[] = [];
+    const netFull = new Map<string, GNode>();   // id nœud réseau → nœud (TOUS réseaux référencés)
+    const netShownIds = new Set<string>();       // ids nœud réseau passant le filtre « Réseaux »
+    const edgeFull: GEdge[] = [];
+    const edgeShownIds = new Set<string>();
+    s.all("vms").forEach((vm: any) => {
+      const vmNodeId = this._vmNodeId(vm.id);
+      vmNodes.push({ id: vmNodeId, name: vm.name || "(VM)", type: "", group_id: null, kind: "vm", orphan: !!vm.orphan, x: 0, y: 0, vx: 0, vy: 0 });
+      const seen = new Set<string>();   // dédoublonnage (VM, réseau) : une seule arête par réseau distinct
+      (Array.isArray(vm.nics) ? vm.nics : []).forEach((nic: any) => {
+        const nid = VmNetMapping.resolve(mapEntries, nic.bridge, nic.vlan_tag);
+        if (!nid || seen.has(nid)) return;              // vNIC non mappée, ou réseau déjà relié à cette VM
+        const net: any = s.get("networks", nid);
+        if (!net) return;                                // réseau supprimé → rien à matérialiser
+        seen.add(nid);
+        const netNodeId = this._netNodeId(nid);
+        if (!netFull.has(netNodeId)) netFull.set(netNodeId, { id: netNodeId, name: net.label || "(réseau)", type: "", group_id: null, kind: "net", x: 0, y: 0, vx: 0, vy: 0 });
+        const edgeId = GraphView.VMNET_EDGE_PREFIX + vm.id + ":" + nid;
+        edgeFull.push({ id: edgeId, name: "", a: vmNodeId, b: netNodeId, network_id: nid, status: "" });
+        if (netAllowed(nid)) { netShownIds.add(netNodeId); edgeShownIds.add(edgeId); }
+      });
+    });
+    if (this._shownEq) {
+      // MODE MASQUAGE : tout présent dans le modèle ; le filtre réseau ne fait que masquer (comme les câbles).
+      this.nodes.push(...vmNodes, ...netFull.values());
+      this.edges.push(...edgeFull);
+      vmNodes.forEach((vn) => this._shownEq!.add(vn.id));   // VM toujours visible (indépendante du filtre réseau)
+      netShownIds.forEach((id) => this._shownEq!.add(id));
+      edgeShownIds.forEach((id) => this._shownCable!.add(id));
+    } else {
+      // MODE FILTRE : on ne matérialise que le sous-ensemble retenu (réseaux exclus/non référencés absents).
+      this.nodes.push(...vmNodes);
+      netFull.forEach((nn, id) => { if (netShownIds.has(id)) this.nodes.push(nn); });
+      edgeFull.forEach((e) => { if (edgeShownIds.has(e.id)) this.edges.push(e); });
+    }
+  }
+
+  /** Recalcule quels nœuds vm/net et arêtes VM→réseau DÉJÀ présents dans le modèle passent le filtre « Réseaux »
+      (mode masquage : le modèle ne change pas, seul le masquage évolue — cf. refreshFilterVisibility). */
+  private _vmShownIds(): { nodeIds: string[]; edgeIds: string[] } {
+    const nodeIds: string[] = [], edgeIds: string[] = [];
+    const allowed = (nid: string) => !this.filters.net.size || this.filters.net.has(nid);
+    this.nodes.forEach((n) => {
+      if (n.kind === "vm") nodeIds.push(n.id);                                    // VM toujours affichée
+      else if (n.kind === "net" && allowed(this._netRealId(n.id))) nodeIds.push(n.id);
+    });
+    this.edges.forEach((e) => { if (this._isVmEdge(e.id) && e.network_id && allowed(e.network_id)) edgeIds.push(e.id); });
+    return { nodeIds, edgeIds };
+  }
+
+  /* ---- préférence d'affichage « VMs » (localStorage, par fichier — comme la vue Datacenter) ---- */
+
+  private _graphPrefsKey(): string { return "dcmanager.graphview." + ((this.store.meta && this.store.meta.fileId) ? this.store.meta.fileId : "__nofile"); }
+  private _loadPrefs(): void {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(this._graphPrefsKey());
+      if (raw) { const p = JSON.parse(raw); if (p && typeof p === "object" && typeof p.showVms === "boolean") this.showVms = p.showVms; }
+    } catch (_) { /* quota / indispo → défaut OFF */ }
+  }
+  private _persistPrefs(): void {
+    if (typeof window === "undefined") return;
+    try { window.localStorage.setItem(this._graphPrefsKey(), JSON.stringify({ showVms: this.showVms })); } catch (_) { /* ignoré */ }
+  }
+
+  /* ---- barre d'outils / filtres ---- */
+
+  private _pruneFilters(): void {
+    const s = this.store;
+    const valid: Record<string, Set<string>> = {
+      equip: new Set(s.all("equipments").map((e: any) => e.id)),
+      net: new Set(s.all("networks").map((n: any) => n.id)),
+      pt: new Set(s.all("portTypes").map((t: any) => t.id)),
+      grp: new Set(s.all("groups").map((g: any) => g.id)),
+    };
+    (["equip", "net", "pt", "grp"] as const).forEach((k) => {
+      [...this.filters[k]].forEach((id) => { if (!valid[k].has(id)) this.filters[k].delete(id); });
+    });
+  }
+
+  buildToolbar(): void {
+    const s = this.store;
+    this._pruneFilters();
+    this.toolbarEl.innerHTML = "";
+    const mkGroup = (node: HTMLElement) => { const g = document.createElement("div"); g.className = "graph-filter-group"; g.appendChild(node); return g; };
+    const eqItems = s.all("equipments").filter((e: any) => this._hasPorts(e)).sort((a: any, b: any) => a.name.localeCompare(b.name)).map((e: any) => ({ id: e.id, label: e.name || "(sans nom)" }));   // sans port = jamais au graphe → pas dans le sélecteur
+    const netItems = s.all("networks").sort((a: any, b: any) => a.label.localeCompare(b.label)).map((n: any) => ({ id: n.id, label: n.label, color: n.color }));
+    const ptItems = s.all("portTypes").sort((a: any, b: any) => a.name.localeCompare(b.name)).map((t: any) => ({ id: t.id, label: t.name + " · " + t.family }));
+    const grpItems = s.all("groups").sort((a: any, b: any) => a.label.localeCompare(b.label)).map((g: any) => ({ id: g.id, label: g.label || "(sans label)", color: g.color }));
+    const onChange = () => this.onFilterChange();
+    this.toolbarEl.appendChild(mkGroup(MultiSelect.build("Équipements", eqItems, this.filters.equip, onChange)));
+    this.toolbarEl.appendChild(mkGroup(MultiSelect.build("Réseaux", netItems, this.filters.net, onChange)));
+    this.toolbarEl.appendChild(mkGroup(MultiSelect.build("Groupes", grpItems, this.filters.grp, onChange)));
+    this.toolbarEl.appendChild(mkGroup(MultiSelect.build("Types de port", ptItems, this.filters.pt, onChange)));
+
+    const barSel = FormControls.select([{ value: "type", label: "Type" }, { value: "network", label: "Réseau" }, { value: "group", label: "Groupe" }], this.nodeBarMode);
+    barSel.title = "Couleur de la poignée des nœuds";
+    barSel.onchange = () => { this.nodeBarMode = barSel.value as any; this.updateNodeBars(); };
+    this.toolbarEl.appendChild(mkGroup(barSel));
+
+    // Toggle « VMs » (opt-in, persisté par navigateur) : matérialise VMs + réseaux logiques. Changement →
+    // rebuild complet (les nœuds vm:/net: entrent ou sortent du modèle), recadrage inclus.
+    const vmToggle = FormControls.toggle("VMs", this.showVms, (v) => { this.showVms = v; this._persistPrefs(); this.rebuild({ recenter: true }); },
+      { title: "Afficher les machines virtuelles et leurs réseaux logiques (liens via le mapping bridge/VLAN → réseau)" });
+    this.toolbarEl.appendChild(mkGroup(vmToggle));
+
+    const search = document.createElement("input");
+    search.type = "text"; search.className = "search-input"; search.placeholder = "Surligner…"; search.value = this.search; search.style.maxWidth = "200px";
+    search.oninput = () => { this.search = search.value; this.applyHighlight(); };
+    this.toolbarEl.appendChild(search);
+
+    const reset = document.createElement("button");
+    reset.type = "button"; reset.className = "btn btn-ghost btn-sm"; reset.textContent = "Tout afficher";
+    reset.onclick = () => { this.filters.equip.clear(); this.filters.net.clear(); this.filters.pt.clear(); this.filters.grp.clear(); this.search = ""; this.buildToolbar(); this.onFilterChange(); };
+    this.toolbarEl.appendChild(reset);
+
+    // Les actions de disposition/vue (export · cadre · mode · dispositions · auto) et les contrôles de
+    // zoom/recentrage/plein écran vivent en OVERLAY sur le stage (cf. buildOverlays), comme l'app d'origine.
+    this.refreshLayoutControls();
+  }
+
+  /** Routage d'un changement de filtre selon le mode (sans toucher au zoom en B/C). */
+  onFilterChange(): void {
+    if (this._activeLayout() || this.displayMode === "B") this.refreshFilterVisibility();
+    else if (this.displayMode === "C") this.rebuild({ recenter: false });
+    else this.rebuild({ recenter: true });
+  }
+
+  /** Applique le MASQUAGE par filtres (display:none) ; _shownEq null = tout visible. */
+  applyFilterVisibility(): void {
+    if (!this.gRoot) return;
+    const showAll = !this._shownEq;
+    this.gRoot.querySelectorAll("g.gnode").forEach((g) => { (g as any).style.display = (showAll || this._shownEq!.has((g as any).dataset.id)) ? "" : "none"; });
+    const showCable = (id: string) => showAll || (this._shownCable && this._shownCable.has(id));
+    this.gRoot.querySelectorAll("line.gedge").forEach((l) => { (l as any).style.display = showCable((l as any).dataset.id) ? "" : "none"; });
+    this.gRoot.querySelectorAll("text.gedge-label").forEach((t) => { (t as any).style.display = showCable((t as any).dataset.id) ? "" : "none"; });
+  }
+  /** Recalcule les filtres et applique le masquage SANS re-rendre (mode B / disposition). */
+  refreshFilterVisibility(): void {
+    const sets = this._filteredSets();
+    this._shownEq = sets.eqIds; this._shownCable = sets.cableIds;
+    // Les nœuds vm/net et arêtes VM→réseau sont DÉJÀ dans le modèle (mode masquage) : on ne recalcule que
+    // le sous-ensemble visible face au filtre « Réseaux » (VM toujours affichée), sinon ils seraient masqués.
+    if (this.showVms) { const vs = this._vmShownIds(); vs.nodeIds.forEach((id) => this._shownEq!.add(id)); vs.edgeIds.forEach((id) => this._shownCable!.add(id)); }
+    this.applyFilterVisibility(); this.applyHighlight(); this.renderLegend();
+  }
+
+  /* ---- dispositions NOMMÉES ---- */
+
+  private _layouts(): any[] { return this.store.meta.graphLayouts || (this.store.meta.graphLayouts = []); }
+  private _activeLayout(): any { return this._layouts().find((l) => l.id === this.store.meta.activeLayoutId) || null; }
+  private _activePositions(): any { const l = this._activeLayout(); return l ? l.positions : null; }
+
+  private _persistLayouts(): void {
+    const m = this.store.meta;
+    if (m.activeLayoutId && !this._layouts().some((l) => l.id === m.activeLayoutId)) m.activeLayoutId = null;
+    const active = this._activeLayout();
+    m.graphLayout = active ? active.positions : null;
+    this.store.persistMeta(); this.host.setDirty?.(true);
+  }
+  private _capturePositions(base: any): Record<string, { x: number; y: number }> {
+    const pos = Object.assign({}, base || {});
+    this.nodes.forEach((n) => { pos[n.id] = { x: Math.round(n.x), y: Math.round(n.y) }; });
+    return pos;
+  }
+  private _captureFilters(): any { return { equip: [...this.filters.equip], net: [...this.filters.net], pt: [...this.filters.pt], grp: [...this.filters.grp] }; }
+  private _applyFilters(f: any): void { (["equip", "net", "pt", "grp"] as const).forEach((k) => { this.filters[k] = new Set<string>((f && f[k]) || []); }); }
+  private _markDirtyLayout(): void { if (!this._activeLayout()) return; this._layoutDirty = true; if (this._layoutSaveBtn) this._layoutSaveBtn.classList.add("dirty"); }
+
+  refreshLayoutControls(): void {
+    const active = this._activeLayout();
+    if (this._layoutSelectEl) {
+      const opts = ['<option value="__default__">Vue par défaut</option>']
+        .concat(this._layouts().map((l) => `<option value="${l.id}">${Html.escape(l.name || "(sans nom)")}</option>`));
+      this._layoutSelectEl.innerHTML = opts.join("");
+      this._layoutSelectEl.value = active ? active.id : "__default__";
+    }
+    if (this._layoutSaveBtn) { this._layoutSaveBtn.style.display = active ? "" : "none"; this._layoutSaveBtn.classList.toggle("dirty", !!this._layoutDirty); }
+    if (this._displayModeEl) { this._displayModeEl.value = this.displayMode; this._displayModeEl.disabled = !!active; }
+    if (this._autoBtn) this._autoBtn.disabled = !!active;
+  }
+
+  activateDefaultView(): void {
+    this.store.meta.activeLayoutId = null; this._layoutDirty = false;
+    this._persistLayouts(); this.rebuild({ recenter: true }); Notify.toast("Vue par défaut");
+  }
+
+  private _promptName(title: string, initial: string): Promise<string | null> {
+    return Dialog.custom({
+      title, confirmLabel: "OK",
+      build: (root) => {
+        const inp = FormControls.text(initial || "", "ex. Salle serveurs, Vue logique…");
+        root.appendChild(FormControls.fieldRow("Nom", inp));
+        setTimeout(() => { inp.focus(); inp.select(); }, 30);
+        return { validate: () => inp.value.trim() ? true : "Le nom ne peut pas être vide.", collect: () => inp.value.trim() };
+      },
+    });
+  }
+
+  async saveLayout(): Promise<void> {
+    const positions = this._capturePositions(this.pos);
+    const filters = this._captureFilters();
+    const def = "Disposition " + (this._layouts().length + 1);
+    const name = await this._promptName("Enregistrer la disposition", def);
+    if (!name) return;
+    const id = Id.uid();
+    this._layouts().push({ id, name, positions, filters, created_date: Id.nowIso(), updated_date: Id.nowIso() });
+    this.store.meta.activeLayoutId = id; this._layoutDirty = false;
+    this._persistLayouts(); this._moved.clear();
+    this.pos = Object.assign({}, positions);
+    this.buildToolbar(); this.rebuild({ recenter: true });
+    Notify.toast("Disposition « " + name + " » enregistrée");
+  }
+  applyLayout(id: string): void {
+    const l = this._layouts().find((x) => x.id === id);
+    if (!l) return;
+    this.store.meta.activeLayoutId = id; this._layoutDirty = false;
+    this.pos = Object.assign({}, l.positions || {}); this._moved.clear();
+    this._applyFilters(l.filters); this._persistLayouts();
+    this.buildToolbar(); this.rebuild({ recenter: true });
+    Notify.toast("Disposition « " + (l.name || "") + " » restaurée");
+  }
+  updateLayout(id: string): void {
+    const l = this._layouts().find((x) => x.id === id);
+    if (!l) return;
+    l.positions = this._capturePositions(this.pos); l.filters = this._captureFilters(); l.updated_date = Id.nowIso();
+    this._layoutDirty = false; this._persistLayouts(); this.refreshLayoutControls();
+    Notify.toast("Disposition « " + l.name + " » enregistrée");
+  }
+  async renameLayout(id: string): Promise<void> {
+    const l = this._layouts().find((x) => x.id === id);
+    if (!l) return;
+    const name = await this._promptName("Renommer la disposition", l.name);
+    if (!name) return;
+    l.name = name; l.updated_date = Id.nowIso(); this._persistLayouts(); this.refreshLayoutControls(); Notify.toast("Disposition renommée");
+  }
+  async deleteLayout(id: string): Promise<void> {
+    const l = this._layouts().find((x) => x.id === id);
+    if (!l) return;
+    const ok = await Dialog.confirm({ title: "Supprimer la disposition ?", message: "« " + (l.name || "") + " » sera supprimée. Les équipements ne sont pas affectés.", confirmLabel: "Supprimer", danger: true });
+    if (!ok) return;
+    const wasActive = this.store.meta.activeLayoutId === id;
+    this.store.meta.graphLayouts = this._layouts().filter((x) => x.id !== id);
+    if (wasActive) { this.store.meta.activeLayoutId = null; this._layoutDirty = false; }
+    this._persistLayouts(); this.buildToolbar(); this.rebuild({ recenter: wasActive }); Notify.toast("Disposition supprimée");
+  }
+  /** Réorganise tout (force) en ignorant les positions vivantes. */
+  autoArrange(): void { this.pos = {}; this._moved.clear(); this.rebuild({ recenter: true }); }
+
+  openLayoutManager(): void {
+    const fmtDate = (iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch (_) { return ""; } };
+    const root = document.createElement("div");
+    const top = document.createElement("div"); top.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;";
+    const hint = document.createElement("div"); hint.style.cssText = "font-size:11px;color:var(--fg-dim);";
+    const addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "btn btn-primary btn-sm"; addBtn.textContent = "+ Enregistrer la disposition actuelle";
+    top.appendChild(hint); top.appendChild(addBtn);
+    const listEl = document.createElement("div"); listEl.className = "layout-mgr";
+    root.appendChild(top); root.appendChild(listEl);
+    const render = () => {
+      const layouts = this._layouts();
+      hint.textContent = layouts.length ? layouts.length + " disposition(s) enregistrée(s)" : "Aucune disposition enregistrée pour l'instant.";
+      listEl.innerHTML = "";
+      if (!layouts.length) { const e = document.createElement("div"); e.className = "lm-empty"; e.textContent = "Disposez les nœuds, puis « Enregistrer la disposition actuelle »."; listEl.appendChild(e); return; }
+      layouts.forEach((l) => {
+        const active = this.store.meta.activeLayoutId === l.id;
+        const item = document.createElement("div"); item.className = "lm-item" + (active ? " active" : "");
+        const info = document.createElement("div"); info.className = "lm-info";
+        const nameEl = document.createElement("div"); nameEl.className = "lm-name"; nameEl.appendChild(document.createTextNode(l.name || "(sans nom)"));
+        if (active) { const b = document.createElement("span"); b.className = "lm-badge"; b.textContent = "active"; nameEl.appendChild(b); }
+        const sub = document.createElement("div"); sub.className = "lm-sub";
+        sub.textContent = (l.positions ? Object.keys(l.positions).length : 0) + " nœud(s) · maj " + fmtDate(l.updated_date || l.created_date);
+        info.appendChild(nameEl); info.appendChild(sub);
+        const acts = document.createElement("div"); acts.className = "lm-actions";
+        const mk = (label: string, cls: string, title: string, fn: () => any) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn " + cls + " btn-sm"; b.textContent = label; if (title) b.title = title; b.onclick = () => Promise.resolve(fn()).then(render); acts.appendChild(b); };
+        mk("Restaurer", "btn-ghost", "Appliquer cette disposition", () => this.applyLayout(l.id));
+        mk("Mettre à jour", "btn-ghost", "Remplacer ses positions par la vue actuelle", () => this.updateLayout(l.id));
+        mk("Renommer", "btn-ghost", "Renommer cette disposition", () => this.renameLayout(l.id));
+        mk("Supprimer", "btn-danger", "Supprimer cette disposition", () => this.deleteLayout(l.id));
+        item.appendChild(info); item.appendChild(acts); listEl.appendChild(item);
+      });
+    };
+    addBtn.onclick = () => Promise.resolve(this.saveLayout()).then(render);
+    render();
+    this.host.openModal?.({ title: "Dispositions enregistrées", subtitle: "Sauvegardez, restaurez, renommez ou supprimez vos agencements", body: root, hideFooter: true, wide: true });
+  }
+
+  /* ---- plein écran ---- */
+
+  toggleFullscreen(): void {
+    if (document.fullscreenElement) { document.exitFullscreen(); return; }
+    const el = this.stage.parentElement || this.stage;
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => Notify.toast("Plein écran indisponible", "err"));
+    else Notify.toast("Plein écran non supporté par le navigateur", "err");
+  }
+
+  /* ---- export SVG (fidèle) / JPEG (rasterisé) ---- */
+
+  private _exportName(ext: string): string {
+    return ImageExport.fileBase(this.store.meta.docName || "", "topologie") + "-topologie-" + new Date().toISOString().slice(0, 10) + "." + ext;
+  }
+  private _contentBounds(): { minX: number; minY: number; maxX: number; maxY: number } {
+    let { minX, minY, maxX, maxY } = GraphGeometry.nodesBBox(this.nodes, () => 26);
+    ((this.store.meta.graphFrames as GFrame[]) || []).forEach((f) => { minX = Math.min(minX, f.x); maxX = Math.max(maxX, f.x + f.w); minY = Math.min(minY, f.y); maxY = Math.max(maxY, f.y + f.h); });
+    if (!isFinite(minX)) { minX = 0; minY = 0; maxX = this.stage.clientWidth || 900; maxY = this.stage.clientHeight || 560; }
+    return { minX, minY, maxX, maxY };
+  }
+  /** Rectangle MONDE à exporter : "view" = vue actuelle (écran) ; "all" = tout le contenu. */
+  private _exportWorldRect(scope: string): { x: number; y: number; w: number; h: number } {
+    const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
+    if (scope === "all") { const b = this._contentBounds(), pad = 40; return { x: b.minX - pad, y: b.minY - pad, w: (b.maxX - b.minX) + pad * 2, h: (b.maxY - b.minY) + pad * 2 }; }
+    const s = this.scale || 1;
+    return { x: (-this.tx) / s, y: (-this.ty) / s, w: W / s, h: H / s };
+  }
+  /** SVG autonome et fidèle (styles calculés inlinés), cadré sur `scope`. */
+  private _buildExportSvg(scope: string): string {
+    const rect = this._exportWorldRect(scope);
+    const bgColor = getComputedStyle(document.documentElement).getPropertyValue("--bg-2").trim() || "#111";
+    const clone = this.svg!.cloneNode(true) as SVGSVGElement;
+    ImageExport.inlineComputedStyles(this.svg!, clone);
+    const g = clone.querySelector("g"); if (g) g.setAttribute("transform", "translate(0,0) scale(1)");
+    clone.setAttribute("width", String(Math.round(rect.w)));
+    clone.setAttribute("height", String(Math.round(rect.h)));
+    clone.setAttribute("viewBox", rect.x + " " + rect.y + " " + rect.w + " " + rect.h);
+    clone.setAttribute("xmlns", Dom.SVGNS);
+    clone.insertBefore(Dom.svg("rect", { x: rect.x, y: rect.y, width: rect.w, height: rect.h, fill: bgColor }), clone.firstChild);
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone);
+  }
+  async openExportDialog(): Promise<void> {
+    if (!this.svg) { Notify.toast("Rien à exporter", "err"); return; }
+    const res = await ImageExport.dialog(true);
+    if (res) this.exportImage(res);
+  }
+  exportImage(opts: ExportOptions): void {
+    if (!this.svg) { Notify.toast("Rien à exporter", "err"); return; }
+    const rect = this._exportWorldRect(opts.scope);
+    ImageExport.run(opts, this._buildExportSvg(opts.scope), rect.w, rect.h, (ext) => this._exportName(ext));
+  }
+
+  /* ---- couleur de la poignée des nœuds ---- */
+
+  private _nodeBarColor(n: GNode): { color: string; tip: string; muted?: boolean } {
+    if (this.nodeBarMode === "type") return { color: EquipmentTypes.color(n.type), tip: "Type : " + EquipmentTypes.label(n.type) };
+    if (this.nodeBarMode === "network") {
+      const r = this._nodeNetworkColor(n.id);
+      return r ? { color: r.color, tip: "Réseau : " + r.label + (r.multi ? " (dominant)" : "") } : { color: "var(--line-2)", tip: "Aucun réseau", muted: true };
+    }
+    const grp = n.group_id ? this.store.get("groups", n.group_id) : null;
+    return grp ? { color: grp.color || "var(--accent)", tip: "Groupe : " + (grp.label || "(sans label)") + " (" + GroupTypes.label(grp.type) + ")" } : { color: "var(--line-2)", tip: "Aucun groupe", muted: true };
+  }
+
+  /** Réseau DOMINANT (le plus représenté) parmi les câbles d'un équipement. */
+  private _nodeNetworkColor(eqId: string): { color: string; label: string; multi: boolean } | null {
+    const s = this.store;
+    const counts = new Map<string, number>(), nets = new Map<string, any>();
+    s.cablesOfEquipment(eqId).forEach((c: any) => {
+      this.store.cableNetworkIds(c).forEach((nid) => { const nw = s.get("networks", nid); if (nw && nw.color) { counts.set(nid, (counts.get(nid) || 0) + 1); nets.set(nid, nw); } });
+    });
+    let best: string | null = null, bestN = 0; counts.forEach((cnt, nid) => { if (cnt > bestN) { bestN = cnt; best = nid; } });
+    if (!best) return null;
+    const nw = nets.get(best);
+    return { color: nw.color, label: nw.label || "(réseau)", multi: counts.size > 1 };
+  }
+
+  /** Met à jour la couleur des poignées en place (sans re-rendre). */
+  updateNodeBars(): void {
+    if (!this.gRoot) return;
+    this.nodes.forEach((n) => {
+      const g = this._gById[n.id]; if (!g) return;
+      const bar = g.querySelector("path.gnode-group"); if (!bar) return;
+      const bi = this._nodeBarColor(n);
+      bar.setAttribute("fill", bi.color);
+      if (bi.muted) bar.setAttribute("opacity", "0.5"); else bar.removeAttribute("opacity");
+      let t: Element | null = bar.querySelector("title"); if (!t) { t = Dom.svg("title"); bar.appendChild(t); } t.textContent = bi.tip;
+    });
+  }
+
+  /* ---- surlignage (recherche) + légende ---- */
+
+  applyHighlight(): void {
+    if (!this.gRoot) return;
+    const q = Text.normSearch(this.search || "");
+    const active = q.length > 0;
+    const matchIds = new Set<string>();
+    this.gRoot.querySelectorAll("g.gnode").forEach((g) => {
+      const id = (g as any).dataset.id; const n = this._nodeById[id];
+      const match = active && n && Text.normSearch(n.name).includes(q);
+      if (match) matchIds.add(id);
+      g.classList.toggle("highlight", !!match);
+      g.classList.toggle("dim", active && !match);
+    });
+    this.gRoot.querySelectorAll("line.gedge").forEach((line) => {
+      const e = this._edgeById[(line as any).dataset.id];
+      const touch = e && (matchIds.has(e.a) || matchIds.has(e.b));
+      line.classList.toggle("dim", active && !touch);
+    });
+  }
+
+  renderLegend(): void {
+    const s = this.store;
+    const nets = new Map<string, any>();
+    this.edges.forEach((e) => { if (e.network_id) { const n = s.get("networks", e.network_id); if (n) nets.set(n.id, n); } });
+    const grps = new Map<string, any>();
+    this.nodes.forEach((n) => { if (n.group_id) { const g = s.get("groups", n.group_id); if (g) grps.set(g.id, g); } });
+    if (!nets.size && !grps.size) { this.legendEl.style.display = "none"; this.legendEl.innerHTML = ""; return; }
+    this.legendEl.style.display = "block";
+    const head = (t: string) => '<div style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim);margin-bottom:4px;">' + t + "</div>";
+    const item = (color: string, label: string) => `<div class="graph-legend-item"><span class="swatch-dot" style="background:${color || "var(--line-2)"};"></span><span>${label}</span></div>`;
+    let html = "";
+    if (nets.size) { html += head("Réseaux"); nets.forEach((n) => { html += item(n.color, n.label); }); }
+    if (grps.size) { if (html) html += '<div style="height:6px;"></div>'; html += head("Groupes"); grps.forEach((g) => { html += item(g.color, (g.label || "(sans label)") + " · " + GroupTypes.label(g.type)); }); }
+    this.legendEl.innerHTML = html;
+  }
+
+  /* ---- layout ---- */
+
+  layout(): void {
+    this.unplaced = new Set();
+    if (this._activeLayout()) this._applyFixedLayout();          // disposition active → positions figées
+    else if (this.displayMode === "B") this._layoutStable();      // tout reste en place
+    else if (this.displayMode === "C") { this._forceLayout(); this._pinMoved(); }   // réorg. + ré-épingle les déplacés
+    else this._forceLayout();                                     // mode A : réorganise tout
+    this._syncPosFromNodes();
+  }
+
+  private _syncPosFromNodes(): void { this.nodes.forEach((n) => { this.pos[n.id] = { x: Math.round(n.x), y: Math.round(n.y) }; }); }
+  private _pinMoved(): void { this.nodes.forEach((n) => { if (this._moved.has(n.id) && this.pos[n.id]) { n.x = this.pos[n.id].x; n.y = this.pos[n.id].y; n.vx = 0; n.vy = 0; } }); }
+
+  private _applyFixedLayout(): void {
+    const placed: GNode[] = [], missing: GNode[] = [];
+    this.nodes.forEach((n) => { const p = this.pos[n.id]; if (p) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; placed.push(n); } else missing.push(n); });
+    this._placeMissingNearCentroid(missing, placed, true);
+  }
+  private _layoutStable(): void {
+    const placed: GNode[] = [], missing: GNode[] = [];
+    this.nodes.forEach((n) => { const p = this.pos[n.id]; if (p) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; placed.push(n); } else missing.push(n); });
+    if (!placed.length) { this._forceLayout(); return; }
+    this._placeMissingNearCentroid(missing, placed, false);
+  }
+  /* Disposition force-directed : géométrie PURE extraite dans GraphGeometry (forceLayout /
+     simulateComponent / placeMissingNearCentroid) — la vue ne garde que l'adaptation (dimensions
+     du stage, marquage « non placé »). */
+  private _placeMissingNearCentroid(missing: GNode[], placed: GNode[], markUnplaced: boolean): void {
+    if (!missing.length) return;
+    const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
+    GraphGeometry.placeMissingNearCentroid(missing, placed, W / 2, H / 2);
+    if (markUnplaced) missing.forEach((n) => this.unplaced.add(n.id));
+  }
+
+  private _forceLayout(): void {
+    const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
+    GraphGeometry.forceLayout(this.nodes, this.edges, W, H);
+  }
+
+  /* ---- rendu SVG ---- */
+
+  render(): void {
+    if (this.svg) this.svg.remove();
+    this._nodeById = {}; this._gById = {}; this._edgeById = {}; this._edgeLineById = {}; this._edgeLabelById = {};
+    this.nodes.forEach((n) => { this._nodeById[n.id] = n; });
+    const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
+    const svg = Dom.svg("svg", { width: W, height: H }) as SVGSVGElement;
+    this.svg = svg;
+    const gRoot = Dom.svg("g") as SVGGElement; this.gRoot = gRoot; svg.appendChild(gRoot);
+    const idx: Record<string, number> = {}; this.nodes.forEach((n, i) => { idx[n.id] = i; });
+
+    // cadres de regroupement (calque le plus bas, derrière arêtes et nœuds)
+    const frameLayer = Dom.svg("g"); frameLayer.setAttribute("class", "gframe-layer");
+    (((this.store.meta.graphFrames as GFrame[]) || [])).forEach((f) => frameLayer.appendChild(this._renderFrame(f)));
+    gRoot.appendChild(frameLayer);
+
+    // arêtes
+    const edgeLayer = Dom.svg("g");
+    this.edges.forEach((e) => {
+      const a = this.nodes[idx[e.a]], b = this.nodes[idx[e.b]];
+      if (!a || !b) return;
+      const net = e.network_id ? this.store.get("networks", e.network_id) : null;
+      const color = net && net.color ? net.color : "var(--line-2)";
+      const line = Dom.svg("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: color });
+      line.setAttribute("class", "gedge"); (line as any).dataset.id = e.id;
+      if (e.status === "brouillon") line.setAttribute("stroke-dasharray", "1 4");
+      else if (e.status === "planifie") line.setAttribute("stroke-dasharray", "6 4");
+      else if (e.status === "a-remplacer") line.setAttribute("stroke-dasharray", "2 3");
+      edgeLayer.appendChild(line);
+      this._edgeLineById[e.id] = line; this._edgeById[e.id] = e;
+      if (e.name) {
+        const lbl = Dom.svg("text", { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 3, "text-anchor": "middle" });
+        lbl.setAttribute("class", "gedge-label"); (lbl as any).dataset.id = e.id; lbl.textContent = e.name;
+        edgeLayer.appendChild(lbl);
+        this._edgeLabelById[e.id] = lbl;
+      }
+    });
+    gRoot.appendChild(edgeLayer);
+
+    // nœuds — construction commune (boîte, transform, drag/dblclick/menu) puis contenu DISPATCHÉ par `kind`.
+    const nodeLayer = Dom.svg("g");
+    this.nodes.forEach((n) => {
+      const { w, h } = GraphGeometry.nodeSize(n);
+      n._w = w; n._h = h;
+      const g = Dom.svg("g") as SVGGElement;
+      const kindCls = n.kind === "vm" ? " gnode-vm" + (n.orphan ? " orphan" : "") : n.kind === "net" ? " gnode-net" : "";
+      g.setAttribute("class", "gnode" + kindCls + (this.unplaced.has(n.id) ? " unplaced" : "") + (this.selection.has(n.id) ? " selected" : ""));
+      (g as any).dataset.id = n.id;
+      g.setAttribute("transform", `translate(${n.x - w / 2},${n.y - h / 2})`);
+      (g as any).style.cursor = "grab";
+      if (n.kind === "vm") this._buildVmNodeContent(g, n, w, h);
+      else if (n.kind === "net") this._buildNetNodeContent(g, n, w, h);
+      else this._buildEquipNodeContent(g, n, w, h);
+      if (this.unplaced.has(n.id)) {
+        const tag = Dom.svg("text", { x: w - 3, y: -4, "text-anchor": "end" }); tag.setAttribute("class", "unplaced-tag"); tag.textContent = "non placé";
+        g.appendChild(tag);
+      }
+      this._gById[n.id] = g;
+      g.addEventListener("pointerdown", (ev) => this._onNodeMouseDown(ev as MouseEvent, n));
+      g.addEventListener("dblclick", () => this._onNodeDblClick(n));
+      g.addEventListener("contextmenu", (ev) => { ev.preventDefault(); ev.stopPropagation(); this._nodeContextMenu(ev as MouseEvent, n); });
+      nodeLayer.appendChild(g);
+    });
+    gRoot.appendChild(nodeLayer);
+
+    svg.addEventListener("mousedown", (ev) => {
+      if (ev.target !== svg || ev.button !== 0) return;
+      if (ev.shiftKey || ev.ctrlKey || ev.metaKey) this._startMarquee(ev);
+      else this._startPan(ev);
+    });
+    svg.addEventListener("wheel", (ev) => this._onWheel(ev), { passive: false });
+    svg.addEventListener("contextmenu", (ev) => { if (ev.target === svg) { ev.preventDefault(); this._bgContextMenu(ev); } });
+    // navigation TACTILE : 1 doigt (sur le fond) = pan · 2 doigts = pinch-zoom. Le tap d'1 doigt n'est pas
+    // intercepté → la sélection/édition des nœuds passe par les events souris de compatibilité.
+    TouchNav.attach(svg, {
+      panBy: (dx, dy) => this.panByClient(dx, dy),
+      zoomAt: (f, x, y) => this.zoomAtClient(f, x, y),
+      panStart: () => svg.classList.add("panning"),
+      panEnd: () => svg.classList.remove("panning"),
+    });
+
+    this.stage.insertBefore(svg, this.stage.firstChild);
+    this._applyTransform();
+    this._renderSelection();
+
+    if (!this.nodes.length && !((this.store.meta.graphFrames as GFrame[]) || []).length) {
+      const msg = Dom.svg("text", { x: W / 2, y: H / 2, "text-anchor": "middle", fill: "var(--fg-dim)", "font-size": 13 });
+      msg.textContent = "Aucun élément à afficher.";
+      gRoot.appendChild(msg);
+    }
+  }
+
+  /** Contenu SVG d'un nœud ÉQUIPEMENT (rendu HISTORIQUE — inchangé) : corps, poignée colorée selon
+      nodeBarMode (type | réseau | groupe), icône de type et deux lignes de texte (nom + libellé de type). */
+  private _buildEquipNodeContent(g: SVGGElement, n: GNode, w: number, h: number): void {
+    const ICON = 18, ICON_X = 9, TEXT_X = ICON_X + ICON + 7;
+    const typeLabel = EquipmentTypes.label(n.type);
+    g.appendChild(Dom.svg("rect", { x: 0, y: 0, width: w, height: h, rx: 4 }));
+    // poignée colorée selon nodeBarMode (type | réseau | groupe)
+    const R = 4, BW = 8;
+    const bandD = `M ${BW},0 L ${R},0 Q 0,0 0,${R} L 0,${h - R} Q 0,${h} ${R},${h} L ${BW},${h} Z`;
+    const bi = this._nodeBarColor(n);
+    const bar = Dom.svg("path", { d: bandD, fill: bi.color });
+    bar.setAttribute("class", "gnode-group");
+    if (bi.muted) bar.setAttribute("opacity", "0.5");
+    const bt = Dom.svg("title"); bt.textContent = bi.tip; bar.appendChild(bt);
+    g.appendChild(bar);
+    // icône du type
+    const iconG = Dom.svg("g"); iconG.setAttribute("class", "gnode-icon");
+    iconG.setAttribute("transform", `translate(${ICON_X},${(h - ICON) / 2}) scale(0.75)`);
+    iconG.setAttribute("pointer-events", "none");
+    const ic = Dom.parseSvgIcon(EquipmentTypes.icon(n.type)); if (ic) iconG.appendChild(ic);
+    g.appendChild(iconG);
+    const t1 = Dom.svg("text", { x: TEXT_X, y: 17, "text-anchor": "start", "font-size": 11, "font-weight": 600 }); t1.textContent = n.name;
+    const t2 = Dom.svg("text", { x: TEXT_X, y: 31, "text-anchor": "start", "font-size": 9, fill: "var(--fg-dim)" }); t2.textContent = typeLabel;
+    g.appendChild(t1); g.appendChild(t2);
+  }
+
+  /** Contenu SVG d'un nœud VM (overlay « VMs ») : corps standard (`.gnode rect` → sélection/surlignage
+      hérités), badge « VM » (pastille accent, réutilise le style des pills) à gauche, nom + sous-ligne
+      « VM » / « VM · orpheline ». Une VM orpheline est atténuée (classe `.orphan` sur le groupe). */
+  private _buildVmNodeContent(g: SVGGElement, n: GNode, w: number, h: number): void {
+    g.appendChild(Dom.svg("rect", { x: 0, y: 0, width: w, height: h, rx: 4 }));
+    // badge « VM » : petit cartouche accent (identité visuelle distincte de l'icône d'équipement)
+    const badge = Dom.svg("rect", { x: 6, y: (h - 16) / 2, width: 22, height: 16, rx: 3 });
+    badge.setAttribute("class", "vm-badge");
+    g.appendChild(badge);
+    const bt = Dom.svg("text", { x: 17, y: h / 2 + 3, "text-anchor": "middle", "font-size": 8, "font-weight": 700 });
+    bt.setAttribute("class", "vm-badge-txt"); bt.textContent = "VM";
+    g.appendChild(bt);
+    const TEXT_X = 34;   // après le badge (aligné sur GNODE_TEXT_X de la géométrie)
+    const t1 = Dom.svg("text", { x: TEXT_X, y: 17, "text-anchor": "start", "font-size": 11, "font-weight": 600 }); t1.textContent = n.name;
+    const t2 = Dom.svg("text", { x: TEXT_X, y: 31, "text-anchor": "start", "font-size": 9 });
+    t2.setAttribute("class", "vm-sub"); t2.textContent = n.orphan ? "VM · orpheline" : "VM";
+    g.appendChild(t1); g.appendChild(t2);
+  }
+
+  /** Contenu SVG d'un nœud RÉSEAU logique matérialisé : cartouche à coins TRÈS arrondis (forme distincte des
+      équipements), teinté par `networks.color` via la variable CSS `--net-col` (posée en ligne → la sélection et
+      le surlignage restent gérés par le CSS, cf. `.gnode-net.selected`), nom du réseau centré. */
+  private _buildNetNodeContent(g: SVGGElement, n: GNode, w: number, h: number): void {
+    const net: any = this.store.get("networks", this._netRealId(n.id));
+    const col = (net && net.color) ? net.color : "var(--line-2)";
+    (g as any).style.setProperty("--net-col", col);
+    const body = Dom.svg("rect", { x: 0, y: 0, width: w, height: h, rx: h / 2 });
+    body.setAttribute("class", "net-body");
+    g.appendChild(body);
+    const t = Dom.svg("text", { x: w / 2, y: h / 2 + 4, "text-anchor": "middle", "font-size": 11, "font-weight": 600 });
+    t.setAttribute("class", "net-label"); t.textContent = n.name;
+    g.appendChild(t);
+  }
+
+  /** Double-clic sur un nœud → fiche détail selon le `kind` (jamais d'action d'équipement sur vm/net). */
+  private _onNodeDblClick(n: GNode): void {
+    if (n.kind === "vm") this.host.openVmDetail?.(this._vmRealId(n.id));
+    else if (n.kind === "net") this.host.openNetworkDetail?.(this._netRealId(n.id));
+    else this.host.openEquipmentDetail?.(n.id);
+  }
+
+  /* ---- cadres de regroupement ---- */
+
+  private _frames(): GFrame[] { return (this.store.meta.graphFrames as GFrame[]) || (this.store.meta.graphFrames = []); }
+  private _nodesInFrame(f: GFrame): string[] { return this._nodesInRect(f.x, f.y, f.x + f.w, f.y + f.h); }
+  private _persistFrames(): void { this.store.persistMeta(); this.host.setDirty?.(true); }
+
+  /* Un cadre : fond translucide, barre de titre (déplacement), poignée de resize. */
+  private _renderFrame(f: GFrame): SVGGElement {
+    const g = Dom.svg("g") as SVGGElement; g.setAttribute("class", "gframe"); (g as any).dataset.id = f.id;
+    const col = f.color || "#ff5500";
+    const bg = Dom.svg("rect", { x: f.x, y: f.y, width: f.w, height: f.h, rx: 8, fill: col, "fill-opacity": 0.1, stroke: col, "stroke-width": 1.5 });
+    bg.setAttribute("class", "frame-bg"); bg.setAttribute("pointer-events", "none");
+    const head = Dom.svg("rect", { x: f.x, y: f.y, width: f.w, height: 22, fill: col, "fill-opacity": 0.22 });
+    head.setAttribute("class", "frame-head"); head.setAttribute("pointer-events", "all"); (head as any).style.cursor = "move";
+    const label = Dom.svg("text", { x: f.x + 10, y: f.y + 15, fill: col }); label.setAttribute("class", "frame-label"); label.setAttribute("pointer-events", "none"); label.textContent = f.label || "Cadre";
+    const handle = Dom.svg("rect", { x: f.x + f.w - 14, y: f.y + f.h - 14, width: 14, height: 14, fill: "var(--bg)", stroke: col }); handle.setAttribute("class", "frame-handle"); handle.setAttribute("pointer-events", "all");
+    if (f.description) { const ti = Dom.svg("title"); ti.textContent = f.description; g.appendChild(ti); }
+    g.appendChild(bg); g.appendChild(head); g.appendChild(label); g.appendChild(handle);
+    head.addEventListener("pointerdown", (ev) => this._startFrameDrag(ev as MouseEvent, f, g));
+    handle.addEventListener("pointerdown", (ev) => this._startFrameResize(ev as MouseEvent, f, g));
+    const ctx = (ev: Event) => { ev.preventDefault(); ev.stopPropagation(); this._frameContextMenu(ev as MouseEvent, f); };
+    head.addEventListener("contextmenu", ctx); handle.addEventListener("contextmenu", ctx);
+    return g;
+  }
+
+  private _reflowFrame(g: SVGGElement, f: GFrame): void {
+    const bg = g.querySelector("rect.frame-bg")!, head = g.querySelector("rect.frame-head")!,
+      label = g.querySelector("text.frame-label")!, handle = g.querySelector("rect.frame-handle")!;
+    bg.setAttribute("x", String(f.x)); bg.setAttribute("y", String(f.y)); bg.setAttribute("width", String(f.w)); bg.setAttribute("height", String(f.h));
+    head.setAttribute("x", String(f.x)); head.setAttribute("y", String(f.y)); head.setAttribute("width", String(f.w));
+    label.setAttribute("x", String(f.x + 10)); label.setAttribute("y", String(f.y + 15));
+    handle.setAttribute("x", String(f.x + f.w - 14)); handle.setAttribute("y", String(f.y + f.h - 14));
+  }
+
+  /* Glisser un cadre déplace AUSSI les nœuds couverts (Alt = cadre seul). */
+  private _startFrameDrag(ev: MouseEvent, f: GFrame, g: SVGGElement): void {
+    ev.preventDefault(); ev.stopPropagation();
+    const standalone = ev.altKey;
+    const start = this._clientToWorld(ev.clientX, ev.clientY);
+    const ofx = f.x, ofy = f.y;
+    const movers = standalone ? [] : this._nodesInFrame(f);
+    const moverSet = new Set(movers);
+    const orig: Record<string, { x: number; y: number }> = {}; movers.forEach((id) => { const nd = this._nodeById[id]; if (nd) orig[id] = { x: nd.x, y: nd.y }; });
+    let last = { x: ev.clientX, y: ev.clientY };
+    const sync = () => {
+      const p = this._clientToWorld(last.x, last.y);
+      const dx = p.x - start.x, dy = p.y - start.y;
+      f.x = ofx + dx; f.y = ofy + dy; this._reflowFrame(g, f);
+      movers.forEach((id) => { const nd = this._nodeById[id]; if (!nd || !orig[id]) return; nd.x = orig[id].x + dx; nd.y = orig[id].y + dy; this._placeNodeOnly(nd); });
+      if (moverSet.size) this._updateEdgesForSet(moverSet);
+    };
+    this._dragSession((e) => { last = { x: e.clientX, y: e.clientY }; sync(); }, () => { this._stopEdgePan(); this._persistFrames(); });
+    this._startEdgePan(() => last, sync);
+  }
+
+  private _startFrameResize(ev: MouseEvent, f: GFrame, g: SVGGElement): void {
+    ev.preventDefault(); ev.stopPropagation();
+    const start = this._clientToWorld(ev.clientX, ev.clientY);
+    const ow = f.w, oh = f.h;
+    this._dragSession(
+      (e) => { const p = this._clientToWorld(e.clientX, e.clientY); f.w = Math.max(90, ow + (p.x - start.x)); f.h = Math.max(56, oh + (p.y - start.y)); this._reflowFrame(g, f); },
+      () => { this._persistFrames(); },
+    );
+  }
+
+  addFrameAt(wx?: number, wy?: number): void {
+    if (typeof wx !== "number") {
+      const r = this.svg ? this.svg.getBoundingClientRect() : ({ left: 0, top: 0, width: 900, height: 560 } as DOMRect);
+      const c = this._clientToWorld(r.left + r.width / 2, r.top + r.height / 2);
+      wx = c.x - 130; wy = c.y - 90;
+    }
+    this.openFrameForm(null, { x: Math.round(wx), y: Math.round(wy!) });
+  }
+
+  openFrameForm(frame: GFrame | null, pos?: { x: number; y: number }): void {
+    const root = document.createElement("div");
+    const labelI = FormControls.text(frame ? frame.label : "", "ex. Cœur de réseau, Salle A…");
+    root.appendChild(FormControls.fieldRow("Label", labelI));
+    let color: string | null = frame ? frame.color : "#ff5500";
+    root.appendChild(FormControls.fieldRow("Couleur", ColorPalette.build(color, (c) => { color = c; }), "Bordure et teinte du cadre."));
+    const descI = FormControls.textArea(frame ? frame.description : "");
+    root.appendChild(FormControls.fieldRow("Description", descI, "Affichée en infobulle sur le cadre."));
+    this.host.openModal?.({
+      title: frame ? "Modifier le cadre" : "Nouveau cadre",
+      subtitle: frame ? (frame.label || "") : "",
+      body: root,
+      onSave: () => {
+        const label = labelI.value.trim() || "Cadre";
+        const frames = this._frames().slice();
+        if (frame) {
+          const i = frames.findIndex((f) => f.id === frame.id);
+          if (i >= 0) frames[i] = Object.assign({}, frames[i], { label, color: color || "#ff5500", description: descI.value.trim() });
+        } else {
+          frames.push({ id: Id.uid(), label, color: color || "#ff5500", description: descI.value.trim(), x: pos!.x, y: pos!.y, w: 260, h: 180 });
+        }
+        this.store.meta.graphFrames = frames; this.store.persistMeta(); this.host.setDirty?.(true);
+        this.rebuild();
+        Notify.toast(frame ? "Cadre mis à jour" : "Cadre ajouté"); return true;
+      },
+    });
+    setTimeout(() => labelI.focus(), 30);
+  }
+
+  removeFrame(id: string): void {
+    Dialog.confirm({ title: "Supprimer le cadre ?", message: "Le cadre de regroupement sera retiré (les équipements ne sont pas affectés).", confirmLabel: "Supprimer", danger: true }).then((ok) => {
+      if (!ok) return;
+      this.store.meta.graphFrames = this._frames().filter((f) => f.id !== id);
+      this.store.persistMeta(); this.host.setDirty?.(true); this.rebuild(); Notify.toast("Cadre supprimé");
+    });
+  }
+
+  private _frameContextMenu(ev: MouseEvent, f: GFrame): void {
+    const covered = this._nodesInFrame(f);
+    ContextMenu.show(ev.clientX, ev.clientY, [{
+      head: f.label || "Cadre",
+      items: [
+        { label: "Modifier le cadre", action: () => this.openFrameForm(f) },
+        { label: "Sélectionner le contenu (" + covered.length + ")", action: () => { this.selection = new Set(covered); this._renderSelection(); } },
+        { label: "Supprimer le cadre", danger: true, action: () => this.removeFrame(f.id) },
+      ],
+    }]);
+  }
+
+  /* ---- transform (pan / zoom) ---- */
+
+  private _applyTransform(): void {
+    if (this.gRoot) this.gRoot.setAttribute("transform", `translate(${this.tx},${this.ty}) scale(${this.scale})`);
+  }
+  private _clientToWorld(cx: number, cy: number): { x: number; y: number } {
+    const r = this.svg!.getBoundingClientRect();
+    return { x: (cx - r.left - this.tx) / this.scale, y: (cy - r.top - this.ty) / this.scale };
+  }
+  /** Zoom centré sur le milieu de la vue. */
+  zoomBy(factor: number): void {
+    const r = this.svg ? this.svg.getBoundingClientRect() : ({ width: 900, height: 560 } as DOMRect);
+    const px = (this.stage.clientWidth || r.width) / 2, py = (this.stage.clientHeight || r.height) / 2;
+    const wx = (px - this.tx) / this.scale, wy = (py - this.ty) / this.scale;
+    this.scale = Math.max(0.15, Math.min(4, this.scale * factor));
+    this.tx = px - wx * this.scale; this.ty = py - wy * this.scale;
+    this._applyTransform();
+  }
+  private _onWheel(ev: WheelEvent): void {
+    ev.preventDefault();
+    this.zoomAtClient(ev.deltaY < 0 ? 1.1 : 1 / 1.1, ev.clientX, ev.clientY);
+  }
+
+  /** Zoom autour d'un point écran (molette OU pinch tactile). */
+  zoomAtClient(factor: number, clientX: number, clientY: number): void {
+    if (!this.svg) return;
+    const r = this.svg.getBoundingClientRect();
+    const px = clientX - r.left, py = clientY - r.top;
+    const wx = (px - this.tx) / this.scale, wy = (py - this.ty) / this.scale;
+    this.scale = Math.max(0.15, Math.min(4, this.scale * factor));
+    this.tx = px - wx * this.scale; this.ty = py - wy * this.scale;
+    this._applyTransform();
+  }
+
+  /** Pan incrémental (glisser tactile à 1 doigt / centroïde à 2 doigts). */
+  panByClient(dx: number, dy: number): void {
+    this.tx += dx; this.ty += dy; this._applyTransform();
+  }
+  private _startPan(ev: MouseEvent): void {
+    ev.preventDefault();
+    this.svg!.classList.add("panning");
+    const sx = ev.clientX, sy = ev.clientY, ox = this.tx, oy = this.ty;
+    let moved = false;
+    const move = (e: MouseEvent) => {
+      if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 3) moved = true;
+      this.tx = ox + (e.clientX - sx); this.ty = oy + (e.clientY - sy); this._applyTransform();
+    };
+    const up = () => {
+      this.svg!.classList.remove("panning");
+      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      if (!moved && this.selection.size) this._clearSelection();   // clic à vide = désélectionner
+    };
+    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+  }
+
+  /** Recadre l'ensemble des nœuds dans la vue. */
+  recenter(): void {
+    if (!this.nodes.length || !this.svg) { this.scale = 1; this.tx = 0; this.ty = 0; this._applyTransform(); return; }
+    const { minX, minY, maxX, maxY } = GraphGeometry.nodesBBox(this.nodes, (n) => (n._h || 40) / 2);
+    const W = this.stage.clientWidth || 900, H = this.stage.clientHeight || 560;
+    const pad = 50;
+    const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
+    const s = Math.min((W - pad * 2) / bw, (H - pad * 2) / bh, 1.6);
+    this.scale = Math.max(0.15, s);
+    this.tx = (W - bw * this.scale) / 2 - minX * this.scale;
+    this.ty = (H - bh * this.scale) / 2 - minY * this.scale;
+    this._applyTransform();
+  }
+
+  /* ---- sélection multiple ---- */
+
+  private _renderSelection(): void {
+    if (!this.gRoot) return;
+    [...this.selection].forEach((id) => { if (!this._nodeById[id]) this.selection.delete(id); });
+    this.gRoot.querySelectorAll("g.gnode").forEach((g) => (g as SVGGElement).classList.toggle("selected", this.selection.has((g as any).dataset.id)));
+  }
+  private _clearSelection(): void { this.selection.clear(); this._renderSelection(); }
+  selectAll(): void { this.selection = new Set(this.nodes.map((n) => n.id)); this._renderSelection(); }
+  private _nodesInRect(x0: number, y0: number, x1: number, y1: number): string[] {
+    const a = Math.min(x0, x1), b = Math.max(x0, x1), c = Math.min(y0, y1), d = Math.max(y0, y1);
+    return this.nodes.filter((n) => n.x >= a && n.x <= b && n.y >= c && n.y <= d).map((n) => n.id);
+  }
+
+  /* ---- déplacement (sélection-aware) ---- */
+
+  private _onNodeMouseDown(ev: MouseEvent, n: GNode): void {
+    if (ev.button !== 0) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const additive = ev.shiftKey || ev.ctrlKey || ev.metaKey;
+    if (additive) {
+      if (this.selection.has(n.id)) this.selection.delete(n.id); else this.selection.add(n.id);
+      this._renderSelection();
+      return;
+    }
+    if (!this.selection.has(n.id)) { this.selection.clear(); this.selection.add(n.id); this._renderSelection(); }
+    this._startNodesDrag(ev);
+  }
+
+  private _dragSession(onMove: (e: MouseEvent) => void, onUp?: (e: MouseEvent) => void): void {
+    // Pointer Events → drag unifié souris + TACTILE (les nœuds/cadres se déplacent au doigt). `pointerdown` des
+    // éléments appelle preventDefault → pas d'event souris de compat (donc pas de pan de fond parasite).
+    const move = (e: PointerEvent) => onMove(e);
+    const up = (e: PointerEvent) => {
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+      if (onUp) onUp(e);
+    };
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+  }
+
+  /** Déplace tous les nœuds sélectionnés du même delta, avec auto-pan au bord. */
+  private _startNodesDrag(ev: MouseEvent): void {
+    const ids = [...this.selection].filter((id) => this._nodeById[id]);
+    if (!ids.length) return;
+    const idSet = new Set(ids);
+    ids.forEach((id) => { const g = this._gById[id]; if (g) (g as any).style.cursor = "grabbing"; });
+    const startW = this._clientToWorld(ev.clientX, ev.clientY);
+    const orig: Record<string, { x: number; y: number }> = {}; ids.forEach((id) => { const nd = this._nodeById[id]; orig[id] = { x: nd.x, y: nd.y }; });
+    let last = { x: ev.clientX, y: ev.clientY };
+    const sync = () => {
+      const p = this._clientToWorld(last.x, last.y);
+      const dx = p.x - startW.x, dy = p.y - startW.y;
+      ids.forEach((id) => { const nd = this._nodeById[id]; nd.x = orig[id].x + dx; nd.y = orig[id].y + dy; this._placeNodeOnly(nd); });
+      this._updateEdgesForSet(idSet);
+    };
+    this._dragSession(
+      (e) => { last = { x: e.clientX, y: e.clientY }; sync(); },
+      () => {
+        ids.forEach((id) => { const g = this._gById[id]; if (g) (g as any).style.cursor = "grab"; });
+        ids.forEach((id) => { const nd = this._nodeById[id]; if (nd) { this.pos[id] = { x: Math.round(nd.x), y: Math.round(nd.y) }; this._moved.add(id); this.unplaced.delete(id); } });
+        this._markDirtyLayout();
+        this._stopEdgePan();
+      },
+    );
+    this._startEdgePan(() => last, sync);
+  }
+
+  private _placeNodeOnly(n: GNode): void {
+    const g = this._gById[n.id]; if (!g) return;
+    const w = n._w || GraphGeometry.nodeSize(n).w, h = n._h || 40;
+    g.setAttribute("transform", `translate(${n.x - w / 2},${n.y - h / 2})`);
+  }
+
+  /** Sélection rectangle (marquee) : ajoute les nœuds couverts à la sélection. */
+  private _startMarquee(ev: MouseEvent): void {
+    ev.preventDefault();
+    const start = this._clientToWorld(ev.clientX, ev.clientY);
+    const base = new Set(this.selection);
+    const rect = Dom.svg("rect", { class: "gmarquee", fill: "var(--accent)", "fill-opacity": 0.08, stroke: "var(--accent)", "stroke-width": 1, "stroke-dasharray": "4 3" });
+    rect.setAttribute("pointer-events", "none");
+    this.gRoot!.appendChild(rect);
+    let cur = start;
+    const draw = () => {
+      const x0 = Math.min(start.x, cur.x), y0 = Math.min(start.y, cur.y), x1 = Math.max(start.x, cur.x), y1 = Math.max(start.y, cur.y);
+      rect.setAttribute("x", String(x0)); rect.setAttribute("y", String(y0)); rect.setAttribute("width", String(x1 - x0)); rect.setAttribute("height", String(y1 - y0));
+      const sel = new Set(base);
+      this._nodesInRect(x0, y0, x1, y1).forEach((id) => sel.add(id));
+      this.selection = sel; this._renderSelection();
+    };
+    const move = (e: MouseEvent) => { cur = this._clientToWorld(e.clientX, e.clientY); draw(); };
+    const up = () => { rect.remove(); document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+  }
+
+  /** Auto-pan quand le pointeur approche un bord pendant un déplacement. */
+  private _startEdgePan(getClient: () => { x: number; y: number }, onPan: () => void): void {
+    this._stopEdgePan();
+    const MARGIN = 60, MAX_SPEED = 16;
+    const state = { raf: 0 };
+    const tick = () => {
+      if (!this.svg) return;
+      const r = this.svg.getBoundingClientRect();
+      const c = getClient();
+      let dx = 0, dy = 0;
+      if (c.x < r.left + MARGIN) dx = (r.left + MARGIN - c.x);
+      else if (c.x > r.right - MARGIN) dx = -(c.x - (r.right - MARGIN));
+      if (c.y < r.top + MARGIN) dy = (r.top + MARGIN - c.y);
+      else if (c.y > r.bottom - MARGIN) dy = -(c.y - (r.bottom - MARGIN));
+      const ease = (v: number) => { const t = Math.max(-1, Math.min(1, v / MARGIN)); return Math.sign(t) * t * t * MAX_SPEED; };
+      const vx = ease(dx), vy = ease(dy);
+      if (vx || vy) { this.tx += vx; this.ty += vy; this._applyTransform(); if (onPan) onPan(); }
+      state.raf = requestAnimationFrame(tick);
+    };
+    state.raf = requestAnimationFrame(tick);
+    this._edgePan = state;
+  }
+  private _stopEdgePan(): void {
+    if (this._edgePan && this._edgePan.raf) cancelAnimationFrame(this._edgePan.raf);
+    this._edgePan = null;
+  }
+
+  private _updateEdgesForSet(idSet: Set<string>): void {
+    if (!this.gRoot) return;
+    this.edges.forEach((e) => {
+      if (!idSet.has(e.a) && !idSet.has(e.b)) return;
+      const a = this._nodeById[e.a], b = this._nodeById[e.b]; if (!a || !b) return;
+      const line = this._edgeLineById[e.id];
+      if (line) { line.setAttribute("x1", String(a.x)); line.setAttribute("y1", String(a.y)); line.setAttribute("x2", String(b.x)); line.setAttribute("y2", String(b.y)); }
+      const lbl = this._edgeLabelById[e.id];
+      if (lbl) { lbl.setAttribute("x", String((a.x + b.x) / 2)); lbl.setAttribute("y", String((a.y + b.y) / 2 - 3)); }
+    });
+  }
+
+  /* ---- menus contextuels ---- */
+
+  private _nodeContextMenu(ev: MouseEvent, n: GNode): void {
+    // vm/net : menu RESTREINT à « Détails » (jamais les actions d'équipement — suppression, etc.).
+    if (n.kind === "vm") {
+      ContextMenu.show(ev.clientX, ev.clientY, [{ head: n.name, items: [{ label: "Détails", action: () => this.host.openVmDetail?.(this._vmRealId(n.id)) }] }]);
+      return;
+    }
+    if (n.kind === "net") {
+      if (!this.host.openNetworkDetail) return;   // aucune fiche réseau câblée → pas de menu
+      ContextMenu.show(ev.clientX, ev.clientY, [{ head: n.name, items: [{ label: "Détails", action: () => this.host.openNetworkDetail!(this._netRealId(n.id)) }] }]);
+      return;
+    }
+    ContextMenu.show(ev.clientX, ev.clientY, [{
+      head: n.name,
+      items: [
+        { label: "Détails", action: () => this.host.openEquipmentDetail?.(n.id) },
+        { label: "Supprimer", danger: true, action: () => this.host.deleteEquipment?.(n.id) },
+      ],
+    }]);
+  }
+  private _bgContextMenu(ev: MouseEvent): void {
+    const p = this._clientToWorld(ev.clientX, ev.clientY);
+    const items = [{ label: "Tout sélectionner", action: () => this.selectAll() }];
+    if (this.selection.size) items.push({ label: "Tout désélectionner", action: () => this._clearSelection() });
+    ContextMenu.show(ev.clientX, ev.clientY, [
+      { items: [
+        { label: "Ajouter un cadre ici", action: () => this.addFrameAt(p.x, p.y) },
+        { label: "Recentrer la vue", action: () => this.recenter() },
+      ] },
+      { head: "Sélection", items },
+    ]);
+  }
+}

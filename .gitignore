@@ -1,0 +1,20 @@
+# Archive of old DC Manager version snapshots (kept on disk, not tracked)
+dcmanager-old-versions.zip
+
+# Scrapped experiments / obsolete smoke-tests (kept untracked)
+Scrapped/
+
+# Node / webpack build
+node_modules/
+dist/
+dist-test/
+*.tsbuildinfo
+
+# Documents de SUIVI (tracking de refactor, checklists, notes de session) — cf. CLAUDE.md
+.notes/
+
+# Jeux de données locaux (peuvent contenir des données client réelles) — jamais versionnés
+Samples/
+
+# artefact legacy v172 (comparateur Painter) — conservé localement, hors dépôt
+dcmanager-v172-painter-comparator.html

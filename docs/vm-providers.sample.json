@@ -1,0 +1,41 @@
+{
+  "3f8a1c2e-9b47-4d0a-8e21-5c6f7a9d0b13": {
+    "docName": "[FORMAT LEGACY — migré automatiquement vers vm-providers.db dès que DCMANAGER_SECRETS_KEY (ou l'ancienne VM_PROVIDERS_KEY, lue en repli) est définie ; l'édition passe désormais par l'UI (modale « Providers… » du sous-onglet Clusters). Sans clé, ce fichier reste lu en seule lecture.] Datacenter production — pool de 3 nœuds (bascule si un nœud tombe), synchro horaire",
+    "providers": [
+      {
+        "id": "pve-prod",
+        "kind": "proxmox",
+        "urls": [
+          { "url": "https://pve1.example.lan:8006", "fingerprint": "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99" },
+          { "url": "https://pve2.example.lan:8006", "fingerprint": "CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB" },
+          "https://pve3.example.lan:8006"
+        ],
+        "token": "sync@pve!inventaire=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        "include_lxc": true,
+        "interval_sec": 3600,
+        "timeout_sec": 10
+      },
+      {
+        "id": "pve-lab",
+        "kind": "proxmox",
+        "url": "https://pve-lab.example.lan:8006",
+        "fingerprint": null,
+        "include_lxc": false,
+        "interval_sec": 0,
+        "token": "sync@pve!inventaire=yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"
+      }
+    ]
+  },
+  "7d2e5f80-1a3b-4c6d-9e0f-2b4c6d8e0f1a": {
+    "docName": "[FORMAT LEGACY — voir ci-dessus : migré vers vm-providers.db, édition par l'UI.] Site secondaire — nœud unique (raccourci url), synchro manuelle, timeout par défaut (15 s)",
+    "providers": [
+      {
+        "id": "pve-site2",
+        "kind": "proxmox",
+        "url": "https://192.168.50.10:8006",
+        "token": "sync@pve!inventaire=zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
+        "fingerprint": "11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00"
+      }
+    ]
+  }
+}

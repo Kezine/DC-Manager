@@ -1,0 +1,33 @@
+{
+  "name": "dc-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DC Manager — cartographie réseau / datacenter (migration du HTML monolithique vers TypeScript orienté objet).",
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "webpack serve --mode development",
+    "watch": "webpack --mode development --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:modules",
+    "test:modules": "tsc -p tsconfig.node.json && node Tests/modules/run.js"
+  },
+  "devDependencies": {
+    "@types/three": "^0.160.0",
+    "css-loader": "^7.1.4",
+    "html-inline-script-webpack-plugin": "^3.2.1",
+    "html-webpack-plugin": "^5.6.0",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.4.5",
+    "webpack": "^5.91.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^6.0.0"
+  },
+  "dependencies": {
+    "@peculiar/x509": "^1.14.3",
+    "@zip.js/zip.js": "^2.8.30",
+    "fflate": "^0.8.3",
+    "micromark": "^4.0.2",
+    "three": "^0.160.0"
+  }
+}

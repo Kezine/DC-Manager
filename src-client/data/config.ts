@@ -1,0 +1,40 @@
+/* Constantes de la couche données (données pures). */
+import { Schema } from "../../src-shared/Schema";
+
+/** Taille de page par défaut des listes. RÉ-EXPORTÉE du schéma PARTAGÉ (source unique front ⇄ back). */
+export const PAGE_SIZE_DEFAULT = Schema.PAGE_SIZE_DEFAULT;
+
+/** Taille de page « TOUT » (document complet en une page). RÉ-EXPORTÉE du schéma PARTAGÉ. */
+export const PAGE_SIZE_ALL = Schema.PAGE_SIZE_ALL;
+
+/** Tailles de page proposées dans les listes. */
+export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+/** Profondeur max de la pile undo/redo (snapshots). */
+export const HISTORY_MAX = 50;
+
+/** Sentinel « valeur vide » des index secondaires. */
+export const IDX_NULL = "∅";
+
+/* INDEX SECONDAIRES — champs d'égalité indexés par collection. Spec PARTAGÉ :
+   - l'adapter local indexe les ENREGISTREMENTS persistés (findBy/list sans scan) ;
+   - le Store indexera les ENTITÉS hydratées (helpers métier en O(1)).
+   Un champ tableau (ex. cables.network_ids) est indexé élément par élément ;
+   les valeurs vides tombent sous IDX_NULL → findBy(coll, champ, null) répond
+   « éléments non rattachés » sans parcourir la collection. */
+export const INDEX_SPEC: Record<string, string[]> = {
+  equipments: ["group_id", "group_ids", "rack_id", "dc_id", "tray_item_id", "face_image_id", "face_image_rear_id", "face_image_top_id", "face_image_bottom_id", "face_image_left_id", "face_image_right_id"],
+  ports:       ["equipment_id", "parent_port_id", "port_type_id", "aggregate_id", "bundle_id", "network_id", "network_ids"],
+  cables:      ["from_port_id", "to_port_id", "cable_type_id", "network_id", "network_ids", "waypoint_ids"],
+  cableBundles: ["cable_type_id", "waypoint_ids", "endpoint_a_equipment_id", "endpoint_b_equipment_id"],
+  aggregates:  ["equipment_id"],
+  racks:       ["datacenter_id"],
+  rackItems:   ["rack_id"],
+  waypoints:   ["datacenter_id", "rack_id"],
+  floors:      ["location"],
+  ipAddresses: ["network_id", "equipment_id", "vm_id", "address"],   // vm_id indexé : la cascade vms détache par ce champ
+  dhcpRanges:  ["network_id", "server_id"],
+  networks:    ["ip_network_id"],
+  spares:      ["assigned_equipment_id"],
+  vms:         ["host_equipment_id", "group_id", "group_ids"],   // cascades hôte + groupes (parité spares/equipments)
+};

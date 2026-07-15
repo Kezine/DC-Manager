@@ -1,0 +1,66 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "dist-test",
+    "noEmit": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src-client/**/*.ts", "src-shared/**/*.ts",
+    // Modules SERVEUR testables sans Express (tests dans Tests/modules/run.js, driver SQLite injecté) :
+    // ApiRules (règles pures de la couche HTTP), Repository/db et DocumentStore (+ constants/logger transitifs).
+    "src-server/src/ApiRules.ts", "src-server/src/db.ts", "src-server/src/documents.ts",
+    // Module `vm/` AMOVIBLE — parsing Proxmox PUR (aucun réseau/Node) : testé en isolation
+    // (fixtures JSON → VmRecord). Seul ce fichier est émis dans dist-test/ ; VmProvider.ts n'est
+    // qu'un import de TYPES (erased), pas de dépendance runtime.
+    "src-server/src/vm/ProxmoxParse.ts",
+    // Chargement/validation de la config des providers VM — la méthode PURE `parse` (string → map
+    // validée) est testée sans filesystem ; l'import `../logger.js` (transitif) est déjà compilé via documents.ts.
+    "src-server/src/vm/ProviderConfigStore.ts",
+    // Validation PAR PROVIDER extraite (classe PURE partagée fichier legacy ↔ CRUD DB) — mêmes
+    // messages d'erreur des deux côtés, testée en isolation (parseProvider + libellés).
+    "src-server/src/vm/ProviderConfigValidate.ts",
+    // Stockage DB des providers (vm-providers.db, jetons chiffrés via SecretBox) — CRUD + lecture
+    // pour la synchro + migration du fichier legacy ; testé avec better-sqlite3 RÉEL (driver injecté).
+    "src-server/src/vm/ProviderConfigDb.ts",
+    // Adaptateur Proxmox — l'ORCHESTRATION est testée avec un client HTTP stub (PveJsonClient
+    // injecté) ; PveHttp (node:https) est compilé transitivement mais jamais sollicité en test.
+    "src-server/src/vm/ProxmoxAdapter.ts",
+    // Moteur de réconciliation PUR (inventaire pivot → ops create/update/orphan) — dépendances
+    // injectées (résolution d'hôte, id, horloge) ; la frontière source/locaux vient de src-shared/VmSync.
+    "src-server/src/vm/VmReconcile.ts",
+    // Moteur de SYNCHRO (adaptateur → réconciliation → écriture transactionnelle + SSE) — sans Express
+    // (bus live vu par interface, adaptateur injecté) : testé avec DocumentStore réel + stub d'inventaire.
+    // Les routes (VmModule.ts, Express) restent HORS test, comme api.ts.
+    "src-server/src/vm/VmSyncService.ts",
+    // Coffre à secrets serveur PARTAGÉ (AES-256-GCM, node:crypto) des secrets stockés en DB
+    // (jetons providers VM, jetons webhooks notify) — testé en isolation (aller-retour, clé
+    // différente, altération, format inconnu, repli d'environnement legacy).
+    "src-server/src/SecretBox.ts",
+    // Module `notify/` AMOVIBLE — moteur anti-spam PUR (état/routage/horloge/journal injectés) :
+    // testé en isolation (nouveau/rappel dû-pas dû/resolve avec-sans envoi/échec d'envoi/multi-types).
+    "src-server/src/notify/NotifyEngine.ts",
+    "src-server/src/notify/MemoryNotifyStateStore.ts",
+    "src-server/src/notify/ConsoleNotifier.ts",
+    // Persistance du module notify (notify.db : instances/abonnements/états/log/réglages) —
+    // testée avec better-sqlite3 RÉEL (driver injecté), validation pure NotifyValidate,
+    // webhook avec fetch INJECTÉ (payload/en-tête/erreurs sans secret), routage des abonnements
+    // (contacts vus par contrat ContactSource — stub en test).
+    "src-server/src/notify/NotifyValidate.ts",
+    "src-server/src/notify/NotifyDb.ts",
+    // Formatage PUR du corps des webhooks (texte compact / HTML échappé / brut) — testé en isolation.
+    "src-server/src/notify/WebhookFormat.ts",
+    "src-server/src/notify/WebhookNotifier.ts",
+    "src-server/src/notify/SubscriptionRouter.ts",
+    // Module `certs/` AMOVIBLE (PKI zéro-connaissance) — persistance certs.db (3 vraies tables,
+    // FK composite émetteur, SAN ordonnés) + validation pure : testés avec better-sqlite3 RÉEL.
+    // Les routes (CertsModule.ts, Express) restent HORS test, comme api.ts/VmModule/NotifyModule.
+    "src-server/src/certs/CertsValidate.ts",
+    "src-server/src/certs/CertsDb.ts",
+    // Veilleur d'échéances (producteur cert-expiry, seuils Q6 30/14/7 j) — PUR (source/rapporteur/
+    // horloge injectés), testé avec stubs + horloge contrôlée.
+    "src-server/src/certs/CertExpiryWatcher.ts"
+  ]
+}
