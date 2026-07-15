@@ -79,9 +79,14 @@ export class BulkActions {
   static readonly EXPORT_LABEL_PUBLIC = EXPORT_LABEL_PUBLIC;
 
   /** INTERSECTION des actions communes à une sélection, selon l'état de session (cadrage §5).
-      Sélection vide → aucune action. Export toujours possible (publics au minimum). Révoquer/supprimer
-      exigent le déverrouillage (parité actions par ligne) ; révoquer exige EN PLUS qu'aucun ne soit
-      déjà révoqué (sinon il n'y a rien de commun à révoquer). */
+      Sélection vide → aucune action. Export toujours possible (publics au minimum).
+
+      Révoquer/supprimer NE dépendent PAS du déverrouillage (parité avec les actions par ligne) :
+      ce sont des opérations de MÉTADONNÉES — aucun secret n'est déchiffré, la clé maître n'y sert
+      à rien. Les en exclure rendait IMPURGEABLE une PKI dont la phrase est perdue, en contradiction
+      avec docs/certs.md (« peut encore être consultée et purgée »). Le garde-fou pertinent n'est pas
+      le verrou mais l'intention explicite (confirmation par saisie côté UI, `force` côté serveur).
+      Révoquer exige EN PLUS qu'aucun ne soit déjà révoqué (sinon rien de commun à révoquer). */
   static commonActions(snapshots: CertSelectionSnapshot[], unlocked: boolean): BulkActionAvailability {
     const list = Array.isArray(snapshots) ? snapshots : [];
     const hasSelection = list.length > 0;
@@ -90,8 +95,8 @@ export class BulkActions {
       canExport: hasSelection,
       exportLabel: unlocked ? EXPORT_LABEL_FULL : EXPORT_LABEL_PUBLIC,
       withPrivateKeys: unlocked,
-      canRevoke: hasSelection && unlocked && !anyRevoked,
-      canDelete: hasSelection && unlocked,
+      canRevoke: hasSelection && !anyRevoked,
+      canDelete: hasSelection,
     };
   }
 

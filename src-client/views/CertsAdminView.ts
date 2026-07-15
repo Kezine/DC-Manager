@@ -59,9 +59,15 @@ import * as x509 from "@peculiar/x509";
    portent aucun matériau de clé. Le coffre de session (PkiSession) oublie la clé au
    verrouillage manuel OU après 15 min d'inactivité (chaque action appelle `touch()`).
 
-   VERROUILLÉ vs DÉVERROUILLÉ : verrouillée, la LISTE (métadonnées + échéances) reste
-   CONSULTABLE en lecture seule ; seules les opérations de CLÉ (créer/émettre/exporter/
-   révoquer/supprimer) exigent le déverrouillage.
+   VERROUILLÉ vs DÉVERROUILLÉ : seules les opérations qui ONT BESOIN de la clé maître
+   exigent le déverrouillage — créer une CA, ÉMETTRE (signer réclame la clé privée de
+   l'émetteur), et exporter AVEC la clé privée. Verrouillée, la page reste : liste et
+   échéances consultables, export des artefacts PUBLICS, et RÉVOCATION/SUPPRESSION —
+   ce sont des opérations de MÉTADONNÉES, aucun secret n'y est déchiffré. C'est ce qui
+   permet de purger une PKI dont la phrase secrète est perdue (docs/certs.md § Limites).
+   Le garde-fou de la suppression n'est donc pas le verrou mais l'INTENTION EXPLICITE :
+   confirmation par saisie ici, et `?force=true` exigé par le serveur pour tout
+   certificat encore VALIDE (cf. CertsModule).
 
    MODE : le service est SANS OBJET hors mode API (pas de serveur, pas de crypto scopée
    par document). En mode fichier/viewer, `client` est null → message « mode API requis ».
@@ -359,7 +365,7 @@ export class CertsAdminView {
     const title = document.createElement("div"); title.style.cssText = "font-weight:600;color:var(--fg);margin-bottom:6px";
     title.textContent = "Déverrouiller le coffre de certificat";
     const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "8px";
-    hint.textContent = "Saisissez la phrase secrète maître pour créer, émettre ou exporter des clés. La liste ci-dessous reste consultable sans déverrouiller.";
+    hint.textContent = "Saisissez la phrase secrète maître pour créer une autorité, émettre un certificat ou exporter une clé privée. Sans déverrouiller, la liste reste consultable et vous pouvez exporter les artefacts publics, révoquer et supprimer.";
 
     // Le bouton est frère de l'INPUT SEUL (pas du .form-field label+input) : posé à côté du champ
     // ENTIER, `align-items:flex-end` collait son bas à celui de l'input alors qu'il est ~15 px plus
@@ -566,7 +572,7 @@ export class CertsAdminView {
     // Actions : opérations de clé si déverrouillé + « Déployer la confiance… » / « Lister les certificats »
     // (consultation, disponibles MÊME verrouillé — aucune clé requise).
     const actions = document.createElement("td");
-    if (this.session.unlocked) this.fillActions(actions, item);
+    this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
     // Aide au déploiement : uniquement les AUTORITÉS (racine X.509 ou CA SSH) — pas les paires simples ni les
     // dérivés. Consultation pure (procédure d'installation dans les magasins de confiance des clients).
     if (item.kind === "root-ca" || item.kind === "ssh-ca") actions.appendChild(this.actionButton("Déployer la confiance…", "Procédure d'installation de cette autorité dans les magasins de confiance des clients", () => this.deployTrustModal(item)));
@@ -625,7 +631,7 @@ export class CertsAdminView {
     tr.appendChild(this.htmlCell(this.expiryCell(item)));
     tr.appendChild(this.htmlCell(item.revoked_at ? this.pill("révoqué", "err") : CertsAdminView.MUTED));
     const actions = document.createElement("td");
-    if (this.session.unlocked) this.fillActions(actions, item);
+    this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
     tr.appendChild(actions);
     return tr;
   }
@@ -715,10 +721,16 @@ export class CertsAdminView {
       (listes denses), la mini-doc de chacun vivant dans son tooltip enrichi (CERTS_TIPS).
       NB : l'export PAR LIGNE a un libellé STATIQUE → il devient une icône sans rien perdre. C'est
       l'export GROUPÉ (barre de sélection) qui garde son texte : SON libellé est dynamique et porte
-      une garantie de sécurité (« Exporter publics (ZIP) » = aucune clé privée). */
+      une garantie de sécurité (« Exporter publics (ZIP) » = aucune clé privée).
+
+      VERROUILLÉ : seule l'ÉMISSION disparaît — elle exige la clé privée de la CA pour signer.
+      Export (publics seuls), révocation et suppression restent offerts : ce sont des opérations de
+      MÉTADONNÉES, aucun secret n'est déchiffré. C'est ce qui rend une PKI dont la phrase secrète est
+      perdue encore consultable ET PURGEABLE, comme le promet docs/certs.md. */
   private fillActions(cell: HTMLElement, item: CertificateListItem): void {
-    if (item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, "Émettre TLS", CERT_TIP.issueTls, () => this.leafModal(item)));
-    if (item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, "Émettre SSH", CERT_TIP.issueSsh, () => this.sshCertModal(item)));
+    const unlocked = this.session.unlocked;
+    if (unlocked && item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, "Émettre TLS", CERT_TIP.issueTls, () => this.leafModal(item)));
+    if (unlocked && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, "Émettre SSH", CERT_TIP.issueSsh, () => this.sshCertModal(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.EXPORT, "Exporter les artefacts", CERT_TIP.export, () => void this.exportModal(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.REVOKE, "Révoquer", CERT_TIP.revoke, () => void this.revoke(item)));
     cell.appendChild(this.iconAction(Icons.DELETE, "Supprimer", CERT_TIP.remove, () => void this.remove(item), true));

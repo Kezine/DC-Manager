@@ -827,13 +827,20 @@ module.exports = async () => {
     ck.eq(b.canDelete, true, "un révoqué → supprimer reste disponible");
     ck.eq(b.canExport, true, "un révoqué → export reste disponible (le révoqué sera exclu du ZIP)");
 
-    // VERROUILLÉ → SEUL l'export (publics) ; révoquer/supprimer exigent le déverrouillage (parité par ligne).
+    // VERROUILLÉ → l'export tombe aux PUBLICS, mais révoquer/supprimer restent OFFERTS : ce sont des
+    // opérations de MÉTADONNÉES (aucun secret déchiffré). Les interdire rendait impurgeable une PKI
+    // dont la phrase est perdue — en contradiction avec docs/certs.md (« consultée ET PURGÉE »).
     const locked = BulkActions.commonActions(active, false);
     ck.eq(locked.canExport, true, "verrouillé : export disponible");
     ck.eq(locked.exportLabel, "Exporter publics (ZIP)", "verrouillé : libellé « Exporter publics (ZIP) »");
     ck.eq(locked.withPrivateKeys, false, "verrouillé : aucune clé privée incluse");
-    ck.eq(locked.canRevoke, false, "verrouillé : révoquer exige le déverrouillage");
-    ck.eq(locked.canDelete, false, "verrouillé : supprimer exige le déverrouillage");
+    ck.eq(locked.canRevoke, true, "verrouillé : révoquer reste disponible (métadonnée, aucun secret touché)");
+    ck.eq(locked.canDelete, true, "verrouillé : supprimer reste disponible (purge d'une PKI sans phrase)");
+
+    // …et un révoqué dans la sélection reste le SEUL motif de retrait de « révoquer », verrou ou pas.
+    const lockedMixed = BulkActions.commonActions(mixed, false);
+    ck.eq(lockedMixed.canRevoke, false, "verrouillé + un révoqué → révoquer indisponible (rien de commun)");
+    ck.eq(lockedMixed.canDelete, true, "verrouillé + un révoqué → supprimer disponible");
 
     // partitionExport : sépare inclus / exclus-révoqués (ordre préservé).
     const part = BulkActions.partitionExport([

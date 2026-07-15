@@ -101,6 +101,31 @@ La clé maître dérivée vit dans un **coffre de session en MÉMOIRE** :
 Timers INJECTÉS (testable headless). `onLock` prévient l'UI (retour à l'écran
 verrouillé) quelle que soit la cause (auto ou manuel).
 
+#### Ce que le verrou gouverne — et ce qu'il ne gouverne pas
+
+Le déverrouillage n'est **pas** une autorisation : c'est la **disponibilité de la clé maître**.
+N'exigent donc le déverrouillage que les opérations qui **ont besoin de la clé** :
+
+| Opération | Verrouillé | Pourquoi |
+|---|---|---|
+| Consulter la liste, les échéances | ✅ | métadonnées, jamais chiffrées |
+| Exporter les artefacts **publics** | ✅ | rien à déchiffrer |
+| **Révoquer** | ✅ | pose `revoked_at` — **métadonnée** |
+| **Supprimer** | ✅ | efface des lignes + un blob **opaque** |
+| Initialiser la PKI, **créer une CA** | ❌ | génère et chiffre une clé privée |
+| **Émettre** (feuille TLS, certificat SSH) | ❌ | **signer** exige la clé privée de l'émetteur |
+| Exporter **avec la clé privée** | ❌ | il faut déchiffrer `key_enc` |
+
+Révoquer et supprimer restent donc offerts **coffre verrouillé** : c'est ce qui rend une PKI
+dont la phrase est perdue **consultable ET purgeable** (cf. « Limites assumées »). Les en
+exclure aurait transformé une phrase oubliée en **impasse définitive** — un coffre qu'on ne
+peut ni ouvrir ni vider.
+
+Le verrou n'est pas non plus une frontière de sécurité pour la suppression : il est **local**,
+le serveur ne peut pas le connaître (zéro-connaissance). Ce qui protège réellement le `DELETE`,
+c'est l'**authentification** (SSO / Basic Auth) — plus l'exigence d'**intention explicite**
+décrite dans « Garde-fous de suppression ».
+
 ### Chiffrement des clés privées
 
 Chaque clé privée (PKCS#8 PEM pour X.509, graine ed25519 pour SSH) est chiffrée en
