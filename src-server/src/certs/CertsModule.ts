@@ -189,13 +189,26 @@ export class CertsModule {
       }
     });
 
+    // `?force=true` = INTENTION EXPLICITE de supprimer un certificat ENCORE VALIDE. Sans lui, un tel
+    // certificat est refusé (428) : par l'API il n'y a aucun prompt, c'est donc la seule barrière
+    // contre un effacement naïf d'un certificat en production. Révoqué/expiré : aucune cérémonie.
     router.delete("/:id", (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const id = (req.params as any).id as string;
-      const outcome = ctx.db.remove(ctx.docId, id);
+      const force = String((req.query as any)?.force ?? "") === "true";
+      const outcome = ctx.db.remove(ctx.docId, id, force);
       if (outcome === "missing") { res.status(404).json({ error: "certificat inconnu" }); return; }
       if (outcome === "children") {
-        res.status(409).json({ error: "des certificats dérivés existent — supprimez (ou ré-émettez) d'abord la descendance de cet émetteur" });
+        res.status(409).json({ error: "des certificats dérivés existent — supprimez (ou ré-émettez) d'abord la descendance de cet émetteur", code: "has_children" });
+        return;
+      }
+      if (outcome === "force_required") {
+        // 428 et NON 409 : le 409 signale déjà la descendance et le client lui associe un message
+        // dédié — réutiliser le même statut afficherait « des dérivés existent », ce qui serait FAUX.
+        res.status(428).json({
+          error: "ce certificat est encore valide — rejouez la requête avec ?force=true pour confirmer la suppression",
+          code: "force_required",
+        });
         return;
       }
       // Certificat disparu → son alerte d'échéance n'a plus d'objet (resolve no-op si aucune).

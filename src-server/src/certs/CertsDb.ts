@@ -452,17 +452,39 @@ export class CertsDb {
     return (this.db.prepare("SELECT id FROM certificates WHERE doc_id = ? AND parent_id = ?").all(docId, id) as any[]).map((r) => r.id);
   }
 
-  /** Supprime un certificat. REFUSE ("children") si des dérivés existent — supprimer un
-      émetteur orphelinerait sa descendance (garde-fou du cadrage §4) ; "missing" si inconnu. */
-  remove(docId: string, id: string): "ok" | "missing" | "children" {
-    if (!this.db.prepare("SELECT 1 FROM certificates WHERE doc_id = ? AND id = ?").get(docId, id)) return "missing";
+  /** Un certificat est-il ENCORE VALIDE (« actif ») ? Ni révoqué, ni expiré.
+      C'est la SEULE question de sûreté que le serveur puisse trancher lui-même : elle ne porte que
+      sur des MÉTADONNÉES qu'il détient en clair (`revoked_at`, `not_after`) — contrairement à l'état
+      de verrou du client, qu'il ne peut pas connaître (zéro-connaissance).
+      `not_after` absent/illisible → considéré ACTIF (on protège plutôt que de supposer l'expiration). */
+  static isActive(row: { revoked_at?: string | null; not_after?: string | null }, now: number = Date.now()): boolean {
+    if (row.revoked_at) return false;
+    if (!row.not_after) return true;
+    const t = Date.parse(row.not_after);
+    if (!isFinite(t)) return true;
+    return t > now;
+  }
+
+  /** Supprime un certificat. Verdicts, dans cet ordre :
+      - "missing"        : inconnu ;
+      - "children"       : des dérivés existent — supprimer l'émetteur orphelinerait sa descendance
+                           (garde-fou du cadrage §4). PRIORITAIRE : c'est un blocage d'intégrité,
+                           qu'aucun `force` ne lève ;
+      - "force_required" : le certificat est ENCORE VALIDE et l'appel n'a pas posé `force` → on exige
+                           une INTENTION EXPLICITE. Un révoqué ou un expiré part sans cérémonie.
+      La garde vit ICI (et non dans l'UI seule) : par l'API, elle est la seule à empêcher d'effacer
+      naïvement un certificat en production. */
+  remove(docId: string, id: string, force = false): "ok" | "missing" | "children" | "force_required" {
+    const row = this.db.prepare("SELECT revoked_at, not_after FROM certificates WHERE doc_id = ? AND id = ?").get(docId, id) as any;
+    if (!row) return "missing";
     if (this.childrenOf(docId, id).length > 0) return "children";
+    if (!force && CertsDb.isActive(row)) return "force_required";
     const purge = this.db.transaction(() => {
       // Les SAN partent par CASCADE ; la ligne ensuite.
       this.db.prepare("DELETE FROM certificates WHERE doc_id = ? AND id = ?").run(docId, id);
     });
     purge();
-    this.log.info("certs: certificat supprimé", docId, id);
+    this.log.info("certs: certificat supprimé", docId, id, force ? "(force)" : "");
     return "ok";
   }
 

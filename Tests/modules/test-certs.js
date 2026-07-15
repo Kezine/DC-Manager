@@ -1062,4 +1062,53 @@ module.exports = async () => {
     ck(emptyPassFailed, "zipArtifactsEncrypted : mot de passe vide refusé (garde-fou)");
   }
   });
+
+  /* ==========================================================================
+     GARDE-FOUS DE SUPPRESSION — DeleteGuard (PUR). Miroir client de la garde
+     `force` du serveur : quelle cérémonie exiger, quelle saisie l'accepte.
+     ========================================================================== */
+
+  await section("Certs : DeleteGuard — cérémonie de suppression + besoin de `force` (logique PURE)", async () => {
+  {
+    const { DeleteGuard } = D("certs/DeleteGuard.js");
+    const NOW = Date.parse("2026-07-16T12:00:00Z");
+    const cert = (label, opts = {}) => ({ label, revoked_at: opts.revoked || null, not_after: opts.not_after !== undefined ? opts.not_after : "2027-01-01T00:00:00Z" });
+
+    // ---- isActive : ni révoqué, ni expiré (miroir EXACT de CertsDb.isActive) ----
+    ck.eq(DeleteGuard.isActive(cert("a"), NOW), true, "isActive : ni révoqué ni expiré → actif");
+    ck.eq(DeleteGuard.isActive(cert("a", { revoked: "2026-07-01T00:00:00Z" }), NOW), false, "isActive : révoqué → inactif");
+    ck.eq(DeleteGuard.isActive(cert("a", { not_after: "2026-01-01T00:00:00Z" }), NOW), false, "isActive : expiré → inactif");
+    ck.eq(DeleteGuard.isActive(cert("a", { not_after: null }), NOW), true, "isActive : sans date de fin → ACTIF (on protège par défaut)");
+    ck.eq(DeleteGuard.isActive(cert("a", { not_after: "pas-une-date" }), NOW), true, "isActive : date illisible → ACTIF (on ne suppose pas l'expiration)");
+
+    // ---- ceremony : proportionnée au risque ----
+    ck.eq(DeleteGuard.ceremony([cert("x", { revoked: "2026-07-01T00:00:00Z" })], NOW).kind, "simple", "1 révoqué → confirmation simple");
+    ck.eq(DeleteGuard.ceremony([cert("x", { not_after: "2026-01-01T00:00:00Z" })], NOW).kind, "simple", "1 expiré → confirmation simple");
+    const one = DeleteGuard.ceremony([cert("sw-core-01")], NOW);
+    ck.eq(one.kind, "type-name", "1 ACTIF → re-saisie du nom");
+    ck.eq(one.expected, "sw-core-01", "type-name : le nom attendu est le libellé du certificat");
+    // Lot : la phrase, MÊME si aucun n'est actif (le volume est un risque en soi).
+    const many = DeleteGuard.ceremony([cert("a", { revoked: "2026-07-01T00:00:00Z" }), cert("b", { revoked: "2026-07-01T00:00:00Z" })], NOW);
+    ck.eq(many.kind, "type-phrase", "lot (même sans actif) → phrase de confirmation");
+    ck.eq(many.expected, "Oui je supprime", "type-phrase : phrase attendue");
+    // REPLI : un actif au libellé blanc serait intapable → on bascule sur la phrase.
+    ck.eq(DeleteGuard.ceremony([cert("   ")], NOW).kind, "type-phrase", "actif au libellé blanc → repli sur la phrase (nom intapable)");
+    ck.eq(DeleteGuard.ceremony([], NOW).kind, "simple", "sélection vide → simple");
+
+    // ---- accepts : trim toléré, casse STRICTE ----
+    ck.eq(DeleteGuard.accepts(one, "sw-core-01"), true, "accepts : saisie exacte");
+    ck.eq(DeleteGuard.accepts(one, "  sw-core-01  "), true, "accepts : espaces autour tolérés (copier/coller)");
+    ck.eq(DeleteGuard.accepts(one, "SW-CORE-01"), false, "accepts : la CASSE compte (friction voulue)");
+    ck.eq(DeleteGuard.accepts(one, "sw-core-0"), false, "accepts : saisie partielle refusée");
+    ck.eq(DeleteGuard.accepts(many, "oui je supprime"), false, "accepts : phrase en minuscules refusée");
+    ck.eq(DeleteGuard.accepts(many, "Oui je supprime"), true, "accepts : phrase exacte");
+    ck.eq(DeleteGuard.accepts({ kind: "simple" }, ""), true, "accepts : cérémonie simple → rien à saisir");
+
+    // ---- countActive / needsForce ----
+    ck.eq(DeleteGuard.countActive([cert("a"), cert("b", { revoked: "2026-07-01T00:00:00Z" }), cert("c")], NOW), 2, "countActive : 2 actifs sur 3");
+    ck.eq(DeleteGuard.needsForce(cert("a"), NOW), true, "needsForce : actif → force requis");
+    ck.eq(DeleteGuard.needsForce(cert("a", { revoked: "2026-07-01T00:00:00Z" }), NOW), false, "needsForce : révoqué → pas de force");
+    ck.eq(DeleteGuard.needsForce(cert("a", { not_after: "2020-01-01T00:00:00Z" }), NOW), false, "needsForce : expiré → pas de force");
+  }
+  });
 };

@@ -244,9 +244,12 @@ export class CertsClient {
     return json.certificate as CertificateDetail;
   }
 
-  /** Supprime un certificat. 409 (descendance existante) → CertsError (message serveur). */
-  async remove(id: string): Promise<void> {
-    await this.call("DELETE", "/certs/" + encodeURIComponent(id));
+  /** Supprime un certificat.
+      `force` = intention EXPLICITE de supprimer un certificat ENCORE VALIDE : sans lui le serveur
+      refuse (428 `force_required`). Un révoqué/expiré part sans `force`.
+      Erreurs → CertsError (message serveur) : 409 = descendance existante · 428 = force requis. */
+  async remove(id: string, force = false): Promise<void> {
+    await this.call("DELETE", "/certs/" + encodeURIComponent(id) + (force ? "?force=true" : ""));
   }
 
   /* ---- Paramètres PKI (clé maître — dérivation CÔTÉ CLIENT) ---- */

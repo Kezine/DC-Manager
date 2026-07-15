@@ -247,6 +247,47 @@ ces blobs opaques.
   `principal`), `value`. **FK `ON DELETE CASCADE`** vers `certificates` (supprimer un
   certificat purge ses SAN). L'ordre du tableau fait foi (`position` = index).
 
+### Garde-fous de suppression — `?force=true` (intention explicite)
+
+Le verrou étant **local** (le serveur ne peut pas le connaître), il ne peut rien garder. En
+revanche « ce certificat est-il **ENCORE VALIDE** ? » se répond avec `revoked_at` + `not_after` :
+des **métadonnées que le serveur détient en clair**. C'est donc une garde qu'il peut réellement
+appliquer — et il le fait.
+
+**ACTIF** ⇔ `revoked_at IS NULL` **ET** `not_after > now`.
+`not_after` absent ou illisible ⇒ **ACTIF** : on protège plutôt que de supposer l'expiration (une
+paire SSH sans échéance n'expire jamais — elle est donc toujours active).
+
+`DELETE /certs/:id` — verdicts de `CertsDb.remove(docId, id, force)`, **dans cet ordre** :
+
+| Verdict | HTTP | Quand |
+|---|---|---|
+| `missing` | 404 | inconnu |
+| `children` | 409 `has_children` | des dérivés existent — **`force` ne le lève PAS** : c'est une contrainte d'**intégrité**, pas une question d'intention |
+| `force_required` | **428** `force_required` | le certificat est **ENCORE VALIDE** et l'appel n'a pas posé `?force=true` |
+| `ok` | 200 | supprimé (révoqué/expiré : aucune cérémonie ; actif : `force` fourni) |
+
+> **428 et non 409** — le 409 signale déjà la descendance, et le client lui associe un message
+> dédié (« des dérivés existent »). Réutiliser le même statut aurait affiché un motif **faux**.
+> Le champ `code` (`has_children` / `force_required`) permet de discriminer sans se fier au statut.
+
+**Côté UI** (`DeleteGuard`, logique pure), la cérémonie est **proportionnée au risque** — elle
+n'autorise rien, elle matérialise l'intention que le serveur exigera :
+
+| Cas | Confirmation |
+|---|---|
+| 1 certificat révoqué ou expiré | confirmation ordinaire |
+| **1 certificat encore valide** | **re-saisir son nom exact** |
+| **plusieurs certificats** | saisir **« Oui je supprime »** (+ décompte des encore-valides) |
+
+Comparaison : `trim()` puis égalité **stricte** — la casse compte, c'est le point de friction.
+Un actif au libellé vide bascule sur la phrase (un nom intapable bloquerait la purge). Le lot
+exige la phrase **même sans aucun actif** : une sélection se fait d'un glissement de souris.
+
+> Il n'y a **pas de route bulk** (N appels unitaires) : `force` s'applique **par certificat**.
+> `DeleteGuard.isActive` duplique `CertsDb.isActive` — duplication **assumée** (le front ne peut
+> pas importer un module serveur) ; le serveur reste **seul juge**, l'UI ne fait qu'anticiper.
+
 ### Invariant Q5 — `key_enc` au GET unitaire seulement
 
 La clé privée chiffrée (`key_enc`) **ne sort JAMAIS en liste** : `GET /certs` renvoie

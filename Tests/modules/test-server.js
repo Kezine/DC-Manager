@@ -1720,12 +1720,29 @@ module.exports = async () => {
       try { db.save("doc-A", "bad-4", { kind: "ssh-keypair", label: "X", subject: "u@x", key_algo: "ed25519", sans: [{ san_type: "pigeon-voyageur", value: "x" }] }); } catch (e) { if (e instanceof CertsConfigError) sanIssues = e.issues; }
       ck(!!sanIssues && sanIssues.some((i) => /san_type/.test(i)), "type de SAN inconnu → grief");
 
-      // -- SUPPRESSION : garde-fou descendance, cascade des SAN. --
+      // -- isActive : ni révoqué, ni expiré (seule question de sûreté que le serveur puisse trancher). --
+      const NOW = Date.parse("2026-07-16T12:00:00Z");
+      ck.eq(CertsDb.isActive({ revoked_at: null, not_after: "2027-01-01T00:00:00Z" }, NOW), true, "isActive : ni révoqué ni expiré → actif");
+      ck.eq(CertsDb.isActive({ revoked_at: "2026-01-01T00:00:00Z", not_after: "2027-01-01T00:00:00Z" }, NOW), false, "isActive : révoqué → inactif");
+      ck.eq(CertsDb.isActive({ revoked_at: null, not_after: "2026-01-01T00:00:00Z" }, NOW), false, "isActive : expiré → inactif");
+      ck.eq(CertsDb.isActive({ revoked_at: null, not_after: null }, NOW), true, "isActive : sans date de fin → ACTIF (on protège par défaut)");
+      ck.eq(CertsDb.isActive({ revoked_at: null, not_after: "pas-une-date" }, NOW), true, "isActive : date illisible → ACTIF (on ne suppose pas l'expiration)");
+
+      // -- SUPPRESSION : descendance (prioritaire) > garde `force` (encore valide) ; cascade des SAN. --
       ck.eq(db.remove("doc-A", "ca-1"), "children", "suppression d'un émetteur avec dérivés → refusée (garde-fou)");
-      ck.eq(db.remove("doc-A", "leaf-1"), "ok", "suppression du dérivé → ok");
+      ck.eq(db.remove("doc-A", "ca-1", true), "children", "…et `force` NE lève PAS la descendance : intégrité, pas intention");
+      ck.eq(db.remove("doc-A", "leaf-1"), "force_required", "certificat ENCORE VALIDE sans force → force_required (428 côté route)");
+      ck.eq(raw.prepare("SELECT COUNT(*) AS n FROM certificates WHERE id='leaf-1'").get().n, 1, "…et il est TOUJOURS là (le refus n'efface rien)");
+      ck.eq(db.remove("doc-A", "leaf-1", true), "ok", "…avec ?force=true → supprimé");
       ck.eq(raw.prepare("SELECT COUNT(*) AS n FROM certificate_sans WHERE cert_id='leaf-1'").get().n, 0, "…ses SAN partent en cascade");
-      ck.eq(db.remove("doc-A", "ca-1"), "ok", "…puis l'émetteur peut être supprimé");
+      ck.eq(db.remove("doc-A", "ca-1", true), "ok", "…puis l'émetteur peut être supprimé (force : lui aussi est encore valide)");
       ck.eq(db.remove("doc-A", "inconnu"), "missing", "suppression d'un inconnu → missing (404 côté route)");
+
+      // Un RÉVOQUÉ et un EXPIRÉ partent SANS force : ils ne sont plus « encore valides ».
+      db.save("doc-A", "gone-1", { kind: "ssh-keypair", label: "Révoqué", subject: "u@r", key_algo: "ed25519", revoked_at: "2026-07-01T00:00:00.000Z" });
+      ck.eq(db.remove("doc-A", "gone-1"), "ok", "révoqué → suppression directe (aucun force)");
+      db.save("doc-A", "gone-2", { kind: "ssh-keypair", label: "Expiré", subject: "u@e", key_algo: "ed25519", not_after: "2020-01-01T00:00:00.000Z" });
+      ck.eq(db.remove("doc-A", "gone-2"), "ok", "expiré → suppression directe (aucun force)");
 
       // -- SUIVI D'ÉCHÉANCES (matière C7) : non-révoqués porteurs de not_after, tous documents, triés. --
       db.save("doc-A", "exp-1", { kind: "ssh-keypair", label: "Paire A", subject: "u@a", key_algo: "ed25519", not_after: "2026-09-01T00:00:00.000Z" });

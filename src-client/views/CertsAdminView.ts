@@ -12,6 +12,7 @@ import { Dialog } from "../ui/Dialog";
 import { RichTooltip } from "../ui/RichTooltip";
 import { Icons } from "../ui/Icons";
 import { CERTS_TIPS, CERT_TIP } from "./CertsTips";
+import { DeleteGuard, type DeletableCert } from "../certs/DeleteGuard";
 import { Download } from "../core/Download";
 import { CertDeployGuide, type DeployGuide } from "../core/CertDeployGuide";
 import type { FormHost } from "./forms/shared";
@@ -764,7 +765,7 @@ export class CertsAdminView {
 
   /** Instantané minimal mémorisé pour un élément coché (suffit aux actions communes + bilan). */
   private snapshotOf(item: CertificateListItem): CertSelectionSnapshot {
-    return { kind: item.kind, label: item.label, has_key: item.has_key, revoked_at: item.revoked_at };
+    return { kind: item.kind, label: item.label, has_key: item.has_key, revoked_at: item.revoked_at, not_after: item.not_after };
   }
 
   /** En-tête de la colonne de sélection : case « toute la page » (cochée/indéterminée synchronisée après coup). */
@@ -1018,18 +1019,18 @@ export class CertsAdminView {
     this.session.touch();
     const ids = [...this.selection.keys()];
     const n = ids.length;
-    const ok = await Dialog.confirm({
-      title: "Supprimer " + n + " certificat" + (n > 1 ? "s" : "") + " ?",
-      message: "Les certificats sélectionnés (clés privées chiffrées + métadonnées) seront EFFACÉS du serveur (irréversible). Un émetteur ayant des dérivés ne peut pas être supprimé : il sera signalé au bilan.",
-      confirmLabel: "Supprimer", danger: true,
-    });
+    const ok = await this.confirmDelete([...this.selection.values()],
+      "Supprimer " + n + " certificat" + (n > 1 ? "s" : "") + " ?",
+      "Les certificats sélectionnés (clés privées chiffrées + métadonnées) seront EFFACÉS du serveur (irréversible). Un émetteur ayant des dérivés ne peut pas être supprimé : il sera signalé au bilan.");
     if (!ok) return;
 
     const errors: Array<{ label: string; reason: string }> = [];
     let done = 0;
     for (const id of ids) {
       const snap = this.selection.get(id)!;
-      try { await this.client!.remove(id); done++; }
+      // `force` par certificat : le serveur ne l'exige que pour les ENCORE VALIDES (pas de route
+      // bulk — N appels unitaires). La confirmation groupée vaut intention pour tout le lot.
+      try { await this.client!.remove(id, DeleteGuard.needsForce(snap)); done++; }
       catch (e) {
         if (e instanceof CertsError && e.status === 409) errors.push({ label: snap.label, reason: "des certificats dérivés existent — supprimer d'abord la descendance" });
         else errors.push({ label: snap.label, reason: CertsAdminView.errText(e) });
@@ -1513,14 +1514,11 @@ export class CertsAdminView {
   /** Suppression : DELETE avec confirmation ; 409 (descendance) → message clair. */
   private async remove(item: CertificateListItem): Promise<void> {
     this.session.touch();
-    const ok = await Dialog.confirm({
-      title: "Supprimer définitivement ?",
-      message: "Supprimer « " + item.label + " » ? La clé privée chiffrée et les métadonnées seront EFFACÉES du serveur (irréversible).",
-      confirmLabel: "Supprimer", danger: true,
-    });
+    const ok = await this.confirmDelete([item], "Supprimer définitivement ?",
+      "Supprimer « " + item.label + " » ? La clé privée chiffrée et les métadonnées seront EFFACÉES du serveur (irréversible).");
     if (!ok) return;
     try {
-      await this.client!.remove(item.id);
+      await this.client!.remove(item.id, DeleteGuard.needsForce(item));
       Notify.toast("Certificat supprimé", "ok");
       await this.refreshBody();
     } catch (e) {
@@ -1530,6 +1528,46 @@ export class CertsAdminView {
       }
       this.actionError(e);
     }
+  }
+
+  /** Confirmation de suppression, à cérémonie PROPORTIONNÉE au risque (DeleteGuard.ceremony) :
+      confirmation ordinaire pour un révoqué/expiré · re-saisie du NOM pour un certificat encore
+      valide · phrase « Oui je supprime » pour un lot. La saisie n'AUTORISE rien : elle ne fait que
+      matérialiser l'intention que le serveur exigera ensuite via `?force=true`. */
+  private async confirmDelete(items: DeletableCert[], title: string, message: string): Promise<boolean> {
+    const cer = DeleteGuard.ceremony(items);
+    if (cer.kind === "simple") return Dialog.confirm({ title, message, confirmLabel: "Supprimer", danger: true });
+
+    const activeCount = DeleteGuard.countActive(items);
+    const res = await Dialog.custom({
+      title, variant: "danger", danger: true, confirmLabel: "Supprimer", cancelLabel: "Annuler",
+      build: (root: HTMLElement) => {
+        const msg = document.createElement("div"); msg.className = "form-hint"; msg.style.marginBottom = "10px"; msg.textContent = message;
+        root.appendChild(msg);
+        if (activeCount > 0) {
+          const warn = document.createElement("div");
+          warn.style.cssText = "margin-bottom:10px;color:var(--err);font-weight:600";
+          warn.textContent = activeCount > 1
+            ? "⚠ " + activeCount + " de ces certificats sont ENCORE VALIDES — ce qui en dépend cessera de fonctionner."
+            : "⚠ Ce certificat est ENCORE VALIDE — ce qui en dépend cessera de fonctionner.";
+          root.appendChild(warn);
+        }
+        const field = document.createElement("div"); field.className = "form-field"; field.style.margin = "0";
+        const lab = document.createElement("label");
+        lab.textContent = cer.kind === "type-name" ? "Pour confirmer, saisissez le nom du certificat" : "Pour confirmer, saisissez la phrase exacte";
+        const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.margin = "0 0 6px";
+        hint.textContent = cer.expected;   // textContent → jamais interprété, même si le libellé contient du balisage
+        const input = document.createElement("input"); input.type = "text"; input.autocomplete = "off"; input.spellcheck = false;
+        field.append(lab, hint, input);
+        root.appendChild(field);
+        setTimeout(() => input.focus(), 30);
+        return {
+          validate: () => DeleteGuard.accepts(cer, input.value) ? true
+            : (cer.kind === "type-name" ? "Le nom saisi ne correspond pas exactement." : "La phrase saisie ne correspond pas exactement."),
+        };
+      },
+    });
+    return res !== null && res !== false;
   }
 
   /* --------------------------------------------------------------------------

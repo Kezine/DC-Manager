@@ -29,6 +29,9 @@ export interface CertSelectionSnapshot {
   has_key: boolean;
   /** Horodatage de révocation (null = actif) — un révoqué est exclu des exports (décision Q4). */
   revoked_at: string | null;
+  /** Fin de validité — avec `revoked_at`, détermine si le certificat est ENCORE VALIDE, donc si sa
+      suppression exige une intention explicite (cf. DeleteGuard / garde `force` du serveur). */
+  not_after: string | null;
 }
 
 /** Décision d'affichage de la barre d'actions groupées : quels boutons proposer + libellé d'export. */
