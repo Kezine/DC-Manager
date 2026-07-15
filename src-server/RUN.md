@@ -114,6 +114,28 @@ Inspecter le contenu du volume dans le conteneur :
 docker compose exec dc-manager ls -la /data/documents
 ```
 
+### Éditer une base à la main (client SQLite)
+
+Le compose déclare un service **`sqlite`** sous `profiles: ["tools"]` : il est **inerte**
+(`docker compose up` l'ignore), donc **l'image de production n'embarque aucun éditeur de base**.
+Il monte le même volume, ce qui suffit à atteindre les fichiers.
+
+```bash
+docker compose stop dc-manager        # ⚠️ INDISPENSABLE (voir ci-dessous)
+docker compose run --rm sqlite        # cibler le service active son profil automatiquement
+# sqlite> .tables
+docker compose start dc-manager
+```
+
+Bases dans `/data/documents/` : `registry.db` (documents), `certs.db` (PKI), `notify.db`,
+`vm-providers.db`. Le service ouvre `certs.db` par défaut — `.open ../documents/notify.db`
+pour changer.
+
+> ⚠️ **Toujours arrêter le serveur avant d'écrire.** Les bases sont ouvertes en **WAL** : deux
+> écrivains concurrents, c'est au mieux un timeout, au pire un état incohérent (le serveur garde
+> en mémoire des lignes effacées sous lui). À la main, **aucun garde-fou applicatif ne s'applique** :
+> penser à `PRAGMA foreign_keys = ON;` avant toute suppression.
+
 ---
 
 ## 6. Configuration (variables d'environnement)

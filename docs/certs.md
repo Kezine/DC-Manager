@@ -621,6 +621,33 @@ détaillé ; les messages d'erreur ne portent aucun matériau de clé.
 
 ## Procédures
 
+### Éditer `certs.db` à la main (client SQLite)
+
+Cas d'usage : purger un coffre dont la phrase maître est perdue au-delà de ce que l'UI permet,
+ou inspecter l'état réel. **À réserver au dépannage** — l'UI et l'API restent la voie normale
+(elles appliquent les garde-fous : descendance, `force`).
+
+Le `docker-compose.yml` déclare un service **`sqlite`** sous `profiles: ["tools"]` : il est
+**inerte** (`docker compose up` l'ignore), donc **l'image de production ne contient aucun éditeur
+de base**. Il monte le même volume nommé — c'est ce qui suffit à atteindre les fichiers.
+
+```bash
+docker compose stop dc-manager        # ⚠️ INDISPENSABLE (WAL — voir ci-dessous)
+docker compose run --rm sqlite        # cibler le service active son profil automatiquement
+# sqlite> .tables
+# sqlite> SELECT id, label, revoked_at, not_after FROM certificates WHERE doc_id='…';
+# sqlite> DELETE FROM certificates WHERE doc_id='…' AND id='…';   -- les SAN partent en CASCADE
+docker compose start dc-manager
+```
+
+> ⚠️ **Arrêter le serveur d'abord.** `CertsDb` ouvre en **WAL + `busy_timeout`** : écrire pendant
+> qu'il tourne, c'est **deux écrivains concurrents** — au mieux un timeout, au pire un état
+> incohérent (le serveur garde en mémoire des lignes qu'on vient d'effacer sous lui).
+
+> À la main, **aucun garde-fou ne s'applique** : `PRAGMA foreign_keys` n'est pas actif par défaut
+> dans le shell `sqlite3`. Un `DELETE` sur un émetteur peut donc **orpheliner sa descendance** et
+> laisser des SAN derrière lui. Activer `PRAGMA foreign_keys = ON;` avant toute suppression.
+
 ### Ajouter un FORMAT d'export
 
 1. Ajouter une méthode statique à `CertExports` renvoyant un `ExportArtifact`

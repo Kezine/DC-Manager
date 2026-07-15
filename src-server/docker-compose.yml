@@ -28,5 +28,30 @@ services:
       - dc-manager-data:/data            # persistance des documents (un .db par document)
     restart: unless-stopped
 
+  # OUTIL de maintenance — client SQLite à la demande, pour inspecter/réparer une base à la main
+  # (ex. purger des certificats d'un coffre dont la phrase maître est perdue).
+  #
+  # `profiles` le rend INERTE : `docker compose up` l'IGNORE totalement. L'image de production
+  # reste donc vierge de tout éditeur de base — l'outil n'existe pas dans le conteneur qui sert
+  # le port 3000. Il monte simplement le MÊME volume nommé, ce qui suffit à atteindre les fichiers.
+  #
+  #   docker compose stop dc-manager            # ⚠️ INDISPENSABLE — voir ci-dessous
+  #   docker compose run --rm sqlite            # cibler le service active son profil tout seul
+  #   docker compose start dc-manager
+  #
+  # ⚠️ WAL : le serveur ouvre les bases en WAL avec busy_timeout. Écrire pendant qu'il tourne =
+  # deux écrivains concurrents → au mieux un timeout, au pire un état corrompu (le serveur garde
+  # en mémoire des données qu'on vient d'effacer sous lui). TOUJOURS l'arrêter d'abord.
+  #
+  # Bases : /data/documents/certs.db (PKI) · registry.db (documents) · notify.db · vm-providers.db
+  sqlite:
+    profiles: ["tools"]
+    image: alpine:3.20                   # `apk add` à chaque run : lent mais aucune image tierce dans la chaîne
+    volumes:
+      - dc-manager-data:/data
+    working_dir: /data/documents
+    entrypoint: ["/bin/sh", "-lc"]
+    command: ["apk add --no-cache sqlite >/dev/null 2>&1 && exec sqlite3 certs.db"]
+
 volumes:
   dc-manager-data:
