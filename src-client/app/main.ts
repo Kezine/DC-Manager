@@ -13,7 +13,7 @@ import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmPro
 import { FormBase } from "../views/forms/FormBase";
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
-import { Modal, Notify, FormControls, Dialog, Fullscreen } from "../ui";
+import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip } from "../ui";
 import { Html } from "../core/Html";
 import { Download } from "../core/Download";
 import { Prefs } from "../core/Prefs";
@@ -120,6 +120,7 @@ async function boot(): Promise<void> {
   imageStore.restoreLoadedKey();   // clé du bundle .nmfb actuellement en IndexedDB (persistée) — appariement json↔compagnon
   if (!REST_MODE) await imageStore.ready();   // en REST, le miroir est chargé à l'ouverture d'un document
   Fullscreen.install();   // re-parente les overlays (modale/dialogues/toasts/menus) dans l'élément plein écran
+  RichTooltip.install();  // délégation UNIQUE des tooltips enrichis (data-rich-tooltip) — idempotent
 
   /* Onglet à afficher à l'OUVERTURE d'un document : on PRÉSERVE l'onglet actif — restauré du hash #nom au
      boot (lien rapide bookmarkable) ou choisi par l'utilisateur — au lieu de forcer « equipements » (ce qui

@@ -1240,6 +1240,15 @@
   /* ============ TOOLTIP ============ */
   /* v101 â€” tooltips enrichis repensÃ©s : bandeau d'en-tÃªte pleine largeur (le 1er .tt-title bleed via marges
      nÃ©gatives â†’ aucun changement requis dans les builders), liserÃ© d'accent, sections, paires clÃ©/valeur alignÃ©es. */
+  /* v172 — BOUTON-ICÔNE d'action (listes denses : actions par ligne des certificats).
+     Carré arrondi (même facture que .dc-3d-toggle-grid), l'icône porte le sens et le
+     TOOLTIP ENRICHI (data-rich-tooltip → ui/RichTooltip) porte la mini-doc. L'aria-label
+     et le title court restent posés sur le bouton : seuls supports des lecteurs d'écran,
+     et repli natif si le moteur de tooltip ne tourne pas. */
+  .icon-btn { width: 30px; height: 30px; padding: 0; gap: 0; justify-content: center; align-items: center; border-radius: 8px; flex: none; }
+  .icon-btn svg { width: 16px; height: 16px; display: block; }
+  .icon-btn.danger:hover:not(:disabled) { color: var(--err); border-color: var(--err); }
+
   .app-tooltip {
     position: fixed;
     z-index: 1900;

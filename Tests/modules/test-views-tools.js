@@ -1,7 +1,7 @@
 /* Tests modules — vues & outils pilotés par hôte injecté (Graph/Datacenter, outils 2D/3D, images).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("GraphView (pilote) : build + layout (sans DOM)", async () => {
@@ -631,6 +631,47 @@ module.exports = async () => {
     ck.eq(g.isCurrent(t3), false, "bump : le jeton en vol devient périmé (aucune réponse ne s'applique)");
     const t4 = g.begin();
     ck.eq(g.isCurrent(t4), true, "après bump, un nouveau begin redevient courant");
+  }
+  });
+
+  await section("RichTooltip.place : placement PUR (sous l'ancre, flip, clamp)", async () => {
+  {
+    const VP = { width: 1000, height: 800 };
+    const TIP = { width: 200, height: 100 };
+    const rect = (left, top, w, h) => ({ left, top, right: left + w, bottom: top + h, width: w, height: h });
+
+    // Cas nominal : sous l'ancre, centré horizontalement dessus.
+    const p = RichTooltip.place(rect(400, 300, 40, 30), TIP, VP, 8);
+    ck.eq(p.y, 338, "sous l'ancre : bottom (330) + gap (8)");
+    ck.eq(p.x, 320, "centré sur l'ancre : 400 + 40/2 - 200/2");
+
+    // FLIP : déborde en bas ET place au-dessus → passe au-dessus.
+    const flip = RichTooltip.place(rect(400, 700, 40, 30), TIP, VP, 8);
+    ck.eq(flip.y, 592, "flip au-dessus : top (700) - gap (8) - hauteur (100)");
+
+    // Déborde en bas MAIS pas de place au-dessus (ancre collée en haut) → pas de flip, clamp bas.
+    const noRoom = RichTooltip.place(rect(400, 20, 40, 770), TIP, VP, 8);
+    ck.eq(noRoom.y, 700, "sans place au-dessus : pas de flip, clamp à vp.height - tip.height");
+
+    // CLAMP horizontal : ancre collée à gauche → jamais de x négatif.
+    ck.eq(RichTooltip.place(rect(0, 300, 20, 20), TIP, VP, 8).x, 0, "clamp gauche : x ne passe jamais sous 0");
+    // Ancre collée à droite → le tooltip reste dans le viewport.
+    ck.eq(RichTooltip.place(rect(980, 300, 20, 20), TIP, VP, 8).x, 800, "clamp droite : x = vp.width - tip.width");
+
+    // Tooltip PLUS GRAND que le viewport → on colle au bord 0 plutôt que de partir hors-champ.
+    const huge = RichTooltip.place(rect(10, 10, 20, 20), { width: 1200, height: 900 }, VP, 8);
+    ck.eq(huge.x, 0, "tooltip plus large que le viewport : x = 0 (pas de valeur négative)");
+    ck.eq(huge.y, 0, "tooltip plus haut que le viewport : y = 0");
+  }
+  });
+
+  await section("RichTooltip : contenus par CLÉ (register/get)", async () => {
+  {
+    RichTooltip.register("t.demo", { title: "Démo", sub: "s", sections: [{ head: "H", body: "B" }] });
+    ck.eq(RichTooltip.get("t.demo").title, "Démo", "register/get : contenu retrouvé par sa clé");
+    ck.eq(RichTooltip.get("t.inconnue"), null, "clé inconnue → null (aucun tooltip, le title natif reste)");
+    RichTooltip.registerAll({ "t.a": { title: "A" }, "t.b": { title: "B" } });
+    ck.eq(RichTooltip.get("t.b").title, "B", "registerAll : lot enregistré");
   }
   });
 };

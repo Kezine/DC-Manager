@@ -16,3 +16,6 @@ export type { ExportOptions } from "./ImageExport";
 export { Fullscreen } from "./Fullscreen";
 export { FormControls } from "./FormControls";
 export type { SelectOption, NumberOpts, ToggleOpts, DateOpts } from "./FormControls";
+export { RichTooltip } from "./RichTooltip";
+export type { TipContent, TipSection, TipLine, TipRect, TipSize, TipPoint } from "./RichTooltip";
+export { Icons } from "./Icons";

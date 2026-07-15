@@ -9,6 +9,9 @@ import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from "../data/config";
 import { Notify } from "../ui/Notify";
 import { Clipboard } from "../ui/Clipboard";
 import { Dialog } from "../ui/Dialog";
+import { RichTooltip } from "../ui/RichTooltip";
+import { Icons } from "../ui/Icons";
+import { CERTS_TIPS, CERT_TIP } from "./CertsTips";
 import { Download } from "../core/Download";
 import { CertDeployGuide, type DeployGuide } from "../core/CertDeployGuide";
 import type { FormHost } from "./forms/shared";
@@ -170,6 +173,7 @@ export class CertsAdminView {
     private readonly host: FormHost,
   ) {
     this.session = new PkiSession({ onLock: () => this.onLocked() });
+    RichTooltip.registerAll(CERTS_TIPS);   // idempotent (Map.set) — les contenus vivent dans CertsTips.ts
   }
 
   /** Activation de la sous-page (onShow) : messages d'indisponibilité, sinon (re)charge PKI + liste. */
@@ -707,13 +711,31 @@ export class CertsAdminView {
     return `<span style="color:${color}" title="${Html.escape(title)}">${Html.escape(CertsFormat.expiryLabel(item.not_after))}</span>`;
   }
 
-  /** Boutons d'action d'une ligne (déverrouillé) : émission (CA), export, révocation, suppression. */
+  /** Boutons d'action d'une ligne : émission (CA), export, révocation, suppression — tous en ICÔNE
+      (listes denses), la mini-doc de chacun vivant dans son tooltip enrichi (CERTS_TIPS).
+      NB : l'export PAR LIGNE a un libellé STATIQUE → il devient une icône sans rien perdre. C'est
+      l'export GROUPÉ (barre de sélection) qui garde son texte : SON libellé est dynamique et porte
+      une garantie de sécurité (« Exporter publics (ZIP) » = aucune clé privée). */
   private fillActions(cell: HTMLElement, item: CertificateListItem): void {
-    if (item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.actionButton("Émettre TLS", "Émettre une feuille TLS signée par cette CA", () => this.leafModal(item)));
-    if (item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.actionButton("Émettre SSH", "Émettre un certificat SSH signé par cette CA", () => this.sshCertModal(item)));
-    if (!item.revoked_at) cell.appendChild(this.actionButton("Exporter…", "Télécharger les artefacts", () => void this.exportModal(item)));
-    if (!item.revoked_at) cell.appendChild(this.actionButton("Révoquer", "Marquer révoqué (exclu des exports)", () => void this.revoke(item)));
-    cell.appendChild(this.actionButton("Supprimer", "Supprimer définitivement", () => void this.remove(item)));
+    if (item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, "Émettre TLS", CERT_TIP.issueTls, () => this.leafModal(item)));
+    if (item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, "Émettre SSH", CERT_TIP.issueSsh, () => this.sshCertModal(item)));
+    if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.EXPORT, "Exporter les artefacts", CERT_TIP.export, () => void this.exportModal(item)));
+    if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.REVOKE, "Révoquer", CERT_TIP.revoke, () => void this.revoke(item)));
+    cell.appendChild(this.iconAction(Icons.DELETE, "Supprimer", CERT_TIP.remove, () => void this.remove(item), true));
+  }
+
+  /** Bouton d'action ICÔNE : l'icône porte le sens, le tooltip enrichi (`tipKey`) la mini-doc.
+      `aria-label` + `title` court restent posés : seuls supports des lecteurs d'écran, et repli
+      natif si le moteur de tooltip ne tourne pas. `danger` teinte le survol en rouge. */
+  private iconAction(icon: string, ariaLabel: string, tipKey: string, onClick: () => void, danger = false): HTMLButtonElement {
+    const b = document.createElement("button"); b.type = "button";
+    b.className = "btn btn-ghost btn-sm icon-btn" + (danger ? " danger" : "");
+    b.innerHTML = icon;                       // constante de CONFIANCE (ui/Icons), jamais une donnée
+    b.setAttribute("aria-label", ariaLabel);
+    b.title = ariaLabel;
+    b.setAttribute("data-rich-tooltip", tipKey);
+    b.onclick = onClick;
+    return b;
   }
 
   /* --------------------------------------------------------------------------
@@ -809,9 +831,12 @@ export class CertsAdminView {
     this.selBarEl.appendChild(count);
 
     const av = BulkActions.commonActions([...this.selection.values()], this.session.unlocked);
+    // « Exporter » GARDE SON TEXTE : son libellé est dynamique et porte une garantie de sécurité
+    // (« Exporter publics (ZIP) » = aucune clé privée n'entrera dans l'archive) — une icône la perdrait.
     if (av.canExport) this.selBarEl.appendChild(this.actionButton(av.exportLabel, "Choisir les artefacts communs et télécharger une archive ZIP (protégeable par mot de passe)", () => this.bulkExportDialog(), "btn-primary"));
-    if (av.canRevoke) this.selBarEl.appendChild(this.actionButton("Révoquer (" + n + ")", "Marquer révoqués (exclus des exports)", () => void this.bulkRevoke()));
-    if (av.canDelete) this.selBarEl.appendChild(this.actionButton("Supprimer (" + n + ")", "Supprimer définitivement", () => void this.bulkDelete()));
+    // Le compteur n'est PAS répété sur les boutons : le span « N sélectionné(s) » ci-dessus le dit déjà.
+    if (av.canRevoke) this.selBarEl.appendChild(this.iconAction(Icons.REVOKE, "Révoquer la sélection", CERT_TIP.revoke, () => void this.bulkRevoke()));
+    if (av.canDelete) this.selBarEl.appendChild(this.iconAction(Icons.DELETE, "Supprimer la sélection", CERT_TIP.remove, () => void this.bulkDelete(), true));
     this.selBarEl.appendChild(this.actionButton("Effacer la sélection", "Vider la sélection courante", () => this.clearSelection()));
   }
 
