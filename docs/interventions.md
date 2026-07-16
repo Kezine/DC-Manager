@@ -7,9 +7,11 @@ Chaque objet porte un cycle de vie, une priorité de traitement, une fenêtre d'
 optionnelle, une référence Jira facultative et une description markdown. Un **veilleur de
 rappels** signale au service de notifications les fenêtres qui approchent de l'heure H.
 
-> **Ce document décrit le LOT SERVEUR.** L'UI (lot client) viendra ensuite ; les messages
-> serveur restent en **français** (les libellés localisés des slugs `kind`/`status`/`priority`
-> sont l'affaire du client, via i18n — décision de cadrage 2026-07-16).
+> **Serveur + client.** Le module serveur (base, routes, veilleur) et la page « Interventions »
+> (première page **entièrement localisée** FR/EN) sont livrés. Les messages **serveur** restent en
+> **français** ; les libellés localisés des slugs `kind`/`status`/`priority` sont l'affaire du **client**,
+> via i18n (décision de cadrage 2026-07-16). Sont hors périmètre : boutons « Déclarer une intervention »
+> et badges sur les fiches équipement/VM/spare, vue calendrier, lecture Jira enrichie.
 
 Deux exigences fondatrices (pattern `vm/`, `notify/`, `certs/`) :
 
@@ -191,6 +193,53 @@ module vit normalement, simplement sans notifications.
 le cœur (notif live) et ce module (principe n°3 — aucune duplication de la règle « qui a
 écrit ? »).
 
+### Client (`src-client/` — aucune dépendance du cœur front ne pointe vers ces fichiers)
+
+| Fichier | Rôle |
+|---|---|
+| `views/forms/InterventionsClient.ts` | **Client REST** du module + `InterventionsError` (code HTTP + `detail`). DTOs = **MIROIRS** commentés des formes serveur (duplication assumée, principe n°3 — préserve l'amovibilité). `listPage`/`meta`/`getOne`/`save`/`remove` ; `buildQuery` PURE (filtres `kind`/`status`/`priority` **répétables**). ⚠ Routes **SCOPÉES PAR DOCUMENT** (`<dataBase>/interventions/…`, comme `CertsClient`). |
+| `core/InterventionsFormat.ts` | Logique **PURE** (aucun DOM, aucune dépendance i18n — testée en isolation) : `kindLabelKey`/`statusLabelKey`/`priorityLabelKey`/`targetKindLabelKey` renvoient des **CLÉS** i18n (la vue appelle `I18n.t` dessus, le module reste pur) ; `priorityRank`/`priorityClass`/`statusClass` (rang & couleur de badge) ; `jiraUrl` (référence Jira → lien, jointures de `/`) ; `formatWindow` ; `shortId`. Porte les slugs MIROIRS des énumérations serveur. |
+| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition, éditeur de liens, transitions rapides. Déclare l'interface hôte `InterventionTargetSource` (cibles injectées — la vue ne touche JAMAIS le Store). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
+
+**Branchement client** : `main.ts` enregistre l'onglet principal « Interventions » (`shell.addView`, JUSTE AVANT « Certificats »), crée `InterventionsClient` en mode API seulement (null sinon → « mode API requis »), et injecte l'implémentation de `InterventionTargetSource` construite sur le Store (collections `equipments`/`vms`/`spares`).
+
+## Page « Interventions » (`InterventionsAdminView`)
+
+**Onglet PRINCIPAL** de premier niveau, enregistré JUSTE AVANT « Certificats ». Vue custom TOUJOURS
+enregistrée : `interventionsClient` est null hors mode API → la page affiche « mode API requis »
+(parité `NotificationsAdminView`/`CertsAdminView`). Aucun document ouvert → message dédié (les
+interventions sont propres au document).
+
+- **PREMIÈRE PAGE ENTIÈREMENT LOCALISÉE** : TOUTES les chaînes d'UI passent par `I18n.t` (domaine
+  `interventions.*` + `tabs.interventions`, catalogues `fr`/`en` — complétude vérifiée par
+  `Tests/modules/test-i18n.js`). La logique PURE (`InterventionsFormat`) reste i18n-agnostique (elle
+  renvoie des CLÉS) ; la vue localise au point d'affichage.
+- **Listing PAGINÉ SERVEUR** (jamais de slice client, CSS des `ListView` : `.list-toolbar`/`.pagination`/
+  `.sortable`/`.sort-ind`) : toolbar = champ de **recherche** (query, anti-rebond ~250 ms) + filtres
+  **MultiSelect** « Type »/« Statut »/« Priorité » (répétables) + « Réinit. filtres » ; **tri** par clic
+  d'en-tête (Titre/Priorité/Statut/Fenêtre) ; état de listing en mémoire d'instance (après écriture, la
+  **page courante** est rechargée — clamp serveur si elle disparaît). Colonnes : Titre, Type, **Priorité**
+  (badge coloré par rang), **Statut** (badge), **Fenêtre planifiée** (`formatWindow`, vide sinon), **Liens**
+  (compte + détail en survol), **Jira** (lien cliquable via `jiraUrl` + `meta` chargée UNE fois ; texte brut
+  si pas de base), **Créé par**, Actions.
+- **Actions par ligne** : **Modifier** (modale), **Démarrer** (declared/planned → `in_progress`), **Clore**
+  (`in_progress` → `closed`), **Supprimer** (confirmation danger). Les transitions rapides font un **GET
+  unitaire puis un PUT du corps complet** avec le status changé (le serveur re-estampille `updated_*` ;
+  repartir de l'état serveur évite d'écraser une édition concurrente).
+- **Modale de création/édition** (principe n°11) : nature FIGÉE (création via bouton dédié « + Incident » /
+  « + Intervention », édition immuable), titre, description (textarea markdown), priorité, statut (édition
+  seulement — création : `planned` pour une intervention, `declared` pour un incident), `planned_start`/
+  `planned_end` (inputs `datetime-local` optionnels, manipulés en **UTC** pour rester cohérents avec le
+  stockage et le veilleur), `jira_ref`, et l'**éditeur de LIENS**.
+- **Éditeur de liens** (interface hôte `InterventionTargetSource` injectée) : sélecteur « famille »
+  (équipement/VM/spare, libellés i18n) + sélecteur des cibles disponibles (libellés du document) + bouton
+  « Ajouter » ; liste ORDONNÉE des liens avec retrait. **Politique orphelins côté UI** : une cible disparue
+  (`labelOf` → null) s'affiche « (introuvable) » **grisée** — le lien est conservé (aucune FK côté serveur,
+  cf. « Liens sans FK »), c'est bien le client qui matérialise l'orphelin.
+- **Lien Jira** : la base d'URL vient de `GET …/interventions/meta` (`JIRA_BASE_URL`), chargée **une seule
+  fois** au premier rendu. `InterventionsFormat.jiraUrl(base, ref)` fabrique le lien (référence déjà URL →
+  telle quelle ; base absente → référence en texte brut). Aucun appel à Jira.
+
 ## Limites assumées (v1)
 
 - **Pas de commentaires ni de journal d'activité** par objet (un seul texte : `description`).
@@ -224,12 +273,19 @@ l'importe jamais).
    `extensions`, `interventions.start()`/`interventions.stop()`, **et le pont
    `problems: { … }`** passé à `InterventionsModule.create` (les ponts `notify` de `vm/` et
    `certs/` restent inchangés). Supprimer le fichier `interventions.db` s'il existe.
-2. **Tests** : retirer les **trois sections « Serveur : Interventions… »** de
-   `Tests/modules/test-server.js` et les **trois entrées `src-server/src/interventions/…`** de
+2. **Client** : supprimer `src-client/views/InterventionsAdminView.ts`,
+   `src-client/views/forms/InterventionsClient.ts`, `src-client/core/InterventionsFormat.ts` ; retirer de
+   `main.ts` l'enregistrement de l'**onglet principal** « Interventions » (`shell.addView` + `new
+   InterventionsAdminView(...)` + `interventionsClient` + l'implémentation `InterventionTargetSource`), et
+   les exports dans `views/index.ts`. Retirer le domaine `interventions.*` et l'entrée `tabs.interventions`
+   des catalogues `src-client/i18n/locales/fr.ts` ET `en.ts` (le test de complétude vérifie la parité).
+3. **Tests** : retirer les **trois sections « Serveur : Interventions… »** de
+   `Tests/modules/test-server.js`, le fichier `Tests/modules/test-interventions.js` et son entrée dans
+   `Tests/modules/run.js`, et les **trois entrées `src-server/src/interventions/…`** de
    `tsconfig.node.json` (`include`).
-3. **Documentation** : supprimer ce fichier (`docs/interventions.md`), son entrée dans l'index
+4. **Documentation** : supprimer ce fichier (`docs/interventions.md`), son entrée dans l'index
    de `CLAUDE.md`, la ligne `JIRA_BASE_URL` de `README.md` §4 et de `src-server/RUN.md` §6.
-4. **Ce qui RESTE (indépendant du module)** :
+5. **Ce qui RESTE (indépendant du module)** :
    - le helper **`RequestAuthor`** de `api.ts` — désormais utilisé par le cœur (notif live) ;
      il PRÉEXISTE à la feature (extrait de `writerInfo`) et n'a aucun lien avec elle ;
    - le **service de notifications** (`notify/`) — le producteur `intervention-reminder`

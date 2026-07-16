@@ -19,5 +19,9 @@ export { NotifyClient } from "./forms/NotifyClient";
 // Page « Certificats » (feature certs/ AMOVIBLE, PKI zéro-connaissance, mode API) — vue dédiée + client REST détachables.
 export { CertsAdminView } from "./CertsAdminView";
 export { CertsClient } from "./forms/CertsClient";
+// Page « Interventions » (feature interventions/ AMOVIBLE, mode API) — vue dédiée + client REST détachables.
+export { InterventionsAdminView } from "./InterventionsAdminView";
+export type { InterventionTargetSource } from "./InterventionsAdminView";
+export { InterventionsClient } from "./forms/InterventionsClient";
 export { DatacenterView } from "./DatacenterView";
 export type { DatacenterHost } from "./DatacenterView";

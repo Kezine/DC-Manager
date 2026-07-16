@@ -9,7 +9,8 @@ import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
 import { RuntimeConfigLoader } from "./RuntimeConfig";
-import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient } from "../views";
+import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
+import type { InterventionTargetSource } from "../views";
 import { FormBase } from "../views/forms/FormBase";
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
@@ -66,6 +67,10 @@ const notifyClient = REST_MODE ? new NotifyClient(adapter as RestAdapter) : null
 // la page admin affiche alors un message d'indisponibilité). Le RestAdapter satisfait `CertsRestContext`
 // (dataBase/docId/headers/clientId publics) ; les routes certs sont SCOPÉES PAR DOCUMENT (`<dataBase>/certs`).
 const certsClient = REST_MODE ? new CertsClient(adapter as RestAdapter) : null;
+// Client du suivi d'interventions (feature interventions/ AMOVIBLE) — mode API SEULEMENT (null en mode
+// fichier/viewer : la page affiche alors un message d'indisponibilité). Le RestAdapter satisfait
+// `InterventionsRestContext` (dataBase/docId/headers/clientId publics) ; routes SCOPÉES PAR DOCUMENT (`<dataBase>/interventions`).
+const interventionsClient = REST_MODE ? new InterventionsClient(adapter as RestAdapter) : null;
 const W = window as any;
 const HAS_FS_API = typeof W.showSaveFilePicker === "function" && typeof W.showOpenFilePicker === "function";
 
@@ -629,6 +634,29 @@ async function boot(): Promise<void> {
     onShow: () => notificationsView.show(),
   });
   notificationsView = new NotificationsAdminView(store, notifyContainer, notifyClient, formHost);   // formulaires dans LA modale de l'app (principe n°11)
+  // INTERVENTIONS : page d'ADMINISTRATION du suivi des incidents & interventions (liés aux équipements/VMs/
+  // spares). ONGLET PRINCIPAL (décision de cadrage), enregistré JUSTE AVANT « Certificats ». Vue custom
+  // TOUJOURS enregistrée : `interventionsClient` est null hors mode API → la vue affiche « mode API requis »
+  // (feature AMOVIBLE : retirer = supprimer InterventionsAdminView + InterventionsClient + InterventionsFormat
+  // + ces lignes). Les cibles liables viennent d'une interface hôte INJECTÉE (la vue ne touche jamais le Store).
+  const targetLabel = (kind: string, r: any): string => {
+    if (kind === "spare") return (r.displayName ? r.displayName() : (r.name || r.serial)) || "(spare)";
+    return r.name || (kind === "vm" ? "(VM)" : "(équipement)");
+  };
+  const targetCollection = (kind: string): string => (kind === "equipment" ? "equipments" : kind === "vm" ? "vms" : "spares");
+  const interventionTargets: InterventionTargetSource = {
+    list: (kind) => store.all(targetCollection(kind)).slice()
+      .map((r: any) => ({ id: r.id, label: targetLabel(kind, r) }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    labelOf: (kind, id) => { const r: any = store.get(targetCollection(kind), id); return r ? targetLabel(kind, r) : null; },
+  };
+  let interventionsView: InterventionsAdminView;
+  const interventionsContainer = shell.addView({
+    name: "interventions", label: I18n.t("tabs.interventions.label"), kind: "primary",
+    title: I18n.t("tabs.interventions.label"), subtitle: I18n.t("tabs.interventions.subtitle"),
+    onShow: () => interventionsView.show(),
+  });
+  interventionsView = new InterventionsAdminView(interventionsContainer, interventionsClient, formHost, interventionTargets);   // formulaires dans LA modale de l'app (principe n°11)
   // CERTIFICATS (C6) : page d'ADMINISTRATION de la PKI interne (clé maître, arbre CA/dérivés, créations
   // X.509/SSH, exports, révocation, aide au déploiement de la confiance). ONGLET PRINCIPAL de premier niveau
   // (décision utilisateur 2026-07-15 : « ce n'est pas vraiment un paramètre ») — enregistré EN DERNIER parmi les
