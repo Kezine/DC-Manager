@@ -1,4 +1,5 @@
 import type { Store } from "../../store";
+import { Icons } from "../../ui/Icons";
 import { FormControls } from "../../ui/FormControls";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
@@ -278,7 +279,7 @@ export class RackForms extends CableForms {
         const uPos = (e.placement_mode === "rack" && e.rack_u != null)
           ? ("U" + e.rack_u + ((e.u_height || 1) > 1 ? "–U" + (e.rack_u + (e.u_height || 1) - 1) : ""))
           : (e.placement_mode === "side" ? "latéral" : e.placement_mode === "wall" ? "mural" : "—");
-        return `<tr><td class="cell-name">${Html.escape(e.name || "(équip.)")}</td><td><span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span></td><td style="font-family:var(--mono)">${Html.escape(uPos)}</td><td class="cell-actions">${host.locate ? `<button class="row-btn" data-eq-loc="${e.id}" title="Localiser en 3D">📍</button>` : ""}<button class="row-btn" data-eq-view="${e.id}" title="Détails">ⓘ</button></td></tr>`;
+        return `<tr><td class="cell-name">${Html.escape(e.name || "(équip.)")}</td><td><span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span></td><td style="font-family:var(--mono)">${Html.escape(uPos)}</td><td class="cell-actions">${host.locate ? `<button class="btn btn-ghost btn-sm icon-action" data-eq-loc="${e.id}" title="Localiser en 3D" aria-label="Localiser en 3D">${Icons.LOCATE}</button>` : ""}<button class="btn btn-ghost btn-sm icon-action" data-eq-view="${e.id}" title="Détails" aria-label="Détails">${Icons.INFO}</button></td></tr>`;
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>Équipement</th><th>Type</th><th>U</th><th style="text-align:right;">Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);

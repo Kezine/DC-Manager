@@ -4,6 +4,8 @@ import { Text } from "../core/Text";
 import { Sort } from "../core/Sort";
 import { MultiSelect } from "../ui/MultiSelect";
 import { FormControls } from "../ui/FormControls";
+import { Icons } from "../ui/Icons";
+import { IconButton } from "../ui/IconButton";
 import { RowMenu } from "../ui/RowMenu";
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from "../data/config";
 
@@ -215,17 +217,22 @@ export class ListView {
     }
   }
 
-  /** Actions de ligne RÉDUITES à 3 boutons : Détails (ⓘ) · Modifier (✎) · « plus d'actions » (⋮ → menu overflow
-      regroupant les actions secondaires : localiser, cloner, supprimer). Le ⋮ n'apparaît que s'il y a au moins une
-      action secondaire active. Inspiré du listing des dépenses de l'app Compta. */
+  /** Actions de ligne RÉDUITES à 3 boutons : Détails · Modifier · « plus d'actions » (menu overflow
+      regroupant les actions secondaires : localiser, cloner, supprimer). L'overflow n'apparaît que s'il y a au
+      moins une action secondaire active. Inspiré du listing des dépenses de l'app Compta.
+
+      Icônes SVG du registre PARTAGÉ (`ui/Icons`) et bouton du constructeur PARTAGÉ (`ui/IconButton`) : mêmes
+      dessins et même style que la page Certificats. Les glyphes de police d'origine (ⓘ ✎ ▦ ⋮) dépendaient de
+      la police installée et ne s'alignaient pas sur la grille des traits. */
   private _rowActions(id: string): string {
     const a = this.actions;
-    const btn = (act: string, title: string, txt: string) => `<button class="row-btn" data-act="${act}" title="${title}">${txt}</button>`;
     let html = `<span data-id="${id}">`;
-    if (a.view) html += btn("view", "Détails", "ⓘ");
-    if (a.manage) html += btn("manage", "Contenu (montage des U)", "▦");   // éditeur de contenu de baie (inline, à côté de Détails)
-    if (a.edit) html += btn("edit", "Modifier", "✎");
-    if (a.locate || a.clone || a.del || a.download) html += `<button class="row-btn row-overflow" data-act="__more__" title="Plus d'actions" aria-haspopup="menu" aria-expanded="false">⋮</button>`;
+    if (a.view) html += IconButton.html({ icon: Icons.INFO, label: "Détails", act: "view" });
+    if (a.manage) html += IconButton.html({ icon: Icons.RACK_CONTENT, label: "Contenu (montage des U)", act: "manage" });   // éditeur de contenu de baie (inline, à côté de Détails)
+    if (a.edit) html += IconButton.html({ icon: Icons.EDIT, label: "Modifier", act: "edit" });
+    if (a.locate || a.clone || a.del || a.download) {
+      html += `<button type="button" class="btn btn-ghost btn-sm icon-action row-overflow" data-act="__more__" title="Plus d'actions" aria-label="Plus d'actions" aria-haspopup="menu" aria-expanded="false">${Icons.MORE}</button>`;
+    }
     return html + "</span>";
   }
 
@@ -233,10 +240,12 @@ export class ListView {
   private _openRowMenu(trigger: HTMLElement, id: string): void {
     const a = this.actions;
     const items: { label: string; icon?: string; danger?: boolean; onClick: () => void }[] = [];
-    if (a.locate) items.push({ label: "Localiser en 3D", icon: "📍", onClick: () => this.onAction && this.onAction("locate", id) });
-    if (a.download) items.push({ label: "Télécharger", icon: "⬇", onClick: () => this.onAction && this.onAction("download", id) });
-    if (a.clone) items.push({ label: "Cloner", icon: "⧉", onClick: () => this.onAction && this.onAction("clone", id) });
-    if (a.del) items.push({ label: "Supprimer", icon: "×", danger: true, onClick: () => this.onAction && this.onAction("del", id) });
+    // Icônes du registre PARTAGÉ : les emoji d'origine (📍 ⬇ ⧉) étaient des bitmaps COULEUR — ils
+    // pixellisaient au zoom et ignoraient `currentColor`, donc la teinte « danger » du survol.
+    if (a.locate) items.push({ label: "Localiser en 3D", icon: Icons.LOCATE, onClick: () => this.onAction && this.onAction("locate", id) });
+    if (a.download) items.push({ label: "Télécharger", icon: Icons.EXPORT, onClick: () => this.onAction && this.onAction("download", id) });
+    if (a.clone) items.push({ label: "Cloner", icon: Icons.CLONE, onClick: () => this.onAction && this.onAction("clone", id) });
+    if (a.del) items.push({ label: "Supprimer", icon: Icons.DELETE, danger: true, onClick: () => this.onAction && this.onAction("del", id) });
     RowMenu.open(trigger, items);
   }
 
@@ -290,8 +299,10 @@ export class ListView {
     });
     const sel = this._bodyEl.querySelector(".page-size") as HTMLSelectElement;
     if (sel) sel.onchange = () => { this.pageSize = parseInt(sel.value, 10); this.page = 1; this.render(); };
-    // délégation des actions de ligne → onAction(act, id)
-    this._bodyEl.querySelectorAll(".row-btn").forEach((b) => {
+    // Délégation des actions de ligne → onAction(act, id). On cible `[data-act]`, PAS une classe de
+    // style : l'attribut EST le contrat de la délégation (il porte l'action), la classe n'est qu'une
+    // apparence. Cibler `.row-btn` couplait le câblage au style — le changer rendait les boutons inertes.
+    this._bodyEl.querySelectorAll("[data-act]").forEach((b) => {
       (b as HTMLElement).onclick = (ev) => {
         const span = (b as HTMLElement).closest("[data-id]") as HTMLElement | null;
         const id = span ? (span as any).dataset.id : null;

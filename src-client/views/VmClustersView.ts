@@ -1,4 +1,5 @@
 import type { Store } from "../store";
+import { Icons } from "../ui/Icons";
 import { Html } from "../core/Html";
 import { Format } from "../core/Format";
 import { VmClusterFormat } from "../core/VmClusterFormat";
@@ -161,7 +162,7 @@ export class VmClustersView {
       const eqId = VmClusterFormat.resolveHostEquipmentId(equipments, ipAddresses, node.name);
       const eq = eqId ? this.store.get("equipments", eqId) as { name?: string } | undefined : undefined;
       const eqCell = eq
-        ? `${Html.escape(eq.name || "(équip.)")} <button class="row-btn" data-eq-view="${Html.escape(eqId!)}" title="Ouvrir la fiche de l'équipement">ⓘ</button>`
+        ? `${Html.escape(eq.name || "(équip.)")} <button class="btn btn-ghost btn-sm icon-action" data-eq-view="${Html.escape(eqId!)}" title="Ouvrir la fiche de l'équipement" aria-label="Ouvrir la fiche de l'équipement">${Icons.INFO}</button>`
         : `<span class="pill" style="border-color:var(--warn);color:var(--warn)">non rapproché</span>`;
       // Lien de management PAR nœud (généré par le provider — lien profond de l'UI web Proxmox).
       // Anchor externe (nouvel onglet) accolé au nom ; URL échappée pour l'attribut HTML (elle est

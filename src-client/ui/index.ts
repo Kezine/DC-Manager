@@ -19,3 +19,5 @@ export type { SelectOption, NumberOpts, ToggleOpts, DateOpts } from "./FormContr
 export { RichTooltip } from "./RichTooltip";
 export type { TipContent, TipSection, TipLine, TipRect, TipSize, TipPoint } from "./RichTooltip";
 export { Icons } from "./Icons";
+export { IconButton } from "./IconButton";
+export type { IconButtonOpts } from "./IconButton";

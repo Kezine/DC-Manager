@@ -21,6 +21,8 @@ export const CERT_TIP = {
   export: "certs.export",
   revoke: "certs.revoke",
   remove: "certs.remove",
+  trustDeploy: "certs.trustDeploy",
+  certList: "certs.certList",
 } as const;
 
 export const CERTS_TIPS: { [key: string]: TipContent } = {
@@ -65,6 +67,26 @@ export const CERTS_TIPS: { [key: string]: TipContent } = {
       { head: "Effet", body: "Pose une date de révocation, exclut l'objet des exports et referme son alerte d'échéance." },
       { head: "Limite assumée", body: "Il n'y a ni CRL ni répondeur OCSP : la PKI est interne. Concrètement, la révocation vaut par le NON-DÉPLOIEMENT — ce qui est déjà installé ailleurs continue de fonctionner jusqu'à son retrait." },
       { head: "Clé", body: "Opération de métadonnées : aucun secret n'est touché, le coffre peut rester verrouillé." },
+    ],
+  },
+
+  [CERT_TIP.trustDeploy]: {
+    title: "Déploiement des certificats",
+    icon: Icons.TRUST_DEPLOY,
+    sub: "Procédure d'installation de cette autorité dans les magasins de confiance des clients.",
+    sections: [
+      { head: "Pourquoi", body: "Un serveur présente sa feuille ; c'est la RACINE qui doit vivre chez le client pour que la feuille soit validée. Sans ce déploiement, tout certificat signé par cette autorité sera rejeté." },
+      { head: "Contenu", body: "Commandes pré-remplies pour Linux, Windows, Android et SSH, avec le certificat prêt à copier." },
+      { head: "Clé", body: "Consultation pure : aucune clé privée n'est manipulée, le coffre peut rester verrouillé." },
+    ],
+  },
+
+  [CERT_TIP.certList]: {
+    title: "Lister les certificats",
+    icon: Icons.CERT_LIST,
+    sub: "Ouvre la liste des certificats émis par cette autorité.",
+    sections: [
+      { head: "Vue", body: "Bascule sur le listing filtré de cette racine : tout son sous-arbre, paginé côté serveur, avec ses propres filtres et tris." },
     ],
   },
 

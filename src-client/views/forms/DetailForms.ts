@@ -1,4 +1,5 @@
 import type { Store } from "../../store";
+import { Icons } from "../../ui/Icons";
 import { Html } from "../../core/Html";
 import { Markdown } from "../../core/Markdown";
 import { Color } from "../../core/Color";
@@ -188,7 +189,7 @@ export class DetailForms extends IpamForms {
     const rows = ports.map((p: any) => {
       const eq: any = store.get("equipments", p.equipment_id);
       const strands = [p.strand_a, p.strand_b].filter((s) => s != null).join(" · ");
-      const loc = host.locate ? `<button class="row-btn" data-port-loc="${p.id}" title="Localiser le port en 3D">📍</button>` : "";
+      const loc = host.locate ? `<button class="btn btn-ghost btn-sm icon-action" data-port-loc="${p.id}" title="Localiser le port en 3D" aria-label="Localiser le port en 3D">${Icons.LOCATE}</button>` : "";
       return [`${Html.escape(eq ? (eq.name || "?") : "?")} <span style="color:var(--fg-dimmer)">:</span> ${Html.escape(p.name || "(port)")}`, `<span style="font-family:var(--mono)">${strands || "—"}</span>`, `<span class="cell-actions">${loc}</span>`];
     });
     const tw = this.tbl(root, ["Port de patch", "Fibre(s)", ""], rows, "Aucun port ne pioche encore de brin (le tracé existe dès que les 2 extrémités sont posées).");
@@ -364,8 +365,8 @@ export class DetailForms extends IpamForms {
     const racks = store.racksOfDc(id).slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
     this.sect(root, "Baies (" + racks.length + ")");
     const tw = this.tbl(root, ["Baie", "Taille", ""], racks.map((r: any) => {
-      const loc = host.locate ? `<button class="row-btn" data-rack-loc="${r.id}" title="Localiser en 3D">📍</button>` : "";
-      const view = `<button class="row-btn" data-rack-view="${r.id}" title="Détails">ⓘ</button>`;
+      const loc = host.locate ? `<button class="btn btn-ghost btn-sm icon-action" data-rack-loc="${r.id}" title="Localiser en 3D" aria-label="Localiser en 3D">${Icons.LOCATE}</button>` : "";
+      const view = `<button class="btn btn-ghost btn-sm icon-action" data-rack-view="${r.id}" title="Détails" aria-label="Détails">${Icons.INFO}</button>`;
       return [Html.escape(r.name || "(baie)"), `<span class="pill">${r.u_count} U</span>`, `<span class="cell-actions">${loc}${view}</span>`];
     }), "Aucune baie dans cette salle.");
     tw?.querySelectorAll("[data-rack-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.rackDetail(store, host, (el as HTMLElement).dataset.rackView!, onChanged); });
@@ -401,7 +402,7 @@ export class DetailForms extends IpamForms {
     this.sect(root, "Salles (" + dcs.length + ")");
     const tw = this.tbl(root, ["Salle", "Étage", "Baies", ""], dcs.slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((d: any) => [
       Html.escape(d.name || "(salle)"), d.floor ? Html.escape(String(d.floor)) : this.MUTED, `<span class="pill">${store.racksOfDc(d.id).length}</span>`,
-      `<span class="cell-actions"><button class="row-btn" data-dc-view="${d.id}" title="Détails">ⓘ</button></span>`,
+      `<span class="cell-actions"><button class="btn btn-ghost btn-sm icon-action" data-dc-view="${d.id}" title="Détails" aria-label="Détails">${Icons.INFO}</button></span>`,
     ]), "Aucune salle dans ce site.");
     tw?.querySelectorAll("[data-dc-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.datacenterDetail(store, host, (el as HTMLElement).dataset.dcView!, onChanged); });
     this.footer(root, () => this.site(store, host, id, onChanged));
@@ -423,7 +424,7 @@ export class DetailForms extends IpamForms {
     this.sect(root, "Membres (" + eqs.length + ")");
     const tw = this.tbl(root, ["Équipement", "Type", "Emplacement", ""], eqs.map((e: any) => {
       const primary = e.group_id === id;
-      const view = `<button class="row-btn" data-eq-view="${e.id}" title="Détails">ⓘ</button>`;
+      const view = `<button class="btn btn-ghost btn-sm icon-action" data-eq-view="${e.id}" title="Détails" aria-label="Détails">${Icons.INFO}</button>`;
       return [`${Html.escape(e.name || "(équip.)")}${primary ? ` <span class="pill">primaire</span>` : ""}`, `<span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span>`, EntityViz.equipmentLocationShort(store, e), `<span class="cell-actions">${view}</span>`];
     }), "Aucun équipement dans ce groupe.");
     tw?.querySelectorAll("[data-eq-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.equipmentDetail(store, host, (el as HTMLElement).dataset.eqView!, onChanged); });
@@ -451,7 +452,7 @@ export class DetailForms extends IpamForms {
     this.sect(root, "Salles de l'étage (" + dcs.length + ")");
     const tw = this.tbl(root, ["Salle", "Baies", ""], dcs.slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((d: any) => [
       Html.escape(d.name || "(salle)"), `<span class="pill">${store.racksOfDc(d.id).length}</span>`,
-      `<span class="cell-actions"><button class="row-btn" data-dc-view="${d.id}" title="Détails">ⓘ</button></span>`,
+      `<span class="cell-actions"><button class="btn btn-ghost btn-sm icon-action" data-dc-view="${d.id}" title="Détails" aria-label="Détails">${Icons.INFO}</button></span>`,
     ]), "Aucune salle sur cet étage.");
     tw?.querySelectorAll("[data-dc-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.datacenterDetail(store, host, (el as HTMLElement).dataset.dcView!, onChanged); });
     this.footer(root, () => this.floor(store, host, f.location || "", String(f.floor || ""), {}));
@@ -567,7 +568,7 @@ export class DetailForms extends IpamForms {
         `<span style="font-family:var(--mono)">${Html.escape(a.address || "?")}</span>`,
         ipn ? Html.escape(Ip.short(ipn)) : this.MUTED,
         a.hostname ? Html.escape(a.hostname) : this.MUTED,
-        `<span class="cell-actions"><button class="row-btn" data-addr-view="${a.id}" title="Ouvrir la fiche de l'adresse">ⓘ</button></span>`,
+        `<span class="cell-actions"><button class="btn btn-ghost btn-sm icon-action" data-addr-view="${a.id}" title="Ouvrir la fiche de l'adresse" aria-label="Ouvrir la fiche de l'adresse">${Icons.INFO}</button></span>`,
       ];
     }), "Aucune adresse IPAM rapprochée de cette VM (rapprochement informatif depuis l'IPAM).");
     twAddr?.querySelectorAll("[data-addr-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.ipAddressDetail(store, host, (el as HTMLElement).dataset.addrView!, () => this.vmDetail(store, host, id, onChanged)); });

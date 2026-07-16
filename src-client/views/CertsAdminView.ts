@@ -11,6 +11,7 @@ import { Clipboard } from "../ui/Clipboard";
 import { Dialog } from "../ui/Dialog";
 import { RichTooltip } from "../ui/RichTooltip";
 import { Icons } from "../ui/Icons";
+import { IconButton } from "../ui/IconButton";
 import { CERTS_TIPS, CERT_TIP } from "./CertsTips";
 import { DeleteGuard, type DeletableCert } from "../certs/DeleteGuard";
 import { Download } from "../core/Download";
@@ -576,8 +577,8 @@ export class CertsAdminView {
     this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
     // Aide au déploiement : uniquement les AUTORITÉS (racine X.509 ou CA SSH) — pas les paires simples ni les
     // dérivés. Consultation pure (procédure d'installation dans les magasins de confiance des clients).
-    if (item.kind === "root-ca" || item.kind === "ssh-ca") actions.appendChild(this.actionButton("Déployer la confiance…", "Procédure d'installation de cette autorité dans les magasins de confiance des clients", () => this.deployTrustModal(item)));
-    if (item.children_total > 0) actions.appendChild(this.actionButton("Lister les certificats", "Voir les certificats de cette autorité", () => this.openCerts(item)));
+    if (item.kind === "root-ca" || item.kind === "ssh-ca") actions.appendChild(this.iconAction(Icons.TRUST_DEPLOY, "Déploiement des certificats", CERT_TIP.trustDeploy, () => this.deployTrustModal(item)));
+    if (item.children_total > 0) actions.appendChild(this.iconAction(Icons.CERT_LIST, "Lister les certificats de cette autorité", CERT_TIP.certList, () => this.openCerts(item)));
     tr.appendChild(actions);
     return tr;
   }
@@ -737,18 +738,10 @@ export class CertsAdminView {
     cell.appendChild(this.iconAction(Icons.DELETE, "Supprimer", CERT_TIP.remove, () => void this.remove(item), true));
   }
 
-  /** Bouton d'action ICÔNE : l'icône porte le sens, le tooltip enrichi (`tipKey`) la mini-doc.
-      `aria-label` + `title` court restent posés : seuls supports des lecteurs d'écran, et repli
-      natif si le moteur de tooltip ne tourne pas. `danger` teinte le survol en rouge. */
+  /** Bouton d'action ICÔNE — délègue au constructeur PARTAGÉ (ui/IconButton) : un seul point de
+      fabrication pour toute l'app, donc un seul style et des règles d'a11y impossibles à oublier. */
   private iconAction(icon: string, ariaLabel: string, tipKey: string, onClick: () => void, danger = false): HTMLButtonElement {
-    const b = document.createElement("button"); b.type = "button";
-    b.className = "btn btn-ghost btn-sm icon-btn" + (danger ? " danger" : "");
-    b.innerHTML = icon;                       // constante de CONFIANCE (ui/Icons), jamais une donnée
-    b.setAttribute("aria-label", ariaLabel);
-    b.title = ariaLabel;
-    b.setAttribute("data-rich-tooltip", tipKey);
-    b.onclick = onClick;
-    return b;
+    return IconButton.build({ icon, label: ariaLabel, tipKey, danger, onClick });
   }
 
   /* --------------------------------------------------------------------------
@@ -1442,7 +1435,7 @@ export class CertsAdminView {
     } else {
       return;   // garde-fou : aucun autre kind n'ouvre cette modale
     }
-    this.host.openModal({ title: "Déployer la confiance", subtitle: Html.escape(subtitle), body: this.renderDeployGuide(guide), hideFooter: true, wide: true });
+    this.host.openModal({ title: "Déploiement des certificats", subtitle: Html.escape(subtitle), body: this.renderDeployGuide(guide), hideFooter: true, wide: true });
   }
 
   /** Rend un `DeployGuide` en DOM : encadré d'intro, puis une section par plateforme (titre + intro +

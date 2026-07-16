@@ -438,6 +438,9 @@
   .row-menu-item[disabled] { opacity: 0.4; cursor: not-allowed; }
   .row-menu-item[disabled]:hover { background: transparent; color: var(--fg); }
   .row-menu-ic { display: inline-flex; width: 16px; justify-content: center; flex-shrink: 0; }
+  /* v172 — les items du menu portent désormais des SVG du registre (ui/Icons) et non des emoji :
+     ils suivent donc `currentColor`, y compris la teinte rouge de .row-menu-danger au survol. */
+  .row-menu-ic svg { width: 15px; height: 15px; display: block; }
   .row-menu-sep { height: 1px; background: var(--line); margin: 4px 0; }
 
   .pagination {
@@ -1245,9 +1248,15 @@
      TOOLTIP ENRICHI (data-rich-tooltip → ui/RichTooltip) porte la mini-doc. L'aria-label
      et le title court restent posés sur le bouton : seuls supports des lecteurs d'écran,
      et repli natif si le moteur de tooltip ne tourne pas. */
-  .icon-btn { width: 30px; height: 30px; padding: 0; gap: 0; justify-content: center; align-items: center; border-radius: 8px; flex: none; }
-  .icon-btn svg { width: 16px; height: 16px; display: block; }
-  .icon-btn.danger:hover:not(:disabled) { color: var(--err); border-color: var(--err); }
+  /* .icon-action = bouton d'ACTION à icône, réutilisé dans TOUS les listings (page Certificats,
+     tableaux de collections, tableaux des fiches détail). Posé sur .btn.btn-sm.btn-ghost dont il
+     hérite fond/bord/survol ; on n'override que la forme carrée. NOM DISTINCT de `.icon-btn`
+     (bouton PLEINE HAUTEUR de la topbar, cf. ~l.218) pour éviter toute collision de style. */
+  .icon-action { width: 30px; height: 30px; padding: 0; gap: 0; justify-content: center; align-items: center; border-radius: 8px; flex: none; }
+  .icon-action svg { width: 16px; height: 16px; display: block; }
+  .icon-action.danger:hover:not(:disabled) { color: var(--err); border-color: var(--err); }
+  /* actif/ouvert (ex. l'overflow ⋮ quand son menu est ouvert) : accent, comme l'ancien .row-overflow */
+  .icon-action.row-overflow[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); background: var(--bg-3); }
 
   .app-tooltip {
     position: fixed;

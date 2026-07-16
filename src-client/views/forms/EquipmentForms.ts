@@ -1,4 +1,5 @@
 import type { Store } from "../../store";
+import { Icons } from "../../ui/Icons";
 import { PortEditorControls, type PortDraft } from "./PortEditorControls";
 import { ImageStore } from "../../data/ImageStore";
 import { FormControls } from "../../ui/FormControls";
@@ -122,7 +123,7 @@ export class EquipmentForms extends FormBase {
         let bk = "";
         if (store.isBreakoutParent(p)) bk = ` <span class="pill">trunk ×${store.breakoutLanes(p.id).length}</span>`;
         else if (p.parent_port_id) { const par: any = store.get("ports", p.parent_port_id); bk = ` <span class="pill">lane ${p.lane || "?"} · ${Html.escape(par ? (par.name || "trunk") : "trunk")}</span>`; }
-        return `<tr><td class="cell-name">${Html.escape(p.name || "(port)")}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : '<span style="color:var(--err)">type ?</span>'}</td><td><span class="pill role-${p.role === "mgmt" ? "mgmt" : (p.role === "power" ? "power" : "data")}">${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || "(agrégat)") : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate ? `<button class="row-btn" data-port-locate="${p.id}" title="Localiser le port en 3D">📍</button>` : ""}</td></tr>`;
+        return `<tr><td class="cell-name">${Html.escape(p.name || "(port)")}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : '<span style="color:var(--err)">type ?</span>'}</td><td><span class="pill role-${p.role === "mgmt" ? "mgmt" : (p.role === "power" ? "power" : "data")}">${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || "(agrégat)") : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate ? `<button class="btn btn-ghost btn-sm icon-action" data-port-locate="${p.id}" title="Localiser le port en 3D" aria-label="Localiser le port en 3D">${Icons.LOCATE}</button>` : ""}</td></tr>`;
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>Port</th><th>Type</th><th>Rôle</th><th>Agrégat</th><th style="text-align:right;">3D</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
