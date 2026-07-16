@@ -167,6 +167,11 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   métadonnées + blobs opaques ; schéma `certs.db` à 3 tables + invariant Q5, formats X.509/OpenSSH/
   PKCS#12 validés croisés ssh-keygen/openssl, veilleur d'échéances `cert-expiry`, limites assumées,
   procédures et script de suppression).
+- [`interventions.md`](docs/interventions.md) — **incidents & interventions** (module serveur AMOVIBLE
+  `interventions/`, base `interventions.db` à 2 tables, objets liés aux équipements/VMs/spares SANS FK
+  inter-bases — orphelins tolérés ; audit posé SERVEUR via helper partagé `RequestAuthor`, `closed_date`
+  auto, listing paginé SQL à tris sémantiques, veilleur `intervention-reminder` paliers 24 h/1 h/heure H,
+  Jira = simple référence via `JIRA_BASE_URL`, limites v1 et script de suppression). Lot CLIENT à venir.
 - [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
   catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).

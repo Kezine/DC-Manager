@@ -151,6 +151,7 @@ pour changer.
 | `COOKIE_NAME` | *(vide)* | nom du cookie contenant le jeton à proxifier au SSO (`""` = en-tête `Cookie` complet) |
 | `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié) ; macro `${clbkUrl}` → URL courante encodée. Vide = pas de bouton |
 | `DEV_USER` | `dev` | nom de l'utilisateur factice en mode dev |
+| `JIRA_BASE_URL` | *(vide)* | base d'URL Jira du module **interventions** (ex. `https://monorg.atlassian.net/browse/`) pour lier une clé à son ticket ; vide/absente → pas de lien. Simple référence, aucun appel Jira (cf. `docs/interventions.md`) |
 
 ### Authentification (SSO)
 

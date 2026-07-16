@@ -187,6 +187,7 @@ Lues par le serveur au démarrage — cœur dans [`src-server/src/index.ts`](src
 | `DEV_USER` | — | Nom de l'utilisateur factice (mode dev). |
 | `BASIC_AUTH` | — | `"user:pass"` → impose une Basic Auth navigateur (dev). Prioritaire sur le SSO. |
 | `DCMANAGER_SECRETS_KEY` | — | **Clé de chiffrement** des secrets serveur (coffre `SecretBox` partagé, lu par les modules — pas par `index.ts`). Requise par les modules **VM/Proxmox** (jetons des providers) et **notifications** (jetons de webhook) : absente → ces modules se désactivent et le signalent. Repli *legacy* : `VM_PROVIDERS_KEY` (même valeur ; un avertissement invite à renommer). La PKI/certs est *zéro-connaissance* (chiffrement navigateur) et **n'en dépend pas**. |
+| `JIRA_BASE_URL` | *(vide)* | **Base d'URL Jira** (module **interventions**) pour fabriquer un lien vers un ticket depuis une clé (ex. `https://monorg.atlassian.net/browse/`). Trimmée ; vide/absente → le client masque le lien. Exposée par `GET …/interventions/meta` ; simple RÉFÉRENCE (aucun appel Jira côté serveur). |
 
 **Authentification.** L'app **ne gère pas le login** : elle transmet les cookies de
 session au backend, qui valide via un SSO externe (ou le proxifie).

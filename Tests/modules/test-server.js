@@ -2553,4 +2553,262 @@ module.exports = async () => {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* dossier temp */ }
     }
   });
+
+  /* ============ SERVEUR : InterventionsDb (incidents/interventions, interventions.db, better-sqlite3 RÉEL) ============ */
+
+  await section("Serveur : InterventionsDb — schéma, CRUD + estampillage d'audit (serveur), closed_date auto, liens remplacés + cascade, validation griefs groupés", async () => {
+    // better-sqlite3 RÉEL requis (binaire natif) — même probe que les autres sections DB.
+    let Sqlite = null;
+    try {
+      const Candidate = require(path.join(__dirname, "..", "..", "src-server", "node_modules", "better-sqlite3"));
+      const probe = new Candidate(":memory:"); probe.close();
+      Sqlite = Candidate;
+    } catch (_) { /* module/binaire absent → section sautée */ }
+    if (!Sqlite) { ck(true, "better-sqlite3 indisponible → section InterventionsDb sautée"); return; }
+
+    const fs = require("fs"), os = require("os");
+    const { InterventionsDb } = SERVER("interventions/InterventionsDb.js");
+    const { InterventionsConfigError } = SERVER("interventions/InterventionsValidate.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-interv-"));
+    let raw = null;
+    try {
+      const db = new InterventionsDb(dir, Sqlite); // Logger "error" par défaut → silencieux
+
+      // -- SCHÉMA : fichier matérialisé, 2 tables. --
+      ck(fs.existsSync(path.join(dir, "interventions.db")), "interventions.db matérialisé dans le dossier injecté");
+      raw = new Sqlite(path.join(dir, "interventions.db"));
+      const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
+      for (const t of ["interventions", "intervention_links"]) ck(tables.includes(t), "schéma : table " + t + " créée");
+
+      // -- CRÉATION : l'audit est posé PAR LE SERVEUR ; les champs d'audit ENVOYÉS par le client sont IGNORÉS. --
+      const created = db.save("doc-A", "i1", {
+        kind: "intervention", title: "Remplacement switch", description: "# Plan\nà faire", status: "planned", priority: "high",
+        planned_start: "2026-08-01T09:00:00.000Z", planned_end: "2026-08-01T11:00:00.000Z", jira_ref: "INFRA-42",
+        links: [{ target_kind: "equipment", target_id: "eq-1" }, { target_kind: "vm", target_id: "vm-9" }],
+        created_by: "pirate", created_date: "1999-01-01T00:00:00.000Z", updated_by: "pirate", closed_date: "1999-01-01T00:00:00.000Z",
+      }, "Alice Martin");
+      ck(created.created_by === "Alice Martin" && created.updated_by === "Alice Martin", "création : created_by/updated_by = utilisateur authentifié (posé serveur)");
+      ck(created.created_by !== "pirate" && created.created_date !== "1999-01-01T00:00:00.000Z", "création : champs d'audit envoyés par le CLIENT ignorés");
+      ck.eq(created.created_date, created.updated_date, "création : created_date = updated_date (même instant)");
+      ck.eq(created.closed_date, null, "création (status planned) : closed_date null (pas encore clos)");
+      ck.eq(created.links.map((l) => l.target_kind + ":" + l.target_id).join(","), "equipment:eq-1,vm:vm-9", "liens ordonnés (position = index du tableau)");
+
+      // -- MISE À JOUR (writer distinct + attente pour un updated_date distinct) : created_* CONSERVÉS, updated_* rafraîchis. --
+      await new Promise((r) => setTimeout(r, 25));
+      const updated = db.save("doc-A", "i1", { kind: "intervention", title: "Remplacement switch (repoussé)", status: "planned", priority: "critical", planned_start: "2026-08-02T09:00:00.000Z" }, "Bob Durand");
+      ck(updated.created_by === "Alice Martin" && updated.created_date === created.created_date, "mise à jour : created_by/created_date CONSERVÉS");
+      ck(updated.updated_by === "Bob Durand" && updated.updated_date !== created.updated_date, "mise à jour : updated_by/updated_date rafraîchis");
+      ck.eq(updated.links.length, 0, "mise à jour SANS links → liens remplacés intégralement (vidés)");
+      ck.eq(updated.priority, "critical", "mise à jour : priority modifiée");
+
+      // -- closed_date : posé à l'ENTRÉE en 'closed', CONSERVÉ tant qu'on y reste, EFFACÉ en sortie. --
+      const closed1 = db.save("doc-A", "i1", { kind: "intervention", title: "Remplacement switch (repoussé)", status: "closed", priority: "critical" }, "Bob Durand");
+      ck(closed1.closed_date !== null, "entrée en 'closed' → closed_date posé automatiquement");
+      await new Promise((r) => setTimeout(r, 25));
+      const stay = db.save("doc-A", "i1", { kind: "intervention", title: "Toujours clos", status: "closed", priority: "critical" }, "Bob Durand");
+      ck.eq(stay.closed_date, closed1.closed_date, "reste 'closed' → closed_date CONSERVÉ (pas ré-écrit)");
+      const reopened = db.save("doc-A", "i1", { kind: "intervention", title: "Ré-ouvert", status: "in_progress", priority: "critical" }, "Bob Durand");
+      ck.eq(reopened.closed_date, null, "sortie de 'closed' → closed_date EFFACÉ");
+
+      // -- getOne + persistance des liens sur un autre objet ; cascade au DELETE. --
+      db.save("doc-A", "i2", { kind: "incident", title: "Panne alim", status: "declared", priority: "normal", links: [{ target_kind: "spare", target_id: "sp-3" }] }, "Alice Martin");
+      const got = db.getOne("doc-A", "i2");
+      ck(got && got.kind === "incident" && got.links.length === 1 && got.links[0].target_id === "sp-3", "getOne : objet + liens restitués");
+      ck.eq(db.getOne("doc-A", "inconnu"), null, "getOne inconnu → null");
+      ck.eq(raw.prepare("SELECT COUNT(*) AS n FROM intervention_links WHERE intervention_id='i2'").get().n, 1, "avant suppression : 1 lien en base");
+      ck.eq(db.remove("doc-A", "i2"), true, "remove → true (objet supprimé)");
+      ck.eq(raw.prepare("SELECT COUNT(*) AS n FROM intervention_links WHERE intervention_id='i2'").get().n, 0, "…ses liens partent en CASCADE");
+      ck.eq(db.remove("doc-A", "i2"), false, "remove d'un inconnu → false (404 côté route)");
+
+      // -- VALIDATION : griefs GROUPÉS (title vide, kind inconnu, end sans start, end < start, liens trop nombreux / kind inconnu). --
+      const grief = (cand) => { try { db.save("doc-A", "bad", cand, "Testeur"); return null; } catch (e) { return e instanceof InterventionsConfigError ? e.issues : ["AUTRE: " + (e && e.message)]; } };
+      const gTitle = grief({ kind: "incident", title: "   ", status: "declared", priority: "low" });
+      ck(!!gTitle && gTitle.some((i) => /title/.test(i)), "validation : title vide → grief");
+      const gKind = grief({ kind: "sinistre", title: "X", status: "declared", priority: "low" });
+      ck(!!gKind && gKind.some((i) => /kind/.test(i)), "validation : kind inconnu → grief");
+      const gEndNoStart = grief({ kind: "intervention", title: "X", status: "planned", priority: "low", planned_end: "2026-08-01T10:00:00.000Z" });
+      ck(!!gEndNoStart && gEndNoStart.some((i) => /exige planned_start/.test(i)), "validation : planned_end sans planned_start → grief");
+      const gOrder = grief({ kind: "intervention", title: "X", status: "planned", priority: "low", planned_start: "2026-08-02T10:00:00.000Z", planned_end: "2026-08-01T10:00:00.000Z" });
+      ck(!!gOrder && gOrder.some((i) => /antérieur/.test(i)), "validation : planned_end < planned_start → grief");
+      const gManyLinks = grief({ kind: "intervention", title: "X", status: "planned", priority: "low", links: Array.from({ length: 201 }, (_, i) => ({ target_kind: "equipment", target_id: "eq" + i })) });
+      ck(!!gManyLinks && gManyLinks.some((i) => /links/.test(i)), "validation : > 200 liens → grief");
+      const gLinkKind = grief({ kind: "intervention", title: "X", status: "planned", priority: "low", links: [{ target_kind: "planet", target_id: "x" }] });
+      ck(!!gLinkKind && gLinkKind.some((i) => /target_kind/.test(i)), "validation : target_kind de lien inconnu → grief");
+      const gMulti = grief({ kind: "?", title: "", status: "?", priority: "?" });
+      ck(!!gMulti && gMulti.length >= 4, "validation : griefs GROUPÉS (title + kind + status + priority cumulés en une passe)");
+      ck.eq(raw.prepare("SELECT COUNT(*) AS n FROM interventions WHERE id='bad'").get().n, 0, "validation : un candidat rejeté n'écrit RIEN (parse avant transaction)");
+    } finally {
+      if (raw) { try { raw.close(); } catch (_) {} }
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+    }
+  });
+
+  /* ============ SERVEUR : InterventionsDb — listing paginé (filtres/tris/recherche SQL) ============ */
+
+  await section("Serveur : InterventionsDb.listPage — pagination, filtres kind/status/priority (répétables), query (search), tris (rang sémantique), plafond pageSize", async () => {
+    let Sqlite = null;
+    try {
+      const Candidate = require(path.join(__dirname, "..", "..", "src-server", "node_modules", "better-sqlite3"));
+      const probe = new Candidate(":memory:"); probe.close();
+      Sqlite = Candidate;
+    } catch (_) { /* module/binaire absent → section sautée */ }
+    if (!Sqlite) { ck(true, "better-sqlite3 indisponible → section listing Interventions sautée"); return; }
+
+    const fs = require("fs"), os = require("os");
+    const { InterventionsDb } = SERVER("interventions/InterventionsDb.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-interv-page-"));
+    try {
+      const db = new InterventionsDb(dir, Sqlite);
+      const D = "D";
+      const pad2 = (n) => String(n).padStart(2, "0");
+      const STATUSES = ["declared", "planned", "in_progress", "closed", "cancelled"];
+      const PRIORITIES = ["low", "normal", "high", "critical"];
+      // Parc SYNTHÉTIQUE de 30 objets, kinds/status/priority variés + valeurs cherchables (titre/description/jira).
+      for (let i = 1; i <= 30; i++) {
+        const id = "o" + pad2(i);
+        const cand = { kind: i % 3 === 0 ? "incident" : "intervention", title: "Objet " + pad2(i), status: STATUSES[i % 5], priority: PRIORITIES[i % 4] };
+        if (id === "o07") { cand.title = "Café serveur"; cand.jira_ref = "INFRA-777"; }
+        if (id === "o08") { cand.description = "contient le mot Trouvemoi caché"; }
+        db.save(D, id, cand, "Testeur");
+      }
+
+      // -- PAGINATION : total / pages / clamp / plafond pageSize. --
+      const p10 = db.listPage(D, { pageSize: 10 });
+      ck(p10.total === 30 && p10.pages === 3 && p10.page === 1 && p10.pageSize === 10 && p10.interventions.length === 10, "listPage : total 30, 3 pages, page 1 pleine (10)");
+      const clamp = db.listPage(D, { pageSize: 10, page: 99 });
+      ck(clamp.page === 3 && clamp.interventions.length === 10, "listPage : page hors borne clampée à la dernière");
+      const cap = db.listPage(D, { pageSize: 9999 });
+      ck(cap.pageSize === 200 && cap.interventions.length === 30 && cap.pages === 1, "listPage : pageSize plafonné à 200 (tout sur une page)");
+
+      // -- Chaque item INCLUT ses liens. --
+      db.save(D, "olink", { kind: "intervention", title: "Avec liens", status: "planned", priority: "low", links: [{ target_kind: "vm", target_id: "vmX" }] }, "Testeur");
+      const withLink = db.listPage(D, { query: "avec liens" }).interventions[0];
+      ck(withLink && withLink.links.length === 1 && withLink.links[0].target_id === "vmX", "listPage : chaque item inclut ses liens");
+
+      // -- QUERY (colonne search dénormalisée, normSearch partagé) : titre/description/jira, insensible casse/accents. --
+      ck.eq(db.listPage(D, { query: "trouvemoi" }).interventions.map((x) => x.id).join(","), "o08", "query : trouve par DESCRIPTION (o08)");
+      ck.eq(db.listPage(D, { query: "INFRA-777" }).interventions.map((x) => x.id).join(","), "o07", "query : trouve par jira_ref");
+      ck.eq(db.listPage(D, { query: "cafe" }).interventions.map((x) => x.id).join(","), "o07", "query : insensible aux accents (« Café » ↦ « cafe »)");
+      ck.eq(db.listPage(D, { query: "CAFE" }).interventions.map((x) => x.id).join(","), "o07", "query : insensible à la casse");
+
+      // -- FILTRES kind/status/priority (IN, répétables) + combinés. --
+      const incidents = db.listPage(D, { kinds: ["incident"], pageSize: 200 });
+      ck(incidents.total === 10 && incidents.interventions.every((x) => x.kind === "incident"), "kinds : incident → 10 (multiples de 3)");
+      const closed = db.listPage(D, { statuses: ["closed"], pageSize: 200 });
+      ck(closed.total > 0 && closed.interventions.every((x) => x.status === "closed"), "statuses : closed uniquement");
+      const twoStatuses = db.listPage(D, { statuses: ["closed", "cancelled"], pageSize: 200 });
+      ck(twoStatuses.total > closed.total && twoStatuses.interventions.every((x) => x.status === "closed" || x.status === "cancelled"), "statuses : répétable (closed|cancelled)");
+      const crit = db.listPage(D, { priorities: ["critical"], pageSize: 200 });
+      ck(crit.total > 0 && crit.interventions.every((x) => x.priority === "critical"), "priorities : critical uniquement");
+      const combo = db.listPage(D, { kinds: ["intervention"], statuses: ["planned"], pageSize: 200 });
+      ck(combo.total > 0 && combo.interventions.every((x) => x.kind === "intervention" && x.status === "planned"), "filtres combinés (AND : intervention + planned)");
+
+      // -- TRIS : rang SÉMANTIQUE pour priority/status (PAS alphabétique). --
+      const prioDesc = db.listPage(D, { sort: "priority", dir: "desc", pageSize: 200 }).interventions.map((x) => x.priority);
+      ck(prioDesc[0] === "critical" && prioDesc[prioDesc.length - 1] === "low", "sort priority desc : critical en tête, low en fin (rang sémantique, pas alphabétique)");
+      const prioAsc = db.listPage(D, { sort: "priority", dir: "asc", pageSize: 200 }).interventions.map((x) => x.priority);
+      ck(prioAsc[0] === "low" && prioAsc[prioAsc.length - 1] === "critical", "sort priority asc : low → critical");
+      const statusAsc = db.listPage(D, { sort: "status", dir: "asc", pageSize: 200 }).interventions.map((x) => x.status);
+      ck(statusAsc[0] === "declared" && statusAsc[statusAsc.length - 1] === "cancelled", "sort status asc : declared en tête, cancelled en fin (cycle de vie)");
+
+      // -- TRI planned_start : NULL en DERNIER dans les deux sens. --
+      db.save(D, "sched-a", { kind: "intervention", title: "Planif A", status: "planned", priority: "low", planned_start: "2026-09-01T08:00:00.000Z" }, "Testeur");
+      db.save(D, "sched-b", { kind: "intervention", title: "Planif B", status: "planned", priority: "low", planned_start: "2026-08-01T08:00:00.000Z" }, "Testeur");
+      const startAsc = db.listPage(D, { sort: "planned_start", dir: "asc", pageSize: 200 }).interventions;
+      ck(startAsc[0].id === "sched-b" && startAsc[startAsc.length - 1].planned_start === null, "sort planned_start asc : plus proche en tête, NULL en fin");
+      const startDesc = db.listPage(D, { sort: "planned_start", dir: "desc", pageSize: 200 }).interventions;
+      ck(startDesc[0].id === "sched-a" && startDesc[startDesc.length - 1].planned_start === null, "sort planned_start desc : plus lointaine en tête, NULL TOUJOURS en fin");
+
+      // -- Validation SOUPLE : sort/dir inconnus → défaut appliqué (jamais d'erreur). --
+      const soft = db.listPage(D, { sort: "n_importe_quoi", dir: "n_importe" });
+      ck(soft.total >= 30 && soft.interventions.length > 0, "sort/dir inconnus → défaut appliqué (validation souple, aucune erreur)");
+    } finally {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+    }
+  });
+
+  /* ============ SERVEUR : InterventionReminderWatcher + route meta (logique PURE — sans SQLite) ============ */
+
+  await section("Serveur : InterventionReminderWatcher — paliers info(−24h)/warning(−1h)/error(H), error maintenu fenêtre dépassée, resolve démarrage/disparition ; route meta (JIRA_BASE_URL)", async () => {
+    const { InterventionReminderWatcher } = SERVER("interventions/InterventionReminderWatcher.js");
+    const { InterventionsValidate } = SERVER("interventions/InterventionsValidate.js");
+    const HOUR = 3600000;
+    const nowMs = Date.parse("2026-07-20T12:00:00.000Z");
+    const clock = () => new Date(nowMs);
+    const at = (hours) => new Date(nowMs + hours * HOUR).toISOString();
+    const calls = [];
+    const reporter = { raise: (key, event) => calls.push({ op: "raise", key, event }), resolve: (key) => calls.push({ op: "resolve", key }) };
+    const parc = [];
+    const watcher = new InterventionReminderWatcher({ listReminderCandidates: () => parc.slice() }, reporter, clock);
+
+    ck.eq(InterventionReminderWatcher.keyFor("doc-A", "i1"), "intervention-reminder:doc-A:i1", "clé stable intervention-reminder:<docId>:<id>");
+
+    // -- PALIERS : gravité CROISSANTE à l'approche de l'heure H (défauts 24 h / 1 h). --
+    parc.push(
+      { doc_id: "d", id: "loin", title: "Loin", kind: "intervention", status: "planned", planned_start: at(48), planned_end: at(50) },     // > 24 h → rien (resolve)
+      { doc_id: "d", id: "j-info", title: "Info", kind: "intervention", status: "planned", planned_start: at(20), planned_end: at(22) },    // ≤ 24 h, > 1 h → info
+      { doc_id: "d", id: "j-warn", title: "Warn", kind: "intervention", status: "declared", planned_start: at(0.5), planned_end: at(2) },   // ≤ 1 h, > 0 → warning
+      { doc_id: "d", id: "j-err", title: "Err", kind: "intervention", status: "planned", planned_start: at(-1), planned_end: at(1) },       // début passé → error
+    );
+    const bilan = watcher.scan();
+    ck(bilan.raised === 3 && bilan.resolved === 1, "passe : 3 rappels levés (info/warning/error), 1 clôture (hors seuil > 24 h)");
+    const byId = (id) => calls.find((c) => c.op === "raise" && c.key.endsWith(":" + id));
+    ck.eq(byId("j-info").event.severity, "info", "départ dans ≤ 24 h et > 1 h → info");
+    ck.eq(byId("j-warn").event.severity, "warning", "départ dans ≤ 1 h et > H → warning");
+    ck.eq(byId("j-err").event.severity, "error", "départ atteint/dépassé → error (« devait commencer »)");
+    ck(byId("j-err").event.event_type === "intervention-reminder" && byId("j-err").event.doc_id === "d", "événement : type intervention-reminder + doc_id porté");
+    ck(/devait commencer/.test(byId("j-err").event.body) && /2026-07-20 11:00/.test(byId("j-err").event.body), "message error : « devait commencer » + fenêtre (heure incluse)");
+    ck(calls.some((c) => c.op === "resolve" && c.key === "intervention-reminder:d:loin"), "> 24 h → resolve (no-op moteur si jamais levé)");
+
+    // -- ERROR MAINTENU même fenêtre DÉPASSÉE (planned_end passé) et toujours pas démarré. --
+    calls.length = 0;
+    parc.length = 0;
+    parc.push({ doc_id: "d", id: "depasse", title: "Dépassée", kind: "intervention", status: "planned", planned_start: at(-10), planned_end: at(-2) });
+    watcher.scan();
+    const dep = calls.find((c) => c.op === "raise" && c.key.endsWith(":depasse"));
+    ck(dep && dep.event.severity === "error", "fenêtre dépassée (planned_end passé), pas démarrée → error MAINTENU (jamais clos)");
+
+    // -- Idempotence par passe (l'anti-spam vit dans le moteur notify, pas ici). --
+    calls.length = 0;
+    watcher.scan();
+    ck.eq(calls.filter((c) => c.op === "raise").length, 1, "re-scan → raise re-signalé (idempotent côté moteur, aucun anti-spam ici)");
+
+    // -- RESOLVE quand l'objet DÉMARRE / se clôt / s'annule → il sort de listReminderCandidates. --
+    calls.length = 0;
+    parc.length = 0; // 'depasse' passé en in_progress/closed/cancelled → plus fourni par la source
+    watcher.scan();
+    ck(calls.some((c) => c.op === "resolve" && c.key === "intervention-reminder:d:depasse"), "objet démarré/clos/annulé → disparaît de la source → resolve (jeu mémoire des clés levées)");
+    calls.length = 0;
+    watcher.scan();
+    ck.eq(calls.filter((c) => c.op === "resolve" && c.key.endsWith(":depasse")).length, 0, "…une seule fois (clé oubliée après clôture)");
+
+    // -- BORDURES exactes des paliers (inclusives). --
+    calls.length = 0;
+    parc.length = 0;
+    parc.push(
+      { doc_id: "b", id: "pile24", title: "Pile 24h", kind: "intervention", status: "planned", planned_start: at(24), planned_end: null },     // pile −24 h → info (inclusif)
+      { doc_id: "b", id: "pile1", title: "Pile 1h", kind: "intervention", status: "planned", planned_start: at(1), planned_end: null },         // pile −1 h → warning (inclusif)
+      { doc_id: "b", id: "au-dela", title: "Au-delà", kind: "intervention", status: "planned", planned_start: at(24.001), planned_end: null },  // juste > 24 h → resolve
+    );
+    watcher.scan();
+    ck(calls.some((c) => c.op === "raise" && c.key.endsWith(":pile24") && c.event.severity === "info"), "−24 h pile → info (inclusif)");
+    ck(calls.some((c) => c.op === "raise" && c.key.endsWith(":pile1") && c.event.severity === "warning"), "−1 h pile → warning (inclusif)");
+    ck(calls.some((c) => c.op === "resolve" && c.key.endsWith(":au-dela")), "juste au-delà de −24 h → hors seuil (resolve)");
+
+    // -- Seuils INJECTABLES (tests) : paliers resserrés. --
+    const calls2 = [];
+    const reporter2 = { raise: (k, e) => calls2.push({ op: "raise", e }), resolve: (k) => calls2.push({ op: "resolve" }) };
+    const tight = new InterventionReminderWatcher(
+      { listReminderCandidates: () => [{ doc_id: "t", id: "x", title: "X", kind: "incident", status: "planned", planned_start: at(3), planned_end: null }] },
+      reporter2, clock, { info: 6 * HOUR, warning: 2 * HOUR },
+    );
+    tight.scan();
+    ck(calls2.some((c) => c.op === "raise" && c.e.severity === "info"), "seuils injectés (info=6 h/warning=2 h) : départ à +3 h → info");
+
+    // -- ROUTE meta : jira_base_url = JIRA_BASE_URL (trim ; vide/absente → null). --
+    ck.eq(InterventionsValidate.jiraBaseUrl({ JIRA_BASE_URL: "https://monorg.atlassian.net/browse/" }), "https://monorg.atlassian.net/browse/", "meta : JIRA_BASE_URL posée → valeur");
+    ck.eq(InterventionsValidate.jiraBaseUrl({ JIRA_BASE_URL: "  https://x/browse/  " }), "https://x/browse/", "meta : valeur trimmée");
+    ck.eq(InterventionsValidate.jiraBaseUrl({ JIRA_BASE_URL: "   " }), null, "meta : vide (espaces) → null");
+    ck.eq(InterventionsValidate.jiraBaseUrl({}), null, "meta : absente → null");
+  });
 };
