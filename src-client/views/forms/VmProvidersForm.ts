@@ -1,4 +1,5 @@
 import { FormControls } from "../../ui/FormControls";
+import { Icons } from "../../ui/Icons";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
@@ -168,7 +169,7 @@ export class VmProvidersForm {
         up.onclick = () => { if (i > 0) { [pool[i - 1], pool[i]] = [pool[i], pool[i - 1]]; renderPool(); } };
         const down = VmProvidersForm.iconBtn("↓", "Descendre (priorité de bascule)", i === pool.length - 1);
         down.onclick = () => { if (i < pool.length - 1) { [pool[i + 1], pool[i]] = [pool[i], pool[i + 1]]; renderPool(); } };
-        const del = VmProvidersForm.iconBtn("✕", "Supprimer ce nœud", pool.length <= 1);
+        const del = VmProvidersForm.iconBtn(Icons.CLOSE, "Supprimer ce nœud", pool.length <= 1);
         del.onclick = () => { if (pool.length > 1) { pool.splice(i, 1); renderPool(); } };
         const ctrls = document.createElement("div"); ctrls.className = "form-field"; ctrls.style.flex = "0 0 auto";
         const spacer = document.createElement("label"); spacer.innerHTML = "&nbsp;"; // aligne les boutons sur le bas des champs
@@ -381,7 +382,7 @@ export class VmProvidersForm {
   /** Petit bouton icône (monter/descendre/supprimer un nœud du pool). */
   private static iconBtn(glyph: string, title: string, disabled: boolean): HTMLButtonElement {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm";
-    b.textContent = glyph; b.title = title; b.disabled = disabled;
+    b.innerHTML = glyph; b.title = title; b.disabled = disabled;
     return b;
   }
 

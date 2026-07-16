@@ -12,6 +12,8 @@
    de clic à la fois — cf. host.disarmPositioning / host.clearRoute).
    ============================================================================= */
 import { Dom } from "../../ui/Dom";
+import { IconButton } from "../../ui/IconButton";
+import { Icons } from "../../ui/Icons";
 import { Html } from "../../core/Html";
 import { Format } from "../../core/Format";
 import { Notify } from "../../ui/Notify";
@@ -208,7 +210,7 @@ export class MeasureTool {
   /** Carte « Mesure » (panneau latéral) : liste des segments + longueur totale + actions. */
   card(): HTMLElement {
     const box = document.createElement("div"); box.className = "dc-card";
-    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "📏 Mesure"; box.appendChild(t);
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.innerHTML = '<span class="gi">' + Icons.MEASURE + '</span>Mesure'; box.appendChild(t);
     const m = this.state!, here = this.activeHere();
     const list = document.createElement("div"); list.style.cssText = "font-size:12px;margin:4px 0;display:flex;flex-direction:column;gap:3px";
     // LISTE des mesures : terminées (conservées en session) + celle en cours, avec longueur + nombre de points.
@@ -240,9 +242,9 @@ export class MeasureTool {
     box.appendChild(hint);
     const acts = document.createElement("div"); acts.className = "dc-card-acts";
     const bUndo = this.host.btn("↩ Annuler point", () => this.undo()); (bUndo as any).disabled = !m.pts.length || !here;
-    const bNew = this.host.btn("✓ Valider (Entrée)", () => this.commit()); (bNew as any).disabled = m.pts.length < 2 || !here;
-    const bClear = this.host.btn("🗑 Tout effacer", () => this.clearAll()); (bClear as any).disabled = !m.pts.length && !m.done.length;
-    const bClose = this.host.btn("✕ Fermer", () => this.cancel()); bClose.classList.add("btn-danger");
+    const bNew = this.host.btn("Valider (Entrée)", () => this.commit()); IconButton.decorate(bNew, Icons.CHECK); (bNew as any).disabled = m.pts.length < 2 || !here;
+    const bClear = this.host.btn("Tout effacer", () => this.clearAll()); IconButton.decorate(bClear, Icons.DELETE); (bClear as any).disabled = !m.pts.length && !m.done.length;
+    const bClose = this.host.btn("Fermer", () => this.cancel()); IconButton.decorate(bClose, Icons.CLOSE); bClose.classList.add("btn-danger");
     acts.append(bUndo, bNew, bClear, bClose); box.appendChild(acts);
     return box;
   }

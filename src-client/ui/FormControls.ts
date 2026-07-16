@@ -3,8 +3,9 @@ import { Html } from "../core/Html";
 export interface SelectOption { value: string; label: string; disabled?: boolean; group?: string; }
 export interface NumberOpts { min?: number | string; max?: number | string; step?: number | string; placeholder?: string; }
 /** `tipKey` = CLÉ d'un contenu enregistré dans `RichTooltip` (jamais du HTML : le moteur
-    construit le DOM et échappe lui-même — cf. ui/RichTooltip.ts). */
-export interface ToggleOpts { title?: string; block?: boolean; disabled?: boolean; tipKey?: string; }
+    construit le DOM et échappe lui-même — cf. ui/RichTooltip.ts).
+    `icon` = SVG de CONFIANCE (constante `ui/Icons`) rendu avant le libellé — jamais une donnée. */
+export interface ToggleOpts { title?: string; block?: boolean; disabled?: boolean; tipKey?: string; icon?: string; }
 export interface DateOpts { buttons?: string[]; min?: string; max?: string; }
 
 /* Composants de FORMULAIRE réutilisables (rangée libellée, champs texte/nombre/
@@ -82,7 +83,8 @@ export class FormControls {
     if (opts.title) b.title = opts.title;
     if (opts.tipKey) b.setAttribute("data-rich-tooltip", opts.tipKey);   // simple CLÉ → aucun échappement à bricoler ici
     if (opts.disabled) b.disabled = true;
-    b.innerHTML = '<span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">' + Html.escape(labelText) + "</span>";
+    const iconSpan = opts.icon ? '<span class="gi" aria-hidden="true">' + opts.icon + "</span>" : "";   // SVG de confiance (ui/Icons)
+    b.innerHTML = '<span class="tgl-dot" aria-hidden="true"></span>' + iconSpan + '<span class="tgl-txt">' + Html.escape(labelText) + "</span>";
     const set = (v: boolean, fire: boolean) => {
       b.classList.toggle("active", !!v);
       b.setAttribute("aria-checked", v ? "true" : "false");

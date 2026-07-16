@@ -1,4 +1,5 @@
 import { Notify } from "./Notify";
+import { Icons } from "./Icons";
 import { Dialog } from "./Dialog";
 import { Fullscreen } from "./Fullscreen";
 
@@ -49,7 +50,7 @@ export class Modal {
           <div class="modal-header-left"><div class="modal-titles">
             <div class="modal-title"></div><div class="modal-subtitle"></div>
           </div></div>
-          <button type="button" class="modal-close" aria-label="Fermer">✕</button>
+          <button type="button" class="modal-close" aria-label="Fermer">${Icons.CLOSE}</button>
         </div>
         <div class="modal-body"></div>
         <div class="modal-footer">

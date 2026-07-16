@@ -46,6 +46,13 @@ export class IconButton {
     return b;
   }
 
+  /** Préfixe une icône SVG à un bouton TEXTE déjà construit (ex. `DcBase.btn(...)`), sous forme d'un
+      `<span class="gi">` avant le libellé. Pour les panneaux d'outils et actions qui gardent leur
+      texte mais gagnent une icône. `icon` = SVG de confiance (`ui/Icons`). */
+  static decorate(btn: HTMLElement, icon: string): void {
+    btn.insertAdjacentHTML("afterbegin", '<span class="gi" aria-hidden="true">' + icon + "</span>");
+  }
+
   /** Même bouton, rendu en CHAÎNE HTML — pour les listings qui peignent leur corps en une passe
       (`innerHTML`) plutôt qu'en assemblant des nœuds. `label` est échappé : il finit dans des
       attributs. `icon` ne l'est pas — c'est un SVG de confiance, et l'échapper l'afficherait

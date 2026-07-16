@@ -11,6 +11,7 @@
    câblés au constructeur (le serveur fait autorité — pas de rejeu).
    ============================================================================= */
 import type { Store } from "../store";
+import { Icons } from "../ui/Icons";
 import type { ImageStore } from "../data/ImageStore";
 import type { SaveState } from "./SaveState";
 import type { Prefs } from "../core/Prefs";
@@ -270,40 +271,41 @@ export class RestDocumentController {
         const wrap = document.createElement("div"); wrap.className = "open-kind-choices";
         docs.forEach((d) => {
           const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
-          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = "🗂";
+          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.innerHTML = Icons.FILE;
           const tx = document.createElement("span"); tx.className = "ok-tx";
           const isDefault = d.id === defaultDocId;
-          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = (d.locked ? "🔒 " : "") + d.name + (d.id === this.docId ? "  ◀ ouvert" : "") + (isDefault ? "  ★ défaut" : "");
+          // Le nom seul : l'état verrouillé/défaut est déjà porté par les pastilles cadenas/étoile à droite.
+          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = d.name + (d.id === this.docId ? "  ◀ ouvert" : "");
           const de = document.createElement("span"); de.className = "ok-desc"; de.textContent = "maj " + String(d.updated_date || "").slice(0, 10);
           tx.append(ti, de); b.append(ic, tx);
           b.onmousedown = (e) => { e.preventDefault(); chosen = d.id; confirmBtn?.click(); };
           // Étoile : bascule du DOC PAR DÉFAUT global (ouvert au boot d'un client sans « dernier doc ouvert »).
           // Cliquer l'étoile du défaut courant l'efface ; cliquer une autre la déplace. Défaut = ★ net ; sinon ☆ estompé.
-          const star = document.createElement("span"); star.textContent = isDefault ? "★" : "☆";
+          const star = document.createElement("span"); star.className = "gi"; star.innerHTML = isDefault ? Icons.STAR : Icons.STAR_OUTLINE;
           star.title = isDefault ? "Retirer comme document par défaut" : "Définir comme document par défaut (ouvert au démarrage)";
-          star.style.cssText = "margin-left:auto;padding:0 6px;cursor:pointer;opacity:" + (isDefault ? "1" : "0.4");
+          star.style.cssText = "margin-left:auto;padding:0 6px;cursor:pointer;color:" + (isDefault ? "var(--accent)" : "var(--fg-dimmer)");
           star.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__default__:" + (isDefault ? "" : d.id); confirmBtn?.click(); };
           b.appendChild(star);
           // Cadenas : bascule de verrouillage (protège d'une suppression accidentelle). Verrouillé = 🔒 net ; libre = 🔓 estompé.
-          const lock = document.createElement("span"); lock.textContent = d.locked ? "🔒" : "🔓";
+          const lock = document.createElement("span"); lock.className = "gi"; lock.innerHTML = d.locked ? Icons.LOCK : Icons.UNLOCK;
           lock.title = d.locked ? "Déverrouiller (réautorise la suppression)" : "Verrouiller (protège de la suppression)";
-          lock.style.cssText = "padding:0 6px;cursor:pointer;opacity:" + (d.locked ? "1" : "0.4");
+          lock.style.cssText = "padding:0 6px;cursor:pointer;color:" + (d.locked ? "var(--accent)" : "var(--fg-dimmer)");
           lock.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__lock__:" + d.id; confirmBtn?.click(); };
           b.appendChild(lock);
           // Suppression proposée UNIQUEMENT si non verrouillé → flux délibéré « déverrouiller d'abord » (le serveur refuse en 423 par sécurité).
           if (!d.locked) {
-            const del = document.createElement("span"); del.textContent = "✕"; del.title = "Supprimer ce document"; del.style.cssText = "padding:0 8px;cursor:pointer;color:var(--fg-dimmer)";
+            const del = document.createElement("span"); del.className = "gi"; del.innerHTML = Icons.CLOSE; del.title = "Supprimer ce document"; del.style.cssText = "padding:0 8px;cursor:pointer;color:var(--fg-dimmer)";
             del.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__del__:" + d.id; confirmBtn?.click(); };
             b.appendChild(del);
           }
           wrap.appendChild(b);
         });
         const nb = document.createElement("button"); nb.type = "button"; nb.className = "open-kind-btn";
-        const ni = document.createElement("span"); ni.className = "ok-ic"; ni.textContent = "＋"; const nt = document.createElement("span"); nt.className = "ok-tx";
+        const ni = document.createElement("span"); ni.className = "ok-ic"; ni.innerHTML = Icons.PLUS; const nt = document.createElement("span"); nt.className = "ok-tx";
         const nti = document.createElement("span"); nti.className = "ok-title"; nti.textContent = "Nouveau document"; nt.appendChild(nti);
         nb.append(ni, nt); nb.onmousedown = (e) => { e.preventDefault(); chosen = "__new__"; confirmBtn?.click(); }; wrap.appendChild(nb);
         const ib = document.createElement("button"); ib.type = "button"; ib.className = "open-kind-btn";
-        const ii = document.createElement("span"); ii.className = "ok-ic"; ii.textContent = "📥"; const itx = document.createElement("span"); itx.className = "ok-tx";
+        const ii = document.createElement("span"); ii.className = "ok-ic"; ii.innerHTML = Icons.IMPORT; const itx = document.createElement("span"); itx.className = "ok-tx";
         const iti = document.createElement("span"); iti.className = "ok-title"; iti.textContent = "Importer un fichier .json…";
         const ide = document.createElement("span"); ide.className = "ok-desc"; ide.textContent = "crée un nouveau document depuis un export .json (+ .nmfb d'images)";
         itx.append(iti, ide); ib.append(ii, itx); ib.onmousedown = (e) => { e.preventDefault(); chosen = "__import__"; confirmBtn?.click(); }; wrap.appendChild(ib);

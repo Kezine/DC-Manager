@@ -12,6 +12,7 @@
    inter-onglets) sont injectées au constructeur.
    ============================================================================= */
 import type { Store } from "../store";
+import { Icons } from "../ui/Icons";
 import type { ImageStore } from "../data/ImageStore";
 import type { SaveState } from "./SaveState";
 import type { Prefs } from "../core/Prefs";
@@ -219,7 +220,7 @@ export class FileDocumentController {
     this.flog("openFacesFile: .nmfb du dossier", names);
     if (!names.length) { Notify.toast("Aucun fichier de faces (.nmfb) dans ce dossier.", "err"); return; }
     names.sort((a, b) => a.localeCompare(b));
-    const name = (names.length === 1) ? names[0] : await this.chooseFileInDir(names, "Choisir un fichier de faces", "🖼");
+    const name = (names.length === 1) ? names[0] : await this.chooseFileInDir(names, "Choisir un fichier de faces", Icons.IMAGE);
     if (!name) return;
     try { const fh = await dir.getFileHandle(name); await this.associateCompanion(fh); }
     catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
@@ -420,7 +421,7 @@ export class FileDocumentController {
         const wrap = document.createElement("div"); wrap.className = "open-kind-choices";
         const mk = (val: string, icon: string, label: string, desc: string) => {
           const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
-          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = icon;
+          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.innerHTML = icon;
           const tx = document.createElement("span"); tx.className = "ok-tx";
           const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = label;
           const de = document.createElement("span"); de.className = "ok-desc"; de.textContent = desc;
@@ -428,8 +429,8 @@ export class FileDocumentController {
           b.onclick = () => { chosen = val; confirmBtn?.click(); };
           wrap.appendChild(b);
         };
-        mk("json", "📄", "Document JSON", "Ouvrir un autre document (remplace le document courant).");
-        mk("companion", "🖼", "Fichier compagnon d'images", "Charger un .nmfb et l'associer au document courant.");
+        mk("json", Icons.FILE, "Document JSON", "Ouvrir un autre document (remplace le document courant).");
+        mk("companion", Icons.IMAGE, "Fichier compagnon d'images", "Charger un .nmfb et l'associer au document courant.");
         root.appendChild(wrap);
         return { collect: () => chosen, validate: () => true };
       },
@@ -446,7 +447,7 @@ export class FileDocumentController {
         const wrap = document.createElement("div"); wrap.className = "open-kind-choices";
         names.forEach((n) => {
           const b = document.createElement("button"); b.type = "button"; b.className = "open-kind-btn";
-          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.textContent = icon;
+          const ic = document.createElement("span"); ic.className = "ok-ic"; ic.innerHTML = icon;
           const tx = document.createElement("span"); tx.className = "ok-tx";
           const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = n; tx.appendChild(ti);
           b.append(ic, tx); b.onclick = () => { chosen = n; confirmBtn?.click(); }; wrap.appendChild(b);
@@ -474,7 +475,7 @@ export class FileDocumentController {
     this.flog("doOpenDir: dossier choisi", { dir: dir && dir.name, jsons: names });
     if (!names.length) { Notify.toast("Aucun fichier .json dans ce dossier.", "err"); return; }
     names.sort((a, b) => a.localeCompare(b));
-    const name = (names.length === 1) ? names[0] : await this.chooseFileInDir(names, "Choisir un document", "📄");
+    const name = (names.length === 1) ? names[0] : await this.chooseFileInDir(names, "Choisir un document", Icons.FILE);
     if (!name) return;
     try {
       const fh = await dir.getFileHandle(name);

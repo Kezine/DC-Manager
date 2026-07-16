@@ -13,6 +13,8 @@
    ET le Plan d'étage. Le DOM utilisé (SVG, panneau) est créé via Dom/HTML standard.
    ============================================================================= */
 import { Dom } from "../../ui/Dom";
+import { IconButton } from "../../ui/IconButton";
+import { Icons } from "../../ui/Icons";
 import { Notify } from "../../ui/Notify";
 import { Html } from "../../core/Html";
 import { Format } from "../../core/Format";
@@ -241,11 +243,11 @@ export class PositioningTool {
   /** Carte de panneau latéral de l'outil. */
   card(): HTMLElement {
     const box = document.createElement("div"); box.className = "dc-card";
-    const title = document.createElement("div"); title.className = "dc-card-title"; title.textContent = "📐 Positionnement"; box.appendChild(title);
+    const title = document.createElement("div"); title.className = "dc-card-title"; title.innerHTML = `<span class="gi">${Icons.POSITION}</span>Positionnement`; box.appendChild(title);
     const scene = this.host.posScene();
     if (!scene) {
       const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Disponible en vue 2D (Plan de salle ou Plan d'étage)."; box.appendChild(h);
-      const acts = document.createElement("div"); acts.className = "dc-card-acts"; const bc = this.btn("✕ Fermer", () => this.cancel()); bc.classList.add("btn-danger"); acts.appendChild(bc); box.appendChild(acts);
+      const acts = document.createElement("div"); acts.className = "dc-card-acts"; const bc = this.btn("Fermer", () => this.cancel()); IconButton.decorate(bc, Icons.CLOSE); bc.classList.add("btn-danger"); acts.appendChild(bc); box.appendChild(acts);
       return box;
     }
     const moverEntry = scene.rects.find((x) => x.id === this.moverId);
@@ -277,7 +279,7 @@ export class PositioningTool {
     const dragHint = document.createElement("div"); dragHint.className = "form-hint"; dragHint.textContent = "Astuce : glissez l'élément pour l'aimanter aux murs et aux coins voisins."; box.appendChild(dragHint);
     const acts = document.createElement("div"); acts.className = "dc-card-acts";
     const bClear = this.btn("Effacer réf.", () => { this.refX = null; this.refY = null; this.host.render(); }); (bClear as any).disabled = !this.refX && !this.refY;
-    const bClose = this.btn("✕ Fermer", () => this.cancel()); bClose.classList.add("btn-danger");
+    const bClose = this.btn("Fermer", () => this.cancel()); IconButton.decorate(bClose, Icons.CLOSE); bClose.classList.add("btn-danger");
     acts.append(bClear, bClose); box.appendChild(acts);
     return box;
   }

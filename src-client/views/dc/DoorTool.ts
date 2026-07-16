@@ -11,6 +11,7 @@
    seront rapatriés ici lors des étapes suivantes ; ils appellent déjà ce contrôleur pour le CRUD.
    ============================================================================= */
 import { Id } from "../../core/Id";
+import { Icons } from "../../ui/Icons";
 import { Format } from "../../core/Format";
 import { Doors, DOOR_WALLS, type DoorWall } from "../../domain/Doors";
 import { DoorGeometry } from "../../geometry/DoorGeometry";
@@ -76,7 +77,7 @@ export class DoorTool {
       { label: "Ouverture : " + (door.opening === "interior" ? "→ extérieur" : "→ intérieur"), action: () => this.update(dc, door.id, { opening: Doors.toggleOpening(door.opening) }) },
       { label: "Supprimer la porte", danger: true, action: () => this.remove(dc, door.id) },
     );
-    return [{ head: "🚪 Porte" + (dbl ? " (double battant)" : "") + " — passage " + Math.round(Doors.freeWidth(door)) + " mm", items }];
+    return [{ head: "Porte" + (dbl ? " (double battant)" : "") + " — passage " + Math.round(Doors.freeWidth(door)) + " mm", items }];
   }
 
   /* ---- rendu 2D (SVG) + glisser le long du mur ---- */
@@ -166,7 +167,7 @@ export class DoorTool {
       const cy = door.wall === "bottom" ? dc.depth_mm : (door.wall === "top" ? 0 : along);
       const hw = Math.max(1, (door.width_mm || 900) / 2), hx = onSide ? 30 : hw, hy = onSide ? hw : 30;
       return {
-        id: door.id, name: "🚪 " + Doors.wallLabel(door.wall), orient: 0, anchor: "center", rect: { cx, cy, hx, hy },
+        id: door.id, name: Doors.wallLabel(door.wall), orient: 0, anchor: "center", rect: { cx, cy, hx, hy },
         commit: async (nx: number, ny: number) => {
           const off = DoorGeometry.clampOffset({ ...door, offset: onSide ? ny : nx }, room);
           await this.update(dc, door.id, { offset: Math.round(off) });
@@ -192,7 +193,7 @@ export class DoorTool {
         const lab = document.createElement("span"); lab.className = "grow"; lab.style.fontSize = "12px";
         lab.textContent = "Mur " + Doors.wallLabel(d.wall) + (Doors.isDouble(d) ? " · 2 vantaux" : "") + " · ouv. " + d.width_mm + " · passage " + Doors.freeWidth(d) + " mm";
         const bEdit = this.btn("Modifier", () => this.host.openDoorForm(dc.id, d.id));
-        const bDel = this.btn("✕", () => this.remove(dc, d.id)); bDel.classList.add("btn-danger");
+        const bDel = this.btn("", () => this.remove(dc, d.id)); bDel.innerHTML = Icons.CLOSE; bDel.classList.add("btn-danger");
         row.append(lab, bEdit, bDel); list.appendChild(row);
       });
       box.appendChild(list);

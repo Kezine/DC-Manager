@@ -1,4 +1,5 @@
 import type { Store } from "../store";
+import { Icons } from "../ui/Icons";
 import { Html } from "../core/Html";
 import { Format } from "../core/Format";
 import { NotifyFormat, DEFAULT_REMIND_HOURS, EVENT_TYPE_SUGGESTIONS } from "../core/NotifyFormat";
@@ -621,7 +622,7 @@ export class NotificationsAdminView {
     box.style.cssText = "border:1px solid var(--line);border-radius:6px;padding:12px;background:var(--bg-2)";
     const head = document.createElement("div"); head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
     const t = document.createElement("div"); t.style.cssText = "font-weight:600;color:var(--fg)"; t.textContent = title;
-    const close = document.createElement("button"); close.type = "button"; close.className = "btn btn-ghost btn-sm"; close.textContent = "✕"; close.title = "Masquer";
+    const close = document.createElement("button"); close.type = "button"; close.className = "btn btn-ghost btn-sm"; close.innerHTML = Icons.CLOSE; close.title = "Masquer";
     close.onclick = () => { this.resultBar.innerHTML = ""; };
     head.append(t, close); box.appendChild(head);
 

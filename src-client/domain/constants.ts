@@ -189,10 +189,11 @@ export const WAYPOINT_TYPES = [
 /* ---- INVENTAIRE DE SPARES (pièces de rechange, hors graphe réseau) ---- */
 export interface SpareTypeDef { id: string; label: string; icon: string; }
 export const SPARE_TYPES: SpareTypeDef[] = [
-  { id: "hdd",         label: "HDD (disque dur)", icon: "💽" },
-  { id: "ssd",         label: "SSD",              icon: "💾" },
-  { id: "transceiver", label: "Transceiver",      icon: "🔌" },
-  { id: "other",       label: "Autre",            icon: "📦" },
+  // icon = INNER markup SVG (enveloppé par SpareTypes.svg), même convention qu'EquipmentTypes.
+  { id: "hdd",         label: "HDD (disque dur)", icon: `<rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="12" r="0.7" fill="currentColor"/>` },
+  { id: "ssd",         label: "SSD",              icon: `<rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10h6M7 13.5h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
+  { id: "transceiver", label: "Transceiver",      icon: `<rect x="2" y="9" width="13" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 10.5h4l3 1.5-3 1.5h-4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>` },
+  { id: "other",       label: "Autre",            icon: `<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>` },
 ];
 export const SPARE_TYPE_DEFAULT = "other";
 /** Types « disque » partageant le même groupe de champs (capacité/interface/format ; RPM = HDD seul). */

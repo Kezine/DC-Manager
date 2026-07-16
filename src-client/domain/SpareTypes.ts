@@ -9,5 +9,9 @@ export class SpareTypes {
 
   static isType(x: unknown): boolean { return !!BY_ID[x as string]; }
   static label(id: string): string { const t = BY_ID[id]; return t ? t.label : (id || "—"); }
+  /** INNER markup SVG du type (paths seuls) — à envelopper. Vide si type inconnu. */
   static icon(id: string): string { const t = BY_ID[id]; return t ? t.icon : ""; }
+  /** Icône PRÊTE À INSÉRER (span.gi + svg enveloppé), pour les pastilles/listes. Vide si inconnu.
+      NB : inutilisable dans une <option> (texte seul) — y passer `label()` nu. */
+  static svg(id: string): string { const inner = SpareTypes.icon(id); return inner ? `<span class="gi"><svg viewBox="0 0 24 24" aria-hidden="true">${inner}</svg></span>` : ""; }
 }

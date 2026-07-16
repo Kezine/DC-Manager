@@ -1,4 +1,5 @@
 import type { Store } from "../store";
+import { Icons } from "../ui/Icons";
 import { Html } from "../core/Html";
 import { Ip } from "../core/Ip";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
@@ -16,7 +17,7 @@ import type { ListOptions } from "./ListView";
 const dim = (s: string) => `<span style="color:var(--fg-dimmer)">${s}</span>`;
 const swatch = (c: string | null) => (c ? `<span class="swatch-dot" style="background:${c}"></span> ` : "");
 const kindPill = (k: string) => (k === "power"
-  ? '<span class="pill" style="border-color:var(--accent-2);color:var(--accent-2)">⚡ alim.</span>'
+  ? '<span class="pill" style="border-color:var(--accent-2);color:var(--accent-2)"><span class="gi">' + Icons.POWER + '</span>alim.</span>'
   : '<span class="pill">data</span>');
 const descCell = (o: any) => (o.description ? Html.escape(String(o.description).slice(0, 80)) : dim("—"));
 
@@ -66,7 +67,7 @@ export class ListConfigs {
           head: "Type", sortKey: "kind", sort: (n) => n.kind, render: (n) => kindPill(n.kind),
           filter: { label: "Type", options: () => [{ id: "data", label: "Data" }, { id: "power", label: "Alimentation" }], valueOf: (n) => (n.kind === "power" ? "power" : "data") },
         },
-        { head: "Réseau IP", render: (n) => { const ip: any = n.ip_network_id && store.get("ipNetworks", n.ip_network_id); return ip ? `<span class="pill">🌐 ${Html.escape(ip.cidr || ip.label || "(IP)")}</span>` : dim("logique"); } },
+        { head: "Réseau IP", render: (n) => { const ip: any = n.ip_network_id && store.get("ipNetworks", n.ip_network_id); return ip ? `<span class="pill"><span class="gi">${Icons.NETWORK}</span>${Html.escape(ip.cidr || ip.label || "(IP)")}</span>` : dim("logique"); } },
         { head: "Câbles", cls: "num", sort: (n) => store.cablesOfNetwork(n.id).length, render: (n) => `<span class="pill">${store.cablesOfNetwork(n.id).length}</span>` },
         { head: "Description", cls: "cell-desc", sort: (n) => n.description || "", render: descCell },
       ],
@@ -419,7 +420,7 @@ export class ListConfigs {
       columns: [
         { head: "Désignation", essential: true, cls: "cell-name", sortKey: "name", sort: (o) => (o.displayName ? o.displayName() : (o.name || "")), render: (o) => Html.escape(o.displayName ? o.displayName() : (o.name || "(spare)")) + (o.serial ? " " + dim("· SN " + Html.escape(o.serial)) : "") },
         {
-          head: "Type", essential: true, sortKey: "type", sort: (o) => SpareTypes.label(o.type), render: (o) => `<span class="pill">${SpareTypes.icon(o.type)} ${Html.escape(SpareTypes.label(o.type))}</span>`,
+          head: "Type", essential: true, sortKey: "type", sort: (o) => SpareTypes.label(o.type), render: (o) => `<span class="pill">${SpareTypes.svg(o.type)}${Html.escape(SpareTypes.label(o.type))}</span>`,
           filter: { label: "Type", options: () => SpareTypes.ALL.map((t) => ({ id: t.id, label: t.label })), valueOf: (o) => o.type },
         },
         { head: "Caractéristiques", render: (o) => { const t = o.techSummary ? o.techSummary() : ""; return t ? Html.escape(t) : dim("—"); } },

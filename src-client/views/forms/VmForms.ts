@@ -1,4 +1,5 @@
 import type { Store } from "../../store";
+import { Icons } from "../../ui/Icons";
 import { FormControls } from "../../ui/FormControls";
 import { ChipsInput, ChipItem } from "../../ui/ChipsInput";
 import { FieldFacet } from "../../core/FieldFacet";
@@ -101,7 +102,7 @@ export class VmForms {
         netCell.append(dot, netSel);
 
         const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm";
-        del.textContent = "✕"; del.title = "Supprimer cette ligne";
+        del.innerHTML = Icons.CLOSE; del.title = "Supprimer cette ligne";
         del.onclick = () => { rows.splice(i, 1); renderTable(); renderUnmapped(); };
         const delWrap = document.createElement("div"); delWrap.className = "form-field"; delWrap.style.flex = "0 0 auto";
         const spacer = document.createElement("label"); spacer.innerHTML = "&nbsp;";   // aligne le bouton sur le bas des champs

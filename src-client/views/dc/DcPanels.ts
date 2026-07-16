@@ -14,6 +14,8 @@ import { Waypoint } from "../../models/Waypoint";
 import { PlacementLock } from "../../domain/PlacementLock";
 import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT } from "../../domain/constants";
 import { DC_SCOPE_ICONS } from "./shared";
+import { Icons } from "../../ui/Icons";
+import { IconButton } from "../../ui/IconButton";
 import { DcViews2D } from "./DcViews2D";
 
 export abstract class DcPanels extends DcViews2D {
@@ -79,7 +81,7 @@ export abstract class DcPanels extends DcViews2D {
     const input = document.createElement("input");
     input.type = "text"; input.className = "search-input"; input.placeholder = "Rechercher (équipement, baie, câble, salle, waypoint…)";
     input.style.cssText = "min-width:220px;max-width:320px;padding:6px 10px;flex:none"; input.value = this.searchTerm;
-    const clear = this.btn("✕", () => this.clearHighlight(), "Effacer la mise en évidence");
+    const clear = this.btn("", () => this.clearHighlight(), "Effacer la mise en évidence"); clear.innerHTML = Icons.CLOSE;
     const pop = document.createElement("div"); pop.className = "dc-search-pop";
     const hide = () => { pop.classList.remove("open"); pop.innerHTML = ""; };
     const renderPop = () => {
@@ -245,6 +247,7 @@ export abstract class DcPanels extends DcViews2D {
       const a = acts();
       const feLocked = PlacementLock.isLocked(fe);
       const bLock = this.btn(PlacementLock.toggleLabel(feLocked), async () => { await PlacementLock.toggle(this.store, "equipments", fe.id); this.host.setDirty?.(true); this.render(); });
+      IconButton.decorate(bLock, feLocked ? Icons.UNLOCK : Icons.LOCK);   // icône = l'ACTION (verrouillé → « déverrouiller » 🔓)
       const bRot = this.btn("Pivoter 90°", async () => { await this.store.update("equipments", fe.id, { dc_orientation: Normalize.rackOrientation((fe.dc_orientation || 0) + 90) }); this.host.setDirty?.(true); });
       const bEdit = this.btn("Détails", () => this.host.openEquipmentDetail?.(fe.id));
       const bOut = this.btn("Retirer", async () => {
@@ -264,9 +267,11 @@ export abstract class DcPanels extends DcViews2D {
       const a = acts();
       const rLocked = PlacementLock.isLocked(r);
       const bRot = this.btn("Pivoter 90°", async () => { await this.store.update("racks", r.id, { orientation: Normalize.rackOrientation(r.orientation + 90) }); this.host.setDirty?.(true); });
+      const bContent = this.btn("Contenu", () => this.host.openRackContentForm?.(r.id)); IconButton.decorate(bContent, Icons.RACK_CONTENT);   // éditeur de montage des U (modale dédiée)
+      const bRLock = this.btn(PlacementLock.toggleLabel(rLocked), async () => { await PlacementLock.toggle(this.store, "racks", r.id); this.host.setDirty?.(true); this.render(); }); IconButton.decorate(bRLock, rLocked ? Icons.UNLOCK : Icons.LOCK);
       a.append(
-        this.btn("▦ Contenu", () => this.host.openRackContentForm?.(r.id)),   // éditeur de montage des U (modale dédiée)
-        this.btn(PlacementLock.toggleLabel(rLocked), async () => { await PlacementLock.toggle(this.store, "racks", r.id); this.host.setDirty?.(true); this.render(); }),
+        bContent,
+        bRLock,
         bRot,
         this.btn("Modifier", () => this.host.openRackForm?.(r.id)),
       );
@@ -404,7 +409,7 @@ export abstract class DcPanels extends DcViews2D {
     );
     box.appendChild(acts);
     const acfg = this.floor.config(ft.location, ft.floor);
-    const ah = document.createElement("div"); ah.className = "form-hint"; ah.textContent = "⚓ Ancrage : " + Format.meters(acfg.anchor_x || 0) + " ; " + Format.meters(acfg.anchor_y || 0) + " (affichage : panneau « Affichage »)"; box.appendChild(ah);
+    const ah = document.createElement("div"); ah.className = "form-hint"; ah.innerHTML = '<span class="gi">' + Icons.ANCHOR + '</span>Ancrage : ' + Html.escape(Format.meters(acfg.anchor_x || 0) + " ; " + Format.meters(acfg.anchor_y || 0) + " (affichage : panneau « Affichage »)"); box.appendChild(ah);
     return box;   // recadrage : bouton ⊕ (recentrer) de l'overlay
   }
 
@@ -673,7 +678,8 @@ export abstract class DcPanels extends DcViews2D {
     const resolved = this.panelCables(dc);
     const total = this.store.all("cables").length;
     // créer une route 3D au clic (le prochain clic sur un port libre démarre ; puis waypoints ; puis port terminal)
-    const bRoute = this.btn(this.routeTool.active ? "✕ Annuler la route" : "🧵 Créer une route", () => { if (this.routeTool.active) this.routeTool.cancel(); else this.routeTool.arm(); }, "Tracer un câble en cliquant les ports + waypoints");
+    const bRoute = this.btn(this.routeTool.active ? "Annuler la route" : "Créer une route", () => { if (this.routeTool.active) this.routeTool.cancel(); else this.routeTool.arm(); }, "Tracer un câble en cliquant les ports + waypoints");
+    IconButton.decorate(bRoute, this.routeTool.active ? Icons.CLOSE : Icons.ROUTE);
     bRoute.style.marginBottom = "6px"; box.appendChild(bRoute);
     box.appendChild(FormControls.toggle("Tout afficher (estompé)", this.showAllCables, (v) => { this.showAllCables = v; this.rerenderView(); }, { block: true }));
     const hint = document.createElement("div"); hint.className = "form-hint";

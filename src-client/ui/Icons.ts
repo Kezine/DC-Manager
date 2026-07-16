@@ -64,6 +64,83 @@ export class Icons {
   /** Plus d'actions (remplace `⋮`) : points verticaux — ouvre le menu overflow. */
   static readonly MORE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>';
 
+  /** Fermer / annuler / retirer une ligne (remplace `✕`) : croix. */
+  static readonly CLOSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+
+  /** Importer (remplace `📥`) : flèche entrant dans un bac. */
+  static readonly IMPORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 8l5-5 5 5"/><path d="M12 3v12"/></svg>';
+
+  /** Créer / ajouter (remplace `＋`) : plus. */
+  static readonly PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+
+  /** Valider / confirmer (remplace `✓`) : coche. */
+  static readonly CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 6.5"/></svg>';
+
+  /* ------------------------------------------------------------------------
+     ÉTAT / MÉTADONNÉES — verrou, défaut (étoile), identité.
+     ------------------------------------------------------------------------ */
+
+  /** Verrouillé (remplace `🔒`) : cadenas fermé. */
+  static readonly LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>';
+
+  /** Déverrouillé (remplace `🔓`) : cadenas ouvert (l'anse écartée). */
+  static readonly UNLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 7.5-2"/></svg>';
+
+  /** Défaut / favori ACTIF (remplace `★`) : étoile pleine. */
+  static readonly STAR = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>';
+
+  /** Défaut INACTIF (remplace `☆`) : étoile contour. */
+  static readonly STAR_OUTLINE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>';
+
+  /** Utilisateur connecté (remplace `👤`) : buste. */
+  static readonly USER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 21v-1a7 7 0 0 1 14 0v1"/></svg>';
+
+  /* ------------------------------------------------------------------------
+     FICHIERS & DOCUMENTS — pickers, liste de documents.
+     ------------------------------------------------------------------------ */
+
+  /** Document / fichier JSON (remplace `📄`) : feuille au coin plié. */
+  static readonly FILE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+
+  /** Fichier compagnon d'IMAGES (remplace `🖼`) : cadre + montagne. */
+  static readonly IMAGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.6"/><path d="M21 16l-5-5-7 7"/></svg>';
+
+  /** Document ouvert / liste de documents (remplace `🗂`) : dossier. */
+  static readonly FOLDER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+
+  /* ------------------------------------------------------------------------
+     OUTILS DE VUE 2D/3D — titres des panneaux, boutons d'outil.
+     ------------------------------------------------------------------------ */
+
+  /** Mesure (remplace `📏`) : règle inclinée graduée. */
+  static readonly MEASURE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2.5l7 7L9.5 21.5l-7-7z"/><path d="M8 7l1.5 1.5M11 10l1.5 1.5M14 7l1.5 1.5M17 10l1.5 1.5"/></svg>';
+
+  /** Positionnement (remplace `📐`) : équerre. */
+  static readonly POSITION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16z"/><path d="M4 9h4M4 14h9"/></svg>';
+
+  /** Route de câble (remplace `🧵`) : tracé jalonné. */
+  static readonly ROUTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M6.5 17.5c3-1 4-4 2-6s1-5 4-6"/></svg>';
+
+  /** Porte (remplace `🚪`) : battant + poignée. */
+  static readonly DOOR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v17"/><path d="M3 21h18"/><circle cx="12.5" cy="12" r="0.9" fill="currentColor"/></svg>';
+
+  /** Point d'ancrage (remplace `⚓`) : ancre. */
+  static readonly ANCHOR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><line x1="12" y1="7" x2="12" y2="21"/><path d="M5 13a7 7 0 0 0 14 0"/><line x1="5" y1="13" x2="8" y2="13"/><line x1="16" y1="13" x2="19" y2="13"/></svg>';
+
+  /* ------------------------------------------------------------------------
+     RÉSEAU — pastilles (alimentation / réseau IP) et types de spare.
+     ------------------------------------------------------------------------ */
+
+  /** Alimentation électrique (remplace `⚡`) : éclair. */
+  static readonly POWER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>';
+
+  /** Réseau IP (remplace `🌐`) : globe méridiens. */
+  static readonly NETWORK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.5 4 5.7 4 9s-1.4 6.5-4 9c-2.6-2.5-4-5.7-4-9s1.4-6.5 4-9z"/></svg>';
+
+  /* NB : les icônes de TYPE du domaine (équipements, rack-items, spare) vivent dans
+     `domain/constants.ts` avec leurs entités, pas ici (ce registre = icônes d'ACTION/nav
+     génériques). Elles y sont au même format : inner markup enveloppé par le consommateur. */
+
   /* ------------------------------------------------------------------------
      OBJETS DU DOMAINE — ce sur QUOI on agit (émission, contenu de baie…).
      ------------------------------------------------------------------------ */

@@ -146,14 +146,14 @@ export class EquipmentForms extends FormBase {
     if (spares.length) {
       const dS = document.createElement("div"); dS.className = "section-divider"; dS.textContent = "Spares affectés (" + spares.length + ")"; root.appendChild(dS);
       const tw = document.createElement("div"); tw.className = "table-wrap";
-      const rows = spares.map((s: any) => `<tr><td class="cell-name">${Html.escape(s.displayName())}</td><td><span class="pill">${SpareTypes.icon(s.type)} ${Html.escape(SpareTypes.label(s.type))}</span></td><td>${s.techSummary() ? Html.escape(s.techSummary()) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td>${s.serial ? Html.escape(s.serial) : '<span style="color:var(--fg-dimmer)">—</span>'}</td></tr>`).join("");
+      const rows = spares.map((s: any) => `<tr><td class="cell-name">${Html.escape(s.displayName())}</td><td><span class="pill">${SpareTypes.svg(s.type)}${Html.escape(SpareTypes.label(s.type))}</span></td><td>${s.techSummary() ? Html.escape(s.techSummary()) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td>${s.serial ? Html.escape(s.serial) : '<span style="color:var(--fg-dimmer)">—</span>'}</td></tr>`).join("");
       tw.innerHTML = `<table><thead><tr><th>Désignation</th><th>Type</th><th>Caractéristiques</th><th>N° série</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
     }
 
     // Modifier → formulaire d'édition (remplace la fiche par la modale d'édition)
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.textContent = "📍 Localiser en 3D"; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); actions.appendChild(locBtn); }
+    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>Localiser en 3D`; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) {   // viewer : pas de bouton « Modifier »
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = "Modifier";
       editBtn.onclick = () => this.equipment(store, host, eq.id, onChanged);
@@ -336,7 +336,7 @@ export class EquipmentForms extends FormBase {
     const today = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 
     // -- type + identité --
-    const typeI = FormControls.select(SpareTypes.ALL.map((t) => ({ value: t.id, label: t.icon + " " + t.label })), sp ? sp.type : SpareTypes.DEFAULT);
+    const typeI = FormControls.select(SpareTypes.ALL.map((t) => ({ value: t.id, label: t.label })), sp ? sp.type : SpareTypes.DEFAULT);   // <option> = texte seul (pas de SVG) : libellé nu
     const nameI = FormControls.text(sp ? sp.name : "", "désignation (sinon dérivée du modèle)");
     root.appendChild(FormUi.row2(FormControls.fieldRow("Type", typeI), FormControls.fieldRow("Désignation", nameI)));
     const brandI = FormControls.text(sp ? sp.brand : "", "ex. Seagate, Cisco, Intel…");
@@ -695,7 +695,7 @@ export class EquipmentForms extends FormBase {
 
     // Verrou de positionnement : empêche déplacer / pivoter / retirer l'équipement DEPUIS LES VUES 2D/3D (cf.
     // PlacementLock). Ce formulaire reste l'échappatoire (principe n°10) : placement modifiable même verrouillé.
-    const lockedI = FormControls.toggle("🔒 Verrouiller le positionnement", !!(eq && eq.locked), () => {}, { block: true, title: "Empêche déplacer / pivoter / retirer l'équipement depuis les vues 2D/3D (drag, menus, panneau). Le placement reste modifiable ici." });
+    const lockedI = FormControls.toggle("Verrouiller le positionnement", !!(eq && eq.locked), () => {}, { block: true, icon: Icons.LOCK, title: "Empêche déplacer / pivoter / retirer l'équipement depuis les vues 2D/3D (drag, menus, panneau). Le placement reste modifiable ici." });
     adv.appendChild(lockedI);
 
     // -- agrégats (LAG / bond) --

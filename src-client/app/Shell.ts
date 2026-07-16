@@ -71,6 +71,8 @@ export interface ShellHost {
 export interface ShellStatus { file?: string; release?: string; source?: string; entities?: number | string; lastSave?: string; }
 
 import { Prefs } from "../core/Prefs";
+import { Html } from "../core/Html";
+import { Icons } from "../ui/Icons";
 import { FieldFacet } from "../core/FieldFacet";
 import { ShellNav } from "./ShellNav";
 import type { ShellNavView, ShellNavLookup } from "./ShellNav";
@@ -641,9 +643,9 @@ export class Shell {
     this.userChip.style.display = "";
     if (user) {
       const who = user.name || [user.prenom, user.nom].filter(Boolean).join(" ") || user.login || user.eMail || user.email || "utilisateur";
-      this.userChip.textContent = "👤 " + who; this.userChip.title = "Connecté en tant que " + who; this.userChip.classList.remove("user-chip--off");
+      this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span>` + Html.escape(who); this.userChip.title = "Connecté en tant que " + who; this.userChip.classList.remove("user-chip--off");
     } else {
-      this.userChip.textContent = "👤 non connecté"; this.userChip.title = "Aucune session SSO active"; this.userChip.classList.add("user-chip--off");
+      this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span>non connecté`; this.userChip.title = "Aucune session SSO active"; this.userChip.classList.add("user-chip--off");
     }
   }
   /** Mode API : masque Enregistrer/Enregistrer-sous + réglages fichier ; Nouveau/Ouvrir gèrent les documents serveur. */

@@ -136,7 +136,7 @@ export class DetailForms extends IpamForms {
 
     // actions : Localiser en 3D + Modifier (mêmes conventions que equipment/rackDetail)
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.textContent = "📍 Localiser en 3D"; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
+    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>Localiser en 3D`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = "Modifier"; b.onclick = () => this.cable(store, host, id, onChanged); actions.appendChild(b); }
     root.appendChild(actions);
     host.openModal({ title: "Détail du câble", subtitle: Html.escape(c.name || ""), body: root, hideFooter: true, wide: true });
@@ -470,7 +470,7 @@ export class DetailForms extends IpamForms {
       : sp.assigned_free ? Html.escape(sp.assigned_free) : this.MUTED;
     root.appendChild(this.grid([
       ["Désignation", Html.escape(sp.displayName ? sp.displayName() : (sp.name || "(pièce)"))],
-      ["Type", `<span class="pill">${SpareTypes.icon(sp.type)} ${Html.escape(SpareTypes.label(sp.type))}</span>`],
+      ["Type", `<span class="pill">${SpareTypes.svg(sp.type)}${Html.escape(SpareTypes.label(sp.type))}</span>`],
       ["Caractéristiques", sp.techSummary && sp.techSummary() ? Html.escape(sp.techSummary()) : this.MUTED],
       ["Marque / modèle", [sp.brand, sp.model_pn].filter(Boolean).map(Html.escape).join(" · ") || this.MUTED],
       ["N° de série", sp.serial ? Html.escape(sp.serial) : this.MUTED],

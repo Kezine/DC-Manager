@@ -56,7 +56,7 @@ export class RackForms extends CableForms {
 
     // Verrou de positionnement : empêche déplacer / pivoter / retirer la baie de la salle DEPUIS LES VUES 2D/3D
     // (cf. PlacementLock). Ce formulaire reste l'échappatoire (principe n°10) : placement modifiable même verrouillé.
-    const lockedI = FormControls.toggle("🔒 Verrouiller le positionnement", rk ? !!rk.locked : false, () => {}, { block: true, title: "Empêche déplacer / pivoter / retirer la baie depuis les vues 2D/3D (drag, menus, panneau). Le placement reste modifiable ici." });
+    const lockedI = FormControls.toggle("Verrouiller le positionnement", rk ? !!rk.locked : false, () => {}, { block: true, icon: Icons.LOCK, title: "Empêche déplacer / pivoter / retirer la baie depuis les vues 2D/3D (drag, menus, panneau). Le placement reste modifiable ici." });
     root.appendChild(lockedI);
 
     // cage
@@ -289,7 +289,7 @@ export class RackForms extends CableForms {
 
     // actions : Localiser en 3D + Gérer le contenu + Modifier
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.textContent = "📍 Localiser en 3D"; locBtn.onclick = () => host.locate!("rack", rk.id, () => this.rackDetail(store, host, rk.id, onChanged)); actions.appendChild(locBtn); }
+    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>Localiser en 3D`; locBtn.onclick = () => host.locate!("rack", rk.id, () => this.rackDetail(store, host, rk.id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) {   // viewer : pas d'édition
       const contentBtn = document.createElement("button"); contentBtn.type = "button"; contentBtn.className = "btn btn-ghost"; contentBtn.textContent = "▦ Contenu…";
       contentBtn.title = "Monter / retirer des équipements et pseudo-éléments dans les U";
@@ -610,7 +610,7 @@ export class RackForms extends CableForms {
     root.appendChild(FormControls.fieldRow("Description", descI));
     // Verrou de positionnement : empêche déplacer / retirer le waypoint DEPUIS LES VUES 2D/3D (cf. PlacementLock).
     // Ce formulaire reste l'échappatoire (principe n°10).
-    const lockedI = FormControls.toggle("🔒 Verrouiller le positionnement", !!wp.locked, () => {}, { block: true, title: "Empêche déplacer / retirer le waypoint depuis les vues 2D/3D (drag, menu). Reste modifiable ici." });
+    const lockedI = FormControls.toggle("Verrouiller le positionnement", !!wp.locked, () => {}, { block: true, icon: Icons.LOCK, title: "Empêche déplacer / retirer le waypoint depuis les vues 2D/3D (drag, menu). Reste modifiable ici." });
     root.appendChild(lockedI);
     host.openModal({
       title: "Modifier le waypoint", subtitle: Html.escape(wp.name || ""), body: root, wide: true,

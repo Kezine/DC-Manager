@@ -146,7 +146,7 @@ export abstract class DcInteract extends DcPanels {
     if (bundle.length_m != null) rows.push(this.tipRow(`Longueur : <b>${bundle.length_m} m</b>`));
     const wps = (bundle.waypoint_ids || []).map((id: string) => this.store.get("waypoints", id)).filter(Boolean);
     if (wps.length) rows.push(this.tipRow(`Via : ${wps.map((w: any) => Html.escape(Waypoint.glyph(w) + " " + (w.name || "(waypoint)"))).join(" → ")}`));
-    return `<div class="tt-title">☰ ${Html.escape(bundle.name || "(faisceau)")}</div>` + rows.join("");
+    return `<div class="tt-title">${Html.escape(bundle.name || "(faisceau)")}</div>` + rows.join("");
   }
 
   /** Tooltip d'un waypoint (type, forme/étage, hauteur, nb de câbles affectés). */
@@ -471,7 +471,7 @@ export abstract class DcInteract extends DcPanels {
 
   /** Menu contextuel du PERSONNAGE d'échelle (repère de vue) : pivoter · masquer. Aucune mutation du document. */
   protected figureCtx(): CtxSection[] {
-    return [{ head: "🧍 Personnage (échelle)", items: [
+    return [{ head: "Personnage (échelle)", items: [
       { label: "↻ Pivoter 90°", action: () => { if (this.figure) { this.figure.orient = Normalize.rackOrientation((this.figure.orient || 0) + 90); this.persistView(); this.reflow(); } } },
       { label: "Masquer le personnage", danger: true, action: () => { this.showFigure = false; this.persistView(); this.buildToolbar(); this.render(); } },
     ] }];
@@ -595,7 +595,7 @@ export abstract class DcInteract extends DcPanels {
           await this.store.remove("cableBundles", bundle.id); this.setDirty(); Notify.toast("Faisceau supprimé");
         } },
     ];
-    return [{ head: "☰ " + (bundle.name || "(faisceau)"), items }, { items: this.cableSelItems([bundle.id], "ce faisceau") }];
+    return [{ head: "" + (bundle.name || "(faisceau)"), items }, { items: this.cableSelItems([bundle.id], "ce faisceau") }];
   }
 
   /** Menu du SOL (vue Dessus) : créer un waypoint (pin / chemin / exit) au point cliqué (aimanté ½ maille). */

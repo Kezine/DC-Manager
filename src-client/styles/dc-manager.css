@@ -329,6 +329,9 @@
   }
   .btn:hover { border-color: var(--fg); background: var(--bg-3); }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  /* Icône SVG posée DIRECTEMENT dans un .btn (ex. bouton « fermer » réduit à une croix). Les cas plus
+     spécifiques gardent la main : .icon-action svg (16px), .gi svg (libellés), .date-ctrl-btn svg. */
+  .btn > svg { width: 14px; height: 14px; display: block; flex: none; }
   .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
   .btn-primary:hover { background: var(--accent-2); border-color: var(--accent-2); box-shadow: 0 0 16px rgba(255,85,0,0.4); }
   .btn-ghost { background: transparent; border-color: var(--line); }
@@ -1236,6 +1239,7 @@
   .open-kind-btn { display: flex; align-items: center; gap: 12px; text-align: left; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); color: var(--fg); cursor: pointer; transition: border-color .12s, background .12s; }
   .open-kind-btn:hover { border-color: var(--accent); background: var(--bg-3); }
   .open-kind-btn .ok-ic { font-size: 22px; line-height: 1; flex: 0 0 auto; }
+  .open-kind-btn .ok-ic svg { width: 20px; height: 20px; display: block; }   /* icône SVG (remplace l'ancien emoji) */
   .open-kind-btn .ok-tx { display: flex; flex-direction: column; gap: 2px; }
   .open-kind-btn .ok-title { font-weight: 600; }
   .open-kind-btn .ok-desc { font-size: 12px; color: var(--fg-dim); }
@@ -1257,6 +1261,18 @@
   .icon-action.danger:hover:not(:disabled) { color: var(--err); border-color: var(--err); }
   /* actif/ouvert (ex. l'overflow ⋮ quand son menu est ouvert) : accent, comme l'ancien .row-overflow */
   .icon-action.row-overflow[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); background: var(--bg-3); }
+
+  /* .gi = icône SVG INLINE dans un libellé, un titre ou une pastille (remplace un emoji d'icône).
+     Dans un hôte flex à `gap` (.btn/.pill), l'espacement vient du gap ; dans un hôte sans gap
+     (titres de carte, chip utilisateur), une marge est ajoutée. Suit `currentColor` de l'hôte. */
+  .gi { display: inline-flex; align-items: center; vertical-align: -2px; flex: none; }
+  .gi svg { width: 14px; height: 14px; display: block; }
+  .dc-card-title .gi { margin-right: 6px; vertical-align: -3px; }
+  .dc-card-title .gi svg { width: 15px; height: 15px; }
+  .user-chip .gi { margin-right: 6px; }
+  /* pastille d'icône seule (ex. étoile « défaut », cadenas dans la liste de documents) : couleur d'accent nette */
+  .doc-star.on { color: var(--accent); }
+  .doc-lock.on { color: var(--accent); }
 
   .app-tooltip {
     position: fixed;

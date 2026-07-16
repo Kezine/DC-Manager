@@ -1,4 +1,5 @@
 import type { Store } from "../../store";
+import { Icons } from "../../ui/Icons";
 import { Dom } from "../../ui/Dom";
 import { Notify } from "../../ui/Notify";
 import { ContextMenu } from "../../ui/ContextMenu";
@@ -154,7 +155,7 @@ export abstract class DcBase {
       // (rendu inchangé). En RESPONSIVE : `.dc-row.show-side` la transforme en MODALE centrée (backdrop + bouton
       // fermer), ouverte par l'icône « réglages 3D » de l'overlay — sans empiéter sur le rendu de la vue.
       const sideModal = document.createElement("div"); sideModal.className = "dc-side-modal";
-      const closeBtn = document.createElement("button"); closeBtn.type = "button"; closeBtn.className = "btn btn-ghost btn-sm dc-side-close"; closeBtn.textContent = "✕"; closeBtn.title = "Fermer";
+      const closeBtn = document.createElement("button"); closeBtn.type = "button"; closeBtn.className = "btn btn-ghost btn-sm dc-side-close"; closeBtn.innerHTML = Icons.CLOSE; closeBtn.title = "Fermer";
       closeBtn.onclick = () => this.rowEl && this.rowEl.classList.remove("show-side");
       sideModal.append(closeBtn, this.sideEl);
       const backdrop = document.createElement("div"); backdrop.className = "dc-side-backdrop";

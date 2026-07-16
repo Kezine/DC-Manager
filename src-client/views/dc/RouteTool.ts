@@ -12,6 +12,8 @@
    `store.routeHasRoomBreak` (codes stables — cf. Store.cableRoute).
    ============================================================================= */
 import { Notify } from "../../ui/Notify";
+import { IconButton } from "../../ui/IconButton";
+import { Icons } from "../../ui/Icons";
 import { Html } from "../../core/Html";
 import { Waypoint } from "../../models/Waypoint";
 import type { Store } from "../../store";
@@ -95,7 +97,7 @@ export class RouteTool {
   /** Carte « Route en cours » (panneau latéral) : étapes + retour + annuler. */
   card(): HTMLElement {
     const rb = this.state!, box = document.createElement("div"); box.className = "dc-card";
-    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "🧵 Route en cours"; box.appendChild(t);
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.innerHTML = `<span class="gi">${Icons.ROUTE}</span>Route en cours`; box.appendChild(t);
     const list = document.createElement("div"); list.style.cssText = "font-size:12px;margin:4px 0;display:flex;flex-direction:column;gap:3px";
     const step = (html: string, n?: number) => { const d = document.createElement("div"); d.innerHTML = (n != null ? '<span class="pill">' + n + "</span> " : "") + html; return d; };
     if (rb.fromPortId) list.appendChild(step("Départ : <b>" + Html.escape(this.host.portShort(rb.fromPortId)) + "</b>", 1));
@@ -107,7 +109,7 @@ export class RouteTool {
     box.appendChild(hint);
     const acts = document.createElement("div"); acts.className = "dc-card-acts";
     const bBack = this.host.btn("↩ Retour", () => this.back()); (bBack as any).disabled = !rb.fromPortId && !rb.wpIds.length;
-    const bCancel = this.host.btn("✕ Annuler", () => this.cancel()); bCancel.classList.add("btn-danger");
+    const bCancel = this.host.btn("Annuler", () => this.cancel()); IconButton.decorate(bCancel, Icons.CLOSE); bCancel.classList.add("btn-danger");
     acts.append(bBack, bCancel); box.appendChild(acts);
     return box;
   }

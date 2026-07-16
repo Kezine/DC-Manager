@@ -1603,7 +1603,7 @@ export class CertsAdminView {
       const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;align-items:center";
       const type = FormControls.select(SAN_TYPE_OPTS, "dns"); type.style.flex = "0 0 90px";
       const value = FormControls.text("", "valeur"); value.style.flex = "1 1 auto";
-      const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm"; del.textContent = "✕"; del.title = "Retirer";
+      const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm"; del.innerHTML = Icons.CLOSE; del.title = "Retirer";
       const entry = { type, value };
       del.onclick = () => { const i = entries.indexOf(entry); if (i >= 0) entries.splice(i, 1); row.remove(); };
       row.append(type, value, del); rows.appendChild(row); entries.push(entry);
@@ -1626,7 +1626,7 @@ export class CertsAdminView {
     const addRow = (): void => {
       const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;align-items:center";
       const value = FormControls.text("", "login ou nom d'hôte"); value.style.flex = "1 1 auto";
-      const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm"; del.textContent = "✕"; del.title = "Retirer";
+      const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm"; del.innerHTML = Icons.CLOSE; del.title = "Retirer";
       del.onclick = () => { const i = inputs.indexOf(value); if (i >= 0) inputs.splice(i, 1); row.remove(); };
       row.append(value, del); rows.appendChild(row); inputs.push(value);
     };
