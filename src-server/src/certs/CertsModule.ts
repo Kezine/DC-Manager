@@ -29,8 +29,10 @@ import { CertExpiryWatcher, type CertProblemReporter } from "./CertExpiryWatcher
    - GET    /documents/:docId/certs/pki      → paramètres KDF + wrapped_dek (dérivation côté client)
    - PUT    /documents/:docId/certs/pki      → initialisation UNIQUE (409 si déjà initialisée :
                                                ré-initialiser rendrait tout indéchiffrable)
-   - PUT    /documents/:docId/certs/pki/rekey → changer la phrase maître (re-chiffre le seul
-                                               wrapped_dek ; AUCUN key_enc touché ; 404 si vierge)
+   - PUT    /documents/:docId/certs/pki/rekey → changer la phrase maître (ré-emballe le seul
+                                               wrapped_dek ; AUCUN key_enc touché ; 404 si vierge,
+                                               409 conflict si l'enveloppe a changé entre-temps ;
+                                               l'ancienne enveloppe est ARCHIVÉE — récupérable)
    - GET    /documents/:docId/certs/:id      → détail unitaire, key_enc INCLUS (Q5)
    - PUT    /documents/:docId/certs/:id     → créer/mettre à jour (métadonnées validées,
                                               blobs opaques ; key_enc absent = conservé)
@@ -152,15 +154,24 @@ export class CertsModule {
     });
 
     // CHANGEMENT DE PHRASE MAÎTRE (déclarée AVANT /:id — « pki » n'est pas un id). Ne réécrit
-    // que les paramètres KDF + le wrapped_dek (DEK ré-emballée sous la nouvelle KEK) : elle ne
-    // PEUT PAS rendre un coffre indéchiffrable (aucun key_enc touché, la DEK est inchangée),
-    // donc PAS de verrou 409 — contrairement à l'initialisation. 404 si non initialisée.
+    // que les paramètres KDF + le wrapped_dek (DEK ré-emballée sous la nouvelle KEK) : aucun
+    // key_enc n'est touché. Le serveur ne pouvant PAS vérifier que le nouveau blob emballe la
+    // même DEK (zéro-connaissance), l'opération est encadrée par un VERROU OPTIMISTE
+    // (prev_wrapped_dek → 409 conflict si le coffre a changé entre-temps) et par
+    // l'HISTORISATION de l'ancienne enveloppe (récupérable — cf. CertsDb.rekeyPki).
     router.put("/pki/rekey", (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
-        if (!ctx.db.rekeyPki(ctx.docId, body)) {
+        const verdict = ctx.db.rekeyPki(ctx.docId, body);
+        if (verdict === "missing") {
           res.status(404).json({ error: "PKI non initialisée pour ce document — rien à re-chiffrer (initialisez-la d'abord)" });
+          return;
+        }
+        if (verdict === "conflict") {
+          // L'enveloppe a changé depuis la lecture du client (autre changement de phrase concurrent) :
+          // écrire par-dessus perdrait silencieusement l'autre changement. Le client recharge et réessaie.
+          res.status(409).json({ error: "le coffre a été modifié entre-temps (autre changement de phrase ?) — rechargez la page puis réessayez", code: "conflict" });
           return;
         }
         res.json({ ok: true });

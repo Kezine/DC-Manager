@@ -20,6 +20,8 @@ import { CertsValidate, type CertificateCandidate, type PkiParamsCandidate, type
    VRAIES TABLES (contrainte transverse) — schéma EXACT du cadrage §3 :
    - pki_documents     : paramètres de dérivation de la KEK PAR document + enveloppe
                          de la DEK (sel, itérations, wrapped_dek — chiffré côté client) ;
+   - pki_envelope_history : ARCHIVE append-only des enveloppes remplacées par un
+                         changement de phrase (filet de récupération — audit 2026-07-17) ;
    - certificates      : métadonnées + public_pem (public par nature) +
                          key_enc (blob chiffré client) — PK (doc_id, id),
                          FK composite parent (émetteur) ;
@@ -157,6 +159,15 @@ export class CertsDb {
         kdf_iters     INTEGER NOT NULL,
         wrapped_dek   TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS pki_envelope_history (
+        doc_id        TEXT NOT NULL,
+        archived_date TEXT NOT NULL,
+        kdf_version   TEXT NOT NULL,
+        kdf_salt      TEXT NOT NULL,
+        kdf_iters     INTEGER NOT NULL,
+        wrapped_dek   TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pki_history_doc ON pki_envelope_history(doc_id);
       CREATE TABLE IF NOT EXISTS certificates (
         id            TEXT NOT NULL,
         doc_id        TEXT NOT NULL,
@@ -254,22 +265,44 @@ export class CertsDb {
     return true;
   }
 
-  /** CHANGEMENT DE PHRASE MAÎTRE (re-chiffrement de l'enveloppe) — réécrit UNIQUEMENT les
+  /** CHANGEMENT DE PHRASE MAÎTRE (re-emballage de l'enveloppe) — réécrit UNIQUEMENT les
       paramètres KDF + le `wrapped_dek` (la DEK ré-emballée sous la nouvelle KEK), sur la SEULE
       ligne pki_documents. Ne touche à AUCUN `key_enc` : la DEK est inchangée, les clés privées
-      restent déchiffrables. UPDATE d'une seule ligne = atomique par nature, donc SÛR par
-      construction (impossible de laisser un coffre à moitié migré). Renvoie false si la PKI
-      n'est pas encore initialisée (rien à re-chiffrer → 404 côté route). */
-  rekeyPki(docId: string, candidate: Record<string, unknown>): boolean {
-    const parsed = CertsValidate.parsePkiParams(candidate);
-    if (!this.pkiParams(docId)) return false;
-    this.db.prepare(`
-      UPDATE pki_documents SET kdf_version = @kdf_version, kdf_salt = @kdf_salt,
-             kdf_iters = @kdf_iters, wrapped_dek = @wrapped_dek
-      WHERE doc_id = @doc_id
-    `).run({ doc_id: docId, ...parsed });
-    this.log.info("certs: phrase maître changée (enveloppe re-chiffrée)", docId, parsed.kdf_version + ", " + parsed.kdf_iters + " itérations");
-    return true;
+      restent déchiffrables.
+
+      Deux GARDE-FOUS (audit sécurité 2026-07-17 — le serveur ne peut PAS vérifier que le
+      nouveau blob emballe la même DEK, zéro-connaissance oblige ; il peut en revanche rendre
+      l'opération RÉCUPÉRABLE et non-écrasante) :
+      - VERROU OPTIMISTE : le client fournit `prev_wrapped_dek` (l'enveloppe sur laquelle il a
+        fondé son ré-emballage) ; si elle ne correspond plus à la ligne courante, `conflict` —
+        deux changements concurrents ne peuvent plus s'écraser silencieusement ;
+      - HISTORISATION append-only : l'ancien tuple (sel/itérations/enveloppe) est ARCHIVÉ dans
+        `pki_envelope_history` AVANT l'UPDATE, dans la MÊME transaction. Toute enveloppe passée
+        emballe la MÊME DEK (fixe à vie) : n'importe quelle ligne d'historique, restaurée à la
+        main (cf. docs/certs.md « Procédures »), suffit à récupérer un coffre écrasé par un
+        client bogué ou malveillant. */
+  rekeyPki(docId: string, candidate: Record<string, unknown>): "ok" | "missing" | "conflict" {
+    const parsed = CertsValidate.parseRekeyParams(candidate);
+    const run = this.db.transaction(() => {
+      const current = this.pkiParams(docId);
+      if (!current) return "missing";
+      if (current.wrapped_dek !== parsed.prev_wrapped_dek) return "conflict";
+      this.db.prepare(`
+        INSERT INTO pki_envelope_history (doc_id, archived_date, kdf_version, kdf_salt, kdf_iters, wrapped_dek)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(docId, new Date().toISOString(), current.kdf_version, current.kdf_salt, current.kdf_iters, current.wrapped_dek);
+      this.db.prepare(`
+        UPDATE pki_documents SET kdf_version = @kdf_version, kdf_salt = @kdf_salt,
+               kdf_iters = @kdf_iters, wrapped_dek = @wrapped_dek
+        WHERE doc_id = @doc_id
+      `).run({ doc_id: docId, kdf_version: parsed.kdf_version, kdf_salt: parsed.kdf_salt, kdf_iters: parsed.kdf_iters, wrapped_dek: parsed.wrapped_dek });
+      return "ok";
+    });
+    // Le shim SqliteCtor type `transaction` sans valeur de retour ; better-sqlite3, lui, PROPAGE
+    // le retour de la fonction — le cast rétablit ce que le typage minimal du shim ne porte pas.
+    const verdict = (run as unknown as () => "ok" | "missing" | "conflict")();
+    if (verdict === "ok") this.log.info("certs: phrase maître changée (enveloppe ré-emballée, ancienne archivée)", docId, parsed.kdf_version + ", " + parsed.kdf_iters + " itérations");
+    return verdict;
   }
 
   /* --------------------------------------------------------------------------

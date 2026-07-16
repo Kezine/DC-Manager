@@ -192,7 +192,12 @@ module.exports = async () => {
     // INITIALISATION : la DEK est tirée aléatoirement et emballée par la KEK (wrapped_dek).
     const { wrappedDek, dek } = await PkiCrypto.initDek(kek);
     ck(/^v1:/.test(wrappedDek), "wrapped_dek au format v1:<iv>:<ct>");
-    ck.eq(dek.extractable, false, "DEK de session NON extractible (importée extractable:false)");
+    ck.eq(dek.extractable, false, "DEK de session NON extractible (unwrapKey extractable:false)");
+    // Correctif audit 2026-07-17 : la non-extractibilité doit être EFFECTIVE — un exportKey
+    // (ce que ferait un XSS pour exfiltrer la clé maître) est refusé par le moteur WebCrypto.
+    let dekExportRefused = false;
+    try { await crypto.subtle.exportKey("raw", dek); } catch (_) { dekExportRefused = true; }
+    ck(dekExportRefused, "DEK de session : exportKey REFUSÉ (clé maître utilisable en session, jamais exfiltrable)");
     ck((await PkiCrypto.initDek(kek)).wrappedDek !== wrappedDek, "deux initialisations → DEK différentes (aléatoire)");
 
     // Chiffrement d'une clé privée SOUS LA DEK (c'est un key_enc de certificat).

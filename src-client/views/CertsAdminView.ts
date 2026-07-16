@@ -1165,6 +1165,11 @@ export class CertsAdminView {
         if (currentPass.trim() === "") { this.showError(errBox, "Phrase actuelle requise."); return false; }
         if (newPass.trim() === "") { this.showError(errBox, "Nouvelle phrase requise."); return false; }
         if (newPass !== p2.value) { this.showError(errBox, "Les deux nouvelles phrases ne correspondent pas."); return false; }
+        // Instantané FRAIS à CHAQUE tentative (masque la capture d'ouverture) : après un 409
+        // « conflict », this.pkiState a été rafraîchi — la relance doit repartir de l'enveloppe
+        // COURANTE (dériver l'ancienne KEK sur le bon sel, fonder le rewrap sur le bon blob).
+        const state = this.pkiState;
+        if (!state || state.initialized !== true) { this.showError(errBox, "État PKI indisponible — rechargez la page."); return false; }
 
         // 1) Ré-emballer la DEK côté client. rewrapDek JETTE si la phrase actuelle est mauvaise
         //    (déchiffrement refusé) — on l'isole pour un message ciblé, distinct d'une panne réseau.
@@ -1181,10 +1186,20 @@ export class CertsAdminView {
           return false;
         }
 
-        // 2) Persister la nouvelle enveloppe (UPDATE d'une seule ligne côté serveur).
+        // 2) Persister la nouvelle enveloppe. `prev_wrapped_dek` = l'enveloppe sur laquelle le
+        //    ré-emballage vient d'être fondé (verrou optimiste) : si un AUTRE changement de phrase
+        //    est passé entre-temps, le serveur répond 409 au lieu d'écraser silencieusement.
         try {
-          await this.client!.rekeyPki({ kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: newSalt, kdf_iters: newIters, wrapped_dek: newWrappedDek });
-        } catch (e) { this.showError(errBox, e); return false; }
+          await this.client!.rekeyPki({
+            kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: newSalt, kdf_iters: newIters,
+            wrapped_dek: newWrappedDek, prev_wrapped_dek: state.wrapped_dek,
+          });
+        } catch (e) {
+          // Conflit (ou autre échec) : re-lire l'état PKI en arrière-plan pour qu'un nouvel essai
+          // reparte de l'enveloppe COURANTE (sans ça, le prev resterait périmé à chaque tentative).
+          try { this.pkiState = await this.client!.pki(); } catch (_) { /* l'erreur affichée suffit */ }
+          this.showError(errBox, e); return false;
+        }
 
         // 3) Rafraîchir l'état local : les prochains déverrouillages utiliseront les nouveaux
         //    paramètres. La session détient toujours la MÊME DEK → elle reste valablement ouverte.

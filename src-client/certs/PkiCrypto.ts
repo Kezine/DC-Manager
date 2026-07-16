@@ -23,16 +23,17 @@
      nouvelle KEK (`rewrapDek`) : un seul petit blob réécrit, AUCUN `key_enc`
      touché (voir « Modèle cryptographique » dans docs/certs.md).
 
-   Le `wrapped_dek` fait AUSSI office de keycheck : le déchiffrement AES-GCM est
+   Le `wrapped_dek` fait AUSSI office de keycheck : le déballage AES-GCM est
    AUTHENTIFIÉ — une mauvaise phrase produit une KEK fausse et `unwrapDek` JETTE.
    Pas de constante-témoin séparée à stocker.
 
-   Extractibilité : la DEK vit dans la session en clé WebCrypto NON extractible
-   (importée `extractable:false`) — même garantie que l'ancienne clé maître. Ses
-   32 octets bruts n'existent en mémoire JS QUE le temps de l'initialisation, du
-   déverrouillage ou du re-chiffrement (effacés aussitôt, best-effort) ; c'est
-   strictement dans l'enveloppe de confiance déjà admise (les clés privées, elles,
-   transitent en clair dans la page à la génération et à l'export).
+   Extractibilité (correctif audit 2026-07-17) : l'enveloppe passe par
+   `crypto.subtle.wrapKey`/`unwrapKey` — les octets de la DEK ne TOUCHENT JAMAIS
+   la mémoire JS. Le déverrouillage produit une DEK de session NON extractible
+   (unwrapKey extractable:false) : même sous page compromise (XSS), la clé maître
+   peut être UTILISÉE mais pas EXFILTRÉE — strictement la garantie de l'ancienne
+   clé dérivée directe. Seuls l'initialisation et le ré-emballage manipulent un
+   handle extractible TRANSITOIRE (le temps d'un wrapKey), jamais exporté vers JS.
 
    Limite ASSUMÉE (documentée) : phrase perdue = KEK irrécupérable = DEK
    irrécupérable = clés privées perdues — c'est le but (aucune récupération, ni
@@ -44,8 +45,6 @@ export class PkiCrypto {
   /** Itérations PBKDF2 par défaut à l'INITIALISATION (décision Q1 : ≥ 600 000 —
       les documents existants gardent leur valeur stockée, relue à chaque dérivation). */
   static readonly DEFAULT_ITERS = 600000;
-  /** Taille de la DEK (clé de chiffrement des données) : 256 bits = 32 octets. */
-  private static readonly DEK_BYTES = 32;
 
   /** WebCrypto complet disponible ? `crypto.subtle` n'existe que dans un CONTEXTE SÉCURISÉ
       (HTTPS ou localhost) — servi en HTTP sur un hôte de LAN, le navigateur le retire et
@@ -63,8 +62,9 @@ export class PkiCrypto {
   }
 
   /** Dérive la KEK : passphrase + sel + itérations → AES-256-GCM NON extractible.
-      La KEK ne sert QU'À emballer/déballer la DEK (encrypt/decrypt du seul `wrapped_dek`).
-      Les paramètres viennent du serveur (GET /certs/pki) — la passphrase, de l'utilisateur. */
+      La KEK ne sert QU'À emballer/déballer la DEK (usages wrapKey/unwrapKey — elle ne
+      peut même pas chiffrer autre chose). Les paramètres viennent du serveur
+      (GET /certs/pki) — la passphrase, de l'utilisateur. */
   static async deriveKek(passphrase: string, saltB64: string, iterations: number): Promise<CryptoKey> {
     if (typeof passphrase !== "string" || passphrase === "") throw new Error("PkiCrypto : passphrase vide");
     // Ceinture (l'UI teste available() en amont) : sans elle, l'échec serait un TypeError
@@ -78,48 +78,67 @@ export class PkiCrypto {
       material,
       { name: "AES-GCM", length: 256 },
       false, // NON extractible : la KEK vit dans le moteur WebCrypto, jamais en mémoire JS
-      ["encrypt", "decrypt"],
+      ["wrapKey", "unwrapKey"], // son SEUL métier : l'enveloppe de la DEK
     );
   }
 
   /** INITIALISATION d'un document : tire une DEK aléatoire, l'emballe sous la KEK
-      (→ `wrapped_dek` à stocker) et rend la DEK de session (NON extractible) prête à
-      chiffrer/déchiffrer les clés privées. La DEK n'existe en octets bruts que le temps
-      de cette fonction (effacés en sortie). */
+      (→ `wrapped_dek` à stocker) et rend la DEK de session NON extractible prête à
+      chiffrer/déchiffrer les clés privées. Correctif audit 2026-07-17 : la génération
+      produit un handle extractible TRANSITOIRE (nécessaire à wrapKey), dont les octets
+      ne sont JAMAIS exportés vers JS — l'export a lieu à l'intérieur du moteur WebCrypto,
+      directement dans le blob chiffré. La DEK rendue à la session est RE-déballée
+      NON extractible (ce qui valide au passage l'enveloppe fraîchement écrite). */
   static async initDek(kek: CryptoKey): Promise<{ wrappedDek: string; dek: CryptoKey }> {
-    const raw = new Uint8Array(PkiCrypto.DEK_BYTES);
-    crypto.getRandomValues(raw);
-    try {
-      const wrappedDek = await PkiCrypto.encryptSecret(kek, PkiCrypto.toB64(raw)); // enveloppe = clair chiffré par la KEK
-      const dek = await PkiCrypto.importDek(raw);
-      return { wrappedDek, dek };
-    } finally {
-      raw.fill(0); // efface les octets bruts de la DEK dès que possible (best-effort : le b64 intermédiaire reste immuable jusqu'au GC)
-    }
+    const transient = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const wrappedDek = await PkiCrypto.wrapDek(kek, transient);
+    // Le handle extractible `transient` sort de portée ici — la seule DEK qui survit est non extractible.
+    const dek = await PkiCrypto.unwrapDek(kek, wrappedDek);
+    return { wrappedDek, dek };
   }
 
   /** DÉVERROUILLAGE : déballe la DEK depuis `wrapped_dek` avec la KEK dérivée de la phrase.
       JETTE si la phrase est mauvaise (KEK fausse → GCM refuse l'authentification) — c'est
-      la vérification de phrase elle-même (le `wrapped_dek` FAIT office de keycheck). La DEK
-      rendue est NON extractible (session). */
+      la vérification de phrase elle-même (le `wrapped_dek` FAIT office de keycheck).
+      `unwrapKey(…, extractable:false)` : la DEK naît NON extractible dans le moteur
+      WebCrypto, ses octets ne passent JAMAIS par la mémoire JS. */
   static async unwrapDek(kek: CryptoKey, wrappedDek: string): Promise<CryptoKey> {
-    const rawB64 = await PkiCrypto.decryptSecret(kek, wrappedDek); // JETTE sur mauvaise phrase / blob altéré
-    const raw = PkiCrypto.fromB64(rawB64);
+    const { iv, ciphertext } = PkiCrypto.parseBlob(wrappedDek);
     try {
-      return await PkiCrypto.importDek(raw);
-    } finally {
-      raw.fill(0);
+      return await crypto.subtle.unwrapKey(
+        "raw", ciphertext as BufferSource, kek,
+        { name: "AES-GCM", iv: iv as BufferSource },
+        { name: "AES-GCM" },
+        false, // NON extractible : utilisable en session, jamais exfiltrable — même par du code compromis de la page
+        ["encrypt", "decrypt"],
+      );
+    } catch {
+      // GCM refuse l'authentification : mauvaise phrase ou blob altéré. Message SANS détail (rien à divulguer).
+      throw new Error("PkiCrypto : déchiffrement refusé (clé différente ou donnée altérée)");
     }
   }
 
   /** CHANGEMENT DE PHRASE MAÎTRE — cœur de l'opération O(1) : déballe la DEK sous
       l'ANCIENNE KEK et la ré-emballe sous la NOUVELLE. AUCUN `key_enc` n'est touché
       (la DEK est identique avant/après) ; seul le petit `wrapped_dek` change. JETTE si
-      l'ancienne phrase est mauvaise (déchiffrement refusé). La DEK n'est même pas importée
-      en clé — on ne fait que re-chiffrer son clair (b64). */
+      l'ancienne phrase est mauvaise (déballage refusé). Le déballage intermédiaire est
+      extractible (wrapKey l'exige) mais TRANSITOIRE et jamais exporté vers JS — les
+      octets voyagent de blob à blob à l'intérieur du moteur WebCrypto. */
   static async rewrapDek(oldKek: CryptoKey, newKek: CryptoKey, wrappedDek: string): Promise<string> {
-    const rawB64 = await PkiCrypto.decryptSecret(oldKek, wrappedDek); // JETTE si l'ancienne phrase est mauvaise
-    return PkiCrypto.encryptSecret(newKek, rawB64);                   // ré-emballe sous la nouvelle KEK
+    const { iv, ciphertext } = PkiCrypto.parseBlob(wrappedDek);
+    let transient: CryptoKey;
+    try {
+      transient = await crypto.subtle.unwrapKey(
+        "raw", ciphertext as BufferSource, oldKek,
+        { name: "AES-GCM", iv: iv as BufferSource },
+        { name: "AES-GCM" },
+        true, // extractible : indispensable à wrapKey ci-dessous — handle transitoire, jamais exporté vers JS
+        ["encrypt", "decrypt"],
+      );
+    } catch {
+      throw new Error("PkiCrypto : déchiffrement refusé (clé différente ou donnée altérée)");
+    }
+    return PkiCrypto.wrapDek(newKek, transient);
   }
 
   /** Chiffre un secret (clé privée PEM/PKCS#8, graine, ou DEK b64) → `v1:<iv>:<ct>` (base64).
@@ -135,16 +154,9 @@ export class PkiCrypto {
   /** Déchiffre une chaîne produite par encryptSecret(). Jette une erreur EXPLICITE (sans
       aucune donnée sensible) si le format est inconnu, la clé différente ou le contenu altéré. */
   static async decryptSecret(key: CryptoKey, stored: string): Promise<string> {
-    const parts = typeof stored === "string" ? stored.split(":") : [];
-    if (parts.length !== 3 || parts[0] !== PkiCrypto.KDF_VERSION) {
-      throw new Error("PkiCrypto : format de blob chiffré inconnu — donnée corrompue ou version future");
-    }
+    const { iv, ciphertext } = PkiCrypto.parseBlob(stored);
     try {
-      const plain = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: PkiCrypto.fromB64(parts[1]) as BufferSource },
-        key,
-        PkiCrypto.fromB64(parts[2]) as BufferSource,
-      );
+      const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, ciphertext as BufferSource);
       return new TextDecoder().decode(plain);
     } catch {
       // GCM refuse l'authentification : clé différente (mauvaise phrase) ou donnée altérée. Message
@@ -157,9 +169,23 @@ export class PkiCrypto {
      Interne
      -------------------------------------------------------------------------- */
 
-  /** Importe les octets bruts de la DEK en clé AES-GCM NON extractible (encrypt/decrypt). */
-  private static importDek(raw: Uint8Array): Promise<CryptoKey> {
-    return crypto.subtle.importKey("raw", raw as BufferSource, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+  /** Emballe la DEK sous la KEK → blob `v1:<iv>:<ct>`. L'export des octets a lieu DANS le
+      moteur WebCrypto (wrapKey = exportKey+encrypt fusionnés) : rien ne transite par JS. */
+  private static async wrapDek(kek: CryptoKey, dek: CryptoKey): Promise<string> {
+    const iv = new Uint8Array(12);
+    crypto.getRandomValues(iv);
+    const ciphertext = await crypto.subtle.wrapKey("raw", dek, kek, { name: "AES-GCM", iv: iv as BufferSource });
+    return PkiCrypto.KDF_VERSION + ":" + PkiCrypto.toB64(iv) + ":" + PkiCrypto.toB64(new Uint8Array(ciphertext));
+  }
+
+  /** Découpe un blob `v1:<iv>:<ct>` (format partagé par key_enc ET wrapped_dek). Jette une
+      erreur explicite si le format est inconnu — donnée corrompue ou version future. */
+  private static parseBlob(stored: string): { iv: Uint8Array; ciphertext: Uint8Array } {
+    const parts = typeof stored === "string" ? stored.split(":") : [];
+    if (parts.length !== 3 || parts[0] !== PkiCrypto.KDF_VERSION) {
+      throw new Error("PkiCrypto : format de blob chiffré inconnu — donnée corrompue ou version future");
+    }
+    return { iv: PkiCrypto.fromB64(parts[1]), ciphertext: PkiCrypto.fromB64(parts[2]) };
   }
 
   /* --------------------------------------------------------------------------

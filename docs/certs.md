@@ -87,11 +87,13 @@ Deux clés, deux rôles — c'est ce qui rend le **changement de phrase maître*
   `kdf_iters` inférieur), **sel aléatoire de 16 octets PAR document** (`kdf_salt`, base64 ;
   même phrase + autre sel = autre KEK, ce qui **compartimente** les PKI). Son SEUL travail
   est d'emballer/déballer la DEK dans `wrapped_dek`.
-- **Extractibilité** : la DEK vit en session en clé **AES-256-GCM NON extractible**
-  (importée `extractable:false`) — comme l'ancienne clé maître, elle ne peut être exportée.
-  Ses 32 octets bruts n'existent en mémoire JS que le temps de l'init/du déverrouillage/du
-  re-chiffrement (effacés aussitôt, best-effort) — strictement dans l'enveloppe de
-  confiance déjà admise (les clés privées transitent en clair à la génération/l'export).
+- **Extractibilité** (durcie suite à l'audit 2026-07-17) : l'enveloppe passe par
+  `crypto.subtle.wrapKey`/`unwrapKey` — les octets de la DEK **ne touchent JAMAIS la mémoire
+  JS**. Le déverrouillage produit une DEK de session **NON extractible** : même sous page
+  compromise (XSS), la clé maître peut être *utilisée* pendant la session mais **pas
+  exfiltrée** — strictement la garantie qu'offrait l'ancienne clé dérivée directe. Seuls
+  l'initialisation et le ré-emballage manipulent un handle extractible TRANSITOIRE
+  (exigence de `wrapKey`), jamais exporté vers JS.
 - **Schéma VERSIONNÉ** : `kdf_version = "v1"` (colonne en base + préfixe des blobs
   `v1:<iv>:<ct>`). Le versionnage est là POUR une rotation future de KDF/algo.
 
@@ -255,6 +257,12 @@ client ; le serveur ne stocke que des métadonnées lisibles et ces blobs opaque
   chiffrée par la KEK côté client — sert AUSSI de keycheck). Le serveur ne fait que
   **STOCKER** — il ne dérive ni ne déballe jamais. Le **changement de phrase** ne réécrit
   que cette ligne (`kdf_salt`/`kdf_iters`/`wrapped_dek`), sans toucher aux `certificates`.
+- **`pki_envelope_history`** — **archive append-only** des enveloppes remplacées par un
+  changement de phrase : `doc_id`, `archived_date`, `kdf_version`, `kdf_salt`, `kdf_iters`,
+  `wrapped_dek`. Filet de récupération (audit 2026-07-17) : **toute enveloppe passée emballe
+  la MÊME DEK** — n'importe quelle ligne restaurée à la main rend le coffre déchiffrable avec
+  la phrase de l'époque (cf. « Procédures »). Jamais purgée (quelques centaines d'octets par
+  changement de phrase — événement rarissime).
 - **`certificates`** — métadonnées + matériau : `id` + `doc_id` (**PK composite**),
   `kind`, `parent_id` (émetteur), `label`, `subject`, `serial`, `not_before`,
   `not_after`, `fingerprint`, `key_algo`, `public_pem` (PUBLIC par nature),
@@ -553,8 +561,11 @@ module est en erreur (certs.db illisible). ⚠ `/pki` et `/roots` sont déclaré
   initialisée : ré-initialiser rendrait tout indéchiffrable) ;
 - `PUT    /documents/:docId/certs/pki/rekey` → **changer la phrase maître** : réécrit
   `kdf_salt`/`kdf_iters`/`wrapped_dek` (DEK ré-emballée sous la nouvelle KEK), **aucun
-  `key_enc` touché**. **404** si la PKI n'est pas initialisée ; PAS de verrou 409 (l'opé ne
-  peut pas rendre le coffre indéchiffrable). Déclarée AVANT `/:id` (« pki » n'est pas un id) ;
+  `key_enc` touché**. Exige **`prev_wrapped_dek`** (l'enveloppe sur laquelle le client a fondé
+  son ré-emballage) : **404** si PKI vierge, **409 `conflict`** si l'enveloppe a changé
+  entre-temps (verrou optimiste — deux changements concurrents ne s'écrasent pas), et
+  l'ancienne enveloppe est **archivée** avant l'UPDATE (cf. « Garde-fous du changement de
+  phrase »). Déclarée AVANT `/:id` (« pki » n'est pas un id) ;
 - `GET    /documents/:docId/certs/:id` → détail unitaire, `key_enc` **INCLUS** (Q5) ;
 - `PUT    /documents/:docId/certs/:id` → créer/mettre à jour (métadonnées validées,
   blobs opaques ; `key_enc` absent = conservé ; **400** si `parent_id` désigne un
@@ -671,6 +682,21 @@ docker compose run --rm sqlite        # cibler le service active son profil auto
 docker compose start dc-manager
 ```
 
+**Restaurer une enveloppe archivée** (coffre écrasé par un changement de phrase indésirable —
+cf. « Garde-fous du changement de phrase ») : chaque ligne de `pki_envelope_history` emballe
+la MÊME DEK ; en restaurer une rend le coffre déchiffrable avec la **phrase en vigueur à
+l'époque** de cette ligne.
+
+```sql
+-- repérer l'enveloppe à restaurer (la plus récente saine, en général) :
+SELECT rowid, archived_date, kdf_iters FROM pki_envelope_history WHERE doc_id = '…' ORDER BY rowid;
+-- la remettre en service (remplacer <N> par le rowid choisi) :
+UPDATE pki_documents
+   SET (kdf_version, kdf_salt, kdf_iters, wrapped_dek) =
+       (SELECT kdf_version, kdf_salt, kdf_iters, wrapped_dek FROM pki_envelope_history WHERE rowid = <N>)
+ WHERE doc_id = '…';
+```
+
 > ⚠️ **Arrêter le serveur d'abord.** `CertsDb` ouvre en **WAL + `busy_timeout`** : écrire pendant
 > qu'il tourne, c'est **deux écrivains concurrents** — au mieux un timeout, au pire un état
 > incohérent (le serveur garde en mémoire des lignes qu'on vient d'effacer sous lui).
@@ -708,18 +734,35 @@ de l'en-tête (session déverrouillée requise) → modale (phrase actuelle + no
    et la **nouvelle KEK** (nouvelle phrase + **sel régénéré**) ;
 2. `rewrapDek(oldKek, newKek, wrapped_dek)` **déballe** la DEK sous l'ancienne KEK et la
    **ré-emballe** sous la nouvelle → nouveau `wrapped_dek`. La phrase actuelle est ainsi
-   RE-VÉRIFIÉE (le déballage échoue si elle est fausse → « Phrase actuelle incorrecte »),
-   et la DEK n'est même pas importée en clé — on re-chiffre juste son clair ;
-3. `PUT /pki/rekey` persiste `kdf_salt`/`kdf_iters`/`wrapped_dek` (UPDATE d'**une seule
-   ligne**, atomique — impossible de laisser un coffre à moitié migré) ; **aucun `key_enc`
-   n'est envoyé ni modifié** ;
+   RE-VÉRIFIÉE (le déballage échoue si elle est fausse → « Phrase actuelle incorrecte »).
+   Tout passe par `unwrapKey`/`wrapKey` : les octets de la DEK voyagent de blob à blob
+   **à l'intérieur du moteur WebCrypto**, jamais par la mémoire JS ;
+3. `PUT /pki/rekey` persiste `kdf_salt`/`kdf_iters`/`wrapped_dek`, accompagnés de
+   **`prev_wrapped_dek`** (l'enveloppe de départ) ; **aucun `key_enc` n'est envoyé ni
+   modifié** ;
 4. la DEK étant inchangée, la **session reste ouverte** ; les prochains déverrouillages
    utilisent la nouvelle phrase. L'ancienne phrase ne déverrouille plus (l'ancienne KEK ne
    déballe plus le nouveau `wrapped_dek`).
 
+#### Garde-fous du changement de phrase (audit 2026-07-17)
+
+Le serveur ne peut PAS vérifier que le nouveau blob emballe bien la même DEK
+(zéro-connaissance) : un client autorisé mais **bogué ou malveillant** pourrait soumettre
+une enveloppe étrangère. Deux garde-fous rendent le geste **non-écrasant et récupérable** :
+
+- **Verrou optimiste** : `prev_wrapped_dek` obligatoire ; s'il ne correspond plus à
+  l'enveloppe courante → **409 `conflict`**, rien n'est écrit — deux changements concurrents
+  ne peuvent pas se perdre silencieusement (l'UI re-lit l'état PKI et laisse réessayer) ;
+- **Historisation append-only** : l'ancien tuple (sel, itérations, enveloppe) est archivé
+  dans `pki_envelope_history` AVANT l'UPDATE, dans la MÊME transaction. Toute enveloppe
+  passée emballant la MÊME DEK, restaurer n'importe quelle ligne d'historique (cf. « Éditer
+  `certs.db` à la main ») rend le coffre à nouveau déchiffrable **avec la phrase de
+  l'époque** — un écrasement accidentel ou hostile ne détruit plus rien d'irrécupérable.
+
 > **Ré-init ≠ changement de phrase.** `PUT /pki` reste bloqué (409) sur une PKI déjà
 > initialisée — il tirerait une nouvelle DEK et perdrait les clés. Seul `PUT /pki/rekey`,
-> qui CONSERVE la DEK, est autorisé à réécrire les paramètres.
+> qui CONSERVE la DEK, est autorisé à réécrire les paramètres — sous les garde-fous
+> ci-dessus.
 
 ### Rotation future du KDF (le versionnage v1 est prévu pour ça)
 

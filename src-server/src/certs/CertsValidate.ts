@@ -61,6 +61,13 @@ export interface PkiParamsCandidate {
   wrapped_dek: string;
 }
 
+/** Changement de phrase maître : les nouveaux paramètres + l'enveloppe ATTENDUE courante
+    (`prev_wrapped_dek`) — verrou optimiste : si elle ne correspond plus, le serveur refuse
+    (deux rekeys concurrents ne peuvent pas s'écraser silencieusement). */
+export interface PkiRekeyCandidate extends PkiParamsCandidate {
+  prev_wrapped_dek: string;
+}
+
 /** Erreur de validation à N griefs — les routes la traduisent en 400 { issues }. */
 export class CertsConfigError extends Error {
   constructor(readonly issues: string[]) {
@@ -138,6 +145,22 @@ export class CertsValidate {
     if (wrappedDek === "" || wrappedDek.length > MAX_BLOB_CHARS) issues.push("wrapped_dek : requis (DEK chiffrée par la KEK côté client)");
     if (issues.length) throw new CertsConfigError(issues);
     return { kdf_version: version, kdf_salt: salt, kdf_iters: iters, wrapped_dek: wrappedDek };
+  }
+
+  /** Valide un changement de phrase maître : paramètres PKI complets + `prev_wrapped_dek`
+      (l'enveloppe courante attendue — verrou optimiste, cf. CertsDb.rekeyPki). */
+  static parseRekeyParams(candidate: Record<string, unknown>): PkiRekeyCandidate {
+    const issues: string[] = [];
+    let base: PkiParamsCandidate | null = null;
+    try {
+      base = CertsValidate.parsePkiParams(candidate);
+    } catch (e) {
+      if (e instanceof CertsConfigError) issues.push(...e.issues); else throw e;
+    }
+    const prev = typeof candidate.prev_wrapped_dek === "string" ? candidate.prev_wrapped_dek.trim() : "";
+    if (prev === "" || prev.length > MAX_BLOB_CHARS) issues.push("prev_wrapped_dek : requis (enveloppe courante attendue — protège d'un écrasement concurrent)");
+    if (issues.length || !base) throw new CertsConfigError(issues);
+    return { ...base, prev_wrapped_dek: prev };
   }
 
   /* --------------------------------------------------------------------------

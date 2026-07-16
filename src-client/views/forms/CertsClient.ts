@@ -137,13 +137,19 @@ export type PkiState =
   | { initialized: false }
   | { initialized: true; kdf_version: string; kdf_salt: string; kdf_iters: number; wrapped_dek: string };
 
-/** CORPS envoyé à PUT /certs/pki (init) ET PUT /certs/pki/rekey (changement de phrase) —
-    miroir de `PkiParamsCandidate`. */
+/** CORPS envoyé à PUT /certs/pki (initialisation) — miroir de `PkiParamsCandidate`. */
 export interface PkiParamsInput {
   kdf_version: string;
   kdf_salt: string;
   kdf_iters: number;
   wrapped_dek: string;
+}
+
+/** CORPS envoyé à PUT /certs/pki/rekey — miroir de `PkiRekeyCandidate`. `prev_wrapped_dek` =
+    l'enveloppe sur laquelle le ré-emballage a été fondé (verrou optimiste : 409 `conflict`
+    si le coffre a changé entre-temps — autre changement de phrase concurrent). */
+export interface PkiRekeyInput extends PkiParamsInput {
+  prev_wrapped_dek: string;
 }
 
 /** Erreur d'un appel certs porteuse du CODE HTTP et du `detail` serveur (503 module en erreur,
@@ -271,8 +277,9 @@ export class CertsClient {
   }
 
   /** Change la phrase maître : réécrit le seul `wrapped_dek` (DEK ré-emballée) + paramètres KDF.
-      Ne touche à AUCUN key_enc (la DEK est conservée). 404 si la PKI n'est pas initialisée. */
-  async rekeyPki(input: PkiParamsInput): Promise<void> {
+      Ne touche à AUCUN key_enc (la DEK est conservée). 404 si PKI non initialisée ; 409 `conflict`
+      si l'enveloppe a changé depuis la lecture (verrou optimiste — recharger puis réessayer). */
+  async rekeyPki(input: PkiRekeyInput): Promise<void> {
     await this.call("PUT", "/certs/pki/rekey", input);
   }
 
