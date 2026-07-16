@@ -144,6 +144,17 @@ export const en = {
       vm: "VM",
       spare: "Spare part",
       unknown: "(not found)",
+      fallback: {
+        equipment: "(equipment)",
+        vm: "(VM)",
+        spare: "(spare)",
+      },
+    },
+    fiche: {
+      section: "Interventions",
+      declare: "Declare an intervention",
+      openCount: "{{n}} open",
+      none: "None open",
     },
     col: {
       title: "Title",

@@ -7,11 +7,12 @@ Chaque objet porte un cycle de vie, une priorité de traitement, une fenêtre d'
 optionnelle, une référence Jira facultative et une description markdown. Un **veilleur de
 rappels** signale au service de notifications les fenêtres qui approchent de l'heure H.
 
-> **Serveur + client.** Le module serveur (base, routes, veilleur) et la page « Interventions »
-> (première page **entièrement localisée** FR/EN) sont livrés. Les messages **serveur** restent en
-> **français** ; les libellés localisés des slugs `kind`/`status`/`priority` sont l'affaire du **client**,
-> via i18n (décision de cadrage 2026-07-16). Sont hors périmètre : boutons « Déclarer une intervention »
-> et badges sur les fiches équipement/VM/spare, vue calendrier, lecture Jira enrichie.
+> **Serveur + client + fiches.** Le module serveur (base, routes, veilleur), la page « Interventions »
+> (première page **entièrement localisée** FR/EN) et l'**intégration « fiches »** (badge d'interventions
+> ouvertes + « Déclarer une intervention » depuis une fiche équipement/VM/spare) sont livrés. Les messages
+> **serveur** restent en **français** ; les libellés localisés des slugs `kind`/`status`/`priority` sont
+> l'affaire du **client**, via i18n (décision de cadrage 2026-07-16). Restent hors périmètre : badges dans
+> les **listes** (ListView), vue **calendrier**, lecture **Jira enrichie**.
 
 Deux exigences fondatrices (pattern `vm/`, `notify/`, `certs/`) :
 
@@ -131,6 +132,12 @@ serait lu comme un id).
 - `GET    /documents/:docId/interventions/meta` → `{ jira_base_url }` : valeur de la variable
   d'environnement **`JIRA_BASE_URL`** (trim ; vide/absente → `null`). Sert au client à
   fabriquer le lien vers un ticket depuis une clé Jira — SANS aucun appel Jira côté serveur ;
+- `GET    /documents/:docId/interventions/counts?target=<kind>:<id>&target=…` → `{ counts: { "<kind>:<id>":
+  n, … } }` où `n` = nombre d'interventions **OUVERTES** (status ∉ {closed, cancelled}) liées à cette cible.
+  `target` est **RÉPÉTABLE** ; validation SOUPLE (cibles malformées ignorées, dédupliquées, plafonnées à 100 ;
+  une cible sans intervention → `0`). Déclarée AVANT `/:id` (« counts » n'est pas un id). Sert les **badges
+  de fiche** (équipement/VM/spare). Logique SQL dans `InterventionsDb.countOpenForTargets` (COUNT DISTINCT
+  sur l'intervention → un objet lié deux fois à la même cible compte pour 1) ;
 - `GET    /documents/:docId/interventions/:id` → détail (liens inclus ; **404** sinon) ;
 - `PUT    /documents/:docId/interventions/:id` → **créer/mettre à jour** : validation (griefs
   groupés → **400** `{ issues }`), liens **remplacés intégralement**, **audit posé par le
@@ -197,9 +204,11 @@ le cœur (notif live) et ce module (principe n°3 — aucune duplication de la r
 
 | Fichier | Rôle |
 |---|---|
-| `views/forms/InterventionsClient.ts` | **Client REST** du module + `InterventionsError` (code HTTP + `detail`). DTOs = **MIROIRS** commentés des formes serveur (duplication assumée, principe n°3 — préserve l'amovibilité). `listPage`/`meta`/`getOne`/`save`/`remove` ; `buildQuery` PURE (filtres `kind`/`status`/`priority` **répétables**). ⚠ Routes **SCOPÉES PAR DOCUMENT** (`<dataBase>/interventions/…`, comme `CertsClient`). |
+| `views/forms/InterventionsClient.ts` | **Client REST** du module + `InterventionsError` (code HTTP + `detail`). DTOs = **MIROIRS** commentés des formes serveur (duplication assumée, principe n°3 — préserve l'amovibilité). `listPage`/`meta`/`counts`/`getOne`/`save`/`remove` ; `buildQuery` PURE (filtres `kind`/`status`/`priority` **répétables**). ⚠ Routes **SCOPÉES PAR DOCUMENT** (`<dataBase>/interventions/…`, comme `CertsClient`). |
 | `core/InterventionsFormat.ts` | Logique **PURE** (aucun DOM, aucune dépendance i18n — testée en isolation) : `kindLabelKey`/`statusLabelKey`/`priorityLabelKey`/`targetKindLabelKey` renvoient des **CLÉS** i18n (la vue appelle `I18n.t` dessus, le module reste pur) ; `priorityRank`/`priorityClass`/`statusClass` (rang & couleur de badge) ; `jiraUrl` (référence Jira → lien, jointures de `/`) ; `formatWindow` ; `shortId`. Porte les slugs MIROIRS des énumérations serveur. |
-| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition, éditeur de liens, transitions rapides. Déclare l'interface hôte `InterventionTargetSource` (cibles injectées — la vue ne touche JAMAIS le Store). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
+| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition, éditeur de liens, transitions rapides. Déclare l'interface hôte `InterventionTargetSource` (cibles injectées — la vue ne touche JAMAIS le Store) ; `openCreateFor(kind, id)` ouvre une création PRÉ-LIÉE (déclaration depuis une fiche). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
+| `views/InterventionFicheHooks.ts` | **Contrat d'intégration « fiches »** `InterventionFicheHooks { countOpen; declareFor }` (injecté via `FormHost.interventionHooks`, implémenté dans `main.ts`) — permet aux fiches détail d'afficher le badge et de déclarer SANS importer la vue ni le client (découplage principe n°2). |
+| `views/forms/InterventionFicheRow.ts` | Helper DOM PARTAGÉ (une seule implémentation pour les 3 fiches) : rangée « Interventions » (badge async + bouton « Déclarer »). No-op si `hooks` null. Ne connaît que le contrat. |
 
 **Branchement client** : `main.ts` enregistre l'onglet principal « Interventions » (`shell.addView`, JUSTE AVANT « Certificats »), crée `InterventionsClient` en mode API seulement (null sinon → « mode API requis »), et injecte l'implémentation de `InterventionTargetSource` construite sur le Store (collections `equipments`/`vms`/`spares`).
 
@@ -240,6 +249,30 @@ interventions sont propres au document).
   fois** au premier rendu. `InterventionsFormat.jiraUrl(base, ref)` fabrique le lien (référence déjà URL →
   telle quelle ; base absente → référence en texte brut). Aucun appel à Jira.
 
+## Depuis les fiches (badge + déclaration)
+
+Point d'usage du cadrage : **déclarer une intervention DEPUIS la fiche** d'un équipement / d'une VM / d'un
+spare, et y **voir d'un coup d'œil** les interventions ouvertes.
+
+- **Où.** Une rangée « Interventions » DISCRÈTE dans les **fiches détail** (`equipmentDetail`, `vmDetail`,
+  `spareDetail`) — placée sous l'identité de l'objet. Choix des fiches détail (et non des formulaires
+  d'édition) : c'est là que « voir d'un coup d'œil » a du sens, ces fiches sont en **lecture seule** (donc
+  fermer proprement pour déclarer ne perd aucune saisie) et n'existent que pour un objet **déjà créé** (jamais
+  en création). La rangée porte un **badge** « N ouverte(s) » (chargé en **async**, `warn` si N > 0, discret
+  sinon ; **silencieux et non bloquant** en cas d'échec réseau → « — ») et un bouton **« Déclarer une
+  intervention »**.
+- **Découplage** (principe n°2). Les fiches n'importent **NI la vue NI le client** interventions : elles ne
+  connaissent que le contrat `InterventionFicheHooks { countOpen; declareFor }` (fichier
+  `views/InterventionFicheHooks.ts`), injecté via **`FormHost.interventionHooks`** et implémenté dans
+  `main.ts`. La rangée elle-même est un helper PARTAGÉ `views/forms/InterventionFicheRow.ts` (une seule
+  implémentation pour les trois fiches).
+- **Modale dans modale.** La modale de l'app est un **overlay UNIQUE** (pas d'empilement — cf. `ui/Modal`).
+  Le bouton **FERME donc d'abord** la fiche courante (`host.closeModal`), **PUIS** `declareFor` **navigue**
+  vers l'onglet « Interventions » (`shell.switchView`) et ouvre la **modale de création PRÉ-LIÉE** à la cible
+  (`InterventionsAdminView.openCreateFor` — nature « intervention », lien pré-ajouté, cible en sous-titre).
+- **Mode fichier / hors API.** `interventionHooks` est **null** → `InterventionFicheRow.attach` est un **no-op**
+  (aucune rangée « Interventions » dans les fiches). L'intégration est ainsi totalement absente sans serveur.
+
 ## Limites assumées (v1)
 
 - **Pas de commentaires ni de journal d'activité** par objet (un seul texte : `description`).
@@ -274,11 +307,15 @@ l'importe jamais).
    `problems: { … }`** passé à `InterventionsModule.create` (les ponts `notify` de `vm/` et
    `certs/` restent inchangés). Supprimer le fichier `interventions.db` s'il existe.
 2. **Client** : supprimer `src-client/views/InterventionsAdminView.ts`,
-   `src-client/views/forms/InterventionsClient.ts`, `src-client/core/InterventionsFormat.ts` ; retirer de
+   `src-client/views/forms/InterventionsClient.ts`, `src-client/core/InterventionsFormat.ts`,
+   `src-client/views/InterventionFicheHooks.ts`, `src-client/views/forms/InterventionFicheRow.ts` ; retirer de
    `main.ts` l'enregistrement de l'**onglet principal** « Interventions » (`shell.addView` + `new
-   InterventionsAdminView(...)` + `interventionsClient` + l'implémentation `InterventionTargetSource`), et
-   les exports dans `views/index.ts`. Retirer le domaine `interventions.*` et l'entrée `tabs.interventions`
-   des catalogues `src-client/i18n/locales/fr.ts` ET `en.ts` (le test de complétude vérifie la parité).
+   InterventionsAdminView(...)` + `interventionsClient` + l'implémentation `InterventionTargetSource` + les
+   `interventionHooks`), et les exports dans `views/index.ts`. Retirer le champ `interventionHooks` de
+   `FormHost` (`views/forms/shared.ts`) et les **trois appels `InterventionFicheRow.attach`** (+ imports) dans
+   `equipmentDetail` (`EquipmentForms.ts`), `vmDetail` et `spareDetail` (`DetailForms.ts`). Retirer le domaine
+   `interventions.*` et l'entrée `tabs.interventions` des catalogues `src-client/i18n/locales/fr.ts` ET
+   `en.ts` (le test de complétude vérifie la parité).
 3. **Tests** : retirer les **trois sections « Serveur : Interventions… »** de
    `Tests/modules/test-server.js`, le fichier `Tests/modules/test-interventions.js` et son entrée dans
    `Tests/modules/run.js`, et les **trois entrées `src-server/src/interventions/…`** de

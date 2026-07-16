@@ -2727,6 +2727,59 @@ module.exports = async () => {
     }
   });
 
+  /* ============ SERVEUR : InterventionsDb.countOpenForTargets (badges de fiche — interventions OUVERTES par cible) ============ */
+
+  await section("Serveur : InterventionsDb.countOpenForTargets — comptes OUVERTS par cible (exclut closed/cancelled, dédup lien, cible inconnue → 0, multi-cibles, souple)", async () => {
+    let Sqlite = null;
+    try {
+      const Candidate = require(path.join(__dirname, "..", "..", "src-server", "node_modules", "better-sqlite3"));
+      const probe = new Candidate(":memory:"); probe.close();
+      Sqlite = Candidate;
+    } catch (_) { /* module/binaire absent → section sautée */ }
+    if (!Sqlite) { ck(true, "better-sqlite3 indisponible → section counts Interventions sautée"); return; }
+
+    const fs = require("fs"), os = require("os");
+    const { InterventionsDb } = SERVER("interventions/InterventionsDb.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-interv-counts-"));
+    try {
+      const db = new InterventionsDb(dir, Sqlite);
+      const D = "D";
+      const mk = (id, status, links) => db.save(D, id, { kind: "intervention", title: "T-" + id, status, priority: "normal", links }, "Testeur");
+      // eq1 : 2 OUVERTES (declared + in_progress) + 1 closed + 1 cancelled (exclues) → 2.
+      mk("i1", "declared",    [{ target_kind: "equipment", target_id: "eq1" }]);
+      mk("i2", "in_progress", [{ target_kind: "equipment", target_id: "eq1" }, { target_kind: "vm", target_id: "vm9" }]);
+      mk("i3", "closed",      [{ target_kind: "equipment", target_id: "eq1" }]);
+      mk("i4", "cancelled",   [{ target_kind: "equipment", target_id: "eq1" }]);
+      // vm9 : i2 (in_progress) + i5 (planned) → 2 ouvertes.
+      mk("i5", "planned",     [{ target_kind: "vm", target_id: "vm9" }]);
+      // sp3 : UNE intervention liée DEUX fois à la même cible (positions distinctes) → comptée UNE fois.
+      mk("i6", "declared",    [{ target_kind: "spare", target_id: "sp3" }, { target_kind: "spare", target_id: "sp3" }]);
+
+      const c = db.countOpenForTargets(D, [
+        { kind: "equipment", id: "eq1" }, { kind: "vm", id: "vm9" }, { kind: "spare", id: "sp3" },
+        { kind: "equipment", id: "absent" },
+      ]);
+      ck.eq(c["equipment:eq1"], 2, "eq1 : 2 ouvertes (declared + in_progress ; closed/cancelled exclues)");
+      ck.eq(c["vm:vm9"], 2, "vm9 : 2 ouvertes (in_progress + planned)");
+      ck.eq(c["spare:sp3"], 1, "sp3 : lien dupliqué compté UNE fois (COUNT DISTINCT sur l'intervention)");
+      ck.eq(c["equipment:absent"], 0, "cible sans intervention → 0 (présente dans la map)");
+
+      // Cible NON demandée → absente de la map.
+      ck(!("vm:vm9" in db.countOpenForTargets(D, [{ kind: "equipment", id: "eq1" }])), "cible non demandée → absente de la map");
+      // Cibles MALFORMÉES ignorées (validation souple) — seule eq1 subsiste.
+      const cSoft = db.countOpenForTargets(D, [{ kind: "", id: "x" }, { kind: "equipment", id: "" }, { kind: "equipment", id: "eq1" }]);
+      ck(Object.keys(cSoft).length === 1 && cSoft["equipment:eq1"] === 2, "cibles malformées ignorées (souple), seule eq1 comptée");
+      // Aucune cible → map vide.
+      ck.eq(Object.keys(db.countOpenForTargets(D, [])).length, 0, "aucune cible → map vide");
+
+      // Fermeture d'une ouverte → le compte baisse.
+      db.save(D, "i1", { kind: "intervention", title: "T-i1", status: "closed", priority: "normal", links: [{ target_kind: "equipment", target_id: "eq1" }] }, "Testeur");
+      ck.eq(db.countOpenForTargets(D, [{ kind: "equipment", id: "eq1" }])["equipment:eq1"], 1, "après clôture de i1 → eq1 retombe à 1");
+    } finally {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+    }
+  });
+
   /* ============ SERVEUR : InterventionReminderWatcher + route meta (logique PURE — sans SQLite) ============ */
 
   await section("Serveur : InterventionReminderWatcher — paliers info(−24h)/warning(−1h)/error(H), error maintenu fenêtre dépassée, resolve démarrage/disparition ; route meta (JIRA_BASE_URL)", async () => {

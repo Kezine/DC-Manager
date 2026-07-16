@@ -1,5 +1,6 @@
 import type { Store } from "../../store";
 import type { ModalOptions } from "../../ui/Modal";
+import type { InterventionFicheHooks } from "../InterventionFicheHooks";
 import { FLOORS } from "../../domain/constants";
 import { Ip } from "../../core/Ip";
 import { FormControls } from "../../ui/FormControls";
@@ -66,4 +67,7 @@ export interface FormHost {
   locate?(kind: "equipment" | "rack" | "cable" | "port", id: string, returnAction?: () => void): void;
   /** Nb MAX de suggestions d'autocomplétion des formulaires (réglage global — cf. Prefs.autocompleteMaxResults). */
   autocompleteLimit?(): number;
+  /** Intégration « fiches » de la feature interventions (AMOVIBLE) — null hors mode API : les fiches détail
+      (équipement/VM/spare) n'affichent alors AUCUNE rangée « Interventions ». Injecté par `main.ts`. */
+  interventionHooks?: InterventionFicheHooks | null;
 }

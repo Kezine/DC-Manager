@@ -269,6 +269,47 @@ export class InterventionsDb {
   }
 
   /* --------------------------------------------------------------------------
+     Comptes d'interventions OUVERTES par cible (badges de fiche)
+     -------------------------------------------------------------------------- */
+
+  /** Nombre d'interventions OUVERTES (status ∉ {closed, cancelled}) liées à chacune des cibles demandées.
+      Renvoie une map `"<kind>:<id>" → n` couvrant TOUTES les cibles valides demandées (0 si aucune liée).
+      Validation SOUPLE : cibles malformées ignorées, dédupliquées, plafonnées à 100 (anti-abus). Une même
+      intervention liée deux fois à la même cible n'est comptée qu'UNE fois (COUNT DISTINCT). */
+  countOpenForTargets(docId: string, targets: Array<{ kind: string; id: string }>): Record<string, number> {
+    const result: Record<string, number> = {};
+    const seen = new Set<string>();
+    const clean: Array<{ kind: string; id: string }> = [];
+    for (const t of targets) {
+      const kind = t && typeof t.kind === "string" ? t.kind.trim() : "";
+      const id = t && typeof t.id === "string" ? t.id.trim() : "";
+      if (kind === "" || id === "") continue;               // cible malformée → ignorée (souple)
+      const key = kind + ":" + id;
+      if (seen.has(key)) continue;                          // déduplication
+      seen.add(key);
+      clean.push({ kind, id });
+      if (clean.length >= 100) break;                       // plafond anti-abus
+    }
+    for (const t of clean) result[t.kind + ":" + t.id] = 0; // défaut 0 pour toute cible valide demandée
+    if (clean.length === 0) return result;
+
+    // OR de couples (kind, id) — robuste et lisible (≤ 100 clauses). JOIN links → interventions ouvertes ;
+    // COUNT DISTINCT sur l'id d'intervention (doc_id fixé par le WHERE) pour ne pas compter deux fois un
+    // même objet lié plusieurs fois à la même cible.
+    const pairSql = clean.map(() => "(l.target_kind = ? AND l.target_id = ?)").join(" OR ");
+    const params: string[] = [docId];
+    for (const t of clean) { params.push(t.kind, t.id); }
+    const rows = this.db.prepare(
+      "SELECT l.target_kind AS k, l.target_id AS t, COUNT(DISTINCT i.id) AS n " +
+      "FROM intervention_links l JOIN interventions i ON i.doc_id = l.doc_id AND i.id = l.intervention_id " +
+      "WHERE l.doc_id = ? AND i.status NOT IN ('closed', 'cancelled') AND (" + pairSql + ") " +
+      "GROUP BY l.target_kind, l.target_id",
+    ).all(...params) as any[];
+    for (const row of rows) result[row.k + ":" + row.t] = (row.n | 0);
+    return result;
+  }
+
+  /* --------------------------------------------------------------------------
      Source du veilleur de rappels (fenêtres planifiées encore à démarrer)
      -------------------------------------------------------------------------- */
 

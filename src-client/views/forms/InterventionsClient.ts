@@ -140,6 +140,16 @@ export class InterventionsClient {
     return { jira_base_url: (json && typeof json.jira_base_url === "string") ? json.jira_base_url : null };
   }
 
+  /** Comptes d'interventions OUVERTES par cible (badges de fiche) — `target` répétable « <kind>:<id> ».
+      Renvoie une map `"<kind>:<id>" → n` (0 pour une cible sans intervention ouverte). */
+  async counts(targets: Array<{ kind: string; id: string }>): Promise<Record<string, number>> {
+    const sp = new URLSearchParams();
+    for (const t of targets) if (t && t.kind && t.id) sp.append("target", t.kind + ":" + t.id);
+    const qs = sp.toString();
+    const json = await this.call("GET", "/interventions/counts" + (qs ? "?" + qs : ""));
+    return (json && json.counts && typeof json.counts === "object") ? (json.counts as Record<string, number>) : {};
+  }
+
   /** Détail unitaire (liens inclus). 404 → InterventionsError(status 404). */
   async getOne(id: string): Promise<InterventionRecord> {
     const json = await this.call("GET", "/interventions/" + encodeURIComponent(id));

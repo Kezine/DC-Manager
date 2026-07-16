@@ -113,6 +113,17 @@ export class InterventionsModule {
       res.json({ jira_base_url: InterventionsValidate.jiraBaseUrl() });
     });
 
+    // /counts déclarée AVANT /:id (« counts » n'est pas un id). Comptes d'interventions OUVERTES par cible
+    // (badges de fiche équipement/VM/spare). `target` = paramètre RÉPÉTABLE « <kind>:<id> » ; validation
+    // souple (cibles malformées ignorées, plafonnées par la couche DB).
+    router.get("/counts", (req, res) => {
+      const ctx = this.context(req, res); if (!ctx) return;
+      const q: any = (req.query && typeof req.query === "object") ? req.query : {};
+      const raw = q.target === undefined ? [] : (Array.isArray(q.target) ? q.target : [q.target]);
+      const targets = raw.map((s: unknown) => InterventionsModule.parseTarget(s)).filter((t: any): t is { kind: string; id: string } => t !== null);
+      res.json({ counts: ctx.db.countOpenForTargets(ctx.docId, targets) });
+    });
+
     router.get("/:id", (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const item = ctx.db.getOne(ctx.docId, (req.params as any).id);
@@ -158,6 +169,17 @@ export class InterventionsModule {
   /* --------------------------------------------------------------------------
      Helpers privés
      -------------------------------------------------------------------------- */
+
+  /** Analyse une cible « <kind>:<id> » (séparateur = PREMIER « : » ; l'id peut en contenir d'autres). Renvoie
+      null si malformée (ignorée par l'appelant — validation souple). */
+  private static parseTarget(raw: unknown): { kind: string; id: string } | null {
+    if (typeof raw !== "string") return null;
+    const idx = raw.indexOf(":");
+    if (idx <= 0) return null;
+    const kind = raw.slice(0, idx).trim();
+    const id = raw.slice(idx + 1).trim();
+    return (kind === "" || id === "") ? null : { kind, id };
+  }
 
   private static readonly LIST_SORTS = ["title", "status", "priority", "planned_start", "created_date", "updated_date"];
 

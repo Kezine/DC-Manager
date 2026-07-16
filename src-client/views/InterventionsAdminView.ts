@@ -364,7 +364,15 @@ export class InterventionsAdminView {
      Modale de création / édition (principe n°11) + éditeur de liens
      -------------------------------------------------------------------------- */
 
-  private interventionModal(existing: InterventionRecord | null, kind: string): void {
+  /** Ouvre la modale de CRÉATION pré-liée à une cible (appelée par l'intégration « fiches » après navigation
+      vers cet onglet). Nature « intervention » par défaut ; le lien vers la cible est pré-ajouté. No-op si le
+      client est absent (ne devrait pas arriver : les hooks de fiche sont null hors mode API). */
+  openCreateFor(targetKind: string, targetId: string, targetLabel?: string): void {
+    if (!this.client) return;
+    this.interventionModal(null, "intervention", [{ target_kind: targetKind, target_id: targetId }], targetLabel);
+  }
+
+  private interventionModal(existing: InterventionRecord | null, kind: string, presetLinks: InterventionLink[] = [], subtitleContext?: string): void {
     const editing = existing !== null;
     const root = document.createElement("div");
 
@@ -400,8 +408,9 @@ export class InterventionsAdminView {
     const jiraInput = FormControls.text(existing && existing.jira_ref ? existing.jira_ref : "", I18n.t("interventions.modal.jiraRefPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("interventions.modal.jiraRef"), jiraInput, I18n.t("interventions.modal.jiraHint")));
 
-    // -- Éditeur de LIENS : famille + cible + Ajouter, liste ordonnée avec retrait. --
-    const links: InterventionLink[] = existing ? existing.links.map((l) => ({ target_kind: l.target_kind, target_id: l.target_id })) : [];
+    // -- Éditeur de LIENS : famille + cible + Ajouter, liste ordonnée avec retrait. En création, les liens
+    //    PRÉ-ADDÉS (déclaration depuis une fiche) initialisent la liste. --
+    const links: InterventionLink[] = (existing ? existing.links : presetLinks).map((l) => ({ target_kind: l.target_kind, target_id: l.target_id }));
     root.appendChild(this.buildLinksEditor(links));
 
     const errBox = this.errBox();
@@ -410,7 +419,7 @@ export class InterventionsAdminView {
     this.host.openModal({
       title: editing ? I18n.t("interventions.modal.editTitle")
         : I18n.t(kind === "incident" ? "interventions.modal.createIncidentTitle" : "interventions.modal.createInterventionTitle"),
-      subtitle: editing ? Html.escape(existing!.title) : "",
+      subtitle: editing ? Html.escape(existing!.title) : (subtitleContext ? Html.escape(subtitleContext) : ""),
       body: root,
       onSave: async () => {
         errBox.style.display = "none";

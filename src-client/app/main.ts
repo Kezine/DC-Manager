@@ -10,7 +10,7 @@ import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
 import { RuntimeConfigLoader } from "./RuntimeConfig";
 import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
-import type { InterventionTargetSource } from "../views";
+import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
 import { FormBase } from "../views/forms/FormBase";
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
@@ -639,9 +639,10 @@ async function boot(): Promise<void> {
   // TOUJOURS enregistrée : `interventionsClient` est null hors mode API → la vue affiche « mode API requis »
   // (feature AMOVIBLE : retirer = supprimer InterventionsAdminView + InterventionsClient + InterventionsFormat
   // + ces lignes). Les cibles liables viennent d'une interface hôte INJECTÉE (la vue ne touche jamais le Store).
+  const targetFallback = (kind: string): string => I18n.t(kind === "equipment" ? "interventions.target.fallback.equipment" : kind === "vm" ? "interventions.target.fallback.vm" : "interventions.target.fallback.spare");
   const targetLabel = (kind: string, r: any): string => {
-    if (kind === "spare") return (r.displayName ? r.displayName() : (r.name || r.serial)) || "(spare)";
-    return r.name || (kind === "vm" ? "(VM)" : "(équipement)");
+    if (kind === "spare") return (r.displayName ? r.displayName() : r.name) || r.serial || targetFallback(kind);
+    return r.name || targetFallback(kind);
   };
   const targetCollection = (kind: string): string => (kind === "equipment" ? "equipments" : kind === "vm" ? "vms" : "spares");
   const interventionTargets: InterventionTargetSource = {
@@ -657,6 +658,16 @@ async function boot(): Promise<void> {
     onShow: () => interventionsView.show(),
   });
   interventionsView = new InterventionsAdminView(interventionsContainer, interventionsClient, formHost, interventionTargets);   // formulaires dans LA modale de l'app (principe n°11)
+  // INTÉGRATION « FICHES » (badge + déclaration depuis équipement/VM/spare) : hooks injectés dans les fiches
+  // via FormHost (contrat découplé — les formulaires n'importent NI la vue NI le client interventions). null
+  // hors mode API → aucune rangée « Interventions » dans les fiches. `declareFor` FERME la fiche courante
+  // (fait par InterventionFicheRow) PUIS navigue vers l'onglet et ouvre la modale de création pré-liée (la
+  // modale de l'app est un overlay UNIQUE, pas d'empilement — cf. Modal).
+  const interventionHooks: InterventionFicheHooks | null = interventionsClient ? {
+    countOpen: async (kind, id) => { const map = await interventionsClient.counts([{ kind, id }]); return map[kind + ":" + id] || 0; },
+    declareFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openCreateFor(kind, id, label); },
+  } : null;
+  formHost.interventionHooks = interventionHooks;
   // CERTIFICATS (C6) : page d'ADMINISTRATION de la PKI interne (clé maître, arbre CA/dérivés, créations
   // X.509/SSH, exports, révocation, aide au déploiement de la confiance). ONGLET PRINCIPAL de premier niveau
   // (décision utilisateur 2026-07-15 : « ce n'est pas vraiment un paramètre ») — enregistré EN DERNIER parmi les
