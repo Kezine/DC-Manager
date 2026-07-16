@@ -240,9 +240,14 @@ export class CertsAdminView {
     const bar = document.createElement("div");
     bar.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:10px";
     const left = document.createElement("div"); left.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap";
-    const status = document.createElement("span");
-    status.innerHTML = this.session.unlocked ? this.pill("déverrouillé", "ok") : this.pill("verrouillé", "warn");
-    left.appendChild(status);
+    // Badge d'état du coffre : SEULEMENT si la PKI existe. Non initialisée = ni verrouillée ni
+    // déverrouillée (aucune clé n'existe encore) — aucun badge, l'écran d'initialisation l'explique.
+    // Pas de span vide non plus : un item flex vide consommerait quand même un cran de `gap`.
+    if (this.pkiState?.initialized === true) {
+      const status = document.createElement("span");
+      status.innerHTML = this.session.unlocked ? this.pill("déverrouillé", "ok") : this.pill("verrouillé", "warn");
+      left.appendChild(status);
+    }
     // Recherche (L3) : visible dans les DEUX vues et MÊME verrouillée — elle ne lit que des métadonnées
     // (aucune opération de clé). Le clic sur un résultat ouvre la bonne vue avec l'élément mis en évidence.
     left.appendChild(this.searchBox());
