@@ -259,6 +259,45 @@ quel par la liste et l'enregistrement (aucune réserve, contrairement au jeton).
 - Config invalide (fichier legacy illisible, DB en erreur) : module « en erreur »,
   routes en **503** avec le détail — visibilité opérateur sans faire tomber le reste.
 
+### Dépannage — clé `DCMANAGER_SECRETS_KEY` CHANGÉE (jetons stockés indéchiffrables)
+
+**Symptôme** (incident réel) : la vue **Clusters** n'affiche plus aucun cluster
+et le bouton **« Tester »** d'un provider échoue — alors que la clé est bien
+définie et la liste des providers reste affichée. Les logs serveur montrent :
+
+```
+ERROR [vm] POST /vm/providers/test : construction en échec <docId>
+  SecretBox : déchiffrement refusé (clé DCMANAGER_SECRETS_KEY différente ou
+  donnée altérée) — le secret doit être ressaisi
+```
+
+**Cause** : la valeur de `DCMANAGER_SECRETS_KEY` (ou de son repli
+`VM_PROVIDERS_KEY`) a **changé** depuis l'enregistrement du jeton. Le jeton est
+chiffré AU REPOS avec une clé dérivée de la passphrase (cf. « Chiffrement des
+jetons ») : une passphrase différente ne peut PAS le déchiffrer (AES-256-GCM
+authentifié — c'est le but : clé perdue = secret irrécupérable). Ce n'est PAS le
+cas « clé absente » (§ 503) : ici la clé EST présente, mais ce n'est pas la bonne.
+Le module fonctionne, la liste des providers s'affiche (elle ne déchiffre aucun
+jeton), mais toute opération qui a besoin du jeton en clair (synchro, test) échoue.
+
+**Comportement UI (désormais explicite — plus de silence)** :
+
+- **Vue Clusters** : le provider concerné, jusqu'ici EXCLU de la liste des statuts
+  (car `providersFor` écarte tout jeton indéchiffrable), est **réinjecté** comme
+  une carte **« Provider en erreur »** (bandeau rouge) portant le message
+  ci-dessus — au lieu d'une liste vide silencieuse.
+- **Bouton « Tester »** : affiche le message SecretBox actionnable dans la zone
+  d'erreur du formulaire (réponse **422**, corps `{ error }`) — plus de « test
+  impossible » générique.
+- **Bouton « Synchroniser »** : le résultat inclut aussi ces providers en erreur.
+
+**Solution** : ré-ouvrir le provider (**Providers…** → *Modifier*), **ressaisir
+le jeton** dans le champ « Jeton d'API » puis **Enregistrer**. Le jeton est
+re-chiffré avec la clé COURANTE et redevient déchiffrable. (Alternative : restaurer
+l'ANCIENNE valeur de `DCMANAGER_SECRETS_KEY` dans l'environnement du serveur, si
+elle est connue.) Aucune donnée du document n'est perdue entre-temps : les VMs déjà
+synchronisées restent en place, la synchro reprend une fois le jeton ressaisi.
+
 ### Fichier `vm-providers.json` — format **LEGACY** (migré automatiquement)
 
 Le fichier `vm-providers.json` (à côté de la base) reste pris en charge pour

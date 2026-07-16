@@ -209,4 +209,5 @@ node scripts/import-json.mjs doc.json --url http://host:3000 --basic dev:secret
 | **`Cannot connect to the Docker daemon`** | Docker Desktop n'est pas démarré. |
 | **Conteneur en `Restarting`/`Exited`** | `docker compose logs --tail 50` pour voir l'erreur de démarrage. |
 | **`Client introuvable`** (503 sur `/`) | Le build du client a échoué : `docker compose up --build` et regarder les logs de build. |
+| **Aucun cluster affiché / test provider VM en échec** (logs : `SecretBox : déchiffrement refusé … le secret doit être ressaisi`) | La valeur de `DCMANAGER_SECRETS_KEY` (ou du repli `VM_PROVIDERS_KEY`) a **changé** → les jetons chiffrés au repos ne sont plus déchiffrables. La vue Clusters montre désormais le provider en **« Provider en erreur »** et « Tester » renvoie le message. **Solution** : ré-ouvrir le provider (Providers… → Modifier), **ressaisir le jeton**, Enregistrer — ou restaurer l'ancienne valeur de la clé. Détails : [`docs/vm-proxmox.md`](../docs/vm-proxmox.md) § Dépannage. |
 | **Repartir totalement de zéro** | `docker compose down -v && docker compose up -d --build`. |

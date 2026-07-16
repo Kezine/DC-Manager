@@ -1129,6 +1129,42 @@ module.exports = async () => {
   }
   });
 
+  await section("Serveur : VmStatusEnrichment — réinjection des providers au jeton indéchiffrable (visibilité UI)", async () => {
+  {
+    const { VmStatusEnrichment } = SERVER("vm/VmStatusEnrichment.js");
+    // Message SecretBox tel que mémorisé par providersFor (SÛR : aucun jeton, actionnable).
+    const secretMsg = "SecretBox : déchiffrement refusé (clé DCMANAGER_SECRETS_KEY différente ou donnée altérée) — le secret doit être ressaisi";
+    const okStatus = { provider_id: "pve-ok", kind: "proxmox", interval_sec: 60, last_attempt: "2026-07-16T00:00:00.000Z", last_success: "2026-07-16T00:00:00.000Z", ok: true, message: "0 créée(s)…", counts: null, cluster: null };
+    const listItems = [
+      { id: "pve-ok", kind: "proxmox", interval_sec: 60 },
+      { id: "pve-cassé", kind: "proxmox", interval_sec: 300 },
+    ];
+
+    // Aucune erreur de jeton → COPIE inchangée (nouveau tableau, mêmes entrées).
+    const none = VmStatusEnrichment.withTokenErrors([okStatus], [], listItems);
+    ck.eq(none.length, 1, "aucune erreur de jeton → liste inchangée");
+    ck(none !== [okStatus] && none[0] === okStatus, "…renvoie un NOUVEAU tableau, entrée d'origine préservée");
+
+    // Un provider en erreur, ABSENT des statuts (exclu par providersFor) → statut d'erreur AJOUTÉ.
+    const enriched = VmStatusEnrichment.withTokenErrors([okStatus], [{ id: "pve-cassé", message: secretMsg }], listItems);
+    ck.eq(enriched.length, 2, "provider au jeton indéchiffrable → réinjecté en statut d'erreur");
+    ck.eq(enriched[0], okStatus, "…le provider sain reste en tête, inchangé");
+    const bad = enriched[1];
+    ck(bad.provider_id === "pve-cassé" && bad.ok === false, "…statut d'erreur (ok:false) pour le provider cassé");
+    ck.eq(bad.message, secretMsg, "…message SecretBox actionnable repris VERBATIM (sans jeton)");
+    ck(bad.kind === "proxmox" && bad.interval_sec === 300, "…kind/intervalle repris de la liste CRUD (qui inclut les cassés)");
+    ck(bad.cluster === null && bad.counts === null && bad.last_attempt === null, "…pas de cluster/compteurs/tentative pour un provider jamais déchiffré");
+
+    // Repli neutre quand le provider n'est pas dans la liste CRUD (course improbable, garde défensive).
+    const orphan = VmStatusEnrichment.withTokenErrors([], [{ id: "pve-inconnu", message: secretMsg }], []);
+    ck(orphan.length === 1 && orphan[0].kind === "?" && orphan[0].interval_sec === 0, "provider hors liste CRUD → kind « ? » + intervalle 0 (repli neutre)");
+
+    // Déduplication défensive : un provider DÉJÀ décrit dans les statuts n'est pas doublé.
+    const dup = VmStatusEnrichment.withTokenErrors([okStatus], [{ id: "pve-ok", message: secretMsg }], listItems);
+    ck.eq(dup.length, 1, "provider déjà présent dans les statuts → non doublé (dédup par provider_id)");
+  }
+  });
+
   /* ============ SERVEUR : SecretBox partagé (chiffrement au repos des secrets) ============ */
 
   await section("Serveur : SecretBox — AES-256-GCM (aller-retour, clé différente, altération, repli env legacy)", async () => {
