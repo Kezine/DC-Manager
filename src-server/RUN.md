@@ -118,18 +118,20 @@ docker compose exec dc-manager ls -la /data/documents
 
 Le compose déclare un service **`sqlite`** sous `profiles: ["tools"]` : il est **inerte**
 (`docker compose up` l'ignore), donc **l'image de production n'embarque aucun éditeur de base**.
-Il monte le même volume, ce qui suffit à atteindre les fichiers.
+Il monte le même volume et se place dans `/data/documents`, ce qui suffit à atteindre les fichiers.
 
 ```bash
 docker compose stop dc-manager        # ⚠️ INDISPENSABLE (voir ci-dessous)
-docker compose run --rm sqlite        # cibler le service active son profil automatiquement
-# sqlite> .tables
-docker compose start dc-manager
+docker compose run --rm sqlite        # ouvre sqlite3 sur certs.db (le profil "tools" s'active seul)
+#   sqlite> .tables                    # lister les tables de la base ouverte
+#   sqlite> .open notify.db            # basculer sur une AUTRE base (même dossier)
+#   sqlite> .quit                      # sortir
+docker compose start dc-manager        # redémarrer le serveur après
 ```
 
 Bases dans `/data/documents/` : `registry.db` (documents), `certs.db` (PKI), `notify.db`,
-`vm-providers.db`. Le service ouvre `certs.db` par défaut — `.open ../documents/notify.db`
-pour changer.
+`vm-providers.db`. Le service ouvre **`certs.db`** par défaut — `.open <base>.db` pour changer
+(chemins relatifs à `/data/documents`, ex. `.open registry.db`).
 
 > ⚠️ **Toujours arrêter le serveur avant d'écrire.** Les bases sont ouvertes en **WAL** : deux
 > écrivains concurrents, c'est au mieux un timeout, au pire un état incohérent (le serveur garde
