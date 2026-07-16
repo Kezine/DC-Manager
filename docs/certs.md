@@ -10,13 +10,14 @@ et des **blobs opaques** (clés privées déjà chiffrées) qu'il est **incapabl
 déchiffrer**. Deuxième exigence : **découplage maximal** (supprimable sans cicatrice,
 pattern `vm/` et `notify/`).
 
-> **Zéro-connaissance, littéralement.** La clé maître du document est dérivée d'une
-> phrase secrète **par PBKDF2 dans le navigateur** et ne quitte JAMAIS le moteur
-> WebCrypto (clé non extractible). Les clés privées générées sont chiffrées côté
+> **Zéro-connaissance, littéralement.** Les clés privées générées sont chiffrées côté
 > client (AES-GCM) AVANT l'envoi ; le serveur reçoit un blob `key_enc` qu'il range et
-> rend tel quel, sans jamais l'ouvrir. Conséquence assumée : **phrase secrète perdue =
-> clés privées perdues** — aucune récupération, ni par nous ni par le serveur. C'est
-> le but.
+> rend tel quel, sans jamais l'ouvrir. La clé qui les chiffre (la **DEK**, cf.
+> « Chiffrement en enveloppe » ci-dessous) est elle-même scellée par une clé dérivée de
+> la phrase secrète **par PBKDF2 dans le navigateur** ; ni la phrase, ni la DEK, ni la
+> clé qui la scelle ne quittent jamais le poste. Conséquence assumée : **phrase secrète
+> perdue = clés privées perdues** — aucune récupération, ni par nous ni par le serveur.
+> C'est le but.
 
 > **Mode API uniquement.** La PKI vit dans le serveur (base + timer d'échéances). En
 > mode fichier/viewer elle est **sans objet** : la page « Certificats » affiche
@@ -30,15 +31,15 @@ pattern `vm/` et `notify/`).
   ┌────────────────────────────────────┐      ┌──────────────────────────────────┐
   │ phrase secrète maître               │      │  CertsModule (routes + timer)     │
   │   └─ PBKDF2-SHA-256 (≥ 600 000)     │      │   ├─ CertsDb (certs.db)           │
-  │        sel PAR document             │      │   │    pki_documents              │
-  │      → clé maître AES-256-GCM       │      │   │    certificates (+ key_enc)   │
-  │        (NON extractible)            │      │   │    certificate_sans           │
-  │   └─ keycheck (constante chiffrée)  │      │   └─ CertExpiryWatcher (30/14/7 j)│
-  │                                     │ REST │                                   │
+  │        sel PAR document → KEK       │      │   │    pki_documents (wrapped_dek)│
+  │   └─ KEK ──emballe──► wrapped_dek   │      │   │    certificates (+ key_enc)   │
+  │            (AES-256-GCM)            │      │   │    certificate_sans           │
+  │        wrapped_dek ──► DEK aléatoire│      │   └─ CertExpiryWatcher (30/14/7 j)│
+  │              (NON extractible)      │ REST │                                   │
   │ X509Factory / OpenSshEncoder →      │─────►│  MÉTADONNÉES lisibles (sujet,     │
   │   clé privée EN CLAIR (le temps     │ JSON │  échéance, empreinte…)            │
   │   de la génération)                 │      │  + blobs OPAQUES (key_enc,        │
-  │   └─ AES-GCM(clé maître) → key_enc ─┼─────►│    keycheck_enc) — jamais ouverts │
+  │   └─ AES-GCM(DEK) → key_enc ────────┼─────►│    wrapped_dek) — jamais ouverts  │
   │                                     │      │            │ pont index.ts        │
   │ CertExports → PEM / PKCS#12 / SSH   │      │            ▼ (structurel)         │
   └────────────────────────────────────┘      │   NotifyModule (cert-expiry)      │
@@ -47,9 +48,10 @@ pattern `vm/` et `notify/`).
 
 Cycle de vie d'un certificat :
 1. l'utilisateur **déverrouille** la PKI du document (saisit la phrase secrète →
-   dérivation PBKDF2 → keycheck vérifié côté client) ;
+   dérivation PBKDF2 de la **KEK** → **déballage de la DEK** depuis `wrapped_dek` ;
+   l'unwrap AES-GCM étant authentifié, il valide du même coup la phrase — cf. keycheck) ;
 2. il **crée** une CA ou **émet** un dérivé : les clés naissent dans WebCrypto, la clé
-   privée est chiffrée AUSSITÔT par la clé maître, et seuls le **certificat public**
+   privée est chiffrée AUSSITÔT par la **DEK**, et seuls le **certificat public**
    (+ métadonnées) et le **blob `key_enc`** partent au serveur ;
 3. il **exporte** un artefact : le serveur renvoie le blob au **GET unitaire**, le
    navigateur le déchiffre LOCALEMENT et fabrique le fichier (PEM/PKCS#12/OpenSSH) ;
@@ -65,33 +67,48 @@ d'environnement, ni `SecretBox` (contrairement à `vm/`/`notify/` : ici il n'y a
 Toute la crypto est dans `src-client/certs/` (modules PURS : WebCrypto seul, ni DOM
 ni réseau — testables headless sous Node ≥ 18, cf. `Tests/modules/test-certs.js`).
 
-### Dérivation de la clé maître (décision Q1, `PkiCrypto`)
+### Chiffrement en enveloppe — KEK / DEK (décision « changement de phrase », `PkiCrypto`)
 
-- **PBKDF2-SHA-256**, **≥ 600 000 itérations** (défaut `DEFAULT_ITERS = 600000` à
-  l'initialisation ; le serveur REFUSE un `kdf_iters` inférieur — un client qui
-  négocierait moins affaiblirait la clé maître), **sel aléatoire de 16 octets PAR
-  document** (`kdf_salt`, base64). Même phrase secrète + autre sel = autre clé : le sel
-  **compartimente** les PKI de deux documents.
-- Sortie : une **clé AES-256-GCM NON extractible** — elle vit dans le moteur WebCrypto
-  et ne peut être exportée, même par du code compromis de la page.
+Deux clés, deux rôles — c'est ce qui rend le **changement de phrase maître** peu coûteux
+(cf. « Changer la phrase maître » dans « Procédures ») :
+
+```
+  phrase ──PBKDF2-SHA-256(sel)──► KEK ──AES-GCM──► wrapped_dek   (UN petit blob stocké)
+                                                       │  déchiffre
+                                                       ▼
+                    DEK (32 octets ALÉATOIRES, FIXE À VIE) ──AES-GCM──► key_enc
+```
+
+- La **DEK** (*Data Encryption Key*) chiffre RÉELLEMENT toutes les clés privées ; tirée
+  **aléatoirement une fois** à l'initialisation, elle **ne change jamais**. Les `key_enc`
+  lui sont donc liés pour toute la vie du document.
+- La **KEK** (*Key Encryption Key*) est dérivée de la phrase par **PBKDF2-SHA-256**,
+  **≥ 600 000 itérations** (défaut `DEFAULT_ITERS = 600000` ; le serveur REFUSE un
+  `kdf_iters` inférieur), **sel aléatoire de 16 octets PAR document** (`kdf_salt`, base64 ;
+  même phrase + autre sel = autre KEK, ce qui **compartimente** les PKI). Son SEUL travail
+  est d'emballer/déballer la DEK dans `wrapped_dek`.
+- **Extractibilité** : la DEK vit en session en clé **AES-256-GCM NON extractible**
+  (importée `extractable:false`) — comme l'ancienne clé maître, elle ne peut être exportée.
+  Ses 32 octets bruts n'existent en mémoire JS que le temps de l'init/du déverrouillage/du
+  re-chiffrement (effacés aussitôt, best-effort) — strictement dans l'enveloppe de
+  confiance déjà admise (les clés privées transitent en clair à la génération/l'export).
 - **Schéma VERSIONNÉ** : `kdf_version = "v1"` (colonne en base + préfixe des blobs
-  `v1:<iv>:<ct>`). Le versionnage est là POUR une rotation future de KDF/algo (cf.
-  « Procédures »).
+  `v1:<iv>:<ct>`). Le versionnage est là POUR une rotation future de KDF/algo.
 
-### keycheck — vérification côté client (décision Q1)
+### keycheck — la vérification, portée par `wrapped_dek`
 
-À l'initialisation, une **constante connue** (`KEYCHECK_PLAINTEXT =
-"dcmanager-pki-keycheck-v1"`) est chiffrée par la clé dérivée et stockée
-(`keycheck_enc`). Au déverrouillage, le client dérive la clé depuis la phrase saisie et
-tente de **déchiffrer** le keycheck : si le GCM authentifié rend la constante, la phrase
-est bonne. La détection est **IMMÉDIATE et locale** — le serveur n'y participe pas et ne
-sait pas si une phrase est correcte. Tout échec (mauvaise phrase, blob altéré, format
-inconnu) donne la MÊME réponse UI neutre (« clé maître incorrecte »), sans divulguer de
-détail.
+Il n'y a **pas de constante-témoin séparée** : c'est le déballage de la DEK qui vérifie la
+phrase. Au déverrouillage, le client dérive la KEK depuis la phrase saisie et tente de
+**déchiffrer `wrapped_dek`** (unwrap de la DEK). Le déchiffrement AES-GCM étant
+**AUTHENTIFIÉ**, une phrase fausse produit une KEK fausse et l'unwrap **échoue** : la
+phrase est donc validée exactement quand la DEK est déballable. La détection est
+**IMMÉDIATE et locale** — le serveur n'y participe pas et ne sait pas si une phrase est
+correcte. Tout échec (mauvaise phrase, blob altéré, format inconnu) donne la MÊME réponse
+UI neutre (« clé maître incorrecte »), sans divulguer de détail.
 
 ### Session (décision Q2, `PkiSession`)
 
-La clé maître dérivée vit dans un **coffre de session en MÉMOIRE** :
+La **DEK** (déballée au déverrouillage) vit dans un **coffre de session en MÉMOIRE** :
 - **verrouillage auto après 15 min d'INACTIVITÉ** (chaque action de la page appelle
   `touch()` pour ré-armer le compte à rebours) ;
 - bouton **« Verrouiller »** = verrouillage manuel immédiat ;
@@ -129,20 +146,23 @@ décrite dans « Garde-fous de suppression ».
 ### Chiffrement des clés privées
 
 Chaque clé privée (PKCS#8 PEM pour X.509, graine ed25519 pour SSH) est chiffrée en
-**AES-256-GCM** par la clé maître, IV aléatoire de 12 octets (jamais réutilisé), format
+**AES-256-GCM** par la **DEK**, IV aléatoire de 12 octets (jamais réutilisé), format
 stocké `v1:<iv>:<ct>` en base64 (le tag GCM est inclus dans `<ct>` par WebCrypto). Deux
 chiffrements du même clair diffèrent (IV aléatoire). Même philosophie que le `SecretBox`
 serveur (cf. [`vm-proxmox.md`](vm-proxmox.md)), mais **côté client, avec la clé de
-l'utilisateur**.
+l'utilisateur**. `wrapped_dek` emploie EXACTEMENT le même format `v1:<iv>:<ct>` (autre
+clé : la KEK) — un déchiffrement avec la mauvaise clé échoue simplement (GCM), sans
+ambiguïté.
 
 ### Extractibilité — un choix délibéré et asymétrique
 
-- La **clé maître** est générée **NON extractible** : elle sert uniquement à
-  chiffrer/déchiffrer, jamais à être lue.
+- La **DEK** (et la **KEK**) sont **NON extractibles** : elles servent uniquement à
+  chiffrer/déchiffrer, jamais à être lues. Les 32 octets bruts de la DEK n'apparaissent en
+  mémoire JS qu'à l'init/au déverrouillage/au re-chiffrement, effacés aussitôt.
 - Les **clés générées** (CA, feuilles, paires SSH) sont créées **extractibles** — il
   FAUT pouvoir exporter la clé privée en PKCS#8 pour la chiffrer, puis la ré-exporter à
   la demande de l'utilisateur. Elles n'existent en clair que **le temps de la
-  génération/de l'export** (session déverrouillée), puis sont scellées par la clé maître.
+  génération/de l'export** (session déverrouillée), puis sont scellées par la DEK.
 
 ## Limites assumées (cadrage §2)
 
@@ -161,10 +181,13 @@ manques à combler :
   ET l'UI grise le bouton) et son alerte d'échéance est close. Il n'y a ni liste de
   révocation publiée, ni répondeur OCSP : la PKI est **interne**, la révocation
   s'applique par le **non-déploiement** (on ne réexporte plus l'objet).
-- **Ré-initialisation refusée (409).** Une PKI déjà initialisée ne peut pas être
-  ré-initialisée : changer le sel/keycheck reviendrait à changer de clé maître et
-  rendrait indéchiffrables toutes les clés déjà stockées. Geste irréversible **interdit
-  en v1**.
+- **Ré-initialisation refusée (409) — mais changement de phrase POSSIBLE.** Une PKI déjà
+  initialisée ne peut pas être **ré-initialisée** (`PUT /pki` → 409) : cela tirerait une
+  NOUVELLE DEK aléatoire et rendrait indéchiffrables toutes les clés déjà stockées. En
+  revanche **changer la phrase maître** est offert (`PUT /pki/rekey`) : il **conserve la
+  DEK** et ne ré-emballe que `wrapped_dek` — aucun `key_enc` n'est touché (cf. « Changer la
+  phrase maître » dans « Procédures »). Deux gestes à ne pas confondre : l'un remplace la
+  clé des données (interdit), l'autre remplace seulement ce qui la protège (permis).
 - **CA de signature SSH ed25519 uniquement** (`OpenSshEncoder`, décision Q3) : la
   signature déterministe d'ed25519 est ce qui rend la validation croisée byte-à-byte
   possible. Les paires RSA restent supportées comme **clés simples** et comme **sujets**
@@ -183,7 +206,7 @@ manques à combler :
 
 | Fichier | Rôle |
 |---|---|
-| `CertsValidate.ts` | **Validation PURE** (ni DB ni réseau), griefs GROUPÉS, messages français uniques (mêmes principes que `NotifyValidate`/`ProviderConfigValidate`). Ne valide que des **métadonnées** et **borne** la taille des blobs OPAQUES (`key_enc`, `keycheck_enc` jamais déchiffrés). Porte les tables `CERT_KINDS` (`root-ca`/`leaf-tls`/`ssh-ca`/`ssh-keypair`/`ssh-cert`), `KEY_ALGOS`, `SAN_TYPES` et l'invariant émetteur (une racine n'a pas de `parent_id`, un dérivé en exige un). |
+| `CertsValidate.ts` | **Validation PURE** (ni DB ni réseau), griefs GROUPÉS, messages français uniques (mêmes principes que `NotifyValidate`/`ProviderConfigValidate`). Ne valide que des **métadonnées** et **borne** la taille des blobs OPAQUES (`key_enc`, `wrapped_dek` jamais déchiffrés). Porte les tables `CERT_KINDS` (`root-ca`/`leaf-tls`/`ssh-ca`/`ssh-keypair`/`ssh-cert`), `KEY_ALGOS`, `SAN_TYPES` et l'invariant émetteur (une racine n'a pas de `parent_id`, un dérivé en exige un). |
 | `CertsDb.ts` | **Persistance SQLite dédiée** (`certs.db`, à côté de `registry.db`), possédée par le module (jamais une table de `registry.db`). **3 tables** (cf. « Schéma »). CRUD métadonnées + blobs, garde-fous de suppression (`childrenOf`), `listExpiring` pour le veilleur. **Listing PAGINÉ SQL** (`listPage`/`listRoots` — LIMIT/OFFSET, jamais de chargement complet) : filtres query/kinds/status, tris stables, portée **sous-arbre** et agrégats racines par **CTE récursive**, paramètre `focus` (page contenant un élément via `ROW_NUMBER`), colonne **`search`** dénormalisée (migration + backfill). Porte l'**invariant Q5** par des DTO distincts : `CertificateListItem` (SANS `key_enc`) / `CertificateDetail` (AVEC). Driver SQLite **injecté**. **Pas de `SecretBox`** : rien à chiffrer côté serveur. |
 | `CertExpiryWatcher.ts` | **Veilleur d'échéances** (producteur `cert-expiry`, C7) : balaye les métadonnées `not_after`, `raise` les certificats sous seuil (gravité croissante 30/14/7 j), `resolve` ceux qui repassent au vert ou disparaissent. Déclare **chez lui** l'interface `CertProblemReporter` (dépendance INVERSÉE, pattern `VmSyncService`) — `certs/` n'importe RIEN de `notify/`. Horloge et seuils injectables (tests). |
 | `CertsModule.ts` | **Façade et POINT DE BRANCHEMENT UNIQUE** (amovible, pattern `VmModule`/`NotifyModule`) : assemble `certs.db` + routes REST (`ApiExtension`) + timer horaire d'échéances. Module « en erreur » (certs.db illisible) → routes **503** détaillé sans faire tomber le serveur. Rapporteur de problèmes **OPTIONNEL** (sans lui, le module vit normalement, sans notifications). |
@@ -198,8 +221,8 @@ que `vm/`/`notify/`) ; le câblage concret tient en quelques lignes dans `index.
 
 | Fichier | Rôle |
 |---|---|
-| `PkiCrypto.ts` | **Clé maître** : dérivation PBKDF2-SHA-256, keycheck, chiffrement AES-GCM `v1:<iv>:<ct>` des clés privées. WebCrypto seul. Porte `KDF_VERSION`/`DEFAULT_ITERS`/`KEYCHECK_PLAINTEXT`. |
-| `PkiSession.ts` | **Coffre de session** de la clé maître dérivée : verrouillage auto (15 min d'inactivité), `touch`/`lock`, `onLock` → re-render. Clé en MÉMOIRE seule. Timers injectés. |
+| `PkiCrypto.ts` | **Enveloppe KEK/DEK** : dérivation KEK (PBKDF2-SHA-256), `initDek`/`unwrapDek` (emballage/déballage de la DEK — l'unwrap fait office de keycheck), `rewrapDek` (changement de phrase), chiffrement AES-GCM `v1:<iv>:<ct>` des clés privées. WebCrypto seul. Porte `KDF_VERSION`/`DEFAULT_ITERS`. |
+| `PkiSession.ts` | **Coffre de session** de la **DEK** (clé de chiffrement des données, déballée au déverrouillage) : verrouillage auto (15 min d'inactivité), `touch`/`lock`, `onLock` → re-render. Clé en MÉMOIRE seule. Timers injectés. |
 | `X509Factory.ts` | **Fabrique X.509** via `@peculiar/x509` : CA racines auto-signées + feuilles signées (extensions, EKU par usage, SKI/AKI, tolérance d'horloge). Produit la clé privée EN CLAIR le temps de la génération (l'appelant la chiffre aussitôt). |
 | `SshWire.ts` | **Primitives d'encodage « wire » SSH** (RFC 4251 §5) : uint32/uint64, string, mpint (règle du zéro de tête), base64. Brique de bas niveau des encodeurs OpenSSH. |
 | `OpenSshEncoder.ts` | **Encodeur OpenSSH MAISON** (décision Q3) : ligne `authorized_keys`, fichier privé `openssh-key-v1` (non chiffré), **certificat SSH signé** ed25519. Champs aléatoires (nonce/checkint) INJECTABLES → **validation croisée byte-identique ssh-keygen**. |
@@ -224,13 +247,14 @@ rien de la feature ; supprimer la feature = supprimer le module + ce fichier).
 `PRAGMA foreign_keys = ON` à chaque connexion (la FK composite parent et le
 `ON DELETE CASCADE` des SAN en dépendent), WAL + `busy_timeout` (parité `DocumentStore`).
 
-**Aucun secret exploitable ici** : `key_enc`/`keycheck_enc` arrivent DÉJÀ chiffrés par
-la clé maître de l'utilisateur ; le serveur ne stocke que des métadonnées lisibles et
-ces blobs opaques.
+**Aucun secret exploitable ici** : `key_enc`/`wrapped_dek` arrivent DÉJÀ chiffrés côté
+client ; le serveur ne stocke que des métadonnées lisibles et ces blobs opaques.
 
-- **`pki_documents`** — paramètres de dérivation de la clé maître **PAR document** :
-  `doc_id` (PK), `kdf_version`, `kdf_salt`, `kdf_iters`, `keycheck_enc` (constante
-  connue chiffrée côté client). Le serveur ne fait que **STOCKER** — il ne dérive jamais.
+- **`pki_documents`** — paramètres de dérivation de la KEK + enveloppe de la DEK **PAR
+  document** : `doc_id` (PK), `kdf_version`, `kdf_salt`, `kdf_iters`, `wrapped_dek` (la DEK
+  chiffrée par la KEK côté client — sert AUSSI de keycheck). Le serveur ne fait que
+  **STOCKER** — il ne dérive ni ne déballe jamais. Le **changement de phrase** ne réécrit
+  que cette ligne (`kdf_salt`/`kdf_iters`/`wrapped_dek`), sans toucher aux `certificates`.
 - **`certificates`** — métadonnées + matériau : `id` + `doc_id` (**PK composite**),
   `kind`, `parent_id` (émetteur), `label`, `subject`, `serial`, `not_before`,
   `not_after`, `fingerprint`, `key_algo`, `public_pem` (PUBLIC par nature),
@@ -523,10 +547,14 @@ module est en erreur (certs.db illisible). ⚠ `/pki` et `/roots` sont déclaré
   sous-arbre** (`children_total`, `children_alert` = descendants non révoqués à échéance
   ≤ 30 j — expirés inclus, `next_expiry` = échéance la plus proche de l'arbre). Mêmes
   paramètres que ci-dessus (sauf `root`) + tris `children_total`/`next_expiry` ;
-- `GET    /documents/:docId/certs/pki` → paramètres KDF + keycheck (`initialized:false`
+- `GET    /documents/:docId/certs/pki` → paramètres KDF + `wrapped_dek` (`initialized:false`
   SANS 404 : la première ouverture enchaîne sur l'initialisation) ;
 - `PUT    /documents/:docId/certs/pki` → initialisation **UNIQUE** (**409** si déjà
   initialisée : ré-initialiser rendrait tout indéchiffrable) ;
+- `PUT    /documents/:docId/certs/pki/rekey` → **changer la phrase maître** : réécrit
+  `kdf_salt`/`kdf_iters`/`wrapped_dek` (DEK ré-emballée sous la nouvelle KEK), **aucun
+  `key_enc` touché**. **404** si la PKI n'est pas initialisée ; PAS de verrou 409 (l'opé ne
+  peut pas rendre le coffre indéchiffrable). Déclarée AVANT `/:id` (« pki » n'est pas un id) ;
 - `GET    /documents/:docId/certs/:id` → détail unitaire, `key_enc` **INCLUS** (Q5) ;
 - `PUT    /documents/:docId/certs/:id` → créer/mettre à jour (métadonnées validées,
   blobs opaques ; `key_enc` absent = conservé ; **400** si `parent_id` désigne un
@@ -543,8 +571,9 @@ bookmarkable inchangé. Toujours enregistrée (`certsClient` null hors mode API 
 « mode API requis »).
 
 - **Écran VERROUILLÉ** : soit l'**initialisation** (PKI vierge → choix de la phrase
-  secrète ×2, avertissement de perte, dérivation + keycheck + `PUT /pki`), soit le
-  **déverrouillage** (saisie de la phrase → dérivation → vérification du keycheck). Les
+  secrète ×2, avertissement de perte, dérivation KEK + tirage/emballage de la DEK +
+  `PUT /pki`), soit le **déverrouillage** (saisie de la phrase → dérivation KEK →
+  **déballage de la DEK**, qui valide la phrase — cf. keycheck). Les
   **listings restent CONSULTABLES** en lecture seule (métadonnées + échéances colorées,
   filtres/tris/pagination, drill-in « Lister les certificats ») sans déverrouiller —
   seules les opérations de CLÉ l'exigent.
@@ -577,7 +606,9 @@ bookmarkable inchangé. Toujours enregistrée (`certsClient` null hors mode API 
     estompée au premier clic ailleurs / à la navigation suivante). La logique PURE (mapping
     du résultat, décision de vue) vit dans `core/CertsSearch` (testée en isolation).
 - **En-tête** (déverrouillé) : créer une **CA racine X.509**, une **CA SSH**, une **paire
-  SSH** ; **Verrouiller** ; **Actualiser**.
+  SSH** ; **Changer la phrase maître…** (modale : phrase actuelle + nouvelle ×2 →
+  `rewrapDek` + `PUT /pki/rekey` ; la session reste ouverte, la DEK ne changeant pas) ;
+  **Verrouiller** ; **Actualiser**.
 - **Créations en MODALE** (principe n°11) : chaque formulaire (init, CA racine, feuille
   TLS, CA/paire SSH, certificat SSH, PKCS#12) s'ouvre dans LA modale de l'app. La clé
   privée est générée dans WebCrypto, chiffrée par la clé maître, et seuls le public +
@@ -667,16 +698,39 @@ docker compose start dc-manager
    selon la nature du nouvel objet. Rien à changer côté schéma DB (les métadonnées et le
    blob sont génériques).
 
+### Changer la phrase maître (`PUT /pki/rekey`, `PkiCrypto.rewrapDek`)
+
+Grâce au chiffrement en enveloppe, changer la phrase est **O(1)** : on ne re-chiffre PAS
+les certificats, on ré-emballe seulement la DEK. Bouton **« Changer la phrase maître… »**
+de l'en-tête (session déverrouillée requise) → modale (phrase actuelle + nouvelle ×2).
+
+1. le client dérive l'**ancienne KEK** (phrase actuelle + `kdf_salt`/`kdf_iters` courants)
+   et la **nouvelle KEK** (nouvelle phrase + **sel régénéré**) ;
+2. `rewrapDek(oldKek, newKek, wrapped_dek)` **déballe** la DEK sous l'ancienne KEK et la
+   **ré-emballe** sous la nouvelle → nouveau `wrapped_dek`. La phrase actuelle est ainsi
+   RE-VÉRIFIÉE (le déballage échoue si elle est fausse → « Phrase actuelle incorrecte »),
+   et la DEK n'est même pas importée en clé — on re-chiffre juste son clair ;
+3. `PUT /pki/rekey` persiste `kdf_salt`/`kdf_iters`/`wrapped_dek` (UPDATE d'**une seule
+   ligne**, atomique — impossible de laisser un coffre à moitié migré) ; **aucun `key_enc`
+   n'est envoyé ni modifié** ;
+4. la DEK étant inchangée, la **session reste ouverte** ; les prochains déverrouillages
+   utilisent la nouvelle phrase. L'ancienne phrase ne déverrouille plus (l'ancienne KEK ne
+   déballe plus le nouveau `wrapped_dek`).
+
+> **Ré-init ≠ changement de phrase.** `PUT /pki` reste bloqué (409) sur une PKI déjà
+> initialisée — il tirerait une nouvelle DEK et perdrait les clés. Seul `PUT /pki/rekey`,
+> qui CONSERVE la DEK, est autorisé à réécrire les paramètres.
+
 ### Rotation future du KDF (le versionnage v1 est prévu pour ça)
 
 Le schéma est **VERSIONNÉ de bout en bout** (`kdf_version`, préfixe `v1:` des blobs) :
 1. introduire un `v2` dans `PkiCrypto` (nouveau KDF/algo) et l'accepter dans
    `CertsValidate.parsePkiParams` ;
 2. `decryptSecret` lit déjà le préfixe → les blobs `v1` restent déchiffrables ;
-3. prévoir une **ré-écriture des `key_enc`** (déchiffrer en `v1`, re-chiffrer en `v2`)
-   session déverrouillée — la clé maître ne quittant pas le navigateur, c'est un flux
-   purement client. Aucun changement de schéma DB n'est requis (le format est porté par
-   la valeur, pas par une colonne dédiée).
+3. faire évoluer le KDF ne touche que la **KEK** : ré-emballer la DEK sous une nouvelle KEK
+   `v2` (déchiffrer `wrapped_dek` en `v1`, re-chiffrer en `v2`) suffit — c'est exactement
+   le flux `rewrapDek` ci-dessus, les `key_enc` restant inchangés. Aucun changement de
+   schéma DB n'est requis (le format est porté par la valeur, pas par une colonne dédiée).
 
 ## Suppression de la feature (script d'amovibilité)
 

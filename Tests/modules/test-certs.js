@@ -1,6 +1,7 @@
 /* Tests modules — CERTIFICATS (PKI zéro-connaissance) : crypto CLIENT pure
-   (PkiCrypto : dérivation PBKDF2 + keycheck + chiffrement AES-GCM — WebCrypto,
-   disponible dans Node ≥ 18) et coffre de session (PkiSession : verrouillage
+   (PkiCrypto : dérivation KEK PBKDF2 + enveloppe DEK + changement de phrase +
+   chiffrement AES-GCM — WebCrypto, disponible dans Node ≥ 18) et coffre de session
+   (PkiSession : verrouillage
    auto/manuel, timers injectés). Les sections serveur (CertsDb) vivent dans
    test-server.js ; harnais et assertions : harness.js. */
 "use strict";
@@ -161,7 +162,7 @@ module.exports = async () => {
   }
   });
 
-  await section("Certs : PkiCrypto — dérivation PBKDF2, keycheck, chiffrement AES-GCM (WebCrypto)", async () => {
+  await section("Certs : PkiCrypto — enveloppe KEK/DEK, changement de phrase, chiffrement AES-GCM (WebCrypto)", async () => {
   {
     const { PkiCrypto } = D("certs/PkiCrypto.js");
     // WebCrypto requis (Node ≥ 18) — sinon section sautée avec un constat explicite.
@@ -182,39 +183,68 @@ module.exports = async () => {
     // CertsValidate) ; la dérivation est identique quelle que soit la valeur — on ne fait pas
     // attendre la suite de tests pour rien.
     const ITERS = 10000;
-    const key = await PkiCrypto.deriveKey("passphrase-maitre-de-test", salt, ITERS);
-    ck.eq(key.extractable, false, "clé dérivée NON extractible (ne quitte jamais le moteur WebCrypto)");
+    const kek = await PkiCrypto.deriveKek("passphrase-maitre-de-test", salt, ITERS);
+    ck.eq(kek.extractable, false, "KEK dérivée NON extractible (ne quitte jamais le moteur WebCrypto)");
+    let emptyPass = false;
+    try { await PkiCrypto.deriveKek("", salt, ITERS); } catch (_) { emptyPass = true; }
+    ck(emptyPass, "passphrase vide → refusée");
 
-    // Keycheck : bonne passphrase → true ; tout échec → false (JAMAIS de throw — même réponse UI).
-    const keycheck = await PkiCrypto.makeKeycheck(key);
-    ck(/^v1:/.test(keycheck), "keycheck au format v1:<iv>:<ct>");
-    ck.eq(await PkiCrypto.verifyKeycheck(key, keycheck), true, "keycheck : bonne clé → true");
-    const wrong = await PkiCrypto.deriveKey("mauvaise-passphrase", salt, ITERS);
-    ck.eq(await PkiCrypto.verifyKeycheck(wrong, keycheck), false, "keycheck : mauvaise passphrase → false (détection immédiate, sans serveur)");
-    ck.eq(await PkiCrypto.verifyKeycheck(key, "n-importe-quoi"), false, "keycheck : blob illisible → false (pas de throw)");
-    // Même passphrase mais AUTRE sel → autre clé (le sel PAR document compartimente les PKI).
-    const sameButOtherSalt = await PkiCrypto.deriveKey("passphrase-maitre-de-test", PkiCrypto.generateSaltB64(), ITERS);
-    ck.eq(await PkiCrypto.verifyKeycheck(sameButOtherSalt, keycheck), false, "même passphrase, autre sel → autre clé (sel par document)");
+    // INITIALISATION : la DEK est tirée aléatoirement et emballée par la KEK (wrapped_dek).
+    const { wrappedDek, dek } = await PkiCrypto.initDek(kek);
+    ck(/^v1:/.test(wrappedDek), "wrapped_dek au format v1:<iv>:<ct>");
+    ck.eq(dek.extractable, false, "DEK de session NON extractible (importée extractable:false)");
+    ck((await PkiCrypto.initDek(kek)).wrappedDek !== wrappedDek, "deux initialisations → DEK différentes (aléatoire)");
 
-    // Chiffrement des clés privées : aller-retour, IV aléatoire, refus explicites sans fuite.
+    // Chiffrement d'une clé privée SOUS LA DEK (c'est un key_enc de certificat).
     const pem = "-----BEGIN PRIVATE KEY-----exemple-----END PRIVATE KEY-----";
-    const enc = await PkiCrypto.encryptSecret(key, pem);
-    ck(/^v1:/.test(enc) && !enc.includes("exemple"), "chiffré au format v1:…, le clair n'apparaît pas");
-    ck.eq(await PkiCrypto.decryptSecret(key, enc), pem, "déchiffrement → clair d'origine");
-    ck((await PkiCrypto.encryptSecret(key, pem)) !== enc, "IV aléatoire → deux chiffrements du même clair diffèrent");
+    const keyEnc = await PkiCrypto.encryptSecret(dek, pem);
+    ck(/^v1:/.test(keyEnc) && !keyEnc.includes("exemple"), "key_enc au format v1:…, le clair n'apparaît pas");
+    ck.eq(await PkiCrypto.decryptSecret(dek, keyEnc), pem, "déchiffrement par la DEK → clair d'origine");
+    ck((await PkiCrypto.encryptSecret(dek, pem)) !== keyEnc, "IV aléatoire → deux chiffrements du même clair diffèrent");
+
+    // DÉVERROUILLAGE : re-dériver la KEK et DÉBALLER la DEK — l'unwrap FAIT office de keycheck.
+    const dekAgain = await PkiCrypto.unwrapDek(kek, wrappedDek);
+    ck.eq(await PkiCrypto.decryptSecret(dekAgain, keyEnc), pem, "unwrapDek (bonne phrase) → DEK qui déchiffre le key_enc");
+    const wrongKek = await PkiCrypto.deriveKek("mauvaise-passphrase", salt, ITERS);
+    let unwrapWrong = false;
+    try { await PkiCrypto.unwrapDek(wrongKek, wrappedDek); } catch (_) { unwrapWrong = true; }
+    ck(unwrapWrong, "unwrapDek (mauvaise phrase) → JETTE (GCM authentifié = keycheck)");
+    // Même passphrase mais AUTRE sel → autre KEK → ne déballe pas (le sel PAR document compartimente).
+    const kekOtherSalt = await PkiCrypto.deriveKek("passphrase-maitre-de-test", PkiCrypto.generateSaltB64(), ITERS);
+    let unwrapOtherSalt = false;
+    try { await PkiCrypto.unwrapDek(kekOtherSalt, wrappedDek); } catch (_) { unwrapOtherSalt = true; }
+    ck(unwrapOtherSalt, "même passphrase, autre sel → autre KEK → n'ouvre pas l'enveloppe");
+
+    // CHANGEMENT DE PHRASE MAÎTRE — le cœur : le key_enc n'est JAMAIS re-chiffré.
+    const newSalt = PkiCrypto.generateSaltB64();
+    const newKek = await PkiCrypto.deriveKek("nouvelle-passphrase", newSalt, ITERS);
+    const newWrapped = await PkiCrypto.rewrapDek(kek, newKek, wrappedDek);
+    ck(newWrapped !== wrappedDek && /^v1:/.test(newWrapped), "rewrapDek → nouvelle enveloppe (wrapped_dek) distincte");
+    // Le key_enc du certificat est INCHANGÉ (aucune ré-écriture) et toujours déchiffrable par la MÊME DEK.
+    ck.eq(await PkiCrypto.decryptSecret(dek, keyEnc), pem, "après changement de phrase, le key_enc INCHANGÉ se déchiffre encore (jamais re-chiffré)");
+    // Déverrouiller avec la NOUVELLE phrase rend la MÊME DEK, qui déchiffre le key_enc d'origine.
+    const dekAfter = await PkiCrypto.unwrapDek(newKek, newWrapped);
+    ck.eq(await PkiCrypto.decryptSecret(dekAfter, keyEnc), pem, "nouvelle phrase → même DEK → déchiffre le key_enc d'origine");
+    // L'ANCIENNE KEK ne déballe plus la NOUVELLE enveloppe (l'ancienne phrase est révoquée de fait).
+    let oldKekOnNew = false;
+    try { await PkiCrypto.unwrapDek(kek, newWrapped); } catch (_) { oldKekOnNew = true; }
+    ck(oldKekOnNew, "l'ancienne phrase ne déverrouille plus après changement");
+    // rewrapDek avec une MAUVAISE phrase actuelle → refus (déchiffrement de l'enveloppe échoue).
+    let rewrapWrongCur = false;
+    try { await PkiCrypto.rewrapDek(wrongKek, newKek, wrappedDek); } catch (_) { rewrapWrongCur = true; }
+    ck(rewrapWrongCur, "rewrapDek avec phrase actuelle fausse → refusé");
+
+    // Refus explicites sans fuite (clé différente, blob altéré, format inconnu).
     let wrongKeyErr = null;
-    try { await PkiCrypto.decryptSecret(wrong, enc); } catch (e) { wrongKeyErr = e.message; }
+    try { await PkiCrypto.decryptSecret(wrongKek, keyEnc); } catch (e) { wrongKeyErr = e.message; }
     ck(!!wrongKeyErr && /refusé/.test(wrongKeyErr) && !wrongKeyErr.includes("exemple"), "clé différente → erreur explicite, aucun contenu divulgué");
-    const tampered = enc.slice(0, -4) + (enc.endsWith("AAAA") ? "BBBB" : "AAAA");
+    const tampered = keyEnc.slice(0, -4) + (keyEnc.endsWith("AAAA") ? "BBBB" : "AAAA");
     let alt = false;
-    try { await PkiCrypto.decryptSecret(key, tampered); } catch (_) { alt = true; }
+    try { await PkiCrypto.decryptSecret(dek, tampered); } catch (_) { alt = true; }
     ck(alt, "blob altéré → déchiffrement refusé (GCM authentifié)");
     let badFmt = false;
-    try { await PkiCrypto.decryptSecret(key, "v9:a:b"); } catch (_) { badFmt = true; }
+    try { await PkiCrypto.decryptSecret(dek, "v9:a:b"); } catch (_) { badFmt = true; }
     ck(badFmt, "format de version inconnue → erreur explicite");
-    let emptyPass = false;
-    try { await PkiCrypto.deriveKey("", salt, ITERS); } catch (_) { emptyPass = true; }
-    ck(emptyPass, "passphrase vide → refusée");
   }
   });
 

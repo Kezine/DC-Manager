@@ -129,19 +129,21 @@ export interface CertificateInput {
   sans: CertSan[];
 }
 
-/** Paramètres de dérivation de la clé maître d'un document (GET /certs/pki). `initialized:false`
-    signale une PKI VIERGE (le client enchaîne sur l'initialisation) ; sinon les paramètres KDF +
-    keycheck (constante connue chiffrée) permettent la dérivation/vérification CÔTÉ CLIENT. */
+/** Paramètres PKI d'un document (GET /certs/pki). `initialized:false` signale une PKI VIERGE
+    (le client enchaîne sur l'initialisation) ; sinon les paramètres KDF + `wrapped_dek` (la DEK
+    chiffrée par la KEK) permettent, CÔTÉ CLIENT, de déballer la DEK (l'unwrap authentifié
+    valide du même coup la phrase — pas de keycheck séparé). */
 export type PkiState =
   | { initialized: false }
-  | { initialized: true; kdf_version: string; kdf_salt: string; kdf_iters: number; keycheck_enc: string };
+  | { initialized: true; kdf_version: string; kdf_salt: string; kdf_iters: number; wrapped_dek: string };
 
-/** CORPS envoyé à PUT /certs/pki (initialisation UNIQUE) — miroir de `PkiParamsCandidate`. */
-export interface PkiInitInput {
+/** CORPS envoyé à PUT /certs/pki (init) ET PUT /certs/pki/rekey (changement de phrase) —
+    miroir de `PkiParamsCandidate`. */
+export interface PkiParamsInput {
   kdf_version: string;
   kdf_salt: string;
   kdf_iters: number;
-  keycheck_enc: string;
+  wrapped_dek: string;
 }
 
 /** Erreur d'un appel certs porteuse du CODE HTTP et du `detail` serveur (503 module en erreur,
@@ -254,18 +256,24 @@ export class CertsClient {
 
   /* ---- Paramètres PKI (clé maître — dérivation CÔTÉ CLIENT) ---- */
 
-  /** État de la PKI du document : vierge (`initialized:false`) ou paramètres KDF + keycheck. */
+  /** État de la PKI du document : vierge (`initialized:false`) ou paramètres KDF + wrapped_dek. */
   async pki(): Promise<PkiState> {
     const json = await this.call("GET", "/certs/pki");
     if (json && json.initialized === true) {
-      return { initialized: true, kdf_version: json.kdf_version, kdf_salt: json.kdf_salt, kdf_iters: json.kdf_iters, keycheck_enc: json.keycheck_enc };
+      return { initialized: true, kdf_version: json.kdf_version, kdf_salt: json.kdf_salt, kdf_iters: json.kdf_iters, wrapped_dek: json.wrapped_dek };
     }
     return { initialized: false };
   }
 
   /** Initialise la PKI du document (UNIQUE : 409 si déjà initialisée — irréversible côté serveur). */
-  async initPki(input: PkiInitInput): Promise<void> {
+  async initPki(input: PkiParamsInput): Promise<void> {
     await this.call("PUT", "/certs/pki", input);
+  }
+
+  /** Change la phrase maître : réécrit le seul `wrapped_dek` (DEK ré-emballée) + paramètres KDF.
+      Ne touche à AUCUN key_enc (la DEK est conservée). 404 si la PKI n'est pas initialisée. */
+  async rekeyPki(input: PkiParamsInput): Promise<void> {
+    await this.call("PUT", "/certs/pki/rekey", input);
   }
 
   /* -------------------------------------------------------------------------- */

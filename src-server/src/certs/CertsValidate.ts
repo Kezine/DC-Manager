@@ -5,8 +5,8 @@
 
    Le serveur est ZÉRO-CONNAISSANCE (cadrage certs 2026-07-14) : il ne valide
    que des MÉTADONNÉES et des blobs OPAQUES — `key_enc` (clé privée chiffrée
-   côté client) et `keycheck_enc` ne sont jamais déchiffrés ni interprétés
-   ici ; seuls leur type/taille sont bornés (anti-abus).
+   côté client) et `wrapped_dek` (DEK chiffrée par la KEK) ne sont jamais
+   déchiffrés ni interprétés ici ; seuls leur type/taille sont bornés (anti-abus).
    ============================================================================= */
 
 /** Familles d'objets suivis (cadrage §3) : CA X.509, feuille TLS, CA SSH,
@@ -50,12 +50,15 @@ export interface CertificateCandidate {
   sans: SanCandidate[];
 }
 
-/** Paramètres PKI d'un document (dérivation de la clé maître, côté CLIENT). */
+/** Paramètres PKI d'un document (côté CLIENT) : dérivation de la KEK + enveloppe de la DEK.
+    `wrapped_dek` = la DEK (clé de chiffrement des données) chiffrée par la KEK dérivée de la
+    phrase maître ; le serveur ne fait que le STOCKER (blob opaque, jamais déchiffré). Sert à la
+    fois d'enveloppe de la DEK et de keycheck (l'unwrap authentifié valide la phrase côté client). */
 export interface PkiParamsCandidate {
   kdf_version: string;
   kdf_salt: string;
   kdf_iters: number;
-  keycheck_enc: string;
+  wrapped_dek: string;
 }
 
 /** Erreur de validation à N griefs — les routes la traduisent en 400 { issues }. */
@@ -131,10 +134,10 @@ export class CertsValidate {
     const iters = typeof candidate.kdf_iters === "number" && Number.isFinite(candidate.kdf_iters) ? Math.floor(candidate.kdf_iters) : NaN;
     // Plancher de la décision Q1 (≥ 600 000) — un client qui négocierait moins affaiblirait la clé maître.
     if (!(iters >= 600000)) issues.push("kdf_iters : entier ≥ 600000 attendu (décision Q1)");
-    const keycheck = typeof candidate.keycheck_enc === "string" ? candidate.keycheck_enc.trim() : "";
-    if (keycheck === "" || keycheck.length > MAX_BLOB_CHARS) issues.push("keycheck_enc : requis (valeur connue chiffrée côté client)");
+    const wrappedDek = typeof candidate.wrapped_dek === "string" ? candidate.wrapped_dek.trim() : "";
+    if (wrappedDek === "" || wrappedDek.length > MAX_BLOB_CHARS) issues.push("wrapped_dek : requis (DEK chiffrée par la KEK côté client)");
     if (issues.length) throw new CertsConfigError(issues);
-    return { kdf_version: version, kdf_salt: salt, kdf_iters: iters, keycheck_enc: keycheck };
+    return { kdf_version: version, kdf_salt: salt, kdf_iters: iters, wrapped_dek: wrappedDek };
   }
 
   /* --------------------------------------------------------------------------

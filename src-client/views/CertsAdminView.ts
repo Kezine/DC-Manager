@@ -254,6 +254,7 @@ export class CertsAdminView {
         this.actionButton("+ CA SSH", "Créer une autorité de certification SSH (ed25519)", () => this.sshKeyModal("ssh-ca"), "btn-primary"),
         this.actionButton("+ Paire SSH", "Créer une paire de clés SSH simple (ed25519)", () => this.sshKeyModal("ssh-keypair"), "btn-primary"),
       );
+      right.appendChild(this.actionButton("Changer la phrase maître…", "Re-chiffrer l'enveloppe de la clé maître avec une nouvelle phrase (les clés privées ne sont PAS re-chiffrées)", () => this.changePassphraseModal()));
       right.appendChild(this.actionButton("Verrouiller", "Oublier la clé maître (verrouillage immédiat)", () => { this.session.lock(); }));
     }
     right.appendChild(this.actionButton("Actualiser", "Recharger la liste", () => { this.session.touch(); void this.reload(); }));
@@ -1062,7 +1063,8 @@ export class CertsAdminView {
      Déverrouillage / initialisation de la clé maître
      -------------------------------------------------------------------------- */
 
-  /** Initialisation EN MODALE : phrase ×2, avertissement de perte, dérivation + keycheck + PUT /pki. */
+  /** Initialisation EN MODALE : phrase ×2, avertissement de perte, dérivation KEK + tirage/emballage
+      de la DEK (enveloppe) + PUT /pki. La session s'ouvre sur la DEK déballée (NON extractible). */
   private initModal(): void {
     const root = document.createElement("div");
     const warn = document.createElement("div"); warn.className = "form-hint"; warn.style.cssText = "margin-bottom:10px;color:var(--warn)";
@@ -1087,10 +1089,10 @@ export class CertsAdminView {
         try {
           const salt = PkiCrypto.generateSaltB64();
           const iters = PkiCrypto.DEFAULT_ITERS;
-          const key = await PkiCrypto.deriveKey(pass, salt, iters);
-          const keycheck = await PkiCrypto.makeKeycheck(key);
-          await this.client!.initPki({ kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: salt, kdf_iters: iters, keycheck_enc: keycheck });
-          this.session.unlock(key);
+          const kek = await PkiCrypto.deriveKek(pass, salt, iters);
+          const { wrappedDek, dek } = await PkiCrypto.initDek(kek); // DEK aléatoire, emballée par la KEK
+          await this.client!.initPki({ kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: salt, kdf_iters: iters, wrapped_dek: wrappedDek });
+          this.session.unlock(dek); // la session détient la DEK (non extractible), pas la KEK
           await this.reload();
           Notify.toast("PKI initialisée — session déverrouillée", "ok");
           return true;
@@ -1100,23 +1102,93 @@ export class CertsAdminView {
     setTimeout(() => p1.focus(), 30);
   }
 
-  /** Déverrouillage : dérive la clé, vérifie le keycheck (bon → unlock ; mauvais → message NEUTRE). */
+  /** Déverrouillage : dérive la KEK et DÉBALLE la DEK depuis wrapped_dek. L'unwrap AES-GCM est
+      authentifié : il réussit (→ unlock) si la phrase est bonne, JETTE sinon (→ message NEUTRE).
+      Le wrapped_dek FAIT donc office de keycheck — pas de vérification séparée. */
   private async attemptUnlock(pass: string, errBox: HTMLElement): Promise<void> {
     const state = this.pkiState;
     if (!state || state.initialized !== true) return;
     errBox.style.display = "none";
     if (pass.trim() === "") { this.showError(errBox, "Phrase secrète requise."); return; }
     try {
-      const key = await PkiCrypto.deriveKey(pass, state.kdf_salt, state.kdf_iters);
-      const ok = await PkiCrypto.verifyKeycheck(key, state.keycheck_enc);
-      if (!ok) { this.showError(errBox, "Clé maître incorrecte."); return; }  // aucun détail (invariant sécurité)
-      this.session.unlock(key);
+      const kek = await PkiCrypto.deriveKek(pass, state.kdf_salt, state.kdf_iters);
+      const dek = await PkiCrypto.unwrapDek(kek, state.wrapped_dek); // JETTE si mauvaise phrase (GCM refuse)
+      this.session.unlock(dek);
       this.render();
       Notify.toast("Session déverrouillée", "ok");
     } catch (_) {
-      // Toute erreur (dérivation, blob) → même réponse neutre, sans matériau de clé.
+      // Toute erreur (dérivation, unwrap, blob) → même réponse neutre, sans matériau de clé.
       this.showError(errBox, "Clé maître incorrecte.");
     }
+  }
+
+  /** Changement de phrase maître EN MODALE (principe n°11) — session déverrouillée requise.
+      PRINCIPE : la phrase ne garde pas les clés privées, elle garde la DEK. On déballe la DEK
+      avec l'ANCIENNE phrase et on la ré-emballe avec la NOUVELLE (`rewrapDek`) : un seul petit
+      wrapped_dek est réécrit, AUCUN key_enc n'est re-chiffré. La phrase actuelle est redemandée
+      (on en a besoin pour dériver l'ancienne KEK — la session ne détient que la DEK, pas la KEK
+      ni la phrase) et sert de RE-VÉRIFICATION. La DEK ne changeant pas, la session reste ouverte. */
+  private changePassphraseModal(): void {
+    const state = this.pkiState;
+    if (!state || state.initialized !== true || !this.session.unlocked) return;
+    this.session.touch();
+
+    const root = document.createElement("div");
+    const info = document.createElement("div"); info.className = "form-hint"; info.style.marginBottom = "10px";
+    info.textContent = "Change la phrase qui protège la clé maître. Les clés privées déjà stockées ne sont PAS re-chiffrées "
+      + "(elles restent lisibles) : seule l'enveloppe de la clé maître est ré-emballée avec la nouvelle phrase. "
+      + "Les artefacts déjà exportés (PKCS#12, ZIP protégés…) conservent leur ancienne protection propre.";
+    root.appendChild(info);
+
+    const cur = FormControls.text("", "phrase actuelle"); cur.type = "password"; cur.autocomplete = "current-password";
+    root.appendChild(FormControls.fieldRow("Phrase actuelle", cur, "Nécessaire pour déverrouiller l'enveloppe à ré-emballer."));
+    const p1 = FormControls.text("", "nouvelle phrase"); p1.type = "password"; p1.autocomplete = "new-password";
+    root.appendChild(FormControls.fieldRow("Nouvelle phrase", p1, "Choisissez une phrase longue et unique."));
+    const p2 = FormControls.text("", "confirmer la nouvelle phrase"); p2.type = "password"; p2.autocomplete = "new-password";
+    root.appendChild(FormControls.fieldRow("Confirmation", p2, "Ressaisissez la nouvelle phrase."));
+
+    const errBox = this.errBox(); root.appendChild(errBox);
+    this.host.openModal({
+      title: "Changer la phrase maître",
+      body: root,
+      saveLabel: "Changer la phrase",
+      onSave: async () => {
+        errBox.style.display = "none";
+        this.session.touch();
+        const currentPass = cur.value;
+        const newPass = p1.value;
+        if (currentPass.trim() === "") { this.showError(errBox, "Phrase actuelle requise."); return false; }
+        if (newPass.trim() === "") { this.showError(errBox, "Nouvelle phrase requise."); return false; }
+        if (newPass !== p2.value) { this.showError(errBox, "Les deux nouvelles phrases ne correspondent pas."); return false; }
+
+        // 1) Ré-emballer la DEK côté client. rewrapDek JETTE si la phrase actuelle est mauvaise
+        //    (déchiffrement refusé) — on l'isole pour un message ciblé, distinct d'une panne réseau.
+        //    On régénère le sel (bonne hygiène : nouvelle phrase = nouveaux paramètres KDF).
+        const newSalt = PkiCrypto.generateSaltB64();
+        const newIters = PkiCrypto.DEFAULT_ITERS;
+        let newWrappedDek: string;
+        try {
+          const oldKek = await PkiCrypto.deriveKek(currentPass, state.kdf_salt, state.kdf_iters);
+          const newKek = await PkiCrypto.deriveKek(newPass, newSalt, newIters);
+          newWrappedDek = await PkiCrypto.rewrapDek(oldKek, newKek, state.wrapped_dek);
+        } catch (_) {
+          this.showError(errBox, "Phrase actuelle incorrecte.");
+          return false;
+        }
+
+        // 2) Persister la nouvelle enveloppe (UPDATE d'une seule ligne côté serveur).
+        try {
+          await this.client!.rekeyPki({ kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: newSalt, kdf_iters: newIters, wrapped_dek: newWrappedDek });
+        } catch (e) { this.showError(errBox, e); return false; }
+
+        // 3) Rafraîchir l'état local : les prochains déverrouillages utiliseront les nouveaux
+        //    paramètres. La session détient toujours la MÊME DEK → elle reste valablement ouverte.
+        this.pkiState = { initialized: true, kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: newSalt, kdf_iters: newIters, wrapped_dek: newWrappedDek };
+        Notify.toast("Phrase maître changée", "ok");
+        return true;
+      },
+    });
+    setTimeout(() => cur.focus(), 30);
   }
 
   /* --------------------------------------------------------------------------

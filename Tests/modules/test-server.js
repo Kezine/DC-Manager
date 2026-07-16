@@ -1654,18 +1654,25 @@ module.exports = async () => {
       const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
       for (const t of ["pki_documents", "certificates", "certificate_sans"]) ck(tables.includes(t), "schéma : table " + t + " créée");
 
-      // -- PKI : initialisation UNIQUE (jamais d'écrasement — clé maître irremplaçable). --
+      // -- PKI : initialisation UNIQUE (jamais d'écrasement — ré-init tirerait une nouvelle DEK). --
       ck.eq(db.pkiParams("doc-A"), null, "PKI non initialisée → null (le client enchaîne sur l'initialisation)");
-      const pkiOk = db.initPki("doc-A", { kdf_version: "v1", kdf_salt: "c2VsLWFsZWF0b2lyZQ==", kdf_iters: 600000, keycheck_enc: "v1:aXY=:Y2hlY2s=" });
+      const pkiOk = db.initPki("doc-A", { kdf_version: "v1", kdf_salt: "c2VsLWFsZWF0b2lyZQ==", kdf_iters: 600000, wrapped_dek: "v1:aXY=:d3JhcHBlZA==" });
       ck.eq(pkiOk, true, "initPki : première initialisation acceptée");
       const params = db.pkiParams("doc-A");
-      ck(params.kdf_version === "v1" && params.kdf_iters === 600000 && params.kdf_salt === "c2VsLWFsZWF0b2lyZQ==", "pkiParams : aller-retour fidèle (sel/itérations/version)");
-      ck.eq(db.initPki("doc-A", { kdf_version: "v1", kdf_salt: "YXV0cmU=", kdf_iters: 700000, keycheck_enc: "x" }), false, "ré-initialisation REFUSÉE (rendrait les clés stockées indéchiffrables)");
+      ck(params.kdf_version === "v1" && params.kdf_iters === 600000 && params.kdf_salt === "c2VsLWFsZWF0b2lyZQ==" && params.wrapped_dek === "v1:aXY=:d3JhcHBlZA==", "pkiParams : aller-retour fidèle (sel/itérations/version/wrapped_dek)");
+      ck.eq(db.initPki("doc-A", { kdf_version: "v1", kdf_salt: "YXV0cmU=", kdf_iters: 700000, wrapped_dek: "v1:x:y" }), false, "ré-initialisation REFUSÉE (rendrait les clés stockées indéchiffrables)");
       ck.eq(db.pkiParams("doc-A").kdf_salt, "c2VsLWFsZWF0b2lyZQ==", "…paramètres d'origine INTACTS");
-      // Validation des paramètres (plancher Q1, base64, version connue).
+
+      // -- CHANGEMENT DE PHRASE (rekeyPki) : réécrit sel/itérations/wrapped_dek, conserve la DEK. --
+      ck.eq(db.rekeyPki("doc-Z", { kdf_version: "v1", kdf_salt: "eA==", kdf_iters: 600000, wrapped_dek: "v1:a:b" }), false, "rekeyPki sur PKI vierge → false (404 côté route)");
+      ck.eq(db.rekeyPki("doc-A", { kdf_version: "v1", kdf_salt: "bm91dmVhdQ==", kdf_iters: 800000, wrapped_dek: "v1:bmV3:ZW52ZWxvcHBl" }), true, "rekeyPki : changement de phrase accepté (PKI initialisée)");
+      const rek = db.pkiParams("doc-A");
+      ck(rek.kdf_salt === "bm91dmVhdQ==" && rek.kdf_iters === 800000 && rek.wrapped_dek === "v1:bmV3:ZW52ZWxvcHBl", "…nouveaux sel/itérations/wrapped_dek persistés (nouvelle enveloppe)");
+
+      // Validation des paramètres (plancher Q1, base64, version connue) — partagée init/rekey.
       let pkiIssues = null;
-      try { db.initPki("doc-B", { kdf_version: "v2", kdf_salt: "pas du base64 !", kdf_iters: 1000, keycheck_enc: "" }); } catch (e) { if (e instanceof CertsConfigError) pkiIssues = e.issues; }
-      ck(!!pkiIssues && pkiIssues.some((i) => /kdf_version/.test(i)) && pkiIssues.some((i) => /600000/.test(i)) && pkiIssues.some((i) => /kdf_salt/.test(i)), "paramètres PKI invalides → griefs groupés (version, plancher d'itérations, sel)");
+      try { db.initPki("doc-B", { kdf_version: "v2", kdf_salt: "pas du base64 !", kdf_iters: 1000, wrapped_dek: "" }); } catch (e) { if (e instanceof CertsConfigError) pkiIssues = e.issues; }
+      ck(!!pkiIssues && pkiIssues.some((i) => /kdf_version/.test(i)) && pkiIssues.some((i) => /600000/.test(i)) && pkiIssues.some((i) => /kdf_salt/.test(i)) && pkiIssues.some((i) => /wrapped_dek/.test(i)), "paramètres PKI invalides → griefs groupés (version, plancher d'itérations, sel, wrapped_dek)");
 
       // -- CRÉATION d'une racine (métadonnées + SAN + clé chiffrée client). --
       const rootDetail = db.save("doc-A", "ca-1", {

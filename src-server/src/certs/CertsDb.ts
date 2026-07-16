@@ -18,8 +18,8 @@ import { CertsValidate, type CertificateCandidate, type PkiParamsCandidate, type
    opaques. PAS de SecretBox ici : il n'y a rien à chiffrer côté serveur.
 
    VRAIES TABLES (contrainte transverse) — schéma EXACT du cadrage §3 :
-   - pki_documents     : paramètres de dérivation de la clé maître PAR document
-                         (sel, itérations, keycheck chiffré côté client) ;
+   - pki_documents     : paramètres de dérivation de la KEK PAR document + enveloppe
+                         de la DEK (sel, itérations, wrapped_dek — chiffré côté client) ;
    - certificates      : métadonnées + public_pem (public par nature) +
                          key_enc (blob chiffré client) — PK (doc_id, id),
                          FK composite parent (émetteur) ;
@@ -59,7 +59,7 @@ export interface CertificateDetail extends CertificateListItem {
   key_enc: string | null;
 }
 
-/** Paramètres PKI d'un document tels que renvoyés au client (dérivation + keycheck). */
+/** Paramètres PKI d'un document tels que renvoyés au client (dérivation KEK + enveloppe DEK). */
 export interface PkiParams extends PkiParamsCandidate {
   doc_id: string;
 }
@@ -155,7 +155,7 @@ export class CertsDb {
         kdf_version   TEXT NOT NULL,
         kdf_salt      TEXT NOT NULL,
         kdf_iters     INTEGER NOT NULL,
-        keycheck_enc  TEXT NOT NULL
+        wrapped_dek   TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS certificates (
         id            TEXT NOT NULL,
@@ -236,20 +236,39 @@ export class CertsDb {
 
   pkiParams(docId: string): PkiParams | null {
     const row = this.db.prepare("SELECT * FROM pki_documents WHERE doc_id = ?").get(docId) as any;
-    return row ? { doc_id: row.doc_id, kdf_version: row.kdf_version, kdf_salt: row.kdf_salt, kdf_iters: row.kdf_iters, keycheck_enc: row.keycheck_enc } : null;
+    return row ? { doc_id: row.doc_id, kdf_version: row.kdf_version, kdf_salt: row.kdf_salt, kdf_iters: row.kdf_iters, wrapped_dek: row.wrapped_dek } : null;
   }
 
-  /** Initialise la PKI d'un document (première ouverture côté client : sel + keycheck).
-      REFUSE l'écrasement (false) : ré-initialiser changerait la clé maître et rendrait
-      indéchiffrables toutes les clés déjà stockées — geste irréversible interdit en v1. */
+  /** Initialise la PKI d'un document (première ouverture côté client : sel + enveloppe de la DEK).
+      REFUSE l'écrasement (false) : ré-initialiser tirerait une NOUVELLE DEK et rendrait
+      indéchiffrables toutes les clés déjà stockées — geste irréversible interdit (409). Le
+      CHANGEMENT DE PHRASE, lui, passe par `rekeyPki` (il conserve la DEK, donc les key_enc). */
   initPki(docId: string, candidate: Record<string, unknown>): boolean {
     const parsed = CertsValidate.parsePkiParams(candidate);
     if (this.pkiParams(docId)) return false;
     this.db.prepare(`
-      INSERT INTO pki_documents (doc_id, kdf_version, kdf_salt, kdf_iters, keycheck_enc)
-      VALUES (@doc_id, @kdf_version, @kdf_salt, @kdf_iters, @keycheck_enc)
+      INSERT INTO pki_documents (doc_id, kdf_version, kdf_salt, kdf_iters, wrapped_dek)
+      VALUES (@doc_id, @kdf_version, @kdf_salt, @kdf_iters, @wrapped_dek)
     `).run({ doc_id: docId, ...parsed });
     this.log.info("certs: PKI initialisée", docId, parsed.kdf_version + ", " + parsed.kdf_iters + " itérations");
+    return true;
+  }
+
+  /** CHANGEMENT DE PHRASE MAÎTRE (re-chiffrement de l'enveloppe) — réécrit UNIQUEMENT les
+      paramètres KDF + le `wrapped_dek` (la DEK ré-emballée sous la nouvelle KEK), sur la SEULE
+      ligne pki_documents. Ne touche à AUCUN `key_enc` : la DEK est inchangée, les clés privées
+      restent déchiffrables. UPDATE d'une seule ligne = atomique par nature, donc SÛR par
+      construction (impossible de laisser un coffre à moitié migré). Renvoie false si la PKI
+      n'est pas encore initialisée (rien à re-chiffrer → 404 côté route). */
+  rekeyPki(docId: string, candidate: Record<string, unknown>): boolean {
+    const parsed = CertsValidate.parsePkiParams(candidate);
+    if (!this.pkiParams(docId)) return false;
+    this.db.prepare(`
+      UPDATE pki_documents SET kdf_version = @kdf_version, kdf_salt = @kdf_salt,
+             kdf_iters = @kdf_iters, wrapped_dek = @wrapped_dek
+      WHERE doc_id = @doc_id
+    `).run({ doc_id: docId, ...parsed });
+    this.log.info("certs: phrase maître changée (enveloppe re-chiffrée)", docId, parsed.kdf_version + ", " + parsed.kdf_iters + " itérations");
     return true;
   }
 
