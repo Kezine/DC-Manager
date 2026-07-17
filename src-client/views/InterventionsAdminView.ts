@@ -1,9 +1,13 @@
 import { Html } from "../core/Html";
 import { Format } from "../core/Format";
+import { Markdown } from "../core/Markdown";
 import { I18n } from "../i18n/I18n";
 import { InterventionsFormat, type BadgeClass } from "../core/InterventionsFormat";
 import { FormControls, type SelectOption } from "../ui/FormControls";
 import { MultiSelect, type MultiItem } from "../ui/MultiSelect";
+import { SearchPop, type SearchPopResult } from "../ui/SearchPop";
+import { Icons } from "../ui/Icons";
+import { IconButton } from "../ui/IconButton";
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from "../data/config";
 import { Notify } from "../ui/Notify";
 import { Dialog } from "../ui/Dialog";
@@ -45,13 +49,20 @@ import type {
    ============================================================================= */
 
 /** Source des cibles liables (équipements/VMs/spares) — interface hôte INJECTÉE (la vue ne connaît pas le
-    Store). `list` alimente le sélecteur de l'éditeur de liens ; `labelOf` résout le libellé d'un lien
-    existant (null = cible disparue → « introuvable » côté UI, orphelin toléré). */
+    Store). `labelOf` résout le libellé d'un lien existant (null = cible disparue → « introuvable » côté UI,
+    orphelin toléré) ; `search` alimente la SÉLECTION unifiée (SearchPop) de l'éditeur de liens ;
+    `openTargetDetail` ouvre la fiche de la cible avec retour-auto (aller-retour). */
 export interface InterventionTargetSource {
-  /** Cibles disponibles d'une famille ("equipment"|"vm"|"spare"), triées et libellées. */
-  list(kind: string): Array<{ id: string; label: string }>;
   /** Libellé d'une cible précise, ou null si elle n'existe plus dans le document (orphelin). */
   labelOf(kind: string, id: string): string | null;
+  /** Recherche UNIFIÉE sur TOUTES les familles liables (équipements + VMs + spares CONFONDUS) : renvoie des
+      candidats {kind,id,label} déjà TRIÉS par pertinence (préfixe avant inclusion) et BORNÉS. `excluded` =
+      clés « kind:id » des cibles déjà liées, écartées des résultats (dédup). Insensible casse/accents. */
+  search(query: string, excluded?: ReadonlySet<string>): Array<{ kind: string; id: string; label: string }>;
+  /** Ouvre la FICHE DE DÉTAIL existante d'une cible (equipment/vm/spare). `onClosed` est rappelé à la
+      FERMETURE de cette fiche (quelle qu'en soit la cause) → retour-auto à la modale de détail de
+      l'intervention (l'app n'a qu'un overlay de modale, sans empilement). */
+  openTargetDetail(kind: string, id: string, onClosed: () => void): void;
 }
 
 /** État d'un listing (mémoire d'instance — PAS de sessionStorage : les volumes vivent côté serveur, l'état
@@ -174,8 +185,10 @@ export class InterventionsAdminView {
     const bar = document.createElement("div");
     bar.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px";
 
+    // Champ de recherche NORMALISÉ (même markup/thème que la recherche des listings — classe `.search-input`,
+    // type search) ; le comportement (anti-rebond + requête serveur) reste propre à cette page paginée.
     const search = document.createElement("input");
-    search.type = "search"; search.placeholder = I18n.t("interventions.search.placeholder");
+    search.type = "search"; search.className = "search-input"; search.placeholder = I18n.t("interventions.search.placeholder");
     search.value = this.state.query; search.style.cssText = "min-width:240px;flex:0 1 320px";
     search.oninput = () => {
       if (this.searchTimer) clearTimeout(this.searchTimer);
@@ -257,7 +270,11 @@ export class InterventionsAdminView {
     const tr = document.createElement("tr");
 
     const title = document.createElement("td");
-    const span = document.createElement("span"); span.textContent = item.title; title.appendChild(span);
+    // Le TITRE ouvre la modale de DÉTAIL (consultation) — même geste que l'action « Détails » de la ligne.
+    const span = document.createElement("span"); span.textContent = item.title;
+    span.style.cssText = "cursor:pointer;color:var(--accent)"; span.title = I18n.t("interventions.rowAction.details");
+    span.onclick = () => this.detailModal(item);
+    title.appendChild(span);
     tr.appendChild(title);
 
     tr.appendChild(this.htmlCell(this.badge(I18n.t(InterventionsFormat.kindLabelKey(item.kind)), "neutral")));
@@ -293,37 +310,41 @@ export class InterventionsAdminView {
     return td;
   }
 
-  /** Cellule « Jira » : lien cliquable si une URL est fabricable (base + clé, ou clé déjà URL) ; sinon texte
-      brut (base non configurée) ou « — » si aucune référence. */
+  /** Cellule « Jira » : réutilise le contenu inline (lien/texte/« — ») dans un `<td>`. */
   private jiraCell(item: InterventionRecord): HTMLElement {
-    const td = document.createElement("td");
+    const td = document.createElement("td"); td.appendChild(this.jiraInline(item)); return td;
+  }
+
+  /** Contenu Jira RÉUTILISABLE (listing + modale de détail) : lien cliquable si une URL est fabricable
+      (base + clé, ou clé déjà URL) ; sinon texte brut mono (base non configurée) ; « — » si aucune référence. */
+  private jiraInline(item: InterventionRecord): HTMLElement {
     const ref = item.jira_ref;
-    if (!ref) { td.innerHTML = InterventionsAdminView.MUTED; return td; }
+    if (!ref) { const s = document.createElement("span"); s.innerHTML = InterventionsAdminView.MUTED; return s; }
     const url = InterventionsFormat.jiraUrl(this.jiraBase, ref);
     if (url) {
       const a = document.createElement("a");
       a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = ref;
       a.style.cssText = "font-family:var(--mono);font-size:12px";
-      td.appendChild(a);
-    } else {
-      td.style.cssText = "font-family:var(--mono);font-size:12px"; td.textContent = ref;
+      return a;
     }
-    return td;
+    const span = document.createElement("span"); span.style.cssText = "font-family:var(--mono);font-size:12px"; span.textContent = ref;
+    return span;
   }
 
-  /** Actions par ligne : Modifier · Démarrer (declared/planned → in_progress) · Clore (in_progress → closed)
-      · Supprimer. Les transitions rapides relisent le corps complet (GET) puis PUT le status changé (le
-      serveur re-estampille updated_*). */
+  /** Actions par ligne, en boutons-ICÔNE (principe n°14) : Détails · Modifier · Démarrer (declared/planned →
+      in_progress) · Clore (in_progress → closed) · Supprimer (danger). Les transitions rapides relisent le
+      corps complet (GET) puis PUT le status changé (le serveur re-estampille updated_*). */
   private actionsCell(item: InterventionRecord): HTMLElement {
     const td = document.createElement("td"); td.style.cssText = "display:flex;gap:4px;flex-wrap:wrap";
-    td.appendChild(this.actionButton(I18n.t("interventions.rowAction.edit"), "", () => this.interventionModal(item, item.kind)));
+    td.appendChild(this.iconAction(Icons.INFO, I18n.t("interventions.rowAction.details"), () => this.detailModal(item)));
+    td.appendChild(this.iconAction(Icons.EDIT, I18n.t("interventions.rowAction.edit"), () => this.interventionModal(item, item.kind)));
     if (item.status === "declared" || item.status === "planned") {
-      td.appendChild(this.actionButton(I18n.t("interventions.rowAction.start"), "", () => void this.quickTransition(item, "in_progress")));
+      td.appendChild(this.iconAction(Icons.PLAY, I18n.t("interventions.rowAction.start"), () => void this.quickTransition(item, "in_progress")));
     }
     if (item.status === "in_progress") {
-      td.appendChild(this.actionButton(I18n.t("interventions.rowAction.close"), "", () => void this.quickTransition(item, "closed")));
+      td.appendChild(this.iconAction(Icons.CHECK, I18n.t("interventions.rowAction.close"), () => void this.quickTransition(item, "closed")));
     }
-    td.appendChild(this.actionButton(I18n.t("interventions.rowAction.delete"), "", () => void this.remove(item), "btn-ghost"));
+    td.appendChild(this.iconAction(Icons.DELETE, I18n.t("interventions.rowAction.delete"), () => void this.remove(item), true));
     return td;
   }
 
@@ -398,11 +419,12 @@ export class InterventionsAdminView {
     }
     const createStatus = kind === "intervention" ? "planned" : "declared";
 
-    const startInput = document.createElement("input"); startInput.type = "datetime-local";
-    startInput.value = InterventionsAdminView.isoToInput(existing ? existing.planned_start : null);
+    // Fenêtre planifiée : contrôle de DATE-HEURE maison (FormControls.date, mode « date-time » — principe
+    // n°14, jamais un <input datetime-local> brut). `.value` proxifié = valeur d'un datetime-local
+    // (« AAAA-MM-JJTHH:MM ») ; la conversion locale ⇄ ISO (UTC) reste identique (isoToInput/inputToIso).
+    const startInput: any = FormControls.date(InterventionsAdminView.isoToInput(existing ? existing.planned_start : null), { mode: "date-time" });
     root.appendChild(FormControls.fieldRow(I18n.t("interventions.modal.plannedStart"), startInput, I18n.t("interventions.modal.plannedHint")));
-    const endInput = document.createElement("input"); endInput.type = "datetime-local";
-    endInput.value = InterventionsAdminView.isoToInput(existing ? existing.planned_end : null);
+    const endInput: any = FormControls.date(InterventionsAdminView.isoToInput(existing ? existing.planned_end : null), { mode: "date-time" });
     root.appendChild(FormControls.fieldRow(I18n.t("interventions.modal.plannedEnd"), endInput));
 
     const jiraInput = FormControls.text(existing && existing.jira_ref ? existing.jira_ref : "", I18n.t("interventions.modal.jiraRefPlaceholder"));
@@ -447,22 +469,14 @@ export class InterventionsAdminView {
     setTimeout(() => titleInput.focus(), 30);
   }
 
-  /** Éditeur de liens : sélecteur famille + cible + « Ajouter », et la liste ordonnée (retrait par ligne).
-      `links` est mutée en place (l'ordre = position ; le serveur remplace intégralement à l'enregistrement). */
+  /** Éditeur de liens : SÉLECTION unifiée via SearchPop (recherche sur équipements + VMs + spares CONFONDUS,
+      le CLIC lie l'élément) + la liste ordonnée avec retrait par bouton-ICÔNE (principe n°14). `links` est
+      mutée en place (l'ordre = position ; le serveur remplace intégralement à l'enregistrement). */
   private buildLinksEditor(links: InterventionLink[]): HTMLElement {
     const field = document.createElement("div"); field.className = "form-field";
     const label = document.createElement("label"); label.textContent = I18n.t("interventions.modal.links");
     const hint = document.createElement("div"); hint.className = "form-hint"; hint.textContent = I18n.t("interventions.modal.linksHint");
     field.append(label, hint);
-
-    const familySel = FormControls.select(InterventionsAdminView.slugOptions(InterventionsFormat.TARGET_KIND_SLUGS, (s) => InterventionsFormat.targetKindLabelKey(s)), "equipment");
-    const targetSel = FormControls.select([], "");
-    const repopulate = (): void => {
-      const opts = this.targets.list(familySel.value).map((t) => ({ value: t.id, label: t.label }));
-      FormControls.fillSelect(targetSel, opts.length ? opts : [{ value: "", label: I18n.t("interventions.modal.linksNoTarget") }], opts.length ? opts[0].value : "");
-      targetSel.disabled = opts.length === 0;
-    };
-    familySel.onchange = repopulate; repopulate();
 
     const listEl = document.createElement("div"); listEl.style.marginTop = "8px";
     const renderLinks = (): void => {
@@ -474,34 +488,137 @@ export class InterventionsAdminView {
       links.forEach((l, index) => {
         const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:8px;padding:2px 0";
         const resolved = this.targets.labelOf(l.target_kind, l.target_id);
+        const icon = document.createElement("span"); icon.className = "gi"; icon.setAttribute("aria-hidden", "true"); icon.innerHTML = InterventionsAdminView.familyIcon(l.target_kind);
         const text = document.createElement("span");
         text.textContent = I18n.t(InterventionsFormat.targetKindLabelKey(l.target_kind)) + " · " + (resolved !== null ? resolved : I18n.t("interventions.target.unknown"));
         if (resolved === null) text.style.color = "var(--fg-dimmer)";   // cible disparue (orphelin) → grisée
-        const del = this.actionButton(I18n.t("interventions.modal.linksRemove"), "", () => { links.splice(index, 1); renderLinks(); });
-        row.append(text, del); listEl.appendChild(row);
+        const del = this.iconAction(Icons.CLOSE, I18n.t("interventions.modal.linksRemove"), () => { links.splice(index, 1); renderLinks(); });
+        del.style.marginLeft = "auto";
+        row.append(icon, text, del); listEl.appendChild(row);
       });
     };
     renderLinks();
 
-    const add = this.actionButton(I18n.t("interventions.modal.linksAdd"), "", () => {
-      const id = targetSel.value;
-      if (!id) return;
-      links.push({ target_kind: familySel.value, target_id: id });
-      renderLinks();
-    }, "btn-primary");
+    // SÉLECTION unifiée (SearchPop) : la recherche traverse TOUTES les familles à la fois ; chaque résultat
+    // porte son badge de famille (`tag`) ; le CLIC lie l'élément. Les cibles DÉJÀ liées sont exclues des
+    // résultats (dédup calculée à chaque frappe sur l'état COURANT de `links`), un doublon résiduel étant
+    // ignoré avec un toast discret. La source (recherche sur le Store) est injectée via `this.targets`.
+    const pop = new SearchPop({
+      placeholder: I18n.t("interventions.modal.linksSearchPlaceholder"),
+      minChars: 1,
+      fetch: (query) => {
+        const excluded = new Set(links.map((l) => l.target_kind + ":" + l.target_id));
+        const results = this.targets.search(query, excluded);
+        return Promise.resolve(results.map((r): SearchPopResult => ({
+          id: r.kind + ":" + r.id, label: r.label,
+          tag: I18n.t(InterventionsFormat.targetKindLabelKey(r.kind)), data: r,
+        })));
+      },
+      onPick: (result) => {
+        const t = result.data as { kind: string; id: string; label: string };
+        if (links.some((l) => l.target_kind === t.kind && l.target_id === t.id)) { Notify.toast(I18n.t("interventions.toast.linkExists"), "info"); return; }
+        links.push({ target_kind: t.kind, target_id: t.id });
+        renderLinks();
+      },
+    });
+    const searchWrap = document.createElement("div"); searchWrap.style.marginTop = "6px"; searchWrap.appendChild(pop.element);
 
-    const controls = document.createElement("div"); controls.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px";
-    const famWrap = document.createElement("label"); famWrap.style.cssText = "display:inline-flex;align-items:center;gap:6px";
-    const famTxt = document.createElement("span"); famTxt.className = "lt-flabel"; famTxt.textContent = I18n.t("interventions.modal.linksFamily");
-    famWrap.append(famTxt, familySel);
-    const tgtWrap = document.createElement("label"); tgtWrap.style.cssText = "display:inline-flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0";
-    const tgtTxt = document.createElement("span"); tgtTxt.className = "lt-flabel"; tgtTxt.textContent = I18n.t("interventions.modal.linksTarget");
-    targetSel.style.cssText = "flex:1 1 auto;min-width:0";
-    tgtWrap.append(tgtTxt, targetSel);
-    controls.append(famWrap, tgtWrap, add);
-
-    field.append(controls, listEl);
+    field.append(searchWrap, listEl);
     return field;
+  }
+
+  /* --------------------------------------------------------------------------
+     Modale de DÉTAIL (consultation) + aller-retour vers les fiches liées
+     -------------------------------------------------------------------------- */
+
+  /** Modale de CONSULTATION d'une intervention (hideFooter) : badges (nature/priorité/statut), fenêtre
+      planifiée, référence Jira, description rendue en MARKDOWN, audit, et la liste des objets liés (icône de
+      famille + libellé + badge ; orphelin « introuvable » grisé, NON cliquable). Un CLIC sur un objet lié
+      existant ouvre sa fiche de détail PUIS revient ICI à la fermeture (aller-retour — overlay unique). Le
+      bouton « Modifier » bascule vers la modale d'ÉDITION (openModal remplace le contenu, fermer-puis-ouvrir).
+      L'`item` du listing porte déjà TOUS les champs (liste et détail partagent la même forme serveur) — aucune
+      relecture réseau nécessaire. */
+  private detailModal(item: InterventionRecord): void {
+    const root = document.createElement("div");
+
+    const badges = document.createElement("div"); badges.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px";
+    badges.innerHTML = this.badge(I18n.t(InterventionsFormat.kindLabelKey(item.kind)), "neutral")
+      + this.badge(I18n.t(InterventionsFormat.priorityLabelKey(item.priority)), InterventionsFormat.priorityClass(item.priority))
+      + this.badge(I18n.t(InterventionsFormat.statusLabelKey(item.status)), InterventionsFormat.statusClass(item.status));
+    root.appendChild(badges);
+
+    const win = InterventionsFormat.formatWindow(item.planned_start, item.planned_end);
+    root.appendChild(this.detailField(I18n.t("interventions.col.window"), this.textValue(win || "—", !win)));
+    root.appendChild(this.detailField(I18n.t("interventions.col.jira"), this.jiraInline(item)));
+
+    // Description : MARKDOWN (micromark, défauts sûrs → sortie injectable en innerHTML — cf. core/Markdown).
+    const desc = document.createElement("div");
+    if (item.description && item.description.trim() !== "") { desc.className = "md-body"; desc.innerHTML = Markdown.render(item.description); }
+    else { desc.className = "form-hint"; desc.style.fontStyle = "italic"; desc.textContent = I18n.t("interventions.detail.noDescription"); }
+    root.appendChild(this.detailField(I18n.t("interventions.modal.description"), desc));
+
+    root.appendChild(this.detailField(I18n.t("interventions.modal.links"), this.detailLinksList(item)));
+    root.appendChild(this.detailField(I18n.t("interventions.col.createdBy"), this.textValue(this.auditText(item.created_by, item.created_date))));
+    root.appendChild(this.detailField(I18n.t("interventions.detail.updatedBy"), this.textValue(this.auditText(item.updated_by, item.updated_date))));
+
+    // « Modifier » : bascule vers la modale d'ÉDITION. openModal étant un overlay UNIQUE, l'ouvrir REMPLACE ce
+    // détail (fermer-puis-ouvrir implicite) ; inutile de fermer d'abord.
+    const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
+    actions.appendChild(this.actionButton(I18n.t("interventions.rowAction.edit"), "", () => this.interventionModal(item, item.kind), "btn-primary"));
+    root.appendChild(actions);
+
+    this.host.openModal({ title: I18n.t("interventions.detail.title"), subtitle: Html.escape(item.title), body: root, hideFooter: true, wide: true });
+  }
+
+  /** Liste ÉLÉGANTE des objets liés (modale de détail) : icône de famille + libellé + badge de famille. Une
+      cible existante est CLIQUABLE (ouvre sa fiche, retour-auto ici à la fermeture — aller-retour) ; une cible
+      disparue s'affiche « introuvable » grisée et NON cliquable (orphelin toléré). */
+  private detailLinksList(item: InterventionRecord): HTMLElement {
+    const wrap = document.createElement("div");
+    if (!item.links.length) {
+      wrap.className = "form-hint"; wrap.style.fontStyle = "italic"; wrap.textContent = I18n.t("interventions.modal.linksEmpty");
+      return wrap;
+    }
+    wrap.style.cssText = "display:flex;flex-direction:column;gap:4px";
+    for (const l of item.links) {
+      const resolved = this.targets.labelOf(l.target_kind, l.target_id);
+      const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:8px";
+      const icon = document.createElement("span"); icon.className = "gi"; icon.setAttribute("aria-hidden", "true"); icon.innerHTML = InterventionsAdminView.familyIcon(l.target_kind);
+      const text = document.createElement("span");
+      if (resolved !== null) {
+        const link = document.createElement("a"); link.href = "#"; link.textContent = resolved; link.style.cursor = "pointer";
+        // Aller-retour mémorisé : ouvre la fiche de la cible ; à SA fermeture, on rouvre CE détail.
+        link.onclick = (e) => { e.preventDefault(); this.targets.openTargetDetail(l.target_kind, l.target_id, () => this.detailModal(item)); };
+        text.appendChild(link);
+      } else {
+        text.textContent = I18n.t("interventions.target.unknown"); text.style.color = "var(--fg-dimmer)";
+      }
+      const fam = document.createElement("span"); fam.innerHTML = this.badge(I18n.t(InterventionsFormat.targetKindLabelKey(l.target_kind)), "neutral");
+      row.append(icon, text, fam);
+      wrap.appendChild(row);
+    }
+    return wrap;
+  }
+
+  /** Rangée « libellé + valeur » d'une modale de CONSULTATION (lecture seule, sans champ éditable). */
+  private detailField(label: string, value: HTMLElement): HTMLElement {
+    const f = document.createElement("div"); f.className = "form-field";
+    const l = document.createElement("label"); l.textContent = label;
+    f.append(l, value);
+    return f;
+  }
+
+  /** Valeur texte simple (estompée si `muted`) d'une modale de consultation. */
+  private textValue(text: string, muted = false): HTMLElement {
+    const div = document.createElement("div"); div.textContent = text;
+    if (muted) div.style.color = "var(--fg-dimmer)";
+    return div;
+  }
+
+  /** Ligne d'audit « auteur · date » (auteur seul si la date manque ; « — » si rien). */
+  private auditText(who: string, dateIso: string): string {
+    const author = who || "—";
+    return dateIso ? author + " · " + Format.dateTime(dateIso) : author;
   }
 
   /* --------------------------------------------------------------------------
@@ -619,6 +736,17 @@ export class InterventionsAdminView {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn " + cls + " btn-sm";
     b.textContent = label; if (title) b.title = title; b.onclick = onClick;
     return b;
+  }
+
+  /** Bouton d'action ICÔNE — délègue au constructeur PARTAGÉ (ui/IconButton) : aria-label + title obligatoires
+      (i18n), un seul style d'a11y pour toute l'app. `danger` teinte le survol en rouge (suppression). */
+  private iconAction(icon: string, label: string, onClick: () => void, danger = false): HTMLButtonElement {
+    return IconButton.build({ icon, label, danger, onClick });
+  }
+
+  /** Icône de FAMILLE d'une cible liable (equipment/vm/spare) — repère visuel de la liste des objets liés. */
+  private static familyIcon(kind: string): string {
+    return kind === "vm" ? Icons.VM : kind === "spare" ? Icons.SPARE : Icons.EQUIPMENT;
   }
 
   /** Pastille sémantique (mêmes couleurs que NotificationsAdminView/CertsAdminView). */

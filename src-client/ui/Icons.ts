@@ -76,6 +76,9 @@ export class Icons {
   /** Valider / confirmer (remplace `✓`) : coche. */
   static readonly CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 6.5"/></svg>';
 
+  /** Démarrer / lancer (mise en cours d'une intervention…) : triangle « play ». */
+  static readonly PLAY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5l12 7.5-12 7.5z"/></svg>';
+
   /* ------------------------------------------------------------------------
      ÉTAT / MÉTADONNÉES — verrou, défaut (étoile), identité.
      ------------------------------------------------------------------------ */
@@ -136,6 +139,23 @@ export class Icons {
 
   /** Réseau IP (remplace `🌐`) : globe méridiens. */
   static readonly NETWORK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.5 4 5.7 4 9s-1.4 6.5-4 9c-2.6-2.5-4-5.7-4-9s1.4-6.5 4-9z"/></svg>';
+
+  /* ------------------------------------------------------------------------
+     FAMILLES d'objets liables (interventions) — icône de FAMILLE (pas de TYPE) :
+     un équipement, une VM ou un spare, indépendamment de son type précis. Vivent
+     ICI (et non dans domain/constants avec les icônes de TYPE) car elles servent
+     une UI TRANSVERSE — la liste des objets liés d'une intervention confond les
+     trois familles — et sont réutilisables comme repère de navigation générique.
+     ------------------------------------------------------------------------ */
+
+  /** Famille « équipement » : châssis rackable (deux rangées + voyants). */
+  static readonly EQUIPMENT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><line x1="7" y1="7.5" x2="7.02" y2="7.5"/><line x1="7" y1="16.5" x2="7.02" y2="16.5"/></svg>';
+
+  /** Famille « VM » : machine VIRTUELLE — un cadre écran contenant un cadre imbriqué. */
+  static readonly VM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="13" rx="2"/><rect x="7" y="8" width="10" height="5" rx="1"/><line x1="9" y1="20.5" x2="15" y2="20.5"/></svg>';
+
+  /** Famille « spare » (pièce de rechange) : petit carton/boîte. */
+  static readonly SPARE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>';
 
   /* NB : les icônes de TYPE du domaine (équipements, rack-items, spare) vivent dans
      `domain/constants.ts` avec leurs entités, pas ici (ce registre = icônes d'ACTION/nav

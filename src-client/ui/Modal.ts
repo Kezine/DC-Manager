@@ -9,6 +9,11 @@ export interface ModalOptions {
   body: HTMLElement;
   onSave?: () => any | Promise<any>;
   onCancel?: () => void;
+  /** Rappelé à TOUTE fermeture de la modale (annulation, croix, clic hors-modale, OU enregistrement réussi) —
+      contrairement à `onCancel` (annulation seule). Signal GÉNÉRIQUE de « la modale a disparu », utile pour
+      enchaîner un retour (ex. aller-retour vers une fiche liée : `Modal` est un overlay UNIQUE, sans
+      empilement). Ré-armé à chaque `open` (l'omettre le remet à null) et invoqué une seule fois. */
+  onClose?: () => void;
   hideFooter?: boolean;
   saveLabel?: string;
   confirmClose?: boolean;
@@ -22,6 +27,11 @@ export interface ModalOptions {
    requestCloseModal/markModalDirty. Services app injectés/optionnels :
      - `editLocked` (mode viewer : bloque les modales d'édition) ;
      - confirmation de fermeture déléguée à Dialog.confirm.
+   RAPPELS de fermeture (options d'`open`) : `onCancel` = annulation SEULE ;
+   `onClose` = fermeture GÉNÉRIQUE (toute cause, y compris enregistrement réussi).
+   `onClose` sert les ALLERS-RETOURS entre modales (overlay UNIQUE, pas
+   d'empilement) : rouvrir la modale d'origine à la disparition d'une modale
+   ouverte par-dessus.
    ============================================================================= */
 export class Modal {
   /** Mode visualiseur : bloque les modales d'ÉDITION (laisse passer les fiches hideFooter). */
@@ -35,6 +45,8 @@ export class Modal {
   private elBox!: HTMLElement;
   private btnSave!: HTMLButtonElement;
   private cancelCb: (() => void) | null = null;
+  /** Rappel de fermeture GÉNÉRIQUE (cf. ModalOptions.onClose) — invoqué quelle que soit la cause. */
+  private closeCb: (() => void) | null = null;
   private confirmClose = false;
   private dirty = false;
   private snapshot = "";
@@ -88,7 +100,7 @@ export class Modal {
   private _differs(): boolean { return this._snapshot() !== this.snapshot; }
 
   open(opts: ModalOptions): void {
-    const { title, subtitle, body, onSave, onCancel, hideFooter, saveLabel, confirmClose, wide } = opts;
+    const { title, subtitle, body, onSave, onCancel, onClose, hideFooter, saveLabel, confirmClose, wide } = opts;
     if (this.editLocked && !hideFooter) return;   // viewer : bloque l'édition
     this.elTitle.textContent = title || "—";
     this.elSubtitle.innerHTML = subtitle || "";
@@ -98,6 +110,7 @@ export class Modal {
     this.elBox.classList.toggle("wide", !!wide);
     this.btnSave.textContent = saveLabel || "Enregistrer";
     this.cancelCb = (typeof onCancel === "function") ? onCancel : null;
+    this.closeCb = (typeof onClose === "function") ? onClose : null;   // ré-armé à chaque open (omission → null)
     this.confirmClose = (typeof confirmClose === "boolean") ? confirmClose : (typeof onSave === "function");
     this.dirty = false;
     this.snapshot = this._snapshot();
@@ -115,14 +128,19 @@ export class Modal {
   }
 
   close(): void {
-    const cb = this.cancelCb;
-    this.cancelCb = null; this.confirmClose = false; this.dirty = false;
+    // Capture PUIS neutralise les rappels avant de les invoquer : un onClose qui rouvre une modale
+    // (aller-retour) ne doit pas se re-déclencher en boucle sur la nouvelle ouverture.
+    const cancel = this.cancelCb; const closed = this.closeCb;
+    this.cancelCb = null; this.closeCb = null; this.confirmClose = false; this.dirty = false;
     this.overlay.classList.remove("open");
-    if (cb) { try { cb(); } catch (e) { console.warn(e); } }
+    if (cancel) { try { cancel(); } catch (e) { console.warn(e); } }
+    if (closed) { try { closed(); } catch (e) { console.warn(e); } }
   }
   closeQuiet(): void {
-    this.cancelCb = null; this.confirmClose = false; this.dirty = false;
+    const closed = this.closeCb;
+    this.cancelCb = null; this.closeCb = null; this.confirmClose = false; this.dirty = false;
     this.overlay.classList.remove("open");
+    if (closed) { try { closed(); } catch (e) { console.warn(e); } }   // fermeture après enregistrement = fermeture aussi
   }
   async requestClose(): Promise<void> {
     const changed = this.dirty || this._differs();

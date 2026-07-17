@@ -187,10 +187,16 @@ export const fr = {
       refresh: "Actualiser",
     },
     rowAction: {
+      details: "Détails",
       edit: "Modifier",
       start: "Démarrer",
       close: "Clore",
       delete: "Supprimer",
+    },
+    detail: {
+      title: "Détail de l'intervention",
+      noDescription: "Aucune description.",
+      updatedBy: "Modifié par",
     },
     modal: {
       createIncidentTitle: "Nouvel incident",
@@ -200,7 +206,7 @@ export const fr = {
       title: "Titre",
       titlePlaceholder: "ex. Remplacement du switch cœur",
       description: "Description",
-      descriptionHint: "Markdown accepté (rendu à venir). Détaillez le contexte, le plan d'action, les impacts.",
+      descriptionHint: "Markdown accepté (rendu dans le détail). Détaillez le contexte, le plan d'action, les impacts.",
       priority: "Priorité",
       status: "Statut",
       plannedStart: "Début planifié",
@@ -211,11 +217,8 @@ export const fr = {
       jiraHint: "Clé ou URL d'un ticket. Simple référence — aucun appel à Jira.",
       links: "Objets liés",
       linksHint: "Équipements, VMs ou pièces concernés. Une cible supprimée reste « introuvable » (lien conservé).",
-      linksFamily: "Famille",
-      linksTarget: "Cible",
-      linksAdd: "Ajouter",
+      linksSearchPlaceholder: "Rechercher un équipement, une VM ou un spare…",
       linksEmpty: "Aucun objet lié.",
-      linksNoTarget: "— aucun disponible —",
       linksRemove: "Retirer",
     },
     confirm: {
@@ -229,6 +232,7 @@ export const fr = {
       deleted: "Intervention supprimée",
       started: "Intervention démarrée",
       closed: "Intervention close",
+      linkExists: "Cet objet est déjà lié.",
     },
     error: {
       titleRequired: "Le titre est requis.",

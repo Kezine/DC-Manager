@@ -4,11 +4,12 @@
    - InterventionsClient.buildQuery : construction PURE de la query string (filtres RÉPÉTABLES).
    Les nouvelles CLÉS i18n (interventions.*) sont couvertes par test-i18n (complétude fr ⇄ en). */
 "use strict";
-const { ck, section, D } = require("./harness.js");
+const { ck, section, D, SharedSchema } = require("./harness.js");
 
 module.exports = async () => {
   const { InterventionsFormat } = D("core/InterventionsFormat.js");
   const { InterventionsClient } = D("views/forms/InterventionsClient.js");
+  const { TargetSearch } = D("core/TargetSearch.js");
 
   await section("Interventions : InterventionsFormat — slugs → clés i18n (kind/status/priority/target) + miroirs serveur", async () => {
     // Tous les slugs des énumérations donnent « interventions.<domaine>.<slug> » (la vue appelle I18n.t dessus).
@@ -68,5 +69,40 @@ module.exports = async () => {
     ck(q.indexOf(",") < 0 && q.indexOf("%2C") < 0, "kinds : aucune virgule (répétition, jamais « kind=a,b »)");
     ck(q.indexOf("status=declared") >= 0 && q.indexOf("priority=high") >= 0 && q.indexOf("priority=critical") >= 0, "statuses/priorities répétés de la même façon");
     ck.eq(InterventionsClient.buildQuery({ query: "a b", sort: "priority", dir: "desc" }), "?query=a+b&sort=priority&dir=desc", "query encodée (espace → +) + sort/dir");
+  });
+
+  await section("Interventions : TargetSearch.rank — pertinence (préfixe avant inclusion), accents, plafond, dédup", async () => {
+    const norm = SharedSchema.normSearch;   // MÊME normalisation que la recherche du cœur (casse/accents)
+    const items = [
+      { kind: "equipment", id: "e1", label: "Switch Core" },      // « core » en INCLUSION (indexOf 7)
+      { kind: "vm",        id: "v1", label: "core-db-01" },       // « core » en PRÉFIXE (indexOf 0)
+      { kind: "spare",     id: "s1", label: "Écran de secours" }, // accent : matché par « ecran »
+      { kind: "equipment", id: "e2", label: "Routeur périphérique" },
+    ];
+
+    // Requête vide → aucun résultat (on n'inonde pas le popover).
+    ck.eq(TargetSearch.rank(items, "", { normalize: norm }).length, 0, "requête vide → []");
+    ck.eq(TargetSearch.rank(items, "   ", { normalize: norm }).length, 0, "requête blanche → []");
+
+    // Pertinence : le PRÉFIXE (core-db-01) passe AVANT l'inclusion (Switch Core).
+    const core = TargetSearch.rank(items, "core", { normalize: norm });
+    ck.eq(core.length, 2, "« core » → 2 correspondances");
+    ck.eq(core[0].id, "v1", "préfixe (core-db-01) classé en 1er");
+    ck.eq(core[1].id, "e1", "inclusion (Switch Core) classée après le préfixe");
+
+    // Insensibilité aux accents ET à la casse (normalisation partagée injectée).
+    ck.eq(TargetSearch.rank(items, "ECRAN", { normalize: norm }).map((r) => r.id).join(","), "s1", "« ECRAN » (sans accent, majuscules) → Écran de secours");
+    ck.eq(TargetSearch.rank(items, "périph", { normalize: norm }).map((r) => r.id).join(","), "e2", "« périph » → Routeur périphérique");
+
+    // Plafond : limite le nombre de résultats (préfixe prioritaire conservé).
+    const capped = TargetSearch.rank(items, "core", { normalize: norm, limit: 1 });
+    ck.eq(capped.length, 1, "plafond 1 → 1 résultat");
+    ck.eq(capped[0].id, "v1", "plafond conserve le plus pertinent (préfixe)");
+
+    // Dédup : les cibles DÉJÀ liées (clés « kind:id ») sont écartées.
+    const excluded = new Set([TargetSearch.key("vm", "v1")]);
+    const deduped = TargetSearch.rank(items, "core", { normalize: norm, excluded });
+    ck.eq(deduped.map((r) => r.id).join(","), "e1", "dédup : v1 exclu → reste Switch Core");
+    ck.eq(TargetSearch.key("equipment", "e1"), "equipment:e1", "key = « <kind>:<id> » (convention des liens)");
   });
 };
