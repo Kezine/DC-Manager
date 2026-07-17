@@ -20,6 +20,7 @@ import { IpamForms } from "./IpamForms";
 import { VmNetMapping } from "../../core/VmNetMapping";
 import { VmIpMatch } from "../../core/VmIpMatch";
 import { VmForms } from "./VmForms";
+import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
 
 /* =============================================================================
    FICHES DÉTAIL (lecture) des entités « secondaires » — remplacent le vidage
@@ -482,6 +483,8 @@ export class DetailForms extends IpamForms {
       ["Créé", Html.escape(Format.dateTime(sp.created_date))],
       ["Modifié", Html.escape(Format.dateTime(sp.updated_date))],
     ]));
+    // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
+    InterventionFicheRow.attach(root, host.interventionHooks, { kind: "spare", id, label: (sp.displayName ? sp.displayName() : (sp.name || "")) }, () => host.closeModal?.());
     this.footer(root, () => this.spare(store, host, id, onChanged));
     host.openModal({ title: "Détail de la pièce", subtitle: Html.escape(sp.displayName ? sp.displayName() : (sp.name || "")), body: root, hideFooter: true, wide: true });
   }
@@ -545,6 +548,9 @@ export class DetailForms extends IpamForms {
 
     // -- vNIC : réseau logique RÉSOLU via la table de mapping (bridge/tag → réseau), pastille de couleur comme
     //    les réseaux ; « non raccordé » si aucun mapping. IPs constatées = donnée source informative (décision IPAM). --
+    // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
+    InterventionFicheRow.attach(root, host.interventionHooks, { kind: "vm", id, label: vm.name || "" }, () => host.closeModal?.());
+
     const mapEntries = VmNetMapping.read(store.meta);
     const nics: any[] = Array.isArray(vm.nics) ? vm.nics : [];
     this.sect(root, "Interfaces réseau (vNIC) (" + nics.length + ")");

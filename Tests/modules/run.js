@@ -20,6 +20,7 @@ const DOMAINS = [
   "./test-shared-validation.js", // code partagé front/back
   "./test-i18n.js",              // localisation : complétude des catalogues fr ⇄ en
   "./test-certs.js",             // certificats : crypto client pure (PkiCrypto/PkiSession)
+  "./test-interventions.js",     // interventions : logique cliente pure (InterventionsFormat, buildQuery)
   "./test-server.js",            // serveur (ApiRules, SQLite réel, protocole REST)
 ];
 

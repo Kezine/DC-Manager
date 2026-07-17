@@ -26,6 +26,20 @@ export interface ApiExtension {
   router: Router;
 }
 
+/** Identité de l'AUTEUR d'une requête, dérivée de la session SSO validée par la garde d'accès
+    (`requireAdmin` pose `authUser`). Extrait en helper RÉUTILISABLE (principe n°3) : le cœur (notif
+    live) ET les modules d'extension qui estampillent un audit « qui a écrit ? » (ex. interventions/)
+    appliquent la MÊME règle sans la dupliquer. Les modules importent déjà `ApiExtension` d'ici — pas
+    de couplage nouveau. */
+export class RequestAuthor {
+  /** Nom d'affichage de l'utilisateur authentifié : « Prénom Nom » si connu, sinon le login, sinon « ? ». */
+  static name(req: Request): string {
+    const r = (req as RepoRequest).authUser;
+    const u = (r && r.user) || {};
+    return [u.prenom, u.nom].filter(Boolean).join(" ") || u.login || "?";
+  }
+}
+
 /** Couche HTTP : registre de documents + données SCOPÉES par document, déléguées au `Repository`. */
 export class Api {
   private readonly upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
@@ -102,11 +116,11 @@ export class Api {
     res.status(403).json({ error: "accès refusé", logged: !!r.logged, adminRight: r.adminRight || "NONE" });
   };
 
-  /** Identité de l'auteur d'une écriture (pour la notif live) : nom (SSO) + IP. */
+  /** Identité de l'auteur d'une écriture (pour la notif live) : nom (SSO) + IP. Le nom passe par le
+      helper PARTAGÉ `RequestAuthor` (même règle que les modules d'extension — cf. interventions/). */
   private writerInfo(req: Request): { name: string; ip: string } {
     const r = (req as RepoRequest).authUser;
-    const u = (r && r.user) || {};
-    const name = [u.prenom, u.nom].filter(Boolean).join(" ") || u.login || "?";
+    const name = RequestAuthor.name(req);
     const fwd = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
     const ip = (r && (r as any).ip) || fwd || req.ip || "";
     return { name, ip };

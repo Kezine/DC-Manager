@@ -61,6 +61,16 @@
     "src-server/src/certs/CertsDb.ts",
     // Veilleur d'échéances (producteur cert-expiry, seuils Q6 30/14/7 j) — PUR (source/rapporteur/
     // horloge injectés), testé avec stubs + horloge contrôlée.
-    "src-server/src/certs/CertExpiryWatcher.ts"
+    "src-server/src/certs/CertExpiryWatcher.ts",
+    // Module `interventions/` AMOVIBLE (incidents/interventions liés aux équipements/VMs/spares) —
+    // validation PURE (enums + griefs groupés + normalisation JIRA_BASE_URL) et persistance
+    // interventions.db (2 tables, liens ordonnés + cascade, listing paginé) : testées avec
+    // better-sqlite3 RÉEL. Les routes (InterventionsModule.ts, Express) restent HORS test, comme
+    // api.ts/VmModule/NotifyModule/CertsModule.
+    "src-server/src/interventions/InterventionsValidate.ts",
+    "src-server/src/interventions/InterventionsDb.ts",
+    // Veilleur de rappels (producteur intervention-reminder, paliers 24 h/1 h/heure H) — PUR
+    // (source/rapporteur/horloge/seuils injectés), testé avec stubs + horloge contrôlée.
+    "src-server/src/interventions/InterventionReminderWatcher.ts"
   ]
 }

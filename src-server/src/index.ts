@@ -10,6 +10,7 @@ import { Logger } from "./logger.js";
 import { VmModule } from "./vm/VmModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de vm/
 import { NotifyModule } from "./notify/NotifyModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de notify/
 import { CertsModule } from "./certs/CertsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de certs/
+import { InterventionsModule } from "./interventions/InterventionsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de interventions/
 
 /* Bootstrap : lit l'environnement, ouvre le registre multi-documents (driver better-sqlite3) et démarre le serveur. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,10 +51,17 @@ const vm = VmModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as 
 // (seuils 30/14/7 j) et clôt au renouvellement/révocation/suppression.
 const certs = CertsModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("certs"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
-new Server({ docs, auth, live, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), notify.extension(), certs.extension()] }).listen(PORT);
+// Interventions/incidents (objets liés aux équipements/VMs/spares — aucune clé d'environnement requise,
+// base interventions.db dédiée, cf. InterventionsModule). PONT vers notify (typage structurel, comme
+// vm/certs) : le veilleur de rappels signale intervention-reminder (paliers 24 h/1 h/heure H) et clôt
+// dès qu'un objet démarre/se clôt/s'annule ou est supprimé.
+const interventions = InterventionsModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("interventions"),
+  problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
+new Server({ docs, auth, live, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), notify.extension(), certs.extension(), interventions.extension()] }).listen(PORT);
 vm.start();   // synchros périodiques (interval_sec > 0) — après l'écoute : le serveur répond pendant une 1re synchro lente
 notify.start();   // timer de rappels (tick 60 s, unref) — après l'écoute, comme vm
 certs.start();    // suivi d'échéances (passe immédiate + tick horaire, unref)
+interventions.start();   // veilleur de rappels (passe immédiate + tick 5 min, unref)
 
 // ARRÊT PROPRE (SIGINT = Ctrl-C · SIGTERM = docker stop / systemd) : ferme les dépôts SQLite et le registre
 // (optimize + checkpoint des -wal — cf. DocumentStore.closeAll) avant de quitter. Sans ça, l'OS ferme les fd
@@ -65,6 +73,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     try { vm.stop(); } catch (e) { log.warn("vm.stop a échoué", (e as any) && (e as any).message); }
     try { notify.stop(); } catch (e) { log.warn("notify.stop a échoué", (e as any) && (e as any).message); }
     try { certs.stop(); } catch (e) { log.warn("certs.stop a échoué", (e as any) && (e as any).message); }
+    try { interventions.stop(); } catch (e) { log.warn("interventions.stop a échoué", (e as any) && (e as any).message); }
     try { docs.closeAll(); } catch (e) { log.warn("closeAll a échoué", (e as any) && (e as any).message); }
     process.exit(0);
   });
