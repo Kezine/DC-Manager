@@ -85,6 +85,27 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
     doit lister **TOUTES** les variables d'environnement reconnues par le serveur. Une doc en
     retard sur le code est un **bug** : dès qu'un écart est constaté, le corriger — ou, si ce
     n'est pas le moment, le SIGNALER explicitement (note/issue) plutôt que le laisser filer.
+14. **RÉUTILISER les primitives UI de l'app — JAMAIS réinventer un contrôle.** Cas particulier
+    du principe n°3, appliqué à l'interface. Avant d'écrire un `<input>`, un `<button>` ou un
+    sélecteur à la main, utiliser le composant maison correspondant (tous dans `ui/`). En
+    particulier :
+    - **Champs de DATE** → `FormControls.date(...)` (input thématisé avec boutons 📅 / Aujourd'hui /
+      effacer, `.value` proxifié). **Jamais** un `<input type="date">` ou `type="datetime-local">`
+      brut. Si une granularité heure est requise et manque au composant, l'ÉTENDRE (variante
+      date-heure) plutôt que contourner — le contrôle reste unique et cohérent.
+    - **Boutons d'ACTION** (ligne de liste, barre d'outils, actions par élément) → **boutons-ICÔNE**
+      du registre `Icons` (pattern `iconAction(icon, ariaLabel, tip, onClick, danger?)` : `aria-label`
+      + tooltip obligatoires, jamais d'emoji/glyphe en dur). **Pas de bouton texte** pour ces actions.
+      Le texte reste réservé aux boutons PRIMAIRES explicites (création « + … » d'en-tête, Enregistrer/
+      Annuler d'une modale).
+    - **Champs de RECHERCHE** → le champ de recherche NORMALISÉ de l'app (même style/comportement que
+      les recherches des listings), jamais un `<input>` ad hoc.
+    - **SÉLECTION d'une entité** (lier un équipement / une VM / un spare / un objet du modèle) → le
+      pattern **`SearchPop`** (recherche-popover UNIFIÉE sur TOUS les éléments, le **clic** sur un
+      résultat sélectionne/lie), comme la vue 3D et la page Certificats — **pas** un `<select>` par
+      famille suivi d'une liste. La recherche traverse l'ensemble des éléments, pas une famille à la fois.
+    Ces primitives portent le thème, l'accessibilité et le comportement clavier ; les réimplémenter
+    diverge silencieusement du reste de l'app (dette repérée sur la feature `interventions/`, à résorber).
 
 ## Structure du projet
 
