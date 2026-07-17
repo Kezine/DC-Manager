@@ -9,7 +9,8 @@ import { ProviderConfigStore } from "./ProviderConfigStore.js";
 import { ProviderConfigDb } from "./ProviderConfigDb.js";
 import { ProviderConfigError } from "./ProviderConfigValidate.js";
 import { SecretBox } from "../SecretBox.js";
-import { VmSyncService, type VmLivePublisher, type ProblemReporter } from "./VmSyncService.js";
+import { VmSyncService, type VmLivePublisher, type ProblemReporter, type VmProviderStatus } from "./VmSyncService.js";
+import { VmStatusEnrichment } from "./VmStatusEnrichment.js";
 
 /* =============================================================================
    MODULE VM — façade d'assemblage et POINT DE BRANCHEMENT UNIQUE de la feature
@@ -131,7 +132,9 @@ export class VmModule {
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
       if (!this.service) { res.status(503).json({ error: "configuration des providers invalide", detail: this.configError }); return; }
       this.service.syncDocument(docId)
-        .then((providers) => res.json({ providers }))
+        // Enrichissement : les providers au jeton indéchiffrable sont EXCLUS de la synchro (donc
+        // absents du résultat) — on les réinjecte en erreur pour qu'ils restent visibles côté UI.
+        .then((providers) => res.json({ providers: this.withTokenErrors(docId, providers) }))
         .catch((e) => {
           // syncProvider ne jette jamais — ceci est une ceinture (bug interne) : 500 loggé, jamais silencieux.
           this.log.error("POST /vm/sync : échec inattendu", docId, e instanceof Error ? e.message : String(e));
@@ -143,7 +146,10 @@ export class VmModule {
       const docId = (req.params as any).docId as string;
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
       if (!this.service) { res.status(503).json({ error: "configuration des providers invalide", detail: this.configError }); return; }
-      res.json({ providers: this.service.statusFor(docId) });
+      // Enrichissement : statusFor s'appuie sur providersFor, qui EXCLUT les providers au jeton
+      // indéchiffrable (clé DCMANAGER_SECRETS_KEY changée) → sans ce complément ils disparaîtraient
+      // silencieusement de la vue Clusters (l'incident corrigé). On les réinjecte en erreur.
+      res.json({ providers: this.withTokenErrors(docId, this.service.statusFor(docId)) });
     });
 
     /* ---- CRUD des providers (stockage DB chiffré uniquement) ---- */
@@ -202,8 +208,15 @@ export class VmModule {
         config = db.buildForTest(docId, candidate, tokenPlain);
       } catch (e) {
         if (e instanceof ProviderConfigError) { res.status(400).json({ error: "configuration invalide", issues: e.issues }); return; }
-        this.log.error("POST /vm/providers/test : construction en échec", docId, e instanceof Error ? e.message : String(e));
-        res.status(500).json({ error: "test impossible" }); return;
+        // Échec de CONSTRUCTION hors validation — cas typique : le jeton STOCKÉ est indéchiffrable
+        // (clé DCMANAGER_SECRETS_KEY changée/perdue). Le message SecretBox est SÛR (aucun jeton) et
+        // ACTIONNABLE (« le secret doit être ressaisi ») : on le RENVOIE au client au lieu du 500
+        // muet « test impossible » — c'est CE message que le bouton « Tester » doit afficher pour
+        // que l'utilisateur sache quoi faire (l'incident : la clé avait changé, l'UI ne disait rien).
+        // 422 : la requête est bien formée, c'est la donnée STOCKÉE qui est inexploitable (à ressaisir).
+        const message = e instanceof Error ? e.message : String(e);
+        this.log.error("POST /vm/providers/test : construction en échec", docId, message);
+        res.status(422).json({ error: message }); return;
       }
       let adapter;
       try {
@@ -226,6 +239,17 @@ export class VmModule {
   /* --------------------------------------------------------------------------
      Helpers privés
      -------------------------------------------------------------------------- */
+
+  /** Réinjecte dans la liste des statuts les providers dont le jeton stocké est INDÉCHIFFRABLE
+      (clé DCMANAGER_SECRETS_KEY changée/perdue) : `providersFor` les exclut → ils sont absents de
+      `statusFor`/`syncDocument` et, sans ce complément, DISPARAISSENT silencieusement de l'UI.
+      No-op en mode fichier legacy (aucun chiffrement → aucune erreur de jeton possible).
+      ⚠ PRÉCONDITION : appelé APRÈS `statusFor`/`syncDocument`, qui, via `providersFor`, rafraîchissent
+      `tokenErrorsFor` pour ce document (sinon on lirait des erreurs périmées ou vides). */
+  private withTokenErrors(docId: string, statuses: VmProviderStatus[]): VmProviderStatus[] {
+    if (!this.providerDb) return statuses;
+    return VmStatusEnrichment.withTokenErrors(statuses, this.providerDb.tokenErrorsFor(docId), this.providerDb.listFor(docId));
+  }
 
   /** Renvoie le backend CRUD (stockage DB) OU répond 503 et renvoie null. Deux 503 distincts :
       - clé ABSENTE → « définir DCMANAGER_SECRETS_KEY… » (guidance actionnable) ;

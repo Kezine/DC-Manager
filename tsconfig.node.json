@@ -35,6 +35,9 @@
     // (bus live vu par interface, adaptateur injecté) : testé avec DocumentStore réel + stub d'inventaire.
     // Les routes (VmModule.ts, Express) restent HORS test, comme api.ts.
     "src-server/src/vm/VmSyncService.ts",
+    // Enrichissement PUR des statuts (réinjecte les providers au jeton indéchiffrable, exclus par
+    // providersFor, comme statuts en erreur) — logique sans DB/réseau, testée en isolation.
+    "src-server/src/vm/VmStatusEnrichment.ts",
     // Coffre à secrets serveur PARTAGÉ (AES-256-GCM, node:crypto) des secrets stockés en DB
     // (jetons providers VM, jetons webhooks notify) — testé en isolation (aller-retour, clé
     // différente, altération, format inconnu, repli d'environnement legacy).

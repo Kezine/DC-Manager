@@ -113,24 +113,35 @@ export class VmClustersView {
     head.append(left, pills);
     card.appendChild(head);
 
-    // -- ÉTAT DE SYNCHRO : période, dernière tentative/réussite (formatage de dates du repo), compteurs, message. --
+    // -- ÉTAT DE SYNCHRO : période, dernière tentative/réussite (formatage de dates du repo), compteurs.
+    //    Le « Message » n'entre dans la grille QU'EN SUCCÈS (résumé/compteurs, indice d'inventaire vide) ;
+    //    en ERREUR il part dans un BANDEAU dédié ci-dessous (plus visible et actionnable, sans doublon). --
     const period = p.interval_sec > 0 ? ("automatique · toutes les " + p.interval_sec + " s") : "manuelle";
     const counts = p.counts
       ? `${p.counts.created} créée(s) · ${p.counts.updated} mise(s) à jour · ${p.counts.orphaned} orpheline(s) · ${p.counts.unchanged} inchangée(s)`
       : VmClustersView.MUTED;
-    card.appendChild(this.grid([
+    const gridPairs: Array<[string, string]> = [
       ["Période", Html.escape(period)],
       ["Dernière tentative", Html.escape(Format.dateTime(p.last_attempt || ""))],
       ["Dernière réussite", Html.escape(Format.dateTime(p.last_success || ""))],
-      ["Message", Html.escape(p.message)],
-      ["Compteurs", counts],
-    ]));
+    ];
+    if (p.ok) gridPairs.push(["Message", Html.escape(p.message)]);
+    gridPairs.push(["Compteurs", counts]);
+    card.appendChild(this.grid(gridPairs));
 
-    // -- NŒUDS : cluster jamais synchronisé (null) → invitation ; sinon table des nœuds + métriques + rapprochement. --
-    if (!cluster) {
-      this.appendNote("Ce provider n'a pas encore été synchronisé depuis le démarrage du serveur. Utilisez « Synchroniser » (barre d'outils de l'onglet VMs) pour récupérer l'état du cluster et l'inventaire des VMs.", card);
-    } else {
+    // -- BANDEAU D'ERREUR (par provider) : synchro OU construction en échec → message serveur ACTIONNABLE
+    //    bien visible. Cas emblématique corrigé : jeton indéchiffrable après changement de la clé
+    //    DCMANAGER_SECRETS_KEY → « le secret doit être ressaisi » (au lieu d'une liste vide silencieuse).
+    //    Inspiré des bandeaux 503 de CertsAdminView/NotificationsAdminView. --
+    if (!p.ok) this.appendErrorBanner(card, p.message);
+
+    // -- NŒUDS : cluster synchronisé → table des nœuds + métriques + rapprochement. Jamais synchronisé
+    //    (cluster null) → invitation, mais SEULEMENT si le provider est SAIN : en erreur, le bandeau
+    //    ci-dessus explique déjà — l'invitation « pas encore synchronisé » serait trompeuse. --
+    if (cluster) {
       this.appendNodes(card, p, cluster, equipments, ipAddresses, vms);
+    } else if (p.ok) {
+      this.appendNote("Ce provider n'a pas encore été synchronisé depuis le démarrage du serveur. Utilisez « Synchroniser » (barre d'outils de l'onglet VMs) pour récupérer l'état du cluster et l'inventaire des VMs.", card);
     }
     return card;
   }
@@ -227,6 +238,20 @@ export class VmClustersView {
     const body = rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("");
     tw.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     root.appendChild(tw); return tw;
+  }
+
+  /** Bandeau d'erreur PAR provider (bordure `--err`, message serveur ACTIONNABLE) — même esprit que
+      les bandeaux 503 de CertsAdminView/NotificationsAdminView, répliqué ici pour rester AUTONOME
+      (feature VM amovible). `white-space:pre-line` : le serveur peut renvoyer un message multi-lignes. */
+  private appendErrorBanner(card: HTMLElement, message: string): void {
+    const banner = document.createElement("div");
+    banner.style.cssText = "border:1px solid var(--err); border-radius:6px; padding:10px 12px; margin-top:12px; background:var(--bg-2)";
+    const title = document.createElement("div"); title.style.cssText = "font-weight:600; color:var(--err); margin-bottom:4px";
+    title.textContent = "Provider en erreur";
+    const detail = document.createElement("div"); detail.className = "form-hint"; detail.style.whiteSpace = "pre-line";
+    detail.textContent = message;
+    banner.append(title, detail);
+    card.appendChild(banner);
   }
 
   /** Note libre (form-hint), sur `parent` (défaut = conteneur de vue). */
