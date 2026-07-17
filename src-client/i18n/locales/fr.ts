@@ -36,5 +36,6 @@ import { rack } from "./fr/rack";
 import { equipment } from "./fr/equipment";
 import { detail } from "./fr/detail";
 import { face } from "./fr/face";
+import { dc } from "./fr/dc";
 
-export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face } as const;
+export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc } as const;

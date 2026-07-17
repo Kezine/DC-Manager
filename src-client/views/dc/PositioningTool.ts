@@ -20,6 +20,7 @@ import { Html } from "../../core/Html";
 import { Format } from "../../core/Format";
 import { Positioning, CORNER_IDS, WALL_IDS } from "../../geometry/Positioning";
 import type { Frame, Rect, CornerId, WallId, Axis, Ref } from "../../geometry/Positioning";
+import { I18n } from "../../i18n/I18n";
 
 /** Une entité DÉPLAÇABLE : `rect` = centre + demi-extents (repère monde de la vue) ; `anchor` = ancrage du nœud SVG
     ("center" + rotation, ou "topleft" pour une salle d'étage) ; `commit(cx,cy)` écrit la position dans le modèle. */
@@ -71,7 +72,7 @@ export class PositioningTool {
     this.host.posClearOtherTools();
     this.active = true; this.ctx = this.host.posCtxKey();
     this.moverId = null; this.corner = null; this.refX = null; this.refY = null;
-    Notify.toast("Positionnement : cliquez un élément à déplacer, son coin, puis un mur ou le coin d'un autre élément · glissez pour aimanter", "ok");
+    Notify.toast(I18n.t("dc.positioning.armToast"), "ok");
     this.host.buildToolbar(); this.host.render();
   }
   cancel(): void { this.disarm(); this.host.hideCote(); this.host.buildToolbar(); this.host.render(); }
@@ -94,8 +95,8 @@ export class PositioningTool {
   /** Pose une référence : un MUR fixe l'axe correspondant ; un COIN d'ancrage fixe les DEUX axes (cote X et Y). */
   setRef(ref: Ref): void {
     const scene = this.host.posScene(); if (!scene) return;
-    if (!this.moverId) { Notify.toast("Choisissez d'abord un élément à déplacer.", "err"); return; }
-    if (ref.kind === "corner" && ref.rectId === this.moverId) { Notify.toast("La référence doit être un MUR ou le coin d'un AUTRE élément.", "err"); return; }
+    if (!this.moverId) { Notify.toast(I18n.t("dc.positioning.chooseMover"), "err"); return; }
+    if (ref.kind === "corner" && ref.rectId === this.moverId) { Notify.toast(I18n.t("dc.positioning.refMustBeOther"), "err"); return; }
     if (!this.corner) this.corner = "TL";   // coin par défaut si non choisi
     const axis = Positioning.refAxis(ref, scene.frame);
     if (axis === "x") this.refX = ref;
@@ -128,8 +129,8 @@ export class PositioningTool {
     this.host.render();
   }
   private refLabel(ref: Ref, scene: PosScene): string {
-    if (ref.kind === "wall") { const w: Record<WallId, string> = { left: "mur gauche", right: "mur droit", top: "mur haut", bottom: "mur bas" }; return w[ref.wall]; }
-    const e = scene.rects.find((x) => x.id === ref.rectId), cl: Record<CornerId, string> = { TL: "H-G", TR: "H-D", BR: "B-D", BL: "B-G" };
+    if (ref.kind === "wall") { const w: Record<WallId, string> = { left: I18n.t("dc.positioning.wallLeft"), right: I18n.t("dc.positioning.wallRight"), top: I18n.t("dc.positioning.wallTop"), bottom: I18n.t("dc.positioning.wallBottom") }; return w[ref.wall]; }
+    const e = scene.rects.find((x) => x.id === ref.rectId), cl: Record<CornerId, string> = { TL: I18n.t("dc.positioning.cornerTL"), TR: I18n.t("dc.positioning.cornerTR"), BR: I18n.t("dc.positioning.cornerBR"), BL: I18n.t("dc.positioning.cornerBL") };
     return "« " + (e ? e.name : "?") + " » " + cl[ref.corner];
   }
 
@@ -243,30 +244,30 @@ export class PositioningTool {
   /** Carte de panneau latéral de l'outil. */
   card(): HTMLElement {
     const box = document.createElement("div"); box.className = "dc-card";
-    const title = document.createElement("div"); title.className = "dc-card-title"; title.innerHTML = `<span class="gi">${Icons.POSITION}</span>Positionnement`; box.appendChild(title);
+    const title = document.createElement("div"); title.className = "dc-card-title"; title.innerHTML = `<span class="gi">${Icons.POSITION}</span>${I18n.t("dc.positioning.cardTitle")}`; box.appendChild(title);
     const scene = this.host.posScene();
     if (!scene) {
-      const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Disponible en vue 2D (Plan de salle ou Plan d'étage)."; box.appendChild(h);
-      const acts = document.createElement("div"); acts.className = "dc-card-acts"; const bc = this.btn("Fermer", () => this.cancel()); IconButton.decorate(bc, Icons.CLOSE); bc.classList.add("btn-danger"); acts.appendChild(bc); box.appendChild(acts);
+      const h = document.createElement("div"); h.className = "form-hint"; h.textContent = I18n.t("dc.positioning.only2D"); box.appendChild(h);
+      const acts = document.createElement("div"); acts.className = "dc-card-acts"; const bc = this.btn(I18n.t("ui.action.close"), () => this.cancel()); IconButton.decorate(bc, Icons.CLOSE); bc.classList.add("btn-danger"); acts.appendChild(bc); box.appendChild(acts);
       return box;
     }
     const moverEntry = scene.rects.find((x) => x.id === this.moverId);
-    const what = this.host.posViewKind() === "floor" ? "une salle / un équipement" : "une baie / un équipement";
+    const what = this.host.posViewKind() === "floor" ? I18n.t("dc.positioning.whatFloor") : I18n.t("dc.positioning.whatRoom");
     const moverLine = document.createElement("div"); moverLine.style.cssText = "font-size:12px;margin:4px 0";
-    moverLine.innerHTML = moverEntry ? 'À déplacer : <b style="color:var(--accent)">' + Html.escape(moverEntry.name) + "</b>" : '<span style="color:var(--accent)">Cliquez ' + what + " à déplacer.</span>";
+    moverLine.innerHTML = moverEntry ? I18n.t("dc.positioning.moverLabel") + '<b style="color:var(--accent)">' + Html.escape(moverEntry.name) + "</b>" : '<span style="color:var(--accent)">' + Html.escape(I18n.t("dc.positioning.clickWhat", { what })) + "</span>";
     box.appendChild(moverLine);
     if (moverEntry) {
       const cornerRow = document.createElement("div"); cornerRow.className = "dc-card-acts"; cornerRow.style.marginTop = "2px";
-      const labels: Record<CornerId, string> = { TL: "◰ H-G", TR: "◳ H-D", BR: "◲ B-D", BL: "◱ B-G" };
+      const labels: Record<CornerId, string> = { TL: I18n.t("dc.positioning.cornerBtnTL"), TR: I18n.t("dc.positioning.cornerBtnTR"), BR: I18n.t("dc.positioning.cornerBtnBR"), BL: I18n.t("dc.positioning.cornerBtnBL") };
       CORNER_IDS.forEach((cid) => { const b = this.btn(labels[cid], () => this.setCorner(cid)); if (this.corner === cid) b.classList.add("active"); cornerRow.appendChild(b); });
       box.appendChild(cornerRow);
-      const ch = document.createElement("div"); ch.className = "form-hint"; ch.textContent = "Coin actif, puis cliquez un mur (cote ⟂) ou le coin d'un autre élément (cote X et Y)."; box.appendChild(ch);
+      const ch = document.createElement("div"); ch.className = "form-hint"; ch.textContent = I18n.t("dc.positioning.cornerHint"); box.appendChild(ch);
       const cotes = this.cotes(scene);
       (["x", "y"] as Axis[]).forEach((ax) => {
         const ref = ax === "x" ? this.refX : this.refY, co = ax === "x" ? cotes.x : cotes.y;
         if (!ref || !co) return;
         const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:6px;margin:5px 0;font-size:12px";
-        const lab = document.createElement("span"); lab.style.cssText = "color:var(--fg-dim);min-width:80px"; lab.textContent = (ax === "x" ? "↔ X" : "↕ Y") + " → " + this.refLabel(ref, scene);
+        const lab = document.createElement("span"); lab.style.cssText = "color:var(--fg-dim);min-width:80px"; lab.textContent = (ax === "x" ? I18n.t("dc.positioning.axisX") : I18n.t("dc.positioning.axisY")) + " → " + this.refLabel(ref, scene);
         const inp = document.createElement("input"); inp.type = "number"; inp.step = "1"; inp.min = "0"; inp.value = String(Math.round(co.value)); inp.style.cssText = "width:88px";
         const unit = document.createElement("span"); unit.style.color = "var(--fg-dim)"; unit.textContent = "mm";
         const apply = () => { const v = parseFloat(inp.value); if (isFinite(v) && v >= 0) void this.applyAxis(ax, v); };
@@ -274,12 +275,12 @@ export class PositioningTool {
         inp.onchange = apply;
         row.append(lab, inp, unit); box.appendChild(row);
       });
-      if (!this.refX && !this.refY) { const hint = document.createElement("div"); hint.className = "form-hint"; hint.textContent = "Aucune référence. Cliquez un mur ou le coin d'un autre élément."; box.appendChild(hint); }
+      if (!this.refX && !this.refY) { const hint = document.createElement("div"); hint.className = "form-hint"; hint.textContent = I18n.t("dc.positioning.noRef"); box.appendChild(hint); }
     }
-    const dragHint = document.createElement("div"); dragHint.className = "form-hint"; dragHint.textContent = "Astuce : glissez l'élément pour l'aimanter aux murs et aux coins voisins."; box.appendChild(dragHint);
+    const dragHint = document.createElement("div"); dragHint.className = "form-hint"; dragHint.textContent = I18n.t("dc.positioning.dragHint"); box.appendChild(dragHint);
     const acts = document.createElement("div"); acts.className = "dc-card-acts";
-    const bClear = this.btn("Effacer réf.", () => { this.refX = null; this.refY = null; this.host.render(); }); (bClear as any).disabled = !this.refX && !this.refY;
-    const bClose = this.btn("Fermer", () => this.cancel()); IconButton.decorate(bClose, Icons.CLOSE); bClose.classList.add("btn-danger");
+    const bClear = this.btn(I18n.t("dc.positioning.clearRef"), () => { this.refX = null; this.refY = null; this.host.render(); }); (bClear as any).disabled = !this.refX && !this.refY;
+    const bClose = this.btn(I18n.t("ui.action.close"), () => this.cancel()); IconButton.decorate(bClose, Icons.CLOSE); bClose.classList.add("btn-danger");
     acts.append(bClear, bClose); box.appendChild(acts);
     return box;
   }

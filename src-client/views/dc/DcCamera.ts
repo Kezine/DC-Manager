@@ -4,6 +4,7 @@ import { ImageExport } from "../../ui/ImageExport";
 import type { ExportOptions } from "../../ui/ImageExport";
 import { CAM_PRESETS } from "./shared";
 import { DcBase } from "./DcBase";
+import { I18n } from "../../i18n/I18n";
 
 /* Icônes des contrôles 3D : règle graduée (mesure), projection orthographique (lignes parallèles) / perspective (lignes fuyantes). */
 const ICON_RULER = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="8.5" width="19" height="7" rx="1"/><line x1="6.5" y1="8.5" x2="6.5" y2="12"/><line x1="10.5" y1="8.5" x2="10.5" y2="13"/><line x1="14.5" y1="8.5" x2="14.5" y2="12"/><line x1="18.5" y1="8.5" x2="18.5" y2="13"/></svg>';
@@ -35,32 +36,32 @@ export abstract class DcCamera extends DcBase {
   protected buildControls(): void {
     const c = document.createElement("div"); c.className = "graph-zoom-controls dc-control-bar"; this.controlsEl = c;
     c.innerHTML = `
-      <button class="btn btn-sm dc-back-btn" data-act="back" title="Retour à la vue précédente" aria-label="Retour" style="display:none"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M11 18l-6-6 6-6"/></svg></button>
+      <button class="btn btn-sm dc-back-btn" data-act="back" title="${I18n.t("dc.camera.backTitle")}" aria-label="${I18n.t("dc.camera.back")}" style="display:none"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M11 18l-6-6 6-6"/></svg></button>
       <span class="gz-sep" data-back-sep style="display:none"></span>
-      <button class="btn btn-ghost btn-sm" data-act="in" title="Zoom avant" aria-label="Zoom avant">+</button>
-      <button class="btn btn-ghost btn-sm" data-act="out" title="Zoom arrière" aria-label="Zoom arrière">−</button>
+      <button class="btn btn-ghost btn-sm" data-act="in" title="${I18n.t("dc.camera.zoomIn")}" aria-label="${I18n.t("dc.camera.zoomIn")}">+</button>
+      <button class="btn btn-ghost btn-sm" data-act="out" title="${I18n.t("dc.camera.zoomOut")}" aria-label="${I18n.t("dc.camera.zoomOut")}">−</button>
       <span class="gz-sep"></span>
-      <button class="btn btn-ghost btn-sm" data-act="recenter" title="Recentrer / ajuster la vue" aria-label="Recentrer la vue">
+      <button class="btn btn-ghost btn-sm" data-act="recenter" title="${I18n.t("dc.camera.recenterTitle")}" aria-label="${I18n.t("dc.camera.recenter")}">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="12" y1="1.5" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22.5" y2="12"/></svg>
       </button>
-      <div class="dc-cam-presets" data-cam-presets title="Point de vue">
-        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="top" title="Vue de dessus" aria-label="Vue de dessus">${ICON_VIEW_TOP}</button>
-        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="front" title="Vue de face" aria-label="Vue de face">${ICON_VIEW_FRONT}</button>
-        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="back" title="Vue de l'arrière" aria-label="Vue de l'arrière">${ICON_VIEW_BACK}</button>
-        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="side" title="Vue de côté" aria-label="Vue de côté">${ICON_VIEW_SIDE}</button>
+      <div class="dc-cam-presets" data-cam-presets title="${I18n.t("dc.camera.viewpoint")}">
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="top" title="${I18n.t("dc.camera.viewTop")}" aria-label="${I18n.t("dc.camera.viewTop")}">${ICON_VIEW_TOP}</button>
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="front" title="${I18n.t("dc.camera.viewFront")}" aria-label="${I18n.t("dc.camera.viewFront")}">${ICON_VIEW_FRONT}</button>
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="back" title="${I18n.t("dc.camera.viewBack")}" aria-label="${I18n.t("dc.camera.viewBack")}">${ICON_VIEW_BACK}</button>
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="side" title="${I18n.t("dc.camera.viewSide")}" aria-label="${I18n.t("dc.camera.viewSide")}">${ICON_VIEW_SIDE}</button>
       </div>
-      <button class="btn btn-ghost btn-sm" data-act="fs" title="Plein écran" aria-label="Plein écran">
+      <button class="btn btn-ghost btn-sm" data-act="fs" title="${I18n.t("dc.camera.fullscreen")}" aria-label="${I18n.t("dc.camera.fullscreen")}">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>
       </button>
       <span class="gz-sep" data-tools-sep></span>
-      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="proj" title="Projection : orthographique / perspective" style="display:none"></button>
-      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="measure" title="Outil de mesure multipoint (cliquer pour poser des points)">${ICON_RULER}</button>
-      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="position" title="Aide au positionnement : placer un élément par ses coins (murs / coins d'autres éléments, cotes ⟂) — baies & équipements en salle, salles & équipements sur l'étage" style="display:none">${ICON_POSITION}</button>
+      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="proj" title="${I18n.t("dc.camera.projToggle")}" style="display:none"></button>
+      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="measure" title="${I18n.t("dc.camera.measureTool")}">${ICON_RULER}</button>
+      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="position" title="${I18n.t("dc.camera.positionTool")}" style="display:none">${ICON_POSITION}</button>
       <span class="gz-sep"></span>
-      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="eimg" title="Exporter une image (SVG / JPEG)…" aria-label="Exporter une image">
+      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="eimg" title="${I18n.t("dc.camera.exportImgTitle")}" aria-label="${I18n.t("dc.camera.exportImg")}">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
       </button>
-      <button class="btn btn-ghost btn-sm gz-resp-toggle" data-act="resp-opts" title="Réglages 3D / panneau latéral" aria-label="Réglages 3D">${ICON_GEAR}</button>`;
+      <button class="btn btn-ghost btn-sm gz-resp-toggle" data-act="resp-opts" title="${I18n.t("dc.camera.respTitle")}" aria-label="${I18n.t("dc.camera.resp")}">${ICON_GEAR}</button>`;
     c.addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest("button"); if (!b) return;
       // Toggle RESPONSIVE : « réglages 3D » → ouvre/ferme le panneau latéral en modale (cf. .dc-row.show-side).
@@ -86,8 +87,8 @@ export abstract class DcCamera extends DcBase {
   toggleFullscreen(): void {
     if (document.fullscreenElement) { document.exitFullscreen(); return; }
     const el: any = this.rowEl || this.stage;
-    if (el.requestFullscreen) el.requestFullscreen().catch(() => Notify.toast("Plein écran indisponible", "err"));
-    else Notify.toast("Plein écran non supporté par le navigateur", "err");
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => Notify.toast(I18n.t("dc.camera.fsUnavailable"), "err"));
+    else Notify.toast(I18n.t("dc.camera.fsUnsupported"), "err");
   }
 
   /* ---- export SVG (fidèle) / JPEG (rasterisé) de la vue affichée ---- */
@@ -112,19 +113,19 @@ export abstract class DcCamera extends DcBase {
       const scale = await ImageExport.scaleDialog(base.w, base.h, this._three.exportMaxDim());
       if (!scale) return;
       this._three.exportJPEG(scale, (b: Blob | null) => {
-        if (b) { ImageExport.download(this.exportName("jpg"), b); Notify.toast("Export JPEG généré (" + (base.w * scale) + "×" + (base.h * scale) + ")"); }
-        else Notify.toast("Échec de l'export JPEG", "err");
+        if (b) { ImageExport.download(this.exportName("jpg"), b); Notify.toast(I18n.t("ui.export.jpegDone", { w: base.w * scale, h: base.h * scale })); }
+        else Notify.toast(I18n.t("ui.export.jpegFailed"), "err");
       });
       return;
     }
     // VUES 2D (Plan de salle / Plan d'étage) : SVG vectoriel conservé (ou JPEG rasterisé).
-    if (!this.svg) { Notify.toast("Rien à exporter", "err"); return; }
+    if (!this.svg) { Notify.toast(I18n.t("dc.camera.nothingToExport"), "err"); return; }
     const res = await ImageExport.dialog(false);
     if (res) this.exportImage(res);
   }
 
   exportImage(opts: ExportOptions): void {
-    if (!this.svg) { Notify.toast("Rien à exporter", "err"); return; }
+    if (!this.svg) { Notify.toast(I18n.t("dc.camera.nothingToExport"), "err"); return; }
     const built = this.buildExportSvg();
     ImageExport.run(opts, built.svg, built.w, built.h, (ext) => this.exportName(ext));
   }
@@ -143,7 +144,7 @@ export abstract class DcCamera extends DcBase {
     if (pos) { pos.style.display = (this.view === "top" || this.view === "floor") ? "" : "none"; pos.classList.toggle("active", this.posTool.active); }
     // PROJECTION (3D uniquement) : icône (ortho = lignes parallèles · perspective = lignes fuyantes) + visibilité
     const proj = this.controlsEl.querySelector('[data-act="proj"]') as HTMLElement | null;
-    if (proj) { proj.style.display = is3d ? "" : "none"; proj.innerHTML = this.webglPerspective ? ICON_PERSP : ICON_ORTHO; proj.title = this.webglPerspective ? "Projection : perspective (cliquer pour orthographique)" : "Projection : orthographique (cliquer pour perspective)"; }
+    if (proj) { proj.style.display = is3d ? "" : "none"; proj.innerHTML = this.webglPerspective ? ICON_PERSP : ICON_ORTHO; proj.title = this.webglPerspective ? I18n.t("dc.camera.projPersp") : I18n.t("dc.camera.projOrtho"); }
   }
 
 

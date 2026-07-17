@@ -21,5 +21,6 @@ import { rack } from "./en/rack";
 import { equipment } from "./en/equipment";
 import { detail } from "./en/detail";
 import { face } from "./en/face";
+import { dc } from "./en/dc";
 
-export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face } as const;
+export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc } as const;

@@ -15,6 +15,7 @@ import { Notify } from "../../ui/Notify";
 import { IconButton } from "../../ui/IconButton";
 import { Icons } from "../../ui/Icons";
 import { Html } from "../../core/Html";
+import { I18n } from "../../i18n/I18n";
 import { Waypoint } from "../../models/Waypoint";
 import type { Store } from "../../store";
 import type { Resolver3D } from "../../geometry/Resolver3D";
@@ -58,17 +59,17 @@ export class RouteTool {
 
   /* ---- machine d'état ---- */
   /** Arme le routage (exclusif du positionnement) : on attend le PORT de départ. */
-  arm(): void { this.state = { fromPortId: null, wpIds: [], armed: true }; this.host.disarmPositioning(); Notify.toast("Routage : cliquez le PORT de départ", "ok"); this.host.render(); }
+  arm(): void { this.state = { fromPortId: null, wpIds: [], armed: true }; this.host.disarmPositioning(); Notify.toast(I18n.t("dc.route.armToast"), "ok"); this.host.render(); }
   /** Pose le port de départ. */
-  start(portId: string): void { this.state = { fromPortId: portId, wpIds: [] }; Notify.toast("Route démarrée — cliquez des waypoints/brosses puis un PORT terminal"); this.host.render(); }
+  start(portId: string): void { this.state = { fromPortId: portId, wpIds: [] }; Notify.toast(I18n.t("dc.route.startedToast")); this.host.render(); }
   /** Ajoute un waypoint à la route (refus des doublons et des violations de cohérence de salle « exit terminal »). */
   addWp(wpId: string): void {
     if (!this.state) return;
-    if (this.state.wpIds.includes(wpId)) { Notify.toast("Ce point de passage est déjà dans la route", "err"); return; }   // pas deux fois le même
+    if (this.state.wpIds.includes(wpId)) { Notify.toast(I18n.t("dc.route.dupWp"), "err"); return; }   // pas deux fois le même
     // EXIT TERMINAL : un exit FERME sa salle au niveau de la route → interdit d'ajouter ensuite un waypoint de cette
     // salle (le câble DOIT sortir). On éprouve la route prospective (codes stables, cf. Store.cableRoute).
     const probe = { from_port_id: this.state.fromPortId, to_port_id: null, waypoint_ids: [...this.state.wpIds, wpId] };
-    if (this.store.routeHasRoomBreak(probe)) { Notify.toast("Un exit est TERMINAL pour sa salle — le câble doit sortir avant tout autre waypoint de salle.", "err"); return; }
+    if (this.store.routeHasRoomBreak(probe)) { Notify.toast(I18n.t("dc.route.exitTerminal"), "err"); return; }
     this.state.wpIds.push(wpId); this.host.render();
   }
   /** Défait la dernière étape : retire le dernier waypoint, sinon le port de départ (retour à l'armement). */
@@ -78,7 +79,7 @@ export class RouteTool {
   /** Termine la route sur `endPortId` → ouvre le formulaire de câblage prérempli. */
   finish(endPortId: string): void {
     const rb = this.state; if (!rb || !rb.fromPortId) return;
-    if (endPortId === rb.fromPortId) { Notify.toast("Le port terminal doit différer du port de départ", "err"); return; }
+    if (endPortId === rb.fromPortId) { Notify.toast(I18n.t("dc.route.endDiffers"), "err"); return; }
     const fromPortId = rb.fromPortId, wpIds = rb.wpIds.slice();
     this.state = null; this.host.render();
     // dialogue de câblage prérempli ; à la création effective, on rend le câble visible dans la vue.
@@ -97,19 +98,19 @@ export class RouteTool {
   /** Carte « Route en cours » (panneau latéral) : étapes + retour + annuler. */
   card(): HTMLElement {
     const rb = this.state!, box = document.createElement("div"); box.className = "dc-card";
-    const t = document.createElement("div"); t.className = "dc-card-title"; t.innerHTML = `<span class="gi">${Icons.ROUTE}</span>Route en cours`; box.appendChild(t);
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.innerHTML = `<span class="gi">${Icons.ROUTE}</span>${I18n.t("dc.route.cardTitle")}`; box.appendChild(t);
     const list = document.createElement("div"); list.style.cssText = "font-size:12px;margin:4px 0;display:flex;flex-direction:column;gap:3px";
     const step = (html: string, n?: number) => { const d = document.createElement("div"); d.innerHTML = (n != null ? '<span class="pill">' + n + "</span> " : "") + html; return d; };
-    if (rb.fromPortId) list.appendChild(step("Départ : <b>" + Html.escape(this.host.portShort(rb.fromPortId)) + "</b>", 1));
-    else list.appendChild(step('<span style="color:var(--accent)">Cliquez le PORT de départ…</span>'));
-    rb.wpIds.forEach((id, i) => { const w: any = this.store.get("waypoints", id); list.appendChild(step(w ? Html.escape(Waypoint.glyph(w) + " " + (w.name || "(waypoint)")) : "(waypoint ?)", i + 2)); });
+    if (rb.fromPortId) list.appendChild(step(I18n.t("dc.route.startPrefix") + "<b>" + Html.escape(this.host.portShort(rb.fromPortId)) + "</b>", 1));
+    else list.appendChild(step('<span style="color:var(--accent)">' + I18n.t("dc.route.clickStart") + '</span>'));
+    rb.wpIds.forEach((id, i) => { const w: any = this.store.get("waypoints", id); list.appendChild(step(w ? Html.escape(Waypoint.glyph(w) + " " + (w.name || I18n.t("dc.common.waypoint"))) : I18n.t("dc.route.wpUnknown"), i + 2)); });
     box.appendChild(list);
     const hint = document.createElement("div"); hint.className = "form-hint";
-    hint.textContent = rb.fromPortId ? "Cliquez des waypoints/brosses (changez de salle/étage si besoin), puis un PORT terminal pour finir." : "Cliquez un port libre pour démarrer la route.";
+    hint.textContent = rb.fromPortId ? I18n.t("dc.route.hintStarted") : I18n.t("dc.route.hintStart");
     box.appendChild(hint);
     const acts = document.createElement("div"); acts.className = "dc-card-acts";
-    const bBack = this.host.btn("↩ Retour", () => this.back()); (bBack as any).disabled = !rb.fromPortId && !rb.wpIds.length;
-    const bCancel = this.host.btn("Annuler", () => this.cancel()); IconButton.decorate(bCancel, Icons.CLOSE); bCancel.classList.add("btn-danger");
+    const bBack = this.host.btn(I18n.t("dc.route.back"), () => this.back()); (bBack as any).disabled = !rb.fromPortId && !rb.wpIds.length;
+    const bCancel = this.host.btn(I18n.t("ui.action.cancel"), () => this.cancel()); IconButton.decorate(bCancel, Icons.CLOSE); bCancel.classList.add("btn-danger");
     acts.append(bBack, bCancel); box.appendChild(acts);
     return box;
   }
