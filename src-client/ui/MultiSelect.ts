@@ -1,4 +1,5 @@
 import { Html } from "../core/Html";
+import { I18n } from "../i18n/I18n";
 
 export interface MultiItem { id: string; label: string; color?: string | null; }
 
@@ -22,12 +23,12 @@ export class MultiSelect {
     const refreshLabel = () => {
       const n = selected.size;
       const all = items.length > 0 && n === items.length;
-      trigger.innerHTML = Html.escape(labelTxt) + ' <span class="count-badge">' + ((n === 0 || all) ? "Tous" : (n + " sél.")) + "</span>";
+      trigger.innerHTML = Html.escape(labelTxt) + ' <span class="count-badge">' + ((n === 0 || all) ? I18n.t("ui.multiselect.all") : I18n.t("ui.multiselect.selectedCount", { n })) + "</span>";
     };
     if (items.length) {
       const head = document.createElement("div"); head.className = "multi-allnone";
-      const bAll = document.createElement("button"); bAll.type = "button"; bAll.textContent = "Tout";
-      const bNone = document.createElement("button"); bNone.type = "button"; bNone.textContent = "Aucun";
+      const bAll = document.createElement("button"); bAll.type = "button"; bAll.textContent = I18n.t("ui.multiselect.selectAll");
+      const bNone = document.createElement("button"); bNone.type = "button"; bNone.textContent = I18n.t("ui.multiselect.selectNone");
       bAll.onclick = () => { items.forEach((it) => selected.add(it.id)); boxes.forEach((c) => { c.checked = true; }); refreshLabel(); onChange(); };
       bNone.onclick = () => { selected.clear(); boxes.forEach((c) => { c.checked = false; }); refreshLabel(); onChange(); };
       head.appendChild(bAll); head.appendChild(bNone);
@@ -43,7 +44,7 @@ export class MultiSelect {
       row.appendChild(cb); row.appendChild(txt);
       panel.appendChild(row);
     });
-    if (!items.length) { const e = document.createElement("div"); e.className = "multi-item"; e.style.color = "var(--fg-dimmer)"; e.textContent = "(vide)"; panel.appendChild(e); }
+    if (!items.length) { const e = document.createElement("div"); e.className = "multi-item"; e.style.color = "var(--fg-dimmer)"; e.textContent = I18n.t("ui.multiselect.empty"); panel.appendChild(e); }
     trigger.onclick = (e) => {
       e.stopPropagation();
       const willOpen = !panel.classList.contains("open");

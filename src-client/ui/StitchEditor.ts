@@ -25,6 +25,7 @@ import type { PerspectiveOptions } from "./PerspectiveEditor";
 import { ImageStitch } from "../geometry/ImageStitch";
 import type { StitchAxis } from "../geometry/ImageStitch";
 import type { RawImage } from "../geometry/Homography";
+import { I18n } from "../i18n/I18n";
 
 const STITCH_SETTINGS_KEY = "dcmanager.stitch";
 
@@ -44,15 +45,15 @@ export class StitchEditor {
   static open(fileA: Blob, fileB: Blob, opts: PerspectiveOptions = {}): Promise<Blob | null> {
     return this.run(fileA, fileB, opts).catch((e) => {
       console.error("StitchEditor", e);
-      Notify.toast("Assemblage impossible (erreur interne — voir la console).", "err");
+      Notify.toast(I18n.t("ui.stitch.error"), "err");
       return null;
     });
   }
 
   private static async run(fileA: Blob, fileB: Blob, opts: PerspectiveOptions): Promise<Blob | null> {
-    const rawA = await this.prepare(fileA, "1re photo (gauche / haut)");
+    const rawA = await this.prepare(fileA, I18n.t("ui.stitch.photo1"));
     if (!rawA) return null;
-    const rawB = await this.prepare(fileB, "2de photo (droite / bas)");
+    const rawB = await this.prepare(fileB, I18n.t("ui.stitch.photo2"));
     if (!rawB) return null;
     const merged = await this.align(rawA, rawB, opts);
     return merged ? ImageBlob.fromRaw(merged) : null;
@@ -61,13 +62,13 @@ export class StitchEditor {
   /** Étape par photo : proposer le redressement (recommandé — photos de biais), sinon décodage brut. */
   private static async prepare(file: Blob, label: string): Promise<RawImage | null> {
     const fix = await Dialog.confirm({
-      title: "Redresser la " + label + " ?",
-      message: "Recommandé : posez les coins sur la portion de façade visible — l'assemblage n'a plus ensuite qu'à glisser les deux morceaux l'un sur l'autre.",
-      confirmLabel: "Redresser…", cancelLabel: "Telle quelle",
+      title: I18n.t("ui.stitch.straightenTitle", { photo: label }),
+      message: I18n.t("ui.stitch.straightenMessage"),
+      confirmLabel: I18n.t("ui.stitch.straightenConfirm"), cancelLabel: I18n.t("ui.stitch.straightenCancel"),
     });
     if (fix) return PerspectiveEditor.openRaw(file, {});   // PAS de ratio façade : le cliché ne couvre qu'une portion
     const raw = await ImageBlob.toRaw(file);
-    if (!raw) Notify.toast("Impossible de décoder l'image.", "err");
+    if (!raw) Notify.toast(I18n.t("ui.stitch.decodeError"), "err");
     return raw;
   }
 
@@ -98,30 +99,30 @@ export class StitchEditor {
     };
 
     return Dialog.custom({
-      title: "Assembler les deux photos",
-      message: "Glissez la 2de photo pour la superposer à la 1re sur la zone de recouvrement (repères : rails, vis, trous de U).",
-      wide: true, confirmLabel: "Fusionner et utiliser", cancelLabel: "Annuler",
+      title: I18n.t("ui.stitch.title"),
+      message: I18n.t("ui.stitch.message"),
+      wide: true, confirmLabel: I18n.t("ui.stitch.confirm"), cancelLabel: I18n.t("ui.action.cancel"),
       build: (root: HTMLElement) => {
         const bar = document.createElement("div"); bar.className = "face-toolbar"; bar.style.flexWrap = "wrap";
         const mkBtn = (txt: string, title = "") => { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = txt; if (title) b.title = title; return b; };
         const lab = (txt: string) => { const s = document.createElement("span"); s.style.cssText = "font-size:11px;color:var(--fg-dim);"; s.textContent = txt; return s; };
-        const segH = mkBtn("Côte à côte", "Photos gauche/droite (hauteurs normalisées)");
-        const segV = mkBtn("Empilées", "Photos haut/bas (largeurs normalisées)");
-        const segOnion = mkBtn("Pelure", "Superposition à 50 % d'opacité");
-        const segDiff = mkBtn("Différence", "Mode différence : le recouvrement bien aligné devient NOIR");
-        const segCut = mkBtn("Coupe franche", "Jonction : la 1re photo est PRIORITAIRE, la 2de est croppée à la jonction — aucun mélange de pixels");
-        const segFeather = mkBtn("Fondu", "Jonction : fondu linéaire dans le recouvrement (adoucit la couture, peut créer du flou/fantôme sur le relief)");
+        const segH = mkBtn(I18n.t("ui.stitch.sideBySide"), I18n.t("ui.stitch.sideBySideTitle"));
+        const segV = mkBtn(I18n.t("ui.stitch.stacked"), I18n.t("ui.stitch.stackedTitle"));
+        const segOnion = mkBtn(I18n.t("ui.stitch.onion"), I18n.t("ui.stitch.onionTitle"));
+        const segDiff = mkBtn(I18n.t("ui.stitch.diff"), I18n.t("ui.stitch.diffTitle"));
+        const segCut = mkBtn(I18n.t("ui.stitch.cut"), I18n.t("ui.stitch.cutTitle"));
+        const segFeather = mkBtn(I18n.t("ui.stitch.feather"), I18n.t("ui.stitch.featherTitle"));
         const fineI = document.createElement("input"); fineI.type = "range"; fineI.min = "0.90"; fineI.max = "1.10"; fineI.step = "0.002"; fineI.value = "1"; fineI.style.width = "110px";
-        fineI.title = "Réglage fin de l'échelle de la 2de photo (±10 %) — utile si elle ne couvre pas toute la hauteur/largeur du panneau";
+        fineI.title = I18n.t("ui.stitch.fineTitle");
         const fineLab = lab("100 %"); fineLab.style.minWidth = "40px";
-        const refineBtn = mkBtn("Affiner ±10 px", "Recherche automatique du meilleur alignement autour de la position posée (corrélation de luminance)");
+        const refineBtn = mkBtn(I18n.t("ui.stitch.refine"), I18n.t("ui.stitch.refineTitle"));
         const spacer = document.createElement("span"); spacer.style.flex = "1";
-        const zoomOut = mkBtn("−", "Dézoomer"); const zoomLvl = lab("100 %"); zoomLvl.style.minWidth = "40px"; zoomLvl.style.textAlign = "center";
-        const zoomIn = mkBtn("+", "Zoomer"); const zoomFit = mkBtn("Ajuster", "Ajuster l'ensemble à l'écran");
-        bar.append(segH, segV, lab("·"), segOnion, segDiff, lab("Jonction :"), segCut, segFeather, lab("Échelle 2de :"), fineI, fineLab, refineBtn, spacer, zoomOut, zoomLvl, zoomIn, zoomFit);
+        const zoomOut = mkBtn("−", I18n.t("ui.zoom.out")); const zoomLvl = lab("100 %"); zoomLvl.style.minWidth = "40px"; zoomLvl.style.textAlign = "center";
+        const zoomIn = mkBtn("+", I18n.t("ui.zoom.in")); const zoomFit = mkBtn(I18n.t("ui.zoom.fitLabel"), I18n.t("ui.stitch.fitTitle"));
+        bar.append(segH, segV, lab("·"), segOnion, segDiff, lab(I18n.t("ui.stitch.junctionLabel")), segCut, segFeather, lab(I18n.t("ui.stitch.scale2Label")), fineI, fineLab, refineBtn, spacer, zoomOut, zoomLvl, zoomIn, zoomFit);
 
         const hint = document.createElement("div"); hint.className = "form-hint";
-        hint.textContent = "Glisser = déplacer la 2de photo · clic droit glissé = déplacer la vue · molette = zoom · flèches = ajustement fin (Maj = ×10).";
+        hint.textContent = I18n.t("ui.stitch.hint");
         const info = document.createElement("div"); info.className = "form-hint";   // recouvrement · dimensions · ratio
 
         const wrap = document.createElement("div");
@@ -155,8 +156,8 @@ export class StitchEditor {
           const ov = axis === "h" ? Math.min(A.width, rdx + sBw()) - Math.max(0, rdx) : Math.min(A.height, rdy + sBh()) - Math.max(0, rdy);
           const r = ImageStitch.autoCropRect(A, { width: sBw(), height: sBh() }, rdx, rdy, axis);
           const ratio = r.w / r.h;
-          info.textContent = "Recouvrement : " + Math.max(0, ov) + " px · Sortie ≈ " + r.w + " × " + r.h + " px · Ratio l/h : " + ratio.toFixed(2)
-            + (faceRatio ? " (cible façade : " + faceRatio.toFixed(2) + ")" : "");
+          info.textContent = I18n.t("ui.stitch.info", { overlap: Math.max(0, ov), w: r.w, h: r.h, ratio: ratio.toFixed(2) })
+            + (faceRatio ? I18n.t("ui.stitch.targetFace", { ratio: faceRatio.toFixed(2) }) : "");
         };
         const syncControls = () => {
           segH.className = "btn btn-sm " + (axis === "h" ? "btn-primary" : "btn-ghost");
@@ -218,7 +219,7 @@ export class StitchEditor {
         segFeather.onclick = () => { seam = "feather"; this.saveSeam(seam); syncControls(); };
         fineI.oninput = () => { fine = parseFloat(fineI.value) || 1; scaledCache = null; syncControls(); render(); };
         refineBtn.onclick = () => {
-          Notify.busy("Affinage…");
+          Notify.busy(I18n.t("ui.stitch.busyRefine"));
           requestAnimationFrame(() => requestAnimationFrame(() => {
             try { const best = ImageStitch.refine(A, scaledB(), Math.round(dx), Math.round(dy), 10); dx = best.dx; dy = best.dy; render(); }
             finally { Notify.idle(); }
@@ -238,7 +239,7 @@ export class StitchEditor {
       if (!placement) return null;
       // FUSION après fermeture, derrière l'indicateur (resize + gain + fondu + recadrage : centaines de ms).
       return new Promise<RawImage | null>((resolve) => {
-        Notify.busy("Fusion…");
+        Notify.busy(I18n.t("ui.stitch.busyMerge"));
         requestAnimationFrame(() => requestAnimationFrame(() => {
           try {
             const sb = scaledB();
@@ -246,7 +247,7 @@ export class StitchEditor {
             const { img, ox, oy } = ImageStitch.blend(A, sb, placement.dx, placement.dy, placement.axis, gain, seam);
             const r = ImageStitch.autoCropRect(A, sb, placement.dx, placement.dy, placement.axis);
             Notify.idle(); resolve(ImageStitch.crop(img, r.x - ox, r.y - oy, r.w, r.h));
-          } catch (e) { Notify.idle(); Notify.toast("Fusion impossible.", "err"); resolve(null); }
+          } catch (e) { Notify.idle(); Notify.toast(I18n.t("ui.stitch.mergeError"), "err"); resolve(null); }
         }));
       });
     });

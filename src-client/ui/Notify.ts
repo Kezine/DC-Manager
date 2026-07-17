@@ -1,4 +1,5 @@
 import { Fullscreen } from "./Fullscreen";
+import { I18n } from "../i18n/I18n";
 
 /** Notifications éphémères (toasts). Crée son conteneur au besoin. */
 export class Notify {
@@ -26,7 +27,7 @@ export class Notify {
       ≈ 1 s) : capte les clics et signale que l'UI travaille au lieu de paraître figée. `busy()`/`idle()`
       s'équilibrent ; un second `busy()` ne fait que mettre à jour le message. */
   private static busyEl: HTMLElement | null = null;
-  static busy(msg: string = "Chargement…"): void {
+  static busy(msg: string = I18n.t("ui.notify.busy")): void {
     if (Notify.busyEl) { const t = Notify.busyEl.querySelector(".busy-msg"); if (t) t.textContent = msg; return; }
     const ov = document.createElement("div");
     ov.className = "busy-overlay";

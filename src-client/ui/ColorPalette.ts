@@ -1,4 +1,5 @@
 import { COLOR_PALETTE } from "../domain/constants";
+import { I18n } from "../i18n/I18n";
 
 /* Sélecteur de couleur : pastilles de la palette (+ « aucune ») + color-picker natif
    pour une couleur hors palette. `onChange(color|null)` à chaque choix.
@@ -14,7 +15,7 @@ export class ColorPalette {
     };
     const none = document.createElement("div");
     none.className = "palette-swatch none" + (!initial ? " selected" : "");
-    none.title = "Aucune couleur"; none.textContent = "∅";
+    none.title = I18n.t("ui.color.none"); none.textContent = "∅";
     none.onclick = () => { current = null; selectSwatch(none); onChange(null); syncPicker(); };
     palette.appendChild(none);
     COLOR_PALETTE.forEach((c) => {
@@ -30,7 +31,7 @@ export class ColorPalette {
     const picker = document.createElement("input");
     picker.type = "color"; picker.value = (initial && /^#[0-9a-f]{6}$/i.test(initial)) ? initial : "#ff5500";
     const lbl = document.createElement("span");
-    lbl.style.fontSize = "10px"; lbl.style.color = "var(--fg-dim)"; lbl.textContent = "Couleur personnalisée";
+    lbl.style.fontSize = "10px"; lbl.style.color = "var(--fg-dim)"; lbl.textContent = I18n.t("ui.color.custom");
     picker.oninput = () => { current = picker.value; selectSwatch(null); onChange(picker.value); };
     function syncPicker() { if (current && /^#[0-9a-f]{6}$/i.test(current)) picker.value = current; }
     customRow.appendChild(picker); customRow.appendChild(lbl);

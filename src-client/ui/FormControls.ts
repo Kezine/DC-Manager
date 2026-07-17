@@ -1,4 +1,5 @@
 import { Html } from "../core/Html";
+import { I18n } from "../i18n/I18n";
 
 export interface SelectOption { value: string; label: string; disabled?: boolean; group?: string; }
 export interface NumberOpts { min?: number | string; max?: number | string; step?: number | string; placeholder?: string; }
@@ -32,7 +33,7 @@ export class FormControls {
 
   static textArea(value?: string): HTMLTextAreaElement {
     const t = document.createElement("textarea");
-    t.value = value || ""; t.placeholder = "Description / note…";
+    t.value = value || ""; t.placeholder = I18n.t("ui.form.textareaPlaceholder");
     return t;
   }
 
@@ -106,8 +107,7 @@ export class FormControls {
 
   /** Saisie de DATE thématisée (input + boutons choisir 📅/🕑 / maintenant / effacer). `.value` proxifié.
       `opts.mode` étend la granularité (date / date-heure / heure) SANS casser les appelants existants (défaut
-      « date »). Les infobulles restent EN DUR en français : ce composant n'est pas encore migré i18n (par le
-      chantier i18n) — on ne mélange donc pas les styles dans un fichier non migré. */
+      « date »). Libellés/infobulles LOCALISÉS (`ui.form.*`) — variantes par mode. */
   static date(value?: string, opts: DateOpts = {}): HTMLDivElement {
     const mode = opts.mode || "date";
     const buttons = opts.buttons || ["pick", "now", "clear"];
@@ -133,10 +133,11 @@ export class FormControls {
     const CLR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20H8.5L3 14l5.5-6H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2z"/><line x1="18" y1="11" x2="12" y2="17"/><line x1="12" y1="11" x2="18" y2="17"/></svg>';
     // Le bouton « choisir » prend l'icône horloge en mode heure seule ; « maintenant » garde son ancien libellé
     // « Auj. » en mode date (rétro-compatibilité) et devient « Maint. » quand une heure entre en jeu.
+    // Fusion rebase adaptations-UI × migration i18n : structure multi-modes + libellés en CLÉS (ui.form.*).
     const pickIcon = mode === "time" ? CLK : CAL;
-    const pickTitle = mode === "time" ? "Ouvrir le sélecteur d'heure" : "Ouvrir le sélecteur de date";
-    const nowLabel = mode === "date" ? "Auj." : "Maint.";
-    const nowTitle = mode === "date" ? "Mettre la date du jour" : mode === "date-time" ? "Mettre la date et l'heure courantes" : "Mettre l'heure courante";
+    const pickTitle = mode === "time" ? I18n.t("ui.form.timePick") : I18n.t("ui.form.datePick");
+    const nowLabel = mode === "date" ? I18n.t("ui.form.dateToday") : I18n.t("ui.form.dateNow");
+    const nowTitle = mode === "date" ? I18n.t("ui.form.dateTodayTitle") : mode === "date-time" ? I18n.t("ui.form.dateTimeNowTitle") : I18n.t("ui.form.timeNowTitle");
     const mkBtn = (cls: string, html: string, title: string, fn: () => void) => {
       const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-sm btn-ghost date-ctrl-btn " + cls;
       b.title = title; b.setAttribute("aria-label", title); b.innerHTML = html; b.addEventListener("click", fn); return b;
@@ -144,7 +145,7 @@ export class FormControls {
     buttons.forEach((k) => {
       if (k === "pick") row.appendChild(mkBtn("date-ctrl-icon", pickIcon, pickTitle, () => { try { (input as any).showPicker(); } catch (_) { input.focus(); } }));
       else if (k === "now") row.appendChild(mkBtn("date-ctrl-text", nowLabel, nowTitle, () => { input.value = nowValue(); fire(); }));
-      else if (k === "clear") row.appendChild(mkBtn("date-ctrl-icon", CLR, "Effacer cette date", () => { input.value = ""; fire(); }));
+      else if (k === "clear") row.appendChild(mkBtn("date-ctrl-icon", CLR, I18n.t("ui.form.dateClear"), () => { input.value = ""; fire(); }));
     });
     wrap.appendChild(row);
     (wrap as any)._input = input;

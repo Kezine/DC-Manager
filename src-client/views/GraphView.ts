@@ -17,6 +17,7 @@ import { VmNetMapping } from "../core/VmNetMapping";
 import { GraphGeometry } from "../geometry/GraphGeometry";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { GroupTypes } from "../domain/GroupTypes";
+import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
    GraphView — vue GRAPHE du câblage (SVG).
@@ -141,20 +142,20 @@ export class GraphView {
     // recentrer/ajuster + plein écran : MÊMES icônes que l'overlay de la vue 3D (DatacenterView.buildControls)
     const RECENTER = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="12" y1="1.5" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22.5" y2="12"/></svg>';
     const FS = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>';
-    const DM_TITLE = "Mode d'affichage de la vue par défaut :\nA · Réorganiser — la disposition est recalculée à chaque changement de filtre\nB · Masquer (fixe) — les nœuds restent en place, les filtres ne font qu'afficher/masquer\nC · Réorg. + garder — comme A, mais les nœuds déplacés à la main gardent leur position";
+    const DM_TITLE = I18n.t("graph.displayModeTitle");
     // --- actions (haut-droite) ---
     const actions = document.createElement("div"); actions.className = "graph-actions";
     actions.innerHTML =
-      `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="export" title="Exporter une image (SVG / JPEG)…">${CAM}</button>`
+      `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="export" title="${I18n.t("graph.actions.exportTitle")}">${CAM}</button>`
       + `<span class="ga-sep"></span>`
-      + `<button class="btn btn-ghost btn-sm" data-act="frame" title="Ajouter un cadre de regroupement">▭ Cadre</button>`
+      + `<button class="btn btn-ghost btn-sm" data-act="frame" title="${I18n.t("graph.actions.frameTitle")}">${I18n.t("graph.actions.frame")}</button>`
       + `<span class="ga-sep"></span>`
-      + `<select class="graph-action-select" data-act="dm"><option value="A">A · Réorganiser</option><option value="B">B · Masquer (fixe)</option><option value="C">C · Réorg. + garder</option></select>`
+      + `<select class="graph-action-select" data-act="dm"><option value="A">${I18n.t("graph.actions.dmA")}</option><option value="B">${I18n.t("graph.actions.dmB")}</option><option value="C">${I18n.t("graph.actions.dmC")}</option></select>`
       + `<span class="ga-sep"></span>`
-      + `<select class="graph-action-select" data-act="lsel" title="Disposition active (« Vue par défaut » = aucune disposition enregistrée)"></select>`
-      + `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="lsave" title="Enregistrer les modifications dans la disposition active" style="display:none;">${SAVE}</button>`
-      + `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="lmanage" title="Gérer les dispositions enregistrées (renommer, mettre à jour, supprimer)…">${LIST}</button>`
-      + `<button class="btn btn-ghost btn-sm" data-act="auto" title="Disposition automatique (force) — réorganise les nœuds affichés">Auto</button>`;
+      + `<select class="graph-action-select" data-act="lsel" title="${I18n.t("graph.actions.layoutSelectTitle")}"></select>`
+      + `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="lsave" title="${I18n.t("graph.actions.layoutSaveTitle")}" style="display:none;">${SAVE}</button>`
+      + `<button class="btn btn-ghost btn-sm graph-icon-btn" data-act="lmanage" title="${I18n.t("graph.actions.layoutManageTitle")}">${LIST}</button>`
+      + `<button class="btn btn-ghost btn-sm" data-act="auto" title="${I18n.t("graph.actions.autoTitle")}">${I18n.t("graph.actions.auto")}</button>`;
     this.stage.appendChild(actions);
     const a = (sel: string) => actions.querySelector('[data-act="' + sel + '"]') as HTMLElement;
     (a("export")).onclick = () => this.openExportDialog();
@@ -173,11 +174,11 @@ export class GraphView {
     // --- zoom / recentrage / plein écran (bas-droite) ---
     const zoom = document.createElement("div"); zoom.className = "graph-zoom-controls";
     zoom.innerHTML =
-      `<button class="btn btn-ghost btn-sm" data-act="zin" title="Zoom avant">+</button>`
-      + `<button class="btn btn-ghost btn-sm" data-act="zout" title="Zoom arrière">−</button>`
+      `<button class="btn btn-ghost btn-sm" data-act="zin" title="${I18n.t("graph.zoom.inTitle")}">+</button>`
+      + `<button class="btn btn-ghost btn-sm" data-act="zout" title="${I18n.t("graph.zoom.outTitle")}">−</button>`
       + `<span class="gz-sep"></span>`
-      + `<button class="btn btn-ghost btn-sm" data-act="recenter" title="Recentrer / ajuster la vue" aria-label="Recentrer la vue">${RECENTER}</button>`
-      + `<button class="btn btn-ghost btn-sm" data-act="fs" title="Plein écran" aria-label="Plein écran">${FS}</button>`;
+      + `<button class="btn btn-ghost btn-sm" data-act="recenter" title="${I18n.t("graph.zoom.recenterTitle")}" aria-label="${I18n.t("graph.zoom.recenterAria")}">${RECENTER}</button>`
+      + `<button class="btn btn-ghost btn-sm" data-act="fs" title="${I18n.t("graph.zoom.fullscreenTitle")}" aria-label="${I18n.t("graph.zoom.fullscreenTitle")}">${FS}</button>`;
     this.stage.appendChild(zoom);
     const z = (sel: string) => zoom.querySelector('[data-act="' + sel + '"]') as HTMLElement;
     (z("zin")).onclick = () => this.zoomBy(1.2);
@@ -276,7 +277,7 @@ export class GraphView {
       eqIds = sets.eqIds; cableIds = sets.cableIds;
       this._shownEq = null; this._shownCable = null;
     }
-    this.nodes = [...eqIds].map((id) => s.get("equipments", id)).filter(Boolean).map((e: any): GNode => ({ id: e.id, name: e.name || "(sans nom)", type: e.type || "", group_id: e.group_id || null, kind: "equip", x: 0, y: 0, vx: 0, vy: 0 }));
+    this.nodes = [...eqIds].map((id) => s.get("equipments", id)).filter(Boolean).map((e: any): GNode => ({ id: e.id, name: e.name || I18n.t("graph.unnamed"), type: e.type || "", group_id: e.group_id || null, kind: "equip", x: 0, y: 0, vx: 0, vy: 0 }));
     this.edges = [...cableIds].map((id) => s.get("cables", id)).filter(Boolean).flatMap((c: any) => {
       const pa = s.get("ports", c.from_port_id), pb = s.get("ports", c.to_port_id);
       if (!pa || !pb || !pa.equipment_id || !pb.equipment_id) return [];   // garanti par _resolvableCables — garde de typage/robustesse
@@ -317,7 +318,7 @@ export class GraphView {
     const edgeShownIds = new Set<string>();
     s.all("vms").forEach((vm: any) => {
       const vmNodeId = this._vmNodeId(vm.id);
-      vmNodes.push({ id: vmNodeId, name: vm.name || "(VM)", type: "", group_id: null, kind: "vm", orphan: !!vm.orphan, x: 0, y: 0, vx: 0, vy: 0 });
+      vmNodes.push({ id: vmNodeId, name: vm.name || I18n.t("graph.vmFallback"), type: "", group_id: null, kind: "vm", orphan: !!vm.orphan, x: 0, y: 0, vx: 0, vy: 0 });
       const seen = new Set<string>();   // dédoublonnage (VM, réseau) : une seule arête par réseau distinct
       (Array.isArray(vm.nics) ? vm.nics : []).forEach((nic: any) => {
         const nid = VmNetMapping.resolve(mapEntries, nic.bridge, nic.vlan_tag);
@@ -326,7 +327,7 @@ export class GraphView {
         if (!net) return;                                // réseau supprimé → rien à matérialiser
         seen.add(nid);
         const netNodeId = this._netNodeId(nid);
-        if (!netFull.has(netNodeId)) netFull.set(netNodeId, { id: netNodeId, name: net.label || "(réseau)", type: "", group_id: null, kind: "net", x: 0, y: 0, vx: 0, vy: 0 });
+        if (!netFull.has(netNodeId)) netFull.set(netNodeId, { id: netNodeId, name: net.label || I18n.t("graph.netFallback"), type: "", group_id: null, kind: "net", x: 0, y: 0, vx: 0, vy: 0 });
         const edgeId = GraphView.VMNET_EDGE_PREFIX + vm.id + ":" + nid;
         edgeFull.push({ id: edgeId, name: "", a: vmNodeId, b: netNodeId, network_id: nid, status: "" });
         if (netAllowed(nid)) { netShownIds.add(netNodeId); edgeShownIds.add(edgeId); }
@@ -400,29 +401,29 @@ export class GraphView {
     const ptItems = s.all("portTypes").sort((a: any, b: any) => a.name.localeCompare(b.name)).map((t: any) => ({ id: t.id, label: t.name + " · " + t.family }));
     const grpItems = s.all("groups").sort((a: any, b: any) => a.label.localeCompare(b.label)).map((g: any) => ({ id: g.id, label: g.label || "(sans label)", color: g.color }));
     const onChange = () => this.onFilterChange();
-    this.toolbarEl.appendChild(mkGroup(MultiSelect.build("Équipements", eqItems, this.filters.equip, onChange)));
-    this.toolbarEl.appendChild(mkGroup(MultiSelect.build("Réseaux", netItems, this.filters.net, onChange)));
-    this.toolbarEl.appendChild(mkGroup(MultiSelect.build("Groupes", grpItems, this.filters.grp, onChange)));
-    this.toolbarEl.appendChild(mkGroup(MultiSelect.build("Types de port", ptItems, this.filters.pt, onChange)));
+    this.toolbarEl.appendChild(mkGroup(MultiSelect.build(I18n.t("graph.filter.equipments"), eqItems, this.filters.equip, onChange)));
+    this.toolbarEl.appendChild(mkGroup(MultiSelect.build(I18n.t("graph.filter.networks"), netItems, this.filters.net, onChange)));
+    this.toolbarEl.appendChild(mkGroup(MultiSelect.build(I18n.t("graph.filter.groups"), grpItems, this.filters.grp, onChange)));
+    this.toolbarEl.appendChild(mkGroup(MultiSelect.build(I18n.t("graph.filter.portTypes"), ptItems, this.filters.pt, onChange)));
 
-    const barSel = FormControls.select([{ value: "type", label: "Type" }, { value: "network", label: "Réseau" }, { value: "group", label: "Groupe" }], this.nodeBarMode);
-    barSel.title = "Couleur de la poignée des nœuds";
+    const barSel = FormControls.select([{ value: "type", label: I18n.t("graph.filter.colorType") }, { value: "network", label: I18n.t("graph.filter.colorNetwork") }, { value: "group", label: I18n.t("graph.filter.colorGroup") }], this.nodeBarMode);
+    barSel.title = I18n.t("graph.filter.barColorTitle");
     barSel.onchange = () => { this.nodeBarMode = barSel.value as any; this.updateNodeBars(); };
     this.toolbarEl.appendChild(mkGroup(barSel));
 
     // Toggle « VMs » (opt-in, persisté par navigateur) : matérialise VMs + réseaux logiques. Changement →
     // rebuild complet (les nœuds vm:/net: entrent ou sortent du modèle), recadrage inclus.
-    const vmToggle = FormControls.toggle("VMs", this.showVms, (v) => { this.showVms = v; this._persistPrefs(); this.rebuild({ recenter: true }); },
-      { title: "Afficher les machines virtuelles et leurs réseaux logiques (liens via le mapping bridge/VLAN → réseau)" });
+    const vmToggle = FormControls.toggle(I18n.t("graph.filter.vms"), this.showVms, (v) => { this.showVms = v; this._persistPrefs(); this.rebuild({ recenter: true }); },
+      { title: I18n.t("graph.filter.vmsTitle") });
     this.toolbarEl.appendChild(mkGroup(vmToggle));
 
     const search = document.createElement("input");
-    search.type = "text"; search.className = "search-input"; search.placeholder = "Surligner…"; search.value = this.search; search.style.maxWidth = "200px";
+    search.type = "text"; search.className = "search-input"; search.placeholder = I18n.t("graph.filter.highlight"); search.value = this.search; search.style.maxWidth = "200px";
     search.oninput = () => { this.search = search.value; this.applyHighlight(); };
     this.toolbarEl.appendChild(search);
 
     const reset = document.createElement("button");
-    reset.type = "button"; reset.className = "btn btn-ghost btn-sm"; reset.textContent = "Tout afficher";
+    reset.type = "button"; reset.className = "btn btn-ghost btn-sm"; reset.textContent = I18n.t("graph.filter.showAll");
     reset.onclick = () => { this.filters.equip.clear(); this.filters.net.clear(); this.filters.pt.clear(); this.filters.grp.clear(); this.search = ""; this.buildToolbar(); this.onFilterChange(); };
     this.toolbarEl.appendChild(reset);
 
@@ -482,8 +483,8 @@ export class GraphView {
   refreshLayoutControls(): void {
     const active = this._activeLayout();
     if (this._layoutSelectEl) {
-      const opts = ['<option value="__default__">Vue par défaut</option>']
-        .concat(this._layouts().map((l) => `<option value="${l.id}">${Html.escape(l.name || "(sans nom)")}</option>`));
+      const opts = ['<option value="__default__">' + Html.escape(I18n.t("graph.defaultView")) + "</option>"]
+        .concat(this._layouts().map((l) => `<option value="${l.id}">${Html.escape(l.name || I18n.t("graph.unnamed"))}</option>`));
       this._layoutSelectEl.innerHTML = opts.join("");
       this._layoutSelectEl.value = active ? active.id : "__default__";
     }
@@ -494,17 +495,17 @@ export class GraphView {
 
   activateDefaultView(): void {
     this.store.meta.activeLayoutId = null; this._layoutDirty = false;
-    this._persistLayouts(); this.rebuild({ recenter: true }); Notify.toast("Vue par défaut");
+    this._persistLayouts(); this.rebuild({ recenter: true }); Notify.toast(I18n.t("graph.defaultView"));
   }
 
   private _promptName(title: string, initial: string): Promise<string | null> {
     return Dialog.custom({
-      title, confirmLabel: "OK",
+      title, confirmLabel: I18n.t("ui.action.ok"),
       build: (root) => {
-        const inp = FormControls.text(initial || "", "ex. Salle serveurs, Vue logique…");
-        root.appendChild(FormControls.fieldRow("Nom", inp));
+        const inp = FormControls.text(initial || "", I18n.t("graph.layout.namePlaceholder"));
+        root.appendChild(FormControls.fieldRow(I18n.t("graph.layout.nameField"), inp));
         setTimeout(() => { inp.focus(); inp.select(); }, 30);
-        return { validate: () => inp.value.trim() ? true : "Le nom ne peut pas être vide.", collect: () => inp.value.trim() };
+        return { validate: () => inp.value.trim() ? true : I18n.t("graph.layout.nameEmpty"), collect: () => inp.value.trim() };
       },
     });
   }
@@ -512,8 +513,8 @@ export class GraphView {
   async saveLayout(): Promise<void> {
     const positions = this._capturePositions(this.pos);
     const filters = this._captureFilters();
-    const def = "Disposition " + (this._layouts().length + 1);
-    const name = await this._promptName("Enregistrer la disposition", def);
+    const def = I18n.t("graph.layout.defaultName", { n: this._layouts().length + 1 });
+    const name = await this._promptName(I18n.t("graph.layout.promptSaveTitle"), def);
     if (!name) return;
     const id = Id.uid();
     this._layouts().push({ id, name, positions, filters, created_date: Id.nowIso(), updated_date: Id.nowIso() });
@@ -521,7 +522,7 @@ export class GraphView {
     this._persistLayouts(); this._moved.clear();
     this.pos = Object.assign({}, positions);
     this.buildToolbar(); this.rebuild({ recenter: true });
-    Notify.toast("Disposition « " + name + " » enregistrée");
+    Notify.toast(I18n.t("graph.layout.saved", { name }));
   }
   applyLayout(id: string): void {
     const l = this._layouts().find((x) => x.id === id);
@@ -530,31 +531,31 @@ export class GraphView {
     this.pos = Object.assign({}, l.positions || {}); this._moved.clear();
     this._applyFilters(l.filters); this._persistLayouts();
     this.buildToolbar(); this.rebuild({ recenter: true });
-    Notify.toast("Disposition « " + (l.name || "") + " » restaurée");
+    Notify.toast(I18n.t("graph.layout.restored", { name: l.name || "" }));
   }
   updateLayout(id: string): void {
     const l = this._layouts().find((x) => x.id === id);
     if (!l) return;
     l.positions = this._capturePositions(this.pos); l.filters = this._captureFilters(); l.updated_date = Id.nowIso();
     this._layoutDirty = false; this._persistLayouts(); this.refreshLayoutControls();
-    Notify.toast("Disposition « " + l.name + " » enregistrée");
+    Notify.toast(I18n.t("graph.layout.saved", { name: l.name }));
   }
   async renameLayout(id: string): Promise<void> {
     const l = this._layouts().find((x) => x.id === id);
     if (!l) return;
-    const name = await this._promptName("Renommer la disposition", l.name);
+    const name = await this._promptName(I18n.t("graph.layout.promptRenameTitle"), l.name);
     if (!name) return;
-    l.name = name; l.updated_date = Id.nowIso(); this._persistLayouts(); this.refreshLayoutControls(); Notify.toast("Disposition renommée");
+    l.name = name; l.updated_date = Id.nowIso(); this._persistLayouts(); this.refreshLayoutControls(); Notify.toast(I18n.t("graph.layout.renamed"));
   }
   async deleteLayout(id: string): Promise<void> {
     const l = this._layouts().find((x) => x.id === id);
     if (!l) return;
-    const ok = await Dialog.confirm({ title: "Supprimer la disposition ?", message: "« " + (l.name || "") + " » sera supprimée. Les équipements ne sont pas affectés.", confirmLabel: "Supprimer", danger: true });
+    const ok = await Dialog.confirm({ title: I18n.t("graph.layout.deleteTitle"), message: I18n.t("graph.layout.deleteMessage", { name: l.name || "" }), confirmLabel: I18n.t("ui.action.delete"), danger: true });
     if (!ok) return;
     const wasActive = this.store.meta.activeLayoutId === id;
     this.store.meta.graphLayouts = this._layouts().filter((x) => x.id !== id);
     if (wasActive) { this.store.meta.activeLayoutId = null; this._layoutDirty = false; }
-    this._persistLayouts(); this.buildToolbar(); this.rebuild({ recenter: wasActive }); Notify.toast("Disposition supprimée");
+    this._persistLayouts(); this.buildToolbar(); this.rebuild({ recenter: wasActive }); Notify.toast(I18n.t("graph.layout.deleted"));
   }
   /** Réorganise tout (force) en ignorant les positions vivantes. */
   autoArrange(): void { this.pos = {}; this._moved.clear(); this.rebuild({ recenter: true }); }
@@ -564,36 +565,36 @@ export class GraphView {
     const root = document.createElement("div");
     const top = document.createElement("div"); top.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;";
     const hint = document.createElement("div"); hint.style.cssText = "font-size:11px;color:var(--fg-dim);";
-    const addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "btn btn-primary btn-sm"; addBtn.textContent = "+ Enregistrer la disposition actuelle";
+    const addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "btn btn-primary btn-sm"; addBtn.textContent = I18n.t("graph.layout.mgrAdd");
     top.appendChild(hint); top.appendChild(addBtn);
     const listEl = document.createElement("div"); listEl.className = "layout-mgr";
     root.appendChild(top); root.appendChild(listEl);
     const render = () => {
       const layouts = this._layouts();
-      hint.textContent = layouts.length ? layouts.length + " disposition(s) enregistrée(s)" : "Aucune disposition enregistrée pour l'instant.";
+      hint.textContent = layouts.length ? I18n.t("graph.layout.mgrCount", { n: layouts.length }) : I18n.t("graph.layout.mgrNoneYet");
       listEl.innerHTML = "";
-      if (!layouts.length) { const e = document.createElement("div"); e.className = "lm-empty"; e.textContent = "Disposez les nœuds, puis « Enregistrer la disposition actuelle »."; listEl.appendChild(e); return; }
+      if (!layouts.length) { const e = document.createElement("div"); e.className = "lm-empty"; e.textContent = I18n.t("graph.layout.mgrEmpty"); listEl.appendChild(e); return; }
       layouts.forEach((l) => {
         const active = this.store.meta.activeLayoutId === l.id;
         const item = document.createElement("div"); item.className = "lm-item" + (active ? " active" : "");
         const info = document.createElement("div"); info.className = "lm-info";
-        const nameEl = document.createElement("div"); nameEl.className = "lm-name"; nameEl.appendChild(document.createTextNode(l.name || "(sans nom)"));
-        if (active) { const b = document.createElement("span"); b.className = "lm-badge"; b.textContent = "active"; nameEl.appendChild(b); }
+        const nameEl = document.createElement("div"); nameEl.className = "lm-name"; nameEl.appendChild(document.createTextNode(l.name || I18n.t("graph.unnamed")));
+        if (active) { const b = document.createElement("span"); b.className = "lm-badge"; b.textContent = I18n.t("graph.layout.mgrActive"); nameEl.appendChild(b); }
         const sub = document.createElement("div"); sub.className = "lm-sub";
-        sub.textContent = (l.positions ? Object.keys(l.positions).length : 0) + " nœud(s) · maj " + fmtDate(l.updated_date || l.created_date);
+        sub.textContent = I18n.t("graph.layout.mgrNodes", { n: (l.positions ? Object.keys(l.positions).length : 0), date: fmtDate(l.updated_date || l.created_date) });
         info.appendChild(nameEl); info.appendChild(sub);
         const acts = document.createElement("div"); acts.className = "lm-actions";
         const mk = (label: string, cls: string, title: string, fn: () => any) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn " + cls + " btn-sm"; b.textContent = label; if (title) b.title = title; b.onclick = () => Promise.resolve(fn()).then(render); acts.appendChild(b); };
-        mk("Restaurer", "btn-ghost", "Appliquer cette disposition", () => this.applyLayout(l.id));
-        mk("Mettre à jour", "btn-ghost", "Remplacer ses positions par la vue actuelle", () => this.updateLayout(l.id));
-        mk("Renommer", "btn-ghost", "Renommer cette disposition", () => this.renameLayout(l.id));
-        mk("Supprimer", "btn-danger", "Supprimer cette disposition", () => this.deleteLayout(l.id));
+        mk(I18n.t("graph.layout.mgrRestore"), "btn-ghost", I18n.t("graph.layout.mgrRestoreTitle"), () => this.applyLayout(l.id));
+        mk(I18n.t("graph.layout.mgrUpdate"), "btn-ghost", I18n.t("graph.layout.mgrUpdateTitle"), () => this.updateLayout(l.id));
+        mk(I18n.t("graph.layout.mgrRename"), "btn-ghost", I18n.t("graph.layout.mgrRenameTitle"), () => this.renameLayout(l.id));
+        mk(I18n.t("ui.action.delete"), "btn-danger", I18n.t("graph.layout.mgrDeleteTitle"), () => this.deleteLayout(l.id));
         item.appendChild(info); item.appendChild(acts); listEl.appendChild(item);
       });
     };
     addBtn.onclick = () => Promise.resolve(this.saveLayout()).then(render);
     render();
-    this.host.openModal?.({ title: "Dispositions enregistrées", subtitle: "Sauvegardez, restaurez, renommez ou supprimez vos agencements", body: root, hideFooter: true, wide: true });
+    this.host.openModal?.({ title: I18n.t("graph.layout.mgrTitle"), subtitle: I18n.t("graph.layout.mgrSubtitle"), body: root, hideFooter: true, wide: true });
   }
 
   /* ---- plein écran ---- */
@@ -601,8 +602,8 @@ export class GraphView {
   toggleFullscreen(): void {
     if (document.fullscreenElement) { document.exitFullscreen(); return; }
     const el = this.stage.parentElement || this.stage;
-    if (el.requestFullscreen) el.requestFullscreen().catch(() => Notify.toast("Plein écran indisponible", "err"));
-    else Notify.toast("Plein écran non supporté par le navigateur", "err");
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => Notify.toast(I18n.t("graph.fullscreen.unavailable"), "err"));
+    else Notify.toast(I18n.t("graph.fullscreen.unsupported"), "err");
   }
 
   /* ---- export SVG (fidèle) / JPEG (rasterisé) ---- */
@@ -638,12 +639,12 @@ export class GraphView {
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone);
   }
   async openExportDialog(): Promise<void> {
-    if (!this.svg) { Notify.toast("Rien à exporter", "err"); return; }
+    if (!this.svg) { Notify.toast(I18n.t("graph.export.nothing"), "err"); return; }
     const res = await ImageExport.dialog(true);
     if (res) this.exportImage(res);
   }
   exportImage(opts: ExportOptions): void {
-    if (!this.svg) { Notify.toast("Rien à exporter", "err"); return; }
+    if (!this.svg) { Notify.toast(I18n.t("graph.export.nothing"), "err"); return; }
     const rect = this._exportWorldRect(opts.scope);
     ImageExport.run(opts, this._buildExportSvg(opts.scope), rect.w, rect.h, (ext) => this._exportName(ext));
   }
@@ -651,13 +652,13 @@ export class GraphView {
   /* ---- couleur de la poignée des nœuds ---- */
 
   private _nodeBarColor(n: GNode): { color: string; tip: string; muted?: boolean } {
-    if (this.nodeBarMode === "type") return { color: EquipmentTypes.color(n.type), tip: "Type : " + EquipmentTypes.label(n.type) };
+    if (this.nodeBarMode === "type") return { color: EquipmentTypes.color(n.type), tip: I18n.t("graph.tip.type", { type: EquipmentTypes.label(n.type) }) };
     if (this.nodeBarMode === "network") {
       const r = this._nodeNetworkColor(n.id);
-      return r ? { color: r.color, tip: "Réseau : " + r.label + (r.multi ? " (dominant)" : "") } : { color: "var(--line-2)", tip: "Aucun réseau", muted: true };
+      return r ? { color: r.color, tip: I18n.t("graph.tip.network", { label: r.label }) + (r.multi ? I18n.t("graph.tip.networkDominant") : "") } : { color: "var(--line-2)", tip: I18n.t("graph.tip.noNetwork"), muted: true };
     }
     const grp = n.group_id ? this.store.get("groups", n.group_id) : null;
-    return grp ? { color: grp.color || "var(--accent)", tip: "Groupe : " + (grp.label || "(sans label)") + " (" + GroupTypes.label(grp.type) + ")" } : { color: "var(--line-2)", tip: "Aucun groupe", muted: true };
+    return grp ? { color: grp.color || "var(--accent)", tip: I18n.t("graph.tip.group", { label: grp.label || I18n.t("graph.unlabeled"), type: GroupTypes.label(grp.type) }) } : { color: "var(--line-2)", tip: I18n.t("graph.tip.noGroup"), muted: true };
   }
 
   /** Réseau DOMINANT (le plus représenté) parmi les câbles d'un équipement. */
@@ -670,7 +671,7 @@ export class GraphView {
     let best: string | null = null, bestN = 0; counts.forEach((cnt, nid) => { if (cnt > bestN) { bestN = cnt; best = nid; } });
     if (!best) return null;
     const nw = nets.get(best);
-    return { color: nw.color, label: nw.label || "(réseau)", multi: counts.size > 1 };
+    return { color: nw.color, label: nw.label || I18n.t("graph.netFallback"), multi: counts.size > 1 };
   }
 
   /** Met à jour la couleur des poignées en place (sans re-rendre). */
@@ -718,8 +719,8 @@ export class GraphView {
     const head = (t: string) => '<div style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim);margin-bottom:4px;">' + t + "</div>";
     const item = (color: string, label: string) => `<div class="graph-legend-item"><span class="swatch-dot" style="background:${color || "var(--line-2)"};"></span><span>${label}</span></div>`;
     let html = "";
-    if (nets.size) { html += head("Réseaux"); nets.forEach((n) => { html += item(n.color, n.label); }); }
-    if (grps.size) { if (html) html += '<div style="height:6px;"></div>'; html += head("Groupes"); grps.forEach((g) => { html += item(g.color, (g.label || "(sans label)") + " · " + GroupTypes.label(g.type)); }); }
+    if (nets.size) { html += head(I18n.t("graph.legend.networks")); nets.forEach((n) => { html += item(n.color, n.label); }); }
+    if (grps.size) { if (html) html += '<div style="height:6px;"></div>'; html += head(I18n.t("graph.legend.groups")); grps.forEach((g) => { html += item(g.color, (g.label || I18n.t("graph.unlabeled")) + " · " + GroupTypes.label(g.type)); }); }
     this.legendEl.innerHTML = html;
   }
 
@@ -818,7 +819,7 @@ export class GraphView {
       else if (n.kind === "net") this._buildNetNodeContent(g, n, w, h);
       else this._buildEquipNodeContent(g, n, w, h);
       if (this.unplaced.has(n.id)) {
-        const tag = Dom.svg("text", { x: w - 3, y: -4, "text-anchor": "end" }); tag.setAttribute("class", "unplaced-tag"); tag.textContent = "non placé";
+        const tag = Dom.svg("text", { x: w - 3, y: -4, "text-anchor": "end" }); tag.setAttribute("class", "unplaced-tag"); tag.textContent = I18n.t("graph.node.unplaced");
         g.appendChild(tag);
       }
       this._gById[n.id] = g;
@@ -851,7 +852,7 @@ export class GraphView {
 
     if (!this.nodes.length && !((this.store.meta.graphFrames as GFrame[]) || []).length) {
       const msg = Dom.svg("text", { x: W / 2, y: H / 2, "text-anchor": "middle", fill: "var(--fg-dim)", "font-size": 13 });
-      msg.textContent = "Aucun élément à afficher.";
+      msg.textContent = I18n.t("graph.node.empty");
       gRoot.appendChild(msg);
     }
   }
@@ -892,12 +893,12 @@ export class GraphView {
     badge.setAttribute("class", "vm-badge");
     g.appendChild(badge);
     const bt = Dom.svg("text", { x: 17, y: h / 2 + 3, "text-anchor": "middle", "font-size": 8, "font-weight": 700 });
-    bt.setAttribute("class", "vm-badge-txt"); bt.textContent = "VM";
+    bt.setAttribute("class", "vm-badge-txt"); bt.textContent = I18n.t("graph.node.vmBadge");
     g.appendChild(bt);
     const TEXT_X = 34;   // après le badge (aligné sur GNODE_TEXT_X de la géométrie)
     const t1 = Dom.svg("text", { x: TEXT_X, y: 17, "text-anchor": "start", "font-size": 11, "font-weight": 600 }); t1.textContent = n.name;
     const t2 = Dom.svg("text", { x: TEXT_X, y: 31, "text-anchor": "start", "font-size": 9 });
-    t2.setAttribute("class", "vm-sub"); t2.textContent = n.orphan ? "VM · orpheline" : "VM";
+    t2.setAttribute("class", "vm-sub"); t2.textContent = n.orphan ? I18n.t("graph.node.vmSubOrphan") : I18n.t("graph.node.vmSub");
     g.appendChild(t1); g.appendChild(t2);
   }
 
@@ -937,7 +938,7 @@ export class GraphView {
     bg.setAttribute("class", "frame-bg"); bg.setAttribute("pointer-events", "none");
     const head = Dom.svg("rect", { x: f.x, y: f.y, width: f.w, height: 22, fill: col, "fill-opacity": 0.22 });
     head.setAttribute("class", "frame-head"); head.setAttribute("pointer-events", "all"); (head as any).style.cursor = "move";
-    const label = Dom.svg("text", { x: f.x + 10, y: f.y + 15, fill: col }); label.setAttribute("class", "frame-label"); label.setAttribute("pointer-events", "none"); label.textContent = f.label || "Cadre";
+    const label = Dom.svg("text", { x: f.x + 10, y: f.y + 15, fill: col }); label.setAttribute("class", "frame-label"); label.setAttribute("pointer-events", "none"); label.textContent = f.label || I18n.t("graph.frame.fallback");
     const handle = Dom.svg("rect", { x: f.x + f.w - 14, y: f.y + f.h - 14, width: 14, height: 14, fill: "var(--bg)", stroke: col }); handle.setAttribute("class", "frame-handle"); handle.setAttribute("pointer-events", "all");
     if (f.description) { const ti = Dom.svg("title"); ti.textContent = f.description; g.appendChild(ti); }
     g.appendChild(bg); g.appendChild(head); g.appendChild(label); g.appendChild(handle);
@@ -999,18 +1000,18 @@ export class GraphView {
 
   openFrameForm(frame: GFrame | null, pos?: { x: number; y: number }): void {
     const root = document.createElement("div");
-    const labelI = FormControls.text(frame ? frame.label : "", "ex. Cœur de réseau, Salle A…");
-    root.appendChild(FormControls.fieldRow("Label", labelI));
+    const labelI = FormControls.text(frame ? frame.label : "", I18n.t("graph.frame.labelPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("graph.frame.fieldLabel"), labelI));
     let color: string | null = frame ? frame.color : "#ff5500";
-    root.appendChild(FormControls.fieldRow("Couleur", ColorPalette.build(color, (c) => { color = c; }), "Bordure et teinte du cadre."));
+    root.appendChild(FormControls.fieldRow(I18n.t("graph.frame.fieldColor"), ColorPalette.build(color, (c) => { color = c; }), I18n.t("graph.frame.colorHint")));
     const descI = FormControls.textArea(frame ? frame.description : "");
-    root.appendChild(FormControls.fieldRow("Description", descI, "Affichée en infobulle sur le cadre."));
+    root.appendChild(FormControls.fieldRow(I18n.t("graph.frame.fieldDescription"), descI, I18n.t("graph.frame.descriptionHint")));
     this.host.openModal?.({
-      title: frame ? "Modifier le cadre" : "Nouveau cadre",
+      title: frame ? I18n.t("graph.frame.editTitle") : I18n.t("graph.frame.newTitle"),
       subtitle: frame ? (frame.label || "") : "",
       body: root,
       onSave: () => {
-        const label = labelI.value.trim() || "Cadre";
+        const label = labelI.value.trim() || I18n.t("graph.frame.fallback");
         const frames = this._frames().slice();
         if (frame) {
           const i = frames.findIndex((f) => f.id === frame.id);
@@ -1020,28 +1021,28 @@ export class GraphView {
         }
         this.store.meta.graphFrames = frames; this.store.persistMeta(); this.host.setDirty?.(true);
         this.rebuild();
-        Notify.toast(frame ? "Cadre mis à jour" : "Cadre ajouté"); return true;
+        Notify.toast(frame ? I18n.t("graph.frame.updated") : I18n.t("graph.frame.added")); return true;
       },
     });
     setTimeout(() => labelI.focus(), 30);
   }
 
   removeFrame(id: string): void {
-    Dialog.confirm({ title: "Supprimer le cadre ?", message: "Le cadre de regroupement sera retiré (les équipements ne sont pas affectés).", confirmLabel: "Supprimer", danger: true }).then((ok) => {
+    Dialog.confirm({ title: I18n.t("graph.frame.removeTitle"), message: I18n.t("graph.frame.removeMessage"), confirmLabel: I18n.t("ui.action.delete"), danger: true }).then((ok) => {
       if (!ok) return;
       this.store.meta.graphFrames = this._frames().filter((f) => f.id !== id);
-      this.store.persistMeta(); this.host.setDirty?.(true); this.rebuild(); Notify.toast("Cadre supprimé");
+      this.store.persistMeta(); this.host.setDirty?.(true); this.rebuild(); Notify.toast(I18n.t("graph.frame.removed"));
     });
   }
 
   private _frameContextMenu(ev: MouseEvent, f: GFrame): void {
     const covered = this._nodesInFrame(f);
     ContextMenu.show(ev.clientX, ev.clientY, [{
-      head: f.label || "Cadre",
+      head: f.label || I18n.t("graph.frame.fallback"),
       items: [
-        { label: "Modifier le cadre", action: () => this.openFrameForm(f) },
-        { label: "Sélectionner le contenu (" + covered.length + ")", action: () => { this.selection = new Set(covered); this._renderSelection(); } },
-        { label: "Supprimer le cadre", danger: true, action: () => this.removeFrame(f.id) },
+        { label: I18n.t("graph.frame.menuEdit"), action: () => this.openFrameForm(f) },
+        { label: I18n.t("graph.frame.menuSelect", { n: covered.length }), action: () => { this.selection = new Set(covered); this._renderSelection(); } },
+        { label: I18n.t("graph.frame.menuDelete"), danger: true, action: () => this.removeFrame(f.id) },
       ],
     }]);
   }
@@ -1253,32 +1254,32 @@ export class GraphView {
   private _nodeContextMenu(ev: MouseEvent, n: GNode): void {
     // vm/net : menu RESTREINT à « Détails » (jamais les actions d'équipement — suppression, etc.).
     if (n.kind === "vm") {
-      ContextMenu.show(ev.clientX, ev.clientY, [{ head: n.name, items: [{ label: "Détails", action: () => this.host.openVmDetail?.(this._vmRealId(n.id)) }] }]);
+      ContextMenu.show(ev.clientX, ev.clientY, [{ head: n.name, items: [{ label: I18n.t("graph.menu.details"), action: () => this.host.openVmDetail?.(this._vmRealId(n.id)) }] }]);
       return;
     }
     if (n.kind === "net") {
       if (!this.host.openNetworkDetail) return;   // aucune fiche réseau câblée → pas de menu
-      ContextMenu.show(ev.clientX, ev.clientY, [{ head: n.name, items: [{ label: "Détails", action: () => this.host.openNetworkDetail!(this._netRealId(n.id)) }] }]);
+      ContextMenu.show(ev.clientX, ev.clientY, [{ head: n.name, items: [{ label: I18n.t("graph.menu.details"), action: () => this.host.openNetworkDetail!(this._netRealId(n.id)) }] }]);
       return;
     }
     ContextMenu.show(ev.clientX, ev.clientY, [{
       head: n.name,
       items: [
-        { label: "Détails", action: () => this.host.openEquipmentDetail?.(n.id) },
-        { label: "Supprimer", danger: true, action: () => this.host.deleteEquipment?.(n.id) },
+        { label: I18n.t("graph.menu.details"), action: () => this.host.openEquipmentDetail?.(n.id) },
+        { label: I18n.t("ui.action.delete"), danger: true, action: () => this.host.deleteEquipment?.(n.id) },
       ],
     }]);
   }
   private _bgContextMenu(ev: MouseEvent): void {
     const p = this._clientToWorld(ev.clientX, ev.clientY);
-    const items = [{ label: "Tout sélectionner", action: () => this.selectAll() }];
-    if (this.selection.size) items.push({ label: "Tout désélectionner", action: () => this._clearSelection() });
+    const items = [{ label: I18n.t("graph.menu.selectAll"), action: () => this.selectAll() }];
+    if (this.selection.size) items.push({ label: I18n.t("graph.menu.deselectAll"), action: () => this._clearSelection() });
     ContextMenu.show(ev.clientX, ev.clientY, [
       { items: [
-        { label: "Ajouter un cadre ici", action: () => this.addFrameAt(p.x, p.y) },
-        { label: "Recentrer la vue", action: () => this.recenter() },
+        { label: I18n.t("graph.menu.addFrameHere"), action: () => this.addFrameAt(p.x, p.y) },
+        { label: I18n.t("graph.menu.recenter"), action: () => this.recenter() },
       ] },
-      { head: "Sélection", items },
+      { head: I18n.t("graph.menu.selection"), items },
     ]);
   }
 }

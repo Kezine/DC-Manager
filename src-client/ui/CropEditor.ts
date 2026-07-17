@@ -17,6 +17,7 @@
 import { Dialog } from "./Dialog";
 import { ImageBlob } from "./ImageBlob";
 import type { RawImage } from "../geometry/Homography";
+import { I18n } from "../i18n/I18n";
 
 export interface CropRect { x: number; y: number; w: number; h: number; }
 export interface CropOptions {
@@ -44,24 +45,24 @@ export class CropEditor {
     const targetRatio = (opts.targetRatio && isFinite(opts.targetRatio) && opts.targetRatio > 0) ? opts.targetRatio : null;
 
     return Dialog.custom({
-      title: "Recadrer l'image redressée",
-      message: "Choisissez l'emprise UTILE — l'image est déjà redressée, le cadre peut dépasser le rectangle de référence.",
-      wide: true, confirmLabel: "Recadrer et utiliser", cancelLabel: "Annuler",
+      title: I18n.t("ui.crop.title"),
+      message: I18n.t("ui.crop.message"),
+      wide: true, confirmLabel: I18n.t("ui.crop.confirm"), cancelLabel: I18n.t("ui.action.cancel"),
       build: (root: HTMLElement) => {
         const bar = document.createElement("div"); bar.className = "face-toolbar"; bar.style.flexWrap = "wrap";
         const mkBtn = (txt: string, title = "") => { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = txt; if (title) b.title = title; return b; };
         const lab = (txt: string) => { const s = document.createElement("span"); s.style.cssText = "font-size:11px;color:var(--fg-dim);"; s.textContent = txt; return s; };
-        const ratioBtn = mkBtn("Caler au ratio cible", "Ajuste la hauteur du cadre au ratio façade (centre conservé)");
-        const resetBtn = mkBtn("Cadre initial", "Revenir au rectangle de référence du redressement");
-        const allBtn = mkBtn("Tout", "Étendre le cadre à toute l'image redressée");
+        const ratioBtn = mkBtn(I18n.t("ui.crop.ratioBtn"), I18n.t("ui.crop.ratioTitle"));
+        const resetBtn = mkBtn(I18n.t("ui.crop.resetBtn"), I18n.t("ui.crop.resetTitle"));
+        const allBtn = mkBtn(I18n.t("ui.crop.allBtn"), I18n.t("ui.crop.allTitle"));
         const spacer = document.createElement("span"); spacer.style.flex = "1";
-        const zoomOut = mkBtn("−", "Dézoomer"); const zoomLvl = lab("100 %"); zoomLvl.style.minWidth = "40px"; zoomLvl.style.textAlign = "center";
-        const zoomIn = mkBtn("+", "Zoomer"); const zoomFit = mkBtn("Ajuster", "Ajuster l'image à l'écran");
+        const zoomOut = mkBtn("−", I18n.t("ui.zoom.out")); const zoomLvl = lab("100 %"); zoomLvl.style.minWidth = "40px"; zoomLvl.style.textAlign = "center";
+        const zoomIn = mkBtn("+", I18n.t("ui.zoom.in")); const zoomFit = mkBtn(I18n.t("ui.zoom.fitLabel"), I18n.t("ui.crop.fitTitle"));
         if (targetRatio) bar.append(ratioBtn);
         bar.append(resetBtn, allBtn, spacer, zoomOut, zoomLvl, zoomIn, zoomFit);
 
         const hint = document.createElement("div"); hint.className = "form-hint";
-        hint.textContent = "Poignées = redimensionner · intérieur = déplacer le cadre · extérieur / clic droit = déplacer la vue · molette = zoom · flèches = déplacer (Maj = ×10). Le damier = hors de la photo (transparent).";
+        hint.textContent = I18n.t("ui.crop.hint");
         const info = document.createElement("div"); info.className = "form-hint";
 
         const wrap = document.createElement("div");
@@ -187,7 +188,7 @@ export class CropEditor {
         ro.observe(wrap);
 
         return {
-          validate: () => (rect.w >= MIN_SIDE && rect.h >= MIN_SIDE) ? true as const : "Cadre trop petit.",
+          validate: () => (rect.w >= MIN_SIDE && rect.h >= MIN_SIDE) ? true as const : I18n.t("ui.crop.tooSmall"),
           collect: () => { const r = clampRect(rect); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) }; },
         };
       },

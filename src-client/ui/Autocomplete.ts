@@ -1,5 +1,6 @@
 import { Html } from "../core/Html";
 import { Schema } from "../../src-shared/Schema";
+import { I18n } from "../i18n/I18n";
 
 /** Une suggestion d'autocomplétion. `id` identifie la valeur (pour un champ libre, id === label). */
 export interface AcItem { id: string; label: string; color?: string | null; meta?: string; }
@@ -81,14 +82,14 @@ export class Autocomplete {
       if (matches.length > max) {
         const hint = document.createElement("div");
         hint.className = "ac-item ac-overflow";
-        hint.innerHTML = `<span class="ac-meta">+ ${matches.length - max} résultat${matches.length - max > 1 ? "s" : ""} masqué${matches.length - max > 1 ? "s" : ""} — affinez la recherche</span>`;
+        hint.innerHTML = `<span class="ac-meta">${Html.escape(I18n.t("ui.autocomplete.overflow", { count: matches.length - max }))}</span>`;
         list.appendChild(hint);
       }
       const raw = input.value.trim();
       if (opts.allowCreate && raw && !matches.some((m) => Schema.normSearch(m.label) === Schema.normSearch(raw))) {
         const el = document.createElement("div");
         el.className = "ac-item"; el.setAttribute("role", "option");
-        el.innerHTML = `<span class="ac-new">+ Créer</span> ${Html.escape(raw)}`;
+        el.innerHTML = `<span class="ac-new">${Html.escape(I18n.t("ui.autocomplete.create"))}</span> ${Html.escape(raw)}`;
         el.addEventListener("mousedown", (ev) => { ev.preventDefault(); pick({ id: AC_CREATE_ID, label: raw }); });
         list.appendChild(el);
       }

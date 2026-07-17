@@ -158,7 +158,7 @@ export class Shell {
     const logo = document.createElement("div"); logo.className = "brand-logo";
     logo.appendChild(svgIcon('<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M5 8.4V12h14V8.4M12 12v3.6"/>'));
     const name = document.createElement("span"); name.className = "brand-name"; name.textContent = "DC Manager";
-    const docName = document.createElement("input"); docName.type = "text"; docName.className = "doc-name"; docName.placeholder = "Nom du document"; docName.maxLength = 64;
+    const docName = document.createElement("input"); docName.type = "text"; docName.className = "doc-name"; docName.placeholder = I18n.t("shell.doc.placeholder"); docName.maxLength = 64;
     docName.addEventListener("change", () => this.host.onRenameDoc?.(docName.value.trim()));
     brand.append(logo, name, docName);
 
@@ -170,17 +170,17 @@ export class Shell {
       b.appendChild(svgIcon(paths)); if (onClick) b.onclick = onClick; return b;
     };
     // Nouveau / Ouvrir : utiles dans LES DEUX modes (fichier → fichier ; API → document serveur). Toujours visibles.
-    this.newBtn = iconBtn("Nouveau document (Ctrl+N)", '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>', () => this.host.onNew?.());
-    this.openBtn = iconBtn("Ouvrir un fichier (Ctrl+O)", '<path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', () => this.host.onOpen?.());
+    this.newBtn = iconBtn(I18n.t("shell.topbar.new"), '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>', () => this.host.onNew?.());
+    this.openBtn = iconBtn(I18n.t("shell.topbar.open"), '<path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', () => this.host.onOpen?.());
     actions.append(this.newBtn, this.openBtn);
     // Enregistrer / Enregistrer-sous : propres au mode FICHIER (masqués en API : sauvegarde continue côté serveur).
     this.fileActionsEl = document.createElement("span"); this.fileActionsEl.style.display = "contents";
-    this.saveBtn = iconBtn("Enregistrer (Ctrl+S)", '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>', () => this.host.onSave?.());
+    this.saveBtn = iconBtn(I18n.t("shell.topbar.save"), '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>', () => this.host.onSave?.());
     this.fileActionsEl.appendChild(this.saveBtn);
-    this.fileActionsEl.appendChild(iconBtn("Enregistrer une copie sous… (Ctrl+Shift+S)", '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><circle cx="18" cy="18" r="3" stroke-dasharray="2 2"/>', () => this.host.onSaveAs?.()));
+    this.fileActionsEl.appendChild(iconBtn(I18n.t("shell.topbar.saveAs"), '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><circle cx="18" cy="18" r="3" stroke-dasharray="2 2"/>', () => this.host.onSaveAs?.()));
     actions.appendChild(this.fileActionsEl);
-    this.undoBtn = iconBtn("Annuler (Ctrl+Z)", '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-5"/>', () => this.host.onUndo?.()); this.undoBtn.disabled = true;
-    this.redoBtn = iconBtn("Rétablir (Ctrl+Maj+Z)", '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h5"/>', () => this.host.onRedo?.()); this.redoBtn.disabled = true;
+    this.undoBtn = iconBtn(I18n.t("shell.topbar.undo"), '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-5"/>', () => this.host.onUndo?.()); this.undoBtn.disabled = true;
+    this.redoBtn = iconBtn(I18n.t("shell.topbar.redo"), '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h5"/>', () => this.host.onRedo?.()); this.redoBtn.disabled = true;
     actions.append(this.undoBtn, this.redoBtn);
     // pastille utilisateur (mode API) : « connecté en tant que … » — masquée par défaut
     this.userChip = document.createElement("span"); this.userChip.className = "user-chip"; this.userChip.style.display = "none";
@@ -195,11 +195,11 @@ export class Shell {
     const stat = (html: string) => { const d = document.createElement("div"); d.className = "status-stat"; d.innerHTML = html; statusbar.appendChild(d); return d; };
     this.saveDot = document.createElement("span"); this.saveDot.className = "save-state-icon mem";
     const sd = document.createElement("div"); sd.className = "status-stat"; sd.appendChild(this.saveDot); statusbar.appendChild(sd);
-    this.statusEls.file = stat('FICHIER <strong>— en mémoire —</strong>').querySelector("strong")!;
-    this.statusEls.release = stat('RELEASE <strong>—</strong>').querySelector("strong")!;
-    this.statusEls.source = stat('SOURCE <strong>navigateur</strong>').querySelector("strong")!;
-    this.statusEls.entities = stat('ENTITÉS <strong>0</strong>').querySelector("strong")!;
-    this.statusEls.lastSave = stat('DERNIÈRE SAUVEGARDE <strong>—</strong>').querySelector("strong")!;
+    this.statusEls.file = stat(I18n.t("shell.status.fileLabel") + ' <strong>' + I18n.t("shell.status.inMemory") + '</strong>').querySelector("strong")!;
+    this.statusEls.release = stat(I18n.t("shell.status.releaseLabel") + ' <strong>—</strong>').querySelector("strong")!;
+    this.statusEls.source = stat(I18n.t("shell.status.sourceLabel") + ' <strong>' + I18n.t("shell.status.browser") + '</strong>').querySelector("strong")!;
+    this.statusEls.entities = stat(I18n.t("shell.status.entitiesLabel") + ' <strong>0</strong>').querySelector("strong")!;
+    this.statusEls.lastSave = stat(I18n.t("shell.status.lastSaveLabel") + ' <strong>—</strong>').querySelector("strong")!;
 
     const main = document.createElement("main");   // styles pilotés par dc-manager.css (padding, max-width, :has full-bleed)
 
@@ -215,59 +215,59 @@ export class Shell {
 
   private buildSettingsMenu(): HTMLElement {
     const wrap = document.createElement("div"); wrap.className = "settings-menu";
-    const btn = document.createElement("button"); btn.type = "button"; btn.className = "icon-btn"; btn.title = "Réglages"; btn.setAttribute("aria-haspopup", "menu");
+    const btn = document.createElement("button"); btn.type = "button"; btn.className = "icon-btn"; btn.title = I18n.t("shell.settings.title"); btn.setAttribute("aria-haspopup", "menu");
     btn.appendChild(svgIcon('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'));
     const pop = document.createElement("div"); pop.className = "settings-popover"; pop.setAttribute("role", "menu");
     const section = (title: string) => { const s = document.createElement("div"); s.className = "settings-section"; const t = document.createElement("div"); t.className = "settings-section-title"; t.textContent = title; s.appendChild(t); pop.appendChild(s); return s; };
 
     // -- Source de données : toggle SLIDER Local ⟷ API (+ URL d'API en mode API) --
-    const src = section("Source de données");
+    const src = section(I18n.t("shell.settings.dataSource"));
     const srcRow = document.createElement("div"); srcRow.className = "mode-switch-row";
-    const lblLocal = document.createElement("span"); lblLocal.className = "mode-switch-side"; lblLocal.textContent = "Local";
+    const lblLocal = document.createElement("span"); lblLocal.className = "mode-switch-side"; lblLocal.textContent = I18n.t("shell.settings.local");
     const sw = document.createElement("label"); sw.className = "mode-switch";
     this.dataSourceSwitch = document.createElement("input"); this.dataSourceSwitch.type = "checkbox";
     this.dataSourceSwitch.onchange = () => { this.updateApiUrlVisibility(); this.host.onDataSource?.(this.dataSourceSwitch.checked ? "api" : "local"); };
     const track = document.createElement("span"); track.className = "mode-switch-track"; track.setAttribute("aria-hidden", "true");
     sw.append(this.dataSourceSwitch, track);
-    const lblApi = document.createElement("span"); lblApi.className = "mode-switch-side"; lblApi.textContent = "API";
+    const lblApi = document.createElement("span"); lblApi.className = "mode-switch-side"; lblApi.textContent = I18n.t("shell.settings.api");
     srcRow.append(lblLocal, sw, lblApi); src.appendChild(srcRow);
     // ligne URL d'API (visible en mode API uniquement)
     this.apiUrlRow = document.createElement("div"); this.apiUrlRow.className = "settings-row"; this.apiUrlRow.style.marginTop = "10px";
-    const urlLbl = document.createElement("label"); urlLbl.className = "settings-row-label"; urlLbl.textContent = "URL de l'API";
+    const urlLbl = document.createElement("label"); urlLbl.className = "settings-row-label"; urlLbl.textContent = I18n.t("shell.settings.apiUrl");
     this.apiUrlInput = document.createElement("input"); this.apiUrlInput.type = "text"; this.apiUrlInput.className = "settings-row-select"; this.apiUrlInput.placeholder = "api"; this.apiUrlInput.spellcheck = false;
     this.apiUrlInput.onchange = () => this.host.onApiBaseUrl?.(this.apiUrlInput.value);
     this.apiUrlRow.append(urlLbl, this.apiUrlInput); src.appendChild(this.apiUrlRow);
     // ligne URL de CONNEXION (SSO) — utilisée pour le bouton « Connexion » de l'écran d'accueil (non connecté)
     this.apiLoginRow = document.createElement("div"); this.apiLoginRow.className = "settings-row"; this.apiLoginRow.style.marginTop = "10px";
-    const loginLbl = document.createElement("label"); loginLbl.className = "settings-row-label"; loginLbl.textContent = "URL de connexion";
-    this.apiLoginInput = document.createElement("input"); this.apiLoginInput.type = "text"; this.apiLoginInput.className = "settings-row-select"; this.apiLoginInput.placeholder = "https://sso…/login?back=${clbkUrl}"; this.apiLoginInput.spellcheck = false;
+    const loginLbl = document.createElement("label"); loginLbl.className = "settings-row-label"; loginLbl.textContent = I18n.t("shell.settings.loginUrl");
+    this.apiLoginInput = document.createElement("input"); this.apiLoginInput.type = "text"; this.apiLoginInput.className = "settings-row-select"; this.apiLoginInput.placeholder = I18n.t("shell.settings.loginUrlPlaceholder"); this.apiLoginInput.spellcheck = false;
     this.apiLoginInput.onchange = () => this.host.onLoginUrl?.(this.apiLoginInput.value);
     this.apiLoginRow.append(loginLbl, this.apiLoginInput); src.appendChild(this.apiLoginRow);
-    const loginNote = document.createElement("div"); loginNote.className = "settings-row-note"; loginNote.textContent = "URL de connexion SSO affichée à l'écran d'accueil quand l'utilisateur n'est pas authentifié. La macro ${clbkUrl} est remplacée par l'URL courante (encodée) pour le retour après connexion."; src.appendChild(loginNote);
-    const srcNote = document.createElement("div"); srcNote.className = "settings-row-note"; srcNote.textContent = "Local : les données vivent dans le navigateur (session), liables à un fichier JSON sur disque. API : synchronisation avec un serveur REST. Changer de mode (ou d'URL) recharge l'application."; src.appendChild(srcNote);
+    const loginNote = document.createElement("div"); loginNote.className = "settings-row-note"; loginNote.textContent = I18n.t("shell.settings.loginNote"); src.appendChild(loginNote);
+    const srcNote = document.createElement("div"); srcNote.className = "settings-row-note"; srcNote.textContent = I18n.t("shell.settings.sourceNote"); src.appendChild(srcNote);
 
     // -- Accès aux fichiers (par fichier / par dossier) --
-    const fa = section("Accès aux fichiers");
+    const fa = section(I18n.t("shell.settings.fileAccess"));
     const faRow = document.createElement("div"); faRow.className = "settings-row";
-    const faLbl = document.createElement("label"); faLbl.className = "settings-row-label"; faLbl.textContent = "Mode";
+    const faLbl = document.createElement("label"); faLbl.className = "settings-row-label"; faLbl.textContent = I18n.t("shell.settings.mode");
     this.fileAccessSel = document.createElement("select"); this.fileAccessSel.className = "settings-row-select";
-    const oFile = document.createElement("option"); oFile.value = "file"; oFile.textContent = "Fichier";
-    const oDir = document.createElement("option"); oDir.value = "directory"; oDir.textContent = "Dossier";
+    const oFile = document.createElement("option"); oFile.value = "file"; oFile.textContent = I18n.t("shell.settings.file");
+    const oDir = document.createElement("option"); oDir.value = "directory"; oDir.textContent = I18n.t("shell.settings.directory");
     this.fileAccessSel.append(oFile, oDir);
     this.fileAccessSel.onchange = () => this.host.onFileAccessMode?.(this.fileAccessSel.value);
     faRow.append(faLbl, this.fileAccessSel); fa.appendChild(faRow);
-    const faNote = document.createElement("div"); faNote.className = "settings-row-note"; faNote.textContent = "Fichier : on autorise chaque .json et son compagnon d'images .nmfb séparément. Dossier : on autorise un dossier UNE fois — le .json et son .nmfb y sont lus/écrits sans nouvelle demande."; fa.appendChild(faNote);
+    const faNote = document.createElement("div"); faNote.className = "settings-row-note"; faNote.textContent = I18n.t("shell.settings.fileAccessNote"); fa.appendChild(faNote);
 
     // -- Auto-save (toggle + fréquence + état) --
-    const as = section("Auto-save");
+    const as = section(I18n.t("shell.settings.autosave"));
     const asRow = document.createElement("div"); asRow.className = "settings-toggle-row";
     const asLabel = document.createElement("label"); asLabel.className = "settings-toggle";
     this.autosaveChk = document.createElement("input"); this.autosaveChk.type = "checkbox";
     this.autosaveChk.onchange = () => this.host.onAutosaveToggle?.(this.autosaveChk.checked);
-    asLabel.append(this.autosaveChk, document.createTextNode("Activer l'auto-save"));
+    asLabel.append(this.autosaveChk, document.createTextNode(I18n.t("shell.settings.autosaveEnable")));
     asRow.appendChild(asLabel); as.appendChild(asRow);
     const freqRow = document.createElement("div"); freqRow.className = "settings-row"; freqRow.style.marginTop = "10px";
-    const freqLbl = document.createElement("label"); freqLbl.className = "settings-row-label"; freqLbl.textContent = "Fréquence";
+    const freqLbl = document.createElement("label"); freqLbl.className = "settings-row-label"; freqLbl.textContent = I18n.t("shell.settings.frequency");
     this.autosaveIntervalSel = document.createElement("select"); this.autosaveIntervalSel.className = "settings-row-select";
     Prefs.INTERVAL_OPTIONS.forEach((n) => { const o = document.createElement("option"); o.value = String(n); o.textContent = n + " s"; this.autosaveIntervalSel.appendChild(o); });
     this.autosaveIntervalSel.onchange = () => this.host.onAutosaveInterval?.(parseInt(this.autosaveIntervalSel.value, 10));
@@ -276,63 +276,64 @@ export class Shell {
     this.fileOnlySections.push(fa, as);   // sections propres au mode fichier → masquées en mode API
 
     // -- Apparence -- (seule section « cosmétique » conservée en mode visualiseur ; cf. body.viewer-mode)
-    const app = section("Apparence"); app.classList.add("settings-cosmetic");
-    const themeBtn = document.createElement("button"); themeBtn.type = "button"; themeBtn.className = "btn btn-ghost btn-sm"; themeBtn.style.width = "100%"; themeBtn.textContent = "Basculer le thème clair / sombre";
+    const app = section(I18n.t("shell.settings.appearance")); app.classList.add("settings-cosmetic");
+    const themeBtn = document.createElement("button"); themeBtn.type = "button"; themeBtn.className = "btn btn-ghost btn-sm"; themeBtn.style.width = "100%"; themeBtn.textContent = I18n.t("shell.settings.toggleTheme");
     themeBtn.onclick = () => this.host.onToggleTheme?.(); app.appendChild(themeBtn);
     // -- Taille du texte (échelle d'interface) : compense les mobiles qui grossissent les polices --
     const fsRow = document.createElement("div"); fsRow.className = "settings-row"; fsRow.style.marginTop = "10px";
-    const fsLbl = document.createElement("label"); fsLbl.className = "settings-row-label"; fsLbl.textContent = "Taille du texte";
+    const fsLbl = document.createElement("label"); fsLbl.className = "settings-row-label"; fsLbl.textContent = I18n.t("shell.settings.textSize");
     this.uiScaleSel = document.createElement("select"); this.uiScaleSel.className = "settings-row-select";
     Prefs.UI_SCALE_OPTIONS.forEach((o) => { const op = document.createElement("option"); op.value = String(o.value); op.textContent = o.label; this.uiScaleSel.appendChild(op); });
     this.uiScaleSel.onchange = () => this.host.onUiScale?.(parseFloat(this.uiScaleSel.value));
     fsRow.append(fsLbl, this.uiScaleSel); app.appendChild(fsRow);
     // -- Suggestions d'autocomplétion (formulaires) : nb max de valeurs proposées (Marque/Modèle/Nom/Personne…) --
     const acRow = document.createElement("div"); acRow.className = "settings-row"; acRow.style.marginTop = "10px";
-    const acLbl = document.createElement("label"); acLbl.className = "settings-row-label"; acLbl.textContent = "Suggestions max";
-    acLbl.title = "Nombre maximum de valeurs proposées en autocomplétion dans les formulaires (plafond absolu : " + FieldFacet.MAX_RESULTS_ABS + ").";
+    const acLbl = document.createElement("label"); acLbl.className = "settings-row-label"; acLbl.textContent = I18n.t("shell.settings.suggestionsMax");
+    acLbl.title = I18n.t("shell.settings.suggestionsMaxTitle", { max: FieldFacet.MAX_RESULTS_ABS });
     this.acMaxSel = document.createElement("select"); this.acMaxSel.className = "settings-row-select";
     FieldFacet.MAX_RESULTS_OPTIONS.forEach((n) => { const op = document.createElement("option"); op.value = String(n); op.textContent = String(n); this.acMaxSel.appendChild(op); });
     this.acMaxSel.onchange = () => this.host.onAutocompleteMax?.(parseInt(this.acMaxSel.value, 10));
     acRow.append(acLbl, this.acMaxSel); app.appendChild(acRow);
-    // -- Langue / Language : préférence de LOCALISATION (auto = langue du navigateur ; repli français). Libellés
-    //    BILINGUES (le panneau réglages n'est pas encore localisé) pour rester compréhensibles quelle que soit la
-    //    langue active. Une bascule PERSISTE la préférence puis RECHARGE l'app (cf. I18n.setPreference / docs/i18n.md). --
-    const lang = section("Langue / Language");
+    // -- Langue / Language : préférence de LOCALISATION (auto = langue du navigateur ; repli français). Le TITRE de
+    //    section reste BILINGUE (seul repli pour retrouver le sélecteur quelle que soit la langue active) ; le reste
+    //    du panneau est localisé. Une bascule PERSISTE la préférence puis RECHARGE l'app (cf. I18n.setPreference / docs/i18n.md). --
+    const lang = section(I18n.t("shell.settings.language"));
     const langSel = document.createElement("select"); langSel.className = "settings-row-select"; langSel.style.width = "100%";
-    // valeur → libellé affiché ; « auto » suit navigator.language (cf. I18n.resolve).
-    ([["auto", "Auto (navigateur)"], ["fr", "Français"], ["en", "English"]] as Array<[LocalePreference, string]>).forEach(([value, label]) => {
+    // valeur → libellé affiché ; « auto » suit navigator.language (cf. I18n.resolve). Les endonymes « Français » /
+    // « English » restent identiques dans les deux langues (nom de langue dans sa propre langue).
+    ([["auto", I18n.t("shell.settings.langAuto")], ["fr", I18n.t("shell.settings.langFr")], ["en", I18n.t("shell.settings.langEn")]] as Array<[LocalePreference, string]>).forEach(([value, label]) => {
       const op = document.createElement("option"); op.value = value; op.textContent = label; langSel.appendChild(op);
     });
     langSel.value = I18n.preference;   // reflète la préférence PERSISTÉE (pas la locale effective) : « auto » reste « auto »
     langSel.onchange = () => I18n.setPreference(langSel.value as LocalePreference);
     lang.appendChild(langSel);
-    const langNote = document.createElement("div"); langNote.className = "settings-row-note"; langNote.textContent = "Auto suit la langue du navigateur (repli : français). Changer de langue recharge l'application. / Auto follows the browser language (fallback: French). Changing the language reloads the app."; lang.appendChild(langNote);
+    const langNote = document.createElement("div"); langNote.className = "settings-row-note"; langNote.textContent = I18n.t("shell.settings.languageNote"); lang.appendChild(langNote);
     // -- Affichage 3D --
-    const v3d = section("Affichage 3D");
-    const resetBtn = document.createElement("button"); resetBtn.type = "button"; resetBtn.className = "btn btn-ghost btn-sm"; resetBtn.style.width = "100%"; resetBtn.textContent = "Réinitialiser les préférences d'affichage";
+    const v3d = section(I18n.t("shell.settings.view3d"));
+    const resetBtn = document.createElement("button"); resetBtn.type = "button"; resetBtn.className = "btn btn-ghost btn-sm"; resetBtn.style.width = "100%"; resetBtn.textContent = I18n.t("shell.settings.resetViewPrefs");
     resetBtn.onclick = () => this.host.onResetViewPrefs?.(); v3d.appendChild(resetBtn);
     // -- Export (tous modes, y compris API) : JSON autonome + visualiseur HTML hors-ligne --
-    const exp = section("Export");
-    const expJsonBtn = document.createElement("button"); expJsonBtn.type = "button"; expJsonBtn.className = "btn btn-ghost btn-sm"; expJsonBtn.style.width = "100%"; expJsonBtn.textContent = "Exporter le document (JSON)";
+    const exp = section(I18n.t("shell.settings.export"));
+    const expJsonBtn = document.createElement("button"); expJsonBtn.type = "button"; expJsonBtn.className = "btn btn-ghost btn-sm"; expJsonBtn.style.width = "100%"; expJsonBtn.textContent = I18n.t("shell.settings.exportJson");
     expJsonBtn.onclick = () => this.host.onExportJson?.();
-    const expHtmlBtn = document.createElement("button"); expHtmlBtn.type = "button"; expHtmlBtn.className = "btn btn-ghost btn-sm"; expHtmlBtn.style.cssText = "width:100%;margin-top:8px"; expHtmlBtn.textContent = "Exporter en visualiseur autonome (HTML)";
+    const expHtmlBtn = document.createElement("button"); expHtmlBtn.type = "button"; expHtmlBtn.className = "btn btn-ghost btn-sm"; expHtmlBtn.style.cssText = "width:100%;margin-top:8px"; expHtmlBtn.textContent = I18n.t("shell.settings.exportStandalone");
     expHtmlBtn.onclick = () => this.host.onExportStandalone?.();
     exp.append(expJsonBtn, expHtmlBtn);
-    const expNote = document.createElement("div"); expNote.className = "settings-row-note"; expNote.textContent = "JSON : document complet (images incluses), réimportable. Visualiseur autonome : un fichier .html LECTURE SEULE consultable hors-ligne (sans serveur)."; exp.appendChild(expNote);
+    const expNote = document.createElement("div"); expNote.className = "settings-row-note"; expNote.textContent = I18n.t("shell.settings.exportNote"); exp.appendChild(expNote);
     // -- Maintenance (tous modes) : purge des images de façade non utilisées (+ compactage serveur en mode API) --
-    const mnt = section("Maintenance");
-    const purgeBtn = document.createElement("button"); purgeBtn.type = "button"; purgeBtn.className = "btn btn-ghost btn-sm"; purgeBtn.style.width = "100%"; purgeBtn.textContent = "Nettoyer les images non utilisées";
+    const mnt = section(I18n.t("shell.settings.maintenance"));
+    const purgeBtn = document.createElement("button"); purgeBtn.type = "button"; purgeBtn.className = "btn btn-ghost btn-sm"; purgeBtn.style.width = "100%"; purgeBtn.textContent = I18n.t("shell.settings.cleanImages");
     purgeBtn.onclick = () => this.host.onPurgeImages?.(); mnt.appendChild(purgeBtn);
-    const mntNote = document.createElement("div"); mntNote.className = "settings-row-note"; mntNote.textContent = "Supprime de la bibliothèque les images de façade référencées par AUCUN équipement (confirmation demandée). En mode API, compacte aussi la base du document (VACUUM)."; mnt.appendChild(mntNote);
+    const mntNote = document.createElement("div"); mntNote.className = "settings-row-note"; mntNote.textContent = I18n.t("shell.settings.maintenanceNote"); mnt.appendChild(mntNote);
     // -- Débogage --
-    const dbg = section("Débogage");
+    const dbg = section(I18n.t("shell.settings.debug"));
     const dbgRow = document.createElement("div"); dbgRow.className = "settings-toggle-row";
     const dbgLabel = document.createElement("label"); dbgLabel.className = "settings-toggle";
     this.debugLogChk = document.createElement("input"); this.debugLogChk.type = "checkbox";
     this.debugLogChk.onchange = () => this.host.onDebugLog?.(this.debugLogChk.checked);
-    dbgLabel.append(this.debugLogChk, document.createTextNode("Logs de débogage (console)"));
+    dbgLabel.append(this.debugLogChk, document.createTextNode(I18n.t("shell.settings.debugLogs")));
     dbgRow.appendChild(dbgLabel); dbg.appendChild(dbgRow);
-    const dbgNote = document.createElement("div"); dbgNote.className = "settings-row-note"; dbgNote.textContent = "Trace les opérations (fichier, compagnon, …) dans la console du navigateur. À activer pour diagnostiquer."; dbg.appendChild(dbgNote);
+    const dbgNote = document.createElement("div"); dbgNote.className = "settings-row-note"; dbgNote.textContent = I18n.t("shell.settings.debugNote"); dbg.appendChild(dbgNote);
 
     btn.onclick = (e) => { e.stopPropagation(); pop.classList.toggle("open"); };
     document.addEventListener("click", () => pop.classList.remove("open"));
@@ -354,17 +355,17 @@ export class Shell {
     this.welcomeReopenBtn = document.createElement("button"); this.welcomeReopenBtn.type = "button"; this.welcomeReopenBtn.className = "btn btn-primary welcome-btn"; this.welcomeReopenBtn.style.display = "none";
     this.welcomeReopenBtn.onclick = () => this.host.onReopenLast?.();
     // deux ouvertures explicites : « Fichier » (1 autorisation par fichier) · « Dossier » (1 autorisation pour tout).
-    this.welcomeOpenFileBtn = document.createElement("button"); this.welcomeOpenFileBtn.type = "button"; this.welcomeOpenFileBtn.className = "btn btn-primary welcome-btn"; this.welcomeOpenFileBtn.textContent = "Ouvrir un fichier"; this.welcomeOpenFileBtn.onclick = () => this.host.onOpenMode?.("file");
-    this.welcomeOpenDirBtn = document.createElement("button"); this.welcomeOpenDirBtn.type = "button"; this.welcomeOpenDirBtn.className = "btn welcome-btn"; this.welcomeOpenDirBtn.textContent = "Ouvrir un dossier"; this.welcomeOpenDirBtn.onclick = () => this.host.onOpenMode?.("directory");
-    const newBtn = document.createElement("button"); newBtn.type = "button"; newBtn.className = "btn welcome-btn"; newBtn.textContent = "Créer un nouveau document"; newBtn.onclick = () => this.host.onNew?.();
+    this.welcomeOpenFileBtn = document.createElement("button"); this.welcomeOpenFileBtn.type = "button"; this.welcomeOpenFileBtn.className = "btn btn-primary welcome-btn"; this.welcomeOpenFileBtn.textContent = I18n.t("shell.welcome.openFile"); this.welcomeOpenFileBtn.onclick = () => this.host.onOpenMode?.("file");
+    this.welcomeOpenDirBtn = document.createElement("button"); this.welcomeOpenDirBtn.type = "button"; this.welcomeOpenDirBtn.className = "btn welcome-btn"; this.welcomeOpenDirBtn.textContent = I18n.t("shell.welcome.openDir"); this.welcomeOpenDirBtn.onclick = () => this.host.onOpenMode?.("directory");
+    const newBtn = document.createElement("button"); newBtn.type = "button"; newBtn.className = "btn welcome-btn"; newBtn.textContent = I18n.t("shell.welcome.newDoc"); newBtn.onclick = () => this.host.onNew?.();
     acts.append(this.welcomeReopenBtn, this.welcomeOpenFileBtn, this.welcomeOpenDirBtn, newBtn);
-    const hint = document.createElement("p"); hint.className = "welcome-mode-hint"; hint.textContent = "Mode local (session) : à la fermeture de l'onglet, les données ne sont pas conservées dans le navigateur — votre fichier reste la référence.";
+    const hint = document.createElement("p"); hint.className = "welcome-mode-hint"; hint.textContent = I18n.t("shell.welcome.modeHint");
     // bloc « auth » (mode API) : message d'accès refusé / non connecté + bouton Réessayer — masqué par défaut
     this.welcomeAuthEl = document.createElement("div"); this.welcomeAuthEl.className = "welcome-auth"; this.welcomeAuthEl.style.display = "none";
     this.welcomeAuthMsg = document.createElement("p"); this.welcomeAuthMsg.className = "welcome-auth-msg";
     // bouton « Connexion » (SSO) — primaire, affiché si non connecté + URL configurée (cf. showAccessDenied)
-    this.welcomeLoginBtn = document.createElement("button"); this.welcomeLoginBtn.type = "button"; this.welcomeLoginBtn.className = "btn btn-primary welcome-btn"; this.welcomeLoginBtn.textContent = "Connexion"; this.welcomeLoginBtn.style.display = "none";
-    this.welcomeAuthBtn = document.createElement("button"); this.welcomeAuthBtn.type = "button"; this.welcomeAuthBtn.className = "btn welcome-btn"; this.welcomeAuthBtn.textContent = "Réessayer";
+    this.welcomeLoginBtn = document.createElement("button"); this.welcomeLoginBtn.type = "button"; this.welcomeLoginBtn.className = "btn btn-primary welcome-btn"; this.welcomeLoginBtn.textContent = I18n.t("shell.welcome.login"); this.welcomeLoginBtn.style.display = "none";
+    this.welcomeAuthBtn = document.createElement("button"); this.welcomeAuthBtn.type = "button"; this.welcomeAuthBtn.className = "btn welcome-btn"; this.welcomeAuthBtn.textContent = I18n.t("shell.welcome.retry");
     this.welcomeAuthEl.append(this.welcomeAuthMsg, this.welcomeLoginBtn, this.welcomeAuthBtn);
     this.welcomeNormalEls = [this.welcomeModeEl, acts, hint];   // contenu « fichier » à masquer en cas d'accès refusé
     card.append(logo, title, this.welcomeModeEl, acts, hint, this.welcomeAuthEl);
@@ -380,8 +381,8 @@ export class Shell {
     this.welcomeNormalEls.forEach((el) => { if (el) el.style.display = "none"; });
     this.welcomeAuthEl.style.display = "";
     this.welcomeAuthMsg.textContent = opts.connected
-      ? "Connecté en tant que « " + (opts.user || "?") + " », mais ce compte n'a pas les droits requis (SUPER_ADMIN). Contactez un administrateur."
-      : "Vous n'êtes pas authentifié auprès du SSO. Connectez-vous, puis réessayez.";
+      ? I18n.t("shell.welcome.accessDeniedConnected", { user: opts.user || "?" })
+      : I18n.t("shell.welcome.accessDeniedAnon");
     const loginUrl = (opts.loginUrl || "").trim();
     const showLogin = !opts.connected && !!loginUrl;
     this.welcomeLoginBtn.style.display = showLogin ? "" : "none";
@@ -405,8 +406,10 @@ export class Shell {
   setWelcomeMode(mode: string, fsApi: boolean): void {
     if (!this.welcomeModeEl) return;
     const dir = mode === "directory";
-    this.welcomeModeEl.innerHTML = "Mode d'accès : <strong>" + (dir ? "Dossier" : "Fichier") + "</strong> — "
-      + (dir ? "une autorisation couvre le document et ses images (.nmfb)." : "autorisation par fichier (le .json et son .nmfb séparément).");
+    this.welcomeModeEl.innerHTML = I18n.t("shell.welcome.modeBadge", {
+      mode: I18n.t(dir ? "shell.settings.directory" : "shell.settings.file"),
+      detail: I18n.t(dir ? "shell.welcome.modeDirDetail" : "shell.welcome.modeFileDetail"),
+    });
     // bouton « dossier » masqué si le navigateur n'a pas la File System Access API
     this.welcomeOpenDirBtn.style.display = fsApi ? "" : "none";
     // met en avant (primaire) l'ouverture du MODE COURANT ; l'autre reste une option secondaire
@@ -416,7 +419,7 @@ export class Shell {
   hideWelcome(): void { this.welcomeEl.style.display = "none"; document.body.classList.remove("welcome-active"); }
   /** Configure le bouton « Rouvrir » (null = masqué). */
   setReopen(name: string | null): void {
-    if (name) { this.welcomeReopenBtn.style.display = ""; this.welcomeReopenBtn.textContent = "Rouvrir « " + name + " »"; }
+    if (name) { this.welcomeReopenBtn.style.display = ""; this.welcomeReopenBtn.textContent = I18n.t("shell.welcome.reopen", { name }); }
     else this.welcomeReopenBtn.style.display = "none";
   }
 
@@ -491,7 +494,7 @@ export class Shell {
     if (this.tabsDdEl) { this.tabsDdEl.remove(); this.tabsDdEl = null; this.tabsDdLabelEl = null; }
     const dd = document.createElement("div"); dd.className = "tabs-dd";
     const trigger = document.createElement("button"); trigger.type = "button"; trigger.className = "tabs-dd-trigger"; trigger.setAttribute("aria-haspopup", "menu");
-    const lbl = document.createElement("span"); lbl.className = "tabs-dd-label"; lbl.textContent = "Menu";
+    const lbl = document.createElement("span"); lbl.className = "tabs-dd-label"; lbl.textContent = I18n.t("shell.tabs.menu");
     const caret = document.createElement("span"); caret.className = "tabs-dd-caret"; caret.textContent = "▾";
     trigger.append(lbl, caret);
     const menu = document.createElement("div"); menu.className = "tabs-dd-menu"; menu.setAttribute("role", "menu");
@@ -561,7 +564,7 @@ export class Shell {
     // bouton « ← retour » (sous-vue → parent)
     if (def.parent && this.views.has(def.parent)) {
       const p = this.views.get(def.parent)!.def;
-      const back = document.createElement("button"); back.type = "button"; back.className = "btn btn-ghost"; back.textContent = "← " + p.label; back.title = "Retour : " + p.label;
+      const back = document.createElement("button"); back.type = "button"; back.className = "btn btn-ghost"; back.textContent = I18n.t("shell.header.back", { label: p.label }); back.title = I18n.t("shell.header.backTitle", { label: p.label });
       back.onclick = () => this.switchView(def.parent!); acts.appendChild(back);
     }
     // liens vers les sous-vues du domaine (avec badge de comptage)
@@ -575,7 +578,7 @@ export class Shell {
     // boutons secondaires (ghost) — ex. « Ouvrir un fichier de faces »
     (def.extraActions || []).forEach((a) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost"; b.textContent = a.label; if (a.title) b.title = a.title; b.onclick = () => a.onClick(b); acts.appendChild(b); });
     // bouton primaire « + … »
-    if (def.onAdd) { const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-primary"; add.textContent = def.addLabel || "+ Nouveau"; add.onclick = () => def.onAdd!(); acts.appendChild(add); }
+    if (def.onAdd) { const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-primary"; add.textContent = def.addLabel || I18n.t("shell.header.addDefault"); add.onclick = () => def.onAdd!(); acts.appendChild(add); }
     v.header.append(left, acts);
     if (!acts.children.length) v.header.style.alignItems = "center";
   }
@@ -656,10 +659,10 @@ export class Shell {
     if (user === undefined) { this.userChip.style.display = "none"; return; }
     this.userChip.style.display = "";
     if (user) {
-      const who = user.name || [user.prenom, user.nom].filter(Boolean).join(" ") || user.login || user.eMail || user.email || "utilisateur";
-      this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span>` + Html.escape(who); this.userChip.title = "Connecté en tant que " + who; this.userChip.classList.remove("user-chip--off");
+      const who = user.name || [user.prenom, user.nom].filter(Boolean).join(" ") || user.login || user.eMail || user.email || I18n.t("shell.user.anonymous");
+      this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span>` + Html.escape(who); this.userChip.title = I18n.t("shell.user.connectedAs", { who }); this.userChip.classList.remove("user-chip--off");
     } else {
-      this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span>non connecté`; this.userChip.title = "Aucune session SSO active"; this.userChip.classList.add("user-chip--off");
+      this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span>` + Html.escape(I18n.t("shell.user.notConnected")); this.userChip.title = I18n.t("shell.user.noSession"); this.userChip.classList.add("user-chip--off");
     }
   }
   /** Mode API : masque Enregistrer/Enregistrer-sous + réglages fichier ; Nouveau/Ouvrir gèrent les documents serveur. */
@@ -675,8 +678,8 @@ export class Shell {
     if (this.undoBtn) this.undoBtn.style.display = on ? "none" : "";
     if (this.redoBtn) this.redoBtn.style.display = on ? "none" : "";
     this.fileOnlySections.forEach((s) => { if (s) s.style.display = on ? "none" : ""; });
-    if (this.newBtn) this.newBtn.title = on ? "Nouveau document (Ctrl+N)" : "Nouveau document (Ctrl+N)";
-    if (this.openBtn) this.openBtn.title = on ? "Documents… (ouvrir / créer / supprimer)" : "Ouvrir un fichier (Ctrl+O)";
+    if (this.newBtn) this.newBtn.title = I18n.t("shell.topbar.new");
+    if (this.openBtn) this.openBtn.title = on ? I18n.t("shell.topbar.docsOpen") : I18n.t("shell.topbar.open");
     if (on && this.dataSourceSwitch) this.dataSourceSwitch.checked = true;
     this.updateApiUrlVisibility();
   }
