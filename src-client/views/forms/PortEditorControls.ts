@@ -5,6 +5,7 @@ import { Notify } from "../../ui/Notify";
 import { Normalize } from "../../core/Normalize";
 import { PortRoles } from "../../registries/PortRoles";
 import { PORT_DIRECTIONS, POWER_PHASES } from "../../domain/constants";
+import { I18n } from "../../i18n/I18n";   // lot B2a : options des tables de libellés (labelKey → I18n.t)
 
 /** Contexte injecté par le formulaire d'équipement à ses contrôles de port (couplage par INTERFACE, pas d'accès
     en dur au monolithe — cf. CLAUDE.md n°2). `equipment` = l'équipement édité (null si création) ; `currentType()`
@@ -122,7 +123,7 @@ export class PortEditorControls {
   /** POWER : sens de l'énergie (source/sink) + calibre (A) + phase (départ = source). Pilote l'analyse énergie. */
   powerPortControls(p: PortDraft): HTMLElement {
     const wrap = document.createElement("span"); wrap.style.cssText = "display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;";
-    const dirSel = FormControls.select([{ value: "", label: "— sens —" }].concat(PORT_DIRECTIONS.map((d) => ({ value: d.id, label: d.label }))), p.direction || ""); dirSel.className = "sub-input app-select";
+    const dirSel = FormControls.select([{ value: "", label: "— sens —" }].concat(PORT_DIRECTIONS.map((d) => ({ value: d.id, label: I18n.t(d.labelKey) }))), p.direction || ""); dirSel.className = "sub-input app-select";
     dirSel.onchange = () => { p.direction = dirSel.value || ""; if (p.direction !== "source") p.phase = ""; this.host.rerenderPorts(); };
     wrap.appendChild(dirSel);
     const ampI = FormControls.number(p.power_max_a != null ? p.power_max_a : "", { min: 0, step: 1, placeholder: "A" }); ampI.style.width = "60px"; ampI.className = "sub-input"; ampI.title = "Calibre / plafond de courant (A).";

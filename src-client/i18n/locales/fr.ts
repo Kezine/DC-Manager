@@ -18,12 +18,19 @@
 
    Domaines : `tabs`/`interventions` (pilotes) ; `ui` (primitives réutilisables),
    `shell` (ossature/réglages), `app` (documents fichier/REST, boot), `graph`
-   (vue Netmap) — lot B1 « chrome & primitives ». */
+   (vue Netmap) — lot B1 « chrome & primitives » ; `lists` (listes + chrome),
+   `forms` (socle des formulaires), `cable` (câbles/réseaux/faisceaux), `ipam`
+   (adressage IP), `domain` (tables de libellés métier) — lot B2a. */
 import { tabs } from "./fr/tabs";
 import { interventions } from "./fr/interventions";
 import { ui } from "./fr/ui";
 import { shell } from "./fr/shell";
 import { app } from "./fr/app";
 import { graph } from "./fr/graph";
+import { lists } from "./fr/lists";
+import { forms } from "./fr/forms";
+import { cable } from "./fr/cable";
+import { ipam } from "./fr/ipam";
+import { domain } from "./fr/domain";
 
-export const fr = { tabs, interventions, ui, shell, app, graph } as const;
+export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain } as const;

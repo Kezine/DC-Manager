@@ -8,6 +8,7 @@ import { Icons } from "../ui/Icons";
 import { IconButton } from "../ui/IconButton";
 import { RowMenu } from "../ui/RowMenu";
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from "../data/config";
+import { I18n } from "../i18n/I18n";
 
 export interface FilterOption { id: string; label: string; color?: string | null; }
 export interface ListColumn {
@@ -75,11 +76,11 @@ export class ListView {
     this.columns = opts.columns;
     this.items = opts.items || null;
     this.searchFields = opts.searchFields;
-    this.emptyText = opts.emptyText || "Aucun élément.";
+    this.emptyText = opts.emptyText || I18n.t("lists.chrome.empty");
     this.actions = opts.actions || { view: true, edit: true, clone: true, del: true };
     this.onAction = opts.onAction;
     this.onCreate = opts.onCreate;
-    this.createLabel = opts.createLabel || "+ Nouveau";
+    this.createLabel = opts.createLabel || I18n.t("lists.chrome.create");
     this.sortKey = (opts.defaultSort && opts.defaultSort.key) || "__created__";
     this.sortDir = (opts.defaultSort && opts.defaultSort.dir) || "asc";
     this._stateKey = "dcmanager.list:" + (opts.stateKey || opts.collection || "list");
@@ -120,8 +121,8 @@ export class ListView {
   private _colKey(c: ListColumn): string { return c.sortKey || ("col" + this.columns.indexOf(c)); }
   private _sortOptions(): { key: string; label: string }[] {
     const opts = this.columns.filter((c) => c.sort).map((c) => ({ key: this._colKey(c), label: c.head }));
-    opts.push({ key: "__created__", label: "Date de création" });
-    opts.push({ key: "__updated__", label: "Date de modification" });
+    opts.push({ key: "__created__", label: I18n.t("lists.chrome.sortCreated") });
+    opts.push({ key: "__updated__", label: I18n.t("lists.chrome.sortUpdated") });
     return opts;
   }
   private _sortRows(all: any[]): any[] {
@@ -160,7 +161,7 @@ export class ListView {
 
   private _ensureScaffold(): void {
     if (this._scaffold && this.container.querySelector(".list-body")) return;
-    this.container.innerHTML = `<div class="list-search" style="display:flex;gap:8px;align-items:center;padding:6px 8px"><input type="search" class="search-input" placeholder="Rechercher…" style="flex:1 1 auto"></div><div class="list-toolbar"></div><div class="list-body"></div>`;
+    this.container.innerHTML = `<div class="list-search" style="display:flex;gap:8px;align-items:center;padding:6px 8px"><input type="search" class="search-input" placeholder="${I18n.t("lists.chrome.searchPlaceholder")}" style="flex:1 1 auto"></div><div class="list-toolbar"></div><div class="list-body"></div>`;
     this._searchEl = this.container.querySelector(".list-search input") as HTMLInputElement;
     if (this.onCreate) {
       const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary btn-sm"; b.textContent = this.createLabel;
@@ -182,25 +183,25 @@ export class ListView {
     this._toolbarSig = sig;
     this._toolbarEl.innerHTML = "";
     const sg = document.createElement("div"); sg.className = "lt-group";
-    const lbl = document.createElement("label"); lbl.textContent = "Trier";
+    const lbl = document.createElement("label"); lbl.textContent = I18n.t("lists.chrome.sort");
     const sortSel = document.createElement("select"); sortSel.className = "sort-key app-select";
     this._sortOptions().forEach((o) => { const op = document.createElement("option"); op.value = o.key; op.textContent = o.label; sortSel.appendChild(op); });
     sortSel.value = this.sortKey;
     sortSel.onchange = () => { this.sortKey = sortSel.value; this.page = 1; this.render(); };
     const dirBtn = document.createElement("button"); dirBtn.type = "button"; dirBtn.className = "sort-dir-btn btn btn-ghost btn-sm";
-    const setDir = () => { dirBtn.textContent = this.sortDir === "desc" ? "▼ Décroissant" : "▲ Croissant"; };
+    const setDir = () => { dirBtn.textContent = this.sortDir === "desc" ? I18n.t("lists.chrome.dirDesc") : I18n.t("lists.chrome.dirAsc"); };
     setDir();
     dirBtn.onclick = () => { this.sortDir = this.sortDir === "desc" ? "asc" : "desc"; setDir(); this.page = 1; this.render(); };
     sg.appendChild(lbl); sg.appendChild(sortSel); sg.appendChild(dirBtn);
     // bascule COMPACT (colonnes essentielles seulement) : bascule booléenne → .toggle-pill (pilule + témoin +
     // teinte) via la factory, cohérente avec les autres bascules. L'état persiste à travers les re-rendus (this._compact).
-    const compactBtn = FormControls.toggle("Compact", this._compact, (v) => { this._compact = v; this.page = 1; this.render(); }, { title: "N'afficher que les colonnes essentielles (affichage dense)" });
+    const compactBtn = FormControls.toggle(I18n.t("lists.chrome.compact"), this._compact, (v) => { this._compact = v; this.page = 1; this.render(); }, { title: I18n.t("lists.chrome.compactTitle") });
     compactBtn.classList.add("lt-compact");
     sg.appendChild(compactBtn);
     this._toolbarEl.appendChild(sg);
     if (filterCols.length) {
       const fg = document.createElement("div"); fg.className = "lt-filters";
-      const fl = document.createElement("span"); fl.className = "lt-flabel"; fl.textContent = "Filtrer"; fg.appendChild(fl);
+      const fl = document.createElement("span"); fl.className = "lt-flabel"; fl.textContent = I18n.t("lists.chrome.filter"); fg.appendChild(fl);
       filterCols.forEach((c) => {
         const key = this._colKey(c);
         if (!this.filterState[key]) this.filterState[key] = new Set();
@@ -210,7 +211,7 @@ export class ListView {
         [...set].forEach((id) => { if (!valid.has(id)) set.delete(id); });
         fg.appendChild(MultiSelect.build(c.filter!.label || c.head, items, set, () => { this.page = 1; this.render(); }));
       });
-      const reset = document.createElement("button"); reset.type = "button"; reset.className = "lt-reset btn btn-ghost btn-sm"; reset.textContent = "Réinit. filtres";
+      const reset = document.createElement("button"); reset.type = "button"; reset.className = "lt-reset btn btn-ghost btn-sm"; reset.textContent = I18n.t("lists.chrome.filterReset");
       reset.onclick = () => { Object.values(this.filterState).forEach((s) => s.clear()); this._toolbarSig = null; this.page = 1; this.render(); };
       fg.appendChild(reset);
       this._toolbarEl.appendChild(fg);
@@ -227,11 +228,12 @@ export class ListView {
   private _rowActions(id: string): string {
     const a = this.actions;
     let html = `<span data-id="${id}">`;
-    if (a.view) html += IconButton.html({ icon: Icons.INFO, label: "Détails", act: "view" });
-    if (a.manage) html += IconButton.html({ icon: Icons.RACK_CONTENT, label: "Contenu (montage des U)", act: "manage" });   // éditeur de contenu de baie (inline, à côté de Détails)
-    if (a.edit) html += IconButton.html({ icon: Icons.EDIT, label: "Modifier", act: "edit" });
+    if (a.view) html += IconButton.html({ icon: Icons.INFO, label: I18n.t("lists.chrome.rowView"), act: "view" });
+    if (a.manage) html += IconButton.html({ icon: Icons.RACK_CONTENT, label: I18n.t("lists.chrome.rowManage"), act: "manage" });   // éditeur de contenu de baie (inline, à côté de Détails)
+    if (a.edit) html += IconButton.html({ icon: Icons.EDIT, label: I18n.t("lists.chrome.rowEdit"), act: "edit" });
     if (a.locate || a.clone || a.del || a.download) {
-      html += `<button type="button" class="btn btn-ghost btn-sm icon-action row-overflow" data-act="__more__" title="Plus d'actions" aria-label="Plus d'actions" aria-haspopup="menu" aria-expanded="false">${Icons.MORE}</button>`;
+      const moreLbl = I18n.t("lists.chrome.rowMore");
+      html += `<button type="button" class="btn btn-ghost btn-sm icon-action row-overflow" data-act="__more__" title="${moreLbl}" aria-label="${moreLbl}" aria-haspopup="menu" aria-expanded="false">${Icons.MORE}</button>`;
     }
     return html + "</span>";
   }
@@ -242,10 +244,10 @@ export class ListView {
     const items: { label: string; icon?: string; danger?: boolean; onClick: () => void }[] = [];
     // Icônes du registre PARTAGÉ : les emoji d'origine (📍 ⬇ ⧉) étaient des bitmaps COULEUR — ils
     // pixellisaient au zoom et ignoraient `currentColor`, donc la teinte « danger » du survol.
-    if (a.locate) items.push({ label: "Localiser en 3D", icon: Icons.LOCATE, onClick: () => this.onAction && this.onAction("locate", id) });
-    if (a.download) items.push({ label: "Télécharger", icon: Icons.EXPORT, onClick: () => this.onAction && this.onAction("download", id) });
-    if (a.clone) items.push({ label: "Cloner", icon: Icons.CLONE, onClick: () => this.onAction && this.onAction("clone", id) });
-    if (a.del) items.push({ label: "Supprimer", icon: Icons.DELETE, danger: true, onClick: () => this.onAction && this.onAction("del", id) });
+    if (a.locate) items.push({ label: I18n.t("lists.chrome.rowLocate"), icon: Icons.LOCATE, onClick: () => this.onAction && this.onAction("locate", id) });
+    if (a.download) items.push({ label: I18n.t("lists.chrome.rowDownload"), icon: Icons.EXPORT, onClick: () => this.onAction && this.onAction("download", id) });
+    if (a.clone) items.push({ label: I18n.t("lists.chrome.rowClone"), icon: Icons.CLONE, onClick: () => this.onAction && this.onAction("clone", id) });
+    if (a.del) items.push({ label: I18n.t("ui.action.delete"), icon: Icons.DELETE, danger: true, onClick: () => this.onAction && this.onAction("del", id) });
     RowMenu.open(trigger, items);
   }
 
@@ -257,7 +259,7 @@ export class ListView {
       const key = this._colKey(c); const active = this.sortKey === key;
       const ind = active ? `<span class="sort-ind"> ${this.sortDir === "desc" ? "▼" : "▲"}</span>` : "";
       return `<th class="sortable" data-sortkey="${key}">${Html.escape(c.head)}${ind}</th>`;
-    }).join("") + `<th>Actions</th>`;
+    }).join("") + `<th>${I18n.t("lists.chrome.actions")}</th>`;
     let bodyHtml: string;
     if (rows.length === 0) {
       bodyHtml = `<tr class="empty-row"><td colspan="${cols.length + 1}">${Html.escape(this.emptyText)}</td></tr>`;
@@ -270,14 +272,14 @@ export class ListView {
     this._bodyEl.innerHTML = `
       <div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${bodyHtml}</tbody></table></div>
       <div class="pagination">
-        <div>${total} élément${total > 1 ? "s" : ""} · page ${page}/${pages}</div>
+        <div>${I18n.t("lists.chrome.count", { count: total, page, pages })}</div>
         <div class="pagination-controls">
           <button class="page-btn" data-pg="first" ${page <= 1 ? "disabled" : ""}>«</button>
           <button class="page-btn" data-pg="prev" ${page <= 1 ? "disabled" : ""}>‹</button>
           <span style="padding:0 6px;">${page} / ${pages}</span>
           <button class="page-btn" data-pg="next" ${page >= pages ? "disabled" : ""}>›</button>
           <button class="page-btn" data-pg="last" ${page >= pages ? "disabled" : ""}>»</button>
-          <select class="page-size app-select">${PAGE_SIZE_OPTIONS.map((n) => `<option value="${n}" ${n === this.pageSize ? "selected" : ""}>${n}/page</option>`).join("")}</select>
+          <select class="page-size app-select">${PAGE_SIZE_OPTIONS.map((n) => `<option value="${n}" ${n === this.pageSize ? "selected" : ""}>${I18n.t("lists.chrome.pageSize", { n })}</option>`).join("")}</select>
         </div>
       </div>`;
     this._bodyEl.querySelectorAll("th.sortable").forEach((th) => {

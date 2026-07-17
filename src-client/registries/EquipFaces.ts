@@ -1,7 +1,5 @@
 import { EQUIP_FACES, EQUIP_FACE_IDS, EQUIP_ANNEX_FACE_IDS } from "../domain/constants";
-import { Labeler } from "../core/Labeler";
-
-const labeler = Labeler.make(EQUIP_FACES, "Avant");
+import { I18n } from "../i18n/I18n";
 
 /** Registre des faces d'équipement (avant/arrière + 4 annexes des équipements libres). */
 export class EquipFaces {
@@ -9,8 +7,11 @@ export class EquipFaces {
   static readonly IDS = EQUIP_FACE_IDS;
   static readonly ANNEX_IDS = EQUIP_ANNEX_FACE_IDS;
 
-  /** Libellé d'une face (inconnu → « Avant »). */
-  static label(id: string): string { return labeler(id); }
+  /** Libellé d'une face (inconnu → « Avant »). Résolu au rendu (i18n). */
+  static label(id: string): string {
+    const f = EQUIP_FACES.find((x) => x.id === id);
+    return f ? I18n.t(f.labelKey) : I18n.t("domain.equipFace.front");
+  }
 
   /** Normalise vers une face valide (défaut « front »). */
   static norm(f: string): string { return EQUIP_FACE_IDS.includes(f) ? f : "front"; }

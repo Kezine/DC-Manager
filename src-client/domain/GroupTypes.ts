@@ -1,4 +1,5 @@
 import { GROUP_TYPES, GROUP_TYPE_DEFAULT, GroupTypeDef } from "./constants";
+import { I18n } from "../i18n/I18n";
 
 const BY_ID: Record<string, GroupTypeDef> = Object.fromEntries(GROUP_TYPES.map((t) => [t.id, t]));
 
@@ -13,6 +14,6 @@ export class GroupTypes {
 
   static label(id: string): string {
     const t = BY_ID[id];
-    return t ? t.label : (id || "—");
+    return t ? I18n.t(t.labelKey) : (id || "—");
   }
 }

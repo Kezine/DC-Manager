@@ -14,12 +14,15 @@ export const RACK_EAR_STANDOFF_MM = 3;        // épaisseur standard RÉSERVÉE 
 export const RACK_DEPTH_DEFAULT = 1000;       // profondeur EXTÉRIEURE par défaut (mm)
 export const RACK_DEPTHS = [600, 800, 1000, 1200];
 export const RACK_ORIENTATIONS = [0, 90, 180, 270];   // pas de 90° (sens horaire)
-/** Faces de baie (simple / double). */
-export const RACK_SIDES = [{ id: "single", label: "Simple face" }, { id: "dual", label: "Double face" }];
-/** Faces portant une porte (avant / arrière). */
-export const RACK_FACES = [{ id: "front", label: "Avant" }, { id: "rear", label: "Arrière" }];
+/** Faces de baie (simple / double). Libellés i18n (résolus au rendu, cf. domaine `domain`). */
+export const RACK_SIDES = [{ id: "single", labelKey: "domain.rackSide.single" }, { id: "dual", labelKey: "domain.rackSide.dual" }];
+/** Faces portant une porte (avant / arrière). Libellés i18n. */
+export const RACK_FACES = [{ id: "front", labelKey: "domain.rackFace.front" }, { id: "rear", labelKey: "domain.rackFace.rear" }];
 
 /* ---- lieux & étages (listes FERMÉES — éditables ici) ---- */
+// LOCATIONS NON migré en i18n VOLONTAIREMENT : ses libellés servent de VALEURS SEED PERSISTÉES (Store amorce le
+// nom des sites par défaut à partir d'eux) et sont des noms propres géographiques identiques en fr/en — ce sont
+// des données, pas des chaînes d'UI traduisibles.
 export const LOCATIONS = [
   { id: "liege", label: "Liège" }, { id: "herstal", label: "Herstal" }, { id: "bruxelles", label: "Bruxelles" },
 ];
@@ -56,11 +59,11 @@ export const BREAKOUT_SPANS = [2, 4, 8];
 /* ---- faces d'équipement ----
    Avant/arrière : tous. Dessus/dessous/gauche/droite : équipements en
    dimensionnement LIBRE uniquement. */
-export interface FaceDef { id: string; label: string; }
+export interface FaceDef { id: string; labelKey: string; }
 export const EQUIP_FACES: FaceDef[] = [
-  { id: "front", label: "Avant" },   { id: "rear", label: "Arrière" },
-  { id: "top", label: "Dessus" },    { id: "bottom", label: "Dessous" },
-  { id: "left", label: "Gauche" },   { id: "right", label: "Droite" },
+  { id: "front", labelKey: "domain.equipFace.front" },   { id: "rear", labelKey: "domain.equipFace.rear" },
+  { id: "top", labelKey: "domain.equipFace.top" },       { id: "bottom", labelKey: "domain.equipFace.bottom" },
+  { id: "left", labelKey: "domain.equipFace.left" },     { id: "right", labelKey: "domain.equipFace.right" },
 ];
 export const EQUIP_FACE_IDS: string[] = EQUIP_FACES.map((f) => f.id);
 export const EQUIP_ANNEX_FACE_IDS = ["top", "bottom", "left", "right"];
@@ -83,29 +86,29 @@ export const COLOR_PALETTE = [
 ];
 
 /* ---- types d'équipement (icône SVG viewBox 24, currentColor) ---- */
-export interface EquipmentTypeDef { id: string; label: string; icon: string; }
+export interface EquipmentTypeDef { id: string; labelKey: string; icon: string; }
 export const EQUIPMENT_TYPES: EquipmentTypeDef[] = [
-  { id: "switch",     label: "Switch",     icon: `<rect x="2" y="6" width="20" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10h7l-2-2m2 2-2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 14h-7l2-2m-2 2 2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` },
-  { id: "serveur",    label: "Serveur",    icon: `<rect x="3" y="4" width="18" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="13" width="18" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="7" cy="7.5" r="1.1" fill="currentColor"/><circle cx="7" cy="16.5" r="1.1" fill="currentColor"/>` },
-  { id: "caisson",    label: "Caisson",    icon: `<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>` },
-  { id: "pc",         label: "PC",         icon: `<rect x="3" y="4" width="18" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 20h6M12 16v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
-  { id: "imprimante", label: "Imprimante", icon: `<path d="M7 9V4h10v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><rect x="3" y="9" width="18" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 14h10v6H7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="17.5" cy="12" r="0.9" fill="currentColor"/>` },
-  { id: "ap",         label: "AP",         icon: `<path d="M5 11a10 10 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 14a6 6 0 0 1 8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="18" r="1.4" fill="currentColor"/>` },
-  { id: "patch_panel",label: "Patch panel",icon: `<rect x="2" y="8" width="20" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="12" r="1" fill="currentColor"/><circle cx="9.5" cy="12" r="1" fill="currentColor"/><circle cx="13" cy="12" r="1" fill="currentColor"/><circle cx="16.5" cy="12" r="1" fill="currentColor"/><circle cx="20" cy="12" r="1" fill="currentColor"/>` },
-  { id: "pdu",        label: "PDU",        icon: `<rect x="8" y="2" width="8" height="20" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="6" r="1.1" fill="currentColor"/><circle cx="12" cy="10" r="1.1" fill="currentColor"/><circle cx="12" cy="14" r="1.1" fill="currentColor"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/>` },
-  { id: "tableau",    label: "Tableau électrique", icon: `<rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="6.5" y="6" width="3" height="5" rx="0.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="10.5" y="6" width="3" height="5" rx="0.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="14.5" y="6" width="3" height="5" rx="0.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6 15h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M6 18h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>` },
-  { id: "autre",      label: "Autre",      icon: `<rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="12" r="1.1" fill="currentColor"/><circle cx="12" cy="12" r="1.1" fill="currentColor"/><circle cx="16" cy="12" r="1.1" fill="currentColor"/>` },
+  { id: "switch",     labelKey: "domain.equipmentType.switch",     icon: `<rect x="2" y="6" width="20" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10h7l-2-2m2 2-2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 14h-7l2-2m-2 2 2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` },
+  { id: "serveur",    labelKey: "domain.equipmentType.serveur",    icon: `<rect x="3" y="4" width="18" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="13" width="18" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="7" cy="7.5" r="1.1" fill="currentColor"/><circle cx="7" cy="16.5" r="1.1" fill="currentColor"/>` },
+  { id: "caisson",    labelKey: "domain.equipmentType.caisson",    icon: `<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>` },
+  { id: "pc",         labelKey: "domain.equipmentType.pc",         icon: `<rect x="3" y="4" width="18" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 20h6M12 16v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
+  { id: "imprimante", labelKey: "domain.equipmentType.imprimante", icon: `<path d="M7 9V4h10v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><rect x="3" y="9" width="18" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 14h10v6H7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="17.5" cy="12" r="0.9" fill="currentColor"/>` },
+  { id: "ap",         labelKey: "domain.equipmentType.ap",         icon: `<path d="M5 11a10 10 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 14a6 6 0 0 1 8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="18" r="1.4" fill="currentColor"/>` },
+  { id: "patch_panel",labelKey: "domain.equipmentType.patch_panel",icon: `<rect x="2" y="8" width="20" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="12" r="1" fill="currentColor"/><circle cx="9.5" cy="12" r="1" fill="currentColor"/><circle cx="13" cy="12" r="1" fill="currentColor"/><circle cx="16.5" cy="12" r="1" fill="currentColor"/><circle cx="20" cy="12" r="1" fill="currentColor"/>` },
+  { id: "pdu",        labelKey: "domain.equipmentType.pdu",        icon: `<rect x="8" y="2" width="8" height="20" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="6" r="1.1" fill="currentColor"/><circle cx="12" cy="10" r="1.1" fill="currentColor"/><circle cx="12" cy="14" r="1.1" fill="currentColor"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/>` },
+  { id: "tableau",    labelKey: "domain.equipmentType.tableau", icon: `<rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="6.5" y="6" width="3" height="5" rx="0.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="10.5" y="6" width="3" height="5" rx="0.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="14.5" y="6" width="3" height="5" rx="0.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6 15h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M6 18h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>` },
+  { id: "autre",      labelKey: "domain.equipmentType.autre",      icon: `<rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="12" r="1.1" fill="currentColor"/><circle cx="12" cy="12" r="1.1" fill="currentColor"/><circle cx="16" cy="12" r="1.1" fill="currentColor"/>` },
 ];
 export const EQUIPMENT_TYPE_DEFAULT = "switch";
 
-/** Sources d'alimentation possibles d'un réseau Power. */
+/** Sources d'alimentation possibles d'un réseau Power. Libellés i18n (cf. domaine `domain`). */
 export const POWER_SOURCES = [
-  { id: "ups", label: "Sous UPS" }, { id: "ups_gen", label: "UPS + Générateur" }, { id: "grid", label: "Réseau (Grid only)" },
+  { id: "ups", labelKey: "domain.powerSource.ups" }, { id: "ups_gen", labelKey: "domain.powerSource.ups_gen" }, { id: "grid", labelKey: "domain.powerSource.grid" },
 ];
 
-/** SENS de l'énergie d'un port power : source (fournit) | sink (consomme). */
+/** SENS de l'énergie d'un port power : source (fournit) | sink (consomme). Libellés i18n. */
 export const PORT_DIRECTIONS = [
-  { id: "source", label: "Source (fournit)" }, { id: "sink", label: "Sink (consomme)" },
+  { id: "source", labelKey: "domain.portDirection.source" }, { id: "sink", labelKey: "domain.portDirection.sink" },
 ];
 /** PHASES d'un réseau triphasé (départ de tableau monophasé réparti sur 3 phases). */
 export const POWER_PHASES = ["L1", "L2", "L3"];
@@ -113,11 +116,11 @@ export const POWER_PHASES = ["L1", "L2", "L3"];
 export const POWER_LOAD_WARN_FRACTION = 0.8;
 
 /** Rôles de port (catégorie data | power). */
-export interface PortRoleDef { id: string; label: string; kind: "data" | "power"; }
+export interface PortRoleDef { id: string; labelKey: string; kind: "data" | "power"; }
 export const PORT_ROLES: PortRoleDef[] = [
-  { id: "mgmt",  label: "Mgmt",  kind: "data" },
-  { id: "data",  label: "Data",  kind: "data" },
-  { id: "power", label: "Power", kind: "power" },
+  { id: "mgmt",  labelKey: "domain.portRole.mgmt",  kind: "data" },
+  { id: "data",  labelKey: "domain.portRole.data",  kind: "data" },
+  { id: "power", labelKey: "domain.portRole.power", kind: "power" },
 ];
 
 /* ---- profondeur d'équipement en mm (remplace l'enum legacy full/half/quarter) ---- */
@@ -130,30 +133,30 @@ export const EQUIP_DEPTH_DEFAULT_MM = 600;
        ne servent qu'au REPLI de lecture des vieux documents et à la MIGRATION → depth_mm
        (Store._migrateDepths / Depths.legacyToMm). ---- */
 export const MOUNT_DEPTHS = [
-  { id: "full", label: "Full-depth" },
-  { id: "half", label: "Half-depth" },
-  { id: "quarter", label: "Quarter-depth" },
+  { id: "full", labelKey: "domain.mountDepth.full" },
+  { id: "half", labelKey: "domain.mountDepth.half" },
+  { id: "quarter", labelKey: "domain.mountDepth.quarter" },
 ];
 /** Part de la profondeur de cage occupée par chaque enum legacy (`none` = pseudo-élément). */
 export const DEPTH_FRAC: Record<string, number> = { full: 1, half: 0.5, quarter: 0.25, none: 0.06 };
 
 /* ---- types de groupe ---- */
-export interface GroupTypeDef { id: string; label: string; hint: string; }
+export interface GroupTypeDef { id: string; labelKey: string; hintKey: string; }
 export const GROUP_TYPES: GroupTypeDef[] = [
-  { id: "stack",   label: "Stack",   hint: "Grouper les switchs d'un même stack" },
-  { id: "system",  label: "System",  hint: "Grouper les éléments d'un même système (ex. un SAN)" },
-  { id: "general", label: "General", hint: "Regroupement générique" },
+  { id: "stack",   labelKey: "domain.groupType.stack",   hintKey: "domain.groupTypeHint.stack" },
+  { id: "system",  labelKey: "domain.groupType.system",  hintKey: "domain.groupTypeHint.system" },
+  { id: "general", labelKey: "domain.groupType.general", hintKey: "domain.groupTypeHint.general" },
 ];
 export const GROUP_TYPE_DEFAULT = "general";
 
 /* ---- statut de câble (cycle de vie ; slug stable, pas le libellé affiché) ---- */
-export interface CableStatusDef { id: string; label: string; cls: string; draft?: boolean; }
+export interface CableStatusDef { id: string; labelKey: string; cls: string; draft?: boolean; }
 export const CABLE_STATUSES: CableStatusDef[] = [
-  { id: "brouillon",   label: "Brouillon",   cls: "status-brouillon", draft: true },
-  { id: "planifie",    label: "Planifié",    cls: "status-planifie" },
-  { id: "cable",       label: "Câblé",       cls: "status-cable" },
-  { id: "a-remplacer", label: "À remplacer", cls: "status-a-remplacer" },
-  { id: "casse",       label: "Cassé",       cls: "status-casse" },
+  { id: "brouillon",   labelKey: "domain.cableStatus.brouillon",   cls: "status-brouillon", draft: true },
+  { id: "planifie",    labelKey: "domain.cableStatus.planifie",    cls: "status-planifie" },
+  { id: "cable",       labelKey: "domain.cableStatus.cable",       cls: "status-cable" },
+  { id: "a-remplacer", labelKey: "domain.cableStatus.aRemplacer", cls: "status-a-remplacer" },
+  { id: "casse",       labelKey: "domain.cableStatus.casse",       cls: "status-casse" },
 ];
 export const CABLE_STATUS_DRAFT = "brouillon";          // imposé tant que l'assignation est incomplète
 export const CABLE_STATUS_DEFAULT_NEW = "planifie";     // câble complet créé via le formulaire
@@ -182,28 +185,28 @@ export const PORT_CONNECTOR_DEFAULT = PORT_CONNECTOR_MM.RJ45;
 // Types de waypoint. Le pin « hors salle » (ex-OOB) est désormais un PIN dont le placement est au niveau ÉTAGE
 // (cf. Waypoint.isFloorLevel) — plus un type à part.
 export const WAYPOINT_TYPES = [
-  { id: "datacenter", label: "Passage interne à la salle (pin / chemin)" },
-  { id: "exit",       label: "Exit — sortie / entrée de salle" },
+  { id: "datacenter", labelKey: "domain.waypointType.datacenter" },
+  { id: "exit",       labelKey: "domain.waypointType.exit" },
 ];
 
 /* ---- INVENTAIRE DE SPARES (pièces de rechange, hors graphe réseau) ---- */
-export interface SpareTypeDef { id: string; label: string; icon: string; }
+export interface SpareTypeDef { id: string; labelKey: string; icon: string; }
 export const SPARE_TYPES: SpareTypeDef[] = [
   // icon = INNER markup SVG (enveloppé par SpareTypes.svg), même convention qu'EquipmentTypes.
-  { id: "hdd",         label: "HDD (disque dur)", icon: `<rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="12" r="0.7" fill="currentColor"/>` },
-  { id: "ssd",         label: "SSD",              icon: `<rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10h6M7 13.5h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
-  { id: "transceiver", label: "Transceiver",      icon: `<rect x="2" y="9" width="13" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 10.5h4l3 1.5-3 1.5h-4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>` },
-  { id: "other",       label: "Autre",            icon: `<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>` },
+  { id: "hdd",         labelKey: "domain.spareType.hdd", icon: `<rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="12" r="0.7" fill="currentColor"/>` },
+  { id: "ssd",         labelKey: "domain.spareType.ssd",              icon: `<rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10h6M7 13.5h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
+  { id: "transceiver", labelKey: "domain.spareType.transceiver",      icon: `<rect x="2" y="9" width="13" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 10.5h4l3 1.5-3 1.5h-4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>` },
+  { id: "other",       labelKey: "domain.spareType.other",            icon: `<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>` },
 ];
 export const SPARE_TYPE_DEFAULT = "other";
 /** Types « disque » partageant le même groupe de champs (capacité/interface/format ; RPM = HDD seul). */
 export const SPARE_DISK_TYPES = ["hdd", "ssd"];
 
-export interface SpareStatusDef { id: string; label: string; }
+export interface SpareStatusDef { id: string; labelKey: string; }
 export const SPARE_STATUSES: SpareStatusDef[] = [
-  { id: "available",      label: "Disponible" },
-  { id: "assigned",       label: "Attribué" },
-  { id: "decommissioned", label: "Décommissionné" },
+  { id: "available",      labelKey: "domain.spareStatus.available" },
+  { id: "assigned",       labelKey: "domain.spareStatus.assigned" },
+  { id: "decommissioned", labelKey: "domain.spareStatus.decommissioned" },
 ];
 export const SPARE_STATUS_DEFAULT = "available";
 
@@ -217,19 +220,19 @@ export const SPARE_TX_SPEEDS = ["1G", "10G", "25G", "40G", "100G", "200G", "400G
 export const SPARE_TX_MEDIA = ["LC (fibre)", "RJ45 (cuivre)", "DAC", "AOC", "MPO/MTP", "SC"];
 
 /* ---- pseudo-équipements montables en rack (icône SVG viewBox 24, currentColor) ---- */
-export interface RackItemKindDef { id: string; label: string; icon: string; }
+export interface RackItemKindDef { id: string; labelKey: string; icon: string; }
 /* ---- tray (étagère de baie — pseudo-équipement rackItems, kind "tray") ---- */
-export interface TrayTypeDef { id: string; label: string; }
+export interface TrayTypeDef { id: string; labelKey: string; }
 export const TRAY_TYPES: TrayTypeDef[] = [
-  { id: "dual", label: "Posée avant + arrière (pleine cage)" },
-  { id: "cantilever", label: "Porte-à-faux (renforts triangulaires)" },
+  { id: "dual", labelKey: "domain.trayType.dual" },
+  { id: "cantilever", labelKey: "domain.trayType.cantilever" },
 ];
 export const TRAY_DEPTH_DEFAULT_MM = 450;   // longueur de plateau par défaut d'une étagère en porte-à-faux (mm)
 export const TRAY_SHEET_RESERVE_MM = 5;     // réserve de hauteur INUTILISABLE au ras du plateau (tôle + renforts transversaux du tray)
 export const TRAY_GUSSET_CLEARANCE_MM = 4;  // garde LATÉRALE (mm) de chaque côté réservée aux renforts (porte-à-faux) : les équipements posés n'y empiètent pas
 
 export const RACK_ITEM_KINDS: RackItemKindDef[] = [
-  { id: "blank",     label: "Blanking Plate", icon: `<rect x="2" y="8" width="20" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="5.5" cy="12" r="1.1" fill="currentColor"/><circle cx="18.5" cy="12" r="1.1" fill="currentColor"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
-  { id: "tray",      label: "Tray",           icon: `<path d="M5 10h14v2l-1.5 4h-11L5 12z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M3 10h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
-  { id: "keepblank", label: "KeepBlank",      icon: `<rect x="2" y="8" width="20" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2.5"/><path d="M8 15l8-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
+  { id: "blank",     labelKey: "domain.rackItemKind.blank", icon: `<rect x="2" y="8" width="20" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="5.5" cy="12" r="1.1" fill="currentColor"/><circle cx="18.5" cy="12" r="1.1" fill="currentColor"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
+  { id: "tray",      labelKey: "domain.rackItemKind.tray",           icon: `<path d="M5 10h14v2l-1.5 4h-11L5 12z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M3 10h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
+  { id: "keepblank", labelKey: "domain.rackItemKind.keepblank",      icon: `<rect x="2" y="8" width="20" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2.5"/><path d="M8 15l8-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },
 ];

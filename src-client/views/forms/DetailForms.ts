@@ -15,6 +15,7 @@ import { GroupTypes } from "../../domain/GroupTypes";
 import { SpareTypes } from "../../domain/SpareTypes";
 import { SpareStatuses } from "../../domain/SpareStatuses";
 import { POWER_SOURCES } from "../../domain/constants";
+import { I18n } from "../../i18n/I18n";   // lot B2a : libellé de POWER_SOURCES (labelKey → I18n.t)
 import type { FormHost } from "./shared";
 import { IpamForms } from "./IpamForms";
 import { VmNetMapping } from "../../core/VmNetMapping";
@@ -113,7 +114,7 @@ export class DetailForms extends IpamForms {
       ["De", this.portRef(store, c.from_port_id)],
       ["Vers", this.portRef(store, c.to_port_id)],
       ["Réseau(x)", netsHtml],
-      ["Statut", `<span class="pill ${st ? st.cls : ""}">${Html.escape(st ? st.label : (c.status || "—"))}</span>`],
+      ["Statut", `<span class="pill ${st ? st.cls : ""}">${Html.escape(CableStatuses.label(c.status))}</span>`],
       ["Longueur", c.length_m != null ? `${c.length_m} m` : this.MUTED],
       ["Description", c.description ? Html.escape(c.description) : this.MUTED],
       ["Créé", Html.escape(Format.dateTime(c.created_date))],
@@ -215,7 +216,7 @@ export class DetailForms extends IpamForms {
       const src = POWER_SOURCES.find((s) => s.id === n.power_source);
       pairs.push(["Tension", n.voltage != null ? `${n.voltage} V` : this.MUTED]);
       pairs.push(["Capacité max", n.max_amp != null ? `${n.max_amp} A` : this.MUTED]);
-      pairs.push(["Alimentation", src ? Html.escape(src.label) : this.MUTED]);
+      pairs.push(["Alimentation", src ? Html.escape(I18n.t(src.labelKey)) : this.MUTED]);
     } else {
       const ipn: any = n.ip_network_id ? store.get("ipNetworks", n.ip_network_id) : null;
       pairs.push(["Réseau IP", ipn ? Html.escape(Ip.short(ipn)) : `<span style="color:var(--fg-dimmer)">purement logique</span>`]);

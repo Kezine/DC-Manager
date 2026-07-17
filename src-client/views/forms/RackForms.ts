@@ -12,6 +12,7 @@ import { RackGeometry } from "../../geometry/RackGeometry";
 import { RackScene } from "../../geometry/RackScene";
 import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Normalize } from "../../core/Normalize";
+import { I18n } from "../../i18n/I18n";   // lot B2a : options des tables de libellés (labelKey → I18n.t)
 import {
   FLOORS, RACK_SIDES, RACK_FACES, RACK_DEPTHS,
   RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_MOUNT_MARGIN_DEFAULT, U_MM, SIDE_U_STEP,
@@ -67,7 +68,7 @@ export class RackForms extends CableForms {
     const cageI = FormControls.number(rk ? RackGeometry.cageDepth(rk) : RACK_DEPTH_DEFAULT, { min: 1 });
     const fmI = FormControls.number(rk ? RackGeometry.frontMargin(rk) : 0, { min: 0, placeholder: "0" });
     const lmI = FormControls.number(rk ? RackGeometry.lMargin(rk) : RACK_MOUNT_MARGIN_DEFAULT, { min: 0 });
-    const sidesI = FormControls.select(RACK_SIDES.map((s) => ({ value: s.id, label: s.label })), rk ? rk.sides : "single");
+    const sidesI = FormControls.select(RACK_SIDES.map((s) => ({ value: s.id, label: I18n.t(s.labelKey) })), rk ? rk.sides : "single");
     root.appendChild(FormUi.row2(FormControls.fieldRow("Hauteur (U)", uI), FormControls.fieldRow("Marge verticale (mm)", vmI), FormControls.fieldRow("Marge basse (mm)", vmBotI)));
     root.appendChild(FormUi.row2(FormControls.fieldRow("Profondeur cage (mm)", cageI), FormControls.fieldRow("Marge avant (mm)", fmI), FormControls.fieldRow("Marge latérale (mm)", lmI), FormControls.fieldRow("Faces", sidesI)));
 
@@ -108,7 +109,7 @@ export class RackForms extends CableForms {
     RACK_FACES.forEach((face) => {
       const cur = Normalize.rackDoor(rk ? (face.id === "rear" ? rk.door_rear : rk.door_front) : null);
       const col = document.createElement("div"); col.style.cssText = "flex:1;min-width:230px;border:1px solid var(--line-2);border-radius:8px;padding:10px;";
-      const enI = FormControls.toggle("Porte " + face.label.toLowerCase(), !!cur.enabled, () => syncDoors(), { block: true });
+      const enI = FormControls.toggle("Porte " + I18n.t(face.labelKey).toLowerCase(), !!cur.enabled, () => syncDoors(), { block: true });
       col.appendChild(enI);
       const ctrls = document.createElement("div"); ctrls.style.marginTop = "8px"; col.appendChild(ctrls);
       const thI = FormControls.number(cur.thickness_mm, { min: 1, placeholder: "40" }); ctrls.appendChild(FormControls.fieldRow("Épaisseur (mm)", thI));
@@ -725,7 +726,7 @@ export class RackForms extends CableForms {
     // ne se rackent pas ; ils restent réservés aux montages latéraux/muraux et au placement libre en salle).
     const eqFree = store.unrackedEquipments().filter((e: any) => e.dim_mode !== "free" && (span === 1 || (e.u_height || 1) === span)).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
     const noEqLabel = eqFree.length ? "— choisir —" : (span > 1 ? "(aucun équipement de " + span + " U)" : "(aucun équipement libre)");
-    const kindOpts = [{ value: "equipment", label: "Équipement…" }].concat(RackItemKinds.ALL.map((k) => ({ value: k.id, label: k.label })));
+    const kindOpts = [{ value: "equipment", label: "Équipement…" }].concat(RackItemKinds.ALL.map((k) => ({ value: k.id, label: I18n.t(k.labelKey) })));
     if (rack.datacenter_id) kindOpts.push({ value: "brush", label: "▦ Brosse de brassage" });
     const kindI = FormControls.select(kindOpts, "equipment");
     body.appendChild(FormControls.fieldRow("Élément", kindI));
@@ -749,7 +750,7 @@ export class RackForms extends CableForms {
     // configuration TRAY (étagère) : variante, longueur du plateau (porte-à-faux seulement), hauteur de structure.
     // La « Hauteur (U) » commune (pheightI) devient la hauteur totale RÉSERVÉE (structure + espace utile au-dessus).
     const trayAvail = RackGeometry.mountAvailDepth(rack, side) - (RackGeometry.hasDoor(rack) ? RACK_DEPTH_SAFETY_MM : 0);
-    const trayTypeI = FormControls.select(TRAY_TYPES.map((t) => ({ value: t.id, label: t.label })), "dual");
+    const trayTypeI = FormControls.select(TRAY_TYPES.map((t) => ({ value: t.id, label: I18n.t(t.labelKey) })), "dual");
     const trayTypeRow = FormControls.fieldRow("Variante d'étagère", trayTypeI, "« Posée avant + arrière » : plateau pleine cage accroché aux deux plans de montage. « Porte-à-faux » : accroche sur la seule face de montage + renforts triangulaires latéraux."); body.appendChild(trayTypeRow);
     const trayLenI = FormControls.number(String(Math.min(TRAY_DEPTH_DEFAULT_MM, Math.max(50, Math.round(trayAvail)))), { min: 50, step: 10, max: Math.max(50, Math.round(trayAvail)) });
     const trayLenRow = FormControls.fieldRow("Longueur du plateau (mm)", trayLenI, "≤ " + Math.round(trayAvail) + " mm disponibles" + (RackGeometry.hasDoor(rack) ? " (marge de sécurité de porte déduite)" : "") + "."); body.appendChild(trayLenRow);
@@ -826,7 +827,7 @@ export class RackForms extends CableForms {
     let trayTypeI: HTMLSelectElement | null = null, trayLenI: any = null, trayUI: any = null, trayLenRow: HTMLElement | null = null;
     const trayAvail = () => rack ? (RackGeometry.mountAvailDepth(rack, sideI.value) - (RackGeometry.hasDoor(rack) ? RACK_DEPTH_SAFETY_MM : 0)) : Infinity;
     if (isTray) {
-      trayTypeI = FormControls.select(TRAY_TYPES.map((t) => ({ value: t.id, label: t.label })), it.tray_type === "cantilever" ? "cantilever" : "dual");
+      trayTypeI = FormControls.select(TRAY_TYPES.map((t) => ({ value: t.id, label: I18n.t(t.labelKey) })), it.tray_type === "cantilever" ? "cantilever" : "dual");
       root.appendChild(FormControls.fieldRow("Variante d'étagère", trayTypeI, "« Posée avant + arrière » : plateau pleine cage. « Porte-à-faux » : accroche sur la face de montage + renforts triangulaires."));
       trayLenI = FormControls.number(it.depth_mm != null ? it.depth_mm : TRAY_DEPTH_DEFAULT_MM, { min: 50, step: 10 });
       trayLenRow = FormControls.fieldRow("Longueur du plateau (mm)", trayLenI, "Bornée par la profondeur disponible de la baie.");

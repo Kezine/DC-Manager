@@ -1,4 +1,5 @@
 import { PORT_ROLES, PortRoleDef } from "../domain/constants";
+import { I18n } from "../i18n/I18n";
 
 const BY_ID: Record<string, PortRoleDef> = Object.fromEntries(PORT_ROLES.map((r) => [r.id, r]));
 
@@ -9,7 +10,7 @@ export class PortRoles {
   /** Libellé du rôle ; repli sur l'id (ou « — » si vide). */
   static label(id: string): string {
     const r = BY_ID[id];
-    return r ? r.label : (id || "—");
+    return r ? I18n.t(r.labelKey) : (id || "—");
   }
 
   /** Catégorie d'un rôle (défaut « data »). */

@@ -7,39 +7,40 @@ import { FormUi } from "./shared";
 import type { FormHost } from "./shared";
 import { RackForms } from "./RackForms";
 import { LiveValidation } from "./LiveValidation";
+import { I18n } from "../../i18n/I18n";
 
 export class IpamForms extends RackForms {
 
   static ipNetwork(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
     const net: any = id ? store.get("ipNetworks", id) : null;
     const root = document.createElement("div");
-    const labelI = FormControls.text(net ? net.label : "", "ex. LAN Prod, DMZ…");
-    root.appendChild(FormControls.fieldRow("Label", labelI));
-    const cidrI = FormControls.text(net ? net.cidr : "", "ex. 10.0.0.0/24");
+    const labelI = FormControls.text(net ? net.label : "", I18n.t("ipam.net.labelPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.net.label"), labelI));
+    const cidrI = FormControls.text(net ? net.cidr : "", I18n.t("ipam.net.cidrPlaceholder"));
     const hint = document.createElement("div"); hint.className = "form-hint";
     const refresh = () => {
       const c = Ip.parseCidr(cidrI.value);
-      if (!cidrI.value.trim()) { hint.textContent = "Sous-réseau IPv4 « adresse/préfixe »."; hint.style.color = ""; return; }
-      if (!c) { hint.textContent = "⚠ CIDR IPv4 invalide."; hint.style.color = "var(--err)"; return; }
+      if (!cidrI.value.trim()) { hint.textContent = I18n.t("ipam.net.cidrPrompt"); hint.style.color = ""; return; }
+      if (!c) { hint.textContent = I18n.t("ipam.net.cidrInvalid"); hint.style.color = "var(--err)"; return; }
       hint.style.color = "";
-      hint.innerHTML = `Réseau <strong>${c.networkStr}</strong> · diffusion <strong>${c.broadcastStr}</strong> · ${c.hostCount} hôte(s)`;
+      hint.innerHTML = I18n.t("ipam.net.cidrInfo", { count: c.hostCount, network: c.networkStr, broadcast: c.broadcastStr });
     };
     cidrI.addEventListener("input", refresh); refresh();
-    root.appendChild(FormControls.fieldRow("CIDR", cidrI)); root.appendChild(hint);
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.net.cidr"), cidrI)); root.appendChild(hint);
     // passerelle (∈ CIDR) + serveurs DNS (plusieurs, résolveurs externes admis) + serveur DHCP du réseau (FK équipement).
-    const gwI = FormControls.text(net ? (net.gateway || "") : "", "ex. 10.0.0.1"); gwI.style.fontFamily = "var(--mono)";
-    root.appendChild(FormControls.fieldRow("Passerelle", gwI, "Facultatif — doit appartenir au sous-réseau."));
-    const dnsI = FormControls.text(net && Array.isArray(net.dns_servers) ? net.dns_servers.join(", ") : "", "ex. 10.0.0.2, 1.1.1.1"); dnsI.style.fontFamily = "var(--mono)";
-    root.appendChild(FormControls.fieldRow("Serveurs DNS", dnsI, "Facultatif — plusieurs séparés par des virgules (résolveurs externes admis)."));
-    const dhcpSel = FormControls.select(FormUi.eqOptions(store, "— non désigné —"), net ? (net.dhcp_server_id || "") : "");
-    root.appendChild(FormControls.fieldRow("Serveur DHCP", dhcpSel, "Facultatif — équipement assurant le service DHCP de ce réseau."));
+    const gwI = FormControls.text(net ? (net.gateway || "") : "", I18n.t("ipam.net.gwPlaceholder")); gwI.style.fontFamily = "var(--mono)";
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.net.gateway"), gwI, I18n.t("ipam.net.gatewayHint")));
+    const dnsI = FormControls.text(net && Array.isArray(net.dns_servers) ? net.dns_servers.join(", ") : "", I18n.t("ipam.net.dnsPlaceholder")); dnsI.style.fontFamily = "var(--mono)";
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.net.dnsServers"), dnsI, I18n.t("ipam.net.dnsHint")));
+    const dhcpSel = FormControls.select(FormUi.eqOptions(store, I18n.t("ipam.common.noneDesignated")), net ? (net.dhcp_server_id || "") : "");
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.dhcpServer"), dhcpSel, I18n.t("ipam.net.dhcpHint")));
     const descI = FormControls.textArea(net ? net.description : "");
-    root.appendChild(FormControls.fieldRow("Description", descI));
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.description"), descI));
     const live = new LiveValidation("ipNetworks", { label: labelI, cidr: cidrI, gateway: gwI, dns_servers: dnsI });
     live.clearOnInput();
 
     host.openModal({
-      title: net ? "Modifier le réseau IP" : "Nouveau réseau IP",
+      title: net ? I18n.t("ipam.net.titleEdit") : I18n.t("ipam.net.titleNew"),
       subtitle: net ? Html.escape(Ip.short(net)) : "",
       body: root,
       onSave: async () => {
@@ -52,13 +53,13 @@ export class IpamForms extends RackForms {
         const cidr = c.networkStr + "/" + c.prefix;
         if (net) {
           const bad = store.ipAddressesOfNetwork(net.id).find((a: any) => !Ip.inCidr(Ip.toInt(a.address), c));
-          if (bad) { Notify.toast(`L'adresse ${bad.address} ne serait plus dans ${cidr}.`, "err"); return false; }
+          if (bad) { Notify.toast(I18n.t("ipam.net.addrOutOfCidr", { addr: bad.address, cidr }), "err"); return false; }
           const badR = store.dhcpRangesOfNetwork(net.id).find((r: any) => !Ip.inCidr(Ip.toInt(r.start_ip), c) || !Ip.inCidr(Ip.toInt(r.end_ip), c));
-          if (badR) { Notify.toast(`La plage DHCP ${badR.start_ip}→${badR.end_ip} ne serait plus dans ${cidr}.`, "err"); return false; }
+          if (badR) { Notify.toast(I18n.t("ipam.net.rangeOutOfCidr", { start: badR.start_ip, end: badR.end_ip, cidr }), "err"); return false; }
         }
         const payload = { label: labelI.value.trim(), cidr, description: descI.value.trim(), gateway, dns_servers, dhcp_server_id };
         if (net) await store.update("ipNetworks", net.id, payload); else await store.create("ipNetworks", payload);
-        host.setDirty?.(true); Notify.toast(net ? "Réseau IP mis à jour" : "Réseau IP créé"); onSaved?.(); return true;
+        host.setDirty?.(true); Notify.toast(net ? I18n.t("ipam.net.updated") : I18n.t("ipam.net.created")); onSaved?.(); return true;
       },
     });
     setTimeout(() => labelI.focus(), 30);
@@ -67,28 +68,28 @@ export class IpamForms extends RackForms {
   /** Adresse IP statique. */
   static ipAddress(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
     const addr: any = id ? store.get("ipAddresses", id) : null;
-    if (!addr && !store.all("ipNetworks").length) { Notify.toast("Créez d'abord un réseau IP.", "err"); return; }
+    if (!addr && !store.all("ipNetworks").length) { Notify.toast(I18n.t("ipam.common.needIpNetwork"), "err"); return; }
     const root = document.createElement("div");
     const netSel = FormControls.select(FormUi.ipNetOptions(store), addr ? addr.network_id : "");
-    root.appendChild(FormControls.fieldRow("Réseau IP", netSel));
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.ipNetwork"), netSel));
     const ipWrap = document.createElement("div"); ipWrap.style.display = "flex"; ipWrap.style.gap = "8px";
-    const ipI = FormControls.text(addr ? addr.address : "", "ex. 10.0.0.10"); ipI.style.flex = "1"; ipI.style.fontFamily = "var(--mono)";
-    const freeBtn = document.createElement("button"); freeBtn.type = "button"; freeBtn.className = "btn btn-ghost btn-sm"; freeBtn.textContent = "Proposer libre";
-    freeBtn.onclick = () => { const f = Ip.nextFree(store, netSel.value); if (f) ipI.value = f; else Notify.toast("Aucune adresse libre.", "err"); };
+    const ipI = FormControls.text(addr ? addr.address : "", I18n.t("ipam.addr.ipPlaceholder")); ipI.style.flex = "1"; ipI.style.fontFamily = "var(--mono)";
+    const freeBtn = document.createElement("button"); freeBtn.type = "button"; freeBtn.className = "btn btn-ghost btn-sm"; freeBtn.textContent = I18n.t("ipam.addr.proposeFree");
+    freeBtn.onclick = () => { const f = Ip.nextFree(store, netSel.value); if (f) ipI.value = f; else Notify.toast(I18n.t("ipam.addr.noFree"), "err"); };
     ipWrap.appendChild(ipI); ipWrap.appendChild(freeBtn);
     const hint = document.createElement("div"); hint.className = "form-hint";
-    const refresh = () => { const c = Ip.cidrOf(store.get("ipNetworks", netSel.value)); hint.innerHTML = c ? `Plage assignable : <strong>${Ip.toStr(c.firstHost)}</strong> → <strong>${Ip.toStr(c.lastHost)}</strong>` : "Choisissez un réseau au CIDR valide."; };
+    const refresh = () => { const c = Ip.cidrOf(store.get("ipNetworks", netSel.value)); hint.innerHTML = c ? I18n.t("ipam.addr.assignable", { first: Ip.toStr(c.firstHost), last: Ip.toStr(c.lastHost) }) : I18n.t("ipam.common.chooseCidrNet"); };
     netSel.addEventListener("change", refresh); refresh();
-    root.appendChild(FormControls.fieldRow("Adresse IP", ipWrap)); root.appendChild(hint);
-    const hostI = FormControls.text(addr ? addr.hostname : "", "ex. srv-web-01.lan"); hostI.style.fontFamily = "var(--mono)";
-    root.appendChild(FormControls.fieldRow("Hostname", hostI, "Facultatif."));
-    const eqSel = FormControls.select(FormUi.eqOptions(store, "— aucun —"), addr ? (addr.equipment_id || "") : "");
-    root.appendChild(FormControls.fieldRow("Équipement", eqSel, "Facultatif — exclusif avec la VM."));
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.addr.ipField"), ipWrap)); root.appendChild(hint);
+    const hostI = FormControls.text(addr ? addr.hostname : "", I18n.t("ipam.addr.hostPlaceholder")); hostI.style.fontFamily = "var(--mono)";
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.addr.hostname"), hostI, I18n.t("ipam.common.optional")));
+    const eqSel = FormControls.select(FormUi.eqOptions(store, I18n.t("ipam.addr.noneEquip")), addr ? (addr.equipment_id || "") : "");
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.addr.equipment"), eqSel, I18n.t("ipam.addr.equipmentHint")));
     // Sélecteur VM (rattachement à une VM, parité équipement) — feature AMOVIBLE : affiché SEULEMENT s'il existe des
     // VMs (ou si l'adresse en cible déjà une), pour ne pas encombrer le formulaire en mode fichier / sans inventaire VM.
     const hasVms = store.all("vms").length > 0 || !!(addr && addr.vm_id);
-    const vmSel = hasVms ? FormControls.select(FormUi.vmOptions(store, "— aucune —"), addr ? (addr.vm_id || "") : "") : null;
-    if (vmSel) root.appendChild(FormControls.fieldRow("VM", vmSel, "Facultatif — exclusif avec l'équipement."));
+    const vmSel = hasVms ? FormControls.select(FormUi.vmOptions(store, I18n.t("ipam.addr.noneVm")), addr ? (addr.vm_id || "") : "") : null;
+    if (vmSel) root.appendChild(FormControls.fieldRow(I18n.t("ipam.addr.vm"), vmSel, I18n.t("ipam.addr.vmHint")));
     // EXCLUSIVITÉ VISIBLE (miroir de l'invariant de la spec) : choisir un équipement vide la VM, et inversement —
     // l'utilisateur VOIT le champ opposé se remettre à « aucun », plutôt que de se faire refuser les deux à l'enregistrement.
     if (vmSel) {
@@ -96,7 +97,7 @@ export class IpamForms extends RackForms {
       vmSel.addEventListener("change", () => { if (vmSel.value) eqSel.value = ""; });
     }
     const descI = FormControls.textArea(addr ? addr.description : "");
-    root.appendChild(FormControls.fieldRow("Description", descI));
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.description"), descI));
     // validation live : adresse (format) + IP ∈ CIDR du réseau (cross-entité) + adresse UNIQUE (portée V6)
     // + exclusivité équipement/VM (invariant, surligné sur le champ VM quand il est présent).
     const liveFields: Record<string, HTMLElement> = { address: ipI, network_id: netSel, equipment_id: eqSel };
@@ -106,13 +107,13 @@ export class IpamForms extends RackForms {
     live.clearOnInput();
 
     host.openModal({
-      title: addr ? "Modifier l'adresse IP" : "Nouvelle adresse IP",
+      title: addr ? I18n.t("ipam.addr.titleEdit") : I18n.t("ipam.addr.titleNew"),
       subtitle: addr ? Html.escape(addr.address) : "",
       body: root,
       onSave: async () => {
         const networkId = netSel.value;
         const net = store.get("ipNetworks", networkId);
-        if (!net) { Notify.toast("Choisissez un réseau IP.", "err"); return false; }
+        if (!net) { Notify.toast(I18n.t("ipam.common.pickIpNetwork"), "err"); return false; }
         const address = ipI.value.trim();
         // `id` inclus → la validation de PORTÉE exclut l'adresse en cours d'édition (« sauf moi-même »).
         // vm_id : valeur du sélecteur si présent, sinon on PRÉSERVE l'existant (le sélecteur peut être masqué faute de VMs).
@@ -121,7 +122,7 @@ export class IpamForms extends RackForms {
         // surlignés par la validation live : format + IP ∈ CIDR + unicité (V6a) + pas dans une plage DHCP (V6b).
         if (live.check(payload).length) return false;
         if (addr) await store.update("ipAddresses", addr.id, payload); else await store.create("ipAddresses", payload);
-        host.setDirty?.(true); Notify.toast(addr ? "Adresse mise à jour" : "Adresse attribuée"); onSaved?.(); return true;
+        host.setDirty?.(true); Notify.toast(addr ? I18n.t("ipam.addr.updated") : I18n.t("ipam.addr.created")); onSaved?.(); return true;
       },
     });
     setTimeout(() => { if (!addr) netSel.focus(); else ipI.focus(); }, 30);
@@ -130,34 +131,34 @@ export class IpamForms extends RackForms {
   /** Plage DHCP réservée. */
   static dhcpRange(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
     const rng: any = id ? store.get("dhcpRanges", id) : null;
-    if (!rng && !store.all("ipNetworks").length) { Notify.toast("Créez d'abord un réseau IP.", "err"); return; }
+    if (!rng && !store.all("ipNetworks").length) { Notify.toast(I18n.t("ipam.common.needIpNetwork"), "err"); return; }
     const root = document.createElement("div");
     const netSel = FormControls.select(FormUi.ipNetOptions(store), rng ? rng.network_id : "");
-    root.appendChild(FormControls.fieldRow("Réseau IP", netSel));
-    const startI = FormControls.text(rng ? rng.start_ip : "", "ex. 10.0.0.100"); startI.style.fontFamily = "var(--mono)";
-    const endI = FormControls.text(rng ? rng.end_ip : "", "ex. 10.0.0.200"); endI.style.fontFamily = "var(--mono)";
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.ipNetwork"), netSel));
+    const startI = FormControls.text(rng ? rng.start_ip : "", I18n.t("ipam.range.startPlaceholder")); startI.style.fontFamily = "var(--mono)";
+    const endI = FormControls.text(rng ? rng.end_ip : "", I18n.t("ipam.range.endPlaceholder")); endI.style.fontFamily = "var(--mono)";
     const hint = document.createElement("div"); hint.className = "form-hint";
-    const refresh = () => { const c = Ip.cidrOf(store.get("ipNetworks", netSel.value)); hint.innerHTML = c ? `Bornes dans : <strong>${c.networkStr}</strong> → <strong>${c.broadcastStr}</strong>` : "Choisissez un réseau au CIDR valide."; };
+    const refresh = () => { const c = Ip.cidrOf(store.get("ipNetworks", netSel.value)); hint.innerHTML = c ? I18n.t("ipam.range.bounds", { network: c.networkStr, broadcast: c.broadcastStr }) : I18n.t("ipam.common.chooseCidrNet"); };
     netSel.addEventListener("change", refresh); refresh();
-    root.appendChild(FormControls.fieldRow("Début de plage", startI));
-    root.appendChild(FormControls.fieldRow("Fin de plage", endI)); root.appendChild(hint);
-    const srvSel = FormControls.select(FormUi.eqOptions(store, "— non désigné —"), rng ? (rng.server_id || "") : "");
-    root.appendChild(FormControls.fieldRow("Serveur DHCP", srvSel, "Facultatif."));
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.range.startField"), startI));
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.range.endField"), endI)); root.appendChild(hint);
+    const srvSel = FormControls.select(FormUi.eqOptions(store, I18n.t("ipam.common.noneDesignated")), rng ? (rng.server_id || "") : "");
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.dhcpServer"), srvSel, I18n.t("ipam.common.optional")));
     const descI = FormControls.textArea(rng ? rng.description : "");
-    root.appendChild(FormControls.fieldRow("Description", descI));
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.description"), descI));
     // validation live : format, fin ≥ début, bornes ∈ CIDR (cross-entité), chevauchement + IP statique (portée V6b).
     const live = new LiveValidation("dhcpRanges", { start_ip: startI, end_ip: endI, network_id: netSel, server_id: srvSel },
       (coll, i) => store.get(coll, i) || null, (coll, f, v) => store.findByField(coll, f, v));
     live.clearOnInput();
 
     host.openModal({
-      title: rng ? "Modifier la plage DHCP" : "Nouvelle plage DHCP",
+      title: rng ? I18n.t("ipam.range.titleEdit") : I18n.t("ipam.range.titleNew"),
       subtitle: rng ? Html.escape(rng.start_ip + " → " + rng.end_ip) : "",
       body: root,
       onSave: async () => {
         const networkId = netSel.value;
         const net = store.get("ipNetworks", networkId);
-        if (!net) { Notify.toast("Choisissez un réseau IP.", "err"); return false; }
+        if (!net) { Notify.toast(I18n.t("ipam.common.pickIpNetwork"), "err"); return false; }
         // « sauf moi-même » : on passe l'id à la validation de portée pour exclure la plage en cours d'édition.
         const record = { id: rng ? rng.id : undefined, network_id: networkId, start_ip: startI.value.trim(), end_ip: endI.value.trim(), server_id: srvSel.value || null };
         // surlignés : format, fin≥début, bornes ∈ CIDR, chevauchement de plage, IP statique dans la plage (V6b).
@@ -165,7 +166,7 @@ export class IpamForms extends RackForms {
         const s = Ip.toInt(record.start_ip)!, e = Ip.toInt(record.end_ip)!;   // valides après la validation live
         const payload = { network_id: networkId, start_ip: Ip.toStr(s), end_ip: Ip.toStr(e), server_id: srvSel.value || null, description: descI.value.trim() };
         if (rng) await store.update("dhcpRanges", rng.id, payload); else await store.create("dhcpRanges", payload);
-        host.setDirty?.(true); Notify.toast(rng ? "Plage DHCP mise à jour" : "Plage DHCP réservée"); onSaved?.(); return true;
+        host.setDirty?.(true); Notify.toast(rng ? I18n.t("ipam.range.updated") : I18n.t("ipam.range.created")); onSaved?.(); return true;
       },
     });
     setTimeout(() => { if (!rng) netSel.focus(); else startI.focus(); }, 30);

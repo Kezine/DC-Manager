@@ -1,14 +1,16 @@
 import { MOUNT_DEPTHS, DEPTH_FRAC } from "../domain/constants";
-import { Labeler } from "../core/Labeler";
-
-const labeler = Labeler.make(MOUNT_DEPTHS, (d) => (d === "none" ? "No-depth" : d));
+import { I18n } from "../i18n/I18n";
 
 /** Profondeurs de montage en rack (full/half/quarter + pseudo « none »). */
 export class Depths {
   static readonly ALL = MOUNT_DEPTHS;
 
-  /** Libellé d'une profondeur enum (« none » → « No-depth » ; inconnu → l'id). */
-  static label(d: string): string { return labeler(d); }
+  /** Libellé d'une profondeur enum (« none » → « No-depth » ; inconnu → l'id). Résolu au rendu (i18n). */
+  static label(d: string): string {
+    const e = MOUNT_DEPTHS.find((x) => x.id === d);
+    if (e) return I18n.t(e.labelKey);
+    return d === "none" ? I18n.t("domain.mountDepth.none") : (d || "");
+  }
 
   /** Part de la profondeur de cage occupée (défaut 1). */
   static frac(d: string): number { return DEPTH_FRAC[d] != null ? DEPTH_FRAC[d] : 1; }

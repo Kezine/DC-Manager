@@ -1,0 +1,72 @@
+/* ============================================================================
+   Domaine `ipam` — FRANÇAIS. Formulaires ADRESSAGE IP (`views/forms/IpamForms.ts`) :
+   réseaux IP (`net`), adresses statiques (`addr`), plages DHCP (`range`) ;
+   `common` = fragments partagés. Agrégé par `../fr.ts`. Voir docs/i18n.md.
+
+   Les infos CIDR (`<strong>…</strong>`) sont insérées via innerHTML ; les valeurs
+   interpolées sont des chaînes d'adresses IP (sûres). */
+export const ipam = {
+  common: {
+    ipNetwork: "Réseau IP",
+    description: "Description",
+    optional: "Facultatif.",
+    dhcpServer: "Serveur DHCP",
+    needIpNetwork: "Créez d'abord un réseau IP.",
+    pickIpNetwork: "Choisissez un réseau IP.",
+    chooseCidrNet: "Choisissez un réseau au CIDR valide.",
+    noneDesignated: "— non désigné —",
+  },
+  net: {
+    labelPlaceholder: "ex. LAN Prod, DMZ…",
+    label: "Label",
+    cidrPrompt: "Sous-réseau IPv4 « adresse/préfixe ».",
+    cidrInvalid: "⚠ CIDR IPv4 invalide.",
+    cidrInfo_one: "Réseau <strong>{{network}}</strong> · diffusion <strong>{{broadcast}}</strong> · {{count}} hôte",
+    cidrInfo_other: "Réseau <strong>{{network}}</strong> · diffusion <strong>{{broadcast}}</strong> · {{count}} hôtes",
+    cidr: "CIDR",
+    cidrPlaceholder: "ex. 10.0.0.0/24",
+    gwPlaceholder: "ex. 10.0.0.1",
+    gateway: "Passerelle",
+    gatewayHint: "Facultatif — doit appartenir au sous-réseau.",
+    dnsPlaceholder: "ex. 10.0.0.2, 1.1.1.1",
+    dnsServers: "Serveurs DNS",
+    dnsHint: "Facultatif — plusieurs séparés par des virgules (résolveurs externes admis).",
+    dhcpHint: "Facultatif — équipement assurant le service DHCP de ce réseau.",
+    titleEdit: "Modifier le réseau IP",
+    titleNew: "Nouveau réseau IP",
+    addrOutOfCidr: "L'adresse {{addr}} ne serait plus dans {{cidr}}.",
+    rangeOutOfCidr: "La plage DHCP {{start}}→{{end}} ne serait plus dans {{cidr}}.",
+    updated: "Réseau IP mis à jour",
+    created: "Réseau IP créé",
+  },
+  addr: {
+    ipPlaceholder: "ex. 10.0.0.10",
+    proposeFree: "Proposer libre",
+    noFree: "Aucune adresse libre.",
+    assignable: "Plage assignable : <strong>{{first}}</strong> → <strong>{{last}}</strong>",
+    ipField: "Adresse IP",
+    hostPlaceholder: "ex. srv-web-01.lan",
+    hostname: "Hostname",
+    noneEquip: "— aucun —",
+    equipment: "Équipement",
+    equipmentHint: "Facultatif — exclusif avec la VM.",
+    noneVm: "— aucune —",
+    vm: "VM",
+    vmHint: "Facultatif — exclusif avec l'équipement.",
+    titleEdit: "Modifier l'adresse IP",
+    titleNew: "Nouvelle adresse IP",
+    updated: "Adresse mise à jour",
+    created: "Adresse attribuée",
+  },
+  range: {
+    startPlaceholder: "ex. 10.0.0.100",
+    endPlaceholder: "ex. 10.0.0.200",
+    bounds: "Bornes dans : <strong>{{network}}</strong> → <strong>{{broadcast}}</strong>",
+    startField: "Début de plage",
+    endField: "Fin de plage",
+    titleEdit: "Modifier la plage DHCP",
+    titleNew: "Nouvelle plage DHCP",
+    updated: "Plage DHCP mise à jour",
+    created: "Plage DHCP réservée",
+  },
+} as const;

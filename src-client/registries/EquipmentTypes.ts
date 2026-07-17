@@ -1,4 +1,5 @@
 import { EQUIPMENT_TYPES, EQUIPMENT_TYPE_DEFAULT, COLOR_PALETTE, EquipmentTypeDef } from "../domain/constants";
+import { I18n } from "../i18n/I18n";
 
 const BY_ID: Record<string, EquipmentTypeDef> = Object.fromEntries(EQUIPMENT_TYPES.map((t) => [t.id, t]));
 // Mémo : EQUIPMENT_TYPES / COLOR_PALETTE sont des constantes → jamais périmé.
@@ -11,7 +12,7 @@ export class EquipmentTypes {
 
   static label(id: string): string {
     const t = BY_ID[id];
-    return t ? t.label : (id || "—");
+    return t ? I18n.t(t.labelKey) : (id || "—");
   }
 
   static icon(id: string): string {

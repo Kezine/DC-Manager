@@ -29,6 +29,13 @@ const mkStorage = () => {
 };
 global.window = { localStorage: mkStorage(), sessionStorage: mkStorage() };
 
+/* -------- localisation : init AVANT tout (lot B2a) --------
+   Les registres de libellés (EquipmentTypes/SpareStatuses/Depths…) résolvent désormais leur libellé
+   via `I18n.t(labelKey)` au POINT DE RENDU. Comme certaines sections testent `.label()` directement,
+   la localisation doit être initialisée ici (locale résolue = "fr", cf. navigator absent → repli). */
+const { I18n } = D("i18n/I18n.js");
+I18n.init();
+
 /* -------- modules sous test -------- */
 const { Store } = D("store/Store.js");
 const { BrowserStorageAdapter } = D("data/BrowserStorageAdapter.js");

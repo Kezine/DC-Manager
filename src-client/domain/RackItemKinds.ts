@@ -1,4 +1,5 @@
 import { RACK_ITEM_KINDS, RackItemKindDef } from "./constants";
+import { I18n } from "../i18n/I18n";
 
 const BY_ID: Record<string, RackItemKindDef> = Object.fromEntries(RACK_ITEM_KINDS.map((k) => [k.id, k]));
 
@@ -12,7 +13,7 @@ export class RackItemKinds {
 
   static label(id: string): string {
     const k = BY_ID[id];
-    return k ? k.label : (id || "—");
+    return k ? I18n.t(k.labelKey) : (id || "—");
   }
 
   static icon(id: string): string {

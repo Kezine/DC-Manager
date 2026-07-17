@@ -12,5 +12,10 @@ import { ui } from "./en/ui";
 import { shell } from "./en/shell";
 import { app } from "./en/app";
 import { graph } from "./en/graph";
+import { lists } from "./en/lists";
+import { forms } from "./en/forms";
+import { cable } from "./en/cable";
+import { ipam } from "./en/ipam";
+import { domain } from "./en/domain";
 
-export const en = { tabs, interventions, ui, shell, app, graph } as const;
+export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain } as const;

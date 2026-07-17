@@ -18,6 +18,7 @@ import { SpareTypes } from "../../domain/SpareTypes";
 import { SpareStatuses } from "../../domain/SpareStatuses";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Depths } from "../../registries/Depths";
+import { I18n } from "../../i18n/I18n";   // lot B2a : options des tables de libellés (labelKey → I18n.t)
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { PortRoles } from "../../registries/PortRoles";
 import { EquipFaces } from "../../registries/EquipFaces";
@@ -309,7 +310,7 @@ export class EquipmentForms extends FormBase {
     const root = document.createElement("div");
     const labelI = FormControls.text(grp ? grp.label : "", "ex. Cœur de réseau, Salle A…");
     root.appendChild(FormControls.fieldRow("Label", labelI));
-    const typeI = FormControls.select(GroupTypes.ALL.map((t) => ({ value: t.id, label: t.label })), grp ? (grp.type || GroupTypes.DEFAULT) : GroupTypes.DEFAULT);
+    const typeI = FormControls.select(GroupTypes.ALL.map((t) => ({ value: t.id, label: I18n.t(t.labelKey) })), grp ? (grp.type || GroupTypes.DEFAULT) : GroupTypes.DEFAULT);
     root.appendChild(FormControls.fieldRow("Type", typeI, "Stack · System (ex. SAN) · General."));
     let color: string | null = grp ? grp.color : null;
     root.appendChild(FormControls.fieldRow("Couleur", ColorPalette.build(color, (c) => { color = c; }), "Identifie le groupe dans les listes et la topologie."));
@@ -340,7 +341,7 @@ export class EquipmentForms extends FormBase {
     const today = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 
     // -- type + identité --
-    const typeI = FormControls.select(SpareTypes.ALL.map((t) => ({ value: t.id, label: t.label })), sp ? sp.type : SpareTypes.DEFAULT);   // <option> = texte seul (pas de SVG) : libellé nu
+    const typeI = FormControls.select(SpareTypes.ALL.map((t) => ({ value: t.id, label: I18n.t(t.labelKey) })), sp ? sp.type : SpareTypes.DEFAULT);   // <option> = texte seul (pas de SVG) : libellé nu
     const nameI = FormControls.text(sp ? sp.name : "", "désignation (sinon dérivée du modèle)");
     root.appendChild(FormUi.row2(FormControls.fieldRow("Type", typeI), FormControls.fieldRow("Désignation", nameI)));
     const brandI = FormControls.text(sp ? sp.brand : "", "ex. Seagate, Cisco, Intel…");
@@ -385,7 +386,7 @@ export class EquipmentForms extends FormBase {
 
     // -- statut + attribution --
     root.appendChild(FormUi.divider("Statut"));
-    const statusI = FormControls.select(SpareStatuses.ALL.map((s) => ({ value: s.id, label: s.label })), sp ? sp.status : SpareStatuses.DEFAULT);
+    const statusI = FormControls.select(SpareStatuses.ALL.map((s) => ({ value: s.id, label: I18n.t(s.labelKey) })), sp ? sp.status : SpareStatuses.DEFAULT);
     root.appendChild(FormControls.fieldRow("Statut", statusI));
     const assignBlock = document.createElement("div");
     const eqOpts = [{ value: "", label: "— libre / non précisé —" }].concat(
@@ -488,7 +489,7 @@ export class EquipmentForms extends FormBase {
     // -- identité --
     const nameI = FormControls.text(eq ? eq.name : "", "ex. sw-core-01");
     const curType = eq ? (eq.type || EQUIPMENT_TYPE_DEFAULT) : EQUIPMENT_TYPE_DEFAULT;
-    let typeOpts = EquipmentTypes.ALL.map((t) => ({ value: t.id, label: t.label }));
+    let typeOpts = EquipmentTypes.ALL.map((t) => ({ value: t.id, label: I18n.t(t.labelKey) }));
     if (curType && !EquipmentTypes.ALL.some((t) => t.id === curType)) typeOpts = [{ value: curType, label: curType + " (hors liste)" }, ...typeOpts];
     const typeI = FormControls.select(typeOpts, curType);
     root.appendChild(FormUi.row2(FormControls.fieldRow("Nom", nameI), FormControls.fieldRow("Type", typeI)));
@@ -783,7 +784,7 @@ export class EquipmentForms extends FormBase {
         const tPill = document.createElement("span"); tPill.className = "pill"; tPill.textContent = tt ? tt.name : "type ?";
         r.appendChild(rPill); r.appendChild(tPill);
       } else {
-        const rl = FormControls.select(PortRoles.ALL.map((x) => ({ value: x.id, label: x.label })), p.role || "data"); rl.className = "sub-input app-select";
+        const rl = FormControls.select(PortRoles.ALL.map((x) => ({ value: x.id, label: I18n.t(x.labelKey) })), p.role || "data"); rl.className = "sub-input app-select";
         const pt = ptOptions(p.port_type_id, p.role); pt.className = "sub-input app-select";
         rl.onchange = () => { p.role = rl.value; const cur: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null; if (cur && ptKind(cur) !== PortRoles.kind(p.role)) p.port_type_id = null; if (PortRoles.kind(p.role) === "power") p.aggregate_id = null; renderPorts(); };
         pt.onchange = () => { p.port_type_id = pt.value || null; renderPorts(); };
