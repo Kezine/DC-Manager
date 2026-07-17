@@ -167,12 +167,20 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   métadonnées + blobs opaques ; schéma `certs.db` à 3 tables + invariant Q5, formats X.509/OpenSSH/
   PKCS#12 validés croisés ssh-keygen/openssl, veilleur d'échéances `cert-expiry`, limites assumées,
   procédures et script de suppression).
+- [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
+  catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
+  reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).
 
 ## Points d'architecture à connaître
 
 - **`EntityRegistry.COLLECTIONS`** est la liste canonique des collections. Toute
   nouvelle collection doit être ajoutée à la carte d'impact (`src-client/sync/RenderImpact.ts`,
   invariant testé) et au schéma serveur (`src-server/src/constants.ts`).
+- **Localisation (i18n)** : le client se traduit via la classe `I18n` (i18next enveloppé,
+  `src-client/i18n/`, catalogues `fr`/`en`). **Toute nouvelle chaîne UI passe par `I18n.t(...)`**
+  (clé ajoutée DES DEUX CÔTÉS `fr.ts`/`en.ts` — test de complétude `test-i18n.js`). Pilote actuel :
+  libellés d'onglets ; le reste migre par lots. `I18n.init()` DOIT précéder toute construction d'UI.
+  Détails et procédure d'ajout : `docs/i18n.md`.
 - **Rendu 3D** : la scène est reconstruite via `build()` (complet) ou des chemins
   incrémentaux (`applyOptionsDiff`, `applyRoomDelta`). L'invalidation passe par
   `DcBase.invalidate3D()` + `markStale()`. Ne JAMAIS sous-invalider (laisserait un

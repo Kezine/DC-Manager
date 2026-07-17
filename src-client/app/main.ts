@@ -18,6 +18,7 @@ import { Html } from "../core/Html";
 import { Download } from "../core/Download";
 import { Prefs } from "../core/Prefs";
 import { Log } from "../core/Log";
+import { I18n } from "../i18n/I18n";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD } from "../domain/constants";
 import { Shell } from "./Shell";
 import type { ShellHost } from "./Shell";
@@ -81,6 +82,9 @@ function applyUiScale(scale: number): void {
 }
 
 async function boot(): Promise<void> {
+  // LOCALISATION : à initialiser AVANT toute construction d'UI (Shell, onglets…) — sinon `I18n.t()` jette. La
+  // préférence de langue est lue depuis localStorage ; une bascule recharge la page (cf. I18n / docs/i18n.md).
+  I18n.init();
   Pwa.register();   // app installable + chargement hors-ligne (service worker) — no-op en file:// / build dev
   await store.init();
   // En mode API, le SERVEUR fait autorité : on N'ENSEMENCE PAS (un newDocument pousserait un /snapshot
@@ -366,8 +370,8 @@ async function boot(): Promise<void> {
   };
 
   // === ONGLETS PRINCIPAUX (ordre de l'original) ===
-  addListTab("equipements", "Équipements", ListConfigs.equipments, {
-    subtitle: "Switchs, serveurs, caissons, modems… avec leurs ports, rôles et agrégats.",
+  addListTab("equipements", I18n.t("tabs.equipements.label"), ListConfigs.equipments, {
+    subtitle: I18n.t("tabs.equipements.subtitle"),
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: "+ Équipement",
     links: ["groupes", "faceimages", "spares"], locate: "equipment",
   });
@@ -394,8 +398,8 @@ async function boot(): Promise<void> {
   }
   // L'onglet VMs expose le lien « Clusters » vers son sous-onglet — MODE API uniquement (masqué en mode fichier/viewer).
   const vmLinks = (REST_MODE && vmSyncClient) ? ["clusters"] : undefined;
-  addListTab("vms", "VMs", ListConfigs.vms, {
-    title: "Équipements virtuels (VMs)", subtitle: "VMs QEMU et conteneurs LXC alimentés par la synchronisation d'un cluster de management (Proxmox). Champs source en lecture ; les enrichissements locaux se font depuis la fiche.",
+  addListTab("vms", I18n.t("tabs.vms.label"), ListConfigs.vms, {
+    title: I18n.t("tabs.vms.title"), subtitle: I18n.t("tabs.vms.subtitle"),
     extraActions: VIEWER ? undefined : vmExtraActions, links: vmLinks,
   });
   // Sous-onglet « Clusters » : vue PERSONNALISÉE (non-liste) enregistrée comme les vues Netmap/Datacenters
@@ -409,8 +413,8 @@ async function boot(): Promise<void> {
     if (!VIEWER) clustersActions.push({ label: "Providers…", title: "Configurer les providers de synchronisation (pool de nœuds, jeton, intervalle)", onClick: () => VmProvidersForm.open(formHost, client, () => { void clustersView?.reload(); }) });
     clustersActions.push({ label: "Actualiser", title: "Recharger l'état des clusters (GET /vm/status)", onClick: () => { void clustersView?.reload(); } });
     const clustersContainer = shell.addView({
-      name: "clusters", label: "Clusters", kind: "secondary", parent: "vms",
-      title: "Clusters", subtitle: "État par provider des clusters synchronisés (nœuds, métriques, quorum) et de la synchronisation.",
+      name: "clusters", label: I18n.t("tabs.clusters.label"), kind: "secondary", parent: "vms",
+      title: I18n.t("tabs.clusters.label"), subtitle: I18n.t("tabs.clusters.subtitle"),
       extraActions: clustersActions,
       onShow: () => clustersView?.show(),
     });
@@ -419,24 +423,24 @@ async function boot(): Promise<void> {
       openEquipmentDetail: (id) => Forms.equipmentDetail(store, formHost, id, () => shell.refreshActive()),
     });
   }
-  addListTab("racks", "Racks", ListConfigs.racks, {
-    subtitle: "Baies : emplacement, taille (U), profondeur, faces, portes et capots. « ▦ Contenu » pour monter les équipements dans les U.",
+  addListTab("racks", I18n.t("tabs.racks.label"), ListConfigs.racks, {
+    subtitle: I18n.t("tabs.racks.subtitle"),
     form: (id, done) => Forms.rack(store, formHost, id, done), addLabel: "+ Rack", locate: "rack", manage: true,
   });
-  addListTab("cables", "Câbles", ListConfigs.cables, {
-    subtitle: "Lien nommé entre deux ports — type compatible avec les ports, réseau optionnel.",
+  addListTab("cables", I18n.t("tabs.cables.label"), ListConfigs.cables, {
+    subtitle: I18n.t("tabs.cables.subtitle"),
     form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: "+ Câble",
     links: ["reseaux", "porttypes", "cabletypes", "faisceaux"], locate: "cable",
   });
-  addListTab("ipam", "IPAM", ListConfigs.ipNetworks, {
-    title: "IPAM — Réseaux IP", subtitle: "Registre d'attribution d'IP statiques. Déclarez des sous-réseaux (CIDR IPv4), puis attribuez-y des adresses et réservez des plages DHCP.",
+  addListTab("ipam", I18n.t("tabs.ipam.label"), ListConfigs.ipNetworks, {
+    title: I18n.t("tabs.ipam.title"), subtitle: I18n.t("tabs.ipam.subtitle"),
     form: (id, done) => Forms.ipNetwork(store, formHost, id, done), addLabel: "+ Réseau IP",
     links: ["ipaddresses", "dhcpranges"],
   });
 
-  // Netmap (GraphView)
+  // Netmap (GraphView) — « Netmap » est un NOM DE FONCTIONNALITÉ, conservé tel quel dans les deux langues (cf. catalogues).
   let graph: GraphView;
-  const graphContainer = shell.addView({ name: "graph", label: "Netmap", subtitle: "Rendu filtré par équipements, réseaux et/ou types de port. Zoom, recentrage, surbrillance.", onShow: () => graph.show() });
+  const graphContainer = shell.addView({ name: "graph", label: I18n.t("tabs.graph.label"), subtitle: I18n.t("tabs.graph.subtitle"), onShow: () => graph.show() });
   const stage = document.createElement("div");
   stage.className = "graph-stage";
   stage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
@@ -459,7 +463,7 @@ async function boot(): Promise<void> {
 
   // Datacenters (vue 3D — tranche-pilote : caméra orbitale + salle/baies)
   let dcView: DatacenterView;
-  const dcContainer = shell.addView({ name: "datacenter", label: "Datacenters", subtitle: "Disposition physique des salles : baies en 3D. Glisser = déplacer · Maj/clic droit = orbiter · molette = zoom.", links: ["salles", "etages", "sites"], onShow: () => dcView.show() });
+  const dcContainer = shell.addView({ name: "datacenter", label: I18n.t("tabs.datacenter.label"), subtitle: I18n.t("tabs.datacenter.subtitle"), links: ["salles", "etages", "sites"], onShow: () => dcView.show() });
   const dcStage = document.createElement("div");
   dcStage.className = "dc-stage";
   dcStage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
@@ -508,12 +512,12 @@ async function boot(): Promise<void> {
   formHost.locate = (kind, id, ret) => { modal.close(); shell.switchView("datacenter"); dcView.locate(kind, id); dcView.setReturnAction(ret || null); };
 
   // === SOUS-VUES (atteintes par les liens d'en-tête ; surlignent leur onglet parent) ===
-  addListTab("groupes", "Groupes", ListConfigs.groups, {
-    subtitle: "Regroupements logiques d'équipements : label + couleur + description.",
+  addListTab("groupes", I18n.t("tabs.groupes.label"), ListConfigs.groups, {
+    subtitle: I18n.t("tabs.groupes.subtitle"),
     form: (id, done) => Forms.group(store, formHost, id, done), addLabel: "+ Groupe", kind: "secondary", parent: "equipements",
   });
-  addListTab("spares", "Spares", ListConfigs.spares, {
-    subtitle: "Inventaire de pièces de rechange (HDD · SSD · transceiver · autre) : suivi unitaire, statut, attribution.",
+  addListTab("spares", I18n.t("tabs.spares.label"), ListConfigs.spares, {
+    subtitle: I18n.t("tabs.spares.subtitle"),
     form: (id, done) => Forms.spare(store, formHost, id, done), addLabel: "+ Spare", kind: "secondary", parent: "equipements",
   });
   // Images de façade : bibliothèque hors modèle (ImageStore) → câblage dédié (CRUD via imageStore)
@@ -521,7 +525,7 @@ async function boot(): Promise<void> {
     const cfg = ListConfigs.faceImages(store);
     let view: ListView | null = null;
     const container = shell.addView({
-      name: "faceimages", label: "Images de façade", subtitle: "Bibliothèque d'images de façade (JPEG/PNG/WebP) partagées par référence. Stockées hors document (IndexedDB).",
+      name: "faceimages", label: I18n.t("tabs.faceimages.label"), subtitle: I18n.t("tabs.faceimages.subtitle"),
       kind: "secondary", parent: "equipements", links: [],
       count: () => imageStore.count(),
       extraActions: [
@@ -554,32 +558,32 @@ async function boot(): Promise<void> {
       },
     });
   }
-  addListTab("reseaux", "Réseaux", ListConfigs.networks, {
-    subtitle: "Réseaux logiques (VLAN…) ou circuits d'alimentation : label, couleur, type.",
+  addListTab("reseaux", I18n.t("tabs.reseaux.label"), ListConfigs.networks, {
+    subtitle: I18n.t("tabs.reseaux.subtitle"),
     form: (id, done) => Forms.network(store, formHost, id, done), addLabel: "+ Réseau", kind: "secondary", parent: "cables",
   });
-  addListTab("faisceaux", "Faisceaux", ListConfigs.cableBundles, {
-    title: "Faisceaux / trunks", subtitle: "Câbles MULTI-FIBRES entre 2 patch panels, créés à l'avance. Les PORTS des patchs piochent les fibres ; la route du trunk porte son tracé 2D/3D.",
+  addListTab("faisceaux", I18n.t("tabs.faisceaux.label"), ListConfigs.cableBundles, {
+    title: I18n.t("tabs.faisceaux.title"), subtitle: I18n.t("tabs.faisceaux.subtitle"),
     form: (id, done) => Forms.cableBundle(store, formHost, id, done), addLabel: "+ Faisceau", kind: "secondary", parent: "cables",
   });
-  addListTab("porttypes", "Types de port", ListConfigs.portTypes, {
-    title: "Types de port / liaison", subtitle: "Catalogue STANDARDISÉ (lecture seule). La « famille » lie ports et câbles compatibles ; le « connecteur » est la forme physique.",
+  addListTab("porttypes", I18n.t("tabs.porttypes.label"), ListConfigs.portTypes, {
+    title: I18n.t("tabs.porttypes.title"), subtitle: I18n.t("tabs.porttypes.subtitle"),
     kind: "secondary", parent: "cables",
   });
-  addListTab("cabletypes", "Types de câble", ListConfigs.cableTypes, {
-    subtitle: "Catalogue STANDARDISÉ (lecture seule). Rattaché à une « famille » de port.",
+  addListTab("cabletypes", I18n.t("tabs.cabletypes.label"), ListConfigs.cableTypes, {
+    subtitle: I18n.t("tabs.cabletypes.subtitle"),
     kind: "secondary", parent: "cables",
   });
-  addListTab("ipaddresses", "Adresses IP", ListConfigs.ipAddresses, {
-    title: "Adresses IP statiques", subtitle: "Une ligne = une IP attribuée. Liée à un réseau, optionnellement à un équipement. Unicité garantie.",
+  addListTab("ipaddresses", I18n.t("tabs.ipaddresses.label"), ListConfigs.ipAddresses, {
+    title: I18n.t("tabs.ipaddresses.title"), subtitle: I18n.t("tabs.ipaddresses.subtitle"),
     form: (id, done) => Forms.ipAddress(store, formHost, id, done), addLabel: "+ Adresse IP", kind: "secondary", parent: "ipam",
   });
-  addListTab("salles", "Salles", ListConfigs.datacenters, {
-    title: "Salles (datacenters)", subtitle: "Grille au sol d'une salle : dimensions + maille. Placez-y des baies (onglet Racks → champ Salle) pour les voir en 3D.",
+  addListTab("salles", I18n.t("tabs.salles.label"), ListConfigs.datacenters, {
+    title: I18n.t("tabs.salles.title"), subtitle: I18n.t("tabs.salles.subtitle"),
     form: (id, done) => Forms.datacenter(store, formHost, id, done), addLabel: "+ Salle", kind: "secondary", parent: "datacenter",
   });
-  addListTab("sites", "Sites", ListConfigs.sites, {
-    title: "Sites / bâtiments", subtitle: "Nom + adresse. La suppression décommissionne le site (salles & étages supprimés, baies → non placé, liaisons logiques préservées).",
+  addListTab("sites", I18n.t("tabs.sites.label"), ListConfigs.sites, {
+    title: I18n.t("tabs.sites.title"), subtitle: I18n.t("tabs.sites.subtitle"),
     form: (id, done) => Forms.site(store, formHost, id, done), addLabel: "+ Site", kind: "secondary", parent: "datacenter",
     onDel: async (id, reRender) => {
       const s: any = store.get("sites", id);
@@ -588,8 +592,8 @@ async function boot(): Promise<void> {
       await store.removeSite(id); Notify.toast("Site décommissionné (liaisons logiques préservées)"); reRender();
     },
   });
-  addListTab("etages", "Étages", ListConfigs.floors, {
-    title: "Plans d'étage", subtitle: "Dimensions, maille et ancrage d'un étage (bâtiment + niveau). « + Étage » : choisir le bâtiment et le niveau.",
+  addListTab("etages", I18n.t("tabs.etages.label"), ListConfigs.floors, {
+    title: I18n.t("tabs.etages.title"), subtitle: I18n.t("tabs.etages.subtitle"),
     form: (id) => { const f: any = id ? store.get("floors", id) : null; Forms.floor(store, formHost, f ? (f.location || "") : "", f ? String(f.floor || "") : "", {}); }, addLabel: "+ Étage", kind: "secondary", parent: "datacenter",
     onAdd: () => { if (!store.sitesSorted().length) { Notify.toast("Créez d'abord un site / bâtiment (onglet Sites)", "err"); return; } Forms.floor(store, formHost, "", "", { pick: true }); },
     onDel: async (id, reRender) => {
@@ -599,8 +603,8 @@ async function boot(): Promise<void> {
       await store.remove("floors", id); Notify.toast("Plan d'étage supprimé"); reRender();
     },
   });
-  addListTab("dhcpranges", "Plages DHCP", ListConfigs.dhcpRanges, {
-    title: "Plages DHCP réservées", subtitle: "Plages (début → fin) attribuées à un serveur DHCP. Pas de chevauchement avec une autre plage ni une IP statique du réseau.",
+  addListTab("dhcpranges", I18n.t("tabs.dhcpranges.label"), ListConfigs.dhcpRanges, {
+    title: I18n.t("tabs.dhcpranges.title"), subtitle: I18n.t("tabs.dhcpranges.subtitle"),
     form: (id, done) => Forms.dhcpRange(store, formHost, id, done), addLabel: "+ Plage DHCP", kind: "secondary", parent: "ipam",
   });
   // CONTACTS : carnet des destinataires des NOTIFICATIONS (email/sms), tenu PAR DOCUMENT. Le module serveur
@@ -608,8 +612,8 @@ async function boot(): Promise<void> {
   // SOUS-PAGE du groupe « Paramètres » (S6, cf. cadrage notifications 2026-07-14 §3) : vraie vue `kind:"secondary"`
   // rattachée au groupe `parametres`, atteinte par son menu déroulant (et bookmarkable via #contacts). Décision Q4 :
   // contacts PAR DOCUMENT.
-  addListTab("contacts", "Contacts", ListConfigs.contacts, {
-    title: "Contacts (notifications)", subtitle: "Carnet des destinataires des notifications (email / sms). Nom requis ; e-mail et téléphone facultatifs (validés en douceur). Référencés par le routage notify (référence souple contact_id, hors document).",
+  addListTab("contacts", I18n.t("tabs.contacts.label"), ListConfigs.contacts, {
+    title: I18n.t("tabs.contacts.title"), subtitle: I18n.t("tabs.contacts.subtitle"),
     form: (id, done) => Forms.contact(store, formHost, id, done), addLabel: "+ Contact",
     kind: "secondary", parent: "parametres",
   });
@@ -620,8 +624,8 @@ async function boot(): Promise<void> {
   // AMOVIBLE : retirer S7 = supprimer NotificationsAdminView + NotifyClient + ces lignes).
   let notificationsView: NotificationsAdminView;
   const notifyContainer = shell.addView({
-    name: "notifications", label: "Notifications", kind: "secondary", parent: "parametres",
-    title: "Notifications", subtitle: "Administration du service de notifications : canaux d'envoi, abonnements par type d'événement, intervalles de rappel, alertes actives, historique et tests d'envoi.",
+    name: "notifications", label: I18n.t("tabs.notifications.label"), kind: "secondary", parent: "parametres",
+    title: I18n.t("tabs.notifications.label"), subtitle: I18n.t("tabs.notifications.subtitle"),
     onShow: () => notificationsView.show(),
   });
   notificationsView = new NotificationsAdminView(store, notifyContainer, notifyClient, formHost);   // formulaires dans LA modale de l'app (principe n°11)
@@ -634,14 +638,14 @@ async function boot(): Promise<void> {
   // retirer C6 = supprimer CertsAdminView + CertsClient + CertsFormat + ces lignes).
   let certsView: CertsAdminView;
   const certsContainer = shell.addView({
-    name: "certificats", label: "Certificats", kind: "primary",
-    title: "Certificats", subtitle: "PKI interne (zéro-connaissance) : clé maître, autorités et certificats X.509/SSH, émission, exports, révocation. La cryptographie se fait dans le navigateur — le serveur ne voit jamais la clé maître.",
+    name: "certificats", label: I18n.t("tabs.certificats.label"), kind: "primary",
+    title: I18n.t("tabs.certificats.label"), subtitle: I18n.t("tabs.certificats.subtitle"),
     onShow: () => certsView.show(),
   });
   certsView = new CertsAdminView(certsContainer, certsClient, formHost);   // formulaires dans LA modale de l'app (principe n°11)
   // GROUPE « Paramètres » : onglet TOUJOURS DÉROULANT (jamais une vue) regroupant les pages rarement visitées.
   // EN DERNIER (après les onglets métier ET l'onglet Certificats).
-  shell.addGroup({ name: "parametres", label: "Paramètres", kind: "group", children: ["contacts", "notifications"] });
+  shell.addGroup({ name: "parametres", label: I18n.t("tabs.parametres.label"), kind: "group", children: ["contacts", "notifications"] });
 
   shell.build();
   shell.setDataSource(REST_MODE ? "api" : "local");   // position du toggle = mode EFFECTIF

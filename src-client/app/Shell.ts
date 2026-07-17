@@ -74,6 +74,7 @@ import { Prefs } from "../core/Prefs";
 import { Html } from "../core/Html";
 import { Icons } from "../ui/Icons";
 import { FieldFacet } from "../core/FieldFacet";
+import { I18n, type LocalePreference } from "../i18n/I18n";
 import { ShellNav } from "./ShellNav";
 import type { ShellNavView, ShellNavLookup } from "./ShellNav";
 
@@ -293,6 +294,19 @@ export class Shell {
     FieldFacet.MAX_RESULTS_OPTIONS.forEach((n) => { const op = document.createElement("option"); op.value = String(n); op.textContent = String(n); this.acMaxSel.appendChild(op); });
     this.acMaxSel.onchange = () => this.host.onAutocompleteMax?.(parseInt(this.acMaxSel.value, 10));
     acRow.append(acLbl, this.acMaxSel); app.appendChild(acRow);
+    // -- Langue / Language : préférence de LOCALISATION (auto = langue du navigateur ; repli français). Libellés
+    //    BILINGUES (le panneau réglages n'est pas encore localisé) pour rester compréhensibles quelle que soit la
+    //    langue active. Une bascule PERSISTE la préférence puis RECHARGE l'app (cf. I18n.setPreference / docs/i18n.md). --
+    const lang = section("Langue / Language");
+    const langSel = document.createElement("select"); langSel.className = "settings-row-select"; langSel.style.width = "100%";
+    // valeur → libellé affiché ; « auto » suit navigator.language (cf. I18n.resolve).
+    ([["auto", "Auto (navigateur)"], ["fr", "Français"], ["en", "English"]] as Array<[LocalePreference, string]>).forEach(([value, label]) => {
+      const op = document.createElement("option"); op.value = value; op.textContent = label; langSel.appendChild(op);
+    });
+    langSel.value = I18n.preference;   // reflète la préférence PERSISTÉE (pas la locale effective) : « auto » reste « auto »
+    langSel.onchange = () => I18n.setPreference(langSel.value as LocalePreference);
+    lang.appendChild(langSel);
+    const langNote = document.createElement("div"); langNote.className = "settings-row-note"; langNote.textContent = "Auto suit la langue du navigateur (repli : français). Changer de langue recharge l'application. / Auto follows the browser language (fallback: French). Changing the language reloads the app."; lang.appendChild(langNote);
     // -- Affichage 3D --
     const v3d = section("Affichage 3D");
     const resetBtn = document.createElement("button"); resetBtn.type = "button"; resetBtn.className = "btn btn-ghost btn-sm"; resetBtn.style.width = "100%"; resetBtn.textContent = "Réinitialiser les préférences d'affichage";

@@ -18,6 +18,7 @@ const DOMAINS = [
   "./test-views-tools.js",       // vues & outils (hôtes injectés)
   "./test-sync.js",              // rechargement granulaire REST
   "./test-shared-validation.js", // code partagé front/back
+  "./test-i18n.js",              // localisation : complétude des catalogues fr ⇄ en
   "./test-certs.js",             // certificats : crypto client pure (PkiCrypto/PkiSession)
   "./test-server.js",            // serveur (ApiRules, SQLite réel, protocole REST)
 ];
