@@ -1652,20 +1652,42 @@ module.exports = async () => {
       ck(fs.existsSync(path.join(dir, "certs.db")), "certs.db matérialisé dans le dossier injecté");
       raw = new Sqlite(path.join(dir, "certs.db"));
       const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
-      for (const t of ["pki_documents", "certificates", "certificate_sans"]) ck(tables.includes(t), "schéma : table " + t + " créée");
+      for (const t of ["pki_documents", "pki_envelope_history", "certificates", "certificate_sans"]) ck(tables.includes(t), "schéma : table " + t + " créée");
 
-      // -- PKI : initialisation UNIQUE (jamais d'écrasement — clé maître irremplaçable). --
+      // -- PKI : initialisation UNIQUE (jamais d'écrasement — ré-init tirerait une nouvelle DEK). --
       ck.eq(db.pkiParams("doc-A"), null, "PKI non initialisée → null (le client enchaîne sur l'initialisation)");
-      const pkiOk = db.initPki("doc-A", { kdf_version: "v1", kdf_salt: "c2VsLWFsZWF0b2lyZQ==", kdf_iters: 600000, keycheck_enc: "v1:aXY=:Y2hlY2s=" });
+      const pkiOk = db.initPki("doc-A", { kdf_version: "v1", kdf_salt: "c2VsLWFsZWF0b2lyZQ==", kdf_iters: 600000, wrapped_dek: "v1:aXY=:d3JhcHBlZA==" });
       ck.eq(pkiOk, true, "initPki : première initialisation acceptée");
       const params = db.pkiParams("doc-A");
-      ck(params.kdf_version === "v1" && params.kdf_iters === 600000 && params.kdf_salt === "c2VsLWFsZWF0b2lyZQ==", "pkiParams : aller-retour fidèle (sel/itérations/version)");
-      ck.eq(db.initPki("doc-A", { kdf_version: "v1", kdf_salt: "YXV0cmU=", kdf_iters: 700000, keycheck_enc: "x" }), false, "ré-initialisation REFUSÉE (rendrait les clés stockées indéchiffrables)");
+      ck(params.kdf_version === "v1" && params.kdf_iters === 600000 && params.kdf_salt === "c2VsLWFsZWF0b2lyZQ==" && params.wrapped_dek === "v1:aXY=:d3JhcHBlZA==", "pkiParams : aller-retour fidèle (sel/itérations/version/wrapped_dek)");
+      ck.eq(db.initPki("doc-A", { kdf_version: "v1", kdf_salt: "YXV0cmU=", kdf_iters: 700000, wrapped_dek: "v1:x:y" }), false, "ré-initialisation REFUSÉE (rendrait les clés stockées indéchiffrables)");
       ck.eq(db.pkiParams("doc-A").kdf_salt, "c2VsLWFsZWF0b2lyZQ==", "…paramètres d'origine INTACTS");
-      // Validation des paramètres (plancher Q1, base64, version connue).
+
+      // -- CHANGEMENT DE PHRASE (rekeyPki) : verrou optimiste (prev) + historisation (audit 2026-07-17). --
+      ck.eq(db.rekeyPki("doc-Z", { kdf_version: "v1", kdf_salt: "eA==", kdf_iters: 600000, wrapped_dek: "v1:a:b", prev_wrapped_dek: "v1:a:b" }), "missing", "rekeyPki sur PKI vierge → 'missing' (404 côté route)");
+      // prev PÉRIMÉ (≠ enveloppe courante) → 'conflict', RIEN n'est écrit (ni ligne ni historique).
+      ck.eq(db.rekeyPki("doc-A", { kdf_version: "v1", kdf_salt: "bm91dmVhdQ==", kdf_iters: 800000, wrapped_dek: "v1:bmV3:ZW52ZWxvcHBl", prev_wrapped_dek: "v1:cGVyaW1l:ZQ==" }), "conflict", "rekeyPki avec prev périmé → 'conflict' (verrou optimiste, 409 côté route)");
+      ck.eq(db.pkiParams("doc-A").wrapped_dek, "v1:aXY=:d3JhcHBlZA==", "…enveloppe courante INTACTE après le conflit");
+      ck.eq(raw.prepare("SELECT count(*) AS n FROM pki_envelope_history WHERE doc_id = 'doc-A'").get().n, 0, "…et AUCUNE ligne d'historique écrite sur un conflit");
+      // prev CORRECT → 'ok' : nouvelle enveloppe persistée, l'ANCIENNE archivée (filet de récupération).
+      ck.eq(db.rekeyPki("doc-A", { kdf_version: "v1", kdf_salt: "bm91dmVhdQ==", kdf_iters: 800000, wrapped_dek: "v1:bmV3:ZW52ZWxvcHBl", prev_wrapped_dek: "v1:aXY=:d3JhcHBlZA==" }), "ok", "rekeyPki avec prev correct → 'ok'");
+      const rek = db.pkiParams("doc-A");
+      ck(rek.kdf_salt === "bm91dmVhdQ==" && rek.kdf_iters === 800000 && rek.wrapped_dek === "v1:bmV3:ZW52ZWxvcHBl", "…nouveaux sel/itérations/wrapped_dek persistés (nouvelle enveloppe)");
+      const hist = raw.prepare("SELECT * FROM pki_envelope_history WHERE doc_id = 'doc-A' ORDER BY rowid").all();
+      ck.eq(hist.length, 1, "…l'ancienne enveloppe est ARCHIVÉE (1 ligne d'historique)");
+      ck(hist[0].wrapped_dek === "v1:aXY=:d3JhcHBlZA==" && hist[0].kdf_salt === "c2VsLWFsZWF0b2lyZQ==" && hist[0].kdf_iters === 600000 && !!hist[0].archived_date, "…tuple archivé = l'ANCIEN (enveloppe + sel + itérations + horodatage)");
+      // Second changement (prev = l'enveloppe désormais courante) → l'historique s'ACCUMULE (append-only).
+      ck.eq(db.rekeyPki("doc-A", { kdf_version: "v1", kdf_salt: "dHJvaXM=", kdf_iters: 700000, wrapped_dek: "v1:djM=:ZW52My4=", prev_wrapped_dek: "v1:bmV3:ZW52ZWxvcHBl" }), "ok", "second rekey (prev à jour) → 'ok'");
+      ck.eq(raw.prepare("SELECT count(*) AS n FROM pki_envelope_history WHERE doc_id = 'doc-A'").get().n, 2, "…2 lignes d'historique après 2 changements (append-only, jamais purgé)");
+      // prev_wrapped_dek MANQUANT → grief groupé (validation parseRekeyParams).
+      let rekeyIssues = null;
+      try { db.rekeyPki("doc-A", { kdf_version: "v1", kdf_salt: "eA==", kdf_iters: 600000, wrapped_dek: "v1:a:b" }); } catch (e) { if (e instanceof CertsConfigError) rekeyIssues = e.issues; }
+      ck(!!rekeyIssues && rekeyIssues.some((i) => /prev_wrapped_dek/.test(i)), "rekey sans prev_wrapped_dek → grief explicite (verrou optimiste obligatoire)");
+
+      // Validation des paramètres (plancher Q1, base64, version connue) — partagée init/rekey.
       let pkiIssues = null;
-      try { db.initPki("doc-B", { kdf_version: "v2", kdf_salt: "pas du base64 !", kdf_iters: 1000, keycheck_enc: "" }); } catch (e) { if (e instanceof CertsConfigError) pkiIssues = e.issues; }
-      ck(!!pkiIssues && pkiIssues.some((i) => /kdf_version/.test(i)) && pkiIssues.some((i) => /600000/.test(i)) && pkiIssues.some((i) => /kdf_salt/.test(i)), "paramètres PKI invalides → griefs groupés (version, plancher d'itérations, sel)");
+      try { db.initPki("doc-B", { kdf_version: "v2", kdf_salt: "pas du base64 !", kdf_iters: 1000, wrapped_dek: "" }); } catch (e) { if (e instanceof CertsConfigError) pkiIssues = e.issues; }
+      ck(!!pkiIssues && pkiIssues.some((i) => /kdf_version/.test(i)) && pkiIssues.some((i) => /600000/.test(i)) && pkiIssues.some((i) => /kdf_salt/.test(i)) && pkiIssues.some((i) => /wrapped_dek/.test(i)), "paramètres PKI invalides → griefs groupés (version, plancher d'itérations, sel, wrapped_dek)");
 
       // -- CRÉATION d'une racine (métadonnées + SAN + clé chiffrée client). --
       const rootDetail = db.save("doc-A", "ca-1", {

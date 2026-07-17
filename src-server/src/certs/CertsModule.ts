@@ -20,16 +20,20 @@ import { CertExpiryWatcher, type CertProblemReporter } from "./CertExpiryWatcher
    (dérivation PBKDF2 de la clé maître, chiffrement AES-GCM des clés privées,
    signature X.509/SSH) ; le serveur stocke des MÉTADONNÉES (sujets, échéances,
    empreintes — matière du suivi d'expiration C7) et des blobs opaques
-   (`key_enc`, `keycheck_enc`) qu'il est INCAPABLE de déchiffrer. Conséquence
-   assumée (documentée) : clé maître perdue = clés privées perdues.
+   (`key_enc`, `wrapped_dek`) qu'il est INCAPABLE de déchiffrer. Conséquence
+   assumée (documentée) : phrase maître perdue = clés privées perdues.
 
    Routes (montées sous la garde d'accès de l'API, mergeParams pour :docId) —
-   ⚠ /pki est déclarée AVANT /:id (sinon le segment « pki » serait lu comme id) :
-   - GET    /documents/:docId/certs         → liste métadonnées + SAN (JAMAIS key_enc — Q5)
-   - GET    /documents/:docId/certs/pki     → paramètres KDF + keycheck (dérivation côté client)
-   - PUT    /documents/:docId/certs/pki     → initialisation UNIQUE (409 si déjà initialisée :
-                                              ré-initialiser rendrait tout indéchiffrable)
-   - GET    /documents/:docId/certs/:id     → détail unitaire, key_enc INCLUS (Q5)
+   ⚠ /pki et /pki/rekey sont déclarées AVANT /:id (sinon « pki » serait lu comme id) :
+   - GET    /documents/:docId/certs          → liste métadonnées + SAN (JAMAIS key_enc — Q5)
+   - GET    /documents/:docId/certs/pki      → paramètres KDF + wrapped_dek (dérivation côté client)
+   - PUT    /documents/:docId/certs/pki      → initialisation UNIQUE (409 si déjà initialisée :
+                                               ré-initialiser rendrait tout indéchiffrable)
+   - PUT    /documents/:docId/certs/pki/rekey → changer la phrase maître (ré-emballe le seul
+                                               wrapped_dek ; AUCUN key_enc touché ; 404 si vierge,
+                                               409 conflict si l'enveloppe a changé entre-temps ;
+                                               l'ancienne enveloppe est ARCHIVÉE — récupérable)
+   - GET    /documents/:docId/certs/:id      → détail unitaire, key_enc INCLUS (Q5)
    - PUT    /documents/:docId/certs/:id     → créer/mettre à jour (métadonnées validées,
                                               blobs opaques ; key_enc absent = conservé)
    - DELETE /documents/:docId/certs/:id     → suppression (409 si des dérivés existent)
@@ -135,9 +139,10 @@ export class CertsModule {
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
         if (!ctx.db.initPki(ctx.docId, body)) {
-          // Écrasement REFUSÉ : changer le sel/keycheck = changer de clé maître = toutes les
-          // clés stockées deviennent illisibles. Aucune ré-initialisation en v1 (irréversible).
-          res.status(409).json({ error: "PKI déjà initialisée pour ce document — la ré-initialisation est refusée (elle rendrait les clés stockées indéchiffrables)" });
+          // Écrasement REFUSÉ : ré-initialiser tirerait une NOUVELLE DEK = toutes les clés
+          // stockées deviennent illisibles. Aucune ré-initialisation (irréversible). Le
+          // CHANGEMENT de phrase passe par /pki/rekey (il CONSERVE la DEK → key_enc intacts).
+          res.status(409).json({ error: "PKI déjà initialisée pour ce document — la ré-initialisation est refusée (elle rendrait les clés stockées indéchiffrables). Pour changer la phrase maître, utilisez /pki/rekey." });
           return;
         }
         res.json({ ok: true });
@@ -145,6 +150,35 @@ export class CertsModule {
         if (e instanceof CertsConfigError) { res.status(400).json({ error: "paramètres invalides", issues: e.issues }); return; }
         this.log.error("PUT /certs/pki : échec", ctx.docId, e instanceof Error ? e.message : String(e));
         res.status(500).json({ error: "initialisation en échec" });
+      }
+    });
+
+    // CHANGEMENT DE PHRASE MAÎTRE (déclarée AVANT /:id — « pki » n'est pas un id). Ne réécrit
+    // que les paramètres KDF + le wrapped_dek (DEK ré-emballée sous la nouvelle KEK) : aucun
+    // key_enc n'est touché. Le serveur ne pouvant PAS vérifier que le nouveau blob emballe la
+    // même DEK (zéro-connaissance), l'opération est encadrée par un VERROU OPTIMISTE
+    // (prev_wrapped_dek → 409 conflict si le coffre a changé entre-temps) et par
+    // l'HISTORISATION de l'ancienne enveloppe (récupérable — cf. CertsDb.rekeyPki).
+    router.put("/pki/rekey", (req, res) => {
+      const ctx = this.context(req, res); if (!ctx) return;
+      const body: any = (req.body && typeof req.body === "object") ? req.body : {};
+      try {
+        const verdict = ctx.db.rekeyPki(ctx.docId, body);
+        if (verdict === "missing") {
+          res.status(404).json({ error: "PKI non initialisée pour ce document — rien à re-chiffrer (initialisez-la d'abord)" });
+          return;
+        }
+        if (verdict === "conflict") {
+          // L'enveloppe a changé depuis la lecture du client (autre changement de phrase concurrent) :
+          // écrire par-dessus perdrait silencieusement l'autre changement. Le client recharge et réessaie.
+          res.status(409).json({ error: "le coffre a été modifié entre-temps (autre changement de phrase ?) — rechargez la page puis réessayez", code: "conflict" });
+          return;
+        }
+        res.json({ ok: true });
+      } catch (e) {
+        if (e instanceof CertsConfigError) { res.status(400).json({ error: "paramètres invalides", issues: e.issues }); return; }
+        this.log.error("PUT /certs/pki/rekey : échec", ctx.docId, e instanceof Error ? e.message : String(e));
+        res.status(500).json({ error: "changement de phrase en échec" });
       }
     });
 
