@@ -16,6 +16,8 @@ import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip } from "../ui";
 import { Html } from "../core/Html";
+import { TargetSearch } from "../core/TargetSearch";
+import { Schema } from "../../src-shared/Schema";
 import { Download } from "../core/Download";
 import { Prefs } from "../core/Prefs";
 import { Log } from "../core/Log";
@@ -646,10 +648,22 @@ async function boot(): Promise<void> {
   };
   const targetCollection = (kind: string): string => (kind === "equipment" ? "equipments" : kind === "vm" ? "vms" : "spares");
   const interventionTargets: InterventionTargetSource = {
-    list: (kind) => store.all(targetCollection(kind)).slice()
-      .map((r: any) => ({ id: r.id, label: targetLabel(kind, r) }))
-      .sort((a, b) => a.label.localeCompare(b.label)),
     labelOf: (kind, id) => { const r: any = store.get(targetCollection(kind), id); return r ? targetLabel(kind, r) : null; },
+    // Recherche UNIFIÉE des cibles liables : concatène les 3 familles en items {kind,id,label} puis délègue le
+    // tri de pertinence (préfixe avant inclusion), le plafond et la dédup (cibles déjà liées) au module pur
+    // TargetSearch, avec la normalisation PARTAGÉE Schema.normSearch (insensibilité casse/accents).
+    search: (query, excluded) => {
+      const families: ReadonlyArray<readonly [string, string]> = [["equipment", "equipments"], ["vm", "vms"], ["spare", "spares"]];
+      const items = families.flatMap(([kind, coll]) => store.all(coll).map((r: any) => ({ kind, id: r.id, label: targetLabel(kind, r) })));
+      return TargetSearch.rank(items, query, { normalize: Schema.normSearch, limit: 12, excluded });
+    },
+    // Ouvre la FICHE DE DÉTAIL existante de la cible (equipment/vm/spare) via la machinerie des fiches. Le
+    // retour-auto à la modale de détail de l'intervention passe par l'option GÉNÉRIQUE onClose d'openModal
+    // (appelée à TOUTE fermeture) : un hôte enveloppant l'injecte dans l'ouverture de la fiche (overlay UNIQUE).
+    openTargetDetail: (kind, id, onClosed) => {
+      const wrappedHost: FormHost = { ...formHost, openModal: (o) => modal.open({ ...o, onClose: onClosed }) };
+      Forms.detail(store, wrappedHost, targetCollection(kind), id, () => shell.refreshActive());
+    },
   };
   let interventionsView: InterventionsAdminView;
   const interventionsContainer = shell.addView({

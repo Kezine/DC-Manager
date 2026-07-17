@@ -183,10 +183,16 @@ export const en = {
       refresh: "Refresh",
     },
     rowAction: {
+      details: "Details",
       edit: "Edit",
       start: "Start",
       close: "Close",
       delete: "Delete",
+    },
+    detail: {
+      title: "Intervention details",
+      noDescription: "No description.",
+      updatedBy: "Updated by",
     },
     modal: {
       createIncidentTitle: "New incident",
@@ -196,7 +202,7 @@ export const en = {
       title: "Title",
       titlePlaceholder: "e.g. Core switch replacement",
       description: "Description",
-      descriptionHint: "Markdown accepted (rendering coming later). Describe the context, action plan and impact.",
+      descriptionHint: "Markdown accepted (rendered in the detail view). Describe the context, action plan and impact.",
       priority: "Priority",
       status: "Status",
       plannedStart: "Planned start",
@@ -207,11 +213,8 @@ export const en = {
       jiraHint: "A ticket key or URL. Reference only — no call is made to Jira.",
       links: "Linked objects",
       linksHint: "Equipment, VMs or spares involved. A deleted target stays as “not found” (the link is kept).",
-      linksFamily: "Family",
-      linksTarget: "Target",
-      linksAdd: "Add",
+      linksSearchPlaceholder: "Search for equipment, a VM or a spare…",
       linksEmpty: "No linked object.",
-      linksNoTarget: "— none available —",
       linksRemove: "Remove",
     },
     confirm: {
@@ -225,6 +228,7 @@ export const en = {
       deleted: "Intervention deleted",
       started: "Intervention started",
       closed: "Intervention closed",
+      linkExists: "This object is already linked.",
     },
     error: {
       titleRequired: "Title is required.",

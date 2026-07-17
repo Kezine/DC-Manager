@@ -59,7 +59,8 @@ dénormalisée, et surveille les fenêtres à démarrer.
 - **`jira_ref`** : clé (`INFRA-123`) ou URL — **simple RÉFÉRENCE**, AUCUN appel Jira n'est
   fait côté serveur. Le client fabrique un lien en la préfixant par `JIRA_BASE_URL` (cf. route
   `/meta`).
-- **`description`** : markdown (rendu côté client plus tard), bornée à 100 000 caractères.
+- **`description`** : markdown (rendu côté client dans la **modale de détail**, via `core/Markdown`/
+  micromark), bornée à 100 000 caractères.
 - **Audit** (`created_by`/`created_date`, `updated_by`/`updated_date`) : posé **PAR LE
   SERVEUR**, jamais par le client. Le nom vient de l'utilisateur authentifié (SSO/Basic Auth),
   via le helper PARTAGÉ `RequestAuthor.name(req)` (le même que la notif live du cœur — cf.
@@ -206,7 +207,8 @@ le cœur (notif live) et ce module (principe n°3 — aucune duplication de la r
 |---|---|
 | `views/forms/InterventionsClient.ts` | **Client REST** du module + `InterventionsError` (code HTTP + `detail`). DTOs = **MIROIRS** commentés des formes serveur (duplication assumée, principe n°3 — préserve l'amovibilité). `listPage`/`meta`/`counts`/`getOne`/`save`/`remove` ; `buildQuery` PURE (filtres `kind`/`status`/`priority` **répétables**). ⚠ Routes **SCOPÉES PAR DOCUMENT** (`<dataBase>/interventions/…`, comme `CertsClient`). |
 | `core/InterventionsFormat.ts` | Logique **PURE** (aucun DOM, aucune dépendance i18n — testée en isolation) : `kindLabelKey`/`statusLabelKey`/`priorityLabelKey`/`targetKindLabelKey` renvoient des **CLÉS** i18n (la vue appelle `I18n.t` dessus, le module reste pur) ; `priorityRank`/`priorityClass`/`statusClass` (rang & couleur de badge) ; `jiraUrl` (référence Jira → lien, jointures de `/`) ; `formatWindow` ; `shortId`. Porte les slugs MIROIRS des énumérations serveur. |
-| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition, éditeur de liens, transitions rapides. Déclare l'interface hôte `InterventionTargetSource` (cibles injectées — la vue ne touche JAMAIS le Store) ; `openCreateFor(kind, id)` ouvre une création PRÉ-LIÉE (déclaration depuis une fiche). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
+| `core/TargetSearch.ts` | Logique **PURE** de la SÉLECTION unifiée des cibles liables (équipements + VMs + spares CONFONDUS) : `rank(items, query, opts)` filtre/classe/borne les candidats — **préfixe avant simple inclusion**, plafond (déf. 12), **dédup des cibles déjà liées** (`excluded`), normalisation **INJECTÉE** (le cœur passe `Schema.normSearch` — insensibilité casse/accents). Testé en isolation (`test-interventions.js`). |
+| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition/**détail**, éditeur de liens **via SearchPop**, transitions rapides, actions par ligne en **boutons-icône** (principe n°14). Déclare l'interface hôte `InterventionTargetSource` (`labelOf`/`search`/`openTargetDetail` — cibles injectées, la vue ne touche JAMAIS le Store) ; `openCreateFor(kind, id)` ouvre une création PRÉ-LIÉE (déclaration depuis une fiche). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
 | `views/InterventionFicheHooks.ts` | **Contrat d'intégration « fiches »** `InterventionFicheHooks { countOpen; declareFor }` (injecté via `FormHost.interventionHooks`, implémenté dans `main.ts`) — permet aux fiches détail d'afficher le badge et de déclarer SANS importer la vue ni le client (découplage principe n°2). |
 | `views/forms/InterventionFicheRow.ts` | Helper DOM PARTAGÉ (une seule implémentation pour les 3 fiches) : rangée « Interventions » (badge async + bouton « Déclarer »). No-op si `hooks` null. Ne connaît que le contrat. |
 
@@ -224,27 +226,46 @@ interventions sont propres au document).
   `Tests/modules/test-i18n.js`). La logique PURE (`InterventionsFormat`) reste i18n-agnostique (elle
   renvoie des CLÉS) ; la vue localise au point d'affichage.
 - **Listing PAGINÉ SERVEUR** (jamais de slice client, CSS des `ListView` : `.list-toolbar`/`.pagination`/
-  `.sortable`/`.sort-ind`) : toolbar = champ de **recherche** (query, anti-rebond ~250 ms) + filtres
-  **MultiSelect** « Type »/« Statut »/« Priorité » (répétables) + « Réinit. filtres » ; **tri** par clic
-  d'en-tête (Titre/Priorité/Statut/Fenêtre) ; état de listing en mémoire d'instance (après écriture, la
-  **page courante** est rechargée — clamp serveur si elle disparaît). Colonnes : Titre, Type, **Priorité**
-  (badge coloré par rang), **Statut** (badge), **Fenêtre planifiée** (`formatWindow`, vide sinon), **Liens**
-  (compte + détail en survol), **Jira** (lien cliquable via `jiraUrl` + `meta` chargée UNE fois ; texte brut
-  si pas de base), **Créé par**, Actions.
-- **Actions par ligne** : **Modifier** (modale), **Démarrer** (declared/planned → `in_progress`), **Clore**
-  (`in_progress` → `closed`), **Supprimer** (confirmation danger). Les transitions rapides font un **GET
+  `.sortable`/`.sort-ind`) : toolbar = champ de **recherche NORMALISÉ** (classe `.search-input`, même
+  markup/thème que la recherche des listings — query, anti-rebond ~250 ms) + filtres **MultiSelect**
+  « Type »/« Statut »/« Priorité » (répétables) + « Réinit. filtres » ; **tri** par clic d'en-tête
+  (Titre/Priorité/Statut/Fenêtre) ; état de listing en mémoire d'instance (après écriture, la **page
+  courante** est rechargée — clamp serveur si elle disparaît). Colonnes : **Titre** (CLIQUABLE → modale de
+  détail), Type, **Priorité** (badge coloré par rang), **Statut** (badge), **Fenêtre planifiée**
+  (`formatWindow`, vide sinon), **Liens** (compte + détail en survol), **Jira** (lien cliquable via `jiraUrl`
+  + `meta` chargée UNE fois ; texte brut si pas de base), **Créé par**, Actions.
+- **Actions par ligne — boutons-ICÔNE** (registre `Icons` + `IconButton`, principe n°14 ; aria-label +
+  tooltip i18n) : **Détails** (`INFO`, ouvre la modale de consultation), **Modifier** (`EDIT`, modale),
+  **Démarrer** (`PLAY`, declared/planned → `in_progress`), **Clore** (`CHECK`, `in_progress` → `closed`),
+  **Supprimer** (`DELETE`, danger, confirmation). Les boutons d'EN-TÊTE « + Incident » / « + Intervention » /
+  « Actualiser » RESTENT textuels (texte réservé aux primaires). Les transitions rapides font un **GET
   unitaire puis un PUT du corps complet** avec le status changé (le serveur re-estampille `updated_*` ;
   repartir de l'état serveur évite d'écraser une édition concurrente).
 - **Modale de création/édition** (principe n°11) : nature FIGÉE (création via bouton dédié « + Incident » /
   « + Intervention », édition immuable), titre, description (textarea markdown), priorité, statut (édition
   seulement — création : `planned` pour une intervention, `declared` pour un incident), `planned_start`/
-  `planned_end` (inputs `datetime-local` optionnels, manipulés en **UTC** pour rester cohérents avec le
+  `planned_end` (**`FormControls.date` en mode `date-time`** — plus de `<input datetime-local>` brut,
+  principe n°14 ; valeur manipulée en **UTC** via `isoToInput`/`inputToIso` pour rester cohérente avec le
   stockage et le veilleur), `jira_ref`, et l'**éditeur de LIENS**.
-- **Éditeur de liens** (interface hôte `InterventionTargetSource` injectée) : sélecteur « famille »
-  (équipement/VM/spare, libellés i18n) + sélecteur des cibles disponibles (libellés du document) + bouton
-  « Ajouter » ; liste ORDONNÉE des liens avec retrait. **Politique orphelins côté UI** : une cible disparue
-  (`labelOf` → null) s'affiche « (introuvable) » **grisée** — le lien est conservé (aucune FK côté serveur,
-  cf. « Liens sans FK »), c'est bien le client qui matérialise l'orphelin.
+- **Éditeur de liens — sélection UNIFIÉE via `SearchPop`** (interface hôte `InterventionTargetSource`
+  injectée) : un seul champ de recherche-popover balaye **TOUTES les familles à la fois** (équipements + VMs
+  + spares confondus, via `targets.search(query, excluded)` → `TargetSearch` + `Schema.normSearch`) ; chaque
+  résultat porte son **badge de famille**, le **CLIC** LIE l'élément (ajout à la liste ordonnée). Les cibles
+  déjà liées sont **exclues** des résultats (dédup) ; un doublon résiduel est ignoré avec un toast discret.
+  La liste des liens affiche **icône de famille + libellé** et un **bouton-icône de retrait** (`CLOSE`).
+  **Politique orphelins côté UI** : une cible disparue (`labelOf` → null) s'affiche « (introuvable) »
+  **grisée** — le lien est conservé (aucune FK côté serveur, cf. « Liens sans FK »).
+- **Modale de DÉTAIL (consultation)** — ouverte par l'action « Détails » ou le clic sur le titre : badges
+  (nature/priorité/statut), fenêtre planifiée, référence Jira, **description rendue en MARKDOWN** (`core/
+  Markdown`/micromark, défauts sûrs), audit (créé/modifié par-le), et la **liste des objets liés** (icône de
+  famille + libellé + badge ; orphelin « introuvable » grisé, NON cliquable). Un CLIC sur un objet lié
+  **existant** ouvre sa **fiche de détail** (equipmentDetail/vmDetail/spareDetail) puis **revient
+  automatiquement** à cette modale à la fermeture de la fiche — **aller-retour** mémorisé. Mécanique :
+  `InterventionTargetSource.openTargetDetail(kind, id, onClosed)` (implémenté dans `main.ts` sur la
+  machinerie des fiches) ouvre la fiche via un hôte enveloppant qui injecte l'option **`onClose` d'`openModal`**
+  (rappel GÉNÉRIQUE de fermeture ajouté à `ui/Modal`, appelé à TOUTE cause) — l'app n'ayant qu'un overlay de
+  modale (sans empilement). Un bouton **« Modifier »** bascule vers la modale d'ÉDITION (openModal remplace le
+  contenu : fermer-puis-ouvrir).
 - **Lien Jira** : la base d'URL vient de `GET …/interventions/meta` (`JIRA_BASE_URL`), chargée **une seule
   fois** au premier rendu. `InterventionsFormat.jiraUrl(base, ref)` fabrique le lien (référence déjà URL →
   telle quelle ; base absente → référence en texte brut). Aucun appel à Jira.
@@ -308,7 +329,8 @@ l'importe jamais).
    `certs/` restent inchangés). Supprimer le fichier `interventions.db` s'il existe.
 2. **Client** : supprimer `src-client/views/InterventionsAdminView.ts`,
    `src-client/views/forms/InterventionsClient.ts`, `src-client/core/InterventionsFormat.ts`,
-   `src-client/views/InterventionFicheHooks.ts`, `src-client/views/forms/InterventionFicheRow.ts` ; retirer de
+   `src-client/core/TargetSearch.ts`, `src-client/views/InterventionFicheHooks.ts`,
+   `src-client/views/forms/InterventionFicheRow.ts` ; retirer de
    `main.ts` l'enregistrement de l'**onglet principal** « Interventions » (`shell.addView` + `new
    InterventionsAdminView(...)` + `interventionsClient` + l'implémentation `InterventionTargetSource` + les
    `interventionHooks`), et les exports dans `views/index.ts`. Retirer le champ `interventionHooks` de
@@ -323,6 +345,10 @@ l'importe jamais).
 4. **Documentation** : supprimer ce fichier (`docs/interventions.md`), son entrée dans l'index
    de `CLAUDE.md`, la ligne `JIRA_BASE_URL` de `README.md` §4 et de `src-server/RUN.md` §6.
 5. **Ce qui RESTE (indépendant du module)** :
+   - les **extensions de primitives UI RÉUTILISABLES** faites pour cette page (principe n°14) : les modes
+     `date-time`/`time` de `FormControls.date`, l'option **`onClose`** d'`ui/Modal` (rappel de fermeture
+     générique), les icônes `PLAY`/`EQUIPMENT`/`VM`/`SPARE` du registre `Icons`. Ce sont des primitives
+     partagées, PAS du code spécifique aux interventions — elles restent en place ;
    - le helper **`RequestAuthor`** de `api.ts` — désormais utilisé par le cœur (notif live) ;
      il PRÉEXISTE à la feature (extrait de `writerInfo`) et n'a aucun lien avec elle ;
    - le **service de notifications** (`notify/`) — le producteur `intervention-reminder`
