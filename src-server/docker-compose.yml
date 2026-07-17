@@ -12,13 +12,14 @@ services:
     environment:
       PORT: "3000"
       API_BASE: /api
-      LOG_LEVEL: info                    # error | warn | info | debug | trace
+      LOG_LEVEL: debug                    # error | warn | info | debug | trace
       # --- Auth ---
       # Pour un déploiement réel, préférez la Basic Auth (BASIC_AUTH ci-dessous) : le SSO est spécifique
       # à un besoin personnel et peu pertinent pour la plupart des usages (cf. RUN.md § Authentification).
       # MODE DEV par défaut (utilisateur factice SUPER_ADMIN) pour tester hors réseau SSO :
       SSO_URL: ""
       DEV_USER: dev
+      DCMANAGER_SECRETS_KEY : DemoKeyNosecret!!!DoNoUseInProd'
       # DEV : pour exiger un mot de passe (Basic Auth navigateur) au lieu de l'accès libre, décommenter :
       # BASIC_AUTH: "dev:secret"
       # Pour un VRAI SSO externe : commenter les 2 lignes ci-dessus et décommenter (adapter URL + cookie) :
