@@ -22,6 +22,7 @@ import { RackGeometry } from "../../geometry/RackGeometry";
 import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
 import { EquipmentForms } from "./EquipmentForms";   // modale complète de création d'image (import « + Importer »)
+import { I18n } from "../../i18n/I18n";
 
 export class FaceEditor extends FormBase {
   /** Éditeur de FAÇADE (sous-éditeur empilé) : pose les ports sur les faces de l'équipement
@@ -31,7 +32,7 @@ export class FaceEditor extends FormBase {
       ultérieure : on PRÉSERVE les références d'image existantes (fids) et on permet de les détacher. */
   static open(store: Store, host: FormHost, eqId: string, opts: any = {}): void {
     const eq: any = store.get("equipments", eqId);
-    if (!eq) { Notify.toast("Équipement introuvable", "err"); return; }
+    if (!eq) { Notify.toast(I18n.t("equipment.notFound"), "err"); return; }
     const isFree = eq.dim_mode === "free";
     const faces: string[] = isFree ? EQUIP_FACE_IDS.slice() : ["front", "rear"];
     const srcPorts: any[] = opts.ports || store.portsOf(eq.id);
@@ -50,10 +51,10 @@ export class FaceEditor extends FormBase {
     root.appendChild(tabs);
 
     const FACE_GRID_PRESETS = [
-      { id: "free", label: "Libre (sans grille)", cols: 0, rows: 0 }, { id: "g6x1", label: "Grille 6 × 1", cols: 6, rows: 1 },
-      { id: "g12x1", label: "Grille 12 × 1", cols: 12, rows: 1 }, { id: "g12x2", label: "Grille 12 × 2", cols: 12, rows: 2 },
-      { id: "g24x1", label: "Grille 24 × 1", cols: 24, rows: 1 }, { id: "g24x2", label: "Grille 24 × 2", cols: 24, rows: 2 },
-      { id: "g24x4", label: "Grille 24 × 4", cols: 24, rows: 4 }, { id: "g48x2", label: "Grille 48 × 2", cols: 48, rows: 2 },
+      { id: "free", label: I18n.t("face.gridFree"), cols: 0, rows: 0 }, { id: "g6x1", label: I18n.t("face.grid", { cols: 6, rows: 1 }), cols: 6, rows: 1 },
+      { id: "g12x1", label: I18n.t("face.grid", { cols: 12, rows: 1 }), cols: 12, rows: 1 }, { id: "g12x2", label: I18n.t("face.grid", { cols: 12, rows: 2 }), cols: 12, rows: 2 },
+      { id: "g24x1", label: I18n.t("face.grid", { cols: 24, rows: 1 }), cols: 24, rows: 1 }, { id: "g24x2", label: I18n.t("face.grid", { cols: 24, rows: 2 }), cols: 24, rows: 2 },
+      { id: "g24x4", label: I18n.t("face.grid", { cols: 24, rows: 4 }), cols: 24, rows: 4 }, { id: "g48x2", label: I18n.t("face.grid", { cols: 48, rows: 2 }), cols: 48, rows: 2 },
     ];
     let grid: { cols: number; rows: number } | null = null;
     let gridVisible = true;   // la grille peut être MASQUÉE tout en restant ACTIVE (le snap continue).
@@ -74,25 +75,25 @@ export class FaceEditor extends FormBase {
     let placeMode: "auto" | "click" = "auto";
     let activePortId: string | null = null;   // port ACTIVÉ (mode 2 clics) : les autres ports posés sont masqués.
     const tools = document.createElement("div"); tools.className = "face-toolbar";
-    const attachBtn = document.createElement("button"); attachBtn.type = "button"; attachBtn.className = "btn btn-ghost btn-sm"; attachBtn.textContent = "Attacher une image…";
-    const detachBtn = document.createElement("button"); detachBtn.type = "button"; detachBtn.className = "btn btn-ghost btn-sm"; detachBtn.textContent = "Détacher l'image";
-    const addAllBtn = document.createElement("button"); addAllBtn.type = "button"; addAllBtn.className = "btn btn-ghost btn-sm"; addAllBtn.textContent = "Tout poser"; addAllBtn.title = "Disposer uniformément tous les ports sur cette face (suit la grille si active)";
-    const removeAllBtn = document.createElement("button"); removeAllBtn.type = "button"; removeAllBtn.className = "btn btn-ghost btn-sm"; removeAllBtn.textContent = "Tout enlever";
-    const placeBtn = document.createElement("button"); placeBtn.type = "button"; placeBtn.className = "btn btn-ghost btn-sm"; placeBtn.textContent = "Pose en 2 clics"; placeBtn.title = "Mode de pose précis : cliquez un port (il s'active, les autres sont masqués), puis cliquez la face à l'endroit voulu.";
-    const leaderBtn = document.createElement("button"); leaderBtn.type = "button"; leaderBtn.className = "btn btn-ghost btn-sm"; leaderBtn.textContent = "Étiquettes déportées"; leaderBtn.title = "Affichage alternatif : chaque port devient une pastille, son nom est déporté et relié par une ligne (aucune étiquette sur un port).";
-    const gridLab = document.createElement("span"); gridLab.style.cssText = "font-size:11px;color:var(--fg-dim);margin-left:6px;"; gridLab.textContent = "Grille :";
+    const attachBtn = document.createElement("button"); attachBtn.type = "button"; attachBtn.className = "btn btn-ghost btn-sm"; attachBtn.textContent = I18n.t("face.attachImage");
+    const detachBtn = document.createElement("button"); detachBtn.type = "button"; detachBtn.className = "btn btn-ghost btn-sm"; detachBtn.textContent = I18n.t("face.detachImage");
+    const addAllBtn = document.createElement("button"); addAllBtn.type = "button"; addAllBtn.className = "btn btn-ghost btn-sm"; addAllBtn.textContent = I18n.t("face.placeAll"); addAllBtn.title = I18n.t("face.placeAllTitle");
+    const removeAllBtn = document.createElement("button"); removeAllBtn.type = "button"; removeAllBtn.className = "btn btn-ghost btn-sm"; removeAllBtn.textContent = I18n.t("face.removeAll");
+    const placeBtn = document.createElement("button"); placeBtn.type = "button"; placeBtn.className = "btn btn-ghost btn-sm"; placeBtn.textContent = I18n.t("face.place2"); placeBtn.title = I18n.t("face.place2Title");
+    const leaderBtn = document.createElement("button"); leaderBtn.type = "button"; leaderBtn.className = "btn btn-ghost btn-sm"; leaderBtn.textContent = I18n.t("face.leaders"); leaderBtn.title = I18n.t("face.leadersTitle");
+    const gridLab = document.createElement("span"); gridLab.style.cssText = "font-size:11px;color:var(--fg-dim);margin-left:6px;"; gridLab.textContent = I18n.t("face.gridLabel");
     const gridSel = FormControls.select(FACE_GRID_PRESETS.map((g) => ({ value: g.id, label: g.label })), "free"); gridSel.style.cssText = "font-size:11px;padding:4px 6px;";
-    const gridShowBtn = document.createElement("button"); gridShowBtn.type = "button"; gridShowBtn.className = "btn btn-ghost btn-sm"; gridShowBtn.title = "Afficher/masquer le quadrillage — la grille reste ACTIVE (le snap continue).";
+    const gridShowBtn = document.createElement("button"); gridShowBtn.type = "button"; gridShowBtn.className = "btn btn-ghost btn-sm"; gridShowBtn.title = I18n.t("face.gridToggleTitle");
     // Zoom (molette + boutons ; glisser le fond = déplacer) : utile sur les faces denses / gros équipements.
-    const zoomOutBtn = document.createElement("button"); zoomOutBtn.type = "button"; zoomOutBtn.className = "btn btn-ghost btn-sm"; zoomOutBtn.textContent = "−"; zoomOutBtn.title = "Dézoomer";
+    const zoomOutBtn = document.createElement("button"); zoomOutBtn.type = "button"; zoomOutBtn.className = "btn btn-ghost btn-sm"; zoomOutBtn.textContent = "−"; zoomOutBtn.title = I18n.t("ui.zoom.out");
     const zoomLab = document.createElement("span"); zoomLab.style.cssText = "font-size:11px;color:var(--fg-dim);min-width:36px;text-align:center;";
-    const zoomInBtn = document.createElement("button"); zoomInBtn.type = "button"; zoomInBtn.className = "btn btn-ghost btn-sm"; zoomInBtn.textContent = "+"; zoomInBtn.title = "Zoomer";
-    const zoomResetBtn = document.createElement("button"); zoomResetBtn.type = "button"; zoomResetBtn.className = "btn btn-ghost btn-sm"; zoomResetBtn.textContent = "Ajuster"; zoomResetBtn.title = "Réinitialiser le zoom (100 %)";
+    const zoomInBtn = document.createElement("button"); zoomInBtn.type = "button"; zoomInBtn.className = "btn btn-ghost btn-sm"; zoomInBtn.textContent = "+"; zoomInBtn.title = I18n.t("ui.zoom.in");
+    const zoomResetBtn = document.createElement("button"); zoomResetBtn.type = "button"; zoomResetBtn.className = "btn btn-ghost btn-sm"; zoomResetBtn.textContent = I18n.t("ui.zoom.fitLabel"); zoomResetBtn.title = I18n.t("face.zoomResetTitle");
     const zoomGroup = document.createElement("span"); zoomGroup.style.cssText = "display:inline-flex;align-items:center;gap:4px;margin-left:6px;"; zoomGroup.append(zoomOutBtn, zoomLab, zoomInBtn, zoomResetBtn);
     tools.append(attachBtn, detachBtn, placeBtn, leaderBtn, addAllBtn, removeAllBtn, gridLab, gridSel, gridShowBtn, zoomGroup); root.appendChild(tools);
 
     const hint = document.createElement("div"); hint.className = "form-hint";
-    hint.textContent = "Cliquez un port pour le poser, puis glissez-le. Molette / +/− = zoom · glisser le fond = déplacer. « Grille » contraint le glisser (elle peut être masquée tout en restant active). « Attacher une image » : fond de façade (filtré par face ; contrainte de U en mode baie seulement).";
+    hint.textContent = I18n.t("face.hint");
     root.appendChild(hint);
     // VIEWPORT (clipping) → FRAME (zoom/pan) → STAGE (corps : grille + marqueurs). L'image et les oreilles vivent
     // dans le FRAME (l'image « avec oreilles » déborde sur les bandes latérales) ; le STAGE est au-dessus (z-index).
@@ -179,10 +180,10 @@ export class FaceEditor extends FormBase {
       const faceHasEars = panelMode && side === "front";
       const withEars = faceHasEars && (mir ? mir.with_ears !== false : true);
       attachBtn.style.display = this.images ? "" : "none";
-      attachBtn.textContent = hasImg ? "Changer l'image…" : "Attacher une image…";
+      attachBtn.textContent = hasImg ? I18n.t("face.changeImage") : I18n.t("face.attachImage");
       detachBtn.style.display = hasImg ? "" : "none";
       gridShowBtn.style.display = grid ? "" : "none";
-      gridShowBtn.textContent = gridVisible ? "Masquer la grille" : "Afficher la grille";
+      gridShowBtn.textContent = gridVisible ? I18n.t("face.gridHide") : I18n.t("face.gridShow");
 
       applyFrameSize(side);
       frame.querySelectorAll(".face-bg, .face-ear").forEach((n) => n.remove());   // image + bandes reconstruites à chaque rendu
@@ -205,7 +206,7 @@ export class FaceEditor extends FormBase {
         im.style.cssText = "top:" + vt + "%;height:" + vh + "%;left:" + iLeft + "%;width:" + iW + "%;right:auto;bottom:auto;";
         frame.appendChild(im);
       } else {
-        const h = document.createElement("div"); h.className = "face-empty-hint"; h.textContent = "Face " + EquipFaces.label(side).toLowerCase() + (hasImg ? " — image introuvable (référence orpheline)" : " — aucune image (positionnement possible)"); stage.appendChild(h);
+        const h = document.createElement("div"); h.className = "face-empty-hint"; h.textContent = hasImg ? I18n.t("face.emptyOrphan", { face: EquipFaces.label(side).toLowerCase() }) : I18n.t("face.emptyNoImage", { face: EquipFaces.label(side).toLowerCase() }); stage.appendChild(h);
       }
       // OREILLES de montage 19″ (AVANT uniquement) : bandes latérales NON cliquables (le placement reste sur le
       // corps) — des RAILS jusqu'aux bords du boîtier (asymétriques si boîtier rétréci/aligné).
@@ -240,8 +241,8 @@ export class FaceEditor extends FormBase {
           const anchorFrame = (pos: any) => ({ fx: (hLeft + pos.x * hW) / 100, fy: (vt + pos.y * vh) / 100 });   // port → fraction du FRAME
           const labels = placedHere.map((p) => {
             const el = document.createElement("div"); el.className = "face-leader-label" + roleCls(p);
-            const nm = document.createElement("span"); nm.textContent = p.name || "(port)"; el.appendChild(nm);
-            const x = document.createElement("span"); x.className = "fm-x"; x.textContent = "×"; x.title = "Retirer de la façade";
+            const nm = document.createElement("span"); nm.textContent = p.name || I18n.t("face.portParen"); el.appendChild(nm);
+            const x = document.createElement("span"); x.className = "fm-x"; x.textContent = "×"; x.title = I18n.t("face.removeFromFace");
             x.addEventListener("pointerdown", (e) => e.stopPropagation());
             x.addEventListener("click", (e) => { e.stopPropagation(); markDirty(); delete place[p.id]; render(); });
             el.appendChild(x); leaderLayer.appendChild(el); return el;
@@ -269,8 +270,8 @@ export class FaceEditor extends FormBase {
           const pos = place[p.id];
           const mk = document.createElement("div"); mk.className = "face-marker" + roleCls(p);
           mk.style.left = (pos.x * 100) + "%"; mk.style.top = (pos.y * 100) + "%";
-          const lab = document.createElement("span"); lab.textContent = p.name || "(port)"; mk.appendChild(lab);
-          const x = document.createElement("span"); x.className = "fm-x"; x.textContent = "×"; x.title = "Retirer de la façade";
+          const lab = document.createElement("span"); lab.textContent = p.name || I18n.t("face.portParen"); mk.appendChild(lab);
+          const x = document.createElement("span"); x.className = "fm-x"; x.textContent = "×"; x.title = I18n.t("face.removeFromFace");
           x.addEventListener("pointerdown", (e) => e.stopPropagation());
           x.addEventListener("click", (e) => { e.stopPropagation(); markDirty(); delete place[p.id]; render(); });
           mk.appendChild(x);
@@ -285,14 +286,16 @@ export class FaceEditor extends FormBase {
       const ph = document.createElement("div"); ph.className = "face-palette-hint";
       if (activePortId) {
         const ap = ports.find((p) => p.id === activePortId);
-        ph.textContent = "Cliquez la face pour poser « " + (ap ? (ap.name || "port") : "port") + " » — Échap pour annuler.";
+        ph.textContent = I18n.t("face.clickToPlace", { name: (ap && ap.name) ? ap.name : I18n.t("face.portBare") });
       } else {
-        const verb = placeMode === "click" ? " — cliquez un port, puis l'endroit voulu sur la face" : " — cliquez pour les ajouter à la face " + EquipFaces.label(side).toLowerCase();
-        ph.textContent = (unplaced.length ? "Ports à poser (" + unplaced.length + ")" + verb + " :" : (ports.length ? "Tous les ports sont posés." : "Cet équipement n'a aucun port.")) + (onOther ? "  (" + onOther + " sur " + (faces.length > 2 ? "d'autres faces" : "l'autre face") + ")" : "");
+        const verb = placeMode === "click" ? I18n.t("face.verbClick") : I18n.t("face.verbAuto", { face: EquipFaces.label(side).toLowerCase() });
+        const base = unplaced.length ? I18n.t("face.portsToPlace", { count: unplaced.length, verb }) : (ports.length ? I18n.t("face.allPlaced") : I18n.t("face.noPorts"));
+        const other = onOther ? (faces.length > 2 ? I18n.t("face.onOtherFaces", { count: onOther }) : I18n.t("face.onOtherFace", { count: onOther })) : "";
+        ph.textContent = base + other;
       }
       palette.appendChild(ph);
       unplaced.forEach((p) => {
-        const c = document.createElement("button"); c.type = "button"; c.className = "face-chip" + (p.id === activePortId ? " active" : ""); c.textContent = p.name || "(port)";
+        const c = document.createElement("button"); c.type = "button"; c.className = "face-chip" + (p.id === activePortId ? " active" : ""); c.textContent = p.name || I18n.t("face.portParen");
         c.onclick = () => {
           if (placeMode === "click") { activePortId = (activePortId === p.id) ? null : p.id; render(); return; }   // active (les autres ports se masquent)
           markDirty(); const s = snapToGrid(0.5, 0.5); place[p.id] = { x: s.x, y: s.y, side }; render();            // pose au centre (mode auto)
@@ -330,8 +333,8 @@ export class FaceEditor extends FormBase {
     syncModes(); render();
 
     const subtitle = (isFree
-      ? "Boîtier libre · " + (eq.free_w_mm || "?") + " × " + (eq.free_l_mm || "?") + " × " + (eq.free_h_mm || "?") + " mm (l × p × h) — 6 faces"
-      : "Panneau 19″ · " + (eq.u_height || 1) + "U — faces avant et arrière");
+      ? I18n.t("face.subtitleFree", { w: eq.free_w_mm || "?", l: eq.free_l_mm || "?", h: eq.free_h_mm || "?" })
+      : I18n.t("face.subtitleRack", { u: eq.u_height || 1 }));
     const applyResult = async () => {
       if (opts.onApply) { opts.onApply({ fids, place }); return; }
       const facePatch: any = {};
@@ -339,11 +342,11 @@ export class FaceEditor extends FormBase {
       const ops: any[] = [{ collection: "equipments", id: eq.id, patch: facePatch }];
       ports.forEach((p) => { const pos = place[p.id]; ops.push({ collection: "ports", id: p.id, patch: pos ? { face_x: pos.x, face_y: pos.y, face_side: pos.side } : { face_x: null, face_y: null } }); });
       await store.updateBatch(ops);
-      host.setDirty?.(true); Notify.toast("Façade enregistrée");
+      host.setDirty?.(true); Notify.toast(I18n.t("face.saved"));
     };
     Dialog.custom({
-      title: "Façade — " + Html.escape(eq.name || "équipement"), message: subtitle, wide: true,
-      confirmLabel: opts.onApply ? "Appliquer" : "Enregistrer", cancelLabel: "Fermer",
+      title: I18n.t("face.title", { name: Html.escape(eq.name || I18n.t("face.equipName")) }), message: subtitle, wide: true,
+      confirmLabel: opts.onApply ? I18n.t("face.apply") : I18n.t("ui.action.save"), cancelLabel: I18n.t("ui.action.close"),
       build: (h2) => { h2.appendChild(root); return { validate: () => true as const, collect: () => true }; },
     }).then(async (res) => { document.removeEventListener("keydown", onKey, true); if (res) await applyResult(); });
   }
@@ -355,7 +358,7 @@ export class FaceEditor extends FormBase {
     const annex = this.faceAnnex(face), faceLbl = EquipFaces.label(face);
     const uTag = !annex && !free;   // étiquette/filtre par U : front/rear d'un équipement BAIE seulement
     return Dialog.custom({
-      title: "Image de façade — " + (free ? "face " + faceLbl.toLowerCase() + " (équipement libre)" : annex ? "face " + faceLbl.toLowerCase() + " (catégorie « autre »)" : (uTag ? (u || 1) + "U · " : "") + "face " + faceLbl.toLowerCase()), confirmLabel: "Choisir",
+      title: I18n.t(free ? "face.imgPickerFree" : annex ? "face.imgPickerAnnex" : uTag ? "face.imgPickerU" : "face.imgPickerFace", { face: faceLbl.toLowerCase(), u: u || 1 }), confirmLabel: I18n.t("face.choose"),
       build: (root: HTMLElement) => {
         let selected: string | null = current || null, query = "";
         // Toggle OREILLES — UNIQUEMENT pour la face AVANT (l'arrière n'a jamais d'oreilles) : (a) FILTRE les images
@@ -363,24 +366,24 @@ export class FaceEditor extends FormBase {
         const hasEarToggle = (face === "front") && !free;   // oreilles = concept BAIE (19″) ; pas en libre
         let earMode = true;
         const note = document.createElement("div"); note.className = "form-hint"; note.style.marginBottom = "8px";
-        note.textContent = free ? "Équipement libre : toutes les images de la bibliothèque sont éligibles (aucun filtre de face ni de U)."
-          : annex ? "Faces annexes (équipement libre) : seules les images marquées « autre » sont éligibles (sans contrainte de U)."
-          : "Seules les images " + (u || 1) + "U marquées « " + faceLbl + " » sont éligibles ici.";
+        note.textContent = free ? I18n.t("face.noteFree")
+          : annex ? I18n.t("face.noteAnnex")
+          : I18n.t("face.noteU", { u: u || 1, face: faceLbl });
         const earRow = document.createElement("div"); earRow.style.cssText = "display:flex;align-items:center;gap:6px;margin-bottom:8px;";
-        const earLab = document.createElement("span"); earLab.className = "form-hint"; earLab.style.margin = "0"; earLab.textContent = "Oreilles :";
-        const segWith = document.createElement("button"); segWith.type = "button"; segWith.textContent = "Avec oreilles";
-        const segWithout = document.createElement("button"); segWithout.type = "button"; segWithout.textContent = "Sans oreilles";
+        const earLab = document.createElement("span"); earLab.className = "form-hint"; earLab.style.margin = "0"; earLab.textContent = I18n.t("face.ears");
+        const segWith = document.createElement("button"); segWith.type = "button"; segWith.textContent = I18n.t("face.withEars");
+        const segWithout = document.createElement("button"); segWithout.type = "button"; segWithout.textContent = I18n.t("face.withoutEars");
         segWith.onclick = () => { earMode = true; renderGrid(); };
         segWithout.onclick = () => { earMode = false; renderGrid(); };
         earRow.append(earLab, segWith, segWithout);
-        const search = document.createElement("input"); search.type = "text"; search.className = "search-input"; search.placeholder = "Rechercher une image (nom, description)…"; search.style.cssText = "width:100%;max-width:none;margin-bottom:8px;";
+        const search = document.createElement("input"); search.type = "text"; search.className = "search-input"; search.placeholder = I18n.t("face.searchImage"); search.style.cssText = "width:100%;max-width:none;margin-bottom:8px;";
         const grid = document.createElement("div"); grid.className = "fi-grid";
         if (hasEarToggle) root.append(note, earRow, search, grid); else root.append(note, search, grid);
         const renderGrid = () => {
           segWith.className = "btn btn-sm " + (earMode ? "btn-primary" : "btn-ghost");
           segWithout.className = "btn btn-sm " + (!earMode ? "btn-primary" : "btn-ghost");
           grid.innerHTML = "";
-          const none = document.createElement("button"); none.type = "button"; none.className = "fi-tile fi-none" + (selected == null ? " sel" : ""); none.textContent = "Aucune"; none.onclick = () => { selected = null; renderGrid(); }; grid.appendChild(none);
+          const none = document.createElement("button"); none.type = "button"; none.className = "fi-tile fi-none" + (selected == null ? " sel" : ""); none.textContent = I18n.t("face.imgNone"); none.onclick = () => { selected = null; renderGrid(); }; grid.appendChild(none);
           const eligible = this.eligibleImages(u, face, free), cur: any = current ? images.get(current) : null;
           const list = eligible.slice(); if (cur && !eligible.some((fi: any) => fi.id === cur.id)) list.push(cur);
           const q = Text.normSearch(query);
@@ -392,11 +395,18 @@ export class FaceEditor extends FormBase {
             const t = document.createElement("button"); t.type = "button"; t.className = "fi-tile" + (selected === fi.id ? " sel" : "");
             const im = document.createElement("img"); im.src = fi.url; im.alt = "";
             const cap = document.createElement("span"); cap.className = "fi-cap";
-            cap.textContent = (fi.name || "(image)") + (offFilter ? " · " + (fi.face === "autre" ? "autre" : fi.u_height + "U/" + EquipFaces.label(fi.face)) : "") + " · " + store.faceImageUsageCount(fi.id) + "×";
+            cap.textContent = (fi.name || I18n.t("face.imgFallback")) + (offFilter ? " · " + (fi.face === "autre" ? I18n.t("face.faceOther") : fi.u_height + "U/" + EquipFaces.label(fi.face)) : "") + " · " + store.faceImageUsageCount(fi.id) + "×";
             t.append(im, cap); t.onclick = () => { selected = fi.id; renderGrid(); }; grid.appendChild(t);
           });
-          if (shown.length === 0) { const empty = document.createElement("div"); empty.className = "fi-grid-empty"; empty.textContent = q ? ("Aucune image ne correspond à « " + query.trim() + " ».") : ("Aucune image " + (annex ? "« autre »" : (faceLbl + (hasEarToggle ? (earMode ? " avec oreilles" : " sans oreilles") : ""))) + " — importez-en une ci-dessous."); grid.appendChild(empty); }
-          const imp = document.createElement("button"); imp.type = "button"; imp.className = "fi-tile fi-import"; imp.innerHTML = "<span>+ Importer<br>image " + (annex ? "« autre »" : ((uTag ? (u || 1) + "U · " : "") + faceLbl + (hasEarToggle ? (earMode ? " · avec oreilles" : " · sans oreilles") : ""))) + "</span>";
+          if (shown.length === 0) {
+            const empty = document.createElement("div"); empty.className = "fi-grid-empty";
+            const kind = annex ? I18n.t("face.kindAnnex") : (faceLbl + (hasEarToggle ? (earMode ? I18n.t("face.earSuffixWith") : I18n.t("face.earSuffixWithout")) : ""));
+            empty.textContent = q ? I18n.t("face.noImageMatch", { query: query.trim() }) : I18n.t("face.noImageOfKind", { kind });
+            grid.appendChild(empty);
+          }
+          const imp = document.createElement("button"); imp.type = "button"; imp.className = "fi-tile fi-import";
+          const impKind = annex ? I18n.t("face.kindAnnex") : ((uTag ? I18n.t("face.uPrefix", { u: u || 1 }) : "") + faceLbl + (hasEarToggle ? (earMode ? I18n.t("face.earDotWith") : I18n.t("face.earDotWithout")) : ""));
+          imp.innerHTML = "<span>" + I18n.t("face.importImage", { kind: impKind }) + "</span>";
           imp.onclick = () => {
             // MODALE COMPLÈTE de création d'image (nom, face, U, oreilles, import + redressement/assemblage,
             // description), préremplie depuis le contexte du sélecteur (face AV/AR · U · oreilles). Ouverte en

@@ -5,6 +5,7 @@ import { FLOORS } from "../../domain/constants";
 import { Ip } from "../../core/Ip";
 import { FormControls } from "../../ui/FormControls";
 import type { SelectOption } from "../../ui/FormControls";
+import { I18n } from "../../i18n/I18n";
 
 /* Helpers et types PARTAGÉS par les formulaires (extraits de l'ancien Forms.ts monolithique). */
 
@@ -19,13 +20,13 @@ export const ORIENT_OPTS = [{ value: "0", label: "0°" }, { value: "90", label: 
 export class FormUi {
   /** Options « site / bâtiment » (— aucun — en tête). */
   static locOptions(store: Store): Array<{ value: string; label: string }> {
-    return [{ value: "", label: "— aucun —" }].concat(store.sitesSorted().map((s: any) => ({ value: s.id, label: s.name || s.id })));
+    return [{ value: "", label: I18n.t("forms.opt.none") }].concat(store.sitesSorted().map((s: any) => ({ value: s.id, label: s.name || s.id })));
   }
   /** Options « étage » (une valeur courante hors liste est conservée, marquée). */
   static floorOptions(sel: string): Array<{ value: string; label: string }> {
     const s = String(sel == null ? "" : sel);
-    const o = [{ value: "", label: "— étage —" }].concat(FLOORS.map((f) => ({ value: f, label: "Étage " + f })));
-    if (s && !FLOORS.includes(s)) o.push({ value: s, label: s + " (hors liste)" });
+    const o = [{ value: "", label: I18n.t("forms.opt.floorNone") }].concat(FLOORS.map((f) => ({ value: f, label: I18n.t("lists.ph.floorLabel", { n: f }) })));
+    if (s && !FLOORS.includes(s)) o.push({ value: s, label: I18n.t("forms.opt.outOfList", { value: s }) });
     return o;
   }
   /** Intercalaire de section. */
@@ -46,12 +47,12 @@ export class FormUi {
   /** Options « équipement » triées par nom (`none` en tête). */
   static eqOptions(store: Store, none: string): Array<{ value: string; label: string }> {
     return [{ value: "", label: none }].concat(
-      store.all("equipments").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((e: any) => ({ value: e.id, label: e.name || "(équipement)" })));
+      store.all("equipments").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((e: any) => ({ value: e.id, label: e.name || I18n.t("forms.ph.equipment") })));
   }
   /** Options « VM » triées par nom (`none` en tête) — parité stricte avec `eqOptions` (tri identique). */
   static vmOptions(store: Store, none: string): Array<{ value: string; label: string }> {
     return [{ value: "", label: none }].concat(
-      store.all("vms").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((v: any) => ({ value: v.id, label: v.name || "(VM)" })));
+      store.all("vms").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((v: any) => ({ value: v.id, label: v.name || I18n.t("lists.ph.vm") })));
   }
 }
 

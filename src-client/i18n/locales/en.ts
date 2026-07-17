@@ -17,5 +17,9 @@ import { forms } from "./en/forms";
 import { cable } from "./en/cable";
 import { ipam } from "./en/ipam";
 import { domain } from "./en/domain";
+import { rack } from "./en/rack";
+import { equipment } from "./en/equipment";
+import { detail } from "./en/detail";
+import { face } from "./en/face";
 
-export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain } as const;
+export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face } as const;

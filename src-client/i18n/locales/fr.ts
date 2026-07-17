@@ -32,5 +32,9 @@ import { forms } from "./fr/forms";
 import { cable } from "./fr/cable";
 import { ipam } from "./fr/ipam";
 import { domain } from "./fr/domain";
+import { rack } from "./fr/rack";
+import { equipment } from "./fr/equipment";
+import { detail } from "./fr/detail";
+import { face } from "./fr/face";
 
-export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain } as const;
+export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face } as const;
