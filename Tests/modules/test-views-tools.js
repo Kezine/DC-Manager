@@ -1,9 +1,46 @@
 /* Tests modules — vues & outils pilotés par hôte injecté (Graph/Datacenter, outils 2D/3D, images).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
+  await section("FilterChips : modèle pur des filtres actifs (barre de contrôles unifiée, lot C)", async () => {
+    const dims = [
+      { key: "type", label: "Type", options: [{ id: "switch", label: "Switch" }, { id: "server", label: "Serveur" }] },
+      { key: "status", label: "Statut", options: [{ id: "ok", label: "OK" }, { id: "ko", label: "KO" }] },
+    ];
+    const sel = (m) => (k) => m[k];   // accès à l'état : dimKey → Set (ou undefined)
+
+    // état vide → aucun chip
+    ck.eq(FilterChips.build(dims, sel({})).length, 0, "aucun filtre → 0 chip");
+    ck.eq(FilterChips.count(dims, sel({})), 0, "count = 0 sans filtre");
+    ck.eq(FilterChips.build(dims, sel({ type: new Set() })).length, 0, "Set vide → 0 chip");
+
+    // une valeur → un chip entièrement renseigné
+    const one = FilterChips.build(dims, sel({ type: new Set(["switch"]) }));
+    ck.eq(one.length, 1, "1 valeur → 1 chip");
+    ck.eq(one[0].dimKey, "type", "chip.dimKey");
+    ck.eq(one[0].dimLabel, "Type", "chip.dimLabel");
+    ck.eq(one[0].valueId, "switch", "chip.valueId");
+    ck.eq(one[0].valueLabel, "Switch", "chip.valueLabel");
+    ck.eq(one[0].key, FilterChips.keyOf("type", "switch"), "chip.key = keyOf(dim, val)");
+
+    // ordre DÉTERMINISTE = dimensions puis OPTIONS (pas l'ordre d'insertion du Set)
+    const state = { type: new Set(["server", "switch"]), status: new Set(["ko"]) };
+    const many = FilterChips.build(dims, sel(state));
+    ck.eq(many.map((c) => c.valueId).join(","), "switch,server,ko", "ordre = dimensions puis options (déterministe)");
+    ck.eq(FilterChips.count(dims, sel(state)), 3, "count = 3");
+
+    // valeur cochée absente des options (option disparue) → ignorée (aucun chip fantôme)
+    const orphan = FilterChips.build(dims, sel({ type: new Set(["switch", "ghost"]) }));
+    ck.eq(orphan.length, 1, "valeur orpheline ignorée");
+    ck.eq(orphan[0].valueId, "switch", "seule la valeur valide subsiste");
+
+    // clés uniques par (dimension, valeur)
+    ck(FilterChips.keyOf("type", "x") !== FilterChips.keyOf("status", "x"), "keyOf : clés distinctes selon la dimension");
+    ck(FilterChips.keyOf("d", "a") !== FilterChips.keyOf("d", "b"), "keyOf : clés distinctes selon la valeur");
+  });
+
   await section("GraphView (pilote) : build + layout (sans DOM)", async () => {
   {
     const s = await makeStore();

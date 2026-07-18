@@ -4,7 +4,8 @@ import { Markdown } from "../core/Markdown";
 import { I18n } from "../i18n/I18n";
 import { InterventionsFormat, type BadgeClass } from "../core/InterventionsFormat";
 import { FormControls, type SelectOption } from "../ui/FormControls";
-import { MultiSelect, type MultiItem } from "../ui/MultiSelect";
+import { type MultiItem } from "../ui/MultiSelect";
+import { FilterBar } from "../ui/FilterBar";
 import { SearchPop, type SearchPopResult } from "../ui/SearchPop";
 import { Icons } from "../ui/Icons";
 import { IconButton } from "../ui/IconButton";
@@ -42,9 +43,9 @@ import type {
    équipements/VMs/spares liables viennent d'une interface hôte INJECTÉE
    (InterventionTargetSource), implémentée dans main.ts sur le Store.
 
-   LISTING PAGINÉ SERVEUR : filtres (recherche + Type/Statut/Priorité en MultiSelect),
-   tris par en-tête et pagination portés par la REQUÊTE (jamais de slice client) ;
-   l'UI reprend les classes CSS des ListView (.list-toolbar/.pagination/.sortable).
+   LISTING PAGINÉ SERVEUR : filtres (recherche + Type/Statut/Priorité), tris par en-tête et pagination portés
+   par la REQUÊTE (jamais de slice client) ; l'UI reprend la barre de contrôles unifiée des listings (recherche
+   en tête + filtres en CHIPS via `ui/FilterBar`, classes `.list-chrome`/`.pagination`/`.sortable`).
    L'état de listing vit en MÉMOIRE d'instance (rechargé après chaque écriture).
    ============================================================================= */
 
@@ -102,6 +103,9 @@ export class InterventionsAdminView {
   private metaLoaded = false;
   /** Anti-rebond de la recherche (~250 ms). */
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Barre de filtres unifiée (chips + « + Filtre » + Réinitialiser) — bâtie au rendu complet, PRÉSERVÉE sur
+      refreshBody (un changement de filtre ne repeint que ses chips + le corps). */
+  private filterBar: FilterBar | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -172,11 +176,6 @@ export class InterventionsAdminView {
     void dir.ensure(ids).then(() => { if (this.bodyEl) this.paintBody(); }).catch(() => { /* auteurs non critiques */ });
   }
 
-  /** Re-render COMPLET (toolbar de filtres comprise) — après (re)chargement / réinitialisation des filtres. */
-  private async rerender(): Promise<void> {
-    await this.guarded(async () => { await this.loadPage(); this.render(); });
-  }
-
   /** Recharge la page courante et repeint UNIQUEMENT le corps — la toolbar (recherche + filtres) reste en
       place. Sert aussi APRÈS une écriture (la page courante est rechargée, clamp serveur si elle a disparu). */
   private async refreshBody(): Promise<void> {
@@ -210,63 +209,51 @@ export class InterventionsAdminView {
   private render(): void {
     if (!this.client) return;
     this.container.innerHTML = "";
-    this.container.appendChild(this.buildToolbar());
-    this.container.appendChild(this.buildFilterToolbar());
+    this.container.appendChild(this.buildChrome());
     this.bodyEl = document.createElement("div");
     this.bodyEl.className = "list-body";   // mêmes règles CSS que les listings ListView (défaut à gauche, numériques via cell-num)
     this.container.appendChild(this.bodyEl);
     this.paintBody();
   }
 
-  /** Barre d'outils du haut : recherche (gauche) + créations & actualisation (droite). NON reconstruite sur
-      refreshBody → le champ de recherche garde son focus pendant la frappe. */
-  private buildToolbar(): HTMLElement {
-    const bar = document.createElement("div");
-    bar.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px";
+  /** Barre de contrôles UNIFIÉE (revue design lot C) : recherche EN TÊTE (extensible, loupe intégrée), filtres
+      « Type/Statut/Priorité » en CHIPS + « + Filtre » (FilterBar partagée), puis le cluster de DROITE (créations
+      + actualisation, « Réinitialiser » le plus à droite). NON reconstruite sur refreshBody → le champ de
+      recherche garde son focus pendant la frappe et un panneau de filtre ouvert n'est pas refermé. */
+  private buildChrome(): HTMLElement {
+    const st = this.state;
+    const bar = document.createElement("div"); bar.className = "list-chrome";
 
-    // Champ de recherche NORMALISÉ (même markup/thème que la recherche des listings — classe `.search-input`,
-    // type search) ; le comportement (anti-rebond + requête serveur) reste propre à cette page paginée.
-    const search = document.createElement("input");
-    search.type = "search"; search.className = "search-input"; search.placeholder = I18n.t("interventions.search.placeholder");
-    search.value = this.state.query; search.style.cssText = "min-width:240px;flex:0 1 320px";
-    search.oninput = () => {
+    // Recherche NORMALISÉE (classe `.search-input`, loupe intégrée) ; l'anti-rebond + la requête serveur restent
+    // propres à cette page paginée.
+    const search = document.createElement("div"); search.className = "lc-search";
+    const icon = document.createElement("span"); icon.className = "lc-search-ic"; icon.setAttribute("aria-hidden", "true"); icon.innerHTML = Icons.SEARCH;
+    const input = document.createElement("input"); input.type = "search"; input.className = "search-input";
+    input.placeholder = I18n.t("interventions.search.placeholder"); input.setAttribute("aria-label", I18n.t("interventions.search.placeholder"));
+    input.value = st.query;
+    input.oninput = () => {
       if (this.searchTimer) clearTimeout(this.searchTimer);
-      this.searchTimer = setTimeout(() => {
-        this.state.query = search.value.trim(); this.state.page = 1; void this.refreshBody();
-      }, 250);
+      this.searchTimer = setTimeout(() => { st.query = input.value.trim(); st.page = 1; void this.refreshBody(); }, 250);
     };
-    const left = document.createElement("div"); left.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap";
-    left.appendChild(search);
+    search.append(icon, input);
+    bar.appendChild(search);
 
-    const right = document.createElement("div"); right.style.cssText = "display:flex;gap:8px;flex-wrap:wrap";
+    // Filtres Type/Statut/Priorité (répétables) → chips + « + Filtre » (vocabulaire commun à tous les listings).
+    this.filterBar = new FilterBar([
+      { key: "kinds", label: I18n.t("interventions.filter.type"), options: InterventionsAdminView.slugItems(InterventionsFormat.KIND_SLUGS, (s) => InterventionsFormat.kindLabelKey(s)), selected: st.kinds },
+      { key: "statuses", label: I18n.t("interventions.filter.status"), options: InterventionsAdminView.slugItems(InterventionsFormat.STATUS_SLUGS, (s) => InterventionsFormat.statusLabelKey(s)), selected: st.statuses },
+      { key: "priorities", label: I18n.t("interventions.filter.priority"), options: InterventionsAdminView.slugItems(InterventionsFormat.PRIORITY_SLUGS, (s) => InterventionsFormat.priorityLabelKey(s)), selected: st.priorities },
+    ], () => { st.page = 1; void this.refreshBody(); });
+    bar.appendChild(this.filterBar.filtersElement);
+
+    const right = document.createElement("div"); right.className = "lc-right";
     right.append(
       this.actionButton(I18n.t("interventions.action.addIncident"), "", () => this.interventionModal(null, "incident"), "btn-primary"),
       this.actionButton(I18n.t("interventions.action.addIntervention"), "", () => this.interventionModal(null, "intervention"), "btn-primary"),
       this.actionButton(I18n.t("interventions.action.refresh"), "", () => void this.reload()),
     );
-
-    bar.append(left, right);
-    return bar;
-  }
-
-  /** Toolbar de filtres (CSS ListView) : « Type »/« Statut »/« Priorité » en MultiSelect (répétables) + réinit. */
-  private buildFilterToolbar(): HTMLElement {
-    const st = this.state;
-    const bar = document.createElement("div"); bar.className = "list-toolbar";
-    const fg = document.createElement("div"); fg.className = "lt-filters";
-    const fl = document.createElement("span"); fl.className = "lt-flabel"; fl.textContent = I18n.t("interventions.filter.label");
-    fg.appendChild(fl);
-
-    fg.appendChild(MultiSelect.build(I18n.t("interventions.filter.type"), InterventionsAdminView.slugItems(InterventionsFormat.KIND_SLUGS, (s) => InterventionsFormat.kindLabelKey(s)), st.kinds, () => { st.page = 1; void this.refreshBody(); }));
-    fg.appendChild(MultiSelect.build(I18n.t("interventions.filter.status"), InterventionsAdminView.slugItems(InterventionsFormat.STATUS_SLUGS, (s) => InterventionsFormat.statusLabelKey(s)), st.statuses, () => { st.page = 1; void this.refreshBody(); }));
-    fg.appendChild(MultiSelect.build(I18n.t("interventions.filter.priority"), InterventionsAdminView.slugItems(InterventionsFormat.PRIORITY_SLUGS, (s) => InterventionsFormat.priorityLabelKey(s)), st.priorities, () => { st.page = 1; void this.refreshBody(); }));
-
-    const reset = document.createElement("button"); reset.type = "button"; reset.className = "lt-reset btn btn-ghost btn-sm";
-    reset.textContent = I18n.t("interventions.filter.reset");
-    reset.onclick = () => { st.kinds.clear(); st.statuses.clear(); st.priorities.clear(); st.page = 1; void this.rerender(); };
-    fg.appendChild(reset);
-
-    bar.appendChild(fg);
+    right.appendChild(this.filterBar.resetElement);
+    bar.appendChild(right);
     return bar;
   }
 

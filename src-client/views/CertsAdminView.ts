@@ -4,7 +4,8 @@ import { CertsFormat } from "../core/CertsFormat";
 import { CertsSearch, type CertSearchItem, type CertNavTarget } from "../core/CertsSearch";
 import { SearchPop, type SearchPopResult } from "../ui/SearchPop";
 import { FormControls, type SelectOption } from "../ui/FormControls";
-import { MultiSelect, type MultiItem } from "../ui/MultiSelect";
+import { type MultiItem } from "../ui/MultiSelect";
+import { FilterBar } from "../ui/FilterBar";
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from "../data/config";
 import { Notify } from "../ui/Notify";
 import { Clipboard } from "../ui/Clipboard";
@@ -131,6 +132,9 @@ export class CertsAdminView {
   /** Champ de recherche + popover (L3) — instance UNIQUE réemployée à chaque rebuild de toolbar (l'élément
       est simplement re-rattaché ; le terme saisi et l'anti-rebond survivent). Créé à la volée. */
   private searchPop: SearchPop | null = null;
+  /** Barre de filtres unifiée (chips « Type/État » + « + Filtre » + Réinitialiser) — bâtie au rendu complet,
+      PRÉSERVÉE sur refreshBody (un changement de filtre ne repeint que ses chips + le corps). */
+  private filterBar: FilterBar | null = null;
   /** Id de la ligne à mettre en évidence après une navigation par la recherche (`.row-focus`). CONSOMMÉ au
       premier `paintBody` (mis à null après application), pour qu'un repaint ultérieur (tri/page) ne la ré-allume pas. */
   private focusId: string | null = null;
@@ -207,24 +211,28 @@ export class CertsAdminView {
     this.paintBody();
   }
 
-  /** Barre d'outils : statut (verrouillé/déverrouillé) + actions (créations + verrouiller si ouvert). */
+  /** Barre de contrôles UNIFIÉE (revue design lot C) : recherche EN TÊTE (extensible, loupe intégrée), filtres
+      « Type/État » en CHIPS + « + Filtre » (FilterBar partagée), puis le cluster de DROITE (état du coffre,
+      créations/changement de phrase/verrou/actualisation, « Réinitialiser » le plus à droite). NON reconstruite
+      sur refreshBody → recherche et panneau de filtre ouverts survivent. */
   private buildToolbar(): HTMLElement {
-    const bar = document.createElement("div");
-    bar.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:10px";
-    const left = document.createElement("div"); left.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap";
-    // Badge d'état du coffre : SEULEMENT si la PKI existe. Non initialisée = ni verrouillée ni
-    // déverrouillée (aucune clé n'existe encore) — aucun badge, l'écran d'initialisation l'explique.
-    // Pas de span vide non plus : un item flex vide consommerait quand même un cran de `gap`.
-    if (this.pkiState?.initialized === true) {
-      const status = document.createElement("span");
-      status.innerHTML = this.session.unlocked ? this.pill(I18n.t("certs.admin.toolbar.unlocked"), "ok") : this.pill(I18n.t("certs.admin.toolbar.locked"), "warn");
-      left.appendChild(status);
-    }
-    // Recherche (L3) : visible dans les DEUX vues et MÊME verrouillée — elle ne lit que des métadonnées
-    // (aucune opération de clé). Le clic sur un résultat ouvre la bonne vue avec l'élément mis en évidence.
-    left.appendChild(this.searchBox());
+    const bar = document.createElement("div"); bar.className = "list-chrome";
 
-    const right = document.createElement("div"); right.style.cssText = "display:flex;gap:8px;flex-wrap:wrap";
+    // Recherche : visible dans les DEUX vues et MÊME verrouillée — elle ne lit que des métadonnées (aucune
+    // opération de clé). Le clic sur un résultat ouvre la bonne vue avec l'élément mis en évidence.
+    bar.appendChild(this.searchBox());
+
+    // Filtres « Type » (répétable) + « État » (sélection UNIQUE — le serveur n'accepte qu'un status) → chips.
+    bar.appendChild(this.buildFilters());
+
+    const right = document.createElement("div"); right.className = "lc-right";
+    // Badge d'état du coffre : SEULEMENT si la PKI existe (non initialisée = aucune clé encore, l'écran
+    // d'initialisation l'explique). Placé en tête du cluster de droite (état + actions).
+    if (this.pkiState?.initialized === true) {
+      const status = document.createElement("span"); status.className = "lc-lockbadge";
+      status.innerHTML = this.session.unlocked ? this.pill(I18n.t("certs.admin.toolbar.unlocked"), "ok") : this.pill(I18n.t("certs.admin.toolbar.locked"), "warn");
+      right.appendChild(status);
+    }
     if (this.session.unlocked) {
       right.append(
         this.actionButton(I18n.t("certs.admin.toolbar.addRootCa"), I18n.t("certs.admin.toolbar.addRootCaTitle"), () => this.rootCaModal(), "btn-primary"),
@@ -235,9 +243,35 @@ export class CertsAdminView {
       right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.lock"), I18n.t("certs.admin.toolbar.lockTitle"), () => { this.session.lock(); }));
     }
     right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.refresh"), I18n.t("certs.admin.toolbar.refreshTitle"), () => { this.session.touch(); void this.reload(); }));
+    if (this.filterBar) right.appendChild(this.filterBar.resetElement);
 
-    bar.append(left, right);
+    bar.appendChild(right);
     return bar;
+  }
+
+  /** FilterBar de la vue courante : « Type » (MultiSelect → chips, familles pertinentes à la vue A/B) + « État »
+      (sélection UNIQUE — un `<select>` proxifié par un Set 0/1 reporté dans `state.status`). Reconstruite à chaque
+      rendu complet ; préservée sur refreshBody (un changement de valeur ne repeint que chips + corps). */
+  private buildFilters(): HTMLElement {
+    const st = this.currentState();
+    // Familles proposées + purge de celles mémorisées hors du jeu de la vue (évite un filtre fantôme).
+    const kindItems: MultiItem[] = (this.view === "roots" ? ROOT_KIND_FILTER_IDS : CERT_KIND_FILTER_IDS).map((id) => ({ id, label: CertsFormat.kindLabel(id) }));
+    const valid = new Set(kindItems.map((k) => k.id));
+    [...st.kinds].forEach((k) => { if (!valid.has(k)) st.kinds.delete(k); });
+    // État : le serveur n'accepte qu'UN status → dimension `single` ; le Set (0/1) fait autorité et se reporte
+    // dans `st.status` à chaque changement. Options sans le « Tous » (la FilterBar l'ajoute elle-même).
+    const statusSet = new Set<string>(st.status ? [st.status] : []);
+    const statusItems: MultiItem[] = CertsAdminView.statusFilterOpts().filter((o) => o.value !== "").map((o) => ({ id: o.value, label: o.label }));
+    this.filterBar = new FilterBar([
+      { key: "kinds", label: I18n.t("lists.col.type"), options: kindItems, selected: st.kinds },
+      { key: "status", label: I18n.t("certs.admin.listing.colState"), options: statusItems, selected: statusSet, single: true },
+    ], () => {
+      st.status = [...statusSet][0] || "";
+      st.page = 1;
+      this.session.touch();
+      void this.refreshBody();
+    });
+    return this.filterBar.filtersElement;
   }
 
   /* --------------------------------------------------------------------------
@@ -251,6 +285,7 @@ export class CertsAdminView {
     if (!this.searchPop) {
       this.searchPop = new SearchPop({
         placeholder: I18n.t("certs.admin.toolbar.searchPlaceholder"),
+        grow: true,   // barre de listing : champ extensible + loupe intégrée, à la hauteur de contrôle unifiée
         fetch: (query) => this.searchFetch(query),
         onPick: (result) => this.searchPick(result),
       });
@@ -430,8 +465,8 @@ export class CertsAdminView {
     void this.rerender();
   }
 
-  /** En-tête de la section listing (intro vue A, ou fil d'Ariane « ← Autorités » + titre vue B) + toolbar de
-      filtres + le conteneur de corps (rempli par paintBody). */
+  /** En-tête de la section listing (intro vue A, ou fil d'Ariane « ← Autorités » + titre vue B) + le conteneur
+      de corps (rempli par paintBody). Les filtres vivent désormais dans la barre de contrôles unifiée (buildToolbar). */
   private buildListingSection(): HTMLElement {
     const wrap = document.createElement("div");
     if (this.view === "certs" && this.rootScope) {
@@ -448,42 +483,10 @@ export class CertsAdminView {
         : I18n.t("certs.admin.listing.introLocked");
       wrap.appendChild(intro);
     }
-    wrap.appendChild(this.buildListingToolbar());
     this.bodyEl = document.createElement("div");
     this.bodyEl.className = "list-body";   // mêmes règles CSS que les listings ListView (défaut à gauche, numériques via cell-num)
     wrap.appendChild(this.bodyEl);
     return wrap;
-  }
-
-  /** Toolbar de filtres (CSS ListView : .list-toolbar/.lt-filters/.lt-flabel/.lt-reset) : « Type » (MultiSelect,
-      kinds pertinents à la vue) + « État » (SÉLECTION UNIQUE — le serveur n'accepte qu'un status) + réinit. */
-  private buildListingToolbar(): HTMLElement {
-    const st = this.currentState();
-    const bar = document.createElement("div"); bar.className = "list-toolbar";
-    const fg = document.createElement("div"); fg.className = "lt-filters";
-    const fl = document.createElement("span"); fl.className = "lt-flabel"; fl.textContent = I18n.t("lists.chrome.filter");
-    fg.appendChild(fl);
-
-    // Libellés de familles résolus ICI (rendu) via CertsFormat.kindLabel — jamais au chargement du module.
-    const kindItems: MultiItem[] = (this.view === "roots" ? ROOT_KIND_FILTER_IDS : CERT_KIND_FILTER_IDS).map((id) => ({ id, label: CertsFormat.kindLabel(id) }));
-    // Purge des kinds mémorisés hors du jeu de la vue (parité ListView) — évite un filtre fantôme.
-    const valid = new Set(kindItems.map((k) => k.id));
-    [...st.kinds].forEach((k) => { if (!valid.has(k)) st.kinds.delete(k); });
-    fg.appendChild(MultiSelect.build(I18n.t("lists.col.type"), kindItems, st.kinds, () => { st.page = 1; void this.refreshBody(); }));
-
-    const statusSel = FormControls.select(CertsAdminView.statusFilterOpts(), st.status);
-    statusSel.onchange = () => { st.status = statusSel.value; st.page = 1; void this.refreshBody(); };
-    const statusWrap = document.createElement("label"); statusWrap.style.cssText = "display:inline-flex;align-items:center;gap:6px";
-    const sl = document.createElement("span"); sl.className = "lt-flabel"; sl.textContent = I18n.t("certs.admin.listing.colState");
-    statusWrap.append(sl, statusSel);
-    fg.appendChild(statusWrap);
-
-    const reset = document.createElement("button"); reset.type = "button"; reset.className = "lt-reset btn btn-ghost btn-sm"; reset.textContent = I18n.t("lists.chrome.filterReset");
-    reset.onclick = () => { st.kinds.clear(); st.status = ""; st.page = 1; void this.rerender(); };
-    fg.appendChild(reset);
-
-    bar.appendChild(fg);
-    return bar;
   }
 
   /** Peint le CORPS (table + pagination) de la vue courante dans `bodyEl`. Si une navigation par la recherche

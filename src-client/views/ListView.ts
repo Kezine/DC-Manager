@@ -2,8 +2,8 @@ import type { Store } from "../store";
 import { Html } from "../core/Html";
 import { Text } from "../core/Text";
 import { Sort } from "../core/Sort";
-import { MultiSelect } from "../ui/MultiSelect";
 import { FormControls } from "../ui/FormControls";
+import { FilterBar, type FilterBarDimension } from "../ui/FilterBar";
 import { Icons } from "../ui/Icons";
 import { IconButton } from "../ui/IconButton";
 import { RowMenu } from "../ui/RowMenu";
@@ -73,7 +73,9 @@ export class ListView {
   private _scaffold = false;
   private _toolbarSig: string | null = null;
   private _searchEl!: HTMLInputElement;
-  private _toolbarEl!: HTMLElement;
+  private _filtersHostEl!: HTMLElement;   // hôte du groupe « + Filtre » + chips (rempli selon les colonnes filtrables)
+  private _resetHostEl!: HTMLElement;      // hôte du bouton « Réinitialiser » (cluster de droite)
+  private _filterBar: FilterBar | null = null;
   private _bodyEl!: HTMLElement;
 
   constructor(store: Store, container: HTMLElement, opts: ListOptions) {
@@ -166,63 +168,76 @@ export class ListView {
     this._saveState();
   }
 
+  /** Bâtit UNE FOIS la barre de contrôles unifiée (revue design lot C) : recherche EN TÊTE (extensible,
+      loupe intégrée), hôte des filtres (« + Filtre » + chips), puis le cluster de DROITE (compact, création,
+      « Réinitialiser »). Le TRI n'est PAS en barre — il vit sur les EN-TÊTES de colonnes (`th.sortable`). Ce
+      squelette n'est bâti qu'une fois : le champ de recherche garde ainsi son focus/anti-rebond à travers les
+      re-rendus (seuls le corps et les chips sont repeints ensuite). */
   private _ensureScaffold(): void {
     if (this._scaffold && this.container.querySelector(".list-body")) return;
-    this.container.innerHTML = `<div class="list-search" style="display:flex;gap:8px;align-items:center;padding:6px 8px"><input type="search" class="search-input" placeholder="${I18n.t("lists.chrome.searchPlaceholder")}" style="flex:1 1 auto"></div><div class="list-toolbar"></div><div class="list-body"></div>`;
-    this._searchEl = this.container.querySelector(".list-search input") as HTMLInputElement;
+    this.container.innerHTML = "";
+    const chrome = document.createElement("div"); chrome.className = "list-chrome";
+
+    // Recherche EN PREMIER (action n°1), extensible : loupe intégrée + champ normalisé, à la hauteur unifiée.
+    const search = document.createElement("div"); search.className = "lc-search";
+    const icon = document.createElement("span"); icon.className = "lc-search-ic"; icon.setAttribute("aria-hidden", "true"); icon.innerHTML = Icons.SEARCH;
+    this._searchEl = document.createElement("input"); this._searchEl.type = "search"; this._searchEl.className = "search-input";
+    this._searchEl.placeholder = I18n.t("lists.chrome.searchPlaceholder");
+    this._searchEl.setAttribute("aria-label", I18n.t("lists.chrome.searchPlaceholder"));
+    search.append(icon, this._searchEl);
+    chrome.appendChild(search);
+
+    // Hôte des filtres (« + Filtre » + chips actifs) — (re)peuplé par _ensureToolbar selon les colonnes filtrables.
+    this._filtersHostEl = document.createElement("div"); this._filtersHostEl.className = "lc-filters-host";
+    chrome.appendChild(this._filtersHostEl);
+
+    // Cluster de DROITE (poussé par CSS) : bascule Compact, bouton de création, puis « Réinitialiser » (le plus à droite).
+    const right = document.createElement("div"); right.className = "lc-right";
+    // bascule COMPACT : bascule booléenne → .toggle-pill (pilule + témoin + teinte) via la factory. La factory
+    // met à jour son propre état visuel au clic ; l'état persiste à travers les re-rendus (this._compact).
+    const compactBtn = FormControls.toggle(I18n.t("lists.chrome.compact"), this._compact, (v) => { this._compact = v; this.page = 1; this.render(); }, { title: I18n.t("lists.chrome.compactTitle") });
+    compactBtn.classList.add("lc-compact");
+    right.appendChild(compactBtn);
     if (this.onCreate) {
-      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary btn-sm"; b.textContent = this.createLabel;
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary btn-sm lc-create"; b.textContent = this.createLabel;
       b.onclick = () => this.onCreate!();
-      (this.container.querySelector(".list-search") as HTMLElement).appendChild(b);
+      right.appendChild(b);
     }
-    this._toolbarEl = this.container.querySelector(".list-toolbar") as HTMLElement;
-    this._bodyEl = this.container.querySelector(".list-body") as HTMLElement;
+    this._resetHostEl = document.createElement("div"); this._resetHostEl.className = "lc-reset-host";
+    right.appendChild(this._resetHostEl);
+    chrome.appendChild(right);
+    this.container.appendChild(chrome);
+
+    this._bodyEl = document.createElement("div"); this._bodyEl.className = "list-body";
+    this.container.appendChild(this._bodyEl);
+
     this._searchEl.value = this.query;
     let t: any;
     this._searchEl.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { this.query = this._searchEl.value; this.page = 1; this.render(); }, 180); });
-    this._scaffold = true; this._toolbarSig = null;
+    this._scaffold = true; this._toolbarSig = null; this._filterBar = null;
   }
 
+  /** (Re)construit la FilterBar (« + Filtre » + chips + Réinitialiser) quand l'ensemble des OPTIONS filtrables
+      change (signature) — jamais à chaque frappe/tri/page : un changement de VALEUR de filtre ne repeint que
+      les chips (FilterBar) + le corps, laissant un panneau ouvert intact. Aucune colonne filtrable → hôtes vidés. */
   private _ensureToolbar(): void {
     const filterCols = this.columns.filter((c) => c.filter);
     const sig = filterCols.map((c) => (c.filter!.options() || []).map((o) => o.id).join(",")).join("|");
-    if (this._toolbarSig === sig && this._toolbarEl.children.length) return;
+    if (this._toolbarSig === sig && this._filterBar) return;
     this._toolbarSig = sig;
-    this._toolbarEl.innerHTML = "";
-    const sg = document.createElement("div"); sg.className = "lt-group";
-    const lbl = document.createElement("label"); lbl.textContent = I18n.t("lists.chrome.sort");
-    const sortSel = document.createElement("select"); sortSel.className = "sort-key app-select";
-    this._sortOptions().forEach((o) => { const op = document.createElement("option"); op.value = o.key; op.textContent = o.label; sortSel.appendChild(op); });
-    sortSel.value = this.sortKey;
-    sortSel.onchange = () => { this.sortKey = sortSel.value; this.page = 1; this.render(); };
-    const dirBtn = document.createElement("button"); dirBtn.type = "button"; dirBtn.className = "sort-dir-btn btn btn-ghost btn-sm";
-    const setDir = () => { dirBtn.textContent = this.sortDir === "desc" ? I18n.t("lists.chrome.dirDesc") : I18n.t("lists.chrome.dirAsc"); };
-    setDir();
-    dirBtn.onclick = () => { this.sortDir = this.sortDir === "desc" ? "asc" : "desc"; setDir(); this.page = 1; this.render(); };
-    sg.appendChild(lbl); sg.appendChild(sortSel); sg.appendChild(dirBtn);
-    // bascule COMPACT (colonnes essentielles seulement) : bascule booléenne → .toggle-pill (pilule + témoin +
-    // teinte) via la factory, cohérente avec les autres bascules. L'état persiste à travers les re-rendus (this._compact).
-    const compactBtn = FormControls.toggle(I18n.t("lists.chrome.compact"), this._compact, (v) => { this._compact = v; this.page = 1; this.render(); }, { title: I18n.t("lists.chrome.compactTitle") });
-    compactBtn.classList.add("lt-compact");
-    sg.appendChild(compactBtn);
-    this._toolbarEl.appendChild(sg);
-    if (filterCols.length) {
-      const fg = document.createElement("div"); fg.className = "lt-filters";
-      const fl = document.createElement("span"); fl.className = "lt-flabel"; fl.textContent = I18n.t("lists.chrome.filter"); fg.appendChild(fl);
-      filterCols.forEach((c) => {
-        const key = this._colKey(c);
-        if (!this.filterState[key]) this.filterState[key] = new Set();
-        const set = this.filterState[key];
-        const items = c.filter!.options() || [];
-        const valid = new Set(items.map((i) => i.id));
-        [...set].forEach((id) => { if (!valid.has(id)) set.delete(id); });
-        fg.appendChild(MultiSelect.build(c.filter!.label || c.head, items, set, () => { this.page = 1; this.render(); }));
-      });
-      const reset = document.createElement("button"); reset.type = "button"; reset.className = "lt-reset btn btn-ghost btn-sm"; reset.textContent = I18n.t("lists.chrome.filterReset");
-      reset.onclick = () => { Object.values(this.filterState).forEach((s) => s.clear()); this._toolbarSig = null; this.page = 1; this.render(); };
-      fg.appendChild(reset);
-      this._toolbarEl.appendChild(fg);
-    }
+    if (!filterCols.length) { this._filtersHostEl.replaceChildren(); this._resetHostEl.replaceChildren(); this._filterBar = null; return; }
+    const dims: FilterBarDimension[] = filterCols.map((c) => {
+      const key = this._colKey(c);
+      if (!this.filterState[key]) this.filterState[key] = new Set();
+      const set = this.filterState[key];
+      const items = c.filter!.options() || [];
+      const valid = new Set(items.map((i) => i.id));
+      [...set].forEach((id) => { if (!valid.has(id)) set.delete(id); });   // purge des valeurs disparues (parité historique)
+      return { key, label: c.filter!.label || c.head, options: items.slice(), selected: set };
+    });
+    this._filterBar = new FilterBar(dims, () => { this.page = 1; this.render(); });
+    this._filtersHostEl.replaceChildren(this._filterBar.filtersElement);
+    this._resetHostEl.replaceChildren(this._filterBar.resetElement);
   }
 
   /** Actions de ligne RÉDUITES à 3 boutons : Détails · Modifier · « plus d'actions » (menu overflow
@@ -301,7 +316,6 @@ export class ListView {
         const k = (th as any).dataset.sortkey;
         if (this.sortKey === k) this.sortDir = this.sortDir === "desc" ? "asc" : "desc";
         else { this.sortKey = k; this.sortDir = "asc"; }
-        const sk = this._toolbarEl.querySelector(".sort-key") as HTMLSelectElement; if (sk) sk.value = this.sortKey;
         this.page = 1; this.render();
       };
     });
