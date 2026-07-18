@@ -339,7 +339,12 @@ function listTemplates(dir, base) {
 }
 
 function main() {
-  const css = fs.readFileSync(CSS_PATH, "utf8");
+  // ⚠ STRIP du BOM UTF-8 : dc-manager.css commence par U+FEFF. Inliné tel quel AU MILIEU du
+  // document (dans <style>), ce caractère n'est PAS du blanc pour le tokenizer CSS du navigateur :
+  // il invalide la règle suivante, qui se trouve être `:root { … }` — TOUT le thème sombre était
+  // avalé (fond blanc, monochrome), alors que `[data-theme="light"]`, règle distincte, survivait.
+  // (Le parse de tokens ci-dessous, lui, est régex-tolérant et masquait le problème.)
+  const css = fs.readFileSync(CSS_PATH, "utf8").replace(/^\uFEFF/, "");
   const icons = loadIcons();
   const dark = parseVars(blockBody(css, ":root"));
   const light = parseVars(blockBody(css, '[data-theme="light"]'));
@@ -365,6 +370,9 @@ function main() {
 
     const bodyHtml = inject(rest, ctx);
     const page = renderPage(meta, marker, css, bodyHtml);
+    // Garde-fou : aucun U+FEFF ne doit survivre dans une page générée (un BOM au milieu d'un
+    // <style> casse le parse CSS du navigateur — cf. strip à la lecture du CSS ci-dessus).
+    if (page.includes("\uFEFF")) throw new Error(`U+FEFF (BOM) résiduel dans la page générée : ${rel}`);
 
     const outPath = path.join(PREVIEWS_DIR, rel);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
