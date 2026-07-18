@@ -69,10 +69,10 @@ export interface ExportChoice {
     CertZip ne connaît que la CLÉ d'artefact). Table de CLÉS résolue par `I18n.t` AU POINT DE RENDU (exportChoices),
     jamais au chargement du module — la localisation n'est initialisée qu'au bootstrap. */
 const CATEGORY_LABEL_KEY: Record<ExportCategoryKey, string> = {
-  public: "certs.bulk.catPublic",
-  fullchain: "certs.bulk.catFullchain",
-  "ca-chain": "certs.bulk.catCaChain",
-  key: "certs.bulk.catKey",
+  public: "certs.admin.bulk.catPublic",
+  fullchain: "certs.admin.bulk.catFullchain",
+  "ca-chain": "certs.admin.bulk.catCaChain",
+  key: "certs.admin.bulk.catKey",
 };
 
 export class BulkActions {
@@ -91,7 +91,7 @@ export class BulkActions {
     const anyRevoked = list.some((s) => BulkActions.isRevoked(s.revoked_at));
     return {
       canExport: hasSelection,
-      exportLabel: unlocked ? I18n.t("certs.bulk.selExportFull") : I18n.t("certs.bulk.selExportPublic"),
+      exportLabel: unlocked ? I18n.t("certs.admin.bulk.selExportFull") : I18n.t("certs.admin.bulk.selExportPublic"),
       withPrivateKeys: unlocked,
       canRevoke: hasSelection && !anyRevoked,
       canDelete: hasSelection,
