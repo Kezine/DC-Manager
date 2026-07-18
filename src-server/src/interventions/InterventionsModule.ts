@@ -1,6 +1,8 @@
 import express from "express";
 import { type ApiExtension, RequestAuthor } from "../api.js";
 import type { DocumentStore } from "../documents.js";
+import type { LivePublisher } from "../live.js";   // publication d'événements live (marqueur `modules` → pastilles)
+import { Changeset } from "../../../src-shared/DocumentChangeset.js";   // fabrique de changeset (marqueur module partagé)
 import type { SqliteCtor } from "../db.js";
 import { Logger } from "../logger.js";
 import { InterventionsDb, type InterventionsListOpts } from "./InterventionsDb.js";
@@ -43,6 +45,10 @@ export class InterventionsModule {
 
   private constructor(
     private readonly docs: DocumentStore,
+    /** Bus live (publication seule) — un événement porteur du marqueur `modules:["interventions"]` est diffusé
+        à CHAQUE écriture réussie pour que les AUTRES clients rafraîchissent la pastille d'onglet. null = pas de
+        bus injecté (badges non rafraîchis en live, module fonctionnel par ailleurs). */
+    private readonly live: LivePublisher | null,
     /** null = module en erreur (ouverture d'interventions.db impossible) → routes en 503 détaillé. */
     private readonly db: InterventionsDb | null,
     /** Veilleur de rappels — null si module en erreur OU aucun rapporteur branché. */
@@ -53,18 +59,19 @@ export class InterventionsModule {
     private readonly log: Logger,
   ) {}
 
-  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger; problems?: InterventionProblemReporter }): InterventionsModule {
+  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger; live?: LivePublisher; problems?: InterventionProblemReporter }): InterventionsModule {
     const log = opts.log || new Logger("error");
+    const live = opts.live || null;
     try {
       const db = new InterventionsDb(opts.dataDir, opts.sqlite, log);
       const watcher = opts.problems ? new InterventionReminderWatcher(db, opts.problems, undefined, undefined, log) : null;
       log.info("module interventions prêt (interventions.db"
         + (watcher ? ", rappels actifs)" : ", rappels SANS rapporteur)"));
-      return new InterventionsModule(opts.docs, db, watcher, opts.problems || null, null, log);
+      return new InterventionsModule(opts.docs, live, db, watcher, opts.problems || null, null, log);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       log.error("module interventions en erreur — démarré désactivé", message);
-      return new InterventionsModule(opts.docs, null, null, opts.problems || null, message, log);
+      return new InterventionsModule(opts.docs, live, null, null, opts.problems || null, message, log);
     }
   }
 
@@ -148,6 +155,7 @@ export class InterventionsModule {
           this.problems?.resolve(InterventionReminderWatcher.keyFor(ctx.docId, id));
         }
         this.scanQuietly();
+        this.publishLive(req, ctx.docId);   // pastille d'onglet des AUTRES clients (compte d'ouvertes / criticité)
         res.json({ intervention });
       } catch (e) {
         if (e instanceof InterventionsConfigError) { res.status(400).json({ error: "données invalides", issues: e.issues }); return; }
@@ -162,6 +170,7 @@ export class InterventionsModule {
       if (!ctx.db.remove(ctx.docId, id)) { res.status(404).json({ error: "intervention inconnue" }); return; }
       // Objet disparu → son rappel n'a plus d'objet (resolve no-op côté moteur si aucune alerte).
       this.problems?.resolve(InterventionReminderWatcher.keyFor(ctx.docId, id));
+      this.publishLive(req, ctx.docId);   // pastille d'onglet des AUTRES clients (une ouverte a pu disparaître)
       res.json({ ok: true });
     });
 
@@ -205,6 +214,16 @@ export class InterventionsModule {
       sort: InterventionsModule.LIST_SORTS.includes(String(q.sort)) ? (q.sort as InterventionsListOpts["sort"]) : undefined,
       dir: (q.dir === "asc" || q.dir === "desc") ? q.dir : undefined,
     };
+  }
+
+  /** Publie un événement live MINIMAL porteur du marqueur `modules:["interventions"]` : les AUTRES clients
+      rafraîchissent leur pastille d'onglet (compte d'ouvertes / criticité) SANS recharger le document (base
+      séparée, hors révision du cœur → le ReloadPlanner du client ignore ce marqueur). `origin` = X-Client-Id
+      de l'écrivain (il ignore son propre événement) ; `by` = auteur (parité avec la notif live du cœur). */
+  private publishLive(req: express.Request, docId: string): void {
+    if (!this.live) return;
+    const origin = (req.headers["x-client-id"] as string) || "";
+    this.live.publish(docId, { origin, by: { name: RequestAuthor.name(req), ip: "" }, changeset: Changeset.modules(["interventions"]) });
   }
 
   /** Garde commune des routes : document existant + module sain — sinon répond et renvoie null. */

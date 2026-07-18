@@ -575,6 +575,16 @@ module est en erreur (certs.db illisible). ⚠ `/pki` et `/roots` sont déclaré
 - `DELETE /documents/:docId/certs/:id` → suppression (**409** si des dérivés existent —
   supprimer un émetteur orphelinerait sa descendance).
 
+**Notification LIVE (pastille d'onglet).** À CHAQUE écriture réussie (PUT/DELETE — création, renouvellement,
+révocation, suppression), le module publie sur le **`LiveBus` du document** un événement MINIMAL porteur du
+marqueur **`modules: ["certs"]`** (`src-shared/DocumentChangeset.ts`). Les AUTRES clients (l'écrivain ignore
+son propre `origin`) recomptent alors la **pastille d'onglet** — l'**alerte d'échéance** : nombre d'**expirants**
+(`status=expiring`, ≤ 30 j non encore expirés) + **expirés** (`status=expired`), teinte `err` s'il y a au moins
+un expiré sinon `warn`, masquée à 0 — THROTTLÉ. La base `certs.db` étant SÉPARÉE du document cœur, le
+`ReloadPlanner` du client **ignore** ce marqueur (aucun rechargement de collections). Bus OPTIONNEL (non injecté
+→ badges simplement non rafraîchis en live). Aucun paramètre serveur ajouté : les comptages réutilisent le filtre
+`status` **existant** du listing paginé.
+
 ## Page « Certificats » (`CertsAdminView`)
 
 **Onglet PRINCIPAL** de premier niveau (`kind:"primary"`, décision utilisateur 2026-07-15 :

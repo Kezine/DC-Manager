@@ -151,6 +151,14 @@ serait lu comme un id).
 - `DELETE /documents/:docId/interventions/:id` → suppression (**cascade** des liens ; **404**
   si inconnu ; `resolve` du rappel).
 
+**Notification LIVE (pastille d'onglet).** À CHAQUE écriture réussie (PUT/DELETE), le module publie sur le
+**`LiveBus` du document** (injecté au bootstrap) un événement MINIMAL `{ origin, by, changeset }` où le
+changeset porte le seul marqueur **`modules: ["interventions"]`** (cf. `src-shared/DocumentChangeset.ts`). Les
+AUTRES clients (l'écrivain ignore son propre `origin`) recomptent alors la **pastille d'onglet** (nombre
+d'ouvertes + teinte d'alerte si une ouverte est *critical*), THROTTLÉ. La base `interventions.db` étant SÉPARÉE
+du document cœur (hors révision), le `ReloadPlanner` du client **ignore** ce marqueur : aucun rechargement de
+collections. Le bus est OPTIONNEL (non injecté → module fonctionnel, badges simplement non rafraîchis en live).
+
 ## Veilleur de rappels (`InterventionReminderWatcher`)
 
 Producteur **`intervention-reminder`** du service de notifications (pattern

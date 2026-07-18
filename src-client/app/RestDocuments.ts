@@ -41,6 +41,10 @@ export interface RestDocumentsHost {
   setUser(user: any): void;
   /** Écran « accès refusé » (auth SSO non autorisée) avec bouton Réessayer. */
   showAccessDenied(opts: { connected: boolean; user: string; onRetry: () => void; loginUrl: string }): void;
+  /** Un AUTRE client a écrit dans un MODULE (interventions/certs) — marqueur `changeset.modules`. À traiter en
+      rafraîchissant les PASTILLES d'onglet concernées (comptages), throttlé côté hôte. AUCUN rechargement de
+      collections (bases séparées, hors révision du document cœur). Optionnel (null → événement ignoré). */
+  onModulesChanged?(modules: string[]): void;
 }
 
 export interface RestDocumentsDeps {
@@ -169,6 +173,11 @@ export class RestDocumentController {
       es.onmessage = (e) => { try {
         const d = JSON.parse(e.data);
         if (!d || (d.origin && d.origin === this.adapter.clientId)) return;   // NOTRE propre écriture → on ignore (pas de reload)
+        // Événement d'un MODULE (interventions/certs) : bases SÉPARÉES, hors révision du document → on ne
+        // recharge RIEN (le ReloadPlanner ignore ce marqueur), on rafraîchit seulement les PASTILLES d'onglet
+        // (throttlé côté hôte). Un événement de module ne porte pas de `rev` → il n'entre pas dans la branche ci-dessous.
+        const modules = (d.changeset && Array.isArray(d.changeset.modules)) ? d.changeset.modules.filter((m: unknown): m is string => typeof m === "string") : [];
+        if (modules.length) this.host.onModulesChanged?.(modules);
         if (typeof d.rev === "number" && d.rev > this.adapter.docRev) {
           this.lastBy = d.by || null;
           // accumule le périmètre de CET événement avec ceux déjà en attente (plusieurs écritures peuvent tomber

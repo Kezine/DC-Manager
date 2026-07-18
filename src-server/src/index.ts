@@ -61,13 +61,13 @@ const vm = VmModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as 
 // métadonnées + blobs chiffrés client — aucune clé d'environnement requise, cf. CertsModule).
 // PONT vers notify (typage structurel, comme vm) : le veilleur d'échéances signale cert-expiry
 // (seuils 30/14/7 j) et clôt au renouvellement/révocation/suppression.
-const certs = CertsModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("certs"),
+const certs = CertsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("certs"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
 // Interventions/incidents (objets liés aux équipements/VMs/spares — aucune clé d'environnement requise,
 // base interventions.db dédiée, cf. InterventionsModule). PONT vers notify (typage structurel, comme
 // vm/certs) : le veilleur de rappels signale intervention-reminder (paliers 24 h/1 h/heure H) et clôt
 // dès qu'un objet démarre/se clôt/s'annule ou est supprimé.
-const interventions = InterventionsModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("interventions"),
+const interventions = InterventionsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("interventions"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
 new Server({ docs, auth, live, resolver: userResolver, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), notify.extension(), certs.extension(), interventions.extension()] }).listen(PORT);
 vm.start();   // synchros périodiques (interval_sec > 0) — après l'écoute : le serveur répond pendant une 1re synchro lente

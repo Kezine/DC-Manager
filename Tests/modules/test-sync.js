@@ -46,6 +46,13 @@ module.exports = async () => {
     ck.eq(JSON.stringify(merged.collections), JSON.stringify(["racks", "cables"]), "merge : union dédupliquée des collections");
     ck.eq(merged.meta && merged.images, true, "merge : drapeaux meta/images en OU");
     ck.eq(Changeset.merge(Changeset.full(), Changeset.empty()).full, true, "merge : full domine");
+    // Marqueur MODULE (interventions/certs) : bases SÉPARÉES → aucun changement de collection/méta/image du cœur,
+    // juste le marqueur `modules` (rafraîchit les pastilles d'onglet côté client).
+    const mod = Changeset.modules(["interventions"]);
+    ck.eq(mod.full, false, "Changeset.modules : full=false");
+    ck.eq(JSON.stringify(mod.collections), "[]", "Changeset.modules : aucune collection cœur");
+    ck.eq(mod.meta || mod.images, false, "Changeset.modules : ni méta ni image");
+    ck.eq(JSON.stringify(mod.modules), JSON.stringify(["interventions"]), "Changeset.modules : marqueur porté");
   }
   });
 
@@ -70,6 +77,12 @@ module.exports = async () => {
     const fullPlan = planner.plan(Changeset.full());
     ck.eq(fullPlan.refetchCollections, null, "plan : full → refetch null (tout le document)");
     ck.eq(fullPlan.threeRebuild, "geometry", "plan : full → geometry");
+    // TOLÉRANCE marqueur MODULE : un changeset porteur du SEUL `modules` (événement interventions/certs) est
+    // IGNORÉ par le cœur → aucun refetch de collection, aucun rebuild 3D, ni méta ni image (badges seulement).
+    const modPlan = planner.plan(Changeset.modules(["interventions", "certs"]));
+    ck.eq(JSON.stringify(modPlan.refetchCollections), "[]", "plan : marqueur modules → refetch [] (rien à recharger)");
+    ck.eq(modPlan.threeRebuild, "none", "plan : marqueur modules → aucun rebuild 3D");
+    ck.eq(modPlan.refreshMeta || modPlan.refreshImages, false, "plan : marqueur modules → ni méta ni image");
   }
   });
 };

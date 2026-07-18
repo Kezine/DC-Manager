@@ -18,6 +18,11 @@ export interface DocumentChangeset {
   meta: boolean;
   /** Au moins une image de façade a changé. */
   images: boolean;
+  /** MARQUEUR d'écriture dans un MODULE amovible (ex. `["interventions"]`, `["certs"]`). Ces bases sont
+      SÉPARÉES du document cœur (hors révision) : leur événement live sert UNIQUEMENT à rafraîchir les
+      PASTILLES d'onglet côté client — le `ReloadPlanner` du cœur l'IGNORE (aucune collection à recharger).
+      Optionnel : une écriture du cœur ne le pose jamais. */
+  modules?: string[];
 }
 
 /** Fabrique / fusion de changesets (méthodes statiques regroupées — cf. CLAUDE.md). */
@@ -30,6 +35,13 @@ export class Changeset {
   /** Changeset « tout » : repli sûr quand le périmètre est inconnu (→ rechargement total). */
   static full(): DocumentChangeset {
     return { full: true, collections: [], meta: true, images: true };
+  }
+
+  /** Changeset MODULE (interventions/certs…) : AUCUN changement de collection/méta/image du cœur — juste le
+      marqueur `modules` pour rafraîchir les pastilles d'onglet. Le `ReloadPlanner` le traite comme « rien »
+      (refetch [], threeRebuild none). */
+  static modules(names: string[]): DocumentChangeset {
+    return { full: false, collections: [], meta: false, images: false, modules: names.slice() };
   }
 
   /** Normalise une valeur reçue (réseau, donc non fiable) en `DocumentChangeset` ; `null`/forme invalide → « tout ».

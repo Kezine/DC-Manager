@@ -169,6 +169,11 @@
     font-size: 10px;
     color: var(--fg-dim);
   }
+  /* Pastilles en mode ALERTE (cf. Shell.refreshCounts / ShellView.countClass) : bordure + texte teintés, fond
+     transparent (même langage visuel que les pills sémantiques). warn = attention (ex. certificats expirants ≤ 30 j) ;
+     err = critique (ex. interventions ouvertes critiques, certificats déjà expirés). */
+  .tab-count.warn { background: transparent; border-color: var(--warn); color: var(--warn); }
+  .tab-count.err { background: transparent; border-color: var(--err); color: var(--err); }
 
   /* Onglet en ICÔNE (barre desktop) : l'icône (span .gi) remplace le texte ; taille alignée sur les autres icônes
      de la topbar (.icon-btn svg = 16px). Le libellé reste porté par title + aria-label (a11y). Le soulignement de

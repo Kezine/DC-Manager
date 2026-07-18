@@ -15,8 +15,12 @@ export interface ShellView {
   parent?: string;
   /** Pour kind:"group" : noms des sous-vues (kind:"secondary", parent = ce groupe) déroulées par l'onglet. */
   children?: string[];
-  /** Compteur affiché en badge (onglet topbar + tout lien qui pointe vers cette vue). */
+  /** Compteur affiché en badge (onglet topbar + tout lien qui pointe vers cette vue). Badge MASQUÉ à 0
+      (pas de pastille « 0 » : bruit / pas d'alerte). */
   count?: () => number;
+  /** Teinte d'ALERTE de la pastille (null = neutre) : "warn" (attention) ou "err" (critique). Évaluée à chaque
+      `refreshCounts`. Ex. interventions ouvertes CRITIQUES → err ; certificats expirés → err, expirants → warn. */
+  countClass?: () => string | null;
   /** Icône SVG (constante du registre `ui/Icons`) de l'onglet. Sur la barre DESKTOP elle REMPLACE le texte
       (onglet icône seule → `title` + `aria-label` = `label`) ; dans les menus déroulants (responsive, groupes)
       elle PRÉCÈDE le libellé texte. Absente → repli sur le texte (comportement historique). */
@@ -639,9 +643,18 @@ export class Shell {
     this.refreshCounts();
   }
 
-  /** Met à jour tous les badges de comptage (onglets topbar + liens d'en-tête). */
+  /** Met à jour tous les badges de comptage (onglets topbar + liens d'en-tête) : valeur, teinte d'alerte
+      (warn/err) et VISIBILITÉ (masqué à 0 — pas de pastille « 0 »). */
   refreshCounts(): void {
-    this.countBadges.forEach(({ name, el }) => { const v = this.views.get(name); if (v && v.def.count) el.textContent = String(v.def.count()); });
+    this.countBadges.forEach(({ name, el }) => {
+      const v = this.views.get(name); if (!v || !v.def.count) return;
+      const n = v.def.count();
+      el.textContent = String(n);
+      el.style.display = n > 0 ? "" : "none";   // pastille masquée à 0 (bruit / aucune alerte)
+      const cls = v.def.countClass ? v.def.countClass() : null;
+      el.classList.toggle("warn", cls === "warn");
+      el.classList.toggle("err", cls === "err");
+    });
   }
 
   /* ---- chrome : statut / nom de document / undo-redo ---- */
