@@ -22,6 +22,7 @@ import {
   RACK_EAR_MM
 } from "../../domain/constants";
 import { Schema } from "../../../src-shared/Schema";   // types MIME d'images acceptés — liste PARTAGÉE (le serveur applique la même)
+import { I18n } from "../../i18n/I18n";
 
 export class FormBase {
   /** Bibliothèque d'images de façade (injectée au boot) — singleton applicatif (hors modèle). */
@@ -48,17 +49,19 @@ export class FormBase {
   }
   /** Libellé du préréglage façade (bouton de l'éditeur de perspective). */
   protected static faceImageRatioLabel(face: string, u: number, withEars: boolean): string {
-    return "Façade " + Math.max(1, u || 1) + "U" + (face === "front" ? (withEars ? " · avec oreilles" : " · sans oreilles") : " · arrière");
+    const uu = Math.max(1, u || 1);
+    if (face !== "front") return I18n.t("forms.faceRatio.rear", { u: uu });
+    return I18n.t(withEars ? "forms.faceRatio.frontEars" : "forms.faceRatio.frontNoEars", { u: uu });
   }
   protected static configureBreakout(store: Store): Promise<{ name: string; trunkTypeId: string; laneTypeId: string; count: number } | null> {
     const types = store.all("portTypes").slice().sort((a: any, b: any) => (a.family || "").localeCompare(b.family || "") || a.name.localeCompare(b.name));
-    if (!types.length) { Notify.toast("Créez d'abord des types de port (QSFP+ et SFP+).", "err"); return Promise.resolve(null); }
+    if (!types.length) { Notify.toast(I18n.t("forms.breakout.needPortTypes"), "err"); return Promise.resolve(null); }
     const connOf = (t: any) => (t.connector || t.family || "").toUpperCase();
     const guessTrunk = types.find((t: any) => connOf(t).startsWith("QSFP")) || types[0];
     const guessLane = types.find((t: any) => connOf(t) === "SFP+") || types.find((t: any) => connOf(t).startsWith("SFP")) || types[0];
     // regroupés par FAMILLE (<optgroup>) ; le connecteur, s'il diffère de la famille, reste dans le libellé.
     const typeOpts = types.map((t: any) => ({ value: t.id, label: t.name + (t.connector && t.connector !== t.family ? " (" + t.connector + ")" : ""), group: t.family || "(sans famille)" }));
-    const nameI = FormControls.text("QSFP1", "ex. QSFP1");
+    const nameI = FormControls.text("QSFP1", I18n.t("forms.breakout.namePlaceholder"));
     const trunkSel = FormControls.select(typeOpts, guessTrunk ? guessTrunk.id : "");
     const laneSel = FormControls.select(typeOpts, guessLane ? guessLane.id : "");
     const spanWrap = document.createElement("div");
@@ -72,33 +75,33 @@ export class FormBase {
         const h = document.createElement("div"); h.className = "form-hint";
         if (Number.isInteger(ratio) && BREAKOUT_SPANS.includes(ratio)) {
           span = ratio;
-          h.innerHTML = "Nombre de lanes : <b>×" + ratio + "</b>  (" + Html.escape(tk.s) + " ÷ " + Html.escape(ln.s) + " = " + ratio + " — breakout standard).";
+          h.innerHTML = I18n.t("forms.breakout.lanes", { n: ratio, trunk: Html.escape(tk.s), lane: Html.escape(ln.s) });
         } else {
           span = null; h.style.color = "var(--err)";
-          h.textContent = "Combinaison non standard : " + tk.s + " ÷ " + ln.s + " = " + (Number.isInteger(ratio) ? ratio : ratio.toFixed(2)) + ". Un breakout valide impose débit(trunk) = N × débit(lane) avec N ∈ {" + BREAKOUT_SPANS.join(", ") + "}.";
+          h.textContent = I18n.t("forms.breakout.nonStandard", { trunk: tk.s, lane: ln.s, ratio: (Number.isInteger(ratio) ? ratio : ratio.toFixed(2)), spans: "{" + BREAKOUT_SPANS.join(", ") + "}" });
         }
         spanWrap.appendChild(h);
       } else {   // débit non renseigné (fibre, USB…) → choix manuel
-        const sel = FormControls.select(BREAKOUT_SPANS.map((n) => ({ value: String(n), label: "×" + n + " lanes" })), String(span && BREAKOUT_SPANS.includes(span) ? span : 4));
+        const sel = FormControls.select(BREAKOUT_SPANS.map((n) => ({ value: String(n), label: I18n.t("forms.breakout.laneOpt", { n }) })), String(span && BREAKOUT_SPANS.includes(span) ? span : 4));
         span = parseInt(sel.value, 10);
         sel.onchange = () => { span = parseInt(sel.value, 10); };
-        spanWrap.appendChild(FormControls.fieldRow("Nombre de lanes", sel, "Débit non renseigné sur ces types → choix manuel parmi les breakouts standard."));
+        spanWrap.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.lanesField"), sel, I18n.t("forms.breakout.lanesManualHint")));
       }
     };
     trunkSel.onchange = refreshSpan; laneSel.onchange = refreshSpan; refreshSpan();
     return Dialog.custom({
-      title: "Nouveau breakout", confirmLabel: "Créer",
+      title: I18n.t("forms.breakout.title"), confirmLabel: I18n.t("forms.breakout.create"),
       build: (root) => {
-        root.appendChild(FormControls.fieldRow("Nom du trunk", nameI, "Les lanes seront nommées « nom/1 », « nom/2 », …"));
-        root.appendChild(FormControls.fieldRow("Type du trunk (connecteur physique)", trunkSel, "Ex. 400G QSFP-DD — le trunk ne porte pas de câble lui-même."));
-        root.appendChild(FormControls.fieldRow("Type des lanes", laneSel, "Identique pour TOUTES les lanes — chacune porte un câble 1:1."));
+        root.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.nameField"), nameI, I18n.t("forms.breakout.nameHint")));
+        root.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.trunkField"), trunkSel, I18n.t("forms.breakout.trunkHint")));
+        root.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.laneField"), laneSel, I18n.t("forms.breakout.laneHint")));
         root.appendChild(spanWrap);
         return {
           validate: () => {
-            if (!nameI.value.trim()) return "Donnez un nom au trunk.";
-            if (!trunkSel.value) return "Choisissez le type du trunk.";
-            if (!laneSel.value) return "Choisissez le type des lanes.";
-            if (!span) return "Combinaison trunk/lane non standard : ajustez les types (débit trunk = N × débit lane, N ∈ {" + BREAKOUT_SPANS.join(", ") + "}).";
+            if (!nameI.value.trim()) return I18n.t("forms.breakout.errName");
+            if (!trunkSel.value) return I18n.t("forms.breakout.errTrunk");
+            if (!laneSel.value) return I18n.t("forms.breakout.errLane");
+            if (!span) return I18n.t("forms.breakout.errCombo", { spans: "{" + BREAKOUT_SPANS.join(", ") + "}" });
             return true as const;
           },
           collect: () => ({ name: nameI.value.trim(), trunkTypeId: trunkSel.value, laneTypeId: laneSel.value, count: span as number }),
@@ -234,7 +237,7 @@ export class FormBase {
           if (add) set.add(k); else { if (occ.has(k)) { skipped++; continue; } set.delete(k); }
         }
       cells.set([...set]);   // TAMPON local — persisté au clic sur « Enregistrer » du formulaire de baie
-      if (skipped) Notify.toast(skipped + " cellule(s) conservée(s) : un pin y est posé.", "err");
+      if (skipped) Notify.toast(I18n.t("forms.cap.kept", { count: skipped }), "err");
       draw();
     };
     // « Supprimer tout » : retire tous les trous de ce capot. Les cellules portant un PIN sont conservées (comme la
@@ -243,7 +246,7 @@ export class FormBase {
       const occ = occSet();
       if (!cellsSet().size) return;   // rien à retirer
       cells.set([...occ]);   // TAMPON local — persisté au clic sur « Enregistrer » du formulaire de baie
-      if (occ.size) Notify.toast(occ.size + " cellule(s) conservée(s) : un pin y est posé.", "err");
+      if (occ.size) Notify.toast(I18n.t("forms.cap.kept", { count: occ.size }), "err");
       draw();
     };
     const onDown = (e: MouseEvent) => {
@@ -273,7 +276,7 @@ export class FormBase {
     draw();
     const bar = document.createElement("div"); bar.style.cssText = "display:flex;justify-content:center;margin-top:6px";
     const clearBtn = document.createElement("button"); clearBtn.type = "button"; clearBtn.className = "btn btn-ghost btn-sm";
-    clearBtn.textContent = "Supprimer tout"; clearBtn.title = "Retirer tous les trous de ce capot (les cellules portant un pin sont conservées)";
+    clearBtn.textContent = I18n.t("forms.cap.clearAll"); clearBtn.title = I18n.t("forms.cap.clearAllTitle");
     clearBtn.onclick = () => { clearAll(); };
     bar.appendChild(clearBtn); wrap.appendChild(bar);
     return { el: wrap, refresh: draw };
@@ -299,7 +302,7 @@ export class FormBase {
   }
   protected static validImageFile(f: File | null): File | null {
     if (!f) return null;
-    if (!Schema.isImageMime(f.type)) { Notify.toast("Format non supporté (PNG / JPEG / WebP).", "err"); return null; }
+    if (!Schema.isImageMime(f.type)) { Notify.toast(I18n.t("forms.image.badFormat"), "err"); return null; }
     return f;
   }
   protected static sideGrid(store: Store, scene: RackScene, rack: any, opts: any): { el: HTMLElement; refresh: () => void } {
@@ -310,13 +313,13 @@ export class FormBase {
       const fitsW = (opts.width || 0) <= colW + 0.5, sel = opts.selected;
       const occ = scene.sideOccupants(rack.id, face, null);
       const columns: Array<{ lr: string; col: number }> = []; ["left", "right"].forEach((lr) => { for (let c = 0; c < cols; c++) columns.push({ lr, col: c }); });
-      const colLabel = (lr: string, c: number) => (lr === "left" ? "G" : "D") + (cols > 1 ? String(c + 1) : "");
+      const colLabel = (lr: string, c: number) => (lr === "left" ? I18n.t("forms.side.left") : I18n.t("forms.side.right")) + (cols > 1 ? String(c + 1) : "");
       const blockAt = (lr: string, col: number, u: number) => occ.find((e: any) => e.id !== opts.exceptEqId
         && ((e.side_lr === "right" ? "right" : "left") === lr) && ((e.side_col === 1 && cols > 1) ? 1 : 0) === col
         && u >= Math.max(1, e.side_u | 0) && u < Math.max(1, e.side_u | 0) + RackGeometry.sideEquipHeightU(e));
       const tops: number[] = []; for (let u = 1; u + heightU - 1 <= uMax; u += SIDE_U_STEP) tops.push(u);
       let html = '<table class="rack-grid side-grid"><thead><tr><th class="ru">U</th>';
-      columns.forEach((cc, i) => { html += `<th>${colLabel(cc.lr, cc.col)}</th>`; if (i === cols - 1) html += '<th class="side-mid">baie</th>'; });
+      columns.forEach((cc, i) => { html += `<th>${colLabel(cc.lr, cc.col)}</th>`; if (i === cols - 1) html += `<th class="side-mid">${I18n.t("forms.side.bay")}</th>`; });
       html += "</tr></thead><tbody>";
       for (let ri = tops.length - 1; ri >= 0; ri--) {
         const uTop = tops[ri];
@@ -326,19 +329,19 @@ export class FormBase {
           const isSel = sel && sel.lr === cc.lr && sel.col === cc.col && uTop >= sel.u && uTop < sel.u + heightU;
           if (blk) {
             const hU = RackGeometry.sideEquipHeightU(blk), range = "U" + blk.side_u + (hU > 1 ? "–U" + (blk.side_u + hU - 1) : "");
-            html += `<td class="rcell occ" title="${Html.escape((blk.name || "(équipement)") + " · " + range + " · marge " + (cc.lr === "left" ? "gauche" : "droite"))}" style="border-left:3px solid var(--accent);"><div class="rcell-in compact"><span class="rcell-name">${Html.escape(blk.name || "")}</span></div></td>`;
+            html += `<td class="rcell occ" title="${Html.escape((blk.name || I18n.t("forms.ph.equipment")) + " · " + range + " · " + (cc.lr === "left" ? I18n.t("forms.side.marginLeft") : I18n.t("forms.side.marginRight")))}" style="border-left:3px solid var(--accent);"><div class="rcell-in compact"><span class="rcell-name">${Html.escape(blk.name || "")}</span></div></td>`;
           } else {
             const free = fitsW && scene.sideSlotFree(rack.id, face, cc.lr, cc.col, uTop, heightU, opts.exceptEqId || null);
             const cls = "rcell free" + (isSel ? " chosen mount-face" : (free ? " placeable" : ""));
             const attrs = free ? `data-pick-lr="${cc.lr}" data-pick-col="${cc.col}" data-pick-u="${uTop}"` : "";
-            html += `<td class="${cls}" ${attrs}>${isSel ? '<div class="rcell-in compact"><span class="rcell-name">ici</span></div>' : ""}</td>`;
+            html += `<td class="${cls}" ${attrs}>${isSel ? `<div class="rcell-in compact"><span class="rcell-name">${I18n.t("forms.side.here")}</span></div>` : ""}</td>`;
           }
           if (i === cols - 1) html += '<td class="side-mid"></td>';
         });
         html += "</tr>";
       }
       html += "</tbody></table>";
-      if (!fitsW) html += `<div class="form-hint" style="color:var(--warn);">L'équipement (largeur ${opts.width || 0} mm) dépasse la largeur de colonne (${Math.round(colW)} mm).</div>`;
+      if (!fitsW) html += `<div class="form-hint" style="color:var(--warn);">${I18n.t("forms.side.tooWide", { w: opts.width || 0, col: Math.round(colW) })}</div>`;
       wrap.innerHTML = html;
       if (opts.onPick) wrap.querySelectorAll("[data-pick-u]").forEach((c: any) => {
         c.onclick = () => opts.onPick(c.getAttribute("data-pick-lr"), parseInt(c.getAttribute("data-pick-col"), 10), parseInt(c.getAttribute("data-pick-u"), 10));
@@ -391,7 +394,7 @@ export class FormBase {
     const wrap = document.createElement("div"); wrap.className = "rack-grid-wrap";
     const faceBadge = (depth: string, side: string, f: string) => {
       if (!dual) return "";
-      if (depth === "full") return f === side ? "▸ " + this.faceLabel(side) : this.faceLabel(f) + " (dos)";
+      if (depth === "full") return f === side ? "▸ " + this.faceLabel(side) : this.faceLabel(f) + I18n.t("forms.rack.rearSuffix");
       return "▸ " + this.faceLabel(side);
     };
     const cellInner = (iconInner: string, name: string, sub: string, height: number) => {
@@ -416,11 +419,11 @@ export class FormBase {
               const sub = (isEq ? "" : RackItemKinds.label(info.kind) + " · ") + info.height + " U · " + this.mountDepthLabel(info) + (badge ? " · " + badge : "");
               const uRange = "U" + info.top + (info.height > 1 ? "–U" + (info.top + info.height - 1) : "");
               const title = Html.escape((info.label || "") + " · " + uRange + " · " + info.height + " U");
-              html += `<td class="rcell occ${mount ? " mount-face" : " back-face"}" rowspan="${info.height}" title="${title}" style="border-left:3px solid ${col};"><button class="row-btn danger" data-rm-kind="${info.kind}" data-rm-id="${info.id}" title="Retirer">×</button>${cellInner(iconInner, info.label, sub, info.height)}</td>`;
+              html += `<td class="rcell occ${mount ? " mount-face" : " back-face"}" rowspan="${info.height}" title="${title}" style="border-left:3px solid ${col};"><button class="row-btn danger" data-rm-kind="${info.kind}" data-rm-id="${info.id}" title="${I18n.t("forms.rack.remove")}">×</button>${cellInner(iconInner, info.label, sub, info.height)}</td>`;
             }
             return;   // cellule couverte par un rowspan
           }
-          html += `<td class="rcell free"><button class="btn btn-ghost btn-sm rcell-add" data-add-u="${u}" data-add-face="${f}" title="Monter un élément ici">+</button></td>`;
+          html += `<td class="rcell free"><button class="btn btn-ghost btn-sm rcell-add" data-add-u="${u}" data-add-face="${f}" title="${I18n.t("forms.rack.mount")}">+</button></td>`;
         });
         html += "</tr>";
       }
@@ -436,6 +439,6 @@ export class FormBase {
   /** Création / édition d'un plan d'étage (réplique `openFloorForm`). `opts.pick` = mode création (sélecteurs
       bâtiment+étage, étages existants exclus) ; `opts.onPicked(loc, fl)` = navigation après création. */
 
-  protected static faceLabel(id: string): string { return (RACK_FACES.find((f) => f.id === id) || { label: id }).label; }
+  protected static faceLabel(id: string): string { const f = RACK_FACES.find((x) => x.id === id); return f ? I18n.t(f.labelKey) : (id || "—"); }
   protected static mountDepthLabel(e: any): string { return (e && e.depth_mm != null) ? (e.depth_mm + " mm") : Depths.label((e && e.depth) || "full"); }
 }

@@ -23,6 +23,7 @@ import { Dialog } from "../ui/Dialog";
 import { Download } from "../core/Download";
 import { Id } from "../core/Id";
 import { Log } from "../core/Log";
+import { I18n } from "../i18n/I18n";
 
 const W = window as any;
 const JSON_TYPES = [{ description: "DC Manager JSON", accept: { "application/json": [".json"] } }];
@@ -72,8 +73,8 @@ export class FileDocumentController {
     this.fileInput.addEventListener("change", async () => {
       const f = this.fileInput.files && this.fileInput.files[0]; this.fileInput.value = "";
       if (!f) return;
-      try { await this.loadFromText(await f.text(), f.name, null); Notify.toast("Fichier « " + f.name + " » chargé"); }
-      catch (e: any) { if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err"); else Notify.toast("Fichier invalide (JSON attendu).", "err"); }
+      try { await this.loadFromText(await f.text(), f.name, null); Notify.toast(I18n.t("app.file.loaded", { name: f.name })); }
+      catch (e: any) { if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err"); else Notify.toast(I18n.t("app.common.invalidJson"), "err"); }
     });
   }
 
@@ -139,7 +140,7 @@ export class FileDocumentController {
   /** EXPORT du document en JSON autonome (images inline) — disponible dans TOUS les modes (y compris API : version offline). */
   async exportJsonDownload(): Promise<void> {
     Download.text(this.docFileName(), await this.snapshotWithImages(), "application/json");
-    Notify.toast("Document exporté (" + this.docFileName() + ")");
+    Notify.toast(I18n.t("app.file.exportedJson", { name: this.docFileName() }));
   }
   /** EXPORT VISUALISEUR AUTONOME : récupère l'app (HTML mono-fichier inliné) et y EMBARQUE le document courant →
       fichier .html LECTURE SEULE, consultable hors-ligne sans serveur (ouverture en file://). On retire la config
@@ -147,15 +148,15 @@ export class FileDocumentController {
   async exportStandalone(): Promise<void> {
     let html: string;
     try { html = await (await fetch(location.href, { cache: "no-store" })).text(); }
-    catch (e: any) { Notify.toast("Export HTML impossible (récupération de l'app) : " + ((e && e.message) || e), "err"); return; }
-    if (!/__DCMANAGER_EMBED__|<script/i.test(html)) { Notify.toast("Export HTML indisponible : l'app n'est pas en build autonome.", "err"); return; }
+    catch (e: any) { Notify.toast(I18n.t("app.file.exportHtmlFetchError", { error: (e && e.message) || e }), "err"); return; }
+    if (!/__DCMANAGER_EMBED__|<script/i.test(html)) { Notify.toast(I18n.t("app.file.exportHtmlUnavailable"), "err"); return; }
     const json = (await this.snapshotWithImages()).split("</").join("<\\/");           // neutralise un éventuel </script> dans les données
     html = html.replace(/<script>\s*window\.__DCMANAGER_CONFIG__[\s\S]*?<\/script>/i, "");   // retire la config API injectée par le serveur
     const embed = "<script>window.__DCMANAGER_EMBED__=" + json + ";</script>";
     html = html.replace(/<head([^>]*)>/i, (_m, a) => `<head${a}>${embed}`);
     const fname = Download.safeName(this.store.meta.docName || "dc-manager") + "-viewer.html";
     Download.text(fname, html, "text/html");
-    Notify.toast("Visualiseur autonome exporté (" + fname + ")");
+    Notify.toast(I18n.t("app.file.exportedStandalone", { name: fname }));
   }
   async writeToHandle(handle: any): Promise<void> {
     this.ensureFileId();
@@ -191,39 +192,39 @@ export class FileDocumentController {
     this.flog("associateCompanion", { file: fh.name, docKey, bundleKey, alreadyPaired, nameChanged, regenKey: !!opts.regenKey, images: this.imageStore.count() });
     if (opts.regenKey || !alreadyPaired) {
       this.store.meta.facesKey = "fk-" + Id.uid(); await this.store.persistMeta();
-      try { await this.writeFacesToHandle(fh); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Clé non écrite dans le compagnon : " + (e.message || e), "err"); }
-      if (this.handle) { try { await this.writeToHandle(this.handle); } catch (e: any) { this.session.markDirty(); if (e && e.message !== "permission-refusée" && e.name !== "AbortError") Notify.toast("Clé non écrite dans le .json : " + (e.message || e), "err"); } }
+      try { await this.writeFacesToHandle(fh); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.keyNotWrittenCompanion", { error: e.message || e }), "err"); }
+      if (this.handle) { try { await this.writeToHandle(this.handle); } catch (e: any) { this.session.markDirty(); if (e && e.message !== "permission-refusée" && e.name !== "AbortError") Notify.toast(I18n.t("app.file.keyNotWrittenJson", { error: e.message || e }), "err"); } }
       else this.session.markDirty();
     } else if (nameChanged) {   // déjà apparié (clé OK), seul le NOM du compagnon change → on persiste le nom dans le .json
       await this.store.persistMeta();
-      if (this.handle) { try { await this.writeToHandle(this.handle); } catch (e: any) { this.session.markDirty(); if (e && e.message !== "permission-refusée" && e.name !== "AbortError") Notify.toast("Nom du compagnon non écrit dans le .json : " + (e.message || e), "err"); } }
+      if (this.handle) { try { await this.writeToHandle(this.handle); } catch (e: any) { this.session.markDirty(); if (e && e.message !== "permission-refusée" && e.name !== "AbortError") Notify.toast(I18n.t("app.file.companionNameNotWritten", { error: e.message || e }), "err"); } }
       else this.session.markDirty();
     }
     this.imageStore.setLoadedKey(this.store.meta.facesKey || null);   // la bibliothèque en IndexedDB = ce document
-    this.host.refreshChrome(); this.host.refreshActive(); Notify.toast("Images chargées → " + fh.name);
+    this.host.refreshChrome(); this.host.refreshActive(); Notify.toast(I18n.t("app.file.imagesLoaded", { name: fh.name }));
   }
   /** Charge interactivement un compagnon pour le document courant (génère toujours une nouvelle clé). */
   private async loadCompanionFileInteractive(): Promise<void> {
     if (!this.hasFsApi) return;
     try { const [fh] = await W.showOpenFilePicker({ startIn: this.handle || undefined, types: FACES_TYPES }); await this.associateCompanion(fh, { regenKey: true }); }
-    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
+    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.imagesNotLoaded", { error: e.message || e }), "err"); }
   }
   /** « Ouvrir un fichier de faces » (onglet Images) : mode FICHIER → picker natif ; mode DOSSIER → liste les .nmfb du dossier. */
   async openFacesFile(): Promise<void> {
     this.flog("openFacesFile", { dirMode: this.dirMode(), dir: this.dirHandle && this.dirHandle.name });
-    if (!this.hasFsApi) { Notify.toast("Indisponible : navigateur sans File System Access API.", "err"); return; }
+    if (!this.hasFsApi) { Notify.toast(I18n.t("app.file.unavailableNoFsApi"), "err"); return; }
     if (!this.dirMode()) { await this.loadCompanionFileInteractive(); return; }   // mode fichier → sélecteur de fichier
     let dir = this.dirHandle;
-    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn: await this.startDirHandle() }); this.dirHandle = dir; } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non ouvert : " + (e.message || e), "err"); return; } }
+    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn: await this.startDirHandle() }); this.dirHandle = dir; } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.dirNotOpened", { error: e.message || e }), "err"); return; } }
     const names: string[] = [];
     try { for await (const entry of dir.values()) { if (entry.kind === "file" && /\.nmfb$/i.test(entry.name)) names.push(entry.name); } } catch (_) { /* énumération impossible */ }
     this.flog("openFacesFile: .nmfb du dossier", names);
-    if (!names.length) { Notify.toast("Aucun fichier de faces (.nmfb) dans ce dossier.", "err"); return; }
+    if (!names.length) { Notify.toast(I18n.t("app.file.noFacesInDir"), "err"); return; }
     names.sort((a, b) => a.localeCompare(b));
-    const name = (names.length === 1) ? names[0] : await this.chooseFileInDir(names, "Choisir un fichier de faces", Icons.IMAGE);
+    const name = (names.length === 1) ? names[0] : await this.chooseFileInDir(names, I18n.t("app.file.chooseFacesFile"), Icons.IMAGE);
     if (!name) return;
     try { const fh = await dir.getFileHandle(name); await this.associateCompanion(fh); }
-    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
+    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.imagesNotLoaded", { error: e.message || e }), "err"); }
   }
 
   /* ---- IMPORT / EXPORT EXPLICITE de la BIBLIOTHÈQUE d'images (.nmfb) — portage manuel, disponible dans TOUS les
@@ -231,29 +232,29 @@ export class FileDocumentController {
          automatiquement à côté du .json. Ici : un export téléchargeable + un import qui ÉCRASE la bibliothèque. ---- */
   /** EXPORT : télécharge toute la bibliothèque au format `.nmfb` (blobs hydratés, donc fonctionne aussi en REST). */
   async exportFacesLibrary(): Promise<void> {
-    if (this.imageStore.count() === 0) { Notify.toast("Aucune image de façade à exporter.", "err"); return; }
+    if (this.imageStore.count() === 0) { Notify.toast(I18n.t("app.file.noFacesToExport"), "err"); return; }
     try {
       const blob = await this.imageStore.serializeBundle(this.store.meta.facesKey || null);
       const base = Download.safeName(this.store.meta.docName || "dc-manager");
       Download.blob(base + "-faces.nmfb", blob);
-      Notify.toast(this.imageStore.count() + " image(s) exportée(s) → " + base + "-faces.nmfb");
-    } catch (e: any) { Notify.toast("Export des images impossible : " + ((e && e.message) || e), "err"); }
+      Notify.toast(I18n.t("app.file.imagesExported", { n: this.imageStore.count(), name: base + "-faces.nmfb" }));
+    } catch (e: any) { Notify.toast(I18n.t("app.file.imagesExportError", { error: (e && e.message) || e }), "err"); }
   }
   /** IMPORT : ÉCRASE la bibliothèque par le contenu d'un `.nmfb` (ids conservés). Avertit AVANT : les références
       d'équipement vers des images absentes du fichier importé deviennent orphelines → faces à ré-assigner. */
   async importFacesLibrary(): Promise<void> {
     const existing = this.imageStore.count();
     const ok = await Dialog.confirm({
-      title: "Importer des images (écrase la bibliothèque) ?",
-      message: (existing ? `La bibliothèque actuelle (${existing} image(s)) sera ENTIÈREMENT REMPLACÉE par le contenu du fichier. ` : "")
-        + "Les équipements dont l'image n'existe pas dans le fichier importé perdront leur face : il faudra RÉ-ASSIGNER ces faces ensuite. Continuer ?",
-      confirmLabel: "Importer et écraser", cancelLabel: "Annuler", danger: true,
+      title: I18n.t("app.file.importConfirmTitle"),
+      message: (existing ? I18n.t("app.file.importConfirmPrefix", { n: existing }) : "")
+        + I18n.t("app.file.importConfirmBody"),
+      confirmLabel: I18n.t("app.file.importConfirmBtn"), cancelLabel: I18n.t("ui.action.cancel"), danger: true,
     });
     if (!ok) return;
     let buf: ArrayBuffer | null = null;
     if (this.hasFsApi) {
       try { const [fh] = await W.showOpenFilePicker({ startIn: this.handle || undefined, types: FACES_TYPES }); buf = await (await fh.getFile()).arrayBuffer(); }
-      catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Fichier non ouvert : " + (e.message || e), "err"); return; }
+      catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.fileNotOpened", { error: e.message || e }), "err"); return; }
     } else {
       const file = await new Promise<File | null>((resolve) => {
         const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".nmfb,application/octet-stream";
@@ -265,8 +266,8 @@ export class FileDocumentController {
     try {
       const n = await this.imageStore.importBundle(buf);   // remplace + conserve les ids + marque modifié
       this.host.refreshActive();
-      Notify.toast(n + " image(s) importée(s). Ré-assignez les faces des équipements concernés.");
-    } catch (e: any) { Notify.toast("Import des images impossible : " + ((e && e.message) || e), "err"); }
+      Notify.toast(I18n.t("app.file.imagesImported", { n }));
+    } catch (e: any) { Notify.toast(I18n.t("app.file.imagesImportError", { error: (e && e.message) || e }), "err"); }
   }
   /** (Ré)écrit le compagnon. Sans handle connu, en demande un (suggéré à côté du .json). */
   private async saveCompanionFaces(jsonHandle: any): Promise<void> {
@@ -283,7 +284,7 @@ export class FileDocumentController {
       if (this.facesHandle && this.facesHandle.name) this.store.meta.facesFile = this.facesHandle.name;   // garde le nom à jour
       this.imageStore.setLoadedKey(this.store.meta.facesKey || null);
       this.flog("saveCompanionFaces → écrit", this.facesHandle && this.facesHandle.name);
-    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non enregistrées : " + (e.message || e), "err"); this.flog("saveCompanionFaces → échec", e && e.message); }
+    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.imagesNotSaved", { error: e.message || e }), "err"); this.flog("saveCompanionFaces → échec", e && e.message); }
   }
   /** Charge le compagnon depuis `handle`. `interactive` autorise la (re)demande de permission (geste utilisateur) ;
       à false, ne charge QUE si la permission est DÉJÀ accordée (queryPermission → aucune question). Renvoie true si
@@ -358,20 +359,20 @@ export class FileDocumentController {
       const perm = await HandleStore.ensureReadPermission(remembered.handle, true);   // popup natif direct (geste encore actif)
       if (perm === true) { if (await this.tryLoadCompanion(remembered.handle, false, docKey, stillMissing)) return; }   // accordée → charge sans re-demander
       else if (perm === null) {   // le navigateur exige un geste FRAIS → notre confirmation le fournit, puis on re-demande
-        const ok = await Dialog.confirm({ title: "Images de façade", message: "Recharger les images de façade de ce document depuis « " + (remembered.name || this.facesNameFor(jsonHandle ? jsonHandle.name : this.name)) + " » ?", confirmLabel: "Recharger", cancelLabel: "Plus tard" });
+        const ok = await Dialog.confirm({ title: I18n.t("app.file.imagesReloadTitle"), message: I18n.t("app.file.imagesReloadMessage", { name: remembered.name || this.facesNameFor(jsonHandle ? jsonHandle.name : this.name) }), confirmLabel: I18n.t("app.common.reload"), cancelLabel: I18n.t("app.common.later") });
         if (ok && await this.tryLoadCompanion(remembered.handle, true, docKey, stillMissing)) return;
-        if (ok) Notify.toast("Images non rechargées (accès refusé).", "err");
-      } else Notify.toast("Images non rechargées (accès refusé).", "err");   // perm === false : refus explicite → ne pas insister
+        if (ok) Notify.toast(I18n.t("app.file.imagesNotReloaded"), "err");
+      } else Notify.toast(I18n.t("app.file.imagesNotReloaded"), "err");   // perm === false : refus explicite → ne pas insister
       dropStale(); this.facesHandle = null; this.host.refreshActive(); return;
     }
     // 3) aucun compagnon mémorisé → proposer de le sélectionner (un seul picker)
-    const ok = await Dialog.confirm({ title: "Images de façade", message: "Ce document est associé à un fichier compagnon d'images « " + this.facesNameFor(jsonHandle ? jsonHandle.name : this.name) + " ». Le sélectionner maintenant ?", confirmLabel: "Choisir le fichier…", cancelLabel: "Plus tard" });
+    const ok = await Dialog.confirm({ title: I18n.t("app.file.imagesReloadTitle"), message: I18n.t("app.file.companionAssocMessage", { name: this.facesNameFor(jsonHandle ? jsonHandle.name : this.name) }), confirmLabel: I18n.t("app.file.chooseFileBtn"), cancelLabel: I18n.t("app.common.later") });
     if (!ok) {
       if (docKey && this.imageStore.lastLoadedKey && this.imageStore.lastLoadedKey !== docKey) { await this.imageStore.keepOnly(this.store.faceImageRefIds()); this.imageStore.setLoadedKey(null); }
       this.facesHandle = null; this.host.refreshActive(); return;
     }
     try { const [fh] = await W.showOpenFilePicker({ startIn: jsonHandle || undefined, types: FACES_TYPES }); await this.associateCompanion(fh); }
-    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Images non chargées : " + (e.message || e), "err"); }
+    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.imagesNotLoaded", { error: e.message || e }), "err"); }
   }
 
   /* ---- réouverture / ouverture / enregistrement ---- */
@@ -381,39 +382,39 @@ export class FileDocumentController {
     try {
       const granted = await this.ensureWritePermission(dirRec.handle);
       this.flog("reopenLastDir: permission dossier", granted);
-      if (!granted) { Notify.toast("Autorisation du dossier refusée.", "err"); return; }
+      if (!granted) { Notify.toast(I18n.t("app.file.dirPermDenied"), "err"); return; }
       const fh = await dirRec.handle.getFileHandle(dirRec.name);
       this.dirHandle = dirRec.handle;   // avant loadFromText → le compagnon est relu via le dossier
       await this.loadFromText(await (await fh.getFile()).text(), dirRec.name, fh);
       await this.rememberDir(dirRec.handle, dirRec.name);
-      Notify.toast("Rouvert → " + dirRec.name);
+      Notify.toast(I18n.t("app.file.reopened", { name: dirRec.name }));
     } catch (e: any) {
       if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
-      else if (e && e.name === "NotFoundError") { await this.handleStore.clearDir(); this.host.setReopen(null); Notify.toast("Document introuvable dans le dossier — déplacé ou supprimé.", "err"); }
-      else if (e && e.name !== "AbortError") Notify.toast("Erreur de réouverture : " + (e.message || e), "err");
+      else if (e && e.name === "NotFoundError") { await this.handleStore.clearDir(); this.host.setReopen(null); Notify.toast(I18n.t("app.file.docNotFoundInDir"), "err"); }
+      else if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.reopenError", { error: e.message || e }), "err");
     }
   }
   async reopenLast(): Promise<void> {
     if (this.dirMode()) { const d = await this.handleStore.getDir(); this.flog("reopenLast: mode dossier", { found: !!(d && d.handle), json: d && d.name }); if (d && d.handle && d.name) { await this.reopenLastDir(d as any); return; } }   // dossier mémorisé → réouverture dossier
     let rec = this.lastRec; if (!rec) rec = await this.handleStore.getLast();
-    if (!rec || !rec.handle) { Notify.toast("Aucun fichier récent à rouvrir.", "err"); this.host.setReopen(null); return; }
+    if (!rec || !rec.handle) { Notify.toast(I18n.t("app.file.noRecentFile"), "err"); this.host.setReopen(null); return; }
     const handle = rec.handle;
     try {
       const perm = await HandleStore.ensureReadPermission(handle, true);
-      if (perm === false) { Notify.toast("Autorisation de lecture refusée.", "err"); return; }
+      if (perm === false) { Notify.toast(I18n.t("app.file.readPermDenied"), "err"); return; }
       const file = await handle.getFile();
       await this.loadFromText(await file.text(), handle.name, handle);   // revendique le fileId, raccroche le handle
-      Notify.toast("Rouvert → " + handle.name);
+      Notify.toast(I18n.t("app.file.reopened", { name: handle.name }));
     } catch (e: any) {
       if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
-      else if (e && e.name === "NotFoundError") { await this.handleStore.clearLast(); this.lastRec = null; this.host.setReopen(null); Notify.toast("Fichier introuvable — déplacé ou supprimé.", "err"); }
-      else if (e && e.name !== "AbortError") Notify.toast("Erreur de réouverture : " + (e.message || e), "err");
+      else if (e && e.name === "NotFoundError") { await this.handleStore.clearLast(); this.lastRec = null; this.host.setReopen(null); Notify.toast(I18n.t("app.file.fileNotFound"), "err"); }
+      else if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.reopenError", { error: e.message || e }), "err");
     }
   }
   /** En mode fichier (un .json est ouvert), « Ouvrir » propose : autre document JSON OU compagnon d'images. */
   private chooseOpenKind(): Promise<"json" | "companion" | null> {
     return Dialog.custom({
-      title: "Ouvrir un fichier", cancelLabel: "Annuler",
+      title: I18n.t("app.file.openFileTitle"), cancelLabel: I18n.t("ui.action.cancel"),
       build: (root: HTMLElement) => {
         let chosen: string | null = null;
         const confirmBtn = root.closest(".dialog-box")?.querySelector('[data-dlg="confirm"]') as HTMLElement | null;
@@ -429,8 +430,8 @@ export class FileDocumentController {
           b.onclick = () => { chosen = val; confirmBtn?.click(); };
           wrap.appendChild(b);
         };
-        mk("json", Icons.FILE, "Document JSON", "Ouvrir un autre document (remplace le document courant).");
-        mk("companion", Icons.IMAGE, "Fichier compagnon d'images", "Charger un .nmfb et l'associer au document courant.");
+        mk("json", Icons.FILE, I18n.t("app.file.openKindJsonTitle"), I18n.t("app.file.openKindJsonDesc"));
+        mk("companion", Icons.IMAGE, I18n.t("app.file.openKindCompanionTitle"), I18n.t("app.file.openKindCompanionDesc"));
         root.appendChild(wrap);
         return { collect: () => chosen, validate: () => true };
       },
@@ -439,7 +440,7 @@ export class FileDocumentController {
   /** Sélection d'un nom de fichier parmi une liste (mode dossier) — listing du contenu pertinent du dossier. */
   private chooseFileInDir(names: string[], title: string, icon: string): Promise<string | null> {
     return Dialog.custom({
-      title, cancelLabel: "Annuler",
+      title, cancelLabel: I18n.t("ui.action.cancel"),
       build: (root: HTMLElement) => {
         let chosen: string | null = null;
         const confirmBtn = root.closest(".dialog-box")?.querySelector('[data-dlg="confirm"]') as HTMLElement | null;
@@ -468,24 +469,24 @@ export class FileDocumentController {
     const startIn = await this.startDirHandle();
     this.flog("doOpenDir: ouverture du sélecteur de dossier", { startIn: startIn && startIn.name });
     try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn }); }   // id + startIn → le navigateur rouvre dans le DERNIER dossier
-    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non ouvert : " + (e.message || e), "err"); this.flog("doOpenDir: annulé/erreur", e && e.name); return; }
+    catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.dirNotOpened", { error: e.message || e }), "err"); this.flog("doOpenDir: annulé/erreur", e && e.name); return; }
     const names: string[] = [];
     try { for await (const entry of dir.values()) { if (entry.kind === "file" && /\.json$/i.test(entry.name)) names.push(entry.name); } }
     catch (_) { /* énumération impossible */ }
     this.flog("doOpenDir: dossier choisi", { dir: dir && dir.name, jsons: names });
-    if (!names.length) { Notify.toast("Aucun fichier .json dans ce dossier.", "err"); return; }
+    if (!names.length) { Notify.toast(I18n.t("app.file.noJsonInDir"), "err"); return; }
     names.sort((a, b) => a.localeCompare(b));
-    const name = (names.length === 1) ? names[0] : await this.chooseFileInDir(names, "Choisir un document", Icons.FILE);
+    const name = (names.length === 1) ? names[0] : await this.chooseFileInDir(names, I18n.t("app.file.chooseDocTitle"), Icons.FILE);
     if (!name) return;
     try {
       const fh = await dir.getFileHandle(name);
       this.dirHandle = dir;   // posé AVANT loadFromText → loadCompanionFacesOnOpen lit le .nmfb via le dossier
       await this.loadFromText(await (await fh.getFile()).text(), name, fh);
       await this.rememberDir(dir, name);
-      Notify.toast("Fichier « " + name + " » ouvert");
+      Notify.toast(I18n.t("app.file.fileOpened", { name }));
     } catch (e: any) {
       if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
-      else if (e && e.name !== "AbortError") Notify.toast("Ouverture impossible : " + (e.message || e), "err");
+      else if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.openError", { error: e.message || e }), "err");
     }
   }
   async doOpen(): Promise<void> {
@@ -501,24 +502,24 @@ export class FileDocumentController {
       const [h] = await W.showOpenFilePicker({ types: JSON_TYPES, multiple: false });
       const f = await h.getFile();
       await this.loadFromText(await f.text(), f.name, h);
-      Notify.toast("Fichier « " + f.name + " » ouvert");
+      Notify.toast(I18n.t("app.file.fileOpened", { name: f.name }));
     } catch (e: any) {
       if (e && e.code === "FILE_ALREADY_OPEN") Notify.toast(e.message, "err");
-      else if (e && e.name !== "AbortError") Notify.toast("Ouverture impossible : " + (e.message || e), "err");
+      else if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.openError", { error: e.message || e }), "err");
     }
   }
   async doSave(): Promise<void> {
     if (!this.handle) { await this.doSaveAs(); return; }
     if (this.docHasFaceImages()) this.ensureFacesKey();   // la clé d'appariement doit être dans le .json AVANT son écriture
-    if (!(await this.ensureWritePermission(this.handle))) { Notify.toast("Permission d'écriture refusée.", "err"); return; }
-    try { await this.writeToHandle(this.handle); await this.saveCompanionFaces(this.handle); this.host.refreshChrome(); Notify.toast("Document enregistré (" + this.name + ")"); }
-    catch (e: any) { Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
+    if (!(await this.ensureWritePermission(this.handle))) { Notify.toast(I18n.t("app.file.writePermDenied"), "err"); return; }
+    try { await this.writeToHandle(this.handle); await this.saveCompanionFaces(this.handle); this.host.refreshChrome(); Notify.toast(I18n.t("app.file.docSaved", { name: this.name })); }
+    catch (e: any) { Notify.toast(I18n.t("app.file.saveError", { error: e.message || e }), "err"); }
   }
   /** « Enregistrer sous » en MODE DOSSIER : choisit le dossier (s'il manque) + un nom, écrit .json et .nmfb dedans. */
   private async doSaveAsDir(): Promise<void> {
     let dir = this.dirHandle;
-    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn: await this.startDirHandle() }); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Dossier non choisi : " + (e.message || e), "err"); return; } }
-    const raw = await Dialog.prompt("Nom du fichier", this.docFileName()); if (!raw) return;
+    if (!dir) { try { dir = await W.showDirectoryPicker({ id: "dc-manager-dir", mode: "readwrite", startIn: await this.startDirHandle() }); } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.dirNotChosen", { error: e.message || e }), "err"); return; } }
+    const raw = await Dialog.prompt(I18n.t("app.file.fileNamePrompt"), this.docFileName()); if (!raw) return;
     const name = /\.json$/i.test(raw) ? raw : raw + ".json";
     try {
       const h = await dir.getFileHandle(name, { create: true });
@@ -528,12 +529,12 @@ export class FileDocumentController {
       await this.saveCompanionFaces(h);
       await this.rememberDir(dir, name);
       this.tabChannel.claim(this.store.meta.fileId || null);
-      this.host.applyAutosave(); this.host.refreshChrome(); Notify.toast("Enregistré sous « " + this.name + " »");
-    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
+      this.host.applyAutosave(); this.host.refreshChrome(); Notify.toast(I18n.t("app.file.savedAs", { name: this.name }));
+    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.saveError", { error: e.message || e }), "err"); }
   }
   async doSaveAs(): Promise<void> {
     this.ensureFileId();
-    if (!this.hasFsApi) { Download.text(this.docFileName(), await this.snapshotWithImages(), "application/json"); Notify.toast("Copie téléchargée (" + this.docFileName() + ")"); return; }
+    if (!this.hasFsApi) { Download.text(this.docFileName(), await this.snapshotWithImages(), "application/json"); Notify.toast(I18n.t("app.file.copyDownloaded", { name: this.docFileName() })); return; }
     if (this.dirMode()) { await this.doSaveAsDir(); return; }
     try {
       const h = await W.showSaveFilePicker({ suggestedName: this.docFileName(), types: JSON_TYPES });
@@ -542,7 +543,7 @@ export class FileDocumentController {
       await this.writeToHandle(h);
       await this.saveCompanionFaces(h);   // choisit/écrit le fichier compagnon d'images à côté
       this.tabChannel.claim(this.store.meta.fileId || null);
-      this.host.applyAutosave(); this.host.refreshChrome(); Notify.toast("Enregistré sous « " + this.name + " »");
-    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Enregistrement échoué : " + (e.message || e), "err"); }
+      this.host.applyAutosave(); this.host.refreshChrome(); Notify.toast(I18n.t("app.file.savedAs", { name: this.name }));
+    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.saveError", { error: e.message || e }), "err"); }
   }
 }

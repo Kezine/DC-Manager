@@ -6,6 +6,7 @@ import {
   CABLE_STATUS_BROKEN,
   CableStatusDef,
 } from "./constants";
+import { I18n } from "../i18n/I18n";
 
 /** Registre des statuts de câble (cycle de vie). */
 export class CableStatuses {
@@ -21,7 +22,7 @@ export class CableStatuses {
 
   static label(id: string): string {
     const s = CableStatuses.get(id);
-    return s ? s.label : (id || "—");
+    return s ? I18n.t(s.labelKey) : (id || "—");
   }
 
   static isStatus(id: unknown): boolean {

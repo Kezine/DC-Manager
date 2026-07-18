@@ -1,4 +1,5 @@
 import { SPARE_STATUSES, SPARE_STATUS_DEFAULT, SpareStatusDef } from "./constants";
+import { I18n } from "../i18n/I18n";
 
 const BY_ID: Record<string, SpareStatusDef> = Object.fromEntries(SPARE_STATUSES.map((s) => [s.id, s]));
 
@@ -8,5 +9,5 @@ export class SpareStatuses {
   static readonly DEFAULT = SPARE_STATUS_DEFAULT;
 
   static isStatus(x: unknown): boolean { return !!BY_ID[x as string]; }
-  static label(id: string): string { const s = BY_ID[id]; return s ? s.label : (id || "—"); }
+  static label(id: string): string { const s = BY_ID[id]; return s ? I18n.t(s.labelKey) : (id || "—"); }
 }

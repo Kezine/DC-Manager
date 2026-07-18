@@ -1,5 +1,6 @@
 import { StaleGate } from "./StaleGate";
 import { Icons } from "./Icons";
+import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
    SearchPop — champ de recherche + popover de résultats, composant RÉUTILISABLE
@@ -71,7 +72,7 @@ export class SearchPop {
 
     const clear = document.createElement("button");
     clear.type = "button"; clear.className = "btn btn-ghost btn-sm";
-    clear.innerHTML = Icons.CLOSE; clear.title = "Effacer la recherche";
+    clear.innerHTML = Icons.CLOSE; clear.title = I18n.t("ui.search.clear");
     clear.onclick = () => this.reset();
 
     this.pop = document.createElement("div"); this.pop.className = "dc-search-pop";

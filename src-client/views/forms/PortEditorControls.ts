@@ -5,6 +5,7 @@ import { Notify } from "../../ui/Notify";
 import { Normalize } from "../../core/Normalize";
 import { PortRoles } from "../../registries/PortRoles";
 import { PORT_DIRECTIONS, POWER_PHASES } from "../../domain/constants";
+import { I18n } from "../../i18n/I18n";   // lot B2a : options des tables de libellés (labelKey → I18n.t)
 
 /** Contexte injecté par le formulaire d'équipement à ses contrôles de port (couplage par INTERFACE, pas d'accès
     en dur au monolithe — cf. CLAUDE.md n°2). `equipment` = l'équipement édité (null si création) ; `currentType()`
@@ -67,19 +68,19 @@ export class PortEditorControls {
     const store = this.store;
     const wrap = document.createElement("span"); wrap.style.cssText = "display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;";
     const bundles = this.patchBundles();
-    const bOpts = [{ value: "", label: "— faisceau —" }].concat(bundles.map((b: any) => ({ value: b.id, label: (b.name || "(faisceau)") + " · " + store.bundleOccupancy(b.id).free + " libre" })));
+    const bOpts = [{ value: "", label: I18n.t("forms.port.bundleNone") }].concat(bundles.map((b: any) => ({ value: b.id, label: I18n.t("forms.port.bundleOpt", { name: b.name || I18n.t("lists.ph.bundle"), free: store.bundleOccupancy(b.id).free }) })));
     const bSel = FormControls.select(bOpts, p.bundle_id || ""); bSel.className = "sub-input app-select"; wrap.appendChild(bSel);
     bSel.onchange = () => { p.bundle_id = bSel.value || null; if (!p.bundle_id) { p.strand_a = null; p.strand_b = null; } this.host.rerenderPorts(); };
     if (p.bundle_id) {
       const bundle: any = store.get("cableBundles", p.bundle_id);
       const maxStrand = bundle ? bundle.fiber_count : undefined;
       const duplex = !!(p.port_type_id && (store.get("portTypes", p.port_type_id) || {} as any).duplex);
-      const saI = FormControls.number(p.strand_a != null ? p.strand_a : "", { min: 1, max: maxStrand, step: 1, placeholder: duplex ? "Tx" : "brin" });
+      const saI = FormControls.number(p.strand_a != null ? p.strand_a : "", { min: 1, max: maxStrand, step: 1, placeholder: duplex ? I18n.t("forms.port.strandTx") : I18n.t("forms.port.strandSimplex") });
       saI.style.width = "62px"; saI.className = "sub-input";
       saI.oninput = () => { const v = parseInt(saI.value, 10); p.strand_a = isFinite(v) && v >= 1 ? v : null; };
       wrap.appendChild(saI);
       if (duplex) {
-        const sbI = FormControls.number(p.strand_b != null ? p.strand_b : "", { min: 1, max: maxStrand, step: 1, placeholder: "Rx" });
+        const sbI = FormControls.number(p.strand_b != null ? p.strand_b : "", { min: 1, max: maxStrand, step: 1, placeholder: I18n.t("forms.port.strandRx") });
         sbI.style.width = "62px"; sbI.className = "sub-input";
         sbI.oninput = () => { const v = parseInt(sbI.value, 10); p.strand_b = isFinite(v) && v >= 1 ? v : null; };
         wrap.appendChild(sbI);
@@ -95,8 +96,8 @@ export class PortEditorControls {
     const store = this.store;
     const kind = PortRoles.kind(p.role);
     const nets = store.all("networks").filter((n: any) => (n.kind === "power" ? "power" : "data") === kind).sort((a: any, b: any) => (a.label || "").localeCompare(b.label || ""));
-    const opts = [{ value: "", label: "— réseau (joker) —" }].concat(nets.map((n: any) => ({ value: n.id, label: (n.kind === "power" ? "⚡ " : "") + (n.label || "(réseau)") })));
-    const sel = FormControls.select(opts, p.network_id || ""); sel.className = "sub-input app-select"; sel.title = "Réseau PRINCIPAL asserté par ce port (source du réseau ; vide = joker).";
+    const opts = [{ value: "", label: I18n.t("forms.port.netJoker") }].concat(nets.map((n: any) => ({ value: n.id, label: (n.kind === "power" ? "⚡ " : "") + (n.label || I18n.t("lists.ph.network")) })));
+    const sel = FormControls.select(opts, p.network_id || ""); sel.className = "sub-input app-select"; sel.title = I18n.t("forms.port.netTitle");
     sel.onchange = () => {
       // P5/P8c : la FUSION réseau (anti-clobber #14) est PURE → Normalize.mergePrincipal (testée en isolation, hors DOM).
       // Elle gère : joker vide (network_ids=[] car « joker + réseaux » irreprésentable), port mono (REMPLACE le
@@ -104,7 +105,7 @@ export class PortEditorControls {
       const r = Normalize.mergePrincipal(Array.isArray(p.network_ids) ? p.network_ids : [], p.network_id || null, sel.value || null);
       p.network_id = r.network_id; p.network_ids = r.network_ids;
       // joker (removed > 0) : des réseaux additionnels ont été retirés → on SIGNALE la perte (pas d'effacement muet).
-      if (r.removed) Notify.toast(r.removed + " réseau(x) du port retiré(s) (joker : le port adopte le réseau déduit).");
+      if (r.removed) Notify.toast(I18n.t("forms.port.netRemoved", { count: r.removed }));
       this.host.rerenderPorts();   // P5(c) : rafraîchit la pastille « +N » (onchange ne re-rendait pas) et l'aperçu réseau.
     };
     // Retour UNIFIÉ : toujours un span-conteneur (le select, + une pastille « +N » si des réseaux additionnels
@@ -113,7 +114,7 @@ export class PortEditorControls {
     wrap.appendChild(sel);
     const extra = (Array.isArray(p.network_ids) ? p.network_ids : []).filter((n: string) => n !== (p.network_id || null)).length;
     if (extra > 0) {
-      const badge = document.createElement("span"); badge.className = "pill"; badge.textContent = "+" + extra; badge.title = extra + " réseau(x) additionnel(s) (édition multi : à venir)";
+      const badge = document.createElement("span"); badge.className = "pill"; badge.textContent = "+" + extra; badge.title = I18n.t("forms.port.netExtraTitle", { count: extra });
       wrap.appendChild(badge);
     }
     return wrap;
@@ -122,14 +123,14 @@ export class PortEditorControls {
   /** POWER : sens de l'énergie (source/sink) + calibre (A) + phase (départ = source). Pilote l'analyse énergie. */
   powerPortControls(p: PortDraft): HTMLElement {
     const wrap = document.createElement("span"); wrap.style.cssText = "display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;";
-    const dirSel = FormControls.select([{ value: "", label: "— sens —" }].concat(PORT_DIRECTIONS.map((d) => ({ value: d.id, label: d.label }))), p.direction || ""); dirSel.className = "sub-input app-select";
+    const dirSel = FormControls.select([{ value: "", label: I18n.t("forms.port.dirNone") }].concat(PORT_DIRECTIONS.map((d) => ({ value: d.id, label: I18n.t(d.labelKey) }))), p.direction || ""); dirSel.className = "sub-input app-select";
     dirSel.onchange = () => { p.direction = dirSel.value || ""; if (p.direction !== "source") p.phase = ""; this.host.rerenderPorts(); };
     wrap.appendChild(dirSel);
-    const ampI = FormControls.number(p.power_max_a != null ? p.power_max_a : "", { min: 0, step: 1, placeholder: "A" }); ampI.style.width = "60px"; ampI.className = "sub-input"; ampI.title = "Calibre / plafond de courant (A).";
+    const ampI = FormControls.number(p.power_max_a != null ? p.power_max_a : "", { min: 0, step: 1, placeholder: "A" }); ampI.style.width = "60px"; ampI.className = "sub-input"; ampI.title = I18n.t("forms.port.ampTitle");
     ampI.oninput = () => { const v = parseFloat(ampI.value); p.power_max_a = isFinite(v) && v >= 0 ? v : null; };
     wrap.appendChild(ampI);
     if (p.direction === "source") {   // phase seulement pour un départ / une sortie (source)
-      const phSel = FormControls.select([{ value: "", label: "— phase —" }].concat(POWER_PHASES.map((ph: string) => ({ value: ph, label: ph }))), p.phase || ""); phSel.className = "sub-input app-select"; phSel.title = "Phase (départ triphasé réparti).";
+      const phSel = FormControls.select([{ value: "", label: I18n.t("forms.port.phaseNone") }].concat(POWER_PHASES.map((ph: string) => ({ value: ph, label: ph }))), p.phase || ""); phSel.className = "sub-input app-select"; phSel.title = I18n.t("forms.port.phaseTitle");
       phSel.onchange = () => { p.phase = phSel.value || ""; };
       wrap.appendChild(phSel);
     }
@@ -140,8 +141,8 @@ export class PortEditorControls {
       STORE (brins enregistrés) ; les saisies en cours sont validées à l'enregistrement. */
   renderPatchInfo(el: HTMLElement): void {
     const bundles = this.isPatch() ? this.patchBundles() : [];
-    if (!bundles.length) { el.textContent = this.isPatch() ? "Aucun faisceau ne se termine sur ce patch (rattachez-les depuis l'onglet Faisceaux)." : ""; return; }
-    el.textContent = "Faisceaux : " + bundles.map((b: any) => { const o = this.store.bundleOccupancy(b.id); return (b.name || "(faisceau)") + " " + o.used + "/" + o.capacity + " brins"; }).join(" · ");
+    if (!bundles.length) { el.textContent = this.isPatch() ? I18n.t("forms.port.noPatchBundle") : ""; return; }
+    el.textContent = I18n.t("forms.port.bundlesPrefix") + bundles.map((b: any) => { const o = this.store.bundleOccupancy(b.id); return I18n.t("forms.port.bundleUsage", { name: b.name || I18n.t("lists.ph.bundle"), used: o.used, capacity: o.capacity }); }).join(" · ");
   }
 
   /** Charge par départ/phase + avertissements de fiabilité (SPOF, PSU non câblée…) → dans `el`. Reflète le STORE. */
@@ -153,9 +154,9 @@ export class PortEditorControls {
     const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
     const deps = pa.departLoads(eq.id);
     if (deps.length) {
-      line("Départs : " + deps.map((d) => { const p: any = this.store.get("ports", d.key); return (p && p.name ? p.name : "?") + " " + fmt(d.usedA) + "/" + (d.capacityA != null ? d.capacityA : "?") + " A" + (d.overloaded ? " ⛔" : d.warn ? " ⚠" : ""); }).join(" · "));
+      line(I18n.t("forms.port.departs", { list: deps.map((d) => { const p: any = this.store.get("ports", d.key); return (p && p.name ? p.name : "?") + " " + fmt(d.usedA) + "/" + (d.capacityA != null ? d.capacityA : "?") + " A" + (d.overloaded ? " ⛔" : d.warn ? " ⚠" : ""); }).join(" · ") }));
       const phs = pa.phaseLoads(eq.id).filter((x) => x.key !== "?");
-      if (phs.length) line("Phases : " + phs.map((x) => x.key + " " + fmt(x.usedA) + "/" + (x.capacityA != null ? x.capacityA : "?") + " A" + (x.overloaded ? " ⛔" : x.warn ? " ⚠" : "")).join(" · "));
+      if (phs.length) line(I18n.t("forms.port.phases", { list: phs.map((x) => x.key + " " + fmt(x.usedA) + "/" + (x.capacityA != null ? x.capacityA : "?") + " A" + (x.overloaded ? " ⛔" : x.warn ? " ⚠" : "")).join(" · ") }));
     }
     // origin_unknown = info (redondance non vérifiable), pas un danger avéré → icône + sévérité moindres (cf. PowerAnalysis.isInfo).
     for (const w of pa.equipmentWarnings(eq.id)) { const info = PowerAnalysis.isInfo(w.code); line((info ? "ℹ " : "⚠ ") + w.message, !info); }

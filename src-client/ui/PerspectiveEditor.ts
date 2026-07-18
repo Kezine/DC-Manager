@@ -32,6 +32,7 @@ import { ImageBlob } from "./ImageBlob";
 import { CropEditor } from "./CropEditor";
 import { Homography } from "../geometry/Homography";
 import type { RawImage } from "../geometry/Homography";
+import { I18n } from "../i18n/I18n";
 
 /** Point de contrôle : coin (edge = index 0..3 TL/TR/BR/BL) ou point de bord (f = fraction sur le côté). */
 interface CtrlPoint { type: "corner" | "edge"; edge: number; f: number; x: number; y: number; }
@@ -57,7 +58,7 @@ export class PerspectiveEditor {
     return new Promise((resolve) => {
       const url = URL.createObjectURL(source);
       const img = new Image();
-      img.onerror = () => { URL.revokeObjectURL(url); Notify.toast("Impossible de charger l'image.", "err"); resolve(null); };
+      img.onerror = () => { URL.revokeObjectURL(url); Notify.toast(I18n.t("ui.perspective.loadImageError"), "err"); resolve(null); };
       img.onload = () => { URL.revokeObjectURL(url); this.openLoaded(img, opts).then(resolve); };
       img.src = url;
     });
@@ -159,43 +160,43 @@ export class PerspectiveEditor {
     };
 
     return Dialog.custom({
-      title: "Redresser la perspective",
-      message: "Posez les points sur les coins du rectangle déformé (l'image de la façade), puis redressez.",
-      wide: true, confirmLabel: "Redresser et utiliser", cancelLabel: "Annuler",
+      title: I18n.t("ui.perspective.title"),
+      message: I18n.t("ui.perspective.message"),
+      wide: true, confirmLabel: I18n.t("ui.perspective.confirm"), cancelLabel: I18n.t("ui.action.cancel"),
       build: (root: HTMLElement) => {
         /* ---- barre d'outils (2 rangées, mêmes classes que l'éditeur de façade) ---- */
         const bar1 = document.createElement("div"); bar1.className = "face-toolbar"; bar1.style.flexWrap = "wrap";
         const mkBtn = (txt: string, title = "") => { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = txt; if (title) b.title = title; return b; };
         const lab = (txt: string) => { const s = document.createElement("span"); s.style.cssText = "font-size:11px;color:var(--fg-dim);"; s.textContent = txt; return s; };
-        const subMinus = mkBtn("−", "Moins de points de bord"); const subVal = lab("0"); subVal.style.minWidth = "12px"; subVal.style.textAlign = "center";
-        const subPlus = mkBtn("+", "Plus de points de bord (suivre une déformation non rectiligne — le total reste 4 + 4×n)");
-        const resetBtn = mkBtn("Replacer les points");
-        const seqBtn = mkBtn("Pose séquentielle", "Poser les points un à un en cliquant (coins puis points de bord) — placement précis. Le glisser reste disponible ensuite pour ajuster.");
-        const rotL = mkBtn("⟲ 90°", "Pivoter l'image de 90° vers la gauche (anti-horaire) — les points suivent");
-        const rotR = mkBtn("⟳ 90°", "Pivoter l'image de 90° vers la droite (horaire) — les points suivent");
-        const sepBtn = mkBtn("Recadrage séparé", "Dissocier le RECADRAGE du redressement : les points posent une RÉFÉRENCE (n'importe quel rectangle réel bien net — bandeau, vis, trous de rail), l'emprise UTILE se recadre ensuite dans l'image redressée. Désactivé : le cadre de sortie = le quadrilatère posé (flux combiné).");
-        const zoomOut = mkBtn("−", "Dézoomer"); const zoomLvl = lab("100 %"); zoomLvl.style.minWidth = "40px"; zoomLvl.style.textAlign = "center";
-        const zoomIn = mkBtn("+", "Zoomer"); const zoomFit = mkBtn("Ajuster", "Ajuster l'image à l'écran");
+        const subMinus = mkBtn("−", I18n.t("ui.perspective.edgeMinusTitle")); const subVal = lab("0"); subVal.style.minWidth = "12px"; subVal.style.textAlign = "center";
+        const subPlus = mkBtn("+", I18n.t("ui.perspective.edgePlusTitle"));
+        const resetBtn = mkBtn(I18n.t("ui.perspective.reset"));
+        const seqBtn = mkBtn(I18n.t("ui.perspective.seq"), I18n.t("ui.perspective.seqTitle"));
+        const rotL = mkBtn("⟲ 90°", I18n.t("ui.perspective.rotLeftTitle"));
+        const rotR = mkBtn("⟳ 90°", I18n.t("ui.perspective.rotRightTitle"));
+        const sepBtn = mkBtn(I18n.t("ui.perspective.sepCrop"), I18n.t("ui.perspective.sepCropTitle"));
+        const zoomOut = mkBtn("−", I18n.t("ui.zoom.out")); const zoomLvl = lab("100 %"); zoomLvl.style.minWidth = "40px"; zoomLvl.style.textAlign = "center";
+        const zoomIn = mkBtn("+", I18n.t("ui.zoom.in")); const zoomFit = mkBtn(I18n.t("ui.zoom.fitLabel"), I18n.t("ui.perspective.fitTitle"));
         const spacer = document.createElement("span"); spacer.style.flex = "1";
-        bar1.append(lab("Points de bord :"), subMinus, subVal, subPlus, resetBtn, seqBtn, rotL, rotR, sepBtn, spacer, zoomOut, zoomLvl, zoomIn, zoomFit);
+        bar1.append(lab(I18n.t("ui.perspective.edgePointsLabel")), subMinus, subVal, subPlus, resetBtn, seqBtn, rotL, rotR, sepBtn, spacer, zoomOut, zoomLvl, zoomIn, zoomFit);
 
         const bar2 = document.createElement("div"); bar2.className = "face-toolbar"; bar2.style.flexWrap = "wrap";
         const segBtns: Record<string, HTMLButtonElement> = {};
         const seg = (id: string, txt: string, title: string) => { const b = mkBtn(txt, title); segBtns[id] = b; return b; };
-        const manualI = FormControls.text(st.arManual, "ex. 16:9, 482.6:88.9, 1.41"); manualI.style.cssText = "width:150px;font-size:11px;padding:4px 6px;";
+        const manualI = FormControls.text(st.arManual, I18n.t("ui.perspective.manualPlaceholder")); manualI.style.cssText = "width:150px;font-size:11px;padding:4px 6px;";
         const resSel = FormControls.select(RES_OPTIONS.map((r) => ({ value: String(r), label: r + " px" })), String(res)); resSel.style.cssText = "font-size:11px;padding:4px 6px;";
-        bar2.append(lab("Proportions :"));
-        if (faceRatio) bar2.append(seg("face", opts.faceRatioLabel || "Façade", "Format RÉEL de la façade (19″ × U) déduit du contexte — recommandé"));
-        bar2.append(seg("auto", "Auto", "Ratio estimé depuis la perspective de la forme posée"), seg("manual", "Manuel", "Ratio saisi (l:h ou nombre)"), seg("square", "1:1", "Sortie carrée"), manualI, lab("Résolution :"), resSel);
+        bar2.append(lab(I18n.t("ui.perspective.proportionsLabel")));
+        if (faceRatio) bar2.append(seg("face", opts.faceRatioLabel || I18n.t("ui.perspective.face"), I18n.t("ui.perspective.faceTitle")));
+        bar2.append(seg("auto", I18n.t("ui.perspective.auto"), I18n.t("ui.perspective.autoTitle")), seg("manual", I18n.t("ui.perspective.manual"), I18n.t("ui.perspective.manualTitle")), seg("square", "1:1", I18n.t("ui.perspective.squareTitle")), manualI, lab(I18n.t("ui.perspective.resolutionLabel")), resSel);
 
         const hint = document.createElement("div"); hint.className = "form-hint";
-        const BASE_HINT = "Glisser un point = ajuster · glisser le fond = déplacer · molette / +/− = zoom · flèches = ajustement fin du point sélectionné (Maj = ×10).";
-        const CORNER_NAMES = ["haut-gauche", "haut-droite", "bas-droite", "bas-gauche"];
-        const ptName = (p: CtrlPoint): string => p.type === "corner" ? ("coin " + CORNER_NAMES[p.edge]) : ("point de bord " + (p.edge + 1));
+        const BASE_HINT = I18n.t("ui.perspective.baseHint");
+        const CORNER_NAMES = [I18n.t("ui.perspective.cornerTL"), I18n.t("ui.perspective.cornerTR"), I18n.t("ui.perspective.cornerBR"), I18n.t("ui.perspective.cornerBL")];
+        const ptName = (p: CtrlPoint): string => p.type === "corner" ? I18n.t("ui.perspective.ptCorner", { name: CORNER_NAMES[p.edge] }) : I18n.t("ui.perspective.ptEdge", { n: p.edge + 1 });
         const refreshHint = () => {
           if (placingSeq) {
             const seq = perimeter(), p = seq[placeIdx];
-            hint.textContent = p ? ("Pose séquentielle : cliquez le " + ptName(p) + " (" + (placeIdx + 1) + " / " + seq.length + "). Échap ou « Pose séquentielle » pour arrêter.") : "Tous les points sont posés — ajustez au glisser si besoin.";
+            hint.textContent = p ? I18n.t("ui.perspective.seqHint", { point: ptName(p), i: placeIdx + 1, total: seq.length }) : I18n.t("ui.perspective.seqDone");
           } else hint.textContent = BASE_HINT;
         };
         hint.textContent = BASE_HINT;
@@ -204,7 +205,7 @@ export class PerspectiveEditor {
         let ratioHint: HTMLElement | null = null;
         if (faceRatio) {
           ratioHint = document.createElement("div"); ratioHint.className = "form-hint";
-          ratioHint.textContent = "Préréglage « " + (opts.faceRatioLabel || "Façade") + " » : déduit des champs Face / U / Oreilles du formulaire d'origine — pour le changer, annulez et ajustez ces champs là-bas.";
+          ratioHint.textContent = I18n.t("ui.perspective.ratioHint", { label: opts.faceRatioLabel || I18n.t("ui.perspective.face") });
         }
 
         /* ---- scène canvas ---- */
@@ -301,7 +302,7 @@ export class PerspectiveEditor {
           const seq = perimeter(), p = seq[placeIdx];
           if (!p) return;
           const [ix, iy] = screenToImg(sx, sy); p.x = ix; p.y = iy; selected = points.indexOf(p); placeIdx++;
-          if (placeIdx >= seq.length) { placingSeq = false; cv.style.cursor = "grab"; Notify.toast("Points posés — ajustez au glisser si besoin."); }
+          if (placeIdx >= seq.length) { placingSeq = false; cv.style.cursor = "grab"; Notify.toast(I18n.t("ui.perspective.pointsPlaced")); }
           syncControls(); refreshHint(); render();
         };
         cv.addEventListener("pointerdown", (e) => {
@@ -399,7 +400,7 @@ export class PerspectiveEditor {
       if (!params) return null;
       // WARP après fermeture de la modale, derrière l'indicateur (double rAF pour laisser peindre l'overlay).
       return new Promise<RawImage | null>((resolve) => {
-        Notify.busy("Redressement…");
+        Notify.busy(I18n.t("ui.perspective.busyStraighten"));
         requestAnimationFrame(() => requestAnimationFrame(() => {
           let src: RawImage;
           try {
@@ -408,7 +409,7 @@ export class PerspectiveEditor {
             octx.drawImage(source, 0, 0);   // source COURANTE (rotation 90° éventuelle appliquée dans l'éditeur)
             const srcData = octx.getImageData(0, 0, imgW, imgH);
             src = { data: srcData.data, width: imgW, height: imgH };
-          } catch (e) { Notify.idle(); Notify.toast("Redressement impossible (pixels inaccessibles).", "err"); resolve(null); return; }
+          } catch (e) { Notify.idle(); Notify.toast(I18n.t("ui.perspective.straightenError"), "err"); resolve(null); return; }
           if (!params.sepCrop) {   // flux COMBINÉ (défaut) : le cadre de sortie = le quadrilatère posé
             const out = Homography.warpBilinear(src, params.hOutToSrc, params.outW, params.outH);
             Notify.idle(); resolve(out); return;
@@ -445,20 +446,20 @@ export class PerspectiveEditor {
       targetRatio: faceRatio,
       info: (r) => {   // dims FINALES (res sur le côté long du cadre) + ratio vs cible façade
         const cw = r.w / s, ch = r.h / s, f = p.res / Math.max(cw, ch);
-        return "Sortie : " + Math.max(2, Math.round(cw * f)) + " × " + Math.max(2, Math.round(ch * f)) + " px · Ratio l/h : " + (cw / ch).toFixed(2)
-          + (faceRatio ? " (cible façade : " + faceRatio.toFixed(2) + ")" : "");
+        return I18n.t("ui.perspective.outputInfo", { w: Math.max(2, Math.round(cw * f)), h: Math.max(2, Math.round(ch * f)), ratio: (cw / ch).toFixed(2) })
+          + (faceRatio ? I18n.t("ui.perspective.targetFace", { ratio: faceRatio.toFixed(2) }) : "");
       },
     }).then((r) => {
       if (!r) return null;
       return new Promise<RawImage | null>((resolve) => {
-        Notify.busy("Recadrage…");
+        Notify.busy(I18n.t("ui.perspective.busyCrop"));
         requestAnimationFrame(() => requestAnimationFrame(() => {
           try {
             const cx = x0 + r.x / s, cy = y0 + r.y / s, cw = r.w / s, ch = r.h / s;
             const f = p.res / Math.max(cw, ch);
             const out = Homography.warpBilinear(src, this.composeH(H, cx, cy, 1 / f), Math.max(2, Math.round(cw * f)), Math.max(2, Math.round(ch * f)));
             Notify.idle(); resolve(out);
-          } catch (e) { Notify.idle(); Notify.toast("Recadrage impossible.", "err"); resolve(null); }
+          } catch (e) { Notify.idle(); Notify.toast(I18n.t("ui.perspective.cropError"), "err"); resolve(null); }
         }));
       });
     });

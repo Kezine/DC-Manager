@@ -1,6 +1,7 @@
 import { Html } from "../core/Html";
 import { Color } from "../core/Color";
 import { Autocomplete, AcItem, AC_CREATE_ID } from "./Autocomplete";
+import { I18n } from "../i18n/I18n";
 
 export interface ChipItem { id: string; label: string; color?: string | null; meta?: string; }
 
@@ -35,7 +36,7 @@ export class ChipsInput {
     const wrap = document.createElement("div");
     wrap.className = "chips-input";
     const input = document.createElement("input");
-    input.type = "text"; input.placeholder = opts.placeholder || "Rechercher…";
+    input.type = "text"; input.placeholder = opts.placeholder || I18n.t("ui.chips.placeholder");
 
     const byId = (id: string): ChipItem | null => opts.items().find((i) => i.id === id) || null;
     const emit = () => { try { opts.onChange?.([...selected]); } catch (e) { console.error(e); } };
@@ -48,7 +49,7 @@ export class ChipsInput {
         const style = it ? Color.pillStyle(it.color) : "";
         if (style) { chip.setAttribute("style", style.replace(/^style="|"$/g, "")); chip.classList.add("colored-pill"); }
         const label = it ? it.label : id;
-        chip.innerHTML = Html.escape(label) + ' <span class="chip-x" role="button" aria-label="Retirer">×</span>';
+        chip.innerHTML = Html.escape(label) + ' <span class="chip-x" role="button" aria-label="' + Html.escape(I18n.t("ui.chips.remove")) + '">×</span>';
         chip.querySelector(".chip-x")!.addEventListener("click", () => { remove(id); });
         wrap.insertBefore(chip, input);   // pastilles AVANT l'input
       });

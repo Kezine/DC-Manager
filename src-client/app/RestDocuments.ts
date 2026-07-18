@@ -22,6 +22,7 @@ import { ReloadPlanner, Changeset } from "../sync";
 import type { DocumentChangeset } from "../sync";
 import { EntityRegistry } from "../models";
 import { Log } from "../core/Log";
+import { I18n } from "../i18n/I18n";
 
 const W = window as any;
 
@@ -84,7 +85,7 @@ export class RestDocumentController {
     // divergence client⇄serveur. Notifie les 2-3 premières erreurs (suffisant pour situer le problème).
     this.adapter.onValidationError = (errors) => {
       const head = errors.slice(0, 3).map((e) => e.message).join(" · ");
-      Notify.toast("Données refusées par le serveur : " + head + (errors.length > 3 ? " …" : ""), "err");
+      Notify.toast(I18n.t("app.rest.validationRefused", { head }) + (errors.length > 3 ? " …" : ""), "err");
       void this.reload({ conflict: true });
     };
     // RETOUR au premier plan : en arrière-plan on a ACCUMULÉ les changesets SSE sans recharger (cf. scheduleReload) —
@@ -108,7 +109,7 @@ export class RestDocumentController {
     const changeset = opts?.conflict ? Changeset.full() : (opts?.changeset || Changeset.full());
     const plan = this.reloadPlanner.plan(changeset);
     this.flog("reload document", opts?.conflict ? "(conflit 409)" : "(changement externe)", "→ 3D:" + plan.threeRebuild, this.lastBy);
-    Notify.busy(opts?.conflict ? "Conflit de version — rechargement…" : "Mise à jour du document…");
+    Notify.busy(opts?.conflict ? I18n.t("app.rest.busyConflict") : I18n.t("app.rest.busyUpdate"));
     // laisse le navigateur PEINDRE l'overlay AVANT le travail synchrone lourd (fetch + rebuild 3D ≈ 1 s) qui gèle
     // le thread : sans ce double rAF, l'overlay ne s'affiche qu'une fois le freeze terminé (donc jamais visible).
     // Onglet CACHÉ : rAF est GELÉ (ne se déclencherait qu'au retour, bloquant ce reload) et il n'y a rien à peindre
@@ -131,10 +132,10 @@ export class RestDocumentController {
       this.host.refreshActive(); this.host.refreshChrome();
     } finally { Notify.idle(); this.reloading = false; }
     if (opts?.conflict) {
-      Notify.toast("Modification refusée : le document a changé entre-temps. Données rechargées — refais ta modification.", "conflict");
+      Notify.toast(I18n.t("app.rest.conflictToast"), "conflict");
     } else {
-      const by = this.lastBy ? (" par " + (this.lastBy.name || "?") + (this.lastBy.ip ? " (" + this.lastBy.ip + ")" : "")) : "";
-      Notify.toast("Document mis à jour" + by);
+      const by = this.lastBy ? (I18n.t("app.rest.by", { name: this.lastBy.name || "?" }) + (this.lastBy.ip ? I18n.t("app.rest.byIp", { ip: this.lastBy.ip }) : "")) : "";
+      Notify.toast(I18n.t("app.rest.updated") + by);
     }
     // des demandes sont tombées PENDANT ce reload → on rejoue (sérialisé, pas de rafale) : un conflit 409/400 impose un
     // rechargement TOTAL, sinon on flush le changeset SSE accumulé (débouncé). S'arrête dès que le flux se calme.
@@ -196,11 +197,11 @@ export class RestDocumentController {
     this.session.setFile(true); this.session.markLoaded(this.store.histIndex());
     this.host.documentOpened();
     this.subscribeLive();
-    Notify.toast("Document « " + display + " » ouvert");
+    Notify.toast(I18n.t("app.rest.docOpened", { name: display }));
   }
   /** Crée un nouveau document serveur (catalogues semés) puis l'ouvre. */
   async newDocument(name: string): Promise<void> {
-    let d: any; try { d = await this.adapter.createDocument(name); } catch (e: any) { Notify.toast("Création impossible : " + (e.message || e), "err"); return; }
+    let d: any; try { d = await this.adapter.createDocument(name); } catch (e: any) { Notify.toast(I18n.t("app.rest.createError", { error: e.message || e }), "err"); return; }
     this.adapter.setDocument(d.id);
     this.setImagesBase(this.adapter.dataBase);
     this.docId = d.id;
@@ -212,15 +213,15 @@ export class RestDocumentController {
     this.host.setDisplayName(d.name); this.session.setFile(true); this.session.markLoaded(this.store.histIndex());
     this.host.documentOpened();
     this.subscribeLive();
-    Notify.toast("Document « " + d.name + " » créé");
+    Notify.toast(I18n.t("app.rest.docCreated", { name: d.name }));
   }
   /** Importe un export `.json` (format mode-fichier) DANS UN NOUVEAU document serveur : crée le document,
       pousse le snapshot (meta + collections) puis les images de façade (compagnon `.nmfb` prioritaire, sinon
       `faceImages` inline), et l'ouvre. Réutilise exactement la logique d'écriture du DataAdapter REST. */
   private async importJson(text: string, nmfbBuf: ArrayBuffer | null, suggestedName: string): Promise<void> {
-    let raw: any; try { raw = JSON.parse(text); } catch { Notify.toast("Fichier invalide (JSON attendu).", "err"); return; }
+    let raw: any; try { raw = JSON.parse(text); } catch { Notify.toast(I18n.t("app.common.invalidJson"), "err"); return; }
     const name = String((raw && raw.meta && raw.meta.docName) || suggestedName || "Document").replace(/\.json$/i, "") || "Document";
-    let d: any; try { d = await this.adapter.createDocument(name); } catch (e: any) { Notify.toast("Création impossible : " + (e.message || e), "err"); return; }
+    let d: any; try { d = await this.adapter.createDocument(name); } catch (e: any) { Notify.toast(I18n.t("app.rest.createError", { error: e.message || e }), "err"); return; }
     this.adapter.setDocument(d.id);
     this.setImagesBase(this.adapter.dataBase);
     this.docId = d.id;
@@ -238,8 +239,8 @@ export class RestDocumentController {
       this.host.documentOpened();
       this.subscribeLive();
       const nbEnt = Object.keys(raw).filter((k) => k !== "faceImages" && Array.isArray((raw as any)[k])).reduce((n, k) => n + (raw as any)[k].length, 0);
-      Notify.toast("Importé « " + name + " » (" + nbEnt + " entités, " + nImg + " image(s))");
-    } catch (e: any) { Notify.toast("Import échoué : " + (e.message || e), "err"); }
+      Notify.toast(I18n.t("app.rest.imported", { name, ent: nbEnt, img: nImg }));
+    } catch (e: any) { Notify.toast(I18n.t("app.rest.importError", { error: e.message || e }), "err"); }
   }
   /** Sélectionne un `.json` (+ compagnon `.nmfb` facultatif) puis l'importe dans un nouveau document serveur. */
   private async importFromPicker(): Promise<void> {
@@ -248,22 +249,22 @@ export class RestDocumentController {
       try {
         const handles = await W.showOpenFilePicker({ multiple: true, types: [{ description: "Document DC Manager (.json) + images (.nmfb)", accept: { "application/json": [".json"], "application/octet-stream": [".nmfb"] } }] });
         for (const h of handles) { const f = await h.getFile(); if (/\.nmfb$/i.test(f.name)) nmfbBuf = await f.arrayBuffer(); else if (!jsonFile) jsonFile = f; }
-      } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast("Sélection impossible : " + (e.message || e), "err"); return; }
+      } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.rest.selectError", { error: e.message || e }), "err"); return; }
     } else {
       jsonFile = await new Promise<File | null>((resolve) => {
         const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,application/json";
         inp.onchange = () => resolve((inp.files && inp.files[0]) || null); inp.click();
       });
     }
-    if (!jsonFile) { Notify.toast("Aucun fichier .json sélectionné.", "err"); return; }
+    if (!jsonFile) { Notify.toast(I18n.t("app.rest.noJsonSelected"), "err"); return; }
     await this.importJson(await jsonFile.text(), nmfbBuf, jsonFile.name);
   }
   /** Sélecteur de documents (mode API) : liste serveur, ouverture / création / suppression. */
   async openChooser(): Promise<void> {
-    let docs: any[]; try { docs = await this.adapter.listDocuments(); } catch { Notify.toast("Serveur injoignable.", "err"); return; }
+    let docs: any[]; try { docs = await this.adapter.listDocuments(); } catch { Notify.toast(I18n.t("app.rest.serverUnreachable"), "err"); return; }
     const defaultDocId = await this.adapter.getDefaultDocId().catch(() => null);   // doc par défaut global (best-effort) → mis en évidence + bascule par étoile
     const action = await Dialog.custom({
-      title: "Documents", cancelLabel: "Fermer",
+      title: I18n.t("app.rest.docsTitle"), cancelLabel: I18n.t("ui.action.close"),
       build: (root: HTMLElement) => {
         let chosen: string | null = null;
         const confirmBtn = root.closest(".dialog-box")?.querySelector('[data-dlg="confirm"]') as HTMLElement | null;
@@ -275,26 +276,26 @@ export class RestDocumentController {
           const tx = document.createElement("span"); tx.className = "ok-tx";
           const isDefault = d.id === defaultDocId;
           // Le nom seul : l'état verrouillé/défaut est déjà porté par les pastilles cadenas/étoile à droite.
-          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = d.name + (d.id === this.docId ? "  ◀ ouvert" : "");
-          const de = document.createElement("span"); de.className = "ok-desc"; de.textContent = "maj " + String(d.updated_date || "").slice(0, 10);
+          const ti = document.createElement("span"); ti.className = "ok-title"; ti.textContent = d.name + (d.id === this.docId ? I18n.t("app.rest.openMarker") : "");
+          const de = document.createElement("span"); de.className = "ok-desc"; de.textContent = I18n.t("app.rest.updatedDate", { date: String(d.updated_date || "").slice(0, 10) });
           tx.append(ti, de); b.append(ic, tx);
           b.onmousedown = (e) => { e.preventDefault(); chosen = d.id; confirmBtn?.click(); };
           // Étoile : bascule du DOC PAR DÉFAUT global (ouvert au boot d'un client sans « dernier doc ouvert »).
           // Cliquer l'étoile du défaut courant l'efface ; cliquer une autre la déplace. Défaut = ★ net ; sinon ☆ estompé.
           const star = document.createElement("span"); star.className = "gi"; star.innerHTML = isDefault ? Icons.STAR : Icons.STAR_OUTLINE;
-          star.title = isDefault ? "Retirer comme document par défaut" : "Définir comme document par défaut (ouvert au démarrage)";
+          star.title = isDefault ? I18n.t("app.rest.starRemove") : I18n.t("app.rest.starSet");
           star.style.cssText = "margin-left:auto;padding:0 6px;cursor:pointer;color:" + (isDefault ? "var(--accent)" : "var(--fg-dimmer)");
           star.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__default__:" + (isDefault ? "" : d.id); confirmBtn?.click(); };
           b.appendChild(star);
           // Cadenas : bascule de verrouillage (protège d'une suppression accidentelle). Verrouillé = 🔒 net ; libre = 🔓 estompé.
           const lock = document.createElement("span"); lock.className = "gi"; lock.innerHTML = d.locked ? Icons.LOCK : Icons.UNLOCK;
-          lock.title = d.locked ? "Déverrouiller (réautorise la suppression)" : "Verrouiller (protège de la suppression)";
+          lock.title = d.locked ? I18n.t("app.rest.lockUnlock") : I18n.t("app.rest.lockLock");
           lock.style.cssText = "padding:0 6px;cursor:pointer;color:" + (d.locked ? "var(--accent)" : "var(--fg-dimmer)");
           lock.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__lock__:" + d.id; confirmBtn?.click(); };
           b.appendChild(lock);
           // Suppression proposée UNIQUEMENT si non verrouillé → flux délibéré « déverrouiller d'abord » (le serveur refuse en 423 par sécurité).
           if (!d.locked) {
-            const del = document.createElement("span"); del.className = "gi"; del.innerHTML = Icons.CLOSE; del.title = "Supprimer ce document"; del.style.cssText = "padding:0 8px;cursor:pointer;color:var(--fg-dimmer)";
+            const del = document.createElement("span"); del.className = "gi"; del.innerHTML = Icons.CLOSE; del.title = I18n.t("app.rest.deleteDocHint"); del.style.cssText = "padding:0 8px;cursor:pointer;color:var(--fg-dimmer)";
             del.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__del__:" + d.id; confirmBtn?.click(); };
             b.appendChild(del);
           }
@@ -302,36 +303,36 @@ export class RestDocumentController {
         });
         const nb = document.createElement("button"); nb.type = "button"; nb.className = "open-kind-btn";
         const ni = document.createElement("span"); ni.className = "ok-ic"; ni.innerHTML = Icons.PLUS; const nt = document.createElement("span"); nt.className = "ok-tx";
-        const nti = document.createElement("span"); nti.className = "ok-title"; nti.textContent = "Nouveau document"; nt.appendChild(nti);
+        const nti = document.createElement("span"); nti.className = "ok-title"; nti.textContent = I18n.t("app.rest.newDoc"); nt.appendChild(nti);
         nb.append(ni, nt); nb.onmousedown = (e) => { e.preventDefault(); chosen = "__new__"; confirmBtn?.click(); }; wrap.appendChild(nb);
         const ib = document.createElement("button"); ib.type = "button"; ib.className = "open-kind-btn";
         const ii = document.createElement("span"); ii.className = "ok-ic"; ii.innerHTML = Icons.IMPORT; const itx = document.createElement("span"); itx.className = "ok-tx";
-        const iti = document.createElement("span"); iti.className = "ok-title"; iti.textContent = "Importer un fichier .json…";
-        const ide = document.createElement("span"); ide.className = "ok-desc"; ide.textContent = "crée un nouveau document depuis un export .json (+ .nmfb d'images)";
+        const iti = document.createElement("span"); iti.className = "ok-title"; iti.textContent = I18n.t("app.rest.importJsonBtn");
+        const ide = document.createElement("span"); ide.className = "ok-desc"; ide.textContent = I18n.t("app.rest.importJsonDesc");
         itx.append(iti, ide); ib.append(ii, itx); ib.onmousedown = (e) => { e.preventDefault(); chosen = "__import__"; confirmBtn?.click(); }; wrap.appendChild(ib);
         root.appendChild(wrap);
         return { collect: () => chosen, validate: () => true };
       },
     });
     if (!action) return;
-    if (action === "__new__") { const n = await Dialog.prompt("Nom du document", "Document"); if (n) await this.newDocument(n); return; }
+    if (action === "__new__") { const n = await Dialog.prompt(I18n.t("app.rest.newDocPrompt"), "Document"); if (n) await this.newDocument(n); return; }
     if (action === "__import__") { await this.importFromPicker(); return; }
     if (action.startsWith("__default__:")) {
       const id = action.slice(12) || null;   // "" → efface le défaut ; sinon le déplace sur ce doc
-      try { await this.adapter.setDefaultDocId(id); Notify.toast(id ? "Document par défaut défini." : "Document par défaut retiré."); }
-      catch (e: any) { Notify.toast("Action impossible : " + (e.message || e), "err"); }
+      try { await this.adapter.setDefaultDocId(id); Notify.toast(id ? I18n.t("app.rest.defaultSet") : I18n.t("app.rest.defaultRemoved")); }
+      catch (e: any) { Notify.toast(I18n.t("app.rest.actionError", { error: e.message || e }), "err"); }
       await this.openChooser(); return;   // rouvre le sélecteur rafraîchi
     }
     if (action.startsWith("__lock__:")) {
       const id = action.slice(9), d = docs.find((x) => x.id === id);
-      try { await this.adapter.setDocumentLocked(id, !d?.locked); Notify.toast(d?.locked ? "Document déverrouillé." : "Document verrouillé."); }
-      catch (e: any) { Notify.toast("Action impossible : " + (e.message || e), "err"); }
+      try { await this.adapter.setDocumentLocked(id, !d?.locked); Notify.toast(d?.locked ? I18n.t("app.rest.unlocked") : I18n.t("app.rest.locked")); }
+      catch (e: any) { Notify.toast(I18n.t("app.rest.actionError", { error: e.message || e }), "err"); }
       await this.openChooser(); return;   // rouvre le sélecteur rafraîchi
     }
     if (action.startsWith("__del__:")) {
       const id = action.slice(8), d = docs.find((x) => x.id === id);
-      const ok = await Dialog.confirm({ title: "Supprimer le document ?", message: "Supprimer « " + (d?.name || id) + " » et toutes ses données ? Irréversible.", confirmLabel: "Supprimer", danger: true });
-      if (ok) { try { await this.adapter.deleteDocument(id); } catch (e: any) { Notify.toast("Suppression impossible : " + (e.message || e), "err"); } if (id === this.docId) this.docId = null; if (id === this.prefs.lastRestDocId) this.prefs.lastRestDocId = ""; }
+      const ok = await Dialog.confirm({ title: I18n.t("app.rest.deleteTitle"), message: I18n.t("app.rest.deleteMessage", { name: d?.name || id }), confirmLabel: I18n.t("ui.action.delete"), danger: true });
+      if (ok) { try { await this.adapter.deleteDocument(id); } catch (e: any) { Notify.toast(I18n.t("app.rest.deleteError", { error: e.message || e }), "err"); } if (id === this.docId) this.docId = null; if (id === this.prefs.lastRestDocId) this.prefs.lastRestDocId = ""; }
       await this.openChooser(); return;   // rouvre le sélecteur rafraîchi
     }
     if (action !== this.docId) { const d = docs.find((x) => x.id === action); await this.openDocument(action, d?.name); }

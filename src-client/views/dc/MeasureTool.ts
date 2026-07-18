@@ -18,6 +18,7 @@ import { Html } from "../../core/Html";
 import { Format } from "../../core/Format";
 import { Notify } from "../../ui/Notify";
 import { Measure } from "../../geometry/Measure";
+import { I18n } from "../../i18n/I18n";
 import { DC_DOT_PX } from "./shared";
 import type { Vec3 } from "./shared";
 
@@ -78,7 +79,7 @@ export class MeasureTool {
     this.host.clearRoute(); this.host.disarmPositioning();   // un seul mode de clic à la fois
     this.hi = null;
     this.state = { active: true, ctx: this.ctxKey(), pts: [], cursor: null, done: [] };
-    Notify.toast("Mesure : cliquez pour poser des points · glissez pour naviguer · ÉCHAP pour effacer", "ok");
+    Notify.toast(I18n.t("dc.measure.armToast"), "ok");
     this.host.buildToolbar(); this.host.render();
   }
   cancel(): void { this.state = null; this.hi = null; this.host.hideCote(); this.host.buildToolbar(); this.host.render(); }
@@ -127,9 +128,9 @@ export class MeasureTool {
   /* ---- pose de points (2D) ---- */
   /** Pose un point au clic (si le contexte correspond). */
   placeAt(clientX: number, clientY: number): void {
-    if (!this.activeHere()) { Notify.toast("Mesure prise dans un autre contexte — revenez-y ou effacez-la", "err"); return; }
+    if (!this.activeHere()) { Notify.toast(I18n.t("dc.measure.otherContextToast"), "err"); return; }
     const p = this.pick(clientX, clientY);
-    if (!p) { Notify.toast("Vue trop rasante : inclinez la caméra pour poser un point au sol", "err"); return; }
+    if (!p) { Notify.toast(I18n.t("dc.measure.tooGrazing"), "err"); return; }
     this.state!.pts.push(p); this.state!.cursor = null; this.host.hideCote();
     this.host.render();
   }
@@ -163,7 +164,7 @@ export class MeasureTool {
     m.done.forEach((pts, i) => {   // mesures validées : étiquette nom+total + surbrillance au survol
       poly(pts, i === this.hi, false);
       const c = pts.reduce((a, p) => ({ x: a.x + p.x, y: a.y + p.y, z: 0 }), { x: 0, y: 0, z: 0 });
-      label("Mesure " + (i + 1) + " · " + Format.meters(Measure.total(pts)), c.x / pts.length, c.y / pts.length, "dc-measure-label name");
+      label(I18n.t("dc.measure.overlayLabel", { n: i + 1, len: Format.meters(Measure.total(pts)) }), c.x / pts.length, c.y / pts.length, "dc-measure-label name");
     });
     poly(m.pts, false, true);   // mesure en cours : étiquettes par segment
     gRoot.appendChild(g);
@@ -210,17 +211,17 @@ export class MeasureTool {
   /** Carte « Mesure » (panneau latéral) : liste des segments + longueur totale + actions. */
   card(): HTMLElement {
     const box = document.createElement("div"); box.className = "dc-card";
-    const t = document.createElement("div"); t.className = "dc-card-title"; t.innerHTML = '<span class="gi">' + Icons.MEASURE + '</span>Mesure'; box.appendChild(t);
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.innerHTML = '<span class="gi">' + Icons.MEASURE + '</span>' + I18n.t("dc.measure.cardTitle"); box.appendChild(t);
     const m = this.state!, here = this.activeHere();
     const list = document.createElement("div"); list.style.cssText = "font-size:12px;margin:4px 0;display:flex;flex-direction:column;gap:3px";
     // LISTE des mesures : terminées (conservées en session) + celle en cours, avec longueur + nombre de points.
-    const measures = m.done.map((p, i) => ({ name: "Mesure " + (i + 1), pts: p, idx: i as number | null })).concat(m.pts.length ? [{ name: "En cours", pts: m.pts, idx: null }] : []);
+    const measures = m.done.map((p, i) => ({ name: I18n.t("dc.measure.nameNum", { n: i + 1 }), pts: p, idx: i as number | null })).concat(m.pts.length ? [{ name: I18n.t("dc.measure.inProgress"), pts: m.pts, idx: null }] : []);
     if (!measures.length) {
-      const d = document.createElement("div"); d.innerHTML = '<span style="color:var(--accent)">Cliquez pour poser le premier point…</span>'; list.appendChild(d);
+      const d = document.createElement("div"); d.innerHTML = '<span style="color:var(--accent)">' + I18n.t("dc.measure.clickFirst") + '</span>'; list.appendChild(d);
     } else {
       measures.forEach((meas) => {
         const np = meas.pts.length, d = document.createElement("div");
-        d.innerHTML = '<b>' + Html.escape(meas.name) + '</b> : <b style="color:var(--accent)">' + Html.escape(Format.meters(Measure.total(meas.pts))) + '</b> <span style="color:var(--fg-dim)">· ' + np + ' point' + (np > 1 ? 's' : '') + '</span>';
+        d.innerHTML = '<b>' + Html.escape(meas.name) + '</b> : <b style="color:var(--accent)">' + Html.escape(Format.meters(Measure.total(meas.pts))) + '</b> <span style="color:var(--fg-dim)">· ' + Html.escape(I18n.t("lists.ph.points", { count: np })) + '</span>';
         if (meas.idx != null && here) {   // mesure VALIDÉE → survol = mise en évidence dans la vue
           const idx = meas.idx; d.style.cursor = "pointer";
           d.addEventListener("mouseenter", () => this.setHi(idx));
@@ -233,18 +234,17 @@ export class MeasureTool {
     if (measures.length) {   // LONGUEUR TOTALE (toutes mesures)
       const grand = m.done.reduce((s, p) => s + Measure.total(p), 0) + Measure.total(m.pts);
       const tot = document.createElement("div"); tot.style.cssText = "margin:6px 0;font-size:13px;border-top:1px solid var(--line);padding-top:6px";
-      tot.innerHTML = 'Longueur totale : <b style="color:var(--accent)">' + Html.escape(Format.meters(grand)) + '</b>';
+      tot.innerHTML = I18n.t("dc.measure.totalLabel") + '<b style="color:var(--accent)">' + Html.escape(Format.meters(grand)) + '</b>';
       box.appendChild(tot);
     }
     const hint = document.createElement("div"); hint.className = "form-hint";
-    hint.textContent = here ? "Cliquez pour poser des points · ENTRÉE valide la mesure · ÉCHAP annule la mesure en cours."
-      : "Mesure prise dans un autre contexte de vue. Revenez-y pour l'éditer, ou effacez-la.";
+    hint.textContent = here ? I18n.t("dc.measure.hintHere") : I18n.t("dc.measure.hintOther");
     box.appendChild(hint);
     const acts = document.createElement("div"); acts.className = "dc-card-acts";
-    const bUndo = this.host.btn("↩ Annuler point", () => this.undo()); (bUndo as any).disabled = !m.pts.length || !here;
-    const bNew = this.host.btn("Valider (Entrée)", () => this.commit()); IconButton.decorate(bNew, Icons.CHECK); (bNew as any).disabled = m.pts.length < 2 || !here;
-    const bClear = this.host.btn("Tout effacer", () => this.clearAll()); IconButton.decorate(bClear, Icons.DELETE); (bClear as any).disabled = !m.pts.length && !m.done.length;
-    const bClose = this.host.btn("Fermer", () => this.cancel()); IconButton.decorate(bClose, Icons.CLOSE); bClose.classList.add("btn-danger");
+    const bUndo = this.host.btn(I18n.t("dc.measure.undoPoint"), () => this.undo()); (bUndo as any).disabled = !m.pts.length || !here;
+    const bNew = this.host.btn(I18n.t("dc.measure.commit"), () => this.commit()); IconButton.decorate(bNew, Icons.CHECK); (bNew as any).disabled = m.pts.length < 2 || !here;
+    const bClear = this.host.btn(I18n.t("dc.measure.clearAll"), () => this.clearAll()); IconButton.decorate(bClear, Icons.DELETE); (bClear as any).disabled = !m.pts.length && !m.done.length;
+    const bClose = this.host.btn(I18n.t("ui.action.close"), () => this.cancel()); IconButton.decorate(bClose, Icons.CLOSE); bClose.classList.add("btn-danger");
     acts.append(bUndo, bNew, bClear, bClose); box.appendChild(acts);
     return box;
   }

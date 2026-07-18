@@ -111,7 +111,7 @@ async function boot(): Promise<void> {
 
   const tabChannel = new TabChannel({
     enabled: HAS_FS_API && !REST_MODE,   // verrou inter-onglets = concept FICHIER ; en mode API le serveur arbitre (cf. P3)
-    onConflict: () => Notify.toast("Ce fichier est aussi ouvert dans un autre onglet.", "err"),
+    onConflict: () => Notify.toast(I18n.t("app.main.tabConflict"), "err"),
   });
   const handleStore = new HandleStore();
 
@@ -163,7 +163,7 @@ async function boot(): Promise<void> {
     ensureWritePermission: () => files.ensureCurrentWritePermission(),
     write: async () => { await files.writeCurrent(); refreshChrome(); },
     pickFile: () => files.doSaveAs(),
-    confirmEnable: () => Dialog.confirm({ title: "Activer l'auto-save", message: "Pour l'auto-save, le document doit être lié à un fichier. Choisir maintenant ?", confirmLabel: "Choisir un fichier" }),
+    confirmEnable: () => Dialog.confirm({ title: I18n.t("app.autosave.confirmTitle"), message: I18n.t("app.autosave.confirmMessage"), confirmLabel: I18n.t("app.autosave.confirmBtn") }),
     onStateChange: (on, intervalS, statusHtml) => { shell.setAutosave(on, intervalS); shell.setAutosaveStatus(statusHtml); refreshChrome(); },
     notify: (msg, kind) => Notify.toast(msg, kind),
   });
@@ -192,13 +192,13 @@ async function boot(): Promise<void> {
   // Validation PARTAGÉE côté client (Store) : SEUL garde-fou en mode fichier, retour immédiat en mode API.
   store.onInvalid = (errors) => {
     const head = errors.slice(0, 3).map((e) => e.message).join(" · ");
-    Notify.toast("Données invalides : " + head + (errors.length > 3 ? " …" : ""), "err");
+    Notify.toast(I18n.t("app.main.invalidData", { head }) + (errors.length > 3 ? " …" : ""), "err");
   };
   // Échec de persistance HORS transaction (meta / snapshot) : sans ce câblage, un échec réseau (renommage,
   // import, dispositions de graphe) finissait en console.warn et l'UI croyait au succès.
   store.onPersistError = (op, e: any) => {
-    const what = op === "meta" ? "métadonnées non enregistrées" : "document non enregistré";
-    Notify.toast("Échec de persistance (" + what + ") : " + ((e && e.message) || e), "err");
+    const what = op === "meta" ? I18n.t("app.main.persistMeta") : I18n.t("app.main.persistDoc");
+    Notify.toast(I18n.t("app.main.persistError", { what, error: (e && e.message) || e }), "err");
   };
 
   // NETTOYAGE des images de façade NON UTILISÉES (réglages → Maintenance) : purge de la bibliothèque après
@@ -208,21 +208,21 @@ async function boot(): Promise<void> {
   const purgeUnusedImages = async (): Promise<void> => {
     const refs = store.faceImageRefIds();
     const orphans = imageStore.list().filter((im: any) => !refs.has(im.id));
-    if (!orphans.length && !REST_MODE) { Notify.toast("Aucune image inutilisée."); return; }
+    if (!orphans.length && !REST_MODE) { Notify.toast(I18n.t("app.maint.noUnused")); return; }
     const ok = await Dialog.confirm({
-      title: "Nettoyer les images non utilisées",
-      message: orphans.length + " image(s) de façade ne sont référencées par aucun équipement. Les supprimer DÉFINITIVEMENT de la bibliothèque ?" + (REST_MODE ? " La base du document sera aussi compactée (VACUUM)." : ""),
-      confirmLabel: "Nettoyer", danger: true,
+      title: I18n.t("app.maint.cleanTitle"),
+      message: I18n.t("app.maint.cleanMessage", { n: orphans.length }) + (REST_MODE ? I18n.t("app.maint.cleanVacuum") : ""),
+      confirmLabel: I18n.t("app.maint.cleanConfirm"), danger: true,
     });
     if (!ok) return;
     if (REST_MODE) {
       const r = await (adapter as RestAdapter).maintenance();
       await imageStore.reloadFromBackend();
       const mb = (n: number) => (n / 1048576).toFixed(1) + " Mo";
-      Notify.toast(r ? r.purgedImages + " image(s) purgée(s) · base " + mb(r.bytesBefore) + " → " + mb(r.bytesAfter) : "Maintenance effectuée");
+      Notify.toast(r ? I18n.t("app.maint.purgedRest", { n: r.purgedImages, before: mb(r.bytesBefore), after: mb(r.bytesAfter) }) : I18n.t("app.maint.done"));
     } else {
       await imageStore.keepOnly(refs);
-      Notify.toast(orphans.length + " image(s) purgée(s) — enregistrez pour alléger le compagnon d'images.");
+      Notify.toast(I18n.t("app.maint.purgedFile", { n: orphans.length }));
       session.markDirty(); refreshChrome();
     }
     shell.refreshActive();
@@ -231,14 +231,14 @@ async function boot(): Promise<void> {
   // ---- services FICHIER / GLOBAUX (topbar) ----
   const shellHost: ShellHost = {
     onNew: async () => {
-      if (REST_MODE) { const n = await Dialog.prompt("Nom du nouveau document", "Document"); if (n) await rest!.newDocument(n); return; }
+      if (REST_MODE) { const n = await Dialog.prompt(I18n.t("app.main.newDocPromptTitle"), "Document"); if (n) await rest!.newDocument(n); return; }
       if (hasUserData()) {
-        const ok = await Dialog.confirm({ title: "Nouveau document ?", message: "Le document courant (non enregistré) sera remplacé. Continuer ?", confirmLabel: "Nouveau", danger: true });
+        const ok = await Dialog.confirm({ title: I18n.t("app.main.newDocTitle"), message: I18n.t("app.main.newDocMessage"), confirmLabel: I18n.t("app.main.newDocConfirm"), danger: true });
         if (!ok) return;
       }
       tabChannel.release(store.meta.fileId || null);
       await store.newDocument(); await imageStore.clearAll(); undoTimeline.reset(); files.detach(); session.markLoaded(store.histIndex());
-      applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast("Nouveau document");
+      applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast(I18n.t("app.main.newDocToast"));
     },
     onOpen: () => { if (rest) void rest.openChooser(); else void files.doOpen(); },
     onSave: () => { void files.doSave(); },
@@ -252,7 +252,7 @@ async function boot(): Promise<void> {
     onResetViewPrefs: () => {
       try { Object.keys(window.localStorage).filter((k) => k.startsWith("dcmanager.view3d")).forEach((k) => window.localStorage.removeItem(k)); } catch (_) { /* noop */ }
       dcView.resetView(); shell.refreshActive();   // force une restauration aux défauts à la prochaine activation
-      Notify.toast("Préférences d'affichage 3D réinitialisées");
+      Notify.toast(I18n.t("app.main.viewPrefsReset"));
     },
     onRenameDoc: async (name) => {
       store.meta.docName = name; await store.persistMeta(); session.markDirty(); refreshChrome();   // meta HORS historique
@@ -263,9 +263,9 @@ async function boot(): Promise<void> {
       const target = (value === "api") ? "api" : "local";
       if (target === (REST_MODE ? "api" : "local")) { prefs.dataSource = target; return; }   // déjà ce mode → on mémorise juste le choix
       const ok = await Dialog.confirm({
-        title: "Changer de mode de données ?",
-        message: "Passer en mode « " + (target === "api" ? "API (serveur)" : "Local (fichier)") + " » recharge l'application. Les modifications non enregistrées seront perdues.",
-        confirmLabel: "Changer et recharger", cancelLabel: "Annuler", danger: true,
+        title: I18n.t("app.main.switchModeTitle"),
+        message: I18n.t("app.main.switchModeMessage", { mode: target === "api" ? I18n.t("app.main.switchModeApi") : I18n.t("app.main.switchModeLocal") }),
+        confirmLabel: I18n.t("app.main.switchModeConfirm"), cancelLabel: I18n.t("ui.action.cancel"), danger: true,
       });
       if (!ok) { shell.setDataSource(prefs.dataSource); return; }   // rétablit la position du toggle
       prefs.dataSource = target;
@@ -276,20 +276,20 @@ async function boot(): Promise<void> {
       if (clean === ((prefs.apiBaseUrl && prefs.apiBaseUrl.trim()) || API_BASE_URL)) return;
       prefs.apiBaseUrl = clean; shell.setApiBaseUrl(clean);
       if (prefs.dataSource !== "api") return;   // sans effet tant qu'on n'est pas en mode API
-      const ok = await Dialog.confirm({ title: "Appliquer la nouvelle URL d'API ?", message: "Modifier l'URL de l'API (" + clean + ") recharge l'application.", confirmLabel: "Recharger", cancelLabel: "Plus tard" });
+      const ok = await Dialog.confirm({ title: I18n.t("app.main.applyUrlTitle"), message: I18n.t("app.main.applyUrlMessage", { url: clean }), confirmLabel: I18n.t("app.common.reload"), cancelLabel: I18n.t("app.common.later") });
       if (ok) window.location.reload();
     },
     onLoginUrl: (url) => { prefs.loginUrl = url; shell.setLoginUrl(prefs.loginUrl); },   // utilisée par le bouton « Connexion » du welcome
     onFileAccessMode: (value) => {
-      if (value === "directory" && !HAS_FS_API) { Notify.toast("Mode dossier indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); shell.setFileAccessMode("file"); return; }
+      if (value === "directory" && !HAS_FS_API) { Notify.toast(I18n.t("app.main.dirModeUnavailable"), "err"); shell.setFileAccessMode("file"); return; }
       prefs.fileAccessMode = (value === "directory") ? "directory" : "file";
       if (prefs.fileAccessMode === "file") files.dirHandle = null;   // repasse en mode fichier → on oublie le dossier courant
       shell.setWelcomeMode(prefs.fileAccessMode, HAS_FS_API); refreshChrome();
-      Notify.toast(prefs.fileAccessMode === "directory" ? "Mode dossier : une seule autorisation couvre le document et ses images." : "Mode fichier : autorisation par fichier.");
+      Notify.toast(prefs.fileAccessMode === "directory" ? I18n.t("app.main.dirModeOn") : I18n.t("app.main.fileModeOn"));
     },
     onOpenMode: (mode) => {
       const m = (mode === "directory") ? "directory" : "file";
-      if (m === "directory" && !HAS_FS_API) { Notify.toast("Mode dossier indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); return; }
+      if (m === "directory" && !HAS_FS_API) { Notify.toast(I18n.t("app.main.dirModeUnavailable"), "err"); return; }
       prefs.fileAccessMode = m;
       if (m === "file") files.dirHandle = null;
       shell.setFileAccessMode(m); shell.setWelcomeMode(m, HAS_FS_API);
@@ -300,7 +300,7 @@ async function boot(): Promise<void> {
     onReopenLast: () => { void files.reopenLast(); },
     onExportJson: () => { void files.exportJsonDownload(); },
     onExportStandalone: () => { void files.exportStandalone(); },
-    onDebugLog: (on) => { prefs.debugLog = on; Log.setEnabled(on); Notify.toast(on ? "Logs de débogage activés (console)" : "Logs de débogage désactivés"); },
+    onDebugLog: (on) => { prefs.debugLog = on; Log.setEnabled(on); Notify.toast(on ? I18n.t("app.main.debugOn") : I18n.t("app.main.debugOff")); },
   };
 
   const shell = new Shell(root, shellHost);
@@ -322,7 +322,7 @@ async function boot(): Promise<void> {
       row.readOnly = true;
       body.appendChild(FormControls.fieldRow(k, row));
     });
-    modal.open({ title: Html.escape(o.name || o.label || "(détail)"), subtitle: coll, body, hideFooter: true });
+    modal.open({ title: Html.escape(o.name || o.label || I18n.t("app.main.detailFallback")), subtitle: coll, body, hideFooter: true });
   };
 
   // ---- onglets de LISTE (ListView paramétré par ListConfigs) ----
@@ -357,16 +357,16 @@ async function boot(): Promise<void> {
               if (act === "edit") { formFn?.(id, reRender); return; }
               if (act === "clone") {
                 const c = cfg.collection === "equipments" ? await store.cloneEquipment(id) : await store.cloneSimple(cfg.collection, id);
-                if (c) { reRender(); Notify.toast("Élément cloné"); }
+                if (c) { reRender(); Notify.toast(I18n.t("app.main.itemCloned")); }
                 return;
               }
               if (act === "del") {
                 if (opts.onDel) { opts.onDel(id, reRender); return; }   // suppression spécifique (ex. site → décommissionnement)
                 const o: any = store.get(cfg.collection, id);
-                const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${o?.name || o?.label || "cet élément"} » ?`, confirmLabel: "Supprimer", danger: true });
+                const ok = await Dialog.confirm({ title: I18n.t("app.main.deleteGenericTitle"), message: I18n.t("app.main.deleteGenericMessage", { name: o?.name || o?.label || I18n.t("app.main.deleteGenericItem") }), confirmLabel: I18n.t("ui.action.delete"), danger: true });
                 if (!ok) return;
                 await store.remove(cfg.collection, id);
-                reRender(); Notify.toast("Supprimé");
+                reRender(); Notify.toast(I18n.t("app.main.deleted"));
               }
             },
           });
@@ -379,7 +379,7 @@ async function boot(): Promise<void> {
   // === ONGLETS PRINCIPAUX (ordre de l'original) ===
   addListTab("equipements", I18n.t("tabs.equipements.label"), ListConfigs.equipments, {
     subtitle: I18n.t("tabs.equipements.subtitle"),
-    form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: "+ Équipement",
+    form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: I18n.t("app.add.equipment"),
     links: ["groupes", "faceimages", "spares"], locate: "equipment",
   });
   // VMs : onglet de PREMIER NIVEAU (à côté d'Équipements) — ALIMENTÉ PAR LA SYNCHRO (Proxmox…). Pas de
@@ -392,7 +392,7 @@ async function boot(): Promise<void> {
   // le « Synchroniser » de la barre d'outils puisse le rafraîchir après une passe réussie (cf. onDone ci-dessous).
   let clustersView: VmClustersView | null = null;
   const vmExtraActions: NonNullable<TabOpts["extraActions"]> = VIEWER ? [] : [
-    { label: "Réseaux virtuels…", title: "Associer les couples pont/VLAN des vNIC à des réseaux logiques", onClick: () => VmForms.netMapping(store, formHost) },
+    { label: I18n.t("app.vm.netMapping"), title: I18n.t("app.vm.netMappingTitle"), onClick: () => VmForms.netMapping(store, formHost) },
   ];
   if (REST_MODE && vmSyncClient) {
     const client = vmSyncClient;   // const → non-null capturé dans les closures (garde REST_MODE ci-dessus)
@@ -400,7 +400,7 @@ async function boot(): Promise<void> {
     // MÉMOIRE serveur, sans push SSE → on retire à la main). « Statut de synchro… » a été RETIRÉ : redondant avec
     // le sous-onglet Clusters (qui affiche désormais l'état de synchro PAR provider, cf. cadrage 2026-07-13).
     vmExtraActions.push(
-      { label: "Synchroniser", title: "Synchroniser l'inventaire des VMs depuis les providers du document (Proxmox)", onClick: (btn) => { void VmForms.sync(client, btn, () => { void clustersView?.reload(); }); } },
+      { label: I18n.t("app.vm.sync"), title: I18n.t("app.vm.syncTitle"), onClick: (btn) => { void VmForms.sync(client, btn, () => { void clustersView?.reload(); }); } },
     );
   }
   // L'onglet VMs expose le lien « Clusters » vers son sous-onglet — MODE API uniquement (masqué en mode fichier/viewer).
@@ -417,8 +417,8 @@ async function boot(): Promise<void> {
     // En-tête du sous-onglet : « Providers… » (gestion CRUD, NON-VIEWER seulement) avant « Actualiser ».
     // Après toute écriture, la modale rappelle `onChanged` → on recharge l'état des clusters (config à chaud).
     const clustersActions: NonNullable<TabOpts["extraActions"]> = [];
-    if (!VIEWER) clustersActions.push({ label: "Providers…", title: "Configurer les providers de synchronisation (pool de nœuds, jeton, intervalle)", onClick: () => VmProvidersForm.open(formHost, client, () => { void clustersView?.reload(); }) });
-    clustersActions.push({ label: "Actualiser", title: "Recharger l'état des clusters (GET /vm/status)", onClick: () => { void clustersView?.reload(); } });
+    if (!VIEWER) clustersActions.push({ label: I18n.t("app.vm.providers"), title: I18n.t("app.vm.providersTitle"), onClick: () => VmProvidersForm.open(formHost, client, () => { void clustersView?.reload(); }) });
+    clustersActions.push({ label: I18n.t("app.vm.refresh"), title: I18n.t("app.vm.refreshTitle"), onClick: () => { void clustersView?.reload(); } });
     const clustersContainer = shell.addView({
       name: "clusters", label: I18n.t("tabs.clusters.label"), kind: "secondary", parent: "vms",
       title: I18n.t("tabs.clusters.label"), subtitle: I18n.t("tabs.clusters.subtitle"),
@@ -432,16 +432,16 @@ async function boot(): Promise<void> {
   }
   addListTab("racks", I18n.t("tabs.racks.label"), ListConfigs.racks, {
     subtitle: I18n.t("tabs.racks.subtitle"),
-    form: (id, done) => Forms.rack(store, formHost, id, done), addLabel: "+ Rack", locate: "rack", manage: true,
+    form: (id, done) => Forms.rack(store, formHost, id, done), addLabel: I18n.t("app.add.rack"), locate: "rack", manage: true,
   });
   addListTab("cables", I18n.t("tabs.cables.label"), ListConfigs.cables, {
     subtitle: I18n.t("tabs.cables.subtitle"),
-    form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: "+ Câble",
+    form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: I18n.t("app.add.cable"),
     links: ["reseaux", "porttypes", "cabletypes", "faisceaux"], locate: "cable",
   });
   addListTab("ipam", I18n.t("tabs.ipam.label"), ListConfigs.ipNetworks, {
     title: I18n.t("tabs.ipam.title"), subtitle: I18n.t("tabs.ipam.subtitle"),
-    form: (id, done) => Forms.ipNetwork(store, formHost, id, done), addLabel: "+ Réseau IP",
+    form: (id, done) => Forms.ipNetwork(store, formHost, id, done), addLabel: I18n.t("app.add.ipNetwork"),
     links: ["ipaddresses", "dhcpranges"],
   });
 
@@ -460,10 +460,10 @@ async function boot(): Promise<void> {
     openNetworkDetail: (id) => Forms.networkDetail(store, formHost, id, () => shell.refreshActive()),
     deleteEquipment: async (id) => {
       const eq = store.get("equipments", id);
-      const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${eq?.name || "équipement"} » et ses câbles ?`, confirmLabel: "Supprimer", danger: true });
+      const ok = await Dialog.confirm({ title: I18n.t("app.main.deleteGenericTitle"), message: I18n.t("app.main.deleteEqMessage", { name: eq?.name || I18n.t("app.main.deleteEqItem") }), confirmLabel: I18n.t("ui.action.delete"), danger: true });
       if (!ok) return;
       await store.remove("equipments", id);
-      Notify.toast("Équipement supprimé");
+      Notify.toast(I18n.t("app.main.eqDeleted"));
     },
     openModal: (opts) => modal.open(opts),
   });
@@ -494,7 +494,7 @@ async function boot(): Promise<void> {
     openWaypointForm: (id, opts) => Forms.waypoint(store, formHost, id, opts),
     openRackItemForm: (id) => Forms.rackItem(store, formHost, id, () => shell.refreshActive()),
     assignTraySlot: (trayItemId, onDone) => Forms.assignTraySlot(store, formHost, trayItemId, onDone),
-    removeRackItem: async (id, onDone) => { if (store.get("rackItems", id)) { await store.remove("rackItems", id); Notify.toast("Réservation retirée"); onDone?.(); } },
+    removeRackItem: async (id, onDone) => { if (store.get("rackItems", id)) { await store.remove("rackItems", id); Notify.toast(I18n.t("app.main.rackItemRemoved")); onDone?.(); } },
     openFloorForm: (loc, fl, opts) => Forms.floor(store, formHost, loc, fl, opts),
     openSiteForm: (id) => Forms.site(store, formHost, id, () => { dcView.buildToolbar(); dcView.render(); }),
     faceImageUrl: (eqId, face) => {
@@ -521,11 +521,11 @@ async function boot(): Promise<void> {
   // === SOUS-VUES (atteintes par les liens d'en-tête ; surlignent leur onglet parent) ===
   addListTab("groupes", I18n.t("tabs.groupes.label"), ListConfigs.groups, {
     subtitle: I18n.t("tabs.groupes.subtitle"),
-    form: (id, done) => Forms.group(store, formHost, id, done), addLabel: "+ Groupe", kind: "secondary", parent: "equipements",
+    form: (id, done) => Forms.group(store, formHost, id, done), addLabel: I18n.t("app.add.group"), kind: "secondary", parent: "equipements",
   });
   addListTab("spares", I18n.t("tabs.spares.label"), ListConfigs.spares, {
     subtitle: I18n.t("tabs.spares.subtitle"),
-    form: (id, done) => Forms.spare(store, formHost, id, done), addLabel: "+ Spare", kind: "secondary", parent: "equipements",
+    form: (id, done) => Forms.spare(store, formHost, id, done), addLabel: I18n.t("app.add.spare"), kind: "secondary", parent: "equipements",
   });
   // Images de façade : bibliothèque hors modèle (ImageStore) → câblage dédié (CRUD via imageStore)
   {
@@ -536,12 +536,12 @@ async function boot(): Promise<void> {
       kind: "secondary", parent: "equipements", links: [],
       count: () => imageStore.count(),
       extraActions: [
-        { label: "Importer des images…", title: "Charger une bibliothèque d'images .nmfb — ÉCRASE la bibliothèque actuelle ; les faces des équipements concernés seront à ré-assigner", onClick: () => files.importFacesLibrary() },
-        { label: "Exporter les images", title: "Télécharger toute la bibliothèque d'images au format .nmfb (portable, ré-importable dans un autre document)", onClick: () => files.exportFacesLibrary() },
+        { label: I18n.t("app.faces.import"), title: I18n.t("app.faces.importTitle"), onClick: () => files.importFacesLibrary() },
+        { label: I18n.t("app.faces.export"), title: I18n.t("app.faces.exportTitle"), onClick: () => files.exportFacesLibrary() },
         // Compagnon (mode fichier uniquement) : .nmfb APPARIÉ au document, rechargé/enregistré automatiquement à côté du .json.
-        ...(REST_MODE ? [] : [{ label: "Ouvrir un fichier de faces", title: "Charger le compagnon d'images .nmfb apparié au document (mode dossier : liste le dossier ; mode fichier : sélecteur)", onClick: () => files.openFacesFile() }]),
+        ...(REST_MODE ? [] : [{ label: I18n.t("app.faces.openCompanion"), title: I18n.t("app.faces.openCompanionTitle"), onClick: () => files.openFacesFile() }]),
       ],
-      addLabel: "+ Image", onAdd: () => Forms.faceImage(imageStore, store, formHost, null, () => shell.refreshActive()),
+      addLabel: I18n.t("app.add.image"), onAdd: () => Forms.faceImage(imageStore, store, formHost, null, () => shell.refreshActive()),
       onShow: () => {
         if (!view) {
           const reRender = () => view!.render();
@@ -551,12 +551,12 @@ async function boot(): Promise<void> {
             onAction: async (act, id) => {
               if (act === "edit") { Forms.faceImage(imageStore, store, formHost, id, reRender); return; }
               if (act === "download") { const fi: any = imageStore.get(id); if (fi && fi.url) { const blob = await (await fetch(fi.url)).blob(); Download.blob(ImageStore.downloadName(fi.name, blob.type || fi.type), blob); } return; }
-              if (act === "clone") { const fi: any = imageStore.get(id); if (fi && fi.url) { const blob = await (await fetch(fi.url)).blob(); await imageStore.add({ name: (fi.name || "image") + " (copie)", u_height: fi.u_height, face: fi.face, description: fi.description, blob, type: fi.type }); reRender(); Notify.toast("Image clonée"); } return; }
+              if (act === "clone") { const fi: any = imageStore.get(id); if (fi && fi.url) { const blob = await (await fetch(fi.url)).blob(); await imageStore.add({ name: (fi.name || "image") + " (copie)", u_height: fi.u_height, face: fi.face, description: fi.description, blob, type: fi.type }); reRender(); Notify.toast(I18n.t("app.main.imageCloned")); } return; }
               if (act === "del") {
                 const fi: any = imageStore.get(id); const n = store.faceImageUsageCount(id);
-                const ok = await Dialog.confirm({ title: "Supprimer l'image ?", message: `Supprimer « ${fi?.name || "cette image"} » ?` + (n ? ` Elle est référencée par ${n} équipement(s) (les références seront orphelines).` : ""), confirmLabel: "Supprimer", danger: true });
+                const ok = await Dialog.confirm({ title: I18n.t("app.main.deleteImageTitle"), message: I18n.t("app.main.deleteImageMessage", { name: fi?.name || I18n.t("app.main.deleteImageItem") }) + (n ? I18n.t("app.main.deleteImageRefs", { n }) : ""), confirmLabel: I18n.t("ui.action.delete"), danger: true });
                 if (!ok) return;
-                await imageStore.remove(id); reRender(); Notify.toast("Image supprimée");
+                await imageStore.remove(id); reRender(); Notify.toast(I18n.t("app.main.imageDeleted"));
               }
             },
           });
@@ -567,11 +567,11 @@ async function boot(): Promise<void> {
   }
   addListTab("reseaux", I18n.t("tabs.reseaux.label"), ListConfigs.networks, {
     subtitle: I18n.t("tabs.reseaux.subtitle"),
-    form: (id, done) => Forms.network(store, formHost, id, done), addLabel: "+ Réseau", kind: "secondary", parent: "cables",
+    form: (id, done) => Forms.network(store, formHost, id, done), addLabel: I18n.t("app.add.network"), kind: "secondary", parent: "cables",
   });
   addListTab("faisceaux", I18n.t("tabs.faisceaux.label"), ListConfigs.cableBundles, {
     title: I18n.t("tabs.faisceaux.title"), subtitle: I18n.t("tabs.faisceaux.subtitle"),
-    form: (id, done) => Forms.cableBundle(store, formHost, id, done), addLabel: "+ Faisceau", kind: "secondary", parent: "cables",
+    form: (id, done) => Forms.cableBundle(store, formHost, id, done), addLabel: I18n.t("app.add.bundle"), kind: "secondary", parent: "cables",
   });
   addListTab("porttypes", I18n.t("tabs.porttypes.label"), ListConfigs.portTypes, {
     title: I18n.t("tabs.porttypes.title"), subtitle: I18n.t("tabs.porttypes.subtitle"),
@@ -583,36 +583,36 @@ async function boot(): Promise<void> {
   });
   addListTab("ipaddresses", I18n.t("tabs.ipaddresses.label"), ListConfigs.ipAddresses, {
     title: I18n.t("tabs.ipaddresses.title"), subtitle: I18n.t("tabs.ipaddresses.subtitle"),
-    form: (id, done) => Forms.ipAddress(store, formHost, id, done), addLabel: "+ Adresse IP", kind: "secondary", parent: "ipam",
+    form: (id, done) => Forms.ipAddress(store, formHost, id, done), addLabel: I18n.t("app.add.ipAddress"), kind: "secondary", parent: "ipam",
   });
   addListTab("salles", I18n.t("tabs.salles.label"), ListConfigs.datacenters, {
     title: I18n.t("tabs.salles.title"), subtitle: I18n.t("tabs.salles.subtitle"),
-    form: (id, done) => Forms.datacenter(store, formHost, id, done), addLabel: "+ Salle", kind: "secondary", parent: "datacenter",
+    form: (id, done) => Forms.datacenter(store, formHost, id, done), addLabel: I18n.t("app.add.datacenter"), kind: "secondary", parent: "datacenter",
   });
   addListTab("sites", I18n.t("tabs.sites.label"), ListConfigs.sites, {
     title: I18n.t("tabs.sites.title"), subtitle: I18n.t("tabs.sites.subtitle"),
-    form: (id, done) => Forms.site(store, formHost, id, done), addLabel: "+ Site", kind: "secondary", parent: "datacenter",
+    form: (id, done) => Forms.site(store, formHost, id, done), addLabel: I18n.t("app.add.site"), kind: "secondary", parent: "datacenter",
     onDel: async (id, reRender) => {
       const s: any = store.get("sites", id);
-      const ok = await Dialog.confirm({ title: "Supprimer le site « " + (s?.name || "") + " » ?", message: "Décommissionnement : salles & étages supprimés, baies → « non placé » (équipements conservés), câbles intra → « planifié », équipements d'étage décâblés, waypoints supprimés, routes inter-DC débranchées. Les liaisons LOGIQUES (port↔port) sont préservées. Continuer ?", confirmLabel: "Supprimer le site", danger: true });
+      const ok = await Dialog.confirm({ title: I18n.t("app.main.deleteSiteTitle", { name: s?.name || "" }), message: I18n.t("app.main.deleteSiteMessage"), confirmLabel: I18n.t("app.main.deleteSiteConfirm"), danger: true });
       if (!ok) return;
-      await store.removeSite(id); Notify.toast("Site décommissionné (liaisons logiques préservées)"); reRender();
+      await store.removeSite(id); Notify.toast(I18n.t("app.main.siteDecommissioned")); reRender();
     },
   });
   addListTab("etages", I18n.t("tabs.etages.label"), ListConfigs.floors, {
     title: I18n.t("tabs.etages.title"), subtitle: I18n.t("tabs.etages.subtitle"),
-    form: (id) => { const f: any = id ? store.get("floors", id) : null; Forms.floor(store, formHost, f ? (f.location || "") : "", f ? String(f.floor || "") : "", {}); }, addLabel: "+ Étage", kind: "secondary", parent: "datacenter",
-    onAdd: () => { if (!store.sitesSorted().length) { Notify.toast("Créez d'abord un site / bâtiment (onglet Sites)", "err"); return; } Forms.floor(store, formHost, "", "", { pick: true }); },
+    form: (id) => { const f: any = id ? store.get("floors", id) : null; Forms.floor(store, formHost, f ? (f.location || "") : "", f ? String(f.floor || "") : "", {}); }, addLabel: I18n.t("app.add.floor"), kind: "secondary", parent: "datacenter",
+    onAdd: () => { if (!store.sitesSorted().length) { Notify.toast(I18n.t("app.main.createSiteFirst"), "err"); return; } Forms.floor(store, formHost, "", "", { pick: true }); },
     onDel: async (id, reRender) => {
       const f: any = store.get("floors", id);
-      const ok = await Dialog.confirm({ title: "Supprimer le plan d'étage ?", message: "Supprime le PLAN de l'étage « " + (f ? f.floor : "?") + " » du bâtiment « " + store.siteLabel(f ? (f.location || "") : "") + " ». Les salles posées sur cet étage restent (éditez-les si besoin).", confirmLabel: "Supprimer le plan", danger: true });
+      const ok = await Dialog.confirm({ title: I18n.t("app.main.deleteFloorTitle"), message: I18n.t("app.main.deleteFloorMessage", { floor: f ? f.floor : "?", building: store.siteLabel(f ? (f.location || "") : "") }), confirmLabel: I18n.t("app.main.deleteFloorConfirm"), danger: true });
       if (!ok) return;
-      await store.remove("floors", id); Notify.toast("Plan d'étage supprimé"); reRender();
+      await store.remove("floors", id); Notify.toast(I18n.t("app.main.floorPlanDeleted")); reRender();
     },
   });
   addListTab("dhcpranges", I18n.t("tabs.dhcpranges.label"), ListConfigs.dhcpRanges, {
     title: I18n.t("tabs.dhcpranges.title"), subtitle: I18n.t("tabs.dhcpranges.subtitle"),
-    form: (id, done) => Forms.dhcpRange(store, formHost, id, done), addLabel: "+ Plage DHCP", kind: "secondary", parent: "ipam",
+    form: (id, done) => Forms.dhcpRange(store, formHost, id, done), addLabel: I18n.t("app.add.dhcpRange"), kind: "secondary", parent: "ipam",
   });
   // CONTACTS : carnet des destinataires des NOTIFICATIONS (email/sms), tenu PAR DOCUMENT. Le module serveur
   // notify/ route ses alertes via `repo.getOne("contacts", id)` (référence souple `contact_id`, HORS document).
@@ -621,7 +621,7 @@ async function boot(): Promise<void> {
   // contacts PAR DOCUMENT.
   addListTab("contacts", I18n.t("tabs.contacts.label"), ListConfigs.contacts, {
     title: I18n.t("tabs.contacts.title"), subtitle: I18n.t("tabs.contacts.subtitle"),
-    form: (id, done) => Forms.contact(store, formHost, id, done), addLabel: "+ Contact",
+    form: (id, done) => Forms.contact(store, formHost, id, done), addLabel: I18n.t("app.add.contact"),
     kind: "secondary", parent: "parametres",
   });
   // NOTIFICATIONS (S7) : page d'ADMINISTRATION du module serveur notify/ (canaux, abonnements, rappels, alertes
@@ -720,7 +720,7 @@ async function boot(): Promise<void> {
     // setStatus, qui n'aurait aucun effet visible (champs fichier/source/sauvegarde sans objet côté serveur).
     if (!REST_MODE) {
       shell.setStatus({
-        file: files.name || (store.meta.docName ? files.docFileName() : "— en mémoire —"),
+        file: files.name || (store.meta.docName ? files.docFileName() : I18n.t("shell.status.inMemory")),
         release: APP_RELEASE, source: prefs.dataSource === "api" ? "API" : adapter.label, entities: store.totalCount(), lastSave: "—",
       });
     }
@@ -735,8 +735,8 @@ async function boot(): Promise<void> {
   undoTimeline.register("model", store);
   undoTimeline.register("image", imageStore);
   const afterUndoRedo = (msg: string) => { shell.refreshActive(); refreshChrome(); Notify.toast(msg); };
-  const doUndo = async (): Promise<void> => { if (await undoTimeline.undo()) afterUndoRedo("Annulé"); };
-  const doRedo = async (): Promise<void> => { if (await undoTimeline.redo()) afterUndoRedo("Rétabli"); };
+  const doUndo = async (): Promise<void> => { if (await undoTimeline.undo()) afterUndoRedo(I18n.t("app.main.undone")); };
+  const doRedo = async (): Promise<void> => { if (await undoTimeline.redo()) afterUndoRedo(I18n.t("app.main.redone")); };
   undoTimeline.reset();   // état propre au boot (ignore un éventuel jeton parasite du newDocument initial)
 
   // cohérence inter-vues : toute mutation marque dirty + rafraîchit le chrome (pastille/undo) IMMÉDIATEMENT, et
@@ -785,7 +785,7 @@ async function boot(): Promise<void> {
     try {
       await store.replaceAll(EMBED);
       if (Array.isArray(EMBED.faceImages)) await imageStore.replaceAllFromLegacy(EMBED.faceImages); else await imageStore.clearAll();
-    } catch (e) { console.error(e); Notify.toast("Document embarqué illisible", "err"); }
+    } catch (e) { console.error(e); Notify.toast(I18n.t("app.main.embedUnreadable"), "err"); }
     undoTimeline.reset();
     document.body.classList.add("viewer-mode");   // interface allégée (cf. dc-manager.css) + édition bloquée
     modal.editLocked = true;                       // bloque toute modale d'ÉDITION (les fiches restent consultables)

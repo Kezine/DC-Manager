@@ -5,6 +5,7 @@ import { Format } from "../core/Format";
 import { VmClusterFormat } from "../core/VmClusterFormat";
 import { VmSyncError } from "./forms/VmSyncClient";
 import type { VmSyncClient, VmProviderStatus, VmClusterInfo, VmClusterNode } from "./forms/VmSyncClient";
+import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
    VmClustersView — sous-onglet « Clusters » (sous l'onglet VMs, MODE API UNIQUEMENT).
@@ -47,12 +48,12 @@ export class VmClustersView {
   async reload(): Promise<void> {
     if (this.loading) return;
     this.loading = true;
-    this.renderMessage("Chargement de l'état des clusters…");
+    this.renderMessage(I18n.t("vm.clusters.loading"));
     try {
       const providers = await this.client.status();
       this.render(providers);
     } catch (e) {
-      this.renderMessage("État indisponible — " + VmClustersView.errText(e), true);
+      this.renderMessage(I18n.t("vm.clusters.unavailable", { detail: VmClustersView.errText(e) }), true);
     } finally {
       this.loading = false;
     }
@@ -64,11 +65,11 @@ export class VmClustersView {
   private render(providers: VmProviderStatus[]): void {
     this.container.innerHTML = "";
     const intro = document.createElement("div"); intro.className = "form-hint";
-    intro.textContent = "État des clusters synchronisés, par provider (lu dans vm-providers.json côté serveur). Lecture seule — l'état vit en mémoire serveur et est tiré à la demande.";
+    intro.textContent = I18n.t("vm.clusters.intro");
     this.container.appendChild(intro);
 
     if (!providers.length) {
-      this.appendNote("Aucun provider configuré pour ce document (vm-providers.json).");
+      this.appendNote(I18n.t("vm.common.noProvider"));
       return;
     }
     // Résolution nœud→équipement et comptage des VMs : lus UNE fois par rendu (partagés par toutes les cartes).
@@ -103,8 +104,8 @@ export class VmClustersView {
       mgmt.href = cluster.management_url;
       mgmt.target = "_blank"; mgmt.rel = "noopener noreferrer";
       mgmt.className = "btn btn-ghost btn-sm";
-      mgmt.textContent = "Management ↗";
-      mgmt.title = "Ouvrir l'outil de management du cluster (Proxmox Datacenter Manager)";
+      mgmt.textContent = I18n.t("vm.clusters.mgmtBtn");
+      mgmt.title = I18n.t("vm.clusters.mgmtTitle");
       mgmt.style.cssText = "margin-top:8px; display:inline-flex; text-decoration:none";
       left.appendChild(mgmt);
     }
@@ -116,17 +117,17 @@ export class VmClustersView {
     // -- ÉTAT DE SYNCHRO : période, dernière tentative/réussite (formatage de dates du repo), compteurs.
     //    Le « Message » n'entre dans la grille QU'EN SUCCÈS (résumé/compteurs, indice d'inventaire vide) ;
     //    en ERREUR il part dans un BANDEAU dédié ci-dessous (plus visible et actionnable, sans doublon). --
-    const period = p.interval_sec > 0 ? ("automatique · toutes les " + p.interval_sec + " s") : "manuelle";
+    const period = p.interval_sec > 0 ? I18n.t("vm.clusters.periodAuto", { n: p.interval_sec }) : I18n.t("vm.clusters.periodManual");
     const counts = p.counts
-      ? `${p.counts.created} créée(s) · ${p.counts.updated} mise(s) à jour · ${p.counts.orphaned} orpheline(s) · ${p.counts.unchanged} inchangée(s)`
+      ? I18n.t("vm.clusters.counts", { created: p.counts.created, updated: p.counts.updated, orphaned: p.counts.orphaned, unchanged: p.counts.unchanged })
       : VmClustersView.MUTED;
     const gridPairs: Array<[string, string]> = [
-      ["Période", Html.escape(period)],
-      ["Dernière tentative", Html.escape(Format.dateTime(p.last_attempt || ""))],
-      ["Dernière réussite", Html.escape(Format.dateTime(p.last_success || ""))],
+      [I18n.t("vm.clusters.gPeriod"), Html.escape(period)],
+      [I18n.t("vm.clusters.gLastAttempt"), Html.escape(Format.dateTime(p.last_attempt || ""))],
+      [I18n.t("vm.clusters.gLastSuccess"), Html.escape(Format.dateTime(p.last_success || ""))],
     ];
-    if (p.ok) gridPairs.push(["Message", Html.escape(p.message)]);
-    gridPairs.push(["Compteurs", counts]);
+    if (p.ok) gridPairs.push([I18n.t("vm.clusters.gMessage"), Html.escape(p.message)]);
+    gridPairs.push([I18n.t("vm.clusters.gCounts"), counts]);
     card.appendChild(this.grid(gridPairs));
 
     // -- BANDEAU D'ERREUR (par provider) : synchro OU construction en échec → message serveur ACTIONNABLE
@@ -141,7 +142,7 @@ export class VmClustersView {
     if (cluster) {
       this.appendNodes(card, p, cluster, equipments, ipAddresses, vms);
     } else if (p.ok) {
-      this.appendNote("Ce provider n'a pas encore été synchronisé depuis le démarrage du serveur. Utilisez « Synchroniser » (barre d'outils de l'onglet VMs) pour récupérer l'état du cluster et l'inventaire des VMs.", card);
+      this.appendNote(I18n.t("vm.clusters.neverSynced"), card);
     }
     return card;
   }
@@ -149,14 +150,14 @@ export class VmClustersView {
   /** Pills d'en-tête : synchro (ok/err), et — si le cluster est connu — version + gamme + quorum. */
   private headerPills(p: VmProviderStatus, cluster: VmClusterInfo | null): string {
     const out: string[] = [];
-    out.push(this.pill(p.ok ? "Synchro OK" : "Synchro en erreur", p.ok ? "ok" : "err"));
+    out.push(this.pill(p.ok ? I18n.t("vm.clusters.syncOk") : I18n.t("vm.clusters.syncErr"), p.ok ? "ok" : "err"));
     if (cluster) {
-      out.push(cluster.version ? this.pill("PVE " + cluster.version, "neutral") : this.pill("Version inconnue", "dim"));
-      out.push(this.pill(cluster.supported ? "Gamme supportée" : "Hors gamme", cluster.supported ? "ok" : "warn"));
+      out.push(cluster.version ? this.pill(I18n.t("vm.common.pveVersion", { version: cluster.version }), "neutral") : this.pill(I18n.t("vm.common.versionUnknown"), "dim"));
+      out.push(this.pill(cluster.supported ? I18n.t("vm.common.rangeSupported") : I18n.t("vm.common.rangeOut"), cluster.supported ? "ok" : "warn"));
       // Quorum : true = OK ; false = PERDU (erreur) ; null = inconnu (nœud isolé sans cluster).
-      out.push(cluster.quorate === true ? this.pill("Quorum OK", "ok")
-        : cluster.quorate === false ? this.pill("Quorum PERDU", "err")
-        : this.pill("Quorum inconnu", "dim"));
+      out.push(cluster.quorate === true ? this.pill(I18n.t("vm.clusters.quorumOk"), "ok")
+        : cluster.quorate === false ? this.pill(I18n.t("vm.clusters.quorumLost"), "err")
+        : this.pill(I18n.t("vm.clusters.quorumUnknown"), "dim"));
     }
     return out.join(" ");
   }
@@ -164,22 +165,22 @@ export class VmClustersView {
   /** Section + table des nœuds d'un cluster (nom · état · CPU · RAM · uptime · équipement · nb VMs). */
   private appendNodes(card: HTMLElement, p: VmProviderStatus, cluster: VmClusterInfo, equipments: Array<{ id: string; name: string }>, ipAddresses: Array<{ equipment_id: string | null; hostname: string }>, vms: Array<{ provider_id?: string; host_node?: string }>): void {
     const nodes = Array.isArray(cluster.nodes) ? cluster.nodes : [];
-    this.sect(card, "Nœuds (" + nodes.length + ")");
+    this.sect(card, I18n.t("vm.clusters.nodesSection", { count: nodes.length }));
     const rows = nodes.map((node: VmClusterNode) => {
-      const statePill = node.online ? this.pill("en ligne", "ok") : this.pill("hors ligne", "err");
+      const statePill = node.online ? this.pill(I18n.t("vm.clusters.online"), "ok") : this.pill(I18n.t("vm.clusters.offline"), "err");
       // Rapprochement nœud→équipement : MÊME hiérarchie v3 que la synchro (VmClusterFormat, miroir serveur —
       // les hostnames des IP rattachées priment, cf. ipAddresses). Résolu → nom + lien ⓘ vers la fiche
       // (pattern inter-fiches de DetailForms) ; sinon « non rapproché ».
       const eqId = VmClusterFormat.resolveHostEquipmentId(equipments, ipAddresses, node.name);
       const eq = eqId ? this.store.get("equipments", eqId) as { name?: string } | undefined : undefined;
       const eqCell = eq
-        ? `${Html.escape(eq.name || "(équip.)")} <button class="btn btn-ghost btn-sm icon-action" data-eq-view="${Html.escape(eqId!)}" title="Ouvrir la fiche de l'équipement" aria-label="Ouvrir la fiche de l'équipement">${Icons.INFO}</button>`
-        : `<span class="pill" style="border-color:var(--warn);color:var(--warn)">non rapproché</span>`;
+        ? `${Html.escape(eq.name || I18n.t("lists.ph.equipment"))} <button class="btn btn-ghost btn-sm icon-action" data-eq-view="${Html.escape(eqId!)}" title="${Html.escape(I18n.t("vm.clusters.eqOpenTitle"))}" aria-label="${Html.escape(I18n.t("vm.clusters.eqOpenTitle"))}">${Icons.INFO}</button>`
+        : `<span class="pill" style="border-color:var(--warn);color:var(--warn)">${Html.escape(I18n.t("vm.clusters.notMatched"))}</span>`;
       // Lien de management PAR nœud (généré par le provider — lien profond de l'UI web Proxmox).
       // Anchor externe (nouvel onglet) accolé au nom ; URL échappée pour l'attribut HTML (elle est
       // http(s) validée côté serveur). Absent → pas de lien.
       const mgmtLink = node.management_url
-        ? ` <a href="${Html.escape(node.management_url)}" target="_blank" rel="noopener noreferrer" class="row-btn" title="Ouvrir l'UI de management du nœud">↗</a>`
+        ? ` <a href="${Html.escape(node.management_url)}" target="_blank" rel="noopener noreferrer" class="row-btn" title="${Html.escape(I18n.t("vm.clusters.nodeMgmtTitle"))}">↗</a>`
         : "";
       // Nb de VMs du document hébergées sur ce nœud (même provider) — `host_node` == nom du nœud.
       const vmCount = vms.filter((v) => v.provider_id === p.provider_id && v.host_node === node.name).length;
@@ -193,7 +194,7 @@ export class VmClustersView {
         String(vmCount),
       ];
     });
-    const tw = this.tbl(card, ["Nœud", "État", "CPU", "RAM", "Uptime", "Équipement DC Manager", "VMs"], rows, "Aucun nœud remonté par ce cluster.");
+    const tw = this.tbl(card, [I18n.t("vm.clusters.colNode"), I18n.t("vm.clusters.colState"), I18n.t("vm.clusters.colCpu"), I18n.t("vm.clusters.colRam"), I18n.t("vm.clusters.colUptime"), I18n.t("vm.clusters.colEquipment"), I18n.t("vm.clusters.colVms")], rows, I18n.t("vm.clusters.nodesEmpty"));
     // Liaison des liens ⓘ → fiche équipement (après injection du HTML), pattern DetailForms.
     tw?.querySelectorAll("[data-eq-view]").forEach((el) => {
       (el as HTMLElement).onclick = () => this.host.openEquipmentDetail((el as HTMLElement).dataset.eqView!);
@@ -247,7 +248,7 @@ export class VmClustersView {
     const banner = document.createElement("div");
     banner.style.cssText = "border:1px solid var(--err); border-radius:6px; padding:10px 12px; margin-top:12px; background:var(--bg-2)";
     const title = document.createElement("div"); title.style.cssText = "font-weight:600; color:var(--err); margin-bottom:4px";
-    title.textContent = "Provider en erreur";
+    title.textContent = I18n.t("vm.clusters.bannerTitle");
     const detail = document.createElement("div"); detail.className = "form-hint"; detail.style.whiteSpace = "pre-line";
     detail.textContent = message;
     banner.append(title, detail);

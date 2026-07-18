@@ -7,6 +7,7 @@
    — testable avec un hôte simulé (cf. Tests/modules).
    ============================================================================= */
 import { SaveState } from "./SaveState";
+import { I18n } from "../i18n/I18n";
 
 /** Préférences consommées/écrites (l'instance `Prefs` de l'app les persiste à l'affectation). */
 export interface AutoSavePrefs { autosave: boolean; autosaveInterval: number; }
@@ -32,10 +33,10 @@ export class AutoSave {
 
   /** Statut lisible pour le panneau réglages. */
   statusHtml(): string {
-    if (!this.host.hasFsApi()) return "Indisponible — navigateur sans <strong>File System Access API</strong>.";
-    if (!this.prefs.autosave) return "État : <strong>off</strong>.";
-    if (!this.host.hasFile()) return "État : <strong>en attente d'un fichier</strong> — démarrera à la prochaine (ré)ouverture.";
-    return "État : <strong>actif</strong> · toutes les <strong>" + this.prefs.autosaveInterval + "s</strong>.";
+    if (!this.host.hasFsApi()) return I18n.t("app.autosave.statusUnavailable");
+    if (!this.prefs.autosave) return I18n.t("app.autosave.statusOff");
+    if (!this.host.hasFile()) return I18n.t("app.autosave.statusWaiting");
+    return I18n.t("app.autosave.statusActive", { n: this.prefs.autosaveInterval });
   }
 
   /** (Ré)arme le timer selon les préférences + l'état courant, et pousse l'état au chrome.
@@ -55,7 +56,7 @@ export class AutoSave {
     try {
       if (!(await this.host.ensureWritePermission())) {
         this.prefs.autosave = false; this.apply();
-        this.host.notify("Auto-save désactivé : permission révoquée", "err");
+        this.host.notify(I18n.t("app.autosave.disabledPermission"), "err");
         return;
       }
       await this.host.write();
@@ -64,16 +65,16 @@ export class AutoSave {
 
   /** Active/désactive (toggle du panneau réglages). L'activation SANS fichier lié propose d'en choisir un. */
   async setEnabled(on: boolean): Promise<void> {
-    if (!on) { this.prefs.autosave = false; this.apply(); this.host.notify("Auto-save désactivé"); return; }
+    if (!on) { this.prefs.autosave = false; this.apply(); this.host.notify(I18n.t("app.autosave.disabled")); return; }
     const refuse = () => this.host.onStateChange(false, this.prefs.autosaveInterval, this.statusHtml());
-    if (!this.host.hasFsApi()) { this.host.notify("Auto-save indisponible : navigateur sans File System Access API (Chrome/Edge/Brave/Opera).", "err"); refuse(); return; }
+    if (!this.host.hasFsApi()) { this.host.notify(I18n.t("app.autosave.unavailable"), "err"); refuse(); return; }
     if (!this.host.hasFile()) {
       if (!(await this.host.confirmEnable())) { refuse(); return; }
       await this.host.pickFile();
       if (!this.host.hasFile()) { refuse(); return; }   // « Enregistrer sous » annulé
     }
     this.prefs.autosave = true; this.apply();
-    this.host.notify("Auto-save activé (toutes les " + this.prefs.autosaveInterval + "s)");
+    this.host.notify(I18n.t("app.autosave.enabled", { n: this.prefs.autosaveInterval }));
   }
 
   /** Désarme le timer (démontage). */

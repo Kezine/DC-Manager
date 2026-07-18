@@ -5,8 +5,10 @@
    (`DcDoor`), aujourd'hui dispersés/dupliqués : normalisation (`Normalize.dcDoors`), création
    (`addDoor`), menus contextuels, cartes de panneau et (à venir) l'outil dédié. Aligné sur le
    principe CLAUDE.md n°10 (énumérations normalisées via un domaine, comme `CableStatuses`,
-   `RackItemKinds`…). TS PUR : ni DOM, ni core, ni store → testable en isolation.
+   `RackItemKinds`…). Ni DOM, ni store → testable en isolation ; les LIBELLÉS sont résolus au
+   RENDU via `I18n.t` (table de CLÉS, comme `RackItemKinds`/`Depths` — lot i18n B2a).
    ============================================================================= */
+import { I18n } from "../i18n/I18n";
 
 /** Murs porteurs possibles d'une porte (top = avant, bottom = arrière). */
 export const DOOR_WALLS = ["top", "bottom", "left", "right"] as const;
@@ -33,9 +35,10 @@ export interface DoorSpec {
 
 /** Règles et libellés PURS des portes de salle (méthodes statiques — cf. CLAUDE.md). */
 export class Doors {
-  /** Libellé métier d'un mur (avant/arrière/gauche/droit). */
-  static readonly WALL_LABEL: Record<DoorWall, string> = { top: "avant", bottom: "arrière", left: "gauche", right: "droit" };
-  static wallLabel(wall: string): string { return Doors.WALL_LABEL[wall as DoorWall] || wall; }
+  /** CLÉS i18n des libellés métier d'un mur (avant/arrière/gauche/droit). Table de CLÉS résolue par `I18n.t`
+      dans `wallLabel` AU POINT DE RENDU (la localisation n'est prête qu'après le bootstrap). */
+  static readonly WALL_LABEL_KEY: Record<DoorWall, string> = { top: "domain.doorWall.top", bottom: "domain.doorWall.bottom", left: "domain.doorWall.left", right: "domain.doorWall.right" };
+  static wallLabel(wall: string): string { const k = Doors.WALL_LABEL_KEY[wall as DoorWall]; return k ? I18n.t(k) : wall; }
   /** Un mur VERTICAL (gauche/droite) → la porte se positionne/glisse le long de l'axe Y (sinon X). */
   static isVerticalWall(wall: string): boolean { return wall === "left" || wall === "right"; }
   /** Passage LIBRE (largeur max d'équipement) = ouverture − 2·listel, borné ≥ 0. */

@@ -1,6 +1,7 @@
 import { Html } from "../core/Html";
 import { Notify } from "./Notify";
 import { Fullscreen } from "./Fullscreen";
+import { I18n } from "../i18n/I18n";
 
 /** API optionnelle renvoyée par un `build(root)` de dialogue personnalisé. */
 export interface DialogBuildApi {
@@ -38,7 +39,7 @@ export class Dialog {
     return new Promise((resolve) => {
       const {
         title = "", message = "", variant = "info", build = null,
-        confirmLabel = "Confirmer", cancelLabel = "Annuler",
+        confirmLabel = I18n.t("ui.action.confirm"), cancelLabel = I18n.t("ui.action.cancel"),
         hideCancel = false, danger = false, cancelValue = false,
         confirmValueFromBuild = false, wide = false, choices = null,
       } = opts || {};
@@ -132,22 +133,22 @@ export class Dialog {
 
   /** Confirmation oui/non → Promise<boolean>. */
   static confirm(o: Partial<DialogOptions> & { danger?: boolean } = {}): Promise<boolean> {
-    return Dialog.open({ title: o.title || "Confirmation", message: o.message || "", variant: o.variant || (o.danger ? "danger" : "info"), confirmLabel: o.confirmLabel || "Confirmer", cancelLabel: o.cancelLabel || "Annuler", danger: !!o.danger, cancelValue: false });
+    return Dialog.open({ title: o.title || I18n.t("ui.dialog.confirmTitle"), message: o.message || "", variant: o.variant || (o.danger ? "danger" : "info"), confirmLabel: o.confirmLabel || I18n.t("ui.action.confirm"), cancelLabel: o.cancelLabel || I18n.t("ui.action.cancel"), danger: !!o.danger, cancelValue: false });
   }
 
   /** Information (un seul bouton) → Promise. */
   static alert(o: Partial<DialogOptions> = {}): Promise<any> {
-    return Dialog.open({ title: o.title || "Information", message: o.message || "", variant: o.variant || "info", confirmLabel: o.confirmLabel || "OK", hideCancel: true, cancelValue: true });
+    return Dialog.open({ title: o.title || I18n.t("ui.dialog.alertTitle"), message: o.message || "", variant: o.variant || "info", confirmLabel: o.confirmLabel || I18n.t("ui.action.ok"), hideCancel: true, cancelValue: true });
   }
 
   /** CHOIX parmi N options empilées (label + hint) → Promise<valeur du choix | null (Annuler/Échap)>. */
   static choice(o: Partial<DialogOptions> & { choices: Array<{ label: string; value: any; hint?: string }> }): Promise<any> {
-    return Dialog.open({ title: o.title || "", message: o.message || "", variant: o.variant || "info", choices: o.choices, cancelLabel: o.cancelLabel || "Annuler", cancelValue: null });
+    return Dialog.open({ title: o.title || "", message: o.message || "", variant: o.variant || "info", choices: o.choices, cancelLabel: o.cancelLabel || I18n.t("ui.action.cancel"), cancelValue: null });
   }
 
   /** Dialogue personnalisé (corps construit par `build`) → Promise<valeur collectée|null>. */
   static custom(o: Partial<DialogOptions> = {}): Promise<any> {
-    return Dialog.open({ title: o.title || "", message: o.message || "", variant: o.variant || (o.danger ? "danger" : "info"), build: o.build || null, confirmLabel: o.confirmLabel || "Confirmer", cancelLabel: o.cancelLabel || "Annuler", hideCancel: !!o.hideCancel, danger: !!o.danger, wide: !!o.wide, cancelValue: null, confirmValueFromBuild: true });
+    return Dialog.open({ title: o.title || "", message: o.message || "", variant: o.variant || (o.danger ? "danger" : "info"), build: o.build || null, confirmLabel: o.confirmLabel || I18n.t("ui.action.confirm"), cancelLabel: o.cancelLabel || I18n.t("ui.action.cancel"), hideCancel: !!o.hideCancel, danger: !!o.danger, wide: !!o.wide, cancelValue: null, confirmValueFromBuild: true });
   }
 
   /** Saisie d'une ligne de texte → Promise<string|null>. */

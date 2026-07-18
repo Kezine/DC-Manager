@@ -18,6 +18,7 @@
    déjà révoqué (rien de commun à révoquer).
    ============================================================================= */
 import type { ExportCategoryKey } from "./CertZip";
+import { I18n } from "../i18n/I18n";
 
 /** Instantané MINIMAL d'un certificat sélectionné (mémorisé par la vue, `id` = clé de la Map).
     Suffit à décider les actions communes ET à afficher un bilan lisible (label). */
@@ -64,23 +65,17 @@ export interface ExportChoice {
   available: boolean;
 }
 
-/** Libellés des boutons d'export (constantes nommées — réemployées par la vue et les tests). */
-const EXPORT_LABEL_FULL = "Exporter (ZIP)";
-const EXPORT_LABEL_PUBLIC = "Exporter publics (ZIP)";
-
-/** Libellés UI des catégories d'artefacts (le libellé vit dans la couche décision ; l'assemblage CertZip
-    ne connaît que la CLÉ). Table nommée réutilisée par exportChoices et les tests. */
-const CATEGORY_LABELS: Record<ExportCategoryKey, string> = {
-  public: "Certificat / clé publique",
-  fullchain: "Fullchain (PEM)",
-  "ca-chain": "Chaîne CA (PEM)",
-  key: "Clé privée",
+/** CLÉS i18n des libellés UI des catégories d'artefacts (le libellé vit dans la couche décision ; l'assemblage
+    CertZip ne connaît que la CLÉ d'artefact). Table de CLÉS résolue par `I18n.t` AU POINT DE RENDU (exportChoices),
+    jamais au chargement du module — la localisation n'est initialisée qu'au bootstrap. */
+const CATEGORY_LABEL_KEY: Record<ExportCategoryKey, string> = {
+  public: "certs.admin.bulk.catPublic",
+  fullchain: "certs.admin.bulk.catFullchain",
+  "ca-chain": "certs.admin.bulk.catCaChain",
+  key: "certs.admin.bulk.catKey",
 };
 
 export class BulkActions {
-  static readonly EXPORT_LABEL_FULL = EXPORT_LABEL_FULL;
-  static readonly EXPORT_LABEL_PUBLIC = EXPORT_LABEL_PUBLIC;
-
   /** INTERSECTION des actions communes à une sélection, selon l'état de session (cadrage §5).
       Sélection vide → aucune action. Export toujours possible (publics au minimum).
 
@@ -96,7 +91,7 @@ export class BulkActions {
     const anyRevoked = list.some((s) => BulkActions.isRevoked(s.revoked_at));
     return {
       canExport: hasSelection,
-      exportLabel: unlocked ? EXPORT_LABEL_FULL : EXPORT_LABEL_PUBLIC,
+      exportLabel: unlocked ? I18n.t("certs.admin.bulk.selExportFull") : I18n.t("certs.admin.bulk.selExportPublic"),
       withPrivateKeys: unlocked,
       canRevoke: hasSelection && !anyRevoked,
       canDelete: hasSelection,
@@ -122,10 +117,10 @@ export class BulkActions {
     const allLeaf = hasActive && active.every((s) => s.kind === "leaf-tls");
     const allHaveKey = hasActive && active.every((s) => s.has_key);
     return [
-      { key: "public", label: CATEGORY_LABELS.public, available: true },
-      { key: "fullchain", label: CATEGORY_LABELS.fullchain, available: allLeaf },
-      { key: "ca-chain", label: CATEGORY_LABELS["ca-chain"], available: allLeaf },
-      { key: "key", label: CATEGORY_LABELS.key, available: unlocked && allHaveKey },
+      { key: "public", label: I18n.t(CATEGORY_LABEL_KEY.public), available: true },
+      { key: "fullchain", label: I18n.t(CATEGORY_LABEL_KEY.fullchain), available: allLeaf },
+      { key: "ca-chain", label: I18n.t(CATEGORY_LABEL_KEY["ca-chain"]), available: allLeaf },
+      { key: "key", label: I18n.t(CATEGORY_LABEL_KEY.key), available: unlocked && allHaveKey },
     ];
   }
 

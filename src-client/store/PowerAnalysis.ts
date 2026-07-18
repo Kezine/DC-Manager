@@ -1,4 +1,5 @@
 import { POWER_LOAD_WARN_FRACTION } from "../domain/constants";
+import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
    ANALYSE ÉNERGIE (power) — PURE, pilotée par le store injecté (aucun DOM).
@@ -203,22 +204,22 @@ export class PowerAnalysis {
     const wired = sinks.filter((s: any) => this.store.cablesOfPort(s.id).length > 0);   // a un câble (peu importe l'autre bout)
     const fed = this.fedSinksOf(equipmentId);                                            // câblé VERS une source (réellement alimenté) — mémoïsé, plus de re-filtre inline
     // PSU non câblée : redondance amoindrie (compte les prises SANS aucun câble).
-    if (sinks.length >= 2 && wired.length < sinks.length) out.push({ code: "psu_uncabled", message: `${sinks.length - wired.length} alimentation(s) non câblée(s) — redondance amoindrie.` });
-    if (!fed.length) { out.push({ code: "no_source", message: "Aucune alimentation valide (câblée vers une source) — équipement non alimenté." }); return out; }
+    if (sinks.length >= 2 && wired.length < sinks.length) out.push({ code: "psu_uncabled", message: I18n.t("analysis.power.psuUncabled", { n: sinks.length - wired.length }) });
+    if (!fed.length) { out.push({ code: "no_source", message: I18n.t("analysis.power.noSource") }); return out; }
     // Diversité des feeds : ≥ 2 feeds RÉELS mais toutes vers la MÊME racine = point unique de défaillance. 0 racine
     // traçable ⇒ on NE prétend PAS « même origine » (les sens/racines amont manquent) → message distinct.
     if (fed.length >= 2) {
       const roots = new Set<string>();
       for (const s of fed) this.rootSourcesOf(s.id).forEach((r) => roots.add(r));
-      if (roots.size === 1) out.push({ code: "spof", message: "Alimentations non redondantes — même source d'origine (point unique de défaillance)." });
-      else if (roots.size === 0) out.push({ code: "origin_unknown", message: "Origine des alimentations indéterminable (sens ou tableau amont non renseignés) — redondance non vérifiable." });
+      if (roots.size === 1) out.push({ code: "spof", message: I18n.t("analysis.power.spof") });
+      else if (roots.size === 0) out.push({ code: "origin_unknown", message: I18n.t("analysis.power.originUnknown") });
     }
     // Rating PSU vs charge max : chaque PSU doit tenir la charge MAX seule (redondance réelle).
     const maxW = this.demandW(eq, true);
     if (maxW > 0) for (const s of fed) {
       const v = this.deducedVoltageOf(s.id) || DEFAULT_VOLTAGE;
       if (s.power_max_a != null && s.power_max_a > 0 && s.power_max_a * v < maxW) {
-        out.push({ code: "psu_undersized", message: `Alimentation « ${s.name || "?"} » (${s.power_max_a} A) insuffisante pour la charge max seule (${Math.ceil(maxW / v)} A requis).` });
+        out.push({ code: "psu_undersized", message: I18n.t("analysis.power.psuUndersized", { name: s.name || "?", amps: s.power_max_a, req: Math.ceil(maxW / v) }) });
       }
     }
     return out;

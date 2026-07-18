@@ -11,6 +11,7 @@ import { Waypoint } from "../models/Waypoint";
 import { PortRoles } from "../registries/PortRoles";
 import { Id } from "../core/Id";
 import { Text } from "../core/Text";
+import { I18n } from "../i18n/I18n";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT, LOCATIONS, RACK_DEPTH_DEFAULT } from "../domain/constants";
 import { Depths } from "../registries/Depths";
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
@@ -669,10 +670,10 @@ export class Store {
     const ct = this.get("cableTypes", cableTypeId);
     const pf = this.portFamily(this.get("ports", fromPortId));
     const pt = this.portFamily(this.get("ports", toPortId));
-    if (!ct) return { ok: false, reason: "Type de câble manquant" };
-    if (!pf || !pt) return { ok: false, reason: "Un port n'a pas de type défini" };
+    if (!ct) return { ok: false, reason: I18n.t("analysis.cable.typeMissing") };
+    if (!pf || !pt) return { ok: false, reason: I18n.t("analysis.cable.portTypeMissing") };
     if (ct.family !== pf || ct.family !== pt) {
-      return { ok: false, reason: `Incompatible : câble « ${ct.family} » vs ports « ${pf} » / « ${pt} »` };
+      return { ok: false, reason: I18n.t("analysis.cable.incompatible", { family: ct.family, pf, pt }) };
     }
     return { ok: true };
   }

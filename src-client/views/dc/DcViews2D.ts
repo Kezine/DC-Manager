@@ -8,6 +8,7 @@ import { Format } from "../../core/Format";
 import { Waypoint } from "../../models/Waypoint";
 import { PlacementLock } from "../../domain/PlacementLock";
 import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT } from "../../domain/constants";
+import { I18n } from "../../i18n/I18n";
 import { DC_DOT_PX, WP_HIT_PX } from "./shared";
 import type { Vec3 } from "./shared";
 import { DcScene3D } from "./DcScene3D";
@@ -130,8 +131,8 @@ export abstract class DcViews2D extends DcScene3D {
     g.appendChild(Dom.svg("line", { class: "dc-floor-anchor-mark", x1: 0, y1: -s * 1.5, x2: 0, y2: s * 1.5 }));
     g.appendChild(Dom.svg("circle", { class: "dc-floor-anchor-dot", cx: 0, cy: 0, r: s * 0.2 }));
     const label = Dom.svg("text", { class: "dc-floor-anchor-label", x: s * 1.7, y: -s * 1.5, "font-size": cfg.cell_mm * 0.4 });
-    label.textContent = "⚓ ancrage"; g.appendChild(label);
-    const tip = Dom.svg("title"); tip.textContent = "⚓ Point d'ancrage de l'étage — décale ce plan dans la pile 3D (" + Format.meters(ax) + " ; " + Format.meters(ay) + ") · glissez pour régler"; g.appendChild(tip);
+    label.textContent = I18n.t("dc.views2d.anchorLabel"); g.appendChild(label);
+    const tip = Dom.svg("title"); tip.textContent = I18n.t("dc.views2d.anchorTip", { x: Format.meters(ax), y: Format.meters(ay) }); g.appendChild(tip);
     g.addEventListener("pointerdown", (e: any) => this.onFloorAnchorPointerDown(e, cfg, loc, fl));
     return g;
   }
@@ -200,20 +201,20 @@ export abstract class DcViews2D extends DcScene3D {
     if (!keys.length) { rail.style.display = "none"; return; }
     rail.style.display = "";
     const loc = ft.location || "", fl = String(ft.floor || "");
-    const title = document.createElement("div"); title.className = "dc-floor-rail-title"; title.textContent = "Étages"; rail.appendChild(title);
+    const title = document.createElement("div"); title.className = "dc-floor-rail-title"; title.textContent = I18n.t("lists.col.floors"); rail.appendChild(title);
     const byB = new Map<string, Array<{ location: string; floor: string }>>();
     keys.forEach((k) => { const b = k.location || ""; if (!byB.has(b)) byB.set(b, []); byB.get(b)!.push(k); });
     const multiB = byB.size > 1;
     [...byB.keys()].forEach((b) => {
-      if (multiB) { const h = document.createElement("div"); h.className = "dc-floor-rail-bldg"; h.textContent = this.store.siteLabel(b) || "(bât. ?)"; h.title = this.store.siteLabel(b) || ""; rail.appendChild(h); }
+      if (multiB) { const h = document.createElement("div"); h.className = "dc-floor-rail-bldg"; h.textContent = this.store.siteLabel(b) || I18n.t("dc.views2d.bldgUnknown"); h.title = this.store.siteLabel(b) || ""; rail.appendChild(h); }
       // étages d'un bâtiment = CHOIX 1 parmi N → contrôle SEGMENTÉ vertical (.rm-toggle.rm-vert), segment courant teinté.
       const seg = document.createElement("div"); seg.className = "rm-toggle rm-vert dc-floor-rail-seg";
       byB.get(b)!.slice().sort((a, c) => FloorLayout.floorNum(c.floor) - FloorLayout.floorNum(a.floor)).forEach((k) => {
         const isCur = (k.location || "") === loc && String(k.floor || "") === fl;
         const btn = document.createElement("button"); btn.type = "button"; btn.className = "dc-floor-rail-btn";   // nu : style via .rm-toggle button
         btn.classList.toggle("on", isCur);
-        btn.textContent = "ét. " + (String(k.floor) || "0");
-        btn.title = (this.store.siteLabel(k.location) || "(bât. ?)") + " · étage " + (String(k.floor) || "0");
+        btn.textContent = I18n.t("dc.views2d.floorAbbr", { n: String(k.floor) || "0" });
+        btn.title = I18n.t("dc.views2d.floorTitle", { bldg: this.store.siteLabel(k.location) || I18n.t("dc.views2d.bldgUnknown"), n: String(k.floor) || "0" });
         if (isCur) btn.setAttribute("aria-current", "true");
         btn.onclick = () => { if (!isCur) { this.floorTarget = { location: k.location, floor: String(k.floor) }; this.scale = null; this.render(); } };
         seg.appendChild(btn);
@@ -229,7 +230,7 @@ export abstract class DcViews2D extends DcScene3D {
     g.appendChild(Dom.svg("rect", { class: "dc-floor-equip-body", x: -b.w / 2, y: -b.d / 2, width: b.w, height: b.d, rx: Math.min(b.w, b.d) * 0.06 }));
     const fs = Math.max(40, s * 0.22), yLab = -b.d / 2 - fs * 0.55;
     const label = Dom.svg("text", { class: "dc-floor-equip-label", x: 0, y: yLab, "text-anchor": "middle", "font-size": fs, transform: `rotate(${(360 - o) % 360} 0 ${yLab})` });
-    label.textContent = (eq.name || "équipement") + (FloorLayout.floorEquipLocalized(eq) ? "" : " (auto)"); g.appendChild(label);
+    label.textContent = (eq.name || I18n.t("lists.ph.equipment")) + (FloorLayout.floorEquipLocalized(eq) ? "" : I18n.t("dc.common.autoSuffix")); g.appendChild(label);
     g.addEventListener("pointerdown", (e: any) => this.onFloorEquipPointerDown(e, eq, cfg));
     g.addEventListener("contextmenu", (e: any) => this.ctxMenu(e, this.floorEquipCtx(eq)));
     return g;
@@ -261,7 +262,7 @@ export abstract class DcViews2D extends DcScene3D {
     (d.doors || []).forEach((door: any) => inner.appendChild(this.doorTool.node2D(d, door, { w, h }, false)));   // portes (affichage seul en étage ; placement en Plan de salle)
     g.appendChild(inner);
     const label = Dom.svg("text", { class: "dc-floor-room-label", x: fp.w / 2, y: fp.h / 2, "text-anchor": "middle", "dominant-baseline": "central", "font-size": Math.max(200, Math.min(fp.w, fp.h) * 0.12) });
-    label.textContent = (d.name || "(salle)") + (d.room ? " · " + d.room : ""); g.appendChild(label);
+    label.textContent = (d.name || I18n.t("lists.ph.room")) + (d.room ? " · " + d.room : ""); g.appendChild(label);
     g.addEventListener("pointerdown", (e: any) => this.onFloorRoomPointerDown(e, d, cfg));
     g.addEventListener("contextmenu", (e: any) => this.ctxMenu(e, this.floorRoomCtx(d)));
     return g;
@@ -275,7 +276,7 @@ export abstract class DcViews2D extends DcScene3D {
     const g = Dom.svg("g", { class: "dc-floor-oob" + (this.selWaypointId === wp.id ? " sel" : ""), "data-oob": wp.id, "data-wp": wp.id, transform: `translate(${pos.x} ${pos.y})` });
     g.appendChild(Dom.svg("circle", { class: "dc-floor-oob-body", cx: 0, cy: 0, r: s }));
     const label = Dom.svg("text", { class: "dc-floor-oob-label", x: 0, y: -s * 1.5, "text-anchor": "middle", "font-size": cfg.cell_mm * 0.42 });
-    label.textContent = "◎ " + (wp.name || "OOB") + " · " + Format.meters(FloorLayout.oobHeight(wp)) + (loc ? "" : " (auto)");
+    label.textContent = "◎ " + (wp.name || "OOB") + " · " + Format.meters(FloorLayout.oobHeight(wp)) + (loc ? "" : I18n.t("dc.common.autoSuffix"));
     g.appendChild(label);
     this.wireTip(g, () => this.wpTipHtml(wp));
     g.addEventListener("pointerdown", (e: any) => this.onFloorOobPointerDown(e, wp, cfg));
@@ -401,7 +402,7 @@ export abstract class DcViews2D extends DcScene3D {
     grp.appendChild(Dom.svg("rect", { class: "dc-rack-body", x: -w / 2, y: -d / 2, width: w, height: d }));
     grp.appendChild(Dom.svg("rect", { class: "dc-rack-face", x: -w / 2, y: -d / 2, width: w, height: Math.max(20, d * 0.12) }));
     const t = Dom.svg("text", { class: "dc-rack-label", x: 0, y: 0, "text-anchor": "middle", "dominant-baseline": "central", transform: `rotate(${-o})`, "font-size": Math.max(40, Math.min(w, d) * 0.14) });
-    t.textContent = r.name || "(baie)"; grp.appendChild(t);
+    t.textContent = r.name || I18n.t("lists.ph.rack"); grp.appendChild(t);
     grp.addEventListener("pointerdown", (e: any) => this.onRackPointerDown(e, r));
     grp.addEventListener("contextmenu", (e: any) => this.ctxMenu(e, this.rackCtx(r)));
     return grp;
@@ -414,7 +415,7 @@ export abstract class DcViews2D extends DcScene3D {
     grp.appendChild(Dom.svg("rect", { class: "dc-equip-body", x: -b.w / 2, y: -b.d / 2, width: b.w, height: b.d, rx: Math.min(b.w, b.d) * 0.04 }));
     grp.appendChild(Dom.svg("rect", { class: "dc-equip-face", x: -b.w / 2, y: -b.d / 2, width: b.w, height: Math.max(15, b.d * 0.1) }));   // liseré = face AVANT (−Y)
     const t = Dom.svg("text", { class: "dc-equip-label", x: 0, y: 0, "text-anchor": "middle", "dominant-baseline": "central", transform: `rotate(${-o})`, "font-size": Math.max(40, Math.min(b.w, b.d) * 0.16) });
-    t.textContent = e.name || "(équipement)"; grp.appendChild(t);
+    t.textContent = e.name || I18n.t("lists.ph.equipment"); grp.appendChild(t);
     grp.addEventListener("pointerdown", (ev: any) => this.onEquipPointerDown(ev, e));
     grp.addEventListener("contextmenu", (ev: any) => this.ctxMenu(ev, this.equipmentCtx(e.id)));
     return grp;

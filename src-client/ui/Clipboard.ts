@@ -1,4 +1,5 @@
 import { Notify } from "./Notify";
+import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
    Clipboard — copie de texte dans le presse-papiers avec retour visuel (toast) et
@@ -18,9 +19,9 @@ import { Notify } from "./Notify";
 export class Clipboard {
   /** Copie `text` puis affiche un toast : `okMessage` (défaut « Copié ») au succès, un message
       d'erreur sinon. Renvoie le succès (rarement utile — le toast suffit à l'UI). */
-  static async copy(text: string, okMessage = "Copié"): Promise<boolean> {
+  static async copy(text: string, okMessage = I18n.t("ui.clipboard.copied")): Promise<boolean> {
     const ok = await Clipboard.write(text);
-    Notify.toast(ok ? okMessage : "Copie impossible — sélectionnez le texte et copiez-le manuellement.", ok ? "ok" : "err");
+    Notify.toast(ok ? okMessage : I18n.t("ui.clipboard.failed"), ok ? "ok" : "err");
     return ok;
   }
 

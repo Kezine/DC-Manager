@@ -1,10 +1,15 @@
 /* =============================================================================
    CertsTips — CONTENUS des tooltips enrichis de la page Certificats.
 
-   DONNÉES pures (simple export, cf. CLAUDE.md : les constantes/tables restent des
-   exports, seules les fonctions se regroupent en classe). Le moteur `RichTooltip`
-   les résout par CLÉ (`data-rich-tooltip="certs.revoke"`) et construit le DOM
-   lui-même — rien ici n'est du HTML, donc rien n'est à échapper.
+   Le moteur `RichTooltip` résout chaque tooltip par CLÉ (`data-rich-tooltip=
+   "certs.revoke"`, cf. CERT_TIP) et construit le DOM lui-même — rien ici n'est du
+   HTML, donc rien n'est à échapper.
+
+   LOCALISATION (lot B4) : les textes sont RENDUS → résolus via `I18n.t`. Comme la
+   map était auparavant une CONSTANTE évaluée au chargement du module (avant
+   `I18n.init()`), elle devient une MÉTHODE (`CertsTips.build()`), appelée à
+   l'enregistrement (constructeur de la vue, donc après l'init) — pas d'appel à
+   `I18n.t` au chargement. Les CLÉS de tooltip (`CERT_TIP`) restent des données.
 
    POURQUOI des mini-docs : les actions par ligne sont passées en ICÔNES (listes
    denses). L'icône dit « quoi », le tooltip dit « ce que ça fait vraiment » —
@@ -13,8 +18,11 @@
    ============================================================================= */
 import type { TipContent } from "../ui/RichTooltip";
 import { Icons } from "../ui/Icons";
+import { I18n } from "../i18n/I18n";
 
-/** Clés de tooltip de la page Certificats (source unique — évite les chaînes en dur). */
+/** Clés de tooltip de la page Certificats (source unique — évite les chaînes en dur).
+    NB : ce sont les CLÉS d'enregistrement `RichTooltip` (attribut DOM), distinctes des
+    clés i18n `certs.tips.*` qui portent le TEXTE localisé. */
 export const CERT_TIP = {
   issueTls: "certs.issueTls",
   issueSsh: "certs.issueSsh",
@@ -25,79 +33,84 @@ export const CERT_TIP = {
   certList: "certs.certList",
 } as const;
 
-export const CERTS_TIPS: { [key: string]: TipContent } = {
-  [CERT_TIP.issueTls]: {
-    title: "Émettre un certificat TLS",
-    icon: Icons.ISSUE_TLS,
-    sub: "Crée une feuille X.509 signée par cette autorité racine.",
-    sections: [
-      { head: "Ce que vous fournissez", body: "Un sujet (CN), des SAN (dns / ip / email) et une durée de validité." },
-      { head: "Ce qui se passe", body: "La paire de clés naît dans votre navigateur ; la clé privée est chiffrée par la clé maître avant d'être envoyée. Le serveur ne reçoit que le certificat public et un blob opaque." },
-      { head: "Prérequis", body: "Coffre déverrouillé : signer exige la clé privée de la CA." },
-    ],
-  },
+/** Fabrique les contenus de tooltips (textes localisés) — appelée À L'ENREGISTREMENT (après I18n.init()). */
+export class CertsTips {
+  static build(): { [key: string]: TipContent } {
+    return {
+      [CERT_TIP.issueTls]: {
+        title: I18n.t("certs.tips.issueTls.title"),
+        icon: Icons.ISSUE_TLS,
+        sub: I18n.t("certs.tips.issueTls.sub"),
+        sections: [
+          { head: I18n.t("certs.tips.issueTls.h1"), body: I18n.t("certs.tips.issueTls.b1") },
+          { head: I18n.t("certs.tips.issueTls.h2"), body: I18n.t("certs.tips.issueTls.b2") },
+          { head: I18n.t("certs.tips.issueTls.h3"), body: I18n.t("certs.tips.issueTls.b3") },
+        ],
+      },
 
-  [CERT_TIP.issueSsh]: {
-    title: "Émettre un certificat SSH",
-    icon: Icons.ISSUE_SSH,
-    sub: "Crée un certificat OpenSSH signé par cette CA SSH.",
-    sections: [
-      { head: "Ce que vous fournissez", body: "Une identité (key id), des principals et une durée. Type « user » en v1." },
-      { head: "Déploiement", body: "La confiance se déclare à la main côté serveur (TrustedUserCAKeys) — voir l'aide « Déployer la confiance »." },
-      { head: "Prérequis", body: "Coffre déverrouillé : signer exige la clé privée de la CA." },
-    ],
-  },
+      [CERT_TIP.issueSsh]: {
+        title: I18n.t("certs.tips.issueSsh.title"),
+        icon: Icons.ISSUE_SSH,
+        sub: I18n.t("certs.tips.issueSsh.sub"),
+        sections: [
+          { head: I18n.t("certs.tips.issueSsh.h1"), body: I18n.t("certs.tips.issueSsh.b1") },
+          { head: I18n.t("certs.tips.issueSsh.h2"), body: I18n.t("certs.tips.issueSsh.b2") },
+          { head: I18n.t("certs.tips.issueSsh.h3"), body: I18n.t("certs.tips.issueSsh.b3") },
+        ],
+      },
 
-  [CERT_TIP.export]: {
-    title: "Exporter les artefacts",
-    icon: Icons.EXPORT,
-    sub: "Assemble et télécharge les fichiers de cet objet.",
-    sections: [
-      { head: "Formats", body: "PEM et fullchain, PKCS#12 (.p12, chiffré AES-256), artefacts OpenSSH selon le type d'objet." },
-      { head: "Clé privée", body: "Incluse UNIQUEMENT si le coffre est déverrouillé — le déchiffrement se fait dans votre navigateur. Verrouillé, l'export ne contient que du public." },
-      { head: "Révoqué", body: "Un objet révoqué est exclu des exports." },
-    ],
-  },
+      [CERT_TIP.export]: {
+        title: I18n.t("certs.tips.export.title"),
+        icon: Icons.EXPORT,
+        sub: I18n.t("certs.tips.export.sub"),
+        sections: [
+          { head: I18n.t("certs.tips.export.h1"), body: I18n.t("certs.tips.export.b1") },
+          { head: I18n.t("certs.tips.export.h2"), body: I18n.t("certs.tips.export.b2") },
+          { head: I18n.t("certs.tips.export.h3"), body: I18n.t("certs.tips.export.b3") },
+        ],
+      },
 
-  [CERT_TIP.revoke]: {
-    title: "Révoquer",
-    icon: Icons.REVOKE,
-    sub: "Marque l'objet comme ne devant plus être utilisé. Réversible côté données, pas côté déploiement.",
-    sections: [
-      { head: "Effet", body: "Pose une date de révocation, exclut l'objet des exports et referme son alerte d'échéance." },
-      { head: "Limite assumée", body: "Il n'y a ni CRL ni répondeur OCSP : la PKI est interne. Concrètement, la révocation vaut par le NON-DÉPLOIEMENT — ce qui est déjà installé ailleurs continue de fonctionner jusqu'à son retrait." },
-      { head: "Clé", body: "Opération de métadonnées : aucun secret n'est touché, le coffre peut rester verrouillé." },
-    ],
-  },
+      [CERT_TIP.revoke]: {
+        title: I18n.t("certs.tips.revoke.title"),
+        icon: Icons.REVOKE,
+        sub: I18n.t("certs.tips.revoke.sub"),
+        sections: [
+          { head: I18n.t("certs.tips.revoke.h1"), body: I18n.t("certs.tips.revoke.b1") },
+          { head: I18n.t("certs.tips.revoke.h2"), body: I18n.t("certs.tips.revoke.b2") },
+          { head: I18n.t("certs.tips.revoke.h3"), body: I18n.t("certs.tips.revoke.b3") },
+        ],
+      },
 
-  [CERT_TIP.trustDeploy]: {
-    title: "Déploiement des certificats",
-    icon: Icons.TRUST_DEPLOY,
-    sub: "Procédure d'installation de cette autorité dans les magasins de confiance des clients.",
-    sections: [
-      { head: "Pourquoi", body: "Un serveur présente sa feuille ; c'est la RACINE qui doit vivre chez le client pour que la feuille soit validée. Sans ce déploiement, tout certificat signé par cette autorité sera rejeté." },
-      { head: "Contenu", body: "Commandes pré-remplies pour Linux, Windows, Android et SSH, avec le certificat prêt à copier." },
-      { head: "Clé", body: "Consultation pure : aucune clé privée n'est manipulée, le coffre peut rester verrouillé." },
-    ],
-  },
+      [CERT_TIP.trustDeploy]: {
+        title: I18n.t("certs.tips.trustDeploy.title"),
+        icon: Icons.TRUST_DEPLOY,
+        sub: I18n.t("certs.tips.trustDeploy.sub"),
+        sections: [
+          { head: I18n.t("certs.tips.trustDeploy.h1"), body: I18n.t("certs.tips.trustDeploy.b1") },
+          { head: I18n.t("certs.tips.trustDeploy.h2"), body: I18n.t("certs.tips.trustDeploy.b2") },
+          { head: I18n.t("certs.tips.trustDeploy.h3"), body: I18n.t("certs.tips.trustDeploy.b3") },
+        ],
+      },
 
-  [CERT_TIP.certList]: {
-    title: "Lister les certificats",
-    icon: Icons.CERT_LIST,
-    sub: "Ouvre la liste des certificats émis par cette autorité.",
-    sections: [
-      { head: "Vue", body: "Bascule sur le listing filtré de cette racine : tout son sous-arbre, paginé côté serveur, avec ses propres filtres et tris." },
-    ],
-  },
+      [CERT_TIP.certList]: {
+        title: I18n.t("certs.tips.certList.title"),
+        icon: Icons.CERT_LIST,
+        sub: I18n.t("certs.tips.certList.sub"),
+        sections: [
+          { head: I18n.t("certs.tips.certList.h1"), body: I18n.t("certs.tips.certList.b1") },
+        ],
+      },
 
-  [CERT_TIP.remove]: {
-    title: "Supprimer définitivement",
-    icon: Icons.DELETE,
-    sub: "Efface l'objet du serveur. Irréversible.",
-    sections: [
-      { head: "Ce qui est effacé", body: "Les métadonnées, les SAN et la clé privée chiffrée (key_enc). Aucune corbeille, aucune restauration." },
-      { head: "Garde-fous", body: "Un émetteur ayant des dérivés est refusé (supprimez d'abord sa descendance). Un certificat ENCORE VALIDE exige une confirmation explicite." },
-      { head: "Clé", body: "Opération de métadonnées : le coffre peut rester verrouillé — c'est ce qui permet de purger une PKI dont la phrase secrète est perdue." },
-    ],
-  },
-};
+      [CERT_TIP.remove]: {
+        title: I18n.t("certs.tips.remove.title"),
+        icon: Icons.DELETE,
+        sub: I18n.t("certs.tips.remove.sub"),
+        sections: [
+          { head: I18n.t("certs.tips.remove.h1"), body: I18n.t("certs.tips.remove.b1") },
+          { head: I18n.t("certs.tips.remove.h2"), body: I18n.t("certs.tips.remove.b2") },
+          { head: I18n.t("certs.tips.remove.h3"), body: I18n.t("certs.tips.remove.b3") },
+        ],
+      },
+    };
+  }
+}

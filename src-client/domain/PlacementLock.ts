@@ -1,5 +1,6 @@
 import type { Store } from "../store";
 import type { CtxItem } from "../ui/ContextMenu";
+import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
    VERROU DE PLACEMENT (`locked`) — SOURCE UNIQUE de vérité, partagée par toutes
@@ -38,11 +39,13 @@ export class PlacementLock {
   /** Libellé de l'action de bascule (texte SEUL — l'icône cadenas est posée par l'appelant,
       côté vue : PlacementLock est du domaine et n'importe pas `ui/Icons`). */
   static toggleLabel(locked: boolean): string {
-    return locked ? "Déverrouiller le positionnement" : "Verrouiller le positionnement";
+    return locked ? I18n.t("domain.placementLock.unlock") : I18n.t("domain.placementLock.lock");
   }
 
-  /** Raison affichée sur une action bloquée par le verrou (title d'un item/bouton grisé — texte pur). */
-  static readonly BLOCKED_HINT = "Positionnement verrouillé — déverrouillez d'abord (ou passez par le formulaire).";
+  /** Raison affichée sur une action bloquée par le verrou (title d'un item/bouton grisé). GETTER (et non
+      constante) : la localisation n'est initialisée qu'au bootstrap, donc le texte est résolu À L'ACCÈS
+      (au point de rendu), jamais au chargement du module. */
+  static get BLOCKED_HINT(): string { return I18n.t("domain.placementLock.blockedHint"); }
 
   /** Écrit le flag inverse et renvoie le nouvel état (null si l'entité a disparu). */
   static async toggle(store: Store, collection: string, id: string): Promise<boolean | null> {

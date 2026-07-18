@@ -2,6 +2,7 @@ import { Notify } from "./Notify";
 import { Icons } from "./Icons";
 import { Dialog } from "./Dialog";
 import { Fullscreen } from "./Fullscreen";
+import { I18n } from "../i18n/I18n";
 
 export interface ModalOptions {
   title?: string;
@@ -62,12 +63,12 @@ export class Modal {
           <div class="modal-header-left"><div class="modal-titles">
             <div class="modal-title"></div><div class="modal-subtitle"></div>
           </div></div>
-          <button type="button" class="modal-close" aria-label="Fermer">${Icons.CLOSE}</button>
+          <button type="button" class="modal-close" aria-label="${I18n.t("ui.action.close")}">${Icons.CLOSE}</button>
         </div>
         <div class="modal-body"></div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-ghost modal-cancel">Annuler</button>
-          <button type="button" class="btn btn-primary modal-save">Enregistrer</button>
+          <button type="button" class="btn btn-ghost modal-cancel">${I18n.t("ui.action.cancel")}</button>
+          <button type="button" class="btn btn-primary modal-save">${I18n.t("ui.action.save")}</button>
         </div>
       </div>`;
     Fullscreen.host().appendChild(overlay);   // plein écran : dans l'élément FS courant (sinon <body>)
@@ -108,7 +109,7 @@ export class Modal {
     this.elBody.appendChild(body);
     this.elFooter.style.display = hideFooter ? "none" : "flex";
     this.elBox.classList.toggle("wide", !!wide);
-    this.btnSave.textContent = saveLabel || "Enregistrer";
+    this.btnSave.textContent = saveLabel || I18n.t("ui.action.save");
     this.cancelCb = (typeof onCancel === "function") ? onCancel : null;
     this.closeCb = (typeof onClose === "function") ? onClose : null;   // ré-armé à chaque open (omission → null)
     this.confirmClose = (typeof confirmClose === "boolean") ? confirmClose : (typeof onSave === "function");
@@ -121,7 +122,7 @@ export class Modal {
       try {
         if (onSave) { const ok = await onSave(); if (ok !== false) this.closeQuiet(); }
         else this.closeQuiet();
-      } catch (e: any) { console.error(e); Notify.toast("Erreur : " + e.message, "err"); }
+      } catch (e: any) { console.error(e); Notify.toast(I18n.t("ui.modal.errorPrefix", { message: e.message }), "err"); }
       finally { this.btnSave.disabled = false; }
     };
     this.overlay.classList.add("open");
@@ -146,9 +147,9 @@ export class Modal {
     const changed = this.dirty || this._differs();
     if (!this.confirmClose || !changed) { this.close(); return; }
     const ok = await Dialog.confirm({
-      title: "Fermer sans enregistrer ?",
-      message: "Les modifications non enregistrées de ce formulaire seront perdues.",
-      confirmLabel: "Fermer", cancelLabel: "Continuer l'édition", danger: true,
+      title: I18n.t("ui.modal.confirmCloseTitle"),
+      message: I18n.t("ui.modal.confirmCloseMessage"),
+      confirmLabel: I18n.t("ui.modal.confirmCloseConfirm"), cancelLabel: I18n.t("ui.modal.confirmCloseCancel"), danger: true,
     });
     if (ok) this.close();
   }

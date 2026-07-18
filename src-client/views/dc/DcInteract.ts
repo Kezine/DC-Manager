@@ -20,6 +20,7 @@ import { Waypoint } from "../../models/Waypoint";
 import { CableStatuses } from "../../domain/CableStatuses";
 import { PlacementLock } from "../../domain/PlacementLock";
 import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, U_MM, TRAY_SHEET_RESERVE_MM } from "../../domain/constants";
+import { I18n } from "../../i18n/I18n";
 import type { Vec3 } from "./shared";
 import { DcPanels } from "./DcPanels";
 
@@ -79,12 +80,12 @@ export abstract class DcInteract extends DcPanels {
     const eqCount = occs.filter((o: any) => o.kind === "eq").length, itemCount = occs.filter((o: any) => o.kind === "item").length;
     const usedU = new Set<string>(); this.scene.occupants(r.id).forEach((_v: any, k: string) => usedU.add(k.split(":")[0]));
     const rows = [
-      this.tipRow(`<b>${w} × ${d} mm</b> · ${uMax} U · ${r.sides === "dual" ? "double face" : "simple face"}`),
-      this.tipRow(`Orientation ${Normalize.rackOrientation(r.orientation)}°${r.row ? " · rangée " + Html.escape(r.row) : ""}`),
-      this.tipRow(`<b>${eqCount}</b> équipement${eqCount > 1 ? "s" : ""}${itemCount ? " · " + itemCount + " élément" + (itemCount > 1 ? "s" : "") : ""} · ${usedU.size}/${uMax} U occupés`),
-      this.tipRow(`<span style="color:var(--accent)">Cliquer pour éditer la baie</span>`),
+      this.tipRow(`<b>${w} × ${d} mm</b> · ${uMax} U · ${r.sides === "dual" ? I18n.t("dc.interact.doubleFace") : I18n.t("dc.interact.singleFace")}`),
+      this.tipRow(Html.escape(I18n.t("dc.interact.orientation", { deg: Normalize.rackOrientation(r.orientation) })) + `${r.row ? Html.escape(I18n.t("dc.interact.rowSuffix", { row: r.row })) : ""}`),
+      this.tipRow(`<b>${eqCount}</b> ${I18n.t("dc.interact.equipWord", { count: eqCount })}${itemCount ? " · " + I18n.t("dc.interact.itemCount", { count: itemCount }) : ""} · ${I18n.t("dc.interact.uOccupied", { used: usedU.size, max: uMax })}`),
+      this.tipRow(`<span style="color:var(--accent)">${I18n.t("dc.interact.clickEditRack")}</span>`),
     ];
-    return `<div class="tt-title">${Html.escape(r.name || "(baie)")}</div>` + rows.join("");
+    return `<div class="tt-title">${Html.escape(r.name || I18n.t("lists.ph.rack"))}</div>` + rows.join("");
   }
 
   /** Tooltip d'un équipement (type, marque/modèle, série, baie, groupe, nb de ports). */
@@ -93,38 +94,38 @@ export abstract class DcInteract extends DcPanels {
     const rk: any = e.rack_id ? this.store.get("racks", e.rack_id) : null;
     const nPorts = this.store.portsOf(e.id).length;
     const rows = [this.tipRow(`<b>${Html.escape(EquipmentTypes.label(e.type))}</b>${e.brand || e.model ? " · " + Html.escape([e.brand, e.model].filter(Boolean).join(" ")) : ""}`)];
-    if (e.serial) rows.push(this.tipRow(`N/S : <b>${Html.escape(e.serial)}</b>`));
+    if (e.serial) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.serialPrefix"))}<b>${Html.escape(e.serial)}</b>`));
     if (e.rack_u != null) { const uh = Math.max(1, e.u_height | 0 || 1); rows.push(this.tipRow(`U${e.rack_u}${uh > 1 ? "–U" + (e.rack_u + uh - 1) : ""} · ${Html.escape(Depths.label(e.depth || "full"))}`)); }
-    if (rk) rows.push(this.tipRow(`Baie : <b>${Html.escape(rk.name || "(baie)")}</b>${rk.row ? " · " + Html.escape(rk.row) : ""}`));
+    if (rk) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.rackPrefix"))}<b>${Html.escape(rk.name || I18n.t("lists.ph.rack"))}</b>${rk.row ? " · " + Html.escape(rk.row) : ""}`));
     // groupes : primaire (couleur héritée) + secondaires — un swatch par groupe membre.
     this.store.equipmentGroupIds(e).forEach((gid: string) => { const g: any = this.store.get("groups", gid); if (g) rows.push(this.tipRow(`${this.tipSwatch(g.color)}${Html.escape(g.label || "")}`)); });
-    rows.push(this.tipRow(`${nPorts} port${nPorts > 1 ? "s" : ""}`));
-    return `<div class="tt-title">${Html.escape(e.name || "(équipement)")}</div>` + rows.join("");
+    rows.push(this.tipRow(`${I18n.t("dc.interact.portCount", { count: nPorts })}`));
+    return `<div class="tt-title">${Html.escape(e.name || I18n.t("lists.ph.equipment"))}</div>` + rows.join("");
   }
 
   /** Tooltip d'un port (équipement : port + état de câblage). */
   protected portTipHtml(port: any, cab: any): string {
     const eq: any = this.store.get("equipments", port.equipment_id);
-    const head = (eq ? (eq.name || "(équip.)") + " : " : "") + (port.name || "(port)");
+    const head = (eq ? (eq.name || I18n.t("lists.ph.equipment")) + " : " : "") + (port.name || I18n.t("dc.common.port"));
     return `<div class="tt-title">${Html.escape(head)}</div>`
-      + (cab ? this.tipRow(`Câble : <b>${Html.escape(this.cableLabelShort(cab))}</b> — cliquer pour l'éditer`)
-             : `<div class="tt-row" style="color:var(--accent)">Port libre — cliquer pour créer ou affecter un câble</div>`);
+      + (cab ? this.tipRow(`${Html.escape(I18n.t("dc.interact.cablePrefix"))}<b>${Html.escape(this.cableLabelShort(cab))}</b>${Html.escape(I18n.t("dc.interact.clickEditCableSuffix"))}`)
+             : `<div class="tt-row" style="color:var(--accent)">${I18n.t("dc.interact.portFree")}</div>`);
   }
 
   /** Tooltip d'un câble (type, longueur, réseaux, extrémités, points de passage, état). */
   protected cableTipHtml(c: any): string {
     const ct: any = c.cable_type_id ? this.store.get("cableTypes", c.cable_type_id) : null;
     const rows: string[] = [];
-    if (ct) rows.push(this.tipRow(`Type : <b>${Html.escape(ct.name || "")}</b>`));
-    if (c.length_m != null) rows.push(this.tipRow(`Longueur : <b>${c.length_m} m</b>`));
+    if (ct) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.typePrefix"))}<b>${Html.escape(ct.name || "")}</b>`));
+    if (c.length_m != null) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.lengthPrefix"))}<b>${c.length_m} m</b>`));
     const netIds = this.store.cableNetworkIds(c);   // réseaux DÉDUITS (des ports terminaux)
     const primaryNid = this.store.cablePrimaryNetworkId(c);   // principal STABLE (pilote la couleur)
-    netIds.forEach((nid: string) => { const n: any = this.store.get("networks", nid); if (!n) return; const star = (nid === primaryNid && netIds.length > 1) ? " ★" : ""; rows.push(this.tipRow(`${this.tipSwatch(n.color)}${Html.escape(n.label || n.name || "(réseau)")}${star}`)); });
-    rows.push(this.tipRow(`A : <b>${Html.escape(this.portShort(c.from_port_id))}</b>`));
-    rows.push(this.tipRow(`B : <b>${Html.escape(this.portShort(c.to_port_id))}</b>`));
+    netIds.forEach((nid: string) => { const n: any = this.store.get("networks", nid); if (!n) return; const star = (nid === primaryNid && netIds.length > 1) ? " ★" : ""; rows.push(this.tipRow(`${this.tipSwatch(n.color)}${Html.escape(n.label || n.name || I18n.t("lists.ph.network"))}${star}`)); });
+    rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.endAPrefix"))}<b>${Html.escape(this.portShort(c.from_port_id))}</b>`));
+    rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.endBPrefix"))}<b>${Html.escape(this.portShort(c.to_port_id))}</b>`));
     const wps = (this.store.effectiveWaypointIds(c) || []).map((id: string) => this.store.get("waypoints", id)).filter(Boolean);
-    if (wps.length) rows.push(this.tipRow(`Via : ${wps.map((w: any) => Html.escape(Waypoint.glyph(w) + " " + (w.name || "(waypoint)"))).join(" → ")}`));
-    if (c.status) rows.push(this.tipRow(`État : ${Html.escape(CableStatuses.label(c.status))}`));
+    if (wps.length) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.viaPrefix"))}${wps.map((w: any) => Html.escape(Waypoint.glyph(w) + " " + (w.name || I18n.t("dc.common.waypoint")))).join(" → ")}`));
+    if (c.status) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.statePrefix"))}${Html.escape(CableStatuses.label(c.status))}`));
     return `<div class="tt-title">${Html.escape(this.cableLabelShort(c))}</div>` + rows.join("");
   }
 
@@ -132,33 +133,33 @@ export abstract class DcInteract extends DcPanels {
   protected bundleTipHtml(bundle: any): string {
     const rows: string[] = [];
     const ct: any = bundle.cable_type_id ? this.store.get("cableTypes", bundle.cable_type_id) : null;
-    if (ct) rows.push(this.tipRow(`Type : <b>${Html.escape(ct.name || "")}</b>`));
+    if (ct) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.typePrefix"))}<b>${Html.escape(ct.name || "")}</b>`));
     const occ = this.store.bundleOccupancy(bundle.id);
-    rows.push(this.tipRow(`Fibres : <b>${occ.used}/${occ.capacity}</b> pioché(es)`));
+    rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.fibersPrefix"))}<b>${occ.used}/${occ.capacity}</b>${Html.escape(I18n.t("dc.interact.fibersPicked"))}`));
     const endLabel = (eqId: string | null) => {
       const eq: any = eqId ? this.store.get("equipments", eqId) : null;
-      if (!eq) return "(non posée)";
+      if (!eq) return I18n.t("dc.interact.notPlaced");
       const dc = this.store.equipmentDcId(eq);
-      return (eq.name || "(patch)") + (dc ? " · " + this.store.dcName(dc) : " · non placé");
+      return (eq.name || I18n.t("dc.interact.patchPh")) + (dc ? " · " + this.store.dcName(dc) : I18n.t("dc.interact.notPlacedShort"));
     };
-    rows.push(this.tipRow(`A : <b>${Html.escape(endLabel(bundle.endpoint_a_equipment_id))}</b>`));
-    rows.push(this.tipRow(`B : <b>${Html.escape(endLabel(bundle.endpoint_b_equipment_id))}</b>`));
-    if (bundle.length_m != null) rows.push(this.tipRow(`Longueur : <b>${bundle.length_m} m</b>`));
+    rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.endAPrefix"))}<b>${Html.escape(endLabel(bundle.endpoint_a_equipment_id))}</b>`));
+    rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.endBPrefix"))}<b>${Html.escape(endLabel(bundle.endpoint_b_equipment_id))}</b>`));
+    if (bundle.length_m != null) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.lengthPrefix"))}<b>${bundle.length_m} m</b>`));
     const wps = (bundle.waypoint_ids || []).map((id: string) => this.store.get("waypoints", id)).filter(Boolean);
-    if (wps.length) rows.push(this.tipRow(`Via : ${wps.map((w: any) => Html.escape(Waypoint.glyph(w) + " " + (w.name || "(waypoint)"))).join(" → ")}`));
-    return `<div class="tt-title">${Html.escape(bundle.name || "(faisceau)")}</div>` + rows.join("");
+    if (wps.length) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.viaPrefix"))}${wps.map((w: any) => Html.escape(Waypoint.glyph(w) + " " + (w.name || I18n.t("dc.common.waypoint")))).join(" → ")}`));
+    return `<div class="tt-title">${Html.escape(bundle.name || I18n.t("lists.ph.bundle"))}</div>` + rows.join("");
   }
 
   /** Tooltip d'un waypoint (type, forme/étage, hauteur, nb de câbles affectés). */
   protected wpTipHtml(wp: any): string {
     const n = this.store.cablesOfWaypoint(wp.id).length, floorLvl = Waypoint.isFloorLevel(wp);
-    const kindLbl = Waypoint.typeOf(wp) === "exit" ? "Exit (sortie de salle)" : floorLvl ? "Pin d'étage" : (wp.kind === "segment" ? "Chemin de câbles" : wp.kind === "brush" ? "Brosse de brassage" : "Pin de salle");
-    const where = floorLvl ? Html.escape(Waypoint.floorLabel(wp)) : "hauteur " + (wp.dc_z || 0) + " mm";
-    return `<div class="tt-title">${Waypoint.glyph(wp)} ${Html.escape(wp.name || "(waypoint)")}</div>`
+    const kindLbl = Waypoint.typeOf(wp) === "exit" ? I18n.t("dc.interact.wpExit") : floorLvl ? I18n.t("dc.interact.wpFloorPin") : (wp.kind === "segment" ? I18n.t("dc.interact.wpPath") : wp.kind === "brush" ? I18n.t("dc.interact.wpBrush") : I18n.t("dc.interact.wpRoomPin"));
+    const where = floorLvl ? Html.escape(Waypoint.floorLabel(wp)) : Html.escape(I18n.t("dc.interact.heightMm", { mm: wp.dc_z || 0 }));
+    return `<div class="tt-title">${Waypoint.glyph(wp)} ${Html.escape(wp.name || I18n.t("dc.common.waypoint"))}</div>`
       + this.tipRow(`<b>${Html.escape(kindLbl)}</b>`)
       + this.tipRow(where)
-      + this.tipRow(`${n} câble${n > 1 ? "s" : ""} affecté${n > 1 ? "s" : ""}`)
-      + `<div class="tt-row" style="color:var(--accent)">Clic : modifier · clic droit : actions</div>`;
+      + this.tipRow(`${Html.escape(I18n.t("dc.interact.cablesAssigned", { count: n }))}`)
+      + `<div class="tt-row" style="color:var(--accent)">${I18n.t("dc.interact.clickActions")}</div>`;
   }
 
 
@@ -197,7 +198,7 @@ export abstract class DcInteract extends DcPanels {
       grp.classList.remove("dragging"); this.hideCote();
       if (!moved) return;   // simple clic = sélection
       const c = this.freePlace ? clampC(cur) : clampC({ x: this.snap(cur.x, dc.cell_mm), y: this.snap(cur.y, dc.cell_mm) });
-      if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); this.render(); return; }
+      if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast(I18n.t("dc.common.blockedCell"), "err"); this.render(); return; }
       await this.store.update(opts.collection, ent.id, { dc_x: c.x, dc_y: c.y }); this.host.setDirty?.(true);
     };
     document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
@@ -281,7 +282,7 @@ export abstract class DcInteract extends DcPanels {
       else this.slotSel = { rackId, side, lo: u, hi: s.hi };
     } else {
       const nlo = Math.min(s.lo, u), nhi = Math.max(s.hi, u), occ = this.scene.occupants(rackId);
-      for (let k = nlo; k <= nhi; k++) { if (occ.has(k + ":" + side)) { Notify.toast("Sélection interrompue par un emplacement occupé", "err"); return; } }
+      for (let k = nlo; k <= nhi; k++) { if (occ.has(k + ":" + side)) { Notify.toast(I18n.t("dc.interact.selInterrupted"), "err"); return; } }
       this.slotSel = { rackId, side, lo: nlo, hi: nhi };
     }
     this.render();
@@ -321,25 +322,25 @@ export abstract class DcInteract extends DcPanels {
     const kind = RackItemKinds.label(item.kind), uh = Math.max(1, (item.u_height | 0) || 1);
     const name = (item.label && item.label.trim()) ? item.label : kind;
     const rows = [
-      this.tipRow(`<b>${Html.escape(kind)}</b>${item.depth === "none" && item.kind !== "tray" ? " · sans profondeur" : ""}`),
-      this.tipRow(`U${item.u}${uh > 1 ? "–U" + (item.u + uh - 1) : ""}${item.side === "rear" ? " · arrière" : (item.side === "front" ? " · avant" : "")}`),
+      this.tipRow(`<b>${Html.escape(kind)}</b>${item.depth === "none" && item.kind !== "tray" ? Html.escape(I18n.t("dc.interact.noDepth")) : ""}`),
+      this.tipRow(`U${item.u}${uh > 1 ? "–U" + (item.u + uh - 1) : ""}${item.side === "rear" ? Html.escape(I18n.t("dc.interact.sideRear")) : (item.side === "front" ? Html.escape(I18n.t("dc.interact.sideFront")) : "")}`),
     ];
     if (item.kind === "tray") {
       const cant = item.tray_type === "cantilever", tu = Math.max(1, (item.tray_u | 0) || 1);
-      rows.push(this.tipRow((cant ? "Porte-à-faux" + (item.depth_mm ? " · plateau " + item.depth_mm + " mm" : "") : "Posée avant + arrière (pleine cage)")
-        + ` · structure ${tu} U (dessin)` + ` · ${Math.round(uh * U_MM - TRAY_SHEET_RESERVE_MM)} mm utiles au-dessus du plateau`));
+      rows.push(this.tipRow(Html.escape((cant ? I18n.t("dc.interact.cantilever") + (item.depth_mm ? I18n.t("dc.interact.trayShelf", { mm: item.depth_mm }) : "") : I18n.t("dc.interact.fullCage"))
+        + I18n.t("dc.interact.trayStructure", { u: tu }) + I18n.t("dc.interact.trayUseful", { mm: Math.round(uh * U_MM - TRAY_SHEET_RESERVE_MM) }))));
     }
-    rows.push(this.tipRow(`<span style="color:var(--accent)">Clic / clic droit : actions</span>`));
+    rows.push(this.tipRow(`<span style="color:var(--accent)">${I18n.t("dc.interact.clickRightActions")}</span>`));
     return `<div class="tt-title">${Html.escape(name)}</div>` + rows.join("");
   }
   /** Menu d'un pseudo-élément (rackItem) : modifier, poser un équipement (tray) ou retirer. */
   protected itemCtx(item: any): CtxSection[] {
     const name = (item.label && item.label.trim()) ? item.label : RackItemKinds.label(item.kind);
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [
-      { label: "Modifier…", action: () => this.host.openRackItemForm?.(item.id) },
+      { label: I18n.t("dc.common.editEllipsis"), action: () => this.host.openRackItemForm?.(item.id) },
     ];
-    if (item.kind === "tray") items.push({ label: "Poser un équipement…", action: () => this.host.assignTraySlot?.(item.id, () => { this.setDirty(); this.reflow(); }) });
-    items.push({ label: "Retirer", danger: true, action: async () => { if (this.store.get("rackItems", item.id)) { await this.store.remove("rackItems", item.id); this.setDirty(); Notify.toast("Élément retiré"); } } });
+    if (item.kind === "tray") items.push({ label: I18n.t("dc.interact.placeEquip"), action: () => this.host.assignTraySlot?.(item.id, () => { this.setDirty(); this.reflow(); }) });
+    items.push({ label: I18n.t("dc.common.remove"), danger: true, action: async () => { if (this.store.get("rackItems", item.id)) { await this.store.remove("rackItems", item.id); this.setDirty(); Notify.toast(I18n.t("dc.interact.itemRemoved")); } } });
     return [{ head: name, items }];
   }
 
@@ -375,14 +376,14 @@ export abstract class DcInteract extends DcPanels {
   protected async connectPort(port: any): Promise<void> {
     const cands = this.store.cableDraftCandidatesForPort(port.id);
     if (!cands.length) { this.host.openCableForm?.(null, { fromPortId: port.id }); return; }
-    const sel = FormControls.select([{ value: "", label: "➕ Nouveau câble" }].concat(cands.map((c: any) => {
+    const sel = FormControls.select([{ value: "", label: I18n.t("dc.interact.newCable") }].concat(cands.map((c: any) => {
       const ct: any = c.cable_type_id ? this.store.get("cableTypes", c.cable_type_id) : null, sum = this.store.cableRouteSummary(this.store.cableRoute(c));
-      return { value: c.id, label: (c.name || "(brouillon)") + (ct ? " · " + ct.name : "") + (sum ? " · " + sum : "") };
+      return { value: c.id, label: (c.name || I18n.t("dc.interact.draftPh")) + (ct ? " · " + ct.name : "") + (sum ? " · " + sum : "") };
     })), "");
     const body = document.createElement("div");
-    const hint = document.createElement("div"); hint.className = "form-hint"; hint.textContent = "Des brouillons de câble attendent un port. Affecter ce port à l'un d'eux, ou créer un nouveau câble.";
-    body.append(hint, FormControls.fieldRow("Câble", sel, "Le formulaire s'ouvre ensuite, port prérempli — vérifiez puis enregistrez."));
-    const res = await Dialog.custom({ title: "Brancher le port", confirmLabel: "Continuer", build: (r: HTMLElement) => { r.appendChild(body); return { validate: () => true as const, collect: () => ({ cableId: sel.value }) }; } });
+    const hint = document.createElement("div"); hint.className = "form-hint"; hint.textContent = I18n.t("dc.interact.draftHint");
+    body.append(hint, FormControls.fieldRow(I18n.t("dc.interact.cableField"), sel, I18n.t("dc.interact.cableFieldHint")));
+    const res = await Dialog.custom({ title: I18n.t("dc.interact.connectPortTitle"), confirmLabel: I18n.t("dc.interact.continue"), build: (r: HTMLElement) => { r.appendChild(body); return { validate: () => true as const, collect: () => ({ cableId: sel.value }) }; } });
     if (!res) return;
     if (!res.cableId) this.host.openCableForm?.(null, { fromPortId: port.id });
     else this.host.openCableForm?.(res.cableId, { assignPortId: port.id });
@@ -401,20 +402,20 @@ export abstract class DcInteract extends DcPanels {
     const u = [...new Set((ids || []).filter(Boolean))]; const n = u.length; if (!n) return [];
     const suf = n > 1 ? " (" + n + ")" : "";
     return [
-      { label: "Afficher " + noun + suf, action: () => { u.forEach((id) => this.selCables.add(id)); this.rerenderView(); } },
-      { label: "Isoler " + noun + suf, action: () => { this.selCables = new Set(u); this.rerenderView(); } },
-      { label: "Masquer " + noun + suf, action: () => { u.forEach((id) => this.selCables.delete(id)); this.rerenderView(); } },
+      { label: I18n.t("dc.interact.show", { noun, suf }), action: () => { u.forEach((id) => this.selCables.add(id)); this.rerenderView(); } },
+      { label: I18n.t("dc.interact.isolate", { noun, suf }), action: () => { this.selCables = new Set(u); this.rerenderView(); } },
+      { label: I18n.t("dc.interact.hide", { noun, suf }), action: () => { u.forEach((id) => this.selCables.delete(id)); this.rerenderView(); } },
     ];
   }
 
   protected portCtx(port: any, cab: any): CtxSection[] {
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [cab
-      ? { label: "Éditer le câble…", action: () => this.host.openCableForm?.(cab.id) }
-      : { label: "Créer / affecter un câble…", action: () => this.connectPort(port) }];
-    if (this.routeTool.state) { if (this.routeTool.state.fromPortId && port.id !== this.routeTool.state.fromPortId) items.push({ label: "Terminer la route ici", action: () => this.routeTool.finish(port.id) }); }
-    else if (!cab) items.push({ label: "Démarrer une route ici", action: () => this.routeTool.start(port.id) });
-    const secs: CtxSection[] = [{ head: port.name || "(port)", items }];
-    const csi = this.cableSelItems(this.store.cablesOfPorts([port.id]).map((c: any) => c.id), "le câble du port");
+      ? { label: I18n.t("dc.interact.editCableEllipsis"), action: () => this.host.openCableForm?.(cab.id) }
+      : { label: I18n.t("dc.interact.createAssignCable"), action: () => this.connectPort(port) }];
+    if (this.routeTool.state) { if (this.routeTool.state.fromPortId && port.id !== this.routeTool.state.fromPortId) items.push({ label: I18n.t("dc.interact.finishRouteHere"), action: () => this.routeTool.finish(port.id) }); }
+    else if (!cab) items.push({ label: I18n.t("dc.interact.startRouteHere"), action: () => this.routeTool.start(port.id) });
+    const secs: CtxSection[] = [{ head: port.name || I18n.t("dc.common.port"), items }];
+    const csi = this.cableSelItems(this.store.cablesOfPorts([port.id]).map((c: any) => c.id), I18n.t("dc.interact.nounPortCable"));
     if (csi.length) secs.push({ items: csi });
     return secs;
   }
@@ -434,34 +435,34 @@ export abstract class DcInteract extends DcPanels {
           : [{ collection: "equipments", id: eqId, patch: { placement_mode: "rack", dim_mode: "u", rack_id: null, rack_u: null } }];
       if (placed) ops.push(...this.store.cableDowngradeOps([eqId]));
       await this.store.updateBatch(ops); this.setDirty();
-      Notify.toast((onTray ? "Équipement descendu de l'étagère" : "Équipement retiré du datacenter") + (ops.length > 1 ? " — câble(s) en « Planifié »" : ""));
+      Notify.toast((onTray ? I18n.t("dc.interact.equipOffShelf") : I18n.t("dc.interact.equipRemovedDc")) + (ops.length > 1 ? I18n.t("dc.interact.cablesPlannedSuffix") : ""));
     };
     const rotate = (deg: number) => async () => { const o: any = this.store.get("equipments", eqId); if (!o) return; await this.store.update("equipments", eqId, { dc_orientation: Normalize.rackOrientation((o.dc_orientation || 0) + deg) }); this.setDirty(); };
     const items: Array<{ label: string; danger?: boolean; disabled?: boolean; title?: string; action: () => void }> = [
-      { label: "Détails…", action: () => this.host.openEquipmentDetail?.(eqId) },
-      { label: "Modifier…", action: () => this.host.openEquipmentForm?.(eqId) },   // modale d'ÉDITION (pas la fiche d'info)
+      { label: I18n.t("dc.interact.detailsEllipsis"), action: () => this.host.openEquipmentDetail?.(eqId) },
+      { label: I18n.t("dc.common.editEllipsis"), action: () => this.host.openEquipmentForm?.(eqId) },   // modale d'ÉDITION (pas la fiche d'info)
       PlacementLock.ctxItem(this.store, "equipments", eqId, () => this.render()),
     ];
     // rotation au sol : pertinente pour un équipement LIBRE (boîtier orienté). En U, l'orientation suit la baie.
     if (e.dim_mode === "free") items.push(
-      { label: "↻ Pivoter 90°", disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: rotate(90) },
-      { label: "⟲ Pivoter 180°", disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: rotate(180) });
+      { label: I18n.t("dc.common.rotate90g"), disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: rotate(90) },
+      { label: I18n.t("dc.common.rotate180g"), disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: rotate(180) });
     // masquage 3D/2D par ÉQUIPEMENT / TYPE / GROUPE (équipements libres) — piloté aussi depuis le panneau « Équipements libres ».
     if (e.dim_mode === "free") {
       const dcIds = this.displayedDcIds(this.current());
       const setHidden = (ids: string[], hide: boolean) => { ids.forEach((id) => { if (hide) this.hidden3dEquips.add(id); else this.hidden3dEquips.delete(id); }); this.reflow(); this.renderSide(this.current()); };
       const matching = (pred: (x: any) => boolean) => this.store.all("equipments").filter((x: any) => x.dim_mode === "free" && x.dc_x != null && dcIds.includes(x.dc_id) && pred(x)).map((x: any) => x.id);
-      items.push({ label: this.hidden3dEquips.has(eqId) ? "Afficher cet équipement" : "Masquer cet équipement", action: () => setHidden([eqId], !this.hidden3dEquips.has(eqId)) });
-      items.push({ label: "Masquer le type « " + EquipmentTypes.label(e.type) + " »", action: () => setHidden(matching((x) => x.type === e.type), true) });
+      items.push({ label: this.hidden3dEquips.has(eqId) ? I18n.t("dc.interact.showThisEquip") : I18n.t("dc.interact.hideThisEquip"), action: () => setHidden([eqId], !this.hidden3dEquips.has(eqId)) });
+      items.push({ label: I18n.t("dc.interact.hideType", { type: EquipmentTypes.label(e.type) }), action: () => setHidden(matching((x) => x.type === e.type), true) });
       // un item de masquage par groupe MEMBRE (primaire + secondaires) ; l'appartenance teste group_ids.
-      this.store.equipmentGroupIds(e).forEach((gid: string) => { const g: any = this.store.get("groups", gid); items.push({ label: "Masquer le groupe « " + ((g && g.label) || "?") + " »", action: () => setHidden(matching((x) => this.store.equipmentGroupIds(x).includes(gid)), true) }); });
+      this.store.equipmentGroupIds(e).forEach((gid: string) => { const g: any = this.store.get("groups", gid); items.push({ label: I18n.t("dc.interact.hideGroup", { group: (g && g.label) || "?" }), action: () => setHidden(matching((x) => this.store.equipmentGroupIds(x).includes(gid)), true) }); });
     }
     items.push(
-      { label: "Créer un câble…", action: () => this.host.openCableForm?.(null, { fromEqId: eqId }) },
-      { label: onTray ? "Descendre de l'étagère" : (placed ? "Retirer du datacenter" : "Renvoyer en « Non placé »"), danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: removeAction },
+      { label: I18n.t("dc.interact.createCable"), action: () => this.host.openCableForm?.(null, { fromEqId: eqId }) },
+      { label: onTray ? I18n.t("dc.interact.descendShelf") : (placed ? I18n.t("dc.interact.removeFromDc") : I18n.t("dc.interact.returnUnplaced")), danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: removeAction },
     );
-    const secs: CtxSection[] = [{ head: e.name || "(équipement)", items }];
-    const csi = this.cableSelItems(this.store.cablesOfEquipment(eqId).map((c: any) => c.id), "les câbles de l'équipement");
+    const secs: CtxSection[] = [{ head: e.name || I18n.t("lists.ph.equipment"), items }];
+    const csi = this.cableSelItems(this.store.cablesOfEquipment(eqId).map((c: any) => c.id), I18n.t("dc.interact.nounEquipCables"));
     if (csi.length) secs.push({ items: csi });
     return secs;
   }
@@ -471,9 +472,9 @@ export abstract class DcInteract extends DcPanels {
 
   /** Menu contextuel du PERSONNAGE d'échelle (repère de vue) : pivoter · masquer. Aucune mutation du document. */
   protected figureCtx(): CtxSection[] {
-    return [{ head: "Personnage (échelle)", items: [
-      { label: "↻ Pivoter 90°", action: () => { if (this.figure) { this.figure.orient = Normalize.rackOrientation((this.figure.orient || 0) + 90); this.persistView(); this.reflow(); } } },
-      { label: "Masquer le personnage", danger: true, action: () => { this.showFigure = false; this.persistView(); this.buildToolbar(); this.render(); } },
+    return [{ head: I18n.t("dc.interact.figureHead"), items: [
+      { label: I18n.t("dc.common.rotate90g"), action: () => { if (this.figure) { this.figure.orient = Normalize.rackOrientation((this.figure.orient || 0) + 90); this.persistView(); this.reflow(); } } },
+      { label: I18n.t("dc.interact.hideFigure"), danger: true, action: () => { this.showFigure = false; this.persistView(); this.buildToolbar(); this.render(); } },
     ] }];
   }
 
@@ -495,11 +496,11 @@ export abstract class DcInteract extends DcPanels {
       `dc` peut être null (plan d'étage sans salle) : 3D / Plan de salle sont alors inertes (toast), Plan d'étage cible loc/fl. */
   protected viewSwitchSectionAt(dc: any | null, loc: string, fl: string): CtxSection {
     const cur = (v: string) => (this.view === v ? "✓ " : "");
-    const need = () => Notify.toast("Aucune salle ici — activez/placez une salle d'abord", "err");
-    return { head: "Vue", items: [
-      { label: cur("3d") + "Vue 3D", action: () => (dc ? this.activateView("3d", dc) : need()) },
-      { label: cur("top") + "Plan de salle", action: () => (dc ? this.activateView("top", dc) : need()) },
-      { label: cur("floor") + "Plan d'étage", action: () => { this.floorTarget = { location: loc, floor: fl }; this.view = "floor"; this.selRackId = null; this.camTarget = null; this.scale = null; this.buildToolbar(); this.render(); } },
+    const need = () => Notify.toast(I18n.t("dc.interact.noRoomHere"), "err");
+    return { head: I18n.t("dc.interact.viewHead"), items: [
+      { label: cur("3d") + I18n.t("dc.interact.view3d"), action: () => (dc ? this.activateView("3d", dc) : need()) },
+      { label: cur("top") + I18n.t("dc.common.roomPlan"), action: () => (dc ? this.activateView("top", dc) : need()) },
+      { label: cur("floor") + I18n.t("dc.common.floorPlan"), action: () => { this.floorTarget = { location: loc, floor: fl }; this.view = "floor"; this.selRackId = null; this.camTarget = null; this.scale = null; this.buildToolbar(); this.render(); } },
     ] };
   }
   protected viewSwitchSection(dc: any): CtxSection { return this.viewSwitchSectionAt(dc, dc.location || "", String(dc.floor || "")); }
@@ -507,19 +508,19 @@ export abstract class DcInteract extends DcPanels {
   protected roomCtx(dc: any): CtxSection[] {
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [];
     if (this.multiDc) {   // activer / isoler / quitter le multi-DC n'ont de sens qu'en mode Multi-DC
-      items.push({ label: "Activer ce DC", action: () => this.activateDc(dc.id, false) });   // devient la salle active (affichage inchangé)
+      items.push({ label: I18n.t("dc.interact.activateDc"), action: () => this.activateDc(dc.id, false) });   // devient la salle active (affichage inchangé)
       // Isoler : RESTE en Multi-DC mais n'affiche QUE ce DC (visibleDcIds = {ce DC}) — distinct du mode simple.
-      items.push({ label: "Isoler ce DC (afficher seul)", action: () => { this.dcId = dc.id; this.selRackId = null; this.visibleDcIds = new Set([dc.id]); this.camTarget = null; this.scale = null; this.buildToolbar(); this.render(); } });
-      items.push({ label: "Passer en mode simple DC", action: () => this.activateDc(dc.id, true) });   // quitte le Multi-DC, sur ce DC
+      items.push({ label: I18n.t("dc.interact.isolateDc"), action: () => { this.dcId = dc.id; this.selRackId = null; this.visibleDcIds = new Set([dc.id]); this.camTarget = null; this.scale = null; this.buildToolbar(); this.render(); } });
+      items.push({ label: I18n.t("dc.interact.simpleDcMode"), action: () => this.activateDc(dc.id, true) });   // quitte le Multi-DC, sur ce DC
     }
     // afficher toutes les baies — seulement si au moins une baie de CE DC est masquée
     const dcRacks = this.store.racksOfDc(dc.id);
     if (dcRacks.some((r: any) => this.hidden3dRacks.has(r.id))) {
-      items.push({ label: "Afficher toutes les baies", action: () => { dcRacks.forEach((r: any) => this.hidden3dRacks.delete(r.id)); this.render(); } });
+      items.push({ label: I18n.t("dc.interact.showAllRacks"), action: () => { dcRacks.forEach((r: any) => this.hidden3dRacks.delete(r.id)); this.render(); } });
     }
-    items.push({ label: "Modifier la salle…", action: () => this.host.openDatacenterForm?.(dc.id) });
+    items.push({ label: I18n.t("dc.common.editRoomEllipsis"), action: () => this.host.openDatacenterForm?.(dc.id) });
     return [
-      { head: dc.name || "(salle)", items },
+      { head: dc.name || I18n.t("lists.ph.room"), items },
       this.viewSwitchSection(dc),
     ];
   }
@@ -527,29 +528,29 @@ export abstract class DcInteract extends DcPanels {
     const hidden = this.hidden3dRacks.has(rack.id);
     const locked = PlacementLock.isLocked(rack);
     const items: any[] = [
-      { label: "Modifier…", action: () => this.host.openRackForm?.(rack.id) },
+      { label: I18n.t("dc.common.editEllipsis"), action: () => this.host.openRackForm?.(rack.id) },
       PlacementLock.ctxItem(this.store, "racks", rack.id, () => this.render()),
-      { label: "Isoler la baie", action: () => this.isolateRack(rack.id) },
-      { label: hidden ? "Afficher la baie" : "Masquer la baie", action: () => { if (hidden) this.hidden3dRacks.delete(rack.id); else this.hidden3dRacks.add(rack.id); this.render(); } },
+      { label: I18n.t("dc.interact.isolateRack"), action: () => this.isolateRack(rack.id) },
+      { label: hidden ? I18n.t("dc.interact.showRack") : I18n.t("dc.interact.hideRack"), action: () => { if (hidden) this.hidden3dRacks.delete(rack.id); else this.hidden3dRacks.add(rack.id); this.render(); } },
     ];
     // capots & portes : bascules GLOBALES (toutes les baies) = même état que les toggles « Capots / parois des baies »
     // et « Portes des baies » du panneau (3D). Proposées seulement en vue 3D et si la baie porte l'élément concerné
     // (elle a des capots / une porte) — sans quoi la bascule serait sans effet visible sur la baie cliquée.
     if (this.view === "3d") {
-      if (rack.has_caps !== false) items.push({ label: this.showRackSides ? "Masquer les capots" : "Afficher les capots", action: () => { this.showRackSides = !this.showRackSides; this.rerenderView(); } });
-      if (RackGeometry.hasDoor(rack)) items.push({ label: this.showDoors ? "Masquer les portes" : "Afficher les portes", action: () => { this.showDoors = !this.showDoors; this.rerenderView(); } });
+      if (rack.has_caps !== false) items.push({ label: this.showRackSides ? I18n.t("dc.interact.hideCaps") : I18n.t("dc.interact.showCaps"), action: () => { this.showRackSides = !this.showRackSides; this.rerenderView(); } });
+      if (RackGeometry.hasDoor(rack)) items.push({ label: this.showDoors ? I18n.t("dc.interact.hideDoors") : I18n.t("dc.interact.showDoors"), action: () => { this.showDoors = !this.showDoors; this.rerenderView(); } });
     }
-    const secs: CtxSection[] = [{ head: rack.name || "(baie)", items: items.concat([
-      { label: "Retirer du datacenter", danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: async () => {
+    const secs: CtxSection[] = [{ head: rack.name || I18n.t("lists.ph.rack"), items: items.concat([
+      { label: I18n.t("dc.interact.removeFromDc"), danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: async () => {
           if (!this.store.get("racks", rack.id)) return;
           const eqIds = this.store.equipmentsOfRack(rack.id).filter((e: any) => e.placement_mode === "rack" && e.rack_u != null).map((e: any) => e.id);
           const ops: Array<{ collection: string; id: string; patch: Record<string, any> }> = [{ collection: "racks", id: rack.id, patch: { datacenter_id: null, dc_x: null, dc_y: null } }];
           if (rack.datacenter_id) ops.push(...this.store.cableDowngradeOps(eqIds));
-          await this.store.updateBatch(ops); this.setDirty(); Notify.toast("Baie retirée — replacée dans le pool");
+          await this.store.updateBatch(ops); this.setDirty(); Notify.toast(I18n.t("dc.interact.rackRemovedPool"));
         } },
     ]) }];
     const rackCableIds = this.store.equipmentsOfRack(rack.id).flatMap((e: any) => this.store.cablesOfEquipment(e.id).map((c: any) => c.id));
-    const csi = this.cableSelItems(rackCableIds, "les câbles de la baie");
+    const csi = this.cableSelItems(rackCableIds, I18n.t("dc.interact.nounRackCables"));
     if (csi.length) secs.push({ items: csi });
     return secs;
   }
@@ -558,44 +559,44 @@ export abstract class DcInteract extends DcPanels {
     const nCab = this.store.cablesOfWaypoint(wp.id).length;
     const locked = PlacementLock.isLocked(wp);
     const items: Array<{ label: string; danger?: boolean; disabled?: boolean; title?: string; action: () => void }> = [];
-    if (this.routeTool.state && this.routeTool.state.fromPortId) items.push({ label: "Ajouter à la route", action: () => this.routeTool.addWp(wp.id) });
-    items.push({ label: "Modifier…", action: () => this.host.openWaypointForm?.(wp.id) });
+    if (this.routeTool.state && this.routeTool.state.fromPortId) items.push({ label: I18n.t("dc.interact.addToRoute"), action: () => this.routeTool.addWp(wp.id) });
+    items.push({ label: I18n.t("dc.common.editEllipsis"), action: () => this.host.openWaypointForm?.(wp.id) });
     items.push(PlacementLock.ctxItem(this.store, "waypoints", wp.id, () => this.render()));
-    items.push({ label: "Retirer de la salle", danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: async () => { if (!this.store.get("waypoints", wp.id)) return; await this.store.update("waypoints", wp.id, { datacenter_id: null, dc_x: null, dc_y: null, dc_x2: null, dc_y2: null }); this.setDirty(); } });
-    items.push({ label: "Supprimer", danger: true, action: async () => {
-        const ok = await Dialog.confirm({ title: "Supprimer le waypoint", danger: true, message: `Supprimer « ${wp.name || "(waypoint)"} » ?` + (nCab ? ` Les ${nCab} câble(s) qui le traversent seront détachés.` : "") });
+    items.push({ label: I18n.t("dc.interact.removeFromRoom"), danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: async () => { if (!this.store.get("waypoints", wp.id)) return; await this.store.update("waypoints", wp.id, { datacenter_id: null, dc_x: null, dc_y: null, dc_x2: null, dc_y2: null }); this.setDirty(); } });
+    items.push({ label: I18n.t("ui.action.delete"), danger: true, action: async () => {
+        const ok = await Dialog.confirm({ title: I18n.t("dc.common.delWpTitle"), danger: true, message: I18n.t("dc.common.deleteNamedQ", { name: wp.name || I18n.t("dc.common.waypoint") }) + (nCab ? I18n.t("dc.interact.delWpCables", { n: nCab }) : "") });
         if (!ok || !this.store.get("waypoints", wp.id)) return;
-        await this.store.remove("waypoints", wp.id); this.setDirty(); Notify.toast("Waypoint supprimé");
+        await this.store.remove("waypoints", wp.id); this.setDirty(); Notify.toast(I18n.t("dc.common.wpDeleted"));
       } });
-    const secs: CtxSection[] = [{ head: Waypoint.glyph(wp) + " " + (wp.name || "(waypoint)"), items }];
-    const csi = this.cableSelItems(this.store.cablesOfWaypoint(wp.id).map((c: any) => c.id), wp.kind === "brush" ? "les câbles de la brosse" : "les câbles passant ici");
+    const secs: CtxSection[] = [{ head: Waypoint.glyph(wp) + " " + (wp.name || I18n.t("dc.common.waypoint")), items }];
+    const csi = this.cableSelItems(this.store.cablesOfWaypoint(wp.id).map((c: any) => c.id), wp.kind === "brush" ? I18n.t("dc.interact.nounBrushCables") : I18n.t("dc.interact.nounPassingCables"));
     if (csi.length) secs.push({ items: csi });
     return secs;
   }
 
   protected cableCtx(cable: any): CtxSection[] {
     let detach: { label: string; patch: Record<string, any>; msg: string } | null = null;
-    if (cable.status === "cable" || cable.status === "a-remplacer") detach = { label: "Détacher (→ Planifié)", patch: { status: "planifie" }, msg: "Câble détaché — « Planifié »" };
-    else if (cable.status === "planifie") detach = { label: "Détacher (→ Brouillon)", patch: { status: "brouillon", from_port_id: null, to_port_id: null, waypoint_ids: [] }, msg: "Câble détaché — assignation retirée" };
-    const items: Array<{ label: string; danger?: boolean; action: () => void }> = [{ label: "Modifier le câble…", action: () => this.host.openCableForm?.(cable.id) }];
+    if (cable.status === "cable" || cable.status === "a-remplacer") detach = { label: I18n.t("dc.interact.detachPlanned"), patch: { status: "planifie" }, msg: I18n.t("dc.interact.detachedPlannedMsg") };
+    else if (cable.status === "planifie") detach = { label: I18n.t("dc.interact.detachDraft"), patch: { status: "brouillon", from_port_id: null, to_port_id: null, waypoint_ids: [] }, msg: I18n.t("dc.interact.detachedDraftMsg") };
+    const items: Array<{ label: string; danger?: boolean; action: () => void }> = [{ label: I18n.t("dc.interact.editCableEllipsis"), action: () => this.host.openCableForm?.(cable.id) }];
     if (detach) items.push({ label: detach.label, action: async () => { if (!this.store.get("cables", cable.id)) return; await this.store.update("cables", cable.id, detach!.patch); this.setDirty(); Notify.toast(detach!.msg); } });
-    items.push({ label: "Supprimer le câble", danger: true, action: async () => { const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${cable.name || "ce câble"} » ?`, confirmLabel: "Supprimer", danger: true }); if (!ok || !this.store.get("cables", cable.id)) return; await this.store.remove("cables", cable.id); this.setDirty(); Notify.toast("Câble supprimé"); } });
-    return [{ head: cable.name || "(câble)", items }, { items: this.cableSelItems([cable.id], "ce câble") }];
+    items.push({ label: I18n.t("dc.interact.deleteCable"), danger: true, action: async () => { const ok = await Dialog.confirm({ title: I18n.t("dc.common.deleteQ"), message: I18n.t("dc.common.deleteNamedQ", { name: cable.name || I18n.t("dc.interact.thisCablePh") }), confirmLabel: I18n.t("ui.action.delete"), danger: true }); if (!ok || !this.store.get("cables", cable.id)) return; await this.store.remove("cables", cable.id); this.setDirty(); Notify.toast(I18n.t("dc.interact.cableDeleted")); } });
+    return [{ head: cable.name || I18n.t("lists.ph.cable"), items }, { items: this.cableSelItems([cable.id], I18n.t("dc.interact.nounThisCable")) }];
   }
 
   /** Menu contextuel d'un FAISCEAU (trunk) : éditer · supprimer + sélection (Afficher/Isoler/Masquer) du trunk
       et de ses brins — mêmes actions de visibilité que les câbles (selCables partage les ids). */
   protected bundleCtx(bundle: any): CtxSection[] {
     const items: Array<{ label: string; danger?: boolean; action: () => void }> = [
-      { label: "Modifier le faisceau…", action: () => this.host.openCableBundleForm?.(bundle.id) },
-      { label: "Supprimer le faisceau", danger: true, action: async () => {
+      { label: I18n.t("dc.interact.editBundleEllipsis"), action: () => this.host.openCableBundleForm?.(bundle.id) },
+      { label: I18n.t("dc.interact.deleteBundle"), danger: true, action: async () => {
           const nStrand = this.store.portsOfBundle(bundle.id).length;
-          const ok = await Dialog.confirm({ title: "Supprimer ?", message: `Supprimer « ${bundle.name || "ce faisceau"} » ?` + (nStrand ? ` Les ${nStrand} affectation(s) de brin seront détachées.` : ""), confirmLabel: "Supprimer", danger: true });
+          const ok = await Dialog.confirm({ title: I18n.t("dc.common.deleteQ"), message: I18n.t("dc.common.deleteNamedQ", { name: bundle.name || I18n.t("dc.interact.thisBundlePh") }) + (nStrand ? I18n.t("dc.interact.delBundleStrands", { n: nStrand }) : ""), confirmLabel: I18n.t("ui.action.delete"), danger: true });
           if (!ok || !this.store.get("cableBundles", bundle.id)) return;
-          await this.store.remove("cableBundles", bundle.id); this.setDirty(); Notify.toast("Faisceau supprimé");
+          await this.store.remove("cableBundles", bundle.id); this.setDirty(); Notify.toast(I18n.t("dc.interact.bundleDeleted"));
         } },
     ];
-    return [{ head: "" + (bundle.name || "(faisceau)"), items }, { items: this.cableSelItems([bundle.id], "ce faisceau") }];
+    return [{ head: "" + (bundle.name || I18n.t("lists.ph.bundle")), items }, { items: this.cableSelItems([bundle.id], I18n.t("dc.interact.nounThisBundle")) }];
   }
 
   /** Menu du SOL (vue Dessus) : créer un waypoint (pin / chemin / exit) au point cliqué (aimanté ½ maille). */
@@ -604,10 +605,10 @@ export abstract class DcInteract extends DcPanels {
     const x = snapHalf(w.x), y = snapHalf(w.y);
     const baseName = () => "WP-" + (this.store.all("waypoints").length + 1);
     const sel = async (wp: any) => { this.selWaypointId = wp.id; this.setDirty(); };
-    return [{ head: "Waypoint — point de passage de câbles", items: [
-      { label: "◆ Ajouter un pin ici", action: async () => { sel(await this.store.create("waypoints", { name: baseName(), kind: "point", datacenter_id: dc.id, dc_x: x, dc_y: y })); Notify.toast("Pin créé — glissez-le pour l'ajuster"); } },
-      { label: "▬ Ajouter un chemin de câbles ici", action: async () => { const h = dc.cell_mm; sel(await this.store.create("waypoints", { name: baseName(), kind: "segment", datacenter_id: dc.id, dc_x: Math.max(0, x - h), dc_y: y, dc_x2: Math.min(dc.width_mm, x + h), dc_y2: y })); Notify.toast("Chemin de câbles créé — glissez ses extrémités"); } },
-      { label: "⏏ Ajouter un exit (sortie de salle) ici", action: async () => { const nx = this.store.all("waypoints").filter((w2: any) => Waypoint.typeOf(w2) === "exit").length + 1; sel(await this.store.create("waypoints", { name: "EXIT-" + nx, wp_type: "exit", kind: "point", datacenter_id: dc.id, dc_x: x, dc_y: y })); Notify.toast("Exit créé — un câble sort par une PAIRE d'exits"); } },
+    return [{ head: I18n.t("dc.interact.wpMenuHead"), items: [
+      { label: I18n.t("dc.interact.addPinHere"), action: async () => { sel(await this.store.create("waypoints", { name: baseName(), kind: "point", datacenter_id: dc.id, dc_x: x, dc_y: y })); Notify.toast(I18n.t("dc.interact.pinCreatedDrag")); } },
+      { label: I18n.t("dc.interact.addPathHere"), action: async () => { const h = dc.cell_mm; sel(await this.store.create("waypoints", { name: baseName(), kind: "segment", datacenter_id: dc.id, dc_x: Math.max(0, x - h), dc_y: y, dc_x2: Math.min(dc.width_mm, x + h), dc_y2: y })); Notify.toast(I18n.t("dc.interact.pathCreatedDrag")); } },
+      { label: I18n.t("dc.interact.addExitHere"), action: async () => { const nx = this.store.all("waypoints").filter((w2: any) => Waypoint.typeOf(w2) === "exit").length + 1; sel(await this.store.create("waypoints", { name: "EXIT-" + nx, wp_type: "exit", kind: "point", datacenter_id: dc.id, dc_x: x, dc_y: y })); Notify.toast(I18n.t("dc.interact.exitCreatedPair")); } },
     ] }, this.viewSwitchSection(dc)];
   }
 
@@ -616,30 +617,30 @@ export abstract class DcInteract extends DcPanels {
   protected floorPlaneCtx(loc: string, fl: string, w: { x: number; y: number }): CtxSection[] {
     const cfg = this.floor.config(loc, fl), half = (cfg.cell_mm || 1000) / 2;
     const x = Math.round(w.x / half) * half, y = Math.round(w.y / half) * half;
-    return [{ head: "Plan d'étage — " + this.store.siteLabel(loc) + " · ét. " + (fl || "0"), items: [
-      { label: "+ Ajouter une salle…", action: () => this.host.openDatacenterForm?.("") },
-      { label: "◎ Ajouter un pin d'étage ici", action: async () => { const wp: any = await this.store.create("waypoints", { name: "PIN-" + (this.store.oobWaypoints().length + 1), kind: "point", location: loc, floor: fl, floor_x: x, floor_y: y }); this.selWaypointId = wp.id; this.setDirty(); Notify.toast("Pin d'étage créé — glissez-le, éditez sa hauteur (clic droit)"); } },
-      { label: "Éditer le plan d'étage…", action: () => this.editFloor(loc, fl, false) },
+    return [{ head: I18n.t("dc.interact.floorPlaneHead", { bldg: this.store.siteLabel(loc), n: fl || "0" }), items: [
+      { label: I18n.t("dc.interact.addRoomEllipsis"), action: () => this.host.openDatacenterForm?.("") },
+      { label: I18n.t("dc.interact.addFloorPinHere"), action: async () => { const wp: any = await this.store.create("waypoints", { name: "PIN-" + (this.store.oobWaypoints().length + 1), kind: "point", location: loc, floor: fl, floor_x: x, floor_y: y }); this.selWaypointId = wp.id; this.setDirty(); Notify.toast(I18n.t("dc.interact.floorPinCreatedDrag")); } },
+      { label: I18n.t("dc.common.editFloorPlanEllipsis"), action: () => this.editFloor(loc, fl, false) },
     ] }, this.viewSwitchSectionAt(this.store.dcsOfFloor(loc, fl)[0] || null, loc, fl)];
   }
 
   /** Menu de la DALLE d'étage en 3D multi-salles (clic droit) : éditer le plan · ajouter une salle · vue Étage 2D. */
   protected floorPlane3DCtx(loc: string, fl: string): CtxSection[] {
     fl = String(fl || "");
-    return [{ head: "Étage — " + (this.store.siteLabel(loc) || "(bâtiment ?)") + " · ét. " + (fl || "0"), items: [
-      { label: "Éditer le plan d'étage…", action: () => this.editFloor(loc, fl, false) },
-      { label: "+ Ajouter une salle (DC) à cet étage…", action: () => this.host.openDatacenterForm?.("") },
-      { label: "Vue Étage (2D)", action: () => { this.floorTarget = { location: loc, floor: fl }; this.view = "floor"; this.scale = null; this.buildToolbar(); this.render(); } },
+    return [{ head: I18n.t("dc.interact.floorHead", { bldg: this.store.siteLabel(loc) || I18n.t("dc.interact.buildingUnknown"), n: fl || "0" }), items: [
+      { label: I18n.t("dc.common.editFloorPlanEllipsis"), action: () => this.editFloor(loc, fl, false) },
+      { label: I18n.t("dc.interact.addRoomToFloor"), action: () => this.host.openDatacenterForm?.("") },
+      { label: I18n.t("dc.interact.floorView2d"), action: () => { this.floorTarget = { location: loc, floor: fl }; this.view = "floor"; this.scale = null; this.buildToolbar(); this.render(); } },
     ] }];
   }
 
   /** Menu d'une salle dans le plan d'étage : pivoter / ouvrir (plan de salle) / modifier / position auto. */
   protected floorRoomCtx(d: any): CtxSection[] {
-    return [{ head: d.name || "(salle)", items: [
-      { label: "↻ Pivoter 90°", action: async () => { await this.store.update("datacenters", d.id, { floor_orientation: Normalize.rackOrientation((d.floor_orientation || 0) + 90) }); this.selRoomId = d.id; this.setDirty(); } },
-      { label: "Ouvrir la salle (Plan de salle)", action: () => { this.dcId = d.id; this.view = "top"; this.scale = null; this.buildToolbar(); this.render(); } },
-      { label: "Modifier la salle…", action: () => this.host.openDatacenterForm?.(d.id) },
-      { label: "Position auto (retirer le placement)", danger: true, action: async () => { await this.store.update("datacenters", d.id, { floor_x: null, floor_y: null }); this.setDirty(); } },
+    return [{ head: d.name || I18n.t("lists.ph.room"), items: [
+      { label: I18n.t("dc.common.rotate90g"), action: async () => { await this.store.update("datacenters", d.id, { floor_orientation: Normalize.rackOrientation((d.floor_orientation || 0) + 90) }); this.selRoomId = d.id; this.setDirty(); } },
+      { label: I18n.t("dc.interact.openRoom"), action: () => { this.dcId = d.id; this.view = "top"; this.scale = null; this.buildToolbar(); this.render(); } },
+      { label: I18n.t("dc.common.editRoomEllipsis"), action: () => this.host.openDatacenterForm?.(d.id) },
+      { label: I18n.t("dc.interact.autoPosition"), danger: true, action: async () => { await this.store.update("datacenters", d.id, { floor_x: null, floor_y: null }); this.setDirty(); } },
     ] }];
   }
 
@@ -648,19 +649,19 @@ export abstract class DcInteract extends DcPanels {
     const locked = PlacementLock.isLocked(eq);
     const rotate = (deg: number) => async () => { const o: any = this.store.get("equipments", eq.id); if (!o) return; await this.store.update("equipments", eq.id, { dc_orientation: Normalize.rackOrientation((o.dc_orientation || 0) + deg) }); this.selFloorEquip = eq.id; this.setDirty(); };
     const items: Array<{ label: string; danger?: boolean; disabled?: boolean; title?: string; action: () => void }> = [
-      { label: "Modifier…", action: () => this.host.openEquipmentForm?.(eq.id) },   // modale d'ÉDITION
-      { label: "Fiche / détails…", action: () => this.host.openEquipmentDetail?.(eq.id) },
+      { label: I18n.t("dc.common.editEllipsis"), action: () => this.host.openEquipmentForm?.(eq.id) },   // modale d'ÉDITION
+      { label: I18n.t("dc.interact.sheetDetails"), action: () => this.host.openEquipmentDetail?.(eq.id) },
       PlacementLock.ctxItem(this.store, "equipments", eq.id, () => this.render()),
-      { label: "↻ Pivoter 90°", disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: rotate(90) },
-      { label: "⟲ Pivoter 180°", disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: rotate(180) },
+      { label: I18n.t("dc.common.rotate90g"), disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: rotate(90) },
+      { label: I18n.t("dc.common.rotate180g"), disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: rotate(180) },
     ];
-    if (FloorLayout.floorEquipLocalized(eq)) items.push({ label: "Délocaliser (centre du plan)", danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: async () => { await this.store.update("equipments", eq.id, { floor_x: null, floor_y: null }); this.selFloorEquip = null; this.setDirty(); } });
-    items.push({ label: "Retirer de l'étage (→ non placé)", danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: async () => {
+    if (FloorLayout.floorEquipLocalized(eq)) items.push({ label: I18n.t("dc.interact.delocate"), danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: async () => { await this.store.update("equipments", eq.id, { floor_x: null, floor_y: null }); this.selFloorEquip = null; this.setDirty(); } });
+    items.push({ label: I18n.t("dc.interact.removeFromFloor"), danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: async () => {
       const downs = this.store.equipmentDcId(eq.id) ? this.store.cableDowngradeOps([eq.id]) : [];
       await this.store.updateBatch(([{ collection: "equipments", id: eq.id, patch: { placement_mode: "manual", floor_x: null, floor_y: null } }] as any[]).concat(downs as any));
-      this.selFloorEquip = null; this.setDirty(); Notify.toast("Équipement retiré de l'étage");
+      this.selFloorEquip = null; this.setDirty(); Notify.toast(I18n.t("dc.interact.equipRemovedFloor"));
     } });
-    return [{ head: "▣ " + (eq.name || "équipement"), items }];
+    return [{ head: "▣ " + (eq.name || I18n.t("lists.ph.equipment")), items }];
   }
 
 
@@ -674,7 +675,7 @@ export abstract class DcInteract extends DcPanels {
          Déclenché par les clics ports/waypoints (this.routeTool.start/finish/addWp) ; armé par la barre d'outils. ---- */
 
   /** Libellé court d'un port (équipement : port) — PARTAGÉ avec les tooltips de câble et le panneau de route. */
-  protected portShort(portId: string): string { const p: any = this.store.get("ports", portId); if (!p) return "(port ?)"; const e: any = this.store.get("equipments", p.equipment_id); return (e ? (e.name || "(équip.)") + " : " : "") + (p.name || "(port)"); }
+  protected portShort(portId: string): string { const p: any = this.store.get("ports", portId); if (!p) return I18n.t("dc.interact.portUnknown"); const e: any = this.store.get("equipments", p.equipment_id); return (e ? (e.name || I18n.t("lists.ph.equipment")) + " : " : "") + (p.name || I18n.t("dc.common.port")); }
 
 
   /* ===================== OUTIL DE POSITIONNEMENT — adaptation de VUE =====================
@@ -698,20 +699,20 @@ export abstract class DcInteract extends DcPanels {
       this.racks(dc.id).forEach((r: any) => {
         if (this.hidden3dRacks.has(r.id) || PlacementLock.isLocked(r)) return;   // verrouillé : non déplaçable par l'outil de positionnement
         const ext = this.rackHalfExtents(r), o = Normalize.rackOrientation(r.orientation);
-        rects.push({ id: r.id, name: r.name || "(baie)", orient: o, anchor: "center", rect: { cx: (r.dc_x != null ? r.dc_x : ext.hx), cy: (r.dc_y != null ? r.dc_y : ext.hy), hx: ext.hx, hy: ext.hy },
+        rects.push({ id: r.id, name: r.name || I18n.t("lists.ph.rack"), orient: o, anchor: "center", rect: { cx: (r.dc_x != null ? r.dc_x : ext.hx), cy: (r.dc_y != null ? r.dc_y : ext.hy), hx: ext.hx, hy: ext.hy },
           commit: async (cx, cy) => {
             const c = clamp(cx, cy, ext.hx, ext.hy, frame);
-            if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); return; }
+            if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast(I18n.t("dc.common.blockedCell"), "err"); return; }
             await this.store.update("racks", r.id, { dc_x: Math.round(c.x), dc_y: Math.round(c.y) }); this.host.setDirty?.(true);
           } });
       });
       this.store.freeEquipsOfDc(dc.id).forEach((eq: any) => {
         if (eq.dc_x == null || eq.dc_y == null || PlacementLock.isLocked(eq)) return;   // seulement les équipements PLACÉS au sol et NON verrouillés
         const ext = FreeEquipGeometry.halfExtents(eq), o = Normalize.rackOrientation(eq.dc_orientation);
-        rects.push({ id: eq.id, name: eq.name || "(équipement)", orient: o, anchor: "center", rect: { cx: eq.dc_x, cy: eq.dc_y, hx: ext.hx, hy: ext.hy },
+        rects.push({ id: eq.id, name: eq.name || I18n.t("lists.ph.equipment"), orient: o, anchor: "center", rect: { cx: eq.dc_x, cy: eq.dc_y, hx: ext.hx, hy: ext.hy },
           commit: async (cx, cy) => {
             const c = clamp(cx, cy, ext.hx, ext.hy, frame);
-            if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast("Case inaccessible — placement refusé", "err"); return; }
+            if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast(I18n.t("dc.common.blockedCell"), "err"); return; }
             await this.store.update("equipments", eq.id, { dc_x: Math.round(c.x), dc_y: Math.round(c.y) }); this.host.setDirty?.(true);
           } });
       });
@@ -726,7 +727,7 @@ export abstract class DcInteract extends DcPanels {
       const rects: PosEntry[] = [];
       this.store.dcsOfFloor(loc, fl).forEach((d: any) => {
         const fp = FloorLayout.roomFootprint(d), pos = this.floor.roomPos(d, cfg), hx = fp.w / 2, hy = fp.h / 2;
-        rects.push({ id: d.id, name: (d.name || "(salle)") + (d.room ? " · " + d.room : ""), orient: 0, anchor: "topleft", rect: { cx: pos.x + hx, cy: pos.y + hy, hx, hy },
+        rects.push({ id: d.id, name: (d.name || I18n.t("lists.ph.room")) + (d.room ? " · " + d.room : ""), orient: 0, anchor: "topleft", rect: { cx: pos.x + hx, cy: pos.y + hy, hx, hy },
           commit: async (cx, cy) => {
             const c = clamp(cx, cy, hx, hy, frame);
             await this.store.update("datacenters", d.id, { floor_x: Math.round(c.x - hx), floor_y: Math.round(c.y - hy) }); this.host.setDirty?.(true);
@@ -735,7 +736,7 @@ export abstract class DcInteract extends DcPanels {
       this.store.floorEquipments().filter((e: any) => (e.location || "") === loc && String(e.floor || "") === fl).forEach((eq: any) => {
         if (PlacementLock.isLocked(eq)) return;   // verrouillé : non déplaçable par l'outil de positionnement
         const ext = FreeEquipGeometry.halfExtents(eq), o = Normalize.rackOrientation(eq.dc_orientation), pos = FloorLayout.floorEquipPos(eq, cfg);
-        rects.push({ id: eq.id, name: eq.name || "(équipement)", orient: o, anchor: "center", rect: { cx: pos.x, cy: pos.y, hx: ext.hx, hy: ext.hy },
+        rects.push({ id: eq.id, name: eq.name || I18n.t("lists.ph.equipment"), orient: o, anchor: "center", rect: { cx: pos.x, cy: pos.y, hx: ext.hx, hy: ext.hy },
           commit: async (cx, cy) => {
             const c = clamp(cx, cy, ext.hx, ext.hy, frame);
             await this.store.update("equipments", eq.id, { floor_x: Math.round(c.x), floor_y: Math.round(c.y), location: loc, floor: fl }); this.host.setDirty?.(true);
@@ -858,12 +859,12 @@ export abstract class DcInteract extends DcPanels {
 
   /** Libellé d'affichage d'un objet localisable (pour peupler le champ de recherche). */
   protected locateLabel(kind: string, id: string): string {
-    if (kind === "equipment") { const e: any = this.store.get("equipments", id); return e ? (e.name || "(équipement)") : ""; }
-    if (kind === "rack") { const r: any = this.store.get("racks", id); return r ? (r.name || "(baie)") : ""; }
-    if (kind === "room") { const d: any = this.store.get("datacenters", id); return d ? (d.name || "(salle)") : ""; }
+    if (kind === "equipment") { const e: any = this.store.get("equipments", id); return e ? (e.name || I18n.t("lists.ph.equipment")) : ""; }
+    if (kind === "rack") { const r: any = this.store.get("racks", id); return r ? (r.name || I18n.t("lists.ph.rack")) : ""; }
+    if (kind === "room") { const d: any = this.store.get("datacenters", id); return d ? (d.name || I18n.t("lists.ph.room")) : ""; }
     if (kind === "cable") { const c: any = this.store.get("cables", id); return c ? this.cableLabelShort(c) : ""; }
-    if (kind === "port") { const p: any = this.store.get("ports", id); const e: any = p ? this.store.get("equipments", p.equipment_id) : null; return p ? ((e && e.name ? e.name + " · " : "") + (p.name || "(port)")) : ""; }
-    if (kind === "waypoint") { const w: any = this.store.get("waypoints", id); return w ? (Waypoint.glyph(w) + " " + (w.name || "(waypoint)")) : ""; }
+    if (kind === "port") { const p: any = this.store.get("ports", id); const e: any = p ? this.store.get("equipments", p.equipment_id) : null; return p ? ((e && e.name ? e.name + " · " : "") + (p.name || I18n.t("dc.common.port"))) : ""; }
+    if (kind === "waypoint") { const w: any = this.store.get("waypoints", id); return w ? (Waypoint.glyph(w) + " " + (w.name || I18n.t("dc.common.waypoint"))) : ""; }
     return "";
   }
 
@@ -886,7 +887,7 @@ export abstract class DcInteract extends DcPanels {
   locateEquipment(eqId: string): void {
     const e: any = this.store.get("equipments", eqId); if (!e) return;
     const dcId = this.store.equipmentDcId(eqId);
-    if (!dcId) { Notify.toast("Équipement non placé dans une salle", "err"); return; }
+    if (!dcId) { Notify.toast(I18n.t("dc.interact.equipNotInRoom"), "err"); return; }
     const face = this.aimAtEquip(e, dcId);
     // en baie : emprise = hauteur de la baie isolée (on la voit entière) ; sinon ~1,6 m autour du boîtier.
     const rk: any = (this.selRackId) ? this.store.get("racks", this.selRackId) : null;
@@ -897,7 +898,7 @@ export abstract class DcInteract extends DcPanels {
   locateRack(rackId: string): void {
     const rk: any = this.store.get("racks", rackId); if (!rk) return;
     const dcId = rk.datacenter_id;
-    if (!dcId) { Notify.toast("Baie non placée dans une salle", "err"); return; }
+    if (!dcId) { Notify.toast(I18n.t("dc.interact.rackNotInRoom"), "err"); return; }
     this.selRackId = rackId; this.focusEqId = null;
     const H = RackGeometry.physHeight(rk);
     this.focus3DAt(dcId, { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: H / 2 }, H, this.frontAzimuth(rk.orientation));
@@ -906,9 +907,9 @@ export abstract class DcInteract extends DcPanels {
   locateCable(cableId: string): void {
     const c: any = this.store.get("cables", cableId); if (!c) return;
     const dcId = this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id);
-    if (!dcId) { Notify.toast("Câble non raccordé dans une salle", "err"); return; }
+    if (!dcId) { Notify.toast(I18n.t("dc.interact.cableNotInRoom"), "err"); return; }
     const a = this.resolver.resolvePort3D(c.from_port_id, dcId) || this.resolver.resolvePort3D(c.to_port_id, dcId);
-    if (!a) { Notify.toast("Extrémité du câble introuvable dans cette salle", "err"); return; }
+    if (!a) { Notify.toast(I18n.t("dc.interact.cableEndNotFound"), "err"); return; }
     this.selCables.add(cableId); this.showAllCables = true; this.focusEqId = null;
     this.focus3DAt(dcId, { x: a.x, y: a.y, z: a.z }, 2500);
   }
@@ -916,7 +917,7 @@ export abstract class DcInteract extends DcPanels {
   locateWaypoint(wpId: string): void {
     const wp: any = this.store.get("waypoints", wpId); if (!wp) return;
     const dcId = wp.datacenter_id;
-    if (!dcId || !this.store.waypointIsPlaced(wp)) { Notify.toast("Waypoint non posé dans une salle", "err"); return; }
+    if (!dcId || !this.store.waypointIsPlaced(wp)) { Notify.toast(I18n.t("dc.interact.wpNotInRoom"), "err"); return; }
     this.focusEqId = null; this.selRackId = null; this.selWaypointId = wpId;
     const a = this.resolver.waypointAnchor(wp);
     this.focus3DAt(dcId, { x: a.x, y: a.y, z: a.z }, 1200);
@@ -925,9 +926,9 @@ export abstract class DcInteract extends DcPanels {
   locatePort(portId: string): void {
     const p: any = this.store.get("ports", portId); if (!p) return;
     const dcId = this.store.equipmentDcId(p.equipment_id);
-    if (!dcId) { Notify.toast("Port : équipement non placé dans une salle", "err"); return; }
+    if (!dcId) { Notify.toast(I18n.t("dc.interact.portEquipNotInRoom"), "err"); return; }
     const pt = this.resolver.resolvePort3D(portId, dcId);
-    if (!pt) { Notify.toast("Port introuvable en 3D (façade non posée ?)", "err"); return; }
+    if (!pt) { Notify.toast(I18n.t("dc.interact.portNotFound3d"), "err"); return; }
     const e: any = this.store.get("equipments", p.equipment_id);
     // surbrillance de l'équipement ET du PORT + isolement de sa baie + orientation « en face » ; cadrage serré.
     const face = e ? this.aimAtEquip(e, dcId) : null;

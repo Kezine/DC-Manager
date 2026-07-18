@@ -3,6 +3,7 @@ import type { RouteAnalysis } from "../store/CableRouteAnalyzer";
 import { Dom } from "../ui/Dom";
 import { Waypoint } from "../models/Waypoint";
 import { RouteGraphLayout, RouteGraphNode, ROUTE_GRAPH } from "../geometry/RouteGraphLayout";
+import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
    MINI-GRAPHE de TRACÉ — rendu SVG de la route d'un câble/faisceau dans les
@@ -47,7 +48,7 @@ export class RouteMiniGraph {
 
     if (nodes.length < 2) {
       const hint = document.createElement("div"); hint.className = "form-hint";
-      hint.textContent = "Aucun tracé à afficher (extrémités non posées).";
+      hint.textContent = I18n.t("dc.routeMini.empty");
       wrap.appendChild(hint);
       return wrap;
     }
@@ -70,11 +71,11 @@ export class RouteMiniGraph {
         return b;
       };
       const toggle = document.createElement("div"); toggle.className = "rm-toggle";
-      toggle.appendChild(mkBtn("chain", "Chaîne")); toggle.appendChild(mkBtn("profile", "Profil"));
+      toggle.appendChild(mkBtn("chain", I18n.t("dc.routeMini.modeChain"))); toggle.appendChild(mkBtn("profile", I18n.t("dc.routeMini.modeProfile")));
       head.appendChild(toggle);
       const count = document.createElement("span"); count.className = "form-hint";
       const rooms = new Set(nodes.map((n) => n.roomId).filter(Boolean)).size;
-      count.textContent = route.steps.length + " étape(s) · " + rooms + " salle(s)";
+      count.textContent = I18n.t("dc.routeMini.stepsRooms", { steps: route.steps.length, rooms });
       head.appendChild(count);
       wrap.appendChild(head);
     }
@@ -119,8 +120,8 @@ export class RouteMiniGraph {
         z: (wp.dc_z != null && isFinite(wp.dc_z)) ? wp.dc_z : null,
         level: floor ? (isFinite(pinLevel) ? pinLevel : 0) : levelOfDc(wp.datacenter_id || null),
         glyph: Waypoint.glyph(wp),
-        label: wp.name || (floor ? Waypoint.floorLabel(wp) : "(waypoint)"),
-        sub: this.stepSub(wp, s.type) + (placed ? "" : " (non posé)"),
+        label: wp.name || (floor ? Waypoint.floorLabel(wp) : I18n.t("dc.common.waypoint")),
+        sub: this.stepSub(wp, s.type) + (placed ? "" : I18n.t("dc.routeMini.notPlacedSuffix")),
       });
     });
     pushEndpoint(opts.endpointB);
@@ -129,11 +130,11 @@ export class RouteMiniGraph {
 
   /** Libellé de type d'une étape (tooltip + lisibilité du glyphe). */
   private static stepSub(wp: any, stepType: string): string {
-    if (stepType === "floor") return "pin d'étage · " + Waypoint.floorLabel(wp);
-    if (Waypoint.typeOf(wp) === "exit") return "sortie de salle";
-    if (wp.kind === "brush") return "brosse de brassage";
-    if (wp.kind === "segment") return "chemin de câbles";
-    return "point de passage";
+    if (stepType === "floor") return I18n.t("dc.routeMini.floorPin", { floor: Waypoint.floorLabel(wp) });
+    if (Waypoint.typeOf(wp) === "exit") return I18n.t("dc.routeMini.roomExit");
+    if (wp.kind === "brush") return I18n.t("dc.routeMini.brush");
+    if (wp.kind === "segment") return I18n.t("dc.routeMini.path");
+    return I18n.t("dc.routeMini.waypoint");
   }
 
   /* ---- habillage d'arête : couleur + tirets par statut (conventions GraphView ; cassé rouge, parité 2D) ---- */
@@ -244,9 +245,9 @@ export class RouteMiniGraph {
       if (f.yBottom - f.y > 2) svg.appendChild(Dom.svg("rect", { x: f.x0, y: f.y, width: f.x1 - f.x0, height: f.yBottom - f.y, fill: "var(--fg-dim)", opacity: 0.07 }));
       svg.appendChild(Dom.svg("line", { class: "rm-zline", x1: f.x0, y1: f.y, x2: f.x1, y2: f.y }));
       const zl = Dom.svg("text", { class: "rm-zlabel", x: f.x0 + 8, y: f.y - 5 });
-      zl.textContent = L.multiFloor ? "dalle ét. " + f.level : "dalle · 0 mm";
+      zl.textContent = L.multiFloor ? I18n.t("dc.routeMini.slabFloor", { level: f.level }) : I18n.t("dc.routeMini.slabZero");
       svg.appendChild(zl);
-      if (f.hasUnderfloor) { const fl = Dom.svg("text", { class: "rm-zlabel", x: f.x0 + 8, y: f.y + 13 }); fl.textContent = "faux-plancher"; svg.appendChild(fl); }
+      if (f.hasUnderfloor) { const fl = Dom.svg("text", { class: "rm-zlabel", x: f.x0 + 8, y: f.y + 13 }); fl.textContent = I18n.t("dc.routeMini.underfloor"); svg.appendChild(fl); }
     });
 
     // salles : libellés en tête + séparateurs verticaux aux transitions

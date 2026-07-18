@@ -17,12 +17,15 @@ export class Prefs {
   static readonly INTERVAL_OPTIONS = [5, 10, 30, 60, 90, 120];
   // échelle d'interface (zoom global) — réglable pour compenser les mobiles qui grossissent les polices.
   static readonly UI_SCALE_DEFAULT = 1;
-  static readonly UI_SCALE_OPTIONS: { value: number; label: string }[] = [
-    { value: 0.75, label: "Très compact (75 %)" },
-    { value: 0.85, label: "Compact (85 %)" },
-    { value: 0.95, label: "Réduit (95 %)" },
-    { value: 1, label: "Normal (100 %)" },
-    { value: 1.1, label: "Agrandi (110 %)" },
+  // Cette table est évaluée au CHARGEMENT du module (statique), AVANT `I18n.init()` : elle ne stocke donc
+  // que des CLÉS i18n (`labelKey`), le libellé étant résolu par `I18n.t(labelKey)` AU RENDU par le consommateur
+  // (panneau réglages du Shell) — même pattern que les tables de libellés du domaine (lot B2a).
+  static readonly UI_SCALE_OPTIONS: { value: number; labelKey: string }[] = [
+    { value: 0.75, labelKey: "shell.settings.scaleVeryCompact" },
+    { value: 0.85, labelKey: "shell.settings.scaleCompact" },
+    { value: 0.95, labelKey: "shell.settings.scaleReduced" },
+    { value: 1, labelKey: "shell.settings.scaleNormal" },
+    { value: 1.1, labelKey: "shell.settings.scaleEnlarged" },
   ];
 
   private data: AppPrefs = { theme: "dark", autosave: false, autosaveInterval: Prefs.INTERVAL_DEFAULT, dataSource: "local", dataSourceUserSet: false, apiBaseUrl: "", loginUrl: "", fileAccessMode: "file", debugLog: false, uiScale: Prefs.UI_SCALE_DEFAULT, autocompleteMaxResults: FieldFacet.MAX_RESULTS_DEFAULT, lastRestDocId: "" };

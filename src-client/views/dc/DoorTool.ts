@@ -16,6 +16,7 @@ import { Format } from "../../core/Format";
 import { Doors, DOOR_WALLS, type DoorWall } from "../../domain/Doors";
 import { DoorGeometry } from "../../geometry/DoorGeometry";
 import { Dom } from "../../ui/Dom";
+import { I18n } from "../../i18n/I18n";
 import type { CtxSection } from "../../ui/ContextMenu";
 import type { PosEntry } from "./PositioningTool";
 
@@ -68,16 +69,16 @@ export class DoorTool {
   ctx(dc: any, door: any): CtxSection[] {
     const dbl = Doors.isDouble(door);
     const items: CtxSection["items"] = [
-      { label: "Modifier…", action: () => this.host.openDoorForm(dc.id, door.id) },
-      { label: "Vantaux : " + (dbl ? "→ simple" : "→ double battant"), action: () => this.update(dc, door.id, { leaves: Doors.toggleLeaves(door.leaves) }) },
+      { label: I18n.t("dc.common.editEllipsis"), action: () => this.host.openDoorForm(dc.id, door.id) },
+      { label: I18n.t("dc.door.leavesLabel") + (dbl ? I18n.t("dc.door.toSingle") : I18n.t("dc.door.toDouble")), action: () => this.update(dc, door.id, { leaves: Doors.toggleLeaves(door.leaves) }) },
     ];
     // charnière : sans effet en double battant (charnières aux deux extrémités) → item masqué.
-    if (!dbl) items.push({ label: "Charnière : " + (door.hinge === "left" ? "→ droite" : "→ gauche"), action: () => this.update(dc, door.id, { hinge: Doors.toggleHinge(door.hinge) }) });
+    if (!dbl) items.push({ label: I18n.t("dc.door.hingeLabel") + (door.hinge === "left" ? I18n.t("dc.door.toRight") : I18n.t("dc.door.toLeft")), action: () => this.update(dc, door.id, { hinge: Doors.toggleHinge(door.hinge) }) });
     items.push(
-      { label: "Ouverture : " + (door.opening === "interior" ? "→ extérieur" : "→ intérieur"), action: () => this.update(dc, door.id, { opening: Doors.toggleOpening(door.opening) }) },
-      { label: "Supprimer la porte", danger: true, action: () => this.remove(dc, door.id) },
+      { label: I18n.t("dc.door.openingLabel") + (door.opening === "interior" ? I18n.t("dc.door.toExterior") : I18n.t("dc.door.toInterior")), action: () => this.update(dc, door.id, { opening: Doors.toggleOpening(door.opening) }) },
+      { label: I18n.t("dc.door.delete"), danger: true, action: () => this.remove(dc, door.id) },
     );
-    return [{ head: "Porte" + (dbl ? " (double battant)" : "") + " — passage " + Math.round(Doors.freeWidth(door)) + " mm", items }];
+    return [{ head: I18n.t("dc.door.ctxHead", { suffix: dbl ? I18n.t("dc.door.doubleSuffix") : "", mm: Math.round(Doors.freeWidth(door)) }), items }];
   }
 
   /* ---- rendu 2D (SVG) + glisser le long du mur ---- */
@@ -183,25 +184,25 @@ export class DoorTool {
   /** Carte PORTES : liste (mur · ouverture · passage libre) + éditer/supprimer + ajout par mur. */
   card(dc: any): HTMLElement {
     const box = document.createElement("div"); box.className = "dc-card";
-    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = "Portes"; box.appendChild(t);
+    const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = I18n.t("dc.door.cardTitle"); box.appendChild(t);
     const doors = dc.doors || [];
-    if (!doors.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = "Aucune porte. Ajoutez-en une (collée à un mur)."; box.appendChild(h); }
+    if (!doors.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = I18n.t("dc.door.cardEmpty"); box.appendChild(h); }
     else {
       const list = document.createElement("div"); list.className = "dc-layers";
       doors.forEach((d: any) => {
         const row = document.createElement("div"); row.className = "dc-rack-row";
         const lab = document.createElement("span"); lab.className = "grow"; lab.style.fontSize = "12px";
-        lab.textContent = "Mur " + Doors.wallLabel(d.wall) + (Doors.isDouble(d) ? " · 2 vantaux" : "") + " · ouv. " + d.width_mm + " · passage " + Doors.freeWidth(d) + " mm";
-        const bEdit = this.btn("Modifier", () => this.host.openDoorForm(dc.id, d.id));
+        lab.textContent = I18n.t("dc.door.rowLabel", { wall: Doors.wallLabel(d.wall), leaves: Doors.isDouble(d) ? I18n.t("dc.door.twoLeaves") : "", w: d.width_mm, mm: Doors.freeWidth(d) });
+        const bEdit = this.btn(I18n.t("lists.chrome.rowEdit"), () => this.host.openDoorForm(dc.id, d.id));
         const bDel = this.btn("", () => this.remove(dc, d.id)); bDel.innerHTML = Icons.CLOSE; bDel.classList.add("btn-danger");
         row.append(lab, bEdit, bDel); list.appendChild(row);
       });
       box.appendChild(list);
     }
     const acts = document.createElement("div"); acts.className = "dc-card-acts"; acts.style.marginTop = "6px";
-    DOOR_WALLS.forEach((w) => acts.appendChild(this.btn("＋ " + Doors.wallLabel(w), async () => { await this.add(dc, w); this.host.refreshSide(); }, "Ajouter une porte sur le mur " + Doors.wallLabel(w))));
+    DOOR_WALLS.forEach((w) => acts.appendChild(this.btn(I18n.t("dc.door.addWall", { wall: Doors.wallLabel(w) }), async () => { await this.add(dc, w); this.host.refreshSide(); }, I18n.t("dc.door.addWallTitle", { wall: Doors.wallLabel(w) }))));
     box.appendChild(acts);
-    const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginTop = "4px"; hint.textContent = "Après ajout, glissez la porte le long de son mur ; clic droit / « Modifier » pour ses réglages.";
+    const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginTop = "4px"; hint.textContent = I18n.t("dc.door.cardHint");
     box.appendChild(hint);
     return box;
   }

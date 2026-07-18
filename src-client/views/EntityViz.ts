@@ -1,6 +1,7 @@
 import type { Store } from "../store";
 import { Html } from "../core/Html";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
+import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
    EntityViz — rendu VISUEL riche (HTML) des LIAISONS de ports et des LOCALISATIONS
@@ -37,7 +38,7 @@ export class EntityViz {
   /** Pastille d'équipement (icône de type + nom). `e` peut être nul (port non rattaché). */
   static equipChip(e: any): string {
     if (!e) return `<span class="viz-equip viz-equip-unk">?</span>`;
-    return `<span class="viz-equip">${EntityViz.equipIcon(e.type)}<span>${Html.escape(e.name || "(équip.)")}</span></span>`;
+    return `<span class="viz-equip">${EntityViz.equipIcon(e.type)}<span>${Html.escape(e.name || I18n.t("detail.viz.equipFallback"))}</span></span>`;
   }
 
   private static portTag(name: string | null | undefined): string { return `<span class="viz-port">${Html.escape(name || "—")}</span>`; }
@@ -70,10 +71,10 @@ export class EntityViz {
     const segs: LocSeg[] = [];
     if (!dc) return segs;
     const site = store.siteLabel(dc.location || "");
-    if (site) segs.push({ ic: I.building, k: "Bât.", v: site });
-    if (dc.floor != null && String(dc.floor) !== "") segs.push({ ic: I.stairs, k: "Étage", v: String(dc.floor) });
+    if (site) segs.push({ ic: I.building, k: I18n.t("detail.viz.building"), v: site });
+    if (dc.floor != null && String(dc.floor) !== "") segs.push({ ic: I.stairs, k: I18n.t("detail.viz.floor"), v: String(dc.floor) });
     const room = dc.room || dc.name;
-    if (room) segs.push({ ic: I.door, k: "Salle", v: room });
+    if (room) segs.push({ ic: I.door, k: I18n.t("detail.viz.room"), v: room });
     return segs;
   }
 
@@ -90,11 +91,11 @@ export class EntityViz {
     const inRack = e.placement_mode === "rack" || e.placement_mode === "side" || e.placement_mode === "wall";
     if (inRack && e.rack_id) { rack = store.get("racks", e.rack_id); if (rack) dc = rack.datacenter_id && store.get("datacenters", rack.datacenter_id); }
     else if (e.dim_mode === "free" && e.dc_id) { dc = store.get("datacenters", e.dc_id); }
-    else if (e.placement_mode === "floor") return `<span class="viz-loc"><span class="viz-loc-seg" title="Étage">${I.stairs}<span class="viz-loc-v">${Html.escape(store.siteLabel(e.location || "") || "—")}${e.floor != null && String(e.floor) !== "" ? " · " + Html.escape(String(e.floor)) : ""}</span></span></span>`;
+    else if (e.placement_mode === "floor") return `<span class="viz-loc"><span class="viz-loc-seg" title="${Html.escape(I18n.t("detail.viz.floor"))}">${I.stairs}<span class="viz-loc-v">${Html.escape(store.siteLabel(e.location || "") || "—")}${e.floor != null && String(e.floor) !== "" ? " · " + Html.escape(String(e.floor)) : ""}</span></span></span>`;
     const segs = EntityViz.dcSegs(store, dc);
-    if (rack) segs.push({ ic: I.rack, k: "Rack", v: rack.name || "(baie)", mono: true });
+    if (rack) segs.push({ ic: I.rack, k: I18n.t("detail.viz.rack"), v: rack.name || I18n.t("detail.viz.rackFallback"), mono: true });
     const u = EntityViz.uRange(e);
-    if (u) segs.push({ ic: I.u, k: "U", v: u, mono: true });
+    if (u) segs.push({ ic: I.u, k: I18n.t("detail.viz.u"), v: u, mono: true });
     return EntityViz.breadcrumb(segs);
   }
 
@@ -104,9 +105,9 @@ export class EntityViz {
     if (inRack && e.rack_id) {
       const rack: any = store.get("racks", e.rack_id); if (!rack) return `<span class="viz-muted">—</span>`;
       const u = EntityViz.uRange(e);
-      return `<span class="viz-loc-short">${I.rack}<span>${Html.escape(rack.name || "(baie)")}</span>${u ? `<span class="viz-dot">·</span><span>U${Html.escape(u)}</span>` : ""}</span>`;
+      return `<span class="viz-loc-short">${I.rack}<span>${Html.escape(rack.name || I18n.t("detail.viz.rackFallback"))}</span>${u ? `<span class="viz-dot">·</span><span>U${Html.escape(u)}</span>` : ""}</span>`;
     }
-    if (e.dim_mode === "free" && e.dc_id) { const dc: any = store.get("datacenters", e.dc_id); if (dc) return `<span class="viz-loc-short">${I.door}<span>${Html.escape(dc.room || dc.name || "(salle)")}</span></span>`; }
+    if (e.dim_mode === "free" && e.dc_id) { const dc: any = store.get("datacenters", e.dc_id); if (dc) return `<span class="viz-loc-short">${I.door}<span>${Html.escape(dc.room || dc.name || I18n.t("detail.viz.roomFallback"))}</span></span>`; }
     return `<span class="viz-muted">—</span>`;
   }
 
@@ -114,7 +115,7 @@ export class EntityViz {
   static rackLocation(store: Store, r: any): string {
     const dc: any = r.datacenter_id && store.get("datacenters", r.datacenter_id);
     if (dc) return EntityViz.breadcrumb(EntityViz.dcSegs(store, dc));
-    if (r.room) return `<span class="viz-loc"><span class="viz-loc-seg" title="Salle">${I.door}<span class="viz-loc-v">${Html.escape(r.room)}</span></span></span>`;
-    return `<span class="viz-muted">— pool —</span>`;
+    if (r.room) return `<span class="viz-loc"><span class="viz-loc-seg" title="${Html.escape(I18n.t("detail.viz.room"))}">${I.door}<span class="viz-loc-v">${Html.escape(r.room)}</span></span></span>`;
+    return `<span class="viz-muted">${Html.escape(I18n.t("detail.viz.pool"))}</span>`;
   }
 }

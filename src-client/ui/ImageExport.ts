@@ -1,6 +1,7 @@
 import { Dialog } from "./Dialog";
 import { Notify } from "./Notify";
 import { FormControls } from "./FormControls";
+import { I18n } from "../i18n/I18n";
 
 export interface ExportOptions { format: "jpeg" | "svg"; scope: "view" | "all"; width: number; height: number; }
 
@@ -46,15 +47,15 @@ export class ImageExport {
       const s = Math.min(outW / srcW, outH / srcH), dw = srcW * s, dh = srcH * s;
       ctx.drawImage(img, (outW - dw) / 2, (outH - dh) / 2, dw, dh);
       URL.revokeObjectURL(url);
-      c.toBlob((b) => { if (b) { ImageExport.download(filename, b); Notify.toast("Export JPEG généré (" + outW + "×" + outH + ")"); } else Notify.toast("Échec de l'export JPEG", "err"); }, "image/jpeg", 0.92);
+      c.toBlob((b) => { if (b) { ImageExport.download(filename, b); Notify.toast(I18n.t("ui.export.jpegDone", { w: outW, h: outH })); } else Notify.toast(I18n.t("ui.export.jpegFailed"), "err"); }, "image/jpeg", 0.92);
     };
-    img.onerror = () => { URL.revokeObjectURL(url); Notify.toast("Échec de l'export JPEG", "err"); };
+    img.onerror = () => { URL.revokeObjectURL(url); Notify.toast(I18n.t("ui.export.jpegFailed"), "err"); };
     img.src = url;
   }
 
   /** SVG → téléchargement direct ; JPEG → rasterisation. `nameFn(ext)` produit le nom. */
   static run(opts: ExportOptions, svgStr: string, w: number, h: number, nameFn: (ext: string) => string): void {
-    if (opts.format === "svg") { ImageExport.download(nameFn("svg"), new Blob([svgStr], { type: "image/svg+xml" })); Notify.toast("Export SVG généré"); return; }
+    if (opts.format === "svg") { ImageExport.download(nameFn("svg"), new Blob([svgStr], { type: "image/svg+xml" })); Notify.toast(I18n.t("ui.export.svgDone")); return; }
     const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg-2").trim() || "#111";
     ImageExport.svgToJpeg(svgStr, w, h, Math.max(16, opts.width | 0), Math.max(16, opts.height | 0), bg, nameFn("jpg"));
   }
@@ -63,22 +64,22 @@ export class ImageExport {
       Granularité ×1 → ×16 (curseur). `baseW × baseH` = résolution ×1 ; `maxDim` = limite GPU (px/côté). */
   static async scaleDialog(baseW: number, baseH: number, maxDim: number): Promise<number | null> {
     const res: any = await Dialog.custom({
-      title: "Exporter (JPEG)", confirmLabel: "Exporter",
+      title: I18n.t("ui.export.scaleTitle"), confirmLabel: I18n.t("ui.export.exportBtn"),
       build: (root) => {
         const hint = document.createElement("div"); hint.className = "form-hint";
-        hint.textContent = "Exporte la VUE ACTUELLE, rendue à une résolution multipliée. ×1 = exactement ce qui est affiché ; au-delà = plus de détails (anti-crénelage).";
+        hint.textContent = I18n.t("ui.export.scaleHint");
         root.appendChild(hint);
         const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:10px;margin:8px 0";
-        const lab = document.createElement("span"); lab.style.cssText = "font-size:12px;color:var(--fg-dim)"; lab.textContent = "Échelle";
+        const lab = document.createElement("span"); lab.style.cssText = "font-size:12px;color:var(--fg-dim)"; lab.textContent = I18n.t("ui.export.scaleLabel");
         const sl = document.createElement("input"); sl.type = "range"; sl.min = "1"; sl.max = "16"; sl.step = "1"; sl.value = "2"; sl.style.cssText = "flex:1;accent-color:var(--accent);cursor:pointer";
         const val = document.createElement("span"); val.style.cssText = "font-family:var(--mono);color:var(--accent);min-width:30px;text-align:right";
         row.append(lab, sl, val); root.appendChild(row);
         const info = document.createElement("div"); info.className = "form-hint";
-        const upd = () => { const n = parseInt(sl.value, 10) || 1; val.textContent = "×" + n; const w = baseW * n, h = baseH * n; const over = w > maxDim || h > maxDim; info.innerHTML = "Résolution exportée : <b>" + w + " × " + h + "</b> px" + (over ? ' <span style="color:var(--err)">⚠ dépasse la limite GPU (' + maxDim + ' px)</span>' : ""); };
+        const upd = () => { const n = parseInt(sl.value, 10) || 1; val.textContent = "×" + n; const w = baseW * n, h = baseH * n; const over = w > maxDim || h > maxDim; info.innerHTML = I18n.t("ui.export.resInfo", { w, h }) + (over ? ' <span style="color:var(--err)">' + I18n.t("ui.export.gpuWarn", { max: maxDim }) + "</span>" : ""); };
         sl.addEventListener("input", upd); upd();
         root.appendChild(info);
         return {
-          validate: () => { const n = parseInt(sl.value, 10) || 1; if (baseW * n > maxDim || baseH * n > maxDim) return "Résolution trop grande (limite GPU " + maxDim + " px/côté) — réduisez l'échelle."; return true as const; },
+          validate: () => { const n = parseInt(sl.value, 10) || 1; if (baseW * n > maxDim || baseH * n > maxDim) return I18n.t("ui.export.scaleTooLarge", { max: maxDim }); return true as const; },
           collect: () => ({ scale: parseInt(sl.value, 10) || 1 }),
         };
       },
@@ -89,15 +90,15 @@ export class ImageExport {
   /** Dialogue d'export : format (JPEG/SVG), portée optionnelle, résolution JPEG. `jpegOnly` masque l'option SVG (3D). */
   static dialog(allowScope: boolean, jpegOnly = false): Promise<ExportOptions | null> {
     return Dialog.custom({
-      title: "Exporter", confirmLabel: "Exporter",
+      title: I18n.t("ui.export.dialogTitle"), confirmLabel: I18n.t("ui.export.exportBtn"),
       build: (root) => {
-        const fmt = FormControls.select([{ value: "jpeg", label: "JPEG (image)" }, { value: "svg", label: "SVG (vectoriel)" }], "jpeg");
-        if (!jpegOnly) root.appendChild(FormControls.fieldRow("Format", fmt));   // 3D : JPEG uniquement (pas de SVG)
+        const fmt = FormControls.select([{ value: "jpeg", label: I18n.t("ui.export.fmtJpeg") }, { value: "svg", label: I18n.t("ui.export.fmtSvg") }], "jpeg");
+        if (!jpegOnly) root.appendChild(FormControls.fieldRow(I18n.t("ui.export.fieldFormat"), fmt));   // 3D : JPEG uniquement (pas de SVG)
         let scope: HTMLSelectElement | null = null;
-        if (allowScope) { scope = FormControls.select([{ value: "view", label: "Vue actuelle (ce qui est affiché)" }, { value: "all", label: "Tout le contenu" }], "view"); root.appendChild(FormControls.fieldRow("Portée", scope)); }
+        if (allowScope) { scope = FormControls.select([{ value: "view", label: I18n.t("ui.export.scopeView") }, { value: "all", label: I18n.t("ui.export.scopeAll") }], "view"); root.appendChild(FormControls.fieldRow(I18n.t("ui.export.fieldScope"), scope)); }
         const wI = FormControls.number(1920, { min: 16, step: 1 }), hI = FormControls.number(1080, { min: 16, step: 1 });
         const resRow = document.createElement("div"); resRow.className = "form-row";
-        resRow.appendChild(FormControls.fieldRow("Largeur (px)", wI)); resRow.appendChild(FormControls.fieldRow("Hauteur (px)", hI));
+        resRow.appendChild(FormControls.fieldRow(I18n.t("ui.export.fieldWidth"), wI)); resRow.appendChild(FormControls.fieldRow(I18n.t("ui.export.fieldHeight"), hI));
         const resField = document.createElement("div"); resField.appendChild(resRow);
         const presets = document.createElement("div"); presets.className = "form-hint";
         ([["1920×1080", 1920, 1080], ["2560×1440", 2560, 1440], ["3840×2160 (4K)", 3840, 2160], ["1280×720", 1280, 720]] as [string, number, number][]).forEach(([lbl, w, h]) => {
@@ -108,7 +109,7 @@ export class ImageExport {
         const syncFmt = () => { resField.style.display = (fmt.value === "jpeg") ? "" : "none"; };
         fmt.addEventListener("change", syncFmt); syncFmt();
         return {
-          validate: () => { if (fmt.value === "jpeg") { const w = parseInt(wI.value, 10), h = parseInt(hI.value, 10); if (!(w > 0) || !(h > 0)) return "Résolution invalide."; if (w * h > 50e6) return "Résolution trop grande (max ~50 Mpx)."; } return true; },
+          validate: () => { if (fmt.value === "jpeg") { const w = parseInt(wI.value, 10), h = parseInt(hI.value, 10); if (!(w > 0) || !(h > 0)) return I18n.t("ui.export.resInvalid"); if (w * h > 50e6) return I18n.t("ui.export.resTooBig"); } return true; },
           collect: () => ({ format: fmt.value, scope: scope ? scope.value : "view", width: parseInt(wI.value, 10) || 1920, height: parseInt(hI.value, 10) || 1080 }),
         };
       },

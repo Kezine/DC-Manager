@@ -1,6 +1,7 @@
 import type { Store } from "../../store";
 import { Icons } from "../../ui/Icons";
 import { Dom } from "../../ui/Dom";
+import { I18n } from "../../i18n/I18n";
 import { Notify } from "../../ui/Notify";
 import { ContextMenu } from "../../ui/ContextMenu";
 import type { CtxSection } from "../../ui/ContextMenu";
@@ -155,7 +156,7 @@ export abstract class DcBase {
       // (rendu inchangé). En RESPONSIVE : `.dc-row.show-side` la transforme en MODALE centrée (backdrop + bouton
       // fermer), ouverte par l'icône « réglages 3D » de l'overlay — sans empiéter sur le rendu de la vue.
       const sideModal = document.createElement("div"); sideModal.className = "dc-side-modal";
-      const closeBtn = document.createElement("button"); closeBtn.type = "button"; closeBtn.className = "btn btn-ghost btn-sm dc-side-close"; closeBtn.innerHTML = Icons.CLOSE; closeBtn.title = "Fermer";
+      const closeBtn = document.createElement("button"); closeBtn.type = "button"; closeBtn.className = "btn btn-ghost btn-sm dc-side-close"; closeBtn.innerHTML = Icons.CLOSE; closeBtn.title = I18n.t("ui.action.close");
       closeBtn.onclick = () => this.rowEl && this.rowEl.classList.remove("show-side");
       sideModal.append(closeBtn, this.sideEl);
       const backdrop = document.createElement("div"); backdrop.className = "dc-side-backdrop";
@@ -439,12 +440,12 @@ export abstract class DcBase {
     if (this.view === "floor") {
       const dc = this.current(); this.renderSide(dc);
       const ft = this.floorTargetResolve();
-      if (!ft) { showControls(false); this.clearStage(); const p = document.createElement("p"); p.style.cssText = "padding:24px;color:var(--fg-dim)"; p.textContent = "Aucun étage. Créez une salle (avec bâtiment + étage) pour afficher son plan."; this.stage.appendChild(p); return; }
+      if (!ft) { showControls(false); this.clearStage(); const p = document.createElement("p"); p.style.cssText = "padding:24px;color:var(--fg-dim)"; p.textContent = I18n.t("dc.base.noFloor"); this.stage.appendChild(p); return; }
       showControls(true); this.renderFloor(ft); return;
     }
     const dc = this.current();
     this.renderSide(dc);
-    if (!dc) { showControls(false); this.clearStage(); const p = document.createElement("p"); p.style.cssText = "padding:24px;color:var(--fg-dim)"; p.textContent = "Aucune salle (datacenter). Créez-en une pour la visualiser en 3D."; this.stage.appendChild(p); return; }
+    if (!dc) { showControls(false); this.clearStage(); const p = document.createElement("p"); p.style.cssText = "padding:24px;color:var(--fg-dim)"; p.textContent = I18n.t("dc.base.noRoom"); this.stage.appendChild(p); return; }
     showControls(true);
     if (this.view === "top") this.renderTop(dc);
     else {   // vue 3D : moteur WebGL (unique moteur 3D)
@@ -550,7 +551,7 @@ export abstract class DcBase {
     const oobs = this.store.oobWaypoints()
       .filter((wp: any) => shown.has((wp.location || "") + "" + String(wp.floor || "")))
       .map((wp: any) => { const w = this.floor.oobWorld(m, wp); return { id: wp.id, x: w.x, y: w.y, z: w.z, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(String(wp.floor || ""))) }; });
-    const levels = m.levels.map((lv: number, i: number) => ({ label: "Étage " + lv, x: -m.gap * 0.6, y: 0, z: m.levelZs ? m.levelZs[i] : i * (m.stackH + m.gap) }));
+    const levels = m.levels.map((lv: number, i: number) => ({ label: I18n.t("lists.ph.floorLabel", { n: lv }), x: -m.gap * 0.6, y: 0, z: m.levelZs ? m.levelZs[i] : i * (m.stackH + m.gap) }));
     const buildings = m.buildings.map((b: any, i: number) => ({ label: this.store.siteLabel(b.loc), x: (b.x0 + b.x1) / 2, y: -m.gap * 0.5, z: m.topZ / 2, sepX: i > 0 ? b.x0 - m.gap : null }));
     return { planes, oobs, levels, buildings, maxD: m.maxD, topZ: m.topZ };
   }
@@ -638,7 +639,7 @@ export abstract class DcBase {
     if (Notify.isBusy()) {
       doMount();   // un appelant gère déjà l'overlay (ex. reload SSE : il l'affiche et l'efface lui-même) → ne pas doubler
     } else if (!this._three || this.build3DIsHeavy(dc)) {
-      Notify.busy("Rendu 3D…");
+      Notify.busy(I18n.t("dc.base.rendering3d"));
       requestAnimationFrame(() => requestAnimationFrame(() => { doMount().finally(() => Notify.idle()); }));
     } else {
       doMount();

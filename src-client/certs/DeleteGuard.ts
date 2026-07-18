@@ -15,6 +15,7 @@
    ne peut pas importer un module serveur, et l'inverse non plus ; le serveur reste
    seul juge (l'UI ne fait qu'anticiper sa réponse pour choisir la cérémonie).
    ============================================================================= */
+import { I18n } from "../i18n/I18n";
 
 /** Ce dont le garde a besoin pour statuer (sous-ensemble d'un CertificateListItem). */
 export interface DeletableCert { label?: string | null; revoked_at?: string | null; not_after?: string | null; }
@@ -27,8 +28,11 @@ export type DeleteCeremony =
 
 export class DeleteGuard {
   /** Phrase à recopier pour un lot. Volontairement une PHRASE (et non « OUI ») : assez longue
-      pour qu'on ne la tape pas par réflexe. */
-  static readonly PHRASE = "Oui je supprime";
+      pour qu'on ne la tape pas par réflexe. GETTER (et non constante) : le texte est LOCALISÉ,
+      donc résolu via `I18n.t` À L'APPEL — jamais au chargement du module (avant `I18n.init()`).
+      UNE SEULE clé sert d'invite affichée ET de référence de comparaison : `ceremony()` la capture
+      dans `expected`, ce que l'UI affiche et compare — elles ne peuvent donc JAMAIS diverger. */
+  static get PHRASE(): string { return I18n.t("certs.guard.phrase"); }
 
   /** Ni révoqué, ni expiré. `not_after` absent/illisible → ACTIF (on protège plutôt que de
       supposer l'expiration). Miroir EXACT de `CertsDb.isActive` côté serveur. */
