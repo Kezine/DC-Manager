@@ -638,6 +638,8 @@
   .form-field input[type="number"],
   .form-field input[type="password"],
   .form-field input[type="date"],
+  .form-field input[type="datetime-local"],
+  .form-field input[type="time"],
   .form-field textarea,
   .form-field select {
     width: 100%;
@@ -655,13 +657,22 @@
   .form-field select:focus { border-color: var(--accent); }
   /* v104 â€” sÃ©lecteur de date (composant repris de l'app Compta) : indicateur natif masquÃ© (on fournit nos
      boutons), color-scheme suivant le thÃ¨me pour que le calendrier natif soit lisible. */
-  input[type="date"] { color-scheme: dark; }
-  [data-theme="light"] input[type="date"] { color-scheme: light; }
-  input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
+  /* color-scheme + masquage de l'indicateur natif : ÉTENDUS aux variantes date-heure et heure (FormControls.date,
+     mode « date-time » / « time ») — sinon le calendrier/horloge natif restait illisible en thème sombre et
+     l'indicateur natif s'ajoutait EN DOUBLE de nos boutons maison. */
+  input[type="date"], input[type="datetime-local"], input[type="time"] { color-scheme: dark; }
+  [data-theme="light"] input[type="date"],
+  [data-theme="light"] input[type="datetime-local"],
+  [data-theme="light"] input[type="time"] { color-scheme: light; }
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator { display: none; }
   .date-input-wrap { display: flex; flex-direction: column; gap: 4px; }
   /* v106 â€” input + contrÃ´les TOUJOURS sur la mÃªme ligne (pas de retour Ã  la ligne) ; l'input rÃ©trÃ©cit au besoin. */
   .date-input-row { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
-  .date-input-row > input[type="date"] { flex: 1 1 auto; min-width: 0; height: 34px; box-sizing: border-box; }
+  /* Sélecteur sur TOUS les types d'input (date/datetime-local/time) : la rangée ne contient qu'un input, le reste
+     étant des boutons `.date-ctrl-btn` (ciblés à part) — un datetime-local, plus large, se comprime donc bien. */
+  .date-input-row > input { flex: 1 1 auto; min-width: 0; height: 34px; box-sizing: border-box; }
   .date-ctrl-btn { flex: 0 0 auto; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }
   .date-ctrl-btn.date-ctrl-icon { width: 34px; }
   .date-ctrl-btn.date-ctrl-text { padding: 0 10px; font-size: 10px; letter-spacing: 0.06em; }
