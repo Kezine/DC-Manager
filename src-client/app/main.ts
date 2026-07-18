@@ -342,11 +342,15 @@ async function boot(): Promise<void> {
       onShow: () => {
         if (!view) {
           const reRender = () => view!.render();
+          // « Localiser en 3D » par ligne : pour les ÉQUIPEMENTS, le bouton n'est proposé que si l'équipement est
+          // rattaché à une salle (même prédicat que locateEquipment : `store.equipmentDcId`) — un équipement
+          // d'inventaire pur / posé sur plan d'étage / dans une baie non placée n'aurait qu'un toast d'erreur.
+          const canLocate = opts.locate === "equipment" ? (id: string) => !!store.equipmentDcId(id) : undefined;
           view = new ListView(store, container, {
             ...cfg,
             actions: VIEWER
-              ? { view: true, locate: !!opts.locate }   // viewer : consultation + localisation seulement (pas d'édition/clone/suppression)
-              : { ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }), ...(opts.locate ? { locate: true } : {}), ...(opts.manage ? { manage: true } : {}) },
+              ? { view: true, locate: !!opts.locate, canLocate }   // viewer : consultation + localisation seulement (pas d'édition/clone/suppression)
+              : { ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }), ...(opts.locate ? { locate: true, canLocate } : {}), ...(opts.manage ? { manage: true } : {}) },
             onAction: async (act, id) => {
               if (act === "locate" && opts.locate) { shell.switchView("datacenter"); dcView.locate(opts.locate, id); dcView.setReturnAction(() => shell.switchView(name)); return; }
               if (act === "manage" && cfg.collection === "racks") { Forms.rackContent(store, formHost, id, reRender); return; }   // ▦ Contenu : éditeur de montage des U

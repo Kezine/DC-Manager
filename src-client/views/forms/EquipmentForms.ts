@@ -158,7 +158,10 @@ export class EquipmentForms extends FormBase {
 
     // Modifier → formulaire d'édition (remplace la fiche par la modale d'édition)
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); actions.appendChild(locBtn); }
+    // « Localiser en 3D » seulement si l'équipement est RATTACHÉ à une salle (même prédicat que locateEquipment :
+    // `store.equipmentDcId`) — un équipement d'inventaire pur, posé sur plan d'étage ou dans une baie non placée
+    // n'aurait qu'un toast d'erreur (parité avec le listing, cf. ListActions.canLocate).
+    if (host.locate && store.equipmentDcId(eq.id)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) {   // viewer : pas de bouton « Modifier »
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = I18n.t("lists.chrome.rowEdit");
       editBtn.onclick = () => this.equipment(store, host, eq.id, onChanged);

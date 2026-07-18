@@ -22,7 +22,14 @@ export interface ListColumn {
       essentielle pour une collection, le mode compact retombe sur les 3 premières colonnes. */
   essential?: boolean;
 }
-export interface ListActions { view?: boolean; edit?: boolean; clone?: boolean; del?: boolean; locate?: boolean; download?: boolean; manage?: boolean; }
+export interface ListActions {
+  view?: boolean; edit?: boolean; clone?: boolean; del?: boolean; locate?: boolean; download?: boolean; manage?: boolean;
+  /** Raffinement PAR LIGNE de `locate` : le bouton « Localiser en 3D » n'est proposé que si ce prédicat accepte
+      l'enregistrement (ex. équipement : localisable seulement s'il est rattaché à une salle — un équipement
+      d'inventaire pur, posé sur plan d'étage ou dans une baie non placée n'aurait qu'un toast d'erreur). Absent
+      → `locate` vaut pour toutes les lignes (comportement historique). */
+  canLocate?: (id: string) => boolean;
+}
 export interface ListOptions {
   collection: string;
   columns: ListColumn[];
@@ -231,11 +238,16 @@ export class ListView {
     if (a.view) html += IconButton.html({ icon: Icons.INFO, label: I18n.t("lists.chrome.rowView"), act: "view" });
     if (a.manage) html += IconButton.html({ icon: Icons.RACK_CONTENT, label: I18n.t("lists.chrome.rowManage"), act: "manage" });   // éditeur de contenu de baie (inline, à côté de Détails)
     if (a.edit) html += IconButton.html({ icon: Icons.EDIT, label: I18n.t("lists.chrome.rowEdit"), act: "edit" });
-    if (a.locate || a.clone || a.del || a.download) {
+    if (this._rowCanLocate(id) || a.clone || a.del || a.download) {
       const moreLbl = I18n.t("lists.chrome.rowMore");
       html += `<button type="button" class="btn btn-ghost btn-sm icon-action row-overflow" data-act="__more__" title="${moreLbl}" aria-label="${moreLbl}" aria-haspopup="menu" aria-expanded="false">${Icons.MORE}</button>`;
     }
     return html + "</span>";
+  }
+
+  /** `locate` effectif pour UNE ligne : action activée ET prédicat par ligne (s'il existe) satisfait. */
+  private _rowCanLocate(id: string): boolean {
+    return !!this.actions.locate && (!this.actions.canLocate || this.actions.canLocate(id));
   }
 
   /** Ouvre le menu « plus d'actions » (overflow) d'une ligne : actions secondaires actives, déléguées à onAction. */
@@ -244,7 +256,7 @@ export class ListView {
     const items: { label: string; icon?: string; danger?: boolean; onClick: () => void }[] = [];
     // Icônes du registre PARTAGÉ : les emoji d'origine (📍 ⬇ ⧉) étaient des bitmaps COULEUR — ils
     // pixellisaient au zoom et ignoraient `currentColor`, donc la teinte « danger » du survol.
-    if (a.locate) items.push({ label: I18n.t("lists.chrome.rowLocate"), icon: Icons.LOCATE, onClick: () => this.onAction && this.onAction("locate", id) });
+    if (this._rowCanLocate(id)) items.push({ label: I18n.t("lists.chrome.rowLocate"), icon: Icons.LOCATE, onClick: () => this.onAction && this.onAction("locate", id) });
     if (a.download) items.push({ label: I18n.t("lists.chrome.rowDownload"), icon: Icons.EXPORT, onClick: () => this.onAction && this.onAction("download", id) });
     if (a.clone) items.push({ label: I18n.t("lists.chrome.rowClone"), icon: Icons.CLONE, onClick: () => this.onAction && this.onAction("clone", id) });
     if (a.del) items.push({ label: I18n.t("ui.action.delete"), icon: Icons.DELETE, danger: true, onClick: () => this.onAction && this.onAction("del", id) });
