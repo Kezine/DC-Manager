@@ -450,6 +450,7 @@ export class CertsAdminView {
     }
     wrap.appendChild(this.buildListingToolbar());
     this.bodyEl = document.createElement("div");
+    this.bodyEl.className = "list-body";   // mêmes règles CSS que les listings ListView : colonnes CENTRÉES (th + td)
     wrap.appendChild(this.bodyEl);
     return wrap;
   }
@@ -524,7 +525,7 @@ export class CertsAdminView {
       this.selectHeaderCell(),
       this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label", st), this.sortableTh(I18n.t("lists.col.type"), "kind", st), this.plainTh(I18n.t("certs.admin.listing.colSubject")),
       this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")),
-      this.sortableTh(I18n.t("certs.admin.listing.colDerived"), "children_total", st), this.plainTh(I18n.t("certs.admin.listing.colAlert")), this.plainTh(""),
+      this.sortableTh(I18n.t("certs.admin.listing.colDerived"), "children_total", st), this.plainTh(I18n.t("certs.admin.listing.colAlert")), this.plainTh(I18n.t("lists.chrome.actions")),
     );
     thead.appendChild(tr);
     const tbody = document.createElement("tbody");
@@ -551,7 +552,7 @@ export class CertsAdminView {
     tr.appendChild(this.htmlCell(this.alertCell(item)));
     // Actions : opérations de clé si déverrouillé + « Déployer la confiance… » / « Lister les certificats »
     // (consultation, disponibles MÊME verrouillé — aucune clé requise).
-    const actions = document.createElement("td");
+    const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + centrage .list-body (parité ListView)
     this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
     // Aide au déploiement : uniquement les AUTORITÉS (racine X.509 ou CA SSH) — pas les paires simples ni les
     // dérivés. Consultation pure (procédure d'installation dans les magasins de confiance des clients).
@@ -581,7 +582,7 @@ export class CertsAdminView {
       this.selectHeaderCell(),
       this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label", st), this.sortableTh(I18n.t("lists.col.type"), "kind", st),
       this.sortableTh(I18n.t("certs.admin.listing.colIssuer"), "parent", st), this.plainTh(I18n.t("certs.admin.listing.colSubject")),
-      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")), this.plainTh(""),
+      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")), this.plainTh(I18n.t("lists.chrome.actions")),
     );
     thead.appendChild(tr);
     const tbody = document.createElement("tbody");
@@ -610,7 +611,7 @@ export class CertsAdminView {
     tr.appendChild(this.subjectCell(item.subject));
     tr.appendChild(this.htmlCell(this.expiryCell(item)));
     tr.appendChild(this.htmlCell(item.revoked_at ? this.pill(I18n.t("certs.admin.listing.revoked"), "err") : CertsAdminView.MUTED));
-    const actions = document.createElement("td");
+    const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + centrage .list-body (parité ListView)
     this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
     tr.appendChild(actions);
     return tr;

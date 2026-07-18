@@ -190,6 +190,7 @@ export class InterventionsAdminView {
     this.container.appendChild(this.buildToolbar());
     this.container.appendChild(this.buildFilterToolbar());
     this.bodyEl = document.createElement("div");
+    this.bodyEl.className = "list-body";   // mêmes règles CSS que les listings ListView : colonnes CENTRÉES (th + td)
     this.container.appendChild(this.bodyEl);
     this.paintBody();
   }
@@ -350,7 +351,8 @@ export class InterventionsAdminView {
       in_progress) · Clore (in_progress → closed) · Supprimer (danger). Les transitions rapides relisent le
       corps complet (GET) puis PUT le status changé (le serveur re-estampille updated_*). */
   private actionsCell(item: InterventionRecord): HTMLElement {
-    const td = document.createElement("td"); td.style.cssText = "display:flex;gap:4px;flex-wrap:wrap";
+    // display:flex ignore text-align → justify-content:center pour suivre le centrage .list-body des colonnes.
+    const td = document.createElement("td"); td.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;justify-content:center";
     td.appendChild(this.iconAction(Icons.INFO, I18n.t("interventions.rowAction.details"), () => this.detailModal(item)));
     td.appendChild(this.iconAction(Icons.EDIT, I18n.t("interventions.rowAction.edit"), () => this.interventionModal(item, item.kind)));
     if (item.status === "declared" || item.status === "planned") {
