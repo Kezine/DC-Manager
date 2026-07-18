@@ -22,5 +22,8 @@ import { equipment } from "./en/equipment";
 import { detail } from "./en/detail";
 import { face } from "./en/face";
 import { dc } from "./en/dc";
+import { vm } from "./en/vm";
+import { notify } from "./en/notify";
+import { certs } from "./en/certs";
 
-export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc } as const;
+export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, notify, certs } as const;

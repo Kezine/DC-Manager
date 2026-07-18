@@ -10,6 +10,7 @@ import type { VmNetPair } from "../../core/VmNetMapping";
 import { VmSyncClient, VmSyncError } from "./VmSyncClient";
 import type { VmProviderStatus } from "./VmSyncClient";
 import type { FormHost } from "./shared";
+import { I18n } from "../../i18n/I18n";
 
 /** UI de la table de mapping « (bridge, vlan_tag) → réseau logique » des vNIC (feature VM AMOVIBLE).
 
@@ -32,8 +33,8 @@ export class VmForms {
     // est libellée « Réseaux logiques » dans l'app : data ET power ; on n'exclut donc rien a priori.)
     const networks = store.all("networks").slice().sort((a: any, b: any) => (a.label || "").localeCompare(b.label || ""));
     const netColor = (id: string): string | null => { const n: any = id && store.get("networks", id); return n ? (n.color || null) : null; };
-    const netOptions = [{ value: "", label: "— non raccordé —" }].concat(
-      networks.map((n: any) => ({ value: n.id, label: n.label || "(réseau)" })));
+    const netOptions = [{ value: "", label: I18n.t("vm.netMap.notConnected") }].concat(
+      networks.map((n: any) => ({ value: n.id, label: n.label || I18n.t("lists.ph.network") })));
 
     // ÉTAT LOCAL = source de vérité des lignes (les `<input>` y réécrivent en direct via `oninput`) :
     // reconstruire la table (ajout / suppression) ne perd donc jamais une saisie en cours.
@@ -42,7 +43,7 @@ export class VmForms {
 
     const root = document.createElement("div");
     const intro = document.createElement("div"); intro.className = "form-hint";
-    intro.textContent = "Associez chaque couple pont/VLAN (bridge + tag) d'une vNIC à un réseau logique. Un couple non mappé reste « non raccordé ». La synchronisation ne modifie jamais cette table.";
+    intro.textContent = I18n.t("vm.netMap.intro");
     root.appendChild(intro);
 
     const tableWrap = document.createElement("div");
@@ -55,19 +56,19 @@ export class VmForms {
       unmappedWrap.innerHTML = "";
       const pairs: VmNetPair[] = VmNetMapping.unmappedPairs(currentEntries(), store.all("vms"));
       const title = document.createElement("div"); title.className = "section-divider";
-      title.textContent = "Couples détectés non mappés (" + pairs.length + ")";
+      title.textContent = I18n.t("vm.netMap.unmappedTitle", { count: pairs.length });
       unmappedWrap.appendChild(title);
       if (!pairs.length) {
         const none = document.createElement("div"); none.className = "form-hint";
-        none.textContent = "Tous les couples pont/VLAN présents dans les vNIC sont mappés.";
+        none.textContent = I18n.t("vm.netMap.allMapped");
         unmappedWrap.appendChild(none);
         return;
       }
       const list = document.createElement("div"); list.style.cssText = "display:flex;flex-wrap:wrap;gap:6px";
       pairs.forEach((p) => {
         const chip = document.createElement("button"); chip.type = "button"; chip.className = "btn btn-ghost btn-sm";
-        chip.title = "Ajouter une ligne pré-remplie pour ce couple";
-        chip.innerHTML = "+ " + Html.escape(p.bridge) + (p.vlan_tag === null ? " · <em>sans tag</em>" : " · tag " + p.vlan_tag);
+        chip.title = I18n.t("vm.netMap.chipAddTitle");
+        chip.innerHTML = "+ " + Html.escape(p.bridge) + (p.vlan_tag === null ? " · <em>" + Html.escape(I18n.t("vm.netMap.noTag")) + "</em>" : " · " + Html.escape(I18n.t("vm.netMap.tag", { tag: p.vlan_tag })));
         chip.onclick = () => addRow(p.bridge, p.vlan_tag === null ? "" : String(p.vlan_tag), "", true);
         list.appendChild(chip);
       });
@@ -78,17 +79,17 @@ export class VmForms {
       tableWrap.innerHTML = "";
       if (!rows.length) {
         const empty = document.createElement("div"); empty.className = "form-hint"; empty.style.fontStyle = "italic";
-        empty.textContent = "Aucune correspondance. Ajoutez une ligne, ou mappez un couple détecté ci-dessous.";
+        empty.textContent = I18n.t("vm.netMap.tableEmpty");
         tableWrap.appendChild(empty);
       }
       rows.forEach((row, i) => {
         const line = document.createElement("div"); line.className = "form-row"; line.style.alignItems = "flex-end";
 
-        const bridgeI = FormControls.text(row.bridge, "ex. vmbr0");
+        const bridgeI = FormControls.text(row.bridge, I18n.t("vm.netMap.bridgePlaceholder"));
         bridgeI.oninput = () => { row.bridge = bridgeI.value; };
         bridgeI.onchange = () => renderUnmapped();
 
-        const tagI = FormControls.number(row.tag, { min: 0, step: 1, placeholder: "sans tag" });
+        const tagI = FormControls.number(row.tag, { min: 0, step: 1, placeholder: I18n.t("vm.netMap.noTag") });
         tagI.oninput = () => { row.tag = tagI.value; };
         tagI.onchange = () => renderUnmapped();
 
@@ -102,16 +103,16 @@ export class VmForms {
         netCell.append(dot, netSel);
 
         const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm";
-        del.innerHTML = Icons.CLOSE; del.title = "Supprimer cette ligne";
+        del.innerHTML = Icons.CLOSE; del.title = I18n.t("vm.netMap.rowDelete");
         del.onclick = () => { rows.splice(i, 1); renderTable(); renderUnmapped(); };
         const delWrap = document.createElement("div"); delWrap.className = "form-field"; delWrap.style.flex = "0 0 auto";
         const spacer = document.createElement("label"); spacer.innerHTML = "&nbsp;";   // aligne le bouton sur le bas des champs
         delWrap.append(spacer, del);
 
         line.append(
-          FormControls.fieldRow("Pont (bridge)", bridgeI),
-          FormControls.fieldRow("Tag VLAN", tagI),
-          FormControls.fieldRow("Réseau logique", netCell),
+          FormControls.fieldRow(I18n.t("vm.netMap.colBridge"), bridgeI),
+          FormControls.fieldRow(I18n.t("vm.netMap.colTag"), tagI),
+          FormControls.fieldRow(I18n.t("vm.netMap.colNetwork"), netCell),
           delWrap,
         );
         tableWrap.appendChild(line);
@@ -126,19 +127,19 @@ export class VmForms {
 
     root.appendChild(tableWrap);
     const addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "btn btn-ghost btn-sm";
-    addBtn.textContent = "+ Ajouter une ligne"; addBtn.style.marginTop = "8px"; addBtn.onclick = () => addRow();
+    addBtn.textContent = I18n.t("vm.netMap.addRow"); addBtn.style.marginTop = "8px"; addBtn.onclick = () => addRow();
     root.appendChild(addBtn);
     if (!networks.length) {
       const warn = document.createElement("div"); warn.className = "form-hint"; warn.style.color = "var(--warn)"; warn.style.marginTop = "6px";
-      warn.textContent = "Aucun réseau logique défini : créez-en dans l'onglet « Réseaux » pour pouvoir raccorder les vNIC.";
+      warn.textContent = I18n.t("vm.netMap.noNetworksWarn");
       root.appendChild(warn);
     }
     root.appendChild(unmappedWrap);
     renderTable(); renderUnmapped();
 
     host.openModal({
-      title: "Réseaux virtuels",
-      subtitle: "Mapping bridge/tag → réseau logique",
+      title: I18n.t("vm.netMap.title"),
+      subtitle: I18n.t("vm.netMap.subtitle"),
       body: root,
       wide: true,
       onSave: async () => {
@@ -146,7 +147,7 @@ export class VmForms {
         store.meta[VmNetMapping.META_KEY] = normalized;   // même chemin que meta.graphFrames…
         await store.persistMeta();                        // …persistance (fichier ET API) + SSE méta pour les autres clients
         host.setDirty?.(true);
-        Notify.toast("Réseaux virtuels enregistrés");
+        Notify.toast(I18n.t("vm.netMap.saved"));
         onSaved?.();
         return true;
       },
@@ -163,37 +164,37 @@ export class VmForms {
       l'existant (cf. Store.update → `_applyPatch`), donc les champs source ET dérivés restent INTACTS. */
   static edit(store: Store, host: FormHost, id: string, onSaved?: () => void): void {
     const vm: any = store.get("vms", id);
-    if (!vm) { Notify.toast("VM introuvable", "err"); return; }
+    if (!vm) { Notify.toast(I18n.t("vm.edit.notFound"), "err"); return; }
     const root = document.createElement("div");
 
     // Bandeau explicite : SEULS les enrichissements locaux sont modifiables ici (l'hôte est dérivé par la synchro).
     const note = document.createElement("div"); note.className = "form-hint";
-    note.textContent = "Enrichissements locaux uniquement. Les autres champs (nom, type, statut, hôte, vNIC, IPs, tags…) sont gérés par la synchronisation et ne sont pas modifiables ici.";
+    note.textContent = I18n.t("vm.edit.localOnly");
     root.appendChild(note);
 
     // GROUPES : primaire (single) + secondaires (multi, recherche + pastilles) — PARITÉ STRICTE avec le
     // formulaire d'équipement (EquipmentForms.equipment) : mêmes options triées, même ChipsInput, même
     // invariant « primaire ∈ group_ids » garanti par construction du payload (groupIds inclut toujours le primaire).
     const groupsSorted = (): any[] => store.all("groups").slice().sort((a: any, b: any) => (a.label || "").localeCompare(b.label || ""));
-    const grpOpts = [{ value: "", label: "— aucun —" }].concat(groupsSorted().map((g: any) => ({ value: g.id, label: g.label || "(sans label)" })));
+    const grpOpts = [{ value: "", label: I18n.t("forms.opt.none") }].concat(groupsSorted().map((g: any) => ({ value: g.id, label: g.label || I18n.t("lists.ph.noLabel") })));
     const groupI = FormControls.select(grpOpts, vm.group_id || "");
-    root.appendChild(FormControls.fieldRow("Groupe primaire", groupI, "Gérés dans l'onglet Groupes."));
+    root.appendChild(FormControls.fieldRow(I18n.t("vm.edit.groupPrimary"), groupI, I18n.t("vm.edit.groupPrimaryHint")));
     const initSecondary: string[] = (Array.isArray(vm.group_ids) ? vm.group_ids : []).filter((gid: string) => gid !== (vm.group_id || null));
-    const groupItems = (): ChipItem[] => groupsSorted().filter((g: any) => g.id !== groupI.value).map((g: any) => ({ id: g.id, label: g.label || "(sans label)", color: g.color }));
+    const groupItems = (): ChipItem[] => groupsSorted().filter((g: any) => g.id !== groupI.value).map((g: any) => ({ id: g.id, label: g.label || I18n.t("lists.ph.noLabel"), color: g.color }));
     const secondaryGroups = ChipsInput.build({
-      items: groupItems, value: initSecondary, placeholder: "Ajouter un groupe secondaire…",
+      items: groupItems, value: initSecondary, placeholder: I18n.t("vm.edit.groupSecondaryPlaceholder"),
       getLimit: () => host.autocompleteLimit ? host.autocompleteLimit() : FieldFacet.MAX_RESULTS_DEFAULT,
     });
-    root.appendChild(FormControls.fieldRow("Groupes secondaires", secondaryGroups.element, "Appartenances additionnelles (recherche + pastilles)."));
+    root.appendChild(FormControls.fieldRow(I18n.t("vm.edit.groupSecondary"), secondaryGroups.element, I18n.t("vm.edit.groupSecondaryHint")));
     // choisir le primaire le retire des secondaires (un groupe ne peut être primaire ET secondaire).
     groupI.addEventListener("change", () => { secondaryGroups.setValue(secondaryGroups.getValue().filter((gid) => gid !== groupI.value)); secondaryGroups.refresh(); });
 
     // Notes : SEUL champ texte LOCAL conservé (la description locale a été retirée — les notes suffisent).
     const notesI = FormControls.textArea(vm.notes || "");
-    root.appendChild(FormControls.fieldRow("Notes", notesI, "Note libre d'enrichissement (jamais écrasée par la synchronisation)."));
+    root.appendChild(FormControls.fieldRow(I18n.t("vm.edit.notes"), notesI, I18n.t("vm.edit.notesHint")));
 
     host.openModal({
-      title: "Modifier la VM (champs locaux)",
+      title: I18n.t("vm.edit.title"),
       subtitle: Html.escape(vm.name || ""),
       body: root, wide: true,
       onSave: async () => {
@@ -208,8 +209,8 @@ export class VmForms {
           notes: notesI.value.trim(),
         };
         const ok = await store.update("vms", id, payload);
-        if (!ok) { Notify.toast("Enregistrement refusé (données invalides).", "err"); return false; }   // validation partagée → modale conservée
-        host.setDirty?.(true); Notify.toast("VM mise à jour"); onSaved?.(); return true;
+        if (!ok) { Notify.toast(I18n.t("vm.edit.saveRefused"), "err"); return false; }   // validation partagée → modale conservée
+        host.setDirty?.(true); Notify.toast(I18n.t("vm.edit.saved")); onSaved?.(); return true;
       },
     });
     setTimeout(() => groupI.focus(), 30);   // 1er champ éditable restant (l'hôte hébergeur n'est plus dans le formulaire)
@@ -229,13 +230,13 @@ export class VmForms {
       est appelé après une passe ABOUTIE (≥ 1 provider) — le sous-onglet Clusters s'en sert pour se
       rafraîchir, l'état du cluster vivant en mémoire serveur (sans push SSE). */
   static async sync(client: VmSyncClient, btn: HTMLButtonElement, onDone?: () => void): Promise<void> {
-    const originalLabel = btn.textContent || "Synchroniser";
+    const originalLabel = btn.textContent || I18n.t("vm.sync.syncLabel");
     btn.disabled = true;
-    btn.textContent = "Synchronisation…";
+    btn.textContent = I18n.t("vm.sync.syncing");
     try {
       const providers = await client.sync();
       if (!providers.length) {
-        Notify.toast("Aucun provider configuré pour ce document (vm-providers.json).");
+        Notify.toast(I18n.t("vm.common.noProvider"));
         return;
       }
       // Un toast PAR provider : succès = résumé des compteurs (message serveur) ; échec = message d'erreur.
@@ -243,7 +244,7 @@ export class VmForms {
       onDone?.();   // état de synchro/cluster mis à jour côté serveur → laisser l'appelant retirer (sous-onglet Clusters)
     } catch (e) {
       // 404 (document inconnu), 503 (config providers invalide + detail), panne réseau → toast d'erreur détaillé.
-      Notify.toast("Synchronisation impossible — " + VmForms.errText(e), "err");
+      Notify.toast(I18n.t("vm.sync.syncImpossible", { detail: VmForms.errText(e) }), "err");
     } finally {
       btn.disabled = false;
       btn.textContent = originalLabel;

@@ -13,7 +13,13 @@
    SEUILS D'ÉCHÉANCE (cadrage certs 2026-07-14 §5) : ok > 30 j · warn ≤ 30 j ·
    err ≤ 7 j OU expiré · « — » (none) sans date d'expiration. Les seuils sont des
    constantes nommées pour être ré-employés/testés sans les redécouvrir.
-   ============================================================================= */
+
+   LOCALISATION (lot B4) : la famille (kind) et le libellé d'échéance sont RENDUS
+   à l'utilisateur → résolus via `I18n.t` au POINT D'APPEL (pattern « table de
+   CLÉS » du lot B2a). KIND_LABELS ne stocke donc plus le texte français mais la
+   CLÉ i18n (`certs.kind.*`) ; `kindLabel`/`expiryLabel` la résolvent à l'appel.
+   Rien n'est évalué au chargement du module (aucun `I18n.t` avant `I18n.init()`). */
+import { I18n } from "../i18n/I18n";
 
 /** Classe de couleur d'une échéance (mappée en variable CSS par la vue). */
 export type ExpiryClass = "ok" | "warn" | "err" | "none";
@@ -27,13 +33,15 @@ export class CertsFormat {
   /** Millisecondes par jour (constante nommée : évite les 86400000 magiques). */
   private static readonly DAY_MS = 24 * 60 * 60 * 1000;
 
-  /** Libellés lisibles des familles d'objets (MIROIR des CERT_KINDS serveur). */
+  /** CLÉS i18n des libellés de familles d'objets (MIROIR des CERT_KINDS serveur).
+      Table de CLÉS (et non de textes) : le libellé est résolu par `kindLabel` au
+      point de rendu — jamais au chargement du module (avant `I18n.init()`). */
   static readonly KIND_LABELS: Record<string, string> = {
-    "root-ca": "CA racine X.509",
-    "leaf-tls": "Certificat TLS",
-    "ssh-ca": "CA SSH",
-    "ssh-keypair": "Paire SSH",
-    "ssh-cert": "Certificat SSH",
+    "root-ca": "certs.kind.rootCa",
+    "leaf-tls": "certs.kind.leafTls",
+    "ssh-ca": "certs.kind.sshCa",
+    "ssh-keypair": "certs.kind.sshKeypair",
+    "ssh-cert": "certs.kind.sshCert",
   };
 
   /** Jours ENTIERS restants avant `not_after` (négatif si déjà expiré) ; null si pas de
@@ -56,20 +64,21 @@ export class CertsFormat {
     return "ok";
   }
 
-  /** Libellé français lisible de l'échéance : « — » (sans date), « expiré (il y a N j) »,
-      « expire aujourd'hui », « dans 1 jour », « dans N jours ». */
+  /** Libellé lisible de l'échéance (localisé) : « — » (sans date), « expiré (il y a N j) »,
+      « expire aujourd'hui », « dans 1 jour », « dans N jours ». Résolu via `I18n.t` (pluriels
+      `_one`/`_other`) — l'échéance passée reporte le nombre de jours ÉCOULÉS (`-days`). */
   static expiryLabel(notAfter: string | null | undefined, nowMs: number = Date.now()): string {
     const days = CertsFormat.daysUntil(notAfter, nowMs);
-    if (days === null) return "—";
-    if (days < 0) return "expiré (il y a " + (-days) + " j)";
-    if (days === 0) return "expire aujourd'hui";
-    if (days === 1) return "dans 1 jour";
-    return "dans " + days + " jours";
+    if (days === null) return I18n.t("certs.expiry.none");
+    if (days < 0) return I18n.t("certs.expiry.expired", { days: -days });
+    if (days === 0) return I18n.t("certs.expiry.today");
+    return I18n.t("certs.expiry.inDays", { count: days });
   }
 
-  /** Libellé lisible d'une famille d'objet — repli sur la valeur brute si inconnue. */
+  /** Libellé lisible d'une famille d'objet (localisé) — repli sur la valeur brute si inconnue. */
   static kindLabel(kind: string): string {
-    return CertsFormat.KIND_LABELS[kind] || kind;
+    const key = CertsFormat.KIND_LABELS[kind];
+    return key ? I18n.t(key) : kind;
   }
 
   /** Libellé d'affichage de l'ÉMETTEUR d'un dérivé (colonne « Émetteur » de la vue B). Le listing étant

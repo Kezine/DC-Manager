@@ -12,8 +12,9 @@ import { Dialog } from "../ui/Dialog";
 import { RichTooltip } from "../ui/RichTooltip";
 import { Icons } from "../ui/Icons";
 import { IconButton } from "../ui/IconButton";
-import { CERTS_TIPS, CERT_TIP } from "./CertsTips";
+import { CertsTips, CERT_TIP } from "./CertsTips";
 import { DeleteGuard, type DeletableCert } from "../certs/DeleteGuard";
+import { I18n } from "../i18n/I18n";
 import { Download } from "../core/Download";
 import { CertDeployGuide, type DeployGuide } from "../core/CertDeployGuide";
 import type { FormHost } from "./forms/shared";
@@ -76,52 +77,15 @@ import * as x509 from "@peculiar/x509";
    503 (module en erreur serveur) → bandeau détaillé (pattern NotificationsAdminView).
    ============================================================================= */
 
-/** Algorithmes de clé X.509 proposés à la création (données pures d'UI). */
-const ALGO_X509_OPTS: SelectOption[] = [
-  { value: "ec-p256", label: "EC P-256 (recommandé)" },
-  { value: "rsa-2048", label: "RSA 2048" },
-  { value: "rsa-4096", label: "RSA 4096" },
-];
-/** Usage d'une feuille TLS → ExtendedKeyUsage. */
-const USAGE_OPTS: SelectOption[] = [
-  { value: "server", label: "Serveur (TLS)" },
-  { value: "client", label: "Client" },
-  { value: "both", label: "Les deux" },
-];
-/** Types de SAN X.509 (le « principal » SSH est saisi séparément pour un certificat SSH). */
-const SAN_TYPE_OPTS: SelectOption[] = [
-  { value: "dns", label: "DNS" },
-  { value: "ip", label: "IP" },
-  { value: "email", label: "E-mail" },
-];
-/** Type d'un certificat SSH. */
-const SSH_CERT_TYPE_OPTS: SelectOption[] = [
-  { value: "user", label: "Utilisateur" },
-  { value: "host", label: "Hôte" },
-];
-
+/* Les LIBELLÉS des options/filtres sont localisés → construits AU POINT DE RENDU (méthodes statiques
+   `CertsAdminView.*Opts()`), jamais au chargement du module (avant `I18n.init()`). Ne restent en données
+   PURES au niveau module que les IDENTIFIANTS de familles proposés à chaque vue (valeurs de kind non
+   traduisibles — le libellé est résolu par `CertsFormat.kindLabel` à la construction du MultiSelect). */
 /** Familles proposées au filtre « Type » de la VUE A (autorités & clés = premier niveau, parent_id nul). */
-const ROOT_KIND_FILTER: MultiItem[] = [
-  { id: "root-ca", label: CertsFormat.kindLabel("root-ca") },
-  { id: "ssh-ca", label: CertsFormat.kindLabel("ssh-ca") },
-  { id: "ssh-keypair", label: CertsFormat.kindLabel("ssh-keypair") },
-];
+const ROOT_KIND_FILTER_IDS = ["root-ca", "ssh-ca", "ssh-keypair"];
 /** Familles proposées au filtre « Type » de la VUE B (dérivés émis en v1 : feuilles TLS + certificats SSH ;
     les CA intermédiaires ne sont pas produites en v1 — le schéma les autoriserait, cf. cadrage). */
-const CERT_KIND_FILTER: MultiItem[] = [
-  { id: "leaf-tls", label: CertsFormat.kindLabel("leaf-tls") },
-  { id: "ssh-cert", label: CertsFormat.kindLabel("ssh-cert") },
-];
-/** Options du filtre « État » — SÉLECTION UNIQUE (le serveur n'accepte qu'UN `status` :
-    active|revoked|expired|expiring) : un MultiSelect laisserait croire que les états se combinent, ce que la
-    route ne permet pas. « » = tous (aucun filtre d'état). */
-const STATUS_FILTER_OPTS: SelectOption[] = [
-  { value: "", label: "Tous les états" },
-  { value: "active", label: "Actif" },
-  { value: "revoked", label: "Révoqué" },
-  { value: "expired", label: "Expiré" },
-  { value: "expiring", label: "Expire ≤ 30 j" },
-];
+const CERT_KIND_FILTER_IDS = ["leaf-tls", "ssh-cert"];
 
 /** État d'un listing (mémoire d'instance — PAS de sessionStorage en v1 : les volumes vivent côté serveur et
     l'état doit rester cohérent après chaque écriture). `status` = "" signifie « tous » (aucun filtre d'état). */
@@ -181,7 +145,7 @@ export class CertsAdminView {
     private readonly host: FormHost,
   ) {
     this.session = new PkiSession({ onLock: () => this.onLocked() });
-    RichTooltip.registerAll(CERTS_TIPS);   // idempotent (Map.set) — les contenus vivent dans CertsTips.ts
+    RichTooltip.registerAll(CertsTips.build());   // idempotent (Map.set) — contenus LOCALISÉS bâtis à l'enregistrement (après I18n.init())
   }
 
   /** Activation de la sous-page (onShow) : messages d'indisponibilité, sinon (re)charge PKI + liste. */
@@ -218,7 +182,7 @@ export class CertsAdminView {
     try { await load(); }
     catch (e) {
       if (e instanceof CertsError && e.status === 503) { this.renderDisabled(e); return; }
-      this.renderMessage("Chargement impossible — " + CertsAdminView.errText(e), true);
+      this.renderMessage(I18n.t("certs.admin.msg.loadError", { detail: CertsAdminView.errText(e) }), true);
     } finally { this.loading = false; }
   }
 
@@ -245,7 +209,7 @@ export class CertsAdminView {
     // Pas de span vide non plus : un item flex vide consommerait quand même un cran de `gap`.
     if (this.pkiState?.initialized === true) {
       const status = document.createElement("span");
-      status.innerHTML = this.session.unlocked ? this.pill("déverrouillé", "ok") : this.pill("verrouillé", "warn");
+      status.innerHTML = this.session.unlocked ? this.pill(I18n.t("certs.admin.toolbar.unlocked"), "ok") : this.pill(I18n.t("certs.admin.toolbar.locked"), "warn");
       left.appendChild(status);
     }
     // Recherche (L3) : visible dans les DEUX vues et MÊME verrouillée — elle ne lit que des métadonnées
@@ -255,14 +219,14 @@ export class CertsAdminView {
     const right = document.createElement("div"); right.style.cssText = "display:flex;gap:8px;flex-wrap:wrap";
     if (this.session.unlocked) {
       right.append(
-        this.actionButton("+ CA racine X.509", "Créer une autorité racine X.509 auto-signée", () => this.rootCaModal(), "btn-primary"),
-        this.actionButton("+ CA SSH", "Créer une autorité de certification SSH (ed25519)", () => this.sshKeyModal("ssh-ca"), "btn-primary"),
-        this.actionButton("+ Paire SSH", "Créer une paire de clés SSH simple (ed25519)", () => this.sshKeyModal("ssh-keypair"), "btn-primary"),
+        this.actionButton(I18n.t("certs.admin.toolbar.addRootCa"), I18n.t("certs.admin.toolbar.addRootCaTitle"), () => this.rootCaModal(), "btn-primary"),
+        this.actionButton(I18n.t("certs.admin.toolbar.addSshCa"), I18n.t("certs.admin.toolbar.addSshCaTitle"), () => this.sshKeyModal("ssh-ca"), "btn-primary"),
+        this.actionButton(I18n.t("certs.admin.toolbar.addSshPair"), I18n.t("certs.admin.toolbar.addSshPairTitle"), () => this.sshKeyModal("ssh-keypair"), "btn-primary"),
       );
-      right.appendChild(this.actionButton("Changer la phrase maître…", "Re-chiffrer l'enveloppe de la clé maître avec une nouvelle phrase (les clés privées ne sont PAS re-chiffrées)", () => this.changePassphraseModal()));
-      right.appendChild(this.actionButton("Verrouiller", "Oublier la clé maître (verrouillage immédiat)", () => { this.session.lock(); }));
+      right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.changePass"), I18n.t("certs.admin.toolbar.changePassTitle"), () => this.changePassphraseModal()));
+      right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.lock"), I18n.t("certs.admin.toolbar.lockTitle"), () => { this.session.lock(); }));
     }
-    right.appendChild(this.actionButton("Actualiser", "Recharger la liste", () => { this.session.touch(); void this.reload(); }));
+    right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.refresh"), I18n.t("certs.admin.toolbar.refreshTitle"), () => { this.session.touch(); void this.reload(); }));
 
     bar.append(left, right);
     return bar;
@@ -278,7 +242,7 @@ export class CertsAdminView {
   private searchBox(): HTMLElement {
     if (!this.searchPop) {
       this.searchPop = new SearchPop({
-        placeholder: "Rechercher un certificat (libellé, sujet, série, SAN)…",
+        placeholder: I18n.t("certs.admin.toolbar.searchPlaceholder"),
         fetch: (query) => this.searchFetch(query),
         onPick: (result) => this.searchPick(result),
       });
@@ -348,11 +312,9 @@ export class CertsAdminView {
     if (!PkiCrypto.available()) {
       box.style.borderColor = "var(--warn)";
       const title = document.createElement("div"); title.style.cssText = "font-weight:600;color:var(--warn);margin-bottom:6px";
-      title.textContent = "Opérations de clé indisponibles — contexte non sécurisé";
+      title.textContent = I18n.t("certs.admin.lock.insecureTitle");
       const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.whiteSpace = "pre-line";
-      hint.textContent = "Le navigateur désactive la cryptographie WebCrypto (crypto.subtle) quand la page n'est pas servie dans un contexte sécurisé. "
-        + "Pour initialiser ou déverrouiller la PKI, accédez à l'application en HTTPS (cf. docs/reverse-proxy.md pour servir derrière un proxy TLS) "
-        + "ou via http://localhost. La liste des certificats et leurs échéances restent consultables ci-dessous.";
+      hint.textContent = I18n.t("certs.admin.lock.insecureHint");
       box.append(title, hint);
       return box;
     }
@@ -360,10 +322,10 @@ export class CertsAdminView {
     if (state.initialized !== true) {
       // PKI VIERGE → proposer l'initialisation (formulaire EN MODALE).
       const title = document.createElement("div"); title.style.cssText = "font-weight:600;color:var(--fg);margin-bottom:6px";
-      title.textContent = "PKI non initialisée";
+      title.textContent = I18n.t("certs.admin.lock.uninitTitle");
       const hint = document.createElement("div"); hint.className = "form-hint";
-      hint.textContent = "Ce document n'a pas encore de clé maître. Initialisez la PKI pour créer et chiffrer des clés privées : le chiffrement se fait dans votre navigateur, le serveur ne voit jamais la clé maître.";
-      const btn = this.actionButton("Initialiser la PKI…", "Choisir une phrase secrète maître", () => this.initModal(), "btn-primary");
+      hint.textContent = I18n.t("certs.admin.lock.uninitHint");
+      const btn = this.actionButton(I18n.t("certs.admin.lock.initBtn"), I18n.t("certs.admin.lock.initBtnTitle"), () => this.initModal(), "btn-primary");
       btn.style.marginTop = "10px";
       box.append(title, hint, btn);
       return box;
@@ -371,20 +333,20 @@ export class CertsAdminView {
 
     // PKI INITIALISÉE → déverrouillage par phrase secrète (input password STANDARD .form-field).
     const title = document.createElement("div"); title.style.cssText = "font-weight:600;color:var(--fg);margin-bottom:6px";
-    title.textContent = "Déverrouiller le coffre de certificat";
+    title.textContent = I18n.t("certs.admin.lock.unlockTitle");
     const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "8px";
-    hint.textContent = "Saisissez la phrase secrète maître pour créer une autorité, émettre un certificat ou exporter une clé privée. Sans déverrouiller, la liste reste consultable et vous pouvez exporter les artefacts publics, révoquer et supprimer.";
+    hint.textContent = I18n.t("certs.admin.lock.unlockHint");
 
     // Le bouton est frère de l'INPUT SEUL (pas du .form-field label+input) : posé à côté du champ
     // ENTIER, `align-items:flex-end` collait son bas à celui de l'input alors qu'il est ~15 px plus
     // court (input : padding 8px/13px ≈ 37 px · .btn-sm : padding 4px/10px ≈ 22 px) → il paraissait
     // excentré. Ici `stretch` lui fait épouser la hauteur EXACTE de l'input, sans hauteur en dur.
     const passField = document.createElement("div"); passField.className = "form-field"; passField.style.margin = "0";
-    const label = document.createElement("label"); label.textContent = "Phrase secrète maître";
-    const input = document.createElement("input"); input.type = "password"; input.autocomplete = "current-password"; input.placeholder = "phrase secrète";
+    const label = document.createElement("label"); label.textContent = I18n.t("certs.admin.lock.passLabel");
+    const input = document.createElement("input"); input.type = "password"; input.autocomplete = "current-password"; input.placeholder = I18n.t("certs.admin.lock.passPlaceholder");
     input.style.cssText = "flex:1 1 auto;min-width:0";   // min-width:0 : sans lui, un flex item ne descend pas sous sa largeur intrinsèque
     const errBox = this.errBox();
-    const btn = this.actionButton("Déverrouiller", "Dériver la clé maître et vérifier la phrase", () => void this.attemptUnlock(input.value, errBox), "btn-primary");
+    const btn = this.actionButton(I18n.t("certs.admin.lock.unlockBtn"), I18n.t("certs.admin.lock.unlockBtnTitle"), () => void this.attemptUnlock(input.value, errBox), "btn-primary");
     btn.classList.remove("btn-sm");   // hauteur d'un .btn plein pour matcher l'input
     btn.style.flex = "none";
     const inputRow = document.createElement("div"); inputRow.style.cssText = "display:flex;gap:8px;align-items:stretch";
@@ -465,16 +427,16 @@ export class CertsAdminView {
     const wrap = document.createElement("div");
     if (this.view === "certs" && this.rootScope) {
       const bc = document.createElement("div"); bc.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px";
-      bc.appendChild(this.actionButton("← Autorités", "Revenir à la liste des autorités & clés", () => this.goToRoots()));
+      bc.appendChild(this.actionButton(I18n.t("certs.admin.listing.backAuthorities"), I18n.t("certs.admin.listing.backAuthoritiesTitle"), () => this.goToRoots()));
       const title = document.createElement("span"); title.style.cssText = "font-weight:600;color:var(--fg)";
-      title.textContent = "Certificats de « " + this.rootScope.label + " »";
+      title.textContent = I18n.t("certs.admin.listing.viewBTitle", { label: this.rootScope.label });
       bc.appendChild(title);
       wrap.appendChild(bc);
     } else {
       const intro = document.createElement("div"); intro.className = "form-hint"; intro.style.marginBottom = "8px";
       intro.textContent = this.session.unlocked
-        ? "Autorités et clés de ce document. Émettez, exportez, révoquez ou supprimez ; « Lister les certificats » ouvre le détail d'une autorité."
-        : "Autorités et clés de ce document (lecture seule). Déverrouillez pour les opérations de clé.";
+        ? I18n.t("certs.admin.listing.introUnlocked")
+        : I18n.t("certs.admin.listing.introLocked");
       wrap.appendChild(intro);
     }
     wrap.appendChild(this.buildListingToolbar());
@@ -489,23 +451,24 @@ export class CertsAdminView {
     const st = this.currentState();
     const bar = document.createElement("div"); bar.className = "list-toolbar";
     const fg = document.createElement("div"); fg.className = "lt-filters";
-    const fl = document.createElement("span"); fl.className = "lt-flabel"; fl.textContent = "Filtrer";
+    const fl = document.createElement("span"); fl.className = "lt-flabel"; fl.textContent = I18n.t("lists.chrome.filter");
     fg.appendChild(fl);
 
-    const kindItems = this.view === "roots" ? ROOT_KIND_FILTER : CERT_KIND_FILTER;
+    // Libellés de familles résolus ICI (rendu) via CertsFormat.kindLabel — jamais au chargement du module.
+    const kindItems: MultiItem[] = (this.view === "roots" ? ROOT_KIND_FILTER_IDS : CERT_KIND_FILTER_IDS).map((id) => ({ id, label: CertsFormat.kindLabel(id) }));
     // Purge des kinds mémorisés hors du jeu de la vue (parité ListView) — évite un filtre fantôme.
     const valid = new Set(kindItems.map((k) => k.id));
     [...st.kinds].forEach((k) => { if (!valid.has(k)) st.kinds.delete(k); });
-    fg.appendChild(MultiSelect.build("Type", kindItems, st.kinds, () => { st.page = 1; void this.refreshBody(); }));
+    fg.appendChild(MultiSelect.build(I18n.t("lists.col.type"), kindItems, st.kinds, () => { st.page = 1; void this.refreshBody(); }));
 
-    const statusSel = FormControls.select(STATUS_FILTER_OPTS, st.status);
+    const statusSel = FormControls.select(CertsAdminView.statusFilterOpts(), st.status);
     statusSel.onchange = () => { st.status = statusSel.value; st.page = 1; void this.refreshBody(); };
     const statusWrap = document.createElement("label"); statusWrap.style.cssText = "display:inline-flex;align-items:center;gap:6px";
-    const sl = document.createElement("span"); sl.className = "lt-flabel"; sl.textContent = "État";
+    const sl = document.createElement("span"); sl.className = "lt-flabel"; sl.textContent = I18n.t("certs.admin.listing.colState");
     statusWrap.append(sl, statusSel);
     fg.appendChild(statusWrap);
 
-    const reset = document.createElement("button"); reset.type = "button"; reset.className = "lt-reset btn btn-ghost btn-sm"; reset.textContent = "Réinit. filtres";
+    const reset = document.createElement("button"); reset.type = "button"; reset.className = "lt-reset btn btn-ghost btn-sm"; reset.textContent = I18n.t("lists.chrome.filterReset");
     reset.onclick = () => { st.kinds.clear(); st.status = ""; st.page = 1; void this.rerender(); };
     fg.appendChild(reset);
 
@@ -550,9 +513,9 @@ export class CertsAdminView {
     const thead = document.createElement("thead"); const tr = document.createElement("tr");
     tr.append(
       this.selectHeaderCell(),
-      this.sortableTh("Libellé", "label", st), this.sortableTh("Type", "kind", st), this.plainTh("Sujet"),
-      this.sortableTh("Échéance", "not_after", st), this.plainTh("État"),
-      this.sortableTh("Dérivés", "children_total", st), this.plainTh("Sous seuil"), this.plainTh(""),
+      this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label", st), this.sortableTh(I18n.t("lists.col.type"), "kind", st), this.plainTh(I18n.t("certs.admin.listing.colSubject")),
+      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")),
+      this.sortableTh(I18n.t("certs.admin.listing.colDerived"), "children_total", st), this.plainTh(I18n.t("certs.admin.listing.colAlert")), this.plainTh(""),
     );
     thead.appendChild(tr);
     const tbody = document.createElement("tbody");
@@ -571,7 +534,7 @@ export class CertsAdminView {
     tr.appendChild(this.htmlCell(this.pill(CertsFormat.kindLabel(item.kind), "neutral")));
     tr.appendChild(this.subjectCell(item.subject));
     tr.appendChild(this.htmlCell(this.expiryCell(item)));
-    tr.appendChild(this.htmlCell(item.revoked_at ? this.pill("révoqué", "err") : CertsAdminView.MUTED));
+    tr.appendChild(this.htmlCell(item.revoked_at ? this.pill(I18n.t("certs.admin.listing.revoked"), "err") : CertsAdminView.MUTED));
     // Dérivés : nombre total de descendants (0 pour une paire simple).
     const derived = document.createElement("td"); derived.textContent = String(item.children_total);
     if (item.children_total === 0) derived.style.color = "var(--fg-dimmer)";
@@ -583,8 +546,8 @@ export class CertsAdminView {
     this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
     // Aide au déploiement : uniquement les AUTORITÉS (racine X.509 ou CA SSH) — pas les paires simples ni les
     // dérivés. Consultation pure (procédure d'installation dans les magasins de confiance des clients).
-    if (item.kind === "root-ca" || item.kind === "ssh-ca") actions.appendChild(this.iconAction(Icons.TRUST_DEPLOY, "Déploiement des certificats", CERT_TIP.trustDeploy, () => this.deployTrustModal(item)));
-    if (item.children_total > 0) actions.appendChild(this.iconAction(Icons.CERT_LIST, "Lister les certificats de cette autorité", CERT_TIP.certList, () => this.openCerts(item)));
+    if (item.kind === "root-ca" || item.kind === "ssh-ca") actions.appendChild(this.iconAction(Icons.TRUST_DEPLOY, I18n.t("certs.admin.listing.deployTitle"), CERT_TIP.trustDeploy, () => this.deployTrustModal(item)));
+    if (item.children_total > 0) actions.appendChild(this.iconAction(Icons.CERT_LIST, I18n.t("certs.admin.listing.listCertsTitle"), CERT_TIP.certList, () => this.openCerts(item)));
     tr.appendChild(actions);
     return tr;
   }
@@ -607,9 +570,9 @@ export class CertsAdminView {
     const thead = document.createElement("thead"); const tr = document.createElement("tr");
     tr.append(
       this.selectHeaderCell(),
-      this.sortableTh("Libellé", "label", st), this.sortableTh("Type", "kind", st),
-      this.sortableTh("Émetteur", "parent", st), this.plainTh("Sujet"),
-      this.sortableTh("Échéance", "not_after", st), this.plainTh("État"), this.plainTh(""),
+      this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label", st), this.sortableTh(I18n.t("lists.col.type"), "kind", st),
+      this.sortableTh(I18n.t("certs.admin.listing.colIssuer"), "parent", st), this.plainTh(I18n.t("certs.admin.listing.colSubject")),
+      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")), this.plainTh(""),
     );
     thead.appendChild(tr);
     const tbody = document.createElement("tbody");
@@ -637,7 +600,7 @@ export class CertsAdminView {
     tr.appendChild(issuer);
     tr.appendChild(this.subjectCell(item.subject));
     tr.appendChild(this.htmlCell(this.expiryCell(item)));
-    tr.appendChild(this.htmlCell(item.revoked_at ? this.pill("révoqué", "err") : CertsAdminView.MUTED));
+    tr.appendChild(this.htmlCell(item.revoked_at ? this.pill(I18n.t("certs.admin.listing.revoked"), "err") : CertsAdminView.MUTED));
     const actions = document.createElement("td");
     this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
     tr.appendChild(actions);
@@ -650,7 +613,7 @@ export class CertsAdminView {
   private labelCell(item: CertificateListItem): HTMLElement {
     const td = document.createElement("td");
     const span = document.createElement("span"); span.textContent = item.label;
-    if (item.has_key) span.title = "Clé privée détenue (chiffrée)";
+    if (item.has_key) span.title = I18n.t("certs.admin.listing.keyOwned");
     td.appendChild(span);
     return td;
   }
@@ -684,7 +647,7 @@ export class CertsAdminView {
   private emptyRow(colspan: number): HTMLElement {
     const tr = document.createElement("tr"); tr.className = "empty-row";
     const td = document.createElement("td"); td.colSpan = colspan;
-    td.textContent = this.session.unlocked ? "Aucun élément. Créez une autorité ou ajustez les filtres." : "Aucun élément.";
+    td.textContent = this.session.unlocked ? I18n.t("certs.admin.listing.emptyUnlocked") : I18n.t("certs.admin.listing.empty");
     tr.appendChild(td);
     return tr;
   }
@@ -696,7 +659,7 @@ export class CertsAdminView {
     const meta = this.pageMeta || { total: 0, page: 1, pages: 1, pageSize: st.pageSize };
     const wrap = document.createElement("div"); wrap.className = "pagination";
     const info = document.createElement("div");
-    info.textContent = meta.total + " élément" + (meta.total > 1 ? "s" : "") + " · page " + meta.page + "/" + meta.pages;
+    info.textContent = I18n.t("lists.chrome.count", { count: meta.total, page: meta.page, pages: meta.pages });
     const controls = document.createElement("div"); controls.className = "pagination-controls";
     const nav = (label: string, disabled: boolean, to: number): HTMLButtonElement => {
       const b = document.createElement("button"); b.type = "button"; b.className = "page-btn"; b.textContent = label; b.disabled = disabled;
@@ -710,7 +673,7 @@ export class CertsAdminView {
     controls.appendChild(nav("›", meta.page >= meta.pages, Math.min(meta.pages, meta.page + 1)));
     controls.appendChild(nav("»", meta.page >= meta.pages, meta.pages));
     const sel = document.createElement("select"); sel.className = "page-size app-select";
-    for (const n of PAGE_SIZE_OPTIONS) { const o = document.createElement("option"); o.value = String(n); o.textContent = n + "/page"; if (n === st.pageSize) o.selected = true; sel.appendChild(o); }
+    for (const n of PAGE_SIZE_OPTIONS) { const o = document.createElement("option"); o.value = String(n); o.textContent = I18n.t("lists.chrome.pageSize", { n }); if (n === st.pageSize) o.selected = true; sel.appendChild(o); }
     sel.onchange = () => { st.pageSize = parseInt(sel.value, 10); st.page = 1; void this.refreshBody(); };
     controls.appendChild(sel);
     wrap.append(info, controls);
@@ -737,11 +700,11 @@ export class CertsAdminView {
       perdue encore consultable ET PURGEABLE, comme le promet docs/certs.md. */
   private fillActions(cell: HTMLElement, item: CertificateListItem): void {
     const unlocked = this.session.unlocked;
-    if (unlocked && item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, "Émettre TLS", CERT_TIP.issueTls, () => this.leafModal(item)));
-    if (unlocked && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, "Émettre SSH", CERT_TIP.issueSsh, () => this.sshCertModal(item)));
-    if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.EXPORT, "Exporter les artefacts", CERT_TIP.export, () => void this.exportModal(item)));
-    if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.REVOKE, "Révoquer", CERT_TIP.revoke, () => void this.revoke(item)));
-    cell.appendChild(this.iconAction(Icons.DELETE, "Supprimer", CERT_TIP.remove, () => void this.remove(item), true));
+    if (unlocked && item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, I18n.t("certs.admin.actions.issueTls"), CERT_TIP.issueTls, () => this.leafModal(item)));
+    if (unlocked && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, I18n.t("certs.admin.actions.issueSsh"), CERT_TIP.issueSsh, () => this.sshCertModal(item)));
+    if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.EXPORT, I18n.t("certs.admin.actions.exportArtifacts"), CERT_TIP.export, () => void this.exportModal(item)));
+    if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.REVOKE, I18n.t("certs.admin.actions.revoke"), CERT_TIP.revoke, () => void this.revoke(item)));
+    cell.appendChild(this.iconAction(Icons.DELETE, I18n.t("ui.action.delete"), CERT_TIP.remove, () => void this.remove(item), true));
   }
 
   /** Bouton d'action ICÔNE — délègue au constructeur PARTAGÉ (ui/IconButton) : un seul point de
@@ -770,7 +733,7 @@ export class CertsAdminView {
   /** En-tête de la colonne de sélection : case « toute la page » (cochée/indéterminée synchronisée après coup). */
   private selectHeaderCell(): HTMLElement {
     const th = document.createElement("th"); th.style.width = "1%";
-    const cb = document.createElement("input"); cb.type = "checkbox"; cb.title = "Sélectionner toute la page";
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.title = I18n.t("certs.admin.select.headerAll");
     cb.onclick = () => this.toggleSelectAll(cb.checked);
     this.headerCheckbox = cb;
     th.appendChild(cb);
@@ -783,7 +746,7 @@ export class CertsAdminView {
     const td = document.createElement("td"); td.style.width = "1%";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.setAttribute("data-cert-id", item.id);
     cb.checked = this.selection.has(item.id);
-    cb.title = "Sélectionner « " + item.label + " »";
+    cb.title = I18n.t("certs.admin.select.rowSelect", { label: item.label });
     cb.onclick = () => this.toggleSelect(item, cb.checked);
     td.appendChild(cb);
     return td;
@@ -839,17 +802,17 @@ export class CertsAdminView {
     if (n === 0) { this.selBarEl.style.display = "none"; return; }
     this.selBarEl.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 8px;padding:8px 10px;border:1px solid var(--accent);border-radius:6px;background:color-mix(in srgb, var(--accent) 8%, transparent)";
     const count = document.createElement("span"); count.style.cssText = "font-weight:600;color:var(--fg)";
-    count.textContent = n + " sélectionné" + (n > 1 ? "s" : "");
+    count.textContent = I18n.t("certs.admin.select.selected", { count: n });
     this.selBarEl.appendChild(count);
 
     const av = BulkActions.commonActions([...this.selection.values()], this.session.unlocked);
     // « Exporter » GARDE SON TEXTE : son libellé est dynamique et porte une garantie de sécurité
     // (« Exporter publics (ZIP) » = aucune clé privée n'entrera dans l'archive) — une icône la perdrait.
-    if (av.canExport) this.selBarEl.appendChild(this.actionButton(av.exportLabel, "Choisir les artefacts communs et télécharger une archive ZIP (protégeable par mot de passe)", () => this.bulkExportDialog(), "btn-primary"));
+    if (av.canExport) this.selBarEl.appendChild(this.actionButton(av.exportLabel, I18n.t("certs.admin.select.exportTitle"), () => this.bulkExportDialog(), "btn-primary"));
     // Le compteur n'est PAS répété sur les boutons : le span « N sélectionné(s) » ci-dessus le dit déjà.
-    if (av.canRevoke) this.selBarEl.appendChild(this.iconAction(Icons.REVOKE, "Révoquer la sélection", CERT_TIP.revoke, () => void this.bulkRevoke()));
-    if (av.canDelete) this.selBarEl.appendChild(this.iconAction(Icons.DELETE, "Supprimer la sélection", CERT_TIP.remove, () => void this.bulkDelete(), true));
-    this.selBarEl.appendChild(this.actionButton("Effacer la sélection", "Vider la sélection courante", () => this.clearSelection()));
+    if (av.canRevoke) this.selBarEl.appendChild(this.iconAction(Icons.REVOKE, I18n.t("certs.admin.select.revokeSelection"), CERT_TIP.revoke, () => void this.bulkRevoke()));
+    if (av.canDelete) this.selBarEl.appendChild(this.iconAction(Icons.DELETE, I18n.t("certs.admin.select.deleteSelection"), CERT_TIP.remove, () => void this.bulkDelete(), true));
+    this.selBarEl.appendChild(this.actionButton(I18n.t("certs.admin.select.clearSelection"), I18n.t("certs.admin.select.clearSelectionTitle"), () => this.clearSelection()));
   }
 
   /* ---- Actions groupées (N appels unitaires séquentiels — pas de route bulk serveur en v1) ---- */
@@ -869,14 +832,14 @@ export class CertsAdminView {
 
     const root = document.createElement("div");
     const intro = document.createElement("div"); intro.className = "form-hint"; intro.style.marginBottom = "10px";
-    intro.textContent = "Choisissez les artefacts COMMUNS à exporter (une archive ZIP, un dossier par certificat). Les clés privées sont déchiffrées LOCALEMENT (session déverrouillée) et ne transitent jamais par le serveur.";
+    intro.textContent = I18n.t("certs.admin.bulk.exportIntro");
     root.appendChild(intro);
 
     // Note d'exclusion : les révoqués ne sont jamais emballés (décision Q4). Affichée seulement s'il y en a.
     if (part.excludedRevoked.length) {
       const r = part.excludedRevoked.length;
       const note = document.createElement("div"); note.className = "form-hint"; note.style.cssText = "margin-bottom:10px;color:var(--warn)";
-      note.textContent = r + " révoqué" + (r > 1 ? "s" : "") + " ser" + (r > 1 ? "ont" : "a") + " exclu" + (r > 1 ? "s" : "") + " de l'archive.";
+      note.textContent = I18n.t("certs.admin.bulk.excludedRevoked", { count: r });
       root.appendChild(note);
     }
 
@@ -884,7 +847,7 @@ export class CertsAdminView {
     const checks = new Map<ExportCategoryKey, HTMLInputElement>();
     const catBox = document.createElement("div"); catBox.style.cssText = "display:flex;flex-direction:column;gap:6px;margin-bottom:12px";
     const catTitle = document.createElement("div"); catTitle.style.cssText = "font-weight:600;color:var(--fg);margin-bottom:2px";
-    catTitle.textContent = "Artefacts à inclure";
+    catTitle.textContent = I18n.t("certs.admin.bulk.catTitle");
     catBox.appendChild(catTitle);
     for (const c of available) {
       const lab = document.createElement("label"); lab.style.cssText = "display:flex;gap:8px;align-items:center;cursor:pointer";
@@ -895,26 +858,26 @@ export class CertsAdminView {
     root.appendChild(catBox);
 
     // Mot de passe OPTIONNEL (deux champs) : vides = ZIP en clair ; renseigné = AES-256 (WinZip AE-2).
-    const p1 = FormControls.text("", "laisser vide = ZIP non chiffré"); p1.type = "password"; p1.autocomplete = "new-password";
-    root.appendChild(FormControls.fieldRow("Mot de passe (optionnel)", p1, "Vide = archive NON chiffrée. Renseigné = chiffrement AES-256."));
-    const p2 = FormControls.text("", "confirmer le mot de passe"); p2.type = "password"; p2.autocomplete = "new-password";
-    root.appendChild(FormControls.fieldRow("Confirmer", p2, "AES-256 — s'ouvre avec 7-Zip/WinRAR, PAS avec l'explorateur Windows natif."));
+    const p1 = FormControls.text("", I18n.t("certs.admin.bulk.passOptionalPlaceholder")); p1.type = "password"; p1.autocomplete = "new-password";
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.bulk.passOptional"), p1, I18n.t("certs.admin.bulk.passOptionalHint")));
+    const p2 = FormControls.text("", I18n.t("certs.admin.bulk.passConfirmPlaceholder")); p2.type = "password"; p2.autocomplete = "new-password";
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.bulk.passConfirm"), p2, I18n.t("certs.admin.bulk.passConfirmHint")));
 
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
-      title: "Exporter " + n + " certificat" + (n > 1 ? "s" : "") + " (ZIP)",
+      title: I18n.t("certs.admin.bulk.exportZipTitle", { count: n }),
       body: root,
-      saveLabel: "Exporter",
+      saveLabel: I18n.t("certs.admin.bulk.exportBtn"),
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
         const selected = new Set<ExportCategoryKey>();
         for (const [key, cb] of checks) if (cb.checked) selected.add(key);
-        if (selected.size === 0) { this.showError(errBox, "Sélectionnez au moins une catégorie d'artefacts à exporter."); return false; }
+        if (selected.size === 0) { this.showError(errBox, I18n.t("certs.admin.bulk.noCategory")); return false; }
         // Mot de passe : deux vides = pas de chiffrement ; non identiques = erreur ; non vide = AES-256.
         const pass = p1.value;
-        if (pass !== "" && pass !== p2.value) { this.showError(errBox, "Les deux mots de passe ne correspondent pas."); return false; }
+        if (pass !== "" && pass !== p2.value) { this.showError(errBox, I18n.t("certs.admin.bulk.passMismatch")); return false; }
         try {
           await this.runBulkExport(selected, pass !== "" ? pass : null);
           return true;
@@ -948,13 +911,13 @@ export class CertsAdminView {
     for (const id of part.included) {
       const snap = this.selection.get(id)!;
       const item = byId.get(id);
-      if (!item) { errors.push({ label: snap.label, reason: "introuvable (supprimé entre-temps ?)" }); continue; }
+      if (!item) { errors.push({ label: snap.label, reason: I18n.t("certs.admin.bulk.notFound") }); continue; }
       try {
         const keyPem = (withKeys && item.has_key) ? await this.decryptKey(id) : null;   // clé déchiffrée LOCALEMENT
         const rec: CertBundleRecord = { id: item.id, label: item.label, parent_id: item.parent_id, public_pem: item.public_pem, revoked_at: item.revoked_at, kind: item.kind, subject: item.subject };
         const artifacts = await CertZip.bundleFor(rec, all, keyPem, categories);
         if (artifacts.length) { entries.push({ folder: item.label, artifacts }); done++; }
-        else errors.push({ label: item.label, reason: "aucun artefact exportable (catégories cochées absentes de cet objet)" });
+        else errors.push({ label: item.label, reason: I18n.t("certs.admin.bulk.noArtifact") });
       } catch (e) { errors.push({ label: snap.label, reason: CertsAdminView.errText(e) }); }
     }
 
@@ -964,15 +927,15 @@ export class CertsAdminView {
       Download.data("certificats-" + CertsAdminView.stamp() + ".zip", zip, "application/zip");
     }
     // BILAN : réussis, exclus (révoqués), en erreur — construit AVANT de vider la sélection (labels lus depuis elle).
-    const encNote = password ? " · archive chiffrée AES-256" : "";
+    const encNote = password ? I18n.t("certs.admin.bulk.encNote") : "";
     const lines = [
       entries.length
-        ? "✔ " + done + " certificat" + (done > 1 ? "s" : "") + " exporté" + (done > 1 ? "s" : "") + (withKeys ? " (clés privées incluses là où détenues)" : " (artefacts publics seuls)") + encNote
-        : "Aucun certificat exporté.",
-      ...part.excludedRevoked.map((id) => "✕ « " + (this.selection.get(id)?.label || id) + " » exclu — révoqué (décision Q4)"),
-      ...errors.map((e) => "✕ « " + e.label + " » — " + e.reason),
+        ? I18n.t("certs.admin.bulk.exportedCount", { count: done }) + (withKeys ? I18n.t("certs.admin.bulk.exportedWithKeys") : I18n.t("certs.admin.bulk.exportedPublicOnly")) + encNote
+        : I18n.t("certs.admin.bulk.exportEmpty"),
+      ...part.excludedRevoked.map((id) => I18n.t("certs.admin.bulk.excludedLine", { label: this.selection.get(id)?.label || id })),
+      ...errors.map((e) => I18n.t("certs.admin.bulk.errorLine", { label: e.label, reason: e.reason })),
     ];
-    this.showBulkSummary("Export ZIP", lines);
+    this.showBulkSummary(I18n.t("certs.admin.bulk.sumExport"), lines);
     this.clearSelection();   // aucune donnée modifiée : on vide simplement la sélection (cadrage §5)
   }
 
@@ -983,9 +946,9 @@ export class CertsAdminView {
     const ids = [...this.selection.keys()];
     const n = ids.length;
     const ok = await Dialog.confirm({
-      title: "Révoquer " + n + " certificat" + (n > 1 ? "s" : "") + " ?",
-      message: "Les certificats sélectionnés seront marqués révoqués et EXCLUS des exports. Les clés privées stockées sont conservées.",
-      confirmLabel: "Révoquer", danger: true,
+      title: I18n.t("certs.admin.bulk.revokeTitle", { count: n }),
+      message: I18n.t("certs.admin.bulk.revokeMessage"),
+      confirmLabel: I18n.t("certs.admin.bulk.revokeBtn"), danger: true,
     });
     if (!ok) return;
 
@@ -999,14 +962,14 @@ export class CertsAdminView {
     for (const id of ids) {
       const snap = this.selection.get(id)!;
       const item = byId.get(id);
-      if (!item) { errors.push({ label: snap.label, reason: "introuvable (supprimé entre-temps ?)" }); continue; }
-      if (item.revoked_at) { errors.push({ label: item.label, reason: "déjà révoqué" }); continue; }
+      if (!item) { errors.push({ label: snap.label, reason: I18n.t("certs.admin.bulk.notFound") }); continue; }
+      if (item.revoked_at) { errors.push({ label: item.label, reason: I18n.t("certs.admin.bulk.alreadyRevoked") }); continue; }
       try { await this.client!.save(id, CertsAdminView.metadataInput(item, { revoked_at: now })); done++; }
       catch (e) { errors.push({ label: item.label, reason: CertsAdminView.errText(e) }); }
     }
-    this.showBulkSummary("Révocation", [
-      "✔ " + done + " certificat" + (done > 1 ? "s" : "") + " révoqué" + (done > 1 ? "s" : ""),
-      ...errors.map((e) => "✕ « " + e.label + " » — " + e.reason),
+    this.showBulkSummary(I18n.t("certs.admin.bulk.sumRevoke"), [
+      I18n.t("certs.admin.bulk.revokedCount", { count: done }),
+      ...errors.map((e) => I18n.t("certs.admin.bulk.errorLine", { label: e.label, reason: e.reason })),
     ]);
     this.clearSelection();
     await this.refreshBody();
@@ -1019,8 +982,8 @@ export class CertsAdminView {
     const ids = [...this.selection.keys()];
     const n = ids.length;
     const ok = await this.confirmDelete([...this.selection.values()],
-      "Supprimer " + n + " certificat" + (n > 1 ? "s" : "") + " ?",
-      "Les certificats sélectionnés (clés privées chiffrées + métadonnées) seront EFFACÉS du serveur (irréversible). Un émetteur ayant des dérivés ne peut pas être supprimé : il sera signalé au bilan.");
+      I18n.t("certs.admin.bulk.deleteTitle", { count: n }),
+      I18n.t("certs.admin.bulk.deleteMessage"));
     if (!ok) return;
 
     const errors: Array<{ label: string; reason: string }> = [];
@@ -1031,13 +994,13 @@ export class CertsAdminView {
       // bulk — N appels unitaires). La confirmation groupée vaut intention pour tout le lot.
       try { await this.client!.remove(id, DeleteGuard.needsForce(snap)); done++; }
       catch (e) {
-        if (e instanceof CertsError && e.status === 409) errors.push({ label: snap.label, reason: "des certificats dérivés existent — supprimer d'abord la descendance" });
+        if (e instanceof CertsError && e.status === 409) errors.push({ label: snap.label, reason: I18n.t("certs.admin.bulk.hasChildren") });
         else errors.push({ label: snap.label, reason: CertsAdminView.errText(e) });
       }
     }
-    this.showBulkSummary("Suppression", [
-      "✔ " + done + " certificat" + (done > 1 ? "s" : "") + " supprimé" + (done > 1 ? "s" : ""),
-      ...errors.map((e) => "✕ « " + e.label + " » — " + e.reason),
+    this.showBulkSummary(I18n.t("certs.admin.bulk.sumDelete"), [
+      I18n.t("certs.admin.bulk.deletedCount", { count: done }),
+      ...errors.map((e) => I18n.t("certs.admin.bulk.errorLine", { label: e.label, reason: e.reason })),
     ]);
     this.clearSelection();
     await this.refreshBody();
@@ -1047,9 +1010,9 @@ export class CertsAdminView {
       colorées. JAMAIS de silence partiel — chaque élément non traité y figure avec sa raison. */
   private showBulkSummary(title: string, lines: string[]): void {
     void Dialog.custom({
-      title: "Bilan — " + title,
+      title: I18n.t("certs.admin.bulk.summaryTitle", { title }),
       hideCancel: true,
-      confirmLabel: "OK",
+      confirmLabel: I18n.t("ui.action.ok"),
       build: (root) => {
         const box = document.createElement("div");
         box.style.cssText = "display:flex;flex-direction:column;gap:4px;font-size:12px;max-height:50vh;overflow:auto";
@@ -1073,24 +1036,24 @@ export class CertsAdminView {
   private initModal(): void {
     const root = document.createElement("div");
     const warn = document.createElement("div"); warn.className = "form-hint"; warn.style.cssText = "margin-bottom:10px;color:var(--warn)";
-    warn.textContent = "La phrase secrète maître chiffre TOUTES les clés privées de ce document, dans votre navigateur. Le serveur ne la connaît jamais et ne peut pas la récupérer : si vous la perdez, les clés privées stockées sont DÉFINITIVEMENT perdues (les certificats publics et métadonnées, eux, restent lisibles).";
+    warn.textContent = I18n.t("certs.admin.init.warn");
     root.appendChild(warn);
 
-    const p1 = FormControls.text("", "phrase secrète maître"); p1.type = "password"; p1.autocomplete = "new-password";
-    root.appendChild(FormControls.fieldRow("Phrase secrète maître", p1, "Choisissez une phrase longue et unique."));
-    const p2 = FormControls.text("", "confirmer la phrase"); p2.type = "password"; p2.autocomplete = "new-password";
-    root.appendChild(FormControls.fieldRow("Confirmation", p2, "Ressaisissez la même phrase."));
+    const p1 = FormControls.text("", I18n.t("certs.admin.init.passPlaceholder")); p1.type = "password"; p1.autocomplete = "new-password";
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.init.passLabel"), p1, I18n.t("certs.admin.common.longUniqueHint")));
+    const p2 = FormControls.text("", I18n.t("certs.admin.init.confirmPlaceholder")); p2.type = "password"; p2.autocomplete = "new-password";
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.confirmation"), p2, I18n.t("certs.admin.init.confirmHint")));
 
     const errBox = this.errBox(); root.appendChild(errBox);
     this.host.openModal({
-      title: "Initialiser la PKI du document",
+      title: I18n.t("certs.admin.init.title"),
       body: root,
-      saveLabel: "Initialiser et déverrouiller",
+      saveLabel: I18n.t("certs.admin.init.saveLabel"),
       onSave: async () => {
         errBox.style.display = "none";
         const pass = p1.value;
-        if (pass.trim() === "") { this.showError(errBox, "Phrase secrète requise."); return false; }
-        if (pass !== p2.value) { this.showError(errBox, "Les deux phrases ne correspondent pas."); return false; }
+        if (pass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.common.passRequired")); return false; }
+        if (pass !== p2.value) { this.showError(errBox, I18n.t("certs.admin.init.passMismatch")); return false; }
         try {
           const salt = PkiCrypto.generateSaltB64();
           const iters = PkiCrypto.DEFAULT_ITERS;
@@ -1099,7 +1062,7 @@ export class CertsAdminView {
           await this.client!.initPki({ kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: salt, kdf_iters: iters, wrapped_dek: wrappedDek });
           this.session.unlock(dek); // la session détient la DEK (non extractible), pas la KEK
           await this.reload();
-          Notify.toast("PKI initialisée — session déverrouillée", "ok");
+          Notify.toast(I18n.t("certs.admin.init.toast"), "ok");
           return true;
         } catch (e) { this.showError(errBox, e); return false; }
       },
@@ -1114,16 +1077,16 @@ export class CertsAdminView {
     const state = this.pkiState;
     if (!state || state.initialized !== true) return;
     errBox.style.display = "none";
-    if (pass.trim() === "") { this.showError(errBox, "Phrase secrète requise."); return; }
+    if (pass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.common.passRequired")); return; }
     try {
       const kek = await PkiCrypto.deriveKek(pass, state.kdf_salt, state.kdf_iters);
       const dek = await PkiCrypto.unwrapDek(kek, state.wrapped_dek); // JETTE si mauvaise phrase (GCM refuse)
       this.session.unlock(dek);
       this.render();
-      Notify.toast("Session déverrouillée", "ok");
+      Notify.toast(I18n.t("certs.admin.unlock.toast"), "ok");
     } catch (_) {
       // Toute erreur (dérivation, unwrap, blob) → même réponse neutre, sans matériau de clé.
-      this.showError(errBox, "Clé maître incorrecte.");
+      this.showError(errBox, I18n.t("certs.admin.unlock.wrong"));
     }
   }
 
@@ -1140,36 +1103,34 @@ export class CertsAdminView {
 
     const root = document.createElement("div");
     const info = document.createElement("div"); info.className = "form-hint"; info.style.marginBottom = "10px";
-    info.textContent = "Change la phrase qui protège la clé maître. Les clés privées déjà stockées ne sont PAS re-chiffrées "
-      + "(elles restent lisibles) : seule l'enveloppe de la clé maître est ré-emballée avec la nouvelle phrase. "
-      + "Les artefacts déjà exportés (PKCS#12, ZIP protégés…) conservent leur ancienne protection propre.";
+    info.textContent = I18n.t("certs.admin.rekey.info");
     root.appendChild(info);
 
-    const cur = FormControls.text("", "phrase actuelle"); cur.type = "password"; cur.autocomplete = "current-password";
-    root.appendChild(FormControls.fieldRow("Phrase actuelle", cur, "Nécessaire pour déverrouiller l'enveloppe à ré-emballer."));
-    const p1 = FormControls.text("", "nouvelle phrase"); p1.type = "password"; p1.autocomplete = "new-password";
-    root.appendChild(FormControls.fieldRow("Nouvelle phrase", p1, "Choisissez une phrase longue et unique."));
-    const p2 = FormControls.text("", "confirmer la nouvelle phrase"); p2.type = "password"; p2.autocomplete = "new-password";
-    root.appendChild(FormControls.fieldRow("Confirmation", p2, "Ressaisissez la nouvelle phrase."));
+    const cur = FormControls.text("", I18n.t("certs.admin.rekey.curPlaceholder")); cur.type = "password"; cur.autocomplete = "current-password";
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rekey.curLabel"), cur, I18n.t("certs.admin.rekey.curHint")));
+    const p1 = FormControls.text("", I18n.t("certs.admin.rekey.newPlaceholder")); p1.type = "password"; p1.autocomplete = "new-password";
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rekey.newLabel"), p1, I18n.t("certs.admin.common.longUniqueHint")));
+    const p2 = FormControls.text("", I18n.t("certs.admin.rekey.confirmPlaceholder")); p2.type = "password"; p2.autocomplete = "new-password";
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.confirmation"), p2, I18n.t("certs.admin.rekey.confirmHint")));
 
     const errBox = this.errBox(); root.appendChild(errBox);
     this.host.openModal({
-      title: "Changer la phrase maître",
+      title: I18n.t("certs.admin.rekey.title"),
       body: root,
-      saveLabel: "Changer la phrase",
+      saveLabel: I18n.t("certs.admin.rekey.saveLabel"),
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
         const currentPass = cur.value;
         const newPass = p1.value;
-        if (currentPass.trim() === "") { this.showError(errBox, "Phrase actuelle requise."); return false; }
-        if (newPass.trim() === "") { this.showError(errBox, "Nouvelle phrase requise."); return false; }
-        if (newPass !== p2.value) { this.showError(errBox, "Les deux nouvelles phrases ne correspondent pas."); return false; }
+        if (currentPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.curRequired")); return false; }
+        if (newPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.newRequired")); return false; }
+        if (newPass !== p2.value) { this.showError(errBox, I18n.t("certs.admin.rekey.mismatch")); return false; }
         // Instantané FRAIS à CHAQUE tentative (masque la capture d'ouverture) : après un 409
         // « conflict », this.pkiState a été rafraîchi — la relance doit repartir de l'enveloppe
         // COURANTE (dériver l'ancienne KEK sur le bon sel, fonder le rewrap sur le bon blob).
         const state = this.pkiState;
-        if (!state || state.initialized !== true) { this.showError(errBox, "État PKI indisponible — rechargez la page."); return false; }
+        if (!state || state.initialized !== true) { this.showError(errBox, I18n.t("certs.admin.rekey.stateUnavailable")); return false; }
 
         // 1) Ré-emballer la DEK côté client. rewrapDek JETTE si la phrase actuelle est mauvaise
         //    (déchiffrement refusé) — on l'isole pour un message ciblé, distinct d'une panne réseau.
@@ -1182,7 +1143,7 @@ export class CertsAdminView {
           const newKek = await PkiCrypto.deriveKek(newPass, newSalt, newIters);
           newWrappedDek = await PkiCrypto.rewrapDek(oldKek, newKek, state.wrapped_dek);
         } catch (_) {
-          this.showError(errBox, "Phrase actuelle incorrecte.");
+          this.showError(errBox, I18n.t("certs.admin.rekey.curWrong"));
           return false;
         }
 
@@ -1204,7 +1165,7 @@ export class CertsAdminView {
         // 3) Rafraîchir l'état local : les prochains déverrouillages utiliseront les nouveaux
         //    paramètres. La session détient toujours la MÊME DEK → elle reste valablement ouverte.
         this.pkiState = { initialized: true, kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: newSalt, kdf_iters: newIters, wrapped_dek: newWrappedDek };
-        Notify.toast("Phrase maître changée", "ok");
+        Notify.toast(I18n.t("certs.admin.rekey.toast"), "ok");
         return true;
       },
     });
@@ -1218,24 +1179,24 @@ export class CertsAdminView {
   /** CA racine X.509 auto-signée. */
   private rootCaModal(): void {
     const root = document.createElement("div");
-    const cn = FormControls.text("", "ex. CA Racine interne");
-    root.appendChild(FormControls.fieldRow("Nom commun (CN)", cn, "Identité de l'autorité (CN du certificat)."));
-    const org = FormControls.text("", "ex. Mon Organisation");
-    root.appendChild(FormControls.fieldRow("Organisation (facultatif)", org, "Ajoutée au sujet (O=…) si renseignée."));
-    const algo = FormControls.select(ALGO_X509_OPTS, "ec-p256");
-    root.appendChild(FormControls.fieldRow("Algorithme de clé", algo, "EC P-256 (compact) ou RSA 2048/4096."));
+    const cn = FormControls.text("", I18n.t("certs.admin.rootCa.cnPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rootCa.cnField"), cn, I18n.t("certs.admin.rootCa.cnHint")));
+    const org = FormControls.text("", I18n.t("certs.admin.rootCa.orgPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rootCa.orgField"), org, I18n.t("certs.admin.rootCa.orgHint")));
+    const algo = FormControls.select(CertsAdminView.algoX509Opts(), "ec-p256");
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.algoField"), algo, I18n.t("certs.admin.rootCa.algoHint")));
     const days = FormControls.number(3650, { min: 1, step: 1 });
-    root.appendChild(FormControls.fieldRow("Durée de validité (jours)", days, "Défaut 3650 (~10 ans) pour une CA racine."));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, I18n.t("certs.admin.rootCa.daysHint")));
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
-      title: "Nouvelle CA racine X.509",
+      title: I18n.t("certs.admin.rootCa.title"),
       body: root,
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
         const commonName = cn.value.trim();
-        if (commonName === "") { this.showError(errBox, "Nom commun (CN) requis."); return false; }
+        if (commonName === "") { this.showError(errBox, I18n.t("certs.admin.common.cnRequired")); return false; }
         try {
           const keyAlgo = algo.value as X509KeyAlgo;
           const organization = org.value.trim() || undefined;
@@ -1246,7 +1207,7 @@ export class CertsAdminView {
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans: [],
           });
-          Notify.toast("CA racine créée", "ok");
+          Notify.toast(I18n.t("certs.admin.rootCa.toast"), "ok");
           await this.refreshBody();
           return true;
         } catch (e) { this.showError(errBox, e); return false; }
@@ -1258,31 +1219,31 @@ export class CertsAdminView {
   /** Feuille TLS signée par une CA X.509 (action « Émettre TLS »). */
   private leafModal(ca: CertificateListItem): void {
     const root = document.createElement("div");
-    const cn = FormControls.text("", "ex. service.interne");
-    root.appendChild(FormControls.fieldRow("Nom commun (CN)", cn, "Identité de la feuille (souvent le nom d'hôte principal)."));
+    const cn = FormControls.text("", I18n.t("certs.admin.leaf.cnPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.cnField"), cn, I18n.t("certs.admin.leaf.cnHint")));
     const sanEditor = this.buildSanEditor();
-    root.appendChild(FormControls.fieldRow("Noms alternatifs (SAN)", sanEditor.element, "dns / ip / email. Les navigateurs valident le SAN, pas le CN — ajoutez au moins le nom d'hôte."));
-    const usage = FormControls.select(USAGE_OPTS, "server");
-    root.appendChild(FormControls.fieldRow("Usage", usage, "Serveur (TLS entrant), client (authentification) ou les deux."));
-    const algo = FormControls.select(ALGO_X509_OPTS, "ec-p256");
-    root.appendChild(FormControls.fieldRow("Algorithme de clé", algo, "EC P-256 ou RSA."));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.sanField"), sanEditor.element, I18n.t("certs.admin.leaf.sanHint")));
+    const usage = FormControls.select(CertsAdminView.usageOpts(), "server");
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.usageField"), usage, I18n.t("certs.admin.leaf.usageHint")));
+    const algo = FormControls.select(CertsAdminView.algoX509Opts(), "ec-p256");
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.algoField"), algo, I18n.t("certs.admin.leaf.algoHint")));
     const days = FormControls.number(397, { min: 1, step: 1 });
-    root.appendChild(FormControls.fieldRow("Durée de validité (jours)", days, "Défaut 397 (limite navigateurs pour un certificat serveur)."));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, I18n.t("certs.admin.leaf.daysHint")));
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
-      title: "Émettre un certificat TLS",
+      title: I18n.t("certs.admin.leaf.title"),
       subtitle: Html.escape(ca.label),
       body: root,
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
         const commonName = cn.value.trim();
-        if (commonName === "") { this.showError(errBox, "Nom commun (CN) requis."); return false; }
+        if (commonName === "") { this.showError(errBox, I18n.t("certs.admin.common.cnRequired")); return false; }
         const sans = sanEditor.collect();
         try {
           const detail = await this.client!.getOne(ca.id);
-          if (!detail.key_enc) { this.showError(errBox, "Cette CA ne détient pas de clé privée — émission impossible."); return false; }
+          if (!detail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
           const caKeyPem = await PkiCrypto.decryptSecret(this.session.key, detail.key_enc);
           const keyAlgo = algo.value as X509KeyAlgo;
           const gen = await X509Factory.issueLeaf({
@@ -1295,7 +1256,7 @@ export class CertsAdminView {
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans,
           });
-          Notify.toast("Certificat TLS émis", "ok");
+          Notify.toast(I18n.t("certs.admin.leaf.toast"), "ok");
           await this.refreshBody();
           return true;
         } catch (e) { this.showError(errBox, e); return false; }
@@ -1307,18 +1268,18 @@ export class CertsAdminView {
   /** CA SSH (ssh-ca) ou paire SSH simple (ssh-keypair) — ed25519, WebCrypto extractible. */
   private sshKeyModal(kind: "ssh-ca" | "ssh-keypair"): void {
     const root = document.createElement("div");
-    const ident = FormControls.text("", kind === "ssh-ca" ? "ex. ca-ssh@interne" : "ex. utilisateur@poste");
-    root.appendChild(FormControls.fieldRow("Identité (commentaire)", ident, "Commentaire OpenSSH de la clé (identité lisible). Sert aussi de libellé."));
+    const ident = FormControls.text("", kind === "ssh-ca" ? I18n.t("certs.admin.ssh.identPlaceholderCa") : I18n.t("certs.admin.ssh.identPlaceholderPair"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.ssh.identField"), ident, I18n.t("certs.admin.ssh.identHint")));
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
-      title: kind === "ssh-ca" ? "Nouvelle CA SSH (ed25519)" : "Nouvelle paire SSH (ed25519)",
+      title: kind === "ssh-ca" ? I18n.t("certs.admin.ssh.titleCa") : I18n.t("certs.admin.ssh.titlePair"),
       body: root,
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
         const comment = ident.value.trim();
-        if (comment === "") { this.showError(errBox, "Identité (commentaire) requise."); return false; }
+        if (comment === "") { this.showError(errBox, I18n.t("certs.admin.ssh.identRequired")); return false; }
         try {
           const kp = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]) as CryptoKeyPair;
           const pub = await SshKeyMaterial.ed25519PublicRaw(kp.publicKey);
@@ -1329,7 +1290,7 @@ export class CertsAdminView {
             serial: null, not_before: null, not_after: null, fingerprint: null,
             key_algo: "ed25519", public_pem: publicLine, key_enc: keyEnc, revoked_at: null, sans: [],
           });
-          Notify.toast(kind === "ssh-ca" ? "CA SSH créée" : "Paire SSH créée", "ok");
+          Notify.toast(kind === "ssh-ca" ? I18n.t("certs.admin.ssh.toastCa") : I18n.t("certs.admin.ssh.toastPair"), "ok");
           await this.refreshBody();
           return true;
         } catch (e) { this.showError(errBox, e); return false; }
@@ -1341,34 +1302,34 @@ export class CertsAdminView {
   /** Certificat SSH signé par une ssh-ca (action « Émettre SSH ») — la paire sujette NAÎT avec le cert (v1). */
   private sshCertModal(ca: CertificateListItem): void {
     const root = document.createElement("div");
-    const keyId = FormControls.text("", "ex. acces-admin-2026");
-    root.appendChild(FormControls.fieldRow("Identifiant du certificat (key id)", keyId, "Journalisé par le serveur SSH lors de l'authentification."));
-    const type = FormControls.select(SSH_CERT_TYPE_OPTS, "user");
-    root.appendChild(FormControls.fieldRow("Type", type, "Utilisateur (accès à un compte) ou hôte (identité d'un serveur)."));
+    const keyId = FormControls.text("", I18n.t("certs.admin.sshCert.keyIdPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.sshCert.keyIdField"), keyId, I18n.t("certs.admin.sshCert.keyIdHint")));
+    const type = FormControls.select(CertsAdminView.sshCertTypeOpts(), "user");
+    root.appendChild(FormControls.fieldRow(I18n.t("lists.col.type"), type, I18n.t("certs.admin.sshCert.typeHint")));
     const principalsEditor = this.buildPrincipalsEditor();
-    root.appendChild(FormControls.fieldRow("Principaux (principals)", principalsEditor.element, "Logins autorisés (user) ou noms d'hôte (host). Vide = valable pour tous (déconseillé)."));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.sshCert.principalsField"), principalsEditor.element, I18n.t("certs.admin.sshCert.principalsHint")));
     const days = FormControls.number(365, { min: 1, step: 1 });
-    root.appendChild(FormControls.fieldRow("Durée de validité (jours)", days, "Durée de vie du certificat SSH."));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, I18n.t("certs.admin.sshCert.daysHint")));
     const info = document.createElement("div"); info.className = "form-hint"; info.style.marginTop = "6px";
-    info.textContent = "Une NOUVELLE paire ed25519 sujette est générée avec ce certificat (v1). Sa clé privée est chiffrée et stockée avec le certificat.";
+    info.textContent = I18n.t("certs.admin.sshCert.info");
     root.appendChild(info);
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
-      title: "Émettre un certificat SSH",
+      title: I18n.t("certs.admin.sshCert.title"),
       subtitle: Html.escape(ca.label),
       body: root,
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
         const id = keyId.value.trim();
-        if (id === "") { this.showError(errBox, "Identifiant (key id) requis."); return false; }
+        if (id === "") { this.showError(errBox, I18n.t("certs.admin.sshCert.keyIdRequired")); return false; }
         const nbDays = Number(days.value);
-        if (!Number.isFinite(nbDays) || nbDays <= 0) { this.showError(errBox, "Durée invalide."); return false; }
+        if (!Number.isFinite(nbDays) || nbDays <= 0) { this.showError(errBox, I18n.t("certs.admin.sshCert.daysInvalid")); return false; }
         const principals = principalsEditor.collect();
         try {
           const detail = await this.client!.getOne(ca.id);
-          if (!detail.key_enc) { this.showError(errBox, "Cette CA SSH ne détient pas de clé privée — signature impossible."); return false; }
+          if (!detail.key_enc) { this.showError(errBox, I18n.t("certs.admin.sshCert.noKey")); return false; }
           const caKeyPem = await PkiCrypto.decryptSecret(this.session.key, detail.key_enc);
           const caSeed = await this.seedFromPkcs8Pem(caKeyPem);
           const caSignKey = await SshKeyMaterial.importEd25519PrivateForSigning(caSeed);
@@ -1392,7 +1353,7 @@ export class CertsAdminView {
             fingerprint: null, key_algo: "ed25519", public_pem: enc.line, key_enc: keyEnc, revoked_at: null,
             sans: principals.map((p) => ({ san_type: "principal", value: p })),
           });
-          Notify.toast("Certificat SSH émis", "ok");
+          Notify.toast(I18n.t("certs.admin.sshCert.toast"), "ok");
           await this.refreshBody();
           return true;
         } catch (e) { this.showError(errBox, e); return false; }
@@ -1414,7 +1375,7 @@ export class CertsAdminView {
     catch (e) { this.actionError(e); return; }
     const root = document.createElement("div");
     const intro = document.createElement("div"); intro.className = "form-hint"; intro.style.marginBottom = "10px";
-    intro.textContent = "Téléchargez les artefacts de « " + item.label + " ». Les clés privées sont déchiffrées LOCALEMENT (session déverrouillée) et ne transitent jamais par le serveur.";
+    intro.textContent = I18n.t("certs.admin.export.intro", { label: item.label });
     root.appendChild(intro);
     const list = document.createElement("div"); list.style.cssText = "display:flex;flex-direction:column;gap:8px;align-items:flex-start";
     root.appendChild(list);
@@ -1435,7 +1396,7 @@ export class CertsAdminView {
     // cert + fullchain + clé en un geste). Clé privée incluse SI session déverrouillée ET clé détenue, sinon
     // artefacts publics seuls — le libellé du bouton l'indique.
     const withKey = this.session.unlocked && item.has_key;
-    addAction("Tout (ZIP)" + (withKey ? " — cert + clé privée" : " — artefacts publics"), async () => {
+    addAction(I18n.t("certs.admin.export.allZip") + (withKey ? I18n.t("certs.admin.export.allZipWithKey") : I18n.t("certs.admin.export.allZipPublic")), async () => {
       const keyPem = withKey ? await this.decryptKey(item.id) : null;
       const bundleRec: CertBundleRecord = { id: item.id, label: item.label, parent_id: item.parent_id, public_pem: item.public_pem, revoked_at: item.revoked_at, kind: item.kind, subject: item.subject };
       const artifacts = await CertZip.bundleFor(bundleRec, all, keyPem);
@@ -1444,54 +1405,54 @@ export class CertsAdminView {
     });
 
     if (item.kind === "root-ca" || item.kind === "leaf-tls") {
-      addAction("Certificat public (.pem)", async () => this.download(CertExports.pemCertificate(rec)));
-      addAction("Chaîne complète (fullchain.pem)", async () => this.download(CertExports.pemFullchain(rec, all)));
-      if (item.kind === "leaf-tls") addAction("Chaîne d'autorité (ca-chain.pem)", async () => this.download(CertExports.pemCaChain(rec, all)));
+      addAction(I18n.t("certs.admin.export.pubPem"), async () => this.download(CertExports.pemCertificate(rec)));
+      addAction(I18n.t("certs.admin.export.fullchain"), async () => this.download(CertExports.pemFullchain(rec, all)));
+      if (item.kind === "leaf-tls") addAction(I18n.t("certs.admin.export.caChain"), async () => this.download(CertExports.pemCaChain(rec, all)));
       if (item.has_key) {
-        addAction("Clé privée (.key.pem)", async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))));
-        addAction("Paquet PKCS#12 (.p12)…", async () => { this.pkcs12Flow(item, rec, all); return true; });
+        addAction(I18n.t("certs.admin.export.keyPem"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))));
+        addAction(I18n.t("certs.admin.export.pkcs12"), async () => { this.pkcs12Flow(item, rec, all); return true; });
       }
     } else if (item.kind === "ssh-ca" || item.kind === "ssh-keypair") {
       if (item.has_key) {
-        addAction("Clé OpenSSH (privée + .pub)", async () => {
+        addAction(I18n.t("certs.admin.export.opensshKey"), async () => {
           const seed = await this.seedFromPkcs8Pem(await this.decryptKey(item.id));
           const publicKey = CertsAdminView.ed25519PubFromLine(item.public_pem || "");
           for (const art of CertExports.opensshArtifacts(rec, { kind: item.kind as "ssh-ca" | "ssh-keypair", seed, publicKey, comment: item.subject })) this.download(art);
         });
-        addAction("Clé privée (.key.pem)", async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))));
+        addAction(I18n.t("certs.admin.export.keyPem"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))));
       }
     } else if (item.kind === "ssh-cert") {
-      addAction("Certificat SSH (-cert.pub)", async () => { for (const art of CertExports.opensshArtifacts(rec, { kind: "ssh-cert", certLine: item.public_pem || "" })) this.download(art); });
-      if (item.has_key) addAction("Clé privée du sujet (.key.pem)", async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))));
+      addAction(I18n.t("certs.admin.export.sshCert"), async () => { for (const art of CertExports.opensshArtifacts(rec, { kind: "ssh-cert", certLine: item.public_pem || "" })) this.download(art); });
+      if (item.has_key) addAction(I18n.t("certs.admin.export.subjectKey"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))));
     }
 
-    if (!list.children.length) { const n = document.createElement("div"); n.className = "form-hint"; n.textContent = "Aucun export disponible pour cet objet."; root.appendChild(n); }
-    this.host.openModal({ title: "Exporter", subtitle: Html.escape(item.label), body: root, hideFooter: true });
+    if (!list.children.length) { const n = document.createElement("div"); n.className = "form-hint"; n.textContent = I18n.t("certs.admin.export.empty"); root.appendChild(n); }
+    this.host.openModal({ title: I18n.t("certs.admin.export.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true });
   }
 
   /** PKCS#12 : la passphrase est demandée EN MODALE et JAMAIS stockée. */
   private pkcs12Flow(item: CertificateListItem, rec: CertExportRecord, all: CertExportRecord[]): void {
     const root = document.createElement("div");
     const info = document.createElement("div"); info.className = "form-hint"; info.style.marginBottom = "10px";
-    info.textContent = "Le fichier PKCS#12 regroupe le certificat, sa chaîne et la clé privée, protégés par une phrase secrète. Cette phrase n'est PAS stockée — notez-la pour l'import.";
+    info.textContent = I18n.t("certs.admin.pkcs12.info");
     root.appendChild(info);
-    const pass = FormControls.text("", "phrase secrète du fichier .p12"); pass.type = "password"; pass.autocomplete = "new-password";
-    root.appendChild(FormControls.fieldRow("Phrase secrète du .p12", pass, "Demandée à l'import du fichier."));
+    const pass = FormControls.text("", I18n.t("certs.admin.pkcs12.passPlaceholder")); pass.type = "password"; pass.autocomplete = "new-password";
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.pkcs12.passField"), pass, I18n.t("certs.admin.pkcs12.passHint")));
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
-      title: "Exporter en PKCS#12",
+      title: I18n.t("certs.admin.pkcs12.title"),
       subtitle: Html.escape(item.label),
       body: root,
-      saveLabel: "Télécharger le .p12",
+      saveLabel: I18n.t("certs.admin.pkcs12.saveLabel"),
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
-        if (pass.value === "") { this.showError(errBox, "Phrase secrète requise."); return false; }
+        if (pass.value === "") { this.showError(errBox, I18n.t("certs.admin.common.passRequired")); return false; }
         try {
           const keyPem = await this.decryptKey(item.id);
           this.download(await CertExports.pkcs12(rec, all, { passphrase: pass.value, privateKeyPkcs8Pem: keyPem }));
-          Notify.toast("Fichier PKCS#12 téléchargé", "ok");
+          Notify.toast(I18n.t("certs.admin.pkcs12.toast"), "ok");
           return true;
         } catch (e) { this.showError(errBox, e); return false; }
       },
@@ -1519,15 +1480,15 @@ export class CertsAdminView {
       // <FICHIER> = nom assaini du CA + « .crt » (le certificat PUBLIC exporté, renommé — cf. CertDeployGuide).
       const fileName = CertExports.safeFileName(item.label) + ".crt";
       guide = CertDeployGuide.forRootCa(fileName);
-      subtitle = item.label + " — autorité racine X.509";
+      subtitle = I18n.t("certs.admin.deploy.subtitleRootCa", { label: item.label });
     } else if (item.kind === "ssh-ca") {
       // Ligne authorized_keys de la CA SSH (public_pem stocké — public par nature, aucun déchiffrement).
       guide = CertDeployGuide.forSshCa(item.public_pem || "");
-      subtitle = item.label + " — CA SSH";
+      subtitle = I18n.t("certs.admin.deploy.subtitleSshCa", { label: item.label });
     } else {
       return;   // garde-fou : aucun autre kind n'ouvre cette modale
     }
-    this.host.openModal({ title: "Déploiement des certificats", subtitle: Html.escape(subtitle), body: this.renderDeployGuide(guide), hideFooter: true, wide: true });
+    this.host.openModal({ title: I18n.t("certs.admin.deploy.title"), subtitle: Html.escape(subtitle), body: this.renderDeployGuide(guide), hideFooter: true, wide: true });
   }
 
   /** Rend un `DeployGuide` en DOM : encadré d'intro, puis une section par plateforme (titre + intro +
@@ -1569,7 +1530,7 @@ export class CertsAdminView {
     const pre = document.createElement("pre");
     pre.style.cssText = "flex:1 1 auto;margin:0;padding:8px 10px;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:12px;white-space:pre;overflow-x:auto";
     pre.textContent = command;
-    const copy = this.actionButton("Copier", "Copier la commande dans le presse-papiers", () => void Clipboard.copy(command));
+    const copy = this.actionButton(I18n.t("certs.admin.deploy.copy"), I18n.t("certs.admin.deploy.copyTitle"), () => void Clipboard.copy(command));
     copy.style.flex = "0 0 auto";
     row.append(pre, copy);
     block.appendChild(row);
@@ -1584,14 +1545,14 @@ export class CertsAdminView {
   private async revoke(item: CertificateListItem): Promise<void> {
     this.session.touch();
     const ok = await Dialog.confirm({
-      title: "Révoquer ce certificat ?",
-      message: "« " + item.label + " » sera marqué révoqué et EXCLU des exports. La clé privée stockée est conservée.",
-      confirmLabel: "Révoquer", danger: true,
+      title: I18n.t("certs.admin.revoke.title"),
+      message: I18n.t("certs.admin.revoke.message", { label: item.label }),
+      confirmLabel: I18n.t("certs.admin.revoke.btn"), danger: true,
     });
     if (!ok) return;
     try {
       await this.client!.save(item.id, CertsAdminView.metadataInput(item, { revoked_at: new Date().toISOString() }));
-      Notify.toast("Certificat révoqué", "ok");
+      Notify.toast(I18n.t("certs.admin.revoke.toast"), "ok");
       await this.refreshBody();
     } catch (e) { this.actionError(e); }
   }
@@ -1599,16 +1560,16 @@ export class CertsAdminView {
   /** Suppression : DELETE avec confirmation ; 409 (descendance) → message clair. */
   private async remove(item: CertificateListItem): Promise<void> {
     this.session.touch();
-    const ok = await this.confirmDelete([item], "Supprimer définitivement ?",
-      "Supprimer « " + item.label + " » ? La clé privée chiffrée et les métadonnées seront EFFACÉES du serveur (irréversible).");
+    const ok = await this.confirmDelete([item], I18n.t("certs.admin.remove.title"),
+      I18n.t("certs.admin.remove.message", { label: item.label }));
     if (!ok) return;
     try {
       await this.client!.remove(item.id, DeleteGuard.needsForce(item));
-      Notify.toast("Certificat supprimé", "ok");
+      Notify.toast(I18n.t("certs.admin.remove.toast"), "ok");
       await this.refreshBody();
     } catch (e) {
       if (e instanceof CertsError && e.status === 409) {
-        Notify.toast("Suppression refusée : des certificats dérivés existent. Supprimez d'abord la descendance de cet émetteur.", "err");
+        Notify.toast(I18n.t("certs.admin.remove.hasChildren"), "err");
         return;
       }
       this.actionError(e);
@@ -1621,11 +1582,11 @@ export class CertsAdminView {
       matérialiser l'intention que le serveur exigera ensuite via `?force=true`. */
   private async confirmDelete(items: DeletableCert[], title: string, message: string): Promise<boolean> {
     const cer = DeleteGuard.ceremony(items);
-    if (cer.kind === "simple") return Dialog.confirm({ title, message, confirmLabel: "Supprimer", danger: true });
+    if (cer.kind === "simple") return Dialog.confirm({ title, message, confirmLabel: I18n.t("ui.action.delete"), danger: true });
 
     const activeCount = DeleteGuard.countActive(items);
     const res = await Dialog.custom({
-      title, variant: "danger", danger: true, confirmLabel: "Supprimer", cancelLabel: "Annuler",
+      title, variant: "danger", danger: true, confirmLabel: I18n.t("ui.action.delete"), cancelLabel: I18n.t("ui.action.cancel"),
       build: (root: HTMLElement) => {
         const msg = document.createElement("div"); msg.className = "form-hint"; msg.style.marginBottom = "10px"; msg.textContent = message;
         root.appendChild(msg);
@@ -1633,13 +1594,13 @@ export class CertsAdminView {
           const warn = document.createElement("div");
           warn.style.cssText = "margin-bottom:10px;color:var(--err);font-weight:600";
           warn.textContent = activeCount > 1
-            ? "⚠ " + activeCount + " de ces certificats sont ENCORE VALIDES — ce qui en dépend cessera de fonctionner."
-            : "⚠ Ce certificat est ENCORE VALIDE — ce qui en dépend cessera de fonctionner.";
+            ? I18n.t("certs.admin.confirm.activeWarnMany", { count: activeCount })
+            : I18n.t("certs.admin.confirm.activeWarnOne");
           root.appendChild(warn);
         }
         const field = document.createElement("div"); field.className = "form-field"; field.style.margin = "0";
         const lab = document.createElement("label");
-        lab.textContent = cer.kind === "type-name" ? "Pour confirmer, saisissez le nom du certificat" : "Pour confirmer, saisissez la phrase exacte";
+        lab.textContent = cer.kind === "type-name" ? I18n.t("certs.admin.confirm.nameLabel") : I18n.t("certs.admin.confirm.phraseLabel");
         const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.margin = "0 0 6px";
         hint.textContent = cer.expected;   // textContent → jamais interprété, même si le libellé contient du balisage
         const input = document.createElement("input"); input.type = "text"; input.autocomplete = "off"; input.spellcheck = false;
@@ -1648,7 +1609,7 @@ export class CertsAdminView {
         setTimeout(() => input.focus(), 30);
         return {
           validate: () => DeleteGuard.accepts(cer, input.value) ? true
-            : (cer.kind === "type-name" ? "Le nom saisi ne correspond pas exactement." : "La phrase saisie ne correspond pas exactement."),
+            : (cer.kind === "type-name" ? I18n.t("certs.admin.confirm.nameMismatch") : I18n.t("certs.admin.confirm.phraseMismatch")),
         };
       },
     });
@@ -1693,15 +1654,15 @@ export class CertsAdminView {
     const entries: Array<{ type: HTMLSelectElement; value: HTMLInputElement }> = [];
     const addRow = (): void => {
       const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;align-items:center";
-      const type = FormControls.select(SAN_TYPE_OPTS, "dns"); type.style.flex = "0 0 90px";
-      const value = FormControls.text("", "valeur"); value.style.flex = "1 1 auto";
-      const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm"; del.innerHTML = Icons.CLOSE; del.title = "Retirer";
+      const type = FormControls.select(CertsAdminView.sanTypeOpts(), "dns"); type.style.flex = "0 0 90px";
+      const value = FormControls.text("", I18n.t("certs.admin.san.valuePlaceholder")); value.style.flex = "1 1 auto";
+      const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm"; del.innerHTML = Icons.CLOSE; del.title = I18n.t("ui.chips.remove");
       const entry = { type, value };
       del.onclick = () => { const i = entries.indexOf(entry); if (i >= 0) entries.splice(i, 1); row.remove(); };
       row.append(type, value, del); rows.appendChild(row); entries.push(entry);
     };
     const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-ghost btn-sm"; add.style.marginTop = "6px";
-    add.textContent = "+ Ajouter un SAN"; add.onclick = () => addRow();
+    add.textContent = I18n.t("certs.admin.san.addSan"); add.onclick = () => addRow();
     container.append(rows, add);
     addRow();   // une ligne par défaut
     return {
@@ -1717,13 +1678,13 @@ export class CertsAdminView {
     const inputs: HTMLInputElement[] = [];
     const addRow = (): void => {
       const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;align-items:center";
-      const value = FormControls.text("", "login ou nom d'hôte"); value.style.flex = "1 1 auto";
-      const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm"; del.innerHTML = Icons.CLOSE; del.title = "Retirer";
+      const value = FormControls.text("", I18n.t("certs.admin.san.principalPlaceholder")); value.style.flex = "1 1 auto";
+      const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm"; del.innerHTML = Icons.CLOSE; del.title = I18n.t("ui.chips.remove");
       del.onclick = () => { const i = inputs.indexOf(value); if (i >= 0) inputs.splice(i, 1); row.remove(); };
       row.append(value, del); rows.appendChild(row); inputs.push(value);
     };
     const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-ghost btn-sm"; add.style.marginTop = "6px";
-    add.textContent = "+ Ajouter un principal"; add.onclick = () => addRow();
+    add.textContent = I18n.t("certs.admin.san.addPrincipal"); add.onclick = () => addRow();
     container.append(rows, add);
     addRow();
     return { element: container, collect: () => inputs.map((i) => i.value.trim()).filter((v) => v !== "") };
@@ -1735,20 +1696,18 @@ export class CertsAdminView {
 
   /** Mode fichier/viewer : le service n'a pas d'objet (pas de serveur) → message clair, aucun appel réseau. */
   private renderNeedsApi(): void {
-    this.renderBanner("var(--line)", "Certificats — mode API requis",
-      "La PKI interne (clé maître, certificats X.509/SSH) est fournie par le serveur. Elle n'est disponible qu'en mode API. Basculez la source de données sur « API » dans les Réglages pour l'administrer.");
+    this.renderBanner("var(--line)", I18n.t("certs.admin.msg.needsApiTitle"), I18n.t("certs.admin.msg.needsApi"));
   }
 
   /** Aucun document courant : rien à administrer tant qu'un document n'est pas ouvert. */
   private renderNoDoc(): void {
-    this.renderBanner("var(--line)", "Certificats — aucun document ouvert",
-      "La PKI est propre à CHAQUE document. Ouvrez ou créez un document pour gérer sa clé maître et ses certificats.");
+    this.renderBanner("var(--line)", I18n.t("certs.admin.msg.noDocTitle"), I18n.t("certs.admin.msg.noDoc"));
   }
 
   /** 503 : module certificats en erreur côté serveur (ex. certs.db illisible) → détail actionnable. */
   private renderDisabled(err: CertsError): void {
-    this.renderBanner("var(--warn)", err.message || "Service de certificats indisponible",
-      err.detail || "Le module certificats est désactivé côté serveur (base certs.db illisible). Consultez les journaux du serveur.");
+    this.renderBanner("var(--warn)", err.message || I18n.t("certs.admin.msg.disabledTitle"),
+      err.detail || I18n.t("certs.admin.msg.disabled"));
   }
 
   private renderBanner(borderColor: string, titleText: string, detailText: string): void {
@@ -1810,6 +1769,51 @@ export class CertsAdminView {
   private errBox(): HTMLElement {
     const e = document.createElement("div"); e.className = "form-hint err"; e.style.cssText = "margin-top:10px;white-space:pre-line;display:none";
     return e;
+  }
+
+  /* -- Options de sélecteurs (libellés LOCALISÉS) : construites À L'APPEL (rendu), jamais au chargement. -- */
+  /** Algorithmes de clé X.509 proposés à la création. */
+  private static algoX509Opts(): SelectOption[] {
+    return [
+      { value: "ec-p256", label: I18n.t("certs.admin.algo.ecP256") },
+      { value: "rsa-2048", label: I18n.t("certs.admin.algo.rsa2048") },
+      { value: "rsa-4096", label: I18n.t("certs.admin.algo.rsa4096") },
+    ];
+  }
+  /** Usage d'une feuille TLS → ExtendedKeyUsage. */
+  private static usageOpts(): SelectOption[] {
+    return [
+      { value: "server", label: I18n.t("certs.admin.usage.server") },
+      { value: "client", label: I18n.t("certs.admin.usage.client") },
+      { value: "both", label: I18n.t("certs.admin.usage.both") },
+    ];
+  }
+  /** Types de SAN X.509 (le « principal » SSH est saisi séparément pour un certificat SSH). */
+  private static sanTypeOpts(): SelectOption[] {
+    return [
+      { value: "dns", label: I18n.t("certs.admin.san.dns") },
+      { value: "ip", label: I18n.t("certs.admin.san.ip") },
+      { value: "email", label: I18n.t("certs.admin.san.email") },
+    ];
+  }
+  /** Type d'un certificat SSH. */
+  private static sshCertTypeOpts(): SelectOption[] {
+    return [
+      { value: "user", label: I18n.t("certs.admin.sshType.user") },
+      { value: "host", label: I18n.t("certs.admin.sshType.host") },
+    ];
+  }
+  /** Options du filtre « État » — SÉLECTION UNIQUE (le serveur n'accepte qu'UN `status` :
+      active|revoked|expired|expiring) : un MultiSelect laisserait croire que les états se combinent, ce que la
+      route ne permet pas. « » = tous (aucun filtre d'état). */
+  private static statusFilterOpts(): SelectOption[] {
+    return [
+      { value: "", label: I18n.t("certs.admin.status.all") },
+      { value: "active", label: I18n.t("certs.admin.status.active") },
+      { value: "revoked", label: I18n.t("certs.admin.status.revoked") },
+      { value: "expired", label: I18n.t("certs.admin.status.expired") },
+      { value: "expiring", label: I18n.t("certs.admin.status.expiring") },
+    ];
   }
 
   /** État de listing NEUF (défauts : page 1, taille par défaut, tri par libellé ascendant, aucun filtre). */
