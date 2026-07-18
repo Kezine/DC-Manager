@@ -17,6 +17,7 @@ import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
 import { Html } from "../core/Html";
 import { TargetSearch } from "../core/TargetSearch";
+import { UserDirectory } from "../core/UserDirectory";   // annuaire client (résolution des auteurs d'audit — mode API)
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
 import { Schema } from "../../src-shared/Schema";
 import { Download } from "../core/Download";
@@ -74,6 +75,10 @@ const certsClient = REST_MODE ? new CertsClient(adapter as RestAdapter) : null;
 // fichier/viewer : la page affiche alors un message d'indisponibilité). Le RestAdapter satisfait
 // `InterventionsRestContext` (dataBase/docId/headers/clientId publics) ; routes SCOPÉES PAR DOCUMENT (`<dataBase>/interventions`).
 const interventionsClient = REST_MODE ? new InterventionsClient(adapter as RestAdapter) : null;
+// Annuaire utilisateurs (service CORE, mode API SEULEMENT — null en mode fichier/viewer : aucune identité serveur,
+// donc aucune ligne « Créé/Modifié par » dans les fiches). Le RestAdapter satisfait `UserResolverClient`
+// (méthode `resolveUsers` → endpoint batch GET /users/resolve). Injecté dans les fiches via FormHost. Cf. docs/user-resolver.md.
+const userDirectory = REST_MODE ? new UserDirectory(adapter as RestAdapter) : null;
 const W = window as any;
 const HAS_FS_API = typeof W.showSaveFilePicker === "function" && typeof W.showOpenFilePicker === "function";
 
@@ -117,7 +122,7 @@ async function boot(): Promise<void> {
   const handleStore = new HandleStore();
 
   const modal = new Modal();
-  const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults };   // mutation modèle déjà suivie par la révision (store.onChange)
+  const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
   // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
   // backend d'images selon le mode : IndexedDB (fichier, + compagnon .nmfb) · endpoints blob (REST). Cf. P2.
   const imageBackend = REST_MODE ? new RestImageBackend(API_BASE_URL) : new IdbImageBackend();

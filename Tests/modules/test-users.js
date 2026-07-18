@@ -5,11 +5,12 @@
    - UsersDb + réhydratation : snapshot users.db (upsert « dernier vu » + loadAll, nouvelle instance sur
      la MÊME base → profils retrouvés) — testé avec better-sqlite3 RÉEL (driver injecté), comme les autres DB. */
 "use strict";
-const { ck, section, path, SERVER } = require("./harness.js");
+const { ck, section, path, SERVER, D } = require("./harness.js");
 
 module.exports = async () => {
   const { UserProfiles } = SERVER("users/UserProfiles.js");
   const { AuthCacheUserResolver } = SERVER("users/AuthCacheUserResolver.js");
+  const { UserDirectory } = D("core/UserDirectory.js");   // annuaire CLIENT (règle d'affichage pure + coalescence batch)
 
   await section("Serveur : users — UserProfiles.canonicalId & fromSsoUser (normalisation, repli login, champs vides)", async () => {
     // -- canonicalId : String(id) si présent (0 compris), sinon login, sinon "". --
@@ -145,5 +146,61 @@ module.exports = async () => {
     } finally {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* handle SQLite éventuellement ouvert (dossier temp) */ }
     }
+  });
+
+  await section("Client : UserDirectory.displayOf — règle d'affichage PURE (Prénom Nom / login / id brut)", async () => {
+    const mk = (o) => Object.assign({ id: "", login: "", domain: "", firstname: "", lastname: "", email: "", phone: "" }, o);
+    // « Prénom Nom » prioritaire.
+    ck.eq(UserDirectory.displayOf(mk({ firstname: "Alice", lastname: "Martin", login: "amartin" }), "42"), "Alice Martin", "displayOf : prénom + nom");
+    ck.eq(UserDirectory.displayOf(mk({ firstname: "Alice", login: "amartin" }), "42"), "Alice", "displayOf : prénom seul (nom manquant)");
+    ck.eq(UserDirectory.displayOf(mk({ lastname: "Martin", login: "amartin" }), "42"), "Martin", "displayOf : nom seul (prénom manquant)");
+    // Repli login quand aucun nom.
+    ck.eq(UserDirectory.displayOf(mk({ login: "amartin" }), "42"), "amartin", "displayOf : login en repli (aucun nom)");
+    ck.eq(UserDirectory.displayOf(mk({ login: "  amartin  " }), "42"), "amartin", "displayOf : login trimé");
+    // Repli id brut quand ni nom ni login (couvre le legacy « nom en clair » et l'inconnu).
+    ck.eq(UserDirectory.displayOf(mk({}), "42"), "42", "displayOf : dummy → id brut");
+    ck.eq(UserDirectory.displayOf(undefined, "Jean Legacy"), "Jean Legacy", "displayOf : profil absent → id brut (legacy nom en clair tel quel)");
+    ck.eq(UserDirectory.displayOf(undefined, "42"), "42", "displayOf : inconnu → id brut");
+  });
+
+  await section("Client : UserDirectory.ensure — coalescence en UNE requête batch + cache (pas de re-requête)", async () => {
+    const mk = (id, o) => Object.assign({ id, login: "", domain: "", firstname: "", lastname: "", email: "", phone: "" }, o || {});
+    let calls = [];
+    const stub = { resolveUsers: async (ids) => { calls.push(ids.slice()); return ids.map((id) => id === "u1" ? mk("u1", { firstname: "Jean", lastname: "Dupont" }) : mk(id)); } };
+    const dir = new UserDirectory(stub);
+
+    // display() AVANT résolution → id brut (cache vide).
+    ck.eq(dir.display("u1"), "u1", "display avant ensure → id brut");
+    ck.eq(dir.display(""), "", "display('') → chaîne vide");
+
+    // Deux ensure() dans le MÊME tick → UNE seule requête batch (coalescence micro-tâche), union des ids.
+    calls = [];
+    await Promise.all([dir.ensure(["u1"]), dir.ensure(["u2"])]);
+    ck.eq(calls.length, 1, "ensure ×2 (même tick) → UNE requête batch");
+    ck.eq(calls[0].slice().sort().join(","), "u1,u2", "batch : union des ids demandés");
+    ck.eq(dir.display("u1"), "Jean Dupont", "après ensure : u1 résolu (Prénom Nom)");
+    ck.eq(dir.display("u2"), "u2", "après ensure : u2 sans nom ni login → id brut");
+    ck.eq(dir.has("u1"), true, "has : u1 en cache");
+
+    // Ids DÉJÀ en cache → aucune nouvelle requête.
+    calls = [];
+    await dir.ensure(["u1", "u2"]);
+    ck.eq(calls.length, 0, "ensure d'ids déjà en cache → aucune requête");
+
+    // ensure([]) / que des vides → no-op immédiat.
+    calls = [];
+    await dir.ensure(["", "  "]);
+    ck.eq(calls.length, 0, "ensure d'ids vides → aucune requête");
+  });
+
+  await section("Client : UserDirectory — échec réseau non bloquant (id brut conservé, réessai possible)", async () => {
+    let attempts = 0;
+    const stub = { resolveUsers: async () => { attempts++; throw new Error("réseau"); } };
+    const dir = new UserDirectory(stub);
+    await dir.ensure(["u1"]);   // ne rejette PAS (badge/fiche non critiques)
+    ck.eq(dir.display("u1"), "u1", "échec réseau → id brut conservé (pas de cache pourri)");
+    ck.eq(dir.has("u1"), false, "échec réseau → id NON caché (réessai possible)");
+    await dir.ensure(["u1"]);   // nouvelle tentative (l'id n'a pas été caché)
+    ck.eq(attempts, 2, "échec → l'id reste redemandable (2e tentative effectuée)");
   });
 };

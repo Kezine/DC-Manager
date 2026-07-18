@@ -5,6 +5,7 @@ import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
 import { Format } from "../../core/Format";
+import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (annuaire, mode API)
 import { LiveValidation } from "./LiveValidation";
 import { Waypoint } from "../../models/Waypoint";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
@@ -287,6 +288,8 @@ export class RackForms extends CableForms {
       tw.querySelectorAll("[data-eq-view]").forEach((b) => { (b as HTMLElement).onclick = () => this.equipmentDetail(store, host, (b as HTMLElement).dataset.eqView!, onChanged); });
       tw.querySelectorAll("[data-eq-loc]").forEach((b) => { (b as HTMLElement).onclick = () => host.locate?.("equipment", (b as HTMLElement).dataset.eqLoc!, () => this.rackDetail(store, host, rk.id, onChanged)); });
     } else { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = I18n.t("rack.rackDetail.empty"); root.appendChild(e); }
+
+    AuditLine.attach(root, rk, host.userDirectory);   // « Créé/Modifié par » (mode API)
 
     // actions : Localiser en 3D + Gérer le contenu + Modifier
     // « Localiser » seulement si la baie est POSÉE dans une salle (même prédicat que locateRack) — sinon toast d'erreur.

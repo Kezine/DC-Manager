@@ -1,6 +1,7 @@
 import type { Store } from "../../store";
 import type { ModalOptions } from "../../ui/Modal";
 import type { InterventionFicheHooks } from "../InterventionFicheHooks";
+import type { UserDirectory } from "../../core/UserDirectory";
 import { FLOORS } from "../../domain/constants";
 import { Ip } from "../../core/Ip";
 import { FormControls } from "../../ui/FormControls";
@@ -71,4 +72,7 @@ export interface FormHost {
   /** Intégration « fiches » de la feature interventions (AMOVIBLE) — null hors mode API : les fiches détail
       (équipement/VM/spare) n'affichent alors AUCUNE rangée « Interventions ». Injecté par `main.ts`. */
   interventionHooks?: InterventionFicheHooks | null;
+  /** Annuaire utilisateurs (résolution des auteurs d'audit — cf. `AuditLine`, docs/user-resolver.md). null en
+      mode fichier → aucune ligne « Créé/Modifié par » dans les fiches. Injecté par `main.ts` (mode REST). */
+  userDirectory?: UserDirectory | null;
 }

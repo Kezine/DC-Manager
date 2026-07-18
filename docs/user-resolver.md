@@ -6,12 +6,13 @@ Il répond à un besoin transverse : l'application ne mémorise les utilisateurs
 d'un audit « créé/modifié par », destinataires…) que par un **id**, et l'interface veut
 en montrer « Prénom Nom », le login, éventuellement les coordonnées.
 
-> **Périmètre livré (lots 1 & 2).** Le contrat, l'implémentation v1 (cache d'auth + snapshot
+> **Périmètre livré (lots 1, 2 & 3).** Le contrat, l'implémentation v1 (cache d'auth + snapshot
 > SQLite), la capture au fil des authentifications, `RequestAuthor.identity(req)` et
 > l'endpoint batch `GET /users/resolve` (lot 1) sont livrés et testés. L'**estampillage** de
 > `created_by`/`updated_by` (id canonique) et des **dates serveur** sur TOUTES les écritures —
 > cœur, interventions, configs des modules (lot 2) — l'est aussi (voir « Estampillage d'audit »).
-> Reste le **client** (service `UserDirectory`, fiches, colonnes) : le **lot 3**.
+> Le **client** (lot 3) l'est également : service `UserDirectory` + affichage des auteurs dans les
+> fiches et la modale d'interventions (voir « Client : UserDirectory »).
 
 Deux propriétés fondatrices :
 
@@ -184,6 +185,28 @@ d'écriture qui ne passe pas par `AuditStamp` ; la normalisation partagée prés
 (hors `DO UPDATE SET`), `updated_by` rafraîchi à chaque écriture ; id vide → colonnes `NULL`. L'identité
 vient de la requête (`RequestAuthor.identity(req).id`, posée côté route). **Interventions** stocke
 désormais l'id canonique (les valeurs LEGACY = noms en clair restent lisibles via le repli du client).
+
+## Client : `UserDirectory` (lot 3)
+
+Service CLIENT (`src-client/core/UserDirectory.ts`, CORE, mode API uniquement) qui transforme un
+**id** d'auteur (posé en audit `created_by`/`updated_by`) en **libellé affichable**.
+
+- **Cache mémoire** `Map<id, ResolvedUser>` alimenté par des résolutions **BATCH** contre
+  `GET /users/resolve` (méthode `RestAdapter.resolveUsers` — contrat minimal `UserResolverClient`).
+- **`display(id)`** est **SYNCHRONE** (lecture du cache) — les rendus restent synchrones. Règle
+  d'affichage **PURE et testée** (`UserDirectory.displayOf`) : « **Prénom Nom** » sinon **login**
+  sinon **id brut**. L'id brut couvre le **legacy** (« noms en clair » écrits avant l'estampillage
+  par id : absents du cache, affichés tels quels) et l'inconnu.
+- **`ensure(ids)`** ne résout que les ids **MANQUANTS** et **COALESCE** les demandes rapprochées en
+  **UNE** requête batch (micro-tâche) ; la promesse renvoyée résout quand le lot est traité → le
+  consommateur re-rend (localement). Un échec réseau ne rejette pas (l'affichage garde l'id brut).
+- Instancié UNIQUEMENT en mode REST (null en mode fichier : aucune identité serveur), **injecté via
+  `FormHost.userDirectory`** (pattern `interventionHooks` — contrat découplé).
+
+**Points d'affichage** (lot 3) : la ligne d'audit **discrète** « Créé par {auteur} le {date} ·
+Modifié par {auteur} le {date} » des **fiches détail** du cœur (`AuditLine`, helper partagé — null en
+mode fichier → pas de ligne) ; la **colonne « Créé par »** du listing d'interventions et l'**audit** de
+sa modale de détail. `RestAdapter.resolveUsers(ids)` est le seul point d'accès réseau.
 
 ## Impl future : `SsoUserResolver` (hors périmètre v1)
 
