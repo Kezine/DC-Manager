@@ -91,4 +91,15 @@ export const domain = {
     tray: "Tray",
     keepblank: "KeepBlank",
   },
+  placementLock: {
+    blockedHint: "Positioning locked — unlock it first (or use the form).",
+    lock: "Lock positioning",
+    unlock: "Unlock positioning",
+  },
+  doorWall: {
+    top: "front",
+    bottom: "rear",
+    left: "left",
+    right: "right",
+  },
 } as const;

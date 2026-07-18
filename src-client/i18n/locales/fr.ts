@@ -40,5 +40,6 @@ import { dc } from "./fr/dc";
 import { vm } from "./fr/vm";
 import { notify } from "./fr/notify";
 import { certs } from "./fr/certs";
+import { analysis } from "./fr/analysis";
 
-export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, notify, certs } as const;
+export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, notify, certs, analysis } as const;

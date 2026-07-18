@@ -25,6 +25,17 @@ export const detail = {
     yes: "Yes",
     no: "No",
   },
+  viz: {
+    building: "Bldg.",
+    floor: "Floor",
+    room: "Room",
+    rack: "Rack",
+    u: "U",
+    equipFallback: "(equip.)",
+    rackFallback: "(rack)",
+    roomFallback: "(room)",
+    pool: "— pool —",
+  },
   nf: {
     cable: "Cable not found",
     bundle: "Bundle not found",

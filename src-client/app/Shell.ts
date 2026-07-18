@@ -283,7 +283,7 @@ export class Shell {
     const fsRow = document.createElement("div"); fsRow.className = "settings-row"; fsRow.style.marginTop = "10px";
     const fsLbl = document.createElement("label"); fsLbl.className = "settings-row-label"; fsLbl.textContent = I18n.t("shell.settings.textSize");
     this.uiScaleSel = document.createElement("select"); this.uiScaleSel.className = "settings-row-select";
-    Prefs.UI_SCALE_OPTIONS.forEach((o) => { const op = document.createElement("option"); op.value = String(o.value); op.textContent = o.label; this.uiScaleSel.appendChild(op); });
+    Prefs.UI_SCALE_OPTIONS.forEach((o) => { const op = document.createElement("option"); op.value = String(o.value); op.textContent = I18n.t(o.labelKey); this.uiScaleSel.appendChild(op); });
     this.uiScaleSel.onchange = () => this.host.onUiScale?.(parseFloat(this.uiScaleSel.value));
     fsRow.append(fsLbl, this.uiScaleSel); app.appendChild(fsRow);
     // -- Suggestions d'autocomplétion (formulaires) : nb max de valeurs proposées (Marque/Modèle/Nom/Personne…) --

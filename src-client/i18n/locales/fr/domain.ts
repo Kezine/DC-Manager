@@ -95,4 +95,15 @@ export const domain = {
     tray: "Tray",
     keepblank: "KeepBlank",
   },
+  placementLock: {
+    blockedHint: "Positionnement verrouillé — déverrouillez d'abord (ou passez par le formulaire).",
+    lock: "Verrouiller le positionnement",
+    unlock: "Déverrouiller le positionnement",
+  },
+  doorWall: {
+    top: "avant",
+    bottom: "arrière",
+    left: "gauche",
+    right: "droit",
+  },
 } as const;

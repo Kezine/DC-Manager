@@ -16,6 +16,7 @@
    ============================================================================= */
 import { Waypoint } from "../models/Waypoint";
 import { CABLE_STATUS_DRAFT, CABLE_STATUS_BROKEN, CABLE_STATUS_RANK } from "../domain/constants";
+import { I18n } from "../i18n/I18n";
 
 /** Codes STABLES des erreurs de route (cf. en-tête). */
 export type RouteErrorCode =
@@ -232,8 +233,11 @@ export class CableRouteAnalyzer {
       const remotePortId = fromIsEq ? c.to_port_id : c.from_port_id;
       const remotePort = remotePortId ? this.s.get("ports", remotePortId) : null;
       const remoteEq = remotePort ? this.s.get("equipments", remotePort.equipment_id) : null;
-      const reason = "Suite au déplacement de l'équipement « " + (eq.name || "?") + " », la liaison vers « "
-        + (remoteEq ? (remoteEq.name || "?") : "?") + " » sur le port « " + (remotePort ? (remotePort.name || "?") : "?") + " » n'est plus valide.";
+      const reason = I18n.t("analysis.cable.breakReason", {
+        equip: eq.name || "?",
+        remote: remoteEq ? (remoteEq.name || "?") : "?",
+        port: remotePort ? (remotePort.name || "?") : "?",
+      });
       const patch: Record<string, any> = { status: CABLE_STATUS_BROKEN, description: (c.description ? c.description.trim() + "\n" : "") + reason };
       if (fromIsEq) patch.to_port_id = null; else patch.from_port_id = null;
       ops.push({ collection: "cables", id: c.id, patch });

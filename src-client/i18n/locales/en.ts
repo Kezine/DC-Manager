@@ -25,5 +25,6 @@ import { dc } from "./en/dc";
 import { vm } from "./en/vm";
 import { notify } from "./en/notify";
 import { certs } from "./en/certs";
+import { analysis } from "./en/analysis";
 
-export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, notify, certs } as const;
+export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, notify, certs, analysis } as const;

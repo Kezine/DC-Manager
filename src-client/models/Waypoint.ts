@@ -5,6 +5,7 @@ import {
   CONDUIT_H_DEFAULT,
   OOB_HEIGHT_DEFAULT,
 } from "../domain/constants";
+import { I18n } from "../i18n/I18n";
 
 /** Point de passage de câbles. Trois formes (kind : point | segment | brush)
     et trois types (wp_type : datacenter | exit | oob). */
@@ -133,6 +134,6 @@ export class Waypoint extends Entity {
     return wp.kind === "segment" ? "▬" : "◆";
   }
 
-  /** Libellé d'étage d'un pin d'étage ("ét. N", étage vide/libre → niveau 0). */
-  static floorLabel(wp: any): string { const n = parseFloat(wp && wp.floor); return "ét. " + (isFinite(n) ? n : 0); }
+  /** Libellé d'étage d'un pin d'étage ("ét. N", étage vide/libre → niveau 0). Résolu au rendu (i18n). */
+  static floorLabel(wp: any): string { const n = parseFloat(wp && wp.floor); return I18n.t("dc.common.floorShort", { n: isFinite(n) ? n : 0 }); }
 }
