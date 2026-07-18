@@ -13,6 +13,7 @@ import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
 import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
+import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (annuaire, mode API)
 import { GroupTypes } from "../../domain/GroupTypes";
 import { SpareTypes } from "../../domain/SpareTypes";
 import { SpareStatuses } from "../../domain/SpareStatuses";
@@ -155,6 +156,8 @@ export class EquipmentForms extends FormBase {
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("lists.col.designation")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("lists.col.characteristics")}</th><th>${I18n.t("equipment.detail.colSerial")}</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
     }
+
+    AuditLine.attach(root, eq, host.userDirectory);   // « Créé/Modifié par » (mode API)
 
     // Modifier → formulaire d'édition (remplace la fiche par la modale d'édition)
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";

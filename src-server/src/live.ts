@@ -1,9 +1,15 @@
 import type { Response } from "express";
 import { Logger } from "./logger.js";
 
+/** Contrat MINIMAL de PUBLICATION (les modules d'extension publient un événement live sans jamais s'abonner).
+    `LiveBus` l'implémente ; un module ne dépend que de ce contrat (découplage — parité VmLivePublisher). */
+export interface LivePublisher {
+  publish(docId: string, data: unknown): void;
+}
+
 /* Canal LIVE (Server-Sent Events) par document : notifie les autres clients
    d'un changement (nouvelle révision) pour qu'ils rechargent. */
-export class LiveBus {
+export class LiveBus implements LivePublisher {
   private readonly subs = new Map<string, Set<Response>>();
 
   constructor(private readonly log: Logger) {}

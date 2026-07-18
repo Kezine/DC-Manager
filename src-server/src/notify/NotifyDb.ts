@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Logger } from "../logger.js";
 import type { SqliteCtor, SqliteDb } from "../db.js";
+import { AuditStamp } from "../AuditStamp.js";   // « auteur présent » partagé (id canonique de created_by/updated_by)
 import { SecretBox } from "../SecretBox.js";
 import type { NotifyJournalEntry, NotifyState, NotifyStateStore } from "./NotifyEngine.js";
 import { DEFAULT_REMIND_INTERVAL_SEC } from "./NotifyEngine.js";
@@ -130,7 +131,9 @@ export class NotifyDb implements NotifyStateStore {
         simple_max_chars INTEGER NOT NULL DEFAULT 300,
         html INTEGER NOT NULL DEFAULT 0,
         created_date TEXT NOT NULL,
-        updated_date TEXT NOT NULL
+        updated_date TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT
       );
       CREATE TABLE IF NOT EXISTS subscriptions (
         id TEXT PRIMARY KEY,
@@ -139,7 +142,9 @@ export class NotifyDb implements NotifyStateStore {
         contact_id TEXT NOT NULL,
         channel TEXT NOT NULL,
         notifier_id TEXT NOT NULL REFERENCES notifier_instances(id) ON DELETE CASCADE,
-        enabled INTEGER NOT NULL DEFAULT 1
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT,
+        updated_by TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_subscriptions_event ON subscriptions(event_type);
       CREATE TABLE IF NOT EXISTS notification_states (
@@ -186,6 +191,13 @@ export class NotifyDb implements NotifyStateStore {
     this.ensureColumn("notifier_instances", "simple_mode", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("notifier_instances", "simple_max_chars", "INTEGER NOT NULL DEFAULT 300");
     this.ensureColumn("notifier_instances", "html", "INTEGER NOT NULL DEFAULT 0");
+    // AUDIT « qui a créé / modifié » (lot audit utilisateur) sur les objets de CONFIGURATION (canaux +
+    // abonnements — PAS les états/journaux, produits par les veilleurs sans auteur humain). Colonnes nullable
+    // ajoutées idempotemment : une notify.db antérieure les gagne sans valeur (legacy = NULL).
+    this.ensureColumn("notifier_instances", "created_by", "TEXT");
+    this.ensureColumn("notifier_instances", "updated_by", "TEXT");
+    this.ensureColumn("subscriptions", "created_by", "TEXT");
+    this.ensureColumn("subscriptions", "updated_by", "TEXT");
   }
 
   /** ALTER TABLE ADD COLUMN idempotent : n'ajoute la colonne que si elle manque (table_info). */
@@ -208,23 +220,28 @@ export class NotifyDb implements NotifyStateStore {
 
   /** Crée/remplace une instance. `tokenPlain` : null = CONSERVER le jeton existant (édition sans
       ressaisie) ; chaîne vide interdite par l'appelant (les routes passent null). Le jeton est
-      chiffré ICI (il n'existe en clair qu'en mémoire, le temps de cet appel). */
-  saveInstance(candidate: Record<string, unknown>, id: string, tokenPlain: string | null): NotifierInstanceItem {
+      chiffré ICI (il n'existe en clair qu'en mémoire, le temps de cet appel).
+      AUDIT posé PAR LE SERVEUR : `authorId` = id canonique de l'auteur (RequestAuthor.identity, résolu côté
+      route) → `updated_by` à chaque écriture, `created_by` à la création puis préservé par l'upsert. */
+  saveInstance(candidate: Record<string, unknown>, id: string, tokenPlain: string | null, authorId: string = ""): NotifierInstanceItem {
     const parsed: NotifierInstanceCandidate = NotifyValidate.parseInstance(id, candidate);
     const nowIso = new Date().toISOString();
+    const author = AuditStamp.author(authorId);   // id non vide, sinon null
     const existing = this.db.prepare("SELECT token_enc, created_date FROM notifier_instances WHERE id = ?").get(parsed.id) as any;
     const tokenEnc = tokenPlain !== null ? this.box.encrypt(tokenPlain)
       : (existing ? existing.token_enc : null); // pas de nouveau jeton : conserver l'existant (ou aucun)
     this.db.prepare(`
-      INSERT INTO notifier_instances (id, kind, label, url, token_enc, enabled, simple_mode, simple_max_chars, html, created_date, updated_date)
-      VALUES (@id, @kind, @label, @url, @token_enc, @enabled, @simple_mode, @simple_max_chars, @html, @created_date, @updated_date)
+      INSERT INTO notifier_instances (id, kind, label, url, token_enc, enabled, simple_mode, simple_max_chars, html, created_date, updated_date, created_by, updated_by)
+      VALUES (@id, @kind, @label, @url, @token_enc, @enabled, @simple_mode, @simple_max_chars, @html, @created_date, @updated_date, @created_by, @updated_by)
       ON CONFLICT(id) DO UPDATE SET kind=@kind, label=@label, url=@url, token_enc=@token_enc, enabled=@enabled,
-        simple_mode=@simple_mode, simple_max_chars=@simple_max_chars, html=@html, updated_date=@updated_date
+        simple_mode=@simple_mode, simple_max_chars=@simple_max_chars, html=@html, updated_date=@updated_date, updated_by=@updated_by
     `).run({
       id: parsed.id, kind: parsed.kind, label: parsed.label, url: parsed.url,
       token_enc: tokenEnc, enabled: parsed.enabled ? 1 : 0,
       simple_mode: parsed.simple ? 1 : 0, simple_max_chars: parsed.simple_max_chars, html: parsed.html ? 1 : 0,
       created_date: existing ? existing.created_date : nowIso, updated_date: nowIso,
+      // created_by posé à la CRÉATION uniquement (hors DO UPDATE SET → immuable) ; updated_by à chaque écriture.
+      created_by: author, updated_by: author,
     });
     this.log.info("notify: instance enregistrée", parsed.id, parsed.kind);
     return this.listInstances().find((i) => i.id === parsed.id)!;
@@ -263,14 +280,17 @@ export class NotifyDb implements NotifyStateStore {
   }
 
   /** Crée/remplace un abonnement. La FK vérifie l'instance ; le contact est une référence
-      SOUPLE (collection d'un document — garde-fou à l'affichage, cf. cadrage §2). */
-  saveSubscription(candidate: Record<string, unknown>, id: string): SubscriptionItem {
+      SOUPLE (collection d'un document — garde-fou à l'affichage, cf. cadrage §2).
+      AUDIT posé PAR LE SERVEUR : `authorId` = id canonique de l'auteur (RequestAuthor.identity) →
+      `updated_by` à chaque écriture, `created_by` à la création puis préservé par l'upsert. */
+  saveSubscription(candidate: Record<string, unknown>, id: string, authorId: string = ""): SubscriptionItem {
     const parsed: SubscriptionCandidate = NotifyValidate.parseSubscription(id, candidate);
+    const author = AuditStamp.author(authorId);   // id non vide, sinon null
     this.db.prepare(`
-      INSERT INTO subscriptions (id, doc_id, event_type, contact_id, channel, notifier_id, enabled)
-      VALUES (@id, @doc_id, @event_type, @contact_id, @channel, @notifier_id, @enabled)
-      ON CONFLICT(id) DO UPDATE SET doc_id=@doc_id, event_type=@event_type, contact_id=@contact_id, channel=@channel, notifier_id=@notifier_id, enabled=@enabled
-    `).run({ ...parsed, enabled: parsed.enabled ? 1 : 0 });
+      INSERT INTO subscriptions (id, doc_id, event_type, contact_id, channel, notifier_id, enabled, created_by, updated_by)
+      VALUES (@id, @doc_id, @event_type, @contact_id, @channel, @notifier_id, @enabled, @created_by, @updated_by)
+      ON CONFLICT(id) DO UPDATE SET doc_id=@doc_id, event_type=@event_type, contact_id=@contact_id, channel=@channel, notifier_id=@notifier_id, enabled=@enabled, updated_by=@updated_by
+    `).run({ ...parsed, enabled: parsed.enabled ? 1 : 0, created_by: author, updated_by: author });
     this.log.info("notify: abonnement enregistré", parsed.id, parsed.event_type + " → " + parsed.channel);
     return this.listSubscriptions().find((s) => s.id === parsed.id)!;
   }

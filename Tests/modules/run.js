@@ -21,6 +21,7 @@ const DOMAINS = [
   "./test-i18n.js",              // localisation : complétude des catalogues fr ⇄ en
   "./test-certs.js",             // certificats : crypto client pure (PkiCrypto/PkiSession)
   "./test-interventions.js",     // interventions : logique cliente pure (InterventionsFormat, buildQuery)
+  "./test-users.js",             // annuaire utilisateurs serveur (UserProfiles pur, resolver + snapshot SQLite)
   "./test-server.js",            // serveur (ApiRules, SQLite réel, protocole REST)
 ];
 

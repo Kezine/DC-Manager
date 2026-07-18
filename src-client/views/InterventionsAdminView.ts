@@ -147,6 +147,29 @@ export class InterventionsAdminView {
     this.items = res.interventions;
     this.pageMeta = { total: res.total, page: res.page, pages: res.pages, pageSize: res.pageSize };
     this.state.page = res.page;
+    this.ensureAuthors();   // résout les auteurs (created_by/updated_by = IDS) de la page → repeint quand prêts
+  }
+
+  /** Annuaire utilisateurs injecté (mode API) — résout les IDS d'auteur en « Prénom Nom »/login. null en
+      mode fichier (mais le service interventions y est déjà indisponible). */
+  private get directory() { return this.host.userDirectory || null; }
+
+  /** Libellé affichable d'un auteur : depuis le cache de l'annuaire (id brut en repli → le LEGACY « nom en
+      clair » s'affiche tel quel) ; « — » si aucun auteur. */
+  private authorDisplay(by: string): string {
+    const id = (by || "").trim();
+    if (!id) return "—";
+    return this.directory ? this.directory.display(id) : id;
+  }
+
+  /** Résout (async, coalescé) les auteurs de la page courante puis REPEINT le corps quand ils arrivent —
+      la colonne « Créé par » reste SYNCHRONE (cache), rafraîchie une fois le lot résolu. Non bloquant. */
+  private ensureAuthors(): void {
+    const dir = this.directory; if (!dir) return;
+    const ids: string[] = [];
+    for (const it of this.items) { if (it.created_by) ids.push(it.created_by); if (it.updated_by) ids.push(it.updated_by); }
+    if (!ids.length) return;
+    void dir.ensure(ids).then(() => { if (this.bodyEl) this.paintBody(); }).catch(() => { /* auteurs non critiques */ });
   }
 
   /** Re-render COMPLET (toolbar de filtres comprise) — après (re)chargement / réinitialisation des filtres. */
@@ -305,7 +328,7 @@ export class InterventionsAdminView {
     tr.appendChild(this.linksCell(item));
     tr.appendChild(this.jiraCell(item));
 
-    const createdBy = document.createElement("td"); createdBy.textContent = item.created_by || "—";
+    const createdBy = document.createElement("td"); createdBy.textContent = this.authorDisplay(item.created_by);   // ID canonique → nom (legacy = nom en clair, affiché tel quel)
     createdBy.title = item.created_date ? Format.dateTime(item.created_date) : "";
     tr.appendChild(createdBy);
 
@@ -575,8 +598,20 @@ export class InterventionsAdminView {
     root.appendChild(this.detailField(I18n.t("interventions.modal.description"), desc));
 
     root.appendChild(this.detailField(I18n.t("interventions.modal.links"), this.detailLinksList(item)));
-    root.appendChild(this.detailField(I18n.t("interventions.col.createdBy"), this.textValue(this.auditText(item.created_by, item.created_date))));
-    root.appendChild(this.detailField(I18n.t("interventions.detail.updatedBy"), this.textValue(this.auditText(item.updated_by, item.updated_date))));
+    // Audit : created_by/updated_by = IDS canoniques → résolus par l'annuaire. Rendu SYNCHRONE (cache, id brut
+    // en repli) puis re-peint quand le lot d'ids manquants arrive (ensure coalescé). Legacy = nom en clair tel quel.
+    const createdEl = this.textValue(this.auditText(item.created_by, item.created_date));
+    const updatedEl = this.textValue(this.auditText(item.updated_by, item.updated_date));
+    root.appendChild(this.detailField(I18n.t("interventions.col.createdBy"), createdEl));
+    root.appendChild(this.detailField(I18n.t("interventions.detail.updatedBy"), updatedEl));
+    const dir = this.directory;
+    if (dir) {
+      const ids = [item.created_by, item.updated_by].filter((x) => x);
+      if (ids.length) void dir.ensure(ids).then(() => {
+        createdEl.textContent = this.auditText(item.created_by, item.created_date);
+        updatedEl.textContent = this.auditText(item.updated_by, item.updated_date);
+      }).catch(() => { /* auteurs non critiques */ });
+    }
 
     // « Modifier » : bascule vers la modale d'ÉDITION. openModal étant un overlay UNIQUE, l'ouvrir REMPLACE ce
     // détail (fermer-puis-ouvrir implicite) ; inutile de fermer d'abord.
@@ -632,9 +667,10 @@ export class InterventionsAdminView {
     return div;
   }
 
-  /** Ligne d'audit « auteur · date » (auteur seul si la date manque ; « — » si rien). */
+  /** Ligne d'audit « auteur · date » (auteur seul si la date manque ; « — » si rien). L'auteur est résolu
+      via l'annuaire (id canonique → nom ; legacy = nom en clair tel quel). */
   private auditText(who: string, dateIso: string): string {
-    const author = who || "—";
+    const author = this.authorDisplay(who);
     return dateIso ? author + " · " + Format.dateTime(dateIso) : author;
   }
 

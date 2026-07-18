@@ -17,6 +17,7 @@ import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
 import { Html } from "../core/Html";
 import { TargetSearch } from "../core/TargetSearch";
+import { UserDirectory } from "../core/UserDirectory";   // annuaire client (résolution des auteurs d'audit — mode API)
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
 import { Schema } from "../../src-shared/Schema";
 import { Download } from "../core/Download";
@@ -74,6 +75,10 @@ const certsClient = REST_MODE ? new CertsClient(adapter as RestAdapter) : null;
 // fichier/viewer : la page affiche alors un message d'indisponibilité). Le RestAdapter satisfait
 // `InterventionsRestContext` (dataBase/docId/headers/clientId publics) ; routes SCOPÉES PAR DOCUMENT (`<dataBase>/interventions`).
 const interventionsClient = REST_MODE ? new InterventionsClient(adapter as RestAdapter) : null;
+// Annuaire utilisateurs (service CORE, mode API SEULEMENT — null en mode fichier/viewer : aucune identité serveur,
+// donc aucune ligne « Créé/Modifié par » dans les fiches). Le RestAdapter satisfait `UserResolverClient`
+// (méthode `resolveUsers` → endpoint batch GET /users/resolve). Injecté dans les fiches via FormHost. Cf. docs/user-resolver.md.
+const userDirectory = REST_MODE ? new UserDirectory(adapter as RestAdapter) : null;
 const W = window as any;
 const HAS_FS_API = typeof W.showSaveFilePicker === "function" && typeof W.showOpenFilePicker === "function";
 
@@ -117,7 +122,7 @@ async function boot(): Promise<void> {
   const handleStore = new HandleStore();
 
   const modal = new Modal();
-  const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults };   // mutation modèle déjà suivie par la révision (store.onChange)
+  const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
   // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
   // backend d'images selon le mode : IndexedDB (fichier, + compagnon .nmfb) · endpoints blob (REST). Cf. P2.
   const imageBackend = REST_MODE ? new RestImageBackend(API_BASE_URL) : new IdbImageBackend();
@@ -187,6 +192,9 @@ async function boot(): Promise<void> {
       invalidate3D: () => dcView.invalidate3D(),
       setUser: (user) => shell.setUser(user),
       showAccessDenied: (opts) => shell.showAccessDenied(opts),
+      // Écriture d'un AUTRE client dans un module (interventions/certs) : recompte les pastilles concernées,
+      // throttlé (cf. scheduleModulesRecount, défini plus bas ; appelé seulement après le boot, via SSE).
+      onModulesChanged: (modules) => scheduleModulesRecount(modules),
     },
   }) : null;
 
@@ -701,12 +709,21 @@ async function boot(): Promise<void> {
   // activation de l'onglet, après écriture dans la vue), et on force `shell.refreshCounts()` quand elle arrive. Le
   // total d'ouvertes = `total` du listing filtré sur les statuts ouverts (aucun chargement complet côté client).
   // Mode fichier : `interventionsClient` est null → `count` non défini (pas de badge, cf. Shell.build).
+  // La pastille prend une TEINTE D'ALERTE (err) dès qu'au moins une intervention OUVERTE est de priorité
+  // `critical` (2e comptage pageSize:1 filtré ouvertes + priorité critique — le listing serveur ET statuts ET
+  // priorité). Le compte affiché reste le nombre d'OUVERTES (inchangé).
   let interventionsOpenCount = 0;
+  let interventionsCriticalOpen = false;
   const refreshInterventionsCount = async (): Promise<void> => {
-    if (!interventionsClient || !interventionsClient.docId) { interventionsOpenCount = 0; shell.refreshCounts(); return; }
+    if (!interventionsClient || !interventionsClient.docId) { interventionsOpenCount = 0; interventionsCriticalOpen = false; shell.refreshCounts(); return; }
     try {
-      const res = await interventionsClient.listPage({ pageSize: 1, statuses: [...InterventionsFormat.OPEN_STATUS_SLUGS] });
-      interventionsOpenCount = res.total;
+      const openStatuses = [...InterventionsFormat.OPEN_STATUS_SLUGS];
+      const [openRes, critRes] = await Promise.all([
+        interventionsClient.listPage({ pageSize: 1, statuses: openStatuses }),
+        interventionsClient.listPage({ pageSize: 1, statuses: openStatuses, priorities: ["critical"] }),
+      ]);
+      interventionsOpenCount = openRes.total;
+      interventionsCriticalOpen = critRes.total > 0;
     } catch (_) { /* badge non critique : on garde l'ancienne valeur en cas d'échec réseau */ }
     shell.refreshCounts();
   };
@@ -714,7 +731,8 @@ async function boot(): Promise<void> {
     name: "interventions", label: I18n.t("tabs.interventions.label"), kind: "primary",
     icon: Icons.INTERVENTION,
     title: I18n.t("tabs.interventions.label"), subtitle: I18n.t("tabs.interventions.subtitle"),
-    count: REST_MODE ? () => interventionsOpenCount : undefined,   // badge en mode API uniquement
+    count: REST_MODE ? () => interventionsOpenCount : undefined,   // badge en mode API uniquement (masqué à 0)
+    countClass: REST_MODE ? () => (interventionsCriticalOpen ? "err" : null) : undefined,   // ≥ 1 ouverte critique → alerte rouge
     onShow: () => { interventionsView.show(); void refreshInterventionsCount(); },
   });
   interventionsView = new InterventionsAdminView(interventionsContainer, interventionsClient, formHost, interventionTargets);   // formulaires dans LA modale de l'app (principe n°11)
@@ -737,16 +755,21 @@ async function boot(): Promise<void> {
   // enregistrée : `certsClient` est null hors mode API → la vue affiche « mode API requis » (feature AMOVIBLE :
   // retirer C6 = supprimer CertsAdminView + CertsClient + CertsFormat + ces lignes).
   let certsView: CertsAdminView;
-  // Badge de l'onglet « Certificats » : nombre TOTAL de certificats. Même mécanique async que les interventions
-  // (donnée paginée serveur, `count()` shell synchrone) : valeur cachée + refresh async → `shell.refreshCounts()`.
-  // Total = `total` du listing plat SANS filtre (une requête pageSize:1, aucun chargement complet). Null en mode
-  // fichier (`certsClient` null) → `count` non défini, pas de badge.
-  let certsTotalCount = 0;
+  // Badge de l'onglet « Certificats » : ALERTE D'ÉCHÉANCE (et non plus le total). Compte = certificats non
+  // révoqués EXPIRANTS (échéance ≤ 30 j, pas encore expirés) + DÉJÀ EXPIRÉS — deux comptages plats pageSize:1
+  // via le filtre serveur `status` existant (« expiring » / « expired », cf. CertsDb.filterClause, seuil 30 j).
+  // Teinte : `err` si au moins un DÉJÀ EXPIRÉ, sinon `warn` si des expirants. Pastille MASQUÉE à 0 (c'est une
+  // alerte : rien à signaler quand aucune échéance proche). Null en mode fichier (`certsClient` null → pas de badge).
+  let certsExpiringCount = 0, certsExpiredCount = 0;
   const refreshCertsCount = async (): Promise<void> => {
-    if (!certsClient || !certsClient.docId) { certsTotalCount = 0; shell.refreshCounts(); return; }
+    if (!certsClient || !certsClient.docId) { certsExpiringCount = 0; certsExpiredCount = 0; shell.refreshCounts(); return; }
     try {
-      const res = await certsClient.listPage({ pageSize: 1 });
-      certsTotalCount = res.total;
+      const [expiring, expired] = await Promise.all([
+        certsClient.listPage({ pageSize: 1, status: "expiring" }),
+        certsClient.listPage({ pageSize: 1, status: "expired" }),
+      ]);
+      certsExpiringCount = expiring.total;
+      certsExpiredCount = expired.total;
     } catch (_) { /* badge non critique : on garde l'ancienne valeur en cas d'échec réseau */ }
     shell.refreshCounts();
   };
@@ -754,11 +777,28 @@ async function boot(): Promise<void> {
     name: "certificats", label: I18n.t("tabs.certificats.label"), kind: "primary",
     icon: Icons.CERTIFICATE,
     title: I18n.t("tabs.certificats.label"), subtitle: I18n.t("tabs.certificats.subtitle"),
-    count: REST_MODE ? () => certsTotalCount : undefined,   // badge en mode API uniquement
+    count: REST_MODE ? () => certsExpiringCount + certsExpiredCount : undefined,   // badge = alerte d'échéance (masqué à 0)
+    countClass: REST_MODE ? () => (certsExpiredCount > 0 ? "err" : (certsExpiringCount > 0 ? "warn" : null)) : undefined,   // expiré → rouge, expirant → orange
     onShow: () => { certsView.show(); void refreshCertsCount(); },
   });
   certsView = new CertsAdminView(certsContainer, certsClient, formHost);   // formulaires dans LA modale de l'app (principe n°11)
-  certsView.onCountsChanged = () => { void refreshCertsCount(); };   // après création/suppression → recompte le total
+  certsView.onCountsChanged = () => { void refreshCertsCount(); };   // après création/suppression → recompte l'alerte d'échéance
+
+  // SSE MODULES (interventions/certs) : quand un AUTRE client écrit, le serveur publie un événement porteur du
+  // marqueur `changeset.modules` (cf. RestDocumentController). On recompte alors les pastilles concernées, THROTTLÉ
+  // (accumulation des modules d'événements rapprochés → une seule rafale de recomptes ; comptages pageSize:1 bon marché).
+  const pendingModuleRecounts = new Set<string>();
+  let moduleRecountTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleModulesRecount = (modules: string[]): void => {
+    modules.forEach((m) => pendingModuleRecounts.add(m));
+    if (moduleRecountTimer) clearTimeout(moduleRecountTimer);
+    moduleRecountTimer = setTimeout(() => {
+      moduleRecountTimer = null;
+      const mods = new Set(pendingModuleRecounts); pendingModuleRecounts.clear();
+      if (mods.has("interventions")) void refreshInterventionsCount();
+      if (mods.has("certs")) void refreshCertsCount();
+    }, 400);
+  };
   // GROUPE « Paramètres » : onglet TOUJOURS DÉROULANT (jamais une vue) regroupant les pages rarement visitées.
   // EN DERNIER (après les onglets métier ET l'onglet Certificats).
   shell.addGroup({ name: "parametres", label: I18n.t("tabs.parametres.label"), kind: "group", icon: Icons.SETTINGS, children: ["contacts", "notifications"] });

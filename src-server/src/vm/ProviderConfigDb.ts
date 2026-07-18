@@ -3,6 +3,7 @@ import path from "node:path";
 import { Logger } from "../logger.js";
 import type { SqliteCtor, SqliteDb } from "../db.js";
 import type { ProviderConfig, ProviderConfigSource, ProviderEndpoint } from "./VmProvider.js";
+import { AuditStamp } from "../AuditStamp.js";   // « auteur présent » partagé (id canonique de created_by/updated_by)
 import { SecretBox } from "../SecretBox.js";
 import { ProviderConfigValidate, ProviderConfigError } from "./ProviderConfigValidate.js";
 import { ProviderConfigStore } from "./ProviderConfigStore.js";
@@ -133,6 +134,8 @@ export class ProviderConfigDb implements ProviderConfigSource {
       management_url TEXT,
       created_date TEXT NOT NULL,
       updated_date TEXT NOT NULL,
+      created_by   TEXT,
+      updated_by   TEXT,
       PRIMARY KEY (doc_id, id)
     )`);
     // MIGRATION IDEMPOTENTE : des vm-providers.db existent DÉJÀ chez l'utilisateur (créés avant
@@ -141,6 +144,10 @@ export class ProviderConfigDb implements ProviderConfigSource {
     // migrations de DocumentStore, src-server/src/documents.ts). Sur une base neuve, la colonne
     // vient déjà du CREATE ci-dessus → l'ALTER échoue et est ignoré (idempotent).
     try { this.db.exec("ALTER TABLE vm_providers ADD COLUMN management_url TEXT"); } catch { /* colonne déjà présente */ }
+    // AUDIT « qui a créé / modifié » (lot audit utilisateur) : colonnes nullable ajoutées idempotemment —
+    // une vm-providers.db antérieure les gagne sans valeur (lignes legacy = NULL), estampillées à la prochaine écriture.
+    try { this.db.exec("ALTER TABLE vm_providers ADD COLUMN created_by TEXT"); } catch { /* colonne déjà présente */ }
+    try { this.db.exec("ALTER TABLE vm_providers ADD COLUMN updated_by TEXT"); } catch { /* colonne déjà présente */ }
     this.db.exec(`CREATE TABLE IF NOT EXISTS vm_provider_endpoints (
       doc_id       TEXT NOT NULL,
       provider_id  TEXT NOT NULL,
@@ -222,8 +229,10 @@ export class ProviderConfigDb implements ProviderConfigSource {
       - `tokenPlain === null` (ou vide) → CONSERVE le jeton existant (édition « inchangé ») ;
       - création (aucun existant) SANS jeton → erreur de validation (« token requis »).
       La config candidate (SANS jeton) est validée par `ProviderConfigValidate` (mêmes messages que
-      le parseur fichier). Lève `ProviderConfigError` si invalide. Renvoie l'élément SANS jeton. */
-  save(docId: string, candidate: unknown, tokenPlain: string | null): ProviderListItem {
+      le parseur fichier). Lève `ProviderConfigError` si invalide. Renvoie l'élément SANS jeton.
+      AUDIT posé PAR LE SERVEUR : `authorId` = id canonique de l'auteur (RequestAuthor.identity, résolu côté
+      route) → `updated_by` à chaque écriture, `created_by` à la création puis préservé par l'upsert. */
+  save(docId: string, candidate: unknown, tokenPlain: string | null, authorId: string = ""): ProviderListItem {
     if (!ProviderConfigValidate.isPlainObject(candidate)) {
       throw new ProviderConfigError([ProviderConfigValidate.providerLabel(docId, 0, null) + " : provider attendu (objet)"]);
     }
@@ -247,7 +256,7 @@ export class ProviderConfigDb implements ProviderConfigSource {
     const tokenEnc = hasNewToken ? this.box.encrypt(tokenPlain as string) : (existing as ProviderRow).token_enc;
     const now = new Date().toISOString();
     const createdDate = existing ? existing.created_date : now;
-    this.writeProvider(docId, config, tokenEnc, createdDate, now);
+    this.writeProvider(docId, config, tokenEnc, createdDate, now, AuditStamp.author(authorId));
     this.log.info(existing ? "vm: provider mis à jour" : "vm: provider créé", docId, config.id);
     return this.toListItem(docId, {
       id: config.id, kind: config.kind, include_lxc: config.include_lxc ? 1 : 0,
@@ -341,20 +350,23 @@ export class ProviderConfigDb implements ProviderConfigSource {
 
   /** Écrit UN provider (upsert par PK) + REMPLACE ses endpoints (delete puis insert ordonné), en
       UNE transaction. `ca_pem` est PERSISTÉ (CA du cluster, PUBLIC) : posé à la création comme à la
-      mise à jour — vide côté UI = null (« pas de CA cluster »). */
-  private writeProvider(docId: string, config: ProviderConfig, tokenEnc: string, createdDate: string, updatedDate: string): void {
+      mise à jour — vide côté UI = null (« pas de CA cluster »). `createdBy` = id canonique de l'auteur
+      (null en migration legacy) : posé à la CRÉATION puis PRÉSERVÉ par l'upsert (hors DO UPDATE SET) ;
+      `updated_by` rafraîchi à chaque écriture. */
+  private writeProvider(docId: string, config: ProviderConfig, tokenEnc: string, createdDate: string, updatedDate: string, createdBy: string | null = null): void {
     const write = this.db.transaction(() => {
       this.db.prepare(
-        `INSERT INTO vm_providers (doc_id, id, kind, token_enc, include_lxc, interval_sec, timeout_sec, ca_pem, management_url, created_date, updated_date)
-         VALUES (@doc_id, @id, @kind, @token_enc, @include_lxc, @interval_sec, @timeout_sec, @ca_pem, @management_url, @created_date, @updated_date)
+        `INSERT INTO vm_providers (doc_id, id, kind, token_enc, include_lxc, interval_sec, timeout_sec, ca_pem, management_url, created_date, updated_date, created_by, updated_by)
+         VALUES (@doc_id, @id, @kind, @token_enc, @include_lxc, @interval_sec, @timeout_sec, @ca_pem, @management_url, @created_date, @updated_date, @created_by, @updated_by)
          ON CONFLICT(doc_id, id) DO UPDATE SET
            kind = @kind, token_enc = @token_enc, include_lxc = @include_lxc,
            interval_sec = @interval_sec, timeout_sec = @timeout_sec, ca_pem = @ca_pem,
-           management_url = @management_url, updated_date = @updated_date`,
+           management_url = @management_url, updated_date = @updated_date, updated_by = @updated_by`,
       ).run({
         doc_id: docId, id: config.id, kind: config.kind, token_enc: tokenEnc,
         include_lxc: config.include_lxc ? 1 : 0, interval_sec: config.interval_sec, timeout_sec: config.timeout_sec,
         ca_pem: config.ca_pem, management_url: config.management_url, created_date: createdDate, updated_date: updatedDate,
+        created_by: createdBy, updated_by: createdBy,
       });
       // Le pool est REMPLACÉ intégralement (ordre + fingerprints peuvent changer) : delete puis ré-insert.
       this.db.prepare(`DELETE FROM vm_provider_endpoints WHERE doc_id = ? AND provider_id = ?`).run(docId, config.id);

@@ -131,13 +131,16 @@ en dépend), WAL + `busy_timeout` (parité `DocumentStore`/`ProviderConfigDb`).
 - **`notifier_instances`** — canaux configurés :
   `id` (PK), `kind` (`console`/`webhook`), `label`, `url` (endpoint webhook, NULL
   pour console), `token_enc` (jeton d'appel **CHIFFRÉ** au repos, NULL = sans auth),
-  `enabled`, `created_date`/`updated_date`.
+  `enabled`, `created_date`/`updated_date`, **`created_by`/`updated_by`** (id canonique de
+  l'auteur — audit posé SERVEUR, cf. [`user-resolver.md`](user-resolver.md)).
 - **`subscriptions`** — routage par TYPE d'événement (décision utilisateur) :
   `id` (PK), `doc_id` (NULL = abonnement **global**, tous documents), `event_type`
   (type exact ou `*`), `contact_id` (**référence SOUPLE** vers la collection
   `contacts` d'un document — pas de FK inter-bases), `channel` (`email`/`sms`),
-  `notifier_id` (**FK `ON DELETE CASCADE`** → `notifier_instances.id`), `enabled`.
-  Index sur `event_type`.
+  `notifier_id` (**FK `ON DELETE CASCADE`** → `notifier_instances.id`), `enabled`,
+  **`created_by`/`updated_by`** (audit posé SERVEUR). Index sur `event_type`.
+  (Les tables `notification_states`/`notification_log` — produites par les veilleurs, sans
+  auteur humain — ne portent PAS d'audit.)
 - **`notification_states`** — l'anti-spam/rappels (le `NotifyStateStore` du moteur) :
   `key` (PK), `event_type`, `severity`, `doc_id`, `title`/`body` (**extension au
   cadrage** : le timer reconstruit le message sans le producteur), `first_seen`,

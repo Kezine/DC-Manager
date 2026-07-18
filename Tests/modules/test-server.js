@@ -4,6 +4,50 @@
 const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
+  await section("Serveur : AuditStamp — estampillage PUR created_by/updated_by + dates serveur (création/màj/écrasement client/legacy/id vide/idempotence)", async () => {
+  {
+    const { AuditStamp } = SERVER("AuditStamp.js");
+    const T1 = "2026-01-01T00:00:00.000Z", T2 = "2026-02-02T00:00:00.000Z";
+
+    // -- CRÉATION (existing = null) : _by = id, dates = maintenant ; les valeurs d'audit du CLIENT sont ÉCRASÉES. --
+    const created = AuditStamp.apply({ name: "srv", created_by: "PIRATE", updated_by: "PIRATE", created_date: "1999-01-01T00:00:00.000Z", updated_date: "1999-01-01T00:00:00.000Z" }, null, "u-alice", T1);
+    ck(created.created_by === "u-alice" && created.updated_by === "u-alice", "création : created_by/updated_by = id de l'auteur");
+    ck(created.created_date === T1 && created.updated_date === T1, "création : created_date = updated_date = horodatage serveur");
+    ck.eq(created.name, "srv", "création : les autres champs sont conservés");
+
+    // -- MISE À JOUR : created_* REPRIS de l'existant (immuables), updated_* rafraîchis ; valeurs client écrasées. --
+    const existing = { name: "srv", created_by: "u-alice", updated_by: "u-alice", created_date: T1, updated_date: T1 };
+    const updated = AuditStamp.apply({ name: "srv2", created_by: "PIRATE", created_date: "1999-01-01T00:00:00.000Z" }, existing, "u-bob", T2);
+    ck(updated.created_by === "u-alice" && updated.created_date === T1, "màj : created_by/created_date REPRIS de l'existant (immuables, valeur client ignorée)");
+    ck(updated.updated_by === "u-bob" && updated.updated_date === T2, "màj : updated_by/updated_date rafraîchis");
+
+    // -- LEGACY (existant sans audit) : created_* RESTENT ABSENTS ; updated_* posés. --
+    const legacyUpd = AuditStamp.apply({ name: "vieux", created_by: "PIRATE" }, { name: "vieux" }, "u-bob", T2);
+    ck(!("created_by" in legacyUpd) && !("created_date" in legacyUpd), "legacy : created_by/created_date absents de l'existant → restent absents (valeur client neutralisée)");
+    ck(legacyUpd.updated_by === "u-bob" && legacyUpd.updated_date === T2, "legacy : updated_by/updated_date tout de même posés");
+
+    // -- id VIDE (dégénéré) : on ne POSE PAS les _by ; les DATES restent posées. --
+    const noIdCreate = AuditStamp.apply({ created_by: "PIRATE", updated_by: "PIRATE" }, null, "", T1);
+    ck(!("created_by" in noIdCreate) && !("updated_by" in noIdCreate), "id vide (création) : aucun _by posé (valeur client neutralisée)");
+    ck(noIdCreate.created_date === T1 && noIdCreate.updated_date === T1, "id vide (création) : dates tout de même posées");
+    const noIdUpd = AuditStamp.apply({ created_by: "PIRATE" }, { created_by: "u-alice", updated_by: "u-alice", created_date: T1 }, "", T2);
+    ck(noIdUpd.created_by === "u-alice" && noIdUpd.updated_by === "u-alice", "id vide (màj) : _by conservés (dernier auteur connu de l'existant)");
+    ck(noIdUpd.updated_date === T2, "id vide (màj) : updated_date rafraîchi");
+
+    // -- PURETÉ : l'entrée n'est jamais mutée. --
+    const input = { name: "x", created_by: "PIRATE" };
+    AuditStamp.apply(input, null, "u-alice", T1);
+    ck(input.created_by === "PIRATE", "pureté : l'objet d'entrée n'est PAS muté (copie renvoyée)");
+
+    // -- IDEMPOTENCE : ré-estampiller le résultat comme une màj laisse created_* stable. --
+    const again = AuditStamp.apply(created, created, "u-alice", T2);
+    ck(again.created_by === "u-alice" && again.created_date === T1 && again.updated_by === "u-alice" && again.updated_date === T2, "idempotence : created_* stables, seul updated_date évolue");
+
+    // -- author() : définition « auteur présent » (chaîne non vide, sinon null). --
+    ck(AuditStamp.author("u-x") === "u-x" && AuditStamp.author("") === null && AuditStamp.author(undefined) === null && AuditStamp.author(42) === null, "author() : chaîne non vide → id, sinon null");
+  }
+  });
+
   await section("Serveur : ApiRules — ciblage du verrou optimiste (writeTargets)", async () => {
   {
     const { ApiRules } = SERVER("ApiRules.js");
@@ -164,6 +208,12 @@ module.exports = async () => {
     ck.eq(repo.getImageMeta("imgR").rev, 1, "putImage : édition de MÉTA seule → rev inchangée");
     repo.putImage("imgR", { name: "v2", type: "image/png" }, Buffer.from([3, 4]));   // nouveau blob de MÊME taille
     ck.eq(repo.getImageMeta("imgR").rev, 2, "putImage : nouveau blob (même taille) → rev incrémentée (l'ancien jeton bytes ne le voyait pas)");
+    // -- SNAPSHOT (restore) : l'audit contenu est restauré VERBATIM (arbitrage Q7 — pas de ré-estampillage serveur).
+    //    Le blob stocke le record ENTIER (replaceSnapshot), donc created_by/updated_by survivent tels quels. --
+    repo.replaceSnapshot({ equipments: [{ id: "au1", name: "audité", created_by: "u-alice", updated_by: "u-bob", created_date: "2020-01-01T00:00:00.000Z", updated_date: "2021-01-01T00:00:00.000Z" }] }, 9);
+    const restored = repo.getOne("equipments", "au1");
+    ck(restored.created_by === "u-alice" && restored.updated_by === "u-bob", "snapshot : audit created_by/updated_by restauré VERBATIM (Q7 — pas de ré-estampillage)");
+    ck.eq(restored.created_date, "2020-01-01T00:00:00.000Z", "snapshot : created_date d'audit restauré verbatim");
     repo.close();
 
     // -- DocumentStore : cycle de vie complet SUR DISQUE (fix Windows : close() avant suppression) --
@@ -1630,6 +1680,20 @@ module.exports = async () => {
       ck.eq(await engine.runReminders(), 1, "…rappel autonome dû après 12 h (timer S3)");
       await engine.resolve("vm-sync:docA:pve");
       ck(consoleSent.length === 3 && /Rétabli/.test(consoleSent[2].title), "…rétablissement notifié une fois (cycle complet)");
+
+      // -- AUDIT « qui » (lot audit utilisateur) : created_by/updated_by sur les objets de CONFIGURATION
+      //    (canaux + abonnements — jamais sur les états/journaux, produits par les veilleurs sans auteur humain). --
+      db.saveInstance({ kind: "console", label: "Auditée" }, "aud-inst", null, "u-alice");
+      let aInst = raw.prepare("SELECT created_by, updated_by FROM notifier_instances WHERE id='aud-inst'").get();
+      ck(aInst.created_by === "u-alice" && aInst.updated_by === "u-alice", "audit notify : création d'instance → created_by/updated_by = id de l'auteur");
+      db.saveInstance({ kind: "console", label: "Auditée (maj)" }, "aud-inst", null, "u-bob");
+      aInst = raw.prepare("SELECT created_by, updated_by FROM notifier_instances WHERE id='aud-inst'").get();
+      ck(aInst.created_by === "u-alice" && aInst.updated_by === "u-bob", "audit notify : màj d'instance → created_by CONSERVÉ, updated_by rafraîchi");
+      db.saveSubscription({ event_type: "test", contact_id: "c-aud", channel: "email", notifier_id: "aud-inst" }, "aud-sub", "u-alice");
+      const aSub = raw.prepare("SELECT created_by, updated_by FROM subscriptions WHERE id='aud-sub'").get();
+      ck(aSub.created_by === "u-alice" && aSub.updated_by === "u-alice", "audit notify : création d'abonnement → created_by/updated_by = id de l'auteur");
+      db.saveInstance({ kind: "console", label: "Sans auteur" }, "aud-noauth", null); // authorId par défaut ""
+      ck.eq(raw.prepare("SELECT created_by FROM notifier_instances WHERE id='aud-noauth'").get().created_by, null, "audit notify : écriture sans id d'auteur → colonne NULL");
     } finally {
       if (raw) { try { raw.close(); } catch (_) {} }
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
@@ -1659,6 +1723,10 @@ module.exports = async () => {
       ck(cols("notification_log").includes("phase"), "migration : colonne phase ajoutée à une notification_log antérieure");
       ck(cols("notification_states").includes("title") && cols("notification_states").includes("body"), "migration : colonnes title/body ajoutées à une notification_states antérieure");
       ck(cols("notifier_instances").includes("simple_mode") && cols("notifier_instances").includes("simple_max_chars") && cols("notifier_instances").includes("html"), "migration : colonnes simple_mode/simple_max_chars/html ajoutées à une notifier_instances antérieure");
+      // Lot audit utilisateur : created_by/updated_by ajoutées à notifier_instances antérieure ; subscriptions (absente
+      // du schéma ancien de ce test) créée par createSchema AVEC les colonnes d'audit.
+      ck(cols("notifier_instances").includes("created_by") && cols("notifier_instances").includes("updated_by"), "migration : colonnes d'audit created_by/updated_by ajoutées à une notifier_instances antérieure");
+      ck(cols("subscriptions").includes("created_by") && cols("subscriptions").includes("updated_by"), "migration : subscriptions porte created_by/updated_by (schéma courant)");
     } finally {
       try { fs.rmSync(dirOld, { recursive: true, force: true }); } catch (_) {}
     }
@@ -1777,6 +1845,18 @@ module.exports = async () => {
       let sanIssues = null;
       try { db.save("doc-A", "bad-4", { kind: "ssh-keypair", label: "X", subject: "u@x", key_algo: "ed25519", sans: [{ san_type: "pigeon-voyageur", value: "x" }] }); } catch (e) { if (e instanceof CertsConfigError) sanIssues = e.issues; }
       ck(!!sanIssues && sanIssues.some((i) => /san_type/.test(i)), "type de SAN inconnu → grief");
+
+      // -- AUDIT « qui » (lot audit utilisateur) : created_by/updated_by posés PAR LE SERVEUR (id canonique). --
+      db.save("doc-A", "aud-1", { kind: "ssh-keypair", label: "Audité", subject: "u@aud", key_algo: "ed25519" }, "u-alice");
+      let audRow = raw.prepare("SELECT created_by, updated_by FROM certificates WHERE doc_id='doc-A' AND id='aud-1'").get();
+      ck(audRow.created_by === "u-alice" && audRow.updated_by === "u-alice", "audit certs : création → created_by/updated_by = id de l'auteur");
+      db.save("doc-A", "aud-1", { kind: "ssh-keypair", label: "Audité (maj)", subject: "u@aud", key_algo: "ed25519" }, "u-bob");
+      audRow = raw.prepare("SELECT created_by, updated_by FROM certificates WHERE doc_id='doc-A' AND id='aud-1'").get();
+      ck(audRow.created_by === "u-alice" && audRow.updated_by === "u-bob", "audit certs : mise à jour → created_by CONSERVÉ, updated_by rafraîchi");
+      db.save("doc-A", "aud-2", { kind: "ssh-keypair", label: "Sans auteur", subject: "u@none", key_algo: "ed25519" }); // sans authorId
+      const audNone = raw.prepare("SELECT created_by, updated_by FROM certificates WHERE doc_id='doc-A' AND id='aud-2'").get();
+      ck(audNone.created_by === null && audNone.updated_by === null, "audit certs : écriture sans id d'auteur → colonnes NULL");
+      db.remove("doc-A", "aud-1", true); db.remove("doc-A", "aud-2", true); // laisser la base propre pour listExpiring
 
       // -- isActive : ni révoqué, ni expiré (seule question de sûreté que le serveur puisse trancher). --
       const NOW = Date.parse("2026-07-16T12:00:00Z");
@@ -1961,7 +2041,11 @@ module.exports = async () => {
 
       const migDb = new CertsDb(backfillDir, Sqlite);
       rawBackfill = new Sqlite(path.join(backfillDir, "certs.db"));
-      ck(rawBackfill.prepare("PRAGMA table_info(certificates)").all().map((c) => c.name).includes("search"), "backfill : réouverture → colonne search AJOUTÉE (ensureColumn idempotent)");
+      const bfCols = rawBackfill.prepare("PRAGMA table_info(certificates)").all().map((c) => c.name);
+      ck(bfCols.includes("search"), "backfill : réouverture → colonne search AJOUTÉE (ensureColumn idempotent)");
+      // L'ancien schéma (ci-dessus) n'a pas non plus created_by/updated_by → ensureColumn les ajoute (lot audit).
+      ck(bfCols.includes("created_by") && bfCols.includes("updated_by"), "backfill : colonnes d'audit created_by/updated_by AJOUTÉES à une certs.db antérieure (ensureColumn idempotent)");
+      ck.eq(rawBackfill.prepare("SELECT created_by FROM certificates WHERE id='legacy-1'").get().created_by, null, "backfill : ligne préexistante → created_by NULL (legacy, pas d'auteur)");
       const bfSan = migDb.listPage("OLD", { query: "backfilled" });
       ck(bfSan.total === 1 && bfSan.certificates[0].id === "legacy-1", "backfill : search recalculé DEPUIS le SAN de la ligne préexistante (query « backfilled » → legacy-1)");
       const bfLabel = migDb.listPage("OLD", { query: "ancien" });
@@ -2097,6 +2181,16 @@ module.exports = async () => {
       ck.eq(forSync[0].ca_pem, null, "providersFor : ca_pem null restitué (pas de CA cluster)");
       ck.eq(db.configuredDocIds().join(","), "doc-A", "configuredDocIds → documents configurés");
 
+      // -- AUDIT « qui » (lot audit utilisateur) : created_by/updated_by sur les providers (posés PAR LE SERVEUR). --
+      db.save("doc-A", { id: "pve-aud", kind: "proxmox", url: "https://aud:8006" }, "t@pam!x=AUD", "u-alice");
+      let pAud = raw.prepare("SELECT created_by, updated_by FROM vm_providers WHERE doc_id='doc-A' AND id='pve-aud'").get();
+      ck(pAud.created_by === "u-alice" && pAud.updated_by === "u-alice", "audit vm : création de provider → created_by/updated_by = id de l'auteur");
+      db.save("doc-A", { id: "pve-aud", kind: "proxmox", url: "https://aud:8006", interval_sec: 120 }, null, "u-bob"); // token conservé, autre auteur
+      pAud = raw.prepare("SELECT created_by, updated_by FROM vm_providers WHERE doc_id='doc-A' AND id='pve-aud'").get();
+      ck(pAud.created_by === "u-alice" && pAud.updated_by === "u-bob", "audit vm : màj de provider → created_by CONSERVÉ, updated_by rafraîchi");
+      ck.eq(raw.prepare("SELECT created_by FROM vm_providers WHERE doc_id='doc-A' AND id='pve-1'").get().created_by, null, "audit vm : provider écrit SANS id d'auteur → colonne NULL");
+      db.remove("doc-A", "pve-aud"); // laisser la base à l'état attendu par la suite de la section
+
       // -- ca_pem (CA du cluster, PUBLIQUE) : ROUNDTRIP save → listFor + providersFor + colonne DB. --
       const caPem = "-----BEGIN CERTIFICATE-----\nMIIB...FAUX-CA-TEST...\n-----END CERTIFICATE-----";
       const savedCa = db.save("doc-A", { id: "pve-ca", kind: "proxmox", url: "https://pveca:8006", ca_pem: caPem }, "root@pam!t=CA-1");
@@ -2204,6 +2298,9 @@ module.exports = async () => {
         const rawCol = new Sqlite(path.join(migColDir, "vm-providers.db"));
         const colsAfter = rawCol.prepare("PRAGMA table_info(vm_providers)").all().map((c) => c.name);
         ck(colsAfter.includes("management_url"), "migration colonne : réouverture → colonne management_url AJOUTÉE (ALTER idempotent)");
+        // Lot audit utilisateur : la même réouverture ajoute created_by/updated_by (ALTER idempotent).
+        ck(colsAfter.includes("created_by") && colsAfter.includes("updated_by"), "migration colonne : created_by/updated_by AJOUTÉES à une vm-providers.db antérieure");
+        ck.eq(rawCol.prepare("SELECT created_by FROM vm_providers WHERE id='pve-old'").get().created_by, null, "migration colonne : provider préexistant → created_by NULL (legacy, pas d'auteur)");
         const item = migColDb.listFor("doc-OLD")[0];
         ck(!!item && item.id === "pve-old" && item.endpoints.length === 1 && item.endpoints[0].url === "https://old:8006", "migration colonne : provider + endpoint INTACTS après migration");
         ck.eq(item.management_url, null, "migration colonne : lignes préexistantes → management_url null (colonne ajoutée sans valeur)");

@@ -31,6 +31,16 @@ export const detail = {
     yes: "Oui",
     no: "Non",
   },
+  // Ligne d'audit DISCRÈTE des fiches détail (« Créé/Modifié par {auteur} le {date} », cf. AuditLine, mode API).
+  // Variantes selon les champs présents : par+date, par seul, date seule.
+  audit: {
+    createdBy: "Créé par {{author}} le {{date}}",
+    createdByOnly: "Créé par {{author}}",
+    createdAt: "Créé le {{date}}",
+    updatedBy: "Modifié par {{author}} le {{date}}",
+    updatedByOnly: "Modifié par {{author}}",
+    updatedAt: "Modifié le {{date}}",
+  },
   viz: {
     building: "Bât.",
     floor: "Étage",

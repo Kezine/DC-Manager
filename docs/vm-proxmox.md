@@ -209,7 +209,9 @@ plaintext, cf. persistance.md) :
 - `vm_providers` : `doc_id`, `id`, `kind`, `token_enc` (jeton **chiffré**),
   `include_lxc`, `interval_sec`, `timeout_sec`, `ca_pem` (CA du cluster au format
   PEM — **PUBLIC**, pas un secret ; NULL = pas de CA cluster ; niveau 2 de la
-  hiérarchie de confiance), `created_date`/`updated_date`. PK `(doc_id, id)`.
+  hiérarchie de confiance), `created_date`/`updated_date`, **`created_by`/`updated_by`**
+  (id canonique de l'auteur — audit posé SERVEUR, migration `ALTER` idempotente ; cf.
+  [`user-resolver.md`](user-resolver.md)). PK `(doc_id, id)`.
 - `vm_provider_endpoints` : le **POOL est un 1-N ORDONNÉ** — `doc_id`,
   `provider_id`, `position` (= priorité de bascule), `url`, `fingerprint`
   (empreinte PAR nœud, NULL = CA système). FK `ON DELETE CASCADE` (supprimer un

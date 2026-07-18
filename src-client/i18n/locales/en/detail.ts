@@ -25,6 +25,15 @@ export const detail = {
     yes: "Yes",
     no: "No",
   },
+  // Discreet audit line of the detail cards (« Created/Modified by {author} on {date} », cf. AuditLine, API mode).
+  audit: {
+    createdBy: "Created by {{author}} on {{date}}",
+    createdByOnly: "Created by {{author}}",
+    createdAt: "Created on {{date}}",
+    updatedBy: "Modified by {{author}} on {{date}}",
+    updatedByOnly: "Modified by {{author}}",
+    updatedAt: "Modified on {{date}}",
+  },
   viz: {
     building: "Bldg.",
     floor: "Floor",

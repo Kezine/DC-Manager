@@ -169,6 +169,11 @@
     font-size: 10px;
     color: var(--fg-dim);
   }
+  /* Pastilles en mode ALERTE (cf. Shell.refreshCounts / ShellView.countClass) : bordure + texte teintés, fond
+     transparent (même langage visuel que les pills sémantiques). warn = attention (ex. certificats expirants ≤ 30 j) ;
+     err = critique (ex. interventions ouvertes critiques, certificats déjà expirés). */
+  .tab-count.warn { background: transparent; border-color: var(--warn); color: var(--warn); }
+  .tab-count.err { background: transparent; border-color: var(--err); color: var(--err); }
 
   /* Onglet en ICÔNE (barre desktop) : l'icône (span .gi) remplace le texte ; taille alignée sur les autres icônes
      de la topbar (.icon-btn svg = 16px). Le libellé reste porté par title + aria-label (a11y). Le soulignement de
@@ -1214,6 +1219,8 @@
   .detail-grid { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; font-size: 12px; }
   .detail-grid .dt { color: var(--fg-dim); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; padding-top: 2px; }
   .detail-grid .dd { color: var(--fg); word-break: break-word; }
+  /* Ligne d'audit DISCRÈTE des fiches (« Créé/Modifié par … le … », cf. AuditLine) : petite, estompée, en retrait. */
+  .audit-line { margin-top: 14px; font-size: 10px; color: var(--fg-dimmer); letter-spacing: 0.03em; }
 
   /* ============ DIALOG ============ */
   .dialog-overlay {

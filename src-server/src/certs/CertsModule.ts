@@ -1,6 +1,8 @@
 import express from "express";
-import type { ApiExtension } from "../api.js";
+import { RequestAuthor, type ApiExtension } from "../api.js";   // RequestAuthor : id canonique de l'auteur (audit)
 import type { DocumentStore } from "../documents.js";
+import type { LivePublisher } from "../live.js";   // publication d'événements live (marqueur `modules` → pastilles)
+import { Changeset } from "../../../src-shared/DocumentChangeset.js";   // fabrique de changeset (marqueur module partagé)
 import type { SqliteCtor } from "../db.js";
 import { Logger } from "../logger.js";
 import { CertsDb, type CertsListOpts } from "./CertsDb.js";
@@ -55,6 +57,10 @@ export class CertsModule {
 
   private constructor(
     private readonly docs: DocumentStore,
+    /** Bus live (publication seule) — un événement porteur du marqueur `modules:["certs"]` est diffusé à
+        CHAQUE écriture réussie (création/renouvellement/révocation/suppression) pour que les AUTRES clients
+        rafraîchissent la pastille d'onglet (expirants ≤ 30 j / expirés). null = pas de bus injecté. */
+    private readonly live: LivePublisher | null,
     /** null = module en erreur (ouverture de certs.db impossible) → routes en 503 détaillé. */
     private readonly db: CertsDb | null,
     /** Veilleur d'échéances — null si module en erreur OU aucun rapporteur branché. */
@@ -65,18 +71,19 @@ export class CertsModule {
     private readonly log: Logger,
   ) {}
 
-  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger; problems?: CertProblemReporter }): CertsModule {
+  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger; live?: LivePublisher; problems?: CertProblemReporter }): CertsModule {
     const log = opts.log || new Logger("error");
+    const live = opts.live || null;
     try {
       const db = new CertsDb(opts.dataDir, opts.sqlite, log);
       const watcher = opts.problems ? new CertExpiryWatcher(db, opts.problems, undefined, undefined, log) : null;
       log.info("module certificats prêt (certs.db — zéro-connaissance, aucune clé serveur"
         + (watcher ? ", suivi d'échéances actif)" : ", suivi d'échéances SANS rapporteur)"));
-      return new CertsModule(opts.docs, db, watcher, opts.problems || null, null, log);
+      return new CertsModule(opts.docs, live, db, watcher, opts.problems || null, null, log);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       log.error("module certificats en erreur — démarré désactivé", message);
-      return new CertsModule(opts.docs, null, null, opts.problems || null, message, log);
+      return new CertsModule(opts.docs, live, null, null, opts.problems || null, message, log);
     }
   }
 
@@ -204,12 +211,14 @@ export class CertsModule {
       const id = (req.params as any).id as string;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
-        const certificate = ctx.db.save(ctx.docId, id, body);
+        // AUDIT posé PAR LE SERVEUR : id canonique de l'auteur (jamais le corps) — création/renouvellement/révocation.
+        const certificate = ctx.db.save(ctx.docId, id, body, RequestAuthor.identity(req).id);
         // Révocation → clôture EXPLICITE de l'alerte d'échéance (indépendante du jeu mémoire du
         // veilleur : vaut aussi pour une alerte levée par un processus précédent) ; toute écriture
         // relance une passe (création/renouvellement reflétés sans attendre le tick horaire).
         if (certificate.revoked_at !== null) this.problems?.resolve(CertExpiryWatcher.keyFor(ctx.docId, id));
         this.scanQuietly();
+        this.publishLive(req, ctx.docId);   // pastille d'onglet des AUTRES clients (expirants ≤ 30 j / expirés)
         res.json({ certificate });
       } catch (e) {
         if (e instanceof CertsConfigError) { res.status(400).json({ error: "données invalides", issues: e.issues }); return; }
@@ -247,6 +256,7 @@ export class CertsModule {
       }
       // Certificat disparu → son alerte d'échéance n'a plus d'objet (resolve no-op si aucune).
       this.problems?.resolve(CertExpiryWatcher.keyFor(ctx.docId, id));
+      this.publishLive(req, ctx.docId);   // pastille d'onglet des AUTRES clients (un expirant a pu disparaître)
       res.json({ ok: true });
     });
 
@@ -286,6 +296,16 @@ export class CertsModule {
       dir: (q.dir === "asc" || q.dir === "desc") ? q.dir : undefined,
       focus: str(q.focus),
     };
+  }
+
+  /** Publie un événement live MINIMAL porteur du marqueur `modules:["certs"]` : les AUTRES clients rafraîchissent
+      leur pastille d'onglet (expirants ≤ 30 j / expirés) SANS recharger le document (base séparée, hors révision
+      du cœur → le ReloadPlanner du client ignore ce marqueur). `origin` = X-Client-Id de l'écrivain (il ignore
+      son propre événement) ; `by` = auteur (parité avec la notif live du cœur). */
+  private publishLive(req: express.Request, docId: string): void {
+    if (!this.live) return;
+    const origin = (req.headers["x-client-id"] as string) || "";
+    this.live.publish(docId, { origin, by: { name: RequestAuthor.name(req), ip: "" }, changeset: Changeset.modules(["certs"]) });
   }
 
   /** Garde commune des routes : document existant + module sain — sinon répond et renvoie null. */

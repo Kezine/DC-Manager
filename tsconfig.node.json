@@ -74,6 +74,13 @@
     "src-server/src/interventions/InterventionsDb.ts",
     // Veilleur de rappels (producteur intervention-reminder, paliers 24 h/1 h/heure H) — PUR
     // (source/rapporteur/horloge/seuils injectés), testé avec stubs + horloge contrôlée.
-    "src-server/src/interventions/InterventionReminderWatcher.ts"
+    "src-server/src/interventions/InterventionReminderWatcher.ts",
+    // Annuaire utilisateurs (service CORE) — logique PURE (UserProfiles : clé canonique, normalisation,
+    // caviardage, parsing d'ids) + impl v1 (AuthCacheUserResolver : cache mémoire + capture) testée SANS
+    // SQLite (db null) + snapshot (UsersDb, users.db 1 table typée) testé avec better-sqlite3 RÉEL (driver
+    // injecté). UserResolver.ts (types seuls) est tiré transitivement. auth.ts/api.ts restent HORS test.
+    "src-server/src/users/UserProfiles.ts",
+    "src-server/src/users/UsersDb.ts",
+    "src-server/src/users/AuthCacheUserResolver.ts"
   ]
 }

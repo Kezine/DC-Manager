@@ -162,4 +162,14 @@ export class RestAdapter extends DataAdapter {
     try { return await this._root("GET", "/me", undefined, { allow404: true }); }
     catch (_) { return null; }
   }
+
+  /* Résolution BATCH d'ids d'utilisateurs → profils affichables (annuaire — endpoint CORE non scopé
+     `GET /users/resolve?id=…&id=…`, cf. docs/user-resolver.md). Alimente `UserDirectory` (satisfait son
+     contrat `UserResolverClient`). Renvoie le tableau `users` (vide si aucun id / erreur avalée en amont). */
+  async resolveUsers(ids: string[]): Promise<any[]> {
+    if (!ids || !ids.length) return [];
+    const qs = ids.map((id) => "id=" + encodeURIComponent(id)).join("&");
+    const res = await this._root("GET", "/users/resolve?" + qs);
+    return (res && Array.isArray(res.users)) ? res.users : [];
+  }
 }

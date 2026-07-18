@@ -62,9 +62,13 @@ dénormalisée, et surveille les fenêtres à démarrer.
 - **`description`** : markdown (rendu côté client dans la **modale de détail**, via `core/Markdown`/
   micromark), bornée à 100 000 caractères.
 - **Audit** (`created_by`/`created_date`, `updated_by`/`updated_date`) : posé **PAR LE
-  SERVEUR**, jamais par le client. Le nom vient de l'utilisateur authentifié (SSO/Basic Auth),
-  via le helper PARTAGÉ `RequestAuthor.name(req)` (le même que la notif live du cœur — cf.
-  `src-server/src/api.ts`). Un client qui enverrait ces champs est **ignoré**.
+  SERVEUR**, jamais par le client. Depuis le lot « audit utilisateur », `created_by`/`updated_by`
+  stockent l'**ID CANONIQUE** de l'utilisateur authentifié (`RequestAuthor.identity(req).id` —
+  `String(id)` SSO sinon login, résoluble en profil affichable via l'annuaire, cf.
+  [`user-resolver.md`](user-resolver.md)), et non plus son display-name. Les valeurs **LEGACY** (noms
+  en clair écrits avant ce lot) restent en base et s'afficheront via le repli du client (id inconnu de
+  l'annuaire → valeur brute affichée). Colonnes inchangées (`TEXT NOT NULL`). `created_*` figés à la
+  création, `updated_*` rafraîchis. Un client qui enverrait ces champs est **ignoré**.
 
 ## Liens sans FK — politique d'orphelins
 
@@ -146,6 +150,14 @@ serait lu comme un id).
   CONSERVÉS), `closed_date` géré automatiquement. Une passe du veilleur suit l'écriture ;
 - `DELETE /documents/:docId/interventions/:id` → suppression (**cascade** des liens ; **404**
   si inconnu ; `resolve` du rappel).
+
+**Notification LIVE (pastille d'onglet).** À CHAQUE écriture réussie (PUT/DELETE), le module publie sur le
+**`LiveBus` du document** (injecté au bootstrap) un événement MINIMAL `{ origin, by, changeset }` où le
+changeset porte le seul marqueur **`modules: ["interventions"]`** (cf. `src-shared/DocumentChangeset.ts`). Les
+AUTRES clients (l'écrivain ignore son propre `origin`) recomptent alors la **pastille d'onglet** (nombre
+d'ouvertes + teinte d'alerte si une ouverte est *critical*), THROTTLÉ. La base `interventions.db` étant SÉPARÉE
+du document cœur (hors révision), le `ReloadPlanner` du client **ignore** ce marqueur : aucun rechargement de
+collections. Le bus est OPTIONNEL (non injecté → module fonctionnel, badges simplement non rafraîchis en live).
 
 ## Veilleur de rappels (`InterventionReminderWatcher`)
 
