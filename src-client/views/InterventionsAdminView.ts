@@ -213,7 +213,7 @@ export class InterventionsAdminView {
     this.container.appendChild(this.buildToolbar());
     this.container.appendChild(this.buildFilterToolbar());
     this.bodyEl = document.createElement("div");
-    this.bodyEl.className = "list-body";   // mêmes règles CSS que les listings ListView : colonnes CENTRÉES (th + td)
+    this.bodyEl.className = "list-body";   // mêmes règles CSS que les listings ListView (défaut à gauche, numériques via cell-num)
     this.container.appendChild(this.bodyEl);
     this.paintBody();
   }
@@ -291,10 +291,10 @@ export class InterventionsAdminView {
       this.sortableTh(I18n.t("interventions.col.priority"), "priority", st),
       this.sortableTh(I18n.t("interventions.col.status"), "status", st),
       this.sortableTh(I18n.t("interventions.col.window"), "planned_start", st),
-      this.plainTh(I18n.t("interventions.col.links")),
+      this.plainTh(I18n.t("interventions.col.links"), "cell-num"),
       this.plainTh(I18n.t("interventions.col.jira")),
       this.plainTh(I18n.t("interventions.col.createdBy")),
-      this.plainTh(I18n.t("interventions.col.actions")),
+      this.plainTh(I18n.t("interventions.col.actions"), "cell-actions"),
     );
     thead.appendChild(tr);
     const tbody = document.createElement("tbody");
@@ -339,7 +339,7 @@ export class InterventionsAdminView {
   /** Cellule « Liens » : compte + énumération en title (chaque lien = famille · libellé, « introuvable » si
       la cible a disparu — orphelin toléré). */
   private linksCell(item: InterventionRecord): HTMLElement {
-    const td = document.createElement("td");
+    const td = document.createElement("td"); td.className = "cell-num";   // compteur de liens → colonne numérique (droite, tabulaire)
     if (!item.links.length) { td.innerHTML = InterventionsAdminView.MUTED; return td; }
     td.textContent = String(item.links.length);
     td.title = item.links.map((l) => {
@@ -374,8 +374,9 @@ export class InterventionsAdminView {
       in_progress) · Clore (in_progress → closed) · Supprimer (danger). Les transitions rapides relisent le
       corps complet (GET) puis PUT le status changé (le serveur re-estampille updated_*). */
   private actionsCell(item: InterventionRecord): HTMLElement {
-    // display:flex ignore text-align → justify-content:center pour suivre le centrage .list-body des colonnes.
-    const td = document.createElement("td"); td.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;justify-content:center";
+    // display:flex ignore text-align → justify-content:flex-end pour aligner les actions à DROITE (parité
+    // .cell-actions des listings ; revue design lot B).
+    const td = document.createElement("td"); td.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end";
     td.appendChild(this.iconAction(Icons.INFO, I18n.t("interventions.rowAction.details"), () => this.detailModal(item)));
     td.appendChild(this.iconAction(Icons.EDIT, I18n.t("interventions.rowAction.edit"), () => this.interventionModal(item, item.kind)));
     if (item.status === "declared" || item.status === "planned") {
@@ -678,8 +679,9 @@ export class InterventionsAdminView {
      Cellules & pagination
      -------------------------------------------------------------------------- */
 
-  private plainTh(text: string): HTMLElement {
-    const th = document.createElement("th"); th.textContent = text; return th;
+  /** En-tête NON triable ; `cls` porte l'alignement de la colonne (ex. « cell-num » à droite, « cell-actions »). */
+  private plainTh(text: string, cls = ""): HTMLElement {
+    const th = document.createElement("th"); if (cls) th.className = cls; th.textContent = text; return th;
   }
 
   /** En-tête TRIABLE (CSS ListView : .sortable + .sort-ind ▲/▼). Clic : bascule le sens si déjà actif, sinon

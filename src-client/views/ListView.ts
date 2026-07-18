@@ -267,11 +267,13 @@ export class ListView {
     this._bodyEl.classList.toggle("compact", this._compact);   // cellules plus denses en mode compact (CSS)
     const cols = this._visibleColumns();   // mode compact : sous-ensemble essentiel
     const head = cols.map((c) => {
-      if (!c.sort) return `<th>${Html.escape(c.head)}</th>`;
+      // L'en-tête porte la classe d'alignement de SA colonne (`cls`) : une colonne numérique (`cell-num`)
+      // ancre ainsi son libellé ET son indicateur de tri au bord DROIT, aligné avec les valeurs de la colonne.
+      if (!c.sort) return `<th class="${c.cls || ""}">${Html.escape(c.head)}</th>`;
       const key = this._colKey(c); const active = this.sortKey === key;
       const ind = active ? `<span class="sort-ind"> ${this.sortDir === "desc" ? "▼" : "▲"}</span>` : "";
-      return `<th class="sortable" data-sortkey="${key}">${Html.escape(c.head)}${ind}</th>`;
-    }).join("") + `<th>${I18n.t("lists.chrome.actions")}</th>`;
+      return `<th class="sortable${c.cls ? " " + c.cls : ""}" data-sortkey="${key}">${Html.escape(c.head)}${ind}</th>`;
+    }).join("") + `<th class="cell-actions">${I18n.t("lists.chrome.actions")}</th>`;
     let bodyHtml: string;
     if (rows.length === 0) {
       bodyHtml = `<tr class="empty-row"><td colspan="${cols.length + 1}">${Html.escape(this.emptyText)}</td></tr>`;

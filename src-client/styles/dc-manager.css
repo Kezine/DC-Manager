@@ -474,10 +474,19 @@
   td.cell-name { font-weight: 600; color: var(--fg); }
   td.cell-actions { white-space: nowrap; text-align: right; }
   td.cell-desc { color: var(--fg-dim); max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
-  /* tableaux de LISTING : texte CENTRÉ (cellules + en-têtes de colonnes) */
-  .list-body th, .list-body td { text-align: center; }
-  .list-body td.cell-actions { text-align: center; }   /* actions centrées aussi */
-  .list-body td .viz-liaison, .list-body td .viz-loc { justify-content: center; }   /* lignes enroulées centrées */
+  /* Revue design (lot B) — REMPLACE le centrage généralisé de 7863bb1 (arbitrage utilisateur : scannabilité).
+     Dans les LISTINGS, le défaut redevient GAUCHE (le texte, les identifiants et les IP se lisent alignés à
+     gauche) : on ne rétablit donc AUCUNE règle `.list-body th/td { text-align:center }`. Seules les colonnes
+     NUMÉRIQUES passent à droite en chiffres tabulaires (.cell-num) et les actions à droite (.cell-actions).
+     Les flex `.viz-liaison`/`.viz-loc` retrouvent leur alignement de départ (flex-start) — plus de centrage. */
+  /* Colonne NUMÉRIQUE : quantités, compteurs, positions/hauteurs en U, tailles, nombres de ports/liens/dérivés,
+     ET dates ABSOLUES (elles se comparent verticalement). PAS les IP ni les identifiants (= texte mono, à gauche),
+     ni les libellés RELATIFS (« dans 30 j ») ou les PLAGES (« début → fin »), qui scannent mieux à gauche. Le
+     <th> porte la MÊME classe → l'en-tête s'ancre au bord droit et l'indicateur de tri suit sa colonne. */
+  .cell-num { text-align: right; font-variant-numeric: tabular-nums; }
+  /* En-tête de la colonne d'ACTIONS ancré à droite, au-dessus des boutons (les cellules `td.cell-actions`
+     retombent, elles, sur le `text-align:right` défini plus haut). */
+  th.cell-actions { text-align: right; }
   .cell-id { font-size: 10px; color: var(--fg-dimmer); }
   .empty-row td { text-align: center; color: var(--fg-dimmer); padding: 32px 12px; font-style: italic; }
   .row-btn {

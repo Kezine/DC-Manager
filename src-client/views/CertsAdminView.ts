@@ -450,7 +450,7 @@ export class CertsAdminView {
     }
     wrap.appendChild(this.buildListingToolbar());
     this.bodyEl = document.createElement("div");
-    this.bodyEl.className = "list-body";   // mêmes règles CSS que les listings ListView : colonnes CENTRÉES (th + td)
+    this.bodyEl.className = "list-body";   // mêmes règles CSS que les listings ListView (défaut à gauche, numériques via cell-num)
     wrap.appendChild(this.bodyEl);
     return wrap;
   }
@@ -525,7 +525,7 @@ export class CertsAdminView {
       this.selectHeaderCell(),
       this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label", st), this.sortableTh(I18n.t("lists.col.type"), "kind", st), this.plainTh(I18n.t("certs.admin.listing.colSubject")),
       this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")),
-      this.sortableTh(I18n.t("certs.admin.listing.colDerived"), "children_total", st), this.plainTh(I18n.t("certs.admin.listing.colAlert")), this.plainTh(I18n.t("lists.chrome.actions")),
+      this.sortableTh(I18n.t("certs.admin.listing.colDerived"), "children_total", st, "cell-num"), this.plainTh(I18n.t("certs.admin.listing.colAlert"), "cell-num"), this.plainTh(I18n.t("lists.chrome.actions"), "cell-actions"),
     );
     thead.appendChild(tr);
     const tbody = document.createElement("tbody");
@@ -545,14 +545,14 @@ export class CertsAdminView {
     tr.appendChild(this.subjectCell(item.subject));
     tr.appendChild(this.htmlCell(this.expiryCell(item)));
     tr.appendChild(this.htmlCell(item.revoked_at ? this.pill(I18n.t("certs.admin.listing.revoked"), "err") : CertsAdminView.MUTED));
-    // Dérivés : nombre total de descendants (0 pour une paire simple).
-    const derived = document.createElement("td"); derived.textContent = String(item.children_total);
+    // Dérivés : nombre total de descendants (0 pour une paire simple) — colonne numérique (droite, tabulaire).
+    const derived = document.createElement("td"); derived.className = "cell-num"; derived.textContent = String(item.children_total);
     if (item.children_total === 0) derived.style.color = "var(--fg-dimmer)";
     tr.appendChild(derived);
-    tr.appendChild(this.htmlCell(this.alertCell(item)));
+    tr.appendChild(this.htmlCell(this.alertCell(item), "cell-num"));   // « Sous seuil » = compteur → colonne numérique
     // Actions : opérations de clé si déverrouillé + « Déployer la confiance… » / « Lister les certificats »
     // (consultation, disponibles MÊME verrouillé — aucune clé requise).
-    const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + centrage .list-body (parité ListView)
+    const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + alignées à DROITE (parité ListView)
     this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
     // Aide au déploiement : uniquement les AUTORITÉS (racine X.509 ou CA SSH) — pas les paires simples ni les
     // dérivés. Consultation pure (procédure d'installation dans les magasins de confiance des clients).
@@ -582,7 +582,7 @@ export class CertsAdminView {
       this.selectHeaderCell(),
       this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label", st), this.sortableTh(I18n.t("lists.col.type"), "kind", st),
       this.sortableTh(I18n.t("certs.admin.listing.colIssuer"), "parent", st), this.plainTh(I18n.t("certs.admin.listing.colSubject")),
-      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")), this.plainTh(I18n.t("lists.chrome.actions")),
+      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")), this.plainTh(I18n.t("lists.chrome.actions"), "cell-actions"),
     );
     thead.appendChild(tr);
     const tbody = document.createElement("tbody");
@@ -611,7 +611,7 @@ export class CertsAdminView {
     tr.appendChild(this.subjectCell(item.subject));
     tr.appendChild(this.htmlCell(this.expiryCell(item)));
     tr.appendChild(this.htmlCell(item.revoked_at ? this.pill(I18n.t("certs.admin.listing.revoked"), "err") : CertsAdminView.MUTED));
-    const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + centrage .list-body (parité ListView)
+    const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + alignées à DROITE (parité ListView)
     this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
     tr.appendChild(actions);
     return tr;
@@ -633,14 +633,16 @@ export class CertsAdminView {
     return td;
   }
 
-  private plainTh(text: string): HTMLElement {
-    const th = document.createElement("th"); th.textContent = text; return th;
+  /** En-tête NON triable ; `cls` porte l'alignement de la colonne (ex. « cell-num » à droite, « cell-actions »). */
+  private plainTh(text: string, cls = ""): HTMLElement {
+    const th = document.createElement("th"); if (cls) th.className = cls; th.textContent = text; return th;
   }
 
   /** En-tête TRIABLE (CSS ListView : .sortable + .sort-ind ▲/▼). Clic : bascule le sens si déjà actif, sinon
-      trie ASC sur cette colonne ; retour page 1 puis repeint le corps (rechargement serveur). */
-  private sortableTh(text: string, sortKey: string, st: ListingState): HTMLElement {
-    const th = document.createElement("th"); th.className = "sortable"; th.textContent = text;
+      trie ASC sur cette colonne ; retour page 1 puis repeint le corps (rechargement serveur). `cls` = classe
+      d'alignement de la colonne (« cell-num » pour les colonnes numériques → en-tête + tri ancrés à droite). */
+  private sortableTh(text: string, sortKey: string, st: ListingState, cls = ""): HTMLElement {
+    const th = document.createElement("th"); th.className = cls ? "sortable " + cls : "sortable"; th.textContent = text;
     if (st.sort === sortKey) {
       const ind = document.createElement("span"); ind.className = "sort-ind"; ind.textContent = " " + (st.dir === "desc" ? "▼" : "▲");
       th.appendChild(ind);
@@ -1785,9 +1787,9 @@ export class CertsAdminView {
     return `<span class="pill"${style}>${Html.escape(text)}</span>`;
   }
 
-  /** Cellule de table dont le contenu est du HTML déjà échappé. */
-  private htmlCell(html: string): HTMLTableCellElement {
-    const td = document.createElement("td"); td.innerHTML = html; return td;
+  /** Cellule de table dont le contenu est du HTML déjà échappé ; `cls` = alignement éventuel (ex. « cell-num »). */
+  private htmlCell(html: string, cls = ""): HTMLTableCellElement {
+    const td = document.createElement("td"); if (cls) td.className = cls; td.innerHTML = html; return td;
   }
 
   private errBox(): HTMLElement {
