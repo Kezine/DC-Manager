@@ -185,14 +185,17 @@ export class InterventionsDb {
 
       AUDIT posé PAR LE SERVEUR (jamais par le client) : à la CRÉATION, created_by/created_date
       ET updated_by/updated_date ; à la MISE À JOUR, created_* CONSERVÉS et seuls updated_*
-      rafraîchis. `writer` = nom de l'utilisateur authentifié (résolu côté route).
+      rafraîchis. `writer` = ID CANONIQUE de l'utilisateur authentifié (RequestAuthor.identity, résolu
+      côté route) — depuis le lot « audit utilisateur » ; les valeurs LEGACY (noms en clair) restent
+      telles quelles en base et s'afficheront via le repli du client. Colonnes inchangées (TEXT NOT NULL).
 
       `closed_date` : posé automatiquement À L'ENTRÉE en 'closed' (conservé tant qu'on y reste),
       effacé dès qu'on en sort. `search` recalculée à CHAQUE save (normSearch partagé avec le cœur). */
   save(docId: string, id: string, candidate: Record<string, unknown>, writer: string): InterventionRecord {
     const parsed: InterventionCandidate = InterventionsValidate.parse(id, candidate);
     const nowIso = new Date().toISOString();
-    const writerName = typeof writer === "string" && writer.trim() !== "" ? writer.trim() : "?";
+    // Colonne NOT NULL → repli "?" quand l'id d'auteur est vide (cas dégénéré : profil sans id ni login).
+    const writerId = typeof writer === "string" && writer.trim() !== "" ? writer.trim() : "?";
     const existing = this.db.prepare("SELECT created_by, created_date, status, closed_date FROM interventions WHERE doc_id = ? AND id = ?").get(docId, parsed.id) as any;
 
     // closed_date : posé à l'ENTRÉE en 'closed' (si on n'y était pas déjà), effacé si on en sort.
@@ -212,9 +215,9 @@ export class InterventionsDb {
       `).run({
         doc_id: docId, id: parsed.id, kind: parsed.kind, title: parsed.title, description: parsed.description,
         status: parsed.status, priority: parsed.priority,
-        created_by: existing ? existing.created_by : writerName,
+        created_by: existing ? existing.created_by : writerId,
         created_date: existing ? existing.created_date : nowIso,
-        updated_by: writerName, updated_date: nowIso,
+        updated_by: writerId, updated_date: nowIso,
         planned_start: parsed.planned_start, planned_end: parsed.planned_end,
         jira_ref: parsed.jira_ref, closed_date: closedDate, search,
       });

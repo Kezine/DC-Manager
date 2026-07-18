@@ -3,6 +3,7 @@ import path from "node:path";
 import { Logger } from "../logger.js";
 import { Schema } from "../constants.js";
 import type { SqliteCtor, SqliteDb } from "../db.js";
+import { AuditStamp } from "../AuditStamp.js";   // « auteur présent » partagé (id canonique de created_by/updated_by)
 import { CertsValidate, type CertificateCandidate, type PkiParamsCandidate, type SanCandidate } from "./CertsValidate.js";
 
 /* =============================================================================
@@ -185,6 +186,8 @@ export class CertsDb {
         revoked_at    TEXT,
         created_date  TEXT NOT NULL,
         updated_date  TEXT NOT NULL,
+        created_by    TEXT,
+        updated_by    TEXT,
         search        TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (doc_id, id),
         FOREIGN KEY (doc_id, parent_id) REFERENCES certificates(doc_id, id)
@@ -204,6 +207,10 @@ export class CertsDb {
     // manquer sur une certs.db créée AVANT le listing paginé — ensureColumn ne fait rien sur une base
     // fraîche (la colonne est déjà dans le CREATE ci-dessus) et l'AJOUTE aux bases antérieures.
     this.ensureColumn("certificates", "search", "TEXT NOT NULL DEFAULT ''");
+    // AUDIT « qui a créé / modifié » (lot audit utilisateur) : colonnes nullable ajoutées idempotemment —
+    // une certs.db antérieure les gagne sans valeur (lignes legacy = NULL), estampillées dès la prochaine écriture.
+    this.ensureColumn("certificates", "created_by", "TEXT");
+    this.ensureColumn("certificates", "updated_by", "TEXT");
     // Index APRÈS la migration : sur une base ancienne, la colonne `search` n'existe qu'une fois
     // ensureColumn passé (créer l'index avant échouerait). idx_search sert le filtre `query`
     // (search LIKE), idx_parent la remontée d'arbre (CTE sur (doc_id, parent_id)).
@@ -466,10 +473,16 @@ export class CertsDb {
 
   /** Crée/remplace un certificat (transactionnel : ligne + SAN ré-écrits ensemble).
       `key_enc` ABSENT du candidat = CONSERVÉ tel quel (mise à jour de métadonnées —
-      la liste ne renvoyant jamais key_enc, le client ne peut pas le rejouer). */
-  save(docId: string, id: string, candidate: Record<string, unknown>): CertificateDetail {
+      la liste ne renvoyant jamais key_enc, le client ne peut pas le rejouer).
+
+      AUDIT posé PAR LE SERVEUR : `authorId` = id CANONIQUE de l'auteur (RequestAuthor.identity, résolu côté
+      route). À la création (comme le renouvellement/la révocation, qui sont des `save`), `updated_by` prend
+      cet id ; `created_by` est posé à la création puis PRÉSERVÉ par l'upsert (jamais dans le DO UPDATE SET).
+      id vide (cas dégénéré) → colonnes NULL (pas d'auteur identifiable). */
+  save(docId: string, id: string, candidate: Record<string, unknown>, authorId: string = ""): CertificateDetail {
     const parsed: CertificateCandidate = CertsValidate.parseCertificate(id, candidate);
     const nowIso = new Date().toISOString();
+    const author = AuditStamp.author(authorId);   // id non vide, sinon null
     const existing = this.db.prepare("SELECT key_enc, created_date FROM certificates WHERE doc_id = ? AND id = ?").get(docId, parsed.id) as any;
     const keyEnc = parsed.key_enc === undefined ? (existing ? existing.key_enc : null) : parsed.key_enc;
     // Colonne `search` recalculée à CHAQUE save (label + subject + serial + valeurs de SAN, normalisés
@@ -477,17 +490,19 @@ export class CertsDb {
     const search = CertsDb.searchText(parsed.label, parsed.subject, parsed.serial, parsed.sans.map((s) => s.value));
     const write = this.db.transaction(() => {
       this.db.prepare(`
-        INSERT INTO certificates (id, doc_id, kind, parent_id, label, subject, serial, not_before, not_after, fingerprint, key_algo, public_pem, key_enc, revoked_at, created_date, updated_date, search)
-        VALUES (@id, @doc_id, @kind, @parent_id, @label, @subject, @serial, @not_before, @not_after, @fingerprint, @key_algo, @public_pem, @key_enc, @revoked_at, @created_date, @updated_date, @search)
+        INSERT INTO certificates (id, doc_id, kind, parent_id, label, subject, serial, not_before, not_after, fingerprint, key_algo, public_pem, key_enc, revoked_at, created_date, updated_date, created_by, updated_by, search)
+        VALUES (@id, @doc_id, @kind, @parent_id, @label, @subject, @serial, @not_before, @not_after, @fingerprint, @key_algo, @public_pem, @key_enc, @revoked_at, @created_date, @updated_date, @created_by, @updated_by, @search)
         ON CONFLICT(doc_id, id) DO UPDATE SET kind=@kind, parent_id=@parent_id, label=@label, subject=@subject, serial=@serial,
           not_before=@not_before, not_after=@not_after, fingerprint=@fingerprint, key_algo=@key_algo,
-          public_pem=@public_pem, key_enc=@key_enc, revoked_at=@revoked_at, updated_date=@updated_date, search=@search
+          public_pem=@public_pem, key_enc=@key_enc, revoked_at=@revoked_at, updated_date=@updated_date, updated_by=@updated_by, search=@search
       `).run({
         id: parsed.id, doc_id: docId, kind: parsed.kind, parent_id: parsed.parent_id, label: parsed.label,
         subject: parsed.subject, serial: parsed.serial, not_before: parsed.not_before, not_after: parsed.not_after,
         fingerprint: parsed.fingerprint, key_algo: parsed.key_algo, public_pem: parsed.public_pem,
         key_enc: keyEnc, revoked_at: parsed.revoked_at,
-        created_date: existing ? existing.created_date : nowIso, updated_date: nowIso, search,
+        created_date: existing ? existing.created_date : nowIso, updated_date: nowIso,
+        // created_by posé à la CRÉATION uniquement (absent du DO UPDATE SET → immuable) ; updated_by à chaque écriture.
+        created_by: author, updated_by: author, search,
       });
       // SAN : remplacement COMPLET (l'ordre du tableau fait foi — position = index).
       this.db.prepare("DELETE FROM certificate_sans WHERE doc_id = ? AND cert_id = ?").run(docId, parsed.id);

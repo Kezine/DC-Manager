@@ -1,5 +1,5 @@
 import express from "express";
-import type { ApiExtension } from "../api.js";
+import { RequestAuthor, type ApiExtension } from "../api.js";   // RequestAuthor : id canonique de l'auteur (audit)
 import type { DocumentStore } from "../documents.js";
 import type { SqliteCtor } from "../db.js";
 import { Logger } from "../logger.js";
@@ -188,7 +188,8 @@ export class NotifyModule {
       const candidate = { ...body };
       delete candidate.token;
       try {
-        res.json({ instance: db.saveInstance(candidate, (req.params as any).id, tokenPlain) }); // réponse SANS jeton
+        // AUDIT posé PAR LE SERVEUR : id canonique de l'auteur (jamais le corps).
+        res.json({ instance: db.saveInstance(candidate, (req.params as any).id, tokenPlain, RequestAuthor.identity(req).id) }); // réponse SANS jeton
       } catch (e) {
         if (e instanceof NotifyConfigError) { res.status(400).json({ error: "configuration invalide", issues: e.issues }); return; }
         this.log.error("PUT /notify/instances : échec", (req.params as any).id, e instanceof Error ? e.message : String(e));
@@ -214,7 +215,8 @@ export class NotifyModule {
       const db = this.backend(res); if (!db) return;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
-        res.json({ subscription: db.saveSubscription(body, (req.params as any).id) });
+        // AUDIT posé PAR LE SERVEUR : id canonique de l'auteur (jamais le corps).
+        res.json({ subscription: db.saveSubscription(body, (req.params as any).id, RequestAuthor.identity(req).id) });
       } catch (e) {
         if (e instanceof NotifyConfigError) { res.status(400).json({ error: "configuration invalide", issues: e.issues }); return; }
         if (e instanceof Error && /FOREIGN KEY/i.test(e.message)) {

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import express from "express";
-import type { ApiExtension } from "../api.js";
+import { RequestAuthor, type ApiExtension } from "../api.js";   // RequestAuthor : id canonique de l'auteur (audit)
 import type { DocumentStore } from "../documents.js";
 import type { SqliteCtor } from "../db.js";
 import { Logger } from "../logger.js";
@@ -173,7 +173,8 @@ export class VmModule {
       const candidate = { ...body, id };
       delete candidate.token;
       try {
-        const provider = db.save(docId, candidate, tokenPlain);
+        // AUDIT posé PAR LE SERVEUR : id canonique de l'auteur (jamais le corps).
+        const provider = db.save(docId, candidate, tokenPlain, RequestAuthor.identity(req).id);
         this.service?.rearmTimers(); // la config a changé À CHAUD → ré-armer les timers périodiques
         res.json({ provider }); // réponse SANS jeton (garanti par ProviderConfigDb)
       } catch (e) {

@@ -23,6 +23,19 @@ Seuls quelques champs **opérationnels** sont promus en colonnes (`id`, `created
 JSONB en Postgres — SQLite l'assume nativement avec `json_extract`/`json_each`). Le `data` écrit est EXACTEMENT ce que
 le front sérialise (`Store.toJSON()`) → une seule forme de sérialisation des deux côtés.
 
+### Audit « qui / quand » (posé PAR LE SERVEUR)
+
+Quatre champs d'audit vivent DANS le blob : `created_by` / `updated_by` (id canonique de l'auteur, cf.
+[`user-resolver.md`](user-resolver.md)) et `created_date` / `updated_date`. En **mode API** le serveur en fait
+**autorité** : à chaque écriture qui traverse `resolveRepo` (CRUD, `/transact`, updates de cascade d'un `DELETE`),
+`api.ts` estampille le record via la classe pure `AuditStamp` AVANT `upsert` — les valeurs client sont **écrasées**
+(pas d'usurpation d'auteur ni d'antidatage). `created_*` sont figés à la création et repris de l'existant ensuite ;
+`updated_*` sont rafraîchis à chaque écriture. **Exception** : `PUT /snapshot` (restauration) n'estampille PAS —
+l'audit du snapshot est restauré tel quel (arbitrage Q7). En **mode fichier** (aucune identité), les `_by` sont
+absents et les dates restent celles du client. Ces champs étant NON DÉCLARÉS dans `DataValidation`, ils traversent
+la normalisation/validation sans être retirés ni rejetés (specs partielles). La colonne promue `created_date` reçoit
+donc, en mode API, l'horodatage serveur.
+
 ## Pourquoi ce choix
 
 - **Évolution de schéma sans migration.** Ajouter un champ à un modèle = il tombe dans le JSON, aucun `ALTER TABLE`.

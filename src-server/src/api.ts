@@ -9,6 +9,7 @@ import type { DocumentChangeset } from "../../src-shared/DocumentChangeset.js"; 
 import { DataValidator, type ValidationError, type EntityFetcher, type ChildFinder } from "../../src-shared/DataValidation.js";   // normalisation + validation PARTAGÉES
 import { Cascade } from "../../src-shared/Cascade.js";   // cascade de suppression PARTAGÉE (intégrité référentielle en DELETE)
 import { ApiRules } from "./ApiRules.js";             // règles PURES de la couche HTTP (verrou, changeset, lot) — testables sans Express
+import { AuditStamp } from "./AuditStamp.js";         // règles PURES d'estampillage « qui a écrit, quand » (created_by/updated_by + dates serveur)
 import { UserProfiles } from "./users/UserProfiles.js";   // logique PURE de l'annuaire (clé canonique, caviardage, parsing d'ids)
 import type { UserResolver } from "./users/UserResolver.js";   // contrat de résolution d'utilisateurs (service CORE injecté)
 
@@ -111,6 +112,9 @@ export class Api {
   private repoOf(req: Request): Repository { return (req as RepoRequest).repo!; }
   /** Révision portée par l'écriture courante (posée par `resolveRepo`) → estampillée sur les lignes (`updated_rev`). */
   private revOf(req: Request): number { return (req as RepoRequest).docRev || 0; }
+  /** Id CANONIQUE de l'auteur de l'écriture courante — estampillé en audit `created_by`/`updated_by`
+      par `AuditStamp` (cf. RequestAuthor.identity). "" = pas d'identité résoluble (les `_by` restent non posés). */
+  private authorId(req: Request): string { return RequestAuthor.identity(req).id; }
   private parseList(q: Record<string, any>): ListOpts {
     const { page, pageSize, q: query, ids, ...rest } = q;
     const where: Rec = {};
@@ -304,8 +308,25 @@ export class Api {
         cs.collections = [...touched];
       }
     }
+    // AUDIT posé PAR LE SERVEUR sur CHAQUE opération du lot (créations comme mises à jour, y compris les
+    // updates de cascade résiduelle : ce sont des modifications par l'auteur du lot) — cf. AuditStamp. Les
+    // champs d'audit envoyés par le client sont écrasés ; le `created_*` d'une mise à jour est repris de l'existant.
+    const nowIso = new Date().toISOString();
+    const authorId = this.authorId(req);
+    const repo = this.repoOf(req);
+    const stampCreate = (entry: any) => (entry && entry.collection && entry.record)
+      ? { ...entry, record: AuditStamp.apply(entry.record, null, authorId, nowIso) } : entry;
+    const stampUpdate = (entry: any) => {
+      if (!entry || !entry.collection || !entry.record) return entry;
+      // On ne lit l'existant (created_* immuables) que si l'id est présent — sinon `repo.transact`
+      // rejettera l'entrée sans id (« record sans id ») ; on ne veut pas planter avant, sur getOne(undefined).
+      const existing = entry.record.id ? repo.getOne(entry.collection, entry.record.id) : null;
+      return { ...entry, record: AuditStamp.apply(entry.record, existing, authorId, nowIso) };
+    };
+    const stampedCreates = creates.map(stampCreate);
+    const stampedUpdates = [...updates, ...residual.updates].map(stampUpdate);
     try {
-      this.repoOf(req).transact({ ...body, creates, updates: [...updates, ...residual.updates], deletes: [...(body.deletes || []), ...residual.deletes] }, this.revOf(req));
+      repo.transact({ ...body, creates: stampedCreates, updates: stampedUpdates, deletes: [...(body.deletes || []), ...residual.deletes] }, this.revOf(req));
       res.status(204).end();
     }
     catch (e: any) { res.status(400).json({ error: e.message }); }
@@ -345,6 +366,9 @@ export class Api {
     // V5b : cohérence enfants ⇄ parent AU SEIN du snapshot normalisé (ex. adresse ∈ CIDR de son réseau).
     for (const c of Schema.COLLECTIONS) for (const rec of (out[c] || [])) errors.push(...DataValidator.validateDependents(c, rec, find, fetch));
     if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return; }
+    // AUDIT : la restauration N'ESTAMPILLE PAS (arbitrage Q7) — l'audit contenu dans le snapshot est restauré
+    // TEL QUEL (fidélité historique). C'est le SEUL chemin d'écriture qui ne passe pas par AuditStamp ; la
+    // normalisation partagée préserve created_by/updated_by/created_date/updated_date (champs non déclarés → ils traversent).
     try { this.repoOf(req).replaceSnapshot(out, this.revOf(req)); res.status(204).end(); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
@@ -428,7 +452,10 @@ export class Api {
       res.status(409).json({ error: "création refusée : l'id existe déjà", collection: req.params.collection, id: record.id });
       return;
     }
-    try { this.repoOf(req).upsert(req.params.collection, record, this.revOf(req)); res.status(201).json(record); }
+    // AUDIT posé PAR LE SERVEUR (création) : created_by/updated_by = id de l'auteur, dates = maintenant
+    // (les champs d'audit envoyés par le client sont écrasés — cf. AuditStamp). La ligne renvoyée les porte.
+    const stamped = AuditStamp.apply(record, null, this.authorId(req), new Date().toISOString());
+    try { this.repoOf(req).upsert(req.params.collection, stamped, this.revOf(req)); res.status(201).json(stamped); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private update: RequestHandler = (req, res) => {
@@ -436,12 +463,16 @@ export class Api {
     // PATCH PARTIEL (V3) : on fusionne le corps SUR l'enregistrement existant avant de normaliser/valider, sinon
     // les valeurs par défaut écraseraient les champs absents. (Le client packagé envoie des records complets ;
     // ce merge protège les interfaces tierces qui posteraient un patch partiel.)
-    const existing = this.repoOf(req).getOne(req.params.collection, req.params.id) || {};
-    const record = this.accept(res, req.params.collection, { ...existing, ...(req.body || {}), id: req.params.id }, this.repoFetcher(req), this.repoChildFinder(req)); if (!record) return;
+    // `existing` peut être null (PUT sur un id inconnu = création) → AuditStamp le traite alors comme une création.
+    const existing = this.repoOf(req).getOne(req.params.collection, req.params.id);
+    const record = this.accept(res, req.params.collection, { ...(existing || {}), ...(req.body || {}), id: req.params.id }, this.repoFetcher(req), this.repoChildFinder(req)); if (!record) return;
     // V5b : si ce changement invalide des enfants (ex. CIDR d'un réseau → adresses hors sous-réseau), on rejette.
     const dependentErrors = DataValidator.validateDependents(req.params.collection, record, this.repoChildFinder(req), this.repoFetcher(req));
     if (dependentErrors.length) { res.status(400).json({ error: "données invalides", errors: dependentErrors }); return; }
-    try { this.repoOf(req).upsert(req.params.collection, record, this.revOf(req)); res.json(record); }
+    // AUDIT posé PAR LE SERVEUR (mise à jour) : created_by/created_date REPRIS de l'existant (immuables),
+    // updated_by/updated_date rafraîchis. Une valeur d'audit envoyée par le client est écrasée (cf. AuditStamp).
+    const stamped = AuditStamp.apply(record, existing, this.authorId(req), new Date().toISOString());
+    try { this.repoOf(req).upsert(req.params.collection, stamped, this.revOf(req)); res.json(stamped); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };
   private remove: RequestHandler = (req, res) => {
@@ -464,7 +495,11 @@ export class Api {
       if (!entry) { const rec = fetch(d.c, d.id); if (!rec) continue; entry = { collection: d.c, record: { ...rec } }; patched.set(mapKey, entry); }
       entry.record[d.key] = d.value;
     }
-    const updates = [...patched.values()];
+    // AUDIT posé PAR LE SERVEUR : un détachement de cascade est une MODIFICATION de l'entité par l'auteur de
+    // la suppression → updated_by/updated_date rafraîchis (created_* repris de l'existant) — cf. AuditStamp.
+    const nowIso = new Date().toISOString();
+    const authorId = this.authorId(req);
+    const updates = [...patched.values()].map((u) => ({ ...u, record: AuditStamp.apply(u.record, fetch(u.collection, u.record.id), authorId, nowIso) }));
     const deletes = [...plan.deletes.map((x) => ({ collection: x.c, id: x.id })), { collection, id }];
     // Périmètre SSE ÉLARGI : la cascade touche d'autres collections → les autres clients doivent les recharger.
     const touched = new Set<string>([collection]);

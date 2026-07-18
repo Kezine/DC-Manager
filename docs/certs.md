@@ -267,7 +267,9 @@ client ; le serveur ne stocke que des métadonnées lisibles et ces blobs opaque
   `kind`, `parent_id` (émetteur), `label`, `subject`, `serial`, `not_before`,
   `not_after`, `fingerprint`, `key_algo`, `public_pem` (PUBLIC par nature),
   `key_enc` (**clé privée chiffrée client** — blob opaque), `revoked_at`,
-  `created_date`/`updated_date`, **`search`** (colonne DÉNORMALISÉE `TEXT NOT NULL
+  `created_date`/`updated_date`, **`created_by`/`updated_by`** (id canonique de l'auteur —
+  audit posé SERVEUR sur création/renouvellement/révocation, migration `ensureColumn` ; cf.
+  [`user-resolver.md`](user-resolver.md)), **`search`** (colonne DÉNORMALISÉE `TEXT NOT NULL
   DEFAULT ''` = `normSearch(label + subject + serial + valeurs de SAN)`, recalculée
   à CHAQUE save avec la MÊME normalisation partagée que le cœur ; migration
   `ensureColumn` + **backfill** one-shot des lignes antérieures). **FK composite**

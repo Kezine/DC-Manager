@@ -1,5 +1,5 @@
 import express from "express";
-import type { ApiExtension } from "../api.js";
+import { RequestAuthor, type ApiExtension } from "../api.js";   // RequestAuthor : id canonique de l'auteur (audit)
 import type { DocumentStore } from "../documents.js";
 import type { SqliteCtor } from "../db.js";
 import { Logger } from "../logger.js";
@@ -204,7 +204,8 @@ export class CertsModule {
       const id = (req.params as any).id as string;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
-        const certificate = ctx.db.save(ctx.docId, id, body);
+        // AUDIT posé PAR LE SERVEUR : id canonique de l'auteur (jamais le corps) — création/renouvellement/révocation.
+        const certificate = ctx.db.save(ctx.docId, id, body, RequestAuthor.identity(req).id);
         // Révocation → clôture EXPLICITE de l'alerte d'échéance (indépendante du jeu mémoire du
         // veilleur : vaut aussi pour une alerte levée par un processus précédent) ; toute écriture
         // relance une passe (création/renouvellement reflétés sans attendre le tick horaire).

@@ -136,9 +136,11 @@ export class InterventionsModule {
       const id = (req.params as any).id as string;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
-        // L'AUDIT est posé PAR LE SERVEUR : le nom vient de l'utilisateur authentifié (helper partagé
-        // RequestAuthor), jamais du corps. Le client ne peut donc pas se faire passer pour un autre.
-        const intervention = ctx.db.save(ctx.docId, id, body, RequestAuthor.name(req));
+        // L'AUDIT est posé PAR LE SERVEUR : l'ID CANONIQUE de l'auteur (RequestAuthor.identity — String(id)
+        // SSO sinon login, résoluble a posteriori par l'annuaire) vient de la session authentifiée, jamais du
+        // corps. Le client ne peut donc pas se faire passer pour un autre. Les valeurs LEGACY (noms en clair
+        // écrits avant ce lot) restent en base et s'afficheront via le repli du client (lot 3).
+        const intervention = ctx.db.save(ctx.docId, id, body, RequestAuthor.identity(req).id);
         // Un objet DÉMARRÉ/clos/annulé sort du périmètre de rappel → clôture EXPLICITE (vaut aussi pour
         // une alerte levée par un processus précédent, hors du jeu mémoire du veilleur). Puis une passe
         // reflète la création/modification sans attendre le tick de 5 min.

@@ -6,11 +6,12 @@ Il répond à un besoin transverse : l'application ne mémorise les utilisateurs
 d'un audit « créé/modifié par », destinataires…) que par un **id**, et l'interface veut
 en montrer « Prénom Nom », le login, éventuellement les coordonnées.
 
-> **Périmètre livré (lot 1).** Le contrat, l'implémentation v1 (cache d'auth + snapshot
+> **Périmètre livré (lots 1 & 2).** Le contrat, l'implémentation v1 (cache d'auth + snapshot
 > SQLite), la capture au fil des authentifications, `RequestAuthor.identity(req)` et
-> l'endpoint batch `GET /users/resolve` sont livrés et testés. La **consommation** de
-> `identity` par les écritures (estampillage `created_by`/`updated_by`) est le **lot 2** ;
-> le **client** (service `UserDirectory`, fiches, colonnes) est le **lot 3**.
+> l'endpoint batch `GET /users/resolve` (lot 1) sont livrés et testés. L'**estampillage** de
+> `created_by`/`updated_by` (id canonique) et des **dates serveur** sur TOUTES les écritures —
+> cœur, interventions, configs des modules (lot 2) — l'est aussi (voir « Estampillage d'audit »).
+> Reste le **client** (service `UserDirectory`, fiches, colonnes) : le **lot 3**.
 
 Deux propriétés fondatrices :
 
@@ -136,11 +137,53 @@ Monté dans `Api`, **derrière `requireAdmin`** (comme tout le reste). Réponse 
   propres coordonnées). `login`/`domain`/`firstname`/`lastname` restent visibles pour tout admin.
   Caviardage **pur et testé** : `UserProfiles.redactFor(callerId, user)`.
 
-## Estampillage d'audit : `RequestAuthor.identity(req)`
+## Estampillage d'audit : `RequestAuthor.identity(req)` + `AuditStamp`
 
-`RequestAuthor.identity(req) → { id, name }` : `id` = clé canonique (même logique partagée),
-`name` = display-name actuel (`RequestAuthor.name`, conservé). **Livrée et testée dans ce lot**,
-**pas encore consommée** par les écritures (lot 2 : `created_by`/`updated_by` = id canonique).
+`RequestAuthor.identity(req) → { id, name }` : `id` = clé canonique (même logique partagée
+`UserProfiles.canonicalId`), `name` = display-name (`RequestAuthor.name`, conservé pour le SSE `by`).
+
+Les écritures posent l'**id canonique** de l'auteur dans `created_by` / `updated_by`, et les dates
+d'audit deviennent **autoritatives serveur en mode API** (arbitrage Q9 ; le mode fichier n'a aucune
+identité et garde ses dates client). Le SERVEUR est seul autoritaire : les valeurs d'audit envoyées
+par le client sont **systématiquement écrasées** (aucune usurpation d'auteur ni antidatage possible).
+
+### Règles PURES : `AuditStamp` (`src-server/src/AuditStamp.ts`)
+
+`AuditStamp.apply(incoming, existing, authorId, nowIso)` renvoie une COPIE estampillée (l'entrée
+n'est pas mutée). Règle unique, testée en isolation :
+
+- **Création** (`existing === null`) : `created_by = updated_by = id`,
+  `created_date = updated_date = nowIso`.
+- **Mise à jour** (`existing` fourni) : `created_by` / `created_date` **repris de l'existant**
+  (immuables ; **absents** d'un enregistrement legacy → restent absents), `updated_by = id`,
+  `updated_date = nowIso`.
+- **id canonique VIDE** (dégénéré — profil sans id ni login) : on ne pose PAS les `_by` (à la
+  création ils restent absents ; à la mise à jour on conserve le dernier auteur connu de l'existant)
+  ; les **dates** sont tout de même posées.
+
+`AuditStamp.author(authorId)` centralise « auteur présent » (chaîne non vide → id, sinon `null`),
+partagé avec les modules à colonnes typées.
+
+### Points d'application (cœur, `api.ts`)
+
+Toutes les écritures qui traversent `resolveRepo` sont estampillées AVANT `upsert` : `create` (création),
+`update` (mise à jour), **chaque op** `create`/`update` d'un `/transact` (y compris les updates de
+**cascade résiduelle**), et les **updates de CASCADE** d'un `DELETE` (détacher une FK = une modification
+de l'entité par l'auteur de la suppression → `updated_by`). Les champs d'audit sont NON DÉCLARÉS dans
+`src-shared/DataValidation` (pas nécessaire) : ils **traversent** la normalisation/validation sans être
+retirés ni rejetés (specs partielles), et sont écrits dans le blob `data`.
+
+**Exception : la restauration de snapshot (`PUT /snapshot`) N'ESTAMPILLE PAS** (arbitrage Q7) —
+l'audit contenu dans le snapshot est restauré **tel quel** (fidélité historique). C'est le seul chemin
+d'écriture qui ne passe pas par `AuditStamp` ; la normalisation partagée préserve les champs d'audit.
+
+### Modules (colonnes typées)
+
+`interventions.db`, `certs.db`, `notify.db` (canaux + abonnements) et `vm-providers.db` portent
+`created_by` / `updated_by` en **colonnes** : `created_by` posé à la création puis PRÉSERVÉ par l'upsert
+(hors `DO UPDATE SET`), `updated_by` rafraîchi à chaque écriture ; id vide → colonnes `NULL`. L'identité
+vient de la requête (`RequestAuthor.identity(req).id`, posée côté route). **Interventions** stocke
+désormais l'id canonique (les valeurs LEGACY = noms en clair restent lisibles via le repli du client).
 
 ## Impl future : `SsoUserResolver` (hors périmètre v1)
 

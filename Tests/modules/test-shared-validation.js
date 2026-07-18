@@ -4,6 +4,24 @@
 const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
 
 module.exports = async () => {
+  await section("shared : DataValidation — champs d'audit (created_by/updated_by/dates) préservés au round-trip", async () => {
+  {
+    // Le serveur estampille created_by/updated_by/created_date/updated_date HORS spec de collection (blob JSON) :
+    // ces champs NON DÉCLARÉS doivent TRAVERSER la normalisation + validation partagées sans être ni retirés ni
+    // rejetés — sinon l'estampillage d'audit (lot 2) et la restauration de snapshot (Q7) les perdraient.
+    const { DataValidator } = Validation;
+    const audit = { created_by: "u-alice", updated_by: "u-bob", created_date: "2026-01-01T00:00:00.000Z", updated_date: "2026-02-02T00:00:00.000Z" };
+    // Collection AVEC spec (equipments) : la normalisation ne touche qu'aux champs déclarés → l'audit traverse.
+    const { record, errors } = DataValidator.normalizeAndValidate("equipments", { id: "e1", name: "srv1", ...audit });
+    ck(record.created_by === "u-alice" && record.updated_by === "u-bob", "audit : created_by/updated_by traversent la normalisation d'une collection à spec");
+    ck(record.created_date === audit.created_date && record.updated_date === audit.updated_date, "audit : created_date/updated_date préservés");
+    ck.eq(errors.filter((e) => e.path === "created_by" || e.path === "updated_by").length, 0, "audit : aucun champ d'audit n'est rejeté par la validation");
+    // Une AUTRE collection à spec (spares) : la normalisation applique ses défauts mais l'audit non déclaré traverse.
+    const { record: r2 } = DataValidator.normalizeAndValidate("spares", { id: "s1", ...audit });
+    ck(r2.created_by === "u-alice" && r2.updated_date === audit.updated_date, "audit : préservé aussi sur une autre collection à spec (champs non déclarés → traversent)");
+  }
+  });
+
   await section("shared : Cascade.plan (intégrité référentielle PARTAGÉE — front ⇄ back)", async () => {
   {
     // Jeu de données en mémoire + capacités injectées (find/fetch), comme côté serveur (repo) ou Store (_byFk).
