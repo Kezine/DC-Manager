@@ -293,8 +293,13 @@
      un calcul CSS en dur serait fragile. overflow:hidden = garde anti-scroll. */
   main:has(#view-graph.active) { max-width: none; overflow: hidden; }
   /* Vues LISTING : pleine largeur (pas de plafond 95vw centré) → densité maximale, pas de marges latérales qui
-     « apparaissent » quand le tableau se rétrécit (ex. mode compact). */
-  main:has(.view.active .list-body) { max-width: none; padding-left: 14px; padding-right: 14px; }
+     « apparaissent » quand le tableau se rétrécit (ex. mode compact).
+     Les pages Interventions & Certificats sont des LISTINGS paginés serveur mais peignent leur corps SANS émettre
+     de `.list-body` (vues custom, pas des ListView) : on les cible par leur id de section pour leur donner la
+     MÊME pleine largeur, sinon elles restaient centrées à 95vw (parité avec #view-graph / #view-datacenter). */
+  main:has(.view.active .list-body),
+  main:has(#view-interventions.active),
+  main:has(#view-certificats.active) { max-width: none; padding-left: 14px; padding-right: 14px; }
   .view { display: none; }
   .view.active { display: block; }
   #view-graph.active { display: flex; flex-direction: column; }
