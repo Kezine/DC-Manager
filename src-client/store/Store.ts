@@ -716,6 +716,21 @@ export class Store {
     return null;
   }
 
+  /** Salle où se résout un PORT : celle de son équipement porteur. null = port inconnu ou équipement hors salle.
+      Résolveur PARTAGÉ (vue 3D, boutons « Localiser ») — même règle que `equipmentDcId`. */
+  portDcId(portId: string | null): string | null {
+    const p: any = this.get("ports", portId);
+    return p ? this.equipmentDcId(p.equipment_id) : null;
+  }
+
+  /** Salle où se résout un CÂBLE : première extrémité dont le port est localisable (parité avec
+      `locateCable` de la vue 3D). null = aucune extrémité en salle → câble non localisable. */
+  cableDcId(cableOrId: any): string | null {
+    const c: any = (typeof cableOrId === "object") ? cableOrId : this.get("cables", cableOrId);
+    if (!c) return null;
+    return this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id);
+  }
+
   /* ---- faisceaux (trunks) : pool de fibres pioché par les PORTS des patchs d'extrémité ---- */
 
   /** Ports de PATCH piochant dans ce faisceau (bundle_id + strand_a/strand_b sur le Port). Indexé (_byFk). */

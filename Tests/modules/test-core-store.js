@@ -372,7 +372,13 @@ module.exports = async () => {
     // contrainte de placement (câblage) : un équipement LIBRE câblé intra-salle vers pA1 (Salle A)
     const eqX = await s.create("equipments", { name: "X" });
     const pX = (await s.create("ports", { equipment_id: eqX.id, name: "pX" })).id;
-    await s.create("cables", { name: "lien", from_port_id: pX, to_port_id: pA1 });
+    const lien = await s.create("cables", { name: "lien", from_port_id: pX, to_port_id: pA1 });
+    // portDcId / cableDcId : résolveurs PARTAGÉS des boutons « Localiser en 3D » (parité locatePort/locateCable
+    // de la vue 3D) — à ce stade eqX est encore NON PLACÉ (il n'est mis en baie que plus bas).
+    ck.eq(s.portDcId(pA1), dcA.id, "portDcId : port d'un équipement racké → salle de la baie");
+    ck.eq(s.portDcId(pX), null, "portDcId : port d'un équipement non placé → null");
+    ck.eq(s.cableDcId(lien.id), dcA.id, "cableDcId : une extrémité localisable suffit → sa salle");
+    ck.eq(s.cableDcId(jm), null, "cableDcId : aucune extrémité en salle → null (bouton Localiser masqué)");
     ck.eq(s.equipmentPlacementBlockedReason(eqX.id, dcA.id), null, "blockedReason : pose dans la salle câblée → autorisée");
     ck(typeof s.equipmentPlacementBlockedReason(eqX.id, dcB.id) === "string", "blockedReason : pose dans une AUTRE salle → bloquée");
     ck(s.equipmentRequiredDcs(eqX.id).has(dcA.id), "equipmentRequiredDcs : contraint à la Salle A");

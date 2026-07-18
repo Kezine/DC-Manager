@@ -280,7 +280,7 @@ export class RackForms extends CableForms {
         const uPos = (e.placement_mode === "rack" && e.rack_u != null)
           ? ("U" + e.rack_u + ((e.u_height || 1) > 1 ? "–U" + (e.rack_u + (e.u_height || 1) - 1) : ""))
           : (e.placement_mode === "side" ? I18n.t("rack.rackDetail.uSide") : e.placement_mode === "wall" ? I18n.t("rack.rackDetail.uWall") : "—");
-        return `<tr><td class="cell-name">${Html.escape(e.name || I18n.t("lists.ph.equipment"))}</td><td><span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span></td><td style="font-family:var(--mono)">${Html.escape(uPos)}</td><td class="cell-actions">${host.locate ? `<button class="btn btn-ghost btn-sm icon-action" data-eq-loc="${e.id}" title="${I18n.t("lists.chrome.rowLocate")}" aria-label="${I18n.t("lists.chrome.rowLocate")}">${Icons.LOCATE}</button>` : ""}<button class="btn btn-ghost btn-sm icon-action" data-eq-view="${e.id}" title="${I18n.t("lists.chrome.rowView")}" aria-label="${I18n.t("lists.chrome.rowView")}">${Icons.INFO}</button></td></tr>`;
+        return `<tr><td class="cell-name">${Html.escape(e.name || I18n.t("lists.ph.equipment"))}</td><td><span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span></td><td style="font-family:var(--mono)">${Html.escape(uPos)}</td><td class="cell-actions">${host.locate && store.equipmentDcId(e) ? `<button class="btn btn-ghost btn-sm icon-action" data-eq-loc="${e.id}" title="${I18n.t("lists.chrome.rowLocate")}" aria-label="${I18n.t("lists.chrome.rowLocate")}">${Icons.LOCATE}</button>` : ""}<button class="btn btn-ghost btn-sm icon-action" data-eq-view="${e.id}" title="${I18n.t("lists.chrome.rowView")}" aria-label="${I18n.t("lists.chrome.rowView")}">${Icons.INFO}</button></td></tr>`;
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("lists.col.equipment")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("rack.rackDetail.colU")}</th><th style="text-align:right;">${I18n.t("lists.chrome.actions")}</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
@@ -289,8 +289,9 @@ export class RackForms extends CableForms {
     } else { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = I18n.t("rack.rackDetail.empty"); root.appendChild(e); }
 
     // actions : Localiser en 3D + Gérer le contenu + Modifier
+    // « Localiser » seulement si la baie est POSÉE dans une salle (même prédicat que locateRack) — sinon toast d'erreur.
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("rack", rk.id, () => this.rackDetail(store, host, rk.id, onChanged)); actions.appendChild(locBtn); }
+    if (host.locate && rk.datacenter_id) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("rack", rk.id, () => this.rackDetail(store, host, rk.id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) {   // viewer : pas d'édition
       const contentBtn = document.createElement("button"); contentBtn.type = "button"; contentBtn.className = "btn btn-ghost"; contentBtn.textContent = I18n.t("rack.rackDetail.contentBtn");
       contentBtn.title = I18n.t("rack.rackDetail.contentTitle");

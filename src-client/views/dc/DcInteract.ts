@@ -796,7 +796,7 @@ export abstract class DcInteract extends DcPanels {
     return null;
   }
 
-  protected portDcId(portId: string | null): string | null { const p: any = this.store.get("ports", portId); return p ? this.store.equipmentDcId(p.equipment_id) : null; }
+  protected portDcId(portId: string | null): string | null { return this.store.portDcId(portId); }   // résolveur PARTAGÉ (Store) — même règle pour la vue 3D et les boutons « Localiser »
 
   /** Bascule en 3D sur la salle `dcId` (mode simple DC) et programme le focus caméra sur `p` (emprise `extent` mm).
       `face` (optionnel) oriente la caméra face au front de l'objet ; sinon l'angle courant est conservé. */

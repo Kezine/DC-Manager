@@ -342,10 +342,15 @@ async function boot(): Promise<void> {
       onShow: () => {
         if (!view) {
           const reRender = () => view!.render();
-          // « Localiser en 3D » par ligne : pour les ÉQUIPEMENTS, le bouton n'est proposé que si l'équipement est
-          // rattaché à une salle (même prédicat que locateEquipment : `store.equipmentDcId`) — un équipement
-          // d'inventaire pur / posé sur plan d'étage / dans une baie non placée n'aurait qu'un toast d'erreur.
-          const canLocate = opts.locate === "equipment" ? (id: string) => !!store.equipmentDcId(id) : undefined;
+          // « Localiser en 3D » par ligne : le bouton n'est proposé que si la localisation peut ABOUTIR — mêmes
+          // prédicats que locateEquipment/locateRack/locateCable (équipement rattaché à une salle, baie posée dans
+          // une salle, câble avec au moins une extrémité en salle). Sinon le bouton n'aurait qu'un toast d'erreur
+          // (équipement d'inventaire pur, posé sur plan d'étage, baie non placée, câble en attente…).
+          const canLocate =
+            opts.locate === "equipment" ? (id: string) => !!store.equipmentDcId(id)
+            : opts.locate === "rack" ? (id: string) => { const rk: any = store.get("racks", id); return !!(rk && rk.datacenter_id); }
+            : opts.locate === "cable" ? (id: string) => !!store.cableDcId(id)
+            : undefined;
           view = new ListView(store, container, {
             ...cfg,
             actions: VIEWER

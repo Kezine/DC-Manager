@@ -138,8 +138,9 @@ export class DetailForms extends IpamForms {
     }));
 
     // actions : Localiser en 3D + Modifier (mêmes conventions que equipment/rackDetail)
+    // « Localiser » seulement si une extrémité au moins se résout en salle (même prédicat que locateCable).
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (host.locate) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
+    if (host.locate && store.cableDcId(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = () => this.cable(store, host, id, onChanged); actions.appendChild(b); }
     root.appendChild(actions);
     host.openModal({ title: I18n.t("detail.cable.title"), subtitle: Html.escape(c.name || ""), body: root, hideFooter: true, wide: true });
@@ -192,7 +193,7 @@ export class DetailForms extends IpamForms {
     const rows = ports.map((p: any) => {
       const eq: any = store.get("equipments", p.equipment_id);
       const strands = [p.strand_a, p.strand_b].filter((s) => s != null).join(" · ");
-      const loc = host.locate ? `<button class="btn btn-ghost btn-sm icon-action" data-port-loc="${p.id}" title="${I18n.t("detail.common.locatePort")}" aria-label="${I18n.t("detail.common.locatePort")}">${Icons.LOCATE}</button>` : "";
+      const loc = host.locate && store.portDcId(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-loc="${p.id}" title="${I18n.t("detail.common.locatePort")}" aria-label="${I18n.t("detail.common.locatePort")}">${Icons.LOCATE}</button>` : "";
       return [`${Html.escape(eq ? (eq.name || "?") : "?")} <span style="color:var(--fg-dimmer)">:</span> ${Html.escape(p.name || I18n.t("detail.common.port"))}`, `<span style="font-family:var(--mono)">${strands || "—"}</span>`, `<span class="cell-actions">${loc}</span>`];
     });
     const tw = this.tbl(root, [I18n.t("detail.bundle.colPatchPort"), I18n.t("detail.bundle.colFibers"), ""], rows, I18n.t("detail.bundle.strandsEmpty"));
