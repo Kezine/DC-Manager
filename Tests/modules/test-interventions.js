@@ -22,6 +22,11 @@ module.exports = async () => {
     ck.eq(InterventionsFormat.STATUS_SLUGS.join(","), "declared,planned,in_progress,closed,cancelled", "STATUS_SLUGS = miroir serveur (ordre cycle de vie)");
     ck.eq(InterventionsFormat.PRIORITY_SLUGS.join(","), "low,normal,high,critical", "PRIORITY_SLUGS = miroir serveur (ordre croissant)");
     ck.eq(InterventionsFormat.TARGET_KIND_SLUGS.join(","), "equipment,vm,spare", "TARGET_KIND_SLUGS = miroir serveur");
+    // OPEN_STATUS_SLUGS : sous-ensemble ACTIF de STATUS_SLUGS (badge de comptage d'onglet) — dérivé de
+    // l'énumération, donc toujours un vrai sous-ensemble, et excluant bien les états terminaux closed/cancelled.
+    ck.eq(InterventionsFormat.OPEN_STATUS_SLUGS.join(","), "declared,planned,in_progress", "OPEN_STATUS_SLUGS = statuts ouverts (ni closed ni cancelled)");
+    InterventionsFormat.OPEN_STATUS_SLUGS.forEach((s) => ck(InterventionsFormat.STATUS_SLUGS.includes(s), "OPEN_STATUS_SLUGS ⊂ STATUS_SLUGS (" + s + ")"));
+    ck(InterventionsFormat.CLOSED_STATUS_SLUGS.every((s) => !InterventionsFormat.OPEN_STATUS_SLUGS.includes(s)), "OPEN_STATUS_SLUGS exclut les états terminaux");
   });
 
   await section("Interventions : InterventionsFormat — rangs & classes de badge (priorité/statut)", async () => {

@@ -99,6 +99,14 @@ interface ListingState {
 }
 
 export class CertsAdminView {
+  /** Signal ÉMIS après tout rechargement du corps de listing (dont création / suppression / révocation) : la vue
+      prévient l'hôte que le NOMBRE TOTAL de certificats a pu changer, pour rafraîchir le badge de l'onglet — tenu
+      HORS de cette vue (compteur caché maintenu en async dans main.ts, la donnée étant paginée serveur alors que
+      le count() du shell est synchrone). Branché sur refreshBody() (chokepoint de tous les rechargements après
+      écriture) plutôt que dispersé sur chaque site : robuste (aucune mutation oubliée) ; un rechargement de simple
+      pagination/tri/filtre déclenche aussi un recomptage (requête pageSize:1, coût négligeable). Optionnel. */
+  onCountsChanged?: () => void;
+
   /** Coffre de session détenant la clé maître dérivée (créé au constructeur, onLock → re-render). */
   private readonly session: PkiSession;
   /** Dernier état PKI connu (null = pas encore chargé). */
@@ -400,6 +408,7 @@ export class CertsAdminView {
       vue A (Dérivés/Sous seuil) reflètent le changement. */
   private async refreshBody(): Promise<void> {
     await this.guarded(async () => { await this.loadCurrentPage(); this.paintBody(); });
+    this.onCountsChanged?.();   // le TOTAL de certificats a pu changer (création/suppression) → badge d'onglet (async, hors vue)
   }
 
   /** Bascule vers la vue B (certificats du sous-arbre d'une racine) avec des filtres/tri NEUFS. */

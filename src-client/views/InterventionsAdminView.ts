@@ -79,6 +79,13 @@ interface ListingState {
 }
 
 export class InterventionsAdminView {
+  /** Signal ÉMIS après une écriture (création / transition rapide / suppression) : la vue prévient l'hôte que le
+      NOMBRE d'interventions OUVERTES a pu changer, pour rafraîchir le badge de l'onglet — tenu HORS de cette vue
+      (compteur caché maintenu en async dans main.ts, car la donnée est paginée serveur et le count() du shell est
+      synchrone). Optionnel (null tant que main.ts ne l'a pas câblé). N'est PAS déclenché par la simple navigation
+      (recherche/tri/filtre/pagination) : le total d'ouvertes n'y change pas. */
+  onCountsChanged?: () => void;
+
   /** Garde anti-rechargements concurrents. */
   private loading = false;
   /** État du listing. */
@@ -151,6 +158,14 @@ export class InterventionsAdminView {
       place. Sert aussi APRÈS une écriture (la page courante est rechargée, clamp serveur si elle a disparu). */
   private async refreshBody(): Promise<void> {
     await this.guarded(async () => { await this.loadPage(); this.paintBody(); });
+  }
+
+  /** Après une ÉCRITURE (création / transition rapide / suppression) : recharge la page courante (comme
+      refreshBody) PUIS signale que le compteur d'ouvertes a pu changer (badge d'onglet). Les rechargements de
+      simple navigation passent, eux, par refreshBody() SANS ce signal. */
+  private async afterWrite(): Promise<void> {
+    await this.refreshBody();
+    this.onCountsChanged?.();
   }
 
   /** Exécute un chargement en traduisant 503 (module serveur en erreur) en BANDEAU actionnable, et toute
@@ -362,7 +377,7 @@ export class InterventionsAdminView {
       input.status = newStatus;
       await this.client.save(item.id, input);
       Notify.toast(I18n.t(newStatus === "in_progress" ? "interventions.toast.started" : "interventions.toast.closed"), "ok");
-      await this.refreshBody();
+      await this.afterWrite();
     } catch (e) { this.actionError(e); }
   }
 
@@ -377,7 +392,7 @@ export class InterventionsAdminView {
     try {
       await this.client.remove(item.id);
       Notify.toast(I18n.t("interventions.toast.deleted"), "ok");
-      await this.refreshBody();
+      await this.afterWrite();
     } catch (e) { this.actionError(e); }
   }
 
@@ -461,7 +476,7 @@ export class InterventionsAdminView {
         try {
           await this.client!.save(editing ? existing!.id : InterventionsAdminView.newId(), input);
           Notify.toast(I18n.t(editing ? "interventions.toast.updated" : "interventions.toast.created"), "ok");
-          await this.refreshBody();
+          await this.afterWrite();
           return true;
         } catch (e) { this.showError(errBox, e); return false; }   // modale OUVERTE tant que non enregistré
       },

@@ -19,6 +19,13 @@ export class InterventionsFormat {
   static readonly KIND_SLUGS: readonly string[] = ["incident", "intervention"];
   /** Cycle de vie — MIROIR de INTERVENTION_STATUSES (serveur), dans l'ordre canonique. */
   static readonly STATUS_SLUGS: readonly string[] = ["declared", "planned", "in_progress", "closed", "cancelled"];
+  /** Statuts TERMINAUX (une intervention y est « close ») — MIROIR du serveur. */
+  static readonly CLOSED_STATUS_SLUGS: readonly string[] = ["closed", "cancelled"];
+  /** Statuts OUVERTS (encore actifs) = STATUS_SLUGS privé des états terminaux. Sert au badge de comptage de
+      l'onglet « Interventions » (nombre d'ouvertes) : dérivé de STATUS_SLUGS pour rester synchrone si l'énumération
+      évolue. Passé tel quel au filtre `statuses` du listing paginé (le `total` renvoyé = nombre d'ouvertes). */
+  static readonly OPEN_STATUS_SLUGS: readonly string[] =
+    InterventionsFormat.STATUS_SLUGS.filter((s) => !InterventionsFormat.CLOSED_STATUS_SLUGS.includes(s));
   /** Priorités (ordre de traitement) — MIROIR de INTERVENTION_PRIORITIES (serveur), du plus faible au plus fort. */
   static readonly PRIORITY_SLUGS: readonly string[] = ["low", "normal", "high", "critical"];
   /** Familles de cibles liables — MIROIR de INTERVENTION_TARGET_KINDS (serveur). */

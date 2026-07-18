@@ -17,6 +17,7 @@ import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip } from "../ui";
 import { Html } from "../core/Html";
 import { TargetSearch } from "../core/TargetSearch";
+import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
 import { Schema } from "../../src-shared/Schema";
 import { Download } from "../core/Download";
 import { Prefs } from "../core/Prefs";
@@ -666,12 +667,28 @@ async function boot(): Promise<void> {
     },
   };
   let interventionsView: InterventionsAdminView;
+  // Badge de l'onglet « Interventions » : nombre d'interventions OUVERTES. La donnée est PAGINÉE côté serveur alors
+  // que le `count()` du shell est SYNCHRONE → on maintient une valeur CACHÉE, rafraîchie en ASYNC (bootstrap REST,
+  // activation de l'onglet, après écriture dans la vue), et on force `shell.refreshCounts()` quand elle arrive. Le
+  // total d'ouvertes = `total` du listing filtré sur les statuts ouverts (aucun chargement complet côté client).
+  // Mode fichier : `interventionsClient` est null → `count` non défini (pas de badge, cf. Shell.build).
+  let interventionsOpenCount = 0;
+  const refreshInterventionsCount = async (): Promise<void> => {
+    if (!interventionsClient || !interventionsClient.docId) { interventionsOpenCount = 0; shell.refreshCounts(); return; }
+    try {
+      const res = await interventionsClient.listPage({ pageSize: 1, statuses: [...InterventionsFormat.OPEN_STATUS_SLUGS] });
+      interventionsOpenCount = res.total;
+    } catch (_) { /* badge non critique : on garde l'ancienne valeur en cas d'échec réseau */ }
+    shell.refreshCounts();
+  };
   const interventionsContainer = shell.addView({
     name: "interventions", label: I18n.t("tabs.interventions.label"), kind: "primary",
     title: I18n.t("tabs.interventions.label"), subtitle: I18n.t("tabs.interventions.subtitle"),
-    onShow: () => interventionsView.show(),
+    count: REST_MODE ? () => interventionsOpenCount : undefined,   // badge en mode API uniquement
+    onShow: () => { interventionsView.show(); void refreshInterventionsCount(); },
   });
   interventionsView = new InterventionsAdminView(interventionsContainer, interventionsClient, formHost, interventionTargets);   // formulaires dans LA modale de l'app (principe n°11)
+  interventionsView.onCountsChanged = () => { void refreshInterventionsCount(); };   // après création/clôture/suppression → recompte les ouvertes
   // INTÉGRATION « FICHES » (badge + déclaration depuis équipement/VM/spare) : hooks injectés dans les fiches
   // via FormHost (contrat découplé — les formulaires n'importent NI la vue NI le client interventions). null
   // hors mode API → aucune rangée « Interventions » dans les fiches. `declareFor` FERME la fiche courante
@@ -690,12 +707,27 @@ async function boot(): Promise<void> {
   // enregistrée : `certsClient` est null hors mode API → la vue affiche « mode API requis » (feature AMOVIBLE :
   // retirer C6 = supprimer CertsAdminView + CertsClient + CertsFormat + ces lignes).
   let certsView: CertsAdminView;
+  // Badge de l'onglet « Certificats » : nombre TOTAL de certificats. Même mécanique async que les interventions
+  // (donnée paginée serveur, `count()` shell synchrone) : valeur cachée + refresh async → `shell.refreshCounts()`.
+  // Total = `total` du listing plat SANS filtre (une requête pageSize:1, aucun chargement complet). Null en mode
+  // fichier (`certsClient` null) → `count` non défini, pas de badge.
+  let certsTotalCount = 0;
+  const refreshCertsCount = async (): Promise<void> => {
+    if (!certsClient || !certsClient.docId) { certsTotalCount = 0; shell.refreshCounts(); return; }
+    try {
+      const res = await certsClient.listPage({ pageSize: 1 });
+      certsTotalCount = res.total;
+    } catch (_) { /* badge non critique : on garde l'ancienne valeur en cas d'échec réseau */ }
+    shell.refreshCounts();
+  };
   const certsContainer = shell.addView({
     name: "certificats", label: I18n.t("tabs.certificats.label"), kind: "primary",
     title: I18n.t("tabs.certificats.label"), subtitle: I18n.t("tabs.certificats.subtitle"),
-    onShow: () => certsView.show(),
+    count: REST_MODE ? () => certsTotalCount : undefined,   // badge en mode API uniquement
+    onShow: () => { certsView.show(); void refreshCertsCount(); },
   });
   certsView = new CertsAdminView(certsContainer, certsClient, formHost);   // formulaires dans LA modale de l'app (principe n°11)
+  certsView.onCountsChanged = () => { void refreshCertsCount(); };   // après création/suppression → recompte le total
   // GROUPE « Paramètres » : onglet TOUJOURS DÉROULANT (jamais une vue) regroupant les pages rarement visitées.
   // EN DERNIER (après les onglets métier ET l'onglet Certificats).
   shell.addGroup({ name: "parametres", label: I18n.t("tabs.parametres.label"), kind: "group", children: ["contacts", "notifications"] });
@@ -799,6 +831,8 @@ async function boot(): Promise<void> {
   if (REST_MODE) {
     shell.hideWelcome();
     await rest!.bootstrap();   // ouvre le dernier doc ouvert → défaut global → plus récent (ou en crée un) — cf. RestDocumentController.bootstrap
+    void refreshInterventionsCount();   // badges d'onglets (données paginées serveur) — après ouverture du document
+    void refreshCertsCount();
   } else {
     const reopenName: string | null = HAS_FS_API ? await files.lastOpenName() : null;
     shell.showWelcome({ reopenName, mode: prefs.fileAccessMode, fsApi: HAS_FS_API });
