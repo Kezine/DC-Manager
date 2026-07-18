@@ -1,0 +1,53 @@
+<!-- @dsCard group="Boutons" name="Boutons" subtitle="btn primaire / fantôme / danger, tailles, bouton-icône, états" -->
+<!-- DÉRIVÉ de dc-manager.css (.btn, .btn-primary, .btn-ghost, .btn-danger, .btn-sm)
+     et de src-client/ui/IconButton.ts (IconButton.build → <button class="btn btn-ghost
+     btn-sm icon-action">SVG</button> + aria-label + title obligatoires). -->
+<section class="ds-section">
+  <h2>Boutons texte</h2>
+  <div class="ds-row">
+    <button type="button" class="btn btn-primary">Enregistrer</button>
+    <button type="button" class="btn btn-ghost">Annuler</button>
+    <button type="button" class="btn">Neutre</button>
+    <button type="button" class="btn btn-danger">Supprimer</button>
+  </div>
+
+  <div class="ds-variant-title">Bouton primaire à icône (en-tête « + Nouveau »)</div>
+  <div class="ds-row">
+    <button type="button" class="btn btn-primary"><span class="gi" aria-hidden="true">{{ICON:PLUS}}</span>Nouvel équipement</button>
+    <button type="button" class="btn btn-ghost"><span class="gi" aria-hidden="true">{{ICON:IMPORT}}</span>Importer</button>
+  </div>
+
+  <div class="ds-variant-title">Taille compacte (.btn-sm)</div>
+  <div class="ds-row">
+    <button type="button" class="btn btn-sm btn-primary">Valider</button>
+    <button type="button" class="btn btn-sm btn-ghost">Réinitialiser</button>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Boutons-icône d'action (.icon-action)</h2>
+  <p class="ds-note">Miroir de <code>IconButton.build</code> : <code>&lt;button class="btn btn-ghost btn-sm icon-action"&gt;</code> avec <code>aria-label</code> + <code>title</code> obligatoires (icône seule = pas de nom accessible sans eux). Réutilisés dans TOUS les listings.</p>
+  <div class="ds-row">
+    <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Consulter le détail" title="Consulter le détail">{{ICON:INFO}}</button>
+    <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Modifier" title="Modifier">{{ICON:EDIT}}</button>
+    <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Localiser" title="Localiser">{{ICON:LOCATE}}</button>
+    <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Dupliquer" title="Dupliquer">{{ICON:CLONE}}</button>
+    <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Plus d'actions" title="Plus d'actions">{{ICON:MORE}}</button>
+  </div>
+
+  <div class="ds-variant-title">Variante danger (.icon-action.danger)</div>
+  <div class="ds-row">
+    <button type="button" class="btn btn-ghost btn-sm icon-action danger" aria-label="Supprimer" title="Supprimer">{{ICON:DELETE}}</button>
+    <button type="button" class="btn btn-ghost btn-sm icon-action danger" aria-label="Révoquer" title="Révoquer">{{ICON:REVOKE}}</button>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>États</h2>
+  <div class="ds-row">
+    <button type="button" class="btn btn-primary" disabled>Primaire désactivé</button>
+    <button type="button" class="btn btn-ghost" disabled>Fantôme désactivé</button>
+    <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Action indisponible" title="Action indisponible" disabled>{{ICON:EXPORT}}</button>
+  </div>
+  <p class="ds-note">Les états <em>désactivés</em> ci-dessus sont réels (attribut <code>disabled</code>). L'état <em>survolé</em> (<code>:hover</code> — bordure accentuée, léger halo pour le primaire) ne peut pas être figé en statique : survoler les boutons ci-dessus pour le voir.</p>
+</section>

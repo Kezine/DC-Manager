@@ -1,0 +1,52 @@
+<!-- @dsCard group="Fondations" name="Typographie" subtitle="familles, tailles et casse réellement utilisées dans l'app" -->
+<!-- DÉRIVÉ des règles de dc-manager.css : body (13px mono), .view-title (16px),
+     .modal-title / .section-divider (12px uppercase), .tab / th (10-11px uppercase),
+     .form-field label (10px uppercase). Police unique = var(--mono) (jeton {{MONO_STACK}}). -->
+<section class="ds-section">
+  <h2>Famille</h2>
+  <p class="ds-note">Une seule famille dans toute l'app : <code>var(--mono)</code> = <code>{{MONO_STACK}}</code>. Aucune police web chargée (piles système uniquement).</p>
+</section>
+
+<section class="ds-section">
+  <h2>Échelle</h2>
+
+  <div class="ds-type-row">
+    <span class="ds-type-meta">.view-title · 16px · 700 · UPPERCASE</span>
+    <span class="view-title">Équipements <span>·</span> inventaire</span>
+  </div>
+
+  <div class="ds-type-row">
+    <span class="ds-type-meta">.modal-title · 12px · 700 · letter-spacing 0.15em</span>
+    <span class="modal-title">Modifier une <span>baie</span></span>
+  </div>
+
+  <div class="ds-type-row">
+    <span class="ds-type-meta">.section-divider · 11px · UPPERCASE · accent</span>
+    <span class="section-divider" style="margin:0;border:0;padding:0;">Alimentation</span>
+  </div>
+
+  <div class="ds-type-row">
+    <span class="ds-type-meta">corps (body) · 13px · 1.5</span>
+    <span>Texte courant d'un formulaire ou d'une fiche : lisible, interligne 1,5.</span>
+  </div>
+
+  <div class="ds-type-row">
+    <span class="ds-type-meta">.tab · 11px · UPPERCASE · 0.13em</span>
+    <span style="font-size:11px;letter-spacing:0.13em;text-transform:uppercase;color:var(--fg-dim);">Datacenter</span>
+  </div>
+
+  <div class="ds-type-row">
+    <span class="ds-type-meta">th (en-tête de table) · 10px · UPPERCASE · 0.1em</span>
+    <span style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--fg-dim);font-weight:600;">Nom du port</span>
+  </div>
+
+  <div class="ds-type-row">
+    <span class="ds-type-meta">.form-field label · 10px · UPPERCASE</span>
+    <span style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--fg-dim);">Adresse IP</span>
+  </div>
+
+  <div class="ds-type-row">
+    <span class="ds-type-meta">valeur mono · 12px (ex. .viz-port)</span>
+    <span class="viz-port">Gi0/0/1</span>
+  </div>
+</section>

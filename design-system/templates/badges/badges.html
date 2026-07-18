@@ -1,0 +1,74 @@
+<!-- @dsCard group="Badges & pastilles" name="Badges & pastilles" subtitle="pill, tab-count, badges interventions & échéances certificats" -->
+<!-- DÉRIVÉ de dc-manager.css (.pill + .role-*/.status-*, .tab-count/.warn/.err) et
+     des formateurs : src-client/views/InterventionsAdminView.ts (badge() = .pill +
+     style border-color/color) et CertsAdminView.ts (pill() ok/warn/err/neutral). -->
+<section class="ds-section">
+  <h2>Pastilles (.pill)</h2>
+  <div class="ds-variant-title">Neutre</div>
+  <div class="ds-row"><span class="pill">Étiquette</span></div>
+
+  <div class="ds-variant-title">Rôles réseau (.pill.role-*)</div>
+  <div class="ds-row">
+    <span class="pill role-mgmt">Management</span>
+    <span class="pill role-data">Données</span>
+    <span class="pill role-power">Alimentation</span>
+  </div>
+
+  <div class="ds-variant-title">Statuts de câble (.pill.status-*)</div>
+  <div class="ds-row">
+    <span class="pill status-brouillon">Brouillon</span>
+    <span class="pill status-planifie">Planifié</span>
+    <span class="pill status-cable">Câblé</span>
+    <span class="pill status-a-remplacer">À remplacer</span>
+    <span class="pill status-casse">Cassé</span>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Compteurs d'onglet (.tab-count)</h2>
+  <p class="ds-note">Pastille de comptage d'un onglet. En mode alerte, bordure + texte teintés (fond transparent) : <code>warn</code> = attention (ex. certificats expirants), <code>err</code> = critique.</p>
+  <div class="ds-row">
+    <span style="font-size:11px;letter-spacing:0.13em;text-transform:uppercase;color:var(--fg-dim);">Équipements <span class="tab-count">128</span></span>
+    <span style="font-size:11px;letter-spacing:0.13em;text-transform:uppercase;color:var(--fg-dim);">Certificats <span class="tab-count warn">6</span></span>
+    <span style="font-size:11px;letter-spacing:0.13em;text-transform:uppercase;color:var(--fg-dim);">Interventions <span class="tab-count err">3</span></span>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Interventions — priorité</h2>
+  <p class="ds-note">Miroir de <code>InterventionsFormat.priorityClass</code> → <code>InterventionsAdminView.badge</code> : <code>.pill</code> teinté en ligne (low → estompé, normal → neutre, high → warn, critical → err).</p>
+  <div class="ds-row">
+    <span class="pill" style="border-color:var(--fg-dimmer);color:var(--fg-dim)">Basse</span>
+    <span class="pill">Normale</span>
+    <span class="pill" style="border-color:var(--warn);color:var(--warn)">Haute</span>
+    <span class="pill" style="border-color:var(--err);color:var(--err)">Critique</span>
+  </div>
+
+  <div class="ds-variant-title">Interventions — statut (InterventionsFormat.statusClass)</div>
+  <div class="ds-row">
+    <span class="pill">Déclarée</span>
+    <span class="pill">Planifiée</span>
+    <span class="pill" style="border-color:var(--warn);color:var(--warn)">En cours</span>
+    <span class="pill" style="border-color:var(--ok);color:var(--ok)">Close</span>
+    <span class="pill" style="border-color:var(--fg-dimmer);color:var(--fg-dim)">Annulée</span>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Certificats — échéance & état</h2>
+  <p class="ds-note">Miroir de <code>CertsAdminView.pill</code> (ok / warn / err / neutre) et de la cellule d'échéance <code>expiryCell</code> (texte coloré : vert &gt; 30 j, orange ≤ 30 j, rouge ≤ 7 j ou expiré).</p>
+  <div class="ds-row">
+    <span class="pill" style="border-color:var(--ok);color:var(--ok)">Déverrouillé</span>
+    <span class="pill" style="border-color:var(--warn);color:var(--warn)">Verrouillé</span>
+    <span class="pill" style="border-color:var(--err);color:var(--err)">Révoqué</span>
+    <span class="pill">Autorité</span>
+  </div>
+  <div class="ds-variant-title">Cellule d'échéance (jours restants)</div>
+  <div class="ds-row">
+    <span style="color:var(--ok)">dans 142 j</span>
+    <span style="color:var(--warn)">dans 21 j</span>
+    <span style="color:var(--err)">dans 4 j</span>
+    <span style="color:var(--err)">expiré</span>
+    <span style="color:var(--fg-dimmer)">—</span>
+  </div>
+</section>

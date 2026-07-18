@@ -1,0 +1,114 @@
+<!-- @dsCard group="Listing" name="Listing" subtitle="barre de tri/filtres, table triable, cellule d'actions, ligne vide, pagination" -->
+<!-- DÉRIVÉ de src-client/views/ListView.ts : .list-toolbar (.lt-group + select.sort-key +
+     .sort-dir-btn + .lt-filters + .lt-reset), .list-search, .list-body > .table-wrap >
+     table (th.sortable + .sort-ind, .cell-name, .cell-actions avec IconButton, .empty-row),
+     et .pagination. Les boutons d'action de ligne sont des .icon-action (cf. IconButton). -->
+<section class="ds-section">
+  <h2>Barre de tri & filtres (.list-toolbar)</h2>
+  <div class="list-toolbar">
+    <div class="lt-group">
+      <label>Trier par</label>
+      <select class="sort-key">
+        <option>Nom</option>
+        <option>Type</option>
+        <option>Position</option>
+      </select>
+      <button type="button" class="sort-dir-btn btn btn-ghost btn-sm">▲ Croissant</button>
+    </div>
+    <div class="lt-filters">
+      <span class="lt-flabel">Filtres</span>
+      <div class="multi-pop">
+        <button type="button" class="multi-trigger">Type <span class="count-badge">Tous</span></button>
+      </div>
+      <button type="button" class="lt-reset">Réinitialiser</button>
+    </div>
+  </div>
+  <div class="list-search" style="display:flex;gap:8px;align-items:center;padding:6px 8px;">
+    <input type="search" class="search-input" placeholder="Rechercher…" style="flex:1 1 auto;">
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Table (.list-body)</h2>
+  <p class="ds-note">En-têtes triables (<code>th.sortable</code> + indicateur <code>.sort-ind</code>), cellule nom (<code>.cell-name</code>), cellule d'actions (<code>.cell-actions</code>) avec boutons-icône. Texte centré (règle <code>.list-body</code>).</p>
+  <div class="list-body">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="sortable">Nom<span class="sort-ind"> ▲</span></th>
+            <th class="sortable">Type</th>
+            <th>Position</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="cell-name">core-sw-01</td>
+            <td>Switch</td>
+            <td><span class="viz-loc-short"><span class="viz-dot">●</span> RACK-A-03 · U12</span></td>
+            <td class="cell-actions">
+              <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Consulter le détail" title="Consulter le détail">{{ICON:INFO}}</button>
+              <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Modifier" title="Modifier">{{ICON:EDIT}}</button>
+              <button type="button" class="btn btn-ghost btn-sm icon-action danger" aria-label="Supprimer" title="Supprimer">{{ICON:DELETE}}</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="cell-name">edge-rtr-02</td>
+            <td>Routeur</td>
+            <td><span class="viz-loc-short"><span class="viz-dot">●</span> RACK-B-01 · U40</span></td>
+            <td class="cell-actions">
+              <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Consulter le détail" title="Consulter le détail">{{ICON:INFO}}</button>
+              <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Modifier" title="Modifier">{{ICON:EDIT}}</button>
+              <button type="button" class="btn btn-ghost btn-sm icon-action danger" aria-label="Supprimer" title="Supprimer">{{ICON:DELETE}}</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="cell-name">esxi-host-07</td>
+            <td>Serveur</td>
+            <td><span class="viz-muted">non placé</span></td>
+            <td class="cell-actions">
+              <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Consulter le détail" title="Consulter le détail">{{ICON:INFO}}</button>
+              <button type="button" class="btn btn-ghost btn-sm icon-action" aria-label="Modifier" title="Modifier">{{ICON:EDIT}}</button>
+              <button type="button" class="btn btn-ghost btn-sm icon-action danger" aria-label="Supprimer" title="Supprimer">{{ICON:DELETE}}</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <div>3 éléments · page 1 / 1</div>
+      <div class="pagination-controls">
+        <button type="button" class="page-btn" disabled>«</button>
+        <button type="button" class="page-btn" disabled>‹</button>
+        <span style="padding:0 6px;">1 / 1</span>
+        <button type="button" class="page-btn" disabled>›</button>
+        <button type="button" class="page-btn" disabled>»</button>
+        <select class="page-size app-select">
+          <option>25 / page</option>
+          <option>50 / page</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Ligne vide (.empty-row)</h2>
+  <div class="list-body">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="sortable">Nom</th>
+            <th>Type</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="empty-row"><td colspan="3">Aucun élément à afficher.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>

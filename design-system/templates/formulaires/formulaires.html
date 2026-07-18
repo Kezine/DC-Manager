@@ -1,0 +1,153 @@
+<!-- @dsCard group="Formulaires" name="Formulaires" subtitle="champs texte / nombre / date, select, textarea, bascule, recherche, multi-sélection" -->
+<!-- DÉRIVÉ de src-client/ui/FormControls.ts (fieldRow, text, number, select, textArea,
+     toggle, date), de dc-manager.css (.form-field / .form-row / .form-hint / .search-input)
+     et de src-client/ui/MultiSelect.ts (trigger + panneau). Les SVG des boutons de date
+     sont ceux DÉFINIS dans FormControls.date (hors registre Icons). -->
+<section class="ds-section">
+  <h2>Champs simples (.form-field)</h2>
+  <div class="ds-field-w">
+    <div class="form-field">
+      <label>Nom de l'équipement</label>
+      <input type="text" value="core-sw-01">
+    </div>
+    <div class="form-field">
+      <label>Position U</label>
+      <input type="number" value="12" min="1" step="1">
+    </div>
+    <div class="form-field">
+      <label>Mot de passe SNMP</label>
+      <input type="password" value="secret">
+    </div>
+    <div class="form-field">
+      <label>Type</label>
+      <select class="app-select">
+        <option>Switch</option>
+        <option>Routeur</option>
+        <option>Serveur</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>Notes</label>
+      <textarea placeholder="Description libre…">Migration prévue au T3.</textarea>
+    </div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Rangée à deux champs (.form-row)</h2>
+  <div class="ds-field-w" style="max-width:520px;">
+    <div class="form-row">
+      <div class="form-field">
+        <label>Largeur (mm)</label>
+        <input type="number" value="600" step="1">
+      </div>
+      <div class="form-field">
+        <label>Profondeur (mm)</label>
+        <input type="number" value="1000" step="1">
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Sélecteur de date (FormControls.date)</h2>
+  <p class="ds-note">Miroir de <code>FormControls.date</code> : input thématisé + boutons <code>.date-ctrl-btn</code> (choisir 📅 / Aujourd'hui / effacer). Jamais un <code>&lt;input type="date"&gt;</code> brut. Trois granularités : date, date-heure, heure.</p>
+  <div class="ds-field-w">
+    <div class="form-field">
+      <label>Date (mode « date »)</label>
+      <div class="date-input-wrap">
+        <div class="date-input-row">
+          <input type="date" value="2026-07-18">
+          <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-icon" title="Choisir une date" aria-label="Choisir une date"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
+          <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-text" title="Aujourd'hui" aria-label="Aujourd'hui">Auj.</button>
+          <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-icon" title="Effacer" aria-label="Effacer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20H8.5L3 14l5.5-6H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2z"/><line x1="18" y1="11" x2="12" y2="17"/><line x1="12" y1="11" x2="18" y2="17"/></svg></button>
+        </div>
+      </div>
+    </div>
+    <div class="form-field">
+      <label>Date-heure (mode « date-time »)</label>
+      <div class="date-input-wrap">
+        <div class="date-input-row">
+          <input type="datetime-local" value="2026-07-18T09:30">
+          <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-icon" title="Choisir une date" aria-label="Choisir une date"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
+          <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-text" title="Maintenant" aria-label="Maintenant">Maint.</button>
+          <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-icon" title="Effacer" aria-label="Effacer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20H8.5L3 14l5.5-6H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2z"/><line x1="18" y1="11" x2="12" y2="17"/><line x1="12" y1="11" x2="18" y2="17"/></svg></button>
+        </div>
+      </div>
+    </div>
+    <div class="form-field">
+      <label>Heure (mode « time »)</label>
+      <div class="date-input-wrap">
+        <div class="date-input-row">
+          <input type="time" value="14:05">
+          <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-icon" title="Choisir une heure" aria-label="Choisir une heure"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7.5 12 12 15.5 14"/></svg></button>
+          <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-text" title="Maintenant" aria-label="Maintenant">Maint.</button>
+          <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-icon" title="Effacer" aria-label="Effacer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20H8.5L3 14l5.5-6H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2z"/><line x1="18" y1="11" x2="12" y2="17"/><line x1="12" y1="11" x2="18" y2="17"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Bascule (FormControls.toggle → .toggle-pill)</h2>
+  <p class="ds-note">Pilule + témoin <code>.tgl-dot</code> + teinte (jamais de plein orange, réservé à l'action). <code>role="switch"</code> + <code>aria-checked</code>.</p>
+  <div class="ds-row">
+    <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Inactive</span></button>
+    <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Active</span></button>
+    <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" disabled><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Désactivée</span></button>
+  </div>
+  <div class="ds-variant-title">Pleine largeur (.toggle-block)</div>
+  <div class="ds-field-w">
+    <button type="button" class="btn btn-sm toggle-pill toggle-block active" role="switch" aria-checked="true"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Afficher les réseaux masqués</span></button>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Recherche (.search-input)</h2>
+  <p class="ds-note">Champ de recherche NORMALISÉ de l'app (jamais un <code>&lt;input&gt;</code> ad hoc).</p>
+  <div class="ds-row">
+    <input type="search" class="search-input" placeholder="Rechercher un équipement…">
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Multi-sélection (MultiSelect)</h2>
+  <p class="ds-note">Miroir de <code>MultiSelect.build</code> : déclencheur <code>.multi-trigger</code> (libellé + <code>.count-badge</code>) + panneau <code>.multi-panel</code>. Le panneau est ouvert ici en STATIQUE (normalement affiché au clic).</p>
+  <div class="ds-demo" style="min-height:240px;">
+    <div class="multi-pop">
+      <button type="button" class="multi-trigger">Statut <span class="count-badge">2 sélectionné(s)</span></button>
+      <div class="multi-panel open">
+        <div class="multi-allnone">
+          <button type="button">Tout</button>
+          <button type="button">Aucun</button>
+        </div>
+        <label class="multi-item"><input type="checkbox" checked><span>Câblé</span></label>
+        <label class="multi-item"><input type="checkbox" checked><span>Planifié</span></label>
+        <label class="multi-item"><input type="checkbox"><span>Brouillon</span></label>
+        <label class="multi-item"><input type="checkbox"><span><span class="swatch-dot" style="background:#4ade80;"></span>À remplacer</span></label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Aides & validation</h2>
+  <div class="ds-field-w">
+    <div class="form-field">
+      <label>Hôte</label>
+      <input type="text" value="core-sw-01">
+      <div class="form-hint">Nom d'hôte utilisé pour la corrélation VM.</div>
+    </div>
+    <div class="form-field">
+      <label>Bail DHCP</label>
+      <input type="text" value="86400">
+      <div class="form-hint warn">Valeur inhabituelle : vérifier l'unité (secondes).</div>
+    </div>
+    <div class="form-field invalid">
+      <label>Adresse IP</label>
+      <input type="text" value="10.0.0.999">
+      <div class="field-error">Adresse IPv4 invalide.</div>
+    </div>
+  </div>
+</section>

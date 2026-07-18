@@ -1,0 +1,10 @@
+<!-- @dsCard group="Icônes" name="Registre d'icônes" subtitle="registre complet Icons.* — rendus 16 px et 24 px, teintes courant / accent / danger" -->
+<!-- DÉRIVÉ de src-client/ui/Icons.ts (constantes statiques). La grille est injectée
+     par build.js ({{ICONS_GRID}}) depuis le compilé dist-test ou, à défaut, le source.
+     Chaque icône = viewBox 24×24, fill:none, stroke=currentColor → prend la couleur de
+     son hôte (donc var(--accent) actif, var(--err) danger). La TAILLE vient de l'hôte. -->
+<section class="ds-section">
+  <h2>Registre complet</h2>
+  <p class="ds-note">Par cellule : nom de la constante, puis rendus — 16 px (courant) · 24 px (courant) · 24 px (accent) · 24 px (danger). Une intention = une icône, réutilisée partout (cf. règle de Icons.ts).</p>
+  {{ICONS_GRID}}
+</section>

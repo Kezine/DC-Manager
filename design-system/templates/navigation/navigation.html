@@ -1,0 +1,82 @@
+<!-- @dsCard group="Navigation" name="Navigation" subtitle="barre d'onglets (icône + actif), onglet groupe, menu déroulant, pagination" -->
+<!-- DÉRIVÉ de src-client/app/Shell.ts (barre d'onglets : .tab.tab-icon avec <span class="gi">,
+     .tab.active, .tab-count ; .tab-group + caret ; .tabs-dd responsive) et de
+     src-client/views/ListView.ts (pagination : .page-btn + select.page-size). -->
+<section class="ds-section">
+  <h2>Barre d'onglets (desktop, icônes seules)</h2>
+  <p class="ds-note">Sur desktop, chaque onglet est une ICÔNE seule (libellé porté par <code>title</code> + <code>aria-label</code>). L'onglet actif est souligné (<code>.tab.active::after</code>). Le badge de comptage est un <code>.tab-count</code>.</p>
+  <div class="ds-demo ds-tight" style="padding:0;overflow:hidden;">
+    <div class="topbar" style="position:static;">
+      <nav class="tabs">
+        <button type="button" class="tab tab-icon active" title="Datacenter" aria-label="Datacenter"><span class="gi" aria-hidden="true">{{ICON:DATACENTER}}</span></button>
+        <button type="button" class="tab tab-icon" title="Netmap" aria-label="Netmap"><span class="gi" aria-hidden="true">{{ICON:GRAPH}}</span></button>
+        <button type="button" class="tab tab-icon" title="Câbles" aria-label="Câbles"><span class="gi" aria-hidden="true">{{ICON:CABLE}}</span></button>
+        <button type="button" class="tab tab-icon" title="Certificats" aria-label="Certificats"><span class="gi" aria-hidden="true">{{ICON:CERTIFICATE}}</span><span class="tab-count warn">6</span></button>
+        <button type="button" class="tab tab-icon" title="Interventions" aria-label="Interventions"><span class="gi" aria-hidden="true">{{ICON:INTERVENTION}}</span><span class="tab-count err">3</span></button>
+      </nav>
+    </div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Onglet groupe (déroulant, .tab-group)</h2>
+  <p class="ds-note">Un onglet <code>.tab</code> suivi d'un caret <code>.tabs-dd-caret</code>, avec un menu <code>.tabs-dd-menu</code> (ouvert ici en statique).</p>
+  <div class="ds-demo" style="min-height:200px;">
+    <div class="tab-group open" style="display:inline-flex;">
+      <button type="button" class="tab tab-icon" title="Paramètres" aria-label="Paramètres"><span class="gi" aria-hidden="true">{{ICON:SETTINGS}}</span><span class="tabs-dd-caret">▾</span></button>
+      <div class="tabs-dd-menu" role="menu" style="display:flex;">
+        <button type="button" class="tabs-dd-item active" role="menuitem"><span class="gi" aria-hidden="true">{{ICON:IPAM}}</span>Adresses IP</button>
+        <button type="button" class="tabs-dd-item" role="menuitem"><span class="gi" aria-hidden="true">{{ICON:PORT}}</span>Types de port</button>
+        <button type="button" class="tabs-dd-item" role="menuitem"><span class="gi" aria-hidden="true">{{ICON:NOTIFICATION}}</span>Notifications</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Menu déroulant responsive (.tabs-dd)</h2>
+  <p class="ds-note">Sur petit écran, la barre d'onglets cède la place à ce déclencheur unique (<code>.tabs-dd-trigger</code>) + menu global (groupes aplatis). Forcé visible ici (masqué &gt; 760 px dans l'app).</p>
+  <div class="ds-demo" style="min-height:260px;">
+    <div class="tabs-dd open" style="display:flex;max-width:280px;">
+      <button type="button" class="tabs-dd-trigger" aria-haspopup="menu">
+        <span class="tabs-dd-label">Datacenter</span>
+        <span class="tabs-dd-caret">▾</span>
+      </button>
+      <div class="tabs-dd-menu" role="menu" style="display:flex;">
+        <button type="button" class="tabs-dd-item active" role="menuitem">Datacenter</button>
+        <button type="button" class="tabs-dd-item" role="menuitem">Netmap</button>
+        <div class="tabs-dd-group">Paramètres</div>
+        <button type="button" class="tabs-dd-item tabs-dd-item--child" role="menuitem">Adresses IP</button>
+        <button type="button" class="tabs-dd-item tabs-dd-item--child" role="menuitem">Types de port</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Pagination (.pagination)</h2>
+  <div class="pagination" style="max-width:520px;">
+    <div>128 éléments · page 2 / 9</div>
+    <div class="pagination-controls">
+      <button type="button" class="page-btn">«</button>
+      <button type="button" class="page-btn">‹</button>
+      <span style="padding:0 6px;">2 / 9</span>
+      <button type="button" class="page-btn">›</button>
+      <button type="button" class="page-btn">»</button>
+      <select class="page-size app-select">
+        <option>25 / page</option>
+        <option>50 / page</option>
+        <option>100 / page</option>
+      </select>
+    </div>
+  </div>
+  <div class="ds-variant-title">États (première page : « précédent » désactivé, page courante active)</div>
+  <div class="ds-row">
+    <button type="button" class="page-btn" disabled>«</button>
+    <button type="button" class="page-btn" disabled>‹</button>
+    <button type="button" class="page-btn active">1</button>
+    <button type="button" class="page-btn">2</button>
+    <button type="button" class="page-btn">3</button>
+    <button type="button" class="page-btn">›</button>
+  </div>
+</section>

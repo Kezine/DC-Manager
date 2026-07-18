@@ -1,0 +1,94 @@
+<!-- @dsCard group="Surfaces" name="Surfaces" subtitle="modale, dialogue de confirmation, toasts, tooltip enrichi" -->
+<!-- DÉRIVÉ de src-client/ui/Modal.ts (Modal._build), Dialog.ts (Dialog.open : glyphes
+     ⓘ/✓/⚠/✕, .dialog-box), Notify.ts (Notify.toast : .toast) et RichTooltip.ts /
+     dc-manager.css (.app-tooltip). APERÇUS STATIQUES : aucun overlay plein écran ni JS
+     de fermeture (les surfaces sont sorties de leur overlay pour être montrées en flux). -->
+<section class="ds-section">
+  <h2>Modale (Modal)</h2>
+  <p class="ds-note">Structure réelle de <code>Modal._build</code> : en-tête (titre + sous-titre + croix), corps, pied (Annuler / Enregistrer). Montrée hors de son <code>.modal-overlay</code>.</p>
+  <div class="ds-demo">
+    <div class="modal" style="margin:0 auto;">
+      <div class="modal-header">
+        <div class="modal-header-left"><div class="modal-titles">
+          <div class="modal-title">Modifier une <span>baie</span></div>
+          <div class="modal-subtitle">Salle A · rangée 3 · 42 U</div>
+        </div></div>
+        <button type="button" class="modal-close" aria-label="Fermer">{{ICON:CLOSE}}</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field">
+          <label>Nom</label>
+          <input type="text" value="RACK-A-03">
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label>Hauteur (U)</label>
+            <input type="number" value="42" step="1">
+          </div>
+          <div class="form-field">
+            <label>Largeur (mm)</label>
+            <input type="number" value="600" step="1">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost modal-cancel">Annuler</button>
+        <button type="button" class="btn btn-primary modal-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Dialogue de confirmation (Dialog)</h2>
+  <p class="ds-note">Miroir de <code>Dialog.open</code> : les icônes d'en-tête sont des GLYPHES (ⓘ / ✓ / ⚠ / ✕), pas des SVG du registre. Confirmation danger + information (bouton unique).</p>
+  <div class="ds-row" style="align-items:flex-start;gap:18px;">
+    <div class="dialog-box" style="margin:0;">
+      <div class="dialog-header">
+        <span class="dialog-icon variant-danger">⚠</span>
+        <div class="dialog-title">Supprimer le certificat</div>
+      </div>
+      <div class="dialog-body"><p class="dialog-message">Cette action est définitive. Le certificat et sa clé privée chiffrée seront supprimés.</p></div>
+      <div class="dialog-footer">
+        <button type="button" class="btn btn-ghost">Annuler</button>
+        <button type="button" class="btn btn-danger">Supprimer</button>
+      </div>
+    </div>
+    <div class="dialog-box" style="margin:0;">
+      <div class="dialog-header">
+        <span class="dialog-icon variant-info">ⓘ</span>
+        <div class="dialog-title">Synchronisation terminée</div>
+      </div>
+      <div class="dialog-body"><p class="dialog-message">14 machines virtuelles réconciliées, 2 orphelines conservées.</p></div>
+      <div class="dialog-footer">
+        <button type="button" class="btn btn-primary">OK</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Toasts (Notify.toast)</h2>
+  <p class="ds-note">Notifications éphémères. Liseré gauche coloré selon le type. Montrées en flux (dans l'app, empilées en bas à droite dans <code>#toast-container</code>).</p>
+  <div class="ds-row ds-col" style="max-width:380px;align-items:flex-start;">
+    <div class="toast">Document enregistré.</div>
+    <div class="toast warn">Modifications non sauvegardées.</div>
+    <div class="toast err">Échec de l'écriture : conflit de révision (409).</div>
+  </div>
+</section>
+
+<section class="ds-section">
+  <h2>Tooltip enrichi (RichTooltip → .app-tooltip)</h2>
+  <p class="ds-note">Aperçu statique du tooltip enrichi (normalement <code>position:fixed</code>, affiché au survol). Bandeau de titre (avec icône), sous-titre, sections, paires clé/valeur, séparateur, pastille.</p>
+  <div class="ds-demo">
+    <div class="app-tooltip" style="display:block;position:static;box-shadow:none;">
+      <div class="tt-title"><span class="ricon">{{ICON:CERTIFICATE}}</span>Émettre un certificat TLS</div>
+      <div class="tt-sub">Signé par l'autorité racine interne.</div>
+      <div class="tt-sec">Paramètres</div>
+      <div class="tt-line"><span class="tt-k">Algorithme</span><span class="tt-v">ECDSA P-256</span></div>
+      <div class="tt-line"><span class="tt-k">Validité</span><span class="tt-v">397 j</span></div>
+      <div class="tt-sep"></div>
+      <span class="tt-pill">Zéro-connaissance</span>
+    </div>
+  </div>
+</section>
