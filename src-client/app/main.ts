@@ -14,7 +14,7 @@ import type { InterventionTargetSource, InterventionFicheHooks } from "../views"
 import { FormBase } from "../views/forms/FormBase";
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
-import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip } from "../ui";
+import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
 import { Html } from "../core/Html";
 import { TargetSearch } from "../core/TargetSearch";
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
@@ -328,13 +328,14 @@ async function boot(): Promise<void> {
 
   // ---- onglets de LISTE (ListView paramétré par ListConfigs) ----
   type FormFn = (id: string | null, onSaved: () => void) => void;
-  interface TabOpts { title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; links?: string[]; onAdd?: () => void; onDel?: (id: string, reRender: () => void) => void; locate?: "equipment" | "rack" | "cable"; manage?: boolean; extraActions?: Array<{ label: string; onClick: (btn: HTMLButtonElement) => void; title?: string }>; }
+  interface TabOpts { title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; links?: string[]; icon?: string; onAdd?: () => void; onDel?: (id: string, reRender: () => void) => void; locate?: "equipment" | "rack" | "cable"; manage?: boolean; extraActions?: Array<{ label: string; onClick: (btn: HTMLButtonElement) => void; title?: string }>; }
   const addListTab = (name: string, label: string, configFn: (s: typeof store) => ListOptions, opts: TabOpts = {}) => {
     const cfg = configFn(store);
     const formFn = opts.form;
     let view: ListView | null = null;
     const container = shell.addView({
       name, label, title: opts.title, subtitle: opts.subtitle, kind: opts.kind || "primary", parent: opts.parent, links: opts.links,
+      icon: opts.icon,   // icône d'onglet (barre desktop = icône seule ; menus = icône + libellé)
       extraActions: opts.extraActions,   // boutons secondaires d'en-tête (ex. « Réseaux virtuels… » sur l'onglet VMs)
       count: () => store.all(cfg.collection).length,
       addLabel: VIEWER ? undefined : opts.addLabel, onAdd: VIEWER ? undefined : (opts.onAdd || (formFn ? () => formFn(null, () => shell.refreshActive()) : undefined)),   // viewer : pas de création
@@ -379,6 +380,7 @@ async function boot(): Promise<void> {
 
   // === ONGLETS PRINCIPAUX (ordre de l'original) ===
   addListTab("equipements", I18n.t("tabs.equipements.label"), ListConfigs.equipments, {
+    icon: Icons.EQUIPMENT,
     subtitle: I18n.t("tabs.equipements.subtitle"),
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: I18n.t("app.add.equipment"),
     links: ["groupes", "faceimages", "spares"], locate: "equipment",
@@ -407,6 +409,7 @@ async function boot(): Promise<void> {
   // L'onglet VMs expose le lien « Clusters » vers son sous-onglet — MODE API uniquement (masqué en mode fichier/viewer).
   const vmLinks = (REST_MODE && vmSyncClient) ? ["clusters"] : undefined;
   addListTab("vms", I18n.t("tabs.vms.label"), ListConfigs.vms, {
+    icon: Icons.VM,
     title: I18n.t("tabs.vms.title"), subtitle: I18n.t("tabs.vms.subtitle"),
     extraActions: VIEWER ? undefined : vmExtraActions, links: vmLinks,
   });
@@ -422,6 +425,7 @@ async function boot(): Promise<void> {
     clustersActions.push({ label: I18n.t("app.vm.refresh"), title: I18n.t("app.vm.refreshTitle"), onClick: () => { void clustersView?.reload(); } });
     const clustersContainer = shell.addView({
       name: "clusters", label: I18n.t("tabs.clusters.label"), kind: "secondary", parent: "vms",
+      icon: Icons.NETWORK,
       title: I18n.t("tabs.clusters.label"), subtitle: I18n.t("tabs.clusters.subtitle"),
       extraActions: clustersActions,
       onShow: () => clustersView?.show(),
@@ -432,15 +436,18 @@ async function boot(): Promise<void> {
     });
   }
   addListTab("racks", I18n.t("tabs.racks.label"), ListConfigs.racks, {
+    icon: Icons.RACK_CONTENT,
     subtitle: I18n.t("tabs.racks.subtitle"),
     form: (id, done) => Forms.rack(store, formHost, id, done), addLabel: I18n.t("app.add.rack"), locate: "rack", manage: true,
   });
   addListTab("cables", I18n.t("tabs.cables.label"), ListConfigs.cables, {
+    icon: Icons.CABLE,
     subtitle: I18n.t("tabs.cables.subtitle"),
     form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: I18n.t("app.add.cable"),
     links: ["reseaux", "porttypes", "cabletypes", "faisceaux"], locate: "cable",
   });
   addListTab("ipam", I18n.t("tabs.ipam.label"), ListConfigs.ipNetworks, {
+    icon: Icons.IPAM,
     title: I18n.t("tabs.ipam.title"), subtitle: I18n.t("tabs.ipam.subtitle"),
     form: (id, done) => Forms.ipNetwork(store, formHost, id, done), addLabel: I18n.t("app.add.ipNetwork"),
     links: ["ipaddresses", "dhcpranges"],
@@ -448,7 +455,7 @@ async function boot(): Promise<void> {
 
   // Netmap (GraphView) — « Netmap » est un NOM DE FONCTIONNALITÉ, conservé tel quel dans les deux langues (cf. catalogues).
   let graph: GraphView;
-  const graphContainer = shell.addView({ name: "graph", label: I18n.t("tabs.graph.label"), subtitle: I18n.t("tabs.graph.subtitle"), onShow: () => graph.show() });
+  const graphContainer = shell.addView({ name: "graph", label: I18n.t("tabs.graph.label"), subtitle: I18n.t("tabs.graph.subtitle"), icon: Icons.GRAPH, onShow: () => graph.show() });
   const stage = document.createElement("div");
   stage.className = "graph-stage";
   stage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
@@ -471,7 +478,7 @@ async function boot(): Promise<void> {
 
   // Datacenters (vue 3D — tranche-pilote : caméra orbitale + salle/baies)
   let dcView: DatacenterView;
-  const dcContainer = shell.addView({ name: "datacenter", label: I18n.t("tabs.datacenter.label"), subtitle: I18n.t("tabs.datacenter.subtitle"), links: ["salles", "etages", "sites"], onShow: () => dcView.show() });
+  const dcContainer = shell.addView({ name: "datacenter", label: I18n.t("tabs.datacenter.label"), subtitle: I18n.t("tabs.datacenter.subtitle"), icon: Icons.DATACENTER, links: ["salles", "etages", "sites"], onShow: () => dcView.show() });
   const dcStage = document.createElement("div");
   dcStage.className = "dc-stage";
   dcStage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
@@ -521,10 +528,12 @@ async function boot(): Promise<void> {
 
   // === SOUS-VUES (atteintes par les liens d'en-tête ; surlignent leur onglet parent) ===
   addListTab("groupes", I18n.t("tabs.groupes.label"), ListConfigs.groups, {
+    icon: Icons.GROUP,
     subtitle: I18n.t("tabs.groupes.subtitle"),
     form: (id, done) => Forms.group(store, formHost, id, done), addLabel: I18n.t("app.add.group"), kind: "secondary", parent: "equipements",
   });
   addListTab("spares", I18n.t("tabs.spares.label"), ListConfigs.spares, {
+    icon: Icons.SPARE,
     subtitle: I18n.t("tabs.spares.subtitle"),
     form: (id, done) => Forms.spare(store, formHost, id, done), addLabel: I18n.t("app.add.spare"), kind: "secondary", parent: "equipements",
   });
@@ -534,7 +543,7 @@ async function boot(): Promise<void> {
     let view: ListView | null = null;
     const container = shell.addView({
       name: "faceimages", label: I18n.t("tabs.faceimages.label"), subtitle: I18n.t("tabs.faceimages.subtitle"),
-      kind: "secondary", parent: "equipements", links: [],
+      kind: "secondary", parent: "equipements", links: [], icon: Icons.IMAGE,
       count: () => imageStore.count(),
       extraActions: [
         { label: I18n.t("app.faces.import"), title: I18n.t("app.faces.importTitle"), onClick: () => files.importFacesLibrary() },
@@ -567,30 +576,37 @@ async function boot(): Promise<void> {
     });
   }
   addListTab("reseaux", I18n.t("tabs.reseaux.label"), ListConfigs.networks, {
+    icon: Icons.NETWORK,
     subtitle: I18n.t("tabs.reseaux.subtitle"),
     form: (id, done) => Forms.network(store, formHost, id, done), addLabel: I18n.t("app.add.network"), kind: "secondary", parent: "cables",
   });
   addListTab("faisceaux", I18n.t("tabs.faisceaux.label"), ListConfigs.cableBundles, {
+    icon: Icons.BUNDLE,
     title: I18n.t("tabs.faisceaux.title"), subtitle: I18n.t("tabs.faisceaux.subtitle"),
     form: (id, done) => Forms.cableBundle(store, formHost, id, done), addLabel: I18n.t("app.add.bundle"), kind: "secondary", parent: "cables",
   });
   addListTab("porttypes", I18n.t("tabs.porttypes.label"), ListConfigs.portTypes, {
+    icon: Icons.PORT,
     title: I18n.t("tabs.porttypes.title"), subtitle: I18n.t("tabs.porttypes.subtitle"),
     kind: "secondary", parent: "cables",
   });
   addListTab("cabletypes", I18n.t("tabs.cabletypes.label"), ListConfigs.cableTypes, {
+    icon: Icons.CABLE,
     subtitle: I18n.t("tabs.cabletypes.subtitle"),
     kind: "secondary", parent: "cables",
   });
   addListTab("ipaddresses", I18n.t("tabs.ipaddresses.label"), ListConfigs.ipAddresses, {
+    icon: Icons.IPAM,
     title: I18n.t("tabs.ipaddresses.title"), subtitle: I18n.t("tabs.ipaddresses.subtitle"),
     form: (id, done) => Forms.ipAddress(store, formHost, id, done), addLabel: I18n.t("app.add.ipAddress"), kind: "secondary", parent: "ipam",
   });
   addListTab("salles", I18n.t("tabs.salles.label"), ListConfigs.datacenters, {
+    icon: Icons.DATACENTER,
     title: I18n.t("tabs.salles.title"), subtitle: I18n.t("tabs.salles.subtitle"),
     form: (id, done) => Forms.datacenter(store, formHost, id, done), addLabel: I18n.t("app.add.datacenter"), kind: "secondary", parent: "datacenter",
   });
   addListTab("sites", I18n.t("tabs.sites.label"), ListConfigs.sites, {
+    icon: Icons.SITE,
     title: I18n.t("tabs.sites.title"), subtitle: I18n.t("tabs.sites.subtitle"),
     form: (id, done) => Forms.site(store, formHost, id, done), addLabel: I18n.t("app.add.site"), kind: "secondary", parent: "datacenter",
     onDel: async (id, reRender) => {
@@ -601,6 +617,7 @@ async function boot(): Promise<void> {
     },
   });
   addListTab("etages", I18n.t("tabs.etages.label"), ListConfigs.floors, {
+    icon: Icons.FLOOR,
     title: I18n.t("tabs.etages.title"), subtitle: I18n.t("tabs.etages.subtitle"),
     form: (id) => { const f: any = id ? store.get("floors", id) : null; Forms.floor(store, formHost, f ? (f.location || "") : "", f ? String(f.floor || "") : "", {}); }, addLabel: I18n.t("app.add.floor"), kind: "secondary", parent: "datacenter",
     onAdd: () => { if (!store.sitesSorted().length) { Notify.toast(I18n.t("app.main.createSiteFirst"), "err"); return; } Forms.floor(store, formHost, "", "", { pick: true }); },
@@ -612,6 +629,7 @@ async function boot(): Promise<void> {
     },
   });
   addListTab("dhcpranges", I18n.t("tabs.dhcpranges.label"), ListConfigs.dhcpRanges, {
+    icon: Icons.IPAM,
     title: I18n.t("tabs.dhcpranges.title"), subtitle: I18n.t("tabs.dhcpranges.subtitle"),
     form: (id, done) => Forms.dhcpRange(store, formHost, id, done), addLabel: I18n.t("app.add.dhcpRange"), kind: "secondary", parent: "ipam",
   });
@@ -621,6 +639,7 @@ async function boot(): Promise<void> {
   // rattachée au groupe `parametres`, atteinte par son menu déroulant (et bookmarkable via #contacts). Décision Q4 :
   // contacts PAR DOCUMENT.
   addListTab("contacts", I18n.t("tabs.contacts.label"), ListConfigs.contacts, {
+    icon: Icons.USER,
     title: I18n.t("tabs.contacts.title"), subtitle: I18n.t("tabs.contacts.subtitle"),
     form: (id, done) => Forms.contact(store, formHost, id, done), addLabel: I18n.t("app.add.contact"),
     kind: "secondary", parent: "parametres",
@@ -633,6 +652,7 @@ async function boot(): Promise<void> {
   let notificationsView: NotificationsAdminView;
   const notifyContainer = shell.addView({
     name: "notifications", label: I18n.t("tabs.notifications.label"), kind: "secondary", parent: "parametres",
+    icon: Icons.NOTIFICATION,
     title: I18n.t("tabs.notifications.label"), subtitle: I18n.t("tabs.notifications.subtitle"),
     onShow: () => notificationsView.show(),
   });
@@ -683,6 +703,7 @@ async function boot(): Promise<void> {
   };
   const interventionsContainer = shell.addView({
     name: "interventions", label: I18n.t("tabs.interventions.label"), kind: "primary",
+    icon: Icons.INTERVENTION,
     title: I18n.t("tabs.interventions.label"), subtitle: I18n.t("tabs.interventions.subtitle"),
     count: REST_MODE ? () => interventionsOpenCount : undefined,   // badge en mode API uniquement
     onShow: () => { interventionsView.show(); void refreshInterventionsCount(); },
@@ -722,6 +743,7 @@ async function boot(): Promise<void> {
   };
   const certsContainer = shell.addView({
     name: "certificats", label: I18n.t("tabs.certificats.label"), kind: "primary",
+    icon: Icons.CERTIFICATE,
     title: I18n.t("tabs.certificats.label"), subtitle: I18n.t("tabs.certificats.subtitle"),
     count: REST_MODE ? () => certsTotalCount : undefined,   // badge en mode API uniquement
     onShow: () => { certsView.show(); void refreshCertsCount(); },
@@ -730,7 +752,7 @@ async function boot(): Promise<void> {
   certsView.onCountsChanged = () => { void refreshCertsCount(); };   // après création/suppression → recompte le total
   // GROUPE « Paramètres » : onglet TOUJOURS DÉROULANT (jamais une vue) regroupant les pages rarement visitées.
   // EN DERNIER (après les onglets métier ET l'onglet Certificats).
-  shell.addGroup({ name: "parametres", label: I18n.t("tabs.parametres.label"), kind: "group", children: ["contacts", "notifications"] });
+  shell.addGroup({ name: "parametres", label: I18n.t("tabs.parametres.label"), kind: "group", icon: Icons.SETTINGS, children: ["contacts", "notifications"] });
 
   shell.build();
   shell.setDataSource(REST_MODE ? "api" : "local");   // position du toggle = mode EFFECTIF

@@ -179,4 +179,52 @@ export class Icons {
 
   /** Contenu d'une baie / montage des U (remplace `▦`) : rangées empilées. */
   static readonly RACK_CONTENT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>';
+
+  /* ------------------------------------------------------------------------
+     ONGLETS — repères de NAVIGATION de la barre d'onglets (rendue en ICÔNES sur
+     desktop ; icône + libellé dans les menus déroulants). Nommées par INTENTION
+     (le DOMAINE de l'onglet), donc RÉUTILISÉES partout où ce domaine reparaît :
+     un sous-onglet « Types de câble » reprend CABLE, « Adresses IP » reprend
+     IPAM, « Salles » reprend DATACENTER… (une intention = une icône). Même
+     facture que ci-dessus (24×24, fill:none, stroke currentColor, bouts ronds).
+     ------------------------------------------------------------------------ */
+
+  /** Câblage / câbles : deux connecteurs reliés par un brin. */
+  static readonly CABLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="9" width="6" height="6" rx="1.2"/><rect x="15.5" y="9" width="6" height="6" rx="1.2"/><line x1="8.5" y1="12" x2="15.5" y2="12"/></svg>';
+
+  /** Faisceau / trunk : gaine renfermant plusieurs brins (points). */
+  static readonly BUNDLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="8" rx="4"/><circle cx="8" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="16" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg>';
+
+  /** Type de port / connecteur : embase à ergots. */
+  static readonly PORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="16" height="10" rx="1.5"/><path d="M8 9V6.5a4 4 0 0 1 8 0V9"/><line x1="9" y1="19" x2="9" y2="21"/><line x1="15" y1="19" x2="15" y2="21"/></svg>';
+
+  /** IPAM / adressage IP : arborescence de sous-réseaux. */
+  static readonly IPAM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="4" rx="1"/><rect x="3" y="17" width="6" height="4" rx="1"/><rect x="15" y="17" width="6" height="4" rx="1"/><path d="M12 7v5M6 17v-5h12v5"/></svg>';
+
+  /** Netmap / graphe : nœuds reliés par des arêtes. */
+  static readonly GRAPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="8" r="2"/><circle cx="11" cy="18" r="2"/><path d="M6.8 6.9 9.4 16.2M17.2 9.4 12.6 16.4M6.9 6.4 17.1 7.7"/></svg>';
+
+  /** Datacenter / salle : baies alignées d'une salle serveur. */
+  static readonly DATACENTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/><path d="M5 8h3M16 8h3M5 12h3M16 12h3M5 16h3M16 16h3"/></svg>';
+
+  /** Site / bâtiment : immeuble à porte et fenêtres. */
+  static readonly SITE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V6l8-3 8 3v15"/><line x1="2.5" y1="21" x2="21.5" y2="21"/><path d="M9.5 21v-4h5v4"/><line x1="8" y1="9" x2="8.02" y2="9"/><line x1="16" y1="9" x2="16.02" y2="9"/><line x1="8" y1="13" x2="8.02" y2="13"/><line x1="16" y1="13" x2="16.02" y2="13"/></svg>';
+
+  /** Étage / plan d'étage : niveaux empilés. */
+  static readonly FLOOR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="M3 12l9 5 9-5"/><path d="M3 16l9 5 9-5"/></svg>';
+
+  /** Groupe (regroupement logique) : trois éléments assemblés. */
+  static readonly GROUP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="8" y="13" width="8" height="8" rx="1.5"/></svg>';
+
+  /** Certificats (domaine PKI) : feuille signée d'un sceau à ruban. */
+  static readonly CERTIFICATE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="13" y2="12"/><circle cx="15.5" cy="16" r="3"/><path d="M13.8 18.3 13 21l2.5-1.4L18 21l-.8-2.7"/></svg>';
+
+  /** Interventions / maintenance : clé à molette. */
+  static readonly INTERVENTION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.66 5.66l-6.7 6.7a1.5 1.5 0 0 0 2.12 2.12l6.7-6.7a4 4 0 0 0 5.66-5.66l-2.83 2.83-2.12-.71-.71-2.12z"/></svg>';
+
+  /** Notifications : cloche. */
+  static readonly NOTIFICATION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
+
+  /** Paramètres : engrenage. */
+  static readonly SETTINGS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"/></svg>';
 }

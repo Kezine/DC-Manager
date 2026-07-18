@@ -170,6 +170,12 @@
     color: var(--fg-dim);
   }
 
+  /* Onglet en ICÔNE (barre desktop) : l'icône (span .gi) remplace le texte ; taille alignée sur les autres icônes
+     de la topbar (.icon-btn svg = 16px). Le libellé reste porté par title + aria-label (a11y). Le soulignement de
+     l'onglet actif (::after, en absolu), le badge .tab-count et le caret des groupes ne sont pas affectés. */
+  .tab.tab-icon { display: inline-flex; align-items: center; }
+  .tab .gi svg { width: 16px; height: 16px; }
+
   /* Onglets en MENU DEROULANT custom (responsive) — pas un <select> natif. Masque en grand ecran. */
   .tabs-dd { position: relative; display: none; align-items: stretch; flex: 1; min-width: 0; }
   .tabs-dd-trigger {

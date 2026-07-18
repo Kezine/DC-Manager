@@ -17,6 +17,10 @@ export interface ShellView {
   children?: string[];
   /** Compteur affiché en badge (onglet topbar + tout lien qui pointe vers cette vue). */
   count?: () => number;
+  /** Icône SVG (constante du registre `ui/Icons`) de l'onglet. Sur la barre DESKTOP elle REMPLACE le texte
+      (onglet icône seule → `title` + `aria-label` = `label`) ; dans les menus déroulants (responsive, groupes)
+      elle PRÉCÈDE le libellé texte. Absente → repli sur le texte (comportement historique). */
+  icon?: string;
   /** Noms de sous-vues exposées comme boutons-liens dans l'en-tête de CETTE vue. */
   links?: string[];
   /** Libellé du bouton primaire « + … » de l'en-tête (si action de création). */
@@ -474,7 +478,15 @@ export class Shell {
       if (this.groups.has(nm)) return;                  // les groupes sont rendus HORS .tabs (leur menu déborde du clip overflow)
       const v = this.views.get(nm)!; if (v.def.kind === "secondary") return;
       const btn = document.createElement("button"); btn.type = "button"; btn.className = "tab"; btn.dataset.view = nm;
-      btn.appendChild(document.createTextNode(v.def.label + " "));
+      // Barre DESKTOP : ICÔNE SEULE si la vue en déclare une (le libellé passe en title + aria-label — a11y
+      // obligatoire pour un bouton sans texte) ; sinon repli sur le TEXTE (comportement historique).
+      if (v.def.icon) {
+        btn.classList.add("tab-icon");
+        btn.innerHTML = '<span class="gi" aria-hidden="true">' + v.def.icon + "</span>";
+        btn.setAttribute("aria-label", v.def.label); btn.title = v.def.label;
+      } else {
+        btn.appendChild(document.createTextNode(v.def.label + " "));
+      }
       if (v.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; btn.appendChild(badge); this.countBadges.push({ name: nm, el: badge }); }
       btn.onclick = () => this.switchView(nm);
       v.tabBtn = btn; this.tabsEl.appendChild(btn);
@@ -503,8 +515,9 @@ export class Shell {
         const head = document.createElement("div"); head.className = "tabs-dd-group"; head.textContent = e.label; menu.appendChild(head); return;
       }
       const it = document.createElement("button"); it.type = "button"; it.className = "tabs-dd-item" + (e.depth ? " tabs-dd-item--child" : ""); it.dataset.view = e.name; it.setAttribute("role", "menuitem");
+      const src = this.views.get(e.name);   // source de l'icône ET du badge de comptage (recollé par nom)
+      if (src && src.def.icon) { const gi = document.createElement("span"); gi.className = "gi"; gi.setAttribute("aria-hidden", "true"); gi.innerHTML = src.def.icon; it.appendChild(gi); }   // menu : icône + libellé
       it.appendChild(document.createTextNode(e.label + " "));
-      const src = this.views.get(e.name);   // badge de comptage recollé par nom (l'enfant de groupe garde le sien)
       if (src && src.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; it.appendChild(badge); this.countBadges.push({ name: e.name, el: badge }); }
       it.onclick = () => { dd.classList.remove("open"); this.switchView(e.name); };
       menu.appendChild(it);
@@ -525,12 +538,20 @@ export class Shell {
       const g = this.groups.get(nm); if (!g) return;
       const wrap = document.createElement("div"); wrap.className = "tab-group";
       const btn = document.createElement("button"); btn.type = "button"; btn.className = "tab"; btn.dataset.group = nm; btn.setAttribute("aria-haspopup", "menu");
-      btn.appendChild(document.createTextNode(g.def.label + " "));
+      // Onglet GROUPE sur la barre desktop : ICÔNE SEULE (+ caret) si déclarée ; libellé porté par title + aria-label.
+      if (g.def.icon) {
+        btn.classList.add("tab-icon");
+        btn.innerHTML = '<span class="gi" aria-hidden="true">' + g.def.icon + "</span>";
+        btn.setAttribute("aria-label", g.def.label); btn.title = g.def.label;
+      } else {
+        btn.appendChild(document.createTextNode(g.def.label + " "));
+      }
       const caret = document.createElement("span"); caret.className = "tabs-dd-caret"; caret.textContent = "▾"; btn.appendChild(caret);
       const menu = document.createElement("div"); menu.className = "tabs-dd-menu"; menu.setAttribute("role", "menu");
       (g.def.children || []).forEach((childName) => {
         const cv = this.views.get(childName); if (!cv) return;   // enfant absent (mode-dépendant) → simplement omis
         const it = document.createElement("button"); it.type = "button"; it.className = "tabs-dd-item"; it.dataset.view = childName; it.setAttribute("role", "menuitem");
+        if (cv.def.icon) { const gi = document.createElement("span"); gi.className = "gi"; gi.setAttribute("aria-hidden", "true"); gi.innerHTML = cv.def.icon; it.appendChild(gi); }   // menu de groupe : icône + libellé
         it.appendChild(document.createTextNode(cv.def.label + " "));
         if (cv.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; it.appendChild(badge); this.countBadges.push({ name: childName, el: badge }); }
         it.onclick = () => { wrap.classList.remove("open"); this.switchView(childName); };
