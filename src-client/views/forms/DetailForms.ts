@@ -1,5 +1,6 @@
 import type { Store } from "../../store";
 import { Icons } from "../../ui/Icons";
+import { IconButton } from "../../ui/IconButton";
 import { Html } from "../../core/Html";
 import { Markdown } from "../../core/Markdown";
 import { Color } from "../../core/Color";
@@ -645,11 +646,20 @@ export class DetailForms extends IpamForms {
     this.sect(root, I18n.t("detail.vm.hostSection"));
     const hostEq: any = vm.host_equipment_id ? store.get("equipments", vm.host_equipment_id) : null;
     if (hostEq) {
-      root.appendChild(this.grid([[I18n.t("lists.col.equipment"), `${Html.escape(hostEq.name || "?")} ${EntityViz.equipmentLocationShort(store, hostEq)}`]]));
-      const openWrap = document.createElement("div"); openWrap.style.cssText = "margin-top:4px";
-      const openBtn = document.createElement("button"); openBtn.type = "button"; openBtn.className = "btn btn-ghost btn-sm"; openBtn.textContent = I18n.t("detail.vm.openHost");
-      openBtn.onclick = () => this.equipmentDetail(store, host, hostEq.id, () => this.vmDetail(store, host, id, onChanged));
-      openWrap.appendChild(openBtn); root.appendChild(openWrap);
+      // Fiche de l'hôte ouverte par un bouton-ICÔNE (Icons.INFO, principe n°14) posé SUR LA MÊME LIGNE que la valeur
+      // « Équipement » — comme l'icône « ouvrir l'adresse » des IP liées plus haut. Aller-retour FAÇON INTERVENTIONS
+      // (cf. app/main.ts openTargetDetail) : on ENVELOPPE le FormHost pour injecter un onClose GÉNÉRIQUE qui rouvre
+      // CETTE fiche VM à TOUTE fermeture de la fiche équipement (pas seulement en cas de modification).
+      const hostGrid = this.grid([[I18n.t("lists.col.equipment"),
+        `${Html.escape(hostEq.name || "?")} ${EntityViz.equipmentLocationShort(store, hostEq)} `
+        + IconButton.html({ icon: Icons.INFO, label: I18n.t("detail.vm.openHost"), act: "open-host" })]]);
+      const openBtn = hostGrid.querySelector('[data-act="open-host"]') as HTMLElement | null;
+      if (openBtn) openBtn.onclick = () => {
+        const reopenVm = () => this.vmDetail(store, host, id, onChanged);
+        const wrappedHost: FormHost = { ...host, openModal: (o) => host.openModal({ ...o, onClose: reopenVm }) };
+        this.equipmentDetail(store, wrappedHost, hostEq.id, onChanged);
+      };
+      root.appendChild(hostGrid);
     } else {
       root.appendChild(this.grid([[I18n.t("detail.vm.sourceNode"), vm.host_node ? `${Html.escape(vm.host_node)} <span class="pill" style="border-color:var(--warn);color:var(--warn)">${I18n.t("detail.vm.notMatched")}</span>` : this.MUTED]]));
     }
