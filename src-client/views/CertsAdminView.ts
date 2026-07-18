@@ -865,6 +865,16 @@ export class CertsAdminView {
       const span = document.createElement("span"); span.textContent = c.label;
       lab.append(cb, span); catBox.appendChild(lab); checks.set(c.key, cb);
     }
+    // Catégories indisponibles UNIQUEMENT à cause du VERROU (lockedOnly) : GRISÉES plutôt que cachées — l'option
+    // existe, déverrouiller la session la rend cochable. Les indisponibilités STRUCTURELLES (catégorie sans sens
+    // pour cette sélection) restent, elles, cachées.
+    for (const c of choices.filter((x) => !x.available && x.lockedOnly)) {
+      const lab = document.createElement("label"); lab.style.cssText = "display:flex;gap:8px;align-items:center;opacity:0.45;cursor:not-allowed";
+      lab.title = I18n.t("certs.admin.export.lockedHint");
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = false; cb.disabled = true;
+      const span = document.createElement("span"); span.textContent = c.label;
+      lab.append(cb, span); catBox.appendChild(lab);
+    }
     root.appendChild(catBox);
 
     // Mot de passe OPTIONNEL (deux champs) : vides = ZIP en clair ; renseigné = AES-256 (WinZip AE-2).
@@ -1391,16 +1401,20 @@ export class CertsAdminView {
     root.appendChild(list);
 
     // Un bouton par artefact ; `run` renvoie true pour GARDER la modale (ex. PKCS#12 ouvre sa propre modale).
-    const addAction = (label: string, run: () => Promise<boolean | void>): void => {
+    // `lockedDisabled` : l'artefact exige la clé privée et la session est VERROUILLÉE → bouton GRISÉ (pas caché,
+    // pas d'erreur au clic) avec l'explication en tooltip — déverrouiller la session le rend cliquable.
+    const addAction = (label: string, run: () => Promise<boolean | void>, lockedDisabled = false): void => {
       const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.style.textAlign = "left";
       b.textContent = label;
-      b.onclick = async () => {
+      if (lockedDisabled) { b.disabled = true; b.title = I18n.t("certs.admin.export.lockedHint"); }
+      else b.onclick = async () => {
         this.session.touch();
         try { const keep = await run(); if (!keep) this.host.closeModal?.(); }
         catch (e) { Notify.toast(CertsAdminView.errText(e), "err"); }   // laisse la modale ouverte
       };
       list.appendChild(b);
     };
+    const locked = !this.session.unlocked;
 
     // Export UNITAIRE « Tout (ZIP) » (L4) : le BUNDLE complet du certificat en une archive (ex. feuille TLS =
     // cert + fullchain + clé en un geste). Clé privée incluse SI session déverrouillée ET clé détenue, sinon
@@ -1419,8 +1433,8 @@ export class CertsAdminView {
       addAction(I18n.t("certs.admin.export.fullchain"), async () => this.download(CertExports.pemFullchain(rec, all)));
       if (item.kind === "leaf-tls") addAction(I18n.t("certs.admin.export.caChain"), async () => this.download(CertExports.pemCaChain(rec, all)));
       if (item.has_key) {
-        addAction(I18n.t("certs.admin.export.keyPem"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))));
-        addAction(I18n.t("certs.admin.export.pkcs12"), async () => { this.pkcs12Flow(item, rec, all); return true; });
+        addAction(I18n.t("certs.admin.export.keyPem"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))), locked);
+        addAction(I18n.t("certs.admin.export.pkcs12"), async () => { this.pkcs12Flow(item, rec, all); return true; }, locked);
       }
     } else if (item.kind === "ssh-ca" || item.kind === "ssh-keypair") {
       if (item.has_key) {
@@ -1428,12 +1442,12 @@ export class CertsAdminView {
           const seed = await this.seedFromPkcs8Pem(await this.decryptKey(item.id));
           const publicKey = CertsAdminView.ed25519PubFromLine(item.public_pem || "");
           for (const art of CertExports.opensshArtifacts(rec, { kind: item.kind as "ssh-ca" | "ssh-keypair", seed, publicKey, comment: item.subject })) this.download(art);
-        });
-        addAction(I18n.t("certs.admin.export.keyPem"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))));
+        }, locked);
+        addAction(I18n.t("certs.admin.export.keyPem"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))), locked);
       }
     } else if (item.kind === "ssh-cert") {
       addAction(I18n.t("certs.admin.export.sshCert"), async () => { for (const art of CertExports.opensshArtifacts(rec, { kind: "ssh-cert", certLine: item.public_pem || "" })) this.download(art); });
-      if (item.has_key) addAction(I18n.t("certs.admin.export.subjectKey"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))));
+      if (item.has_key) addAction(I18n.t("certs.admin.export.subjectKey"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))), locked);
     }
 
     if (!list.children.length) { const n = document.createElement("div"); n.className = "form-hint"; n.textContent = I18n.t("certs.admin.export.empty"); root.appendChild(n); }

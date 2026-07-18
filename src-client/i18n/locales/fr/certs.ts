@@ -342,6 +342,7 @@ export const certs = {
     },
     export: {
       intro: "Téléchargez les artefacts de « {{label}} ». Les clés privées sont déchiffrées LOCALEMENT (session déverrouillée) et ne transitent jamais par le serveur.",
+      lockedHint: "Coffre verrouillé — déverrouillez la session pour exporter les clés privées.",
       allZip: "Tout (ZIP)",
       allZipWithKey: " — cert + clé privée",
       allZipPublic: " — artefacts publics",

@@ -337,6 +337,7 @@ export const certs = {
     },
     export: {
       intro: "Download the artifacts of “{{label}}”. Private keys are decrypted LOCALLY (unlocked session) and never transit through the server.",
+      lockedHint: "Vault locked — unlock the session to export private keys.",
       allZip: "Everything (ZIP)",
       allZipWithKey: " — cert + private key",
       allZipPublic: " — public artifacts",

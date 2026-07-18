@@ -58,11 +58,15 @@ export interface ExportPartition {
 
 /** Une CATÉGORIE d'artefacts proposée au DIALOGUE d'export groupé : sa clé STABLE (partagée avec l'assemblage
     CertZip.bundleFor), son libellé UI et sa DISPONIBILITÉ. Une catégorie n'est `available` que si elle a du
-    sens pour TOUS les éléments NON RÉVOQUÉS de la sélection (cf. exportChoices). */
+    sens pour TOUS les éléments NON RÉVOQUÉS de la sélection (cf. exportChoices).
+    `lockedOnly` distingue le POURQUOI d'une indisponibilité : true = la catégorie aurait du sens mais la
+    session PKI est VERROUILLÉE (le dialogue la montre GRISÉE — déverrouiller suffit) ; false/absent = elle
+    n'a pas de sens pour cette sélection (le dialogue la cache). */
 export interface ExportChoice {
   key: ExportCategoryKey;
   label: string;
   available: boolean;
+  lockedOnly?: boolean;
 }
 
 /** CLÉS i18n des libellés UI des catégories d'artefacts (le libellé vit dans la couche décision ; l'assemblage
@@ -120,7 +124,8 @@ export class BulkActions {
       { key: "public", label: I18n.t(CATEGORY_LABEL_KEY.public), available: true },
       { key: "fullchain", label: I18n.t(CATEGORY_LABEL_KEY.fullchain), available: allLeaf },
       { key: "ca-chain", label: I18n.t(CATEGORY_LABEL_KEY["ca-chain"]), available: allLeaf },
-      { key: "key", label: I18n.t(CATEGORY_LABEL_KEY.key), available: unlocked && allHaveKey },
+      // `lockedOnly` : tous détiennent une clé mais la session est verrouillée → grisée (pas cachée) au dialogue.
+      { key: "key", label: I18n.t(CATEGORY_LABEL_KEY.key), available: unlocked && allHaveKey, lockedOnly: allHaveKey && !unlocked },
     ];
   }
 
