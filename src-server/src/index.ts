@@ -7,6 +7,8 @@ import { Auth } from "./auth.js";
 import { LiveBus } from "./live.js";
 import { Server } from "./server.js";
 import { Logger } from "./logger.js";
+import { UsersDb } from "./users/UsersDb.js";   // snapshot de l'annuaire (users.db) — service CORE
+import { AuthCacheUserResolver } from "./users/AuthCacheUserResolver.js";   // impl v1 de l'annuaire (cache d'auth + snapshot)
 import { VmModule } from "./vm/VmModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de vm/
 import { NotifyModule } from "./notify/NotifyModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de notify/
 import { CertsModule } from "./certs/CertsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de certs/
@@ -28,7 +30,17 @@ const DEV_USER = process.env.DEV_USER ?? null;
 const BASIC_AUTH = process.env.BASIC_AUTH || null;                // "user:pass" → gate Basic Auth (dev), PRIORITAIRE sur le SSO
 
 const log = Logger.fromEnv();
-const auth = new Auth(log.child("auth"), { ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH });
+// Annuaire utilisateurs (service CORE, aucune clé d'environnement requise) : snapshot « dernier profil vu »
+// (users.db, même dossier data + driver injecté que DocumentStore) RÉHYDRATÉ au boot ; le resolver capture
+// les profils authentifiés (puits injecté dans Auth ci-dessous) et sert la résolution batch (GET /users/resolve).
+// Si users.db est indisponible, l'annuaire vit en MÉMOIRE seule (dummy après un redémarrage, jusqu'à reconnexion).
+let usersDb: UsersDb | null = null;
+try { usersDb = new UsersDb(DOCS_DIR, Database as unknown as SqliteCtor, log.child("users")); }
+catch (e) { log.child("users").error("snapshot users.db indisponible — annuaire en mémoire seule", (e as any) && (e as any).message); }
+const userResolver = new AuthCacheUserResolver(usersDb, log.child("users"));
+// Auth reçoit l'annuaire comme PUITS de profils (ProfileSink) : chaque authentification réussie y est capturée,
+// sans qu'Auth connaisse l'implémentation (découplage — principe n°2).
+const auth = new Auth(log.child("auth"), { ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH }, userResolver);
 const docs = new DocumentStore(DOCS_DIR, Database as unknown as SqliteCtor, log.child("docs"));
 const live = new LiveBus(log.child("live"));
 // Notifications (alertes persistantes + rappels) : mêmes prérequis que vm/ (DCMANAGER_SECRETS_KEY
@@ -57,7 +69,7 @@ const certs = CertsModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database as 
 // dès qu'un objet démarre/se clôt/s'annule ou est supprimé.
 const interventions = InterventionsModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("interventions"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
-new Server({ docs, auth, live, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), notify.extension(), certs.extension(), interventions.extension()] }).listen(PORT);
+new Server({ docs, auth, live, resolver: userResolver, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), notify.extension(), certs.extension(), interventions.extension()] }).listen(PORT);
 vm.start();   // synchros périodiques (interval_sec > 0) — après l'écoute : le serveur répond pendant une 1re synchro lente
 notify.start();   // timer de rappels (tick 60 s, unref) — après l'écoute, comme vm
 certs.start();    // suivi d'échéances (passe immédiate + tick horaire, unref)
@@ -74,6 +86,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     try { notify.stop(); } catch (e) { log.warn("notify.stop a échoué", (e as any) && (e as any).message); }
     try { certs.stop(); } catch (e) { log.warn("certs.stop a échoué", (e as any) && (e as any).message); }
     try { interventions.stop(); } catch (e) { log.warn("interventions.stop a échoué", (e as any) && (e as any).message); }
+    try { usersDb?.close(); } catch (e) { log.warn("usersDb.close a échoué", (e as any) && (e as any).message); }
     try { docs.closeAll(); } catch (e) { log.warn("closeAll a échoué", (e as any) && (e as any).message); }
     process.exit(0);
   });

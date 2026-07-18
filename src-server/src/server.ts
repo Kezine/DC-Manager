@@ -6,8 +6,9 @@ import { DocumentStore } from "./documents.js";
 import { Auth } from "./auth.js";
 import { LiveBus } from "./live.js";
 import { Logger } from "./logger.js";
+import type { UserResolver } from "./users/UserResolver.js";   // annuaire utilisateurs (service CORE injecté dans Api)
 
-export interface ServerOptions { docs: DocumentStore; auth: Auth; live: LiveBus; clientDir: string; apiBase: string; loginUrl?: string; log?: Logger; extensions?: ApiExtension[] }
+export interface ServerOptions { docs: DocumentStore; auth: Auth; live: LiveBus; resolver: UserResolver; clientDir: string; apiBase: string; loginUrl?: string; log?: Logger; extensions?: ApiExtension[] }
 
 /** Application HTTP : API REST sous `apiBase` + service du client (HTML autonome) avec injection de config. */
 export class Server {
@@ -27,7 +28,7 @@ export class Server {
     if (opts.auth.mode === "basic") this.app.use(this.basicGate);   // gate Basic Auth (dev) sur TOUT (sauf /healthz)
     this.app.use(express.json({ limit: "128mb" }));   // /snapshot et /transact peuvent être volumineux
     this.app.get("/healthz", (_req, res) => { res.json({ ok: true }); });
-    this.app.use(opts.apiBase, new Api(opts.docs, opts.auth, opts.live, opts.extensions || []).router());
+    this.app.use(opts.apiBase, new Api(opts.docs, opts.auth, opts.live, opts.resolver, opts.extensions || []).router());
     this.app.use(opts.apiBase, (_req, res) => { res.status(404).json({ error: "endpoint inconnu" }); });   // 404 API
     this.app.get(["/", "/dc-manager.html", "/index.html"], this.serveClient);
     this.app.use(express.static(opts.clientDir, { index: false }));   // assets éventuels (build multi-fichiers en dev)

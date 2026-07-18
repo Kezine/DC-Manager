@@ -9,6 +9,8 @@ import type { DocumentChangeset } from "../../src-shared/DocumentChangeset.js"; 
 import { DataValidator, type ValidationError, type EntityFetcher, type ChildFinder } from "../../src-shared/DataValidation.js";   // normalisation + validation PARTAGÉES
 import { Cascade } from "../../src-shared/Cascade.js";   // cascade de suppression PARTAGÉE (intégrité référentielle en DELETE)
 import { ApiRules } from "./ApiRules.js";             // règles PURES de la couche HTTP (verrou, changeset, lot) — testables sans Express
+import { UserProfiles } from "./users/UserProfiles.js";   // logique PURE de l'annuaire (clé canonique, caviardage, parsing d'ids)
+import type { UserResolver } from "./users/UserResolver.js";   // contrat de résolution d'utilisateurs (service CORE injecté)
 
 /** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`).
     `changeset` : périmètre SSE, posé par défaut par `resolveRepo` et ÉLARGISSABLE par un handler (ex. la cascade
@@ -38,14 +40,27 @@ export class RequestAuthor {
     const u = (r && r.user) || {};
     return [u.prenom, u.nom].filter(Boolean).join(" ") || u.login || "?";
   }
+
+  /** Identité STABLE de l'auteur : id CANONIQUE (clé de stockage/résolution, cf. UserProfiles.canonicalId
+      — String(id) SSO sinon login) + nom d'affichage. Destinée à l'estampillage d'audit « qui a écrit ? »
+      par un id RÉSOLUBLE a posteriori (annuaire) ; `name` reste le libellé lisible et le repli si l'id
+      n'est pas résolu. Livrée ET testée ici ; sa consommation par les écritures est le lot 2.
+      Voir docs/user-resolver.md. */
+  static identity(req: Request): { id: string; name: string } {
+    const r = (req as RepoRequest).authUser;
+    return { id: UserProfiles.canonicalId(r && r.user), name: RequestAuthor.name(req) };
+  }
 }
 
 /** Couche HTTP : registre de documents + données SCOPÉES par document, déléguées au `Repository`. */
 export class Api {
   private readonly upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
 
+  /** Plafond d'ids par appel à `GET /users/resolve` (anti-abus — parité avec les autres endpoints batch). */
+  private static readonly USERS_RESOLVE_CAP = 200;
+
   constructor(private readonly docs: DocumentStore, private readonly auth: Auth, private readonly live: LiveBus,
-              private readonly extensions: ApiExtension[] = []) {}
+              private readonly resolver: UserResolver, private readonly extensions: ApiExtension[] = []) {}
 
   router(): Router {
     const r = express.Router();
@@ -55,6 +70,10 @@ export class Api {
     // -- extensions (modules optionnels) : montées TÔT — avant le routeur de données, dont la
     // route générique `/:collection` capterait sinon leurs segments (ex. « vm » lu comme collection).
     for (const ext of this.extensions) r.use(ext.path, ext.router);
+
+    // -- annuaire utilisateurs (service CORE, PAS un module amovible) : résolution BATCH d'ids
+    // canoniques en profils affichables, derrière la même garde d'accès. Voir docs/user-resolver.md.
+    r.get("/users/resolve", this.usersResolve);
 
     // -- réglages globaux (doc par défaut…) --
     r.get("/settings", this.getSettings);
@@ -114,6 +133,20 @@ export class Api {
     (req as RepoRequest).authUser = r;   // réutilisé par resolveRepo (qui a écrit, pour le live)
     if (this.auth.isAuthorized(r)) { next(); return; }
     res.status(403).json({ error: "accès refusé", logged: !!r.logged, adminRight: r.adminRight || "NONE" });
+  };
+
+  /** Résolution BATCH d'utilisateurs par id canonique : `GET /users/resolve?id=…&id=…`.
+      Param `id` RÉPÉTABLE, dédupliqué, plafonné (USERS_RESOLVE_CAP), ORDRE de la requête préservé
+      dans la réponse `{ users: ResolvedUser[] }`. RESTRICTION de confidentialité (arbitrage Q4) :
+      email et téléphone sont renvoyés VIDES pour autrui — renseignés UNIQUEMENT quand l'id résolu
+      est celui de l'APPELANT (il voit ses propres coordonnées). Caviardage PUR : UserProfiles.redactFor.
+      Voir docs/user-resolver.md. */
+  private usersResolve: RequestHandler = async (req, res) => {
+    const ids = UserProfiles.parseIdList((req.query as Record<string, any>).id, Api.USERS_RESOLVE_CAP);
+    const caller = (req as RepoRequest).authUser;
+    const callerId = UserProfiles.canonicalId(caller && caller.user);
+    const resolved = await this.resolver.resolve(ids);
+    res.json({ users: resolved.map((u) => UserProfiles.redactFor(callerId, u)) });
   };
 
   /** Identité de l'auteur d'une écriture (pour la notif live) : nom (SSO) + IP. Le nom passe par le

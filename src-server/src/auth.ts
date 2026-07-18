@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Request } from "express";
 import { Logger } from "./logger.js";
+import type { ProfileSink } from "./users/UserResolver.js";   // TYPE seul (annuaire) — Auth ignore l'impl : injection (principe n°2)
 
 /* Authentification déléguée à un SSO externe. L'app NE gère PAS l'auth :
    on proxifie le JETON (cookie nommé `cookieName`) au SSO `ssoUrl` qui répond
@@ -30,7 +31,10 @@ export class Auth {
   private readonly basicPass: string = "";
   readonly mode: AuthMode;
 
-  constructor(private readonly log: Logger, opts: AuthOptions = {}) {
+  /** @param sink  Puits de profils OPTIONNEL (annuaire) : Auth y pousse chaque profil authentifié
+      (`remember`) sans connaître l'implémentation, câblée au bootstrap (index.ts). Découplage
+      total — cf. ProfileSink. */
+  constructor(private readonly log: Logger, opts: AuthOptions = {}, private readonly sink: ProfileSink | null = null) {
     this.ssoUrl = (opts.ssoUrl || "").trim();
     this.cookieName = (opts.cookieName || "").trim();
     this.devUser = opts.devUser ?? null;
@@ -72,22 +76,35 @@ export class Auth {
 
   /** Validation de la session (cache par hash de jeton + expireDate). */
   async validate(req: Request): Promise<SsoResult> {
-    if (this.mode === "dev") return this.devResult();
-    if (this.mode === "basic") return this.checkBasic(req)
-      ? { user: { login: this.basicUser || "dev" }, logged: true, adminRight: "SUPER_ADMIN", dev: true }
-      : ANON;
+    if (this.mode === "dev") { const r = this.devResult(); this.capture(r); return r; }
+    if (this.mode === "basic") {
+      if (!this.checkBasic(req)) return ANON;
+      const r: SsoResult = { user: { login: this.basicUser || "dev" }, logged: true, adminRight: "SUPER_ADMIN", dev: true };
+      this.capture(r);
+      return r;
+    }
     const token = this.tokenOf(req);
     if (!token) return ANON;                                   // aucun cookie → anonyme
     const key = createHash("sha256").update(token).digest("hex");
     const now = Date.now();
     const hit = this.cache.get(key);
-    if (hit && now < hit.expireAt) return hit.result;          // même cookie, non expiré → cache
+    if (hit && now < hit.expireAt) return hit.result;          // même cookie, non expiré → cache (PAS de re-capture)
     const result = await this.fetchSso(token);
     const expireAt = this.expiryOf(result, now);
     this.cache.set(key, { result, expireAt });
     this.prune(now);
     this.log.debug("SSO validé", (result.user && result.user.login) || "?", "logged=" + result.logged, "right=" + result.adminRight);
+    // Capture SEULEMENT sur défaut de cache jeton : le cache par jeton borne déjà la fréquence (le
+    // resolver throttle en plus ses écritures snapshot). Sur un hit ci-dessus, on a déjà remonté ce profil.
+    this.capture(result);
     return result;
+  }
+
+  /** Pousse un profil AUTHENTIFIÉ vers le puits injecté (annuaire), le cas échéant.
+      INVARIANT (arbitrage) : on ne capture JAMAIS un profil non loggé (anonyme / échec d'auth) —
+      seul un utilisateur réellement authentifié alimente l'annuaire. */
+  private capture(r: SsoResult): void {
+    if (this.sink && r.logged && r.user) this.sink.remember(r.user);
   }
 
   /** Accès autorisé ? (connecté ET SUPER_ADMIN). */

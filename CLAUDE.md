@@ -196,6 +196,11 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 - [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
   catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).
+- [`user-resolver.md`](docs/user-resolver.md) — **annuaire utilisateurs** (service CORE interface-driven
+  `UserResolver` : id canonique `String(id)` SSO sinon login → profil affichable ; impl v1
+  `AuthCacheUserResolver` = cache d'auth capturé par puits injecté `ProfileSink` + snapshot SQLite
+  `users.db` réhydraté au boot ; `RequestAuthor.identity` ; endpoint batch `GET /users/resolve`,
+  email/téléphone caviardés sauf pour l'appelant ; impl SSO future, procédure d'ajout).
 
 ## Points d'architecture à connaître
 
