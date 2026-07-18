@@ -7,16 +7,36 @@
     --line: #222222;
     --line-2: #2d2d2d;
     --fg: #e8e8e8;
-    --fg-dim: #888888;
+    --fg-dim: #9a9aa2;   /* AA : ex-#888 relevé/refroidi → meilleur contraste du texte secondaire sur fond sombre */
     --fg-dimmer: #555555;
-    --accent: #ff5500;
+    /* ===== RAMPE ACCENT (identité orange DÉCLINÉE en 3 rôles — revue design lot A) =====
+       L'orange reste l'identité de l'app ; on le décline en trois tokens selon l'USAGE, pour concilier
+       punch visuel et contraste (AA). RÈGLE, à respecter par les prochains contributeurs :
+         • --accent-fill : APLATS / FONDS PLEINS opaques (bouton primaire, page active, bouton retour…).
+                           Orange vif et saturé — c'est lui qui « porte » l'action.
+         • --accent      : DÉFAUT. Bordures, soulignés, indicateurs, ET tout le dessin 2D/3D (baies,
+                           câbles, waypoints, graphe…). Même teinte perçue que l'ex-#ff5500, un cheveu
+                           plus clair/doux pour rester lisible en trait fin. En cas de doute → ce token.
+         • --accent-text : PETIT TEXTE, liens, titres de section, badges textuels ≤ ~13px. Décliné plus
+                           CLAIR en thème sombre (ici) et plus FONCÉ en thème clair → contraste AA garanti. */
+    --accent-fill: oklch(0.67 0.19 46);
+    --accent: oklch(0.72 0.175 50);
+    --accent-text: oklch(0.80 0.15 62);
     --accent-2: #ffaa00;
-    --ok: #4ade80;
-    --warn: #facc15;
-    --err: #ef4444;
-    --role-mgmt: #38bdf8;
-    --role-data: #4ade80;
-    --role-power: #f59e0b;
+    /* Sémantiques HARMONISÉES en OKLCH : même luminosité/chroma perçus d'un état à l'autre → langage
+       d'état cohérent (statuts, toasts, pills, dialogues). --info (bleu) formalisé en token. */
+    --ok: oklch(0.76 0.15 152);
+    --warn: oklch(0.82 0.14 88);
+    --err: oklch(0.66 0.19 27);
+    --info: oklch(0.72 0.12 240);
+    /* Rôles réseau : teinte CONSERVÉE (mgmt = bleu, data = vert, power = ambre) mais alignés sur la même
+       logique L/C que les sémantiques ci-dessus, pour s'harmoniser visuellement avec elles. */
+    --role-mgmt: oklch(0.74 0.13 236);
+    --role-data: oklch(0.76 0.15 152);
+    --role-power: oklch(0.77 0.15 68);
+    /* Anneau de focus clavier (cf. règle :focus-visible globale) = couleur du petit texte accent (AA).
+       Défini une seule fois : var(--accent-text) se résout par thème là où l'anneau est appliqué. */
+    --focus: var(--accent-text);
     /* pastille d'équipement (liaisons/localisation) — bleu */
     --viz-equip-bg: #0c447c;
     --viz-equip-fg: #b5d4f4;
@@ -31,13 +51,24 @@
     --line: #d6d6d0;
     --line-2: #b8b8b0;
     --fg: #0a0a0a;
-    --fg-dim: #555555;
+    --fg-dim: #555555;   /* déjà AA sur --bg clair (#f4f4f1) — inchangé (vérifié lot A) */
     --fg-dimmer: #888888;
-    --accent: #cc4400;
+    /* Rampe accent — variante THÈME CLAIR (cf. commentaire de la rampe dans :root). fill ≈ l'ancien accent
+       clair (#cc4400) ; accent un poil plus foncé pour le trait fin ; accent-text ENCORE plus foncé → AA sur fond clair. */
+    --accent-fill: oklch(0.57 0.18 42);
+    --accent: oklch(0.58 0.17 45);
+    --accent-text: oklch(0.55 0.18 45);
     --accent-2: #aa6600;
-    --role-mgmt: #2b6cb0;
-    --role-data: #15803d;
-    --role-power: #b45309;
+    /* Sémantiques — variante claire ASSOMBRIE : le vif du thème sombre passerait sous le seuil de contraste
+       sur --bg clair. Teinte conservée, luminosité abaissée pour rester AA. */
+    --ok: oklch(0.52 0.15 152);
+    --warn: oklch(0.55 0.13 78);
+    --err: oklch(0.53 0.20 27);
+    --info: oklch(0.50 0.15 250);
+    /* Rôles réseau — variante claire assombrie (teinte conservée). */
+    --role-mgmt: oklch(0.50 0.13 250);
+    --role-data: oklch(0.52 0.14 152);
+    --role-power: oklch(0.53 0.13 60);
     --viz-equip-bg: #e6f1fb;
     --viz-equip-fg: #0c447c;
   }
@@ -57,22 +88,51 @@
     font-size: 13px;
     line-height: 1.5;
     min-height: 100vh;
+  }
+  /* Grille de fond (repère d'alignement, purement décoratif). Portée par ::before — couche DÉDIÉE — pour que
+     l'opacité et le masque n'affectent QUE la grille, jamais le contenu (un mask posé sur <body> rognerait le texte).
+     • opacity 0.35 → grille discrète (« adoucie »).
+     • masque radial depuis le haut → grille CONFINÉE en haut-centre puis fondue ; REMPLACE l'ancien vignettage
+       opaque superposé (qui repeignait --bg par-dessus au lieu de simplement estomper la grille).
+     position:fixed + z-index:0 → grille fixe au défilement, SOUS le contenu (main = z-index 1). */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
     background-image:
       linear-gradient(var(--line) 1px, transparent 1px),
       linear-gradient(90deg, var(--line) 1px, transparent 1px);
     background-size: var(--grid-size) var(--grid-size);
     background-position: -1px -1px;
     background-attachment: fixed;
+    opacity: 0.35;
+    -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000, transparent 80%);
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000, transparent 80%);
   }
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    background: radial-gradient(ellipse at top, transparent 0%, var(--bg) 70%);
-    pointer-events: none;
-    z-index: 0;
+  /* Sur écran tactile (pas de survol), background-attachment:fixed provoque des saccades au défilement :
+     on repasse la grille en `scroll`. */
+  @media (hover: none) {
+    body::before { background-attachment: scroll; }
   }
-  a { color: var(--accent); }
+  a { color: var(--accent-text); }   /* lien = petit texte accent → --accent-text (contraste AA) */
+
+  /* Anneau de focus CLAVIER uniquement (:focus-visible, jamais :focus → le focus SOURIS reste inchangé).
+     Règle GLOBALE : tout élément interactif dépourvu d'indicateur de focus propre reçoit un anneau visible. */
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* Préférence système « animations réduites » : on neutralise transitions et animations (durée quasi nulle)
+     pour les personnes sensibles au mouvement — coupe pulsations, glissements de modale, spinners agités.
+     Durée 0.01ms (et non 0) pour que les événements transitionend/animationend attendus côté JS se déclenchent. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 
   /* ============ BARRES DE SCROLL (thÃ¨me app) ============ */
   /* Firefox */
@@ -206,7 +266,7 @@
   }
   .tabs-dd-item:last-child { border-bottom: none; }
   .tabs-dd-item:hover { color: var(--fg); background: var(--bg-3); }
-  .tabs-dd-item.active { color: var(--accent); }
+  .tabs-dd-item.active { color: var(--accent-text); }   /* libellé d'onglet actif = texte accent → --accent-text */
   /* En-tête de GROUPE dans le menu responsive (non cliquable) + ses enfants indentés (piège ②) — RÉUTILISE le
      gabarit .tabs-dd-menu/.tabs-dd-item, on n'ajoute que le repère de section et le décalage. */
   .tabs-dd-group { padding: 10px 16px 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--fg-dimmer); border-bottom: 1px solid var(--line); }
@@ -324,7 +384,7 @@
     flex-wrap: wrap;
   }
   .view-title { font-size: 16px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
-  .view-title span { color: var(--accent); }
+  .view-title span { color: var(--accent-text); }   /* titre de vue (accent) → --accent-text */
   .view-sub { font-size: 11px; color: var(--fg-dim); margin-top: 2px; letter-spacing: 0.04em; text-transform: none; }
   .view-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -348,7 +408,7 @@
   /* Icône SVG posée DIRECTEMENT dans un .btn (ex. bouton « fermer » réduit à une croix). Les cas plus
      spécifiques gardent la main : .icon-action svg (16px), .gi svg (libellés), .date-ctrl-btn svg. */
   .btn > svg { width: 14px; height: 14px; display: block; flex: none; }
-  .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+  .btn-primary { background: var(--accent-fill); color: #000; border-color: var(--accent-fill); font-weight: 600; }   /* aplat plein → --accent-fill */
   .btn-primary:hover { background: var(--accent-2); border-color: var(--accent-2); box-shadow: 0 0 16px rgba(255,85,0,0.4); }
   .btn-ghost { background: transparent; border-color: var(--line); }
   .btn-danger { color: var(--err); border-color: var(--err); background: transparent; }
@@ -452,7 +512,7 @@
     letter-spacing: 0.05em; text-transform: uppercase;
     font-family: inherit; font-size: inherit;
   }
-  .row-menu-item:hover { background: var(--bg-3); color: var(--accent); }
+  .row-menu-item:hover { background: var(--bg-3); color: var(--accent-text); }   /* texte d'item au survol → --accent-text */
   .row-menu-item.row-menu-danger:hover { color: var(--err); background: var(--bg-3); }
   .row-menu-item[disabled] { opacity: 0.4; cursor: not-allowed; }
   .row-menu-item[disabled]:hover { background: transparent; color: var(--fg); }
@@ -484,7 +544,7 @@
     font-size: 11px;
   }
   .page-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--fg); }
-  .page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
+  .page-btn.active { background: var(--accent-fill); color: #000; border-color: var(--accent-fill); font-weight: 700; }   /* page active = sélection pleine → --accent-fill */
   .page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   select.page-size, select.app-select {
     background: var(--bg-2);
@@ -522,7 +582,7 @@
     display: inline-flex; align-items: center; gap: 6px;
     padding: 3px 10px; border-radius: var(--radius-pill);
     border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent);
-    color: var(--accent); font-size: 12px; font-weight: 600; white-space: nowrap;
+    color: var(--accent-text); font-size: 12px; font-weight: 600; white-space: nowrap;   /* texte de pill (bordure/fond restent --accent) → --accent-text */
   }
   .loc-pill svg { width: 13px; height: 13px; flex: none; }
   .loc-tag { margin-left: 8px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-dim); }
@@ -575,12 +635,12 @@
     border-bottom: 1px solid var(--line);
   }
   .ac-item:last-child { border-bottom: none; }
-  .ac-item:hover, .ac-item.active { background: var(--bg-3); color: var(--accent); }
+  .ac-item:hover, .ac-item.active { background: var(--bg-3); color: var(--accent-text); }   /* texte d'item (13px) au survol/actif → --accent-text */
   .ac-item.ac-overflow { cursor: default; }
   .ac-item.ac-overflow:hover { background: transparent; color: inherit; }
   .ac-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.25); }
   .ac-meta { color: var(--fg-dimmer); font-size: 11px; margin-left: auto; padding-left: 10px; }
-  .ac-new { color: var(--accent); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .ac-new { color: var(--accent-text); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }   /* étiquette « nouveau » (10px) → --accent-text */
 
   .palette { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .palette-swatch {
@@ -707,7 +767,7 @@
     font-size: 11px;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: var(--accent);
+    color: var(--accent-text);   /* titre de section (11px) → --accent-text (AA) */
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -749,7 +809,7 @@
   .rcell.preview { background: color-mix(in srgb, var(--accent) 30%, transparent) !important; box-shadow: inset 0 0 0 1px var(--accent); }
   .rcell.occ.back-face { opacity: 0.55; }
   .rcell.occ.back-face .rcell-name { font-style: italic; }
-  .rcell.occ.mount-face .rcell-sub { color: var(--accent); }
+  .rcell.occ.mount-face .rcell-sub { color: var(--accent-text); }   /* sous-libellé (9px) de face de pose → --accent-text (lisibilité) */
   /* v115 â€” grille de pose latÃ©rale : colonne Â« baie Â» centrale (visuel du corps de la baie) */
   .side-grid th.side-mid, .side-grid td.side-mid { width: 30px; background: var(--bg-3); color: var(--fg-dimmer); font-size: 9px; text-align: center; border-left: 1px solid var(--line-2); border-right: 1px solid var(--line-2); }
   /* Ã©diteur de faÃ§ade d'Ã©quipement */
@@ -1101,7 +1161,7 @@
   .dc-tooltip .tt-title { margin: -8px -11px 7px; padding: 7px 11px 6px; background: var(--bg-2); border-bottom: 1px solid var(--line); font-weight: 700; font-size: 12.5px; color: var(--fg); }
   .dc-tooltip .tt-row { color: var(--fg-dim); margin: 2px 0; }
   .dc-tooltip .tt-row b { color: var(--fg); font-weight: 600; }
-  .dc-tooltip .tt-sec { margin: 8px 0 2px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700; color: var(--accent); opacity: 0.85; }
+  .dc-tooltip .tt-sec { margin: 8px 0 2px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700; color: var(--accent-text); opacity: 0.85; }   /* libellé de section (9px) → --accent-text */
   .dc-tooltip .tt-title + .tt-sec { margin-top: 3px; }
   .dc-tooltip .tt-sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: baseline; border: 1px solid var(--line-2); }
   .dc-card-head { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
@@ -1188,7 +1248,7 @@
   .modal-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .modal-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .modal-title { font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 700; }
-  .modal-title span { color: var(--accent); }
+  .modal-title span { color: var(--accent-text); }   /* titre de modale (accent) → --accent-text */
   .modal-subtitle { font-size: 10px; letter-spacing: 0.06em; color: var(--fg-dimmer); font-weight: 400; }
   .modal-subtitle:empty { display: none; }
   .modal-close {
@@ -1336,14 +1396,14 @@
   .app-tooltip .tt-title .ricon svg { width: 15px; height: 15px; display: block; }
   .app-tooltip .tt-sub { color: var(--fg-dim); margin: 0 0 5px; font-size: 10.5px; }
   /* libellÃ© de SECTION (regroupe les paires clÃ©/valeur) */
-  .app-tooltip .tt-sec { margin: 9px 0 3px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700; color: var(--accent); opacity: 0.85; }
+  .app-tooltip .tt-sec { margin: 9px 0 3px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700; color: var(--accent-text); opacity: 0.85; }   /* libellé de section (9px) → --accent-text */
   .app-tooltip .tt-sub + .tt-sec, .app-tooltip .tt-title + .tt-sec { margin-top: 4px; }
   .app-tooltip .tt-sep { border-top: 1px solid var(--line); margin: 8px 0; }
   .app-tooltip .tt-line { display: flex; align-items: baseline; gap: 14px; margin: 3px 0; }
   .app-tooltip .tt-line .tt-k { color: var(--fg-dim); white-space: nowrap; }
   .app-tooltip .tt-line .tt-v { color: var(--fg); margin-left: auto; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .app-tooltip .tt-line .tt-v b { color: var(--accent); }
-  .app-tooltip .tt-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10px; line-height: 1.55; background: var(--bg); border: 1px solid var(--accent); color: var(--accent); font-weight: 600; }
+  .app-tooltip .tt-line .tt-v b { color: var(--accent-text); }   /* valeur en gras (petit texte) → --accent-text */
+  .app-tooltip .tt-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10px; line-height: 1.55; background: var(--bg); border: 1px solid var(--accent); color: var(--accent-text); font-weight: 600; }   /* texte de pill (10px) → --accent-text ; bordure reste --accent */
 
   /* ============ TOAST ============ */
   #toast-container {
@@ -1497,7 +1557,7 @@
   .multi-trigger:hover { border-color: var(--fg); }
   .multi-trigger:disabled { opacity: 0.5; cursor: default; }
   .multi-trigger:disabled:hover { border-color: var(--line); }
-  .multi-trigger .count-badge { color: var(--accent); }
+  .multi-trigger .count-badge { color: var(--accent-text); }   /* compteur textuel → --accent-text */
   .multi-panel {
     position: absolute;
     top: calc(100% + 4px);
@@ -1553,7 +1613,7 @@
   .dc-search-tag {
     flex: none; min-width: 46px; text-align: center;
     font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--accent); border: 1px solid var(--line-2);
+    color: var(--accent-text); border: 1px solid var(--line-2);   /* tag textuel (9px) → --accent-text */
     border-radius: var(--radius-pill); padding: 1px 6px;
   }
 
@@ -1615,7 +1675,7 @@
     padding: 7px 8px; cursor: pointer; border-radius: var(--radius-pill);
   }
   .ss-item:hover { background: var(--bg-3); }
-  .ss-item.sel { color: var(--accent); }
+  .ss-item.sel { color: var(--accent-text); }   /* item sélectionné (texte 12px) → --accent-text */
   .ss-item:disabled { color: var(--fg-dimmer); cursor: not-allowed; }
   .ss-empty { color: var(--fg-dimmer); font-size: 12px; padding: 7px 8px; }
 
@@ -1660,8 +1720,8 @@
   }
   .graph-zoom-controls .btn svg { display: block; }
   /* bouton RETOUR : flèche SVG sur fond accent orange (plus de texte) */
-  .graph-zoom-controls .dc-back-btn { background: var(--accent); color: #000; border-color: var(--accent); }
-  .graph-zoom-controls .dc-back-btn:hover { background: var(--accent); border-color: var(--accent); filter: brightness(1.12); }
+  .graph-zoom-controls .dc-back-btn { background: var(--accent-fill); color: #000; border-color: var(--accent-fill); }   /* bouton plein → --accent-fill */
+  .graph-zoom-controls .dc-back-btn:hover { background: var(--accent-fill); border-color: var(--accent-fill); filter: brightness(1.12); }
   .graph-zoom-controls .gz-sep { height: 1px; background: var(--line-2); margin: 3px 2px; align-self: stretch; }
   /* v48 : points de vue 3D en ligne (Ã  cÃ´tÃ© du recentrage) */
   .dc-cam-presets { display: flex; gap: 3px; }
@@ -1760,7 +1820,7 @@
     padding: 4px 12px; color: var(--fg-dim);
   }
   .rm-toggle button + button { border-left: 1px solid var(--line-2); }
-  .rm-toggle button.on { background: var(--bg-3); color: var(--accent); }
+  .rm-toggle button.on { background: var(--bg-3); color: var(--accent-text); }   /* segment actif : fond NON plein (bg-3) → seul le texte est accent → --accent-text */
   /* v171 — extensions du contrôle segmenté (choix 1/N, cf. POC Piste D) : survol, désactivé,
      segments à ICÔNE (presets de portée 3D), orientation VERTICALE (rail des étages). */
   .rm-toggle button:not(.on):not(:disabled):hover { color: var(--fg); background: var(--bg-2); }
@@ -1805,7 +1865,7 @@
   .layout-mgr .lm-item.active { border-color: var(--accent); }
   .layout-mgr .lm-info { flex: 1 1 220px; min-width: 0; }
   .layout-mgr .lm-name { font-weight: 600; display: flex; align-items: center; gap: 8px; color: var(--fg); }
-  .layout-mgr .lm-badge { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius-pill); padding: 1px 7px; font-weight: 700; }
+  .layout-mgr .lm-badge { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text); border: 1px solid var(--accent); border-radius: var(--radius-pill); padding: 1px 7px; font-weight: 700; }   /* texte de badge (9px) → --accent-text ; bordure reste --accent */
   .layout-mgr .lm-sub { font-size: 10px; color: var(--fg-dim); margin-top: 3px; }
   .layout-mgr .lm-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
   /* plein Ã©cran : le stage occupe tout l'Ã©cran */
@@ -1865,7 +1925,7 @@
   .mode-switch-track::before { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: var(--fg-dim); border-radius: 50%; transition: transform .15s, background .15s; }
   .mode-switch input:checked + .mode-switch-track { background: var(--bg-3); border-color: var(--accent); }
   .mode-switch input:checked + .mode-switch-track::before { transform: translateX(22px); background: var(--accent); }
-  .mode-switch input:focus-visible + .mode-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mode-switch input:focus-visible + .mode-switch-track { outline: 2px solid var(--focus); outline-offset: 2px; }   /* aligné sur l'anneau de focus global (--focus) */
   .settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .settings-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--fg); }
   .settings-toggle input { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); }
@@ -1875,7 +1935,10 @@
     border: 1px solid var(--line-2); color: var(--fg-dimmer);
     font-size: 9px; font-weight: 700; cursor: help; user-select: none;
   }
-  .settings-help-icon:hover, .settings-help-icon:focus { color: var(--fg); border-color: var(--fg-dim); outline: none; }
+  /* `outline: none` retiré : il supprimait l'anneau AU CLAVIER aussi. On laisse désormais la règle
+     :focus-visible globale poser l'anneau au clavier ; au survol/focus SOURIS, seuls couleur + bordure changent
+     (:focus-visible ne s'active pas à la souris sur ce contrôle non textuel → focus souris inchangé). */
+  .settings-help-icon:hover, .settings-help-icon:focus { color: var(--fg); border-color: var(--fg-dim); }
   .settings-status-line { font-size: 10px; color: var(--fg-dim); margin-top: 8px; letter-spacing: 0.04em; }
   .settings-status-line strong { color: var(--fg); font-weight: 600; }
   .settings-row-note { font-size: 10px; color: var(--fg-dimmer); margin-top: 6px; line-height: 1.5; }
@@ -1910,7 +1973,7 @@
     padding: 8px 12px; border: 1px solid var(--line-2); border-left: 3px solid var(--accent);
     background: var(--bg-2); border-radius: 4px;
   }
-  .welcome-mode-badge strong { color: var(--accent); }
+  .welcome-mode-badge strong { color: var(--accent-text); }   /* emphase textuelle du bandeau → --accent-text */
   .welcome-actions { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
   .welcome-btn { width: 100%; justify-content: center; }
   .welcome-mode-hint { color: var(--fg-dimmer); font-size: 10px; line-height: 1.5; margin: 18px 0 0; letter-spacing: 0.02em; }
@@ -1969,4 +2032,23 @@
     }
     .dc-row.show-side .dc-side-close { display: inline-flex; align-self: flex-end; margin-bottom: 4px; }
     .dc-row.show-side .dc-side { flex: 1 1 auto; width: auto; min-width: 0; overflow: auto; }
+  }
+
+  /* ============ CIBLES TACTILES (écrans SANS survol) ============
+     Sur tactile, on agrandit les boutons-ICÔNE d'action à ≥ 44×44 px (recommandation d'accessibilité pour
+     le tap) et on écarte de ≥ 8 px les boutons d'une même rangée d'actions. Le DESKTOP reste STRICTEMENT
+     inchangé : tout est confiné à @media (hover: none). Non touché : les boutons déjà grands (topbar 56 px)
+     et les commandes des grilles denses (baies) où 44 px déborderait. */
+  @media (hover: none) {
+    /* boutons-icône d'action des listings / fiches / barres de sélection */
+    .icon-action { width: 44px; height: 44px; }
+    .icon-action + .icon-action { margin-left: 8px; }   /* ≥ 8 px entre boutons voisins d'une rangée */
+    /* boutons texte-icône d'une cellule d'actions (ex. « Attacher ») */
+    .cell-actions .row-btn { width: 44px; height: 44px; margin-left: 8px; }
+    /* pagination (⋮ overflow relève de .icon-action ci-dessus) */
+    .page-btn { min-width: 44px; height: 44px; }
+    /* sélecteur de date : input + boutons alignés à 44 px (l'input suit pour ne pas dépareiller la rangée) */
+    .date-ctrl-btn { height: 44px; }
+    .date-ctrl-btn.date-ctrl-icon { width: 44px; }
+    .date-input-row > input { height: 44px; }
   }
