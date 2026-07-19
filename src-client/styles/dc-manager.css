@@ -1271,6 +1271,11 @@
   .dc-cam-pivot line, .dc-cam-pivot circle { stroke: var(--fg-dim); stroke-width: 1px; fill: none; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.5; stroke-dasharray: 3 3; }
   .dc-rack-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
   .dc-rack-row .grow { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Rangée de PORTE : libellé (mur + vantaux) qui peut passer sur deux lignes (jamais tronqué) + colonne de cotes
+     alignées à droite (chiffres tabulaires, valeurs entières) → aucune ellipsis sur les valeurs. */
+  .dc-door-row { align-items: flex-start; }
+  .dc-door-row .dc-door-name { flex: 1 1 auto; min-width: 0; font-size: 12px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
+  .dc-door-row .dc-door-dims { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 11px; color: var(--fg-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .dc-net-sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; border: 1px solid var(--line-2); }
   .dc-layers { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; max-height: 42vh; overflow: auto; }
   .dc-layer-row { display: flex; align-items: center; gap: 8px; font-size: 11px; cursor: pointer; }

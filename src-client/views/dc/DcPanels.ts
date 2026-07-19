@@ -38,14 +38,14 @@ export abstract class DcPanels extends DcViews2D {
     // ORDRE INVERSÉ : bascules d'édition (déplacement/exclusion, plans 2D) À GAUCHE · modes de vue À DROITE.
     if (this.view === "top" || this.view === "floor") {
       const edits = document.createElement("div"); edits.className = "dc-subviews"; edits.style.cssText = "display:flex;gap:4px";
-      const bFree = this.btn(I18n.t("dc.panels.freePlace"), () => { this.freePlace = !this.freePlace; bFree.classList.toggle("active", this.freePlace); }, I18n.t("dc.panels.freePlaceTitle"));
-      bFree.classList.toggle("active", this.freePlace);
+      const bFree = this.btn(I18n.t("dc.panels.freePlace"), () => { this.freePlace = !this.freePlace; bFree.classList.toggle("active", this.freePlace); bFree.setAttribute("aria-pressed", String(this.freePlace)); }, I18n.t("dc.panels.freePlaceTitle"));
+      bFree.classList.toggle("active", this.freePlace); bFree.setAttribute("aria-pressed", String(this.freePlace));   // état PERSISTANT (session) → exposé aux lecteurs d'écran
       // édition contextuelle : étage courant (plan d'étage) · salle courante (plan de salle)
       const bEdit = (this.view === "floor")
         ? this.btn(I18n.t("dc.panels.editFloor"), () => { const ft = this.floorTargetResolve(); if (ft) this.editFloor(ft.location, ft.floor, false); else this.editFloor("", "", true); }, I18n.t("dc.panels.editFloorTitle"))
         : this.btn(I18n.t("dc.panels.editRoom"), () => { const d = this.current(); if (d) this.host.openDatacenterForm?.(d.id); }, I18n.t("dc.panels.editRoomTitle"));   // current() (pas this.dcId, qui peut être null alors qu'une salle par défaut est affichée)
-      const bBlock = this.btn(I18n.t("dc.panels.blockedCells"), () => { this.blockEdit = !this.blockEdit; bBlock.classList.toggle("active", this.blockEdit); this.render(); }, I18n.t("dc.panels.blockedCellsTitle"));
-      bBlock.classList.toggle("active", this.blockEdit);
+      const bBlock = this.btn(I18n.t("dc.panels.blockedCells"), () => { this.blockEdit = !this.blockEdit; bBlock.classList.toggle("active", this.blockEdit); bBlock.setAttribute("aria-pressed", String(this.blockEdit)); this.render(); }, I18n.t("dc.panels.blockedCellsTitle"));
+      bBlock.classList.toggle("active", this.blockEdit); bBlock.setAttribute("aria-pressed", String(this.blockEdit));   // état PERSISTANT (session) → exposé aux lecteurs d'écran
       edits.append(bFree, bEdit, bBlock); this.toolbarEl.appendChild(edits);
       this.toolbarEl.appendChild(this.vsep());   // séparateur : déplacement/exclusion | contrôles de visualisation
     }
@@ -56,6 +56,7 @@ export abstract class DcPanels extends DcViews2D {
     ([["3d", "3D"], ["top", I18n.t("dc.common.roomPlan")], ["floor", I18n.t("dc.common.floorPlan")]] as Array<["3d" | "top" | "floor", string]>).forEach(([m, label]) => {
       const b = document.createElement("button"); b.type = "button"; b.textContent = label;   // nu : style via .rm-toggle button
       b.classList.toggle("on", this.view === m);
+      b.setAttribute("aria-pressed", this.view === m ? "true" : "false");   // état de vue PERSISTANT → annoncé aux lecteurs d'écran (le rebuild du toolbar rafraîchit)
       b.onclick = () => { if (this.view === m) return; this.view = m; if (m === "3d") this.blockEdit = false; this.scale = null; this.camTarget = null; this.buildToolbar(); this.render(); };
       modes.appendChild(b);
     });
@@ -678,7 +679,7 @@ export abstract class DcPanels extends DcViews2D {
     const resolved = this.panelCables(dc);
     const total = this.store.all("cables").length;
     // créer une route 3D au clic (le prochain clic sur un port libre démarre ; puis waypoints ; puis port terminal)
-    const bRoute = this.btn(this.routeTool.active ? I18n.t("dc.panels.cancelRoute") : I18n.t("dc.panels.createRoute"), () => { if (this.routeTool.active) this.routeTool.cancel(); else this.routeTool.arm(); }, I18n.t("dc.panels.createRouteTitle"));
+    const bRoute = this.btn(this.routeTool.active ? I18n.t("dc.panels.cancelRoute") : I18n.t("dc.panels.createRoute"), () => { if (this.routeTool.active) void this.routeTool.requestClose(); else this.routeTool.arm(); }, I18n.t("dc.panels.createRouteTitle"));   // abandon = même garde-fou que le bouton « Annuler » de la carte
     IconButton.decorate(bRoute, this.routeTool.active ? Icons.CLOSE : Icons.ROUTE);
     bRoute.style.marginBottom = "6px"; box.appendChild(bRoute);
     box.appendChild(FormControls.toggle(I18n.t("dc.panels.showAllDimmed"), this.showAllCables, (v) => { this.showAllCables = v; this.rerenderView(); }, { block: true }));
@@ -784,8 +785,8 @@ export abstract class DcPanels extends DcViews2D {
     let cur: HTMLElement = box; let pending: string | null = null;
     const section = (label: string) => { pending = label; };
     const I: Record<string, string> = {
-      hideFront: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg>',
-      hideRear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="14" width="16" height="6" fill="currentColor" stroke="none"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg>',
+      front: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/></svg>',
+      rear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="14" width="16" height="6" fill="currentColor" stroke="none"/></svg>',
       names: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h9M5 18h6"/></svg>',
       ports: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/></svg>',
       image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="10" r="1.8"/><path d="M21 16l-5-4-8 7"/></svg>',
@@ -813,8 +814,12 @@ export abstract class DcPanels extends DcViews2D {
       b.innerHTML = icon; b.title = title; b.setAttribute("aria-label", title); cur.appendChild(b); return b;
     };
     section(I18n.t("lists.col.equipments"));
-    tgi(D3, I.hideFront, I18n.t("dc.panels.tHideFront"), () => this.hideFrontEq, (v) => { this.hideFrontEq = v; r3(); });
-    tgi(D3, I.hideRear, I18n.t("dc.panels.tHideRear"), () => this.hideRearEq, (v) => { this.hideRearEq = v; r3(); });
+    // DOCTRINE de la grille : « allumé = VISIBLE » pour TOUTES les bascules (pas de légende nécessaire). Les faces
+    // avant/arrière sont donc formulées en POSITIF : l'état ACTIF du toggle = faces AFFICHÉES. L'option persistée
+    // sous-jacente (`hideFrontEq`/`hideRearEq`, cf. DcThreeScene) garde sa sémantique « masquer » — on inverse
+    // UNIQUEMENT le rendu de la bascule (get = !hidden, apply = hidden = !v), rien d'autre en aval.
+    tgi(D3, I.front, I18n.t("dc.panels.tFront"), () => !this.hideFrontEq, (v) => { this.hideFrontEq = !v; r3(); });
+    tgi(D3, I.rear, I18n.t("dc.panels.tRear"), () => !this.hideRearEq, (v) => { this.hideRearEq = !v; r3(); });
     tgi(D3, I.ports, I18n.t("dc.panels.tPorts"), () => this.showPorts, (v) => { this.showPorts = v; r3(); });
     tgi(D3, I.names, I18n.t("dc.panels.tNames"), () => this.showEqNames, (v) => { this.showEqNames = v; r3(); });
     tgi(D3, I.image, I18n.t("dc.panels.tImages"), () => this.showFaceImages, (v) => { this.showFaceImages = v; r3(); });

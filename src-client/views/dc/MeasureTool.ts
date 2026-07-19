@@ -17,6 +17,7 @@ import { Icons } from "../../ui/Icons";
 import { Html } from "../../core/Html";
 import { Format } from "../../core/Format";
 import { Notify } from "../../ui/Notify";
+import { Dialog } from "../../ui/Dialog";
 import { Measure } from "../../geometry/Measure";
 import { I18n } from "../../i18n/I18n";
 import { DC_DOT_PX } from "./shared";
@@ -83,6 +84,19 @@ export class MeasureTool {
     this.host.buildToolbar(); this.host.render();
   }
   cancel(): void { this.state = null; this.hi = null; this.host.hideCote(); this.host.buildToolbar(); this.host.render(); }
+  /** Y a-t-il un travail de session qui serait PERDU en fermant ? (mesure en cours OU mesures terminées, conservées
+      en session seulement — jamais persistées). */
+  private hasWork(): boolean { return !!(this.state && (this.state.pts.length || this.state.done.length)); }
+  /** Fermeture DEPUIS le bouton de la carte : garde-fou si du travail non enregistré existe (confirmation danger,
+      focus initial sur Annuler), sinon fermeture directe (pas de friction inutile). Distinct de `cancel()`, qui reste
+      la fermeture inconditionnelle utilisée par l'exclusivité des outils. */
+  async requestClose(): Promise<void> {
+    if (this.hasWork()) {
+      const ok = await Dialog.confirm({ title: I18n.t("dc.measure.closeConfirmTitle"), message: I18n.t("dc.measure.closeConfirmMsg"), danger: true, confirmLabel: I18n.t("ui.action.close") });
+      if (!ok) return;
+    }
+    this.cancel();
+  }
   undo(): void { if (this.state && this.state.pts.length) { this.state.pts.pop(); this.state.cursor = null; this.host.render(); } }
 
   /* ---- aperçu SOURIS 2D (throttlé) — vivait dans la vue (DcBase.newScene), rapatrié DANS l'outil ---- */
@@ -241,11 +255,14 @@ export class MeasureTool {
     hint.textContent = here ? I18n.t("dc.measure.hintHere") : I18n.t("dc.measure.hintOther");
     box.appendChild(hint);
     const acts = document.createElement("div"); acts.className = "dc-card-acts";
+    // Hiérarchie des actions : VALIDER (primaire) + ANNULER POINT (ghost) = couple du geste courant, à gauche ;
+    // TOUT EFFACER (destructif) et FERMER sont repoussés à DROITE (margin-left:auto) et teintés danger → le clic
+    // destructeur est visuellement à l'écart du couple valider/annuler-point.
+    const bNew = this.host.btn(I18n.t("dc.measure.commit"), () => this.commit()); bNew.classList.remove("btn-ghost"); bNew.classList.add("btn-primary"); IconButton.decorate(bNew, Icons.CHECK); (bNew as any).disabled = m.pts.length < 2 || !here;
     const bUndo = this.host.btn(I18n.t("dc.measure.undoPoint"), () => this.undo()); (bUndo as any).disabled = !m.pts.length || !here;
-    const bNew = this.host.btn(I18n.t("dc.measure.commit"), () => this.commit()); IconButton.decorate(bNew, Icons.CHECK); (bNew as any).disabled = m.pts.length < 2 || !here;
-    const bClear = this.host.btn(I18n.t("dc.measure.clearAll"), () => this.clearAll()); IconButton.decorate(bClear, Icons.DELETE); (bClear as any).disabled = !m.pts.length && !m.done.length;
-    const bClose = this.host.btn(I18n.t("ui.action.close"), () => this.cancel()); IconButton.decorate(bClose, Icons.CLOSE); bClose.classList.add("btn-danger");
-    acts.append(bUndo, bNew, bClear, bClose); box.appendChild(acts);
+    const bClear = this.host.btn(I18n.t("dc.measure.clearAll"), () => this.clearAll()); IconButton.decorate(bClear, Icons.DELETE); bClear.classList.add("btn-danger"); bClear.style.marginLeft = "auto"; (bClear as any).disabled = !m.pts.length && !m.done.length;
+    const bClose = this.host.btn(I18n.t("ui.action.close"), () => this.requestClose()); IconButton.decorate(bClose, Icons.CLOSE); bClose.classList.add("btn-danger");
+    acts.append(bNew, bUndo, bClear, bClose); box.appendChild(acts);
     return box;
   }
 

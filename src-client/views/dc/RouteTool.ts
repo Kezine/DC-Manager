@@ -14,6 +14,7 @@
 import { Notify } from "../../ui/Notify";
 import { IconButton } from "../../ui/IconButton";
 import { Icons } from "../../ui/Icons";
+import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
 import { I18n } from "../../i18n/I18n";
 import { Waypoint } from "../../models/Waypoint";
@@ -76,6 +77,18 @@ export class RouteTool {
   back(): void { const rb = this.state; if (!rb) return; if (rb.wpIds.length) rb.wpIds.pop(); else if (rb.fromPortId) { rb.fromPortId = null; rb.armed = true; } this.host.render(); }
   /** Annule la route en cours. */
   cancel(): void { this.state = null; this.host.render(); }
+  /** Le tracé en cours porte-t-il un travail (port de départ posé ou waypoints ajoutés) qui serait perdu ? */
+  private hasWork(): boolean { return !!(this.state && (this.state.fromPortId || this.state.wpIds.length)); }
+  /** Abandon DEPUIS le bouton de la carte : garde-fou si un tracé non validé existe (confirmation danger, focus
+      initial sur Annuler), sinon annulation directe. Distinct de `cancel()`, l'annulation inconditionnelle utilisée
+      par la fin de route et l'exclusivité des outils. */
+  async requestClose(): Promise<void> {
+    if (this.hasWork()) {
+      const ok = await Dialog.confirm({ title: I18n.t("dc.route.cancelConfirmTitle"), message: I18n.t("dc.route.cancelConfirmMsg"), danger: true, confirmLabel: I18n.t("dc.route.cancelConfirmYes") });
+      if (!ok) return;
+    }
+    this.cancel();
+  }
   /** Termine la route sur `endPortId` → ouvre le formulaire de câblage prérempli. */
   finish(endPortId: string): void {
     const rb = this.state; if (!rb || !rb.fromPortId) return;
@@ -109,8 +122,10 @@ export class RouteTool {
     hint.textContent = rb.fromPortId ? I18n.t("dc.route.hintStarted") : I18n.t("dc.route.hintStart");
     box.appendChild(hint);
     const acts = document.createElement("div"); acts.className = "dc-card-acts";
+    // RETOUR (ghost) = geste courant à gauche ; ANNULER (destructif) repoussé à DROITE (margin-left:auto) et teinté
+    // danger, à l'écart — même logique que la carte Mesure. L'abandon passe par le garde-fou `requestClose`.
     const bBack = this.host.btn(I18n.t("dc.route.back"), () => this.back()); (bBack as any).disabled = !rb.fromPortId && !rb.wpIds.length;
-    const bCancel = this.host.btn(I18n.t("ui.action.cancel"), () => this.cancel()); IconButton.decorate(bCancel, Icons.CLOSE); bCancel.classList.add("btn-danger");
+    const bCancel = this.host.btn(I18n.t("ui.action.cancel"), () => this.requestClose()); IconButton.decorate(bCancel, Icons.CLOSE); bCancel.classList.add("btn-danger"); bCancel.style.marginLeft = "auto";
     acts.append(bBack, bCancel); box.appendChild(acts);
     return box;
   }

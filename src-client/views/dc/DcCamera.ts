@@ -70,7 +70,7 @@ export abstract class DcCamera extends DcBase {
       const preset = (b as HTMLElement).dataset.preset; if (preset) { if (gl) this._three.setPreset(preset); else this.setCamPreset(preset); return; }
       const a = (b as HTMLElement).dataset.act;
       if (a === "back") { this.goBack(); return; }
-      if (a === "measure") { if (this.measureTool.hasActive()) this.measureTool.cancel(); else this.measureTool.arm(); return; }
+      if (a === "measure") { if (this.measureTool.hasActive()) void this.measureTool.requestClose(); else this.measureTool.arm(); return; }   // fermeture = même garde-fou que le bouton « Fermer » de la carte
       if (a === "position") { if (this.posTool.active) this.posTool.cancel(); else this.posTool.arm(); return; }
       if (a === "proj") { this.webglPerspective = !this.webglPerspective; if (this._three) this._three.setProjection(this.webglPerspective); this.persistView(); this.updateControls(); return; }
       if (a === "in") { if (gl) this._three.zoomBy(1.2); else this.zoomBy(1.2); }

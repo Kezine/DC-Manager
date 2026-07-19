@@ -3,7 +3,9 @@
      (exclusifs entre eux et du positionnement). Titre .dc-card-title + .gi (Icons.MEASURE / Icons.ROUTE). Listes en
      flux (font 12px, gap 3px) : mesures terminées + en cours (survol = surbrillance dans la scène) ; étapes de route
      numérotées par .pill. Longueurs via Format.meters (séparateur décimal « . », suffixe « m »). Aides = .form-hint.
-     Actions = .dc-card-acts, boutons décorés Icons.CHECK / DELETE / CLOSE. Noms d'entités / valeurs = DONNÉES
+     Actions = .dc-card-acts : VALIDER (primaire .btn-primary) + ANNULER POINT (ghost) à gauche ; TOUT EFFACER
+     (destructif) et FERMER teintés .btn-danger et repoussés à DROITE (margin-left:auto). FERMER / ANNULER passent par
+     un garde-fou (Dialog.confirm danger) si un travail non validé existe. Noms d'entités / valeurs = DONNÉES
      illustratives ; libellés d'interface = catalogue i18n dc.measure.* / dc.route.* / lists.ph.points. -->
 <section class="ds-section">
   <h2>Mesure multipoint (session active)</h2>
@@ -18,14 +20,14 @@
       <div style="margin:6px 0;font-size:13px;border-top:1px solid var(--line);padding-top:6px">Longueur totale : <b style="color:var(--accent)">5.95 m</b></div>
       <div class="form-hint">Cliquez pour poser des points · ENTRÉE valide la mesure · ÉCHAP annule la mesure en cours.</div>
       <div class="dc-card-acts">
+        <button type="button" class="btn btn-sm btn-primary"><span class="gi" aria-hidden="true">{{ICON:CHECK}}</span>Valider (Entrée)</button>
         <button type="button" class="btn btn-ghost btn-sm">↩ Annuler point</button>
-        <button type="button" class="btn btn-ghost btn-sm"><span class="gi" aria-hidden="true">{{ICON:CHECK}}</span>Valider (Entrée)</button>
-        <button type="button" class="btn btn-ghost btn-sm"><span class="gi" aria-hidden="true">{{ICON:DELETE}}</span>Tout effacer</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-danger" style="margin-left:auto"><span class="gi" aria-hidden="true">{{ICON:DELETE}}</span>Tout effacer</button>
         <button type="button" class="btn btn-ghost btn-sm btn-danger"><span class="gi" aria-hidden="true">{{ICON:CLOSE}}</span>Fermer</button>
       </div>
     </div>
   </div>
-  <p class="ds-note">Prise dans un AUTRE contexte de vue, la même carte affiche « Mesure prise dans un autre contexte… » et les actions de pose sont désactivées (état non représenté).</p>
+  <p class="ds-note">« Valider » est le bouton PRIMAIRE ; « Annuler point » ghost à côté ; « Tout effacer » (destructif) et « Fermer » sont teintés danger et repoussés à droite, à l'écart du couple valider/annuler-point. Fermer alors qu'une mesure non validée (ou des mesures de session) existe déclenche une confirmation danger (« Fermer la mesure ? ») — sinon la fermeture est directe. Prise dans un AUTRE contexte de vue, la même carte affiche « Mesure prise dans un autre contexte… » et les actions de pose sont désactivées (état non représenté).</p>
 </section>
 
 <section class="ds-section">
@@ -41,9 +43,9 @@
       <div class="form-hint">Cliquez des waypoints/brosses (changez de salle/étage si besoin), puis un PORT terminal pour finir.</div>
       <div class="dc-card-acts">
         <button type="button" class="btn btn-ghost btn-sm">↩ Retour</button>
-        <button type="button" class="btn btn-ghost btn-sm btn-danger"><span class="gi" aria-hidden="true">{{ICON:CLOSE}}</span>Annuler</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-danger" style="margin-left:auto"><span class="gi" aria-hidden="true">{{ICON:CLOSE}}</span>Annuler</button>
       </div>
     </div>
   </div>
-  <p class="ds-note">Avant la pose du port de départ, la première ligne est l'invite en accent « Cliquez le PORT de départ… » et l'aide devient « Cliquez un port libre pour démarrer la route. ».</p>
+  <p class="ds-note">« Annuler » (destructif, danger) est repoussé à droite, à l'écart de « Retour » ; abandonner un tracé non validé (port de départ posé ou waypoints ajoutés) déclenche une confirmation danger (« Abandonner la route ? »). Avant la pose du port de départ, la première ligne est l'invite en accent « Cliquez le PORT de départ… » et l'aide devient « Cliquez un port libre pour démarrer la route. ».</p>
 </section>

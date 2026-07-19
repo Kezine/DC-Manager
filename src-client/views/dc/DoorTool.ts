@@ -190,12 +190,18 @@ export class DoorTool {
     else {
       const list = document.createElement("div"); list.className = "dc-layers";
       doors.forEach((d: any) => {
-        const row = document.createElement("div"); row.className = "dc-rack-row";
-        const lab = document.createElement("span"); lab.className = "grow"; lab.style.fontSize = "12px";
-        lab.textContent = I18n.t("dc.door.rowLabel", { wall: Doors.wallLabel(d.wall), leaves: Doors.isDouble(d) ? I18n.t("dc.door.twoLeaves") : "", w: d.width_mm, mm: Doors.freeWidth(d) });
+        const row = document.createElement("div"); row.className = "dc-rack-row dc-door-row";
+        // Libellé (mur + vantaux) : peut passer sur DEUX lignes, jamais tronqué. Les cotes (ouverture / passage
+        // libre) forment une colonne à DROITE, chiffres alignés (tabular-nums) et toujours ENTIÈRES — plus d'ellipsis.
+        const lab = document.createElement("span"); lab.className = "dc-door-name";
+        lab.textContent = I18n.t("dc.door.rowWall", { wall: Doors.wallLabel(d.wall), leaves: Doors.isDouble(d) ? I18n.t("dc.door.twoLeaves") : "" });
+        const dims = document.createElement("span"); dims.className = "dc-door-dims";
+        const vOpen = document.createElement("span"); vOpen.textContent = I18n.t("dc.door.rowOpening", { w: d.width_mm });
+        const vClear = document.createElement("span"); vClear.textContent = I18n.t("dc.door.rowClearance", { mm: Doors.freeWidth(d) });
+        dims.append(vOpen, vClear);
         const bEdit = this.btn(I18n.t("lists.chrome.rowEdit"), () => this.host.openDoorForm(dc.id, d.id));
         const bDel = this.btn("", () => this.remove(dc, d.id)); bDel.innerHTML = Icons.CLOSE; bDel.classList.add("btn-danger");
-        row.append(lab, bEdit, bDel); list.appendChild(row);
+        row.append(lab, dims, bEdit, bDel); list.appendChild(row);
       });
       box.appendChild(list);
     }

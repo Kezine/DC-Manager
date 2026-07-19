@@ -24,9 +24,9 @@
       </div>
       <div style="flex:1 1 auto"></div>
       <div class="rm-toggle">
-        <button type="button" class="on">3D</button>
-        <button type="button">Plan de salle</button>
-        <button type="button">Plan d'étage</button>
+        <button type="button" class="on" aria-pressed="true">3D</button>
+        <button type="button" aria-pressed="false">Plan de salle</button>
+        <button type="button" aria-pressed="false">Plan d'étage</button>
       </div>
       <div style="align-self:stretch;width:1px;min-height:22px;margin:0 4px;background:var(--line)"></div>
       <div class="multi-pop">
@@ -34,7 +34,7 @@
       </div>
     </div>
   </div>
-  <p class="ds-note"><code>.rm-toggle</code> = contrôle segmenté (CHOIX 1 parmi N) : un seul conteneur bordé, segment actif teinté (fond non plein, texte accent). Le filtre <code>.multi-trigger</code> est montré FERMÉ (son panneau <code>.multi-panel</code> est masqué tant qu'il n'est pas <code>.open</code>).</p>
+  <p class="ds-note"><code>.rm-toggle</code> = contrôle segmenté (CHOIX 1 parmi N) : un seul conteneur bordé, segment actif teinté (fond non plein, texte accent). Le mode de vue étant un état PERSISTANT, chaque segment porte <code>aria-pressed</code> (true sur le segment actif) pour les lecteurs d'écran. Le filtre <code>.multi-trigger</code> est montré FERMÉ (son panneau <code>.multi-panel</code> est masqué tant qu'il n'est pas <code>.open</code>).</p>
 </section>
 
 <section class="ds-section">
@@ -44,15 +44,15 @@
     <div class="dc-toolbar">
       <div style="flex:1 1 auto"></div>
       <div class="dc-subviews" style="display:flex;gap:4px">
-        <button type="button" class="btn btn-ghost btn-sm" title="Désactive l'aimantation à la grille pendant le glisser (n'affecte pas les éléments déjà placés)">Placement libre</button>
+        <button type="button" class="btn btn-ghost btn-sm" aria-pressed="false" title="Désactive l'aimantation à la grille pendant le glisser (n'affecte pas les éléments déjà placés)">Placement libre</button>
         <button type="button" class="btn btn-ghost btn-sm" title="Modifier la salle courante">Éditer la salle</button>
-        <button type="button" class="btn btn-ghost btn-sm active" title="Glissez une sélection sur la grille pour marquer / démarquer les cases (in)accessibles">Cases inaccessibles</button>
+        <button type="button" class="btn btn-ghost btn-sm active" aria-pressed="true" title="Glissez une sélection sur la grille pour marquer / démarquer les cases (in)accessibles">Cases inaccessibles</button>
       </div>
       <div style="align-self:stretch;width:1px;min-height:22px;margin:0 4px;background:var(--line)"></div>
       <div class="rm-toggle">
-        <button type="button">3D</button>
-        <button type="button" class="on">Plan de salle</button>
-        <button type="button">Plan d'étage</button>
+        <button type="button" aria-pressed="false">3D</button>
+        <button type="button" class="on" aria-pressed="true">Plan de salle</button>
+        <button type="button" aria-pressed="false">Plan d'étage</button>
       </div>
       <div style="align-self:stretch;width:1px;min-height:22px;margin:0 4px;background:var(--line)"></div>
       <div class="multi-pop">
@@ -60,7 +60,7 @@
       </div>
     </div>
   </div>
-  <p class="ds-note">La bascule « Cases inaccessibles » est montrée ACTIVE (état <code>.active</code> = accent). En Plan d'étage, « Éditer la salle » devient « Éditer l'étage ».</p>
+  <p class="ds-note">La bascule « Cases inaccessibles » est montrée ACTIVE (état <code>.active</code> = accent). Les bascules PERSISTANTES (« Placement libre », « Cases inaccessibles ») portent <code>aria-pressed</code> reflétant leur état ; « Éditer la salle » est une ACTION (ouvre un formulaire) et n'en porte pas. En Plan d'étage, « Éditer la salle » devient « Éditer l'étage ».</p>
 </section>
 
 <section class="ds-section">
