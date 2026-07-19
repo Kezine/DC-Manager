@@ -230,4 +230,20 @@ export class Icons {
 
   /** Paramètres : engrenage. */
   static readonly SETTINGS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"/></svg>';
+
+  /* ------------------------------------------------------------------------
+     APPARENCE — repères des bascules de réglages (thème, plein écran). Servent
+     de LÉGENDE aux toggles `.mode-switch` de la section « Apparence » (soleil/lune
+     = thème clair/sombre, écran étendu = modales plein écran). Même facture
+     (24×24, fill:none, stroke currentColor, bouts ronds).
+     ------------------------------------------------------------------------ */
+
+  /** Thème CLAIR : soleil (astre + rayons). Repère de gauche (état décoché) de la bascule de thème. */
+  static readonly SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg>';
+
+  /** Thème SOMBRE : lune (croissant). Repère de droite (état coché) de la bascule de thème. */
+  static readonly MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>';
+
+  /** Plein écran : quatre coins qui s'écartent. Repère de la bascule « modales en plein écran ». */
+  static readonly FULLSCREEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
 }

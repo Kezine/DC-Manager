@@ -261,7 +261,7 @@ async function boot(): Promise<void> {
     onSaveAs: () => { void files.doSaveAs(); },
     onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
     onRedo: () => { void doRedo(); },
-    onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); dcView.onThemeChanged(); },
+    onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); shell.setTheme(prefs.theme); dcView.onThemeChanged(); },
     onUiScale: (value) => { prefs.uiScale = value; applyUiScale(prefs.uiScale); shell.setUiScale(prefs.uiScale); },
     onModalFullscreen: (on) => { prefs.modalFullscreen = on; applyModalFullscreen(prefs.modalFullscreen); shell.setModalFullscreen(prefs.modalFullscreen); },   // une modale DÉJÀ ouverte s'adapte par le CSS seul
     onAutocompleteMax: (value) => { prefs.autocompleteMaxResults = value; shell.setAutocompleteMax(prefs.autocompleteMaxResults); },
@@ -818,6 +818,7 @@ async function boot(): Promise<void> {
   shell.setFileAccessMode(prefs.fileAccessMode);
   shell.setDebugLog(prefs.debugLog); Log.setEnabled(prefs.debugLog);
   shell.setUiScale(prefs.uiScale);
+  shell.setTheme(prefs.theme);   // position de la bascule thème = thème EFFECTIF (coché = sombre)
   shell.setModalFullscreen(prefs.modalFullscreen);
   shell.setAutocompleteMax(prefs.autocompleteMaxResults);
   shell.setRestMode(REST_MODE);   // mode API : masque les contrôles fichier

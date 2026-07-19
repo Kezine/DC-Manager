@@ -117,6 +117,7 @@ export class Shell {
   private saveBtn!: HTMLButtonElement;
   private saveDot!: HTMLElement;
   private dataSourceSwitch!: HTMLInputElement;     // toggle slider Local ⟷ API (coché = API)
+  private themeSwitch!: HTMLInputElement;          // toggle slider thème clair ⟷ sombre (coché = sombre)
   private apiUrlInput!: HTMLInputElement;          // URL de base de l'API (mode API)
   private apiUrlRow!: HTMLElement;                 // ligne URL (masquée en mode Local)
   private apiLoginInput!: HTMLInputElement;        // URL de connexion SSO (bouton « Connexion » du welcome)
@@ -224,6 +225,23 @@ export class Shell {
     window.addEventListener("hashchange", () => { const v = ShellNav.resolveHash(location.hash, this.navLookup()); if (v && v !== this.current) this.switchView(v); });
   }
 
+  /** Fabrique un toggle SLIDER `.mode-switch` (case cachée + piste) — contrôle PARTAGÉ par la source de
+      données, le thème et les modales plein écran (principe n°3 : un seul idiome pour toutes les bascules
+      slider). L'anneau focus-visible et les transitions sont portés par le CSS `.mode-switch`. Le câblage
+      `onchange` et l'étiquetage (côtés/icônes, aria-label) restent à la charge de l'appelant. */
+  private buildModeSwitch(): { label: HTMLLabelElement; input: HTMLInputElement } {
+    const label = document.createElement("label"); label.className = "mode-switch";
+    const input = document.createElement("input"); input.type = "checkbox";
+    const track = document.createElement("span"); track.className = "mode-switch-track"; track.setAttribute("aria-hidden", "true");
+    label.append(input, track);
+    return { label, input };
+  }
+
+  /** Petite pastille d'ICÔNE flanquant un toggle slider (légende décorative, cf. soleil/lune du thème). */
+  private static modeSwitchIcon(svg: string): HTMLElement {
+    const s = document.createElement("span"); s.className = "mode-switch-icon"; s.setAttribute("aria-hidden", "true"); s.innerHTML = svg; return s;
+  }
+
   private buildSettingsMenu(): HTMLElement {
     const wrap = document.createElement("div"); wrap.className = "settings-menu";
     const btn = document.createElement("button"); btn.type = "button"; btn.className = "icon-btn"; btn.title = I18n.t("shell.settings.title"); btn.setAttribute("aria-haspopup", "menu");
@@ -235,13 +253,10 @@ export class Shell {
     const src = section(I18n.t("shell.settings.dataSource"));
     const srcRow = document.createElement("div"); srcRow.className = "mode-switch-row";
     const lblLocal = document.createElement("span"); lblLocal.className = "mode-switch-side"; lblLocal.textContent = I18n.t("shell.settings.local");
-    const sw = document.createElement("label"); sw.className = "mode-switch";
-    this.dataSourceSwitch = document.createElement("input"); this.dataSourceSwitch.type = "checkbox";
+    const dsSwitch = this.buildModeSwitch(); this.dataSourceSwitch = dsSwitch.input;
     this.dataSourceSwitch.onchange = () => { this.updateApiUrlVisibility(); this.host.onDataSource?.(this.dataSourceSwitch.checked ? "api" : "local"); };
-    const track = document.createElement("span"); track.className = "mode-switch-track"; track.setAttribute("aria-hidden", "true");
-    sw.append(this.dataSourceSwitch, track);
     const lblApi = document.createElement("span"); lblApi.className = "mode-switch-side"; lblApi.textContent = I18n.t("shell.settings.api");
-    srcRow.append(lblLocal, sw, lblApi); src.appendChild(srcRow);
+    srcRow.append(lblLocal, dsSwitch.label, lblApi); src.appendChild(srcRow);
     // ligne URL d'API (visible en mode API uniquement)
     this.apiUrlRow = document.createElement("div"); this.apiUrlRow.className = "settings-row"; this.apiUrlRow.style.marginTop = "10px";
     const urlLbl = document.createElement("label"); urlLbl.className = "settings-row-label"; urlLbl.textContent = I18n.t("shell.settings.apiUrl");
@@ -288,8 +303,28 @@ export class Shell {
 
     // -- Apparence -- (seule section « cosmétique » conservée en mode visualiseur ; cf. body.viewer-mode)
     const app = section(I18n.t("shell.settings.appearance")); app.classList.add("settings-cosmetic");
-    const themeBtn = document.createElement("button"); themeBtn.type = "button"; themeBtn.className = "btn btn-ghost btn-sm"; themeBtn.style.width = "100%"; themeBtn.textContent = I18n.t("shell.settings.toggleTheme");
-    themeBtn.onclick = () => this.host.onToggleTheme?.(); app.appendChild(themeBtn);
+    // -- Thème clair / sombre : toggle SLIDER (même contrôle que la source de données) flanqué du SOLEIL (thème
+    //    clair, à gauche = décoché) et de la LUNE (thème sombre, à droite = coché) — sens du mode-switch (le pouce
+    //    glisse à droite quand coché). Comportement inchangé : l'appui BASCULE (host.onToggleTheme, persistance via
+    //    Prefs) ; la position est reflétée par setTheme (boot + après bascule). aria-label/title localisés ; l'anneau
+    //    focus-visible du mode-switch s'applique. --
+    const themeRow = document.createElement("div"); themeRow.className = "mode-switch-row mode-switch-row--spread";
+    const themeSwitch = this.buildModeSwitch(); this.themeSwitch = themeSwitch.input;
+    this.themeSwitch.setAttribute("aria-label", I18n.t("shell.settings.toggleTheme")); this.themeSwitch.title = I18n.t("shell.settings.toggleTheme");
+    this.themeSwitch.onchange = () => this.host.onToggleTheme?.();
+    themeRow.append(Shell.modeSwitchIcon(Icons.SUN), themeSwitch.label, Shell.modeSwitchIcon(Icons.MOON)); app.appendChild(themeRow);
+    // -- Modales en plein écran (préférence DESKTOP) : MÊME toggle mode-switch, JUSTE SOUS le thème. Le libellé nomme
+    //    la préférence (gauche) ; l'icône « plein écran » marque l'état ACTIF (droite = coché = plein écran), un seul
+    //    côté iconé suffit ici (bascule binaire, contrairement au thème à deux états nommés). Remplace l'ANCIENNE case
+    //    à cocher (pas de doublon de contrôle pour la même préférence). Toujours actif sous le breakpoint responsive
+    //    (CSS seul) ; ici on ne pilote QUE l'effet desktop (attribut data-modal-fs). --
+    const mfsRow = document.createElement("div"); mfsRow.className = "mode-switch-row mode-switch-row--spread"; mfsRow.style.marginTop = "12px";
+    const mfsLabel = document.createElement("span"); mfsLabel.className = "mode-switch-label"; mfsLabel.textContent = I18n.t("shell.settings.modalFs");
+    const mfsSwitch = this.buildModeSwitch(); this.modalFsChk = mfsSwitch.input;
+    this.modalFsChk.setAttribute("aria-label", I18n.t("shell.settings.modalFs")); this.modalFsChk.title = I18n.t("shell.settings.modalFs");
+    this.modalFsChk.onchange = () => this.host.onModalFullscreen?.(this.modalFsChk.checked);
+    mfsRow.append(mfsLabel, mfsSwitch.label, Shell.modeSwitchIcon(Icons.FULLSCREEN)); app.appendChild(mfsRow);
+    const mfsNote = document.createElement("div"); mfsNote.className = "settings-row-note"; mfsNote.textContent = I18n.t("shell.settings.modalFsNote"); app.appendChild(mfsNote);
     // -- Taille du texte (échelle d'interface) : compense les mobiles qui grossissent les polices --
     const fsRow = document.createElement("div"); fsRow.className = "settings-row"; fsRow.style.marginTop = "10px";
     const fsLbl = document.createElement("label"); fsLbl.className = "settings-row-label"; fsLbl.textContent = I18n.t("shell.settings.textSize");
@@ -305,15 +340,6 @@ export class Shell {
     FieldFacet.MAX_RESULTS_OPTIONS.forEach((n) => { const op = document.createElement("option"); op.value = String(n); op.textContent = String(n); this.acMaxSel.appendChild(op); });
     this.acMaxSel.onchange = () => this.host.onAutocompleteMax?.(parseInt(this.acMaxSel.value, 10));
     acRow.append(acLbl, this.acMaxSel); app.appendChild(acRow);
-    // -- Modales en plein écran (préférence DESKTOP) : bascule maison (checkbox thématisée, cf. auto-save/débogage).
-    //    Toujours actif sous le breakpoint responsive (CSS seul) ; ici on ne pilote QUE l'effet desktop (attribut data-modal-fs). --
-    const mfsRow = document.createElement("div"); mfsRow.className = "settings-toggle-row"; mfsRow.style.marginTop = "10px";
-    const mfsLabel = document.createElement("label"); mfsLabel.className = "settings-toggle";
-    this.modalFsChk = document.createElement("input"); this.modalFsChk.type = "checkbox";
-    this.modalFsChk.onchange = () => this.host.onModalFullscreen?.(this.modalFsChk.checked);
-    mfsLabel.append(this.modalFsChk, document.createTextNode(I18n.t("shell.settings.modalFs")));
-    mfsRow.appendChild(mfsLabel); app.appendChild(mfsRow);
-    const mfsNote = document.createElement("div"); mfsNote.className = "settings-row-note"; mfsNote.textContent = I18n.t("shell.settings.modalFsNote"); app.appendChild(mfsNote);
     // -- Langue / Language : préférence de LOCALISATION (auto = langue du navigateur ; repli français). Le TITRE de
     //    section reste BILINGUE (seul repli pour retrouver le sélecteur quelle que soit la langue active) ; le reste
     //    du panneau est localisé. Une bascule PERSISTE la préférence puis RECHARGE l'app (cf. I18n.setPreference / docs/i18n.md). --
@@ -697,6 +723,8 @@ export class Shell {
   setDebugLog(on: boolean): void { this.debugLogChk.checked = on; }
   /** Reflète l'échelle d'interface dans le sélecteur des réglages (sans déclencher onUiScale). */
   setUiScale(v: number): void { if (this.uiScaleSel) this.uiScaleSel.value = String(v); }
+  /** Reflète le thème courant dans la bascule des réglages (coché = sombre) — sans déclencher onToggleTheme. */
+  setTheme(theme: string): void { if (this.themeSwitch) this.themeSwitch.checked = (theme === "dark"); }
   /** Reflète la préférence « modales en plein écran » dans la bascule des réglages (sans déclencher onModalFullscreen). */
   setModalFullscreen(on: boolean): void { if (this.modalFsChk) this.modalFsChk.checked = on; }
   /** Reflète le nb max de suggestions d'autocomplétion dans le sélecteur des réglages. */
