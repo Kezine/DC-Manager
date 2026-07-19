@@ -294,7 +294,10 @@ export class ListView {
       bodyHtml = `<tr class="empty-row"><td colspan="${cols.length + 1}">${Html.escape(this.emptyText)}</td></tr>`;
     } else {
       bodyHtml = rows.map((o) => {
-        const cells = cols.map((c) => `<td class="${c.cls || ""}">${c.render(o)}</td>`).join("");
+        // `data-label` = en-tête de la colonne : sert au repli en CARTES sous 560px (revue design lot D2) — le
+        // CSS l'affiche via `td::before { content: attr(data-label) }`, zéro duplication de markup. La cellule
+        // d'ACTIONS n'en reçoit pas (rangée de boutons, jamais préfixée d'un libellé).
+        const cells = cols.map((c) => `<td class="${c.cls || ""}" data-label="${Html.escape(c.head)}">${c.render(o)}</td>`).join("");
         return `<tr>${cells}<td class="cell-actions">${this._rowActions(o.id)}</td></tr>`;
       }).join("");
     }

@@ -6,6 +6,7 @@ import { InterventionsFormat, type BadgeClass } from "../core/InterventionsForma
 import { FormControls, type SelectOption } from "../ui/FormControls";
 import { type MultiItem } from "../ui/MultiSelect";
 import { FilterBar } from "../ui/FilterBar";
+import { CardTable } from "../ui/CardTable";
 import { SearchPop, type SearchPopResult } from "../ui/SearchPop";
 import { Icons } from "../ui/Icons";
 import { IconButton } from "../ui/IconButton";
@@ -284,9 +285,10 @@ export class InterventionsAdminView {
       this.plainTh(I18n.t("interventions.col.actions"), "cell-actions"),
     );
     thead.appendChild(tr);
+    const labels = CardTable.columnLabels(tr);   // repli en cartes (< 560px) : libellés lus depuis l'en-tête
     const tbody = document.createElement("tbody");
     if (!this.items.length) tbody.appendChild(this.emptyRow(9));
-    else for (const item of this.items) tbody.appendChild(this.buildRow(item));
+    else for (const item of this.items) { const row = this.buildRow(item); CardTable.labelCells(row, labels); tbody.appendChild(row); }
     table.append(thead, tbody);
     tw.appendChild(table);
     return tw;
@@ -362,8 +364,9 @@ export class InterventionsAdminView {
       corps complet (GET) puis PUT le status changé (le serveur re-estampille updated_*). */
   private actionsCell(item: InterventionRecord): HTMLElement {
     // display:flex ignore text-align → justify-content:flex-end pour aligner les actions à DROITE (parité
-    // .cell-actions des listings ; revue design lot B).
-    const td = document.createElement("td"); td.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end";
+    // .cell-actions des listings ; revue design lot B). Classe `cell-actions` : identifie la cellule d'actions
+    // pour le repli en cartes (< 560px) — CardTable ne la préfixe pas d'un libellé (rangée de boutons).
+    const td = document.createElement("td"); td.className = "cell-actions"; td.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end";
     td.appendChild(this.iconAction(Icons.INFO, I18n.t("interventions.rowAction.details"), () => this.detailModal(item)));
     td.appendChild(this.iconAction(Icons.EDIT, I18n.t("interventions.rowAction.edit"), () => this.interventionModal(item, item.kind)));
     if (item.status === "declared" || item.status === "planned") {

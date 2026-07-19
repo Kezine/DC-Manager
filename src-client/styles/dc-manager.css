@@ -2210,3 +2210,40 @@
     .date-ctrl-btn.date-ctrl-icon { width: 44px; }
     .date-input-row > input { height: 44px; }
   }
+
+  /* ============ LISTINGS EN CARTES (< 560px) — revue design lot D2 ============
+     Sous 560px, une table de listing ne tient plus en largeur (défilement horizontal pénible au pouce). On la
+     replie en CARTES empilées SANS dupliquer le markup : chaque `<td>` porte déjà un `data-label` (= en-tête de
+     sa colonne — posé au rendu par la ListView dans son gabarit, et par CardTable pour les vues Certs /
+     Interventions). Ici : on RETIRE le `thead` du flux (mais on le garde accessible aux lecteurs d'écran), on
+     transforme chaque `<tr>` en carte, et chaque cellule affiche son libellé via
+     `td::before { content: attr(data-label) }`. Portée STRICTEMENT aux tables de LISTING (.list-body) — les
+     grilles de baies (.rack-grid), la 3D, etc. ne sont pas concernées. Placé APRÈS le bloc 760px → l'emporte. */
+  @media (max-width: 560px) {
+    .list-body .table-wrap { border: none; background: transparent; overflow: visible; }
+    .list-body table, .list-body tbody, .list-body tr, .list-body td { display: block; }
+    /* en-têtes retirés VISUELLEMENT mais lus par les lecteurs d'écran (repris en ::before sur chaque cellule). */
+    .list-body thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+    .list-body tbody tr {
+      border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2);
+      margin-bottom: 10px; padding: 4px 12px;
+    }
+    .list-body tbody tr:hover { background: var(--bg-2); }   /* pas de survol « ligne » en carte (le doigt ne survole pas) */
+    /* width auto en !important : neutralise les `width:1%` INLINE des cellules de sélection (case à cocher),
+       qui, en display:block, réduiraient la cellule à 1 % de la carte. */
+    .list-body tbody td { width: auto !important; text-align: left; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .list-body tbody td:last-child { border-bottom: none; }
+    /* Libellé de colonne DEVANT la valeur : petit label capitales, esprit console conservé (mono). */
+    .list-body tbody td[data-label]::before {
+      content: attr(data-label);
+      display: block; margin-bottom: 3px;
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dim);
+    }
+    /* Colonne NUMÉRIQUE : libellé et valeur sur la MÊME ligne (label à gauche, valeur à droite) — lecture compacte. */
+    .list-body tbody td.cell-num { display: flex; align-items: baseline; justify-content: space-between; text-align: right; }
+    .list-body tbody td.cell-num[data-label]::before { margin-bottom: 0; }
+    /* Cellule d'ACTIONS : rangée de boutons alignée à droite, SANS libellé (aucun data-label). */
+    .list-body tbody td.cell-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; padding-top: 10px; }
+    /* Ligne vide : reste une carte simple centrée (aucun data-label → pas de ::before). */
+    .list-body tbody tr.empty-row td { text-align: center; border-bottom: none; }
+  }

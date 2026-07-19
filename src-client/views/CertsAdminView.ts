@@ -6,6 +6,7 @@ import { SearchPop, type SearchPopResult } from "../ui/SearchPop";
 import { FormControls, type SelectOption } from "../ui/FormControls";
 import { type MultiItem } from "../ui/MultiSelect";
 import { FilterBar } from "../ui/FilterBar";
+import { CardTable } from "../ui/CardTable";
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from "../data/config";
 import { Notify } from "../ui/Notify";
 import { Clipboard } from "../ui/Clipboard";
@@ -531,9 +532,10 @@ export class CertsAdminView {
       this.sortableTh(I18n.t("certs.admin.listing.colDerived"), "children_total", st, "cell-num"), this.plainTh(I18n.t("certs.admin.listing.colAlert"), "cell-num"), this.plainTh(I18n.t("lists.chrome.actions"), "cell-actions"),
     );
     thead.appendChild(tr);
+    const labels = CardTable.columnLabels(tr);   // repli en cartes (< 560px) : libellés lus depuis l'en-tête
     const tbody = document.createElement("tbody");
     if (!this.rootItems.length) tbody.appendChild(this.emptyRow(9));
-    else for (const item of this.rootItems) tbody.appendChild(this.buildRootRow(item));
+    else for (const item of this.rootItems) { const row = this.buildRootRow(item); CardTable.labelCells(row, labels); tbody.appendChild(row); }
     table.append(thead, tbody);
     tw.appendChild(table);
     return tw;
@@ -588,9 +590,10 @@ export class CertsAdminView {
       this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")), this.plainTh(I18n.t("lists.chrome.actions"), "cell-actions"),
     );
     thead.appendChild(tr);
+    const labels = CardTable.columnLabels(tr);   // repli en cartes (< 560px) : libellés lus depuis l'en-tête
     const tbody = document.createElement("tbody");
     if (!this.certItems.length) tbody.appendChild(this.emptyRow(8));
-    else for (const item of this.certItems) tbody.appendChild(this.buildCertRow(item));
+    else for (const item of this.certItems) { const row = this.buildCertRow(item); CardTable.labelCells(row, labels); tbody.appendChild(row); }
     table.append(thead, tbody);
     tw.appendChild(table);
     return tw;
