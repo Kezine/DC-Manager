@@ -530,6 +530,14 @@ module.exports = async () => {
     ck.eq(Color.cssToHex("#f80"), 0xff8800, "Color.cssToHex(#rgb → étendu)");
     ck.eq(Color.cssToHex("rgb(255, 136, 0)"), 0xff8800, "Color.cssToHex(rgb(...))");
     ck.eq(Number.isNaN(Color.cssToHex("bleu")), true, "Color.cssToHex(inconnu) → NaN");
+    // oklch : conversion PURE OKLCH→sRGB (tokens du thème depuis la revue design). Références :
+    // blanc/noir exacts, rouge sRGB (couple OKLCH connu), et l'accent du thème = ORANGE (pas le repli bleu 3D).
+    ck.eq(Color.cssToHex("oklch(1 0 0)"), 0xffffff, "Color.cssToHex(oklch blanc) → #ffffff");
+    ck.eq(Color.cssToHex("oklch(0 0 0)"), 0x000000, "Color.cssToHex(oklch noir) → #000000");
+    ck.eq(Color.cssToHex("oklch(0.6279554 0.2576833 29.2338851)"), 0xff0000, "Color.cssToHex(oklch rouge sRGB) → #ff0000");
+    const accent = Color.cssToHex("oklch(0.72 0.175 50)");
+    ck(isFinite(accent), "Color.cssToHex(oklch accent) → fini (plus de repli bleu du thème 3D)");
+    ck(((accent >> 16) & 255) > ((accent >> 8) & 255) && ((accent >> 8) & 255) > (accent & 255), "Color.cssToHex(oklch accent) → dominante ORANGE (R > V > B)");
     ck.eq(Color.contrastText("#ffffff"), "#000", "contrastText(blanc) → #000");
     ck.eq(Color.contrastText("#000000"), "#fff", "contrastText(noir) → #fff");
     ck.eq(Format.meters(1234), "1.23 m", "Format.meters(1234)");
