@@ -93,6 +93,12 @@ function applyTheme(theme: string): void {
 function applyUiScale(scale: number): void {
   document.documentElement.style.setProperty("--ui-scale", String(scale || 1));
 }
+/** Active/désactive les modales PLEIN ÉCRAN en desktop via `data-modal-fs` sur <html> (même pattern que le thème,
+    CSS seul — pas de resize JS). Sous le breakpoint responsive, le plein écran s'applique de toute façon (règle miroir). */
+function applyModalFullscreen(on: boolean): void {
+  if (on) document.documentElement.setAttribute("data-modal-fs", "");
+  else document.documentElement.removeAttribute("data-modal-fs");
+}
 
 async function boot(): Promise<void> {
   // LOCALISATION : à initialiser AVANT toute construction d'UI (Shell, onglets…) — sinon `I18n.t()` jette. La
@@ -105,6 +111,7 @@ async function boot(): Promise<void> {
   if (!store.restored && !REST_MODE && !VIEWER) await store.newDocument();
   applyTheme(prefs.theme);
   applyUiScale(prefs.uiScale);   // échelle d'interface persistée (taille du texte)
+  applyModalFullscreen(prefs.modalFullscreen);   // préférence « modales plein écran » (desktop) — attribut posé AVANT toute ouverture
 
   const root = document.getElementById("app");
   if (!root) return;
@@ -256,6 +263,7 @@ async function boot(): Promise<void> {
     onRedo: () => { void doRedo(); },
     onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); dcView.onThemeChanged(); },
     onUiScale: (value) => { prefs.uiScale = value; applyUiScale(prefs.uiScale); shell.setUiScale(prefs.uiScale); },
+    onModalFullscreen: (on) => { prefs.modalFullscreen = on; applyModalFullscreen(prefs.modalFullscreen); shell.setModalFullscreen(prefs.modalFullscreen); },   // une modale DÉJÀ ouverte s'adapte par le CSS seul
     onAutocompleteMax: (value) => { prefs.autocompleteMaxResults = value; shell.setAutocompleteMax(prefs.autocompleteMaxResults); },
     onPurgeImages: () => { void purgeUnusedImages(); },
     onResetViewPrefs: () => {
@@ -810,6 +818,7 @@ async function boot(): Promise<void> {
   shell.setFileAccessMode(prefs.fileAccessMode);
   shell.setDebugLog(prefs.debugLog); Log.setEnabled(prefs.debugLog);
   shell.setUiScale(prefs.uiScale);
+  shell.setModalFullscreen(prefs.modalFullscreen);
   shell.setAutocompleteMax(prefs.autocompleteMaxResults);
   shell.setRestMode(REST_MODE);   // mode API : masque les contrôles fichier
   // (l'auth SSO + la pastille utilisateur sont gérées par restBootstrap, au boot)

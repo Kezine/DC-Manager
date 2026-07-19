@@ -51,6 +51,8 @@ export const shell = {
     scaleEnlarged: "Enlarged (110%)",
     suggestionsMax: "Max suggestions",
     suggestionsMaxTitle: "Maximum number of values offered in form autocompletion (absolute cap: {{max}}).",
+    modalFs: "Full-screen modals",
+    modalFsNote: "Stretches modals across the whole screen. Desktop effect; on small screens modals are always full-screen.",
     language: "Langue / Language",
     languageNote: "Auto follows the browser language (fallback: French). Changing the language reloads the app.",
     langAuto: "Auto (browser)",

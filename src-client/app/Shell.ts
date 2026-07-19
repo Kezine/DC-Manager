@@ -46,6 +46,8 @@ export interface ShellHost {
   onToggleTheme?(): void; onResetViewPrefs?(): void;
   /** Changement d'échelle d'interface (zoom global, taille du texte). */
   onUiScale?(value: number): void;
+  /** Bascule « modales en plein écran » (préférence desktop ; toujours actif sous le breakpoint responsive). */
+  onModalFullscreen?(on: boolean): void;
   /** Changement du nombre max de suggestions d'autocomplétion des formulaires. */
   onAutocompleteMax?(value: number): void;
   /** Nettoyage des images de façade NON UTILISÉES (purge bibliothèque ; mode API : + compactage serveur). */
@@ -122,6 +124,7 @@ export class Shell {
   private fileAccessSel!: HTMLSelectElement;
   private debugLogChk!: HTMLInputElement;
   private uiScaleSel!: HTMLSelectElement;          // échelle d'interface (taille du texte)
+  private modalFsChk!: HTMLInputElement;           // bascule « modales en plein écran » (préférence desktop)
   private acMaxSel!: HTMLSelectElement;            // nb max de suggestions d'autocomplétion (formulaires)
   private newBtn!: HTMLButtonElement;             // « Nouveau » (fichier ou document serveur)
   private openBtn!: HTMLButtonElement;            // « Ouvrir » (fichier ou sélecteur de documents)
@@ -302,6 +305,15 @@ export class Shell {
     FieldFacet.MAX_RESULTS_OPTIONS.forEach((n) => { const op = document.createElement("option"); op.value = String(n); op.textContent = String(n); this.acMaxSel.appendChild(op); });
     this.acMaxSel.onchange = () => this.host.onAutocompleteMax?.(parseInt(this.acMaxSel.value, 10));
     acRow.append(acLbl, this.acMaxSel); app.appendChild(acRow);
+    // -- Modales en plein écran (préférence DESKTOP) : bascule maison (checkbox thématisée, cf. auto-save/débogage).
+    //    Toujours actif sous le breakpoint responsive (CSS seul) ; ici on ne pilote QUE l'effet desktop (attribut data-modal-fs). --
+    const mfsRow = document.createElement("div"); mfsRow.className = "settings-toggle-row"; mfsRow.style.marginTop = "10px";
+    const mfsLabel = document.createElement("label"); mfsLabel.className = "settings-toggle";
+    this.modalFsChk = document.createElement("input"); this.modalFsChk.type = "checkbox";
+    this.modalFsChk.onchange = () => this.host.onModalFullscreen?.(this.modalFsChk.checked);
+    mfsLabel.append(this.modalFsChk, document.createTextNode(I18n.t("shell.settings.modalFs")));
+    mfsRow.appendChild(mfsLabel); app.appendChild(mfsRow);
+    const mfsNote = document.createElement("div"); mfsNote.className = "settings-row-note"; mfsNote.textContent = I18n.t("shell.settings.modalFsNote"); app.appendChild(mfsNote);
     // -- Langue / Language : préférence de LOCALISATION (auto = langue du navigateur ; repli français). Le TITRE de
     //    section reste BILINGUE (seul repli pour retrouver le sélecteur quelle que soit la langue active) ; le reste
     //    du panneau est localisé. Une bascule PERSISTE la préférence puis RECHARGE l'app (cf. I18n.setPreference / docs/i18n.md). --
@@ -685,6 +697,8 @@ export class Shell {
   setDebugLog(on: boolean): void { this.debugLogChk.checked = on; }
   /** Reflète l'échelle d'interface dans le sélecteur des réglages (sans déclencher onUiScale). */
   setUiScale(v: number): void { if (this.uiScaleSel) this.uiScaleSel.value = String(v); }
+  /** Reflète la préférence « modales en plein écran » dans la bascule des réglages (sans déclencher onModalFullscreen). */
+  setModalFullscreen(on: boolean): void { if (this.modalFsChk) this.modalFsChk.checked = on; }
   /** Reflète le nb max de suggestions d'autocomplétion dans le sélecteur des réglages. */
   setAutocompleteMax(v: number): void { if (this.acMaxSel) this.acMaxSel.value = String(FieldFacet.clampLimit(v)); }
   /** Pastille utilisateur (mode API). `user` = objet SSO (login/nom/prénom/eMail…) ; null = non connecté ; undefined = masquer. */

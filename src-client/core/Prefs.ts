@@ -9,7 +9,7 @@ import { FieldFacet } from "./FieldFacet";
 export type ThemeName = "dark" | "light";
 export type DataSource = "local" | "api";
 export type FileAccessMode = "file" | "directory";   // accès FS : 1 autorisation par fichier · 1 autorisation pour le dossier
-export interface AppPrefs { theme: ThemeName; autosave: boolean; autosaveInterval: number; dataSource: DataSource; dataSourceUserSet: boolean; apiBaseUrl: string; loginUrl: string; fileAccessMode: FileAccessMode; debugLog: boolean; uiScale: number; autocompleteMaxResults: number; lastRestDocId: string; }
+export interface AppPrefs { theme: ThemeName; autosave: boolean; autosaveInterval: number; dataSource: DataSource; dataSourceUserSet: boolean; apiBaseUrl: string; loginUrl: string; fileAccessMode: FileAccessMode; debugLog: boolean; uiScale: number; autocompleteMaxResults: number; modalFullscreen: boolean; lastRestDocId: string; }
 
 export class Prefs {
   static readonly KEY = "dcmanager.prefs";
@@ -28,7 +28,7 @@ export class Prefs {
     { value: 1.1, labelKey: "shell.settings.scaleEnlarged" },
   ];
 
-  private data: AppPrefs = { theme: "dark", autosave: false, autosaveInterval: Prefs.INTERVAL_DEFAULT, dataSource: "local", dataSourceUserSet: false, apiBaseUrl: "", loginUrl: "", fileAccessMode: "file", debugLog: false, uiScale: Prefs.UI_SCALE_DEFAULT, autocompleteMaxResults: FieldFacet.MAX_RESULTS_DEFAULT, lastRestDocId: "" };
+  private data: AppPrefs = { theme: "dark", autosave: false, autosaveInterval: Prefs.INTERVAL_DEFAULT, dataSource: "local", dataSourceUserSet: false, apiBaseUrl: "", loginUrl: "", fileAccessMode: "file", debugLog: false, uiScale: Prefs.UI_SCALE_DEFAULT, autocompleteMaxResults: FieldFacet.MAX_RESULTS_DEFAULT, modalFullscreen: false, lastRestDocId: "" };
 
   constructor() { this.load(); }
 
@@ -47,6 +47,7 @@ export class Prefs {
       this.data.debugLog = !!p.debugLog;
       if (typeof p.uiScale === "number" && p.uiScale >= 0.5 && p.uiScale <= 2) this.data.uiScale = p.uiScale;
       if (p.autocompleteMaxResults != null) this.data.autocompleteMaxResults = FieldFacet.clampLimit(p.autocompleteMaxResults);
+      this.data.modalFullscreen = !!p.modalFullscreen;
       if (typeof p.lastRestDocId === "string") this.data.lastRestDocId = p.lastRestDocId;
     } catch (e) { console.warn("Prefs.load a échoué", e); }
   }
@@ -75,6 +76,10 @@ export class Prefs {
   // Nb MAX de suggestions d'autocomplétion (Marque/Modèle/Nom/Personne…). Plafonné à 100 (FieldFacet.MAX_RESULTS_ABS).
   get autocompleteMaxResults(): number { return this.data.autocompleteMaxResults; }
   set autocompleteMaxResults(v: number) { this.data.autocompleteMaxResults = FieldFacet.clampLimit(v); this.save(); }
+  // Modales en PLEIN ÉCRAN sur DESKTOP (défaut false) — pilote l'attribut `data-modal-fs` sur <html> (cf. main.applyModalFullscreen).
+  // NB : le plein écran est TOUJOURS appliqué sous le breakpoint responsive (CSS seul), quelle que soit cette préférence.
+  get modalFullscreen(): boolean { return this.data.modalFullscreen; }
+  set modalFullscreen(v: boolean) { this.data.modalFullscreen = !!v; this.save(); }
   // DERNIER document serveur OUVERT (mode API) — mémorisé par navigateur pour le rouvrir au prochain lancement.
   // "" = aucun (le boot retombe alors sur le doc par défaut global, puis sur le plus récent). Cf. restBootstrap.
   get lastRestDocId(): string { return this.data.lastRestDocId; }

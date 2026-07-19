@@ -1369,6 +1369,23 @@
     flex: 0 0 auto;
   }
 
+  /* ============ MODALE PLEIN ÉCRAN — préférence DESKTOP (Réglages ▸ Apparence) ============
+     Quand l'utilisateur active « Modales en plein écran », `data-modal-fs` est posé sur <html>
+     (au boot ET en direct, cf. main.ts applyModalFullscreen). La boîte occupe alors TOUT l'écran :
+     overlay sans padding, largeur/hauteur 100 % (dvh dynamique → le pied reste visible clavier
+     virtuel ouvert), max-width/max-height levés, bordure et coins supprimés. La STRUCTURE interne
+     (en-tête/pied fixes en `flex:0 0 auto`, corps défilable en `flex:1 1 auto; overflow-y:auto`)
+     est inchangée. MIROIR EXACT du bloc `@media (max-width: 760px)` plus bas (petite duplication
+     ASSUMÉE : deux déclencheurs INDÉPENDANTS — préférence desktop OU petit écran — sans resize JS ;
+     garder les deux synchronisés). PÉRIMÈTRE = la Modal SEULE : les DIALOGUES (`.dialog-*`, confirm/
+     alert) restent centrés et compacts (un confirm étiré plein écran serait absurde). */
+  html[data-modal-fs] .modal-overlay { padding: 0; }
+  html[data-modal-fs] .modal {
+    width: 100%; max-width: none;
+    height: 100vh; height: 100dvh; max-height: none;
+    border: none; border-radius: 0;
+  }
+
   /* read-only detail rows */
   .detail-grid { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; font-size: 12px; }
   .detail-grid .dt { color: var(--fg-dim); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; padding-top: 2px; }
@@ -2210,6 +2227,18 @@
     .tabs { display: none; }
     .tab-group { display: none; }
     .tabs-dd { display: flex; }
+    /* MODALE PLEIN ÉCRAN, SYSTÉMATIQUE sous le breakpoint de bascule des onglets : sur petit écran une
+       modale « flottante » à marges gâche l'espace utile → elle occupe TOUT l'écran. MIROIR EXACT du bloc
+       `html[data-modal-fs]` (préférence desktop) près des règles `.modal` — garder les deux synchronisés.
+       On lève aussi la contrainte de `.modal.wide` (max-width 920px). La structure interne (en-tête/pied
+       fixes, corps défilable en dvh) est intacte → pas de double barre, pied visible clavier ouvert. Les
+       DIALOGUES (`.dialog-*`) restent CENTRÉS (périmètre = Modal seule). */
+    .modal-overlay { padding: 0; }
+    .modal, .modal.wide {
+      width: 100%; max-width: none;
+      height: 100vh; height: 100dvh; max-height: none;
+      border: none; border-radius: 0;
+    }
   }
 
   /* ============ FORMULAIRES EN MODALE — passage 1 COLONNE (< 640px) ============

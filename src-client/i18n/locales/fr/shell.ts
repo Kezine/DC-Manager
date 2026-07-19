@@ -56,6 +56,8 @@ export const shell = {
     scaleEnlarged: "Agrandi (110 %)",
     suggestionsMax: "Suggestions max",
     suggestionsMaxTitle: "Nombre maximum de valeurs proposées en autocomplétion dans les formulaires (plafond absolu : {{max}}).",
+    modalFs: "Modales en plein écran",
+    modalFsNote: "Étire les modales sur tout l'écran. Effet en mode bureau ; sur petit écran, les modales sont toujours en plein écran.",
     language: "Langue / Language",
     languageNote: "Auto suit la langue du navigateur (repli : français). Changer de langue recharge l'application.",
     langAuto: "Auto (navigateur)",
