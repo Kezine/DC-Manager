@@ -1,4 +1,4 @@
-<!-- @dsCard group="Modales" name="Cérémonie de suppression (DeleteGuard)" subtitle="dialogue danger : avertissement + phrase à recopier + champ de saisie + bouton danger (désactivé puis actif)" -->
+<!-- @dsCard group="Modales" name="Cérémonie de suppression (DeleteGuard)" subtitle="dialogue danger : avertissement + phrase NOMMANT la cible à recopier + champ de saisie + bouton danger (désactivé puis actif)" -->
 <!doctype html>
 <html lang="fr">
 <head>
@@ -189,6 +189,17 @@
   /* Anneau de focus CLAVIER uniquement (:focus-visible, jamais :focus → le focus SOURIS reste inchangé).
      Règle GLOBALE : tout élément interactif dépourvu d'indicateur de focus propre reçoit un anneau visible. */
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  /* Champs TEXTE : anneau réintroduit en version DISCRÈTE (1px, offset 1 — arbitrage utilisateur 2026-07-19),
+     en COMPLÉMENT de leur bordure accent de :focus. Particularité assumée : sur un input texte, les
+     navigateurs déclenchent :focus-visible AUSSI au clic (saisie clavier anticipée) → l'anneau apparaît à
+     la souris sur CES champs uniquement — c'est le compromis choisi pour que le focus clavier y soit aussi
+     net que sur les boutons. La spécificité de :focus-visible surclasse les `outline: none` de leurs règles
+     de base (conservés : ils neutralisent l'outline NATIF par défaut des navigateurs). */
+  .doc-name:focus-visible, .search-input:focus-visible, .sub-input:focus-visible,
+  .chips-input input:focus-visible,
+  .form-field input:focus-visible, .form-field textarea:focus-visible, .form-field select:focus-visible {
+    outline: 1px solid var(--focus); outline-offset: 1px;
+  }
 
   /* Préférence système « animations réduites » : on neutralise transitions et animations (durée quasi nulle)
      pour les personnes sensibles au mouvement — coupe pulsations, glissements de modale, spinners agités.
@@ -663,6 +674,14 @@
   }
   .loc-pill svg { width: 13px; height: 13px; flex: none; }
   .loc-tag { margin-left: 8px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-dim); }
+  /* Pastille DISCRÈTE « Coffre verrouillé » à côté d'une entrée d'export exigeant la clé privée
+     (CertsAdminView.exportModal) : double VISUELLEMENT le tooltip d'indisponibilité (teinte --warn). */
+  .lock-tag {
+    display: inline-flex; align-items: center;
+    padding: 1px 7px; border-radius: var(--radius-pill);
+    border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent);
+    color: var(--warn); font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; flex: none;
+  }
   .pill.role-mgmt { border-color: var(--role-mgmt); color: var(--role-mgmt); }
   .pill.role-data { border-color: var(--role-data); color: var(--role-data); }
   .pill.role-power { border-color: var(--role-power); color: var(--role-power); }
@@ -2195,6 +2214,16 @@
     .tabs-dd { display: flex; }
   }
 
+  /* ============ FORMULAIRES EN MODALE — passage 1 COLONNE (< 640px) ============
+     Sous ~640px, une rangée `.form-row` (deux champs côte à côte) devient illisible : on l'EMPILE en
+     une seule colonne (chaque `.form-field` garde son `margin-bottom`, d'où `gap:0`). Le pied de modale
+     reste VISIBLE quand le clavier virtuel pousse : `.modal` est un flex vertical borné en `dvh`, le
+     `.modal-body` défile seul (`flex:1 1 auto; overflow-y:auto`) tandis que `.modal-footer` est fixe
+     (`flex:0 0 auto`) — structure déjà en place (cf. bloc modale), non modifiée ici. */
+  @media (max-width: 640px) {
+    .form-row { flex-direction: column; gap: 0; }
+  }
+
   /* ============ RESPONSIVE — VUE DATACENTER (3D) ============
      Déclenché sous ~860px de large OU dès que l'affichage est PLUS HAUT QUE LARGE (orientation portrait) : dans ces
      cas le panneau lateral (420px) etoufferait la scene. Le bandeau de controles reste en haut (defilable) ; l'icone
@@ -2331,32 +2360,34 @@
   <header class="ds-card-head">
     <div class="ds-card-group">Modales</div>
     <div class="ds-card-title">Cérémonie de suppression (DeleteGuard)</div>
-    <div class="ds-card-sub">dialogue danger : avertissement + phrase à recopier + champ de saisie + bouton danger (désactivé puis actif)</div>
+    <div class="ds-card-sub">dialogue danger : avertissement + phrase NOMMANT la cible à recopier + champ de saisie + bouton danger (désactivé puis actif)</div>
   </header>
 <!-- DÉRIVÉ de src-client/views/CertsAdminView.ts (confirmDelete → Dialog.custom variant danger) et de
-     la logique PURE src-client/certs/DeleteGuard.ts (cérémonie PROPORTIONNÉE : phrase « Oui je supprime »
-     pour un lot). Corps construit dans .dialog-body : message (.form-hint), avertissement « ENCORE VALIDE »
-     (rouge, gras), rangée .form-field (label = confirm.phraseLabel, .form-hint = la phrase EXACTE à recopier
-     = cer.expected, input texte). Pied Annuler + Supprimer (danger).
+     la logique PURE src-client/certs/DeleteGuard.ts (cérémonie PROPORTIONNÉE). Pour un certificat unique
+     ENCORE VALIDE, la phrase à recopier NOMME la cible : « Oui je supprime <label> » (clé certs.guard.
+     phraseNamed, ceremony → type-name). Corps construit dans .dialog-body : message (.form-hint),
+     avertissement « ENCORE VALIDE » (rouge, gras), rangée .form-field (label = confirm.nameLabel, .form-hint
+     = la phrase EXACTE à recopier = cer.expected, input texte). Le champ BLOQUE le collage (paste →
+     preventDefault) : la recopie doit être manuelle. Pied Annuler + Supprimer (danger).
      APERÇU STATIQUE — DEUX états côte à côte. NB : dans l'app, la validation se fait AU CLIC (le bouton
      reste cliquable et un refus s'affiche si la phrase ne correspond pas) ; ici le bouton est figé
      « désactivé » puis « actif » pour matérialiser le gating de la cérémonie. -->
 <section class="ds-section">
   <h2>Cérémonie de suppression — deux états</h2>
-  <p class="ds-note">Suppression d'un LOT de certificats : au moins un est encore valide, donc la cérémonie exige de recopier une PHRASE (assez longue pour ne pas la taper par réflexe). La même clé sert d'invite affichée ET de référence de comparaison — impossible de diverger.</p>
+  <p class="ds-note">Suppression d'UN certificat encore valide : la cérémonie exige de recopier une phrase qui NOMME la cible (« Oui je supprime core-sw-01 ») — assez longue et explicite pour ne pas la taper par réflexe, et pour viser CE certificat sans ambiguïté. La même clé sert d'invite affichée ET de référence de comparaison — impossible de diverger. Le champ refuse le collage.</p>
   <div class="ds-row" style="align-items:flex-start;gap:18px;">
 
     <div class="dialog-box" style="margin:0;">
       <div class="dialog-header">
         <span class="dialog-icon variant-danger">⚠</span>
-        <div class="dialog-title">Supprimer 3 certificats ?</div>
+        <div class="dialog-title">Supprimer définitivement ?</div>
       </div>
       <div class="dialog-body">
-        <div class="form-hint" style="margin-bottom:10px">Les certificats sélectionnés (clés privées chiffrées + métadonnées) seront EFFACÉS du serveur (irréversible).</div>
-        <div style="margin-bottom:10px;color:var(--err);font-weight:600">⚠ 2 de ces certificats sont ENCORE VALIDES — ce qui en dépend cessera de fonctionner.</div>
+        <div class="form-hint" style="margin-bottom:10px">Supprimer « core-sw-01 » ? La clé privée chiffrée et les métadonnées seront EFFACÉES du serveur (irréversible).</div>
+        <div style="margin-bottom:10px;color:var(--err);font-weight:600">⚠ Ce certificat est ENCORE VALIDE — ce qui en dépend cessera de fonctionner.</div>
         <div class="form-field" style="margin:0">
-          <label>Pour confirmer, saisissez la phrase exacte</label>
-          <div class="form-hint" style="margin:0 0 6px">Oui je supprime</div>
+          <label>Pour confirmer, recopiez la phrase (elle nomme le certificat)</label>
+          <div class="form-hint" style="margin:0 0 6px">Oui je supprime core-sw-01</div>
           <input type="text" autocomplete="off" spellcheck="false" value="">
         </div>
       </div>
@@ -2369,15 +2400,15 @@
     <div class="dialog-box" style="margin:0;">
       <div class="dialog-header">
         <span class="dialog-icon variant-danger">⚠</span>
-        <div class="dialog-title">Supprimer 3 certificats ?</div>
+        <div class="dialog-title">Supprimer définitivement ?</div>
       </div>
       <div class="dialog-body">
-        <div class="form-hint" style="margin-bottom:10px">Les certificats sélectionnés (clés privées chiffrées + métadonnées) seront EFFACÉS du serveur (irréversible).</div>
-        <div style="margin-bottom:10px;color:var(--err);font-weight:600">⚠ 2 de ces certificats sont ENCORE VALIDES — ce qui en dépend cessera de fonctionner.</div>
+        <div class="form-hint" style="margin-bottom:10px">Supprimer « core-sw-01 » ? La clé privée chiffrée et les métadonnées seront EFFACÉES du serveur (irréversible).</div>
+        <div style="margin-bottom:10px;color:var(--err);font-weight:600">⚠ Ce certificat est ENCORE VALIDE — ce qui en dépend cessera de fonctionner.</div>
         <div class="form-field" style="margin:0">
-          <label>Pour confirmer, saisissez la phrase exacte</label>
-          <div class="form-hint" style="margin:0 0 6px">Oui je supprime</div>
-          <input type="text" autocomplete="off" spellcheck="false" value="Oui je supprime">
+          <label>Pour confirmer, recopiez la phrase (elle nomme le certificat)</label>
+          <div class="form-hint" style="margin:0 0 6px">Oui je supprime core-sw-01</div>
+          <input type="text" autocomplete="off" spellcheck="false" value="Oui je supprime core-sw-01">
         </div>
       </div>
       <div class="dialog-footer">
@@ -2387,7 +2418,7 @@
     </div>
 
   </div>
-  <p class="ds-note">À gauche : phrase non saisie → suppression bloquée. À droite : phrase exacte recopiée → suppression autorisée. La comparaison est stricte (la casse compte) après <code>trim</code> ; la saisie ne fait que matérialiser l'intention que le serveur exigera ensuite via <code>?force=true</code>.</p>
+  <p class="ds-note">À gauche : phrase non saisie → suppression bloquée. À droite : phrase exacte recopiée → suppression autorisée. La comparaison est stricte (la casse compte) après <code>trim</code> ; la saisie ne fait que matérialiser l'intention que le serveur exigera ensuite via <code>?force=true</code>. Pour un LOT de certificats, la phrase de base « Oui je supprime » suffit (pas de cible unique à nommer).</p>
 </section>
 
 </div>

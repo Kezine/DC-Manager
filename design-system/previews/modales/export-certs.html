@@ -1,4 +1,4 @@
-<!-- @dsCard group="Modales" name="Export de certificat" subtitle="modale hideFooter : liste d'artefacts, entrées « Clé privée » et « PKCS#12 » grisées (coffre verrouillé)" -->
+<!-- @dsCard group="Modales" name="Export de certificat" subtitle="modale hideFooter : liste d'artefacts ; entrées exigeant la clé privée aria-disabled + pastille « Coffre verrouillé » + bouton « Déverrouiller le coffre »" -->
 <!doctype html>
 <html lang="fr">
 <head>
@@ -189,6 +189,17 @@
   /* Anneau de focus CLAVIER uniquement (:focus-visible, jamais :focus → le focus SOURIS reste inchangé).
      Règle GLOBALE : tout élément interactif dépourvu d'indicateur de focus propre reçoit un anneau visible. */
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  /* Champs TEXTE : anneau réintroduit en version DISCRÈTE (1px, offset 1 — arbitrage utilisateur 2026-07-19),
+     en COMPLÉMENT de leur bordure accent de :focus. Particularité assumée : sur un input texte, les
+     navigateurs déclenchent :focus-visible AUSSI au clic (saisie clavier anticipée) → l'anneau apparaît à
+     la souris sur CES champs uniquement — c'est le compromis choisi pour que le focus clavier y soit aussi
+     net que sur les boutons. La spécificité de :focus-visible surclasse les `outline: none` de leurs règles
+     de base (conservés : ils neutralisent l'outline NATIF par défaut des navigateurs). */
+  .doc-name:focus-visible, .search-input:focus-visible, .sub-input:focus-visible,
+  .chips-input input:focus-visible,
+  .form-field input:focus-visible, .form-field textarea:focus-visible, .form-field select:focus-visible {
+    outline: 1px solid var(--focus); outline-offset: 1px;
+  }
 
   /* Préférence système « animations réduites » : on neutralise transitions et animations (durée quasi nulle)
      pour les personnes sensibles au mouvement — coupe pulsations, glissements de modale, spinners agités.
@@ -663,6 +674,14 @@
   }
   .loc-pill svg { width: 13px; height: 13px; flex: none; }
   .loc-tag { margin-left: 8px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-dim); }
+  /* Pastille DISCRÈTE « Coffre verrouillé » à côté d'une entrée d'export exigeant la clé privée
+     (CertsAdminView.exportModal) : double VISUELLEMENT le tooltip d'indisponibilité (teinte --warn). */
+  .lock-tag {
+    display: inline-flex; align-items: center;
+    padding: 1px 7px; border-radius: var(--radius-pill);
+    border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent);
+    color: var(--warn); font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; flex: none;
+  }
   .pill.role-mgmt { border-color: var(--role-mgmt); color: var(--role-mgmt); }
   .pill.role-data { border-color: var(--role-data); color: var(--role-data); }
   .pill.role-power { border-color: var(--role-power); color: var(--role-power); }
@@ -2195,6 +2214,16 @@
     .tabs-dd { display: flex; }
   }
 
+  /* ============ FORMULAIRES EN MODALE — passage 1 COLONNE (< 640px) ============
+     Sous ~640px, une rangée `.form-row` (deux champs côte à côte) devient illisible : on l'EMPILE en
+     une seule colonne (chaque `.form-field` garde son `margin-bottom`, d'où `gap:0`). Le pied de modale
+     reste VISIBLE quand le clavier virtuel pousse : `.modal` est un flex vertical borné en `dvh`, le
+     `.modal-body` défile seul (`flex:1 1 auto; overflow-y:auto`) tandis que `.modal-footer` est fixe
+     (`flex:0 0 auto`) — structure déjà en place (cf. bloc modale), non modifiée ici. */
+  @media (max-width: 640px) {
+    .form-row { flex-direction: column; gap: 0; }
+  }
+
   /* ============ RESPONSIVE — VUE DATACENTER (3D) ============
      Déclenché sous ~860px de large OU dès que l'affichage est PLUS HAUT QUE LARGE (orientation portrait) : dans ces
      cas le panneau lateral (420px) etoufferait la scene. Le bandeau de controles reste en haut (defilable) ; l'icone
@@ -2331,17 +2360,20 @@
   <header class="ds-card-head">
     <div class="ds-card-group">Modales</div>
     <div class="ds-card-title">Export de certificat</div>
-    <div class="ds-card-sub">modale hideFooter : liste d'artefacts, entrées « Clé privée » et « PKCS#12 » grisées (coffre verrouillé)</div>
+    <div class="ds-card-sub">modale hideFooter : liste d'artefacts ; entrées exigeant la clé privée aria-disabled + pastille « Coffre verrouillé » + bouton « Déverrouiller le coffre »</div>
   </header>
 <!-- DÉRIVÉ de src-client/views/CertsAdminView.ts (exportModal) : intro .form-hint, liste verticale de
      boutons .btn.btn-ghost.btn-sm (text-align:left) — un par artefact. Les artefacts qui EXIGENT la clé
-     privée sont DÉSACTIVÉS (disabled) quand la session est verrouillée, avec l'explication en tooltip
-     (certs.admin.export.lockedHint). Libellés = catalogue certs (export.*). La fiche s'ouvre en Modal
-     hideFooter (téléchargement = clic sur un artefact, pas de pied Enregistrer/Annuler).
+     privée sont INERTES quand la session est verrouillée : `aria-disabled="true"` (et NON `disabled`, pour
+     rester découvrables au clavier), clic neutralisé par une garde, tooltip (certs.admin.export.lockedHint)
+     DOUBLÉ d'une pastille visible « Coffre verrouillé » (.lock-tag, certs.admin.export.lockedTag). En bas,
+     un bouton « Déverrouiller le coffre… » ferme la modale et renvoie au flux de déverrouillage existant.
+     Libellés = catalogue certs (export.*). La fiche s'ouvre en Modal hideFooter (téléchargement = clic sur
+     un artefact, pas de pied Enregistrer/Annuler).
      APERÇU STATIQUE : la modale est sortie de son overlay plein écran ; l'état « coffre verrouillé » est figé. -->
 <section class="ds-section">
   <h2>Modale d'export unitaire (certificats)</h2>
-  <p class="ds-note">Télécharge les artefacts d'un certificat. La liste s'adapte au type d'objet ; les artefacts contenant une clé privée ne sont proposés que si le coffre est déverrouillé. Ici la session est VERROUILLÉE : « Clé privée » et « PKCS#12 » sont grisés (état figé pour l'aperçu).</p>
+  <p class="ds-note">Télécharge les artefacts d'un certificat. La liste s'adapte au type d'objet ; les artefacts contenant une clé privée ne sont proposés que si le coffre est déverrouillé. Ici la session est VERROUILLÉE : « Clé privée » et « PKCS#12 » sont grisés, chacun flanqué d'une pastille « Coffre verrouillé » (état figé pour l'aperçu).</p>
   <div class="ds-demo">
     <div class="modal" style="margin:0 auto;">
       <div class="modal-header">
@@ -2358,13 +2390,20 @@
           <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Certificat public (.pem)</button>
           <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Chaîne complète (fullchain.pem)</button>
           <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Chaîne d'autorité (ca-chain.pem)</button>
-          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left" disabled title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Clé privée (.key.pem)</button>
-          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left" disabled title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Paquet PKCS#12 (.p12)…</button>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button type="button" class="btn btn-ghost btn-sm" style="text-align:left" aria-disabled="true" title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Clé privée (.key.pem)</button>
+            <span class="lock-tag" title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Coffre verrouillé</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button type="button" class="btn btn-ghost btn-sm" style="text-align:left" aria-disabled="true" title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Paquet PKCS#12 (.p12)…</button>
+            <span class="lock-tag" title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Coffre verrouillé</span>
+          </div>
         </div>
+        <button type="button" class="btn btn-ghost btn-sm" style="margin-top:12px" title="Fermer cette fenêtre et revenir à la saisie de la phrase pour déverrouiller le coffre.">Déverrouiller le coffre…</button>
       </div>
     </div>
   </div>
-  <p class="ds-note">Les deux dernières entrées sont <code>disabled</code> (grisées, non cliquables) avec le tooltip « Coffre verrouillé… » — pas cachées, pas d'erreur au clic : déverrouiller la session les réactive et le libellé « Tout (ZIP) » repasse à « cert + clé privée ».</p>
+  <p class="ds-note">Les deux entrées exigeant la clé privée sont <code>aria-disabled="true"</code> (grisées, clic inerte, mais focusables au clavier) — pas cachées, pas d'erreur au clic —, avec la pastille <code>.lock-tag</code> « Coffre verrouillé » en plus du tooltip. Le bouton « Déverrouiller le coffre… » ferme la modale et renvoie le focus au champ de phrase ; une fois déverrouillé, ces entrées redeviennent cliquables et « Tout (ZIP) » repasse à « cert + clé privée ».</p>
 </section>
 
 </div>
