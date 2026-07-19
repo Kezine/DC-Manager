@@ -79,6 +79,9 @@ export class Icons {
   /** Démarrer / lancer (mise en cours d'une intervention…) : triangle « play ». */
   static readonly PLAY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5l12 7.5-12 7.5z"/></svg>';
 
+  /** Rechercher : loupe. Icône INTÉGRÉE au champ de recherche des barres de listing (revue design lot C). */
+  static readonly SEARCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>';
+
   /* ------------------------------------------------------------------------
      ÉTAT / MÉTADONNÉES — verrou, défaut (étoile), identité.
      ------------------------------------------------------------------------ */

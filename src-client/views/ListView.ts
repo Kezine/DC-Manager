@@ -2,8 +2,8 @@ import type { Store } from "../store";
 import { Html } from "../core/Html";
 import { Text } from "../core/Text";
 import { Sort } from "../core/Sort";
-import { MultiSelect } from "../ui/MultiSelect";
 import { FormControls } from "../ui/FormControls";
+import { FilterBar, type FilterBarDimension } from "../ui/FilterBar";
 import { Icons } from "../ui/Icons";
 import { IconButton } from "../ui/IconButton";
 import { RowMenu } from "../ui/RowMenu";
@@ -73,7 +73,11 @@ export class ListView {
   private _scaffold = false;
   private _toolbarSig: string | null = null;
   private _searchEl!: HTMLInputElement;
-  private _toolbarEl!: HTMLElement;
+  private _sortSelEl!: HTMLSelectElement;   // sélecteur de CRITÈRE de tri EN BARRE (état partagé avec les en-têtes)
+  private _sortDirEl!: HTMLButtonElement;   // bouton de SENS dédié (▲/▼) — bascule asc/desc
+  private _filtersHostEl!: HTMLElement;   // hôte du groupe « + Filtre » + chips (rempli selon les colonnes filtrables)
+  private _resetHostEl!: HTMLElement;      // hôte du bouton « Réinitialiser » (cluster de droite)
+  private _filterBar: FilterBar | null = null;
   private _bodyEl!: HTMLElement;
 
   constructor(store: Store, container: HTMLElement, opts: ListOptions) {
@@ -141,6 +145,20 @@ export class ListView {
     return all.map((o, i) => [o, i] as [any, number]).sort((a, b) => { const r = Sort.compare(valOf(a[0]), valOf(b[0])); return r !== 0 ? r * dir : (a[1] - b[1]); }).map((p) => p[0]);
   }
 
+  /** Recale le TRI EN BARRE (select de critère + bouton de sens) sur l'état de tri UNIQUE. Appelé à chaque
+      rendu : quel que soit l'ORIGINE du changement (select, bouton de sens, ou clic d'en-tête qui repasse par
+      render()), les deux contrôles reflètent this.sortKey/this.sortDir → synchronisation bidirectionnelle. */
+  private _syncSortControls(): void {
+    if (this._sortSelEl) this._sortSelEl.value = this.sortKey;
+    if (this._sortDirEl) {
+      const asc = this.sortDir !== "desc";
+      this._sortDirEl.textContent = asc ? "▲" : "▼";   // même langage visuel que l'indicateur d'en-tête (.sort-ind)
+      const label = I18n.t(asc ? "lists.chrome.dirAsc" : "lists.chrome.dirDesc");
+      this._sortDirEl.setAttribute("aria-label", label);
+      this._sortDirEl.title = label;
+    }
+  }
+
   render(): void {
     let all = this.items ? this.items() : this.store.all(this.collection);
     if (this.searchFields && this.query.trim()) {
@@ -163,66 +181,98 @@ export class ListView {
     this._ensureScaffold();
     this._ensureToolbar();
     this._paintBody(rows, total, pages, page);
+    this._syncSortControls();   // reflète l'état de tri UNIQUE (this.sortKey/sortDir) sur le select + bouton de sens en barre
     this._saveState();
   }
 
+  /** Bâtit UNE FOIS la barre de contrôles unifiée (revue design lot C) : recherche EN TÊTE (extensible,
+      loupe intégrée), puis le TRI en barre (select compact + bouton de sens), l'hôte des filtres (« + Filtre »
+      + chips), puis le cluster de DROITE (compact, création, « Réinitialiser »). Le tri vit AUSSI sur les
+      EN-TÊTES de colonnes (`th.sortable`), synchronisés au select via l'état de tri UNIQUE (cf.
+      `_syncSortControls`). Ce squelette n'est bâti qu'une fois : le champ de recherche garde ainsi son
+      focus/anti-rebond à travers les re-rendus (seuls le corps et les chips sont repeints ensuite). */
   private _ensureScaffold(): void {
     if (this._scaffold && this.container.querySelector(".list-body")) return;
-    this.container.innerHTML = `<div class="list-search" style="display:flex;gap:8px;align-items:center;padding:6px 8px"><input type="search" class="search-input" placeholder="${I18n.t("lists.chrome.searchPlaceholder")}" style="flex:1 1 auto"></div><div class="list-toolbar"></div><div class="list-body"></div>`;
-    this._searchEl = this.container.querySelector(".list-search input") as HTMLInputElement;
+    this.container.innerHTML = "";
+    const chrome = document.createElement("div"); chrome.className = "list-chrome";
+
+    // Recherche EN PREMIER (action n°1), extensible : loupe intégrée + champ normalisé, à la hauteur unifiée.
+    const search = document.createElement("div"); search.className = "lc-search";
+    const icon = document.createElement("span"); icon.className = "lc-search-ic"; icon.setAttribute("aria-hidden", "true"); icon.innerHTML = Icons.SEARCH;
+    this._searchEl = document.createElement("input"); this._searchEl.type = "search"; this._searchEl.className = "search-input";
+    this._searchEl.placeholder = I18n.t("lists.chrome.searchPlaceholder");
+    this._searchEl.setAttribute("aria-label", I18n.t("lists.chrome.searchPlaceholder"));
+    search.append(icon, this._searchEl);
+    chrome.appendChild(search);
+
+    // TRI EN BARRE (revue design — règle « ≥ 4 critères ⇒ select compact + bouton de SENS dédié ») : réintroduit
+    // APRÈS le lot C, qui l'avait retiré et rendait ainsi inatteignables les tris « Date de création / de
+    // modification » (critères SANS colonne d'en-tête cliquable). Placé APRÈS la recherche et AVANT « + Filtre ».
+    // L'état de tri reste UNIQUE (this.sortKey/this.sortDir), partagé avec les en-têtes triables : le select et le
+    // bouton ne le RÉFLÉCHISSENT pas en double — `_syncSortControls()` les recale à chaque rendu, et un clic
+    // d'en-tête repasse par render() → synchronisation bidirectionnelle sans duplication d'état.
+    const sortGroup = document.createElement("div"); sortGroup.className = "lc-sort";
+    const sortLbl = document.createElement("span"); sortLbl.className = "lc-sort-lb"; sortLbl.textContent = I18n.t("lists.chrome.sort");
+    this._sortSelEl = document.createElement("select"); this._sortSelEl.className = "lc-sort-key app-select";
+    this._sortSelEl.setAttribute("aria-label", I18n.t("lists.chrome.sort"));
+    this._sortOptions().forEach((o) => { const op = document.createElement("option"); op.value = o.key; op.textContent = o.label; this._sortSelEl.appendChild(op); });
+    this._sortSelEl.onchange = () => { this.sortKey = this._sortSelEl.value; this.page = 1; this.render(); };
+    this._sortDirEl = document.createElement("button"); this._sortDirEl.type = "button"; this._sortDirEl.className = "lc-sort-dir";
+    this._sortDirEl.onclick = () => { this.sortDir = this.sortDir === "desc" ? "asc" : "desc"; this.page = 1; this.render(); };
+    sortGroup.append(sortLbl, this._sortSelEl, this._sortDirEl);
+    chrome.appendChild(sortGroup);
+
+    // Hôte des filtres (« + Filtre » + chips actifs) — (re)peuplé par _ensureToolbar selon les colonnes filtrables.
+    this._filtersHostEl = document.createElement("div"); this._filtersHostEl.className = "lc-filters-host";
+    chrome.appendChild(this._filtersHostEl);
+
+    // Cluster de DROITE (poussé par CSS) : bascule Compact, bouton de création, puis « Réinitialiser » (le plus à droite).
+    const right = document.createElement("div"); right.className = "lc-right";
+    // bascule COMPACT : bascule booléenne → .toggle-pill (pilule + témoin + teinte) via la factory. La factory
+    // met à jour son propre état visuel au clic ; l'état persiste à travers les re-rendus (this._compact).
+    const compactBtn = FormControls.toggle(I18n.t("lists.chrome.compact"), this._compact, (v) => { this._compact = v; this.page = 1; this.render(); }, { title: I18n.t("lists.chrome.compactTitle") });
+    compactBtn.classList.add("lc-compact");
+    right.appendChild(compactBtn);
     if (this.onCreate) {
-      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary btn-sm"; b.textContent = this.createLabel;
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary btn-sm lc-create"; b.textContent = this.createLabel;
       b.onclick = () => this.onCreate!();
-      (this.container.querySelector(".list-search") as HTMLElement).appendChild(b);
+      right.appendChild(b);
     }
-    this._toolbarEl = this.container.querySelector(".list-toolbar") as HTMLElement;
-    this._bodyEl = this.container.querySelector(".list-body") as HTMLElement;
+    this._resetHostEl = document.createElement("div"); this._resetHostEl.className = "lc-reset-host";
+    right.appendChild(this._resetHostEl);
+    chrome.appendChild(right);
+    this.container.appendChild(chrome);
+
+    this._bodyEl = document.createElement("div"); this._bodyEl.className = "list-body";
+    this.container.appendChild(this._bodyEl);
+
     this._searchEl.value = this.query;
     let t: any;
     this._searchEl.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { this.query = this._searchEl.value; this.page = 1; this.render(); }, 180); });
-    this._scaffold = true; this._toolbarSig = null;
+    this._scaffold = true; this._toolbarSig = null; this._filterBar = null;
   }
 
+  /** (Re)construit la FilterBar (« + Filtre » + chips + Réinitialiser) quand l'ensemble des OPTIONS filtrables
+      change (signature) — jamais à chaque frappe/tri/page : un changement de VALEUR de filtre ne repeint que
+      les chips (FilterBar) + le corps, laissant un panneau ouvert intact. Aucune colonne filtrable → hôtes vidés. */
   private _ensureToolbar(): void {
     const filterCols = this.columns.filter((c) => c.filter);
     const sig = filterCols.map((c) => (c.filter!.options() || []).map((o) => o.id).join(",")).join("|");
-    if (this._toolbarSig === sig && this._toolbarEl.children.length) return;
+    if (this._toolbarSig === sig && this._filterBar) return;
     this._toolbarSig = sig;
-    this._toolbarEl.innerHTML = "";
-    const sg = document.createElement("div"); sg.className = "lt-group";
-    const lbl = document.createElement("label"); lbl.textContent = I18n.t("lists.chrome.sort");
-    const sortSel = document.createElement("select"); sortSel.className = "sort-key app-select";
-    this._sortOptions().forEach((o) => { const op = document.createElement("option"); op.value = o.key; op.textContent = o.label; sortSel.appendChild(op); });
-    sortSel.value = this.sortKey;
-    sortSel.onchange = () => { this.sortKey = sortSel.value; this.page = 1; this.render(); };
-    const dirBtn = document.createElement("button"); dirBtn.type = "button"; dirBtn.className = "sort-dir-btn btn btn-ghost btn-sm";
-    const setDir = () => { dirBtn.textContent = this.sortDir === "desc" ? I18n.t("lists.chrome.dirDesc") : I18n.t("lists.chrome.dirAsc"); };
-    setDir();
-    dirBtn.onclick = () => { this.sortDir = this.sortDir === "desc" ? "asc" : "desc"; setDir(); this.page = 1; this.render(); };
-    sg.appendChild(lbl); sg.appendChild(sortSel); sg.appendChild(dirBtn);
-    // bascule COMPACT (colonnes essentielles seulement) : bascule booléenne → .toggle-pill (pilule + témoin +
-    // teinte) via la factory, cohérente avec les autres bascules. L'état persiste à travers les re-rendus (this._compact).
-    const compactBtn = FormControls.toggle(I18n.t("lists.chrome.compact"), this._compact, (v) => { this._compact = v; this.page = 1; this.render(); }, { title: I18n.t("lists.chrome.compactTitle") });
-    compactBtn.classList.add("lt-compact");
-    sg.appendChild(compactBtn);
-    this._toolbarEl.appendChild(sg);
-    if (filterCols.length) {
-      const fg = document.createElement("div"); fg.className = "lt-filters";
-      const fl = document.createElement("span"); fl.className = "lt-flabel"; fl.textContent = I18n.t("lists.chrome.filter"); fg.appendChild(fl);
-      filterCols.forEach((c) => {
-        const key = this._colKey(c);
-        if (!this.filterState[key]) this.filterState[key] = new Set();
-        const set = this.filterState[key];
-        const items = c.filter!.options() || [];
-        const valid = new Set(items.map((i) => i.id));
-        [...set].forEach((id) => { if (!valid.has(id)) set.delete(id); });
-        fg.appendChild(MultiSelect.build(c.filter!.label || c.head, items, set, () => { this.page = 1; this.render(); }));
-      });
-      const reset = document.createElement("button"); reset.type = "button"; reset.className = "lt-reset btn btn-ghost btn-sm"; reset.textContent = I18n.t("lists.chrome.filterReset");
-      reset.onclick = () => { Object.values(this.filterState).forEach((s) => s.clear()); this._toolbarSig = null; this.page = 1; this.render(); };
-      fg.appendChild(reset);
-      this._toolbarEl.appendChild(fg);
-    }
+    if (!filterCols.length) { this._filtersHostEl.replaceChildren(); this._resetHostEl.replaceChildren(); this._filterBar = null; return; }
+    const dims: FilterBarDimension[] = filterCols.map((c) => {
+      const key = this._colKey(c);
+      if (!this.filterState[key]) this.filterState[key] = new Set();
+      const set = this.filterState[key];
+      const items = c.filter!.options() || [];
+      const valid = new Set(items.map((i) => i.id));
+      [...set].forEach((id) => { if (!valid.has(id)) set.delete(id); });   // purge des valeurs disparues (parité historique)
+      return { key, label: c.filter!.label || c.head, options: items.slice(), selected: set };
+    });
+    this._filterBar = new FilterBar(dims, () => { this.page = 1; this.render(); });
+    this._filtersHostEl.replaceChildren(this._filterBar.filtersElement);
+    this._resetHostEl.replaceChildren(this._filterBar.resetElement);
   }
 
   /** Actions de ligne RÉDUITES à 3 boutons : Détails · Modifier · « plus d'actions » (menu overflow
@@ -267,17 +317,22 @@ export class ListView {
     this._bodyEl.classList.toggle("compact", this._compact);   // cellules plus denses en mode compact (CSS)
     const cols = this._visibleColumns();   // mode compact : sous-ensemble essentiel
     const head = cols.map((c) => {
-      if (!c.sort) return `<th>${Html.escape(c.head)}</th>`;
+      // L'en-tête porte la classe d'alignement de SA colonne (`cls`) : une colonne numérique (`cell-num`)
+      // ancre ainsi son libellé ET son indicateur de tri au bord DROIT, aligné avec les valeurs de la colonne.
+      if (!c.sort) return `<th class="${c.cls || ""}">${Html.escape(c.head)}</th>`;
       const key = this._colKey(c); const active = this.sortKey === key;
       const ind = active ? `<span class="sort-ind"> ${this.sortDir === "desc" ? "▼" : "▲"}</span>` : "";
-      return `<th class="sortable" data-sortkey="${key}">${Html.escape(c.head)}${ind}</th>`;
-    }).join("") + `<th>${I18n.t("lists.chrome.actions")}</th>`;
+      return `<th class="sortable${c.cls ? " " + c.cls : ""}" data-sortkey="${key}">${Html.escape(c.head)}${ind}</th>`;
+    }).join("") + `<th class="cell-actions">${I18n.t("lists.chrome.actions")}</th>`;
     let bodyHtml: string;
     if (rows.length === 0) {
       bodyHtml = `<tr class="empty-row"><td colspan="${cols.length + 1}">${Html.escape(this.emptyText)}</td></tr>`;
     } else {
       bodyHtml = rows.map((o) => {
-        const cells = cols.map((c) => `<td class="${c.cls || ""}">${c.render(o)}</td>`).join("");
+        // `data-label` = en-tête de la colonne : sert au repli en CARTES sous 560px (revue design lot D2) — le
+        // CSS l'affiche via `td::before { content: attr(data-label) }`, zéro duplication de markup. La cellule
+        // d'ACTIONS n'en reçoit pas (rangée de boutons, jamais préfixée d'un libellé).
+        const cells = cols.map((c) => `<td class="${c.cls || ""}" data-label="${Html.escape(c.head)}">${c.render(o)}</td>`).join("");
         return `<tr>${cells}<td class="cell-actions">${this._rowActions(o.id)}</td></tr>`;
       }).join("");
     }
@@ -299,7 +354,6 @@ export class ListView {
         const k = (th as any).dataset.sortkey;
         if (this.sortKey === k) this.sortDir = this.sortDir === "desc" ? "asc" : "desc";
         else { this.sortKey = k; this.sortDir = "asc"; }
-        const sk = this._toolbarEl.querySelector(".sort-key") as HTMLSelectElement; if (sk) sk.value = this.sortKey;
         this.page = 1; this.render();
       };
     });

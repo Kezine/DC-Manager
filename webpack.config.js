@@ -42,6 +42,10 @@ module.exports = (env, argv) => {
         /* CSS injecté au runtime via style-loader → reste inclus dans le bundle JS,
            donc dans le HTML autonome (HtmlInlineScriptPlugin). */
         { test: /\.css$/, use: ["style-loader", "css-loader"] },
+        /* Fontes embarquées (IBM Plex Sans, cf. src-client/fonts/) : INLINÉES en base64 dans le CSS
+           (data: URI) — l'app vit en LAN/hors-ligne (aucun CDN) ET l'export mono-fichier autonome
+           (HtmlInlineScriptPlugin) doit contenir les fontes. asset/inline = zéro requête réseau. */
+        { test: /\.woff2$/, type: "asset/inline" },
       ],
     },
     plugins: [

@@ -47,10 +47,10 @@ export class ListConfigs {
           // filtre par APPARTENANCE (primaire OU secondaire) — valueOf renvoie un tableau, comme la colonne Réseaux des câbles.
           filter: { label: I18n.t("lists.col.group"), options: () => store.all("groups").map((g: any) => ({ id: g.id, label: g.label || I18n.t("lists.ph.group") })), valueOf: (e) => store.equipmentGroupIds(e) },
         },
-        { head: "U", cls: "num", sortKey: "u", sort: (e) => (e.dim_mode === "u" ? (e.u_height || 1) : -1), render: (e) => (e.dim_mode === "u" ? `<span class="pill">${e.u_height || 1} U</span>` : dim(I18n.t("lists.ph.free"))) },
+        { head: "U", cls: "cell-num", sortKey: "u", sort: (e) => (e.dim_mode === "u" ? (e.u_height || 1) : -1), render: (e) => (e.dim_mode === "u" ? `<span class="pill">${e.u_height || 1} U</span>` : dim(I18n.t("lists.ph.free"))) },
         { head: I18n.t("lists.col.location"), essential: true, sortKey: "place", sort: (e) => ListConfigs._placeText(store, e), render: (e) => EntityViz.equipmentLocation(store, e) },
-        { head: I18n.t("lists.col.ports"), cls: "num", sort: (e) => store.portsOf(e.id).length, render: (e) => `<span class="pill">${store.portsOf(e.id).length}</span>` },
-        { head: I18n.t("lists.col.aggregates"), cls: "num", sort: (e) => store.aggregatesOf(e.id).length, render: (e) => `<span class="pill">${store.aggregatesOf(e.id).length}</span>` },
+        { head: I18n.t("lists.col.ports"), cls: "cell-num", sort: (e) => store.portsOf(e.id).length, render: (e) => `<span class="pill">${store.portsOf(e.id).length}</span>` },
+        { head: I18n.t("lists.col.aggregates"), cls: "cell-num", sort: (e) => store.aggregatesOf(e.id).length, render: (e) => `<span class="pill">${store.aggregatesOf(e.id).length}</span>` },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (e) => e.description || "", render: descCell },
       ],
     };
@@ -70,7 +70,7 @@ export class ListConfigs {
           filter: { label: I18n.t("lists.col.type"), options: () => [{ id: "data", label: I18n.t("lists.opt.dataFilter") }, { id: "power", label: I18n.t("lists.opt.powerFilter") }], valueOf: (n) => (n.kind === "power" ? "power" : "data") },
         },
         { head: I18n.t("lists.col.ipNetwork"), render: (n) => { const ip: any = n.ip_network_id && store.get("ipNetworks", n.ip_network_id); return ip ? `<span class="pill"><span class="gi">${Icons.NETWORK}</span>${Html.escape(ip.cidr || ip.label || "(IP)")}</span>` : dim(I18n.t("lists.ph.logical")); } },
-        { head: I18n.t("lists.col.cables"), cls: "num", sort: (n) => store.cablesOfNetwork(n.id).length, render: (n) => `<span class="pill">${store.cablesOfNetwork(n.id).length}</span>` },
+        { head: I18n.t("lists.col.cables"), cls: "cell-num", sort: (n) => store.cablesOfNetwork(n.id).length, render: (n) => `<span class="pill">${store.cablesOfNetwork(n.id).length}</span>` },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (n) => n.description || "", render: descCell },
       ],
     };
@@ -89,7 +89,7 @@ export class ListConfigs {
           head: I18n.t("lists.col.type"), sortKey: "type", sort: (g) => GroupTypes.label(g.type), render: (g) => `<span class="pill">${Html.escape(GroupTypes.label(g.type))}</span>`,
           filter: { label: I18n.t("lists.col.type"), options: () => GroupTypes.ALL.map((t) => ({ id: t.id, label: I18n.t(t.labelKey) })), valueOf: (g) => g.type },
         },
-        { head: I18n.t("lists.col.equipments"), cls: "num", sort: (g) => store.equipmentsOfGroup(g.id).length, render: (g) => `<span class="pill">${store.equipmentsOfGroup(g.id).length}</span>` },
+        { head: I18n.t("lists.col.equipments"), cls: "cell-num", sort: (g) => store.equipmentsOfGroup(g.id).length, render: (g) => `<span class="pill">${store.equipmentsOfGroup(g.id).length}</span>` },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (g) => g.description || "", render: descCell },
       ],
     };
@@ -107,12 +107,12 @@ export class ListConfigs {
       columns: [
         { head: I18n.t("lists.col.preview"), render: (o) => o.url ? `<span class="cell-fithumb"><img src="${o.url}" alt="" /></span>` : dim("—") },
         { head: I18n.t("lists.col.name"), cls: "cell-name", sortKey: "name", sort: (o) => o.name || "", render: (o) => Html.escape(o.name || I18n.t("lists.ph.noName")) },
-        { head: I18n.t("lists.col.height"), cls: "num", sort: (o) => (o.face === "autre" ? -1 : (o.u_height || 1)), render: (o) => o.face === "autre" ? dim(I18n.t("lists.ph.free")) : `<span class="pill">${o.u_height || 1} U</span>` },
+        { head: I18n.t("lists.col.height"), cls: "cell-num", sort: (o) => (o.face === "autre" ? -1 : (o.u_height || 1)), render: (o) => o.face === "autre" ? dim(I18n.t("lists.ph.free")) : `<span class="pill">${o.u_height || 1} U</span>` },
         {
           head: I18n.t("lists.col.face"), sortKey: "face", sort: (o) => faceLbl(o.face), render: (o) => `<span class="pill">${Html.escape(faceLbl(o.face))}</span>`,
           filter: { label: I18n.t("lists.col.face"), options: () => [{ id: "front", label: I18n.t("domain.equipFace.front") }, { id: "rear", label: I18n.t("domain.equipFace.rear") }, { id: "autre", label: I18n.t("lists.opt.faceOther") }], valueOf: (o) => o.face || "front" },
         },
-        { head: I18n.t("lists.col.usages"), cls: "num", sort: (o) => store.faceImageUsageCount(o.id), render: (o) => `<span class="pill">${store.faceImageUsageCount(o.id)}</span>` },
+        { head: I18n.t("lists.col.usages"), cls: "cell-num", sort: (o) => store.faceImageUsageCount(o.id), render: (o) => `<span class="pill">${store.faceImageUsageCount(o.id)}</span>` },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", render: descCell },
       ],
     };
@@ -128,7 +128,7 @@ export class ListConfigs {
         { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (c) => c.name, render: (c) => Html.escape(c.name || I18n.t("lists.ph.cable")) },
         { head: I18n.t("lists.col.type"), render: (c) => { const t: any = c.cable_type_id && store.get("cableTypes", c.cable_type_id); return t ? `<span class="pill">${Html.escape(t.name)}</span>` : dim("—"); } },
         { head: I18n.t("lists.col.link"), essential: true, render: (c) => EntityViz.cableLink(store, c) },
-        { head: I18n.t("lists.col.lengthShort"), cls: "num", sort: (c) => { const L = ListConfigs._cableLen(store, c); return L != null ? L : -1; }, render: (c) => { const L = ListConfigs._cableLen(store, c); return L != null ? L + " m" : dim("—"); } },
+        { head: I18n.t("lists.col.lengthShort"), cls: "cell-num", sort: (c) => { const L = ListConfigs._cableLen(store, c); return L != null ? L : -1; }, render: (c) => { const L = ListConfigs._cableLen(store, c); return L != null ? L + " m" : dim("—"); } },
         {
           head: I18n.t("lists.col.status"), essential: true, sortKey: "status", sort: (c) => c.status, render: (c) => Html.escape(CableStatuses.label(c.status)),
           filter: { label: I18n.t("lists.col.status"), options: () => CableStatuses.ALL.map((s) => ({ id: s.id, label: I18n.t(s.labelKey) })), valueOf: (c) => c.status },
@@ -152,8 +152,8 @@ export class ListConfigs {
       columns: [
         { head: I18n.t("lists.col.name"), cls: "cell-name", sortKey: "name", sort: (b) => b.name, render: (b) => Html.escape(b.name || I18n.t("lists.ph.bundle")) },
         { head: I18n.t("lists.col.type"), render: (b) => { const t: any = b.cable_type_id && store.get("cableTypes", b.cable_type_id); return t ? `<span class="pill">${Html.escape(t.name)}</span>` : dim("—"); } },
-        { head: I18n.t("lists.col.strands"), cls: "num", render: (b) => { const o = store.bundleOccupancy(b.id); return o.used + " / " + o.capacity; } },
-        { head: I18n.t("lists.col.length"), cls: "num", sort: (b) => (b.length_m != null ? b.length_m : -1), render: (b) => (b.length_m != null ? b.length_m + " m" : dim("—")) },
+        { head: I18n.t("lists.col.strands"), cls: "cell-num", render: (b) => { const o = store.bundleOccupancy(b.id); return o.used + " / " + o.capacity; } },
+        { head: I18n.t("lists.col.length"), cls: "cell-num", sort: (b) => (b.length_m != null ? b.length_m : -1), render: (b) => (b.length_m != null ? b.length_m + " m" : dim("—")) },
         { head: I18n.t("lists.col.route"), render: (b) => { const n = (b.waypoint_ids || []).length; return n ? `<span class="pill">${I18n.t("lists.ph.points", { count: n })}</span>` : dim(I18n.t("lists.ph.direct")); } },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (b) => b.description || "", render: descCell },
       ],
@@ -171,7 +171,7 @@ export class ListConfigs {
         { head: I18n.t("lists.col.name"), cls: "cell-name", sortKey: "name", sort: (d) => d.name, render: (d) => Html.escape(d.name || I18n.t("lists.ph.room")) },
         { head: I18n.t("lists.col.dimensions"), render: (d) => (d.width_mm / 1000).toFixed(1) + " × " + (d.depth_mm / 1000).toFixed(1) + " m" },
         { head: I18n.t("lists.col.room"), render: (d) => (d.room ? Html.escape(d.room) : dim("—")) },
-        { head: I18n.t("lists.col.racks"), cls: "num", render: (d) => String(store.racksOfDc(d.id).length) },
+        { head: I18n.t("lists.col.racks"), cls: "cell-num", render: (d) => String(store.racksOfDc(d.id).length) },
       ],
     };
   }
@@ -187,8 +187,8 @@ export class ListConfigs {
       columns: [
         { head: I18n.t("lists.col.name"), cls: "cell-name", sortKey: "name", sort: (s) => s.name, render: (s) => Html.escape(s.name || I18n.t("lists.ph.site")) },
         { head: I18n.t("lists.col.address"), render: (s) => (s.address ? Html.escape(s.address) : dim("—")) },
-        { head: I18n.t("lists.col.floors"), cls: "num", render: (s) => String(store.floorsOf(s.id).length) },
-        { head: I18n.t("lists.col.rooms"), cls: "num", render: (s) => String(store.all("datacenters").filter((d: any) => (d.location || "") === s.id).length) },
+        { head: I18n.t("lists.col.floors"), cls: "cell-num", render: (s) => String(store.floorsOf(s.id).length) },
+        { head: I18n.t("lists.col.rooms"), cls: "cell-num", render: (s) => String(store.all("datacenters").filter((d: any) => (d.location || "") === s.id).length) },
       ],
     };
   }
@@ -223,7 +223,7 @@ export class ListConfigs {
         { head: I18n.t("lists.col.building"), cls: "cell-name", sortKey: "loc", sort: (f) => store.siteLabel(f.location), render: (f) => Html.escape(store.siteLabel(f.location)) },
         { head: I18n.t("lists.col.floor"), sortKey: "fl", sort: (f) => FloorLayout.floorNum(String(f.floor || "")), render: (f) => I18n.t("lists.ph.floorLabel", { n: (f.floor != null && f.floor !== "" ? f.floor : "0") }) },
         { head: I18n.t("lists.col.dimensions"), render: (f) => ((f.width_mm || 0) / 1000).toFixed(1) + " × " + ((f.depth_mm || 0) / 1000).toFixed(1) + " m" },
-        { head: I18n.t("lists.col.rooms"), cls: "num", render: (f) => String(store.dcsOfFloor(f.location, String(f.floor || "")).length) },
+        { head: I18n.t("lists.col.rooms"), cls: "cell-num", render: (f) => String(store.dcsOfFloor(f.location, String(f.floor || "")).length) },
       ],
     };
   }
@@ -242,15 +242,15 @@ export class ListConfigs {
           render: (r) => EntityViz.rackLocation(store, r),
           filter: { label: I18n.t("lists.filter.room"), options: () => store.all("datacenters").map((d: any) => ({ id: d.id, label: d.name || I18n.t("lists.ph.room") })), valueOf: (r) => r.datacenter_id || "__none__" },
         },
-        { head: I18n.t("lists.col.size"), cls: "num", sortKey: "u", sort: (r) => r.u_count, render: (r) => `<span class="pill">${r.u_count} U</span>` },
-        { head: I18n.t("lists.col.depth"), cls: "num", sort: (r) => r.depth, render: (r) => `<span class="pill">${r.depth} mm</span>` },
+        { head: I18n.t("lists.col.size"), cls: "cell-num", sortKey: "u", sort: (r) => r.u_count, render: (r) => `<span class="pill">${r.u_count} U</span>` },
+        { head: I18n.t("lists.col.depth"), cls: "cell-num", sort: (r) => r.depth, render: (r) => `<span class="pill">${r.depth} mm</span>` },
         {
           head: I18n.t("lists.col.faces"), sortKey: "faces", sort: (r) => r.sides, render: (r) => `<span class="pill">${r.sides === "dual" ? I18n.t("lists.opt.dual") : I18n.t("lists.opt.single")}</span>`,
           filter: { label: I18n.t("lists.col.faces"), options: () => [{ id: "single", label: I18n.t("lists.opt.single") }, { id: "dual", label: I18n.t("lists.opt.dual") }], valueOf: (r) => (r.sides === "dual" ? "dual" : "single") },
         },
-        { head: I18n.t("lists.col.occupied"), cls: "num", sort: (r) => scene.occupancyCount(r.id), render: (r) => `<span class="pill">${scene.occupancyCount(r.id)}</span>` },
-        { head: I18n.t("lists.col.free"), cls: "num", sort: (r) => scene.freeUInfo(r.id).free, render: (r) => { const f = scene.freeUInfo(r.id); return `<span class="pill">${f.free} U</span>`; } },
-        { head: I18n.t("lists.col.contig"), cls: "num", sort: (r) => scene.freeUInfo(r.id).contig, render: (r) => `<span class="pill">${scene.freeUInfo(r.id).contig} U</span>` },
+        { head: I18n.t("lists.col.occupied"), cls: "cell-num", sort: (r) => scene.occupancyCount(r.id), render: (r) => `<span class="pill">${scene.occupancyCount(r.id)}</span>` },
+        { head: I18n.t("lists.col.free"), cls: "cell-num", sort: (r) => scene.freeUInfo(r.id).free, render: (r) => { const f = scene.freeUInfo(r.id); return `<span class="pill">${f.free} U</span>`; } },
+        { head: I18n.t("lists.col.contig"), cls: "cell-num", sort: (r) => scene.freeUInfo(r.id).contig, render: (r) => `<span class="pill">${scene.freeUInfo(r.id).contig} U</span>` },
       ],
     };
   }
@@ -276,7 +276,7 @@ export class ListConfigs {
         },
         { head: I18n.t("lists.col.connector"), render: (t) => Html.escape(t.connector || t.family || "—") + (t.duplex ? ` <span class="pill">duplex</span>` : "") },
         { head: I18n.t("lists.col.speed"), render: (t) => (t.speed ? Html.escape(t.speed) : dim("—")) },
-        { head: I18n.t("lists.col.ports"), cls: "num", sort: (t) => store.portsOfType(t.id).length, render: (t) => `<span class="pill">${store.portsOfType(t.id).length}</span>` },
+        { head: I18n.t("lists.col.ports"), cls: "cell-num", sort: (t) => store.portsOfType(t.id).length, render: (t) => `<span class="pill">${store.portsOfType(t.id).length}</span>` },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (t) => t.description || "", render: descCell },
       ],
     };
@@ -301,7 +301,7 @@ export class ListConfigs {
           filter: { label: I18n.t("lists.col.family"), options: () => ListConfigs._families(store, "cableTypes"), valueOf: (t) => t.family },
         },
         { head: I18n.t("lists.col.medium"), render: (t) => Html.escape(t.medium || "—") },
-        { head: I18n.t("lists.col.cables"), cls: "num", sort: (t) => store.cablesOfType(t.id).length, render: (t) => `<span class="pill">${store.cablesOfType(t.id).length}</span>` },
+        { head: I18n.t("lists.col.cables"), cls: "cell-num", sort: (t) => store.cablesOfType(t.id).length, render: (t) => `<span class="pill">${store.cablesOfType(t.id).length}</span>` },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (t) => t.description || "", render: descCell },
       ],
     };
@@ -316,9 +316,9 @@ export class ListConfigs {
       columns: [
         { head: I18n.t("lists.col.label"), cls: "cell-name", sortKey: "label", sort: (n) => n.label, render: (n) => Html.escape(n.label || I18n.t("lists.ph.noLabel")) },
         { head: "CIDR", sortKey: "cidr", sort: (n) => n.cidr, render: (n) => (n.cidr ? `<code>${Html.escape(n.cidr)}</code>` : dim("—")) },
-        { head: I18n.t("lists.col.addresses"), cls: "num", sort: (n) => store.ipAddressesOfNetwork(n.id).length, render: (n) => `<span class="pill">${store.ipAddressesOfNetwork(n.id).length}</span>` },
-        { head: I18n.t("lists.col.dhcpRanges"), cls: "num", sort: (n) => store.dhcpRangesOfNetwork(n.id).length, render: (n) => `<span class="pill">${store.dhcpRangesOfNetwork(n.id).length}</span>` },
-        { head: I18n.t("lists.col.logicalNetworks"), cls: "num", sort: (n) => store.networksOfIpNetwork(n.id).length, render: (n) => { const ns = store.networksOfIpNetwork(n.id); return ns.length ? `<span class="pill">${ns.length}</span>` : dim("—"); } },
+        { head: I18n.t("lists.col.addresses"), cls: "cell-num", sort: (n) => store.ipAddressesOfNetwork(n.id).length, render: (n) => `<span class="pill">${store.ipAddressesOfNetwork(n.id).length}</span>` },
+        { head: I18n.t("lists.col.dhcpRanges"), cls: "cell-num", sort: (n) => store.dhcpRangesOfNetwork(n.id).length, render: (n) => `<span class="pill">${store.dhcpRangesOfNetwork(n.id).length}</span>` },
+        { head: I18n.t("lists.col.logicalNetworks"), cls: "cell-num", sort: (n) => store.networksOfIpNetwork(n.id).length, render: (n) => { const ns = store.networksOfIpNetwork(n.id); return ns.length ? `<span class="pill">${ns.length}</span>` : dim("—"); } },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (n) => n.description || "", render: descCell },
       ],
     };
@@ -361,7 +361,7 @@ export class ListConfigs {
           render: (d) => { const n: any = d.network_id && store.get("ipNetworks", d.network_id); return n ? Html.escape(n.label || n.cidr || I18n.t("lists.ph.network")) : dim("—"); },
           filter: { label: I18n.t("lists.col.network"), options: () => store.all("ipNetworks").map((n: any) => ({ id: n.id, label: n.label || n.cidr || I18n.t("lists.ph.network") })), valueOf: (d) => d.network_id || "__none__" },
         },
-        { head: I18n.t("lists.col.size"), cls: "num", sort: (d) => { const a = Ip.toInt(d.start_ip), b = Ip.toInt(d.end_ip); return (a != null && b != null && b >= a) ? (b - a + 1) : -1; }, render: (d) => { const a = Ip.toInt(d.start_ip), b = Ip.toInt(d.end_ip); return (a != null && b != null && b >= a) ? `<span class="pill">${I18n.t("lists.ph.addrCount", { count: b - a + 1 })}</span>` : dim("—"); } },
+        { head: I18n.t("lists.col.size"), cls: "cell-num", sort: (d) => { const a = Ip.toInt(d.start_ip), b = Ip.toInt(d.end_ip); return (a != null && b != null && b >= a) ? (b - a + 1) : -1; }, render: (d) => { const a = Ip.toInt(d.start_ip), b = Ip.toInt(d.end_ip); return (a != null && b != null && b >= a) ? `<span class="pill">${I18n.t("lists.ph.addrCount", { count: b - a + 1 })}</span>` : dim("—"); } },
         {
           head: I18n.t("lists.col.dhcpServer"), essential: true, sortKey: "srv", sort: (d) => { const e: any = d.server_id && store.get("equipments", d.server_id); return e ? (e.name || "") : ""; },
           render: (d) => { const e: any = d.server_id && store.get("equipments", d.server_id); return e ? Html.escape(e.name || I18n.t("lists.ph.server")) : dim(I18n.t("lists.ph.notDesignated")); },
@@ -434,7 +434,7 @@ export class ListConfigs {
         },
         { head: I18n.t("lists.col.assignedTo"), sort: (o) => assignedTo(o), render: (o) => { const t = assignedTo(o); return t ? Html.escape(t) : dim("—"); } },
         { head: I18n.t("lists.col.storage"), render: (o) => (o.storage_location ? Html.escape(o.storage_location) : dim("—")) },
-        { head: I18n.t("lists.col.purchase"), cls: "num", sortKey: "purchase", sort: (o) => o.purchase_date || "", render: (o) => (o.purchase_date ? Html.escape(o.purchase_date) : dim("—")) },
+        { head: I18n.t("lists.col.purchase"), cls: "cell-num", sortKey: "purchase", sort: (o) => o.purchase_date || "", render: (o) => (o.purchase_date ? Html.escape(o.purchase_date) : dim("—")) },
       ],
     };
   }
@@ -507,7 +507,7 @@ export class ListConfigs {
           render: (v) => { const t = hostText(v); return t ? Html.escape(t) : dim("—"); },
           filter: { label: I18n.t("lists.col.host"), options: hostOptions, valueOf: (v) => hostText(v) },
         },
-        { head: "vNIC", cls: "num", sort: (v) => (v.nics || []).length, render: (v) => `<span class="pill">${(v.nics || []).length}</span>` },
+        { head: "vNIC", cls: "cell-num", sort: (v) => (v.nics || []).length, render: (v) => `<span class="pill">${(v.nics || []).length}</span>` },
         {
           head: "IPs", sort: (v) => vmIps(v)[0] || "",
           render: (v) => { const ips = vmIps(v); if (!ips.length) return dim("—"); const shown = ips.slice(0, 3).map((ip) => `<code>${Html.escape(ip)}</code>`).join(", "); return shown + (ips.length > 3 ? " " + dim("+" + (ips.length - 3)) : ""); },

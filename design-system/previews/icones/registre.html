@@ -7,6 +7,56 @@
 <title>DC Manager — DS · Registre d'icônes</title>
 <style>
 /* DC Manager — styles extraits du monolithe v172 (bloc <style>, verbatim). */
+  /* ============ FONTES EMBARQUÉES — IBM Plex Sans (PROSE) ============
+     Revue design lot D1. Fontes VENDORÉES en local (woff2 committés dans src-client/fonts/, licence OFL.txt à
+     côté) : l'app doit fonctionner en LAN / HORS-LIGNE — AUCUN CDN, AUCUNE requête réseau à l'exécution.
+     webpack INLINE chaque woff2 en base64 (règle asset/inline) → l'export mono-fichier autonome
+     (HtmlInlineScriptPlugin) embarque les fontes. IBM Plex Sans ne sert QUE la PROSE (token --sans, appliqué
+     conteneur par conteneur — cf. plus bas) ; la DONNÉE reste en MONO système (--mono). Pas de Plex Mono
+     (arbitrage POIDS DU BUNDLE : la moitié du gain identitaire pour la moitié du coût). font-display: swap →
+     le texte s'affiche aussitôt dans la fonte de repli, puis bascule sans bloquer le rendu. Deux subsets
+     (latin + latin-ext, app FRANCOPHONE) × 4 graisses (400/500/600/700) ; l'unicode-range laisse le navigateur
+     choisir le bon subset par glyphe. */
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-400.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-ext-400.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-500.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-ext-500.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-600.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-ext-600.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 700; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-700.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 700; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-ext-700.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
   /* ============ VARIABLES / THEME ============ */
   :root {
     --bg: #0a0a0a;
@@ -15,22 +65,52 @@
     --line: #222222;
     --line-2: #2d2d2d;
     --fg: #e8e8e8;
-    --fg-dim: #888888;
+    --fg-dim: #9a9aa2;   /* AA : ex-#888 relevé/refroidi → meilleur contraste du texte secondaire sur fond sombre */
     --fg-dimmer: #555555;
-    --accent: #ff5500;
+    /* ===== RAMPE ACCENT (identité orange DÉCLINÉE en 3 rôles — revue design lot A) =====
+       L'orange reste l'identité de l'app ; on le décline en trois tokens selon l'USAGE, pour concilier
+       punch visuel et contraste (AA). RÈGLE, à respecter par les prochains contributeurs :
+         • --accent-fill : APLATS / FONDS PLEINS opaques (bouton primaire, page active, bouton retour…).
+                           Orange vif et saturé — c'est lui qui « porte » l'action.
+         • --accent      : DÉFAUT. Bordures, soulignés, indicateurs, ET tout le dessin 2D/3D (baies,
+                           câbles, waypoints, graphe…). Même teinte perçue que l'ex-#ff5500, un cheveu
+                           plus clair/doux pour rester lisible en trait fin. En cas de doute → ce token.
+         • --accent-text : PETIT TEXTE, liens, titres de section, badges textuels ≤ ~13px. Décliné plus
+                           CLAIR en thème sombre (ici) et plus FONCÉ en thème clair → contraste AA garanti. */
+    --accent-fill: oklch(0.67 0.19 46);
+    --accent: oklch(0.72 0.175 50);
+    --accent-text: oklch(0.80 0.15 62);
     --accent-2: #ffaa00;
-    --ok: #4ade80;
-    --warn: #facc15;
-    --err: #ef4444;
-    --role-mgmt: #38bdf8;
-    --role-data: #4ade80;
-    --role-power: #f59e0b;
+    /* Sémantiques HARMONISÉES en OKLCH : même luminosité/chroma perçus d'un état à l'autre → langage
+       d'état cohérent (statuts, toasts, pills, dialogues). --info (bleu) formalisé en token. */
+    --ok: oklch(0.76 0.15 152);
+    --warn: oklch(0.82 0.14 88);
+    --err: oklch(0.66 0.19 27);
+    --info: oklch(0.72 0.12 240);
+    /* Rôles réseau : teinte CONSERVÉE (mgmt = bleu, data = vert, power = ambre) mais alignés sur la même
+       logique L/C que les sémantiques ci-dessus, pour s'harmoniser visuellement avec elles. */
+    --role-mgmt: oklch(0.74 0.13 236);
+    --role-data: oklch(0.76 0.15 152);
+    --role-power: oklch(0.77 0.15 68);
+    /* Anneau de focus clavier (cf. règle :focus-visible globale) = couleur du petit texte accent (AA).
+       Défini une seule fois : var(--accent-text) se résout par thème là où l'anneau est appliqué. */
+    --focus: var(--accent-text);
     /* pastille d'équipement (liaisons/localisation) — bleu */
     --viz-equip-bg: #0c447c;
     --viz-equip-fg: #b5d4f4;
     --grid-size: 24px;
     --radius-pill: 5px;
+    /* Hauteur de CONTRÔLE unifiée des barres de listing (revue design lot C) : recherche, boutons, « + Filtre »,
+       Réinitialiser… partagent cette hauteur → une barre visuellement homogène (fini le mélange de hauteurs). */
+    --control-h: 36px;
     --mono: ui-monospace, "SF Mono", "Menlo", "Consolas", "Cascadia Mono", "Roboto Mono", monospace;
+    /* Pile SANS pour la PROSE (revue design lot D1) : IBM Plex Sans embarquée (cf. @font-face) + repli système.
+       RÈGLE d'usage, à respecter par les prochains contributeurs :
+         • --mono = tout ce qu'on IDENTIFIE / COPIE : identifiants, tables de listing, U/IP/valeurs, code, inputs,
+                    boutons, badges/pills, onglets, libellés courts en capitales. L'esprit CONSOLE reste l'identité.
+         • --sans = tout ce qu'on LIT : paragraphes, aides/hints de formulaire, descriptions, messages de dialogue,
+                    toasts, intros/états vides. Appliqué CONTENEUR PAR CONTENEUR (pas via <body>, gardé en mono). */
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
   [data-theme="light"] {
     --bg: #f4f4f1;
@@ -39,13 +119,24 @@
     --line: #d6d6d0;
     --line-2: #b8b8b0;
     --fg: #0a0a0a;
-    --fg-dim: #555555;
+    --fg-dim: #555555;   /* déjà AA sur --bg clair (#f4f4f1) — inchangé (vérifié lot A) */
     --fg-dimmer: #888888;
-    --accent: #cc4400;
+    /* Rampe accent — variante THÈME CLAIR (cf. commentaire de la rampe dans :root). fill ≈ l'ancien accent
+       clair (#cc4400) ; accent un poil plus foncé pour le trait fin ; accent-text ENCORE plus foncé → AA sur fond clair. */
+    --accent-fill: oklch(0.57 0.18 42);
+    --accent: oklch(0.58 0.17 45);
+    --accent-text: oklch(0.55 0.18 45);
     --accent-2: #aa6600;
-    --role-mgmt: #2b6cb0;
-    --role-data: #15803d;
-    --role-power: #b45309;
+    /* Sémantiques — variante claire ASSOMBRIE : le vif du thème sombre passerait sous le seuil de contraste
+       sur --bg clair. Teinte conservée, luminosité abaissée pour rester AA. */
+    --ok: oklch(0.52 0.15 152);
+    --warn: oklch(0.55 0.13 78);
+    --err: oklch(0.53 0.20 27);
+    --info: oklch(0.50 0.15 250);
+    /* Rôles réseau — variante claire assombrie (teinte conservée). */
+    --role-mgmt: oklch(0.50 0.13 250);
+    --role-data: oklch(0.52 0.14 152);
+    --role-power: oklch(0.53 0.13 60);
     --viz-equip-bg: #e6f1fb;
     --viz-equip-fg: #0c447c;
   }
@@ -65,22 +156,51 @@
     font-size: 13px;
     line-height: 1.5;
     min-height: 100vh;
+  }
+  /* Grille de fond (repère d'alignement, purement décoratif). Portée par ::before — couche DÉDIÉE — pour que
+     l'opacité et le masque n'affectent QUE la grille, jamais le contenu (un mask posé sur <body> rognerait le texte).
+     • opacity 0.35 → grille discrète (« adoucie »).
+     • masque radial depuis le haut → grille CONFINÉE en haut-centre puis fondue ; REMPLACE l'ancien vignettage
+       opaque superposé (qui repeignait --bg par-dessus au lieu de simplement estomper la grille).
+     position:fixed + z-index:0 → grille fixe au défilement, SOUS le contenu (main = z-index 1). */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
     background-image:
       linear-gradient(var(--line) 1px, transparent 1px),
       linear-gradient(90deg, var(--line) 1px, transparent 1px);
     background-size: var(--grid-size) var(--grid-size);
     background-position: -1px -1px;
     background-attachment: fixed;
+    opacity: 0.35;
+    -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000, transparent 80%);
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000, transparent 80%);
   }
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    background: radial-gradient(ellipse at top, transparent 0%, var(--bg) 70%);
-    pointer-events: none;
-    z-index: 0;
+  /* Sur écran tactile (pas de survol), background-attachment:fixed provoque des saccades au défilement :
+     on repasse la grille en `scroll`. */
+  @media (hover: none) {
+    body::before { background-attachment: scroll; }
   }
-  a { color: var(--accent); }
+  a { color: var(--accent-text); }   /* lien = petit texte accent → --accent-text (contraste AA) */
+
+  /* Anneau de focus CLAVIER uniquement (:focus-visible, jamais :focus → le focus SOURIS reste inchangé).
+     Règle GLOBALE : tout élément interactif dépourvu d'indicateur de focus propre reçoit un anneau visible. */
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* Préférence système « animations réduites » : on neutralise transitions et animations (durée quasi nulle)
+     pour les personnes sensibles au mouvement — coupe pulsations, glissements de modale, spinners agités.
+     Durée 0.01ms (et non 0) pour que les événements transitionend/animationend attendus côté JS se déclenchent. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 
   /* ============ BARRES DE SCROLL (thÃ¨me app) ============ */
   /* Firefox */
@@ -214,7 +334,7 @@
   }
   .tabs-dd-item:last-child { border-bottom: none; }
   .tabs-dd-item:hover { color: var(--fg); background: var(--bg-3); }
-  .tabs-dd-item.active { color: var(--accent); }
+  .tabs-dd-item.active { color: var(--accent-text); }   /* libellé d'onglet actif = texte accent → --accent-text */
   /* En-tête de GROUPE dans le menu responsive (non cliquable) + ses enfants indentés (piège ②) — RÉUTILISE le
      gabarit .tabs-dd-menu/.tabs-dd-item, on n'ajoute que le repère de section et le décalage. */
   .tabs-dd-group { padding: 10px 16px 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--fg-dimmer); border-bottom: 1px solid var(--line); }
@@ -332,7 +452,7 @@
     flex-wrap: wrap;
   }
   .view-title { font-size: 16px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
-  .view-title span { color: var(--accent); }
+  .view-title span { color: var(--accent-text); }   /* titre de vue (accent) → --accent-text */
   .view-sub { font-size: 11px; color: var(--fg-dim); margin-top: 2px; letter-spacing: 0.04em; text-transform: none; }
   .view-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -356,7 +476,7 @@
   /* Icône SVG posée DIRECTEMENT dans un .btn (ex. bouton « fermer » réduit à une croix). Les cas plus
      spécifiques gardent la main : .icon-action svg (16px), .gi svg (libellés), .date-ctrl-btn svg. */
   .btn > svg { width: 14px; height: 14px; display: block; flex: none; }
-  .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+  .btn-primary { background: var(--accent-fill); color: #000; border-color: var(--accent-fill); font-weight: 600; }   /* aplat plein → --accent-fill */
   .btn-primary:hover { background: var(--accent-2); border-color: var(--accent-2); box-shadow: 0 0 16px rgba(255,85,0,0.4); }
   .btn-ghost { background: transparent; border-color: var(--line); }
   .btn-danger { color: var(--err); border-color: var(--err); background: transparent; }
@@ -422,12 +542,21 @@
   td.cell-name { font-weight: 600; color: var(--fg); }
   td.cell-actions { white-space: nowrap; text-align: right; }
   td.cell-desc { color: var(--fg-dim); max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
-  /* tableaux de LISTING : texte CENTRÉ (cellules + en-têtes de colonnes) */
-  .list-body th, .list-body td { text-align: center; }
-  .list-body td.cell-actions { text-align: center; }   /* actions centrées aussi */
-  .list-body td .viz-liaison, .list-body td .viz-loc { justify-content: center; }   /* lignes enroulées centrées */
+  /* Revue design (lot B) — REMPLACE le centrage généralisé de 7863bb1 (arbitrage utilisateur : scannabilité).
+     Dans les LISTINGS, le défaut redevient GAUCHE (le texte, les identifiants et les IP se lisent alignés à
+     gauche) : on ne rétablit donc AUCUNE règle `.list-body th/td { text-align:center }`. Seules les colonnes
+     NUMÉRIQUES passent à droite en chiffres tabulaires (.cell-num) et les actions à droite (.cell-actions).
+     Les flex `.viz-liaison`/`.viz-loc` retrouvent leur alignement de départ (flex-start) — plus de centrage. */
+  /* Colonne NUMÉRIQUE : quantités, compteurs, positions/hauteurs en U, tailles, nombres de ports/liens/dérivés,
+     ET dates ABSOLUES (elles se comparent verticalement). PAS les IP ni les identifiants (= texte mono, à gauche),
+     ni les libellés RELATIFS (« dans 30 j ») ou les PLAGES (« début → fin »), qui scannent mieux à gauche. Le
+     <th> porte la MÊME classe → l'en-tête s'ancre au bord droit et l'indicateur de tri suit sa colonne. */
+  .cell-num { text-align: right; font-variant-numeric: tabular-nums; }
+  /* En-tête de la colonne d'ACTIONS ancré à droite, au-dessus des boutons (les cellules `td.cell-actions`
+     retombent, elles, sur le `text-align:right` défini plus haut). */
+  th.cell-actions { text-align: right; }
   .cell-id { font-size: 10px; color: var(--fg-dimmer); }
-  .empty-row td { text-align: center; color: var(--fg-dimmer); padding: 32px 12px; font-style: italic; }
+  .empty-row td { text-align: center; color: var(--fg-dimmer); padding: 32px 12px; font-style: italic; font-family: var(--sans); }   /* prose (« aucun élément ») → --sans */
   .row-btn {
     background: transparent;
     border: 1px solid var(--line-2);
@@ -460,7 +589,7 @@
     letter-spacing: 0.05em; text-transform: uppercase;
     font-family: inherit; font-size: inherit;
   }
-  .row-menu-item:hover { background: var(--bg-3); color: var(--accent); }
+  .row-menu-item:hover { background: var(--bg-3); color: var(--accent-text); }   /* texte d'item au survol → --accent-text */
   .row-menu-item.row-menu-danger:hover { color: var(--err); background: var(--bg-3); }
   .row-menu-item[disabled] { opacity: 0.4; cursor: not-allowed; }
   .row-menu-item[disabled]:hover { background: transparent; color: var(--fg); }
@@ -492,7 +621,7 @@
     font-size: 11px;
   }
   .page-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--fg); }
-  .page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
+  .page-btn.active { background: var(--accent-fill); color: #000; border-color: var(--accent-fill); font-weight: 700; }   /* page active = sélection pleine → --accent-fill */
   .page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   select.page-size, select.app-select {
     background: var(--bg-2);
@@ -530,7 +659,7 @@
     display: inline-flex; align-items: center; gap: 6px;
     padding: 3px 10px; border-radius: var(--radius-pill);
     border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent);
-    color: var(--accent); font-size: 12px; font-weight: 600; white-space: nowrap;
+    color: var(--accent-text); font-size: 12px; font-weight: 600; white-space: nowrap;   /* texte de pill (bordure/fond restent --accent) → --accent-text */
   }
   .loc-pill svg { width: 13px; height: 13px; flex: none; }
   .loc-tag { margin-left: 8px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-dim); }
@@ -583,12 +712,12 @@
     border-bottom: 1px solid var(--line);
   }
   .ac-item:last-child { border-bottom: none; }
-  .ac-item:hover, .ac-item.active { background: var(--bg-3); color: var(--accent); }
+  .ac-item:hover, .ac-item.active { background: var(--bg-3); color: var(--accent-text); }   /* texte d'item (13px) au survol/actif → --accent-text */
   .ac-item.ac-overflow { cursor: default; }
   .ac-item.ac-overflow:hover { background: transparent; color: inherit; }
   .ac-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.25); }
   .ac-meta { color: var(--fg-dimmer); font-size: 11px; margin-left: auto; padding-left: 10px; }
-  .ac-new { color: var(--accent); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .ac-new { color: var(--accent-text); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }   /* étiquette « nouveau » (10px) → --accent-text */
 
   .palette { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .palette-swatch {
@@ -697,7 +826,7 @@
   .date-ctrl-btn.date-ctrl-text { padding: 0 10px; font-size: 10px; letter-spacing: 0.06em; }
   .date-ctrl-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; fill: none; }
   .form-field textarea { resize: vertical; min-height: 64px; line-height: 1.5; }
-  .form-hint { font-size: 10px; color: var(--fg-dimmer); margin-top: 4px; letter-spacing: 0.03em; }
+  .form-hint { font-size: 10px; color: var(--fg-dimmer); margin-top: 4px; letter-spacing: 0.03em; font-family: var(--sans); }   /* aide de formulaire (prose) → --sans */
   .form-hint.warn { color: var(--warn); }
   .form-hint.err { color: var(--err); }
   /* validation live (LiveValidation) : champ en erreur + message sous le contrôle */
@@ -715,7 +844,7 @@
     font-size: 11px;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: var(--accent);
+    color: var(--accent-text);   /* titre de section (11px) → --accent-text (AA) */
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -757,7 +886,7 @@
   .rcell.preview { background: color-mix(in srgb, var(--accent) 30%, transparent) !important; box-shadow: inset 0 0 0 1px var(--accent); }
   .rcell.occ.back-face { opacity: 0.55; }
   .rcell.occ.back-face .rcell-name { font-style: italic; }
-  .rcell.occ.mount-face .rcell-sub { color: var(--accent); }
+  .rcell.occ.mount-face .rcell-sub { color: var(--accent-text); }   /* sous-libellé (9px) de face de pose → --accent-text (lisibilité) */
   /* v115 â€” grille de pose latÃ©rale : colonne Â« baie Â» centrale (visuel du corps de la baie) */
   .side-grid th.side-mid, .side-grid td.side-mid { width: 30px; background: var(--bg-3); color: var(--fg-dimmer); font-size: 9px; text-align: center; border-left: 1px solid var(--line-2); border-right: 1px solid var(--line-2); }
   /* Ã©diteur de faÃ§ade d'Ã©quipement */
@@ -767,7 +896,7 @@
   .face-frame { position: relative; width: 100%; max-height: 70vh; margin: 0 auto; transform-origin: 0 0; will-change: transform; }
   .face-stage { position: absolute; inset: 0; background: transparent; border: 1px solid var(--line-2); overflow: hidden; user-select: none; z-index: 2; }
   .face-stage.empty { background-color: var(--bg); background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 22px 22px; }
-  .face-stage .face-empty-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px; color: var(--fg-dim); font-size: 11px; }
+  .face-stage .face-empty-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px; color: var(--fg-dim); font-size: 11px; font-family: var(--sans); }   /* état vide (prose) → --sans */
   .face-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; z-index: 0; }
   /* oreilles de montage 19″ : zone NON cliquable, matérialisée par des hachures */
   .face-ear { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; opacity: 0.55; background: repeating-linear-gradient(45deg, var(--line-2) 0 1px, transparent 1px 7px); border-inline: 1px dashed var(--line-2); }
@@ -782,7 +911,7 @@
   .face-marker .fm-x { cursor: pointer; font-weight: 700; opacity: 0.75; }
   .face-marker .fm-x:hover { opacity: 1; }
   .face-palette { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-  .face-palette-hint { width: 100%; font-size: 11px; color: var(--fg-dim); margin-bottom: 2px; }
+  .face-palette-hint { width: 100%; font-size: 11px; color: var(--fg-dim); margin-bottom: 2px; font-family: var(--sans); }   /* aide (prose) → --sans */
   .face-chip { background: var(--bg-3); border: 1px solid var(--line-2); color: var(--fg); font-size: 11px; padding: 3px 9px; border-radius: 4px; cursor: pointer; }
   .face-chip:hover { border-color: var(--accent); }
   .face-chip.active { background: var(--accent); border-color: var(--accent); color: #08121a; font-weight: 700; }
@@ -813,7 +942,7 @@
   .face-preview .face-marker { cursor: default; }
   /* bibliothÃ¨que d'images (sÃ©lecteur + gestionnaire) */
   .fi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; max-height: 52vh; overflow: auto; }
-  .fi-grid-empty { grid-column: 1 / -1; padding: 10px 4px; color: var(--fg-dim); font-size: 11px; }
+  .fi-grid-empty { grid-column: 1 / -1; padding: 10px 4px; color: var(--fg-dim); font-size: 11px; font-family: var(--sans); }   /* état vide (prose) → --sans */
   .fi-tile { display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 6px; cursor: pointer; color: var(--fg); text-align: center; }
   .fi-tile:hover { border-color: var(--accent); }
   .fi-tile.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -830,7 +959,7 @@
   /* aperÃ§u dans le formulaire d'image */
   .fi-form-preview { position: relative; width: 100%; max-width: 360px; aspect-ratio: 19 / 3.5; background: var(--bg); border: 1px solid var(--line-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .fi-form-preview img { width: 100%; height: 100%; object-fit: contain; }
-  .fi-form-empty { color: var(--fg-dim); font-size: 11px; }
+  .fi-form-empty { color: var(--fg-dim); font-size: 11px; font-family: var(--sans); }   /* état vide (prose) → --sans */
   /* ============ DATACENTER (v23) ============ */
   /* Comme la vue topologie : pleine largeur, pleine hauteur (mesurÃ©e en JS), anti-scroll. */
   main:has(#view-datacenter.active) { max-width: none; overflow: hidden; }
@@ -854,7 +983,7 @@
   .dc-pool { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-height: 42vh; overflow: auto; }
   .dc-pool-row { display: flex; align-items: center; gap: 8px; }
   .dc-pool-row .grow { flex: 1 1 auto; min-width: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dc-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; padding: 32px; text-align: center; color: var(--fg-dim); font-size: 12px; line-height: 1.7; }
+  .dc-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; padding: 32px; text-align: center; color: var(--fg-dim); font-size: 12px; line-height: 1.7; font-family: var(--sans); }   /* état vide / intro (prose) → --sans */
   .dc-room { fill: var(--bg); stroke: var(--line-2); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
   .dc-grid-line { stroke: var(--line); stroke-width: 1px; vector-effect: non-scaling-stroke; }
   /* v68 â€” cases INACCESSIBLES (hachurÃ©es) + overlay d'Ã©dition + cote (coordonnÃ©es en m) */
@@ -1109,7 +1238,7 @@
   .dc-tooltip .tt-title { margin: -8px -11px 7px; padding: 7px 11px 6px; background: var(--bg-2); border-bottom: 1px solid var(--line); font-weight: 700; font-size: 12.5px; color: var(--fg); }
   .dc-tooltip .tt-row { color: var(--fg-dim); margin: 2px 0; }
   .dc-tooltip .tt-row b { color: var(--fg); font-weight: 600; }
-  .dc-tooltip .tt-sec { margin: 8px 0 2px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700; color: var(--accent); opacity: 0.85; }
+  .dc-tooltip .tt-sec { margin: 8px 0 2px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700; color: var(--accent-text); opacity: 0.85; }   /* libellé de section (9px) → --accent-text */
   .dc-tooltip .tt-title + .tt-sec { margin-top: 3px; }
   .dc-tooltip .tt-sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: baseline; border: 1px solid var(--line-2); }
   .dc-card-head { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
@@ -1196,7 +1325,7 @@
   .modal-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .modal-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .modal-title { font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 700; }
-  .modal-title span { color: var(--accent); }
+  .modal-title span { color: var(--accent-text); }   /* titre de modale (accent) → --accent-text */
   .modal-subtitle { font-size: 10px; letter-spacing: 0.06em; color: var(--fg-dimmer); font-weight: 400; }
   .modal-subtitle:empty { display: none; }
   .modal-close {
@@ -1261,12 +1390,16 @@
   @keyframes dialogSlideIn { from { transform: translateY(-12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
   .dialog-header { padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--bg-3); display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
   .dialog-icon { font-size: 18px; line-height: 1; flex: 0 0 auto; }
-  .dialog-icon.variant-info { color: var(--accent); }
+  /* distinction sémantique : information ≠ action → l'icône « info » porte le token dédié --info (bleu, formalisé
+     au lot A), et non --accent (réservé aux ACTIONS/liens de l'app). */
+  .dialog-icon.variant-info { color: var(--info); }
   .dialog-icon.variant-success { color: var(--ok); }
   .dialog-icon.variant-warning { color: var(--warn); }
   .dialog-icon.variant-error, .dialog-icon.variant-danger { color: var(--err); }
   .dialog-title { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; flex: 1 1 auto; min-width: 0; }
-  .dialog-body { padding: 18px; flex: 1 1 auto; min-height: 0; overflow-y: auto; font-size: 13px; line-height: 1.5; color: var(--fg); }
+  /* Message de dialogue / confirmation = surface de LECTURE → --sans. Seul font-size de PROSE relevé (13→14px,
+     revue design lot D1) : bump contenu et à faible risque, le <body> reste à 13px (densité mono préservée). */
+  .dialog-body { padding: 18px; flex: 1 1 auto; min-height: 0; overflow-y: auto; font-size: 14px; line-height: 1.5; color: var(--fg); font-family: var(--sans); }
   .dialog-body p { margin: 0 0 10px; }
   .dialog-body p:last-child { margin-bottom: 0; }
   .dialog-message { white-space: pre-wrap; word-wrap: break-word; }
@@ -1279,7 +1412,7 @@
   .open-kind-btn .ok-ic svg { width: 20px; height: 20px; display: block; }   /* icône SVG (remplace l'ancien emoji) */
   .open-kind-btn .ok-tx { display: flex; flex-direction: column; gap: 2px; }
   .open-kind-btn .ok-title { font-weight: 600; }
-  .open-kind-btn .ok-desc { font-size: 12px; color: var(--fg-dim); }
+  .open-kind-btn .ok-desc { font-size: 12px; color: var(--fg-dim); font-family: var(--sans); }   /* description (prose) → --sans */
 
   /* ============ TOOLTIP ============ */
   /* v101 â€” tooltips enrichis repensÃ©s : bandeau d'en-tÃªte pleine largeur (le 1er .tt-title bleed via marges
@@ -1344,14 +1477,14 @@
   .app-tooltip .tt-title .ricon svg { width: 15px; height: 15px; display: block; }
   .app-tooltip .tt-sub { color: var(--fg-dim); margin: 0 0 5px; font-size: 10.5px; }
   /* libellÃ© de SECTION (regroupe les paires clÃ©/valeur) */
-  .app-tooltip .tt-sec { margin: 9px 0 3px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700; color: var(--accent); opacity: 0.85; }
+  .app-tooltip .tt-sec { margin: 9px 0 3px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700; color: var(--accent-text); opacity: 0.85; }   /* libellé de section (9px) → --accent-text */
   .app-tooltip .tt-sub + .tt-sec, .app-tooltip .tt-title + .tt-sec { margin-top: 4px; }
   .app-tooltip .tt-sep { border-top: 1px solid var(--line); margin: 8px 0; }
   .app-tooltip .tt-line { display: flex; align-items: baseline; gap: 14px; margin: 3px 0; }
   .app-tooltip .tt-line .tt-k { color: var(--fg-dim); white-space: nowrap; }
   .app-tooltip .tt-line .tt-v { color: var(--fg); margin-left: auto; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .app-tooltip .tt-line .tt-v b { color: var(--accent); }
-  .app-tooltip .tt-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10px; line-height: 1.55; background: var(--bg); border: 1px solid var(--accent); color: var(--accent); font-weight: 600; }
+  .app-tooltip .tt-line .tt-v b { color: var(--accent-text); }   /* valeur en gras (petit texte) → --accent-text */
+  .app-tooltip .tt-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10px; line-height: 1.55; background: var(--bg); border: 1px solid var(--accent); color: var(--accent-text); font-weight: 600; }   /* texte de pill (10px) → --accent-text ; bordure reste --accent */
 
   /* ============ TOAST ============ */
   #toast-container {
@@ -1370,6 +1503,7 @@
     color: var(--fg);
     padding: 10px 14px;
     font-size: 12px;
+    font-family: var(--sans);   /* message (prose) → --sans */
     box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     animation: toastIn .2s;
     max-width: 360px;
@@ -1505,7 +1639,7 @@
   .multi-trigger:hover { border-color: var(--fg); }
   .multi-trigger:disabled { opacity: 0.5; cursor: default; }
   .multi-trigger:disabled:hover { border-color: var(--line); }
-  .multi-trigger .count-badge { color: var(--accent); }
+  .multi-trigger .count-badge { color: var(--accent-text); }   /* compteur textuel → --accent-text */
   .multi-panel {
     position: absolute;
     top: calc(100% + 4px);
@@ -1561,7 +1695,7 @@
   .dc-search-tag {
     flex: none; min-width: 46px; text-align: center;
     font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--accent); border: 1px solid var(--line-2);
+    color: var(--accent-text); border: 1px solid var(--line-2);   /* tag textuel (9px) → --accent-text */
     border-radius: var(--radius-pill); padding: 1px 6px;
   }
 
@@ -1597,6 +1731,105 @@
   th.sortable:hover { color: var(--accent); }
   th .sort-ind { color: var(--accent); }
 
+  /* ============ BARRE DE CONTRÔLES UNIFIÉE DES LISTINGS (revue design lot C) ============
+     UNE barre par listing (ListView générique, Interventions, Certificats) : recherche EN TÊTE (extensible,
+     loupe intégrée), TRI en barre (select compact + bouton de sens, ListView uniquement), filtres ACTIFS en
+     chips supprimables + bouton « + Filtre » (ouvre le MultiSelect existant), « Réinitialiser » à droite. TOUS
+     les contrôles partagent --control-h → plus de mélange de hauteurs/motifs. Le tri reste AUSSI porté par les
+     en-têtes de colonnes (.sortable), synchronisés au select (même état de tri). */
+  .list-chrome {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-bottom: 12px;
+  }
+  /* Hauteur unique pour les contrôles VIVANT DANS la barre (pas ceux des popovers). Les conteneurs qui PEUVENT
+     s'envelopper (filtres/chips) reçoivent min-height (ne pas rogner un chip passé à la ligne). Combinateurs
+     DESCENDANTS (et non « > ») car les hôtes en display:contents s'effacent du rendu mais pas du DOM. */
+  .list-chrome .lc-search,
+  .list-chrome .lc-sort-key,
+  .list-chrome .lc-sort-dir,
+  .list-chrome .lc-addfilter-btn,
+  .list-chrome .lc-right .btn,
+  .list-chrome .lc-reset {
+    height: var(--control-h); box-sizing: border-box;
+  }
+  .list-chrome .lc-filters { min-height: var(--control-h); }
+  .list-chrome .lc-right .btn { display: inline-flex; align-items: center; }
+  .lc-filters-host, .lc-reset-host { display: contents; }   /* hôtes transparents : la FilterBar participe au flex de la barre */
+
+  /* -- Recherche : loupe intégrée + champ sans bordure propre (le conteneur EST la boîte) -- */
+  .lc-search, .lc-searchpop {
+    flex: 1 1 260px; min-width: 180px; position: relative;
+    display: inline-flex; align-items: center; gap: 6px; padding: 0 10px;
+    background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius-pill);
+  }
+  .lc-searchpop { height: var(--control-h); box-sizing: border-box; padding: 0 6px 0 10px; }
+  .lc-search:focus-within, .lc-searchpop:focus-within { border-color: var(--accent); }
+  .lc-search-ic { display: inline-flex; flex: none; color: var(--fg-dim); }
+  .lc-search-ic svg { width: 15px; height: 15px; }
+  .lc-search .search-input, .lc-searchpop .search-input {
+    flex: 1 1 auto; min-width: 0; max-width: none;
+    border: none; background: transparent; padding: 0; height: 100%;
+  }
+  .lc-searchpop .btn { height: auto; padding: 3px 5px; }   /* le ✕ « effacer » reste petit dans le champ */
+
+  /* -- Tri EN BARRE (revue design) : select compact de CRITÈRE + bouton de SENS dédié, entre la recherche et
+     « + Filtre ». Hauteur calée sur --control-h (cf. règle partagée plus haut) ; sens = petit bouton pilule
+     reprenant l'esthétique de « + Filtre »/recherche. Synchronisé avec les en-têtes triables (état unique). -- */
+  .lc-sort { display: inline-flex; align-items: center; gap: 6px; }
+  .lc-sort-lb { font-size: 10px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.07em; }
+  .lc-sort-key { cursor: pointer; }   /* le fond/bordure/mono vient de select.app-select ; la hauteur de la règle --control-h */
+  .lc-sort-dir {
+    display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h);
+    padding: 0 10px; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius-pill);
+    color: var(--fg); font-family: var(--mono); font-size: 13px; line-height: 1; cursor: pointer;
+  }
+  .lc-sort-dir:hover { border-color: var(--fg); }
+  .lc-sort-dir:focus-visible { border-color: var(--accent); }
+
+  /* -- « + Filtre » : bouton pointillé + popover reprenant les MultiSelect existants (un par dimension) -- */
+  .lc-filters { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .lc-addfilter { position: relative; display: inline-flex; }
+  .lc-addfilter-btn {
+    display: inline-flex; align-items: center; gap: 5px; padding: 0 12px;
+    background: var(--bg-2); border: 1px dashed var(--line-2); border-radius: var(--radius-pill);
+    color: var(--fg-dim); font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .lc-addfilter-btn:hover { color: var(--fg); border-color: var(--fg); }
+  .lc-addfilter-ic { display: inline-flex; }
+  .lc-addfilter-ic svg { width: 13px; height: 13px; }
+  .lc-addfilter-menu {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 55;
+    display: none; flex-direction: column; gap: 8px;
+    background: var(--bg-2); border: 1px solid var(--line-2);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5); padding: 10px; min-width: 200px;
+  }
+  .lc-addfilter-menu.open { display: flex; }
+  .lc-addfilter-menu .btn { height: auto; }   /* boutons internes (MultiSelect « tout/rien ») à leur taille propre */
+  .lc-addfilter-menu .multi-trigger { min-width: 180px; }
+  .lc-single { display: flex; align-items: center; gap: 6px; }
+  .lc-single-lb { font-size: 10px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.07em; }
+
+  /* -- Chips de filtre actif (un par valeur) : pastille accentuée, croix de retrait (inspirée de .loc-pill/.chip) -- */
+  .lc-chips { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 280px;
+    padding: 3px 5px 3px 10px; border-radius: var(--radius-pill);
+    border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent-text); font-size: 11px; white-space: nowrap;
+  }
+  .filter-chip-lb { overflow: hidden; text-overflow: ellipsis; }
+  .filter-chip-x {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 16px; height: 16px; padding: 0; border: none; border-radius: 50%;
+    background: transparent; color: var(--accent-text); opacity: 0.75; cursor: pointer;
+  }
+  .filter-chip-x:hover { opacity: 1; color: var(--err); background: color-mix(in srgb, var(--err) 16%, transparent); }
+  .filter-chip-x svg { width: 11px; height: 11px; }
+
+  /* -- Cluster de DROITE (poussé à droite) : compact/créations/actualisation + « Réinitialiser » (le plus à droite) -- */
+  .lc-right { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  .lc-lockbadge { display: inline-flex; align-items: center; }
+
   /* v78 â€” combo de sÃ©lection avec recherche intÃ©grÃ©e (grandes listes) */
   .ss-pop { position: relative; width: 100%; }
   .ss-trigger {
@@ -1623,9 +1856,9 @@
     padding: 7px 8px; cursor: pointer; border-radius: var(--radius-pill);
   }
   .ss-item:hover { background: var(--bg-3); }
-  .ss-item.sel { color: var(--accent); }
+  .ss-item.sel { color: var(--accent-text); }   /* item sélectionné (texte 12px) → --accent-text */
   .ss-item:disabled { color: var(--fg-dimmer); cursor: not-allowed; }
-  .ss-empty { color: var(--fg-dimmer); font-size: 12px; padding: 7px 8px; }
+  .ss-empty { color: var(--fg-dimmer); font-size: 12px; padding: 7px 8px; font-family: var(--sans); }   /* état vide (prose) → --sans */
 
   .graph-stage {
     position: relative;
@@ -1668,8 +1901,8 @@
   }
   .graph-zoom-controls .btn svg { display: block; }
   /* bouton RETOUR : flèche SVG sur fond accent orange (plus de texte) */
-  .graph-zoom-controls .dc-back-btn { background: var(--accent); color: #000; border-color: var(--accent); }
-  .graph-zoom-controls .dc-back-btn:hover { background: var(--accent); border-color: var(--accent); filter: brightness(1.12); }
+  .graph-zoom-controls .dc-back-btn { background: var(--accent-fill); color: #000; border-color: var(--accent-fill); }   /* bouton plein → --accent-fill */
+  .graph-zoom-controls .dc-back-btn:hover { background: var(--accent-fill); border-color: var(--accent-fill); filter: brightness(1.12); }
   .graph-zoom-controls .gz-sep { height: 1px; background: var(--line-2); margin: 3px 2px; align-self: stretch; }
   /* v48 : points de vue 3D en ligne (Ã  cÃ´tÃ© du recentrage) */
   .dc-cam-presets { display: flex; gap: 3px; }
@@ -1768,7 +2001,7 @@
     padding: 4px 12px; color: var(--fg-dim);
   }
   .rm-toggle button + button { border-left: 1px solid var(--line-2); }
-  .rm-toggle button.on { background: var(--bg-3); color: var(--accent); }
+  .rm-toggle button.on { background: var(--bg-3); color: var(--accent-text); }   /* segment actif : fond NON plein (bg-3) → seul le texte est accent → --accent-text */
   /* v171 — extensions du contrôle segmenté (choix 1/N, cf. POC Piste D) : survol, désactivé,
      segments à ICÔNE (presets de portée 3D), orientation VERTICALE (rail des étages). */
   .rm-toggle button:not(.on):not(:disabled):hover { color: var(--fg); background: var(--bg-2); }
@@ -1808,12 +2041,12 @@
   .graph-ctx .ctx-head { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-dim); padding: 4px 10px 2px; }
   /* gestionnaire de dispositions enregistrÃ©es */
   .layout-mgr { display: flex; flex-direction: column; gap: 8px; }
-  .layout-mgr .lm-empty { color: var(--fg-dimmer); font-style: italic; padding: 20px 4px; text-align: center; font-size: 12px; }
+  .layout-mgr .lm-empty { color: var(--fg-dimmer); font-style: italic; padding: 20px 4px; text-align: center; font-size: 12px; font-family: var(--sans); }   /* état vide (prose) → --sans */
   .layout-mgr .lm-item { border: 1px solid var(--line); background: var(--bg); padding: 10px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .layout-mgr .lm-item.active { border-color: var(--accent); }
   .layout-mgr .lm-info { flex: 1 1 220px; min-width: 0; }
   .layout-mgr .lm-name { font-weight: 600; display: flex; align-items: center; gap: 8px; color: var(--fg); }
-  .layout-mgr .lm-badge { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius-pill); padding: 1px 7px; font-weight: 700; }
+  .layout-mgr .lm-badge { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text); border: 1px solid var(--accent); border-radius: var(--radius-pill); padding: 1px 7px; font-weight: 700; }   /* texte de badge (9px) → --accent-text ; bordure reste --accent */
   .layout-mgr .lm-sub { font-size: 10px; color: var(--fg-dim); margin-top: 3px; }
   .layout-mgr .lm-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
   /* plein Ã©cran : le stage occupe tout l'Ã©cran */
@@ -1873,7 +2106,7 @@
   .mode-switch-track::before { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: var(--fg-dim); border-radius: 50%; transition: transform .15s, background .15s; }
   .mode-switch input:checked + .mode-switch-track { background: var(--bg-3); border-color: var(--accent); }
   .mode-switch input:checked + .mode-switch-track::before { transform: translateX(22px); background: var(--accent); }
-  .mode-switch input:focus-visible + .mode-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mode-switch input:focus-visible + .mode-switch-track { outline: 2px solid var(--focus); outline-offset: 2px; }   /* aligné sur l'anneau de focus global (--focus) */
   .settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .settings-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--fg); }
   .settings-toggle input { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); }
@@ -1883,10 +2116,13 @@
     border: 1px solid var(--line-2); color: var(--fg-dimmer);
     font-size: 9px; font-weight: 700; cursor: help; user-select: none;
   }
-  .settings-help-icon:hover, .settings-help-icon:focus { color: var(--fg); border-color: var(--fg-dim); outline: none; }
+  /* `outline: none` retiré : il supprimait l'anneau AU CLAVIER aussi. On laisse désormais la règle
+     :focus-visible globale poser l'anneau au clavier ; au survol/focus SOURIS, seuls couleur + bordure changent
+     (:focus-visible ne s'active pas à la souris sur ce contrôle non textuel → focus souris inchangé). */
+  .settings-help-icon:hover, .settings-help-icon:focus { color: var(--fg); border-color: var(--fg-dim); }
   .settings-status-line { font-size: 10px; color: var(--fg-dim); margin-top: 8px; letter-spacing: 0.04em; }
   .settings-status-line strong { color: var(--fg); font-weight: 600; }
-  .settings-row-note { font-size: 10px; color: var(--fg-dimmer); margin-top: 6px; line-height: 1.5; }
+  .settings-row-note { font-size: 10px; color: var(--fg-dimmer); margin-top: 6px; line-height: 1.5; font-family: var(--sans); }   /* note (prose) → --sans */
 
   /* ============ WELCOME SCREEN ============ */
   .welcome-screen {
@@ -1912,19 +2148,19 @@
   .welcome-logo { width: 48px; height: 48px; margin: 0 auto 18px; color: var(--accent); }
   .welcome-logo svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
   .welcome-title { color: var(--fg); letter-spacing: 0.22em; font-size: 20px; margin: 0 0 10px; font-weight: 700; }
-  .welcome-text { color: var(--fg-dim); font-size: 12px; line-height: 1.6; margin: 0 0 16px; }
+  .welcome-text { color: var(--fg-dim); font-size: 12px; line-height: 1.6; margin: 0 0 16px; font-family: var(--sans); }   /* intro (prose) → --sans */
   .welcome-mode-badge {
     color: var(--fg-dim); font-size: 11px; line-height: 1.5; margin: 0 0 18px;
     padding: 8px 12px; border: 1px solid var(--line-2); border-left: 3px solid var(--accent);
     background: var(--bg-2); border-radius: 4px;
   }
-  .welcome-mode-badge strong { color: var(--accent); }
+  .welcome-mode-badge strong { color: var(--accent-text); }   /* emphase textuelle du bandeau → --accent-text */
   .welcome-actions { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
   .welcome-btn { width: 100%; justify-content: center; }
-  .welcome-mode-hint { color: var(--fg-dimmer); font-size: 10px; line-height: 1.5; margin: 18px 0 0; letter-spacing: 0.02em; }
+  .welcome-mode-hint { color: var(--fg-dimmer); font-size: 10px; line-height: 1.5; margin: 18px 0 0; letter-spacing: 0.02em; font-family: var(--sans); }   /* aide (prose) → --sans */
   .welcome-auth { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
   .welcome-auth-msg {
-    color: var(--fg-dim); font-size: 13px; line-height: 1.6; margin: 0;
+    color: var(--fg-dim); font-size: 13px; line-height: 1.6; margin: 0; font-family: var(--sans);   /* message (prose) → --sans */
     padding: 14px 16px; border: 1px solid var(--line-2); border-left: 3px solid var(--danger, #e5534b);
     background: var(--bg-2); border-radius: 4px; text-align: left;
   }
@@ -1947,6 +2183,10 @@
     th, td { padding: 8px 6px; }
     table { font-size: 11px; }
     .list-search, .list-toolbar { padding-left: 4px; padding-right: 4px; }
+    /* Barre de contrôles unifiée : recherche PLEINE LARGEUR en tête, le reste (chips, « + Filtre », cluster de
+       droite) passe dessous et s'aligne à gauche — wrap propre, aucune casse. */
+    .list-chrome .lc-search, .list-chrome .lc-searchpop { flex-basis: 100%; }
+    .list-chrome .lc-right { margin-left: 0; }
     .view-header { margin-bottom: 10px; }
     /* Onglets → MENU DEROULANT (gain de place, accessible au pouce) : la barre d'onglets cède la place au déclencheur.
        Les boutons de GROUPE (dans .tabs) disparaissent aussi — leurs enfants sont aplatis dans le menu global (piège ②). */
@@ -1977,6 +2217,62 @@
     }
     .dc-row.show-side .dc-side-close { display: inline-flex; align-self: flex-end; margin-bottom: 4px; }
     .dc-row.show-side .dc-side { flex: 1 1 auto; width: auto; min-width: 0; overflow: auto; }
+  }
+
+  /* ============ CIBLES TACTILES (écrans SANS survol) ============
+     Sur tactile, on agrandit les boutons-ICÔNE d'action à ≥ 44×44 px (recommandation d'accessibilité pour
+     le tap) et on écarte de ≥ 8 px les boutons d'une même rangée d'actions. Le DESKTOP reste STRICTEMENT
+     inchangé : tout est confiné à @media (hover: none). Non touché : les boutons déjà grands (topbar 56 px)
+     et les commandes des grilles denses (baies) où 44 px déborderait. */
+  @media (hover: none) {
+    /* boutons-icône d'action des listings / fiches / barres de sélection */
+    .icon-action { width: 44px; height: 44px; }
+    .icon-action + .icon-action { margin-left: 8px; }   /* ≥ 8 px entre boutons voisins d'une rangée */
+    /* boutons texte-icône d'une cellule d'actions (ex. « Attacher ») */
+    .cell-actions .row-btn { width: 44px; height: 44px; margin-left: 8px; }
+    /* pagination (⋮ overflow relève de .icon-action ci-dessus) */
+    .page-btn { min-width: 44px; height: 44px; }
+    /* sélecteur de date : input + boutons alignés à 44 px (l'input suit pour ne pas dépareiller la rangée) */
+    .date-ctrl-btn { height: 44px; }
+    .date-ctrl-btn.date-ctrl-icon { width: 44px; }
+    .date-input-row > input { height: 44px; }
+  }
+
+  /* ============ LISTINGS EN CARTES (< 560px) — revue design lot D2 ============
+     Sous 560px, une table de listing ne tient plus en largeur (défilement horizontal pénible au pouce). On la
+     replie en CARTES empilées SANS dupliquer le markup : chaque `<td>` porte déjà un `data-label` (= en-tête de
+     sa colonne — posé au rendu par la ListView dans son gabarit, et par CardTable pour les vues Certs /
+     Interventions). Ici : on RETIRE le `thead` du flux (mais on le garde accessible aux lecteurs d'écran), on
+     transforme chaque `<tr>` en carte, et chaque cellule affiche son libellé via
+     `td::before { content: attr(data-label) }`. Portée STRICTEMENT aux tables de LISTING (.list-body) — les
+     grilles de baies (.rack-grid), la 3D, etc. ne sont pas concernées. Placé APRÈS le bloc 760px → l'emporte. */
+  @media (max-width: 560px) {
+    .list-body .table-wrap { border: none; background: transparent; overflow: visible; }
+    .list-body table, .list-body tbody, .list-body tr, .list-body td { display: block; }
+    /* en-têtes retirés VISUELLEMENT mais lus par les lecteurs d'écran (repris en ::before sur chaque cellule). */
+    .list-body thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+    .list-body tbody tr {
+      border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2);
+      margin-bottom: 10px; padding: 4px 12px;
+    }
+    .list-body tbody tr:hover { background: var(--bg-2); }   /* pas de survol « ligne » en carte (le doigt ne survole pas) */
+    /* width auto en !important : neutralise les `width:1%` INLINE des cellules de sélection (case à cocher),
+       qui, en display:block, réduiraient la cellule à 1 % de la carte. */
+    .list-body tbody td { width: auto !important; text-align: left; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .list-body tbody td:last-child { border-bottom: none; }
+    /* Libellé de colonne DEVANT la valeur : petit label capitales, esprit console conservé (mono). */
+    .list-body tbody td[data-label]::before {
+      content: attr(data-label);
+      display: block; margin-bottom: 3px;
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dim);
+    }
+    /* Colonne NUMÉRIQUE : libellé et valeur sur la MÊME ligne (label à gauche, valeur à droite) — lecture compacte. */
+    .list-body tbody td.cell-num { display: flex; align-items: baseline; justify-content: space-between; text-align: right; }
+    .list-body tbody td.cell-num[data-label]::before { margin-bottom: 0; }
+    /* Cellule d'ACTIONS : rangée de boutons alignée à droite, SANS libellé (aucun data-label). */
+    .list-body tbody td.cell-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; padding-top: 10px; }
+    /* Ligne vide : reste une carte simple centrée (aucun data-label → pas de ::before). */
+    .list-body tbody tr.empty-row td { text-align: center; border-bottom: none; }
   }
 
 
@@ -2403,6 +2699,15 @@
           <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M6.5 17.5c3-1 4-4 2-6s1-5 4-6"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M6.5 17.5c3-1 4-4 2-6s1-5 4-6"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M6.5 17.5c3-1 4-4 2-6s1-5 4-6"/></svg></span>
+        </div>
+      </div>
+      <div class="ds-ico-cell">
+        <div class="ds-ico-name">SEARCH</div>
+        <div class="ds-ico-renders">
+          <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg></span>
+          <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg></span>
         </div>
       </div>
       <div class="ds-ico-cell">

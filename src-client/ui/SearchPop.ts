@@ -41,6 +41,10 @@ export interface SearchPopOptions {
   debounceMs?: number;
   /** Nombre de caractères minimal avant de lancer une recherche — défaut 2. */
   minChars?: number;
+  /** Mode « barre de listing » (revue design lot C) : le champ devient EXTENSIBLE (flex:1), à la HAUTEUR
+      de contrôle unifiée, avec la loupe INTÉGRÉE (`Icons.SEARCH`) — même vocabulaire que la recherche des
+      ListView. Défaut false : rendu compact d'origine (sélecteur d'entité en modale, etc.). */
+  grow?: boolean;
 }
 
 export class SearchPop {
@@ -61,14 +65,18 @@ export class SearchPop {
     this.debounceMs = opts.debounceMs ?? 180;
     this.minChars = opts.minChars ?? 2;
 
+    const grow = opts.grow === true;
     this.wrap = document.createElement("div");
     // position:relative : ancre le popover absolu au conteneur (indépendant de la toolbar hôte).
-    this.wrap.style.cssText = "position:relative;display:flex;align-items:center;gap:4px";
+    // Mode `grow` (barre de listing) : la classe `.lc-searchpop` porte la loupe, la bordure et la hauteur
+    // de contrôle unifiée ; le champ y est extensible et sans bordure propre (box = le conteneur).
+    if (grow) this.wrap.className = "lc-searchpop";
+    else this.wrap.style.cssText = "position:relative;display:flex;align-items:center;gap:4px";
 
     this.input = document.createElement("input");
     this.input.type = "text"; this.input.className = "search-input";
     this.input.placeholder = opts.placeholder;
-    this.input.style.cssText = "min-width:220px;max-width:320px;padding:6px 10px;flex:none";
+    if (!grow) this.input.style.cssText = "min-width:220px;max-width:320px;padding:6px 10px;flex:none";
 
     const clear = document.createElement("button");
     clear.type = "button"; clear.className = "btn btn-ghost btn-sm";
@@ -83,7 +91,14 @@ export class SearchPop {
     this.input.onblur = () => { window.setTimeout(() => this.hide(), 150); };
     this.input.onkeydown = (e) => this.onKey(e);
 
-    this.wrap.append(this.input, clear, this.pop);
+    // Loupe INTÉGRÉE en tête (mode barre de listing) — repère visuel, non focusable (aria-hidden).
+    if (grow) {
+      const icon = document.createElement("span"); icon.className = "lc-search-ic";
+      icon.setAttribute("aria-hidden", "true"); icon.innerHTML = Icons.SEARCH;
+      this.wrap.append(icon, this.input, clear, this.pop);
+    } else {
+      this.wrap.append(this.input, clear, this.pop);
+    }
   }
 
   /** Conteneur à insérer dans une toolbar (input + bouton ✕ + popover). */
