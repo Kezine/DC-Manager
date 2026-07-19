@@ -1390,7 +1390,9 @@
   @keyframes dialogSlideIn { from { transform: translateY(-12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
   .dialog-header { padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--bg-3); display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
   .dialog-icon { font-size: 18px; line-height: 1; flex: 0 0 auto; }
-  .dialog-icon.variant-info { color: var(--accent); }
+  /* distinction sémantique : information ≠ action → l'icône « info » porte le token dédié --info (bleu, formalisé
+     au lot A), et non --accent (réservé aux ACTIONS/liens de l'app). */
+  .dialog-icon.variant-info { color: var(--info); }
   .dialog-icon.variant-success { color: var(--ok); }
   .dialog-icon.variant-warning { color: var(--warn); }
   .dialog-icon.variant-error, .dialog-icon.variant-danger { color: var(--err); }
@@ -1731,9 +1733,10 @@
 
   /* ============ BARRE DE CONTRÔLES UNIFIÉE DES LISTINGS (revue design lot C) ============
      UNE barre par listing (ListView générique, Interventions, Certificats) : recherche EN TÊTE (extensible,
-     loupe intégrée), filtres ACTIFS en chips supprimables + bouton « + Filtre » (ouvre le MultiSelect existant),
-     « Réinitialiser » à droite. TOUS les contrôles partagent --control-h → plus de mélange de hauteurs/motifs.
-     Le TRI n'est PAS en barre : il vit sur les en-têtes de colonnes (.sortable). */
+     loupe intégrée), TRI en barre (select compact + bouton de sens, ListView uniquement), filtres ACTIFS en
+     chips supprimables + bouton « + Filtre » (ouvre le MultiSelect existant), « Réinitialiser » à droite. TOUS
+     les contrôles partagent --control-h → plus de mélange de hauteurs/motifs. Le tri reste AUSSI porté par les
+     en-têtes de colonnes (.sortable), synchronisés au select (même état de tri). */
   .list-chrome {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
     margin-bottom: 12px;
@@ -1742,6 +1745,8 @@
      s'envelopper (filtres/chips) reçoivent min-height (ne pas rogner un chip passé à la ligne). Combinateurs
      DESCENDANTS (et non « > ») car les hôtes en display:contents s'effacent du rendu mais pas du DOM. */
   .list-chrome .lc-search,
+  .list-chrome .lc-sort-key,
+  .list-chrome .lc-sort-dir,
   .list-chrome .lc-addfilter-btn,
   .list-chrome .lc-right .btn,
   .list-chrome .lc-reset {
@@ -1766,6 +1771,20 @@
     border: none; background: transparent; padding: 0; height: 100%;
   }
   .lc-searchpop .btn { height: auto; padding: 3px 5px; }   /* le ✕ « effacer » reste petit dans le champ */
+
+  /* -- Tri EN BARRE (revue design) : select compact de CRITÈRE + bouton de SENS dédié, entre la recherche et
+     « + Filtre ». Hauteur calée sur --control-h (cf. règle partagée plus haut) ; sens = petit bouton pilule
+     reprenant l'esthétique de « + Filtre »/recherche. Synchronisé avec les en-têtes triables (état unique). -- */
+  .lc-sort { display: inline-flex; align-items: center; gap: 6px; }
+  .lc-sort-lb { font-size: 10px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.07em; }
+  .lc-sort-key { cursor: pointer; }   /* le fond/bordure/mono vient de select.app-select ; la hauteur de la règle --control-h */
+  .lc-sort-dir {
+    display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h);
+    padding: 0 10px; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius-pill);
+    color: var(--fg); font-family: var(--mono); font-size: 13px; line-height: 1; cursor: pointer;
+  }
+  .lc-sort-dir:hover { border-color: var(--fg); }
+  .lc-sort-dir:focus-visible { border-color: var(--accent); }
 
   /* -- « + Filtre » : bouton pointillé + popover reprenant les MultiSelect existants (un par dimension) -- */
   .lc-filters { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
