@@ -1,0 +1,77 @@
+<!-- @dsCard group="Panneaux 2D/3D" name="Panneau Affichage / calques" subtitle="bascules groupées (grille d'icônes toggle-pill), curseurs, coloration — carte view-aware (jeu complet en 3D, sous-ensemble en 2D)" -->
+<!-- DÉRIVÉ de src-client/views/dc/DcPanels.ts (view3dOptionsCard) : carte .dc-card view-aware. Chaque calque est un
+     BOUTON-BASCULE ui/FormControls.toggle (.btn.btn-sm.toggle-pill, role=switch), dont le contenu est REMPLACÉ par
+     l'icône seule → carré 36px dans une grille .dc-3d-toggle-grid (cf. dc-manager.css). Les icônes des toggles sont
+     des SVG INLINE locaux à DcPanels (map `I`) — reproduits verbatim. Curseurs = DcBase.slider (input[type=range]) ;
+     coloration = ui/FormControls.select (.app-select). Titre + icône d'aide (.settings-help-icon.dc-help) en 3D.
+     Textes FR = catalogue i18n dc.panels.* + lists.col.*. APERÇU STATIQUE : variante 3D (jeu COMPLET) ; la carte est
+     repliable dans le panneau latéral réel (chevron injecté par DcBase.collapsible) — montrée dépliée ici. -->
+<section class="ds-section">
+  <h2>Panneau « Vue 3D » (jeu complet de calques)</h2>
+  <p class="ds-note">Carte du panneau latéral. Les calques sont des bascules ICÔNE regroupées par thème (Équipements, Baies, Câbles, Waypoints, Étage &amp; repères) ; l'en-tête de section n'apparaît que si au moins un calque s'applique à la vue courante. État ON = teinte accent + témoin, sans aplat plein.</p>
+  <div class="ds-demo">
+    <div class="dc-card" style="max-width:420px">
+      <div class="dc-card-title">Vue 3D<span class="settings-help-icon dc-help" role="img" tabindex="0" aria-label="Aide : navigation 3D" title="Glisser GAUCHE = déplacer le modèle · glisser DROIT (ou Maj+glisser) = orbiter · molette = zoom. Survolez une baie pour son détail, cliquez-la pour l'éditer.">?</span></div>
+
+      <div style="font-size:10.5px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.05em;margin:9px 0 3px">Équipements</div>
+      <div class="dc-3d-toggle-grid">
+        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Masquer les équipements montés en façade AVANT" aria-label="Masquer les équipements montés en façade AVANT"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Masquer les équipements montés à l'ARRIÈRE" aria-label="Masquer les équipements montés à l'ARRIÈRE"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="14" width="16" height="6" fill="currentColor" stroke="none"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Ports (connecteurs sur les faces)" aria-label="Ports (connecteurs sur les faces)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Noms des équipements" aria-label="Noms des équipements"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h9M5 18h6"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Images de façade" aria-label="Images de façade"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="10" r="1.8"/><path d="M21 16l-5-4-8 7"/></svg></button>
+      </div>
+
+      <div style="font-size:10.5px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.05em;margin:9px 0 3px">Baies</div>
+      <div class="dc-3d-toggle-grid">
+        <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Capots / parois des baies" aria-label="Capots / parois des baies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18M19 3v18"/><rect x="9" y="6" width="6" height="12" rx="1"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Portes des baies" aria-label="Portes des baies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v17"/><path d="M4 21h16"/><circle cx="13.5" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Débattement des portes : projection du rayon d'ouverture au sol (3D et plan de salle)" aria-label="Débattement des portes : projection du rayon d'ouverture au sol (3D et plan de salle)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V5"/><path d="M5 5a16 16 0 0 1 16 16"/><path d="M5 21h16" stroke-dasharray="2.5 2.5"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Emplacements libres" aria-label="Emplacements libres"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="8" rx="1" stroke-dasharray="3 2.5"/></svg></button>
+      </div>
+
+      <div style="font-size:10.5px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.05em;margin:9px 0 3px">Câbles</div>
+      <div class="dc-3d-toggle-grid">
+        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Câbles toujours au-dessus des équipements / baies (moteur WebGL)" aria-label="Câbles toujours au-dessus des équipements / baies (moteur WebGL)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="12" width="14" height="8" rx="1"/><path d="M3 9c3.5 0 4.5-4 9-4s5.5 4 9 4"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Sortie ⊥ des ports (20 mm) : les câbles quittent la face perpendiculairement sur 20 mm (affecte aussi le tracé 2D)" aria-label="Sortie ⊥ des ports (20 mm)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v14h14"/><path d="M10.5 18a4.5 4.5 0 0 1 4.5-4.5"/></svg></button>
+      </div>
+
+      <div style="font-size:10.5px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.05em;margin:9px 0 3px">Waypoints</div>
+      <div class="dc-3d-toggle-grid">
+        <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Marqueurs de waypoint (pins, extrémités de chemins/brosses, OOB). N'affecte pas le routage des câbles." aria-label="Marqueurs de waypoint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l9 9.5-9 9.5-9-9.5z"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Brosses et passe-câbles (géométrie des conduits : bacs de chemins de câbles, coques des brosses)" aria-label="Brosses et passe-câbles"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1"/><path d="M3 12h18" stroke-dasharray="2.5 2.5"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Taille RÉELLE des marqueurs : waypoints 5 cm, pastilles de câble ⌀ 1 cm (à 100 % du slider) — suivent le zoom comme la géométrie." aria-label="Taille réelle des marqueurs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l9 9.5-9 9.5-9-9.5z"/><text x="12" y="14.6" text-anchor="middle" font-size="7" font-weight="700" fill="currentColor" stroke="none">1:1</text></svg></button>
+      </div>
+
+      <div style="font-size:10.5px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.05em;margin:9px 0 3px">Étage &amp; repères</div>
+      <div class="dc-3d-toggle-grid">
+        <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Grilles d'étage" aria-label="Grilles d'étage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Repères d'orientation" aria-label="Repères d'orientation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 5.5l2.4 8.5L12 12l-2.4 2z" fill="currentColor" stroke="none"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Personnage d'échelle (~1,75 m) — repère de vue, non enregistré ; déplaçable en salle et sur l'étage" aria-label="Personnage d'échelle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="6" r="3"/><path d="M6 21v-1.5a6 6 0 0 1 12 0V21"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Centre de rotation" aria-label="Centre de rotation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg></button>
+      </div>
+
+      <div style="margin-top:6px;font-size:12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="grow">Arrondi des câbles</span>
+          <span style="font-family:var(--mono);color:var(--accent)">0.14</span>
+        </div>
+        <input type="range" min="0" max="0.32" step="0.01" value="0.14" style="width:100%;accent-color:var(--accent);cursor:pointer;margin-top:4px">
+      </div>
+      <div style="margin-top:6px;font-size:12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="grow">Taille marqueurs / ports</span>
+          <span style="font-family:var(--mono);color:var(--accent)">100 %</span>
+        </div>
+        <input type="range" min="0.25" max="1.75" step="0.05" value="1" style="width:100%;accent-color:var(--accent);cursor:pointer;margin-top:4px">
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px">
+        <span class="grow">Coloration</span>
+        <select class="app-select"><option value="face">Par face</option><option value="group">Par groupe</option><option value="type">Par type</option></select>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm">Recentrer sur la salle</button>
+    </div>
+  </div>
+  <p class="ds-note">Variante 2D (Dessus / Étage) = SOUS-ENSEMBLE : titre « Affichage », seuls les calques que le rendu 2D respecte réellement (débattement des portes, sortie ⊥ des ports, marqueurs de waypoint, repères d'orientation, personnage, point d'ancrage de l'étage en Plan d'étage) plus les deux curseurs — sans coloration ni recentrage 3D. Les calques floor-only (point d'ancrage) n'apparaissent PAS en 3D (état figé, non représenté ici).</p>
+</section>

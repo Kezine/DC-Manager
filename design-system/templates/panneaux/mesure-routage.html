@@ -1,0 +1,49 @@
+<!-- @dsCard group="Panneaux 2D/3D" name="Outils Mesure & Routage" subtitle="deux cartes .dc-card compactes : liste de segments + longueur totale (mesure multipoint) ; étapes port → waypoints → port (routage de câble)" -->
+<!-- DÉRIVÉ de src-client/views/dc/MeasureTool.ts (card) et RouteTool.ts (card) : deux panneaux d'outils de clic
+     (exclusifs entre eux et du positionnement). Titre .dc-card-title + .gi (Icons.MEASURE / Icons.ROUTE). Listes en
+     flux (font 12px, gap 3px) : mesures terminées + en cours (survol = surbrillance dans la scène) ; étapes de route
+     numérotées par .pill. Longueurs via Format.meters (séparateur décimal « . », suffixe « m »). Aides = .form-hint.
+     Actions = .dc-card-acts, boutons décorés Icons.CHECK / DELETE / CLOSE. Noms d'entités / valeurs = DONNÉES
+     illustratives ; libellés d'interface = catalogue i18n dc.measure.* / dc.route.* / lists.ph.points. -->
+<section class="ds-section">
+  <h2>Mesure multipoint (session active)</h2>
+  <p class="ds-note">Pose des points au clic ; longueur par segment + total. Les mesures « terminées » restent en session (survol du listing = mise en évidence dans la scène) ; une mesure en cours s'ajoute en bas. Cadre mesuré dans le CONTEXTE de vue courant.</p>
+  <div class="ds-demo">
+    <div class="dc-card" style="max-width:360px">
+      <div class="dc-card-title"><span class="gi">{{ICON:MEASURE}}</span>Mesure</div>
+      <div style="font-size:12px;margin:4px 0;display:flex;flex-direction:column;gap:3px">
+        <div style="cursor:pointer"><b>Mesure 1</b> : <b style="color:var(--accent)">4.20 m</b> <span style="color:var(--fg-dim)">· 3 points</span></div>
+        <div><b>En cours</b> : <b style="color:var(--accent)">1.75 m</b> <span style="color:var(--fg-dim)">· 2 points</span></div>
+      </div>
+      <div style="margin:6px 0;font-size:13px;border-top:1px solid var(--line);padding-top:6px">Longueur totale : <b style="color:var(--accent)">5.95 m</b></div>
+      <div class="form-hint">Cliquez pour poser des points · ENTRÉE valide la mesure · ÉCHAP annule la mesure en cours.</div>
+      <div class="dc-card-acts">
+        <button type="button" class="btn btn-ghost btn-sm">↩ Annuler point</button>
+        <button type="button" class="btn btn-ghost btn-sm"><span class="gi" aria-hidden="true">{{ICON:CHECK}}</span>Valider (Entrée)</button>
+        <button type="button" class="btn btn-ghost btn-sm"><span class="gi" aria-hidden="true">{{ICON:DELETE}}</span>Tout effacer</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-danger"><span class="gi" aria-hidden="true">{{ICON:CLOSE}}</span>Fermer</button>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Prise dans un AUTRE contexte de vue, la même carte affiche « Mesure prise dans un autre contexte… » et les actions de pose sont désactivées (état non représenté).</p>
+</section>
+
+<section class="ds-section">
+  <h2>Route de câble en cours</h2>
+  <p class="ds-note">Trace une route au clic : PORT de départ → waypoints/brosses (au besoin dans d'autres salles/étages) → PORT terminal, qui ouvre le formulaire de câblage prérempli. Chaque étape est numérotée par une pastille.</p>
+  <div class="ds-demo">
+    <div class="dc-card" style="max-width:360px">
+      <div class="dc-card-title"><span class="gi">{{ICON:ROUTE}}</span>Route en cours</div>
+      <div style="font-size:12px;margin:4px 0;display:flex;flex-direction:column;gap:3px">
+        <div><span class="pill">1</span> Départ : <b>core-sw-01 : Gi0/1</b></div>
+        <div><span class="pill">2</span> ▬ Chemin A</div>
+      </div>
+      <div class="form-hint">Cliquez des waypoints/brosses (changez de salle/étage si besoin), puis un PORT terminal pour finir.</div>
+      <div class="dc-card-acts">
+        <button type="button" class="btn btn-ghost btn-sm">↩ Retour</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-danger"><span class="gi" aria-hidden="true">{{ICON:CLOSE}}</span>Annuler</button>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Avant la pose du port de départ, la première ligne est l'invite en accent « Cliquez le PORT de départ… » et l'aide devient « Cliquez un port libre pour démarrer la route. ».</p>
+</section>

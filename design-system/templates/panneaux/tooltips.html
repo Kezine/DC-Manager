@@ -1,0 +1,52 @@
+<!-- @dsCard group="Panneaux 2D/3D" name="Readouts & tooltips de scène" subtitle="infobulles .dc-tooltip clé/valeur (baie, équipement, câble, waypoint) : bandeau de titre + liseré d'accent + rangées .tt-row, pastilles .tt-sw" -->
+<!-- DÉRIVÉ de src-client/views/dc/DcInteract.ts (showTip + builders rackTipHtml / equipmentTipHtml / cableTipHtml /
+     wpTipHtml) et dc-manager.css (.dc-tooltip). Structure réelle : .dc-tooltip > .tt-title (bandeau) + n × .tt-row
+     (libellé, valeurs en <b>) ; une pastille de couleur (groupe / réseau) = .tt-sw en ligne. Survol d'une baie /
+     équipement / câble / waypoint en 3D ou vue Étage. Libellés d'interface = catalogue i18n dc.interact.* ; noms,
+     dimensions et couleurs = DONNÉES illustratives. APERÇU STATIQUE : les tooltips (normalement position:absolute,
+     display:none, suivis au pointeur) sont FIGÉS en flux (display:block ; position:static ; ombre retirée). -->
+<section class="ds-section">
+  <h2>Infobulles de scène (dc-tooltip)</h2>
+  <p class="ds-note">Réplique fidèle des tooltips enrichis de la scène : bandeau de titre (fond, liseré d'accent en haut), rangées clé/valeur, pastilles de couleur pour les groupes et réseaux. La dernière rangée en accent rappelle l'action au clic. Montrées hors de leur ancrage flottant.</p>
+  <div class="ds-row" style="align-items:flex-start;gap:16px">
+
+    <div class="dc-tooltip" style="display:block;position:static;box-shadow:none">
+      <div class="tt-title">RACK-A-03</div>
+      <div class="tt-row"><b>600 × 1070 mm</b> · 42 U · double face</div>
+      <div class="tt-row">Orientation 90° · rangée 3</div>
+      <div class="tt-row"><b>18</b> équipements · 2 éléments · 30/42 U occupés</div>
+      <div class="tt-row" style="color:var(--accent)">Cliquer pour éditer la baie</div>
+    </div>
+
+    <div class="dc-tooltip" style="display:block;position:static;box-shadow:none">
+      <div class="tt-title">srv-esxi-04</div>
+      <div class="tt-row"><b>Serveur</b> · Dell PowerEdge R740</div>
+      <div class="tt-row">N/S : <b>CN-7F2A91</b></div>
+      <div class="tt-row">U12–U13 · Full-depth</div>
+      <div class="tt-row">Baie : <b>RACK-A-03</b> · 3</div>
+      <div class="tt-row"><span class="tt-sw" style="background:#3b82f6"></span>Production</div>
+      <div class="tt-row">6 ports</div>
+    </div>
+
+    <div class="dc-tooltip" style="display:block;position:static;box-shadow:none">
+      <div class="tt-title">Uplink core→dist 12</div>
+      <div class="tt-row">Type : <b>OM4 LC-LC duplex</b></div>
+      <div class="tt-row">Longueur : <b>15 m</b></div>
+      <div class="tt-row"><span class="tt-sw" style="background:#22c55e"></span>Data-Prod ★</div>
+      <div class="tt-row">A : <b>core-sw-01 : Gi0/1</b></div>
+      <div class="tt-row">B : <b>dist-sw-02 : Gi0/24</b></div>
+      <div class="tt-row">Via : ▬ Chemin A → ◆ Pin 3</div>
+      <div class="tt-row">État : Câblé</div>
+    </div>
+
+    <div class="dc-tooltip" style="display:block;position:static;box-shadow:none">
+      <div class="tt-title">▬ Chemin A</div>
+      <div class="tt-row"><b>Chemin de câbles</b></div>
+      <div class="tt-row">hauteur 300 mm</div>
+      <div class="tt-row">4 câbles affectés</div>
+      <div class="tt-row" style="color:var(--accent)">Clic : modifier · clic droit : actions</div>
+    </div>
+
+  </div>
+  <p class="ds-note">Le réseau PRINCIPAL d'un câble multi-réseaux porte l'étoile « ★ » (il pilote la couleur). Une pastille <code>.tt-sw</code> précède chaque groupe/réseau. Le glyphe du waypoint (◆ pin · ▬ chemin · ▦ brosse · ⏏ exit · ◎ pin d'étage) est repris dans le titre.</p>
+</section>

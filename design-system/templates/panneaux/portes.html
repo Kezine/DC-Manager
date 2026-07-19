@@ -1,0 +1,35 @@
+<!-- @dsCard group="Panneaux 2D/3D" name="Outil Portes" subtitle="carte .dc-card : liste des portes de salle (mur · vantaux · ouverture · passage libre), éditer/supprimer, ajout par mur (＋ avant/arrière/gauche/droit)" -->
+<!-- DÉRIVÉ de src-client/views/dc/DoorTool.ts (card) : panneau des portes d'une salle (Plan de salle). Titre
+     .dc-card-title (SANS icône). Liste = .dc-layers de rangées .dc-rack-row (libellé .grow + « Modifier » + supprimer
+     dont le contenu est l'icône Icons.CLOSE brute, .btn-danger). Ajout = .dc-card-acts, un bouton « ＋ <mur> » PAR mur
+     (ordre DOOR_WALLS : avant, arrière, gauche, droit). Aide = .form-hint. Libellés de mur = catalogue i18n
+     domain.doorWall.* (avant/arrière/gauche/droit) ; gabarit de rangée = dc.door.rowLabel. Dimensions = DONNÉES. -->
+<section class="ds-section">
+  <h2>Portes de salle (deux portes posées)</h2>
+  <p class="ds-note">Chaque porte est collée à un mur et déplaçable le long de celui-ci. La rangée résume mur, nombre de vantaux, largeur d'ouverture et passage LIBRE (ouverture − 2 × listel). « Modifier » ouvre le formulaire ; la croix supprime.</p>
+  <div class="ds-demo">
+    <div class="dc-card" style="max-width:380px">
+      <div class="dc-card-title">Portes</div>
+      <div class="dc-layers">
+        <div class="dc-rack-row">
+          <span class="grow" style="font-size:12px">Mur avant · 2 vantaux · ouv. 1600 · passage 1400 mm</span>
+          <button type="button" class="btn btn-ghost btn-sm">Modifier</button>
+          <button type="button" class="btn btn-ghost btn-sm btn-danger">{{ICON:CLOSE}}</button>
+        </div>
+        <div class="dc-rack-row">
+          <span class="grow" style="font-size:12px">Mur gauche · ouv. 900 · passage 780 mm</span>
+          <button type="button" class="btn btn-ghost btn-sm">Modifier</button>
+          <button type="button" class="btn btn-ghost btn-sm btn-danger">{{ICON:CLOSE}}</button>
+        </div>
+      </div>
+      <div class="dc-card-acts" style="margin-top:6px">
+        <button type="button" class="btn btn-ghost btn-sm" title="Ajouter une porte sur le mur avant">＋ avant</button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Ajouter une porte sur le mur arrière">＋ arrière</button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Ajouter une porte sur le mur gauche">＋ gauche</button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Ajouter une porte sur le mur droit">＋ droit</button>
+      </div>
+      <div class="form-hint" style="margin-top:4px">Après ajout, glissez la porte le long de son mur ; clic droit / « Modifier » pour ses réglages.</div>
+    </div>
+  </div>
+  <p class="ds-note">Sans porte, la liste laisse place à l'aide « Aucune porte. Ajoutez-en une (collée à un mur). ». Le menu contextuel (clic droit) d'une porte offre : Modifier… · vantaux simple/double · charnière gauche/droite · ouverture intérieure/extérieure · Supprimer.</p>
+</section>

@@ -1,0 +1,100 @@
+<!-- @dsCard group="Panneaux 2D/3D" name="Barres d'outils" subtitle="barre de vue (recherche SearchPop, bascules 3D/Dessus/Étage, filtre Sites) + bandeau de contrôles 3D (zoom · points de vue · outils)" -->
+<!-- DÉRIVÉ de src-client/views/dc/DcPanels.ts (buildToolbar / buildSearchBox : .dc-toolbar, champ .search-input +
+     popover .dc-search-pop/.dc-search-item/.dc-search-tag, bascules d'édition .dc-subviews, contrôle segmenté
+     .rm-toggle 3D/Dessus/Étage, filtre .multi-pop/.multi-trigger via ui/MultiSelect) et de DcCamera.ts (buildControls
+     / updateControls : bandeau .dc-control-bar = .graph-zoom-controls repositionné). Les icônes du bandeau 3D sont des
+     constantes LOCALES de DcCamera (ICON_RULER/ICON_POSITION/ICON_ORTHO/ICON_GEAR + cubeIcon des points de vue) —
+     reproduites verbatim (hors registre ui/Icons). Textes FR = catalogue i18n dc.panels.* / dc.camera.* + ui.*.
+     APERÇUS STATIQUES : la popover de recherche (normalement position:absolute) et le bandeau 3D (position:absolute
+     dans le stage) sont SORTIS de leur ancrage (position:static) pour l'aperçu en flux ; états contextuels FIGÉS + annotés. -->
+<section class="ds-section">
+  <h2>Barre d'outils de la vue — 3D</h2>
+  <p class="ds-note">En vue 3D, la barre porte à GAUCHE le champ de recherche GLOBAL (tout résultat cliqué navigue vers la 3D), à DROITE le contrôle segmenté de mode de vue et le filtre Sites. La popover de résultats est montrée OUVERTE, sortie de son ancrage <code>position:absolute</code>.</p>
+  <div class="ds-demo">
+    <div class="dc-toolbar">
+      <div style="position:relative;display:flex;align-items:center;gap:4px">
+        <input type="text" class="search-input" placeholder="Rechercher (équipement, baie, câble, salle, waypoint…)" style="min-width:220px;max-width:320px;padding:6px 10px;flex:none" value="core">
+        <button type="button" class="btn btn-ghost btn-sm" title="Effacer la mise en évidence">{{ICON:CLOSE}}</button>
+        <div class="dc-search-pop open" style="position:static;top:auto;left:auto;margin-top:4px;min-width:0;max-width:340px">
+          <div class="dc-search-item"><span class="dc-search-tag">Équip.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">core-sw-01</span></div>
+          <div class="dc-search-item"><span class="dc-search-tag">Baie</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">RACK-CORE-A</span></div>
+          <div class="dc-search-item"><span class="dc-search-tag">Câble</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">core-sw-01 : Gi0/1 → dist-sw-02 : Gi0/24</span></div>
+          <div class="dc-search-item"><span class="dc-search-tag">Salle</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Salle A — Core</span></div>
+        </div>
+      </div>
+      <div style="flex:1 1 auto"></div>
+      <div class="rm-toggle">
+        <button type="button" class="on">3D</button>
+        <button type="button">Plan de salle</button>
+        <button type="button">Plan d'étage</button>
+      </div>
+      <div style="align-self:stretch;width:1px;min-height:22px;margin:0 4px;background:var(--line)"></div>
+      <div class="multi-pop">
+        <button type="button" class="multi-trigger">Sites <span class="count-badge">Tous</span></button>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note"><code>.rm-toggle</code> = contrôle segmenté (CHOIX 1 parmi N) : un seul conteneur bordé, segment actif teinté (fond non plein, texte accent). Le filtre <code>.multi-trigger</code> est montré FERMÉ (son panneau <code>.multi-panel</code> est masqué tant qu'il n'est pas <code>.open</code>).</p>
+</section>
+
+<section class="ds-section">
+  <h2>Barre d'outils de la vue — Plan de salle (2D)</h2>
+  <p class="ds-note">En vue 2D (Dessus / Étage), le champ de recherche disparaît (les résultats forcent la 3D). Apparaissent alors à GAUCHE les bascules d'édition contextuelles (<code>.dc-subviews</code>), à DROITE le segmenté et le filtre Sites.</p>
+  <div class="ds-demo">
+    <div class="dc-toolbar">
+      <div style="flex:1 1 auto"></div>
+      <div class="dc-subviews" style="display:flex;gap:4px">
+        <button type="button" class="btn btn-ghost btn-sm" title="Désactive l'aimantation à la grille pendant le glisser (n'affecte pas les éléments déjà placés)">Placement libre</button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Modifier la salle courante">Éditer la salle</button>
+        <button type="button" class="btn btn-ghost btn-sm active" title="Glissez une sélection sur la grille pour marquer / démarquer les cases (in)accessibles">Cases inaccessibles</button>
+      </div>
+      <div style="align-self:stretch;width:1px;min-height:22px;margin:0 4px;background:var(--line)"></div>
+      <div class="rm-toggle">
+        <button type="button">3D</button>
+        <button type="button" class="on">Plan de salle</button>
+        <button type="button">Plan d'étage</button>
+      </div>
+      <div style="align-self:stretch;width:1px;min-height:22px;margin:0 4px;background:var(--line)"></div>
+      <div class="multi-pop">
+        <button type="button" class="multi-trigger">Sites <span class="count-badge">Tous</span></button>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">La bascule « Cases inaccessibles » est montrée ACTIVE (état <code>.active</code> = accent). En Plan d'étage, « Éditer la salle » devient « Éditer l'étage ».</p>
+</section>
+
+<section class="ds-section">
+  <h2>Bandeau de contrôles 3D (dc-control-bar)</h2>
+  <p class="ds-note">Overlay horizontal en haut du canevas (normalement <code>position:absolute</code>, sorti de son ancrage ici). État figé = vue 3D bureau : zoom, recentrage, points de vue (cube dont la face regardée est liserée d'accent), plein écran, projection, mesure, export. Les boutons contextuels sont conservés dans le DOM mais masqués.</p>
+  <div class="ds-demo">
+    <div class="graph-zoom-controls dc-control-bar" style="position:static;transform:none;left:auto;top:auto;right:auto;bottom:auto;max-width:none;margin:0 auto;width:max-content">
+      <button class="btn btn-sm dc-back-btn" data-act="back" title="Retour à la vue précédente" aria-label="Retour" style="display:none"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M11 18l-6-6 6-6"/></svg></button>
+      <span class="gz-sep" data-back-sep style="display:none"></span>
+      <button class="btn btn-ghost btn-sm" data-act="in" title="Zoom avant" aria-label="Zoom avant">+</button>
+      <button class="btn btn-ghost btn-sm" data-act="out" title="Zoom arrière" aria-label="Zoom arrière">−</button>
+      <span class="gz-sep"></span>
+      <button class="btn btn-ghost btn-sm" data-act="recenter" title="Recentrer / ajuster la vue" aria-label="Recentrer la vue">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="12" y1="1.5" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22.5" y2="12"/></svg>
+      </button>
+      <div class="dc-cam-presets" data-cam-presets title="Point de vue">
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="top" title="Vue de dessus" aria-label="Vue de dessus"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path opacity="0.45" d="M4 9L14 9L14 19L4 19Z M4 9L9 4L19 4L14 9 M14 19L19 14L19 4"/><path d="M4 9L9 4L19 4L14 9Z" stroke-width="2" style="stroke:var(--accent);fill:var(--accent);fill-opacity:0.22"/></svg></button>
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="front" title="Vue de face" aria-label="Vue de face"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path opacity="0.45" d="M4 9L14 9L14 19L4 19Z M4 9L9 4L19 4L14 9 M14 19L19 14L19 4"/><path d="M4 9L14 9L14 19L4 19Z" stroke-width="2" style="stroke:var(--accent);fill:var(--accent);fill-opacity:0.22"/></svg></button>
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="back" title="Vue de l'arrière" aria-label="Vue de l'arrière"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path opacity="0.45" d="M4 9L14 9L14 19L4 19Z M4 9L9 4L19 4L14 9 M14 19L19 14L19 4"/><path d="M9 4L19 4L19 14L9 14Z" stroke-width="2" style="stroke:var(--accent);fill:var(--accent);fill-opacity:0.22"/></svg></button>
+        <button class="btn btn-ghost btn-sm graph-icon-btn" data-preset="side" title="Vue de côté" aria-label="Vue de côté"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path opacity="0.45" d="M4 9L14 9L14 19L4 19Z M4 9L9 4L19 4L14 9 M14 19L19 14L19 4"/><path d="M14 9L19 4L19 14L14 19Z" stroke-width="2" style="stroke:var(--accent);fill:var(--accent);fill-opacity:0.22"/></svg></button>
+      </div>
+      <button class="btn btn-ghost btn-sm" data-act="fs" title="Plein écran" aria-label="Plein écran">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>
+      </button>
+      <span class="gz-sep" data-tools-sep></span>
+      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="proj" title="Projection : orthographique (cliquer pour perspective)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="4" x2="6" y2="20"/><line x1="18" y1="4" x2="18" y2="20"/><line x1="6" y1="9" x2="18" y2="9"/><line x1="6" y1="15" x2="18" y2="15"/></svg></button>
+      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="measure" title="Outil de mesure multipoint (cliquer pour poser des points)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="8.5" width="19" height="7" rx="1"/><line x1="6.5" y1="8.5" x2="6.5" y2="12"/><line x1="10.5" y1="8.5" x2="10.5" y2="13"/><line x1="14.5" y1="8.5" x2="14.5" y2="12"/><line x1="18.5" y1="8.5" x2="18.5" y2="13"/></svg></button>
+      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="position" title="Aide au positionnement : placer un élément par ses coins (murs / coins d'autres éléments, cotes ⟂)" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="1"/><circle cx="9" cy="9" r="2" fill="currentColor" stroke="none"/><line x1="2.5" y1="9" x2="7" y2="9"/><line x1="2.5" y1="6.5" x2="2.5" y2="11.5"/><line x1="9" y1="2.5" x2="9" y2="7"/><line x1="6.5" y1="2.5" x2="11.5" y2="2.5"/></svg></button>
+      <span class="gz-sep"></span>
+      <button class="btn btn-ghost btn-sm graph-icon-btn" data-act="eimg" title="Exporter une image (SVG / JPEG)…" aria-label="Exporter une image">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      </button>
+      <button class="btn btn-ghost btn-sm gz-resp-toggle" data-act="resp-opts" title="Réglages 3D / panneau latéral" aria-label="Réglages 3D"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+    </div>
+  </div>
+  <p class="ds-note">États FIGÉS reproduits du DOM réel : le bouton RETOUR (<code>data-act="back"</code>) reste masqué hors historique de navigation ; l'outil POSITIONNEMENT (<code>data-act="position"</code>) n'apparaît qu'en 2D ; le bouton « Réglages 3D » (<code>.gz-resp-toggle</code>) est réservé au responsive (masqué sur grand écran par le CSS). La projection est montrée en ORTHOGRAPHIQUE (lignes parallèles) ; en perspective, l'icône passe aux lignes fuyantes.</p>
+</section>

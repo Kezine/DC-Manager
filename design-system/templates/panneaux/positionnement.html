@@ -1,0 +1,57 @@
+<!-- @dsCard group="Panneaux 2D/3D" name="Outil Positionnement" subtitle="carte .dc-card : sélection élément/coin (◰◳◲◱), cotes X/Y saisies (input number inputmode=numeric), astuce glisser-aimanter, actions" -->
+<!-- DÉRIVÉ de src-client/views/dc/PositioningTool.ts (card) : panneau de l'outil d'aide au positionnement. Titre
+     .dc-card-title + icône .gi (Icons.POSITION). Rangée de coins = boutons .btn.btn-ghost.btn-sm (coin actif → .active,
+     teinté accent via `.dc-card-acts .btn.active`). Cotes = rangées libellé + input[type=number inputmode=numeric] + mm,
+     une par axe RÉFÉRENCÉ. Aides = .form-hint. Actions = .dc-card-acts (« Effacer réf. » + « Fermer » décoré Icons.CLOSE,
+     .btn-danger). Le picto de coin (◰◳◲◱) et les flèches d'axe (↔ ↕) sont des DONNÉES de libellé (catalogue
+     dc.positioning.*), recopiées telles quelles. APERÇU STATIQUE : deux états figés (armé / entièrement référencé). -->
+<section class="ds-section">
+  <h2>Positionnement — élément, coin et références posés</h2>
+  <p class="ds-note">État le plus riche : un élément à déplacer est choisi, son coin actif sélectionné, et DEUX références posées (un mur → cote sur un axe ; le coin d'un autre élément → cotes X et Y). Chaque axe référencé ouvre une saisie numérique en millimètres (pavé numérique sur mobile via <code>inputmode="numeric"</code>).</p>
+  <div class="ds-demo">
+    <div class="dc-card" style="max-width:360px">
+      <div class="dc-card-title"><span class="gi">{{ICON:POSITION}}</span>Positionnement</div>
+      <div style="font-size:12px;margin:4px 0">À déplacer : <b style="color:var(--accent)">RACK-A-03</b></div>
+      <div class="dc-card-acts" style="margin-top:2px">
+        <button type="button" class="btn btn-ghost btn-sm active">◰ H-G</button>
+        <button type="button" class="btn btn-ghost btn-sm">◳ H-D</button>
+        <button type="button" class="btn btn-ghost btn-sm">◲ B-D</button>
+        <button type="button" class="btn btn-ghost btn-sm">◱ B-G</button>
+      </div>
+      <div class="form-hint">Coin actif, puis cliquez un mur (cote ⟂) ou le coin d'un autre élément (cote X et Y).</div>
+      <div style="display:flex;align-items:center;gap:6px;margin:5px 0;font-size:12px">
+        <span style="color:var(--fg-dim);min-width:80px">↔ X → mur gauche</span>
+        <input type="number" step="1" min="0" inputmode="numeric" value="1200" style="width:88px">
+        <span style="color:var(--fg-dim)">mm</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin:5px 0;font-size:12px">
+        <span style="color:var(--fg-dim);min-width:80px">↕ Y → « RACK-A-01 » H-D</span>
+        <input type="number" step="1" min="0" inputmode="numeric" value="800" style="width:88px">
+        <span style="color:var(--fg-dim)">mm</span>
+      </div>
+      <div class="form-hint">Astuce : glissez l'élément pour l'aimanter aux murs et aux coins voisins.</div>
+      <div class="dc-card-acts">
+        <button type="button" class="btn btn-ghost btn-sm">Effacer réf.</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-danger"><span class="gi" aria-hidden="true">{{ICON:CLOSE}}</span>Fermer</button>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Le coin actif porte l'état <code>.active</code> (teinte accent). Le libellé d'axe compose la flèche (↔ X / ↕ Y) et le libellé de la référence (« mur gauche » pour un mur ; « <em>nom</em> » + coin pour un ancrage).</p>
+</section>
+
+<section class="ds-section">
+  <h2>Positionnement — armé, aucun élément choisi</h2>
+  <p class="ds-note">État initial juste après l'armement : aucun élément « mover » sélectionné → invite en accent, pas de rangée de coins ni de cotes ; « Effacer réf. » est désactivé.</p>
+  <div class="ds-demo">
+    <div class="dc-card" style="max-width:360px">
+      <div class="dc-card-title"><span class="gi">{{ICON:POSITION}}</span>Positionnement</div>
+      <div style="font-size:12px;margin:4px 0"><span style="color:var(--accent)">Cliquez une baie / un équipement à déplacer.</span></div>
+      <div class="form-hint">Astuce : glissez l'élément pour l'aimanter aux murs et aux coins voisins.</div>
+      <div class="dc-card-acts">
+        <button type="button" class="btn btn-ghost btn-sm" disabled>Effacer réf.</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-danger"><span class="gi" aria-hidden="true">{{ICON:CLOSE}}</span>Fermer</button>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Hors vue 2D, le panneau se réduit à l'aide « Disponible en vue 2D (Plan de salle ou Plan d'étage). » suivie du seul bouton « Fermer » (état non représenté ici).</p>
+</section>
