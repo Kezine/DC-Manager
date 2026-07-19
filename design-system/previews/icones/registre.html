@@ -2139,9 +2139,17 @@
   }
   .settings-row-select:disabled { opacity: 0.5; cursor: not-allowed; }
   .settings-row-select option:disabled { color: var(--fg-dimmer); }
-  /* Toggle SLIDER « Local ⟷ API » (source de données) */
+  /* Toggle SLIDER GÉNÉRIQUE (source de données Local ⟷ API, thème clair ⟷ sombre, modales plein écran).
+     Les sélecteurs `.mode-switch*` ne portent AUCUNE spécificité métier → réutilisés tels quels par les
+     trois bascules. Variantes de LÉGENDE : `.mode-switch-side` (texte majuscule, ex. LOCAL/API),
+     `.mode-switch-icon` (pastille SVG, ex. soleil/lune/plein écran), `.mode-switch-label` (libellé casse
+     normale). `--spread` répartit la légende aux extrémités (toggle centré, deux repères de part et d'autre). */
   .mode-switch-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
+  .mode-switch-row--spread { justify-content: space-between; }
   .mode-switch-side { font-size: 12px; color: var(--fg-dim); letter-spacing: 0.06em; text-transform: uppercase; }
+  .mode-switch-icon { display: inline-flex; align-items: center; color: var(--fg-dim); flex: 0 0 auto; }
+  .mode-switch-icon svg { width: 16px; height: 16px; }
+  .mode-switch-label { font-size: 12px; color: var(--fg); }
   .mode-switch { position: relative; display: inline-block; width: 46px; height: 24px; flex: 0 0 auto; cursor: pointer; }
   .mode-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
   .mode-switch-track { position: absolute; inset: 0; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 999px; transition: background .15s, border-color .15s; }
@@ -2559,6 +2567,15 @@
         </div>
       </div>
       <div class="ds-ico-cell">
+        <div class="ds-ico-name">FULLSCREEN</div>
+        <div class="ds-ico-renders">
+          <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></span>
+          <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></span>
+        </div>
+      </div>
+      <div class="ds-ico-cell">
         <div class="ds-ico-name">GRAPH</div>
         <div class="ds-ico-renders">
           <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="8" r="2"/><circle cx="11" cy="18" r="2"/><path d="M6.8 6.9 9.4 16.2M17.2 9.4 12.6 16.4M6.9 6.4 17.1 7.7"/></svg></span>
@@ -2664,6 +2681,15 @@
           <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2.5l7 7L9.5 21.5l-7-7z"/><path d="M8 7l1.5 1.5M11 10l1.5 1.5M14 7l1.5 1.5M17 10l1.5 1.5"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2.5l7 7L9.5 21.5l-7-7z"/><path d="M8 7l1.5 1.5M11 10l1.5 1.5M14 7l1.5 1.5M17 10l1.5 1.5"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2.5l7 7L9.5 21.5l-7-7z"/><path d="M8 7l1.5 1.5M11 10l1.5 1.5M14 7l1.5 1.5M17 10l1.5 1.5"/></svg></span>
+        </div>
+      </div>
+      <div class="ds-ico-cell">
+        <div class="ds-ico-name">MOON</div>
+        <div class="ds-ico-renders">
+          <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></span>
+          <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></span>
         </div>
       </div>
       <div class="ds-ico-cell">
@@ -2817,6 +2843,15 @@
           <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.4l1.2-6L3.4 9.3l6-.7z"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.4l1.2-6L3.4 9.3l6-.7z"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.4l1.2-6L3.4 9.3l6-.7z"/></svg></span>
+        </div>
+      </div>
+      <div class="ds-ico-cell">
+        <div class="ds-ico-name">SUN</div>
+        <div class="ds-ico-renders">
+          <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg></span>
+          <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg></span>
         </div>
       </div>
       <div class="ds-ico-cell">
