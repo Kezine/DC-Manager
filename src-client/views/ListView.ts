@@ -73,6 +73,8 @@ export class ListView {
   private _scaffold = false;
   private _toolbarSig: string | null = null;
   private _searchEl!: HTMLInputElement;
+  private _sortSelEl!: HTMLSelectElement;   // sélecteur de CRITÈRE de tri EN BARRE (état partagé avec les en-têtes)
+  private _sortDirEl!: HTMLButtonElement;   // bouton de SENS dédié (▲/▼) — bascule asc/desc
   private _filtersHostEl!: HTMLElement;   // hôte du groupe « + Filtre » + chips (rempli selon les colonnes filtrables)
   private _resetHostEl!: HTMLElement;      // hôte du bouton « Réinitialiser » (cluster de droite)
   private _filterBar: FilterBar | null = null;
@@ -143,6 +145,20 @@ export class ListView {
     return all.map((o, i) => [o, i] as [any, number]).sort((a, b) => { const r = Sort.compare(valOf(a[0]), valOf(b[0])); return r !== 0 ? r * dir : (a[1] - b[1]); }).map((p) => p[0]);
   }
 
+  /** Recale le TRI EN BARRE (select de critère + bouton de sens) sur l'état de tri UNIQUE. Appelé à chaque
+      rendu : quel que soit l'ORIGINE du changement (select, bouton de sens, ou clic d'en-tête qui repasse par
+      render()), les deux contrôles reflètent this.sortKey/this.sortDir → synchronisation bidirectionnelle. */
+  private _syncSortControls(): void {
+    if (this._sortSelEl) this._sortSelEl.value = this.sortKey;
+    if (this._sortDirEl) {
+      const asc = this.sortDir !== "desc";
+      this._sortDirEl.textContent = asc ? "▲" : "▼";   // même langage visuel que l'indicateur d'en-tête (.sort-ind)
+      const label = I18n.t(asc ? "lists.chrome.dirAsc" : "lists.chrome.dirDesc");
+      this._sortDirEl.setAttribute("aria-label", label);
+      this._sortDirEl.title = label;
+    }
+  }
+
   render(): void {
     let all = this.items ? this.items() : this.store.all(this.collection);
     if (this.searchFields && this.query.trim()) {
@@ -165,14 +181,16 @@ export class ListView {
     this._ensureScaffold();
     this._ensureToolbar();
     this._paintBody(rows, total, pages, page);
+    this._syncSortControls();   // reflète l'état de tri UNIQUE (this.sortKey/sortDir) sur le select + bouton de sens en barre
     this._saveState();
   }
 
   /** Bâtit UNE FOIS la barre de contrôles unifiée (revue design lot C) : recherche EN TÊTE (extensible,
-      loupe intégrée), hôte des filtres (« + Filtre » + chips), puis le cluster de DROITE (compact, création,
-      « Réinitialiser »). Le TRI n'est PAS en barre — il vit sur les EN-TÊTES de colonnes (`th.sortable`). Ce
-      squelette n'est bâti qu'une fois : le champ de recherche garde ainsi son focus/anti-rebond à travers les
-      re-rendus (seuls le corps et les chips sont repeints ensuite). */
+      loupe intégrée), puis le TRI en barre (select compact + bouton de sens), l'hôte des filtres (« + Filtre »
+      + chips), puis le cluster de DROITE (compact, création, « Réinitialiser »). Le tri vit AUSSI sur les
+      EN-TÊTES de colonnes (`th.sortable`), synchronisés au select via l'état de tri UNIQUE (cf.
+      `_syncSortControls`). Ce squelette n'est bâti qu'une fois : le champ de recherche garde ainsi son
+      focus/anti-rebond à travers les re-rendus (seuls le corps et les chips sont repeints ensuite). */
   private _ensureScaffold(): void {
     if (this._scaffold && this.container.querySelector(".list-body")) return;
     this.container.innerHTML = "";
@@ -186,6 +204,23 @@ export class ListView {
     this._searchEl.setAttribute("aria-label", I18n.t("lists.chrome.searchPlaceholder"));
     search.append(icon, this._searchEl);
     chrome.appendChild(search);
+
+    // TRI EN BARRE (revue design — règle « ≥ 4 critères ⇒ select compact + bouton de SENS dédié ») : réintroduit
+    // APRÈS le lot C, qui l'avait retiré et rendait ainsi inatteignables les tris « Date de création / de
+    // modification » (critères SANS colonne d'en-tête cliquable). Placé APRÈS la recherche et AVANT « + Filtre ».
+    // L'état de tri reste UNIQUE (this.sortKey/this.sortDir), partagé avec les en-têtes triables : le select et le
+    // bouton ne le RÉFLÉCHISSENT pas en double — `_syncSortControls()` les recale à chaque rendu, et un clic
+    // d'en-tête repasse par render() → synchronisation bidirectionnelle sans duplication d'état.
+    const sortGroup = document.createElement("div"); sortGroup.className = "lc-sort";
+    const sortLbl = document.createElement("span"); sortLbl.className = "lc-sort-lb"; sortLbl.textContent = I18n.t("lists.chrome.sort");
+    this._sortSelEl = document.createElement("select"); this._sortSelEl.className = "lc-sort-key app-select";
+    this._sortSelEl.setAttribute("aria-label", I18n.t("lists.chrome.sort"));
+    this._sortOptions().forEach((o) => { const op = document.createElement("option"); op.value = o.key; op.textContent = o.label; this._sortSelEl.appendChild(op); });
+    this._sortSelEl.onchange = () => { this.sortKey = this._sortSelEl.value; this.page = 1; this.render(); };
+    this._sortDirEl = document.createElement("button"); this._sortDirEl.type = "button"; this._sortDirEl.className = "lc-sort-dir";
+    this._sortDirEl.onclick = () => { this.sortDir = this.sortDir === "desc" ? "asc" : "desc"; this.page = 1; this.render(); };
+    sortGroup.append(sortLbl, this._sortSelEl, this._sortDirEl);
+    chrome.appendChild(sortGroup);
 
     // Hôte des filtres (« + Filtre » + chips actifs) — (re)peuplé par _ensureToolbar selon les colonnes filtrables.
     this._filtersHostEl = document.createElement("div"); this._filtersHostEl.className = "lc-filters-host";
