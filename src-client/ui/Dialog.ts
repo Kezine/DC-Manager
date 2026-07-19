@@ -1,6 +1,7 @@
 import { Html } from "../core/Html";
 import { Notify } from "./Notify";
 import { Fullscreen } from "./Fullscreen";
+import { OverlayA11y } from "./OverlayA11y";
 import { I18n } from "../i18n/I18n";
 
 /** API optionnelle renvoyée par un `build(root)` de dialogue personnalisé. */
@@ -31,9 +32,21 @@ const ICONS: Record<string, string> = { info: "ⓘ", success: "✓", warning: "�
    Dialogues EMPILABLES (confirm / alert / custom / prompt). Chaque dialogue
    construit sa propre overlay et se résout par Promise. Remplace les fonctions
    libres `_openDialog`/`confirmDialog`/`alertDialog`/`customDialog`.
+
+   ACCESSIBILITÉ (socle partagé avec Modal, cf. ui/OverlayA11y) : boîte
+   `role="dialog"` + `aria-modal="true"` + `aria-labelledby` (titre) +
+   `aria-describedby` (message d'une confirmation) ; focus capturé/restitué ;
+   Échap (déjà présent) + PIÈGE de focus (Tab boucle dans la boîte) ; verrou de
+   défilement de la page (compteur ScrollLock, empilement dialogue-sur-modale).
+   CONFIRMATION DANGER : le focus initial va sur « Annuler » (jamais sur l'action
+   destructrice) — un Entrée réflexe annule au lieu de détruire.
    ============================================================================= */
 export class Dialog {
   private static stack: Array<{ overlay: HTMLElement }> = [];
+
+  /** Un dialogue est-il ouvert ? (Modal l'interroge pour SUSPENDRE Échap/Tab quand un dialogue,
+      empilé plus haut, doit capter le clavier — cf. Modal._build.) */
+  static isOpen(): boolean { return Dialog.stack.length > 0; }
 
   private static open(opts: DialogOptions): Promise<any> {
     return new Promise((resolve) => {
@@ -50,11 +63,18 @@ export class Dialog {
       const box = document.createElement("div");
       box.className = "dialog-box" + (wide ? " dialog-wide" : "");
       box.setAttribute("role", "dialog");
+      box.setAttribute("aria-modal", "true");
       const iconChar = ICONS[variant] || "";
+      // IDs stables reliant la boîte à son titre (aria-labelledby) et, pour une confirmation, à son
+      // message (aria-describedby) — annoncés ensemble par les lecteurs d'écran à la prise de focus.
+      const titleId = OverlayA11y.nextId("dcm-dialog-title");
+      const msgId = OverlayA11y.nextId("dcm-dialog-msg");
+      if (title) box.setAttribute("aria-labelledby", titleId);
+      if (message) box.setAttribute("aria-describedby", msgId);
       box.innerHTML = `
         <div class="dialog-header">
           ${iconChar ? `<span class="dialog-icon variant-${Html.escape(variant)}">${iconChar}</span>` : ""}
-          <div class="dialog-title">${Html.escape(title)}</div>
+          <div class="dialog-title" id="${titleId}">${Html.escape(title)}</div>
         </div>
         <div class="dialog-body"></div>
         <div class="dialog-footer">
@@ -62,7 +82,7 @@ export class Dialog {
           ${choices ? "" : `<button type="button" class="btn ${danger ? "btn-danger" : "btn-primary"}" data-dlg="confirm">${Html.escape(confirmLabel)}</button>`}
         </div>`;
       const bodyEl = box.querySelector(".dialog-body") as HTMLElement;
-      if (message) { const p = document.createElement("p"); p.className = "dialog-message"; p.textContent = message; bodyEl.appendChild(p); }
+      if (message) { const p = document.createElement("p"); p.className = "dialog-message"; p.id = msgId; p.textContent = message; bodyEl.appendChild(p); }
       let api: DialogBuildApi | null = null;
       if (typeof build === "function") {
         const root = document.createElement("div");
@@ -71,12 +91,14 @@ export class Dialog {
       }
       overlay.appendChild(box);
       Fullscreen.host().appendChild(overlay);   // plein écran : dans l'élément FS courant (sinon <body>)
+      OverlayA11y.lockScroll();   // fige le défilement de la page tant que ce dialogue est ouvert (compteur)
       let settled = false;
       const entry = { overlay };
       const teardown = () => {
         overlay.remove();
         document.removeEventListener("keydown", onKey, true);
         const i = Dialog.stack.indexOf(entry); if (i >= 0) Dialog.stack.splice(i, 1);
+        OverlayA11y.unlockScroll();
         if (prevFocus && document.contains(prevFocus)) { try { prevFocus.focus(); } catch (_) {} }
       };
       const doConfirm = () => {
@@ -113,19 +135,23 @@ export class Dialog {
       overlay.addEventListener("mousedown", (e) => { down = (e.button === 0 && e.target === overlay); });
       overlay.addEventListener("mouseup", (e) => { if (down && e.button === 0 && e.target === overlay) doCancel(); down = false; });
       function onKey(e: KeyboardEvent) {
-        if (Dialog.stack[Dialog.stack.length - 1] !== entry) return;
+        if (Dialog.stack[Dialog.stack.length - 1] !== entry) return;   // seul le dialogue du SOMMET capte le clavier
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideCancel ? doConfirm() : doCancel(); }
         else if (e.key === "Enter") {
           const t = e.target as HTMLElement;
           if (t && (t.tagName === "TEXTAREA" || t.tagName === "BUTTON")) return;
           e.preventDefault(); e.stopPropagation(); doConfirm();
         }
+        else if (e.key === "Tab") OverlayA11y.trapTab(box, e);   // piège de focus : boucle DANS la boîte
       }
       document.addEventListener("keydown", onKey, true);
       Dialog.stack.push(entry);
       setTimeout(() => {
-        if (overlay.contains(document.activeElement) && document.activeElement !== document.body) return;
-        const target = confirmBtn || (bodyEl.querySelector("button") as HTMLElement | null);   // choices : focus 1er choix
+        if (overlay.contains(document.activeElement) && document.activeElement !== document.body) return;   // un build() a déjà ciblé un champ
+        // DANGER : focus initial sur « Annuler » (jamais l'action destructrice) — Entrée réflexe = annuler.
+        // Sinon : action primaire (bouton « Confirmer »), ou 1er bouton du corps (mode « choix »).
+        const primary = confirmBtn || (bodyEl.querySelector("button") as HTMLElement | null);
+        const target = (danger && cancelBtn instanceof HTMLElement) ? cancelBtn : primary;
         if (target) target.focus();
       }, 0);
     });

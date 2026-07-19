@@ -711,4 +711,31 @@ module.exports = async () => {
     ck.eq(RichTooltip.get("t.b").title, "B", "registerAll : lot enregistré");
   }
   });
+
+  await section("UI a11y : ScrollLock (compteur) + OverlayA11y.nextId (ids stables) — socle des overlays", async () => {
+  {
+    const { ScrollLock } = D("ui/ScrollLock.js");
+    const { OverlayA11y } = D("ui/OverlayA11y.js");
+
+    // ---- ScrollLock : le verrou ne se pose qu'à la 1re prise, ne se retire qu'à la dernière libération ----
+    ScrollLock.reset();
+    ck.eq(ScrollLock.depth, 0, "verrou : profondeur initiale 0");
+    ck.eq(ScrollLock.acquire(), true, "1re prise (0→1) → APPLIQUER le verrou");
+    ck.eq(ScrollLock.acquire(), false, "prise imbriquée (1→2, dialogue sur modale) → déjà verrouillé, ne rien faire");
+    ck.eq(ScrollLock.depth, 2, "profondeur = 2 après deux prises");
+    ck.eq(ScrollLock.release(), false, "libération imbriquée (2→1) → une modale reste ouverte, garder le verrou");
+    ck.eq(ScrollLock.release(), true, "dernière libération (1→0) → RÉTABLIR le défilement");
+    ck.eq(ScrollLock.depth, 0, "profondeur revenue à 0");
+    ck.eq(ScrollLock.release(), true, "libération en trop → borné à 0 (jamais négatif)");
+    ck.eq(ScrollLock.depth, 0, "profondeur reste 0 après libération excédentaire");
+    ScrollLock.reset();
+
+    // ---- OverlayA11y.nextId : identifiants uniques et préfixés (aria-labelledby / aria-describedby) ----
+    const a = OverlayA11y.nextId("dcm-modal-title");
+    const b = OverlayA11y.nextId("dcm-modal-title");
+    ck.eq(a === b, false, "nextId : deux appels ne collisionnent jamais");
+    ck.eq(a.startsWith("dcm-modal-title-"), true, "nextId : préfixe conservé");
+    ck.eq(OverlayA11y.nextId("x").startsWith("x-"), true, "nextId : préfixe arbitraire respecté");
+  }
+  });
 };
