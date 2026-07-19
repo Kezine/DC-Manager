@@ -1,0 +1,38 @@
+<!-- @dsCard group="Formulaires" name="Bascules (toggle-pill)" subtitle="pilule + témoin ● + teinte, états off/on/désactivée, variante pleine largeur et grille d'icônes" -->
+<!-- DÉRIVÉ de ui/FormControls.ts (FormControls.toggle → .btn.btn-sm.toggle-pill, role="switch",
+     témoin .tgl-dot + libellé .tgl-txt) et de dc-manager.css (.toggle-pill / .toggle-block).
+     DOCTRINE (différenciation bascules/boutons) : une BASCULE porte un ÉTAT — trois signaux
+     indépendants (forme pilule, témoin ●, teinte accent), JAMAIS d'aplat plein (réservé à l'ACTION).
+     Carte DÉDIÉE : ces contrôles vivent aussi dans la carte « Formulaires » (contexte) et, en
+     variante icône seule 36px, dans le panneau « Affichage / calques » (Panneaux 2D/3D). -->
+<section class="ds-section">
+  <h2>États de la bascule</h2>
+  <div class="ds-row">
+    <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Inactive</span></button>
+    <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Active</span></button>
+    <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" disabled><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Désactivée</span></button>
+  </div>
+  <p class="ds-note">OFF = anneau creux neutre · ON = témoin plein + teinte accent (bordure/texte, jamais d'aplat) ·
+  désactivée = opacité réduite. <code>role="switch"</code> + <code>aria-checked</code> portés par le bouton.</p>
+</section>
+
+<section class="ds-section">
+  <h2>Pleine largeur (.toggle-block)</h2>
+  <div class="ds-row ds-col" style="max-width:340px">
+    <button type="button" class="btn btn-sm toggle-pill toggle-block active" role="switch" aria-checked="true"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Afficher les réseaux masqués</span></button>
+    <button type="button" class="btn btn-sm toggle-pill toggle-block" role="switch" aria-checked="false"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Placement libre</span></button>
+  </div>
+  <p class="ds-note">Variante de panneau/réglages : la pilule s'étire sur la colonne, libellé à gauche du flux.</p>
+</section>
+
+<section class="ds-section">
+  <h2>Variante icône seule (grilles de calques)</h2>
+  <div class="dc-3d-toggle-grid" style="max-width:200px">
+    <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Faces avant des équipements" aria-label="Faces avant des équipements"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/></svg></button>
+    <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Ports" aria-label="Ports"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/></svg></button>
+    <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Noms des équipements" aria-label="Noms des équipements"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h9M5 18h6"/></svg></button>
+  </div>
+  <p class="ds-note">Le contenu de la pilule est remplacé par l'icône seule (carré 36 px, <code>title</code> +
+  <code>aria-label</code> obligatoires) — doctrine « allumé = visible » dans les grilles de calques.
+  Jeu complet : carte « Panneau Affichage / calques » du groupe Panneaux 2D/3D.</p>
+</section>

@@ -1,10 +1,10 @@
-<!-- @dsCard group="Modales" name="Export de certificat" subtitle="modale hideFooter : liste d'artefacts ; entrées exigeant la clé privée aria-disabled + pastille « Coffre verrouillé » + bouton « Déverrouiller le coffre »" -->
+<!-- @dsCard group="Formulaires" name="Bascules (toggle-pill)" subtitle="pilule + témoin ● + teinte, états off/on/désactivée, variante pleine largeur et grille d'icônes" -->
 <!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DC Manager — DS · Export de certificat</title>
+<title>DC Manager — DS · Bascules (toggle-pill)</title>
 <style>
 /* DC Manager — styles extraits du monolithe v172 (bloc <style>, verbatim). */
   /* ============ FONTES EMBARQUÉES — IBM Plex Sans (PROSE) ============
@@ -2393,52 +2393,46 @@
 <button type="button" id="ds-theme-toggle" class="ds-theme-toggle" aria-label="Basculer le thème clair / sombre" title="Basculer le thème"></button>
 <div class="ds-page">
   <header class="ds-card-head">
-    <div class="ds-card-group">Modales</div>
-    <div class="ds-card-title">Export de certificat</div>
-    <div class="ds-card-sub">modale hideFooter : liste d'artefacts ; entrées exigeant la clé privée aria-disabled + pastille « Coffre verrouillé » + bouton « Déverrouiller le coffre »</div>
+    <div class="ds-card-group">Formulaires</div>
+    <div class="ds-card-title">Bascules (toggle-pill)</div>
+    <div class="ds-card-sub">pilule + témoin ● + teinte, états off/on/désactivée, variante pleine largeur et grille d'icônes</div>
   </header>
-<!-- DÉRIVÉ de src-client/views/CertsAdminView.ts (exportModal) : intro .form-hint, liste verticale de
-     boutons .btn.btn-ghost.btn-sm (text-align:left) — un par artefact. Les artefacts qui EXIGENT la clé
-     privée sont INERTES quand la session est verrouillée : `aria-disabled="true"` (et NON `disabled`, pour
-     rester découvrables au clavier), clic neutralisé par une garde, tooltip (certs.admin.export.lockedHint)
-     DOUBLÉ d'une pastille visible « Coffre verrouillé » (.lock-tag, certs.admin.export.lockedTag). En bas,
-     un bouton « Déverrouiller le coffre… » ferme la modale et renvoie au flux de déverrouillage existant.
-     Libellés = catalogue certs (export.*). La fiche s'ouvre en Modal hideFooter (téléchargement = clic sur
-     un artefact, pas de pied Enregistrer/Annuler).
-     APERÇU STATIQUE : la modale est sortie de son overlay plein écran ; l'état « coffre verrouillé » est figé. -->
+<!-- DÉRIVÉ de ui/FormControls.ts (FormControls.toggle → .btn.btn-sm.toggle-pill, role="switch",
+     témoin .tgl-dot + libellé .tgl-txt) et de dc-manager.css (.toggle-pill / .toggle-block).
+     DOCTRINE (différenciation bascules/boutons) : une BASCULE porte un ÉTAT — trois signaux
+     indépendants (forme pilule, témoin ●, teinte accent), JAMAIS d'aplat plein (réservé à l'ACTION).
+     Carte DÉDIÉE : ces contrôles vivent aussi dans la carte « Formulaires » (contexte) et, en
+     variante icône seule 36px, dans le panneau « Affichage / calques » (Panneaux 2D/3D). -->
 <section class="ds-section">
-  <h2>Modale d'export unitaire (certificats)</h2>
-  <p class="ds-note">Télécharge les artefacts d'un certificat. La liste s'adapte au type d'objet ; les artefacts contenant une clé privée ne sont proposés que si le coffre est déverrouillé. Ici la session est VERROUILLÉE : « Clé privée » et « PKCS#12 » sont grisés, chacun flanqué d'une pastille « Coffre verrouillé » (état figé pour l'aperçu).</p>
-  <div class="ds-demo">
-    <div class="modal" style="margin:0 auto;">
-      <div class="modal-header">
-        <div class="modal-header-left"><div class="modal-titles">
-          <div class="modal-title">Exporter</div>
-          <div class="modal-subtitle">wildcard.interne</div>
-        </div></div>
-        <button type="button" class="modal-close" aria-label="Fermer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
-      </div>
-      <div class="modal-body">
-        <div class="form-hint" style="margin-bottom:10px">Téléchargez les artefacts de « wildcard.interne ». Les clés privées sont déchiffrées LOCALEMENT (session déverrouillée) et ne transitent jamais par le serveur.</div>
-        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start">
-          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Tout (ZIP) — artefacts publics</button>
-          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Certificat public (.pem)</button>
-          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Chaîne complète (fullchain.pem)</button>
-          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Chaîne d'autorité (ca-chain.pem)</button>
-          <div style="display:flex;align-items:center;gap:8px">
-            <button type="button" class="btn btn-ghost btn-sm" style="text-align:left" aria-disabled="true" title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Clé privée (.key.pem)</button>
-            <span class="lock-tag" title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Coffre verrouillé</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <button type="button" class="btn btn-ghost btn-sm" style="text-align:left" aria-disabled="true" title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Paquet PKCS#12 (.p12)…</button>
-            <span class="lock-tag" title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Coffre verrouillé</span>
-          </div>
-        </div>
-        <button type="button" class="btn btn-ghost btn-sm" style="margin-top:12px" title="Fermer cette fenêtre et revenir à la saisie de la phrase pour déverrouiller le coffre.">Déverrouiller le coffre…</button>
-      </div>
-    </div>
+  <h2>États de la bascule</h2>
+  <div class="ds-row">
+    <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Inactive</span></button>
+    <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Active</span></button>
+    <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" disabled><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Désactivée</span></button>
   </div>
-  <p class="ds-note">Les deux entrées exigeant la clé privée sont <code>aria-disabled="true"</code> (grisées, clic inerte, mais focusables au clavier) — pas cachées, pas d'erreur au clic —, avec la pastille <code>.lock-tag</code> « Coffre verrouillé » en plus du tooltip. Le bouton « Déverrouiller le coffre… » ferme la modale et renvoie le focus au champ de phrase ; une fois déverrouillé, ces entrées redeviennent cliquables et « Tout (ZIP) » repasse à « cert + clé privée ».</p>
+  <p class="ds-note">OFF = anneau creux neutre · ON = témoin plein + teinte accent (bordure/texte, jamais d'aplat) ·
+  désactivée = opacité réduite. <code>role="switch"</code> + <code>aria-checked</code> portés par le bouton.</p>
+</section>
+
+<section class="ds-section">
+  <h2>Pleine largeur (.toggle-block)</h2>
+  <div class="ds-row ds-col" style="max-width:340px">
+    <button type="button" class="btn btn-sm toggle-pill toggle-block active" role="switch" aria-checked="true"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Afficher les réseaux masqués</span></button>
+    <button type="button" class="btn btn-sm toggle-pill toggle-block" role="switch" aria-checked="false"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Placement libre</span></button>
+  </div>
+  <p class="ds-note">Variante de panneau/réglages : la pilule s'étire sur la colonne, libellé à gauche du flux.</p>
+</section>
+
+<section class="ds-section">
+  <h2>Variante icône seule (grilles de calques)</h2>
+  <div class="dc-3d-toggle-grid" style="max-width:200px">
+    <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Faces avant des équipements" aria-label="Faces avant des équipements"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/></svg></button>
+    <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Ports" aria-label="Ports"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/></svg></button>
+    <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Noms des équipements" aria-label="Noms des équipements"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h9M5 18h6"/></svg></button>
+  </div>
+  <p class="ds-note">Le contenu de la pilule est remplacé par l'icône seule (carré 36 px, <code>title</code> +
+  <code>aria-label</code> obligatoires) — doctrine « allumé = visible » dans les grilles de calques.
+  Jeu complet : carte « Panneau Affichage / calques » du groupe Panneaux 2D/3D.</p>
 </section>
 
 </div>
