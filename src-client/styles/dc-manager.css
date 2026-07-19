@@ -1,4 +1,54 @@
 ﻿/* DC Manager — styles extraits du monolithe v172 (bloc <style>, verbatim). */
+  /* ============ FONTES EMBARQUÉES — IBM Plex Sans (PROSE) ============
+     Revue design lot D1. Fontes VENDORÉES en local (woff2 committés dans src-client/fonts/, licence OFL.txt à
+     côté) : l'app doit fonctionner en LAN / HORS-LIGNE — AUCUN CDN, AUCUNE requête réseau à l'exécution.
+     webpack INLINE chaque woff2 en base64 (règle asset/inline) → l'export mono-fichier autonome
+     (HtmlInlineScriptPlugin) embarque les fontes. IBM Plex Sans ne sert QUE la PROSE (token --sans, appliqué
+     conteneur par conteneur — cf. plus bas) ; la DONNÉE reste en MONO système (--mono). Pas de Plex Mono
+     (arbitrage POIDS DU BUNDLE : la moitié du gain identitaire pour la moitié du coût). font-display: swap →
+     le texte s'affiche aussitôt dans la fonte de repli, puis bascule sans bloquer le rendu. Deux subsets
+     (latin + latin-ext, app FRANCOPHONE) × 4 graisses (400/500/600/700) ; l'unicode-range laisse le navigateur
+     choisir le bon subset par glyphe. */
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-400.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-ext-400.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-500.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-ext-500.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-600.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-ext-600.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 700; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-700.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans"; font-style: normal; font-weight: 700; font-display: swap;
+    src: url("../fonts/IBMPlexSans-latin-ext-700.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
   /* ============ VARIABLES / THEME ============ */
   :root {
     --bg: #0a0a0a;
@@ -46,6 +96,13 @@
        Réinitialiser… partagent cette hauteur → une barre visuellement homogène (fini le mélange de hauteurs). */
     --control-h: 36px;
     --mono: ui-monospace, "SF Mono", "Menlo", "Consolas", "Cascadia Mono", "Roboto Mono", monospace;
+    /* Pile SANS pour la PROSE (revue design lot D1) : IBM Plex Sans embarquée (cf. @font-face) + repli système.
+       RÈGLE d'usage, à respecter par les prochains contributeurs :
+         • --mono = tout ce qu'on IDENTIFIE / COPIE : identifiants, tables de listing, U/IP/valeurs, code, inputs,
+                    boutons, badges/pills, onglets, libellés courts en capitales. L'esprit CONSOLE reste l'identité.
+         • --sans = tout ce qu'on LIT : paragraphes, aides/hints de formulaire, descriptions, messages de dialogue,
+                    toasts, intros/états vides. Appliqué CONTENEUR PAR CONTENEUR (pas via <body>, gardé en mono). */
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
   [data-theme="light"] {
     --bg: #f4f4f1;
@@ -491,7 +548,7 @@
      retombent, elles, sur le `text-align:right` défini plus haut). */
   th.cell-actions { text-align: right; }
   .cell-id { font-size: 10px; color: var(--fg-dimmer); }
-  .empty-row td { text-align: center; color: var(--fg-dimmer); padding: 32px 12px; font-style: italic; }
+  .empty-row td { text-align: center; color: var(--fg-dimmer); padding: 32px 12px; font-style: italic; font-family: var(--sans); }   /* prose (« aucun élément ») → --sans */
   .row-btn {
     background: transparent;
     border: 1px solid var(--line-2);
@@ -761,7 +818,7 @@
   .date-ctrl-btn.date-ctrl-text { padding: 0 10px; font-size: 10px; letter-spacing: 0.06em; }
   .date-ctrl-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; fill: none; }
   .form-field textarea { resize: vertical; min-height: 64px; line-height: 1.5; }
-  .form-hint { font-size: 10px; color: var(--fg-dimmer); margin-top: 4px; letter-spacing: 0.03em; }
+  .form-hint { font-size: 10px; color: var(--fg-dimmer); margin-top: 4px; letter-spacing: 0.03em; font-family: var(--sans); }   /* aide de formulaire (prose) → --sans */
   .form-hint.warn { color: var(--warn); }
   .form-hint.err { color: var(--err); }
   /* validation live (LiveValidation) : champ en erreur + message sous le contrôle */
@@ -831,7 +888,7 @@
   .face-frame { position: relative; width: 100%; max-height: 70vh; margin: 0 auto; transform-origin: 0 0; will-change: transform; }
   .face-stage { position: absolute; inset: 0; background: transparent; border: 1px solid var(--line-2); overflow: hidden; user-select: none; z-index: 2; }
   .face-stage.empty { background-color: var(--bg); background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 22px 22px; }
-  .face-stage .face-empty-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px; color: var(--fg-dim); font-size: 11px; }
+  .face-stage .face-empty-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px; color: var(--fg-dim); font-size: 11px; font-family: var(--sans); }   /* état vide (prose) → --sans */
   .face-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; z-index: 0; }
   /* oreilles de montage 19″ : zone NON cliquable, matérialisée par des hachures */
   .face-ear { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; opacity: 0.55; background: repeating-linear-gradient(45deg, var(--line-2) 0 1px, transparent 1px 7px); border-inline: 1px dashed var(--line-2); }
@@ -846,7 +903,7 @@
   .face-marker .fm-x { cursor: pointer; font-weight: 700; opacity: 0.75; }
   .face-marker .fm-x:hover { opacity: 1; }
   .face-palette { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-  .face-palette-hint { width: 100%; font-size: 11px; color: var(--fg-dim); margin-bottom: 2px; }
+  .face-palette-hint { width: 100%; font-size: 11px; color: var(--fg-dim); margin-bottom: 2px; font-family: var(--sans); }   /* aide (prose) → --sans */
   .face-chip { background: var(--bg-3); border: 1px solid var(--line-2); color: var(--fg); font-size: 11px; padding: 3px 9px; border-radius: 4px; cursor: pointer; }
   .face-chip:hover { border-color: var(--accent); }
   .face-chip.active { background: var(--accent); border-color: var(--accent); color: #08121a; font-weight: 700; }
@@ -877,7 +934,7 @@
   .face-preview .face-marker { cursor: default; }
   /* bibliothÃ¨que d'images (sÃ©lecteur + gestionnaire) */
   .fi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; max-height: 52vh; overflow: auto; }
-  .fi-grid-empty { grid-column: 1 / -1; padding: 10px 4px; color: var(--fg-dim); font-size: 11px; }
+  .fi-grid-empty { grid-column: 1 / -1; padding: 10px 4px; color: var(--fg-dim); font-size: 11px; font-family: var(--sans); }   /* état vide (prose) → --sans */
   .fi-tile { display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 6px; cursor: pointer; color: var(--fg); text-align: center; }
   .fi-tile:hover { border-color: var(--accent); }
   .fi-tile.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -894,7 +951,7 @@
   /* aperÃ§u dans le formulaire d'image */
   .fi-form-preview { position: relative; width: 100%; max-width: 360px; aspect-ratio: 19 / 3.5; background: var(--bg); border: 1px solid var(--line-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .fi-form-preview img { width: 100%; height: 100%; object-fit: contain; }
-  .fi-form-empty { color: var(--fg-dim); font-size: 11px; }
+  .fi-form-empty { color: var(--fg-dim); font-size: 11px; font-family: var(--sans); }   /* état vide (prose) → --sans */
   /* ============ DATACENTER (v23) ============ */
   /* Comme la vue topologie : pleine largeur, pleine hauteur (mesurÃ©e en JS), anti-scroll. */
   main:has(#view-datacenter.active) { max-width: none; overflow: hidden; }
@@ -918,7 +975,7 @@
   .dc-pool { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-height: 42vh; overflow: auto; }
   .dc-pool-row { display: flex; align-items: center; gap: 8px; }
   .dc-pool-row .grow { flex: 1 1 auto; min-width: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dc-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; padding: 32px; text-align: center; color: var(--fg-dim); font-size: 12px; line-height: 1.7; }
+  .dc-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; padding: 32px; text-align: center; color: var(--fg-dim); font-size: 12px; line-height: 1.7; font-family: var(--sans); }   /* état vide / intro (prose) → --sans */
   .dc-room { fill: var(--bg); stroke: var(--line-2); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
   .dc-grid-line { stroke: var(--line); stroke-width: 1px; vector-effect: non-scaling-stroke; }
   /* v68 â€” cases INACCESSIBLES (hachurÃ©es) + overlay d'Ã©dition + cote (coordonnÃ©es en m) */
@@ -1330,7 +1387,9 @@
   .dialog-icon.variant-warning { color: var(--warn); }
   .dialog-icon.variant-error, .dialog-icon.variant-danger { color: var(--err); }
   .dialog-title { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; flex: 1 1 auto; min-width: 0; }
-  .dialog-body { padding: 18px; flex: 1 1 auto; min-height: 0; overflow-y: auto; font-size: 13px; line-height: 1.5; color: var(--fg); }
+  /* Message de dialogue / confirmation = surface de LECTURE → --sans. Seul font-size de PROSE relevé (13→14px,
+     revue design lot D1) : bump contenu et à faible risque, le <body> reste à 13px (densité mono préservée). */
+  .dialog-body { padding: 18px; flex: 1 1 auto; min-height: 0; overflow-y: auto; font-size: 14px; line-height: 1.5; color: var(--fg); font-family: var(--sans); }
   .dialog-body p { margin: 0 0 10px; }
   .dialog-body p:last-child { margin-bottom: 0; }
   .dialog-message { white-space: pre-wrap; word-wrap: break-word; }
@@ -1343,7 +1402,7 @@
   .open-kind-btn .ok-ic svg { width: 20px; height: 20px; display: block; }   /* icône SVG (remplace l'ancien emoji) */
   .open-kind-btn .ok-tx { display: flex; flex-direction: column; gap: 2px; }
   .open-kind-btn .ok-title { font-weight: 600; }
-  .open-kind-btn .ok-desc { font-size: 12px; color: var(--fg-dim); }
+  .open-kind-btn .ok-desc { font-size: 12px; color: var(--fg-dim); font-family: var(--sans); }   /* description (prose) → --sans */
 
   /* ============ TOOLTIP ============ */
   /* v101 â€” tooltips enrichis repensÃ©s : bandeau d'en-tÃªte pleine largeur (le 1er .tt-title bleed via marges
@@ -1434,6 +1493,7 @@
     color: var(--fg);
     padding: 10px 14px;
     font-size: 12px;
+    font-family: var(--sans);   /* message (prose) → --sans */
     box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     animation: toastIn .2s;
     max-width: 360px;
@@ -1771,7 +1831,7 @@
   .ss-item:hover { background: var(--bg-3); }
   .ss-item.sel { color: var(--accent-text); }   /* item sélectionné (texte 12px) → --accent-text */
   .ss-item:disabled { color: var(--fg-dimmer); cursor: not-allowed; }
-  .ss-empty { color: var(--fg-dimmer); font-size: 12px; padding: 7px 8px; }
+  .ss-empty { color: var(--fg-dimmer); font-size: 12px; padding: 7px 8px; font-family: var(--sans); }   /* état vide (prose) → --sans */
 
   .graph-stage {
     position: relative;
@@ -1954,7 +2014,7 @@
   .graph-ctx .ctx-head { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-dim); padding: 4px 10px 2px; }
   /* gestionnaire de dispositions enregistrÃ©es */
   .layout-mgr { display: flex; flex-direction: column; gap: 8px; }
-  .layout-mgr .lm-empty { color: var(--fg-dimmer); font-style: italic; padding: 20px 4px; text-align: center; font-size: 12px; }
+  .layout-mgr .lm-empty { color: var(--fg-dimmer); font-style: italic; padding: 20px 4px; text-align: center; font-size: 12px; font-family: var(--sans); }   /* état vide (prose) → --sans */
   .layout-mgr .lm-item { border: 1px solid var(--line); background: var(--bg); padding: 10px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .layout-mgr .lm-item.active { border-color: var(--accent); }
   .layout-mgr .lm-info { flex: 1 1 220px; min-width: 0; }
@@ -2035,7 +2095,7 @@
   .settings-help-icon:hover, .settings-help-icon:focus { color: var(--fg); border-color: var(--fg-dim); }
   .settings-status-line { font-size: 10px; color: var(--fg-dim); margin-top: 8px; letter-spacing: 0.04em; }
   .settings-status-line strong { color: var(--fg); font-weight: 600; }
-  .settings-row-note { font-size: 10px; color: var(--fg-dimmer); margin-top: 6px; line-height: 1.5; }
+  .settings-row-note { font-size: 10px; color: var(--fg-dimmer); margin-top: 6px; line-height: 1.5; font-family: var(--sans); }   /* note (prose) → --sans */
 
   /* ============ WELCOME SCREEN ============ */
   .welcome-screen {
@@ -2061,7 +2121,7 @@
   .welcome-logo { width: 48px; height: 48px; margin: 0 auto 18px; color: var(--accent); }
   .welcome-logo svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
   .welcome-title { color: var(--fg); letter-spacing: 0.22em; font-size: 20px; margin: 0 0 10px; font-weight: 700; }
-  .welcome-text { color: var(--fg-dim); font-size: 12px; line-height: 1.6; margin: 0 0 16px; }
+  .welcome-text { color: var(--fg-dim); font-size: 12px; line-height: 1.6; margin: 0 0 16px; font-family: var(--sans); }   /* intro (prose) → --sans */
   .welcome-mode-badge {
     color: var(--fg-dim); font-size: 11px; line-height: 1.5; margin: 0 0 18px;
     padding: 8px 12px; border: 1px solid var(--line-2); border-left: 3px solid var(--accent);
@@ -2070,10 +2130,10 @@
   .welcome-mode-badge strong { color: var(--accent-text); }   /* emphase textuelle du bandeau → --accent-text */
   .welcome-actions { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
   .welcome-btn { width: 100%; justify-content: center; }
-  .welcome-mode-hint { color: var(--fg-dimmer); font-size: 10px; line-height: 1.5; margin: 18px 0 0; letter-spacing: 0.02em; }
+  .welcome-mode-hint { color: var(--fg-dimmer); font-size: 10px; line-height: 1.5; margin: 18px 0 0; letter-spacing: 0.02em; font-family: var(--sans); }   /* aide (prose) → --sans */
   .welcome-auth { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
   .welcome-auth-msg {
-    color: var(--fg-dim); font-size: 13px; line-height: 1.6; margin: 0;
+    color: var(--fg-dim); font-size: 13px; line-height: 1.6; margin: 0; font-family: var(--sans);   /* message (prose) → --sans */
     padding: 14px 16px; border: 1px solid var(--line-2); border-left: 3px solid var(--danger, #e5534b);
     background: var(--bg-2); border-radius: 4px; text-align: left;
   }
