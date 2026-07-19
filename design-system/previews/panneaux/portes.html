@@ -1279,6 +1279,11 @@
   .dc-cam-pivot line, .dc-cam-pivot circle { stroke: var(--fg-dim); stroke-width: 1px; fill: none; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.5; stroke-dasharray: 3 3; }
   .dc-rack-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
   .dc-rack-row .grow { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Rangée de PORTE : libellé (mur + vantaux) qui peut passer sur deux lignes (jamais tronqué) + colonne de cotes
+     alignées à droite (chiffres tabulaires, valeurs entières) → aucune ellipsis sur les valeurs. */
+  .dc-door-row { align-items: flex-start; }
+  .dc-door-row .dc-door-name { flex: 1 1 auto; min-width: 0; font-size: 12px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
+  .dc-door-row .dc-door-dims { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 11px; color: var(--fg-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .dc-net-sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; border: 1px solid var(--line-2); }
   .dc-layers { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; max-height: 42vh; overflow: auto; }
   .dc-layer-row { display: flex; align-items: center; gap: 8px; font-size: 11px; cursor: pointer; }
@@ -2363,24 +2368,27 @@
     <div class="ds-card-sub">carte .dc-card : liste des portes de salle (mur · vantaux · ouverture · passage libre), éditer/supprimer, ajout par mur (＋ avant/arrière/gauche/droit)</div>
   </header>
 <!-- DÉRIVÉ de src-client/views/dc/DoorTool.ts (card) : panneau des portes d'une salle (Plan de salle). Titre
-     .dc-card-title (SANS icône). Liste = .dc-layers de rangées .dc-rack-row (libellé .grow + « Modifier » + supprimer
-     dont le contenu est l'icône Icons.CLOSE brute, .btn-danger). Ajout = .dc-card-acts, un bouton « ＋ <mur> » PAR mur
-     (ordre DOOR_WALLS : avant, arrière, gauche, droit). Aide = .form-hint. Libellés de mur = catalogue i18n
-     domain.doorWall.* (avant/arrière/gauche/droit) ; gabarit de rangée = dc.door.rowLabel. Dimensions = DONNÉES. -->
+     .dc-card-title (SANS icône). Liste = .dc-layers de rangées .dc-rack-row.dc-door-row : libellé .dc-door-name
+     (mur + vantaux, peut passer sur DEUX lignes, jamais tronqué) + cotes .dc-door-dims (colonne à droite, chiffres
+     tabulaires, valeurs ENTIÈRES) + « Modifier » + supprimer (icône Icons.CLOSE brute, .btn-danger). Ajout =
+     .dc-card-acts, un bouton « ＋ <mur> » PAR mur (ordre DOOR_WALLS : avant, arrière, gauche, droit). Aide = .form-hint.
+     Libellés de mur = i18n domain.doorWall.* ; gabarits = dc.door.rowWall / rowOpening / rowClearance. Cotes = DONNÉES. -->
 <section class="ds-section">
   <h2>Portes de salle (deux portes posées)</h2>
-  <p class="ds-note">Chaque porte est collée à un mur et déplaçable le long de celui-ci. La rangée résume mur, nombre de vantaux, largeur d'ouverture et passage LIBRE (ouverture − 2 × listel). « Modifier » ouvre le formulaire ; la croix supprime.</p>
+  <p class="ds-note">Chaque porte est collée à un mur et déplaçable le long de celui-ci. Le libellé (mur + vantaux) peut passer sur deux lignes ; les cotes — largeur d'ouverture et passage LIBRE (ouverture − 2 × listel) — restent ENTIÈRES, alignées en colonne à droite (chiffres tabulaires), jamais tronquées. « Modifier » ouvre le formulaire ; la croix supprime.</p>
   <div class="ds-demo">
     <div class="dc-card" style="max-width:380px">
       <div class="dc-card-title">Portes</div>
       <div class="dc-layers">
-        <div class="dc-rack-row">
-          <span class="grow" style="font-size:12px">Mur avant · 2 vantaux · ouv. 1600 · passage 1400 mm</span>
+        <div class="dc-rack-row dc-door-row">
+          <span class="dc-door-name">Mur avant · 2 vantaux</span>
+          <span class="dc-door-dims"><span>ouv. 1600 mm</span><span>passage 1400 mm</span></span>
           <button type="button" class="btn btn-ghost btn-sm">Modifier</button>
           <button type="button" class="btn btn-ghost btn-sm btn-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
         </div>
-        <div class="dc-rack-row">
-          <span class="grow" style="font-size:12px">Mur gauche · ouv. 900 · passage 780 mm</span>
+        <div class="dc-rack-row dc-door-row">
+          <span class="dc-door-name">Mur gauche</span>
+          <span class="dc-door-dims"><span>ouv. 900 mm</span><span>passage 780 mm</span></span>
           <button type="button" class="btn btn-ghost btn-sm">Modifier</button>
           <button type="button" class="btn btn-ghost btn-sm btn-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
         </div>

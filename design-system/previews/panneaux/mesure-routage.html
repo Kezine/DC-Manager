@@ -1279,6 +1279,11 @@
   .dc-cam-pivot line, .dc-cam-pivot circle { stroke: var(--fg-dim); stroke-width: 1px; fill: none; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.5; stroke-dasharray: 3 3; }
   .dc-rack-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
   .dc-rack-row .grow { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Rangée de PORTE : libellé (mur + vantaux) qui peut passer sur deux lignes (jamais tronqué) + colonne de cotes
+     alignées à droite (chiffres tabulaires, valeurs entières) → aucune ellipsis sur les valeurs. */
+  .dc-door-row { align-items: flex-start; }
+  .dc-door-row .dc-door-name { flex: 1 1 auto; min-width: 0; font-size: 12px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
+  .dc-door-row .dc-door-dims { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 11px; color: var(--fg-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .dc-net-sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; border: 1px solid var(--line-2); }
   .dc-layers { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; max-height: 42vh; overflow: auto; }
   .dc-layer-row { display: flex; align-items: center; gap: 8px; font-size: 11px; cursor: pointer; }
@@ -2366,7 +2371,9 @@
      (exclusifs entre eux et du positionnement). Titre .dc-card-title + .gi (Icons.MEASURE / Icons.ROUTE). Listes en
      flux (font 12px, gap 3px) : mesures terminées + en cours (survol = surbrillance dans la scène) ; étapes de route
      numérotées par .pill. Longueurs via Format.meters (séparateur décimal « . », suffixe « m »). Aides = .form-hint.
-     Actions = .dc-card-acts, boutons décorés Icons.CHECK / DELETE / CLOSE. Noms d'entités / valeurs = DONNÉES
+     Actions = .dc-card-acts : VALIDER (primaire .btn-primary) + ANNULER POINT (ghost) à gauche ; TOUT EFFACER
+     (destructif) et FERMER teintés .btn-danger et repoussés à DROITE (margin-left:auto). FERMER / ANNULER passent par
+     un garde-fou (Dialog.confirm danger) si un travail non validé existe. Noms d'entités / valeurs = DONNÉES
      illustratives ; libellés d'interface = catalogue i18n dc.measure.* / dc.route.* / lists.ph.points. -->
 <section class="ds-section">
   <h2>Mesure multipoint (session active)</h2>
@@ -2381,14 +2388,14 @@
       <div style="margin:6px 0;font-size:13px;border-top:1px solid var(--line);padding-top:6px">Longueur totale : <b style="color:var(--accent)">5.95 m</b></div>
       <div class="form-hint">Cliquez pour poser des points · ENTRÉE valide la mesure · ÉCHAP annule la mesure en cours.</div>
       <div class="dc-card-acts">
+        <button type="button" class="btn btn-sm btn-primary"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 6.5"/></svg></span>Valider (Entrée)</button>
         <button type="button" class="btn btn-ghost btn-sm">↩ Annuler point</button>
-        <button type="button" class="btn btn-ghost btn-sm"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 6.5"/></svg></span>Valider (Entrée)</button>
-        <button type="button" class="btn btn-ghost btn-sm"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></span>Tout effacer</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-danger" style="margin-left:auto"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></span>Tout effacer</button>
         <button type="button" class="btn btn-ghost btn-sm btn-danger"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></span>Fermer</button>
       </div>
     </div>
   </div>
-  <p class="ds-note">Prise dans un AUTRE contexte de vue, la même carte affiche « Mesure prise dans un autre contexte… » et les actions de pose sont désactivées (état non représenté).</p>
+  <p class="ds-note">« Valider » est le bouton PRIMAIRE ; « Annuler point » ghost à côté ; « Tout effacer » (destructif) et « Fermer » sont teintés danger et repoussés à droite, à l'écart du couple valider/annuler-point. Fermer alors qu'une mesure non validée (ou des mesures de session) existe déclenche une confirmation danger (« Fermer la mesure ? ») — sinon la fermeture est directe. Prise dans un AUTRE contexte de vue, la même carte affiche « Mesure prise dans un autre contexte… » et les actions de pose sont désactivées (état non représenté).</p>
 </section>
 
 <section class="ds-section">
@@ -2404,11 +2411,11 @@
       <div class="form-hint">Cliquez des waypoints/brosses (changez de salle/étage si besoin), puis un PORT terminal pour finir.</div>
       <div class="dc-card-acts">
         <button type="button" class="btn btn-ghost btn-sm">↩ Retour</button>
-        <button type="button" class="btn btn-ghost btn-sm btn-danger"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></span>Annuler</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-danger" style="margin-left:auto"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></span>Annuler</button>
       </div>
     </div>
   </div>
-  <p class="ds-note">Avant la pose du port de départ, la première ligne est l'invite en accent « Cliquez le PORT de départ… » et l'aide devient « Cliquez un port libre pour démarrer la route. ».</p>
+  <p class="ds-note">« Annuler » (destructif, danger) est repoussé à droite, à l'écart de « Retour » ; abandonner un tracé non validé (port de départ posé ou waypoints ajoutés) déclenche une confirmation danger (« Abandonner la route ? »). Avant la pose du port de départ, la première ligne est l'invite en accent « Cliquez le PORT de départ… » et l'aide devient « Cliquez un port libre pour démarrer la route. ».</p>
 </section>
 
 </div>

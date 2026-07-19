@@ -1279,6 +1279,11 @@
   .dc-cam-pivot line, .dc-cam-pivot circle { stroke: var(--fg-dim); stroke-width: 1px; fill: none; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.5; stroke-dasharray: 3 3; }
   .dc-rack-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
   .dc-rack-row .grow { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Rangée de PORTE : libellé (mur + vantaux) qui peut passer sur deux lignes (jamais tronqué) + colonne de cotes
+     alignées à droite (chiffres tabulaires, valeurs entières) → aucune ellipsis sur les valeurs. */
+  .dc-door-row { align-items: flex-start; }
+  .dc-door-row .dc-door-name { flex: 1 1 auto; min-width: 0; font-size: 12px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
+  .dc-door-row .dc-door-dims { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 11px; color: var(--fg-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .dc-net-sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; border: 1px solid var(--line-2); }
   .dc-layers { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; max-height: 42vh; overflow: auto; }
   .dc-layer-row { display: flex; align-items: center; gap: 8px; font-size: 11px; cursor: pointer; }
@@ -2371,15 +2376,15 @@
      repliable dans le panneau latéral réel (chevron injecté par DcBase.collapsible) — montrée dépliée ici. -->
 <section class="ds-section">
   <h2>Panneau « Vue 3D » (jeu complet de calques)</h2>
-  <p class="ds-note">Carte du panneau latéral. Les calques sont des bascules ICÔNE regroupées par thème (Équipements, Baies, Câbles, Waypoints, Étage &amp; repères) ; l'en-tête de section n'apparaît que si au moins un calque s'applique à la vue courante. État ON = teinte accent + témoin, sans aplat plein.</p>
+  <p class="ds-note">Carte du panneau latéral. Les calques sont des bascules ICÔNE regroupées par thème (Équipements, Baies, Câbles, Waypoints, Étage &amp; repères) ; l'en-tête de section n'apparaît que si au moins un calque s'applique à la vue courante. État ON = teinte accent + témoin, sans aplat plein. DOCTRINE de la grille : « allumé = VISIBLE » pour TOUTES les bascules — les faces avant/arrière sont formulées en POSITIF (actif = faces affichées), sans légende nécessaire.</p>
   <div class="ds-demo">
     <div class="dc-card" style="max-width:420px">
       <div class="dc-card-title">Vue 3D<span class="settings-help-icon dc-help" role="img" tabindex="0" aria-label="Aide : navigation 3D" title="Glisser GAUCHE = déplacer le modèle · glisser DROIT (ou Maj+glisser) = orbiter · molette = zoom. Survolez une baie pour son détail, cliquez-la pour l'éditer.">?</span></div>
 
       <div style="font-size:10.5px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.05em;margin:9px 0 3px">Équipements</div>
       <div class="dc-3d-toggle-grid">
-        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Masquer les équipements montés en façade AVANT" aria-label="Masquer les équipements montés en façade AVANT"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg></button>
-        <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Masquer les équipements montés à l'ARRIÈRE" aria-label="Masquer les équipements montés à l'ARRIÈRE"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="14" width="16" height="6" fill="currentColor" stroke="none"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Faces avant des équipements" aria-label="Faces avant des équipements"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/></svg></button>
+        <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Faces arrière des équipements" aria-label="Faces arrière des équipements"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="14" width="16" height="6" fill="currentColor" stroke="none"/></svg></button>
         <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Ports (connecteurs sur les faces)" aria-label="Ports (connecteurs sur les faces)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/></svg></button>
         <button type="button" class="btn btn-sm toggle-pill active" role="switch" aria-checked="true" title="Noms des équipements" aria-label="Noms des équipements"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h9M5 18h6"/></svg></button>
         <button type="button" class="btn btn-sm toggle-pill" role="switch" aria-checked="false" title="Images de façade" aria-label="Images de façade"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="10" r="1.8"/><path d="M21 16l-5-4-8 7"/></svg></button>
