@@ -441,7 +441,8 @@
      MÊME pleine largeur, sinon elles restaient centrées à 95vw (parité avec #view-graph / #view-datacenter). */
   main:has(.view.active .list-body),
   main:has(#view-interventions.active),
-  main:has(#view-certificats.active) { max-width: none; padding-left: 14px; padding-right: 14px; }
+  main:has(#view-certificats.active),
+  main:has(#view-notifications.active) { max-width: none; padding-left: 14px; padding-right: 14px; }
   .view { display: none; }
   .view.active { display: block; }
   #view-graph.active { display: flex; flex-direction: column; }
