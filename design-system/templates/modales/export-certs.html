@@ -1,0 +1,34 @@
+<!-- @dsCard group="Modales" name="Export de certificat" subtitle="modale hideFooter : liste d'artefacts, entrées « Clé privée » et « PKCS#12 » grisées (coffre verrouillé)" -->
+<!-- DÉRIVÉ de src-client/views/CertsAdminView.ts (exportModal) : intro .form-hint, liste verticale de
+     boutons .btn.btn-ghost.btn-sm (text-align:left) — un par artefact. Les artefacts qui EXIGENT la clé
+     privée sont DÉSACTIVÉS (disabled) quand la session est verrouillée, avec l'explication en tooltip
+     (certs.admin.export.lockedHint). Libellés = catalogue certs (export.*). La fiche s'ouvre en Modal
+     hideFooter (téléchargement = clic sur un artefact, pas de pied Enregistrer/Annuler).
+     APERÇU STATIQUE : la modale est sortie de son overlay plein écran ; l'état « coffre verrouillé » est figé. -->
+<section class="ds-section">
+  <h2>Modale d'export unitaire (certificats)</h2>
+  <p class="ds-note">Télécharge les artefacts d'un certificat. La liste s'adapte au type d'objet ; les artefacts contenant une clé privée ne sont proposés que si le coffre est déverrouillé. Ici la session est VERROUILLÉE : « Clé privée » et « PKCS#12 » sont grisés (état figé pour l'aperçu).</p>
+  <div class="ds-demo">
+    <div class="modal" style="margin:0 auto;">
+      <div class="modal-header">
+        <div class="modal-header-left"><div class="modal-titles">
+          <div class="modal-title">Exporter</div>
+          <div class="modal-subtitle">wildcard.interne</div>
+        </div></div>
+        <button type="button" class="modal-close" aria-label="Fermer">{{ICON:CLOSE}}</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-hint" style="margin-bottom:10px">Téléchargez les artefacts de « wildcard.interne ». Les clés privées sont déchiffrées LOCALEMENT (session déverrouillée) et ne transitent jamais par le serveur.</div>
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start">
+          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Tout (ZIP) — artefacts publics</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Certificat public (.pem)</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Chaîne complète (fullchain.pem)</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left">Chaîne d'autorité (ca-chain.pem)</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left" disabled title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Clé privée (.key.pem)</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="text-align:left" disabled title="Coffre verrouillé — déverrouillez la session pour exporter les clés privées.">Paquet PKCS#12 (.p12)…</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Les deux dernières entrées sont <code>disabled</code> (grisées, non cliquables) avec le tooltip « Coffre verrouillé… » — pas cachées, pas d'erreur au clic : déverrouiller la session les réactive et le libellé « Tout (ZIP) » repasse à « cert + clé privée ».</p>
+</section>

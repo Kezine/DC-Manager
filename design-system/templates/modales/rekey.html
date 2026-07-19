@@ -1,0 +1,47 @@
+<!-- @dsCard group="Modales" name="Changement de phrase maître (rekey)" subtitle="modale Modal : phrase actuelle / nouvelle / confirmation, hints de sécurité, pied Changer la phrase" -->
+<!-- DÉRIVÉ de src-client/views/CertsAdminView.ts (changePassphraseModal) : info .form-hint puis trois
+     FormControls.fieldRow → .form-field (input type=password) avec .form-hint de sécurité, et une zone
+     d'erreur partagée .form-hint.err (masquée tant qu'aucune erreur). Le pied de Modal porte le libellé
+     d'action personnalisé « Changer la phrase » (saveLabel) + Annuler. Libellés = catalogue certs (rekey.*).
+     APERÇU STATIQUE : la modale est sortie de son overlay plein écran ; la zone d'erreur est masquée (défaut). -->
+<section class="ds-section">
+  <h2>Modale de changement de phrase (rekey)</h2>
+  <p class="ds-note">Ré-emballe l'enveloppe de la clé maître avec une nouvelle phrase (les clés privées déjà stockées ne sont PAS re-chiffrées). La phrase actuelle est redemandée pour déverrouiller l'enveloppe et sert de re-vérification.</p>
+  <div class="ds-demo">
+    <div class="modal" style="margin:0 auto;">
+      <div class="modal-header">
+        <div class="modal-header-left"><div class="modal-titles">
+          <div class="modal-title">Changer la phrase maître</div>
+          <div class="modal-subtitle"></div>
+        </div></div>
+        <button type="button" class="modal-close" aria-label="Fermer">{{ICON:CLOSE}}</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-hint" style="margin-bottom:10px">Change la phrase qui protège la clé maître. Les clés privées déjà stockées ne sont PAS re-chiffrées (elles restent lisibles) : seule l'enveloppe de la clé maître est ré-emballée avec la nouvelle phrase. Les artefacts déjà exportés (PKCS#12, ZIP protégés…) conservent leur ancienne protection propre.</div>
+        <div class="form-field">
+          <label>Phrase actuelle</label>
+          <input type="password" autocomplete="current-password" placeholder="phrase actuelle">
+          <div class="form-hint">Nécessaire pour déverrouiller l'enveloppe à ré-emballer.</div>
+        </div>
+        <div class="form-field">
+          <label>Nouvelle phrase</label>
+          <input type="password" autocomplete="new-password" placeholder="nouvelle phrase">
+          <div class="form-hint">Choisissez une phrase longue et unique.</div>
+        </div>
+        <div class="form-field">
+          <label>Confirmation</label>
+          <input type="password" autocomplete="new-password" placeholder="confirmer la nouvelle phrase">
+          <div class="form-hint">Ressaisissez la nouvelle phrase.</div>
+        </div>
+        <!-- Zone d'erreur partagée (CertsAdminView.errBox) : masquée par défaut, affichée sur échec
+             (phrase actuelle incorrecte, conflit 409…). Reproduite ici masquée par fidélité de structure. -->
+        <div class="form-hint err" style="margin-top:10px;white-space:pre-line;display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost modal-cancel">Annuler</button>
+        <button type="button" class="btn btn-primary modal-save">Changer la phrase</button>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Trois champs mot de passe (<code>type="password"</code>, <code>autocomplete</code> adapté) portant chacun un <code>.form-hint</code> de sécurité. Le pied utilise un libellé d'action explicite (« Changer la phrase ») plutôt qu'« Enregistrer ».</p>
+</section>

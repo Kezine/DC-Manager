@@ -308,12 +308,15 @@ function cssClassSet(css) {
   return set;
 }
 
-/* Classes ACCROCHES JS (pas de style) : générées par les primitives réelles mais
-   jamais dans le CSS car elles ne servent qu'au `querySelector` (ex. Modal._build →
-   `.modal-save`/`.modal-cancel` câblés en JS). On les reproduit par fidélité et on
-   les EXCLUT du lint pour qu'il reste ciblé sur les fautes de frappe de classes de
-   STYLE. Toute entrée ici doit être une vraie accroche du code source. */
-const KNOWN_HOOK_CLASSES = new Set(["modal-save", "modal-cancel"]);
+/* Classes ÉMISES par le code mais ABSENTES du CSS (jamais stylées par dc-manager.css). On les
+   reproduit par fidélité et on les EXCLUT du lint pour qu'il reste ciblé sur les fautes de frappe
+   de classes de STYLE. Toute entrée ici doit être une vraie classe du code source. Deux natures :
+     - accroches JS pures (servent au `querySelector`) : `.modal-save`/`.modal-cancel` câblés par
+       Modal._build ;
+     - conteneur SÉMANTIQUE de sortie Markdown : `.md-body` (InterventionsAdminView.detailModal,
+       DetailForms.vmDetail) enveloppe le HTML rendu par micromark — le rendu s'appuie sur le style
+       par défaut des éléments (p/ul/li…), la CLASSE elle-même n'a pas de règle dédiée. */
+const KNOWN_HOOK_CLASSES = new Set(["modal-save", "modal-cancel", "md-body"]);
 
 /** Classes UTILISÉES dans un HTML (attributs `class="…"`), hors préfixe `ds-`
     (habillage propre à la galerie) et hors accroches JS connues. */

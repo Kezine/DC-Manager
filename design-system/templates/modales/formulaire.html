@@ -1,0 +1,87 @@
+<!-- @dsCard group="Modales" name="Formulaire (création / édition)" subtitle="modale Modal standard : en-tête, corps .form-field/.form-row, hint, erreur de validation, date, select, pied" -->
+<!-- DÉRIVÉ de src-client/ui/Modal.ts (Modal._build : .modal-overlay > .modal > .modal-header /
+     .modal-body / .modal-footer), src-client/ui/FormControls.ts (fieldRow → .form-field,
+     select → .app-select, date → .date-input-wrap/.date-input-row + .date-ctrl-btn) et
+     src-client/views/forms/EquipmentForms.ts (formulaire d'équipement : identité + Administratif).
+     L'erreur de validation reprend .form-field.invalid + .field-error posés par
+     src-client/views/forms/LiveValidation.ts (message EXACT de src-shared/DataValidation.ts).
+     APERÇU STATIQUE : la modale est sortie de son overlay plein écran pour être montrée en flux. -->
+<section class="ds-section">
+  <h2>Modale de formulaire (Modal)</h2>
+  <p class="ds-note">Structure réelle d'un formulaire d'édition en modale (principe n°11 « formulaires en modale ») : en-tête titre/sous-titre + croix, corps en rangées <code>.form-field</code> / <code>.form-row</code>, pied Annuler / Enregistrer. Les contrôles sont ceux de <code>FormControls</code> (select thématisé, sélecteur de date avec ses boutons).</p>
+  <div class="ds-demo">
+    <div class="modal" style="margin:0 auto;">
+      <div class="modal-header">
+        <div class="modal-header-left"><div class="modal-titles">
+          <div class="modal-title">Modifier un équipement</div>
+          <div class="modal-subtitle">core-sw-01</div>
+        </div></div>
+        <button type="button" class="modal-close" aria-label="Fermer">{{ICON:CLOSE}}</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-field invalid">
+            <label>Nom</label>
+            <input type="text" value="">
+            <div class="field-error">Le champ « name » est obligatoire.</div>
+          </div>
+          <div class="form-field">
+            <label>Type</label>
+            <select class="app-select">
+              <option selected>Switch</option>
+              <option>Routeur</option>
+              <option>Serveur</option>
+              <option>Onduleur (PDU)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label>Marque</label>
+            <input type="text" value="Cisco">
+          </div>
+          <div class="form-field">
+            <label>Modèle</label>
+            <input type="text" value="Catalyst 9300">
+          </div>
+        </div>
+        <div class="form-field">
+          <label>Numéro de série</label>
+          <input type="text" value="FCW2245A1BC">
+          <div class="form-hint">Numéro figurant sur l'étiquette du châssis.</div>
+        </div>
+
+        <div class="section-divider">Administratif</div>
+        <div class="form-row">
+          <div class="form-field">
+            <label>Date d'achat</label>
+            <div class="date-input-wrap">
+              <div class="date-input-row">
+                <input type="date" value="2024-03-12">
+                <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-icon" title="Ouvrir le sélecteur de date" aria-label="Ouvrir le sélecteur de date"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
+                <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-text" title="Mettre la date du jour" aria-label="Auj.">Auj.</button>
+                <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-icon" title="Effacer cette date" aria-label="Effacer cette date"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20H8.5L3 14l5.5-6H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2z"/><line x1="18" y1="11" x2="12" y2="17"/><line x1="12" y1="11" x2="18" y2="17"/></svg></button>
+              </div>
+            </div>
+          </div>
+          <div class="form-field">
+            <label>Fin de garantie</label>
+            <div class="date-input-wrap">
+              <div class="date-input-row">
+                <input type="date" value="2027-03-12">
+                <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-icon" title="Ouvrir le sélecteur de date" aria-label="Ouvrir le sélecteur de date"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
+                <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-text" title="Mettre la date du jour" aria-label="Auj.">Auj.</button>
+                <button type="button" class="btn btn-sm btn-ghost date-ctrl-btn date-ctrl-icon" title="Effacer cette date" aria-label="Effacer cette date"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20H8.5L3 14l5.5-6H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2z"/><line x1="18" y1="11" x2="12" y2="17"/><line x1="12" y1="11" x2="18" y2="17"/></svg></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost modal-cancel">Annuler</button>
+        <button type="button" class="btn btn-primary modal-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">État FIGÉ pour l'aperçu : le champ « Nom » est montré en erreur (<code>.form-field.invalid</code> + <code>.field-error</code>) — état posé par <code>LiveValidation</code> après un envoi refusé (message EXACT de la validation partagée). Les boutons de date reproduisent <code>FormControls.date</code> (icônes DÉFINIES dans le contrôle, hors registre Icons).</p>
+</section>

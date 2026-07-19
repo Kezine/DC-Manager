@@ -1,0 +1,84 @@
+<!-- @dsCard group="Modales" name="Détail d'intervention" subtitle="modale hideFooter : badges nature/priorité/statut, champs de consultation, liens cliquables, réf. Jira, pied Modifier" -->
+<!-- DÉRIVÉ de src-client/views/InterventionsAdminView.ts (detailModal / detailField / detailLinksList /
+     jiraInline / auditText) : bandeau de badges (.pill teinté en ligne, cf. InterventionsFormat.priorityClass
+     / statusClass), rangées de CONSULTATION .form-field (label + valeur en lecture seule), description en
+     MARKDOWN (.md-body, micromark), liste des objets liés (icône de famille .gi + lien + badge de famille),
+     référence Jira (lien mono). Pied = « Modifier » (bouton primaire). La modale s'ouvre en hideFooter/wide.
+     Libellés = catalogues interventions.* / detail.*. APERÇU STATIQUE : sortie de son overlay plein écran. -->
+<section class="ds-section">
+  <h2>Modale de détail d'intervention (lecture)</h2>
+  <p class="ds-note">Consultation d'une intervention : badges de nature/priorité/statut, fenêtre planifiée, référence Jira (simple lien), description Markdown, objets liés cliquables (une cible disparue reste « introuvable », lien conservé), audit résolu via l'annuaire.</p>
+  <div class="ds-demo">
+    <div class="modal wide" style="margin:0 auto;">
+      <div class="modal-header">
+        <div class="modal-header-left"><div class="modal-titles">
+          <div class="modal-title">Détail de l'intervention</div>
+          <div class="modal-subtitle">Remplacement du switch cœur</div>
+        </div></div>
+        <button type="button" class="modal-close" aria-label="Fermer">{{ICON:CLOSE}}</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+          <span class="pill">Intervention</span>
+          <span class="pill" style="border-color:var(--warn);color:var(--warn)">Haute</span>
+          <span class="pill" style="border-color:var(--warn);color:var(--warn)">En cours</span>
+        </div>
+
+        <div class="form-field">
+          <label>Fenêtre planifiée</label>
+          <div>2026-07-18 22:00 → 2026-07-19 02:00</div>
+        </div>
+        <div class="form-field">
+          <label>Jira</label>
+          <a href="#" target="_blank" rel="noopener noreferrer" style="font-family:var(--mono);font-size:12px">INFRA-1234</a>
+        </div>
+        <div class="form-field">
+          <label>Description</label>
+          <div class="md-body">
+            <p>Migration du switch cœur vers le nouveau châssis. Fenêtre de maintenance validée par l'équipe réseau.</p>
+            <ul>
+              <li>Bascule des uplinks sur le lien redondant</li>
+              <li>Remplacement physique en baie RACK-A-03</li>
+              <li>Vérification des voisins LLDP puis rétablissement</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label>Objets liés</label>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="gi" aria-hidden="true">{{ICON:EQUIPMENT}}</span>
+              <span><a href="#" style="cursor:pointer">core-sw-01</a></span>
+              <span class="pill">Équipement</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="gi" aria-hidden="true">{{ICON:VM}}</span>
+              <span><a href="#" style="cursor:pointer">vm-db-01</a></span>
+              <span class="pill">VM</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="gi" aria-hidden="true">{{ICON:SPARE}}</span>
+              <span style="color:var(--fg-dimmer)">(introuvable)</span>
+              <span class="pill">Pièce (spare)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label>Créé par</label>
+          <div>Marie Dupont · 15/07/2026 14:20</div>
+        </div>
+        <div class="form-field">
+          <label>Modifié par</label>
+          <div>Jean Martin · 18/07/2026 21:55</div>
+        </div>
+
+        <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">
+          <button type="button" class="btn btn-primary btn-sm">Modifier</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Chaque objet lié porte l'icône de sa famille (<code>.gi</code>) et un badge de famille ; une cible existante est cliquable (aller-retour vers sa fiche), une cible disparue s'affiche « introuvable » grisée et non cliquable (orphelin toléré, sans FK inter-bases).</p>
+</section>

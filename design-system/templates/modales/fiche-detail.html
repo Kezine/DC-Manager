@@ -1,0 +1,86 @@
+<!-- @dsCard group="Modales" name="Fiche détail" subtitle="modale hideFooter : grille clé/valeur, section, table .table-wrap à boutons-icône, ligne d'audit, pied Localiser + Modifier" -->
+<!-- DÉRIVÉ de src-client/views/forms/EquipmentForms.ts (equipmentDetail) et DetailForms.ts :
+     .detail-grid > .dt/.dd (FormBase.dt/dd), .section-divider, .table-wrap > table (cellules
+     .cell-name / .cell-actions avec IconButton .icon-action LOCATE), .pill / .role-* / .loc-pill.
+     La ligne d'audit vient de src-client/views/forms/AuditLine.ts (.audit-line, « Créé/Modifié par
+     {auteur} le {date} », mode API). Le pied est celui de la fiche : « Localiser en 3D » (ghost,
+     icône préfixée .gi) + « Modifier » (primaire) — la fiche s'ouvre en Modal hideFooter (le pied de
+     modale est masqué, les actions vivent dans le corps).
+     APERÇU STATIQUE : la modale est sortie de son overlay plein écran. -->
+<section class="ds-section">
+  <h2>Modale de fiche détail (lecture)</h2>
+  <p class="ds-note">Fiche RICHE en lecture d'une entité (Modal <code>hideFooter</code>, <code>wide</code>) : elle résout les liens (noms au lieu d'ids), agrège les entités liées et propose « Localiser » + « Modifier ». Grille clé/valeur, intercalaires de section, tables compactes.</p>
+  <div class="ds-demo">
+    <div class="modal wide" style="margin:0 auto;">
+      <div class="modal-header">
+        <div class="modal-header-left"><div class="modal-titles">
+          <div class="modal-title">Détail de l'équipement</div>
+          <div class="modal-subtitle">core-sw-01</div>
+        </div></div>
+        <button type="button" class="modal-close" aria-label="Fermer">{{ICON:CLOSE}}</button>
+      </div>
+      <div class="modal-body">
+        <div class="detail-grid">
+          <div class="dt">Nom</div><div class="dd">core-sw-01</div>
+          <div class="dt">Type</div><div class="dd"><span class="pill">Switch</span></div>
+          <div class="dt">Marque</div><div class="dd">Cisco</div>
+          <div class="dt">Modèle</div><div class="dd">Catalyst 9300</div>
+          <div class="dt">N° de série</div><div class="dd">FCW2245A1BC</div>
+          <div class="dt">Groupe</div><div class="dd"><span class="pill colored-pill" style="--pill-bg:#4ade80;--pill-fg:#0b1220;--pill-border:#4ade80;" title="Groupe primaire">Cœur réseau</span></div>
+          <div class="dt">Dimensions</div><div class="dd"><span class="pill">U</span> 1 U · Standard (1000 mm)</div>
+          <div class="dt">Emplacement</div><div class="dd"><span class="pill">Rack</span> RACK-A-03 · U12 · Standard</div>
+          <div class="dt">Lieu</div><div class="dd"><span class="loc-pill">Bât. Principal · Étage 0 · Salle A · RACK-A-03</span></div>
+          <div class="dt">Description</div><div class="dd">Switch d'accès de l'étage 0.</div>
+          <div class="dt">Créé</div><div class="dd">12/03/2024 09:14</div>
+          <div class="dt">Modifié</div><div class="dd">05/07/2026 16:32</div>
+        </div>
+
+        <div class="section-divider">Ports (3)</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Port</th>
+                <th>Type</th>
+                <th>Rôle</th>
+                <th>Agrégat</th>
+                <th style="text-align:right;">3D</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="cell-name">Gi1/0/1</td>
+                <td>RJ45 <span style="color:var(--fg-dimmer)">· cuivre</span></td>
+                <td><span class="pill role-data">Données</span></td>
+                <td><span style="color:var(--fg-dimmer)">—</span></td>
+                <td class="cell-actions"><button type="button" class="btn btn-ghost btn-sm icon-action" title="Localiser le port en 3D" aria-label="Localiser le port en 3D">{{ICON:LOCATE}}</button></td>
+              </tr>
+              <tr>
+                <td class="cell-name">Gi1/0/2</td>
+                <td>RJ45 <span style="color:var(--fg-dimmer)">· cuivre</span></td>
+                <td><span class="pill role-data">Données</span></td>
+                <td>lag-uplink</td>
+                <td class="cell-actions"><button type="button" class="btn btn-ghost btn-sm icon-action" title="Localiser le port en 3D" aria-label="Localiser le port en 3D">{{ICON:LOCATE}}</button></td>
+              </tr>
+              <tr>
+                <td class="cell-name">mgmt0</td>
+                <td>RJ45 <span style="color:var(--fg-dimmer)">· cuivre</span></td>
+                <td><span class="pill role-mgmt">Management</span></td>
+                <td><span style="color:var(--fg-dimmer)">—</span></td>
+                <td class="cell-actions"><button type="button" class="btn btn-ghost btn-sm icon-action" title="Localiser le port en 3D" aria-label="Localiser le port en 3D">{{ICON:LOCATE}}</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="audit-line">Créé par Marie Dupont le 12/03/2024 09:14 · Modifié par Jean Martin le 05/07/2026 16:32</div>
+
+        <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">
+          <button type="button" class="btn btn-ghost"><span class="gi">{{ICON:LOCATE}}</span>Localiser en 3D</button>
+          <button type="button" class="btn btn-primary">Modifier</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Les boutons d'action de la table sont des boutons-icône (<code>.icon-action</code>, <code>aria-label</code> + <code>title</code> obligatoires, cf. <code>IconButton</code>). Le pied « Localiser en 3D » préfixe l'icône via <code>.gi</code> (icône dans un libellé). La ligne d'audit est discrète et estompée.</p>
+</section>

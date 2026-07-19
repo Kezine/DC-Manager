@@ -1,0 +1,36 @@
+<!-- @dsCard group="Modales" name="Confirmation (Dialog)" subtitle="dialogue empilable Dialog.confirm : variante info (icône bleue --info) et variante danger (suppression)" -->
+<!-- DÉRIVÉ de src-client/ui/Dialog.ts (Dialog.open / Dialog.confirm) : .dialog-box > .dialog-header
+     (.dialog-icon.variant-* = GLYPHE ⓘ/⚠, pas un SVG du registre) + .dialog-title, .dialog-body >
+     .dialog-message, .dialog-footer (Annuler ghost + bouton primaire OU danger). La teinte de l'icône
+     suit la variante : variant-info → var(--info) (bleu, câblé récemment), variant-danger → var(--err).
+     APERÇU STATIQUE : les dialogues (normalement position:fixed dans .dialog-overlay) sont sortis de
+     leur overlay pour être montrés en flux, côte à côte. -->
+<section class="ds-section">
+  <h2>Dialogue de confirmation (Dialog.confirm)</h2>
+  <p class="ds-note">Confirmation oui/non. L'icône d'en-tête est un GLYPHE selon la variante (ⓘ information, ⚠ avertissement/danger). Le bouton de confirmation est <code>primaire</code> (info) ou <code>danger</code> (suppression, teinte rouge au survol).</p>
+  <div class="ds-row" style="align-items:flex-start;gap:18px;">
+    <div class="dialog-box" style="margin:0;">
+      <div class="dialog-header">
+        <span class="dialog-icon variant-info">ⓘ</span>
+        <div class="dialog-title">Recharger le document ?</div>
+      </div>
+      <div class="dialog-body"><p class="dialog-message">Des modifications distantes sont disponibles. Recharger remplacera l'affichage courant par la dernière version enregistrée.</p></div>
+      <div class="dialog-footer">
+        <button type="button" class="btn btn-ghost">Annuler</button>
+        <button type="button" class="btn btn-primary">Recharger</button>
+      </div>
+    </div>
+    <div class="dialog-box" style="margin:0;">
+      <div class="dialog-header">
+        <span class="dialog-icon variant-danger">⚠</span>
+        <div class="dialog-title">Supprimer l'équipement ?</div>
+      </div>
+      <div class="dialog-body"><p class="dialog-message">« core-sw-01 » et ses ports seront supprimés. Les câbles connectés seront détachés. Cette action est définitive.</p></div>
+      <div class="dialog-footer">
+        <button type="button" class="btn btn-ghost">Annuler</button>
+        <button type="button" class="btn btn-danger">Supprimer</button>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Variante <code>info</code> à gauche (icône bleue via le token <code>--info</code>), variante <code>danger</code> à droite (icône rouge <code>--err</code> + bouton <code>.btn-danger</code>). Mêmes deux boutons, seul le rôle du bouton de droite change.</p>
+</section>
