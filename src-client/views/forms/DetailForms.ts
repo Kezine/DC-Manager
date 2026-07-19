@@ -76,6 +76,11 @@ export class DetailForms extends IpamForms {
       du shell pour les collections couvertes ; renvoie false si aucune fiche dédiée n'existe → repli générique). */
   static detail(store: Store, host: FormHost, collection: string, id: string, onChanged?: () => void): boolean {
     switch (collection) {
+      // Équipements et baies : leurs fiches vivent chez des ANCÊTRES de la chaîne (EquipmentForms/RackForms)
+      // → accessibles ici en statique. Leur ABSENCE de ce dispatcher rendait le clic sur un ÉQUIPEMENT lié
+      // d'une intervention muet (openTargetDetail → detail() → false silencieux), alors que VM/spare ouvraient.
+      case "equipments": this.equipmentDetail(store, host, id, onChanged); return true;
+      case "racks": this.rackDetail(store, host, id, onChanged); return true;
       case "cables": this.cableDetail(store, host, id, onChanged); return true;
       case "cableBundles": this.cableBundleDetail(store, host, id, onChanged); return true;
       case "networks": this.networkDetail(store, host, id, onChanged); return true;
