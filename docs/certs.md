@@ -311,12 +311,19 @@ n'autorise rien, elle matérialise l'intention que le serveur exigera :
 | Cas | Confirmation |
 |---|---|
 | 1 certificat révoqué ou expiré | confirmation ordinaire |
-| **1 certificat encore valide** | **re-saisir son nom exact** |
-| **plusieurs certificats** | saisir **« Oui je supprime »** (+ décompte des encore-valides) |
+| **1 certificat encore valide** | **recopier la phrase NOMMANT la cible** : « Oui je supprime `<label>` » |
+| **plusieurs certificats** | saisir **« Oui je supprime »** (phrase de base + décompte des encore-valides) |
 
 Comparaison : `trim()` puis égalité **stricte** — la casse compte, c'est le point de friction.
-Un actif au libellé vide bascule sur la phrase (un nom intapable bloquerait la purge). Le lot
+La phrase qui **nomme la cible** (`DeleteGuard.phraseFor(label)`, clé `certs.guard.phraseNamed` à
+interpolation `{{label}}`) affirme l'intention et vise CE certificat sans ambiguïté ; l'invite affichée
+et la référence de comparaison sortent de la **même source** — impossible de diverger. Un actif au
+libellé vide bascule sur la phrase de base (une phrase nommée intapable bloquerait la purge). Le lot
 exige la phrase **même sans aucun actif** : une sélection se fait d'un glissement de souris.
+
+> **Recopie manuelle imposée** : le champ de saisie **bloque le collage** (`paste → preventDefault`).
+> Coller la phrase (souvent récupérée du texte de l'invite juste au-dessus) réduirait la cérémonie à un
+> Ctrl-V machinal — la friction voulue disparaîtrait.
 
 > Il n'y a **pas de route bulk** (N appels unitaires) : `force` s'applique **par certificat**.
 > `DeleteGuard.isActive` duplique `CertsDb.isActive` — duplication **assumée** (le front ne peut

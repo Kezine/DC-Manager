@@ -21,6 +21,7 @@ export const certs = {
   },
   guard: {
     phrase: "Yes I delete",
+    phraseNamed: "Yes I delete {{label}}",
   },
   tips: {
     issueTls: {
@@ -338,6 +339,9 @@ export const certs = {
     export: {
       intro: "Download the artifacts of “{{label}}”. Private keys are decrypted LOCALLY (unlocked session) and never transit through the server.",
       lockedHint: "Vault locked — unlock the session to export private keys.",
+      lockedTag: "Vault locked",
+      unlockVault: "Unlock the vault…",
+      unlockVaultTitle: "Close this window and return to the passphrase entry to unlock the vault.",
       allZip: "Everything (ZIP)",
       allZipWithKey: " — cert + private key",
       allZipPublic: " — public artifacts",
@@ -381,9 +385,9 @@ export const certs = {
       hasChildren: "Deletion refused: derived certificates exist. Delete this issuer's descendants first.",
     },
     confirm: {
-      nameLabel: "To confirm, type the certificate's name",
+      nameLabel: "To confirm, type the phrase below (it names the certificate)",
       phraseLabel: "To confirm, type the exact phrase",
-      nameMismatch: "The typed name does not match exactly.",
+      nameMismatch: "The typed phrase does not match exactly.",
       phraseMismatch: "The typed phrase does not match exactly.",
       activeWarnOne: "⚠ This certificate is STILL VALID — whatever depends on it will stop working.",
       activeWarnMany: "⚠ {{count}} of these certificates are STILL VALID — whatever depends on them will stop working.",

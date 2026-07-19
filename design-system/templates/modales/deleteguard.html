@@ -1,28 +1,30 @@
-<!-- @dsCard group="Modales" name="Cérémonie de suppression (DeleteGuard)" subtitle="dialogue danger : avertissement + phrase à recopier + champ de saisie + bouton danger (désactivé puis actif)" -->
+<!-- @dsCard group="Modales" name="Cérémonie de suppression (DeleteGuard)" subtitle="dialogue danger : avertissement + phrase NOMMANT la cible à recopier + champ de saisie + bouton danger (désactivé puis actif)" -->
 <!-- DÉRIVÉ de src-client/views/CertsAdminView.ts (confirmDelete → Dialog.custom variant danger) et de
-     la logique PURE src-client/certs/DeleteGuard.ts (cérémonie PROPORTIONNÉE : phrase « Oui je supprime »
-     pour un lot). Corps construit dans .dialog-body : message (.form-hint), avertissement « ENCORE VALIDE »
-     (rouge, gras), rangée .form-field (label = confirm.phraseLabel, .form-hint = la phrase EXACTE à recopier
-     = cer.expected, input texte). Pied Annuler + Supprimer (danger).
+     la logique PURE src-client/certs/DeleteGuard.ts (cérémonie PROPORTIONNÉE). Pour un certificat unique
+     ENCORE VALIDE, la phrase à recopier NOMME la cible : « Oui je supprime <label> » (clé certs.guard.
+     phraseNamed, ceremony → type-name). Corps construit dans .dialog-body : message (.form-hint),
+     avertissement « ENCORE VALIDE » (rouge, gras), rangée .form-field (label = confirm.nameLabel, .form-hint
+     = la phrase EXACTE à recopier = cer.expected, input texte). Le champ BLOQUE le collage (paste →
+     preventDefault) : la recopie doit être manuelle. Pied Annuler + Supprimer (danger).
      APERÇU STATIQUE — DEUX états côte à côte. NB : dans l'app, la validation se fait AU CLIC (le bouton
      reste cliquable et un refus s'affiche si la phrase ne correspond pas) ; ici le bouton est figé
      « désactivé » puis « actif » pour matérialiser le gating de la cérémonie. -->
 <section class="ds-section">
   <h2>Cérémonie de suppression — deux états</h2>
-  <p class="ds-note">Suppression d'un LOT de certificats : au moins un est encore valide, donc la cérémonie exige de recopier une PHRASE (assez longue pour ne pas la taper par réflexe). La même clé sert d'invite affichée ET de référence de comparaison — impossible de diverger.</p>
+  <p class="ds-note">Suppression d'UN certificat encore valide : la cérémonie exige de recopier une phrase qui NOMME la cible (« Oui je supprime core-sw-01 ») — assez longue et explicite pour ne pas la taper par réflexe, et pour viser CE certificat sans ambiguïté. La même clé sert d'invite affichée ET de référence de comparaison — impossible de diverger. Le champ refuse le collage.</p>
   <div class="ds-row" style="align-items:flex-start;gap:18px;">
 
     <div class="dialog-box" style="margin:0;">
       <div class="dialog-header">
         <span class="dialog-icon variant-danger">⚠</span>
-        <div class="dialog-title">Supprimer 3 certificats ?</div>
+        <div class="dialog-title">Supprimer définitivement ?</div>
       </div>
       <div class="dialog-body">
-        <div class="form-hint" style="margin-bottom:10px">Les certificats sélectionnés (clés privées chiffrées + métadonnées) seront EFFACÉS du serveur (irréversible).</div>
-        <div style="margin-bottom:10px;color:var(--err);font-weight:600">⚠ 2 de ces certificats sont ENCORE VALIDES — ce qui en dépend cessera de fonctionner.</div>
+        <div class="form-hint" style="margin-bottom:10px">Supprimer « core-sw-01 » ? La clé privée chiffrée et les métadonnées seront EFFACÉES du serveur (irréversible).</div>
+        <div style="margin-bottom:10px;color:var(--err);font-weight:600">⚠ Ce certificat est ENCORE VALIDE — ce qui en dépend cessera de fonctionner.</div>
         <div class="form-field" style="margin:0">
-          <label>Pour confirmer, saisissez la phrase exacte</label>
-          <div class="form-hint" style="margin:0 0 6px">Oui je supprime</div>
+          <label>Pour confirmer, recopiez la phrase (elle nomme le certificat)</label>
+          <div class="form-hint" style="margin:0 0 6px">Oui je supprime core-sw-01</div>
           <input type="text" autocomplete="off" spellcheck="false" value="">
         </div>
       </div>
@@ -35,15 +37,15 @@
     <div class="dialog-box" style="margin:0;">
       <div class="dialog-header">
         <span class="dialog-icon variant-danger">⚠</span>
-        <div class="dialog-title">Supprimer 3 certificats ?</div>
+        <div class="dialog-title">Supprimer définitivement ?</div>
       </div>
       <div class="dialog-body">
-        <div class="form-hint" style="margin-bottom:10px">Les certificats sélectionnés (clés privées chiffrées + métadonnées) seront EFFACÉS du serveur (irréversible).</div>
-        <div style="margin-bottom:10px;color:var(--err);font-weight:600">⚠ 2 de ces certificats sont ENCORE VALIDES — ce qui en dépend cessera de fonctionner.</div>
+        <div class="form-hint" style="margin-bottom:10px">Supprimer « core-sw-01 » ? La clé privée chiffrée et les métadonnées seront EFFACÉES du serveur (irréversible).</div>
+        <div style="margin-bottom:10px;color:var(--err);font-weight:600">⚠ Ce certificat est ENCORE VALIDE — ce qui en dépend cessera de fonctionner.</div>
         <div class="form-field" style="margin:0">
-          <label>Pour confirmer, saisissez la phrase exacte</label>
-          <div class="form-hint" style="margin:0 0 6px">Oui je supprime</div>
-          <input type="text" autocomplete="off" spellcheck="false" value="Oui je supprime">
+          <label>Pour confirmer, recopiez la phrase (elle nomme le certificat)</label>
+          <div class="form-hint" style="margin:0 0 6px">Oui je supprime core-sw-01</div>
+          <input type="text" autocomplete="off" spellcheck="false" value="Oui je supprime core-sw-01">
         </div>
       </div>
       <div class="dialog-footer">
@@ -53,5 +55,5 @@
     </div>
 
   </div>
-  <p class="ds-note">À gauche : phrase non saisie → suppression bloquée. À droite : phrase exacte recopiée → suppression autorisée. La comparaison est stricte (la casse compte) après <code>trim</code> ; la saisie ne fait que matérialiser l'intention que le serveur exigera ensuite via <code>?force=true</code>.</p>
+  <p class="ds-note">À gauche : phrase non saisie → suppression bloquée. À droite : phrase exacte recopiée → suppression autorisée. La comparaison est stricte (la casse compte) après <code>trim</code> ; la saisie ne fait que matérialiser l'intention que le serveur exigera ensuite via <code>?force=true</code>. Pour un LOT de certificats, la phrase de base « Oui je supprime » suffit (pas de cible unique à nommer).</p>
 </section>

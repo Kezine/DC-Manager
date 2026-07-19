@@ -44,6 +44,10 @@ export class FormControls {
     if (opts.min != null) i.min = String(opts.min);
     if (opts.max != null) i.max = String(opts.max);
     i.step = (opts.step != null) ? String(opts.step) : "1";
+    // Clavier mobile ADAPTÉ : un champ nombre ne doit jamais ouvrir un clavier alphabétique. La
+    // granularité se déduit du `step` — entier → pavé « numeric » (positions U, quantités, ports…) ;
+    // pas fractionnaire (ou « any ») → « decimal », qui garde le séparateur décimal (dimensions mm, A…).
+    i.inputMode = Number.isInteger(Number(i.step)) ? "numeric" : "decimal";
     if (opts.placeholder) i.placeholder = opts.placeholder;
     if (value != null && value !== "") i.value = String(value);
     return i;

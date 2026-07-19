@@ -22,8 +22,8 @@
         <div class="form-row">
           <div class="form-field invalid">
             <label>Nom</label>
-            <input type="text" value="">
-            <div class="field-error">Le champ « name » est obligatoire.</div>
+            <input type="text" value="" aria-invalid="true" aria-describedby="field-error-demo">
+            <div class="field-error" id="field-error-demo">Le champ « name » est obligatoire.</div>
           </div>
           <div class="form-field">
             <label>Type</label>
@@ -83,5 +83,5 @@
       </div>
     </div>
   </div>
-  <p class="ds-note">État FIGÉ pour l'aperçu : le champ « Nom » est montré en erreur (<code>.form-field.invalid</code> + <code>.field-error</code>) — état posé par <code>LiveValidation</code> après un envoi refusé (message EXACT de la validation partagée). Les boutons de date reproduisent <code>FormControls.date</code> (icônes DÉFINIES dans le contrôle, hors registre Icons).</p>
+  <p class="ds-note">État FIGÉ pour l'aperçu : le champ « Nom » est montré en erreur (<code>.form-field.invalid</code> + <code>.field-error</code>) — état posé par <code>LiveValidation</code> après un envoi refusé (message EXACT de la validation partagée). Le contrôle fautif porte <code>aria-invalid="true"</code> et un <code>aria-describedby</code> vers l'ID du message (annoncé par les lecteurs d'écran) ; à la soumission invalide, le focus va sur le premier champ en erreur. Les boutons de date reproduisent <code>FormControls.date</code> (icônes DÉFINIES dans le contrôle, hors registre Icons).</p>
 </section>

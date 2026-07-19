@@ -26,6 +26,7 @@ export const certs = {
   },
   guard: {
     phrase: "Oui je supprime",
+    phraseNamed: "Oui je supprime {{label}}",
   },
   tips: {
     issueTls: {
@@ -343,6 +344,9 @@ export const certs = {
     export: {
       intro: "Téléchargez les artefacts de « {{label}} ». Les clés privées sont déchiffrées LOCALEMENT (session déverrouillée) et ne transitent jamais par le serveur.",
       lockedHint: "Coffre verrouillé — déverrouillez la session pour exporter les clés privées.",
+      lockedTag: "Coffre verrouillé",
+      unlockVault: "Déverrouiller le coffre…",
+      unlockVaultTitle: "Fermer cette fenêtre et revenir à la saisie de la phrase pour déverrouiller le coffre.",
       allZip: "Tout (ZIP)",
       allZipWithKey: " — cert + clé privée",
       allZipPublic: " — artefacts publics",
@@ -386,9 +390,9 @@ export const certs = {
       hasChildren: "Suppression refusée : des certificats dérivés existent. Supprimez d'abord la descendance de cet émetteur.",
     },
     confirm: {
-      nameLabel: "Pour confirmer, saisissez le nom du certificat",
+      nameLabel: "Pour confirmer, recopiez la phrase (elle nomme le certificat)",
       phraseLabel: "Pour confirmer, saisissez la phrase exacte",
-      nameMismatch: "Le nom saisi ne correspond pas exactement.",
+      nameMismatch: "La phrase saisie ne correspond pas exactement.",
       phraseMismatch: "La phrase saisie ne correspond pas exactement.",
       activeWarnOne: "⚠ Ce certificat est ENCORE VALIDE — ce qui en dépend cessera de fonctionner.",
       activeWarnMany: "⚠ {{count}} de ces certificats sont ENCORE VALIDES — ce qui en dépend cessera de fonctionner.",

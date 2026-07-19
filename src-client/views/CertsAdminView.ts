@@ -14,6 +14,7 @@ import { Dialog } from "../ui/Dialog";
 import { RichTooltip } from "../ui/RichTooltip";
 import { Icons } from "../ui/Icons";
 import { IconButton } from "../ui/IconButton";
+import { OverlayA11y } from "../ui/OverlayA11y";
 import { CertsTips, CERT_TIP } from "./CertsTips";
 import { DeleteGuard, type DeletableCert } from "../certs/DeleteGuard";
 import { I18n } from "../i18n/I18n";
@@ -149,6 +150,9 @@ export class CertsAdminView {
   private selBarEl: HTMLElement | null = null;
   /** Case d'en-tête « toute la page » (état INDÉTERMINÉ si sélection partielle) — mise à jour à chaque variation. */
   private headerCheckbox: HTMLInputElement | null = null;
+  /** Champ de phrase du panneau de déverrouillage (recréé à chaque rendu verrouillé) — cible du bouton
+      « Déverrouiller le coffre » d'une modale d'export (fermer l'export puis y renvoyer le focus). */
+  private lockInput: HTMLInputElement | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -389,6 +393,7 @@ export class CertsAdminView {
     const label = document.createElement("label"); label.textContent = I18n.t("certs.admin.lock.passLabel");
     const input = document.createElement("input"); input.type = "password"; input.autocomplete = "current-password"; input.placeholder = I18n.t("certs.admin.lock.passPlaceholder");
     input.style.cssText = "flex:1 1 auto;min-width:0";   // min-width:0 : sans lui, un flex item ne descend pas sous sa largeur intrinsèque
+    this.lockInput = input;   // cible du renvoi « Déverrouiller le coffre » depuis une modale d'export
     const errBox = this.errBox();
     const btn = this.actionButton(I18n.t("certs.admin.lock.unlockBtn"), I18n.t("certs.admin.lock.unlockBtnTitle"), () => void this.attemptUnlock(input.value, errBox), "btn-primary");
     btn.classList.remove("btn-sm");   // hauteur d'un .btn plein pour matcher l'input
@@ -402,6 +407,16 @@ export class CertsAdminView {
     box.append(title, hint, passField, errBox);
     setTimeout(() => input.focus(), 30);
     return box;
+  }
+
+  /** Renvoie l'utilisateur vers le flux de déverrouillage EXISTANT (le panneau de phrase, affiché dès que
+      la session est verrouillée) : amène le champ à l'écran et lui donne le focus. Utilisé par le bouton
+      « Déverrouiller le coffre » d'une modale d'export (qui ferme d'abord l'export). No-op si déjà déverrouillé. */
+  private focusUnlock(): void {
+    const input = this.lockInput;
+    if (!input || !document.contains(input)) return;
+    try { input.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) { /* sans effet */ }
+    setTimeout(() => { try { input.focus(); } catch (_) { /* sans effet */ } }, 60);
   }
 
   /* --------------------------------------------------------------------------
@@ -1140,8 +1155,17 @@ export class CertsAdminView {
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rekey.newLabel"), p1, I18n.t("certs.admin.common.longUniqueHint")));
     const p2 = FormControls.text("", I18n.t("certs.admin.rekey.confirmPlaceholder")); p2.type = "password"; p2.autocomplete = "new-password";
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.confirmation"), p2, I18n.t("certs.admin.rekey.confirmHint")));
+    // COLLAGE BLOQUÉ sur la CONFIRMATION : la retape de la nouvelle phrase doit être une VRAIE retape
+    // (coller depuis le 1er champ contournerait la vérification anti-faute de frappe).
+    p2.addEventListener("paste", (e) => e.preventDefault());
 
     const errBox = this.errBox(); root.appendChild(errBox);
+    // Liaison d'erreur (accessibilité, cf. point 7) : le message d'erreur porte un ID ; les champs
+    // fautifs pointeront dessus (aria-describedby) et prendront `aria-invalid`, nettoyés dès la saisie.
+    const errId = OverlayA11y.nextId("cert-rekey-err"); errBox.id = errId;
+    const clearInvalid = () => [cur, p1, p2].forEach((f) => { f.removeAttribute("aria-invalid"); f.removeAttribute("aria-describedby"); });
+    [cur, p1, p2].forEach((f) => f.addEventListener("input", clearInvalid));
+    const failField = (f: HTMLInputElement): false => { f.setAttribute("aria-invalid", "true"); f.setAttribute("aria-describedby", errId); try { f.focus(); } catch (_) { /* sans effet */ } return false; };
     this.host.openModal({
       title: I18n.t("certs.admin.rekey.title"),
       body: root,
@@ -1149,11 +1173,12 @@ export class CertsAdminView {
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
+        clearInvalid();
         const currentPass = cur.value;
         const newPass = p1.value;
-        if (currentPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.curRequired")); return false; }
-        if (newPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.newRequired")); return false; }
-        if (newPass !== p2.value) { this.showError(errBox, I18n.t("certs.admin.rekey.mismatch")); return false; }
+        if (currentPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.curRequired")); return failField(cur); }
+        if (newPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.newRequired")); return failField(p1); }
+        if (newPass !== p2.value) { this.showError(errBox, I18n.t("certs.admin.rekey.mismatch")); return failField(p2); }
         // Instantané FRAIS à CHAQUE tentative (masque la capture d'ouverture) : après un 409
         // « conflict », this.pkiState a été rafraîchi — la relance doit repartir de l'enveloppe
         // COURANTE (dériver l'ancienne KEK sur le bon sel, fonder le rewrap sur le bon blob).
@@ -1172,7 +1197,7 @@ export class CertsAdminView {
           newWrappedDek = await PkiCrypto.rewrapDek(oldKek, newKek, state.wrapped_dek);
         } catch (_) {
           this.showError(errBox, I18n.t("certs.admin.rekey.curWrong"));
-          return false;
+          return failField(cur);
         }
 
         // 2) Persister la nouvelle enveloppe. `prev_wrapped_dek` = l'enveloppe sur laquelle le
@@ -1409,18 +1434,30 @@ export class CertsAdminView {
     root.appendChild(list);
 
     // Un bouton par artefact ; `run` renvoie true pour GARDER la modale (ex. PKCS#12 ouvre sa propre modale).
-    // `lockedDisabled` : l'artefact exige la clé privée et la session est VERROUILLÉE → bouton GRISÉ (pas caché,
-    // pas d'erreur au clic) avec l'explication en tooltip — déverrouiller la session le rend cliquable.
+    // `lockedDisabled` : l'artefact exige la clé privée et la session est VERROUILLÉE → l'entrée est INERTE
+    // mais DÉCOUVRABLE au clavier : `aria-disabled` (pas `disabled` sec, qui la sortirait de la tabulation),
+    // clic neutralisé par une garde, pastille visible « Coffre verrouillé » + explication en tooltip.
+    let hasLocked = false;
     const addAction = (label: string, run: () => Promise<boolean | void>, lockedDisabled = false): void => {
       const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.style.textAlign = "left";
       b.textContent = label;
-      if (lockedDisabled) { b.disabled = true; b.title = I18n.t("certs.admin.export.lockedHint"); }
-      else b.onclick = async () => {
-        this.session.touch();
-        try { const keep = await run(); if (!keep) this.host.closeModal?.(); }
-        catch (e) { Notify.toast(CertsAdminView.errText(e), "err"); }   // laisse la modale ouverte
-      };
-      list.appendChild(b);
+      if (lockedDisabled) {
+        hasLocked = true;
+        b.setAttribute("aria-disabled", "true"); b.title = I18n.t("certs.admin.export.lockedHint");
+        b.addEventListener("click", (e) => e.preventDefault());   // clic INERTE tant que verrouillé (garde)
+        const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:8px";
+        const tag = document.createElement("span"); tag.className = "lock-tag";
+        tag.textContent = I18n.t("certs.admin.export.lockedTag"); tag.title = I18n.t("certs.admin.export.lockedHint");
+        row.append(b, tag);
+        list.appendChild(row);
+      } else {
+        b.onclick = async () => {
+          this.session.touch();
+          try { const keep = await run(); if (!keep) this.host.closeModal?.(); }
+          catch (e) { Notify.toast(CertsAdminView.errText(e), "err"); }   // laisse la modale ouverte
+        };
+        list.appendChild(b);
+      }
     };
     const locked = !this.session.unlocked;
 
@@ -1459,6 +1496,15 @@ export class CertsAdminView {
     }
 
     if (!list.children.length) { const n = document.createElement("div"); n.className = "form-hint"; n.textContent = I18n.t("certs.admin.export.empty"); root.appendChild(n); }
+    // Coffre verrouillé ET des exports le REQUIÈRENT (clé privée) → raccourci direct vers le flux de
+    // déverrouillage existant : ferme la modale d'export et renvoie le focus au champ de phrase du panneau.
+    if (hasLocked) {
+      const unlock = document.createElement("button");
+      unlock.type = "button"; unlock.className = "btn btn-ghost btn-sm"; unlock.style.marginTop = "12px";
+      unlock.textContent = I18n.t("certs.admin.export.unlockVault"); unlock.title = I18n.t("certs.admin.export.unlockVaultTitle");
+      unlock.onclick = () => { this.host.closeModal?.(); this.focusUnlock(); };
+      root.appendChild(unlock);
+    }
     this.host.openModal({ title: I18n.t("certs.admin.export.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true });
   }
 
@@ -1636,6 +1682,9 @@ export class CertsAdminView {
         const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.margin = "0 0 6px";
         hint.textContent = cer.expected;   // textContent → jamais interprété, même si le libellé contient du balisage
         const input = document.createElement("input"); input.type = "text"; input.autocomplete = "off"; input.spellcheck = false;
+        // COLLAGE BLOQUÉ : la recopie doit être une VRAIE recopie manuelle — coller la phrase (souvent
+        // récupérée du texte de l'invite juste au-dessus) réduirait la cérémonie à un Ctrl-V machinal.
+        input.addEventListener("paste", (e) => e.preventDefault());
         field.append(lab, hint, input);
         root.appendChild(field);
         setTimeout(() => input.focus(), 30);

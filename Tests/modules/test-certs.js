@@ -1120,21 +1120,24 @@ module.exports = async () => {
     ck.eq(DeleteGuard.ceremony([cert("x", { revoked: "2026-07-01T00:00:00Z" })], NOW).kind, "simple", "1 révoqué → confirmation simple");
     ck.eq(DeleteGuard.ceremony([cert("x", { not_after: "2026-01-01T00:00:00Z" })], NOW).kind, "simple", "1 expiré → confirmation simple");
     const one = DeleteGuard.ceremony([cert("sw-core-01")], NOW);
-    ck.eq(one.kind, "type-name", "1 ACTIF → re-saisie du nom");
-    ck.eq(one.expected, "sw-core-01", "type-name : le nom attendu est le libellé du certificat");
-    // Lot : la phrase, MÊME si aucun n'est actif (le volume est un risque en soi).
+    ck.eq(one.kind, "type-name", "1 ACTIF → phrase NOMMANT la cible");
+    ck.eq(one.expected, "Oui je supprime sw-core-01", "type-name : la phrase attendue nomme le certificat (« Oui je supprime <label> »)");
+    ck.eq(DeleteGuard.phraseFor("sw-core-01"), "Oui je supprime sw-core-01", "phraseFor : interpolation du libellé");
+    // Lot : la phrase de BASE, MÊME si aucun n'est actif (le volume est un risque en soi ; pas de cible unique).
     const many = DeleteGuard.ceremony([cert("a", { revoked: "2026-07-01T00:00:00Z" }), cert("b", { revoked: "2026-07-01T00:00:00Z" })], NOW);
     ck.eq(many.kind, "type-phrase", "lot (même sans actif) → phrase de confirmation");
-    ck.eq(many.expected, "Oui je supprime", "type-phrase : phrase attendue");
-    // REPLI : un actif au libellé blanc serait intapable → on bascule sur la phrase.
-    ck.eq(DeleteGuard.ceremony([cert("   ")], NOW).kind, "type-phrase", "actif au libellé blanc → repli sur la phrase (nom intapable)");
+    ck.eq(many.expected, "Oui je supprime", "type-phrase : phrase de base attendue");
+    // REPLI : un actif au libellé blanc rendrait la phrase nommée intapable → on bascule sur la phrase de base.
+    const blank = DeleteGuard.ceremony([cert("   ")], NOW);
+    ck.eq(blank.kind, "type-phrase", "actif au libellé blanc → repli sur la phrase de base");
+    ck.eq(blank.expected, "Oui je supprime", "repli : phrase de base (pas de libellé à nommer)");
     ck.eq(DeleteGuard.ceremony([], NOW).kind, "simple", "sélection vide → simple");
 
     // ---- accepts : trim toléré, casse STRICTE ----
-    ck.eq(DeleteGuard.accepts(one, "sw-core-01"), true, "accepts : saisie exacte");
-    ck.eq(DeleteGuard.accepts(one, "  sw-core-01  "), true, "accepts : espaces autour tolérés (copier/coller)");
-    ck.eq(DeleteGuard.accepts(one, "SW-CORE-01"), false, "accepts : la CASSE compte (friction voulue)");
-    ck.eq(DeleteGuard.accepts(one, "sw-core-0"), false, "accepts : saisie partielle refusée");
+    ck.eq(DeleteGuard.accepts(one, "Oui je supprime sw-core-01"), true, "accepts : phrase nommée exacte");
+    ck.eq(DeleteGuard.accepts(one, "  Oui je supprime sw-core-01  "), true, "accepts : espaces autour tolérés (copier/coller)");
+    ck.eq(DeleteGuard.accepts(one, "oui je supprime sw-core-01"), false, "accepts : la CASSE compte (friction voulue)");
+    ck.eq(DeleteGuard.accepts(one, "Oui je supprime sw-core-0"), false, "accepts : saisie partielle refusée");
     ck.eq(DeleteGuard.accepts(many, "oui je supprime"), false, "accepts : phrase en minuscules refusée");
     ck.eq(DeleteGuard.accepts(many, "Oui je supprime"), true, "accepts : phrase exacte");
     ck.eq(DeleteGuard.accepts({ kind: "simple" }, ""), true, "accepts : cérémonie simple → rien à saisir");

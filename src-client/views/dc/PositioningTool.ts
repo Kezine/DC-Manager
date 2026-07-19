@@ -268,7 +268,7 @@ export class PositioningTool {
         if (!ref || !co) return;
         const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:6px;margin:5px 0;font-size:12px";
         const lab = document.createElement("span"); lab.style.cssText = "color:var(--fg-dim);min-width:80px"; lab.textContent = (ax === "x" ? I18n.t("dc.positioning.axisX") : I18n.t("dc.positioning.axisY")) + " → " + this.refLabel(ref, scene);
-        const inp = document.createElement("input"); inp.type = "number"; inp.step = "1"; inp.min = "0"; inp.value = String(Math.round(co.value)); inp.style.cssText = "width:88px";
+        const inp = document.createElement("input"); inp.type = "number"; inp.step = "1"; inp.min = "0"; inp.inputMode = "numeric"; inp.value = String(Math.round(co.value)); inp.style.cssText = "width:88px";
         const unit = document.createElement("span"); unit.style.color = "var(--fg-dim)"; unit.textContent = "mm";
         const apply = () => { const v = parseFloat(inp.value); if (isFinite(v) && v >= 0) void this.applyAxis(ax, v); };
         inp.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); apply(); } };
