@@ -181,6 +181,17 @@
   /* Anneau de focus CLAVIER uniquement (:focus-visible, jamais :focus → le focus SOURIS reste inchangé).
      Règle GLOBALE : tout élément interactif dépourvu d'indicateur de focus propre reçoit un anneau visible. */
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  /* Champs TEXTE : anneau réintroduit en version DISCRÈTE (1px, offset 1 — arbitrage utilisateur 2026-07-19),
+     en COMPLÉMENT de leur bordure accent de :focus. Particularité assumée : sur un input texte, les
+     navigateurs déclenchent :focus-visible AUSSI au clic (saisie clavier anticipée) → l'anneau apparaît à
+     la souris sur CES champs uniquement — c'est le compromis choisi pour que le focus clavier y soit aussi
+     net que sur les boutons. La spécificité de :focus-visible surclasse les `outline: none` de leurs règles
+     de base (conservés : ils neutralisent l'outline NATIF par défaut des navigateurs). */
+  .doc-name:focus-visible, .search-input:focus-visible, .sub-input:focus-visible,
+  .chips-input input:focus-visible,
+  .form-field input:focus-visible, .form-field textarea:focus-visible, .form-field select:focus-visible {
+    outline: 1px solid var(--focus); outline-offset: 1px;
+  }
 
   /* Préférence système « animations réduites » : on neutralise transitions et animations (durée quasi nulle)
      pour les personnes sensibles au mouvement — coupe pulsations, glissements de modale, spinners agités.
