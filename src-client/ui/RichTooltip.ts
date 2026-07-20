@@ -145,7 +145,12 @@ export class RichTooltip {
   private static show(host: HTMLElement, content: TipContent): void {
     const el = RichTooltip.ensureEl();
     RichTooltip.render(content, el);
-    // Afficher AVANT de mesurer : un élément en display:none n'a pas de dimensions.
+    // MESURER SANS PEINDRE, puis RÉVÉLER une fois positionné. `visibility:hidden` donne les dimensions
+    // (contrairement à `display:none`, qui les annule) tout en n'affichant STRICTEMENT RIEN. On mesure à
+    // gauche/en haut (left/top = 0 → largeur disponible maximale, donc hauteur fidèle après retour à la ligne),
+    // on calcule la position finale, PUIS on passe visible. Sans cette garde, le tooltip était rendu visible
+    // en (0,0) et « clignotait » brièvement en haut à gauche de la fenêtre avant d'être repositionné.
+    el.style.visibility = "hidden";
     el.style.display = "block"; el.style.left = "0px"; el.style.top = "0px";
     const a = host.getBoundingClientRect();
     const t = el.getBoundingClientRect();
@@ -155,6 +160,7 @@ export class RichTooltip {
       { width: window.innerWidth, height: window.innerHeight },
     );
     el.style.left = p.x + "px"; el.style.top = p.y + "px";
+    el.style.visibility = "visible";   // position finale posée → on peut afficher sans clignotement
   }
 
   private static hide(): void { if (RichTooltip.el) RichTooltip.el.style.display = "none"; }
