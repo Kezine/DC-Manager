@@ -686,6 +686,12 @@ module.exports = async () => {
     const weird = { id: "w", label: 'a/b:c*d?"e<f>g|h', parent_id: null, public_pem: leaf.public_pem, revoked_at: null };
     ck.eq(CertExports.pemCertificate(weird).filename, "a_b_c_d_e_f_g_h.pem", "nom de fichier : caractères interdits (\\/:*?\"<>|) → _");
 
+    // Assainissement RENFORCÉ (demande utilisateur) : accents RETIRÉS + espaces/caractères spéciaux → « _ », le
+    // nom exporté est TOUJOURS portable (sans accent ni espace), même si le libellé en contient. Le point interne
+    // survit (nom d'hôte lisible), les « _ » de bord sont retirés.
+    const accents = { id: "ac", label: "Ma Clé Privée (café)", parent_id: null, public_pem: leaf.public_pem, revoked_at: null };
+    ck.eq(CertExports.pemCertificate(accents).filename, "Ma_Cle_Privee_cafe.pem", "nom de fichier : accents retirés + espaces/spéciaux → _ (assainissement renforcé)");
+
     // Parent manquant → erreur française explicite.
     const orphan = { id: "o", label: "orpheline", parent_id: "fantome", public_pem: leaf.public_pem, revoked_at: null };
     let missErr = null; try { CertExports.pemFullchain(orphan, [orphan]); } catch (e) { missErr = e.message; }
@@ -1029,7 +1035,9 @@ module.exports = async () => {
     const paths = Object.keys(unzipped).sort();
     ck(paths.indexOf("hote.exemple.test/cert.pem") >= 0 && paths.indexOf("hote.exemple.test/fullchain.pem") >= 0 && paths.indexOf("hote.exemple.test/key.pem") >= 0,
       "zip : dossier feuille contient cert/fullchain/key");
-    ck(paths.indexOf("CA Racine exemple/cert.pem") >= 0 && paths.indexOf("CA Racine exemple/key.pem") >= 0, "zip : dossier CA contient cert/key");
+    // Le libellé « CA Racine exemple » (avec espaces) est ASSAINI en nom de dossier → « CA_Racine_exemple »
+    // (assainissement renforcé de CertExports.safeFileName : espaces/spéciaux → _, accents retirés).
+    ck(paths.indexOf("CA_Racine_exemple/cert.pem") >= 0 && paths.indexOf("CA_Racine_exemple/key.pem") >= 0, "zip : dossier CA (label assaini : espaces → _) contient cert/key");
     ck.eq(strFromU8(unzipped["hote.exemple.test/cert.pem"]), certArt.content, "zip : contenu de cert.pem INTACT après aller-retour");
 
     // -- DÉDUP de dossiers homonymes : deux certs de même label → dossiers distincts (meme, meme-2) --
@@ -1072,12 +1080,12 @@ module.exports = async () => {
     const reader = new ZipReader(new Uint8ArrayReader(enc), { password: PASS });
     const zEntries = await reader.getEntries();
     const paths = zEntries.map((e) => e.filename).sort();
-    ck(paths.indexOf("hote.exemple.test/cert.pem") >= 0 && paths.indexOf("hote.exemple.test/key.pem") >= 0 && paths.indexOf("CA Racine exemple/cert.pem") >= 0,
-      "zip chiffré : arborescence dossier/fichier attendue");
+    ck(paths.indexOf("hote.exemple.test/cert.pem") >= 0 && paths.indexOf("hote.exemple.test/key.pem") >= 0 && paths.indexOf("CA_Racine_exemple/cert.pem") >= 0,
+      "zip chiffré : arborescence dossier/fichier attendue (label CA assaini : espaces → _)");
     const readOne = async (name) => reader && (await zEntries.find((e) => e.filename === name).getData(new TextWriter()));
     ck.eq(await readOne("hote.exemple.test/cert.pem"), "CONTENU-CERT", "zip chiffré : cert.pem déchiffré intact (bon mot de passe)");
     ck.eq(await readOne("hote.exemple.test/key.pem"), "CONTENU-CLE", "zip chiffré : key.pem déchiffré intact");
-    ck.eq(await readOne("CA Racine exemple/cert.pem"), "CONTENU-CA", "zip chiffré : cert.pem CA déchiffré intact");
+    ck.eq(await readOne("CA_Racine_exemple/cert.pem"), "CONTENU-CA", "zip chiffré : cert.pem CA déchiffré intact");
     await reader.close();
 
     // -- MAUVAIS mot de passe → lecture REFUSÉE (jamais de clair divulgué) --

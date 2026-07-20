@@ -192,6 +192,10 @@ export const certs = {
       revoked: "révoqué",
       deployTitle: "Déploiement des certificats",
       listCertsTitle: "Lister les certificats de cette autorité",
+      createTls: "+ Certificat TLS",
+      createTlsTitle: "Émettre un certificat TLS signé par cette autorité",
+      createSsh: "+ Certificat SSH",
+      createSshTitle: "Émettre un certificat SSH signé par cette CA",
     },
     // Rapprochement CALCULÉ cert ↔ équipement/VM (indicateur du listing, vue B). Cf. docs/certs.md.
     target: {

@@ -139,8 +139,10 @@ export class CertsAdminView {
 
   /** Vue active : A « Autorités & clés » (racines) par défaut, B « Certificats d'une racine ». */
   private view: "roots" | "certs" = "roots";
-  /** Racine scopée en vue B (id + libellé pour le fil d'Ariane) ; null en vue A. */
-  private rootScope: { id: string; label: string } | null = null;
+  /** Racine scopée en vue B (id + libellé pour le fil d'Ariane) ; null en vue A. `root` = l'objet racine complet
+      (ou null si sa lecture a échoué en navigation par recherche) : sert le bouton d'ÉMISSION de l'en-tête de vue B
+      (la racine étant EXCLUE du sous-arbre listé, aucune action par ligne ne la vise ici). */
+  private rootScope: { id: string; label: string; root: CertificateListItem | null } | null = null;
   /** États de listing SÉPARÉS par vue : revenir en A conserve sa page/ses filtres ; entrer en B repart neuf. */
   private rootsState: ListingState = CertsAdminView.defaultState();
   private certsState: ListingState = CertsAdminView.defaultState();
@@ -383,8 +385,9 @@ export class CertsAdminView {
         // page de focus. On lit ses métadonnées (GET unitaire, aucun déchiffrement) pour un libellé lisible ;
         // repli sur l'id court si l'appel échoue (le scope, lui, tient au seul id).
         let rootLabel = CertsFormat.shortId(nav.rootId!);
-        try { rootLabel = (await this.client!.getOne(nav.rootId!)).label || rootLabel; } catch (_) { /* repli id court */ }
-        this.rootScope = { id: nav.rootId!, label: rootLabel };
+        let rootItem: CertificateListItem | null = null;
+        try { rootItem = await this.client!.getOne(nav.rootId!); rootLabel = rootItem.label || rootLabel; } catch (_) { /* repli id court, pas d'émission depuis l'en-tête */ }
+        this.rootScope = { id: nav.rootId!, label: rootLabel, root: rootItem };
         const res = await this.client!.listPage({ ...CertsAdminView.listParams(this.certsState), root: nav.rootId!, focus: nav.focus });
         this.certItems = res.certificates;
         this.pageMeta = { total: res.total, page: res.page, pages: res.pages, pageSize: res.pageSize };
@@ -515,7 +518,7 @@ export class CertsAdminView {
     this.session.touch();
     this.selection.clear();   // changement de vue A→B : la sélection ne traverse pas les vues (cadrage §5)
     this.view = "certs";
-    this.rootScope = { id: root.id, label: root.label };
+    this.rootScope = { id: root.id, label: root.label, root };
     this.certsState = CertsAdminView.defaultState();
     void this.rerender();
   }
@@ -539,6 +542,15 @@ export class CertsAdminView {
       const title = document.createElement("span"); title.style.cssText = "font-weight:600;color:var(--fg)";
       title.textContent = I18n.t("certs.admin.listing.viewBTitle", { label: this.rootScope.label });
       bc.appendChild(title);
+      // Émettre un nouveau certificat SOUS l'autorité scopée : la racine est EXCLUE du sous-arbre listé (vue B),
+      // donc l'action d'émission par ligne (fillActions) ne s'y présente jamais — on l'offre ICI, dans l'en-tête.
+      // Prérequis : coffre DÉVERROUILLÉ (signer exige la clé privée de la CA), racine connue et NON révoquée. Le
+      // type de la racine décide de la cible (root-ca → feuille TLS ; ssh-ca → certificat SSH), comme fillActions.
+      const scoped = this.rootScope.root;
+      if (this.session.unlocked && scoped && !scoped.revoked_at) {
+        if (scoped.kind === "root-ca") bc.appendChild(this.actionButton(I18n.t("certs.admin.listing.createTls"), I18n.t("certs.admin.listing.createTlsTitle"), () => this.leafModal(scoped), "btn-primary"));
+        else if (scoped.kind === "ssh-ca") bc.appendChild(this.actionButton(I18n.t("certs.admin.listing.createSsh"), I18n.t("certs.admin.listing.createSshTitle"), () => this.sshCertModal(scoped), "btn-primary"));
+      }
       wrap.appendChild(bc);
     } else {
       const intro = document.createElement("div"); intro.className = "form-hint"; intro.style.marginBottom = "8px";
@@ -1558,76 +1570,84 @@ export class CertsAdminView {
      -------------------------------------------------------------------------- */
 
   private async exportModal(item: CertificateListItem): Promise<void> {
-    const rec = CertsAdminView.toExportRecord(item);
     // `all` = liste COMPLÈTE (métadonnées, sans key_enc) pour résoudre les chaînes d'émission (fullchain/
     // ca-chain remontent parent_id) : le listing est paginé, les ancêtres ne sont pas forcément affichés.
     let all: CertExportRecord[];
     try { all = (await this.client!.list()).map((c) => CertsAdminView.toExportRecord(c)); }
     catch (e) { this.actionError(e); return; }
+    this.openExportModal(item, all);   // construction/ouverture SYNCHRONE → ré-ouverture sans réseau (aller-retour)
+  }
+
+  /** Construit ET ouvre la modale d'export d'un objet (`all` déjà chargé → SYNCHRONE). Les artefacts sont
+      présentés en TABLEAU (grille 2 colonnes) : le LIBELLÉ à gauche, les BOUTONS d'action à droite, chaque ligne
+      soulignée d'un filet — séparation claire de « quoi » et « comment ». Afficher un artefact TEXTE ouvre une
+      visualisation qui REVIENT ICI à sa fermeture (aller-retour, overlay unique → on passe la ré-ouverture
+      `() => this.openExportModal(item, all)`). Extraite d'exportModal pour rendre cette ré-ouverture synchrone. */
+  private openExportModal(item: CertificateListItem, all: CertExportRecord[]): void {
+    const rec = CertsAdminView.toExportRecord(item);
     const root = document.createElement("div");
     const intro = document.createElement("div"); intro.className = "form-hint"; intro.style.marginBottom = "10px";
     intro.textContent = I18n.t("certs.admin.export.intro", { label: item.label });
     root.appendChild(intro);
-    const list = document.createElement("div"); list.style.cssText = "display:flex;flex-direction:column;gap:8px;align-items:flex-start";
-    root.appendChild(list);
 
-    // Un bouton par artefact ; `run` renvoie true pour GARDER la modale (ex. PKCS#12 ouvre sa propre modale).
-    // `lockedDisabled` : l'artefact exige la clé privée et la session est VERROUILLÉE → l'entrée est INERTE
-    // mais DÉCOUVRABLE au clavier : `aria-disabled` (pas `disabled` sec, qui la sortirait de la tabulation),
-    // clic neutralisé par une garde, pastille visible « Coffre verrouillé » + explication en tooltip.
-    let hasLocked = false;
-    const addAction = (label: string, run: () => Promise<boolean | void>, lockedDisabled = false): void => {
-      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.style.textAlign = "left";
-      b.textContent = label;
-      if (lockedDisabled) {
-        hasLocked = true;
-        b.setAttribute("aria-disabled", "true"); b.title = I18n.t("certs.admin.export.lockedHint");
-        b.addEventListener("click", (e) => e.preventDefault());   // clic INERTE tant que verrouillé (garde)
-        const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:8px";
-        const tag = document.createElement("span"); tag.className = "lock-tag";
-        tag.textContent = I18n.t("certs.admin.export.lockedTag"); tag.title = I18n.t("certs.admin.export.lockedHint");
-        row.append(b, tag);
-        list.appendChild(row);
-      } else {
-        b.onclick = async () => {
-          this.session.touch();
-          try { const keep = await run(); if (!keep) this.host.closeModal?.(); }
-          catch (e) { Notify.toast(CertsAdminView.errText(e), "err"); }   // laisse la modale ouverte
-        };
-        list.appendChild(b);
-      }
+    // Tableau des artefacts : grille [ libellé (1fr) | actions (auto, alignées à droite) ]. Chaque ligne pose ses
+    // DEUX cellules via `addGridRow`, qui applique le filet de séparation et l'espacement communs.
+    const list = document.createElement("div");
+    list.style.cssText = "display:grid;grid-template-columns:1fr auto;gap:0 24px;align-items:center";
+    root.appendChild(list);
+    const addGridRow = (labelNode: HTMLElement, actionsNode: HTMLElement): void => {
+      for (const cell of [labelNode, actionsNode]) { cell.style.padding = "9px 0"; cell.style.borderBottom = "1px solid var(--line)"; }
+      actionsNode.style.justifySelf = "end";   // boutons plaqués à droite → colonne d'actions nette
+      list.append(labelNode, actionsNode);
     };
+    const labelCell = (text: string): HTMLElement => { const n = document.createElement("span"); n.textContent = text; n.style.cssText = "font-size:13px;color:var(--fg)"; return n; };
+    const actionsCell = (): HTMLElement => { const a = document.createElement("div"); a.style.cssText = "display:flex;align-items:center;gap:6px"; return a; };
+    const lockTag = (): HTMLElement => { const t = document.createElement("span"); t.className = "lock-tag"; t.textContent = I18n.t("certs.admin.export.lockedTag"); t.title = I18n.t("certs.admin.export.lockedHint"); return t; };
+
+    let hasLocked = false;
     const locked = !this.session.unlocked;
 
-    // Artefact TEXTE (PEM / ligne OpenSSH) : ligne « libellé + Télécharger (⬇) + Afficher (👁) ». L'AFFICHAGE
-    // rend le contenu EN CLAIR à l'écran pour copier-coller (besoin courant). Opération SENSIBLE : une clé privée
-    // (`sensitive`) exige une confirmation à l'affichage ; une clé privée de ROOT CA exige une confirmation
-    // TEXTUELLE (re-saisie d'une phrase) à l'affichage ET au téléchargement — cf. confirmRevealPrivateKey.
+    // Ligne d'action GLOBALE (ZIP, PKCS#12, clé OpenSSH…) : libellé descriptif (col 1) + bouton-icône « exporter »
+    // (col 2). `run` renvoie true pour GARDER la modale (ex. PKCS#12 ouvre sa propre modale). `lockedDisabled` :
+    // l'artefact exige la clé privée et le coffre est VERROUILLÉ → pastille « Coffre verrouillé » à la place du
+    // bouton (l'objet reste listé, la raison est visible + rappelée en tooltip ; le raccourci de déverrouillage
+    // apparaît en bas de modale).
+    const addAction = (label: string, run: () => Promise<boolean | void>, lockedDisabled = false): void => {
+      const acts = actionsCell();
+      if (lockedDisabled) { hasLocked = true; acts.appendChild(lockTag()); }
+      else acts.appendChild(IconButton.build({ icon: Icons.EXPORT, label: I18n.t("certs.admin.export.download"), onClick: async () => {
+        this.session.touch();
+        try { const keep = await run(); if (!keep) this.host.closeModal?.(); }
+        catch (e) { Notify.toast(CertsAdminView.errText(e), "err"); }   // laisse la modale ouverte
+      } }));
+      addGridRow(labelCell(label), acts);
+    };
+
+    // Artefact TEXTE (PEM / ligne OpenSSH) : libellé (col 1) + « Télécharger (⬇) » et « Afficher (👁) » (col 2).
+    // L'AFFICHAGE rend le contenu EN CLAIR à l'écran pour copier-coller (besoin courant) ET REVIENT à cette modale
+    // à sa fermeture (aller-retour). Opération SENSIBLE : une clé privée (`sensitive`) exige une confirmation à
+    // l'affichage ; une clé privée de ROOT CA exige une confirmation TEXTUELLE (re-saisie d'une phrase) à
+    // l'affichage ET au téléchargement — cf. confirmRevealPrivateKey.
     const addTextArtifact = (label: string, produce: () => Promise<ExportArtifact>, opts: { sensitive?: boolean } = {}): void => {
-      const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:8px";
-      const name = document.createElement("span"); name.textContent = label; name.style.minWidth = "210px";
-      row.appendChild(name);
-      if (opts.sensitive && locked) {   // clé privée + coffre VERROUILLÉ → ligne inerte (pas de déchiffrement possible)
-        hasLocked = true;
-        const tag = document.createElement("span"); tag.className = "lock-tag";
-        tag.textContent = I18n.t("certs.admin.export.lockedTag"); tag.title = I18n.t("certs.admin.export.lockedHint");
-        row.appendChild(tag); list.appendChild(row); return;
+      const acts = actionsCell();
+      if (opts.sensitive && locked) {   // clé privée + coffre VERROUILLÉ → pas de déchiffrement possible → pastille seule
+        hasLocked = true; acts.appendChild(lockTag()); addGridRow(labelCell(label), acts); return;
       }
-      row.appendChild(IconButton.build({ icon: Icons.EXPORT, label: I18n.t("certs.admin.export.download"), onClick: async () => {
+      acts.appendChild(IconButton.build({ icon: Icons.EXPORT, label: I18n.t("certs.admin.export.download"), onClick: async () => {
         this.session.touch();
         try {
           if (opts.sensitive && item.kind === "root-ca" && !(await this.confirmRevealPrivateKey(item))) return;   // clé racine : garde textuelle même au téléchargement
           this.download(await produce()); this.host.closeModal?.();
         } catch (e) { Notify.toast(CertsAdminView.errText(e), "err"); }
       } }));
-      row.appendChild(IconButton.build({ icon: Icons.EYE, label: I18n.t("certs.admin.export.display"), onClick: async () => {
+      acts.appendChild(IconButton.build({ icon: Icons.EYE, label: I18n.t("certs.admin.export.display"), onClick: async () => {
         this.session.touch();
         try {
           if (opts.sensitive && !(await this.confirmRevealPrivateKey(item))) return;   // toute clé privée : confirmation (racine → textuelle)
-          this.displayArtifact(label, await produce());
+          this.displayArtifact(label, await produce(), () => this.openExportModal(item, all));   // retour ICI à la fermeture
         } catch (e) { Notify.toast(CertsAdminView.errText(e), "err"); }
       } }));
-      list.appendChild(row);
+      addGridRow(labelCell(label), acts);
     };
 
     // Export UNITAIRE « Tout (ZIP) » (L4) : le BUNDLE complet du certificat en une archive (ex. feuille TLS =
@@ -1898,7 +1918,7 @@ export class CertsAdminView {
 
   /** Affiche le contenu d'un artefact TEXTE EN CLAIR (zone en lecture seule + « Copier ») pour copier-coller.
       Un artefact BINAIRE (PKCS#12) n'est pas affichable → toast. Remplace la modale courante (overlay UNIQUE de l'app). */
-  private displayArtifact(title: string, artifact: ExportArtifact): void {
+  private displayArtifact(title: string, artifact: ExportArtifact, reopen?: () => void): void {
     if (typeof artifact.content !== "string") { Notify.toast(I18n.t("certs.admin.export.notDisplayable"), "warn"); return; }
     const content = artifact.content;
     const root = document.createElement("div");
@@ -1908,10 +1928,15 @@ export class CertsAdminView {
     copy.onclick = () => { void Clipboard.copy(content); Notify.toast(I18n.t("certs.admin.export.copied")); };
     bar.append(name, copy);
     const ta = document.createElement("textarea"); ta.readOnly = true; ta.value = content;
-    ta.style.cssText = "width:100%;min-height:300px;font-family:var(--mono);font-size:12px;white-space:pre;overflow:auto;resize:vertical";
+    // Zone en lecture seule THÉMATISÉE (mêmes variables que les champs `.form-field` : fond/texte/bordure du
+    // thème courant) — un textarea nu prendrait le blanc par défaut du navigateur, illisible en thème sombre.
+    ta.style.cssText = "width:100%;min-height:300px;box-sizing:border-box;font-family:var(--mono);font-size:12px;white-space:pre;overflow:auto;resize:vertical;background:var(--bg);color:var(--fg);border:1px solid var(--line-2);border-radius:var(--radius-pill);padding:10px";
     ta.onclick = () => ta.select();
     root.append(bar, ta);
-    this.host.openModal({ title: I18n.t("certs.admin.export.displayTitle"), subtitle: Html.escape(title), body: root, hideFooter: true, wide: true });
+    // Aller-retour (overlay UNIQUE) : à la FERMETURE de cette visualisation (croix / Échap / clic hors-modale),
+    // on rouvre la modale d'export d'où elle a été ouverte (`reopen`), au lieu de tout fermer. `onClose` couvre
+    // TOUTE cause de fermeture (cf. Modal.onClose) — c'est exactement le signal « je reviens en arrière ».
+    this.host.openModal({ title: I18n.t("certs.admin.export.displayTitle"), subtitle: Html.escape(title), body: root, hideFooter: true, wide: true, onClose: reopen });
   }
 
   /** Confirmation avant de RÉVÉLER une clé privée (afficher en clair OU télécharger). Une clé de CA RACINE

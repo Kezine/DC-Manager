@@ -201,12 +201,21 @@ export class CertExports {
     return trimmed + "\n";
   }
 
-  /** Nom de fichier SÛR dérivé du label : caractères interdits (Windows) → « _ »,
-      espaces de bord retirés. Duplique volontairement la règle de Download.safeName
-      (module DOM) pour garder CE module PUR ; repli « certificat » si le label est vide.
+  /** Nom de fichier SÛR dérivé du label — ASSAINISSEMENT RENFORCÉ (demande utilisateur) : le nom exporté est
+      TOUJOURS sans accent ni espace, même si le libellé du certificat/de la clé en contient.
+      1. accents retirés (décomposition NFD puis suppression des diacritiques : « é » → « e », « ç » → « c »…) ;
+      2. TOUT caractère hors [A-Za-z0-9._-] (espaces et caractères spéciaux compris) remplacé par « _ » ;
+      3. « _ » consécutifs fusionnés, et séparateurs/points de bord retirés (pas de fichier caché ni d'extension
+         parasite). Le point interne est conservé (un « www.exemple.test » reste lisible).
+      Va PLUS LOIN que `Download.safeName` (qui ne neutralise que les caractères interdits sous Windows) : ce
+      module reste PUR (aucune dépendance DOM). Repli « certificat » si le résultat est vide.
       PUBLIC : `CertZip` réutilise le MÊME assainisseur pour les noms de dossier/fichier du ZIP. */
   static safeFileName(label: string): string {
-    const cleaned = String(label || "").replace(/[\\/:*?"<>|]+/g, "_").trim();
+    const cleaned = String(label || "")
+      .normalize("NFD").replace(/\p{Diacritic}/gu, "")   // 1. retrait des accents (marques diacritiques combinantes)
+      .replace(/[^A-Za-z0-9._-]+/g, "_")                   // 2. espaces + caractères spéciaux → séparateur unique
+      .replace(/_+/g, "_")                                  //    pas de « __ » consécutifs
+      .replace(/^[_.]+|[_.]+$/g, "");                       // 3. ni séparateur ni point en tête/fin
     return cleaned === "" ? "certificat" : cleaned;
   }
 }

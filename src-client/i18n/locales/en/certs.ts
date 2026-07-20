@@ -187,6 +187,10 @@ export const certs = {
       revoked: "revoked",
       deployTitle: "Certificate deployment",
       listCertsTitle: "List this authority's certificates",
+      createTls: "+ TLS certificate",
+      createTlsTitle: "Issue a TLS certificate signed by this authority",
+      createSsh: "+ SSH certificate",
+      createSshTitle: "Issue an SSH certificate signed by this CA",
     },
     // COMPUTED cert ↔ equipment/VM matching (listing indicator, view B). See docs/certs.md.
     target: {
