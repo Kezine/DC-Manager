@@ -79,7 +79,13 @@ export interface FieldSpec {
 }
 
 /** Spécification d'une collection : ses champs déclarés (partielle — seuls les champs porteurs de règles
-    sont listés ; les autres traversent) + invariants inter-champs (V3) + règles cross-entité (V5). */
+    sont listés ; les autres traversent) + invariants inter-champs (V3) + règles cross-entité (V5).
+    DOCTRINE (audit de régularisation 2026-07-20) : la traversée des champs non déclarés sert la COMPAT et
+    les champs SANS règle — pas le design. Tout champ d'IDENTITÉ ou porteur de sémantique DOIT être déclaré
+    (cas régularisé : `ipAddresses.hostname`). Passthrough INTENTIONNELS assumés : les champs d'AUDIT
+    `created_by`/`updated_by`/`created_date`/`updated_date` (posés/écrasés PAR LE SERVEUR via AuditStamp
+    APRÈS validation — les déclarer ici n'apporterait aucune règle côté client et leur traversée est
+    éprouvée par test) et `vms.nics` (tableau d'objets, validé par invariant — cf. spec vms). */
 export interface CollectionSpec {
   fields: Record<string, FieldSpec>;
   invariants?: Invariant[];
@@ -866,6 +872,12 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   ipAddresses: {
     fields: {
       address:      { type: "string", required: true, format: "ipv4" },
+      // Nom d'hôte auquel l'IP résout (saisi dans IpamForms, affiché en liste et dans les fiches). RÉGULARISÉ
+      // 2026-07-20 : le champ vivait HORS spec (traversée tolérée) alors que c'est une IDENTITÉ — base des
+      // rapprochements par hostname (VM↔hôte via VmClusterFormat, certificats↔cibles à venir). Déclaration
+      // VOLONTAIREMENT tolérante : optionnel, trim seulement — AUCUN format strict, les valeurs historiques
+      // sont libres (FQDN, nom court, voire liste informelle) et ne doivent pas devenir invalides.
+      hostname:     { type: "string", trim: true },
       network_id:   { type: "string", nullable: true, default: null, ref: "ipNetworks" },
       equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
       // rattachement à une VM (parité equipment_id) — FK contrôlée (V2) et détachée en cascade (Cascade.vms).
@@ -972,6 +984,10 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     },
   },
   vms: {
+    // NB (audit de régularisation 2026-07-20) : `nics` (tableau d'OBJETS source Proxmox, normalisé par
+    // VmSync.normalizeNic) n'est PAS déclarable champ-par-champ dans cette spec (FieldType ne couvre pas
+    // les tableaux d'objets) — sa validation vit dans l'INVARIANT « IPv4 des vNIC » ci-dessous. PASSTHROUGH
+    // INTENTIONNEL documenté, pas un oubli.
     fields: {
       name:              { type: "string", required: true },
       // vm_type / status TOLÉRANTS : PAS de contrainte `enum` — une valeur inconnue (nouveau type/statut d'une

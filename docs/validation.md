@@ -291,3 +291,23 @@ finder ; `buildBatchChildFinder` pour `/transact`.
 Commencer par **V6a** (unicité d'adresse — net, sûr, réutilise tout l'existant), puis **V6b**.
 Laisser **V6c** au Store (`rackPlacementBlockedReason`) tant qu'il n'y a pas de besoin
 multi-client / interface tierce sur le placement en baie.
+
+## 10. Champs déclarés vs traversée — doctrine (audit de régularisation 2026-07-20)
+
+Les specs sont **partielles** : seuls les champs porteurs de règles sont déclarés, les autres
+**traversent** la normalisation et la validation sans être ni retirés ni rejetés. Un audit
+(modèles clients ⇄ formulaires ⇄ specs) a précisé la doctrine :
+
+- **La traversée sert la COMPATIBILITÉ et les champs sans règle — pas le design.** Tout champ
+  d''IDENTITÉ ou porteur de sémantique métier DOIT être déclaré dans la spec de sa collection.
+- **Régularisé** : `ipAddresses.hostname` (saisi dans les formulaires IPAM, affiché en liste et
+  en fiche, base des rapprochements par nom d''hôte) est désormais déclaré
+  `{ type: "string", trim: true }` — volontairement TOLÉRANT : optionnel, pas de format strict
+  (les valeurs historiques sont libres et ne doivent pas devenir invalides), `null`/vide/absent
+  acceptés, aucun défaut injecté (pas de churn des enregistrements existants).
+- **Passthrough INTENTIONNELS assumés** (documentés dans `DataValidation.ts`) :
+  - les champs d''AUDIT `created_by` / `updated_by` / `created_date` / `updated_date` : posés et
+    écrasés PAR LE SERVEUR (`AuditStamp`) APRÈS la validation — les déclarer n''apporterait
+    aucune règle côté client ; leur traversée est éprouvée par un test dédié ;
+  - `vms.nics` : tableau d''OBJETS (non exprimable par `FieldType`), validé par l''invariant
+    « IPv4 des vNIC » de la spec `vms`.

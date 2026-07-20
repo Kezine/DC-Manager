@@ -22,6 +22,32 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : DataValidation — ipAddresses.hostname régularisé (déclaré, tolérant)", async () => {
+  {
+    // RÉGULARISATION 2026-07-20 : `hostname` vivait HORS spec (traversée tolérée) alors que c'est une
+    // IDENTITÉ (base des rapprochements par nom d'hôte). Déclaré { type:"string", trim:true } SANS format
+    // strict ni required : AUCUNE valeur historique (libre) ne doit devenir invalide.
+    const { DataValidator } = Validation;
+    const base = { id: "ip1", address: "10.0.0.5" };
+    // Valeur normale : trimée, acceptée.
+    const { record: rTrim, errors: eTrim } = DataValidator.normalizeAndValidate("ipAddresses", { ...base, hostname: "  srv1.dom.local  " });
+    ck.eq(rTrim.hostname, "srv1.dom.local", "hostname : trimé à la normalisation");
+    ck.eq(eTrim.filter((e) => e.path === "hostname").length, 0, "hostname : valeur FQDN acceptée");
+    // Valeur legacy LIBRE (pas un hostname strict) : toujours acceptée — pas de format.
+    const { errors: eFree } = DataValidator.normalizeAndValidate("ipAddresses", { ...base, hostname: "vip web / interne (double A)" });
+    ck.eq(eFree.filter((e) => e.path === "hostname").length, 0, "hostname : valeur legacy libre toujours acceptée (aucun format strict)");
+    // Absent : reste absent (pas de défaut injecté → aucune churn des enregistrements existants).
+    const { record: rAbs, errors: eAbs } = DataValidator.normalizeAndValidate("ipAddresses", { ...base });
+    ck(!("hostname" in rAbs) || rAbs.hostname === undefined, "hostname : absent reste absent (aucun défaut injecté)");
+    ck.eq(eAbs.filter((e) => e.path === "hostname").length, 0, "hostname : absence acceptée (optionnel)");
+    // null / vide legacy : acceptés (isEmpty couvre null et \"\" — non requis).
+    const { errors: eNull } = DataValidator.normalizeAndValidate("ipAddresses", { ...base, hostname: null });
+    ck.eq(eNull.filter((e) => e.path === "hostname").length, 0, "hostname : null legacy accepté");
+    const { errors: eEmpty } = DataValidator.normalizeAndValidate("ipAddresses", { ...base, hostname: "" });
+    ck.eq(eEmpty.filter((e) => e.path === "hostname").length, 0, "hostname : chaîne vide acceptée");
+  }
+  });
+
   await section("shared : Cascade.plan (intégrité référentielle PARTAGÉE — front ⇄ back)", async () => {
   {
     // Jeu de données en mémoire + capacités injectées (find/fetch), comme côté serveur (repo) ou Store (_byFk).
