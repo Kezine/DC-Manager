@@ -266,9 +266,9 @@ pour chiffrer les jetons de webhook au repos — la MÊME clé unique
 `DCMANAGER_SECRETS_KEY` que le module `vm/` (détails cryptographiques : AES-256-GCM,
 clé = SHA-256 de la passphrase, format versionné `v1:…` — cf. [`vm-proxmox.md`](vm-proxmox.md)).
 
-- **Compatibilité** : l'ancienne `VM_PROVIDERS_KEY` est lue **en repli** si la
-  nouvelle est absente (même dérivation), avec un **avertissement** au démarrage
-  invitant à renommer la variable (même valeur).
+- **Migration (repli RETIRÉ le 2026-07-20)** : l'ancienne `VM_PROVIDERS_KEY`
+  n'est **plus lue** — renommer la variable en `DCMANAGER_SECRETS_KEY` (même
+  valeur, même dérivation). Sans ce renommage, le module reste INACTIF (clé absente).
 - **Clé absente → module INACTIF en bloc.** Uniformité assumée : même les canaux
   `console` (pourtant sans secret) sont indisponibles — un module, un prérequis, un
   message. Les routes répondent **503 explicite** (« définir `DCMANAGER_SECRETS_KEY`… »)

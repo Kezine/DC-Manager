@@ -22,7 +22,7 @@ import { VmStatusEnrichment } from "./VmStatusEnrichment.js";
 
    CHOIX DU SUPPORT DE STOCKAGE (cadrage UI providers 2026-07-14), selon la
    présence de la clé de chiffrement `DCMANAGER_SECRETS_KEY` (SecretBox serveur
-   partagé — l'ancienne `VM_PROVIDERS_KEY` reste lue en repli, cf. SecretBox) :
+   partagé — clé UNIQUE, sans repli depuis le 2026-07-20, cf. SecretBox) :
    - clé PRÉSENTE → stockage DB chiffré (`ProviderConfigDb`, vm-providers.db) +
      migration du fichier legacy au démarrage ; routes CRUD/test ACTIVES.
    - clé ABSENTE → comportement LEGACY (fichier `vm-providers.json`, lecture
@@ -69,8 +69,8 @@ export class VmModule {
 
   static create(opts: { docs: DocumentStore; live: VmLivePublisher; dataDir: string; sqlite: SqliteCtor; log?: Logger; problems?: ProblemReporter }): VmModule {
     const log = opts.log || new Logger("error");
-    // Coffre PARTAGÉ (clé unique DCMANAGER_SECRETS_KEY, repli legacy VM_PROVIDERS_KEY loggué par fromEnv).
-    const box = SecretBox.fromEnv(process.env, log);
+    // Coffre PARTAGÉ (clé unique DCMANAGER_SECRETS_KEY ; aucun repli — cf. SecretBox).
+    const box = SecretBox.fromEnv(process.env);
 
     // ---- Clé PRÉSENTE : stockage DB chiffré + migration legacy au démarrage. ----
     if (box) {
@@ -94,7 +94,7 @@ export class VmModule {
     // ---- Clé ABSENTE mais base chiffrée PRÉSENTE : erreur EXPLICITE (pas de silence). ----
     const dbPath = path.join(opts.dataDir, PROVIDERS_DB_FILE);
     if (fs.existsSync(dbPath)) {
-      const message = PROVIDERS_DB_FILE + " présent mais aucune clé de chiffrement (" + SecretBox.ENV_VAR + ", ou legacy " + SecretBox.LEGACY_ENV_VAR + ") — définissez la clé pour déchiffrer les jetons stockés";
+      const message = PROVIDERS_DB_FILE + " présent mais aucune clé de chiffrement (" + SecretBox.ENV_VAR + ") — définissez la clé pour déchiffrer les jetons stockés";
       log.error("module VM en erreur : base chiffrée présente sans clé", message);
       return new VmModule(opts.docs, null, null, message, true, log);
     }

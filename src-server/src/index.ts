@@ -48,7 +48,7 @@ const live = new LiveBus(log.child("live"));
 // CRÉÉ AVANT vm : le module VM lui SIGNALE ses échecs de synchro (producteur vm-sync-failure, S4).
 const notify = NotifyModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("notify") });
 // Inventaire VM (Proxmox…) : providers PAR DOCUMENT. Clé DCMANAGER_SECRETS_KEY présente (SecretBox
-// partagé — legacy VM_PROVIDERS_KEY lue en repli) → stockage DB chiffré (DOCS_DIR/vm-providers.db,
+// partagé — clé UNIQUE, sans repli depuis le 2026-07-20) → stockage DB chiffré (DOCS_DIR/vm-providers.db,
 // même driver better-sqlite3 injecté que DocumentStore) + CRUD ;
 // absente → fichier legacy DOCS_DIR/vm-providers.json en lecture seule (cf. VmModule).
 // PONT vers notify (typage STRUCTUREL — vm/ n'importe RIEN de notify/, les deux features restent

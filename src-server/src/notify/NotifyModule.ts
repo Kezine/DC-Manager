@@ -22,8 +22,8 @@ import type { NotificationMessage, NotificationTarget, Notifier, NotifySeverity 
    dossier notify/ — le cœur (api/db/documents/live) n'importe RIEN d'ici.
 
    CLÉ DE CHIFFREMENT (pattern VmModule) : le module exige `DCMANAGER_SECRETS_KEY`
-   (SecretBox partagé — repli legacy accepté) pour chiffrer les jetons des
-   webhooks. Clé ABSENTE → module DÉSACTIVÉ en bloc : routes en 503 explicite,
+   (SecretBox partagé — clé UNIQUE, sans repli depuis le 2026-07-20) pour chiffrer
+   les jetons des webhooks. Clé ABSENTE → module DÉSACTIVÉ en bloc : routes en 503 explicite,
    pas de timer, raise/resolve no-op (les producteurs ne voient qu'une
    interface optionnelle — cf. S4). Uniformité assumée : même les canaux
    console sont indisponibles sans clé (un module, un prérequis, un message).
@@ -79,7 +79,7 @@ export class NotifyModule {
 
   static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger }): NotifyModule {
     const log = opts.log || new Logger("error");
-    const box = SecretBox.fromEnv(process.env, log);
+    const box = SecretBox.fromEnv(process.env);
     if (!box) {
       log.info("module notifications INACTIF — clé " + SecretBox.ENV_VAR + " absente (routes en 503 explicite)");
       return new NotifyModule(null, null, null, null, true, log);

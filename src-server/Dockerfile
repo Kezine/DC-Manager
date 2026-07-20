@@ -30,6 +30,16 @@ COPY src-server/src ./src-server/src
 COPY src-shared ./src-shared
 RUN cd src-server && npm run build && npm prune --omit=dev
 COPY --from=client /client/dist /client-dist
+# --- Variables d'environnement au RUNTIME ---
+# POSÉES par l'image (surchargables au `docker run`/compose) — voir la ligne ENV ci-dessous :
+#   PORT=3000 · API_BASE=/api · DOCS_DIR=/data/documents (sous le VOLUME) · CLIENT_DIR=/client-dist · NODE_ENV=production
+# À FOURNIR À L'EXÉCUTION selon les besoins (JAMAIS de valeur en dur ici — surtout pas un secret) :
+#   DCMANAGER_SECRETS_KEY : passphrase de chiffrement des secrets serveur (jetons des providers VM + webhooks notify).
+#                           ABSENTE → ces features se désactivent (503 explicite) MAIS le serveur DÉMARRE quand même.
+#                           AUCUN repli (l'ancien VM_PROVIDERS_KEY n'est plus lu). La PKI/certs n'en dépend pas.
+#   Auth  : SSO_URL | SSO_LOGIN_URL | COOKIE_NAME | DEV_USER | BASIC_AUTH   (cf. RUN.md § Authentification)
+#   Autres : LOG_LEVEL (error|warn|info|debug|trace) · JIRA_BASE_URL (lien Jira des interventions)
+# Référence EXHAUSTIVE des variables : README.md — tableau « Variables d'environnement ».
 ENV NODE_ENV=production CLIENT_DIR=/client-dist DOCS_DIR=/data/documents PORT=3000 API_BASE=/api
 VOLUME ["/data"]
 EXPOSE 3000

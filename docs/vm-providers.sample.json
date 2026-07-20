@@ -1,6 +1,6 @@
 {
   "3f8a1c2e-9b47-4d0a-8e21-5c6f7a9d0b13": {
-    "docName": "[FORMAT LEGACY — migré automatiquement vers vm-providers.db dès que DCMANAGER_SECRETS_KEY (ou l'ancienne VM_PROVIDERS_KEY, lue en repli) est définie ; l'édition passe désormais par l'UI (modale « Providers… » du sous-onglet Clusters). Sans clé, ce fichier reste lu en seule lecture.] Datacenter production — pool de 3 nœuds (bascule si un nœud tombe), synchro horaire",
+    "docName": "[FORMAT LEGACY — migré automatiquement vers vm-providers.db dès que DCMANAGER_SECRETS_KEY est définie ; l'édition passe désormais par l'UI (modale « Providers… » du sous-onglet Clusters). Sans clé, ce fichier reste lu en seule lecture.] Datacenter production — pool de 3 nœuds (bascule si un nœud tombe), synchro horaire",
     "providers": [
       {
         "id": "pve-prod",

@@ -1217,7 +1217,7 @@ module.exports = async () => {
 
   /* ============ SERVEUR : SecretBox partagé (chiffrement au repos des secrets) ============ */
 
-  await section("Serveur : SecretBox — AES-256-GCM (aller-retour, clé différente, altération, repli env legacy)", async () => {
+  await section("Serveur : SecretBox — AES-256-GCM (aller-retour, clé différente, altération, clé unique sans repli)", async () => {
   {
     const { SecretBox } = SERVER("SecretBox.js");
     const box = new SecretBox("une-passphrase-d-infrastructure-longue");
@@ -1243,22 +1243,15 @@ module.exports = async () => {
     try { box.decrypt("v9:x:y:z"); } catch (_) { badFmt = true; }
     ck(badFmt, "format de version inconnue → erreur explicite");
 
-    // -- fromEnv : clé générique, repli legacy (compat VM_PROVIDERS_KEY), priorité. --
-    ck.eq(SecretBox.fromEnv({}), null, "aucune clé (ni DCMANAGER_SECRETS_KEY ni legacy) → null (features à secrets désactivées)");
+    // -- fromEnv : SEULE la clé générique est lue (repli legacy VM_PROVIDERS_KEY RETIRÉ le 2026-07-20). --
+    ck.eq(SecretBox.fromEnv({}), null, "aucune clé → null (features à secrets désactivées)");
     const fromEnv = SecretBox.fromEnv({ DCMANAGER_SECRETS_KEY: "une-passphrase-d-infrastructure-longue" });
     ck.eq(fromEnv.decrypt(stored), secret, "fromEnv (DCMANAGER_SECRETS_KEY) → même clé dérivée (déchiffre ce que le coffre direct a chiffré)");
-    // Legacy seule → coffre opérationnel (les déploiements VM existants continuent de déchiffrer)
-    // + AVERTISSEMENT de migration (noms de variables uniquement, jamais de valeur).
-    const warns = [];
-    const legacyBox = SecretBox.fromEnv({ VM_PROVIDERS_KEY: "une-passphrase-d-infrastructure-longue" }, { warn: (...a) => warns.push(a.join(" ")) });
-    ck.eq(legacyBox.decrypt(stored), secret, "legacy VM_PROVIDERS_KEY seule → repli, même dérivation (secrets existants lisibles)");
-    ck(warns.length === 1 && /VM_PROVIDERS_KEY/.test(warns[0]) && /DCMANAGER_SECRETS_KEY/.test(warns[0]), "…avec un avertissement invitant à migrer (les deux noms cités)");
-    ck(!warns[0].includes("une-passphrase"), "…et JAMAIS la valeur de la passphrase dans le log");
-    // Les deux présentes → la GÉNÉRIQUE gagne (pas d'ambiguïté), aucun avertissement.
-    const bothWarns = [];
-    const bothBox = SecretBox.fromEnv({ DCMANAGER_SECRETS_KEY: "une-passphrase-d-infrastructure-longue", VM_PROVIDERS_KEY: "autre-passphrase" }, { warn: (...a) => bothWarns.push(a.join(" ")) });
-    ck.eq(bothBox.decrypt(stored), secret, "les deux clés présentes → DCMANAGER_SECRETS_KEY prioritaire");
-    ck.eq(bothWarns.length, 0, "…sans avertissement (la configuration cible est en place)");
+    // Repli RETIRÉ : l'ancienne VM_PROVIDERS_KEY seule n'ouvre PLUS rien (migration = renommer la variable, même valeur).
+    ck.eq(SecretBox.fromEnv({ VM_PROVIDERS_KEY: "une-passphrase-d-infrastructure-longue" }), null, "VM_PROVIDERS_KEY seule → null (repli legacy retiré)");
+    // DCMANAGER présente + ancienne variable résiduelle → seule DCMANAGER compte (l'autre est ignorée).
+    const bothBox = SecretBox.fromEnv({ DCMANAGER_SECRETS_KEY: "une-passphrase-d-infrastructure-longue", VM_PROVIDERS_KEY: "autre-passphrase" });
+    ck.eq(bothBox.decrypt(stored), secret, "DCMANAGER_SECRETS_KEY présente → seule elle est lue (VM_PROVIDERS_KEY ignorée)");
     // Passphrase vide/blanche = absente (pas de coffre au comportement surprenant).
     ck.eq(SecretBox.fromEnv({ DCMANAGER_SECRETS_KEY: "  " }), null, "passphrase blanche → traitée comme absente");
   }

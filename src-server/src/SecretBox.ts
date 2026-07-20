@@ -6,9 +6,10 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
    vm-providers.db, jetons d'appel des webhooks de notification dans notify.db,
    …). Généralisation de l'ex-`vm/VmSecretBox` (décision utilisateur
    2026-07-14, Q3 du cadrage notifications) : UNE clé d'environnement unique
-   `DCMANAGER_SECRETS_KEY` pour tous les modules, avec COMPATIBILITÉ de l'ancienne
-   `VM_PROVIDERS_KEY` (lue en repli tant que la nouvelle n'est pas définie —
-   même dérivation, donc les secrets déjà stockés restent déchiffrables).
+   `DCMANAGER_SECRETS_KEY` pour tous les modules. (Le repli historique vers l'ancienne
+   `VM_PROVIDERS_KEY` a été RETIRÉ le 2026-07-20 : un déploiement encore sur l'ancien
+   nom doit RENOMMER la variable en `DCMANAGER_SECRETS_KEY` — même valeur, dérivation
+   identique, donc les secrets déjà stockés restent déchiffrables sans réécriture.)
 
    Schéma cryptographique (délibérément simple et standard) :
    - AES-256-GCM (chiffrement AUTHENTIFIÉ : toute altération du stocké est
@@ -30,11 +31,9 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
    n'apparaissent JAMAIS dans un message d'erreur ou un log.
    ============================================================================= */
 export class SecretBox {
-  /** Nom de la variable d'environnement portant la passphrase (clé UNIQUE, tous modules). */
+  /** Nom de la variable d'environnement portant la passphrase (clé UNIQUE, tous modules).
+      SEULE variable lue : le repli historique vers `VM_PROVIDERS_KEY` a été retiré (2026-07-20). */
   static readonly ENV_VAR = "DCMANAGER_SECRETS_KEY";
-  /** Ancien nom (module VM seul) — lu en REPLI si la clé générique est absente, pour que les
-      déploiements existants continuent de déchiffrer leurs jetons sans intervention. */
-  static readonly LEGACY_ENV_VAR = "VM_PROVIDERS_KEY";
 
   private readonly key: Buffer;
 
@@ -48,24 +47,13 @@ export class SecretBox {
     this.key = createHash("sha256").update(passphrase, "utf8").digest();
   }
 
-  /** Construit le coffre depuis l'environnement : `DCMANAGER_SECRETS_KEY` d'abord, repli sur
-      l'ancienne `VM_PROVIDERS_KEY` (avertissement invitant à migrer — les NOMS de variables
-      seulement, jamais les valeurs). null si aucune des deux n'est définie (→ les features à
-      secrets chiffrés se désactivent et le signalent explicitement, cf. VmModule/NotifyModule). */
-  static fromEnv(
-    env: { [k: string]: string | undefined } = process.env,
-    log?: { warn(...args: unknown[]): void },
-  ): SecretBox | null {
-    const fresh = env[SecretBox.ENV_VAR];
-    if (fresh && fresh.trim() !== "") return new SecretBox(fresh, SecretBox.ENV_VAR);
-    const legacy = env[SecretBox.LEGACY_ENV_VAR];
-    if (legacy && legacy.trim() !== "") {
-      log?.warn(
-        SecretBox.LEGACY_ENV_VAR + " lue en repli (clé " + SecretBox.ENV_VAR + " absente) — "
-        + "migrer : renommer la variable en " + SecretBox.ENV_VAR + " (même valeur, dérivation identique)",
-      );
-      return new SecretBox(legacy, SecretBox.LEGACY_ENV_VAR);
-    }
+  /** Construit le coffre depuis l'environnement : `DCMANAGER_SECRETS_KEY` UNIQUEMENT (aucun repli —
+      retiré le 2026-07-20). null si elle est absente ou blanche (→ les features à secrets chiffrés se
+      désactivent et le signalent explicitement, cf. VmModule/NotifyModule). Un déploiement encore sur
+      l'ancien `VM_PROVIDERS_KEY` doit RENOMMER la variable (même valeur, même dérivation). */
+  static fromEnv(env: { [k: string]: string | undefined } = process.env): SecretBox | null {
+    const key = env[SecretBox.ENV_VAR];
+    if (key && key.trim() !== "") return new SecretBox(key);
     return null;
   }
 

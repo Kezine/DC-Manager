@@ -46,11 +46,11 @@ Idempotence de bout en bout : un inventaire inchangé ne produit **aucune**
 | `ProxmoxAdapter.ts` | Orchestration des appels (`/cluster/status` → nom + quorate, `/cluster/resources` SANS filtre → VMs + nœuds, `/version` → version + gamme, configs, agent pour les QEMU allumées). HTTP **injecté** (`PveJsonClient`) → testable par stub. Échec d'une config individuelle ou d'une métadonnée cluster (quorum/version) toléré ; seul l'échec de l'inventaire de masse rejette. |
 | `ProviderConfigStore.ts` | Parseur/validation du fichier **LEGACY** `vm-providers.json` (lecture seule, cf. « Configuration »). Délègue la validation par provider à `ProviderConfigValidate`. Sert de source tant que la clé de chiffrement est absente, et alimente la migration vers la DB. |
 | `ProviderConfigValidate.ts` | Validation PURE d'UN provider (id/kind/token requis, pool d'urls https + empreintes par nœud + doublons, include_lxc/interval_sec/timeout_sec avec défauts) — PARTAGÉE par le parseur legacy ET le CRUD DB (messages d'erreur IDENTIQUES, zéro duplication). Le token n'apparaît jamais dans un message. |
-| `../SecretBox.ts` | Coffre de chiffrement des secrets AU REPOS — module serveur **PARTAGÉ** (hors de `vm/`, réutilisé par `notify/`) : AES-256-GCM (authentifié), clé = SHA-256 de la passphrase d'env `DCMANAGER_SECRETS_KEY` (**compat** : `VM_PROVIDERS_KEY` lue en repli, avertissement de migration), IV aléatoire 12 o, format versionné `v1:<iv>:<tag>:<ct>` (base64). Aucun secret (passphrase/clé/jeton) dans un log ou une erreur. Limites assumées + clé perdue = jetons à ressaisir (cf. « Configuration »). |
+| `../SecretBox.ts` | Coffre de chiffrement des secrets AU REPOS — module serveur **PARTAGÉ** (hors de `vm/`, réutilisé par `notify/`) : AES-256-GCM (authentifié), clé = SHA-256 de la passphrase d'env `DCMANAGER_SECRETS_KEY` (**clé UNIQUE, sans repli** depuis le 2026-07-20), IV aléatoire 12 o, format versionné `v1:<iv>:<tag>:<ct>` (base64). Aucun secret (passphrase/clé/jeton) dans un log ou une erreur. Limites assumées + clé perdue = jetons à ressaisir (cf. « Configuration »). |
 | `ProviderConfigDb.ts` | Stockage DB chiffré (`vm-providers.db`, tables typées `vm_providers` + `vm_provider_endpoints` ordonnées, jetons `token_enc`). Deux surfaces : LECTURE synchro (`providersFor`/`configuredDocIds`) ET CRUD sans fuite de jeton (`listFor`/`save`/`remove`/`buildForTest` — `has_token` seul, jamais le jeton). Migre le fichier legacy au démarrage. Driver SQLite injecté. |
 | `VmReconcile.ts` | Moteur de réconciliation PUR (clé `ext_id`, périmètre = une instance de provider). Frontière source/locaux, orphelines jamais supprimées, patchs minimaux. Dépendances injectées (résolution d'hôte, id, horloge). |
 | `VmSyncService.ts` | Exécution d'une synchro + statut mémoire par doc×provider + timers périodiques (`interval_sec`, anti-chevauchement, `unref`). Sans Express (bus live vu par interface) → testé de bout en bout. `rearmTimers()` relit la config à chaud après une écriture CRUD. **Producteur `vm-sync-failure`** : sur une VRAIE passe (hors sorties anticipées « déjà en cours »/anti-rafale), un échec `raise` et un succès `resolve` un problème persistant AUPRÈS DU MODULE NOTIFICATIONS, via l'interface OPTIONNELLE `ProblemReporter` injectée au bootstrap (typage structurel — `vm/` n'importe rien de `notify/`). Clé stable `vm-sync:<docId>:<providerId>` ; AUCUN comptage/anti-spam ici (rappels et déduplication côté notify — cf. [`docs/notifications.md`](notifications.md)). |
-| `VmModule.ts` | Façade : routes REST (sync/status + CRUD/test des providers) + assemblage. Choisit le support de stockage selon `DCMANAGER_SECRETS_KEY` (ou son repli legacy) : DB chiffrée si présente (CRUD actif), fichier legacy sinon (CRUD en **503** explicite). Config invalide → module « en erreur » (503 détaillé) sans faire tomber le serveur ; ré-arme les timers après chaque écriture. |
+| `VmModule.ts` | Façade : routes REST (sync/status + CRUD/test des providers) + assemblage. Choisit le support de stockage selon `DCMANAGER_SECRETS_KEY` : DB chiffrée si présente (CRUD actif), fichier legacy sinon (CRUD en **503** explicite). Config invalide → module « en erreur » (503 détaillé) sans faire tomber le serveur ; ré-arme les timers après chaque écriture. |
 
 **Branchement au cœur** : point d'extension GÉNÉRIQUE `ApiExtension`
 (`api.ts` — montage sous la garde d'accès, avant la route `/:collection`) ;
@@ -230,11 +230,12 @@ quel par la liste et l'enregistrement (aucune réserve, contrairement au jeton).
   de l'ex-`VmSecretBox`, décision 2026-07-14 — réutilisé par le module
   `notify/` pour les jetons de webhooks). Une **clé UNIQUE** pour tous les
   modules : `DCMANAGER_SECRETS_KEY`.
-- **Compatibilité** : l'ancienne `VM_PROVIDERS_KEY` est lue **en repli** si la
-  nouvelle est absente (même dérivation → les jetons déjà stockés restent
-  déchiffrables sans intervention), avec un avertissement au démarrage invitant
-  à renommer la variable (même valeur). Si les deux sont définies, la générique
-  gagne.
+- **Migration (repli RETIRÉ le 2026-07-20)** : l'ancienne `VM_PROVIDERS_KEY`
+  n'est **plus lue**. Un déploiement encore sur ce nom doit **renommer** la
+  variable en `DCMANAGER_SECRETS_KEY` (même valeur → même dérivation SHA-256,
+  donc les jetons déjà stockés restent déchiffrables sans réécriture). Tant que le
+  renommage n'est pas fait, les features à secrets se comportent comme sans clé
+  (503 explicite / lecture seule du fichier legacy).
 - **AES-256-GCM** (chiffrement *authentifié* : toute altération du stocké est
   détectée au déchiffrement), clé = **SHA-256 de la passphrase d'environnement**
   (dérivation qui normalise une passphrase libre en 32
@@ -273,8 +274,9 @@ ERROR [vm] POST /vm/providers/test : construction en échec <docId>
   donnée altérée) — le secret doit être ressaisi
 ```
 
-**Cause** : la valeur de `DCMANAGER_SECRETS_KEY` (ou de son repli
-`VM_PROVIDERS_KEY`) a **changé** depuis l'enregistrement du jeton. Le jeton est
+**Cause** : la valeur de `DCMANAGER_SECRETS_KEY` a **changé** depuis
+l'enregistrement du jeton (ou la variable a été renommée depuis l'ancien
+`VM_PROVIDERS_KEY` sans reporter la MÊME valeur). Le jeton est
 chiffré AU REPOS avec une clé dérivée de la passphrase (cf. « Chiffrement des
 jetons ») : une passphrase différente ne peut PAS le déchiffrer (AES-256-GCM
 authentifié — c'est le but : clé perdue = secret irrécupérable). Ce n'est PAS le
@@ -306,7 +308,7 @@ Le fichier `vm-providers.json` (à côté de la base) reste pris en charge pour
 compatibilité, en LECTURE SEULE :
 
 - **sans clé** : encore LU tel quel (pas de CRUD) — comportement v1 inchangé ;
-- **dès que `DCMANAGER_SECRETS_KEY` (ou son repli legacy) est présente** : MIGRÉ automatiquement au démarrage
+- **dès que `DCMANAGER_SECRETS_KEY` est présente** : MIGRÉ automatiquement au démarrage
   (chaque jeton chiffré au passage) puis fichier RENOMMÉ
   `vm-providers.json.imported-<AAAA-MM-JJ>` (trace, plus jamais relu) — la DB
   devient l'unique source. Idempotent (au 2ᵉ démarrage le fichier est déjà
@@ -399,10 +401,10 @@ Ajouter **`DCMANAGER_SECRETS_KEY`** (une passphrase LONGUE) à l'environnement d
 serveur pour activer la gestion des providers par l'UI et le chiffrement des
 secrets au repos (clé UNIQUE partagée par tous les modules à secrets — VM,
 notifications). Les déploiements historiques qui n'ont que `VM_PROVIDERS_KEY`
-continuent de fonctionner (repli, même dérivation) — renommer la variable à
-l'occasion (même valeur). Sans aucune clé : seule la lecture du fichier legacy
-fonctionne (pas de CRUD). **Clé perdue = jetons à ressaisir** (aucune
-récupération possible).
+doivent **renommer** la variable en `DCMANAGER_SECRETS_KEY` (même valeur → même
+dérivation : le repli automatique a été **retiré le 2026-07-20**). Sans aucune
+clé : seule la lecture du fichier legacy fonctionne (pas de CRUD). **Clé perdue =
+jetons à ressaisir** (aucune récupération possible).
 
 ## Gamme Proxmox supportée
 
