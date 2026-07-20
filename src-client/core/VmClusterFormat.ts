@@ -15,7 +15,13 @@
    AUCUNE dépendance au store ni au DOM : le module opère sur des tableaux/valeurs nus
    (tolérance de forme), ce qui le rend testable sans navigateur (harness.js). L'accès
    concret aux équipements/adresses IP/VMs reste dans la vue.
+
+   NORMALISATION DES HOSTNAMES : déléguée à `HostnameMatch.norm` (module pur dédié) —
+   une SEULE définition de « trim + minuscules + 1er label », partagée avec le
+   rapprochement certificat (`CertTargetMatch`). Le comportement reste STRICTEMENT
+   identique à l'ancienne normalisation inline (donc au miroir serveur `VmSyncService`).
    ============================================================================= */
+import { HostnameMatch } from "./HostnameMatch";
 
 /** Vue MINIMALE d'un équipement pour le rapprochement (le module ne dépend pas du modèle `Equipment`). */
 export interface VmHostEquipmentRef {
@@ -46,8 +52,9 @@ export class VmClusterFormat {
         3) premier label du FQDN du nom d'équipement (« srv1.int.exemple.com » → « srv1 »).
       `node` vide → null. `ipAddresses` (nouveau param v3) porte les hostnames du niveau 1. */
   static resolveHostEquipmentId(equipments: VmHostEquipmentRef[], ipAddresses: VmHostIpRef[], node: string): string | null {
-    const key = (typeof node === "string" ? node.trim() : "").toLowerCase();
-    if (!key) return null;
+    const nodeNorm = HostnameMatch.norm(node);
+    if (!nodeNorm) return null;
+    const key = nodeNorm.full;                             // clé de recherche = hostname COMPLET normalisé
     const eqs = Array.isArray(equipments) ? equipments : [];
     const ips = Array.isArray(ipAddresses) ? ipAddresses : [];
 
@@ -61,17 +68,17 @@ export class VmClusterFormat {
     };
     for (const eq of eqs) {
       if (!eq || typeof eq.id !== "string") continue;
-      const name = (typeof eq.name === "string" ? eq.name : "").trim().toLowerCase();
-      if (!name) continue;   // sans nom → seul un futur niveau 1 (IP) pourrait le trouver
-      add(byNameExact, name, eq.id);
-      if (name.includes(".")) add(byNameLabel, name.split(".")[0], eq.id);   // pas un FQDN → seul le niveau 2 le trouve
+      const eqName = HostnameMatch.norm(eq.name);
+      if (!eqName) continue;   // sans nom → seul un futur niveau 1 (IP) pourrait le trouver
+      add(byNameExact, eqName.full, eq.id);
+      if (eqName.full.includes(".")) add(byNameLabel, eqName.firstLabel, eq.id);   // pas un FQDN → seul le niveau 2 le trouve
     }
     for (const ip of ips) {
       if (!ip || !ip.equipment_id) continue;   // niveau 1 = IP RATTACHÉE à un équipement (equipment_id posé)
-      const host = (typeof ip.hostname === "string" ? ip.hostname : "").trim().toLowerCase();
-      if (!host) continue;
-      add(byIpHost, host, ip.equipment_id);                  // hostname COMPLET
-      add(byIpHost, host.split(".")[0], ip.equipment_id);    // + PREMIER LABEL (dédup par équipement : même Set)
+      const ipHost = HostnameMatch.norm(ip.hostname);
+      if (!ipHost) continue;
+      add(byIpHost, ipHost.full, ip.equipment_id);          // hostname COMPLET
+      add(byIpHost, ipHost.firstLabel, ip.equipment_id);    // + PREMIER LABEL (dédup par équipement : même Set)
     }
 
     // Évaluation DANS L'ORDRE — premier niveau qui a des candidats TRANCHE (résolu OU ambigu), sans descendre.
