@@ -94,8 +94,8 @@ export interface CertsListOpts {
   status?: "active" | "revoked" | "expired" | "expiring";
   /** Restreint au SOUS-ARBRE STRICT de cette racine (elle-même EXCLUE) — sans objet pour /roots. */
   root?: string;
-  /** `parent` = tri par émetteur puis libellé ; `children_total`/`next_expiry` réservés à /roots. */
-  sort?: "label" | "kind" | "not_after" | "created_date" | "parent" | "children_total" | "next_expiry";
+  /** `parent` = tri par émetteur puis libellé ; `not_before` = date d'émission ; `children_total`/`next_expiry` réservés à /roots. */
+  sort?: "label" | "kind" | "not_before" | "not_after" | "created_date" | "parent" | "children_total" | "next_expiry";
   dir?: "asc" | "desc";
   /** Id d'un élément à CIBLER : s'il matche les filtres, la réponse porte la page qui le contient (le
       paramètre `page` est alors ignoré) ; sinon comportement normal (page demandée). */
@@ -601,6 +601,7 @@ export class CertsDb {
   private static orderBy(sort: string | undefined, dirSql: string): string {
     switch (sort) {
       case "kind":         return `c.kind ${dirSql}, c.id ASC`;
+      case "not_before":   return `(c.not_before IS NULL) ASC, c.not_before ${dirSql}, c.id ASC`;   // date d'ÉMISSION
       case "not_after":    return `(c.not_after IS NULL) ASC, c.not_after ${dirSql}, c.id ASC`;
       case "created_date": return `c.created_date ${dirSql}, c.id ASC`;
       case "parent":       return `c.parent_id ${dirSql}, c.label ${dirSql}, c.id ASC`;

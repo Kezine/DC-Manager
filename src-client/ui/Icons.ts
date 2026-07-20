@@ -36,6 +36,10 @@ export class Icons {
   /** Consulter le détail (remplace le glyphe `ⓘ`). */
   static readonly INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><line x1="12" y1="7.6" x2="12" y2="7.7"/></svg>';
 
+  /** RÉVÉLER / afficher un contenu sensible en clair à l'écran (œil) — distinct de INFO (consulter des
+      métadonnées) : ici on DÉVOILE une matière (clé/cert) pour copier-coller, opération à confirmer. */
+  static readonly EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3.2"/></svg>';
+
   /** Modifier (remplace `✎`) : crayon. */
   static readonly EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 

@@ -22,6 +22,7 @@ export const certs = {
   guard: {
     phrase: "Yes I delete",
     phraseNamed: "Yes I delete {{label}}",
+    revealRoot: "Yes I reveal the root key",
   },
   tips: {
     issueTls: {
@@ -177,6 +178,7 @@ export const certs = {
       colDerived: "Derivatives",
       colAlert: "Below threshold",
       colIssuer: "Issuer",
+      colIssued: "Issued",
       keyOwned: "Private key held (encrypted)",
       empty: "No item.",
       emptyUnlocked: "No item. Create an authority or adjust the filters.",
@@ -189,6 +191,7 @@ export const certs = {
       issueSsh: "Issue SSH",
       exportArtifacts: "Export the artifacts",
       revoke: "Revoke",
+      info: "Certificate details",
     },
     select: {
       headerAll: "Select the whole page",
@@ -353,8 +356,34 @@ export const certs = {
       opensshKey: "OpenSSH key (private + .pub)",
       sshCert: "SSH certificate (-cert.pub)",
       subjectKey: "Subject's private key (.key.pem)",
+      download: "Download",
+      display: "Show (copy-paste)",
+      displayTitle: "Content to copy",
+      copy: "Copy",
+      copied: "Copied",
+      notDisplayable: "Binary format — download only",
       empty: "No export available for this object.",
       title: "Export",
+    },
+    info: {
+      title: "Certificate details",
+      serial: "Serial number",
+      fingerprint: "SHA-256 fingerprint",
+      algo: "Key algorithm",
+      sans: "Alternative names (SAN)",
+      keyOwned: "Private key held",
+      yes: "Yes",
+      no: "No",
+      created: "Created",
+      updated: "Updated",
+    },
+    reveal: {
+      title: "Reveal the private key?",
+      message: "The private key of “{{label}}” will be shown in clear text. Make sure nobody is looking at the screen.",
+      confirm: "Reveal",
+      rootTitle: "Reveal a ROOT CA private key?",
+      rootMessage: "“{{label}}” is a ROOT authority: its private key signs the WHOLE PKI. Revealing it (display or export) is a critical operation.",
+      rootWarn: "A leak makes EVERY certificate issued under this root suspect.",
     },
     pkcs12: {
       info: "The PKCS#12 file bundles the certificate, its chain and the private key, protected by a passphrase. This passphrase is NOT stored — note it down for the import.",

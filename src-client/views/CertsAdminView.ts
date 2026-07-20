@@ -602,12 +602,13 @@ export class CertsAdminView {
       this.selectHeaderCell(),
       this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label", st), this.sortableTh(I18n.t("lists.col.type"), "kind", st),
       this.sortableTh(I18n.t("certs.admin.listing.colIssuer"), "parent", st), this.plainTh(I18n.t("certs.admin.listing.colSubject")),
+      this.sortableTh(I18n.t("certs.admin.listing.colIssued"), "not_before", st),
       this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")), this.plainTh(I18n.t("lists.chrome.actions"), "cell-actions"),
     );
     thead.appendChild(tr);
     const labels = CardTable.columnLabels(tr);   // repli en cartes (< 560px) : libellés lus depuis l'en-tête
     const tbody = document.createElement("tbody");
-    if (!this.certItems.length) tbody.appendChild(this.emptyRow(8));
+    if (!this.certItems.length) tbody.appendChild(this.emptyRow(9));
     else for (const item of this.certItems) { const row = this.buildCertRow(item); CardTable.labelCells(row, labels); tbody.appendChild(row); }
     table.append(thead, tbody);
     tw.appendChild(table);
@@ -620,16 +621,20 @@ export class CertsAdminView {
     tr.appendChild(this.selectRowCell(item));
     tr.appendChild(this.labelCell(item));
     tr.appendChild(this.htmlCell(this.pill(CertsFormat.kindLabel(item.kind), "neutral")));
-    // Émetteur : libellé du parent RÉSOLU depuis les items de la PAGE (CertsFormat.issuerLabel) ; s'il est sur
-    // une AUTRE page du sous-arbre, on montre son id court en mono avec l'id complet en title (limite assumée
-    // — pas de requête par ligne, cadrage §3).
+    // Émetteur en NOM : en vue B, le parent d'un dérivé est la RACINE scopée (rootScope) — ABSENTE de la page
+    // (sous-arbre STRICT) → on affiche son LIBELLÉ (et non l'id hexa, illisible). Replis : résolution depuis les
+    // items de la page (CertsFormat.issuerLabel), puis id court en mono pour un émetteur non résolu (CA
+    // intermédiaire — non produite en v1, mais le sous-arbre est récursif : on ne casse rien si ça arrive).
     const issuer = document.createElement("td");
-    if (item.parent_id && !this.certItems.some((c) => c.id === item.parent_id)) {
-      issuer.style.cssText = "font-family:var(--mono);font-size:12px"; issuer.title = item.parent_id;
+    const isScopedRoot = !!item.parent_id && item.parent_id === this.rootScope?.id;
+    const resolvedByPage = !!item.parent_id && this.certItems.some((c) => c.id === item.parent_id);
+    if (item.parent_id && !isScopedRoot && !resolvedByPage) {
+      issuer.style.cssText = "font-family:var(--mono);font-size:12px"; issuer.title = item.parent_id;   // non résolu → id court
     }
-    issuer.textContent = CertsFormat.issuerLabel(item.parent_id, this.certItems);
+    issuer.textContent = isScopedRoot ? this.rootScope!.label : CertsFormat.issuerLabel(item.parent_id, this.certItems);
     tr.appendChild(issuer);
     tr.appendChild(this.subjectCell(item.subject));
+    tr.appendChild(this.htmlCell(this.issuedCell(item)));   // date d'ÉMISSION (not_before)
     tr.appendChild(this.htmlCell(this.expiryCell(item)));
     tr.appendChild(this.htmlCell(item.revoked_at ? this.pill(I18n.t("certs.admin.listing.revoked"), "err") : CertsAdminView.MUTED));
     const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + alignées à DROITE (parité ListView)
@@ -721,6 +726,12 @@ export class CertsAdminView {
     return `<span style="color:${color}" title="${Html.escape(title)}">${Html.escape(CertsFormat.expiryLabel(item.not_after))}</span>`;
   }
 
+  /** Cellule « date d'émission » (not_before) : date lisible NEUTRE (aucune sémantique de couleur — c'est une
+      date passée), « — » si absente. Colonne triable serveur (tri `not_before`, cf. CertsDb.orderBy). */
+  private issuedCell(item: CertificateListItem): string {
+    return item.not_before ? Html.escape(Format.dateTime(item.not_before)) : CertsAdminView.MUTED;
+  }
+
   /** Boutons d'action d'une ligne : émission (CA), export, révocation, suppression — tous en ICÔNE
       (listes denses), la mini-doc de chacun vivant dans son tooltip enrichi (CERTS_TIPS).
       NB : l'export PAR LIGNE a un libellé STATIQUE → il devient une icône sans rien perdre. C'est
@@ -733,6 +744,8 @@ export class CertsAdminView {
       perdue encore consultable ET PURGEABLE, comme le promet docs/certs.md. */
   private fillActions(cell: HTMLElement, item: CertificateListItem): void {
     const unlocked = this.session.unlocked;
+    // Détail (lecture seule) : disponible EN PERMANENCE (même verrouillé / révoqué) — aucune clé, aucune écriture.
+    cell.appendChild(IconButton.build({ icon: Icons.INFO, label: I18n.t("certs.admin.actions.info"), onClick: () => this.infoModal(item) }));
     if (unlocked && item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, I18n.t("certs.admin.actions.issueTls"), CERT_TIP.issueTls, () => this.leafModal(item)));
     if (unlocked && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, I18n.t("certs.admin.actions.issueSsh"), CERT_TIP.issueSsh, () => this.sshCertModal(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.EXPORT, I18n.t("certs.admin.actions.exportArtifacts"), CERT_TIP.export, () => void this.exportModal(item)));
@@ -744,6 +757,41 @@ export class CertsAdminView {
       fabrication pour toute l'app, donc un seul style et des règles d'a11y impossibles à oublier. */
   private iconAction(icon: string, ariaLabel: string, tipKey: string, onClick: () => void, danger = false): HTMLButtonElement {
     return IconButton.build({ icon, label: ariaLabel, tipKey, danger, onClick });
+  }
+
+  /** Modale d'INFO (lecture seule) : métadonnées d'un certificat/clé pour consultation + copie (sujet, émetteur
+      EN CLAIR, numéro de série, empreinte, émission/échéance, algo, SAN, dates). N'expose AUCUN secret
+      (`key_enc` jamais chargé — l'item de listing suffit). Disponible même coffre VERROUILLÉ (rien à déchiffrer). */
+  private infoModal(item: CertificateListItem): void {
+    const root = document.createElement("div");
+    const grid = document.createElement("div");
+    grid.style.cssText = "display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;align-items:baseline";
+    const add = (label: string, valueHtml: string): void => {
+      const dt = document.createElement("div"); dt.style.cssText = "color:var(--fg-dim);font-weight:600;white-space:nowrap"; dt.textContent = label;
+      const dd = document.createElement("div"); dd.style.wordBreak = "break-word"; dd.innerHTML = valueHtml;
+      grid.append(dt, dd);
+    };
+    const mono = (s: string): string => `<span style="font-family:var(--mono);font-size:12px;word-break:break-all">${Html.escape(s)}</span>`;
+    const issuerName = (item.parent_id && item.parent_id === this.rootScope?.id) ? this.rootScope!.label
+      : (item.parent_id ? CertsFormat.issuerLabel(item.parent_id, this.certItems) : "—");
+    const sans = Array.isArray(item.sans) ? item.sans : [];
+
+    add(I18n.t("lists.col.type"), this.pill(CertsFormat.kindLabel(item.kind), "neutral") + (item.revoked_at ? " " + this.pill(I18n.t("certs.admin.listing.revoked"), "err") : ""));
+    add(I18n.t("certs.admin.listing.colLabel"), Html.escape(item.label || "—"));
+    add(I18n.t("certs.admin.listing.colSubject"), item.subject ? mono(item.subject) : "—");
+    add(I18n.t("certs.admin.listing.colIssuer"), Html.escape(issuerName));
+    add(I18n.t("certs.admin.info.serial"), item.serial ? mono(item.serial) : "—");
+    add(I18n.t("certs.admin.info.fingerprint"), item.fingerprint ? mono(item.fingerprint) : "—");
+    add(I18n.t("certs.admin.info.algo"), Html.escape(item.key_algo || "—"));
+    add(I18n.t("certs.admin.listing.colIssued"), item.not_before ? Html.escape(Format.dateTime(item.not_before)) : "—");
+    add(I18n.t("certs.admin.listing.colExpiry"), this.expiryCell(item));
+    add(I18n.t("certs.admin.info.sans"), sans.length ? sans.map((s) => this.pill(s.san_type + " · " + s.value, "neutral")).join(" ") : "—");
+    add(I18n.t("certs.admin.info.keyOwned"), item.has_key ? I18n.t("certs.admin.info.yes") : I18n.t("certs.admin.info.no"));
+    if (item.revoked_at) add(I18n.t("certs.admin.listing.revoked"), Html.escape(Format.dateTime(item.revoked_at)));
+    add(I18n.t("certs.admin.info.created"), Html.escape(Format.dateTime(item.created_date)));
+    add(I18n.t("certs.admin.info.updated"), Html.escape(Format.dateTime(item.updated_date)));
+    root.appendChild(grid);
+    this.host.openModal({ title: I18n.t("certs.admin.info.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true });
   }
 
   /* --------------------------------------------------------------------------
@@ -1461,11 +1509,43 @@ export class CertsAdminView {
     };
     const locked = !this.session.unlocked;
 
+    // Artefact TEXTE (PEM / ligne OpenSSH) : ligne « libellé + Télécharger (⬇) + Afficher (👁) ». L'AFFICHAGE
+    // rend le contenu EN CLAIR à l'écran pour copier-coller (besoin courant). Opération SENSIBLE : une clé privée
+    // (`sensitive`) exige une confirmation à l'affichage ; une clé privée de ROOT CA exige une confirmation
+    // TEXTUELLE (re-saisie d'une phrase) à l'affichage ET au téléchargement — cf. confirmRevealPrivateKey.
+    const addTextArtifact = (label: string, produce: () => Promise<ExportArtifact>, opts: { sensitive?: boolean } = {}): void => {
+      const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:8px";
+      const name = document.createElement("span"); name.textContent = label; name.style.minWidth = "210px";
+      row.appendChild(name);
+      if (opts.sensitive && locked) {   // clé privée + coffre VERROUILLÉ → ligne inerte (pas de déchiffrement possible)
+        hasLocked = true;
+        const tag = document.createElement("span"); tag.className = "lock-tag";
+        tag.textContent = I18n.t("certs.admin.export.lockedTag"); tag.title = I18n.t("certs.admin.export.lockedHint");
+        row.appendChild(tag); list.appendChild(row); return;
+      }
+      row.appendChild(IconButton.build({ icon: Icons.EXPORT, label: I18n.t("certs.admin.export.download"), onClick: async () => {
+        this.session.touch();
+        try {
+          if (opts.sensitive && item.kind === "root-ca" && !(await this.confirmRevealPrivateKey(item))) return;   // clé racine : garde textuelle même au téléchargement
+          this.download(await produce()); this.host.closeModal?.();
+        } catch (e) { Notify.toast(CertsAdminView.errText(e), "err"); }
+      } }));
+      row.appendChild(IconButton.build({ icon: Icons.EYE, label: I18n.t("certs.admin.export.display"), onClick: async () => {
+        this.session.touch();
+        try {
+          if (opts.sensitive && !(await this.confirmRevealPrivateKey(item))) return;   // toute clé privée : confirmation (racine → textuelle)
+          this.displayArtifact(label, await produce());
+        } catch (e) { Notify.toast(CertsAdminView.errText(e), "err"); }
+      } }));
+      list.appendChild(row);
+    };
+
     // Export UNITAIRE « Tout (ZIP) » (L4) : le BUNDLE complet du certificat en une archive (ex. feuille TLS =
     // cert + fullchain + clé en un geste). Clé privée incluse SI session déverrouillée ET clé détenue, sinon
     // artefacts publics seuls — le libellé du bouton l'indique.
     const withKey = this.session.unlocked && item.has_key;
     addAction(I18n.t("certs.admin.export.allZip") + (withKey ? I18n.t("certs.admin.export.allZipWithKey") : I18n.t("certs.admin.export.allZipPublic")), async () => {
+      if (item.kind === "root-ca" && withKey && !(await this.confirmRevealPrivateKey(item))) return true;   // le ZIP inclut la clé racine → garde textuelle (true = garde la modale ouverte)
       const keyPem = withKey ? await this.decryptKey(item.id) : null;
       const bundleRec: CertBundleRecord = { id: item.id, label: item.label, parent_id: item.parent_id, public_pem: item.public_pem, revoked_at: item.revoked_at, kind: item.kind, subject: item.subject };
       const artifacts = await CertZip.bundleFor(bundleRec, all, keyPem);
@@ -1474,25 +1554,27 @@ export class CertsAdminView {
     });
 
     if (item.kind === "root-ca" || item.kind === "leaf-tls") {
-      addAction(I18n.t("certs.admin.export.pubPem"), async () => this.download(CertExports.pemCertificate(rec)));
-      addAction(I18n.t("certs.admin.export.fullchain"), async () => this.download(CertExports.pemFullchain(rec, all)));
-      if (item.kind === "leaf-tls") addAction(I18n.t("certs.admin.export.caChain"), async () => this.download(CertExports.pemCaChain(rec, all)));
+      addTextArtifact(I18n.t("certs.admin.export.pubPem"), async () => CertExports.pemCertificate(rec));
+      addTextArtifact(I18n.t("certs.admin.export.fullchain"), async () => CertExports.pemFullchain(rec, all));
+      if (item.kind === "leaf-tls") addTextArtifact(I18n.t("certs.admin.export.caChain"), async () => CertExports.pemCaChain(rec, all));
       if (item.has_key) {
-        addAction(I18n.t("certs.admin.export.keyPem"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))), locked);
+        addTextArtifact(I18n.t("certs.admin.export.keyPem"), async () => CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id)), { sensitive: true });
         addAction(I18n.t("certs.admin.export.pkcs12"), async () => { this.pkcs12Flow(item, rec, all); return true; }, locked);
       }
     } else if (item.kind === "ssh-ca" || item.kind === "ssh-keypair") {
       if (item.has_key) {
+        // Clé OpenSSH (paire privée + .pub) = PLUSIEURS fichiers, dont un binaire → téléchargement seul.
+        // La MÊME clé privée est offerte en PKCS#8 PEM juste après (avec affichage copier-coller).
         addAction(I18n.t("certs.admin.export.opensshKey"), async () => {
           const seed = await this.seedFromPkcs8Pem(await this.decryptKey(item.id));
           const publicKey = CertsAdminView.ed25519PubFromLine(item.public_pem || "");
           for (const art of CertExports.opensshArtifacts(rec, { kind: item.kind as "ssh-ca" | "ssh-keypair", seed, publicKey, comment: item.subject })) this.download(art);
         }, locked);
-        addAction(I18n.t("certs.admin.export.keyPem"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))), locked);
+        addTextArtifact(I18n.t("certs.admin.export.keyPem"), async () => CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id)), { sensitive: true });
       }
     } else if (item.kind === "ssh-cert") {
-      addAction(I18n.t("certs.admin.export.sshCert"), async () => { for (const art of CertExports.opensshArtifacts(rec, { kind: "ssh-cert", certLine: item.public_pem || "" })) this.download(art); });
-      if (item.has_key) addAction(I18n.t("certs.admin.export.subjectKey"), async () => this.download(CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id))), locked);
+      addTextArtifact(I18n.t("certs.admin.export.sshCert"), async () => CertExports.opensshArtifacts(rec, { kind: "ssh-cert", certLine: item.public_pem || "" })[0]);
+      if (item.has_key) addTextArtifact(I18n.t("certs.admin.export.subjectKey"), async () => CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id)), { sensitive: true });
     }
 
     if (!list.children.length) { const n = document.createElement("div"); n.className = "form-hint"; n.textContent = I18n.t("certs.admin.export.empty"); root.appendChild(n); }
@@ -1722,6 +1804,57 @@ export class CertsAdminView {
   /** Déclenche le téléchargement d'un artefact (texte ou binaire indifféremment). */
   private download(artifact: ExportArtifact): void {
     Download.data(artifact.filename, artifact.content, artifact.mime);
+  }
+
+  /** Affiche le contenu d'un artefact TEXTE EN CLAIR (zone en lecture seule + « Copier ») pour copier-coller.
+      Un artefact BINAIRE (PKCS#12) n'est pas affichable → toast. Remplace la modale courante (overlay UNIQUE de l'app). */
+  private displayArtifact(title: string, artifact: ExportArtifact): void {
+    if (typeof artifact.content !== "string") { Notify.toast(I18n.t("certs.admin.export.notDisplayable"), "warn"); return; }
+    const content = artifact.content;
+    const root = document.createElement("div");
+    const bar = document.createElement("div"); bar.style.cssText = "display:flex;align-items:center;gap:10px;margin-bottom:8px";
+    const name = document.createElement("span"); name.style.cssText = "font-family:var(--mono);font-size:12px;color:var(--fg-dim)"; name.textContent = artifact.filename;
+    const copy = document.createElement("button"); copy.type = "button"; copy.className = "btn btn-ghost btn-sm"; copy.textContent = I18n.t("certs.admin.export.copy");
+    copy.onclick = () => { void Clipboard.copy(content); Notify.toast(I18n.t("certs.admin.export.copied")); };
+    bar.append(name, copy);
+    const ta = document.createElement("textarea"); ta.readOnly = true; ta.value = content;
+    ta.style.cssText = "width:100%;min-height:300px;font-family:var(--mono);font-size:12px;white-space:pre;overflow:auto;resize:vertical";
+    ta.onclick = () => ta.select();
+    root.append(bar, ta);
+    this.host.openModal({ title: I18n.t("certs.admin.export.displayTitle"), subtitle: Html.escape(title), body: root, hideFooter: true, wide: true });
+  }
+
+  /** Confirmation avant de RÉVÉLER une clé privée (afficher en clair OU télécharger). Une clé de CA RACINE
+      exige une confirmation TEXTUELLE (re-saisie d'une phrase, comme la suppression — collage bloqué) : sa
+      compromission ruine TOUTE la PKI. Toute autre clé privée : confirmation simple (l'opération met un secret
+      à l'écran / au disque). Renvoie true si l'utilisateur confirme. */
+  private async confirmRevealPrivateKey(item: CertificateListItem): Promise<boolean> {
+    if (item.kind !== "root-ca") {
+      return Dialog.confirm({ title: I18n.t("certs.admin.reveal.title"), message: I18n.t("certs.admin.reveal.message", { label: item.label }), confirmLabel: I18n.t("certs.admin.reveal.confirm"), danger: true });
+    }
+    const expected = I18n.t("certs.guard.revealRoot");
+    const res = await Dialog.custom({
+      title: I18n.t("certs.admin.reveal.rootTitle"), variant: "danger", danger: true,
+      confirmLabel: I18n.t("certs.admin.reveal.confirm"), cancelLabel: I18n.t("ui.action.cancel"),
+      build: (root: HTMLElement) => {
+        const msg = document.createElement("div"); msg.className = "form-hint"; msg.style.marginBottom = "10px";
+        msg.textContent = I18n.t("certs.admin.reveal.rootMessage", { label: item.label });
+        root.appendChild(msg);
+        const warn = document.createElement("div"); warn.style.cssText = "margin-bottom:10px;color:var(--err);font-weight:600";
+        warn.textContent = I18n.t("certs.admin.reveal.rootWarn");
+        root.appendChild(warn);
+        const field = document.createElement("div"); field.className = "form-field"; field.style.margin = "0";
+        const lab = document.createElement("label"); lab.textContent = I18n.t("certs.admin.confirm.phraseLabel");
+        const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.margin = "0 0 6px"; hint.textContent = expected;
+        const input = document.createElement("input"); input.type = "text"; input.autocomplete = "off"; input.spellcheck = false;
+        input.addEventListener("paste", (e) => e.preventDefault());   // vraie recopie manuelle (comme confirmDelete)
+        field.append(lab, hint, input);
+        root.appendChild(field);
+        setTimeout(() => input.focus(), 30);
+        return { validate: () => input.value.trim() === expected ? true : I18n.t("certs.admin.confirm.phraseMismatch") };
+      },
+    });
+    return res !== null && res !== false;
   }
 
   /* --------------------------------------------------------------------------

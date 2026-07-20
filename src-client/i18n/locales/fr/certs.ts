@@ -27,6 +27,7 @@ export const certs = {
   guard: {
     phrase: "Oui je supprime",
     phraseNamed: "Oui je supprime {{label}}",
+    revealRoot: "Oui je révèle la clé racine",
   },
   tips: {
     issueTls: {
@@ -182,6 +183,7 @@ export const certs = {
       colDerived: "Dérivés",
       colAlert: "Sous seuil",
       colIssuer: "Émetteur",
+      colIssued: "Émission",
       keyOwned: "Clé privée détenue (chiffrée)",
       empty: "Aucun élément.",
       emptyUnlocked: "Aucun élément. Créez une autorité ou ajustez les filtres.",
@@ -194,6 +196,7 @@ export const certs = {
       issueSsh: "Émettre SSH",
       exportArtifacts: "Exporter les artefacts",
       revoke: "Révoquer",
+      info: "Détail du certificat",
     },
     select: {
       headerAll: "Sélectionner toute la page",
@@ -358,8 +361,34 @@ export const certs = {
       opensshKey: "Clé OpenSSH (privée + .pub)",
       sshCert: "Certificat SSH (-cert.pub)",
       subjectKey: "Clé privée du sujet (.key.pem)",
+      download: "Télécharger",
+      display: "Afficher (copier-coller)",
+      displayTitle: "Contenu à copier",
+      copy: "Copier",
+      copied: "Copié",
+      notDisplayable: "Format binaire — téléchargement uniquement",
       empty: "Aucun export disponible pour cet objet.",
       title: "Exporter",
+    },
+    info: {
+      title: "Détail du certificat",
+      serial: "Numéro de série",
+      fingerprint: "Empreinte SHA-256",
+      algo: "Algorithme de clé",
+      sans: "Noms alternatifs (SAN)",
+      keyOwned: "Clé privée détenue",
+      yes: "Oui",
+      no: "Non",
+      created: "Créé le",
+      updated: "Modifié le",
+    },
+    reveal: {
+      title: "Révéler la clé privée ?",
+      message: "La clé privée de « {{label}} » va s'afficher en clair. Assurez-vous que personne ne regarde l'écran.",
+      confirm: "Révéler",
+      rootTitle: "Révéler la clé privée d'une CA RACINE ?",
+      rootMessage: "« {{label}} » est une autorité RACINE : sa clé privée signe TOUTE la PKI. La révéler (affichage ou export) est une opération critique.",
+      rootWarn: "Une fuite rend suspects TOUS les certificats émis sous cette racine.",
     },
     pkcs12: {
       info: "Le fichier PKCS#12 regroupe le certificat, sa chaîne et la clé privée, protégés par une phrase secrète. Cette phrase n'est PAS stockée — notez-la pour l'import.",

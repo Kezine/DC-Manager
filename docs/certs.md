@@ -612,14 +612,16 @@ bookmarkable inchangé. Toujours enregistrée (`certsClient` null hors mode API 
   repris des `ListView` : `.pagination`, `.list-toolbar`, `.sortable`/`.sort-ind`) :
   - **Vue A « Autorités & clés »** (par défaut, `GET /certs/roots`) : racines (parent_id
     nul) + agrégats **Dérivés** (`children_total`) et **Sous seuil** (`children_alert`,
-    badge warn/err selon `next_expiry`). Par ligne : **Émettre TLS/SSH**, **Exporter…**,
-    **Révoquer**, **Supprimer**, **Lister les certificats** (si dérivés > 0) → vue B, et —
-    sur une AUTORITÉ (root-ca / ssh-ca), même verrouillé — **Déployer la confiance…** (aide
-    au déploiement, cf. « Déployer la confiance » plus bas).
+    badge warn/err selon `next_expiry`). Par ligne : **Détail** (info lecture seule, cf.
+    plus bas), **Émettre TLS/SSH**, **Exporter…**, **Révoquer**, **Supprimer**, **Lister les
+    certificats** (si dérivés > 0) → vue B, et — sur une AUTORITÉ (root-ca / ssh-ca), même
+    verrouillé — **Déployer la confiance…** (aide au déploiement, cf. « Déployer la confiance » plus bas).
   - **Vue B « Certificats de \<racine\> »** (`GET /certs?root=…`) : fil d'Ariane
-    « ← Autorités » + sous-arbre PLAT de la racine, colonne **Émetteur** (libellé du
-    parent résolu depuis la page, id court sinon) à la place de l'indentation. Mêmes
-    actions par ligne.
+    « ← Autorités » + sous-arbre PLAT de la racine à la place de l'indentation. Colonnes :
+    **Émetteur** (LIBELLÉ de l'autorité — la racine scopée `rootScope` n'étant PAS dans la
+    page (sous-arbre strict), on affiche son nom plutôt que l'id hexa ; repli page/id court
+    pour d'éventuels intermédiaires, non produits en v1), **Émission** (`not_before`, triable
+    serveur) et **Échéance** (`not_after`, colorée). Mêmes actions par ligne.
   - **Filtres** : « Type » (MultiSelect, kinds pertinents à la vue) + « État » (sélection
     **UNIQUE** — le serveur n'accepte qu'un `status`) + « Réinit. filtres ». **Tri** par
     clic d'en-tête. État de listing (page/tris/filtres/vue+racine) en mémoire d'instance
@@ -643,12 +645,22 @@ bookmarkable inchangé. Toujours enregistrée (`certsClient` null hors mode API 
   TLS, CA/paire SSH, certificat SSH, PKCS#12) s'ouvre dans LA modale de l'app. La clé
   privée est générée dans WebCrypto, chiffrée par la clé maître, et seuls le public +
   `key_enc` partent au serveur.
-- **Exports** : menu par ligne, un bouton par artefact ; les clés privées sont
-  déchiffrées LOCALEMENT (session déverrouillée) et ne transitent jamais par le serveur.
-  La passphrase d'un PKCS#12 est demandée en modale et JAMAIS stockée. L'export unitaire
-  propose en plus **« Tout (ZIP) »** : le BUNDLE du certificat selon son kind (ex. feuille
-  TLS = cert + fullchain + clé en un geste ; clé incluse si déverrouillé ET clé détenue,
-  sinon artefacts publics seuls — le libellé l'indique).
+- **Détail (info)** : action par ligne (icône ⓘ, disponible MÊME verrouillé — lecture seule,
+  aucun secret) → modale récapitulant les métadonnées de l'objet (sujet, **émetteur en clair**,
+  numéro de série, empreinte SHA-256, émission/échéance, algo, SAN, dates). Alimentée par l'item
+  de listing (jamais `key_enc`).
+- **Exports** : menu par ligne. Chaque artefact TEXTE (PEM, ligne OpenSSH) offre **⬇ Télécharger**
+  ET **👁 Afficher** — une zone en LECTURE SEULE + « Copier », pour le copier-coller courant sans
+  passer par un fichier. PKCS#12 (binaire) et clé OpenSSH (multi-fichiers) restent en téléchargement
+  seul. Les clés privées sont déchiffrées LOCALEMENT (session déverrouillée) et ne transitent jamais
+  par le serveur ; la passphrase d'un PKCS#12 est demandée en modale et JAMAIS stockée.
+  - **RÉVÉLER une clé privée** — l'afficher en clair OU la télécharger/zipper — passe par une
+    CONFIRMATION : simple pour une clé ordinaire, **TEXTUELLE** (re-saisie de la phrase
+    « Oui je révèle la clé racine », collage bloqué — même cérémonie que la suppression) pour la clé
+    privée d'une **CA RACINE**, dont la fuite compromet TOUTE la PKI (`confirmRevealPrivateKey`).
+  - L'export unitaire propose en plus **« Tout (ZIP) »** : le BUNDLE du certificat selon son kind
+    (ex. feuille TLS = cert + fullchain + clé en un geste ; clé incluse si déverrouillé ET clé
+    détenue, sinon artefacts publics seuls — le libellé l'indique ; clé RACINE ⇒ garde textuelle).
 - **Sélection multiple & actions groupées** (les DEUX listings, L4) : case par ligne + case
   d'en-tête « toute la page » (état INDÉTERMINÉ si sélection partielle). La sélection
   (instantanés `{kind,label,has_key,revoked_at}` en mémoire d'instance) SURVIT aux changements
