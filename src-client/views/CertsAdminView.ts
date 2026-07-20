@@ -1284,6 +1284,8 @@ export class CertsAdminView {
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rootCa.cnField"), cn, I18n.t("certs.admin.rootCa.cnHint")));
     const org = FormControls.text("", I18n.t("certs.admin.rootCa.orgPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rootCa.orgField"), org, I18n.t("certs.admin.rootCa.orgHint")));
+    const ou = FormControls.text("", I18n.t("certs.admin.rootCa.ouPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rootCa.ouField"), ou, I18n.t("certs.admin.rootCa.ouHint")));
     const algo = FormControls.select(CertsAdminView.algoX509Opts(), "ec-p256");
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.algoField"), algo, I18n.t("certs.admin.rootCa.algoHint")));
     const days = FormControls.number(3650, { min: 1, step: 1 });
@@ -1301,10 +1303,11 @@ export class CertsAdminView {
         try {
           const keyAlgo = algo.value as X509KeyAlgo;
           const organization = org.value.trim() || undefined;
-          const gen = await X509Factory.createRootCa({ commonName, organization, keyAlgo, days: Number(days.value) });
+          const organizationalUnit = ou.value.trim() || undefined;
+          const gen = await X509Factory.createRootCa({ commonName, organization, organizationalUnit, keyAlgo, days: Number(days.value) });
           const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
           await this.client!.save(CertsAdminView.newId(), {
-            kind: "root-ca", parent_id: null, label: commonName, subject: CertsAdminView.subjectDn(commonName, organization),
+            kind: "root-ca", parent_id: null, label: commonName, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans: [],
           });
@@ -1322,6 +1325,12 @@ export class CertsAdminView {
     const root = document.createElement("div");
     const cn = FormControls.text("", I18n.t("certs.admin.leaf.cnPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.cnField"), cn, I18n.t("certs.admin.leaf.cnHint")));
+    // O / OU du sujet de la FEUILLE — pré-remplis depuis le sujet de la CA (l'organisation est le plus souvent
+    // partagée), éditables. Sans eux, le certificat émis n'avait que le CN (correctif : O + OU manquaient).
+    const org = FormControls.text(CertsAdminView.parseDnField(ca.subject, "O"), I18n.t("certs.admin.leaf.orgPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.orgField"), org, I18n.t("certs.admin.leaf.orgHint")));
+    const ou = FormControls.text(CertsAdminView.parseDnField(ca.subject, "OU"), I18n.t("certs.admin.leaf.ouPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.ouField"), ou, I18n.t("certs.admin.leaf.ouHint")));
     const sanEditor = this.buildSanEditor();
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.sanField"), sanEditor.element, I18n.t("certs.admin.leaf.sanHint")));
     const usage = FormControls.select(CertsAdminView.usageOpts(), "server");
@@ -1347,13 +1356,15 @@ export class CertsAdminView {
           if (!detail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
           const caKeyPem = await PkiCrypto.decryptSecret(this.session.key, detail.key_enc);
           const keyAlgo = algo.value as X509KeyAlgo;
+          const organization = org.value.trim() || undefined;
+          const organizationalUnit = ou.value.trim() || undefined;
           const gen = await X509Factory.issueLeaf({
             caCertPem: detail.public_pem || "", caPrivateKeyPkcs8Pem: caKeyPem,
-            commonName, keyAlgo, days: Number(days.value), sans: sans as X509San[], usage: usage.value as LeafUsage,
+            commonName, organization, organizationalUnit, keyAlgo, days: Number(days.value), sans: sans as X509San[], usage: usage.value as LeafUsage,
           });
           const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
           await this.client!.save(CertsAdminView.newId(), {
-            kind: "leaf-tls", parent_id: ca.id, label: commonName, subject: CertsAdminView.subjectDn(commonName),
+            kind: "leaf-tls", parent_id: ca.id, label: commonName, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans,
           });
@@ -2058,11 +2069,25 @@ export class CertsAdminView {
     return "" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
   }
 
-  /** DN X.509 lisible depuis CN (+ O éventuel) — sert de `subject` stocké/affiché. */
-  private static subjectDn(commonName: string, organization?: string): string {
+  /** DN X.509 lisible depuis CN (+ OU puis O éventuels, ordre X.500 CN < OU < O) — sert de `subject`
+      stocké/affiché. Doit rester COHÉRENT avec X509Factory.buildDistinguishedName (même ordre de RDN). */
+  private static subjectDn(commonName: string, organization?: string, organizationalUnit?: string): string {
     const parts = ["CN=" + commonName];
+    if (organizationalUnit && organizationalUnit.trim() !== "") parts.push("OU=" + organizationalUnit.trim());
     if (organization && organization.trim() !== "") parts.push("O=" + organization.trim());
     return parts.join(", ");
+  }
+
+  /** Valeur d'un RDN (`O`, `OU`…) lue dans un DN stocké (« CN=…, OU=…, O=… ») — pour pré-remplir le sujet d'une
+      feuille depuis celui de sa CA (l'organisation est le plus souvent partagée). "" si absent. Casse de clé
+      tolérée ; le nom de clé est comparé EXACTEMENT (« O » ne matche pas « OU »). */
+  private static parseDnField(dn: string, key: string): string {
+    if (typeof dn !== "string") return "";
+    for (const rdn of dn.split(",")) {
+      const eq = rdn.indexOf("=");
+      if (eq >= 0 && rdn.slice(0, eq).trim().toUpperCase() === key.toUpperCase()) return rdn.slice(eq + 1).trim();
+    }
+    return "";
   }
 
   /** Vue MINIMALE d'un certificat pour les exports (sous-ensemble du DTO, cf. CertExportRecord). */

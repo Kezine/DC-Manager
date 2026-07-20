@@ -317,7 +317,7 @@ module.exports = async () => {
     const spanMs = (c) => Date.parse(c.notAfter) - Date.parse(c.notBefore);
 
     /* -------- Racine EC P-256 : forme, auto-signature, extensions -------- */
-    const ca = await X509Factory.createRootCa({ commonName: "CA Racine exemple", organization: "Exemple SA", keyAlgo: "ec-p256", days: 365 });
+    const ca = await X509Factory.createRootCa({ commonName: "CA Racine exemple", organization: "Exemple SA", organizationalUnit: "Infrastructure", keyAlgo: "ec-p256", days: 365 });
     ck(/-----BEGIN CERTIFICATE-----/.test(ca.certPem) && /-----END CERTIFICATE-----/.test(ca.certPem), "racine : certificat PEM bien formé");
     ck(/-----BEGIN PRIVATE KEY-----/.test(ca.privateKeyPkcs8Pem), "racine : clé privée PKCS#8 PEM exportée");
     ck(FP_RE.test(ca.fingerprintSha256), "racine : empreinte SHA-256 « AA:BB:… » majuscule");
@@ -326,6 +326,7 @@ module.exports = async () => {
     ck(Math.abs(spanMs(ca) - 365 * 86400000) <= 10 * 60000, "racine : validité ≈ days (notAfter − notBefore)");
 
     const caCert = new x509.X509Certificate(ca.certPem);
+    ck(/CN=CA Racine exemple/.test(caCert.subject) && /O=Exemple SA/.test(caCert.subject) && /OU=Infrastructure/.test(caCert.subject), "racine : sujet porte CN + O + OU (correctif O/OU dans le sujet)");
     ck.eq(await caCert.verify({ publicKey: caCert.publicKey, signatureOnly: true }), true, "racine : auto-signature vérifiée (sa propre clé publique)");
     const caBasic = caCert.getExtension(x509.BasicConstraintsExtension);
     ck(!!caBasic && caBasic.ca === true, "racine : BasicConstraints CA=true");
@@ -337,11 +338,13 @@ module.exports = async () => {
     /* -------- Feuille EC signée par la CA : chaîne, extensions, SAN -------- */
     const leaf = await X509Factory.issueLeaf({
       caCertPem: ca.certPem, caPrivateKeyPkcs8Pem: ca.privateKeyPkcs8Pem,
-      commonName: "hote.exemple.test", keyAlgo: "ec-p256", days: 90,
+      commonName: "hote.exemple.test", organization: "Exemple SA", organizationalUnit: "Services", keyAlgo: "ec-p256", days: 90,
       sans: [{ san_type: "dns", value: "hote.exemple.test" }, { san_type: "ip", value: "10.0.0.5" }],
       usage: "server",
     });
     const leafCert = new x509.X509Certificate(leaf.certPem);
+    ck(/O=Exemple SA/.test(leafCert.subject) && /OU=Services/.test(leafCert.subject), "feuille : sujet porte O + OU (correctif : la feuille n'avait que le CN)");
+    ck(/O=Exemple SA/.test(leafCert.issuer) && /OU=Infrastructure/.test(leafCert.issuer), "feuille : émetteur = sujet de la CA, avec O + OU (correctif OU dans l'émetteur)");
     ck.eq(await leafCert.verify({ publicKey: caCert.publicKey, signatureOnly: true }), true, "feuille : signée par la CA (vérifiée avec la clé publique CA)");
     const leafBasic = leafCert.getExtension(x509.BasicConstraintsExtension);
     ck(!!leafBasic && leafBasic.ca === false, "feuille : BasicConstraints CA=false");

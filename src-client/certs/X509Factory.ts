@@ -59,6 +59,7 @@ export class X509Factory {
   static async createRootCa(opts: {
     commonName: string;
     organization?: string;
+    organizationalUnit?: string;
     keyAlgo: X509KeyAlgo;
     days: number;
   }): Promise<GeneratedCert> {
@@ -76,7 +77,7 @@ export class X509Factory {
 
     const cert = await x509.X509CertificateGenerator.createSelfSigned({
       serialNumber: X509Factory.randomSerialHex(),
-      name: X509Factory.buildDistinguishedName(opts.commonName, opts.organization),
+      name: X509Factory.buildDistinguishedName(opts.commonName, opts.organization, opts.organizationalUnit),
       notBefore, notAfter,
       signingAlgorithm: algos.sign,
       keys,
@@ -102,6 +103,8 @@ export class X509Factory {
     caCertPem: string;
     caPrivateKeyPkcs8Pem: string;
     commonName: string;
+    organization?: string;
+    organizationalUnit?: string;
     keyAlgo: X509KeyAlgo;
     days: number;
     sans: X509San[];
@@ -123,7 +126,7 @@ export class X509Factory {
 
     const cert = await x509.X509CertificateGenerator.create({
       serialNumber: X509Factory.randomSerialHex(),
-      subject: X509Factory.buildDistinguishedName(opts.commonName),
+      subject: X509Factory.buildDistinguishedName(opts.commonName, opts.organization, opts.organizationalUnit),
       // Émetteur = sujet de la CA : c'est ce qui LIE la feuille à sa racine.
       issuer: caCert.subject,
       notBefore, notAfter,
@@ -210,11 +213,12 @@ export class X509Factory {
     }
   }
 
-  /** Construit le DN (JsonName @peculiar : CN obligatoire, O optionnel). Le
-      JsonName gère l'échappement des virgules/caractères spéciaux à notre place. */
-  private static buildDistinguishedName(commonName: string, organization?: string): x509.JsonName {
+  /** Construit le DN (JsonName @peculiar : CN obligatoire ; OU puis O optionnels — ordre X.500 du plus
+      SPÉCIFIQUE au plus général, CN < OU < O). Le JsonName gère l'échappement des virgules/caractères spéciaux. */
+  private static buildDistinguishedName(commonName: string, organization?: string, organizationalUnit?: string): x509.JsonName {
     const name: x509.JsonName = [{ CN: [commonName] }];
-    if (organization && organization.trim() !== "") name.push({ O: [organization] });
+    if (organizationalUnit && organizationalUnit.trim() !== "") name.push({ OU: [organizationalUnit.trim()] });
+    if (organization && organization.trim() !== "") name.push({ O: [organization.trim()] });
     return name;
   }
 
