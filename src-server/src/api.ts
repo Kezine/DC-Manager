@@ -249,6 +249,11 @@ export class Api {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
+    // Reverse proxy (nginx) : DÉSACTIVE le buffering de réponse POUR CE FLUX. Sans ce header, nginx (buffering
+    // activé PAR DÉFAUT) met le flux SSE en tampon → les événements n'atteignent jamais le navigateur et l'UI
+    // ne se met pas à jour sur un changement POUSSÉ par le serveur (synchro VM, écriture d'un autre client) :
+    // il faut recharger la page. Le header est ignoré sans proxy (connexion directe) — cf. docs/reverse-proxy.md.
+    res.setHeader("X-Accel-Buffering", "no");
     (res as any).flushHeaders?.();
     res.write("retry: 5000\n\n");
     this.live.subscribe(req.params.docId, res);
