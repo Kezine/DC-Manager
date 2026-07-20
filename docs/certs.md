@@ -468,6 +468,10 @@ Dans ce qui suit, `<FICHIER>` = le certificat public de la racine, renommé avec
 
 - Invite de commandes (admin) : `certutil -addstore -f Root <FICHIER>`
 - PowerShell (admin) : `Import-Certificate -FilePath <FICHIER> -CertStoreLocation Cert:\LocalMachine\Root`
+
+> **Extension `.pem` vs `.crt`** : `certutil` accepte le `.pem` exporté **tel quel** (inutile de
+> renommer). Seuls `Import-Certificate` (PowerShell) et l'installation par **double-clic** exigent
+> l'extension `.crt` — renommez alors le `.pem` en `.crt` (contenu identique).
 - Interface graphique : double-cliquer le fichier → « Installer un certificat » →
   « Ordinateur local » → placer **explicitement** dans le magasin « Autorités de
   certification racines de confiance » (ne pas laisser la sélection automatique).

@@ -99,7 +99,7 @@ export const certs = {
   },
   guide: {
     rootCa: {
-      intro1: "Seul le certificat PUBLIC de l'autorité se déploie : utilisez l'export « Certificat public » (cert.pem), renommé en « {{file}} » (extension .crt). La clé privée de la CA ne quitte JAMAIS la PKI — ne l'installez sur aucun client.",
+      intro1: "Seul le certificat PUBLIC de l'autorité se déploie : utilisez l'export « Certificat public » (cert.pem), à renommer « {{file}} » (extension .crt) LÀ OÙ c'est exigé — contenu identique. La clé privée de la CA ne quitte JAMAIS la PKI — ne l'installez sur aucun client.",
       intro2: "Un serveur TLS présente sa FEUILLE (et, s'il existe des intermédiaires, la chaîne « fullchain » SANS la racine). La racine, elle, vit dans le magasin de confiance des CLIENTS : « déployer la confiance », c'est installer ce certificat racine sur chaque machine, navigateur ou service qui doit valider les certificats qu'elle signe.",
       linuxIntro: "Le fichier doit porter l'extension .crt (son contenu reste du PEM). Installation dans le magasin système, puis rafraîchissement du bundle.",
       linuxVerifyLabel: "Vérifier une feuille signée par la racine",
@@ -110,6 +110,7 @@ export const certs = {
       winIntro: "En tant qu'administrateur, dans le magasin de la MACHINE (« Ordinateur local » → « Autorités de certification racines de confiance »).",
       winCmdLabel: "Invite de commandes (admin)",
       winPsLabel: "PowerShell (admin)",
+      winNotePem: "Extension : `certutil` accepte le `.pem` exporté TEL QUEL (inutile de renommer). Seuls `Import-Certificate` (PowerShell) et l'installation par double-clic exigent l'extension `.crt` — dans ce cas, renommez le `.pem` en `.crt` (contenu identique).",
       winNoteGui: "Interface graphique : double-cliquer sur le fichier → « Installer un certificat » → « Ordinateur local » → placer dans le magasin « Autorités de certification racines de confiance » (choisir le magasin EXPLICITEMENT — ne pas laisser la sélection automatique).",
       winNoteGpo: "Parc en domaine : déployer par GPO (Configuration ordinateur → Stratégies → Paramètres Windows → Paramètres de sécurité → Stratégies de clé publique → Autorités de certification racines de confiance).",
       winNoteFirefox: "Firefox : même remarque que sous Linux (magasin NSS propre — « security.enterprise_roots.enabled »).",

@@ -81,6 +81,7 @@ export class CertDeployGuide {
             { label: I18n.t("certs.guide.rootCa.winPsLabel"), command: "Import-Certificate -FilePath " + f + " -CertStoreLocation Cert:\\LocalMachine\\Root" },
           ],
           notes: [
+            I18n.t("certs.guide.rootCa.winNotePem"),
             I18n.t("certs.guide.rootCa.winNoteGui"),
             I18n.t("certs.guide.rootCa.winNoteGpo"),
             I18n.t("certs.guide.rootCa.winNoteFirefox"),

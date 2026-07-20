@@ -94,7 +94,7 @@ export const certs = {
   },
   guide: {
     rootCa: {
-      intro1: "Only the authority's PUBLIC certificate is deployed: use the “Public certificate” export (cert.pem), renamed to “{{file}}” (.crt extension). The CA's private key NEVER leaves the PKI — do not install it on any client.",
+      intro1: "Only the authority's PUBLIC certificate is deployed: use the “Public certificate” export (cert.pem), to be renamed “{{file}}” (.crt extension) WHERE required — identical content. The CA's private key NEVER leaves the PKI — do not install it on any client.",
       intro2: "A TLS server presents its LEAF (and, if intermediates exist, the “fullchain” WITHOUT the root). The root itself lives in the CLIENTS' trust store: “deploying trust” means installing this root certificate on every machine, browser or service that must validate the certificates it signs.",
       linuxIntro: "The file must carry the .crt extension (its content stays PEM). Install into the system store, then refresh the bundle.",
       linuxVerifyLabel: "Verify a leaf signed by the root",
@@ -105,6 +105,7 @@ export const certs = {
       winIntro: "As an administrator, into the MACHINE store (“Local Computer” → “Trusted Root Certification Authorities”).",
       winCmdLabel: "Command prompt (admin)",
       winPsLabel: "PowerShell (admin)",
+      winNotePem: "Extension: `certutil` accepts the exported `.pem` AS IS (no rename needed). Only `Import-Certificate` (PowerShell) and double-click install require the `.crt` extension — in that case, rename the `.pem` to `.crt` (identical content).",
       winNoteGui: "Graphical interface: double-click the file → “Install Certificate” → “Local Machine” → place into the “Trusted Root Certification Authorities” store (choose the store EXPLICITLY — do not leave automatic selection).",
       winNoteGpo: "Domain estate: deploy via GPO (Computer Configuration → Policies → Windows Settings → Security Settings → Public Key Policies → Trusted Root Certification Authorities).",
       winNoteFirefox: "Firefox: same remark as on Linux (dedicated NSS store — “security.enterprise_roots.enabled”).",
