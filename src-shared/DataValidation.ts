@@ -72,8 +72,9 @@ export interface FieldSpec {
   enum?: readonly string[];
   /** Borne inférieure (type `number`). */
   min?: number;
-  /** Format attendu (chaîne) : `ipv4` (« a.b.c.d ») ou `cidr` (« a.b.c.d/n », n ∈ 0..32). */
-  format?: "ipv4" | "cidr";
+  /** Format attendu (chaîne) : `ipv4` (« a.b.c.d »), `cidr` (« a.b.c.d/n », n ∈ 0..32) ou `hostname`
+      (nom d'hôte / FQDN RFC 1123 : labels alphanumériques + tirets, insensible à la casse). */
+  format?: "ipv4" | "cidr" | "hostname";
   /** Collection cible d'une clé étrangère (exploité par l'intégrité référentielle — V2). */
   ref?: string;
 }
@@ -874,10 +875,11 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       address:      { type: "string", required: true, format: "ipv4" },
       // Nom d'hôte auquel l'IP résout (saisi dans IpamForms, affiché en liste et dans les fiches). RÉGULARISÉ
       // 2026-07-20 : le champ vivait HORS spec (traversée tolérée) alors que c'est une IDENTITÉ — base des
-      // rapprochements par hostname (VM↔hôte via VmClusterFormat, certificats↔cibles à venir). Déclaration
-      // VOLONTAIREMENT tolérante : optionnel, trim seulement — AUCUN format strict, les valeurs historiques
-      // sont libres (FQDN, nom court, voire liste informelle) et ne doivent pas devenir invalides.
-      hostname:     { type: "string", trim: true },
+      // rapprochements par hostname (VM↔hôte via VmClusterFormat, certificats↔cibles à venir). DURCI (décision
+      // utilisateur, aucune donnée en conflit) : format `hostname` STRICT (RFC 1123, nom court ou FQDN) — une
+      // valeur mal formée est désormais rejetée (400 serveur / erreur UI). Optionnel (non requis) : une IP peut
+      // n'avoir aucun nom d'hôte ; trim conservé (fiabilise l'identité pour les rapprochements).
+      hostname:     { type: "string", trim: true, format: "hostname" },
       network_id:   { type: "string", nullable: true, default: null, ref: "ipNetworks" },
       equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
       // rattachement à une VM (parité equipment_id) — FK contrôlée (V2) et détachée en cascade (Cascade.vms).
@@ -1094,7 +1096,10 @@ export class DataValidator {
         fail(field, "min", `Le champ « ${field} » doit être ≥ ${fieldSpec.min}.`);
       }
       if (fieldSpec.format && typeof value === "string" && !DataValidator.matchesFormat(value, fieldSpec.format)) {
-        fail(field, "format", `Le champ « ${field} » n'est pas ${fieldSpec.format === "cidr" ? "un CIDR IPv4 (ex. 10.0.0.0/24)" : "une adresse IPv4 (ex. 10.0.0.5)"}.`);
+        const formatLabel = fieldSpec.format === "cidr" ? "un CIDR IPv4 (ex. 10.0.0.0/24)"
+          : fieldSpec.format === "hostname" ? "un nom d'hôte valide (ex. srv1 ou srv1.dom.local)"
+          : "une adresse IPv4 (ex. 10.0.0.5)";
+        fail(field, "format", `Le champ « ${field} » n'est pas ${formatLabel}.`);
       }
       // intégrité référentielle (si `fetch`) : la (ou les) FK doivent désigner une entité existante (fetch ≠ null).
       if (fetch && fieldSpec.ref) {
@@ -1238,7 +1243,19 @@ export class DataValidator {
   }
 
   private static matchesFormat(value: string, format: NonNullable<FieldSpec["format"]>): boolean {
-    return format === "cidr" ? Ipv4.isCidr(value) : Ipv4.toInt(value) != null;
+    if (format === "cidr") return Ipv4.isCidr(value);
+    if (format === "hostname") return DataValidator.isHostname(value);
+    return Ipv4.toInt(value) != null;
+  }
+
+  /** Nom d'hôte / FQDN valide (RFC 1123, insensible à la casse) : un ou plusieurs LABELS séparés par des points ;
+      chaque label fait 1 à 63 caractères alphanumériques ou tirets, SANS tiret en tête ni en queue ; longueur
+      totale ≤ 253. Refuse espaces, underscores, `_`, accents, ponctuation libre. Accepte aussi bien un nom court
+      (« srv1 ») qu'un FQDN (« srv1.dom.local ») — les deux sont des hôtes légitimes, ce n'est pas de la souplesse. */
+  private static isHostname(value: string): boolean {
+    if (value.length === 0 || value.length > 253) return false;
+    const label = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
+    return value.split(".").every((part) => label.test(part));
   }
 
   private static refKey(collection: string, id: string): string {

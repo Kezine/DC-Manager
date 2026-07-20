@@ -22,29 +22,35 @@ module.exports = async () => {
   }
   });
 
-  await section("shared : DataValidation — ipAddresses.hostname régularisé (déclaré, tolérant)", async () => {
+  await section("shared : DataValidation — ipAddresses.hostname déclaré + format strict (RFC 1123)", async () => {
   {
-    // RÉGULARISATION 2026-07-20 : `hostname` vivait HORS spec (traversée tolérée) alors que c'est une
-    // IDENTITÉ (base des rapprochements par nom d'hôte). Déclaré { type:"string", trim:true } SANS format
-    // strict ni required : AUCUNE valeur historique (libre) ne doit devenir invalide.
+    // RÉGULARISATION 2026-07-20 puis DURCISSEMENT (décision utilisateur, aucune donnée en conflit) :
+    // `hostname` est déclaré { type:"string", trim:true, format:"hostname" } → format RFC 1123 STRICT
+    // (nom court ou FQDN, insensible à la casse). Optionnel : une IP peut n'avoir aucun nom d'hôte.
     const { DataValidator } = Validation;
     const base = { id: "ip1", address: "10.0.0.5" };
-    // Valeur normale : trimée, acceptée.
+    const errsOn = (host) => DataValidator.normalizeAndValidate("ipAddresses", { ...base, hostname: host }).errors.filter((e) => e.path === "hostname");
+    // Valides : nom court, FQDN, casse mixte, tirets internes, chiffres.
     const { record: rTrim, errors: eTrim } = DataValidator.normalizeAndValidate("ipAddresses", { ...base, hostname: "  srv1.dom.local  " });
     ck.eq(rTrim.hostname, "srv1.dom.local", "hostname : trimé à la normalisation");
-    ck.eq(eTrim.filter((e) => e.path === "hostname").length, 0, "hostname : valeur FQDN acceptée");
-    // Valeur legacy LIBRE (pas un hostname strict) : toujours acceptée — pas de format.
-    const { errors: eFree } = DataValidator.normalizeAndValidate("ipAddresses", { ...base, hostname: "vip web / interne (double A)" });
-    ck.eq(eFree.filter((e) => e.path === "hostname").length, 0, "hostname : valeur legacy libre toujours acceptée (aucun format strict)");
-    // Absent : reste absent (pas de défaut injecté → aucune churn des enregistrements existants).
+    ck.eq(eTrim.filter((e) => e.path === "hostname").length, 0, "hostname : FQDN accepté");
+    ck.eq(errsOn("srv1").length, 0, "hostname : nom court accepté");
+    ck.eq(errsOn("SRV1.DOM.local").length, 0, "hostname : casse mixte acceptée (insensible)");
+    ck.eq(errsOn("edge-rtr-02.dc1.example.com").length, 0, "hostname : tirets internes + FQDN long acceptés");
+    // Invalides (format strict) : espaces, slash, underscore, tiret en tête/queue, label vide, accents.
+    ck.eq(errsOn("vip web / interne").length, 1, "hostname : espaces/slash REJETÉS (format)");
+    ck.eq(errsOn("srv_1").length, 1, "hostname : underscore REJETÉ");
+    ck.eq(errsOn("-srv1").length, 1, "hostname : tiret en tête REJETÉ");
+    ck.eq(errsOn("srv1-").length, 1, "hostname : tiret en queue REJETÉ");
+    ck.eq(errsOn("srv1..dom").length, 1, "hostname : label vide (double point) REJETÉ");
+    ck.eq(errsOn("srvé1").length, 1, "hostname : accent REJETÉ");
+    ck.eq(errsOn("a".repeat(64)).length, 1, "hostname : label > 63 caractères REJETÉ");
+    // Optionnel : absent / null / vide → pas d'erreur (une IP peut n'avoir aucun hostname).
     const { record: rAbs, errors: eAbs } = DataValidator.normalizeAndValidate("ipAddresses", { ...base });
     ck(!("hostname" in rAbs) || rAbs.hostname === undefined, "hostname : absent reste absent (aucun défaut injecté)");
     ck.eq(eAbs.filter((e) => e.path === "hostname").length, 0, "hostname : absence acceptée (optionnel)");
-    // null / vide legacy : acceptés (isEmpty couvre null et \"\" — non requis).
-    const { errors: eNull } = DataValidator.normalizeAndValidate("ipAddresses", { ...base, hostname: null });
-    ck.eq(eNull.filter((e) => e.path === "hostname").length, 0, "hostname : null legacy accepté");
-    const { errors: eEmpty } = DataValidator.normalizeAndValidate("ipAddresses", { ...base, hostname: "" });
-    ck.eq(eEmpty.filter((e) => e.path === "hostname").length, 0, "hostname : chaîne vide acceptée");
+    ck.eq(errsOn(null).length, 0, "hostname : null accepté (optionnel)");
+    ck.eq(errsOn("").length, 0, "hostname : chaîne vide acceptée (optionnel)");
   }
   });
 

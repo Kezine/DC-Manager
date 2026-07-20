@@ -300,11 +300,14 @@ Les specs sont **partielles** : seuls les champs porteurs de règles sont décla
 
 - **La traversée sert la COMPATIBILITÉ et les champs sans règle — pas le design.** Tout champ
   d''IDENTITÉ ou porteur de sémantique métier DOIT être déclaré dans la spec de sa collection.
-- **Régularisé** : `ipAddresses.hostname` (saisi dans les formulaires IPAM, affiché en liste et
-  en fiche, base des rapprochements par nom d''hôte) est désormais déclaré
-  `{ type: "string", trim: true }` — volontairement TOLÉRANT : optionnel, pas de format strict
-  (les valeurs historiques sont libres et ne doivent pas devenir invalides), `null`/vide/absent
-  acceptés, aucun défaut injecté (pas de churn des enregistrements existants).
+- **Régularisé puis DURCI** : `ipAddresses.hostname` (saisi dans les formulaires IPAM, affiché en
+  liste et en fiche, base des rapprochements par nom d''hôte) est déclaré
+  `{ type: "string", trim: true, format: "hostname" }`. Le format `hostname` (nouveau, RFC 1123 :
+  labels alphanumériques + tirets, 1–63 car., pas de tiret en tête/queue, total ≤ 253, insensible
+  à la casse, nom court OU FQDN) est STRICT : une valeur mal formée (espaces, `_`, accents,
+  ponctuation) est rejetée (400 serveur / erreur UI). Reste **optionnel** (une IP peut n''avoir
+  aucun nom d''hôte) ; le durcissement a été décidé après confirmation qu''aucune donnée existante
+  n''était en conflit — pas de rétro-compat conservée à dessein.
 - **Passthrough INTENTIONNELS assumés** (documentés dans `DataValidation.ts`) :
   - les champs d''AUDIT `created_by` / `updated_by` / `created_date` / `updated_date` : posés et
     écrasés PAR LE SERVEUR (`AuditStamp`) APRÈS la validation — les déclarer n''apporterait
