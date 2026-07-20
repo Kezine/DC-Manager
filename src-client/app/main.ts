@@ -19,6 +19,11 @@ import { Html } from "../core/Html";
 import { TargetSearch } from "../core/TargetSearch";
 import { UserDirectory } from "../core/UserDirectory";   // annuaire client (résolution des auteurs d'audit — mode API)
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
+import { CertTargetMatch } from "../core/CertTargetMatch";   // moteur PUR du rapprochement certificat ↔ équipement/VM (calculé)
+import type { NetworkIdentity } from "../core/CertTargetMatch";
+import type { CertFicheHooks, CertFicheMatch } from "../views/CertFicheHooks";
+import type { CertTargetResolver } from "../views/CertsAdminView";
+import type { CertificateListItem } from "../views/forms/CertsClient";
 import { Schema } from "../../src-shared/Schema";
 import { Download } from "../core/Download";
 import { Prefs } from "../core/Prefs";
@@ -755,6 +760,49 @@ async function boot(): Promise<void> {
     declareFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openCreateFor(kind, id, label); },
   } : null;
   formHost.interventionHooks = interventionHooks;
+
+  // ---- RAPPROCHEMENT CERTIFICAT ↔ équipement/VM (feature AMOVIBLE, mode API) : lien CALCULÉ, jamais persisté ----
+  // Identité réseau d'une cible : hostnames rapprochables (`name` + hostnames des IP rattachées) + IP (IPAM = fait
+  // foi, `observed:false` ; IP constatées sur les vNIC = `observed:true`, informatives). Alimente CertTargetMatch.
+  const buildNetworkIdentity = (kind: "equipment" | "vm", id: string): NetworkIdentity | null => {
+    const rec: any = store.get(kind === "equipment" ? "equipments" : "vms", id);
+    if (!rec) return null;
+    const addrs: any[] = kind === "equipment" ? store.ipAddressesOfEquipment(id) : store.ipAddressesOfVm(id);
+    const hostnames = [rec.name, ...addrs.map((a) => a.hostname)].filter((h): h is string => typeof h === "string" && h.trim() !== "");
+    const ips: { value: string; observed: boolean }[] = addrs
+      .map((a) => ({ value: String(a.address || "").trim(), observed: false }))
+      .filter((x) => x.value !== "");
+    if (kind === "vm") {
+      // IP CONSTATÉES sur les vNIC (source Proxmox) : informatives, marquées `observed` (l'IPAM prime si doublon — cf. moteur).
+      for (const nic of (Array.isArray(rec.nics) ? rec.nics : [])) {
+        for (const ip of (Array.isArray(nic.ips) ? nic.ips : [])) { const v = String(ip || "").trim(); if (v) ips.push({ value: v, observed: true }); }
+      }
+    }
+    return { kind, id, name: rec.name || "", hostnames, ips };
+  };
+  // Identités de TOUTES les cibles, MÉMOÏSÉES — base du résolveur du listing certs (rapproché PAR LIGNE, sinon
+  // O(lignes × cibles)). Invalidées à l'activation de l'onglet Certificats (inventaire figé le temps d'un parcours).
+  let identitiesMemo: NetworkIdentity[] | null = null;
+  const invalidateIdentities = (): void => { identitiesMemo = null; };
+  const allNetworkIdentities = (): NetworkIdentity[] => {
+    if (identitiesMemo) return identitiesMemo;
+    const list: NetworkIdentity[] = [];
+    for (const e of store.all("equipments")) { const idn = buildNetworkIdentity("equipment", e.id); if (idn) list.push(idn); }
+    for (const v of store.all("vms")) { const idn = buildNetworkIdentity("vm", v.id); if (idn) list.push(idn); }
+    identitiesMemo = list;
+    return list;
+  };
+  // Liste COMPLÈTE des certs mise en cache (métadonnées + sans + subject ; JAMAIS key_enc, invariant Q5) : le
+  // rapprochement DEPUIS une fiche confronte TOUS les certs à UNE identité. Invalidée sur SSE `certs` et après
+  // écriture dans la vue (onCountsChanged). Un échec réseau n'est PAS mis en cache (nouvelle tentative ultérieure).
+  let certsListCache: CertificateListItem[] | null = null;
+  const invalidateCertsListCache = (): void => { certsListCache = null; };
+  const loadCertsList = async (): Promise<CertificateListItem[]> => {
+    if (!certsClient || !certsClient.docId) return [];
+    if (certsListCache) return certsListCache;
+    try { certsListCache = await certsClient.list(); return certsListCache; }
+    catch (_) { return []; }
+  };
   // CERTIFICATS (C6) : page d'ADMINISTRATION de la PKI interne (clé maître, arbre CA/dérivés, créations
   // X.509/SSH, exports, révocation, aide au déploiement de la confiance). ONGLET PRINCIPAL de premier niveau
   // (décision utilisateur 2026-07-15 : « ce n'est pas vraiment un paramètre ») — enregistré EN DERNIER parmi les
@@ -787,10 +835,40 @@ async function boot(): Promise<void> {
     title: I18n.t("tabs.certificats.label"), subtitle: I18n.t("tabs.certificats.subtitle"),
     count: REST_MODE ? () => certsExpiringCount + certsExpiredCount : undefined,   // badge = alerte d'échéance (masqué à 0)
     countClass: REST_MODE ? () => (certsExpiredCount > 0 ? "err" : (certsExpiringCount > 0 ? "warn" : null)) : undefined,   // expiré → rouge, expirant → orange
-    onShow: () => { certsView.show(); void refreshCertsCount(); },
+    onShow: () => { invalidateIdentities(); certsView.show(); void refreshCertsCount(); },   // inventaire re-photographié à l'activation
   });
   certsView = new CertsAdminView(certsContainer, certsClient, formHost);   // formulaires dans LA modale de l'app (principe n°11)
-  certsView.onCountsChanged = () => { void refreshCertsCount(); };   // après création/suppression → recompte l'alerte d'échéance
+  certsView.onCountsChanged = () => { invalidateCertsListCache(); void refreshCertsCount(); };   // écriture certs → invalide le cache de rapprochement + recompte l'alerte
+
+  // Rapprochement DEPUIS une fiche (rangée « Certificats TLS ») : hooks injectés via FormHost (contrat découplé —
+  // les fiches n'importent NI la vue NI le client certs). null hors mode API → aucune rangée. `openCert` bascule
+  // sur l'onglet Certificats focalisé (la fiche est fermée AVANT par CertFicheRow — overlay unique).
+  const certHooks: CertFicheHooks | null = certsClient ? {
+    certsForTarget: async (kind, id) => {
+      const identity = buildNetworkIdentity(kind, id);
+      if (!identity) return [];
+      const certs = await loadCertsList();
+      return CertTargetMatch.certsForTarget(identity, certs).map(({ cert, vias }): CertFicheMatch => ({
+        certId: cert.id, label: cert.label,
+        vias: vias.map((v) => ({ via: v.via, value: v.value, observed: v.observed })),
+        notAfter: cert.not_after,
+      }));
+    },
+    openCert: (certId) => { shell.switchView("certificats"); void certsView.focusCert(certId); },
+  } : null;
+  formHost.certHooks = certHooks;
+  // Indicateur « cible(s) » du LISTING certs (vue B) : le résolveur rapproche l'item de ligne (déjà porteur de
+  // sans/subject → aucun réseau) aux identités du store, et ouvre la fiche cible avec retour-auto (openTargetDetail).
+  if (certsClient) {
+    const targetResolver: CertTargetResolver = {
+      targetsForCert: (cert) => CertTargetMatch.targetsForCert(cert, allNetworkIdentities()).map(({ id }) => ({ kind: id.kind, id: id.id, label: id.name || id.id })),
+      openTarget: (ref, onClosed) => {
+        const wrappedHost: FormHost = { ...formHost, openModal: (o) => modal.open({ ...o, onClose: onClosed }) };
+        Forms.detail(store, wrappedHost, ref.kind === "vm" ? "vms" : "equipments", ref.id, () => shell.refreshActive());
+      },
+    };
+    certsView.setTargetResolver(targetResolver);
+  }
 
   // SSE MODULES (interventions/certs) : quand un AUTRE client écrit, le serveur publie un événement porteur du
   // marqueur `changeset.modules` (cf. RestDocumentController). On recompte alors les pastilles concernées, THROTTLÉ
@@ -804,7 +882,7 @@ async function boot(): Promise<void> {
       moduleRecountTimer = null;
       const mods = new Set(pendingModuleRecounts); pendingModuleRecounts.clear();
       if (mods.has("interventions")) void refreshInterventionsCount();
-      if (mods.has("certs")) void refreshCertsCount();
+      if (mods.has("certs")) { invalidateCertsListCache(); void refreshCertsCount(); }   // un autre client a modifié les certs → cache de rapprochement périmé
     }, 400);
   };
   // GROUPE « Paramètres » : onglet TOUJOURS DÉROULANT (jamais une vue) regroupant les pages rarement visitées.

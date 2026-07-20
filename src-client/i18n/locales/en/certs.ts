@@ -180,12 +180,19 @@ export const certs = {
       colAlert: "Below threshold",
       colIssuer: "Issuer",
       colIssued: "Issued",
+      colTarget: "Target(s)",
       keyOwned: "Private key held (encrypted)",
       empty: "No item.",
       emptyUnlocked: "No item. Create an authority or adjust the filters.",
       revoked: "revoked",
       deployTitle: "Certificate deployment",
       listCertsTitle: "List this authority's certificates",
+    },
+    // COMPUTED cert ↔ equipment/VM matching (listing indicator, view B). See docs/certs.md.
+    target: {
+      openEquipment: "Linked equipment: {{label}}",
+      openVm: "Linked VM: {{label}}",
+      ambiguous: "ambiguous",
     },
     actions: {
       issueTls: "Issue TLS",

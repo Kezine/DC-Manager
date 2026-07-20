@@ -23,6 +23,7 @@ import { VmNetMapping } from "../../core/VmNetMapping";
 import { VmIpMatch } from "../../core/VmIpMatch";
 import { VmForms } from "./VmForms";
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
+import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (résolue via l'annuaire, mode API)
 
 /* =============================================================================
@@ -572,6 +573,8 @@ export class DetailForms extends IpamForms {
     //    les réseaux ; « non raccordé » si aucun mapping. IPs constatées = donnée source informative (décision IPAM). --
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "vm", id, label: vm.name || "" }, () => host.closeModal?.());
+    // Intégration « fiches » : certificats TLS rapprochés (calculé, no-op hors mode API).
+    CertFicheRow.attach(root, host.certHooks, { kind: "vm", id }, () => host.closeModal?.());
 
     const mapEntries = VmNetMapping.read(store.meta);
     const nics: any[] = Array.isArray(vm.nics) ? vm.nics : [];

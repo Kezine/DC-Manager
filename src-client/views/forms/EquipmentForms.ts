@@ -40,6 +40,7 @@ import { PerspectiveEditor } from "../../ui/PerspectiveEditor";
 import { StitchEditor } from "../../ui/StitchEditor";
 import { Download } from "../../core/Download";
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
+import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
 
 export class EquipmentForms extends FormBase {
   /** Fiche DÉTAIL d'un équipement (lecture) + bouton « Modifier » → formulaire d'édition. */
@@ -88,6 +89,8 @@ export class EquipmentForms extends FormBase {
 
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "equipment", id: eq.id, label: eq.name || "" }, () => host.closeModal?.());
+    // Intégration « fiches » : certificats TLS rapprochés (calculé, no-op hors mode API).
+    CertFicheRow.attach(root, host.certHooks, { kind: "equipment", id: eq.id }, () => host.closeModal?.());
 
     // façade : bouton éditer + toggle « haute densité » + aperçus des faces avec contenu
     const dF = document.createElement("div"); dF.className = "section-divider"; dF.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px";

@@ -1,6 +1,7 @@
 import type { Store } from "../../store";
 import type { ModalOptions } from "../../ui/Modal";
 import type { InterventionFicheHooks } from "../InterventionFicheHooks";
+import type { CertFicheHooks } from "../CertFicheHooks";
 import type { UserDirectory } from "../../core/UserDirectory";
 import { FLOORS } from "../../domain/constants";
 import { Ip } from "../../core/Ip";
@@ -72,6 +73,9 @@ export interface FormHost {
   /** Intégration « fiches » de la feature interventions (AMOVIBLE) — null hors mode API : les fiches détail
       (équipement/VM/spare) n'affichent alors AUCUNE rangée « Interventions ». Injecté par `main.ts`. */
   interventionHooks?: InterventionFicheHooks | null;
+  /** Intégration « fiches » du rapprochement CERTIFICAT ↔ équipement/VM (AMOVIBLE) — null hors mode API : les
+      fiches détail (équipement/VM) n'affichent alors AUCUNE rangée « Certificats TLS ». Injecté par `main.ts`. */
+  certHooks?: CertFicheHooks | null;
   /** Annuaire utilisateurs (résolution des auteurs d'audit — cf. `AuditLine`, docs/user-resolver.md). null en
       mode fichier → aucune ligne « Créé/Modifié par » dans les fiches. Injecté par `main.ts` (mode REST). */
   userDirectory?: UserDirectory | null;

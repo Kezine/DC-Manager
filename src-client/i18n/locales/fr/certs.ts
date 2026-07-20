@@ -185,12 +185,19 @@ export const certs = {
       colAlert: "Sous seuil",
       colIssuer: "Émetteur",
       colIssued: "Émission",
+      colTarget: "Cible(s)",
       keyOwned: "Clé privée détenue (chiffrée)",
       empty: "Aucun élément.",
       emptyUnlocked: "Aucun élément. Créez une autorité ou ajustez les filtres.",
       revoked: "révoqué",
       deployTitle: "Déploiement des certificats",
       listCertsTitle: "Lister les certificats de cette autorité",
+    },
+    // Rapprochement CALCULÉ cert ↔ équipement/VM (indicateur du listing, vue B). Cf. docs/certs.md.
+    target: {
+      openEquipment: "Équipement associé : {{label}}",
+      openVm: "VM associée : {{label}}",
+      ambiguous: "ambigu",
     },
     actions: {
       issueTls: "Émettre TLS",

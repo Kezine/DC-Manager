@@ -220,6 +220,17 @@ export const detail = {
     deleted: "VM deleted",
     title: "VM details",
   },
+  // "TLS certificates" row on equipment/VM detail sheets: COMPUTED matching (never persisted) — see docs/certs.md.
+  certs: {
+    section: "TLS certificates",
+    none: "No matching certificate",
+    open: "Open in the Certificates tab",
+    viaDns: "DNS",
+    viaCn: "CN",
+    viaWildcard: "wildcard",
+    viaIp: "IP",
+    observed: "observed",
+  },
   cableType: {
     nature: "Nature",
     count: "Cables of this type",

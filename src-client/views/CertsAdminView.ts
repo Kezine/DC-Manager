@@ -101,6 +101,22 @@ interface ListingState {
   status: string;
 }
 
+/** Cible (équipement/VM) RAPPROCHÉE d'un certificat — vue minimale pour l'indicateur de listing (vue B). */
+export interface CertTargetRef {
+  kind: "equipment" | "vm";
+  id: string;
+  label: string;
+}
+
+/** Résolveur INJECTÉ par main.ts (feature AMOVIBLE) : rapproche un certificat de cibles réseau (calculé, jamais
+    persisté — cf. CertTargetMatch) et sait OUVRIR la fiche d'une cible avec retour-auto. null hors mode API →
+    aucun indicateur « cible » dans le listing. `targetsForCert` reçoit l'item de ligne (déjà porteur de
+    sans/subject) → aucun appel réseau. `openTarget` réutilise le patron openTargetDetail (overlay unique). */
+export interface CertTargetResolver {
+  targetsForCert(cert: CertificateListItem): CertTargetRef[];
+  openTarget(ref: CertTargetRef, onClosed: () => void): void;
+}
+
 export class CertsAdminView {
   /** Signal ÉMIS après tout rechargement du corps de listing (dont création / suppression / révocation) : la vue
       prévient l'hôte que le NOMBRE TOTAL de certificats a pu changer, pour rafraîchir le badge de l'onglet — tenu
@@ -116,6 +132,10 @@ export class CertsAdminView {
   private pkiState: PkiState | null = null;
   /** Garde anti-rechargements concurrents. */
   private loading = false;
+  /** Dernier chargement d'activation (show) — AWAITÉ par `focusCert` : l'ouverture d'un cert DEPUIS une fiche
+      bascule d'abord l'onglet (→ `show()` lance un reload), puis focalise ; sans cette attente, la garde de
+      ré-entrance de `navigateToFocus` ignorerait la focalisation demandée dans la foulée. */
+  private lastLoad: Promise<void> = Promise.resolve();
 
   /** Vue active : A « Autorités & clés » (racines) par défaut, B « Certificats d'une racine ». */
   private view: "roots" | "certs" = "roots";
@@ -140,6 +160,10 @@ export class CertsAdminView {
   /** Id de la ligne à mettre en évidence après une navigation par la recherche (`.row-focus`). CONSOMMÉ au
       premier `paintBody` (mis à null après application), pour qu'un repaint ultérieur (tri/page) ne la ré-allume pas. */
   private focusId: string | null = null;
+
+  /** Résolveur de cibles rapprochées (INJECTÉ par main.ts, feature amovible) — null hors mode API : aucune
+      colonne « Cible(s) » active dans la vue B. Cf. `CertTargetResolver`. */
+  private targetResolver: CertTargetResolver | null = null;
 
   /** SÉLECTION MULTIPLE (L4) : instantané par id des éléments cochés. SURVIT aux changements de page/tri/filtre
       DANS la vue courante ; VIDÉE au changement de vue (A↔B, recherche) et après une action groupée. Un snapshot
@@ -169,7 +193,31 @@ export class CertsAdminView {
   show(): void {
     if (!this.client) { this.renderNeedsApi(); return; }
     if (!this.client.docId) { this.renderNoDoc(); return; }
-    void this.reload();
+    this.lastLoad = this.reload();   // mémorisé pour que focusCert puisse attendre la fin d'un chargement d'activation
+  }
+
+  /** Injecte (ou retire) le résolveur de cibles rapprochées — active la colonne « Cible(s) » de la vue B
+      (feature AMOVIBLE, posée par main.ts en mode API). */
+  setTargetResolver(resolver: CertTargetResolver | null): void {
+    this.targetResolver = resolver;
+  }
+
+  /** FOCALISE un certificat par son id : ouvre l'onglet (déjà basculé par l'appelant) sur la vue qui le CONTIENT
+      (A racine si premier niveau, B sous-arbre sinon) avec sa ligne surlignée. Point d'entrée du rapprochement
+      DEPUIS une fiche (`CertFicheHooks.openCert`). Résout le `root_id` via une page ciblée (`focus`) — la liste
+      complète des fiches n'en dispose pas —, puis réutilise la navigation de la recherche (CertsSearch.navTarget).
+      Introuvable / erreur réseau → no-op silencieux (la vue reste où elle est). */
+  async focusCert(certId: string): Promise<void> {
+    if (!this.client || !this.client.docId) return;
+    this.session.touch();
+    await this.lastLoad.catch(() => { /* un échec du chargement d'activation ne bloque pas la focalisation */ });
+    let item: CertificatePageItem | undefined;
+    try {
+      const page = await this.client.listPage({ focus: certId, pageSize: PAGE_SIZE_DEFAULT });
+      item = page.certificates.find((c) => c.id === certId);
+    } catch (_) { /* réseau : on abandonne (aucune navigation) */ }
+    if (!item) return;
+    await this.navigateToFocus(CertsSearch.navTarget(item as CertSearchItem));
   }
 
   /** Verrouillage (auto 15 min ou manuel) → revient à l'écran verrouillé (re-render). */
@@ -603,12 +651,13 @@ export class CertsAdminView {
       this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label", st), this.sortableTh(I18n.t("lists.col.type"), "kind", st),
       this.sortableTh(I18n.t("certs.admin.listing.colIssuer"), "parent", st), this.plainTh(I18n.t("certs.admin.listing.colSubject")),
       this.sortableTh(I18n.t("certs.admin.listing.colIssued"), "not_before", st),
-      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")), this.plainTh(I18n.t("lists.chrome.actions"), "cell-actions"),
+      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")),
+      this.plainTh(I18n.t("certs.admin.listing.colTarget")), this.plainTh(I18n.t("lists.chrome.actions"), "cell-actions"),
     );
     thead.appendChild(tr);
     const labels = CardTable.columnLabels(tr);   // repli en cartes (< 560px) : libellés lus depuis l'en-tête
     const tbody = document.createElement("tbody");
-    if (!this.certItems.length) tbody.appendChild(this.emptyRow(9));
+    if (!this.certItems.length) tbody.appendChild(this.emptyRow(10));   // select+label+type+émetteur+sujet+émission+échéance+état+cible+actions
     else for (const item of this.certItems) { const row = this.buildCertRow(item); CardTable.labelCells(row, labels); tbody.appendChild(row); }
     table.append(thead, tbody);
     tw.appendChild(table);
@@ -637,10 +686,40 @@ export class CertsAdminView {
     tr.appendChild(this.htmlCell(this.issuedCell(item)));   // date d'ÉMISSION (not_before)
     tr.appendChild(this.htmlCell(this.expiryCell(item)));
     tr.appendChild(this.htmlCell(item.revoked_at ? this.pill(I18n.t("certs.admin.listing.revoked"), "err") : CertsAdminView.MUTED));
+    tr.appendChild(this.targetCell(item));   // équipement/VM rapproché (calculé) — inerte hors mode API
     const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + alignées à DROITE (parité ListView)
     this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
     tr.appendChild(actions);
     return tr;
+  }
+
+  /** Cellule « Cible(s) » (vue B) : un bouton-icône INFO par équipement/VM RAPPROCHÉ (aller-retour vers sa fiche,
+      patron openTargetDetail) + pastille discrète « ambigu » si plusieurs cibles distinctes ; rien si aucune (ou
+      hors mode API : `targetResolver` null). Rapprochement CALCULÉ (CertTargetMatch), jamais persisté. */
+  private targetCell(item: CertificatePageItem): HTMLElement {
+    const td = document.createElement("td");
+    const resolver = this.targetResolver;
+    if (!resolver) return td;   // hors mode API → colonne inerte
+    let refs: CertTargetRef[] = [];
+    try { refs = resolver.targetsForCert(item); } catch (_) { refs = []; }
+    if (!refs.length) return td;   // zéro cible → cellule vide
+    const wrap = document.createElement("span"); wrap.style.cssText = "display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap";
+    for (const ref of refs) {
+      const label = ref.label || ref.id;
+      const tip = I18n.t(ref.kind === "vm" ? "certs.admin.target.openVm" : "certs.admin.target.openEquipment", { label });
+      const btn = IconButton.build({ icon: Icons.INFO, label: tip, onClick: () => resolver.openTarget(ref, () => { /* retour : le listing reste affiché */ }) });
+      btn.title = tip;
+      wrap.appendChild(btn);
+    }
+    if (refs.length > 1) {   // AMBIGUÏTÉ : plusieurs cibles distinctes → pastille discrète (liste en infobulle)
+      const pill = document.createElement("span"); pill.className = "pill";
+      pill.style.borderColor = "var(--warn)"; pill.style.color = "var(--warn)";
+      pill.textContent = I18n.t("certs.admin.target.ambiguous");
+      pill.title = refs.map((r) => r.label || r.id).join(", ");
+      wrap.appendChild(pill);
+    }
+    td.appendChild(wrap);
+    return td;
   }
 
   /* ---- Cellules & pagination communes ---- */

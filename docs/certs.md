@@ -696,6 +696,55 @@ bookmarkable inchangé. Toujours enregistrée (`certsClient` null hors mode API 
 Toute erreur `CertsError` **503** (module serveur en erreur) bascule sur un bandeau
 détaillé ; les messages d'erreur ne portent aucun matériau de clé.
 
+## Rapprochement calculé cert ↔ cible (équipement/VM)
+
+Fonctionnalité **purement CLIENTE** (aucune route, aucune table, aucun schéma serveur touché) qui
+**CALCULE à la volée** le lien entre un certificat TLS et un équipement/VM, **sans jamais le persister** :
+pas de « suggestion de rattachement » stockée, aucune écriture. On **informe** (« ce certificat concerne
+probablement cet hôte »), on ne **devine** ni ne **rattache** rien — parité conceptuelle avec le
+rapprochement VM ↔ hôte (« on ne devine pas », traduit ici par « on montre tout, on ne rattache rien »).
+Feature **AMOVIBLE** (cf. « Suppression » plus bas).
+
+**Où c'est affiché** (mode API uniquement — `certsClient` null en mode fichier → tout est no-op) :
+- **Fiche équipement/VM** : rangée « Certificats TLS » (`CertFicheRow`, calque d'`InterventionFicheRow`) listant
+  les certificats rapprochés, chacun avec ses **pistes** (puces dns/cn/wildcard/ip) et une pastille d'échéance
+  (warn/err). Un clic ferme la fiche et bascule sur l'onglet Certificats focalisé (`CertFicheHooks.openCert` →
+  `CertsAdminView.focusCert`).
+- **Listing certs (vue B, sous-arbre d'une racine)** : colonne « Cible(s) » — un bouton-icône INFO par
+  équipement/VM rapproché (aller-retour vers sa fiche, patron `openTargetDetail`) + une pastille « ambigu »
+  si plusieurs cibles distinctes sont rapprochées. Résolveur `CertTargetResolver` injecté par `main.ts`.
+
+**Le moteur** — `src-client/core/CertTargetMatch.ts` (PUR, testé `Tests/modules/test-rapprochement-certs.js`),
+appuyé sur `HostnameMatch` (normalisation + rapprochement de hostnames, extrait de `VmClusterFormat` — une seule
+définition) et `CertSubject` (extraction du CN d'un DN brut) :
+
+- **Sources d'une identité** (`main.ts:buildNetworkIdentity`) : `hostnames` = `name` de l'équipement/VM (libre,
+  normalisé défensivement) + `ipAddresses.hostname` des IP rattachées (format RFC 1123 STRICT depuis `1cf42c2`,
+  donc bien formés) ; `ips` = adresses **IPAM** (`observed:false`, **fait foi**) + IP **constatées sur les vNIC**
+  (`observed:true`, informatives, marquées « constatée »).
+- **Règles** : **leaf-tls SEULEMENT** (root-ca / ssh-* ignorés) ; **RÉVOQUÉS EXCLUS** (`revoked_at` non vide →
+  jamais de match) ; **EXPIRÉS INCLUS** (ils documentent l'existant ; l'affichage les **teinte** via
+  `CertsFormat.expiryClass`). DNS : chaque SAN `dns` + le **CN** → rapprochement EXACT (pont court ⇄ FQDN par 1er
+  label) ; un SAN `dns` en `*.dom` → wildcard RFC 6125 (UN label de plus). IP : chaque SAN `ip` comparé (entier
+  IPv4 partagé `Ip.toInt`) aux IP de l'identité ; un match reposant UNIQUEMENT sur une IP vNIC → `observed:true`.
+- **Ambiguïté** : un cert rapprochant plusieurs cibles les renvoie TOUTES (le moteur ne masque rien) ;
+  l'appelant signale « ambigu » (cardinalité > 1).
+
+**Limites assumées** (documentées, ne produisent JAMAIS un match) : **IPv6 non couvert** (Ipv4 strict —
+`Ip.toInt` rend null), **IDN/punycode** non normalisé, `name` d'équipement/VM **libre** (rattrapé par la
+normalisation de `HostnameMatch`, jamais validé). Le CN wildcard n'est pas rapproché (seul le SAN `dns` l'est).
+
+**Caches** (`main.ts`) : la liste complète des certs (`certsClient.list()`, métadonnées + sans + subject, JAMAIS
+`key_enc`) est mise en cache pour le rapprochement DEPUIS une fiche, invalidée sur SSE `certs` et après écriture
+dans la vue ; les identités du listing sont mémoïsées et re-photographiées à l'activation de l'onglet Certificats.
+
+**Suppression de la fonctionnalité** (indépendante du reste des certs) : retirer les fichiers
+`core/CertTargetMatch.ts`, `core/CertSubject.ts`, `views/CertFicheHooks.ts`, `views/forms/CertFicheRow.ts`, le
+test `test-rapprochement-certs.js`, les branchements de `main.ts` (identités/cache/hooks/résolveur), l'appel
+`CertFicheRow.attach` dans `EquipmentForms`/`DetailForms`, la colonne « Cible(s) » + `setTargetResolver`/`focusCert`
+de `CertsAdminView`, et les clés i18n `detail.certs.*` / `certs.admin.target.*` / `certs.admin.listing.colTarget`.
+`HostnameMatch` reste (consommé par `VmClusterFormat`). Aucune trace en base : rien n'a été persisté.
+
 ## Procédures
 
 ### Éditer `certs.db` à la main (client SQLite)

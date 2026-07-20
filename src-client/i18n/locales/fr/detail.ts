@@ -227,6 +227,17 @@ export const detail = {
     deleted: "VM supprimée",
     title: "Détail de la VM",
   },
+  // Rangée « Certificats TLS » des fiches équipement/VM : rapprochement CALCULÉ (jamais persisté) — cf. docs/certs.md.
+  certs: {
+    section: "Certificats TLS",
+    none: "Aucun certificat rapproché",
+    open: "Ouvrir dans l'onglet Certificats",
+    viaDns: "DNS",
+    viaCn: "CN",
+    viaWildcard: "wildcard",
+    viaIp: "IP",
+    observed: "constatée",
+  },
   cableType: {
     nature: "Nature",
     count: "Câbles de ce type",
