@@ -424,6 +424,14 @@ module.exports = async () => {
     ck.eq(X509Factory.readLeafUsage(leafBoth.certPem), "both", "readLeafUsage : feuille both → both");
     ck.eq(X509Factory.readLeafUsage("pas un pem"), "server", "readLeafUsage : PEM illisible → server (repli)");
 
+    /* -------- reSignRootCa : PROLONGE la CA (même clé) → les feuilles existantes valident toujours -------- */
+    const reSigned = await X509Factory.reSignRootCa({ existingCertPem: ca.certPem, existingPrivateKeyPkcs8Pem: ca.privateKeyPkcs8Pem, commonName: "CA Racine exemple", organization: "Exemple SA", organizationalUnit: "Infrastructure", days: 3650 });
+    const reCaCert = new x509.X509Certificate(reSigned.certPem);
+    ck(Date.parse(reSigned.notAfter) > Date.parse(ca.notAfter), "reSignRootCa : échéance repoussée (durée plus longue)");
+    ck.eq(await leafCert.verify({ publicKey: reCaCert.publicKey, signatureOnly: true }), true, "reSignRootCa : feuille émise par l'ANCIEN cert valide toujours contre le NOUVEAU (même clé)");
+    ck.eq(reCaCert.getExtension(x509.SubjectKeyIdentifierExtension).keyId, caSki.keyId, "reSignRootCa : SubjectKeyIdentifier INCHANGÉ (même clé → AKI des feuilles toujours valide)");
+    ck(await reCaCert.verify({ publicKey: reCaCert.publicKey, signatureOnly: true }), "reSignRootCa : nouvelle CA auto-signée cohérente");
+
     /* -------- Roundtrip PKCS#8 : la clé privée PEM se ré-importe via WebCrypto -------- */
     const der = x509.PemConverter.decodeFirst(leaf.privateKeyPkcs8Pem);
     const reimported = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);

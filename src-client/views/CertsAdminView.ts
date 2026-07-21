@@ -841,8 +841,10 @@ export class CertsAdminView {
     cell.appendChild(IconButton.build({ icon: Icons.INFO, label: I18n.t("certs.admin.actions.info"), onClick: () => this.infoModal(item) }));
     if (unlocked && item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, I18n.t("certs.admin.actions.issueTls"), CERT_TIP.issueTls, () => this.leafModal(item)));
     if (unlocked && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, I18n.t("certs.admin.actions.issueSsh"), CERT_TIP.issueSsh, () => this.sshCertModal(item)));
-    // RENOUVELLEMENT unitaire (mode 1) — feuille TLS / certificat SSH (les CA passent par renewCaDialog, ajouté en phase 5).
+    // RENOUVELLEMENT unitaire (mode 1) — feuille TLS / certificat SSH.
     if (unlocked && (item.kind === "leaf-tls" || item.kind === "ssh-cert") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renew"), CERT_TIP.renew, () => void this.renewModal(item)));
+    // RENOUVELLEMENT d'une CA racine (opération de masse : prolonger / rotation de clé + enfants).
+    if (unlocked && item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renewCa"), CERT_TIP.renew, () => void this.renewCaDialog(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.EXPORT, I18n.t("certs.admin.actions.exportArtifacts"), CERT_TIP.export, () => void this.exportModal(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.REVOKE, I18n.t("certs.admin.actions.revoke"), CERT_TIP.revoke, () => void this.revoke(item)));
     cell.appendChild(this.iconAction(Icons.DELETE, I18n.t("ui.action.delete"), CERT_TIP.remove, () => void this.remove(item), true));
@@ -1679,6 +1681,98 @@ export class CertsAdminView {
     catch (e) { this.actionError(e); return; }
     if (item.kind === "leaf-tls") this.leafModal(ca, item);
     else this.sshCertModal(ca, item);
+  }
+
+  /** RENOUVELLEMENT D'UNE CA RACINE (X.509) — opération de MASSE avec avertissement clair (cadrage §Phase 5).
+      Deux mécaniques au choix :
+      - « Prolonger (même clé) » : la CA est RE-SIGNÉE avec sa clé actuelle et une échéance repoussée, MISE À JOUR
+        EN PLACE (même id, key_enc conservé) → l'arbre reste intact ; puis ses feuilles actives sont renouvelées.
+      - « Rotation de clé » : une NOUVELLE CA (nouvelle paire) est créée, l'ancienne révoquée, et toutes les
+        feuilles actives ré-émises SOUS la nouvelle CA (nouveau parent_id). Le cross-signing (recouvrement propre)
+        est ajouté en phase 6.
+      Réservé au root-ca : une ssh-ca (ed25519) n'a pas d'échéance à prolonger. */
+  private async renewCaDialog(ca: CertificateListItem): Promise<void> {
+    this.session.touch();
+    if (ca.kind !== "root-ca") return;
+    const root = document.createElement("div");
+    const warn = document.createElement("div"); warn.style.cssText = "margin-bottom:10px;color:var(--warn);font-weight:600";
+    warn.textContent = I18n.t("certs.admin.renewCa.warn");
+    const intro = document.createElement("div"); intro.className = "form-hint"; intro.style.marginBottom = "10px";
+    intro.textContent = I18n.t("certs.admin.renewCa.intro", { label: ca.label });
+    const mode = FormControls.select([
+      { value: "prolong", label: I18n.t("certs.admin.renewCa.modeProlong") },
+      { value: "rotate", label: I18n.t("certs.admin.renewCa.modeRotate") },
+    ], "prolong");
+    const days = FormControls.number(3650, { min: 1, step: 1 });
+    const errBox = this.errBox();
+    root.append(warn, intro,
+      FormControls.fieldRow(I18n.t("certs.admin.renewCa.modeField"), mode, I18n.t("certs.admin.renewCa.modeHint")),
+      FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, I18n.t("certs.admin.renewCa.daysHint")),
+      errBox);
+
+    this.host.openModal({
+      title: I18n.t("certs.admin.renewCa.title"), subtitle: Html.escape(ca.label), body: root,
+      saveLabel: I18n.t("certs.admin.renewCa.btn"),
+      onSave: async () => {
+        errBox.style.display = "none";
+        this.session.touch();
+        const requested = Number(days.value);
+        if (!Number.isFinite(requested) || requested <= 0) { this.showError(errBox, I18n.t("certs.admin.sshCert.daysInvalid")); return false; }
+        try {
+          const caDetail = await this.client!.getOne(ca.id);
+          if (!caDetail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
+          const oldCaKey = await PkiCrypto.decryptSecret(this.session.key, caDetail.key_enc);
+          const cn = CertsAdminView.parseDnField(ca.subject, "CN") || ca.label;
+          const organization = CertsAdminView.parseDnField(ca.subject, "O") || undefined;
+          const organizationalUnit = CertsAdminView.parseDnField(ca.subject, "OU") || undefined;
+          // Feuilles ACTIVES rattachées (un root-ca n'a que des feuilles TLS en enfants directs).
+          const children = (await this.client!.list()).filter((c) => c.parent_id === ca.id && !c.revoked_at);
+          const isRotate = mode.value === "rotate";
+
+          // CA « effective » sous laquelle ré-émettre les enfants (+ sa clé déchiffrée).
+          let effectiveCa: CertificateDetail;
+          let effectiveKey: string;
+          if (isRotate) {
+            const keyAlgo = (["ec-p256", "rsa-2048", "rsa-4096"] as string[]).includes(ca.key_algo) ? ca.key_algo as X509KeyAlgo : "ec-p256";
+            const gen = await X509Factory.createRootCa({ commonName: cn, organization, organizationalUnit, keyAlgo, days: requested });
+            const newKeyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
+            const newCaId = CertsAdminView.newId();
+            await this.client!.save(newCaId, {
+              kind: "root-ca", parent_id: null, label: ca.label, subject: ca.subject,
+              serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
+              key_algo: keyAlgo, public_pem: gen.certPem, key_enc: newKeyEnc, revoked_at: null, sans: [], renewed_from: ca.id,
+            });
+            await this.revokeSuperseded(ca);   // ancienne CA remplacée
+            effectiveCa = await this.client!.getOne(newCaId);
+            effectiveKey = gen.privateKeyPkcs8Pem;
+          } else {
+            const re = await X509Factory.reSignRootCa({ existingCertPem: caDetail.public_pem || "", existingPrivateKeyPkcs8Pem: oldCaKey, commonName: cn, organization, organizationalUnit, days: requested });
+            // MISE À JOUR EN PLACE : metadataInput n'envoie pas key_enc → la clé de la CA est CONSERVÉE (même clé).
+            await this.client!.save(ca.id, CertsAdminView.metadataInput(ca, { public_pem: re.certPem, serial: re.serial, not_before: re.notBefore, not_after: re.notAfter, fingerprint: re.fingerprintSha256 }));
+            effectiveCa = { ...caDetail, public_pem: re.certPem, serial: re.serial, not_before: re.notBefore, not_after: re.notAfter, fingerprint: re.fingerprintSha256 };
+            effectiveKey = oldCaKey;
+          }
+
+          // Renouvelle chaque feuille active sous la CA effective (durée rognée à SA nouvelle échéance).
+          const errors: Array<{ label: string; reason: string }> = [];
+          let done = 0;
+          for (const child of children) {
+            try {
+              await this.reissueLeafRenewal(child, effectiveCa, effectiveKey, CertValidity.clampDays(requested, effectiveCa.not_after, Date.now()));
+              done++;
+            } catch (e) { errors.push({ label: child.label, reason: CertsAdminView.errText(e) }); }
+          }
+          this.showBulkSummary(I18n.t("certs.admin.renewCa.sumTitle"), [
+            I18n.t(isRotate ? "certs.admin.renewCa.caRotated" : "certs.admin.renewCa.caProlonged"),
+            I18n.t("certs.admin.bulk.renewedCount", { count: done }),
+            ...errors.map((e) => I18n.t("certs.admin.bulk.errorLine", { label: e.label, reason: e.reason })),
+          ]);
+          await this.refreshBody();
+          return true;
+        } catch (e) { this.showError(errBox, e); return false; }
+      },
+    });
+    setTimeout(() => days.focus(), 30);
   }
 
   /** CA SSH (ssh-ca) ou paire SSH simple (ssh-keypair) — ed25519, WebCrypto extractible. */

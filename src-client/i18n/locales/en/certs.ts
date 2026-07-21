@@ -214,6 +214,7 @@ export const certs = {
       exportArtifacts: "Export the artifacts",
       revoke: "Revoke",
       renew: "Renew",
+      renewCa: "Renew the CA",
       info: "Certificate details",
     },
     renew: {
@@ -223,6 +224,20 @@ export const certs = {
       sshCertToast: "SSH certificate renewed (old one revoked)",
       noParent: "Issuer (CA) not found — renewal impossible.",
       oldRevokeFailed: "New certificate created, but revoking “{{label}}” failed — revoke it manually.",
+    },
+    renewCa: {
+      title: "Renew the root authority",
+      warn: "⚠ Mass operation: this authority AND all its active certificates will be renewed.",
+      intro: "“{{label}}” will be renewed, then all its active TLS leaves reissued and the old ones revoked.",
+      modeField: "Mechanism",
+      modeHint: "“Extend” keeps the CA's key (tree intact). “Rotate” generates a new key (redeploying the CA to clients is required).",
+      modeProlong: "Extend (same key)",
+      modeRotate: "Key rotation (new key)",
+      daysHint: "Duration of the renewed CA; also applied to leaves (capped at the CA's expiry).",
+      btn: "Renew",
+      sumTitle: "Authority renewal",
+      caProlonged: "✔ Authority extended (same key, updated in place)",
+      caRotated: "✔ Authority recreated (new key) — old one revoked",
     },
     select: {
       headerAll: "Select the whole page",

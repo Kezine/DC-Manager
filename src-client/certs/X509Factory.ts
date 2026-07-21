@@ -96,6 +96,47 @@ export class X509Factory {
     return X509Factory.assembleResult(cert, keys.privateKey);
   }
 
+  /** RE-SIGNE une CA racine avec SA clé EXISTANTE et une nouvelle fenêtre de validité (renouvellement
+      « prolonger » — cadrage §Phase 5) : même sujet, MÊME clé publique/privée → les certificats déjà émis
+      par cette CA continuent de chaîner (l'AKI des enfants = empreinte de la clé, inchangée). L'appelant
+      MET À JOUR la ligne de la CA en place (même id, key_enc conservé). Ne renvoie PAS la clé privée : elle
+      est inchangée. */
+  static async reSignRootCa(opts: {
+    existingCertPem: string;
+    existingPrivateKeyPkcs8Pem: string;
+    commonName: string;
+    organization?: string;
+    organizationalUnit?: string;
+    days: number;
+  }): Promise<{ certPem: string; serial: string; fingerprintSha256: string; notBefore: string; notAfter: string }> {
+    X509Factory.ensureProvider();
+    X509Factory.requireNonEmpty(opts.commonName, "le nom commun (CN) de la CA");
+    const days = X509Factory.requirePositiveDays(opts.days);
+    // Réutilise le chargement de CA (public depuis le certificat, privé importé, algo de signature déduit).
+    const { caCert, caPrivateKey, caSignAlgo } = await X509Factory.importCa(opts.existingCertPem, opts.existingPrivateKeyPkcs8Pem);
+    const publicKey = await caCert.publicKey.export(crypto);
+    const { notBefore, notAfter } = X509Factory.validityWindow(days);
+    const cert = await x509.X509CertificateGenerator.createSelfSigned({
+      serialNumber: X509Factory.randomSerialHex(),
+      name: X509Factory.buildDistinguishedName(opts.commonName, opts.organization, opts.organizationalUnit),
+      notBefore, notAfter,
+      signingAlgorithm: caSignAlgo,
+      keys: { publicKey, privateKey: caPrivateKey } as CryptoKeyPair,   // MÊME paire — on ne fait que redater/re-signer
+      extensions: [
+        new x509.BasicConstraintsExtension(true, undefined, true),
+        new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
+        await x509.SubjectKeyIdentifierExtension.create(publicKey, false, crypto),   // SKI inchangé (même clé) → enfants toujours rattachés
+      ],
+    }, crypto);
+    return {
+      certPem: cert.toString("pem"),
+      serial: cert.serialNumber,
+      fingerprintSha256: await X509Factory.fingerprintSha256(cert.rawData),
+      notBefore: cert.notBefore.toISOString(),
+      notAfter: cert.notAfter.toISOString(),
+    };
+  }
+
   /** Émet une feuille signée par la CA. La clé privée de la CA est fournie
       DÉCHIFFRÉE par l'appelant (session déverrouillée) — cette fabrique ne
       connaît pas la clé maître et ne déchiffre rien elle-même. */
