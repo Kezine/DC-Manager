@@ -149,6 +149,10 @@ export const certs = {
       cnRequired: "Nom commun (CN) requis.",
       passRequired: "Phrase secrète requise.",
       algoField: "Algorithme de clé",
+      labelField: "Label",
+      labelPlaceholder: "ex. Portail interne",
+      labelHint: "Nom d'affichage du certificat — recopié dans le CN ci-dessous (que vous pouvez ensuite modifier).",
+      labelRequired: "Label requis.",
     },
     toolbar: {
       unlock: "Déverrouiller",
@@ -505,6 +509,13 @@ export const certs = {
       toast: "Commentaire enregistré",
       edit: "Modifier le commentaire",
       editTitle: "Éditer la note libre de ce certificat",
+    },
+    meta: {
+      title: "Métadonnées du certificat",
+      labelHint: "Nom d'affichage — modifiable ; le CN (sujet du certificat) reste figé.",
+      edit: "Modifier",
+      editTitle: "Éditer le label et le commentaire de ce certificat",
+      toast: "Métadonnées enregistrées",
     },
     remove: {
       title: "Supprimer définitivement ?",

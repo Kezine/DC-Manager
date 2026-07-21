@@ -911,7 +911,7 @@ export class CertsAdminView {
     add(I18n.t("certs.admin.info.updated"), Html.escape(Format.dateTime(item.updated_date)));
     // Édition du commentaire depuis la fiche (aller-retour : la fiche revient à la fermeture de l'éditeur).
     const acts = document.createElement("div"); acts.style.cssText = "margin-top:14px;display:flex;justify-content:flex-end";
-    acts.appendChild(this.actionButton(I18n.t("certs.admin.comment.edit"), I18n.t("certs.admin.comment.editTitle"), () => this.commentModal(item, () => this.infoModal(item, reopen))));
+    acts.appendChild(this.actionButton(I18n.t("certs.admin.meta.edit"), I18n.t("certs.admin.meta.editTitle"), () => this.metadataModal(item, () => this.infoModal(item, reopen))));
     root.append(grid, acts);
     // `reopen` (aller-retour) : présent quand cette fiche a été ouverte DEPUIS une autre (lignée) → on y revient
     // à la fermeture. Absent pour une ouverture directe (onClose null).
@@ -940,33 +940,35 @@ export class CertsAdminView {
     }
   }
 
-  /** Éditeur du COMMENTAIRE (métadonnée libre) d'un certificat — modale standard (principe n°11). Enregistre via
-      une mise à jour de métadonnées (metadataInput → save, key_enc conservé). `reopen` = aller-retour vers la
-      fiche d'origine à la fermeture (l'éditeur est appelé depuis la fiche INFO). */
-  private commentModal(item: CertificateListItem, reopen?: () => void): void {
+  /** Éditeur des MÉTADONNÉES d'un certificat (LABEL d'affichage + COMMENTAIRE libre) — modale standard (principe
+      n°11). Le label est modifiable APRÈS génération (il peut différer du CN, lequel vit dans le SUJET du certificat
+      et n'est PAS modifiable). Enregistre via une mise à jour de métadonnées (metadataInput → save, key_enc conservé).
+      `reopen` = aller-retour vers la fiche d'origine à la fermeture (appelé depuis la fiche INFO). */
+  private metadataModal(item: CertificateListItem, reopen?: () => void): void {
     const root = document.createElement("div");
-    const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "8px";
-    hint.textContent = I18n.t("certs.admin.comment.hint");
+    const labelI = FormControls.text(item.label || "", I18n.t("certs.admin.common.labelPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.labelField"), labelI, I18n.t("certs.admin.meta.labelHint")));
     const ta = FormControls.textArea(item.comment || "");
-    const field = document.createElement("div"); field.className = "form-field"; field.append(ta);
-    const errBox = this.errBox();
-    root.append(hint, field, errBox);
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.info.comment"), ta, I18n.t("certs.admin.comment.hint")));
+    const errBox = this.errBox(); root.appendChild(errBox);
     this.host.openModal({
-      title: I18n.t("certs.admin.comment.title"), subtitle: Html.escape(item.label), body: root, onClose: reopen,
+      title: I18n.t("certs.admin.meta.title"), subtitle: Html.escape(item.label), body: root, onClose: reopen,
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
+        const label = labelI.value.trim();
+        if (label === "") { this.showError(errBox, I18n.t("certs.admin.common.labelRequired")); return false; }
         try {
           const comment = ta.value.trim() === "" ? null : ta.value.trim();
-          await this.client!.save(item.id, CertsAdminView.metadataInput(item, { comment }));
-          item.comment = comment;   // objet capturé mis à jour → la fiche rouverte (aller-retour) montre la nouvelle valeur
-          Notify.toast(I18n.t("certs.admin.comment.toast"), "ok");
+          await this.client!.save(item.id, CertsAdminView.metadataInput(item, { label, comment }));
+          item.label = label; item.comment = comment;   // objet capturé mis à jour → la fiche rouverte (aller-retour) montre les nouvelles valeurs
+          Notify.toast(I18n.t("certs.admin.meta.toast"), "ok");
           await this.refreshBody();
           return true;
         } catch (e) { this.showError(errBox, e); return false; }
       },
     });
-    setTimeout(() => ta.focus(), 30);
+    setTimeout(() => labelI.focus(), 30);
   }
 
   /* --------------------------------------------------------------------------
@@ -1256,7 +1258,8 @@ export class CertsAdminView {
     });
     const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
     await this.client!.save(CertsAdminView.newId(), {
-      kind: "leaf-tls", parent_id: ca.id, label: commonName, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
+      // renouvellement : on PRÉSERVE le label (métadonnée d'affichage, possiblement ≠ CN) — le sujet, lui, suit le CN.
+      kind: "leaf-tls", parent_id: ca.id, label: item.label, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
       serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
       key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans, renewed_from: item.id,
     });
@@ -1539,10 +1542,23 @@ export class CertsAdminView {
      Créations (TOUTES en MODALE — principe n°11)
      -------------------------------------------------------------------------- */
 
+  /** Champ LABEL (métadonnée d'affichage) couplé au champ CN : le label est saisi EN PREMIER et RECOPIÉ dans le CN
+      tant que celui-ci n'a pas été édité à la main (le CN reste librement modifiable → label ≠ CN possible). En
+      renouvellement (`cnPrefilled` = CN déjà rempli et distinct), le couplage est désactivé d'emblée. Retourne la
+      rangée de champ LABEL (à insérer AVANT la rangée CN). Le label est éditable après génération (modale méta). */
+  private labelCnRow(labelInput: HTMLInputElement, cnInput: HTMLInputElement, cnPrefilled: boolean): HTMLElement {
+    let cnTouched = cnPrefilled;
+    cnInput.addEventListener("input", () => { cnTouched = true; });
+    labelInput.addEventListener("input", () => { if (!cnTouched) cnInput.value = labelInput.value; });
+    return FormControls.fieldRow(I18n.t("certs.admin.common.labelField"), labelInput, I18n.t("certs.admin.common.labelHint"));
+  }
+
   /** CA racine X.509 auto-signée. */
   private rootCaModal(): void {
     const root = document.createElement("div");
+    const label = FormControls.text("", I18n.t("certs.admin.common.labelPlaceholder"));
     const cn = FormControls.text("", I18n.t("certs.admin.rootCa.cnPlaceholder"));
+    root.appendChild(this.labelCnRow(label, cn, false));   // LABEL en premier → recopié dans le CN
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rootCa.cnField"), cn, I18n.t("certs.admin.rootCa.cnHint")));
     const org = FormControls.text("", I18n.t("certs.admin.rootCa.orgPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rootCa.orgField"), org, I18n.t("certs.admin.rootCa.orgHint")));
@@ -1560,6 +1576,8 @@ export class CertsAdminView {
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
+        const lbl = label.value.trim();
+        if (lbl === "") { this.showError(errBox, I18n.t("certs.admin.common.labelRequired")); return false; }
         const commonName = cn.value.trim();
         if (commonName === "") { this.showError(errBox, I18n.t("certs.admin.common.cnRequired")); return false; }
         try {
@@ -1569,7 +1587,7 @@ export class CertsAdminView {
           const gen = await X509Factory.createRootCa({ commonName, organization, organizationalUnit, keyAlgo, days: Number(days.value) });
           const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
           await this.client!.save(CertsAdminView.newId(), {
-            kind: "root-ca", parent_id: null, label: commonName, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
+            kind: "root-ca", parent_id: null, label: lbl, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans: [],
           });
@@ -1579,7 +1597,7 @@ export class CertsAdminView {
         } catch (e) { this.showError(errBox, e); return false; }
       },
     });
-    setTimeout(() => cn.focus(), 30);
+    setTimeout(() => label.focus(), 30);
   }
 
   /** Feuille TLS signée par une CA X.509 (action « Émettre TLS »). `renewOf` présent = RENOUVELLEMENT (mode 1) :
@@ -1595,7 +1613,9 @@ export class CertsAdminView {
     const algoInit = renewOf && (["ec-p256", "rsa-2048", "rsa-4096"] as string[]).includes(renewOf.key_algo) ? renewOf.key_algo : "ec-p256";
 
     const root = document.createElement("div");
+    const label = FormControls.text(renewOf ? renewOf.label : "", I18n.t("certs.admin.common.labelPlaceholder"));
     const cn = FormControls.text(cnInit, I18n.t("certs.admin.leaf.cnPlaceholder"));
+    root.appendChild(this.labelCnRow(label, cn, !!renewOf));   // LABEL en premier → recopié dans le CN (couplage off en renouvellement)
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.cnField"), cn, I18n.t("certs.admin.leaf.cnHint")));
     const org = FormControls.text(orgInit, I18n.t("certs.admin.leaf.orgPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.orgField"), org, I18n.t("certs.admin.leaf.orgHint")));
@@ -1626,6 +1646,8 @@ export class CertsAdminView {
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
+        const lbl = label.value.trim();
+        if (lbl === "") { this.showError(errBox, I18n.t("certs.admin.common.labelRequired")); return false; }
         const commonName = cn.value.trim();
         if (commonName === "") { this.showError(errBox, I18n.t("certs.admin.common.cnRequired")); return false; }
         if (CertValidity.exceedsCa(Number(days.value), ca.not_after, Date.now())) {
@@ -1645,7 +1667,7 @@ export class CertsAdminView {
           });
           const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
           await this.client!.save(CertsAdminView.newId(), {
-            kind: "leaf-tls", parent_id: ca.id, label: commonName, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
+            kind: "leaf-tls", parent_id: ca.id, label: lbl, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans,
             renewed_from: renewOf ? renewOf.id : undefined,   // lignée (mode 1) ; undefined → null côté serveur
@@ -1659,7 +1681,7 @@ export class CertsAdminView {
         } catch (e) { this.showError(errBox, e); return false; }
       },
     });
-    setTimeout(() => cn.focus(), 30);
+    setTimeout(() => label.focus(), 30);
   }
 
   /** Révoque un certificat au motif « superseded » (remplacé par renouvellement). Ne LÈVE PAS : un échec (rare)

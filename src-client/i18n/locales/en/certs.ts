@@ -144,6 +144,10 @@ export const certs = {
       cnRequired: "Common name (CN) required.",
       passRequired: "Passphrase required.",
       algoField: "Key algorithm",
+      labelField: "Label",
+      labelPlaceholder: "e.g. Internal portal",
+      labelHint: "Display name for the certificate — copied into the CN below (which you can then change).",
+      labelRequired: "Label required.",
     },
     toolbar: {
       unlock: "Unlock",
@@ -500,6 +504,13 @@ export const certs = {
       toast: "Comment saved",
       edit: "Edit comment",
       editTitle: "Edit this certificate's free note",
+    },
+    meta: {
+      title: "Certificate metadata",
+      labelHint: "Display name — editable; the CN (certificate subject) stays fixed.",
+      edit: "Edit",
+      editTitle: "Edit this certificate's label and comment",
+      toast: "Metadata saved",
     },
     remove: {
       title: "Delete permanently?",
