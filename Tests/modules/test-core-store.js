@@ -983,7 +983,8 @@ module.exports = async () => {
   await section("Store : sites + removeSite (décommissionnement, liaisons logiques préservées)", async () => {
   {
     const s = await makeStore();
-    ck.eq(s.siteLabel("liege"), "Liège", "siteLabel : site par défaut seedé");
+    ck.eq(s.all("sites").length, 0, "aucun site par défaut sur un document vierge (seed retiré)");
+    ck.eq(s.siteLabel("inconnu"), "inconnu", "siteLabel : id sans entité ni repli → l'id brut");
     const site = await s.create("sites", { name: "S1" });
     const dc = await s.create("datacenters", { name: "DC1", location: site.id, floor: "0" });
     const rack = await s.create("racks", { name: "R1", datacenter_id: dc.id, location: site.id });

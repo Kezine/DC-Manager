@@ -129,14 +129,14 @@ export class Store {
       e.depth_mm = Depths.legacyToMm(e.depth, cage);
     });
   }
-  /** Garantit l'existence d'entités `sites` : seed des sites par défaut (anciennes LOCATIONS) sur un document
-      vierge/legacy, + MIGRATION de tout `location` référencé qui n'a pas encore d'entité site (docs ≤ avant
-      l'entité Site). Synchrone (en mémoire) — la persistance suit au prochain save. */
+  /** MIGRATION de tout `location` référencé qui n'a pas encore d'entité site (docs ≤ avant l'entité Site) → crée le
+      site manquant (libellé de repli LOCATIONS si l'id est un ancien slug connu, sinon l'id). Un document vierge
+      NE reçoit PLUS de sites par défaut (retiré à la demande) : il démarre sans site, l'utilisateur crée les siens.
+      Synchrone (en mémoire) — la persistance suit au prochain save. */
   private _ensureSites(): void {
     const have = new Set(this.data.sites.map((s: any) => s.id));
     const Cls = ENTITY_CLASSES.sites;
     const add = (id: string, name?: string) => { if (id && !have.has(id)) { this.data.sites.push(new Cls({ id, name: name || id })); have.add(id); } };
-    if (!this.data.sites.length) LOCATIONS.forEach((l) => add(l.id, l.label));   // doc vierge/legacy → sites par défaut
     const lbl = (id: string) => { const l = LOCATIONS.find((x) => x.id === id); return l ? l.label : id; };
     ["datacenters", "racks", "equipments", "floors", "waypoints"].forEach((coll) => this.data[coll].forEach((o: any) => { if (o.location) add(o.location, lbl(o.location)); }));
   }

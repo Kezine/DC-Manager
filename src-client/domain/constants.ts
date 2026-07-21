@@ -20,12 +20,11 @@ export const RACK_SIDES = [{ id: "single", labelKey: "domain.rackSide.single" },
 export const RACK_FACES = [{ id: "front", labelKey: "domain.rackFace.front" }, { id: "rear", labelKey: "domain.rackFace.rear" }];
 
 /* ---- lieux & étages (listes FERMÉES — éditables ici) ---- */
-// LOCATIONS NON migré en i18n VOLONTAIREMENT : ses libellés servent de VALEURS SEED PERSISTÉES (Store amorce le
-// nom des sites par défaut à partir d'eux) et sont des noms propres géographiques identiques en fr/en — ce sont
-// des données, pas des chaînes d'UI traduisibles.
-export const LOCATIONS = [
-  { id: "liege", label: "Liège" }, { id: "herstal", label: "Herstal" }, { id: "bruxelles", label: "Bruxelles" },
-];
+// LOCATIONS = table de LIBELLÉS de repli pour d'anciens ids `location` (slugs) sans entité `sites` (via
+// Store.siteLabel / FloorLayout.locationLabel). VIDÉE : plus de sites par défaut — un document vierge démarre SANS
+// site (l'utilisateur crée les siens). Ré-ajouter une entrée ici NE réamorce PAS de site (le seed a été retiré) ;
+// elle ne servirait que de libellé de repli pour un id legacy déjà référencé. NON migré en i18n (données, pas UI).
+export const LOCATIONS: { id: string; label: string }[] = [];
 export const FLOORS = ["-3", "-2", "-1", "0", "1", "2", "3", "4", "5"];
 
 /* ---- montage latéral (side) & mural (wall) ---- */
