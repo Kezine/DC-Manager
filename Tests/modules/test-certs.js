@@ -26,6 +26,21 @@ module.exports = async () => {
   }
   });
 
+  await section("Certs : RevocationReasons — encodage/décodage code standard + note (logique PURE)", async () => {
+  {
+    const { RevocationReasons } = D("certs/RevocationReasons.js");
+    ck.eq(RevocationReasons.encode("superseded", "remplacé"), "superseded: remplacé", "encode : code + note");
+    ck.eq(RevocationReasons.encode("keyCompromise", ""), "keyCompromise", "encode : code sans note");
+    ck.eq(RevocationReasons.encode("", "libre"), "unspecified: libre", "encode : code vide → unspecified");
+    ck.eq(RevocationReasons.encode("inconnu", ""), "unspecified", "encode : code inconnu → unspecified");
+    let d = RevocationReasons.decode("superseded: remplacé"); ck(d.code === "superseded" && d.note === "remplacé", "decode : code + note");
+    d = RevocationReasons.decode("keyCompromise"); ck(d.code === "keyCompromise" && d.note === "", "decode : code seul");
+    d = RevocationReasons.decode("texte libre historique"); ck(d.code === "" && d.note === "texte libre historique", "decode : valeur libre → tout en note (rien perdu)");
+    d = RevocationReasons.decode(""); ck(d.code === "" && d.note === "", "decode : vide → vide");
+    d = RevocationReasons.decode("superseded: note: avec: deux-points"); ck(d.code === "superseded" && d.note === "note: avec: deux-points", "decode : la note peut contenir des « : » (seul le premier sépare)");
+  }
+  });
+
   await section("Certs : CertsFormat — échéances colorées, arbre CA/dérivés, libellés de kind (logique PURE)", async () => {
   {
     const { CertsFormat } = D("core/CertsFormat.js");

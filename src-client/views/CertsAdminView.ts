@@ -31,6 +31,7 @@ import { SshKeyMaterial } from "../certs/SshKeyMaterial";
 import { SshWire } from "../certs/SshWire";
 import { CertExports, type CertExportRecord, type ExportArtifact } from "../certs/CertExports";
 import { CertValidity } from "../certs/CertValidity";
+import { RevocationReasons, REVOCATION_REASON_CODES } from "../certs/RevocationReasons";
 import { CertZip, type CertBundleRecord, type ExportCategoryKey } from "../certs/CertZip";
 import { BulkActions, type CertSelectionSnapshot } from "../certs/BulkActions";
 import * as x509 from "@peculiar/x509";
@@ -854,13 +855,20 @@ export class CertsAdminView {
   /** Modale d'INFO (lecture seule) : métadonnées d'un certificat/clé pour consultation + copie (sujet, émetteur
       EN CLAIR, numéro de série, empreinte, émission/échéance, algo, SAN, dates). N'expose AUCUN secret
       (`key_enc` jamais chargé — l'item de listing suffit). Disponible même coffre VERROUILLÉ (rien à déchiffrer). */
-  private infoModal(item: CertificateListItem): void {
+  private infoModal(item: CertificateListItem, reopen?: () => void): void {
     const root = document.createElement("div");
     const grid = document.createElement("div");
     grid.style.cssText = "display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;align-items:baseline";
     const add = (label: string, valueHtml: string): void => {
       const dt = document.createElement("div"); dt.style.cssText = "color:var(--fg-dim);font-weight:600;white-space:nowrap"; dt.textContent = label;
       const dd = document.createElement("div"); dd.style.wordBreak = "break-word"; dd.innerHTML = valueHtml;
+      grid.append(dt, dd);
+    };
+    // Variante NŒUD : pour une valeur qui porte un comportement (lien vers le certificat d'origine) — pas de HTML
+    // interpolé, donc pas d'échappement à la main.
+    const addNode = (label: string, node: HTMLElement): void => {
+      const dt = document.createElement("div"); dt.style.cssText = "color:var(--fg-dim);font-weight:600;white-space:nowrap"; dt.textContent = label;
+      const dd = document.createElement("div"); dd.style.wordBreak = "break-word"; dd.appendChild(node);
       grid.append(dt, dd);
     };
     const mono = (s: string): string => `<span style="font-family:var(--mono);font-size:12px;word-break:break-all">${Html.escape(s)}</span>`;
@@ -879,11 +887,80 @@ export class CertsAdminView {
     add(I18n.t("certs.admin.listing.colExpiry"), this.expiryCell(item));
     add(I18n.t("certs.admin.info.sans"), sans.length ? sans.map((s) => this.pill(s.san_type + " · " + s.value, "neutral")).join(" ") : "—");
     add(I18n.t("certs.admin.info.keyOwned"), item.has_key ? I18n.t("certs.admin.info.yes") : I18n.t("certs.admin.info.no"));
-    if (item.revoked_at) add(I18n.t("certs.admin.listing.revoked"), Html.escape(Format.dateTime(item.revoked_at)));
+    if (item.revoked_at) {
+      add(I18n.t("certs.admin.listing.revoked"), Html.escape(Format.dateTime(item.revoked_at)));
+      add(I18n.t("certs.admin.info.revocationReason"), Html.escape(CertsAdminView.revocationReasonText(item.revocation_reason)));
+    }
+    // Lignée : lien vers le certificat d'ORIGINE (aller-retour — sa fiche revient ICI à sa fermeture). L'original
+    // peut être hors de la page courante → on le charge à la demande (getOne). Orphelin toléré (repli sur l'id).
+    if (item.renewed_from) {
+      const link = document.createElement("a"); link.href = "#"; link.style.cursor = "pointer";
+      link.textContent = I18n.t("certs.admin.info.viewOriginal");
+      link.onclick = (e) => { e.preventDefault(); void this.openCertInfoById(item.renewed_from!, () => this.infoModal(item)); };
+      addNode(I18n.t("certs.admin.info.renewedFrom"), link);
+    }
+    if (item.cross_signed_pem) add(I18n.t("certs.admin.info.crossSigned"), I18n.t("certs.admin.info.crossSignedYes"));
+    add(I18n.t("certs.admin.info.comment"), item.comment ? Html.escape(item.comment) : "—");
     add(I18n.t("certs.admin.info.created"), Html.escape(Format.dateTime(item.created_date)));
     add(I18n.t("certs.admin.info.updated"), Html.escape(Format.dateTime(item.updated_date)));
-    root.appendChild(grid);
-    this.host.openModal({ title: I18n.t("certs.admin.info.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true });
+    // Édition du commentaire depuis la fiche (aller-retour : la fiche revient à la fermeture de l'éditeur).
+    const acts = document.createElement("div"); acts.style.cssText = "margin-top:14px;display:flex;justify-content:flex-end";
+    acts.appendChild(this.actionButton(I18n.t("certs.admin.comment.edit"), I18n.t("certs.admin.comment.editTitle"), () => this.commentModal(item, () => this.infoModal(item, reopen))));
+    root.append(grid, acts);
+    // `reopen` (aller-retour) : présent quand cette fiche a été ouverte DEPUIS une autre (lignée) → on y revient
+    // à la fermeture. Absent pour une ouverture directe (onClose null).
+    this.host.openModal({ title: I18n.t("certs.admin.info.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true, onClose: reopen });
+  }
+
+  /** Libellé lisible d'une raison de révocation stockée (code normé + note). Statique/pur côté données ;
+      I18n.t est appliqué ici. Repli « — » si aucune raison. */
+  private static revocationReasonText(stored: string | null | undefined): string {
+    const { code, note } = RevocationReasons.decode(stored);
+    const codeLabel = code && RevocationReasons.LABEL_KEY[code] ? I18n.t(RevocationReasons.LABEL_KEY[code]) : "";
+    const text = [codeLabel, note].filter((s) => s !== "").join(" — ");
+    return text || "—";
+  }
+
+  /** Ouvre la fiche INFO d'un certificat par son id (lignée). Charge ses métadonnées (getOne, aucun secret
+      requis pour la fiche), puis affiche AVEC aller-retour (`reopen` = fiche d'origine à la fermeture).
+      Certificat introuvable (original supprimé — orphelin toléré) → toast neutre, on rouvre la fiche d'origine. */
+  private async openCertInfoById(id: string, reopen: () => void): Promise<void> {
+    try {
+      const detail = await this.client!.getOne(id);
+      this.infoModal(detail, reopen);
+    } catch (_) {
+      Notify.toast(I18n.t("certs.admin.info.originalGone"), "warn");
+      reopen();
+    }
+  }
+
+  /** Éditeur du COMMENTAIRE (métadonnée libre) d'un certificat — modale standard (principe n°11). Enregistre via
+      une mise à jour de métadonnées (metadataInput → save, key_enc conservé). `reopen` = aller-retour vers la
+      fiche d'origine à la fermeture (l'éditeur est appelé depuis la fiche INFO). */
+  private commentModal(item: CertificateListItem, reopen?: () => void): void {
+    const root = document.createElement("div");
+    const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "8px";
+    hint.textContent = I18n.t("certs.admin.comment.hint");
+    const ta = FormControls.textArea(item.comment || "");
+    const field = document.createElement("div"); field.className = "form-field"; field.append(ta);
+    const errBox = this.errBox();
+    root.append(hint, field, errBox);
+    this.host.openModal({
+      title: I18n.t("certs.admin.comment.title"), subtitle: Html.escape(item.label), body: root, onClose: reopen,
+      onSave: async () => {
+        errBox.style.display = "none";
+        this.session.touch();
+        try {
+          const comment = ta.value.trim() === "" ? null : ta.value.trim();
+          await this.client!.save(item.id, CertsAdminView.metadataInput(item, { comment }));
+          item.comment = comment;   // objet capturé mis à jour → la fiche rouverte (aller-retour) montre la nouvelle valeur
+          Notify.toast(I18n.t("certs.admin.comment.toast"), "ok");
+          await this.refreshBody();
+          return true;
+        } catch (e) { this.showError(errBox, e); return false; }
+      },
+    });
+    setTimeout(() => ta.focus(), 30);
   }
 
   /* --------------------------------------------------------------------------
@@ -1128,12 +1205,9 @@ export class CertsAdminView {
     this.session.touch();
     const ids = [...this.selection.keys()];
     const n = ids.length;
-    const ok = await Dialog.confirm({
-      title: I18n.t("certs.admin.bulk.revokeTitle", { count: n }),
-      message: I18n.t("certs.admin.bulk.revokeMessage"),
-      confirmLabel: I18n.t("certs.admin.bulk.revokeBtn"), danger: true,
-    });
-    if (!ok) return;
+    // UNE raison saisie pour tout le lot (D3 du cadrage) — appliquée à chaque révocation.
+    const reason = await this.revocationReasonDialog(I18n.t("certs.admin.bulk.revokeTitle", { count: n }), I18n.t("certs.admin.bulk.revokeMessage"));
+    if (reason === null) return;
 
     let allItems: CertificateListItem[];
     try { allItems = await this.client!.list(); }
@@ -1147,7 +1221,7 @@ export class CertsAdminView {
       const item = byId.get(id);
       if (!item) { errors.push({ label: snap.label, reason: I18n.t("certs.admin.bulk.notFound") }); continue; }
       if (item.revoked_at) { errors.push({ label: item.label, reason: I18n.t("certs.admin.bulk.alreadyRevoked") }); continue; }
-      try { await this.client!.save(id, CertsAdminView.metadataInput(item, { revoked_at: now })); done++; }
+      try { await this.client!.save(id, CertsAdminView.metadataInput(item, { revoked_at: now, revocation_reason: reason })); done++; }
       catch (e) { errors.push({ label: item.label, reason: CertsAdminView.errText(e) }); }
     }
     this.showBulkSummary(I18n.t("certs.admin.bulk.sumRevoke"), [
@@ -1826,17 +1900,37 @@ export class CertsAdminView {
   /** Révocation : PUT métadonnées avec revoked_at=now, SANS key_enc (conservé côté serveur). */
   private async revoke(item: CertificateListItem): Promise<void> {
     this.session.touch();
-    const ok = await Dialog.confirm({
-      title: I18n.t("certs.admin.revoke.title"),
-      message: I18n.t("certs.admin.revoke.message", { label: item.label }),
-      confirmLabel: I18n.t("certs.admin.revoke.btn"), danger: true,
-    });
-    if (!ok) return;
+    const reason = await this.revocationReasonDialog(I18n.t("certs.admin.revoke.title"), I18n.t("certs.admin.revoke.message", { label: item.label }));
+    if (reason === null) return;   // annulé
     try {
-      await this.client!.save(item.id, CertsAdminView.metadataInput(item, { revoked_at: new Date().toISOString() }));
+      await this.client!.save(item.id, CertsAdminView.metadataInput(item, { revoked_at: new Date().toISOString(), revocation_reason: reason }));
       Notify.toast(I18n.t("certs.admin.revoke.toast"), "ok");
       await this.refreshBody();
     } catch (e) { this.actionError(e); }
+  }
+
+  /** Dialogue de RÉVOCATION : raison NORMÉE (select des codes standard X.509) + note libre. Renvoie la raison
+      ENCODÉE (RevocationReasons.encode) sur confirmation, `null` sur annulation. Partagé par la révocation
+      unitaire et groupée. `preselect` = code présélectionné (défaut « unspecified »). */
+  private async revocationReasonDialog(title: string, message: string, preselect: string = "unspecified"): Promise<string | null> {
+    return Dialog.custom({
+      title, variant: "danger", danger: true,
+      confirmLabel: I18n.t("certs.admin.revoke.btn"), cancelLabel: I18n.t("ui.action.cancel"),
+      build: (root: HTMLElement) => {
+        const msg = document.createElement("div"); msg.className = "form-hint"; msg.style.marginBottom = "10px"; msg.textContent = message;
+        root.appendChild(msg);
+        const rf = document.createElement("div"); rf.className = "form-field";
+        const rl = document.createElement("label"); rl.textContent = I18n.t("certs.admin.revoke.reasonLabel");
+        const sel = FormControls.select(REVOCATION_REASON_CODES.map((c) => ({ value: c, label: I18n.t(RevocationReasons.LABEL_KEY[c]) })), preselect);
+        rf.append(rl, sel); root.appendChild(rf);
+        const nf = document.createElement("div"); nf.className = "form-field";
+        const nl = document.createElement("label"); nl.textContent = I18n.t("certs.admin.revoke.noteLabel");
+        const note = FormControls.textArea(""); nf.append(nl, note); root.appendChild(nf);
+        setTimeout(() => sel.focus(), 30);
+        // `collect` (confirmValueFromBuild) : la valeur résolue par le dialogue à la confirmation = raison encodée.
+        return { collect: () => RevocationReasons.encode(sel.value, note.value) };
+      },
+    });
   }
 
   /** Suppression : DELETE avec confirmation ; 409 (descendance) → message clair. */
