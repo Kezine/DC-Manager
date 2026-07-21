@@ -245,7 +245,9 @@ export class Shell {
   private buildSettingsMenu(): HTMLElement {
     const wrap = document.createElement("div"); wrap.className = "settings-menu";
     const btn = document.createElement("button"); btn.type = "button"; btn.className = "icon-btn"; btn.title = I18n.t("shell.settings.title"); btn.setAttribute("aria-haspopup", "menu");
-    btn.appendChild(svgIcon('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'));
+    // Réglages UI/utilisateur : icône « double slider empilé » (deux curseurs horizontaux à positions distinctes) —
+    // le rouage denté est désormais réservé au groupe « Paramètres » (contacts + notifications), cf. Icons.SETTINGS.
+    btn.appendChild(svgIcon('<line x1="3" y1="8" x2="14" y2="8"/><line x1="18" y1="8" x2="21" y2="8"/><circle cx="16" cy="8" r="2"/><line x1="3" y1="16" x2="8" y2="16"/><line x1="12" y1="16" x2="21" y2="16"/><circle cx="10" cy="16" r="2"/>'));
     const pop = document.createElement("div"); pop.className = "settings-popover"; pop.setAttribute("role", "menu");
     const section = (title: string) => { const s = document.createElement("div"); s.className = "settings-section"; const t = document.createElement("div"); t.className = "settings-section-title"; t.textContent = title; s.appendChild(t); pop.appendChild(s); return s; };
 
