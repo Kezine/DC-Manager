@@ -84,6 +84,7 @@
     --role-mgmt: oklch(0.74 0.13 236);
     --role-data: oklch(0.76 0.15 152);
     --role-power: oklch(0.77 0.15 68);
+    --role-poe: oklch(0.82 0.15 102);   /* POE = data+énergie : or/lime entre data(152) et power(68), tirant vers le power */
     /* Anneau de focus clavier (cf. règle :focus-visible globale) = couleur du petit texte accent (AA).
        Défini une seule fois : var(--accent-text) se résout par thème là où l'anneau est appliqué. */
     --focus: var(--accent-text);
@@ -129,6 +130,7 @@
     --role-mgmt: oklch(0.50 0.13 250);
     --role-data: oklch(0.52 0.14 152);
     --role-power: oklch(0.53 0.13 60);
+    --role-poe: oklch(0.54 0.14 102);
     --viz-equip-bg: #e6f1fb;
     --viz-equip-fg: #0c447c;
   }
@@ -678,6 +680,7 @@
   .pill.role-mgmt { border-color: var(--role-mgmt); color: var(--role-mgmt); }
   .pill.role-data { border-color: var(--role-data); color: var(--role-data); }
   .pill.role-power { border-color: var(--role-power); color: var(--role-power); }
+  .pill.role-poe { border-color: var(--role-poe); color: var(--role-poe); }
   .pill.status-brouillon { border-color: var(--accent-2); color: var(--accent-2); border-style: dashed; }
   .pill.status-planifie { border-color: var(--fg-dimmer); color: var(--fg-dim); }
   .pill.status-cable { border-color: var(--ok); color: var(--ok); }

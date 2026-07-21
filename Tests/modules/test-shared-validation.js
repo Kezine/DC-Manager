@@ -843,4 +843,22 @@ module.exports = async () => {
     ck.eq(Validation.DataValidator.validateRecord("ipAddresses", { address: "10.0.0.7", network_id: "net1" }, batchFetch).some((e) => e.code === "cross_entity"), true, "batch : IP hors du nouveau CIDR → rejetée");
   }
   });
+
+  await section("shared : POE — port POE exige un équipement POE (T-POE1) + capacité non retirable (T-POE2)", async () => {
+  {
+    const V = (coll, rec, fetch, find) => Validation.DataValidator.validateRecord(coll, rec, fetch, find);
+    // T-POE1 : un port role="poe" EXIGE que son équipement porteur soit poe_device.
+    const fetchNoPoe = (coll, id) => (coll === "equipments" && id === "E1") ? { id: "E1", poe_device: false } : null;
+    const fetchPoe   = (coll, id) => (coll === "equipments" && id === "E1") ? { id: "E1", poe_device: true }  : null;
+    ck(V("ports", { id: "P1", name: "poe-1", role: "poe", equipment_id: "E1" }, fetchNoPoe, () => []).some((e) => e.path === "role" && e.code === "cross_entity"), "T-POE1 : port POE sur équipement NON-POE → cross_entity");
+    ck.eq(V("ports", { id: "P1", name: "poe-1", role: "poe", equipment_id: "E1" }, fetchPoe, () => []).filter((e) => e.path === "role").length, 0, "T-POE1 : port POE sur équipement POE → OK");
+    ck.eq(V("ports", { id: "P2", name: "eth0", role: "data", equipment_id: "E1" }, fetchNoPoe, () => []).filter((e) => e.path === "role").length, 0, "T-POE1 : port DATA → règle non applicable");
+    // T-POE2 : on ne peut pas retirer la capacité POE (poe_device faux) tant qu'un port POE existe.
+    const eqBase = { name: "sw", type: "switch", depth: "full", placement_mode: "manual", u_height: 1, inventory_only: false, group_id: null, id: "E1" };
+    const findPoePort = (coll, field, value) => (coll === "ports" && field === "equipment_id" && value === "E1") ? [{ id: "P1", role: "poe", equipment_id: "E1" }] : [];
+    ck(V("equipments", { ...eqBase, poe_device: false }, () => null, findPoePort).some((e) => e.path === "poe_device" && e.code === "scope"), "T-POE2 : désactiver POE avec un port POE présent → scope");
+    ck.eq(V("equipments", { ...eqBase, poe_device: true }, () => null, findPoePort).filter((e) => e.path === "poe_device").length, 0, "T-POE2 : poe_device actif → OK malgré le port POE");
+    ck.eq(V("equipments", { ...eqBase, poe_device: false }, () => null, () => []).filter((e) => e.path === "poe_device").length, 0, "T-POE2 : aucun port POE → désactivation OK");
+  }
+  });
 };

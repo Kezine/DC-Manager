@@ -23,4 +23,10 @@ export class PortRoles {
   static forKind(kind: string): PortRoleDef[] {
     return PORT_ROLES.filter((r) => r.kind === (kind || "data"));
   }
+
+  /** Le rôle transporte-t-il du POE (data + alimentation) ? Le POE est de `kind: "data"` (connecteurs/réseaux
+      data) mais participe à l'énergie et fait porter l'éclair d'avertissement aux câbles — marqueur = l'ID "poe". */
+  static isPoe(roleId: string): boolean {
+    return roleId === "poe";
+  }
 }

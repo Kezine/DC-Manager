@@ -458,6 +458,9 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       // CONSOMMATION (W) d'un équipement consommateur — courant dérivé de la tension du circuit (cf. Store).
       power_nominal_w: { type: "number", nullable: true, default: null, min: 0 },
       power_max_w:     { type: "number", nullable: true, default: null, min: 0 },
+      // POE : équipement capable de PoE (déverrouille le rôle "poe") + budget POE TOTAL partagé (W).
+      poe_device:      { type: "boolean", default: false },
+      poe_budget_w:    { type: "number", nullable: true, default: null, min: 0 },
       // NB : les FK face_image_* visent le magasin d'images (hors modèle) → pas de `ref` (collection non modélisée).
     },
     invariants: [
@@ -510,6 +513,13 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       (eq, find, fetch) => RackDepth.backToBack(eq, find, fetch),
       // V6e : pas de chevauchement entre équipements posés sur la MÊME étagère.
       (eq, find, fetch) => TrayFit.overlap(eq, find, fetch),
+      // T-POE2 : on ne peut pas RETIRER la capacité POE (poe_device faux) tant qu'un port POE est défini sur
+      //          l'équipement (message clair côté équipement ; T-POE1 verrouille aussi côté port via les dependents).
+      (eq, find) => {
+        if (eq.poe_device === true) return null;
+        const poePort = find("ports", "equipment_id", eq.id).find((p: any) => p.role === "poe");
+        return poePort ? { path: "poe_device", message: "Retirez d'abord les ports POE avant de désactiver la capacité POE." } : null;
+      },
     ],
     // V5b (P4a) : re-typer un équipement en « patch_panel » par API/import alors que ses ports assertent un réseau
     // les laisserait porteurs → contamine la déduction (T7 : un patch n'assert rien). On re-valide donc ses ports au
@@ -638,6 +648,8 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       direction:      { type: "string", default: "", enum: ["", "source", "sink"] },
       power_max_a:    { type: "number", nullable: true, default: null, min: 0 },
       phase:          { type: "string", default: "", enum: ["", "L1", "L2", "L3"] },
+      // POE (rôle "poe") : budget max du port en WATTS (délivré si producteur / tiré si consommateur).
+      poe_budget_w:   { type: "number", nullable: true, default: null, min: 0 },
     },
     invariants: [
       // T1 : position de façade complète (X ET Y) ou absente (aucun des deux).
@@ -682,6 +694,13 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
         if (!port.equipment_id || !(Array.isArray(port.network_ids) && port.network_ids.length)) return null;
         const eq = fetch("equipments", port.equipment_id);
         return (eq && eq.type === "patch_panel") ? { path: "network_ids", message: "Un port de patch ne porte pas de réseau (il le déduit du chemin)." } : null;
+      },
+      // T-POE1 : un port POE (role "poe") EXIGE un équipement porteur marqué « POE » (poe_device). Rejoué au
+      //          changement d'équipement (dependents equipments→ports) → désactiver poe_device avec des ports POE échoue.
+      (port, fetch) => {
+        if (port.role !== "poe" || !port.equipment_id) return null;
+        const eq = fetch("equipments", port.equipment_id);
+        return (eq && eq.poe_device !== true) ? { path: "role", message: "Un port POE exige un équipement marqué « POE »." } : null;
       },
     ],
     scope: [

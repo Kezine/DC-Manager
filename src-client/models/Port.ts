@@ -57,6 +57,10 @@ export class Port extends Entity {
   power_max_a: number | null;
   /** Phase assertée sur un départ (source) : "" | "L1" | "L2" | "L3". Déduite en aval. */
   phase: string;
+  /** POE (rôle "poe") : budget MAX du port en WATTS — délivré par un producteur (PSE, direction "source") ou
+      tiré par un consommateur (PD, direction "sink"). Distinct de `power_max_a` (ampères des ports power).
+      null = non renseigné / non applicable. */
+  poe_budget_w: number | null;
 
   constructor(p: Props = {}) {
     super(p);
@@ -80,5 +84,6 @@ export class Port extends Entity {
     this.direction = (p.direction === "source" || p.direction === "sink") ? p.direction : "";
     this.power_max_a = (p.power_max_a != null && p.power_max_a !== "") ? Math.max(0, +p.power_max_a || 0) : null;
     this.phase = (p.phase === "L1" || p.phase === "L2" || p.phase === "L3") ? p.phase : "";
+    this.poe_budget_w = (p.poe_budget_w != null && p.poe_budget_w !== "") ? Math.max(0, +p.poe_budget_w || 0) : null;
   }
 }

@@ -127,12 +127,15 @@ export const POWER_PHASES = ["L1", "L2", "L3"];
 /** Seuil de charge (fraction du calibre) au-delà duquel on alerte (règle de l'art : 80 % en continu). */
 export const POWER_LOAD_WARN_FRACTION = 0.8;
 
-/** Rôles de port (catégorie data | power). */
+/** Rôles de port (catégorie data | power). NB : le POE est un rôle de `kind: "data"` (il passe sur l'Ethernet
+    → connecteurs et réseaux DATA) mais transporte AUSSI de l'énergie ; sa nature « porteur de puissance » est
+    portée par l'ID du rôle ("poe" — cf. PortRoles.isPoe), pas par le `kind` binaire (inchangé). */
 export interface PortRoleDef { id: string; labelKey: string; kind: "data" | "power"; }
 export const PORT_ROLES: PortRoleDef[] = [
   { id: "mgmt",  labelKey: "domain.portRole.mgmt",  kind: "data" },
   { id: "data",  labelKey: "domain.portRole.data",  kind: "data" },
   { id: "power", labelKey: "domain.portRole.power", kind: "power" },
+  { id: "poe",   labelKey: "domain.portRole.poe",   kind: "data" },   // data + alimentation (PoE) — réservé aux équipements POE
 ];
 
 /* ---- profondeur d'équipement en mm (remplace l'enum legacy full/half/quarter) ---- */

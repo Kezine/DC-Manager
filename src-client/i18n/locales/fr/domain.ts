@@ -49,6 +49,7 @@ export const domain = {
     mgmt: "Mgmt",
     data: "Data",
     power: "Power",
+    poe: "POE",
   },
   mountDepth: {
     full: "Full-depth",

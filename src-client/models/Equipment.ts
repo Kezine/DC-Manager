@@ -34,6 +34,12 @@ export class Equipment extends Entity {
   power_nominal_w: number | null;
   /** CONSOMMATION maximale (W) — pointe. Sert au dimensionnement (rating PSU ≥ max ⇒ redondance réelle). null = idem nominale. */
   power_max_w: number | null;
+  /** Équipement CAPABLE DE POE (PSE/PD) : déverrouille le rôle de port "poe". NON désactivable tant qu'un
+      port POE existe (sinon on orphelinerait ces ports — cf. validation partagée). */
+  poe_device: boolean;
+  /** Budget POE TOTAL (W) — pool PARTAGÉ par tous les ports POE producteurs de l'équipement. Une survente
+      (Σ budgets producteurs > ce total) est signalée (analyse énergie). null = non renseigné. */
+  poe_budget_w: number | null;
   /** « Inventaire seul » : répertorié uniquement (ni placé, ni câblé, ni de ports). */
   inventory_only: boolean;
   /** Positionnement VERROUILLÉ : empêche déplacement / rotation / retrait (baie · salle · étagère · étage)
@@ -178,6 +184,8 @@ export class Equipment extends Entity {
     this.pdu_max_a = (p.pdu_max_a != null && p.pdu_max_a !== "") ? Math.max(0, +p.pdu_max_a || 0) : null;
     this.power_nominal_w = (p.power_nominal_w != null && p.power_nominal_w !== "") ? Math.max(0, +p.power_nominal_w || 0) : null;
     this.power_max_w = (p.power_max_w != null && p.power_max_w !== "") ? Math.max(0, +p.power_max_w || 0) : null;
+    this.poe_device = p.poe_device === true;
+    this.poe_budget_w = (p.poe_budget_w != null && p.poe_budget_w !== "") ? Math.max(0, +p.poe_budget_w || 0) : null;
     this.inventory_only = p.inventory_only === true;
     this.locked = p.locked === true;
     this.group_id = p.group_id || null;
