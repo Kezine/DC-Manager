@@ -432,6 +432,19 @@ module.exports = async () => {
     ck.eq(reCaCert.getExtension(x509.SubjectKeyIdentifierExtension).keyId, caSki.keyId, "reSignRootCa : SubjectKeyIdentifier INCHANGÉ (même clé → AKI des feuilles toujours valide)");
     ck(await reCaCert.verify({ publicKey: reCaCert.publicKey, signatureOnly: true }), "reSignRootCa : nouvelle CA auto-signée cohérente");
 
+    /* -------- crossSignCa : la NOUVELLE CA certifiée par l'ANCIENNE (rotation de clé, recouvrement) -------- */
+    const oldCaR = await X509Factory.createRootCa({ commonName: "Ancienne CA", keyAlgo: "ec-p256", days: 3650 });
+    const newCaR = await X509Factory.createRootCa({ commonName: "Ancienne CA", keyAlgo: "ec-p256", days: 3650 });   // même sujet, NOUVELLE clé
+    const cross = await X509Factory.crossSignCa({ subjectCaCertPem: newCaR.certPem, issuerCaCertPem: oldCaR.certPem, issuerCaPrivateKeyPkcs8Pem: oldCaR.privateKeyPkcs8Pem, days: 3650 });
+    const oldCaCertR = new x509.X509Certificate(oldCaR.certPem);
+    const crossCert = new x509.X509Certificate(cross.certPem);
+    ck.eq(await crossCert.verify({ publicKey: oldCaCertR.publicKey, signatureOnly: true }), true, "crossSignCa : cross-cert signé par l'ANCIENNE CA");
+    const crossBasic = crossCert.getExtension(x509.BasicConstraintsExtension);
+    ck(!!crossBasic && crossBasic.ca === true, "crossSignCa : cross-cert est une CA (CA=true)");
+    const leafUnderNew = await X509Factory.issueLeaf({ caCertPem: newCaR.certPem, caPrivateKeyPkcs8Pem: newCaR.privateKeyPkcs8Pem, commonName: "svc.exemple.test", keyAlgo: "ec-p256", days: 90, sans: [] });
+    ck.eq(await new x509.X509Certificate(leafUnderNew.certPem).verify({ publicKey: crossCert.publicKey, signatureOnly: true }), true, "crossSignCa : feuille de la nouvelle CA valide via la clé du cross-cert (chaîne transitoire vers l'ancien root)");
+    ck(Date.parse(cross.notAfter) <= Date.parse(oldCaR.notAfter), "crossSignCa : échéance rognée à celle de l'ancienne CA");
+
     /* -------- Roundtrip PKCS#8 : la clé privée PEM se ré-importe via WebCrypto -------- */
     const der = x509.PemConverter.decodeFirst(leaf.privateKeyPkcs8Pem);
     const reimported = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);

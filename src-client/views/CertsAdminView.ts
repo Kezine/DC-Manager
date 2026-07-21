@@ -1736,11 +1736,19 @@ export class CertsAdminView {
             const keyAlgo = (["ec-p256", "rsa-2048", "rsa-4096"] as string[]).includes(ca.key_algo) ? ca.key_algo as X509KeyAlgo : "ec-p256";
             const gen = await X509Factory.createRootCa({ commonName: cn, organization, organizationalUnit, keyAlgo, days: requested });
             const newKeyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
+            // CROSS-SIGNATURE (phase 6) : l'ANCIENNE CA certifie la clé de la NOUVELLE → recouvrement transitoire
+            // (un client qui fait encore confiance à l'ancien root valide les nouvelles feuilles). Généré AVANT la
+            // révocation (on a encore la clé de l'ancienne). Échéance rognée à celle de l'ancienne CA (dans crossSignCa).
+            let crossPem: string | undefined;
+            try {
+              crossPem = (await X509Factory.crossSignCa({ subjectCaCertPem: gen.certPem, issuerCaCertPem: caDetail.public_pem || "", issuerCaPrivateKeyPkcs8Pem: oldCaKey, days: requested })).certPem;
+            } catch (_) { crossPem = undefined; }   // cross-signature best-effort : son échec ne bloque pas la rotation
             const newCaId = CertsAdminView.newId();
             await this.client!.save(newCaId, {
               kind: "root-ca", parent_id: null, label: ca.label, subject: ca.subject,
               serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
-              key_algo: keyAlgo, public_pem: gen.certPem, key_enc: newKeyEnc, revoked_at: null, sans: [], renewed_from: ca.id,
+              key_algo: keyAlgo, public_pem: gen.certPem, key_enc: newKeyEnc, revoked_at: null, sans: [],
+              cross_signed_pem: crossPem, renewed_from: ca.id,
             });
             await this.revokeSuperseded(ca);   // ancienne CA remplacée
             effectiveCa = await this.client!.getOne(newCaId);
@@ -1981,6 +1989,9 @@ export class CertsAdminView {
       addTextArtifact(I18n.t("certs.admin.export.pubPem"), async () => CertExports.pemCertificate(rec));
       addTextArtifact(I18n.t("certs.admin.export.fullchain"), async () => CertExports.pemFullchain(rec, all));
       if (item.kind === "leaf-tls") addTextArtifact(I18n.t("certs.admin.export.caChain"), async () => CertExports.pemCaChain(rec, all));
+      // Certificat CROISÉ d'une CA issue d'une rotation de clé (phase 6) : à déployer chez les clients qui font
+      // encore confiance à l'ancien root, pour valider les nouvelles feuilles pendant la transition.
+      if (item.cross_signed_pem) addTextArtifact(I18n.t("certs.admin.export.crossCert"), async () => ({ filename: CertExports.safeFileName(item.label) + ".cross.pem", mime: CertExports.MIME_PEM, content: item.cross_signed_pem! }));
       if (item.has_key) {
         addTextArtifact(I18n.t("certs.admin.export.keyPem"), async () => CertExports.pemPrivateKey(item.label, await this.decryptKey(item.id)), { sensitive: true });
         addAction(I18n.t("certs.admin.export.pkcs12"), async () => { this.pkcs12Flow(item, rec, all); return true; }, locked);

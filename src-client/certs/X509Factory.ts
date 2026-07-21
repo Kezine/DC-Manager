@@ -137,6 +137,53 @@ export class X509Factory {
     };
   }
 
+  /** CROSS-SIGNE une CA : produit un certificat qui CERTIFIE la clé de la NOUVELLE CA (`subjectCaCertPem`)
+      SOUS l'ANCIENNE CA (`issuerCaCertPem`, signature par sa clé). Sert le renouvellement par ROTATION DE CLÉ
+      (cadrage §Phase 6) : pendant la transition, un client qui fait encore confiance à l'ancien root peut valider
+      les nouvelles feuilles via ce maillon croisé (feuille → nouvelle CA [cross] → ancienne CA de confiance).
+      Subject/clé publique = ceux de la NOUVELLE CA ; Issuer = l'ancienne. CA=true. La validité est ROGNÉE à
+      l'échéance de l'ancienne CA (elle ne peut pas certifier au-delà de sa propre vie — même invariant que le guard). */
+  static async crossSignCa(opts: {
+    subjectCaCertPem: string;
+    issuerCaCertPem: string;
+    issuerCaPrivateKeyPkcs8Pem: string;
+    days: number;
+  }): Promise<{ certPem: string; serial: string; fingerprintSha256: string; notBefore: string; notAfter: string }> {
+    X509Factory.ensureProvider();
+    const days = X509Factory.requirePositiveDays(opts.days);
+    let subjectCert: x509.X509Certificate;
+    try { subjectCert = new x509.X509Certificate(opts.subjectCaCertPem); }
+    catch { throw new Error("X509Factory : certificat de la nouvelle CA illisible (cross-signature impossible)"); }
+    const { caCert: issuerCert, caPrivateKey: issuerKey, caSignAlgo } = await X509Factory.importCa(opts.issuerCaCertPem, opts.issuerCaPrivateKeyPkcs8Pem);
+    const subjectPublicKey = await subjectCert.publicKey.export(crypto);
+    const window = X509Factory.validityWindow(days);
+    const notBefore = window.notBefore;
+    // Le cross-cert est émis PAR l'ancienne CA → il ne peut vivre au-delà d'elle (recouvrement transitoire) → rognage.
+    const notAfter = window.notAfter.getTime() > issuerCert.notAfter.getTime() ? issuerCert.notAfter : window.notAfter;
+    const cert = await x509.X509CertificateGenerator.create({
+      serialNumber: X509Factory.randomSerialHex(),
+      subject: subjectCert.subject,   // sujet DN de la NOUVELLE CA (chaîne)
+      issuer: issuerCert.subject,     // émetteur = l'ANCIENNE CA
+      notBefore, notAfter,
+      signingAlgorithm: caSignAlgo,
+      publicKey: subjectPublicKey,    // on certifie la CLÉ de la nouvelle CA (pas une clé neuve)
+      signingKey: issuerKey,
+      extensions: [
+        new x509.BasicConstraintsExtension(true, undefined, true),   // c'est bien une CA
+        new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
+        await x509.SubjectKeyIdentifierExtension.create(subjectPublicKey, false, crypto),   // SKI = clé de la nouvelle CA
+        await x509.AuthorityKeyIdentifierExtension.create(issuerCert.publicKey, false, crypto),   // AKI → ancienne CA
+      ],
+    }, crypto);
+    return {
+      certPem: cert.toString("pem"),
+      serial: cert.serialNumber,
+      fingerprintSha256: await X509Factory.fingerprintSha256(cert.rawData),
+      notBefore: cert.notBefore.toISOString(),
+      notAfter: cert.notAfter.toISOString(),
+    };
+  }
+
   /** Émet une feuille signée par la CA. La clé privée de la CA est fournie
       DÉCHIFFRÉE par l'appelant (session déverrouillée) — cette fabrique ne
       connaît pas la clé maître et ne déchiffre rien elle-même. */

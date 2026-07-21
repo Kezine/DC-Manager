@@ -417,6 +417,7 @@ export const certs = {
       allZipWithKey: " — cert + private key",
       allZipPublic: " — public artifacts",
       pubPem: "Public certificate (.pem)",
+      crossCert: "Cross certificate (.cross.pem)",
       fullchain: "Full chain (fullchain.pem)",
       caChain: "Authority chain (ca-chain.pem)",
       keyPem: "Private key (.key.pem)",
