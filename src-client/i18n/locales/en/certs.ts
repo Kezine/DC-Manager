@@ -330,6 +330,8 @@ export const certs = {
       usageHint: "Server (inbound TLS), client (authentication) or both.",
       algoHint: "EC P-256 or RSA.",
       daysHint: "Default 397 (browser limit for a server certificate).",
+      caCeiling: "Capped at the CA's expiry ({{date}}, {{days}} days max).",
+      exceedsCa: "The duration exceeds the CA's expiry ({{date}}): reduce it to at most {{days}} days.",
       title: "Issue a TLS certificate",
       noKey: "This CA holds no private key — issuance impossible.",
       toast: "TLS certificate issued",

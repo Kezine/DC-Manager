@@ -30,6 +30,7 @@ import { OpenSshEncoder, type SshCertType } from "../certs/OpenSshEncoder";
 import { SshKeyMaterial } from "../certs/SshKeyMaterial";
 import { SshWire } from "../certs/SshWire";
 import { CertExports, type CertExportRecord, type ExportArtifact } from "../certs/CertExports";
+import { CertValidity } from "../certs/CertValidity";
 import { CertZip, type CertBundleRecord, type ExportCategoryKey } from "../certs/CertZip";
 import { BulkActions, type CertSelectionSnapshot } from "../certs/BulkActions";
 import * as x509 from "@peculiar/x509";
@@ -1428,8 +1429,16 @@ export class CertsAdminView {
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.usageField"), usage, I18n.t("certs.admin.leaf.usageHint")));
     const algo = FormControls.select(CertsAdminView.algoX509Opts(), "ec-p256");
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.algoField"), algo, I18n.t("certs.admin.leaf.algoHint")));
-    const days = FormControls.number(397, { min: 1, step: 1 });
-    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, I18n.t("certs.admin.leaf.daysHint")));
+    // GUARD (formulaire) : la feuille ne peut vivre au-delà de la CA → on plafonne la durée à ce qui reste
+    // sur la CA (`caDaysLeft`) et on le RAPPELLE dans l'indication. Un root-ca a toujours une échéance
+    // (caDaysLeft non nul) ; la validation de sauvegarde et X509Factory forment le double filet.
+    const caDaysLeft = CertValidity.daysUntil(ca.not_after, Date.now());
+    const defaultDays = caDaysLeft != null ? Math.min(397, Math.max(1, caDaysLeft)) : 397;
+    const days = FormControls.number(defaultDays, caDaysLeft != null ? { min: 1, max: caDaysLeft, step: 1 } : { min: 1, step: 1 });
+    const daysHint = caDaysLeft != null
+      ? I18n.t("certs.admin.leaf.daysHint") + " " + I18n.t("certs.admin.leaf.caCeiling", { date: (ca.not_after || "").slice(0, 10), days: caDaysLeft })
+      : I18n.t("certs.admin.leaf.daysHint");
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, daysHint));
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
@@ -1441,6 +1450,9 @@ export class CertsAdminView {
         this.session.touch();
         const commonName = cn.value.trim();
         if (commonName === "") { this.showError(errBox, I18n.t("certs.admin.common.cnRequired")); return false; }
+        if (CertValidity.exceedsCa(Number(days.value), ca.not_after, Date.now())) {
+          this.showError(errBox, I18n.t("certs.admin.leaf.exceedsCa", { date: (ca.not_after || "").slice(0, 10), days: caDaysLeft ?? 0 })); return false;
+        }
         const sans = sanEditor.collect();
         try {
           const detail = await this.client!.getOne(ca.id);

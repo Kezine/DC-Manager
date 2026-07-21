@@ -335,6 +335,8 @@ export const certs = {
       usageHint: "Serveur (TLS entrant), client (authentification) ou les deux.",
       algoHint: "EC P-256 ou RSA.",
       daysHint: "Défaut 397 (limite navigateurs pour un certificat serveur).",
+      caCeiling: "Plafonné à l'échéance de la CA ({{date}}, {{days}} j max).",
+      exceedsCa: "La durée dépasse l'échéance de la CA ({{date}}) : réduisez-la à {{days}} jours au plus.",
       title: "Émettre un certificat TLS",
       noKey: "Cette CA ne détient pas de clé privée — émission impossible.",
       toast: "Certificat TLS émis",

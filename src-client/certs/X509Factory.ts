@@ -124,6 +124,15 @@ export class X509Factory {
     const keys = await crypto.subtle.generateKey(algos.generate, true, ["sign", "verify"]);
     const { notBefore, notAfter } = X509Factory.validityWindow(days);
 
+    // GUARD (cadrage renouvellement) : une feuille ne peut PAS vivre au-delà de sa CA — un maillon dont la
+    // validité déborde l'ancre est rejeté par les vérificateurs. On BLOQUE l'émission ici (source de vérité de
+    // l'invariant ; le formulaire plafonne la durée en amont, ceci est le filet). La CA est déjà parsée
+    // (`caCert`) → on lit son échéance sans paramètre supplémentaire.
+    if (notAfter.getTime() > caCert.notAfter.getTime()) {
+      throw new Error("X509Factory : la validité de la feuille dépasse celle de la CA (échéance CA : "
+        + caCert.notAfter.toISOString().slice(0, 10) + ") — réduisez la durée");
+    }
+
     const cert = await x509.X509CertificateGenerator.create({
       serialNumber: X509Factory.randomSerialHex(),
       subject: X509Factory.buildDistinguishedName(opts.commonName, opts.organization, opts.organizationalUnit),

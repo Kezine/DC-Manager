@@ -8,6 +8,24 @@
 const { ck, section, D } = require("./harness.js");
 
 module.exports = async () => {
+  await section("Certs : CertValidity — plafonnement de durée enfant ≤ CA (logique PURE)", async () => {
+  {
+    const { CertValidity } = D("certs/CertValidity.js");
+    const NOW = Date.parse("2026-07-21T00:00:00Z");
+    const in100 = new Date(NOW + 100 * 86400000).toISOString();
+    ck.eq(CertValidity.daysUntil(in100, NOW), 100, "daysUntil : 100 jours restants");
+    ck.eq(CertValidity.daysUntil(null, NOW), null, "daysUntil : pas d'échéance (CA SSH) → null (aucun plafond)");
+    ck.eq(CertValidity.daysUntil("pas-une-date", NOW), null, "daysUntil : date illisible → null");
+    ck.eq(CertValidity.daysUntil(new Date(NOW - 86400000).toISOString(), NOW), 0, "daysUntil : échéance passée → 0 (plancher)");
+    ck.eq(CertValidity.clampDays(365, in100, NOW), 100, "clampDays : demande 365 sous CA à 100 j → rognée à 100");
+    ck.eq(CertValidity.clampDays(30, in100, NOW), 30, "clampDays : demande 30 sous CA à 100 j → inchangée");
+    ck.eq(CertValidity.clampDays(365, null, NOW), 365, "clampDays : CA sans échéance → demande inchangée");
+    ck.eq(CertValidity.exceedsCa(365, in100, NOW), true, "exceedsCa : 365 > 100 → vrai");
+    ck.eq(CertValidity.exceedsCa(50, in100, NOW), false, "exceedsCa : 50 ≤ 100 → faux");
+    ck.eq(CertValidity.exceedsCa(365, null, NOW), false, "exceedsCa : CA sans échéance → faux");
+  }
+  });
+
   await section("Certs : CertsFormat — échéances colorées, arbre CA/dérivés, libellés de kind (logique PURE)", async () => {
   {
     const { CertsFormat } = D("core/CertsFormat.js");
@@ -371,6 +389,16 @@ module.exports = async () => {
     });
     const ekuBoth = new x509.X509Certificate(leafBoth.certPem).getExtension(x509.ExtendedKeyUsageExtension).usages;
     ck(ekuBoth.includes(x509.ExtendedKeyUsage.serverAuth) && ekuBoth.includes(x509.ExtendedKeyUsage.clientAuth), "usage « both » → serverAuth + clientAuth");
+
+    /* -------- GUARD : une feuille ne peut vivre AU-DELÀ de sa CA -------- */
+    const shortCa = await X509Factory.createRootCa({ commonName: "CA courte", keyAlgo: "ec-p256", days: 30 });
+    let guardErr = null;
+    try {
+      await X509Factory.issueLeaf({ caCertPem: shortCa.certPem, caPrivateKeyPkcs8Pem: shortCa.privateKeyPkcs8Pem, commonName: "trop-long.exemple.test", keyAlgo: "ec-p256", days: 365, sans: [] });
+    } catch (e) { guardErr = e.message; }
+    ck(!!guardErr && /dépasse celle de la CA/.test(guardErr), "guard : feuille dont la validité dépasse la CA → émission REFUSÉE");
+    const okLeaf = await X509Factory.issueLeaf({ caCertPem: shortCa.certPem, caPrivateKeyPkcs8Pem: shortCa.privateKeyPkcs8Pem, commonName: "ok.exemple.test", keyAlgo: "ec-p256", days: 10, sans: [] });
+    ck(/-----BEGIN CERTIFICATE-----/.test(okLeaf.certPem), "guard : feuille de durée ≤ CA → émise normalement");
 
     /* -------- Roundtrip PKCS#8 : la clé privée PEM se ré-importe via WebCrypto -------- */
     const der = x509.PemConverter.decodeFirst(leaf.privateKeyPkcs8Pem);
