@@ -15,5 +15,6 @@ export const analysis = {
     spof: "Non-redundant power feeds — same origin source (single point of failure).",
     originUnknown: "Power feed origin undeterminable (direction or upstream board not set) — redundancy not verifiable.",
     psuUndersized: "Power feed “{{name}}” ({{amps}} A) insufficient for the max load alone ({{req}} A required).",
+    poeOverBudget: "POE over-budget: {{alloc}} W allocated to producer ports exceed the {{budget}} W budget.",
   },
 } as const;

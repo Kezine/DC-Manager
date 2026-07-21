@@ -517,6 +517,29 @@ module.exports = async () => {
     await s.create("cables", { from_port_id: p4a.id, to_port_id: dataPort.id });        // câblé mais pas vers une source
     ck.eq(pa.rootSourcesOf(p4a.id).length, 0, "power : sink câblé vers un port sans sens → aucune racine");
     ck.eq(pa.equipmentWarnings(srv4.id).some((w) => w.code === "no_source"), true, "power : sink câblé mais non alimenté → no_source");
+
+    // ---- POE : le PoE FOURNI (Σ budgets producteurs) s'ajoute à la conso de l'équipement ; bilan de budget + survente ----
+    const sw = await s.create("equipments", { name: "sw-poe", power_nominal_w: 50, poe_device: true, poe_budget_w: 90 });
+    const swPsu = await s.create("ports", { equipment_id: sw.id, name: "PSU", role: "power", direction: "sink", power_max_a: 4 });
+    await s.create("ports", { equipment_id: sw.id, name: "poe-1", role: "poe", direction: "source", poe_budget_w: 30 });
+    await s.create("ports", { equipment_id: sw.id, name: "poe-2", role: "poe", direction: "source", poe_budget_w: 30 });
+    const out5 = await s.create("ports", { equipment_id: pdu.id, name: "C5", role: "power", direction: "source", power_max_a: 16 });
+    await s.create("cables", { from_port_id: out5.id, to_port_id: swPsu.id });   // PDU → switch PoE
+    {
+      const paP = new PowerAnalysis(s);   // instance fraîche (le store a muté depuis `pa`)
+      // conso = base 50 W + PoE fourni 60 W = 110 W → 110 / 230 V ≈ 0,478 A tirés par l'unique PSU.
+      ck(Math.abs(paP.leafSinkCurrentA(swPsu, false) - (110 / 230)) < 0.01, "POE : conso du switch = base 50 W + PoE fourni 60 W (110 W)");
+      const supply = paP.poeSupply(sw.id);
+      ck(supply.allocatedW === 60 && supply.budgetW === 90 && !supply.over, "POE : bilan 60 W alloués / 90 W budget, pas de survente");
+      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_over_budget"), false, "POE : sous le budget → pas d'avertissement");
+    }
+    // SURVENTE : un 3e producteur pousse à 100 W > 90 W budget.
+    await s.create("ports", { equipment_id: sw.id, name: "poe-3", role: "poe", direction: "source", poe_budget_w: 40 });
+    {
+      const paP = new PowerAnalysis(s);
+      ck.eq(paP.poeSupply(sw.id).over, true, "POE : 100 W alloués > 90 W budget → survente (over)");
+      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_over_budget"), true, "POE : survente → avertissement poe_over_budget");
+    }
   }
   });
 
