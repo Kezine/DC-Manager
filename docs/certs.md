@@ -267,10 +267,16 @@ client ; le serveur ne stocke que des métadonnées lisibles et ces blobs opaque
   `kind`, `parent_id` (émetteur), `label`, `subject`, `serial`, `not_before`,
   `not_after`, `fingerprint`, `key_algo`, `public_pem` (PUBLIC par nature),
   `key_enc` (**clé privée chiffrée client** — blob opaque), `revoked_at`,
+  **`comment`** (note libre de l'opérateur), **`revocation_reason`** (code CRL X.509 + note
+  éventuelle, posé à la révocation — cf. « Renouvellement & révocation »), **`renewed_from`**
+  (id du certificat d'ORIGINE dont celui-ci est le renouvellement — **lignée**, référence
+  SOUPLE sans FK : l'orphelin est toléré si l'original est supprimé), **`cross_signed_pem`**
+  (certificat CROISÉ d'une CA issue d'une rotation de clé — public), les quatre en migration
+  `ensureColumn` (nullable),
   `created_date`/`updated_date`, **`created_by`/`updated_by`** (id canonique de l'auteur —
   audit posé SERVEUR sur création/renouvellement/révocation, migration `ensureColumn` ; cf.
   [`user-resolver.md`](user-resolver.md)), **`search`** (colonne DÉNORMALISÉE `TEXT NOT NULL
-  DEFAULT ''` = `normSearch(label + subject + serial + valeurs de SAN)`, recalculée
+  DEFAULT ''` = `normSearch(label + subject + serial + comment + valeurs de SAN)`, recalculée
   à CHAQUE save avec la MÊME normalisation partagée que le cœur ; migration
   `ensureColumn` + **backfill** one-shot des lignes antérieures). **FK composite**
   `(doc_id, parent_id) → certificates(doc_id, id)` : l'émetteur d'un dérivé doit
@@ -545,6 +551,62 @@ les autres. Le pont est branché sur le MÊME `NotifyModule` que `vm/`.
 > (`CertsFormat`, cadrage §5) est indépendante et n'a que deux paliers : `warn` ≤ 30 j,
 > `err` ≤ 7 j (ou expiré), `ok` au-delà. Les deux sont des décisions de cadrage
 > assumées ; ne pas confondre l'affichage (2 paliers) et les notifications (3 niveaux).
+
+## Renouvellement, guard de validité & révocation
+
+Chantier 2026-07-21 (cadrage `.notes/certs-renew-guard-metadata-cadrage-2026-07-21.md`). Tout côté
+CLIENT (crypto zéro-connaissance) ; le serveur ne voit que des `save`/révocations de métadonnées.
+
+### Guard — une feuille ne vit pas au-delà de sa CA
+
+`X509Factory.issueLeaf` **REJETTE** si l'échéance de la feuille dépasse celle de la CA (lue dans le
+certificat de CA déjà parsé). C'est la **source de vérité** de l'invariant. En amont, le module PUR
+`certs/CertValidity` (`daysUntil`/`clampDays`/`exceedsCa`/`durationDays`) sert le formulaire (plafond
+du champ durée + message) et les lots (rognage de la durée demandée à ce qui reste sur la CA). Une
+**CA SSH** (ed25519) n'a pas d'échéance → `daysUntil` renvoie `null`, aucun plafond ne s'applique.
+
+### Renouvellement (« révoquer l'ancien + créer le neuf »)
+
+Le neuf porte **`renewed_from`** = id de l'ancien (lignée) ; l'ancien est **révoqué** au motif
+**`superseded`** (`RevocationReasons.encode`). `revokeSuperseded` ne bloque pas si la révocation
+échoue (le neuf existe déjà — avertissement, ancien à révoquer à la main).
+
+- **Unitaire (mode 1)** — feuille TLS / certificat SSH : `renewModal` charge la CA émettrice puis
+  rouvre le formulaire d'émission **PRÉ-REMPLI à l'identique** (CN/O/OU/SAN/usage/algo/durée). L'usage
+  (EKU, non stocké en métadonnée) est relu du PEM par `X509Factory.readLeafUsage` ; la durée repart de
+  l'originale (`CertValidity.durationDays`), plafonnée à la CA.
+- **Groupé (mode 2)** — `bulkRenewDialog` : modale ne demandant QUE la durée, appliquée à toutes les
+  **feuilles TLS actives** sélectionnées (rognée par CA ; clé de chaque CA déchiffrée une seule fois).
+  Restreint aux feuilles TLS : le **type** d'un certificat SSH (user/host) n'est pas en métadonnée →
+  renouvellement à l'unité (`BulkActions.canRenew`).
+
+### Renouvellement d'une CA racine (opération de masse)
+
+`renewCaDialog` (root-ca) — avertissement clair + deux mécaniques + durée :
+
+- **Prolonger (même clé)** — `X509Factory.reSignRootCa` re-signe la CA avec **sa clé existante** et une
+  échéance repoussée ; **mise à jour EN PLACE** (même id, `key_enc` conservé). Le **SKI est inchangé**
+  (même clé) → les feuilles déjà émises **continuent de chaîner**. Puis ses feuilles actives sont
+  renouvelées pour bénéficier de la durée prolongée.
+- **Rotation de clé** — nouvelle CA (nouvelle paire, `renewed_from`), ancienne **révoquée**, feuilles
+  actives ré-émises SOUS la nouvelle CA (nouveau `parent_id`).
+
+**Cross-signing** (rotation) : `X509Factory.crossSignCa` fait certifier la clé de la NOUVELLE CA par
+l'ANCIENNE (Subject = nouvelle CA, Issuer = ancienne, CA=true, signé par l'ancienne clé, échéance
+**rognée** à celle de l'ancienne). Stocké dans **`cross_signed_pem`** de la nouvelle CA. Pendant la
+transition, un client qui fait ENCORE confiance à l'ancien root valide les nouvelles feuilles
+(feuille → nouvelle CA [cross] → ancien root). Export : artefact **« Certificat croisé (.cross.pem) »**
+proposé quand la CA en porte un. *Limite v1 : pas de cross-fullchain PAR feuille (le cross-cert de la
+CA suffit au déploiement) ; une ssh-ca ne se renouvelle pas (pas d'échéance).*
+
+### Raison de révocation (métadonnée)
+
+Révocation manuelle → dialogue demandant un **code standard X.509** (`RevocationReasons` :
+`unspecified`/`superseded`/`keyCompromise`/`cessationOfOperation`/`affiliationChanged`/
+`privilegeWithdrawn`) + une **note libre**, encodés en `revocation_reason` (`<code>: <note>`). Un
+renouvellement pose **`superseded`** automatiquement. La révocation d'un root reste marquée
+« Révoqué » (libellé uniforme — outil interne sans CRL, cf. « Limites assumées »). Le **commentaire**
+libre s'édite depuis la fiche (aller-retour) ; la fiche affiche commentaire, raison et lignée.
 
 ## Routes REST
 
