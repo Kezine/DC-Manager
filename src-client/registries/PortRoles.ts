@@ -29,4 +29,16 @@ export class PortRoles {
   static isPoe(roleId: string): boolean {
     return roleId === "poe";
   }
+
+  /** Classe de PASTILLE (`.pill`) d'un rôle : `role-mgmt|role-data|role-power|role-poe`. Rôle inconnu → `role-data`.
+      UNIQUE source de ce mapping (évite les ternaires dupliqués dans les vues/fiches — CLAUDE.md n°3). */
+  static pillClass(roleId: string): string {
+    return "role-" + (BY_ID[roleId] ? roleId : "data");
+  }
+
+  /** Suffixe de classe pour un MARQUEUR de façade (`.face-marker`/`.face-dot`) : ` role-<id>` pour mgmt/power/poe,
+      chaîne VIDE pour data (le data garde l'accent par défaut — comportement historique). */
+  static markerRoleClass(roleId: string): string {
+    return (roleId === "mgmt" || roleId === "power" || roleId === "poe") ? " role-" + roleId : "";
+  }
 }

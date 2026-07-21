@@ -15,6 +15,7 @@ import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
 import { Text } from "../../core/Text";
 import { EquipFaces } from "../../registries/EquipFaces";
+import { PortRoles } from "../../registries/PortRoles";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { LeaderLayout, LeaderAnchor } from "../../geometry/LeaderLayout";
 import { EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, RACK_MOUNT_WIDTH } from "../../domain/constants";
@@ -224,7 +225,7 @@ export class FaceEditor extends FormBase {
         stage.appendChild(ov);
       }
       // PORTS posés sur CETTE face — masqués tant qu'un port est ACTIVÉ (mode 2 clics) pour dégager la face.
-      const roleCls = (p: any) => p.role === "mgmt" ? " role-mgmt" : (p.role === "power" ? " role-power" : "");
+      const roleCls = (p: any) => PortRoles.markerRoleClass(p.role);   // "" (data) · role-mgmt/power/poe
       const placedHere = activePortId ? [] : ports.filter((p) => place[p.id] && place[p.id].side === side);
       if (portDisplay === "leader") {
         // PASTILLES (dots) draggables dans le stage (référencées pour le surlignage au survol de l'étiquette).

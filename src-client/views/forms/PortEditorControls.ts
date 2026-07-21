@@ -43,6 +43,7 @@ export interface PortDraft {
   direction?: string;
   power_max_a?: number | null;
   phase?: string;
+  poe_budget_w?: number | null;
 }
 
 /** Sous-UI d'édition d'un PORT dans le formulaire d'équipement : affectation de brins (patch), réseau asserté
@@ -120,21 +121,30 @@ export class PortEditorControls {
     return wrap;
   }
 
-  /** POWER : sens de l'énergie (source/sink) + calibre (A) + phase (départ = source). Pilote l'analyse énergie. */
-  powerPortControls(p: PortDraft): HTMLElement {
-    const wrap = document.createElement("span"); wrap.style.cssText = "display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;";
-    const dirSel = FormControls.select([{ value: "", label: I18n.t("forms.port.dirNone") }].concat(PORT_DIRECTIONS.map((d) => ({ value: d.id, label: I18n.t(d.labelKey) }))), p.direction || ""); dirSel.className = "sub-input app-select";
-    dirSel.onchange = () => { p.direction = dirSel.value || ""; if (p.direction !== "source") p.phase = ""; this.host.rerenderPorts(); };
-    wrap.appendChild(dirSel);
-    const ampI = FormControls.number(p.power_max_a != null ? p.power_max_a : "", { min: 0, step: 1, placeholder: "A" }); ampI.style.width = "60px"; ampI.className = "sub-input"; ampI.title = I18n.t("forms.port.ampTitle");
-    ampI.oninput = () => { const v = parseFloat(ampI.value); p.power_max_a = isFinite(v) && v >= 0 ? v : null; };
-    wrap.appendChild(ampI);
-    if (p.direction === "source") {   // phase seulement pour un départ / une sortie (source)
-      const phSel = FormControls.select([{ value: "", label: I18n.t("forms.port.phaseNone") }].concat(POWER_PHASES.map((ph: string) => ({ value: ph, label: ph }))), p.phase || ""); phSel.className = "sub-input app-select"; phSel.title = I18n.t("forms.port.phaseTitle");
-      phSel.onchange = () => { p.phase = phSel.value || ""; };
-      wrap.appendChild(phSel);
-    }
-    return wrap;
+  /** SENS de l'énergie (source/sink) d'un port POWER ou POE — contrôle segmenté (`.rm-toggle`). Libellés adaptés à
+      la catégorie : Source/Sink (power) vs PSE/PD (poe, cosmétique — le champ stocke bien source/sink). Un
+      changement re-rend la liste (phase power conditionnée à « source » ; tête + jauge POE recalculées à partir des
+      seuls producteurs). Contrôle NU (le formulaire l'enveloppe dans une rangée libellée). */
+  sensControl(p: PortDraft, mode: "power" | "poe"): HTMLElement {
+    const opts = mode === "poe"
+      ? [{ value: "source", label: I18n.t("forms.port.pse") }, { value: "sink", label: I18n.t("forms.port.pd") }]
+      : PORT_DIRECTIONS.map((d) => ({ value: d.id, label: I18n.t(d.labelKey) }));
+    return FormControls.segmented(opts, p.direction || "", (v) => { p.direction = v || ""; if (p.direction !== "source") p.phase = ""; this.host.rerenderPorts(); }, { ariaLabel: I18n.t("forms.port.sens") });
+  }
+
+  /** Calibre (A) d'un port POWER. Contrôle nu (unité A). */
+  caliberControl(p: PortDraft): HTMLElement {
+    const w = FormControls.unitNumber(p.power_max_a != null ? p.power_max_a : "", "A", { min: 0, step: 1 });
+    (w as any)._input.title = I18n.t("forms.port.ampTitle");
+    (w as any)._input.oninput = () => { const v = parseFloat((w as any).value); p.power_max_a = isFinite(v) && v >= 0 ? v : null; };
+    return w;
+  }
+
+  /** Phase (L1/L2/L3) d'un DÉPART power (source). Contrôle nu. */
+  phaseControl(p: PortDraft): HTMLElement {
+    const sel = FormControls.select([{ value: "", label: I18n.t("forms.port.phaseNone") }].concat(POWER_PHASES.map((ph: string) => ({ value: ph, label: ph }))), p.phase || ""); sel.className = "app-select"; sel.title = I18n.t("forms.port.phaseTitle");
+    sel.onchange = () => { p.phase = sel.value || ""; };
+    return sel;
   }
 
   /** Résumé d'occupation des faisceaux terminés par ce patch (brins utilisés / capacité) → dans `el`. Reflète le

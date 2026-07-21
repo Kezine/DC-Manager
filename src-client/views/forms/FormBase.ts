@@ -6,6 +6,7 @@ import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
 import { Depths } from "../../registries/Depths";
 import { PortTypes } from "../../registries/PortTypes";
+import { PortRoles } from "../../registries/PortRoles";
 import { EquipFaces } from "../../registries/EquipFaces";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
@@ -143,7 +144,7 @@ export class FormBase {
     stage.style.maxWidth = "calc(" + MAXVH + "vh * " + (wh.W / wh.H).toFixed(4) + ")";
     stage.style.margin = "0 auto";
     if (url) { const im = document.createElement("img"); im.className = "face-bg"; im.src = url; im.alt = ""; stage.appendChild(im); }
-    const roleCls = (p: any) => p.role === "mgmt" ? " role-mgmt" : (p.role === "power" ? " role-power" : "");
+    const roleCls = (p: any) => PortRoles.markerRoleClass(p.role);   // "" (data) · role-mgmt/power/poe
     if (!dense) {
       ports.forEach((p: any) => { const mk = document.createElement("div"); mk.className = "face-marker" + roleCls(p); mk.style.left = (p.face_x * 100) + "%"; mk.style.top = (p.face_y * 100) + "%"; mk.textContent = p.name || "(port)"; stage.appendChild(mk); });
       return stage;

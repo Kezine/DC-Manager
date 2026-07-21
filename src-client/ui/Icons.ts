@@ -147,6 +147,13 @@ export class Icons {
   /** Alimentation électrique (remplace `⚡`) : éclair. */
   static readonly POWER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>';
 
+  /** POE (data + énergie) : éclair PLEIN, petit — glyphe des pastilles/métriques POE (distinction data/power en
+      niveaux de gris & pour daltoniens, cf. maquette port-editor-poe). Rempli, pas de contour → lisible à 11 px. */
+  static readonly POE_BOLT = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>';
+
+  /** Avertissement : triangle « ! » (liseré de survente POE, alertes en ligne). */
+  static readonly WARNING = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+
   /** Réseau IP (remplace `🌐`) : globe méridiens. */
   static readonly NETWORK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.5 4 5.7 4 9s-1.4 6.5-4 9c-2.6-2.5-4-5.7-4-9s1.4-6.5 4-9z"/></svg>';
 

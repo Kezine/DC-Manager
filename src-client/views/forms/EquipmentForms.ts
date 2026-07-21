@@ -30,7 +30,8 @@ import {
   EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD,
   DEPTH_PRESETS_MM, EQUIP_DEPTH_DEFAULT_MM, RACK_DEPTH_DEFAULT,
   SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
-  SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA
+  SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
+  PORT_DIRECTIONS, POWER_LOAD_WARN_FRACTION
 } from "../../domain/constants";
 import { FormUi, ORIENT_OPTS } from "./shared";
 import type { FormHost } from "./shared";
@@ -132,7 +133,7 @@ export class EquipmentForms extends FormBase {
         let bk = "";
         if (store.isBreakoutParent(p)) bk = ` <span class="pill">${I18n.t("equipment.detail.trunkPill", { n: store.breakoutLanes(p.id).length })}</span>`;
         else if (p.parent_port_id) { const par: any = store.get("ports", p.parent_port_id); bk = ` <span class="pill">${I18n.t("equipment.detail.lanePill", { lane: p.lane || "?", trunk: Html.escape(par ? (par.name || I18n.t("equipment.detail.trunkWord")) : I18n.t("equipment.detail.trunkWord")) })}</span>`; }
-        return `<tr><td class="cell-name">${Html.escape(p.name || I18n.t("equipment.common.portParen"))}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : `<span style="color:var(--err)">${I18n.t("equipment.detail.typeUnknown")}</span>`}</td><td><span class="pill role-${p.role === "mgmt" ? "mgmt" : (p.role === "power" ? "power" : "data")}">${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || I18n.t("equipment.detail.aggFallback")) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate && store.portDcId(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-locate="${p.id}" title="${I18n.t("equipment.detail.locatePort")}" aria-label="${I18n.t("equipment.detail.locatePort")}">${Icons.LOCATE}</button>` : ""}</td></tr>`;
+        return `<tr><td class="cell-name">${Html.escape(p.name || I18n.t("equipment.common.portParen"))}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : `<span style="color:var(--err)">${I18n.t("equipment.detail.typeUnknown")}</span>`}</td><td><span class="pill ${PortRoles.pillClass(p.role)}">${PortRoles.isPoe(p.role) ? Icons.POE_BOLT : ""}${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || I18n.t("equipment.detail.aggFallback")) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate && store.portDcId(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-locate="${p.id}" title="${I18n.t("equipment.detail.locatePort")}" aria-label="${I18n.t("equipment.detail.locatePort")}">${Icons.LOCATE}</button>` : ""}</td></tr>`;
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("equipment.detail.colPort")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("equipment.detail.colRole")}</th><th>${I18n.t("equipment.detail.colAgg")}</th><th style="text-align:right;">${I18n.t("equipment.detail.col3d")}</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
@@ -489,6 +490,8 @@ export class EquipmentForms extends FormBase {
       network_id: p.network_id || null, network_ids: Array.isArray(p.network_ids) ? p.network_ids.slice() : [],
       // power : sens de l'énergie + calibre (A) + phase (départ)
       direction: p.direction || "", power_max_a: (p.power_max_a != null) ? p.power_max_a : null, phase: p.phase || "",
+      // POE : budget du port (W) — max délivré (PSE) / tiré (PD)
+      poe_budget_w: (p.poe_budget_w != null) ? p.poe_budget_w : null,
     })) : [];
     // brouillon des images de façade (référence par face) — l'éditeur de façade les reporte ici.
     const faceFids: Record<string, string | null> = {};
@@ -528,6 +531,23 @@ export class EquipmentForms extends FormBase {
     const pMaxI = FormControls.number((eq && eq.power_max_w != null) ? eq.power_max_w : "", { min: 0, step: 1, placeholder: I18n.t("equipment.equip.wattsPlaceholder") });
     const consoRow = FormUi.row2(FormControls.fieldRow(I18n.t("equipment.equip.consoNominal"), pNomI, I18n.t("equipment.equip.consoNomHint")), FormControls.fieldRow(I18n.t("equipment.equip.consoMax"), pMaxI, I18n.t("equipment.equip.consoMaxHint")));
     root.appendChild(consoRow);
+
+    // -- BLOC POE (Power over Ethernet) : bascule « équipement POE » + budget TOTAL partagé + JAUGE de budget.
+    //    La bascule est VERROUILLÉE tant qu'un port POE existe (invariant T-POE2 : sinon on orphelinerait ces ports).
+    //    Budget + jauge visibles seulement si la bascule est ON. `alloué` = Σ des budgets des ports POE PRODUCTEURS
+    //    (rôle poe + sens source) du BROUILLON (live, pas le store) → reflète l'édition non enregistrée. Cf. maquette
+    //    design-system/briefs/port-editor-poe. La disponibilité de la catégorie POE des ports en découle (renderPorts).
+    const poeBlock = document.createElement("div"); poeBlock.className = "poe-block";
+    const poeDeviceI = FormControls.toggle(I18n.t("equipment.equip.poeDevice"), eq ? !!eq.poe_device : false, () => renderPorts(), { block: true, title: I18n.t("equipment.equip.poeDeviceTitle") });
+    poeBlock.appendChild(poeDeviceI);
+    const poeBudgetI = FormControls.unitNumber((eq && eq.poe_budget_w != null) ? eq.poe_budget_w : "", "W", { min: 0, step: "any" });
+    (poeBudgetI as any)._input.oninput = () => refreshPoeGauge();
+    const poeBudgetRow = FormControls.fieldRow(I18n.t("equipment.equip.poeBudgetTotal"), poeBudgetI, I18n.t("equipment.equip.poeBudgetHint"));
+    const poeGaugeEl = document.createElement("div"); poeGaugeEl.className = "gauge-card";
+    const poeGaugeRow = FormControls.fieldRow(I18n.t("equipment.equip.poeGauge"), poeGaugeEl);
+    const poeDetailsRow = FormUi.row2(poeBudgetRow, poeGaugeRow);   // budget + jauge : masqués en bloc si POE off (syncPoe)
+    poeBlock.appendChild(poeDetailsRow);
+    root.appendChild(poeBlock);
 
     // GROUPES : primaire (single, pilote la COULEUR héritée) + secondaires (multi, recherche + pastilles).
     const groupsSorted = (): any[] => store.all("groups").slice().sort((a: any, b: any) => (a.label || "").localeCompare(b.label || ""));
@@ -768,7 +788,9 @@ export class EquipmentForms extends FormBase {
     const isPatch = () => portControls.isPatch();
     const patchStrandControls = (p: any) => portControls.patchStrandControls(p);
     const terminalNetworkControl = (p: any) => portControls.terminalNetworkControl(p);
-    const powerPortControls = (p: any) => portControls.powerPortControls(p);
+    // ÉTAT d'expansion des lignes de port (`<details>`) — préservé À TRAVERS les re-rendus (renderPorts reconstruit
+    // la liste ; sans ça, éditer un champ refermerait la ligne). Clé = id du port.
+    const openPorts = new Set<string>();
 
     const renderAggs = () => {
       aggList.innerHTML = "";
@@ -781,49 +803,129 @@ export class EquipmentForms extends FormBase {
         r.appendChild(nm); r.appendChild(rm); aggList.appendChild(r);
       });
     };
-    const portRow = (p: any, kind: string) => {
-      const locked = kind === "trunk" || kind === "lane";
-      const r = document.createElement("div"); r.className = "chip-row";
+    const fmtW = (n: number) => String(Math.round(n * 10) / 10);
+    // LIVE (brouillon) — la jauge/survente POE reflètent l'édition NON enregistrée, pas le store.
+    const poeBudgetTotal = (): number | null => { const v = parseFloat((poeBudgetI as any).value); return isFinite(v) && v >= 0 ? v : null; };
+    const poeAllocatedW = (): number => draftPorts.filter((p) => PortRoles.isPoe(p.role) && p.direction === "source").reduce((s, p) => s + (p.poe_budget_w != null ? p.poe_budget_w : 0), 0);
+    const poeIsOver = (): boolean => { if (!(poeDeviceI as any).checked) return false; const t = poeBudgetTotal(); return t != null && poeAllocatedW() > t; };
+    // Libellé du SENS pour la tête compacte : Source/Sink (power), Producteur/Consommateur (poe), « — » sinon.
+    const sensLabel = (p: any): string => {
+      if (!p.direction) return "—";
+      if (PortRoles.isPoe(p.role)) return p.direction === "source" ? I18n.t("forms.port.pseLong") : I18n.t("forms.port.pdLong");
+      if (PortRoles.kind(p.role) === "power") { const d = PORT_DIRECTIONS.find((x) => x.id === p.direction); return d ? I18n.t(d.labelKey) : "—"; }
+      return "—";
+    };
+    const netName = (p: any): string => { const n: any = p.network_id ? store.get("networks", p.network_id) : null; return n ? (n.label || "") : ""; };
+    const iconBtn = (svg: string, label: string, danger: boolean, onClick: () => void) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-sm icon-action" + (danger ? " btn-danger" : " btn-ghost");
+      b.title = label; b.setAttribute("aria-label", label); b.innerHTML = svg;
+      // dans un <summary> : empêcher le clic d'action de (dé)plier le <details>.
+      b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); onClick(); };
+      return b;
+    };
+    const catPill = (role: string) => {
+      const s = document.createElement("span"); s.className = "pill " + PortRoles.pillClass(role);
+      if (PortRoles.isPoe(role)) s.innerHTML = Icons.POE_BOLT;   // éclair (distinction data/power en niveaux de gris)
+      s.appendChild(document.createTextNode(PortRoles.label(role))); return s;
+    };
+
+    // Ligne de port VERROUILLÉE (trunk/lane d'un breakout) : nom éditable + pastilles figées + retrait du breakout.
+    // Non extensible ; cohabite avec les cartes `<details>` (cf. maquette §5.9). Comportement inchangé.
+    const lockedRow = (p: any, kind: string) => {
+      const r = document.createElement("div"); r.className = "chip-row port-locked";
       if (kind === "lane") r.style.cssText = "margin-left:18px;border-left:2px solid var(--line-2);padding-left:8px;";
-      const nm = document.createElement("input"); nm.className = "sub-input grow"; nm.value = p.name; nm.placeholder = kind === "trunk" ? I18n.t("equipment.equip.trunkPh") : (kind === "lane" ? I18n.t("equipment.equip.lanePh") : I18n.t("equipment.equip.portPh")); nm.oninput = () => { p.name = nm.value; };
+      const nm = document.createElement("input"); nm.className = "sub-input grow"; nm.value = p.name; nm.placeholder = kind === "trunk" ? I18n.t("equipment.equip.trunkPh") : I18n.t("equipment.equip.lanePh"); nm.oninput = () => { p.name = nm.value; };
       r.appendChild(nm);
-      if (locked) {
-        const rPill = document.createElement("span"); rPill.className = "pill"; rPill.textContent = PortRoles.label(p.role);
-        const tt: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null;
-        const tPill = document.createElement("span"); tPill.className = "pill"; tPill.textContent = tt ? tt.name : I18n.t("equipment.detail.typeUnknown");
-        r.appendChild(rPill); r.appendChild(tPill);
-      } else {
-        const rl = FormControls.select(PortRoles.ALL.map((x) => ({ value: x.id, label: I18n.t(x.labelKey) })), p.role || "data"); rl.className = "sub-input app-select";
-        const pt = ptOptions(p.port_type_id, p.role); pt.className = "sub-input app-select";
-        rl.onchange = () => { p.role = rl.value; const cur: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null; if (cur && ptKind(cur) !== PortRoles.kind(p.role)) p.port_type_id = null; if (PortRoles.kind(p.role) === "power") p.aggregate_id = null; renderPorts(); };
-        pt.onchange = () => { p.port_type_id = pt.value || null; renderPorts(); };
-        r.appendChild(rl); r.appendChild(pt);
-      }
+      const rPill = document.createElement("span"); rPill.className = "pill " + PortRoles.pillClass(p.role); rPill.textContent = PortRoles.label(p.role);
+      const tt: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null;
+      const tPill = document.createElement("span"); tPill.className = "pill"; tPill.textContent = tt ? tt.name : I18n.t("equipment.detail.typeUnknown");
+      r.appendChild(rPill); r.appendChild(tPill);
       if (kind === "trunk") {
         const tag = document.createElement("span"); tag.className = "pill"; tag.textContent = I18n.t("equipment.equip.breakoutTag", { n: draftPorts.filter((c) => c.parent_port_id === p.id).length });
         const rm = document.createElement("button"); rm.type = "button"; rm.className = "btn btn-danger btn-sm"; rm.textContent = "×"; rm.title = I18n.t("equipment.equip.removeBreakout");
         rm.onclick = () => { const ids = new Set([p.id, ...draftPorts.filter((c) => c.parent_port_id === p.id).map((c) => c.id)]); for (let i = draftPorts.length - 1; i >= 0; i--) if (ids.has(draftPorts[i].id)) draftPorts.splice(i, 1); renderPorts(); };
         r.appendChild(tag); r.appendChild(rm);
-      } else if (kind === "lane") {
-        const tag = document.createElement("span"); tag.className = "pill"; tag.textContent = I18n.t("equipment.equip.laneTag", { lane: p.lane || "?" }); r.appendChild(tag);
-      } else {
-        // PATCH : affectation de brins (le patch déduit son réseau — pas d'agrégat ni de réseau saisi ici).
-        // TERMINAL : combo d'agrégat (hors power) + sélecteur de réseau asserté (source unique).
-        if (isPatch()) { r.appendChild(patchStrandControls(p)); }
-        else {
-          if (PortRoles.kind(p.role) === "power") { r.appendChild(powerPortControls(p)); }   // sens/calibre/phase
-          else { const ag = aggOptionsFor(p); ag.className = "sub-input app-select"; ag.onchange = () => { p.aggregate_id = ag.value || null; }; r.appendChild(ag); }
-          r.appendChild(terminalNetworkControl(p));
-        }
-        const dup = document.createElement("button"); dup.type = "button"; dup.className = "btn btn-ghost btn-sm"; dup.textContent = "⎘"; dup.title = I18n.t("equipment.equip.duplicate");
-        // le doublon ne réutilise PAS les mêmes brins physiques (un brin = une fibre unique) : brins remis à zéro.
-        dup.onclick = () => { const i = draftPorts.indexOf(p); draftPorts.splice(i + 1, 0, Object.assign({}, p, { id: Id.uid(), name: bump(p.name), face_x: null, face_y: null, strand_a: null, strand_b: null })); renderPorts(); };
-        const rm = document.createElement("button"); rm.type = "button"; rm.className = "btn btn-danger btn-sm"; rm.textContent = "×";
-        rm.onclick = () => { const i = draftPorts.indexOf(p); if (i >= 0) draftPorts.splice(i, 1); renderPorts(); };
-        r.appendChild(dup); r.appendChild(rm);
-      }
+      } else { const tag = document.createElement("span"); tag.className = "pill"; tag.textContent = I18n.t("equipment.equip.laneTag", { lane: p.lane || "?" }); r.appendChild(tag); }
       return r;
     };
+
+    // Ligne de port ÉDITABLE = `<details>` extensible (cf. maquette) : tête compacte (nom · pastille catégorie · sens ·
+    // métrique clé · réseau · actions) + corps déplié (champs conditionnels selon la catégorie). Tient la densité d'un
+    // switch 48 ports. Le sens/calibre/phase (power) et le budget (poe) vivent dans PortEditorControls (module dédié).
+    const detailsRow = (p: any) => {
+      const kindP = PortRoles.kind(p.role), isPoeP = PortRoles.isPoe(p.role), patch = isPatch();
+      const overHere = isPoeP && p.direction === "source" && poeIsOver();
+      const det = document.createElement("details"); det.className = "port";
+      if (openPorts.has(p.id)) det.open = true;
+      if (overHere) det.setAttribute("data-err", "");
+      det.addEventListener("toggle", () => { if (det.open) openPorts.add(p.id); else openPorts.delete(p.id); });
+
+      // -- TÊTE compacte --
+      const head = document.createElement("summary"); head.className = "port-head";
+      head.innerHTML = '<span class="chev" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>';
+      const nameSpan = document.createElement("span"); nameSpan.className = "p-name"; nameSpan.textContent = p.name || I18n.t("equipment.common.portParen"); head.appendChild(nameSpan);
+      const catWrap = document.createElement("span"); catWrap.className = "p-cat"; catWrap.appendChild(catPill(p.role)); head.appendChild(catWrap);
+      const sensSpan = document.createElement("span"); sensSpan.className = "p-sens"; sensSpan.textContent = sensLabel(p); head.appendChild(sensSpan);
+      const metric = document.createElement("span"); metric.className = "p-metric" + (kindP === "power" ? " power" : isPoeP ? " poe" : "");
+      if (kindP === "power") metric.textContent = (p.power_max_a != null ? fmtW(p.power_max_a) : "—") + " A";
+      else if (isPoeP) { metric.innerHTML = Icons.POE_BOLT; if (overHere) metric.style.color = "var(--err)"; metric.appendChild(document.createTextNode(" " + (p.poe_budget_w != null ? fmtW(p.poe_budget_w) : "—") + " W")); }
+      else { const tt: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null; const m = document.createElement("span"); m.className = "muted"; m.textContent = tt ? tt.name : "—"; metric.appendChild(m); }
+      head.appendChild(metric);
+      const netSpan = document.createElement("span"); netSpan.className = "p-net"; const nn = netName(p); if (nn) netSpan.textContent = nn; else netSpan.innerHTML = '<span class="muted">—</span>'; head.appendChild(netSpan);
+      const acts = document.createElement("span"); acts.className = "p-acts";
+      acts.appendChild(iconBtn(Icons.CLONE, I18n.t("equipment.equip.duplicate"), false, () => { const i = draftPorts.indexOf(p); draftPorts.splice(i + 1, 0, Object.assign({}, p, { id: Id.uid(), name: bump(p.name), face_x: null, face_y: null, strand_a: null, strand_b: null })); renderPorts(); }));
+      acts.appendChild(iconBtn(Icons.DELETE, I18n.t("equipment.detail.deletePort"), true, () => { const i = draftPorts.indexOf(p); if (i >= 0) draftPorts.splice(i, 1); renderPorts(); }));
+      head.appendChild(acts);
+      det.appendChild(head);
+
+      // -- CORPS (champs conditionnels) --
+      const body = document.createElement("div"); body.className = "port-body";
+      const grid = document.createElement("div"); grid.className = "body-grid";
+      const nm = FormControls.text(p.name, I18n.t("equipment.equip.portPh")); nm.oninput = () => { p.name = nm.value; nameSpan.textContent = p.name || I18n.t("equipment.common.portParen"); };
+      grid.appendChild(FormControls.fieldRow(I18n.t("lists.col.name"), nm));
+      // Catégorie (segmenté) — POE désactivé + tooltip de découvrabilité tant que `poe_device` est faux (T-POE1 côté UI).
+      const poeOn = (poeDeviceI as any).checked;
+      const catOpts = PortRoles.ALL.map((x) => ({ value: x.id, label: PortRoles.label(x.id), disabled: PortRoles.isPoe(x.id) && !poeOn, title: (PortRoles.isPoe(x.id) && !poeOn) ? I18n.t("equipment.equip.poeCatDisabled") : undefined }));
+      const catSeg = FormControls.segmented(catOpts, p.role || "data", (v) => {
+        p.role = v;
+        const cur: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null;
+        if (cur && ptKind(cur) !== PortRoles.kind(p.role)) p.port_type_id = null;   // connecteur incompatible → réinitialisé
+        if (PortRoles.kind(p.role) === "power" || PortRoles.isPoe(p.role)) p.aggregate_id = null;   // ni power ni poe n'agrègent
+        renderPorts();
+      }, { ariaLabel: I18n.t("forms.port.category"), className: "rm-cat" });
+      grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.category"), catSeg));
+      const pt = ptOptions(p.port_type_id, p.role); pt.onchange = () => { p.port_type_id = pt.value || null; renderPorts(); };
+      grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.connector"), pt, isPoeP ? I18n.t("forms.port.poeConnHint") : undefined));
+      if (patch) {
+        grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.strands"), patchStrandControls(p)));   // patch : brins piochés (pas de réseau saisi)
+      } else if (kindP === "power") {
+        grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.sens"), portControls.sensControl(p, "power")));
+        grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.caliber"), portControls.caliberControl(p)));
+        if (p.direction === "source") grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.phase"), portControls.phaseControl(p)));
+        grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.network"), terminalNetworkControl(p)));
+      } else if (isPoeP) {
+        grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.sens"), portControls.sensControl(p, "poe")));
+        const budget = FormControls.unitNumber(p.poe_budget_w != null ? p.poe_budget_w : "", "W", { min: 0, step: "any" });
+        (budget as any)._input.oninput = () => { const v = parseFloat((budget as any).value); p.poe_budget_w = isFinite(v) && v >= 0 ? v : null; refreshPoeGauge(); };
+        (budget as any)._input.onchange = () => renderPorts();   // au blur : rafraîchit liserés de survente + métriques
+        grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.poeBudget"), budget, I18n.t("forms.port.poeClassHint")));
+        grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.network"), terminalNetworkControl(p)));
+      } else {
+        const ag = aggOptionsFor(p); ag.onchange = () => { p.aggregate_id = ag.value || null; };
+        grid.appendChild(FormControls.fieldRow(I18n.t("equipment.equip.aggregates"), ag));
+        grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.network"), terminalNetworkControl(p)));
+      }
+      body.appendChild(grid);
+      if (overHere) {
+        const strip = document.createElement("div"); strip.className = "warn-strip";
+        strip.innerHTML = '<span class="gi" aria-hidden="true">' + Icons.WARNING + "</span>";
+        strip.appendChild(document.createTextNode(I18n.t("equipment.equip.poeOverStrip", { alloc: fmtW(poeAllocatedW()), budget: fmtW(poeBudgetTotal() as number) })));
+        body.appendChild(strip);
+      }
+      det.appendChild(body);
+      return det;
+    };
+    const portRow = (p: any, kind: string) => (kind === "trunk" || kind === "lane") ? lockedRow(p, kind) : detailsRow(p);
     const renderPorts = () => {
       portList.innerHTML = "";
       if (!draftPorts.length) { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = I18n.t("equipment.detail.noPorts"); portList.appendChild(e); }
@@ -833,10 +935,40 @@ export class EquipmentForms extends FormBase {
       });
       renderPatchInfo();
       renderPowerInfo();
+      syncPoe();   // T-POE2 (verrou bascule) + jauge de budget, recalculés à chaque re-rendu
     };
     // Panneaux de synthèse (occupation patch / charge+warnings power) : rendus par le module dans leur élément.
     const renderPatchInfo = () => portControls.renderPatchInfo(patchInfo);
     const renderPowerInfo = () => portControls.renderPowerInfo(powerInfo);
+    // JAUGE de budget POE (bloc énergie) — `alloué / total` + reste + état normal/≈80 %/survente. Reflète le brouillon.
+    const refreshPoeGauge = () => {
+      const total = poeBudgetTotal(), alloc = poeAllocatedW();
+      const over = total != null && alloc > total;
+      const warn = !over && total != null && total > 0 && alloc >= total * POWER_LOAD_WARN_FRACTION;
+      const pct = (total != null && total > 0) ? Math.min(100, (alloc / total) * 100) : (alloc > 0 ? 100 : 0);
+      const rest = total != null ? total - alloc : null;
+      poeGaugeEl.innerHTML = "";
+      const top = document.createElement("div"); top.className = "gauge-top";
+      const allocS = document.createElement("span"); allocS.className = "alloc" + (over ? " over" : "");
+      allocS.innerHTML = Html.escape(fmtW(alloc)) + ' <span class="alloc-total">/ ' + Html.escape(total != null ? fmtW(total) : "—") + " W</span>";
+      const restS = document.createElement("span"); restS.className = "rest" + (over ? " over" : "");
+      restS.textContent = rest == null ? "" : (rest >= 0 ? I18n.t("equipment.equip.poeRest", { w: fmtW(rest) }) : I18n.t("equipment.equip.poeOverBy", { w: fmtW(-rest) }));
+      top.appendChild(allocS); top.appendChild(restS);
+      const bar = document.createElement("div"); bar.className = "gauge" + (over ? " over" : warn ? " warn" : "");
+      const fill = document.createElement("div"); fill.className = "gauge-fill"; fill.style.width = pct + "%"; bar.appendChild(fill);
+      const st = document.createElement("div"); st.className = "gauge-state " + (over ? "over" : warn ? "warn" : "ok");
+      st.textContent = I18n.t(over ? "equipment.equip.poeStateOver" : warn ? "equipment.equip.poeStateWarn" : "equipment.equip.poeStateOk");
+      poeGaugeEl.appendChild(top); poeGaugeEl.appendChild(bar); poeGaugeEl.appendChild(st);
+    };
+    // T-POE2 (verrou de bascule) + visibilité budget/jauge — recalculés à chaque re-rendu des ports.
+    const syncPoe = () => {
+      const hasPoe = draftPorts.some((p) => PortRoles.isPoe(p.role));
+      (poeDeviceI as any).disabled = hasPoe;   // ne peut plus être désactivée tant qu'un port POE existe
+      poeDeviceI.title = hasPoe ? I18n.t("equipment.equip.poeDeviceLocked") : I18n.t("equipment.equip.poeDeviceTitle");
+      const on = (poeDeviceI as any).checked;
+      poeDetailsRow.style.display = on ? "" : "none";
+      refreshPoeGauge();
+    };
     addAggBtn.onclick = () => { draftAggs.push({ id: Id.uid(), name: "", description: "" }); renderAggs(); renderPorts(); };
     addPortBtn.onclick = () => { const firstPt: any = store.all("portTypes").find((t: any) => ptKind(t) !== "power") || store.all("portTypes")[0]; draftPorts.push({ id: Id.uid(), name: "", port_type_id: firstPt ? firstPt.id : null, role: "data", aggregate_id: null, description: "" }); renderPorts(); };
     addBreakoutBtn.onclick = () => this.configureBreakout(store).then((cfg) => {
@@ -922,6 +1054,9 @@ export class EquipmentForms extends FormBase {
           pdu_max_a: pduI.value !== "" ? Math.max(0, parseInt(pduI.value, 10) || 0) : null,
           power_nominal_w: pNomI.value !== "" ? Math.max(0, parseInt(pNomI.value, 10) || 0) : null,
           power_max_w: pMaxI.value !== "" ? Math.max(0, parseInt(pMaxI.value, 10) || 0) : null,
+          // POE : capacité (bascule) + budget TOTAL partagé. Budget neutralisé si l'équipement n'est pas POE.
+          poe_device: (poeDeviceI as any).checked,
+          poe_budget_w: ((poeDeviceI as any).checked && (poeBudgetI as any).value !== "") ? poeBudgetTotal() : null,
           dim_mode: free ? "free" : "u",
         };
         // images de façade (référence par face) — appliquées via l'éditeur de façade, persistées ici.
@@ -1014,6 +1149,15 @@ export class EquipmentForms extends FormBase {
             if (p.network_id || (Array.isArray(p.network_ids) && p.network_ids.length)) await store.update("ports", p.id, { network_id: null, network_ids: [] });
           }
         }
+        // Symétrique (T-POE2) : passer poe_device à FAUX est refusé tant qu'un port POE PERSISTÉ existe. Le formulaire
+        // garantit qu'aucun DRAFT n'est POE (bascule verrouillée sinon), mais les ports persistés ne sont réconciliés
+        // qu'APRÈS l'équipement → on relâche leur rôle « poe » ICI, avant l'update, pour que la désactivation passe
+        // (la réconciliation des ports plus bas scelle le rôle définitif du draft, ou les supprime).
+        if (existingId && payload.poe_device === false) {
+          for (const p of store.portsOf(existingId)) {
+            if (p.role === "poe") await store.update("ports", p.id, { role: "data" });
+          }
+        }
         if (existingId) {
           const savedEq = await store.update("equipments", existingId, payload);
           if (!savedEq) { Notify.toast(I18n.t("equipment.equip.saveFailed"), "err"); return false; }
@@ -1055,12 +1199,15 @@ export class EquipmentForms extends FormBase {
           const isPatchEq = typeI.value === "patch_panel";
           const netPrimary = isPatchEq ? null : (p.network_id || null);
           const netIds = netPrimary ? ((Array.isArray(p.network_ids) && p.network_ids.length) ? p.network_ids.slice() : [netPrimary]) : [];
-          // power : sens/calibre/phase seulement sur un port power ; sinon neutralisés.
+          // power/poe : le SENS (source/sink) vaut pour les DEUX (PSE/PD = source/sink) ; sinon neutralisé. ⚠ ne PAS
+          // vider la direction d'un port POE. Calibre (A) + phase restent réservés au power ; budget (W) au poe.
           const isPowerPort = PortRoles.kind(p.role) === "power";
-          const direction = isPowerPort ? (p.direction || "") : "";
+          const isPoePort = PortRoles.isPoe(p.role);
+          const direction = (isPowerPort || isPoePort) ? (p.direction || "") : "";
           const powerMaxA = isPowerPort && p.power_max_a != null ? p.power_max_a : null;
           const phase = (isPowerPort && direction === "source") ? (p.phase || "") : "";
-          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role: p.role || "data", aggregate_id: agg, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase };
+          const poeBudgetW = isPoePort && p.poe_budget_w != null ? p.poe_budget_w : null;
+          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role: p.role || "data", aggregate_id: agg, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase, poe_budget_w: poeBudgetW };
           const ex: any = store.get("ports", p.id);
           const saved = ex ? await store.update("ports", p.id, patch) : await store.create("ports", Object.assign({ id: p.id }, patch));
           if (!saved) saveError = true;   // validation refusée (ex. brin en double, Tx=Rx) → échec signalé plus bas

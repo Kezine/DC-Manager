@@ -3,6 +3,9 @@ import { I18n } from "../i18n/I18n";
 
 export interface SelectOption { value: string; label: string; disabled?: boolean; group?: string; }
 export interface NumberOpts { min?: number | string; max?: number | string; step?: number | string; placeholder?: string; }
+/** Option d'un contrôle segmenté (`.rm-toggle`). `icon` = SVG de CONFIANCE (constante `ui/Icons`), jamais une donnée. */
+export interface SegOption { value: string; label?: string; icon?: string; title?: string; disabled?: boolean; }
+export interface SegmentedOpts { ariaLabel?: string; className?: string; }
 /** `tipKey` = CLÉ d'un contenu enregistré dans `RichTooltip` (jamais du HTML : le moteur
     construit le DOM et échappe lui-même — cf. ui/RichTooltip.ts).
     `icon` = SVG de CONFIANCE (constante `ui/Icons`) rendu avant le libellé — jamais une donnée. */
@@ -100,6 +103,46 @@ export class FormControls {
     b.addEventListener("click", () => { if (b.disabled) return; set(!b.classList.contains("active"), true); });
     Object.defineProperty(b, "checked", { get() { return b.classList.contains("active"); }, set(v) { set(!!v, false); }, configurable: true });
     return b;
+  }
+
+  /** Contrôle SEGMENTÉ (choix 1 parmi N, exclusif) — primitive `.rm-toggle` unifiée (cf. CLAUDE.md n°14 : ne pas
+      réinventer une rangée de boutons ad hoc). Chaque option porte `value` + `label` (ou `icon` SVG de confiance).
+      Une option `disabled` reste visible mais non cliquable (+ `title` de découvrabilité). `.value` getter/setter
+      exposé (le setter NE déclenche PAS `onChange`, comme `.checked` de `toggle`). */
+  static segmented(options: SegOption[], value: string, onChange: (v: string) => void, opts: SegmentedOpts = {}): HTMLDivElement {
+    const wrap = document.createElement("div"); wrap.className = "rm-toggle" + (opts.className ? " " + opts.className : "");
+    wrap.setAttribute("role", "group"); if (opts.ariaLabel) wrap.setAttribute("aria-label", opts.ariaLabel);
+    let cur = value;
+    const buttons: Array<{ b: HTMLButtonElement; v: string }> = [];
+    const set = (v: string, fire: boolean) => {
+      cur = v; buttons.forEach(({ b, v: bv }) => b.classList.toggle("on", bv === v));
+      if (fire) { try { onChange(v); } catch (e) { console.error(e); } }
+    };
+    options.forEach((o) => {
+      const b = document.createElement("button"); b.type = "button";
+      if (o.disabled) b.disabled = true;
+      if (o.title) b.title = o.title;
+      if (o.icon) b.innerHTML = o.icon + (o.label ? '<span>' + Html.escape(o.label) + "</span>" : "");
+      else b.textContent = o.label || o.value;
+      b.classList.toggle("on", o.value === cur);
+      b.addEventListener("click", () => { if (b.disabled) return; set(o.value, true); });
+      buttons.push({ b, v: o.value }); wrap.appendChild(b);
+    });
+    Object.defineProperty(wrap, "value", { get() { return cur; }, set(v) { set(String(v == null ? "" : v), false); }, configurable: true });
+    return wrap;
+  }
+
+  /** Champ NUMBER avec SUFFIXE d'unité (A / W…) — `.unit-inp` (cf. maquette énergie/POE). Encapsule `number()` ;
+      `.value` proxifié vers l'input interne (parité `date()`), pour que les appelants lisent `wrap.value` comme un
+      champ nu. `unit` est du TEXTE (échappé). */
+  static unitNumber(value: any, unit: string, opts: NumberOpts = {}): HTMLDivElement {
+    const wrap = document.createElement("div"); wrap.className = "unit-inp";
+    const input = FormControls.number(value, opts);
+    const u = document.createElement("span"); u.className = "u"; u.textContent = unit;
+    wrap.appendChild(input); wrap.appendChild(u);
+    (wrap as any)._input = input;
+    Object.defineProperty(wrap, "value", { get() { return input.value; }, set(v) { input.value = (v == null ? "" : String(v)); }, configurable: true });
+    return wrap;
   }
 
   static attachDatalist(input: HTMLInputElement, id: string, values: string[]): HTMLDataListElement {
