@@ -28,6 +28,7 @@ export const CERT_TIP = {
   issueSsh: "certs.issueSsh",
   export: "certs.export",
   revoke: "certs.revoke",
+  renew: "certs.renew",
   remove: "certs.remove",
   trustDeploy: "certs.trustDeploy",
   certList: "certs.certList",
@@ -78,6 +79,17 @@ export class CertsTips {
           { head: I18n.t("certs.tips.revoke.h1"), body: I18n.t("certs.tips.revoke.b1") },
           { head: I18n.t("certs.tips.revoke.h2"), body: I18n.t("certs.tips.revoke.b2") },
           { head: I18n.t("certs.tips.revoke.h3"), body: I18n.t("certs.tips.revoke.b3") },
+        ],
+      },
+
+      [CERT_TIP.renew]: {
+        title: I18n.t("certs.tips.renew.title"),
+        icon: Icons.RENEW,
+        sub: I18n.t("certs.tips.renew.sub"),
+        sections: [
+          { head: I18n.t("certs.tips.renew.h1"), body: I18n.t("certs.tips.renew.b1") },
+          { head: I18n.t("certs.tips.renew.h2"), body: I18n.t("certs.tips.renew.b2") },
+          { head: I18n.t("certs.tips.renew.h3"), body: I18n.t("certs.tips.renew.b3") },
         ],
       },
 

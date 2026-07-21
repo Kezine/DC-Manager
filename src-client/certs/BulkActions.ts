@@ -46,6 +46,10 @@ export interface BulkActionAvailability {
   withPrivateKeys: boolean;
   /** « Révoquer » : proposé seulement si déverrouillé ET aucun sélectionné n'est déjà révoqué. */
   canRevoke: boolean;
+  /** « Renouveler » (mode 2, durée seule) : proposé si déverrouillé ET TOUS les sélectionnés sont des FEUILLES
+      TLS actives. Restreint aux feuilles : le type d'un certificat SSH (user/host) n'est pas en métadonnée, il
+      ne peut donc pas être renouvelé fidèlement en lot (→ renouvellement unitaire, formulaire complet). */
+  canRenew: boolean;
   /** « Supprimer » : proposé si déverrouillé (parité action par ligne — un révoqué reste supprimable). */
   canDelete: boolean;
 }
@@ -93,11 +97,14 @@ export class BulkActions {
     const list = Array.isArray(snapshots) ? snapshots : [];
     const hasSelection = list.length > 0;
     const anyRevoked = list.some((s) => BulkActions.isRevoked(s.revoked_at));
+    // Renouvellement groupé : déverrouillé + tous des feuilles TLS actives (cf. canRenew — les CA/SSH sont exclus).
+    const allRenewableLeaves = hasSelection && list.every((s) => s.kind === "leaf-tls" && !BulkActions.isRevoked(s.revoked_at));
     return {
       canExport: hasSelection,
       exportLabel: unlocked ? I18n.t("certs.admin.bulk.selExportFull") : I18n.t("certs.admin.bulk.selExportPublic"),
       withPrivateKeys: unlocked,
       canRevoke: hasSelection && !anyRevoked,
+      canRenew: unlocked && allRenewableLeaves,
       canDelete: hasSelection,
     };
   }

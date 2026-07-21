@@ -159,6 +159,25 @@ export class X509Factory {
     return X509Factory.assembleResult(cert, keys.privateKey);
   }
 
+  /** Lit l'USAGE (ExtendedKeyUsage) d'une feuille X.509 depuis son PEM — sert à PRÉ-REMPLIR fidèlement le
+      renouvellement (l'usage n'est pas stocké en métadonnée serveur, il vit dans l'extension du certificat).
+      Parsing PUR (aucune opération de clé) → pas besoin du provider WebCrypto. Repli « server » si l'extension
+      manque ou si le PEM est illisible. */
+  static readLeafUsage(certPem: string): LeafUsage {
+    try {
+      const cert = new x509.X509Certificate(certPem);
+      const eku = cert.getExtension(x509.ExtendedKeyUsageExtension);
+      if (!eku) return "server";
+      const hasServer = eku.usages.includes(x509.ExtendedKeyUsage.serverAuth);
+      const hasClient = eku.usages.includes(x509.ExtendedKeyUsage.clientAuth);
+      if (hasServer && hasClient) return "both";
+      if (hasClient) return "client";
+      return "server";
+    } catch {
+      return "server";
+    }
+  }
+
   /* --------------------------------------------------------------------------
      Helpers privés
      -------------------------------------------------------------------------- */

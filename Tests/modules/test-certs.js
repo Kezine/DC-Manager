@@ -23,6 +23,9 @@ module.exports = async () => {
     ck.eq(CertValidity.exceedsCa(365, in100, NOW), true, "exceedsCa : 365 > 100 → vrai");
     ck.eq(CertValidity.exceedsCa(50, in100, NOW), false, "exceedsCa : 50 ≤ 100 → faux");
     ck.eq(CertValidity.exceedsCa(365, null, NOW), false, "exceedsCa : CA sans échéance → faux");
+    ck.eq(CertValidity.durationDays("2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z", 397), 365, "durationDays : 1 an (2026 non bissextile) → 365 j");
+    ck.eq(CertValidity.durationDays(null, "2027-01-01T00:00:00Z", 397), 397, "durationDays : date manquante → fallback");
+    ck.eq(CertValidity.durationDays("2027-01-01T00:00:00Z", "2026-01-01T00:00:00Z", 397), 397, "durationDays : after ≤ before → fallback");
   }
   });
 
@@ -414,6 +417,12 @@ module.exports = async () => {
     ck(!!guardErr && /dépasse celle de la CA/.test(guardErr), "guard : feuille dont la validité dépasse la CA → émission REFUSÉE");
     const okLeaf = await X509Factory.issueLeaf({ caCertPem: shortCa.certPem, caPrivateKeyPkcs8Pem: shortCa.privateKeyPkcs8Pem, commonName: "ok.exemple.test", keyAlgo: "ec-p256", days: 10, sans: [] });
     ck(/-----BEGIN CERTIFICATE-----/.test(okLeaf.certPem), "guard : feuille de durée ≤ CA → émise normalement");
+
+    /* -------- readLeafUsage : relit l'usage (EKU) du PEM pour un renouvellement fidèle -------- */
+    ck.eq(X509Factory.readLeafUsage(leaf.certPem), "server", "readLeafUsage : feuille server → server");
+    ck.eq(X509Factory.readLeafUsage(leafClient.certPem), "client", "readLeafUsage : feuille client → client");
+    ck.eq(X509Factory.readLeafUsage(leafBoth.certPem), "both", "readLeafUsage : feuille both → both");
+    ck.eq(X509Factory.readLeafUsage("pas un pem"), "server", "readLeafUsage : PEM illisible → server (repli)");
 
     /* -------- Roundtrip PKCS#8 : la clé privée PEM se ré-importe via WebCrypto -------- */
     const der = x509.PemConverter.decodeFirst(leaf.privateKeyPkcs8Pem);

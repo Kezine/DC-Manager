@@ -56,6 +56,9 @@ export class Icons {
   /** Révoquer : cercle barré (l'objet existe encore mais ne vaut plus — distinct de la corbeille). */
   static readonly REVOKE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>';
 
+  /** Renouveler : flèche circulaire (cycle). Intention « réémettre en remplaçant » — révoque l'ancien, crée le neuf. */
+  static readonly RENEW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>';
+
   /** Exporter / télécharger : flèche descendante vers un bac. (Sert AUSSI au « Télécharger » des listings.) */
   static readonly EXPORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>';
 

@@ -42,4 +42,14 @@ export class CertValidity {
     if (maxDays === null) return false;
     return Math.floor(Number(requestedDays) || 0) > maxDays;
   }
+
+  /** Durée D'ORIGINE d'un certificat (jours entiers entre not_before et not_after) — sert à PRÉ-REMPLIR la
+      durée d'un renouvellement à l'identique. Repli `fallback` si l'une des dates manque/est illisible
+      (ex. objet SSH sans dates). Plancher 1. */
+  static durationDays(notBeforeIso: string | null | undefined, notAfterIso: string | null | undefined, fallback: number): number {
+    if (!notBeforeIso || !notAfterIso) return fallback;
+    const before = Date.parse(notBeforeIso), after = Date.parse(notAfterIso);
+    if (!isFinite(before) || !isFinite(after) || after <= before) return fallback;
+    return Math.max(1, Math.round((after - before) / CertValidity.MS_PER_DAY));
+  }
 }

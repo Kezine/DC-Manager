@@ -22,7 +22,7 @@ import { Download } from "../core/Download";
 import { CertDeployGuide, type DeployGuide } from "../core/CertDeployGuide";
 import type { FormHost } from "./forms/shared";
 import { CertsError } from "./forms/CertsClient";
-import type { CertsClient, CertificateListItem, CertificateInput, CertSan, PkiState, CertificatePageItem, CertificateRootItem, CertsListParams } from "./forms/CertsClient";
+import type { CertsClient, CertificateListItem, CertificateDetail, CertificateInput, CertSan, PkiState, CertificatePageItem, CertificateRootItem, CertsListParams } from "./forms/CertsClient";
 import { PkiCrypto } from "../certs/PkiCrypto";
 import { PkiSession } from "../certs/PkiSession";
 import { X509Factory, type X509KeyAlgo, type LeafUsage, type X509San } from "../certs/X509Factory";
@@ -31,7 +31,7 @@ import { SshKeyMaterial } from "../certs/SshKeyMaterial";
 import { SshWire } from "../certs/SshWire";
 import { CertExports, type CertExportRecord, type ExportArtifact } from "../certs/CertExports";
 import { CertValidity } from "../certs/CertValidity";
-import { RevocationReasons, REVOCATION_REASON_CODES } from "../certs/RevocationReasons";
+import { RevocationReasons, REVOCATION_REASON_CODES, RENEWAL_REASON_CODE } from "../certs/RevocationReasons";
 import { CertZip, type CertBundleRecord, type ExportCategoryKey } from "../certs/CertZip";
 import { BulkActions, type CertSelectionSnapshot } from "../certs/BulkActions";
 import * as x509 from "@peculiar/x509";
@@ -841,6 +841,8 @@ export class CertsAdminView {
     cell.appendChild(IconButton.build({ icon: Icons.INFO, label: I18n.t("certs.admin.actions.info"), onClick: () => this.infoModal(item) }));
     if (unlocked && item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, I18n.t("certs.admin.actions.issueTls"), CERT_TIP.issueTls, () => this.leafModal(item)));
     if (unlocked && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, I18n.t("certs.admin.actions.issueSsh"), CERT_TIP.issueSsh, () => this.sshCertModal(item)));
+    // RENOUVELLEMENT unitaire (mode 1) — feuille TLS / certificat SSH (les CA passent par renewCaDialog, ajouté en phase 5).
+    if (unlocked && (item.kind === "leaf-tls" || item.kind === "ssh-cert") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renew"), CERT_TIP.renew, () => void this.renewModal(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.EXPORT, I18n.t("certs.admin.actions.exportArtifacts"), CERT_TIP.export, () => void this.exportModal(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.REVOKE, I18n.t("certs.admin.actions.revoke"), CERT_TIP.revoke, () => void this.revoke(item)));
     cell.appendChild(this.iconAction(Icons.DELETE, I18n.t("ui.action.delete"), CERT_TIP.remove, () => void this.remove(item), true));
@@ -1060,6 +1062,7 @@ export class CertsAdminView {
     // (« Exporter publics (ZIP) » = aucune clé privée n'entrera dans l'archive) — une icône la perdrait.
     if (av.canExport) this.selBarEl.appendChild(this.actionButton(av.exportLabel, I18n.t("certs.admin.select.exportTitle"), () => this.bulkExportDialog(), "btn-primary"));
     // Le compteur n'est PAS répété sur les boutons : le span « N sélectionné(s) » ci-dessus le dit déjà.
+    if (av.canRenew) this.selBarEl.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.select.renewSelection"), CERT_TIP.renew, () => void this.bulkRenewDialog()));
     if (av.canRevoke) this.selBarEl.appendChild(this.iconAction(Icons.REVOKE, I18n.t("certs.admin.select.revokeSelection"), CERT_TIP.revoke, () => void this.bulkRevoke()));
     if (av.canDelete) this.selBarEl.appendChild(this.iconAction(Icons.DELETE, I18n.t("certs.admin.select.deleteSelection"), CERT_TIP.remove, () => void this.bulkDelete(), true));
     this.selBarEl.appendChild(this.actionButton(I18n.t("certs.admin.select.clearSelection"), I18n.t("certs.admin.select.clearSelectionTitle"), () => this.clearSelection()));
@@ -1230,6 +1233,91 @@ export class CertsAdminView {
     ]);
     this.clearSelection();
     await this.refreshBody();
+  }
+
+  /** Ré-émet une FEUILLE TLS à l'identique de `item` (renouvellement), signée par `ca` (déchiffrée en `caKeyPem`),
+      pour `days` jours (déjà rognés au plafond de la CA par l'appelant) : nouveau certificat (nouvelle paire,
+      `renewed_from` = item.id), puis révocation « superseded » de l'ancien. Partagé par le lot ET le renouvellement
+      de CA (phase 5). Le sujet/usage/algo/SAN sont repris des MÉTADONNÉES de `item` (usage lu du PEM). */
+  private async reissueLeafRenewal(item: CertificateListItem, ca: CertificateDetail, caKeyPem: string, days: number): Promise<void> {
+    const commonName = CertsAdminView.parseDnField(item.subject, "CN") || item.label;
+    const organization = CertsAdminView.parseDnField(item.subject, "O") || undefined;
+    const organizationalUnit = CertsAdminView.parseDnField(item.subject, "OU") || undefined;
+    const keyAlgo = (["ec-p256", "rsa-2048", "rsa-4096"] as string[]).includes(item.key_algo) ? item.key_algo as X509KeyAlgo : "ec-p256";
+    const usage = X509Factory.readLeafUsage(item.public_pem || "");
+    const sans = (item.sans || []).filter((s) => s.san_type === "dns" || s.san_type === "ip" || s.san_type === "email");
+    const gen = await X509Factory.issueLeaf({
+      caCertPem: ca.public_pem || "", caPrivateKeyPkcs8Pem: caKeyPem,
+      commonName, organization, organizationalUnit, keyAlgo, days, sans: sans as X509San[], usage,
+    });
+    const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
+    await this.client!.save(CertsAdminView.newId(), {
+      kind: "leaf-tls", parent_id: ca.id, label: commonName, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
+      serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
+      key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans, renewed_from: item.id,
+    });
+    await this.revokeSuperseded(item);
+  }
+
+  /** RENOUVELLEMENT GROUPÉ (mode 2) : modale ne demandant QUE la durée, appliquée à toutes les feuilles TLS
+      sélectionnées (chaque durée rognée au plafond de sa CA). Ré-émission à l'identique (sujet/SAN/usage/algo
+      d'origine), l'ancien révoqué. Clés de CA déchiffrées UNE fois par CA (cache). Bilan systématique. */
+  private async bulkRenewDialog(): Promise<void> {
+    this.session.touch();
+    const n = this.selection.size;
+    const root = document.createElement("div");
+    const intro = document.createElement("div"); intro.className = "form-hint"; intro.style.marginBottom = "10px";
+    intro.textContent = I18n.t("certs.admin.bulk.renewIntro", { count: n });
+    const days = FormControls.number(397, { min: 1, step: 1 });
+    const errBox = this.errBox();
+    root.append(intro, FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, I18n.t("certs.admin.bulk.renewDaysHint")), errBox);
+
+    this.host.openModal({
+      title: I18n.t("certs.admin.bulk.renewTitle", { count: n }),
+      body: root, saveLabel: I18n.t("certs.admin.bulk.renewBtn"),
+      onSave: async () => {
+        errBox.style.display = "none";
+        this.session.touch();
+        const requested = Number(days.value);
+        if (!Number.isFinite(requested) || requested <= 0) { this.showError(errBox, I18n.t("certs.admin.sshCert.daysInvalid")); return false; }
+        const ids = [...this.selection.keys()];
+        let allItems: CertificateListItem[];
+        try { allItems = await this.client!.list(); }
+        catch (e) { this.showError(errBox, e); return false; }
+        const byId = new Map(allItems.map((c) => [c.id, c] as const));
+        // Cache par CA : évite de re-télécharger/re-déchiffrer la clé d'une même CA pour chaque feuille.
+        const caCache = new Map<string, { ca: CertificateDetail; key: string }>();
+        const errors: Array<{ label: string; reason: string }> = [];
+        let done = 0;
+        for (const id of ids) {
+          const snap = this.selection.get(id)!;
+          const item = byId.get(id);
+          if (!item) { errors.push({ label: snap.label, reason: I18n.t("certs.admin.bulk.notFound") }); continue; }
+          if (item.revoked_at) { errors.push({ label: item.label, reason: I18n.t("certs.admin.bulk.alreadyRevoked") }); continue; }
+          if (item.kind !== "leaf-tls" || !item.parent_id) { errors.push({ label: item.label, reason: I18n.t("certs.admin.bulk.notRenewable") }); continue; }
+          try {
+            let cc = caCache.get(item.parent_id);
+            if (!cc) {
+              const ca = await this.client!.getOne(item.parent_id);
+              if (!ca.key_enc) throw new Error(I18n.t("certs.admin.leaf.noKey"));
+              cc = { ca, key: await PkiCrypto.decryptSecret(this.session.key, ca.key_enc) };
+              caCache.set(item.parent_id, cc);
+            }
+            const clamped = CertValidity.clampDays(requested, cc.ca.not_after, Date.now());
+            await this.reissueLeafRenewal(item, cc.ca, cc.key, clamped);
+            done++;
+          } catch (e) { errors.push({ label: item.label, reason: CertsAdminView.errText(e) }); }
+        }
+        this.showBulkSummary(I18n.t("certs.admin.bulk.sumRenew"), [
+          I18n.t("certs.admin.bulk.renewedCount", { count: done }),
+          ...errors.map((e) => I18n.t("certs.admin.bulk.errorLine", { label: e.label, reason: e.reason })),
+        ]);
+        this.clearSelection();
+        await this.refreshBody();
+        return true;
+      },
+    });
+    setTimeout(() => days.focus(), 30);
   }
 
   /** SUPPRESSION groupée : confirmation danger, puis N DELETE. Les 409 (descendance) sont COLLECTÉS par élément
@@ -1486,28 +1574,36 @@ export class CertsAdminView {
     setTimeout(() => cn.focus(), 30);
   }
 
-  /** Feuille TLS signée par une CA X.509 (action « Émettre TLS »). */
-  private leafModal(ca: CertificateListItem): void {
+  /** Feuille TLS signée par une CA X.509 (action « Émettre TLS »). `renewOf` présent = RENOUVELLEMENT (mode 1) :
+      le formulaire est PRÉ-REMPLI à l'identique du certificat renouvelé (CN/O/OU/SAN/usage/algo/durée) et, à la
+      validation, l'ancien est RÉVOQUÉ (raison « superseded ») tandis que le nouveau porte `renewed_from` = son id. */
+  private leafModal(ca: CertificateListItem, renewOf?: CertificateListItem): void {
+    // Pré-remplissage : depuis le certificat renouvelé si mode 1, sinon défauts (O/OU hérités de la CA).
+    const cnInit = renewOf ? (CertsAdminView.parseDnField(renewOf.subject, "CN") || renewOf.label) : "";
+    const orgInit = CertsAdminView.parseDnField(renewOf ? renewOf.subject : ca.subject, "O");
+    const ouInit = CertsAdminView.parseDnField(renewOf ? renewOf.subject : ca.subject, "OU");
+    const sansInit = renewOf ? (renewOf.sans || []).filter((s) => s.san_type === "dns" || s.san_type === "ip" || s.san_type === "email") : undefined;
+    const usageInit: LeafUsage = renewOf ? X509Factory.readLeafUsage(renewOf.public_pem || "") : "server";
+    const algoInit = renewOf && (["ec-p256", "rsa-2048", "rsa-4096"] as string[]).includes(renewOf.key_algo) ? renewOf.key_algo : "ec-p256";
+
     const root = document.createElement("div");
-    const cn = FormControls.text("", I18n.t("certs.admin.leaf.cnPlaceholder"));
+    const cn = FormControls.text(cnInit, I18n.t("certs.admin.leaf.cnPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.cnField"), cn, I18n.t("certs.admin.leaf.cnHint")));
-    // O / OU du sujet de la FEUILLE — pré-remplis depuis le sujet de la CA (l'organisation est le plus souvent
-    // partagée), éditables. Sans eux, le certificat émis n'avait que le CN (correctif : O + OU manquaient).
-    const org = FormControls.text(CertsAdminView.parseDnField(ca.subject, "O"), I18n.t("certs.admin.leaf.orgPlaceholder"));
+    const org = FormControls.text(orgInit, I18n.t("certs.admin.leaf.orgPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.orgField"), org, I18n.t("certs.admin.leaf.orgHint")));
-    const ou = FormControls.text(CertsAdminView.parseDnField(ca.subject, "OU"), I18n.t("certs.admin.leaf.ouPlaceholder"));
+    const ou = FormControls.text(ouInit, I18n.t("certs.admin.leaf.ouPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.ouField"), ou, I18n.t("certs.admin.leaf.ouHint")));
-    const sanEditor = this.buildSanEditor();
+    const sanEditor = this.buildSanEditor(sansInit);
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.sanField"), sanEditor.element, I18n.t("certs.admin.leaf.sanHint")));
-    const usage = FormControls.select(CertsAdminView.usageOpts(), "server");
+    const usage = FormControls.select(CertsAdminView.usageOpts(), usageInit);
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.leaf.usageField"), usage, I18n.t("certs.admin.leaf.usageHint")));
-    const algo = FormControls.select(CertsAdminView.algoX509Opts(), "ec-p256");
+    const algo = FormControls.select(CertsAdminView.algoX509Opts(), algoInit);
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.algoField"), algo, I18n.t("certs.admin.leaf.algoHint")));
-    // GUARD (formulaire) : la feuille ne peut vivre au-delà de la CA → on plafonne la durée à ce qui reste
-    // sur la CA (`caDaysLeft`) et on le RAPPELLE dans l'indication. Un root-ca a toujours une échéance
-    // (caDaysLeft non nul) ; la validation de sauvegarde et X509Factory forment le double filet.
+    // GUARD (formulaire) : la feuille ne peut vivre au-delà de la CA → durée plafonnée à ce qui reste sur la CA.
+    // En renouvellement, on PRÉ-REMPLIT la durée d'origine (rognée au plafond). Double filet : validation + fabrique.
     const caDaysLeft = CertValidity.daysUntil(ca.not_after, Date.now());
-    const defaultDays = caDaysLeft != null ? Math.min(397, Math.max(1, caDaysLeft)) : 397;
+    const baseDays = renewOf ? CertValidity.durationDays(renewOf.not_before, renewOf.not_after, 397) : 397;
+    const defaultDays = caDaysLeft != null ? Math.min(baseDays, Math.max(1, caDaysLeft)) : baseDays;
     const days = FormControls.number(defaultDays, caDaysLeft != null ? { min: 1, max: caDaysLeft, step: 1 } : { min: 1, step: 1 });
     const daysHint = caDaysLeft != null
       ? I18n.t("certs.admin.leaf.daysHint") + " " + I18n.t("certs.admin.leaf.caCeiling", { date: (ca.not_after || "").slice(0, 10), days: caDaysLeft })
@@ -1516,8 +1612,8 @@ export class CertsAdminView {
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
-      title: I18n.t("certs.admin.leaf.title"),
-      subtitle: Html.escape(ca.label),
+      title: renewOf ? I18n.t("certs.admin.renew.leafTitle") : I18n.t("certs.admin.leaf.title"),
+      subtitle: Html.escape(renewOf ? renewOf.label : ca.label),
       body: root,
       onSave: async () => {
         errBox.style.display = "none";
@@ -1544,14 +1640,45 @@ export class CertsAdminView {
             kind: "leaf-tls", parent_id: ca.id, label: commonName, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans,
+            renewed_from: renewOf ? renewOf.id : undefined,   // lignée (mode 1) ; undefined → null côté serveur
           });
-          Notify.toast(I18n.t("certs.admin.leaf.toast"), "ok");
+          // RENOUVELLEMENT : révoque l'ancien APRÈS création du neuf (raison auto « superseded »). Échec de la
+          // révocation → le neuf existe déjà : on avertit sans bloquer (l'ancien restera à révoquer à la main).
+          if (renewOf) await this.revokeSuperseded(renewOf);
+          Notify.toast(renewOf ? I18n.t("certs.admin.renew.leafToast") : I18n.t("certs.admin.leaf.toast"), "ok");
           await this.refreshBody();
           return true;
         } catch (e) { this.showError(errBox, e); return false; }
       },
     });
     setTimeout(() => cn.focus(), 30);
+  }
+
+  /** Révoque un certificat au motif « superseded » (remplacé par renouvellement). Ne LÈVE PAS : un échec (rare)
+      est signalé par un toast d'avertissement — le nouveau certificat est déjà en place, l'ancien reste à révoquer
+      manuellement au besoin. Partagé par tous les flux de renouvellement (feuille, ssh-cert, CA, lots). */
+  private async revokeSuperseded(old: CertificateListItem): Promise<void> {
+    try {
+      await this.client!.save(old.id, CertsAdminView.metadataInput(old, {
+        revoked_at: new Date().toISOString(), revocation_reason: RevocationReasons.encode(RENEWAL_REASON_CODE, ""),
+      }));
+    } catch (_) {
+      Notify.toast(I18n.t("certs.admin.renew.oldRevokeFailed", { label: old.label }), "warn");
+    }
+  }
+
+  /** RENOUVELLEMENT UNITAIRE (mode 1) d'une feuille TLS ou d'un certificat SSH : ouvre la modale d'émission
+      PRÉ-REMPLIE à l'identique. Charge d'abord la CA émettrice (échéance pour le plafond + clé pour signer).
+      Les CA (root-ca/ssh-ca) passent, elles, par renewCaDialog (opération de masse). */
+  private async renewModal(item: CertificateListItem): Promise<void> {
+    this.session.touch();
+    if (item.kind !== "leaf-tls" && item.kind !== "ssh-cert") return;   // les CA → renewCaDialog
+    if (!item.parent_id) { Notify.toast(I18n.t("certs.admin.renew.noParent"), "err"); return; }
+    let ca: CertificateListItem;
+    try { ca = await this.client!.getOne(item.parent_id); }
+    catch (e) { this.actionError(e); return; }
+    if (item.kind === "leaf-tls") this.leafModal(ca, item);
+    else this.sshCertModal(ca, item);
   }
 
   /** CA SSH (ssh-ca) ou paire SSH simple (ssh-keypair) — ed25519, WebCrypto extractible. */
@@ -1588,16 +1715,21 @@ export class CertsAdminView {
     setTimeout(() => ident.focus(), 30);
   }
 
-  /** Certificat SSH signé par une ssh-ca (action « Émettre SSH ») — la paire sujette NAÎT avec le cert (v1). */
-  private sshCertModal(ca: CertificateListItem): void {
+  /** Certificat SSH signé par une ssh-ca (action « Émettre SSH ») — la paire sujette NAÎT avec le cert (v1).
+      `renewOf` présent = RENOUVELLEMENT (mode 1) : key id + principals + durée pré-remplis, l'ancien révoqué à la
+      validation, le neuf porte `renewed_from`. NB : le TYPE (user/host) n'est pas en métadonnée → défaut « user »
+      en renouvellement (éditable). Une ssh-ca n'a pas d'échéance → aucun plafond de durée. */
+  private sshCertModal(ca: CertificateListItem, renewOf?: CertificateListItem): void {
+    const principalsInit = renewOf ? (renewOf.sans || []).filter((s) => s.san_type === "principal").map((s) => s.value) : undefined;
+    const daysInit = renewOf ? CertValidity.durationDays(renewOf.not_before, renewOf.not_after, 365) : 365;
     const root = document.createElement("div");
-    const keyId = FormControls.text("", I18n.t("certs.admin.sshCert.keyIdPlaceholder"));
+    const keyId = FormControls.text(renewOf ? renewOf.label : "", I18n.t("certs.admin.sshCert.keyIdPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.sshCert.keyIdField"), keyId, I18n.t("certs.admin.sshCert.keyIdHint")));
     const type = FormControls.select(CertsAdminView.sshCertTypeOpts(), "user");
     root.appendChild(FormControls.fieldRow(I18n.t("lists.col.type"), type, I18n.t("certs.admin.sshCert.typeHint")));
-    const principalsEditor = this.buildPrincipalsEditor();
+    const principalsEditor = this.buildPrincipalsEditor(principalsInit);
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.sshCert.principalsField"), principalsEditor.element, I18n.t("certs.admin.sshCert.principalsHint")));
-    const days = FormControls.number(365, { min: 1, step: 1 });
+    const days = FormControls.number(daysInit, { min: 1, step: 1 });
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, I18n.t("certs.admin.sshCert.daysHint")));
     const info = document.createElement("div"); info.className = "form-hint"; info.style.marginTop = "6px";
     info.textContent = I18n.t("certs.admin.sshCert.info");
@@ -1605,8 +1737,8 @@ export class CertsAdminView {
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
-      title: I18n.t("certs.admin.sshCert.title"),
-      subtitle: Html.escape(ca.label),
+      title: renewOf ? I18n.t("certs.admin.renew.sshCertTitle") : I18n.t("certs.admin.sshCert.title"),
+      subtitle: Html.escape(renewOf ? renewOf.label : ca.label),
       body: root,
       onSave: async () => {
         errBox.style.display = "none";
@@ -1641,8 +1773,10 @@ export class CertsAdminView {
             serial: String(serial), not_before: new Date(validAfter * 1000).toISOString(), not_after: new Date(validBefore * 1000).toISOString(),
             fingerprint: null, key_algo: "ed25519", public_pem: enc.line, key_enc: keyEnc, revoked_at: null,
             sans: principals.map((p) => ({ san_type: "principal", value: p })),
+            renewed_from: renewOf ? renewOf.id : undefined,   // lignée (mode 1) ; undefined → null côté serveur
           });
-          Notify.toast(I18n.t("certs.admin.sshCert.toast"), "ok");
+          if (renewOf) await this.revokeSuperseded(renewOf);   // renouvellement : révoque l'ancien (raison auto)
+          Notify.toast(renewOf ? I18n.t("certs.admin.renew.sshCertToast") : I18n.t("certs.admin.sshCert.toast"), "ok");
           await this.refreshBody();
           return true;
         } catch (e) { this.showError(errBox, e); return false; }
@@ -2083,14 +2217,15 @@ export class CertsAdminView {
      -------------------------------------------------------------------------- */
 
   /** Éditeur de lignes SAN (type dns/ip/email + valeur) ajoutables/retirables. */
-  private buildSanEditor(): { element: HTMLElement; collect: () => CertSan[] } {
+  private buildSanEditor(initial?: CertSan[]): { element: HTMLElement; collect: () => CertSan[] } {
     const container = document.createElement("div");
     const rows = document.createElement("div"); rows.style.cssText = "display:flex;flex-direction:column;gap:6px";
     const entries: Array<{ type: HTMLSelectElement; value: HTMLInputElement }> = [];
-    const addRow = (): void => {
+    // `pre` (pré-remplissage, cas du RENOUVELLEMENT) : la ligne naît avec le type + la valeur du SAN d'origine.
+    const addRow = (pre?: CertSan): void => {
       const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;align-items:center";
-      const type = FormControls.select(CertsAdminView.sanTypeOpts(), "dns"); type.style.flex = "0 0 90px";
-      const value = FormControls.text("", I18n.t("certs.admin.san.valuePlaceholder")); value.style.flex = "1 1 auto";
+      const type = FormControls.select(CertsAdminView.sanTypeOpts(), pre ? pre.san_type : "dns"); type.style.flex = "0 0 90px";
+      const value = FormControls.text(pre ? pre.value : "", I18n.t("certs.admin.san.valuePlaceholder")); value.style.flex = "1 1 auto";
       const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm"; del.innerHTML = Icons.CLOSE; del.title = I18n.t("ui.chips.remove");
       const entry = { type, value };
       del.onclick = () => { const i = entries.indexOf(entry); if (i >= 0) entries.splice(i, 1); row.remove(); };
@@ -2099,7 +2234,8 @@ export class CertsAdminView {
     const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-ghost btn-sm"; add.style.marginTop = "6px";
     add.textContent = I18n.t("certs.admin.san.addSan"); add.onclick = () => addRow();
     container.append(rows, add);
-    addRow();   // une ligne par défaut
+    if (initial && initial.length) initial.forEach((s) => addRow(s));   // renouvellement : reprend les SAN d'origine
+    else addRow();   // une ligne vide par défaut
     return {
       element: container,
       collect: () => entries.map((e) => ({ san_type: e.type.value as CertSan["san_type"], value: e.value.value.trim() })).filter((s) => s.value !== ""),
@@ -2107,13 +2243,13 @@ export class CertsAdminView {
   }
 
   /** Éditeur de lignes « principal » SSH (valeur seule) ajoutables/retirables. */
-  private buildPrincipalsEditor(): { element: HTMLElement; collect: () => string[] } {
+  private buildPrincipalsEditor(initial?: string[]): { element: HTMLElement; collect: () => string[] } {
     const container = document.createElement("div");
     const rows = document.createElement("div"); rows.style.cssText = "display:flex;flex-direction:column;gap:6px";
     const inputs: HTMLInputElement[] = [];
-    const addRow = (): void => {
+    const addRow = (pre?: string): void => {
       const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;align-items:center";
-      const value = FormControls.text("", I18n.t("certs.admin.san.principalPlaceholder")); value.style.flex = "1 1 auto";
+      const value = FormControls.text(pre || "", I18n.t("certs.admin.san.principalPlaceholder")); value.style.flex = "1 1 auto";
       const del = document.createElement("button"); del.type = "button"; del.className = "btn btn-ghost btn-sm"; del.innerHTML = Icons.CLOSE; del.title = I18n.t("ui.chips.remove");
       del.onclick = () => { const i = inputs.indexOf(value); if (i >= 0) inputs.splice(i, 1); row.remove(); };
       row.append(value, del); rows.appendChild(row); inputs.push(value);
@@ -2121,7 +2257,8 @@ export class CertsAdminView {
     const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-ghost btn-sm"; add.style.marginTop = "6px";
     add.textContent = I18n.t("certs.admin.san.addPrincipal"); add.onclick = () => addRow();
     container.append(rows, add);
-    addRow();
+    if (initial && initial.length) initial.forEach((p) => addRow(p));   // renouvellement : reprend les principals
+    else addRow();
     return { element: container, collect: () => inputs.map((i) => i.value.trim()).filter((v) => v !== "") };
   }
 
