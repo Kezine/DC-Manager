@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DC Manager — Éditeur de ports (support POE) · maquette</title>
+<style>
+:root{
+  --bg:#0a0a0a;--bg-2:#111111;--bg-3:#161616;--line:#222222;--line-2:#2d2d2d;
+  --fg:#e8e8e8;--fg-dim:#9a9aa2;--fg-dimmer:#555555;
+  --accent-fill:oklch(0.67 0.19 46);--accent:oklch(0.72 0.175 50);--accent-text:oklch(0.80 0.15 62);--accent-2:#ffaa00;
+  --ok:oklch(0.76 0.15 152);--warn:oklch(0.82 0.14 88);--err:oklch(0.66 0.19 27);--info:oklch(0.72 0.12 240);
+  --role-mgmt:oklch(0.74 0.13 236);--role-data:oklch(0.76 0.15 152);--role-power:oklch(0.77 0.15 68);
+  /* NOUVEAU — teinte POE : or/lime entre data(152) et power-ambre(68), tirant vers le power. */
+  --role-poe:oklch(0.82 0.15 102);
+  --focus:var(--accent-text);--radius-pill:5px;--control-h:36px;--grid-size:24px;
+  --mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+html[data-theme="light"]{
+  --bg:#f4f4f1;--bg-2:#ffffff;--bg-3:#ebebe6;--line:#d6d6d0;--line-2:#b8b8b0;
+  --fg:#0a0a0a;--fg-dim:#555555;--fg-dimmer:#888888;
+  --accent-fill:oklch(0.57 0.18 42);--accent:oklch(0.58 0.17 45);--accent-text:oklch(0.55 0.18 45);--accent-2:#aa6600;
+  --ok:oklch(0.52 0.14 152);--warn:oklch(0.60 0.13 78);--err:oklch(0.53 0.19 27);--info:oklch(0.50 0.15 250);
+  --role-mgmt:oklch(0.50 0.13 250);--role-data:oklch(0.52 0.14 152);--role-power:oklch(0.53 0.13 60);
+  --role-poe:oklch(0.54 0.14 102);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.4;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:var(--grid-size) var(--grid-size);background-position:-1px -1px;
+}
+html[data-theme="light"] body{background-image:linear-gradient(rgba(0,0,0,0.045) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,0.045) 1px,transparent 1px)}
+.wrap{max-width:1080px;margin:0 auto;padding:32px 24px 96px}
+.prose{font-family:var(--sans)}
+a{color:var(--accent-text);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* ---- doc chrome ---- */
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:28px;flex-wrap:wrap}
+.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-text)}
+h1{font-size:22px;letter-spacing:.01em;margin:4px 0 0}
+.lede{font-family:var(--sans);color:var(--fg-dim);max-width:62ch;margin:10px 0 0;line-height:1.55}
+.theme-btn{background:var(--bg-2);color:var(--fg);border:1px solid var(--line-2);padding:8px 14px;font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+.theme-btn:hover{border-color:var(--fg)}
+
+section{margin-top:44px}
+.sec-h{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line-2);padding-bottom:8px;margin-bottom:18px}
+.sec-n{font-size:11px;color:var(--accent-text);letter-spacing:.1em}
+.sec-t{font-size:14px;letter-spacing:.08em;text-transform:uppercase}
+.note{font-family:var(--sans);color:var(--fg-dim);font-size:12.5px;line-height:1.55;max-width:70ch;margin:0 0 16px}
+.state-tag{display:inline-block;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dimmer);border:1px solid var(--line-2);border-radius:3px;padding:1px 6px;margin-left:auto}
+
+/* ---- primitives DS ---- */
+.btn{background:var(--bg-2);color:var(--fg);border:1px solid var(--line-2);padding:8px 16px;font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:8px}
+.btn:hover{border-color:var(--fg);background:var(--bg-3)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-sm{padding:4px 10px;font-size:10px}
+.btn-primary{background:var(--accent-fill);color:#000;border-color:var(--accent-fill);font-weight:600}
+.btn-primary:hover{background:var(--accent-2);border-color:var(--accent-2)}
+.gi{display:inline-flex;align-items:center;flex:none}
+.gi svg{width:1em;height:1em;display:block}
+
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:var(--radius-pill);border:1px solid var(--line-2);background:var(--bg-3);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dim);white-space:nowrap}
+.pill.role-mgmt{border-color:var(--role-mgmt);color:var(--role-mgmt)}
+.pill.role-data{border-color:var(--role-data);color:var(--role-data)}
+.pill.role-power{border-color:var(--role-power);color:var(--role-power)}
+.pill.role-poe{border-color:var(--role-poe);color:var(--role-poe)}
+.pill svg{width:11px;height:11px}
+
+.rm-toggle{display:inline-flex;border:1px solid var(--line-2);border-radius:5px;overflow:hidden}
+.rm-toggle button{background:transparent;border:none;cursor:pointer;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;padding:5px 12px;color:var(--fg-dim)}
+.rm-toggle button+button{border-left:1px solid var(--line-2)}
+.rm-toggle button.on{background:var(--bg-3);color:var(--accent-text)}
+.rm-toggle button:not(.on):hover{color:var(--fg);background:var(--bg-2)}
+.rm-toggle button:disabled{opacity:.45;cursor:not-allowed}
+
+.toggle-pill{display:inline-flex;align-items:center;gap:8px;border-radius:999px}
+.toggle-pill .tgl-dot{width:9px;height:9px;border-radius:50%;flex:none;border:1.5px solid var(--fg-dimmer);background:transparent;transition:all .15s}
+.toggle-pill.active{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 13%,transparent)}
+.toggle-pill.active .tgl-dot{background:var(--accent);border-color:var(--accent);box-shadow:0 0 6px color-mix(in srgb,var(--accent) 70%,transparent)}
+
+.field label{display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dim);margin-bottom:5px}
+.inp{width:100%;height:36px;box-sizing:border-box;background:var(--bg);border:1px solid var(--line-2);color:var(--fg);font-family:var(--mono);font-size:13px;padding:0 10px;outline:none;transition:border-color .15s}
+select.inp{padding-right:6px}
+.inp:focus{border-color:var(--accent)}
+.unit-inp{display:flex;height:36px;box-sizing:border-box;align-items:stretch;border:1px solid var(--line-2);background:var(--bg)}
+.unit-inp:focus-within{border-color:var(--accent)}
+.unit-inp input{flex:1;min-width:0;border:none;background:transparent;color:var(--fg);font-family:var(--mono);font-size:13px;padding:8px 10px;outline:none}
+.unit-inp .u{display:flex;align-items:center;padding:0 10px;border-left:1px solid var(--line-2);color:var(--fg-dim);font-size:11px;letter-spacing:.06em;background:var(--bg-3)}
+.form-hint{font-family:var(--sans);font-size:11px;color:var(--fg-dimmer);margin-top:5px}
+.form-hint.warn{color:var(--warn)}
+
+/* ---- panneau énergie / bloc POE ---- */
+.panel{border:1px solid var(--line);background:var(--bg-2);border-radius:8px;padding:18px 20px}
+.panel-h{display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dim);margin-bottom:14px}
+.poe-block{margin-top:16px;padding-top:16px;border-top:1px dashed var(--line-2)}
+.poe-block .row{display:flex;gap:20px;align-items:flex-end;flex-wrap:wrap}
+.poe-block .field{flex:0 0 180px}
+
+.gauge-card{display:flex;flex-direction:column;gap:8px}
+.gauge-top{display:flex;justify-content:space-between;align-items:baseline;font-size:11px}
+.gauge-top .alloc{font-size:15px}
+.gauge-top .rest{color:var(--fg-dim)}
+.gauge{position:relative;height:9px;border-radius:999px;background:var(--bg-3);border:1px solid var(--line-2);overflow:hidden}
+.gauge-fill{height:100%;background:var(--role-poe);transition:width .3s}
+.gauge.warn .gauge-fill{background:var(--warn)}
+.gauge.over{border-color:var(--err)}
+.gauge.over .gauge-fill{background:repeating-linear-gradient(45deg,var(--err),var(--err) 6px,color-mix(in srgb,var(--err) 55%,#000) 6px,color-mix(in srgb,var(--err) 55%,#000) 12px)}
+.gauge-state{font-family:var(--sans);font-size:11px}
+.gauge-state.ok{color:var(--fg-dim)}
+.gauge-state.warn{color:var(--warn)}
+.gauge-state.over{color:var(--err)}
+.gauges{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:22px}
+@media(max-width:720px){.gauges{grid-template-columns:1fr}}
+
+/* ---- liste de ports ---- */
+.port-list{border:1px solid var(--line);border-radius:8px;background:var(--bg-2);overflow:hidden}
+.list-chrome{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line-2);background:var(--bg-3)}
+.list-chrome .title{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dim)}
+.list-chrome .count{color:var(--fg-dimmer);font-size:11px}
+.list-chrome .sp{flex:1}
+
+details.port{border-bottom:1px solid var(--line)}
+details.port:last-child{border-bottom:none}
+details.port[data-err] .port-head{box-shadow:inset 3px 0 0 var(--err)}
+.port-head{display:flex;align-items:center;gap:12px;padding:11px 14px;cursor:pointer;list-style:none;user-select:none}
+.port-head::-webkit-details-marker{display:none}
+.port-head:hover{background:var(--bg-3)}
+.chev{color:var(--fg-dimmer);transition:transform .15s;flex:none}
+details.port[open] .chev{transform:rotate(90deg)}
+.p-name{font-weight:600;flex:0 0 88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.p-sens{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dim);flex:0 0 104px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rm-cat button{padding-left:10px;padding-right:10px}
+.p-metric{flex:0 0 92px;text-align:right;font-variant-numeric:tabular-nums;color:var(--fg)}
+.p-metric.poe{color:var(--role-poe);display:flex;align-items:center;gap:4px;justify-content:flex-end}
+.p-metric.power{color:var(--role-power)}
+.p-metric .muted{color:var(--fg-dimmer)}
+.p-net{flex:1;min-width:0;color:var(--fg-dim);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.p-cat{flex:0 0 auto}
+.p-acts{display:flex;gap:4px;flex:none}
+.icon-action{width:28px;height:28px;padding:0;justify-content:center}
+.port-body{padding:4px 14px 16px 42px;background:var(--bg)}
+.body-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px 18px;align-items:start}
+.body-grid .field{display:flex;flex-direction:column}
+.body-grid .field>label{min-height:14px}
+.body-grid .rm-toggle{height:36px;align-self:start}
+.body-grid .rm-toggle button{display:flex;align-items:center}
+.body-grid .field .form-hint{margin-top:6px}
+.warn-strip{display:flex;align-items:center;gap:8px;margin-top:12px;padding:8px 10px;border:1px solid var(--err);background:color-mix(in srgb,var(--err) 12%,transparent);color:var(--err);border-radius:5px;font-size:11px}
+.warn-strip svg{width:14px;height:14px;flex:none}
+
+/* ligne figée trunk/lane */
+.port-row.locked{display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--line);opacity:.72}
+.port-row.locked:last-child{border-bottom:none}
+.port-row.locked .p-name{color:var(--fg-dim)}
+.lane-pills{display:flex;gap:5px;flex-wrap:wrap}
+.lock-tag{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:var(--radius-pill);border:1px solid var(--fg-dimmer);background:var(--bg-3);color:var(--fg-dim);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;flex:none}
+.lock-tag svg{width:10px;height:10px}
+
+/* état vide */
+.port-empty{padding:34px 20px;text-align:center}
+.port-empty p{font-family:var(--sans);color:var(--fg-dim);margin:0 0 14px}
+
+.add-row{padding:12px 14px;border-top:1px solid var(--line-2);background:var(--bg-3)}
+
+/* catégorie select mock (état POE désactivé) */
+.cat-demo{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
+.cat-demo>div{flex:1;min-width:240px}
+.tip{position:relative;display:inline-block}
+.tip .bubble{position:absolute;left:0;top:calc(100% + 8px);background:var(--bg-3);border:1px solid var(--line-2);color:var(--fg);font-family:var(--sans);font-size:11px;line-height:1.4;padding:8px 10px;border-radius:6px;width:220px;box-shadow:0 6px 20px rgba(0,0,0,.4);z-index:5}
+.tip .bubble::before{content:"";position:absolute;left:14px;top:-5px;width:9px;height:9px;background:var(--bg-3);border-left:1px solid var(--line-2);border-top:1px solid var(--line-2);transform:rotate(45deg)}
+
+/* teinte role-poe : swatches */
+.swatches{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+@media(max-width:640px){.swatches{grid-template-columns:1fr}}
+.sw-group{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.sw-head{padding:9px 14px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dim);border-bottom:1px solid var(--line-2);background:var(--bg-3)}
+.sw-body{padding:16px 14px;display:flex;flex-direction:column;gap:12px}
+.sw-dark{background:#0a0a0a}.sw-light{background:#f4f4f1}
+.sw-row{display:flex;align-items:center;gap:10px}
+.sw-chip{width:22px;height:22px;border-radius:5px;flex:none;border:1px solid rgba(128,128,128,.35)}
+.sw-lbl{font-size:11px;color:#9a9aa2}
+.sw-light .sw-lbl{color:#555}
+.legend{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+
+.callout{border-left:2px solid var(--accent);background:var(--bg-2);padding:14px 16px;border-radius:0 6px 6px 0;font-family:var(--sans);font-size:12.5px;line-height:1.6;color:var(--fg-dim)}
+.callout b{color:var(--fg)}
+.pro-con{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:16px}
+@media(max-width:640px){.pro-con{grid-template-columns:1fr}}
+.pc{border:1px solid var(--line);border-radius:8px;background:var(--bg-2);padding:16px}
+.pc h4{margin:0 0 10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+.pc.pick h4{color:var(--accent-text)}
+.pc ul{margin:0;padding-left:18px;font-family:var(--sans);font-size:12px;color:var(--fg-dim);line-height:1.6}
+
+/* ---- responsive mobile <560 : lignes → cartes ---- */
+@media(max-width:560px){
+  .wrap{padding:20px 14px 72px}
+  .port-head{flex-wrap:wrap;gap:8px 10px}
+  .p-name{flex:1 1 auto}
+  .p-sens{flex:0 0 auto;order:5}
+  .p-metric{flex:0 0 auto;order:4}
+  .p-net{flex:1 1 100%;order:6}
+  .p-net::before{content:"réseau · ";color:var(--fg-dimmer)}
+  .port-body{padding-left:14px}
+  .body-grid{grid-template-columns:1fr}
+  .port-row.locked{flex-wrap:wrap}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div>
+      <div class="eyebrow">Carton — refonte prospective</div>
+      <h1>Éditeur de ports · support POE</h1>
+    </div>
+    <button class="theme-btn" id="themeBtn" type="button">◑ Thème clair</button>
+  </div>
+  <p class="lede">Maquette de l'éditeur de port refondu couvrant les états du §5 du carton. La mono-ligne
+  ne suffit plus (sens, budget W, validation de budget) : on passe à une <b>ligne extensible</b> — compacte
+  par défaut, détail conditionnel révélé — qui tient la densité d'un switch 48 ports. Réutilise les tokens et
+  primitives de <code>dc-manager.css</code> (<code>.pill</code>, <code>.rm-toggle</code>,
+  <code>.toggle-pill</code>, champs, jauge énergie). Nouveauté : la teinte <code>role-poe</code>.</p>
+
+  <!-- ============ BLOC ÉQUIPEMENT ============ -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§3.2</span><span class="sec-t">Bloc POE de l'équipement</span></div>
+    <p class="note">Ajouté près des champs énergie existants (<code>pdu_max_a</code>,
+    <code>power_nominal_w</code>…). Bascule <code>.toggle-pill</code> + budget total + <b>compteur de budget</b>
+    — le nouvel élément visuel clé, partagé par tous les ports POE producteurs.</p>
+
+    <div class="panel">
+      <div class="panel-h"><span>Énergie</span><span style="color:var(--fg-dimmer)">·</span><span>équipement « SW-CORE-01 »</span></div>
+      <div class="row" style="display:flex;gap:20px;flex-wrap:wrap">
+        <div class="field" style="flex:0 0 180px"><label>Puissance nominale</label>
+          <div class="unit-inp"><input value="240" inputmode="numeric"><span class="u">W</span></div></div>
+        <div class="field" style="flex:0 0 180px"><label>Puissance max</label>
+          <div class="unit-inp"><input value="380" inputmode="numeric"><span class="u">W</span></div></div>
+      </div>
+
+      <div class="poe-block">
+        <div class="row">
+          <div class="field" style="flex:0 0 auto">
+            <label>Capacité POE</label>
+            <button class="btn btn-sm toggle-pill active" type="button" aria-pressed="true">
+              <span class="tgl-dot"></span><span>Équipement POE</span></button>
+          </div>
+          <div class="field" style="flex:0 0 180px">
+            <label>Budget POE total</label>
+            <div class="unit-inp"><input value="90" inputmode="numeric"><span class="u">W</span></div>
+          </div>
+          <div class="field" style="flex:1 1 240px;min-width:220px">
+            <label>Compteur de budget</label>
+            <div class="gauge-card">
+              <div class="gauge-top"><span class="alloc">68&nbsp;<span style="font-size:11px;color:var(--fg-dim)">/ 90 W</span></span><span class="rest">reste 22 W</span></div>
+              <div class="gauge"><div class="gauge-fill" style="width:75%"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note" style="margin-top:20px">États de la jauge (§5.7) — seuil d'avertissement à ~80 %, aligné sur les seuils énergie existants :</p>
+    <div class="gauges">
+      <div class="gauge-card">
+        <div class="gauge-top"><span class="alloc">32&nbsp;<span style="font-size:11px;color:var(--fg-dim)">/ 90 W</span></span><span class="rest">reste 58 W</span></div>
+        <div class="gauge"><div class="gauge-fill" style="width:36%"></div></div>
+        <div class="gauge-state ok">Normal — remplissage partiel</div>
+      </div>
+      <div class="gauge-card">
+        <div class="gauge-top"><span class="alloc">76&nbsp;<span style="font-size:11px;color:var(--fg-dim)">/ 90 W</span></span><span class="rest">reste 14 W</span></div>
+        <div class="gauge warn"><div class="gauge-fill" style="width:84%"></div></div>
+        <div class="gauge-state warn">≈ 84 % — proche de la limite</div>
+      </div>
+      <div class="gauge-card">
+        <div class="gauge-top"><span class="alloc" style="color:var(--err)">104&nbsp;<span style="font-size:11px">/ 90 W</span></span><span class="rest" style="color:var(--err)">−14 W</span></div>
+        <div class="gauge over"><div class="gauge-fill" style="width:100%"></div></div>
+        <div class="gauge-state over">Survente — budget dépassé</div>
+      </div>
+    </div>
+
+    <div class="callout" style="margin-top:22px"><b>Bascule verrouillée (§5.8).</b> Dès qu'au moins un port
+    POE existe, la bascule « Équipement POE » ne peut plus être désactivée (sinon on orphelinerait ces ports) :
+    &nbsp;
+    <button class="btn btn-sm toggle-pill active" type="button" disabled aria-pressed="true" style="vertical-align:middle">
+      <span class="tgl-dot"></span><span>Équipement POE</span></button>
+    &nbsp; <span class="lock-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>verrouillée</span>
+    &nbsp;— <i>« retirez d'abord les ports POE »</i>.</div>
+  </section>
+
+  <!-- ============ LISTE DE PORTS ============ -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§3.1 / §5</span><span class="sec-t">Éditeur de ports — ligne extensible</span></div>
+    <p class="note">Ligne compacte : <b>nom · pastille catégorie · sens · métrique clé · réseau · actions</b>.
+    Le chevron déplie le détail (champs conditionnels selon la catégorie). Unité affichée selon la catégorie —
+    <b>A</b> pour power, <b>W</b> pour POE. Cliquez une ligne pour la déplier.</p>
+
+    <div class="port-list">
+      <div class="list-chrome"><span class="title">Ports</span><span class="count">7 ports · 2 lanes figées</span><span class="sp"></span>
+        <button class="btn btn-sm" type="button"><span class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span>Ajouter</button></div>
+
+      <!-- data -->
+      <details class="port">
+        <summary class="port-head">
+          <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
+          <span class="p-name">eth0</span>
+          <span class="p-cat"><span class="pill role-data">Data</span></span>
+          <span class="p-sens">—</span>
+          <span class="p-metric"><span class="muted">RJ45</span></span>
+          <span class="p-net">vlan-prod-10</span>
+          <span class="p-acts">
+            <button class="btn btn-sm icon-action" title="Dupliquer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="btn btn-sm icon-action" title="Supprimer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </span>
+        </summary>
+        <div class="port-body">
+          <div class="body-grid">
+            <div class="field"><label>Nom</label><input class="inp" value="eth0"></div><div class="field"><label>Catégorie</label><div class="rm-toggle rm-cat" role="group"><button type="button" class="on">Data</button><button type="button">Mgmt</button><button type="button">Power</button><button type="button">POE</button></div></div>
+            <div class="field"><label>Type de port (connecteur)</label><select class="inp"><option>RJ45 (Ethernet)</option><option>SFP+</option><option>QSFP28</option></select></div>
+            <div class="field"><label>Réseau (terminal)</label><select class="inp"><option>vlan-prod-10</option><option>vlan-mgmt-1</option></select></div>
+          </div>
+        </div>
+      </details>
+
+      <!-- mgmt -->
+      <details class="port">
+        <summary class="port-head">
+          <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
+          <span class="p-name">mgmt0</span>
+          <span class="p-cat"><span class="pill role-mgmt">Mgmt</span></span>
+          <span class="p-sens">—</span>
+          <span class="p-metric"><span class="muted">RJ45</span></span>
+          <span class="p-net">vlan-mgmt-1</span>
+          <span class="p-acts">
+            <button class="btn btn-sm icon-action" title="Dupliquer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="btn btn-sm icon-action" title="Supprimer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </span>
+        </summary>
+        <div class="port-body">
+          <div class="body-grid">
+            <div class="field"><label>Nom</label><input class="inp" value="mgmt0"></div><div class="field"><label>Catégorie</label><div class="rm-toggle rm-cat" role="group"><button type="button">Data</button><button type="button" class="on">Mgmt</button><button type="button">Power</button><button type="button">POE</button></div></div>
+            <div class="field"><label>Type de port (connecteur)</label><select class="inp"><option>RJ45 (Ethernet)</option></select></div>
+            <div class="field"><label>Réseau (terminal)</label><select class="inp"><option>vlan-mgmt-1</option></select></div>
+          </div>
+        </div>
+      </details>
+
+      <!-- power source (déplié) -->
+      <details class="port" open>
+        <summary class="port-head">
+          <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
+          <span class="p-name">psu-in-A</span>
+          <span class="p-cat"><span class="pill role-power">Power</span></span>
+          <span class="p-sens">Source</span>
+          <span class="p-metric power">16&nbsp;A</span>
+          <span class="p-net"><span class="muted">—</span></span>
+          <span class="p-acts">
+            <button class="btn btn-sm icon-action" title="Dupliquer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="btn btn-sm icon-action" title="Supprimer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </span>
+        </summary>
+        <div class="port-body">
+          <div class="body-grid">
+            <div class="field"><label>Nom</label><input class="inp" value="psu-in-A"></div><div class="field"><label>Catégorie</label><div class="rm-toggle rm-cat" role="group"><button type="button">Data</button><button type="button">Mgmt</button><button type="button" class="on">Power</button><button type="button">POE</button></div></div>
+            <div class="field"><label>Type de port (connecteur)</label><select class="inp"><option>C14 (IEC)</option><option>C20 (IEC)</option></select></div>
+            <div class="field"><label>Sens</label>
+              <div class="rm-toggle" role="group"><button class="on" type="button">Source</button><button type="button">Sink</button></div></div>
+            <div class="field"><label>Calibre</label><div class="unit-inp"><input value="16" inputmode="numeric"><span class="u">A</span></div></div>
+            <div class="field"><label>Phase</label><select class="inp"><option>L1</option><option>L2</option><option>L3</option></select></div>
+          </div>
+        </div>
+      </details>
+
+      <!-- power sink -->
+      <details class="port">
+        <summary class="port-head">
+          <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
+          <span class="p-name">psu-in-B</span>
+          <span class="p-cat"><span class="pill role-power">Power</span></span>
+          <span class="p-sens">Sink</span>
+          <span class="p-metric power">10&nbsp;A</span>
+          <span class="p-net"><span class="muted">—</span></span>
+          <span class="p-acts">
+            <button class="btn btn-sm icon-action" title="Dupliquer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="btn btn-sm icon-action" title="Supprimer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </span>
+        </summary>
+        <div class="port-body">
+          <div class="body-grid">
+            <div class="field"><label>Nom</label><input class="inp" value="psu-in-B"></div><div class="field"><label>Catégorie</label><div class="rm-toggle rm-cat" role="group"><button type="button">Data</button><button type="button">Mgmt</button><button type="button" class="on">Power</button><button type="button">POE</button></div></div>
+            <div class="field"><label>Type de port (connecteur)</label><select class="inp"><option>C14 (IEC)</option></select></div>
+            <div class="field"><label>Sens</label>
+              <div class="rm-toggle" role="group"><button type="button">Source</button><button class="on" type="button">Sink</button></div></div>
+            <div class="field"><label>Calibre</label><div class="unit-inp"><input value="10" inputmode="numeric"><span class="u">A</span></div></div>
+          </div>
+          <p class="form-hint">La phase n'est demandée que pour un port <b>source</b> — masquée ici (sink).</p>
+        </div>
+      </details>
+
+      <!-- POE PSE (déplié — le cas neuf) -->
+      <details class="port" open>
+        <summary class="port-head">
+          <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
+          <span class="p-name">poe-1</span>
+          <span class="p-cat"><span class="pill role-poe"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>POE</span></span>
+          <span class="p-sens">Producteur</span>
+          <span class="p-metric poe"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>30&nbsp;W</span>
+          <span class="p-net">vlan-cam-30</span>
+          <span class="p-acts">
+            <button class="btn btn-sm icon-action" title="Dupliquer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="btn btn-sm icon-action" title="Supprimer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </span>
+        </summary>
+        <div class="port-body">
+          <div class="body-grid">
+            <div class="field"><label>Nom</label><input class="inp" value="poe-1"></div><div class="field"><label>Catégorie</label><div class="rm-toggle rm-cat" role="group"><button type="button">Data</button><button type="button">Mgmt</button><button type="button">Power</button><button type="button" class="on">POE</button></div></div>
+            <div class="field"><label>Type de port (connecteur)</label><select class="inp"><option>RJ45 (Ethernet)</option></select><p class="form-hint">POE passe sur l'Ethernet — connecteurs data uniquement.</p></div>
+            <div class="field"><label>Sens</label>
+              <div class="rm-toggle" role="group"><button class="on" type="button">PSE</button><button type="button">PD</button></div></div>
+            <div class="field"><label>Budget POE</label><div class="unit-inp"><input value="30" inputmode="numeric"><span class="u">W</span></div><p class="form-hint">Classes PoE : 15,4 · 30 · 60 · 90 W</p></div>
+            <div class="field"><label>Réseau (terminal)</label><select class="inp"><option>vlan-cam-30</option></select></div>
+          </div>
+        </div>
+      </details>
+
+      <!-- POE PD -->
+      <details class="port">
+        <summary class="port-head">
+          <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
+          <span class="p-name">poe-uplink</span>
+          <span class="p-cat"><span class="pill role-poe"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>POE</span></span>
+          <span class="p-sens">Consommateur</span>
+          <span class="p-metric poe"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>15,4&nbsp;W</span>
+          <span class="p-net">vlan-prod-10</span>
+          <span class="p-acts">
+            <button class="btn btn-sm icon-action" title="Dupliquer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="btn btn-sm icon-action" title="Supprimer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </span>
+        </summary>
+        <div class="port-body">
+          <div class="body-grid">
+            <div class="field"><label>Nom</label><input class="inp" value="poe-uplink"></div><div class="field"><label>Catégorie</label><div class="rm-toggle rm-cat" role="group"><button type="button">Data</button><button type="button">Mgmt</button><button type="button">Power</button><button type="button" class="on">POE</button></div></div>
+            <div class="field"><label>Type de port (connecteur)</label><select class="inp"><option>RJ45 (Ethernet)</option></select></div>
+            <div class="field"><label>Sens</label>
+              <div class="rm-toggle" role="group"><button type="button">PSE</button><button class="on" type="button">PD</button></div></div>
+            <div class="field"><label>Budget POE</label><div class="unit-inp"><input value="15,4" inputmode="decimal"><span class="u">W</span></div></div>
+            <div class="field"><label>Réseau (terminal)</label><select class="inp"><option>vlan-prod-10</option></select></div>
+          </div>
+        </div>
+      </details>
+
+      <!-- POE PSE en survente → validation (déplié) -->
+      <details class="port" open data-err>
+        <summary class="port-head">
+          <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
+          <span class="p-name">poe-2</span>
+          <span class="p-cat"><span class="pill role-poe"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>POE</span></span>
+          <span class="p-sens">Producteur</span>
+          <span class="p-metric poe" style="color:var(--err)"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>60&nbsp;W</span>
+          <span class="p-net">vlan-cam-30</span>
+          <span class="p-acts">
+            <span class="pill" style="border-color:var(--err);color:var(--err)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 8v5M12 17h.01"/><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>
+            <button class="btn btn-sm icon-action" title="Supprimer" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </span>
+        </summary>
+        <div class="port-body">
+          <div class="body-grid">
+            <div class="field"><label>Nom</label><input class="inp" value="poe-2"></div><div class="field"><label>Catégorie</label><div class="rm-toggle rm-cat" role="group"><button type="button">Data</button><button type="button">Mgmt</button><button type="button">Power</button><button type="button" class="on">POE</button></div></div>
+            <div class="field"><label>Sens</label>
+              <div class="rm-toggle" role="group"><button class="on" type="button">PSE</button><button type="button">PD</button></div></div>
+            <div class="field"><label>Budget POE</label><div class="unit-inp" style="border-color:var(--err)"><input value="60" inputmode="numeric"><span class="u">W</span></div></div>
+          </div>
+          <div class="warn-strip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v5M12 17h.01"/><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+          Σ des budgets producteurs (30 + 60 = 90 W) atteint la limite ; ce port pousse à <b>104 W &gt; 90 W</b> — survente du budget équipement.</div>
+        </div>
+      </details>
+
+      <!-- lanes figées -->
+      <div class="port-row locked">
+        <span class="p-name">trunk-qsfp-1</span>
+        <div class="lane-pills">
+          <span class="pill role-data">Lane 1</span><span class="pill role-data">Lane 2</span>
+          <span class="pill role-data">Lane 3</span><span class="pill role-data">Lane 4</span>
+        </div>
+        <span class="sp" style="flex:1"></span>
+        <span class="lock-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Faisceau — lecture seule</span>
+      </div>
+      <div class="port-row locked">
+        <span class="p-name">breakout-A</span>
+        <div class="lane-pills">
+          <span class="pill role-data">1/1</span><span class="pill role-data">1/2</span>
+          <span class="pill role-data">1/3</span><span class="pill role-data">1/4</span>
+        </div>
+        <span class="sp" style="flex:1"></span>
+        <span class="lock-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Breakout — lecture seule</span>
+      </div>
+
+      <div class="add-row"><button class="btn btn-sm" type="button"><span class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span>Ajouter un port</button></div>
+    </div>
+  </section>
+
+  <!-- état vide + catégorie POE désactivée -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§5.1 / §5.6</span><span class="sec-t">État vide · catégorie POE désactivée</span></div>
+    <div class="cat-demo">
+      <div>
+        <p class="note">Équipement <b>sans port</b> :</p>
+        <div class="port-list">
+          <div class="port-empty"><p>Aucun port défini sur cet équipement.</p>
+            <button class="btn btn-primary btn-sm" type="button"><span class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span>Ajouter un port</button></div>
+        </div>
+      </div>
+      <div>
+        <p class="note">Sélecteur de catégorie quand <code>poe_device = false</code> — l'option
+        <b>POE est grisée</b> avec un tooltip qui rend le flag découvrable :</p>
+        <div style="position:relative">
+          <div class="rm-toggle" role="group" style="flex-wrap:wrap">
+            <button type="button">Data</button><button class="on" type="button">Mgmt</button><button type="button">Power</button>
+            <span class="tip"><button type="button" disabled>POE</button>
+              <span class="bubble">Activez « Équipement POE » dans le bloc énergie pour rendre cette catégorie disponible.</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TEINTE role-poe ============ -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§7</span><span class="sec-t">Langage visuel POE — teinte <code>role-poe</code></span></div>
+    <p class="note">POE = <b>data + énergie</b>. La teinte doit se distinguer du data pur et évoquer le power
+    sans se confondre avec un power « pur ». Deux pistes, en clair et sombre. Le <b>glyphe éclair</b> ⚡ lie POE
+    au signal power de scène (le câble touchant un port POE portera le même éclair ambre).</p>
+
+    <div class="swatches">
+      <div class="sw-group">
+        <div class="sw-head">Piste 1 — or/lime + éclair · <span style="color:var(--accent-text)">recommandée</span></div>
+        <div class="sw-body sw-dark">
+          <div class="sw-row"><span class="sw-chip" style="background:oklch(0.82 0.15 102)"></span><span class="sw-lbl">--role-poe sombre · oklch(0.82 0.15 102)</span></div>
+          <div class="sw-row">
+            <span class="pill role-data">Data</span>
+            <span class="pill" style="border-color:oklch(0.82 0.15 102);color:oklch(0.82 0.15 102)"><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>POE</span>
+            <span class="pill role-power">Power</span>
+          </div>
+        </div>
+        <div class="sw-body sw-light">
+          <div class="sw-row"><span class="sw-chip" style="background:oklch(0.54 0.14 102)"></span><span class="sw-lbl">--role-poe clair · oklch(0.54 0.14 102)</span></div>
+          <div class="sw-row">
+            <span class="pill role-data" style="border-color:oklch(0.52 0.14 152);color:oklch(0.52 0.14 152)">Data</span>
+            <span class="pill" style="border-color:oklch(0.54 0.14 102);color:oklch(0.54 0.14 102)"><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>POE</span>
+            <span class="pill role-power" style="border-color:oklch(0.53 0.13 60);color:oklch(0.53 0.13 60)">Power</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sw-group">
+        <div class="sw-head">Piste 2 — ambre power + point data + éclair</div>
+        <div class="sw-body sw-dark">
+          <div class="sw-row"><span class="sw-chip" style="background:oklch(0.79 0.15 74)"></span><span class="sw-lbl">teinte proche power · distinction par glyphe</span></div>
+          <div class="sw-row">
+            <span class="pill role-data">Data</span>
+            <span class="pill" style="border-color:oklch(0.79 0.15 74);color:oklch(0.79 0.15 74)"><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>POE<span style="width:6px;height:6px;border-radius:50%;background:oklch(0.76 0.15 152)"></span></span>
+            <span class="pill role-power">Power</span>
+          </div>
+        </div>
+        <div class="sw-body sw-light">
+          <div class="sw-row"><span class="sw-chip" style="background:oklch(0.55 0.13 66)"></span><span class="sw-lbl">risque de confusion avec power ↑</span></div>
+          <div class="sw-row">
+            <span class="pill role-data" style="border-color:oklch(0.52 0.14 152);color:oklch(0.52 0.14 152)">Data</span>
+            <span class="pill" style="border-color:oklch(0.55 0.13 66);color:oklch(0.55 0.13 66)"><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>POE<span style="width:6px;height:6px;border-radius:50%;background:oklch(0.52 0.14 152)"></span></span>
+            <span class="pill role-power" style="border-color:oklch(0.53 0.13 60);color:oklch(0.53 0.13 60)">Power</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note" style="margin-top:16px"><b>Recommandation : piste 1.</b> La hue 102 (or/lime) s'insère
+    visiblement entre data (vert 152) et power (ambre 68) — « data qui porte de l'énergie » — et le glyphe
+    éclair assure la distinction en niveaux de gris / pour daltoniens. La piste 2 (ambre quasi-power) repose
+    trop sur le seul glyphe et se confond avec power en thème clair.</p>
+
+    <div class="legend">
+      <span class="pill role-mgmt">Mgmt</span><span class="pill role-data">Data</span>
+      <span class="pill role-power">Power</span>
+      <span class="pill role-poe"><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>POE</span>
+    </div>
+  </section>
+
+  <!-- ============ ARGUMENTAIRE LAYOUT ============ -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§6</span><span class="sec-t">Layout — ligne extensible vs carte</span></div>
+    <div class="pro-con">
+      <div class="pc pick">
+        <h4>◆ Ligne extensible — retenu</h4>
+        <ul>
+          <li>Densité préservée : un switch 48 ports reste scannable, une ligne par port.</li>
+          <li>Métrique clé visible sans déplier (A / W), sens et catégorie en un coup d'œil.</li>
+          <li><code>&lt;details&gt;</code> natif → détail conditionnel révélé, coût de hauteur maîtrisé.</li>
+          <li>Cohabite avec les lanes/faisceaux figés (mêmes lignes, sans chevron).</li>
+        </ul>
+      </div>
+      <div class="pc">
+        <h4>Carte par port</h4>
+        <ul>
+          <li>Plus lisible unitairement, mais explose la hauteur en masse.</li>
+          <li>À réserver aux équipements à peu de ports, ou avec repli compact.</li>
+          <li>Pour 24/48 ports : mur de cartes, scroll interminable.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:18px"><b>Responsive &lt;560 px.</b> La ligne se replie en carte
+    (le réseau passe sous une seconde ligne avec son libellé, le détail empile ses champs) — aucun scroll
+    horizontal. Réduisez la fenêtre pour vérifier.</div>
+  </section>
+
+</div>
+
+<script>
+  var root=document.documentElement, btn=document.getElementById('themeBtn');
+  btn.addEventListener('click',function(){
+    var light=root.getAttribute('data-theme')==='light';
+    root.setAttribute('data-theme',light?'dark':'light');
+    btn.textContent=light?'◑ Thème clair':'◐ Thème sombre';
+  });
+</script>
+</body>
+</html>
