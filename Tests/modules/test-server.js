@@ -1839,6 +1839,26 @@ module.exports = async () => {
       try { db.save("doc-A", "bad-4", { kind: "ssh-keypair", label: "X", subject: "u@x", key_algo: "ed25519", sans: [{ san_type: "pigeon-voyageur", value: "x" }] }); } catch (e) { if (e instanceof CertsConfigError) sanIssues = e.issues; }
       ck(!!sanIssues && sanIssues.some((i) => /san_type/.test(i)), "type de SAN inconnu → grief");
 
+      // -- MÉTADONNÉES (lot renouvellement) : commentaire, raison de révocation, lignée renewed_from, cert croisé. --
+      db.save("doc-A", "meta-orig", { kind: "ssh-keypair", label: "Clé d'origine", subject: "u@orig", key_algo: "ed25519" });
+      const metaNew = db.save("doc-A", "meta-new", {
+        kind: "ssh-keypair", label: "Clé renouvelée", subject: "u@orig", key_algo: "ed25519",
+        comment: "  renouvellement annuel  ", revocation_reason: "superseded : remplacé", renewed_from: "meta-orig",
+        cross_signed_pem: "-----BEGIN CERTIFICATE-----croise-----END CERTIFICATE-----",
+      });
+      ck(metaNew.comment === "renouvellement annuel" && metaNew.revocation_reason === "superseded : remplacé" && metaNew.renewed_from === "meta-orig" && /croise/.test(metaNew.cross_signed_pem),
+        "métadonnées : commentaire trimmé + raison + lignée renewed_from + cert croisé persistés (aller-retour)");
+      const metaListed = db.listFor("doc-A").find((c) => c.id === "meta-new");
+      ck(metaListed.comment === "renouvellement annuel" && metaListed.renewed_from === "meta-orig", "métadonnées : commentaire + lignée présents EN LISTE (public, pas un secret comme key_enc)");
+      ck(db.listPage("doc-A", { query: "renouvellement annuel" }).certificates.some((c) => c.id === "meta-new"), "métadonnées : le commentaire alimente la recherche (colonne search dénormalisée)");
+      let selfRenewIssues = null;
+      try { db.save("doc-A", "meta-self", { kind: "ssh-keypair", label: "X", subject: "u@x", key_algo: "ed25519", renewed_from: "meta-self" }); } catch (e) { if (e instanceof CertsConfigError) selfRenewIssues = e.issues; }
+      ck(!!selfRenewIssues && selfRenewIssues.some((i) => /renewed_from/.test(i)), "renewed_from = son propre id → grief (pas d'auto-renouvellement)");
+      let longCommentIssues = null;
+      try { db.save("doc-A", "meta-long", { kind: "ssh-keypair", label: "X", subject: "u@x", key_algo: "ed25519", comment: "x".repeat(5000) }); } catch (e) { if (e instanceof CertsConfigError) longCommentIssues = e.issues; }
+      ck(!!longCommentIssues && longCommentIssues.some((i) => /comment/.test(i)), "commentaire > 4096 caractères → grief (borne anti-abus)");
+      db.remove("doc-A", "meta-new", true); db.remove("doc-A", "meta-orig", true); // base propre pour listExpiring
+
       // -- AUDIT « qui » (lot audit utilisateur) : created_by/updated_by posés PAR LE SERVEUR (id canonique). --
       db.save("doc-A", "aud-1", { kind: "ssh-keypair", label: "Audité", subject: "u@aud", key_algo: "ed25519" }, "u-alice");
       let audRow = raw.prepare("SELECT created_by, updated_by FROM certificates WHERE doc_id='doc-A' AND id='aud-1'").get();

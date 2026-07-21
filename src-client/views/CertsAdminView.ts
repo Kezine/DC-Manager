@@ -2204,7 +2204,11 @@ export class CertsAdminView {
     return {
       kind: item.kind, parent_id: item.parent_id, label: item.label, subject: item.subject,
       serial: item.serial, not_before: item.not_before, not_after: item.not_after, fingerprint: item.fingerprint,
-      key_algo: item.key_algo, public_pem: item.public_pem, revoked_at: item.revoked_at, sans: item.sans,
+      key_algo: item.key_algo, public_pem: item.public_pem, revoked_at: item.revoked_at,
+      // Métadonnées PRÉSERVÉES par défaut (une mise à jour comme la révocation ne doit pas les effacer) ;
+      // `patch` peut les remplacer (ex. revocation_reason à la révocation).
+      comment: item.comment, revocation_reason: item.revocation_reason, renewed_from: item.renewed_from, cross_signed_pem: item.cross_signed_pem,
+      sans: item.sans,
       ...patch,
     };
   }

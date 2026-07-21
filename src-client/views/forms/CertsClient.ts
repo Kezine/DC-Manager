@@ -45,6 +45,14 @@ export interface CertificateListItem {
   public_pem: string | null;
   has_key: boolean;
   revoked_at: string | null;
+  /** Note libre de l'opérateur (métadonnée). */
+  comment: string | null;
+  /** Raison de révocation (code standard X.509 + éventuelle note), posée à la révocation. */
+  revocation_reason: string | null;
+  /** Id du certificat d'origine dont celui-ci est le renouvellement (lignée). */
+  renewed_from: string | null;
+  /** Certificat croisé d'une CA rekeyée (Issuer = ancienne CA) — public. */
+  cross_signed_pem: string | null;
   created_date: string;
   updated_date: string;
   sans: CertSan[];
@@ -126,6 +134,11 @@ export interface CertificateInput {
   public_pem: string | null;
   key_enc?: string | null;
   revoked_at: string | null;
+  /** Métadonnées optionnelles (absent = null côté serveur) : note, raison de révocation, lignée, cert croisé. */
+  comment?: string | null;
+  revocation_reason?: string | null;
+  renewed_from?: string | null;
+  cross_signed_pem?: string | null;
   sans: CertSan[];
 }
 

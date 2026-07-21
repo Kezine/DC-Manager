@@ -52,6 +52,14 @@ export interface CertificateListItem {
   public_pem: string | null;
   has_key: boolean;
   revoked_at: string | null;
+  /** Note libre de l'opérateur. */
+  comment: string | null;
+  /** Raison de révocation (code standard X.509 + éventuelle note), posée à la révocation. */
+  revocation_reason: string | null;
+  /** Id du certificat d'origine dont celui-ci est le renouvellement (lignée, référence souple). */
+  renewed_from: string | null;
+  /** Certificat croisé d'une CA rekeyée (Issuer = ancienne CA) — public, jamais un secret. */
+  cross_signed_pem: string | null;
   created_date: string;
   updated_date: string;
   sans: SanCandidate[];
@@ -211,6 +219,12 @@ export class CertsDb {
     // une certs.db antérieure les gagne sans valeur (lignes legacy = NULL), estampillées dès la prochaine écriture.
     this.ensureColumn("certificates", "created_by", "TEXT");
     this.ensureColumn("certificates", "updated_by", "TEXT");
+    // MÉTADONNÉES (lot renouvellement 2026-07-21) : note libre, raison de révocation, lignée de renouvellement,
+    // certificat croisé d'une CA rekeyée. Toutes nullable → une base antérieure les gagne à NULL (idempotent).
+    this.ensureColumn("certificates", "comment", "TEXT");
+    this.ensureColumn("certificates", "revocation_reason", "TEXT");
+    this.ensureColumn("certificates", "renewed_from", "TEXT");
+    this.ensureColumn("certificates", "cross_signed_pem", "TEXT");
     // Index APRÈS la migration : sur une base ancienne, la colonne `search` n'existe qu'une fois
     // ensureColumn passé (créer l'index avant échouerait). idx_search sert le filtre `query`
     // (search LIKE), idx_parent la remontée d'arbre (CTE sur (doc_id, parent_id)).
@@ -234,14 +248,14 @@ export class CertsDb {
       un label (typiquement celles écrites AVANT l'ajout de la colonne). Idempotent — une base déjà à jour
       n'a rien à recalculer (toutes ses lignes ont un `search` non vide), une ligne au label vide reste à ''. */
   private backfillSearch(): void {
-    const rows = this.db.prepare("SELECT id, doc_id, label, subject, serial FROM certificates WHERE search = '' AND label <> ''").all() as any[];
+    const rows = this.db.prepare("SELECT id, doc_id, label, subject, serial, comment FROM certificates WHERE search = '' AND label <> ''").all() as any[];
     if (rows.length === 0) return;
     const sansStmt = this.db.prepare("SELECT value FROM certificate_sans WHERE doc_id = ? AND cert_id = ? ORDER BY position");
     const update = this.db.prepare("UPDATE certificates SET search = ? WHERE doc_id = ? AND id = ?");
     const run = this.db.transaction(() => {
       for (const row of rows) {
         const sanValues = (sansStmt.all(row.doc_id, row.id) as any[]).map((s) => s.value as string);
-        update.run(CertsDb.searchText(row.label, row.subject, row.serial, sanValues), row.doc_id, row.id);
+        update.run(CertsDb.searchText(row.label, row.subject, row.serial, row.comment ?? null, sanValues), row.doc_id, row.id);
       }
     });
     run();
@@ -487,19 +501,21 @@ export class CertsDb {
     const keyEnc = parsed.key_enc === undefined ? (existing ? existing.key_enc : null) : parsed.key_enc;
     // Colonne `search` recalculée à CHAQUE save (label + subject + serial + valeurs de SAN, normalisés
     // par la règle PARTAGÉE Schema.normSearch) : le filtre `query` du listing devient un LIKE indexable.
-    const search = CertsDb.searchText(parsed.label, parsed.subject, parsed.serial, parsed.sans.map((s) => s.value));
+    const search = CertsDb.searchText(parsed.label, parsed.subject, parsed.serial, parsed.comment, parsed.sans.map((s) => s.value));
     const write = this.db.transaction(() => {
       this.db.prepare(`
-        INSERT INTO certificates (id, doc_id, kind, parent_id, label, subject, serial, not_before, not_after, fingerprint, key_algo, public_pem, key_enc, revoked_at, created_date, updated_date, created_by, updated_by, search)
-        VALUES (@id, @doc_id, @kind, @parent_id, @label, @subject, @serial, @not_before, @not_after, @fingerprint, @key_algo, @public_pem, @key_enc, @revoked_at, @created_date, @updated_date, @created_by, @updated_by, @search)
+        INSERT INTO certificates (id, doc_id, kind, parent_id, label, subject, serial, not_before, not_after, fingerprint, key_algo, public_pem, key_enc, revoked_at, comment, revocation_reason, renewed_from, cross_signed_pem, created_date, updated_date, created_by, updated_by, search)
+        VALUES (@id, @doc_id, @kind, @parent_id, @label, @subject, @serial, @not_before, @not_after, @fingerprint, @key_algo, @public_pem, @key_enc, @revoked_at, @comment, @revocation_reason, @renewed_from, @cross_signed_pem, @created_date, @updated_date, @created_by, @updated_by, @search)
         ON CONFLICT(doc_id, id) DO UPDATE SET kind=@kind, parent_id=@parent_id, label=@label, subject=@subject, serial=@serial,
           not_before=@not_before, not_after=@not_after, fingerprint=@fingerprint, key_algo=@key_algo,
-          public_pem=@public_pem, key_enc=@key_enc, revoked_at=@revoked_at, updated_date=@updated_date, updated_by=@updated_by, search=@search
+          public_pem=@public_pem, key_enc=@key_enc, revoked_at=@revoked_at, comment=@comment, revocation_reason=@revocation_reason,
+          renewed_from=@renewed_from, cross_signed_pem=@cross_signed_pem, updated_date=@updated_date, updated_by=@updated_by, search=@search
       `).run({
         id: parsed.id, doc_id: docId, kind: parsed.kind, parent_id: parsed.parent_id, label: parsed.label,
         subject: parsed.subject, serial: parsed.serial, not_before: parsed.not_before, not_after: parsed.not_after,
         fingerprint: parsed.fingerprint, key_algo: parsed.key_algo, public_pem: parsed.public_pem,
         key_enc: keyEnc, revoked_at: parsed.revoked_at,
+        comment: parsed.comment, revocation_reason: parsed.revocation_reason, renewed_from: parsed.renewed_from, cross_signed_pem: parsed.cross_signed_pem,
         created_date: existing ? existing.created_date : nowIso, updated_date: nowIso,
         // created_by posé à la CRÉATION uniquement (absent du DO UPDATE SET → immuable) ; updated_by à chaque écriture.
         created_by: author, updated_by: author, search,
@@ -564,7 +580,11 @@ export class CertsDb {
       id: row.id, kind: row.kind, parent_id: row.parent_id, label: row.label, subject: row.subject,
       serial: row.serial, not_before: row.not_before, not_after: row.not_after, fingerprint: row.fingerprint,
       key_algo: row.key_algo, public_pem: row.public_pem, has_key: row.key_enc !== null,
-      revoked_at: row.revoked_at, created_date: row.created_date, updated_date: row.updated_date,
+      revoked_at: row.revoked_at,
+      // Colonnes de métadonnées : présentes depuis la migration ; `?? null` couvre une ligne legacy non encore réécrite.
+      comment: row.comment ?? null, revocation_reason: row.revocation_reason ?? null,
+      renewed_from: row.renewed_from ?? null, cross_signed_pem: row.cross_signed_pem ?? null,
+      created_date: row.created_date, updated_date: row.updated_date,
       sans: sans.map((s) => ({ san_type: s.san_type, value: s.value })),
     };
   }
@@ -572,8 +592,8 @@ export class CertsDb {
   /** Texte de recherche dénormalisé (colonne `search`) : label + subject + serial + valeurs de SAN,
       normalisés par la MÊME règle PARTAGÉE que le cœur (Schema.normSearch — minuscules + sans accents),
       pour que le client filtre avec exactement la même normalisation (cadrage §6). */
-  private static searchText(label: string, subject: string, serial: string | null, sanValues: string[]): string {
-    return Schema.normSearch([label, subject, serial || "", ...sanValues].join(" "));
+  private static searchText(label: string, subject: string, serial: string | null, comment: string | null, sanValues: string[]): string {
+    return Schema.normSearch([label, subject, serial || "", comment || "", ...sanValues].join(" "));
   }
 
   /** Chaîne non vide (trimmée) ou null — normalise les paramètres optionnels avant usage SQL. */

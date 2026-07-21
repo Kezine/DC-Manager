@@ -24,6 +24,10 @@ export const SAN_TYPES = ["dns", "ip", "email", "principal"] as const;
     réels pèsent quelques Ko ; 1 Mo laisse une marge x100 sans ouvrir la porte à l'abus. */
 const MAX_BLOB_CHARS = 1024 * 1024;
 
+/** Bornes des champs texte de métadonnées (anti-abus, valeurs saisies par l'opérateur). */
+const MAX_COMMENT_CHARS = 4096;
+const MAX_REASON_CHARS = 512;
+
 /** Entrée SAN validée (l'ordre du tableau devient `position` en DB). */
 export interface SanCandidate {
   san_type: (typeof SAN_TYPES)[number];
@@ -47,6 +51,16 @@ export interface CertificateCandidate {
       null = pas de clé détenue ; chaîne = nouveau blob chiffré côté client. */
   key_enc: string | null | undefined;
   revoked_at: string | null;
+  /** Note libre de l'opérateur (métadonnée, jamais un secret). */
+  comment: string | null;
+  /** Raison de révocation : code standard X.509 éventuellement suivi d'une note libre (posée à la révocation). */
+  revocation_reason: string | null;
+  /** Id du certificat d'ORIGINE dont celui-ci est le renouvellement (lignée). Référence SOUPLE (pas de FK) —
+      l'original révoqué persiste ; s'il est supprimé, le lien devient inerte (orphelin toléré). */
+  renewed_from: string | null;
+  /** Certificat CROISÉ d'une CA issue d'une rotation de clé (Subject = cette CA, Issuer = l'ancienne CA,
+      signé par la clé de l'ancienne CA). Blob public opaque ; NULL hors rotation croisée. */
+  cross_signed_pem: string | null;
   sans: SanCandidate[];
 }
 
@@ -118,6 +132,13 @@ export class CertsValidate {
     // key_enc : ABSENT (undefined) = conserver l'existant — indispensable au flux zéro-connaissance
     // (la liste ne renvoie jamais key_enc : une mise à jour de métadonnées ne peut pas le rejouer).
     const keyEnc = candidate.key_enc === undefined ? undefined : CertsValidate.parseBlob("key_enc", candidate.key_enc, issues);
+    const crossSignedPem = CertsValidate.parseBlob("cross_signed_pem", candidate.cross_signed_pem, issues);
+
+    // Métadonnées (D1/D3 du cadrage renouvellement) : note libre, raison de révocation, lignée de renouvellement.
+    const comment = CertsValidate.parseText("comment", candidate.comment, MAX_COMMENT_CHARS, issues);
+    const revocationReason = CertsValidate.parseText("revocation_reason", candidate.revocation_reason, MAX_REASON_CHARS, issues);
+    const renewedFrom = typeof candidate.renewed_from === "string" && candidate.renewed_from.trim() !== "" ? candidate.renewed_from.trim() : null;
+    if (renewedFrom !== null && renewedFrom === id.trim()) issues.push("renewed_from : un certificat ne peut pas être le renouvellement de lui-même");
 
     const sans = CertsValidate.parseSans(candidate.sans, issues);
 
@@ -126,7 +147,8 @@ export class CertsValidate {
       id: id.trim(), kind: kind as CertKind, parent_id: parentId, label, subject,
       serial, not_before: notBefore, not_after: notAfter, fingerprint,
       key_algo: keyAlgo as CertificateCandidate["key_algo"],
-      public_pem: publicPem, key_enc: keyEnc, revoked_at: revokedAt, sans,
+      public_pem: publicPem, key_enc: keyEnc, revoked_at: revokedAt,
+      comment, revocation_reason: revocationReason, renewed_from: renewedFrom, cross_signed_pem: crossSignedPem, sans,
     };
   }
 
@@ -175,6 +197,16 @@ export class CertsValidate {
       return null;
     }
     return value;
+  }
+
+  /** Champ texte de métadonnée optionnel (note, raison) : chaîne trimmée bornée ou null. */
+  private static parseText(field: string, value: unknown, maxLen: number, issues: string[]): string | null {
+    if (value === undefined || value === null || value === "") return null;
+    if (typeof value !== "string") { issues.push(field + " : chaîne attendue"); return null; }
+    const trimmed = value.trim();
+    if (trimmed === "") return null;
+    if (trimmed.length > maxLen) { issues.push(field + " : dépasse " + maxLen + " caractères"); return null; }
+    return trimmed;
   }
 
   /** Blob opaque optionnel (PEM public, clé chiffrée) : chaîne bornée ou null. */
