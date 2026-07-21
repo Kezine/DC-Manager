@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -286,6 +286,30 @@ module.exports = async () => {
     const wp = await s.create("ports", { equipment_id: we.id, name: "wp", face_x: 0.5, face_y: 0.5 });
     const wr = r3.resolvePort3D(wp.id, dc.id);
     ck(wr && isFinite(wr.x) && isFinite(wr.z), "resolvePort3D(wall) → point fini");
+  }
+  });
+
+  await section("CableRouting : carriesPower — POE compris (éclair d'avertissement)", async () => {
+  {
+    const s = await makeStore();
+    // `carriesPower` n'utilise que le store ; resolver/floor non requis pour ce prédicat.
+    const cr = new CableRouting(s, null, null);
+    const eqData = await s.create("equipments", { name: "SW" });
+    const eqPoe = await s.create("equipments", { name: "SW-POE", poe_device: true });
+    const pData1 = await s.create("ports", { equipment_id: eqData.id, name: "d1", role: "data" });
+    const pData2 = await s.create("ports", { equipment_id: eqData.id, name: "d2", role: "data" });
+    const pPoe = await s.create("ports", { equipment_id: eqPoe.id, name: "poe1", role: "poe", direction: "source", poe_budget_w: 30 });
+    const ctData = await s.create("cableTypes", { name: "Cat6", kind: "data" });
+    const ctPower = await s.create("cableTypes", { name: "C13", kind: "power" });
+    // carriesPower ne lit que {cable_type_id, from_port_id, to_port_id} + le store : on passe des câbles LITTÉRAUX
+    // (pas besoin de persister — et la validation de compatibilité de câble n'est pas l'objet du test).
+    // 1) câble data reliant deux ports data → pas d'énergie.
+    ck.eq(cr.carriesPower({ cable_type_id: ctData.id, from_port_id: pData1.id, to_port_id: pData2.id }), false, "carriesPower : câble data + ports data → false");
+    // 2) câble de TYPE power → énergie (comportement historique préservé).
+    ck.eq(cr.carriesPower({ cable_type_id: ctPower.id, from_port_id: pData1.id, to_port_id: pData2.id }), true, "carriesPower : câble de type power → true");
+    // 3) câble data dont UNE extrémité est un port POE → énergie (nouveauté POE).
+    ck.eq(cr.carriesPower({ cable_type_id: ctData.id, from_port_id: pData1.id, to_port_id: pPoe.id }), true, "carriesPower : câble data touchant un port POE → true");
+    ck.eq(cr.carriesPower(null), false, "carriesPower : câble nul → false");
   }
   });
 

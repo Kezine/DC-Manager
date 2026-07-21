@@ -499,10 +499,10 @@ export abstract class DcBase {
     if (this.view !== "3d" || !this.useWebGL) return { multi: null, extraCables: [], floorDecor: null };
     const shown = (c: any) => this.showAllCables || this.selCables.has(c.id);   // visibilité = état de vue
     const extraCables: any[] = [];
-    const isPower = (c: any) => { const t: any = c && c.cable_type_id ? this.store.get("cableTypes", c.cable_type_id) : null; return !!(t && t.kind === "power"); };
     const push = (cable: any, linePts: any[], straight?: Set<number>, stubAt?: Set<number>) => {
       if (!shown(cable)) return;
-      extraCables.push({ id: cable.id, color: this.routing.cableColor(cable), line: linePts.map((p) => ({ x: p.x, y: p.y, z: p.z })), straight: straight ? [...straight] : [], stubAt: stubAt ? [...stubAt] : [], power: isPower(cable) });
+      // POE compris : `carriesPower` (prédicat partagé) est vrai aussi si une extrémité est un port POE.
+      extraCables.push({ id: cable.id, color: this.routing.cableColor(cable), line: linePts.map((p) => ({ x: p.x, y: p.y, z: p.z })), straight: straight ? [...straight] : [], stubAt: stubAt ? [...stubAt] : [], power: this.routing.carriesPower(cable) });
     };
     // FAISCEAUX transversaux : même canal que les câbles, style « trunk » (épais, neutre — couleur résolue au moteur).
     const pushTrunk = (bundle: any, linePts: any[], straight?: Set<number>, stubAt?: Set<number>) => {

@@ -3,6 +3,7 @@ import { Resolver3D } from "./Resolver3D";
 import { FloorLayout } from "./FloorLayout";
 import type { MultiLayout, RoomPlacement } from "./FloorLayout";
 import { Waypoint } from "../models/Waypoint";
+import { PortRoles } from "../registries/PortRoles";
 
 /** Point monde (mm) : X = largeur, Y = profondeur, Z = hauteur. */
 export interface Vec3 { x: number; y: number; z: number; }
@@ -21,6 +22,18 @@ export class CableRouting {
 
   /** Couleur d'un câble = couleur de son réseau principal DÉDUIT (des ports terminaux ; null sinon). */
   cableColor(c: any): string | null { const nid = this.store.cablePrimaryNetworkId(c); const n: any = nid ? this.store.get("networks", nid) : null; return (n && n.color) ? n.color : null; }
+
+  /** Le câble transporte-t-il de l'ÉNERGIE (→ éclair d'avertissement ambre en scène) ? Vrai si son TYPE de câble
+      est de genre `power`, OU si l'une de ses extrémités est un port POE (data+alimentation, cf. PortRoles.isPoe) :
+      le POE porte le même signal que le power. Prédicat UNIQUE partagé par les deux moteurs (SVG `DcBase` / WebGL
+      `DcThreeScene`) pour ne pas dupliquer le test POE — les deux passent par `this.routing`. Cf. docs/power.md. */
+  carriesPower(c: any): boolean {
+    if (!c) return false;
+    const t: any = c.cable_type_id ? this.store.get("cableTypes", c.cable_type_id) : null;
+    if (t && t.kind === "power") return true;
+    return this.portIsPoe(c.from_port_id) || this.portIsPoe(c.to_port_id);
+  }
+  private portIsPoe(portId: string): boolean { const p: any = portId ? this.store.get("ports", portId) : null; return !!(p && PortRoles.isPoe(p.role)); }
 
   /** Tracé d'un câble (mécanique UNIQUE ports + conduits) :
         - `pts`      : points ORIGINAUX (pastilles) ;

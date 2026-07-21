@@ -1221,7 +1221,7 @@ export class DcThreeScene extends DcThreeCamera {
       const rc = this.cableVia(c, dcId);
       if (!rc) return;
       const sp = this.routing.cableLine(rc.a, rc.b, rc.via, this.opts.cablePortNormal);
-      this.emitCableTube(root, sp.linePts, sp.straight, this.cableColorHex(c), c.id, this.cableIsPower(c), sp.stubAt);
+      this.emitCableTube(root, sp.linePts, sp.straight, this.cableColorHex(c), c.id, this.routing.carriesPower(c), sp.stubAt);
     });
   }
 
@@ -1237,8 +1237,6 @@ export class DcThreeScene extends DcThreeCamera {
     });
   }
 
-  /** Câble d'alimentation ? (type de câble `kind === "power"`). */
-  protected cableIsPower(c: any): boolean { const t: any = c && c.cable_type_id ? this.store.get("cableTypes", c.cable_type_id) : null; return !!(t && t.kind === "power"); }
 
   /** Décor MULTI-SALLES (repère monde) : plans d'étage (rect + grille + bord de réf + cases bloquées),
       OOB (anneau + mât), étiquettes étage/bâtiment (sprites) + séparateurs. Données pré-calculées par DcBase. */
