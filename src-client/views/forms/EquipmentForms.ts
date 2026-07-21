@@ -10,6 +10,7 @@ import { LiveValidation } from "./LiveValidation";
 import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
+import { ContextMenu } from "../../ui/ContextMenu";
 import { Html } from "../../core/Html";
 import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
@@ -816,12 +817,25 @@ export class EquipmentForms extends FormBase {
       return "—";
     };
     const netName = (p: any): string => { const n: any = p.network_id ? store.get("networks", p.network_id) : null; return n ? (n.label || "") : ""; };
-    const iconBtn = (svg: string, label: string, danger: boolean, onClick: () => void) => {
+    const iconBtn = (svg: string, label: string, danger: boolean, onClick: (e: MouseEvent) => void) => {
       const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-sm icon-action" + (danger ? " btn-danger" : " btn-ghost");
       b.title = label; b.setAttribute("aria-label", label); b.innerHTML = svg;
       // dans un <summary> : empêcher le clic d'action de (dé)plier le <details>.
-      b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); onClick(); };
+      b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); onClick(e); };
       return b;
+    };
+    // Duplication EN LOT : n copies séquentielles d'un port (numéro incrémenté à chaque copie, comme n copies
+    // unitaires enchaînées) insérées juste après l'original. Le réseau multi est cloné par valeur (pas de partage
+    // de tableau entre copies). Brins/position de façade remis à zéro (un brin = une fibre unique).
+    const duplicatePort = (p: any, count: number) => {
+      const n = Math.max(1, Math.min(96, Math.floor(count)));
+      const idx = draftPorts.indexOf(p); if (idx < 0) return;
+      let lastName = p.name; const copies: any[] = [];
+      for (let k = 0; k < n; k++) {
+        lastName = bump(lastName);
+        copies.push(Object.assign({}, p, { id: Id.uid(), name: lastName, network_ids: Array.isArray(p.network_ids) ? p.network_ids.slice() : [], face_x: null, face_y: null, strand_a: null, strand_b: null }));
+      }
+      draftPorts.splice(idx + 1, 0, ...copies); renderPorts();
     };
     const catPill = (role: string) => {
       const s = document.createElement("span"); s.className = "pill " + PortRoles.pillClass(role);
@@ -873,7 +887,18 @@ export class EquipmentForms extends FormBase {
       head.appendChild(metric);
       const netSpan = document.createElement("span"); netSpan.className = "p-net"; const nn = netName(p); if (nn) netSpan.textContent = nn; else netSpan.innerHTML = '<span class="muted">—</span>'; head.appendChild(netSpan);
       const acts = document.createElement("span"); acts.className = "p-acts";
-      acts.appendChild(iconBtn(Icons.CLONE, I18n.t("equipment.equip.duplicate"), false, () => { const i = draftPorts.indexOf(p); draftPorts.splice(i + 1, 0, Object.assign({}, p, { id: Id.uid(), name: bump(p.name), face_x: null, face_y: null, strand_a: null, strand_b: null })); renderPorts(); }));
+      acts.appendChild(iconBtn(Icons.CLONE, I18n.t("equipment.equip.duplicate"), false, (e) => {
+        // Menu déroulant : combien de copies créer d'un coup (presets + « Autre… » pour un nombre libre).
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const counts = [1, 2, 4, 8, 16, 24, 48];
+        ContextMenu.show(r.left, r.bottom + 2, [{
+          head: I18n.t("equipment.equip.dupCount"),
+          items: [
+            ...counts.map((n) => ({ label: I18n.t("equipment.equip.dupTimes", { n }), action: () => duplicatePort(p, n) })),
+            { label: I18n.t("equipment.equip.dupCustom"), action: () => { Dialog.prompt(I18n.t("equipment.equip.dupCustomPrompt"), "8").then((v) => { const n = parseInt((v || "").trim(), 10); if (isFinite(n) && n >= 1) duplicatePort(p, n); }); } },
+          ],
+        }]);
+      }));
       acts.appendChild(iconBtn(Icons.DELETE, I18n.t("equipment.detail.deletePort"), true, () => { const i = draftPorts.indexOf(p); if (i >= 0) draftPorts.splice(i, 1); renderPorts(); }));
       head.appendChild(acts);
       det.appendChild(head);
