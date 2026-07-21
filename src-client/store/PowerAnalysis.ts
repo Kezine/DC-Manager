@@ -35,7 +35,7 @@ export interface PowerLoad {
 }
 
 /** Avertissement de fiabilité électrique sur un équipement. */
-export interface PowerWarning { code: "spof" | "psu_uncabled" | "psu_undersized" | "no_source" | "origin_unknown" | "poe_over_budget"; message: string; }
+export interface PowerWarning { code: "spof" | "psu_uncabled" | "psu_undersized" | "no_source" | "origin_unknown" | "poe_over_budget" | "poe_port_over"; message: string; }
 
 const DEFAULT_VOLTAGE = 230;
 
@@ -50,7 +50,10 @@ export class PowerAnalysis {
 
   private port(id: string | null): any { return id ? this.store.get("ports", id) : null; }
   private eqPortsByDir(equipmentId: string | null, direction: string): any[] {
-    return equipmentId ? this.store.portsOf(equipmentId).filter((p: any) => p.direction === direction) : [];
+    // EXCLUT les ports POE : ils portent une direction (source=PSE / sink=PD) mais vivent sur le réseau ENERGIE
+    // POE, pas sur le graphe SECTEUR (source→sink des câbles power). Sans ça, un port PSE apparaîtrait comme un
+    // « départ » et un PD comme une charge secteur (double comptage — le PoE est comptabilisé à part, cf. poeSuppliedW).
+    return equipmentId ? this.store.portsOf(equipmentId).filter((p: any) => p.direction === direction && p.role !== "poe") : [];
   }
   /** Autre extrémité d'un câble touchant `pid`. */
   private otherEnds(pid: string): any[] {
@@ -142,27 +145,43 @@ export class PowerAnalysis {
     const nominal = eq.power_nominal_w != null ? eq.power_nominal_w : 0;
     const max = eq.power_max_w != null ? eq.power_max_w : nominal;
     const base = useMax ? Math.max(max, nominal) : nominal;
-    // POE : la puissance délivrée par les ports POE PRODUCTEURS (PSE) est TIRÉE des entrées d'alimentation de
-    // l'équipement → elle S'AJOUTE à sa consommation (cadrage : « l'alimentation POE comptabilisée dans les
-    // flux d'énergie »). Un switch PoE tire donc sa conso de base + le PoE qu'il fournit ; le PD, alimenté par
-    // le câble, est couvert par cette contribution côté PSE (pas de double comptage — un PD n'a pas de port power).
-    return base + this.poeSuppliedW(eq.id);
+    // POE : la puissance RÉELLEMENT tirée d'un équipement PSE = Σ des consos des PD câblés à ses ports producteurs
+    // (le budget de port n'est qu'une CAPACITÉ, pas une conso). Elle est prélevée sur ses entrées d'alimentation →
+    // S'AJOUTE à sa conso. Le PD, alimenté par le câble, est couvert par cette contribution côté PSE (pas de double
+    // comptage : les ports POE sont hors du graphe secteur — cf. eqPortsByDir).
+    return base + this.poeSuppliedW(eq.id, useMax);
   }
-  /** Puissance POE ALLOUÉE par un équipement = Σ des budgets (W) de ses ports POE PRODUCTEURS (rôle "poe" +
-      direction "source" = PSE). C'est ce qu'il doit sourcer de ses entrées d'alimentation. */
-  private poeSuppliedW(equipmentId: string | null): number {
+  /** L'équipement PD (alimenté) au bout d'un port PSE (poe+source) : l'autre extrémité du câble SI c'est un port
+      POE consommateur (poe+sink). null si le port n'est pas PSE, n'est pas câblé, ou son vis-à-vis n'est pas un PD. */
+  private pdOfPsePort(psePort: any): any | null {
+    if (!psePort || psePort.role !== "poe" || psePort.direction !== "source") return null;
+    for (const other of this.otherEnds(psePort.id)) {
+      if (other.role === "poe" && other.direction === "sink") return this.store.get("equipments", other.equipment_id);
+    }
+    return null;
+  }
+  /** Charge POE tirée sur un port PSE = consommation du PD câblé (0 si aucun PD). `useMax` : conso MAX (dimensionnement)
+      sinon nominale. Publique : réutilisée par le formulaire (jauge live + survente par port). */
+  poePortLoadW(psePort: any, useMax: boolean): number {
+    const pd = this.pdOfPsePort(psePort); if (!pd) return 0;
+    const nominal = pd.power_nominal_w != null ? pd.power_nominal_w : 0;
+    const max = pd.power_max_w != null ? pd.power_max_w : nominal;
+    return useMax ? Math.max(max, nominal) : nominal;
+  }
+  /** Puissance POE réellement TIRÉE d'un équipement PSE = Σ des consos des PD câblés à ses ports producteurs. */
+  private poeSuppliedW(equipmentId: string | null, useMax: boolean): number {
     if (!equipmentId) return 0;
     return this.store.portsOf(equipmentId)
       .filter((p: any) => p.role === "poe" && p.direction === "source")
-      .reduce((sum: number, p: any) => sum + (p.poe_budget_w != null ? p.poe_budget_w : 0), 0);
+      .reduce((sum: number, p: any) => sum + this.poePortLoadW(p, useMax), 0);
   }
-  /** Bilan POE d'un équipement (pour la jauge de budget + la survente) : puissance ALLOUÉE (Σ budgets des ports
-      producteurs) vs budget TOTAL déclaré. `over` = survente (alloué > budget). budget null = non renseigné. */
-  poeSupply(equipmentId: string): { allocatedW: number; budgetW: number | null; over: boolean } {
+  /** Bilan POE d'un équipement (jauge + survente) : CHARGE réelle (Σ consos MAX des PD câblés) vs budget TOTAL
+      déclaré. `over` = survente (charge > budget). budget null = non renseigné. */
+  poeSupply(equipmentId: string): { loadW: number; budgetW: number | null; over: boolean } {
     const eq = this.store.get("equipments", equipmentId);
-    const allocatedW = this.poeSuppliedW(equipmentId);
+    const loadW = this.poeSuppliedW(equipmentId, true);
     const budgetW = eq && eq.poe_budget_w != null ? eq.poe_budget_w : null;
-    return { allocatedW, budgetW, over: budgetW != null && allocatedW > budgetW };
+    return { loadW, budgetW, over: budgetW != null && loadW > budgetW };
   }
   /** Prises sink réellement ALIMENTÉES d'un équipement (câblées VERS une source) — ses feeds actifs. */
   fedSinksOf(equipmentId: string): any[] {
@@ -220,11 +239,17 @@ export class PowerAnalysis {
   equipmentWarnings(equipmentId: string): PowerWarning[] {
     const out: PowerWarning[] = [];
     const eq = this.store.get("equipments", equipmentId); if (!eq) return out;
-    // POE : SURVENTE du budget (Σ des budgets producteurs > budget total). Testée AVANT la garde « consommateur »
-    // ci-dessous — un injecteur PoE (midspan) peut n'avoir aucune prise power modélisée et doit tout de même alerter.
+    // POE : SURVENTE du budget (charge des PD > budget total) + dépassement PAR PORT (un PD tire plus que la capacité
+    // du port). Testé AVANT la garde « consommateur » ci-dessous — un injecteur PoE (midspan) peut n'avoir aucune
+    // prise power modélisée et doit tout de même alerter.
     if (eq.poe_device) {
       const poe = this.poeSupply(equipmentId);
-      if (poe.over) out.push({ code: "poe_over_budget", message: I18n.t("analysis.power.poeOverBudget", { alloc: poe.allocatedW, budget: poe.budgetW }) });
+      if (poe.over) out.push({ code: "poe_over_budget", message: I18n.t("analysis.power.poeOverBudget", { load: poe.loadW, budget: poe.budgetW }) });
+      for (const sp of this.store.portsOf(equipmentId).filter((p: any) => p.role === "poe" && p.direction === "source")) {
+        if (sp.poe_budget_w == null) continue;
+        const load = this.poePortLoadW(sp, true);   // conso MAX du PD câblé
+        if (load > sp.poe_budget_w) out.push({ code: "poe_port_over", message: I18n.t("analysis.power.poePortOver", { port: sp.name || "?", load, budget: sp.poe_budget_w }) });
+      }
     }
     const sinks = this.eqPortsByDir(equipmentId, "sink");
     if (!sinks.length) return out;   // pas un consommateur alimenté par des PSU

@@ -45,20 +45,26 @@ Le **POE** est une **catégorie de port** (`role: "poe"`, cf. `PortRoles.isPoe`)
 rôle poe reste de `kind: "data"` (connecteurs RJ45 + réseaux data — l'énergie passe sur l'Ethernet). Il **participe
 néanmoins aux flux d'énergie**.
 
-- **`Equipment.poe_device`** : l'équipement fait du POE — **déverrouille** la catégorie POE des ports (invariant
-  **T-POE1** côté port : un port poe exige `poe_device`). Non désactivable tant qu'un port POE existe (**T-POE2**).
-- **`Equipment.poe_budget_w`** : budget POE **TOTAL** (W) — pool **partagé** par tous les ports POE producteurs.
-- **`Port.poe_budget_w`** : budget max **du port** (W). Le **sens réutilise `Port.direction`** : `source` = **PSE**
-  (injecteur/switch PoE), `sink` = **PD** (caméra, borne…). ⚠ Unités : un port **power** se règle en **ampères**
-  (`power_max_a`), un port **POE** en **watts** (`poe_budget_w`) — ne pas confondre.
-- **Contribution énergie** : la puissance délivrée par les ports POE **producteurs** (PSE) est **tirée des entrées
-  d'alimentation** de l'équipement → elle **s'ajoute à sa consommation** (`demandW += Σ budgets PSE`,
-  `PowerAnalysis.poeSuppliedW`). Un **PD** est couvert côté PSE (pas de port power, pas de double comptage).
-- **Bilan / survente** : `PowerAnalysis.poeSupply(equipmentId)` → `{ allocatedW, budgetW, over }` (alloué = Σ budgets
-  PSE). Survente = `over` (alloué > budget) → **avertissement `poe_over_budget`** (pas un blocage). Seuil d'alerte
-  visuel **80 %** (`POWER_LOAD_WARN_FRACTION`, comme la charge power).
-- **UI** : bloc POE de l'équipement (bascule + budget + **jauge** live) et éditeur de ports (catégorie · sens PSE/PD ·
-  budget W) dans `EquipmentForms` — la jauge/survente reflètent le **brouillon** (édition non enregistrée). Un **câble**
+- **`Equipment.poe_device`** : l'équipement fait du POE (PSE **ou** PD) — **déverrouille** la catégorie POE des ports
+  (**T-POE1** : un port poe exige `poe_device`). Non désactivable tant qu'un port POE existe (**T-POE2**).
+- **`Equipment.poe_budget_w`** : budget POE **TOTAL** (W) — capacité PoE de l'équipement, **partagée** par ses ports PSE.
+- **`Port.poe_budget_w`** : **CAPACITÉ** du port (ce qu'il peut **fournir**), **pas une conso**. Renseignée par une
+  **norme PoE** (`POE_CLASSES` : PoE 15,4 · PoE+ 30 · PoE++ 60 · PoE+++ 90 W) ou une valeur libre. Le **sens réutilise
+  `Port.direction`** : `source` = **PSE** (injecteur/switch), `sink` = **PD** (caméra, borne…). ⚠ Unités : port
+  **power** en **ampères** (`power_max_a`), port **POE** en **watts** (`poe_budget_w`).
+- **Conso RÉELLE = celle du PD câblé** (le budget de port n'est qu'une capacité). Pour chaque port PSE, on suit le
+  câble jusqu'au **port PD** (poe+sink) → son équipement → sa conso (`power_nominal_w`/`power_max_w`).
+  `PowerAnalysis.poePortLoadW(psePort, useMax)` = conso du PD (0 si aucun). La puissance ainsi **tirée** d'un PSE
+  (`poeSuppliedW` = Σ des consos PD) est prélevée sur ses entrées d'alim → **s'ajoute à sa conso** (`demandW`).
+- **POE ≠ graphe SECTEUR** : les ports poe portent une direction mais sont **exclus** du graphe power source→sink
+  (`eqPortsByDir` filtre `role !== "poe"`) — sinon un PSE serait un « départ » et un PD une charge secteur (double
+  comptage). Le PoE est comptabilisé **à part** (ci-dessus).
+- **Avertissements** (non bloquants, seuil visuel **80 %** `POWER_LOAD_WARN_FRACTION`) :
+  - **`poe_over_budget`** — survente de l'équipement : `poeSupply()` → `{ loadW, budgetW, over }`, `loadW` = Σ consos
+    MAX des PD ; `over` = charge > budget total.
+  - **`poe_port_over`** — par port : le PD câblé consomme **plus que la capacité (budget) du port** PSE.
+- **UI** : bloc POE de l'équipement (bascule + budget total + **jauge** de charge live) et éditeur de ports (catégorie ·
+  sens PSE/PD · **norme/budget**) dans `EquipmentForms` ; la jauge = Σ consos des PD câblés / budget total. Un **câble**
   touchant un port POE porte le même **éclair ambre** de scène que les câbles power (`CableRouting.carriesPower`).
 
 ## Performance

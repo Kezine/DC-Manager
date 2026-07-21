@@ -207,7 +207,7 @@ export const equipment = {
     poeStateWarn: "Proche de la limite (≈ 80 %)",
     poeStateOver: "Survente — budget dépassé",
     poeCatDisabled: "Activez « Équipement POE » (bloc énergie) pour rendre cette catégorie disponible.",
-    poeOverStrip: "Survente : Σ des budgets producteurs ({{alloc}} W) dépasse le budget de l'équipement ({{budget}} W).",
+    poeOverStrip: "Le PD connecté consomme {{load}} W, au-delà du budget de ce port ({{budget}} W).",
     primaryGroup: "Groupe primaire",
     primaryGroupHint: "Pilote la couleur héritée (listes, topologie, 3D). Gérés dans l'onglet Groupes.",
     addSecondary: "Ajouter un groupe secondaire…",

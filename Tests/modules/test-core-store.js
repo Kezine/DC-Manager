@@ -518,27 +518,40 @@ module.exports = async () => {
     ck.eq(pa.rootSourcesOf(p4a.id).length, 0, "power : sink câblé vers un port sans sens → aucune racine");
     ck.eq(pa.equipmentWarnings(srv4.id).some((w) => w.code === "no_source"), true, "power : sink câblé mais non alimenté → no_source");
 
-    // ---- POE : le PoE FOURNI (Σ budgets producteurs) s'ajoute à la conso de l'équipement ; bilan de budget + survente ----
-    const sw = await s.create("equipments", { name: "sw-poe", power_nominal_w: 50, poe_device: true, poe_budget_w: 90 });
+    // ---- POE : le budget de port est une CAPACITÉ ; la conso RÉELLE vient du PD câblé. Bilan + survente + par port. ----
+    const sw = await s.create("equipments", { name: "sw-poe", power_nominal_w: 50, power_max_w: 60, poe_device: true, poe_budget_w: 90 });
     const swPsu = await s.create("ports", { equipment_id: sw.id, name: "PSU", role: "power", direction: "sink", power_max_a: 4 });
-    await s.create("ports", { equipment_id: sw.id, name: "poe-1", role: "poe", direction: "source", poe_budget_w: 30 });
-    await s.create("ports", { equipment_id: sw.id, name: "poe-2", role: "poe", direction: "source", poe_budget_w: 30 });
+    const poe1 = await s.create("ports", { equipment_id: sw.id, name: "poe-1", role: "poe", direction: "source", poe_budget_w: 30 });
+    const poe2 = await s.create("ports", { equipment_id: sw.id, name: "poe-2", role: "poe", direction: "source", poe_budget_w: 30 });   // non câblé
+    // PD : caméra alimentée en PoE (port poe SINK) — conso nominale 12 W / max 15 W. Un PD est aussi un poe_device (T-POE1).
+    const cam = await s.create("equipments", { name: "cam", power_nominal_w: 12, power_max_w: 15, poe_device: true });
+    const camPoe = await s.create("ports", { equipment_id: cam.id, name: "eth", role: "poe", direction: "sink" });
+    await s.create("cables", { from_port_id: poe1.id, to_port_id: camPoe.id });   // PSE poe-1 → PD caméra
     const out5 = await s.create("ports", { equipment_id: pdu.id, name: "C5", role: "power", direction: "source", power_max_a: 16 });
-    await s.create("cables", { from_port_id: out5.id, to_port_id: swPsu.id });   // PDU → switch PoE
+    await s.create("cables", { from_port_id: out5.id, to_port_id: swPsu.id });     // PDU → alim du switch
     {
       const paP = new PowerAnalysis(s);   // instance fraîche (le store a muté depuis `pa`)
-      // conso = base 50 W + PoE fourni 60 W = 110 W → 110 / 230 V ≈ 0,478 A tirés par l'unique PSU.
-      ck(Math.abs(paP.leafSinkCurrentA(swPsu, false) - (110 / 230)) < 0.01, "POE : conso du switch = base 50 W + PoE fourni 60 W (110 W)");
+      // budget de port = CAPACITÉ (30 W) ; la charge = conso MAX du PD câblé (15 W). poe-2 non câblé → 0.
+      ck.eq(paP.poePortLoadW(poe1, true), 15, "POE : charge du port PSE = conso MAX du PD câblé (15 W), pas le budget");
+      ck.eq(paP.poePortLoadW(poe2, true), 0, "POE : port PSE sans PD câblé → charge 0 (le budget reste une capacité)");
       const supply = paP.poeSupply(sw.id);
-      ck(supply.allocatedW === 60 && supply.budgetW === 90 && !supply.over, "POE : bilan 60 W alloués / 90 W budget, pas de survente");
-      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_over_budget"), false, "POE : sous le budget → pas d'avertissement");
+      ck(supply.loadW === 15 && supply.budgetW === 90 && !supply.over, "POE : bilan 15 W tirés (PD) / 90 W budget, pas de survente");
+      // conso du switch = base max 60 W + PoE tiré 15 W = 75 W → 75 / 230 V tirés par l'unique PSU.
+      ck(Math.abs(paP.leafSinkCurrentA(swPsu, true) - (75 / 230)) < 0.01, "POE : conso switch = base max 60 W + PoE tiré 15 W (75 W)");
+      // POE HORS du graphe secteur : les ports poe ne comptent pas comme départs power du switch (pas de double comptage).
+      ck.eq(paP.departLoads(sw.id).length, 0, "POE : ports poe exclus des départs secteur");
+      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_over_budget"), false, "POE : charge < budget total → pas de survente");
+      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_port_over"), false, "POE : PD sous le budget du port → pas d'alerte port");
     }
-    // SURVENTE : un 3e producteur pousse à 100 W > 90 W budget.
-    await s.create("ports", { equipment_id: sw.id, name: "poe-3", role: "poe", direction: "source", poe_budget_w: 40 });
+    // SURVENTE PAR PORT : le PD (15 W) dépasse le budget (capacité) du port producteur ramené à 10 W.
+    await s.update("ports", poe1.id, { poe_budget_w: 10 });
+    ck.eq(new PowerAnalysis(s).equipmentWarnings(sw.id).some((w) => w.code === "poe_port_over"), true, "POE : PD 15 W > budget du port 10 W → alerte poe_port_over");
+    // SURVENTE ÉQUIPEMENT : la charge PD (15 W) dépasse le budget TOTAL ramené à 10 W.
+    await s.update("equipments", sw.id, { poe_budget_w: 10 });
     {
       const paP = new PowerAnalysis(s);
-      ck.eq(paP.poeSupply(sw.id).over, true, "POE : 100 W alloués > 90 W budget → survente (over)");
-      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_over_budget"), true, "POE : survente → avertissement poe_over_budget");
+      ck.eq(paP.poeSupply(sw.id).over, true, "POE : charge PD 15 W > budget total 10 W → survente (over)");
+      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_over_budget"), true, "POE : survente équipement → avertissement poe_over_budget");
     }
   }
   });

@@ -1,4 +1,5 @@
 import type { Store } from "../../store";
+import { PowerAnalysis } from "../../store";
 import { Icons } from "../../ui/Icons";
 import { PortEditorControls, type PortDraft } from "./PortEditorControls";
 import { ImageStore } from "../../data/ImageStore";
@@ -32,7 +33,7 @@ import {
   DEPTH_PRESETS_MM, EQUIP_DEPTH_DEFAULT_MM, RACK_DEPTH_DEFAULT,
   SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
   SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
-  PORT_DIRECTIONS, POWER_LOAD_WARN_FRACTION
+  PORT_DIRECTIONS, POWER_LOAD_WARN_FRACTION, POE_CLASSES
 } from "../../domain/constants";
 import { FormUi, ORIENT_OPTS } from "./shared";
 import type { FormHost } from "./shared";
@@ -805,10 +806,13 @@ export class EquipmentForms extends FormBase {
       });
     };
     const fmtW = (n: number) => String(Math.round(n * 10) / 10);
-    // LIVE (brouillon) — la jauge/survente POE reflètent l'édition NON enregistrée, pas le store.
+    // Analyse énergie (store STABLE pendant l'édition : aucune écriture avant save) → une instance mémoïsée suffit.
+    // La CHARGE POE = Σ des consos des PD réellement câblés aux ports PSE (budget de port = simple capacité). Les
+    // ports du brouillon portent leur id RÉEL → les câbles du store se résolvent (nouveau port non câblé ⇒ charge 0).
+    const poePa = new PowerAnalysis(store);
     const poeBudgetTotal = (): number | null => { const v = parseFloat((poeBudgetI as any).value); return isFinite(v) && v >= 0 ? v : null; };
-    const poeAllocatedW = (): number => draftPorts.filter((p) => PortRoles.isPoe(p.role) && p.direction === "source").reduce((s, p) => s + (p.poe_budget_w != null ? p.poe_budget_w : 0), 0);
-    const poeIsOver = (): boolean => { if (!(poeDeviceI as any).checked) return false; const t = poeBudgetTotal(); return t != null && poeAllocatedW() > t; };
+    const poePortLoad = (p: any): number => poePa.poePortLoadW(p, true);   // conso MAX du PD câblé (0 si aucun)
+    const poeLoadW = (): number => draftPorts.filter((p) => PortRoles.isPoe(p.role) && p.direction === "source").reduce((s, p) => s + poePortLoad(p), 0);
     // Libellé du SENS pour la tête compacte : Source/Sink (power), Producteur/Consommateur (poe), « — » sinon.
     const sensLabel = (p: any): string => {
       if (!p.direction) return "—";
@@ -868,7 +872,9 @@ export class EquipmentForms extends FormBase {
     // switch 48 ports. Le sens/calibre/phase (power) et le budget (poe) vivent dans PortEditorControls (module dédié).
     const detailsRow = (p: any) => {
       const kindP = PortRoles.kind(p.role), isPoeP = PortRoles.isPoe(p.role), patch = isPatch();
-      const overHere = isPoeP && p.direction === "source" && poeIsOver();
+      // over PAR PORT = le PD câblé consomme plus que le budget (capacité) de CE port producteur.
+      const portLoadW = (isPoeP && p.direction === "source") ? poePortLoad(p) : 0;
+      const overHere = isPoeP && p.direction === "source" && p.poe_budget_w != null && portLoadW > p.poe_budget_w;
       const det = document.createElement("details"); det.className = "port";
       if (openPorts.has(p.id)) det.open = true;
       if (overHere) det.setAttribute("data-err", "");
@@ -930,10 +936,27 @@ export class EquipmentForms extends FormBase {
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.network"), terminalNetworkControl(p)));
       } else if (isPoeP) {
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.sens"), portControls.sensControl(p, "poe")));
-        const budget = FormControls.unitNumber(p.poe_budget_w != null ? p.poe_budget_w : "", "W", { min: 0, step: "any" });
-        (budget as any)._input.oninput = () => { const v = parseFloat((budget as any).value); p.poe_budget_w = isFinite(v) && v >= 0 ? v : null; refreshPoeGauge(); };
-        (budget as any)._input.onchange = () => renderPorts();   // au blur : rafraîchit liserés de survente + métriques
-        grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.poeBudget"), budget, I18n.t("forms.port.poeClassHint")));
+        // Budget = CAPACITÉ du port (ce qu'il peut FOURNIR), pas une conso. Norme PoE (802.3af/at/bt) qui renseigne le
+        // wattage, + « Personnalisé » pour un budget libre. La conso réelle vient du PD câblé (jauge/warnings).
+        const budgetWrap = document.createElement("div"); budgetWrap.style.cssText = "display:flex;flex-direction:column;gap:6px;";
+        const curCls = POE_CLASSES.find((c) => c.w === p.poe_budget_w);
+        const initMode = curCls ? curCls.id : (p.poe_budget_w != null ? "custom" : "");
+        const normSel = FormControls.select(
+          [{ value: "", label: I18n.t("forms.port.poeNormNone") }]
+            .concat(POE_CLASSES.map((c) => ({ value: c.id, label: c.label + " · " + fmtW(c.w) + " W" })))
+            .concat([{ value: "custom", label: I18n.t("forms.port.poeNormCustom") }]),
+          initMode);
+        const customI = FormControls.unitNumber(p.poe_budget_w != null ? p.poe_budget_w : "", "W", { min: 0, step: "any" });
+        customI.style.display = initMode === "custom" ? "" : "none";
+        normSel.onchange = () => {
+          const v = normSel.value;
+          if (v === "custom") { customI.style.display = ""; (customI as any)._input.focus(); }   // saisie libre : pas de re-rendu (garderait le mode)
+          else { const cls = POE_CLASSES.find((c) => c.id === v); p.poe_budget_w = cls ? cls.w : null; customI.style.display = "none"; refreshPoeGauge(); renderPorts(); }
+        };
+        (customI as any)._input.oninput = () => { const v = parseFloat((customI as any).value); p.poe_budget_w = isFinite(v) && v >= 0 ? v : null; refreshPoeGauge(); };
+        (customI as any)._input.onchange = () => renderPorts();   // au blur : rafraîchit liserés de survente + métriques
+        budgetWrap.appendChild(normSel); budgetWrap.appendChild(customI);
+        grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.poeBudget"), budgetWrap, I18n.t("forms.port.poeBudgetHint")));
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.network"), terminalNetworkControl(p)));
       } else {
         const ag = aggOptionsFor(p); ag.onchange = () => { p.aggregate_id = ag.value || null; };
@@ -944,7 +967,7 @@ export class EquipmentForms extends FormBase {
       if (overHere) {
         const strip = document.createElement("div"); strip.className = "warn-strip";
         strip.innerHTML = '<span class="gi" aria-hidden="true">' + Icons.WARNING + "</span>";
-        strip.appendChild(document.createTextNode(I18n.t("equipment.equip.poeOverStrip", { alloc: fmtW(poeAllocatedW()), budget: fmtW(poeBudgetTotal() as number) })));
+        strip.appendChild(document.createTextNode(I18n.t("equipment.equip.poeOverStrip", { load: fmtW(portLoadW), budget: fmtW(p.poe_budget_w) })));
         body.appendChild(strip);
       }
       det.appendChild(body);
@@ -965,17 +988,18 @@ export class EquipmentForms extends FormBase {
     // Panneaux de synthèse (occupation patch / charge+warnings power) : rendus par le module dans leur élément.
     const renderPatchInfo = () => portControls.renderPatchInfo(patchInfo);
     const renderPowerInfo = () => portControls.renderPowerInfo(powerInfo);
-    // JAUGE de budget POE (bloc énergie) — `alloué / total` + reste + état normal/≈80 %/survente. Reflète le brouillon.
+    // JAUGE POE (bloc énergie) — `charge / budget total` + reste + état normal/≈80 %/survente. CHARGE = Σ des consos
+    // MAX des PD câblés aux ports PSE (pas les budgets : ce sont des capacités). Reflète le brouillon + le store.
     const refreshPoeGauge = () => {
-      const total = poeBudgetTotal(), alloc = poeAllocatedW();
-      const over = total != null && alloc > total;
-      const warn = !over && total != null && total > 0 && alloc >= total * POWER_LOAD_WARN_FRACTION;
-      const pct = (total != null && total > 0) ? Math.min(100, (alloc / total) * 100) : (alloc > 0 ? 100 : 0);
-      const rest = total != null ? total - alloc : null;
+      const total = poeBudgetTotal(), load = poeLoadW();
+      const over = total != null && load > total;
+      const warn = !over && total != null && total > 0 && load >= total * POWER_LOAD_WARN_FRACTION;
+      const pct = (total != null && total > 0) ? Math.min(100, (load / total) * 100) : (load > 0 ? 100 : 0);
+      const rest = total != null ? total - load : null;
       poeGaugeEl.innerHTML = "";
       const top = document.createElement("div"); top.className = "gauge-top";
       const allocS = document.createElement("span"); allocS.className = "alloc" + (over ? " over" : "");
-      allocS.innerHTML = Html.escape(fmtW(alloc)) + ' <span class="alloc-total">/ ' + Html.escape(total != null ? fmtW(total) : "—") + " W</span>";
+      allocS.innerHTML = Html.escape(fmtW(load)) + ' <span class="alloc-total">/ ' + Html.escape(total != null ? fmtW(total) : "—") + " W</span>";
       const restS = document.createElement("span"); restS.className = "rest" + (over ? " over" : "");
       restS.textContent = rest == null ? "" : (rest >= 0 ? I18n.t("equipment.equip.poeRest", { w: fmtW(rest) }) : I18n.t("equipment.equip.poeOverBy", { w: fmtW(-rest) }));
       top.appendChild(allocS); top.appendChild(restS);

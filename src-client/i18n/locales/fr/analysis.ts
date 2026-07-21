@@ -18,6 +18,7 @@ export const analysis = {
     spof: "Alimentations non redondantes — même source d'origine (point unique de défaillance).",
     originUnknown: "Origine des alimentations indéterminable (sens ou tableau amont non renseignés) — redondance non vérifiable.",
     psuUndersized: "Alimentation « {{name}} » ({{amps}} A) insuffisante pour la charge max seule ({{req}} A requis).",
-    poeOverBudget: "Survente POE : {{alloc}} W alloués aux ports producteurs dépassent le budget de {{budget}} W.",
+    poeOverBudget: "Survente POE : la charge des PD ({{load}} W) dépasse le budget total de {{budget}} W.",
+    poePortOver: "Port « {{port}} » : le PD connecté consomme {{load}} W, au-delà du budget du port ({{budget}} W).",
   },
 } as const;

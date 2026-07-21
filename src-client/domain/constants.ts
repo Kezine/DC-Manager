@@ -126,6 +126,15 @@ export const PORT_DIRECTIONS = [
 export const POWER_PHASES = ["L1", "L2", "L3"];
 /** Seuil de charge (fraction du calibre) au-delà duquel on alerte (règle de l'art : 80 % en continu). */
 export const POWER_LOAD_WARN_FRACTION = 0.8;
+/** NORMES PoE (IEEE 802.3af/at/bt) → puissance CÔTÉ PSE (ce que le port peut FOURNIR, en W). Le budget d'un port
+    POE est une CAPACITÉ (pas une conso) ; ces classes renseignent le budget. Labels universels (non traduits). */
+export interface PoeClassDef { id: string; label: string; w: number; }
+export const POE_CLASSES: PoeClassDef[] = [
+  { id: "poe",    label: "PoE",    w: 15.4 },   // 802.3af (Type 1)
+  { id: "poe+",   label: "PoE+",   w: 30 },     // 802.3at (Type 2)
+  { id: "poe++",  label: "PoE++",  w: 60 },     // 802.3bt (Type 3)
+  { id: "poe+++", label: "PoE+++", w: 90 },     // 802.3bt (Type 4)
+];
 
 /** Rôles de port (catégorie data | power). NB : le POE est un rôle de `kind: "data"` (il passe sur l'Ethernet
     → connecteurs et réseaux DATA) mais transporte AUSSI de l'énergie ; sa nature « porteur de puissance » est

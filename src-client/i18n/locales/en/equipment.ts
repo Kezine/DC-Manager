@@ -201,7 +201,7 @@ export const equipment = {
     poeStateWarn: "Near the limit (≈ 80%)",
     poeStateOver: "Oversubscribed — budget exceeded",
     poeCatDisabled: "Enable “PoE device” (energy block) to make this category available.",
-    poeOverStrip: "Oversubscribed: Σ of source budgets ({{alloc}} W) exceeds the device budget ({{budget}} W).",
+    poeOverStrip: "The connected PD draws {{load}} W, beyond this port's budget ({{budget}} W).",
     primaryGroup: "Primary group",
     primaryGroupHint: "Drives the inherited colour (lists, topology, 3D). Managed in the Groups tab.",
     addSecondary: "Add a secondary group…",
