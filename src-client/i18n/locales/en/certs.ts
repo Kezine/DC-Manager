@@ -146,8 +146,10 @@ export const certs = {
       algoField: "Key algorithm",
     },
     toolbar: {
-      locked: "locked",
-      unlocked: "unlocked",
+      unlock: "Unlock",
+      unlockTitle: "Open the certificate vault (enter the master passphrase)",
+      init: "Initialize the vault",
+      initTitle: "Create the certificate vault (first master passphrase)",
       addRootCa: "+ X.509 root CA",
       addRootCaTitle: "Create a self-signed X.509 root authority",
       addSshCa: "+ SSH CA",
@@ -174,7 +176,6 @@ export const certs = {
       passLabel: "Master passphrase",
       passPlaceholder: "passphrase",
       unlockBtn: "Unlock",
-      unlockBtnTitle: "Derive the master key and check the passphrase",
     },
     listing: {
       backAuthorities: "← Authorities",

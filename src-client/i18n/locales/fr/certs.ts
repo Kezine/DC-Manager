@@ -151,8 +151,10 @@ export const certs = {
       algoField: "Algorithme de clé",
     },
     toolbar: {
-      locked: "verrouillé",
-      unlocked: "déverrouillé",
+      unlock: "Déverrouiller",
+      unlockTitle: "Ouvrir le coffre de certificat (saisie de la phrase maître)",
+      init: "Initialiser le coffre",
+      initTitle: "Créer le coffre de certificat (première phrase maître)",
       addRootCa: "+ CA racine X.509",
       addRootCaTitle: "Créer une autorité racine X.509 auto-signée",
       addSshCa: "+ CA SSH",
@@ -179,7 +181,6 @@ export const certs = {
       passLabel: "Phrase secrète maître",
       passPlaceholder: "phrase secrète",
       unlockBtn: "Déverrouiller",
-      unlockBtnTitle: "Dériver la clé maître et vérifier la phrase",
     },
     listing: {
       backAuthorities: "← Autorités",

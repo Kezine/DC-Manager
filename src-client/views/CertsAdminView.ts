@@ -178,9 +178,6 @@ export class CertsAdminView {
   private selBarEl: HTMLElement | null = null;
   /** Case d'en-tête « toute la page » (état INDÉTERMINÉ si sélection partielle) — mise à jour à chaque variation. */
   private headerCheckbox: HTMLInputElement | null = null;
-  /** Champ de phrase du panneau de déverrouillage (recréé à chaque rendu verrouillé) — cible du bouton
-      « Déverrouiller le coffre » d'une modale d'export (fermer l'export puis y renvoyer le focus). */
-  private lockInput: HTMLInputElement | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -263,7 +260,8 @@ export class CertsAdminView {
     if (!this.client || !this.pkiState) return;
     this.container.innerHTML = "";
     this.container.appendChild(this.buildToolbar());
-    if (!this.session.unlocked) this.container.appendChild(this.buildLockPanel());
+    // Plus de panneau de déverrouillage persistant : l'état du coffre + le déverrouillage vivent dans le
+    // bouton de la barre de contrôles (buildVaultButton → unlockModal). Gain de place demandé.
     this.container.appendChild(this.buildListingSection());
     this.paintBody();
   }
@@ -283,13 +281,6 @@ export class CertsAdminView {
     bar.appendChild(this.buildFilters());
 
     const right = document.createElement("div"); right.className = "lc-right";
-    // Badge d'état du coffre : SEULEMENT si la PKI existe (non initialisée = aucune clé encore, l'écran
-    // d'initialisation l'explique). Placé en tête du cluster de droite (état + actions).
-    if (this.pkiState?.initialized === true) {
-      const status = document.createElement("span"); status.className = "lc-lockbadge";
-      status.innerHTML = this.session.unlocked ? this.pill(I18n.t("certs.admin.toolbar.unlocked"), "ok") : this.pill(I18n.t("certs.admin.toolbar.locked"), "warn");
-      right.appendChild(status);
-    }
     if (this.session.unlocked) {
       right.append(
         this.actionButton(I18n.t("certs.admin.toolbar.addRootCa"), I18n.t("certs.admin.toolbar.addRootCaTitle"), () => this.rootCaModal(), "btn-primary"),
@@ -297,10 +288,12 @@ export class CertsAdminView {
         this.actionButton(I18n.t("certs.admin.toolbar.addSshPair"), I18n.t("certs.admin.toolbar.addSshPairTitle"), () => this.sshKeyModal("ssh-keypair"), "btn-primary"),
       );
       right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.changePass"), I18n.t("certs.admin.toolbar.changePassTitle"), () => this.changePassphraseModal()));
-      right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.lock"), I18n.t("certs.admin.toolbar.lockTitle"), () => { this.session.lock(); }));
     }
     right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.refresh"), I18n.t("certs.admin.toolbar.refreshTitle"), () => { this.session.touch(); void this.reload(); }));
     if (this.filterBar) right.appendChild(this.filterBar.resetElement);
+    // Contrôle du COFFRE, TOUT À DROITE (remplace le panneau persistant + le badge d'état) : « Verrouiller »
+    // si ouvert (action immédiate), sinon « Déverrouiller » / « Initialiser » qui ouvre la modale du coffre.
+    right.appendChild(this.buildVaultButton());
 
     bar.appendChild(right);
     return bar;
@@ -401,75 +394,77 @@ export class CertsAdminView {
   }
 
   /** Écran VERROUILLÉ : initialisation (PKI vierge) OU saisie de la phrase secrète maître. */
-  private buildLockPanel(): HTMLElement {
-    const box = document.createElement("div");
-    box.style.cssText = "border:1px solid var(--line);border-radius:6px;padding:14px;background:var(--bg-2);margin-bottom:12px";
-    const state = this.pkiState!;
-
-    // CONTEXTE NON SÉCURISÉ : les navigateurs retirent crypto.subtle hors HTTPS/localhost —
-    // toute la crypto de la PKI (dérivation, chiffrement, signatures) est alors inopérante.
-    // Bandeau actionnable AU LIEU des formulaires (la liste des métadonnées, elle, reste
-    // consultable plus bas : elle ne demande aucune opération de clé).
-    if (!PkiCrypto.available()) {
-      box.style.borderColor = "var(--warn)";
-      const title = document.createElement("div"); title.style.cssText = "font-weight:600;color:var(--warn);margin-bottom:6px";
-      title.textContent = I18n.t("certs.admin.lock.insecureTitle");
-      const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.whiteSpace = "pre-line";
-      hint.textContent = I18n.t("certs.admin.lock.insecureHint");
-      box.append(title, hint);
-      return box;
+  /** Bouton de CONTRÔLE DU COFFRE (barre de contrôles, tout à droite) — reflète l'état, libellé + icône portant
+      l'information (l'ancien badge d'état devient superflu) :
+      - déverrouillé → « Verrouiller » (action immédiate, cadenas fermé) ;
+      - PKI vierge → « Initialiser » (ouvre la modale d'initialisation) ;
+      - verrouillé / contexte non sécurisé → « Déverrouiller » (ouvre la modale du coffre). */
+  private buildVaultButton(): HTMLButtonElement {
+    if (this.session.unlocked) {
+      const btn = this.actionButton(I18n.t("certs.admin.toolbar.lock"), I18n.t("certs.admin.toolbar.lockTitle"), () => { this.session.lock(); });
+      IconButton.decorate(btn, Icons.LOCK);
+      return btn;
     }
-
-    if (state.initialized !== true) {
-      // PKI VIERGE → proposer l'initialisation (formulaire EN MODALE).
-      const title = document.createElement("div"); title.style.cssText = "font-weight:600;color:var(--fg);margin-bottom:6px";
-      title.textContent = I18n.t("certs.admin.lock.uninitTitle");
-      const hint = document.createElement("div"); hint.className = "form-hint";
-      hint.textContent = I18n.t("certs.admin.lock.uninitHint");
-      const btn = this.actionButton(I18n.t("certs.admin.lock.initBtn"), I18n.t("certs.admin.lock.initBtnTitle"), () => this.initModal(), "btn-primary");
-      btn.style.marginTop = "10px";
-      box.append(title, hint, btn);
-      return box;
-    }
-
-    // PKI INITIALISÉE → déverrouillage par phrase secrète (input password STANDARD .form-field).
-    const title = document.createElement("div"); title.style.cssText = "font-weight:600;color:var(--fg);margin-bottom:6px";
-    title.textContent = I18n.t("certs.admin.lock.unlockTitle");
-    const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "8px";
-    hint.textContent = I18n.t("certs.admin.lock.unlockHint");
-
-    // Le bouton est frère de l'INPUT SEUL (pas du .form-field label+input) : posé à côté du champ
-    // ENTIER, `align-items:flex-end` collait son bas à celui de l'input alors qu'il est ~15 px plus
-    // court (input : padding 8px/13px ≈ 37 px · .btn-sm : padding 4px/10px ≈ 22 px) → il paraissait
-    // excentré. Ici `stretch` lui fait épouser la hauteur EXACTE de l'input, sans hauteur en dur.
-    const passField = document.createElement("div"); passField.className = "form-field"; passField.style.margin = "0";
-    const label = document.createElement("label"); label.textContent = I18n.t("certs.admin.lock.passLabel");
-    const input = document.createElement("input"); input.type = "password"; input.autocomplete = "current-password"; input.placeholder = I18n.t("certs.admin.lock.passPlaceholder");
-    input.style.cssText = "flex:1 1 auto;min-width:0";   // min-width:0 : sans lui, un flex item ne descend pas sous sa largeur intrinsèque
-    this.lockInput = input;   // cible du renvoi « Déverrouiller le coffre » depuis une modale d'export
-    const errBox = this.errBox();
-    const btn = this.actionButton(I18n.t("certs.admin.lock.unlockBtn"), I18n.t("certs.admin.lock.unlockBtnTitle"), () => void this.attemptUnlock(input.value, errBox), "btn-primary");
-    btn.classList.remove("btn-sm");   // hauteur d'un .btn plein pour matcher l'input
-    btn.style.flex = "none";
-    const inputRow = document.createElement("div"); inputRow.style.cssText = "display:flex;gap:8px;align-items:stretch";
-    inputRow.append(input, btn);
-    passField.append(label, inputRow);
-
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); void this.attemptUnlock(input.value, errBox); } });
-
-    box.append(title, hint, passField, errBox);
-    setTimeout(() => input.focus(), 30);
-    return box;
+    const uninit = this.pkiState?.initialized !== true && PkiCrypto.available();
+    const btn = this.actionButton(
+      uninit ? I18n.t("certs.admin.toolbar.init") : I18n.t("certs.admin.toolbar.unlock"),
+      uninit ? I18n.t("certs.admin.toolbar.initTitle") : I18n.t("certs.admin.toolbar.unlockTitle"),
+      () => this.unlockModal(), "btn-primary");
+    IconButton.decorate(btn, Icons.UNLOCK);
+    return btn;
   }
 
-  /** Renvoie l'utilisateur vers le flux de déverrouillage EXISTANT (le panneau de phrase, affiché dès que
-      la session est verrouillée) : amène le champ à l'écran et lui donne le focus. Utilisé par le bouton
-      « Déverrouiller le coffre » d'une modale d'export (qui ferme d'abord l'export). No-op si déjà déverrouillé. */
-  private focusUnlock(): void {
-    const input = this.lockInput;
-    if (!input || !document.contains(input)) return;
-    try { input.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) { /* sans effet */ }
-    setTimeout(() => { try { input.focus(); } catch (_) { /* sans effet */ } }, 60);
+  /** Modale du COFFRE de certificat — remplace l'ancien panneau persistant (gain de place : la vue n'affiche
+      plus qu'un bouton dans la barre de contrôles). Selon l'état PKI : contexte non sécurisé (info seule),
+      PKI vierge (→ initialisation), ou verrouillée (saisie de la phrase). `reopen` (aller-retour) : à la
+      fermeture — donc après un déverrouillage réussi comme après une annulation — rouvre la modale d'origine.
+      Utilisé par le bouton « Déverrouiller » d'une modale d'export pour Y REVENIR une fois le coffre ouvert. */
+  private unlockModal(reopen?: () => void): void {
+    const state = this.pkiState;
+    if (!state) return;
+
+    // CONTEXTE NON SÉCURISÉ : crypto.subtle absent hors HTTPS/localhost → toute la crypto PKI est inopérante.
+    // Info seule (les métadonnées, elles, restent consultables dans le listing : aucune opération de clé).
+    if (!PkiCrypto.available()) {
+      const box = document.createElement("div");
+      const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.cssText = "white-space:pre-line;color:var(--warn)";
+      hint.textContent = I18n.t("certs.admin.lock.insecureHint");
+      box.appendChild(hint);
+      this.host.openModal({ title: I18n.t("certs.admin.lock.insecureTitle"), body: box, hideFooter: true, onClose: reopen });
+      return;
+    }
+
+    // PKI VIERGE → proposer l'initialisation (initModal remplace cette modale à la validation).
+    if (state.initialized !== true) {
+      const box = document.createElement("div");
+      const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "10px";
+      hint.textContent = I18n.t("certs.admin.lock.uninitHint");
+      const btn = this.actionButton(I18n.t("certs.admin.lock.initBtn"), I18n.t("certs.admin.lock.initBtnTitle"), () => this.initModal(), "btn-primary");
+      box.append(hint, btn);
+      this.host.openModal({ title: I18n.t("certs.admin.lock.uninitTitle"), body: box, hideFooter: true, onClose: reopen });
+      return;
+    }
+
+    // PKI VERROUILLÉE → phrase secrète. onSave = déverrouillage (renvoie true → ferme → onClose/aller-retour).
+    const root = document.createElement("div");
+    const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "10px";
+    hint.textContent = I18n.t("certs.admin.lock.unlockHint");
+    const input = FormControls.text("", I18n.t("certs.admin.lock.passPlaceholder")); input.type = "password"; input.autocomplete = "current-password";
+    const errBox = this.errBox();
+    root.append(hint, FormControls.fieldRow(I18n.t("certs.admin.lock.passLabel"), input), errBox);
+    // Entrée = déverrouiller (parité avec l'ancien panneau) : tente puis ferme la modale en cas de succès
+    // (closeModal → onClose → aller-retour éventuel), comme le bouton « Déverrouiller » du pied.
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      void this.attemptUnlock(input.value, errBox).then((ok) => { if (ok) this.host.closeModal?.(); });
+    });
+    this.host.openModal({
+      title: I18n.t("certs.admin.lock.unlockTitle"), body: root,
+      saveLabel: I18n.t("certs.admin.lock.unlockBtn"), onClose: reopen,
+      onSave: async () => this.attemptUnlock(input.value, errBox),   // true → ferme ; false → reste ouverte (erreur affichée)
+    });
+    setTimeout(() => input.focus(), 30);
   }
 
   /* --------------------------------------------------------------------------
@@ -1427,20 +1422,24 @@ export class CertsAdminView {
   /** Déverrouillage : dérive la KEK et DÉBALLE la DEK depuis wrapped_dek. L'unwrap AES-GCM est
       authentifié : il réussit (→ unlock) si la phrase est bonne, JETTE sinon (→ message NEUTRE).
       Le wrapped_dek FAIT donc office de keycheck — pas de vérification séparée. */
-  private async attemptUnlock(pass: string, errBox: HTMLElement): Promise<void> {
+  /** Tente le déverrouillage. Renvoie `true` en cas de succès (session ouverte + vue re-rendue), `false` sinon
+      (phrase vide/erronée — message neutre affiché). Le booléen pilote la fermeture de la modale du coffre. */
+  private async attemptUnlock(pass: string, errBox: HTMLElement): Promise<boolean> {
     const state = this.pkiState;
-    if (!state || state.initialized !== true) return;
+    if (!state || state.initialized !== true) return false;
     errBox.style.display = "none";
-    if (pass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.common.passRequired")); return; }
+    if (pass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.common.passRequired")); return false; }
     try {
       const kek = await PkiCrypto.deriveKek(pass, state.kdf_salt, state.kdf_iters);
       const dek = await PkiCrypto.unwrapDek(kek, state.wrapped_dek); // JETTE si mauvaise phrase (GCM refuse)
       this.session.unlock(dek);
       this.render();
       Notify.toast(I18n.t("certs.admin.unlock.toast"), "ok");
+      return true;
     } catch (_) {
       // Toute erreur (dérivation, unwrap, blob) → même réponse neutre, sans matériau de clé.
       this.showError(errBox, I18n.t("certs.admin.unlock.wrong"));
+      return false;
     }
   }
 
@@ -2020,13 +2019,14 @@ export class CertsAdminView {
     }
 
     if (!list.children.length) { const n = document.createElement("div"); n.className = "form-hint"; n.textContent = I18n.t("certs.admin.export.empty"); root.appendChild(n); }
-    // Coffre verrouillé ET des exports le REQUIÈRENT (clé privée) → raccourci direct vers le flux de
-    // déverrouillage existant : ferme la modale d'export et renvoie le focus au champ de phrase du panneau.
+    // Coffre verrouillé ET des exports le REQUIÈRENT (clé privée) → ouvre la modale du coffre avec ALLER-RETOUR :
+    // une fois déverrouillé (ou à la fermeture), on REVIENT à CETTE modale d'export, désormais avec les exports
+    // de clé disponibles (`reopen` = ré-ouverture synchrone de l'export).
     if (hasLocked) {
       const unlock = document.createElement("button");
       unlock.type = "button"; unlock.className = "btn btn-ghost btn-sm"; unlock.style.marginTop = "12px";
       unlock.textContent = I18n.t("certs.admin.export.unlockVault"); unlock.title = I18n.t("certs.admin.export.unlockVaultTitle");
-      unlock.onclick = () => { this.host.closeModal?.(); this.focusUnlock(); };
+      unlock.onclick = () => this.unlockModal(() => this.openExportModal(item, all));
       root.appendChild(unlock);
     }
     this.host.openModal({ title: I18n.t("certs.admin.export.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true });
