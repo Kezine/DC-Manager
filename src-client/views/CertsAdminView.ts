@@ -707,9 +707,10 @@ export class CertsAdminView {
     return tr;
   }
 
-  /** Cellule « Cible(s) » (vue B) : un bouton-icône INFO par équipement/VM RAPPROCHÉ (aller-retour vers sa fiche,
-      patron openTargetDetail) + pastille discrète « ambigu » si plusieurs cibles distinctes ; rien si aucune (ou
-      hors mode API : `targetResolver` null). Rapprochement CALCULÉ (CertTargetMatch), jamais persisté. */
+  /** Cellule « Cible(s) » (vue B) : le NOM de chaque équipement/VM RAPPROCHÉ, cliquable (ouvre sa fiche de détail —
+      aller-retour, patron openTargetDetail), précédé d'une petite icône de famille (équipement/VM) pour le
+      contexte + pastille discrète « ambigu » si plusieurs cibles distinctes ; rien si aucune (ou hors mode API :
+      `targetResolver` null). Rapprochement CALCULÉ (CertTargetMatch), jamais persisté. */
   private targetCell(item: CertificatePageItem): HTMLElement {
     const td = document.createElement("td");
     const resolver = this.targetResolver;
@@ -717,13 +718,19 @@ export class CertsAdminView {
     let refs: CertTargetRef[] = [];
     try { refs = resolver.targetsForCert(item); } catch (_) { refs = []; }
     if (!refs.length) return td;   // zéro cible → cellule vide
-    const wrap = document.createElement("span"); wrap.style.cssText = "display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap";
+    const wrap = document.createElement("span"); wrap.style.cssText = "display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap";
     for (const ref of refs) {
       const label = ref.label || ref.id;
       const tip = I18n.t(ref.kind === "vm" ? "certs.admin.target.openVm" : "certs.admin.target.openEquipment", { label });
-      const btn = IconButton.build({ icon: Icons.INFO, label: tip, onClick: () => resolver.openTarget(ref, () => { /* retour : le listing reste affiché */ }) });
-      btn.title = tip;
-      wrap.appendChild(btn);
+      // NOM cliquable (au lieu d'un simple bouton-icône) : un clic ouvre la fiche d'info de la cible.
+      const link = document.createElement("a");
+      link.href = "#"; link.title = tip; link.style.cssText = "cursor:pointer;display:inline-flex;align-items:center;gap:5px";
+      const icon = document.createElement("span"); icon.className = "gi"; icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = ref.kind === "vm" ? Icons.VM : Icons.EQUIPMENT;   // icône de famille = repère visuel, pas l'action
+      const name = document.createElement("span"); name.textContent = label;
+      link.append(icon, name);
+      link.onclick = (e) => { e.preventDefault(); resolver.openTarget(ref, () => { /* retour : le listing reste affiché */ }); };
+      wrap.appendChild(link);
     }
     if (refs.length > 1) {   // AMBIGUÏTÉ : plusieurs cibles distinctes → pastille discrète (liste en infobulle)
       const pill = document.createElement("span"); pill.className = "pill";
