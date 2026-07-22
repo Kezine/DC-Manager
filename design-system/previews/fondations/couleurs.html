@@ -92,6 +92,7 @@
     --role-mgmt: oklch(0.74 0.13 236);
     --role-data: oklch(0.76 0.15 152);
     --role-power: oklch(0.77 0.15 68);
+    --role-poe: oklch(0.82 0.15 102);   /* POE = data+énergie : or/lime entre data(152) et power(68), tirant vers le power */
     /* Anneau de focus clavier (cf. règle :focus-visible globale) = couleur du petit texte accent (AA).
        Défini une seule fois : var(--accent-text) se résout par thème là où l'anneau est appliqué. */
     --focus: var(--accent-text);
@@ -137,6 +138,7 @@
     --role-mgmt: oklch(0.50 0.13 250);
     --role-data: oklch(0.52 0.14 152);
     --role-power: oklch(0.53 0.13 60);
+    --role-poe: oklch(0.54 0.14 102);
     --viz-equip-bg: #e6f1fb;
     --viz-equip-fg: #0c447c;
   }
@@ -660,6 +662,7 @@
     color: var(--fg-dim);
     white-space: nowrap;
   }
+  .pill svg { width: 11px; height: 11px; flex: none; }   /* glyphes de pastille (éclair POE, types de spare…) */
   .colored-pill {
     background: var(--pill-bg, var(--bg-3));
     color: var(--pill-fg, var(--fg));
@@ -686,6 +689,7 @@
   .pill.role-mgmt { border-color: var(--role-mgmt); color: var(--role-mgmt); }
   .pill.role-data { border-color: var(--role-data); color: var(--role-data); }
   .pill.role-power { border-color: var(--role-power); color: var(--role-power); }
+  .pill.role-poe { border-color: var(--role-poe); color: var(--role-poe); }
   .pill.status-brouillon { border-color: var(--accent-2); color: var(--accent-2); border-style: dashed; }
   .pill.status-planifie { border-color: var(--fg-dimmer); color: var(--fg-dim); }
   .pill.status-cable { border-color: var(--ok); color: var(--ok); }
@@ -879,6 +883,71 @@
     border: 1px solid var(--line);
   }
   .chip-row .grow { flex: 1; }
+
+  /* ---- Éditeur de ports : lignes extensibles <details> (support POE — cf. design-system/briefs/port-editor-poe) ----
+     Tête compacte (nom · pastille catégorie · sens · métrique · réseau · actions) + corps déplié (champs
+     conditionnels). Tient la densité d'un switch 48 ports. Cohabite avec les lignes trunk/lane figées (.port-locked). */
+  .port { border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-2); overflow: hidden; }
+  .port[data-err] { border-color: var(--err); }
+  .port-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; list-style: none; user-select: none; }
+  .port-head::-webkit-details-marker { display: none; }
+  .port-head:hover { background: var(--bg-3); }
+  .port[data-err] .port-head { box-shadow: inset 3px 0 0 var(--err); }
+  .port .chev { color: var(--fg-dimmer); flex: none; display: inline-flex; transition: transform 0.15s; }
+  .port[open] .chev { transform: rotate(90deg); }
+  .port .p-name { font-weight: 600; flex: 0 0 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .port .p-cat { flex: 0 0 auto; }
+  .port .p-cat .pill svg { width: 11px; height: 11px; }
+  .port .p-sens { flex: 0 0 96px; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .port .p-metric { flex: 0 0 88px; text-align: right; font-variant-numeric: tabular-nums; color: var(--fg); font-size: 12px; }
+  .port .p-metric.power { color: var(--role-power); }
+  .port .p-metric.poe { color: var(--role-poe); display: inline-flex; align-items: center; gap: 3px; justify-content: flex-end; }
+  .port .p-metric.poe svg { width: 11px; height: 11px; }
+  .port .p-metric .muted { color: var(--fg-dimmer); }
+  .port .p-net { flex: 1; min-width: 0; color: var(--fg-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .port .p-net .muted { color: var(--fg-dimmer); }
+  .port .p-acts { display: flex; gap: 4px; flex: none; }
+  .port-body { padding: 6px 14px 14px 40px; background: var(--bg); border-top: 1px solid var(--line); }
+  .port-body .body-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 16px; align-items: start; }
+  .port-body .body-grid .form-field { margin-bottom: 0; }
+  .port-body .body-grid .rm-toggle { width: fit-content; max-width: 100%; }
+  .port-locked { opacity: 0.78; }
+  .warn-strip { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); color: var(--err); border-radius: 5px; font-size: 11px; }
+  .warn-strip .gi svg { width: 15px; height: 15px; }
+
+  /* champ NUMBER + suffixe d'unité (A / W) — .unit-inp (FormControls.unitNumber) */
+  .unit-inp { display: flex; align-items: stretch; border: 1px solid var(--line-2); background: var(--bg); border-radius: 4px; overflow: hidden; }
+  .unit-inp:focus-within { border-color: var(--accent); }
+  .unit-inp input { flex: 1; min-width: 0; border: none; background: transparent; color: var(--fg); font-family: inherit; font-size: 13px; padding: 7px 10px; outline: none; }
+  .unit-inp .u { display: flex; align-items: center; padding: 0 10px; border-left: 1px solid var(--line-2); color: var(--fg-dim); font-size: 11px; background: var(--bg-3); }
+
+  /* jauge de budget POE — .gauge (états normal / ≈80 % / survente) */
+  .gauge-card { display: flex; flex-direction: column; gap: 6px; }
+  .gauge-top { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; gap: 8px; }
+  .gauge-top .alloc { font-size: 14px; color: var(--fg); }
+  .gauge-top .alloc.over { color: var(--err); }
+  .gauge-top .alloc .alloc-total { font-size: 11px; color: var(--fg-dim); }
+  .gauge-top .rest { color: var(--fg-dim); white-space: nowrap; }
+  .gauge-top .rest.over { color: var(--err); }
+  .gauge { position: relative; height: 9px; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--line-2); overflow: hidden; }
+  .gauge-fill { height: 100%; background: var(--role-poe); transition: width 0.3s; }
+  .gauge.warn .gauge-fill { background: var(--warn); }
+  .gauge.over { border-color: var(--err); }
+  .gauge.over .gauge-fill { background: repeating-linear-gradient(45deg, var(--err), var(--err) 6px, color-mix(in srgb, var(--err) 55%, #000) 6px, color-mix(in srgb, var(--err) 55%, #000) 12px); }
+  .gauge-state { font-size: 11px; font-family: var(--sans); }
+  .gauge-state.ok { color: var(--fg-dim); }
+  .gauge-state.warn { color: var(--warn); }
+  .gauge-state.over { color: var(--err); }
+
+  /* responsive : la tête de port se replie en carte < 560 px (aucun scroll horizontal) */
+  @media (max-width: 560px) {
+    .port-head { flex-wrap: wrap; gap: 6px 10px; }
+    .port .p-name { flex: 1 1 auto; }
+    .port .p-sens, .port .p-metric { flex: 0 0 auto; }
+    .port .p-net { flex: 1 1 100%; }
+    .port-body { padding-left: 14px; }
+    .port-body .body-grid { grid-template-columns: 1fr; }
+  }
   /* grille d'occupation d'un rack â€” proportions rÃ©elles : 1 U = hauteur fixe */
   .rack-grid-wrap { --u-h: 30px; max-height: 62vh; overflow: auto; border: 1px solid var(--line); }
   .rack-grid { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
@@ -927,6 +996,7 @@
   .face-marker:hover { opacity: 1; }
   .face-marker.role-mgmt { background: var(--ok, #4ade80); }
   .face-marker.role-power { background: var(--role-power, #f59e0b); }
+  .face-marker.role-poe { background: var(--role-poe); }
   .face-marker.dragging { cursor: grabbing; opacity: 0.97; }
   .face-marker .fm-x { cursor: pointer; font-weight: 700; opacity: 0.75; }
   .face-marker .fm-x:hover { opacity: 1; }
@@ -944,6 +1014,7 @@
   .face-leader-label { position: absolute; transform: translate(-50%, -50%) scale(var(--inv-zoom, 1)); display: inline-flex; align-items: center; gap: 4px; background: var(--accent); color: #08121a; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; white-space: nowrap; pointer-events: auto; cursor: default; z-index: 4; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
   .face-leader-label.role-mgmt { background: var(--ok, #4ade80); }
   .face-leader-label.role-power { background: var(--role-power, #f59e0b); }
+  .face-leader-label.role-poe { background: var(--role-poe); }
   .face-leader-label .fm-x { cursor: pointer; font-weight: 700; opacity: 0.7; }
   .face-leader-label .fm-x:hover { opacity: 1; }
   .face-leader-label.hi { z-index: 6; box-shadow: 0 0 0 2px var(--fg), 0 2px 10px rgba(0,0,0,0.6); }
@@ -954,6 +1025,7 @@
   .face-dot.dim { opacity: 0.25; }
   .face-dot.role-mgmt { background: var(--ok, #4ade80); }
   .face-dot.role-power { background: var(--role-power, #f59e0b); }
+  .face-dot.role-poe { background: var(--role-poe); }
   /* aperçu HAUTE DENSITÉ (fiche détail) : chip surlignée en miroir du survol de sa pastille ; bulle non interactive. */
   .face-chip.hi { background: var(--accent); border-color: var(--accent); color: #08121a; font-weight: 700; }
   .face-preview .face-leader-label { pointer-events: none; }
@@ -2476,7 +2548,7 @@
         <span class="ds-chip" style="background:#0c447c" title="#0c447c"></span>
         <code class="ds-swname">--viz-equip-fg</code>
         <span class="ds-swval">#b5d4f4<span class="ds-sep">·</span>#0c447c</span>
-      </div><div class="ds-variant-title">Rayons &amp; divers (non-couleur)</div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent-fill</code><span class="ds-swval">oklch(0.67 0.19 46)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent</code><span class="ds-swval">oklch(0.72 0.175 50)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent-text</code><span class="ds-swval">oklch(0.80 0.15 62)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--ok</code><span class="ds-swval">oklch(0.76 0.15 152)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--warn</code><span class="ds-swval">oklch(0.82 0.14 88)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--err</code><span class="ds-swval">oklch(0.66 0.19 27)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--info</code><span class="ds-swval">oklch(0.72 0.12 240)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-mgmt</code><span class="ds-swval">oklch(0.74 0.13 236)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-data</code><span class="ds-swval">oklch(0.76 0.15 152)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-power</code><span class="ds-swval">oklch(0.77 0.15 68)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--focus</code><span class="ds-swval">var(--accent-text)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--grid-size</code><span class="ds-swval">24px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--radius-pill</code><span class="ds-swval">5px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--control-h</code><span class="ds-swval">36px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--mono</code><span class="ds-swval">ui-monospace, &quot;SF Mono&quot;, &quot;Menlo&quot;, &quot;Consolas&quot;, &quot;Cascadia Mono&quot;, &quot;Roboto Mono&quot;, monospace</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--sans</code><span class="ds-swval">&quot;IBM Plex Sans&quot;, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, &quot;Helvetica Neue&quot;, Arial, sans-serif</span></div>
+      </div><div class="ds-variant-title">Rayons &amp; divers (non-couleur)</div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent-fill</code><span class="ds-swval">oklch(0.67 0.19 46)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent</code><span class="ds-swval">oklch(0.72 0.175 50)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent-text</code><span class="ds-swval">oklch(0.80 0.15 62)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--ok</code><span class="ds-swval">oklch(0.76 0.15 152)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--warn</code><span class="ds-swval">oklch(0.82 0.14 88)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--err</code><span class="ds-swval">oklch(0.66 0.19 27)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--info</code><span class="ds-swval">oklch(0.72 0.12 240)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-mgmt</code><span class="ds-swval">oklch(0.74 0.13 236)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-data</code><span class="ds-swval">oklch(0.76 0.15 152)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-power</code><span class="ds-swval">oklch(0.77 0.15 68)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-poe</code><span class="ds-swval">oklch(0.82 0.15 102)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--focus</code><span class="ds-swval">var(--accent-text)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--grid-size</code><span class="ds-swval">24px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--radius-pill</code><span class="ds-swval">5px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--control-h</code><span class="ds-swval">36px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--mono</code><span class="ds-swval">ui-monospace, &quot;SF Mono&quot;, &quot;Menlo&quot;, &quot;Consolas&quot;, &quot;Cascadia Mono&quot;, &quot;Roboto Mono&quot;, monospace</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--sans</code><span class="ds-swval">&quot;IBM Plex Sans&quot;, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, &quot;Helvetica Neue&quot;, Arial, sans-serif</span></div>
 </section>
 
 </div>
