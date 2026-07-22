@@ -62,8 +62,8 @@ export class EquipmentForms extends FormBase {
       ...secondaryGrps.map((g: any) => `<span class="pill colored-pill" ${Color.pillStyle(g.color)} title="${I18n.t("equipment.detail.groupSecondary")}">${Html.escape(g.label)}</span>`),
     ].filter(Boolean);
     add(grpPills.length > 1 ? I18n.t("equipment.detail.groups") : I18n.t("lists.col.group"), grpPills.length ? grpPills.join(" ") : "—");
-    if (eq.type === "pdu" || eq.type === "tableau") add(I18n.t("equipment.detail.maxCapacity"), eq.pdu_max_a != null ? `<span class="pill">${eq.pdu_max_a} A</span>` : "—");
-    if (eq.type !== "tableau" && (eq.power_nominal_w != null || eq.power_max_w != null)) add(I18n.t("equipment.detail.consumption"), [eq.power_nominal_w != null ? I18n.t("equipment.detail.wNom", { w: eq.power_nominal_w }) : null, eq.power_max_w != null ? I18n.t("equipment.detail.wMax", { w: eq.power_max_w }) : null].filter(Boolean).join(" · ") || "—");
+    if (eq.type === "pdu" || eq.type === "switchboard") add(I18n.t("equipment.detail.maxCapacity"), eq.pdu_max_a != null ? `<span class="pill">${eq.pdu_max_a} A</span>` : "—");
+    if (eq.type !== "switchboard" && (eq.power_nominal_w != null || eq.power_max_w != null)) add(I18n.t("equipment.detail.consumption"), [eq.power_nominal_w != null ? I18n.t("equipment.detail.wNom", { w: eq.power_nominal_w }) : null, eq.power_max_w != null ? I18n.t("equipment.detail.wMax", { w: eq.power_max_w }) : null].filter(Boolean).join(" · ") || "—");
     if (eq.purchase_date || eq.po_ref) add(I18n.t("lists.col.purchase"), [eq.purchase_date ? Html.escape(eq.purchase_date) : null, eq.po_ref ? I18n.t("equipment.detail.poRef", { ref: Html.escape(eq.po_ref) }) : null].filter(Boolean).join(" · ") || "—");
     if (eq.warranty_end) add(I18n.t("equipment.field.warrantyEnd"), Html.escape(eq.warranty_end));
     if (eq.assigned_to || eq.assigned_date) add(I18n.t("equipment.field.assignedTo"), [eq.assigned_to ? Html.escape(eq.assigned_to) : null, eq.assigned_date ? I18n.t("equipment.detail.onDate", { date: Html.escape(eq.assigned_date) }) : null].filter(Boolean).join(" · ") || "—");
@@ -497,9 +497,9 @@ export class EquipmentForms extends FormBase {
 
     // -- identité --
     const nameI = FormControls.text(eq ? eq.name : "", I18n.t("equipment.equip.namePlaceholder"));
-    const curType = eq ? (eq.type || EQUIPMENT_TYPE_DEFAULT) : EQUIPMENT_TYPE_DEFAULT;
-    let typeOpts = EquipmentTypes.ALL.map((t) => ({ value: t.id, label: I18n.t(t.labelKey) }));
-    if (curType && !EquipmentTypes.ALL.some((t) => t.id === curType)) typeOpts = [{ value: curType, label: I18n.t("equipment.equip.outOfList", { type: curType }) }, ...typeOpts];
+    // Type STOCKÉ résolu : un ancien id (français) ou un type retiré retombe sur `other` (pas de rétro-compat).
+    const curType = eq ? EquipmentTypes.resolveId(eq.type || EQUIPMENT_TYPE_DEFAULT) : EQUIPMENT_TYPE_DEFAULT;
+    const typeOpts = EquipmentTypes.ALL.map((t) => ({ value: t.id, label: I18n.t(t.labelKey) }));
     const typeI = FormControls.select(typeOpts, curType);
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("lists.col.name"), nameI), FormControls.fieldRow(I18n.t("lists.col.type"), typeI)));
 
@@ -859,8 +859,8 @@ export class EquipmentForms extends FormBase {
       placeBox.style.display = u ? "" : "none";   // placement rack du cœur = mode U
       salleBox.style.display = u ? "none" : "";    // placement en salle (au sol) = mode Libre
       if (!u) syncSalle();
-      pduRow.style.display = (typeI.value === "pdu" || typeI.value === "tableau") ? "" : "none";
-      consoRow.style.display = (typeI.value === "tableau") ? "none" : "";   // un tableau fournit, il ne consomme pas
+      pduRow.style.display = (typeI.value === "pdu" || typeI.value === "switchboard") ? "" : "none";
+      consoRow.style.display = (typeI.value === "switchboard") ? "none" : "";   // un tableau fournit, il ne consomme pas
     };
     dimI.addEventListener("change", sync); typeI.addEventListener("change", sync);
     // changer de type (→/depuis patch_panel) bascule l'affichage brins ↔ agrégat des ports. Passer À « patch »

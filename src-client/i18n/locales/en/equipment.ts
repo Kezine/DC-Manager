@@ -174,7 +174,6 @@ export const equipment = {
   },
   equip: {
     namePlaceholder: "e.g. sw-core-01",
-    outOfList: "{{type}} (off list)",
     invOnly: "Inventory only",
     invOnlyTitle: "Listed only: no placement, no cabling, no ports.",
     brandPlaceholder: "e.g. Cisco, Dell…",

@@ -427,7 +427,7 @@ module.exports = async () => {
     // ---- T10/T11 : extrémités de faisceau = 2 PATCHS DISTINCTS (refus direct + dépendance inverse au re-typage) ----
     const endA = await s.create("equipments", { name: "patch-A", type: "patch_panel" });
     const endB = await s.create("equipments", { name: "patch-B", type: "patch_panel" });
-    const notAPatch = await s.create("equipments", { name: "serveur-X", type: "serveur" });
+    const notAPatch = await s.create("equipments", { name: "serveur-X", type: "server" });
     const looped = await s.create("cableBundles", { name: "trunk-bouclé", endpoint_a_equipment_id: endA.id, endpoint_b_equipment_id: endA.id });
     ck.eq(looped, null, "T10 : faisceau bouclé sur le même patch → refusé (invariant)");
     const onServer = await s.create("cableBundles", { name: "trunk-KO", endpoint_a_equipment_id: notAPatch.id, endpoint_b_equipment_id: endB.id });
@@ -470,7 +470,7 @@ module.exports = async () => {
     const pa = new PowerAnalysis(s);
     // réseau power d'origine (tension 230 V) ; TABLEAU racine avec 1 départ (L1, calibre 16 A, porte l'origine)
     const pnet = await s.create("networks", { label: "UPS-A", kind: "power", voltage: 230, max_amp: 32 });
-    const tab = await s.create("equipments", { name: "TGBT", type: "tableau" });
+    const tab = await s.create("equipments", { name: "TGBT", type: "switchboard" });
     const depart = await s.create("ports", { equipment_id: tab.id, name: "Q1", role: "power", direction: "source", power_max_a: 16, phase: "L1", network_ids: [pnet.id], network_id: pnet.id });
     // PDU (pass-through) : inlet sink + outlet source
     const pdu = await s.create("equipments", { name: "PDU-A", type: "pdu" });

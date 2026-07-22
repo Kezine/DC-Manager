@@ -26,7 +26,7 @@ export class Equipment extends Entity {
   assigned_date: string;
   /** Personne à qui l'équipement est attribué. */
   assigned_to: string;
-  /** PDU / tableau : capacité max en ampères. null = non renseigné (pertinent si `type === "pdu"`/`"tableau"`). */
+  /** PDU / tableau : capacité max en ampères. null = non renseigné (pertinent si `type === "pdu"`/`"switchboard"`). */
   pdu_max_a: number | null;
   /** CONSOMMATION nominale (W) — un équipement CONSOMMATEUR tire cette puissance en régime normal. Répartie sur
       ses ports power (sink). En WATTS (invariant de la PSU à puissance constante) ; le courant = W / tension du

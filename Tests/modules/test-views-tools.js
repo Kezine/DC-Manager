@@ -45,9 +45,9 @@ module.exports = async () => {
   {
     const s = await makeStore();
     const sw = await s.create("equipments", { name: "sw", type: "switch" });
-    const srv = await s.create("equipments", { name: "srv", type: "serveur" });
-    await s.create("equipments", { name: "stock", type: "autre", inventory_only: true });
-    const noPorts = await s.create("equipments", { name: "bandeau", type: "autre" });   // SANS port → jamais au graphe
+    const srv = await s.create("equipments", { name: "srv", type: "server" });
+    await s.create("equipments", { name: "stock", type: "other", inventory_only: true });
+    const noPorts = await s.create("equipments", { name: "bandeau", type: "other" });   // SANS port → jamais au graphe
     const p1 = await s.create("ports", { equipment_id: sw.id, name: "a" });
     const p2 = await s.create("ports", { equipment_id: srv.id, name: "b" });
     await s.create("cables", { name: "lnk", from_port_id: p1.id, to_port_id: p2.id });
@@ -73,7 +73,7 @@ module.exports = async () => {
   // ---- overlay « VMs » (opt-in) : nœuds vm:/net: matérialisés via le mapping bridge/tag → réseau ----
   {
     const s = await makeStore();
-    const eq = await s.create("equipments", { name: "hyperviseur", type: "serveur" });
+    const eq = await s.create("equipments", { name: "hyperviseur", type: "server" });
     const p1 = await s.create("ports", { equipment_id: eq.id, name: "eth0" });
     const eq2 = await s.create("equipments", { name: "sw2", type: "switch" });
     const p2 = await s.create("ports", { equipment_id: eq2.id, name: "g1" });

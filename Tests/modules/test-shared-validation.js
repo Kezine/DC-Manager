@@ -334,7 +334,7 @@ module.exports = async () => {
     const find = (coll, field, value) => (db[coll] || []).filter((o) => o[field] === value);
     const fetch = (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
     const V = (rec) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find);
-    const base = { id: "E1", name: "posé", type: "autre", placement_mode: "tray", tray_item_id: "T1", dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, tray_x: 0, tray_y: 0, dc_orientation: 0 };
+    const base = { id: "E1", name: "posé", type: "other", placement_mode: "tray", tray_item_id: "T1", dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, tray_x: 0, tray_y: 0, dc_orientation: 0 };
     ck.eq(V(base).length, 0, "posé valide (80 ≤ 3 U − 5 mm de tôle) → 0 erreur");
     ck(V(Object.assign({}, base, { tray_item_id: null })).some((x) => x.path === "tray_item_id"), "T1c : mode tray sans étagère → erreur");
     ck(V(Object.assign({}, base, { tray_item_id: "B1" })).some((x) => x.message.includes("pas une étagère")), "T2d : cible non-tray → erreur");

@@ -11,8 +11,16 @@ module.exports = async () => {
     const c1 = EquipmentTypes.color("switch"), c2 = EquipmentTypes.color("switch");
     ck(typeof c1 === "string" && c1.length > 0, "equipmentTypeColor → couleur non vide");
     ck.eq(c1, c2, "equipmentTypeColor : déterministe (mémo)");
-    ck.eq(EquipmentTypes.color("hors-liste-xyz"), EquipmentTypes.color("hors-liste-xyz"), "equipmentTypeColor : hash stable hors catalogue");
     ck(COLOR_PALETTE.includes(c1), "equipmentTypeColor : valeur ∈ COLOR_PALETTE");
+    // fallback : un id NON reconnu (ancien id FR, type retiré) est RÉSOLU sur `other` (ids anglais + pas de rétro-compat).
+    ck.eq(EquipmentTypes.resolveId("serveur"), "other", "resolveId : id inconnu (ancien FR) → other");
+    ck.eq(EquipmentTypes.resolveId("switch"), "switch", "resolveId : id connu → inchangé");
+    ck.eq(EquipmentTypes.has("server") && !EquipmentTypes.has("serveur"), true, "has : server connu, serveur inconnu");
+    ck.eq(EquipmentTypes.color("hors-liste-xyz"), EquipmentTypes.color("other"), "color : type inconnu → couleur du repli other");
+    ck.eq(EquipmentTypes.label("serveur"), EquipmentTypes.label("other"), "label : type inconnu → libellé du repli other");
+    // `system` = types à pilotage fin (non supprimables à terme) : switch/patch_panel/pdu/switchboard uniquement.
+    ck(EquipmentTypes.isSystem("switch") && EquipmentTypes.isSystem("patch_panel") && EquipmentTypes.isSystem("pdu") && EquipmentTypes.isSystem("switchboard"), "isSystem : types à pilotage fin marqués system");
+    ck(!EquipmentTypes.isSystem("server") && !EquipmentTypes.isSystem("camera") && !EquipmentTypes.isSystem("other") && !EquipmentTypes.isSystem("inconnu"), "isSystem : inventaire générique / inconnu → non-system");
     ck([0, 90, 180, 270].includes(Normalize.rackOrientation(450)), "normRackOrientation(450) ∈ {0,90,180,270}");
   }
   });

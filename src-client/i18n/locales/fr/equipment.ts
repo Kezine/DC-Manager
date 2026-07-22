@@ -180,7 +180,6 @@ export const equipment = {
   },
   equip: {
     namePlaceholder: "ex. sw-core-01",
-    outOfList: "{{type}} (hors liste)",
     invOnly: "Inventaire seul",
     invOnlyTitle: "Répertorié uniquement : ni placement, ni câblage, ni ports.",
     brandPlaceholder: "ex. Cisco, Dell…",
