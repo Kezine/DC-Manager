@@ -327,6 +327,7 @@ export const dc = {
     clickEditCableSuffix: " — cliquer pour l'éditer",
     portFree: "Port libre — cliquer pour créer ou affecter un câble",
     typePrefix: "Type : ",
+    aggregatePrefix: "Agrégat : ",
     lengthPrefix: "Longueur : ",
     endAPrefix: "A : ",
     endBPrefix: "B : ",

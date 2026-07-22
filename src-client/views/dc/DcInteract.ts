@@ -14,6 +14,7 @@ import type { Frame } from "../../geometry/Positioning";
 import type { PosEntry, PosScene } from "./PositioningTool";
 import { Depths } from "../../registries/Depths";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
+import { PortRoles } from "../../registries/PortRoles";
 import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Format } from "../../core/Format";
 import { Waypoint } from "../../models/Waypoint";
@@ -103,13 +104,36 @@ export abstract class DcInteract extends DcPanels {
     return `<div class="tt-title">${Html.escape(e.name || I18n.t("lists.ph.equipment"))}</div>` + rows.join("");
   }
 
-  /** Tooltip d'un port (équipement : port + état de câblage). */
+  /** Tooltip d'un port : identité + rôle/connecteur + spécificités électriques (power sens/calibre/phase ·
+      poe PSE-PD/budget) + agrégat + réseau(x) DÉDUIT(s) + état de câblage. */
   protected portTipHtml(port: any, cab: any): string {
     const eq: any = this.store.get("equipments", port.equipment_id);
     const head = (eq ? (eq.name || I18n.t("lists.ph.equipment")) + " : " : "") + (port.name || I18n.t("dc.common.port"));
-    return `<div class="tt-title">${Html.escape(head)}</div>`
-      + (cab ? this.tipRow(`${Html.escape(I18n.t("dc.interact.cablePrefix"))}<b>${Html.escape(this.cableLabelShort(cab))}</b>${Html.escape(I18n.t("dc.interact.clickEditCableSuffix"))}`)
-             : `<div class="tt-row" style="color:var(--accent)">${I18n.t("dc.interact.portFree")}</div>`);
+    const rows: string[] = [];
+    // rôle + connecteur (type de port + famille) sur une ligne
+    const pt: any = port.port_type_id ? this.store.get("portTypes", port.port_type_id) : null;
+    rows.push(this.tipRow(`<b>${Html.escape(PortRoles.label(port.role))}</b>${pt ? " · " + Html.escape(pt.name) + (pt.family ? " (" + Html.escape(pt.family) + ")" : "") : ""}`));
+    // spécificités électriques : POE (PSE/PD · budget W) ou power (sens · calibre A · phase)
+    if (PortRoles.isPoe(port.role)) {
+      const sens = port.direction === "source" ? I18n.t("forms.port.pse") : port.direction === "sink" ? I18n.t("forms.port.pd") : null;
+      const bits = [sens, port.poe_budget_w != null ? port.poe_budget_w + " W" : null].filter(Boolean);
+      if (bits.length) rows.push(this.tipRow(bits.join(" · ")));
+    } else if (PortRoles.kind(port.role) === "power") {
+      const dir = (port.direction === "source" || port.direction === "sink") ? I18n.t("domain.portDirection." + port.direction) : null;
+      const bits = [dir, port.power_max_a != null ? port.power_max_a + " A" : null, port.phase || null].filter(Boolean);
+      if (bits.length) rows.push(this.tipRow(bits.join(" · ")));
+    }
+    // agrégat (LAG) éventuel
+    const ag: any = port.aggregate_id ? this.store.get("aggregates", port.aggregate_id) : null;
+    if (ag) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.aggregatePrefix"))}<b>${Html.escape(ag.name || I18n.t("equipment.detail.aggFallback"))}</b>`));
+    // réseau(x) DÉDUIT(s) du port — swatch par réseau, ★ = principal si multi (miroir du tooltip câble)
+    const nd = this.store.deducedNetwork([port.id]);
+    nd.ids.forEach((nid: string) => { const n: any = this.store.get("networks", nid); if (!n) return; const star = (nid === nd.primary && nd.ids.length > 1) ? " ★" : ""; rows.push(this.tipRow(`${this.tipSwatch(n.color)}${Html.escape(n.label || n.name || I18n.t("lists.ph.network"))}${star}`)); });
+    // état de câblage (dernière ligne)
+    rows.push(cab
+      ? this.tipRow(`${Html.escape(I18n.t("dc.interact.cablePrefix"))}<b>${Html.escape(this.cableLabelShort(cab))}</b>${Html.escape(I18n.t("dc.interact.clickEditCableSuffix"))}`)
+      : `<div class="tt-row" style="color:var(--accent)">${I18n.t("dc.interact.portFree")}</div>`);
+    return `<div class="tt-title">${Html.escape(head)}</div>` + rows.join("");
   }
 
   /** Tooltip d'un câble (type, longueur, réseaux, extrémités, points de passage, état). */
