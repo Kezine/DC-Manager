@@ -68,6 +68,9 @@ export const tabs = {
     label: "Cable types",
     subtitle: "STANDARDISED catalogue (read-only). Attached to a port « family ».",
   },
+  ipnetworks: {
+    label: "IP networks",
+  },
   ipaddresses: {
     label: "IP addresses",
     title: "Static IP addresses",

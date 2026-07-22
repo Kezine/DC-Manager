@@ -481,11 +481,14 @@ async function boot(): Promise<void> {
     form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: I18n.t("app.add.cable"),
     links: ["reseaux", "porttypes", "cabletypes", "faisceaux"], locate: "cable",
   });
-  addListTab("ipam", I18n.t("tabs.ipam.label"), ListConfigs.ipNetworks, {
+  // IPAM : la page PRINCIPALE de l'onglet est la liste des ADRESSES IP ; les réseaux (sous-réseaux) et les plages
+  // DHCP sont des sous-onglets. Le titre/soustitre réutilisent les libellés « adresses » ; ceux « IPAM — Réseaux IP »
+  // partent au sous-onglet ipnetworks.
+  addListTab("ipam", I18n.t("tabs.ipam.label"), ListConfigs.ipAddresses, {
     icon: Icons.IPAM,
-    title: I18n.t("tabs.ipam.title"), subtitle: I18n.t("tabs.ipam.subtitle"),
-    form: (id, done) => Forms.ipNetwork(store, formHost, id, done), addLabel: I18n.t("app.add.ipNetwork"),
-    links: ["ipaddresses", "dhcpranges"],
+    title: I18n.t("tabs.ipaddresses.title"), subtitle: I18n.t("tabs.ipaddresses.subtitle"),
+    form: (id, done) => Forms.ipAddress(store, formHost, id, done), addLabel: I18n.t("app.add.ipAddress"),
+    links: ["ipnetworks", "dhcpranges"],
   });
 
   // Netmap (GraphView) — « Netmap » est un NOM DE FONCTIONNALITÉ, conservé tel quel dans les deux langues (cf. catalogues).
@@ -630,10 +633,10 @@ async function boot(): Promise<void> {
     subtitle: I18n.t("tabs.cabletypes.subtitle"),
     kind: "secondary", parent: "cables",
   });
-  addListTab("ipaddresses", I18n.t("tabs.ipaddresses.label"), ListConfigs.ipAddresses, {
+  addListTab("ipnetworks", I18n.t("tabs.ipnetworks.label"), ListConfigs.ipNetworks, {
     icon: Icons.IPAM,
-    title: I18n.t("tabs.ipaddresses.title"), subtitle: I18n.t("tabs.ipaddresses.subtitle"),
-    form: (id, done) => Forms.ipAddress(store, formHost, id, done), addLabel: I18n.t("app.add.ipAddress"), kind: "secondary", parent: "ipam",
+    title: I18n.t("tabs.ipam.title"), subtitle: I18n.t("tabs.ipam.subtitle"),
+    form: (id, done) => Forms.ipNetwork(store, formHost, id, done), addLabel: I18n.t("app.add.ipNetwork"), kind: "secondary", parent: "ipam",
   });
   addListTab("salles", I18n.t("tabs.salles.label"), ListConfigs.datacenters, {
     icon: Icons.DATACENTER,

@@ -69,6 +69,9 @@ export const tabs = {
     label: "Types de câble",
     subtitle: "Catalogue STANDARDISÉ (lecture seule). Rattaché à une « famille » de port.",
   },
+  ipnetworks: {
+    label: "Réseaux IP",
+  },
   ipaddresses: {
     label: "Adresses IP",
     title: "Adresses IP statiques",
