@@ -439,7 +439,7 @@ export const certs = {
       display: "Afficher (copier-coller)",
       displayTitle: "Contenu à copier",
       copy: "Copier",
-      copied: "Copié",
+      copied: "Contenu copié dans le presse-papiers",
       notDisplayable: "Format binaire — téléchargement uniquement",
       empty: "Aucun export disponible pour cet objet.",
       title: "Exporter",

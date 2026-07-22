@@ -2309,8 +2309,9 @@ export class CertsAdminView {
     const root = document.createElement("div");
     const bar = document.createElement("div"); bar.style.cssText = "display:flex;align-items:center;gap:10px;margin-bottom:8px";
     const name = document.createElement("span"); name.style.cssText = "font-family:var(--mono);font-size:12px;color:var(--fg-dim)"; name.textContent = artifact.filename;
-    const copy = document.createElement("button"); copy.type = "button"; copy.className = "btn btn-ghost btn-sm"; copy.textContent = I18n.t("certs.admin.export.copy");
-    copy.onclick = () => { void Clipboard.copy(content); Notify.toast(I18n.t("certs.admin.export.copied")); };
+    const copy = document.createElement("button"); copy.type = "button"; copy.className = "btn btn-ghost btn-sm icon-action";
+    copy.title = I18n.t("certs.admin.export.copy"); copy.setAttribute("aria-label", I18n.t("certs.admin.export.copy")); copy.innerHTML = Icons.CLONE;
+    copy.onclick = () => { void Clipboard.copy(content, I18n.t("certs.admin.export.copied")); };   // toast UNIQUE (géré par Clipboard.copy) — plus de doublon
     bar.append(name, copy);
     const ta = document.createElement("textarea"); ta.readOnly = true; ta.value = content;
     // Zone en lecture seule THÉMATISÉE (mêmes variables que les champs `.form-field` : fond/texte/bordure du

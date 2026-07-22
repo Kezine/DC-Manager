@@ -434,7 +434,7 @@ export const certs = {
       display: "Show (copy-paste)",
       displayTitle: "Content to copy",
       copy: "Copy",
-      copied: "Copied",
+      copied: "Content copied to clipboard",
       notDisplayable: "Binary format — download only",
       empty: "No export available for this object.",
       title: "Export",
