@@ -34,7 +34,7 @@ const TRUNK_COLOR = 0x9aa6b8;   // couleur NEUTRE d'un faisceau (il n'a pas UN r
 const MARK_PX = 27;          // rayon ÉCRAN (px) d'un marqueur de waypoint — base SVG (DC_DOT_PX+4 = 9) ×3 (+200 %, lisibilité/cliquabilité au routage) ; modulable par le réglage markerScale
 const OOB_PX = 33;           // rayon ÉCRAN (px) d'un marqueur OOB — base 11 ×3 (idem)
 const DOT_PX = 5;            // rayon ÉCRAN (px) d'une pastille d'extrémité de câble (cf. SVG DC_DOT_PX)
-const BOLT_PX = 9.75;        // demi-taille ÉCRAN (px) d'un éclair power bolt (×3 sur la base 3,25)
+const BOLT_PX = 10;          // demi-taille ÉCRAN (px) d'un éclair power bolt
 // Tailles MONDE (mm) en mode « taille réelle » (opts.markerRealSize) — modulées par markerScale (100 % = valeurs ci-dessous).
 const MARK_MM = 50;          // marqueur de waypoint : 5 cm × 5 cm
 const OOB_MM = 50;           // marqueur OOB : même taille réelle que les waypoints (comportement IDENTIQUE salle / multi-DC)
