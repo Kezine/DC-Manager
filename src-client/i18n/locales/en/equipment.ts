@@ -69,6 +69,7 @@ export const equipment = {
     faceLabel: "{{face}} face",
     noFace: "No faceplate defined. « Edit the faceplate » to import an image and place the ports on it.",
     portsSection: "Ports ({{count}})",
+    energySection: "Power",
     trunkPill: "trunk ×{{n}}",
     lanePill: "lane {{lane}} · {{trunk}}",
     trunkWord: "trunk",

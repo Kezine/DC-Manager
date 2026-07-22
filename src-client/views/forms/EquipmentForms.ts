@@ -2,6 +2,7 @@ import type { Store } from "../../store";
 import { PowerAnalysis } from "../../store";
 import { Icons } from "../../ui/Icons";
 import { PortEditorControls, type PortDraft } from "./PortEditorControls";
+import { EnergyInfo } from "./EnergyInfo";   // bilan énergie (jauge PoE + charges/avertissements) = fiche INFO, pas édition
 import { ImageStore } from "../../data/ImageStore";
 import { FormControls } from "../../ui/FormControls";
 import { ChipsInput, ChipItem } from "../../ui/ChipsInput";
@@ -33,7 +34,7 @@ import {
   DEPTH_PRESETS_MM, EQUIP_DEPTH_DEFAULT_MM, RACK_DEPTH_DEFAULT,
   SPARE_DISK_TYPES, SPARE_CAP_UNITS, SPARE_HDD_INTERFACES, SPARE_HDD_FORMATS, SPARE_HDD_RPM,
   SPARE_TX_FORMS, SPARE_TX_SPEEDS, SPARE_TX_MEDIA,
-  PORT_DIRECTIONS, POWER_LOAD_WARN_FRACTION, POE_CLASSES
+  PORT_DIRECTIONS, POE_CLASSES
 } from "../../domain/constants";
 import { FormUi, ORIENT_OPTS } from "./shared";
 import type { FormHost } from "./shared";
@@ -89,6 +90,19 @@ export class EquipmentForms extends FormBase {
     add(I18n.t("equipment.common.created"), Html.escape(Format.dateTime(eq.created_date)));
     add(I18n.t("equipment.common.updated"), Html.escape(Format.dateTime(eq.updated_date)));
     root.appendChild(grid);
+
+    // ÉNERGIE (consultation) : jauge de budget PoE (source switch marquée PoE) + charges par départ/phase +
+    // avertissements de fiabilité (« non alimenté », SPOF…). DÉPLACÉ ici depuis la modale d'ÉDITION — ce sont des
+    // CALCULS sur l'état enregistré, pas des saisies. Section montrée seulement si un contenu est produit.
+    const energyBox = document.createElement("div"); energyBox.style.cssText = "display:flex;flex-direction:column;gap:8px;";
+    const poeGaugeEl = document.createElement("div");
+    const hasGauge = EnergyInfo.renderPoeGauge(store, eq, poeGaugeEl);
+    if (hasGauge) energyBox.appendChild(poeGaugeEl);
+    const hasPowerLines = EnergyInfo.renderPowerLines(store, eq, energyBox);
+    if (hasGauge || hasPowerLines) {
+      const dE = document.createElement("div"); dE.className = "section-divider"; dE.textContent = I18n.t("equipment.detail.energySection");
+      root.appendChild(dE); root.appendChild(energyBox);
+    }
 
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "equipment", id: eq.id, label: eq.name || "" }, () => host.closeModal?.());
@@ -543,11 +557,8 @@ export class EquipmentForms extends FormBase {
     const poeDeviceI = FormControls.toggle(I18n.t("equipment.equip.poeDevice"), eq ? !!eq.poe_device : false, () => renderPorts(), { block: true, title: I18n.t("equipment.equip.poeDeviceTitle") });
     poeBlock.appendChild(poeDeviceI);
     const poeBudgetI = FormControls.unitNumber((eq && eq.poe_budget_w != null) ? eq.poe_budget_w : "", "W", { min: 0, step: "any" });
-    (poeBudgetI as any)._input.oninput = () => refreshPoeGauge();
     const poeBudgetRow = FormControls.fieldRow(I18n.t("equipment.equip.poeBudgetTotal"), poeBudgetI, I18n.t("equipment.equip.poeBudgetHint"));
-    const poeGaugeEl = document.createElement("div"); poeGaugeEl.className = "gauge-card";
-    const poeGaugeRow = FormControls.fieldRow(I18n.t("equipment.equip.poeGauge"), poeGaugeEl);
-    const poeDetailsRow = FormUi.row2(poeBudgetRow, poeGaugeRow);   // budget + jauge : masqués en bloc si POE off (syncPoe)
+    const poeDetailsRow = poeBudgetRow;   // budget SEUL. La jauge de consommation (consultation) vit dans la modale d'INFO (EnergyInfo). Masqué si POE off / type non-source (syncPoe).
     poeBlock.appendChild(poeDetailsRow);
     root.appendChild(poeBlock);
 
@@ -765,7 +776,6 @@ export class EquipmentForms extends FormBase {
     // PATCH : résumé d'occupation des faisceaux terminés par cet équipement (brins utilisés / capacité).
     const patchInfo = document.createElement("div"); patchInfo.className = "form-hint"; patchInfo.style.marginTop = "6px"; adv.appendChild(patchInfo);
     // POWER : charge par départ/phase (tableau/PDU) + avertissements de fiabilité (SPOF, PSU non câblée…).
-    const powerInfo = document.createElement("div"); powerInfo.style.marginTop = "6px"; adv.appendChild(powerInfo);
 
     const isDraftTrunk = (p: any) => draftPorts.some((c) => c.parent_port_id === p.id);
     const ptKind = (t: any) => (t && t.kind === "power") ? "power" : "data";
@@ -812,7 +822,6 @@ export class EquipmentForms extends FormBase {
     const poePa = new PowerAnalysis(store);
     const poeBudgetTotal = (): number | null => { const v = parseFloat((poeBudgetI as any).value); return isFinite(v) && v >= 0 ? v : null; };
     const poePortLoad = (p: any): number => poePa.poePortLoadW(p, true);   // conso MAX du PD câblé (0 si aucun)
-    const poeLoadW = (): number => draftPorts.filter((p) => PortRoles.isPoe(p.role) && p.direction === "source").reduce((s, p) => s + poePortLoad(p), 0);
     // Libellé du SENS pour la tête compacte : Source/Sink (power), Producteur/Consommateur (poe), « — » sinon.
     const sensLabel = (p: any): string => {
       if (!p.direction) return "—";
@@ -957,9 +966,9 @@ export class EquipmentForms extends FormBase {
         normSel.onchange = () => {
           const v = normSel.value;
           if (v === "custom") { customI.style.display = ""; (customI as any)._input.focus(); }   // saisie libre : pas de re-rendu (garderait le mode)
-          else { const cls = POE_CLASSES.find((c) => c.id === v); p.poe_budget_w = cls ? cls.w : null; customI.style.display = "none"; refreshPoeGauge(); renderPorts(); }
+          else { const cls = POE_CLASSES.find((c) => c.id === v); p.poe_budget_w = cls ? cls.w : null; customI.style.display = "none"; renderPorts(); }
         };
-        (customI as any)._input.oninput = () => { const v = parseFloat((customI as any).value); p.poe_budget_w = isFinite(v) && v >= 0 ? v : null; refreshPoeGauge(); };
+        (customI as any)._input.oninput = () => { const v = parseFloat((customI as any).value); p.poe_budget_w = isFinite(v) && v >= 0 ? v : null; };
         (customI as any)._input.onchange = () => renderPorts();   // au blur : rafraîchit liserés de survente + métriques
         budgetWrap.appendChild(normSel); budgetWrap.appendChild(customI);
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.poeBudget"), budgetWrap, I18n.t("forms.port.poeBudgetHint")));
@@ -989,43 +998,19 @@ export class EquipmentForms extends FormBase {
         else portList.appendChild(portRow(p, "normal"));
       });
       renderPatchInfo();
-      renderPowerInfo();
-      syncPoe();   // T-POE2 (verrou bascule) + jauge de budget, recalculés à chaque re-rendu
+      syncPoe();   // T-POE2 (verrou bascule) + visibilité du budget, recalculés à chaque re-rendu
     };
-    // Panneaux de synthèse (occupation patch / charge+warnings power) : rendus par le module dans leur élément.
+    // Panneau de synthèse (occupation des faisceaux du patch) : rendu par le module dans son élément. Les charges/avertissements power et la jauge PoE sont dans la modale d'INFO (EnergyInfo).
     const renderPatchInfo = () => portControls.renderPatchInfo(patchInfo);
-    const renderPowerInfo = () => portControls.renderPowerInfo(powerInfo);
-    // JAUGE POE (bloc énergie) — `charge / budget total` + reste + état normal/≈80 %/survente. CHARGE = Σ des consos
-    // MAX des PD câblés aux ports PSE (pas les budgets : ce sont des capacités). Reflète le brouillon + le store.
-    const refreshPoeGauge = () => {
-      const total = poeBudgetTotal(), load = poeLoadW();
-      const over = total != null && load > total;
-      const warn = !over && total != null && total > 0 && load >= total * POWER_LOAD_WARN_FRACTION;
-      const pct = (total != null && total > 0) ? Math.min(100, (load / total) * 100) : (load > 0 ? 100 : 0);
-      const rest = total != null ? total - load : null;
-      poeGaugeEl.innerHTML = "";
-      const top = document.createElement("div"); top.className = "gauge-top";
-      const allocS = document.createElement("span"); allocS.className = "alloc" + (over ? " over" : "");
-      allocS.innerHTML = Html.escape(fmtW(load)) + ' <span class="alloc-total">/ ' + Html.escape(total != null ? fmtW(total) : "—") + " W</span>";
-      const restS = document.createElement("span"); restS.className = "rest" + (over ? " over" : "");
-      restS.textContent = rest == null ? "" : (rest >= 0 ? I18n.t("equipment.equip.poeRest", { w: fmtW(rest) }) : I18n.t("equipment.equip.poeOverBy", { w: fmtW(-rest) }));
-      top.appendChild(allocS); top.appendChild(restS);
-      const bar = document.createElement("div"); bar.className = "gauge" + (over ? " over" : warn ? " warn" : "");
-      const fill = document.createElement("div"); fill.className = "gauge-fill"; fill.style.width = pct + "%"; bar.appendChild(fill);
-      const st = document.createElement("div"); st.className = "gauge-state " + (over ? "over" : warn ? "warn" : "ok");
-      st.textContent = I18n.t(over ? "equipment.equip.poeStateOver" : warn ? "equipment.equip.poeStateWarn" : "equipment.equip.poeStateOk");
-      poeGaugeEl.appendChild(top); poeGaugeEl.appendChild(bar); poeGaugeEl.appendChild(st);
-    };
-    // T-POE2 (verrou de bascule) + visibilité budget/jauge — recalculés à chaque re-rendu des ports.
+    // T-POE2 (verrou de bascule) + visibilité du budget — recalculés à chaque re-rendu des ports.
     const syncPoe = () => {
       const hasPoe = draftPorts.some((p) => PortRoles.isPoe(p.role));
       (poeDeviceI as any).disabled = hasPoe;   // ne peut plus être désactivée tant qu'un port POE existe
       poeDeviceI.title = hasPoe ? I18n.t("equipment.equip.poeDeviceLocked") : I18n.t("equipment.equip.poeDeviceTitle");
       const on = (poeDeviceI as any).checked;
-      // Budget total + jauge = capacité de SOURCE (PSE) → switch uniquement. Les autres types PoE ne font que
+      // Budget total (saisie) = capacité de SOURCE (PSE) → switch uniquement. Les autres types PoE ne font que
       // consommer (PD) : la conso vit dans les champs Consommation (W), pas dans un budget de fourniture.
       poeDetailsRow.style.display = (on && EquipmentTypes.isPoeSource(typeI.value)) ? "" : "none";
-      refreshPoeGauge();
     };
     addAggBtn.onclick = () => { draftAggs.push({ id: Id.uid(), name: "", description: "" }); renderAggs(); renderPorts(); };
     addPortBtn.onclick = () => { const firstPt: any = store.all("portTypes").find((t: any) => ptKind(t) !== "power") || store.all("portTypes")[0]; draftPorts.push({ id: Id.uid(), name: "", port_type_id: firstPt ? firstPt.id : null, role: "data", aggregate_id: null, description: "" }); renderPorts(); };
@@ -1054,7 +1039,7 @@ export class EquipmentForms extends FormBase {
       pduRow.style.display = EquipmentTypes.hasPowerCapacity(typeI.value) ? "" : "none";
       consoRow.style.display = EquipmentTypes.consumes(typeI.value) ? "" : "none";
       poeBlock.style.display = EquipmentTypes.canPoe(typeI.value) ? "" : "none";
-      syncPoe();   // budget total + jauge = capacité de SOURCE (switch) uniquement + verrou de bascule
+      syncPoe();   // budget (saisie) = capacité de SOURCE (switch) uniquement + verrou de bascule
     };
     dimI.addEventListener("change", sync); typeI.addEventListener("change", sync);
     // changer de type (→/depuis patch_panel) bascule l'affichage brins ↔ agrégat des ports. Passer À « patch »

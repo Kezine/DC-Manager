@@ -1,5 +1,4 @@
 import type { Store } from "../../store";
-import { PowerAnalysis } from "../../store";
 import { FormControls } from "../../ui/FormControls";
 import { Notify } from "../../ui/Notify";
 import { Normalize } from "../../core/Normalize";
@@ -153,22 +152,5 @@ export class PortEditorControls {
     const bundles = this.isPatch() ? this.patchBundles() : [];
     if (!bundles.length) { el.textContent = this.isPatch() ? I18n.t("forms.port.noPatchBundle") : ""; return; }
     el.textContent = I18n.t("forms.port.bundlesPrefix") + bundles.map((b: any) => { const o = this.store.bundleOccupancy(b.id); return I18n.t("forms.port.bundleUsage", { name: b.name || I18n.t("lists.ph.bundle"), used: o.used, capacity: o.capacity }); }).join(" · ");
-  }
-
-  /** Charge par départ/phase + avertissements de fiabilité (SPOF, PSU non câblée…) → dans `el`. Reflète le STORE. */
-  renderPowerInfo(el: HTMLElement): void {
-    el.innerHTML = "";
-    const eq = this.host.equipment; if (!eq) return;
-    const pa = new PowerAnalysis(this.store);
-    const line = (txt: string, warn?: boolean) => { const d = document.createElement("div"); d.className = "form-hint"; if (warn) d.style.color = "var(--danger, #c0392b)"; d.textContent = txt; el.appendChild(d); };
-    const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
-    const deps = pa.departLoads(eq.id);
-    if (deps.length) {
-      line(I18n.t("forms.port.departs", { list: deps.map((d) => { const p: any = this.store.get("ports", d.key); return (p && p.name ? p.name : "?") + " " + fmt(d.usedA) + "/" + (d.capacityA != null ? d.capacityA : "?") + " A" + (d.overloaded ? " ⛔" : d.warn ? " ⚠" : ""); }).join(" · ") }));
-      const phs = pa.phaseLoads(eq.id).filter((x) => x.key !== "?");
-      if (phs.length) line(I18n.t("forms.port.phases", { list: phs.map((x) => x.key + " " + fmt(x.usedA) + "/" + (x.capacityA != null ? x.capacityA : "?") + " A" + (x.overloaded ? " ⛔" : x.warn ? " ⚠" : "")).join(" · ") }));
-    }
-    // origin_unknown = info (redondance non vérifiable), pas un danger avéré → icône + sévérité moindres (cf. PowerAnalysis.isInfo).
-    for (const w of pa.equipmentWarnings(eq.id)) { const info = PowerAnalysis.isInfo(w.code); line((info ? "ℹ " : "⚠ ") + w.message, !info); }
   }
 }

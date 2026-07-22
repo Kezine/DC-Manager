@@ -75,6 +75,7 @@ export const equipment = {
     faceLabel: "Face {{face}}",
     noFace: "Aucune façade définie. « Éditer la façade » pour importer une image et y placer les ports.",
     portsSection: "Ports ({{count}})",
+    energySection: "Énergie",
     trunkPill: "trunk ×{{n}}",
     lanePill: "lane {{lane}} · {{trunk}}",
     trunkWord: "trunk",
