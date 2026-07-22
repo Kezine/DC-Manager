@@ -261,6 +261,16 @@ module.exports = async () => {
     ck.eq(PortRoles.label(""), "—", "PortRoles.label(vide) → —");
     ck.eq(EquipFaces.label("__inconnu__"), "Avant", "EquipFaces.label(inconnu) → Avant");
     ck.eq(EquipmentTypes.label(""), "—", "EquipmentTypes.label(vide) → —");
+    // matrice ÉNERGIE par type (modale caméléon) : PoE, source PoE, capacité (A), consommation
+    ck(EquipmentTypes.canPoe("switch") && EquipmentTypes.canPoe("camera") && EquipmentTypes.canPoe("server"), "canPoe : switch/camera/server → vrai");
+    ck(!EquipmentTypes.canPoe("pdu") && !EquipmentTypes.canPoe("switchboard") && !EquipmentTypes.canPoe("ups") && !EquipmentTypes.canPoe("patch_panel"), "canPoe : pdu/switchboard/ups/patch → faux (infra énergie)");
+    ck(EquipmentTypes.canPoe("__inconnu__"), "canPoe : id inconnu → other (vrai)");
+    ck(EquipmentTypes.isPoeSource("switch"), "isPoeSource : switch → vrai");
+    ck(!EquipmentTypes.isPoeSource("camera") && !EquipmentTypes.isPoeSource("server") && !EquipmentTypes.isPoeSource("__inconnu__"), "isPoeSource : non-switch → faux");
+    ck(EquipmentTypes.hasPowerCapacity("pdu") && EquipmentTypes.hasPowerCapacity("switchboard"), "hasPowerCapacity : pdu/switchboard → vrai");
+    ck(!EquipmentTypes.hasPowerCapacity("switch") && !EquipmentTypes.hasPowerCapacity("ups"), "hasPowerCapacity : switch/ups → faux");
+    ck(!EquipmentTypes.consumes("switchboard"), "consumes : switchboard → faux (il fournit)");
+    ck(EquipmentTypes.consumes("switch") && EquipmentTypes.consumes("pdu") && EquipmentTypes.consumes("__inconnu__"), "consumes : switch/pdu/other → vrai");
   }
   });
 

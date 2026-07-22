@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DC Manager — Modale d'édition d'équipement · maquette</title>
+<style>
+:root{
+  --bg:#0a0a0a;--bg-2:#111111;--bg-3:#161616;--line:#222222;--line-2:#2d2d2d;
+  --fg:#e8e8e8;--fg-dim:#9a9aa2;--fg-dimmer:#555555;
+  --accent-fill:oklch(0.67 0.19 46);--accent:oklch(0.72 0.175 50);--accent-text:oklch(0.80 0.15 62);--accent-2:#ffaa00;
+  --ok:oklch(0.76 0.15 152);--warn:oklch(0.82 0.14 88);--err:oklch(0.66 0.19 27);--info:oklch(0.72 0.12 240);
+  --role-mgmt:oklch(0.74 0.13 236);--role-data:oklch(0.76 0.15 152);--role-power:oklch(0.77 0.15 68);--role-poe:oklch(0.82 0.15 102);
+  --focus:var(--accent-text);--radius-pill:5px;--control-h:36px;--grid-size:24px;
+  --mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+html[data-theme="light"]{
+  --bg:#f4f4f1;--bg-2:#ffffff;--bg-3:#ebebe6;--line:#d6d6d0;--line-2:#b8b8b0;
+  --fg:#0a0a0a;--fg-dim:#555555;--fg-dimmer:#888888;
+  --accent-fill:oklch(0.57 0.18 42);--accent:oklch(0.58 0.17 45);--accent-text:oklch(0.55 0.18 45);--accent-2:#aa6600;
+  --ok:oklch(0.52 0.14 152);--warn:oklch(0.60 0.13 78);--err:oklch(0.53 0.19 27);--info:oklch(0.50 0.15 250);
+  --role-mgmt:oklch(0.50 0.13 250);--role-data:oklch(0.52 0.14 152);--role-power:oklch(0.53 0.13 60);--role-poe:oklch(0.54 0.14 102);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.4;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:var(--grid-size) var(--grid-size);background-position:-1px -1px;
+}
+html[data-theme="light"] body{background-image:linear-gradient(rgba(0,0,0,0.045) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,0.045) 1px,transparent 1px)}
+.wrap{max-width:1080px;margin:0 auto;padding:32px 24px 96px}
+a{color:var(--accent-text);text-decoration:none}
+a:hover{text-decoration:underline}
+code{font-family:var(--mono);font-size:.92em;background:var(--bg-3);border:1px solid var(--line);padding:0 4px;border-radius:3px;color:var(--fg-dim)}
+
+/* ---- doc chrome ---- */
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:28px;flex-wrap:wrap}
+.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-text)}
+h1{font-size:22px;letter-spacing:.01em;margin:4px 0 0}
+.lede{font-family:var(--sans);color:var(--fg-dim);max-width:66ch;margin:10px 0 0;line-height:1.55}
+.theme-btn{background:var(--bg-2);color:var(--fg);border:1px solid var(--line-2);padding:8px 14px;font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+.theme-btn:hover{border-color:var(--fg)}
+section{margin-top:48px}
+.sec-h{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line-2);padding-bottom:8px;margin-bottom:16px;flex-wrap:wrap}
+.sec-n{font-size:11px;color:var(--accent-text);letter-spacing:.1em}
+.sec-t{font-size:14px;letter-spacing:.08em;text-transform:uppercase}
+.note{font-family:var(--sans);color:var(--fg-dim);font-size:12.5px;line-height:1.55;max-width:74ch;margin:0 0 18px}
+.state-tag{display:inline-flex;align-items:center;gap:6px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dimmer);border:1px solid var(--line-2);border-radius:3px;padding:2px 7px;margin-left:auto;white-space:nowrap}
+.state-tag b{color:var(--fg-dim);font-weight:600}
+
+/* ---- boutons / pills ---- */
+.btn{background:var(--bg-2);color:var(--fg);border:1px solid var(--line-2);padding:8px 16px;font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:8px}
+.btn:hover{border-color:var(--fg);background:var(--bg-3)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-sm{padding:5px 11px;font-size:10px}
+.btn-primary{background:var(--accent-fill);color:#000;border-color:var(--accent-fill);font-weight:600}
+.btn-primary:hover{background:var(--accent-2);border-color:var(--accent-2)}
+.btn svg,.gi svg{width:14px;height:14px;display:block}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:var(--radius-pill);border:1px solid var(--line-2);background:var(--bg-3);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dim);white-space:nowrap}
+.pill svg{width:11px;height:11px}
+
+/* ---- bascule pilule / segmented ---- */
+.toggle-pill{display:inline-flex;align-items:center;gap:8px;border-radius:999px;background:var(--bg-2);border:1px solid var(--line-2);color:var(--fg-dim);padding:7px 14px;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+.toggle-pill .tgl-dot{width:9px;height:9px;border-radius:50%;flex:none;border:1.5px solid var(--fg-dimmer);background:transparent;transition:all .15s}
+.toggle-pill.active{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 13%,transparent)}
+.toggle-pill.active .tgl-dot{background:var(--accent);border-color:var(--accent);box-shadow:0 0 6px color-mix(in srgb,var(--accent) 70%,transparent)}
+.toggle-pill.full{display:flex;width:100%;justify-content:flex-start}
+.rm-toggle{display:inline-flex;border:1px solid var(--line-2);border-radius:5px;overflow:hidden;height:36px}
+.rm-toggle button{background:transparent;border:none;cursor:pointer;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:0 13px;color:var(--fg-dim);display:flex;align-items:center;gap:6px}
+.rm-toggle button+button{border-left:1px solid var(--line-2)}
+.rm-toggle button.on{background:var(--bg-3);color:var(--accent-text)}
+.rm-toggle button:not(.on):hover{color:var(--fg);background:var(--bg-2)}
+.rm-toggle button:disabled{opacity:.45;cursor:not-allowed}
+
+/* ---- modale (Modal standard, sortie de l'overlay pour l'aperçu) ---- */
+.stage{display:flex;justify-content:center}
+.modal{width:100%;max-width:720px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:10px;display:flex;flex-direction:column;box-shadow:0 24px 70px rgba(0,0,0,.5);overflow:hidden}
+.modal.wide{max-width:820px}
+.modal.short{max-width:560px}
+.modal-header{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bg-3);flex:0 0 auto}
+.modal-header-left{display:flex;align-items:center;gap:11px;min-width:0}
+.modal-titles{display:flex;flex-direction:column;gap:2px;min-width:0}
+.modal-title{font-size:12px;letter-spacing:.15em;text-transform:uppercase;font-weight:700}
+.modal-title span{color:var(--accent-text)}
+.modal-subtitle{font-size:10px;letter-spacing:.06em;color:var(--fg-dimmer);font-weight:400}
+.modal-close{width:28px;height:28px;flex:none;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line-2);border-radius:6px;color:var(--fg-dim);cursor:pointer}
+.modal-close:hover{color:var(--fg);border-color:var(--fg)}
+.modal-close svg{width:15px;height:15px}
+.modal-body{padding:20px;display:flex;flex-direction:column;gap:14px;max-height:none}
+.modal-footer{padding:13px 18px;border-top:1px solid var(--line);background:var(--bg-3);display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.modal-meta{font-size:10px;letter-spacing:.04em;color:var(--fg-dimmer);margin-right:auto}
+.modal-footer .spacer{flex:1}
+
+/* icône de type d'équipement */
+.eq-ico{width:28px;height:28px;border-radius:7px;flex:none;display:inline-flex;align-items:center;justify-content:center;border:1px solid}
+.eq-ico svg{width:16px;height:16px}
+
+/* ---- champs ---- */
+.form-row{display:flex;gap:14px}
+.form-row>.form-field{flex:1;min-width:0}
+.form-field>label{display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dim);margin-bottom:5px}
+.form-field input[type=text],.form-field input[type=number],.form-field input[type=date],.form-field textarea,.form-field select{width:100%;height:36px;box-sizing:border-box;background:var(--bg);border:1px solid var(--line-2);color:var(--fg);font-family:var(--mono);font-size:13px;padding:0 10px;outline:none;transition:border-color .15s}
+.form-field select{padding-right:6px}
+.form-field textarea{height:auto;min-height:62px;padding:8px 10px;line-height:1.5;resize:vertical}
+.form-field input:focus,.form-field textarea:focus,.form-field select:focus{border-color:var(--accent)}
+.form-field.invalid input,.form-field.invalid select{border-color:var(--err)}
+.form-field.invalid>label{color:var(--err)}
+.field-error{font-size:10px;color:var(--err);margin-top:4px;letter-spacing:.03em}
+.form-hint{font-family:var(--sans);font-size:10.5px;color:var(--fg-dimmer);margin-top:4px;letter-spacing:.02em;line-height:1.4}
+.form-hint.warn{color:var(--warn)}
+.unit-inp{display:flex;height:36px;box-sizing:border-box;align-items:stretch;border:1px solid var(--line-2);background:var(--bg)}
+.unit-inp:focus-within{border-color:var(--accent)}
+.unit-inp.err{border-color:var(--err)}
+.unit-inp input{flex:1;min-width:0;border:none;background:transparent;color:var(--fg);font-family:var(--mono);font-size:13px;padding:0 10px;outline:none}
+.unit-inp .u{display:flex;align-items:center;padding:0 11px;border-left:1px solid var(--line-2);color:var(--fg-dim);font-size:11px;letter-spacing:.04em;background:var(--bg-3)}
+.sel-color{display:flex;align-items:center;gap:8px}
+.sel-color .swatch{width:12px;height:12px;border-radius:3px;flex:none;border:1px solid rgba(128,128,128,.4)}
+.sel-color select{flex:1}
+
+.section-divider{margin:8px 0 -2px;padding-top:15px;border-top:1px solid var(--line);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-text);display:flex;align-items:center;gap:9px}
+.section-divider .sd-hint{margin-left:auto;color:var(--fg-dimmer);letter-spacing:.04em;text-transform:none;font-family:var(--sans);font-size:11px}
+
+/* chips (groupes secondaires) */
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--bg);border:1px solid var(--line-2);padding:6px 8px;min-height:36px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--line-2);background:var(--bg-3);color:var(--fg)}
+.chip .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.chip .x{cursor:pointer;color:var(--fg-dimmer);display:inline-flex}
+.chip .x:hover{color:var(--fg)}
+.chip .x svg{width:11px;height:11px}
+.chips input{flex:1;min-width:90px;border:none;background:transparent;color:var(--fg);font-family:var(--mono);font-size:12px;outline:none;height:24px}
+.chips input::placeholder{color:var(--fg-dimmer)}
+
+/* jauge POE */
+.gauge-card{display:flex;flex-direction:column;gap:7px}
+.gauge-top{display:flex;justify-content:space-between;align-items:baseline;font-size:11px}
+.gauge-top .alloc{font-size:15px}
+.gauge-top .rest{color:var(--fg-dim)}
+.gauge{position:relative;height:9px;border-radius:999px;background:var(--bg-3);border:1px solid var(--line-2);overflow:hidden}
+.gauge-fill{height:100%;background:var(--role-poe)}
+.gauge.warn .gauge-fill{background:var(--warn)}
+.gauge.over{border-color:var(--err)}
+.gauge.over .gauge-fill{background:repeating-linear-gradient(45deg,var(--err),var(--err) 6px,color-mix(in srgb,var(--err) 55%,#000) 6px,color-mix(in srgb,var(--err) 55%,#000) 12px)}
+
+/* bloc énergie encadré */
+.energy-block{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:14px 16px;display:flex;flex-direction:column;gap:14px}
+.poe-sub{padding-top:14px;border-top:1px dashed var(--line-2);display:flex;flex-direction:column;gap:14px}
+
+/* façade */
+.faces{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.face-thumb{width:104px;height:66px;border:1px solid var(--line-2);border-radius:6px;background:var(--bg-3);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.face-strip{position:absolute;inset:14px 8px auto 8px;height:14px;display:flex;gap:3px}
+.face-strip i{flex:1;background:var(--role-data);opacity:.55;border-radius:1px}
+.face-thumb .flbl{position:absolute;left:0;right:0;bottom:0;font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;text-align:center;background:rgba(0,0,0,.55);color:#e8e8e8;padding:2px}
+html[data-theme="light"] .face-thumb .flbl{background:rgba(0,0,0,.4)}
+.face-empty{color:var(--fg-dimmer);font-size:11px}
+
+/* section ports (place seulement — hors scope) */
+.ports-place{border:1px dashed var(--line-2);border-radius:8px;background:var(--bg);padding:12px 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.ports-place .pp-schema{display:flex;gap:3px;flex:1;min-width:120px}
+.ports-place .pp-schema i{width:9px;height:16px;border-radius:1px;background:var(--line-2)}
+.ports-place .pp-schema i.d{background:var(--role-data);opacity:.6}
+.ports-place .pp-schema i.p{background:var(--role-poe);opacity:.75}
+.ports-place .pp-lbl{font-size:11px;color:var(--fg-dim);letter-spacing:.04em}
+
+/* rappel de troncature (inventaire seul) */
+.trunc-note{display:flex;align-items:flex-start;gap:10px;border-left:2px solid var(--accent);background:var(--bg);padding:12px 14px;border-radius:0 6px 6px 0;font-family:var(--sans);font-size:12px;color:var(--fg-dim);line-height:1.5}
+.trunc-note svg{width:15px;height:15px;flex:none;margin-top:1px;color:var(--accent-text)}
+.hint-strip{display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid var(--line-2);border-radius:6px;background:var(--bg);color:var(--fg-dim);font-family:var(--sans);font-size:11.5px}
+.hint-strip svg{width:14px;height:14px;flex:none;color:var(--fg-dimmer)}
+
+/* comparateur énergie */
+.energy-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
+.ecard{border:1px solid var(--line);border-radius:8px;background:var(--bg-2);overflow:hidden;display:flex;flex-direction:column}
+.ecard-h{display:flex;align-items:center;gap:9px;padding:10px 13px;border-bottom:1px solid var(--line-2);background:var(--bg-3)}
+.ecard-h .name{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg)}
+.ecard-h .en{font-size:9.5px;color:var(--fg-dimmer);margin-left:auto}
+.ecard-b{padding:13px;display:flex;flex-direction:column;gap:11px}
+.ecard-b .form-field>label{margin-bottom:4px}
+.emini{font-family:var(--sans);font-size:11px;color:var(--fg-dimmer);line-height:1.4}
+
+/* deux sous-formulaires de placement côte à côte */
+.placement-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.pcol{border:1px solid var(--line);border-radius:8px;background:var(--bg-2);overflow:hidden}
+.pcol-h{padding:10px 13px;border-bottom:1px solid var(--line-2);background:var(--bg-3);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-text)}
+.pcol-b{padding:14px;display:flex;flex-direction:column;gap:12px}
+
+.callout{border-left:2px solid var(--accent);background:var(--bg-2);padding:14px 16px;border-radius:0 6px 6px 0;font-family:var(--sans);font-size:12.5px;line-height:1.6;color:var(--fg-dim)}
+.callout b{color:var(--fg)}
+.legend-types{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.tchip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px 3px 5px;border-radius:6px;border:1px solid var(--line-2);background:var(--bg-2);font-size:10.5px;color:var(--fg-dim)}
+.tchip .eq-ico{width:20px;height:20px;border-radius:5px}
+.tchip .eq-ico svg{width:12px;height:12px}
+
+@media(max-width:720px){.placement-cols{grid-template-columns:1fr}}
+@media(max-width:560px){
+  .wrap{padding:20px 14px 72px}
+  .modal-body{padding:16px}
+  .form-row{flex-direction:column;gap:14px}
+  .energy-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div>
+      <div class="eyebrow">Carton — modale d'édition d'équipement</div>
+      <h1>Modale « caméléon » — variations conditionnelles</h1>
+    </div>
+    <button class="theme-btn" id="themeBtn" type="button">◑ Thème clair</button>
+  </div>
+  <p class="lede">La modale d'édition d'un équipement (<code>Modal</code> standard, <code>wide</code>, une colonne)
+  change radicalement de contenu selon le <b>type</b>, le <b>dimensionnement</b> et le <b>mode de placement</b>.
+  Cette maquette couvre la matrice d'états du §4 : le bloc énergie par type (§3.A), deux modales complètes
+  (switch PoE en baie · caméra libre sur plan d'étage), l'état « inventaire seul », les sous-formulaires de
+  placement libre (§3.D) et la façade (§3.E). Chrome et primitives repris de <code>dc-manager.css</code>
+  (<code>form-field</code>, <code>.toggle-pill</code>, <code>.rm-toggle</code>, chips, jauge POE).</p>
+
+  <div class="legend-types">
+    <span class="tchip"><span class="eq-ico" style="border-color:var(--role-mgmt);color:var(--role-mgmt)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="1.5"/><path d="M6 12h.01M10 12h.01M14 12h4"/></svg></span>switch</span>
+    <span class="tchip"><span class="eq-ico" style="border-color:oklch(0.72 0.13 300);color:oklch(0.72 0.13 300)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 8a2 2 0 0 1 2-2h3l2-2h6l2 2h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><circle cx="12" cy="12" r="3.2"/></svg></span>camera</span>
+    <span class="tchip"><span class="eq-ico" style="border-color:var(--role-power);color:var(--role-power)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M8 7h.01M8 11h.01M8 15h.01M12 7h4M12 11h4M12 15h4"/></svg></span>pdu</span>
+    <span class="tchip"><span class="eq-ico" style="border-color:oklch(0.70 0.16 40);color:oklch(0.70 0.16 40)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M13 8l-4 5h3l-1 4 4-5h-3z" fill="currentColor" stroke="none"/></svg></span>switchboard</span>
+    <span class="tchip"><span class="eq-ico" style="border-color:oklch(0.74 0.12 190);color:oklch(0.74 0.12 190)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1.5"/><path d="M11 9l-2 3h2.5l-.5 3 3-4h-2.5z" fill="currentColor" stroke="none"/><path d="M18 10v4"/></svg></span>ups</span>
+  </div>
+
+  <!-- ============ §3.A — ÉNERGIE SELON LE TYPE ============ -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§3.A</span><span class="sec-t">Bloc énergie selon le type</span>
+      <span class="state-tag"><b>variation transverse</b> · admin/énergie</span></div>
+    <p class="note">Le cœur de la modale caméléon : le bloc énergie (dans la zone administrative) montre des champs
+    différents selon le type. Un <b>tableau électrique fournit</b> l'énergie (capacité A, aucune conso) ; un
+    <b>switch consomme</b> (conso W) et peut être <b>PoE</b> (bascule + budget + jauge). Comparatif des cinq cas :</p>
+    <div class="energy-grid">
+      <div class="ecard">
+        <div class="ecard-h"><span class="eq-ico" style="border-color:var(--role-mgmt);color:var(--role-mgmt)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="1.5"/><path d="M6 12h.01M10 12h.01M14 12h4"/></svg></span><span class="name">switch / serveur / AP…</span><span class="en">switch</span></div>
+        <div class="ecard-b">
+          <div class="form-row">
+            <div class="form-field"><label>Conso nominale</label><div class="unit-inp"><input type="text" value="240"><span class="u">W</span></div></div>
+            <div class="form-field"><label>Conso max</label><div class="unit-inp"><input type="text" value="380"><span class="u">W</span></div></div>
+          </div>
+          <p class="emini">Bloc PoE en option (cf. cas dédié).</p>
+        </div>
+      </div>
+      <div class="ecard">
+        <div class="ecard-h"><span class="eq-ico" style="border-color:var(--role-power);color:var(--role-power)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M8 7h.01M8 11h.01M8 15h.01M12 7h4M12 11h4M12 15h4"/></svg></span><span class="name">PDU / bandeau</span><span class="en">pdu</span></div>
+        <div class="ecard-b">
+          <div class="form-field"><label>Capacité max</label><div class="unit-inp"><input type="text" value="32"><span class="u">A</span></div></div>
+          <div class="form-row">
+            <div class="form-field"><label>Conso nom.</label><div class="unit-inp"><input type="text" value="12"><span class="u">W</span></div></div>
+            <div class="form-field"><label>Conso max</label><div class="unit-inp"><input type="text" value="18"><span class="u">W</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="ecard">
+        <div class="ecard-h"><span class="eq-ico" style="border-color:oklch(0.70 0.16 40);color:oklch(0.70 0.16 40)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M13 8l-4 5h3l-1 4 4-5h-3z" fill="currentColor" stroke="none"/></svg></span><span class="name">Tableau électrique</span><span class="en">switchboard</span></div>
+        <div class="ecard-b">
+          <div class="form-field"><label>Capacité max</label><div class="unit-inp"><input type="text" value="63"><span class="u">A</span></div></div>
+          <div class="hint-strip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>Racine d'alimentation — <b style="color:var(--fg-dim);font-weight:600;margin:0 4px">il fournit</b>, aucune conso.</div>
+        </div>
+      </div>
+      <div class="ecard">
+        <div class="ecard-h"><span class="eq-ico" style="border-color:oklch(0.74 0.12 190);color:oklch(0.74 0.12 190)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1.5"/><path d="M11 9l-2 3h2.5l-.5 3 3-4h-2.5z" fill="currentColor" stroke="none"/><path d="M18 10v4"/></svg></span><span class="name">Onduleur (UPS)</span><span class="en">ups</span></div>
+        <div class="ecard-b">
+          <div class="form-field"><label>Consommation</label><div class="unit-inp"><input type="text" value="45"><span class="u">W</span></div></div>
+          <p class="emini">Énergie simple : ni capacité A ni PoE.</p>
+        </div>
+      </div>
+      <div class="ecard" style="border-color:var(--role-poe)">
+        <div class="ecard-h" style="border-color:color-mix(in srgb,var(--role-poe) 40%,var(--line-2))"><span class="eq-ico" style="border-color:var(--role-poe);color:var(--role-poe)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></span><span class="name">Switch PoE</span><span class="en">bloc PoE</span></div>
+        <div class="ecard-b">
+          <button class="toggle-pill active" type="button" aria-pressed="true"><span class="tgl-dot"></span>Équipement PoE</button>
+          <div class="form-field"><label>Budget PoE total</label><div class="unit-inp"><input type="text" value="90"><span class="u">W</span></div></div>
+          <div class="gauge-card">
+            <div class="gauge-top"><span class="alloc">68&nbsp;<span style="font-size:11px;color:var(--fg-dim)">/ 90 W</span></span><span class="rest">reste 22 W</span></div>
+            <div class="gauge"><div class="gauge-fill" style="width:75%"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:18px"><b>Bloc PoE = celui du carton port-editor-poe (§3.2), repris tel quel.</b>
+    Bascule <code>.toggle-pill</code> « Équipement PoE » + budget total + jauge de budget (charge des PD / budget).
+    États de la jauge — normal, ≈80 %, survente — décrits dans ce carton dédié.</div>
+  </section>
+
+  <!-- ============ §4.1 — SWITCH PoE EN U, EN BAIE (flagship) ============ -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§4.1 · 4.4</span><span class="sec-t">Switch PoE en U, placé en baie</span>
+      <span class="state-tag"><b>cas complet</b> · toutes sections</span></div>
+    <p class="note">Le cas le plus courant et le plus riche : identité, énergie <b>avec bloc PoE</b>, groupes,
+    description, dimensions <b>En U</b>, placement <b>rack</b>, façade avec faces définies, place de l'éditeur de
+    ports. Sert de référence de structure ; les autres états en sont des variantes tronquées.</p>
+    <div class="stage">
+      <div class="modal wide">
+        <div class="modal-header">
+          <div class="modal-header-left">
+            <span class="eq-ico" style="border-color:var(--role-mgmt);color:var(--role-mgmt)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="1.5"/><path d="M6 12h.01M10 12h.01M14 12h4"/></svg></span>
+            <div class="modal-titles">
+              <div class="modal-title">Modifier un <span>équipement</span></div>
+              <div class="modal-subtitle">SW-CORE-01 · switch</div>
+            </div>
+          </div>
+          <button class="modal-close" type="button" aria-label="Fermer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+        <div class="modal-body">
+          <!-- identité -->
+          <div class="form-row">
+            <div class="form-field"><label>Nom</label><input type="text" value="SW-CORE-01"></div>
+            <div class="form-field"><label>Type</label>
+              <div class="sel-color"><span class="eq-ico" style="width:24px;height:24px;border-color:var(--role-mgmt);color:var(--role-mgmt)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="1.5"/><path d="M6 12h.01M10 12h.01M14 12h4"/></svg></span>
+                <select><option>Switch</option><option>Serveur</option><option>Onduleur (UPS)</option><option>Caméra IP</option></select></div></div>
+          </div>
+          <button class="toggle-pill full" type="button" aria-pressed="false"><span class="tgl-dot"></span>Inventaire seul (non placé)</button>
+          <div class="form-row">
+            <div class="form-field"><label>Marque</label><input type="text" value="Cisco"></div>
+            <div class="form-field"><label>Modèle</label><input type="text" value="Catalyst 9300"></div>
+            <div class="form-field"><label>N° de série</label><input type="text" value="FCW2245A1BC"></div>
+          </div>
+
+          <!-- administratif + énergie -->
+          <div class="section-divider">Administratif &amp; énergie</div>
+          <div class="form-row">
+            <div class="form-field"><label>Date d'achat</label><input type="date" value="2024-03-12"></div>
+            <div class="form-field"><label>Fin de garantie</label><input type="date" value="2027-03-12"></div>
+            <div class="form-field"><label>Attribué à</label><input type="text" value="Prod / Datacenter A"></div>
+          </div>
+          <div class="energy-block">
+            <div class="form-row">
+              <div class="form-field"><label>Conso nominale</label><div class="unit-inp"><input type="text" value="240"><span class="u">W</span></div></div>
+              <div class="form-field"><label>Conso max</label><div class="unit-inp"><input type="text" value="380"><span class="u">W</span></div></div>
+            </div>
+            <div class="poe-sub">
+              <div class="form-row" style="align-items:flex-end">
+                <div class="form-field" style="flex:0 0 auto"><label>Capacité PoE</label>
+                  <button class="toggle-pill active" type="button" aria-pressed="true"><span class="tgl-dot"></span>Équipement PoE</button></div>
+                <div class="form-field" style="flex:0 0 150px"><label>Budget PoE total</label><div class="unit-inp"><input type="text" value="90"><span class="u">W</span></div></div>
+                <div class="form-field"><label>Compteur de budget</label>
+                  <div class="gauge-card"><div class="gauge-top"><span class="alloc">68&nbsp;<span style="font-size:11px;color:var(--fg-dim)">/ 90 W</span></span><span class="rest">reste 22 W</span></div><div class="gauge"><div class="gauge-fill" style="width:75%"></div></div></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- groupes -->
+          <div class="section-divider">Groupes</div>
+          <div class="form-row">
+            <div class="form-field"><label>Groupe primaire <span style="color:var(--fg-dimmer);text-transform:none;letter-spacing:0">(pilote la couleur)</span></label>
+              <div class="sel-color"><span class="swatch" style="background:var(--role-mgmt)"></span><select><option>Réseau — Cœur</option><option>Réseau — Accès</option><option>Prod</option></select></div></div>
+            <div class="form-field"><label>Groupes secondaires</label>
+              <div class="chips">
+                <span class="chip"><span class="dot" style="background:var(--role-data)"></span>PoE-caméras<span class="x"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></span></span>
+                <span class="chip"><span class="dot" style="background:var(--role-power)"></span>Critique<span class="x"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></span></span>
+                <input placeholder="Rechercher un groupe…">
+              </div></div>
+          </div>
+
+          <!-- description -->
+          <div class="form-field"><label>Description</label><textarea>Switch cœur redondé, alimente 24 caméras PoE du bâtiment A.</textarea></div>
+
+          <!-- dimensions En U -->
+          <div class="section-divider">Dimensions<span class="sd-hint">masqué si « inventaire seul »</span></div>
+          <div class="form-row">
+            <div class="form-field"><label>Dimensionnement</label>
+              <div class="rm-toggle" role="group"><button type="button" class="on">En U (rack)</button><button type="button">Libre (mm)</button></div></div>
+            <div class="form-field"><label>Hauteur</label><div class="unit-inp"><input type="text" value="1"><span class="u">U</span></div></div>
+            <div class="form-field"><label>Profondeur</label>
+              <div class="rm-toggle" role="group"><button type="button">600</button><button type="button" class="on">800</button><button type="button">1000</button><button type="button">mm…</button></div></div>
+          </div>
+          <div class="form-row">
+            <div class="form-field"><label>Occupe les deux faces</label>
+              <button class="toggle-pill" type="button" aria-pressed="false"><span class="tgl-dot"></span>Non — face avant</button></div>
+            <div class="form-field"><label>Largeur du boîtier</label><div class="unit-inp"><input type="text" value="" placeholder="pleine largeur 19″"><span class="u">mm</span></div>
+              <p class="form-hint">Vide = pleine largeur. Alignement disponible si largeur réduite.</p></div>
+          </div>
+
+          <!-- placement rack -->
+          <div class="section-divider">Placement<span class="sd-hint">dépend du dimensionnement → rack</span></div>
+          <div class="form-row">
+            <div class="form-field"><label>Baie</label>
+              <div class="sel-color"><span class="swatch" style="background:var(--role-mgmt)"></span><select><option>Baie A-03</option><option>Baie A-04</option><option>Baie B-01</option></select></div></div>
+            <div class="form-field"><label>Position</label><div class="unit-inp"><input type="text" value="18"><span class="u">U</span></div>
+              <p class="form-hint">Vide = pose libre dans la baie.</p></div>
+            <div class="form-field"><label>Face</label>
+              <div class="rm-toggle" role="group"><button type="button" class="on">Avant</button><button type="button">Arrière</button></div></div>
+          </div>
+
+          <!-- façade -->
+          <div class="section-divider">Façade</div>
+          <div class="faces">
+            <button class="btn btn-sm" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 14l4-4 5 4 3-3 6 5"/></svg>Façade…</button>
+            <div class="face-thumb"><div class="face-strip"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span class="flbl">Avant</span></div>
+            <div class="face-thumb"><div class="face-strip"><i style="background:var(--role-power)"></i><i style="background:var(--role-power)"></i></div><span class="flbl">Arrière</span></div>
+          </div>
+
+          <!-- ports (place seulement) -->
+          <div class="section-divider">Ports<span class="sd-hint">éditeur dédié — <a href="Éditeur de ports POE - maquette.html">carton port-editor-poe</a></span></div>
+          <div class="ports-place">
+            <div class="pp-schema"><i class="d"></i><i class="d"></i><i class="d"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="d"></i><i class="d"></i><i></i><i></i><i></i></div>
+            <span class="pp-lbl">24 ports · 8 PoE · 2 lanes figées</span>
+            <button class="btn btn-sm" type="button">Éditer les ports…</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span class="modal-meta">Modifié par a.martin le 14 juil. 2026</span>
+          <button class="btn btn-sm" type="button">Annuler</button>
+          <button class="btn btn-sm btn-primary" type="button">Enregistrer</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ §4.5 — CAMÉRA IP LIBRE, PLAN D'ÉTAGE ============ -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§4.5</span><span class="sec-t">Caméra IP libre, sur plan d'étage</span>
+      <span class="state-tag"><b>libre (mm)</b> · placement plan d'étage</span></div>
+    <p class="note">Type différent → énergie réduite (conso W seule), dimensionnement <b>Libre</b> (L×l×h en mm, pas
+    de U) et <b>mode de placement</b> « plan d'étage » (bâtiment / étage / X-Y-Z). La façade est ici <b>vide</b>
+    (aucune image posée). Illustre à quel point la moitié basse de la modale se reconfigure.</p>
+    <div class="stage">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-header-left">
+            <span class="eq-ico" style="border-color:oklch(0.72 0.13 300);color:oklch(0.72 0.13 300)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 8a2 2 0 0 1 2-2h3l2-2h6l2 2h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><circle cx="12" cy="12" r="3.2"/></svg></span>
+            <div class="modal-titles">
+              <div class="modal-title">Modifier un <span>équipement</span></div>
+              <div class="modal-subtitle">CAM-A2-014 · caméra IP</div>
+            </div>
+          </div>
+          <button class="modal-close" type="button" aria-label="Fermer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-field"><label>Nom</label><input type="text" value="CAM-A2-014"></div>
+            <div class="form-field"><label>Type</label>
+              <div class="sel-color"><span class="eq-ico" style="width:24px;height:24px;border-color:oklch(0.72 0.13 300);color:oklch(0.72 0.13 300)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 8a2 2 0 0 1 2-2h3l2-2h6l2 2h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><circle cx="12" cy="12" r="3.2"/></svg></span>
+                <select><option>Caméra IP</option><option>Point d'accès</option></select></div></div>
+          </div>
+          <button class="toggle-pill full" type="button" aria-pressed="false"><span class="tgl-dot"></span>Inventaire seul (non placé)</button>
+
+          <div class="section-divider">Administratif &amp; énergie</div>
+          <div class="form-row">
+            <div class="form-field"><label>Date d'attribution</label><input type="date" value="2025-09-01"></div>
+            <div class="form-field"><label>Consommation</label><div class="unit-inp"><input type="text" value="12,9"><span class="u">W</span></div>
+              <p class="form-hint">Alimentée en PoE — puissance tirée côté PD.</p></div>
+          </div>
+
+          <div class="section-divider">Groupes</div>
+          <div class="form-field"><label>Groupe primaire</label>
+            <div class="sel-color"><span class="swatch" style="background:oklch(0.72 0.13 300)"></span><select><option>Vidéosurveillance</option><option>Sécurité</option></select></div></div>
+
+          <div class="section-divider">Dimensions</div>
+          <div class="form-row">
+            <div class="form-field"><label>Dimensionnement</label>
+              <div class="rm-toggle" role="group"><button type="button">En U (rack)</button><button type="button" class="on">Libre (mm)</button></div></div>
+          </div>
+          <div class="form-row">
+            <div class="form-field"><label>Longueur</label><div class="unit-inp"><input type="text" value="140"><span class="u">mm</span></div></div>
+            <div class="form-field"><label>Largeur</label><div class="unit-inp"><input type="text" value="90"><span class="u">mm</span></div></div>
+            <div class="form-field"><label>Hauteur</label><div class="unit-inp"><input type="text" value="90"><span class="u">mm</span></div></div>
+          </div>
+
+          <div class="section-divider">Placement<span class="sd-hint">libre → mode de placement</span></div>
+          <div class="form-field"><label>Mode de placement</label>
+            <select><option>Sur un plan d'étage</option><option>Au sol d'une salle</option><option>Paroi de baie (mural)</option><option>Latéral (marge de baie)</option><option>Posé sur une étagère</option><option>— non placé —</option></select></div>
+          <div class="form-row">
+            <div class="form-field"><label>Bâtiment</label><select><option>Bâtiment A</option><option>Bâtiment B</option></select></div>
+            <div class="form-field"><label>Étage</label><select><option>R+2</option><option>R+1</option><option>RDC</option></select></div>
+          </div>
+          <div class="form-row">
+            <div class="form-field"><label>Position X</label><div class="unit-inp"><input type="text" value="12400"><span class="u">mm</span></div></div>
+            <div class="form-field"><label>Position Y</label><div class="unit-inp"><input type="text" value="8600"><span class="u">mm</span></div></div>
+            <div class="form-field"><label>Hauteur Z</label><div class="unit-inp"><input type="text" value="2700"><span class="u">mm</span></div></div>
+          </div>
+
+          <div class="section-divider">Façade</div>
+          <div class="faces">
+            <button class="btn btn-sm" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 14l4-4 5 4 3-3 6 5"/></svg>Façade…</button>
+            <span class="face-empty">Aucune face définie.</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span class="modal-meta">Créé par c.dubois le 01 sept. 2025</span>
+          <button class="btn btn-sm" type="button">Annuler</button>
+          <button class="btn btn-sm btn-primary" type="button">Enregistrer</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ §4.7 — INVENTAIRE SEUL ============ -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§4.7</span><span class="sec-t">« Inventaire seul » — modale courte</span>
+      <span class="state-tag"><b>bascule ON</b> · bas de modale masqué</span></div>
+    <p class="note">Quand « Inventaire seul » est activé, tout le bas disparaît : <b>Dimensions, Placement, Façade
+    et Ports</b> ne sont plus rendus. Ne restent que identité, administratif/énergie, groupes et description —
+    une modale nettement plus courte.</p>
+    <div class="stage">
+      <div class="modal short">
+        <div class="modal-header">
+          <div class="modal-header-left">
+            <span class="eq-ico" style="border-color:oklch(0.74 0.12 190);color:oklch(0.74 0.12 190)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1.5"/><path d="M11 9l-2 3h2.5l-.5 3 3-4h-2.5z" fill="currentColor" stroke="none"/><path d="M18 10v4"/></svg></span>
+            <div class="modal-titles">
+              <div class="modal-title">Modifier un <span>équipement</span></div>
+              <div class="modal-subtitle">UPS-STOCK-07 · onduleur · non placé</div>
+            </div>
+          </div>
+          <button class="modal-close" type="button" aria-label="Fermer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-field"><label>Nom</label><input type="text" value="UPS-STOCK-07"></div>
+            <div class="form-field"><label>Type</label>
+              <div class="sel-color"><span class="eq-ico" style="width:24px;height:24px;border-color:oklch(0.74 0.12 190);color:oklch(0.74 0.12 190)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1.5"/><path d="M11 9l-2 3h2.5l-.5 3 3-4h-2.5z" fill="currentColor" stroke="none"/><path d="M18 10v4"/></svg></span>
+                <select><option>Onduleur (UPS)</option></select></div></div>
+          </div>
+          <button class="toggle-pill full active" type="button" aria-pressed="true"><span class="tgl-dot"></span>Inventaire seul (non placé)</button>
+          <div class="form-row">
+            <div class="form-field"><label>Marque</label><input type="text" value="Eaton"></div>
+            <div class="form-field"><label>Modèle</label><input type="text" value="5PX 1500"></div>
+          </div>
+          <div class="section-divider">Administratif &amp; énergie</div>
+          <div class="form-row">
+            <div class="form-field"><label>Date d'achat</label><input type="date" value="2026-05-20"></div>
+            <div class="form-field"><label>Consommation</label><div class="unit-inp"><input type="text" value="45"><span class="u">W</span></div></div>
+          </div>
+          <div class="section-divider">Groupes</div>
+          <div class="form-field"><label>Groupe primaire</label>
+            <div class="sel-color"><span class="swatch" style="background:var(--fg-dim)"></span><select><option>Stock</option><option>À déployer</option></select></div></div>
+          <div class="form-field"><label>Description</label><textarea>Onduleur neuf en stock, non encore affecté à une baie.</textarea></div>
+          <div class="trunc-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h6l2-3 4 6 2-3h6"/></svg>
+            <span><b style="color:var(--fg)">Dimensions, placement, façade et ports masqués.</b> Un équipement « inventaire seul »
+            n'est pas positionné dans le datacenter — désactivez la bascule pour le placer.</span></div>
+        </div>
+        <div class="modal-footer">
+          <span class="modal-meta">Créé par a.martin le 20 mai 2026</span>
+          <button class="btn btn-sm" type="button">Annuler</button>
+          <button class="btn btn-sm btn-primary" type="button">Enregistrer</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ §3.D — MODES DE PLACEMENT (LIBRE) ============ -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§3.D</span><span class="sec-t">Placement libre — le mode change tout</span>
+      <span class="state-tag"><b>2 sous-formulaires</b> · sol · étagère</span></div>
+    <p class="note">Pour un équipement <b>libre</b>, le <code>Mode de placement</code> (select) commande cinq
+    sous-formulaires radicalement différents. Deux exemples côte à côte pour montrer l'écart de champs — plus
+    l'état « non placé ». (Le mode « plan d'étage » est illustré dans la modale caméra ci-dessus.)</p>
+    <div class="placement-cols">
+      <div class="pcol">
+        <div class="pcol-h">Mode : au sol d'une salle</div>
+        <div class="pcol-b">
+          <div class="form-field"><label>Salle</label><select><option>Salle serveurs A</option><option>Local technique 2</option></select></div>
+          <div class="form-row">
+            <div class="form-field"><label>Position X</label><div class="unit-inp"><input type="text" value="3200"><span class="u">mm</span></div></div>
+            <div class="form-field"><label>Position Y</label><div class="unit-inp"><input type="text" value="1450"><span class="u">mm</span></div></div>
+          </div>
+          <div class="form-field"><label>Hauteur Z</label><div class="unit-inp"><input type="text" value="-350"><span class="u">mm</span></div>
+            <p class="form-hint">Négatif = sous faux-plancher.</p></div>
+        </div>
+      </div>
+      <div class="pcol">
+        <div class="pcol-h">Mode : posé sur une étagère (tray)</div>
+        <div class="pcol-b">
+          <div class="form-field"><label>Étagère</label><select><option>Étagère B-02 · U24-25</option><option>Étagère A-01 · U10</option></select></div>
+          <div class="form-row">
+            <div class="form-field"><label>Position X</label><div class="unit-inp"><input type="text" value="" placeholder="auto"><span class="u">mm</span></div></div>
+            <div class="form-field"><label>Position Y</label><div class="unit-inp"><input type="text" value="" placeholder="auto"><span class="u">mm</span></div></div>
+          </div>
+          <p class="form-hint">Vide = placement automatique sur l'étagère.</p>
+        </div>
+      </div>
+    </div>
+    <div class="hint-strip" style="margin-top:14px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+      Mode <b style="color:var(--fg-dim);font-weight:600;margin:0 4px">« — non placé — »</b> : aucun sous-formulaire, juste un rappel que l'équipement existe mais n'est pas posé.</div>
+    <div class="callout" style="margin-top:14px"><b>Principe n°10 — tout est éditable au formulaire.</b>
+    Placement, X/Y, Z, orientation, face… La modale est l'équivalent exhaustif des manipulations des vues 2D/3D :
+    on doit pouvoir tout régler ici sans ouvrir un plan.</div>
+  </section>
+
+  <!-- ============ §3.E — FAÇADE ============ -->
+  <section>
+    <div class="sec-h"><span class="sec-n">§3.E</span><span class="sec-t">Façade — 0 image vs faces définies</span>
+      <span class="state-tag">bouton · miniatures</span></div>
+    <p class="note">Le bouton « Façade… » ouvre un éditeur d'images dédié. La section montre les miniatures des
+    faces posées ; sur un équipement libre, on peut avoir des faces annexes en plus de avant / arrière.</p>
+    <div class="placement-cols">
+      <div class="pcol">
+        <div class="pcol-h">Aucune face</div>
+        <div class="pcol-b"><div class="faces">
+          <button class="btn btn-sm" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 14l4-4 5 4 3-3 6 5"/></svg>Façade…</button>
+          <span class="face-empty">Aucune face définie.</span></div></div>
+      </div>
+      <div class="pcol">
+        <div class="pcol-h">Faces définies</div>
+        <div class="pcol-b"><div class="faces">
+          <button class="btn btn-sm" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 14l4-4 5 4 3-3 6 5"/></svg>Façade…</button>
+          <div class="face-thumb"><div class="face-strip"><i></i><i></i><i></i><i></i><i></i><i></i></div><span class="flbl">Avant</span></div>
+          <div class="face-thumb"><div class="face-strip"><i style="background:var(--role-power)"></i><i style="background:var(--role-power)"></i></div><span class="flbl">Arrière</span></div>
+          <div class="face-thumb"><div class="face-strip" style="inset:24px 8px auto 8px"><i style="background:var(--role-poe)"></i></div><span class="flbl">Dessus</span></div>
+        </div></div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:16px"><b>Responsive &lt;560 px.</b> La modale reste en une colonne :
+    chaque <code>form-row</code> s'empile (les champs passent l'un sous l'autre), le pied reste visible, aucun
+    scroll horizontal. Réduisez la fenêtre pour vérifier.</div>
+  </section>
+
+</div>
+
+<script>
+  var root=document.documentElement, btn=document.getElementById('themeBtn');
+  btn.addEventListener('click',function(){
+    var light=root.getAttribute('data-theme')==='light';
+    root.setAttribute('data-theme',light?'dark':'light');
+    btn.textContent=light?'◑ Thème clair':'◐ Thème sombre';
+  });
+  // bascules & segmented : purement démonstratives
+  document.querySelectorAll('.toggle-pill').forEach(function(t){
+    t.addEventListener('click',function(){var a=t.classList.toggle('active');t.setAttribute('aria-pressed',a);});
+  });
+  document.querySelectorAll('.rm-toggle').forEach(function(g){
+    g.querySelectorAll('button').forEach(function(b){
+      b.addEventListener('click',function(){if(b.disabled)return;g.querySelectorAll('button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');});
+    });
+  });
+  document.querySelectorAll('.chip .x').forEach(function(x){
+    x.addEventListener('click',function(){x.closest('.chip').remove();});
+  });
+</script>
+</body>
+</html>

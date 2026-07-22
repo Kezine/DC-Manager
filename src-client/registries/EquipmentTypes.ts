@@ -5,6 +5,13 @@ const BY_ID: Record<string, EquipmentTypeDef> = Object.fromEntries(EQUIPMENT_TYP
 // Mémo : EQUIPMENT_TYPES / COLOR_PALETTE sont des constantes → jamais périmé.
 const colorCache = new Map<string, string>();
 
+/* Matrice ÉNERGIE par type (source de vérité = maquette design-system/briefs/equipment-editor). Isolée ici, en un
+   point unique, plutôt que dispersée en littéraux `type === "..."` dans les vues (formulaire + fiche détail — n°3).
+   NO_POE  : infrastructure d'ÉNERGIE (distribution/secours) + patch passif → ne participent PAS au PoE (ni PSE ni PD).
+   CAPACITY: portent une CAPACITÉ d'alimentation en ampères (départ de bandeau/tableau). */
+const NO_POE_TYPES = new Set(["pdu", "switchboard", "ups", "patch_panel"]);
+const CAPACITY_TYPES = new Set(["pdu", "switchboard"]);
+
 /** Registre des types d'équipement (libellé, icône, couleur stable). Un id NON reconnu (ancien id français, id
     retiré…) est RÉSOLU sur le type de repli `other` — pas de migration de données ni de rétro-compat. */
 export class EquipmentTypes {
@@ -24,6 +31,30 @@ export class EquipmentTypes {
   /** Type à « pilotage fin » de l'app (traitement spécifique), non supprimable à terme — cf. note EQUIPMENT_TYPES. */
   static isSystem(id: string): boolean {
     return !!(BY_ID[id] && BY_ID[id].system);
+  }
+
+  /* ---- capacités ÉNERGIE par type (pilotent la modale caméléon : visibilité + neutralisation par type) ---- */
+
+  /** Le type participe-t-il au PoE (bascule « équipement PoE » + catégorie PoE des ports) ? Exclut l'infrastructure
+      d'énergie (pdu/switchboard/ups) et le patch passif — ni PSE ni PD. */
+  static canPoe(id: string): boolean {
+    return !NO_POE_TYPES.has(EquipmentTypes.resolveId(id));
+  }
+
+  /** Le type peut-il SOURCER du PoE (budget total + jauge + ports PSE) ? Aujourd'hui le switch SEUL : les autres
+      types PoE ne font que CONSOMMER (PD). Pilote le masquage du budget et du choix PSE/PD (cf. formulaire). */
+  static isPoeSource(id: string): boolean {
+    return EquipmentTypes.resolveId(id) === "switch";
+  }
+
+  /** Le type porte-t-il une CAPACITÉ d'alimentation (A) — départ de bandeau (pdu) ou de tableau (switchboard) ? */
+  static hasPowerCapacity(id: string): boolean {
+    return CAPACITY_TYPES.has(EquipmentTypes.resolveId(id));
+  }
+
+  /** Le type CONSOMME-t-il (champ conso W) ? Un tableau électrique (switchboard) FOURNIT l'énergie, il ne consomme pas. */
+  static consumes(id: string): boolean {
+    return EquipmentTypes.resolveId(id) !== "switchboard";
   }
 
   static label(id: string): string {

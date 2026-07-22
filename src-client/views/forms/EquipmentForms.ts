@@ -65,8 +65,8 @@ export class EquipmentForms extends FormBase {
       ...secondaryGrps.map((g: any) => `<span class="pill colored-pill" ${Color.pillStyle(g.color)} title="${I18n.t("equipment.detail.groupSecondary")}">${Html.escape(g.label)}</span>`),
     ].filter(Boolean);
     add(grpPills.length > 1 ? I18n.t("equipment.detail.groups") : I18n.t("lists.col.group"), grpPills.length ? grpPills.join(" ") : "—");
-    if (eq.type === "pdu" || eq.type === "switchboard") add(I18n.t("equipment.detail.maxCapacity"), eq.pdu_max_a != null ? `<span class="pill">${eq.pdu_max_a} A</span>` : "—");
-    if (eq.type !== "switchboard" && (eq.power_nominal_w != null || eq.power_max_w != null)) add(I18n.t("equipment.detail.consumption"), [eq.power_nominal_w != null ? I18n.t("equipment.detail.wNom", { w: eq.power_nominal_w }) : null, eq.power_max_w != null ? I18n.t("equipment.detail.wMax", { w: eq.power_max_w }) : null].filter(Boolean).join(" · ") || "—");
+    if (EquipmentTypes.hasPowerCapacity(eq.type)) add(I18n.t("equipment.detail.maxCapacity"), eq.pdu_max_a != null ? `<span class="pill">${eq.pdu_max_a} A</span>` : "—");
+    if (EquipmentTypes.consumes(eq.type) && (eq.power_nominal_w != null || eq.power_max_w != null)) add(I18n.t("equipment.detail.consumption"), [eq.power_nominal_w != null ? I18n.t("equipment.detail.wNom", { w: eq.power_nominal_w }) : null, eq.power_max_w != null ? I18n.t("equipment.detail.wMax", { w: eq.power_max_w }) : null].filter(Boolean).join(" · ") || "—");
     if (eq.purchase_date || eq.po_ref) add(I18n.t("lists.col.purchase"), [eq.purchase_date ? Html.escape(eq.purchase_date) : null, eq.po_ref ? I18n.t("equipment.detail.poRef", { ref: Html.escape(eq.po_ref) }) : null].filter(Boolean).join(" · ") || "—");
     if (eq.warranty_end) add(I18n.t("equipment.field.warrantyEnd"), Html.escape(eq.warranty_end));
     if (eq.assigned_to || eq.assigned_date) add(I18n.t("equipment.field.assignedTo"), [eq.assigned_to ? Html.escape(eq.assigned_to) : null, eq.assigned_date ? I18n.t("equipment.detail.onDate", { date: Html.escape(eq.assigned_date) }) : null].filter(Boolean).join(" · ") || "—");
@@ -872,6 +872,9 @@ export class EquipmentForms extends FormBase {
     // switch 48 ports. Le sens/calibre/phase (power) et le budget (poe) vivent dans PortEditorControls (module dédié).
     const detailsRow = (p: any) => {
       const kindP = PortRoles.kind(p.role), isPoeP = PortRoles.isPoe(p.role), patch = isPatch();
+      // Hors switch, un port PoE ne fait que CONSOMMER (PD) : sens figé à « sink » AVANT le rendu, pour que la tête
+      // (libellé de sens + métrique) et le corps (sens/budget masqués) restent cohérents. Le choix PSE/PD = switch.
+      if (isPoeP && !EquipmentTypes.isPoeSource(typeI.value) && p.direction !== "sink") p.direction = "sink";
       // over PAR PORT = le PD câblé consomme plus que le budget (capacité) de CE port producteur.
       const portLoadW = (isPoeP && p.direction === "source") ? poePortLoad(p) : 0;
       const overHere = isPoeP && p.direction === "source" && p.poe_budget_w != null && portLoadW > p.poe_budget_w;
@@ -888,7 +891,7 @@ export class EquipmentForms extends FormBase {
       const sensSpan = document.createElement("span"); sensSpan.className = "p-sens"; sensSpan.textContent = sensLabel(p); head.appendChild(sensSpan);
       const metric = document.createElement("span"); metric.className = "p-metric" + (kindP === "power" ? " power" : isPoeP ? " poe" : "");
       if (kindP === "power") metric.textContent = (p.power_max_a != null ? fmtW(p.power_max_a) : "—") + " A";
-      else if (isPoeP) { metric.innerHTML = Icons.POE_BOLT; if (overHere) metric.style.color = "var(--err)"; metric.appendChild(document.createTextNode(" " + (p.poe_budget_w != null ? fmtW(p.poe_budget_w) : "—") + " W")); }
+      else if (isPoeP) { metric.innerHTML = Icons.POE_BOLT; const poeSrc = EquipmentTypes.isPoeSource(typeI.value); if (poeSrc && overHere) metric.style.color = "var(--err)"; if (poeSrc) metric.appendChild(document.createTextNode(" " + (p.poe_budget_w != null ? fmtW(p.poe_budget_w) : "—") + " W")); }
       else { const tt: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null; const m = document.createElement("span"); m.className = "muted"; m.textContent = tt ? tt.name : "—"; metric.appendChild(m); }
       head.appendChild(metric);
       const netSpan = document.createElement("span"); netSpan.className = "p-net"; const nn = netName(p); if (nn) netSpan.textContent = nn; else netSpan.innerHTML = '<span class="muted">—</span>'; head.appendChild(netSpan);
@@ -915,7 +918,7 @@ export class EquipmentForms extends FormBase {
       const nm = FormControls.text(p.name, I18n.t("equipment.equip.portPh")); nm.oninput = () => { p.name = nm.value; nameSpan.textContent = p.name || I18n.t("equipment.common.portParen"); };
       grid.appendChild(FormControls.fieldRow(I18n.t("lists.col.name"), nm));
       // Catégorie (segmenté) — POE désactivé + tooltip de découvrabilité tant que `poe_device` est faux (T-POE1 côté UI).
-      const poeOn = (poeDeviceI as any).checked;
+      const poeOn = (poeDeviceI as any).checked && EquipmentTypes.canPoe(typeI.value);   // infra d'énergie (pdu/switchboard/ups/patch) → jamais de port PoE
       const catOpts = PortRoles.ALL.map((x) => ({ value: x.id, label: PortRoles.label(x.id), disabled: PortRoles.isPoe(x.id) && !poeOn, title: (PortRoles.isPoe(x.id) && !poeOn) ? I18n.t("equipment.equip.poeCatDisabled") : undefined }));
       const catSeg = FormControls.segmented(catOpts, p.role || "data", (v) => {
         p.role = v;
@@ -935,6 +938,9 @@ export class EquipmentForms extends FormBase {
         if (p.direction === "source") grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.phase"), portControls.phaseControl(p)));
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.network"), terminalNetworkControl(p)));
       } else if (isPoeP) {
+        // Choix PSE/PD + budget (CAPACITÉ) par port = SWITCH uniquement. Hors switch, le port est un PD : sens figé
+        // « sink » (posé au sommet de detailsRow), budget masqué (donnée morte côté PD) — ne restent que nom/connecteur/réseau.
+        if (EquipmentTypes.isPoeSource(typeI.value)) {
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.sens"), portControls.sensControl(p, "poe")));
         // Budget = CAPACITÉ du port (ce qu'il peut FOURNIR), pas une conso. Norme PoE (802.3af/at/bt) qui renseigne le
         // wattage, + « Personnalisé » pour un budget libre. La conso réelle vient du PD câblé (jauge/warnings).
@@ -957,6 +963,7 @@ export class EquipmentForms extends FormBase {
         (customI as any)._input.onchange = () => renderPorts();   // au blur : rafraîchit liserés de survente + métriques
         budgetWrap.appendChild(normSel); budgetWrap.appendChild(customI);
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.poeBudget"), budgetWrap, I18n.t("forms.port.poeBudgetHint")));
+        }
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.network"), terminalNetworkControl(p)));
       } else {
         const ag = aggOptionsFor(p); ag.onchange = () => { p.aggregate_id = ag.value || null; };
@@ -1015,7 +1022,9 @@ export class EquipmentForms extends FormBase {
       (poeDeviceI as any).disabled = hasPoe;   // ne peut plus être désactivée tant qu'un port POE existe
       poeDeviceI.title = hasPoe ? I18n.t("equipment.equip.poeDeviceLocked") : I18n.t("equipment.equip.poeDeviceTitle");
       const on = (poeDeviceI as any).checked;
-      poeDetailsRow.style.display = on ? "" : "none";
+      // Budget total + jauge = capacité de SOURCE (PSE) → switch uniquement. Les autres types PoE ne font que
+      // consommer (PD) : la conso vit dans les champs Consommation (W), pas dans un budget de fourniture.
+      poeDetailsRow.style.display = (on && EquipmentTypes.isPoeSource(typeI.value)) ? "" : "none";
       refreshPoeGauge();
     };
     addAggBtn.onclick = () => { draftAggs.push({ id: Id.uid(), name: "", description: "" }); renderAggs(); renderPorts(); };
@@ -1040,8 +1049,12 @@ export class EquipmentForms extends FormBase {
       placeBox.style.display = u ? "" : "none";   // placement rack du cœur = mode U
       salleBox.style.display = u ? "none" : "";    // placement en salle (au sol) = mode Libre
       if (!u) syncSalle();
-      pduRow.style.display = (typeI.value === "pdu" || typeI.value === "switchboard") ? "" : "none";
-      consoRow.style.display = (typeI.value === "switchboard") ? "none" : "";   // un tableau fournit, il ne consomme pas
+      // ÉNERGIE pilotée par le type (modale caméléon, cf. maquette equipment-editor) — matrice centralisée dans
+      // EquipmentTypes : capacité (A) sur pdu/switchboard, conso (W) sauf switchboard, bloc PoE hors infra d'énergie.
+      pduRow.style.display = EquipmentTypes.hasPowerCapacity(typeI.value) ? "" : "none";
+      consoRow.style.display = EquipmentTypes.consumes(typeI.value) ? "" : "none";
+      poeBlock.style.display = EquipmentTypes.canPoe(typeI.value) ? "" : "none";
+      syncPoe();   // budget total + jauge = capacité de SOURCE (switch) uniquement + verrou de bascule
     };
     dimI.addEventListener("change", sync); typeI.addEventListener("change", sync);
     // changer de type (→/depuis patch_panel) bascule l'affichage brins ↔ agrégat des ports. Passer À « patch »
@@ -1050,6 +1063,7 @@ export class EquipmentForms extends FormBase {
     // P2a : le retrait est RÉVERSIBLE — on stashe les réseaux retirés et on les restaure si l'utilisateur re-choisit
     // un type terminal (re-sélectionner l'ancien type NE doit PAS perdre les assertions ; seul le save les scelle).
     const stashedNets = new Map<string, { network_id: any; network_ids: any[] }>();
+    let prevType = curType;   // type AVANT le changement en cours — détecte ce qu'on QUITTE (démotion PoE, vidage capacité/conso)
     typeI.addEventListener("change", () => {
       if (typeI.value === "patch_panel") {
         const withNet = draftPorts.filter((p) => p.network_id || (Array.isArray(p.network_ids) && p.network_ids.length));
@@ -1070,6 +1084,26 @@ export class EquipmentForms extends FormBase {
         stashedNets.clear();
         if (restored) Notify.toast(I18n.t("equipment.equip.patchNetRestored", { count: restored }));
       }
+      // ÉNERGIE pilotée par le type : vider VISIBLEMENT (toast) ce que le NOUVEAU type ne supporte plus, au lieu de le
+      // laisser masqué mais persisté (uniformisation — miroir du retrait réseau des patch). Neutralisé aussi au save.
+      const newType = typeI.value;
+      // PoE : quitter le switch (seule SOURCE) OU passer à un type SANS PoE (infra d'énergie/patch) → les ports PoE
+      // n'ont plus de sens PSE/budget ici : RÉTROGRADÉS en données (choix utilisateur) + avertissement.
+      const poeToDrop = draftPorts.filter((p) => PortRoles.isPoe(p.role));
+      const leavesPoe = (EquipmentTypes.isPoeSource(prevType) && !EquipmentTypes.isPoeSource(newType)) || !EquipmentTypes.canPoe(newType);
+      if (poeToDrop.length && leavesPoe) {
+        poeToDrop.forEach((p) => { p.role = "data"; p.direction = ""; p.poe_budget_w = null; });
+        Notify.toast(I18n.t("equipment.equip.poeDemotedOnType", { count: poeToDrop.length }));
+      }
+      // Capacité (A) : quitter pdu/switchboard la retire (un type sans départ de bandeau/tableau n'en porte pas).
+      if (EquipmentTypes.hasPowerCapacity(prevType) && !EquipmentTypes.hasPowerCapacity(newType) && pduI.value !== "") {
+        pduI.value = ""; Notify.toast(I18n.t("equipment.equip.capacityDroppedOnType"));
+      }
+      // Consommation : entrer dans « switchboard » la retire (un tableau FOURNIT, il ne consomme pas).
+      if (EquipmentTypes.consumes(prevType) && !EquipmentTypes.consumes(newType) && (pNomI.value !== "" || pMaxI.value !== "")) {
+        pNomI.value = ""; pMaxI.value = ""; Notify.toast(I18n.t("equipment.equip.consoDroppedOnType"));
+      }
+      prevType = newType;
       renderPorts();
     });
     sync();
@@ -1100,12 +1134,15 @@ export class EquipmentForms extends FormBase {
           inventory_only: inv, locked: (lockedI as any).checked, group_id: primaryGroup, group_ids: groupIds, description: descI.value.trim(),
           purchase_date: (purchaseI as any).value || "", warranty_end: (warrantyI as any).value || "", po_ref: poI.value.trim(),
           assigned_date: (assignDateI as any).value || "", assigned_to: assignToI.value.trim(),
-          pdu_max_a: pduI.value !== "" ? Math.max(0, parseInt(pduI.value, 10) || 0) : null,
-          power_nominal_w: pNomI.value !== "" ? Math.max(0, parseInt(pNomI.value, 10) || 0) : null,
-          power_max_w: pMaxI.value !== "" ? Math.max(0, parseInt(pMaxI.value, 10) || 0) : null,
-          // POE : capacité (bascule) + budget TOTAL partagé. Budget neutralisé si l'équipement n'est pas POE.
-          poe_device: (poeDeviceI as any).checked,
-          poe_budget_w: ((poeDeviceI as any).checked && (poeBudgetI as any).value !== "") ? poeBudgetTotal() : null,
+          // ÉNERGIE neutralisée PAR TYPE (matrice EquipmentTypes) : on ne persiste pas de donnée qu'un champ masqué
+          // aurait pu conserver. Capacité (A) = pdu/switchboard ; conso (W) = tout sauf switchboard (il fournit).
+          pdu_max_a: (EquipmentTypes.hasPowerCapacity(typeI.value) && pduI.value !== "") ? Math.max(0, parseInt(pduI.value, 10) || 0) : null,
+          power_nominal_w: (EquipmentTypes.consumes(typeI.value) && pNomI.value !== "") ? Math.max(0, parseInt(pNomI.value, 10) || 0) : null,
+          power_max_w: (EquipmentTypes.consumes(typeI.value) && pMaxI.value !== "") ? Math.max(0, parseInt(pMaxI.value, 10) || 0) : null,
+          // POE : la bascule ne vaut que pour un type PoE (infra d'énergie exclue) ; le budget TOTAL est une capacité de
+          // SOURCE → switch uniquement (les autres types PoE ne font que consommer, cf. Q1/Q2).
+          poe_device: EquipmentTypes.canPoe(typeI.value) && (poeDeviceI as any).checked,
+          poe_budget_w: (EquipmentTypes.isPoeSource(typeI.value) && (poeDeviceI as any).checked && (poeBudgetI as any).value !== "") ? poeBudgetTotal() : null,
           dim_mode: free ? "free" : "u",
         };
         // images de façade (référence par face) — appliquées via l'éditeur de façade, persistées ici.
@@ -1248,15 +1285,20 @@ export class EquipmentForms extends FormBase {
           const isPatchEq = typeI.value === "patch_panel";
           const netPrimary = isPatchEq ? null : (p.network_id || null);
           const netIds = netPrimary ? ((Array.isArray(p.network_ids) && p.network_ids.length) ? p.network_ids.slice() : [netPrimary]) : [];
-          // power/poe : le SENS (source/sink) vaut pour les DEUX (PSE/PD = source/sink) ; sinon neutralisé. ⚠ ne PAS
-          // vider la direction d'un port POE. Calibre (A) + phase restent réservés au power ; budget (W) au poe.
-          const isPowerPort = PortRoles.kind(p.role) === "power";
-          const isPoePort = PortRoles.isPoe(p.role);
-          const direction = (isPowerPort || isPoePort) ? (p.direction || "") : "";
+          // RÔLE neutralisé par type : un port PoE sur un type SANS PoE (infra d'énergie/patch) retombe en données
+          // (défense de fond pour un legacy/import non passé par le formulaire — l'édition l'a déjà rétrogradé au change).
+          const roleRaw = p.role || "data";
+          const role = (PortRoles.isPoe(roleRaw) && !EquipmentTypes.canPoe(typeI.value)) ? "data" : roleRaw;
+          const isPowerPort = PortRoles.kind(role) === "power";
+          const isPoePort = PortRoles.isPoe(role);
+          const poeSourceEq = EquipmentTypes.isPoeSource(typeI.value);
+          // sens (source/sink) : power = tel quel ; poe = choix PSE/PD SUR SWITCH, sinon FORCÉ « sink » (PD, consommateur).
+          const direction = isPoePort ? (poeSourceEq ? (p.direction || "") : "sink") : (isPowerPort ? (p.direction || "") : "");
           const powerMaxA = isPowerPort && p.power_max_a != null ? p.power_max_a : null;
           const phase = (isPowerPort && direction === "source") ? (p.phase || "") : "";
-          const poeBudgetW = isPoePort && p.poe_budget_w != null ? p.poe_budget_w : null;
-          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role: p.role || "data", aggregate_id: agg, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase, poe_budget_w: poeBudgetW };
+          // budget de port = CAPACITÉ de SOURCE → conservé uniquement sur un port PSE de switch, neutralisé sinon.
+          const poeBudgetW = (isPoePort && poeSourceEq && p.poe_budget_w != null) ? p.poe_budget_w : null;
+          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role, aggregate_id: agg, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase, poe_budget_w: poeBudgetW };
           const ex: any = store.get("ports", p.id);
           const saved = ex ? await store.update("ports", p.id, patch) : await store.create("ports", Object.assign({ id: p.id }, patch));
           if (!saved) saveError = true;   // validation refusée (ex. brin en double, Tx=Rx) → échec signalé plus bas
