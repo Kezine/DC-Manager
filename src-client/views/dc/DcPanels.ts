@@ -678,10 +678,14 @@ export abstract class DcPanels extends DcViews2D {
     const t = document.createElement("div"); t.className = "dc-card-title"; t.textContent = I18n.t("lists.col.cables") + (multi ? I18n.t("dc.panels.cablesAllRooms") : ""); box.appendChild(t);
     const resolved = this.panelCables(dc);
     const total = this.store.all("cables").length;
-    // créer une route 3D au clic (le prochain clic sur un port libre démarre ; puis waypoints ; puis port terminal)
-    const bRoute = this.btn(this.routeTool.active ? I18n.t("dc.panels.cancelRoute") : I18n.t("dc.panels.createRoute"), () => { if (this.routeTool.active) void this.routeTool.requestClose(); else this.routeTool.arm(); }, I18n.t("dc.panels.createRouteTitle"));   // abandon = même garde-fou que le bouton « Annuler » de la carte
-    IconButton.decorate(bRoute, this.routeTool.active ? Icons.CLOSE : Icons.ROUTE);
-    bRoute.style.marginBottom = "6px"; box.appendChild(bRoute);
+    // créer une route au clic (le prochain clic sur un port libre démarre ; puis waypoints ; puis port terminal).
+    // RÉSERVÉ à la 3D : en 2D on ne peut pas cliquer un port, le bouton n'aurait aucun effet (une route DÉJÀ en cours
+    // reste annulable via sa carte, affichée « toutes vues »).
+    if (this.view === "3d") {
+      const bRoute = this.btn(this.routeTool.active ? I18n.t("dc.panels.cancelRoute") : I18n.t("dc.panels.createRoute"), () => { if (this.routeTool.active) void this.routeTool.requestClose(); else this.routeTool.arm(); }, I18n.t("dc.panels.createRouteTitle"));   // abandon = même garde-fou que le bouton « Annuler » de la carte
+      IconButton.decorate(bRoute, this.routeTool.active ? Icons.CLOSE : Icons.ROUTE);
+      bRoute.style.marginBottom = "6px"; box.appendChild(bRoute);
+    }
     box.appendChild(FormControls.toggle(I18n.t("dc.panels.showAllDimmed"), this.showAllCables, (v) => { this.showAllCables = v; this.rerenderView(); }, { block: true }));
     const hint = document.createElement("div"); hint.className = "form-hint";
     hint.textContent = I18n.t("dc.panels.cableHintMain", { n: resolved.length, scope: multi ? I18n.t("dc.panels.cableScopeMulti") : I18n.t("dc.panels.cableScopeHere"), off: (total > resolved.length ? I18n.t("dc.panels.cableOff", { n: total - resolved.length }) : "") });
@@ -842,11 +846,11 @@ export abstract class DcPanels extends DcViews2D {
     tgi(["floor"], I.anchor, I18n.t("dc.panels.tAnchor"), () => this.showFloorAnchor, (v) => { this.showFloorAnchor = v; redraw(); });
     tgi(ALL, I.person, I18n.t("dc.panels.tFigure"), () => this.showFigure, (v) => { this.showFigure = v; if (v) this.figureEnsure(this.current()); this.persistView(); redraw(); });
     tgi(D3, I.pivot, I18n.t("dc.panels.tPivot"), () => this.showPivot, (v) => { this.showPivot = v; r3(); });
-    // Sliders AFFECTANT AUSSI le rendu 2D (arrondi des câbles, taille des marqueurs/pastilles de ports) →
-    // exposés dans TOUTES les vues. En WebGL : mise à jour en direct (setCableSpline/setMarkerScale) ; sinon
-    // `redraw()` re-dessine le SVG 2D avec la nouvelle valeur.
-    box.appendChild(this.slider(I18n.t("dc.panels.sCableSpline"), this.cableSplineK, 0, 0.32, 0.01, (val) => val.toFixed(2), (val) => { this.cableSplineK = val; if (this.useWebGL && this._three) { this._three.setCableSpline(val); this.persistView(); } else redraw(); }));
-    box.appendChild(this.slider(I18n.t("dc.panels.sMarkerSize"), this.markerScale, 0.25, 1.75, 0.05, (val) => Math.round(val * 100) + " %", (val) => { this.markerScale = val; if (this.useWebGL && this._three) { this._three.setMarkerScale(val); this.persistView(); } else redraw(); }));
+    // Sliders AFFECTANT AUSSI le rendu 2D (arrondi des câbles, taille des marqueurs/pastilles/éclairs) → exposés dans
+    // TOUTES les vues. On met à jour la scène WebGL EN DIRECT (setCableSpline/setMarkerScale, pour la vue 3D et le retour
+    // ultérieur), ET on re-dessine le SVG quand on est EN 2D — sinon le 2D n'était mis à jour qu'après un aller-retour 3D.
+    box.appendChild(this.slider(I18n.t("dc.panels.sCableSpline"), this.cableSplineK, 0, 0.32, 0.01, (val) => val.toFixed(2), (val) => { this.cableSplineK = val; if (this.useWebGL && this._three) { this._three.setCableSpline(val); this.persistView(); } if (this.view !== "3d") redraw(); }));
+    box.appendChild(this.slider(I18n.t("dc.panels.sMarkerSize"), this.markerScale, 0.25, 1.75, 0.05, (val) => Math.round(val * 100) + " %", (val) => { this.markerScale = val; if (this.useWebGL && this._three) { this._three.setMarkerScale(val); this.persistView(); } if (this.view !== "3d") redraw(); }));
     // Réglages PROPRES à la 3D (coloration du volume, recentrage caméra) — sans objet en 2D.
     if (v === "3d") {
       const colorRow = document.createElement("div"); colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px";

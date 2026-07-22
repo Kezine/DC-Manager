@@ -9,7 +9,7 @@ import { Waypoint } from "../../models/Waypoint";
 import { PlacementLock } from "../../domain/PlacementLock";
 import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT } from "../../domain/constants";
 import { I18n } from "../../i18n/I18n";
-import { DC_DOT_PX, WP_HIT_PX } from "./shared";
+import { DC_DOT_PX, DC_BOLT_PX, WP_HIT_PX } from "./shared";
 import type { Vec3 } from "./shared";
 import { DcScene3D } from "./DcScene3D";
 
@@ -561,6 +561,29 @@ export abstract class DcViews2D extends DcScene3D {
     this.wireClick(hit, () => { this.hideTip(); this.host.openCableForm?.(rc.cable.id); }); hit.addEventListener("contextmenu", (e: any) => { this.hideTip(); this.ctxMenu(e, this.cableCtx(rc.cable)); });
     g.append(line, hit); gRoot.appendChild(g);
     [ends[0], ends[ends.length - 1]].forEach((p) => { const dot = Dom.svg("circle", { class: "dc-cable-end", cx: p.h, cy: p.v, r: rDot }); if (col) (dot as any).style.fill = col; gRoot.appendChild(dot); });
+    if (this.store.cableCarriesPower(rc.cable)) this.drawPowerBolts2D(gRoot, line2);   // éclairs d'énergie répartis (parité 3D)
+  }
+
+  /** Éclairs d'ÉNERGIE (⚡) répartis le long d'un tracé 2D — PARITÉ 3D : un glyphe jaune tous les `powerBoltSpacingMm`
+      (monde), taille écran constante pilotée par `markerScale`. `line2` en coords MONDE (mm) de la salle. */
+  protected drawPowerBolts2D(gRoot: SVGElement, line2: Array<{ h: number; v: number }>): void {
+    const spacing = Math.max(50, this.powerBoltSpacingMm || 300);
+    const half = DC_BOLT_PX * this.markerScale / (this.scale || 1);   // demi-taille du glyphe (monde) → constante à l'écran
+    let acc = spacing / 2;   // 1er éclair à mi-pas
+    for (let i = 1; i < line2.length; i++) {
+      const a = line2[i - 1], b = line2[i], dx = b.h - a.h, dy = b.v - a.v, segLen = Math.hypot(dx, dy);
+      if (segLen < 1e-6) continue;
+      while (acc <= segLen) { const t = acc / segLen; gRoot.appendChild(this.boltGlyph2D(a.h + dx * t, a.v + dy * t, half)); acc += spacing; }
+      acc -= segLen;
+    }
+  }
+  /** Glyphe éclair (polygone, grille 24 — MÊME tracé que le sprite 3D `boltTexture`), centré en (cx,cy), demi-ext ~`half`. */
+  private boltGlyph2D(cx: number, cy: number, half: number): SVGElement {
+    const P = [[13, 1], [4, 14], [11, 14], [9, 23], [20, 9], [13, 9]], f = half / 11;   // centre ≈ (12,12), extension y ±11
+    const pts = P.map(([px, py]) => (cx + (px - 12) * f).toFixed(1) + "," + (cy + (py - 12) * f).toFixed(1)).join(" ");
+    const poly = Dom.svg("polygon", { class: "dc-power-bolt", points: pts, "vector-effect": "non-scaling-stroke" });
+    const st = (poly as any).style; st.fill = "#ffd23a"; st.stroke = "#6b4e00"; st.strokeWidth = "1px"; st.pointerEvents = "none";   // jaune = parité 3D
+    return poly;
   }
 
   /** Faisceaux (trunks) en vue Dessus : intra-salle + stubs sortants — parité complète avec drawCables2D. */

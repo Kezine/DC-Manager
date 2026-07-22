@@ -2,6 +2,7 @@
    DatacenterView.ts monolithique). Importés par DcBase et toutes les classes filles. */
 
 export const DC_DOT_PX = 5;                 // rayon écran (px) des pastilles de câble
+export const DC_BOLT_PX = 10;               // demi-taille écran (px) d'un éclair ⚡ d'énergie sur un câble (vue Dessus — parité BOLT_PX 3D)
 export const WP_HIT_PX = 14;                // rayon écran (px) des zones de clic/glisser des waypoints (vue Dessus)
 export const CABLE_PORT_STUB_MM = 20;       // longueur du stub de sortie ⊥ des ports (cablePortNormal)
 export const CABLE_SPLINE_K = 1 / 6;        // tension Catmull-Rom (arrondi des câbles routés)
