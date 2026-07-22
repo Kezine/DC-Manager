@@ -1,9 +1,10 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { Normalize } from "../core/Normalize";
 import { EQUIP_FACE_IDS } from "../domain/constants";
 
 /** Port d'un équipement (peut être un trunk éclaté en lanes — breakout). */
-export class Port extends Entity {
+export class Port extends Entity implements Records.Port {
   /** FK → equipments (l'équipement porteur). */
   equipment_id: string | null;
   /** Nom du port (ex. "Gi1/0/1"). */

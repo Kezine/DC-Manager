@@ -1,9 +1,10 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { Normalize } from "../core/Normalize";
 import { EQUIP_DEPTHS } from "../domain/constants";
 
 /** Équipement : matériel répertorié, placé (rack / libre / sol / paroi) et câblé. */
-export class Equipment extends Entity {
+export class Equipment extends Entity implements Records.Equipment {
   /** Nom d'affichage. */
   name: string;
   /** Type d'équipement (switch, router, server, pdu, …) — pilote l'icône/la couleur. */

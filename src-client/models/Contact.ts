@@ -1,4 +1,5 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";   // garde-fou de dérive : la classe implémente la forme dérivée de la spec
 
 /** CONTACT — destinataire de NOTIFICATIONS (email/sms), tenu PAR DOCUMENT (carnet d'adresses).
     Vit HORS du graphe réseau : ni placé, ni câblé, ni référencé par aucune autre entité du
@@ -7,7 +8,7 @@ import { Entity, Props } from "./Entity";
     contacts PAR DOCUMENT). Le lien abonnement→contact est une RÉFÉRENCE SOUPLE (`contact_id`
     vit dans la config notify, HORS document) : c'est pourquoi il n'existe AUCUNE cascade de
     suppression pour cette collection (rien dans le document ne pointe vers un contact). */
-export class Contact extends Entity {
+export class Contact extends Entity implements Records.Contact {
   /** Nom / libellé du contact (REQUIS — seul champ obligatoire). */
   name: string;
   /** Adresse e-mail (optionnelle) — cible d'une notification « email ». */

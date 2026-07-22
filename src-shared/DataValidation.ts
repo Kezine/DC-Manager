@@ -79,6 +79,21 @@ export interface FieldSpec {
   ref?: string;
 }
 
+/* ---- TYPES d'ENREGISTREMENT dérivés de la SPEC (point 1 « Direction MODÈLE » — cf. .notes/toDos/db-relational-decision) :
+   la spec déclarative EST la définition canonique du modèle → on en DÉRIVE des types d'échange REST nommés, au lieu
+   d'écrire des DTO par collection à la main (jetables, 3ᵉ source de vérité). `RecordOf<Fields>` mappe un bloc de champs
+   `as const` (SPEC_FIELDS) vers la forme NORMALISÉE de l'enregistrement : les défauts étant posés à la normalisation,
+   chaque champ déclaré est présent ; `nullable: true` ⇒ `| null`. Étape qui SURVIT à la migration relationnelle (plus
+   tard : la MÊME spec générera colonnes + FK). ---- */
+type FieldTs<F> =
+  F extends { type: "string" }   ? (F extends { nullable: true } ? string | null   : string)  :
+  F extends { type: "number" }   ? (F extends { nullable: true } ? number | null   : number)  :
+  F extends { type: "boolean" }  ? (F extends { nullable: true } ? boolean | null  : boolean) :
+  F extends { type: "string[]" } ? (F extends { nullable: true } ? string[] | null : string[]) :
+  unknown;
+/** Forme d'un enregistrement NORMALISÉ dérivée d'un bloc de champs `as const`. Mutable (DTO d'échange) via `-readonly`. */
+export type RecordOf<Fields> = { -readonly [K in keyof Fields]: FieldTs<Fields[K]> };
+
 /** Spécification d'une collection : ses champs déclarés (partielle — seuls les champs porteurs de règles
     sont listés ; les autres traversent) + invariants inter-champs (V3) + règles cross-entité (V5).
     DOCTRINE (audit de régularisation 2026-07-20) : la traversée des champs non déclarés sert la COMPAT et
@@ -432,9 +447,12 @@ class TrayFit {
 }
 
 /* ---- spécifications des collections (couverture 19/19 — cf. docs/validation.md) ---- */
-export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
+/* ---- CHAMPS des collections, isolés `as const` : SOURCE UNIQUE des types d'enregistrement (RecordOf) ET
+   des specs de validation (COLLECTION_SPECS y référence ses `fields`). `as const` préserve les littéraux de
+   `type`/`enum`/défauts pour l'inférence ; les fonctions (invariants/règles) restent dans COLLECTION_SPECS,
+   typées contextuellement par l'annotation (les mettre `as const` ici les rendrait `any` implicites). ---- */
+const SPEC_FIELDS = {
   equipments: {
-    fields: {
       name:           { type: "string", required: true, trim: true },   // identité : trimé (unicité fiable — V6g)
       type:           { type: "string", default: "switch" },
       depth:          { type: "string", enum: EQUIPMENT_DEPTHS, default: "full" },   // LEGACY passif (repli pré-migration)
@@ -464,7 +482,203 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       poe_device:      { type: "boolean", default: false },
       poe_budget_w:    { type: "number", nullable: true, default: null, min: 0 },
       // NB : les FK face_image_* visent le magasin d'images (hors modèle) → pas de `ref` (collection non modélisée).
-    },
+  },
+  cables: {
+      cable_type_id: { type: "string", nullable: true, default: null, ref: "cableTypes" },
+      from_port_id:  { type: "string", nullable: true, default: null, ref: "ports" },
+      to_port_id:    { type: "string", nullable: true, default: null, ref: "ports" },
+      network_ids:   { type: "string[]", default: [], ref: "networks" },
+      network_id:    { type: "string", nullable: true, default: null, ref: "networks" },
+      waypoint_ids:  { type: "string[]", default: [], ref: "waypoints" },
+      length_m:      { type: "number", nullable: true, default: null, min: 0 },
+      status:        { type: "string", required: true, enum: CABLE_STATUS_IDS, default: "brouillon" },
+      // NB : l'ancien mécanisme « câble-brin » (bundle_id/strand_no sur le câble) a été RETIRÉ — les brins d'un
+      // faisceau sont piochés par les PORTS de patch (Port.bundle_id/strand_a/strand_b), source unique.
+  },
+  racks: {
+      name:          { type: "string", required: true },
+      location:      { type: "string", default: "" },
+      u_count:       { type: "number", min: 1, default: 42 },
+      width_mm:      { type: "number", min: 1 },
+      depth:         { type: "number", min: 1 },
+      sides:         { type: "string", enum: RACK_SIDE_CONFIGS, default: "single" },
+      has_caps:      { type: "boolean", default: true },   // habillage toit/fond — false = châssis OUVERT
+      locked:        { type: "boolean", default: false },  // positionnement verrouillé (vues 2D/3D) — cf. PlacementLock
+      datacenter_id: { type: "string", nullable: true, default: null, ref: "datacenters" },
+      dc_x:          { type: "number", nullable: true, default: null },
+      dc_y:          { type: "number", nullable: true, default: null },
+  },
+  ports: {
+      name:           { type: "string" },
+      equipment_id:   { type: "string", nullable: true, default: null, ref: "equipments" },
+      port_type_id:   { type: "string", nullable: true, default: null, ref: "portTypes" },
+      parent_port_id: { type: "string", nullable: true, default: null, ref: "ports" },
+      aggregate_id:   { type: "string", nullable: true, default: null, ref: "aggregates" },
+      face_side:      { type: "string", enum: EQUIPMENT_FACE_IDS, default: "front" },
+      // TERMINAISON DE FAISCEAU (ports de patch) : quel faisceau, quels brins physiques piochés.
+      bundle_id:      { type: "string", nullable: true, default: null, ref: "cableBundles" },
+      strand_a:       { type: "number", nullable: true, default: null, min: 1 },
+      strand_b:       { type: "number", nullable: true, default: null, min: 1 },
+      // RÉSEAU asserté par un port TERMINAL (source unique ; déduit ailleurs). Vide = joker.
+      network_ids:    { type: "string[]", default: [], ref: "networks" },
+      network_id:     { type: "string", nullable: true, default: null, ref: "networks" },
+      // POWER : sens de l'énergie, plafond de courant (A), phase (départ de tableau). Enum souples (vide toléré).
+      direction:      { type: "string", default: "", enum: ["", "source", "sink"] },
+      power_max_a:    { type: "number", nullable: true, default: null, min: 0 },
+      phase:          { type: "string", default: "", enum: ["", "L1", "L2", "L3"] },
+      // POE (rôle "poe") : budget max du port en WATTS (délivré si producteur / tiré si consommateur).
+      poe_budget_w:   { type: "number", nullable: true, default: null, min: 0 },
+      // POE : injection (PSE) / consommation (PD) ACTIVÉE sur ce port. Un câble ne porte l'éclair d'énergie que si
+      // les DEUX extrémités PoE sont activées (cf. Store.cableCarriesPower). Défaut true (un port PoE injecte/tire).
+      poe_enabled:    { type: "boolean", default: true },
+  },
+  aggregates: {
+      name:         { type: "string" },
+      equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+  },
+  networks: {
+      label:         { type: "string", required: true },
+      kind:          { type: "string", enum: DATA_OR_POWER, default: "data" },
+      power_source:  { type: "string", nullable: true, default: null, enum: POWER_SOURCES },
+      ip_network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
+  },
+  groups: {
+      label: { type: "string", required: true },
+      type:  { type: "string", enum: GROUP_TYPE_IDS },
+  },
+  rackItems: {
+      label:     { type: "string" },
+      rack_id:   { type: "string", nullable: true, default: null, ref: "racks" },
+      kind:      { type: "string", enum: RACK_ITEM_KIND_IDS, default: "blank" },
+      side:      { type: "string", enum: RACK_OCCUPANT_SIDES, default: "front" },
+      u_height:  { type: "number", min: 1, default: 1 },
+      // configuration TRAY (étagère) — sans effet pour les autres kinds
+      tray_type: { type: "string", enum: TRAY_TYPE_IDS, default: "dual" },
+      tray_u:    { type: "number", min: 1, default: 1 },
+      depth_mm:  { type: "number", nullable: true, default: null, min: 1 },
+  },
+  portTypes: {
+      name:   { type: "string" },
+      kind:   { type: "string", enum: DATA_OR_POWER, default: "data" },
+      duplex: { type: "boolean", default: false },
+  },
+  cableTypes: {
+      name: { type: "string" },
+      kind: { type: "string", enum: DATA_OR_POWER, default: "data" },
+  },
+  cableBundles: {
+      name:                    { type: "string" },
+      cable_type_id:           { type: "string", nullable: true, default: null, ref: "cableTypes" },
+      waypoint_ids:            { type: "string[]", default: [], ref: "waypoints" },
+      // 2 extrémités (des PATCHS — T11) où le trunk est terminé — cf. Port.bundle_id (affectation des brins).
+      endpoint_a_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+      endpoint_b_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+  },
+  datacenters: {
+      name: { type: "string", required: true },
+  },
+  waypoints: {
+      name:          { type: "string" },
+      kind:          { type: "string", enum: WAYPOINT_KINDS, default: "point" },
+      wp_type:       { type: "string", enum: WAYPOINT_TYPES, default: "datacenter" },
+      locked:        { type: "boolean", default: false },   // positionnement verrouillé (vues 2D/3D) — cf. PlacementLock
+      rack_id:       { type: "string", nullable: true, default: null, ref: "racks" },
+      datacenter_id: { type: "string", nullable: true, default: null, ref: "datacenters" },
+  },
+  floors: {
+      location: { type: "string" },
+  },
+  ipNetworks: {
+      label:          { type: "string", required: true },
+      cidr:           { type: "string", required: true, format: "cidr" },
+      gateway:        { type: "string", nullable: true, default: null, format: "ipv4" },   // passerelle (∈ CIDR — invariant ci-dessous)
+      dns_servers:    { type: "string[]", default: [] },                                    // résolveurs DNS (IPv4, HORS CIDR admis — cf. invariant)
+      dhcp_server_id: { type: "string", nullable: true, default: null, ref: "equipments" }, // serveur DHCP du réseau (parité dhcpRanges.server_id)
+  },
+  ipAddresses: {
+      address:      { type: "string", required: true, format: "ipv4" },
+      // Nom d'hôte auquel l'IP résout (saisi dans IpamForms, affiché en liste et dans les fiches). RÉGULARISÉ
+      // 2026-07-20 : le champ vivait HORS spec (traversée tolérée) alors que c'est une IDENTITÉ — base des
+      // rapprochements par hostname (VM↔hôte via VmClusterFormat, certificats↔cibles à venir). DURCI (décision
+      // utilisateur, aucune donnée en conflit) : format `hostname` STRICT (RFC 1123, nom court ou FQDN) — une
+      // valeur mal formée est désormais rejetée (400 serveur / erreur UI). Optionnel (non requis) : une IP peut
+      // n'avoir aucun nom d'hôte ; trim conservé (fiabilise l'identité pour les rapprochements).
+      hostname:     { type: "string", trim: true, format: "hostname" },
+      network_id:   { type: "string", nullable: true, default: null, ref: "ipNetworks" },
+      equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+      // rattachement à une VM (parité equipment_id) — FK contrôlée (V2) et détachée en cascade (Cascade.vms).
+      vm_id:        { type: "string", nullable: true, default: null, ref: "vms" },
+  },
+  dhcpRanges: {
+      start_ip:   { type: "string", required: true, format: "ipv4" },
+      end_ip:     { type: "string", required: true, format: "ipv4" },
+      network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
+      server_id:  { type: "string", nullable: true, default: null, ref: "equipments" },
+  },
+  spares: {
+      name:                  { type: "string" },
+      type:                  { type: "string", enum: SPARE_TYPE_IDS },
+      status:                { type: "string", enum: SPARE_STATUS_IDS },
+      assigned_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+  },
+  sites: {
+      name:    { type: "string", required: true },
+      address: { type: "string" },
+  },
+  vms: {
+      name:              { type: "string", required: true },
+      // vm_type / status TOLÉRANTS : PAS de contrainte `enum` — une valeur inconnue (nouveau type/statut d'une
+      // release Proxmox) est ACCEPTÉE telle quelle (résilience : le pivot isole l'app, on ne rejette pas une nouveauté).
+      vm_type:           { type: "string", default: "qemu" },
+      status:            { type: "string", default: "" },
+      provider_id:       { type: "string", default: "" },
+      // hôte hébergeur (champ LOCAL) — FK vers un équipement, détachée en cascade (cf. Cascade.equipments).
+      host_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+      // GROUPES (champs LOCAUX) : PARITÉ STRICTE avec la spec equipments — primaire `group_id` ⊂ `group_ids`
+      // (TOUS les groupes), FK contrôlées (V2) et détachées en cascade (Cascade.groups balaie aussi vms).
+      group_id:          { type: "string", nullable: true, default: null, ref: "groups" },
+      group_ids:         { type: "string[]", default: [], ref: "groups" },
+  },
+  contacts: {
+      name:  { type: "string", required: true, trim: true },   // identité du contact — trimée (fiabilise le libellé)
+      email: { type: "string", trim: true },                   // optionnel — format contrôlé en douceur (invariant)
+      phone: { type: "string", trim: true },                   // optionnel — quasi libre (invariant)
+      notes: { type: "string" },                               // notes libres (multi-lignes) — aucune contrainte
+  },
+} as const;
+
+/* Types d'ENREGISTREMENT (formes REST partagées, NORMALISÉES) dérivés de SPEC_FIELDS — SOURCE UNIQUE = la spec.
+   Regroupés en NAMESPACE (type-only, effacé au build) pour NE PAS entrer en collision avec les CLASSES de modèle
+   (`src-client/models/*`, comportement client) ni avec le pivot serveur `VmRecord` (module vm/). ⚠ On ne partage
+   QUE le CONTRAT DE FORME : les classes client `implements Records.X` (garde-fou de dérive), le serveur se type
+   dessus là où il LIT des champs. Usage : `Records.Equipment`, `Records.Contact`, … */
+export namespace Records {
+  export type Equipment  = RecordOf<typeof SPEC_FIELDS.equipments>;
+  export type Cable      = RecordOf<typeof SPEC_FIELDS.cables>;
+  export type Rack       = RecordOf<typeof SPEC_FIELDS.racks>;
+  export type Port       = RecordOf<typeof SPEC_FIELDS.ports>;
+  export type Aggregate  = RecordOf<typeof SPEC_FIELDS.aggregates>;
+  export type Network    = RecordOf<typeof SPEC_FIELDS.networks>;
+  export type Group      = RecordOf<typeof SPEC_FIELDS.groups>;
+  export type RackItem   = RecordOf<typeof SPEC_FIELDS.rackItems>;
+  export type PortType   = RecordOf<typeof SPEC_FIELDS.portTypes>;
+  export type CableType  = RecordOf<typeof SPEC_FIELDS.cableTypes>;
+  export type CableBundle = RecordOf<typeof SPEC_FIELDS.cableBundles>;
+  export type Datacenter = RecordOf<typeof SPEC_FIELDS.datacenters>;
+  export type Waypoint   = RecordOf<typeof SPEC_FIELDS.waypoints>;
+  export type Floor      = RecordOf<typeof SPEC_FIELDS.floors>;
+  export type IpNetwork  = RecordOf<typeof SPEC_FIELDS.ipNetworks>;
+  export type IpAddress  = RecordOf<typeof SPEC_FIELDS.ipAddresses>;
+  export type DhcpRange  = RecordOf<typeof SPEC_FIELDS.dhcpRanges>;
+  export type Spare      = RecordOf<typeof SPEC_FIELDS.spares>;
+  export type Site       = RecordOf<typeof SPEC_FIELDS.sites>;
+  export type Vm         = RecordOf<typeof SPEC_FIELDS.vms>;
+  export type Contact    = RecordOf<typeof SPEC_FIELDS.contacts>;
+}
+
+export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
+  equipments: {
+    fields: SPEC_FIELDS.equipments,
     invariants: [
       // T1 : PLACÉ à un U d'une baie (rack_u renseigné) ⇒ doit référencer une baie. On teste la POSITION
       // (rack_u), PAS le placement_mode : la convention app-wide est qu'un équipement U NON PLACÉ vit en
@@ -536,18 +750,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     ],
   },
   cables: {
-    fields: {
-      cable_type_id: { type: "string", nullable: true, default: null, ref: "cableTypes" },
-      from_port_id:  { type: "string", nullable: true, default: null, ref: "ports" },
-      to_port_id:    { type: "string", nullable: true, default: null, ref: "ports" },
-      network_ids:   { type: "string[]", default: [], ref: "networks" },
-      network_id:    { type: "string", nullable: true, default: null, ref: "networks" },
-      waypoint_ids:  { type: "string[]", default: [], ref: "waypoints" },
-      length_m:      { type: "number", nullable: true, default: null, min: 0 },
-      status:        { type: "string", required: true, enum: CABLE_STATUS_IDS, default: "brouillon" },
-      // NB : l'ancien mécanisme « câble-brin » (bundle_id/strand_no sur le câble) a été RETIRÉ — les brins d'un
-      // faisceau sont piochés par les PORTS de patch (Port.bundle_id/strand_a/strand_b), source unique.
-    },
+    fields: SPEC_FIELDS.cables,
     invariants: [
       {
         path: "to_port_id",
@@ -588,19 +791,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     ],
   },
   racks: {
-    fields: {
-      name:          { type: "string", required: true },
-      location:      { type: "string", default: "" },
-      u_count:       { type: "number", min: 1, default: 42 },
-      width_mm:      { type: "number", min: 1 },
-      depth:         { type: "number", min: 1 },
-      sides:         { type: "string", enum: RACK_SIDE_CONFIGS, default: "single" },
-      has_caps:      { type: "boolean", default: true },   // habillage toit/fond — false = châssis OUVERT
-      locked:        { type: "boolean", default: false },  // positionnement verrouillé (vues 2D/3D) — cf. PlacementLock
-      datacenter_id: { type: "string", nullable: true, default: null, ref: "datacenters" },
-      dc_x:          { type: "number", nullable: true, default: null },
-      dc_y:          { type: "number", nullable: true, default: null },
-    },
+    fields: SPEC_FIELDS.racks,
     invariants: [
       // T3 : une baie SANS capots (châssis ouvert) ne peut pas porter de portes (rien où les fixer).
       { path: "has_caps", message: "Une baie sans capots ne peut pas avoir de portes.", holds: (r) => r.has_caps !== false || !((r.door_front && r.door_front.enabled) || (r.door_rear && r.door_rear.enabled)) },
@@ -632,30 +823,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
 
   /* ---- collections ÉTENDUES — specs PARTIELLES : champs d'identité, énumérations, et surtout les FK (`ref`). ---- */
   ports: {
-    fields: {
-      name:           { type: "string" },
-      equipment_id:   { type: "string", nullable: true, default: null, ref: "equipments" },
-      port_type_id:   { type: "string", nullable: true, default: null, ref: "portTypes" },
-      parent_port_id: { type: "string", nullable: true, default: null, ref: "ports" },
-      aggregate_id:   { type: "string", nullable: true, default: null, ref: "aggregates" },
-      face_side:      { type: "string", enum: EQUIPMENT_FACE_IDS, default: "front" },
-      // TERMINAISON DE FAISCEAU (ports de patch) : quel faisceau, quels brins physiques piochés.
-      bundle_id:      { type: "string", nullable: true, default: null, ref: "cableBundles" },
-      strand_a:       { type: "number", nullable: true, default: null, min: 1 },
-      strand_b:       { type: "number", nullable: true, default: null, min: 1 },
-      // RÉSEAU asserté par un port TERMINAL (source unique ; déduit ailleurs). Vide = joker.
-      network_ids:    { type: "string[]", default: [], ref: "networks" },
-      network_id:     { type: "string", nullable: true, default: null, ref: "networks" },
-      // POWER : sens de l'énergie, plafond de courant (A), phase (départ de tableau). Enum souples (vide toléré).
-      direction:      { type: "string", default: "", enum: ["", "source", "sink"] },
-      power_max_a:    { type: "number", nullable: true, default: null, min: 0 },
-      phase:          { type: "string", default: "", enum: ["", "L1", "L2", "L3"] },
-      // POE (rôle "poe") : budget max du port en WATTS (délivré si producteur / tiré si consommateur).
-      poe_budget_w:   { type: "number", nullable: true, default: null, min: 0 },
-      // POE : injection (PSE) / consommation (PD) ACTIVÉE sur ce port. Un câble ne porte l'éclair d'énergie que si
-      // les DEUX extrémités PoE sont activées (cf. Store.cableCarriesPower). Défaut true (un port PoE injecte/tire).
-      poe_enabled:    { type: "boolean", default: true },
-    },
+    fields: SPEC_FIELDS.ports,
     invariants: [
       // T1 : position de façade complète (X ET Y) ou absente (aucun des deux).
       { path: "face_y", message: "La position de façade doit avoir X et Y (ou aucun des deux).", holds: (p) => (p.face_x == null) === (p.face_y == null) },
@@ -735,18 +903,10 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     ],
   },
   aggregates: {
-    fields: {
-      name:         { type: "string" },
-      equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
-    },
+    fields: SPEC_FIELDS.aggregates,
   },
   networks: {
-    fields: {
-      label:         { type: "string", required: true },
-      kind:          { type: "string", enum: DATA_OR_POWER, default: "data" },
-      power_source:  { type: "string", nullable: true, default: null, enum: POWER_SOURCES },
-      ip_network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
-    },
+    fields: SPEC_FIELDS.networks,
     invariants: [
       {
         path: "ip_network_id",
@@ -756,23 +916,10 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     ],
   },
   groups: {
-    fields: {
-      label: { type: "string", required: true },
-      type:  { type: "string", enum: GROUP_TYPE_IDS },
-    },
+    fields: SPEC_FIELDS.groups,
   },
   rackItems: {
-    fields: {
-      label:     { type: "string" },
-      rack_id:   { type: "string", nullable: true, default: null, ref: "racks" },
-      kind:      { type: "string", enum: RACK_ITEM_KIND_IDS, default: "blank" },
-      side:      { type: "string", enum: RACK_OCCUPANT_SIDES, default: "front" },
-      u_height:  { type: "number", min: 1, default: 1 },
-      // configuration TRAY (étagère) — sans effet pour les autres kinds
-      tray_type: { type: "string", enum: TRAY_TYPE_IDS, default: "dual" },
-      tray_u:    { type: "number", min: 1, default: 1 },
-      depth_mm:  { type: "number", nullable: true, default: null, min: 1 },
-    },
+    fields: SPEC_FIELDS.rackItems,
     invariants: [
       // TRAY : la structure (tray_u) tient dans la hauteur totale RÉSERVÉE (u_height).
       { path: "tray_u", message: "La hauteur du tray (structure) dépasse la hauteur réservée totale.", holds: (it) => it.kind !== "tray" || Math.max(1, it.tray_u | 0) <= Math.max(1, it.u_height | 0) },
@@ -781,27 +928,13 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     scope: [(item, find, fetch) => RackOccupancy.collision(item, "rackItems", find, fetch)],
   },
   portTypes: {
-    fields: {
-      name:   { type: "string" },
-      kind:   { type: "string", enum: DATA_OR_POWER, default: "data" },
-      duplex: { type: "boolean", default: false },
-    },
+    fields: SPEC_FIELDS.portTypes,
   },
   cableTypes: {
-    fields: {
-      name: { type: "string" },
-      kind: { type: "string", enum: DATA_OR_POWER, default: "data" },
-    },
+    fields: SPEC_FIELDS.cableTypes,
   },
   cableBundles: {
-    fields: {
-      name:                    { type: "string" },
-      cable_type_id:           { type: "string", nullable: true, default: null, ref: "cableTypes" },
-      waypoint_ids:            { type: "string[]", default: [], ref: "waypoints" },
-      // 2 extrémités (des PATCHS — T11) où le trunk est terminé — cf. Port.bundle_id (affectation des brins).
-      endpoint_a_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
-      endpoint_b_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
-    },
+    fields: SPEC_FIELDS.cableBundles,
     invariants: [
       // T10 : un faisceau relie deux équipements DISTINCTS (miroir du self-loop câble). Un trunk bouclé sur le
       // même patch n'a pas de sens physique (le pool de brins relierait un équipement à lui-même) et casserait
@@ -835,19 +968,10 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     ],
   },
   datacenters: {
-    fields: {
-      name: { type: "string", required: true },
-    },
+    fields: SPEC_FIELDS.datacenters,
   },
   waypoints: {
-    fields: {
-      name:          { type: "string" },
-      kind:          { type: "string", enum: WAYPOINT_KINDS, default: "point" },
-      wp_type:       { type: "string", enum: WAYPOINT_TYPES, default: "datacenter" },
-      locked:        { type: "boolean", default: false },   // positionnement verrouillé (vues 2D/3D) — cf. PlacementLock
-      rack_id:       { type: "string", nullable: true, default: null, ref: "racks" },
-      datacenter_id: { type: "string", nullable: true, default: null, ref: "datacenters" },
-    },
+    fields: SPEC_FIELDS.waypoints,
     invariants: [
       // T1 : une brosse est montée DANS une baie (rack_id obligatoire pour ce genre).
       { path: "rack_id", message: "Une brosse doit être montée dans une baie.", holds: (wp) => wp.kind !== "brush" || !!wp.rack_id },
@@ -865,18 +989,10 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     scope: [(wp, find, fetch) => RackOccupancy.collision(wp, "waypoints", find, fetch)],
   },
   floors: {
-    fields: {
-      location: { type: "string" },
-    },
+    fields: SPEC_FIELDS.floors,
   },
   ipNetworks: {
-    fields: {
-      label:          { type: "string", required: true },
-      cidr:           { type: "string", required: true, format: "cidr" },
-      gateway:        { type: "string", nullable: true, default: null, format: "ipv4" },   // passerelle (∈ CIDR — invariant ci-dessous)
-      dns_servers:    { type: "string[]", default: [] },                                    // résolveurs DNS (IPv4, HORS CIDR admis — cf. invariant)
-      dhcp_server_id: { type: "string", nullable: true, default: null, ref: "equipments" }, // serveur DHCP du réseau (parité dhcpRanges.server_id)
-    },
+    fields: SPEC_FIELDS.ipNetworks,
     invariants: [
       // La passerelle (si définie) est l'interface locale du routeur → DOIT appartenir au sous-réseau.
       { path: "gateway", message: "La passerelle doit appartenir au sous-réseau.", holds: (n) => {
@@ -895,20 +1011,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     ],
   },
   ipAddresses: {
-    fields: {
-      address:      { type: "string", required: true, format: "ipv4" },
-      // Nom d'hôte auquel l'IP résout (saisi dans IpamForms, affiché en liste et dans les fiches). RÉGULARISÉ
-      // 2026-07-20 : le champ vivait HORS spec (traversée tolérée) alors que c'est une IDENTITÉ — base des
-      // rapprochements par hostname (VM↔hôte via VmClusterFormat, certificats↔cibles à venir). DURCI (décision
-      // utilisateur, aucune donnée en conflit) : format `hostname` STRICT (RFC 1123, nom court ou FQDN) — une
-      // valeur mal formée est désormais rejetée (400 serveur / erreur UI). Optionnel (non requis) : une IP peut
-      // n'avoir aucun nom d'hôte ; trim conservé (fiabilise l'identité pour les rapprochements).
-      hostname:     { type: "string", trim: true, format: "hostname" },
-      network_id:   { type: "string", nullable: true, default: null, ref: "ipNetworks" },
-      equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
-      // rattachement à une VM (parité equipment_id) — FK contrôlée (V2) et détachée en cascade (Cascade.vms).
-      vm_id:        { type: "string", nullable: true, default: null, ref: "vms" },
-    },
+    fields: SPEC_FIELDS.ipAddresses,
     invariants: [
       // EXCLUSIVITÉ SOUPLE : une adresse vise un ÉQUIPEMENT **ou** une VM, jamais les deux. Invariant INTRA-champs
       // (dépend de equipment_id ET vm_id du même enregistrement) — souple : les DEUX vides restent permis (adresse
@@ -947,12 +1050,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     ],
   },
   dhcpRanges: {
-    fields: {
-      start_ip:   { type: "string", required: true, format: "ipv4" },
-      end_ip:     { type: "string", required: true, format: "ipv4" },
-      network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
-      server_id:  { type: "string", nullable: true, default: null, ref: "equipments" },
-    },
+    fields: SPEC_FIELDS.dhcpRanges,
     invariants: [
       {
         path: "end_ip",
@@ -996,38 +1094,17 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     ],
   },
   spares: {
-    fields: {
-      name:                  { type: "string" },
-      type:                  { type: "string", enum: SPARE_TYPE_IDS },
-      status:                { type: "string", enum: SPARE_STATUS_IDS },
-      assigned_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
-    },
+    fields: SPEC_FIELDS.spares,
   },
   sites: {
-    fields: {
-      name:    { type: "string", required: true },
-      address: { type: "string" },
-    },
+    fields: SPEC_FIELDS.sites,
   },
   vms: {
     // NB (audit de régularisation 2026-07-20) : `nics` (tableau d'OBJETS source Proxmox, normalisé par
     // VmSync.normalizeNic) n'est PAS déclarable champ-par-champ dans cette spec (FieldType ne couvre pas
     // les tableaux d'objets) — sa validation vit dans l'INVARIANT « IPv4 des vNIC » ci-dessous. PASSTHROUGH
     // INTENTIONNEL documenté, pas un oubli.
-    fields: {
-      name:              { type: "string", required: true },
-      // vm_type / status TOLÉRANTS : PAS de contrainte `enum` — une valeur inconnue (nouveau type/statut d'une
-      // release Proxmox) est ACCEPTÉE telle quelle (résilience : le pivot isole l'app, on ne rejette pas une nouveauté).
-      vm_type:           { type: "string", default: "qemu" },
-      status:            { type: "string", default: "" },
-      provider_id:       { type: "string", default: "" },
-      // hôte hébergeur (champ LOCAL) — FK vers un équipement, détachée en cascade (cf. Cascade.equipments).
-      host_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
-      // GROUPES (champs LOCAUX) : PARITÉ STRICTE avec la spec equipments — primaire `group_id` ⊂ `group_ids`
-      // (TOUS les groupes), FK contrôlées (V2) et détachées en cascade (Cascade.groups balaie aussi vms).
-      group_id:          { type: "string", nullable: true, default: null, ref: "groups" },
-      group_ids:         { type: "string[]", default: [], ref: "groups" },
-    },
+    fields: SPEC_FIELDS.vms,
     invariants: [
       // Chaque IP d'une vNIC doit être une IPv4 valide : le moteur ne valide PAS élément par élément un tableau
       // d'OBJETS (`nics`), on le fait donc ici — même style que l'invariant `ipNetworks.dns_servers`.
@@ -1043,12 +1120,7 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     // notifications 2026-07-14 §2 (Q4). AUCUNE FK (`ref`) : rien dans le document ne pointe vers un contact
     // (le lien abonnement→contact est une référence souple `contact_id` HORS document), d'où l'absence de
     // cascade et d'index secondaire. `name` est le seul champ REQUIS ; `email`/`phone` sont validés EN DOUCEUR.
-    fields: {
-      name:  { type: "string", required: true, trim: true },   // identité du contact — trimée (fiabilise le libellé)
-      email: { type: "string", trim: true },                   // optionnel — format contrôlé en douceur (invariant)
-      phone: { type: "string", trim: true },                   // optionnel — quasi libre (invariant)
-      notes: { type: "string" },                               // notes libres (multi-lignes) — aucune contrainte
-    },
+    fields: SPEC_FIELDS.contacts,
     invariants: [
       // E-MAIL TOLÉRANT (décision utilisateur : « valider en douceur ») — on ne contrôle le format QUE s'il est
       // renseigné, et on ne refuse que ce qui est CLAIREMENT invalide (pas de « @ » entouré de parties non vides

@@ -1,8 +1,9 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { RackItemKinds } from "../domain/RackItemKinds";
 
 /** Pseudo-équipement monté en rack (Blanking Plate / Tray / KeepBlank). */
-export class RackItem extends Entity {
+export class RackItem extends Entity implements Records.RackItem {
   /** FK → racks (la baie hôte). */
   rack_id: string | null;
   /** U de bas. null = non placé. */

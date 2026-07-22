@@ -4,6 +4,7 @@ import type { NotifyDb } from "./NotifyDb.js";
 import type { Notifier } from "./Notifier.js";
 import { ConsoleNotifier } from "./ConsoleNotifier.js";
 import { WebhookNotifier } from "./WebhookNotifier.js";
+import type { Records } from "../../../src-shared/DataValidation.js";   // forme d'enregistrement DÉRIVÉE de la spec (contacts)
 
 /* =============================================================================
    ROUTAGE PAR ABONNEMENTS — matérialise le `NotifyRouter` injecté au moteur :
@@ -33,8 +34,8 @@ import { WebhookNotifier } from "./WebhookNotifier.js";
 export interface ContactSource {
   /** Ids des documents existants (parcours de repli des abonnements globaux). */
   documentIds(): string[];
-  /** L'enregistrement contact d'un document, ou null (document ou contact inconnu). */
-  contact(docId: string, contactId: string): Record<string, unknown> | null;
+  /** L'enregistrement contact d'un document (forme dérivée de la spec), ou null (document ou contact inconnu). */
+  contact(docId: string, contactId: string): Records.Contact | null;
 }
 
 export class SubscriptionRouter {
@@ -97,7 +98,7 @@ export class SubscriptionRouter {
 
   /** Cherche le contact : documents PRÉFÉRÉS d'abord (événement, puis abonnement),
       puis tous les autres (repli des abonnements globaux). */
-  private findContact(contactId: string, ...preferredDocIds: Array<string | undefined>): Record<string, unknown> | null {
+  private findContact(contactId: string, ...preferredDocIds: Array<string | undefined>): Records.Contact | null {
     const tried = new Set<string>();
     for (const docId of preferredDocIds) {
       if (!docId || tried.has(docId)) continue;

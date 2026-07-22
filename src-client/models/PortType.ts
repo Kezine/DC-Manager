@@ -1,7 +1,8 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 
 /** Type de port : famille (compatibilité signal/médium) + connecteur physique. */
-export class PortType extends Entity {
+export class PortType extends Entity implements Records.PortType {
   /** Nom affiché (ex. "SFP+ 10G"). */
   name: string;
   /** Clé de COMPATIBILITÉ (signal/médium) : un câble relie 2 ports de même famille. */

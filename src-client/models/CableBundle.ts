@@ -1,10 +1,11 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { Normalize } from "../core/Normalize";
 
 /** Faisceau / trunk (câble multi-fibres) entre 2 patchs. Porte la route et la
     longueur du tracé ; ses fibres sont piochées par les PORTS des patchs
     d'extrémité (cf. Port.bundle_id / strand_a / strand_b). */
-export class CableBundle extends Entity {
+export class CableBundle extends Entity implements Records.CableBundle {
   /** Nom du faisceau (utile sur ~99 % du tracé). */
   name: string;
   /** TYPE de fibre du trunk (FK → cableTypes) — indicatif. */

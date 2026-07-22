@@ -1,7 +1,8 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 
 /** Réseau logique (couleur de câble). Data (VLAN) ou Power (circuit). */
-export class Network extends Entity {
+export class Network extends Entity implements Records.Network {
   /** Nom lisible (ex. "VLAN 10 Prod"). */
   label: string;
   /** Couleur d'affichage des câbles du réseau. null = auto. */

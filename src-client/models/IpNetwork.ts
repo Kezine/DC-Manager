@@ -1,7 +1,8 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 
 /** Sous-réseau IPv4 (CIDR) — IPAM. */
-export class IpNetwork extends Entity {
+export class IpNetwork extends Entity implements Records.IpNetwork {
   /** Nom lisible (ex. "LAN Prod"). */
   label: string;
   /** Sous-réseau IPv4 « a.b.c.d/n ». */

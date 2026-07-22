@@ -1,9 +1,10 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { Normalize, RackDoor } from "../core/Normalize";
 import { RACK_WIDTH_DEFAULT, RACK_MOUNT_MARGIN_DEFAULT, RACK_DEPTH_DEFAULT } from "../domain/constants";
 
 /** Baie (rack) : géométrie physique + emplacement dans un datacenter. */
-export class Rack extends Entity {
+export class Rack extends Entity implements Records.Rack {
   /** Nom (les racks sont triés par nom ; l'`order` legacy est ignoré). */
   name: string;
   /** Lieu / bâtiment (slug ∈ LOCATIONS). */

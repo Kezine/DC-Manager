@@ -1,8 +1,9 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { GroupTypes } from "../domain/GroupTypes";
 
 /** Groupe d'équipements (stack | system | general). */
-export class Group extends Entity {
+export class Group extends Entity implements Records.Group {
   /** Nom du groupe. */
   label: string;
   /** Couleur partagée par les membres (héritée par leurs occupants de rack). null = auto. */

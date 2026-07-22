@@ -1,7 +1,8 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 
 /** Plage d'adresses réservée à un serveur DHCP — IPAM. */
-export class DhcpRange extends Entity {
+export class DhcpRange extends Entity implements Records.DhcpRange {
   /** FK → ipNetworks (le sous-réseau). */
   network_id: string | null;
   /** Première adresse de la plage (incluse). */

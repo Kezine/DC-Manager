@@ -1,4 +1,5 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { VmSync, VmNic } from "../../src-shared/VmSync";
 
 /** Interface réseau VIRTUELLE (vNIC) d'une VM — EMBARQUÉE dans l'entité (tableau `nics`), PAS un enregistrement
@@ -15,7 +16,7 @@ export type { VmNic } from "../../src-shared/VmSync";
     Frontière SOURCE / LOCAUX (décision de cadrage) :
     - champs SOURCE : ÉCRASÉS à chaque synchro (réconciliation par `ext_id` = « provider/vmid ») ;
     - champs LOCAUX : enrichissements JAMAIS touchés par la synchro (notes, hôte hébergeur, groupes). */
-export class Vm extends Entity {
+export class Vm extends Entity implements Records.Vm {
   /* ---- champs SOURCE (écrasés par la synchro) ---- */
   /** Identité STABLE côté provider (« provider/vmid ») — clé de RÉCONCILIATION create/update/orphelin. */
   ext_id: string;

@@ -1,10 +1,11 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { Normalize } from "../core/Normalize";
 import type { DcDoor } from "../core/Normalize";
 import { DC_WIDTH_DEFAULT, DC_DEPTH_DEFAULT, DC_CELL_DEFAULT } from "../domain/constants";
 
 /** Salle datacenter : grille au sol + dimensions ; pioche dans le pool de racks. */
-export class Datacenter extends Entity {
+export class Datacenter extends Entity implements Records.Datacenter {
   /** Nom de la salle. */
   name: string;
   /** Largeur salle X (mm). */

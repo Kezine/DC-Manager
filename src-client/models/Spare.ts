@@ -1,11 +1,12 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { SpareTypes } from "../domain/SpareTypes";
 import { SpareStatuses } from "../domain/SpareStatuses";
 import { SPARE_DISK_TYPES } from "../domain/constants";
 
 /** Pièce de rechange (spare) — suivi UNITAIRE, hors graphe réseau (ni placée, ni câblée).
     Champs communs + champs spécifiques par type (HDD · SSD · transceiver · autre). */
-export class Spare extends Entity {
+export class Spare extends Entity implements Records.Spare {
   /** Type principal : "hdd" | "ssd" | "transceiver" | "other". */
   type: string;
   /** Désignation libre (sinon dérivée du type/modèle à l'affichage). */

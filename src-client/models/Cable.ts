@@ -1,4 +1,5 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { Normalize } from "../core/Normalize";
 import { CableStatuses } from "../domain/CableStatuses";
 
@@ -6,7 +7,7 @@ import { CableStatuses } from "../domain/CableStatuses";
     NB : les brins d'un FAISCEAU ne sont pas des câbles — ils sont piochés par les
     PORTS de patch (Port.bundle_id/strand_a/strand_b) ; l'ancien « câble-brin »
     (bundle_id/strand_no ici) a été retiré. */
-export class Cable extends Entity {
+export class Cable extends Entity implements Records.Cable {
   /** Nom libre (optionnel). */
   name: string;
   /** FK → cableTypes. */

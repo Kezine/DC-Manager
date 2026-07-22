@@ -1,4 +1,5 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import {
   WAYPOINT_Z_DEFAULT,
   CONDUIT_W_DEFAULT,
@@ -9,7 +10,7 @@ import { I18n } from "../i18n/I18n";
 
 /** Point de passage de câbles. Trois formes (kind : point | segment | brush)
     et trois types (wp_type : datacenter | exit | oob). */
-export class Waypoint extends Entity {
+export class Waypoint extends Entity implements Records.Waypoint {
   /** Nom libre. */
   name: string;
   /** Forme : "point" (pin) | "segment" (rail/chemin de câbles) | "brush" (brosse, contrainte à un rack). */

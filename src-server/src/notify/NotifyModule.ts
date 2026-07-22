@@ -11,6 +11,7 @@ import { NotifyConfigError } from "./NotifyValidate.js";
 import { ConsoleNotifier } from "./ConsoleNotifier.js";
 import { WebhookNotifier } from "./WebhookNotifier.js";
 import type { NotificationMessage, NotificationTarget, Notifier, NotifySeverity } from "./Notifier.js";
+import type { Records } from "../../../src-shared/DataValidation.js";   // forme dérivée de la spec (contacts) — cast de frontière du store générique
 
 /* =============================================================================
    MODULE NOTIFICATIONS — façade d'assemblage et POINT DE BRANCHEMENT UNIQUE de
@@ -92,7 +93,9 @@ export class NotifyModule {
         documentIds: () => opts.docs.list().map((d) => d.id),
         contact: (docId, contactId) => {
           const repo = opts.docs.repo(docId);
-          return repo ? repo.getOne("contacts", contactId) : null;
+          // Frontière : le store de documents est GÉNÉRIQUE (Rec brut) ; la FORME est garantie par DataValidation à
+          // l'écriture → cast assumé vers le type dérivé de la spec (source unique du contrat), consommé typé côté routeur.
+          return (repo ? repo.getOne("contacts", contactId) : null) as Records.Contact | null;
         },
       };
       const router = new SubscriptionRouter(db, contacts, log);

@@ -1,10 +1,11 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 import { Normalize } from "../core/Normalize";
 import { FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT } from "../domain/constants";
 
 /** Étage : plan du bâtiment (location) à un niveau (floor) où l'on pose
     les salles et les OOB. Clé logique (location, floor). */
-export class Floor extends Entity {
+export class Floor extends Entity implements Records.Floor {
   /** Bâtiment (slug ∈ LOCATIONS) — 1re partie de la clé logique. */
   location: string;
   /** Niveau (∈ FLOORS) — 2e partie de la clé logique. */

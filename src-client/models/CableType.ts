@@ -1,7 +1,8 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 
 /** Type de câble : famille + médium. Data ou Power. */
-export class CableType extends Entity {
+export class CableType extends Entity implements Records.CableType {
   /** Nom affiché (ex. "Cat6a U/FTP"). */
   name: string;
   /** Famille de compatibilité (doit matcher la famille des 2 ports reliés). */

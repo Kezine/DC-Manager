@@ -1,7 +1,8 @@
 import { Entity, Props } from "./Entity";
+import type { Records } from "../../src-shared/DataValidation";
 
 /** Attribution IP statique (adresse unique globalement) — IPAM. */
-export class IpAddress extends Entity {
+export class IpAddress extends Entity implements Records.IpAddress {
   /** FK → ipNetworks (le sous-réseau). */
   network_id: string | null;
   /** Adresse IPv4 « a.b.c.d » — UNIQUE globalement. */
