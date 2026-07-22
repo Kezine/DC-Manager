@@ -808,6 +808,14 @@ export abstract class DcInteract extends DcPanels {
 
   /** Centre monde (mm) d'un équipement dans la salle `dcId` (repère salle = monde en mode simple DC), ou null. */
   protected equipCenter(e: any, dcId: string): Vec3 | null {
+    // POSÉ SUR UNE ÉTAGÈRE (tray) : dim_mode "free" MAIS sans dc_id → centre déduit de la baie hôte (via l'étagère).
+    // DOIT précéder la branche « libre » (qui exige dc_id) sinon le « Localiser » vise l'origine de la salle.
+    if (e.placement_mode === "tray" && e.tray_item_id) {
+      const tray: any = this.store.get("rackItems", e.tray_item_id); if (!tray || !tray.rack_id) return null;
+      const rk: any = this.store.get("racks", tray.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
+      const b = RackGeometry.trayEquipBoxLocal(rk, tray, e);
+      return { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: (b.z0 + b.z1) / 2 };
+    }
     if (e.dim_mode === "free") { if (e.dc_id !== dcId || e.dc_x == null || e.dc_y == null) return null; const b = FreeEquipGeometry.box(e); return { x: e.dc_x, y: e.dc_y, z: b.z + b.h / 2 }; }
     if (e.placement_mode === "rack" && e.rack_id && e.rack_u != null) {
       const rk: any = this.store.get("racks", e.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
@@ -842,12 +850,14 @@ export abstract class DcInteract extends DcPanels {
       « rear ») se regarde depuis l'arrière de la baie ; un boîtier libre depuis sa propre orientation. */
   protected aimAtEquip(e: any, dcId: string): { az: number; el: number } {
     this.focusEqId = e.id;
-    const inRack = (e.placement_mode === "rack" || e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id;
-    if (inRack) {
-      const rk: any = this.store.get("racks", e.rack_id);
-      this.selRackId = e.rack_id;
+    // baie hôte : DIRECTE (rack/side/wall) OU DÉRIVÉE de l'étagère (tray → rackItem → rack) pour un posé.
+    let rackId: string | null = ((e.placement_mode === "rack" || e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id) ? e.rack_id : null;
+    if (!rackId && e.placement_mode === "tray" && e.tray_item_id) { const tray: any = this.store.get("rackItems", e.tray_item_id); rackId = (tray && tray.rack_id) ? tray.rack_id : null; }
+    if (rackId) {
+      const rk: any = this.store.get("racks", rackId);
+      this.selRackId = rackId;
       // isoler la baie : ne montrer que celle-ci dans la salle (les autres baies sont masquées)
-      this.hidden3dRacks = new Set(this.store.racksOfDc(dcId).map((r: any) => r.id)); this.hidden3dRacks.delete(e.rack_id);
+      this.hidden3dRacks = new Set(this.store.racksOfDc(dcId).map((r: any) => r.id)); this.hidden3dRacks.delete(rackId);
       const rear = (e.placement_mode === "rack" && e.rack_side === "rear");   // monté à l'arrière → face arrière de la baie
       return this.frontAzimuth(rk ? rk.orientation : 0, rear);
     }
