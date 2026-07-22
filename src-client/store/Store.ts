@@ -708,6 +708,14 @@ export class Store {
       const rack = this.get("racks", eq.rack_id);
       return (rack && rack.datacenter_id) ? rack.datacenter_id : null;
     }
+    // POSÉ SUR UNE ÉTAGÈRE (tray) : la salle est celle de la BAIE hôte de l'étagère (tray → rackItem → rack → DC).
+    // DOIT précéder le repli « libre » : un équipement posé est dim_mode "free" MAIS sans dc_id (rattaché via
+    // tray_item_id). Sans ce cas il retombait à null (« non placé ») → un câble vers lui restait bloqué à « planifié ».
+    if (eq.placement_mode === "tray" && eq.tray_item_id) {
+      const tray = this.get("rackItems", eq.tray_item_id);
+      const rack = tray && tray.rack_id ? this.get("racks", tray.rack_id) : null;
+      return (rack && rack.datacenter_id) ? rack.datacenter_id : null;
+    }
     if (eq.dim_mode === "free") return eq.dc_id || null;
     if (eq.placement_mode === "rack" && eq.rack_id && eq.rack_u != null) {
       const rack = this.get("racks", eq.rack_id);

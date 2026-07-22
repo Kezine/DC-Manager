@@ -378,6 +378,12 @@ module.exports = async () => {
     // equipmentDcId via baie hôte
     const eqInA = s.get("ports", pA1) ? s.get("equipments", s.get("ports", pA1).equipment_id) : null;
     ck.eq(s.equipmentDcId(eqInA.id), dcA.id, "equipmentDcId(équipement racké) → salle de la baie");
+    // equipmentDcId via ÉTAGÈRE (tray) : posé sur une étagère d une baie placée → salle de la baie hôte.
+    // Bug corrigé : le placement tray retombait à null (« non placé »), bloquant un câble vers ce posé à « planifié ».
+    const rkTray = await s.create("racks", { name: "RTray", u_count: 42, datacenter_id: dcA.id, dc_x: 500, dc_y: 500 });
+    const trayIt = await s.create("rackItems", { rack_id: rkTray.id, kind: "tray", tray_type: "cantilever", u: 10, u_height: 3, tray_u: 1, depth_mm: 400 });
+    const eqOnTray = await s.create("equipments", { name: "surEtagere", dim_mode: "free", placement_mode: "tray", tray_item_id: trayIt.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 });
+    ck.eq(s.equipmentDcId(eqOnTray.id), dcA.id, "equipmentDcId(posé sur étagère) → salle de la baie hôte (bug tray corrigé)");
 
     // contrainte de placement (câblage) : un équipement LIBRE câblé intra-salle vers pA1 (Salle A)
     const eqX = await s.create("equipments", { name: "X" });
