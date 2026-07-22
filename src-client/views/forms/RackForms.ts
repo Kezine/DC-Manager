@@ -23,6 +23,7 @@ import {
 import { FormUi, ORIENT_OPTS } from "./shared";
 import type { FormHost } from "./shared";
 import { CableForms } from "./CableForms";
+import { EquipmentForms } from "./EquipmentForms";   // fiche équipement (nom cliquable dans le contenu de baie)
 import { EntityViz } from "../EntityViz";
 
 export class RackForms extends CableForms {
@@ -343,9 +344,21 @@ export class RackForms extends CableForms {
       host.setDirty?.(true); render();
     };
     const done = () => { host.setDirty?.(true); render(); onChanged?.(); };
+    // nom d'équipement CLIQUABLE → sa fiche (au retour, on rouvre le contenu de baie s'il a été modifié).
+    const openEq = (eqId: string) => EquipmentForms.equipmentDetail(store, host, eqId, () => this.rackContent(store, host, id, onChanged));
+    const clickableName = (e: any): HTMLElement => {
+      const s = document.createElement("span");
+      s.textContent = e.name || I18n.t("lists.ph.noName");
+      s.style.cssText = "cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;";
+      s.setAttribute("role", "button"); s.tabIndex = 0; s.title = I18n.t("detail.viz.openEquip");
+      s.onclick = () => openEq(e.id);
+      s.onkeydown = (ev: KeyboardEvent) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openEq(e.id); } };
+      return s;
+    };
     const gridApi = this.rackFrontGrid(store, rack, {
       onSlotClick: (u, face) => this.assignSlot(store, host, rack.id, u, face, 1, done),
       onRemove: (kind, mid) => { removeMount(kind, mid); },
+      onEquipInfo: openEq,   // clic sur le nom d'un occupant U → sa fiche
     });
     root.appendChild(gridApi.el);
 
@@ -379,7 +392,7 @@ export class RackForms extends CableForms {
       if (!frees.length) { const h = document.createElement("div"); h.className = "form-hint"; h.textContent = I18n.t("rack.rackContent.freeEmpty"); freeList.appendChild(h); }
       frees.forEach((e: any) => {
         const row = document.createElement("div"); row.className = "chip-row";
-        const lab = document.createElement("span"); lab.className = "grow"; lab.textContent = (e.name || I18n.t("lists.ph.noName")) + " · " + (e.u_height || 1) + "U " + this.mountDepthLabel(e);
+        const lab = document.createElement("span"); lab.className = "grow"; lab.appendChild(clickableName(e)); lab.appendChild(document.createTextNode(" · " + (e.u_height || 1) + "U " + this.mountDepthLabel(e)));
         const rm = document.createElement("button"); rm.type = "button"; rm.className = "btn btn-danger btn-sm"; rm.textContent = "×"; rm.title = I18n.t("forms.rack.remove"); rm.onclick = () => removeMount("equipment", e.id);
         row.append(lab, rm); freeList.appendChild(row);
       });
@@ -393,7 +406,7 @@ export class RackForms extends CableForms {
           const hU = RackGeometry.sideEquipHeightU(e), face = (e.side_face === "rear") ? "rear" : "front";
           const row = document.createElement("div"); row.className = "chip-row";
           const lab = document.createElement("span"); lab.className = "grow";
-          lab.textContent = (e.name || I18n.t("lists.ph.noName")) + " · " + I18n.t("rack.rackContent.marginLabel", { lr: e.side_lr === "right" ? I18n.t("rack.common.rightLower") : I18n.t("rack.common.leftLower") }) + " · U" + (e.side_u | 0) + (hU > 1 ? "–U" + ((e.side_u | 0) + hU - 1) : "") + (rack.sides === "dual" ? " · " + this.faceLabel(face) : "");
+          lab.appendChild(clickableName(e)); lab.appendChild(document.createTextNode(" · " + I18n.t("rack.rackContent.marginLabel", { lr: e.side_lr === "right" ? I18n.t("rack.common.rightLower") : I18n.t("rack.common.leftLower") }) + " · U" + (e.side_u | 0) + (hU > 1 ? "–U" + ((e.side_u | 0) + hU - 1) : "") + (rack.sides === "dual" ? " · " + this.faceLabel(face) : "")));
           const rm = document.createElement("button"); rm.type = "button"; rm.className = "btn btn-danger btn-sm"; rm.textContent = "×"; rm.title = I18n.t("forms.rack.remove"); rm.onclick = () => removeMount("equipment", e.id);
           row.append(lab, rm); sideList!.appendChild(row);
         });

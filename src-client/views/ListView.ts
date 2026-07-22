@@ -39,6 +39,9 @@ export interface ListOptions {
   items?: () => any[];          // source CUSTOM (hors store)
   actions?: ListActions;
   onAction?: (act: string, id: string) => void;
+  /** Ouvre la fiche d'une AUTRE entité référencée DANS une cellule (élément `data-open-col`/`data-open-id`), ex.
+      le nom d'équipement dans la liaison d'un câble. Indépendant des actions de ligne (`onAction`, liées à la ligne). */
+  onOpenEntity?: (collection: string, id: string) => void;
   onCreate?: () => void;        // présent ⇒ bouton « + Nouveau »
   createLabel?: string;
   stateKey?: string;
@@ -59,6 +62,7 @@ export class ListView {
   private emptyText: string;
   private actions: ListActions;
   private onAction?: (act: string, id: string) => void;
+  private onOpenEntity?: (collection: string, id: string) => void;
   private onCreate?: () => void;
   private createLabel: string;
 
@@ -90,6 +94,7 @@ export class ListView {
     this.emptyText = opts.emptyText || I18n.t("lists.chrome.empty");
     this.actions = opts.actions || { view: true, edit: true, clone: true, del: true };
     this.onAction = opts.onAction;
+    this.onOpenEntity = opts.onOpenEntity;
     this.onCreate = opts.onCreate;
     this.createLabel = opts.createLabel || I18n.t("lists.chrome.create");
     this.sortKey = (opts.defaultSort && opts.defaultSort.key) || "__created__";
@@ -379,6 +384,13 @@ export class ListView {
         if (act === "__more__") { ev.stopPropagation(); this._openRowMenu(b as HTMLElement, id); return; }   // ouvre le menu overflow
         if (this.onAction) this.onAction(act, id);
       };
+    });
+    // Délégation des RÉFÉRENCES d'entité cliquables dans les cellules (`data-open-col`/`data-open-id`) — ex. le nom
+    // d'équipement dans la liaison d'un câble → ouvre SA fiche via onOpenEntity, sans déclencher l'action de ligne.
+    this._bodyEl.querySelectorAll("[data-open-id]").forEach((el) => {
+      const open = (ev: Event) => { ev.stopPropagation(); const t = el as HTMLElement; const col = t.dataset.openCol, id = t.dataset.openId; if (col && id && this.onOpenEntity) this.onOpenEntity(col, id); };
+      (el as HTMLElement).onclick = open;
+      (el as HTMLElement).onkeydown = (e: KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(e); } };
     });
   }
 }

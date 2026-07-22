@@ -401,6 +401,11 @@ async function boot(): Promise<void> {
                 reRender(); Notify.toast(I18n.t("app.main.deleted"));
               }
             },
+            onOpenEntity: (collection, id) => {   // référence cliquable dans une cellule (ex. nom d'équipement dans la liaison d'un câble)
+              if (collection === "equipments") Forms.equipmentDetail(store, formHost, id, reRender);
+              else if (collection === "racks") Forms.rackDetail(store, formHost, id, reRender);
+              else openDetail(collection, id);
+            },
           });
         }
         view.render();

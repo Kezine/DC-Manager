@@ -388,7 +388,7 @@ export class FormBase {
       au mode GÉRER : cellule libre → bouton « + » (`onSlotClick(u, face)`) ; occupant → cellule pleine + « × »
       (`onRemove(kind, id)`). L'occupation vient de `RackScene.occupants` (source unique, partagée avec la 3D).
       Le mode « placer » (aperçu d'un gabarit, choix de position) reste au formulaire d'équipement. */
-  protected static rackFrontGrid(store: Store, rack: any, opts: { onSlotClick: (u: number, face: string) => void; onRemove: (kind: string, id: string) => void }): { el: HTMLElement; refresh: () => void } {
+  protected static rackFrontGrid(store: Store, rack: any, opts: { onSlotClick: (u: number, face: string) => void; onRemove: (kind: string, id: string) => void; onEquipInfo?: (id: string) => void }): { el: HTMLElement; refresh: () => void } {
     const scene = new RackScene(store);
     const faces = rack.sides === "dual" ? ["front", "rear"] : ["front"];
     const dual = rack.sides === "dual";
@@ -398,10 +398,14 @@ export class FormBase {
       if (depth === "full") return f === side ? "▸ " + this.faceLabel(side) : this.faceLabel(f) + I18n.t("forms.rack.rearSuffix");
       return "▸ " + this.faceLabel(side);
     };
-    const cellInner = (iconInner: string, name: string, sub: string, height: number) => {
+    const cellInner = (iconInner: string, name: string, sub: string, height: number, eqId?: string) => {
       const icon = iconInner ? `<span class="ricon"><svg viewBox="0 0 24 24">${iconInner}</svg></span>` : "";
       const showSub = height >= 3 && sub;
-      return `<div class="rcell-in${height === 1 ? " compact" : ""}">${icon}<span class="rcell-name">${Html.escape(name)}</span>${showSub ? `<span class="rcell-sub">${Html.escape(sub)}</span>` : ""}</div>`;
+      // nom CLIQUABLE (équipement) → fiche via opts.onEquipInfo (délégation `data-eq-info`) ; sinon nom nu.
+      const nameHtml = eqId
+        ? `<span class="rcell-name" role="button" tabindex="0" data-eq-info="${Html.escape(eqId)}" title="${Html.escape(I18n.t("detail.viz.openEquip"))}" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;">${Html.escape(name)}</span>`
+        : `<span class="rcell-name">${Html.escape(name)}</span>`;
+      return `<div class="rcell-in${height === 1 ? " compact" : ""}">${icon}${nameHtml}${showSub ? `<span class="rcell-sub">${Html.escape(sub)}</span>` : ""}</div>`;
     };
     const refresh = () => {
       const occ = scene.occupants(rack.id);
@@ -420,7 +424,7 @@ export class FormBase {
               const sub = (isEq ? "" : RackItemKinds.label(info.kind) + " · ") + info.height + " U · " + this.mountDepthLabel(info) + (badge ? " · " + badge : "");
               const uRange = "U" + info.top + (info.height > 1 ? "–U" + (info.top + info.height - 1) : "");
               const title = Html.escape((info.label || "") + " · " + uRange + " · " + info.height + " U");
-              html += `<td class="rcell occ${mount ? " mount-face" : " back-face"}" rowspan="${info.height}" title="${title}" style="border-left:3px solid ${col};"><button class="row-btn danger" data-rm-kind="${info.kind}" data-rm-id="${info.id}" title="${I18n.t("forms.rack.remove")}">×</button>${cellInner(iconInner, info.label, sub, info.height)}</td>`;
+              html += `<td class="rcell occ${mount ? " mount-face" : " back-face"}" rowspan="${info.height}" title="${title}" style="border-left:3px solid ${col};"><button class="row-btn danger" data-rm-kind="${info.kind}" data-rm-id="${info.id}" title="${I18n.t("forms.rack.remove")}">×</button>${cellInner(iconInner, info.label, sub, info.height, isEq && opts.onEquipInfo ? info.id : undefined)}</td>`;
             }
             return;   // cellule couverte par un rowspan
           }
@@ -432,6 +436,7 @@ export class FormBase {
       wrap.innerHTML = html;
       wrap.querySelectorAll("[data-rm-id]").forEach((b) => { (b as HTMLElement).onclick = () => opts.onRemove((b as HTMLElement).dataset.rmKind!, (b as HTMLElement).dataset.rmId!); });
       wrap.querySelectorAll("[data-add-u]").forEach((b) => { (b as HTMLElement).onclick = () => opts.onSlotClick(parseInt((b as HTMLElement).dataset.addU!, 10), (b as HTMLElement).dataset.addFace!); });
+      wrap.querySelectorAll("[data-eq-info]").forEach((b) => { const open = (ev: Event) => { ev.stopPropagation(); opts.onEquipInfo?.((b as HTMLElement).dataset.eqInfo!); }; (b as HTMLElement).onclick = open; (b as HTMLElement).onkeydown = (e: KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(e); } }; });
     };
     refresh();
     return { el: wrap, refresh };
