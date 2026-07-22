@@ -877,17 +877,28 @@ export class CertsAdminView {
       const dd = document.createElement("div"); dd.style.wordBreak = "break-word"; dd.appendChild(node);
       grid.append(dt, dd);
     };
-    const mono = (s: string): string => `<span style="font-family:var(--mono);font-size:12px;word-break:break-all">${Html.escape(s)}</span>`;
+    // Variante avec bouton COPIER : valeur monospace + icône → presse-papiers (toast via Clipboard). Pour les
+    // identifiants techniques qu'on recolle ailleurs (empreinte, n° de série, sujet/DN). Valeur vide → « — » simple.
+    const addCopy = (label: string, value: string, copiedKey: string): void => {
+      if (!value) { add(label, "—"); return; }
+      const wrap = document.createElement("div"); wrap.style.cssText = "display:flex;align-items:flex-start;gap:8px";
+      const val = document.createElement("span"); val.style.cssText = "font-family:var(--mono);font-size:12px;word-break:break-all;flex:1 1 auto;min-width:0"; val.textContent = value;
+      const btn = document.createElement("button"); btn.type = "button"; btn.className = "btn btn-ghost btn-sm icon-action"; btn.style.flex = "none";
+      btn.title = I18n.t("certs.admin.info.copy"); btn.setAttribute("aria-label", I18n.t("certs.admin.info.copy")); btn.innerHTML = Icons.CLONE;
+      btn.onclick = () => { void Clipboard.copy(value, I18n.t(copiedKey)); };
+      wrap.append(val, btn);
+      addNode(label, wrap);
+    };
     const issuerName = (item.parent_id && item.parent_id === this.rootScope?.id) ? this.rootScope!.label
       : (item.parent_id ? CertsFormat.issuerLabel(item.parent_id, this.certItems) : "—");
     const sans = Array.isArray(item.sans) ? item.sans : [];
 
     add(I18n.t("lists.col.type"), this.pill(CertsFormat.kindLabel(item.kind), "neutral") + (item.revoked_at ? " " + this.pill(I18n.t("certs.admin.listing.revoked"), "err") : ""));
     add(I18n.t("certs.admin.listing.colLabel"), Html.escape(item.label || "—"));
-    add(I18n.t("certs.admin.listing.colSubject"), item.subject ? mono(item.subject) : "—");
+    addCopy(I18n.t("certs.admin.listing.colSubject"), item.subject || "", "certs.admin.info.copiedSubject");
     add(I18n.t("certs.admin.listing.colIssuer"), Html.escape(issuerName));
-    add(I18n.t("certs.admin.info.serial"), item.serial ? mono(item.serial) : "—");
-    add(I18n.t("certs.admin.info.fingerprint"), item.fingerprint ? mono(item.fingerprint) : "—");
+    addCopy(I18n.t("certs.admin.info.serial"), item.serial || "", "certs.admin.info.copiedSerial");
+    addCopy(I18n.t("certs.admin.info.fingerprint"), item.fingerprint || "", "certs.admin.info.copiedFingerprint");
     add(I18n.t("certs.admin.info.algo"), Html.escape(item.key_algo || "—"));
     add(I18n.t("certs.admin.listing.colIssued"), item.not_before ? Html.escape(Format.dateTime(item.not_before)) : "—");
     add(I18n.t("certs.admin.listing.colExpiry"), this.expiryCell(item));
