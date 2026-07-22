@@ -43,6 +43,7 @@ export interface PortDraft {
   power_max_a?: number | null;
   phase?: string;
   poe_budget_w?: number | null;
+  poe_enabled?: boolean;
 }
 
 /** Sous-UI d'édition d'un PORT dans le formulaire d'équipement : affectation de brins (patch), réseau asserté

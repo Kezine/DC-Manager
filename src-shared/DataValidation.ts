@@ -650,6 +650,9 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       phase:          { type: "string", default: "", enum: ["", "L1", "L2", "L3"] },
       // POE (rôle "poe") : budget max du port en WATTS (délivré si producteur / tiré si consommateur).
       poe_budget_w:   { type: "number", nullable: true, default: null, min: 0 },
+      // POE : injection (PSE) / consommation (PD) ACTIVÉE sur ce port. Un câble ne porte l'éclair d'énergie que si
+      // les DEUX extrémités PoE sont activées (cf. Store.cableCarriesPower). Défaut true (un port PoE injecte/tire).
+      poe_enabled:    { type: "boolean", default: true },
     },
     invariants: [
       // T1 : position de façade complète (X ET Y) ou absente (aucun des deux).

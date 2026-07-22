@@ -41,6 +41,8 @@ export const detail = {
     rack: "Rack",
     u: "U",
     equipFallback: "(equip.)",
+    openEquip: "Open the equipment sheet",
+    carriesPower: "Carries power (PoE / power)",
     rackFallback: "(rack)",
     roomFallback: "(room)",
     pool: "— pool —",

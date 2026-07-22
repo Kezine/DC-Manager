@@ -299,6 +299,9 @@ module.exports = async () => {
     const pData1 = await s.create("ports", { equipment_id: eqData.id, name: "d1", role: "data" });
     const pData2 = await s.create("ports", { equipment_id: eqData.id, name: "d2", role: "data" });
     const pPoe = await s.create("ports", { equipment_id: eqPoe.id, name: "poe1", role: "poe", direction: "source", poe_budget_w: 30 });
+    const pPoeOff = await s.create("ports", { equipment_id: eqPoe.id, name: "poeOff", role: "poe", direction: "source", poe_enabled: false });   // PSE, injection COUPÉE
+    const eqPd = await s.create("equipments", { name: "CAM-POE", poe_device: true });
+    const pPd = await s.create("ports", { equipment_id: eqPd.id, name: "pd1", role: "poe", direction: "sink" });   // PD, consommation ACTIVE (défaut)
     const ctData = await s.create("cableTypes", { name: "Cat6", kind: "data" });
     const ctPower = await s.create("cableTypes", { name: "C13", kind: "power" });
     // carriesPower ne lit que {cable_type_id, from_port_id, to_port_id} + le store : on passe des câbles LITTÉRAUX
@@ -307,8 +310,10 @@ module.exports = async () => {
     ck.eq(cr.carriesPower({ cable_type_id: ctData.id, from_port_id: pData1.id, to_port_id: pData2.id }), false, "carriesPower : câble data + ports data → false");
     // 2) câble de TYPE power → énergie (comportement historique préservé).
     ck.eq(cr.carriesPower({ cable_type_id: ctPower.id, from_port_id: pData1.id, to_port_id: pData2.id }), true, "carriesPower : câble de type power → true");
-    // 3) câble data dont UNE extrémité est un port POE → énergie (nouveauté POE).
-    ck.eq(cr.carriesPower({ cable_type_id: ctData.id, from_port_id: pData1.id, to_port_id: pPoe.id }), true, "carriesPower : câble data touchant un port POE → true");
+    // 3) POE : l'éclair exige DEUX extrémités PoE ACTIVES (injection PSE + consommation PD).
+    ck.eq(cr.carriesPower({ cable_type_id: ctData.id, from_port_id: pData1.id, to_port_id: pPoe.id }), false, "carriesPower : câble data, UNE seule extrémité PoE → false");
+    ck.eq(cr.carriesPower({ cable_type_id: ctData.id, from_port_id: pPoe.id, to_port_id: pPd.id }), true, "carriesPower : deux ports PoE actifs (PSE + PD) → true");
+    ck.eq(cr.carriesPower({ cable_type_id: ctData.id, from_port_id: pPoeOff.id, to_port_id: pPd.id }), false, "carriesPower : injection coupée d'un côté → false");
     ck.eq(cr.carriesPower(null), false, "carriesPower : câble nul → false");
   }
   });

@@ -27,6 +27,8 @@ const I = {
   rack: lineIcon('<rect x="5" y="3" width="14" height="18" rx="1"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="16" y2="15"/>'),
   u: lineIcon('<rect x="4" y="4" width="16" height="16" rx="1"/><line x1="4" y1="12" x2="20" y2="12"/>'),
   chevron: lineIcon('<path d="M9 6l6 6-6 6"/>'),
+  // éclair d'ÉNERGIE (fill, pas stroke) — cf. Icons.POE_BOLT : liaison qui transporte du courant (PoE actif / câble power).
+  bolt: '<svg class="viz-bolt" viewBox="0 0 24 24" fill="currentColor" width="12" height="12" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>',
 };
 
 interface LocSeg { ic: string; k: string; v: string; mono?: boolean; }
@@ -35,10 +37,11 @@ export class EntityViz {
   /* ---- icône d'équipement (registre existant ; conserve ses fill/stroke inline) ---- */
   private static equipIcon(type: string): string { return `<svg class="viz-ic" viewBox="0 0 24 24" aria-hidden="true">${EquipmentTypes.icon(type)}</svg>`; }
 
-  /** Pastille d'équipement (icône de type + nom). `e` peut être nul (port non rattaché). */
+  /** Pastille d'équipement (icône de type + nom). `e` peut être nul (port non rattaché). CLIQUABLE : porte
+      `data-open-col`/`data-open-id` (délégation ListView.onOpenEntity → ouvre la fiche de l'équipement). */
   static equipChip(e: any): string {
     if (!e) return `<span class="viz-equip viz-equip-unk">?</span>`;
-    return `<span class="viz-equip">${EntityViz.equipIcon(e.type)}<span>${Html.escape(e.name || I18n.t("detail.viz.equipFallback"))}</span></span>`;
+    return `<span class="viz-equip viz-equip-link" role="button" tabindex="0" data-open-col="equipments" data-open-id="${Html.escape(e.id)}" title="${Html.escape(I18n.t("detail.viz.openEquip"))}" style="cursor:pointer;">${EntityViz.equipIcon(e.type)}<span>${Html.escape(e.name || I18n.t("detail.viz.equipFallback"))}</span></span>`;
   }
 
   private static portTag(name: string | null | undefined): string { return `<span class="viz-port">${Html.escape(name || "—")}</span>`; }
@@ -53,7 +56,9 @@ export class EntityViz {
     const eb: any = pb && pb.equipment_id && store.get("equipments", pb.equipment_id);
     const side1 = `<span class="viz-liaison-side">${EntityViz.equipChip(ea)}<span class="viz-own">${I.arrowR}</span>${EntityViz.portTag(pa && pa.name)}</span>`;
     const side2 = `<span class="viz-liaison-side"><span class="viz-link">${I.link}</span>${EntityViz.portTag(pb && pb.name)}<span class="viz-own">${I.arrowL}</span>${EntityViz.equipChip(eb)}</span>`;
-    return `<span class="viz-liaison">${side1}${side2}</span>`;
+    // éclair : la liaison transporte de l'ÉNERGIE (câble power OU PoE actif des deux côtés — cf. Store.cableCarriesPower).
+    const bolt = store.cableCarriesPower(c) ? `<span class="viz-liaison-bolt" title="${Html.escape(I18n.t("detail.viz.carriesPower"))}" style="color:var(--warn);display:inline-flex;align-items:center;margin-right:3px;vertical-align:middle;">${I.bolt}</span>` : "";
+    return `<span class="viz-liaison">${bolt}${side1}${side2}</span>`;
   }
 
   /* ---- localisation ---- */

@@ -162,7 +162,7 @@ export class EquipmentForms extends FormBase {
     if (cables.length) {
       const tw = document.createElement("div"); tw.className = "table-wrap";
       const endHtml = (c: any) => { const pa: any = store.get("ports", c.from_port_id), pb: any = store.get("ports", c.to_port_id); const ea: any = pa ? store.get("equipments", pa.equipment_id) : null, eb: any = pb ? store.get("equipments", pb.equipment_id) : null; const fmt = (e: any, p: any) => e ? `${Html.escape(e.name || "?")} <span style="color:var(--fg-dimmer)">:</span> ${Html.escape(p ? (p.name || "?") : "?")}` : `<span style="color:var(--err)">${I18n.t("equipment.detail.portUnknown")}</span>`; return `${fmt(ea, pa)} <span style="color:var(--accent)">↔</span> ${fmt(eb, pb)}`; };
-      const rows = cables.map((c: any) => { const ct: any = store.get("cableTypes", c.cable_type_id); const nid = store.cablePrimaryNetworkId(c); const net: any = nid ? store.get("networks", nid) : null; return `<tr><td class="cell-name">${Html.escape(c.name || I18n.t("lists.ph.cable"))}</td><td>${ct ? Html.escape(ct.name) : `<span style="color:var(--err)">${I18n.t("equipment.detail.typeUnknown")}</span>`}</td><td>${endHtml(c)}</td><td>${net ? `<span class="pill colored-pill" ${Color.pillStyle(net.color)}>${Html.escape(net.label)}</span>` : '<span style="color:var(--fg-dimmer)">—</span>'}</td></tr>`; }).join("");
+      const rows = cables.map((c: any) => { const ct: any = store.get("cableTypes", c.cable_type_id); const nid = store.cablePrimaryNetworkId(c); const net: any = nid ? store.get("networks", nid) : null; return `<tr><td class="cell-name">${Html.escape(c.name || I18n.t("lists.ph.cable"))}${store.cableCarriesPower(c) ? ` <span title="${Html.escape(I18n.t("detail.viz.carriesPower"))}" style="color:var(--warn);display:inline-flex;vertical-align:middle;width:13px;height:13px;">${Icons.POE_BOLT}</span>` : ""}</td><td>${ct ? Html.escape(ct.name) : `<span style="color:var(--err)">${I18n.t("equipment.detail.typeUnknown")}</span>`}</td><td>${endHtml(c)}</td><td>${net ? `<span class="pill colored-pill" ${Color.pillStyle(net.color)}>${Html.escape(net.label)}</span>` : '<span style="color:var(--fg-dimmer)">—</span>'}</td></tr>`; }).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("equipment.detail.colCable")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("lists.col.link")}</th><th>${I18n.t("lists.col.network")}</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
     } else { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = I18n.t("equipment.detail.noCables"); root.appendChild(e); }
@@ -506,8 +506,8 @@ export class EquipmentForms extends FormBase {
       network_id: p.network_id || null, network_ids: Array.isArray(p.network_ids) ? p.network_ids.slice() : [],
       // power : sens de l'énergie + calibre (A) + phase (départ)
       direction: p.direction || "", power_max_a: (p.power_max_a != null) ? p.power_max_a : null, phase: p.phase || "",
-      // POE : budget du port (W) — max délivré (PSE) / tiré (PD)
-      poe_budget_w: (p.poe_budget_w != null) ? p.poe_budget_w : null,
+      // POE : budget du port (W) — max délivré (PSE) / tiré (PD) — + injection/consommation activée (défaut true)
+      poe_budget_w: (p.poe_budget_w != null) ? p.poe_budget_w : null, poe_enabled: p.poe_enabled !== false,
     })) : [];
     // brouillon des images de façade (référence par face) — l'éditeur de façade les reporte ici.
     const faceFids: Record<string, string | null> = {};
@@ -947,6 +947,10 @@ export class EquipmentForms extends FormBase {
         if (p.direction === "source") grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.phase"), portControls.phaseControl(p)));
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.network"), terminalNetworkControl(p)));
       } else if (isPoeP) {
+        // Injection (PSE) / consommation (PD) ACTIVÉE sur ce port : pilote l'éclair d'énergie du câble (visible
+        // seulement si les DEUX extrémités PoE sont actives — cf. Store.cableCarriesPower). Vaut pour source ET sink.
+        const enToggle = FormControls.toggle(p.direction === "sink" ? I18n.t("forms.port.poeDraw") : I18n.t("forms.port.poeInject"), p.poe_enabled !== false, () => { p.poe_enabled = (enToggle as any).checked; }, { block: true, title: I18n.t("forms.port.poeEnabledHint") });
+        grid.appendChild(enToggle);
         // Choix PSE/PD + budget (CAPACITÉ) par port = SWITCH uniquement. Hors switch, le port est un PD : sens figé
         // « sink » (posé au sommet de detailsRow), budget masqué (donnée morte côté PD) — ne restent que nom/connecteur/réseau.
         if (EquipmentTypes.isPoeSource(typeI.value)) {
@@ -1283,7 +1287,8 @@ export class EquipmentForms extends FormBase {
           const phase = (isPowerPort && direction === "source") ? (p.phase || "") : "";
           // budget de port = CAPACITÉ de SOURCE → conservé uniquement sur un port PSE de switch, neutralisé sinon.
           const poeBudgetW = (isPoePort && poeSourceEq && p.poe_budget_w != null) ? p.poe_budget_w : null;
-          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role, aggregate_id: agg, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase, poe_budget_w: poeBudgetW };
+          const poeEnabled = isPoePort ? (p.poe_enabled !== false) : true;   // injection/conso PoE (défaut true) — sans effet hors PoE
+          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role, aggregate_id: agg, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase, poe_budget_w: poeBudgetW, poe_enabled: poeEnabled };
           const ex: any = store.get("ports", p.id);
           const saved = ex ? await store.update("ports", p.id, patch) : await store.create("ports", Object.assign({ id: p.id }, patch));
           if (!saved) saveError = true;   // validation refusée (ex. brin en double, Tx=Rx) → échec signalé plus bas

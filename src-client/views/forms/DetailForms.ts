@@ -117,7 +117,7 @@ export class DetailForms extends IpamForms {
       ? [primaryNet ? netPill(primaryNet) : null].concat(otherNets.map(netPill)).filter(Boolean).join(" ")
       : this.MUTED;
     root.appendChild(this.grid([
-      [I18n.t("lists.col.name"), Html.escape(c.name || I18n.t("lists.ph.cable"))],
+      [I18n.t("lists.col.name"), Html.escape(c.name || I18n.t("lists.ph.cable")) + (store.cableCarriesPower(c) ? ` <span title="${Html.escape(I18n.t("detail.viz.carriesPower"))}" style="color:var(--warn);display:inline-flex;vertical-align:middle;width:14px;height:14px;">${Icons.POE_BOLT}</span>` : "")],
       [I18n.t("lists.col.type"), ct ? `${Html.escape(ct.name)} <span style="color:var(--fg-dimmer)">· ${Html.escape(ct.family || "")}</span>` : this.MUTED],
       [I18n.t("detail.cable.from"), this.portRef(store, c.from_port_id)],
       [I18n.t("detail.cable.to"), this.portRef(store, c.to_port_id)],

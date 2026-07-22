@@ -868,6 +868,20 @@ export class Store {
     if (!c || !c.from_port_id || !c.to_port_id || !c.cable_type_id || c.from_port_id === c.to_port_id) return false;
     return this.cableCompatible(c.cable_type_id, c.from_port_id, c.to_port_id).ok;
   }
+  /** Le câble transporte-t-il de l'ÉNERGIE (→ éclair) ? Vrai si son TYPE est de genre `power`, OU s'il relie DEUX
+      ports PoE dont l'injection (PSE) / la consommation (PD) est ACTIVÉE des DEUX côtés (poe_enabled). Prédicat
+      PARTAGÉ : scène 2D/3D (via CableRouting), listing (EntityViz.cableLink), fiches (câble / équipement) et tooltip. */
+  cableCarriesPower(c: any): boolean {
+    if (!c) return false;
+    const t: any = c.cable_type_id ? this.get("cableTypes", c.cable_type_id) : null;
+    if (t && t.kind === "power") return true;
+    return this._portPoeActive(c.from_port_id) && this._portPoeActive(c.to_port_id);
+  }
+  /** Port PoE dont l'injection/consommation est active (rôle "poe" + poe_enabled ≠ false). */
+  private _portPoeActive(portId: string | null): boolean {
+    const p: any = portId ? this.get("ports", portId) : null;
+    return !!(p && p.role === "poe" && p.poe_enabled !== false);
+  }
 
   /* ---- waypoints : pose ---- */
 
