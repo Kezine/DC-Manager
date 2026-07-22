@@ -200,7 +200,9 @@ class RackOccupancy {
   /** Faces occupées par un occupant selon le type de baie (réplique `RackGeometry.mountSides`). */
   private static sides(record: Record<string, any>, collection: string, rack: Record<string, any>): string[] {
     if (rack.sides !== "dual") return ["front"];                                  // baie simple face → tout sur « front »
-    if (collection === "rackItems") return [record.side === "rear" ? "rear" : "front"];
+    // rackItem : un TRAY pleine profondeur (type "dual") occupe les 2 faces ; cantilever/blank → sa seule face de montage.
+    // Parité avec RackGeometry.mountSides (front) — à maintenir ensemble.
+    if (collection === "rackItems") return (record.kind === "tray" && record.tray_type !== "cantilever") ? ["front", "rear"] : [record.side === "rear" ? "rear" : "front"];
     if (collection === "waypoints") return ["front", "rear"];                     // brosse → pleine profondeur
     // locks_u fait foi ; l'enum legacy « full » n'implique les 2 faces QUE pré-migration (depth_mm absent).
     // Parité avec RackGeometry.mountLocksU (front) — à maintenir ensemble.

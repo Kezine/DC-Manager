@@ -564,6 +564,13 @@ module.exports = async () => {
     ck.eq(DV.validateRecord("equipments", { id: "E0", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 1, u_height: 2, depth: "half", rack_side: "front" }, fetch, find).length, 0, "V6c : même occupant garde sa place → OK");
     ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 2, u_height: 1, depth: "full", rack_side: "rear" }, fetch, find).some((e) => e.code === "scope"), true, "V6c : full depth (2 faces) chevauche U2 → collision");
     ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 2, u_height: 1, depth: "half", rack_side: "front" }, fetch).length, 0, "V6c : sans find → pas de contrôle de collision");
+    // tray PLEINE PROFONDEUR (type "dual") : occupe les DEUX faces au même U → un occupant dos à dos entre en collision.
+    occ.item = [{ id: "T5", kind: "tray", rack_id: "RK", side: "front", u: 5, u_height: 1, tray_type: "dual" }];
+    const findI = (c, f, v) => (c === "rackItems" && f === "rack_id" && v === "RK") ? occ.item : find(c, f, v);
+    ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 5, u_height: 1, depth: "half", rack_side: "front" }, fetch, findI).some((e) => e.code === "scope"), true, "V6c : tray dual @U5 → collision face front");
+    ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 5, u_height: 1, depth: "half", rack_side: "rear" }, fetch, findI).some((e) => e.code === "scope"), true, "V6c : tray pleine profondeur occupe AUSSI la face REAR → collision");
+    occ.item[0].tray_type = "cantilever";
+    ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 5, u_height: 1, depth: "half", rack_side: "rear" }, fetch, findI).length, 0, "V6c : tray cantilever (front) → face REAR libre");
   }
   });
 

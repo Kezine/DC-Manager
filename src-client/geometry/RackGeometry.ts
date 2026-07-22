@@ -125,7 +125,12 @@ export class RackGeometry {
   /** Faces occupées par un montage selon le type de baie (simple/double). */
   static mountSides(mount: any, rack: any): string[] {
     if (!rack || rack.sides !== "dual") return ["front"];
-    if (mount.isItem) return [mount.side === "rear" ? "rear" : "front"];
+    if (mount.isItem) {
+      // Un TRAY pleine profondeur (type "dual", posé de façade à façade) occupe les DEUX faces ; un cantilever
+      // (ou blank/keepblank) n'occupe que sa face de montage — sinon on autorisait à tort un occupant DOS À DOS.
+      if (mount.kind === "tray" && mount.tray_type !== "cantilever") return ["front", "rear"];
+      return [mount.side === "rear" ? "rear" : "front"];
+    }
     return RackGeometry.mountLocksU(mount) ? ["front", "rear"] : [mount.side === "rear" ? "rear" : "front"];
   }
   /** Un bloc [startU, startU+height) tient-il et est-il libre sur les faces données ? */

@@ -40,7 +40,7 @@ export class RackScene {
     });
     s.rackItemsOf(rackId).forEach((it: any) => {
       if (it.u && it.id !== opts.exceptItemId) {
-        put(it.u, it.u_height || 1, RackGeometry.mountSides({ side: it.side, isItem: true }, rack),
+        put(it.u, it.u_height || 1, RackGeometry.mountSides({ side: it.side, isItem: true, kind: it.kind, tray_type: it.tray_type }, rack),
           { kind: it.kind, id: it.id, label: RackItemKinds.itemLabel(it), color: null, top: it.u, height: it.u_height || 1, side: it.side, depth: "none" });
       }
     });
