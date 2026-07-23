@@ -247,6 +247,70 @@ export class X509Factory {
     return X509Factory.assembleResult(cert, keys.privateKey);
   }
 
+  /** Émet une CA INTERMÉDIAIRE (sous-CA) signée par une CA parente (racine ou autre intermédiaire).
+      C'est un DÉRIVÉ (il a un émetteur) ET une CA (il peut à son tour signer feuilles et sous-CA). Génère
+      une NOUVELLE paire de clés, renvoyée EN CLAIR (à chiffrer AUSSITÔT par l'appelant), contrairement à
+      `crossSignCa` qui re-certifie une clé existante. La clé privée de la CA parente est fournie DÉCHIFFRÉE
+      par l'appelant (session déverrouillée). `pathLen` = profondeur MAX de sous-CA encore autorisées SOUS
+      celle-ci (défaut **0** : elle n'émet QUE des feuilles — bon défaut de confinement pour une sous-CA
+      émettrice ; > 0 autorise d'autres niveaux de sous-CA). */
+  static async issueIntermediateCa(opts: {
+    caCertPem: string;
+    caPrivateKeyPkcs8Pem: string;
+    commonName: string;
+    organization?: string;
+    organizationalUnit?: string;
+    keyAlgo: X509KeyAlgo;
+    days: number;
+    pathLen?: number;
+  }): Promise<GeneratedCert> {
+    X509Factory.ensureProvider();
+    X509Factory.requireNonEmpty(opts.commonName, "le nom commun (CN) de la CA intermédiaire");
+    const days = X509Factory.requirePositiveDays(opts.days);
+    const pathLen = X509Factory.normalizePathLen(opts.pathLen);
+    const algos = X509Factory.webCryptoAlgos(opts.keyAlgo);
+
+    // Import de la CA parente (certificat public + clé privée déchiffrée) — mêmes garde-fous que issueLeaf
+    // (toute erreur reformulée en message NEUTRE, aucun matériau réinjecté).
+    const { caCert, caPrivateKey, caSignAlgo } = await X509Factory.importCa(opts.caCertPem, opts.caPrivateKeyPkcs8Pem);
+
+    // Clés de la sous-CA — extractibles pour le même motif que la racine/feuille (export PKCS#8 → chiffrement).
+    const keys = await crypto.subtle.generateKey(algos.generate, true, ["sign", "verify"]);
+    const { notBefore, notAfter } = X509Factory.validityWindow(days);
+
+    // GUARD (MÊME invariant que issueLeaf) : une sous-CA ne peut PAS vivre au-delà de sa CA parente — un
+    // maillon dont la validité déborde l'ancre est rejeté par les vérificateurs. Source de vérité de
+    // l'invariant côté intermédiaire (le formulaire plafonnera la durée en amont, ceci est le filet).
+    if (notAfter.getTime() > caCert.notAfter.getTime()) {
+      throw new Error("X509Factory : la validité de la CA intermédiaire dépasse celle de la CA parente (échéance CA parente : "
+        + caCert.notAfter.toISOString().slice(0, 10) + ") — réduisez la durée");
+    }
+
+    const cert = await x509.X509CertificateGenerator.create({
+      serialNumber: X509Factory.randomSerialHex(),
+      subject: X509Factory.buildDistinguishedName(opts.commonName, opts.organization, opts.organizationalUnit),
+      // Émetteur = sujet de la CA parente : c'est ce qui LIE la sous-CA à sa chaîne.
+      issuer: caCert.subject,
+      notBefore, notAfter,
+      // La signature emploie l'algo de la CLÉ de la CA parente (indépendant de l'algo de la sous-CA).
+      signingAlgorithm: caSignAlgo,
+      publicKey: keys.publicKey,
+      signingKey: caPrivateKey,
+      extensions: [
+        // CA=true CRITIQUE + pathLenConstraint (profondeur restante SOUS cette CA ; défaut 0 = feuilles seules).
+        new x509.BasicConstraintsExtension(true, pathLen, true),
+        // Une CA ne fait que signer des certificats et des CRL — CRITIQUE.
+        new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
+        // SKI de la sous-CA (référencée par l'AKI de SES enfants) + AKI pointant vers la clé de la CA parente
+        // (= SKI de la parente) → la chaîne se résout sans ambiguïté à chaque maillon.
+        await x509.SubjectKeyIdentifierExtension.create(keys.publicKey, false, crypto),
+        await x509.AuthorityKeyIdentifierExtension.create(caCert.publicKey, false, crypto),
+      ],
+    }, crypto);
+
+    return X509Factory.assembleResult(cert, keys.privateKey);
+  }
+
   /** Lit l'USAGE (ExtendedKeyUsage) d'une feuille X.509 depuis son PEM — sert à PRÉ-REMPLIR fidèlement le
       renouvellement (l'usage n'est pas stocké en métadonnée serveur, il vit dans l'extension du certificat).
       Parsing PUR (aucune opération de clé) → pas besoin du provider WebCrypto. Repli « server » si l'extension
@@ -418,5 +482,17 @@ export class X509Factory {
       throw new Error("X509Factory : la durée de validité (jours) doit être un nombre strictement positif");
     }
     return Math.floor(days);
+  }
+
+  /** Valide/normalise la profondeur `pathLenConstraint` d'une CA intermédiaire : entier ≥ 0. Défaut **0**
+      (la sous-CA n'émet QUE des feuilles — aucune sous-CA en dessous ; confinement par défaut, cf. cadrage).
+      Une valeur > 0 autorise autant de niveaux de sous-CA supplémentaires. On NE propose PAS l'illimité pour
+      un intermédiaire en v1 (le confinement est le but ; l'illimité reste réservé à la racine). */
+  private static normalizePathLen(pathLen: number | undefined): number {
+    if (pathLen === undefined) return 0;
+    if (typeof pathLen !== "number" || !Number.isFinite(pathLen) || !Number.isInteger(pathLen) || pathLen < 0) {
+      throw new Error("X509Factory : pathLen (profondeur de la CA intermédiaire) doit être un entier ≥ 0");
+    }
+    return pathLen;
   }
 }

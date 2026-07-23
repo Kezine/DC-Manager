@@ -11,7 +11,7 @@
 
 /** Familles d'objets suivis (cadrage §3) : CA X.509, feuille TLS, CA SSH,
     paire SSH simple, certificat SSH signé (format OpenSSH, distinct de X.509). */
-export const CERT_KINDS = ["root-ca", "leaf-tls", "ssh-ca", "ssh-keypair", "ssh-cert"] as const;
+export const CERT_KINDS = ["root-ca", "intermediate-ca", "leaf-tls", "ssh-ca", "ssh-keypair", "ssh-cert"] as const;
 export type CertKind = (typeof CERT_KINDS)[number];
 
 /** Algorithmes de clé supportés (générés côté client — WebCrypto). */
@@ -107,10 +107,12 @@ export class CertsValidate {
     const keyAlgo = typeof candidate.key_algo === "string" ? candidate.key_algo.trim() : "";
     if (!(KEY_ALGOS as readonly string[]).includes(keyAlgo)) issues.push("key_algo : requis, parmi " + KEY_ALGOS.join(" | "));
 
-    // Émetteur : une RACINE (root-ca, ssh-ca, paire simple) n'en a pas ; un DÉRIVÉ doit en avoir un.
+    // Émetteur : une RACINE/objet autonome (root-ca, ssh-ca, paire simple) n'en a pas ; un DÉRIVÉ doit en
+    // avoir un. Une CA INTERMÉDIAIRE est un DÉRIVÉ (signée par une CA parente) ET une CA (peut à son tour
+    // être l'émetteur d'autres certificats) → elle exige un parent, comme les feuilles/certificats SSH.
     // L'EXISTENCE du parent est vérifiée par la FK composite (doc_id, parent_id) de certs.db.
     const parentId = typeof candidate.parent_id === "string" && candidate.parent_id.trim() !== "" ? candidate.parent_id.trim() : null;
-    if ((kind === "leaf-tls" || kind === "ssh-cert") && parentId === null) {
+    if ((kind === "leaf-tls" || kind === "ssh-cert" || kind === "intermediate-ca") && parentId === null) {
       issues.push("parent_id : requis pour un dérivé (" + kind + ") — l'émetteur (CA) doit être désigné");
     }
     if ((kind === "root-ca" || kind === "ssh-ca" || kind === "ssh-keypair") && parentId !== null) {

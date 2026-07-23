@@ -7,6 +7,7 @@
 export const certs = {
   kind: {
     rootCa: "X.509 root CA",
+    intermediateCa: "X.509 intermediate CA",
     leafTls: "TLS certificate",
     sshCa: "SSH CA",
     sshKeypair: "SSH key pair",

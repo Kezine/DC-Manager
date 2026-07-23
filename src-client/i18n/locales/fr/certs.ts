@@ -12,6 +12,7 @@
 export const certs = {
   kind: {
     rootCa: "CA racine X.509",
+    intermediateCa: "CA intermédiaire X.509",
     leafTls: "Certificat TLS",
     sshCa: "CA SSH",
     sshKeypair: "Paire SSH",

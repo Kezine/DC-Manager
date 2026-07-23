@@ -17,7 +17,7 @@ import { CertsFormat } from "./CertsFormat";
 export interface CertSearchItem {
   id: string;
   label: string;
-  /** Famille de l'objet (root-ca / leaf-tls / ssh-ca / ssh-keypair / ssh-cert). */
+  /** Famille de l'objet (root-ca / intermediate-ca / leaf-tls / ssh-ca / ssh-keypair / ssh-cert). */
   kind: string;
   /** Racine de l'arbre du certificat (null au PREMIER NIVEAU) — donné par le serveur (CTE d'ascendance). */
   root_id: string | null;

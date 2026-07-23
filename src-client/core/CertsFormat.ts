@@ -38,6 +38,7 @@ export class CertsFormat {
       point de rendu — jamais au chargement du module (avant `I18n.init()`). */
   static readonly KIND_LABELS: Record<string, string> = {
     "root-ca": "certs.kind.rootCa",
+    "intermediate-ca": "certs.kind.intermediateCa",
     "leaf-tls": "certs.kind.leafTls",
     "ssh-ca": "certs.kind.sshCa",
     "ssh-keypair": "certs.kind.sshKeypair",

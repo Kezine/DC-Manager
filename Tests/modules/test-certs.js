@@ -445,6 +445,56 @@ module.exports = async () => {
     ck.eq(await new x509.X509Certificate(leafUnderNew.certPem).verify({ publicKey: crossCert.publicKey, signatureOnly: true }), true, "crossSignCa : feuille de la nouvelle CA valide via la clé du cross-cert (chaîne transitoire vers l'ancien root)");
     ck(Date.parse(cross.notAfter) <= Date.parse(oldCaR.notAfter), "crossSignCa : échéance rognée à celle de l'ancienne CA");
 
+    /* -------- issueIntermediateCa : sous-CA signée par le root (dérivé + CA), extensions -------- */
+    const inter = await X509Factory.issueIntermediateCa({
+      caCertPem: ca.certPem, caPrivateKeyPkcs8Pem: ca.privateKeyPkcs8Pem,
+      commonName: "CA intermédiaire cluster-A", organization: "Exemple SA", organizationalUnit: "Cluster A", keyAlgo: "ec-p256", days: 180,
+    });
+    const interCert = new x509.X509Certificate(inter.certPem);
+    ck(/-----BEGIN PRIVATE KEY-----/.test(inter.privateKeyPkcs8Pem), "intermédiaire : clé privée PKCS#8 exportée (NOUVELLE paire)");
+    ck.eq(await interCert.verify({ publicKey: caCert.publicKey, signatureOnly: true }), true, "intermédiaire : signée par le root (vérifiée avec la clé publique du root)");
+    ck(/CN=CA intermédiaire cluster-A/.test(interCert.subject), "intermédiaire : sujet porte le CN");
+    ck(/CN=CA Racine exemple/.test(interCert.issuer), "intermédiaire : émetteur = sujet du root");
+    const interBasic = interCert.getExtension(x509.BasicConstraintsExtension);
+    ck(!!interBasic && interBasic.ca === true, "intermédiaire : BasicConstraints CA=true");
+    ck.eq(interBasic.pathLength, 0, "intermédiaire : pathLen=0 par défaut (n'émet que des feuilles)");
+    const interKu = interCert.getExtension(x509.KeyUsagesExtension);
+    ck(!!interKu && (interKu.usages & x509.KeyUsageFlags.keyCertSign) !== 0 && (interKu.usages & x509.KeyUsageFlags.cRLSign) !== 0, "intermédiaire : KeyUsage keyCertSign + cRLSign");
+    const interSki = interCert.getExtension(x509.SubjectKeyIdentifierExtension);
+    ck(!!interSki && typeof interSki.keyId === "string" && interSki.keyId.length > 0, "intermédiaire : SubjectKeyIdentifier présent");
+    const interAki = interCert.getExtension(x509.AuthorityKeyIdentifierExtension);
+    ck(!!interAki && interAki.keyId === caSki.keyId, "intermédiaire : AuthorityKeyIdentifier = SubjectKeyIdentifier du root");
+
+    /* -------- Chaîne à 3 niveaux : feuille → intermédiaire → root -------- */
+    const leafUnderInter = await X509Factory.issueLeaf({
+      caCertPem: inter.certPem, caPrivateKeyPkcs8Pem: inter.privateKeyPkcs8Pem,
+      commonName: "noeud.cluster-a.test", keyAlgo: "ec-p256", days: 90,
+      sans: [{ san_type: "dns", value: "noeud.cluster-a.test" }],
+    });
+    const leafUnderInterCert = new x509.X509Certificate(leafUnderInter.certPem);
+    ck.eq(await leafUnderInterCert.verify({ publicKey: interCert.publicKey, signatureOnly: true }), true, "chaîne : feuille signée par l'intermédiaire (vérifiée avec la clé de l'intermédiaire)");
+    ck.eq(leafUnderInterCert.getExtension(x509.AuthorityKeyIdentifierExtension).keyId, interSki.keyId, "chaîne : AKI de la feuille = SKI de l'intermédiaire (la chaîne se résout)");
+    ck.eq(await interCert.verify({ publicKey: caCert.publicKey, signatureOnly: true }), true, "chaîne : intermédiaire signé par le root → chemin feuille → interm. → root complet");
+
+    /* -------- pathLen configurable (autorise un niveau de sous-CA supplémentaire) -------- */
+    const interDeep = await X509Factory.issueIntermediateCa({
+      caCertPem: ca.certPem, caPrivateKeyPkcs8Pem: ca.privateKeyPkcs8Pem,
+      commonName: "CA intermédiaire profonde", keyAlgo: "ec-p256", days: 180, pathLen: 1,
+    });
+    ck.eq(new x509.X509Certificate(interDeep.certPem).getExtension(x509.BasicConstraintsExtension).pathLength, 1, "intermédiaire : pathLen configurable à la création (=1)");
+
+    /* -------- GUARD : une sous-CA ne peut vivre AU-DELÀ de sa CA parente -------- */
+    let interGuardErr = null;
+    try {
+      await X509Factory.issueIntermediateCa({ caCertPem: shortCa.certPem, caPrivateKeyPkcs8Pem: shortCa.privateKeyPkcs8Pem, commonName: "trop-longue", keyAlgo: "ec-p256", days: 365 });
+    } catch (e) { interGuardErr = e.message; }
+    ck(!!interGuardErr && /dépasse celle de la CA/.test(interGuardErr), "guard : sous-CA dont la validité dépasse la CA parente → émission REFUSÉE");
+
+    /* -------- pathLen invalide refusé (message français) -------- */
+    let pathErr = null;
+    try { await X509Factory.issueIntermediateCa({ caCertPem: ca.certPem, caPrivateKeyPkcs8Pem: ca.privateKeyPkcs8Pem, commonName: "X", keyAlgo: "ec-p256", days: 30, pathLen: -1 }); } catch (e) { pathErr = e.message; }
+    ck(!!pathErr && /pathLen|entier/i.test(pathErr), "intermédiaire : pathLen négatif refusé (message français)");
+
     /* -------- Roundtrip PKCS#8 : la clé privée PEM se ré-importe via WebCrypto -------- */
     const der = x509.PemConverter.decodeFirst(leaf.privateKeyPkcs8Pem);
     const reimported = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
