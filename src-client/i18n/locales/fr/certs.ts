@@ -191,8 +191,9 @@ export const certs = {
       backAuthorities: "← Autorités",
       backAuthoritiesTitle: "Revenir à la liste des autorités & clés",
       viewBTitle: "Certificats de « {{label}} »",
-      introUnlocked: "Autorités et clés de ce document. Émettez, exportez, révoquez ou supprimez ; « Lister les certificats » ouvre le détail d'une autorité.",
-      introLocked: "Autorités et clés de ce document (lecture seule). Déverrouillez pour les opérations de clé.",
+      introUnlocked: "Arbre des autorités et certificats de ce document. Dépliez une autorité pour voir ses dérivés ; émettez, exportez, révoquez ou supprimez.",
+      introLocked: "Arbre des autorités et certificats de ce document (lecture seule). Déverrouillez pour les opérations de clé.",
+      countLine: "{{total}} certificat(s) · {{shown}} affiché(s)",
       colLabel: "Libellé",
       colSubject: "Sujet",
       colExpiry: "Échéance",
@@ -213,7 +214,17 @@ export const certs = {
       createSsh: "+ Certificat SSH",
       createSshTitle: "Émettre un certificat SSH signé par cette CA",
     },
-    // Rapprochement CALCULÉ cert ↔ équipement/VM (indicateur du listing, vue B). Cf. docs/certs.md.
+    // Arbre déployable (Lot 2a-ii) : dépliage global + chevron + compte d'enfants.
+    tree: {
+      toggle: "Déployer / replier",
+      childrenTitle_one: "{{count}} enfant direct",
+      childrenTitle_other: "{{count}} enfants directs",
+      expandAll: "Tout déployer",
+      expandAllTitle: "Déployer toutes les autorités",
+      collapseAll: "Tout replier",
+      collapseAllTitle: "Replier toutes les autorités",
+    },
+    // Rapprochement CALCULÉ cert ↔ équipement/VM (indicateur du listing). Cf. docs/certs.md.
     target: {
       openEquipment: "Équipement associé : {{label}}",
       openVm: "VM associée : {{label}}",

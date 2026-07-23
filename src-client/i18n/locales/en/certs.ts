@@ -186,8 +186,9 @@ export const certs = {
       backAuthorities: "← Authorities",
       backAuthoritiesTitle: "Back to the authorities & keys list",
       viewBTitle: "Certificates of “{{label}}”",
-      introUnlocked: "Authorities and keys of this document. Issue, export, revoke or delete; “List the certificates” opens an authority's detail.",
-      introLocked: "Authorities and keys of this document (read-only). Unlock for key operations.",
+      introUnlocked: "Tree of this document's authorities and certificates. Expand an authority to see its derivatives; issue, export, revoke or delete.",
+      introLocked: "Tree of this document's authorities and certificates (read-only). Unlock for key operations.",
+      countLine: "{{total}} certificate(s) · {{shown}} shown",
       colLabel: "Label",
       colSubject: "Subject",
       colExpiry: "Expiry",
@@ -208,7 +209,17 @@ export const certs = {
       createSsh: "+ SSH certificate",
       createSshTitle: "Issue an SSH certificate signed by this CA",
     },
-    // COMPUTED cert ↔ equipment/VM matching (listing indicator, view B). See docs/certs.md.
+    // Expandable tree (Lot 2a-ii): global expand/collapse + chevron + child count.
+    tree: {
+      toggle: "Expand / collapse",
+      childrenTitle_one: "{{count}} direct child",
+      childrenTitle_other: "{{count}} direct children",
+      expandAll: "Expand all",
+      expandAllTitle: "Expand all authorities",
+      collapseAll: "Collapse all",
+      collapseAllTitle: "Collapse all authorities",
+    },
+    // COMPUTED cert ↔ equipment/VM matching (listing indicator). See docs/certs.md.
     target: {
       openEquipment: "Linked equipment: {{label}}",
       openVm: "Linked VM: {{label}}",

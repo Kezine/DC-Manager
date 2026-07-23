@@ -1,13 +1,11 @@
 import { Html } from "../core/Html";
 import { Format } from "../core/Format";
-import { CertsFormat } from "../core/CertsFormat";
-import { CertsSearch, type CertSearchItem, type CertNavTarget } from "../core/CertsSearch";
-import { SearchPop, type SearchPopResult } from "../ui/SearchPop";
+import { CertsFormat, type CertLifecycle } from "../core/CertsFormat";
+import { CertTree, type CertTreeNode } from "../core/CertTree";
 import { FormControls, type SelectOption } from "../ui/FormControls";
 import { type MultiItem } from "../ui/MultiSelect";
 import { FilterBar } from "../ui/FilterBar";
 import { CardTable } from "../ui/CardTable";
-import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from "../data/config";
 import { Notify } from "../ui/Notify";
 import { Clipboard } from "../ui/Clipboard";
 import { Dialog } from "../ui/Dialog";
@@ -22,7 +20,7 @@ import { Download } from "../core/Download";
 import { CertDeployGuide, type DeployGuide } from "../core/CertDeployGuide";
 import type { FormHost } from "./forms/shared";
 import { CertsError } from "./forms/CertsClient";
-import type { CertsClient, CertificateListItem, CertificateDetail, CertificateInput, CertSan, PkiState, CertificatePageItem, CertificateRootItem, CertsListParams } from "./forms/CertsClient";
+import type { CertsClient, CertificateListItem, CertificateDetail, CertificateInput, CertSan, PkiState } from "./forms/CertsClient";
 import { PkiCrypto } from "../certs/PkiCrypto";
 import { PkiSession } from "../certs/PkiSession";
 import { X509Factory, type X509KeyAlgo, type LeafUsage, type X509San } from "../certs/X509Factory";
@@ -52,14 +50,21 @@ import * as x509 from "@peculiar/x509";
    classes CSS que les fiches, pour rester détachable. Les FORMULAIRES (init, créations,
    PKCS#12) s'ouvrent dans la MODALE de l'app (FormHost injecté — principe n°11).
 
-   DEUX LISTINGS PAGINÉS SERVEUR (l'arbre O(n) ne tenait pas ~100 dérivés/racine) :
-   - VUE A « Autorités & clés » (par défaut) : racines + agrégats (GET /certs/roots) ;
-   - VUE B « Certificats de <racine> » : sous-arbre d'une racine (GET /certs?root=…).
-   Filtres (Type/État), tris par en-tête et pagination portés par la REQUÊTE (jamais de
-   slice client) ; l'UI reprend les classes CSS des ListView (pagination/toolbar). L'état
-   de listing (page/pageSize/tris/filtres/vue courante + racine) vit en MÉMOIRE d'instance
-   (pas de sessionStorage : cohérence après écritures). La recherche (L3) et la sélection
-   multiple (L4) viendront APRÈS — le terrain est préparé (une méthode de rendu par vue).
+   UN SEUL ARBRE DÉPLOYABLE CLIENT-SIDE (Lot 2a-ii — remplace les deux listings paginés serveur
+   « Autorités » / « sous-arbre d'une racine ») : un unique `client.list()` charge TOUTES les
+   métadonnées (SANS `key_enc`, invariant Q5), et le module PUR `CertTree` construit la forêt reliée
+   par `parent_id`, filtre, trie et aplatit — TOUT le calcul se fait en mémoire, dans le navigateur
+   (l'échelle réelle est petite : plus de pagination). L'état d'affichage (familles/état/recherche,
+   tri intra-fratrie, nœuds ouverts) vit en MÉMOIRE d'instance ; les racines sont ouvertes par défaut
+   au PREMIER chargement, l'état d'ouverture est ensuite préservé aux rechargements.
+     - Filtre TYPE = par FAMILLE de racine (root-ca / ssh-ca / ssh-keypair) — sélectionne QUELS arbres
+       s'affichent (les familles X.509 et SSH sont des arbres séparés).
+     - Filtre ÉTAT (CertsFormat.lifecycle) + RECHERCHE : filtrent des LIGNES en gardant les ANCÊTRES
+       pour le contexte, via CertTree.visibleIds.
+     - Tri intra-fratrie (Libellé / Échéance) par en-tête cliquable, client via CertTree.sortSiblings.
+   Deux repeints distincts : `refreshTree()` (filtre/tri/recherche/dépliage — SANS réseau) et
+   `refreshBody()` (APRÈS écriture — recharge `loadAll()` puis repeint), la sélection multiple (L4)
+   portant à plat sur les lignes VISIBLES.
 
    ZÉRO-CONNAISSANCE : toute la crypto vit ICI, dans le navigateur. La clé maître
    (dérivée PBKDF2) et les clés privées déchiffrées ne sont JAMAIS persistées ni
@@ -82,28 +87,23 @@ import * as x509 from "@peculiar/x509";
    503 (module en erreur serveur) → bandeau détaillé (pattern NotificationsAdminView).
    ============================================================================= */
 
-/* Les LIBELLÉS des options/filtres sont localisés → construits AU POINT DE RENDU (méthodes statiques
-   `CertsAdminView.*Opts()`), jamais au chargement du module (avant `I18n.init()`). Ne restent en données
-   PURES au niveau module que les IDENTIFIANTS de familles proposés à chaque vue (valeurs de kind non
-   traduisibles — le libellé est résolu par `CertsFormat.kindLabel` à la construction du MultiSelect). */
-/** Familles proposées au filtre « Type » de la VUE A (autorités & clés = premier niveau, parent_id nul). */
-const ROOT_KIND_FILTER_IDS = ["root-ca", "ssh-ca", "ssh-keypair"];
-/** Familles proposées au filtre « Type » de la VUE B (dérivés émis en v1 : feuilles TLS + certificats SSH ;
-    les CA intermédiaires ne sont pas produites en v1 — le schéma les autoriserait, cf. cadrage). */
-const CERT_KIND_FILTER_IDS = ["leaf-tls", "ssh-cert"];
+/* Les LIBELLÉS des options/filtres sont localisés → construits AU POINT DE RENDU (méthodes statiques),
+   jamais au chargement du module (avant `I18n.init()`). Ne restent en données PURES au niveau module que
+   les IDENTIFIANTS de familles (valeurs de kind non traduisibles — le libellé est résolu par
+   `CertsFormat.kindLabel` à la construction du filtre) et les SVG d'arbre. */
+/** Familles proposées au filtre « Type » = kind de la RACINE d'un arbre (le filtre sélectionne QUELS arbres
+    s'affichent). Les familles X.509 (root-ca) et SSH (ssh-ca / ssh-keypair) sont des arbres SÉPARÉS. */
+const FAMILY_FILTER_IDS = ["root-ca", "ssh-ca", "ssh-keypair"];
 
-/** État d'un listing (mémoire d'instance — PAS de sessionStorage en v1 : les volumes vivent côté serveur et
-    l'état doit rester cohérent après chaque écriture). `status` = "" signifie « tous » (aucun filtre d'état). */
-interface ListingState {
-  page: number;
-  pageSize: number;
-  sort: string;
-  dir: "asc" | "desc";
-  kinds: Set<string>;
-  status: string;
-}
+/* SVG d'arbre INLINE (le registre Icons n'a pas d'équivalent « chevron » ni de bouclier PLEIN sans coche) :
+   facture commune aux icônes de l'app (viewBox 24×24, fill:none, stroke currentColor) → prennent la couleur
+   de leur hôte ; taille et épaisseur de trait viennent du CSS (.twisty svg / .node-ic svg). */
+/** Chevron du bouton de dépliage (twisty) — tourné de 90° par CSS quand la ligne est ouverte. */
+const TREE_CHEVRON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+/** Bouclier PLEIN (sans coche) — icône de niveau des autorités (racine = accent, intermédiaire = info). */
+const TREE_SHIELD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l7 3v6c0 4.4-3 8.3-7 9.5C8 19.3 5 15.4 5 11V5z"/></svg>';
 
-/** Cible (équipement/VM) RAPPROCHÉE d'un certificat — vue minimale pour l'indicateur de listing (vue B). */
+/** Cible (équipement/VM) RAPPROCHÉE d'un certificat — vue minimale pour l'indicateur de listing (colonne Cible). */
 export interface CertTargetRef {
   kind: "equipment" | "vm";
   id: string;
@@ -122,10 +122,10 @@ export interface CertTargetResolver {
 export class CertsAdminView {
   /** Signal ÉMIS après tout rechargement du corps de listing (dont création / suppression / révocation) : la vue
       prévient l'hôte que le NOMBRE TOTAL de certificats a pu changer, pour rafraîchir le badge de l'onglet — tenu
-      HORS de cette vue (compteur caché maintenu en async dans main.ts, la donnée étant paginée serveur alors que
-      le count() du shell est synchrone). Branché sur refreshBody() (chokepoint de tous les rechargements après
-      écriture) plutôt que dispersé sur chaque site : robuste (aucune mutation oubliée) ; un rechargement de simple
-      pagination/tri/filtre déclenche aussi un recomptage (requête pageSize:1, coût négligeable). Optionnel. */
+      HORS de cette vue (compteur caché maintenu en async dans main.ts). Branché sur refreshBody() (chokepoint de
+      tous les rechargements APRÈS écriture) plutôt que dispersé sur chaque site : robuste (aucune mutation oubliée).
+      Les repeints purement CLIENT (filtre/tri/recherche/dépliage) passent par refreshTree() et n'émettent RIEN
+      (le total n'a pas bougé). Optionnel. */
   onCountsChanged?: () => void;
 
   /** Coffre de session détenant la clé maître dérivée (créé au constructeur, onLock → re-render). */
@@ -135,29 +135,39 @@ export class CertsAdminView {
   /** Garde anti-rechargements concurrents. */
   private loading = false;
   /** Dernier chargement d'activation (show) — AWAITÉ par `focusCert` : l'ouverture d'un cert DEPUIS une fiche
-      bascule d'abord l'onglet (→ `show()` lance un reload), puis focalise ; sans cette attente, la garde de
-      ré-entrance de `navigateToFocus` ignorerait la focalisation demandée dans la foulée. */
+      bascule d'abord l'onglet (→ `show()` lance un reload), puis focalise ; on attend la fin de ce chargement
+      avant de chercher le nœud (sinon l'arbre pourrait être vide au moment de la focalisation). */
   private lastLoad: Promise<void> = Promise.resolve();
 
-  /** Vue active : A « Autorités & clés » (racines) par défaut, B « Certificats d'une racine ». */
-  private view: "roots" | "certs" = "roots";
-  /** Racine scopée en vue B (id + libellé pour le fil d'Ariane) ; null en vue A. `root` = l'objet racine complet
-      (ou null si sa lecture a échoué en navigation par recherche) : sert le bouton d'ÉMISSION de l'en-tête de vue B
-      (la racine étant EXCLUE du sous-arbre listé, aucune action par ligne ne la vise ici). */
-  private rootScope: { id: string; label: string; root: CertificateListItem | null } | null = null;
-  /** États de listing SÉPARÉS par vue : revenir en A conserve sa page/ses filtres ; entrer en B repart neuf. */
-  private rootsState: ListingState = CertsAdminView.defaultState();
-  private certsState: ListingState = CertsAdminView.defaultState();
-  /** Métadonnées de pagination de la page courante (null tant qu'aucune page chargée). */
-  private pageMeta: { total: number; page: number; pages: number; pageSize: number } | null = null;
-  /** Items de la page courante — un seul jeu est actif selon la vue (JAMAIS key_enc, consultable verrouillé). */
-  private rootItems: CertificateRootItem[] = [];
-  private certItems: CertificatePageItem[] = [];
-  /** Conteneur du corps (table + pagination) — repeint SEUL sur tri/pagination/filtre (toolbar préservée). */
+  /** Métadonnées PLATES de TOUT le document (un seul `client.list()`, SANS key_enc, invariant Q5). Source de
+      la forêt : reconstruite à chaque rechargement, consultable coffre VERROUILLÉ. */
+  private allItems: CertificateListItem[] = [];
+  /** Forêt (racines) construite depuis `allItems` par CertTree.build — triée intra-fratrie, filtrée/aplatie au rendu. */
+  private forest: CertTreeNode<CertificateListItem>[] = [];
+  /** Ids des nœuds DÉPLIÉS (état d'ouverture, préservé aux rechargements). Les racines y sont ajoutées au PREMIER
+      chargement seulement (cf. `rootsOpened`). */
+  private open: Set<string> = new Set();
+  /** Racines ouvertes par défaut UNE FOIS (premier `loadAll`) — ensuite l'utilisateur maîtrise le dépliage. */
+  private rootsOpened = false;
+  /** Filtres COURANTS : famille (kind de racine, sélection unique) + état (cycle de vie, unique) + recherche libre.
+      Composition : la famille choisit les arbres, l'état + la recherche filtrent les lignes (ancêtres gardés). */
+  private filter: { family: string; state: "" | CertLifecycle; query: string } = { family: "", state: "", query: "" };
+  /** Tri INTRA-FRATRIE (client, CertTree.sortSiblings) : critère + sens, piloté par les en-têtes cliquables. */
+  private sortKey: "label" | "not_after" = "label";
+  private sortDir: "asc" | "desc" = "asc";
+  /** Vrai pendant un rendu FILTRÉ (visible ≠ null) : le chevron d'un nœud à enfants apparaît alors DÉPLIÉ
+      (CertTree.flatten force le chemin des correspondances ouvert). Transitoire, posé par paintBody. */
+  private treeFiltering = false;
+  /** Items des lignes VISIBLES du dernier rendu (résultat aplati/filtré) — base de la sélection « toute la page »
+      et de la case d'en-tête (la sélection porte à plat sur ce qui est affiché ; cascade parent→enfants = Lot 2c). */
+  private visibleItems: CertificateListItem[] = [];
+  /** Conteneur du corps (table arbre + barre de sélection + ligne de compte) — repeint SEUL sur filtre/tri/
+      recherche/dépliage (toolbar préservée). */
   private bodyEl: HTMLElement | null = null;
-  /** Champ de recherche + popover (L3) — instance UNIQUE réemployée à chaque rebuild de toolbar (l'élément
-      est simplement re-rattaché ; le terme saisi et l'anti-rebond survivent). Créé à la volée. */
-  private searchPop: SearchPop | null = null;
+  /** Champ de recherche THÉMATISÉ (loupe + effacer) — élément UNIQUE réemployé à chaque rebuild de toolbar (le
+      terme saisi survit, et le focus est préservé puisque refreshTree ne reconstruit pas la toolbar). */
+  private searchWrap: HTMLElement | null = null;
+  private searchInput: HTMLInputElement | null = null;
   /** Barre de filtres unifiée (chips « Type/État » + « + Filtre » + Réinitialiser) — bâtie au rendu complet,
       PRÉSERVÉE sur refreshBody (un changement de filtre ne repeint que ses chips + le corps). */
   private filterBar: FilterBar | null = null;
@@ -166,12 +176,12 @@ export class CertsAdminView {
   private focusId: string | null = null;
 
   /** Résolveur de cibles rapprochées (INJECTÉ par main.ts, feature amovible) — null hors mode API : aucune
-      colonne « Cible(s) » active dans la vue B. Cf. `CertTargetResolver`. */
+      colonne « Cible(s) » active dans le listing. Cf. `CertTargetResolver`. */
   private targetResolver: CertTargetResolver | null = null;
 
-  /** SÉLECTION MULTIPLE (L4) : instantané par id des éléments cochés. SURVIT aux changements de page/tri/filtre
-      DANS la vue courante ; VIDÉE au changement de vue (A↔B, recherche) et après une action groupée. Un snapshot
-      minimal (kind/label/has_key/revoked_at) suffit à décider les actions communes et au bilan (BulkActions). */
+  /** SÉLECTION MULTIPLE (L4) : instantané par id des éléments cochés. SURVIT aux changements de tri/filtre/dépliage ;
+      VIDÉE après une action groupée. Un snapshot minimal (kind/label/has_key/revoked_at) suffit à décider les
+      actions communes et au bilan (BulkActions). */
   private readonly selection = new Map<string, CertSelectionSnapshot>();
   /** Conteneur de la BARRE de sélection (au-dessus de la table, visible quand N > 0) — repeint sur toute
       variation de sélection sans reconstruire la table. */
@@ -197,28 +207,45 @@ export class CertsAdminView {
     this.lastLoad = this.reload();   // mémorisé pour que focusCert puisse attendre la fin d'un chargement d'activation
   }
 
-  /** Injecte (ou retire) le résolveur de cibles rapprochées — active la colonne « Cible(s) » de la vue B
+  /** Injecte (ou retire) le résolveur de cibles rapprochées — active la colonne « Cible(s) » du listing
       (feature AMOVIBLE, posée par main.ts en mode API). */
   setTargetResolver(resolver: CertTargetResolver | null): void {
     this.targetResolver = resolver;
   }
 
-  /** FOCALISE un certificat par son id : ouvre l'onglet (déjà basculé par l'appelant) sur la vue qui le CONTIENT
-      (A racine si premier niveau, B sous-arbre sinon) avec sa ligne surlignée. Point d'entrée du rapprochement
-      DEPUIS une fiche (`CertFicheHooks.openCert`). Résout le `root_id` via une page ciblée (`focus`) — la liste
-      complète des fiches n'en dispose pas —, puis réutilise la navigation de la recherche (CertsSearch.navTarget).
-      Introuvable / erreur réseau → no-op silencieux (la vue reste où elle est). */
+  /** FOCALISE un certificat par son id : ouvre l'onglet (déjà basculé par l'appelant) sur l'arbre, DÉPLIE tous les
+      ancêtres du nœud et surligne sa ligne. Point d'entrée du rapprochement DEPUIS une fiche
+      (`CertFicheHooks.openCert`). L'arbre complet étant chargé côté client, on cherche le nœud EN MÉMOIRE (aucune
+      requête ciblée). Introuvable → no-op silencieux (la vue reste où elle est). */
   async focusCert(certId: string): Promise<void> {
     if (!this.client || !this.client.docId) return;
     this.session.touch();
     await this.lastLoad.catch(() => { /* un échec du chargement d'activation ne bloque pas la focalisation */ });
-    let item: CertificatePageItem | undefined;
-    try {
-      const page = await this.client.listPage({ focus: certId, pageSize: PAGE_SIZE_DEFAULT });
-      item = page.certificates.find((c) => c.id === certId);
-    } catch (_) { /* réseau : on abandonne (aucune navigation) */ }
-    if (!item) return;
-    await this.navigateToFocus(CertsSearch.navTarget(item as CertSearchItem));
+    // S'assurer que l'arbre est chargé (l'activation a pu ne pas avoir eu lieu / avoir échoué).
+    if (!this.allItems.length) {
+      try { await this.loadAll(); } catch (_) { return; }   // réseau KO → on abandonne
+    }
+    const node = this.findNode(certId);
+    if (!node) return;   // certificat absent du document → aucune navigation
+    // GARANTIR la visibilité de la cible : on lève les filtres/recherche courants (un filtre résiduel pourrait
+    // exclure la ligne de l'arbre affiché) — même intention que l'ancienne navigation par la recherche.
+    this.filter = { family: "", state: "", query: "" };
+    // Déplier TOUS les ancêtres pour que la ligne cible soit rendue, puis la surligner au prochain paintBody.
+    for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) this.open.add(ancestor.item.id);
+    this.focusId = certId;
+    this.render();
+  }
+
+  /** Retrouve un nœud de la forêt par id (parcours en profondeur borné par la structure acyclique de CertTree.build).
+      Null si absent. Sert la focalisation depuis une fiche. */
+  private findNode(id: string): CertTreeNode<CertificateListItem> | null {
+    const stack = [...this.forest];
+    while (stack.length) {
+      const node = stack.pop()!;
+      if (node.item.id === id) return node;
+      for (const child of node.children) stack.push(child);
+    }
+    return null;
   }
 
   /** Verrouillage (auto 15 min ou manuel) → revient à l'écran verrouillé (re-render). */
@@ -232,9 +259,9 @@ export class CertsAdminView {
 
   private async reload(): Promise<void> {
     await this.guarded(async () => {
-      // PKI (état de la clé maître) + page courante en parallèle — le listing est consultable AVANT tout
-      // déverrouillage (lecture seule) ; la page chargée dépend de la vue/filtres/tri courants.
-      const [pki] = await Promise.all([this.client!.pki(), this.loadCurrentPage()]);
+      // PKI (état de la clé maître) + arbre complet en parallèle — le listing est consultable AVANT tout
+      // déverrouillage (lecture seule, métadonnées SEULES).
+      const [pki] = await Promise.all([this.client!.pki(), this.loadAll()]);
       this.pkiState = pki;
       this.render();
     });
@@ -273,11 +300,11 @@ export class CertsAdminView {
   private buildToolbar(): HTMLElement {
     const bar = document.createElement("div"); bar.className = "list-chrome";
 
-    // Recherche : visible dans les DEUX vues et MÊME verrouillée — elle ne lit que des métadonnées (aucune
-    // opération de clé). Le clic sur un résultat ouvre la bonne vue avec l'élément mis en évidence.
+    // Recherche : visible MÊME verrouillée — elle ne lit que des métadonnées (aucune opération de clé). Filtre
+    // l'arbre CLIENT en gardant les ancêtres + surligne le terme (aucun réseau).
     bar.appendChild(this.searchBox());
 
-    // Filtres « Type » (répétable) + « État » (sélection UNIQUE — le serveur n'accepte qu'un status) → chips.
+    // Filtres « Type » (= famille de racine, sélection UNIQUE) + « État » (cycle de vie, sélection UNIQUE) → chips.
     bar.appendChild(this.buildFilters());
 
     const right = document.createElement("div"); right.className = "lc-right";
@@ -289,6 +316,9 @@ export class CertsAdminView {
       );
       right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.changePass"), I18n.t("certs.admin.toolbar.changePassTitle"), () => this.changePassphraseModal()));
     }
+    // Dépliage GLOBAL de l'arbre (client) : « Tout déployer » (tous les nœuds à enfants) / « Tout replier » (vide).
+    right.appendChild(this.actionButton(I18n.t("certs.admin.tree.expandAll"), I18n.t("certs.admin.tree.expandAllTitle"), () => this.expandAll()));
+    right.appendChild(this.actionButton(I18n.t("certs.admin.tree.collapseAll"), I18n.t("certs.admin.tree.collapseAllTitle"), () => this.collapseAll()));
     right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.refresh"), I18n.t("certs.admin.toolbar.refreshTitle"), () => { this.session.touch(); void this.reload(); }));
     if (this.filterBar) right.appendChild(this.filterBar.resetElement);
     // Contrôle du COFFRE, TOUT À DROITE (remplace le panneau persistant + le badge d'état) : « Verrouiller »
@@ -299,98 +329,56 @@ export class CertsAdminView {
     return bar;
   }
 
-  /** FilterBar de la vue courante : « Type » (MultiSelect → chips, familles pertinentes à la vue A/B) + « État »
-      (sélection UNIQUE — un `<select>` proxifié par un Set 0/1 reporté dans `state.status`). Reconstruite à chaque
-      rendu complet ; préservée sur refreshBody (un changement de valeur ne repeint que chips + corps). */
+  /** FilterBar : « Type » = FAMILLE de racine (root-ca / ssh-ca / ssh-keypair, sélection UNIQUE → choisit QUELS
+      arbres s'affichent) + « État » = cycle de vie (actif / expire ≤30j / révoqué / expiré, sélection UNIQUE →
+      filtre les lignes, ancêtres gardés). Les deux dimensions sont `single` : un Set 0/1 fait autorité et se
+      reporte dans `this.filter` à chaque changement, puis `refreshTree()` (repeint CLIENT, sans réseau).
+      Reconstruite à chaque rendu complet ; préservée sur refreshTree (un panneau ouvert reste ouvert). */
   private buildFilters(): HTMLElement {
-    const st = this.currentState();
-    // Familles proposées + purge de celles mémorisées hors du jeu de la vue (évite un filtre fantôme).
-    const kindItems: MultiItem[] = (this.view === "roots" ? ROOT_KIND_FILTER_IDS : CERT_KIND_FILTER_IDS).map((id) => ({ id, label: CertsFormat.kindLabel(id) }));
-    const valid = new Set(kindItems.map((k) => k.id));
-    [...st.kinds].forEach((k) => { if (!valid.has(k)) st.kinds.delete(k); });
-    // État : le serveur n'accepte qu'UN status → dimension `single` ; le Set (0/1) fait autorité et se reporte
-    // dans `st.status` à chaque changement. Options sans le « Tous » (la FilterBar l'ajoute elle-même).
-    const statusSet = new Set<string>(st.status ? [st.status] : []);
-    const statusItems: MultiItem[] = CertsAdminView.statusFilterOpts().filter((o) => o.value !== "").map((o) => ({ id: o.value, label: o.label }));
+    // Familles = kind de la racine (le libellé est résolu par CertsFormat.kindLabel — après I18n.init()).
+    const familyItems: MultiItem[] = FAMILY_FILTER_IDS.map((id) => ({ id, label: CertsFormat.kindLabel(id) }));
+    const familySet = new Set<string>(this.filter.family ? [this.filter.family] : []);
+    // États = cycle de vie (CertsFormat.lifecycle). Options sans le « Tous » (la FilterBar l'ajoute elle-même).
+    const stateItems: MultiItem[] = CertsAdminView.stateFilterItems();
+    const stateSet = new Set<string>(this.filter.state ? [this.filter.state] : []);
     this.filterBar = new FilterBar([
-      { key: "kinds", label: I18n.t("lists.col.type"), options: kindItems, selected: st.kinds },
-      { key: "status", label: I18n.t("certs.admin.listing.colState"), options: statusItems, selected: statusSet, single: true },
+      { key: "family", label: I18n.t("lists.col.type"), options: familyItems, selected: familySet, single: true },
+      { key: "state", label: I18n.t("certs.admin.listing.colState"), options: stateItems, selected: stateSet, single: true },
     ], () => {
-      st.status = [...statusSet][0] || "";
-      st.page = 1;
+      this.filter.family = [...familySet][0] || "";
+      this.filter.state = ([...stateSet][0] as CertLifecycle) || "";
       this.session.touch();
-      void this.refreshBody();
+      this.refreshTree();
     });
     return this.filterBar.filtersElement;
   }
 
   /* --------------------------------------------------------------------------
-     Recherche (L3) — champ + popover (SearchPop réutilisable), clic → bonne vue
-     avec l'élément mis en évidence. La logique PURE (mapping/décision de navigation)
-     vit dans CertsSearch ; ici, seuls le branchement réseau et la navigation.
+     Recherche CLIENT — un simple champ thématisé (loupe + effacer, style .lc-searchpop
+     de la barre de listing) qui alimente `this.filter.query` et repeint l'arbre. Filtre
+     via CertTree.visibleIds (garde les ancêtres) et surligne le terme dans les libellés.
      -------------------------------------------------------------------------- */
 
-  /** Élément de recherche pour la toolbar : instance UNIQUE de SearchPop (réemployée à chaque rebuild). */
+  /** Élément de recherche pour la toolbar : conteneur UNIQUE réemployé à chaque rebuild (le terme saisi survit,
+      et le focus est préservé puisque refreshTree ne reconstruit pas la toolbar). Réutilise les classes de la
+      recherche des listings (`.lc-searchpop`/`.lc-search-ic`/`.search-input`) — pas de popover ni de réseau. */
   private searchBox(): HTMLElement {
-    if (!this.searchPop) {
-      this.searchPop = new SearchPop({
-        placeholder: I18n.t("certs.admin.toolbar.searchPlaceholder"),
-        grow: true,   // barre de listing : champ extensible + loupe intégrée, à la hauteur de contrôle unifiée
-        fetch: (query) => this.searchFetch(query),
-        onPick: (result) => this.searchPick(result),
-      });
+    if (!this.searchWrap) {
+      const wrap = document.createElement("div"); wrap.className = "lc-searchpop";
+      const icon = document.createElement("span"); icon.className = "lc-search-ic"; icon.setAttribute("aria-hidden", "true"); icon.innerHTML = Icons.SEARCH;
+      const input = document.createElement("input"); input.type = "text"; input.className = "search-input";
+      input.placeholder = I18n.t("certs.admin.toolbar.searchPlaceholder");
+      input.value = this.filter.query;
+      const clear = document.createElement("button"); clear.type = "button"; clear.className = "btn btn-ghost btn-sm";
+      clear.innerHTML = Icons.CLOSE; clear.title = I18n.t("ui.search.clear");
+      input.oninput = () => { this.filter.query = input.value; this.session.touch(); this.refreshTree(); };
+      clear.onclick = () => { input.value = ""; this.filter.query = ""; input.focus(); this.refreshTree(); };
+      wrap.append(icon, input, clear);
+      this.searchWrap = wrap; this.searchInput = input;
+    } else if (this.searchInput) {
+      this.searchInput.value = this.filter.query;   // rebuild de toolbar : refléter le terme courant
     }
-    return this.searchPop.element;
-  }
-
-  /** Source des résultats : une page COURTE (8) de la liste plate de tout le document (aucune portée de vue —
-      la recherche traverse racines ET dérivés). Map en résultats via CertsSearch (badge = famille lisible). */
-  private async searchFetch(query: string): Promise<SearchPopResult[]> {
-    const page = await this.client!.listPage({ query, pageSize: 8 });
-    return page.certificates.map((c) => CertsSearch.toResult(c));
-  }
-
-  /** Clic (ou Entrée) sur un résultat : calcule la cible de navigation (CertsSearch.navTarget) puis ouvre
-      la page CONTENANT l'élément avec surbrillance. Le popover est déjà fermé par SearchPop.pick. */
-  private searchPick(result: SearchPopResult): void {
-    this.session.touch();
-    void this.navigateToFocus(CertsSearch.navTarget(result.data as CertSearchItem));
-  }
-
-  /** Ouvre la vue portant l'élément (A racines si premier niveau, B sous-arbre sinon), à la page qui le
-      CONTIENT (paramètre `focus` : le serveur recalcule la page sous le tri/filtres courants), puis surligne
-      sa ligne. On RÉINITIALISE les filtres/tri du listing cible : le focus est calculé SOUS ces filtres — un
-      filtre résiduel (ex. « Type ») pourrait EXCLURE l'élément et rendre le focus introuvable ; repartir de
-      défauts garantit qu'il figure bien dans la page renvoyée. */
-  private async navigateToFocus(nav: CertNavTarget): Promise<void> {
-    await this.guarded(async () => {
-      this.selection.clear();   // navigation par la recherche = (ré)ouverture d'une vue : sélection remise à zéro
-      if (nav.view === "roots") {
-        this.view = "roots";
-        this.rootScope = null;
-        this.rootsState = CertsAdminView.defaultState();
-        const res = await this.client!.listRoots({ ...CertsAdminView.listParams(this.rootsState), focus: nav.focus });
-        this.rootItems = res.certificates;
-        this.pageMeta = { total: res.total, page: res.page, pages: res.pages, pageSize: res.pageSize };
-        this.rootsState.page = res.page;
-      } else {
-        this.view = "certs";
-        this.certsState = CertsAdminView.defaultState();
-        // Fil d'Ariane : la vue B liste le sous-arbre STRICT (racine EXCLUE), la racine n'est donc pas dans la
-        // page de focus. On lit ses métadonnées (GET unitaire, aucun déchiffrement) pour un libellé lisible ;
-        // repli sur l'id court si l'appel échoue (le scope, lui, tient au seul id).
-        let rootLabel = CertsFormat.shortId(nav.rootId!);
-        let rootItem: CertificateListItem | null = null;
-        try { rootItem = await this.client!.getOne(nav.rootId!); rootLabel = rootItem.label || rootLabel; } catch (_) { /* repli id court, pas d'émission depuis l'en-tête */ }
-        this.rootScope = { id: nav.rootId!, label: rootLabel, root: rootItem };
-        const res = await this.client!.listPage({ ...CertsAdminView.listParams(this.certsState), root: nav.rootId!, focus: nav.focus });
-        this.certItems = res.certificates;
-        this.pageMeta = { total: res.total, page: res.page, pages: res.pages, pageSize: res.pageSize };
-        this.certsState.page = res.page;
-      }
-      this.focusId = nav.focus;
-      this.render();
-    });
+    return this.searchWrap;
   }
 
   /** Écran VERROUILLÉ : initialisation (PKI vierge) OU saisie de la phrase secrète maître. */
@@ -468,111 +456,94 @@ export class CertsAdminView {
   }
 
   /* --------------------------------------------------------------------------
-     Listing paginé SERVEUR — DEUX vues (A « Autorités & clés » / B « Certificats
-     d'une racine »). Chaque page vient du serveur (jamais de slice client) ;
-     tris/filtres/pagination portés par la requête, état en mémoire d'instance.
+     Listing HIÉRARCHIQUE CLIENT — un seul `client.list()` charge tout le document
+     (métadonnées SEULES), CertTree construit/filtre/trie/aplatit en mémoire. Deux
+     repeints : refreshTree() (client, sans réseau) et refreshBody() (après écriture).
      -------------------------------------------------------------------------- */
 
-  /** État du listing ACTIF (selon la vue courante). */
-  private currentState(): ListingState {
-    return this.view === "roots" ? this.rootsState : this.certsState;
-  }
-
-  /** Charge la PAGE COURANTE depuis le serveur (racines OU sous-arbre d'une racine). La page effective est
-      relue depuis la réponse (le serveur CLAMPE si la page demandée n'existe plus après une écriture). */
-  private async loadCurrentPage(): Promise<void> {
-    const st = this.currentState();
-    const params = CertsAdminView.listParams(st);
-    if (this.view === "roots") {
-      const res = await this.client!.listRoots(params);
-      this.rootItems = res.certificates;
-      this.pageMeta = { total: res.total, page: res.page, pages: res.pages, pageSize: res.pageSize };
-    } else {
-      const res = await this.client!.listPage({ ...params, root: this.rootScope!.id });
-      this.certItems = res.certificates;
-      this.pageMeta = { total: res.total, page: res.page, pages: res.pages, pageSize: res.pageSize };
+  /** Charge TOUT l'arbre depuis le serveur (métadonnées SEULES, SANS key_enc — invariant Q5), reconstruit la
+      forêt et la trie intra-fratrie. Les racines sont ouvertes par défaut au PREMIER chargement UNIQUEMENT :
+      aux rechargements suivants (après écriture), l'état d'ouverture de l'utilisateur est PRÉSERVÉ. */
+  private async loadAll(): Promise<void> {
+    this.allItems = await this.client!.list();
+    this.forest = CertTree.build(this.allItems);
+    CertTree.sortSiblings(this.forest, this.sortKey, this.sortDir);
+    if (!this.rootsOpened) {
+      for (const root of this.forest) this.open.add(root.item.id);
+      this.rootsOpened = true;
     }
-    st.page = this.pageMeta.page;
   }
 
-  /** Re-render COMPLET après (re)chargement — reconstruit la toolbar de filtres comprise (changement de vue,
-      réinitialisation des filtres). */
-  private async rerender(): Promise<void> {
-    await this.guarded(async () => { await this.loadCurrentPage(); this.render(); });
+  /** Repeint CLIENT (filtre/tri/recherche/dépliage) : re-trie la forêt (idempotent) puis repeint le corps —
+      AUCUN réseau, AUCUN recomptage d'onglet (le total est inchangé). */
+  private refreshTree(): void {
+    CertTree.sortSiblings(this.forest, this.sortKey, this.sortDir);
+    this.paintBody();
   }
 
-  /** Recharge la page courante et repeint UNIQUEMENT le corps (table + pagination) — la toolbar de filtres
-      reste en place (un panneau MultiSelect ouvert n'est pas refermé entre deux cases cochées). Sert aussi
-      APRÈS une écriture : la page courante est rechargée (clamp serveur si elle a disparu), les agrégats de la
-      vue A (Dérivés/Sous seuil) reflètent le changement. */
+  /** Recharge TOUT l'arbre puis repeint le corps — APRÈS une écriture (création/révocation/suppression/renouv.).
+      La toolbar reste en place (un panneau de filtre ouvert n'est pas refermé). Appelé par les modales/bulk. */
   private async refreshBody(): Promise<void> {
-    await this.guarded(async () => { await this.loadCurrentPage(); this.paintBody(); });
+    await this.guarded(async () => { await this.loadAll(); this.paintBody(); });
     this.onCountsChanged?.();   // le TOTAL de certificats a pu changer (création/suppression) → badge d'onglet (async, hors vue)
   }
 
-  /** Bascule vers la vue B (certificats du sous-arbre d'une racine) avec des filtres/tri NEUFS. */
-  private openCerts(root: CertificateListItem): void {
+  /** Déplie/replie un nœud (chevron) puis repeint l'arbre (client). */
+  private toggleOpen(id: string): void {
     this.session.touch();
-    this.selection.clear();   // changement de vue A→B : la sélection ne traverse pas les vues (cadrage §5)
-    this.view = "certs";
-    this.rootScope = { id: root.id, label: root.label, root };
-    this.certsState = CertsAdminView.defaultState();
-    void this.rerender();
+    if (this.open.has(id)) this.open.delete(id); else this.open.add(id);
+    this.refreshTree();
   }
 
-  /** Retour à la vue A (autorités & clés) — l'état de la vue A est préservé (page/filtres mémorisés). */
-  private goToRoots(): void {
+  /** « Tout déployer » : ouvre TOUS les nœuds à enfants de la forêt, puis repeint. */
+  private expandAll(): void {
     this.session.touch();
-    this.selection.clear();   // changement de vue B→A : la sélection ne traverse pas les vues (cadrage §5)
-    this.view = "roots";
-    this.rootScope = null;
-    void this.rerender();
+    const opened = new Set<string>();
+    const walk = (nodes: CertTreeNode<CertificateListItem>[]) => {
+      for (const node of nodes) if (node.children.length) { opened.add(node.item.id); walk(node.children); }
+    };
+    walk(this.forest);
+    this.open = opened;
+    this.refreshTree();
   }
 
-  /** En-tête de la section listing (intro vue A, ou fil d'Ariane « ← Autorités » + titre vue B) + le conteneur
-      de corps (rempli par paintBody). Les filtres vivent désormais dans la barre de contrôles unifiée (buildToolbar). */
+  /** « Tout replier » : vide l'état d'ouverture (seules les racines restent visibles), puis repeint. */
+  private collapseAll(): void {
+    this.session.touch();
+    this.open = new Set();
+    this.refreshTree();
+  }
+
+  /** En-tête de la section listing (intro localisée décrivant l'arbre) + le conteneur de corps (rempli par
+      paintBody). Filtres et boutons de dépliage vivent dans la barre de contrôles unifiée (buildToolbar). */
   private buildListingSection(): HTMLElement {
     const wrap = document.createElement("div");
-    if (this.view === "certs" && this.rootScope) {
-      const bc = document.createElement("div"); bc.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px";
-      bc.appendChild(this.actionButton(I18n.t("certs.admin.listing.backAuthorities"), I18n.t("certs.admin.listing.backAuthoritiesTitle"), () => this.goToRoots()));
-      const title = document.createElement("span"); title.style.cssText = "font-weight:600;color:var(--fg)";
-      title.textContent = I18n.t("certs.admin.listing.viewBTitle", { label: this.rootScope.label });
-      bc.appendChild(title);
-      // Émettre un nouveau certificat SOUS l'autorité scopée : la racine est EXCLUE du sous-arbre listé (vue B),
-      // donc l'action d'émission par ligne (fillActions) ne s'y présente jamais — on l'offre ICI, dans l'en-tête.
-      // Prérequis : coffre DÉVERROUILLÉ (signer exige la clé privée de la CA), racine connue et NON révoquée. Le
-      // type de la racine décide de la cible (root-ca → feuille TLS ; ssh-ca → certificat SSH), comme fillActions.
-      const scoped = this.rootScope.root;
-      if (this.session.unlocked && scoped && !scoped.revoked_at) {
-        if (scoped.kind === "root-ca") bc.appendChild(this.actionButton(I18n.t("certs.admin.listing.createTls"), I18n.t("certs.admin.listing.createTlsTitle"), () => this.leafModal(scoped), "btn-primary"));
-        else if (scoped.kind === "ssh-ca") bc.appendChild(this.actionButton(I18n.t("certs.admin.listing.createSsh"), I18n.t("certs.admin.listing.createSshTitle"), () => this.sshCertModal(scoped), "btn-primary"));
-      }
-      wrap.appendChild(bc);
-    } else {
-      const intro = document.createElement("div"); intro.className = "form-hint"; intro.style.marginBottom = "8px";
-      intro.textContent = this.session.unlocked
-        ? I18n.t("certs.admin.listing.introUnlocked")
-        : I18n.t("certs.admin.listing.introLocked");
-      wrap.appendChild(intro);
-    }
+    const intro = document.createElement("div"); intro.className = "form-hint"; intro.style.marginBottom = "8px";
+    intro.textContent = this.session.unlocked
+      ? I18n.t("certs.admin.listing.introUnlocked")
+      : I18n.t("certs.admin.listing.introLocked");
+    wrap.appendChild(intro);
     this.bodyEl = document.createElement("div");
     this.bodyEl.className = "list-body";   // mêmes règles CSS que les listings ListView (défaut à gauche, numériques via cell-num)
     wrap.appendChild(this.bodyEl);
     return wrap;
   }
 
-  /** Peint le CORPS (table + pagination) de la vue courante dans `bodyEl`. Si une navigation par la recherche
-      a désigné un élément (`focusId`), on centre sa ligne et on l'illumine ; la surbrillance est CONSOMMÉE
-      (mise à null) pour qu'un repaint ultérieur (tri/pagination) ne la ré-allume pas. */
+  /** Peint le CORPS (barre de sélection + table ARBRE + ligne de compte) dans `bodyEl`. L'arbre est filtré
+      (CertTree.visibleIds) puis aplati (CertTree.flatten) sous l'état d'ouverture ; en filtrant, le chemin des
+      correspondances est forcé ouvert. Si une focalisation a désigné un élément (`focusId`), on centre sa ligne et
+      on l'illumine ; la surbrillance est CONSOMMÉE (mise à null) pour qu'un repaint ultérieur ne la ré-allume pas. */
   private paintBody(): void {
     if (!this.bodyEl) return;
+    // Filtrage + aplatissement (PUR, CertTree) : visible=null si aucun filtre → seul l'état d'ouverture décide.
+    const visible = CertTree.visibleIds(this.forest, { ...this.filter, now: Date.now() });
+    this.treeFiltering = visible !== null;   // en mode filtré, les chevrons apparaissent dépliés (chemin forcé ouvert)
+    const rows = CertTree.flatten(this.forest, { open: this.open, visible });
+    this.visibleItems = rows.map((n) => n.item);   // base de la sélection « toute la page » (lignes AFFICHÉES)
     // Barre de sélection EN TÊTE du corps (avant la table) : repeinte à chaque variation de sélection sans
-    // reconstruire la table. `buildRootsTable`/`buildCertsTable` (re)créent la case d'en-tête ; on synchronise
-    // ensuite la barre et l'état de la case (indéterminée si partielle).
+    // reconstruire la table. buildTree (re)crée la case d'en-tête ; on synchronise ensuite barre + case.
     this.selBarEl = document.createElement("div");
-    const table = this.view === "roots" ? this.buildRootsTable() : this.buildCertsTable();
-    this.bodyEl.replaceChildren(this.selBarEl, table, this.buildPagination());
+    this.bodyEl.replaceChildren(this.selBarEl, this.buildTree(rows), this.buildCountLine(this.allItems.length, rows.length));
     this.refreshSelectionUi();
     if (this.focusId) {
       const row = this.bodyEl.querySelector("tr.row-focus") as HTMLElement | null;
@@ -590,123 +561,162 @@ export class CertsAdminView {
     }
   }
 
-  /* ---- Vue A : table des autorités & clés (racines + agrégats) ---- */
+  /** Ligne de COMPTE (remplace la pagination) : « N certificat(s) · M affiché(s) » — N = total du document,
+      M = lignes actuellement rendues (repliées/filtrées comprises). */
+  private buildCountLine(total: number, shown: number): HTMLElement {
+    const line = document.createElement("div"); line.className = "list-count";
+    line.textContent = I18n.t("certs.admin.listing.countLine", { total, shown });
+    return line;
+  }
 
-  private buildRootsTable(): HTMLElement {
-    const st = this.currentState();
+  /* ---- Arbre unique : autorités → CA intermédiaires → dérivés (feuilles TLS / certificats SSH) ---- */
+
+  /** Construit la TABLE-ARBRE depuis les lignes déjà ordonnées/aplaties (une <tr> par nœud). En-tête :
+      ☐ · Libellé (colonne ARBRE, triable) · Type · Émetteur · Sujet · Échéance (triable) · Dérivés · [Cible] ·
+      Actions. La colonne « Cible » n'apparaît que si un résolveur est injecté (mode API). */
+  private buildTree(rows: CertTreeNode<CertificateListItem>[]): HTMLElement {
     const tw = document.createElement("div"); tw.className = "table-wrap";
     const table = document.createElement("table");
     const thead = document.createElement("thead"); const tr = document.createElement("tr");
-    tr.append(
+    const head: HTMLElement[] = [
       this.selectHeaderCell(),
-      this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label", st), this.sortableTh(I18n.t("lists.col.type"), "kind", st), this.plainTh(I18n.t("certs.admin.listing.colSubject")),
-      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")),
-      this.sortableTh(I18n.t("certs.admin.listing.colDerived"), "children_total", st, "cell-num"), this.plainTh(I18n.t("certs.admin.listing.colAlert"), "cell-num"), this.plainTh(I18n.t("lists.chrome.actions"), "cell-actions"),
-    );
+      this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label"),
+      this.plainTh(I18n.t("lists.col.type")),
+      this.plainTh(I18n.t("certs.admin.listing.colIssuer")),
+      this.plainTh(I18n.t("certs.admin.listing.colSubject")),
+      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after"),
+      this.plainTh(I18n.t("certs.admin.listing.colState")),
+      this.plainTh(I18n.t("certs.admin.listing.colDerived"), "cell-num"),
+    ];
+    if (this.targetResolver) head.push(this.plainTh(I18n.t("certs.admin.listing.colTarget")));
+    head.push(this.plainTh(I18n.t("lists.chrome.actions"), "cell-actions"));
+    tr.append(...head);
     thead.appendChild(tr);
     const labels = CardTable.columnLabels(tr);   // repli en cartes (< 560px) : libellés lus depuis l'en-tête
     const tbody = document.createElement("tbody");
-    if (!this.rootItems.length) tbody.appendChild(this.emptyRow(9));
-    else for (const item of this.rootItems) { const row = this.buildRootRow(item); CardTable.labelCells(row, labels); tbody.appendChild(row); }
+    if (!rows.length) tbody.appendChild(this.emptyRow(head.length));
+    else for (const node of rows) { const row = this.buildTreeRow(node); CardTable.labelCells(row, labels); tbody.appendChild(row); }
     table.append(thead, tbody);
     tw.appendChild(table);
     return tw;
   }
 
-  private buildRootRow(item: CertificateRootItem): HTMLElement {
-    const tr = document.createElement("tr");
-    if (this.focusId && item.id === this.focusId) tr.classList.add("row-focus");   // cible d'une recherche
+  /** Une ligne d'arbre : sélection · cellule ARBRE (chevron + icône de niveau + libellé + compte d'enfants) ·
+      type · émetteur · sujet · échéance · état · dérivés (feuilles) · [cible] · actions. */
+  private buildTreeRow(node: CertTreeNode<CertificateListItem>): HTMLElement {
+    const item = node.item;
+    const tr = document.createElement("tr"); tr.className = "row-node";
+    // `.open` pilote la rotation CSS du chevron : dépliée si l'utilisateur l'a ouverte OU si on filtre (chemin forcé).
+    if (node.children.length && (this.treeFiltering || this.open.has(item.id))) tr.classList.add("open");
+    if (this.focusId && item.id === this.focusId) tr.classList.add("row-focus");   // cible d'une focalisation
     tr.appendChild(this.selectRowCell(item));
-    tr.appendChild(this.labelCell(item));
+    tr.appendChild(this.treeCell(node));
     tr.appendChild(this.htmlCell(this.pill(CertsFormat.kindLabel(item.kind), "neutral")));
+    tr.appendChild(this.issuerCell(node));
     tr.appendChild(this.subjectCell(item.subject));
     tr.appendChild(this.htmlCell(this.expiryCell(item)));
     tr.appendChild(this.htmlCell(item.revoked_at ? this.pill(I18n.t("certs.admin.listing.revoked"), "err") : CertsAdminView.MUTED));
-    // Dérivés : nombre total de descendants (0 pour une paire simple) — colonne numérique (droite, tabulaire).
-    const derived = document.createElement("td"); derived.className = "cell-num"; derived.textContent = String(item.children_total);
-    if (item.children_total === 0) derived.style.color = "var(--fg-dimmer)";
-    tr.appendChild(derived);
-    tr.appendChild(this.htmlCell(this.alertCell(item), "cell-num"));   // « Sous seuil » = compteur → colonne numérique
-    // Actions : opérations de clé si déverrouillé + « Déployer la confiance… » / « Lister les certificats »
-    // (consultation, disponibles MÊME verrouillé — aucune clé requise).
+    tr.appendChild(this.derivedCell(node));
+    if (this.targetResolver) tr.appendChild(this.targetCell(item));   // équipement/VM rapproché — colonne présente seulement si résolveur
+    // Actions : opérations de clé si déverrouillé (fillActions filtre) + « Déployer la confiance… » pour les AUTORITÉS.
     const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + alignées à DROITE (parité ListView)
-    this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
-    // Aide au déploiement : uniquement les AUTORITÉS (racine X.509 ou CA SSH) — pas les paires simples ni les
-    // dérivés. Consultation pure (procédure d'installation dans les magasins de confiance des clients).
+    this.fillActions(actions, item);
     if (item.kind === "root-ca" || item.kind === "ssh-ca") actions.appendChild(this.iconAction(Icons.TRUST_DEPLOY, I18n.t("certs.admin.listing.deployTitle"), CERT_TIP.trustDeploy, () => this.deployTrustModal(item)));
-    if (item.children_total > 0) actions.appendChild(this.iconAction(Icons.CERT_LIST, I18n.t("certs.admin.listing.listCertsTitle"), CERT_TIP.certList, () => this.openCerts(item)));
     tr.appendChild(actions);
     return tr;
   }
 
-  /** Badge « Sous seuil » d'une racine : nombre de descendants à échéance ≤ 30 j (children_alert). Le serveur
-      ne distingue pas « expirant » d'« expiré » → err si l'échéance la plus proche du sous-arbre est DÉPASSÉE
-      (au moins un expiré), sinon warn ; « — » si aucun. */
-  private alertCell(item: CertificateRootItem): string {
-    if (!item.children_alert || item.children_alert <= 0) return CertsAdminView.MUTED;
-    const expired = typeof item.next_expiry === "string" && Date.parse(item.next_expiry) < Date.now();
-    return this.pill(String(item.children_alert), expired ? "err" : "warn");
-  }
-
-  /* ---- Vue B : table plate du sous-arbre d'une racine ---- */
-
-  private buildCertsTable(): HTMLElement {
-    const st = this.currentState();
-    const tw = document.createElement("div"); tw.className = "table-wrap";
-    const table = document.createElement("table");
-    const thead = document.createElement("thead"); const tr = document.createElement("tr");
-    tr.append(
-      this.selectHeaderCell(),
-      this.sortableTh(I18n.t("certs.admin.listing.colLabel"), "label", st), this.sortableTh(I18n.t("lists.col.type"), "kind", st),
-      this.sortableTh(I18n.t("certs.admin.listing.colIssuer"), "parent", st), this.plainTh(I18n.t("certs.admin.listing.colSubject")),
-      this.sortableTh(I18n.t("certs.admin.listing.colIssued"), "not_before", st),
-      this.sortableTh(I18n.t("certs.admin.listing.colExpiry"), "not_after", st), this.plainTh(I18n.t("certs.admin.listing.colState")),
-      this.plainTh(I18n.t("certs.admin.listing.colTarget")), this.plainTh(I18n.t("lists.chrome.actions"), "cell-actions"),
-    );
-    thead.appendChild(tr);
-    const labels = CardTable.columnLabels(tr);   // repli en cartes (< 560px) : libellés lus depuis l'en-tête
-    const tbody = document.createElement("tbody");
-    if (!this.certItems.length) tbody.appendChild(this.emptyRow(10));   // select+label+type+émetteur+sujet+émission+échéance+état+cible+actions
-    else for (const item of this.certItems) { const row = this.buildCertRow(item); CardTable.labelCells(row, labels); tbody.appendChild(row); }
-    table.append(thead, tbody);
-    tw.appendChild(table);
-    return tw;
-  }
-
-  private buildCertRow(item: CertificatePageItem): HTMLElement {
-    const tr = document.createElement("tr");
-    if (this.focusId && item.id === this.focusId) tr.classList.add("row-focus");   // cible d'une recherche
-    tr.appendChild(this.selectRowCell(item));
-    tr.appendChild(this.labelCell(item));
-    tr.appendChild(this.htmlCell(this.pill(CertsFormat.kindLabel(item.kind), "neutral")));
-    // Émetteur en NOM : en vue B, le parent d'un dérivé est la RACINE scopée (rootScope) — ABSENTE de la page
-    // (sous-arbre STRICT) → on affiche son LIBELLÉ (et non l'id hexa, illisible). Replis : résolution depuis les
-    // items de la page (CertsFormat.issuerLabel), puis id court en mono pour un émetteur non résolu (CA
-    // intermédiaire — non produite en v1, mais le sous-arbre est récursif : on ne casse rien si ça arrive).
-    const issuer = document.createElement("td");
-    const isScopedRoot = !!item.parent_id && item.parent_id === this.rootScope?.id;
-    const resolvedByPage = !!item.parent_id && this.certItems.some((c) => c.id === item.parent_id);
-    if (item.parent_id && !isScopedRoot && !resolvedByPage) {
-      issuer.style.cssText = "font-family:var(--mono);font-size:12px"; issuer.title = item.parent_id;   // non résolu → id court
+  /** Cellule ARBRE (colonne Libellé) : chevron (twisty) indenté selon la profondeur (invisible sur une feuille),
+      icône de NIVEAU (racine = bouclier accent · intermédiaire = bouclier info · feuille = cadenas discret), le
+      libellé (surligné si la recherche matche + « clé détenue » en title) et un petit compte d'enfants DIRECTS. */
+  private treeCell(node: CertTreeNode<CertificateListItem>): HTMLElement {
+    const item = node.item;
+    const td = document.createElement("td");
+    const cell = document.createElement("div"); cell.className = "tree-cell";
+    // Chevron : indenté de profondeur × 22px ; sur une feuille, il est présent mais INVISIBLE (alignement conservé).
+    const twisty = document.createElement("button"); twisty.type = "button";
+    twisty.className = node.children.length ? "twisty" : "twisty leaf";
+    twisty.style.setProperty("--ind", (node.depth * 22) + "px");
+    const expanded = node.children.length > 0 && (this.treeFiltering || this.open.has(item.id));
+    twisty.setAttribute("aria-expanded", expanded ? "true" : "false");
+    twisty.setAttribute("aria-label", I18n.t("certs.admin.tree.toggle"));
+    twisty.innerHTML = TREE_CHEVRON;
+    if (node.children.length) twisty.onclick = (e) => { e.stopPropagation(); this.toggleOpen(item.id); };
+    // Icône de NIVEAU — la classe lvl-* portée par la CELLULE colore l'icône (cf. CSS .lvl-root/.lvl-mid/.lvl-leaf).
+    const level = CertsAdminView.nodeLevel(node);
+    cell.classList.add(level === "root" ? "lvl-root" : level === "mid" ? "lvl-mid" : "lvl-leaf");
+    const ic = document.createElement("span"); ic.className = "node-ic"; ic.setAttribute("aria-hidden", "true");
+    ic.innerHTML = level === "leaf" ? Icons.LOCK : TREE_SHIELD;
+    // Libellé (surligné) + indication « clé privée détenue » (comme l'ancienne cellule libellé).
+    const label = document.createElement("span"); label.className = "node-label";
+    this.fillHighlighted(label, item.label);
+    if (item.has_key) label.title = I18n.t("certs.admin.listing.keyOwned");
+    cell.append(twisty, ic, label);
+    // Petit compte d'enfants DIRECTS (repère de densité du sous-arbre).
+    if (node.children.length) {
+      const cnt = document.createElement("span"); cnt.className = "node-count";
+      cnt.textContent = String(node.children.length);
+      cnt.title = I18n.t("certs.admin.tree.childrenTitle", { count: node.children.length });
+      cell.appendChild(cnt);
     }
-    issuer.textContent = isScopedRoot ? this.rootScope!.label : CertsFormat.issuerLabel(item.parent_id, this.certItems);
-    tr.appendChild(issuer);
-    tr.appendChild(this.subjectCell(item.subject));
-    tr.appendChild(this.htmlCell(this.issuedCell(item)));   // date d'ÉMISSION (not_before)
-    tr.appendChild(this.htmlCell(this.expiryCell(item)));
-    tr.appendChild(this.htmlCell(item.revoked_at ? this.pill(I18n.t("certs.admin.listing.revoked"), "err") : CertsAdminView.MUTED));
-    tr.appendChild(this.targetCell(item));   // équipement/VM rapproché (calculé) — inerte hors mode API
-    const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + alignées à DROITE (parité ListView)
-    this.fillActions(actions, item);   // fillActions filtre lui-même ce qui exige la clé
-    tr.appendChild(actions);
-    return tr;
+    td.appendChild(cell);
+    return td;
   }
 
-  /** Cellule « Cible(s) » (vue B) : le NOM de chaque équipement/VM RAPPROCHÉ, cliquable (ouvre sa fiche de détail —
+  /** Cellule ÉMETTEUR : libellé du parent résolu depuis `allItems` (l'arbre COMPLET est chargé) — « — » si racine
+      ou parent absent (orphelin toléré). */
+  private issuerCell(node: CertTreeNode<CertificateListItem>): HTMLElement {
+    const td = document.createElement("td");
+    const parentId = node.item.parent_id;
+    const label = parentId ? this.allItems.find((c) => c.id === parentId)?.label : "";
+    if (label) td.textContent = label;
+    else td.innerHTML = CertsAdminView.MUTED;   // racine / émetteur introuvable
+    return td;
+  }
+
+  /** Cellule DÉRIVÉS : nombre de descendants FEUILLES (certificats terminaux émis SOUS ce nœud), « — » si aucun.
+      Colonne numérique (droite, tabulaire). */
+  private derivedCell(node: CertTreeNode<CertificateListItem>): HTMLElement {
+    const td = document.createElement("td"); td.className = "cell-num";
+    const leaves = CertTree.descendants(node).filter((d) => !d.children.length).length;
+    if (leaves === 0) td.innerHTML = CertsAdminView.MUTED;
+    else td.textContent = String(leaves);
+    return td;
+  }
+
+  /** Remplit un élément avec `text`, en enveloppant les occurrences du terme recherché dans un `<mark>` (surbrillance).
+      Construit par nœuds DOM (aucune interpolation HTML → pas d'échappement à la main). Sans terme → texte simple. */
+  private fillHighlighted(el: HTMLElement, text: string): void {
+    const query = this.filter.query.trim();
+    if (!query) { el.textContent = text; return; }
+    const haystack = text.toLowerCase(); const needle = query.toLowerCase();
+    let from = 0; let at = haystack.indexOf(needle, from);
+    if (at < 0) { el.textContent = text; return; }
+    while (at >= 0) {
+      if (at > from) el.appendChild(document.createTextNode(text.slice(from, at)));
+      const mark = document.createElement("mark"); mark.className = "tree-hl"; mark.textContent = text.slice(at, at + query.length);
+      el.appendChild(mark);
+      from = at + query.length; at = haystack.indexOf(needle, from);
+    }
+    if (from < text.length) el.appendChild(document.createTextNode(text.slice(from)));
+  }
+
+  /** Niveau d'un nœud pour l'icône : racine (autorité de tête / paire autonome), intermédiaire (CA sous une CA)
+      ou feuille (certificat terminal). Mappé par KIND en priorité, repli sur la profondeur/présence d'enfants. */
+  private static nodeLevel(node: CertTreeNode<CertificateListItem>): "root" | "mid" | "leaf" {
+    const kind = node.item.kind;
+    if (kind === "root-ca" || kind === "ssh-ca" || kind === "ssh-keypair") return "root";
+    if (kind === "intermediate-ca") return "mid";
+    if (kind === "leaf-tls" || kind === "ssh-cert") return "leaf";
+    if (node.depth === 0) return "root";   // repli : kind inconnu à la racine
+    return node.children.length ? "mid" : "leaf";
+  }
+
+  /** Cellule « Cible(s) » : le NOM de chaque équipement/VM RAPPROCHÉ, cliquable (ouvre sa fiche de détail —
       aller-retour, patron openTargetDetail), précédé d'une petite icône de famille (équipement/VM) pour le
       contexte + pastille discrète « ambigu » si plusieurs cibles distinctes ; rien si aucune (ou hors mode API :
       `targetResolver` null). Rapprochement CALCULÉ (CertTargetMatch), jamais persisté. */
-  private targetCell(item: CertificatePageItem): HTMLElement {
+  private targetCell(item: CertificateListItem): HTMLElement {
     const td = document.createElement("td");
     const resolver = this.targetResolver;
     if (!resolver) return td;   // hors mode API → colonne inerte
@@ -738,16 +748,7 @@ export class CertsAdminView {
     return td;
   }
 
-  /* ---- Cellules & pagination communes ---- */
-
-  /** Cellule libellé (indication « clé détenue » en title, comme l'arbre d'origine). */
-  private labelCell(item: CertificateListItem): HTMLElement {
-    const td = document.createElement("td");
-    const span = document.createElement("span"); span.textContent = item.label;
-    if (item.has_key) span.title = I18n.t("certs.admin.listing.keyOwned");
-    td.appendChild(span);
-    return td;
-  }
+  /* ---- Cellules communes ---- */
 
   private subjectCell(subject: string): HTMLElement {
     const td = document.createElement("td"); td.style.cssText = "font-family:var(--mono);font-size:12px"; td.textContent = subject;
@@ -759,20 +760,19 @@ export class CertsAdminView {
     const th = document.createElement("th"); if (cls) th.className = cls; th.textContent = text; return th;
   }
 
-  /** En-tête TRIABLE (CSS ListView : .sortable + .sort-ind ▲/▼). Clic : bascule le sens si déjà actif, sinon
-      trie ASC sur cette colonne ; retour page 1 puis repeint le corps (rechargement serveur). `cls` = classe
-      d'alignement de la colonne (« cell-num » pour les colonnes numériques → en-tête + tri ancrés à droite). */
-  private sortableTh(text: string, sortKey: string, st: ListingState, cls = ""): HTMLElement {
+  /** En-tête TRIABLE (CSS ListView : .sortable + .sort-ind ▲/▼) sur le tri CLIENT intra-fratrie (CertTree.sortSiblings).
+      Clic : bascule le sens si déjà actif sur cette clé, sinon trie ASC sur elle, puis repeint l'arbre (sans réseau). */
+  private sortableTh(text: string, key: "label" | "not_after", cls = ""): HTMLElement {
     const th = document.createElement("th"); th.className = cls ? "sortable " + cls : "sortable"; th.textContent = text;
-    if (st.sort === sortKey) {
-      const ind = document.createElement("span"); ind.className = "sort-ind"; ind.textContent = " " + (st.dir === "desc" ? "▼" : "▲");
+    if (this.sortKey === key) {
+      const ind = document.createElement("span"); ind.className = "sort-ind"; ind.textContent = " " + (this.sortDir === "desc" ? "▼" : "▲");
       th.appendChild(ind);
     }
     th.onclick = () => {
-      if (st.sort === sortKey) st.dir = st.dir === "desc" ? "asc" : "desc";
-      else { st.sort = sortKey; st.dir = "asc"; }
-      st.page = 1;
-      void this.refreshBody();
+      if (this.sortKey === key) this.sortDir = this.sortDir === "desc" ? "asc" : "desc";
+      else { this.sortKey = key; this.sortDir = "asc"; }
+      this.session.touch();
+      this.refreshTree();
     };
     return th;
   }
@@ -785,46 +785,12 @@ export class CertsAdminView {
     return tr;
   }
 
-  /** Bloc pagination standard (.pagination) : « N élément(s) · page x/y » + first/prev/next/last + « N/page ».
-      TOUTE navigation recharge la page côté SERVEUR (jamais de slice client). */
-  private buildPagination(): HTMLElement {
-    const st = this.currentState();
-    const meta = this.pageMeta || { total: 0, page: 1, pages: 1, pageSize: st.pageSize };
-    const wrap = document.createElement("div"); wrap.className = "pagination";
-    const info = document.createElement("div");
-    info.textContent = I18n.t("lists.chrome.count", { count: meta.total, page: meta.page, pages: meta.pages });
-    const controls = document.createElement("div"); controls.className = "pagination-controls";
-    const nav = (label: string, disabled: boolean, to: number): HTMLButtonElement => {
-      const b = document.createElement("button"); b.type = "button"; b.className = "page-btn"; b.textContent = label; b.disabled = disabled;
-      b.onclick = () => { st.page = to; void this.refreshBody(); };
-      return b;
-    };
-    controls.appendChild(nav("«", meta.page <= 1, 1));
-    controls.appendChild(nav("‹", meta.page <= 1, Math.max(1, meta.page - 1)));
-    const pos = document.createElement("span"); pos.style.cssText = "padding:0 6px"; pos.textContent = meta.page + " / " + meta.pages;
-    controls.appendChild(pos);
-    controls.appendChild(nav("›", meta.page >= meta.pages, Math.min(meta.pages, meta.page + 1)));
-    controls.appendChild(nav("»", meta.page >= meta.pages, meta.pages));
-    const sel = document.createElement("select"); sel.className = "page-size app-select";
-    for (const n of PAGE_SIZE_OPTIONS) { const o = document.createElement("option"); o.value = String(n); o.textContent = I18n.t("lists.chrome.pageSize", { n }); if (n === st.pageSize) o.selected = true; sel.appendChild(o); }
-    sel.onchange = () => { st.pageSize = parseInt(sel.value, 10); st.page = 1; void this.refreshBody(); };
-    controls.appendChild(sel);
-    wrap.append(info, controls);
-    return wrap;
-  }
-
   /** Cellule d'échéance COLORÉE (jours restants) — vert > 30 j, orange ≤ 30, rouge ≤ 7/expiré, « — » sans date. */
   private expiryCell(item: CertificateListItem): string {
     const cls = CertsFormat.expiryClass(item.not_after);
     const color = cls === "ok" ? "var(--ok)" : cls === "warn" ? "var(--warn)" : cls === "err" ? "var(--err)" : "var(--fg-dimmer)";
     const title = item.not_after ? Format.dateTime(item.not_after) : "";
     return `<span style="color:${color}" title="${Html.escape(title)}">${Html.escape(CertsFormat.expiryLabel(item.not_after))}</span>`;
-  }
-
-  /** Cellule « date d'émission » (not_before) : date lisible NEUTRE (aucune sémantique de couleur — c'est une
-      date passée), « — » si absente. Colonne triable serveur (tri `not_before`, cf. CertsDb.orderBy). */
-  private issuedCell(item: CertificateListItem): string {
-    return item.not_before ? Html.escape(Format.dateTime(item.not_before)) : CertsAdminView.MUTED;
   }
 
   /** Boutons d'action d'une ligne : émission (CA), export, révocation, suppression — tous en ICÔNE
@@ -889,8 +855,11 @@ export class CertsAdminView {
       wrap.append(val, btn);
       addNode(label, wrap);
     };
-    const issuerName = (item.parent_id && item.parent_id === this.rootScope?.id) ? this.rootScope!.label
-      : (item.parent_id ? CertsFormat.issuerLabel(item.parent_id, this.certItems) : "—");
+    // Émetteur résolu depuis l'arbre COMPLET (allItems) : plus de portée de page — le libellé du parent est
+    // toujours disponible (repli id court si orphelin toléré). « — » pour une racine (parent_id nul).
+    const issuerName = item.parent_id
+      ? (this.allItems.find((c) => c.id === item.parent_id)?.label || CertsFormat.shortId(item.parent_id))
+      : "—";
     const sans = Array.isArray(item.sans) ? item.sans : [];
 
     add(I18n.t("lists.col.type"), this.pill(CertsFormat.kindLabel(item.kind), "neutral") + (item.revoked_at ? " " + this.pill(I18n.t("certs.admin.listing.revoked"), "err") : ""));
@@ -989,9 +958,10 @@ export class CertsAdminView {
      mémoire d'instance et survit page/tri/filtre (cf. `selection`).
      -------------------------------------------------------------------------- */
 
-  /** Items de la PAGE courante (racines OU sous-arbre) — base des cases et de la case « toute la page ». */
+  /** Items des lignes VISIBLES (résultat aplati/filtré du dernier rendu) — base des cases et de la case « toute la
+      page » : la sélection porte à plat sur ce qui est AFFICHÉ (cascade parent→enfants = Lot 2c, pas maintenant). */
   private currentPageItems(): CertificateListItem[] {
-    return this.view === "roots" ? this.rootItems : this.certItems;
+    return this.visibleItems;
   }
 
   /** Instantané minimal mémorisé pour un élément coché (suffit aux actions communes + bilan). */
@@ -2521,32 +2491,16 @@ export class CertsAdminView {
       { value: "host", label: I18n.t("certs.admin.sshType.host") },
     ];
   }
-  /** Options du filtre « État » — SÉLECTION UNIQUE (le serveur n'accepte qu'UN `status` :
-      active|revoked|expired|expiring) : un MultiSelect laisserait croire que les états se combinent, ce que la
-      route ne permet pas. « » = tous (aucun filtre d'état). */
-  private static statusFilterOpts(): SelectOption[] {
+  /** Options du filtre « État » (cycle de vie CertsFormat.lifecycle) — SÉLECTION UNIQUE. Le « Tous » n'est PAS
+      listé ici : la FilterBar l'ajoute elle-même (option « Tous » d'une dimension `single`). Valeurs alignées sur
+      CertLifecycle (active | expiring | revoked | expired) → filtre client via CertTree.visibleIds. */
+  private static stateFilterItems(): MultiItem[] {
     return [
-      { value: "", label: I18n.t("certs.admin.status.all") },
-      { value: "active", label: I18n.t("certs.admin.status.active") },
-      { value: "revoked", label: I18n.t("certs.admin.status.revoked") },
-      { value: "expired", label: I18n.t("certs.admin.status.expired") },
-      { value: "expiring", label: I18n.t("certs.admin.status.expiring") },
+      { id: "active", label: I18n.t("certs.admin.status.active") },
+      { id: "expiring", label: I18n.t("certs.admin.status.expiring") },
+      { id: "revoked", label: I18n.t("certs.admin.status.revoked") },
+      { id: "expired", label: I18n.t("certs.admin.status.expired") },
     ];
-  }
-
-  /** État de listing NEUF (défauts : page 1, taille par défaut, tri par libellé ascendant, aucun filtre). */
-  private static defaultState(): ListingState {
-    return { page: 1, pageSize: PAGE_SIZE_DEFAULT, sort: "label", dir: "asc", kinds: new Set(), status: "" };
-  }
-
-  /** Paramètres de listing (query string) dérivés d'un état — factorisé (loadCurrentPage + navigation par
-      la recherche). SANS `focus`/`root`, ajoutés ponctuellement par l'appelant. `status`/`kinds` vides = omis. */
-  private static listParams(st: ListingState): CertsListParams {
-    return {
-      page: st.page, pageSize: st.pageSize, sort: st.sort, dir: st.dir,
-      kinds: st.kinds.size ? [...st.kinds] : undefined,
-      status: st.status || undefined,
-    };
   }
 
   /** Identifiant neuf pour une création (PUT idempotent par id côté serveur). */
