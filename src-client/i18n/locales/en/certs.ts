@@ -227,6 +227,7 @@ export const certs = {
     },
     actions: {
       issueTls: "Issue TLS",
+      issueCa: "Issue a sub-CA",
       issueSsh: "Issue SSH",
       exportArtifacts: "Export the artifacts",
       revoke: "Revoke",
@@ -376,6 +377,14 @@ export const certs = {
       daysHint: "Default 3650 (~10 years) for a root CA.",
       title: "New X.509 root CA",
       toast: "Root CA created",
+    },
+    intermediateCa: {
+      title: "Issue an intermediate CA",
+      daysHint: "Lifetime of the sub-CA.",
+      pathLenField: "Sub-CA depth (advanced)",
+      pathLenHint: "0 = this CA only issues leaves. Increase to allow additional sub-CA levels below it.",
+      pathLenInvalid: "The depth (pathLen) must be an integer ≥ 0.",
+      toast: "Intermediate CA issued",
     },
     leaf: {
       cnPlaceholder: "e.g. service.internal",

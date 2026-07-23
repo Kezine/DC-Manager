@@ -188,6 +188,11 @@ export class Icons {
   /** Émettre un certificat SSH : clé (le pendant SSH du sceau X.509). */
   static readonly ISSUE_SSH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L21 2"/><path d="M17 6l3 3"/><path d="M14 9l3 3"/></svg>';
 
+  /** Émettre une CA intermédiaire (sous-CA) : bouclier (l'AUTORITÉ, comme les CA) frappé d'un « + » (CRÉER une
+      autorité subordonnée) — distinct du sceau ISSUE_TLS (émettre une FEUILLE) et du bouclier + coche
+      TRUST_DEPLOY (déployer la CONFIANCE). */
+  static readonly ISSUE_CA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l7 3v6c0 4.4-3 8.3-7 9.5C8 19.3 5 15.4 5 11V5z"/><line x1="12" y1="8.5" x2="12" y2="13.5"/><line x1="9.5" y1="11" x2="14.5" y2="11"/></svg>';
+
   /** Déploiement des certificats : bouclier (la CONFIANCE) posé sur une machine cliente. */
   static readonly TRUST_DEPLOY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l7 3v6c0 4.4-3 8.3-7 9.5C8 19.3 5 15.4 5 11V5z"/><path d="M9 11.5l2 2 4-4.5"/></svg>';
 

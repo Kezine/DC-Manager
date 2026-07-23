@@ -232,6 +232,7 @@ export const certs = {
     },
     actions: {
       issueTls: "Émettre TLS",
+      issueCa: "Émettre une sous-CA",
       issueSsh: "Émettre SSH",
       exportArtifacts: "Exporter les artefacts",
       revoke: "Révoquer",
@@ -381,6 +382,14 @@ export const certs = {
       daysHint: "Défaut 3650 (~10 ans) pour une CA racine.",
       title: "Nouvelle CA racine X.509",
       toast: "CA racine créée",
+    },
+    intermediateCa: {
+      title: "Émettre une CA intermédiaire",
+      daysHint: "Durée de vie de la sous-CA.",
+      pathLenField: "Profondeur de sous-CA (avancé)",
+      pathLenHint: "0 = cette CA n'émet que des feuilles. Augmentez pour autoriser des niveaux de sous-CA supplémentaires en dessous.",
+      pathLenInvalid: "La profondeur (pathLen) doit être un entier ≥ 0.",
+      toast: "CA intermédiaire émise",
     },
     leaf: {
       cnPlaceholder: "ex. service.interne",

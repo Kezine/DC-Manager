@@ -69,6 +69,14 @@ module.exports = async () => {
     ck.eq(i1.children[0].rootKind, "root-ca", "build : rootKind de l1 = root-ca (famille de sa racine)");
     ck.eq(CertTree.descendants(r1).length, 3, "descendants(r1) = i1 + l1 + l2 (3)");
 
+    // -- selectionStateOf : état de sélection d'un SOUS-ARBRE COMPLET (cascade parent→enfants, Lot 2c) --
+    const l1n = i1.children[0];   // feuille sous i1
+    ck.eq(CertTree.selectionStateOf(r1, new Set()), "none", "selectionStateOf : rien coché → none");
+    ck.eq(CertTree.selectionStateOf(r1, new Set(["r1", "i1", "l1", "l2"])), "all", "selectionStateOf : tout le sous-arbre de r1 coché → all");
+    ck.eq(CertTree.selectionStateOf(r1, new Set(["l1"])), "partial", "selectionStateOf : une partie du sous-arbre → partial (case parent indéterminée)");
+    ck.eq(CertTree.selectionStateOf(l1n, new Set(["l1"])), "all", "selectionStateOf : feuille cochée → all (appartenance simple)");
+    ck.eq(CertTree.selectionStateOf(l1n, new Set()), "none", "selectionStateOf : feuille non cochée → none");
+
     // -- visibleIds : famille (élague l'arbre entier) / état + recherche (ancêtres gardés) --
     const idset = (set) => [...set].slice().sort().join(",");
     ck.eq(CertTree.visibleIds(forest, {}), null, "visibleIds : aucun filtre → null (tout visible)");

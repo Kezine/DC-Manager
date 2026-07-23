@@ -98,13 +98,30 @@ export class CertTree {
     for (const child of node.children) CertTree.assign(child, depth + 1, rootKind, seen);
   }
 
-  /** Tous les descendants d'un nœud (pré-ordre, hors le nœud lui-même) — sert au comptage « Dérivés » et,
-      plus tard, à la sélection en cascade (Lot 2c). Borné par la structure déjà acyclique produite par `build`. */
+  /** Tous les descendants d'un nœud (pré-ordre, hors le nœud lui-même) — sert au comptage « Dérivés » et à la
+      sélection en cascade (Lot 2c). Borné par la structure déjà acyclique produite par `build`. */
   static descendants<T extends CertTreeItem>(node: CertTreeNode<T>): CertTreeNode<T>[] {
     const out: CertTreeNode<T>[] = [];
     const walk = (n: CertTreeNode<T>) => { for (const c of n.children) { out.push(c); walk(c); } };
     walk(node);
     return out;
+  }
+
+  /** État de sélection du SOUS-ARBRE COMPLET d'un nœud (le nœud LUI-MÊME + tous ses descendants) au regard d'un
+      ensemble d'ids sélectionnés (Lot 2c — cascade parent→enfants) :
+      - `"all"`   : le nœud ET tout son sous-arbre sont sélectionnés (case COCHÉE) ;
+      - `"none"`  : aucun élément du sous-arbre ne l'est (case DÉCOCHÉE) ;
+      - `"partial"`: une partie seulement (case INDÉTERMINÉE d'un parent).
+      Pour une FEUILLE (sans enfant), le sous-arbre se réduit au nœud → `"all"` (sélectionnée) ou `"none"` : une
+      feuille ne peut donc jamais être « partielle ». Logique PURE (aucun DOM) → testée dans test-certs.js.
+      `selectedIds` n'a besoin que d'un `.has(id)` (Set ou Map d'ids) : on ne dépend pas d'une structure précise. */
+  static selectionStateOf<T extends CertTreeItem>(node: CertTreeNode<T>, selectedIds: { has(id: string): boolean }): "none" | "partial" | "all" {
+    const subtree = [node, ...CertTree.descendants(node)];
+    let selected = 0;
+    for (const n of subtree) if (selectedIds.has(n.item.id)) selected++;
+    if (selected === 0) return "none";
+    if (selected === subtree.length) return "all";
+    return "partial";
   }
 
   /** Ensemble des ids de nœuds à AFFICHER sous les filtres, ou `null` si AUCUN filtre (tout est visible).

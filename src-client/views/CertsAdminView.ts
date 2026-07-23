@@ -64,7 +64,8 @@ import * as x509 from "@peculiar/x509";
      - Tri intra-fratrie (Libellé / Échéance) par en-tête cliquable, client via CertTree.sortSiblings.
    Deux repeints distincts : `refreshTree()` (filtre/tri/recherche/dépliage — SANS réseau) et
    `refreshBody()` (APRÈS écriture — recharge `loadAll()` puis repeint), la sélection multiple (L4)
-   portant à plat sur les lignes VISIBLES.
+   cascadant PARENT→ENFANTS (cocher un nœud coche tout son sous-arbre ; case parent INDÉTERMINÉE si
+   sélection partielle — cf. CertTree.selectionStateOf), la case d'en-tête restant sur les lignes VISIBLES.
 
    ZÉRO-CONNAISSANCE : toute la crypto vit ICI, dans le navigateur. La clé maître
    (dérivée PBKDF2) et les clés privées déchiffrées ne sont JAMAIS persistées ni
@@ -158,8 +159,9 @@ export class CertsAdminView {
   /** Vrai pendant un rendu FILTRÉ (visible ≠ null) : le chevron d'un nœud à enfants apparaît alors DÉPLIÉ
       (CertTree.flatten force le chemin des correspondances ouvert). Transitoire, posé par paintBody. */
   private treeFiltering = false;
-  /** Items des lignes VISIBLES du dernier rendu (résultat aplati/filtré) — base de la sélection « toute la page »
-      et de la case d'en-tête (la sélection porte à plat sur ce qui est affiché ; cascade parent→enfants = Lot 2c). */
+  /** Items des lignes VISIBLES du dernier rendu (résultat aplati/filtré) — base de la case « toute la page » et de
+      la case d'en-tête (elles portent sur les lignes AFFICHÉES ; la cascade parent→enfants, elle, touche le
+      sous-arbre COMPLET, descendants cachés compris — cf. toggleSelect). */
   private visibleItems: CertificateListItem[] = [];
   /** Conteneur du corps (table arbre + barre de sélection + ligne de compte) — repeint SEUL sur filtre/tri/
       recherche/dépliage (toolbar préservée). */
@@ -609,7 +611,7 @@ export class CertsAdminView {
     // `.open` pilote la rotation CSS du chevron : dépliée si l'utilisateur l'a ouverte OU si on filtre (chemin forcé).
     if (node.children.length && (this.treeFiltering || this.open.has(item.id))) tr.classList.add("open");
     if (this.focusId && item.id === this.focusId) tr.classList.add("row-focus");   // cible d'une focalisation
-    tr.appendChild(this.selectRowCell(item));
+    tr.appendChild(this.selectRowCell(node));
     tr.appendChild(this.treeCell(node));
     tr.appendChild(this.htmlCell(this.pill(CertsFormat.kindLabel(item.kind), "neutral")));
     tr.appendChild(this.issuerCell(node));
@@ -817,7 +819,12 @@ export class CertsAdminView {
     const unlocked = this.session.unlocked;
     // Détail (lecture seule) : disponible EN PERMANENCE (même verrouillé / révoqué) — aucune clé, aucune écriture.
     cell.appendChild(IconButton.build({ icon: Icons.INFO, label: I18n.t("certs.admin.actions.info"), onClick: () => this.infoModal(item) }));
-    if (unlocked && item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, I18n.t("certs.admin.actions.issueTls"), CERT_TIP.issueTls, () => this.leafModal(item)));
+    // Émettre une FEUILLE TLS : une CA X.509, racine OU intermédiaire, peut signer une feuille (leafModal ne
+    // présuppose aucune racine — il prend n'importe quelle CA X.509 comme émetteur).
+    if (unlocked && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, I18n.t("certs.admin.actions.issueTls"), CERT_TIP.issueTls, () => this.leafModal(item)));
+    // Émettre une SOUS-CA (CA intermédiaire) : une CA X.509 (racine OU intermédiaire) peut signer une autre CA.
+    // L'émission est CONTEXTUELLE (ce nœud EST l'émetteur) — pas de tooltip enrichi, le title/aria-label suffit.
+    if (unlocked && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_CA, I18n.t("certs.admin.actions.issueCa"), "", () => this.intermediateCaModal(item)));
     if (unlocked && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, I18n.t("certs.admin.actions.issueSsh"), CERT_TIP.issueSsh, () => this.sshCertModal(item)));
     // RENOUVELLEMENT unitaire (mode 1) — feuille TLS / certificat SSH.
     if (unlocked && (item.kind === "leaf-tls" || item.kind === "ssh-cert") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renew"), CERT_TIP.renew, () => void this.renewModal(item)));
@@ -975,8 +982,9 @@ export class CertsAdminView {
      mémoire d'instance et survit page/tri/filtre (cf. `selection`).
      -------------------------------------------------------------------------- */
 
-  /** Items des lignes VISIBLES (résultat aplati/filtré du dernier rendu) — base des cases et de la case « toute la
-      page » : la sélection porte à plat sur ce qui est AFFICHÉ (cascade parent→enfants = Lot 2c, pas maintenant). */
+  /** Items des lignes VISIBLES (résultat aplati/filtré du dernier rendu) — base de la case « toute la page » et de
+      la case d'en-tête (elles portent sur les lignes AFFICHÉES ; la cascade cochant un nœud touche, elle, tout son
+      sous-arbre — cf. toggleSelect). */
   private currentPageItems(): CertificateListItem[] {
     return this.visibleItems;
   }
@@ -996,46 +1004,77 @@ export class CertsAdminView {
     return th;
   }
 
-  /** Cellule de sélection d'une ligne : case reflétant l'appartenance à la sélection (data-cert-id pour la
-      synchro « toute la page »/« effacer »). */
-  private selectRowCell(item: CertificateListItem): HTMLElement {
+  /** Cellule de sélection d'une ligne : case reflétant l'état de sélection de SON SOUS-ARBRE (data-cert-id pour
+      la synchro « toute la page » / « effacer » / cascade). Reçoit le NŒUD (et non le seul item) : cocher cascade
+      sur tout son sous-arbre. L'état exact (coché / indéterminé) est posé juste après par `syncRowCheckboxes`
+      (appelé par `refreshSelectionUi`, lui-même invoqué à la fin de `paintBody`) — l'affectation initiale n'est
+      qu'un point de départ. */
+  private selectRowCell(node: CertTreeNode<CertificateListItem>): HTMLElement {
+    const item = node.item;
     const td = document.createElement("td"); td.style.width = "1%";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.setAttribute("data-cert-id", item.id);
-    cb.checked = this.selection.has(item.id);
+    cb.checked = this.selection.has(item.id);   // état de départ (raffiné en coché/indéterminé par syncRowCheckboxes)
     cb.title = I18n.t("certs.admin.select.rowSelect", { label: item.label });
-    cb.onclick = () => this.toggleSelect(item, cb.checked);
+    cb.onclick = () => this.toggleSelect(node, cb.checked);
     td.appendChild(cb);
     return td;
   }
 
-  /** Coche/décoche un élément (met à jour l'instantané) puis rafraîchit barre + case d'en-tête. */
-  private toggleSelect(item: CertificateListItem, checked: boolean): void {
+  /** Coche/décoche un nœud EN CASCADE : le nœud LUI-MÊME + tous ses descendants (`CertTree.descendants`) — on
+      sélectionne ainsi une CA et son sous-arbre entier d'un geste (export / révocation / suppression groupés ;
+      les actions groupées gèrent déjà les refus par élément, ex. un émetteur à enfants). Met à jour l'instantané
+      de chaque nœud touché, puis re-synchronise TOUTES les cases visibles (les descendants suivent, les ancêtres
+      passent à l'état indéterminé le cas échéant) + la barre + la case d'en-tête. */
+  private toggleSelect(node: CertTreeNode<CertificateListItem>, checked: boolean): void {
     this.session.touch();
-    if (checked) this.selection.set(item.id, this.snapshotOf(item)); else this.selection.delete(item.id);
+    for (const n of [node, ...CertTree.descendants(node)]) {
+      if (checked) this.selection.set(n.item.id, this.snapshotOf(n.item)); else this.selection.delete(n.item.id);
+    }
     this.refreshSelectionUi();
   }
 
-  /** Coche/décoche TOUS les éléments de la page courante (case d'en-tête) + les cases DOM correspondantes. */
+  /** Coche/décoche TOUTES les lignes VISIBLES (case d'en-tête = « toute la page/vue »). Sémantique À PLAT sur les
+      lignes affichées (pas de cascade ici : les descendants visibles sont déjà des lignes de la page ; un parent
+      REPLIÉ voit ses descendants cachés non touchés — cohérent avec l'en-tête qui ne parle que du visible). Les
+      cases DOM (dont l'état indéterminé) sont resynchronisées par `syncRowCheckboxes` via `refreshSelectionUi`. */
   private toggleSelectAll(checked: boolean): void {
     this.session.touch();
     for (const item of this.currentPageItems()) {
       if (checked) this.selection.set(item.id, this.snapshotOf(item)); else this.selection.delete(item.id);
     }
-    this.bodyEl?.querySelectorAll("input[data-cert-id]").forEach((el) => { (el as HTMLInputElement).checked = checked; });
     this.refreshSelectionUi();
   }
 
-  /** Vide la sélection (bouton « Effacer » et après une action groupée) + décoche les cases visibles. */
+  /** Vide la sélection (bouton « Effacer » et après une action groupée). Les cases visibles sont décochées par
+      `syncRowCheckboxes` (via `refreshSelectionUi`). */
   private clearSelection(): void {
     this.selection.clear();
-    this.bodyEl?.querySelectorAll("input[data-cert-id]").forEach((el) => { (el as HTMLInputElement).checked = false; });
     this.refreshSelectionUi();
   }
 
-  /** Repeint la barre de sélection et resynchronise la case d'en-tête (sans reconstruire la table). */
+  /** Repeint la barre de sélection, resynchronise les cases de LIGNE (coché/indéterminé selon l'état du sous-arbre)
+      et la case d'en-tête — sans reconstruire la table. Point de passage UNIQUE de toute variation de sélection. */
   private refreshSelectionUi(): void {
+    this.syncRowCheckboxes();
     this.renderSelectionBar();
     this.syncHeaderCheckbox();
+  }
+
+  /** Pose l'état COCHÉ/INDÉTERMINÉ de chaque case de LIGNE visible depuis l'état de `selection` et la structure de
+      la forêt : pour un nœud à enfants, `checked` si tout son sous-arbre est sélectionné, `indeterminate` si une
+      partie seulement (calcul PUR `CertTree.selectionStateOf`) ; une feuille reflète juste son appartenance. On
+      parcourt les cases réellement présentes dans le corps (`input[data-cert-id]`), retrouvant leur nœud par id. */
+  private syncRowCheckboxes(): void {
+    if (!this.bodyEl) return;
+    this.bodyEl.querySelectorAll("input[data-cert-id]").forEach((el) => {
+      const cb = el as HTMLInputElement;
+      const id = cb.getAttribute("data-cert-id") || "";
+      const node = this.findNode(id);
+      if (!node) { cb.checked = this.selection.has(id); cb.indeterminate = false; return; }   // nœud absent → appartenance simple
+      const state = CertTree.selectionStateOf(node, this.selection);
+      cb.checked = state === "all";
+      cb.indeterminate = state === "partial";
+    });
   }
 
   /** Synchronise la case « toute la page » : cochée si tous les éléments de la page sont sélectionnés,
@@ -1674,6 +1713,90 @@ export class CertsAdminView {
           // révocation → le neuf existe déjà : on avertit sans bloquer (l'ancien restera à révoquer à la main).
           if (renewOf) await this.revokeSuperseded(renewOf);
           Notify.toast(renewOf ? I18n.t("certs.admin.renew.leafToast") : I18n.t("certs.admin.leaf.toast"), "ok");
+          await this.refreshBody();
+          return true;
+        } catch (e) { this.showError(errBox, e); return false; }
+      },
+    });
+    setTimeout(() => label.focus(), 30);
+  }
+
+  /** Émet une CA INTERMÉDIAIRE (sous-CA) signée par la CA `parentCa` (racine OU intermédiaire) — action
+      « Émettre une sous-CA ». La sous-CA est à la fois un DÉRIVÉ (elle a un émetteur) et une CA (elle pourra
+      à son tour signer feuilles et sous-CA). Sa NOUVELLE paire de clés naît dans le navigateur ; la clé privée
+      est chiffrée par la clé maître AVANT envoi (zéro-connaissance), exactement comme une feuille. La clé de la
+      CA parente est déchiffrée LOCALEMENT le temps de signer, jamais réaffichée. PAS de SAN ni d'usage/EKU
+      (c'est une CA, pas une feuille) ; un champ AVANCÉ `pathLen` règle la profondeur de sous-CA encore autorisée
+      EN DESSOUS (défaut 0 = cette CA n'émet QUE des feuilles — confinement par défaut, cadrage Lot 0 §8.4). */
+  private intermediateCaModal(parentCa: CertificateListItem): void {
+    const root = document.createElement("div");
+    // Champs d'IDENTITÉ d'une autorité (CN/O/OU) : on RÉUTILISE les libellés de la CA racine (une sous-CA est
+    // aussi une autorité) plutôt que d'en dupliquer. Label couplé au CN (recopié tant que le CN n'est pas édité).
+    const label = FormControls.text("", I18n.t("certs.admin.common.labelPlaceholder"));
+    const cn = FormControls.text("", I18n.t("certs.admin.rootCa.cnPlaceholder"));
+    root.appendChild(this.labelCnRow(label, cn, false));   // LABEL en premier → recopié dans le CN
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rootCa.cnField"), cn, I18n.t("certs.admin.rootCa.cnHint")));
+    const org = FormControls.text("", I18n.t("certs.admin.rootCa.orgPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rootCa.orgField"), org, I18n.t("certs.admin.rootCa.orgHint")));
+    const ou = FormControls.text("", I18n.t("certs.admin.rootCa.ouPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rootCa.ouField"), ou, I18n.t("certs.admin.rootCa.ouHint")));
+    const algo = FormControls.select(CertsAdminView.algoX509Opts(), "ec-p256");
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.algoField"), algo, I18n.t("certs.admin.rootCa.algoHint")));
+    // GUARD (formulaire) : une sous-CA ne peut vivre AU-DELÀ de sa CA parente → durée plafonnée à ce qui reste
+    // sur la parente. Défaut = la MOITIÉ de ce qui reste (une sous-CA vit moins que son ancre), repli 397 si la
+    // parente n'a pas d'échéance exploitable. Double filet : validation ci-dessous + fabrique (issueIntermediateCa).
+    const caDaysLeft = CertValidity.daysUntil(parentCa.not_after, Date.now());
+    const defaultDays = caDaysLeft != null ? Math.max(1, Math.floor(caDaysLeft / 2)) : 397;
+    const days = FormControls.number(defaultDays, caDaysLeft != null ? { min: 1, max: caDaysLeft, step: 1 } : { min: 1, step: 1 });
+    const daysHint = caDaysLeft != null
+      ? I18n.t("certs.admin.intermediateCa.daysHint") + " " + I18n.t("certs.admin.leaf.caCeiling", { date: (parentCa.not_after || "").slice(0, 10), days: caDaysLeft })
+      : I18n.t("certs.admin.intermediateCa.daysHint");
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, daysHint));
+    // pathLen (AVANCÉ) : profondeur de sous-CA encore autorisée SOUS celle-ci (entier ≥ 0, défaut 0 = feuilles seules).
+    const pathLen = FormControls.number(0, { min: 0, step: 1 });
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.intermediateCa.pathLenField"), pathLen, I18n.t("certs.admin.intermediateCa.pathLenHint")));
+    const errBox = this.errBox(); root.appendChild(errBox);
+
+    this.host.openModal({
+      title: I18n.t("certs.admin.intermediateCa.title"),
+      subtitle: Html.escape(parentCa.label),
+      body: root,
+      onSave: async () => {
+        errBox.style.display = "none";
+        this.session.touch();
+        const lbl = label.value.trim();
+        if (lbl === "") { this.showError(errBox, I18n.t("certs.admin.common.labelRequired")); return false; }
+        const commonName = cn.value.trim();
+        if (commonName === "") { this.showError(errBox, I18n.t("certs.admin.common.cnRequired")); return false; }
+        const requested = Number(days.value);
+        if (CertValidity.exceedsCa(requested, parentCa.not_after, Date.now())) {
+          this.showError(errBox, I18n.t("certs.admin.leaf.exceedsCa", { date: (parentCa.not_after || "").slice(0, 10), days: caDaysLeft ?? 0 })); return false;
+        }
+        // pathLen : entier ≥ 0 (la fabrique le revérifie ; on donne ici un message localisé et ciblé).
+        const depth = Number(pathLen.value);
+        if (!Number.isFinite(depth) || !Number.isInteger(depth) || depth < 0) { this.showError(errBox, I18n.t("certs.admin.intermediateCa.pathLenInvalid")); return false; }
+        try {
+          // Clé de la CA PARENTE chargée puis déchiffrée LOCALEMENT (getOne unitaire seul porte key_enc, invariant Q5).
+          const ca = await this.client!.getOne(parentCa.id);
+          if (!ca.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
+          const caKeyPem = await PkiCrypto.decryptSecret(this.session.key, ca.key_enc);
+          const keyAlgo = algo.value as X509KeyAlgo;
+          const organization = org.value.trim() || undefined;
+          const organizationalUnit = ou.value.trim() || undefined;
+          // Durée rognée au plafond de la parente (défensif : le champ est déjà borné et exceedsCa a bloqué le dépassement).
+          const clampedDays = CertValidity.clampDays(requested, parentCa.not_after, Date.now());
+          const gen = await X509Factory.issueIntermediateCa({
+            caCertPem: ca.public_pem || "", caPrivateKeyPkcs8Pem: caKeyPem,
+            commonName, organization, organizationalUnit, keyAlgo, days: clampedDays, pathLen: depth,
+          });
+          // Clé de la SOUS-CA chiffrée par la clé maître AVANT envoi (le serveur ne reçoit qu'un blob opaque).
+          const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
+          await this.client!.save(CertsAdminView.newId(), {
+            kind: "intermediate-ca", parent_id: parentCa.id, label: lbl, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
+            serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
+            key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans: [],
+          });
+          Notify.toast(I18n.t("certs.admin.intermediateCa.toast"), "ok");
           await this.refreshBody();
           return true;
         } catch (e) { this.showError(errBox, e); return false; }
