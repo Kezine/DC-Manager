@@ -384,6 +384,7 @@ export const certs = {
       pathLenField: "Sub-CA depth (advanced)",
       pathLenHint: "0 = this CA only issues leaves. Increase to allow additional sub-CA levels below it.",
       pathLenInvalid: "The depth (pathLen) must be an integer ≥ 0.",
+      pathLenTooDeep: "Depth too high: maximum {{max}} under this parent CA.",
       toast: "Intermediate CA issued",
     },
     leaf: {

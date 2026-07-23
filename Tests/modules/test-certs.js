@@ -558,6 +558,24 @@ module.exports = async () => {
     });
     ck.eq(new x509.X509Certificate(interDeep.certPem).getExtension(x509.BasicConstraintsExtension).pathLength, 1, "intermédiaire : pathLen configurable à la création (=1)");
 
+    /* -------- GUARD pathLen : une CA pathLen=0 ne peut PAS émettre de sous-CA ; l'enfant ≤ parent-1 -------- */
+    ck.eq(X509Factory.readCaPathLen(ca.certPem), null, "readCaPathLen : racine (pathLen absent) → null (illimité)");
+    ck.eq(X509Factory.readCaPathLen(inter.certPem), 0, "readCaPathLen : sous-CA pathLen=0 → 0");
+    ck.eq(X509Factory.readCaPathLen(interDeep.certPem), 1, "readCaPathLen : sous-CA pathLen=1 → 1");
+    ck.eq(X509Factory.readCaPathLen("pas un pem"), null, "readCaPathLen : PEM illisible → null (ne restreint pas à tort)");
+    let subUnder0Err = null;
+    try { await X509Factory.issueIntermediateCa({ caCertPem: inter.certPem, caPrivateKeyPkcs8Pem: inter.privateKeyPkcs8Pem, commonName: "trop-bas", keyAlgo: "ec-p256", days: 30 }); } catch (e) { subUnder0Err = e.message; }
+    ck(!!subUnder0Err && /pathLen 0|ne peut pas émettre de sous-CA/.test(subUnder0Err), "guard : sous-CA sous une CA pathLen=0 → REFUSÉE (ne signe que des feuilles)");
+    // Une feuille SOUS une CA pathLen=0 reste PERMISE (c'est le sens même de pathLen=0).
+    const leafUnder0 = await X509Factory.issueLeaf({ caCertPem: inter.certPem, caPrivateKeyPkcs8Pem: inter.privateKeyPkcs8Pem, commonName: "feuille.sous.pathlen0", keyAlgo: "ec-p256", days: 30, sans: [] });
+    ck(/-----BEGIN CERTIFICATE-----/.test(leafUnder0.certPem), "guard : une FEUILLE sous une CA pathLen=0 → émise (autorisée)");
+    // Sous une CA pathLen=1 : enfant pathLen=0 OK, enfant pathLen=1 refusé (> parent-1 = 0).
+    const subUnder1 = await X509Factory.issueIntermediateCa({ caCertPem: interDeep.certPem, caPrivateKeyPkcs8Pem: interDeep.privateKeyPkcs8Pem, commonName: "sous-interDeep", keyAlgo: "ec-p256", days: 30, pathLen: 0 });
+    ck.eq(new x509.X509Certificate(subUnder1.certPem).getExtension(x509.BasicConstraintsExtension).pathLength, 0, "guard : sous CA pathLen=1, enfant pathLen=0 → émis");
+    let tooDeepErr = null;
+    try { await X509Factory.issueIntermediateCa({ caCertPem: interDeep.certPem, caPrivateKeyPkcs8Pem: interDeep.privateKeyPkcs8Pem, commonName: "trop-profond", keyAlgo: "ec-p256", days: 30, pathLen: 1 }); } catch (e) { tooDeepErr = e.message; }
+    ck(!!tooDeepErr && /trop élevée|maximum/.test(tooDeepErr), "guard : sous CA pathLen=1, enfant pathLen=1 (> max 0) → REFUSÉ");
+
     /* -------- GUARD : une sous-CA ne peut vivre AU-DELÀ de sa CA parente -------- */
     let interGuardErr = null;
     try {

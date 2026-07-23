@@ -389,6 +389,7 @@ export const certs = {
       pathLenField: "Profondeur de sous-CA (avancé)",
       pathLenHint: "0 = cette CA n'émet que des feuilles. Augmentez pour autoriser des niveaux de sous-CA supplémentaires en dessous.",
       pathLenInvalid: "La profondeur (pathLen) doit être un entier ≥ 0.",
+      pathLenTooDeep: "Profondeur trop élevée : maximum {{max}} sous cette CA parente.",
       toast: "CA intermédiaire émise",
     },
     leaf: {

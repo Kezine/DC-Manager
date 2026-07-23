@@ -274,6 +274,17 @@ export class X509Factory {
     // (toute erreur reformulée en message NEUTRE, aucun matériau réinjecté).
     const { caCert, caPrivateKey, caSignAlgo } = await X509Factory.importCa(opts.caCertPem, opts.caPrivateKeyPkcs8Pem);
 
+    // GUARD pathLen (SOURCE DE VÉRITÉ) : la CA parente ne peut signer une SOUS-CA que si son propre
+    // pathLenConstraint l'autorise. Absent (illimité, ex. une racine) → toujours permis. **= 0 → la parente ne
+    // signe QUE des feuilles** : produire une sous-CA donnerait une chaîne INVALIDE (rejetée par les vérificateurs)
+    // → on REFUSE. = N > 0 → au plus N-1 niveaux de sous-CA en dessous → le pathLen de l'ENFANT est plafonné à N-1.
+    const caBasic = caCert.getExtension(x509.BasicConstraintsExtension);
+    const caPathLen = caBasic && typeof caBasic.pathLength === "number" ? caBasic.pathLength : null;
+    if (caPathLen !== null) {
+      if (caPathLen === 0) throw new Error("X509Factory : cette CA ne peut pas émettre de sous-CA (contrainte pathLen 0 — elle ne signe que des feuilles)");
+      if (pathLen > caPathLen - 1) throw new Error("X509Factory : profondeur pathLen " + pathLen + " trop élevée sous cette CA parente (pathLen " + caPathLen + ") — maximum " + (caPathLen - 1));
+    }
+
     // Clés de la sous-CA — extractibles pour le même motif que la racine/feuille (export PKCS#8 → chiffrement).
     const keys = await crypto.subtle.generateKey(algos.generate, true, ["sign", "verify"]);
     const { notBefore, notAfter } = X509Factory.validityWindow(days);
@@ -327,6 +338,20 @@ export class X509Factory {
       return "server";
     } catch {
       return "server";
+    }
+  }
+
+  /** Lit le `pathLenConstraint` (BasicConstraints) d'un certificat de CA depuis son PEM : `null` si ABSENT — donc
+      profondeur ILLIMITÉE (ex. une racine) — sinon l'entier de contrainte (0 = ne peut signer QUE des feuilles).
+      Parsing PUR (aucune opération de clé). Sert à l'UI pour décider si « Émettre une sous-CA » est proposable et
+      pour plafonner le pathLen de l'enfant. PEM illisible / cert sans BasicConstraints → `null` (on ne restreint
+      pas à tort ; le guard dur de `issueIntermediateCa` reste la source de vérité). */
+  static readCaPathLen(certPem: string): number | null {
+    try {
+      const basic = new x509.X509Certificate(certPem).getExtension(x509.BasicConstraintsExtension);
+      return basic && typeof basic.pathLength === "number" ? basic.pathLength : null;
+    } catch {
+      return null;
     }
   }
 

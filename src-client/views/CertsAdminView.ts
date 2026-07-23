@@ -822,9 +822,14 @@ export class CertsAdminView {
     // Émettre une FEUILLE TLS : une CA X.509, racine OU intermédiaire, peut signer une feuille (leafModal ne
     // présuppose aucune racine — il prend n'importe quelle CA X.509 comme émetteur).
     if (unlocked && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, I18n.t("certs.admin.actions.issueTls"), CERT_TIP.issueTls, () => this.leafModal(item)));
-    // Émettre une SOUS-CA (CA intermédiaire) : une CA X.509 (racine OU intermédiaire) peut signer une autre CA.
-    // L'émission est CONTEXTUELLE (ce nœud EST l'émetteur) — pas de tooltip enrichi, le title/aria-label suffit.
-    if (unlocked && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_CA, I18n.t("certs.admin.actions.issueCa"), "", () => this.intermediateCaModal(item)));
+    // Émettre une SOUS-CA (CA intermédiaire) : une CA X.509 (racine OU intermédiaire) peut signer une autre CA —
+    // SAUF si son pathLenConstraint vaut 0 (elle ne signe alors QUE des feuilles ; une sous-CA sous elle donnerait
+    // une chaîne INVALIDE). pathLen absent (illimité, ex. racine) ou ≥ 1 → autorisé. L'émission est CONTEXTUELLE
+    // (ce nœud EST l'émetteur) — pas de tooltip enrichi, le title/aria-label suffit.
+    if (unlocked && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at
+        && X509Factory.readCaPathLen(item.public_pem || "") !== 0) {
+      cell.appendChild(this.iconAction(Icons.ISSUE_CA, I18n.t("certs.admin.actions.issueCa"), "", () => this.intermediateCaModal(item)));
+    }
     if (unlocked && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, I18n.t("certs.admin.actions.issueSsh"), CERT_TIP.issueSsh, () => this.sshCertModal(item)));
     // RENOUVELLEMENT unitaire (mode 1) — feuille TLS / certificat SSH.
     if (unlocked && (item.kind === "leaf-tls" || item.kind === "ssh-cert") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renew"), CERT_TIP.renew, () => void this.renewModal(item)));
@@ -1752,8 +1757,12 @@ export class CertsAdminView {
       ? I18n.t("certs.admin.intermediateCa.daysHint") + " " + I18n.t("certs.admin.leaf.caCeiling", { date: (parentCa.not_after || "").slice(0, 10), days: caDaysLeft })
       : I18n.t("certs.admin.intermediateCa.daysHint");
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, daysHint));
-    // pathLen (AVANCÉ) : profondeur de sous-CA encore autorisée SOUS celle-ci (entier ≥ 0, défaut 0 = feuilles seules).
-    const pathLen = FormControls.number(0, { min: 0, step: 1 });
+    // pathLen (AVANCÉ) : profondeur de sous-CA encore autorisée SOUS celle-ci (entier ≥ 0, défaut 0 = feuilles
+    // seules). PLAFONNÉ par la CA parente : si elle a un pathLen fini N, l'enfant ne peut dépasser N-1 (sinon la
+    // chaîne serait invalide) ; parente illimitée (racine) → aucun plafond. L'action n'est même pas proposée si N = 0.
+    const parentPathLen = X509Factory.readCaPathLen(parentCa.public_pem || "");   // null = illimité
+    const childMax = parentPathLen === null ? null : Math.max(0, parentPathLen - 1);
+    const pathLen = FormControls.number(0, childMax !== null ? { min: 0, max: childMax, step: 1 } : { min: 0, step: 1 });
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.intermediateCa.pathLenField"), pathLen, I18n.t("certs.admin.intermediateCa.pathLenHint")));
     const errBox = this.errBox(); root.appendChild(errBox);
 
@@ -1775,6 +1784,7 @@ export class CertsAdminView {
         // pathLen : entier ≥ 0 (la fabrique le revérifie ; on donne ici un message localisé et ciblé).
         const depth = Number(pathLen.value);
         if (!Number.isFinite(depth) || !Number.isInteger(depth) || depth < 0) { this.showError(errBox, I18n.t("certs.admin.intermediateCa.pathLenInvalid")); return false; }
+        if (childMax !== null && depth > childMax) { this.showError(errBox, I18n.t("certs.admin.intermediateCa.pathLenTooDeep", { max: childMax })); return false; }
         try {
           // Clé de la CA PARENTE chargée puis déchiffrée LOCALEMENT (getOne unitaire seul porte key_enc, invariant Q5).
           const ca = await this.client!.getOne(parentCa.id);
