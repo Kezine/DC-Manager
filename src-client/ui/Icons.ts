@@ -236,6 +236,10 @@ export class Icons {
   /** Certificats (domaine PKI) : feuille signée d'un sceau à ruban. */
   static readonly CERTIFICATE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="13" y2="12"/><circle cx="15.5" cy="16" r="3"/><path d="M13.8 18.3 13 21l2.5-1.4L18 21l-.8-2.7"/></svg>';
 
+  /** Clé (anneau + panneton horizontal) : repère d'une PAIRE de clés autonome (ex. paire SSH) — un objet clé,
+      PAS une autorité (à distinguer du bouclier des CA). */
+  static readonly KEY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="12" r="4"/><path d="M11 12h10"/><path d="M18 12v3"/><path d="M21 12v2.5"/></svg>';
+
   /** Interventions / maintenance : clé à molette. */
   static readonly INTERVENTION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.66 5.66l-6.7 6.7a1.5 1.5 0 0 0 2.12 2.12l6.7-6.7a4 4 0 0 0 5.66-5.66l-2.83 2.83-2.12-.71-.71-2.12z"/></svg>';
 

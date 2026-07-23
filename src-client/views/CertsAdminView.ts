@@ -620,7 +620,7 @@ export class CertsAdminView {
     if (this.targetResolver) tr.appendChild(this.targetCell(item));   // équipement/VM rapproché — colonne présente seulement si résolveur
     // Actions : opérations de clé si déverrouillé (fillActions filtre) + « Déployer la confiance… » pour les AUTORITÉS.
     const actions = document.createElement("td"); actions.className = "cell-actions";   // nowrap + alignées à DROITE (parité ListView)
-    this.fillActions(actions, item);
+    this.fillActions(actions, item, node.children.length > 0);
     if (item.kind === "root-ca" || item.kind === "ssh-ca") actions.appendChild(this.iconAction(Icons.TRUST_DEPLOY, I18n.t("certs.admin.listing.deployTitle"), CERT_TIP.trustDeploy, () => this.deployTrustModal(item)));
     tr.appendChild(actions);
     return tr;
@@ -646,7 +646,7 @@ export class CertsAdminView {
     const level = CertsAdminView.nodeLevel(node);
     cell.classList.add(level === "root" ? "lvl-root" : level === "mid" ? "lvl-mid" : "lvl-leaf");
     const ic = document.createElement("span"); ic.className = "node-ic"; ic.setAttribute("aria-hidden", "true");
-    ic.innerHTML = level === "leaf" ? Icons.LOCK : TREE_SHIELD;
+    ic.innerHTML = CertsAdminView.nodeIcon(item.kind);
     // Libellé (surligné) + indication « clé privée détenue » (comme l'ancienne cellule libellé).
     const label = document.createElement("span"); label.className = "node-label";
     this.fillHighlighted(label, item.label);
@@ -710,6 +710,16 @@ export class CertsAdminView {
     if (kind === "leaf-tls" || kind === "ssh-cert") return "leaf";
     if (node.depth === 0) return "root";   // repli : kind inconnu à la racine
     return node.children.length ? "mid" : "leaf";
+  }
+
+  /** Icône de niveau par KIND : BOUCLIER pour une AUTORITÉ (racine X.509/SSH ou CA intermédiaire), CLÉ pour une
+      PAIRE SSH autonome (un objet clé, pas une autorité), CERTIFICAT (document scellé) pour un objet ÉMIS (feuille
+      TLS / certificat SSH). Repli = certificat. NB : on n'utilise PLUS le cadenas (Icons.LOCK) ici — il prêtait à
+      confusion avec le glyphe « Verrouiller » du coffre. La COULEUR reste portée par la classe lvl-* (nodeLevel). */
+  private static nodeIcon(kind: string): string {
+    if (kind === "root-ca" || kind === "ssh-ca" || kind === "intermediate-ca") return TREE_SHIELD;
+    if (kind === "ssh-keypair") return Icons.KEY;
+    return Icons.CERTIFICATE;
   }
 
   /** Cellule « Cible(s) » : le NOM de chaque équipement/VM RAPPROCHÉ, cliquable (ouvre sa fiche de détail —
@@ -803,7 +813,7 @@ export class CertsAdminView {
       Export (publics seuls), révocation et suppression restent offerts : ce sont des opérations de
       MÉTADONNÉES, aucun secret n'est déchiffré. C'est ce qui rend une PKI dont la phrase secrète est
       perdue encore consultable ET PURGEABLE, comme le promet docs/certs.md. */
-  private fillActions(cell: HTMLElement, item: CertificateListItem): void {
+  private fillActions(cell: HTMLElement, item: CertificateListItem, hasChildren = false): void {
     const unlocked = this.session.unlocked;
     // Détail (lecture seule) : disponible EN PERMANENCE (même verrouillé / révoqué) — aucune clé, aucune écriture.
     cell.appendChild(IconButton.build({ icon: Icons.INFO, label: I18n.t("certs.admin.actions.info"), onClick: () => this.infoModal(item) }));
@@ -815,7 +825,14 @@ export class CertsAdminView {
     if (unlocked && item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renewCa"), CERT_TIP.renew, () => void this.renewCaDialog(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.EXPORT, I18n.t("certs.admin.actions.exportArtifacts"), CERT_TIP.export, () => void this.exportModal(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.REVOKE, I18n.t("certs.admin.actions.revoke"), CERT_TIP.revoke, () => void this.revoke(item)));
-    cell.appendChild(this.iconAction(Icons.DELETE, I18n.t("ui.action.delete"), CERT_TIP.remove, () => void this.remove(item), true));
+    // Suppression : VERROUILLÉE (bouton grisé) si des dérivés existent — le serveur la refuse de toute façon
+    // (409 has_children, contrainte d'INTÉGRITÉ que `?force=true` ne lève pas). Mieux vaut un bouton désactivé
+    // avec un tooltip explicite qu'un 409 encaissé à l'usage. Un tooltip riche est inutile ici : le title suffit.
+    if (hasChildren) {
+      cell.appendChild(IconButton.build({ icon: Icons.DELETE, label: I18n.t("certs.admin.actions.deleteHasChildren"), danger: true, disabled: true }));
+    } else {
+      cell.appendChild(this.iconAction(Icons.DELETE, I18n.t("ui.action.delete"), CERT_TIP.remove, () => void this.remove(item), true));
+    }
   }
 
   /** Bouton d'action ICÔNE — délègue au constructeur PARTAGÉ (ui/IconButton) : un seul point de

@@ -238,6 +238,7 @@ export const certs = {
       renew: "Renouveler",
       renewCa: "Renouveler la CA",
       info: "Détail du certificat",
+      deleteHasChildren: "Suppression impossible : des dérivés existent (supprimez-les d'abord)",
     },
     renew: {
       leafTitle: "Renouveler le certificat TLS",

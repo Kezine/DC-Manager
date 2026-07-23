@@ -233,6 +233,7 @@ export const certs = {
       renew: "Renew",
       renewCa: "Renew the CA",
       info: "Certificate details",
+      deleteHasChildren: "Cannot delete: derivatives exist (delete them first)",
     },
     renew: {
       leafTitle: "Renew the TLS certificate",
