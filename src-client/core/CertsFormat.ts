@@ -24,6 +24,11 @@ import { I18n } from "../i18n/I18n";
 /** Classe de couleur d'une échéance (mappée en variable CSS par la vue). */
 export type ExpiryClass = "ok" | "warn" | "err" | "none";
 
+/** Cycle de vie d'un certificat (métadonnées seules) — pilote le filtre « État » du listing arborescent
+    (Lot 0) : révoqué / expiré / expire bientôt (≤ 30 j) / actif. Un objet SANS échéance (paire ou CA SSH
+    ed25519) ne peut ni expirer ni « expirer bientôt » → actif à vie. */
+export type CertLifecycle = "active" | "expiring" | "revoked" | "expired";
+
 export class CertsFormat {
   /** Seuil d'AVERTISSEMENT (orange) : échéance à 30 jours ou moins (décision de cadrage §5). */
   static readonly WARN_DAYS = 30;
@@ -74,6 +79,19 @@ export class CertsFormat {
     if (days < 0) return I18n.t("certs.expiry.expired", { days: -days });
     if (days === 0) return I18n.t("certs.expiry.today");
     return I18n.t("certs.expiry.inDays", { count: days });
+  }
+
+  /** Cycle de vie d'un certificat depuis ses SEULES métadonnées (`revoked_at` + `not_after`), pour le filtre
+      « État » (Lot 0) et la coloration. PRIORITÉ : révoqué (revoked_at posé, même si aussi expiré) > expiré
+      (échéance passée) > expire bientôt (≤ WARN_DAYS) > actif. Sans échéance exploitable → actif (paire/CA SSH
+      ed25519 : n'expire jamais). `nowMs` injectable (tests déterministes). Source UNIQUE du seuil (WARN_DAYS). */
+  static lifecycle(item: { revoked_at?: string | null; not_after?: string | null }, nowMs: number = Date.now()): CertLifecycle {
+    if (item && typeof item.revoked_at === "string" && item.revoked_at !== "") return "revoked";
+    const days = CertsFormat.daysUntil(item ? item.not_after : null, nowMs);
+    if (days === null) return "active";
+    if (days < 0) return "expired";
+    if (days <= CertsFormat.WARN_DAYS) return "expiring";
+    return "active";
   }
 
   /** Libellé lisible d'une famille d'objet (localisé) — repli sur la valeur brute si inconnue. */

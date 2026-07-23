@@ -29,6 +29,73 @@ module.exports = async () => {
   }
   });
 
+  await section("Certs : CertsFormat.lifecycle — état 4 valeurs (métadonnées seules)", async () => {
+  {
+    const { CertsFormat } = D("core/CertsFormat.js");
+    const NOW = Date.parse("2026-07-23T00:00:00Z");
+    const iso = (d) => new Date(NOW + d * 86400000).toISOString();
+    ck.eq(CertsFormat.lifecycle({ revoked_at: "2026-01-01T00:00:00Z", not_after: iso(-5) }, NOW), "revoked", "lifecycle : révoqué prime sur expiré");
+    ck.eq(CertsFormat.lifecycle({ revoked_at: null, not_after: iso(-1) }, NOW), "expired", "lifecycle : échéance passée → expiré");
+    ck.eq(CertsFormat.lifecycle({ revoked_at: null, not_after: iso(10) }, NOW), "expiring", "lifecycle : ≤ 30 j → expire bientôt");
+    ck.eq(CertsFormat.lifecycle({ revoked_at: null, not_after: iso(30) }, NOW), "expiring", "lifecycle : 30 j pile → expire bientôt (inclusif)");
+    ck.eq(CertsFormat.lifecycle({ revoked_at: null, not_after: iso(31) }, NOW), "active", "lifecycle : > 30 j → actif");
+    ck.eq(CertsFormat.lifecycle({ revoked_at: null, not_after: null }, NOW), "active", "lifecycle : sans échéance (paire/CA SSH) → actif à vie");
+  }
+  });
+
+  await section("Certs : CertTree — arbre / filtres famille+état+recherche / tri intra-fratrie / aplatissement (PUR)", async () => {
+  {
+    const { CertTree } = D("core/CertTree.js");
+    const NOW = Date.parse("2026-07-23T00:00:00Z");
+    const iso = (d) => new Date(NOW + d * 86400000).toISOString();
+    const items = [
+      { id: "r1", kind: "root-ca", parent_id: null, label: "Root X509", subject: "CN=Root", serial: "01", not_after: iso(3000), revoked_at: null },
+      { id: "i1", kind: "intermediate-ca", parent_id: "r1", label: "Sub A", subject: "CN=SubA", serial: "02", not_after: iso(1000), revoked_at: null },
+      { id: "l1", kind: "leaf-tls", parent_id: "i1", label: "Docker", subject: "CN=docker", serial: "03", not_after: iso(10), revoked_at: null },
+      { id: "l2", kind: "leaf-tls", parent_id: "r1", label: "PmBackup", subject: "CN=pmbackup", serial: "04", not_after: iso(-5), revoked_at: null },
+      { id: "sr", kind: "ssh-ca", parent_id: null, label: "SSH Root", subject: "CN=sshca", serial: null, not_after: null, revoked_at: null },
+      { id: "sc", kind: "ssh-cert", parent_id: "sr", label: "jump", subject: "CN=jump", serial: null, not_after: iso(200), revoked_at: null },
+      { id: "kp", kind: "ssh-keypair", parent_id: null, label: "Pair", subject: "CN=pair", serial: null, not_after: null, revoked_at: "2026-01-01T00:00:00Z" },
+    ];
+
+    // -- build : forêt, liens, profondeur, kind de racine --
+    const forest = CertTree.build(items);
+    ck.eq(forest.map((n) => n.item.id).join(","), "r1,sr,kp", "build : 3 racines (r1, sr, kp) dans l'ordre d'entrée");
+    const r1 = forest[0];
+    ck.eq(r1.children.map((n) => n.item.id).slice().sort().join(","), "i1,l2", "build : enfants directs de r1 = i1 + l2");
+    const i1 = r1.children.find((n) => n.item.id === "i1");
+    ck.eq(i1.children.map((n) => n.item.id).join(","), "l1", "build : i1 porte l'enfant l1");
+    ck.eq(i1.children[0].depth, 2, "build : profondeur de l1 = 2");
+    ck.eq(i1.children[0].rootKind, "root-ca", "build : rootKind de l1 = root-ca (famille de sa racine)");
+    ck.eq(CertTree.descendants(r1).length, 3, "descendants(r1) = i1 + l1 + l2 (3)");
+
+    // -- visibleIds : famille (élague l'arbre entier) / état + recherche (ancêtres gardés) --
+    const idset = (set) => [...set].slice().sort().join(",");
+    ck.eq(CertTree.visibleIds(forest, {}), null, "visibleIds : aucun filtre → null (tout visible)");
+    ck.eq(idset(CertTree.visibleIds(forest, { family: "ssh-ca" })), "sc,sr", "famille ssh-ca → seul l'arbre SSH (sr, sc)");
+    ck.eq(idset(CertTree.visibleIds(forest, { state: "expired", now: NOW })), "l2,r1", "état=expiré → l2 + son ancêtre r1 (contexte)");
+    ck.eq(idset(CertTree.visibleIds(forest, { state: "revoked", now: NOW })), "kp", "état=révoqué → kp (racine autonome)");
+    ck.eq(idset(CertTree.visibleIds(forest, { query: "docker" })), "i1,l1,r1", "recherche « docker » → l1 + ancêtres i1, r1");
+    ck.eq(idset(CertTree.visibleIds(forest, { query: "sub a" })), "i1,l1,r1", "recherche par ÉMETTEUR « sub a » → l1 (émetteur=Sub A) + i1 (libellé) + r1");
+
+    // -- tri intra-fratrie (fresh build à chaque fois : le tri mute EN PLACE) --
+    const fLabel = CertTree.build(items);
+    CertTree.sortSiblings(fLabel, "label", "asc");   // NB : trie AUSSI les racines → retrouver r1 par id
+    ck.eq(fLabel.find((n) => n.item.id === "r1").children.map((n) => n.item.label).join(","), "PmBackup,Sub A", "tri label asc : frères de r1 → PmBackup avant Sub A");
+    ck.eq(fLabel.map((n) => n.item.label).join(","), "Pair,Root X509,SSH Root", "tri label asc : racines aussi triées (Pair, Root X509, SSH Root)");
+    const fDate = CertTree.build(items);
+    CertTree.sortSiblings(fDate, "not_after", "asc");
+    ck.eq(fDate.find((n) => n.item.id === "r1").children.map((n) => n.item.id).join(","), "l2,i1", "tri échéance asc : l2 (−5 j) avant i1 (1000 j)");
+    ck.eq(fDate.map((n) => n.item.id).join(","), "r1,kp,sr", "tri échéance asc : racines SANS échéance en FIN (kp, sr par libellé), r1 en tête");
+
+    // -- aplatissement : respect de l'ouverture, puis chemin forcé sous filtre --
+    ck.eq(CertTree.flatten(forest, { open: new Set(["r1", "sr", "kp"]), visible: null }).map((n) => n.item.id).join(","), "r1,i1,l2,sr,sc,kp", "flatten : racines dépliées, i1 replié → l1 caché");
+    ck.eq(CertTree.flatten(forest, { open: new Set(["r1", "i1", "sr", "kp"]), visible: null }).map((n) => n.item.id).join(","), "r1,i1,l1,l2,sr,sc,kp", "flatten : i1 déplié → l1 visible");
+    const vis = CertTree.visibleIds(forest, { query: "docker" });
+    ck.eq(CertTree.flatten(forest, { open: new Set(), visible: vis }).map((n) => n.item.id).join(","), "r1,i1,l1", "flatten : le filtrage FORCE le chemin ouvert (r1→i1→l1) même open vide");
+  }
+  });
+
   await section("Certs : RevocationReasons — encodage/décodage code standard + note (logique PURE)", async () => {
   {
     const { RevocationReasons } = D("certs/RevocationReasons.js");
