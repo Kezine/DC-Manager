@@ -93,6 +93,21 @@ export class CertExports {
     return { filename: CertExports.safeFileName(cert.label) + ".ca-chain.pem", mime: CertExports.MIME_PEM, content };
   }
 
+  /** Chaîne À SERVIR (serveur TLS) → `<label>.chain.pem` : feuille + intermédiaire(s), **SANS la racine**. C'est
+      ce qu'un serveur présente au handshake (ex. `pveproxy-ssl.pem` Proxmox, `ssl_certificate` nginx). On EXCLUT
+      la racine : elle vit déjà dans les magasins de confiance des CLIENTS, l'envoyer est inutile (octets gaspillés)
+      voire gênant (certains validateurs stricts). Même esprit que le `fullchain.pem` de Let's Encrypt (feuille +
+      intermédiaire, sans le root ISRG). Refuse un révoqué et une racine (rien à servir). La racine = l'UNIQUE
+      maillon sans émetteur (parent_id nul) → on la retire par ce critère. */
+  static pemServeChain(cert: CertExportRecord, allCerts: CertExportRecord[]): ExportArtifact {
+    CertExports.requireNotRevoked(cert);
+    const chain = CertExports.resolveIssuerChain(cert, allCerts);
+    if (chain.length < 2) throw new Error("CertExports : « " + cert.label + " » n'a pas d'émetteur (certificat racine) — pas de chaîne à servir");
+    const serve = chain.filter((c) => typeof c.parent_id === "string" && c.parent_id.trim() !== "");   // retire la racine (sans émetteur)
+    const content = serve.map((c) => CertExports.certPemBlock(c)).join("");
+    return { filename: CertExports.safeFileName(cert.label) + ".chain.pem", mime: CertExports.MIME_PEM, content };
+  }
+
   /* --------------------------------------------------------------------------
      OpenSSH
      -------------------------------------------------------------------------- */

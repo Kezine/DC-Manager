@@ -887,6 +887,16 @@ module.exports = async () => {
     ck.eq(ca.filename, "hote.exemple.test.ca-chain.pem", "ca-chain : nom de fichier");
     ck(!ca.content.includes("LEAF") && ca.content.includes("INTER") && ca.content.includes("ROOT"), "ca-chain : émetteurs seuls (SANS la feuille)");
 
+    // Chaîne À SERVIR (Lot 3) : feuille + intermédiaire(s), SANS le root (déjà chez les clients).
+    const sc = CertExports.pemServeChain(leaf, all);
+    ck.eq(sc.filename, "hote.exemple.test.chain.pem", "chaîne à servir : nom de fichier (.chain.pem)");
+    ck(sc.content.includes("LEAF") && sc.content.includes("INTER") && !sc.content.includes("ROOT"), "chaîne à servir : feuille + intermédiaire, SANS le root");
+    const leaf2 = mkCert("leaf2", "root", "LEAF2", { label: "direct.exemple.test" });
+    const sc2 = CertExports.pemServeChain(leaf2, [root, leaf2]);
+    ck(sc2.content.includes("LEAF2") && !sc2.content.includes("ROOT"), "chaîne à servir (feuille DIRECTE sous root, 2 niveaux) : feuille seule, sans root");
+    let scRootErr = null; try { CertExports.pemServeChain(root, all); } catch (e) { scRootErr = e.message; }
+    ck(!!scRootErr && /(racine|émetteur|servir)/i.test(scRootErr), "chaîne à servir d'une racine → refus (rien à servir)");
+
     let rootCaErr = null; try { CertExports.pemCaChain(root, all); } catch (e) { rootCaErr = e.message; }
     ck(!!rootCaErr && /(racine|émetteur)/i.test(rootCaErr), "ca-chain d'une racine → refus explicite (pas d'émetteur)");
 

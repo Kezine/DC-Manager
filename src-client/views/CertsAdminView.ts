@@ -2144,10 +2144,13 @@ export class CertsAdminView {
       Download.data(CertExports.safeFileName(item.label) + ".zip", zip, "application/zip");
     });
 
-    if (item.kind === "root-ca" || item.kind === "leaf-tls") {
+    if (item.kind === "root-ca" || item.kind === "leaf-tls" || item.kind === "intermediate-ca") {
       addTextArtifact(I18n.t("certs.admin.export.pubPem"), async () => CertExports.pemCertificate(rec));
       addTextArtifact(I18n.t("certs.admin.export.fullchain"), async () => CertExports.pemFullchain(rec, all));
-      if (item.kind === "leaf-tls") addTextArtifact(I18n.t("certs.admin.export.caChain"), async () => CertExports.pemCaChain(rec, all));
+      if (item.kind === "leaf-tls" || item.kind === "intermediate-ca") addTextArtifact(I18n.t("certs.admin.export.caChain"), async () => CertExports.pemCaChain(rec, all));
+      // Chaîne À SERVIR (feuille + intermédiaire(s), SANS le root) — ce qu'on dépose sur un serveur TLS
+      // (pveproxy-ssl.pem / ssl_certificate nginx) ; le root vit déjà dans les magasins de confiance des clients.
+      if (item.kind === "leaf-tls") addTextArtifact(I18n.t("certs.admin.export.serveChain"), async () => CertExports.pemServeChain(rec, all));
       // Certificat CROISÉ d'une CA issue d'une rotation de clé (phase 6) : à déployer chez les clients qui font
       // encore confiance à l'ancien root, pour valider les nouvelles feuilles pendant la transition.
       if (item.cross_signed_pem) addTextArtifact(I18n.t("certs.admin.export.crossCert"), async () => ({ filename: CertExports.safeFileName(item.label) + ".cross.pem", mime: CertExports.MIME_PEM, content: item.cross_signed_pem! }));

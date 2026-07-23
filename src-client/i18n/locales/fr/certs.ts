@@ -453,6 +453,7 @@ export const certs = {
       crossCert: "Certificat croisé (.cross.pem)",
       fullchain: "Chaîne complète (fullchain.pem)",
       caChain: "Chaîne d'autorité (ca-chain.pem)",
+      serveChain: "Chaîne à servir (feuille + intermédiaires, sans le root)",
       keyPem: "Clé privée (.key.pem)",
       pkcs12: "Paquet PKCS#12 (.p12)…",
       opensshKey: "Clé OpenSSH (privée + .pub)",
