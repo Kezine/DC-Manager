@@ -49,10 +49,14 @@ export class PkiCrypto {
   /** Itérations PBKDF2 par défaut à l'INITIALISATION (décision Q1 : ≥ 600 000 —
       les documents existants gardent leur valeur stockée, relue à chaque dérivation). */
   static readonly DEFAULT_ITERS = 600000;
-  /** Longueur MINIMALE d'une NOUVELLE phrase (C8) — appliquée à la saisie (init, changement de phrase,
-      création d'un coffre) AVANT la dérivation de la KEK. Ne concerne JAMAIS une phrase EXISTANTE
-      (déverrouillage/reprise/champ « actuelle »). Constante PARTAGÉE (la vue s'y réfère). */
-  static readonly MIN_PASSPHRASE_LEN = 12;
+  /** Longueur en-deçà de laquelle une NOUVELLE phrase est jugée FAIBLE (init, changement de phrase, création
+      d'un coffre). N'est PLUS un blocage dur : la saisie d'une phrase plus courte est PERMISE (responsabilité
+      de l'utilisateur) mais signalée + temporisée avant validation (cf. CertsAdminView, garde de force). Ne
+      concerne JAMAIS une phrase EXISTANTE (déverrouillage/reprise/champ « actuelle »). Constante PARTAGÉE. */
+  static readonly WEAK_PASSPHRASE_LEN = 10;
+  /** Délai (secondes) de TEMPORISATION du bouton « Valider » quand la phrase saisie est faible — friction
+      volontaire (compte à rebours), pas une interdiction. Voir CertsAdminView.wireWeakPassphraseGuard. */
+  static readonly WEAK_PASSPHRASE_COOLDOWN_S = 10;
 
   /** WebCrypto complet disponible ? `crypto.subtle` n'existe que dans un CONTEXTE SÉCURISÉ
       (HTTPS ou localhost) — servi en HTTP sur un hôte de LAN, le navigateur le retire et

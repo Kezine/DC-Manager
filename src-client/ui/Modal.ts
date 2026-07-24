@@ -20,6 +20,11 @@ export interface ModalOptions {
   saveLabel?: string;
   confirmClose?: boolean;
   wide?: boolean;
+  /** Rappelé À LA FIN d'`open` (après le focus initial), avec le bouton « Enregistrer » de la modale.
+      Point d'accroche pour PILOTER ce bouton depuis l'appelant (ex. temporiser sa ré-activation via
+      `CountdownButton`). Le libellé et l'état `disabled` du bouton sont DÉJÀ posés par `open` quand
+      `onReady` s'exécute → capturer la base APRÈS ce rappel. Additif, aucun impact sur l'existant. */
+  onReady?: (ctx: { saveButton: HTMLButtonElement }) => void;
 }
 
 /* =============================================================================
@@ -137,7 +142,7 @@ export class Modal {
   private _differs(): boolean { return this._snapshot() !== this.snapshot; }
 
   open(opts: ModalOptions): void {
-    const { title, subtitle, body, onSave, onCancel, onClose, hideFooter, saveLabel, confirmClose, wide } = opts;
+    const { title, subtitle, body, onSave, onCancel, onClose, hideFooter, saveLabel, confirmClose, wide, onReady } = opts;
     if (this.editLocked && !hideFooter) return;   // viewer : bloque l'édition
     // 1re ouverture (pas un SWAP de contenu chaîné) : mémoriser le déclencheur pour lui rendre le
     // focus à la fermeture, et prendre le verrou de défilement. Un `open` alors que déjà ouverte
@@ -173,6 +178,8 @@ export class Modal {
     // Focus DANS la modale (1er champ d'un formulaire, sinon 1er focusable). Les formulaires qui
     // ciblent un champ précis via un setTimeout raffinent ensuite ce focus — sans conflit.
     OverlayA11y.focusInitial(this.elBox);
+    // Accroche APRÈS coup (bouton « Enregistrer » prêt : libellé + état posés ci-dessus) — cf. ModalOptions.onReady.
+    if (typeof onReady === "function") onReady({ saveButton: this.btnSave });
   }
 
   /** Neutralise l'état a11y à la fermeture (verrou de défilement + restitution du focus au

@@ -738,4 +738,98 @@ module.exports = async () => {
     ck.eq(OverlayA11y.nextId("x").startsWith("x-"), true, "nextId : préfixe arbitraire respecté");
   }
   });
+
+  await section("CountdownButton : temporisation d'un bouton (timers injectés, bouton STUB)", async () => {
+    const { CountdownButton } = D("ui/CountdownButton.js");
+    // Horloge SIMULÉE : capture la fonction de tick + l'état d'activité du timer (calque des timers injectés de
+    // PkiSession). Aucun setInterval réel — les défauts natifs ne sont jamais atteints (schedule/cancel fournis).
+    const makeClock = () => {
+      const st = { fn: null, active: false, cancels: 0 };
+      return {
+        schedule: (fn) => { st.fn = fn; st.active = true; return 1; },
+        cancel: () => { st.active = false; st.cancels++; },
+        tick: () => { if (st.fn) st.fn(); },
+        st,
+      };
+    };
+
+    // ---- décompte seconde par seconde, libellé « base (n) », restauration en fin ----
+    {
+      const clk = makeClock();
+      const btn = { textContent: "Initialiser", disabled: false };
+      const h = CountdownButton.start(btn, 3, { schedule: clk.schedule, cancel: clk.cancel });
+      ck.eq(btn.disabled, true, "START : bouton DÉSACTIVÉ");
+      ck.eq(btn.textContent, "Initialiser (3)", "START : libellé « base (3) »");
+      ck.eq(h.running, true, "START : décompte en cours");
+      clk.tick();
+      ck.eq(btn.textContent, "Initialiser (2)", "tick 1 → « base (2) »");
+      ck.eq(btn.disabled, true, "toujours désactivé à (2)");
+      clk.tick();
+      ck.eq(btn.textContent, "Initialiser (1)", "tick 2 → « base (1) »");
+      clk.tick();   // remaining → 0 : fin naturelle
+      ck.eq(btn.textContent, "Initialiser", "fin : libellé RESTAURÉ (base)");
+      ck.eq(btn.disabled, false, "fin : bouton RÉACTIVÉ");
+      ck.eq(h.running, false, "fin : décompte terminé");
+      ck.eq(clk.st.active, false, "fin : timer stoppé (aucune fuite)");
+    }
+
+    // ---- onTick (état initial + chaque affichage) et onDone (fin naturelle seulement) ----
+    {
+      const clk = makeClock();
+      const btn = { textContent: "X", disabled: false };
+      let done = 0; const ticks = [];
+      CountdownButton.start(btn, 2, { schedule: clk.schedule, cancel: clk.cancel, onTick: (r) => ticks.push(r), onDone: () => done++ });
+      ck.eq(ticks.join(","), "2", "onTick : appelé à l'état initial (2)");
+      clk.tick();
+      ck.eq(ticks.join(","), "2,1", "onTick : appelé à chaque affichage");
+      ck.eq(done, 0, "onDone : pas encore appelé (décompte en cours)");
+      clk.tick();   // → 0
+      ck.eq(done, 1, "onDone : appelé à la fin NATURELLE");
+    }
+
+    // ---- cancel() : restaure + stoppe, sans onDone ; double cancel = no-op ----
+    {
+      const clk = makeClock();
+      const btn = { textContent: "Valider", disabled: false };
+      let done = 0;
+      const h = CountdownButton.start(btn, 5, { schedule: clk.schedule, cancel: clk.cancel, onDone: () => done++ });
+      ck.eq(btn.disabled, true, "cancel : désactivé avant annulation");
+      h.cancel();
+      ck.eq(btn.disabled, false, "cancel : bouton RÉACTIVÉ");
+      ck.eq(btn.textContent, "Valider", "cancel : libellé RESTAURÉ");
+      ck.eq(h.running, false, "cancel : décompte stoppé");
+      ck.eq(clk.st.active, false, "cancel : timer annulé (pas de fuite)");
+      ck.eq(done, 0, "cancel : onDone JAMAIS appelé");
+      const before = clk.st.cancels;
+      h.cancel();   // idempotent
+      ck.eq(clk.st.cancels, before, "double cancel : no-op (aucun nouvel appel timer)");
+      ck.eq(h.running, false, "double cancel : toujours terminé");
+    }
+
+    // ---- option `label` (base explicite) + `format` personnalisé ----
+    {
+      const clk = makeClock();
+      const btn = { textContent: "libellé courant", disabled: false };
+      CountdownButton.start(btn, 2, { label: "Base", format: (b, r) => b + "=" + r, schedule: clk.schedule, cancel: clk.cancel });
+      ck.eq(btn.textContent, "Base=2", "label/format : libellé initial « Base=2 »");
+      clk.tick();
+      ck.eq(btn.textContent, "Base=1", "format personnalisé à chaque tick");
+      clk.tick();   // fin → restaure la BASE fournie, pas le libellé d'origine
+      ck.eq(btn.textContent, "Base", "fin : restaure la base FOURNIE (option label)");
+      ck.eq(btn.disabled, false, "fin : réactivé");
+    }
+
+    // ---- durée nulle/négative : no-op (bouton laissé tel quel, aucun timer) ----
+    {
+      const clk = makeClock();
+      const btn = { textContent: "Y", disabled: false };
+      const h = CountdownButton.start(btn, 0, { schedule: clk.schedule, cancel: clk.cancel });
+      ck.eq(btn.disabled, false, "seconds=0 : bouton inchangé (actif)");
+      ck.eq(btn.textContent, "Y", "seconds=0 : libellé inchangé");
+      ck.eq(h.running, false, "seconds=0 : pas de décompte");
+      ck.eq(clk.st.active, false, "seconds=0 : aucun timer planifié");
+      h.cancel();
+      ck.eq(h.running, false, "seconds=0 : cancel sans effet");
+    }
+  });
 };

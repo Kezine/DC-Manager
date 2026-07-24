@@ -13,6 +13,7 @@ import { RichTooltip } from "../ui/RichTooltip";
 import { Icons } from "../ui/Icons";
 import { IconButton } from "../ui/IconButton";
 import { OverlayA11y } from "../ui/OverlayA11y";
+import { CountdownButton, type CountdownHandle } from "../ui/CountdownButton";
 import { CertsTips, CERT_TIP } from "./CertsTips";
 import { DeleteGuard, type DeletableCert } from "../certs/DeleteGuard";
 import { I18n } from "../i18n/I18n";
@@ -190,6 +191,10 @@ export class CertsAdminView {
   private selBarEl: HTMLElement | null = null;
   /** Case d'en-tête « toute la page » (état INDÉTERMINÉ si sélection partielle) — mise à jour à chaque variation. */
   private headerCheckbox: HTMLInputElement | null = null;
+  /** Temporisation EN COURS du bouton « Valider » d'une modale de création de phrase (Axe 1 « force »). Le bouton
+      « Enregistrer » de `Modal` est un SINGLETON réutilisé d'une modale à l'autre → on garde le handle pour
+      ANNULER le compte à rebours (fuite de timer) à la fermeture de la modale ou au (ré)armement d'une autre. */
+  private weakPassCountdown: CountdownHandle | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -381,6 +386,9 @@ export class CertsAdminView {
     bar.appendChild(this.buildFilters());
 
     const right = document.createElement("div"); right.className = "lc-right";
+    // PÉRIMÈTRE (point D) : les boutons de CRÉATION gardent VOLONTAIREMENT le gate global `unlocked` — la modale
+    // de création porte un SÉLECTEUR de coffre et vaultKey jette un message clair si le coffre choisi est fermé ;
+    // gater ici par coffre n'aurait pas de sens (l'utilisateur choisit sa cible dans la modale).
     if (this.session.unlocked) {
       right.append(
         this.actionButton(I18n.t("certs.admin.toolbar.addRootCa"), I18n.t("certs.admin.toolbar.addRootCaTitle"), () => this.rootCaModal(), "btn-primary"),
@@ -569,8 +577,12 @@ export class CertsAdminView {
           const badge = document.createElement("span"); badge.innerHTML = this.pill(I18n.t("certs.admin.vault.stateLocked"), "neutral"); head.appendChild(badge.firstElementChild!);
           rowEl.appendChild(head);
           const line = document.createElement("div"); line.style.cssText = "display:flex;gap:6px;align-items:center";
-          const input = FormControls.text("", I18n.t("certs.admin.lock.passPlaceholder")); input.type = "password"; input.autocomplete = "current-password"; input.style.flex = "1 1 auto";
-          if (!firstInput.el) firstInput.el = input;   // focus sur le premier coffre verrouillé
+          const input = FormControls.text("", I18n.t("certs.admin.lock.passPlaceholder")); input.type = "password"; input.autocomplete = "current-password";
+          // Le thème des champs n'est porté QUE par `.form-field input[type="password"]` (dc-manager.css) : hors
+          // `.form-field`, l'input prend le rendu NATIF du navigateur. On l'enrobe donc (margin:0 neutralise le
+          // margin-bottom de rangée, inutile en ligne inline ; flex sur le WRAPPER, plus sur l'input).
+          const field = document.createElement("div"); field.className = "form-field"; field.style.cssText = "margin:0;flex:1 1 auto"; field.appendChild(input);
+          if (!firstInput.el) firstInput.el = input;   // focus sur le premier coffre verrouillé (l'INPUT, pas le wrapper)
           const doUnlock = (): void => {
             void this.attemptUnlockVault(vault.vault_id, input.value, errBox).then((ok) => {
               if (!ok) return;
@@ -581,7 +593,7 @@ export class CertsAdminView {
           };
           input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doUnlock(); } });
           const unlockBtn = this.actionButton(I18n.t("certs.admin.lock.unlockBtn"), I18n.t("certs.admin.toolbar.unlockTitle"), doUnlock, "btn-primary");
-          line.append(input, unlockBtn);
+          line.append(field, unlockBtn);   // bouton « Déverrouiller » gardé INLINE à droite du champ enrobé
           rowEl.appendChild(line);
         }
         listBox.appendChild(rowEl);
@@ -958,25 +970,39 @@ export class CertsAdminView {
       MÉTADONNÉES, aucun secret n'est déchiffré. C'est ce qui rend une PKI dont la phrase secrète est
       perdue encore consultable ET PURGEABLE, comme le promet docs/certs.md. */
   private fillActions(cell: HTMLElement, item: CertificateListItem, hasChildren = false): void {
-    const unlocked = this.session.unlocked;
+    // GATING PAR COFFRE (point D) : une opération de CLÉ n'est offerte que si le COFFRE de la clé REQUISE est
+    // ouvert — pas « au moins un coffre » (this.session.unlocked), sinon on proposerait une émission qui échouera
+    // ensuite (vaultKey jette). Émettre/renouveler une CA = coffre de CETTE CA (elle signe avec SA clé) ;
+    // renouveler une FEUILLE = coffre de la CA PARENTE (clé de signature) ; renouveler une CA INTERMÉDIAIRE = SON
+    // coffre ET celui du parent (re-signature). Parent introuvable (orphelin toléré) → repli global raisonnable.
+    const parentOf = (it: CertificateListItem): CertificateListItem | null => this.allItems.find((c) => c.id === it.parent_id) || null;
     // Détail (lecture seule) : disponible EN PERMANENCE (même verrouillé / révoqué) — aucune clé, aucune écriture.
     cell.appendChild(IconButton.build({ icon: Icons.INFO, label: I18n.t("certs.admin.actions.info"), onClick: () => this.infoModal(item) }));
     // Émettre une FEUILLE TLS : une CA X.509, racine OU intermédiaire, peut signer une feuille (leafModal ne
     // présuppose aucune racine — il prend n'importe quelle CA X.509 comme émetteur).
-    if (unlocked && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, I18n.t("certs.admin.actions.issueTls"), CERT_TIP.issueTls, () => this.leafModal(item)));
+    if (this.caKeyReady(item) && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_TLS, I18n.t("certs.admin.actions.issueTls"), CERT_TIP.issueTls, () => this.leafModal(item)));
     // Émettre une SOUS-CA (CA intermédiaire) : une CA X.509 (racine OU intermédiaire) peut signer une autre CA —
     // SAUF si son pathLenConstraint vaut 0 (elle ne signe alors QUE des feuilles ; une sous-CA sous elle donnerait
     // une chaîne INVALIDE). pathLen absent (illimité, ex. racine) ou ≥ 1 → autorisé. L'émission est CONTEXTUELLE
     // (ce nœud EST l'émetteur) — pas de tooltip enrichi, le title/aria-label suffit.
-    if (unlocked && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at
+    if (this.caKeyReady(item) && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at
         && X509Factory.readCaPathLen(item.public_pem || "") !== 0) {
       cell.appendChild(this.iconAction(Icons.ISSUE_CA, I18n.t("certs.admin.actions.issueCa"), "", () => this.intermediateCaModal(item)));
     }
-    if (unlocked && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, I18n.t("certs.admin.actions.issueSsh"), CERT_TIP.issueSsh, () => this.sshCertModal(item)));
-    // RENOUVELLEMENT unitaire (mode 1) — feuille TLS / certificat SSH.
-    if (unlocked && (item.kind === "leaf-tls" || item.kind === "ssh-cert") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renew"), CERT_TIP.renew, () => void this.renewModal(item)));
+    if (this.caKeyReady(item) && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, I18n.t("certs.admin.actions.issueSsh"), CERT_TIP.issueSsh, () => this.sshCertModal(item)));
+    // RENOUVELLEMENT unitaire (mode 1) — feuille TLS / certificat SSH : re-signé par la CA PARENTE → coffre du PARENT.
+    if ((item.kind === "leaf-tls" || item.kind === "ssh-cert") && !item.revoked_at) {
+      const parent = parentOf(item);
+      const ready = parent ? this.session.unlockedVault(parent.vault_id) : this.session.unlocked;   // orphelin toléré → repli global
+      if (ready) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renew"), CERT_TIP.renew, () => void this.renewModal(item)));
+    }
     // RENOUVELLEMENT d'une CA X.509 — racine OU intermédiaire (opération de masse : prolonger / rotation + enfants).
-    if (unlocked && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renewCa"), CERT_TIP.renew, () => void this.renewCaDialog(item)));
+    // SON coffre requis ; pour un INTERMÉDIAIRE, EN PLUS le coffre du parent (re-signature). Parent absent → toléré.
+    if ((item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at) {
+      const parent = item.kind === "intermediate-ca" ? parentOf(item) : null;
+      const ready = this.caKeyReady(item) && (!parent || this.session.unlockedVault(parent.vault_id));
+      if (ready) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renewCa"), CERT_TIP.renew, () => void this.renewCaDialog(item)));
+    }
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.EXPORT, I18n.t("certs.admin.actions.exportArtifacts"), CERT_TIP.export, () => void this.exportModal(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.REVOKE, I18n.t("certs.admin.actions.revoke"), CERT_TIP.revoke, () => void this.revoke(item)));
     // Suppression : VERROUILLÉE (bouton grisé) si des dérivés existent — le serveur la refuse de toute façon
@@ -993,6 +1019,12 @@ export class CertsAdminView {
       fabrication pour toute l'app, donc un seul style et des règles d'a11y impossibles à oublier. */
   private iconAction(icon: string, ariaLabel: string, tipKey: string, onClick: () => void, danger = false): HTMLButtonElement {
     return IconButton.build({ icon, label: ariaLabel, tipKey, danger, onClick });
+  }
+
+  /** Le coffre de la clé de CE certificat est-il OUVERT ? Gate des opérations qui signent avec SA propre clé
+      (émission depuis une CA, renouvellement d'une CA — point D). Gating PAR COFFRE, pas « au moins un coffre ». */
+  private caKeyReady(item: CertificateListItem): boolean {
+    return this.session.unlockedVault(item.vault_id);
   }
 
   /** Modale d'INFO (lecture seule) : métadonnées d'un certificat/clé pour consultation + copie (sujet, émetteur
@@ -1356,6 +1388,9 @@ export class CertsAdminView {
       en fin (le mot de passe n'y figure JAMAIS). */
   private async runBulkExport(categories: Set<ExportCategoryKey>, password: string | null): Promise<void> {
     // Clés privées incluses SEULEMENT si « key » coché ET session déverrouillée (sinon rien à déchiffrer).
+    // PÉRIMÈTRE (point D) : gate global `unlocked` gardé VOLONTAIREMENT — l'export groupé gère déjà les échecs
+    // PAR ÉLÉMENT (un cert au coffre verrouillé sort en clé absente + est signalé au bilan), pas besoin d'un
+    // gating par coffre en amont.
     const withKeys = categories.has("key") && this.session.unlocked;
     const ids = [...this.selection.keys()];
     const part = BulkActions.partitionExport(ids.map((id) => ({ id, revoked_at: this.selection.get(id)!.revoked_at })));
@@ -1590,6 +1625,87 @@ export class CertsAdminView {
      Déverrouillage / initialisation de la clé maître
      -------------------------------------------------------------------------- */
 
+  /** Longueur d'un collé EN-DEÇÀ de laquelle il est refusé sur la CONFIRMATION (Axe 2). Un mauvais collé COURT
+      (fragment de presse-papier) doit être ressaisi à la main → rattrapé par la comparaison p1 ≠ p2. */
+  private static readonly CONFIRM_PASTE_MIN = 20;
+
+  /** Petit `<div class="form-hint">` d'AVERTISSEMENT (couleur --warn), masqué par défaut — révélé par les gardes
+      de saisie des modales de création de phrase (force faible / collage de confirmation). */
+  private warnHint(): HTMLElement {
+    const w = document.createElement("div"); w.className = "form-hint"; w.style.cssText = "color:var(--warn);display:none";
+    return w;
+  }
+
+  /** Axe 1 (FORCE de la phrase) — sur le champ p1 (NOUVELLE phrase) des 3 modales de création de phrase. Plus de
+      blocage dur : une phrase < WEAK_PASSPHRASE_LEN est PERMISE (responsabilité de l'utilisateur) mais SIGNALÉE
+      (gros warning) et le bouton « Valider » est TEMPORISÉ WEAK_PASSPHRASE_COOLDOWN_S secondes (compte à rebours
+      dans son libellé). len 0 → bouton désactivé (phrase requise), sans warning ni temporisation ; len ≥ seuil →
+      bouton actif, warning masqué, temporisation annulée. Une fois la temporisation ÉCOULÉE, l'utilisateur peut
+      valider une phrase faible (on NE re-temporise PAS tant qu'on reste dans la zone faible). Appelé depuis
+      `onReady` : `saveButton` est le btnSave PARTAGÉ du singleton `Modal` → on ANNULE d'abord la temporisation
+      d'une ouverture précédente (pas de fuite de timer), et la base du libellé est capturée par le compte à
+      rebours APRÈS que `Modal.open` l'a posée. */
+  private wireWeakPassphraseGuard(saveButton: HTMLButtonElement, passInput: HTMLInputElement, weakWarn: HTMLElement): void {
+    this.clearWeakPassphraseGuard();
+    weakWarn.style.display = "none";
+    const seuil = PkiCrypto.WEAK_PASSPHRASE_LEN;
+    // Une fois le cooldown purgé pour la saisie faible COURANTE, on ne le relance pas à chaque frappe. Sortir de
+    // la zone faible (champ vidé OU phrase devenue assez longue) réarme ce drapeau pour la prochaine entrée.
+    let cooldownServed = false;
+    const leaveWeakZone = (): void => {
+      this.clearWeakPassphraseGuard();
+      weakWarn.style.display = "none";
+      cooldownServed = false;
+    };
+    const evaluate = (): void => {
+      const len = passInput.value.length;
+      if (len === 0) { leaveWeakZone(); saveButton.disabled = true; return; }   // requis : bouton bloqué sur vide
+      if (len >= seuil) { leaveWeakZone(); saveButton.disabled = false; return; }   // assez longue : aucune friction
+      // Zone FAIBLE (1..seuil-1) : warning permanent + temporisation (une seule fois par entrée dans la zone).
+      weakWarn.textContent = I18n.t("certs.admin.common.passWeakWarn", { count: seuil });
+      weakWarn.style.display = "block";
+      if (cooldownServed) { saveButton.disabled = false; return; }   // déjà purgé → reste validable, pas de relance
+      if (!this.weakPassCountdown || !this.weakPassCountdown.running) {
+        this.weakPassCountdown = CountdownButton.start(saveButton, PkiCrypto.WEAK_PASSPHRASE_COOLDOWN_S, {
+          onDone: () => { cooldownServed = true; },   // écoulé : l'utilisateur PEUT valider une phrase faible
+        });
+      }
+    };
+    passInput.addEventListener("input", evaluate);
+    evaluate();   // état initial (champ vide → bouton désactivé)
+  }
+
+  /** Annule la temporisation « phrase faible » en cours et oublie son handle. Appelé au (ré)armement du garde et
+      à la FERMETURE de la modale (`onClose`) : sans ça, le compte à rebours resté sur le btnSave singleton
+      continuerait de re-libeller/ré-activer le bouton d'une AUTRE modale ouverte ensuite. Idempotent. */
+  private clearWeakPassphraseGuard(): void {
+    this.weakPassCountdown?.cancel();
+    this.weakPassCountdown = null;
+  }
+
+  /** Axe 2 (SÉCURITÉ DU COLLAGE) — sur la CONFIRMATION p2 des 3 modales de création de phrase. Coller dans la
+      confirmation annule la protection anti-erreur : un même MAUVAIS collé dans p1 ET p2 « matche » et la clé
+      serait chiffrée sous une phrase inconnue = PERDUE. Garde CONDITIONNEL à la longueur du contenu collé :
+      collé < CONFIRM_PASTE_MIN → REFUSÉ (preventDefault) + invite à ressaisir à la main (un collé court erroné
+      est rattrapé par la comparaison p1 ≠ p2) ; collé ≥ seuil → AUTORISÉ mais AVERTISSEMENT informel (ne bloque
+      PAS la validation). p1 (phrase principale) n'a AUCUN garde (on veut pouvoir coller une clé forte). À NE PAS
+      confondre avec les cérémonies destructrices (confirmDelete/confirmRevealPrivateKey), où la retape est une
+      friction distincte, sans rapport avec la confirmation de phrase. */
+  private wireConfirmationPasteGuard(confirmInput: HTMLInputElement, pasteWarn: HTMLElement): void {
+    confirmInput.addEventListener("paste", (e) => {
+      const pasted = e.clipboardData?.getData("text") ?? "";
+      if (pasted.length < CertsAdminView.CONFIRM_PASTE_MIN) {
+        e.preventDefault();   // collage REFUSÉ → force la retape manuelle
+        pasteWarn.textContent = I18n.t("certs.admin.common.pasteConfirmBlocked");
+      } else {
+        // Collage AUTORISÉ (pas de preventDefault) mais signalé : un même collage erroné dans les deux champs
+        // passerait inaperçu.
+        pasteWarn.textContent = I18n.t("certs.admin.common.pasteConfirmDanger");
+      }
+      pasteWarn.style.display = "block";
+    });
+  }
+
   /** Initialisation EN MODALE : phrase ×2, avertissement de perte, dérivation KEK + tirage/emballage
       de la DEK (enveloppe) + PUT /pki. La session s'ouvre sur la DEK déballée (NON extractible). */
   private initModal(): void {
@@ -1603,17 +1719,25 @@ export class CertsAdminView {
     const p2 = FormControls.text("", I18n.t("certs.admin.init.confirmPlaceholder")); p2.type = "password"; p2.autocomplete = "new-password";
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.confirmation"), p2, I18n.t("certs.admin.init.confirmHint")));
 
-    const errBox = this.errBox(); root.appendChild(errBox);
+    // Gardes de saisie (au-dessus de l'errBox) : Axe 1 « force faible » (temporisation, câblé via onReady) et
+    // Axe 2 « collage de confirmation » (câblé maintenant, à la construction du champ p2).
+    const weakWarn = this.warnHint(); weakWarn.style.fontWeight = "600";
+    const pasteWarn = this.warnHint();
+    this.wireConfirmationPasteGuard(p2, pasteWarn);
+    const errBox = this.errBox(); root.append(weakWarn, pasteWarn, errBox);
     this.host.openModal({
       title: I18n.t("certs.admin.init.title"),
       body: root,
       saveLabel: I18n.t("certs.admin.init.saveLabel"),
+      onReady: ({ saveButton }) => this.wireWeakPassphraseGuard(saveButton, p1, weakWarn),
+      onClose: () => this.clearWeakPassphraseGuard(),
       onSave: async () => {
         errBox.style.display = "none";
         const pass = p1.value;
+        // Filet « phrase requise » conservé (le bouton désactivé sur vide est un plus, pas l'unique garde).
         if (pass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.common.passRequired")); return false; }
-        // C8 : longueur minimale d'une NOUVELLE phrase (avant toute dérivation de KEK).
-        if (pass.length < PkiCrypto.MIN_PASSPHRASE_LEN) { this.showError(errBox, I18n.t("certs.admin.common.passTooShort", { count: PkiCrypto.MIN_PASSPHRASE_LEN })); return false; }
+        // Plus de blocage DUR de longueur (Axe 1) : une phrase faible est permise, sous la responsabilité de
+        // l'utilisateur, après la temporisation du bouton.
         if (pass !== p2.value) { this.showError(errBox, I18n.t("certs.admin.init.passMismatch")); return false; }
         try {
           const salt = PkiCrypto.generateSaltB64();
@@ -1683,11 +1807,13 @@ export class CertsAdminView {
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rekey.newLabel"), p1, I18n.t("certs.admin.common.longUniqueHint")));
     const p2 = FormControls.text("", I18n.t("certs.admin.rekey.confirmPlaceholder")); p2.type = "password"; p2.autocomplete = "new-password";
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.confirmation"), p2, I18n.t("certs.admin.rekey.confirmHint")));
-    // COLLAGE BLOQUÉ sur la CONFIRMATION : la retape de la nouvelle phrase doit être une VRAIE retape
-    // (coller depuis le 1er champ contournerait la vérification anti-faute de frappe).
-    p2.addEventListener("paste", (e) => e.preventDefault());
+    // Gardes de saisie (au-dessus de l'errBox) : Axe 1 « force faible » (sur la NOUVELLE phrase p1, via onReady)
+    // et Axe 2 « collage de confirmation » (garde CONDITIONNEL — remplace l'ancien blocage inconditionnel de p2).
+    const weakWarn = this.warnHint(); weakWarn.style.fontWeight = "600";
+    const pasteWarn = this.warnHint();
+    this.wireConfirmationPasteGuard(p2, pasteWarn);
 
-    const errBox = this.errBox(); root.appendChild(errBox);
+    const errBox = this.errBox(); root.append(weakWarn, pasteWarn, errBox);
     // Liaison d'erreur (accessibilité, cf. point 7) : le message d'erreur porte un ID ; les champs
     // fautifs pointeront dessus (aria-describedby) et prendront `aria-invalid`, nettoyés dès la saisie.
     const errId = OverlayA11y.nextId("cert-rekey-err"); errBox.id = errId;
@@ -1698,6 +1824,8 @@ export class CertsAdminView {
       title: I18n.t("certs.admin.rekey.title"),
       body: root,
       saveLabel: I18n.t("certs.admin.rekey.saveLabel"),
+      onReady: ({ saveButton }) => this.wireWeakPassphraseGuard(saveButton, p1, weakWarn),
+      onClose: () => this.clearWeakPassphraseGuard(),
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
@@ -1705,9 +1833,9 @@ export class CertsAdminView {
         const currentPass = cur.value;
         const newPass = p1.value;
         if (currentPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.curRequired")); return failField(cur); }
+        // Filet « nouvelle phrase requise » conservé ; plus de blocage DUR de longueur (Axe 1 : temporisation, la
+        // phrase faible reste permise sous la responsabilité de l'utilisateur ; la phrase ACTUELLE n'est pas contrainte).
         if (newPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.newRequired")); return failField(p1); }
-        // C8 : la NOUVELLE phrase doit atteindre la longueur minimale (la phrase ACTUELLE n'est PAS contrainte).
-        if (newPass.length < PkiCrypto.MIN_PASSPHRASE_LEN) { this.showError(errBox, I18n.t("certs.admin.common.passTooShort", { count: PkiCrypto.MIN_PASSPHRASE_LEN })); return failField(p1); }
         if (newPass !== p2.value) { this.showError(errBox, I18n.t("certs.admin.rekey.mismatch")); return failField(p2); }
         // COFFRE CIBLE : celui du sélecteur (multi-coffres) ou « default ». Instantané FRAIS à CHAQUE tentative
         // (masque la capture d'ouverture) : après un 409 « conflict », this.pkiState a été rafraîchi — la relance
@@ -1786,27 +1914,38 @@ export class CertsAdminView {
     warn.textContent = I18n.t("certs.admin.vault.protectWarn");
     root.appendChild(warn);
 
-    // Saisie de phrase selon le cas : CRÉATION (nouvelle phrase ×2, collage bloqué sur la confirmation — vraie
-    // retape, parité changePassphraseModal) · REPRISE coffre verrouillé (une saisie, validée par l'unwrap) ·
-    // REPRISE coffre déjà ouvert (aucun champ — la DEK root est en session).
+    // Saisie de phrase selon le cas : CRÉATION (nouvelle phrase ×2, gardes de force + collage) · REPRISE coffre
+    // verrouillé (une saisie, phrase EXISTANTE validée par l'unwrap — aucune contrainte) · REPRISE coffre déjà
+    // ouvert (aucun champ — la DEK root est en session). Les gardes ne s'appliquent QU'À la CRÉATION.
     let p1: HTMLInputElement | null = null;
     let p2: HTMLInputElement | null = null;
+    let weakWarn: HTMLElement | null = null;   // non-null → cas CRÉATION (pilote le câblage du garde de force)
+    let pasteWarn: HTMLElement | null = null;
     if (!vaultExists) {
       p1 = FormControls.text("", I18n.t("certs.admin.vault.protectPassPlaceholder")); p1.type = "password"; p1.autocomplete = "new-password";
       root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.vault.protectPassLabel"), p1, I18n.t("certs.admin.common.longUniqueHint")));
       p2 = FormControls.text("", I18n.t("certs.admin.rekey.confirmPlaceholder")); p2.type = "password"; p2.autocomplete = "new-password";
-      p2.addEventListener("paste", (e) => e.preventDefault());
       root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.confirmation"), p2, I18n.t("certs.admin.rekey.confirmHint")));
+      // Gardes de saisie du cas CRÉATION : Axe 1 « force faible » (via onReady) + Axe 2 « collage de confirmation »
+      // CONDITIONNEL (remplace l'ancien blocage inconditionnel de p2).
+      weakWarn = this.warnHint(); weakWarn.style.fontWeight = "600";
+      pasteWarn = this.warnHint();
+      this.wireConfirmationPasteGuard(p2, pasteWarn);
     } else if (!rootUnlocked) {
       p1 = FormControls.text("", I18n.t("certs.admin.vault.protectPassPlaceholder")); p1.type = "password"; p1.autocomplete = "current-password";
       root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.vault.protectPassLabel"), p1, I18n.t("certs.admin.vault.protectResumeHint")));
     }
-    const errBox = this.errBox(); root.appendChild(errBox);
+    const errBox = this.errBox();
+    if (weakWarn) root.append(weakWarn, pasteWarn!);   // au-dessus de l'errBox (cas création seulement)
+    root.appendChild(errBox);
 
     this.host.openModal({
       title: I18n.t("certs.admin.vault.protectTitle"),
       body: root,
       saveLabel: vaultExists ? I18n.t("certs.admin.vault.protectResumeSaveLabel") : I18n.t("certs.admin.vault.protectSaveLabel"),
+      // Garde de force uniquement en CRÉATION (weakWarn posé) ; en REPRISE, p1 est une phrase EXISTANTE → pas de garde.
+      onReady: ({ saveButton }) => { if (p1 && weakWarn) this.wireWeakPassphraseGuard(saveButton, p1, weakWarn); },
+      onClose: () => this.clearWeakPassphraseGuard(),
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
@@ -1814,10 +1953,9 @@ export class CertsAdminView {
           // 1) Le coffre « root » : le CRÉER (DEK fraîche sous la nouvelle phrase) ou l'OUVRIR (reprise).
           if (!vaultExists) {
             const pass = p1!.value;
+            // Filet « phrase requise » conservé ; plus de blocage DUR de longueur (Axe 1 : la phrase du coffre
+            // racine en création peut être faible, sous la responsabilité de l'utilisateur, après temporisation).
             if (pass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.common.passRequired")); return false; }
-            // C8 : phrase du coffre racine en CRÉATION = nouvelle phrase → longueur minimale (la REPRISE, plus bas,
-            // ouvre un coffre EXISTANT et n'est donc PAS contrainte).
-            if (pass.length < PkiCrypto.MIN_PASSPHRASE_LEN) { this.showError(errBox, I18n.t("certs.admin.common.passTooShort", { count: PkiCrypto.MIN_PASSPHRASE_LEN })); return false; }
             if (pass !== p2!.value) { this.showError(errBox, I18n.t("certs.admin.init.passMismatch")); return false; }
             const salt = PkiCrypto.generateSaltB64();
             const iters = PkiCrypto.DEFAULT_ITERS;
@@ -2477,7 +2615,10 @@ export class CertsAdminView {
     const lockTag = (): HTMLElement => { const t = document.createElement("span"); t.className = "lock-tag"; t.textContent = I18n.t("certs.admin.export.lockedTag"); t.title = I18n.t("certs.admin.export.lockedHint"); return t; };
 
     let hasLocked = false;
-    const locked = !this.session.unlocked;
+    // Point D — gating PAR COFFRE : les artefacts de CLÉ PRIVÉE exigent le COFFRE DE CE certificat ouvert (pas
+    // « au moins un coffre »). Un cert dont le coffre est verrouillé → artefacts de clé grisés (pastille), même
+    // si un AUTRE coffre est ouvert. Les artefacts PUBLICS restent toujours disponibles.
+    const locked = !this.session.unlockedVault(item.vault_id);
 
     // Ligne d'action GLOBALE (ZIP, PKCS#12, clé OpenSSH…) : libellé descriptif (col 1) + bouton-icône « exporter »
     // (col 2). `run` renvoie true pour GARDER la modale (ex. PKCS#12 ouvre sa propre modale). `lockedDisabled` :
@@ -2525,7 +2666,7 @@ export class CertsAdminView {
     // Export UNITAIRE « Tout (ZIP) » (L4) : le BUNDLE complet du certificat en une archive (ex. feuille TLS =
     // cert + fullchain + clé en un geste). Clé privée incluse SI session déverrouillée ET clé détenue, sinon
     // artefacts publics seuls — le libellé du bouton l'indique.
-    const withKey = this.session.unlocked && item.has_key;
+    const withKey = this.session.unlockedVault(item.vault_id) && item.has_key;   // clé incluse SI le coffre de CE cert est ouvert
     addAction(I18n.t("certs.admin.export.allZip") + (withKey ? I18n.t("certs.admin.export.allZipWithKey") : I18n.t("certs.admin.export.allZipPublic")), async () => {
       if (item.kind === "root-ca" && withKey && !(await this.confirmRevealPrivateKey(item))) return true;   // le ZIP inclut la clé racine → garde textuelle (true = garde la modale ouverte)
       const keyPem = withKey ? await this.decryptKeyOf(item) : null;
