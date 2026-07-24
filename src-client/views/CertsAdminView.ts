@@ -465,7 +465,6 @@ export class CertsAdminView {
     return this.searchWrap;
   }
 
-  /** Écran VERROUILLÉ : initialisation (PKI vierge) OU saisie de la phrase secrète maître. */
   /** Bouton de CONTRÔLE DU COFFRE (barre de contrôles, tout à droite) — reflète l'état, libellé + icône portant
       l'information (l'ancien badge d'état devient superflu) :
       - déverrouillé → « Verrouiller » (action immédiate, cadenas fermé) ;
@@ -490,11 +489,14 @@ export class CertsAdminView {
       IconButton.decorate(btn, Icons.LOCK);
       return btn;
     }
+    // PKI VIERGE → le bouton ouvre DIRECTEMENT le formulaire d'initialisation (initModal) : l'ancienne modale
+    // intermédiaire « PKI non initialisée » (un hint + un bouton) était un saut inutile, au vocabulaire d'avant
+    // les coffres (« Initialiser le coffre » → « Initialiser la PKI »). L'explication vit désormais DANS initModal.
     const uninit = this.pkiState?.initialized !== true && PkiCrypto.available();
     const btn = this.actionButton(
       uninit ? I18n.t("certs.admin.toolbar.init") : I18n.t("certs.admin.toolbar.unlock"),
       uninit ? I18n.t("certs.admin.toolbar.initTitle") : I18n.t("certs.admin.toolbar.unlockTitle"),
-      () => this.unlockModal(), "btn-primary");
+      () => { if (uninit) this.initModal(); else this.unlockModal(); }, "btn-primary");
     IconButton.decorate(btn, Icons.UNLOCK);
     return btn;
   }
@@ -530,14 +532,12 @@ export class CertsAdminView {
       return;
     }
 
-    // PKI VIERGE → proposer l'initialisation (initModal remplace cette modale à la validation).
+    // PKI VIERGE → DIRECTEMENT le formulaire d'initialisation (qui porte sa propre explication). L'ancienne
+    // modale intermédiaire (« PKI non initialisée » + bouton) doublonnait le geste. Défensif : ce chemin n'est
+    // plus atteint depuis la toolbar (buildVaultButton ouvre initModal en direct) ; `reopen` est sans objet
+    // (les flux d'aller-retour — export — supposent des certificats, donc une PKI initialisée).
     if (state.initialized !== true) {
-      const box = document.createElement("div");
-      const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "10px";
-      hint.textContent = I18n.t("certs.admin.lock.uninitHint");
-      const btn = this.actionButton(I18n.t("certs.admin.lock.initBtn"), I18n.t("certs.admin.lock.initBtnTitle"), () => this.initModal(), "btn-primary");
-      box.append(hint, btn);
-      this.host.openModal({ title: I18n.t("certs.admin.lock.uninitTitle"), body: box, hideFooter: true, onClose: reopen });
+      this.initModal();
       return;
     }
 
@@ -1712,10 +1712,15 @@ export class CertsAdminView {
     this.weakPassCountdown = null;
   }
 
-  /** Initialisation EN MODALE : phrase ×2, avertissement de perte, dérivation KEK + tirage/emballage
-      de la DEK (enveloppe) + PUT /pki. La session s'ouvre sur la DEK déballée (NON extractible). */
+  /** Initialisation EN MODALE : intro (ce que crée l'initialisation — la PKI du document et son COFFRE
+      PRINCIPAL), avertissement de perte, phrase ×2, dérivation KEK + tirage/emballage de la DEK (enveloppe)
+      + PUT /pki. La session s'ouvre sur la DEK déballée (NON extractible). Point d'entrée UNIQUE du flux
+      d'initialisation (la toolbar y mène en direct — plus de modale intermédiaire). */
   private initModal(): void {
     const root = document.createElement("div");
+    const intro = document.createElement("div"); intro.className = "form-hint"; intro.style.marginBottom = "10px";
+    intro.textContent = I18n.t("certs.admin.init.intro");
+    root.appendChild(intro);
     const warn = document.createElement("div"); warn.className = "form-hint"; warn.style.cssText = "margin-bottom:10px;color:var(--warn)";
     warn.textContent = I18n.t("certs.admin.init.warn");
     root.appendChild(warn);
