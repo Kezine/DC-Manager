@@ -577,6 +577,23 @@ module.exports = async () => {
     let emptyThrew = false;
     try { new PveHttpPool([]); } catch (_) { emptyThrew = true; }
     ck(emptyThrew, "pool vide → erreur de construction");
+
+    // 6) dispose() du pool CONSTRUIT DIRECTEMENT (agent null) : ne jette pas, idempotent (no-op sans agent).
+    const bare = new PveHttpPool([mkNode("a", { value: 1 })]);
+    let disposeThrew = false;
+    try { bare.dispose(); bare.dispose(); } catch (_) { disposeThrew = true; }
+    ck(!disposeThrew, "dispose() sans agent (constructeur direct) → no-op, ré-appel sûr (idempotent)");
+
+    // 7) fromConfig → dispose() détruit l'agent keep-alive PARTAGÉ (amortissement TLS des ~N appels
+    //    de détail, cf. audit N+1), sans jeter, et reste idempotent (Agent.destroy() ré-appelable).
+    const { PveHttpPool: PoolCls } = SERVER("vm/PveHttpPool.js");
+    const built = PoolCls.fromConfig({
+      id: "p", kind: "proxmox", token: "t@pam!x=U", include_lxc: true, interval_sec: 0, timeout_sec: 15, ca_pem: null,
+      endpoints: [{ url: "https://pve1:8006", fingerprint: null }, { url: "https://pve2:8006", fingerprint: null }],
+    });
+    let disposeErr = false;
+    try { built.dispose(); built.dispose(); } catch (_) { disposeErr = true; }
+    ck(!disposeErr, "fromConfig().dispose() : destruction de l'agent partagé sûre et idempotente (2 appels)");
   }
   });
 
@@ -914,6 +931,52 @@ module.exports = async () => {
     const inv2 = await new ProxmoxAdapter({ ...cfg, management_url: null }, mkPveStub(routes)).inventory();
     ck.eq(inv2.cluster.management_url, null, "config sans management_url → cluster.management_url null (pas de bouton)");
     ck(inv2.cluster.nodes[0].management_url.startsWith("https://pve1.exemple.lan:8006/#v1:0:=node/"), "…les liens PAR nœud restent générés (indépendants du bouton cluster)");
+  }
+  });
+
+  await section("Serveur : ProxmoxAdapter — cycle de vie (dispose() appelé en fin de passe, succès ET échec)", async () => {
+  {
+    const { ProxmoxAdapter } = SERVER("vm/ProxmoxAdapter.js");
+    // Stub PveJsonClient AVEC un espion `dispose` (le pool réel détruit son agent keep-alive en fin
+    // de passe — cf. audit N+1) : on vérifie que inventory() ET test() le rappellent EXACTEMENT une
+    // fois, y compris quand la passe échoue (sinon les sockets keep-alive traîneraient jusqu'au timeout).
+    const mkDisposable = (routes) => { const s = mkPveStub(routes); s.disposed = 0; s.dispose = () => { s.disposed++; }; return s; };
+
+    // (a) inventory() OK → dispose appelé EXACTEMENT une fois (en fin de passe).
+    const okRoutes = {
+      "/api2/json/version": { data: { version: "8.4.1" } },
+      "/api2/json/cluster/status": { data: [{ type: "cluster", name: "prod", quorate: 1 }, { type: "node", name: "pve1", online: 1 }] },
+      "/api2/json/cluster/resources": { data: [{ vmid: 100, type: "qemu", name: "web", node: "pve1", status: "stopped", maxcpu: 2 }] },
+    };
+    const okStub = mkDisposable(okRoutes);
+    await new ProxmoxAdapter(PVE_CFG, okStub).inventory();
+    ck.eq(okStub.disposed, 1, "inventory() réussi → dispose() appelé exactement une fois (sockets keep-alive libérées)");
+
+    // (b) inventory() en ÉCHEC (le stub rejette /cluster/resources) → dispose appelé QUAND MÊME (finally).
+    const koStub = mkDisposable({
+      "/api2/json/cluster/status": { data: [{ type: "cluster", name: "prod", quorate: 1 }] },
+      "/api2/json/cluster/resources": new Error("Proxmox : HTTP 500 sur /api2/json/cluster/resources"),
+    });
+    let invThrew = false;
+    try { await new ProxmoxAdapter(PVE_CFG, koStub).inventory(); } catch (_) { invThrew = true; }
+    ck(invThrew && koStub.disposed === 1, "inventory() en échec (/cluster/resources rejeté) → dispose() tout de même appelé (finally)");
+
+    // (c) test() → dispose appelé au SUCCÈS comme à l'ÉCHEC (test ouvre une connexion TLS).
+    const testOkStub = mkDisposable({ "/api2/json/version": { data: { version: "8.4.1" } } });
+    await new ProxmoxAdapter(PVE_CFG, testOkStub).test();
+    ck.eq(testOkStub.disposed, 1, "test() réussi → dispose() appelé (socket du test libérée)");
+    const testKoStub = mkDisposable({ "/api2/json/version": new Error("Proxmox : authentification refusée (401)") });
+    await new ProxmoxAdapter(PVE_CFG, testKoStub).test();
+    ck.eq(testKoStub.disposed, 1, "test() en échec → dispose() tout de même appelé (finally)");
+
+    // (d) Client SANS dispose (les sections d'orchestration en font office) : aucun crash — l'appel
+    //     optionnel `dispose?.()` est un no-op. On le RE-vérifie ici explicitement sur inventory ET test.
+    let noDisposeThrew = false;
+    try {
+      await new ProxmoxAdapter(PVE_CFG, mkPveStub(okRoutes)).inventory();
+      await new ProxmoxAdapter(PVE_CFG, mkPveStub({ "/api2/json/version": { data: { version: "8.4.1" } } })).test();
+    } catch (_) { noDisposeThrew = true; }
+    ck(!noDisposeThrew, "client stub SANS dispose → inventory()/test() ne cassent pas (dispose?.() optionnel)");
   }
   });
 

@@ -1,3 +1,4 @@
+import https from "node:https";
 import { PveHttp, PveHttpError } from "./PveHttp.js";
 import type { ProviderConfig } from "./VmProvider.js";
 
@@ -31,18 +32,41 @@ export class PveHttpPool {
   /** Indice du dernier nœud ayant répondu — point de départ du prochain appel. */
   private preferred = 0;
 
-  /** @param clients Un client par endpoint, DANS L'ORDRE de la config (≥ 1). */
-  constructor(private readonly clients: PveNodeClient[]) {
+  /** @param clients Un client par endpoint, DANS L'ORDRE de la config (≥ 1).
+      @param agent Agent HTTPS keep-alive PARTAGÉ par tous les clients du pool, à la durée de vie
+        d'UNE passe d'inventaire (créé par fromConfig, libéré par dispose en fin de passe). null
+        quand le pool est construit DIRECTEMENT (tests, appel direct) → dispose devient un no-op. */
+  constructor(private readonly clients: PveNodeClient[], private readonly agent: https.Agent | null = null) {
     if (clients.length === 0) throw new Error("PveHttpPool : au moins un endpoint requis");
   }
 
   /** Construction standard depuis la config : un PveHttp par endpoint (empreinte TLS PAR NŒUD —
       chaque nœud Proxmox porte son propre certificat), délai commun, et CA du cluster COMMUNE
       (`ca_pem` : niveau 2 de la hiérarchie de confiance, valable pour tout le pool ; l'empreinte
-      de l'endpoint reste prioritaire — cf. PveHttp.trustOptions). */
+      de l'endpoint reste prioritaire — cf. PveHttp.trustOptions).
+
+      UN agent keep-alive PARTAGÉ par tous les endpoints du pool (constat d'audit N+1 : sans lui,
+      chaque appel de détail repaie un handshake TLS complet). Sa vie = UNE passe : l'adaptateur
+      l'ouvre ici et le détruit par dispose() en fin d'inventaire — aucun pool global inter-providers.
+
+      SÛRETÉ du partage entre endpoints aux confiances TLS DIFFÉRENTES (épinglage/CA par nœud) :
+      un Agent réutilise les sockets PAR ORIGINE (host:port). La validation (empreinte/CA) se joue
+      au HANDSHAKE de chaque socket, avec les options TLS de SA requête initiale ; une socket
+      réutilisée a donc DÉJÀ été validée pour SON origine, et deux endpoints du pool sont des
+      origines distinctes — jamais de socket d'un nœud recyclée pour un autre. Bonus gratuit : le
+      cache de sessions TLS de l'Agent accélère aussi les reconnexions au même nœud. */
   static fromConfig(config: ProviderConfig): PveHttpPool {
+    const agent = new https.Agent({ keepAlive: true });
     return new PveHttpPool(config.endpoints.map((endpoint) =>
-      new PveHttp(endpoint.url, config.token, endpoint.fingerprint, config.timeout_sec * 1000, config.ca_pem)));
+      new PveHttp(endpoint.url, config.token, endpoint.fingerprint, config.timeout_sec * 1000, config.ca_pem, agent)), agent);
+  }
+
+  /** Libère les sockets keep-alive du pool EN FIN DE PASSE (destroy de l'agent partagé) : sans ça,
+      les sockets ouvertes traîneraient jusqu'au timeout système à chaque inventaire. Idempotente
+      (`Agent.destroy()` est sûr à ré-appeler) ; NO-OP quand le pool a été construit sans agent
+      (constructeur direct des tests). Appelée par ProxmoxAdapter en `finally` (inventory/test). */
+  dispose(): void {
+    this.agent?.destroy();
   }
 
   /** GET JSON avec bascule : essaie à partir du nœud préféré, passe au suivant sur

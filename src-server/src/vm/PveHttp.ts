@@ -66,6 +66,12 @@ export class PveHttp {
     // CA du cluster (PEM), NIVEAU 2 de la hiérarchie de confiance — optionnel EN DERNIER pour ne
     // pas casser les appels existants. Ignoré si l'endpoint a une empreinte (l'épinglage prime).
     private readonly caPem: string | null = null,
+    // Agent HTTPS INJECTÉ (keep-alive), optionnel EN DERNIER : null (défaut) = comportement
+    // historique « socket dédiée par requête ». Quand le pool l'injecte, il vit LE TEMPS D'UNE
+    // PASSE d'inventaire (créé par PveHttpPool.fromConfig, détruit par dispose en fin de passe),
+    // ce qui amortit TCP+TLS sur les ~N appels de détail (constat d'audit N+1) sans jamais
+    // introduire de pool global partagé entre providers. Voir l'usage dans getJson.
+    private readonly agent: https.Agent | null = null,
   ) {}
 
   /** Empreinte normalisée pour comparaison : hex minuscule sans séparateurs
@@ -150,10 +156,14 @@ export class PveHttp {
       method: "GET",
       headers: { Authorization: "PVEAPIToken=" + this.token, Accept: "application/json" },
       timeout: this.timeoutMs,
-      // Socket DÉDIÉE par requête (pas de pool keep-alive partagé) : cycle de vie déterministe
-      // — nos volumes (une synchro = quelques dizaines d'appels séquentiels) ne justifient pas
-      // la réutilisation de connexions, et l'isolation évite tout état partagé entre providers.
-      agent: false,
+      // Réutilisation de connexion : l'agent keep-alive INJECTÉ s'il existe, sinon une socket
+      // DÉDIÉE par requête (`false`). Le cycle de vie reste déterministe MÊME avec keep-alive :
+      // l'agent injecté vit LE TEMPS D'UNE PASSE (créé par le pool, détruit en fin d'inventaire),
+      // jamais un pool global partagé entre providers. Il amortit alors TCP+TLS sur les ~N appels
+      // de détail (un /config + éventuellement un /agent par VM — constat d'audit N+1), là où
+      // `agent: false` repayait un handshake TLS complet à CHAQUE requête (~50 ms de pur handshake
+      // par appel sur un gros cluster). Sans injection (stubs/tests, appel direct), rien ne change.
+      agent: this.agent ?? false,
       // Modèle de confiance TLS extrait en statique pure (épinglage > CA cluster > CA système) : le
       // spread N'INTRODUIT `checkServerIdentity`/`ca` QUE dans leur branche (cf. trustOptions — un
       // `undefined` explicite de checkServerIdentity casserait la validation interne de tls.connect).

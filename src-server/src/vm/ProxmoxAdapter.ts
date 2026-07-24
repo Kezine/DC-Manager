@@ -32,6 +32,9 @@ import { PveHttpPool } from "./PveHttpPool.js";
 export interface PveJsonClient {
   /** GET JSON authentifié (chemin absolu "/api2/json/…"). Rejette en cas d'échec réseau/HTTP. */
   getJson(path: string): Promise<any>;
+  /** Libération OPTIONNELLE des sockets keep-alive en FIN DE PASSE (cf. PveHttpPool.dispose) :
+      le pool réel détruit son agent partagé ; les stubs de test peuvent l'ignorer (membre absent). */
+  dispose?(): void;
 }
 
 export class ProxmoxAdapter implements VmProviderAdapter {
@@ -75,6 +78,10 @@ export class ProxmoxAdapter implements VmProviderAdapter {
       };
     } catch (e) {
       return { ok: false, kind: this.kind, version: null, supported: false, message: e instanceof Error ? e.message : String(e) };
+    } finally {
+      // Libère la socket keep-alive du pool (le test ouvre une connexion TLS) MÊME en cas d'échec —
+      // sinon elle traînerait jusqu'au timeout système. No-op pour un client sans dispose (stub).
+      this.http.dispose?.();
     }
   }
 
@@ -82,64 +89,71 @@ export class ProxmoxAdapter implements VmProviderAdapter {
       Jette si l'inventaire de masse échoue ; TOLÉRANT sur les enrichissements par VM ET sur les
       métadonnées cluster secondaires (quorum, version → null si indisponibles). */
   async inventory(): Promise<VmInventory> {
-    // 1) Identité + quorum du cluster (1 appel). Nom résolu ici (repli sur l'id d'instance : le
-    //    parser pur ignore l'instance) pour préfixer les ext_id ET nommer le cluster de la vue.
-    const status = await this.clusterStatus();
-    const clusterName = status.name ?? this.config.id;
+    // Tout le corps est enveloppé try/finally : le `finally` LIBÈRE les sockets keep-alive du pool
+    // (dispose) MÊME quand l'inventaire échoue (rejet de /cluster/resources) — sans quoi elles
+    // traîneraient jusqu'au timeout système à chaque passe. No-op pour un client sans dispose (stub).
+    try {
+      // 1) Identité + quorum du cluster (1 appel). Nom résolu ici (repli sur l'id d'instance : le
+      //    parser pur ignore l'instance) pour préfixer les ext_id ET nommer le cluster de la vue.
+      const status = await this.clusterStatus();
+      const clusterName = status.name ?? this.config.id;
 
-    // 2) Ressources cluster-wide SANS le filtre `?type=vm` : la MÊME réponse porte les VMs
-    //    (fromClusterResources ignore les items sans vmid) ET les nœuds — zéro appel de plus.
-    const resources = await this.http.getJson("/api2/json/cluster/resources");
-    let records = ProxmoxParse.fromClusterResources(clusterName, resources);
-    // URL de management PAR nœud GÉNÉRÉE ICI (le parseur pur ne connaît pas la config) : chaque
-    // adaptateur connaît le schéma d'URL de son UI (cf. nodeManagementUrl).
-    const nodes = ProxmoxParse.nodesFromClusterResources(resources)
-      .map((node) => ({ ...node, management_url: this.nodeManagementUrl(node.name) }));
+      // 2) Ressources cluster-wide SANS le filtre `?type=vm` : la MÊME réponse porte les VMs
+      //    (fromClusterResources ignore les items sans vmid) ET les nœuds — zéro appel de plus.
+      const resources = await this.http.getJson("/api2/json/cluster/resources");
+      let records = ProxmoxParse.fromClusterResources(clusterName, resources);
+      // URL de management PAR nœud GÉNÉRÉE ICI (le parseur pur ne connaît pas la config) : chaque
+      // adaptateur connaît le schéma d'URL de son UI (cf. nodeManagementUrl).
+      const nodes = ProxmoxParse.nodesFromClusterResources(resources)
+        .map((node) => ({ ...node, management_url: this.nodeManagementUrl(node.name) }));
 
-    // 3) Version + gamme (1 appel léger, INFORMATIF) : un échec donne version null / supported
-    //    false SANS interrompre l'inventaire (la version n'est pas vitale — décision de cadrage).
-    const version = await this.clusterVersion();
-    // management_url du CLUSTER = RECOPIE de la config (l'URL du Proxmox Datacenter Manager, un
-    // service distinct des nœuds, non déductible de l'API) — à ne pas confondre avec les liens par nœud.
-    const cluster: VmClusterInfo = { name: clusterName, version: version.version, supported: version.supported, quorate: status.quorate, nodes, management_url: this.config.management_url };
+      // 3) Version + gamme (1 appel léger, INFORMATIF) : un échec donne version null / supported
+      //    false SANS interrompre l'inventaire (la version n'est pas vitale — décision de cadrage).
+      const version = await this.clusterVersion();
+      // management_url du CLUSTER = RECOPIE de la config (l'URL du Proxmox Datacenter Manager, un
+      // service distinct des nœuds, non déductible de l'API) — à ne pas confondre avec les liens par nœud.
+      const cluster: VmClusterInfo = { name: clusterName, version: version.version, supported: version.supported, quorate: status.quorate, nodes, management_url: this.config.management_url };
 
-    // Filtre LXC AVANT les appels de détail : pas d'appels réseau pour des records écartés.
-    if (!this.config.include_lxc) records = records.filter((r) => r.vm_type !== "lxc");
+      // Filtre LXC AVANT les appels de détail : pas d'appels réseau pour des records écartés.
+      if (!this.config.include_lxc) records = records.filter((r) => r.vm_type !== "lxc");
 
-    for (const record of records) {
-      record.provider_id = this.config.id; // estampillage de l'instance (le parser pur l'ignore)
-      const vmid = ProxmoxAdapter.vmidFromExtId(record.ext_id);
-      if (record.host_node === null || vmid === "") continue; // sans nœud/vmid → pas d'appel détail possible
+      for (const record of records) {
+        record.provider_id = this.config.id; // estampillage de l'instance (le parser pur l'ignore)
+        const vmid = ProxmoxAdapter.vmidFromExtId(record.ext_id);
+        if (record.host_node === null || vmid === "") continue; // sans nœud/vmid → pas d'appel détail possible
 
-      // Segments issus du CLUSTER DISTANT (nom de nœud, vmid) : TOUJOURS encodés avant injection
-      // dans un chemin d'URL — une donnée distante ne doit jamais porter de méta-caractère d'URL
-      // non encodé (« / », « ? », « # »…) qui altérerait la structure du chemin, même confiné au
-      // même origin. Calculés ICI, juste après la garde, avant toute mutation de `record` (mergeConfig)
-      // — le narrowing non-null de host_node reste valide. Le `vm_type` est déjà contraint à
-      // qemu|lxc par le parseur (ProxmoxParse.fromClusterResources) : pas besoin de l'encoder.
-      const nodeSeg = encodeURIComponent(record.host_node);
-      const vmidSeg = encodeURIComponent(vmid);
+        // Segments issus du CLUSTER DISTANT (nom de nœud, vmid) : TOUJOURS encodés avant injection
+        // dans un chemin d'URL — une donnée distante ne doit jamais porter de méta-caractère d'URL
+        // non encodé (« / », « ? », « # »…) qui altérerait la structure du chemin, même confiné au
+        // même origin. Calculés ICI, juste après la garde, avant toute mutation de `record` (mergeConfig)
+        // — le narrowing non-null de host_node reste valide. Le `vm_type` est déjà contraint à
+        // qemu|lxc par le parseur (ProxmoxParse.fromClusterResources) : pas besoin de l'encoder.
+        const nodeSeg = encodeURIComponent(record.host_node);
+        const vmidSeg = encodeURIComponent(vmid);
 
-      try {
-        const cfg = await this.http.getJson("/api2/json/nodes/" + nodeSeg + "/" + record.vm_type + "/" + vmidSeg + "/config");
-        ProxmoxParse.mergeConfig(record, cfg);
-      } catch {
-        // VM disparue/migrée entre l'inventaire et cet appel : son squelette (nom, statut,
-        // ressources max) reste dans l'inventaire — la prochaine synchro se réalignera.
-      }
-
-      // IPs réelles via guest-agent : QEMU ALLUMÉES uniquement (l'agent ne répond pas VM
-      // éteinte, et les LXC exposent leur IP statique dans la config déjà fusionnée).
-      if (record.vm_type === "qemu" && record.status === "running") {
         try {
-          const agent = await this.http.getJson("/api2/json/nodes/" + nodeSeg + "/qemu/" + vmidSeg + "/agent/network-get-interfaces");
-          ProxmoxParse.mergeAgentInterfaces(record, agent);
+          const cfg = await this.http.getJson("/api2/json/nodes/" + nodeSeg + "/" + record.vm_type + "/" + vmidSeg + "/config");
+          ProxmoxParse.mergeConfig(record, cfg);
         } catch {
-          // Agent non installé / VM sans agent : « au mieux » (cadrage) — record inchangé.
+          // VM disparue/migrée entre l'inventaire et cet appel : son squelette (nom, statut,
+          // ressources max) reste dans l'inventaire — la prochaine synchro se réalignera.
+        }
+
+        // IPs réelles via guest-agent : QEMU ALLUMÉES uniquement (l'agent ne répond pas VM
+        // éteinte, et les LXC exposent leur IP statique dans la config déjà fusionnée).
+        if (record.vm_type === "qemu" && record.status === "running") {
+          try {
+            const agent = await this.http.getJson("/api2/json/nodes/" + nodeSeg + "/qemu/" + vmidSeg + "/agent/network-get-interfaces");
+            ProxmoxParse.mergeAgentInterfaces(record, agent);
+          } catch {
+            // Agent non installé / VM sans agent : « au mieux » (cadrage) — record inchangé.
+          }
         }
       }
+      return { vms: records, cluster };
+    } finally {
+      this.http.dispose?.();
     }
-    return { vms: records, cluster };
   }
 
   /* --------------------------------------------------------------------------
