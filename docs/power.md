@@ -7,7 +7,8 @@ injecté (aucun DOM). UI : `PortEditorControls` (contrôles power du port + pann
 ## Modèle
 
 - **`Port.direction`** : `"source"` (fournit — outlet PDU, départ de tableau) | `"sink"` (consomme — inlet PSU) |
-  `""` (data / non applicable). Un câble power relie une **source** à un **sink** (validation T9).
+  `""` (data / non applicable) — réservée aux ports d'ÉNERGIE (rôle `power`/`poe`, validation T12). Un câble power
+  relie une **source** à un **sink** (validation T9), de **même genre** — power↔power ou PoE↔PoE, jamais poe↔power (T9b).
 - **`Port.power_max_a`** : plafond de **courant** (A) — délivrance (source) ou rating de la PSU (sink). Les
   **capacités sont en AMPÈRES** : c'est le courant qui fait déclencher le disjoncteur.
 - **`Port.phase`** : `L1`/`L2`/`L3` sur un **départ** (source) ; déduite en aval (T8 : phase ⇒ source).

@@ -1226,11 +1226,13 @@ export class EquipmentForms extends FormBase {
         }
         // Symétrique (T-POE2) : passer poe_device à FAUX est refusé tant qu'un port POE PERSISTÉ existe. Le formulaire
         // garantit qu'aucun DRAFT n'est POE (bascule verrouillée sinon), mais les ports persistés ne sont réconciliés
-        // qu'APRÈS l'équipement → on relâche leur rôle « poe » ICI, avant l'update, pour que la désactivation passe
-        // (la réconciliation des ports plus bas scelle le rôle définitif du draft, ou les supprime).
+        // qu'APRÈS l'équipement → on relâche leur rôle « poe » ET on neutralise leur direction + budget PoE ICI, avant
+        // l'update, pour que la désactivation passe. Purger la direction est INDISPENSABLE : un rôle « data » interdit
+        // désormais toute direction résiduelle (T12) — un simple { role: "data" } serait refusé à cause du sink/source
+        // laissé en place. (La réconciliation des ports plus bas scelle le rôle définitif du draft, ou les supprime.)
         if (existingId && payload.poe_device === false) {
           for (const p of store.portsOf(existingId)) {
-            if (p.role === "poe") await store.update("ports", p.id, { role: "data" });
+            if (p.role === "poe") await store.update("ports", p.id, { role: "data", direction: "", poe_budget_w: null });
           }
         }
         if (existingId) {

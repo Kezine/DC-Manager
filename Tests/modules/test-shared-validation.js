@@ -601,9 +601,14 @@ module.exports = async () => {
     // T5 — port terminal : réseau principal ∈ réseaux assertés (miroir de la règle câble)
     ck.eq(DV.validateRecord("ports", { network_id: "n9", network_ids: ["n1", "n2"] }).some((x) => x.code === "invariant" && x.path === "network_id"), true, "T5 port : réseau principal ∉ réseaux → invariant");
     ck.eq(DV.validateRecord("ports", { network_id: "n1", network_ids: ["n1"] }).some((x) => x.code === "invariant" && x.path === "network_id"), false, "T5 port : principal ∈ réseaux → OK");
-    // T8 — phase seulement sur un port source
-    ck.eq(DV.validateRecord("ports", { phase: "L1", direction: "sink" }).some((x) => x.code === "invariant" && x.path === "phase"), true, "T8 port : phase sur un sink → invariant");
-    ck.eq(DV.validateRecord("ports", { phase: "L1", direction: "source" }).some((x) => x.code === "invariant" && x.path === "phase"), false, "T8 port : phase sur une source → OK");
+    // T8 — phase seulement sur un port source (rôle power : sinon T12 refuserait déjà la direction).
+    ck.eq(DV.validateRecord("ports", { role: "power", phase: "L1", direction: "sink" }).some((x) => x.code === "invariant" && x.path === "phase"), true, "T8 port : phase sur un sink → invariant");
+    ck.eq(DV.validateRecord("ports", { role: "power", phase: "L1", direction: "source" }).some((x) => x.code === "invariant" && x.path === "phase"), false, "T8 port : phase sur une source → OK");
+    // T12 — la direction (source/sink) est réservée aux ports d'ÉNERGIE (rôle power ou poe).
+    ck.eq(DV.validateRecord("ports", { role: "data", direction: "source" }).some((x) => x.code === "invariant" && x.path === "direction"), true, "T12 port : direction sur un rôle data → invariant");
+    ck.eq(DV.validateRecord("ports", { role: "power", direction: "source" }).some((x) => x.code === "invariant" && x.path === "direction"), false, "T12 port : direction sur un rôle power → OK");
+    ck.eq(DV.validateRecord("ports", { role: "poe", direction: "source" }).some((x) => x.code === "invariant" && x.path === "direction"), false, "T12 port : direction sur un rôle poe → OK");
+    ck.eq(DV.validateRecord("ports", { role: "data", direction: "" }).some((x) => x.code === "invariant" && x.path === "direction"), false, "T12 port : direction vide sur data → OK");
     // T6 — brin ≤ fiber_count du faisceau (crossEntity, via fetch)
     const bundleFetch = (c, i) => (c === "cableBundles" && i === "B12") ? { id: "B12", fiber_count: 12 } : null;
     ck.eq(DV.validateRecord("ports", { bundle_id: "B12", strand_a: 13 }, bundleFetch).some((x) => x.code === "cross_entity" && x.path === "strand_a"), true, "T6 port : brin 13 > 12 fibres → cross_entity");
@@ -617,11 +622,20 @@ module.exports = async () => {
     ck.eq(DV.validateRecord("ports", { id: "P2", equipment_id: "E1", bundle_id: "B12", strand_a: 2 }, undefined, strandFind).some((x) => x.code === "scope"), true, "V6 port : même patch, brin déjà pioché → scope");
     ck.eq(DV.validateRecord("ports", { id: "P2", equipment_id: "E2", bundle_id: "B12", strand_a: 2 }, undefined, strandFind).some((x) => x.code === "scope"), false, "V6 port : AUTRE extrémité, même brin → OK (les 2 bouts d'une fibre)");
     ck.eq(DV.validateRecord("ports", { id: "P2", equipment_id: "E1", bundle_id: "B12", strand_a: 5 }, undefined, strandFind).some((x) => x.code === "scope"), false, "V6 port : même patch, brin libre → OK");
-    // T9 — câble d'alimentation : source↔sink obligatoire (pas deux mêmes sens)
-    const dirFetch = (c, i) => (c === "ports") ? ({ src1: { id: "src1", direction: "source" }, src2: { id: "src2", direction: "source" }, snk1: { id: "snk1", direction: "sink" }, dat1: { id: "dat1", direction: "" } })[i] || null : null;
+    // T9 — câble d'alimentation : source↔sink obligatoire (pas deux mêmes sens). Rôles EXPLICITES (power/poe) : T12
+    // impose la direction sur un port d'énergie, et T9b exige un genre homogène (cf. plus bas).
+    const dirFetch = (c, i) => (c === "ports") ? ({
+      src1: { id: "src1", role: "power", direction: "source" }, src2: { id: "src2", role: "power", direction: "source" },
+      snk1: { id: "snk1", role: "power", direction: "sink" }, dat1: { id: "dat1", role: "data", direction: "" },
+      poeSrc: { id: "poeSrc", role: "poe", direction: "source" }, poeSnk: { id: "poeSnk", role: "poe", direction: "sink" },
+    })[i] || null : null;
     ck.eq(DV.validateRecord("cables", { status: "planifie", from_port_id: "src1", to_port_id: "src2" }, dirFetch).some((x) => x.code === "cross_entity" && x.path === "to_port_id"), true, "T9 câble : source↔source → cross_entity");
     ck.eq(DV.validateRecord("cables", { status: "planifie", from_port_id: "src1", to_port_id: "snk1" }, dirFetch).some((x) => x.code === "cross_entity"), false, "T9 câble : source↔sink → OK");
     ck.eq(DV.validateRecord("cables", { status: "planifie", from_port_id: "src1", to_port_id: "dat1" }, dirFetch).some((x) => x.code === "cross_entity"), false, "T9 câble : source↔data (sens vide) → non concerné");
+    // T9b — câble d'énergie de genre HOMOGÈNE : power↔power ou PoE↔PoE, jamais poe↔power.
+    ck.eq(DV.validateRecord("cables", { status: "planifie", from_port_id: "poeSrc", to_port_id: "snk1" }, dirFetch).some((x) => x.code === "cross_entity" && x.path === "to_port_id"), true, "T9b câble : PoE(source)↔power(sink) → cross_entity (genre mixte)");
+    ck.eq(DV.validateRecord("cables", { status: "planifie", from_port_id: "poeSrc", to_port_id: "poeSnk" }, dirFetch).some((x) => x.code === "cross_entity"), false, "T9b câble : PoE↔PoE (source/sink) → OK");
+    ck.eq(DV.validateRecord("cables", { status: "planifie", from_port_id: "src1", to_port_id: "snk1" }, dirFetch).some((x) => x.code === "cross_entity"), false, "T9b câble : power↔power (source/sink) → OK");
     // T10 — faisceau : deux extrémités DISTINCTES (miroir du self-loop câble)
     ck.eq(DV.validateRecord("cableBundles", { name: "T", endpoint_a_equipment_id: "PP1", endpoint_b_equipment_id: "PP1" }).some((x) => x.code === "invariant" && x.path === "endpoint_b_equipment_id"), true, "T10 faisceau : A = B → invariant");
     ck.eq(DV.validateRecord("cableBundles", { name: "T", endpoint_a_equipment_id: "PP1", endpoint_b_equipment_id: "PP2" }).some((x) => x.code === "invariant"), false, "T10 faisceau : A ≠ B → OK");

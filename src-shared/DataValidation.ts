@@ -777,6 +777,22 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
         const bothPower = (da === "source" || da === "sink") && (db === "source" || db === "sink");
         return (bothPower && da === db) ? { path: "to_port_id", message: "Un câble d'alimentation relie une source à un sink (pas deux prises de même sens)." } : null;
       },
+      // T9b : un câble d'ÉNERGIE relie deux ports de MÊME GENRE — power↔power ou PoE↔PoE, jamais poe↔power. Même
+      //       prédicat `bothPower` que T9 (les deux ports ont un sens power). Un lien PSE PoE (poe+source) ↔ inlet
+      //       secteur (power+sink) passerait T9 (source ≠ sink) mais ferait FUITER le port PoE dans le graphe SECTEUR :
+      //       isFedSink / rootSourcesOf / downstreamLeafSinks ne filtrent PAS le rôle de l'AUTRE extrémité → charges
+      //       faussées, faux « non alimenté ». On l'interdit à l'écriture (front + serveur/import). Le rejeu au
+      //       changement de rôle/direction d'un port DÉJÀ câblé est assuré par les dependents ports→cables (V5b, ci-dessous).
+      (cable, fetch) => {
+        if (!cable.from_port_id || !cable.to_port_id) return null;
+        const a = fetch("ports", cable.from_port_id), b = fetch("ports", cable.to_port_id);
+        if (!a || !b) return null;
+        const da = a.direction, db = b.direction;
+        const bothPower = (da === "source" || da === "sink") && (db === "source" || db === "sink");
+        return (bothPower && (a.role === "poe") !== (b.role === "poe"))
+          ? { path: "to_port_id", message: "Un câble d'énergie relie deux ports de même genre (power↔power ou PoE↔PoE)." }
+          : null;
+      },
     ],
     scope: [
       // PORTÉE (V6b) : 1 câble par port — aucun AUTRE câble ne référence ce port (côté `from` OU `to`).
@@ -837,6 +853,14 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       { path: "network_id", message: "Le réseau principal doit faire partie des réseaux du port.", holds: (p) => !p.network_id || (Array.isArray(p.network_ids) && p.network_ids.includes(p.network_id)) },
       // T8 : une phase ne se déclare que sur un départ (source) — pas sur un sink.
       { path: "phase", message: "La phase ne s'applique qu'à un port source (départ).", holds: (p) => !p.phase || p.direction === "source" },
+      // T12 : la DIRECTION (source/sink) ne se déclare que sur un port d'ÉNERGIE (rôle power ou poe). Sans ça, un port
+      //       de rôle « data » avec une direction résiduelle écrite par API/import devient un faux départ / une fausse
+      //       charge SECTEUR : PowerAnalysis.eqPortsByDir sélectionne les ports par `direction` en n'excluant QUE le
+      //       rôle "poe" (le PoE vit sur son propre graphe) — un data+source passerait donc pour un départ secteur.
+      //       Rôles en DUR ici : la source de vérité PortRoles vit côté client et n'est pas importable (shared/ est
+      //       auto-suffisant) ; leurs ids ("power"/"poe") sont STABLES. L'UI neutralise déjà la direction au save
+      //       (EquipmentForms, au changement de rôle) — cette règle ferme le même trou côté serveur/import.
+      { path: "direction", message: "La direction (source/sink) ne se déclare que sur un port d'énergie (rôle power ou poe).", holds: (p) => !p.direction || p.role === "power" || p.role === "poe" },
     ],
     crossEntity: [
       // T2 : un port-lane et son port PARENT (breakout) appartiennent au même équipement.
