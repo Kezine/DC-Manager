@@ -4,7 +4,7 @@
    management and the "Clusters" sub-tab. Aggregated by `../en.ts`. */
 export const vm = {
   common: {
-    noProvider: "No provider configured for this document (vm-providers.json).",
+    noProvider: "No provider configured for this document.",
     pveVersion: "PVE {{version}}",
     versionUnknown: "Unknown version",
     rangeSupported: "Supported range",
@@ -112,7 +112,7 @@ export const vm = {
   clusters: {
     loading: "Loading cluster state…",
     unavailable: "State unavailable — {{detail}}",
-    intro: "State of synchronised clusters, per provider (read from vm-providers.json server-side). Read-only — the state lives in server memory and is pulled on demand.",
+    intro: "State of synchronised clusters, per provider (configured server-side). Read-only — the state lives in server memory and is pulled on demand.",
     mgmtBtn: "Management ↗",
     mgmtTitle: "Open the cluster management tool (Proxmox Datacenter Manager)",
     periodAuto: "automatic · every {{n}} s",

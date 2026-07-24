@@ -49,8 +49,8 @@ const live = new LiveBus(log.child("live"));
 const notify = NotifyModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("notify") });
 // Inventaire VM (Proxmox…) : providers PAR DOCUMENT. Clé DCMANAGER_SECRETS_KEY présente (SecretBox
 // partagé — clé UNIQUE, sans repli depuis le 2026-07-20) → stockage DB chiffré (DOCS_DIR/vm-providers.db,
-// même driver better-sqlite3 injecté que DocumentStore) + CRUD ;
-// absente → fichier legacy DOCS_DIR/vm-providers.json en lecture seule (cf. VmModule).
+// même driver better-sqlite3 injecté que DocumentStore) + CRUD, seule source de config ;
+// absente → module inactif (toutes les routes en 503 « définir DCMANAGER_SECRETS_KEY… », cf. VmModule).
 // PONT vers notify (typage STRUCTUREL — vm/ n'importe RIEN de notify/, les deux features restent
 // amovibles) : chaque échec de synchro persistant est signalé (raise) au module notifications, chaque
 // retour à la normale le clôt (resolve). L'anti-spam/rappels vit ENTIÈREMENT côté notify (no-op si

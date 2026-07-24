@@ -5,7 +5,6 @@ import { RequestAuthor, type ApiExtension } from "../api.js";   // RequestAuthor
 import type { DocumentStore } from "../documents.js";
 import type { SqliteCtor } from "../db.js";
 import { Logger } from "../logger.js";
-import { ProviderConfigStore } from "./ProviderConfigStore.js";
 import { ProviderConfigDb } from "./ProviderConfigDb.js";
 import { ProviderConfigError } from "./ProviderConfigValidate.js";
 import { SecretBox } from "../SecretBox.js";
@@ -20,18 +19,17 @@ import { VmStatusEnrichment } from "./VmStatusEnrichment.js";
    Suppression de la feature = retirer le câblage VmModule d'index.ts et le
    dossier vm/ — le cœur (api/db/documents/live) n'importe RIEN d'ici.
 
-   CHOIX DU SUPPORT DE STOCKAGE (cadrage UI providers 2026-07-14), selon la
-   présence de la clé de chiffrement `DCMANAGER_SECRETS_KEY` (SecretBox serveur
-   partagé — clé UNIQUE, sans repli depuis le 2026-07-20, cf. SecretBox) :
-   - clé PRÉSENTE → stockage DB chiffré (`ProviderConfigDb`, vm-providers.db) +
-     migration du fichier legacy au démarrage ; routes CRUD/test ACTIVES.
-   - clé ABSENTE → comportement LEGACY (fichier `vm-providers.json`, lecture
-     seule) : synchro/statut fonctionnent, mais les routes CRUD répondent 503
-     explicite (« définir DCMANAGER_SECRETS_KEY… ») — les déploiements sans clé
-     gardent le comportement actuel, sans gestion des providers.
-   - clé ABSENTE **mais** `vm-providers.db` PRÉSENTE → module « en erreur »
-     explicite (pas de silence) : des jetons chiffrés existent sans clé pour les
-     lire — l'opérateur doit fournir la clé.
+   SUPPORT DE STOCKAGE UNIQUE (base chiffrée `ProviderConfigDb`, vm-providers.db),
+   conditionné à la présence de la clé de chiffrement `DCMANAGER_SECRETS_KEY`
+   (SecretBox serveur partagé — clé UNIQUE, sans repli depuis le 2026-07-20, cf.
+   SecretBox). Le mode fichier legacy `vm-providers.json` a été RETIRÉ le
+   2026-07-24 (il maintenait des jetons EN CLAIR sur disque) — la clé est donc
+   REQUISE pour toute la feature (synchro/statut ET CRUD) :
+   - clé PRÉSENTE → stockage DB chiffré ; synchro/statut + routes CRUD/test ACTIVES.
+   - clé ABSENTE → module « clé manquante » : `service` null, TOUTES les routes
+     répondent 503 ACTIONNABLE (« définir DCMANAGER_SECRETS_KEY… »). Si une
+     `vm-providers.db` existe DÉJÀ sans clé, le message est ENRICHI (base chiffrée
+     présente sans clé — l'opérateur doit fournir la clé pour déchiffrer les jetons).
 
    Routes (montées sous la garde d'accès de l'API, mergeParams pour :docId) :
    - POST   /documents/:docId/vm/sync           → synchronise TOUS les providers
@@ -62,7 +60,7 @@ export class VmModule {
     private readonly providerDb: ProviderConfigDb | null,
     /** Message d'erreur de chargement de la config (null = config saine ou absente). */
     private readonly configError: string | null,
-    /** Vrai quand la clé de chiffrement est absente → les routes CRUD répondent 503 « définir la clé ». */
+    /** Vrai quand la clé de chiffrement est absente → TOUTES les routes répondent 503 « définir la clé ». */
     private readonly keyMissing: boolean,
     private readonly log: Logger,
   ) {}
@@ -72,12 +70,10 @@ export class VmModule {
     // Coffre PARTAGÉ (clé unique DCMANAGER_SECRETS_KEY ; aucun repli — cf. SecretBox).
     const box = SecretBox.fromEnv(process.env);
 
-    // ---- Clé PRÉSENTE : stockage DB chiffré + migration legacy au démarrage. ----
+    // ---- Clé PRÉSENTE : stockage DB chiffré (UNIQUE source de config). ----
     if (box) {
       try {
         const providerDb = new ProviderConfigDb(opts.dataDir, opts.sqlite, box, log);
-        // Migration one-shot du fichier legacy s'il existe (idempotente : renomme puis n'y touche plus).
-        providerDb.importLegacyFile();
         // On re-passe EXPLICITEMENT les défauts des positions 5-6 (fabrique d'adaptateur + délai
         // anti-rafale) pour atteindre le 7e paramètre positionnel `problems` : comportement inchangé,
         // seul le rapporteur de problèmes (optionnel, injecté au bootstrap) est ajouté.
@@ -91,26 +87,18 @@ export class VmModule {
       }
     }
 
-    // ---- Clé ABSENTE mais base chiffrée PRÉSENTE : erreur EXPLICITE (pas de silence). ----
+    // ---- Clé ABSENTE : module « clé manquante ». La feature est ENTIÈREMENT désactivée (le mode
+    // fichier legacy a été retiré) : toutes les routes répondent 503 actionnable. Le message est
+    // ENRICHI si une vm-providers.db existe DÉJÀ sans clé (des jetons chiffrés attendent la clé). ----
     const dbPath = path.join(opts.dataDir, PROVIDERS_DB_FILE);
     if (fs.existsSync(dbPath)) {
-      const message = PROVIDERS_DB_FILE + " présent mais aucune clé de chiffrement (" + SecretBox.ENV_VAR + ") — définissez la clé pour déchiffrer les jetons stockés";
+      const message = PROVIDERS_DB_FILE + " présent mais aucune clé de chiffrement (" + SecretBox.ENV_VAR
+        + ") — base chiffrée présente sans clé : définissez la clé pour déchiffrer les jetons stockés";
       log.error("module VM en erreur : base chiffrée présente sans clé", message);
       return new VmModule(opts.docs, null, null, message, true, log);
     }
-
-    // ---- Clé ABSENTE : comportement LEGACY (fichier, lecture seule) ; CRUD → 503 « définir la clé ». ----
-    try {
-      const providers = new ProviderConfigStore(opts.dataDir, log);
-      // Défauts des positions 5-6 re-passés pour injecter le rapporteur (cf. chemin DB chiffrée ci-dessus).
-      const service = new VmSyncService(opts.docs, opts.live, providers, log, VmSyncService.adapterFor, VmSyncService.DEFAULT_MIN_INTERVAL_SEC, opts.problems);
-      log.info("module VM prêt (fichier legacy, lecture seule — CRUD désactivé faute de clé)", "node " + process.version);
-      return new VmModule(opts.docs, service, null, null, true, log);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      log.error("config des providers VM (fichier legacy) invalide — module démarré en erreur (synchro désactivée)", message);
-      return new VmModule(opts.docs, null, null, message, true, log);
-    }
+    log.info("module VM inactif : aucune clé de chiffrement (" + SecretBox.ENV_VAR + ") — configuration des providers indisponible");
+    return new VmModule(opts.docs, null, null, null, true, log);
   }
 
   /** Démarre les synchros périodiques (no-op si config en erreur/absente). */
@@ -130,7 +118,7 @@ export class VmModule {
     router.post("/sync", (req, res) => {
       const docId = (req.params as any).docId as string;
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
-      if (!this.service) { res.status(503).json({ error: "configuration des providers invalide", detail: this.configError }); return; }
+      if (!this.service) { this.respondUnavailable(res); return; }
       this.service.syncDocument(docId)
         // Enrichissement : les providers au jeton indéchiffrable sont EXCLUS de la synchro (donc
         // absents du résultat) — on les réinjecte en erreur pour qu'ils restent visibles côté UI.
@@ -145,7 +133,7 @@ export class VmModule {
     router.get("/status", (req, res) => {
       const docId = (req.params as any).docId as string;
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
-      if (!this.service) { res.status(503).json({ error: "configuration des providers invalide", detail: this.configError }); return; }
+      if (!this.service) { this.respondUnavailable(res); return; }
       // Enrichissement : statusFor s'appuie sur providersFor, qui EXCLUT les providers au jeton
       // indéchiffrable (clé DCMANAGER_SECRETS_KEY changée) → sans ce complément ils disparaîtraient
       // silencieusement de la vue Clusters (l'incident corrigé). On les réinjecte en erreur.
@@ -252,19 +240,25 @@ export class VmModule {
     return VmStatusEnrichment.withTokenErrors(statuses, this.providerDb.tokenErrorsFor(docId), this.providerDb.listFor(docId));
   }
 
-  /** Renvoie le backend CRUD (stockage DB) OU répond 503 et renvoie null. Deux 503 distincts :
-      - clé ABSENTE → « définir DCMANAGER_SECRETS_KEY… » (guidance actionnable) ;
-      - module en erreur (clé présente mais DB/config KO) → le détail de l'erreur. */
+  /** Renvoie le backend CRUD (stockage DB) OU répond 503 (via respondUnavailable) et renvoie null. */
   private crudBackend(res: express.Response): ProviderConfigDb | null {
     if (this.providerDb) return this.providerDb;
+    this.respondUnavailable(res);
+    return null;
+  }
+
+  /** Écrit le 503 approprié quand la feature est indisponible (aucun service/backend). Deux cas :
+      - clé ABSENTE (keyMissing) → 503 ACTIONNABLE « définir DCMANAGER_SECRETS_KEY… », enrichi du
+        détail « base chiffrée présente sans clé… » quand une vm-providers.db existe déjà (configError) ;
+      - module en erreur (clé présente mais DB/config KO) → le détail de l'erreur de chargement. */
+  private respondUnavailable(res: express.Response): void {
     if (this.keyMissing) {
       res.status(503).json({
         error: "gestion des providers désactivée",
-        detail: "définir " + SecretBox.ENV_VAR + " (passphrase de chiffrement des secrets) pour activer la configuration des providers",
+        detail: this.configError || ("définir " + SecretBox.ENV_VAR + " (passphrase de chiffrement des secrets) pour activer la configuration des providers"),
       });
-      return null;
+      return;
     }
     res.status(503).json({ error: "configuration des providers invalide", detail: this.configError });
-    return null;
   }
 }

@@ -44,13 +44,12 @@ Idempotence de bout en bout : un inventaire inchangé ne produit **aucune**
 | `PveHttpPool.ts` | **Pool de nœuds** avec bascule sur défaillance de joignabilité (jamais sur une erreur applicative) et préférence collante (le nœud mort ne coûte son délai qu'une fois par passe). |
 | `ProxmoxParse.ts` | Décodage PUR des réponses JSON (chaînes `netN` QEMU/LXC, `/cluster/resources` → VMs ET nœuds, `/cluster/status` → nom + quorate, config, guest-agent). TOLÉRANT : clé inconnue ignorée, valeur manquante → null, jamais de throw. |
 | `ProxmoxAdapter.ts` | Orchestration des appels (`/cluster/status` → nom + quorate, `/cluster/resources` SANS filtre → VMs + nœuds, `/version` → version + gamme, configs, agent pour les QEMU allumées). HTTP **injecté** (`PveJsonClient`) → testable par stub. Échec d'une config individuelle ou d'une métadonnée cluster (quorum/version) toléré ; seul l'échec de l'inventaire de masse rejette. |
-| `ProviderConfigStore.ts` | Parseur/validation du fichier **LEGACY** `vm-providers.json` (lecture seule, cf. « Configuration »). Délègue la validation par provider à `ProviderConfigValidate`. Sert de source tant que la clé de chiffrement est absente, et alimente la migration vers la DB. |
-| `ProviderConfigValidate.ts` | Validation PURE d'UN provider (id/kind/token requis, pool d'urls https + empreintes par nœud + doublons, include_lxc/interval_sec/timeout_sec avec défauts) — PARTAGÉE par le parseur legacy ET le CRUD DB (messages d'erreur IDENTIQUES, zéro duplication). Le token n'apparaît jamais dans un message. |
+| `ProviderConfigValidate.ts` | Validation PURE d'UN provider (id/kind/token requis, pool d'urls https + empreintes par nœud + doublons, include_lxc/interval_sec/timeout_sec avec défauts) — utilisée par le CRUD DB (messages d'erreur uniques, zéro duplication). Le token n'apparaît jamais dans un message. |
 | `../SecretBox.ts` | Coffre de chiffrement des secrets AU REPOS — module serveur **PARTAGÉ** (hors de `vm/`, réutilisé par `notify/`) : AES-256-GCM (authentifié), clé = SHA-256 de la passphrase d'env `DCMANAGER_SECRETS_KEY` (**clé UNIQUE, sans repli** depuis le 2026-07-20), IV aléatoire 12 o, format versionné `v1:<iv>:<tag>:<ct>` (base64). Aucun secret (passphrase/clé/jeton) dans un log ou une erreur. Limites assumées + clé perdue = jetons à ressaisir (cf. « Configuration »). |
-| `ProviderConfigDb.ts` | Stockage DB chiffré (`vm-providers.db`, tables typées `vm_providers` + `vm_provider_endpoints` ordonnées, jetons `token_enc`). Deux surfaces : LECTURE synchro (`providersFor`/`configuredDocIds`) ET CRUD sans fuite de jeton (`listFor`/`save`/`remove`/`buildForTest` — `has_token` seul, jamais le jeton). Migre le fichier legacy au démarrage. Driver SQLite injecté. |
+| `ProviderConfigDb.ts` | Stockage DB chiffré (`vm-providers.db`, tables typées `vm_providers` + `vm_provider_endpoints` ordonnées, jetons `token_enc`) — **UNIQUE source de config**. Deux surfaces : LECTURE synchro (`providersFor`/`configuredDocIds`) ET CRUD sans fuite de jeton (`listFor`/`save`/`remove`/`buildForTest` — `has_token` seul, jamais le jeton). Driver SQLite injecté. |
 | `VmReconcile.ts` | Moteur de réconciliation PUR (clé `ext_id`, périmètre = une instance de provider). Frontière source/locaux, orphelines jamais supprimées, patchs minimaux. Dépendances injectées (résolution d'hôte, id, horloge). |
 | `VmSyncService.ts` | Exécution d'une synchro + statut mémoire par doc×provider + timers périodiques (`interval_sec`, anti-chevauchement, `unref`). Sans Express (bus live vu par interface) → testé de bout en bout. `rearmTimers()` relit la config à chaud après une écriture CRUD. **Producteur `vm-sync-failure`** : sur une VRAIE passe (hors sorties anticipées « déjà en cours »/anti-rafale), un échec `raise` et un succès `resolve` un problème persistant AUPRÈS DU MODULE NOTIFICATIONS, via l'interface OPTIONNELLE `ProblemReporter` injectée au bootstrap (typage structurel — `vm/` n'importe rien de `notify/`). Clé stable `vm-sync:<docId>:<providerId>` ; AUCUN comptage/anti-spam ici (rappels et déduplication côté notify — cf. [`docs/notifications.md`](notifications.md)). |
-| `VmModule.ts` | Façade : routes REST (sync/status + CRUD/test des providers) + assemblage. Choisit le support de stockage selon `DCMANAGER_SECRETS_KEY` : DB chiffrée si présente (CRUD actif), fichier legacy sinon (CRUD en **503** explicite). Config invalide → module « en erreur » (503 détaillé) sans faire tomber le serveur ; ré-arme les timers après chaque écriture. |
+| `VmModule.ts` | Façade : routes REST (sync/status + CRUD/test des providers) + assemblage. Le stockage est la DB chiffrée `vm-providers.db`, conditionnée à `DCMANAGER_SECRETS_KEY` : clé présente → feature ACTIVE ; clé absente → module « clé manquante », **TOUTES** les routes en **503** actionnable (« définir DCMANAGER_SECRETS_KEY… »). Config invalide → module « en erreur » (503 détaillé) sans faire tomber le serveur ; ré-arme les timers après chaque écriture. |
 
 **Branchement au cœur** : point d'extension GÉNÉRIQUE `ApiExtension`
 (`api.ts` — montage sous la garde d'accès, avant la route `/:collection`) ;
@@ -68,9 +67,10 @@ Endpoints (mode API uniquement) :
 - `DELETE …/vm/providers/:id` → supprimer un provider (cascade de ses endpoints) ;
 - `POST   …/vm/providers/test` → tester une config CANDIDATE (jeton vide + id existant = reprend le stocké) → `ProviderInfo` (ok/version/gamme/message).
 
-Les quatre routes `providers` répondent **503** explicite si `DCMANAGER_SECRETS_KEY` est absente
-(gestion CRUD désactivée — cf. « Configuration des providers »). Toute écriture ré-arme les
-timers de synchro à chaud (`rearmTimers`), sans redémarrage.
+**TOUTES** ces routes (synchro/statut ET CRUD/test) répondent **503** actionnable si
+`DCMANAGER_SECRETS_KEY` est absente (feature entièrement désactivée — cf. « Configuration des
+providers ») : la clé est REQUISE pour toute la feature. Toute écriture ré-arme les timers de
+synchro à chaud (`rearmTimers`), sans redémarrage.
 
 ### Partagé (`src-shared/VmSync.ts`)
 
@@ -184,19 +184,23 @@ d'action d'équipement (suppression, etc.) sur un nœud vm/net.
 
 La configuration est **par document** (chaque document = une infrastructure) et
 vit **côté serveur** — jamais dans le document (répliqué aux clients), pour que
-les jetons ne quittent pas le serveur. Elle se fait par l'**UI** (modale
-« Providers… » du sous-onglet Clusters) ; le stockage de référence est la base
-chiffrée `vm-providers.db`. Le fichier `vm-providers.json` d'origine devient un
-format **legacy** (lu sans clé, migré automatiquement quand la clé est présente).
+les jetons ne quittent pas le serveur. Elle se fait EXCLUSIVEMENT par l'**UI**
+(modale « Providers… » du sous-onglet Clusters) ; le stockage est la base
+chiffrée `vm-providers.db`, **UNIQUE source de configuration**. La clé
+`DCMANAGER_SECRETS_KEY` est donc **REQUISE** pour toute la feature (cf. « Rupture »
+ci-dessous).
 
-> **État (fait — décidé 2026-07-13, livré 2026-07-14)** : la config est passée du
-> fichier JSON transitoire v1 à une **DB à colonnes typées** avec jetons chiffrés
-> au repos et édition par l'UI. *Historique* : `vm-providers.json` était le
-> transitoire v1 (pas d'UI, modification → redémarrage) ; l'API `providersFor(docId)`
-> ayant toujours isolé le reste du module du support de stockage, seul le backend
-> de config a changé (ajout de `ProviderConfigDb`/`SecretBox`, extraction de
-> `ProviderConfigValidate`), en cohérence avec la direction relationnelle de
-> [`persistance.md`](persistance.md).
+> **RUPTURE (2026-07-24) — retrait du mode fichier legacy** : le fichier
+> `vm-providers.json` (format transitoire v1, jusque-là lu sans clé puis migré
+> automatiquement vers la DB) a été **entièrement retiré** du code — il maintenait
+> des jetons EN CLAIR sur disque, en contradiction directe avec la promesse « un
+> backup n'expose aucun jeton » (la migration renommait certes le fichier en
+> `.imported-<date>` mais laissait les jetons clairs indéfiniment). La base chiffrée
+> `vm-providers.db` est désormais l'**unique** source de config. **Conséquence pour un
+> déploiement encore sur le fichier** : définir `DCMANAGER_SECRETS_KEY` puis
+> **(re)saisir les providers via l'UI** — le fichier n'est PLUS JAMAIS lu. S'il reste
+> un `vm-providers.json` (ou un `vm-providers.json.imported-*`) sur disque, le
+> **SUPPRIMER** manuellement (il porte des jetons en clair).
 
 ### Stockage de référence : `vm-providers.db` (chiffré)
 
@@ -235,7 +239,7 @@ quel par la liste et l'enregistrement (aucune réserve, contrairement au jeton).
   variable en `DCMANAGER_SECRETS_KEY` (même valeur → même dérivation SHA-256,
   donc les jetons déjà stockés restent déchiffrables sans réécriture). Tant que le
   renommage n'est pas fait, les features à secrets se comportent comme sans clé
-  (503 explicite / lecture seule du fichier legacy).
+  (503 explicite, feature désactivée).
 - **AES-256-GCM** (chiffrement *authentifié* : toute altération du stocké est
   détectée au déchiffrement), clé = **SHA-256 de la passphrase d'environnement**
   (dérivation qui normalise une passphrase libre en 32
@@ -251,16 +255,15 @@ quel par la liste et l'enregistrement (aucune réserve, contrairement au jeton).
 
 ### Clé absente / config invalide (503)
 
-- Clé **absente** : la gestion CRUD est désactivée — les routes `providers`
-  répondent **503** explicite (« définir `DCMANAGER_SECRETS_KEY`… ») et l'UI affiche un
-  bandeau actionnable au lieu des contrôles d'édition. Le fichier legacy (ci-après)
-  continue de fonctionner SEUL en lecture : les déploiements sans clé gardent le
-  comportement historique (synchro/statut, sans gestion des providers).
-- Clé absente **mais** `vm-providers.db` présente : module « en erreur » explicite
-  (des jetons chiffrés existent sans clé pour les lire — l'opérateur doit fournir
-  la clé). Pas de silence.
-- Config invalide (fichier legacy illisible, DB en erreur) : module « en erreur »,
-  routes en **503** avec le détail — visibilité opérateur sans faire tomber le reste.
+- Clé **absente** : la feature est ENTIÈREMENT désactivée (le mode fichier a été
+  retiré) — **TOUTES** les routes `vm` (synchro/statut ET CRUD/test) répondent **503**
+  actionnable (« définir `DCMANAGER_SECRETS_KEY`… ») et l'UI affiche un bandeau au lieu
+  des contrôles. Sans clé, ni inventaire ni gestion des providers n'est possible.
+- Clé absente **mais** `vm-providers.db` présente : module « en erreur » explicite,
+  message ENRICHI (« base chiffrée présente sans clé — définissez la clé pour déchiffrer
+  les jetons stockés »). Pas de silence.
+- Config invalide (DB en erreur) : module « en erreur », routes en **503** avec le
+  détail — visibilité opérateur sans faire tomber le reste.
 
 ### Dépannage — clé `DCMANAGER_SECRETS_KEY` CHANGÉE (jetons stockés indéchiffrables)
 
@@ -302,63 +305,23 @@ l'ANCIENNE valeur de `DCMANAGER_SECRETS_KEY` dans l'environnement du serveur, si
 elle est connue.) Aucune donnée du document n'est perdue entre-temps : les VMs déjà
 synchronisées restent en place, la synchro reprend une fois le jeton ressaisi.
 
-### Fichier `vm-providers.json` — format **LEGACY** (migré automatiquement)
+### Champs d'un provider (validation `ProviderConfigValidate`)
 
-Le fichier `vm-providers.json` (à côté de la base) reste pris en charge pour
-compatibilité, en LECTURE SEULE :
-
-- **sans clé** : encore LU tel quel (pas de CRUD) — comportement v1 inchangé ;
-- **dès que `DCMANAGER_SECRETS_KEY` est présente** : MIGRÉ automatiquement au démarrage
-  (chaque jeton chiffré au passage) puis fichier RENOMMÉ
-  `vm-providers.json.imported-<AAAA-MM-JJ>` (trace, plus jamais relu) — la DB
-  devient l'unique source. Idempotent (au 2ᵉ démarrage le fichier est déjà
-  renommé). Un document déjà présent en DB n'est pas ré-importé (on n'écrase pas
-  un jeton ressaisi via l'UI par une vieille valeur du fichier).
-
-Structure du fichier legacy (référence historique — l'édition passe par l'UI ;
-cf. [`vm-providers.sample.json`](vm-providers.sample.json)) :
-
-```json
-{
-  "<docId>": {
-    "docName": "libellé libre (ignoré — lisibilité du fichier)",
-    "providers": [
-      {
-        "id": "pve-prod",
-        "kind": "proxmox",
-        "urls": [
-          { "url": "https://pve1.example.lan:8006", "fingerprint": "AA:BB:…(SHA-256 du nœud 1)" },
-          { "url": "https://pve2.example.lan:8006", "fingerprint": "CC:DD:…(SHA-256 du nœud 2)" },
-          "https://pve3.example.lan:8006"
-        ],
-        "token": "sync@pve!inventaire=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-        "include_lxc": true,
-        "interval_sec": 0,
-        "timeout_sec": 15
-      }
-    ]
-  }
-}
-```
-
-### Champs d'un provider (UI et fichier legacy — mêmes règles, validation partagée)
-
-La validation est la MÊME des deux côtés (`ProviderConfigValidate`) — messages
-d'erreur identiques par l'UI (400 affichée telle quelle) et au chargement du fichier.
+La validation est assurée par `ProviderConfigValidate` (classe pure) — messages
+d'erreur identiques par l'UI (400 affichée telle quelle) et par le CRUD DB.
 
 - `id` : unique par document ; **immuable en édition** (clé de réconciliation des
   VMs — `ext_id` = `nomDuCluster/vmid`, repli : nom du nœud isolé puis id du provider).
 - `kind` : `proxmox` (seul type supporté par `VmSyncService.adapterFor`).
-- **Pool de nœuds** (`urls` dans le fichier ; éditeur ordonné dans l'UI) — palier à
-  la défaillance d'un nœud : l'API Proxmox répond sur chaque nœud, les endpoints
-  sont essayés dans l'ORDRE et le pool **bascule** quand un nœud est injoignable
-  (réseau, DNS, délai, TLS). La bascule ne s'applique JAMAIS à une erreur
-  applicative (authentification, statut HTTP) — elle échouerait à l'identique
-  partout. Préférence collante : le dernier nœud ayant répondu est réessayé en
-  premier, un nœud mort ne coûte donc son délai qu'une fois par passe (cf.
-  `PveHttpPool.ts`). *Fichier legacy* : entrée = objet `{ url, fingerprint? }` ou
-  chaîne (raccourci sans épinglage) ; raccourci mono-nœud `url` (+ `fingerprint`)
-  exclusif de `urls`. *UI* : n'émet que la forme pool (`urls`, empreinte par nœud).
+- **Pool de nœuds** (éditeur ordonné dans l'UI) — palier à la défaillance d'un
+  nœud : l'API Proxmox répond sur chaque nœud, les endpoints sont essayés dans
+  l'ORDRE et le pool **bascule** quand un nœud est injoignable (réseau, DNS, délai,
+  TLS). La bascule ne s'applique JAMAIS à une erreur applicative (authentification,
+  statut HTTP) — elle échouerait à l'identique partout. Préférence collante : le
+  dernier nœud ayant répondu est réessayé en premier, un nœud mort ne coûte donc son
+  délai qu'une fois par passe (cf. `PveHttpPool.ts`). L'UI émet la forme pool (`urls`,
+  empreinte par nœud) ; la validation partagée tolère aussi le raccourci mono-nœud
+  `url` (+ `fingerprint`), exclusif de `urls`.
 - **Confiance TLS — HIÉRARCHIE à 3 niveaux, décidée PAR ENDPOINT** (cf.
   `PveHttp.trustOptions`, du plus spécifique au plus général) :
   1. `fingerprint` de l'endpoint présent → **ÉPINGLAGE** : empreinte SHA-256 du
@@ -398,13 +361,14 @@ d'erreur identiques par l'UI (400 affichée telle quelle) et au chargement du fi
 ### Déploiement
 
 Ajouter **`DCMANAGER_SECRETS_KEY`** (une passphrase LONGUE) à l'environnement du
-serveur pour activer la gestion des providers par l'UI et le chiffrement des
-secrets au repos (clé UNIQUE partagée par tous les modules à secrets — VM,
-notifications). Les déploiements historiques qui n'ont que `VM_PROVIDERS_KEY`
-doivent **renommer** la variable en `DCMANAGER_SECRETS_KEY` (même valeur → même
-dérivation : le repli automatique a été **retiré le 2026-07-20**). Sans aucune
-clé : seule la lecture du fichier legacy fonctionne (pas de CRUD). **Clé perdue =
-jetons à ressaisir** (aucune récupération possible).
+serveur : elle est **REQUISE** pour toute la feature VM (inventaire ET gestion des
+providers par l'UI) et chiffre les secrets au repos (clé UNIQUE partagée par tous
+les modules à secrets — VM, notifications). Les déploiements historiques qui n'ont
+que `VM_PROVIDERS_KEY` doivent **renommer** la variable en `DCMANAGER_SECRETS_KEY`
+(même valeur → même dérivation : le repli automatique a été **retiré le 2026-07-20**).
+Sans clé : la feature est entièrement désactivée (toutes les routes en 503 actionnable ;
+le mode fichier legacy a été retiré le 2026-07-24). **Clé perdue = jetons à ressaisir**
+(aucune récupération possible).
 
 ## Gamme Proxmox supportée
 
@@ -447,8 +411,7 @@ fichiers dédiés ci-dessus).
    réconciliation et l'UI. Réutiliser le découpage Proxmox : client HTTP dédié,
    parsing PUR séparé (testable par fixtures), adaptateur d'orchestration.
 2. Déclarer le `kind` dans `VmSyncService.adapterFor` (fabrique par famille).
-3. Étendre `ProviderConfigValidate` si la config exige d'autres champs (la
-   validation partagée par le fichier legacy ET le CRUD DB ; les clés inconnues
-   sont déjà tolérées).
+3. Étendre `ProviderConfigValidate` si la config exige d'autres champs (validation
+   du CRUD DB ; les clés inconnues sont déjà tolérées).
 4. `ext_id` : choisir une identité STABLE côté provider (équivalent de
    `cluster/vmid`) — c'est la clé de réconciliation.

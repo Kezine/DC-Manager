@@ -107,9 +107,9 @@ export class PveHttp {
       anglophone — l'UTILISATEUR du statut de synchro doit comprendre QUOI FAIRE. Le message
       technique d'origine est conservé à la suite (diagnostic), la cible est toujours citée. */
   private static readonly ERROR_EXPLANATIONS: { [code: string]: string } = {
-    UNABLE_TO_VERIFY_LEAF_SIGNATURE: "certificat TLS non reconnu (certificat auto-signé Proxmox ?) — épinglez l'empreinte SHA-256 de CE nœud dans vm-providers.json (champ « fingerprint », visible dans l'UI Proxmox : nœud → Système → Certificats)",
-    DEPTH_ZERO_SELF_SIGNED_CERT: "certificat TLS auto-signé — épinglez l'empreinte SHA-256 de CE nœud (champ « fingerprint » de vm-providers.json)",
-    SELF_SIGNED_CERT_IN_CHAIN: "chaîne TLS auto-signée — épinglez l'empreinte SHA-256 de CE nœud (champ « fingerprint » de vm-providers.json)",
+    UNABLE_TO_VERIFY_LEAF_SIGNATURE: "certificat TLS non reconnu (certificat auto-signé Proxmox ?) — épinglez l'empreinte SHA-256 de CE nœud dans le formulaire Providers (champ « Empreinte » de l'endpoint ; l'empreinte est visible dans l'UI Proxmox : nœud → Système → Certificats)",
+    DEPTH_ZERO_SELF_SIGNED_CERT: "certificat TLS auto-signé — épinglez l'empreinte SHA-256 de CE nœud (champ « Empreinte » de l'endpoint, formulaire Providers)",
+    SELF_SIGNED_CERT_IN_CHAIN: "chaîne TLS auto-signée — épinglez l'empreinte SHA-256 de CE nœud (champ « Empreinte » de l'endpoint, formulaire Providers)",
     CERT_HAS_EXPIRED: "certificat TLS EXPIRÉ sur le nœud — renouvelez-le côté Proxmox, ou épinglez la nouvelle empreinte",
     ERR_TLS_CERT_ALTNAME_INVALID: "le certificat du nœud ne couvre pas ce nom d'hôte — utilisez le nom porté par le certificat, ou épinglez l'empreinte",
     ECONNREFUSED: "connexion refusée par l'hôte (pveproxy arrêté ? port 8006 fermé ?)",

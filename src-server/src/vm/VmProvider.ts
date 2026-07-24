@@ -141,9 +141,9 @@ export interface ProviderEndpoint {
   fingerprint: string | null;
 }
 
-/** Configuration d'UNE instance d'adaptateur (un cluster) — chargée d'un fichier CÔTÉ SERVEUR
-    (vm-providers.json, cf. ProviderConfigStore) : les secrets ne transitent JAMAIS par le
-    document (répliqué à tous les clients) ni par l'API de consultation. */
+/** Configuration d'UNE instance d'adaptateur (un cluster) — stockée CÔTÉ SERVEUR (base chiffrée
+    `vm-providers.db`, cf. ProviderConfigDb) : les secrets ne transitent JAMAIS par le document
+    (répliqué à tous les clients) ni par l'API de consultation. */
 export interface ProviderConfig {
   /** Identifiant unique de l'instance (référencé par VmRecord.provider_id et l'état de synchro). */
   id: string;
@@ -183,10 +183,10 @@ export interface ProviderConfig {
 }
 
 /** SOURCE de configuration des providers vue par le moteur de synchro (VmSyncService) — le
-    strict minimum dont il a besoin, INDÉPENDAMMENT du support de stockage. Deux implémentations :
-    `ProviderConfigStore` (fichier legacy `vm-providers.json`, lecture seule) et `ProviderConfigDb`
-    (base `vm-providers.db`, jetons chiffrés + CRUD). VmSyncService ne dépend QUE de ce contrat :
-    basculer fichier ↔ DB (cf. VmModule selon la présence de la clé) ne le touche pas. */
+    strict minimum dont il a besoin, INDÉPENDAMMENT du support de stockage. Implémentation de
+    production UNIQUE : `ProviderConfigDb` (base chiffrée `vm-providers.db`, jetons chiffrés + CRUD) ;
+    les tests injectent un stub minimal. VmSyncService ne dépend QUE de ce contrat — le support de
+    stockage réel ne le touche jamais. */
 export interface ProviderConfigSource {
   /** Providers configurés pour un document (jetons EN CLAIR, prêts pour l'adaptateur). Document
       non configuré → `[]` (feature dormante pour CE document). */

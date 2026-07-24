@@ -89,8 +89,8 @@ export class VmSyncService {
   constructor(
     private readonly docs: DocumentStore,
     private readonly live: VmLivePublisher,
-    // SOURCE de config vue par CONTRAT (ProviderConfigSource) : fichier legacy (ProviderConfigStore)
-    // OU base chiffrée (ProviderConfigDb) — le moteur ignore le support de stockage.
+    // SOURCE de config vue par CONTRAT (ProviderConfigSource) : base chiffrée (ProviderConfigDb) en
+    // production, stub minimal en test — le moteur ignore le support de stockage.
     private readonly providers: ProviderConfigSource,
     private readonly log: Logger = new Logger("error"),
     /** Fabrique d'adaptateur INJECTÉE (stub en test). Défaut : par `kind` de la config. */

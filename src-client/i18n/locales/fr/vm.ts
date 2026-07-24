@@ -8,7 +8,7 @@
    `running`/`stopped`, ids de kinds) ne sont JAMAIS localisées : hors périmètre. */
 export const vm = {
   common: {
-    noProvider: "Aucun provider configuré pour ce document (vm-providers.json).",
+    noProvider: "Aucun provider configuré pour ce document.",
     pveVersion: "PVE {{version}}",
     versionUnknown: "Version inconnue",
     rangeSupported: "Gamme supportée",
@@ -116,7 +116,7 @@ export const vm = {
   clusters: {
     loading: "Chargement de l'état des clusters…",
     unavailable: "État indisponible — {{detail}}",
-    intro: "État des clusters synchronisés, par provider (lu dans vm-providers.json côté serveur). Lecture seule — l'état vit en mémoire serveur et est tiré à la demande.",
+    intro: "État des clusters synchronisés, par provider (configurés côté serveur). Lecture seule — l'état vit en mémoire serveur et est tiré à la demande.",
     mgmtBtn: "Management ↗",
     mgmtTitle: "Ouvrir l'outil de management du cluster (Proxmox Datacenter Manager)",
     periodAuto: "automatique · toutes les {{n}} s",

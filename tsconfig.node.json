@@ -16,14 +16,11 @@
     // (fixtures JSON → VmRecord). Seul ce fichier est émis dans dist-test/ ; VmProvider.ts n'est
     // qu'un import de TYPES (erased), pas de dépendance runtime.
     "src-server/src/vm/ProxmoxParse.ts",
-    // Chargement/validation de la config des providers VM — la méthode PURE `parse` (string → map
-    // validée) est testée sans filesystem ; l'import `../logger.js` (transitif) est déjà compilé via documents.ts.
-    "src-server/src/vm/ProviderConfigStore.ts",
-    // Validation PAR PROVIDER extraite (classe PURE partagée fichier legacy ↔ CRUD DB) — mêmes
-    // messages d'erreur des deux côtés, testée en isolation (parseProvider + libellés).
+    // Validation PAR PROVIDER (classe PURE) — messages d'erreur uniques, testée en isolation
+    // (parseProvider + libellés) ; l'import `../logger.js` (transitif) est déjà compilé via documents.ts.
     "src-server/src/vm/ProviderConfigValidate.ts",
-    // Stockage DB des providers (vm-providers.db, jetons chiffrés via SecretBox) — CRUD + lecture
-    // pour la synchro + migration du fichier legacy ; testé avec better-sqlite3 RÉEL (driver injecté).
+    // Stockage DB des providers (vm-providers.db, jetons chiffrés via SecretBox) — UNIQUE source de
+    // config : CRUD + lecture pour la synchro ; testé avec better-sqlite3 RÉEL (driver injecté).
     "src-server/src/vm/ProviderConfigDb.ts",
     // Adaptateur Proxmox — l'ORCHESTRATION est testée avec un client HTTP stub (PveJsonClient
     // injecté) ; PveHttp (node:https) est compilé transitivement mais jamais sollicité en test.

@@ -178,8 +178,9 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   intégrité déportée dans la validation, coût des `find` par champ = full scan, `findBy` lean, direction
   RELATIONNELLE si on retouche la DB — pas JSONB).
 - [`vm-proxmox.md`](docs/vm-proxmox.md) — **inventaire VM Proxmox** (module serveur AMOVIBLE `vm/`,
-  pivot `VmRecord`, réconciliation source/locaux, providers PAR document `vm-providers.json`,
-  mapping bridge/tag → réseau, script de suppression, procédure d'ajout d'un provider).
+  pivot `VmRecord`, réconciliation source/locaux, providers PAR document dans `vm-providers.db`
+  chiffrée (clé `DCMANAGER_SECRETS_KEY` requise), mapping bridge/tag → réseau, script de suppression,
+  procédure d'ajout d'un provider).
 - [`notifications.md`](docs/notifications.md) — **service de notifications** (module serveur AMOVIBLE
   `notify/`, alertes persistantes anti-spam `raise`/`resolve`, moteur pur `NotifyEngine`, schéma
   `notify.db` à 5 tables, routage par abonnements, webhooks, coffre `SecretBox` partagé, producteurs

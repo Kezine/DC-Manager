@@ -508,158 +508,35 @@ module.exports = async () => {
   }
   });
 
-  /* ============ SERVEUR : ProviderConfigStore (config providers VM PAR DOCUMENT, module vm/ amovible) ============ */
-
-  await section("Serveur : ProviderConfigStore.parse — fichier valide multi-documents + défauts", async () => {
-  {
-    const { ProviderConfigStore } = SERVER("vm/ProviderConfigStore.js");
-    const fp64 = Array(32).fill("AB").join(":"); // 32 octets → 64 hex séparés par ':' (empreinte SHA-256 valide)
-    const valid = JSON.stringify({
-      "doc-A": {
-        docName: "Infra Paris (libellé libre, doit être IGNORÉ)",
-        providers: [
-          { id: "pve-paris", kind: "proxmox", url: "https://pve1.paris:8006", token: "root@pam!inv=UUID-1", fingerprint: fp64, include_lxc: false, interval_sec: 300 },
-          { id: "pve-paris-2", kind: "proxmox", url: "https://pve2.paris:8006", token: "root@pam!inv=UUID-2" },
-        ],
-      },
-      "doc-B": {
-        providers: [
-          { id: "pve-lyon", kind: "proxmox", url: "https://pve.lyon:8006", token: "svc@pve!ro=UUID-3", extraKeyInconnue: 42 },
-        ],
-      },
-    });
-    const map = ProviderConfigStore.parse(valid);
-    ck.eq(map.size, 2, "2 documents parsés");
-    const a = map.get("doc-A");
-    ck.eq(a.length, 2, "doc-A : 2 providers (multi-clusters dans un document)");
-    ck.eq(a[0].id, "pve-paris", "id conservé");
-    ck.eq(a[0].kind, "proxmox", "kind conservé");
-    // Raccourci MONO-NŒUD `url`/`fingerprint` → pool d'UN endpoint (l'empreinte suit l'entrée).
-    ck.eq(a[0].endpoints.length, 1, "raccourci url → pool d'un seul endpoint");
-    ck.eq(a[0].endpoints[0].url, "https://pve1.paris:8006", "url conservée (dans l'endpoint)");
-    ck.eq(a[0].endpoints[0].fingerprint, fp64, "fingerprint valide conservée TELLE QUELLE (PveHttp normalise à la comparaison)");
-    ck.eq(a[0].include_lxc, false, "include_lxc explicite (false) conservé");
-    ck.eq(a[0].interval_sec, 300, "interval_sec explicite (300) conservé");
-    // DÉFAUTS sur le 2e provider (rien fourni) : include_lxc true, interval_sec 0, fingerprint null, timeout 15 s.
-    ck.eq(a[1].include_lxc, true, "défaut include_lxc = true (décision de cadrage)");
-    ck.eq(a[1].interval_sec, 0, "défaut interval_sec = 0 (synchro manuelle)");
-    ck.eq(a[1].endpoints[0].fingerprint, null, "défaut fingerprint = null (validation CA système)");
-    ck.eq(a[1].timeout_sec, 15, "défaut timeout_sec = 15 s (parité avec l'ancien délai codé en dur)");
-    ck.eq(a[1].id, "pve-paris-2", "2e provider bien identifié");
-    // docName TOLÉRÉ et IGNORÉ : il n'apparaît pas dans les ProviderConfig produits.
-    ck(!("docName" in a[0]), "docName ignoré (absent des ProviderConfig)");
-    const b = map.get("doc-B");
-    ck.eq(b.length, 1, "doc-B : 1 provider");
-    ck(!("extraKeyInconnue" in b[0]), "clé inconnue au niveau provider TOLÉRÉE (ignorée, pas recopiée)");
-  }
-  });
-
-  await section("Serveur : ProviderConfigStore.parse — validation & erreurs explicites (token JAMAIS cité)", async () => {
-  {
-    const { ProviderConfigStore } = SERVER("vm/ProviderConfigStore.js");
-    const parseErr = (json) => { try { ProviderConfigStore.parse(json); return null; } catch (e) { return e.message; } };
-    // 1) Champ requis manquant → message citant docId + provider (id) + champ fautif.
-    const mUrl = parseErr(JSON.stringify({ "doc-X": { providers: [ { id: "p1", kind: "proxmox", token: "root@pam!t=UUID" } ] } }));
-    ck(!!mUrl, "champ manquant → lève");
-    ck(/doc-X/.test(mUrl) && /p1/.test(mUrl) && /url/.test(mUrl), "message cite docId + id du provider + champ « url »");
-    // 2) JSON invalide → message clair.
-    const badJson = parseErr("{ ceci n'est pas du json");
-    ck(!!badJson && /JSON invalide/.test(badJson), "JSON invalide → message explicite");
-    // 3) Racine non-objet → message clair.
-    ck(/racine/.test(parseErr("[]") || ""), "racine tableau refusée");
-    // 4) Doublon d'id dans un document → erreur citant l'id.
-    const dup = parseErr(JSON.stringify({ "doc-D": { providers: [
-      { id: "same", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U1" },
-      { id: "same", kind: "proxmox", url: "https://b:8006", token: "t@pam!x=U2" },
-    ] } }));
-    ck(!!dup && /double/.test(dup) && /same/.test(dup), "doublon d'id PAR document → erreur citant l'id");
-    // 5) fingerprint mal formée (hex mais mauvaise longueur) → erreur.
-    const badFp = parseErr(JSON.stringify({ "doc-F": { providers: [ { id: "pf", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U", fingerprint: "AA:BB:CC" } ] } }));
-    ck(!!badFp && /fingerprint/.test(badFp) && /pf/.test(badFp), "fingerprint mal formée → erreur citant le champ + l'id");
-    // 6) providers manquant / mal typé → erreur citant le document.
-    ck(/providers/.test(parseErr(JSON.stringify({ "doc-P": { docName: "x" } })) || ""), "champ « providers » manquant → erreur");
-    // 7) include_lxc non booléen / interval_sec négatif → erreurs de type.
-    ck(/include_lxc/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U", include_lxc: "oui" } ] } })) || ""), "include_lxc non booléen → erreur");
-    ck(/interval_sec/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U", interval_sec: -5 } ] } })) || ""), "interval_sec négatif → erreur");
-    // 8) SÉCURITÉ : le token n'apparaît JAMAIS dans un message d'erreur (assertion explicite).
-    const secret = "SUPER-SECRET-TOKEN=deadbeef-cafe-0000";
-    const leaky = parseErr(JSON.stringify({ "doc-S": { providers: [ { id: "ps", kind: "proxmox", token: secret /* url manquante → provoque une erreur */ } ] } }));
-    ck(!!leaky && !leaky.includes(secret), "le token n'apparaît JAMAIS dans le message d'erreur (secret non divulgué)");
-    ck(/ps/.test(leaky) && /url/.test(leaky), "le message cite l'id du provider et le champ fautif (pas le token)");
-  }
-  });
-
-  await section("Serveur : ProviderConfigStore.parse — POOL d'endpoints (urls, fingerprint par nœud, timeout)", async () => {
-  {
-    const { ProviderConfigStore } = SERVER("vm/ProviderConfigStore.js");
-    const parseErr = (json) => { try { ProviderConfigStore.parse(json); return null; } catch (e) { return e.message; } };
-    const fpA = Array(32).fill("AA").join(":"), fpB = Array(32).fill("BB").join(":");
-
-    // POOL valide : entrées objet (empreinte PAR nœud) et chaîne (raccourci sans épinglage), mélangées.
-    const pool = ProviderConfigStore.parse(JSON.stringify({ "doc-H": { providers: [
-      { id: "pve-ha", kind: "proxmox", token: "t@pam!x=U", timeout_sec: 5, urls: [
-        { url: "https://pve1:8006", fingerprint: fpA },
-        { url: "https://pve2:8006", fingerprint: fpB },
-        "https://pve3:8006",
-      ] },
-    ] } })).get("doc-H")[0];
-    ck.eq(pool.endpoints.length, 3, "pool de 3 endpoints parsé");
-    ck.eq(pool.endpoints[0].fingerprint, fpA, "empreinte du nœud 1 portée par SON entrée");
-    ck.eq(pool.endpoints[1].fingerprint, fpB, "empreinte du nœud 2 distincte (un certificat PAR nœud)");
-    ck.eq(pool.endpoints[2].fingerprint, null, "entrée chaîne = raccourci sans épinglage");
-    ck.eq(pool.timeout_sec, 5, "timeout_sec explicite conservé");
-
-    // Ambiguïtés et erreurs du pool.
-    ck(/exclusifs/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", token: "t@pam!x=U", url: "https://a:8006", urls: ["https://b:8006"] } ] } })) || ""),
-      "url ET urls ensemble → erreur (ambigu)");
-    ck(/interdit avec/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", token: "t@pam!x=U", fingerprint: fpA, urls: ["https://a:8006"] } ] } })) || ""),
-      "fingerprint GLOBAL avec urls → erreur (l'empreinte est par nœud)");
-    ck(/NON VIDE/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", token: "t@pam!x=U", urls: [] } ] } })) || ""),
-      "urls vide → erreur (au moins un endpoint)");
-    ck(/urls\[1\]/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", token: "t@pam!x=U", urls: ["https://a:8006", { fingerprint: fpA }] } ] } })) || ""),
-      "entrée de pool sans url → erreur citant la position urls[1]");
-    ck(/double/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", token: "t@pam!x=U", urls: ["https://a:8006", "https://a:8006"] } ] } })) || ""),
-      "url en double dans le pool → erreur (faute de frappe probable)");
-    ck(/urls\[0\]/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", token: "t@pam!x=U", urls: [{ url: "https://a:8006", fingerprint: "AA:BB" }] } ] } })) || ""),
-      "fingerprint mal formée DANS une entrée → erreur citant la position");
-    // timeout_sec invalide.
-    ck(/timeout_sec/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", token: "t@pam!x=U", url: "https://a:8006", timeout_sec: 0 } ] } })) || ""),
-      "timeout_sec 0 → erreur (entier >= 1 attendu)");
-    // URLs VALIDÉES AU CHARGEMENT (citées dans l'erreur) : sans schéma ou en http → refus explicite,
-    // plutôt qu'une erreur réseau cryptique à la première synchro (« contacte-t-on le bon serveur ? »).
-    const noScheme = parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", token: "t@pam!x=U", url: "pve1.lan:8006" } ] } }));
-    ck(!!noScheme && /pve1\.lan:8006/.test(noScheme) && /https/.test(noScheme), "url sans schéma → erreur au chargement, URL fautive citée");
-    ck(/https/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", token: "t@pam!x=U", urls: ["http://a:8006"] } ] } })) || ""),
-      "http:// refusé (pveproxy n'écoute qu'en TLS)");
-  }
-  });
+  /* ============ SERVEUR : ProviderConfigValidate (validation PAR PROVIDER — UNIQUE source de règles) ============ */
 
   await section("Serveur : ProviderConfigValidate — ca_pem (CA du cluster, publique) : défaut null, PEM validé, cumul avec le pin", async () => {
   {
-    const { ProviderConfigStore } = SERVER("vm/ProviderConfigStore.js");
-    const parse = (json) => ProviderConfigStore.parse(json);
-    const parseErr = (json) => { try { ProviderConfigStore.parse(json); return null; } catch (e) { return e.message; } };
+    const { ProviderConfigValidate } = SERVER("vm/ProviderConfigValidate.js");
+    // Valide UN provider : renvoie la config produite, ou null si une erreur a été poussée.
+    const parse = (raw) => { const errors = []; return ProviderConfigValidate.parseProvider("d", 0, raw, errors); };
+    const parseErr = (raw) => { const errors = []; ProviderConfigValidate.parseProvider("d", 0, raw, errors); return errors.length ? errors.join("\n") : null; };
     const caPem = "-----BEGIN CERTIFICATE-----\nMIIB...FAUX...\n-----END CERTIFICATE-----";
     const fpA = Array(32).fill("AA").join(":");
 
     // ABSENT → ca_pem null (défaut, validation par CA système au niveau 3).
-    const absent = parse(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U" } ] } })).get("d")[0];
+    const absent = parse({ id: "i", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U" });
     ck.eq(absent.ca_pem, null, "ca_pem absent → null (défaut : CA système)");
 
     // PRÉSENT et VALIDE (contient le marqueur PEM) → conservé tel quel.
-    const withCa = parse(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U", ca_pem: caPem } ] } })).get("d")[0];
+    const withCa = parse({ id: "i", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U", ca_pem: caPem });
     ck.eq(withCa.ca_pem, caPem, "ca_pem PEM valide → conservé tel quel");
 
     // CUMUL empreinte par endpoint + ca_pem AUTORISÉ (le pin prime par nœud, la CA sert de repli).
-    const both = parse(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", token: "t@pam!x=U", ca_pem: caPem,
-      urls: [ { url: "https://pve1:8006", fingerprint: fpA }, "https://pve2:8006" ] } ] } })).get("d")[0];
+    const both = parse({ id: "i", kind: "proxmox", token: "t@pam!x=U", ca_pem: caPem,
+      urls: [ { url: "https://pve1:8006", fingerprint: fpA }, "https://pve2:8006" ] });
     ck(both.ca_pem === caPem && both.endpoints[0].fingerprint === fpA, "cumul ca_pem + empreinte par endpoint AUTORISÉ (pin par nœud + CA de repli)");
 
     // PEM INVALIDE (chaîne sans le marqueur) → erreur citant le champ « ca_pem ».
-    const badPem = parseErr(JSON.stringify({ "d": { providers: [ { id: "pcx", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U", ca_pem: "pas un certificat" } ] } }));
+    const badPem = parseErr({ id: "pcx", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U", ca_pem: "pas un certificat" });
     ck(!!badPem && /ca_pem/.test(badPem) && /pcx/.test(badPem), "ca_pem sans marqueur PEM → erreur citant le champ + l'id du provider");
     // ca_pem mal TYPÉ (nombre) → erreur également.
-    ck(/ca_pem/.test(parseErr(JSON.stringify({ "d": { providers: [ { id: "i", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U", ca_pem: 42 } ] } })) || ""),
+    ck(/ca_pem/.test(parseErr({ id: "i", kind: "proxmox", url: "https://a:8006", token: "t@pam!x=U", ca_pem: 42 }) || ""),
       "ca_pem non-chaîne → erreur (certificat PEM attendu)");
   }
   });
@@ -758,48 +635,11 @@ module.exports = async () => {
   }
   });
 
-  await section("Serveur : ProviderConfigStore — enveloppe fichier (providersFor, dormance, fichier invalide)", async () => {
-  {
-    const { ProviderConfigStore } = SERVER("vm/ProviderConfigStore.js");
-    const fs = require("fs"), os = require("os");
-    const valid = JSON.stringify({
-      "doc-A": { providers: [
-        { id: "pve-1", kind: "proxmox", url: "https://a:8006", token: "root@pam!t=U1" },
-        { id: "pve-2", kind: "proxmox", url: "https://b:8006", token: "root@pam!t=U2" },
-      ] },
-      "doc-B": { providers: [ { id: "pve-3", kind: "proxmox", url: "https://c:8006", token: "root@pam!t=U3" } ] },
-    });
-    // Fichier PRÉSENT et valide : providersFor + configuredDocIds.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-vmcfg-"));
-    fs.writeFileSync(path.join(dir, "vm-providers.json"), valid, "utf8");
-    const store = new ProviderConfigStore(dir); // Logger "error" par défaut → silencieux
-    ck.eq(store.providersFor("doc-A").length, 2, "providersFor(doc-A) → 2 providers");
-    ck.eq(store.providersFor("doc-ABSENT").length, 0, "providersFor(docId absent du fichier) → [] (dormant pour ce document)");
-    ck.eq(store.configuredDocIds().sort().join(","), "doc-A,doc-B", "configuredDocIds → documents configurés (utile au timer T2.2)");
-    // Copie DÉFENSIVE : muter le tableau renvoyé ne corrompt pas l'état interne.
-    store.providersFor("doc-A").push({ id: "intrus" });
-    ck.eq(store.providersFor("doc-A").length, 2, "providersFor renvoie une COPIE (mutation externe sans effet)");
-    // Fichier ABSENT → feature dormante GLOBALE, PAS une erreur.
-    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-vmcfg-empty-"));
-    const dormant = new ProviderConfigStore(emptyDir);
-    ck.eq(dormant.configuredDocIds().length, 0, "fichier absent → aucune config (dormant global), pas d'erreur");
-    ck.eq(dormant.providersFor("doc-A").length, 0, "fichier absent → providersFor → []");
-    // Fichier PRÉSENT mais invalide → erreur explicite (pas de silence trompeur).
-    const badDir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-vmcfg-bad-"));
-    fs.writeFileSync(path.join(badDir, "vm-providers.json"), "{ pas du json", "utf8");
-    let threwLoad = false;
-    try { new ProviderConfigStore(badDir); } catch (_) { threwLoad = true; }
-    ck(threwLoad, "fichier présent mais invalide → lève (feature NON silencieusement dormante)");
-    try { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(emptyDir, { recursive: true, force: true }); fs.rmSync(badDir, { recursive: true, force: true }); } catch (_) { /* dossiers temp */ }
-  }
-  });
+  /* ============ SERVEUR : ProviderConfigValidate (validation par provider, requis/pool/défauts) ============ */
 
-  /* ============ SERVEUR : ProviderConfigValidate (validation PAR PROVIDER, partagée fichier ↔ CRUD DB) ============ */
-
-  await section("Serveur : ProviderConfigValidate — validation par provider (défauts, requis, pool) + mêmes messages que le parseur fichier", async () => {
+  await section("Serveur : ProviderConfigValidate — validation par provider (défauts, requis, pool)", async () => {
   {
     const { ProviderConfigValidate, ProviderConfigError } = SERVER("vm/ProviderConfigValidate.js");
-    const { ProviderConfigStore } = SERVER("vm/ProviderConfigStore.js");
     const validate = (raw) => { const errors = []; const cfg = ProviderConfigValidate.parseProvider("doc-X", 0, raw, errors); return { cfg, errors }; };
 
     // 1) Provider valide → ProviderConfig avec DÉFAUTS appliqués.
@@ -831,19 +671,11 @@ module.exports = async () => {
     ck(validate({ id: "p", kind: "proxmox", token: "t@x!y=U", url: "https://a:8006", urls: ["https://b:8006"] }).errors.some((m) => /exclusifs/.test(m)), "url ET urls ensemble → « exclusifs »");
     ck(validate({ id: "p", kind: "proxmox", token: "t@x!y=U", url: "pve1.lan:8006" }).errors.some((m) => /https/.test(m)), "url sans schéma https → erreur");
 
-    // 5) MÊMES MESSAGES : le message par provider produit par parse() (parseur fichier) CONTIENT
-    //    exactement celui de parseProvider (délégation prouvée : une seule source de vérité).
-    const viaValidate = validate({ id: "p1", kind: "proxmox", token: "t@x!y=U" }).errors[0]; // url manquante
-    let viaFile = "";
-    try { ProviderConfigStore.parse(JSON.stringify({ "doc-X": { providers: [{ id: "p1", kind: "proxmox", token: "t@x!y=U" }] } })); }
-    catch (e) { viaFile = e.message; }
-    ck(!!viaValidate && viaFile.includes(viaValidate), "message par provider IDENTIQUE via parse() (fichier legacy) et parseProvider (CRUD DB)");
-
-    // 6) ProviderConfigError : porte les issues (rendues en 400 par les routes CRUD).
+    // 5) ProviderConfigError : porte les issues (rendues en 400 par les routes CRUD).
     const err = new ProviderConfigError(["souci A", "souci B"]);
     ck(Array.isArray(err.issues) && err.issues.length === 2 && /souci A/.test(err.message) && err.name === "ProviderConfigError", "ProviderConfigError porte les issues + message agrégé");
 
-    // 7) management_url (URL du PDM, PUBLIQUE) : optionnel (défaut null), http ACCEPTÉ (PDM interne),
+    // 6) management_url (URL du PDM, PUBLIQUE) : optionnel (défaut null), http ACCEPTÉ (PDM interne),
     //    https accepté, invalide REFUSÉ (message citant le champ, jamais le jeton).
     const base = { id: "p", kind: "proxmox", url: "https://a:8006", token: "t@x!y=U" };
     ck.eq(validate({ ...base }).cfg.management_url, null, "management_url absent → null (défaut)");
@@ -2230,7 +2062,7 @@ module.exports = async () => {
 
   /* ============ SERVEUR : ProviderConfigDb (stockage DB des providers, better-sqlite3 RÉEL) ============ */
 
-  await section("Serveur : ProviderConfigDb — schéma, CRUD sans fuite de jeton, cascade, providersFor, jeton indéchiffrable, migration legacy", async () => {
+  await section("Serveur : ProviderConfigDb — schéma, CRUD sans fuite de jeton, cascade, providersFor, jeton indéchiffrable, migration de colonne", async () => {
     // better-sqlite3 RÉEL requis (binaire natif) — même probe que les autres sections DB.
     let Sqlite = null;
     try {
@@ -2347,29 +2179,6 @@ module.exports = async () => {
       ck(errs.length === 1 && errs[0].id === "pve-1" && /ressaisi/.test(errs[0].message) && !errs[0].message.includes("SECRET-1"), "…erreur MÉMORISÉE consultable (id + « à ressaisir »), sans le jeton");
       db2.close();
 
-      // -- MIGRATION legacy : vm-providers.json → DB + renommage + idempotence au 2e démarrage. --
-      const migDir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-vmmig-"));
-      fs.writeFileSync(path.join(migDir, "vm-providers.json"), JSON.stringify({
-        "doc-M": { docName: "infra", providers: [{ id: "pve-m", kind: "proxmox", url: "https://m:8006", token: "root@pam!t=MIG-SECRET" }] },
-      }), "utf8");
-      const migDb = new ProviderConfigDb(migDir, Sqlite, box);
-      const r1 = migDb.importLegacyFile();
-      ck(r1.importedProviders === 1 && r1.skipped === false, "migration : 1 provider importé depuis le fichier");
-      ck.eq(migDb.providersFor("doc-M")[0].token, "root@pam!t=MIG-SECRET", "migration : jeton chiffré en DB puis déchiffrable (aller-retour)");
-      ck(!fs.existsSync(path.join(migDir, "vm-providers.json")), "migration : fichier legacy RENOMMÉ (plus jamais relu)");
-      ck(!!fs.readdirSync(migDir).find((f) => f.startsWith("vm-providers.json.imported-")), "migration : renommé en vm-providers.json.imported-<date>");
-      // 2e démarrage (fichier déjà renommé → absent) → no-op idempotent.
-      const r2 = migDb.importLegacyFile();
-      ck(r2.skipped === true && r2.importedProviders === 0, "migration : 2e démarrage → no-op (fichier absent)");
-      ck.eq(migDb.providersFor("doc-M").length, 1, "migration : toujours 1 provider (pas de doublon)");
-      // Robustesse : fichier legacy RÉAPPARU dont le doc est DÉJÀ en DB → ignoré (jeton ressaisi préservé), renommé quand même.
-      fs.writeFileSync(path.join(migDir, "vm-providers.json"), JSON.stringify({ "doc-M": { providers: [{ id: "pve-m", kind: "proxmox", url: "https://m:8006", token: "root@pam!t=AUTRE" }] } }), "utf8");
-      const r3 = migDb.importLegacyFile();
-      ck(r3.importedProviders === 0 && r3.skipped === false, "migration : doc DÉJÀ en DB → aucun import (pas d'écrasement)");
-      ck.eq(migDb.providersFor("doc-M")[0].token, "root@pam!t=MIG-SECRET", "…jeton d'origine préservé (le fichier réapparu n'écrase pas la DB)");
-      migDb.close();
-      try { fs.rmSync(migDir, { recursive: true, force: true }); } catch (_) { /* dossier temp */ }
-
       // -- MIGRATION DE COLONNE (management_url) : une base à l'ANCIEN schéma (sans la colonne) est
       //    rouverte → la colonne est AJOUTÉE (ALTER idempotent), données INTACTES. Des vm-providers.db
       //    existent DÉJÀ chez l'utilisateur, d'où ce test dédié (parité migrations DocumentStore). --
@@ -2449,14 +2258,14 @@ module.exports = async () => {
         { collection: "equipments", record: { id: "eq-pve9", name: "pve9.int.exemple.com" } },
       ] }, docs.markChanged(doc.id));
 
-      // Config par document (amendement 2026-07-13) : écrite APRÈS création du doc (docId connu).
-      fs.writeFileSync(path.join(dir, "vm-providers.json"), JSON.stringify({
-        [doc.id]: { docName: "infra-test", providers: [
-          { id: "pve-test", kind: "proxmox", url: "https://pve:8006", token: "sync@pve!t=U", interval_sec: 0 },
-        ] },
-      }), "utf8");
-      const { ProviderConfigStore } = SERVER("vm/ProviderConfigStore.js");
-      const providers = new ProviderConfigStore(dir);
+      // Config par document injectée par un STUB ProviderConfigSource (le support réel — base chiffrée
+      // vm-providers.db — a ses propres tests ; ici seule la synchro nous intéresse, jetons factices).
+      const providers = {
+        configuredDocIds: () => [doc.id],
+        providersFor: (d) => d === doc.id
+          ? [{ id: "pve-test", kind: "proxmox", endpoints: [{ url: "https://pve:8006", fingerprint: null }], token: "sync@pve!t=U", include_lxc: true, interval_sec: 0, timeout_sec: 15, ca_pem: null, management_url: null }]
+          : [],
+      };
 
       // Adaptateur STUB : inventaire mutable (le scénario le fait évoluer), et bus live capturé.
       // `cluster` (produit dans la même passe) est FOURNI mais IGNORÉ par la synchro (capture = C2) —
@@ -2621,13 +2430,13 @@ module.exports = async () => {
         { collection: "ipAddresses", record: { id: "ip4b", address: "10.0.0.6", equipment_id: "eq4b", hostname: "srv42.b.exemple.com" } },
       ] }, docs.markChanged(doc.id));
 
-      fs.writeFileSync(path.join(dir, "vm-providers.json"), JSON.stringify({
-        [doc.id]: { docName: "infra-host", providers: [
-          { id: "pve-host", kind: "proxmox", url: "https://pve:8006", token: "sync@pve!t=U", interval_sec: 0 },
-        ] },
-      }), "utf8");
-      const { ProviderConfigStore } = SERVER("vm/ProviderConfigStore.js");
-      const providers = new ProviderConfigStore(dir);
+      // Config injectée par un STUB ProviderConfigSource (cf. section e2e) — seul le rapprochement d'hôte importe.
+      const providers = {
+        configuredDocIds: () => [doc.id],
+        providersFor: (d) => d === doc.id
+          ? [{ id: "pve-host", kind: "proxmox", endpoints: [{ url: "https://pve:8006", fingerprint: null }], token: "sync@pve!t=U", include_lxc: true, interval_sec: 0, timeout_sec: 15, ca_pem: null, management_url: null }]
+          : [],
+      };
 
       const mkVm = (n, node) => ({ ext_id: "h/" + n, provider_id: "pve-host", vm_type: "qemu", name: n, description: "",
         status: "running", host_node: node, cpu: 1, ram_mb: 512, disk_gb: 8, tags: [], nics: [] });
@@ -2728,20 +2537,19 @@ module.exports = async () => {
     const fs = require("fs"), os = require("os");
     const { DocumentStore } = SERVER("documents.js");
     const { VmSyncService } = SERVER("vm/VmSyncService.js");
-    const { ProviderConfigStore } = SERVER("vm/ProviderConfigStore.js");
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-vmnotify-"));
     try {
       const docs = new DocumentStore(dir, Sqlite);
       const doc = docs.create("infra-notify");
 
-      // Un seul provider configuré (manuel). Le jeton est factice — le producteur ne doit JAMAIS le
-      // faire fuiter (body = message de statut, garanti sans jeton).
-      fs.writeFileSync(path.join(dir, "vm-providers.json"), JSON.stringify({
-        [doc.id]: { docName: "infra-notify", providers: [
-          { id: "pve-report", kind: "proxmox", url: "https://pve:8006", token: "sync@pve!t=U", interval_sec: 0 },
-        ] },
-      }), "utf8");
-      const providers = new ProviderConfigStore(dir);
+      // Un seul provider configuré (manuel), injecté par un STUB ProviderConfigSource. Le jeton est
+      // factice — le producteur ne doit JAMAIS le faire fuiter (body = message de statut, sans jeton).
+      const providers = {
+        configuredDocIds: () => [doc.id],
+        providersFor: (d) => d === doc.id
+          ? [{ id: "pve-report", kind: "proxmox", endpoints: [{ url: "https://pve:8006", fingerprint: null }], token: "sync@pve!t=U", include_lxc: true, interval_sec: 0, timeout_sec: 15, ca_pem: null, management_url: null }]
+          : [],
+      };
       const live = { events: [], publish(d, data) { this.events.push({ d, data }); } };
       const expectedKey = "vm-sync:" + doc.id + ":pve-report";
 

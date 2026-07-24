@@ -6,7 +6,6 @@ import type { ProviderConfig, ProviderConfigSource, ProviderEndpoint } from "./V
 import { AuditStamp } from "../AuditStamp.js";   // « auteur présent » partagé (id canonique de created_by/updated_by)
 import { SecretBox } from "../SecretBox.js";
 import { ProviderConfigValidate, ProviderConfigError } from "./ProviderConfigValidate.js";
-import { ProviderConfigStore } from "./ProviderConfigStore.js";
 
 /* =============================================================================
    STOCKAGE DB DES PROVIDERS VM — module `vm/` AMOVIBLE. Base SQLite DÉDIÉE au
@@ -21,11 +20,12 @@ import { ProviderConfigStore } from "./ProviderConfigStore.js";
 
    AMOVIBILITÉ / DÉCOUPLAGE : le driver better-sqlite3 est INJECTÉ (même pattern
    que DocumentStore — type `SqliteCtor`), branché au bootstrap (index.ts). La
-   validation par provider est DÉLÉGUÉE à `ProviderConfigValidate` (partagée avec
-   le parseur du fichier legacy : mêmes messages d'erreur, zéro duplication).
+   validation par provider est DÉLÉGUÉE à `ProviderConfigValidate` (classe pure
+   dédiée : mêmes messages d'erreur partout, zéro duplication).
 
-   RÔLE : `ProviderConfigDb` remplace le fichier legacy `vm-providers.json` quand
-   la clé de chiffrement est présente. Il expose DEUX surfaces :
+   RÔLE : `ProviderConfigDb` est l'UNIQUE source de configuration des providers
+   (le mode fichier legacy `vm-providers.json` a été RETIRÉ le 2026-07-24 — jetons
+   en clair sur disque). Il expose DEUX surfaces :
    - LECTURE POUR LA SYNCHRO (`ProviderConfigSource` : providersFor/configuredDocIds)
      — VmSyncService ne voit que ce contrat, il ignore le support de stockage ;
    - CRUD (listFor/save/remove) alimentant l'UI de configuration (routes P2).
@@ -38,8 +38,6 @@ import { ProviderConfigStore } from "./ProviderConfigStore.js";
 
 /** Nom de la base dédiée au module, DANS le dossier injecté (à côté de registry.db). */
 const PROVIDERS_DB_FILE = "vm-providers.db";
-/** Nom du fichier legacy migré au démarrage (cf. importLegacyFile). */
-const LEGACY_FILE = "vm-providers.json";
 
 /** Placeholder de jeton NON VIDE injecté pour satisfaire la règle « token requis » de la
     validation partagée quand on CONSERVE le jeton existant (édition sans nouveau jeton). Il
@@ -100,7 +98,7 @@ export class ProviderConfigDb implements ProviderConfigSource {
       @param box  Coffre de chiffrement des jetons (clé présente — sinon le module reste sur le fichier legacy).
       @param log  Journalisation (résumés SANS secret). */
   constructor(
-    private readonly dir: string,
+    dir: string,
     Database: SqliteCtor,
     private readonly box: SecretBox,
     private readonly log: Logger = new Logger("error"),
@@ -297,47 +295,6 @@ export class ProviderConfigDb implements ProviderConfigSource {
     return config; // config.token = jeton réel (nouveau ou stocké déchiffré) — usage adaptateur uniquement
   }
 
-  /* --------------------------------------------------------------------------
-     MIGRATION du fichier legacy vm-providers.json → DB (au démarrage)
-     -------------------------------------------------------------------------- */
-
-  /** Migre le fichier legacy `vm-providers.json` (à côté de la DB) vers cette base. Cadrage :
-      si le fichier existe et que ses documents ne sont PAS déjà en DB → import (jetons CHIFFRÉS au
-      passage), puis fichier RENOMMÉ `vm-providers.json.imported-<AAAA-MM-JJ>` (trace, plus jamais
-      relu → la DB devient l'unique source). Idempotent : au 2e démarrage le fichier est déjà
-      renommé (absent) → no-op. Log récapitulatif SANS aucun secret (compteurs seuls). */
-  importLegacyFile(legacyPath: string = path.join(this.dir, LEGACY_FILE)): { importedDocs: number; importedProviders: number; skipped: boolean } {
-    let raw: string;
-    try {
-      raw = fs.readFileSync(legacyPath, "utf8");
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return { importedDocs: 0, importedProviders: 0, skipped: true };
-      throw new Error("vm: lecture du fichier legacy impossible : " + (err instanceof Error ? err.message : String(err)));
-    }
-
-    // Réutilise le parseur/validation LEGACY (mêmes règles) — un fichier invalide LÈVE (pas de
-    // silence : on n'écraserait pas une config cassée par une migration partielle).
-    const byDoc = ProviderConfigStore.parse(raw);
-    const alreadyConfigured = new Set(this.configuredDocIds());
-    const now = new Date().toISOString();
-    let importedDocs = 0;
-    let importedProviders = 0;
-    for (const [docId, providers] of byDoc) {
-      // Documents DÉJÀ en DB : ignorés (la DB est la source depuis un précédent import) — évite
-      // d'écraser des jetons déjà ressaisis via l'UI par de vieilles valeurs du fichier.
-      if (alreadyConfigured.has(docId) || providers.length === 0) continue;
-      for (const config of providers) this.writeProvider(docId, config, this.box.encrypt(config.token), now, now);
-      importedProviders += providers.length;
-      importedDocs++;
-    }
-
-    // Renommage systématique (même si 0 importé : on ne veut PLUS JAMAIS relire ce fichier).
-    const renamed = legacyPath + ".imported-" + now.slice(0, 10);
-    fs.renameSync(legacyPath, renamed);
-    this.log.info("vm: migration du fichier legacy → DB", "documents=" + importedDocs, "providers=" + importedProviders, "fichier renommé");
-    return { importedDocs, importedProviders, skipped: false };
-  }
-
   /** Ferme le handle SQLite (arrêt propre / avant suppression du fichier — parité Repository.close). */
   close(): void {
     try { this.db.pragma("wal_checkpoint(TRUNCATE)"); this.db.pragma("optimize"); } catch { /* driver réduit / déjà fermé */ }
@@ -351,7 +308,7 @@ export class ProviderConfigDb implements ProviderConfigSource {
   /** Écrit UN provider (upsert par PK) + REMPLACE ses endpoints (delete puis insert ordonné), en
       UNE transaction. `ca_pem` est PERSISTÉ (CA du cluster, PUBLIC) : posé à la création comme à la
       mise à jour — vide côté UI = null (« pas de CA cluster »). `createdBy` = id canonique de l'auteur
-      (null en migration legacy) : posé à la CRÉATION puis PRÉSERVÉ par l'upsert (hors DO UPDATE SET) ;
+      (null si l'auteur est inconnu) : posé à la CRÉATION puis PRÉSERVÉ par l'upsert (hors DO UPDATE SET) ;
       `updated_by` rafraîchi à chaque écriture. */
   private writeProvider(docId: string, config: ProviderConfig, tokenEnc: string, createdDate: string, updatedDate: string, createdBy: string | null = null): void {
     const write = this.db.transaction(() => {

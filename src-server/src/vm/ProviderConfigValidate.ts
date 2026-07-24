@@ -7,12 +7,12 @@ import type { ProviderConfig, ProviderEndpoint } from "./VmProvider.js";
    avec défauts) et applique les défauts, en poussant des messages d'erreur
    EXPLICITES.
 
-   POURQUOI ce fichier séparé (cadrage UI providers 2026-07-14) : la MÊME règle
-   de validation par provider doit servir DEUX chemins de stockage — le parseur
-   du fichier legacy `vm-providers.json` (ProviderConfigStore) ET le CRUD de la
-   base `vm-providers.db` (ProviderConfigDb). L'extraire ici garantit des messages
-   d'erreur IDENTIQUES des deux côtés (exigence de cadrage) et zéro duplication :
-   ProviderConfigStore et ProviderConfigDb délèguent tous deux à cette classe.
+   POURQUOI ce fichier séparé (cadrage UI providers 2026-07-14) : la règle de
+   validation par provider est ISOLÉE du support de stockage (base `vm-providers.db`,
+   ProviderConfigDb — UNIQUE source de config). Classe pure, testable en isolation,
+   garantissant des messages d'erreur uniques (la 400 rendue par l'UI EST le message de
+   validation) et zéro duplication. (Le parseur du fichier legacy qui la partageait a été
+   retiré le 2026-07-24.)
 
    SÉCURITÉ (invariant) : la valeur du `token` n'apparaît JAMAIS dans un message
    d'erreur — on ne signale que sa présence/son type. Les messages citent l'`id`
@@ -208,8 +208,8 @@ export class ProviderConfigValidate {
   }
 
   /* --------------------------------------------------------------------------
-     Helpers (coercitions + libellés d'erreur) — publics quand ProviderConfigStore
-     les partage au niveau DOCUMENT (racine, unicité des id) pour rester sans duplication.
+     Helpers (coercitions + libellés d'erreur) — certains publics car ProviderConfigDb
+     les réutilise (isPlainObject/providerLabel) pour rester sans duplication.
      -------------------------------------------------------------------------- */
 
   /** Objet JSON « simple » (ni null, ni tableau) — les entrées `Record<string, unknown>`. */
