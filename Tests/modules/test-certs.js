@@ -364,7 +364,7 @@ module.exports = async () => {
   }
   });
 
-  await section("Certs : PkiSession — coffre de session (auto-verrouillage 15 min, touch, lock manuel)", async () => {
+  await section("Certs : PkiSession — coffres de session multi-DEK (auto-verrouillage 15 min, touch, verrous par coffre)", async () => {
   {
     const { PkiSession } = D("certs/PkiSession.js");
     // Timers SIMULÉS : on capture les planifications, on déclenche l'échéance à la main.
@@ -386,10 +386,11 @@ module.exports = async () => {
       const timers = mkTimers(); const locks = [];
       const session = new PkiSession({ onLock: () => locks.push(1), schedule: timers.schedule, cancel: timers.cancel });
       ck.eq(session.unlocked, false, "état initial : verrouillée");
-      let threw = false; try { void session.key; } catch (_) { threw = true; }
-      ck(threw, "accès à la clé d'une session verrouillée → exception explicite");
-      session.unlock(fakeKey);
-      ck(session.unlocked && session.key === fakeKey, "unlock → clé accessible");
+      let threw = false; try { session.keyOf("default"); } catch (_) { threw = true; }
+      ck(threw, "keyOf d'un coffre verrouillé → exception explicite");
+      session.unlock("default", fakeKey);
+      ck(session.unlocked && session.keyOf("default") === fakeKey, "unlock(vaultId, clé) → clé du coffre accessible");
+      ck(session.unlockedVault("default") && !session.unlockedVault("root"), "unlockedVault : seul le coffre ouvert répond vrai");
       const armed = timers.last();
       ck(timers.slots.has(armed) && timers.slots.get(armed).ms === 15 * 60 * 1000, "…compte à rebours d'inactivité armé à 15 min");
       // touch : l'ancien timer est annulé, un nouveau part (inactivité repartie de zéro).
@@ -404,13 +405,44 @@ module.exports = async () => {
     {
       const timers = mkTimers(); const locks = [];
       const session = new PkiSession({ onLock: () => locks.push(1), schedule: timers.schedule, cancel: timers.cancel });
-      session.unlock(fakeKey);
+      session.unlock("default", fakeKey);
       session.lock();
-      ck(session.unlocked === false && locks.length === 1 && timers.slots.size === 0, "lock manuel → clé oubliée, timer annulé, onLock notifié");
+      ck(session.unlocked === false && locks.length === 1 && timers.slots.size === 0, "lock manuel → clés oubliées, timer annulé, onLock notifié");
       session.lock();
       ck.eq(locks.length, 1, "lock répété → no-op (pas de double notification)");
-      session.unlock(fakeKey);
+      session.unlock("default", fakeKey);
       ck(session.unlocked && timers.slots.size === 1, "re-unlock après lock → session réutilisable, timer ré-armé");
+    }
+    {
+      // MULTI-COFFRES (cadrage §11) : DEK indépendantes par coffre, verrous FINS (lockVault), un SEUL
+      // compte à rebours global d'inactivité (désarmé au dernier coffre fermé seulement).
+      const timers = mkTimers(); const locks = [];
+      const session = new PkiSession({ onLock: () => locks.push(1), schedule: timers.schedule, cancel: timers.cancel });
+      const rootKey = { type: "secret", role: "root" };
+      session.unlock("default", fakeKey);
+      session.unlock("root", rootKey);
+      ck(session.unlockedVault("default") && session.unlockedVault("root"), "deux coffres ouverts indépendamment");
+      ck.eq(session.unlockedIds().join(","), "default,root", "unlockedIds : les deux coffres listés");
+      ck(session.keyOf("default") === fakeKey && session.keyOf("root") === rootKey, "keyOf : chaque coffre rend SA clé (jamais celle d'un autre)");
+      ck.eq(timers.slots.size, 1, "un SEUL compte à rebours global pour tous les coffres");
+      session.lockVault("root");
+      ck(locks.length === 1 && !session.unlockedVault("root") && session.unlockedVault("default"), "lockVault : le coffre root seul verrouillé + onLock notifié");
+      let threw = false; try { session.keyOf("root"); } catch (_) { threw = true; }
+      ck(threw && session.keyOf("default") === fakeKey, "keyOf du coffre verrouillé → exception ; l'autre coffre reste servi");
+      ck.eq(timers.slots.size, 1, "…compte à rebours conservé (un coffre reste ouvert)");
+      session.lockVault("root");
+      ck.eq(locks.length, 1, "lockVault répété sur un coffre déjà fermé → no-op silencieux");
+      session.lockVault("default");
+      ck(locks.length === 2 && session.unlocked === false && timers.slots.size === 0, "dernier coffre verrouillé → session close, timer désarmé");
+    }
+    {
+      // AUTO-VERROUILLAGE multi-coffres : l'échéance d'inactivité ferme TOUS les coffres d'un coup.
+      const timers = mkTimers(); const locks = [];
+      const session = new PkiSession({ onLock: () => locks.push(1), schedule: timers.schedule, cancel: timers.cancel });
+      session.unlock("default", fakeKey);
+      session.unlock("root", { type: "secret" });
+      timers.fire(timers.last());
+      ck(session.unlocked === false && session.unlockedIds().length === 0 && locks.length === 1, "échéance d'inactivité → TOUS les coffres verrouillés, une seule notification");
     }
   }
   });
