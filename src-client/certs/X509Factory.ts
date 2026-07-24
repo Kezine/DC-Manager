@@ -162,15 +162,21 @@ export class X509Factory {
     catch { throw new Error("X509Factory : certificat de la CA intermédiaire illisible (re-signature impossible)"); }
     const { caCert: parentCert, caPrivateKey: parentKey, caSignAlgo } = await X509Factory.importCa(opts.parentCertPem, opts.parentPrivateKeyPkcs8Pem);
 
-    // pathLen PRÉSERVÉ depuis le certificat existant (défaut 0 si absent — même défaut qu'à l'émission).
+    // C10b : pathLen PRÉSERVÉ depuis le certificat existant — l'ABSENCE (undefined) = ILLIMITÉ, on ne resserre PAS
+    // à 0 (l'ancien défaut forçait 0 → resserrement non voulu à la re-signature d'une CA sans contrainte de profondeur).
     const existingBasic = existing.getExtension(x509.BasicConstraintsExtension);
-    const pathLen = existingBasic && typeof existingBasic.pathLength === "number" ? existingBasic.pathLength : 0;
+    const pathLen = existingBasic && typeof existingBasic.pathLength === "number" ? existingBasic.pathLength : undefined;
     // GUARD pathLen du parent (même règle que issueIntermediateCa) : re-signer reste « émettre une sous-CA ».
     const parentBasic = parentCert.getExtension(x509.BasicConstraintsExtension);
     const parentPathLen = parentBasic && typeof parentBasic.pathLength === "number" ? parentBasic.pathLength : null;
     if (parentPathLen !== null) {
       if (parentPathLen === 0) throw new Error("X509Factory : cette CA ne peut pas émettre de sous-CA (contrainte pathLen 0 — elle ne signe que des feuilles)");
-      if (pathLen > parentPathLen - 1) throw new Error("X509Factory : profondeur pathLen " + pathLen + " trop élevée sous cette CA parente (pathLen " + parentPathLen + ") — maximum " + (parentPathLen - 1));
+      // Un enfant ILLIMITÉ (pathLen undefined) sous un parent à pathLen FINI reste invalide (il dépasse toujours
+      // parent-1) → refus, comme un pathLen trop élevé.
+      if (pathLen === undefined || pathLen > parentPathLen - 1) {
+        throw new Error("X509Factory : profondeur pathLen " + (pathLen === undefined ? "illimitée" : pathLen)
+          + " trop élevée sous cette CA parente (pathLen " + parentPathLen + ") — maximum " + (parentPathLen - 1));
+      }
     }
     const { notBefore, notAfter } = X509Factory.validityWindow(days);
     // GUARD échéance (même invariant que issueIntermediateCa) : le maillon ne peut vivre au-delà de son ancre.
@@ -232,6 +238,20 @@ export class X509Factory {
     const notBefore = window.notBefore;
     // Le cross-cert est émis PAR l'ancienne CA → il ne peut vivre au-delà d'elle (recouvrement transitoire) → rognage.
     const notAfter = window.notAfter.getTime() > issuerCert.notAfter.getTime() ? issuerCert.notAfter : window.notAfter;
+    // GUARD C2 : REPRENDRE l'autorité du SUJET (pathLen + NameConstraints) sur le cross-cert. Sans cela, un
+    // cross-cert émis avec pathLen ILLIMITÉ et sans NameConstraints ÉLARGIRAIT l'autorité d'une sous-CA contrainte
+    // pendant la transition (le chemin de validation via le cross-cert perdrait ces bornes) → élévation d'autorité.
+    // Même geste que reSignIntermediateCa (copie BRUTE des NC, aucun ré-encodage).
+    const subjectBasic = subjectCert.getExtension(x509.BasicConstraintsExtension);
+    const subjectPathLen = subjectBasic && typeof subjectBasic.pathLength === "number" ? subjectBasic.pathLength : undefined;
+    const extensions: x509.Extension[] = [
+      new x509.BasicConstraintsExtension(true, subjectPathLen, true),   // c'est bien une CA, pathLen repris du sujet
+      new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
+      await x509.SubjectKeyIdentifierExtension.create(subjectPublicKey, false, crypto),   // SKI = clé de la nouvelle CA
+      await x509.AuthorityKeyIdentifierExtension.create(issuerCert.publicKey, false, crypto),   // AKI → ancienne CA
+    ];
+    const subjectNc = subjectCert.getExtension(id_ce_nameConstraints);
+    if (subjectNc) extensions.push(new x509.Extension(id_ce_nameConstraints, subjectNc.critical, subjectNc.value));
     const cert = await x509.X509CertificateGenerator.create({
       serialNumber: X509Factory.randomSerialHex(),
       subject: subjectCert.subject,   // sujet DN de la NOUVELLE CA (chaîne)
@@ -240,12 +260,7 @@ export class X509Factory {
       signingAlgorithm: caSignAlgo,
       publicKey: subjectPublicKey,    // on certifie la CLÉ de la nouvelle CA (pas une clé neuve)
       signingKey: issuerKey,
-      extensions: [
-        new x509.BasicConstraintsExtension(true, undefined, true),   // c'est bien une CA
-        new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
-        await x509.SubjectKeyIdentifierExtension.create(subjectPublicKey, false, crypto),   // SKI = clé de la nouvelle CA
-        await x509.AuthorityKeyIdentifierExtension.create(issuerCert.publicKey, false, crypto),   // AKI → ancienne CA
-      ],
+      extensions,
     }, crypto);
     return {
       certPem: cert.toString("pem"),
@@ -293,6 +308,23 @@ export class X509Factory {
         + caCert.notAfter.toISOString().slice(0, 10) + ") — réduisez la durée");
     }
 
+    // GUARD C5 : NameConstraints de la CA émettrice. Un SAN dns HORS des `permittedDns` produirait un certificat
+    // que les clients REJETTENT (extension NC CRITIQUE) → échec TARDIF, à la connexion. On BLOQUE ici, à l'émission,
+    // avec un message clair. Scope v1 : SEULS les SAN dns (les autres types ne sont pas contraints). Hors périmètre
+    // v1 : la validation d'imbrication des NC d'une SOUS-CA sous sa parente (TODO si on émet des sous-CA contraintes
+    // sous une parente elle-même contrainte). `caCert` est déjà parsé → on lit l'extension directement.
+    let caPermittedDns: string[] | null = null;
+    try { caPermittedDns = X509Factory.permittedDnsOf(caCert); } catch { caPermittedDns = null; }
+    if (caPermittedDns && caPermittedDns.length) {
+      for (const san of Array.isArray(opts.sans) ? opts.sans : []) {
+        if (san.san_type !== "dns") continue;
+        if (!X509Factory.dnsUnderConstraints(san.value, caPermittedDns)) {
+          throw new Error("X509Factory : le nom « " + String(san.value).trim()
+            + " » n'est pas autorisé par les contraintes de nom de la CA émettrice (permis : " + caPermittedDns.join(", ") + ")");
+        }
+      }
+    }
+
     const cert = await x509.X509CertificateGenerator.create({
       serialNumber: X509Factory.randomSerialHex(),
       subject: X509Factory.buildDistinguishedName(opts.commonName, opts.organization, opts.organizationalUnit),
@@ -305,7 +337,9 @@ export class X509Factory {
       signingKey: caPrivateKey,
       extensions: [
         new x509.BasicConstraintsExtension(false, undefined, true),      // entité finale, CRITIQUE
-        new x509.KeyUsagesExtension(x509.KeyUsageFlags.digitalSignature | x509.KeyUsageFlags.keyEncipherment, true),
+        // C4 : KeyUsage selon l'algo. `keyEncipherment` (key transport RSA) n'a AUCUN sens pour une clé ECDSA
+        // (RFC 5480, rejeté par les linters TLS stricts) → EC = digitalSignature seul ; RSA = + keyEncipherment.
+        new x509.KeyUsagesExtension(X509Factory.leafKeyUsage(opts.keyAlgo), true),
         new x509.ExtendedKeyUsageExtension(X509Factory.extendedKeyUsages(usage), false),
         new x509.SubjectAlternativeNameExtension(X509Factory.mapSans(opts.sans), false),
         // SKI de la feuille + AKI pointant vers la clé de la CA : l'AKI est
@@ -445,13 +479,25 @@ export class X509Factory {
       nouvelle) et l'affichage. */
   static readCaPermittedDns(certPem: string): string[] | null {
     try {
-      const ext = new x509.X509Certificate(certPem).getExtension(id_ce_nameConstraints);
-      if (!ext) return null;
-      const constraints = AsnConvert.parse(ext.value, NameConstraints);
-      return (constraints.permittedSubtrees || []).map((subtree) => subtree.base.dNSName || "").filter((dns) => dns !== "");
+      return X509Factory.permittedDnsOf(new x509.X509Certificate(certPem));
     } catch {
       return null;
     }
+  }
+
+  /** Un nom DNS `name` tombe-t-il sous l'un des `permitted` (règle NameConstraints RFC 5280 §4.2.1.10, dNSName) ?
+      - suffixe AVEC point de tête « .exemple.lan » : couvre les SOUS-DOMAINES stricts (x.exemple.lan), PAS le nom nu ;
+      - suffixe NU « exemple.lan » : se couvre LUI-MÊME et ses sous-domaines (x.exemple.lan).
+      Comparaison INSENSIBLE à la casse (les noms DNS le sont) ; un point final éventuel (FQDN absolu) est retiré.
+      Liste `permitted` vide → aucune contrainte → toujours vrai. Fonction PURE (testée en isolation — C5). */
+  static dnsUnderConstraints(name: string, permitted: string[]): boolean {
+    const host = String(name || "").trim().toLowerCase().replace(/\.$/, "");
+    if (host === "") return false;
+    const suffixes = (Array.isArray(permitted) ? permitted : []).map((p) => String(p || "").trim().toLowerCase()).filter((p) => p !== "");
+    if (suffixes.length === 0) return true;
+    return suffixes.some((suffix) => suffix.startsWith(".")
+      ? host.endsWith(suffix) && host.length > suffix.length   // « .exemple.lan » : sous-domaines stricts seulement
+      : host === suffix || host.endsWith("." + suffix));        // « exemple.lan » : le nom nu ET ses sous-domaines
   }
 
   /* --------------------------------------------------------------------------
@@ -620,6 +666,24 @@ export class X509Factory {
     const subtrees = new GeneralSubtrees(permittedDns.map((dns) => new GeneralSubtree({ base: new GeneralName({ dNSName: dns }) })));
     const der = AsnConvert.serialize(new NameConstraints({ permittedSubtrees: subtrees }));
     return new x509.Extension(id_ce_nameConstraints, true, der);
+  }
+
+  /** Lit les sous-arbres DNS PERMIS (NameConstraints) d'un certificat DÉJÀ parsé : `null` si l'extension est absente,
+      sinon la liste des suffixes dNSName. Partagé par `readCaPermittedDns` (depuis un PEM) et `issueLeaf` (le guard
+      C5 a déjà le certificat parsé — inutile de re-parser). Peut JETER si l'ASN.1 est illisible (l'appelant décide). */
+  private static permittedDnsOf(cert: x509.X509Certificate): string[] | null {
+    const ext = cert.getExtension(id_ce_nameConstraints);
+    if (!ext) return null;
+    const constraints = AsnConvert.parse(ext.value, NameConstraints);
+    return (constraints.permittedSubtrees || []).map((subtree) => subtree.base.dNSName || "").filter((dns) => dns !== "");
+  }
+
+  /** KeyUsage d'une FEUILLE selon l'algo de SA clé (C4) : `keyEncipherment` (key transport) n'a de sens que pour RSA ;
+      une clé ECDSA ne chiffre pas (RFC 5480) → `digitalSignature` seul. Toujours `digitalSignature` (signature TLS). */
+  private static leafKeyUsage(keyAlgo: X509KeyAlgo): x509.KeyUsageFlags {
+    return keyAlgo === "ec-p256"
+      ? x509.KeyUsageFlags.digitalSignature
+      : x509.KeyUsageFlags.digitalSignature | x509.KeyUsageFlags.keyEncipherment;
   }
 
   private static normalizePathLen(pathLen: number | undefined): number {

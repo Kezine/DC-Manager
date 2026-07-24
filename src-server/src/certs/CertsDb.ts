@@ -469,14 +469,16 @@ export class CertsDb {
     const params: Record<string, unknown> = { doc_id: docId, ...f.params };
 
     // Portée SOUS-ARBRE STRICT (racine EXCLUE) via CTE récursive sur (doc_id, parent_id) : on part des
-    // ENFANTS directs de la racine, jamais de la racine elle-même.
+    // ENFANTS directs de la racine, jamais de la racine elle-même. C6 (défense en profondeur) : `UNION` (et non
+    // `UNION ALL`) DÉDUPLIQUE — les ids étant uniques, la sémantique est identique en l'absence de cycle, mais un
+    // cycle de parent_id (glissé en deux PUTs, cf. garde de `save`) ne fait PLUS boucler la récursion indéfiniment.
     let subtreeCte = "";
     let rootWhere = "";
     const root = CertsDb.trimmed(opts.root);
     if (root) {
       subtreeCte = `subtree(id) AS (
         SELECT id FROM certificates WHERE doc_id = @doc_id AND parent_id = @root
-        UNION ALL
+        UNION
         SELECT c.id FROM certificates c JOIN subtree s ON c.parent_id = s.id WHERE c.doc_id = @doc_id
       )`;
       rootWhere = " AND c.id IN (SELECT id FROM subtree)";
@@ -506,7 +508,7 @@ export class CertsDb {
     // recopie PAS dans le DTO (invariant Q5, comme listFor).
     const ancestryCte = `ancestry(id, root_id) AS (
       SELECT id, NULL FROM certificates WHERE doc_id = @doc_id AND parent_id IS NULL
-      UNION ALL
+      UNION
       SELECT c.id, COALESCE(a.root_id, a.id) FROM certificates c JOIN ancestry a ON c.parent_id = a.id WHERE c.doc_id = @doc_id
     )`;
     const withParts = [ancestryCte, subtreeCte].filter((s) => s !== "").join(", ");
@@ -543,9 +545,11 @@ export class CertsDb {
     // `tree` : chaque nœud de chaque arbre, étiqueté par la racine dont il descend (is_root distingue la
     // racine de ses descendants). `agg` réduit par racine — children_alert inclut les EXPIRÉS (≤ now+30 j),
     // next_expiry couvre la racine ET ses descendants non révoqués (MIN ignore les NULL).
+    // C6 (défense en profondeur) : `UNION` (dédup) au lieu de `UNION ALL` — un cycle de parent_id ne fait plus
+    // boucler la CTE d'arbre indéfiniment (chaque tuple (root,id,…) étant unique, la sémantique est inchangée sans cycle).
     const treeCte = `tree(root, id, revoked_at, not_after, is_root) AS (
       SELECT id, id, revoked_at, not_after, 1 FROM certificates WHERE doc_id = @doc_id AND parent_id IS NULL
-      UNION ALL
+      UNION
       SELECT t.root, c.id, c.revoked_at, c.not_after, 0 FROM certificates c JOIN tree t ON c.parent_id = t.id WHERE c.doc_id = @doc_id
     )`;
     const aggCte = `agg(root, children_total, children_alert, next_expiry) AS (
@@ -618,6 +622,25 @@ export class CertsDb {
     if (parsed.vault_id !== VAULT_DEFAULT) {
       const vault = this.db.prepare("SELECT vault_id FROM pki_vaults WHERE doc_id = ? AND vault_id = ?").get(docId, parsed.vault_id);
       if (!vault) throw new CertsConfigError(["vault_id : coffre « " + parsed.vault_id + " » inconnu pour ce document — initialisez-le d'abord (PUT /pki/vaults/" + parsed.vault_id + ")"]);
+    }
+    // GARDE C6 : détection de CYCLE d'émission. L'auto-émission (parent = soi) est déjà refusée par CertsValidate ;
+    // ici on couvre le cycle A→B→A glissé en DEUX PUTs (le second re-parentant A sous son propre dérivé B). On
+    // remonte la chaîne d'ancêtres EXISTANTE depuis parent_id : si elle atteint l'id qu'on écrit, la nouvelle arête
+    // refermerait un cycle → REFUS. Sans ça, la CTE récursive `subtree` (route paginée ?root=…) boucle
+    // indéfiniment (DoS authentifié). Boucle BORNÉE par un jeu d'ids visités (robuste à un cycle PRÉEXISTANT).
+    if (parsed.parent_id !== null) {
+      const parentStmt = this.db.prepare("SELECT parent_id FROM certificates WHERE doc_id = ? AND id = ?");
+      const visited = new Set<string>();
+      let cursor: string | null = parsed.parent_id;
+      while (cursor !== null) {
+        if (cursor === parsed.id) {
+          throw new CertsConfigError(["parent_id : cycle d'émission détecté — « " + parsed.parent_id + " » descend déjà de « " + parsed.id + " » (un certificat ne peut pas devenir le dérivé de sa propre descendance)"]);
+        }
+        if (visited.has(cursor)) break;   // cycle PRÉEXISTANT entre ancêtres (ne concerne pas l'écriture courante) → on borne
+        visited.add(cursor);
+        const ancestor = parentStmt.get(docId, cursor) as { parent_id: string | null } | undefined;
+        cursor = ancestor && ancestor.parent_id ? ancestor.parent_id : null;
+      }
     }
     // Colonne `search` recalculée à CHAQUE save (label + subject + serial + valeurs de SAN, normalisés
     // par la règle PARTAGÉE Schema.normSearch) : le filtre `query` du listing devient un LIKE indexable.

@@ -79,6 +79,7 @@ export class CertExports {
   static pemFullchain(cert: CertExportRecord, allCerts: CertExportRecord[]): ExportArtifact {
     CertExports.requireNotRevoked(cert);
     const chain = CertExports.resolveIssuerChain(cert, allCerts);
+    CertExports.requireChainNotRevoked(chain);
     const content = chain.map((c) => CertExports.certPemBlock(c)).join("");
     return { filename: CertExports.safeFileName(cert.label) + ".fullchain.pem", mime: CertExports.MIME_PEM, content };
   }
@@ -88,6 +89,7 @@ export class CertExports {
   static pemCaChain(cert: CertExportRecord, allCerts: CertExportRecord[]): ExportArtifact {
     CertExports.requireNotRevoked(cert);
     const chain = CertExports.resolveIssuerChain(cert, allCerts);
+    CertExports.requireChainNotRevoked(chain);
     if (chain.length < 2) throw new Error("CertExports : « " + cert.label + " » n'a pas d'émetteur (certificat racine) — aucune chaîne d'autorité à exporter");
     const content = chain.slice(1).map((c) => CertExports.certPemBlock(c)).join("");
     return { filename: CertExports.safeFileName(cert.label) + ".ca-chain.pem", mime: CertExports.MIME_PEM, content };
@@ -102,6 +104,7 @@ export class CertExports {
   static pemServeChain(cert: CertExportRecord, allCerts: CertExportRecord[]): ExportArtifact {
     CertExports.requireNotRevoked(cert);
     const chain = CertExports.resolveIssuerChain(cert, allCerts);
+    CertExports.requireChainNotRevoked(chain);
     if (chain.length < 2) throw new Error("CertExports : « " + cert.label + " » n'a pas d'émetteur (certificat racine) — pas de chaîne à servir");
     const serve = chain.filter((c) => typeof c.parent_id === "string" && c.parent_id.trim() !== "");   // retire la racine (sans émetteur)
     const content = serve.map((c) => CertExports.certPemBlock(c)).join("");
@@ -144,6 +147,7 @@ export class CertExports {
   static async pkcs12(cert: CertExportRecord, allCerts: CertExportRecord[], opts: { passphrase: string; privateKeyPkcs8Pem: string; pbkdf2Iterations?: number }): Promise<ExportArtifact> {
     CertExports.requireNotRevoked(cert);
     const chain = CertExports.resolveIssuerChain(cert, allCerts);
+    CertExports.requireChainNotRevoked(chain);
     const certChainPem = chain.map((c) => CertExports.certPemBlock(c));
     const der = await Pkcs12Builder.build({
       passphrase: opts.passphrase,
@@ -202,6 +206,20 @@ export class CertExports {
   static requireNotRevoked(cert: CertExportRecord): void {
     if (cert && typeof cert.revoked_at === "string" && cert.revoked_at.trim() !== "") {
       throw new Error("CertExports : « " + cert.label + " » est révoqué — exclu des exports (décision Q4)");
+    }
+  }
+
+  /** REFUSE une chaîne dont un ANCÊTRE (émetteur : CA intermédiaire/racine) est révoqué — C3 : la feuille est déjà
+      filtrée par `requireNotRevoked`, mais la décision Q4 (« un objet révoqué est exclu des exports ») vaut AUSSI
+      pour les maillons AU-DESSUS ; on ne doit pas exporter le fullchain/serve-chain/ca-chain/PKCS#12 d'une feuille
+      active embarquant une CA révoquée. Nomme l'ancêtre fautif. `chain` = [feuille, …, racine] (resolveIssuerChain). */
+  private static requireChainNotRevoked(chain: CertExportRecord[]): void {
+    const leafLabel = chain.length ? chain[0].label : "";
+    for (let i = 1; i < chain.length; i++) {
+      const ancestor = chain[i];
+      if (ancestor && typeof ancestor.revoked_at === "string" && ancestor.revoked_at.trim() !== "") {
+        throw new Error("CertExports : la chaîne de « " + leafLabel + " » contient un émetteur révoqué : « " + ancestor.label + " » — export impossible");
+      }
     }
   }
 

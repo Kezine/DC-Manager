@@ -144,6 +144,7 @@ export const certs = {
       longUniqueHint: "Choose a long and unique passphrase.",
       cnRequired: "Common name (CN) required.",
       passRequired: "Passphrase required.",
+      passTooShort: "The passphrase must be at least {{count}} characters.",
       algoField: "Key algorithm",
       labelField: "Label",
       labelPlaceholder: "e.g. Internal portal",

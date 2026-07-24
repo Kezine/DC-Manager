@@ -1901,6 +1901,18 @@ module.exports = async () => {
       db.save("doc-A", "exp-3", { kind: "ssh-keypair", label: "Paire C (révoquée)", subject: "u@c", key_algo: "ed25519", not_after: "2026-08-15T00:00:00.000Z", revoked_at: "2026-07-01T00:00:00.000Z" });
       db.save("doc-A", "exp-4", { kind: "ssh-keypair", label: "Paire D (sans échéance)", subject: "u@d", key_algo: "ed25519" });
       ck.eq(db.listExpiring().map((c) => c.id).join(","), "exp-2,exp-1", "listExpiring : non-révoqués avec not_after, triés par échéance (révoqué et sans date exclus)");
+
+      // -- C6 : détection de CYCLE d'émission (A→B→A en DEUX PUTs) : le second PUT (re-parenter A sous son propre
+      //    dérivé B) est REFUSÉ. Sans ça, la CTE `subtree` (?root=…) boucle indéfiniment (DoS authentifié). --
+      db.save("doc-A", "cy-A", { kind: "root-ca", label: "Cycle A", subject: "CN=A", key_algo: "ec-p256" });
+      db.save("doc-A", "cy-B", { kind: "intermediate-ca", parent_id: "cy-A", label: "Cycle B", subject: "CN=B", key_algo: "ec-p256" });
+      let cycleIssues = null;
+      try { db.save("doc-A", "cy-A", { kind: "intermediate-ca", parent_id: "cy-B", label: "Cycle A (reparent)", subject: "CN=A", key_algo: "ec-p256" }); } catch (e) { if (e instanceof CertsConfigError) cycleIssues = e.issues; }
+      ck(!!cycleIssues && cycleIssues.some((i) => /cycle/.test(i)), "C6 : re-parenter A sous son propre dérivé B → refusé (cycle d'émission détecté)");
+      ck.eq(raw.prepare("SELECT parent_id FROM certificates WHERE id='cy-A'").get().parent_id, null, "C6 : …et A n'a PAS été re-parenté (le refus n'écrit rien)");
+      // La CTE sous-arbre reste FINIE (portée ?root sur A) : pas de boucle, le dérivé B est listé.
+      const cySub = db.listPage("doc-A", { root: "cy-A", pageSize: 200 });
+      ck(cySub.certificates.some((c) => c.id === "cy-B"), "C6 : sous-arbre de A borné (B listé, aucune boucle infinie)");
     } finally {
       if (raw) { try { raw.close(); } catch (_) {} }
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}

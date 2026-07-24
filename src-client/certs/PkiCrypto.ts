@@ -40,11 +40,19 @@
    par nous ni par le serveur).
    ============================================================================= */
 export class PkiCrypto {
-  /** Version du schéma de dérivation/chiffrement (colonne kdf_version + préfixe des blobs). */
+  /** Version du schéma de dérivation/chiffrement (colonne kdf_version + préfixe des blobs SANS AAD). */
   static readonly KDF_VERSION = "v1";
+  /** Préfixe des blobs chiffrés AVEC additionalData (AAD) — durcissement C9 : lie un `key_enc` à
+      (cert, coffre). Format `v2:<iv>:<ct>`, distinct du `v1:…` historique (SANS AAD) → les anciens
+      blobs restent déchiffrables (rétro-compat NON-CASSANTE). */
+  static readonly BLOB_V2 = "v2";
   /** Itérations PBKDF2 par défaut à l'INITIALISATION (décision Q1 : ≥ 600 000 —
       les documents existants gardent leur valeur stockée, relue à chaque dérivation). */
   static readonly DEFAULT_ITERS = 600000;
+  /** Longueur MINIMALE d'une NOUVELLE phrase (C8) — appliquée à la saisie (init, changement de phrase,
+      création d'un coffre) AVANT la dérivation de la KEK. Ne concerne JAMAIS une phrase EXISTANTE
+      (déverrouillage/reprise/champ « actuelle »). Constante PARTAGÉE (la vue s'y réfère). */
+  static readonly MIN_PASSPHRASE_LEN = 12;
 
   /** WebCrypto complet disponible ? `crypto.subtle` n'existe que dans un CONTEXTE SÉCURISÉ
       (HTTPS ou localhost) — servi en HTTP sur un hôte de LAN, le navigateur le retire et
@@ -103,7 +111,7 @@ export class PkiCrypto {
       `unwrapKey(…, extractable:false)` : la DEK naît NON extractible dans le moteur
       WebCrypto, ses octets ne passent JAMAIS par la mémoire JS. */
   static async unwrapDek(kek: CryptoKey, wrappedDek: string): Promise<CryptoKey> {
-    const { iv, ciphertext } = PkiCrypto.parseBlob(wrappedDek);
+    const { iv, ciphertext } = PkiCrypto.parseBlob(wrappedDek);   // `wrapped_dek` est TOUJOURS v1 (sans AAD)
     try {
       return await crypto.subtle.unwrapKey(
         "raw", ciphertext as BufferSource, kek,
@@ -125,7 +133,7 @@ export class PkiCrypto {
       extractible (wrapKey l'exige) mais TRANSITOIRE et jamais exporté vers JS — les
       octets voyagent de blob à blob à l'intérieur du moteur WebCrypto. */
   static async rewrapDek(oldKek: CryptoKey, newKek: CryptoKey, wrappedDek: string): Promise<string> {
-    const { iv, ciphertext } = PkiCrypto.parseBlob(wrappedDek);
+    const { iv, ciphertext } = PkiCrypto.parseBlob(wrappedDek);   // `wrapped_dek` est TOUJOURS v1 (sans AAD)
     let transient: CryptoKey;
     try {
       transient = await crypto.subtle.unwrapKey(
@@ -141,26 +149,45 @@ export class PkiCrypto {
     return PkiCrypto.wrapDek(newKek, transient);
   }
 
-  /** Chiffre un secret (clé privée PEM/PKCS#8, graine, ou DEK b64) → `v1:<iv>:<ct>` (base64).
-      Deux appels sur le même clair produisent des sorties DIFFÉRENTES (IV aléatoire). Utilisé
-      avec la DEK (clés privées) ET avec la KEK (enveloppe de la DEK) — même format, autre clé. */
-  static async encryptSecret(key: CryptoKey, plainText: string): Promise<string> {
+  /** Chiffre un secret (clé privée PEM/PKCS#8, graine, ou DEK b64) → base64. Deux appels sur le même clair
+      produisent des sorties DIFFÉRENTES (IV aléatoire). Utilisé avec la DEK (clés privées) ET avec la KEK
+      (enveloppe de la DEK) — même format, autre clé.
+
+      DURCISSEMENT C9 (NON-CASSANT) — additionalData (AAD) FACULTATIF :
+      - `aad` FOURNI → blob `v2:<iv>:<ct>`, l'AAD est authentifié par AES-GCM (il LIE le chiffré à un contexte,
+        ex. `(cert_id, vault_id)` : permuter deux `key_enc` d'un même coffre casse alors l'authentification GCM) ;
+      - `aad` ABSENT → blob `v1:<iv>:<ct>` comme avant (rétro-compat des appels historiques sans AAD).
+      Le préfixe encode donc le mode, ce qui rend le déchiffrement rétro-compatible (cf. decryptSecret). */
+  static async encryptSecret(key: CryptoKey, plainText: string, aad?: string): Promise<string> {
     const iv = new Uint8Array(12); // 96 bits : taille nominale GCM, unique par chiffrement
     crypto.getRandomValues(iv);
-    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, new TextEncoder().encode(plainText));
-    return PkiCrypto.KDF_VERSION + ":" + PkiCrypto.toB64(iv) + ":" + PkiCrypto.toB64(new Uint8Array(ciphertext));
+    const useAad = aad != null;   // fourni (même vide) → v2 ; absent → v1 (comportement historique)
+    const params: AesGcmParams = { name: "AES-GCM", iv: iv as BufferSource };
+    if (useAad) params.additionalData = new TextEncoder().encode(aad) as BufferSource;
+    const ciphertext = await crypto.subtle.encrypt(params, key, new TextEncoder().encode(plainText));
+    const version = useAad ? PkiCrypto.BLOB_V2 : PkiCrypto.KDF_VERSION;
+    return version + ":" + PkiCrypto.toB64(iv) + ":" + PkiCrypto.toB64(new Uint8Array(ciphertext));
   }
 
-  /** Déchiffre une chaîne produite par encryptSecret(). Jette une erreur EXPLICITE (sans
-      aucune donnée sensible) si le format est inconnu, la clé différente ou le contenu altéré. */
-  static async decryptSecret(key: CryptoKey, stored: string): Promise<string> {
-    const { iv, ciphertext } = PkiCrypto.parseBlob(stored);
+  /** Déchiffre une chaîne produite par encryptSecret(). Jette une erreur EXPLICITE (sans aucune donnée
+      sensible) si le format est inconnu, la clé différente ou le contenu altéré.
+
+      DURCISSEMENT C9 (NON-CASSANT) — le mode est décidé par le PRÉFIXE de version stocké, PAS par l'appelant :
+      - blob `v1` → déchiffré SANS AAD, MÊME si un `aad` est passé (les anciens blobs n'en portent pas → il faut
+        rester capable de les lire indéfiniment : c'est la clé de la rétro-compat) ;
+      - blob `v2` → déchiffré AVEC l'`aad` fourni ; il ÉCHOUE (GCM) si l'AAD est absent ou incorrect.
+      Un appelant peut donc TOUJOURS transmettre l'AAD attendu : il n'est consommé que pour les blobs v2. */
+  static async decryptSecret(key: CryptoKey, stored: string, aad?: string): Promise<string> {
+    const { version, iv, ciphertext } = PkiCrypto.parseBlob(stored);
     try {
-      const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, ciphertext as BufferSource);
+      const params: AesGcmParams = { name: "AES-GCM", iv: iv as BufferSource };
+      // AAD utilisé UNIQUEMENT pour les blobs v2 : un v1 (ancien, sans AAD) ne doit jamais en recevoir.
+      if (version === PkiCrypto.BLOB_V2 && aad != null) params.additionalData = new TextEncoder().encode(aad) as BufferSource;
+      const plain = await crypto.subtle.decrypt(params, key, ciphertext as BufferSource);
       return new TextDecoder().decode(plain);
     } catch {
-      // GCM refuse l'authentification : clé différente (mauvaise phrase) ou donnée altérée. Message
-      // SANS détail cryptographique — il n'y a rien à divulguer.
+      // GCM refuse l'authentification : clé différente (mauvaise phrase), AAD manquant/incorrect, ou donnée
+      // altérée. Message SANS détail cryptographique — il n'y a rien à divulguer.
       throw new Error("PkiCrypto : déchiffrement refusé (clé différente ou donnée altérée)");
     }
   }
@@ -178,14 +205,15 @@ export class PkiCrypto {
     return PkiCrypto.KDF_VERSION + ":" + PkiCrypto.toB64(iv) + ":" + PkiCrypto.toB64(new Uint8Array(ciphertext));
   }
 
-  /** Découpe un blob `v1:<iv>:<ct>` (format partagé par key_enc ET wrapped_dek). Jette une
-      erreur explicite si le format est inconnu — donnée corrompue ou version future. */
-  private static parseBlob(stored: string): { iv: Uint8Array; ciphertext: Uint8Array } {
+  /** Découpe un blob `v1:<iv>:<ct>` (SANS AAD) ou `v2:<iv>:<ct>` (AVEC AAD) — formats partagés par key_enc ;
+      `wrapped_dek` reste toujours v1. Renvoie la VERSION détectée (le déchiffrement en dépend, cf. decryptSecret).
+      Jette une erreur explicite si le format est inconnu — donnée corrompue ou version future. */
+  private static parseBlob(stored: string): { version: string; iv: Uint8Array; ciphertext: Uint8Array } {
     const parts = typeof stored === "string" ? stored.split(":") : [];
-    if (parts.length !== 3 || parts[0] !== PkiCrypto.KDF_VERSION) {
+    if (parts.length !== 3 || (parts[0] !== PkiCrypto.KDF_VERSION && parts[0] !== PkiCrypto.BLOB_V2)) {
       throw new Error("PkiCrypto : format de blob chiffré inconnu — donnée corrompue ou version future");
     }
-    return { iv: PkiCrypto.fromB64(parts[1]), ciphertext: PkiCrypto.fromB64(parts[2]) };
+    return { version: parts[0], iv: PkiCrypto.fromB64(parts[1]), ciphertext: PkiCrypto.fromB64(parts[2]) };
   }
 
   /* --------------------------------------------------------------------------

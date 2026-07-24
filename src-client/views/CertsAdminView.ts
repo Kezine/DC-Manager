@@ -303,9 +303,18 @@ export class CertsAdminView {
     return vaultId;
   }
 
-  /** Chiffre un secret POUR un coffre (l'appelant met le MÊME `vault_id` dans le PUT — invariant §11.5). */
-  private encryptForVault(vaultId: string, clear: string): Promise<string> {
-    return PkiCrypto.encryptSecret(this.vaultKey(vaultId), clear);
+  /** AAD déterministe liant un `key_enc` à (cert, coffre) — durcissement C9. Passé à AES-GCM (additionalData) :
+      permuter deux `key_enc` d'un même coffre casse alors l'authentification GCM au déchiffrement (au lieu d'une
+      détection tardive à la signature). Séparateur \x1f (U+001F, unit separator) NON collisionnable avec un id/slug. */
+  private static keyAad(certId: string, vaultId: string): string {
+    return certId + "\x1f" + vaultId;
+  }
+
+  /** Chiffre un secret POUR un coffre (l'appelant met le MÊME `vault_id` dans le PUT — invariant §11.5). C9 :
+      le blob produit est LIÉ à (certId, vaultId) via AAD → format v2. `certId` DOIT être l'id RÉELLEMENT écrit
+      dans le `save` (un renouvellement crée un NOUVEL id via newId() — c'est CE nouvel id, pas `renewed_from`). */
+  private encryptForVault(vaultId: string, clear: string, certId: string): Promise<string> {
+    return PkiCrypto.encryptSecret(this.vaultKey(vaultId), clear, CertsAdminView.keyAad(certId, vaultId));
   }
 
   /** Coffre CIBLE par DÉFAUT d'une création selon le kind (cadrage §11.2, v1) : une CA RACINE va dans le coffre
@@ -1357,6 +1366,16 @@ export class CertsAdminView {
     const all: CertExportRecord[] = allItems.map((c) => CertsAdminView.toExportRecord(c));
     const byId = new Map(allItems.map((c) => [c.id, c] as const));
 
+    // GARDE C1 : si le lot embarque des clés (`withKeys`) ET qu'au moins une CA RACINE détentrice d'une clé y
+    // figure, exiger UNE fois la garde TEXTUELLE racine (« Oui je révèle la clé racine ») — parité avec l'export
+    // UNITAIRE, qui l'exige déjà. Une seule confirmation couvre tout le lot ; un refus ABANDONNE l'export.
+    if (withKeys) {
+      const rootWithKey = part.included
+        .map((id) => byId.get(id))
+        .find((it): it is CertificateListItem => !!it && it.kind === "root-ca" && it.has_key);
+      if (rootWithKey && !(await this.confirmRevealPrivateKey(rootWithKey))) return;   // annulé → rien n'est produit
+    }
+
     const entries: Array<{ folder: string; artifacts: ExportArtifact[] }> = [];
     const errors: Array<{ label: string; reason: string }> = [];
     let done = 0;
@@ -1440,8 +1459,10 @@ export class CertsAdminView {
       commonName, organization, organizationalUnit, keyAlgo, days, sans: sans as X509San[], usage,
     });
     // RENOUVELLEMENT : la nouvelle feuille reste dans le MÊME coffre que celle qu'elle remplace (invariant §11.5).
-    const keyEnc = await this.encryptForVault(item.vault_id, gen.privateKeyPkcs8Pem);
-    await this.client!.save(CertsAdminView.newId(), {
+    // Id RÉEL du save calculé D'ABORD → il sert d'AAD au nouveau key_enc (C9 : c'est CE nouvel id, pas renewed_from).
+    const newLeafId = CertsAdminView.newId();
+    const keyEnc = await this.encryptForVault(item.vault_id, gen.privateKeyPkcs8Pem, newLeafId);
+    await this.client!.save(newLeafId, {
       // renouvellement : on PRÉSERVE le label (métadonnée d'affichage, possiblement ≠ CN) — le sujet, lui, suit le CN.
       kind: "leaf-tls", parent_id: ca.id, label: item.label, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
       serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
@@ -1492,8 +1513,8 @@ export class CertsAdminView {
             if (!cc) {
               const ca = await this.client!.getOne(item.parent_id);
               if (!ca.key_enc) throw new Error(I18n.t("certs.admin.leaf.noKey"));
-              // La clé de la CA parente est déchiffrée SELON SON coffre (cadrage §11.5).
-              cc = { ca, key: await PkiCrypto.decryptSecret(this.vaultKey(ca.vault_id), ca.key_enc) };
+              // La clé de la CA parente est déchiffrée SELON SON coffre (cadrage §11.5) ; AAD C9 (ca.id, ca.vault_id).
+              cc = { ca, key: await PkiCrypto.decryptSecret(this.vaultKey(ca.vault_id), ca.key_enc, CertsAdminView.keyAad(ca.id, ca.vault_id)) };
               caCache.set(item.parent_id, cc);
             }
             const clamped = CertValidity.clampDays(requested, cc.ca.not_after, Date.now());
@@ -1591,6 +1612,8 @@ export class CertsAdminView {
         errBox.style.display = "none";
         const pass = p1.value;
         if (pass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.common.passRequired")); return false; }
+        // C8 : longueur minimale d'une NOUVELLE phrase (avant toute dérivation de KEK).
+        if (pass.length < PkiCrypto.MIN_PASSPHRASE_LEN) { this.showError(errBox, I18n.t("certs.admin.common.passTooShort", { count: PkiCrypto.MIN_PASSPHRASE_LEN })); return false; }
         if (pass !== p2.value) { this.showError(errBox, I18n.t("certs.admin.init.passMismatch")); return false; }
         try {
           const salt = PkiCrypto.generateSaltB64();
@@ -1683,6 +1706,8 @@ export class CertsAdminView {
         const newPass = p1.value;
         if (currentPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.curRequired")); return failField(cur); }
         if (newPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.newRequired")); return failField(p1); }
+        // C8 : la NOUVELLE phrase doit atteindre la longueur minimale (la phrase ACTUELLE n'est PAS contrainte).
+        if (newPass.length < PkiCrypto.MIN_PASSPHRASE_LEN) { this.showError(errBox, I18n.t("certs.admin.common.passTooShort", { count: PkiCrypto.MIN_PASSPHRASE_LEN })); return failField(p1); }
         if (newPass !== p2.value) { this.showError(errBox, I18n.t("certs.admin.rekey.mismatch")); return failField(p2); }
         // COFFRE CIBLE : celui du sélecteur (multi-coffres) ou « default ». Instantané FRAIS à CHAQUE tentative
         // (masque la capture d'ouverture) : après un 409 « conflict », this.pkiState a été rafraîchi — la relance
@@ -1790,6 +1815,9 @@ export class CertsAdminView {
           if (!vaultExists) {
             const pass = p1!.value;
             if (pass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.common.passRequired")); return false; }
+            // C8 : phrase du coffre racine en CRÉATION = nouvelle phrase → longueur minimale (la REPRISE, plus bas,
+            // ouvre un coffre EXISTANT et n'est donc PAS contrainte).
+            if (pass.length < PkiCrypto.MIN_PASSPHRASE_LEN) { this.showError(errBox, I18n.t("certs.admin.common.passTooShort", { count: PkiCrypto.MIN_PASSPHRASE_LEN })); return false; }
             if (pass !== p2!.value) { this.showError(errBox, I18n.t("certs.admin.init.passMismatch")); return false; }
             const salt = PkiCrypto.generateSaltB64();
             const iters = PkiCrypto.DEFAULT_ITERS;
@@ -1815,8 +1843,10 @@ export class CertsAdminView {
             try {
               const detail = await this.client!.getOne(item.id);   // key_enc au GET unitaire seulement (invariant Q5)
               if (!detail.key_enc || detail.vault_id !== CertsAdminView.VAULT_DEFAULT) continue;   // déjà déplacée / plus de clé (autre onglet)
-              const clearKey = await PkiCrypto.decryptSecret(this.vaultKey(CertsAdminView.VAULT_DEFAULT), detail.key_enc);
-              const keyEnc = await this.encryptForVault(CertsAdminView.VAULT_ROOT, clearKey);
+              // Ancien blob (coffre « default ») : AAD C9 (detail.id, default) — ignoré s'il est encore v1 (ancien).
+              const clearKey = await PkiCrypto.decryptSecret(this.vaultKey(CertsAdminView.VAULT_DEFAULT), detail.key_enc, CertsAdminView.keyAad(detail.id, CertsAdminView.VAULT_DEFAULT));
+              // Re-chiffré POUR le coffre « root » (AAD (detail.id, root)) — le save écrit item.id (= detail.id).
+              const keyEnc = await this.encryptForVault(CertsAdminView.VAULT_ROOT, clearKey, detail.id);
               await this.client!.save(item.id, CertsAdminView.metadataInput(detail, { key_enc: keyEnc, vault_id: CertsAdminView.VAULT_ROOT }));
               moved++;
             } catch (e) { errors.push({ label: item.label, reason: CertsAdminView.errText(e) }); }
@@ -1891,8 +1921,9 @@ export class CertsAdminView {
           const organization = org.value.trim() || undefined;
           const organizationalUnit = ou.value.trim() || undefined;
           const gen = await X509Factory.createRootCa({ commonName, organization, organizationalUnit, keyAlgo, days: Number(days.value) });
-          const keyEnc = await this.encryptForVault(targetVault, gen.privateKeyPkcs8Pem);   // exige le coffre choisi DÉVERROUILLÉ (vaultKey jette sinon)
-          await this.client!.save(CertsAdminView.newId(), {
+          const newCaId = CertsAdminView.newId();   // id RÉEL du save → AAD du key_enc (C9)
+          const keyEnc = await this.encryptForVault(targetVault, gen.privateKeyPkcs8Pem, newCaId);   // exige le coffre choisi DÉVERROUILLÉ (vaultKey jette sinon)
+          await this.client!.save(newCaId, {
             kind: "root-ca", parent_id: null, label: lbl, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans: [],
@@ -1964,10 +1995,11 @@ export class CertsAdminView {
         try {
           const detail = await this.client!.getOne(ca.id);
           if (!detail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
-          // Clé de la CA déchiffrée SELON SON coffre ; la nouvelle feuille va dans le coffre de l'objet renouvelé
-          // (mode 1) ou, en création, dans le coffre par défaut du kind (leaf → « default »). Invariant §11.5.
-          const caKeyPem = await PkiCrypto.decryptSecret(this.vaultKey(detail.vault_id), detail.key_enc);
+          // Clé de la CA déchiffrée SELON SON coffre (AAD C9 (detail.id, detail.vault_id)) ; la nouvelle feuille va
+          // dans le coffre de l'objet renouvelé (mode 1) ou, en création, dans le coffre par défaut du kind. §11.5.
+          const caKeyPem = await PkiCrypto.decryptSecret(this.vaultKey(detail.vault_id), detail.key_enc, CertsAdminView.keyAad(detail.id, detail.vault_id));
           const targetVault = renewOf ? renewOf.vault_id : this.targetVaultFor("leaf-tls");
+          const newLeafId = CertsAdminView.newId();   // id RÉEL du save → AAD du nouveau key_enc (C9)
           const keyAlgo = algo.value as X509KeyAlgo;
           const organization = org.value.trim() || undefined;
           const organizationalUnit = ou.value.trim() || undefined;
@@ -1975,8 +2007,8 @@ export class CertsAdminView {
             caCertPem: detail.public_pem || "", caPrivateKeyPkcs8Pem: caKeyPem,
             commonName, organization, organizationalUnit, keyAlgo, days: Number(days.value), sans: sans as X509San[], usage: usage.value as LeafUsage,
           });
-          const keyEnc = await this.encryptForVault(targetVault, gen.privateKeyPkcs8Pem);
-          await this.client!.save(CertsAdminView.newId(), {
+          const keyEnc = await this.encryptForVault(targetVault, gen.privateKeyPkcs8Pem, newLeafId);
+          await this.client!.save(newLeafId, {
             kind: "leaf-tls", parent_id: ca.id, label: lbl, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans,
@@ -2062,7 +2094,7 @@ export class CertsAdminView {
           // Clé de la CA PARENTE chargée puis déchiffrée SELON SON COFFRE (getOne unitaire seul porte key_enc, invariant Q5).
           const ca = await this.client!.getOne(parentCa.id);
           if (!ca.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
-          const caKeyPem = await PkiCrypto.decryptSecret(this.vaultKey(ca.vault_id), ca.key_enc);
+          const caKeyPem = await PkiCrypto.decryptSecret(this.vaultKey(ca.vault_id), ca.key_enc, CertsAdminView.keyAad(ca.id, ca.vault_id));
           const targetVault = this.targetVaultFor("intermediate-ca");   // v1 : « default » (seul « root-ca » vise le coffre root)
           const keyAlgo = algo.value as X509KeyAlgo;
           const organization = org.value.trim() || undefined;
@@ -2077,8 +2109,9 @@ export class CertsAdminView {
             permittedDns: permittedDns.length ? permittedDns : undefined,
           });
           // Clé de la SOUS-CA chiffrée POUR son coffre cible AVANT envoi (le serveur ne reçoit qu'un blob opaque).
-          const keyEnc = await this.encryptForVault(targetVault, gen.privateKeyPkcs8Pem);
-          await this.client!.save(CertsAdminView.newId(), {
+          const newSubCaId = CertsAdminView.newId();   // id RÉEL du save → AAD du key_enc (C9)
+          const keyEnc = await this.encryptForVault(targetVault, gen.privateKeyPkcs8Pem, newSubCaId);
+          await this.client!.save(newSubCaId, {
             kind: "intermediate-ca", parent_id: parentCa.id, label: lbl, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans: [],
@@ -2176,15 +2209,15 @@ export class CertsAdminView {
         try {
           const caDetail = await this.client!.getOne(ca.id);
           if (!caDetail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
-          // Clés déchiffrées SELON LEUR coffre respectif (cadrage §11.5).
-          const oldCaKey = await PkiCrypto.decryptSecret(this.vaultKey(caDetail.vault_id), caDetail.key_enc);
+          // Clés déchiffrées SELON LEUR coffre respectif (cadrage §11.5) ; AAD C9 (id, vault_id) de chaque objet.
+          const oldCaKey = await PkiCrypto.decryptSecret(this.vaultKey(caDetail.vault_id), caDetail.key_enc, CertsAdminView.keyAad(caDetail.id, caDetail.vault_id));
           // Clé de la CA PARENTE (intermédiaire seulement) : elle signe le prolongement ET la rotation.
           let parentDetail: CertificateDetail | null = null;
           let parentKey: string | null = null;
           if (isIntermediate) {
             parentDetail = await this.client!.getOne(ca.parent_id!);
             if (!parentDetail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
-            parentKey = await PkiCrypto.decryptSecret(this.vaultKey(parentDetail.vault_id), parentDetail.key_enc);
+            parentKey = await PkiCrypto.decryptSecret(this.vaultKey(parentDetail.vault_id), parentDetail.key_enc, CertsAdminView.keyAad(parentDetail.id, parentDetail.vault_id));
           }
           const cn = CertsAdminView.parseDnField(ca.subject, "CN") || ca.label;
           const organization = CertsAdminView.parseDnField(ca.subject, "O") || undefined;
@@ -2215,7 +2248,9 @@ export class CertsAdminView {
                 })
               : await X509Factory.createRootCa({ commonName: cn, organization, organizationalUnit, keyAlgo, days: requested });
             // ROTATION : la nouvelle CA garde le COFFRE de l'ANCIENNE (cadrage §11.5 — même autorité, même compartiment).
-            const newKeyEnc = await this.encryptForVault(ca.vault_id, gen.privateKeyPkcs8Pem);
+            // Id RÉEL du save calculé D'ABORD → il sert d'AAD au nouveau key_enc (C9).
+            const newCaId = CertsAdminView.newId();
+            const newKeyEnc = await this.encryptForVault(ca.vault_id, gen.privateKeyPkcs8Pem, newCaId);
             // CROSS-SIGNATURE (phase 6) : l'ANCIENNE CA certifie la clé de la NOUVELLE → recouvrement transitoire
             // (un client/déploiement qui fait encore confiance à l'ancienne valide les nouveaux certs). Généré AVANT
             // la révocation (on a encore la clé de l'ancienne). Échéance rognée à celle de l'ancienne (crossSignCa).
@@ -2223,7 +2258,6 @@ export class CertsAdminView {
             try {
               crossPem = (await X509Factory.crossSignCa({ subjectCaCertPem: gen.certPem, issuerCaCertPem: caDetail.public_pem || "", issuerCaPrivateKeyPkcs8Pem: oldCaKey, days: requested })).certPem;
             } catch (_) { crossPem = undefined; }   // cross-signature best-effort : son échec ne bloque pas la rotation
-            const newCaId = CertsAdminView.newId();
             await this.client!.save(newCaId, {
               kind: ca.kind, parent_id: ca.parent_id, label: ca.label, subject: ca.subject,
               serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
@@ -2309,8 +2343,9 @@ export class CertsAdminView {
           const kp = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]) as CryptoKeyPair;
           const pub = await SshKeyMaterial.ed25519PublicRaw(kp.publicKey);
           const publicLine = OpenSshEncoder.ed25519PublicKeyLine(pub, comment);
-          const keyEnc = await this.encryptForVault(targetVault, await this.pkcs8Pem(kp.privateKey));
-          await this.client!.save(CertsAdminView.newId(), {
+          const newSshId = CertsAdminView.newId();   // id RÉEL du save → AAD du key_enc (C9)
+          const keyEnc = await this.encryptForVault(targetVault, await this.pkcs8Pem(kp.privateKey), newSshId);
+          await this.client!.save(newSshId, {
             kind, parent_id: null, label: comment, subject: comment,
             serial: null, not_before: null, not_after: null, fingerprint: null,
             key_algo: "ed25519", public_pem: publicLine, key_enc: keyEnc, revoked_at: null, sans: [],
@@ -2361,9 +2396,9 @@ export class CertsAdminView {
         try {
           const detail = await this.client!.getOne(ca.id);
           if (!detail.key_enc) { this.showError(errBox, I18n.t("certs.admin.sshCert.noKey")); return false; }
-          // Clé de la CA SSH déchiffrée SELON SON coffre ; le nouveau certificat va dans le coffre de l'objet
-          // renouvelé (mode 1) ou dans le coffre par défaut du kind (invariant §11.5 — parité leafModal).
-          const caKeyPem = await PkiCrypto.decryptSecret(this.vaultKey(detail.vault_id), detail.key_enc);
+          // Clé de la CA SSH déchiffrée SELON SON coffre (AAD C9 (detail.id, detail.vault_id)) ; le nouveau certificat
+          // va dans le coffre de l'objet renouvelé (mode 1) ou dans le coffre par défaut du kind (§11.5 — parité leafModal).
+          const caKeyPem = await PkiCrypto.decryptSecret(this.vaultKey(detail.vault_id), detail.key_enc, CertsAdminView.keyAad(detail.id, detail.vault_id));
           const targetVault = renewOf ? renewOf.vault_id : this.targetVaultFor("ssh-cert");
           const caSeed = await this.seedFromPkcs8Pem(caKeyPem);
           const caSignKey = await SshKeyMaterial.importEd25519PrivateForSigning(caSeed);
@@ -2375,13 +2410,16 @@ export class CertsAdminView {
           const nowSec = Math.floor(Date.now() / 1000);
           const validAfter = nowSec - 300;   // tolérance d'horloge (5 min), parité X509Factory
           const validBefore = nowSec + Math.floor(nbDays) * 86400;
-          const serial = crypto.getRandomValues(new Uint32Array(1))[0];
+          // C10a : serial SSH sur 64 bits (le champ wire est u64 — un Uint32 gaspillait la moitié de l'espace).
+          // OpenSshEncoder.certificate accepte number|bigint et encode en uint64 ; String(bigint) rend le décimal.
+          const serial = crypto.getRandomValues(new BigUint64Array(1))[0];
           const enc = await OpenSshEncoder.certificate({
             subjectPublicKey: subPub, serial, type: type.value as SshCertType, keyId: id,
             principals, validAfter, validBefore, caPublicKey: caPub, caPrivateKey: caSignKey, comment: id,
           });
-          const keyEnc = await this.encryptForVault(targetVault, subPkcs8Pem);
-          await this.client!.save(CertsAdminView.newId(), {
+          const newSshCertId = CertsAdminView.newId();   // id RÉEL du save → AAD du key_enc (C9)
+          const keyEnc = await this.encryptForVault(targetVault, subPkcs8Pem, newSshCertId);
+          await this.client!.save(newSshCertId, {
             kind: "ssh-cert", parent_id: ca.id, label: id, subject: id,
             serial: String(serial), not_before: new Date(validAfter * 1000).toISOString(), not_after: new Date(validBefore * 1000).toISOString(),
             fingerprint: null, key_algo: "ed25519", public_pem: enc.line, key_enc: keyEnc, revoked_at: null,
@@ -2761,7 +2799,9 @@ export class CertsAdminView {
   private async decryptKeyOf(item: { id: string; vault_id: string }): Promise<string> {
     const detail = await this.client!.getOne(item.id);
     if (!detail.key_enc) throw new Error(I18n.t("certs.admin.leaf.noKey"));
-    return PkiCrypto.decryptSecret(this.vaultKey(item.vault_id), detail.key_enc);
+    // C9 : AAD (item.id, item.vault_id) — utilisé UNIQUEMENT si le blob est v2 (récent) ; un blob v1 (ancien)
+    // se déchiffre sans, transparent pour l'appelant (cf. PkiCrypto.decryptSecret).
+    return PkiCrypto.decryptSecret(this.vaultKey(item.vault_id), detail.key_enc, CertsAdminView.keyAad(item.id, item.vault_id));
   }
 
   /** Clé privée WebCrypto (extractible) → PKCS#8 PEM (via PemConverter de @peculiar, déjà au graphe). */

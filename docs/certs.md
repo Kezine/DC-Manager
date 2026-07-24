@@ -226,6 +226,17 @@ manques à combler :
   DEK** et ne ré-emballe que `wrapped_dek` — aucun `key_enc` n'est touché (cf. « Changer la
   phrase maître » dans « Procédures »). Deux gestes à ne pas confondre : l'un remplace la
   clé des données (interdit), l'autre remplace seulement ce qui la protège (permis).
+- **Changer une phrase NE rotationne PAS le secret (DEK conservée + enveloppes archivées).**
+  `PUT /pki/rekey` (et `/pki/vaults/:id/rekey`) **ré-emballe la MÊME DEK** sous une nouvelle KEK et
+  **ARCHIVE** l'ancienne enveloppe dans `pki_envelope_history` (filet de récupération). Conséquence
+  ASSUMÉE : une **ANCIENNE phrase compromise** + un accès à `certs.db` suffit à re-dériver l'ancienne
+  KEK, déballer une enveloppe **archivée**, en sortir la DEK et déchiffrer **TOUTES** les clés du
+  coffre — **indéfiniment**. C'est inhérent au design **O(1)** : la phrase protège la DEK, elle ne
+  **chiffre pas** les `key_enc`. La VRAIE rotation de secret (invalider pour de bon une ancienne
+  phrase) est la **cérémonie de coffre** (« Protéger les clés racine… », futur déplacement de coffre) :
+  elle tire une **DEK FRAÎCHE** et **re-chiffre** les clés déplacées — l'ancienne enveloppe archivée ne
+  donne alors plus accès à ces clés-là. Choisir la cérémonie, pas seulement le changement de phrase,
+  quand une phrase a pu fuiter.
 - **CA de signature SSH ed25519 uniquement** (`OpenSshEncoder`, décision Q3) : la
   signature déterministe d'ed25519 est ce qui rend la validation croisée byte-à-byte
   possible. Les paires RSA restent supportées comme **clés simples** et comme **sujets**

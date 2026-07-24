@@ -361,6 +361,29 @@ module.exports = async () => {
     let badFmt = false;
     try { await PkiCrypto.decryptSecret(dek, "v9:a:b"); } catch (_) { badFmt = true; }
     ck(badFmt, "format de version inconnue → erreur explicite");
+
+    // -------- C9 : AAD (additionalData) sur key_enc — NON-CASSANT (v1 rétro-compat, v2 lié à son AAD) --------
+    ck.eq(PkiCrypto.BLOB_V2, "v2", "C9 : préfixe des blobs AVEC AAD = « v2 »");
+    const AAD_A = "cert-1\x1fdefault";
+    const AAD_B = "cert-2\x1fdefault";   // AAD différent (autre cert)
+    // (a) Un blob v1 (chiffré SANS AAD, comme tout l'existant) reste déchiffrable — AVEC ou SANS AAD passé.
+    ck(/^v1:/.test(keyEnc), "C9 : encryptSecret sans AAD → blob v1 (rétro-compat)");
+    ck.eq(await PkiCrypto.decryptSecret(dek, keyEnc), pem, "C9 : blob v1 déchiffré SANS AAD (comportement historique)");
+    ck.eq(await PkiCrypto.decryptSecret(dek, keyEnc, AAD_A), pem, "C9 : blob v1 déchiffré même si un AAD est fourni (v1 ignore l'AAD → NON-CASSANT)");
+    // (b) Un blob v2 chiffré avec AAD `A` : déchiffre avec `A`, ÉCHOUE avec `A'`≠A ou sans AAD.
+    const keyEncV2 = await PkiCrypto.encryptSecret(dek, pem, AAD_A);
+    ck(/^v2:/.test(keyEncV2), "C9 : encryptSecret AVEC AAD → blob v2");
+    ck.eq(await PkiCrypto.decryptSecret(dek, keyEncV2, AAD_A), pem, "C9 : blob v2 déchiffré avec le BON AAD");
+    let v2WrongAad = false;
+    try { await PkiCrypto.decryptSecret(dek, keyEncV2, AAD_B); } catch (_) { v2WrongAad = true; }
+    ck(v2WrongAad, "C9 : blob v2 + AAD DIFFÉRENT → déchiffrement refusé (permutation de key_enc détectée par GCM)");
+    let v2NoAad = false;
+    try { await PkiCrypto.decryptSecret(dek, keyEncV2); } catch (_) { v2NoAad = true; }
+    ck(v2NoAad, "C9 : blob v2 SANS AAD → déchiffrement refusé");
+    // (c) Round-trip v2 nominal : IV aléatoire → deux chiffrements du même clair diffèrent.
+    const keyEncV2Bis = await PkiCrypto.encryptSecret(dek, pem, AAD_A);
+    ck(keyEncV2Bis !== keyEncV2, "C9 : v2 IV aléatoire → deux chiffrements du même clair diffèrent");
+    ck.eq(await PkiCrypto.decryptSecret(dek, keyEncV2Bis, AAD_A), pem, "C9 : round-trip v2 nominal (re-déchiffrable avec son AAD)");
   }
   });
 
@@ -498,6 +521,10 @@ module.exports = async () => {
     ck(sanJson.some((e) => e.type === "ip"), "feuille : SAN ip présent");
     const leafAki = leafCert.getExtension(x509.AuthorityKeyIdentifierExtension);
     ck(!!leafAki && leafAki.keyId === caSki.keyId, "feuille : AuthorityKeyIdentifier = SubjectKeyIdentifier de la CA");
+    // C4 : une feuille EC (ECDSA) ne fait PAS de key transport → KeyUsage = digitalSignature SEUL (pas keyEncipherment).
+    const leafKu = leafCert.getExtension(x509.KeyUsagesExtension);
+    ck(!!leafKu && (leafKu.usages & x509.KeyUsageFlags.digitalSignature) !== 0 && (leafKu.usages & x509.KeyUsageFlags.keyEncipherment) === 0,
+      "C4 : feuille EC → KeyUsage digitalSignature seul (keyEncipherment absent, RFC 5480)");
 
     /* -------- Usages client / both -------- */
     const leafClient = await X509Factory.issueLeaf({
@@ -642,6 +669,51 @@ module.exports = async () => {
     // Sans NameConstraints sur l'existant → pas d'extension ajoutée par le re-sign.
     ck.eq(X509Factory.readCaPermittedDns(reInter.certPem), null, "reSignIntermediateCa : pas de NameConstraints inventés (existant sans extension)");
 
+    /* -------- C2 : crossSignCa REPREND l'autorité du sujet (pathLen + NameConstraints) -------- */
+    // Cross-signer une SOUS-CA contrainte (pathLen 0 + NameConstraints) : le cross-cert doit porter le MÊME pathLen
+    // et la MÊME extension NC, sinon élévation d'autorité pendant la transition (le chemin via le cross perdrait les bornes).
+    const crossSub = await X509Factory.crossSignCa({ subjectCaCertPem: ncInter.certPem, issuerCaCertPem: ca.certPem, issuerCaPrivateKeyPkcs8Pem: ca.privateKeyPkcs8Pem, days: 100 });
+    const crossSubCert = new x509.X509Certificate(crossSub.certPem);
+    ck.eq(crossSubCert.getExtension(x509.BasicConstraintsExtension).pathLength, 0, "C2 : crossSignCa reprend le pathLen du sujet (0), PAS illimité");
+    const crossSubNc = crossSubCert.getExtension("2.5.29.30");
+    ck(!!crossSubNc && crossSubNc.critical === true, "C2 : crossSignCa reprend l'extension NameConstraints (critique)");
+    ck.eq((X509Factory.readCaPermittedDns(crossSub.certPem) || []).join(","), ".cluster-b.lan,cluster-b.lan", "C2 : crossSignCa préserve les suffixes DNS permis (copie brute)");
+    // Un cross-sign de RACINE (sujet sans pathLen ni NC) n'invente rien : pathLen absent (illimité préservé).
+    const crossRootBasic = crossCert.getExtension(x509.BasicConstraintsExtension);   // crossCert = cross d'une RACINE (plus haut)
+    ck(crossRootBasic.pathLength === undefined || crossRootBasic.pathLength === null, "C2 : cross-sign d'une racine → pas de pathLen inventé (illimité préservé)");
+
+    /* -------- C5 : issueLeaf vérifie les NameConstraints du parent (SAN dns) + helper PUR dnsUnderConstraints -------- */
+    ck.eq(X509Factory.dnsUnderConstraints("exemple.lan", ["exemple.lan"]), true, "C5 dnsUnderConstraints : nom EXACT sous suffixe nu");
+    ck.eq(X509Factory.dnsUnderConstraints("x.exemple.lan", ["exemple.lan"]), true, "C5 dnsUnderConstraints : sous-domaine sous suffixe nu");
+    ck.eq(X509Factory.dnsUnderConstraints("x.exemple.lan", [".exemple.lan"]), true, "C5 dnsUnderConstraints : sous-domaine sous suffixe pointé");
+    ck.eq(X509Factory.dnsUnderConstraints("exemple.lan", [".exemple.lan"]), false, "C5 dnsUnderConstraints : nom nu PAS couvert par suffixe pointé");
+    ck.eq(X509Factory.dnsUnderConstraints("autre.lan", ["exemple.lan"]), false, "C5 dnsUnderConstraints : hors suffixe → faux");
+    ck.eq(X509Factory.dnsUnderConstraints("notexemple.lan", ["exemple.lan"]), false, "C5 dnsUnderConstraints : faux suffixe (notexemple.lan) → faux");
+    ck.eq(X509Factory.dnsUnderConstraints("X.Exemple.LAN", ["exemple.lan"]), true, "C5 dnsUnderConstraints : casse ignorée (DNS insensible)");
+    ck.eq(X509Factory.dnsUnderConstraints("quoi.que.ce.soit", []), true, "C5 dnsUnderConstraints : liste vide → aucune contrainte (vrai)");
+    // Intégration : feuille sous ncInter (permis .cluster-b.lan / cluster-b.lan). SAN dns HORS suffixe → REFUS PRÉCOCE.
+    let sanOutErr = null;
+    try { await X509Factory.issueLeaf({ caCertPem: ncInter.certPem, caPrivateKeyPkcs8Pem: ncInter.privateKeyPkcs8Pem, commonName: "hors", keyAlgo: "ec-p256", days: 30, sans: [{ san_type: "dns", value: "service.autre.lan" }] }); } catch (e) { sanOutErr = e.message; }
+    ck(!!sanOutErr && /contraintes de nom/.test(sanOutErr), "C5 : feuille avec SAN dns HORS permittedDns de la CA → émission REFUSÉE (échec précoce, pas à la connexion)");
+    // SAN dns SOUS le suffixe permis → émise normalement.
+    const sanOkLeaf = await X509Factory.issueLeaf({ caCertPem: ncInter.certPem, caPrivateKeyPkcs8Pem: ncInter.privateKeyPkcs8Pem, commonName: "node.cluster-b.lan", keyAlgo: "ec-p256", days: 30, sans: [{ san_type: "dns", value: "node.cluster-b.lan" }] });
+    ck(/-----BEGIN CERTIFICATE-----/.test(sanOkLeaf.certPem), "C5 : feuille avec SAN dns SOUS permittedDns → émise");
+    // Les SAN NON-dns ne sont pas contraints (v1) : un SAN ip quelconque passe même sous une CA à NameConstraints.
+    const sanIpLeaf = await X509Factory.issueLeaf({ caCertPem: ncInter.certPem, caPrivateKeyPkcs8Pem: ncInter.privateKeyPkcs8Pem, commonName: "node.cluster-b.lan", keyAlgo: "ec-p256", days: 30, sans: [{ san_type: "dns", value: "node.cluster-b.lan" }, { san_type: "ip", value: "10.9.9.9" }] });
+    ck(/-----BEGIN CERTIFICATE-----/.test(sanIpLeaf.certPem), "C5 : SAN ip non contraint (v1 ne borne que les dns) → émise");
+
+    /* -------- C10b : reSignIntermediateCa PRÉSERVE l'ABSENCE de pathLen (illimité, PAS resserré à 0) -------- */
+    // L'outil met toujours un pathLen ; on fabrique un cert SANS pathLen en réutilisant une CA auto-signée (pathLen
+    // absent comme une racine) comme cert « existant », re-signée sous le root (illimité → aucun plafond parent).
+    const noPathCa = await X509Factory.createRootCa({ commonName: "CA sans pathLen", keyAlgo: "ec-p256", days: 200 });
+    ck.eq(X509Factory.readCaPathLen(noPathCa.certPem), null, "C10b : la CA « existante » n'a pas de pathLen (illimité)");
+    const reNoPath = await X509Factory.reSignIntermediateCa({ existingCertPem: noPathCa.certPem, parentCertPem: ca.certPem, parentPrivateKeyPkcs8Pem: ca.privateKeyPkcs8Pem, days: 150 });
+    ck.eq(X509Factory.readCaPathLen(reNoPath.certPem), null, "C10b : reSignIntermediateCa PRÉSERVE l'absence de pathLen (pas resserré à 0)");
+    // GARDE conservée : un enfant « illimité » sous un parent à pathLen FINI (interDeep, pathLen 1) reste REFUSÉ.
+    let reUnlimErr = null;
+    try { await X509Factory.reSignIntermediateCa({ existingCertPem: noPathCa.certPem, parentCertPem: interDeep.certPem, parentPrivateKeyPkcs8Pem: interDeep.privateKeyPkcs8Pem, days: 30 }); } catch (e) { reUnlimErr = e.message; }
+    ck(!!reUnlimErr && /(illimitée|trop élevée)/.test(reUnlimErr), "C10b : sous-CA illimitée sous un parent à pathLen fini → REFUSÉE (garde conservée)");
+
     /* -------- GUARD : une sous-CA ne peut vivre AU-DELÀ de sa CA parente -------- */
     let interGuardErr = null;
     try {
@@ -669,6 +741,10 @@ module.exports = async () => {
       sans: [{ san_type: "dns", value: "rsa.exemple.test" }],
     });
     ck.eq(await new x509.X509Certificate(rsaLeaf.certPem).verify({ publicKey: rsaCaCert.publicKey, signatureOnly: true }), true, "rsa-2048 : feuille signée par la CA vérifiée");
+    // C4 : une feuille RSA garde keyEncipherment (key transport RSA, conventionnel).
+    const rsaLeafKu = new x509.X509Certificate(rsaLeaf.certPem).getExtension(x509.KeyUsagesExtension);
+    ck(!!rsaLeafKu && (rsaLeafKu.usages & x509.KeyUsageFlags.digitalSignature) !== 0 && (rsaLeafKu.usages & x509.KeyUsageFlags.keyEncipherment) !== 0,
+      "C4 : feuille RSA → KeyUsage digitalSignature + keyEncipherment (key transport conservé)");
 
     /* -------- Deux racines successives → séries différentes (aléa) -------- */
     const caBis = await X509Factory.createRootCa({ commonName: "CA Racine bis", keyAlgo: "ec-p256", days: 1 });
@@ -1001,6 +1077,21 @@ module.exports = async () => {
     ck(!!revErr && /révoqué/i.test(revErr), "révoqué : pemCertificate refuse (garde-fou Q4)");
     let revFc = false; try { CertExports.pemFullchain(revoked, [root, inter, revoked]); } catch (_) { revFc = true; }
     ck(revFc, "révoqué : pemFullchain refuse");
+
+    // C3 : un ANCÊTRE révoqué (CA parente) exclut la chaîne — même si la FEUILLE est active (décision Q4 étendue).
+    const revokedInter = Object.assign({}, inter, { revoked_at: "2026-07-01T00:00:00Z" });
+    let ancFcErr = null; try { CertExports.pemFullchain(leaf, [root, revokedInter, leaf]); } catch (e) { ancFcErr = e.message; }
+    ck(!!ancFcErr && /émetteur révoqué/.test(ancFcErr) && ancFcErr.includes(inter.label), "C3 : fullchain d'une feuille ACTIVE dont la CA parente est révoquée → refus (nomme l'ancêtre)");
+    let ancScErr = null; try { CertExports.pemServeChain(leaf, [root, revokedInter, leaf]); } catch (e) { ancScErr = e.message; }
+    ck(!!ancScErr && /émetteur révoqué/.test(ancScErr), "C3 : pemServeChain refuse aussi une chaîne à ancêtre révoqué");
+    let ancCaErr = null; try { CertExports.pemCaChain(leaf, [root, revokedInter, leaf]); } catch (e) { ancCaErr = e.message; }
+    ck(!!ancCaErr && /émetteur révoqué/.test(ancCaErr), "C3 : pemCaChain refuse aussi une chaîne à ancêtre révoqué");
+    // Racine révoquée : la chaîne d'une feuille active la traversant est refusée (l'ancêtre le plus haut compte aussi).
+    const revokedRoot = Object.assign({}, root, { revoked_at: "2026-07-01T00:00:00Z" });
+    let ancRootErr = null; try { CertExports.pemFullchain(leaf, [revokedRoot, inter, leaf]); } catch (e) { ancRootErr = e.message; }
+    ck(!!ancRootErr && /émetteur révoqué/.test(ancRootErr), "C3 : racine révoquée dans la chaîne → fullchain refusé");
+    // Chaîne SAINE (aucun ancêtre révoqué) : toujours exportable (non-régression).
+    ck(/BEGIN CERTIFICATE/.test(CertExports.pemFullchain(leaf, all).content), "C3 : chaîne saine → fullchain exporté normalement (non-régression)");
   }
   });
 
