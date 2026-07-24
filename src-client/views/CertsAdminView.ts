@@ -1636,74 +1636,80 @@ export class CertsAdminView {
     return w;
   }
 
-  /** Axe 1 (FORCE de la phrase) — sur le champ p1 (NOUVELLE phrase) des 3 modales de création de phrase. Plus de
-      blocage dur : une phrase < WEAK_PASSPHRASE_LEN est PERMISE (responsabilité de l'utilisateur) mais SIGNALÉE
-      (gros warning) et le bouton « Valider » est TEMPORISÉ WEAK_PASSPHRASE_COOLDOWN_S secondes (compte à rebours
-      dans son libellé). len 0 → bouton désactivé (phrase requise), sans warning ni temporisation ; len ≥ seuil →
-      bouton actif, warning masqué, temporisation annulée. Une fois la temporisation ÉCOULÉE, l'utilisateur peut
-      valider une phrase faible (on NE re-temporise PAS tant qu'on reste dans la zone faible). Appelé depuis
-      `onReady` : `saveButton` est le btnSave PARTAGÉ du singleton `Modal` → on ANNULE d'abord la temporisation
-      d'une ouverture précédente (pas de fuite de timer), et la base du libellé est capturée par le compte à
-      rebours APRÈS que `Modal.open` l'a posée. */
-  private wireWeakPassphraseGuard(saveButton: HTMLButtonElement, passInput: HTMLInputElement, weakWarn: HTMLElement): void {
+  /** Gardes de saisie des 3 modales de CRÉATION de phrase (init / nouvelle phrase / coffre racine). UN seul point
+      de câblage (via `onReady`, car il pilote le btnSave INTERNE du singleton `Modal`) qui coordonne :
+
+      1. WARNING DE TAILLE (p1 < WEAK_PASSPHRASE_LEN) : affiché à la PERTE DE FOCUS de p1 (pas en direct pendant la
+         frappe), masqué dès qu'on ré-édite p1 ou si p1 atteint le seuil.
+      2. BOUTON « Valider » REFLÉTANT LA VALIDITÉ : actif SEULEMENT quand la confirmation MATCHE la phrase
+         (p1 === p2, tous deux non vides). TOUT changement du formulaire ré-évalue → le bouton se RÉINITIALISE
+         (se désactive) tant que ça ne matche pas, au lieu de rester actif puis d'échouer à la validation.
+      3. TEMPORISATION « anti-erreur » CONDITIONNELLE (WEAK_PASSPHRASE_COOLDOWN_S s, compte à rebours dans le
+         bouton) déclenchée une fois la confirmation ATTEINTE, SEULEMENT si l'entrée est À RISQUE : phrase FAIBLE
+         (< seuil) OU confirmation renseignée par COLLAGE (presse-papier possiblement erroné → clé « perdue » si
+         on valide une phrase inconnue). Une phrase assez longue ET TAPÉE → bouton actif dès que ça matche.
+      4. GARDE DE COLLAGE sur la CONFIRMATION : collé < CONFIRM_PASTE_MIN REFUSÉ (retape forcée → un mauvais collé
+         court est rattrapé par la comparaison) ; collé ≥ seuil AUTORISÉ mais SIGNALÉ et marqué « à risque »
+         (déclenche la temporisation). p1 colle librement (clé forte). À NE PAS confondre avec les cérémonies
+         destructrices (confirmDelete/confirmRevealPrivateKey), où la retape manuelle est une friction distincte.
+
+      Le btnSave étant PARTAGÉ (singleton Modal), on annule d'abord toute temporisation d'une ouverture précédente
+      (`clearWeakPassphraseGuard`, aussi appelé sur `onClose`) → pas de fuite de timer. */
+  private wirePassphraseCreationGuards(saveButton: HTMLButtonElement, p1: HTMLInputElement, p2: HTMLInputElement, weakWarn: HTMLElement, pasteWarn: HTMLElement): void {
     this.clearWeakPassphraseGuard();
     weakWarn.style.display = "none";
+    pasteWarn.style.display = "none";
     const seuil = PkiCrypto.WEAK_PASSPHRASE_LEN;
-    // Une fois le cooldown purgé pour la saisie faible COURANTE, on ne le relance pas à chaque frappe. Sortir de
-    // la zone faible (champ vidé OU phrase devenue assez longue) réarme ce drapeau pour la prochaine entrée.
-    let cooldownServed = false;
-    const leaveWeakZone = (): void => {
-      this.clearWeakPassphraseGuard();
-      weakWarn.style.display = "none";
-      cooldownServed = false;
-    };
+    let served = false;      // temporisation écoulée (ou non requise) pour le contenu COURANT
+    let justPasted = false;  // le prochain `input` de p2 provient d'un collage AUTORISÉ → contenu « à risque »
+
+    const formReady = (): boolean => p1.value.length > 0 && p2.value.length > 0 && p1.value === p2.value;
+
+    // Ré-évaluée à CHAQUE frappe de p1/p2 : c'est ce qui « réinitialise » le bouton dès qu'on touche au formulaire.
     const evaluate = (): void => {
-      const len = passInput.value.length;
-      if (len === 0) { leaveWeakZone(); saveButton.disabled = true; return; }   // requis : bouton bloqué sur vide
-      if (len >= seuil) { leaveWeakZone(); saveButton.disabled = false; return; }   // assez longue : aucune friction
-      // Zone FAIBLE (1..seuil-1) : warning permanent + temporisation (une seule fois par entrée dans la zone).
-      weakWarn.textContent = I18n.t("certs.admin.common.passWeakWarn", { count: seuil });
-      weakWarn.style.display = "block";
-      if (cooldownServed) { saveButton.disabled = false; return; }   // déjà purgé → reste validable, pas de relance
+      const pasteRisk = justPasted; justPasted = false;   // consommé par l'`input` qui suit le collage
+      if (!formReady()) { served = false; this.clearWeakPassphraseGuard(); saveButton.disabled = true; return; }
+      const risky = p1.value.length < seuil || pasteRisk;
+      if (!risky) { this.clearWeakPassphraseGuard(); served = true; saveButton.disabled = false; return; }
+      if (served) { saveButton.disabled = false; return; }   // temporisation déjà écoulée pour ce contenu
       if (!this.weakPassCountdown || !this.weakPassCountdown.running) {
         this.weakPassCountdown = CountdownButton.start(saveButton, PkiCrypto.WEAK_PASSPHRASE_COOLDOWN_S, {
-          onDone: () => { cooldownServed = true; },   // écoulé : l'utilisateur PEUT valider une phrase faible
+          onDone: () => { served = true; },   // écoulée : l'utilisateur peut valider
         });
       }
     };
-    passInput.addEventListener("input", evaluate);
-    evaluate();   // état initial (champ vide → bouton désactivé)
-  }
 
-  /** Annule la temporisation « phrase faible » en cours et oublie son handle. Appelé au (ré)armement du garde et
-      à la FERMETURE de la modale (`onClose`) : sans ça, le compte à rebours resté sur le btnSave singleton
-      continuerait de re-libeller/ré-activer le bouton d'une AUTRE modale ouverte ensuite. Idempotent. */
-  private clearWeakPassphraseGuard(): void {
-    this.weakPassCountdown?.cancel();
-    this.weakPassCountdown = null;
-  }
+    // p1 : warning de TAILLE à la perte de focus ; masqué dès qu'on ré-édite ; frappe → ré-évalue le bouton.
+    p1.addEventListener("blur", () => {
+      const len = p1.value.length;
+      if (len > 0 && len < seuil) { weakWarn.textContent = I18n.t("certs.admin.common.passWeakWarn", { count: seuil }); weakWarn.style.display = "block"; }
+      else weakWarn.style.display = "none";
+    });
+    p1.addEventListener("input", () => { weakWarn.style.display = "none"; evaluate(); });
 
-  /** Axe 2 (SÉCURITÉ DU COLLAGE) — sur la CONFIRMATION p2 des 3 modales de création de phrase. Coller dans la
-      confirmation annule la protection anti-erreur : un même MAUVAIS collé dans p1 ET p2 « matche » et la clé
-      serait chiffrée sous une phrase inconnue = PERDUE. Garde CONDITIONNEL à la longueur du contenu collé :
-      collé < CONFIRM_PASTE_MIN → REFUSÉ (preventDefault) + invite à ressaisir à la main (un collé court erroné
-      est rattrapé par la comparaison p1 ≠ p2) ; collé ≥ seuil → AUTORISÉ mais AVERTISSEMENT informel (ne bloque
-      PAS la validation). p1 (phrase principale) n'a AUCUN garde (on veut pouvoir coller une clé forte). À NE PAS
-      confondre avec les cérémonies destructrices (confirmDelete/confirmRevealPrivateKey), où la retape est une
-      friction distincte, sans rapport avec la confirmation de phrase. */
-  private wireConfirmationPasteGuard(confirmInput: HTMLInputElement, pasteWarn: HTMLElement): void {
-    confirmInput.addEventListener("paste", (e) => {
+    // p2 (confirmation) : garde de collage CONDITIONNEL + ré-évaluation du bouton.
+    p2.addEventListener("paste", (e) => {
       const pasted = e.clipboardData?.getData("text") ?? "";
       if (pasted.length < CertsAdminView.CONFIRM_PASTE_MIN) {
-        e.preventDefault();   // collage REFUSÉ → force la retape manuelle
+        e.preventDefault();   // collage REFUSÉ → retape manuelle (un collé court erroné est rattrapé par p1 ≠ p2)
         pasteWarn.textContent = I18n.t("certs.admin.common.pasteConfirmBlocked");
       } else {
-        // Collage AUTORISÉ (pas de preventDefault) mais signalé : un même collage erroné dans les deux champs
-        // passerait inaperçu.
+        justPasted = true;    // collage autorisé → l'`input` qui suit déclenche la temporisation (presse-papier possiblement erroné)
         pasteWarn.textContent = I18n.t("certs.admin.common.pasteConfirmDanger");
       }
       pasteWarn.style.display = "block";
     });
+    p2.addEventListener("input", evaluate);
+
+    evaluate();   // état initial (formulaire vide → bouton désactivé)
+  }
+
+  /** Annule la temporisation « anti-erreur » (compte à rebours) en cours et oublie son handle. Appelé au
+      (ré)armement du garde et à la FERMETURE de la modale (`onClose`) : sans ça, le compte à rebours resté sur le
+      btnSave singleton continuerait de re-libeller/ré-activer le bouton d'une AUTRE modale ouverte ensuite. Idempotent. */
+  private clearWeakPassphraseGuard(): void {
+    this.weakPassCountdown?.cancel();
+    this.weakPassCountdown = null;
   }
 
   /** Initialisation EN MODALE : phrase ×2, avertissement de perte, dérivation KEK + tirage/emballage
@@ -1719,17 +1725,16 @@ export class CertsAdminView {
     const p2 = FormControls.text("", I18n.t("certs.admin.init.confirmPlaceholder")); p2.type = "password"; p2.autocomplete = "new-password";
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.confirmation"), p2, I18n.t("certs.admin.init.confirmHint")));
 
-    // Gardes de saisie (au-dessus de l'errBox) : Axe 1 « force faible » (temporisation, câblé via onReady) et
-    // Axe 2 « collage de confirmation » (câblé maintenant, à la construction du champ p2).
+    // Gardes de saisie (au-dessus de l'errBox) : warning de taille (blur), bouton reflétant la validité +
+    // temporisation conditionnelle, garde de collage de la confirmation — tout câblé via onReady (btnSave interne).
     const weakWarn = this.warnHint(); weakWarn.style.fontWeight = "600";
     const pasteWarn = this.warnHint();
-    this.wireConfirmationPasteGuard(p2, pasteWarn);
     const errBox = this.errBox(); root.append(weakWarn, pasteWarn, errBox);
     this.host.openModal({
       title: I18n.t("certs.admin.init.title"),
       body: root,
       saveLabel: I18n.t("certs.admin.init.saveLabel"),
-      onReady: ({ saveButton }) => this.wireWeakPassphraseGuard(saveButton, p1, weakWarn),
+      onReady: ({ saveButton }) => this.wirePassphraseCreationGuards(saveButton, p1, p2, weakWarn, pasteWarn),
       onClose: () => this.clearWeakPassphraseGuard(),
       onSave: async () => {
         errBox.style.display = "none";
@@ -1807,11 +1812,10 @@ export class CertsAdminView {
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rekey.newLabel"), p1, I18n.t("certs.admin.common.longUniqueHint")));
     const p2 = FormControls.text("", I18n.t("certs.admin.rekey.confirmPlaceholder")); p2.type = "password"; p2.autocomplete = "new-password";
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.confirmation"), p2, I18n.t("certs.admin.rekey.confirmHint")));
-    // Gardes de saisie (au-dessus de l'errBox) : Axe 1 « force faible » (sur la NOUVELLE phrase p1, via onReady)
-    // et Axe 2 « collage de confirmation » (garde CONDITIONNEL — remplace l'ancien blocage inconditionnel de p2).
+    // Gardes de saisie (au-dessus de l'errBox), sur la NOUVELLE phrase p1 + sa confirmation p2 : warning de taille
+    // (blur), bouton reflétant la validité + temporisation conditionnelle, garde de collage — câblés via onReady.
     const weakWarn = this.warnHint(); weakWarn.style.fontWeight = "600";
     const pasteWarn = this.warnHint();
-    this.wireConfirmationPasteGuard(p2, pasteWarn);
 
     const errBox = this.errBox(); root.append(weakWarn, pasteWarn, errBox);
     // Liaison d'erreur (accessibilité, cf. point 7) : le message d'erreur porte un ID ; les champs
@@ -1824,7 +1828,7 @@ export class CertsAdminView {
       title: I18n.t("certs.admin.rekey.title"),
       body: root,
       saveLabel: I18n.t("certs.admin.rekey.saveLabel"),
-      onReady: ({ saveButton }) => this.wireWeakPassphraseGuard(saveButton, p1, weakWarn),
+      onReady: ({ saveButton }) => this.wirePassphraseCreationGuards(saveButton, p1, p2, weakWarn, pasteWarn),
       onClose: () => this.clearWeakPassphraseGuard(),
       onSave: async () => {
         errBox.style.display = "none";
@@ -1926,11 +1930,10 @@ export class CertsAdminView {
       root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.vault.protectPassLabel"), p1, I18n.t("certs.admin.common.longUniqueHint")));
       p2 = FormControls.text("", I18n.t("certs.admin.rekey.confirmPlaceholder")); p2.type = "password"; p2.autocomplete = "new-password";
       root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.confirmation"), p2, I18n.t("certs.admin.rekey.confirmHint")));
-      // Gardes de saisie du cas CRÉATION : Axe 1 « force faible » (via onReady) + Axe 2 « collage de confirmation »
-      // CONDITIONNEL (remplace l'ancien blocage inconditionnel de p2).
+      // Gardes de saisie du cas CRÉATION (warning de taille, bouton reflétant la validité + temporisation
+      // conditionnelle, garde de collage) — tout câblé via onReady ci-dessous.
       weakWarn = this.warnHint(); weakWarn.style.fontWeight = "600";
       pasteWarn = this.warnHint();
-      this.wireConfirmationPasteGuard(p2, pasteWarn);
     } else if (!rootUnlocked) {
       p1 = FormControls.text("", I18n.t("certs.admin.vault.protectPassPlaceholder")); p1.type = "password"; p1.autocomplete = "current-password";
       root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.vault.protectPassLabel"), p1, I18n.t("certs.admin.vault.protectResumeHint")));
@@ -1943,8 +1946,8 @@ export class CertsAdminView {
       title: I18n.t("certs.admin.vault.protectTitle"),
       body: root,
       saveLabel: vaultExists ? I18n.t("certs.admin.vault.protectResumeSaveLabel") : I18n.t("certs.admin.vault.protectSaveLabel"),
-      // Garde de force uniquement en CRÉATION (weakWarn posé) ; en REPRISE, p1 est une phrase EXISTANTE → pas de garde.
-      onReady: ({ saveButton }) => { if (p1 && weakWarn) this.wireWeakPassphraseGuard(saveButton, p1, weakWarn); },
+      // Gardes uniquement en CRÉATION (weakWarn posé) ; en REPRISE, p1 est une phrase EXISTANTE → aucun garde.
+      onReady: ({ saveButton }) => { if (p1 && p2 && weakWarn && pasteWarn) this.wirePassphraseCreationGuards(saveButton, p1, p2, weakWarn, pasteWarn); },
       onClose: () => this.clearWeakPassphraseGuard(),
       onSave: async () => {
         errBox.style.display = "none";

@@ -54,8 +54,9 @@ export class PkiCrypto {
       de l'utilisateur) mais signalée + temporisée avant validation (cf. CertsAdminView, garde de force). Ne
       concerne JAMAIS une phrase EXISTANTE (déverrouillage/reprise/champ « actuelle »). Constante PARTAGÉE. */
   static readonly WEAK_PASSPHRASE_LEN = 10;
-  /** Délai (secondes) de TEMPORISATION du bouton « Valider » quand la phrase saisie est faible — friction
-      volontaire (compte à rebours), pas une interdiction. Voir CertsAdminView.wireWeakPassphraseGuard. */
+  /** Délai (secondes) de TEMPORISATION du bouton « Valider » quand l'entrée est À RISQUE (phrase faible OU
+      confirmation collée) — friction volontaire (compte à rebours), pas une interdiction. Voir
+      CertsAdminView.wirePassphraseCreationGuards. */
   static readonly WEAK_PASSPHRASE_COOLDOWN_S = 10;
 
   /** WebCrypto complet disponible ? `crypto.subtle` n'existe que dans un CONTEXTE SÉCURISÉ
