@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Logger } from "../logger.js";
 import type { SqliteCtor, SqliteDb } from "../db.js";
-import type { ProviderConfig, ProviderConfigSource, ProviderEndpoint } from "./VmProvider.js";
+import type { ProviderConfig, ProviderConfigSource, ProviderEndpoint, ProviderSummary } from "./VmProvider.js";
 import { AuditStamp } from "../AuditStamp.js";   // « auteur présent » partagé (id canonique de created_by/updated_by)
 import { SecretBox } from "../SecretBox.js";
 import { ProviderConfigValidate, ProviderConfigError } from "./ProviderConfigValidate.js";
@@ -159,40 +159,65 @@ export class ProviderConfigDb implements ProviderConfigSource {
   }
 
   /* --------------------------------------------------------------------------
-     LECTURE POUR LA SYNCHRO (ProviderConfigSource) — jetons DÉCHIFFRÉS
+     LECTURE POUR LA SYNCHRO / LE STATUT (ProviderConfigSource)
      -------------------------------------------------------------------------- */
 
-  /** Providers d'un document, jetons DÉCHIFFRÉS (prêts pour l'adaptateur). Un jeton INDÉCHIFFRABLE
-      (clé changée/perdue) → provider EXCLU de la passe + erreur mémorisée (consultable via
-      `tokenErrorsFor`), JAMAIS de throw global : les autres providers restent synchronisables. */
+  /** Providers d'un document, jetons DÉCHIFFRÉS (prêts pour l'adaptateur). Réservé à la SYNCHRO/au
+      TEST — seuls chemins qui ont besoin du jeton en clair. Un jeton INDÉCHIFFRABLE (clé changée/
+      perdue) → provider EXCLU de la passe + erreur mémorisée (consultable via `tokenErrorsFor`),
+      JAMAIS de throw global : les autres providers restent synchronisables. */
   providersFor(docId: string): ProviderConfig[] {
+    // Le jeton EN CLAIR est CONSOMMÉ ici (champ `token` de la ProviderConfig servie à l'adaptateur).
+    return this.mapDecryptable(docId, (row, token) => ({
+      id: row.id,
+      kind: row.kind,
+      endpoints: this.endpointsOf(docId, row.id),
+      token,
+      include_lxc: !!row.include_lxc,
+      interval_sec: row.interval_sec,
+      timeout_sec: row.timeout_sec,
+      ca_pem: row.ca_pem ?? null,
+      management_url: row.management_url ?? null,
+    }));
+  }
+
+  /** Résumés SANS jeton des providers d'un document (id/kind/interval_sec) — matière du STATUT et de
+      l'UI. Le jeton est déchiffré par `mapDecryptable` UNIQUEMENT pour VÉRIFIER sa déchiffrabilité
+      (et alimenter `tokenErrors` — précondition de l'enrichissement statut, cf. `ProviderConfigSource`) :
+      le clair est IMMÉDIATEMENT JETÉ (le projecteur l'IGNORE — il n'est ni retourné ni conservé).
+      INVARIANT : aucun jeton (clair ni chiffré) ne figure dans un résumé — le chemin statut ne fait
+      plus circuler de matière sensible (constat d'audit : `GET /vm/status` déchiffrait tout à chaque poll). */
+  summariesFor(docId: string): ProviderSummary[] {
+    return this.mapDecryptable(docId, (row) => ({
+      id: row.id,
+      kind: row.kind,
+      interval_sec: row.interval_sec,
+    }));
+  }
+
+  /** Balaye les providers d'un document en VÉRIFIANT la déchiffrabilité de chaque jeton, MUTUALISE la
+      gestion d'erreur des deux surfaces de lecture (`providersFor`/`summariesFor`) et projette chaque
+      ligne DÉCHIFFRABLE via `project` (qui reçoit le jeton en clair — libre de le consommer ou de
+      l'ignorer). Un jeton indéchiffrable → ligne EXCLUE + erreur mémorisée dans `tokenErrors` (jamais
+      de throw global : les autres providers restent exploitables). Le message de SecretBox ne contient
+      AUCUN contenu sensible (« secret à ressaisir ») — sûr à mémoriser. */
+  private mapDecryptable<T>(docId: string, project: (row: ProviderRow, token: string) => T): T[] {
     const rows = this.db.prepare(
       `SELECT id, kind, token_enc, include_lxc, interval_sec, timeout_sec, ca_pem, management_url FROM vm_providers WHERE doc_id = ? ORDER BY id`,
     ).all(docId) as ProviderRow[];
-    const out: ProviderConfig[] = [];
+    const out: T[] = [];
     const errors: ProviderTokenError[] = [];
     for (const row of rows) {
       let token: string;
       try {
         token = this.box.decrypt(row.token_enc);
       } catch (e) {
-        // Le message de SecretBox ne contient AUCUN contenu sensible (« secret à ressaisir ») : sûr à mémoriser.
         const message = e instanceof Error ? e.message : String(e);
         errors.push({ id: row.id, message });
-        this.log.warn("vm: jeton indéchiffrable — provider exclu de la synchro", docId, row.id);
+        this.log.warn("vm: jeton indéchiffrable — provider exclu (à ressaisir)", docId, row.id);
         continue;
       }
-      out.push({
-        id: row.id,
-        kind: row.kind,
-        endpoints: this.endpointsOf(docId, row.id),
-        token,
-        include_lxc: !!row.include_lxc,
-        interval_sec: row.interval_sec,
-        timeout_sec: row.timeout_sec,
-        ca_pem: row.ca_pem ?? null,
-        management_url: row.management_url ?? null,
-      });
+      out.push(project(row, token));
     }
     this.tokenErrors.set(docId, errors);
     return out;

@@ -182,15 +182,33 @@ export interface ProviderConfig {
   management_url: string | null;
 }
 
+/** Résumé d'UN provider SANS jeton — matière du STATUT (`GET /vm/status`) et de l'UI (id/kind/
+    intervalle affichés). Volontairement RÉDUIT : ni jeton, ni endpoints, ni CA. Le jeton ne circule
+    donc PAS dans le chemin STATUT (constat d'audit : le statut déchiffrait TOUS les jetons à chaque
+    poll — inutile, et matière sensible qui traversait des objets `ProviderConfig` sans raison). */
+export interface ProviderSummary {
+  id: string;
+  kind: string;
+  interval_sec: number;
+}
+
 /** SOURCE de configuration des providers vue par le moteur de synchro (VmSyncService) — le
     strict minimum dont il a besoin, INDÉPENDAMMENT du support de stockage. Implémentation de
     production UNIQUE : `ProviderConfigDb` (base chiffrée `vm-providers.db`, jetons chiffrés + CRUD) ;
     les tests injectent un stub minimal. VmSyncService ne dépend QUE de ce contrat — le support de
     stockage réel ne le touche jamais. */
 export interface ProviderConfigSource {
-  /** Providers configurés pour un document (jetons EN CLAIR, prêts pour l'adaptateur). Document
-      non configuré → `[]` (feature dormante pour CE document). */
+  /** Providers configurés pour un document (jetons EN CLAIR, prêts pour l'adaptateur). Réservé à la
+      SYNCHRO/au TEST (seuls chemins qui ont besoin du jeton). Document non configuré → `[]` (feature
+      dormante pour CE document). */
   providersFor(docId: string): ProviderConfig[];
+  /** Résumés SANS jeton des providers d'un document — matière du STATUT et de l'UI : le jeton ne
+      circule PAS dans ce chemin (contrairement à `providersFor`). DOIT rafraîchir les erreurs de
+      jeton (`tokenErrorsFor`) EXACTEMENT comme `providersFor` : c'est la PRÉCONDITION de
+      l'enrichissement `VmStatusEnrichment.withTokenErrors` (un jeton indéchiffrable exclut le provider
+      du résumé mais doit rester consultable en erreur, sinon il disparaît silencieusement de l'UI).
+      Document non configuré → `[]`. */
+  summariesFor(docId: string): ProviderSummary[];
   /** Documents ayant au moins un provider (utile à l'armement des timers de synchro périodique). */
   configuredDocIds(): string[];
 }

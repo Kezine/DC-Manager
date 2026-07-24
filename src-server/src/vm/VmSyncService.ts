@@ -121,12 +121,25 @@ export class VmSyncService {
   }
 
   /** État courant des providers d'un document — les jamais-synchronisés apparaissent aussi
-      (fusion config déclarée × état runtime), pour que l'UI liste ce qui est configuré. */
+      (fusion config déclarée × état runtime), pour que l'UI liste ce qui est configuré.
+      Consomme `summariesFor` (résumés SANS jeton) et NON `providersFor` : le chemin STATUT n'a
+      besoin que d'id/kind/intervalle — inutile (et malsain) d'y faire circuler les jetons déchiffrés
+      (constat d'audit). `summariesFor` rafraîchit néanmoins `tokenErrorsFor` comme `providersFor`,
+      donc l'enrichissement « jeton indéchiffrable » (VmModule.withTokenErrors) reste alimenté. */
   statusFor(docId: string): VmProviderStatus[] {
+    const summaries = this.providers.summariesFor(docId);
     const runtime = this.status.get(docId);
-    return this.providers.providersFor(docId).map((config) =>
-      (runtime && runtime.get(config.id)) || {
-        provider_id: config.id, kind: config.kind, interval_sec: config.interval_sec,
+    // PURGE DES STATUTS FANTÔMES : un provider RETIRÉ de la config (CRUD) laissait indéfiniment son
+    // état runtime dans `this.status` — fuite mémoire lente, et entrée obsolète qui pouvait resurgir.
+    // `statusFor` est le point de passage naturel de la purge (il connaît la config DÉCLARÉE) : on
+    // retire de la Map du document tout id ABSENT de la config courante (son statut n'a plus de sens).
+    if (runtime) {
+      const configured = new Set(summaries.map((s) => s.id));
+      for (const id of [...runtime.keys()]) if (!configured.has(id)) runtime.delete(id);
+    }
+    return summaries.map((summary) =>
+      (runtime && runtime.get(summary.id)) || {
+        provider_id: summary.id, kind: summary.kind, interval_sec: summary.interval_sec,
         last_attempt: null, last_success: null, ok: true, message: "jamais synchronisé depuis le démarrage", counts: null, cluster: null,
       });
   }
@@ -173,7 +186,14 @@ export class VmSyncService {
     if (this.running.has(key)) {
       // Chevauchement (timer + manuel, ou cluster lent) : on ne double pas la synchro en cours.
       const current = this.status.get(docId) && this.status.get(docId)!.get(config.id);
-      return current || this.record(docId, config, { ok: true, message: "synchronisation déjà en cours", attemptIso: null });
+      if (current) return current;
+      // Aucun état antérieur : on renvoie un statut SYNTHÉTIQUE « déjà en cours » SANS LE STOCKER.
+      // Le stocker (via `record`) figerait un `ok:true` trompeur qui MASQUERAIT le résultat réel de la
+      // passe en cours (constat d'audit) — c'est un simple accusé transitoire, pas un vrai résultat.
+      return {
+        provider_id: config.id, kind: config.kind, interval_sec: config.interval_sec,
+        last_attempt: null, last_success: null, ok: true, message: "synchronisation déjà en cours", counts: null, cluster: null,
+      };
     }
     // ANTI-RAFALE (exigence 2026-07-13) : sous le délai minimal depuis la dernière TENTATIVE,
     // on rend le dernier statut (annoté, SANS le stocker — le statut persistant reste le vrai

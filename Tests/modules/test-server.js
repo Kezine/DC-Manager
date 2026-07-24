@@ -2282,6 +2282,30 @@ module.exports = async () => {
         try { fs.rmSync(migColDir, { recursive: true, force: true }); } catch (_) { /* dossier temp */ }
       }
 
+      // -- summariesFor : résumés SANS jeton pour le STATUT/UI (constat d'audit : le chemin statut ne
+      //    doit plus déchiffrer ni faire circuler les jetons). Un jeton indéchiffrable → provider EXCLU
+      //    du résumé MAIS erreur consultable (tokenErrorsFor), et AUCUN résumé ne porte de champ token. --
+      db.save("doc-S", { id: "pve-s1", kind: "proxmox", url: "https://s1:8006", interval_sec: 120 }, "root@pam!t=SUM-1");
+      db.save("doc-S", { id: "pve-s2", kind: "proxmox", url: "https://s2:8006", interval_sec: 0 }, "root@pam!t=SUM-2");
+      const sums = db.summariesFor("doc-S");
+      ck.eq(sums.length, 2, "summariesFor : un résumé par provider configuré");
+      ck(sums.every((s) => !("token" in s) && !("token_enc" in s)), "summariesFor : AUCUN jeton dans les résumés (ni clair ni chiffré)");
+      const s1 = sums.find((s) => s.id === "pve-s1");
+      ck(s1.kind === "proxmox" && s1.interval_sec === 120, "summariesFor : id/kind/interval_sec restitués");
+      ck(!db.summariesFor("doc-inexistant").length, "summariesFor : document non configuré → []");
+      ck(!db.tokenErrorsFor("doc-S").length, "summariesFor (jetons sains) : aucune erreur de jeton mémorisée");
+      // Corruption DIRECTE de token_enc de pve-s2 (UPDATE brut) → jeton indéchiffrable (GCM authentifié).
+      const validEnc = raw.prepare("SELECT token_enc FROM vm_providers WHERE doc_id='doc-S' AND id='pve-s2'").get().token_enc;
+      const tamperedEnc = validEnc.slice(0, -4) + (validEnc.endsWith("AAAA") ? "BBBB" : "AAAA");
+      raw.prepare("UPDATE vm_providers SET token_enc = ? WHERE doc_id='doc-S' AND id='pve-s2'").run(tamperedEnc);
+      const sums2 = db.summariesFor("doc-S");
+      ck(sums2.length === 1 && sums2[0].id === "pve-s1", "summariesFor : jeton indéchiffrable → provider EXCLU du résumé (comme providersFor)");
+      ck(sums2.every((s) => !("token" in s)), "…et toujours aucun champ token dans les résumés");
+      const sumErrs = db.tokenErrorsFor("doc-S");
+      ck(sumErrs.length === 1 && sumErrs[0].id === "pve-s2" && !/SUM-2/.test(sumErrs[0].message),
+        "…erreur de jeton MÉMORISÉE par summariesFor (id, sans le jeton) — précondition de l'enrichissement statut");
+      db.remove("doc-S", "pve-s1"); db.remove("doc-S", "pve-s2");
+
       db.close();
     } finally {
       try { if (raw) raw.close(); } catch (_) { /* déjà fermé */ }
@@ -2323,6 +2347,9 @@ module.exports = async () => {
         providersFor: (d) => d === doc.id
           ? [{ id: "pve-test", kind: "proxmox", endpoints: [{ url: "https://pve:8006", fingerprint: null }], token: "sync@pve!t=U", include_lxc: true, interval_sec: 0, timeout_sec: 15, ca_pem: null, management_url: null }]
           : [],
+        // Résumés SANS jeton, DÉRIVÉS de providersFor (le vrai ProviderConfigDb n'y met AUCUN jeton) :
+        // c'est ce que statusFor consomme désormais (le chemin statut ne fait plus circuler de jeton).
+        summariesFor: (d) => providers.providersFor(d).map((c) => ({ id: c.id, kind: c.kind, interval_sec: c.interval_sec })),
       };
 
       // Adaptateur STUB : inventaire mutable (le scénario le fait évoluer), et bus live capturé.
@@ -2494,6 +2521,7 @@ module.exports = async () => {
         providersFor: (d) => d === doc.id
           ? [{ id: "pve-host", kind: "proxmox", endpoints: [{ url: "https://pve:8006", fingerprint: null }], token: "sync@pve!t=U", include_lxc: true, interval_sec: 0, timeout_sec: 15, ca_pem: null, management_url: null }]
           : [],
+        summariesFor: (d) => providers.providersFor(d).map((c) => ({ id: c.id, kind: c.kind, interval_sec: c.interval_sec })),
       };
 
       const mkVm = (n, node) => ({ ext_id: "h/" + n, provider_id: "pve-host", vm_type: "qemu", name: n, description: "",
@@ -2530,6 +2558,70 @@ module.exports = async () => {
     }
   });
 
+  /* ============ SERVEUR : VmSyncService — purge des statuts fantômes + « déjà en cours » non stocké ============ */
+
+  await section("Serveur : VmSyncService — purge des statuts fantômes + statut « déjà en cours » non stocké", async () => {
+    // better-sqlite3 RÉEL requis (DocumentStore) — même probe que les sections VmSyncService e2e.
+    let Sqlite = null;
+    try {
+      const Candidate = require(path.join(__dirname, "..", "..", "src-server", "node_modules", "better-sqlite3"));
+      const probeDb = new Candidate(":memory:"); probeDb.close();
+      Sqlite = Candidate;
+    } catch (_) { /* module/binaire absent → section sautée */ }
+    if (!Sqlite) { ck(true, "better-sqlite3 indisponible → section purge/déjà en cours sautée"); return; }
+
+    const fs = require("fs"), os = require("os");
+    const { DocumentStore } = SERVER("documents.js");
+    const { VmSyncService } = SERVER("vm/VmSyncService.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-vmphantom-"));
+    try {
+      const docs = new DocumentStore(dir, Sqlite);
+      const doc = docs.create("infra-phantom");
+
+      // STUB ProviderConfigSource MUTABLE : deux providers au départ, l'un retiré ensuite (simule un CRUD).
+      const cfg = (id) => ({ id, kind: "proxmox", endpoints: [{ url: "https://pve:8006", fingerprint: null }], token: "t=" + id, include_lxc: true, interval_sec: 0, timeout_sec: 15, ca_pem: null, management_url: null });
+      let configured = [cfg("pve-1"), cfg("pve-2")];
+      const providers = {
+        configuredDocIds: () => [doc.id],
+        providersFor: (d) => d === doc.id ? configured : [],
+        // summariesFor DÉRIVÉ (sans jeton) : c'est ce que statusFor consomme — et le pilote de la purge.
+        summariesFor: (d) => (d === doc.id ? configured : []).map((c) => ({ id: c.id, kind: c.kind, interval_sec: c.interval_sec })),
+      };
+      const live = { events: [], publish() {} };
+      const okAdapter = (c) => ({ kind: c.kind, config: c,
+        test: async () => ({ ok: true, kind: c.kind, version: null, supported: true, message: "" }),
+        inventory: async () => ({ vms: [], cluster: { name: c.id, version: null, supported: false, quorate: null, nodes: [] } }) });
+      const service = new VmSyncService(docs, live, providers, undefined, okAdapter, 0);
+
+      // Synchro des deux providers → chacun gagne un état runtime dans la Map interne.
+      await service.syncDocument(doc.id);
+      ck.eq(service.statusFor(doc.id).length, 2, "deux providers configurés → deux statuts");
+      ck(service.status.get(doc.id).has("pve-2"), "état runtime de pve-2 présent avant retrait de la config");
+
+      // pve-2 retiré de la config (CRUD) : statusFor doit le PURGER de la Map interne ET de la sortie.
+      configured = [cfg("pve-1")];
+      const after = service.statusFor(doc.id);
+      ck(after.length === 1 && after[0].provider_id === "pve-1", "provider retiré de la config → absent de statusFor");
+      ck(!service.status.get(doc.id).has("pve-2"), "…et PURGÉ de la Map interne (plus de statut fantôme, pas de fuite mémoire)");
+
+      // « déjà en cours » : un 2e appel concurrent renvoie un statut synthétique SANS le stocker.
+      let release; const gate = new Promise((r) => { release = r; });
+      const blockingAdapter = (c) => ({ kind: c.kind, config: c,
+        test: async () => ({ ok: true, kind: c.kind, version: null, supported: true, message: "" }),
+        inventory: async () => { await gate; return { vms: [], cluster: { name: c.id, version: null, supported: false, quorate: null, nodes: [] } }; } });
+      const svc2 = new VmSyncService(docs, live, providers, undefined, blockingAdapter, 0);
+      const inflight = svc2.syncProvider(doc.id, cfg("pve-1")); // démarre, se bloque sur gate (running=true)
+      const mid = await svc2.syncProvider(doc.id, cfg("pve-1")); // voit running → « déjà en cours »
+      ck.eq(mid.message, "synchronisation déjà en cours", "2e appel concurrent → statut synthétique « déjà en cours »");
+      ck(!(svc2.status.get(doc.id) && svc2.status.get(doc.id).has("pve-1")), "…renvoyé SANS le stocker (aucun ok:true synthétique figé qui masquerait l'état réel)");
+      release();
+      await inflight; // laisse la passe réelle se terminer proprement
+      ck(svc2.status.get(doc.id).get("pve-1").ok === true, "après la passe réelle → l'état réel est bien stocké (lui)");
+    } finally {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* dossier temp */ }
+    }
+  });
+
   /* ============ SERVEUR : VmSyncService.rearmTimers (rechargement à chaud — sans Express ni SQLite) ============ */
 
   await section("Serveur : VmSyncService.rearmTimers — ré-arme les timers selon la config COURANTE", async () => {
@@ -2540,7 +2632,7 @@ module.exports = async () => {
     // Source de config MUTABLE (ProviderConfigSource) : rearmTimers doit relire la config à l'appel,
     // pas un snapshot — c'est tout l'intérêt du rechargement à chaud (CRUD).
     let providersByDoc = { "doc-1": [p("a", 60), p("b", 0), p("c", 30)] }; // b = manuel (interval 0) → pas de timer
-    const providers = { configuredDocIds: () => Object.keys(providersByDoc), providersFor: (docId) => providersByDoc[docId] || [] };
+    const providers = { configuredDocIds: () => Object.keys(providersByDoc), providersFor: (docId) => providersByDoc[docId] || [], summariesFor: (docId) => (providersByDoc[docId] || []).map((c) => ({ id: c.id, kind: c.kind, interval_sec: c.interval_sec })) };
     const docsStub = { get: () => null, repo: () => null }; // non sollicité par (start|rearm|stop)Timers
     const liveStub = { publish() {} };
 
@@ -2607,6 +2699,7 @@ module.exports = async () => {
         providersFor: (d) => d === doc.id
           ? [{ id: "pve-report", kind: "proxmox", endpoints: [{ url: "https://pve:8006", fingerprint: null }], token: "sync@pve!t=U", include_lxc: true, interval_sec: 0, timeout_sec: 15, ca_pem: null, management_url: null }]
           : [],
+        summariesFor: (d) => providers.providersFor(d).map((c) => ({ id: c.id, kind: c.kind, interval_sec: c.interval_sec })),
       };
       const live = { events: [], publish(d, data) { this.events.push({ d, data }); } };
       const expectedKey = "vm-sync:" + doc.id + ":pve-report";

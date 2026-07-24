@@ -280,6 +280,11 @@ clé = SHA-256 de la passphrase, format versionné `v1:…` — cf. [`vm-proxmox
 - **Clé perdue = jetons à ressaisir** (aucune récupération — c'est le but). Un test
   direct sur un canal dont le jeton est indéchiffrable répond **409** (« ressaisir le
   jeton du canal »).
+- **Absence d'AAD (limite assumée)** : les jetons chiffrés ne sont pas liés à leur
+  ligne — un attaquant ayant l'**écriture** sur les bases pourrait échanger deux
+  ciphertexts (jeton de webhook ↔ jeton de provider) sans erreur de déchiffrement. Hors
+  modèle de menace (protection des copies en LECTURE) — détail dans
+  [`vm-proxmox.md`](vm-proxmox.md) (« Modèle de menace »).
 
 ## Producteurs de problèmes
 

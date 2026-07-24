@@ -145,7 +145,7 @@ export class VmModule {
       const docId = (req.params as any).docId as string;
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
       if (!this.service) { this.respondUnavailable(res); return; }
-      // Enrichissement : statusFor s'appuie sur providersFor, qui EXCLUT les providers au jeton
+      // Enrichissement : statusFor s'appuie sur summariesFor, qui EXCLUT les providers au jeton
       // indéchiffrable (clé DCMANAGER_SECRETS_KEY changée) → sans ce complément ils disparaîtraient
       // silencieusement de la vue Clusters (l'incident corrigé). On les réinjecte en erreur.
       res.json({ providers: this.withTokenErrors(docId, this.service.statusFor(docId)) });
@@ -244,8 +244,9 @@ export class VmModule {
       (clé DCMANAGER_SECRETS_KEY changée/perdue) : `providersFor` les exclut → ils sont absents de
       `statusFor`/`syncDocument` et, sans ce complément, DISPARAISSENT silencieusement de l'UI.
       No-op en mode fichier legacy (aucun chiffrement → aucune erreur de jeton possible).
-      ⚠ PRÉCONDITION : appelé APRÈS `statusFor`/`syncDocument`, qui, via `providersFor`, rafraîchissent
-      `tokenErrorsFor` pour ce document (sinon on lirait des erreurs périmées ou vides). */
+      ⚠ PRÉCONDITION : appelé APRÈS `statusFor` (via `summariesFor`) OU `syncDocument` (via
+      `providersFor`) — les DEUX rafraîchissent `tokenErrorsFor` pour ce document (sinon on lirait des
+      erreurs périmées ou vides). */
   private withTokenErrors(docId: string, statuses: VmProviderStatus[]): VmProviderStatus[] {
     if (!this.providerDb) return statuses;
     return VmStatusEnrichment.withTokenErrors(statuses, this.providerDb.tokenErrorsFor(docId), this.providerDb.listFor(docId));

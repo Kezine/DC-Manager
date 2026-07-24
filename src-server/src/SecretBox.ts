@@ -30,6 +30,13 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
    l'environnement du serveur — le chiffrement protège les COPIES des DB
    (backups, exfiltration du fichier), pas un attaquant qui contrôle l'hôte.
    Clé perdue = secrets à ressaisir (aucune récupération possible, c'est le but).
+   ABSENCE D'AAD (donnée additionnelle authentifiée) : un ciphertext n'est PAS LIÉ
+   à son CONTEXTE (table/ligne). GCM authentifie le CONTENU, pas sa PLACE : un
+   attaquant ayant l'ÉCRITURE sur les bases peut donc ÉCHANGER deux secrets chiffrés
+   (p. ex. jeton d'un webhook ↔ jeton d'un provider) sans provoquer la moindre erreur
+   de déchiffrement. Hors modèle de menace (qui protège les COPIES en LECTURE, pas
+   un attaquant en écriture sur l'hôte) — à lier via une AAD portant le contexte dans
+   un éventuel format v2.
 
    INVARIANT : ni la passphrase, ni la clé, ni un secret (clair ou chiffré)
    n'apparaissent JAMAIS dans un message d'erreur ou un log.
