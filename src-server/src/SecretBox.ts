@@ -17,7 +17,11 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
    - clé = SHA-256 de la passphrase d'environnement (dérivation qui normalise
      une passphrase LIBRE en 32 octets ; un KDF lent type scrypt serait du
      théâtre ici : la passphrase n'est pas un mot de passe humain à force-brute
-     mais un secret d'infrastructure long) ;
+     mais un secret d'infrastructure long — hypothèse désormais VÉRIFIÉE et non
+     plus seulement supposée : le constructeur REFUSE toute passphrase de moins
+     de MIN_PASSPHRASE_LENGTH caractères, sans quoi un backup de la base serait
+     force-brutable HORS LIGNE, l'absence de sel/itérations n'ayant de sens que
+     face à un secret déjà long et aléatoire) ;
    - IV de 12 octets ALÉATOIRE par chiffrement (jamais réutilisé — exigence GCM) ;
    - format stocké : `v1:<iv>:<tag>:<ct>` en base64 — le préfixe versionne le
      format (rotation d'algorithme possible sans deviner).
@@ -35,6 +39,13 @@ export class SecretBox {
       SEULE variable lue : le repli historique vers `VM_PROVIDERS_KEY` a été retiré (2026-07-20). */
   static readonly ENV_VAR = "DCMANAGER_SECRETS_KEY";
 
+  /** Longueur MINIMALE (après trim) exigée de la passphrase. La dérivation étant un SHA-256
+      DIRECT (ni sel ni itérations — cf. en-tête), toute la robustesse du chiffrement REPOSE sur
+      une passphrase longue et aléatoire ; en dessous de ce seuil, un backup de la base serait
+      force-brutable hors ligne. On refuse donc à la construction plutôt que de faire confiance à
+      une hypothèse non vérifiée. Exporté (statique) pour être asserté par les tests. */
+  static readonly MIN_PASSPHRASE_LENGTH = 16;
+
   private readonly key: Buffer;
 
   /** @param passphrase  Passphrase d'infrastructure (l'appelant la tire de l'environnement).
@@ -42,7 +53,18 @@ export class SecretBox {
                          messages d'erreur actionnables (« clé X différente… ») ; jamais la valeur. */
   constructor(passphrase: string, private readonly envVarName: string = SecretBox.ENV_VAR) {
     if (typeof passphrase !== "string" || passphrase.trim() === "") {
-      throw new Error("SecretBox : passphrase vide — définir " + SecretBox.ENV_VAR);
+      // Cite le paramètre `envVarName` (et non ENV_VAR en dur) : un appelant peut nommer une AUTRE
+      // variable d'environnement — le message doit désigner CELLE qu'il faut définir.
+      throw new Error("SecretBox : passphrase vide — définir " + this.envVarName);
+    }
+    // GARDE-FOU de robustesse : la passphrase est le SEUL secret dont dépend tout le chiffrement
+    // (clé = SHA-256 direct, sans sel ni itérations). Une passphrase courte rendrait un backup de
+    // la base force-brutable HORS LIGNE — on l'interdit ici pour que l'invariant « secret long et
+    // aléatoire » soit VÉRIFIÉ, pas seulement documenté. Message actionnable, SANS citer la valeur
+    // (rien de sensible dans les logs — invariant du fichier).
+    if (passphrase.trim().length < SecretBox.MIN_PASSPHRASE_LENGTH) {
+      throw new Error("SecretBox : passphrase trop courte (< " + SecretBox.MIN_PASSPHRASE_LENGTH
+        + " caractères) — utilisez un secret long et aléatoire, ex. `openssl rand -base64 32`");
     }
     this.key = createHash("sha256").update(passphrase, "utf8").digest();
   }

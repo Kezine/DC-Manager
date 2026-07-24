@@ -52,6 +52,12 @@ export class PveHttpError extends Error {
 }
 
 export class PveHttp {
+  /** Plafond de taille (octets) d'UNE réponse HTTP acceptée. Sans borne, un endpoint hostile ou
+      détraqué pourrait streamer une réponse gigantesque et gonfler indéfiniment la mémoire du
+      serveur. 32 Mio = très largement au-dessus d'un /cluster/resources réel (quelques centaines de
+      Kio même sur un gros cluster) — le dépassement signale une anomalie, pas un cas nominal. */
+  static readonly MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+
   constructor(
     private readonly baseUrl: string,          // ex. "https://pve.example.lan:8006"
     private readonly token: string,            // "USER@REALM!TOKENID=UUID"
@@ -159,7 +165,25 @@ export class PveHttp {
       try {
         req = https.request(url, requestOptions, (res) => {
           const chunks: Buffer[] = [];
-          res.on("data", (c) => chunks.push(c));
+          let received = 0;
+          // `capped` : garde-fou d'idempotence. `req.destroy(err)` provoque un `error` (→ un seul
+          // reject) ; mais plusieurs `data` peuvent encore arriver dans le même tick avant que la
+          // destruction ne prenne effet — on ne veut alors ni ré-appeler destroy, ni continuer à
+          // accumuler. Un booléen local suffit (portée = cette réponse).
+          let capped = false;
+          res.on("data", (c) => {
+            if (capped) return;
+            received += c.length;
+            // PLAFOND de taille : au-delà, on AVORTE la requête plutôt que d'accumuler sans limite.
+            // NON-retryable (false) : ces données sont cluster-wide (ex. /cluster/resources) — un
+            // autre nœud du pool renverrait la MÊME chose, basculer ne ferait que masquer l'anomalie.
+            if (received > PveHttp.MAX_RESPONSE_BYTES) {
+              capped = true;
+              req.destroy(new PveHttpError("Proxmox : réponse trop volumineuse (> " + (PveHttp.MAX_RESPONSE_BYTES / (1024 * 1024)) + " Mio) sur " + target, false));
+              return;
+            }
+            chunks.push(c);
+          });
           res.on("end", () => {
             const body = Buffer.concat(chunks).toString("utf8");
             const status = res.statusCode || 0;

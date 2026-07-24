@@ -68,7 +68,18 @@ export class VmModule {
   static create(opts: { docs: DocumentStore; live: VmLivePublisher; dataDir: string; sqlite: SqliteCtor; log?: Logger; problems?: ProblemReporter }): VmModule {
     const log = opts.log || new Logger("error");
     // Coffre PARTAGÉ (clé unique DCMANAGER_SECRETS_KEY ; aucun repli — cf. SecretBox).
-    const box = SecretBox.fromEnv(process.env);
+    // fromEnv PEUT jeter si la clé est PRÉSENTE mais trop courte (< MIN_PASSPHRASE_LENGTH) : ce
+    // n'est PAS « clé absente » (qui désactive proprement la feature) mais une clé INVALIDE. On
+    // l'encaisse en « module démarré EN ERREUR » (routes en 503 avec le message actionnable) sans
+    // faire tomber le serveur — philosophie « une config invalide ne fait pas tomber le serveur ».
+    let box: SecretBox | null;
+    try {
+      box = SecretBox.fromEnv(process.env);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      log.error("clé de chiffrement des secrets VM invalide — module démarré en erreur (feature désactivée)", message);
+      return new VmModule(opts.docs, null, null, message, false, log);
+    }
 
     // ---- Clé PRÉSENTE : stockage DB chiffré (UNIQUE source de config). ----
     if (box) {

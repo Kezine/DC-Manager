@@ -80,7 +80,18 @@ export class NotifyModule {
 
   static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger }): NotifyModule {
     const log = opts.log || new Logger("error");
-    const box = SecretBox.fromEnv(process.env);
+    // fromEnv PEUT jeter si la clé est PRÉSENTE mais trop courte (< MIN_PASSPHRASE_LENGTH) : clé
+    // INVALIDE (≠ clé absente, qui désactive proprement). Encaissée en « module démarré EN ERREUR »
+    // (routes en 503 avec le message actionnable) sans faire tomber le serveur — même philosophie
+    // que VmModule (« une config invalide ne fait pas tomber le serveur »).
+    let box: SecretBox | null;
+    try {
+      box = SecretBox.fromEnv(process.env);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      log.error("clé de chiffrement des secrets notifications invalide — module démarré en erreur", message);
+      return new NotifyModule(null, null, null, message, false, log);
+    }
     if (!box) {
       log.info("module notifications INACTIF — clé " + SecretBox.ENV_VAR + " absente (routes en 503 explicite)");
       return new NotifyModule(null, null, null, null, true, log);

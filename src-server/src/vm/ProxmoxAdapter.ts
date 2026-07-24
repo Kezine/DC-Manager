@@ -111,8 +111,17 @@ export class ProxmoxAdapter implements VmProviderAdapter {
       const vmid = ProxmoxAdapter.vmidFromExtId(record.ext_id);
       if (record.host_node === null || vmid === "") continue; // sans nœud/vmid → pas d'appel détail possible
 
+      // Segments issus du CLUSTER DISTANT (nom de nœud, vmid) : TOUJOURS encodés avant injection
+      // dans un chemin d'URL — une donnée distante ne doit jamais porter de méta-caractère d'URL
+      // non encodé (« / », « ? », « # »…) qui altérerait la structure du chemin, même confiné au
+      // même origin. Calculés ICI, juste après la garde, avant toute mutation de `record` (mergeConfig)
+      // — le narrowing non-null de host_node reste valide. Le `vm_type` est déjà contraint à
+      // qemu|lxc par le parseur (ProxmoxParse.fromClusterResources) : pas besoin de l'encoder.
+      const nodeSeg = encodeURIComponent(record.host_node);
+      const vmidSeg = encodeURIComponent(vmid);
+
       try {
-        const cfg = await this.http.getJson("/api2/json/nodes/" + record.host_node + "/" + record.vm_type + "/" + vmid + "/config");
+        const cfg = await this.http.getJson("/api2/json/nodes/" + nodeSeg + "/" + record.vm_type + "/" + vmidSeg + "/config");
         ProxmoxParse.mergeConfig(record, cfg);
       } catch {
         // VM disparue/migrée entre l'inventaire et cet appel : son squelette (nom, statut,
@@ -123,7 +132,7 @@ export class ProxmoxAdapter implements VmProviderAdapter {
       // éteinte, et les LXC exposent leur IP statique dans la config déjà fusionnée).
       if (record.vm_type === "qemu" && record.status === "running") {
         try {
-          const agent = await this.http.getJson("/api2/json/nodes/" + record.host_node + "/qemu/" + vmid + "/agent/network-get-interfaces");
+          const agent = await this.http.getJson("/api2/json/nodes/" + nodeSeg + "/qemu/" + vmidSeg + "/agent/network-get-interfaces");
           ProxmoxParse.mergeAgentInterfaces(record, agent);
         } catch {
           // Agent non installé / VM sans agent : « au mieux » (cadrage) — record inchangé.

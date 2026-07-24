@@ -40,10 +40,10 @@ Idempotence de bout en bout : un inventaire inchangé ne produit **aucune**
 | Fichier | Rôle |
 |---|---|
 | `VmProvider.ts` | **Contrat** : `VmProviderAdapter` (test/inventory), pivot `VmRecord`/`VmNic` + état cluster `VmClusterInfo`/`VmClusterNode` (retour `VmInventory`), `ProviderConfig`. Agnostique du provider — Proxmox n'est que la 1re implémentation. |
-| `PveHttp.ts` | Client HTTPS d'UN nœud : jeton d'API (`PVEAPIToken=…`) et **hiérarchie de confiance TLS** par endpoint (`trustOptions`, statique pure : épinglage d'empreinte SHA-256 > CA du cluster `ca_pem` > CA système) — jamais « accepter tout ». Erreurs TYPÉES (`PveHttpError.retryable` : joignabilité vs applicatif). Le jeton n'apparaît jamais dans une erreur/un log. |
+| `PveHttp.ts` | Client HTTPS d'UN nœud : jeton d'API (`PVEAPIToken=…`) et **hiérarchie de confiance TLS** par endpoint (`trustOptions`, statique pure : épinglage d'empreinte SHA-256 > CA du cluster `ca_pem` > CA système) — jamais « accepter tout ». Erreurs TYPÉES (`PveHttpError.retryable` : joignabilité vs applicatif). Le jeton n'apparaît jamais dans une erreur/un log. **Réponse BORNÉE** : au-delà de `MAX_RESPONSE_BYTES` (32 Mio) la requête est avortée (erreur non-retryable — données cluster-wide, basculer ne servirait à rien) pour qu'un endpoint détraqué ne gonfle pas la mémoire du serveur. |
 | `PveHttpPool.ts` | **Pool de nœuds** avec bascule sur défaillance de joignabilité (jamais sur une erreur applicative) et préférence collante (le nœud mort ne coûte son délai qu'une fois par passe). |
 | `ProxmoxParse.ts` | Décodage PUR des réponses JSON (chaînes `netN` QEMU/LXC, `/cluster/resources` → VMs ET nœuds, `/cluster/status` → nom + quorate, config, guest-agent). TOLÉRANT : clé inconnue ignorée, valeur manquante → null, jamais de throw. |
-| `ProxmoxAdapter.ts` | Orchestration des appels (`/cluster/status` → nom + quorate, `/cluster/resources` SANS filtre → VMs + nœuds, `/version` → version + gamme, configs, agent pour les QEMU allumées). HTTP **injecté** (`PveJsonClient`) → testable par stub. Échec d'une config individuelle ou d'une métadonnée cluster (quorum/version) toléré ; seul l'échec de l'inventaire de masse rejette. |
+| `ProxmoxAdapter.ts` | Orchestration des appels (`/cluster/status` → nom + quorate, `/cluster/resources` SANS filtre → VMs + nœuds, `/version` → version + gamme, configs, agent pour les QEMU allumées). HTTP **injecté** (`PveJsonClient`) → testable par stub. Échec d'une config individuelle ou d'une métadonnée cluster (quorum/version) toléré ; seul l'échec de l'inventaire de masse rejette. Les segments issus du cluster distant (nom de nœud, `vmid`) sont **encodés** (`encodeURIComponent`) avant d'entrer dans un chemin d'URL. |
 | `ProviderConfigValidate.ts` | Validation PURE d'UN provider (id/kind/token requis, pool d'urls https + empreintes par nœud + doublons, include_lxc/interval_sec/timeout_sec avec défauts) — utilisée par le CRUD DB (messages d'erreur uniques, zéro duplication). Le token n'apparaît jamais dans un message. |
 | `../SecretBox.ts` | Coffre de chiffrement des secrets AU REPOS — module serveur **PARTAGÉ** (hors de `vm/`, réutilisé par `notify/`) : AES-256-GCM (authentifié), clé = SHA-256 de la passphrase d'env `DCMANAGER_SECRETS_KEY` (**clé UNIQUE, sans repli** depuis le 2026-07-20), IV aléatoire 12 o, format versionné `v1:<iv>:<tag>:<ct>` (base64). Aucun secret (passphrase/clé/jeton) dans un log ou une erreur. Limites assumées + clé perdue = jetons à ressaisir (cf. « Configuration »). |
 | `ProviderConfigDb.ts` | Stockage DB chiffré (`vm-providers.db`, tables typées `vm_providers` + `vm_provider_endpoints` ordonnées, jetons `token_enc`) — **UNIQUE source de config**. Deux surfaces : LECTURE synchro (`providersFor`/`configuredDocIds`) ET CRUD sans fuite de jeton (`listFor`/`save`/`remove`/`buildForTest` — `has_token` seul, jamais le jeton). Driver SQLite injecté. |
@@ -247,6 +247,12 @@ quel par la liste et l'enregistrement (aucune réserve, contrairement au jeton).
   d'infrastructure long, pas un mot de passe humain à force-brute), IV aléatoire
   de 12 octets par chiffrement, format stocké versionné `v1:<iv>:<tag>:<ct>`
   (base64, le préfixe autorise une rotation d'algorithme future).
+- **Longueur minimale VÉRIFIÉE** : l'hypothèse « secret long et aléatoire » (sur
+  laquelle repose l'absence de sel/itérations) n'est plus seulement documentée —
+  `SecretBox` **REFUSE au démarrage** toute passphrase de moins de
+  `MIN_PASSPHRASE_LENGTH` (**16**) caractères (le module concerné démarre alors
+  « en erreur », routes en **503** avec le message actionnable, sans faire tomber
+  le serveur). Générer un vrai secret, p. ex. `openssl rand -base64 32`.
 - **Limites ASSUMÉES** : la clé vit dans l'environnement du serveur — le
   chiffrement protège les **copies** de la base (backups, exfiltration du
   fichier), PAS un attaquant qui contrôle l'hôte. Ni la passphrase, ni la clé, ni

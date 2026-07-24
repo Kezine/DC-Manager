@@ -632,6 +632,10 @@ module.exports = async () => {
     const sys = PveHttp.trustOptions(null, null);
     ck.eq(sys.rejectUnauthorized, true, "ni pin ni ca : rejectUnauthorized=true (CA système)");
     ck(!("ca" in sys) && !("checkServerIdentity" in sys), "ni pin ni ca : ni « ca » ni checkServerIdentity (validation TLS standard)");
+
+    // Plafond de réponse (durcissement audit 2026-07-24) : borne EXPOSÉE, assertée sans réseau.
+    // getJson avorte au-delà (mémoire du serveur protégée d'un endpoint détraqué) — cf. PveHttp.getJson.
+    ck.eq(PveHttp.MAX_RESPONSE_BYTES, 32 * 1024 * 1024, "MAX_RESPONSE_BYTES = 32 Mio (borne anti-gonflement mémoire)");
   }
   });
 
@@ -816,6 +820,33 @@ module.exports = async () => {
     try { await new ProxmoxAdapter(PVE_CFG, mkPveStub({ "/api2/json/cluster/status": { data: [] } })).inventory(); }
     catch (_) { threw = true; }
     ck(threw, "échec de /cluster/resources → inventory rejette (jamais un inventaire vide trompeur)");
+  }
+  });
+
+  await section("Serveur : ProxmoxAdapter.inventory — segments d'URL encodés (nom de nœud exotique)", async () => {
+  {
+    const { ProxmoxAdapter } = SERVER("vm/ProxmoxAdapter.js");
+    // Nom de nœud EXOTIQUE venu du cluster distant, porteur de méta-caractères d'URL (« / », « ? »,
+    // « = ») : sans encodage, ils altéreraient la STRUCTURE du chemin appelé. Le stub journalise les
+    // chemins tentés → on vérifie qu'ils sont bien encodés (durcissement audit 2026-07-24).
+    const oddNode = "pve/1?x=y";
+    const enc = encodeURIComponent(oddNode); // "pve%2F1%3Fx%3Dy"
+    const stub = mkPveStub({
+      "/api2/json/version": { data: { version: "8.4.1" } },
+      "/api2/json/cluster/status": { data: [{ type: "cluster", name: "prod", quorate: 1 }] },
+      "/api2/json/cluster/resources": { data: [
+        { vmid: 100, type: "qemu", name: "web", node: oddNode, status: "running", maxcpu: 2 },
+      ] },
+      // Aucune route config/agent : le stub 404 → toléré (squelette conservé). On n'observe QUE les
+      // chemins TENTÉS (stub.calls), pas les réponses — c'est l'ENCODAGE du chemin qui est en test.
+    });
+    await new ProxmoxAdapter(PVE_CFG, stub).inventory();
+    const configPath = "/api2/json/nodes/" + enc + "/qemu/100/config";
+    const agentPath = "/api2/json/nodes/" + enc + "/qemu/100/agent/network-get-interfaces";
+    ck(stub.calls.includes(configPath), "chemin config : nom de nœud ENCODÉ (« / » et « ? » échappés)");
+    ck(stub.calls.includes(agentPath), "chemin agent (QEMU running) : nom de nœud ENCODÉ");
+    // Le nom BRUT non encodé n'apparaît dans AUCUN chemin appelé : aucune injection dans le path.
+    ck(!stub.calls.some((p) => p.includes(oddNode)), "aucun chemin ne contient le nom de nœud brut (non encodé)");
   }
   });
 
@@ -1086,6 +1117,33 @@ module.exports = async () => {
     ck.eq(bothBox.decrypt(stored), secret, "DCMANAGER_SECRETS_KEY présente → seule elle est lue (VM_PROVIDERS_KEY ignorée)");
     // Passphrase vide/blanche = absente (pas de coffre au comportement surprenant).
     ck.eq(SecretBox.fromEnv({ DCMANAGER_SECRETS_KEY: "  " }), null, "passphrase blanche → traitée comme absente");
+
+    // -- GARDE-FOU DE LONGUEUR (durcissement audit 2026-07-24) : le SHA-256 direct (sans sel) exige
+    //    un secret long ; une passphrase courte rendrait un backup force-brutable → REFUS explicite. --
+    ck.eq(SecretBox.MIN_PASSPHRASE_LENGTH, 16, "seuil minimal exporté = 16 caractères");
+    const shortSecret = "hunter2xy"; // 9 caractères, valeur SENTINELLE : ne doit JAMAIS fuiter dans le message
+    let tooShort = null;
+    try { new SecretBox(shortSecret); } catch (e) { tooShort = e.message; }
+    ck(!!tooShort && /trop courte/.test(tooShort) && /openssl/.test(tooShort), "passphrase < 16 → throw actionnable (renvoie vers openssl rand)");
+    ck(!tooShort.includes(shortSecret), "…le message ne cite JAMAIS la valeur de la passphrase");
+    // Limite EXACTE (strict < 16) : 15 refusée, 16 acceptée et pleinement fonctionnelle.
+    let just15 = false;
+    try { new SecretBox("x".repeat(15)); } catch (_) { just15 = true; }
+    ck(just15, "passphrase de 15 caractères → refusée (seuil strict)");
+    const ok16 = new SecretBox("y".repeat(16));
+    ck.eq(ok16.decrypt(ok16.encrypt(secret)), secret, "passphrase de 16 caractères → acceptée (aller-retour fonctionnel)");
+    // La longueur se mesure APRÈS trim() (comme la garde « vide ») : les blancs ne comptent pas.
+    let trimmed = false;
+    try { new SecretBox("   abc   "); } catch (_) { trimmed = true; }
+    ck(trimmed, "longueur mesurée après trim (blancs non comptés) → « abc » refusée");
+
+    // -- fromEnv PROPAGE ce throw : une clé PRÉSENTE mais trop courte n'est PAS « clé absente ». --
+    //    (sans quoi une clé invalide passerait pour null silencieux → module cru « désactivé » à tort). --
+    let envShort = false;
+    try { SecretBox.fromEnv({ DCMANAGER_SECRETS_KEY: shortSecret }); } catch (_) { envShort = true; }
+    ck(envShort, "fromEnv(clé trop courte) → PROPAGE le throw (jamais un null silencieux)");
+    // fromEnv absente → null (comportement existant, ne pas casser) : distinct du cas « clé invalide ».
+    ck.eq(SecretBox.fromEnv({}), null, "fromEnv sans clé → null (feature désactivée, ≠ clé invalide)");
   }
   });
 
@@ -1484,7 +1542,7 @@ module.exports = async () => {
       ck.eq(router.route("test", null).map((r) => r.target.address).join(","), "+3222222222", "événement global → repli de recherche du contact dans tous les documents");
       // Jeton indéchiffrable (clé changée) : l'instance est EXCLUE sans faire tomber le routage.
       const otherBoxDb = raw.prepare("UPDATE notifier_instances SET token_enc = ? WHERE id = 'wh-sms'");
-      otherBoxDb.run(new SecretBox("autre-cle").encrypt("JETON"));
+      otherBoxDb.run(new SecretBox("autre-cle-de-chiffrement").encrypt("JETON"));
       ck.eq(router.route("vm-sync-failure", "docA").length, 1, "jeton indéchiffrable → instance exclue, les autres destinataires servis");
 
       // -- BOUT EN BOUT : moteur + notify.db (store/journal réels) + routage + horloge contrôlée. --
@@ -1534,7 +1592,7 @@ module.exports = async () => {
       pre.exec("CREATE TABLE notifier_instances (id TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL, url TEXT, token_enc TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_date TEXT NOT NULL, updated_date TEXT NOT NULL)");
       pre.exec("INSERT INTO notifier_instances (id, kind, label, url, token_enc, enabled, created_date, updated_date) VALUES ('old-wh', 'webhook', 'Ancien', 'https://old.exemple.lan/', NULL, 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')");
       pre.close();
-      const db2 = new NotifyDb(dirOld, Sqlite, new SecretBox("p"));
+      const db2 = new NotifyDb(dirOld, Sqlite, new SecretBox("passphrase-de-migration-test"));
       // La ligne héritée gagne les DÉFAUTS SQL → payload identique à avant (rétro-compat).
       const migrated = db2.listInstances().find((i) => i.id === "old-wh");
       ck(migrated && migrated.simple === false && migrated.simple_max_chars === 300 && migrated.html === false, "migration : instance antérieure → défauts d'envoi (false, 300, false)");
