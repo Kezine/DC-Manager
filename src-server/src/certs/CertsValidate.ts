@@ -20,6 +20,15 @@ export const KEY_ALGOS = ["ec-p256", "rsa-2048", "rsa-4096", "ed25519"] as const
 /** Types de SAN persistés en table (cadrage : dns | ip | email | principal SSH). */
 export const SAN_TYPES = ["dns", "ip", "email", "principal"] as const;
 
+/** COFFRE par défaut (chantier coffres multi-DEK, cadrage §11 — schéma Option B) : chaque certificat
+    porte un `vault_id` désignant le coffre (la DEK) qui chiffre sa `key_enc`. « default » = le coffre
+    historique (l'unique DEK d'avant la migration) ; le client peut en créer d'autres (ex. « root » pour
+    compartimenter les clés racine). Le serveur reste ZÉRO-CONNAISSANCE : un coffre n'est qu'une ligne
+    d'enveloppe opaque de plus — il ne dérive ni ne déballe jamais rien. */
+export const VAULT_DEFAULT = "default";
+/** Format d'un identifiant de coffre : slug court (minuscules/chiffres/tirets), stable et lisible. */
+const VAULT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+
 /** Borne haute des blobs stockés (PEM public, clé chiffrée) — un certificat/une clé
     réels pèsent quelques Ko ; 1 Mo laisse une marge x100 sans ouvrir la porte à l'abus. */
 const MAX_BLOB_CHARS = 1024 * 1024;
@@ -61,6 +70,10 @@ export interface CertificateCandidate {
   /** Certificat CROISÉ d'une CA issue d'une rotation de clé (Subject = cette CA, Issuer = l'ancienne CA,
       signé par la clé de l'ancienne CA). Blob public opaque ; NULL hors rotation croisée. */
   cross_signed_pem: string | null;
+  /** COFFRE dont la DEK chiffre `key_enc` (cadrage §11) — « default » si absent. ⚠ INVARIANT tenu par le
+      CLIENT : `vault_id` et la DEK ayant réellement chiffré le blob doivent TOUJOURS concorder (les deux
+      voyagent dans le MÊME PUT) — le serveur ne peut pas le vérifier (blobs opaques). */
+  vault_id: string;
   sans: SanCandidate[];
 }
 
@@ -142,6 +155,12 @@ export class CertsValidate {
     const renewedFrom = typeof candidate.renewed_from === "string" && candidate.renewed_from.trim() !== "" ? candidate.renewed_from.trim() : null;
     if (renewedFrom !== null && renewedFrom === id.trim()) issues.push("renewed_from : un certificat ne peut pas être le renouvellement de lui-même");
 
+    // Coffre (cadrage §11) : absent/vide → « default » (rétro-compat totale — tout l'existant vit dans le
+    // coffre historique) ; fourni → slug valide exigé. L'EXISTENCE du coffre est vérifiée par CertsDb.save.
+    const vaultRaw = typeof candidate.vault_id === "string" ? candidate.vault_id.trim() : "";
+    const vaultId = vaultRaw === "" ? VAULT_DEFAULT : vaultRaw;
+    if (!VAULT_ID_RE.test(vaultId)) issues.push("vault_id : identifiant de coffre invalide (slug attendu : minuscules/chiffres/tirets, ≤ 32)");
+
     const sans = CertsValidate.parseSans(candidate.sans, issues);
 
     if (issues.length) throw new CertsConfigError(issues);
@@ -150,8 +169,28 @@ export class CertsValidate {
       serial, not_before: notBefore, not_after: notAfter, fingerprint,
       key_algo: keyAlgo as CertificateCandidate["key_algo"],
       public_pem: publicPem, key_enc: keyEnc, revoked_at: revokedAt,
-      comment, revocation_reason: revocationReason, renewed_from: renewedFrom, cross_signed_pem: crossSignedPem, sans,
+      comment, revocation_reason: revocationReason, renewed_from: renewedFrom, cross_signed_pem: crossSignedPem,
+      vault_id: vaultId, sans,
     };
+  }
+
+  /** Valide un IDENTIFIANT de coffre (segment d'URL des routes /pki/vaults/:vaultId). */
+  static parseVaultId(value: unknown): string {
+    const vaultId = typeof value === "string" ? value.trim() : "";
+    if (!VAULT_ID_RE.test(vaultId)) throw new CertsConfigError(["vault_id : identifiant de coffre invalide (slug attendu : minuscules/chiffres/tirets, ≤ 32)"]);
+    return vaultId;
+  }
+
+  /** Valide les paramètres d'INITIALISATION d'un coffre : mêmes champs qu'une PKI (KDF + enveloppe de SA
+      DEK — chaque coffre a sa DEK et sa phrase propres) + un LIBELLÉ optionnel d'affichage. */
+  static parseVaultParams(candidate: Record<string, unknown>): PkiParamsCandidate & { label: string | null } {
+    const issues: string[] = [];
+    let base: PkiParamsCandidate | null = null;
+    try { base = CertsValidate.parsePkiParams(candidate); }
+    catch (e) { if (e instanceof CertsConfigError) issues.push(...e.issues); else throw e; }
+    const label = CertsValidate.parseText("label", candidate.label, 64, issues);
+    if (issues.length || !base) throw new CertsConfigError(issues);
+    return { ...base, label };
   }
 
   /** Valide les paramètres PKI d'un document (initialisation — cadrage §3 pki_documents). */

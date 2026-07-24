@@ -4,7 +4,7 @@ import { Logger } from "../logger.js";
 import { Schema } from "../constants.js";
 import type { SqliteCtor, SqliteDb } from "../db.js";
 import { AuditStamp } from "../AuditStamp.js";   // « auteur présent » partagé (id canonique de created_by/updated_by)
-import { CertsValidate, type CertificateCandidate, type PkiParamsCandidate, type SanCandidate } from "./CertsValidate.js";
+import { CertsValidate, CertsConfigError, VAULT_DEFAULT, type CertificateCandidate, type PkiParamsCandidate, type SanCandidate } from "./CertsValidate.js";
 
 /* =============================================================================
    PERSISTANCE DU MODULE CERTIFICATS — base SQLite DÉDIÉE (`certs.db`, à côté
@@ -18,11 +18,16 @@ import { CertsValidate, type CertificateCandidate, type PkiParamsCandidate, type
    échéances, empreintes — nécessaires au suivi d'expiration) et des blobs
    opaques. PAS de SecretBox ici : il n'y a rien à chiffrer côté serveur.
 
-   VRAIES TABLES (contrainte transverse) — schéma EXACT du cadrage §3 :
-   - pki_documents     : paramètres de dérivation de la KEK PAR document + enveloppe
-                         de la DEK (sel, itérations, wrapped_dek — chiffré côté client) ;
+   VRAIES TABLES (contrainte transverse) — schéma du cadrage §3, étendu §11 (coffres) :
+   - pki_vaults        : les COFFRES d'un document (cadrage §11, schéma Option B UNIFORME) — un
+                         coffre = une DEK indépendante + sa phrase + son enveloppe `wrapped_dek`.
+                         Le coffre « default » = l'unique DEK historique (migré depuis pki_documents) ;
+                         d'autres coffres (ex. « root ») compartimentent des clés (délégation) ;
+   - pki_documents     : en-tête LEGACY de la PKI (paramètres du coffre default d'avant la migration).
+                         CONSERVÉ (copy-never-delete) comme marqueur d'initialisation + MIROIR du coffre
+                         default (init/rekey le tiennent à jour) — filet de récupération supplémentaire ;
    - pki_envelope_history : ARCHIVE append-only des enveloppes remplacées par un
-                         changement de phrase (filet de récupération — audit 2026-07-17) ;
+                         changement de phrase, PAR coffre (`vault_id`) — filet de récupération ;
    - certificates      : métadonnées + public_pem (public par nature) +
                          key_enc (blob chiffré client) — PK (doc_id, id),
                          FK composite parent (émetteur) ;
@@ -60,6 +65,8 @@ export interface CertificateListItem {
   renewed_from: string | null;
   /** Certificat croisé d'une CA rekeyée (Issuer = ancienne CA) — public, jamais un secret. */
   cross_signed_pem: string | null;
+  /** COFFRE dont la DEK chiffre `key_enc` (cadrage §11) — « default » = coffre historique. */
+  vault_id: string;
   created_date: string;
   updated_date: string;
   sans: SanCandidate[];
@@ -73,6 +80,14 @@ export interface CertificateDetail extends CertificateListItem {
 /** Paramètres PKI d'un document tels que renvoyés au client (dérivation KEK + enveloppe DEK). */
 export interface PkiParams extends PkiParamsCandidate {
   doc_id: string;
+}
+
+/** Un COFFRE d'un document (cadrage §11) : sa DEK emballée (`wrapped_dek`) + les paramètres KDF de SA
+    phrase. Le serveur STOCKE, ne déballe jamais (zéro-connaissance). `label` = libellé d'affichage. */
+export interface PkiVault extends PkiParamsCandidate {
+  doc_id: string;
+  vault_id: string;
+  label: string | null;
 }
 
 /** Élément de la LISTE PAGINÉE (GET /certs?…) — un CertificateListItem (donc SANS key_enc, invariant Q5)
@@ -168,6 +183,16 @@ export class CertsDb {
         kdf_iters     INTEGER NOT NULL,
         wrapped_dek   TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS pki_vaults (
+        doc_id        TEXT NOT NULL,
+        vault_id      TEXT NOT NULL,
+        label         TEXT,
+        kdf_version   TEXT NOT NULL,
+        kdf_salt      TEXT NOT NULL,
+        kdf_iters     INTEGER NOT NULL,
+        wrapped_dek   TEXT NOT NULL,
+        PRIMARY KEY (doc_id, vault_id)
+      );
       CREATE TABLE IF NOT EXISTS pki_envelope_history (
         doc_id        TEXT NOT NULL,
         archived_date TEXT NOT NULL,
@@ -225,6 +250,12 @@ export class CertsDb {
     this.ensureColumn("certificates", "revocation_reason", "TEXT");
     this.ensureColumn("certificates", "renewed_from", "TEXT");
     this.ensureColumn("certificates", "cross_signed_pem", "TEXT");
+    // COFFRES (cadrage §11, Temps 1 de la migration — AUCUNE crypto) : chaque certificat porte le coffre
+    // qui chiffre sa key_enc, chaque enveloppe archivée le coffre qu'elle emballait. `NOT NULL DEFAULT
+    // 'default'` : SQLite renseigne les lignes EXISTANTES avec le défaut — le backfill est GRATUIT (pur
+    // ajout de métadonnée, les blobs restent chiffrés par la DEK historique qui DEVIENT le coffre default).
+    this.ensureColumn("certificates", "vault_id", "TEXT NOT NULL DEFAULT 'default'");
+    this.ensureColumn("pki_envelope_history", "vault_id", "TEXT NOT NULL DEFAULT 'default'");
     // Index APRÈS la migration : sur une base ancienne, la colonne `search` n'existe qu'une fois
     // ensureColumn passé (créer l'index avant échouerait). idx_search sert le filtre `query`
     // (search LIKE), idx_parent la remontée d'arbre (CTE sur (doc_id, parent_id)).
@@ -233,6 +264,24 @@ export class CertsDb {
       CREATE INDEX IF NOT EXISTS idx_certificates_parent ON certificates(doc_id, parent_id);
     `);
     this.backfillSearch();
+    this.migrateVaults();
+  }
+
+  /** MIGRATION Temps 1 des COFFRES (cadrage §11.5) : recopie l'enveloppe de `pki_documents` en ligne
+      « default » de `pki_vaults` — IDEMPOTENTE (WHERE NOT EXISTS) et COPY-NEVER-DELETE (pki_documents
+      reste intact : marqueur d'init + filet legacy). AUCUN re-chiffrement : l'unique DEK historique
+      DEVIENT la DEK du coffre default, les key_enc existants lui sont déjà liés. Après cette passe, le
+      store est STRUCTURELLEMENT multi-coffres et FONCTIONNELLEMENT identique (un coffre, même phrase). */
+  private migrateVaults(): void {
+    // `changes` : better-sqlite3 le renvoie ; le shim de test peut ne pas le typer → lecture défensive.
+    const result = this.db.prepare(`
+      INSERT INTO pki_vaults (doc_id, vault_id, label, kdf_version, kdf_salt, kdf_iters, wrapped_dek)
+      SELECT d.doc_id, '${VAULT_DEFAULT}', NULL, d.kdf_version, d.kdf_salt, d.kdf_iters, d.wrapped_dek
+      FROM pki_documents d
+      WHERE NOT EXISTS (SELECT 1 FROM pki_vaults v WHERE v.doc_id = d.doc_id AND v.vault_id = '${VAULT_DEFAULT}')
+    `).run() as { changes?: number } | undefined;
+    const copied = (result && typeof result.changes === "number") ? result.changes : 0;
+    if (copied > 0) this.log.info("certs: migration coffres — enveloppe(s) default recopiée(s) dans pki_vaults", String(copied));
   }
 
   /** ALTER TABLE ADD COLUMN idempotent : n'ajoute la colonne que si elle manque (table_info). */
@@ -278,12 +327,94 @@ export class CertsDb {
   initPki(docId: string, candidate: Record<string, unknown>): boolean {
     const parsed = CertsValidate.parsePkiParams(candidate);
     if (this.pkiParams(docId)) return false;
-    this.db.prepare(`
-      INSERT INTO pki_documents (doc_id, kdf_version, kdf_salt, kdf_iters, wrapped_dek)
-      VALUES (@doc_id, @kdf_version, @kdf_salt, @kdf_iters, @wrapped_dek)
-    `).run({ doc_id: docId, ...parsed });
+    // DOUBLE ÉCRITURE (cadrage §11) : pki_documents = marqueur legacy + miroir du coffre default ;
+    // pki_vaults = la source UNIFORME des coffres (le client lit `vaults`). Même transaction.
+    const write = this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO pki_documents (doc_id, kdf_version, kdf_salt, kdf_iters, wrapped_dek)
+        VALUES (@doc_id, @kdf_version, @kdf_salt, @kdf_iters, @wrapped_dek)
+      `).run({ doc_id: docId, ...parsed });
+      this.db.prepare(`
+        INSERT INTO pki_vaults (doc_id, vault_id, label, kdf_version, kdf_salt, kdf_iters, wrapped_dek)
+        VALUES (@doc_id, @vault_id, NULL, @kdf_version, @kdf_salt, @kdf_iters, @wrapped_dek)
+        ON CONFLICT(doc_id, vault_id) DO NOTHING
+      `).run({ doc_id: docId, vault_id: VAULT_DEFAULT, ...parsed });
+    });
+    write();
     this.log.info("certs: PKI initialisée", docId, parsed.kdf_version + ", " + parsed.kdf_iters + " itérations");
     return true;
+  }
+
+  /* --------------------------------------------------------------------------
+     COFFRES (cadrage §11 — schéma Option B UNIFORME : tous les coffres dans pki_vaults)
+     -------------------------------------------------------------------------- */
+
+  /** Les coffres d'un document, « default » en tête puis par identifiant (affichage stable). */
+  vaultsFor(docId: string): PkiVault[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM pki_vaults WHERE doc_id = ?
+      ORDER BY CASE WHEN vault_id = '${VAULT_DEFAULT}' THEN 0 ELSE 1 END, vault_id
+    `).all(docId) as any[];
+    return rows.map((row) => ({
+      doc_id: row.doc_id, vault_id: row.vault_id, label: row.label ?? null,
+      kdf_version: row.kdf_version, kdf_salt: row.kdf_salt, kdf_iters: row.kdf_iters, wrapped_dek: row.wrapped_dek,
+    }));
+  }
+
+  /** Initialise un coffre ADDITIONNEL (ex. « root ») : sa propre DEK emballée sous SA phrase, côté client.
+      Verdicts : "ok" · "exists" (409 — ré-initialiser écraserait une DEK et rendrait ses key_enc illisibles,
+      même interdit que la PKI) · "missing" (404 — pas de PKI : un coffre secondaire sans coffre default n'a
+      pas de sens, le flux d'initialisation crée d'abord la PKI). Le coffre default passe par initPki. */
+  initVault(docId: string, vaultId: string, candidate: Record<string, unknown>): "ok" | "exists" | "missing" {
+    const parsed = CertsValidate.parseVaultParams(candidate);
+    const id = CertsValidate.parseVaultId(vaultId);
+    const run = this.db.transaction(() => {
+      if (this.vaultsFor(docId).length === 0) return "missing";
+      const existing = this.db.prepare("SELECT vault_id FROM pki_vaults WHERE doc_id = ? AND vault_id = ?").get(docId, id);
+      if (existing) return "exists";
+      this.db.prepare(`
+        INSERT INTO pki_vaults (doc_id, vault_id, label, kdf_version, kdf_salt, kdf_iters, wrapped_dek)
+        VALUES (@doc_id, @vault_id, @label, @kdf_version, @kdf_salt, @kdf_iters, @wrapped_dek)
+      `).run({ doc_id: docId, vault_id: id, label: parsed.label, kdf_version: parsed.kdf_version, kdf_salt: parsed.kdf_salt, kdf_iters: parsed.kdf_iters, wrapped_dek: parsed.wrapped_dek });
+      return "ok";
+    });
+    const verdict = (run as unknown as () => "ok" | "exists" | "missing")();
+    if (verdict === "ok") this.log.info("certs: coffre initialisé", docId, id);
+    return verdict;
+  }
+
+  /** CHANGEMENT DE PHRASE d'un coffre (générique) : mêmes garde-fous que l'historique rekeyPki —
+      VERROU OPTIMISTE (prev_wrapped_dek) + HISTORISATION append-only (avec le vault_id), même
+      transaction. Le coffre default MIROITE en plus dans pki_documents (ligne legacy tenue à jour —
+      les procédures de récupération documentées la lisent encore). */
+  rekeyVault(docId: string, vaultId: string, candidate: Record<string, unknown>): "ok" | "missing" | "conflict" {
+    const parsed = CertsValidate.parseRekeyParams(candidate);
+    const id = CertsValidate.parseVaultId(vaultId);
+    const run = this.db.transaction(() => {
+      const current = this.db.prepare("SELECT * FROM pki_vaults WHERE doc_id = ? AND vault_id = ?").get(docId, id) as any;
+      if (!current) return "missing";
+      if (current.wrapped_dek !== parsed.prev_wrapped_dek) return "conflict";
+      this.db.prepare(`
+        INSERT INTO pki_envelope_history (doc_id, archived_date, kdf_version, kdf_salt, kdf_iters, wrapped_dek, vault_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(docId, new Date().toISOString(), current.kdf_version, current.kdf_salt, current.kdf_iters, current.wrapped_dek, id);
+      this.db.prepare(`
+        UPDATE pki_vaults SET kdf_version = @kdf_version, kdf_salt = @kdf_salt,
+               kdf_iters = @kdf_iters, wrapped_dek = @wrapped_dek
+        WHERE doc_id = @doc_id AND vault_id = @vault_id
+      `).run({ doc_id: docId, vault_id: id, kdf_version: parsed.kdf_version, kdf_salt: parsed.kdf_salt, kdf_iters: parsed.kdf_iters, wrapped_dek: parsed.wrapped_dek });
+      if (id === VAULT_DEFAULT) {
+        this.db.prepare(`
+          UPDATE pki_documents SET kdf_version = @kdf_version, kdf_salt = @kdf_salt,
+                 kdf_iters = @kdf_iters, wrapped_dek = @wrapped_dek
+          WHERE doc_id = @doc_id
+        `).run({ doc_id: docId, kdf_version: parsed.kdf_version, kdf_salt: parsed.kdf_salt, kdf_iters: parsed.kdf_iters, wrapped_dek: parsed.wrapped_dek });
+      }
+      return "ok";
+    });
+    const verdict = (run as unknown as () => "ok" | "missing" | "conflict")();
+    if (verdict === "ok") this.log.info("certs: phrase de coffre changée (enveloppe ré-emballée, ancienne archivée)", docId, id);
+    return verdict;
   }
 
   /** CHANGEMENT DE PHRASE MAÎTRE (re-emballage de l'enveloppe) — réécrit UNIQUEMENT les
@@ -303,27 +434,9 @@ export class CertsDb {
         main (cf. docs/certs.md « Procédures »), suffit à récupérer un coffre écrasé par un
         client bogué ou malveillant. */
   rekeyPki(docId: string, candidate: Record<string, unknown>): "ok" | "missing" | "conflict" {
-    const parsed = CertsValidate.parseRekeyParams(candidate);
-    const run = this.db.transaction(() => {
-      const current = this.pkiParams(docId);
-      if (!current) return "missing";
-      if (current.wrapped_dek !== parsed.prev_wrapped_dek) return "conflict";
-      this.db.prepare(`
-        INSERT INTO pki_envelope_history (doc_id, archived_date, kdf_version, kdf_salt, kdf_iters, wrapped_dek)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(docId, new Date().toISOString(), current.kdf_version, current.kdf_salt, current.kdf_iters, current.wrapped_dek);
-      this.db.prepare(`
-        UPDATE pki_documents SET kdf_version = @kdf_version, kdf_salt = @kdf_salt,
-               kdf_iters = @kdf_iters, wrapped_dek = @wrapped_dek
-        WHERE doc_id = @doc_id
-      `).run({ doc_id: docId, kdf_version: parsed.kdf_version, kdf_salt: parsed.kdf_salt, kdf_iters: parsed.kdf_iters, wrapped_dek: parsed.wrapped_dek });
-      return "ok";
-    });
-    // Le shim SqliteCtor type `transaction` sans valeur de retour ; better-sqlite3, lui, PROPAGE
-    // le retour de la fonction — le cast rétablit ce que le typage minimal du shim ne porte pas.
-    const verdict = (run as unknown as () => "ok" | "missing" | "conflict")();
-    if (verdict === "ok") this.log.info("certs: phrase maître changée (enveloppe ré-emballée, ancienne archivée)", docId, parsed.kdf_version + ", " + parsed.kdf_iters + " itérations");
-    return verdict;
+    // Depuis les coffres (cadrage §11), le changement de phrase « maître » historique = celui du coffre
+    // DEFAULT — délégué au générique rekeyVault (verrou optimiste + historisation + miroir pki_documents).
+    return this.rekeyVault(docId, VAULT_DEFAULT, candidate);
   }
 
   /* --------------------------------------------------------------------------
@@ -499,23 +612,31 @@ export class CertsDb {
     const author = AuditStamp.author(authorId);   // id non vide, sinon null
     const existing = this.db.prepare("SELECT key_enc, created_date FROM certificates WHERE doc_id = ? AND id = ?").get(docId, parsed.id) as any;
     const keyEnc = parsed.key_enc === undefined ? (existing ? existing.key_enc : null) : parsed.key_enc;
+    // GARDE coffre (cadrage §11) : un vault_id NON-default doit référencer un coffre EXISTANT — écrire un
+    // certificat vers un coffre fantôme rendrait sa clé indéchiffrable sans erreur visible. « default »
+    // reste toléré même sans ligne (rétro-compat : certificat sans clé, PKI non initialisée).
+    if (parsed.vault_id !== VAULT_DEFAULT) {
+      const vault = this.db.prepare("SELECT vault_id FROM pki_vaults WHERE doc_id = ? AND vault_id = ?").get(docId, parsed.vault_id);
+      if (!vault) throw new CertsConfigError(["vault_id : coffre « " + parsed.vault_id + " » inconnu pour ce document — initialisez-le d'abord (PUT /pki/vaults/" + parsed.vault_id + ")"]);
+    }
     // Colonne `search` recalculée à CHAQUE save (label + subject + serial + valeurs de SAN, normalisés
     // par la règle PARTAGÉE Schema.normSearch) : le filtre `query` du listing devient un LIKE indexable.
     const search = CertsDb.searchText(parsed.label, parsed.subject, parsed.serial, parsed.comment, parsed.sans.map((s) => s.value));
     const write = this.db.transaction(() => {
       this.db.prepare(`
-        INSERT INTO certificates (id, doc_id, kind, parent_id, label, subject, serial, not_before, not_after, fingerprint, key_algo, public_pem, key_enc, revoked_at, comment, revocation_reason, renewed_from, cross_signed_pem, created_date, updated_date, created_by, updated_by, search)
-        VALUES (@id, @doc_id, @kind, @parent_id, @label, @subject, @serial, @not_before, @not_after, @fingerprint, @key_algo, @public_pem, @key_enc, @revoked_at, @comment, @revocation_reason, @renewed_from, @cross_signed_pem, @created_date, @updated_date, @created_by, @updated_by, @search)
+        INSERT INTO certificates (id, doc_id, kind, parent_id, label, subject, serial, not_before, not_after, fingerprint, key_algo, public_pem, key_enc, revoked_at, comment, revocation_reason, renewed_from, cross_signed_pem, vault_id, created_date, updated_date, created_by, updated_by, search)
+        VALUES (@id, @doc_id, @kind, @parent_id, @label, @subject, @serial, @not_before, @not_after, @fingerprint, @key_algo, @public_pem, @key_enc, @revoked_at, @comment, @revocation_reason, @renewed_from, @cross_signed_pem, @vault_id, @created_date, @updated_date, @created_by, @updated_by, @search)
         ON CONFLICT(doc_id, id) DO UPDATE SET kind=@kind, parent_id=@parent_id, label=@label, subject=@subject, serial=@serial,
           not_before=@not_before, not_after=@not_after, fingerprint=@fingerprint, key_algo=@key_algo,
           public_pem=@public_pem, key_enc=@key_enc, revoked_at=@revoked_at, comment=@comment, revocation_reason=@revocation_reason,
-          renewed_from=@renewed_from, cross_signed_pem=@cross_signed_pem, updated_date=@updated_date, updated_by=@updated_by, search=@search
+          renewed_from=@renewed_from, cross_signed_pem=@cross_signed_pem, vault_id=@vault_id, updated_date=@updated_date, updated_by=@updated_by, search=@search
       `).run({
         id: parsed.id, doc_id: docId, kind: parsed.kind, parent_id: parsed.parent_id, label: parsed.label,
         subject: parsed.subject, serial: parsed.serial, not_before: parsed.not_before, not_after: parsed.not_after,
         fingerprint: parsed.fingerprint, key_algo: parsed.key_algo, public_pem: parsed.public_pem,
         key_enc: keyEnc, revoked_at: parsed.revoked_at,
         comment: parsed.comment, revocation_reason: parsed.revocation_reason, renewed_from: parsed.renewed_from, cross_signed_pem: parsed.cross_signed_pem,
+        vault_id: parsed.vault_id,
         created_date: existing ? existing.created_date : nowIso, updated_date: nowIso,
         // created_by posé à la CRÉATION uniquement (absent du DO UPDATE SET → immuable) ; updated_by à chaque écriture.
         created_by: author, updated_by: author, search,
@@ -584,6 +705,7 @@ export class CertsDb {
       // Colonnes de métadonnées : présentes depuis la migration ; `?? null` couvre une ligne legacy non encore réécrite.
       comment: row.comment ?? null, revocation_reason: row.revocation_reason ?? null,
       renewed_from: row.renewed_from ?? null, cross_signed_pem: row.cross_signed_pem ?? null,
+      vault_id: row.vault_id ?? VAULT_DEFAULT,   // ligne legacy non réécrite → coffre historique
       created_date: row.created_date, updated_date: row.updated_date,
       sans: sans.map((s) => ({ san_type: s.san_type, value: s.value })),
     };

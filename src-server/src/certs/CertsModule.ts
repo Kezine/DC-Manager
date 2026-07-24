@@ -6,7 +6,7 @@ import { Changeset } from "../../../src-shared/DocumentChangeset.js";   // fabri
 import type { SqliteCtor } from "../db.js";
 import { Logger } from "../logger.js";
 import { CertsDb, type CertsListOpts } from "./CertsDb.js";
-import { CertsConfigError, CERT_KINDS } from "./CertsValidate.js";
+import { CertsConfigError, CertsValidate, CERT_KINDS } from "./CertsValidate.js";
 import { CertExpiryWatcher, type CertProblemReporter } from "./CertExpiryWatcher.js";
 
 /* =============================================================================
@@ -137,8 +137,12 @@ export class CertsModule {
     router.get("/pki", (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const params = ctx.db.pkiParams(ctx.docId);
+      // COFFRES (cadrage §11) : la réponse porte TOUS les coffres (`vaults`, default en tête) — le client
+      // multi-coffres lit ce tableau. Les champs plats historiques (paramètres du coffre default) restent
+      // en tête de réponse (rétro-compat + procédures documentées qui les lisent).
+      const vaults = ctx.db.vaultsFor(ctx.docId);
       // initialized:false SANS 404 : la première ouverture côté client enchaîne sur l'initialisation.
-      res.json(params ? { initialized: true, ...params } : { initialized: false });
+      res.json(params ? { initialized: true, ...params, vaults } : { initialized: false });
     });
 
     router.put("/pki", (req, res) => {
@@ -185,6 +189,43 @@ export class CertsModule {
       } catch (e) {
         if (e instanceof CertsConfigError) { res.status(400).json({ error: "paramètres invalides", issues: e.issues }); return; }
         this.log.error("PUT /certs/pki/rekey : échec", ctx.docId, e instanceof Error ? e.message : String(e));
+        res.status(500).json({ error: "changement de phrase en échec" });
+      }
+    });
+
+    // COFFRES ADDITIONNELS (cadrage §11) : initialisation d'un coffre nommé (ex. « root ») — sa propre
+    // DEK emballée sous SA phrase, générées côté client. Le coffre « default » passe par PUT /pki.
+    router.put("/pki/vaults/:vaultId", (req, res) => {
+      const ctx = this.context(req, res); if (!ctx) return;
+      const body: any = (req.body && typeof req.body === "object") ? req.body : {};
+      try {
+        const vaultId = CertsValidate.parseVaultId(req.params.vaultId);
+        if (vaultId === "default") { res.status(400).json({ error: "le coffre « default » s'initialise par PUT /pki (initialisation de la PKI)" }); return; }
+        const verdict = ctx.db.initVault(ctx.docId, vaultId, body);
+        if (verdict === "missing") { res.status(404).json({ error: "PKI non initialisée pour ce document — initialisez-la d'abord (le coffre default) avant de créer un coffre additionnel" }); return; }
+        if (verdict === "exists") { res.status(409).json({ error: "coffre déjà initialisé — la ré-initialisation est refusée (elle écraserait sa DEK et rendrait ses clés indéchiffrables). Pour changer sa phrase : PUT /pki/vaults/" + vaultId + "/rekey." }); return; }
+        res.json({ ok: true });
+      } catch (e) {
+        if (e instanceof CertsConfigError) { res.status(400).json({ error: "paramètres invalides", issues: e.issues }); return; }
+        this.log.error("PUT /certs/pki/vaults : échec", ctx.docId, e instanceof Error ? e.message : String(e));
+        res.status(500).json({ error: "initialisation du coffre en échec" });
+      }
+    });
+
+    // CHANGEMENT DE PHRASE d'un coffre (générique — « default » y passe aussi, /pki/rekey reste l'alias
+    // historique) : mêmes garde-fous que /pki/rekey (verrou optimiste + historisation par coffre).
+    router.put("/pki/vaults/:vaultId/rekey", (req, res) => {
+      const ctx = this.context(req, res); if (!ctx) return;
+      const body: any = (req.body && typeof req.body === "object") ? req.body : {};
+      try {
+        const vaultId = CertsValidate.parseVaultId(req.params.vaultId);
+        const verdict = ctx.db.rekeyVault(ctx.docId, vaultId, body);
+        if (verdict === "missing") { res.status(404).json({ error: "coffre inconnu pour ce document — rien à re-chiffrer (initialisez-le d'abord)" }); return; }
+        if (verdict === "conflict") { res.status(409).json({ error: "le coffre a été modifié entre-temps (autre changement de phrase ?) — rechargez la page puis réessayez", code: "conflict" }); return; }
+        res.json({ ok: true });
+      } catch (e) {
+        if (e instanceof CertsConfigError) { res.status(400).json({ error: "paramètres invalides", issues: e.issues }); return; }
+        this.log.error("PUT /certs/pki/vaults/rekey : échec", ctx.docId, e instanceof Error ? e.message : String(e));
         res.status(500).json({ error: "changement de phrase en échec" });
       }
     });

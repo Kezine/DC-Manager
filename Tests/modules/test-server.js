@@ -1907,6 +1907,82 @@ module.exports = async () => {
     }
   });
 
+  /* ============ SERVEUR : CertsDb — COFFRES multi-DEK (pki_vaults, migration Temps 1, rekey par coffre) ============ */
+
+  await section("Serveur : CertsDb — coffres (pki_vaults) : migration default, initVault, rekeyVault, vault_id des certificats", async () => {
+    let Sqlite = null;
+    try {
+      const Candidate = require(path.join(__dirname, "..", "..", "src-server", "node_modules", "better-sqlite3"));
+      const probe = new Candidate(":memory:"); probe.close();
+      Sqlite = Candidate;
+    } catch (_) { /* module/binaire absent → section sautée */ }
+    if (!Sqlite) { ck(true, "better-sqlite3 indisponible → section coffres sautée"); return; }
+
+    const fs = require("fs"), os = require("os");
+    const { CertsDb } = SERVER("certs/CertsDb.js");
+    const { CertsConfigError } = SERVER("certs/CertsValidate.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-vaults-"));
+    let raw = null;
+    try {
+      // -- MIGRATION Temps 1 sur une base LEGACY : pki_documents pré-existant SANS pki_vaults → la
+      //    ré-ouverture recopie l'enveloppe en coffre « default » (copy-never-delete, idempotent). --
+      {
+        const db0 = new CertsDb(dir, Sqlite);
+        db0.initPki("doc-L", { kdf_version: "v1", kdf_salt: "bGVnYWN5", kdf_iters: 600000, wrapped_dek: "v1:bGVn:YWN5" });
+        db0.close();
+        // Simule l'état ANTÉRIEUR aux coffres : on efface la ligne pki_vaults (comme si elle n'avait jamais existé).
+        const wipe = new Sqlite(path.join(dir, "certs.db"));
+        wipe.prepare("DELETE FROM pki_vaults WHERE doc_id = 'doc-L'").run();
+        wipe.close();
+      }
+      const db = new CertsDb(dir, Sqlite);   // ré-ouverture → migrateVaults recopie
+      const migrated = db.vaultsFor("doc-L");
+      ck.eq(migrated.length, 1, "migration : l'enveloppe legacy est recopiée en UN coffre");
+      ck(migrated[0].vault_id === "default" && migrated[0].wrapped_dek === "v1:bGVn:YWN5", "migration : coffre « default » = l'enveloppe de pki_documents (copy-never-delete)");
+      ck(db.pkiParams("doc-L") !== null, "migration : pki_documents INTACT (marqueur legacy conservé)");
+
+      // -- initPki (base neuve) : DOUBLE écriture pki_documents + pki_vaults default. --
+      db.initPki("doc-V", { kdf_version: "v1", kdf_salt: "c2VsMQ==", kdf_iters: 600000, wrapped_dek: "v1:ZDE=:ZW52MQ==" });
+      const vaults1 = db.vaultsFor("doc-V");
+      ck.eq(vaults1.map((v) => v.vault_id).join(","), "default", "initPki : coffre default créé dans pki_vaults");
+
+      // -- initVault : coffre additionnel « root » (sa PROPRE DEK/phrase). --
+      ck.eq(db.initVault("doc-X", "root", { kdf_version: "v1", kdf_salt: "eA==", kdf_iters: 600000, wrapped_dek: "v1:a:b" }), "missing", "initVault sans PKI → 'missing' (404 côté route)");
+      ck.eq(db.initVault("doc-V", "root", { kdf_version: "v1", kdf_salt: "c2VsUg==", kdf_iters: 700000, wrapped_dek: "v1:ZFI=:ZW52Ug==", label: "Clés racine" }), "ok", "initVault : coffre « root » créé");
+      ck.eq(db.initVault("doc-V", "root", { kdf_version: "v1", kdf_salt: "YXV0cmU=", kdf_iters: 600000, wrapped_dek: "v1:x:y" }), "exists", "ré-initialisation d'un coffre REFUSÉE (écraserait sa DEK)");
+      const vaults2 = db.vaultsFor("doc-V");
+      ck.eq(vaults2.map((v) => v.vault_id).join(","), "default,root", "vaultsFor : default EN TÊTE puis les autres");
+      ck.eq(vaults2[1].label, "Clés racine", "initVault : libellé d'affichage conservé");
+      let slugIssues = null;
+      try { db.initVault("doc-V", "Coffre Racine !", { kdf_version: "v1", kdf_salt: "eA==", kdf_iters: 600000, wrapped_dek: "v1:a:b" }); } catch (e) { if (e instanceof CertsConfigError) slugIssues = e.issues; }
+      ck(!!slugIssues && slugIssues.some((i) => i.includes("vault_id")), "initVault : identifiant non-slug → grief vault_id");
+
+      // -- rekeyVault : verrou optimiste + historisation PAR coffre + miroir pki_documents (default). --
+      ck.eq(db.rekeyVault("doc-V", "root", { kdf_version: "v1", kdf_salt: "bg==", kdf_iters: 800000, wrapped_dek: "v1:bmV3Ug==:ZQ==", prev_wrapped_dek: "v1:cGVyaW1l:ZQ==" }), "conflict", "rekeyVault avec prev périmé → 'conflict'");
+      ck.eq(db.rekeyVault("doc-V", "root", { kdf_version: "v1", kdf_salt: "bg==", kdf_iters: 800000, wrapped_dek: "v1:bmV3Ug==:ZQ==", prev_wrapped_dek: "v1:ZFI=:ZW52Ug==" }), "ok", "rekeyVault avec prev correct → 'ok'");
+      raw = new Sqlite(path.join(dir, "certs.db"));
+      const hist = raw.prepare("SELECT vault_id, wrapped_dek FROM pki_envelope_history WHERE doc_id = 'doc-V'").all();
+      ck(hist.length === 1 && hist[0].vault_id === "root" && hist[0].wrapped_dek === "v1:ZFI=:ZW52Ug==", "rekeyVault : ancienne enveloppe ARCHIVÉE avec son vault_id");
+      // rekeyPki (alias historique) = rekeyVault du DEFAULT, avec MIROIR pki_documents.
+      ck.eq(db.rekeyPki("doc-V", { kdf_version: "v1", kdf_salt: "bTI=", kdf_iters: 900000, wrapped_dek: "v1:ZDI=:ZW52Mg==", prev_wrapped_dek: "v1:ZDE=:ZW52MQ==" }), "ok", "rekeyPki (alias default) → 'ok'");
+      ck.eq(db.pkiParams("doc-V").wrapped_dek, "v1:ZDI=:ZW52Mg==", "rekey default : pki_documents MIROITÉ (ligne legacy à jour)");
+      ck.eq(db.vaultsFor("doc-V")[0].wrapped_dek, "v1:ZDI=:ZW52Mg==", "rekey default : pki_vaults à jour aussi (source uniforme)");
+
+      // -- vault_id des CERTIFICATS : défaut « default », coffre existant exigé sinon. --
+      db.save("doc-V", "kp-1", { kind: "ssh-keypair", label: "Paire", subject: "u@p", key_algo: "ed25519", key_enc: "v1:aQ==:Yw==" });
+      ck.eq(db.listFor("doc-V").find((c) => c.id === "kp-1").vault_id, "default", "save sans vault_id → coffre default");
+      db.save("doc-V", "kp-2", { kind: "ssh-keypair", label: "Paire racine", subject: "u@r", key_algo: "ed25519", key_enc: "v1:aQ==:cg==", vault_id: "root" });
+      ck.eq(db.getOne("doc-V", "kp-2").vault_id, "root", "save avec vault_id existant → porté par la ligne (liste ET détail)");
+      let ghostIssues = null;
+      try { db.save("doc-V", "kp-3", { kind: "ssh-keypair", label: "Fantôme", subject: "u@f", key_algo: "ed25519", vault_id: "inconnu" }); } catch (e) { if (e instanceof CertsConfigError) ghostIssues = e.issues; }
+      ck(!!ghostIssues && ghostIssues.some((i) => i.includes("inconnu")), "save vers un coffre FANTÔME → refus explicite (clé sinon indéchiffrable)");
+      db.close();
+    } finally {
+      if (raw) { try { raw.close(); } catch (_) {} }
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+    }
+  });
+
   /* ============ SERVEUR : CertsDb — listing paginé (filtres/tris/recherche SQL, sous-arbre CTE, focus, agrégats) ============ */
 
   await section("Serveur : CertsDb.listPage/listRoots — pagination SQL, filtres, tris, recherche, sous-arbre (CTE), focus, agrégats racines, backfill search", async () => {
