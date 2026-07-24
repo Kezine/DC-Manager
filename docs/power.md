@@ -1,8 +1,13 @@
 # Analyse énergie (power) — fourniture / consommation / stats
 
 Formalise la distribution électrique : d'où vient l'énergie, combien chaque équipement consomme, et où sont les
-risques (surcharge, redondance). Module pur : `PowerAnalysis` (`src-client/store/PowerAnalysis.ts`), piloté par le store
-injecté (aucun DOM). UI : `PortEditorControls` (contrôles power du port + panneaux stats/warnings), piloté par `EquipmentForms`.
+risques (surcharge, redondance). Moteur pur : `PowerAnalysis` (**`src-shared/PowerAnalysis.ts`** — TS pur, ni DOM ni
+Node), piloté par un **store injecté via l'interface `PowerAnalysisStore`** (4 lectures ; le `Store` client la satisfait
+structurellement). Les avertissements sortent en **codes + params** (`PowerWarning`), PAS en chaînes traduites : le moteur
+ignore l'i18n ; le client résout le libellé via `registries/PowerWarnings` (table code → clé `analysis.power.*`).
+Il vit dans `src-shared/` (et non plus dans `src-client/store/`) pour être consommable côté serveur — cible : un **futur
+producteur d'alertes power** (module `notify/`). UI : `PortEditorControls` (contrôles power du port + panneaux
+stats/warnings), piloté par `EquipmentForms`.
 
 ## Modèle
 

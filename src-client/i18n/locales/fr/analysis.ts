@@ -1,7 +1,9 @@
 /* ============================================================================
    Domaine `analysis` — FRANÇAIS. Messages d'ANALYSE produits par le store (modules
-   `store/Store.ts`, `store/PowerAnalysis.ts`, `store/CableRouteAnalyzer.ts`) et
-   RENDUS à l'écran (toasts, bilans, descriptions de câble). Regroupés ici plutôt
+   `store/Store.ts`, `store/CableRouteAnalyzer.ts`) et RENDUS à l'écran (toasts, bilans,
+   descriptions de câble). Les clés `power.*` résolvent les CODES du moteur partagé
+   `src-shared/PowerAnalysis.ts` (codes+params sans i18n), via `registries/PowerWarnings`.
+   Regroupés ici plutôt
    qu'éparpillés dans `cable`/`domain` : ce sont des sorties d'analyse métier, pas
    des libellés de formulaire. Résolus par `I18n.t` À L'ÉMISSION (au runtime, après
    `I18n.init()`), jamais au chargement. Agrégé par `../fr.ts`. Voir docs/i18n.md. */

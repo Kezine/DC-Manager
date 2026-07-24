@@ -1,9 +1,9 @@
 import type { Store } from "../../store";
-import { PowerAnalysis } from "../../store";
+import { PowerAnalysis, POWER_LOAD_WARN_FRACTION } from "../../store";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
+import { PowerWarnings } from "../../registries/PowerWarnings";
 import { Html } from "../../core/Html";
 import { I18n } from "../../i18n/I18n";
-import { POWER_LOAD_WARN_FRACTION } from "../../domain/constants";
 
 /** Bilan ÉNERGIE d'un équipement — LECTURE SEULE, calculé sur l'état ENREGISTRÉ (PowerAnalysis) :
     - JAUGE de budget PoE (charge des PD câblés / budget total déclaré) d'une SOURCE (switch) marquée PoE ;
@@ -52,7 +52,8 @@ export class EnergyInfo {
       if (phs.length) line(I18n.t("forms.port.phases", { list: phs.map((x) => x.key + " " + EnergyInfo.fmt(x.usedA) + "/" + (x.capacityA != null ? x.capacityA : "?") + " A" + (x.overloaded ? " ⛔" : x.warn ? " ⚠" : "")).join(" · ") }));
     }
     // origin_unknown = info (redondance non vérifiable), pas un danger avéré → icône + sévérité moindres (cf. PowerAnalysis.isInfo).
-    for (const w of pa.equipmentWarnings(eq.id)) { const info = PowerAnalysis.isInfo(w.code); line((info ? "ℹ " : "⚠ ") + w.message, !info); }
+    // Le moteur (src-shared/) émet des codes+params SANS libellé ; la résolution i18n vit ici, côté client (PowerWarnings).
+    for (const w of pa.equipmentWarnings(eq.id)) { const info = PowerAnalysis.isInfo(w.code); line((info ? "ℹ " : "⚠ ") + PowerWarnings.message(w), !info); }
     return any;
   }
 }

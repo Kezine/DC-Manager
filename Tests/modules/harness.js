@@ -97,7 +97,7 @@ const { Text } = D("core/Text.js");
 const { PAGE_SIZE_DEFAULT } = D("data/config.js");
 const Validation = SHARED("src-shared/DataValidation.js");
 const { Cascade } = SHARED("src-shared/Cascade.js");
-const { PowerAnalysis } = D("store/PowerAnalysis.js");
+const { PowerAnalysis } = SHARED("src-shared/PowerAnalysis.js");   // moteur énergie migré dans src-shared/ (cf. Validation/Cascade)
 const { Rack } = D("models/index.js");
 const { CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES } = D("domain/constants.js");
 

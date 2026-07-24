@@ -1,6 +1,7 @@
 /* Barrel des registres OO (catalogues + comportement). */
 export { EquipmentTypes } from "./EquipmentTypes";
 export { PortRoles } from "./PortRoles";
+export { PowerWarnings } from "./PowerWarnings";
 export { Depths } from "./Depths";
 export { EquipFaces } from "./EquipFaces";
 export { PortTypes } from "./PortTypes";

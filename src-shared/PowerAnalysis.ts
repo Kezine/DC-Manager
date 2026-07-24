@@ -1,8 +1,16 @@
-import { POWER_LOAD_WARN_FRACTION } from "../domain/constants";
-import { I18n } from "../i18n/I18n";
-
 /* =============================================================================
-   ANALYSE ÉNERGIE (power) — PURE, pilotée par le store injecté (aucun DOM).
+   ANALYSE ÉNERGIE (power) — moteur PUR, piloté par un store INJECTÉ (aucun DOM,
+   aucun Node). Vit dans src-shared/ pour être consommable des DEUX côtés : le
+   client (fiches / formulaires) ET un FUTUR producteur d'alertes power côté serveur
+   (module notify) — d'où deux DÉCOUPLAGES volontaires vs la version cliente d'origine :
+     - STORE par INTERFACE (`PowerAnalysisStore`) au lieu du `Store` concret : le moteur
+       ne consomme que 4 accès en LECTURE ; le `Store` client la satisfait
+       STRUCTURELLEMENT (aucune adaptation), un adaptateur serveur la réimplémentera.
+     - MESSAGES = CODES + PARAMS (`PowerWarning`) au lieu de chaînes traduites : un
+       module partagé ne connaît PAS l'i18n (elle vit côté client) → le moteur n'émet
+       qu'un code + les valeurs à interpoler ; la RÉSOLUTION du libellé se fait chez le
+       consommateur (client : `registries/PowerWarnings`).
+
    Le réseau électrique est un GRAPHE ORIENTÉ (source → sink) à 2 types d'arêtes :
      - CÂBLE  : un câble power relie une prise SOURCE ↔ une prise SINK ;
      - INTERNE : dans un équipement de distribution (PDU/tableau), les INLETS (sink)
@@ -20,6 +28,24 @@ import { I18n } from "../i18n/I18n";
        ses feeds câblés (partage de charge).
    ============================================================================= */
 
+/** Seuil de charge (fraction du calibre) au-delà duquel on alerte (règle de l'art : 80 % en continu). Rapatrié ici
+    depuis `domain/constants` : c'est une donnée du MOTEUR énergie, désormais partagée front/back avec lui. */
+export const POWER_LOAD_WARN_FRACTION = 0.8;
+
+/** Contrat MINIMAL que le moteur consomme du store (INJECTION : aucune dépendance à une implémentation concrète).
+    Le `Store` client le satisfait STRUCTURELLEMENT (mêmes signatures, aucune adaptation) ; un futur producteur
+    serveur en fournira sa propre implémentation (lecture des collections chargées). Lectures = enregistrements bruts. */
+export interface PowerAnalysisStore {
+  /** Enregistrement d'une collection (`equipments` | `ports` | `networks` …) par id, ou null s'il n'existe pas. */
+  get(collection: string, id: string): any;
+  /** Ports portés par un équipement. */
+  portsOf(equipmentId: string): any[];
+  /** Câbles touchant un port (indifféremment côté from/to). */
+  cablesOfPort(portId: string): any[];
+  /** Ports ASSERTANT explicitement un réseau (via leur `network_ids`) — PAS les ports qui en héritent par déduction. */
+  portsOfNetwork(networkId: string): any[];
+}
+
 /** Résultat de charge d'un départ / d'une phase : courant utilisé vs calibre. */
 export interface PowerLoad {
   /** Départ ou phase concerné (id de port source, ou "L1"/"L2"/"L3"). */
@@ -34,15 +60,21 @@ export interface PowerLoad {
   overloaded: boolean;
 }
 
-/** Avertissement de fiabilité / capacité électrique sur un équipement. Les codes `pdu_over_capacity` (charge aval
-    d'un tableau/PDU > sa capacité déclarée `pdu_max_a`) et `network_over_amp` (charge d'un réseau power > `max_amp`)
-    concernent la DISTRIBUTION (départs), pas la consommation. */
-export interface PowerWarning { code: "spof" | "psu_uncabled" | "psu_undersized" | "no_source" | "origin_unknown" | "poe_over_budget" | "poe_port_over" | "poe_pd_unfed" | "pdu_over_capacity" | "network_over_amp"; message: string; }
+/** Code d'un avertissement énergie : chaîne STABLE identifiant la nature du constat. Le LIBELLÉ traduit n'est PAS
+    produit ici (moteur partagé sans i18n) mais résolu chez le consommateur à partir du code + des params. */
+export type PowerWarningCode = "spof" | "psu_uncabled" | "psu_undersized" | "no_source" | "origin_unknown" | "poe_over_budget" | "poe_port_over" | "poe_pd_unfed" | "pdu_over_capacity" | "network_over_amp";
+
+/** Avertissement de fiabilité / capacité électrique sur un équipement. `code` = nature du constat ; `params` = valeurs
+    à INTERPOLER dans le message (clés = noms EXACTS des placeholders i18n `analysis.power.*`). PAS de chaîne traduite
+    ici : le moteur est partagé (src-shared/) et sans i18n ; le client résout le libellé via `registries/PowerWarnings`.
+    Les codes `pdu_over_capacity` (charge aval d'un tableau/PDU > sa capacité déclarée `pdu_max_a`) et `network_over_amp`
+    (charge d'un réseau power > `max_amp`) concernent la DISTRIBUTION (départs), pas la consommation. */
+export interface PowerWarning { code: PowerWarningCode; params: Record<string, string | number>; }
 
 const DEFAULT_VOLTAGE = 230;
 
 export class PowerAnalysis {
-  constructor(private store: any) {}
+  constructor(private store: PowerAnalysisStore) {}
   // Mémoïsation PAR INSTANCE (une instance = un rendu ; le store ne mute pas pendant un rendu). Évite de refaire
   // la remontée/charge pour chaque feuille et pour departLoads↔phaseLoads↔equipmentWarnings sur les mêmes ports.
   private _rootCache = new Map<string, string[]>();
@@ -269,11 +301,13 @@ export class PowerAnalysis {
     // prise power modélisée et doit tout de même alerter.
     if (eq.poe_device) {
       const poe = this.poeSupply(equipmentId);
-      if (poe.over) out.push({ code: "poe_over_budget", message: I18n.t("analysis.power.poeOverBudget", { load: poe.loadW, budget: poe.budgetW }) });
+      // `over` implique déjà `budgetW != null` (cf. poeSupply) — la garde `!= null` ne change RIEN au comportement,
+      // elle ne fait que rétrécir le type pour le contrat codes+params (params interdit null).
+      if (poe.over && poe.budgetW != null) out.push({ code: "poe_over_budget", params: { load: poe.loadW, budget: poe.budgetW } });
       for (const sp of this.store.portsOf(equipmentId).filter((p: any) => p.role === "poe" && p.direction === "source")) {
         if (sp.poe_budget_w == null) continue;
         const load = this.poePortLoadW(sp, true);   // conso MAX du PD câblé
-        if (load > sp.poe_budget_w) out.push({ code: "poe_port_over", message: I18n.t("analysis.power.poePortOver", { port: sp.name || "?", load, budget: sp.poe_budget_w }) });
+        if (load > sp.poe_budget_w) out.push({ code: "poe_port_over", params: { port: sp.name || "?", load, budget: sp.poe_budget_w } });
       }
       // PD NON ALIMENTÉ : un appareil alimenté UNIQUEMENT en PoE (caméra, borne…) est muet côté SECTEUR (ses seuls
       // ports vivent sur le réseau POE, exclus du graphe source→sink → no_source/psu_uncabled ne le voient pas). On
@@ -282,7 +316,7 @@ export class PowerAnalysis {
       // miroir de `pdOfPsePort` — parité avec l'éclair de `cableCarriesPower`). Sinon : câble absent ou injecteur
       // éteint → le PD n'est pas réellement alimenté.
       for (const pd of this.store.portsOf(equipmentId).filter((p: any) => p.role === "poe" && p.direction === "sink" && p.poe_enabled !== false)) {
-        if (!this.pseOfPdPort(pd)) out.push({ code: "poe_pd_unfed", message: I18n.t("analysis.power.poePdUnfed", { port: pd.name || "?" }) });
+        if (!this.pseOfPdPort(pd)) out.push({ code: "poe_pd_unfed", params: { port: pd.name || "?" } });
       }
     }
     // CAPACITÉ DE DISTRIBUTION : un pdu/tableau porte une capacité d'alimentation (`pdu_max_a`) et ses départs
@@ -293,7 +327,7 @@ export class PowerAnalysis {
     // pdu_over_capacity : Σ des charges MAX des départs de l'équipement vs sa capacité d'alimentation déclarée.
     if (eq.pdu_max_a != null && eq.pdu_max_a > 0) {
       const totalA = departs.reduce((sum: number, sp: any) => sum + this.sourceLoadA(sp.id, true), 0);
-      if (totalA > eq.pdu_max_a) out.push({ code: "pdu_over_capacity", message: I18n.t("analysis.power.pduOverCapacity", { load: Math.ceil(totalA), cap: eq.pdu_max_a }) });
+      if (totalA > eq.pdu_max_a) out.push({ code: "pdu_over_capacity", params: { load: Math.ceil(totalA), cap: eq.pdu_max_a } });
     }
     // network_over_amp : pour chaque réseau POWER à capacité asserté par un départ de CET équipement, on somme les
     // charges MAX de TOUS les départs (source, hors poe) du document assertant ce réseau, puis on compare à `max_amp`.
@@ -310,7 +344,7 @@ export class PowerAnalysis {
         const netA = this.store.portsOfNetwork(nid)
           .filter((p: any) => p.direction === "source" && p.role !== "poe")
           .reduce((sum: number, p: any) => sum + this.sourceLoadA(p.id, true), 0);
-        if (netA > net.max_amp) out.push({ code: "network_over_amp", message: I18n.t("analysis.power.networkOverAmp", { name: net.label || "?", load: Math.ceil(netA), cap: net.max_amp }) });
+        if (netA > net.max_amp) out.push({ code: "network_over_amp", params: { name: net.label || "?", load: Math.ceil(netA), cap: net.max_amp } });
       }
     }
     const sinks = this.eqPortsByDir(equipmentId, "sink");
@@ -318,22 +352,22 @@ export class PowerAnalysis {
     const wired = sinks.filter((s: any) => this.store.cablesOfPort(s.id).length > 0);   // a un câble (peu importe l'autre bout)
     const fed = this.fedSinksOf(equipmentId);                                            // câblé VERS une source (réellement alimenté) — mémoïsé, plus de re-filtre inline
     // PSU non câblée : redondance amoindrie (compte les prises SANS aucun câble).
-    if (sinks.length >= 2 && wired.length < sinks.length) out.push({ code: "psu_uncabled", message: I18n.t("analysis.power.psuUncabled", { n: sinks.length - wired.length }) });
-    if (!fed.length) { out.push({ code: "no_source", message: I18n.t("analysis.power.noSource") }); return out; }
+    if (sinks.length >= 2 && wired.length < sinks.length) out.push({ code: "psu_uncabled", params: { n: sinks.length - wired.length } });
+    if (!fed.length) { out.push({ code: "no_source", params: {} }); return out; }
     // Diversité des feeds : ≥ 2 feeds RÉELS mais toutes vers la MÊME racine = point unique de défaillance. 0 racine
     // traçable ⇒ on NE prétend PAS « même origine » (les sens/racines amont manquent) → message distinct.
     if (fed.length >= 2) {
       const roots = new Set<string>();
       for (const s of fed) this.rootSourcesOf(s.id).forEach((r) => roots.add(r));
-      if (roots.size === 1) out.push({ code: "spof", message: I18n.t("analysis.power.spof") });
-      else if (roots.size === 0) out.push({ code: "origin_unknown", message: I18n.t("analysis.power.originUnknown") });
+      if (roots.size === 1) out.push({ code: "spof", params: {} });
+      else if (roots.size === 0) out.push({ code: "origin_unknown", params: {} });
     }
     // Rating PSU vs charge max : chaque PSU doit tenir la charge MAX seule (redondance réelle).
     const maxW = this.demandW(eq, true);
     if (maxW > 0) for (const s of fed) {
       const v = this.deducedVoltageOf(s.id) || DEFAULT_VOLTAGE;
       if (s.power_max_a != null && s.power_max_a > 0 && s.power_max_a * v < maxW) {
-        out.push({ code: "psu_undersized", message: I18n.t("analysis.power.psuUndersized", { name: s.name || "?", amps: s.power_max_a, req: Math.ceil(maxW / v) }) });
+        out.push({ code: "psu_undersized", params: { name: s.name || "?", amps: s.power_max_a, req: Math.ceil(maxW / v) } });
       }
     }
     return out;
@@ -341,5 +375,5 @@ export class PowerAnalysis {
 
   /** Sévérité d'AFFICHAGE d'un warning : `origin_unknown` est INFORMATIF (redondance non VÉRIFIABLE faute de sens /
       tableau amont renseignés) — pas une faute avérée comme les autres → l'UI l'affiche en sévérité moindre (info). */
-  static isInfo(code: PowerWarning["code"]): boolean { return code === "origin_unknown"; }
+  static isInfo(code: PowerWarningCode): boolean { return code === "origin_unknown"; }
 }

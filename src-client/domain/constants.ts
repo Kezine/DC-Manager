@@ -124,8 +124,7 @@ export const PORT_DIRECTIONS = [
 ];
 /** PHASES d'un réseau triphasé (départ de tableau monophasé réparti sur 3 phases). */
 export const POWER_PHASES = ["L1", "L2", "L3"];
-/** Seuil de charge (fraction du calibre) au-delà duquel on alerte (règle de l'art : 80 % en continu). */
-export const POWER_LOAD_WARN_FRACTION = 0.8;
+/** POWER_LOAD_WARN_FRACTION (seuil d'alerte 80 %) a migré dans src-shared/PowerAnalysis.ts (donnée du moteur énergie, partagée front/back). */
 /** NORMES PoE (IEEE 802.3af/at/bt) → puissance CÔTÉ PSE (ce que le port peut FOURNIR, en W). Le budget d'un port
     POE est une CAPACITÉ (pas une conso) ; ces classes renseignent le budget. Labels universels (non traduits). */
 export interface PoeClassDef { id: string; label: string; w: number; }

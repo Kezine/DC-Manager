@@ -130,6 +130,7 @@ src-shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) �
   DocumentChangeset.ts #   type + helpers du changeset (rechargement granulaire)
   DataValidation.ts #   normalisation + validation des enregistrements (spec déclarative par collection)
   Cascade.ts    #   cascade de suppression (intégrité référentielle en DELETE) — Store (fichier) + serveur (API)
+  PowerAnalysis.ts #   moteur d'analyse énergie (graphe source→sink, charges, warnings codes+params) — store injecté par interface
 docs/           # documentation d'architecture (voir index)
 Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compilés
 ```
@@ -234,10 +235,13 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 ## Code partagé front/back (`src-shared/`)
 
 Mutualiser le code commun UI ⇄ serveur dans `src-shared/` plutôt que de le dupliquer
-(principe n°3). Y vit déjà : le **schéma des collections** (`Schema.ts`) et le type du
-**changeset** (`DocumentChangeset.ts`). Cible suivante : la **validation/intégrité des
-données** soumises (aujourd'hui éparpillée dans les formulaires — à extraire en
-fonction pure réutilisée en UI *et* au serveur).
+(principe n°3). Y vit déjà : le **schéma des collections** (`Schema.ts`), le type du
+**changeset** (`DocumentChangeset.ts`), la **validation/intégrité** des données
+(`DataValidation.ts`), la **cascade de suppression** (`Cascade.ts`) et le **moteur
+d'analyse énergie** (`PowerAnalysis.ts` — store injecté par interface, warnings en
+codes+params, i18n résolue côté client). Ce dernier illustre le PATTERN cible : un
+moteur métier pur, découplé du store (interface injectée) et de la présentation
+(codes plutôt que chaînes traduites), donc réutilisable par un futur producteur serveur.
 
 **Contraintes techniques** (deux builds différents) :
 - `src-shared/` ne contient que du **TS PUR** : aucun accès au DOM (front) ni à Node (back).

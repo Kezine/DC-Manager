@@ -1,7 +1,7 @@
 /* Tests modules — code PARTAGÉ front/back (schéma, normalisation, validation, cascade).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("shared : DataValidation — champs d'audit (created_by/updated_by/dates) préservés au round-trip", async () => {
@@ -880,6 +880,54 @@ module.exports = async () => {
     ck(V("equipments", { ...eqBase, poe_device: false }, () => null, findPoePort).some((e) => e.path === "poe_device" && e.code === "scope"), "T-POE2 : désactiver POE avec un port POE présent → scope");
     ck.eq(V("equipments", { ...eqBase, poe_device: true }, () => null, findPoePort).filter((e) => e.path === "poe_device").length, 0, "T-POE2 : poe_device actif → OK malgré le port POE");
     ck.eq(V("equipments", { ...eqBase, poe_device: false }, () => null, () => []).filter((e) => e.path === "poe_device").length, 0, "T-POE2 : aucun port POE → désactivation OK");
+  }
+  });
+
+  await section("shared : PowerAnalysis — store MINIMAL injecté (nu) + contrat codes+params", async () => {
+  {
+    // PREUVE DU DÉCOUPLAGE : on instancie le moteur avec un FAKE store objet NU (Maps/arrays en dur) qui satisfait
+    // STRUCTURELLEMENT l'interface PowerAnalysisStore — aucun Store client, aucun DOM. On vérifie que les
+    // avertissements sortent en CODES + PARAMS bruts (pas de chaîne i18n : le moteur partagé ignore la localisation).
+    const equipments = new Map([
+      ["tab", { id: "tab", name: "TGBT", type: "switchboard" }],
+      // srv : PSU 2 A câblée à une source racine, mais 600 W max → 2 A × 230 V = 460 W < 600 W ⇒ psu_undersized.
+      ["srv", { id: "srv", name: "srv", power_nominal_w: 460, power_max_w: 600 }],
+      // box : une PSU (sink) NON câblée ⇒ non alimentée ⇒ no_source.
+      ["box", { id: "box", name: "box" }],
+      // cam : appareil PoE (PD) dont l'unique port poe+sink n'a aucun injecteur en face ⇒ poe_pd_unfed.
+      ["cam", { id: "cam", name: "cam", poe_device: true }],
+    ]);
+    const ports = new Map([
+      ["q1", { id: "q1", equipment_id: "tab", name: "Q1", role: "power", direction: "source", power_max_a: 16 }],
+      ["psu1", { id: "psu1", equipment_id: "srv", name: "PSU1", role: "power", direction: "sink", power_max_a: 2 }],
+      ["boxIn", { id: "boxIn", equipment_id: "box", name: "IN", role: "power", direction: "sink", power_max_a: 4 }],
+      ["camEth", { id: "camEth", equipment_id: "cam", name: "eth", role: "poe", direction: "sink" }],
+    ]);
+    const cables = [{ id: "c1", from_port_id: "q1", to_port_id: "psu1" }];   // tableau → PSU du serveur
+    const collections = { equipments, ports, networks: new Map() };
+    const fakeStore = {
+      get: (collection, id) => (collections[collection] ? collections[collection].get(id) || null : null),
+      portsOf: (eqId) => [...ports.values()].filter((p) => p.equipment_id === eqId),
+      cablesOfPort: (pid) => cables.filter((c) => c.from_port_id === pid || c.to_port_id === pid),
+      portsOfNetwork: (nid) => [...ports.values()].filter((p) => (p.network_ids || []).includes(nid)),
+    };
+    const pa = new PowerAnalysis(fakeStore);   // ← moteur PILOTÉ par le fake store nu (découplage prouvé)
+
+    // no_source : présence du CODE.
+    ck.eq(pa.equipmentWarnings("box").some((w) => w.code === "no_source"), true, "shared power : PSU non câblée → code no_source (store nu injecté)");
+
+    // psu_undersized : CODE + PARAMS aux BONNES valeurs (name/amps/req) et AUCUN champ `message` (moteur sans i18n).
+    const undersized = pa.equipmentWarnings("srv").find((w) => w.code === "psu_undersized");
+    ck(!!undersized, "shared power : PSU sous-dimensionnée → code psu_undersized");
+    ck.eq(undersized && undersized.message, undefined, "shared power : warning porte des params, PAS de chaîne message (i18n côté client)");
+    ck.eq(undersized && undersized.params.name, "PSU1", "shared power : params.name = nom de la prise (PSU1)");
+    ck.eq(undersized && undersized.params.amps, 2, "shared power : params.amps = calibre de la PSU (2 A)");
+    ck.eq(undersized && undersized.params.req, 3, "shared power : params.req = courant requis Math.ceil(600/230) = 3 A");
+
+    // poe_pd_unfed : CODE + PARAMS { port }.
+    const unfed = pa.equipmentWarnings("cam").find((w) => w.code === "poe_pd_unfed");
+    ck(!!unfed, "shared power : PD PoE sans injecteur → code poe_pd_unfed");
+    ck.eq(unfed && unfed.params.port, "eth", "shared power : params.port = nom du port PD (eth)");
   }
   });
 };
