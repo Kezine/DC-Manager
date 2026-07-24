@@ -37,7 +37,7 @@ export interface PowerLoad {
 /** Avertissement de fiabilité / capacité électrique sur un équipement. Les codes `pdu_over_capacity` (charge aval
     d'un tableau/PDU > sa capacité déclarée `pdu_max_a`) et `network_over_amp` (charge d'un réseau power > `max_amp`)
     concernent la DISTRIBUTION (départs), pas la consommation. */
-export interface PowerWarning { code: "spof" | "psu_uncabled" | "psu_undersized" | "no_source" | "origin_unknown" | "poe_over_budget" | "poe_port_over" | "pdu_over_capacity" | "network_over_amp"; message: string; }
+export interface PowerWarning { code: "spof" | "psu_uncabled" | "psu_undersized" | "no_source" | "origin_unknown" | "poe_over_budget" | "poe_port_over" | "poe_pd_unfed" | "pdu_over_capacity" | "network_over_amp"; message: string; }
 
 const DEFAULT_VOLTAGE = 230;
 
@@ -168,6 +168,19 @@ export class PowerAnalysis {
     }
     return null;
   }
+  /** L'équipement PSE (injecteur) qui ALIMENTE un port PD (poe+sink) : le vis-à-vis de câble SI c'est un port POE
+      producteur (poe+source) ACTIF. null si le port n'est pas un PD ACTIF (`poe_enabled === false` = désactivation
+      volontaire du port), s'il n'est câblé à rien, ou si aucun vis-à-vis n'est un PSE ACTIF (injecteur coupé).
+      MIROIR EXACT de `pdOfPsePort` : même définition d'un lien PoE actif (les DEUX extrémités `poe_enabled`), en
+      PARITÉ avec l'éclair de scène (`Store.cableCarriesPower`). Un PD à qui aucun injecteur actif ne fait face n'est
+      pas réellement alimenté → warning `poe_pd_unfed`. Réutilise `otherEnds` (pas de duplication du parcours câbles). */
+  private pseOfPdPort(pdPort: any): any | null {
+    if (!pdPort || pdPort.role !== "poe" || pdPort.direction !== "sink" || pdPort.poe_enabled === false) return null;
+    for (const other of this.otherEnds(pdPort.id)) {
+      if (other.role === "poe" && other.direction === "source" && other.poe_enabled !== false) return this.store.get("equipments", other.equipment_id);
+    }
+    return null;
+  }
   /** Charge POE tirée sur un port PSE = consommation du PD câblé (0 si aucun PD, ou si le lien PoE est désactivé d'un
       côté ou de l'autre — cf. pdOfPsePort, parité avec l'éclair de cableCarriesPower). `useMax` : conso MAX
       (dimensionnement) sinon nominale. Publique : réutilisée par le formulaire (jauge live + survente par port). */
@@ -261,6 +274,15 @@ export class PowerAnalysis {
         if (sp.poe_budget_w == null) continue;
         const load = this.poePortLoadW(sp, true);   // conso MAX du PD câblé
         if (load > sp.poe_budget_w) out.push({ code: "poe_port_over", message: I18n.t("analysis.power.poePortOver", { port: sp.name || "?", load, budget: sp.poe_budget_w }) });
+      }
+      // PD NON ALIMENTÉ : un appareil alimenté UNIQUEMENT en PoE (caméra, borne…) est muet côté SECTEUR (ses seuls
+      // ports vivent sur le réseau POE, exclus du graphe source→sink → no_source/psu_uncabled ne le voient pas). On
+      // vérifie donc ici, dans le bloc POE, que chaque port PD ACTIF (poe+sink, `poe_enabled ≠ false` — un port coupé
+      // est un choix volontaire, pas une alerte) a bien un injecteur PSE ACTIF câblé en vis-à-vis (`pseOfPdPort`,
+      // miroir de `pdOfPsePort` — parité avec l'éclair de `cableCarriesPower`). Sinon : câble absent ou injecteur
+      // éteint → le PD n'est pas réellement alimenté.
+      for (const pd of this.store.portsOf(equipmentId).filter((p: any) => p.role === "poe" && p.direction === "sink" && p.poe_enabled !== false)) {
+        if (!this.pseOfPdPort(pd)) out.push({ code: "poe_pd_unfed", message: I18n.t("analysis.power.poePdUnfed", { port: pd.name || "?" }) });
       }
     }
     // CAPACITÉ DE DISTRIBUTION : un pdu/tableau porte une capacité d'alimentation (`pdu_max_a`) et ses départs

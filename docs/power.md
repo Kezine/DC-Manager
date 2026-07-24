@@ -44,6 +44,8 @@ alimentent les outlets — le pass-through). Le sens vient de `Port.direction`, 
   dépasse sa **capacité déclarée** `Network.max_amp`. L'assertion power ne vivant que sur les départs racines
   (tension/phase déduites en aval), la somme des ports assertants ne double-compte pas en usage normal.
 - **`poe_over_budget`** : survente du budget POE (charge = **Σ des consos MAX des PD câblés** > budget total de l'équipement).
+- **`poe_pd_unfed`** : un port PD (poe+sink) **ACTIF** n'a **aucun injecteur PSE actif câblé** en vis-à-vis — un
+  appareil alimenté UNIQUEMENT en PoE n'est vu ni par `no_source` ni par `psu_uncabled` (réservés au SECTEUR).
 
 ## POE (Power over Ethernet)
 
@@ -74,6 +76,10 @@ néanmoins aux flux d'énergie**.
   - **`poe_over_budget`** — survente de l'équipement : `poeSupply()` → `{ loadW, budgetW, over }`, `loadW` = Σ consos
     MAX des PD ; `over` = charge > budget total.
   - **`poe_port_over`** — par port : le PD câblé consomme **plus que la capacité (budget) du port** PSE.
+  - **`poe_pd_unfed`** — par port PD : un port consommateur PoE **ACTIF** (poe+sink) sans **injecteur PSE actif
+    câblé** (câble absent, vis-à-vis non-PSE, ou injection coupée `poe_enabled`) → l'appareil n'est pas alimenté.
+    Un port PD lui-même **désactivé** (`poe_enabled: false`) est un choix volontaire (pas d'alerte). Miroir de
+    `pdOfPsePort` — **parité avec l'éclair** de `cableCarriesPower` (mêmes deux extrémités actives requises).
 - **UI** : bloc POE de l'équipement (bascule + budget total + **jauge** de charge live) et éditeur de ports (catégorie ·
   sens PSE/PD · **norme/budget**) dans `EquipmentForms` ; la jauge = Σ consos des PD câblés / budget total. Un **câble**
   touchant un port POE porte le même **éclair ambre** de scène que les câbles power (`CableRouting.carriesPower`).
@@ -88,3 +94,25 @@ remontée (`rootSourcesOf`) et la charge (`sourceLoadA`) → la remontée n'est 
 
 Contingence **N-1** (bascule de charge sur perte d'un feed) ; vraie **PDU triphasée** (mapping prise→phase, ici
 les PDU sont supposées monophasées réparties sur les 3 phases au niveau des départs du tableau).
+
+### Limites de modèle (constatées à l'audit énergie)
+
+Approximations connues du calcul actuel — à lever si le besoin s'en fait sentir :
+
+1. **Conso propre des distributions ignorée** : un PDU/UPS renseignant un `power_nominal_w` n'est jamais une feuille
+   (pass-through pur) → sa propre consommation n'est **jamais** comptée dans les charges.
+2. **Inlet de distribution non confronté à l'aval** : `psu_undersized` compare le rating d'un inlet à la conso
+   **PROPRE** de l'équipement ; la charge AVAL n'est bornée que par la capacité du **départ amont**, pas par l'inlet.
+3. **Distribution multi-alimentée** : la charge aval est attribuée **PLEINE à chaque** départ amont (le partage de
+   charge n'existe qu'aux feeds de la feuille) — conservateur pour le N-1, mais **surestime** les totaux par phase.
+4. **PoE en cascade sous-compté** : la charge vue par un PSE = conso **PROPRE** du PD (`power_*_w`), pas sa demande
+   totale — un PD qui est lui-même PSE ne **répercute pas** ce qu'il ré-injecte en aval.
+5. **PD bi-alimenté (PoE + secteur) compté deux fois** : une fois comme feuille secteur, une fois comme contribution
+   PoE au PSE.
+6. **PD câblé à plusieurs PSE** : sa conso pleine est comptée sur **chaque** PSE (pas de partage, contrairement au
+   secteur).
+7. **Phase déduite arbitraire** : quand un port a plusieurs racines, la **première** trouvée l'emporte.
+8. **Port poe sans sens (`""`)** : ni PSE ni PD, il ne participe à rien — **silencieusement** (hors `poe_pd_unfed`,
+   réservé aux ports PD ACTIFS).
+9. **Deux référentiels dans la fiche INFO** : charges par départ/phase affichées au **NOMINAL**, mais jauge PoE et
+   avertissements calculés au **MAX** — les deux repères cohabitent côte à côte.

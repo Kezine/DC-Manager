@@ -17,6 +17,7 @@ export const analysis = {
     psuUndersized: "Power feed “{{name}}” ({{amps}} A) insufficient for the max load alone ({{req}} A required).",
     poeOverBudget: "POE over-budget: the PD load ({{load}} W) exceeds the {{budget}} W total budget.",
     poePortOver: "Port “{{port}}”: the connected PD draws {{load}} W, beyond the port budget ({{budget}} W).",
+    poePdUnfed: "PoE port “{{port}}” not powered (no active PSE injector cabled).",
     pduOverCapacity: "Equipment capacity exceeded: {{load}} A downstream for {{cap}} A declared.",
     networkOverAmp: "Network “{{name}}”: {{load}} A drawn for a {{cap}} A capacity.",
   },

@@ -620,6 +620,26 @@ module.exports = async () => {
     ck.eq(srvCodes.includes("pdu_over_capacity"), false, "power capacité : consommateur sans pdu_max_a → jamais pdu_over_capacity");
     ck.eq(srvCodes.includes("network_over_amp"), false, "power capacité : consommateur sans départ assertant → jamais network_over_amp");
     ck.eq(srvCodes.includes("psu_undersized"), true, "power capacité : les assertions existantes du consommateur restent (psu_undersized inchangé)");
+
+    // ---- POE `poe_pd_unfed` : un appareil alimenté UNIQUEMENT en PoE (port poe+sink) est muet côté secteur
+    //      (no_source/psu_uncabled ne voient que le graphe secteur) → on vérifie ici qu'un PD ACTIF a bien un
+    //      injecteur PSE ACTIF câblé. À ce stade : poe1 (10 W, actif) → camPoe (actif) ; poe2 libre et actif. ----
+    // cam est câblé à poe1 (PSE actif) → PAS d'alerte.
+    ck.eq(new PowerAnalysis(s).equipmentWarnings(cam.id).some((w) => w.code === "poe_pd_unfed"), false, "POE non alimenté : PD câblé à un PSE actif → pas d'alerte");
+    // Nouveau PD dont l'unique port PoE (sink) n'est câblé à rien → non alimenté.
+    const cam2 = await s.create("equipments", { name: "cam2", power_nominal_w: 8, poe_device: true });
+    const cam2Poe = await s.create("ports", { equipment_id: cam2.id, name: "eth", role: "poe", direction: "sink" });
+    ck.eq(new PowerAnalysis(s).equipmentWarnings(cam2.id).some((w) => w.code === "poe_pd_unfed"), true, "POE non alimenté : PD au port PoE non câblé → poe_pd_unfed");
+    // Câblé à poe2 (PSE libre et ACTIF du switch) → alimenté, alerte levée.
+    await s.create("cables", { from_port_id: poe2.id, to_port_id: cam2Poe.id });
+    ck.eq(new PowerAnalysis(s).equipmentWarnings(cam2.id).some((w) => w.code === "poe_pd_unfed"), false, "POE non alimenté : PD câblé à un PSE actif (poe-2) → alerte levée");
+    // Injecteur coupé (poe2 désactivé) → câblé mais plus alimenté par un PSE ACTIF → l'alerte revient (parité éclair).
+    await s.update("ports", poe2.id, { poe_enabled: false });
+    ck.eq(new PowerAnalysis(s).equipmentWarnings(cam2.id).some((w) => w.code === "poe_pd_unfed"), true, "POE non alimenté : injecteur PSE désactivé → PD non alimenté (poe_pd_unfed revient)");
+    // Port PD lui-même désactivé (injecteur rallumé) → désactivation VOLONTAIRE, PAS d'alerte.
+    await s.update("ports", poe2.id, { poe_enabled: true });
+    await s.update("ports", cam2Poe.id, { poe_enabled: false });
+    ck.eq(new PowerAnalysis(s).equipmentWarnings(cam2.id).some((w) => w.code === "poe_pd_unfed"), false, "POE non alimenté : port PD désactivé volontairement (poe_enabled:false) → pas d'alerte");
   }
   });
 

@@ -20,6 +20,7 @@ export const analysis = {
     psuUndersized: "Alimentation « {{name}} » ({{amps}} A) insuffisante pour la charge max seule ({{req}} A requis).",
     poeOverBudget: "Survente POE : la charge des PD ({{load}} W) dépasse le budget total de {{budget}} W.",
     poePortOver: "Port « {{port}} » : le PD connecté consomme {{load}} W, au-delà du budget du port ({{budget}} W).",
+    poePdUnfed: "Port PoE « {{port}} » non alimenté (aucun injecteur PSE actif câblé).",
     pduOverCapacity: "Capacité de l'équipement dépassée : {{load}} A en aval pour {{cap}} A déclarés.",
     networkOverAmp: "Réseau « {{name}} » : {{load}} A tirés pour une capacité de {{cap}} A.",
   },
