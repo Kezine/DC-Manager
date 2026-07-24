@@ -208,7 +208,7 @@ manques à combler :
 
 | Fichier | Rôle |
 |---|---|
-| `CertsValidate.ts` | **Validation PURE** (ni DB ni réseau), griefs GROUPÉS, messages français uniques (mêmes principes que `NotifyValidate`/`ProviderConfigValidate`). Ne valide que des **métadonnées** et **borne** la taille des blobs OPAQUES (`key_enc`, `wrapped_dek` jamais déchiffrés). Porte les tables `CERT_KINDS` (`root-ca`/`leaf-tls`/`ssh-ca`/`ssh-keypair`/`ssh-cert`), `KEY_ALGOS`, `SAN_TYPES` et l'invariant émetteur (une racine n'a pas de `parent_id`, un dérivé en exige un). |
+| `CertsValidate.ts` | **Validation PURE** (ni DB ni réseau), griefs GROUPÉS, messages français uniques (mêmes principes que `NotifyValidate`/`ProviderConfigValidate`). Ne valide que des **métadonnées** et **borne** la taille des blobs OPAQUES (`key_enc`, `wrapped_dek` jamais déchiffrés). Porte les tables `CERT_KINDS` (`root-ca`/`intermediate-ca`/`leaf-tls`/`ssh-ca`/`ssh-keypair`/`ssh-cert`), `KEY_ALGOS`, `SAN_TYPES` et l'invariant émetteur (une racine/objet autonome n'a pas de `parent_id` ; un dérivé — feuille, certificat SSH **ou CA intermédiaire** — en exige un). |
 | `CertsDb.ts` | **Persistance SQLite dédiée** (`certs.db`, à côté de `registry.db`), possédée par le module (jamais une table de `registry.db`). **3 tables** (cf. « Schéma »). CRUD métadonnées + blobs, garde-fous de suppression (`childrenOf`), `listExpiring` pour le veilleur. **Listing PAGINÉ SQL** (`listPage`/`listRoots` — LIMIT/OFFSET, jamais de chargement complet) : filtres query/kinds/status, tris stables, portée **sous-arbre** et agrégats racines par **CTE récursive**, paramètre `focus` (page contenant un élément via `ROW_NUMBER`), colonne **`search`** dénormalisée (migration + backfill). Porte l'**invariant Q5** par des DTO distincts : `CertificateListItem` (SANS `key_enc`) / `CertificateDetail` (AVEC). Driver SQLite **injecté**. **Pas de `SecretBox`** : rien à chiffrer côté serveur. |
 | `CertExpiryWatcher.ts` | **Veilleur d'échéances** (producteur `cert-expiry`, C7) : balaye les métadonnées `not_after`, `raise` les certificats sous seuil (gravité croissante 30/14/7 j), `resolve` ceux qui repassent au vert ou disparaissent. Déclare **chez lui** l'interface `CertProblemReporter` (dépendance INVERSÉE, pattern `VmSyncService`) — `certs/` n'importe RIEN de `notify/`. Horloge et seuils injectables (tests). |
 | `CertsModule.ts` | **Façade et POINT DE BRANCHEMENT UNIQUE** (amovible, pattern `VmModule`/`NotifyModule`) : assemble `certs.db` + routes REST (`ApiExtension`) + timer horaire d'échéances. Module « en erreur » (certs.db illisible) → routes **503** détaillé sans faire tomber le serveur. Rapporteur de problèmes **OPTIONNEL** (sans lui, le module vit normalement, sans notifications). |
@@ -234,12 +234,13 @@ que `vm/`/`notify/`) ; le câblage concret tient en quelques lignes dans `index.
 | `CertExports.ts` | **Exports** : assemble les artefacts téléchargeables (PEM, fullchain, ca-chain, clé privée, PKCS#12, OpenSSH) à partir de matériau DÉJÀ déchiffré. Résolution PURE de la **chaîne d'émission** par `parent_id` (garde-fous : émetteur introuvable, cycle). Refuse un objet **révoqué** (décision Q4). |
 | `CertZip.ts` | **Emballage ZIP** des exports : `bundleFor` compose le BUNDLE d'un certificat selon son kind (RÉUTILISE `CertExports`), FILTRABLE par catégories cochées (public/fullchain/ca-chain/key — cf. dialogue groupé) ; `resolveEntries` calcule l'arborescence dossier/fichier (noms ASSAINIS + DÉDUPLIQUÉS -2/-3…), partagée par les DEUX emballages : `zipArtifacts` (**fflate** `zipSync` STORE, ZIP en clair) et `zipArtifactsEncrypted` (**@zip.js/zip.js**, ZIP AES-256 / WinZip AE-2 protégé par mot de passe, `useWebWorkers: false` car bundle monolithique). Sert l'export unitaire « Tout (ZIP) » ET les exports groupés. Module PUR (WebCrypto pour la graine SSH). Refuse un révoqué (garde-fou partagé). Le mot de passe ne sert QU'À dériver la clé AES — jamais stocké ni journalisé. |
 | `BulkActions.ts` | Logique **PURE** des opérations groupées : INTERSECTION des actions communes à une sélection (selon snapshots + état de session, parité STRICTE avec les actions par ligne), **partition d'export** (retenus / exclus-révoqués) et **`exportChoices`** (catégories d'artefacts COMMUNES à la sélection : `public` toujours, `fullchain`/`ca-chain` si tous leaf-tls, `key` si déverrouillé + tous `has_key` — calculées sur les NON-révoqués). Testée en isolation. |
-| `core/CertsFormat.ts` | Logique **PURE** de la page (aucun DOM) : jours restants + classe de couleur d'échéance, libellés des `kind`, **libellé de l'émetteur** résolu depuis les items d'une page (colonne « Émetteur » de la vue B ; repli sur l'id court) + `shortId`. Testée dans `Tests/modules`. |
-| `core/CertsSearch.ts` | Logique **PURE** de la recherche (L3) : mapping d'un item serveur en résultat de popover (`tag` = famille lisible) et **décision de navigation** au clic (premier niveau → vue A ; dérivé → vue B scopée sur `root_id` ; focus). Alimente `ui/SearchPop`. Testée dans `Tests/modules`. |
+| `core/CertsFormat.ts` | Logique **PURE** de la page (aucun DOM) : jours restants + classe de couleur d'échéance, **cycle de vie** `lifecycle` (actif / expire ≤30j / révoqué / expiré — pilote le filtre « État »), libellés des `kind`, `issuerLabel` + `shortId`. Testée dans `Tests/modules`. |
+| `core/CertTree.ts` | Logique **PURE** du listing **HIÉRARCHIQUE** : `build` (forêt depuis `parent_id`, orphelins→racines, anti-cycle), `visibleIds` (filtre FAMILLE de racine + état + recherche, ancêtres gardés pour le contexte), `sortSiblings` (tri intra-fratrie), `flatten` (aplatissement sous l'état d'ouverture, chemin forcé sous filtre), `descendants`, `selectionStateOf` (cascade de sélection none/partial/all). Testée dans `Tests/modules`. |
+| `core/CertsSearch.ts` | Logique **PURE** de recherche (héritage L3 — mapping popover + décision de navigation). **N'est plus consommée par la vue** depuis le passage au listing arborescent (recherche client via `CertTree`) ; conservée testée. |
 | `core/CertDeployGuide.ts` | Logique **PURE** de l'**aide au déploiement** de la confiance (aucun DOM) : structure déclarative (intro + sections + blocs de commande PRÉ-REMPLIS) pour un CA racine X.509 (Linux/Windows/Android + caveats) ou une CA SSH (serveurs/clients). Alimente la modale « Déployer la confiance… » ; la doc en est la référence. Testée dans `Tests/modules`. |
 | `ui/Clipboard.ts` | Primitive **GÉNÉRIQUE** (hors feature certs) : copie presse-papiers (API `navigator.clipboard`, repli `<textarea>`+`execCommand` hors contexte sécurisé) + toast de retour. RESTE si la feature est retirée. |
 | `views/CertsAdminView.ts` | **Page « Certificats »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `NotificationsAdminView`) : écran verrouillé/déverrouillé, **deux listings paginés serveur** (autorités / certificats d'une racine), créations/émissions/exports/révocation/suppression, **aide au déploiement** (modale « Déployer la confiance… », consultation pure via `CertDeployGuide` + `Clipboard`). Toute la crypto vit ICI ; les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
-| `views/forms/CertsClient.ts` | **Client REST** du module `certs/` + `CertsError` (code HTTP + `detail`). DTOs = **MIROIRS** commentés des formes serveur (duplication assumée, principe n°3 — préserve l'amovibilité). `listPage`/`listRoots` (pagination serveur ; `buildQuery` PURE, `kind` répétable), `list` conservée pour la résolution des chaînes d'export. ⚠ Routes **SCOPÉES PAR DOCUMENT** (`<dataBase>/certs/…`, comme `VmSyncClient`, PAS globales comme `NotifyClient`). |
+| `views/forms/CertsClient.ts` | **Client REST** du module `certs/` + `CertsError` (code HTTP + `detail`). DTOs = **MIROIRS** commentés des formes serveur (duplication assumée, principe n°3 — préserve l'amovibilité). `list` = **chargement COMPLET des métadonnées** (matière du listing arborescent ET de la résolution des chaînes d'export) ; `listPage`/`listRoots` (pagination serveur) conservés mais **VESTIGIAUX** depuis le listing arborescent client. ⚠ Routes **SCOPÉES PAR DOCUMENT** (`<dataBase>/certs/…`, comme `VmSyncClient`, PAS globales comme `NotifyClient`). |
 
 ## Schéma de `certs.db`
 
@@ -395,10 +396,13 @@ maison.
 
 - **PEM** : certificat public (`.pem`), clé privée (`.key.pem`), **fullchain**
   (`<label>.fullchain.pem` = feuille + émetteurs remontés par `parent_id` jusqu'à la
-  racine), **ca-chain** (émetteurs sans la feuille). Chaîne résolue par une fonction
-  PURE, garde-fous émetteur-introuvable et boucle-de-parent. Le **certificat public d'une
-  racine** (`.pem`, renommable `.crt`) est ce qu'on DÉPLOIE chez les clients — cf.
-  « Déployer la confiance (magasins clients) » ci-dessous.
+  racine), **ca-chain** (émetteurs sans la feuille), **chaîne à servir**
+  (`<label>.chain.pem` = feuille + intermédiaire(s) **SANS la racine** — ce qu'un serveur
+  TLS présente au handshake, ex. `pveproxy-ssl.pem` Proxmox / `ssl_certificate` nginx ;
+  la racine vit déjà chez les clients, même esprit que le `fullchain.pem` Let's Encrypt).
+  Chaînes résolues par une fonction PURE, garde-fous émetteur-introuvable et
+  boucle-de-parent. Le **certificat public d'une racine** (`.pem`, renommable `.crt`) est
+  ce qu'on DÉPLOIE chez les clients — cf. « Déployer la confiance (magasins clients) ».
 - **PKCS#12** (`.p12`/PFX **moderne**) : **PBES2 = PBKDF2-SHA-256 (≥ 100 000 itérations)
   + AES-256-CBC** pour le keyBag ET les certBags ; intégrité **MAC HMAC-SHA-256** (clé
   dérivée par le KDF PKCS#12, `Pkcs12Kdf`). Les consommateurs 3DES/RC2 très anciens ne
@@ -552,6 +556,34 @@ les autres. Le pont est branché sur le MÊME `NotifyModule` que `vm/`.
 > `err` ≤ 7 j (ou expiré), `ok` au-delà. Les deux sont des décisions de cadrage
 > assumées ; ne pas confondre l'affichage (2 paliers) et les notifications (3 niveaux).
 
+## CA intermédiaires — hiérarchie à N niveaux
+
+Chantier 2026-07-23/24 (cadrage `.notes/toDos/certs-ca-intermediaires-cadrage-2026-07-23.md`). La PKI
+supporte des **sous-CA X.509** entre la racine et les feuilles (cas d'usage fondateur : un ROOT stable
++ **une sous-CA par cluster Proxmox**) : compartimentation (compromission d'une sous-CA → on révoque
+CE cluster, pas la PKI), root déployé UNE fois chez les clients, délégation par périmètre.
+
+- **Kind `intermediate-ca`** : un DÉRIVÉ (il exige un `parent_id`) ET une CA (il peut être `parent_id`
+  d'autres certificats). La DB gérait déjà N niveaux (`parent_id`, CTE récursives) — seule l'ÉMISSION
+  manquait. Familles X.509 et SSH restent des **arbres SÉPARÉS** (pas de sous-CA SSH).
+- **`X509Factory.issueIntermediateCa`** : nouvelle paire signée par la CA parente (racine OU autre
+  intermédiaire), `BasicConstraints CA=true` + **`pathLenConstraint`**, `keyCertSign|cRLSign`,
+  SKI + AKI→parent. Zéro-connaissance inchangé (clé née dans le navigateur, chiffrée par la DEK).
+- **`pathLen`** = profondeur de sous-CA encore autorisée EN DESSOUS. Défauts (cadrage §8.4) :
+  **racine = ILLIMITÉ** (le pathLen est figé à l'émission — le changer imposerait de redistribuer le
+  root dans tous les magasins de confiance) ; **sous-CA = 0** (elle n'émet QUE des feuilles —
+  confinement), configurable à la création (champ avancé). **Guards durs** (source de vérité,
+  `issueIntermediateCa`/`reSignIntermediateCa`) : une CA `pathLen=0` NE PEUT PAS émettre de sous-CA
+  (chaîne invalide sinon) ; l'enfant est plafonné à `parent − 1` ; l'échéance ≤ parent (même invariant
+  que les feuilles). Helper PUR `X509Factory.readCaPathLen` (null = illimité) — l'UI masque l'action
+  « Émettre une sous-CA » sur une CA `pathLen=0` et plafonne le champ.
+- **Émission CONTEXTUELLE** : dans l'arbre, chaque nœud CA X.509 (racine ou intermédiaire, coffre
+  déverrouillé, non révoqué) porte « Émettre TLS » et « Émettre une sous-CA » (`intermediateCaModal`)
+  — le nœud EST l'émetteur, pas de sélecteur séparé.
+- **Déploiement** : un serveur présente la **chaîne à servir** (feuille + intermédiaires, SANS le
+  root — export `.chain.pem`) ; SEUL le root va dans les magasins de confiance des clients. Ne JAMAIS
+  installer un intermédiaire dans un trust store.
+
 ## Renouvellement, guard de validité & révocation
 
 Chantier 2026-07-21 (cadrage `.notes/certs-renew-guard-metadata-cadrage-2026-07-21.md`). Tout côté
@@ -580,16 +612,22 @@ Le neuf porte **`renewed_from`** = id de l'ancien (lignée) ; l'ancien est **ré
   Restreint aux feuilles TLS : le **type** d'un certificat SSH (user/host) n'est pas en métadonnée →
   renouvellement à l'unité (`BulkActions.canRenew`).
 
-### Renouvellement d'une CA racine (opération de masse)
+### Renouvellement d'une CA — racine OU intermédiaire (opération de masse)
 
-`renewCaDialog` (root-ca) — avertissement clair + deux mécaniques + durée :
+`renewCaDialog` (root-ca **et intermediate-ca** — Lot 4) — avertissement clair + deux mécaniques + durée
+(plafonnée à l'échéance du PARENT pour un intermédiaire) :
 
-- **Prolonger (même clé)** — `X509Factory.reSignRootCa` re-signe la CA avec **sa clé existante** et une
-  échéance repoussée ; **mise à jour EN PLACE** (même id, `key_enc` conservé). Le **SKI est inchangé**
-  (même clé) → les feuilles déjà émises **continuent de chaîner**. Puis ses feuilles actives sont
-  renouvelées pour bénéficier de la durée prolongée.
-- **Rotation de clé** — nouvelle CA (nouvelle paire, `renewed_from`), ancienne **révoquée**, feuilles
-  actives ré-émises SOUS la nouvelle CA (nouveau `parent_id`).
+- **Prolonger (même clé)** — racine : `X509Factory.reSignRootCa` (auto-signée, sa propre clé) ;
+  intermédiaire : **`reSignIntermediateCa`** (re-certifie sa clé publique SOUS le PARENT — la clé
+  privée de l'intermédiaire n'est même pas nécessaire ; sujet, clé et pathLen PRÉSERVÉS). **Mise à
+  jour EN PLACE** (même id, `key_enc` conservé). Le **SKI est inchangé** → tous les enfants (feuilles
+  ET sous-CA) **continuent de chaîner**. Puis ses feuilles actives sont renouvelées.
+- **Rotation de clé** — nouvelle CA (nouvelle paire, `renewed_from` ; un intermédiaire est ré-émis
+  sous SON parent avec pathLen préservé), ancienne **révoquée**, feuilles actives ré-émises SOUS la
+  nouvelle CA. Les **SOUS-CA enfants** sont **RE-SIGNÉES** (même clé — leur SKI ne bouge pas, donc
+  LEURS descendants restent valides, aucune cascade plus profonde) et **RE-PARENTÉES** sur le nouvel
+  id, échéance conservée (jours restants, rognée à la nouvelle CA). ⚠ Enfants SÉPARÉS par kind :
+  avant le Lot 4, une sous-CA enfant serait passée dans la ré-émission de FEUILLES.
 
 **Cross-signing** (rotation) : `X509Factory.crossSignCa` fait certifier la clé de la NOUVELLE CA par
 l'ANCIENNE (Subject = nouvelle CA, Issuer = ancienne, CA=true, signé par l'ancienne clé, échéance
@@ -670,39 +708,34 @@ bookmarkable inchangé. Toujours enregistrée (`certsClient` null hors mode API 
   secrète ×2, avertissement de perte, dérivation KEK + tirage/emballage de la DEK +
   `PUT /pki`), soit le **déverrouillage** (saisie de la phrase → dérivation KEK →
   **déballage de la DEK**, qui valide la phrase — cf. keycheck). Les
-  **listings restent CONSULTABLES** en lecture seule (métadonnées + échéances colorées,
-  filtres/tris/pagination, drill-in « Lister les certificats ») sans déverrouiller —
-  seules les opérations de CLÉ l'exigent.
-- **DEUX LISTINGS PAGINÉS SERVEUR** (l'arbre O(n) ne tenait pas ~100 dérivés/racine ;
-  tout le tri/filtre/pagination est calculé côté serveur, jamais de slice client — CSS
-  repris des `ListView` : `.pagination`, `.list-toolbar`, `.sortable`/`.sort-ind`) :
-  - **Vue A « Autorités & clés »** (par défaut, `GET /certs/roots`) : racines (parent_id
-    nul) + agrégats **Dérivés** (`children_total`) et **Sous seuil** (`children_alert`,
-    badge warn/err selon `next_expiry`). Par ligne : **Détail** (info lecture seule, cf.
-    plus bas), **Émettre TLS/SSH**, **Exporter…**, **Révoquer**, **Supprimer**, **Lister les
-    certificats** (si dérivés > 0) → vue B, et — sur une AUTORITÉ (root-ca / ssh-ca), même
-    verrouillé — **Déployer la confiance…** (aide au déploiement, cf. « Déployer la confiance » plus bas).
-  - **Vue B « Certificats de \<racine\> »** (`GET /certs?root=…`) : fil d'Ariane
-    « ← Autorités » + sous-arbre PLAT de la racine à la place de l'indentation. Colonnes :
-    **Émetteur** (LIBELLÉ de l'autorité — la racine scopée `rootScope` n'étant PAS dans la
-    page (sous-arbre strict), on affiche son nom plutôt que l'id hexa ; repli page/id court
-    pour d'éventuels intermédiaires, non produits en v1), **Émission** (`not_before`, triable
-    serveur) et **Échéance** (`not_after`, colorée). Mêmes actions par ligne.
-  - **Filtres** : « Type » (MultiSelect, kinds pertinents à la vue) + « État » (sélection
-    **UNIQUE** — le serveur n'accepte qu'un `status`) + « Réinit. filtres ». **Tri** par
-    clic d'en-tête. État de listing (page/tris/filtres/vue+racine) en mémoire d'instance
-    (pas de sessionStorage — cohérence après écritures ; après une écriture, la **page
-    courante** est rechargée, le serveur clampe si elle disparaît).
-  - **Recherche** (composant réutilisable `ui/SearchPop`, calqué sur la vue 3D) : champ de
-    toolbar (visible dans les DEUX vues, **même verrouillé** — il ne lit que des
-    métadonnées), popover de résultats (badge = famille) alimenté par
-    `GET /certs?query=…&pageSize=8` (anti-rebond ~180 ms ; les réponses PÉRIMÉES d'une
-    saisie devancée sont ignorées via `ui/StaleGate`). Un clic ouvre la **BONNE vue** avec
-    l'élément mis en évidence — premier niveau → vue A, dérivé → vue B scopée sur SA racine
-    (`root_id`) — en RÉINITIALISANT filtres/tri et en passant `focus=<id>` (le serveur
-    renvoie la page qui le contient) ; la ligne est surlignée (`.row-focus` + `scrollIntoView`,
-    estompée au premier clic ailleurs / à la navigation suivante). La logique PURE (mapping
-    du résultat, décision de vue) vit dans `core/CertsSearch` (testée en isolation).
+  Le **listing reste CONSULTABLE** en lecture seule (métadonnées + échéances colorées,
+  arbre dépliable, filtres/tris/recherche) sans déverrouiller — seules les opérations
+  de CLÉ l'exigent.
+- **UN LISTING HIÉRARCHIQUE unique, calculé CLIENT** (refonte 2026-07-23, maquette Claude Design ;
+  remplace les deux listings paginés serveur) : un seul `client.list()` charge TOUTES les métadonnées
+  du document (JAMAIS `key_enc` — Q5), le module PUR `core/CertTree` construit/filtre/trie/aplatit la
+  **forêt** en mémoire, la vue ne fait qu'assembler le DOM. À l'échelle réelle (petite), l'arbre
+  complet rend la hiérarchie autorité → sous-CA → feuilles lisible d'un coup d'œil.
+  - **Lignes-arbre** : chevron de dépliage (indentation = profondeur × 22 px), icône de niveau
+    (bouclier = autorité racine/intermédiaire · clé = paire SSH autonome · certificat = objet émis),
+    compte d'enfants directs ; « Tout déployer / Tout replier » ; racines ouvertes par défaut au
+    premier chargement, état d'ouverture PRÉSERVÉ ensuite. Colonne **Dérivés** = descendants feuilles.
+  - **Filtres** : « Type » = **FAMILLE de racine** (CA racine X.509 / CA SSH / Paire SSH — choisit
+    QUELS arbres s'affichent) + « État » (actif / expire ≤30j / révoqué / expiré —
+    `CertsFormat.lifecycle`). État + recherche filtrent des LIGNES en **gardant les ancêtres**
+    (contexte hiérarchique, chemin forcé ouvert). **Tri intra-fratrie** (Libellé / Échéance) par
+    en-tête, client. Ligne de compte « N certificat(s) · M affiché(s) » (plus de pagination).
+  - **Recherche CLIENT** (champ normalisé de barre de listing, actif même verrouillé) : filtre
+    l'arbre sur libellé + sujet + série + libellé de l'ÉMETTEUR, terme surligné dans les libellés.
+  - **Actions par ligne** : Détail, **Émettre TLS / Émettre une sous-CA** (nœud CA X.509),
+    Émettre SSH (ssh-ca), Renouveler (feuille/cert SSH ; **Renouveler la CA** sur racine ET
+    intermédiaire), Exporter…, Révoquer, Supprimer (**verrouillé/grisé si des dérivés existent** —
+    le serveur refuse de toute façon, 409), et — autorité root-ca/ssh-ca, même verrouillé —
+    **Déployer la confiance…**.
+  - **Sélection en CASCADE** : cocher un nœud coche tout son sous-arbre (case parent INDÉTERMINÉE si
+    partiel — `CertTree.selectionStateOf`) ; la case d'en-tête porte sur les lignes VISIBLES.
+  - `focusCert` (rapprochement depuis une fiche) : déplie les ancêtres du nœud, lève les filtres et
+    surligne la ligne (`.row-focus` + `scrollIntoView`, estompée au premier clic ailleurs).
 - **En-tête** (déverrouillé) : créer une **CA racine X.509**, une **CA SSH**, une **paire
   SSH** ; **Changer la phrase maître…** (modale : phrase actuelle + nouvelle ×2 →
   `rewrapDek` + `PUT /pki/rekey` ; la session reste ouverte, la DEK ne changeant pas) ;
@@ -772,7 +805,7 @@ Feature **AMOVIBLE** (cf. « Suppression » plus bas).
   les certificats rapprochés, chacun avec ses **pistes** (puces dns/cn/wildcard/ip) et une pastille d'échéance
   (warn/err). Un clic ferme la fiche et bascule sur l'onglet Certificats focalisé (`CertFicheHooks.openCert` →
   `CertsAdminView.focusCert`).
-- **Listing certs (vue B, sous-arbre d'une racine)** : colonne « Cible(s) » — un bouton-icône INFO par
+- **Listing certs (arbre)** : colonne « Cible(s) » — un bouton-icône INFO par
   équipement/VM rapproché (aller-retour vers sa fiche, patron `openTargetDetail`) + une pastille « ambigu »
   si plusieurs cibles distinctes sont rapprochées. Résolveur `CertTargetResolver` injecté par `main.ts`.
 
