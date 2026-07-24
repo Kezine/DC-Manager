@@ -20,7 +20,7 @@ import { Download } from "../core/Download";
 import { CertDeployGuide, type DeployGuide } from "../core/CertDeployGuide";
 import type { FormHost } from "./forms/shared";
 import { CertsError } from "./forms/CertsClient";
-import type { CertsClient, CertificateListItem, CertificateDetail, CertificateInput, CertSan, PkiState } from "./forms/CertsClient";
+import type { CertsClient, CertificateListItem, CertificateDetail, CertificateInput, CertSan, PkiState, PkiVaultState } from "./forms/CertsClient";
 import { PkiCrypto } from "../certs/PkiCrypto";
 import { PkiSession } from "../certs/PkiSession";
 import { X509Factory, type X509KeyAlgo, type LeafUsage, type X509San } from "../certs/X509Factory";
@@ -256,6 +256,66 @@ export class CertsAdminView {
   }
 
   /* --------------------------------------------------------------------------
+     COFFRES multi-DEK (cadrage §11) — un `vault_id` par certificat désigne la DEK
+     qui chiffre sa `key_enc`. Ces helpers CENTRAUX sont l'invariant du §11.5 : le
+     `vault_id` posé dans un PUT et la DEK ayant chiffré le blob concordent TOUJOURS
+     (ils voyagent dans le même save). Aucun flux n'appelle `session.keyOf` en direct :
+     tout passe par `vaultKey` (message localisé si le coffre est verrouillé),
+     `encryptForVault` (chiffrer POUR un coffre) ou `decryptKeyOf` (déchiffrer SELON
+     le coffre du certificat).
+     -------------------------------------------------------------------------- */
+
+  /** Id conventionnel du coffre HISTORIQUE (tout l'existant y vit — miroir de VAULT_DEFAULT serveur). */
+  private static readonly VAULT_DEFAULT = "default";
+  /** Id conventionnel du coffre des CLÉS RACINE compartimentées (créé par la cérémonie §11.5). */
+  private static readonly VAULT_ROOT = "root";
+
+  /** Coffres connus (vide tant que la PKI n'est pas initialisée). « default » est toujours en tête (ordre serveur). */
+  private vaults(): PkiVaultState[] {
+    return this.pkiState && this.pkiState.initialized === true ? this.pkiState.vaults : [];
+  }
+
+  /** État d'UN coffre par son id (null si inconnu). */
+  private vaultState(vaultId: string): PkiVaultState | null {
+    return this.vaults().find((v) => v.vault_id === vaultId) || null;
+  }
+
+  /** CE coffre existe-t-il dans l'état PKI courant ? (sert la cérémonie et le ciblage des créations). */
+  private hasVault(vaultId: string): boolean {
+    return this.vaultState(vaultId) !== null;
+  }
+
+  /** DEK d'un coffre. JETTE avec un message LOCALISÉ (portant le libellé du coffre) si CE coffre est verrouillé —
+      l'UI le traduit en invite de déverrouillage ciblée, jamais un échec GCM opaque plus loin. */
+  private vaultKey(vaultId: string): CryptoKey {
+    try { return this.session.keyOf(vaultId); }
+    catch { throw new Error(I18n.t("certs.admin.vault.lockedError", { vault: this.vaultLabel(vaultId) })); }
+  }
+
+  /** Libellé d'affichage d'un coffre : son `label` s'il en a un, sinon « Coffre principal » pour « default »,
+      sinon l'id brut (coffre additionnel sans libellé). */
+  private vaultLabel(vaultId: string): string {
+    const state = this.vaultState(vaultId);
+    if (state && state.label && state.label.trim() !== "") return state.label;
+    if (vaultId === CertsAdminView.VAULT_DEFAULT) return I18n.t("certs.admin.vault.defaultName");
+    return vaultId;
+  }
+
+  /** Chiffre un secret POUR un coffre (l'appelant met le MÊME `vault_id` dans le PUT — invariant §11.5). */
+  private encryptForVault(vaultId: string, clear: string): Promise<string> {
+    return PkiCrypto.encryptSecret(this.vaultKey(vaultId), clear);
+  }
+
+  /** Coffre CIBLE par DÉFAUT d'une création selon le kind (cadrage §11.2, v1) : une CA RACINE va dans le coffre
+      « root » S'IL EXISTE (clés racine compartimentées) — sinon, et pour tout le reste, dans « default ».
+      Assignation FIGÉE à la création (pas de déplacement v1) ; un RENOUVELLEMENT garde, lui, le coffre de l'objet
+      qu'il remplace (géré par les appelants). */
+  private targetVaultFor(kind: string): string {
+    if (kind === "root-ca" && this.hasVault(CertsAdminView.VAULT_ROOT)) return CertsAdminView.VAULT_ROOT;
+    return CertsAdminView.VAULT_DEFAULT;
+  }
+
+  /* --------------------------------------------------------------------------
      Chargement réseau
      -------------------------------------------------------------------------- */
 
@@ -317,6 +377,9 @@ export class CertsAdminView {
         this.actionButton(I18n.t("certs.admin.toolbar.addSshPair"), I18n.t("certs.admin.toolbar.addSshPairTitle"), () => this.sshKeyModal("ssh-keypair"), "btn-primary"),
       );
       right.appendChild(this.actionButton(I18n.t("certs.admin.toolbar.changePass"), I18n.t("certs.admin.toolbar.changePassTitle"), () => this.changePassphraseModal()));
+      // CÉRÉMONIE « Protéger les clés racine… » (Temps 2, §11.5) : proposée seulement si le coffre « default » est
+      // ouvert, la PKI initialisée ET le coffre « root » ABSENT (une seule fois — après, il existe déjà).
+      if (this.protectRootAvailable()) right.appendChild(this.actionButton(I18n.t("certs.admin.vault.protectBtn"), I18n.t("certs.admin.vault.protectBtnTitle"), () => this.protectRootKeysModal(), "btn-primary"));
     }
     // Dépliage GLOBAL de l'arbre (client) : « Tout déployer » (tous les nœuds à enfants) / « Tout replier » (vide).
     right.appendChild(this.actionButton(I18n.t("certs.admin.tree.expandAll"), I18n.t("certs.admin.tree.expandAllTitle"), () => this.expandAll()));
@@ -390,6 +453,19 @@ export class CertsAdminView {
       - PKI vierge → « Initialiser » (ouvre la modale d'initialisation) ;
       - verrouillé / contexte non sécurisé → « Déverrouiller » (ouvre la modale du coffre). */
   private buildVaultButton(): HTMLButtonElement {
+    const vaults = this.vaults();
+    // PLUSIEURS coffres → un bouton d'état « Coffres (N/M) » qui ouvre la modale de GESTION (déverrouiller /
+    // verrouiller par coffre). C'est le cas « non-trivial » : on ne se contente plus d'un lock global.
+    if (vaults.length > 1) {
+      const open = this.session.unlockedIds().filter((id) => this.hasVault(id)).length;
+      const btn = this.actionButton(
+        I18n.t("certs.admin.vault.buttonMulti", { open, total: vaults.length }),
+        I18n.t("certs.admin.vault.buttonMultiTitle"),
+        () => this.unlockModal(), open > 0 ? "btn-ghost" : "btn-primary");
+      IconButton.decorate(btn, open > 0 ? Icons.LOCK : Icons.UNLOCK);
+      return btn;
+    }
+    // Coffre UNIQUE (cas courant) → comportement historique : verrouiller si ouvert, sinon initialiser/déverrouiller.
     if (this.session.unlocked) {
       const btn = this.actionButton(I18n.t("certs.admin.toolbar.lock"), I18n.t("certs.admin.toolbar.lockTitle"), () => { this.session.lock(); });
       IconButton.decorate(btn, Icons.LOCK);
@@ -402,6 +478,14 @@ export class CertsAdminView {
       () => this.unlockModal(), "btn-primary");
     IconButton.decorate(btn, Icons.UNLOCK);
     return btn;
+  }
+
+  /** La cérémonie « Protéger les clés racine… » (§11.5) est-elle proposable ? PKI initialisée + coffre « default »
+      OUVERT (on doit déchiffrer les clés racine actuelles) + coffre « root » PAS ENCORE créé. */
+  private protectRootAvailable(): boolean {
+    return this.pkiState?.initialized === true
+      && this.session.unlockedVault(CertsAdminView.VAULT_DEFAULT)
+      && !this.hasVault(CertsAdminView.VAULT_ROOT);
   }
 
   /** Modale du COFFRE de certificat — remplace l'ancien panneau persistant (gain de place : la vue n'affiche
@@ -435,26 +519,70 @@ export class CertsAdminView {
       return;
     }
 
-    // PKI VERROUILLÉE → phrase secrète. onSave = déverrouillage (renvoie true → ferme → onClose/aller-retour).
+    // PKI INITIALISÉE → LISTE des coffres avec leur état (ouvert/verrouillé) et l'action correspondante. Un seul
+    // coffre (cas courant) → une seule ligne, comportement quasi identique à l'ancien panneau (phrase + bouton).
+    // Plusieurs coffres → gestion fine (déverrouiller l'un, re-verrouiller l'autre). La modale reste OUVERTE après
+    // chaque action (re-rendu de la liste en place) SAUF en aller-retour (`reopen`) où un déverrouillage réussi
+    // referme pour revenir directement à la modale d'origine (parité UX de l'ancien flux d'export).
     const root = document.createElement("div");
     const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "10px";
     hint.textContent = I18n.t("certs.admin.lock.unlockHint");
-    const input = FormControls.text("", I18n.t("certs.admin.lock.passPlaceholder")); input.type = "password"; input.autocomplete = "current-password";
     const errBox = this.errBox();
-    root.append(hint, FormControls.fieldRow(I18n.t("certs.admin.lock.passLabel"), input), errBox);
-    // Entrée = déverrouiller (parité avec l'ancien panneau) : tente puis ferme la modale en cas de succès
-    // (closeModal → onClose → aller-retour éventuel), comme le bouton « Déverrouiller » du pied.
-    input.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter") return;
-      e.preventDefault();
-      void this.attemptUnlock(input.value, errBox).then((ok) => { if (ok) this.host.closeModal?.(); });
-    });
-    this.host.openModal({
-      title: I18n.t("certs.admin.lock.unlockTitle"), body: root,
-      saveLabel: I18n.t("certs.admin.lock.unlockBtn"), onClose: reopen,
-      onSave: async () => this.attemptUnlock(input.value, errBox),   // true → ferme ; false → reste ouverte (erreur affichée)
-    });
-    setTimeout(() => input.focus(), 30);
+    const listBox = document.createElement("div"); listBox.style.cssText = "display:flex;flex-direction:column;gap:10px";
+    const firstInput = { el: null as HTMLInputElement | null };
+
+    const renderList = (): void => {
+      listBox.replaceChildren();
+      firstInput.el = null;
+      const vaults = this.vaults();
+      const anyOpen = vaults.some((v) => this.session.unlockedVault(v.vault_id));
+      for (const vault of vaults) {
+        const rowEl = document.createElement("div");
+        rowEl.style.cssText = "display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--line);border-radius:6px";
+        const head = document.createElement("div"); head.style.cssText = "display:flex;align-items:center;gap:8px;justify-content:space-between";
+        const name = document.createElement("span"); name.style.cssText = "font-weight:600;color:var(--fg)"; name.textContent = this.vaultLabel(vault.vault_id);
+        head.appendChild(name);
+        const opened = this.session.unlockedVault(vault.vault_id);
+        if (opened) {
+          // Coffre OUVERT : pastille d'état + bouton « Verrouiller » (ce coffre seulement).
+          const badge = document.createElement("span"); badge.innerHTML = this.pill(I18n.t("certs.admin.vault.stateUnlocked"), "ok"); head.appendChild(badge.firstElementChild!);
+          const lockBtn = this.actionButton(I18n.t("certs.admin.vault.lockOne"), I18n.t("certs.admin.vault.lockOneTitle"), () => { this.session.lockVault(vault.vault_id); this.render(); renderList(); });
+          IconButton.decorate(lockBtn, Icons.LOCK);
+          head.appendChild(lockBtn);
+          rowEl.appendChild(head);
+        } else {
+          // Coffre VERROUILLÉ : pastille + champ phrase + bouton « Déverrouiller ».
+          const badge = document.createElement("span"); badge.innerHTML = this.pill(I18n.t("certs.admin.vault.stateLocked"), "neutral"); head.appendChild(badge.firstElementChild!);
+          rowEl.appendChild(head);
+          const line = document.createElement("div"); line.style.cssText = "display:flex;gap:6px;align-items:center";
+          const input = FormControls.text("", I18n.t("certs.admin.lock.passPlaceholder")); input.type = "password"; input.autocomplete = "current-password"; input.style.flex = "1 1 auto";
+          if (!firstInput.el) firstInput.el = input;   // focus sur le premier coffre verrouillé
+          const doUnlock = (): void => {
+            void this.attemptUnlockVault(vault.vault_id, input.value, errBox).then((ok) => {
+              if (!ok) return;
+              this.render();                              // la barre de contrôles reflète le nouvel état du coffre
+              if (reopen) this.host.closeModal?.();       // aller-retour (export) : on revient directement à la modale d'origine
+              else renderList();                          // gestion multi-coffres : la liste reste ouverte, rafraîchie
+            });
+          };
+          input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doUnlock(); } });
+          const unlockBtn = this.actionButton(I18n.t("certs.admin.lock.unlockBtn"), I18n.t("certs.admin.toolbar.unlockTitle"), doUnlock, "btn-primary");
+          line.append(input, unlockBtn);
+          rowEl.appendChild(line);
+        }
+        listBox.appendChild(rowEl);
+      }
+      // Raccourci « Tout verrouiller » quand plusieurs coffres et au moins un ouvert.
+      if (vaults.length > 1 && anyOpen) {
+        const lockAll = this.actionButton(I18n.t("certs.admin.toolbar.lock"), I18n.t("certs.admin.toolbar.lockTitle"), () => { this.session.lock(); this.render(); renderList(); });
+        IconButton.decorate(lockAll, Icons.LOCK);
+        listBox.appendChild(lockAll);
+      }
+    };
+    renderList();
+    root.append(hint, listBox, errBox);
+    this.host.openModal({ title: I18n.t("certs.admin.lock.unlockTitle"), body: root, hideFooter: true, onClose: reopen });
+    setTimeout(() => firstInput.el?.focus(), 30);
   }
 
   /* --------------------------------------------------------------------------
@@ -1224,7 +1352,7 @@ export class CertsAdminView {
       const item = byId.get(id);
       if (!item) { errors.push({ label: snap.label, reason: I18n.t("certs.admin.bulk.notFound") }); continue; }
       try {
-        const keyPem = (withKeys && item.has_key) ? await this.decryptKey(id) : null;   // clé déchiffrée LOCALEMENT
+        const keyPem = (withKeys && item.has_key) ? await this.decryptKeyOf(item) : null;   // clé déchiffrée LOCALEMENT (selon SON coffre)
         const rec: CertBundleRecord = { id: item.id, label: item.label, parent_id: item.parent_id, public_pem: item.public_pem, revoked_at: item.revoked_at, kind: item.kind, subject: item.subject };
         const artifacts = await CertZip.bundleFor(rec, all, keyPem, categories);
         if (artifacts.length) { entries.push({ folder: item.label, artifacts }); done++; }
@@ -1298,12 +1426,14 @@ export class CertsAdminView {
       caCertPem: ca.public_pem || "", caPrivateKeyPkcs8Pem: caKeyPem,
       commonName, organization, organizationalUnit, keyAlgo, days, sans: sans as X509San[], usage,
     });
-    const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
+    // RENOUVELLEMENT : la nouvelle feuille reste dans le MÊME coffre que celle qu'elle remplace (invariant §11.5).
+    const keyEnc = await this.encryptForVault(item.vault_id, gen.privateKeyPkcs8Pem);
     await this.client!.save(CertsAdminView.newId(), {
       // renouvellement : on PRÉSERVE le label (métadonnée d'affichage, possiblement ≠ CN) — le sujet, lui, suit le CN.
       kind: "leaf-tls", parent_id: ca.id, label: item.label, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
       serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
       key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans, renewed_from: item.id,
+      vault_id: item.vault_id,
     });
     await this.revokeSuperseded(item);
   }
@@ -1349,7 +1479,8 @@ export class CertsAdminView {
             if (!cc) {
               const ca = await this.client!.getOne(item.parent_id);
               if (!ca.key_enc) throw new Error(I18n.t("certs.admin.leaf.noKey"));
-              cc = { ca, key: await PkiCrypto.decryptSecret(this.session.key, ca.key_enc) };
+              // La clé de la CA parente est déchiffrée SELON SON coffre (cadrage §11.5).
+              cc = { ca, key: await PkiCrypto.decryptSecret(this.vaultKey(ca.vault_id), ca.key_enc) };
               caCache.set(item.parent_id, cc);
             }
             const clamped = CertValidity.clampDays(requested, cc.ca.not_after, Date.now());
@@ -1454,7 +1585,7 @@ export class CertsAdminView {
           const kek = await PkiCrypto.deriveKek(pass, salt, iters);
           const { wrappedDek, dek } = await PkiCrypto.initDek(kek); // DEK aléatoire, emballée par la KEK
           await this.client!.initPki({ kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: salt, kdf_iters: iters, wrapped_dek: wrappedDek });
-          this.session.unlock(dek); // la session détient la DEK (non extractible), pas la KEK
+          this.session.unlock(CertsAdminView.VAULT_DEFAULT, dek); // la session détient la DEK (non extractible) du coffre « default »
           await this.reload();
           Notify.toast(I18n.t("certs.admin.init.toast"), "ok");
           return true;
@@ -1464,21 +1595,19 @@ export class CertsAdminView {
     setTimeout(() => p1.focus(), 30);
   }
 
-  /** Déverrouillage : dérive la KEK et DÉBALLE la DEK depuis wrapped_dek. L'unwrap AES-GCM est
-      authentifié : il réussit (→ unlock) si la phrase est bonne, JETTE sinon (→ message NEUTRE).
-      Le wrapped_dek FAIT donc office de keycheck — pas de vérification séparée. */
-  /** Tente le déverrouillage. Renvoie `true` en cas de succès (session ouverte + vue re-rendue), `false` sinon
-      (phrase vide/erronée — message neutre affiché). Le booléen pilote la fermeture de la modale du coffre. */
-  private async attemptUnlock(pass: string, errBox: HTMLElement): Promise<boolean> {
-    const state = this.pkiState;
-    if (!state || state.initialized !== true) return false;
+  /** Déverrouillage d'UN COFFRE : dérive la KEK depuis SES paramètres KDF et DÉBALLE SA DEK depuis SON wrapped_dek.
+      L'unwrap AES-GCM est authentifié : il réussit (→ unlock du coffre) si la phrase est bonne, JETTE sinon
+      (→ message NEUTRE). Le wrapped_dek FAIT donc office de keycheck — pas de vérification séparée. Renvoie `true`
+      en cas de succès, `false` sinon (phrase vide/erronée). La vue est re-rendue par l'APPELANT (unlockModal). */
+  private async attemptUnlockVault(vaultId: string, pass: string, errBox: HTMLElement): Promise<boolean> {
+    const vault = this.vaultState(vaultId);
+    if (!vault) return false;
     errBox.style.display = "none";
     if (pass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.common.passRequired")); return false; }
     try {
-      const kek = await PkiCrypto.deriveKek(pass, state.kdf_salt, state.kdf_iters);
-      const dek = await PkiCrypto.unwrapDek(kek, state.wrapped_dek); // JETTE si mauvaise phrase (GCM refuse)
-      this.session.unlock(dek);
-      this.render();
+      const kek = await PkiCrypto.deriveKek(pass, vault.kdf_salt, vault.kdf_iters);
+      const dek = await PkiCrypto.unwrapDek(kek, vault.wrapped_dek); // JETTE si mauvaise phrase (GCM refuse)
+      this.session.unlock(vaultId, dek);
       Notify.toast(I18n.t("certs.admin.unlock.toast"), "ok");
       return true;
     } catch (_) {
@@ -1503,6 +1632,14 @@ export class CertsAdminView {
     const info = document.createElement("div"); info.className = "form-hint"; info.style.marginBottom = "10px";
     info.textContent = I18n.t("certs.admin.rekey.info");
     root.appendChild(info);
+
+    // SÉLECTEUR de coffre — proposé seulement s'il y en a PLUSIEURS (défaut « default »). Un seul coffre → « default »
+    // implicite, aucun sur-champ. La phrase saisie sera celle DU coffre choisi (chacun a la sienne).
+    const vaults = this.vaults();
+    const vaultSelect = vaults.length > 1
+      ? FormControls.select(vaults.map((v) => ({ value: v.vault_id, label: this.vaultLabel(v.vault_id) })), CertsAdminView.VAULT_DEFAULT)
+      : null;
+    if (vaultSelect) root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.vault.vaultField"), vaultSelect, I18n.t("certs.admin.vault.rekeyVaultHint")));
 
     const cur = FormControls.text("", I18n.t("certs.admin.rekey.curPlaceholder")); cur.type = "password"; cur.autocomplete = "current-password";
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.rekey.curLabel"), cur, I18n.t("certs.admin.rekey.curHint")));
@@ -1534,34 +1671,37 @@ export class CertsAdminView {
         if (currentPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.curRequired")); return failField(cur); }
         if (newPass.trim() === "") { this.showError(errBox, I18n.t("certs.admin.rekey.newRequired")); return failField(p1); }
         if (newPass !== p2.value) { this.showError(errBox, I18n.t("certs.admin.rekey.mismatch")); return failField(p2); }
-        // Instantané FRAIS à CHAQUE tentative (masque la capture d'ouverture) : après un 409
-        // « conflict », this.pkiState a été rafraîchi — la relance doit repartir de l'enveloppe
-        // COURANTE (dériver l'ancienne KEK sur le bon sel, fonder le rewrap sur le bon blob).
-        const state = this.pkiState;
-        if (!state || state.initialized !== true) { this.showError(errBox, I18n.t("certs.admin.rekey.stateUnavailable")); return false; }
+        // COFFRE CIBLE : celui du sélecteur (multi-coffres) ou « default ». Instantané FRAIS à CHAQUE tentative
+        // (masque la capture d'ouverture) : après un 409 « conflict », this.pkiState a été rafraîchi — la relance
+        // doit repartir de l'enveloppe COURANTE du coffre (bon sel, bon blob pour le verrou optimiste).
+        const vaultId = vaultSelect ? vaultSelect.value : CertsAdminView.VAULT_DEFAULT;
+        const vault = this.vaultState(vaultId);
+        if (!vault) { this.showError(errBox, I18n.t("certs.admin.rekey.stateUnavailable")); return false; }
+        // Le coffre choisi doit être DÉVERROUILLÉ : on ne change la phrase que d'un coffre auquel on a accès.
+        if (!this.session.unlockedVault(vaultId)) { this.showError(errBox, I18n.t("certs.admin.vault.lockedError", { vault: this.vaultLabel(vaultId) })); return false; }
 
-        // 1) Ré-emballer la DEK côté client. rewrapDek JETTE si la phrase actuelle est mauvaise
+        // 1) Ré-emballer la DEK DU COFFRE côté client. rewrapDek JETTE si la phrase actuelle est mauvaise
         //    (déchiffrement refusé) — on l'isole pour un message ciblé, distinct d'une panne réseau.
         //    On régénère le sel (bonne hygiène : nouvelle phrase = nouveaux paramètres KDF).
         const newSalt = PkiCrypto.generateSaltB64();
         const newIters = PkiCrypto.DEFAULT_ITERS;
         let newWrappedDek: string;
         try {
-          const oldKek = await PkiCrypto.deriveKek(currentPass, state.kdf_salt, state.kdf_iters);
+          const oldKek = await PkiCrypto.deriveKek(currentPass, vault.kdf_salt, vault.kdf_iters);
           const newKek = await PkiCrypto.deriveKek(newPass, newSalt, newIters);
-          newWrappedDek = await PkiCrypto.rewrapDek(oldKek, newKek, state.wrapped_dek);
+          newWrappedDek = await PkiCrypto.rewrapDek(oldKek, newKek, vault.wrapped_dek);
         } catch (_) {
           this.showError(errBox, I18n.t("certs.admin.rekey.curWrong"));
           return failField(cur);
         }
 
-        // 2) Persister la nouvelle enveloppe. `prev_wrapped_dek` = l'enveloppe sur laquelle le
-        //    ré-emballage vient d'être fondé (verrou optimiste) : si un AUTRE changement de phrase
-        //    est passé entre-temps, le serveur répond 409 au lieu d'écraser silencieusement.
+        // 2) Persister la nouvelle enveloppe DU COFFRE. `prev_wrapped_dek` = l'enveloppe sur laquelle le
+        //    ré-emballage vient d'être fondé (verrou optimiste) : si un AUTRE changement de phrase du même
+        //    coffre est passé entre-temps, le serveur répond 409 au lieu d'écraser silencieusement.
         try {
-          await this.client!.rekeyPki({
+          await this.client!.rekeyVault(vaultId, {
             kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: newSalt, kdf_iters: newIters,
-            wrapped_dek: newWrappedDek, prev_wrapped_dek: state.wrapped_dek,
+            wrapped_dek: newWrappedDek, prev_wrapped_dek: vault.wrapped_dek,
           });
         } catch (e) {
           // Conflit (ou autre échec) : re-lire l'état PKI en arrière-plan pour qu'un nouvel essai
@@ -1570,9 +1710,9 @@ export class CertsAdminView {
           this.showError(errBox, e); return false;
         }
 
-        // 3) Rafraîchir l'état local : les prochains déverrouillages utiliseront les nouveaux
-        //    paramètres. La session détient toujours la MÊME DEK → elle reste valablement ouverte.
-        this.pkiState = { initialized: true, kdf_version: PkiCrypto.KDF_VERSION, kdf_salt: newSalt, kdf_iters: newIters, wrapped_dek: newWrappedDek };
+        // 3) Recharger l'état PKI : les prochains déverrouillages du coffre utiliseront ses nouveaux paramètres.
+        //    La session détient toujours la MÊME DEK → elle reste valablement ouverte.
+        try { this.pkiState = await this.client!.pki(); } catch (_) { /* toast de succès ci-dessous suffit */ }
         Notify.toast(I18n.t("certs.admin.rekey.toast"), "ok");
         return true;
       },
@@ -1610,6 +1750,12 @@ export class CertsAdminView {
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.algoField"), algo, I18n.t("certs.admin.rootCa.algoHint")));
     const days = FormControls.number(3650, { min: 1, step: 1 });
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, I18n.t("certs.admin.rootCa.daysHint")));
+    // COFFRE cible (cadrage §11.2) : proposé SEULEMENT si le coffre « root » existe (défaut = « root » — les clés
+    // racine y sont compartimentées) ; sinon le coffre « default » est implicite (aucun sur-champ).
+    const vaultSelect = this.hasVault(CertsAdminView.VAULT_ROOT)
+      ? FormControls.select(this.vaults().map((v) => ({ value: v.vault_id, label: this.vaultLabel(v.vault_id) })), this.targetVaultFor("root-ca"))
+      : null;
+    if (vaultSelect) root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.vault.vaultField"), vaultSelect, I18n.t("certs.admin.vault.createVaultHint")));
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
@@ -1623,15 +1769,17 @@ export class CertsAdminView {
         const commonName = cn.value.trim();
         if (commonName === "") { this.showError(errBox, I18n.t("certs.admin.common.cnRequired")); return false; }
         try {
+          const targetVault = vaultSelect ? vaultSelect.value : this.targetVaultFor("root-ca");
           const keyAlgo = algo.value as X509KeyAlgo;
           const organization = org.value.trim() || undefined;
           const organizationalUnit = ou.value.trim() || undefined;
           const gen = await X509Factory.createRootCa({ commonName, organization, organizationalUnit, keyAlgo, days: Number(days.value) });
-          const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
+          const keyEnc = await this.encryptForVault(targetVault, gen.privateKeyPkcs8Pem);   // exige le coffre choisi DÉVERROUILLÉ (vaultKey jette sinon)
           await this.client!.save(CertsAdminView.newId(), {
             kind: "root-ca", parent_id: null, label: lbl, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans: [],
+            vault_id: targetVault,
           });
           Notify.toast(I18n.t("certs.admin.rootCa.toast"), "ok");
           await this.refreshBody();
@@ -1699,7 +1847,10 @@ export class CertsAdminView {
         try {
           const detail = await this.client!.getOne(ca.id);
           if (!detail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
-          const caKeyPem = await PkiCrypto.decryptSecret(this.session.key, detail.key_enc);
+          // Clé de la CA déchiffrée SELON SON coffre ; la nouvelle feuille va dans le coffre de l'objet renouvelé
+          // (mode 1) ou, en création, dans le coffre par défaut du kind (leaf → « default »). Invariant §11.5.
+          const caKeyPem = await PkiCrypto.decryptSecret(this.vaultKey(detail.vault_id), detail.key_enc);
+          const targetVault = renewOf ? renewOf.vault_id : this.targetVaultFor("leaf-tls");
           const keyAlgo = algo.value as X509KeyAlgo;
           const organization = org.value.trim() || undefined;
           const organizationalUnit = ou.value.trim() || undefined;
@@ -1707,12 +1858,13 @@ export class CertsAdminView {
             caCertPem: detail.public_pem || "", caPrivateKeyPkcs8Pem: caKeyPem,
             commonName, organization, organizationalUnit, keyAlgo, days: Number(days.value), sans: sans as X509San[], usage: usage.value as LeafUsage,
           });
-          const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
+          const keyEnc = await this.encryptForVault(targetVault, gen.privateKeyPkcs8Pem);
           await this.client!.save(CertsAdminView.newId(), {
             kind: "leaf-tls", parent_id: ca.id, label: lbl, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans,
             renewed_from: renewOf ? renewOf.id : undefined,   // lignée (mode 1) ; undefined → null côté serveur
+            vault_id: targetVault,
           });
           // RENOUVELLEMENT : révoque l'ancien APRÈS création du neuf (raison auto « superseded »). Échec de la
           // révocation → le neuf existe déjà : on avertit sans bloquer (l'ancien restera à révoquer à la main).
@@ -1764,6 +1916,10 @@ export class CertsAdminView {
     const childMax = parentPathLen === null ? null : Math.max(0, parentPathLen - 1);
     const pathLen = FormControls.number(0, childMax !== null ? { min: 0, max: childMax, step: 1 } : { min: 0, step: 1 });
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.intermediateCa.pathLenField"), pathLen, I18n.t("certs.admin.intermediateCa.pathLenHint")));
+    // NameConstraints (AVANCÉ, Lot 5) : liste de suffixes DNS permis séparés par des virgules. Non vide → la sous-CA
+    // ne pourra certifier QUE des noms sous ces suffixes (extension CRITIQUE). Vide = aucune contrainte.
+    const permittedDnsInput = FormControls.text("", I18n.t("certs.admin.intermediateCa.permittedDnsPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.intermediateCa.permittedDnsField"), permittedDnsInput, I18n.t("certs.admin.intermediateCa.permittedDnsHint")));
     const errBox = this.errBox(); root.appendChild(errBox);
 
     this.host.openModal({
@@ -1786,25 +1942,30 @@ export class CertsAdminView {
         if (!Number.isFinite(depth) || !Number.isInteger(depth) || depth < 0) { this.showError(errBox, I18n.t("certs.admin.intermediateCa.pathLenInvalid")); return false; }
         if (childMax !== null && depth > childMax) { this.showError(errBox, I18n.t("certs.admin.intermediateCa.pathLenTooDeep", { max: childMax })); return false; }
         try {
-          // Clé de la CA PARENTE chargée puis déchiffrée LOCALEMENT (getOne unitaire seul porte key_enc, invariant Q5).
+          // Clé de la CA PARENTE chargée puis déchiffrée SELON SON COFFRE (getOne unitaire seul porte key_enc, invariant Q5).
           const ca = await this.client!.getOne(parentCa.id);
           if (!ca.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
-          const caKeyPem = await PkiCrypto.decryptSecret(this.session.key, ca.key_enc);
+          const caKeyPem = await PkiCrypto.decryptSecret(this.vaultKey(ca.vault_id), ca.key_enc);
+          const targetVault = this.targetVaultFor("intermediate-ca");   // v1 : « default » (seul « root-ca » vise le coffre root)
           const keyAlgo = algo.value as X509KeyAlgo;
           const organization = org.value.trim() || undefined;
           const organizationalUnit = ou.value.trim() || undefined;
+          // NameConstraints : suffixes DNS permis (split virgule, trim, vides retirés). Vide → aucune contrainte.
+          const permittedDns = permittedDnsInput.value.split(",").map((s) => s.trim()).filter((s) => s !== "");
           // Durée rognée au plafond de la parente (défensif : le champ est déjà borné et exceedsCa a bloqué le dépassement).
           const clampedDays = CertValidity.clampDays(requested, parentCa.not_after, Date.now());
           const gen = await X509Factory.issueIntermediateCa({
             caCertPem: ca.public_pem || "", caPrivateKeyPkcs8Pem: caKeyPem,
             commonName, organization, organizationalUnit, keyAlgo, days: clampedDays, pathLen: depth,
+            permittedDns: permittedDns.length ? permittedDns : undefined,
           });
-          // Clé de la SOUS-CA chiffrée par la clé maître AVANT envoi (le serveur ne reçoit qu'un blob opaque).
-          const keyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
+          // Clé de la SOUS-CA chiffrée POUR son coffre cible AVANT envoi (le serveur ne reçoit qu'un blob opaque).
+          const keyEnc = await this.encryptForVault(targetVault, gen.privateKeyPkcs8Pem);
           await this.client!.save(CertsAdminView.newId(), {
             kind: "intermediate-ca", parent_id: parentCa.id, label: lbl, subject: CertsAdminView.subjectDn(commonName, organization, organizationalUnit),
             serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
             key_algo: keyAlgo, public_pem: gen.certPem, key_enc: keyEnc, revoked_at: null, sans: [],
+            vault_id: targetVault,
           });
           Notify.toast(I18n.t("certs.admin.intermediateCa.toast"), "ok");
           await this.refreshBody();
@@ -1898,14 +2059,15 @@ export class CertsAdminView {
         try {
           const caDetail = await this.client!.getOne(ca.id);
           if (!caDetail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
-          const oldCaKey = await PkiCrypto.decryptSecret(this.session.key, caDetail.key_enc);
+          // Clés déchiffrées SELON LEUR coffre respectif (cadrage §11.5).
+          const oldCaKey = await PkiCrypto.decryptSecret(this.vaultKey(caDetail.vault_id), caDetail.key_enc);
           // Clé de la CA PARENTE (intermédiaire seulement) : elle signe le prolongement ET la rotation.
           let parentDetail: CertificateDetail | null = null;
           let parentKey: string | null = null;
           if (isIntermediate) {
             parentDetail = await this.client!.getOne(ca.parent_id!);
             if (!parentDetail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
-            parentKey = await PkiCrypto.decryptSecret(this.session.key, parentDetail.key_enc);
+            parentKey = await PkiCrypto.decryptSecret(this.vaultKey(parentDetail.vault_id), parentDetail.key_enc);
           }
           const cn = CertsAdminView.parseDnField(ca.subject, "CN") || ca.label;
           const organization = CertsAdminView.parseDnField(ca.subject, "O") || undefined;
@@ -1935,7 +2097,8 @@ export class CertsAdminView {
                   permittedDns: X509Factory.readCaPermittedDns(caDetail.public_pem || "") ?? undefined,
                 })
               : await X509Factory.createRootCa({ commonName: cn, organization, organizationalUnit, keyAlgo, days: requested });
-            const newKeyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
+            // ROTATION : la nouvelle CA garde le COFFRE de l'ANCIENNE (cadrage §11.5 — même autorité, même compartiment).
+            const newKeyEnc = await this.encryptForVault(ca.vault_id, gen.privateKeyPkcs8Pem);
             // CROSS-SIGNATURE (phase 6) : l'ANCIENNE CA certifie la clé de la NOUVELLE → recouvrement transitoire
             // (un client/déploiement qui fait encore confiance à l'ancienne valide les nouveaux certs). Généré AVANT
             // la révocation (on a encore la clé de l'ancienne). Échéance rognée à celle de l'ancienne (crossSignCa).
@@ -1948,7 +2111,7 @@ export class CertsAdminView {
               kind: ca.kind, parent_id: ca.parent_id, label: ca.label, subject: ca.subject,
               serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
               key_algo: keyAlgo, public_pem: gen.certPem, key_enc: newKeyEnc, revoked_at: null, sans: [],
-              cross_signed_pem: crossPem, renewed_from: ca.id,
+              cross_signed_pem: crossPem, renewed_from: ca.id, vault_id: ca.vault_id,
             });
             await this.revokeSuperseded(ca);   // ancienne CA remplacée
             effectiveCa = await this.client!.getOne(newCaId);
@@ -2025,14 +2188,16 @@ export class CertsAdminView {
         const comment = ident.value.trim();
         if (comment === "") { this.showError(errBox, I18n.t("certs.admin.ssh.identRequired")); return false; }
         try {
+          const targetVault = this.targetVaultFor(kind);   // ssh-ca / ssh-keypair → « default » (v1)
           const kp = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]) as CryptoKeyPair;
           const pub = await SshKeyMaterial.ed25519PublicRaw(kp.publicKey);
           const publicLine = OpenSshEncoder.ed25519PublicKeyLine(pub, comment);
-          const keyEnc = await PkiCrypto.encryptSecret(this.session.key, await this.pkcs8Pem(kp.privateKey));
+          const keyEnc = await this.encryptForVault(targetVault, await this.pkcs8Pem(kp.privateKey));
           await this.client!.save(CertsAdminView.newId(), {
             kind, parent_id: null, label: comment, subject: comment,
             serial: null, not_before: null, not_after: null, fingerprint: null,
             key_algo: "ed25519", public_pem: publicLine, key_enc: keyEnc, revoked_at: null, sans: [],
+            vault_id: targetVault,
           });
           Notify.toast(kind === "ssh-ca" ? I18n.t("certs.admin.ssh.toastCa") : I18n.t("certs.admin.ssh.toastPair"), "ok");
           await this.refreshBody();
@@ -2468,11 +2633,14 @@ export class CertsAdminView {
      Helpers crypto (WebCrypto ⇄ formats) — clés jamais persistées ni envoyées
      -------------------------------------------------------------------------- */
 
-  /** Récupère et déchiffre la clé privée d'un objet (GET unitaire → key_enc → decryptSecret). */
-  private async decryptKey(id: string): Promise<string> {
-    const detail = await this.client!.getOne(id);
-    if (!detail.key_enc) throw new Error("Aucune clé privée détenue pour cet objet.");
-    return PkiCrypto.decryptSecret(this.session.key, detail.key_enc);
+  /** Récupère et déchiffre la clé privée d'un objet SELON SON COFFRE (cadrage §11). L'item porte déjà `vault_id`
+      (renvoyé en liste ET au GET unitaire) ; on relit key_enc (GET unitaire, invariant Q5) puis on déchiffre avec
+      la DEK de CE coffre. Remplace l'ancien `decryptKey(id)` (qui supposait un unique coffre) : la DEK utilisée
+      concorde TOUJOURS avec le coffre du certificat, jamais une autre. */
+  private async decryptKeyOf(item: { id: string; vault_id: string }): Promise<string> {
+    const detail = await this.client!.getOne(item.id);
+    if (!detail.key_enc) throw new Error(I18n.t("certs.admin.leaf.noKey"));
+    return PkiCrypto.decryptSecret(this.vaultKey(item.vault_id), detail.key_enc);
   }
 
   /** Clé privée WebCrypto (extractible) → PKCS#8 PEM (via PemConverter de @peculiar, déjà au graphe). */

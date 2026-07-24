@@ -53,6 +53,8 @@ export interface CertificateListItem {
   renewed_from: string | null;
   /** Certificat croisé d'une CA rekeyée (Issuer = ancienne CA) — public. */
   cross_signed_pem: string | null;
+  /** COFFRE dont la DEK chiffre `key_enc` (cadrage §11) — « default » = coffre historique. */
+  vault_id: string;
   created_date: string;
   updated_date: string;
   sans: CertSan[];
@@ -139,16 +141,30 @@ export interface CertificateInput {
   revocation_reason?: string | null;
   renewed_from?: string | null;
   cross_signed_pem?: string | null;
+  /** COFFRE cible (cadrage §11) — absent = « default ». ⚠ INVARIANT tenu par l'APPELANT : la DEK qui a
+      réellement chiffré `key_enc` doit être celle de CE coffre (les deux voyagent dans le MÊME PUT). */
+  vault_id?: string;
   sans: CertSan[];
 }
 
+/** Un COFFRE tel que renvoyé par GET /certs/pki (cadrage §11) : SES paramètres KDF + l'enveloppe de SA
+    DEK. `vault_id` « default » = le coffre historique ; « root » (convention client) = clés racine
+    compartimentées. Le client déballe chaque DEK LOCALEMENT (l'unwrap authentifié valide la phrase). */
+export interface PkiVaultState {
+  vault_id: string;
+  label: string | null;
+  kdf_version: string;
+  kdf_salt: string;
+  kdf_iters: number;
+  wrapped_dek: string;
+}
+
 /** Paramètres PKI d'un document (GET /certs/pki). `initialized:false` signale une PKI VIERGE
-    (le client enchaîne sur l'initialisation) ; sinon les paramètres KDF + `wrapped_dek` (la DEK
-    chiffrée par la KEK) permettent, CÔTÉ CLIENT, de déballer la DEK (l'unwrap authentifié
-    valide du même coup la phrase — pas de keycheck séparé). */
+    (le client enchaîne sur l'initialisation) ; sinon `vaults` liste TOUS les coffres (« default »
+    en tête — les champs plats historiques de la réponse serveur sont repliés dans ce tableau). */
 export type PkiState =
   | { initialized: false }
-  | { initialized: true; kdf_version: string; kdf_salt: string; kdf_iters: number; wrapped_dek: string };
+  | { initialized: true; vaults: PkiVaultState[] };
 
 /** CORPS envoyé à PUT /certs/pki (initialisation) — miroir de `PkiParamsCandidate`. */
 export interface PkiParamsInput {
@@ -275,13 +291,33 @@ export class CertsClient {
 
   /* ---- Paramètres PKI (clé maître — dérivation CÔTÉ CLIENT) ---- */
 
-  /** État de la PKI du document : vierge (`initialized:false`) ou paramètres KDF + wrapped_dek. */
+  /** État de la PKI du document : vierge (`initialized:false`) ou la liste de ses COFFRES. Repli
+      DÉFENSIF : un serveur antérieur aux coffres ne renvoie pas `vaults` — on reconstruit alors un
+      coffre « default » unique depuis ses champs plats (même déploiement transitoire couvert). */
   async pki(): Promise<PkiState> {
     const json = await this.call("GET", "/certs/pki");
     if (json && json.initialized === true) {
-      return { initialized: true, kdf_version: json.kdf_version, kdf_salt: json.kdf_salt, kdf_iters: json.kdf_iters, wrapped_dek: json.wrapped_dek };
+      const vaults: PkiVaultState[] = Array.isArray(json.vaults) && json.vaults.length
+        ? json.vaults.map((v: any) => ({
+            vault_id: String(v.vault_id || "default"), label: typeof v.label === "string" ? v.label : null,
+            kdf_version: v.kdf_version, kdf_salt: v.kdf_salt, kdf_iters: v.kdf_iters, wrapped_dek: v.wrapped_dek,
+          }))
+        : [{ vault_id: "default", label: null, kdf_version: json.kdf_version, kdf_salt: json.kdf_salt, kdf_iters: json.kdf_iters, wrapped_dek: json.wrapped_dek }];
+      return { initialized: true, vaults };
     }
     return { initialized: false };
+  }
+
+  /** Initialise un coffre ADDITIONNEL (ex. « root ») : SA DEK emballée sous SA phrase, générées côté
+      client. 404 = PKI non initialisée ; 409 = coffre déjà existant (ré-initialisation refusée). */
+  async initVault(vaultId: string, input: PkiParamsInput & { label?: string | null }): Promise<void> {
+    await this.call("PUT", "/certs/pki/vaults/" + encodeURIComponent(vaultId), input);
+  }
+
+  /** Change la phrase d'un COFFRE (générique — « default » y passe aussi) : réécrit sa seule enveloppe
+      (DEK ré-emballée) + paramètres KDF. 404 coffre inconnu ; 409 `conflict` (verrou optimiste). */
+  async rekeyVault(vaultId: string, input: PkiRekeyInput): Promise<void> {
+    await this.call("PUT", "/certs/pki/vaults/" + encodeURIComponent(vaultId) + "/rekey", input);
   }
 
   /** Initialise la PKI du document (UNIQUE : 409 si déjà initialisée — irréversible côté serveur). */
