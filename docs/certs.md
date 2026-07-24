@@ -97,6 +97,42 @@ Deux clés, deux rôles — c'est ce qui rend le **changement de phrase maître*
 - **Schéma VERSIONNÉ** : `kdf_version = "v1"` (colonne en base + préfixe des blobs
   `v1:<iv>:<ct>`). Le versionnage est là POUR une rotation future de KDF/algo.
 
+### Coffres multi-DEK — compartimentation des clés (cadrage §11)
+
+Le modèle KEK/DEK ci-dessus est INSTANCIÉ PAR COFFRE (« vault ») : un document porte **N coffres**,
+chacun avec **sa DEK indépendante, sa phrase et son enveloppe `wrapped_dek`** (table `pki_vaults`,
+schéma Option B **UNIFORME** — le coffre « default » = l'unique DEK historique, migrée automatiquement).
+Chaque certificat porte un **`vault_id`** désignant le coffre dont la DEK chiffre sa `key_enc`.
+
+Objectif : **ne plus libérer les clés racine à chaque déverrouillage**. Usage quotidien = coffre
+« default » ouvert (émettre des feuilles sous les intermédiaires) ; le coffre « root » (clés des CA
+racines, phrase DISTINCTE) ne s'ouvre que pour les opérations rares (créer/renouveler une sous-CA…)
+— analogue navigateur de la pratique « root hors-ligne / CA émettrice en ligne ». La **délégation**
+en découle : donner la phrase du coffre standard sans jamais donner celle du root.
+
+- **Session par coffre** (`PkiSession`) : une DEK par coffre déverrouillé (`unlock(vaultId, dek)`,
+  `keyOf(vaultId)` JETTE si CE coffre est verrouillé), verrouillage AUTO global (15 min), verrouillage
+  d'UN coffre possible (`lockVault`). Les helpers centraux de la vue couplent TOUJOURS le bon coffre à
+  la bonne clé.
+- ⚠ **INVARIANT (§11.5)** : `vault_id` et la DEK qui a réellement chiffré `key_enc` doivent TOUJOURS
+  concorder — ils voyagent dans le **MÊME PUT** (tenu par le client ; le serveur ne peut pas le
+  vérifier, blobs opaques — il vérifie en revanche que le coffre EXISTE).
+- **Coffre cible d'une création (v1)** : `root-ca` → coffre « root » s'il existe (surclassement
+  possible dans le formulaire), tout le reste → « default ». Assignation **FIGÉE à la création**
+  (pas de déplacement en v1) ; un renouvellement/une rotation CONSERVE le coffre de l'original.
+- **Migration** : *Temps 1* (serveur, automatique, idempotente, AUCUNE crypto) — `pki_vaults` +
+  colonnes `vault_id`, l'enveloppe de `pki_documents` recopiée en coffre « default »
+  (copy-never-delete). *Temps 2* (cérémonie CLIENT, opt-in) — action **« Protéger les clés
+  racine… »** : crée le coffre « root » (nouvelle phrase) puis, pour chaque CA racine à clé, déchiffre
+  `key_enc` sous la DEK default et le re-chiffre sous la DEK root (`vault_id` + `key_enc` dans le même
+  PUT). Seules les clés DÉPLACÉES sont re-chiffrées.
+- **Rekey PAR coffre** (`PUT /pki/vaults/:id/rekey`) : mêmes garde-fous que l'historique (verrou
+  optimiste + historisation, désormais PAR coffre) ; le coffre default garde son miroir legacy
+  `pki_documents`.
+- **Limite assumée** : ce n'est PAS un HSM — la clé racine est quand même déchiffrée dans le
+  navigateur au moment où on l'utilise. La séparation protège le root HORS session en exploitation
+  quotidienne et sépare les DÉTENTEURS de phrase, pas l'instant précis d'usage.
+
 ### keycheck — la vérification, portée par `wrapped_dek`
 
 Il n'y a **pas de constante-témoin séparée** : c'est le déballage de la DEK qui vérifie la
@@ -209,7 +245,7 @@ manques à combler :
 | Fichier | Rôle |
 |---|---|
 | `CertsValidate.ts` | **Validation PURE** (ni DB ni réseau), griefs GROUPÉS, messages français uniques (mêmes principes que `NotifyValidate`/`ProviderConfigValidate`). Ne valide que des **métadonnées** et **borne** la taille des blobs OPAQUES (`key_enc`, `wrapped_dek` jamais déchiffrés). Porte les tables `CERT_KINDS` (`root-ca`/`intermediate-ca`/`leaf-tls`/`ssh-ca`/`ssh-keypair`/`ssh-cert`), `KEY_ALGOS`, `SAN_TYPES` et l'invariant émetteur (une racine/objet autonome n'a pas de `parent_id` ; un dérivé — feuille, certificat SSH **ou CA intermédiaire** — en exige un). |
-| `CertsDb.ts` | **Persistance SQLite dédiée** (`certs.db`, à côté de `registry.db`), possédée par le module (jamais une table de `registry.db`). **3 tables** (cf. « Schéma »). CRUD métadonnées + blobs, garde-fous de suppression (`childrenOf`), `listExpiring` pour le veilleur. **Listing PAGINÉ SQL** (`listPage`/`listRoots` — LIMIT/OFFSET, jamais de chargement complet) : filtres query/kinds/status, tris stables, portée **sous-arbre** et agrégats racines par **CTE récursive**, paramètre `focus` (page contenant un élément via `ROW_NUMBER`), colonne **`search`** dénormalisée (migration + backfill). Porte l'**invariant Q5** par des DTO distincts : `CertificateListItem` (SANS `key_enc`) / `CertificateDetail` (AVEC). Driver SQLite **injecté**. **Pas de `SecretBox`** : rien à chiffrer côté serveur. |
+| `CertsDb.ts` | **Persistance SQLite dédiée** (`certs.db`, à côté de `registry.db`), possédée par le module (jamais une table de `registry.db`). **5 tables** (cf. « Schéma »). CRUD métadonnées + blobs, garde-fous de suppression (`childrenOf`), `listExpiring` pour le veilleur. **Listing PAGINÉ SQL** (`listPage`/`listRoots` — LIMIT/OFFSET, jamais de chargement complet) : filtres query/kinds/status, tris stables, portée **sous-arbre** et agrégats racines par **CTE récursive**, paramètre `focus` (page contenant un élément via `ROW_NUMBER`), colonne **`search`** dénormalisée (migration + backfill). Porte l'**invariant Q5** par des DTO distincts : `CertificateListItem` (SANS `key_enc`) / `CertificateDetail` (AVEC). Driver SQLite **injecté**. **Pas de `SecretBox`** : rien à chiffrer côté serveur. |
 | `CertExpiryWatcher.ts` | **Veilleur d'échéances** (producteur `cert-expiry`, C7) : balaye les métadonnées `not_after`, `raise` les certificats sous seuil (gravité croissante 30/14/7 j), `resolve` ceux qui repassent au vert ou disparaissent. Déclare **chez lui** l'interface `CertProblemReporter` (dépendance INVERSÉE, pattern `VmSyncService`) — `certs/` n'importe RIEN de `notify/`. Horloge et seuils injectables (tests). |
 | `CertsModule.ts` | **Façade et POINT DE BRANCHEMENT UNIQUE** (amovible, pattern `VmModule`/`NotifyModule`) : assemble `certs.db` + routes REST (`ApiExtension`) + timer horaire d'échéances. Module « en erreur » (certs.db illisible) → routes **503** détaillé sans faire tomber le serveur. Rapporteur de problèmes **OPTIONNEL** (sans lui, le module vit normalement, sans notifications). |
 
@@ -253,14 +289,19 @@ rien de la feature ; supprimer la feature = supprimer le module + ce fichier).
 **Aucun secret exploitable ici** : `key_enc`/`wrapped_dek` arrivent DÉJÀ chiffrés côté
 client ; le serveur ne stocke que des métadonnées lisibles et ces blobs opaques.
 
-- **`pki_documents`** — paramètres de dérivation de la KEK + enveloppe de la DEK **PAR
-  document** : `doc_id` (PK), `kdf_version`, `kdf_salt`, `kdf_iters`, `wrapped_dek` (la DEK
-  chiffrée par la KEK côté client — sert AUSSI de keycheck). Le serveur ne fait que
-  **STOCKER** — il ne dérive ni ne déballe jamais. Le **changement de phrase** ne réécrit
-  que cette ligne (`kdf_salt`/`kdf_iters`/`wrapped_dek`), sans toucher aux `certificates`.
+- **`pki_vaults`** — les **COFFRES** du document (cadrage §11, schéma Option B UNIFORME) :
+  `doc_id` + `vault_id` (**PK composite**), `label` (affichage), `kdf_version`, `kdf_salt`,
+  `kdf_iters`, `wrapped_dek` — **une DEK indépendante PAR coffre**, emballée sous SA phrase.
+  « default » = le coffre historique (migré automatiquement depuis `pki_documents`) ; « root »
+  (convention client) = clés racine compartimentées. Le serveur ne fait que **STOCKER**.
+- **`pki_documents`** — en-tête **LEGACY** de la PKI (paramètres du coffre default d'avant les
+  coffres) : `doc_id` (PK), `kdf_version`, `kdf_salt`, `kdf_iters`, `wrapped_dek`. **CONSERVÉ**
+  (copy-never-delete) comme marqueur d'initialisation + **MIROIR** du coffre default (init/rekey
+  le tiennent à jour) — les procédures de récupération documentées le lisent encore.
 - **`pki_envelope_history`** — **archive append-only** des enveloppes remplacées par un
   changement de phrase : `doc_id`, `archived_date`, `kdf_version`, `kdf_salt`, `kdf_iters`,
-  `wrapped_dek`. Filet de récupération (audit 2026-07-17) : **toute enveloppe passée emballe
+  `wrapped_dek`, **`vault_id`** (le coffre qu'elle emballait — migration `ensureColumn`,
+  backfill « default »). Filet de récupération (audit 2026-07-17) : **toute enveloppe passée emballe
   la MÊME DEK** — n'importe quelle ligne restaurée à la main rend le coffre déchiffrable avec
   la phrase de l'époque (cf. « Procédures »). Jamais purgée (quelques centaines d'octets par
   changement de phrase — événement rarissime).
@@ -273,7 +314,9 @@ client ; le serveur ne stocke que des métadonnées lisibles et ces blobs opaque
   (id du certificat d'ORIGINE dont celui-ci est le renouvellement — **lignée**, référence
   SOUPLE sans FK : l'orphelin est toléré si l'original est supprimé), **`cross_signed_pem`**
   (certificat CROISÉ d'une CA issue d'une rotation de clé — public), les quatre en migration
-  `ensureColumn` (nullable),
+  `ensureColumn` (nullable), **`vault_id`** (coffre dont la DEK chiffre `key_enc` — `NOT NULL
+  DEFAULT 'default'`, backfill gratuit ; un vault_id non-default doit référencer un coffre
+  EXISTANT, garde de `save`),
   `created_date`/`updated_date`, **`created_by`/`updated_by`** (id canonique de l'auteur —
   audit posé SERVEUR sur création/renouvellement/révocation, migration `ensureColumn` ; cf.
   [`user-resolver.md`](user-resolver.md)), **`search`** (colonne DÉNORMALISÉE `TEXT NOT NULL
@@ -580,6 +623,11 @@ CE cluster, pas la PKI), root déployé UNE fois chez les clients, délégation 
 - **Émission CONTEXTUELLE** : dans l'arbre, chaque nœud CA X.509 (racine ou intermédiaire, coffre
   déverrouillé, non révoqué) porte « Émettre TLS » et « Émettre une sous-CA » (`intermediateCaModal`)
   — le nœud EST l'émetteur, pas de sélecteur séparé.
+- **NameConstraints (phase 2 — LIVRÉ)** : une sous-CA peut être bornée aux **suffixes DNS** qu'elle a
+  le droit de certifier (`permittedDns` à l'émission → extension **CRITIQUE** OID 2.5.29.30, encodée
+  via `@peculiar/asn1-x509` ; v1 : dNSName permis seulement — ni excluded, ni IP). Le coffre protège
+  la CLÉ, les NameConstraints bornent son AUTORITÉ. `readCaPermittedDns` les relit (fiche INFO,
+  ré-application en rotation) ; `reSignIntermediateCa` les PRÉSERVE par copie brute.
 - **Déploiement** : un serveur présente la **chaîne à servir** (feuille + intermédiaires, SANS le
   root — export `.chain.pem`) ; SEUL le root va dans les magasins de confiance des clients. Ne JAMAIS
   installer un intermédiaire dans un trust store.
@@ -669,9 +717,16 @@ module est en erreur (certs.db illisible). ⚠ `/pki` et `/roots` sont déclaré
   ≤ 30 j — expirés inclus, `next_expiry` = échéance la plus proche de l'arbre). Mêmes
   paramètres que ci-dessus (sauf `root`) + tris `children_total`/`next_expiry` ;
 - `GET    /documents/:docId/certs/pki` → paramètres KDF + `wrapped_dek` (`initialized:false`
-  SANS 404 : la première ouverture enchaîne sur l'initialisation) ;
+  SANS 404 : la première ouverture enchaîne sur l'initialisation) + **`vaults`** : TOUS les
+  coffres du document (« default » en tête — champs plats legacy conservés en tête de réponse) ;
 - `PUT    /documents/:docId/certs/pki` → initialisation **UNIQUE** (**409** si déjà
-  initialisée : ré-initialiser rendrait tout indéchiffrable) ;
+  initialisée : ré-initialiser rendrait tout indéchiffrable) — crée le coffre « default »
+  (double écriture pki_documents + pki_vaults) ;
+- `PUT    /documents/:docId/certs/pki/vaults/:vaultId` → initialisation d'un coffre
+  **ADDITIONNEL** (ex. « root ») : **400** pour « default » (passe par /pki), **404** si PKI
+  vierge, **409** si le coffre existe (ré-initialiser écraserait SA DEK) ;
+- `PUT    /documents/:docId/certs/pki/vaults/:vaultId/rekey` → changer la phrase d'UN coffre
+  (mêmes garde-fous que /pki/rekey : `prev_wrapped_dek` + historisation PAR coffre) ;
 - `PUT    /documents/:docId/certs/pki/rekey` → **changer la phrase maître** : réécrit
   `kdf_salt`/`kdf_iters`/`wrapped_dek` (DEK ré-emballée sous la nouvelle KEK), **aucun
   `key_enc` touché**. Exige **`prev_wrapped_dek`** (l'enveloppe sur laquelle le client a fondé

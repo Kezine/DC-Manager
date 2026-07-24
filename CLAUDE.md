@@ -184,10 +184,12 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `notify.db` à 5 tables, routage par abonnements, webhooks, coffre `SecretBox` partagé, producteurs
   via `ProblemReporter`, script de suppression, procédures d'ajout).
 - [`certs.md`](docs/certs.md) — **PKI interne zéro-connaissance** (module serveur AMOVIBLE `certs/`,
-  crypto 100 % navigateur : clé maître PBKDF2 + keycheck + clés privées chiffrées AES-GCM, serveur =
-  métadonnées + blobs opaques ; schéma `certs.db` à 3 tables + invariant Q5, formats X.509/OpenSSH/
-  PKCS#12 validés croisés ssh-keygen/openssl, veilleur d'échéances `cert-expiry`, limites assumées,
-  procédures et script de suppression).
+  crypto 100 % navigateur : phrases PBKDF2 + keycheck + clés privées chiffrées AES-GCM, serveur =
+  métadonnées + blobs opaques ; **coffres multi-DEK** `pki_vaults` — compartimentation des clés
+  racine, cérémonie « Protéger les clés racine » ; **hiérarchie à N niveaux** (CA intermédiaires,
+  pathLen, NameConstraints, chaîne à servir) ; schéma `certs.db` à 5 tables + invariant Q5, formats
+  X.509/OpenSSH/PKCS#12 validés croisés ssh-keygen/openssl, listing arborescent client, veilleur
+  d'échéances `cert-expiry`, limites assumées, procédures et script de suppression).
 - [`interventions.md`](docs/interventions.md) — **incidents & interventions** (module serveur AMOVIBLE
   `interventions/`, base `interventions.db` à 2 tables, objets liés aux équipements/VMs/spares SANS FK
   inter-bases — orphelins tolérés ; audit posé SERVEUR via helper partagé `RequestAuthor`, `closed_date`
