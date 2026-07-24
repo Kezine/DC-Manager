@@ -1,30 +1,25 @@
 /* ============================================================================
    Domaine `face` — FRANÇAIS. ÉDITEUR DE FAÇADE (`views/forms/FaceEditor.ts`) :
-   pose des ports sur les faces d'un équipement (onglets, zoom/pan, grille de
-   snap, oreilles 19″, étiquettes déportées) + SÉLECTEUR d'image de façade
-   (filtres face/U/oreilles, import). Agrégé par `../fr.ts`. Voir docs/i18n.md.
+   pose des ports sur les faces d'un équipement (onglets, zoom/pan, GUIDES
+   d'alignement dynamiques, oreilles 19″, étiquettes déportées) + SÉLECTEUR
+   d'image de façade (filtres face/U/oreilles, import). Agrégé par `../fr.ts`.
+   Voir docs/i18n.md.
 
    `{{face}}` = libellé de face déjà traduit (registre EquipFaces) ; `{{kind}}` =
    fragment de description d'image composé par l'appelant. */
 export const face = {
-  gridFree: "Libre (sans grille)",
-  grid: "Grille {{cols}} × {{rows}}",
   attachImage: "Attacher une image…",
   changeImage: "Changer l'image…",
   detachImage: "Détacher l'image",
   placeAll: "Tout poser",
-  placeAllTitle: "Disposer uniformément tous les ports sur cette face (suit la grille si active)",
+  placeAllTitle: "Disposer uniformément tous les ports sur cette face",
   removeAll: "Tout enlever",
   place2: "Pose en 2 clics",
-  place2Title: "Mode de pose précis : cliquez un port (il s'active, les autres sont masqués), puis cliquez la face à l'endroit voulu.",
+  place2Title: "Mode de pose précis : cliquez un port (il s'active, les autres deviennent des pastilles de référence), déplacez le curseur sur la face (aperçu aimanté) puis cliquez à l'endroit voulu.",
   leaders: "Étiquettes déportées",
   leadersTitle: "Affichage alternatif : chaque port devient une pastille, son nom est déporté et relié par une ligne (aucune étiquette sur un port).",
-  gridLabel: "Grille :",
-  gridToggleTitle: "Afficher/masquer le quadrillage — la grille reste ACTIVE (le snap continue).",
   zoomResetTitle: "Réinitialiser le zoom (100 %)",
-  gridHide: "Masquer la grille",
-  gridShow: "Afficher la grille",
-  hint: "Cliquez un port pour le poser, puis glissez-le. Molette / +/− = zoom · glisser le fond = déplacer. « Grille » contraint le glisser (elle peut être masquée tout en restant active). « Attacher une image » : fond de façade (filtré par face ; contrainte de U en mode baie seulement).",
+  hint: "Cliquez un port pour le poser, puis glissez-le : il s'AIMANTE sur les autres ports (alignement et espacement régulier), des guides apparaissent. Maintenez Alt pour un placement libre (sans aimantation). Molette / +/− = zoom · glisser le fond = déplacer. « Attacher une image » : fond de façade (filtré par face ; contrainte de U en mode baie seulement).",
   emptyOrphan: "Face {{face}} — image introuvable (référence orpheline)",
   emptyNoImage: "Face {{face}} — aucune image (positionnement possible)",
   portParen: "(port)",
