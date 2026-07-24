@@ -37,6 +37,11 @@ alimentent les outlets — le pass-through). Le sens vient de `Port.direction`, 
 - **`psu_uncabled`** : prise power non câblée (redondance amoindrie).
 - **`psu_undersized`** : rating d'une PSU insuffisant pour la charge **max** seule (redondance non réelle).
 - **`no_source`** : aucune alimentation valide (câblée vers une source).
+- **`pdu_over_capacity`** : la **charge MAX en aval** d'un pdu/tableau (Σ des charges de ses départs) dépasse sa
+  **capacité déclarée** `Equipment.pdu_max_a`.
+- **`network_over_amp`** : la **charge MAX** d'un réseau power (Σ des charges des **départs assertant le réseau**)
+  dépasse sa **capacité déclarée** `Network.max_amp`. L'assertion power ne vivant que sur les départs racines
+  (tension/phase déduites en aval), la somme des ports assertants ne double-compte pas en usage normal.
 - **`poe_over_budget`** : survente du budget POE (charge = **Σ des consos MAX des PD câblés** > budget total de l'équipement).
 
 ## POE (Power over Ethernet)

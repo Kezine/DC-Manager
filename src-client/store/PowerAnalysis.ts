@@ -34,8 +34,10 @@ export interface PowerLoad {
   overloaded: boolean;
 }
 
-/** Avertissement de fiabilité électrique sur un équipement. */
-export interface PowerWarning { code: "spof" | "psu_uncabled" | "psu_undersized" | "no_source" | "origin_unknown" | "poe_over_budget" | "poe_port_over"; message: string; }
+/** Avertissement de fiabilité / capacité électrique sur un équipement. Les codes `pdu_over_capacity` (charge aval
+    d'un tableau/PDU > sa capacité déclarée `pdu_max_a`) et `network_over_amp` (charge d'un réseau power > `max_amp`)
+    concernent la DISTRIBUTION (départs), pas la consommation. */
+export interface PowerWarning { code: "spof" | "psu_uncabled" | "psu_undersized" | "no_source" | "origin_unknown" | "poe_over_budget" | "poe_port_over" | "pdu_over_capacity" | "network_over_amp"; message: string; }
 
 const DEFAULT_VOLTAGE = 230;
 
@@ -244,7 +246,8 @@ export class PowerAnalysis {
 
   /* ---- avertissements de fiabilité ---- */
 
-  /** Avertissements électriques d'un équipement CONSOMMATEUR (redondance, PSU non câblée, alims non diverses…). */
+  /** Avertissements électriques d'un équipement : côté DISTRIBUTION (POE, capacité `pdu_max_a`, capacité `max_amp`
+      des réseaux power assertés) ET côté CONSOMMATEUR (redondance, PSU non câblée, alims non diverses, sous-calibrage). */
   equipmentWarnings(equipmentId: string): PowerWarning[] {
     const out: PowerWarning[] = [];
     const eq = this.store.get("equipments", equipmentId); if (!eq) return out;
@@ -258,6 +261,34 @@ export class PowerAnalysis {
         if (sp.poe_budget_w == null) continue;
         const load = this.poePortLoadW(sp, true);   // conso MAX du PD câblé
         if (load > sp.poe_budget_w) out.push({ code: "poe_port_over", message: I18n.t("analysis.power.poePortOver", { port: sp.name || "?", load, budget: sp.poe_budget_w }) });
+      }
+    }
+    // CAPACITÉ DE DISTRIBUTION : un pdu/tableau porte une capacité d'alimentation (`pdu_max_a`) et ses départs
+    // assertent un/des réseau(x) power à capacité (`max_amp`). On confronte ces plafonds à la charge MAX en aval
+    // (`useMax` — cohérent avec `psu_undersized` qui dimensionne au pire cas). Testé AVANT la garde « consommateur »
+    // ci-dessous, comme le bloc POE : un tableau n'a AUCUNE prise sink → cette garde court-circuiterait ces contrôles.
+    const departs = this.eqPortsByDir(equipmentId, "source");
+    // pdu_over_capacity : Σ des charges MAX des départs de l'équipement vs sa capacité d'alimentation déclarée.
+    if (eq.pdu_max_a != null && eq.pdu_max_a > 0) {
+      const totalA = departs.reduce((sum: number, sp: any) => sum + this.sourceLoadA(sp.id, true), 0);
+      if (totalA > eq.pdu_max_a) out.push({ code: "pdu_over_capacity", message: I18n.t("analysis.power.pduOverCapacity", { load: Math.ceil(totalA), cap: eq.pdu_max_a }) });
+    }
+    // network_over_amp : pour chaque réseau POWER à capacité asserté par un départ de CET équipement, on somme les
+    // charges MAX de TOUS les départs (source, hors poe) du document assertant ce réseau, puis on compare à `max_amp`.
+    // HYPOTHÈSE (cf. docs/power.md) : l'assertion power ne vit que sur les départs RACINES (la tension/phase sont
+    // déduites en aval, pas re-assertées) → sommer les ports assertants ne double-compte pas en usage normal. On
+    // dédoublonne par réseau (plusieurs départs du même équipement peuvent assurer le même réseau → un seul warning).
+    const seenPowerNets = new Set<string>();
+    for (const sp of departs) {
+      for (const nid of (sp.network_ids || [])) {
+        if (seenPowerNets.has(nid)) continue;
+        const net: any = this.store.get("networks", nid);
+        if (!net || net.kind !== "power" || net.max_amp == null || net.max_amp <= 0) continue;
+        seenPowerNets.add(nid);
+        const netA = this.store.portsOfNetwork(nid)
+          .filter((p: any) => p.direction === "source" && p.role !== "poe")
+          .reduce((sum: number, p: any) => sum + this.sourceLoadA(p.id, true), 0);
+        if (netA > net.max_amp) out.push({ code: "network_over_amp", message: I18n.t("analysis.power.networkOverAmp", { name: net.label || "?", load: Math.ceil(netA), cap: net.max_amp }) });
       }
     }
     const sinks = this.eqPortsByDir(equipmentId, "sink");

@@ -596,6 +596,30 @@ module.exports = async () => {
       ck.eq(paP.poePortLoadW(poe1, true), 15, "POE enabled : les deux extrémités actives → la charge revient (15 W)");
       ck.eq(paP.poeSupply(sw.id).loadW, 15, "POE enabled : les deux extrémités actives → charge PoE de 15 W tirée du switch");
     }
+
+    // ---- CAPACITÉ DE DISTRIBUTION : pdu_over_capacity (Equipment.pdu_max_a) et network_over_amp (Network.max_amp). ----
+    // Le scénario a empilé plusieurs consommateurs sur l'UNIQUE départ Q1 du tableau : on mesure la charge MAX réelle
+    // en aval pour placer les plafonds de part et d'autre (test robuste au détail des consos). Instance fraîche à
+    // chaque mutation (mémoïsation PAR INSTANCE).
+    const tabLoadA = new PowerAnalysis(s).departLoads(tab.id, true).reduce((sum, dl) => sum + dl.usedA, 0);
+    ck(tabLoadA > 1, "power capacité : le tableau porte une charge aval non triviale (repère de plafond)");
+    // pdu_over_capacity : plafond SOUS la charge → alerte ; plafond largement AU-DESSUS → plus d'alerte.
+    await s.update("equipments", tab.id, { pdu_max_a: 1 });
+    ck.eq(new PowerAnalysis(s).equipmentWarnings(tab.id).some((w) => w.code === "pdu_over_capacity"), true, "power capacité : pdu_max_a (1 A) < charge aval → pdu_over_capacity");
+    await s.update("equipments", tab.id, { pdu_max_a: Math.ceil(tabLoadA) + 1000 });
+    ck.eq(new PowerAnalysis(s).equipmentWarnings(tab.id).some((w) => w.code === "pdu_over_capacity"), false, "power capacité : pdu_max_a >> charge aval → pas d'alerte");
+    // network_over_amp : le départ racine Q1 asserte déjà pnet (kind power). Capacité du réseau SOUS la charge → alerte
+    // sur le tableau (Σ des départs assertant pnet = ce seul départ) ; capacité large → plus d'alerte.
+    await s.update("networks", pnet.id, { max_amp: 1 });
+    ck.eq(new PowerAnalysis(s).equipmentWarnings(tab.id).some((w) => w.code === "network_over_amp"), true, "power capacité : max_amp (1 A) < charge du réseau power → network_over_amp");
+    await s.update("networks", pnet.id, { max_amp: Math.ceil(tabLoadA) + 1000 });
+    ck.eq(new PowerAnalysis(s).equipmentWarnings(tab.id).some((w) => w.code === "network_over_amp"), false, "power capacité : max_amp >> charge du réseau → pas d'alerte");
+    // Un CONSOMMATEUR (sans pdu_max_a, sans départ assertant un réseau power) ne reçoit AUCUN de ces deux codes, et ses
+    // assertions existantes (psu_undersized ici) restent inchangées — les nouveaux contrôles ne fuient pas sur lui.
+    const srvCodes = new PowerAnalysis(s).equipmentWarnings(srv.id).map((w) => w.code);
+    ck.eq(srvCodes.includes("pdu_over_capacity"), false, "power capacité : consommateur sans pdu_max_a → jamais pdu_over_capacity");
+    ck.eq(srvCodes.includes("network_over_amp"), false, "power capacité : consommateur sans départ assertant → jamais network_over_amp");
+    ck.eq(srvCodes.includes("psu_undersized"), true, "power capacité : les assertions existantes du consommateur restent (psu_undersized inchangé)");
   }
   });
 
