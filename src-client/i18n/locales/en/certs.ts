@@ -245,9 +245,9 @@ export const certs = {
       oldRevokeFailed: "New certificate created, but revoking “{{label}}” failed — revoke it manually.",
     },
     renewCa: {
-      title: "Renew the root authority",
+      title: "Renew the authority",
       warn: "⚠ Mass operation: this authority AND all its active certificates will be renewed.",
-      intro: "“{{label}}” will be renewed, then all its active TLS leaves reissued and the old ones revoked.",
+      intro: "“{{label}}” will be renewed, its active TLS leaves reissued (old ones revoked) and, on rotation, its sub-CAs re-signed under the new key.",
       modeField: "Mechanism",
       modeHint: "“Extend” keeps the CA's key (tree intact). “Rotate” generates a new key (redeploying the CA to clients is required).",
       modeProlong: "Extend (same key)",
@@ -257,6 +257,7 @@ export const certs = {
       sumTitle: "Authority renewal",
       caProlonged: "✔ Authority extended (same key, updated in place)",
       caRotated: "✔ Authority recreated (new key) — old one revoked",
+      subReSigned: "✔ {{count}} sub-CA(s) re-signed under the new key (their descendants stay valid)",
     },
     select: {
       headerAll: "Select the whole page",

@@ -833,8 +833,8 @@ export class CertsAdminView {
     if (unlocked && item.kind === "ssh-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.ISSUE_SSH, I18n.t("certs.admin.actions.issueSsh"), CERT_TIP.issueSsh, () => this.sshCertModal(item)));
     // RENOUVELLEMENT unitaire (mode 1) — feuille TLS / certificat SSH.
     if (unlocked && (item.kind === "leaf-tls" || item.kind === "ssh-cert") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renew"), CERT_TIP.renew, () => void this.renewModal(item)));
-    // RENOUVELLEMENT d'une CA racine (opération de masse : prolonger / rotation de clé + enfants).
-    if (unlocked && item.kind === "root-ca" && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renewCa"), CERT_TIP.renew, () => void this.renewCaDialog(item)));
+    // RENOUVELLEMENT d'une CA X.509 — racine OU intermédiaire (opération de masse : prolonger / rotation + enfants).
+    if (unlocked && (item.kind === "root-ca" || item.kind === "intermediate-ca") && !item.revoked_at) cell.appendChild(this.iconAction(Icons.RENEW, I18n.t("certs.admin.actions.renewCa"), CERT_TIP.renew, () => void this.renewCaDialog(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.EXPORT, I18n.t("certs.admin.actions.exportArtifacts"), CERT_TIP.export, () => void this.exportModal(item)));
     if (!item.revoked_at) cell.appendChild(this.iconAction(Icons.REVOKE, I18n.t("certs.admin.actions.revoke"), CERT_TIP.revoke, () => void this.revoke(item)));
     // Suppression : VERROUILLÉE (bouton grisé) si des dérivés existent — le serveur la refuse de toute façon
@@ -1842,17 +1842,27 @@ export class CertsAdminView {
     else this.sshCertModal(ca, item);
   }
 
-  /** RENOUVELLEMENT D'UNE CA RACINE (X.509) — opération de MASSE avec avertissement clair (cadrage §Phase 5).
+  /** RENOUVELLEMENT D'UNE CA X.509 — RACINE ou INTERMÉDIAIRE (Lot 4) — opération de MASSE avec avertissement.
       Deux mécaniques au choix :
-      - « Prolonger (même clé) » : la CA est RE-SIGNÉE avec sa clé actuelle et une échéance repoussée, MISE À JOUR
-        EN PLACE (même id, key_enc conservé) → l'arbre reste intact ; puis ses feuilles actives sont renouvelées.
-      - « Rotation de clé » : une NOUVELLE CA (nouvelle paire) est créée, l'ancienne révoquée, et toutes les
-        feuilles actives ré-émises SOUS la nouvelle CA (nouveau parent_id). Le cross-signing (recouvrement propre)
-        est ajouté en phase 6.
-      Réservé au root-ca : une ssh-ca (ed25519) n'a pas d'échéance à prolonger. */
+      - « Prolonger (même clé) » : la CA est RE-SIGNÉE avec sa clé publique actuelle et une échéance repoussée,
+        MISE À JOUR EN PLACE (même id, key_enc conservé) → SKI inchangé, l'arbre reste intact ; puis ses feuilles
+        actives sont renouvelées. Racine → auto-signature (reSignRootCa, sa propre clé) ; intermédiaire → signature
+        par sa CA PARENTE (reSignIntermediateCa, clé du parent).
+      - « Rotation de clé » : une NOUVELLE CA (nouvelle paire) est créée (racine auto-signée, ou sous-CA signée par
+        le parent avec pathLen PRÉSERVÉ), l'ancienne révoquée + cross-signée (best-effort), les feuilles actives
+        ré-émises SOUS la nouvelle CA, et les SOUS-CA enfants RE-SIGNÉES (même clé) sous la nouvelle + re-parentées
+        — leurs propres descendants chaînent toujours (SKI des sous-CA inchangé), aucune cascade plus profonde.
+      Réservé aux CA X.509 : une ssh-ca (ed25519) n'a pas d'échéance à prolonger. */
   private async renewCaDialog(ca: CertificateListItem): Promise<void> {
     this.session.touch();
-    if (ca.kind !== "root-ca") return;
+    if (ca.kind !== "root-ca" && ca.kind !== "intermediate-ca") return;
+    const isIntermediate = ca.kind === "intermediate-ca";
+    // Pour un INTERMÉDIAIRE : son parent signe (prolong ET rotation) → il doit être résoluble, et son échéance
+    // PLAFONNE la durée demandée (même invariant que l'émission).
+    const parentItem = isIntermediate ? this.allItems.find((c) => c.id === ca.parent_id) || null : null;
+    if (isIntermediate && !parentItem) { Notify.toast(I18n.t("certs.admin.renew.noParent"), "warn"); return; }
+    const parentDaysLeft = parentItem ? CertValidity.daysUntil(parentItem.not_after, Date.now()) : null;
+
     const root = document.createElement("div");
     const warn = document.createElement("div"); warn.style.cssText = "margin-bottom:10px;color:var(--warn);font-weight:600";
     warn.textContent = I18n.t("certs.admin.renewCa.warn");
@@ -1862,11 +1872,16 @@ export class CertsAdminView {
       { value: "prolong", label: I18n.t("certs.admin.renewCa.modeProlong") },
       { value: "rotate", label: I18n.t("certs.admin.renewCa.modeRotate") },
     ], "prolong");
-    const days = FormControls.number(3650, { min: 1, step: 1 });
+    // Durée : plafonnée par le PARENT pour un intermédiaire (défaut = la moitié de ce qui reste, cf. émission).
+    const defaultDays = parentDaysLeft != null ? Math.max(1, Math.floor(parentDaysLeft / 2)) : 3650;
+    const days = FormControls.number(defaultDays, parentDaysLeft != null ? { min: 1, max: parentDaysLeft, step: 1 } : { min: 1, step: 1 });
+    const daysHint = parentDaysLeft != null
+      ? I18n.t("certs.admin.renewCa.daysHint") + " " + I18n.t("certs.admin.leaf.caCeiling", { date: (parentItem!.not_after || "").slice(0, 10), days: parentDaysLeft })
+      : I18n.t("certs.admin.renewCa.daysHint");
     const errBox = this.errBox();
     root.append(warn, intro,
       FormControls.fieldRow(I18n.t("certs.admin.renewCa.modeField"), mode, I18n.t("certs.admin.renewCa.modeHint")),
-      FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, I18n.t("certs.admin.renewCa.daysHint")),
+      FormControls.fieldRow(I18n.t("certs.admin.common.validityDays"), days, daysHint),
       errBox);
 
     this.host.openModal({
@@ -1877,34 +1892,58 @@ export class CertsAdminView {
         this.session.touch();
         const requested = Number(days.value);
         if (!Number.isFinite(requested) || requested <= 0) { this.showError(errBox, I18n.t("certs.admin.sshCert.daysInvalid")); return false; }
+        if (isIntermediate && CertValidity.exceedsCa(requested, parentItem!.not_after, Date.now())) {
+          this.showError(errBox, I18n.t("certs.admin.leaf.exceedsCa", { date: (parentItem!.not_after || "").slice(0, 10), days: parentDaysLeft ?? 0 })); return false;
+        }
         try {
           const caDetail = await this.client!.getOne(ca.id);
           if (!caDetail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
           const oldCaKey = await PkiCrypto.decryptSecret(this.session.key, caDetail.key_enc);
+          // Clé de la CA PARENTE (intermédiaire seulement) : elle signe le prolongement ET la rotation.
+          let parentDetail: CertificateDetail | null = null;
+          let parentKey: string | null = null;
+          if (isIntermediate) {
+            parentDetail = await this.client!.getOne(ca.parent_id!);
+            if (!parentDetail.key_enc) { this.showError(errBox, I18n.t("certs.admin.leaf.noKey")); return false; }
+            parentKey = await PkiCrypto.decryptSecret(this.session.key, parentDetail.key_enc);
+          }
           const cn = CertsAdminView.parseDnField(ca.subject, "CN") || ca.label;
           const organization = CertsAdminView.parseDnField(ca.subject, "O") || undefined;
           const organizationalUnit = CertsAdminView.parseDnField(ca.subject, "OU") || undefined;
-          // Feuilles ACTIVES rattachées (un root-ca n'a que des feuilles TLS en enfants directs).
+          // Enfants DIRECTS actifs, SÉPARÉS par nature : les FEUILLES sont ré-émises (nouvelle paire), les
+          // SOUS-CA sont RE-SIGNÉES (même clé — rotation seulement ; en prolongement, la clé de cette CA ne
+          // change pas → leurs certificats chaînent toujours, rien à faire). ⚠ Avant le Lot 4, ce flux passait
+          // TOUS les enfants dans reissueLeafRenewal — une sous-CA aurait été « renouvelée » en feuille TLS.
           const children = (await this.client!.list()).filter((c) => c.parent_id === ca.id && !c.revoked_at);
+          const leafChildren = children.filter((c) => c.kind === "leaf-tls");
+          const subCaChildren = children.filter((c) => c.kind === "intermediate-ca");
           const isRotate = mode.value === "rotate";
 
-          // CA « effective » sous laquelle ré-émettre les enfants (+ sa clé déchiffrée).
+          // CA « effective » sous laquelle ré-émettre/re-signer les enfants (+ sa clé déchiffrée).
           let effectiveCa: CertificateDetail;
           let effectiveKey: string;
           if (isRotate) {
             const keyAlgo = (["ec-p256", "rsa-2048", "rsa-4096"] as string[]).includes(ca.key_algo) ? ca.key_algo as X509KeyAlgo : "ec-p256";
-            const gen = await X509Factory.createRootCa({ commonName: cn, organization, organizationalUnit, keyAlgo, days: requested });
+            const gen = isIntermediate
+              // Sous-CA : nouvelle paire signée par le PARENT, pathLen PRÉSERVÉ de l'ancien certificat (défaut 0).
+              ? await X509Factory.issueIntermediateCa({
+                  caCertPem: parentDetail!.public_pem || "", caPrivateKeyPkcs8Pem: parentKey!,
+                  commonName: cn, organization, organizationalUnit, keyAlgo,
+                  days: CertValidity.clampDays(requested, parentDetail!.not_after, Date.now()),
+                  pathLen: X509Factory.readCaPathLen(caDetail.public_pem || "") ?? 0,
+                })
+              : await X509Factory.createRootCa({ commonName: cn, organization, organizationalUnit, keyAlgo, days: requested });
             const newKeyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);
             // CROSS-SIGNATURE (phase 6) : l'ANCIENNE CA certifie la clé de la NOUVELLE → recouvrement transitoire
-            // (un client qui fait encore confiance à l'ancien root valide les nouvelles feuilles). Généré AVANT la
-            // révocation (on a encore la clé de l'ancienne). Échéance rognée à celle de l'ancienne CA (dans crossSignCa).
+            // (un client/déploiement qui fait encore confiance à l'ancienne valide les nouveaux certs). Généré AVANT
+            // la révocation (on a encore la clé de l'ancienne). Échéance rognée à celle de l'ancienne (crossSignCa).
             let crossPem: string | undefined;
             try {
               crossPem = (await X509Factory.crossSignCa({ subjectCaCertPem: gen.certPem, issuerCaCertPem: caDetail.public_pem || "", issuerCaPrivateKeyPkcs8Pem: oldCaKey, days: requested })).certPem;
             } catch (_) { crossPem = undefined; }   // cross-signature best-effort : son échec ne bloque pas la rotation
             const newCaId = CertsAdminView.newId();
             await this.client!.save(newCaId, {
-              kind: "root-ca", parent_id: null, label: ca.label, subject: ca.subject,
+              kind: ca.kind, parent_id: ca.parent_id, label: ca.label, subject: ca.subject,
               serial: gen.serial, not_before: gen.notBefore, not_after: gen.notAfter, fingerprint: gen.fingerprintSha256,
               key_algo: keyAlgo, public_pem: gen.certPem, key_enc: newKeyEnc, revoked_at: null, sans: [],
               cross_signed_pem: crossPem, renewed_from: ca.id,
@@ -1912,6 +1951,14 @@ export class CertsAdminView {
             await this.revokeSuperseded(ca);   // ancienne CA remplacée
             effectiveCa = await this.client!.getOne(newCaId);
             effectiveKey = gen.privateKeyPkcs8Pem;
+          } else if (isIntermediate) {
+            // PROLONGER un intermédiaire : re-certifier SA clé publique sous le PARENT (la clé privée de
+            // l'intermédiaire n'est pas nécessaire à la signature — on redate, même sujet, même SKI, même pathLen).
+            const re = await X509Factory.reSignIntermediateCa({ existingCertPem: caDetail.public_pem || "", parentCertPem: parentDetail!.public_pem || "", parentPrivateKeyPkcs8Pem: parentKey!, days: requested });
+            // MISE À JOUR EN PLACE : metadataInput n'envoie pas key_enc → la clé de la CA est CONSERVÉE (même clé).
+            await this.client!.save(ca.id, CertsAdminView.metadataInput(ca, { public_pem: re.certPem, serial: re.serial, not_before: re.notBefore, not_after: re.notAfter, fingerprint: re.fingerprintSha256 }));
+            effectiveCa = { ...caDetail, public_pem: re.certPem, serial: re.serial, not_before: re.notBefore, not_after: re.notAfter, fingerprint: re.fingerprintSha256 };
+            effectiveKey = oldCaKey;   // ses feuilles sont signées par SA clé (inchangée)
           } else {
             const re = await X509Factory.reSignRootCa({ existingCertPem: caDetail.public_pem || "", existingPrivateKeyPkcs8Pem: oldCaKey, commonName: cn, organization, organizationalUnit, days: requested });
             // MISE À JOUR EN PLACE : metadataInput n'envoie pas key_enc → la clé de la CA est CONSERVÉE (même clé).
@@ -1920,10 +1967,27 @@ export class CertsAdminView {
             effectiveKey = oldCaKey;
           }
 
-          // Renouvelle chaque feuille active sous la CA effective (durée rognée à SA nouvelle échéance).
           const errors: Array<{ label: string; reason: string }> = [];
+          // ROTATION : les SOUS-CA enfants ne chaînent plus (la clé de leur émetteur a changé) → chacune est
+          // RE-SIGNÉE (même clé, échéance CONSERVÉE en jours restants, rognée à la nouvelle CA) et RE-PARENTÉE
+          // sur le nouvel id. Leur SKI ne bouge pas → leurs propres descendants restent valides (pas de cascade).
+          let subDone = 0;
+          if (isRotate) {
+            for (const sub of subCaChildren) {
+              try {
+                const remaining = CertValidity.daysUntil(sub.not_after, Date.now()) ?? requested;
+                const re = await X509Factory.reSignIntermediateCa({
+                  existingCertPem: sub.public_pem || "", parentCertPem: effectiveCa.public_pem || "", parentPrivateKeyPkcs8Pem: effectiveKey,
+                  days: CertValidity.clampDays(remaining, effectiveCa.not_after, Date.now()),
+                });
+                await this.client!.save(sub.id, CertsAdminView.metadataInput(sub, { parent_id: effectiveCa.id, public_pem: re.certPem, serial: re.serial, not_before: re.notBefore, not_after: re.notAfter, fingerprint: re.fingerprintSha256 }));
+                subDone++;
+              } catch (e) { errors.push({ label: sub.label, reason: CertsAdminView.errText(e) }); }
+            }
+          }
+          // Renouvelle chaque FEUILLE active sous la CA effective (durée rognée à SA nouvelle échéance).
           let done = 0;
-          for (const child of children) {
+          for (const child of leafChildren) {
             try {
               await this.reissueLeafRenewal(child, effectiveCa, effectiveKey, CertValidity.clampDays(requested, effectiveCa.not_after, Date.now()));
               done++;
@@ -1932,6 +1996,7 @@ export class CertsAdminView {
           this.showBulkSummary(I18n.t("certs.admin.renewCa.sumTitle"), [
             I18n.t(isRotate ? "certs.admin.renewCa.caRotated" : "certs.admin.renewCa.caProlonged"),
             I18n.t("certs.admin.bulk.renewedCount", { count: done }),
+            ...(subDone > 0 ? [I18n.t("certs.admin.renewCa.subReSigned", { count: subDone })] : []),
             ...errors.map((e) => I18n.t("certs.admin.bulk.errorLine", { label: e.label, reason: e.reason })),
           ]);
           await this.refreshBody();

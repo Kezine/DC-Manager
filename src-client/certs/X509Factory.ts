@@ -137,6 +137,68 @@ export class X509Factory {
     };
   }
 
+  /** RE-SIGNE une CA INTERMÉDIAIRE sous son PARENT avec une nouvelle fenêtre de validité (renouvellement
+      « prolonger » d'un maillon du MILIEU — Lot 4) : MÊME sujet, MÊME clé publique (lue dans le certificat
+      existant), MÊME pathLen (préservé) — seule l'échéance change. Contrairement à `reSignRootCa` (auto-signé),
+      la signature vient de la CA PARENTE : on n'a PAS besoin de la clé privée de l'intermédiaire (on ne fait
+      que re-certifier sa clé publique), seulement de celle du parent. La clé étant inchangée, le SKI l'est
+      aussi → les enfants (feuilles et sous-CA) continuent de chaîner sans être touchés. L'appelant MET À JOUR
+      la ligne en place (même id, key_enc conservé). Guards : échéance ≤ parent, pathLen permis par le parent. */
+  static async reSignIntermediateCa(opts: {
+    existingCertPem: string;
+    parentCertPem: string;
+    parentPrivateKeyPkcs8Pem: string;
+    days: number;
+  }): Promise<{ certPem: string; serial: string; fingerprintSha256: string; notBefore: string; notAfter: string }> {
+    X509Factory.ensureProvider();
+    const days = X509Factory.requirePositiveDays(opts.days);
+    let existing: x509.X509Certificate;
+    try { existing = new x509.X509Certificate(opts.existingCertPem); }
+    catch { throw new Error("X509Factory : certificat de la CA intermédiaire illisible (re-signature impossible)"); }
+    const { caCert: parentCert, caPrivateKey: parentKey, caSignAlgo } = await X509Factory.importCa(opts.parentCertPem, opts.parentPrivateKeyPkcs8Pem);
+
+    // pathLen PRÉSERVÉ depuis le certificat existant (défaut 0 si absent — même défaut qu'à l'émission).
+    const existingBasic = existing.getExtension(x509.BasicConstraintsExtension);
+    const pathLen = existingBasic && typeof existingBasic.pathLength === "number" ? existingBasic.pathLength : 0;
+    // GUARD pathLen du parent (même règle que issueIntermediateCa) : re-signer reste « émettre une sous-CA ».
+    const parentBasic = parentCert.getExtension(x509.BasicConstraintsExtension);
+    const parentPathLen = parentBasic && typeof parentBasic.pathLength === "number" ? parentBasic.pathLength : null;
+    if (parentPathLen !== null) {
+      if (parentPathLen === 0) throw new Error("X509Factory : cette CA ne peut pas émettre de sous-CA (contrainte pathLen 0 — elle ne signe que des feuilles)");
+      if (pathLen > parentPathLen - 1) throw new Error("X509Factory : profondeur pathLen " + pathLen + " trop élevée sous cette CA parente (pathLen " + parentPathLen + ") — maximum " + (parentPathLen - 1));
+    }
+    const { notBefore, notAfter } = X509Factory.validityWindow(days);
+    // GUARD échéance (même invariant que issueIntermediateCa) : le maillon ne peut vivre au-delà de son ancre.
+    if (notAfter.getTime() > parentCert.notAfter.getTime()) {
+      throw new Error("X509Factory : la validité de la CA intermédiaire dépasse celle de la CA parente (échéance CA parente : "
+        + parentCert.notAfter.toISOString().slice(0, 10) + ") — réduisez la durée");
+    }
+
+    const publicKey = await existing.publicKey.export(crypto);
+    const cert = await x509.X509CertificateGenerator.create({
+      serialNumber: X509Factory.randomSerialHex(),
+      subject: existing.subject,     // MÊME sujet : l'issuer-name des enfants reste résoluble
+      issuer: parentCert.subject,
+      notBefore, notAfter,
+      signingAlgorithm: caSignAlgo,
+      publicKey,                     // MÊME clé — on ne fait que redater/re-certifier
+      signingKey: parentKey,
+      extensions: [
+        new x509.BasicConstraintsExtension(true, pathLen, true),
+        new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
+        await x509.SubjectKeyIdentifierExtension.create(publicKey, false, crypto),   // SKI inchangé → enfants toujours rattachés
+        await x509.AuthorityKeyIdentifierExtension.create(parentCert.publicKey, false, crypto),
+      ],
+    }, crypto);
+    return {
+      certPem: cert.toString("pem"),
+      serial: cert.serialNumber,
+      fingerprintSha256: await X509Factory.fingerprintSha256(cert.rawData),
+      notBefore: cert.notBefore.toISOString(),
+      notAfter: cert.notAfter.toISOString(),
+    };
+  }
+
   /** CROSS-SIGNE une CA : produit un certificat qui CERTIFIE la clé de la NOUVELLE CA (`subjectCaCertPem`)
       SOUS l'ANCIENNE CA (`issuerCaCertPem`, signature par sa clé). Sert le renouvellement par ROTATION DE CLÉ
       (cadrage §Phase 6) : pendant la transition, un client qui fait encore confiance à l'ancien root peut valider

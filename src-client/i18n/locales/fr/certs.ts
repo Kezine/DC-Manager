@@ -250,9 +250,9 @@ export const certs = {
       oldRevokeFailed: "Nouveau certificat créé, mais la révocation de « {{label}} » a échoué — à révoquer à la main.",
     },
     renewCa: {
-      title: "Renouveler l'autorité racine",
+      title: "Renouveler l'autorité",
       warn: "⚠ Opération de masse : cette autorité ET tous ses certificats actifs seront renouvelés.",
-      intro: "« {{label}} » sera renouvelée, puis toutes ses feuilles TLS actives seront ré-émises et les anciennes révoquées.",
+      intro: "« {{label}} » sera renouvelée, ses feuilles TLS actives ré-émises (anciennes révoquées) et, en rotation, ses sous-CA re-signées sous la nouvelle clé.",
       modeField: "Mécanique",
       modeHint: "« Prolonger » garde la clé de la CA (arbre intact). « Rotation » génère une nouvelle clé (redéploiement de la CA requis chez les clients).",
       modeProlong: "Prolonger (même clé)",
@@ -262,6 +262,7 @@ export const certs = {
       sumTitle: "Renouvellement de l'autorité",
       caProlonged: "✔ Autorité prolongée (même clé, mise à jour en place)",
       caRotated: "✔ Autorité recréée (nouvelle clé) — ancienne révoquée",
+      subReSigned: "✔ {{count}} sous-CA re-signée(s) sous la nouvelle clé (leurs descendants restent valides)",
     },
     select: {
       headerAll: "Sélectionner toute la page",

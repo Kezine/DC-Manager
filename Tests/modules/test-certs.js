@@ -576,6 +576,22 @@ module.exports = async () => {
     try { await X509Factory.issueIntermediateCa({ caCertPem: interDeep.certPem, caPrivateKeyPkcs8Pem: interDeep.privateKeyPkcs8Pem, commonName: "trop-profond", keyAlgo: "ec-p256", days: 30, pathLen: 1 }); } catch (e) { tooDeepErr = e.message; }
     ck(!!tooDeepErr && /trop élevée|maximum/.test(tooDeepErr), "guard : sous CA pathLen=1, enfant pathLen=1 (> max 0) → REFUSÉ");
 
+    /* -------- reSignIntermediateCa : PROLONGER un maillon du MILIEU (même clé, re-signé par le PARENT) -------- */
+    const reInter = await X509Factory.reSignIntermediateCa({ existingCertPem: inter.certPem, parentCertPem: ca.certPem, parentPrivateKeyPkcs8Pem: ca.privateKeyPkcs8Pem, days: 300 });
+    const reInterCert = new x509.X509Certificate(reInter.certPem);
+    ck(Date.parse(reInter.notAfter) > Date.parse(inter.notAfter), "reSignIntermediateCa : échéance repoussée (180 → 300 j)");
+    ck.eq(await reInterCert.verify({ publicKey: caCert.publicKey, signatureOnly: true }), true, "reSignIntermediateCa : re-signé par le PARENT (root)");
+    ck.eq(reInterCert.getExtension(x509.SubjectKeyIdentifierExtension).keyId, interSki.keyId, "reSignIntermediateCa : SKI INCHANGÉ (même clé)");
+    ck(/CN=CA intermédiaire cluster-A/.test(reInterCert.subject), "reSignIntermediateCa : sujet préservé");
+    ck.eq(reInterCert.getExtension(x509.BasicConstraintsExtension).pathLength, 0, "reSignIntermediateCa : pathLen préservé (0)");
+    ck.eq(await new x509.X509Certificate(leafUnderInter.certPem).verify({ publicKey: reInterCert.publicKey, signatureOnly: true }), true, "reSignIntermediateCa : la feuille enfant chaîne toujours (clé inchangée)");
+    let reOverErr = null;
+    try { await X509Factory.reSignIntermediateCa({ existingCertPem: inter.certPem, parentCertPem: shortCa.certPem, parentPrivateKeyPkcs8Pem: shortCa.privateKeyPkcs8Pem, days: 365 }); } catch (e) { reOverErr = e.message; }
+    ck(!!reOverErr && /dépasse celle de la CA/.test(reOverErr), "reSignIntermediateCa : durée > échéance du parent → REFUSÉ");
+    let reUnder0Err = null;
+    try { await X509Factory.reSignIntermediateCa({ existingCertPem: subUnder1.certPem, parentCertPem: inter.certPem, parentPrivateKeyPkcs8Pem: inter.privateKeyPkcs8Pem, days: 30 }); } catch (e) { reUnder0Err = e.message; }
+    ck(!!reUnder0Err && /pathLen 0|ne peut pas émettre/.test(reUnder0Err), "reSignIntermediateCa : parent pathLen=0 → REFUSÉ (il ne signe que des feuilles)");
+
     /* -------- GUARD : une sous-CA ne peut vivre AU-DELÀ de sa CA parente -------- */
     let interGuardErr = null;
     try {
