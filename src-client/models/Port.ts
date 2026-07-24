@@ -58,9 +58,10 @@ export class Port extends Entity implements Records.Port {
   power_max_a: number | null;
   /** Phase assertée sur un départ (source) : "" | "L1" | "L2" | "L3". Déduite en aval. */
   phase: string;
-  /** POE (rôle "poe") : budget MAX du port en WATTS — délivré par un producteur (PSE, direction "source") ou
-      tiré par un consommateur (PD, direction "sink"). Distinct de `power_max_a` (ampères des ports power).
-      null = non renseigné / non applicable. */
+  /** POE (rôle "poe") : budget MAX du port en WATTS = la CAPACITÉ d'un port PRODUCTEUR (PSE, direction "source") —
+      ce qu'il PEUT fournir. SANS OBJET côté consommateur (PD, direction "sink") : personne ne lit jamais le budget
+      d'un PD — le save le neutralise hors PSE (EquipmentForms) et l'analyse énergie n'utilise que le budget des PSE
+      (poe_port_over). Distinct de `power_max_a` (ampères des ports power). null = non renseigné / non applicable. */
   poe_budget_w: number | null;
   /** POE : injection (PSE) / consommation (PD) ACTIVÉE sur ce port. true = le PSE injecte / le PD tire réellement.
       L'éclair d'énergie ne s'affiche sur un câble PoE que si les DEUX extrémités sont activées. Défaut true. */

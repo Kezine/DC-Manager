@@ -37,7 +37,7 @@ alimentent les outlets — le pass-through). Le sens vient de `Port.direction`, 
 - **`psu_uncabled`** : prise power non câblée (redondance amoindrie).
 - **`psu_undersized`** : rating d'une PSU insuffisant pour la charge **max** seule (redondance non réelle).
 - **`no_source`** : aucune alimentation valide (câblée vers une source).
-- **`poe_over_budget`** : survente du budget POE (Σ des budgets producteurs > budget total de l'équipement).
+- **`poe_over_budget`** : survente du budget POE (charge = **Σ des consos MAX des PD câblés** > budget total de l'équipement).
 
 ## POE (Power over Ethernet)
 
@@ -56,6 +56,11 @@ néanmoins aux flux d'énergie**.
   câble jusqu'au **port PD** (poe+sink) → son équipement → sa conso (`power_nominal_w`/`power_max_w`).
   `PowerAnalysis.poePortLoadW(psePort, useMax)` = conso du PD (0 si aucun). La puissance ainsi **tirée** d'un PSE
   (`poeSuppliedW` = Σ des consos PD) est prélevée sur ses entrées d'alim → **s'ajoute à sa conso** (`demandW`).
+- **`Port.poe_enabled`** (défaut vrai) : injection (PSE) / consommation (PD) **activée** sur le port. Un lien PoE ne
+  transporte de l'énergie que si les **DEUX** extrémités sont actives (`pdOfPsePort`), **en parité avec l'éclair** de
+  scène (`Store.cableCarriesPower`). Désactivé d'un côté **OU** de l'autre, le PD ne compte **ni** dans la charge du
+  PSE (`poeSupply`, `poe_over_budget`, `poe_port_over`) **ni** dans sa conso secteur (`demandW`) — sinon le câble
+  perdrait son éclair alors que la charge resterait comptée (incohérent).
 - **POE ≠ graphe SECTEUR** : les ports poe portent une direction mais sont **exclus** du graphe power source→sink
   (`eqPortsByDir` filtre `role !== "poe"`) — sinon un PSE serait un « départ » et un PD une charge secteur (double
   comptage). Le PoE est comptabilisé **à part** (ci-dessus).

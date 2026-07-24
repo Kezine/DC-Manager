@@ -148,35 +148,44 @@ export class PowerAnalysis {
     // POE : la puissance RÉELLEMENT tirée d'un équipement PSE = Σ des consos des PD câblés à ses ports producteurs
     // (le budget de port n'est qu'une CAPACITÉ, pas une conso). Elle est prélevée sur ses entrées d'alimentation →
     // S'AJOUTE à sa conso. Le PD, alimenté par le câble, est couvert par cette contribution côté PSE (pas de double
-    // comptage : les ports POE sont hors du graphe secteur — cf. eqPortsByDir).
+    // comptage : les ports POE sont hors du graphe secteur — cf. eqPortsByDir). Un lien PoE désactivé (poe_enabled
+    // coupé d'un côté ou de l'autre) ne tire rien — filtré une seule fois dans pdOfPsePort (parité avec l'éclair).
     return base + this.poeSuppliedW(eq.id, useMax);
   }
   /** L'équipement PD (alimenté) au bout d'un port PSE (poe+source) : l'autre extrémité du câble SI c'est un port
-      POE consommateur (poe+sink). null si le port n'est pas PSE, n'est pas câblé, ou son vis-à-vis n'est pas un PD. */
+      POE consommateur (poe+sink) ACTIF. null si le port n'est pas PSE, si son injection est coupée
+      (`poe_enabled === false`), s'il n'est pas câblé, ou si son vis-à-vis n'est pas un PD ACTIF.
+      PARITÉ avec l'éclair de scène (`Store.cableCarriesPower`) : un lien PoE ne transporte de l'énergie que si les
+      DEUX extrémités sont activées (`poe_enabled`). Coupé d'un côté OU de l'autre, le PD ne compte donc NI dans la
+      charge du PSE (poePortLoadW / poeSuppliedW / poeSupply) NI dans sa conso secteur (demandW) — cohérent avec le
+      câble qui perd son éclair. NB : `psePort` peut être un BROUILLON de formulaire → on ne lit QUE ses champs. */
   private pdOfPsePort(psePort: any): any | null {
-    if (!psePort || psePort.role !== "poe" || psePort.direction !== "source") return null;
+    if (!psePort || psePort.role !== "poe" || psePort.direction !== "source" || psePort.poe_enabled === false) return null;
     for (const other of this.otherEnds(psePort.id)) {
-      if (other.role === "poe" && other.direction === "sink") return this.store.get("equipments", other.equipment_id);
+      if (other.role === "poe" && other.direction === "sink" && other.poe_enabled !== false) return this.store.get("equipments", other.equipment_id);
     }
     return null;
   }
-  /** Charge POE tirée sur un port PSE = consommation du PD câblé (0 si aucun PD). `useMax` : conso MAX (dimensionnement)
-      sinon nominale. Publique : réutilisée par le formulaire (jauge live + survente par port). */
+  /** Charge POE tirée sur un port PSE = consommation du PD câblé (0 si aucun PD, ou si le lien PoE est désactivé d'un
+      côté ou de l'autre — cf. pdOfPsePort, parité avec l'éclair de cableCarriesPower). `useMax` : conso MAX
+      (dimensionnement) sinon nominale. Publique : réutilisée par le formulaire (jauge live + survente par port). */
   poePortLoadW(psePort: any, useMax: boolean): number {
     const pd = this.pdOfPsePort(psePort); if (!pd) return 0;
     const nominal = pd.power_nominal_w != null ? pd.power_nominal_w : 0;
     const max = pd.power_max_w != null ? pd.power_max_w : nominal;
     return useMax ? Math.max(max, nominal) : nominal;
   }
-  /** Puissance POE réellement TIRÉE d'un équipement PSE = Σ des consos des PD câblés à ses ports producteurs. */
+  /** Puissance POE réellement TIRÉE d'un équipement PSE = Σ des consos des PD câblés à ses ports producteurs ACTIFS
+      (les liens PoE désactivés donnent 0 via poePortLoadW/pdOfPsePort — parité avec l'éclair). */
   private poeSuppliedW(equipmentId: string | null, useMax: boolean): number {
     if (!equipmentId) return 0;
     return this.store.portsOf(equipmentId)
       .filter((p: any) => p.role === "poe" && p.direction === "source")
       .reduce((sum: number, p: any) => sum + this.poePortLoadW(p, useMax), 0);
   }
-  /** Bilan POE d'un équipement (jauge + survente) : CHARGE réelle (Σ consos MAX des PD câblés) vs budget TOTAL
-      déclaré. `over` = survente (charge > budget). budget null = non renseigné. */
+  /** Bilan POE d'un équipement (jauge + survente) : CHARGE réelle (Σ consos MAX des PD câblés par des liens ACTIFS)
+      vs budget TOTAL déclaré. `over` = survente (charge > budget). budget null = non renseigné. Un lien PoE désactivé
+      d'un côté ou de l'autre ne compte pas (parité avec l'éclair — cf. pdOfPsePort). */
   poeSupply(equipmentId: string): { loadW: number; budgetW: number | null; over: boolean } {
     const eq = this.store.get("equipments", equipmentId);
     const loadW = this.poeSuppliedW(equipmentId, true);

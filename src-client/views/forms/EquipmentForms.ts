@@ -548,11 +548,11 @@ export class EquipmentForms extends FormBase {
     const consoRow = FormUi.row2(FormControls.fieldRow(I18n.t("equipment.equip.consoNominal"), pNomI, I18n.t("equipment.equip.consoNomHint")), FormControls.fieldRow(I18n.t("equipment.equip.consoMax"), pMaxI, I18n.t("equipment.equip.consoMaxHint")));
     root.appendChild(consoRow);
 
-    // -- BLOC POE (Power over Ethernet) : bascule « équipement POE » + budget TOTAL partagé + JAUGE de budget.
+    // -- BLOC POE (Power over Ethernet) : bascule « équipement POE » + budget TOTAL partagé.
     //    La bascule est VERROUILLÉE tant qu'un port POE existe (invariant T-POE2 : sinon on orphelinerait ces ports).
-    //    Budget + jauge visibles seulement si la bascule est ON. `alloué` = Σ des budgets des ports POE PRODUCTEURS
-    //    (rôle poe + sens source) du BROUILLON (live, pas le store) → reflète l'édition non enregistrée. Cf. maquette
-    //    design-system/briefs/port-editor-poe. La disponibilité de la catégorie POE des ports en découle (renderPorts).
+    //    Le budget n'est visible que si la bascule est ON (syncPoe). Ici PAS de jauge : la jauge de charge PoE vit
+    //    dans la modale d'INFO (EnergyInfo), calculée sur l'état ENREGISTRÉ — sa charge = Σ des consos des PD câblés
+    //    (poeSupply), pas les budgets déclarés. La disponibilité de la catégorie POE des ports en découle (renderPorts).
     const poeBlock = document.createElement("div"); poeBlock.className = "poe-block";
     const poeDeviceI = FormControls.toggle(I18n.t("equipment.equip.poeDevice"), eq ? !!eq.poe_device : false, () => renderPorts(), { block: true, title: I18n.t("equipment.equip.poeDeviceTitle") });
     poeBlock.appendChild(poeDeviceI);

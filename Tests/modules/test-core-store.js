@@ -569,6 +569,33 @@ module.exports = async () => {
       ck.eq(paP.poeSupply(sw.id).over, true, "POE : charge PD 15 W > budget total 10 W → survente (over)");
       ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_over_budget"), true, "POE : survente équipement → avertissement poe_over_budget");
     }
+    // ---- POE `poe_enabled` : parité avec l'éclair (cableCarriesPower) — un lien coupé d'un côté OU de l'autre ne
+    //      compte NI dans la charge du PSE NI dans sa conso secteur. Budgets encore ramenés à 10 W (assertions ci-dessus). ----
+    await s.update("ports", camPoe.id, { poe_enabled: false });   // PD désactivé → le lien PoE ne transporte plus rien
+    {
+      const paP = new PowerAnalysis(s);
+      ck.eq(paP.poePortLoadW(poe1, true), 0, "POE enabled : PD désactivé → charge du port PSE = 0 (parité éclair)");
+      ck.eq(paP.poeSupply(sw.id).loadW, 0, "POE enabled : PD désactivé → aucune charge PoE tirée du switch (demandW sans PoE)");
+      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_over_budget"), false, "POE enabled : PD désactivé → pas de survente même à 10 W de budget");
+      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_port_over"), false, "POE enabled : PD désactivé → pas de dépassement de port");
+    }
+    // PD réactivé mais PSE (poe-1) désactivé → l'autre extrémité coupée suffit à annuler le lien.
+    await s.update("ports", camPoe.id, { poe_enabled: true });
+    await s.update("ports", poe1.id, { poe_enabled: false });
+    {
+      const paP = new PowerAnalysis(s);
+      ck.eq(paP.poePortLoadW(poe1, true), 0, "POE enabled : PSE désactivé → charge du port PSE = 0 (parité éclair)");
+      ck.eq(paP.poeSupply(sw.id).loadW, 0, "POE enabled : PSE désactivé → aucune charge PoE tirée du switch");
+      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_over_budget"), false, "POE enabled : PSE désactivé → pas de survente");
+      ck.eq(paP.equipmentWarnings(sw.id).some((w) => w.code === "poe_port_over"), false, "POE enabled : PSE désactivé → pas de dépassement de port");
+    }
+    // Les DEUX réactivés → la charge (conso MAX du PD = 15 W) revient.
+    await s.update("ports", poe1.id, { poe_enabled: true });
+    {
+      const paP = new PowerAnalysis(s);
+      ck.eq(paP.poePortLoadW(poe1, true), 15, "POE enabled : les deux extrémités actives → la charge revient (15 W)");
+      ck.eq(paP.poeSupply(sw.id).loadW, 15, "POE enabled : les deux extrémités actives → charge PoE de 15 W tirée du switch");
+    }
   }
   });
 
