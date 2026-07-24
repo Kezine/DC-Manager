@@ -1931,6 +1931,8 @@ export class CertsAdminView {
                   commonName: cn, organization, organizationalUnit, keyAlgo,
                   days: CertValidity.clampDays(requested, parentDetail!.not_after, Date.now()),
                   pathLen: X509Factory.readCaPathLen(caDetail.public_pem || "") ?? 0,
+                  // NameConstraints RÉ-APPLIQUÉS depuis l'ancien certificat (rotation = même autorité de nom).
+                  permittedDns: X509Factory.readCaPermittedDns(caDetail.public_pem || "") ?? undefined,
                 })
               : await X509Factory.createRootCa({ commonName: cn, organization, organizationalUnit, keyAlgo, days: requested });
             const newKeyEnc = await PkiCrypto.encryptSecret(this.session.key, gen.privateKeyPkcs8Pem);

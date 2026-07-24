@@ -592,6 +592,24 @@ module.exports = async () => {
     try { await X509Factory.reSignIntermediateCa({ existingCertPem: subUnder1.certPem, parentCertPem: inter.certPem, parentPrivateKeyPkcs8Pem: inter.privateKeyPkcs8Pem, days: 30 }); } catch (e) { reUnder0Err = e.message; }
     ck(!!reUnder0Err && /pathLen 0|ne peut pas émettre/.test(reUnder0Err), "reSignIntermediateCa : parent pathLen=0 → REFUSÉ (il ne signe que des feuilles)");
 
+    /* -------- NameConstraints (phase 2) : sous-arbres DNS PERMIS, extension CRITIQUE, préservation -------- */
+    const ncInter = await X509Factory.issueIntermediateCa({
+      caCertPem: ca.certPem, caPrivateKeyPkcs8Pem: ca.privateKeyPkcs8Pem,
+      commonName: "CA cluster-B", keyAlgo: "ec-p256", days: 120, permittedDns: [".cluster-b.lan", "cluster-b.lan"],
+    });
+    const ncExt = new x509.X509Certificate(ncInter.certPem).getExtension("2.5.29.30");
+    ck(!!ncExt, "NameConstraints : extension présente (OID 2.5.29.30)");
+    ck.eq(ncExt.critical, true, "NameConstraints : extension CRITIQUE (RFC 5280)");
+    ck.eq((X509Factory.readCaPermittedDns(ncInter.certPem) || []).join(","), ".cluster-b.lan,cluster-b.lan", "readCaPermittedDns : relit les suffixes DNS permis");
+    ck.eq(X509Factory.readCaPermittedDns(inter.certPem), null, "readCaPermittedDns : CA sans NameConstraints → null (aucune contrainte)");
+    ck.eq(X509Factory.readCaPermittedDns("pas un pem"), null, "readCaPermittedDns : PEM illisible → null");
+    // Préservation au re-sign (prolonger) : l'extension est COPIÉE brute — mêmes suffixes, toujours critique.
+    const ncReSigned = await X509Factory.reSignIntermediateCa({ existingCertPem: ncInter.certPem, parentCertPem: ca.certPem, parentPrivateKeyPkcs8Pem: ca.privateKeyPkcs8Pem, days: 200 });
+    ck.eq((X509Factory.readCaPermittedDns(ncReSigned.certPem) || []).join(","), ".cluster-b.lan,cluster-b.lan", "reSignIntermediateCa : NameConstraints PRÉSERVÉS (copie brute)");
+    ck.eq(new x509.X509Certificate(ncReSigned.certPem).getExtension("2.5.29.30").critical, true, "reSignIntermediateCa : NameConstraints toujours critiques");
+    // Sans NameConstraints sur l'existant → pas d'extension ajoutée par le re-sign.
+    ck.eq(X509Factory.readCaPermittedDns(reInter.certPem), null, "reSignIntermediateCa : pas de NameConstraints inventés (existant sans extension)");
+
     /* -------- GUARD : une sous-CA ne peut vivre AU-DELÀ de sa CA parente -------- */
     let interGuardErr = null;
     try {

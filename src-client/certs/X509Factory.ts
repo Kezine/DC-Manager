@@ -17,6 +17,11 @@
    ============================================================================= */
 
 import * as x509 from "@peculiar/x509";
+// NameConstraints (RFC 5280 §4.2.1.10) : @peculiar/x509 n'expose PAS d'extension dédiée — on l'encode en
+// ASN.1 via @peculiar/asn1-x509 (dépendance TRANSITIVE de @peculiar/x509, déjà consommée directement par
+// Pkcs12Builder — même précédent), emballée dans une x509.Extension brute (OID 2.5.29.30, CRITIQUE).
+import { AsnConvert } from "@peculiar/asn1-schema";
+import { GeneralName, GeneralSubtree, GeneralSubtrees, NameConstraints, id_ce_nameConstraints } from "@peculiar/asn1-x509";
 
 /** Algorithmes de clé émis en X.509 v1 (compatibilité TLS maximale). L'ed25519
     du schéma serveur est RÉSERVÉ au chantier SSH (C4), hors X.509 ici. */
@@ -175,6 +180,16 @@ export class X509Factory {
     }
 
     const publicKey = await existing.publicKey.export(crypto);
+    const extensions: x509.Extension[] = [
+      new x509.BasicConstraintsExtension(true, pathLen, true),
+      new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
+      await x509.SubjectKeyIdentifierExtension.create(publicKey, false, crypto),   // SKI inchangé → enfants toujours rattachés
+      await x509.AuthorityKeyIdentifierExtension.create(parentCert.publicKey, false, crypto),
+    ];
+    // NameConstraints PRÉSERVÉS depuis le certificat existant (copie de l'extension BRUTE — aucun ré-encodage,
+    // donc aucune dérive) : re-signer ne doit ni élargir ni perdre l'autorité de nom de la sous-CA.
+    const existingNc = existing.getExtension(id_ce_nameConstraints);
+    if (existingNc) extensions.push(new x509.Extension(id_ce_nameConstraints, existingNc.critical, existingNc.value));
     const cert = await x509.X509CertificateGenerator.create({
       serialNumber: X509Factory.randomSerialHex(),
       subject: existing.subject,     // MÊME sujet : l'issuer-name des enfants reste résoluble
@@ -183,12 +198,7 @@ export class X509Factory {
       signingAlgorithm: caSignAlgo,
       publicKey,                     // MÊME clé — on ne fait que redater/re-certifier
       signingKey: parentKey,
-      extensions: [
-        new x509.BasicConstraintsExtension(true, pathLen, true),
-        new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
-        await x509.SubjectKeyIdentifierExtension.create(publicKey, false, crypto),   // SKI inchangé → enfants toujours rattachés
-        await x509.AuthorityKeyIdentifierExtension.create(parentCert.publicKey, false, crypto),
-      ],
+      extensions,
     }, crypto);
     return {
       certPem: cert.toString("pem"),
@@ -325,11 +335,17 @@ export class X509Factory {
     keyAlgo: X509KeyAlgo;
     days: number;
     pathLen?: number;
+    /** NameConstraints (phase 2 du cadrage) : sous-arbres DNS PERMIS — la sous-CA ne pourra certifier QUE des
+        noms sous ces suffixes (ex. « .cluster-a.lan » ; un suffixe commençant par un point couvre les sous-domaines,
+        un nom nu se couvre lui-même ET ses sous-domaines, RFC 5280). Vide/absent = aucune contrainte de nom.
+        L'extension est marquée CRITIQUE (exigence RFC) — un validateur qui ne la comprend pas rejette la chaîne. */
+    permittedDns?: string[];
   }): Promise<GeneratedCert> {
     X509Factory.ensureProvider();
     X509Factory.requireNonEmpty(opts.commonName, "le nom commun (CN) de la CA intermédiaire");
     const days = X509Factory.requirePositiveDays(opts.days);
     const pathLen = X509Factory.normalizePathLen(opts.pathLen);
+    const permittedDns = (opts.permittedDns || []).map((d) => String(d || "").trim()).filter((d) => d !== "");
     const algos = X509Factory.webCryptoAlgos(opts.keyAlgo);
 
     // Import de la CA parente (certificat public + clé privée déchiffrée) — mêmes garde-fous que issueLeaf
@@ -359,6 +375,20 @@ export class X509Factory {
         + caCert.notAfter.toISOString().slice(0, 10) + ") — réduisez la durée");
     }
 
+    const extensions: x509.Extension[] = [
+      // CA=true CRITIQUE + pathLenConstraint (profondeur restante SOUS cette CA ; défaut 0 = feuilles seules).
+      new x509.BasicConstraintsExtension(true, pathLen, true),
+      // Une CA ne fait que signer des certificats et des CRL — CRITIQUE.
+      new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
+      // SKI de la sous-CA (référencée par l'AKI de SES enfants) + AKI pointant vers la clé de la CA parente
+      // (= SKI de la parente) → la chaîne se résout sans ambiguïté à chaque maillon.
+      await x509.SubjectKeyIdentifierExtension.create(keys.publicKey, false, crypto),
+      await x509.AuthorityKeyIdentifierExtension.create(caCert.publicKey, false, crypto),
+    ];
+    // NameConstraints : borne les NOMS que cette sous-CA peut certifier (isolation inter-cluster — le
+    // COFFRE protège la clé, les NameConstraints bornent son AUTORITÉ, cf. cadrage §11.4).
+    if (permittedDns.length) extensions.push(X509Factory.nameConstraintsExtension(permittedDns));
+
     const cert = await x509.X509CertificateGenerator.create({
       serialNumber: X509Factory.randomSerialHex(),
       subject: X509Factory.buildDistinguishedName(opts.commonName, opts.organization, opts.organizationalUnit),
@@ -369,16 +399,7 @@ export class X509Factory {
       signingAlgorithm: caSignAlgo,
       publicKey: keys.publicKey,
       signingKey: caPrivateKey,
-      extensions: [
-        // CA=true CRITIQUE + pathLenConstraint (profondeur restante SOUS cette CA ; défaut 0 = feuilles seules).
-        new x509.BasicConstraintsExtension(true, pathLen, true),
-        // Une CA ne fait que signer des certificats et des CRL — CRITIQUE.
-        new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
-        // SKI de la sous-CA (référencée par l'AKI de SES enfants) + AKI pointant vers la clé de la CA parente
-        // (= SKI de la parente) → la chaîne se résout sans ambiguïté à chaque maillon.
-        await x509.SubjectKeyIdentifierExtension.create(keys.publicKey, false, crypto),
-        await x509.AuthorityKeyIdentifierExtension.create(caCert.publicKey, false, crypto),
-      ],
+      extensions,
     }, crypto);
 
     return X509Factory.assembleResult(cert, keys.privateKey);
@@ -412,6 +433,22 @@ export class X509Factory {
     try {
       const basic = new x509.X509Certificate(certPem).getExtension(x509.BasicConstraintsExtension);
       return basic && typeof basic.pathLength === "number" ? basic.pathLength : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Lit les sous-arbres DNS PERMIS (NameConstraints, RFC 5280 §4.2.1.10) d'un certificat de CA : `null` si
+      l'extension est ABSENTE (aucune contrainte de nom) ou le PEM illisible, sinon la liste des suffixes DNS
+      permis (peut être vide si l'extension ne contient pas de dNSName — cas exotique, on la remonte telle
+      quelle). Parsing PUR. Sert la ROTATION d'une sous-CA (ré-appliquer les contraintes de l'ancienne à la
+      nouvelle) et l'affichage. */
+  static readCaPermittedDns(certPem: string): string[] | null {
+    try {
+      const ext = new x509.X509Certificate(certPem).getExtension(id_ce_nameConstraints);
+      if (!ext) return null;
+      const constraints = AsnConvert.parse(ext.value, NameConstraints);
+      return (constraints.permittedSubtrees || []).map((subtree) => subtree.base.dNSName || "").filter((dns) => dns !== "");
     } catch {
       return null;
     }
@@ -575,6 +612,16 @@ export class X509Factory {
       (la sous-CA n'émet QUE des feuilles — aucune sous-CA en dessous ; confinement par défaut, cf. cadrage).
       Une valeur > 0 autorise autant de niveaux de sous-CA supplémentaires. On NE propose PAS l'illimité pour
       un intermédiaire en v1 (le confinement est le but ; l'illimité reste réservé à la racine). */
+  /** Encode l'extension NameConstraints (OID 2.5.29.30, CRITIQUE — RFC 5280 : un validateur qui ne la
+      comprend pas DOIT rejeter) avec les seuls sous-arbres DNS PERMIS (v1 : pas d'excluded, pas d'IP —
+      l'encodage d'un GeneralName iPAddress exige adresse+masque, hors périmètre). ASN.1 via
+      @peculiar/asn1-x509 (NameConstraints/GeneralSubtree(s)/GeneralName), sérialisé DER. */
+  private static nameConstraintsExtension(permittedDns: string[]): x509.Extension {
+    const subtrees = new GeneralSubtrees(permittedDns.map((dns) => new GeneralSubtree({ base: new GeneralName({ dNSName: dns }) })));
+    const der = AsnConvert.serialize(new NameConstraints({ permittedSubtrees: subtrees }));
+    return new x509.Extension(id_ce_nameConstraints, true, der);
+  }
+
   private static normalizePathLen(pathLen: number | undefined): number {
     if (pathLen === undefined) return 0;
     if (typeof pathLen !== "number" || !Number.isFinite(pathLen) || !Number.isInteger(pathLen) || pathLen < 0) {
