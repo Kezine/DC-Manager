@@ -104,7 +104,7 @@ export class DcThreeScene extends DcThreeCamera {
     if (this.multiInfo && this.multiInfo.rooms.length) return this.multiInfo.rooms;
     if (!dc) return [];
     const W = dc.width_mm || 4000, D = dc.depth_mm || 3000;
-    return [{ dcId: dc.id, ox: W / 2, oy: D / 2, oz: 0, o: 0, w: W, d: D }];   // identité : roomToWorld(p) = p
+    return [{ dcId: dc.id, ox: W / 2, oy: D / 2, oz: 0, o: 0, w: W, d: D, underfloorMm: dc.underfloor_mm || undefined }];   // identité : roomToWorld(p) = p
   }
 
   protected roomsKey(): string { return this.rooms.map((r) => r.dcId).join(","); }
@@ -123,7 +123,9 @@ export class DcThreeScene extends DcThreeCamera {
   /** Construit TOUTES les catégories d'UNE salle (chacune dans son groupe transformé) ; renvoie la hauteur max. */
   protected buildRoomContent(room: RoomDesc): number {
     const dcR = this.store.get("datacenters", room.dcId); if (!dcR) return U_MM * 42;
-    this.buildDecor(dcR, this.roomUnder(this.gDecor!, room));
+    const decor = this.roomUnder(this.gDecor!, room);
+    this.buildDecor(dcR, decor);
+    this.buildUnderfloorSlab(room, decor);   // dalle technique bleutée sous le faux-plancher (si underfloor_mm)
     const maxH = this.fillRacks(dcR, this.roomUnder(this.gRacks!, room));
     this.buildFreeEquip(dcR.id, this.roomUnder(this.gFree!, room));
     this.buildWaypoints(dcR.id, this.roomUnder(this.gWaypoints!, room));
@@ -206,6 +208,24 @@ export class DcThreeScene extends DcThreeCamera {
     floor.position.set(W / 2, D / 2, -1); floor.userData = { pick: { type: "room", id: dc.id } }; group.add(floor);   // clic droit sol → menu salle (activer / isoler / simple DC)
     group.add(this.gridLines(W, D, dc.cell_mm || 600, this.theme.grid));
     this.buildDoors(dc, group);   // portes collées aux murs (cadre/listel + vantail + passage)
+  }
+
+  /** DALLE DE PLANCHER TECHNIQUE : quand la salle déclare `underfloorMm > 0`, une SECONDE dalle — légèrement
+      BLEUTÉE — est posée `underfloorMm` mm SOUS le sol de la salle (là où posent les baies, z ≈ 0 local). Elle
+      matérialise le vide technique entre la dalle STRUCTURELLE (celle-ci, en bas) et le FAUX-PLANCHER surélevé
+      (le sol de salle existant, dessiné à z ≈ 0). Même idiome que le sol de salle (`PlaneGeometry` horizontale,
+      MeshStandardMaterial), en coords LOCALES de salle (le groupe `roomUnder` applique oz + orientation). Teinte =
+      couleur de sol du thème MIXÉE vers l'accent bleu (discrète, sobre). NON INTERACTIVE (aucun `pick`) et sans
+      couche `layer` → toujours visible comme le sol de salle. La donnée voyage via `RoomDesc.underfloorMm` (rempli
+      là où les RoomDesc sont construits) ; une édition de salle change `histIndex()` → build() complet → dalle
+      reconstruite (aucun chemin incrémental à câbler). */
+  protected buildUnderfloorSlab(room: RoomDesc, group: THREE.Group): void {
+    const uf = room.underfloorMm; if (!uf || uf <= 0) return;
+    const W = room.w, D = room.d;
+    const col = new THREE.Color(this.theme.floor).lerp(new THREE.Color(this.theme.front), 0.35);   // sol teinté vers le bleu accent
+    const slab = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ color: col, roughness: 0.9, metalness: 0.05 }));
+    slab.position.set(W / 2, D / 2, -uf);   // le sol de salle est à z ≈ 0 local → la dalle structurelle est `uf` mm plus bas
+    group.add(slab);
   }
 
   /** Portes de salle en 3D : porte FERMÉE (vantail plein sur le PASSAGE LIBRE, debout dans le plan du mur) + LISTEL

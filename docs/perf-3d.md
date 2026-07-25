@@ -67,6 +67,11 @@
   seulement. La sélection multi-U au glisser surligne la plage via un PLAN dédié enfant de la bande
   (`applySlotSel`), muté en place.
 
+- **Dalle de PLANCHER TECHNIQUE** (`DcThreeScene.buildUnderfloorSlab`) : si une salle déclare `underfloor_mm > 0`,
+  une seconde dalle légèrement BLEUTÉE (couleur de sol du thème mixée vers l'accent) est posée `underfloor_mm` mm
+  sous le faux-plancher, matérialisant le vide technique. Même idiome que le sol de salle (plan horizontal dans
+  `gDecor`, non interactif, toujours visible) ; la donnée voyage via `RoomDesc.underfloorMm`.
+
 ## ⏳ À faire (consigné, NON implémenté)
 
 ### Rebuild INCRÉMENTAL par baie (et par catégorie d'entité)

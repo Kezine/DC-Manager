@@ -36,8 +36,9 @@ export const LABEL_STANDOFF_MM = 1;
 /** Couleurs de thème lues une fois depuis les variables CSS (fallbacks si absentes). */
 export interface Theme { bg: number; floor: number; grid: number; line: number; rack: number; fg: number; front: number; doorMetal: number; doorPanel: number; }
 
-/** Placement d'une salle dans le repère MONDE : centre (ox,oy,oz), orientation o (rad), dims (w×d). */
-export interface RoomDesc { dcId: string; ox: number; oy: number; oz: number; o: number; w: number; d: number; }
+/** Placement d'une salle dans le repère MONDE : centre (ox,oy,oz), orientation o (rad), dims (w×d).
+    `underfloorMm` (optionnel, > 0) = hauteur sous le faux-plancher → dalle technique bleutée `underfloorMm` mm sous le sol. */
+export interface RoomDesc { dcId: string; ox: number; oy: number; oz: number; o: number; w: number; d: number; underfloorMm?: number; }
 
 /** Câble transversal en repère MONDE : polyligne `line` + indices `straight` (segments droits) + amorces ⊥
     `stubAt` (tangente G1 imposée) + couleur. `kind: "trunk"` = FAISCEAU (trait plus épais, couleur neutre,

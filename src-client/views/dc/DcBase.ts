@@ -522,7 +522,7 @@ export abstract class DcBase {
         const extent = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 2000);
         multi = {
           center, extent,
-          rooms: m.rooms.map((rm: any) => ({ dcId: rm.dc.id, ox: rm.off.x, oy: rm.off.y, oz: rm.off.z, o: rm.o, w: rm.dc.width_mm, d: rm.dc.depth_mm })),
+          rooms: m.rooms.map((rm: any) => ({ dcId: rm.dc.id, ox: rm.off.x, oy: rm.off.y, oz: rm.off.z, o: rm.o, w: rm.dc.width_mm, d: rm.dc.depth_mm, underfloorMm: rm.dc.underfloor_mm || undefined })),
         };
         this.routing.interDcRoutes(m, this.cablePortNormal).forEach((rc: any) => push(rc.cable, rc.linePts, rc.straight, rc.stubAt));   // routes inter-DC (monde)
         this.trunks.interDcTrunks(m, this.cablePortNormal).forEach((rt: any) => pushTrunk(rt.bundle, rt.linePts, rt.straight, rt.stubAt));   // faisceaux inter-DC (monde)
@@ -535,7 +535,7 @@ export abstract class DcBase {
         // UNIFIÉ : la salle unique est décrite comme un « multi » à 1 salle (repère identité) → MÊME chemin
         // incrémental (applyRoomDelta + cache chaud) que le Multi-DC → bascule simple↔multi sans rebuild complet.
         const W = dc.width_mm || 4000, D = dc.depth_mm || 3000, H = Math.max(this.zRef(dc) || 0, 1000);
-        multi = { center: { x: W / 2, y: D / 2, z: H / 2 }, extent: Math.max(W, D, H, 2000), rooms: [{ dcId: dc.id, ox: W / 2, oy: D / 2, oz: 0, o: 0, w: W, d: D }] };
+        multi = { center: { x: W / 2, y: D / 2, z: H / 2 }, extent: Math.max(W, D, H, 2000), rooms: [{ dcId: dc.id, ox: W / 2, oy: D / 2, oz: 0, o: 0, w: W, d: D, underfloorMm: dc.underfloor_mm || undefined }] };
         this.routing.outgoingCableStubs(dc.id, this.cablePortNormal).forEach((st: any) => { if (!this.hidden3dRacks.has(st.portRackId)) push(st.cable, st.linePts, st.straight, st.stubAt); });   // stubs sortants → mur
         this.trunks.outgoingTrunkStubs(dc.id, this.cablePortNormal).forEach((st: any) => { if (!this.hidden3dRacks.has(st.endpointRackId)) pushTrunk(st.bundle, st.linePts, st.straight, st.stubAt); });   // stubs de faisceau → mur
         floorDecor = null;   // une seule salle : pas de décor d'étage
