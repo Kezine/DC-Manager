@@ -1096,8 +1096,10 @@ export class DcThreeScene extends DcThreeCamera {
         frontEdges.userData = { layer: "orient" };
         grp.add(frontEdges);
       }
-      // nom posé à plat sur la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild.
-      if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2 + 1, b.z + b.h / 2, b.w * 0.9, b.h * 0.9, true);
+      // nom posé à plat SUR la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild. On passe
+      // la face elle-même (−b.d/2) : la saillie anti z-fighting (1 mm EN SAILLIE devant la face) est désormais bakée
+      // par faceLabel le long de la normale. (Auparavant −b.d/2 + 1 posait le label 1 mm À L'INTÉRIEUR — mauvais sens.)
+      if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2, b.z + b.h / 2, b.w * 0.9, b.h * 0.9, true);
       // ports en coords MONDE → ajoutés au groupe identité (root = gFree) ; couche "port" basculable (showPorts).
       this.store.portsOf(e.id).forEach((p: any) => this.addPort(root, p, dcId));
     });

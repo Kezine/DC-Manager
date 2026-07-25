@@ -19,6 +19,16 @@ import { TrunkRouting } from "../../../geometry/TrunkRouting";
 import { FloorLayout } from "../../../geometry/FloorLayout";
 import type { DatacenterHost } from "../shared";
 
+/** Labels À PLAT (noms d'équipement ET de baie) : réglages PARTAGÉS entre couches (principe n°3, réutilisés par
+    `faceLabel` en lot 1 et `rackShellLabels` en lot 2).
+    - LABEL_OPACITY : translucidité du plan de texte → on VOIT l'image de façade (ou la paroi) au travers, tout en
+      gardant le texte lisible. Sans opacité < 1, le plan opaque masquerait l'image sous-jacente strictement coplanaire.
+    - LABEL_STANDOFF_MM : saillie du label le long de la NORMALE de sa face, en mm (convention maison anti z-fighting,
+      cf. `DcThreeScene` : ports 1,5 mm, slots 2 mm). Le label et l'image de façade étant coplanaires (même plan/normale),
+      1 mm en saillie tue le z-fighting (clignotement) ET place le texte DEVANT l'image → lisible par-dessus. */
+export const LABEL_OPACITY = 0.85;
+export const LABEL_STANDOFF_MM = 1;
+
 /** Couleurs de thème lues une fois depuis les variables CSS (fallbacks si absentes). */
 export interface Theme { bg: number; floor: number; grid: number; line: number; rack: number; fg: number; front: number; doorMetal: number; doorPanel: number; }
 
@@ -344,6 +354,13 @@ export abstract class DcThreeBase {
   }
 
   /* ---- étiquettes (noms d'équipement, à plat sur la face) ---- */
+  /** Matériau PARTAGÉ d'un label à plat (principe n°3) : plan texturé TRANSLUCIDE (LABEL_OPACITY → on voit l'image
+      de façade / la paroi au travers), `depthWrite:false` (n'écrit pas la profondeur → ne masque pas ce qui est
+      derrière). `protected` (non `private`) car réutilisé par `rackShellLabels` dans la couche scène (lot 2). */
+  protected labelMaterial(tex: THREE.Texture): THREE.MeshBasicMaterial {
+    return new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: LABEL_OPACITY });
+  }
+
   /** Texture canvas d'un libellé (texte clair sur fond translucide), mise en cache (clé texte+dims). */
   protected textTexture(text: string, wMm: number, hMm: number): THREE.CanvasTexture | null {
     if (typeof document === "undefined") return null;
@@ -522,8 +539,12 @@ export abstract class DcThreeBase {
   /** Pose un libellé À PLAT sur une face verticale (avant = normale −Y ; arrière = +Y), en coords LOCALES. */
   protected faceLabel(group: THREE.Group, text: string, x: number, y: number, z: number, w: number, h: number, front: boolean, extra?: any): void {
     const tex = this.textTexture(text, w, h); if (!tex) return;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
-    mesh.position.set(x, y, z);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), this.labelMaterial(tex));   // matériau translucide PARTAGÉ
+    // SAILLIE anti z-fighting : le label est décalé de LABEL_STANDOFF_MM vers l'EXTÉRIEUR le long de la normale de sa
+    // face (avant = −Y → on RECULE en −Y ; arrière = +Y → on avance en +Y). Il passe ainsi 1 mm DEVANT l'image de
+    // façade (strictement coplanaire sinon) → plus de clignotement, texte lisible par-dessus l'image.
+    const yStandoff = front ? y - LABEL_STANDOFF_MM : y + LABEL_STANDOFF_MM;
+    mesh.position.set(x, yStandoff, z);
     // ROTATION PURE (pas de scale → pas de winding inversé ni de miroir) : avant = normale −Y ; arrière = normale +Y,
     // texte droit et NON miroir (180° autour de l'axe (0,1,1) → right=−X = droite du spectateur arrière, up=+Z).
     if (front) mesh.rotation.x = Math.PI / 2;

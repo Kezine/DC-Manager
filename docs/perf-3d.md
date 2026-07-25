@@ -42,6 +42,12 @@
 - **Éviction LRU des textures d'étiquettes** (`texCache`, `pruneLabelTextureCache`, plafond 256) : chaque libellé
   distinct (noms, U, cotes de mesure) créait une CanvasTexture GPU conservée à vie, y compris après changement de
   document. Les textures mutualisées (clés « ##… ») sont permanentes.
+- **Labels à plat TRANSLUCIDES et EN SAILLIE** (`DcThreeBase.faceLabel` + matériau partagé `labelMaterial`, constantes
+  `LABEL_OPACITY = 0.85` / `LABEL_STANDOFF_MM = 1`) : un nom d'équipement (plan texte) et son image de façade sont
+  strictement coplanaires (même Y/normale) → z-fighting (clignotement selon l'angle). Le label est donc rendu
+  translucide (opacité 0,85 → on voit l'image au travers) ET décalé de 1 mm vers l'EXTÉRIEUR le long de la normale de
+  sa face (convention maison en mm, cf. ports 1,5 mm / slots 2 mm) : il passe DEVANT l'image, sans z-fighting, texte
+  lisible par-dessus. Aucun `polygonOffset` (le décalage est géométrique, en mm monde).
 - **Overlay outil scindé statique/dynamique** (`_toolSig` + `ensureToolCursor`/`updateToolCursor`) : au survol en
   mode mesure/route, seuls le segment pointillé et la pastille du curseur sont MUTÉS en place — l'overlay complet
   (polylignes, étiquettes, pastilles posées + `collectScreenObjs`) n'est reconstruit qu'aux changements
