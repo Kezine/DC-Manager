@@ -791,6 +791,9 @@ export abstract class DcPanels extends DcViews2D {
     const I: Record<string, string> = {
       front: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/></svg>',
       rear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="14" width="16" height="6" fill="currentColor" stroke="none"/></svg>',
+      // DÉPRÉCIÉE (plus affectée à aucun toggle) : ancienne icône « noms d'équipement » (3 lignes de texte). Le toggle
+      // des noms d'équipement utilise désormais l'icône `rackNames` (étiquette). Conservée ici : son allure « lignes de
+      // liste » conviendrait à un futur usage LISTING — à reprendre le jour venu, ne pas l'affecter ailleurs entre-temps.
       names: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h9M5 18h6"/></svg>',
       ports: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/></svg>',
       image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="10" r="1.8"/><path d="M21 16l-5-4-8 7"/></svg>',
@@ -826,7 +829,7 @@ export abstract class DcPanels extends DcViews2D {
     tgi(D3, I.front, I18n.t("dc.panels.tFront"), () => !this.hideFrontEq, (v) => { this.hideFrontEq = !v; r3(); });
     tgi(D3, I.rear, I18n.t("dc.panels.tRear"), () => !this.hideRearEq, (v) => { this.hideRearEq = !v; r3(); });
     tgi(D3, I.ports, I18n.t("dc.panels.tPorts"), () => this.showPorts, (v) => { this.showPorts = v; r3(); });
-    tgi(D3, I.names, I18n.t("dc.panels.tNames"), () => this.showEqNames, (v) => { this.showEqNames = v; r3(); });
+    tgi(D3, I.rackNames, I18n.t("dc.panels.tNames"), () => this.showEqNames, (v) => { this.showEqNames = v; r3(); });   // icône « étiquette » (ex-`I.names` dépréciée)
     tgi(D3, I.image, I18n.t("dc.panels.tImages"), () => this.showFaceImages, (v) => { this.showFaceImages = v; r3(); });
     section(I18n.t("lists.col.racks"));
     tgi(D3, I.sides, I18n.t("dc.panels.tSides"), () => this.showRackSides, (v) => { this.showRackSides = v; r3(); });

@@ -23,10 +23,14 @@ import type { DatacenterHost } from "../shared";
     `faceLabel` en lot 1 et `rackShellLabels` en lot 2).
     - LABEL_OPACITY : translucidité du plan de texte → on VOIT l'image de façade (ou la paroi) au travers, tout en
       gardant le texte lisible. Sans opacité < 1, le plan opaque masquerait l'image sous-jacente strictement coplanaire.
-    - LABEL_STANDOFF_MM : saillie du label le long de la NORMALE de sa face, en mm (convention maison anti z-fighting,
-      cf. `DcThreeScene` : ports 1,5 mm, slots 2 mm). Le label et l'image de façade étant coplanaires (même plan/normale),
-      1 mm en saillie tue le z-fighting (clignotement) ET place le texte DEVANT l'image → lisible par-dessus. */
+    - FACE_LABEL_STANDOFF_MM : saillie du label d'ÉQUIPEMENT le long de la normale de sa face, en mm. La face empile
+      DÉJÀ trois plans le long de la normale : image à 0,5 mm, et PORTS à 1,5 mm (`DcThreeScene`, `n * 1.5`). Le label
+      doit se glisser ENTRE les deux (0,5 mm de saillie → label à 1,0 mm) : devant l'image (donc lisible par-dessus)
+      MAIS derrière les ports (qui l'occultent proprement), sans être coplanaire d'aucun des deux → aucun z-fighting.
+    - LABEL_STANDOFF_MM : saillie du label de BAIE sur la coque (flancs/toit) — là il n'y a ni image ni port en vis-à-vis,
+      donc 1 mm (marge plus robuste au rasant sur les grands panneaux ; convention maison, cf. ports 1,5 mm / slots 2 mm). */
 export const LABEL_OPACITY = 0.85;
+export const FACE_LABEL_STANDOFF_MM = 0.5;
 export const LABEL_STANDOFF_MM = 1;
 
 /** Couleurs de thème lues une fois depuis les variables CSS (fallbacks si absentes). */
@@ -541,10 +545,11 @@ export abstract class DcThreeBase {
   protected faceLabel(group: THREE.Group, text: string, x: number, y: number, z: number, w: number, h: number, front: boolean, extra?: any): void {
     const tex = this.textTexture(text, w, h); if (!tex) return;
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), this.labelMaterial(tex));   // matériau translucide PARTAGÉ
-    // SAILLIE anti z-fighting : le label est décalé de LABEL_STANDOFF_MM vers l'EXTÉRIEUR le long de la normale de sa
-    // face (avant = −Y → on RECULE en −Y ; arrière = +Y → on avance en +Y). Il passe ainsi 1 mm DEVANT l'image de
-    // façade (strictement coplanaire sinon) → plus de clignotement, texte lisible par-dessus l'image.
-    const yStandoff = front ? y - LABEL_STANDOFF_MM : y + LABEL_STANDOFF_MM;
+    // SAILLIE anti z-fighting : le label est décalé de FACE_LABEL_STANDOFF_MM vers l'EXTÉRIEUR le long de la normale de
+    // sa face (avant = −Y → on RECULE en −Y ; arrière = +Y → on avance en +Y). Il se glisse ainsi ENTRE l'image de
+    // façade (0,5 mm, coplanaire sinon → il passe devant, lisible) et les PORTS (1,5 mm, qui l'occultent proprement) →
+    // aucun clignotement avec l'un ni l'autre. (0,5 mm ici, PAS 1 mm : à 1 mm le label serait coplanaire aux ports.)
+    const yStandoff = front ? y - FACE_LABEL_STANDOFF_MM : y + FACE_LABEL_STANDOFF_MM;
     mesh.position.set(x, yStandoff, z);
     // ROTATION PURE (pas de scale → pas de winding inversé ni de miroir) : avant = normale −Y ; arrière = normale +Y,
     // texte droit et NON miroir (180° autour de l'axe (0,1,1) → right=−X = droite du spectateur arrière, up=+Z).
