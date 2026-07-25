@@ -38,6 +38,7 @@ export const cable = {
   cable: {
     namePlaceholder: "e.g. patch-A12",
     nameField: "Cable name",
+    swapEnds: "Swap ends A ⇄ B",
     pickEquip: "— equipment —",
     pickEquipFirst: "— choose an equipment —",
     noCompatPort: "(no compatible port)",

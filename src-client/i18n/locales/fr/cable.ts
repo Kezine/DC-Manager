@@ -43,6 +43,7 @@ export const cable = {
   cable: {
     namePlaceholder: "ex. patch-A12",
     nameField: "Nom du câble",
+    swapEnds: "Inverser les extrémités A ⇄ B",
     pickEquip: "— équipement —",
     pickEquipFirst: "— choisir un équipement —",
     noCompatPort: "(aucun port compatible)",
