@@ -213,7 +213,7 @@ export const equipment = {
     primaryGroupHint: "Pilote la couleur héritée (listes, topologie, 3D). Gérés dans l'onglet Groupes.",
     addSecondary: "Ajouter un groupe secondaire…",
     secondaryGroups: "Groupes secondaires",
-    secondaryHint: "Appartenances additionnelles (recherche + pastilles). N'affectent pas la couleur héritée.",
+    secondaryHint: "Appartenances additionnelles (recherche + pastilles). N'affectent pas la couleur héritée. Entrée sur une saisie inédite = créer le groupe.",
     dimensions: "Dimensions",
     dimU: "En U (rack)",
     dimFree: "Libre (L × l × h en mm)",

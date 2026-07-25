@@ -207,7 +207,7 @@ export const equipment = {
     primaryGroupHint: "Drives the inherited colour (lists, topology, 3D). Managed in the Groups tab.",
     addSecondary: "Add a secondary group…",
     secondaryGroups: "Secondary groups",
-    secondaryHint: "Additional memberships (search + pills). Do not affect the inherited colour.",
+    secondaryHint: "Additional memberships (search + pills). Do not affect the inherited colour. Enter on a new entry = create the group.",
     dimensions: "Dimensions",
     dimU: "In U (rack)",
     dimFree: "Free (L × W × H in mm)",

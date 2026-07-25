@@ -15,9 +15,12 @@ export interface ChipsOptions {
   getLimit?: () => number;
   /** Notifie la nouvelle sélection (ids) à chaque changement. */
   onChange?: (ids: string[]) => void;
-  /** Autorise « + Créer <saisie> » ; `onCreate` crée l'entité et renvoie son id (ou null pour annuler). */
+  /** Autorise l'item « + Créer <saisie> » (Autocomplete) quand la saisie ne matche aucun candidat. */
   allowCreate?: boolean;
-  onCreate?: (label: string) => string | null;
+  /** Crée l'entité à la volée et renvoie son id (ou null pour annuler). Peut être ASYNCHRONE : `store.create`
+      renvoie une Promise → `onCreate` peut renvoyer `Promise<string | null>`. Rétro-compatible (un `onCreate`
+      synchrone `string | null` reste valide — cf. `onPick`). */
+  onCreate?: (label: string) => string | null | Promise<string | null>;
 }
 
 export interface ChipsController { element: HTMLElement; getValue(): string[]; setValue(ids: string[]): void; refresh(): void; }
@@ -63,7 +66,16 @@ export class ChipsInput {
     // Suggestions = candidats NON déjà sélectionnés.
     const getItems = (): AcItem[] => opts.items().filter((i) => !selected.includes(i.id));
     const onPick = (item: AcItem) => {
-      if (item.id === AC_CREATE_ID) { if (opts.onCreate) { const id = opts.onCreate(item.label); if (id) add(id); } return; }
+      if (item.id === AC_CREATE_ID) {
+        if (!opts.onCreate) return;
+        // `onCreate` peut être SYNCHRONE (string|null) ou ASYNCHRONE (Promise — `store.create`). On gère les deux
+        // (rétro-compat). Échec async (rejet) : on ne lève pas — trace console (le consommateur affiche déjà, le
+        // cas échéant, un toast d'échec) ; aucune pastille ajoutée. `add` ignore un id vide/déjà présent.
+        const result = opts.onCreate(item.label);
+        if (result instanceof Promise) result.then((id) => { if (id) add(id); }).catch((e) => console.error(e));
+        else if (result) add(result);
+        return;
+      }
       add(item.id);
     };
     const ac = Autocomplete.attach(input, getItems, onPick, { getLimit: opts.getLimit, allowCreate: opts.allowCreate });
