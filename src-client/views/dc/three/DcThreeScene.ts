@@ -22,6 +22,7 @@ import { U_MM, RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EA
 import { Format } from "../../../core/Format";
 import type { Vec3 } from "../shared";
 import { DcThreeCamera } from "./DcThreeCamera";
+import { PivotBounds } from "../../../geometry/PivotBounds";   // bornage du pivot d'orbite aux murs virtuels des salles (géométrie pure)
 import { LABEL_STANDOFF_MM } from "./DcThreeBase";   // saillie anti z-fighting partagée (labels d'équipement + de baie)
 import type { DcThreeOptions, RoomDesc, SceneCtx, Theme } from "./DcThreeBase";
 
@@ -73,6 +74,7 @@ export class DcThreeScene extends DcThreeCamera {
     const dc = dcId ? this.store.get("datacenters", dcId) : null;
     this.builtDc = dc ? dc.id : null;
     this.rooms = this.computeRooms(dc);
+    this.recomputePivotAabb();   // bornes du pivot d'orbite (murs virtuels) — dérivées des salles affichées
     if (!this.rooms.length) { this.pruneFaceTextureCache(); this.frameOnce("∅", 2000, 2000, 1000, 1000, 500, 500); return; }   // aucune salle → aucune image posée → tout devient périmé
 
     // sous-groupes par catégorie → reconstruction partielle (chacun contient un sous-groupe TRANSFORMÉ par salle)
@@ -108,6 +110,15 @@ export class DcThreeScene extends DcThreeCamera {
   }
 
   protected roomsKey(): string { return this.rooms.map((r) => r.dcId).join(","); }
+
+  /** (Re)calcule `pivotAabb` = boîte englobante XY de l'UNION des salles affichées (leurs 4 coins monde, MÊME
+      transformée que `roomUnder`), lue par la caméra pour BORNER le pivot d'orbite aux murs virtuels. Aucune salle
+      → null (bornage désactivé). Cf. PivotBounds. */
+  protected recomputePivotAabb(): void {
+    this.pivotAabb = this.rooms.length
+      ? PivotBounds.unionAabb(this.rooms.map((r) => PivotBounds.rectCorners(r.ox, r.oy, r.o, r.w, r.d)))
+      : null;
+  }
 
   /** Groupe TRANSFORMÉ d'une salle sous `parent` (roomToWorld = translate(off)·rotZ(o)·translate(−centre)) ;
       renvoie le groupe INTERNE où bâtir le contenu en coords LOCALES de salle (coin). Tagué par `dcId`
@@ -167,6 +178,7 @@ export class DcThreeScene extends DcThreeCamera {
       this._warm.set(r.dcId, ++this._warmTick);
     });
     this.rooms = newRooms;
+    this.recomputePivotAabb();   // l'ensemble affiché a changé → recalculer les bornes du pivot d'orbite
     this.evictWarm(nextIds);   // borne mémoire : détruit réellement les salles masquées les plus anciennes au-delà du plafond
     this.applyLayerVisibility();   // salles révélées : respecter les toggles d'affichage/masquage courants
     if (this.gExtra) { this.disposeGroup(this.gExtra); this.buildExtraCables(this.gExtra); }

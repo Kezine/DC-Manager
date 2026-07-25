@@ -119,6 +119,10 @@ export abstract class DcThreeBase {
   /** Descripteur MULTI-SALLES (null = mono-salle). Posé par DcBase : { center, extent, rooms[] } en repère MONDE. */
   protected multiInfo: { center: { x: number; y: number; z: number }; extent: number; rooms: RoomDesc[] } | null = null;
   protected rooms: RoomDesc[] = [];                    // salles AFFICHÉES (mono = 1)
+  // AABB (monde, XY) de l'UNION des salles affichées → « murs virtuels » bornant le pivot d'orbite au repli sol
+  // infini (cf. PivotBounds + DcThreeCamera.recenterPivotOnView). ÉCRITE par la couche scène à chaque (re)build,
+  // LUE par la couche caméra ; null = aucune salle (bornage désactivé → comportement historique).
+  protected pivotAabb: { minX: number; maxX: number; minY: number; maxY: number } | null = null;
   // CACHE CHAUD : les salles qui sortent du champ sont MASQUÉES (visible=false), pas détruites → bascule
   // simple↔multi / changement de portée instantanée (réveil au lieu de reconstruction). Borné par éviction LRU.
   protected _warm = new Map<string, number>();         // dcId d'une salle CONSTRUITE (visible ou masquée) → tick LRU

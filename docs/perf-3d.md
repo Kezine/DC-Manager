@@ -67,6 +67,12 @@
   seulement. La sélection multi-U au glisser surligne la plage via un PLAN dédié enfant de la bande
   (`applySlotSel`), muté en place.
 
+- **Pivot d'orbite BORNÉ aux murs virtuels** (`PivotBounds` + `DcThreeCamera.recenterPivotOnView`,
+  `pivotAabb` recalculée au build depuis les `RoomDesc`) : le contenu réellement touché au centre de l'écran reste
+  prioritaire (pivot inchangé) ; seul le REPLI « sol infini » est borné. Sol DANS l'AABB des salles → gardé ; sol
+  HORS mais rayon traversant → point de SORTIE (mur le plus loin) ; rayon qui rate → sol clampé au bord ; ni sol ni
+  traversée → pivot non déplacé. Murs traités comme INFINIMENT hauts (bornage purement XY, aucune contrainte Z) —
+  corrige le pivot délirant sous un angle rasant (multi-DC/multi-étage surtout). Géométrie PURE testée en Node.
 - **Dalle de PLANCHER TECHNIQUE** (`DcThreeScene.buildUnderfloorSlab`) : si une salle déclare `underfloor_mm > 0`,
   une seconde dalle légèrement BLEUTÉE (couleur de sol du thème mixée vers l'accent) est posée `underfloor_mm` mm
   sous le faux-plancher, matérialisant le vide technique. Même idiome que le sol de salle (plan horizontal dans

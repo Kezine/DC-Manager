@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, PivotBounds, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -22,6 +22,54 @@ module.exports = async () => {
     ck(EquipmentTypes.isSystem("switch") && EquipmentTypes.isSystem("patch_panel") && EquipmentTypes.isSystem("pdu") && EquipmentTypes.isSystem("switchboard"), "isSystem : types à pilotage fin marqués system");
     ck(!EquipmentTypes.isSystem("server") && !EquipmentTypes.isSystem("camera") && !EquipmentTypes.isSystem("other") && !EquipmentTypes.isSystem("inconnu"), "isSystem : inventaire générique / inconnu → non-system");
     ck([0, 90, 180, 270].includes(Normalize.rackOrientation(450)), "normRackOrientation(450) ∈ {0,90,180,270}");
+  }
+  });
+
+  await section("PivotBounds : coins de salle (rotation), union AABB, pivot borné aux murs virtuels", async () => {
+  {
+    const rnd = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+    // rectCorners o=0 : rectangle centré sur (ox,oy) — même transformée que DcThreeScene.roomUnder.
+    const c0 = PivotBounds.rectCorners(0, 0, 0, 200, 100).map(rnd);
+    ck.eq(JSON.stringify(c0), JSON.stringify([{ x: -100, y: -50 }, { x: 100, y: -50 }, { x: 100, y: 50 }, { x: -100, y: 50 }]), "rectCorners o=0 : coins centrés ±w/2 × ±d/2");
+    // rotation 90° (π/2) : largeur ↔ profondeur permutées dans l'AABB.
+    const a90 = PivotBounds.unionAabb([PivotBounds.rectCorners(0, 0, Math.PI / 2, 200, 100)]);
+    ck.eq(Math.round(a90.minX), -50, "rectCorners o=90 : AABB minX = −d/2");
+    ck.eq(Math.round(a90.maxX), 50, "rectCorners o=90 : AABB maxX = +d/2");
+    ck.eq(Math.round(a90.minY), -100, "rectCorners o=90 : AABB minY = −w/2");
+    ck.eq(Math.round(a90.maxY), 100, "rectCorners o=90 : AABB maxY = +w/2");
+    // 180° / 270° : l'AABB retombe sur celle de 0° / 90° (symétrie du rectangle centré).
+    const a180 = PivotBounds.unionAabb([PivotBounds.rectCorners(0, 0, Math.PI, 200, 100)]);
+    ck.eq(Math.round(a180.minX), -100, "rectCorners o=180 : AABB inchangée vs o=0 (symétrie)");
+    const a270 = PivotBounds.unionAabb([PivotBounds.rectCorners(0, 0, 3 * Math.PI / 2, 200, 100)]);
+    ck.eq(Math.round(a270.maxY), 100, "rectCorners o=270 : AABB maxY = +w/2 (comme o=90)");
+    // unionAabb multi-salles : englobe les deux rectangles.
+    const u = PivotBounds.unionAabb([PivotBounds.rectCorners(0, 0, 0, 200, 200), PivotBounds.rectCorners(1000, 500, 0, 200, 200)]);
+    ck.eq(JSON.stringify({ minX: Math.round(u.minX), maxX: Math.round(u.maxX), minY: Math.round(u.minY), maxY: Math.round(u.maxY) }), JSON.stringify({ minX: -100, maxX: 1100, minY: -100, maxY: 600 }), "unionAabb : englobe deux salles disjointes");
+    ck.eq(PivotBounds.unionAabb([]), null, "unionAabb : aucune salle → null");
+
+    // ---- clampPivot : AABB [0,1000] × [0,1000] ----
+    const box = { minX: 0, maxX: 1000, minY: 0, maxY: 1000 };
+    // (a) sol DANS l'AABB → renvoyé tel quel (cas normal).
+    const g1 = { x: 500, y: 500, z: 0 };
+    ck.eq(JSON.stringify(PivotBounds.clampPivot({ x: 0, y: 0, z: 100 }, { x: 1, y: 1, z: -0.1 }, g1, box)), JSON.stringify(g1), "clampPivot : sol dans l'AABB → inchangé");
+    // (b) sol HORS + rayon traversant → point de SORTIE (mur le plus LOIN, x=1000).
+    const p2 = PivotBounds.clampPivot({ x: -500, y: 500, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 2000, y: 500, z: 0 }, box);
+    ck.eq(Math.round(p2.x), 1000, "clampPivot : sol hors + traversée → mur LE PLUS LOIN (sortie x=1000)");
+    ck.eq(Math.round(p2.y), 500, "clampPivot : point de sortie — y conservé");
+    // (c) rayon qui RATE la boîte (parallèle hors slab) → sol ramené au bord (clamp XY).
+    const p3 = PivotBounds.clampPivot({ x: -500, y: 5000, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 3000, y: 5000, z: 0 }, box);
+    ck.eq(Math.round(p3.x), 1000, "clampPivot : rayon rate → sol clampé au bord X");
+    ck.eq(Math.round(p3.y), 1000, "clampPivot : rayon rate → sol clampé au bord Y");
+    // (d) sol NULL + traversée → point de sortie.
+    const p4 = PivotBounds.clampPivot({ x: -500, y: 500, z: 0 }, { x: 1, y: 0, z: 0 }, null, box);
+    ck.eq(Math.round(p4.x), 1000, "clampPivot : sol null + traversée → point de sortie");
+    // (e) sol NULL + pas de traversée → null (ne pas bouger le pivot).
+    ck.eq(PivotBounds.clampPivot({ x: -500, y: 5000, z: 0 }, { x: 1, y: 0, z: 0 }, null, box), null, "clampPivot : sol null + rayon rate → null");
+    // (f) box entièrement DERRIÈRE la caméra (tExit < 0, rayon fuyant) → pas de sortie utilisable → sol clampé au bord.
+    const p6 = PivotBounds.clampPivot({ x: 2000, y: 500, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 3000, y: 500, z: 0 }, box);
+    ck.eq(Math.round(p6.x), 1000, "clampPivot : box derrière la caméra → sol clampé (aucun exit négatif retenu)");
+    // AABB nulle (aucune salle) → sol renvoyé inchangé (comportement historique).
+    ck.eq(JSON.stringify(PivotBounds.clampPivot({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, g1, null)), JSON.stringify(g1), "clampPivot : AABB nulle → sol inchangé (pas de bornage)");
   }
   });
 
