@@ -339,7 +339,11 @@ export class CableForms extends EquipmentForms {
     refresh(); syncWpOrder(); renderNets(); syncRoute(); syncStatus(false);
 
     // validation live (invariant câble partagé : un port ne se relie pas à lui-même) — surligne le port B.
-    const cableLive = new LiveValidation("cables", { from_port_id: selPortA, to_port_id: selPortB, status: statusSel });
+    // `name` mappé pour que l'unicité V6h (règle de PORTÉE) puisse surligner le champ si l'autorité la signale.
+    // NB : `cableLive` ne reçoit ni `fetch` ni `find` → les règles de portée NE tournent PAS en live (comme V6g
+    // dans EquipmentForms) ; l'unicité du nom est jouée au SAVE par le Store/serveur (create/update → null →
+    // toast d'échec). Le mapping reste utile si un `find` est un jour injecté ici.
+    const cableLive = new LiveValidation("cables", { name: nameI, from_port_id: selPortA, to_port_id: selPortB, status: statusSel });
     cableLive.clearOnInput();
 
     host.openModal({
