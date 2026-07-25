@@ -972,7 +972,12 @@
   .side-grid th.side-mid, .side-grid td.side-mid { width: 30px; background: var(--bg-3); color: var(--fg-dimmer); font-size: 9px; text-align: center; border-left: 1px solid var(--line-2); border-right: 1px solid var(--line-2); }
   /* Ã©diteur de faÃ§ade d'Ã©quipement */
   .face-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-  /* viewport (fenêtre de clipping pour le zoom) → frame (transformé par zoom/pan) → stage (corps : placement) */
+  /* viewport (fenêtre de clipping pour le zoom) → frame (transformé par zoom/pan) → stage (corps : placement).
+     Le viewport ÉPOUSE la hauteur du frame (il ne fait que le contenir). Sur une face PLUS LARGE que haute,
+     applyFrameSize (FaceEditor) étend le frame de marges verticales — la façade reste dans la bande CENTRALE →
+     le viewport vaut ~2× la hauteur de face, offrant de l'espace au-dessus/en-dessous pour zoomer/paner à l'aise
+     sur un ruban plat (ex. 1U 19″). Le `max-height: 70vh` du frame borne cette hauteur (le viewport suit) — cap
+     de sécurité (en pratique les faces larges affichées restent bien en dessous). */
   .face-viewport { position: relative; overflow: hidden; margin: 0 auto; touch-action: none; }
   .face-frame { position: relative; width: 100%; max-height: 70vh; margin: 0 auto; transform-origin: 0 0; will-change: transform; }
   .face-stage { position: absolute; inset: 0; background: transparent; border: 1px solid var(--line-2); overflow: hidden; user-select: none; z-index: 2; }
