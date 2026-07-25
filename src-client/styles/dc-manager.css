@@ -981,9 +981,11 @@
   .face-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; z-index: 0; }
   /* oreilles de montage 19″ : zone NON cliquable, matérialisée par des hachures */
   .face-ear { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; opacity: 0.55; background: repeating-linear-gradient(45deg, var(--line-2) 0 1px, transparent 1px 7px); border-inline: 1px dashed var(--line-2); }
-  /* grille de positionnement (overlay) â€” sous les marqueurs, au-dessus de l'image (v35) */
-  .face-grid-ov { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-  .face-grid-ov line { stroke: var(--accent); stroke-opacity: 0.35; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+  /* GUIDES d'alignement dynamiques (overlay du stage) — remplacent l'ancienne grille : traits fins NON interactifs.
+     Alignement exact = trait plein ; espacement régulier (variante « gap ») = trait pointillé + terminaisons. */
+  .face-guides { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
+  .face-guide { stroke: var(--accent); stroke-width: 1px; stroke-opacity: 0.9; vector-effect: non-scaling-stroke; }
+  .face-guide.gap { stroke-dasharray: 3 2; stroke-opacity: 0.8; }
   .face-marker { position: absolute; transform: translate(-50%, -50%) scale(var(--inv-zoom, 1)); background: var(--accent); color: #08121a; font-size: 10px; font-weight: 700; padding: 2px 5px; border-radius: 4px; cursor: grab; white-space: nowrap; box-shadow: 0 1px 5px rgba(0,0,0,0.5); display: inline-flex; align-items: center; gap: 5px; touch-action: none; z-index: 2; opacity: 0.68; transition: opacity 0.1s; }
   .face-marker:hover { opacity: 1; }
   .face-marker.role-mgmt { background: var(--ok, #4ade80); }
@@ -992,6 +994,11 @@
   .face-marker.dragging { cursor: grabbing; opacity: 0.97; }
   .face-marker .fm-x { cursor: pointer; font-weight: 700; opacity: 0.75; }
   .face-marker .fm-x:hover { opacity: 1; }
+  /* Pendant un GLISSER (classe sur le frame), ou la POSE en 2 clics (port actif) : les ports posés se réduisent à des
+     PASTILLES pour dégager la façade — labels masqués, boîte ramenée à un rond (même look que .face-dot). */
+  .face-frame.dragging-ports .face-marker { padding: 0; gap: 0; width: 11px; height: 11px; border-radius: 50%; overflow: hidden; }
+  .face-frame.dragging-ports .face-marker > span { display: none; }
+  .face-frame.dragging-ports .face-leaders { display: none; }   /* mode leader : étiquettes + lignes masquées, pastilles conservées */
   .face-palette { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
   .face-palette-hint { width: 100%; font-size: 11px; color: var(--fg-dim); margin-bottom: 2px; font-family: var(--sans); }   /* aide (prose) → --sans */
   .face-chip { background: var(--bg-3); border: 1px solid var(--line-2); color: var(--fg); font-size: 11px; padding: 3px 9px; border-radius: 4px; cursor: pointer; }
@@ -1015,6 +1022,7 @@
   .face-dot.dragging { cursor: grabbing; }
   .face-dot.hi { box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 55%, transparent), 0 1px 4px rgba(0,0,0,0.5); z-index: 5; }
   .face-dot.dim { opacity: 0.25; }
+  .face-dot.ghost { opacity: 0.5; pointer-events: none; border-style: dashed; }   /* aperçu de pose (mode 2 clics) : pastille fantôme non interactive */
   .face-dot.role-mgmt { background: var(--ok, #4ade80); }
   .face-dot.role-power { background: var(--role-power, #f59e0b); }
   .face-dot.role-poe { background: var(--role-poe); }

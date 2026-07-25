@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -40,6 +40,73 @@ module.exports = async () => {
     // aucune étiquette ne recouvre un port : le rect ne contient pas l'ancre (0.5,0.5) en pixels.
     const covers = (L) => Math.abs(L.x - 0.5) * asp < (W * asp) / 2 && Math.abs(L.y - 0.5) < H / 2;
     ck(!covers(two[0]) && !covers(two[1]), "layout : aucune étiquette posée sur le port");
+  }
+  });
+
+  await section("FaceAlign : guides d'alignement & espacement régulier (pur)", async () => {
+  {
+    const approx = (a, b, name, eps) => ck(Math.abs(a - b) <= (eps || 1e-9), name + "  (attendu ≈" + b + ", obtenu " + a + ")");
+    // rangée de 3 ports alignés en y=0.5 (x = 0.2 / 0.4 / 0.9).
+    const row = [{ id: "a", x: 0.2, y: 0.5 }, { id: "b", x: 0.4, y: 0.5 }, { id: "c", x: 0.9, y: 0.5 }];
+
+    // 1) ACCROCHE Y sous tolérance : y calé sur 0.5, ref = le port le plus PROCHE en x du curseur (0.42 → b à 0.4).
+    let r = FaceAlign.resolve({ x: 0.42, y: 0.51 }, row, 0.01, 0.05);
+    ck(!!r.guideY, "accroche Y : guideY présent (|Δy| < tolY)");
+    ck.eq(r.guideY.y, 0.5, "accroche Y : valeur calée = 0.5");
+    ck.eq(r.guideY.ref.id, "b", "accroche Y : ref = port le plus proche en x (b)");
+    ck.eq(r.y, 0.5, "accroche Y : y résultat calé");
+    ck.eq(r.guideX, null, "accroche Y : pas d'alignement X (hors tolX)");
+
+    // 2) PAS d'accroche hors tolérance (ni X ni Y) : position brute conservée.
+    r = FaceAlign.resolve({ x: 0.7, y: 0.7 }, row, 0.01, 0.05);
+    ck(r.guideY === null && r.guideX === null && r.gapX === null && r.gapY === null, "hors tolérance : aucune accroche");
+    approx(r.x, 0.7, "hors tolérance : x brut"); approx(r.y, 0.7, "hors tolérance : y brut");
+
+    // 3) PLUS PROCHE gagne entre deux valeurs Y candidates sous tolérance (0.52 → 0.50 plus proche que 0.55).
+    const twoY = [{ id: "p1", x: 0.3, y: 0.50 }, { id: "p2", x: 0.6, y: 0.55 }];
+    r = FaceAlign.resolve({ x: 0.85, y: 0.52 }, twoY, 0.01, 0.05);
+    ck.eq(r.guideY.y, 0.50, "Y le plus proche : 0.50 retenu (vs 0.55)");
+    ck.eq(r.guideY.ref.id, "p1", "Y le plus proche : ref = p1");
+
+    // 4) ACCROCHE X et Y SIMULTANÉES (axes indépendants) sur un même port de coin.
+    r = FaceAlign.resolve({ x: 0.305, y: 0.505 }, [{ id: "corner", x: 0.3, y: 0.5 }], 0.02, 0.02);
+    ck(!!r.guideX && !!r.guideY, "simultané : guideX ET guideY accrochent");
+    ck.eq(r.guideX.x, 0.3, "simultané : x calé 0.3"); ck.eq(r.guideY.y, 0.5, "simultané : y calé 0.5");
+    ck.eq(r.x, 0.3, "simultané : x résultat"); ck.eq(r.y, 0.5, "simultané : y résultat");
+
+    // 5a) ESPACEMENT — EXTENSION à droite : paire (0.2,0.4) → nouveau port à 0.6 ; pairs = réf + écart créé.
+    r = FaceAlign.resolve({ x: 0.605, y: 0.5 }, [{ id: "a", x: 0.2, y: 0.5 }, { id: "b", x: 0.4, y: 0.5 }], 0.02, 0.02);
+    ck.eq(r.guideX, null, "espacement droite : pas d'alignement X exact");
+    ck(!!r.gapX, "espacement droite : gapX présent");
+    approx(r.gapX.x, 0.6, "espacement droite : x = 0.6 (b + pas)"); approx(r.x, 0.6, "espacement droite : x résultat calé");
+    ck.eq(r.gapX.pairs.length, 2, "espacement droite : 2 segments (réf + écart créé)");
+    approx(r.gapX.pairs[0].from.x, 0.2, "droite : seg réf de 0.2"); approx(r.gapX.pairs[0].to.x, 0.4, "droite : seg réf à 0.4");
+    approx(r.gapX.pairs[1].from.x, 0.4, "droite : seg créé de 0.4"); approx(r.gapX.pairs[1].to.x, 0.6, "droite : seg créé à 0.6");
+
+    // 5b) ESPACEMENT — EXTENSION à gauche : paire (0.4,0.6) → nouveau port à 0.2.
+    r = FaceAlign.resolve({ x: 0.205, y: 0.5 }, [{ id: "a", x: 0.4, y: 0.5 }, { id: "b", x: 0.6, y: 0.5 }], 0.02, 0.02);
+    approx(r.gapX.x, 0.2, "espacement gauche : x = 0.2 (a − pas)");
+    approx(r.gapX.pairs[0].from.x, 0.2, "gauche : seg créé de 0.2"); approx(r.gapX.pairs[0].to.x, 0.4, "gauche : seg créé à 0.4");
+
+    // 5c) ESPACEMENT — MILIEU d'une paire encadrant le curseur : (0.2,0.8) → 0.5, deux demi-écarts égaux.
+    r = FaceAlign.resolve({ x: 0.51, y: 0.5 }, [{ id: "a", x: 0.2, y: 0.5 }, { id: "b", x: 0.8, y: 0.5 }], 0.02, 0.02);
+    approx(r.gapX.x, 0.5, "milieu : x = 0.5");
+    approx(r.gapX.pairs[0].to.x, 0.5, "milieu : 1er segment jusqu'à 0.5"); approx(r.gapX.pairs[1].from.x, 0.5, "milieu : 2e segment depuis 0.5");
+
+    // 5d) PRIORITÉ alignement > espacement : un port exactement à 0.6 → alignement X, espacement inhibé.
+    r = FaceAlign.resolve({ x: 0.6, y: 0.5 }, [{ id: "a", x: 0.2, y: 0.5 }, { id: "b", x: 0.4, y: 0.5 }, { id: "c", x: 0.6, y: 0.5 }], 0.02, 0.02);
+    ck(!!r.guideX && r.guideX.x === 0.6, "priorité : alignement X exact sur 0.6");
+    ck.eq(r.gapX, null, "priorité : espacement X inhibé par l'alignement exact");
+
+    // 6) CLAMP 0..1 en sortie (sans autre port : position brute clampée).
+    r = FaceAlign.resolve({ x: 1.5, y: -0.3 }, [], 0.02, 0.02);
+    ck.eq(r.x, 1, "clamp : x ramené à 1"); ck.eq(r.y, 0, "clamp : y ramené à 0");
+
+    // 7) TOLÉRANCES par axe DISTINCTES : même écart 0.03 → X (tolX 0.05) accroche, Y (tolY 0.01) non.
+    r = FaceAlign.resolve({ x: 0.53, y: 0.53 }, [{ id: "o", x: 0.5, y: 0.5 }], 0.05, 0.01);
+    ck(!!r.guideX && r.guideX.x === 0.5, "tolérances distinctes : X accroche (tolX 0.05)");
+    ck.eq(r.guideY, null, "tolérances distinctes : Y n'accroche pas (tolY 0.01)");
+    ck.eq(r.x, 0.5, "tolérances distinctes : x calé"); approx(r.y, 0.53, "tolérances distinctes : y brut");
   }
   });
 

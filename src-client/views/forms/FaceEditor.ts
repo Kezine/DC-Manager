@@ -1,15 +1,15 @@
 /* =============================================================================
    ÉDITEUR DE FAÇADE — sous-éditeur EXTRAIT d'EquipmentForms (P4 : la méthode de
    ~210 lignes y était un mini-monolithe) : pose des ports sur les faces d'un
-   équipement (face_x/face_y/face_side) avec onglets de face, zoom/pan, snap de
-   grille, oreilles 19″, « Tout poser / enlever », palette des ports non posés,
+   équipement (face_x/face_y/face_side) avec onglets de face, zoom/pan, GUIDES
+   d'alignement dynamiques (aimantation sur les autres ports, cf. FaceAlign),
+   oreilles 19″, « Tout poser / enlever », palette des ports non posés,
    et SÉLECTEUR d'image de façade (bibliothèque, filtres face/U/oreilles, import).
 
    Étend FormBase pour réutiliser ses statiques protégées (images, faceAnnex,
    eligibleImages, promptImageFile…) SANS rejoindre la chaîne d'héritage Forms.
    ============================================================================= */
 import type { Store } from "../../store";
-import { FormControls } from "../../ui/FormControls";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
@@ -18,6 +18,8 @@ import { EquipFaces } from "../../registries/EquipFaces";
 import { PortRoles } from "../../registries/PortRoles";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { LeaderLayout, LeaderAnchor } from "../../geometry/LeaderLayout";
+import { FaceAlign } from "../../geometry/FaceAlign";
+import type { FaceAlignRef, FaceAlignResult } from "../../geometry/FaceAlign";
 import { EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, RACK_MOUNT_WIDTH } from "../../domain/constants";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import type { FormHost } from "./shared";
@@ -27,8 +29,8 @@ import { I18n } from "../../i18n/I18n";
 
 export class FaceEditor extends FormBase {
   /** Éditeur de FAÇADE (sous-éditeur empilé) : pose les ports sur les faces de l'équipement
-      (face_x/face_y/face_side) — onglets de face, glisser, snap de grille, « Tout poser / enlever »,
-      palette des ports non posés. `opts.onApply({fids,place})` reporte sur le brouillon du formulaire
+      (face_x/face_y/face_side) — onglets de face, glisser avec GUIDES d'alignement dynamiques,
+      « Tout poser / enlever », palette des ports non posés. `opts.onApply({fids,place})` reporte sur le brouillon du formulaire
       parent ; sinon écrit dans le store. Les IMAGES de façade (bibliothèque IndexedDB) sont d'une phase
       ultérieure : on PRÉSERVE les références d'image existantes (fids) et on permet de les détacher. */
   static open(store: Store, host: FormHost, eqId: string, opts: any = {}): void {
@@ -51,14 +53,9 @@ export class FaceEditor extends FormBase {
     faces.forEach((f) => { const b = document.createElement("button"); b.type = "button"; b.textContent = EquipFaces.label(f); b.onclick = () => { side = f; setZoom(1); render(); }; tabBtns[f] = b; tabs.appendChild(b); });
     root.appendChild(tabs);
 
-    const FACE_GRID_PRESETS = [
-      { id: "free", label: I18n.t("face.gridFree"), cols: 0, rows: 0 }, { id: "g6x1", label: I18n.t("face.grid", { cols: 6, rows: 1 }), cols: 6, rows: 1 },
-      { id: "g12x1", label: I18n.t("face.grid", { cols: 12, rows: 1 }), cols: 12, rows: 1 }, { id: "g12x2", label: I18n.t("face.grid", { cols: 12, rows: 2 }), cols: 12, rows: 2 },
-      { id: "g24x1", label: I18n.t("face.grid", { cols: 24, rows: 1 }), cols: 24, rows: 1 }, { id: "g24x2", label: I18n.t("face.grid", { cols: 24, rows: 2 }), cols: 24, rows: 2 },
-      { id: "g24x4", label: I18n.t("face.grid", { cols: 24, rows: 4 }), cols: 24, rows: 4 }, { id: "g48x2", label: I18n.t("face.grid", { cols: 48, rows: 2 }), cols: 48, rows: 2 },
-    ];
-    let grid: { cols: number; rows: number } | null = null;
-    let gridVisible = true;   // la grille peut être MASQUÉE tout en restant ACTIVE (le snap continue).
+    // Distance d'écran (px) d'accroche des guides d'alignement — convertie en tolérance NORMALISÉE par axe
+    // à chaque déplacement (insensible au zoom et au ratio de la face, cf. FaceAlign / alignTol).
+    const SNAP_PX = 8;
     // Oreilles 19″ : le CORPS (zone de placement des ports) = fraction du panneau occupée par le BOÎTIER — pleine
     // largeur (oreilles standard EAR_FRAC de chaque côté) ou RÉTRÉCIE (u_width_mm + u_align : les oreilles
     // s'étendent des rails jusqu'au boîtier, asymétriques). Fractions PAR FACE : l'arrière est un MIROIR
@@ -74,7 +71,7 @@ export class FaceEditor extends FormBase {
     let portDisplay: "chip" | "leader" = "chip";
     // Pose des ports : "auto" (clic port = pose au centre) | "click" (clic port = active, clic sur la face = pose).
     let placeMode: "auto" | "click" = "auto";
-    let activePortId: string | null = null;   // port ACTIVÉ (mode 2 clics) : les autres ports posés sont masqués.
+    let activePortId: string | null = null;   // port ACTIVÉ (mode 2 clics) : les autres ports posés deviennent des pastilles de référence.
     const tools = document.createElement("div"); tools.className = "face-toolbar";
     const attachBtn = document.createElement("button"); attachBtn.type = "button"; attachBtn.className = "btn btn-ghost btn-sm"; attachBtn.textContent = I18n.t("face.attachImage");
     const detachBtn = document.createElement("button"); detachBtn.type = "button"; detachBtn.className = "btn btn-ghost btn-sm"; detachBtn.textContent = I18n.t("face.detachImage");
@@ -82,16 +79,13 @@ export class FaceEditor extends FormBase {
     const removeAllBtn = document.createElement("button"); removeAllBtn.type = "button"; removeAllBtn.className = "btn btn-ghost btn-sm"; removeAllBtn.textContent = I18n.t("face.removeAll");
     const placeBtn = document.createElement("button"); placeBtn.type = "button"; placeBtn.className = "btn btn-ghost btn-sm"; placeBtn.textContent = I18n.t("face.place2"); placeBtn.title = I18n.t("face.place2Title");
     const leaderBtn = document.createElement("button"); leaderBtn.type = "button"; leaderBtn.className = "btn btn-ghost btn-sm"; leaderBtn.textContent = I18n.t("face.leaders"); leaderBtn.title = I18n.t("face.leadersTitle");
-    const gridLab = document.createElement("span"); gridLab.style.cssText = "font-size:11px;color:var(--fg-dim);margin-left:6px;"; gridLab.textContent = I18n.t("face.gridLabel");
-    const gridSel = FormControls.select(FACE_GRID_PRESETS.map((g) => ({ value: g.id, label: g.label })), "free"); gridSel.style.cssText = "font-size:11px;padding:4px 6px;";
-    const gridShowBtn = document.createElement("button"); gridShowBtn.type = "button"; gridShowBtn.className = "btn btn-ghost btn-sm"; gridShowBtn.title = I18n.t("face.gridToggleTitle");
     // Zoom (molette + boutons ; glisser le fond = déplacer) : utile sur les faces denses / gros équipements.
     const zoomOutBtn = document.createElement("button"); zoomOutBtn.type = "button"; zoomOutBtn.className = "btn btn-ghost btn-sm"; zoomOutBtn.textContent = "−"; zoomOutBtn.title = I18n.t("ui.zoom.out");
     const zoomLab = document.createElement("span"); zoomLab.style.cssText = "font-size:11px;color:var(--fg-dim);min-width:36px;text-align:center;";
     const zoomInBtn = document.createElement("button"); zoomInBtn.type = "button"; zoomInBtn.className = "btn btn-ghost btn-sm"; zoomInBtn.textContent = "+"; zoomInBtn.title = I18n.t("ui.zoom.in");
     const zoomResetBtn = document.createElement("button"); zoomResetBtn.type = "button"; zoomResetBtn.className = "btn btn-ghost btn-sm"; zoomResetBtn.textContent = I18n.t("ui.zoom.fitLabel"); zoomResetBtn.title = I18n.t("face.zoomResetTitle");
     const zoomGroup = document.createElement("span"); zoomGroup.style.cssText = "display:inline-flex;align-items:center;gap:4px;margin-left:6px;"; zoomGroup.append(zoomOutBtn, zoomLab, zoomInBtn, zoomResetBtn);
-    tools.append(attachBtn, detachBtn, placeBtn, leaderBtn, addAllBtn, removeAllBtn, gridLab, gridSel, gridShowBtn, zoomGroup); root.appendChild(tools);
+    tools.append(attachBtn, detachBtn, placeBtn, leaderBtn, addAllBtn, removeAllBtn, zoomGroup); root.appendChild(tools);
 
     const hint = document.createElement("div"); hint.className = "form-hint";
     hint.textContent = I18n.t("face.hint");
@@ -109,6 +103,8 @@ export class FaceEditor extends FormBase {
 
     // ---- zoom / pan : transform sur le frame, le viewport clippe. transform-origin: 0 0 (cf. CSS). ----
     let zoom = 1, panX = 0, panY = 0; const ZMIN = 1, ZMAX = 6;
+    let guidesOv: SVGSVGElement | null = null;   // overlay SVG des guides d'alignement (recréé à chaque render)
+    let ghostDot: HTMLDivElement | null = null;  // pastille fantôme d'aperçu de pose (mode 2 clics)
     const applyZoom = () => {
       frame.style.transform = "translate(" + panX + "px," + panY + "px) scale(" + zoom + ")";
       // CONTRE-ÉCHELLE des handles (marqueurs / pastilles / étiquettes) : taille d'écran FIXE au zoom pour un
@@ -134,9 +130,43 @@ export class FaceEditor extends FormBase {
     });
 
     const clamp01 = (v: number) => v < 0 ? 0 : v > 1 ? 1 : v;
-    const snapToGrid = (x: number, y: number) => {
-      if (!grid || !grid.cols || !grid.rows) return { x: clamp01(x), y: clamp01(y) };
-      return { x: clamp01((Math.round(x * grid.cols - 0.5) + 0.5) / grid.cols), y: clamp01((Math.round(y * grid.rows - 0.5) + 0.5) / grid.rows) };
+    const NS_SVG = "http://www.w3.org/2000/svg";
+    // Références d'aimantation = ports posés sur la face COURANTE, hors `excludeId` (ex. le port en cours de glisser).
+    const refsOf = (excludeId: string | null): FaceAlignRef[] =>
+      ports.filter((p) => p.id !== excludeId && place[p.id] && place[p.id].side === side)
+        .map((p) => ({ id: p.id, x: place[p.id].x, y: place[p.id].y }));
+    // Aimante un point normalisé sur les autres ports. Les tolérances sont converties des PIXELS d'écran (SNAP_PX)
+    // via le rect COURANT du stage → distance d'accroche CONSTANTE à l'écran, insensible au zoom et au ratio de la
+    // face (cf. FaceAlign). `alt` (touche Alt enfoncée) = placement LIBRE : ni aimantation ni guide (position brute).
+    const alignAt = (rx: number, ry: number, excludeId: string | null, alt: boolean): FaceAlignResult => {
+      if (alt) return { x: clamp01(rx), y: clamp01(ry), guideY: null, guideX: null, gapX: null, gapY: null };
+      const rect = stage.getBoundingClientRect();
+      const tolX = rect.width ? SNAP_PX / rect.width : 0, tolY = rect.height ? SNAP_PX / rect.height : 0;
+      return FaceAlign.resolve({ x: rx, y: ry }, refsOf(excludeId), tolX, tolY);
+    };
+    const clearGuides = () => { if (guidesOv) guidesOv.innerHTML = ""; };
+    const clearGhost = () => { if (ghostDot) { ghostDot.remove(); ghostDot = null; } clearGuides(); };
+    // Matérialise les accroches d'un résultat FaceAlign dans l'overlay du stage (viewBox 0..100, coords = fractions).
+    // Alignement (guideX/guideY) = trait fin du port de référence jusqu'au port ; espacement (gapX/gapY) = segments
+    // d'écart ÉGAL (variante « gap ») avec petites terminaisons perpendiculaires (repère « ⟷ » discret).
+    const drawGuides = (res: FaceAlignResult): void => {
+      if (!guidesOv) return;
+      guidesOv.innerHTML = "";
+      const seg = (x1: number, y1: number, x2: number, y2: number, cls: string) => {
+        const l = document.createElementNS(NS_SVG, "line");
+        l.setAttribute("x1", String(x1 * 100)); l.setAttribute("y1", String(y1 * 100));
+        l.setAttribute("x2", String(x2 * 100)); l.setAttribute("y2", String(y2 * 100));
+        l.setAttribute("class", "face-guide" + cls); guidesOv!.appendChild(l);
+      };
+      const TICK = 0.02;   // demi-longueur des terminaisons perpendiculaires (fraction du stage)
+      const gapSeg = (a: { x: number; y: number }, b: { x: number; y: number }, horizontal: boolean) => {
+        seg(a.x, a.y, b.x, b.y, " gap");
+        [a, b].forEach((p) => horizontal ? seg(p.x, p.y - TICK, p.x, p.y + TICK, " gap") : seg(p.x - TICK, p.y, p.x + TICK, p.y, " gap"));
+      };
+      if (res.guideY) seg(res.guideY.ref.x, res.guideY.y, res.x, res.guideY.y, "");   // alignement horizontal (même y)
+      if (res.guideX) seg(res.guideX.x, res.guideX.ref.y, res.guideX.x, res.y, "");   // alignement vertical (même x)
+      if (res.gapX) res.gapX.pairs.forEach((s) => gapSeg(s.from, s.to, true));         // espacement en X → segments horizontaux
+      if (res.gapY) res.gapY.pairs.forEach((s) => gapSeg(s.from, s.to, false));        // espacement en Y → segments verticaux
     };
     const faceWH = (f: string) => FreeEquipGeometry.faceWH(eq, f);   // dimensions par face (mutualisé, cf. FreeEquipGeometry)
     const faceWHof = (f: string) => isFree ? faceWH(f) : { W: 19, H: 1.75 * Math.max(1, (eq.u_height | 0) || 1) };   // baie = 19″ × hauteur U
@@ -159,16 +189,30 @@ export class FaceEditor extends FormBase {
     };
     const layoutUniform = (list: any[]) => {
       const n = list.length; if (!n) return;
-      let cols: number, rows: number;
-      if (grid && grid.cols && grid.rows) { cols = grid.cols; rows = Math.max(grid.rows, Math.ceil(n / cols)); }
-      else { const wh = faceWH(side); const aspect = isFree ? (wh.W / wh.H) : (19 / (1.75 * (eq.u_height || 1))); cols = Math.max(1, Math.round(Math.sqrt(n * aspect))); rows = Math.ceil(n / cols); }
+      // Disposition uniforme : grille ÉPHÉMÈRE déduite du ratio de la face (approx. carrée pondérée par l'aspect).
+      const wh = faceWH(side); const aspect = isFree ? (wh.W / wh.H) : (19 / (1.75 * (eq.u_height || 1)));
+      const cols = Math.max(1, Math.round(Math.sqrt(n * aspect))); const rows = Math.ceil(n / cols);
       list.forEach((p, i) => { const c = i % cols, r = Math.floor(i / cols); place[p.id] = { x: clamp01((c + 0.5) / cols), y: clamp01((r + 0.5) / rows), side }; });
     };
     const startDrag = (ev: PointerEvent, id: string, markerEl: HTMLElement) => {
       ev.preventDefault(); markerEl.classList.add("dragging");
-      const move = (e: PointerEvent) => { markDirty(); const rect = stage.getBoundingClientRect(); const s = snapToGrid((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height); place[id].x = s.x; place[id].y = s.y; markerEl.style.left = (s.x * 100) + "%"; markerEl.style.top = (s.y * 100) + "%"; };
-      // En fin de glisser : re-render (mode leader → l'étiquette + la ligne du port suivent sa nouvelle position).
-      const up = () => { markerEl.classList.remove("dragging"); document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); if (portDisplay === "leader") render(); };
+      frame.classList.add("dragging-ports");   // masque les labels : tous les ports posés se réduisent à des pastilles (cf. CSS)
+      const move = (e: PointerEvent) => {
+        markDirty();
+        const rect = stage.getBoundingClientRect();
+        const res = alignAt((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height, id, e.altKey);   // Alt = libre
+        place[id].x = res.x; place[id].y = res.y;
+        markerEl.style.left = (res.x * 100) + "%"; markerEl.style.top = (res.y * 100) + "%";
+        drawGuides(res);   // guides reconstruits à chaque déplacement (vidés si Alt / aucune accroche)
+      };
+      // Fin du glisser : restaure les labels (retrait de la classe), efface les guides ; mode leader → re-render
+      // (l'étiquette + la ligne du port suivent sa nouvelle position — le re-render existant s'en charge).
+      const up = () => {
+        // La classe pastille reste si un port est ACTIVÉ (pose 2 clics : les références restent des pastilles).
+        markerEl.classList.remove("dragging"); frame.classList.toggle("dragging-ports", !!activePortId); clearGuides();
+        document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+        if (portDisplay === "leader") render();
+      };
       document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
     };
     const render = (): void => {
@@ -183,8 +227,6 @@ export class FaceEditor extends FormBase {
       attachBtn.style.display = this.images ? "" : "none";
       attachBtn.textContent = hasImg ? I18n.t("face.changeImage") : I18n.t("face.attachImage");
       detachBtn.style.display = hasImg ? "" : "none";
-      gridShowBtn.style.display = grid ? "" : "none";
-      gridShowBtn.textContent = gridVisible ? I18n.t("face.gridHide") : I18n.t("face.gridShow");
 
       applyFrameSize(side);
       frame.querySelectorAll(".face-bg, .face-ear").forEach((n) => n.remove());   // image + bandes reconstruites à chaque rendu
@@ -215,18 +257,17 @@ export class FaceEditor extends FormBase {
         [[0, bLeft], [bLeft + BODY_FRAC, 1]].forEach(([x0, x1]) => { if (x1 - x0 <= 0.0005) return; const e = document.createElement("div"); e.className = "face-ear"; e.style.cssText = "left:" + (x0 * 100) + "%;width:" + ((x1 - x0) * 100) + "%;top:" + vt + "%;height:" + vh + "%;bottom:auto;"; frame.appendChild(e); });
       }
 
-      // GRILLE (overlay) — affichée seulement si ACTIVE et NON masquée ; le SNAP suit `grid` quel que soit l'affichage.
-      if (grid && grid.cols && grid.rows && gridVisible) {
-        const NS = "http://www.w3.org/2000/svg";
-        const ov = document.createElementNS(NS, "svg"); ov.setAttribute("class", "face-grid-ov"); ov.setAttribute("viewBox", "0 0 " + grid.cols + " " + grid.rows); ov.setAttribute("preserveAspectRatio", "none");
-        const line = (x1: number, y1: number, x2: number, y2: number) => { const l = document.createElementNS(NS, "line"); l.setAttribute("x1", String(x1)); l.setAttribute("y1", String(y1)); l.setAttribute("x2", String(x2)); l.setAttribute("y2", String(y2)); ov.appendChild(l); };
-        for (let i = 1; i < grid.cols; i++) line(i, 0, i, grid.rows);
-        for (let j = 1; j < grid.rows; j++) line(0, j, grid.cols, j);
-        stage.appendChild(ov);
-      }
-      // PORTS posés sur CETTE face — masqués tant qu'un port est ACTIVÉ (mode 2 clics) pour dégager la face.
+      // GUIDES d'alignement (overlay du stage) : vide au repos, rempli pendant un glisser / un aperçu de pose
+      // (cf. drawGuides). viewBox 0..100 + preserveAspectRatio:none → coordonnées en % du stage (comme les marqueurs).
+      ghostDot = null;   // l'ancienne pastille fantôme vient d'être détachée par le vidage du stage
+      guidesOv = document.createElementNS(NS_SVG, "svg") as SVGSVGElement;
+      guidesOv.setAttribute("class", "face-guides"); guidesOv.setAttribute("viewBox", "0 0 100 100"); guidesOv.setAttribute("preserveAspectRatio", "none");
+      stage.appendChild(guidesOv);
+      // PORTS posés sur CETTE face. En pose 2 clics (port ACTIVÉ), ils RESTENT affichés mais réduits à des PASTILLES
+      // (classe `dragging-ports` sur le frame, même rendu que pendant un glisser) pour servir de RÉFÉRENCES visuelles.
+      frame.classList.toggle("dragging-ports", !!activePortId);
       const roleCls = (p: any) => PortRoles.markerRoleClass(p.role);   // "" (data) · role-mgmt/power/poe
-      const placedHere = activePortId ? [] : ports.filter((p) => place[p.id] && place[p.id].side === side);
+      const placedHere = ports.filter((p) => place[p.id] && place[p.id].side === side);
       if (portDisplay === "leader") {
         // PASTILLES (dots) draggables dans le stage (référencées pour le surlignage au survol de l'étiquette).
         const dots = placedHere.map((p) => {
@@ -298,28 +339,36 @@ export class FaceEditor extends FormBase {
       unplaced.forEach((p) => {
         const c = document.createElement("button"); c.type = "button"; c.className = "face-chip" + (p.id === activePortId ? " active" : ""); c.textContent = p.name || I18n.t("face.portParen");
         c.onclick = () => {
-          if (placeMode === "click") { activePortId = (activePortId === p.id) ? null : p.id; render(); return; }   // active (les autres ports se masquent)
-          markDirty(); const s = snapToGrid(0.5, 0.5); place[p.id] = { x: s.x, y: s.y, side }; render();            // pose au centre (mode auto)
+          if (placeMode === "click") { activePortId = (activePortId === p.id) ? null : p.id; render(); return; }   // active (les autres ports deviennent des pastilles de référence)
+          markDirty(); place[p.id] = { x: 0.5, y: 0.5, side }; render();            // pose au centre de la face (mode auto, sans aimantation)
         };
         palette.appendChild(c);
       });
       applyZoom();   // ré-applique zoom/pan au frame reconstruit
     }
-    // MODE 2 CLICS : un port ACTIVÉ se pose au clic sur la face (à l'endroit cliqué ; snap grille si active).
+    // MODE 2 CLICS : un port ACTIVÉ se pose au clic sur la face, à la position AIMANTÉE (FaceAlign au point cliqué ;
+    // Alt = position libre). Un APERÇU (pastille fantôme + guides) suit le curseur pendant le survol du stage.
     stage.addEventListener("click", (e) => {
       if (placeMode !== "click" || !activePortId) return;
       const rect = stage.getBoundingClientRect();
-      const s = snapToGrid((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
-      markDirty(); place[activePortId] = { x: s.x, y: s.y, side }; activePortId = null; render();
+      const res = alignAt((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height, activePortId, (e as MouseEvent).altKey);
+      markDirty(); place[activePortId] = { x: res.x, y: res.y, side }; activePortId = null; clearGhost(); render();
     });
+    stage.addEventListener("pointermove", (e) => {
+      if (placeMode !== "click" || !activePortId) return;
+      const rect = stage.getBoundingClientRect();
+      const res = alignAt((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height, activePortId, e.altKey);
+      if (!ghostDot) { ghostDot = document.createElement("div"); ghostDot.className = "face-dot ghost"; stage.appendChild(ghostDot); }
+      ghostDot.style.left = (res.x * 100) + "%"; ghostDot.style.top = (res.y * 100) + "%";
+      drawGuides(res);
+    });
+    stage.addEventListener("pointerleave", clearGhost);
     const syncModes = () => {
       placeBtn.className = "btn btn-sm " + (placeMode === "click" ? "btn-primary" : "btn-ghost");
       leaderBtn.className = "btn btn-sm " + (portDisplay === "leader" ? "btn-primary" : "btn-ghost");
     };
     placeBtn.onclick = () => { placeMode = placeMode === "click" ? "auto" : "click"; activePortId = null; syncModes(); render(); };
     leaderBtn.onclick = () => { portDisplay = portDisplay === "leader" ? "chip" : "leader"; syncModes(); render(); };   // change aussi la marge verticale (bande)
-    gridSel.onchange = () => { const g = FACE_GRID_PRESETS.find((x) => x.id === gridSel.value); grid = (g && g.cols) ? { cols: g.cols, rows: g.rows } : null; render(); };
-    gridShowBtn.onclick = () => { gridVisible = !gridVisible; render(); };
     addAllBtn.onclick = () => { markDirty(); layoutUniform(ports.filter((p) => !place[p.id] || place[p.id].side === side)); render(); };
     removeAllBtn.onclick = () => { markDirty(); ports.forEach((p) => { if (place[p.id] && place[p.id].side === side) delete place[p.id]; }); render(); };
     detachBtn.onclick = () => { markDirty(); fids[side] = null; render(); };
