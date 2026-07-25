@@ -548,13 +548,30 @@ export class DcThreeScene extends DcThreeCamera {
       const b = RackGeometry.wallEquipBoxLocal(r, e);
       this.localBox(group, b.x0, b.x1, b.y0, b.y1, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
     });
-    // équipements POSÉS sur les étagères (tray) de la baie : boîtes pleines sur le plateau, cliquables.
+    // équipements POSÉS sur les étagères (tray) de la baie : boîtes pleines sur le plateau, cliquables — avec, comme
+    // les occupants U, le NOM sur les deux faces ±Y et l'IMAGE de façade front/rear. Même montage d'offsets que les
+    // occupants U (l.504-505 / 535-536) : label ET image reçoivent la coordonnée de face décalée de 0,5 mm
+    // (yLo − 0,5 / yHi + 0,5), et faceLabel ajoute EN PLUS sa propre saillie FACE_LABEL_STANDOFF_MM (0,5 mm) → le
+    // label finit à 1 mm, l'image à 0,5 mm : aucun z-fighting entre les deux.
     this.store.rackItemsOf(r.id).forEach((it: any) => {
       if (it.kind !== "tray" || it.u == null) return;
       const eqSide = it.side !== "rear" ? "front" : "rear";
       this.store.equipmentsOnTray(it.id).forEach((e: any) => {
         const b = RackGeometry.trayEquipBoxLocal(r, it, e);
-        this.localBox(group, b.x0, b.x1, Math.min(b.y0, b.y1), Math.max(b.y0, b.y1), b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
+        const yLo = Math.min(b.y0, b.y1), yHi = Math.max(b.y0, b.y1);
+        this.localBox(group, b.x0, b.x1, yLo, yHi, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
+        const bw = b.x1 - b.x0, bh = b.z1 - b.z0;
+        const xc = (b.x0 + b.x1) / 2, zc = (b.z0 + b.z1) / 2;
+        const front = it.side !== "rear";   // étagère côté avant → la FACE AVANT du device regarde −Y
+        if (e.name) {
+          this.faceLabel(group, e.name, xc, yLo - 0.5, zc, bw * 0.94, bh * 0.9, true, { eqSide });    // face −Y (avant)
+          this.faceLabel(group, e.name, xc, yHi + 0.5, zc, bw * 0.94, bh * 0.9, false, { eqSide });   // face +Y (arrière)
+        }
+        // Équipement LIBRE sur étagère : pas d'oreilles 19″ → largeur = corps, aucun trim.
+        const imgLo = this.host.faceImageUrl?.(e.id, front ? "front" : "rear");
+        const imgHi = this.host.faceImageUrl?.(e.id, front ? "rear" : "front");
+        if (imgLo) this.faceImagePlane(group, imgLo.url, xc, yLo - 0.5, zc, bw, bh, true, { layer: "faceImage", eqSide, eqId: e.id });
+        if (imgHi) this.faceImagePlane(group, imgHi.url, xc, yHi + 0.5, zc, bw, bh, false, { layer: "faceImage", eqSide, eqId: e.id });
       });
     });
 
