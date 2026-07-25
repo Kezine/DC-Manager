@@ -31,7 +31,10 @@ export class FaceEditor extends FormBase {
   /** Éditeur de FAÇADE (sous-éditeur empilé) : pose les ports sur les faces de l'équipement
       (face_x/face_y/face_side) — onglets de face, glisser avec GUIDES d'alignement dynamiques,
       « Tout poser / enlever », palette des ports non posés. `opts.onApply({fids,place})` reporte sur le brouillon du formulaire
-      parent ; sinon écrit dans le store. Les IMAGES de façade (bibliothèque IndexedDB) sont d'une phase
+      parent ; sinon écrit dans le store. `opts.onSaved()` (branche SANS onApply UNIQUEMENT) est appelée APRÈS
+      l'écriture au store : permet à un appelant EMPILÉ (ex. la fiche détail dont les aperçus lisent l'objet
+      capturé à l'ouverture) de se reconstruire avec l'état frais — sinon rien ne re-rend la vue sous le dialogue.
+      Les IMAGES de façade (bibliothèque IndexedDB) sont d'une phase
       ultérieure : on PRÉSERVE les références d'image existantes (fids) et on permet de les détacher. */
   static open(store: Store, host: FormHost, eqId: string, opts: any = {}): void {
     const eq: any = store.get("equipments", eqId);
@@ -417,6 +420,7 @@ export class FaceEditor extends FormBase {
       ports.forEach((p) => { const pos = place[p.id]; ops.push({ collection: "ports", id: p.id, patch: pos ? { face_x: pos.x, face_y: pos.y, face_side: pos.side } : { face_x: null, face_y: null } }); });
       await store.updateBatch(ops);
       host.setDirty?.(true); Notify.toast(I18n.t("face.saved"));
+      opts.onSaved?.();   // appelant empilé (fiche détail) → reconstruit sa vue avec l'état frais du store
     };
     Dialog.custom({
       title: I18n.t("face.title", { name: Html.escape(eq.name || I18n.t("face.equipName")) }), message: subtitle, wide: true,
