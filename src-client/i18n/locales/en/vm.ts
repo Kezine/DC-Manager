@@ -36,7 +36,7 @@ export const vm = {
     groupPrimary: "Primary group",
     groupPrimaryHint: "Managed in the Groups tab.",
     groupSecondary: "Secondary groups",
-    groupSecondaryHint: "Additional memberships (search + chips).",
+    groupSecondaryHint: "Additional memberships (search + chips). Enter on a new entry = create the group.",
     groupSecondaryPlaceholder: "Add a secondary group…",
     notes: "Notes",
     notesHint: "Free enrichment note (never overwritten by synchronisation).",

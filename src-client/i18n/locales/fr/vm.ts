@@ -40,7 +40,7 @@ export const vm = {
     groupPrimary: "Groupe primaire",
     groupPrimaryHint: "Gérés dans l'onglet Groupes.",
     groupSecondary: "Groupes secondaires",
-    groupSecondaryHint: "Appartenances additionnelles (recherche + pastilles).",
+    groupSecondaryHint: "Appartenances additionnelles (recherche + pastilles). Entrée sur une saisie inédite = créer le groupe.",
     groupSecondaryPlaceholder: "Ajouter un groupe secondaire…",
     notes: "Notes",
     notesHint: "Note libre d'enrichissement (jamais écrasée par la synchronisation).",

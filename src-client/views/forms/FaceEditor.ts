@@ -170,10 +170,24 @@ export class FaceEditor extends FormBase {
     };
     const faceWH = (f: string) => FreeEquipGeometry.faceWH(eq, f);   // dimensions par face (mutualisé, cf. FreeEquipGeometry)
     const faceWHof = (f: string) => isFree ? faceWH(f) : { W: 19, H: 1.75 * Math.max(1, (eq.u_height | 0) || 1) };   // baie = 19″ × hauteur U
-    // MARGE VERTICALE (mode « étiquettes déportées ») : quand la face est ≥2× plus large que haute, on étend la
-    // zone d'édition de +100% de la hauteur de face EN HAUT et EN BAS ; les étiquettes déportées y logent, la
-    // façade reste dans la bande CENTRALE. Sinon (mode chip ou face non large) : aucune marge (bande = tout le frame).
-    const vMargin = (f: string) => { const wh = faceWHof(f); return (portDisplay === "leader" && wh.W / wh.H >= 2) ? 1 : 0; };
+    // MARGE VERTICALE du frame = MAX de DEUX besoins indépendants, tous deux propres aux faces PLUS LARGES que
+    // hautes (rubans plats). La façade occupe toujours la bande CENTRALE ; les marges haut/bas servent selon le cas :
+    //  1) ÉTIQUETTES DÉPORTÉES (mode leader, W/H ≥ 2) : +100 % en haut ET en bas → frame = 3× la hauteur de face,
+    //     les étiquettes déportées y logent.
+    //  2) ESPACE DE TRAVAIL (W > H) : porte le frame — donc le viewport, qui l'épouse (cf. CSS .face-viewport) — à
+    //     2× la hauteur AFFICHÉE de la face (marge +50 % de chaque côté → frame = 2× la face), la façade centrée
+    //     verticalement. Sinon, sur une face très large/plate (ex. 1U 19″) le clip colle à la façade : aucune marge
+    //     pour zoomer/paner à l'aise. On étend le FRAME (plutôt que centrer un frame plus petit dans un viewport
+    //     plus grand) pour garder l'origine du frame au coin haut-gauche du viewport → maths de zoom/pan (origine
+    //     0 0, coords sur le rect du viewport) et de placement (coords sur le rect du stage) inchangées.
+    // En mode leader large, le besoin 1 (3× face ≥ 2× face) DOMINE → pas de double ajout. Sinon (face carrée ou
+    // plus haute que large) : aucune marge (bande = tout le frame), comportement inchangé.
+    const vMargin = (f: string) => {
+      const wh = faceWHof(f);
+      const leaderMargin = (portDisplay === "leader" && wh.W / wh.H >= 2) ? 1 : 0;   // marges pour les étiquettes déportées
+      const workspaceMargin = (wh.W > wh.H) ? 0.5 : 0;                               // frame = face × (1 + 2×0.5) = 2× face
+      return Math.max(leaderMargin, workspaceMargin);
+    };
     const bandTop = (f: string) => { const m = vMargin(f); return m / (1 + 2 * m); };   // fraction : haut de la façade dans le frame
     const bandH = (f: string) => { const m = vMargin(f); return 1 / (1 + 2 * m); };      // fraction : hauteur de la façade dans le frame
     // Dimensionne le FRAME en PRÉSERVANT le ratio de la face (libre = dims réelles ; baie = 19″ × hauteur U), marges

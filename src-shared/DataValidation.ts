@@ -484,6 +484,9 @@ const SPEC_FIELDS = {
       // NB : les FK face_image_* visent le magasin d'images (hors modèle) → pas de `ref` (collection non modélisée).
   },
   cables: {
+      // IDENTITÉ : nom du câble — trimé pour une unicité FIABLE (V6h, même raison que le nom d'équipement V6g).
+      // PAS `required` : des câbles sans nom existent et restent légaux — seule l'UNICITÉ des noms NON VIDES est imposée.
+      name:          { type: "string", trim: true },
       cable_type_id: { type: "string", nullable: true, default: null, ref: "cableTypes" },
       from_port_id:  { type: "string", nullable: true, default: null, ref: "ports" },
       to_port_id:    { type: "string", nullable: true, default: null, ref: "ports" },
@@ -795,6 +798,16 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       },
     ],
     scope: [
+      // V6h : NOM de câble UNIQUE (non vide) dans le document — post-trim, comparaison EXACTE. MÊME mécanisme que
+      // V6g (nom d'équipement) / V6a (adresse IP) : lecture par `find` (conscient du lot), l'entité s'EXCLUANT
+      // elle-même par `id`. La casse reste DISCRIMINANTE (« Patch-A » / « patch-a » restent deux noms légaux) —
+      // l'unicité ne juge que l'égalité exacte. Un nom VIDE est toléré en multiple (câbles sans nom légaux, cf.
+      // champ `name` non `required`) : d'où le `if (!name) return null`.
+      (cable, find) => {
+        if (!cable.name) return null;
+        const duplicate = find("cables", "name", cable.name).some((other) => other.id !== cable.id);
+        return duplicate ? { path: "name", message: `Le nom « ${cable.name} » est déjà utilisé par un autre câble.` } : null;
+      },
       // PORTÉE (V6b) : 1 câble par port — aucun AUTRE câble ne référence ce port (côté `from` OU `to`).
       (cable, find) => {
         for (const [path, portId] of [["from_port_id", cable.from_port_id], ["to_port_id", cable.to_port_id]] as const) {

@@ -1,5 +1,7 @@
 import type { Store } from "../../store";
 import { FormControls } from "../../ui/FormControls";
+import { IconButton } from "../../ui/IconButton";
+import { Icons } from "../../ui/Icons";
 import { LiveValidation } from "./LiveValidation";
 import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
@@ -137,6 +139,12 @@ export class CableForms extends EquipmentForms {
     const selEqA = FormControls.select(eqOpts(null, eqA, null), eqA);
     const selPortA = FormControls.select(portOpts(eqA, initPortA || null, null), initPortA);
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("cable.cable.equipA"), selEqA), FormControls.fieldRow(I18n.t("cable.cable.portA"), selPortA)));
+    // INVERSION A ⇄ B : bouton-icône DISCRET, centré entre les deux rangées symétriques. Il permute équipements
+    // ET ports du BROUILLON (aucune écriture store avant Enregistrer). Le clic est câblé plus bas (`swapEnds`),
+    // une fois définies les fonctions de resynchronisation (refresh/syncRoute/syncStatus/renderNets) qu'il réutilise.
+    const swapBtn = IconButton.build({ icon: Icons.SWAP, label: I18n.t("cable.cable.swapEnds") });
+    const swapRow = document.createElement("div"); swapRow.style.cssText = "display:flex;justify-content:center;margin:-2px 0 2px;";
+    swapRow.appendChild(swapBtn); root.appendChild(swapRow);
     const selEqB = FormControls.select(eqOpts(null, eqB, null), eqB);
     const selPortB = FormControls.select(portOpts(eqB, initPortB || null, null), initPortB);
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("cable.cable.equipB"), selEqB), FormControls.fieldRow(I18n.t("cable.cable.portB"), selPortB)));
@@ -311,10 +319,31 @@ export class CableForms extends EquipmentForms {
     selPortB.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
     selType.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
 
+    // INVERSION A ⇄ B : mémorise les 4 valeurs puis les échange. On reconstruit d'abord les options
+    // d'ÉQUIPEMENT sans contrainte de famille en gardant la valeur échangée (`keepEqId` → l'option reste
+    // présente même si le filtre l'aurait exclue), puis les options de PORT du nouvel équipement (`portOpts`
+    // conserve toujours le port sélectionné, même hors filtre famille), avant de re-sélectionner. Enfin
+    // `refresh()` ré-applique les contraintes famille/salle en préservant ces valeurs — EXACTEMENT l'état
+    // qu'aurait produit un double changement manuel. Cas « bout vide » géré nativement : un côté à "" déplace
+    // simplement le bout rempli vers l'autre (les valeurs "" restent sélectionnables). Aucune écriture store.
+    const swapEnds = () => {
+      const aEq = selEqA.value, aPort = selPortA.value, bEq = selEqB.value, bPort = selPortB.value;
+      FormUi.setOptions(selEqA, eqOpts(null, bEq, null), bEq);
+      FormUi.setOptions(selEqB, eqOpts(null, aEq, null), aEq);
+      FormUi.setOptions(selPortA, portOpts(bEq, bPort || null, null), bPort);
+      FormUi.setOptions(selPortB, portOpts(aEq, aPort || null, null), aPort);
+      refresh(); syncRoute(); syncStatus(true); renderNets();
+    };
+    swapBtn.onclick = swapEnds;
+
     refresh(); syncWpOrder(); renderNets(); syncRoute(); syncStatus(false);
 
     // validation live (invariant câble partagé : un port ne se relie pas à lui-même) — surligne le port B.
-    const cableLive = new LiveValidation("cables", { from_port_id: selPortA, to_port_id: selPortB, status: statusSel });
+    // `name` mappé pour que l'unicité V6h (règle de PORTÉE) puisse surligner le champ si l'autorité la signale.
+    // NB : `cableLive` ne reçoit ni `fetch` ni `find` → les règles de portée NE tournent PAS en live (comme V6g
+    // dans EquipmentForms) ; l'unicité du nom est jouée au SAVE par le Store/serveur (create/update → null →
+    // toast d'échec). Le mapping reste utile si un `find` est un jour injecté ici.
+    const cableLive = new LiveValidation("cables", { name: nameI, from_port_id: selPortA, to_port_id: selPortB, status: statusSel });
     cableLive.clearOnInput();
 
     host.openModal({

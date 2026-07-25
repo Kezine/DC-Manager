@@ -525,6 +525,45 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : nom de câble — trim (normalisation) + unicité V6h (miroir V6g)", async () => {
+  {
+    const DV = Validation.DataValidator;
+    // -- TRIM à la normalisation : `cables.name` est désormais un champ déclaré (trim opt-in). --
+    ck.eq(DV.normalizeRecord("cables", { name: "  patch-A12  " }).name, "patch-A12", "trim câble : « ␠patch-A12␠ » → « patch-A12 »");
+    // Nom ABSENT toléré (name NON `required`) → aucune erreur intrinsèque (au contraire de l'équipement).
+    ck.eq(DV.normalizeAndValidate("cables", { status: "planifie" }).errors.some((e) => e.path === "name" && e.code === "required"), false, "câble sans nom → pas de 'required' (câbles anonymes légaux)");
+
+    // -- UNICITÉ V6h : même mécanisme que V6g/V6a (find conscient du lot, comparaison EXACTE, self-exclue). --
+    // find simulé EXACT (parité findBy SQL / scan store) : un câble « patch-A12 » déjà persisté (id C1).
+    const persisted = [{ id: "C1", name: "patch-A12" }];
+    const find = (coll, field, value) => (coll === "cables" && field === "name") ? persisted.filter((r) => r.name === value) : [];
+    // SANS find → aucun contrôle de portée.
+    ck.eq(DV.validateRecord("cables", { id: "CX", status: "planifie", name: "patch-A12" }).some((e) => e.code === "scope"), false, "V6h : sans find → pas de contrôle d'unicité");
+    // Création d'un nom déjà pris → conflit rattaché à `name`.
+    ck.eq(DV.validateRecord("cables", { id: "CX", status: "planifie", name: "patch-A12" }, undefined, find).some((e) => e.code === "scope" && e.path === "name"), true, "V6h : nom déjà utilisé (création) → 'scope'");
+    // Édition d'un AUTRE câble VERS un nom déjà pris → conflit.
+    ck.eq(DV.validateRecord("cables", { id: "C2", status: "planifie", name: "patch-A12" }, undefined, find).some((e) => e.code === "scope"), true, "V6h : édition vers un nom pris → 'scope'");
+    // « Sauf moi-même » : ré-enregistrer C1 avec son propre nom → OK.
+    ck.eq(DV.validateRecord("cables", { id: "C1", status: "planifie", name: "patch-A12" }, undefined, find).some((e) => e.code === "scope"), false, "V6h : même câble garde son nom → OK");
+    // Nom libre → OK.
+    ck.eq(DV.validateRecord("cables", { id: "CX", status: "planifie", name: "patch-Z99" }, undefined, find).some((e) => e.code === "scope"), false, "V6h : nom libre → OK");
+    // NOM VIDE toléré en MULTIPLE : plusieurs câbles sans nom coexistent (name non `required`).
+    const anon = [{ id: "C1", name: "" }, { id: "C2", name: "" }];
+    const findAnon = (coll, field, value) => (coll === "cables" && field === "name") ? anon.filter((r) => r.name === value) : [];
+    ck.eq(DV.validateRecord("cables", { id: "CX", status: "planifie", name: "" }, undefined, findAnon).some((e) => e.code === "scope"), false, "V6h : nom vide → jamais en conflit (câbles anonymes légaux)");
+    // TRIM + unicité : « patch-A12␠␠ » normalisé en « patch-A12 » entre en conflit avec l'existant.
+    const trimmed = DV.normalizeAndValidate("cables", { id: "CX", status: "planifie", name: "patch-A12  " }, undefined, find);
+    ck.eq(trimmed.record.name, "patch-A12", "V6h trim : « patch-A12␠␠ » → « patch-A12 »");
+    ck.eq(trimmed.errors.some((e) => e.code === "scope" && e.path === "name"), true, "V6h trim : « patch-A12␠␠ » entre en conflit avec « patch-A12 » (doublon post-trim)");
+    // CASSE DISCRIMINANTE : « PATCH-A12 » ≠ « patch-A12 » → légal (comparaison exacte).
+    ck.eq(DV.validateRecord("cables", { id: "CX", status: "planifie", name: "PATCH-A12" }, undefined, find).some((e) => e.code === "scope"), false, "V6h : casse différente (« PATCH-A12 ») ≠ « patch-A12 » → OK (unicité exacte)");
+    // Conscient du lot : deux créations du MÊME nom dans un /transact → conflit.
+    const batch = { creates: [{ collection: "cables", record: { id: "n1", status: "planifie", name: "patch-B7" } }, { collection: "cables", record: { id: "n2", status: "planifie", name: "patch-B7" } }] };
+    const batchFind = DV.buildBatchChildFinder(find, batch);
+    ck.eq(DV.validateRecord("cables", { id: "n1", status: "planifie", name: "patch-B7" }, undefined, batchFind).some((e) => e.code === "scope"), true, "V6h batch : doublon créé dans le lot → 'scope'");
+  }
+  });
+
   await section("shared : portée V6b (1 câble/port, intervalles DHCP)", async () => {
   {
     const DV = Validation.DataValidator;

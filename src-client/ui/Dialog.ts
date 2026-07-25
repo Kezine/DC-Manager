@@ -58,7 +58,11 @@ export class Dialog {
       } = opts || {};
       const prevFocus = document.activeElement as HTMLElement | null;
       const overlay = document.createElement("div");
-      overlay.className = "dialog-overlay";
+      // `dialog-overlay-wide` marque les GRANDS dialogues empilés (sous-éditeurs, cf. Dialog.custom({wide}))
+      // pour que la préférence « modales plein écran » (html[data-modal-fs]) les étire comme la Modal — une
+      // classe sur l'overlay est plus robuste qu'un sélecteur `:has(.dialog-wide)`. Les petits dialogues
+      // (confirm/alert/prompt, non-wide) n'ont PAS cette classe → restent centrés et compacts.
+      overlay.className = "dialog-overlay" + (wide ? " dialog-overlay-wide" : "");
       overlay.style.zIndex = String(300 + Dialog.stack.length * 10);
       const box = document.createElement("div");
       box.className = "dialog-box" + (wide ? " dialog-wide" : "");

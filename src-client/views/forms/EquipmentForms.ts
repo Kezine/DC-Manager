@@ -573,6 +573,17 @@ export class EquipmentForms extends FormBase {
     const secondaryGroups = ChipsInput.build({
       items: groupItems, value: initSecondary, placeholder: I18n.t("equipment.equip.addSecondary"),
       getLimit: () => host.autocompleteLimit ? host.autocompleteLimit() : FieldFacet.MAX_RESULTS_DEFAULT,
+      allowCreate: true,
+      // Entrée sur une saisie qui ne matche aucun groupe → CRÉE le groupe à la volée et l'ajoute en pastille.
+      // Hypothèse ASSUMÉE : le groupe est créé IMMÉDIATEMENT dans le store (payload calqué sur EquipmentForms.group :
+      // type DEFAULT, couleur/description vides) → il SURVIT à l'annulation de ce formulaire, exactement comme
+      // « créer via la modale Groupes puis annuler ». `store.create` est async → onCreate renvoie une Promise.
+      onCreate: async (label: string) => {
+        const created: any = await store.create("groups", { label: label.trim(), type: GroupTypes.DEFAULT, color: null, description: "" });
+        if (!created || !created.id) return null;
+        host.setDirty?.(true); Notify.toast(I18n.t("equipment.group.created"));
+        return created.id;
+      },
     });
     root.appendChild(FormControls.fieldRow(I18n.t("equipment.equip.secondaryGroups"), secondaryGroups.element, I18n.t("equipment.equip.secondaryHint")));
     // choisir le primaire le retire des secondaires (un groupe ne peut être primaire ET secondaire).

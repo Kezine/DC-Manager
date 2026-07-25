@@ -3,6 +3,7 @@ import { Icons } from "../../ui/Icons";
 import { FormControls } from "../../ui/FormControls";
 import { ChipsInput, ChipItem } from "../../ui/ChipsInput";
 import { FieldFacet } from "../../core/FieldFacet";
+import { GroupTypes } from "../../domain/GroupTypes";
 import { Notify } from "../../ui/Notify";
 import { Html } from "../../core/Html";
 import { VmNetMapping } from "../../core/VmNetMapping";
@@ -184,6 +185,15 @@ export class VmForms {
     const secondaryGroups = ChipsInput.build({
       items: groupItems, value: initSecondary, placeholder: I18n.t("vm.edit.groupSecondaryPlaceholder"),
       getLimit: () => host.autocompleteLimit ? host.autocompleteLimit() : FieldFacet.MAX_RESULTS_DEFAULT,
+      allowCreate: true,
+      // Création de groupe À LA VOLÉE (Entrée) — PARITÉ STRICTE avec EquipmentForms (principe n°3, même collection
+      // `groups`). Groupe créé IMMÉDIATEMENT dans le store (survit à l'annulation de ce formulaire) ; toast partagé.
+      onCreate: async (label: string) => {
+        const created: any = await store.create("groups", { label: label.trim(), type: GroupTypes.DEFAULT, color: null, description: "" });
+        if (!created || !created.id) return null;
+        host.setDirty?.(true); Notify.toast(I18n.t("equipment.group.created"));
+        return created.id;
+      },
     });
     root.appendChild(FormControls.fieldRow(I18n.t("vm.edit.groupSecondary"), secondaryGroups.element, I18n.t("vm.edit.groupSecondaryHint")));
     // choisir le primaire le retire des secondaires (un groupe ne peut être primaire ET secondaire).

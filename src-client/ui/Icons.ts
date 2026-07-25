@@ -89,6 +89,11 @@ export class Icons {
   /** Rechercher : loupe. Icône INTÉGRÉE au champ de recherche des barres de listing (revue design lot C). */
   static readonly SEARCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>';
 
+  /** Inverser / échanger deux valeurs (remplace le glyphe `⇅`) : deux flèches verticales de sens opposés.
+      Intention « PERMUTER » (ex. inverser les extrémités A ⇄ B d'un câble) — distincte de RENEW (cycle) et
+      d'IMPORT/EXPORT (transfert vers/depuis un bac). */
+  static readonly SWAP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"/><path d="M4 7l3-3 3 3"/><path d="M17 20V4"/><path d="M14 17l3 3 3-3"/></svg>';
+
   /* ------------------------------------------------------------------------
      ÉTAT / MÉTADONNÉES — verrou, défaut (étoile), identité.
      ------------------------------------------------------------------------ */
