@@ -579,6 +579,34 @@ const SPEC_FIELDS = {
   },
   datacenters: {
       name: { type: "string", required: true },
+      // DIMENSIONS de la salle (grille au sol) — défauts ALIGNÉS sur le formulaire de salle (RackForms.datacenter :
+      // largeur 6000 / profondeur 4000 / maille 600 mm). NB : le constructeur front Datacenter.ts emploie
+      // DC_DEPTH_DEFAULT = 6000 pour la profondeur ; ce défaut de spec ne s'applique qu'à une écriture OMETTANT le
+      // champ (le formulaire, lui, poste toujours une valeur), et le rendu lit la valeur RÉELLE du record — la
+      // divergence de défaut est donc sans incidence. Trou de spec comblé (V6h pour l'existant : régularisation).
+      width_mm: { type: "number", min: 1, default: 6000 },
+      depth_mm: { type: "number", min: 1, default: 4000 },
+      cell_mm:  { type: "number", min: 1, default: 600 },
+      // LOCALISATION (héritée par les baies / équipements LIBRES posés dans la salle) — chaînes libres, vides par défaut.
+      location: { type: "string", default: "" },
+      floor:    { type: "string", default: "" },
+      room:     { type: "string", default: "" },
+      // PLACEMENT sur le PLAN D'ÉTAGE (coin haut-gauche de l'emprise). null = auto (centré par FloorLayout).
+      floor_x:  { type: "number", nullable: true, default: null },
+      floor_y:  { type: "number", nullable: true, default: null },
+      // ORIENTATION sur le plan d'étage : valeurs MÉTIER 0/90/180/270 (cf. Normalize.rackOrientation). Le validateur
+      // ne gère pas l'enum NUMÉRIQUE (FieldSpec.enum = chaînes) → contrainte la PLUS PROCHE exprimable : min 0 (angle
+      // non négatif). La normalisation FINE aux 4 quadrants reste faite côté client (Datacenter.ts / Normalize).
+      floor_orientation: { type: "number", min: 0, default: 0 },
+      // HAUTEUR DE LA SALLE (plafond, mm) — stockée pour usage FUTUR, AUCUN comportement de rendu. DISTINCTE de
+      // floors.height_mm (hauteur d'ÉTAGE, collection SÉPARÉE) : aucune collision de nom, sémantiques différentes.
+      height_mm:     { type: "number", nullable: true, default: null, min: 1 },
+      // HAUTEUR SOUS PLANCHER technique (mm) — le faux-plancher surélevé où posent les baies ; null = pas de plancher
+      // technique. Consommée par le rendu 3D (dalle structurelle bleutée sous la salle — cf. DcThreeScene.buildUnderfloorSlab).
+      underfloor_mm: { type: "number", nullable: true, default: null, min: 1 },
+      // PASSTHROUGH ASSUMÉS (non déclarés — cf. doctrine « Passthrough INTENTIONNELS » en tête de fichier) : `doors`
+      // (tableau d'OBJETS value-object — non exprimable par FieldType, normalisé par Normalize.dcDoors côté client) et
+      // `blocked_cells` (tableau de clés « cx,cy » de cellules inaccessibles, normalisé par Normalize.cellList).
   },
   waypoints: {
       name:          { type: "string" },

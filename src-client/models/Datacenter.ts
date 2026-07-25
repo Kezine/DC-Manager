@@ -26,6 +26,12 @@ export class Datacenter extends Entity implements Records.Datacenter {
   floor_y: number | null;
   /** Orientation de la salle sur le plan d'étage (0/90/180/270). */
   floor_orientation: number;
+  /** Hauteur de la salle (plafond, mm). null = non définie. Stockée pour usage FUTUR — aucun rendu pour l'instant.
+      DISTINCTE de floors.height_mm (hauteur d'ÉTAGE, collection séparée). */
+  height_mm: number | null;
+  /** Hauteur sous plancher technique (mm) — faux-plancher surélevé où posent les baies. null = pas de plancher
+      technique. Consommée par le rendu 3D (dalle bleutée sous la salle). */
+  underfloor_mm: number | null;
   /** Cases INACCESSIBLES de la grille de racks (clés "cx,cy"). */
   blocked_cells: string[];
   /** PORTES de la salle (collées aux murs) — value-objects ; la porte « vit dans la salle » (pas de collection externe). */
@@ -43,6 +49,9 @@ export class Datacenter extends Entity implements Records.Datacenter {
     this.floor_x = (p.floor_x != null) ? +p.floor_x : null;
     this.floor_y = (p.floor_y != null) ? +p.floor_y : null;
     this.floor_orientation = Normalize.rackOrientation(p.floor_orientation);
+    // Hauteurs OPTIONNELLES (vide = null) : entier ≥ 1 sinon null — parité avec le champ hauteur d'une baie.
+    this.height_mm = (p.height_mm != null && p.height_mm !== "") ? Math.max(1, p.height_mm | 0) : null;
+    this.underfloor_mm = (p.underfloor_mm != null && p.underfloor_mm !== "") ? Math.max(1, p.underfloor_mm | 0) : null;
     this.blocked_cells = Normalize.cellList(p.blocked_cells);
     this.doors = Normalize.dcDoors(p.doors);
   }

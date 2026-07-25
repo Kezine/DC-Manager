@@ -266,6 +266,34 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : salle (datacenters) — dimensions déclarées + hauteurs nullables + passthrough doors", async () => {
+  {
+    const V = Validation.DataValidator;
+    // DÉFAUTS posés par la normalisation quand le champ est ABSENT (une écriture tierce peut omettre les dimensions).
+    const n = V.normalizeRecord("datacenters", { name: "Salle A" });
+    ck.eq(n.width_mm, 6000, "normalize datacenters : width_mm défaut → 6000");
+    ck.eq(n.depth_mm, 4000, "normalize datacenters : depth_mm défaut → 4000");
+    ck.eq(n.cell_mm, 600, "normalize datacenters : cell_mm défaut → 600");
+    ck.eq(n.location, "", "normalize datacenters : location défaut → ''");
+    ck.eq(n.floor_x, null, "normalize datacenters : floor_x défaut → null (nullable)");
+    ck.eq(n.floor_orientation, 0, "normalize datacenters : floor_orientation défaut → 0");
+    // COERCITION numérique (une chaîne « 5000 » d'un POST tiers devient un nombre).
+    ck.eq(V.normalizeRecord("datacenters", { name: "X", width_mm: "5000" }).width_mm, 5000, "normalize datacenters : width_mm '5000' → 5000 (number)");
+    // HAUTEURS nullables : vide → null ; valeur conservée / coercée.
+    ck.eq(n.height_mm, null, "normalize datacenters : height_mm défaut → null");
+    ck.eq(n.underfloor_mm, null, "normalize datacenters : underfloor_mm défaut → null");
+    ck.eq(V.normalizeRecord("datacenters", { name: "X", underfloor_mm: "300" }).underfloor_mm, 300, "normalize datacenters : underfloor_mm '300' → 300");
+    ck.eq(V.validateRecord("datacenters", { name: "X", height_mm: null, underfloor_mm: null }).length, 0, "validate datacenters : hauteurs null → OK (nullable)");
+    ck.eq(V.validateRecord("datacenters", { name: "X", height_mm: 2600, underfloor_mm: 400 }).length, 0, "validate datacenters : hauteurs > 0 → OK");
+    // BORNE min ≥ 1 : 0 est refusé (dimension et hauteur sous plancher).
+    ck(V.validateRecord("datacenters", { name: "X", underfloor_mm: 0 }).some((e) => e.path === "underfloor_mm" && e.code === "min"), "validate datacenters : underfloor_mm 0 → erreur 'min'");
+    ck(V.validateRecord("datacenters", { name: "X", width_mm: 0 }).some((e) => e.path === "width_mm" && e.code === "min"), "validate datacenters : width_mm 0 → erreur 'min'");
+    // PASSTHROUGH assumé : `doors` (tableau d'OBJETS) traversé INCHANGÉ par la normalisation (non déclaré).
+    const doors = [{ id: "d1", wall: "top", offset_mm: 100 }];
+    ck.eq(JSON.stringify(V.normalizeRecord("datacenters", { name: "X", doors }).doors), JSON.stringify(doors), "normalize datacenters : doors (objets) traversés inchangés (passthrough)");
+  }
+  });
+
   await section("shared : validation intrinsèque (requis / type / enum / borne)", async () => {
   {
     ck.eq(Validation.DataValidator.validateRecord("equipments", { name: "sw", type: "switch", depth: "full", placement_mode: "manual", u_height: 1, inventory_only: false, group_id: null }).length, 0,
