@@ -980,7 +980,12 @@
   .side-grid th.side-mid, .side-grid td.side-mid { width: 30px; background: var(--bg-3); color: var(--fg-dimmer); font-size: 9px; text-align: center; border-left: 1px solid var(--line-2); border-right: 1px solid var(--line-2); }
   /* Ã©diteur de faÃ§ade d'Ã©quipement */
   .face-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-  /* viewport (fenêtre de clipping pour le zoom) → frame (transformé par zoom/pan) → stage (corps : placement) */
+  /* viewport (fenêtre de clipping pour le zoom) → frame (transformé par zoom/pan) → stage (corps : placement).
+     Le viewport ÉPOUSE la hauteur du frame (il ne fait que le contenir). Sur une face PLUS LARGE que haute,
+     applyFrameSize (FaceEditor) étend le frame de marges verticales — la façade reste dans la bande CENTRALE →
+     le viewport vaut ~2× la hauteur de face, offrant de l'espace au-dessus/en-dessous pour zoomer/paner à l'aise
+     sur un ruban plat (ex. 1U 19″). Le `max-height: 70vh` du frame borne cette hauteur (le viewport suit) — cap
+     de sécurité (en pratique les faces larges affichées restent bien en dessous). */
   .face-viewport { position: relative; overflow: hidden; margin: 0 auto; touch-action: none; }
   .face-frame { position: relative; width: 100%; max-height: 70vh; margin: 0 auto; transform-origin: 0 0; will-change: transform; }
   .face-stage { position: absolute; inset: 0; background: transparent; border: 1px solid var(--line-2); overflow: hidden; user-select: none; z-index: 2; }
@@ -1457,10 +1462,22 @@
      (en-tête/pied fixes en `flex:0 0 auto`, corps défilable en `flex:1 1 auto; overflow-y:auto`)
      est inchangée. MIROIR EXACT du bloc `@media (max-width: 760px)` plus bas (petite duplication
      ASSUMÉE : deux déclencheurs INDÉPENDANTS — préférence desktop OU petit écran — sans resize JS ;
-     garder les deux synchronisés). PÉRIMÈTRE = la Modal SEULE : les DIALOGUES (`.dialog-*`, confirm/
-     alert) restent centrés et compacts (un confirm étiré plein écran serait absurde). */
+     garder les deux synchronisés). PÉRIMÈTRE = la Modal + les GRANDS dialogues EMPILÉS (`.dialog-wide` :
+     éditeur de façade et autres sous-éditeurs d'image, ouverts via Dialog.custom({wide}) car la Modal
+     — singleton — est déjà occupée par le formulaire parent). Les PETITS dialogues (confirm/alert/prompt,
+     non-wide) restent CENTRÉS et compacts (un confirm étiré plein écran serait absurde). */
   html[data-modal-fs] .modal-overlay { padding: 0; }
   html[data-modal-fs] .modal {
+    width: 100%; max-width: none;
+    height: 100vh; height: 100dvh; max-height: none;
+    border: none; border-radius: 0;
+  }
+  /* MIROIR des règles de la Modal pour les GRANDS dialogues empilés (`.dialog-wide`, overlay marqué
+     `.dialog-overlay-wide` par Dialog.ts) : mêmes effets (overlay sans padding, boîte 100 %/100dvh,
+     contraintes levées, bordure/coins supprimés). La structure interne du dialogue (en-tête/pied
+     `flex:0 0 auto`, corps `flex:1 1 auto; overflow-y:auto`, cf. .dialog-*) défile DÉJÀ comme la Modal. */
+  html[data-modal-fs] .dialog-overlay-wide { padding: 0; }
+  html[data-modal-fs] .dialog-box.dialog-wide {
     width: 100%; max-width: none;
     height: 100vh; height: 100dvh; max-height: none;
     border: none; border-radius: 0;
@@ -1844,6 +1861,33 @@
   th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
   th.sortable:hover { color: var(--accent); }
   th .sort-ind { color: var(--accent); }
+
+  /* ============ CERTIFICATS — LISTING HIÉRARCHIQUE (arbre déployable client-side, Lot 2a-ii) ============
+     UN seul arbre remplace les deux listings paginés : la colonne « Libellé » porte la hiérarchie (chevron +
+     icône de niveau + libellé + compte d'enfants), indentée par --ind (profondeur × 22px). Couleurs et tailles
+     tirées des VARIABLES de thème → cohérence clair/sombre AUTOMATIQUE (rien de codé en dur). */
+  .tree-cell { display: flex; align-items: center; gap: 8px; }
+  .twisty {
+    --ind: 0px; margin-left: var(--ind); flex: none; width: 22px; height: 22px;
+    border: 1px solid var(--line-2); background: var(--bg); border-radius: 5px; color: var(--fg-dim);
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+    transition: transform .12s, color .12s, border-color .12s;
+  }
+  .twisty:hover { color: var(--accent); border-color: var(--accent); }
+  .twisty svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2.6; transition: transform .15s; }
+  .row-node.open > td .twisty svg { transform: rotate(90deg); }
+  .twisty.leaf { visibility: hidden; }   /* feuille : pas de chevron, mais l'espace est gardé (alignement des libellés) */
+  .node-ic { flex: none; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; }
+  .node-ic svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.9; }
+  .lvl-root .node-ic { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .lvl-mid .node-ic { color: var(--info); background: color-mix(in srgb, var(--info) 16%, transparent); }
+  .lvl-leaf .node-ic { color: var(--fg-dim); }
+  .node-label { font-weight: 600; color: var(--fg); }
+  .lvl-leaf .node-label { font-weight: 500; }
+  .node-label .tree-hl { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--fg); border-radius: 2px; padding: 0 1px; }
+  .node-count { font-size: 10px; color: var(--fg-dimmer); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; line-height: 16px; }
+  /* Ligne de compte (remplace la pagination) : « N certificat(s) · M affiché(s) ». */
+  .list-count { margin-top: 10px; font-size: 11px; color: var(--fg-dim); }
 
   /* ============ BARRE DE CONTRÔLES UNIFIÉE DES LISTINGS (revue design lot C) ============
      UNE barre par listing (ListView générique, Interventions, Certificats) : recherche EN TÊTE (extensible,
@@ -2319,9 +2363,17 @@
        `html[data-modal-fs]` (préférence desktop) près des règles `.modal` — garder les deux synchronisés.
        On lève aussi la contrainte de `.modal.wide` (max-width 920px). La structure interne (en-tête/pied
        fixes, corps défilable en dvh) est intacte → pas de double barre, pied visible clavier ouvert. Les
-       DIALOGUES (`.dialog-*`) restent CENTRÉS (périmètre = Modal seule). */
+       GRANDS dialogues empilés (`.dialog-wide`, ex. éditeur de façade) suivent AUSSI — même raison (marges
+       gâchées sur petit écran) ; les PETITS dialogues (confirm/alert/prompt) restent CENTRÉS et compacts. */
     .modal-overlay { padding: 0; }
     .modal, .modal.wide {
+      width: 100%; max-width: none;
+      height: 100vh; height: 100dvh; max-height: none;
+      border: none; border-radius: 0;
+    }
+    /* MIROIR pour les grands dialogues empilés (cf. bloc html[data-modal-fs]) — garder les deux synchronisés. */
+    .dialog-overlay-wide { padding: 0; }
+    .dialog-box.dialog-wide {
       width: 100%; max-width: none;
       height: 100vh; height: 100dvh; max-height: none;
       border: none; border-radius: 0;
