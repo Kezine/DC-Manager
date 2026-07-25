@@ -7,13 +7,20 @@
 
 - **TOUS les toggles d'affichage/masquage = bascule de visibilité** (aucune reconstruction). Chaque mesh basculable
   est tagué `userData.layer` (`port`/`name`/`door`/`doorswing`/`slot`/`faceImage`/`conduit`/`marker`/`rail`/
-  `floorgrid`/`orient`/`rackshell`), `userData.eqSide` (`front`/`rear`) et/ou `userData.rackId` (masquage de baie).
+  `floorgrid`/`orient`/`rackshell`/`racklabel`), `userData.eqSide` (`front`/`rear`) et/ou `userData.rackId` (masquage de baie).
   `applyLayerVisibility()` parcourt `gRacks`/`gFree`/`gWaypoints`/`gFloorDecor` et fixe `.visible` via
   `layerVisible(userData)`. Le picking (`rayHits`) ignore les meshes masqués (three ne le fait pas tout seul). Tout
   est **construit en permanence** → toggle instantané. Plus aucun `eqRebuild` dans `applyOptionsDiff`.
   - **`showRackSides`** : coque OPAQUE + capots toujours construits, couche `rackshell` (masquage = on voit dedans,
     pas de box translucide ; les arêtes restent). Les trous de capot (toit + sol) sont en couche `slot` → pilotés par
     le seul toggle « emplacements libres », indépendamment de l'affichage des capots.
+  - **`showRackNames`** : nom de la baie (`rack.name`) posé À PLAT sur le flanc gauche (−X), le flanc droit (+X) et le
+    toit (+Z), translucide et 1 mm en saillie (matériau partagé `labelMaterial` + `LABEL_STANDOFF_MM`). Couche
+    `racklabel` (toggle dédié, activé par défaut). Géométrie PURE déléguée à `RackLabelLayout` (position/rotation/taille
+    par face, rotations PROPRES non miroir, testable en Node sans THREE). RIEN sur une baie SANS capots
+    (`has_caps === false` : pas de surface réelle). Couche INDÉPENDANTE de `rackshell` — masquer les flancs tout en
+    gardant les noms les laisse « flotter » là où étaient les panneaux (accepté). Le tag `rackId` masque aussi le nom
+    quand la baie est masquée individuellement.
   - **`hidden3dRacks`** (masquage de baie) : couche `rackId` — le groupe de baie (et ses ports, hors groupe) bascule
     en visibilité. Le moteur WebGL construit TOUTES les baies (le filtrage est en visibilité, pas au build).
   - **`colorMode`** : recoloration **en place** (`applyColorMode`), pas de rebuild.

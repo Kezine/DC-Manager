@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -107,6 +107,57 @@ module.exports = async () => {
     ck(!!r.guideX && r.guideX.x === 0.5, "tolérances distinctes : X accroche (tolX 0.05)");
     ck.eq(r.guideY, null, "tolérances distinctes : Y n'accroche pas (tolY 0.01)");
     ck.eq(r.x, 0.5, "tolérances distinctes : x calé"); approx(r.y, 0.53, "tolérances distinctes : y brut");
+  }
+  });
+
+  await section("RackLabelLayout : noms de baie sur la coque (flancs + toit, pur)", async () => {
+  {
+    const w = 600, d = 1000, H = 2000, s = 1;
+    const L = RackLabelLayout.forFace("left", w, d, H, s);
+    const R = RackLabelLayout.forFace("right", w, d, H, s);
+    const T = RackLabelLayout.forFace("roof", w, d, H, s);
+
+    // POSITIONS : centre de face + standoff le long de la normale EXTÉRIEURE (le SIGNE est testé).
+    ck.eq(L.position.x, -w / 2 - s, "left : x = −w/2 − standoff (saillie en −X)");
+    ck.eq(L.position.y, 0, "left : y = 0 (centré en profondeur)");
+    ck.eq(L.position.z, H / 2, "left : z = H/2 (centré en hauteur)");
+    ck.eq(R.position.x, w / 2 + s, "right : x = +w/2 + standoff (saillie en +X)");
+    ck.eq(R.position.z, H / 2, "right : z = H/2");
+    ck.eq(T.position.x, 0, "roof : x = 0 (centré en largeur)");
+    ck.eq(T.position.y, 0, "roof : y = 0 (centré en profondeur)");
+    ck.eq(T.position.z, H + s, "roof : z = H + standoff (saillie en +Z)");
+
+    // NORMALE EXTÉRIEURE = direction du standoff : position(standoff=1) − centre(standoff=0), par face.
+    const center = (f) => RackLabelLayout.forFace(f, w, d, H, 0).position;
+    const nrm = (f, p) => ({ x: p.x - center(f).x, y: p.y - center(f).y, z: p.z - center(f).z });
+    const nL = nrm("left", L.position), nR = nrm("right", R.position), nT = nrm("roof", T.position);
+    ck.eq(JSON.stringify(nL), JSON.stringify({ x: -s, y: 0, z: 0 }), "left : normale extérieure = −X");
+    ck.eq(JSON.stringify(nR), JSON.stringify({ x: s, y: 0, z: 0 }), "right : normale extérieure = +X");
+    ck.eq(JSON.stringify(nT), JSON.stringify({ x: 0, y: 0, z: s }), "roof : normale extérieure = +Z");
+    ck(JSON.stringify(nL) !== JSON.stringify(nR) && JSON.stringify(nR) !== JSON.stringify(nT) && JSON.stringify(nL) !== JSON.stringify(nT), "les 3 faces ont des normales DISTINCTES");
+
+    // TAILLES : bandes de texte centrées, > 0, bornées (h ≤ w = bande basse), flancs bornés par H·0.9.
+    ck.eq(L.size.w, d * 0.8, "left : largeur = 0.8·profondeur");
+    ck.eq(L.size.h, Math.min(H * 0.9, d * 0.8 * 0.22), "left : hauteur = min(H·0.9, bande)");
+    ck.eq(R.size.w, d * 0.8, "right : largeur = 0.8·profondeur");
+    ck.eq(T.size.w, w * 0.8, "roof : largeur = 0.8·largeur baie");
+    ck.eq(T.size.h, w * 0.8 * 0.22, "roof : hauteur = ratio·largeur");
+    [L, R, T].forEach((p, i) => { ck(p.size.w > 0 && p.size.h > 0, "taille strictement positive (face " + i + ")"); ck(p.size.h <= p.size.w, "bande basse : h ≤ w (face " + i + ")"); });
+    // baie BASSE (H petit) → hauteur de flanc bornée à H·0.9 (et non la bande, plus grande).
+    const low = RackLabelLayout.forFace("left", w, d, 100, s);
+    ck.eq(low.size.h, 100 * 0.9, "flanc baie basse : hauteur bornée à H·0.9");
+
+    // ROTATIONS : angle FINI, axes NON NULS et DISTINCTS ; flancs = axes symétriques (lecture non miroir des deux côtés).
+    [L, R, T].forEach((p, i) => {
+      ck(Number.isFinite(p.angle), "angle fini (face " + i + ")");
+      ck(p.axis.x * p.axis.x + p.axis.y * p.axis.y + p.axis.z * p.axis.z > 0, "axe non nul (face " + i + ")");
+    });
+    ck.eq(L.angle, (2 * Math.PI) / 3, "left : angle 2π/3");
+    ck.eq(R.angle, (2 * Math.PI) / 3, "right : angle 2π/3");
+    ck.eq(T.angle, Math.PI, "roof : angle π (rotation autour de la normale)");
+    const ax = (p) => JSON.stringify(p.axis);
+    ck(ax(L) !== ax(R) && ax(R) !== ax(T) && ax(L) !== ax(T), "les 3 faces ont des axes de rotation DISTINCTS");
+    ck(L.axis.x === R.axis.x && L.axis.y === -R.axis.y && L.axis.z === -R.axis.z, "flancs : axes symétriques (x égal, y/z opposés)");
   }
   });
 

@@ -9,6 +9,7 @@ import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { RackGeometry } from "../../../geometry/RackGeometry";
 import { RackDoorGeometry } from "../../../geometry/RackDoorGeometry";
 import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
+import { RackLabelLayout } from "../../../geometry/RackLabelLayout";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
 import { CableSpline } from "../../../geometry/CableSpline";
@@ -21,6 +22,7 @@ import { U_MM, RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EA
 import { Format } from "../../../core/Format";
 import type { Vec3 } from "../shared";
 import { DcThreeCamera } from "./DcThreeCamera";
+import { LABEL_STANDOFF_MM } from "./DcThreeBase";   // saillie anti z-fighting partagée (labels d'équipement + de baie)
 import type { DcThreeOptions, RoomDesc, SceneCtx, Theme } from "./DcThreeBase";
 
 export type { DcThreeOptions } from "./DcThreeBase";
@@ -342,7 +344,7 @@ export class DcThreeScene extends DcThreeCamera {
     if (!u) return true;
     const o = this.opts;
     if (u.rackId && o.hiddenRacks && o.hiddenRacks.has(u.rackId)) return false;   // baie masquée → tout son contenu (groupe + ports)
-    const on: Record<string, boolean> = { port: !!o.showPorts, name: !!o.showEqNames, door: !!o.showDoors, doorswing: !!o.showDoorSwing, slot: !!o.showPlaceholders, faceImage: !!o.showFaceImages, conduit: !!o.showConduits, marker: !!o.showWaypoints, rail: !!(o.showWaypoints || o.showConduits), floorgrid: !!o.showFloorGrid, orient: !!o.showOrientMarks, rackshell: !!o.showRackSides,
+    const on: Record<string, boolean> = { port: !!o.showPorts, name: !!o.showEqNames, door: !!o.showDoors, doorswing: !!o.showDoorSwing, slot: !!o.showPlaceholders, faceImage: !!o.showFaceImages, conduit: !!o.showConduits, marker: !!o.showWaypoints, rail: !!(o.showWaypoints || o.showConduits), floorgrid: !!o.showFloorGrid, orient: !!o.showOrientMarks, rackshell: !!o.showRackSides, racklabel: !!o.showRackNames,
       // numéro d'U sur les emplacements LIBRES : visible seulement si les emplacements libres ET les noms d'équipement sont affichés.
       slotlabel: !!o.showPlaceholders && !!o.showEqNames };
     let v = true;
@@ -391,7 +393,7 @@ export class DcThreeScene extends DcThreeCamera {
     // TOUS les toggles d'affichage sont en VISIBILITÉ (couches taguées, toujours construites) — AUCUN rebuild :
     // ports, noms, portes, débattement, emplacements, images, masquage av/ar, conduits, waypoints, grilles, repères,
     // capots/parois (rackshell) et masquage de baies (hidden3dRacks).
-    const eqVis = old.showPorts !== opts.showPorts || old.showEqNames !== opts.showEqNames || old.showDoors !== opts.showDoors || old.showDoorSwing !== opts.showDoorSwing || old.hideFrontEq !== opts.hideFrontEq || old.hideRearEq !== opts.hideRearEq || old.showPlaceholders !== opts.showPlaceholders || old.showFaceImages !== opts.showFaceImages || old.showConduits !== opts.showConduits || old.showWaypoints !== opts.showWaypoints || old.showFloorGrid !== opts.showFloorGrid || old.showOrientMarks !== opts.showOrientMarks || old.showRackSides !== opts.showRackSides || !this.sameSet(old.hiddenRacks, opts.hiddenRacks);
+    const eqVis = old.showPorts !== opts.showPorts || old.showEqNames !== opts.showEqNames || old.showDoors !== opts.showDoors || old.showDoorSwing !== opts.showDoorSwing || old.hideFrontEq !== opts.hideFrontEq || old.hideRearEq !== opts.hideRearEq || old.showPlaceholders !== opts.showPlaceholders || old.showFaceImages !== opts.showFaceImages || old.showConduits !== opts.showConduits || old.showWaypoints !== opts.showWaypoints || old.showFloorGrid !== opts.showFloorGrid || old.showOrientMarks !== opts.showOrientMarks || old.showRackSides !== opts.showRackSides || old.showRackNames !== opts.showRackNames || !this.sameSet(old.hiddenRacks, opts.hiddenRacks);
     // baies — RECOLORATION en place (mode couleur) : aucun rebuild.
     const eqColor = old.colorMode !== opts.colorMode;
     const cb = old.showAllCables !== opts.showAllCables || old.cableSplineK !== opts.cableSplineK || old.cablePortNormal !== opts.cablePortNormal || !this.sameSet(old.selCables, opts.selCables);   // cablesOnTop NON inclus : géré en place par setCablesOnTop (pas de reconstruction)
@@ -448,6 +450,9 @@ export class DcThreeScene extends DcThreeCamera {
     const gC = RackGeometry.capGrid(r);
     this.buildCapPlate(group, r, "roof", H, w, d, gC.cell, theme);
     this.buildCapPlate(group, r, "floor", 0, w, d, gC.cell, theme);
+
+    // NOM de la baie posé à plat sur la coque (flancs ±X + toit +Z) — couche "racklabel" basculable (showRackNames).
+    this.rackShellLabels(group, r, w, d, H);
 
     // occupants U (équipements rackés + pseudo-items + brosses)
     // Convention du moteur SVG (rackInterior3D) : la face AVANT est en y = -hd (−Y).
@@ -655,6 +660,27 @@ export class DcThreeScene extends DcThreeCamera {
     });
 
     return { group, height: H };
+  }
+
+  /** Noms de baie posés À PLAT sur la COQUE : flanc gauche (−X), flanc droit (+X) et toit (+Z). Translucides et 1 mm
+      en saillie (matériau PARTAGÉ `labelMaterial` + `LABEL_STANDOFF_MM` du lot labels d'équipement). La géométrie PURE
+      (position/rotation/taille par face) est déléguée à `RackLabelLayout` (testable en Node, sans THREE) ; ici on ne
+      fait qu'appliquer THREE. RIEN sur une baie sans nom ou SANS capots (has_caps === false) : sans capot il n'y a pas
+      de surface réelle où poser le nom. Chaque plan est tagué couche "racklabel" (toggle showRackNames) + rackId
+      (masquage individuel de la baie) → bascule de visibilité sans reconstruction. */
+  protected rackShellLabels(group: THREE.Group, r: any, w: number, d: number, H: number): void {
+    if (!r.name || r.has_caps === false) return;
+    (["left", "right", "roof"] as const).forEach((face) => {
+      const L = RackLabelLayout.forFace(face, w, d, H, LABEL_STANDOFF_MM);
+      const tex = this.textTexture(r.name, L.size.w, L.size.h); if (!tex) return;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(L.size.w, L.size.h), this.labelMaterial(tex));   // matériau partagé
+      mesh.position.set(L.position.x, L.position.y, L.position.z);
+      // axe renvoyé BRUT par la géométrie pure → normalisé ici (l'angle est indépendant de la norme).
+      mesh.setRotationFromAxisAngle(new THREE.Vector3(L.axis.x, L.axis.y, L.axis.z).normalize(), L.angle);
+      mesh.userData = { layer: "racklabel", rackId: r.id };   // couche basculable (showRackNames) + masquage de baie
+      mesh.visible = this.layerVisible(mesh.userData);
+      group.add(mesh);
+    });
   }
 
   /** Plan plat (emplacement libre) au plan de montage, orienté ±Y : remplissage translucide + CADRE accent

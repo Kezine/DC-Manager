@@ -280,6 +280,7 @@ export const dc = {
     tNames: "Equipment names",
     tImages: "Face images",
     tSides: "Rack covers / side panels",
+    tRackNames: "Rack names (laid flat on the side panels and top; except capless racks)",
     tDoors: "Rack doors",
     tDoorSwing: "Door swing: projection of the opening radius on the floor (3D and room plan)",
     tSlots: "Free slots",
