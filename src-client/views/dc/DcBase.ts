@@ -526,8 +526,14 @@ export abstract class DcBase {
         };
         this.routing.interDcRoutes(m, this.cablePortNormal).forEach((rc: any) => push(rc.cable, rc.linePts, rc.straight, rc.stubAt));   // routes inter-DC (monde)
         this.trunks.interDcTrunks(m, this.cablePortNormal).forEach((rt: any) => pushTrunk(rt.bundle, rt.linePts, rt.straight, rt.stubAt));   // faisceaux inter-DC (monde)
-        // décor d'étage (plans/OOB/étiquettes) SEULEMENT en vrai multi (≥ 2 salles) → une seule salle = on ne dessine que la salle.
-        floorDecor = m.rooms.length > 1 ? this.webglFloorDecor(m) : null;
+        // DÉCOR D'ÉTAGE (plans, OOB posés, étiquettes de niveau/bâtiment) : dessiné dès qu'on est en Vue
+        // étage, SANS condition sur le nombre de salles. L'ancien seuil « ≥ 2 salles » reproduisait, une
+        // couche plus bas, l'erreur du garde-fou de la carte Datacenters : il testait la PORTÉE (combien de
+        // salles) pour décider d'un rendu qui dépend du REPÈRE. Conséquence, en Vue étage sur un document
+        // mono-salle la salle était bien posée en coordonnées bâtiment mais AUCUN plan d'étage n'apparaissait
+        // — l'utilisateur voyait donc « la même chose qu'en salle unique ». `webglFloorDecor` ne suppose rien
+        // sur le nombre de salles (il ne lit que floorPlanes/levels/buildings, tous corrects à une salle).
+        floorDecor = this.webglFloorDecor(m);
       }
     } else {
       const dc = this.current();
