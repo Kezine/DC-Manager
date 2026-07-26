@@ -521,6 +521,10 @@ export class RackForms extends CableForms {
     const dI = FormControls.number(dc ? dc.depth_mm : 4000, { min: 1, step: 100, placeholder: I18n.t("rack.datacenter.depthPlaceholder") });
     const cI = FormControls.number(dc ? dc.cell_mm : 600, { min: 1, step: 50, placeholder: I18n.t("rack.datacenter.meshPlaceholder") });
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("rack.common.widthMm"), wI), FormControls.fieldRow(I18n.t("rack.common.depthMm"), dI), FormControls.fieldRow(I18n.t("rack.datacenter.meshField"), cI)));
+    // Hauteurs OPTIONNELLES (vide = non définie) : plafond de la salle (usage futur) + hauteur sous plancher technique.
+    const hI = FormControls.number(dc && dc.height_mm != null ? dc.height_mm : "", { min: 1, step: 100, placeholder: I18n.t("rack.datacenter.heightPlaceholder") });
+    const ufI = FormControls.number(dc && dc.underfloor_mm != null ? dc.underfloor_mm : "", { min: 1, step: 50, placeholder: I18n.t("rack.datacenter.underfloorPlaceholder") });
+    root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("rack.datacenter.heightField"), hI, I18n.t("rack.datacenter.heightHint")), FormControls.fieldRow(I18n.t("rack.datacenter.underfloorField"), ufI, I18n.t("rack.datacenter.underfloorHint"))));
     root.appendChild(FormUi.divider(I18n.t("rack.datacenter.location")));
     const locI = FormControls.select(FormUi.locOptions(store), dc ? dc.location : "");
     const floorI = FormControls.select(FormUi.floorOptions(dc ? dc.floor : ""), dc ? dc.floor : "");
@@ -535,9 +539,13 @@ export class RackForms extends CableForms {
       body: root, wide: true,
       onSave: async () => {
         const name = nameI.value.trim();
+        // Hauteurs NULLABLES : entier ≥ 1 si saisi, sinon null (vide = non défini).
+        const height_mm = (hI.value !== "") ? Math.max(1, parseInt(hI.value, 10) || 1) : null;
+        const underfloor_mm = (ufI.value !== "") ? Math.max(1, parseInt(ufI.value, 10) || 1) : null;
         const payload = {
           name,
           width_mm: Math.max(1, parseInt(wI.value, 10) || 6000), depth_mm: Math.max(1, parseInt(dI.value, 10) || 4000), cell_mm: Math.max(1, parseInt(cI.value, 10) || 600),
+          height_mm, underfloor_mm,
           location: locI.value || "", floor: floorI.value, room: roomI.value.trim(),
         };
         if (live.check(payload).length) return false;   // nom requis (surligné)

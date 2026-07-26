@@ -122,7 +122,10 @@ export class EquipmentForms extends FormBase {
     dFbtns.appendChild(denseBtn);
     if (!this.isViewer()) {   // viewer (lecture seule) : pas d'édition de façade
       const editFaceBtn = document.createElement("button"); editFaceBtn.type = "button"; editFaceBtn.className = "btn btn-ghost btn-sm"; editFaceBtn.textContent = I18n.t("equipment.detail.editFace");
-      editFaceBtn.onclick = () => FaceEditor.open(store, host, eq.id, { onApply: undefined });
+      // onSaved : l'éditeur écrit dans le store (pas de brouillon ici) puis on RECONSTRUIT la fiche détail —
+      // ses aperçus de façade lisent l'objet `eq` capturé à l'ouverture, donc figés sans ce re-rendu (même
+      // mécanique que les callbacks « localiser » ci-dessous).
+      editFaceBtn.onclick = () => FaceEditor.open(store, host, eq.id, { onSaved: () => this.equipmentDetail(store, host, eq.id, onChanged) });
       dFbtns.appendChild(editFaceBtn);
     }
     root.appendChild(dF);

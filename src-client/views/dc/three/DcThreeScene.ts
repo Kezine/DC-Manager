@@ -9,6 +9,7 @@ import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { RackGeometry } from "../../../geometry/RackGeometry";
 import { RackDoorGeometry } from "../../../geometry/RackDoorGeometry";
 import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
+import { RackLabelLayout } from "../../../geometry/RackLabelLayout";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
 import { CableSpline } from "../../../geometry/CableSpline";
@@ -21,6 +22,8 @@ import { U_MM, RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EA
 import { Format } from "../../../core/Format";
 import type { Vec3 } from "../shared";
 import { DcThreeCamera } from "./DcThreeCamera";
+import { PivotBounds } from "../../../geometry/PivotBounds";   // bornage du pivot d'orbite aux murs virtuels des salles (géométrie pure)
+import { LABEL_STANDOFF_MM } from "./DcThreeBase";   // saillie anti z-fighting partagée (labels d'équipement + de baie)
 import type { DcThreeOptions, RoomDesc, SceneCtx, Theme } from "./DcThreeBase";
 
 export type { DcThreeOptions } from "./DcThreeBase";
@@ -71,6 +74,7 @@ export class DcThreeScene extends DcThreeCamera {
     const dc = dcId ? this.store.get("datacenters", dcId) : null;
     this.builtDc = dc ? dc.id : null;
     this.rooms = this.computeRooms(dc);
+    this.recomputePivotAabb();   // bornes du pivot d'orbite (murs virtuels) — dérivées des salles affichées
     if (!this.rooms.length) { this.pruneFaceTextureCache(); this.frameOnce("∅", 2000, 2000, 1000, 1000, 500, 500); return; }   // aucune salle → aucune image posée → tout devient périmé
 
     // sous-groupes par catégorie → reconstruction partielle (chacun contient un sous-groupe TRANSFORMÉ par salle)
@@ -102,10 +106,19 @@ export class DcThreeScene extends DcThreeCamera {
     if (this.multiInfo && this.multiInfo.rooms.length) return this.multiInfo.rooms;
     if (!dc) return [];
     const W = dc.width_mm || 4000, D = dc.depth_mm || 3000;
-    return [{ dcId: dc.id, ox: W / 2, oy: D / 2, oz: 0, o: 0, w: W, d: D }];   // identité : roomToWorld(p) = p
+    return [{ dcId: dc.id, ox: W / 2, oy: D / 2, oz: 0, o: 0, w: W, d: D, underfloorMm: dc.underfloor_mm || undefined }];   // identité : roomToWorld(p) = p
   }
 
   protected roomsKey(): string { return this.rooms.map((r) => r.dcId).join(","); }
+
+  /** (Re)calcule `pivotAabb` = boîte englobante XY de l'UNION des salles affichées (leurs 4 coins monde, MÊME
+      transformée que `roomUnder`), lue par la caméra pour BORNER le pivot d'orbite aux murs virtuels. Aucune salle
+      → null (bornage désactivé). Cf. PivotBounds. */
+  protected recomputePivotAabb(): void {
+    this.pivotAabb = this.rooms.length
+      ? PivotBounds.unionAabb(this.rooms.map((r) => PivotBounds.rectCorners(r.ox, r.oy, r.o, r.w, r.d)))
+      : null;
+  }
 
   /** Groupe TRANSFORMÉ d'une salle sous `parent` (roomToWorld = translate(off)·rotZ(o)·translate(−centre)) ;
       renvoie le groupe INTERNE où bâtir le contenu en coords LOCALES de salle (coin). Tagué par `dcId`
@@ -121,7 +134,9 @@ export class DcThreeScene extends DcThreeCamera {
   /** Construit TOUTES les catégories d'UNE salle (chacune dans son groupe transformé) ; renvoie la hauteur max. */
   protected buildRoomContent(room: RoomDesc): number {
     const dcR = this.store.get("datacenters", room.dcId); if (!dcR) return U_MM * 42;
-    this.buildDecor(dcR, this.roomUnder(this.gDecor!, room));
+    const decor = this.roomUnder(this.gDecor!, room);
+    this.buildDecor(dcR, decor);
+    this.buildUnderfloorSlab(room, decor);   // dalle technique bleutée sous le faux-plancher (si underfloor_mm)
     const maxH = this.fillRacks(dcR, this.roomUnder(this.gRacks!, room));
     this.buildFreeEquip(dcR.id, this.roomUnder(this.gFree!, room));
     this.buildWaypoints(dcR.id, this.roomUnder(this.gWaypoints!, room));
@@ -163,6 +178,7 @@ export class DcThreeScene extends DcThreeCamera {
       this._warm.set(r.dcId, ++this._warmTick);
     });
     this.rooms = newRooms;
+    this.recomputePivotAabb();   // l'ensemble affiché a changé → recalculer les bornes du pivot d'orbite
     this.evictWarm(nextIds);   // borne mémoire : détruit réellement les salles masquées les plus anciennes au-delà du plafond
     this.applyLayerVisibility();   // salles révélées : respecter les toggles d'affichage/masquage courants
     if (this.gExtra) { this.disposeGroup(this.gExtra); this.buildExtraCables(this.gExtra); }
@@ -204,6 +220,24 @@ export class DcThreeScene extends DcThreeCamera {
     floor.position.set(W / 2, D / 2, -1); floor.userData = { pick: { type: "room", id: dc.id } }; group.add(floor);   // clic droit sol → menu salle (activer / isoler / simple DC)
     group.add(this.gridLines(W, D, dc.cell_mm || 600, this.theme.grid));
     this.buildDoors(dc, group);   // portes collées aux murs (cadre/listel + vantail + passage)
+  }
+
+  /** DALLE DE PLANCHER TECHNIQUE : quand la salle déclare `underfloorMm > 0`, une SECONDE dalle — légèrement
+      BLEUTÉE — est posée `underfloorMm` mm SOUS le sol de la salle (là où posent les baies, z ≈ 0 local). Elle
+      matérialise le vide technique entre la dalle STRUCTURELLE (celle-ci, en bas) et le FAUX-PLANCHER surélevé
+      (le sol de salle existant, dessiné à z ≈ 0). Même idiome que le sol de salle (`PlaneGeometry` horizontale,
+      MeshStandardMaterial), en coords LOCALES de salle (le groupe `roomUnder` applique oz + orientation). Teinte =
+      couleur de sol du thème MIXÉE vers l'accent bleu (discrète, sobre). NON INTERACTIVE (aucun `pick`) et sans
+      couche `layer` → toujours visible comme le sol de salle. La donnée voyage via `RoomDesc.underfloorMm` (rempli
+      là où les RoomDesc sont construits) ; une édition de salle change `histIndex()` → build() complet → dalle
+      reconstruite (aucun chemin incrémental à câbler). */
+  protected buildUnderfloorSlab(room: RoomDesc, group: THREE.Group): void {
+    const uf = room.underfloorMm; if (!uf || uf <= 0) return;
+    const W = room.w, D = room.d;
+    const col = new THREE.Color(this.theme.floor).lerp(new THREE.Color(this.theme.front), 0.35);   // sol teinté vers le bleu accent
+    const slab = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ color: col, roughness: 0.9, metalness: 0.05 }));
+    slab.position.set(W / 2, D / 2, -uf);   // le sol de salle est à z ≈ 0 local → la dalle structurelle est `uf` mm plus bas
+    group.add(slab);
   }
 
   /** Portes de salle en 3D : porte FERMÉE (vantail plein sur le PASSAGE LIBRE, debout dans le plan du mur) + LISTEL
@@ -342,7 +376,7 @@ export class DcThreeScene extends DcThreeCamera {
     if (!u) return true;
     const o = this.opts;
     if (u.rackId && o.hiddenRacks && o.hiddenRacks.has(u.rackId)) return false;   // baie masquée → tout son contenu (groupe + ports)
-    const on: Record<string, boolean> = { port: !!o.showPorts, name: !!o.showEqNames, door: !!o.showDoors, doorswing: !!o.showDoorSwing, slot: !!o.showPlaceholders, faceImage: !!o.showFaceImages, conduit: !!o.showConduits, marker: !!o.showWaypoints, rail: !!(o.showWaypoints || o.showConduits), floorgrid: !!o.showFloorGrid, orient: !!o.showOrientMarks, rackshell: !!o.showRackSides,
+    const on: Record<string, boolean> = { port: !!o.showPorts, name: !!o.showEqNames, door: !!o.showDoors, doorswing: !!o.showDoorSwing, slot: !!o.showPlaceholders, faceImage: !!o.showFaceImages, conduit: !!o.showConduits, marker: !!o.showWaypoints, rail: !!(o.showWaypoints || o.showConduits), floorgrid: !!o.showFloorGrid, orient: !!o.showOrientMarks, rackshell: !!o.showRackSides, racklabel: !!o.showRackNames,
       // numéro d'U sur les emplacements LIBRES : visible seulement si les emplacements libres ET les noms d'équipement sont affichés.
       slotlabel: !!o.showPlaceholders && !!o.showEqNames };
     let v = true;
@@ -391,7 +425,7 @@ export class DcThreeScene extends DcThreeCamera {
     // TOUS les toggles d'affichage sont en VISIBILITÉ (couches taguées, toujours construites) — AUCUN rebuild :
     // ports, noms, portes, débattement, emplacements, images, masquage av/ar, conduits, waypoints, grilles, repères,
     // capots/parois (rackshell) et masquage de baies (hidden3dRacks).
-    const eqVis = old.showPorts !== opts.showPorts || old.showEqNames !== opts.showEqNames || old.showDoors !== opts.showDoors || old.showDoorSwing !== opts.showDoorSwing || old.hideFrontEq !== opts.hideFrontEq || old.hideRearEq !== opts.hideRearEq || old.showPlaceholders !== opts.showPlaceholders || old.showFaceImages !== opts.showFaceImages || old.showConduits !== opts.showConduits || old.showWaypoints !== opts.showWaypoints || old.showFloorGrid !== opts.showFloorGrid || old.showOrientMarks !== opts.showOrientMarks || old.showRackSides !== opts.showRackSides || !this.sameSet(old.hiddenRacks, opts.hiddenRacks);
+    const eqVis = old.showPorts !== opts.showPorts || old.showEqNames !== opts.showEqNames || old.showDoors !== opts.showDoors || old.showDoorSwing !== opts.showDoorSwing || old.hideFrontEq !== opts.hideFrontEq || old.hideRearEq !== opts.hideRearEq || old.showPlaceholders !== opts.showPlaceholders || old.showFaceImages !== opts.showFaceImages || old.showConduits !== opts.showConduits || old.showWaypoints !== opts.showWaypoints || old.showFloorGrid !== opts.showFloorGrid || old.showOrientMarks !== opts.showOrientMarks || old.showRackSides !== opts.showRackSides || old.showRackNames !== opts.showRackNames || !this.sameSet(old.hiddenRacks, opts.hiddenRacks);
     // baies — RECOLORATION en place (mode couleur) : aucun rebuild.
     const eqColor = old.colorMode !== opts.colorMode;
     const cb = old.showAllCables !== opts.showAllCables || old.cableSplineK !== opts.cableSplineK || old.cablePortNormal !== opts.cablePortNormal || !this.sameSet(old.selCables, opts.selCables);   // cablesOnTop NON inclus : géré en place par setCablesOnTop (pas de reconstruction)
@@ -448,6 +482,9 @@ export class DcThreeScene extends DcThreeCamera {
     const gC = RackGeometry.capGrid(r);
     this.buildCapPlate(group, r, "roof", H, w, d, gC.cell, theme);
     this.buildCapPlate(group, r, "floor", 0, w, d, gC.cell, theme);
+
+    // NOM de la baie posé à plat sur la coque (flancs ±X + toit +Z) — couche "racklabel" basculable (showRackNames).
+    this.rackShellLabels(group, r, w, d, H);
 
     // occupants U (équipements rackés + pseudo-items + brosses)
     // Convention du moteur SVG (rackInterior3D) : la face AVANT est en y = -hd (−Y).
@@ -543,13 +580,30 @@ export class DcThreeScene extends DcThreeCamera {
       const b = RackGeometry.wallEquipBoxLocal(r, e);
       this.localBox(group, b.x0, b.x1, b.y0, b.y1, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
     });
-    // équipements POSÉS sur les étagères (tray) de la baie : boîtes pleines sur le plateau, cliquables.
+    // équipements POSÉS sur les étagères (tray) de la baie : boîtes pleines sur le plateau, cliquables — avec, comme
+    // les occupants U, le NOM sur les deux faces ±Y et l'IMAGE de façade front/rear. Même montage d'offsets que les
+    // occupants U (l.504-505 / 535-536) : label ET image reçoivent la coordonnée de face décalée de 0,5 mm
+    // (yLo − 0,5 / yHi + 0,5), et faceLabel ajoute EN PLUS sa propre saillie FACE_LABEL_STANDOFF_MM (0,5 mm) → le
+    // label finit à 1 mm, l'image à 0,5 mm : aucun z-fighting entre les deux.
     this.store.rackItemsOf(r.id).forEach((it: any) => {
       if (it.kind !== "tray" || it.u == null) return;
       const eqSide = it.side !== "rear" ? "front" : "rear";
       this.store.equipmentsOnTray(it.id).forEach((e: any) => {
         const b = RackGeometry.trayEquipBoxLocal(r, it, e);
-        this.localBox(group, b.x0, b.x1, Math.min(b.y0, b.y1), Math.max(b.y0, b.y1), b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
+        const yLo = Math.min(b.y0, b.y1), yHi = Math.max(b.y0, b.y1);
+        this.localBox(group, b.x0, b.x1, yLo, yHi, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
+        const bw = b.x1 - b.x0, bh = b.z1 - b.z0;
+        const xc = (b.x0 + b.x1) / 2, zc = (b.z0 + b.z1) / 2;
+        const front = it.side !== "rear";   // étagère côté avant → la FACE AVANT du device regarde −Y
+        if (e.name) {
+          this.faceLabel(group, e.name, xc, yLo - 0.5, zc, bw * 0.94, bh * 0.9, true, { eqSide });    // face −Y (avant)
+          this.faceLabel(group, e.name, xc, yHi + 0.5, zc, bw * 0.94, bh * 0.9, false, { eqSide });   // face +Y (arrière)
+        }
+        // Équipement LIBRE sur étagère : pas d'oreilles 19″ → largeur = corps, aucun trim.
+        const imgLo = this.host.faceImageUrl?.(e.id, front ? "front" : "rear");
+        const imgHi = this.host.faceImageUrl?.(e.id, front ? "rear" : "front");
+        if (imgLo) this.faceImagePlane(group, imgLo.url, xc, yLo - 0.5, zc, bw, bh, true, { layer: "faceImage", eqSide, eqId: e.id });
+        if (imgHi) this.faceImagePlane(group, imgHi.url, xc, yHi + 0.5, zc, bw, bh, false, { layer: "faceImage", eqSide, eqId: e.id });
       });
     });
 
@@ -655,6 +709,27 @@ export class DcThreeScene extends DcThreeCamera {
     });
 
     return { group, height: H };
+  }
+
+  /** Noms de baie posés À PLAT sur la COQUE : flanc gauche (−X), flanc droit (+X) et toit (+Z). Translucides et 1 mm
+      en saillie (matériau PARTAGÉ `labelMaterial` + `LABEL_STANDOFF_MM` du lot labels d'équipement). La géométrie PURE
+      (position/rotation/taille par face) est déléguée à `RackLabelLayout` (testable en Node, sans THREE) ; ici on ne
+      fait qu'appliquer THREE. RIEN sur une baie sans nom ou SANS capots (has_caps === false) : sans capot il n'y a pas
+      de surface réelle où poser le nom. Chaque plan est tagué couche "racklabel" (toggle showRackNames) + rackId
+      (masquage individuel de la baie) → bascule de visibilité sans reconstruction. */
+  protected rackShellLabels(group: THREE.Group, r: any, w: number, d: number, H: number): void {
+    if (!r.name || r.has_caps === false) return;
+    (["left", "right", "roof"] as const).forEach((face) => {
+      const L = RackLabelLayout.forFace(face, w, d, H, LABEL_STANDOFF_MM);
+      const tex = this.textTexture(r.name, L.size.w, L.size.h); if (!tex) return;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(L.size.w, L.size.h), this.labelMaterial(tex));   // matériau partagé
+      mesh.position.set(L.position.x, L.position.y, L.position.z);
+      // axe renvoyé BRUT par la géométrie pure → normalisé ici (l'angle est indépendant de la norme).
+      mesh.setRotationFromAxisAngle(new THREE.Vector3(L.axis.x, L.axis.y, L.axis.z).normalize(), L.angle);
+      mesh.userData = { layer: "racklabel", rackId: r.id };   // couche basculable (showRackNames) + masquage de baie
+      mesh.visible = this.layerVisible(mesh.userData);
+      group.add(mesh);
+    });
   }
 
   /** Plan plat (emplacement libre) au plan de montage, orienté ±Y : remplissage translucide + CADRE accent
@@ -1096,8 +1171,10 @@ export class DcThreeScene extends DcThreeCamera {
         frontEdges.userData = { layer: "orient" };
         grp.add(frontEdges);
       }
-      // nom posé à plat sur la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild.
-      if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2 + 1, b.z + b.h / 2, b.w * 0.9, b.h * 0.9, true);
+      // nom posé à plat SUR la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild. On passe
+      // la face elle-même (−b.d/2) : la saillie anti z-fighting (1 mm EN SAILLIE devant la face) est désormais bakée
+      // par faceLabel le long de la normale. (Auparavant −b.d/2 + 1 posait le label 1 mm À L'INTÉRIEUR — mauvais sens.)
+      if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2, b.z + b.h / 2, b.w * 0.9, b.h * 0.9, true);
       // ports en coords MONDE → ajoutés au groupe identité (root = gFree) ; couche "port" basculable (showPorts).
       this.store.portsOf(e.id).forEach((p: any) => this.addPort(root, p, dcId));
     });

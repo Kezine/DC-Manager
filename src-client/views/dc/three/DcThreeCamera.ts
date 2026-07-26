@@ -4,6 +4,7 @@
 import * as THREE from "three";
 import { CAM_PRESETS } from "../shared";
 import { DcThreeBase } from "./DcThreeBase";
+import { PivotBounds } from "../../../geometry/PivotBounds";   // bornage du pivot aux murs virtuels des salles (repli sol infini)
 import { Haptics } from "../../../core/Haptics";
 import { U_MM } from "../../../domain/constants";
 
@@ -170,8 +171,21 @@ export abstract class DcThreeCamera extends DcThreeBase {
     const groups = [this.gDecor, this.gRacks, this.gFree, this.gWaypoints].filter(Boolean) as THREE.Object3D[];
     const hits = this.raycaster.intersectObjects(groups, true).filter((h) => this.hitVisible(h.object) && ((h as any).face || (h.object as any).isSprite));
     const P = new THREE.Vector3();
-    if (hits.length) P.copy(hits[0].point);
-    else if (!this.raycaster.ray.intersectPlane(this._groundPlane, P)) return;   // repli : intersection avec le sol z=0
+    if (hits.length) P.copy(hits[0].point);   // contenu réellement touché (baie, équipement, sol, waypoint) → pivot INCHANGÉ (prioritaire)
+    else {
+      // REPLI (aucune surface au centre de l'écran) : le point de sol infini (z=0) partait très LOIN hors salle sous
+      // un angle rasant → pivot délirant. On le BORNE aux « murs virtuels » (parois verticales infinies) de l'AABB des
+      // salles affichées (cf. PivotBounds). AABB nulle (aucune salle) → comportement historique (sol infini seul).
+      const ground = new THREE.Vector3();
+      const hasGround = this.raycaster.ray.intersectPlane(this._groundPlane, ground);
+      if (!this.pivotAabb) { if (!hasGround) return; P.copy(ground); }
+      else {
+        const o = this.raycaster.ray.origin, d = this.raycaster.ray.direction;
+        const clamped = PivotBounds.clampPivot({ x: o.x, y: o.y, z: o.z }, { x: d.x, y: d.y, z: d.z }, hasGround ? { x: ground.x, y: ground.y, z: ground.z } : null, this.pivotAabb);
+        if (!clamped) return;   // rien d'exploitable (sol hors bornes ET rayon ne traverse pas) → on ne bouge pas le pivot
+        P.set(clamped.x, clamped.y, clamped.z);
+      }
+    }
     // PERSPECTIVE : garder la caméra EXACTEMENT en place. P est sur le rayon central → la distance caméra↔P est celle à
     // conserver ; on règle `zoom` pour que perspDist() (∝ 1/zoom) l'égale, sinon updateCamera rapprocherait la caméra.
     if (this.perspective) {

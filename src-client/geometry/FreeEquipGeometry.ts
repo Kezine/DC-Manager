@@ -9,6 +9,28 @@ export interface FreeBox { w: number; d: number; h: number; z: number; }
    Géométrie « boîte 6 faces » d'un ÉQUIPEMENT LIBRE (dims mm), PURE. Partagée par
    le rendu 3D (boîte + connecteur) et resolvePort3D → port et câble coïncident
    exactement. Paramétrée par le centre (cx,cy) et la base z0.
+
+   CONVENTION D'ORIENTATION DES FACES (fx, fy) — dite « PHOTOGRAPHIQUE »
+   ---------------------------------------------------------------------------
+   Les fractions (fx, fy) repèrent un point sur une face : fx=0 = bord GAUCHE de
+   l'image, fy=0 = bord HAUT. Elles servent À LA FOIS au placement des PORTS
+   (`faceLocal`) et au plaquage des IMAGES de façade (`faceFraction`, son inverse) :
+   les deux DOIVENT donc partager la même convention, sinon l'image ne coïncide plus
+   avec les ports posés dessus (c'est tout l'intérêt d'un module unique).
+
+   Le repère retenu est celui de la PRISE DE VUE réelle de l'appareil, la face AVANT
+   servant de référence — pour chaque face, on note de quel côté de l'image se trouve
+   l'avant du boîtier (−Y en local) :
+     • avant / arrière : le HAUT de l'image est le haut du boîtier (+Z).
+     • gauche  : la DROITE de l'image est côté avant (on se place à gauche du boîtier,
+                 son avant tombe donc à notre droite).
+     • droite  : la GAUCHE de l'image est côté avant (symétrique).
+     • dessus  : le BAS de l'image est côté avant (on photographie le dessus en gardant
+                 l'avant vers soi — le cliché « pose » naturellement sur la face avant).
+     • dessous : le HAUT de l'image est côté avant (retourner le boîtier vers soi éloigne
+                 son avant → il se retrouve en haut du cliché).
+   Les 6 faces sont NON MIROIR : le trièdre (droite de l'image) × (haut de l'image) vaut
+   toujours la normale SORTANTE de la face — invariant testé (test-geometry.js).
    ============================================================================= */
 export class FreeEquipGeometry {
   /** Empreinte (X) × longueur (Y) × hauteur (Z) + base z, défauts inclus. */
@@ -38,7 +60,9 @@ export class FreeEquipGeometry {
   }
 
   /** Point LOCAL (origine au centre de l'empreinte, base z0) d'un point (fx,fy) d'une FACE.
-      fy=0 ⇒ haut (z1) pour les faces verticales ; dessus/dessous : fy = profondeur (0 = avant −Y). */
+      fy=0 ⇒ haut (z1) pour les faces VERTICALES. Faces HORIZONTALES : fy porte la profondeur, mais
+      le bord situé côté face AVANT (−Y) DIFFÈRE entre dessus et dessous — dessus : fy=1 ; dessous :
+      fy=0 (convention photographique détaillée en tête de fichier). */
   static faceLocal(eq: any, face: string, fx: number, fy: number, z0: number): { lx: number; ly: number; lz: number } {
     const bx = FreeEquipGeometry.box(eq), hw = bx.w / 2, hd = bx.d / 2;
     let lx, ly, lz;
@@ -46,7 +70,9 @@ export class FreeEquipGeometry {
       case "rear":   lx = (0.5 - fx) * bx.w; ly = hd;  lz = z0 + (1 - fy) * bx.h; break;
       case "left":   lx = -hw; ly = (0.5 - fx) * bx.d; lz = z0 + (1 - fy) * bx.h; break;
       case "right":  lx = hw;  ly = (fx - 0.5) * bx.d; lz = z0 + (1 - fy) * bx.h; break;
-      case "top":    lx = (0.5 - fx) * bx.w; ly = (fy - 0.5) * bx.d; lz = z0 + bx.h; break;
+      // dessus : BAS de l'image (fy=1) côté avant (−Y) → fy croît vers l'avant à l'envers, et fx
+      // croît vers +X pour garder le trièdre direct (droite × haut = +Z, la normale sortante).
+      case "top":    lx = (fx - 0.5) * bx.w; ly = (0.5 - fy) * bx.d; lz = z0 + bx.h; break;
       case "bottom": lx = (fx - 0.5) * bx.w; ly = (fy - 0.5) * bx.d; lz = z0; break;
       default:       lx = (fx - 0.5) * bx.w; ly = -hd; lz = z0 + (1 - fy) * bx.h; break;   // front
     }
@@ -54,10 +80,11 @@ export class FreeEquipGeometry {
   }
 
   /** INVERSE de `faceLocal` : fractions (fx, fy) d'un point LOCAL (lx, ly, lz) sur une FACE.
-      fx = 0 → bord GAUCHE de la face VUE DE L'EXTÉRIEUR · fy = 0 → HAUT (faces verticales) ou AVANT −Y
-      (dessus/dessous). Sert à plaquer les IMAGES DE FAÇADE sur la boîte 3D avec la MÊME convention que les
-      ports (les UVs de BoxGeometry supposent un monde Y-up ; ici Z-up → rear/top/bottom sortaient à 180°,
-      left/right à ±90°). Testé en aller-retour avec faceLocal. */
+      fx = 0 → bord GAUCHE de la face VUE DE L'EXTÉRIEUR · fy = 0 → HAUT (faces verticales). Faces
+      horizontales : cf. la convention photographique en tête de fichier (dessus = bas de l'image côté
+      avant, dessous = haut de l'image côté avant). Sert à plaquer les IMAGES DE FAÇADE sur la boîte 3D
+      avec la MÊME convention que les ports (les UVs de BoxGeometry supposent un monde Y-up ; ici Z-up →
+      rear/top/bottom sortaient à 180°, left/right à ±90°). Testé en aller-retour avec faceLocal. */
   static faceFraction(eq: any, face: string, lx: number, ly: number, lz: number, z0: number): { fx: number; fy: number } {
     const bx = FreeEquipGeometry.box(eq);
     const fyV = 1 - (lz - z0) / bx.h;   // faces VERTICALES : fy = 0 en HAUT (z1)
@@ -65,7 +92,7 @@ export class FreeEquipGeometry {
       case "rear":   return { fx: 0.5 - lx / bx.w, fy: fyV };
       case "left":   return { fx: 0.5 - ly / bx.d, fy: fyV };
       case "right":  return { fx: ly / bx.d + 0.5, fy: fyV };
-      case "top":    return { fx: 0.5 - lx / bx.w, fy: ly / bx.d + 0.5 };
+      case "top":    return { fx: lx / bx.w + 0.5, fy: 0.5 - ly / bx.d };
       case "bottom": return { fx: lx / bx.w + 0.5, fy: ly / bx.d + 0.5 };
       default:       return { fx: lx / bx.w + 0.5, fy: fyV };   // front
     }

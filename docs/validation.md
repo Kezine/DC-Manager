@@ -316,3 +316,12 @@ Les specs sont **partielles** : seuls les champs porteurs de règles sont décla
     aucune règle côté client ; leur traversée est éprouvée par un test dédié ;
   - `vms.nics` : tableau d''OBJETS (non exprimable par `FieldType`), validé par l''invariant
     « IPv4 des vNIC » de la spec `vms`.
+  - `datacenters.doors` et `datacenters.blocked_cells` : tableaux (portes value-object /
+    clés de cellule « cx,cy »), normalisés côté client par `Normalize.dcDoors` / `Normalize.cellList`.
+- **Régularisation `datacenters` (2026-07)** : la spec ne déclarait que `name` ; tous les autres champs de salle
+  (dimensions `width_mm`/`depth_mm`/`cell_mm`, localisation `location`/`floor`/`room`, placement d''étage
+  `floor_x`/`floor_y`/`floor_orientation`) traversaient sans règle. Ils sont désormais **DÉCLARÉS** (types, défauts
+  alignés sur le formulaire de salle, `floor_orientation` borné à `min 0` faute d''enum numérique). Ajout de deux
+  champs de HAUTEUR nullables : `height_mm` (plafond de la salle, usage futur — distinct de `floors.height_mm`,
+  hauteur d''étage) et `underfloor_mm` (plancher technique surélevé, consommé par le rendu 3D). `doors` /
+  `blocked_cells` restent des passthrough assumés (cf. ci-dessus).

@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, PivotBounds, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -22,6 +22,54 @@ module.exports = async () => {
     ck(EquipmentTypes.isSystem("switch") && EquipmentTypes.isSystem("patch_panel") && EquipmentTypes.isSystem("pdu") && EquipmentTypes.isSystem("switchboard"), "isSystem : types à pilotage fin marqués system");
     ck(!EquipmentTypes.isSystem("server") && !EquipmentTypes.isSystem("camera") && !EquipmentTypes.isSystem("other") && !EquipmentTypes.isSystem("inconnu"), "isSystem : inventaire générique / inconnu → non-system");
     ck([0, 90, 180, 270].includes(Normalize.rackOrientation(450)), "normRackOrientation(450) ∈ {0,90,180,270}");
+  }
+  });
+
+  await section("PivotBounds : coins de salle (rotation), union AABB, pivot borné aux murs virtuels", async () => {
+  {
+    const rnd = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+    // rectCorners o=0 : rectangle centré sur (ox,oy) — même transformée que DcThreeScene.roomUnder.
+    const c0 = PivotBounds.rectCorners(0, 0, 0, 200, 100).map(rnd);
+    ck.eq(JSON.stringify(c0), JSON.stringify([{ x: -100, y: -50 }, { x: 100, y: -50 }, { x: 100, y: 50 }, { x: -100, y: 50 }]), "rectCorners o=0 : coins centrés ±w/2 × ±d/2");
+    // rotation 90° (π/2) : largeur ↔ profondeur permutées dans l'AABB.
+    const a90 = PivotBounds.unionAabb([PivotBounds.rectCorners(0, 0, Math.PI / 2, 200, 100)]);
+    ck.eq(Math.round(a90.minX), -50, "rectCorners o=90 : AABB minX = −d/2");
+    ck.eq(Math.round(a90.maxX), 50, "rectCorners o=90 : AABB maxX = +d/2");
+    ck.eq(Math.round(a90.minY), -100, "rectCorners o=90 : AABB minY = −w/2");
+    ck.eq(Math.round(a90.maxY), 100, "rectCorners o=90 : AABB maxY = +w/2");
+    // 180° / 270° : l'AABB retombe sur celle de 0° / 90° (symétrie du rectangle centré).
+    const a180 = PivotBounds.unionAabb([PivotBounds.rectCorners(0, 0, Math.PI, 200, 100)]);
+    ck.eq(Math.round(a180.minX), -100, "rectCorners o=180 : AABB inchangée vs o=0 (symétrie)");
+    const a270 = PivotBounds.unionAabb([PivotBounds.rectCorners(0, 0, 3 * Math.PI / 2, 200, 100)]);
+    ck.eq(Math.round(a270.maxY), 100, "rectCorners o=270 : AABB maxY = +w/2 (comme o=90)");
+    // unionAabb multi-salles : englobe les deux rectangles.
+    const u = PivotBounds.unionAabb([PivotBounds.rectCorners(0, 0, 0, 200, 200), PivotBounds.rectCorners(1000, 500, 0, 200, 200)]);
+    ck.eq(JSON.stringify({ minX: Math.round(u.minX), maxX: Math.round(u.maxX), minY: Math.round(u.minY), maxY: Math.round(u.maxY) }), JSON.stringify({ minX: -100, maxX: 1100, minY: -100, maxY: 600 }), "unionAabb : englobe deux salles disjointes");
+    ck.eq(PivotBounds.unionAabb([]), null, "unionAabb : aucune salle → null");
+
+    // ---- clampPivot : AABB [0,1000] × [0,1000] ----
+    const box = { minX: 0, maxX: 1000, minY: 0, maxY: 1000 };
+    // (a) sol DANS l'AABB → renvoyé tel quel (cas normal).
+    const g1 = { x: 500, y: 500, z: 0 };
+    ck.eq(JSON.stringify(PivotBounds.clampPivot({ x: 0, y: 0, z: 100 }, { x: 1, y: 1, z: -0.1 }, g1, box)), JSON.stringify(g1), "clampPivot : sol dans l'AABB → inchangé");
+    // (b) sol HORS + rayon traversant → point de SORTIE (mur le plus LOIN, x=1000).
+    const p2 = PivotBounds.clampPivot({ x: -500, y: 500, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 2000, y: 500, z: 0 }, box);
+    ck.eq(Math.round(p2.x), 1000, "clampPivot : sol hors + traversée → mur LE PLUS LOIN (sortie x=1000)");
+    ck.eq(Math.round(p2.y), 500, "clampPivot : point de sortie — y conservé");
+    // (c) rayon qui RATE la boîte (parallèle hors slab) → sol ramené au bord (clamp XY).
+    const p3 = PivotBounds.clampPivot({ x: -500, y: 5000, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 3000, y: 5000, z: 0 }, box);
+    ck.eq(Math.round(p3.x), 1000, "clampPivot : rayon rate → sol clampé au bord X");
+    ck.eq(Math.round(p3.y), 1000, "clampPivot : rayon rate → sol clampé au bord Y");
+    // (d) sol NULL + traversée → point de sortie.
+    const p4 = PivotBounds.clampPivot({ x: -500, y: 500, z: 0 }, { x: 1, y: 0, z: 0 }, null, box);
+    ck.eq(Math.round(p4.x), 1000, "clampPivot : sol null + traversée → point de sortie");
+    // (e) sol NULL + pas de traversée → null (ne pas bouger le pivot).
+    ck.eq(PivotBounds.clampPivot({ x: -500, y: 5000, z: 0 }, { x: 1, y: 0, z: 0 }, null, box), null, "clampPivot : sol null + rayon rate → null");
+    // (f) box entièrement DERRIÈRE la caméra (tExit < 0, rayon fuyant) → pas de sortie utilisable → sol clampé au bord.
+    const p6 = PivotBounds.clampPivot({ x: 2000, y: 500, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 3000, y: 500, z: 0 }, box);
+    ck.eq(Math.round(p6.x), 1000, "clampPivot : box derrière la caméra → sol clampé (aucun exit négatif retenu)");
+    // AABB nulle (aucune salle) → sol renvoyé inchangé (comportement historique).
+    ck.eq(JSON.stringify(PivotBounds.clampPivot({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, g1, null)), JSON.stringify(g1), "clampPivot : AABB nulle → sol inchangé (pas de bornage)");
   }
   });
 
@@ -107,6 +155,57 @@ module.exports = async () => {
     ck(!!r.guideX && r.guideX.x === 0.5, "tolérances distinctes : X accroche (tolX 0.05)");
     ck.eq(r.guideY, null, "tolérances distinctes : Y n'accroche pas (tolY 0.01)");
     ck.eq(r.x, 0.5, "tolérances distinctes : x calé"); approx(r.y, 0.53, "tolérances distinctes : y brut");
+  }
+  });
+
+  await section("RackLabelLayout : noms de baie sur la coque (flancs + toit, pur)", async () => {
+  {
+    const w = 600, d = 1000, H = 2000, s = 1;
+    const L = RackLabelLayout.forFace("left", w, d, H, s);
+    const R = RackLabelLayout.forFace("right", w, d, H, s);
+    const T = RackLabelLayout.forFace("roof", w, d, H, s);
+
+    // POSITIONS : centre de face + standoff le long de la normale EXTÉRIEURE (le SIGNE est testé).
+    ck.eq(L.position.x, -w / 2 - s, "left : x = −w/2 − standoff (saillie en −X)");
+    ck.eq(L.position.y, 0, "left : y = 0 (centré en profondeur)");
+    ck.eq(L.position.z, H / 2, "left : z = H/2 (centré en hauteur)");
+    ck.eq(R.position.x, w / 2 + s, "right : x = +w/2 + standoff (saillie en +X)");
+    ck.eq(R.position.z, H / 2, "right : z = H/2");
+    ck.eq(T.position.x, 0, "roof : x = 0 (centré en largeur)");
+    ck.eq(T.position.y, 0, "roof : y = 0 (centré en profondeur)");
+    ck.eq(T.position.z, H + s, "roof : z = H + standoff (saillie en +Z)");
+
+    // NORMALE EXTÉRIEURE = direction du standoff : position(standoff=1) − centre(standoff=0), par face.
+    const center = (f) => RackLabelLayout.forFace(f, w, d, H, 0).position;
+    const nrm = (f, p) => ({ x: p.x - center(f).x, y: p.y - center(f).y, z: p.z - center(f).z });
+    const nL = nrm("left", L.position), nR = nrm("right", R.position), nT = nrm("roof", T.position);
+    ck.eq(JSON.stringify(nL), JSON.stringify({ x: -s, y: 0, z: 0 }), "left : normale extérieure = −X");
+    ck.eq(JSON.stringify(nR), JSON.stringify({ x: s, y: 0, z: 0 }), "right : normale extérieure = +X");
+    ck.eq(JSON.stringify(nT), JSON.stringify({ x: 0, y: 0, z: s }), "roof : normale extérieure = +Z");
+    ck(JSON.stringify(nL) !== JSON.stringify(nR) && JSON.stringify(nR) !== JSON.stringify(nT) && JSON.stringify(nL) !== JSON.stringify(nT), "les 3 faces ont des normales DISTINCTES");
+
+    // TAILLES : bandes de texte centrées, > 0, bornées (h ≤ w = bande basse), flancs bornés par H·0.9.
+    ck.eq(L.size.w, d * 0.8, "left : largeur = 0.8·profondeur");
+    ck.eq(L.size.h, Math.min(H * 0.9, d * 0.8 * 0.22), "left : hauteur = min(H·0.9, bande)");
+    ck.eq(R.size.w, d * 0.8, "right : largeur = 0.8·profondeur");
+    ck.eq(T.size.w, w * 0.8, "roof : largeur = 0.8·largeur baie");
+    ck.eq(T.size.h, w * 0.8 * 0.22, "roof : hauteur = ratio·largeur");
+    [L, R, T].forEach((p, i) => { ck(p.size.w > 0 && p.size.h > 0, "taille strictement positive (face " + i + ")"); ck(p.size.h <= p.size.w, "bande basse : h ≤ w (face " + i + ")"); });
+    // baie BASSE (H petit) → hauteur de flanc bornée à H·0.9 (et non la bande, plus grande).
+    const low = RackLabelLayout.forFace("left", w, d, 100, s);
+    ck.eq(low.size.h, 100 * 0.9, "flanc baie basse : hauteur bornée à H·0.9");
+
+    // ROTATIONS : angle FINI, axes NON NULS et DISTINCTS ; flancs = axes symétriques (lecture non miroir des deux côtés).
+    [L, R, T].forEach((p, i) => {
+      ck(Number.isFinite(p.angle), "angle fini (face " + i + ")");
+      ck(p.axis.x * p.axis.x + p.axis.y * p.axis.y + p.axis.z * p.axis.z > 0, "axe non nul (face " + i + ")");
+    });
+    ck.eq(L.angle, (2 * Math.PI) / 3, "left : angle 2π/3");
+    ck.eq(R.angle, (2 * Math.PI) / 3, "right : angle 2π/3");
+    ck.eq(T.angle, 0, "roof : angle 0 → haut du texte vers +Y, nom LISIBLE depuis la face AVANT");
+    const ax = (p) => JSON.stringify(p.axis);
+    ck(ax(L) !== ax(R) && ax(R) !== ax(T) && ax(L) !== ax(T), "les 3 faces ont des axes de rotation DISTINCTS");
+    ck(L.axis.x === R.axis.x && L.axis.y === -R.axis.y && L.axis.z === -R.axis.z, "flancs : axes symétriques (x égal, y/z opposés)");
   }
   });
 
@@ -1027,9 +1126,26 @@ module.exports = async () => {
     approx(rTop.fy, 0, "rear : z = h → fy = 0 (haut de l'image en haut)");
     const rLeft = FreeEquipGeometry.faceFraction(eq, "rear", 300, 200, 150, 0);   // x = +w/2
     approx(rLeft.fx, 0, "rear : x = +w/2 → fx = 0 (gauche de l'image, vue de derrière)");
-    // DESSUS : fy=0 = avant (−Y) — convention faceLocal (« dessus/dessous : fy = profondeur, 0 = avant −Y »).
-    const tFront = FreeEquipGeometry.faceFraction(eq, "top", 0, -200, 300, 0);
-    approx(tFront.fy, 0, "top : y = −d/2 (avant) → fy = 0");
+    // CONVENTION PHOTOGRAPHIQUE (cf. en-tête de FreeEquipGeometry) : quel bord de l'IMAGE tombe du côté
+    // de la face AVANT du boîtier (−Y). Ces 4 assertions VERROUILLENT la règle métier — un cliché de face
+    // horizontale/latérale se pose comme on l'a pris, l'avant du boîtier servant de repère.
+    approx(FreeEquipGeometry.faceFraction(eq, "top", 0, -200, 300, 0).fy, 1, "dessus : avant (−Y) → fy = 1 (BAS de l'image côté face)");
+    approx(FreeEquipGeometry.faceFraction(eq, "bottom", 0, -200, 0, 0).fy, 0, "dessous : avant (−Y) → fy = 0 (HAUT de l'image côté face)");
+    approx(FreeEquipGeometry.faceFraction(eq, "left", -300, -200, 150, 0).fx, 1, "gauche : avant (−Y) → fx = 1 (DROITE de l'image côté face)");
+    approx(FreeEquipGeometry.faceFraction(eq, "right", 300, -200, 150, 0).fx, 0, "droite : avant (−Y) → fx = 0 (GAUCHE de l'image côté face)");
+    // NON MIROIR sur les 6 faces : (droite de l'image) × (haut de l'image) = normale SORTANTE. Garde-fou
+    // contre une correction d'orientation qui INVERSERAIT l'écriture au lieu de la faire pivoter (une simple
+    // négation de fx ou de fy seule miroite la face — il faut les retourner par PAIRE).
+    const OUT = { front: [0, -1, 0], rear: [0, 1, 0], left: [-1, 0, 0], right: [1, 0, 0], top: [0, 0, 1], bottom: [0, 0, -1] };
+    Object.keys(OUT).forEach((face) => {
+      const P = (fx, fy) => { const p = FreeEquipGeometry.faceLocal(eq, face, fx, fy, 0); return [p.lx, p.ly, p.lz]; };
+      const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+      const r = sub(P(1, 0.5), P(0, 0.5));   // vecteur vers la DROITE de l'image
+      const u = sub(P(0.5, 0), P(0.5, 1));   // vecteur vers le HAUT de l'image
+      const cr = [r[1] * u[2] - r[2] * u[1], r[2] * u[0] - r[0] * u[2], r[0] * u[1] - r[1] * u[0]];
+      const n = OUT[face], dot = cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2];
+      ck(dot > 0, "non miroir " + face + " : (droite × haut) orienté comme la normale sortante");
+    });
   }
   });
 

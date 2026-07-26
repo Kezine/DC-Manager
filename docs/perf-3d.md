@@ -7,13 +7,20 @@
 
 - **TOUS les toggles d'affichage/masquage = bascule de visibilité** (aucune reconstruction). Chaque mesh basculable
   est tagué `userData.layer` (`port`/`name`/`door`/`doorswing`/`slot`/`faceImage`/`conduit`/`marker`/`rail`/
-  `floorgrid`/`orient`/`rackshell`), `userData.eqSide` (`front`/`rear`) et/ou `userData.rackId` (masquage de baie).
+  `floorgrid`/`orient`/`rackshell`/`racklabel`), `userData.eqSide` (`front`/`rear`) et/ou `userData.rackId` (masquage de baie).
   `applyLayerVisibility()` parcourt `gRacks`/`gFree`/`gWaypoints`/`gFloorDecor` et fixe `.visible` via
   `layerVisible(userData)`. Le picking (`rayHits`) ignore les meshes masqués (three ne le fait pas tout seul). Tout
   est **construit en permanence** → toggle instantané. Plus aucun `eqRebuild` dans `applyOptionsDiff`.
   - **`showRackSides`** : coque OPAQUE + capots toujours construits, couche `rackshell` (masquage = on voit dedans,
     pas de box translucide ; les arêtes restent). Les trous de capot (toit + sol) sont en couche `slot` → pilotés par
     le seul toggle « emplacements libres », indépendamment de l'affichage des capots.
+  - **`showRackNames`** : nom de la baie (`rack.name`) posé À PLAT sur le flanc gauche (−X), le flanc droit (+X) et le
+    toit (+Z), translucide et 1 mm en saillie (matériau partagé `labelMaterial` + `LABEL_STANDOFF_MM`). Couche
+    `racklabel` (toggle dédié, activé par défaut). Géométrie PURE déléguée à `RackLabelLayout` (position/rotation/taille
+    par face, rotations PROPRES non miroir, testable en Node sans THREE). RIEN sur une baie SANS capots
+    (`has_caps === false` : pas de surface réelle). Couche INDÉPENDANTE de `rackshell` — masquer les flancs tout en
+    gardant les noms les laisse « flotter » là où étaient les panneaux (accepté). Le tag `rackId` masque aussi le nom
+    quand la baie est masquée individuellement.
   - **`hidden3dRacks`** (masquage de baie) : couche `rackId` — le groupe de baie (et ses ports, hors groupe) bascule
     en visibilité. Le moteur WebGL construit TOUTES les baies (le filtrage est en visibilité, pas au build).
   - **`colorMode`** : recoloration **en place** (`applyColorMode`), pas de rebuild.
@@ -42,6 +49,12 @@
 - **Éviction LRU des textures d'étiquettes** (`texCache`, `pruneLabelTextureCache`, plafond 256) : chaque libellé
   distinct (noms, U, cotes de mesure) créait une CanvasTexture GPU conservée à vie, y compris après changement de
   document. Les textures mutualisées (clés « ##… ») sont permanentes.
+- **Labels à plat TRANSLUCIDES et EN SAILLIE** (`DcThreeBase.faceLabel` + matériau partagé `labelMaterial`, constantes
+  `LABEL_OPACITY = 0.85` / `LABEL_STANDOFF_MM = 1`) : un nom d'équipement (plan texte) et son image de façade sont
+  strictement coplanaires (même Y/normale) → z-fighting (clignotement selon l'angle). Le label est donc rendu
+  translucide (opacité 0,85 → on voit l'image au travers) ET décalé de 1 mm vers l'EXTÉRIEUR le long de la normale de
+  sa face (convention maison en mm, cf. ports 1,5 mm / slots 2 mm) : il passe DEVANT l'image, sans z-fighting, texte
+  lisible par-dessus. Aucun `polygonOffset` (le décalage est géométrique, en mm monde).
 - **Overlay outil scindé statique/dynamique** (`_toolSig` + `ensureToolCursor`/`updateToolCursor`) : au survol en
   mode mesure/route, seuls le segment pointillé et la pastille du curseur sont MUTÉS en place — l'overlay complet
   (polylignes, étiquettes, pastilles posées + `collectScreenObjs`) n'est reconstruit qu'aux changements
@@ -53,6 +66,17 @@
   (`DcThreeCamera.slotRowFromHit`, coordonnées locales du plan). Étiquettes « U n » aux extrémités de bande
   seulement. La sélection multi-U au glisser surligne la plage via un PLAN dédié enfant de la bande
   (`applySlotSel`), muté en place.
+
+- **Pivot d'orbite BORNÉ aux murs virtuels** (`PivotBounds` + `DcThreeCamera.recenterPivotOnView`,
+  `pivotAabb` recalculée au build depuis les `RoomDesc`) : le contenu réellement touché au centre de l'écran reste
+  prioritaire (pivot inchangé) ; seul le REPLI « sol infini » est borné. Sol DANS l'AABB des salles → gardé ; sol
+  HORS mais rayon traversant → point de SORTIE (mur le plus loin) ; rayon qui rate → sol clampé au bord ; ni sol ni
+  traversée → pivot non déplacé. Murs traités comme INFINIMENT hauts (bornage purement XY, aucune contrainte Z) —
+  corrige le pivot délirant sous un angle rasant (multi-DC/multi-étage surtout). Géométrie PURE testée en Node.
+- **Dalle de PLANCHER TECHNIQUE** (`DcThreeScene.buildUnderfloorSlab`) : si une salle déclare `underfloor_mm > 0`,
+  une seconde dalle légèrement BLEUTÉE (couleur de sol du thème mixée vers l'accent) est posée `underfloor_mm` mm
+  sous le faux-plancher, matérialisant le vide technique. Même idiome que le sol de salle (plan horizontal dans
+  `gDecor`, non interactif, toujours visible) ; la donnée voyage via `RoomDesc.underfloorMm`.
 
 ## ⏳ À faire (consigné, NON implémenté)
 

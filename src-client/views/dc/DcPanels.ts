@@ -791,10 +791,14 @@ export abstract class DcPanels extends DcViews2D {
     const I: Record<string, string> = {
       front: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="4" width="16" height="6" fill="currentColor" stroke="none"/></svg>',
       rear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="4" y="14" width="16" height="6" fill="currentColor" stroke="none"/></svg>',
+      // DÉPRÉCIÉE (plus affectée à aucun toggle) : ancienne icône « noms d'équipement » (3 lignes de texte). Le toggle
+      // des noms d'équipement utilise désormais l'icône `rackNames` (étiquette). Conservée ici : son allure « lignes de
+      // liste » conviendrait à un futur usage LISTING — à reprendre le jour venu, ne pas l'affecter ailleurs entre-temps.
       names: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h9M5 18h6"/></svg>',
       ports: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/></svg>',
       image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="10" r="1.8"/><path d="M21 16l-5-4-8 7"/></svg>',
       sides: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18M19 3v18"/><rect x="9" y="6" width="6" height="12" rx="1"/></svg>',
+      rackNames: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 3H5a2 2 0 0 0-2 2v6.5a2 2 0 0 0 .6 1.4l7.5 7.5a2 2 0 0 0 2.8 0l6.1-6.1a2 2 0 0 0 0-2.8L12.9 3.6A2 2 0 0 0 11.5 3z"/><circle cx="7.5" cy="7.5" r="1.4" fill="currentColor" stroke="none"/></svg>',
       door: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v17"/><path d="M4 21h16"/><circle cx="13.5" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg>',
       doorSwing: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V5"/><path d="M5 5a16 16 0 0 1 16 16"/><path d="M5 21h16" stroke-dasharray="2.5 2.5"/></svg>',
       slot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="8" rx="1" stroke-dasharray="3 2.5"/></svg>',
@@ -825,10 +829,11 @@ export abstract class DcPanels extends DcViews2D {
     tgi(D3, I.front, I18n.t("dc.panels.tFront"), () => !this.hideFrontEq, (v) => { this.hideFrontEq = !v; r3(); });
     tgi(D3, I.rear, I18n.t("dc.panels.tRear"), () => !this.hideRearEq, (v) => { this.hideRearEq = !v; r3(); });
     tgi(D3, I.ports, I18n.t("dc.panels.tPorts"), () => this.showPorts, (v) => { this.showPorts = v; r3(); });
-    tgi(D3, I.names, I18n.t("dc.panels.tNames"), () => this.showEqNames, (v) => { this.showEqNames = v; r3(); });
+    tgi(D3, I.rackNames, I18n.t("dc.panels.tNames"), () => this.showEqNames, (v) => { this.showEqNames = v; r3(); });   // icône « étiquette » (ex-`I.names` dépréciée)
     tgi(D3, I.image, I18n.t("dc.panels.tImages"), () => this.showFaceImages, (v) => { this.showFaceImages = v; r3(); });
     section(I18n.t("lists.col.racks"));
     tgi(D3, I.sides, I18n.t("dc.panels.tSides"), () => this.showRackSides, (v) => { this.showRackSides = v; r3(); });
+    tgi(D3, I.rackNames, I18n.t("dc.panels.tRackNames"), () => this.showRackNames, (v) => { this.showRackNames = v; r3(); });
     tgi(D3, I.door, I18n.t("dc.panels.tDoors"), () => this.showDoors, (v) => { this.showDoors = v; r3(); });
     tgi(["3d", "top"], I.doorSwing, I18n.t("dc.panels.tDoorSwing"), () => this.showDoorSwing, (v) => { this.showDoorSwing = v; r3(); });
     tgi(D3, I.slot, I18n.t("dc.panels.tSlots"), () => this.showPlaceholders, (v) => { this.showPlaceholders = v; r3(); });

@@ -19,11 +19,26 @@ import { TrunkRouting } from "../../../geometry/TrunkRouting";
 import { FloorLayout } from "../../../geometry/FloorLayout";
 import type { DatacenterHost } from "../shared";
 
+/** Labels À PLAT (noms d'équipement ET de baie) : réglages PARTAGÉS entre couches (principe n°3, réutilisés par
+    `faceLabel` en lot 1 et `rackShellLabels` en lot 2).
+    - LABEL_OPACITY : translucidité du plan de texte → on VOIT l'image de façade (ou la paroi) au travers, tout en
+      gardant le texte lisible. Sans opacité < 1, le plan opaque masquerait l'image sous-jacente strictement coplanaire.
+    - FACE_LABEL_STANDOFF_MM : saillie du label d'ÉQUIPEMENT le long de la normale de sa face, en mm. La face empile
+      DÉJÀ trois plans le long de la normale : image à 0,5 mm, et PORTS à 1,5 mm (`DcThreeScene`, `n * 1.5`). Le label
+      doit se glisser ENTRE les deux (0,5 mm de saillie → label à 1,0 mm) : devant l'image (donc lisible par-dessus)
+      MAIS derrière les ports (qui l'occultent proprement), sans être coplanaire d'aucun des deux → aucun z-fighting.
+    - LABEL_STANDOFF_MM : saillie du label de BAIE sur la coque (flancs/toit) — là il n'y a ni image ni port en vis-à-vis,
+      donc 1 mm (marge plus robuste au rasant sur les grands panneaux ; convention maison, cf. ports 1,5 mm / slots 2 mm). */
+export const LABEL_OPACITY = 0.85;
+export const FACE_LABEL_STANDOFF_MM = 0.5;
+export const LABEL_STANDOFF_MM = 1;
+
 /** Couleurs de thème lues une fois depuis les variables CSS (fallbacks si absentes). */
 export interface Theme { bg: number; floor: number; grid: number; line: number; rack: number; fg: number; front: number; doorMetal: number; doorPanel: number; }
 
-/** Placement d'une salle dans le repère MONDE : centre (ox,oy,oz), orientation o (rad), dims (w×d). */
-export interface RoomDesc { dcId: string; ox: number; oy: number; oz: number; o: number; w: number; d: number; }
+/** Placement d'une salle dans le repère MONDE : centre (ox,oy,oz), orientation o (rad), dims (w×d).
+    `underfloorMm` (optionnel, > 0) = hauteur sous le faux-plancher → dalle technique bleutée `underfloorMm` mm sous le sol. */
+export interface RoomDesc { dcId: string; ox: number; oy: number; oz: number; o: number; w: number; d: number; underfloorMm?: number; }
 
 /** Câble transversal en repère MONDE : polyligne `line` + indices `straight` (segments droits) + amorces ⊥
     `stubAt` (tangente G1 imposée) + couleur. `kind: "trunk"` = FAISCEAU (trait plus épais, couleur neutre,
@@ -54,6 +69,7 @@ export interface DcThreeOptions {
   cablePortNormal: boolean;   // sortie ⊥ des ports : amorce droite de 20 mm le long de la normale avant l'arrondi
   showEqNames: boolean;   // noms d'équipement posés à plat sur la face
   showRackSides: boolean; // capots/parois : true = coque OPAQUE (baie fermée) · false = translucide (on voit dedans)
+  showRackNames: boolean; // nom de baie posé à plat sur les flancs (±X) et le toit (+Z) — sauf baie sans capots
   showPorts: boolean;     // connecteurs de ports posés à plat sur les faces
   showDoors: boolean;     // portes des baies (panneaux en saillie + charnière)
   showDoorSwing: boolean; // projection 2D au sol du débattement (rayon d'ouverture) des portes
@@ -103,6 +119,10 @@ export abstract class DcThreeBase {
   /** Descripteur MULTI-SALLES (null = mono-salle). Posé par DcBase : { center, extent, rooms[] } en repère MONDE. */
   protected multiInfo: { center: { x: number; y: number; z: number }; extent: number; rooms: RoomDesc[] } | null = null;
   protected rooms: RoomDesc[] = [];                    // salles AFFICHÉES (mono = 1)
+  // AABB (monde, XY) de l'UNION des salles affichées → « murs virtuels » bornant le pivot d'orbite au repli sol
+  // infini (cf. PivotBounds + DcThreeCamera.recenterPivotOnView). ÉCRITE par la couche scène à chaque (re)build,
+  // LUE par la couche caméra ; null = aucune salle (bornage désactivé → comportement historique).
+  protected pivotAabb: { minX: number; maxX: number; minY: number; maxY: number } | null = null;
   // CACHE CHAUD : les salles qui sortent du champ sont MASQUÉES (visible=false), pas détruites → bascule
   // simple↔multi / changement de portée instantanée (réveil au lieu de reconstruction). Borné par éviction LRU.
   protected _warm = new Map<string, number>();         // dcId d'une salle CONSTRUITE (visible ou masquée) → tick LRU
@@ -135,7 +155,7 @@ export abstract class DcThreeBase {
   protected frameArgs: [number, number, number, number, number, number] | null = null;   // derniers args de cadrage
 
   // options d'affichage (poussées par DcBase ; défauts = tout visible)
-  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), hiddenEquips: new Set(), showFigure: false, figure: null, showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cablePortNormal: false, showEqNames: true, showRackSides: false, showPorts: true, showDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, markerRealSize: false, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
+  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), hiddenEquips: new Set(), showFigure: false, figure: null, showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cablePortNormal: false, showEqNames: true, showRackSides: false, showRackNames: true, showPorts: true, showDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, markerRealSize: false, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
   protected _pivot: THREE.Sprite | null = null;   // marqueur du centre de rotation (sprite billboard, taille écran constante)
   // FOCUS « Localiser » : cible caméra demandée par la vue (centre + emprise). Appliquée juste avant le rendu,
   // donc APRÈS le cadrage par défaut d'un éventuel (re)build → le focus prime. En attente tant que la scène n'est pas prête.
@@ -344,6 +364,13 @@ export abstract class DcThreeBase {
   }
 
   /* ---- étiquettes (noms d'équipement, à plat sur la face) ---- */
+  /** Matériau PARTAGÉ d'un label à plat (principe n°3) : plan texturé TRANSLUCIDE (LABEL_OPACITY → on voit l'image
+      de façade / la paroi au travers), `depthWrite:false` (n'écrit pas la profondeur → ne masque pas ce qui est
+      derrière). `protected` (non `private`) car réutilisé par `rackShellLabels` dans la couche scène (lot 2). */
+  protected labelMaterial(tex: THREE.Texture): THREE.MeshBasicMaterial {
+    return new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: LABEL_OPACITY });
+  }
+
   /** Texture canvas d'un libellé (texte clair sur fond translucide), mise en cache (clé texte+dims). */
   protected textTexture(text: string, wMm: number, hMm: number): THREE.CanvasTexture | null {
     if (typeof document === "undefined") return null;
@@ -522,8 +549,13 @@ export abstract class DcThreeBase {
   /** Pose un libellé À PLAT sur une face verticale (avant = normale −Y ; arrière = +Y), en coords LOCALES. */
   protected faceLabel(group: THREE.Group, text: string, x: number, y: number, z: number, w: number, h: number, front: boolean, extra?: any): void {
     const tex = this.textTexture(text, w, h); if (!tex) return;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
-    mesh.position.set(x, y, z);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), this.labelMaterial(tex));   // matériau translucide PARTAGÉ
+    // SAILLIE anti z-fighting : le label est décalé de FACE_LABEL_STANDOFF_MM vers l'EXTÉRIEUR le long de la normale de
+    // sa face (avant = −Y → on RECULE en −Y ; arrière = +Y → on avance en +Y). Il se glisse ainsi ENTRE l'image de
+    // façade (0,5 mm, coplanaire sinon → il passe devant, lisible) et les PORTS (1,5 mm, qui l'occultent proprement) →
+    // aucun clignotement avec l'un ni l'autre. (0,5 mm ici, PAS 1 mm : à 1 mm le label serait coplanaire aux ports.)
+    const yStandoff = front ? y - FACE_LABEL_STANDOFF_MM : y + FACE_LABEL_STANDOFF_MM;
+    mesh.position.set(x, yStandoff, z);
     // ROTATION PURE (pas de scale → pas de winding inversé ni de miroir) : avant = normale −Y ; arrière = normale +Y,
     // texte droit et NON miroir (180° autour de l'axe (0,1,1) → right=−X = droite du spectateur arrière, up=+Z).
     if (front) mesh.rotation.x = Math.PI / 2;

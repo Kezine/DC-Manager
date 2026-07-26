@@ -290,6 +290,7 @@ export const dc = {
     tNames: "Noms des équipements",
     tImages: "Images de façade",
     tSides: "Capots / parois des baies",
+    tRackNames: "Noms des baies (posés à plat sur les flancs et le toit ; sauf baies sans capots)",
     tDoors: "Portes des baies",
     tDoorSwing: "Débattement des portes : projection du rayon d'ouverture au sol (3D et plan de salle)",
     tSlots: "Emplacements libres",
