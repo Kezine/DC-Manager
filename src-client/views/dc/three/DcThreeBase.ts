@@ -49,7 +49,11 @@ export interface ExtraCable { id: string; color: string | null; line: { x: numbe
 export interface FloorPlaneDesc { W: number; D: number; cell: number; ox: number; oy: number; z: number; blocked: string[]; loc: string; floor: string; }
 export interface FloorOobDesc { id: string; x: number; y: number; z: number; baseZ: number; }
 export interface FloorLabelDesc { label: string; x: number; y: number; z: number; sepX?: number | null; }
-export interface FloorDecor { planes: FloorPlaneDesc[]; oobs: FloorOobDesc[]; levels: FloorLabelDesc[]; buildings: FloorLabelDesc[]; maxD: number; topZ: number; }
+/** Équipement posé sur un ÉTAGE (`placement_mode: "floor"`), hors de toute salle. `x`/`y` = centre au sol en
+    coords MONDE ; `baseZ` = Z du NIVEAU seul — la hauteur propre de l'équipement (`dc_z`) est rajoutée par la
+    géométrie de boîte côté moteur, comme pour un équipement libre de salle (d'où l'absence de `z` ici). */
+export interface FloorEquipDesc { id: string; x: number; y: number; baseZ: number; }
+export interface FloorDecor { planes: FloorPlaneDesc[]; oobs: FloorOobDesc[]; equips: FloorEquipDesc[]; levels: FloorLabelDesc[]; buildings: FloorLabelDesc[]; maxD: number; topZ: number; }
 
 /** Contexte de scène poussé par DcBase au moteur (mono/multi + câbles transversaux + décor d'étage). */
 export interface SceneCtx { multi: { center: { x: number; y: number; z: number }; extent: number; rooms: RoomDesc[] } | null; extraCables: ExtraCable[]; floorDecor: FloorDecor | null; }

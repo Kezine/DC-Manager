@@ -1120,66 +1120,78 @@ export class DcThreeScene extends DcThreeCamera {
     this.store.freeEquipsOfDc(dcId).forEach((e: any) => {
       if (e.dc_x == null || e.dc_y == null) return;
       if (this.opts.hiddenEquips && this.opts.hiddenEquips.has(e.id)) return;   // équipement libre masqué (panneau / menu contextuel)
-      const b = FreeEquipGeometry.box(e);
-      const o = Normalize.rackOrientation(e.dc_orientation) * Math.PI / 180;
-      const color = this.occColor({ kind: "eq", id: e.id });
-      const grp = new THREE.Group(); grp.position.set(e.dc_x, e.dc_y, 0); grp.rotation.z = o; root.add(grp);
-      const geo = new THREE.BoxGeometry(b.w, b.d, b.h);
-      // 6 matériaux (un par face de la BoxGeometry) : image de façade si présente (non éclairée, couleurs vraies),
-      // sinon le corps coloré/éclairé. Ordre BoxGeometry : +X,−X,+Y,−Y,+Z,−Z ↔ droite/gauche/arrière/AVANT(−Y)/dessus/dessous.
-      const FACE_BY_MAT = ["right", "left", "rear", "front", "top", "bottom"];
-      // UVs REMAPPÉES pour notre monde Z-UP : BoxGeometry suppose Y-up → l'image d'ARRIÈRE (et dessus/dessous)
-      // sortait à 180°, gauche/droite à ±90°. On dérive chaque UV de l'INVERSE de faceLocal (la source de vérité
-      // du placement des PORTS) : l'image s'aligne donc EXACTEMENT sur les ports, sur les 6 faces.
-      // BoxGeometry = 4 sommets par face, dans l'ordre des groupes de matériaux (FACE_BY_MAT).
-      {
-        const pos = geo.getAttribute("position"), uv = geo.getAttribute("uv");
-        for (let i = 0; i < pos.count; i++) {
-          const face = FACE_BY_MAT[Math.floor(i / 4)];
-          // géométrie centrée (z ∈ [−h/2, +h/2]) → repère faceLocal (base z0 = 0, z ∈ [0, h])
-          const f = FreeEquipGeometry.faceFraction(e, face, pos.getX(i), pos.getY(i), pos.getZ(i) + b.h / 2, 0);
-          uv.setXY(i, f.fx, 1 - f.fy);   // uv.y = 1 ↔ HAUT de l'image (flipY par défaut du TextureLoader)
-        }
-        uv.needsUpdate = true;
-      }
-      let hasFrontImg = false;
-      const mats = FACE_BY_MAT.map((face) => {
-        const img = this.host.faceImageUrl?.(e.id, face);
-        const has = !!(img && img.url);
-        if (face === "front") hasFrontImg = has;
-        if (has) { const m = new THREE.MeshBasicMaterial({ color: 0xffffff }); this.applyFaceTexture(m, img!.url); return m; }
-        return new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 });
-      });
-      const mesh = new THREE.Mesh(geo, mats);
-      mesh.position.set(0, 0, b.z + b.h / 2);
-      mesh.userData = { pick: { type: "occ", kind: "eq", id: e.id } };   // même traitement que les occupants (détail + survol)
-      grp.add(mesh);
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
-      edges.position.copy(mesh.position); grp.add(edges);
-      // Mise en évidence de la FACE AVANT (−Y local) : ses 4 ARÊTES à l'accent → repère d'orientation. INUTILE quand une
-      // image de face avant est posée (elle indique déjà l'avant). Couche "orient" (basculable via showOrientMarks).
-      if (!hasFrontImg) {
-        const hw = b.w / 2, yF = -b.d / 2 - 1, z0 = b.z, z1 = b.z + b.h;   // yF : 1 mm en saillie → pas de z-fighting avec les arêtes noires
-        const fg = new THREE.BufferGeometry();
-        fg.setAttribute("position", new THREE.Float32BufferAttribute([
-          -hw, yF, z0, hw, yF, z0,   // arête basse
-          -hw, yF, z1, hw, yF, z1,   // arête haute
-          -hw, yF, z0, -hw, yF, z1,  // arête gauche
-          hw, yF, z0, hw, yF, z1,    // arête droite
-        ], 3));
-        const frontEdges = new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: this.theme.front }));
-        frontEdges.userData = { layer: "orient" };
-        grp.add(frontEdges);
-      }
-      // nom posé à plat SUR la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild. On passe
-      // la face elle-même (−b.d/2) : la saillie anti z-fighting (1 mm EN SAILLIE devant la face) est désormais bakée
-      // par faceLabel le long de la normale. (Auparavant −b.d/2 + 1 posait le label 1 mm À L'INTÉRIEUR — mauvais sens.)
-      if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2, b.z + b.h / 2, b.w * 0.9, b.h * 0.9, true);
+      this.buildEquipBox(root, e, e.dc_x, e.dc_y, 0);
       // ports en coords MONDE → ajoutés au groupe identité (root = gFree) ; couche "port" basculable (showPorts).
       this.store.portsOf(e.id).forEach((p: any) => this.addPort(root, p, dcId));
     });
     // PERSONNAGE d'échelle (repère personnel, vue seule) : dans la salle ACTIVE uniquement, aux coords salle.
     if (dcId === this.builtDc && this.opts.showFigure && this.opts.figure) this.buildHumanFigure(root, this.opts.figure.dcX, this.opts.figure.dcY, this.opts.figure.orient || 0);
+  }
+
+  /** Boîte 6 faces d'un équipement à dimensions LIBRES, centrée en (cx, cy) et posée sur l'origine verticale
+      `originZ` (mm), le tout dans le repère de `root`. EXTRAIT de `buildFreeEquip` pour être RÉUTILISÉ tel quel
+      par les équipements posés sur un ÉTAGE (repère MONDE) : même corps coloré, mêmes images de façade, même
+      repère d'orientation, même libellé — seule l'ORIGINE change (principe n°3, plutôt qu'un second rendu
+      parallèle qui aurait divergé). La hauteur propre de l'équipement (`box().z` = `dc_z`) reste appliquée en
+      LOCAL, donc `originZ` ne porte que le socle (0 en salle, Z du niveau sur un étage).
+      Les PORTS restent à la charge de l'appelant : ils ne se résolvent que dans une salle (Resolver3D est
+      scopé par dcId), un équipement d'étage n'en a donc pas. */
+  protected buildEquipBox(root: THREE.Group, e: any, cx: number, cy: number, originZ: number): void {
+    const b = FreeEquipGeometry.box(e);
+    const o = Normalize.rackOrientation(e.dc_orientation) * Math.PI / 180;
+    const color = this.occColor({ kind: "eq", id: e.id });
+    const grp = new THREE.Group(); grp.position.set(cx, cy, originZ); grp.rotation.z = o; root.add(grp);
+    const geo = new THREE.BoxGeometry(b.w, b.d, b.h);
+    // 6 matériaux (un par face de la BoxGeometry) : image de façade si présente (non éclairée, couleurs vraies),
+    // sinon le corps coloré/éclairé. Ordre BoxGeometry : +X,−X,+Y,−Y,+Z,−Z ↔ droite/gauche/arrière/AVANT(−Y)/dessus/dessous.
+    const FACE_BY_MAT = ["right", "left", "rear", "front", "top", "bottom"];
+    // UVs REMAPPÉES pour notre monde Z-UP : BoxGeometry suppose Y-up → l'image d'ARRIÈRE (et dessus/dessous)
+    // sortait à 180°, gauche/droite à ±90°. On dérive chaque UV de l'INVERSE de faceLocal (la source de vérité
+    // du placement des PORTS) : l'image s'aligne donc EXACTEMENT sur les ports, sur les 6 faces.
+    // BoxGeometry = 4 sommets par face, dans l'ordre des groupes de matériaux (FACE_BY_MAT).
+    {
+      const pos = geo.getAttribute("position"), uv = geo.getAttribute("uv");
+      for (let i = 0; i < pos.count; i++) {
+        const face = FACE_BY_MAT[Math.floor(i / 4)];
+        // géométrie centrée (z ∈ [−h/2, +h/2]) → repère faceLocal (base z0 = 0, z ∈ [0, h])
+        const f = FreeEquipGeometry.faceFraction(e, face, pos.getX(i), pos.getY(i), pos.getZ(i) + b.h / 2, 0);
+        uv.setXY(i, f.fx, 1 - f.fy);   // uv.y = 1 ↔ HAUT de l'image (flipY par défaut du TextureLoader)
+      }
+      uv.needsUpdate = true;
+    }
+    let hasFrontImg = false;
+    const mats = FACE_BY_MAT.map((face) => {
+      const img = this.host.faceImageUrl?.(e.id, face);
+      const has = !!(img && img.url);
+      if (face === "front") hasFrontImg = has;
+      if (has) { const m = new THREE.MeshBasicMaterial({ color: 0xffffff }); this.applyFaceTexture(m, img!.url); return m; }
+      return new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 });
+    });
+    const mesh = new THREE.Mesh(geo, mats);
+    mesh.position.set(0, 0, b.z + b.h / 2);
+    mesh.userData = { pick: { type: "occ", kind: "eq", id: e.id } };   // même traitement que les occupants (détail + survol)
+    grp.add(mesh);
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
+    edges.position.copy(mesh.position); grp.add(edges);
+    // Mise en évidence de la FACE AVANT (−Y local) : ses 4 ARÊTES à l'accent → repère d'orientation. INUTILE quand une
+    // image de face avant est posée (elle indique déjà l'avant). Couche "orient" (basculable via showOrientMarks).
+    if (!hasFrontImg) {
+      const hw = b.w / 2, yF = -b.d / 2 - 1, z0 = b.z, z1 = b.z + b.h;   // yF : 1 mm en saillie → pas de z-fighting avec les arêtes noires
+      const fg = new THREE.BufferGeometry();
+      fg.setAttribute("position", new THREE.Float32BufferAttribute([
+        -hw, yF, z0, hw, yF, z0,   // arête basse
+        -hw, yF, z1, hw, yF, z1,   // arête haute
+        -hw, yF, z0, -hw, yF, z1,  // arête gauche
+        hw, yF, z0, hw, yF, z1,    // arête droite
+      ], 3));
+      const frontEdges = new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: this.theme.front }));
+      frontEdges.userData = { layer: "orient" };
+      grp.add(frontEdges);
+    }
+    // nom posé à plat SUR la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild. On passe
+    // la face elle-même (−b.d/2) : la saillie anti z-fighting (1 mm EN SAILLIE devant la face) est désormais bakée
+    // par faceLabel le long de la normale. (Auparavant −b.d/2 + 1 posait le label 1 mm À L'INTÉRIEUR — mauvais sens.)
+    if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2, b.z + b.h / 2, b.w * 0.9, b.h * 0.9, true);
   }
 
   /** Humanoïde procédural (~1,75 m) = repère d'échelle. Primitives Three.js (autonome, hors-ligne) ; posé debout
@@ -1345,6 +1357,14 @@ export class DcThreeScene extends DcThreeCamera {
     fd.oobs.forEach((o) => {   // OOB TOUJOURS construits → marqueurs "marker" (showWaypoints) ; le mât suit aussi.
       this.addMarker(root, o.x, o.y, o.z, OOB_PX, OOB_MM, o.id);   // losange 2D (déjà tagué "marker")
       if (o.z - o.baseZ > 1) { const mst = new THREE.Mesh(new THREE.BoxGeometry(8, 8, o.z - o.baseZ), new THREE.MeshStandardMaterial({ color: theme.line })); mst.position.set(o.x, o.y, (o.z + o.baseZ) / 2); mst.userData = { layer: "marker" }; root.add(mst); }
+    });
+    // ÉQUIPEMENTS posés sur un ÉTAGE : mêmes boîtes que les équipements libres d'une salle, mais en repère
+    // MONDE et sur le socle du niveau. Ils respectent le même masquage individuel (`hiddenEquips`) et offrent
+    // donc, via le `pick` posé par `buildEquipBox`, le même survol et le même menu que dans une salle.
+    (fd.equips || []).forEach((fe) => {
+      if (this.opts.hiddenEquips && this.opts.hiddenEquips.has(fe.id)) return;
+      const e: any = this.store.get("equipments", fe.id); if (!e) return;
+      this.buildEquipBox(root, e, fe.x, fe.y, fe.baseZ);
     });
     fd.levels.forEach((l) => this.addLabelSprite(root, l.label, l.x, l.y, l.z));
     fd.buildings.forEach((b) => {

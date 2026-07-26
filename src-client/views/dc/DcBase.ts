@@ -557,9 +557,20 @@ export abstract class DcBase {
     const oobs = this.store.oobWaypoints()
       .filter((wp: any) => shown.has((wp.location || "") + "" + String(wp.floor || "")))
       .map((wp: any) => { const w = this.floor.oobWorld(m, wp); return { id: wp.id, x: w.x, y: w.y, z: w.z, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(String(wp.floor || ""))) }; });
+    // ÉQUIPEMENTS D'ÉTAGE (`placement_mode: "floor"`) : posés sur le plan de leur étage, hors de toute salle.
+    // Ils n'étaient JAMAIS transmis au moteur 3D — seule la vue 2D Plan d'étage les montrait. La position monde
+    // est déléguée à `FloorLayout.equipFloorWorld`, l'analogue d'`oobWorld` qui existait déjà SANS consommateur.
+    // `baseZ` ne porte QUE le Z du niveau : la hauteur propre (`dc_z`) est ajoutée par la géométrie de boîte au
+    // moteur, sinon elle compterait double.
+    // NB : on filtre en comparant lieu et étage CHAMP À CHAMP plutôt qu'en réutilisant la clé concaténée de
+    // `shown` — le séparateur de cette clé est un NUL BRUT dans le littéral TS (piège connu du dépôt), qu'on
+    // évite de retaper.
+    const equips = this.store.floorEquipments()
+      .filter((e: any) => m.floorPlanes.some((fp: any) => (fp.loc || "") === (e.location || "") && String(fp.floor || "") === String(e.floor || "")))
+      .map((e: any) => { const w = this.floor.equipFloorWorld(m, e); return { id: e.id, x: w.x, y: w.y, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(String(e.floor || ""))) }; });
     const levels = m.levels.map((lv: number, i: number) => ({ label: I18n.t("lists.ph.floorLabel", { n: lv }), x: -m.gap * 0.6, y: 0, z: m.levelZs ? m.levelZs[i] : i * (m.stackH + m.gap) }));
     const buildings = m.buildings.map((b: any, i: number) => ({ label: this.store.siteLabel(b.loc), x: (b.x0 + b.x1) / 2, y: -m.gap * 0.5, z: m.topZ / 2, sepX: i > 0 ? b.x0 - m.gap : null }));
-    return { planes, oobs, levels, buildings, maxD: m.maxD, topZ: m.topZ };
+    return { planes, oobs, equips, levels, buildings, maxD: m.maxD, topZ: m.topZ };
   }
 
   /* ---- WebGL : tooltips + menus contextuels (remontés du moteur → réutilisent la machinerie SVG existante) ---- */
