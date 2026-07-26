@@ -247,22 +247,27 @@ module.exports = async () => {
     const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", side: "front", u: 10, u_height: 2 });
 
     // Un cas par MODE de placement, bords compris — c'est le jeu qui fait foi pour la migration.
+    // `attendu` = la salle EXPLICITEMENT attendue. On n'écrit SURTOUT pas « === s.equipmentDcId(e) » :
+    // celui-ci délègue désormais à `roomIdOf`, la comparaison serait donc TAUTOLOGIQUE et ne prouverait
+    // plus rien. Les attentes ci-dessous sont les valeurs qu'avait la règle historique, figées à la main.
     const cases = [];
-    const add = async (label, payload) => { cases.push({ label, e: await s.create("equipments", Object.assign({ name: label }, payload)) }); };
-    await add("racké à un U", { placement_mode: "rack", rack_id: rack.id, rack_u: 5 });
-    await add("pool de baie (rack_id SANS rack_u)", { placement_mode: "rack", rack_id: rack.id });
-    await add("marge latérale", { placement_mode: "side", rack_id: rack.id });
-    await add("paroi", { placement_mode: "wall", rack_id: rack.id });
-    await add("posé sur étagère", { placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 });
-    await add("libre EN salle", { placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 100, dc_y: 100 });
-    await add("libre NON placé", { placement_mode: "manual", dim_mode: "free" });
-    await add("posé sur un ÉTAGE", { placement_mode: "floor", location: "liege", floor: "1", floor_x: 200, floor_y: 300 });
-    await add("racké dans une baie HORS salle", { placement_mode: "rack", rack_id: rackPool.id, rack_u: 3 });
+    const add = async (label, attendu, payload) => { cases.push({ label, attendu, e: await s.create("equipments", Object.assign({ name: label }, payload)) }); };
+    await add("racké à un U", () => dc.id, { placement_mode: "rack", rack_id: rack.id, rack_u: 5 });
+    await add("pool de baie (rack_id SANS rack_u)", () => null, { placement_mode: "rack", rack_id: rack.id });
+    await add("marge latérale", () => dc.id, { placement_mode: "side", rack_id: rack.id });
+    await add("paroi", () => dc.id, { placement_mode: "wall", rack_id: rack.id });
+    await add("posé sur étagère", () => dc.id, { placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 });
+    await add("libre EN salle", () => dc.id, { placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 100, dc_y: 100 });
+    await add("libre NON placé", () => null, { placement_mode: "manual", dim_mode: "free" });
+    await add("posé sur un ÉTAGE", () => null, { placement_mode: "floor", location: "liege", floor: "1", floor_x: 200, floor_y: 300 });
+    await add("racké dans une baie HORS salle", () => null, { placement_mode: "rack", rack_id: rackPool.id, rack_u: 3 });
 
-    // PARITÉ — le nouveau chemin doit rendre EXACTEMENT la même salle que la règle historique, cas par cas.
-    // C'est la condition posée par la doctrine (§4.1) pour pouvoir un jour retirer l'ancien chemin.
-    cases.forEach(({ label, e }) => {
-      ck.eq(PlacementContainers.roomIdOf(e, fetch), s.equipmentDcId(e), "parité salle — " + label);
+    // La chaîne rend la salle ATTENDUE, mode par mode — et `Store.equipmentDcId`, qui délègue désormais
+    // à cette chaîne, la rend aussi (on vérifie le point d'entrée réel de l'application, pas seulement
+    // le module). C'est ce jeu qui remplace l'ancienne comparaison entre deux implémentations.
+    cases.forEach(({ label, attendu, e }) => {
+      ck.eq(PlacementContainers.roomIdOf(e, fetch), attendu(), "salle attendue — " + label);
+      ck.eq(s.equipmentDcId(e), attendu(), "Store.equipmentDcId (délégué) — " + label);
     });
 
     // STRUCTURE de la chaîne : une étagère remonte étagère → baie → salle → étage → bâtiment.

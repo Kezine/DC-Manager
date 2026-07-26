@@ -18,6 +18,7 @@ import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCa
 import { Cascade, CascadeDelete, CascadeDetach } from "./cascadeSpec";
 import { DataValidator, PortStrands } from "../../src-shared/DataValidation";
 import type { ValidationError, EntityFetcher, ChildFinder } from "../../src-shared/DataValidation";
+import { PlacementContainers } from "../../src-shared/PlacementContainers";
 import { CableRouteAnalyzer as RouteAnalyzerImpl } from "./CableRouteAnalyzer";
 import type { RouteError as RouteErrorT, RouteAnalysis as RouteAnalysisT } from "./CableRouteAnalyzer";
 
@@ -699,29 +700,22 @@ export class Store {
 
   /* ---- placement : salle (datacenter) d'un équipement ---- */
 
-  /** Salle (datacenter_id) d'un équipement, via sa baie hôte ou sa pose libre. null = hors salle. */
+  /** Salle (datacenter_id) d'un équipement, via sa baie hôte ou sa pose libre. null = hors salle.
+
+      MIGRÉ vers la CHAÎNE DE CONTENEURS (`src-shared/PlacementContainers`, doctrine `docs/placement.md`) :
+      la salle n'est plus déduite par une cascade de cas particuliers ici, mais en remontant la chaîne
+      d'attache du contenu — étagère → baie → salle → étage → bâtiment. Un contenu ne porte qu'UNE
+      référence, celle de son conteneur immédiat ; tout le reste se déduit.
+
+      Le basculement a été fait APRÈS avoir prouvé la parité stricte des deux chemins sur un cas par mode
+      de placement (cf. `test-core-store.js`), conformément à la méthode de la doctrine §4.1. Le corps
+      historique a ensuite été retiré : le garde-fou n'est plus une comparaison entre deux implémentations
+      — qui deviendrait tautologique une fois l'une déléguée à l'autre — mais des ATTENTES EXPLICITES par
+      mode dans ce même test. Les suites route/câble, qui traversent massivement cette fonction, servent
+      de vérification d'intégration. */
   equipmentDcId(eqOrId: any): string | null {
     const eq = (typeof eqOrId === "object") ? eqOrId : this.get("equipments", eqOrId);
-    if (!eq) return null;
-    if (eq.placement_mode === "floor") return null;   // posé sur un étage (hors DC)
-    if ((eq.placement_mode === "side" || eq.placement_mode === "wall") && eq.rack_id) {
-      const rack = this.get("racks", eq.rack_id);
-      return (rack && rack.datacenter_id) ? rack.datacenter_id : null;
-    }
-    // POSÉ SUR UNE ÉTAGÈRE (tray) : la salle est celle de la BAIE hôte de l'étagère (tray → rackItem → rack → DC).
-    // DOIT précéder le repli « libre » : un équipement posé est dim_mode "free" MAIS sans dc_id (rattaché via
-    // tray_item_id). Sans ce cas il retombait à null (« non placé ») → un câble vers lui restait bloqué à « planifié ».
-    if (eq.placement_mode === "tray" && eq.tray_item_id) {
-      const tray = this.get("rackItems", eq.tray_item_id);
-      const rack = tray && tray.rack_id ? this.get("racks", tray.rack_id) : null;
-      return (rack && rack.datacenter_id) ? rack.datacenter_id : null;
-    }
-    if (eq.dim_mode === "free") return eq.dc_id || null;
-    if (eq.placement_mode === "rack" && eq.rack_id && eq.rack_u != null) {
-      const rack = this.get("racks", eq.rack_id);
-      return (rack && rack.datacenter_id) ? rack.datacenter_id : null;
-    }
-    return null;
+    return PlacementContainers.roomIdOf(eq, (coll, id) => this.get(coll as any, id as any));
   }
 
   /** Salle où se résout un PORT : celle de son équipement porteur. null = port inconnu ou équipement hors salle.
