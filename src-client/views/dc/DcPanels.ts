@@ -549,31 +549,46 @@ export abstract class DcPanels extends DcViews2D {
     const curLoc = dc ? (dc.location || "") : "";
     const bldgIds = (loc: string) => all.filter((d: any) => (d.location || "") === loc).map((d: any) => d.id);
     const selRow = document.createElement("div"); selRow.className = "form-hint"; selRow.style.cssText = "margin-bottom:6px"; selRow.innerHTML = I18n.t("dc.panels.activeRoom") + "<b>" + Html.escape(dc.name || I18n.t("lists.ph.room")) + "</b>"; box.appendChild(selRow);
-    // bascule maître : Vue étage (empilement 3D de plusieurs salles)
+    // BASCULE MAÎTRE — « Vue étage » = basculer la 3D dans le repère du BÂTIMENT (étages empilés, bâtiments
+    // côte à côte). Volontairement disponible MÊME AVEC UNE SEULE SALLE : ce mode ne sert pas qu'à « empiler
+    // plusieurs salles », c'est le seul repère où existent les PLANS D'ÉTAGE et le contenu d'étage (un
+    // équipement en `placement_mode: "floor"`, qui appartient à un bâtiment+étage et non à une salle).
+    // L'ancien garde-fou le conditionnait au NOMBRE de salles — il testait donc la PORTÉE pour interdire un
+    // mode dont l'intérêt est le REPÈRE, ce qui rendait le contenu d'étage inatteignable dans un document
+    // mono-salle. `FloorLayout.multiLayout` gère parfaitement une salle unique (elle ajoute au passage les
+    // étages « nus » du bâtiment courant, d'où le plan d'un étage qui n'existe que par son équipement).
     if (all.length) {
-      const tog = FormControls.toggle(I18n.t("dc.panels.multiDc"), this.multiDc, (v) => {
+      const tog = FormControls.toggle(I18n.t("dc.panels.floorView"), this.multiDc, (v) => {
         this.multiDc = v;
         if (v) { if (!this.visibleDcIds.size) { const b = bldgIds(curLoc); this.visibleDcIds = new Set(b.length ? b : all.map((d: any) => d.id)); } }
         refit();
-      }, { block: true, title: I18n.t("dc.panels.multiDcTitle") });
-      if (all.length <= 1) { tog.disabled = true; tog.title = I18n.t("dc.panels.oneRoomNoStack"); }   // inutile avec une seule salle
+      }, { block: true, title: I18n.t("dc.panels.floorViewTitle") });
       box.appendChild(tog);
     }
-    // préréglages de portée (actifs en Vue étage)
+    // PORTÉE (quelles salles afficher) = SOUS-contrôle de la Vue étage, PAS un réglage frère : hors Vue
+    // étage, la 3D est dans le repère de la salle ACTIVE — il n'y a qu'une salle à montrer, la portée n'a
+    // donc aucun sens. Ces contrôles ne sont RENDUS que dans ce mode, sous un titre explicite, au lieu
+    // d'être affichés grisés avec un suffixe d'infobulle qui laissait DEVINER la subordination. C'est le
+    // découplage demandé : le repère (bascule ci-dessus) et la portée (ici) cessent d'être confondus.
+    // `displayed` reste calculé dans les deux cas : la liste de salles plus bas s'en sert aussi.
     const displayed = new Set(this.displayedDcIds(dc));
     const sameSet = (arr: string[]) => displayed.size === arr.length && arr.every((id) => displayed.has(id));
-    // presets de portée = CHOIX 1 parmi N (aucun actif possible si ensemble custom) → contrôle SEGMENTÉ d'icônes.
-    const acts = document.createElement("div"); acts.className = "rm-toggle dc-scope-seg";
-    const scopeBtn = (icon: string, titleTxt: string, active: boolean, onClick: () => void) => {
-      const b = document.createElement("button"); b.type = "button";   // nu : style via .rm-toggle button (+ svg)
-      b.classList.toggle("on", active && this.multiDc);
-      b.title = this.multiDc ? titleTxt : (titleTxt + I18n.t("dc.panels.scopeMultiSuffix")); b.disabled = !this.multiDc;
-      b.innerHTML = icon; if (this.multiDc) b.onclick = onClick; return b;
-    };
-    acts.appendChild(scopeBtn(DC_SCOPE_ICONS.self, I18n.t("dc.panels.scopeSelf"), sameSet([dc.id]), () => { this.visibleDcIds = new Set([dc.id]); refit(); }));
-    acts.appendChild(scopeBtn(DC_SCOPE_ICONS.bldg, I18n.t("dc.panels.scopeBldg"), sameSet(bldgIds(curLoc)), () => { this.visibleDcIds = new Set(bldgIds(curLoc)); refit(); }));
-    acts.appendChild(scopeBtn(DC_SCOPE_ICONS.all, I18n.t("dc.panels.scopeAll"), sameSet(all.map((d: any) => d.id)), () => { this.visibleDcIds = new Set(all.map((d: any) => d.id)); refit(); }));
-    box.appendChild(acts);
+    if (this.multiDc) {
+      const scopeH = document.createElement("div"); scopeH.className = "dc-card-title"; scopeH.style.marginTop = "8px";
+      scopeH.textContent = I18n.t("dc.panels.scopeSection"); box.appendChild(scopeH);
+      // presets de portée = CHOIX 1 parmi N (aucun actif possible si ensemble custom) → contrôle SEGMENTÉ d'icônes.
+      const acts = document.createElement("div"); acts.className = "rm-toggle dc-scope-seg";
+      const scopeBtn = (icon: string, titleTxt: string, active: boolean, onClick: () => void) => {
+        const b = document.createElement("button"); b.type = "button";   // nu : style via .rm-toggle button (+ svg)
+        b.classList.toggle("on", active);
+        b.title = titleTxt;
+        b.innerHTML = icon; b.onclick = onClick; return b;
+      };
+      acts.appendChild(scopeBtn(DC_SCOPE_ICONS.self, I18n.t("dc.panels.scopeSelf"), sameSet([dc.id]), () => { this.visibleDcIds = new Set([dc.id]); refit(); }));
+      acts.appendChild(scopeBtn(DC_SCOPE_ICONS.bldg, I18n.t("dc.panels.scopeBldg"), sameSet(bldgIds(curLoc)), () => { this.visibleDcIds = new Set(bldgIds(curLoc)); refit(); }));
+      acts.appendChild(scopeBtn(DC_SCOPE_ICONS.all, I18n.t("dc.panels.scopeAll"), sameSet(all.map((d: any) => d.id)), () => { this.visibleDcIds = new Set(all.map((d: any) => d.id)); refit(); }));
+      box.appendChild(acts);
+    }
     // liste groupée par bâtiment puis étage (mono = sélection radio ; Vue étage = multi-sélection)
     const locs = Array.from(new Set(all.map((d: any) => d.location || "")))
       .sort((a, b) => (a === curLoc ? -1 : b === curLoc ? 1 : this.store.siteLabel(a).localeCompare(this.store.siteLabel(b))));
