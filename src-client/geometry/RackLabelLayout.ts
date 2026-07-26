@@ -17,9 +17,14 @@
        +Y→+Z (haut du texte vers le haut), +X→+Y. Lisible depuis +X.
      • flanc GAUCHE (−X) : rotation de 2π/3 autour de (1,−1,−1) → +Z→−X, +Y→+Z, +X→−Y.
        Lisible depuis −X, haut du texte toujours vers +Z.
-     • TOIT (+Z) : rotation de π autour de la normale (0,0,1) → texte lu du dessus, haut du
-       texte vers le front (−Y). Comme c'est une rotation autour de la normale, le texte
-       reste NON miroir.
+     • TOIT (+Z) : AUCUNE rotation (angle 0) — le plan de texte est DÉJÀ dans le bon plan
+       (texte en +Z, donc lu du dessus), avec son haut vers l'ARRIÈRE (+Y). C'est ce qui rend
+       le nom LISIBLE DEPUIS LA FACE AVANT de la baie : sur une surface HORIZONTALE, un texte
+       se lit quand son haut pointe LOIN de l'observateur ; l'observateur regardant la baie
+       depuis l'avant (côté −Y), le haut du texte doit donc aller vers +Y. Une rotation de π
+       autour de la normale (l'état antérieur) mettait le haut vers le front et rendait le nom
+       lisible depuis l'ARRIÈRE seulement. L'axe reste renvoyé pour l'uniformité de
+       l'interface — avec un angle nul, il est sans effet (identité, donc jamais miroir).
    L'axe est renvoyé BRUT (non normalisé) : le consommateur le normalise (three le fait via
    `Vector3.normalize()`) — l'angle est indépendant de la norme de l'axe.
 
@@ -77,12 +82,13 @@ export class RackLabelLayout {
         size: { w: sw, h: Math.min(H * RackLabelLayout.SIDE_HEIGHT_CAP_FRAC, sw * RackLabelLayout.HEIGHT_RATIO) },
       };
     }
-    // roof : centre du toit, décalé en +Z (normale sortante) ; rotation autour de la normale (lecture du dessus).
+    // roof : centre du toit, décalé en +Z (normale sortante). AUCUNE rotation → haut du texte vers
+    // l'arrière (+Y), soit un nom lisible depuis la face AVANT de la baie (cf. en-tête).
     const sw = w * RackLabelLayout.SPAN_FRAC;
     return {
       position: { x: 0, y: 0, z: H + standoffMm },
       axis: { x: 0, y: 0, z: 1 },
-      angle: Math.PI,
+      angle: 0,
       size: { w: sw, h: sw * RackLabelLayout.HEIGHT_RATIO },
     };
   }

@@ -202,7 +202,7 @@ module.exports = async () => {
     });
     ck.eq(L.angle, (2 * Math.PI) / 3, "left : angle 2π/3");
     ck.eq(R.angle, (2 * Math.PI) / 3, "right : angle 2π/3");
-    ck.eq(T.angle, Math.PI, "roof : angle π (rotation autour de la normale)");
+    ck.eq(T.angle, 0, "roof : angle 0 → haut du texte vers +Y, nom LISIBLE depuis la face AVANT");
     const ax = (p) => JSON.stringify(p.axis);
     ck(ax(L) !== ax(R) && ax(R) !== ax(T) && ax(L) !== ax(T), "les 3 faces ont des axes de rotation DISTINCTS");
     ck(L.axis.x === R.axis.x && L.axis.y === -R.axis.y && L.axis.z === -R.axis.z, "flancs : axes symétriques (x égal, y/z opposés)");
@@ -1078,9 +1078,26 @@ module.exports = async () => {
     approx(rTop.fy, 0, "rear : z = h → fy = 0 (haut de l'image en haut)");
     const rLeft = FreeEquipGeometry.faceFraction(eq, "rear", 300, 200, 150, 0);   // x = +w/2
     approx(rLeft.fx, 0, "rear : x = +w/2 → fx = 0 (gauche de l'image, vue de derrière)");
-    // DESSUS : fy=0 = avant (−Y) — convention faceLocal (« dessus/dessous : fy = profondeur, 0 = avant −Y »).
-    const tFront = FreeEquipGeometry.faceFraction(eq, "top", 0, -200, 300, 0);
-    approx(tFront.fy, 0, "top : y = −d/2 (avant) → fy = 0");
+    // CONVENTION PHOTOGRAPHIQUE (cf. en-tête de FreeEquipGeometry) : quel bord de l'IMAGE tombe du côté
+    // de la face AVANT du boîtier (−Y). Ces 4 assertions VERROUILLENT la règle métier — un cliché de face
+    // horizontale/latérale se pose comme on l'a pris, l'avant du boîtier servant de repère.
+    approx(FreeEquipGeometry.faceFraction(eq, "top", 0, -200, 300, 0).fy, 1, "dessus : avant (−Y) → fy = 1 (BAS de l'image côté face)");
+    approx(FreeEquipGeometry.faceFraction(eq, "bottom", 0, -200, 0, 0).fy, 0, "dessous : avant (−Y) → fy = 0 (HAUT de l'image côté face)");
+    approx(FreeEquipGeometry.faceFraction(eq, "left", -300, -200, 150, 0).fx, 1, "gauche : avant (−Y) → fx = 1 (DROITE de l'image côté face)");
+    approx(FreeEquipGeometry.faceFraction(eq, "right", 300, -200, 150, 0).fx, 0, "droite : avant (−Y) → fx = 0 (GAUCHE de l'image côté face)");
+    // NON MIROIR sur les 6 faces : (droite de l'image) × (haut de l'image) = normale SORTANTE. Garde-fou
+    // contre une correction d'orientation qui INVERSERAIT l'écriture au lieu de la faire pivoter (une simple
+    // négation de fx ou de fy seule miroite la face — il faut les retourner par PAIRE).
+    const OUT = { front: [0, -1, 0], rear: [0, 1, 0], left: [-1, 0, 0], right: [1, 0, 0], top: [0, 0, 1], bottom: [0, 0, -1] };
+    Object.keys(OUT).forEach((face) => {
+      const P = (fx, fy) => { const p = FreeEquipGeometry.faceLocal(eq, face, fx, fy, 0); return [p.lx, p.ly, p.lz]; };
+      const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+      const r = sub(P(1, 0.5), P(0, 0.5));   // vecteur vers la DROITE de l'image
+      const u = sub(P(0.5, 0), P(0.5, 1));   // vecteur vers le HAUT de l'image
+      const cr = [r[1] * u[2] - r[2] * u[1], r[2] * u[0] - r[0] * u[2], r[0] * u[1] - r[1] * u[0]];
+      const n = OUT[face], dot = cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2];
+      ck(dot > 0, "non miroir " + face + " : (droite × haut) orienté comme la normale sortante");
+    });
   }
   });
 
