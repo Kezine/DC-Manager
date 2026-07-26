@@ -98,7 +98,7 @@ export const rack = {
     titleNew: "Nouvelle baie",
     removeRoofWps: "Retirez d'abord les waypoints posés sur le toit avant de passer la baie « sans capots ».",
     resizeTitle: "Redimensionner la baie ?",
-    resizeMsg: "Cette baie contient {{count}} équipement(s). Changer le nombre de U les passera tous en « Non placé ». Continuer ?",
+    resizeMsg: "{{eq}} équipement(s) et {{items}} élément(s) de baie (obturateur, étagère, réservation) ne tiennent plus dans {{u}} U. Les équipements repasseront en « Non placé » ; les éléments de baie seront SUPPRIMÉS — un équipement posé sur une étagère supprimée redevient « Non placé ». Ce qui tient encore n'est pas touché. Continuer ?",
     resizeConfirm: "Redimensionner",
     resized: "Baie redimensionnée",
     updated: "Baie mise à jour",

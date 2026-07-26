@@ -1,5 +1,7 @@
 import type { Store } from "../store";
 import { RackGeometry } from "./RackGeometry";
+import { RackResize } from "./RackResize";
+import type { RackUSpan } from "./RackResize";
 import { RackItemKinds } from "../domain/RackItemKinds";
 import { SIDE_U_STEP, EQUIP_DEPTHS } from "../domain/constants";
 
@@ -54,16 +56,36 @@ export class RackScene {
     return occ;
   }
 
-  /** Occupants à ÉLÉVATION (équipements rackés + pseudo-items), pour le rendu 3D. */
+  /** Occupants à ÉLÉVATION (équipements rackés + pseudo-items), pour le rendu 3D.
+      GARDE DE CAGE : un occupant dont l'emprise sort des U de la baie n'est PAS rendu. Nécessaire pour les
+      documents DÉJÀ corrompus par d'anciens redimensionnements — des pseudo-occupants y sont restés au-delà
+      du dernier U et se dessinaient « hors baie ». Corriger le chemin d'écriture (cf. `RackResize`, consommé
+      par le formulaire de baie) ne répare pas ces documents rétroactivement, d'où ce filet au rendu. */
   occupantsElev(rackId: string): OccupantElev[] {
     const s = this.store;
+    const rack = s.get("racks", rackId);
+    const uCount = rack ? (rack.u_count | 0) : 0;   // baie absente → rien à dessiner
     const eqs = s.equipmentsOfRack(rackId)
       .filter((e: any) => e.rack_u != null)
       .map((e: any) => ({ u: e.rack_u | 0, h: Math.max(1, e.u_height | 0 || 1), side: (e.rack_side === "rear") ? "rear" : "front", depth: EQUIP_DEPTHS.includes(e.depth) ? e.depth : "full", depth_mm: e.depth_mm, locks_u: RackGeometry.mountLocksU(e), label: e.name || "", kind: "eq", id: e.id, face_offset_mm: e.face_offset_mm || 0 }));
     const items = s.rackItemsOf(rackId)
       .filter((it: any) => it.u != null)
       .map((it: any) => ({ u: it.u | 0, h: Math.max(1, it.u_height | 0 || 1), side: (it.side === "rear") ? "rear" : "front", depth: "none", depth_mm: it.depth_mm, locks_u: false, label: it.label || "", kind: "item", id: it.id, itemKind: it.kind, tray_type: it.tray_type, tray_u: it.tray_u }));
-    return (eqs as OccupantElev[]).concat(items as OccupantElev[]);
+    return (eqs as OccupantElev[]).concat(items as OccupantElev[]).filter((o) => RackResize.fits(o.u, o.h, uCount));
+  }
+
+  /** Emprises en U BRUTES (SANS garde de cage) des occupants d'une baie, chacune étiquetée par sa famille
+      ("eq" / "item"). Pendant délibéré de `occupantsElev` : le REDIMENSIONNEMENT doit justement VOIR ce qui
+      dépasse pour l'évacuer, là où le rendu doit l'ignorer. Ne pas confondre les deux usages. */
+  uSpans(rackId: string): RackUSpan[] {
+    const s = this.store;
+    const eqs = s.equipmentsOfRack(rackId)
+      .filter((e: any) => e.rack_u != null)
+      .map((e: any) => ({ id: e.id, u: e.rack_u | 0, h: Math.max(1, e.u_height | 0 || 1), kind: "eq" }));
+    const items = s.rackItemsOf(rackId)
+      .filter((it: any) => it.u != null)
+      .map((it: any) => ({ id: it.id, u: it.u | 0, h: Math.max(1, it.u_height | 0 || 1), kind: "item" }));
+    return (eqs as RackUSpan[]).concat(items as RackUSpan[]);
   }
 
   occupancyCount(rackId: string): number {

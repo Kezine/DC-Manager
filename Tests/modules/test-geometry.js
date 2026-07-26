@@ -263,6 +263,54 @@ module.exports = async () => {
   }
   });
 
+  await section("RackResize : évacuation d'une cage redimensionnée (pur) + garde de rendu", async () => {
+  {
+    const { RackResize } = D("geometry/RackResize.js");
+    // fits : les U sont numérotés à partir de 1, l'occupant couvre u … u+h−1.
+    ck(RackResize.fits(1, 1, 42), "fits : U1 h1 dans 42 U");
+    ck(RackResize.fits(42, 1, 42), "fits : U42 h1 tient PILE dans 42 U");
+    ck(RackResize.fits(1, 42, 42), "fits : U1 h42 remplit exactement la cage");
+    ck(!RackResize.fits(42, 2, 42), "fits : U42 h2 DÉPASSE (dernier U = 43)");
+    ck(!RackResize.fits(43, 1, 42), "fits : U43 hors cage");
+    ck(!RackResize.fits(0, 1, 42), "fits : U0 non conforme (numérotation à partir de 1)");
+    ck(!RackResize.fits(-3, 1, 42), "fits : U négatif non conforme");
+    ck(RackResize.fits(5, 0, 42), "fits : hauteur absente → traitée comme 1 U");
+
+    // fallout : SÉPARE les deux familles, car leur traitement diffère (équipement dépublié vs item supprimé).
+    const spans = [
+      { id: "eqIn", u: 5, h: 2, kind: "eq" },      // tient dans 20 U
+      { id: "eqOut", u: 30, h: 1, kind: "eq" },    // dépasse
+      { id: "itIn", u: 1, h: 1, kind: "item" },    // tient
+      { id: "itOut", u: 19, h: 3, kind: "item" },  // 19..21 → dépasse
+    ];
+    const fo = RackResize.fallout(spans, 20);
+    ck.eq(JSON.stringify(fo.equipmentIds), JSON.stringify(["eqOut"]), "fallout : seul l'équipement hors cage est évacué");
+    ck.eq(JSON.stringify(fo.itemIds), JSON.stringify(["itOut"]), "fallout : seul le pseudo-occupant hors cage est évacué");
+    // AGRANDISSEMENT : rien ne dépasse → rien n'est touché (le bug historique déplaçait TOUT à chaque changement).
+    const up = RackResize.fallout(spans, 48);
+    ck(!up.equipmentIds.length && !up.itemIds.length, "fallout : agrandir la cage n'évacue RIEN");
+
+    // uSpans (BRUT, voit ce qui dépasse) vs occupantsElev (garde de cage, ne dessine pas le hors-bornes).
+    const s = await makeStore();
+    const rs = new RackScene(s);
+    const rack = await s.create("racks", { name: "R", u_count: 42, sides: "single" });
+    await s.create("equipments", { name: "sw", placement_mode: "rack", rack_id: rack.id, rack_u: 10, u_height: 2 });
+    await s.create("rackItems", { rack_id: rack.id, kind: "blank", side: "front", u: 40, u_height: 2 });
+    ck.eq(rs.uSpans(rack.id).length, 2, "uSpans : équipement + pseudo-occupant");
+    ck.eq(rs.occupantsElev(rack.id).length, 2, "occupantsElev : les 2 occupants tiennent dans 42 U");
+    // Document CORROMPU : la baie rétrécit sans passer par le formulaire (comme d'anciens redimensionnements).
+    await s.update("racks", rack.id, { u_count: 20 });
+    const raw = rs.uSpans(rack.id);
+    ck.eq(raw.length, 2, "uSpans : voit TOUJOURS l'occupant hors cage (c'est son rôle)");
+    const drawn = rs.occupantsElev(rack.id);
+    ck.eq(drawn.length, 1, "occupantsElev : le pseudo-occupant hors cage n'est PLUS dessiné");
+    ck(drawn[0].kind === "eq" && drawn[0].u === 10, "occupantsElev : l'occupant qui tient est conservé");
+    const foDb = RackResize.fallout(raw, 20);
+    ck.eq(JSON.stringify(foDb.itemIds.length), "1", "fallout sur données réelles : 1 pseudo-occupant à supprimer");
+    ck(!foDb.equipmentIds.length, "fallout sur données réelles : l'équipement U10 h2 tient dans 20 U");
+  }
+  });
+
   await section("RackScene + RackGeometry : side-mount", async () => {
   {
     const s = await makeStore();

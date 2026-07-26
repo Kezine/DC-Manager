@@ -11,6 +11,7 @@ import { Waypoint } from "../../models/Waypoint";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { RackScene } from "../../geometry/RackScene";
+import { RackResize } from "../../geometry/RackResize";
 import { RackItemKinds } from "../../domain/RackItemKinds";
 import { Normalize } from "../../core/Normalize";
 import { I18n } from "../../i18n/I18n";   // lot B2a : options des tables de libellés (labelKey → I18n.t)
@@ -228,13 +229,31 @@ export class RackForms extends CableForms {
         // T3b) — le SOL est conservé (perçable par un waypoint via le faux-plancher).
         if (rk) { payload.roof_cells = hasCaps ? capBuf.roof : []; payload.floor_cells = capBuf.floor; }
         if (live.check(payload).length) return false;   // validation live : champ(s) surligné(s), enregistrement bloqué
-        // redimensionnement d'une baie occupée (nombre de U) → déplace ses équipements
+        // REDIMENSIONNEMENT du nombre de U : on n'évacue QUE les occupants qui ne tiennent plus dans la
+        // nouvelle cage (AGRANDIR ne déplace donc plus rien, et ce qui tient reste en place). La règle est
+        // partagée avec le rendu via `RackResize` — cf. son en-tête pour l'asymétrie de traitement :
+        //   • équipement dépassant  → « Non placé » (il existe hors baie, ses listings y donnent accès) ;
+        //   • PSEUDO-occupant dépassant → SUPPRIMÉ. Il n'a aucune existence hors baie NI aucun listing (seuls
+        //     points d'accès : vue 3D / édition 2D de baie) ; le laisser sans U en ferait un fantôme
+        //     inatteignable. La cascade `rackItems` détache au passage les équipements posés sur une étagère
+        //     supprimée, qui redeviennent « Non placé » (donc de nouveau accessibles).
+        // Les pseudo-occupants étaient auparavant IGNORÉS ici : ils restaient au-delà du dernier U et se
+        // dessinaient hors baie — et une baie n'en contenant QUE (sans aucun équipement) échappait même à la
+        // confirmation, l'ancien garde-fou testant le seul nombre d'équipements.
         if (rk && g.u !== rk.u_count) {
-          const occ = store.equipmentsOfRack(rk.id);
-          if (occ.length) {
-            const ok = await Dialog.confirm({ title: I18n.t("rack.rack.resizeTitle"), message: I18n.t("rack.rack.resizeMsg", { count: occ.length }), confirmLabel: I18n.t("rack.rack.resizeConfirm"), danger: true });
+          const fo = RackResize.fallout(new RackScene(store).uSpans(rk.id), g.u);
+          if (fo.equipmentIds.length || fo.itemIds.length) {
+            const ok = await Dialog.confirm({
+              title: I18n.t("rack.rack.resizeTitle"),
+              message: I18n.t("rack.rack.resizeMsg", { eq: fo.equipmentIds.length, items: fo.itemIds.length, u: g.u }),
+              confirmLabel: I18n.t("rack.rack.resizeConfirm"), danger: true,
+            });
             if (!ok) return false;
-            await store.updateBatch([{ collection: "racks", id: rk.id, patch: payload }].concat(occ.map((e: any) => ({ collection: "equipments", id: e.id, patch: { placement_mode: "manual", rack_id: null, rack_u: null } }))));
+            await store.updateBatch([{ collection: "racks", id: rk.id, patch: payload }].concat(
+              fo.equipmentIds.map((id: string) => ({ collection: "equipments", id, patch: { placement_mode: "manual", rack_id: null, rack_u: null } }))));
+            // Suppressions APRÈS le lot d'écriture : chacune porte sa propre cascade (détachement des invités
+            // d'étagère), ce que `updateBatch` ne sait pas exprimer → `remove` un par un.
+            for (const id of fo.itemIds) await store.remove("rackItems", id);
             host.setDirty?.(true); Notify.toast(I18n.t("rack.rack.resized")); onSaved?.(); return true;
           }
         }

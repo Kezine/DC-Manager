@@ -91,7 +91,7 @@ export const rack = {
     titleNew: "New rack",
     removeRoofWps: "First remove the waypoints placed on the roof before turning the rack « without caps ».",
     resizeTitle: "Resize the rack?",
-    resizeMsg: "This rack contains {{count}} equipment. Changing the number of U will set them all to « Unplaced ». Continue?",
+    resizeMsg: "{{eq}} equipment and {{items}} rack element(s) (blank, shelf, reservation) no longer fit in {{u}} U. Equipment will be set to « Unplaced »; rack elements will be DELETED — equipment resting on a deleted shelf returns to « Unplaced ». Whatever still fits is left untouched. Continue?",
     resizeConfirm: "Resize",
     resized: "Rack resized",
     updated: "Rack updated",
