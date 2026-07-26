@@ -92,6 +92,31 @@ l'application. Une réécriture d'un bloc serait déraisonnable. La convergence 
    deuxième mode migre.
 4. **Aucun élargissement de périmètre non demandé.** Un lot = un mode, vérifié, commité.
 
+### 4.1 Méthode de vérification d'une migration
+
+Le rendu est la seule partie de l'application SANS couverture automatique : la comparaison visuelle
+n'y est donc pas un confort, c'est l'unique vérification possible. Elle s'organise ainsi :
+
+- **BASCULEMENT À CHAUD, pas de vue dupliquée.** Un réglage choisit quel chemin de RÉSOLUTION alimente
+  le descripteur de scène (historique / conteneur) ; la vue se reconstruit en place. Deux vues côte à
+  côte ne partagent ni caméra, ni zoom, ni instant — elles rendent invisible l'écart de quelques
+  millimètres qu'on cherche justement à voir.
+- **L'interrupteur se place SOUS les deux rendus.** La 2D et la 3D consomment les MÊMES primitives de
+  placement (`FreeEquipGeometry`, `FloorLayout`, `RackScene`) : un commutateur au niveau de la
+  résolution les couvre donc toutes les deux. Dupliquer une vue n'en couvrirait qu'une, et clonerait
+  au passage la couche qui ne change pas (matériaux, libellés, saillies anti z-fighting, picking).
+- **La duplication se fait au bon endroit** : deux implémentations d'une même interface de résolution,
+  jamais deux arbres de rendu.
+- **PARITÉ NUMÉRIQUE d'abord.** La résolution étant pure, on fait tourner les deux chemins sur un même
+  document et on compare les points résolus : cela attrape les écarts sub-millimétriques qu'aucun œil
+  ne verra. La 2D s'y prête particulièrement — ses vues sont minces, elles ne font que mapper en SVG
+  des positions calculées par des modules purs.
+- **Le visuel est réservé à ce que lui seul juge** : en 2D le placement des libellés et l'empreinte ;
+  en 3D les matériaux, la lisibilité et le z-fighting.
+- **Période parallèle BORNÉE et ancien chemin GELÉ.** Dès qu'une correction atterrit sur un chemin sans
+  l'autre, la comparaison ne prouve plus rien et l'on entretient deux mondes. « Une fois validé, on
+  retire » doit être une ÉCHÉANCE, pas une intention.
+
 ## 5. Articulation avec le modèle relationnel
 
 `persistance.md` acte la migration du serveur vers un vrai modèle relationnel au prochain remaniement
