@@ -1,0 +1,223 @@
+# Placement & repères — doctrine de l'application
+
+> **Doctrine**, pas plan de refonte. Ce document dit ce qu'est un placement dans DC Manager, quelle
+> règle suivre pour tout nouveau contenu spatial, et comment l'existant converge vers ce modèle.
+> Il gouverne conjointement le chantier « contenu hors-salle » et la migration relationnelle
+> (cf. `persistance.md`) : les deux figent le MÊME modèle, les concevoir séparément reviendrait à le
+> figer deux fois de façons incompatibles.
+
+## 1. Le constat : une hiérarchie née par accrétion
+
+L'application s'est construite par élargissements successifs du cadre spatial :
+
+```
+baie  →  salle  →  étage  →  multi-étage  →  multi-bâtiment
+```
+
+À chaque élargissement, le niveau précédent était déjà câblé en dur. La hiérarchie spatiale est donc
+**implicite** : elle existe dans l'UI et dans la tête de l'utilisateur, mais n'est portée par AUCUN
+objet du code. Chaque couche la re-dérive à sa façon, à partir de FK éparses (`rack_id`, `dc_id`,
+`tray_item_id`, `location` + `floor`).
+
+Trois symptômes observés, tous ramenant à cette cause unique — ils sont cités parce qu'ils sont
+FACTUELS et vérifiables, pas comme illustration rhétorique :
+
+1. **La même erreur dans deux couches.** Le mode « Vue étage » portait deux garde-fous indépendants
+   (`DcPanels`, puis `DcBase`) testant tous deux le NOMBRE DE SALLES pour décider d'un rendu qui dépend
+   du REPÈRE. Sans nom pour distinguer *repère* et *portée*, chaque couche réinvente la distinction —
+   et se trompe de la même manière.
+2. **Une fonction écrite, documentée, sans consommateur.** `FloorLayout.equipFloorWorld` calculait
+   depuis longtemps la position monde d'un équipement d'étage. Personne ne l'a branchée : il n'y avait
+   pas de place pour elle dans le modèle de résolution.
+3. **Cinq branches pour une seule mécanique.** `Resolver3D.resolveFaceAnchor3D` répète cinq fois
+   « prendre une boîte locale, la tourner par l'orientation de l'hôte, la translater à sa position » —
+   une branche par mode de placement. La sixième (étage) est IMPOSSIBLE à écrire dans ce moule, parce
+   que son hôte n'est pas une salle.
+
+## 2. La notion manquante : le CONTENEUR DE PLACEMENT
+
+Un **conteneur de placement** est un objet qui possède un repère local et une transformée vers son
+parent. La hiérarchie réelle est :
+
+```
+monde
+ └─ bâtiment (location)        translation en X (bande de bâtiment)
+     └─ étage (floor)          translation en Z (niveau)
+         ├─ plan d'étage       repère du plan (ancre anchor_x/anchor_y)  ← porte du contenu DIRECT
+         └─ salle (datacenter) translation + rotation (floor_orientation)
+             ├─ contenu libre  translation + rotation (dc_x/dc_y, dc_orientation)
+             └─ baie (rack)    translation + rotation (dc_x/dc_y, orientation)
+                 └─ emplacement  U · étagère · marge latérale · paroi
+```
+
+**Deux axes ORTHOGONAUX en découlent, à ne jamais confondre** — c'est la leçon du symptôme n°1 :
+
+- le **REPÈRE** : à quel niveau de la chaîne la vue s'enracine (salle seule, ou bâtiment) ;
+- la **PORTÉE** : quels sous-arbres sont affichés.
+
+Le nombre d'éléments affichés ne dit RIEN du repère pertinent. Une salle unique dans un bâtiment reste
+un contenu de bâtiment.
+
+## 3. Règles (à appliquer à toute contribution)
+
+1. **Un placement se lit comme une CHAÎNE de conteneurs, pas comme un cas particulier.** Résoudre un
+   point = partir d'un point LOCAL et composer les transformées en remontant la chaîne. Si l'on écrit
+   une n-ième branche qui recompose à la main « rotation de l'hôte puis translation », c'est le signe
+   qu'un conteneur manque.
+2. **Ne JAMAIS conditionner un comportement de REPÈRE au NOMBRE d'éléments.** `length > 1`, `length
+   <= 1` sur des salles, des étages ou des bâtiments pour décider d'un rendu ou d'un mode est un bug
+   par construction. Le cas dégénéré (un seul élément) doit suivre le MÊME chemin.
+3. **Tout conteneur doit pouvoir porter du contenu DIRECT.** Un étage porte des équipements sans passer
+   par une salle ; une salle porte des équipements sans passer par une baie. Un conteneur qui ne sait
+   porter que d'autres conteneurs est une régression du modèle.
+4. **La géométrie de composition est PURE et vit dans `geometry/`** (principe n°2) ; les vues ne font
+   qu'appliquer. Aucune transformée ne se recalcule dans une vue.
+5. **Le repère d'un point résolu doit être EXPLICITE.** « Monde » et « local à la salle » ne se
+   devinent pas. ⚠ Dette actuelle : la docstring de `Resolver3D.resolveFaceAnchor3D` annonce « monde »
+   alors qu'elle renvoie du LOCAL SALLE — corriger au passage de toute contribution sur ce fichier.
+
+## 4. Stratégie de convergence — par le BAS, jamais big-bang
+
+Le code concerné (ports, câbles, faisceaux, rendu 3D) est le plus subtil et le mieux testé de
+l'application. Une réécriture d'un bloc serait déraisonnable. La convergence se fait donc ainsi :
+
+1. **Commencer par le cas qui NE RENTRE PAS** dans le modèle actuel, pas par ceux qui marchent. C'est
+   là que le nouveau modèle paie immédiatement, et le seul endroit sans risque de régression : il n'y
+   a rien à casser.
+2. **Migrer UN mode de placement à la fois**, derrière les tests existants (`Tests/modules/`, modules
+   purs) qui servent de filet.
+3. **Extraire l'abstraction à la DEUXIÈME occurrence, pas à la première.** On ne fabrique pas un
+   `PlacementFrame` générique sur un seul cas : sa forme n'est pas encore connue et on figerait une
+   généralisation spéculative. On nomme le conteneur, on compose explicitement, et on extrait quand le
+   deuxième mode migre.
+4. **Aucun élargissement de périmètre non demandé.** Un lot = un mode, vérifié, commité.
+
+## 5. Articulation avec le modèle relationnel
+
+`persistance.md` acte la migration du serveur vers un vrai modèle relationnel au prochain remaniement
+DB, `DataValidation.ts` faisant foi. Le conteneur de placement est PRÉCISÉMENT ce qu'un schéma
+relationnel obligerait à nommer : aujourd'hui la hiérarchie est dispersée dans des FK optionnelles
+mutuellement exclusives (`rack_id` XOR `dc_id` XOR `tray_item_id` XOR `location`+`floor`), avec des
+invariants de cohérence écrits à la main dans la spec.
+
+Conséquence pratique : **toute décision de modélisation du placement prise ici engage le schéma futur**
+et réciproquement. Les six `placement_mode` actuels (`manual`, `rack`, `side`, `wall`, `floor`, `tray`)
+ne sont pas six natures d'objet : ce sont **six types d'attache à un conteneur parent**. C'est cette
+lecture qui devra guider le schéma.
+
+## 6. Décisions de modélisation (arbitrées le 2026-07-27)
+
+Ces décisions gouvernent la suite du chantier ET la migration relationnelle. Elles sont issues
+d'un arbitrage explicite avec l'utilisateur ; les alternatives écartées sont notées, car ce sont
+précisément les questions qu'on se repose six mois plus tard.
+
+### 6.1 La responsabilité du placement appartient au CONTENEUR
+
+Chaque conteneur place ses propres contenus : l'étagère les siens, la baie les siens, la salle les
+siens, l'étage les siens. Aujourd'hui cette responsabilité est éclatée PAR MODE chez l'appelant — les
+cinq branches de `resolveFaceAnchor3D`, les trois `…EquipBoxLocal` de `RackGeometry`,
+`FreeEquipGeometry` pour la salle, `RackResize.fallout` pour la cage, `trayArrange`/`trayFindSpot` pour
+le plateau. Chacune sait déjà placer *ses* contenus, mais aucune ne le dit. Nommer le conteneur donne
+un porteur à ces règles, et le chaînage remplace le `switch`.
+
+### 6.2 Interface COMMUNE mais ÉTROITE, DÉRIVÉE de l'existant
+
+Les conteneurs sont dissemblables dans leur **paramétrage d'attache** (baie = index U + face + drapeaux
+de profondeur ; plateau = x/y mm ; salle = x/y/z + lacet ; étage = x/y sur plan). Ce paramétrage **ne
+fait PAS partie de l'interface** — l'y forcer produirait une union qui fuit.
+
+N'est commun que ce qui existe déjà quatre fois : **remonter au parent**, **donner la boîte locale d'un
+contenu**, **dire si un contenu tient**. Le placement AUTOMATIQUE n'existe que dans deux conteneurs sur
+quatre → optionnel, hors interface de base. Règle : on n'ajoute à cette interface que ce qui est
+constaté dans au moins deux implémentations.
+
+### 6.3 RÉFÉRENCE UNIQUE au conteneur immédiat ; ancêtres DÉRIVÉS
+
+Un contenu porte **une seule** référence — son conteneur immédiat. Tous les ancêtres se déduisent en
+remontant la chaîne. **Aucune référence croisée vers un grand-parent.**
+
+Le dépôt applique déjà les DEUX patrons, incohéremment : un équipement posé sur une étagère ne
+référence que `tray_item_id` et sa salle est retrouvée par chaînage (correct) ; mais `location`,
+`floor` et `room` sont **recopiés** du parent sur les baies et les équipements (« LOCALISATION héritée
+par les baies / équipements LIBRES posés dans la salle », et le formulaire de baie écrit
+`location: placeDc.location`). Ces copies sont à resynchroniser à la main dès qu'une salle change de
+bâtiment — c'est la référence croisée à supprimer.
+
+Conséquence heureuse : l'état « **non placé** » disparaît comme cas spécial. Une baie hors salle n'est
+pas *nulle part*, elle est attachée au niveau **bâtiment**. La chaîne a des niveaux, et un contenu
+s'attache à celui où il est posé — ce qui est exactement la lecture des six `placement_mode` : *à quel
+niveau je m'attache, et comment*.
+
+⚠ **Coût assumé et sa parade.** Dériver `location` supprime le filtrage et le regroupement bon marché
+des listings, alors que la persistance actuelle fait un balayage complet sur un `find` par champ
+(cf. `persistance.md`). On ne garde donc PAS ces champs autoritatifs, on les **rétrograde en CACHE
+DÉRIVÉ** : recalculés à l'écriture, jamais source de vérité. Ce qui change est l'AUTORITÉ, pas
+forcément la présence physique du champ.
+
+### 6.4 L'étage est un CONTENEUR, pas une « salle virtuelle »
+
+Tentation écartée : créer un enregistrement `datacenters` représentant l'étage. Un étage CONTIENT des
+salles → ce serait une salle contenant des salles, emboîtement absent du modèle, qui casserait
+`racksOfDc`, le rendu des murs, des portes et de la dalle, et exigerait un drapeau « virtuelle » pour
+l'exclure des listings, sélecteurs, cascade et formulaires — donc le retour des cas particuliers, plus
+deux sources de vérité pour le même étage.
+
+Retenu : généraliser la **clé** dont dépend la machinerie de câblage, de « salle » à « conteneur ».
+Bénéfice décisif : un câble baie → équipement d'étage part du conteneur *salle* et arrive dans le
+conteneur *étage*, il traverse donc deux conteneurs et doit sortir par un exit — **physiquement exact**,
+et déjà exprimable par la grammaire de route. L'exception « finir dehors est légal » qu'on envisageait
+devient inutile : on RETIRE un cas particulier au lieu d'en ajouter un.
+
+⚠ L'identité du conteneur étage est le couple **(bâtiment, étage)**, pas un `id` de `floors` : un étage
+non configuré n'a pas d'enregistrement (`FloorLayout.config` renvoie un défaut virtuel à `id: null`).
+Ce couple est déjà l'identité de fait (`allFloorKeys`, `oobWorld`, filtre des étages affichés).
+
+### 6.5 Prérequis et garde-fous
+
+- **Cascade RÉCURSIVE requise.** Sous chaînage pur, supprimer une salle doit propager jusqu'au bout de
+  la chaîne. La cascade actuelle est non récursive (dette connue produisant des orphelins) : elle
+  devient un **prérequis** de ce modèle, plus un nettoyage optionnel.
+- **Garde de profondeur** sur le chaînage (cycle de références → boucle infinie).
+- **Validation renforcée ET simplifiée** : « exactement une référence de conteneur, cohérente avec le
+  mode » interdit par construction les combinaisons illégales aujourd'hui écrivables (`rack_id` ET
+  `tray_item_id` renseignés).
+- **Où ça vit** : `src-shared/`, collaborateurs INJECTÉS et non importés (patron `PowerAnalysis`, cité
+  comme cible par `CLAUDE.md`). C'est ce qui fait DISPARAÎTRE la duplication `TrayFit` ⇄ `RackGeometry`
+  au lieu de la contourner.
+- **NE PAS toucher aux champs PERSISTÉS** pendant le refactor de code : les conteneurs *interprètent*
+  les FK existantes. Coupler le refactor à une migration de données ferait perdre la réversibilité. La
+  migration relationnelle suit, avec des concepts déjà éprouvés par l'usage.
+
+### 6.6 Ordre de migration
+
+**étage** (rien n'existe encore → rode l'interface sans risque, et débloque les câbles) → **plateau**
+(supprime la duplication `TrayFit`) → **baie / side / wall** (les trois qui partagent le plus) →
+**salle** en dernier (la plus utilisée et la mieux rodée).
+
+À chaque étape, l'ancien et le nouveau chemin doivent donner le **même résultat au micron**, prouvé par
+test, AVANT de retirer l'ancien — seule façon de migrer du code non couvert visuellement sans
+régression silencieuse (méthode éprouvée sur la parité `face_up = "top"`).
+
+## 7. État de la convergence
+
+| Mode | Conteneur hôte | Repère résolu | Ports | État |
+|---|---|---|---|---|
+| `rack` | baie → salle | local salle | oui | historique, conforme |
+| `side` / `wall` | baie → salle | local salle | oui | historique, conforme |
+| `tray` | étagère → baie → salle | local salle | oui | historique, conforme |
+| `manual` (libre) | salle | local salle | oui | historique, conforme |
+| `floor` | plan d'étage → étage → bâtiment | **monde** | **en cours** | premier cas migré |
+
+Les équipements d'étage sont le premier contenu porté par un conteneur AUTRE qu'une salle. Ils sont
+donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
+
+## 8. Références
+
+- `src-client/geometry/FloorLayout.ts` — `multiLayout` (chaîne bâtiment/étage/salle), `roomToWorld`,
+  `equipFloorWorld`, `oobWorld`, `levelZ`.
+- `src-client/geometry/Resolver3D.ts` — `resolveFaceAnchor3D` (les cinq branches), `Port3D`.
+- `src-client/geometry/FreeEquipGeometry.ts` — point local d'une face (`faceLocal`) et composition
+  paramétrée par le centre et la base (`portWorldC`), déjà indépendante du conteneur.
+- `src-client/views/dc/DcBase.ts` — repère (`multiDc`) vs portée (`visibleDcIds`), décor d'étage.
+- `docs/persistance.md` — direction relationnelle (cf. §5).
+- `docs/faisceaux.md`, `docs/deduction-reseau.md` — consommateurs de la résolution de ports.

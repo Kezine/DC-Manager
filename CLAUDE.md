@@ -157,6 +157,9 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 > `.gitignore`) ou le répertoire scratchpad de la session. Un fichier de `docs/` doit décrire un pan
 > d'architecture stable, référencé depuis le code ; s'il ne survit pas à la tâche en cours, il n'y a pas sa place.
 
+- [`placement.md`](docs/placement.md) — **DOCTRINE : placement & repères** (conteneur de placement,
+  chaîne bâtiment→étage→salle→baie, axes ORTHOGONAUX repère ⊥ portée, règles à appliquer à tout
+  nouveau contenu spatial, convergence par le bas, articulation avec le modèle relationnel).
 - [`validation.md`](docs/validation.md) — **normalisation & validation** partagées des
   données (spec déclarative, niveaux intrinsèque/référentiel/invariants, V1/V2/V3).
 - [`deduction-reseau.md`](docs/deduction-reseau.md) — **réseau déduit** (source unique = port
