@@ -235,6 +235,66 @@ module.exports = async () => {
   }
   });
 
+  await section("PlacementContainers : chaîne d'attache — PARITÉ STRICTE avec Store.equipmentDcId", async () => {
+  {
+    const { PlacementContainers } = SHARED("src-shared/PlacementContainers.js");
+    const s = await makeStore();
+    const fetch = (coll, id) => s.get(coll, id);
+
+    const dc = await s.create("datacenters", { name: "Salle A", location: "liege", floor: "0" });
+    const rack = await s.create("racks", { name: "R1", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dc.id, dc_x: 500, dc_y: 500 });
+    const rackPool = await s.create("racks", { name: "R-pool", width_mm: 600, depth: 1000, u_count: 42, location: "liege" });   // baie HORS salle
+    const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", side: "front", u: 10, u_height: 2 });
+
+    // Un cas par MODE de placement, bords compris — c'est le jeu qui fait foi pour la migration.
+    const cases = [];
+    const add = async (label, payload) => { cases.push({ label, e: await s.create("equipments", Object.assign({ name: label }, payload)) }); };
+    await add("racké à un U", { placement_mode: "rack", rack_id: rack.id, rack_u: 5 });
+    await add("pool de baie (rack_id SANS rack_u)", { placement_mode: "rack", rack_id: rack.id });
+    await add("marge latérale", { placement_mode: "side", rack_id: rack.id });
+    await add("paroi", { placement_mode: "wall", rack_id: rack.id });
+    await add("posé sur étagère", { placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 });
+    await add("libre EN salle", { placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 100, dc_y: 100 });
+    await add("libre NON placé", { placement_mode: "manual", dim_mode: "free" });
+    await add("posé sur un ÉTAGE", { placement_mode: "floor", location: "liege", floor: "1", floor_x: 200, floor_y: 300 });
+    await add("racké dans une baie HORS salle", { placement_mode: "rack", rack_id: rackPool.id, rack_u: 3 });
+
+    // PARITÉ — le nouveau chemin doit rendre EXACTEMENT la même salle que la règle historique, cas par cas.
+    // C'est la condition posée par la doctrine (§4.1) pour pouvoir un jour retirer l'ancien chemin.
+    cases.forEach(({ label, e }) => {
+      ck.eq(PlacementContainers.roomIdOf(e, fetch), s.equipmentDcId(e), "parité salle — " + label);
+    });
+
+    // STRUCTURE de la chaîne : une étagère remonte étagère → baie → salle → étage → bâtiment.
+    const byLabel = (l) => cases.find((c) => c.label === l).e;
+    const kinds = (e) => JSON.stringify(PlacementContainers.chain(e, fetch).map((c) => c.kind));
+    ck.eq(kinds(byLabel("posé sur étagère")), JSON.stringify(["tray", "rack", "room", "floor", "building"]), "chaîne complète depuis une étagère");
+    // Une baie HORS salle n'est pas « nulle part » : elle est rattachée au BÂTIMENT — sans faire apparaître
+    // de salle, ce qui préserve la parité (cf. doctrine §6.3, disparition de l'état « non placé »).
+    ck.eq(kinds(byLabel("racké dans une baie HORS salle")), JSON.stringify(["rack", "building"]), "baie hors salle → bâtiment, aucune salle");
+    ck.eq(kinds(byLabel("posé sur un ÉTAGE")), JSON.stringify(["floor", "building"]), "étage → bâtiment, aucune salle");
+    ck.eq(kinds(byLabel("pool de baie (rack_id SANS rack_u)")), JSON.stringify([]), "pool de baie : aucun conteneur localisable");
+
+    // L'ÉTAGE est identifié par le COUPLE (bâtiment, étage), jamais par un id : un étage non configuré n'a
+    // pas d'enregistrement `floors`.
+    const fc = PlacementContainers.of(byLabel("posé sur un ÉTAGE"));
+    ck(fc && fc.kind === "floor" && fc.location === "liege" && fc.floor === "1", "étage = conteneur (bâtiment, étage)");
+    // Étage « 0 » (rez-de-chaussée) PRÉSERVÉ — la convention `String(x || "")` l'écraserait en chaîne vide.
+    const ground = PlacementContainers.of({ placement_mode: "floor", location: "liege", floor: 0 });
+    ck(ground && ground.floor === "0", "étage 0 préservé (et non écrasé en chaîne vide)");
+
+    // Égalité STRUCTURELLE (pas d'id composite à comparer).
+    ck(PlacementContainers.same(fc, { kind: "floor", location: "liege", floor: "1" }), "same() : mêmes bâtiment+étage");
+    ck(!PlacementContainers.same(fc, { kind: "floor", location: "liege", floor: "2" }), "same() : étages différents");
+    ck(!PlacementContainers.same(fc, { kind: "room", id: "liege" }), "same() : natures différentes");
+
+    // Chaîne BORNÉE (garde défensive contre une donnée cyclique — la hiérarchie saine décroît toujours).
+    cases.forEach(({ label, e }) => ck(PlacementContainers.chain(e, fetch).length <= PlacementContainers.MAX_DEPTH, "chaîne bornée — " + label));
+    // Référence PENDANTE : une étagère dont la baie a disparu ne doit rien inventer.
+    ck.eq(PlacementContainers.roomIdOf({ placement_mode: "tray", tray_item_id: "inexistant" }, fetch), null, "étagère fantôme → aucune salle");
+  }
+  });
+
   await section("ClickGuard (pure)", async () => {
   {
     const g = (dn, x, y, t, r) => ClickGuard.blocks(dn, x, y, t, r);
