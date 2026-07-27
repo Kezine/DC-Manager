@@ -24,6 +24,7 @@ import type { Vec3 } from "../shared";
 import { DcThreeCamera } from "./DcThreeCamera";
 import { PivotBounds } from "../../../geometry/PivotBounds";   // bornage du pivot d'orbite aux murs virtuels des salles (géométrie pure)
 import { LABEL_STANDOFF_MM } from "./DcThreeBase";   // saillie anti z-fighting partagée (labels d'équipement + de baie)
+import { SceneLayoutSignature } from "./SceneLayoutSignature";   // signature de disposition + décision keep/roomDelta/rebuild (module PUR, testé)
 import type { DcThreeOptions, RoomDesc, SceneCtx, Theme } from "./DcThreeBase";
 
 export type { DcThreeOptions } from "./DcThreeBase";
@@ -410,13 +411,21 @@ export class DcThreeScene extends DcThreeCamera {
   }
 
   /** Applique de nouvelles options en NE reconstruisant que les catégories affectées (diff). Changement de
-      salle(s) / pas de scène → full build. Un toggle non câblé au moteur WebGL → aucune reconstruction. */
+      salle(s) / de DISPOSITION / pas de scène → full build. Un toggle non câblé au moteur WebGL → aucune
+      reconstruction. La décision structurelle est déléguée à `SceneLayoutSignature` (module PUR, testé) :
+      c'est là que vivent la signature de disposition et l'arbitrage keep/roomDelta/rebuild. */
   applyOptionsDiff(opts: DcThreeOptions, dcId: string | null, ctx?: SceneCtx): void {
     const old = this.opts; this.opts = opts;
     const multi = ctx ? ctx.multi : null;
     const newKey = (multi && multi.rooms.length) ? "M:" + multi.rooms.map((r) => r.dcId).join(",") : (dcId || "∅");
     const wasMulti = !!this.multiInfo;
     const curKey = wasMulti ? "M:" + this.roomsKey() : (this.builtDc || "∅");
+    // SIGNATURES de disposition — calculées AVANT la réaffectation des champs de contexte juste en dessous,
+    // sinon on comparerait la nouvelle disposition à ELLE-MÊME (`this.floorDecor` serait déjà la nouvelle).
+    // L'ensemble des identifiants de salles ne suffit pas : changer l'échelle inter-sites, le mode d'échelle
+    // ou le repère (« Vue étage ») déplace la géométrie SANS toucher à cet ensemble. Cf. SceneLayoutSignature.
+    const curLayout = wasMulti ? SceneLayoutSignature.of(this.rooms, this.floorDecor) : SceneLayoutSignature.none();
+    const newLayout = (multi && multi.rooms.length) ? SceneLayoutSignature.of(multi.rooms, ctx ? ctx.floorDecor : null) : SceneLayoutSignature.none();
     this.multiInfo = multi; this.extraCables = ctx ? ctx.extraCables : []; this.floorDecor = ctx ? ctx.floorDecor : null;   // FIX : sinon décor d'étage périmé sur bascule multi↔mono
     // données périmées (mutation intra-salle : occupant supprimé, etc.) → reconstruction COMPLÈTE, le diff par
     // catégorie ne couvre pas les changements de contenu d'une salle conservée (mêmes salles + mêmes options).
@@ -430,10 +439,10 @@ export class DcThreeScene extends DcThreeCamera {
     const eqColor = old.colorMode !== opts.colorMode;
     const cb = old.showAllCables !== opts.showAllCables || old.cableSplineK !== opts.cableSplineK || old.cablePortNormal !== opts.cablePortNormal || !this.sameSet(old.selCables, opts.selCables);   // cablesOnTop NON inclus : géré en place par setCablesOnTop (pas de reconstruction)
     // OPTIMISATION : multi→multi, seul l'ensemble des salles change (options inchangées) → delta de salles (pas de full rebuild).
-    if (this.content && wasMulti && multi && multi.rooms.length && curKey !== newKey && !(eqVis || eqColor || cb)) {
-      this.applyRoomDelta(multi.rooms); this.request(); return;
-    }
-    if (!this.content || curKey !== newKey) { this.build(dcId); this.request(); return; }
+    const deltaEligible = wasMulti && !!multi && multi.rooms.length > 0 && !(eqVis || eqColor || cb);
+    const action = SceneLayoutSignature.action({ ids: curKey, layout: curLayout }, { ids: newKey, layout: newLayout }, { hasContent: !!this.content, deltaEligible });
+    if (action === "roomDelta") { this.applyRoomDelta(multi!.rooms); this.request(); return; }
+    if (action === "rebuild") { this.build(dcId); this.request(); return; }
     if (eqVis) this.applyLayerVisibility(); if (eqColor) this.applyColorMode();   // visibilité / recoloration en place (jamais de rebuild)
     // équipements LIBRES masqués : ils sont SAUTÉS à la construction (pas de couche de visibilité) → reconstruire le
     // seul groupe des équipements libres (peu coûteux). Distinct de hiddenRacks (visibilité en place).

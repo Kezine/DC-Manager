@@ -1,7 +1,7 @@
 /* Tests modules — vues & outils pilotés par hôte injecté (Graph/Datacenter, outils 2D/3D, images).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("FilterChips : modèle pur des filtres actifs (barre de contrôles unifiée, lot C)", async () => {
@@ -831,5 +831,156 @@ module.exports = async () => {
       h.cancel();
       ck.eq(h.running, false, "seconds=0 : cancel sans effet");
     }
+  });
+
+  /* ==========================================================================
+     SIGNATURE DE DISPOSITION 3D — la seule logique du moteur WebGL couvrable
+     sans contexte graphique. Le rendu 3D n'a AUCUN test automatique : c'est
+     précisément pourquoi la décision « reconstruire ou non » a été extraite
+     dans un module PUR (`SceneLayoutSignature`), appelé par
+     `DcThreeScene.applyOptionsDiff` — lui, non chargeable en Node (THREE).
+     Deux exigences OPPOSÉES sont vérifiées ici :
+     - ne pas SOUS-invalider (le bug : réglages sans effet jusqu'au F5) ;
+     - ne pas SUR-invalider (le risque : reconstruire à chaque rendu).
+     ========================================================================== */
+  await section("SceneLayoutSignature : signature de disposition 3D (attentes en dur)", async () => {
+    const ROOM = { dcId: "dc-a", ox: 100, oy: 200, oz: 0, o: 0, w: 4000, d: 3000 };
+    const DECOR = {
+      planes: [{ loc: "s1", floor: "0", W: 20000, D: 10000, cell: 600, ox: 0, oy: 0, z: 0, blocked: ["1,1"] }],
+      oobs: [{ id: "wp1", x: 10, y: 20, z: 30, baseZ: 0 }],
+      equips: [{ id: "eq1", x: 40, y: 50, baseZ: 0 }],
+      levels: [{ label: "Étage 0", x: -1, y: 0, z: 0 }],
+      buildings: [{ label: "Siège", x: 5, y: 6, z: 7, sepX: null }],
+      maxD: 10000, topZ: 3000,
+    };
+
+    // ---- forme EXACTE de la signature (verrou : toute évolution du format se voit ici) ----
+    ck.eq(SceneLayoutSignature.of([ROOM], null), '[[["dc-a",100,200,0,0,4000,3000,null]],null]', "signature : une salle sans décor");
+    ck.eq(SceneLayoutSignature.of([], null), "[[],null]", "signature : disposition vide");
+    ck.eq(SceneLayoutSignature.none(), "[[],null]", "none() = signature de la disposition vide");
+    ck.eq(SceneLayoutSignature.of([{ ...ROOM, underfloorMm: 450 }], null), '[[["dc-a",100,200,0,0,4000,3000,450]],null]', "signature : vide technique porté (dalle dessinée)");
+    ck.eq(
+      SceneLayoutSignature.of([ROOM], DECOR),
+      '[[["dc-a",100,200,0,0,4000,3000,null]],[[["s1","0",20000,10000,600,0,0,0,["1,1"]]],[["wp1",10,20,30,0]],[["eq1",40,50,0]],[["Étage 0",-1,0,0,null]],[["Siège",5,6,7,null]],10000,3000]]',
+      "signature : salle + décor d'étage complet",
+    );
+
+    // ---- STABILITÉ : deux calculs de la MÊME disposition (objets distincts) rendent la MÊME chaîne.
+    //      C'est l'invariant qui empêche de reconstruire la scène à chaque rendu.
+    const clone = (o) => JSON.parse(JSON.stringify(o));
+    ck.eq(SceneLayoutSignature.of([clone(ROOM)], clone(DECOR)), SceneLayoutSignature.of([ROOM], DECOR), "stabilité : objets recalculés → signature identique");
+    ck.eq(SceneLayoutSignature.of([ROOM], DECOR), SceneLayoutSignature.of([ROOM], DECOR), "stabilité : deux appels consécutifs → signature identique");
+    // `undefined` explicite et champ ABSENT décrivent la même absence → même signature (pas de faux positif).
+    ck.eq(SceneLayoutSignature.of([{ ...ROOM, underfloorMm: undefined }], null), SceneLayoutSignature.of([ROOM], null), "stabilité : underfloorMm absent ≡ undefined");
+
+    // ---- SENSIBILITÉ : chaque champ qui DESSINE doit faire bouger la signature ----
+    const base = SceneLayoutSignature.of([ROOM], DECOR);
+    const roomDiff = (patch, label) => ck(SceneLayoutSignature.of([{ ...ROOM, ...patch }], DECOR) !== base, "détecte " + label);
+    roomDiff({ dcId: "dc-b" }, "un changement de salle (identité)");
+    roomDiff({ ox: 101 }, "un déplacement en X (échelle inter-sites, repère bâtiment)");
+    roomDiff({ oy: 201 }, "un déplacement en Y");
+    roomDiff({ oz: 3500 }, "un changement de NIVEAU (empilement des étages)");
+    roomDiff({ o: Math.PI / 2 }, "une rotation de salle sur son plan");
+    roomDiff({ w: 4001 }, "un changement de largeur (sol + grille)");
+    roomDiff({ d: 3001 }, "un changement de profondeur");
+    roomDiff({ underfloorMm: 450 }, "l'apparition d'un plancher technique");
+    ck(SceneLayoutSignature.of([ROOM, { ...ROOM, dcId: "dc-b" }], DECOR) !== base, "détecte une salle AJOUTÉE");
+    ck(SceneLayoutSignature.of([{ ...ROOM, dcId: "dc-b" }, ROOM], DECOR) !== SceneLayoutSignature.of([ROOM, { ...ROOM, dcId: "dc-b" }], DECOR), "détecte un changement d'ORDRE des salles");
+
+    const decorDiff = (patch, label) => ck(SceneLayoutSignature.of([ROOM], { ...DECOR, ...patch }) !== base, "détecte " + label);
+    ck(SceneLayoutSignature.of([ROOM], null) !== base, "détecte l'apparition/disparition du décor d'étage (bascule « Vue étage »)");
+    decorDiff({ planes: [{ ...DECOR.planes[0], ox: 3000 }] }, "un ancrage de plan d'étage déplacé");
+    decorDiff({ planes: [{ ...DECOR.planes[0], W: 21000 }] }, "un plan d'étage redimensionné");
+    decorDiff({ planes: [{ ...DECOR.planes[0], blocked: ["1,1", "2,2"] }] }, "une cellule d'étage rendue inaccessible");
+    decorDiff({ planes: [] }, "un plan d'étage retiré de la portée");
+    decorDiff({ oobs: [{ ...DECOR.oobs[0], x: 11 }] }, "un OOB déplacé");
+    decorDiff({ equips: [{ ...DECOR.equips[0], baseZ: 3500 }] }, "un équipement d'étage changeant de niveau");
+    decorDiff({ levels: [{ ...DECOR.levels[0], z: 3500 }] }, "une étiquette de niveau déplacée");
+    decorDiff({ buildings: [{ ...DECOR.buildings[0], label: "Secours" }] }, "un bâtiment renommé");
+    decorDiff({ buildings: [{ ...DECOR.buildings[0], sepX: 1200 }] }, "l'apparition d'un séparateur de bâtiment");
+    decorDiff({ maxD: 10001 }, "une étendue du monde modifiée (maxD)");
+    decorDiff({ topZ: 3001 }, "une hauteur totale modifiée (topZ)");
+    // Un libellé contenant le séparateur ne doit pas pouvoir imiter une AUTRE disposition (JSON échappe).
+    ck(SceneLayoutSignature.of([ROOM], { ...DECOR, buildings: [{ label: '","x', x: 5, y: 6, z: 7, sepX: null }] })
+       !== SceneLayoutSignature.of([ROOM], { ...DECOR, buildings: [{ label: '\\","x', x: 5, y: 6, z: 7, sepX: null }] }), "aucune collision par libellé contenant des séparateurs");
+
+    // ---- DÉCISION d'invalidation : table de vérité complète ----
+    const A = { ids: "M:a", layout: "L1" }, B = { ids: "M:a,b", layout: "L2" }, A2 = { ids: "M:a", layout: "L2" };
+    ck.eq(SceneLayoutSignature.action(A, B, { hasContent: false, deltaEligible: true }), "rebuild", "action : aucune scène construite → rebuild");
+    ck.eq(SceneLayoutSignature.action(A, B, { hasContent: true, deltaEligible: true }), "roomDelta", "action : ensemble de salles changé + delta applicable → roomDelta");
+    ck.eq(SceneLayoutSignature.action(A, B, { hasContent: true, deltaEligible: false }), "rebuild", "action : ensemble de salles changé, delta NON applicable → rebuild");
+    ck.eq(SceneLayoutSignature.action(A, A2, { hasContent: true, deltaEligible: true }), "rebuild", "action : MÊMES salles, disposition différente → rebuild (le bug corrigé)");
+    ck.eq(SceneLayoutSignature.action(A, { ...A }, { hasContent: true, deltaEligible: true }), "keep", "action : rien n'a changé → keep (aucune reconstruction)");
+    ck.eq(SceneLayoutSignature.action(A, { ...A }, { hasContent: true, deltaEligible: false }), "keep", "action : rien n'a changé, delta inapplicable → keep");
+  });
+
+  await section("DatacenterView : les réglages de vue qui DÉPLACENT la géométrie invalident la scène 3D", async () => {
+    // Régression du bug « réglages 3D sans effet avant F5 » (bascule « Vue étage », curseur d'échelle
+    // inter-sites, mode linéaire/logarithmique). On rejoue le CONTEXTE réellement poussé au moteur
+    // (`webglCtx`) et on applique la MÊME décision que `DcThreeScene.applyOptionsDiff` — seule cette
+    // dernière, qui importe THREE, reste hors de portée du harnais Node.
+    const s = await makeStore();
+    const siteA = await s.create("sites", { name: "Alpha" });
+    const siteB = await s.create("sites", { name: "Beta" });   // sans GPS → posé au repli (5 km à l'est) : l'échelle mord
+    await s.create("floors", { location: siteA.id, floor: "0", width_mm: 20000, depth_mm: 15000, cell_mm: 600 });
+    const dcA = await s.create("datacenters", { name: "Salle A", location: siteA.id, floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const dcB = await s.create("datacenters", { name: "Salle B", location: siteB.id, floor: "0", width_mm: 5000, depth_mm: 4000, floor_x: 500, floor_y: 500 });
+    const dv = new DatacenterView(s, {}, {});   // garde headless
+    dv.view = "3d"; dv.useWebGL = true; dv.dcId = dcA.id;
+
+    // Réplique EXACTE des deux entrées comparées par applyOptionsDiff (options d'affichage inchangées).
+    const snapshot = () => {
+      const ctx = dv.webglCtx(), multi = ctx.multi, hasRooms = !!(multi && multi.rooms.length);
+      return {
+        ids: hasRooms ? "M:" + multi.rooms.map((r) => r.dcId).join(",") : (dv.dcId || "∅"),
+        layout: hasRooms ? SceneLayoutSignature.of(multi.rooms, ctx.floorDecor) : SceneLayoutSignature.none(),
+        hasRooms,
+      };
+    };
+    const decide = (prev, next) => SceneLayoutSignature.action(prev, next, { hasContent: true, deltaEligible: next.hasRooms });
+
+    // ---- bascule « Vue étage » à portée INCHANGÉE : le cas où l'ancienne clé (ensemble des salles)
+    //      était rigoureusement identique — donc où RIEN ne se reconstruisait jusqu'au rechargement.
+    dv.multiDc = false; dv.visibleDcIds = new Set();
+    const mono = snapshot();
+    dv.multiDc = true; dv.visibleDcIds = new Set([dcA.id]);
+    const etage = snapshot();
+    ck.eq(etage.ids, mono.ids, "« Vue étage » à portée inchangée : l'ensemble des salles ne bouge PAS (l'ancienne clé était aveugle)");
+    ck(etage.layout !== mono.layout, "« Vue étage » : la DISPOSITION change (repère bâtiment + décor d'étage)");
+    ck.eq(decide(mono, etage), "rebuild", "« Vue étage » OFF → ON : reconstruction");
+    ck.eq(decide(etage, mono), "rebuild", "« Vue étage » ON → OFF : reconstruction");
+
+    // ---- portée élargie : l'ensemble des salles change → le chemin INCRÉMENTAL reste emprunté
+    //      (le correctif ne doit pas transformer un delta de salles en reconstruction complète).
+    dv.visibleDcIds = new Set([dcA.id, dcB.id]);
+    const deux = snapshot();
+    ck(deux.ids !== etage.ids, "portée élargie : l'ensemble des salles change");
+    ck.eq(decide(etage, deux), "roomDelta", "portée élargie → chemin incrémental (applyRoomDelta) conservé");
+
+    // ---- curseur d'ÉCHELLE inter-sites + bascule LOGARITHMIQUE : mêmes salles, monde déplacé ----
+    dv.siteScaleKm = 10; dv.siteScaleLog = false;
+    const ech10 = snapshot();
+    dv.siteScaleKm = 200;
+    const ech200 = snapshot();
+    ck.eq(ech200.ids, ech10.ids, "échelle inter-sites : l'ensemble des salles ne bouge pas");
+    ck(ech200.layout !== ech10.layout, "échelle inter-sites : les origines de bâtiment bougent");
+    ck.eq(decide(ech10, ech200), "rebuild", "curseur d'échelle relâché → reconstruction");
+    ck.eq(decide(ech200, ech10), "rebuild", "retour à l'échelle précédente → reconstruction");
+    dv.siteScaleKm = 10; dv.siteScaleLog = true;
+    const log = snapshot();
+    ck.eq(log.ids, ech10.ids, "mode logarithmique : l'ensemble des salles ne bouge pas");
+    ck.eq(decide(ech10, log), "rebuild", "linéaire → logarithmique : reconstruction");
+    ck.eq(decide(log, ech10), "rebuild", "logarithmique → linéaire : reconstruction");
+
+    // ---- NON-RÉGRESSION MAJEURE : un rendu SANS aucun changement ne doit RIEN reconstruire.
+    //      Chaque appel recalcule tout le contexte (objets neufs) — seule la STABILITÉ des valeurs
+    //      empêche une reconstruction par rendu, qui figerait l'application.
+    const r1 = snapshot(), r2 = snapshot(), r3 = snapshot();
+    ck.eq(r2.layout, r1.layout, "aucun changement : signature stable d'un rendu à l'autre");
+    ck.eq(decide(r1, r2), "keep", "aucun changement → aucune reconstruction (1)");
+    ck.eq(decide(r2, r3), "keep", "aucun changement → aucune reconstruction (2)");
+    dv.multiDc = false;
+    const m1 = snapshot(), m2 = snapshot();
+    ck.eq(decide(m1, m2), "keep", "salle unique, aucun changement → aucune reconstruction");
   });
 };
