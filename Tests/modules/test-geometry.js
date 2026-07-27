@@ -675,6 +675,22 @@ module.exports = async () => {
     const m2 = fl.multiLayout(null, { visibleDcIds: new Set([dcA.id, dcC.id]) });
     ck.eq(m2.buildings.length, 2, "multiLayout : 2 bâtiments côte à côte");
     ck(m2.buildings[1].x0 >= m2.buildings[0].x1, "multiLayout : bâtiments non chevauchants (x croissant)");
+    // §6.8 de docs/placement.md — le REPÈRE se dérive du MODÈLE DÉCLARÉ, jamais de l'ensemble AFFICHÉ :
+    // réduire la portée (jusqu'à masquer un bâtiment entier) ne doit RIEN déplacer. C'est l'invariant que
+    // ce lot installe, et il n'existait pas avant : la disposition était calculée sur les salles affichées.
+    const large = fl.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcB.id, dcC.id]) });
+    const etroit = fl.multiLayout(dcA, { visibleDcIds: new Set([dcA.id]) });
+    ck.eq(JSON.stringify(etroit.buildings), JSON.stringify(large.buildings), "portée réduite → bandes de bâtiment INCHANGÉES (un site masqué garde sa place)");
+    ck.eq(JSON.stringify(etroit.levelZs), JSON.stringify(large.levelZs), "portée réduite → altitudes de niveau INCHANGÉES");
+    const offA = (mm) => JSON.stringify(mm.rooms.find((x) => x.dc.id === dcA.id).off);
+    ck.eq(offA(etroit), offA(large), "portée réduite → la salle encore affichée ne BOUGE pas");
+    // L'ordre des bâtiments ne dépend plus de la salle ACTIVE (c'est la caméra qui se déplace, pas le monde).
+    const depuisA = fl.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcC.id]) });
+    const depuisC = fl.multiLayout(dcC, { visibleDcIds: new Set([dcA.id, dcC.id]) });
+    ck.eq(JSON.stringify(depuisC.buildings), JSON.stringify(depuisA.buildings), "ordre des bâtiments STABLE, indépendant de la salle active");
+    // …mais la PORTÉE reste pleinement effective sur ce qui est DESSINÉ (repère ⊥ portée).
+    ck(etroit.rooms.length === 1 && large.rooms.length === 3, "la portée filtre bien les salles DESSINÉES");
+    ck(etroit.floorPlanes.length < large.floorPlanes.length, "la portée filtre bien les plans d'étage DESSINÉS");
     // décor (5c.16.3) : plans d'étage (un par bâtiment × étage) + position monde d'un OOB
     ck(m.floorPlanes.length >= 2, "multiLayout : ≥ 2 plans d'étage (Liège ét.0 + ét.1)");
     const fpA = m.floorPlanes.find((fp) => fp.floor === "0"); ck(!!fpA && fpA.off.z === 0, "floorPlane ét.0 → z = 0");

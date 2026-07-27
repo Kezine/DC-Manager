@@ -112,27 +112,42 @@ export class FloorLayout {
     const gap = Math.max(0, opts.gap != null ? opts.gap : DC_GAP_DEFAULT);
     const visibleDcIds = opts.visibleDcIds || new Set<string>();
     const all = this.store.all("datacenters");
-    const curLoc = cur ? (cur.location || "") : null;
+    // (le bâtiment de la salle ACTIVE ne pilote plus l'ordre des bâtiments — cf. tri stable plus bas)
     const dcs = cur
       ? all.filter((d: any) => d.id === cur.id || visibleDcIds.has(d.id))
       : (visibleDcIds.size ? all.filter((d: any) => visibleDcIds.has(d.id)) : all.slice());
-    // étages affichés = étages des salles affichées ∪ étages « nus » (du bâtiment affiché)
+    // ---- REPÈRE (§6.8 de docs/placement.md) : la DISPOSITION se dérive du MODÈLE DÉCLARÉ, jamais de
+    // l'ensemble AFFICHÉ. La portée décide de ce qu'on VOIT, jamais de OÙ SONT les choses. On calcule
+    // donc le layout COMPLET ici, et on FILTRE plus bas ce qu'on émet.
+    // Conséquences VOULUES : un site masqué CONSERVE sa place (masquer retire du dessin, pas du repère),
+    // et la largeur d'un bâtiment cesse de dépendre des étages qu'on affiche.
+    // Séparateur de clé (bâtiment, étage) — ÉCHAPPÉ volontairement : un séparateur tapé en clair a déjà
+    // été transformé en NUL brut dans ce dépôt, produisant des clés qui ne correspondaient jamais.
+    const FLOOR_KEY_SEP = "";
+    const modelFloors = new Map<string, { loc: string; fl: string }>();
+    const addModel = (loc: any, fl: any) => { const L = loc || "", F = String(fl == null ? "" : fl); if (!modelFloors.has(L + FLOOR_KEY_SEP + F)) modelFloors.set(L + FLOOR_KEY_SEP + F, { loc: L, fl: F }); };
+    all.forEach((d: any) => addModel(d.location, d.floor));
+    this.allFloorKeys().forEach((k) => addModel(k.location, k.floor));
+    const allFloors = [...modelFloors.values()];
+    // Étages effectivement DESSINÉS (portée) : ceux des salles affichées ∪ les étages « nus » de leurs
+    // bâtiments. Sert UNIQUEMENT à filtrer l'émission des plans, jamais au calcul des positions.
     const dcLocs = new Set(dcs.map((d: any) => d.location || ""));
-    const dispFloors = new Map<string, { loc: string; fl: string }>();
-    const addF = (loc: any, fl: any) => { const L = loc || "", F = String(fl == null ? "" : fl), k = L + "" + F; if (!dispFloors.has(k)) dispFloors.set(k, { loc: L, fl: F }); };
-    dcs.forEach((d: any) => addF(d.location, d.floor));
-    this.allFloorKeys().forEach((k) => { if (cur == null || dcLocs.has(k.location || "")) addF(k.location, k.floor); });
-    const allFloors = [...dispFloors.values()];
+    const shownFloors = new Set<string>();
+    dcs.forEach((d: any) => shownFloors.add((d.location || "") + FLOOR_KEY_SEP + String(d.floor == null ? "" : d.floor)));
+    this.allFloorKeys().forEach((k) => { if (cur == null || dcLocs.has(k.location || "")) shownFloors.add((k.location || "") + FLOOR_KEY_SEP + String(k.floor == null ? "" : k.floor)); });
+    // Ordre des bâtiments STABLE : trier en plaçant la salle ACTIVE en premier encodait un souci
+    // d'AFFICHAGE dans la GÉOMÉTRIE — le x0 d'un bâtiment sautait dès qu'on cliquait ailleurs. C'est la
+    // CAMÉRA qui va sur la salle active, pas le monde qui se réarrange autour d'elle.
     const locs = Array.from(new Set(allFloors.map((f) => f.loc)))
-      .sort((a, b) => (curLoc != null && a === curLoc ? -1 : curLoc != null && b === curLoc ? 1 : this.store.siteLabel(a).localeCompare(this.store.siteLabel(b))));
+      .sort((a, b) => this.store.siteLabel(a).localeCompare(this.store.siteLabel(b)) || a.localeCompare(b));
     const levels = Array.from(new Set(allFloors.map((f) => FloorLayout.floorNum(f.fl)))).sort((a, b) => a - b);
-    const stackH = Math.max(42 * U_MM, ...dcs.map((d: any) => this.zRef(d)));   // hauteur de contenu GLOBALE = hauteur d'étage par défaut
+    const stackH = Math.max(42 * U_MM, ...all.map((d: any) => this.zRef(d)));   // hauteur de contenu GLOBALE (modèle) = hauteur d'étage par défaut
     // HAUTEUR PAR ÉTAGE : `height_mm` configurée (la plus grande des plans affichés à ce niveau) sinon défaut `stackH`,
     // bornée au contenu (baies) du niveau. Le Z d'un niveau = somme CUMULÉE des hauteurs des étages inférieurs.
     const levelHeight = (lv: number): number => {
       let cfgH = 0;
       allFloors.filter((f) => FloorLayout.floorNum(f.fl) === lv).forEach((f) => { const c = this.config(f.loc, f.fl); if (c.height_mm) cfgH = Math.max(cfgH, c.height_mm); });
-      const contentH = Math.max(42 * U_MM, 0, ...dcs.filter((d: any) => FloorLayout.floorNum(d.floor) === lv).map((d: any) => this.zRef(d)));
+      const contentH = Math.max(42 * U_MM, 0, ...all.filter((d: any) => FloorLayout.floorNum(d.floor) === lv).map((d: any) => this.zRef(d)));   // MODÈLE, pas l'affiché (§6.8)
       return Math.max(cfgH || stackH, contentH);
     };
     const levelHs = levels.map((lv) => levelHeight(lv));
@@ -145,7 +160,12 @@ export class FloorLayout {
       if (!floorStrs.length) return;
       let bw = 0, bd = 0;
       floorStrs.forEach((fs) => { const cfg = this.config(loc, fs); bw = Math.max(bw, cfg.width_mm + (cfg.anchor_x || 0)); bd = Math.max(bd, cfg.depth_mm + (cfg.anchor_y || 0)); });
-      floorStrs.forEach((fs) => { const cfg = this.config(loc, fs); floorPlanes.push({ loc, floor: fs, cfg, off: { x: bx + (cfg.anchor_x || 0), y: (cfg.anchor_y || 0), z: levelZ(FloorLayout.floorNum(fs)) } }); });
+      // ÉMISSION filtrée par la PORTÉE : la position d'un plan vient du layout complet (ci-dessus), mais
+      // on ne DESSINE que les étages affichés. Repère et portée restent ainsi séparés (§6.8).
+      floorStrs.forEach((fs) => {
+        if (!shownFloors.has(loc + FLOOR_KEY_SEP + fs)) return;
+        const cfg = this.config(loc, fs); floorPlanes.push({ loc, floor: fs, cfg, off: { x: bx + (cfg.anchor_x || 0), y: (cfg.anchor_y || 0), z: levelZ(FloorLayout.floorNum(fs)) } });
+      });
       dcs.filter((d: any) => (d.location || "") === loc).forEach((d: any) => {
         const cfg = this.config(loc, String(d.floor || "")), pos = this.roomPos(d, cfg), fp = FloorLayout.roomFootprint(d);
         const ax = cfg.anchor_x || 0, ay = cfg.anchor_y || 0;
