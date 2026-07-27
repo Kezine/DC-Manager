@@ -243,7 +243,57 @@ le point d'entrée de la validation, les deux appelants (Store client, serveur) 
 le module partagé puisqu'ils ne sont pas eux-mêmes dans `src-shared/`. Mais cela change la SIGNATURE de
 `DataValidator`, ce qui est un lot à part entière et non un effet de bord gratuit du chantier.
 
-### 6.8 Ordre de migration
+### 6.8 RÈGLE GÉNÉRALE : dériver du MODÈLE DÉCLARÉ, jamais de l'ENSEMBLE AFFICHÉ
+
+Formulation unifiée de ce que §6.6 constatait comme une fatalité — et qui n'en est pas une.
+
+La coupure « transformées intrinsèques en bas / layout en haut » n'est PAS une propriété du domaine :
+c'est la conséquence directe d'un bâtiment sans géométrie (la spec `sites` ne porte que `name` et
+`address` — le seul niveau de la hiérarchie sans taille ni position, hérité de l'époque où il n'y en
+avait qu'un). Quand un conteneur n'a ni taille ni position, la seule issue est d'en improviser une par
+rangement — d'où un layout qui dépend de ce qu'on affiche.
+
+**La règle qui referme la coupure, sans aucun changement de schéma :**
+
+> Toute grandeur géométrique se dérive du MODÈLE DÉCLARÉ (tous les étages, toutes les salles, tous les
+> sites du document), JAMAIS de l'ensemble AFFICHÉ.
+
+C'est le principe *repère ⊥ portée* appliqué à la géométrie : **la portée décide de ce qu'on VOIT,
+jamais de OÙ SONT les choses.** Une seule règle couvre la largeur d'un bâtiment, l'ordre des bâtiments,
+la hauteur d'un niveau et son altitude. Corollaire opératoire : on calcule le layout COMPLET à partir du
+modèle, puis on FILTRE ce qu'on émet — on ne calcule jamais un layout à partir d'un sous-ensemble.
+
+Deux corrections que cette règle impose à l'existant :
+
+- l'ordre des bâtiments est trié en plaçant celui de la salle ACTIVE en premier — un souci d'affichage
+  encodé dans la géométrie. Ordre STABLE (par site), et c'est la **caméra** qui va sur la salle active,
+  pas le monde qui se réarrange autour d'elle ;
+- **un site MASQUÉ conserve sa place.** Masquer retire du dessin, jamais du repère.
+
+La déclaration de taille reste souhaitable, mais devient une **CONTRAINTE** (un plan d'étage ne peut
+déborder de son bâtiment) et non un prérequis. Étant opt-in, elle ne peut pas rétro-invalider un
+document : seuls les bâtiments qu'on a choisi de fixer sont contrôlés.
+
+### 6.9 Sites/bâtiments : position réelle, échelle COMPRESSÉE
+
+Le niveau site suit la même doctrine, avec une spécificité : il porte des distances GÉOGRAPHIQUES,
+sans commune mesure avec un monde en millimètres.
+
+- **Coordonnées GPS OPTIONNELLES** (comme la dimension du bâtiment), servant à calculer le
+  positionnement RELATIF des sites.
+- **Repli quand elles manquent** : le site est posé à **5 km du précédent**, dans l'ordre de la
+  collection `sites`. Un repli déterministe, donc stable — et non un rangement dépendant de la vue.
+- **L'échelle n'est PAS physique.** Référence : **1 km réel = 10 m dans le monde 3D**, soit un facteur
+  **1/100** (1 km = 1 000 000 mm → 10 000 mm ; le repli de 5 km fait donc 50 m, soit 50 000 mm).
+- **Réglage dans les paramètres 3D** : un curseur d'échelle, et À CÔTÉ un basculement **linéaire /
+  logarithmique** — le logarithmique servant à rapprocher des bâtiments séparés par de longues
+  distances, qu'une échelle linéaire rendrait inexploitables.
+- **Pourquoi ça ne contredit pas §6.8** : l'échelle est un réglage d'AFFICHAGE, pas une donnée du
+  modèle. Le modèle stocke la position RÉELLE (GPS, ou le rang dans la collection) ; la compression est
+  appliquée au RENDU. Les coordonnées monde restent donc, conformément à §6.3, non persistables —
+  elles dépendent d'un réglage de vue.
+
+### 6.10 Ordre de migration
 
 **étage** (rien n'existe encore → rode l'interface sans risque, et débloque les câbles) → **plateau**
 (supprime la duplication `TrayFit`) → **baie / side / wall** (les trois qui partagent le plus) →
