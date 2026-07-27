@@ -213,7 +213,37 @@ Ce couple est déjà l'identité de fait (`allFloorKeys`, `oobWorld`, filtre des
   les FK existantes. Coupler le refactor à une migration de données ferait perdre la réversibilité. La
   migration relationnelle suit, avec des concepts déjà éprouvés par l'usage.
 
-### 6.6 Ordre de migration
+### 6.6 La chaîne se COUPE EN DEUX : transformées intrinsèques vs LAYOUT
+
+Constat fait en migrant (2026-07-27), qui corrige la lecture naïve « une seule chaîne de transformées » :
+
+- **Sous la salle** (étagère → baie → salle), la transformée est **INTRINSÈQUE** : elle se déduit des seuls
+  enregistrements (`dc_x`/`dc_y`/`orientation` d'une baie, position d'une salle sur son plan). Elle est donc
+  calculable par le conteneur, sans contexte.
+- **Au-dessus** (étage → bâtiment), elle est une **DÉCISION DE LAYOUT** : la bande d'un bâtiment résulte du
+  rangement des bâtiments côte à côte avec des écarts, le Z d'un niveau de l'empilement des hauteurs
+  d'étages. Ces valeurs dépendent de l'ENSEMBLE affiché, pas de l'enregistrement — c'est `multiLayout` qui
+  les produit, et elles changent avec la portée.
+
+C'est ce qui explique — et JUSTIFIE — que `Resolver3D` rende du LOCAL SALLE : au-dessus de la salle, il n'y
+a pas de position intrinsèque à rendre. **Un conteneur ne peut donc pas exposer un `toParent()` uniforme
+jusqu'au monde.** L'interface doit distinguer les niveaux intrinsèques (transformée propre) des niveaux de
+layout (transformée fournie par le contexte d'affichage). Prétendre l'inverse produirait une abstraction qui
+ment, du type de celles que cette doctrine cherche justement à éliminer.
+
+### 6.7 Duplication `TrayFit` : suppressible, mais à un prix à connaître
+
+§6.5 affirmait que loger l'abstraction dans `src-shared/` ferait « disparaître » la duplication
+`TrayFit` ⇄ `RackGeometry`. **Précision nécessaire** : déplacer la règle dans un module `src-shared/` ne
+suffit PAS. `DataValidation.ts` est lui-même dans `src-shared/`, où les fichiers sont auto-suffisants — il
+ne pourra donc jamais importer ce module, et la duplication se déplacerait simplement.
+
+La suppression reste possible, par la voie que la règle prescrit : **injecter** la fonction de tenue dans
+le point d'entrée de la validation, les deux appelants (Store client, serveur) pouvant tous deux importer
+le module partagé puisqu'ils ne sont pas eux-mêmes dans `src-shared/`. Mais cela change la SIGNATURE de
+`DataValidator`, ce qui est un lot à part entière et non un effet de bord gratuit du chantier.
+
+### 6.8 Ordre de migration
 
 **étage** (rien n'existe encore → rode l'interface sans risque, et débloque les câbles) → **plateau**
 (supprime la duplication `TrayFit`) → **baie / side / wall** (les trois qui partagent le plus) →
