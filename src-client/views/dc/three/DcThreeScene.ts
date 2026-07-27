@@ -1337,7 +1337,10 @@ export class DcThreeScene extends DcThreeCamera {
 
 
   /** Décor MULTI-SALLES (repère monde) : plans d'étage (rect + grille + bord de réf + cases bloquées),
-      OOB (anneau + mât), étiquettes étage/bâtiment (sprites) + séparateurs. Données pré-calculées par DcBase. */
+      OOB (anneau + mât), équipements posés, étiquettes étage/bâtiment (sprites). Données pré-calculées
+      par DcBase. Le plan SÉPARATEUR vertical entre bâtiments a été retiré : décor hérité du rangement
+      linéaire des sites, il n'avait plus de sens une fois les bâtiments répartis en DEUX dimensions
+      par leur position réelle (doctrine §6.9), où il coupait le monde à un endroit arbitraire. */
   protected buildFloorDecor(root: THREE.Group): void {
     const fd = this.floorDecor, theme = this.theme; if (!fd) return;
     fd.planes.forEach((fp) => {
@@ -1375,25 +1378,9 @@ export class DcThreeScene extends DcThreeCamera {
       const e: any = this.store.get("equipments", fe.id); if (!e) return;
       this.buildEquipBox(root, e, fe.x, fe.y, fe.baseZ);
     });
-    fd.levels.forEach((l) => this.addLabelSprite(root, l.label, l.x, l.y, l.z));
-    fd.buildings.forEach((b) => {
-      this.addLabelSprite(root, b.label, b.x, b.y, b.z);
-      if (b.sepX != null) this.buildBuildingSep(root, b.sepX, fd.maxD, fd.topZ);
-    });
-  }
-
-  /** Séparateur inter-bâtiment : plan vertical translucide ACCENT + contour POINTILLÉ accent — réplique du
-      `.dc-bldg-sep` SVG de référence (fill accent ~0.04, stroke accent dash 10/7). */
-  protected buildBuildingSep(root: THREE.Group, x: number, maxD: number, topZ: number): void {
-    const col = this.theme.front;
-    const fg = new THREE.BufferGeometry();
-    fg.setAttribute("position", new THREE.Float32BufferAttribute([x, 0, 0, x, maxD, 0, x, maxD, topZ, x, 0, topZ], 3));
-    fg.setIndex([0, 1, 2, 0, 2, 3]);
-    const plane = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.05, side: THREE.DoubleSide, depthWrite: false }));
-    root.add(plane);
-    const loop = [new THREE.Vector3(x, 0, 0), new THREE.Vector3(x, maxD, 0), new THREE.Vector3(x, maxD, topZ), new THREE.Vector3(x, 0, topZ), new THREE.Vector3(x, 0, 0)];
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(loop), new THREE.LineDashedMaterial({ color: col, transparent: true, opacity: 0.7, depthWrite: false, dashSize: 600, gapSize: 420 }));
-    line.computeLineDistances(); root.add(line);
+    // Étiquettes d'ÉTAGE : une par plan dessiné, donc répétées sur chaque site (cf. `FloorDecor.floorLabels`).
+    fd.floorLabels.forEach((l) => this.addLabelSprite(root, l.label, l.x, l.y, l.z));
+    fd.buildings.forEach((b) => this.addLabelSprite(root, b.label, b.x, b.y, b.z));
   }
 
   /** Étiquette texte en BILLBOARD (sprite face caméra), au-dessus de tout (depthTest off). */

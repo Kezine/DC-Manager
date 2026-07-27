@@ -849,9 +849,8 @@ module.exports = async () => {
       planes: [{ loc: "s1", floor: "0", W: 20000, D: 10000, cell: 600, ox: 0, oy: 0, z: 0, blocked: ["1,1"] }],
       oobs: [{ id: "wp1", x: 10, y: 20, z: 30, baseZ: 0 }],
       equips: [{ id: "eq1", x: 40, y: 50, baseZ: 0 }],
-      levels: [{ label: "Étage 0", x: -1, y: 0, z: 0 }],
-      buildings: [{ label: "Siège", x: 5, y: 6, z: 7, sepX: null }],
-      maxD: 10000, topZ: 3000,
+      floorLabels: [{ label: "Étage 0", x: -1, y: 0, z: 0 }],
+      buildings: [{ label: "Siège", x: 5, y: 6, z: 7 }],
     };
 
     // ---- forme EXACTE de la signature (verrou : toute évolution du format se voit ici) ----
@@ -861,7 +860,7 @@ module.exports = async () => {
     ck.eq(SceneLayoutSignature.of([{ ...ROOM, underfloorMm: 450 }], null), '[[["dc-a",100,200,0,0,4000,3000,450]],null]', "signature : vide technique porté (dalle dessinée)");
     ck.eq(
       SceneLayoutSignature.of([ROOM], DECOR),
-      '[[["dc-a",100,200,0,0,4000,3000,null]],[[["s1","0",20000,10000,600,0,0,0,["1,1"]]],[["wp1",10,20,30,0]],[["eq1",40,50,0]],[["Étage 0",-1,0,0,null]],[["Siège",5,6,7,null]],10000,3000]]',
+      '[[["dc-a",100,200,0,0,4000,3000,null]],[[["s1","0",20000,10000,600,0,0,0,["1,1"]]],[["wp1",10,20,30,0]],[["eq1",40,50,0]],[["Étage 0",-1,0,0]],[["Siège",5,6,7]]]]',
       "signature : salle + décor d'étage complet",
     );
 
@@ -895,14 +894,20 @@ module.exports = async () => {
     decorDiff({ planes: [] }, "un plan d'étage retiré de la portée");
     decorDiff({ oobs: [{ ...DECOR.oobs[0], x: 11 }] }, "un OOB déplacé");
     decorDiff({ equips: [{ ...DECOR.equips[0], baseZ: 3500 }] }, "un équipement d'étage changeant de niveau");
-    decorDiff({ levels: [{ ...DECOR.levels[0], z: 3500 }] }, "une étiquette de niveau déplacée");
+    // ÉTIQUETTES D'ÉTAGE (une par plan dessiné depuis le lot 9) : leur position suit l'ancrage de LEUR
+    // plan, donc l'échelle inter-sites et le repère du bâtiment — elles doivent peser dans la signature,
+    // sinon déplacer un site laisserait ses étiquettes en place jusqu'au rechargement.
+    decorDiff({ floorLabels: [{ ...DECOR.floorLabels[0], z: 3500 }] }, "une étiquette d'étage changeant de niveau");
+    decorDiff({ floorLabels: [{ ...DECOR.floorLabels[0], x: 48800 }] }, "une étiquette d'étage déplacée en X (échelle inter-sites)");
+    decorDiff({ floorLabels: [{ ...DECOR.floorLabels[0], y: 1500 }] }, "une étiquette d'étage déplacée en Y (ancrage du plan)");
+    decorDiff({ floorLabels: [{ ...DECOR.floorLabels[0], label: "Étage 1" }] }, "une étiquette d'étage renumérotée");
+    decorDiff({ floorLabels: [...DECOR.floorLabels, { label: "Étage 0", x: 48800, y: 0, z: 0 }] }, "l'étiquette d'étage RÉPÉTÉE sur un second site");
+    decorDiff({ floorLabels: [] }, "une étiquette d'étage retirée de la portée");
     decorDiff({ buildings: [{ ...DECOR.buildings[0], label: "Secours" }] }, "un bâtiment renommé");
-    decorDiff({ buildings: [{ ...DECOR.buildings[0], sepX: 1200 }] }, "l'apparition d'un séparateur de bâtiment");
-    decorDiff({ maxD: 10001 }, "une étendue du monde modifiée (maxD)");
-    decorDiff({ topZ: 3001 }, "une hauteur totale modifiée (topZ)");
+    decorDiff({ buildings: [{ ...DECOR.buildings[0], z: 8000 }] }, "une étiquette de bâtiment remontée (hauteur totale du monde)");
     // Un libellé contenant le séparateur ne doit pas pouvoir imiter une AUTRE disposition (JSON échappe).
-    ck(SceneLayoutSignature.of([ROOM], { ...DECOR, buildings: [{ label: '","x', x: 5, y: 6, z: 7, sepX: null }] })
-       !== SceneLayoutSignature.of([ROOM], { ...DECOR, buildings: [{ label: '\\","x', x: 5, y: 6, z: 7, sepX: null }] }), "aucune collision par libellé contenant des séparateurs");
+    ck(SceneLayoutSignature.of([ROOM], { ...DECOR, buildings: [{ label: '","x', x: 5, y: 6, z: 7 }] })
+       !== SceneLayoutSignature.of([ROOM], { ...DECOR, buildings: [{ label: '\\","x', x: 5, y: 6, z: 7 }] }), "aucune collision par libellé contenant des séparateurs");
 
     // ---- DÉCISION d'invalidation : table de vérité complète ----
     const A = { ids: "M:a", layout: "L1" }, B = { ids: "M:a,b", layout: "L2" }, A2 = { ids: "M:a", layout: "L2" };
@@ -982,5 +987,89 @@ module.exports = async () => {
     dv.multiDc = false;
     const m1 = snapshot(), m2 = snapshot();
     ck.eq(decide(m1, m2), "keep", "salle unique, aucun changement → aucune reconstruction");
+  });
+
+  /* ==========================================================================
+     DÉCOR D'ÉTAGE 3D — étiquettes posées À CÔTÉ de chaque étage, RÉPÉTÉES par
+     site, et plan séparateur SUPPRIMÉ (lot 9, demande utilisateur).
+     Le rendu 3D n'a aucune couverture automatique, mais le DESCRIPTEUR qu'on
+     lui pousse, lui, se calcule en Node : `DatacenterView` s'instancie en
+     headless, donc `webglCtx().floorDecor` est observable — c'est la seule
+     façon de verrouiller des coordonnées de décor sans contexte graphique.
+     ========================================================================== */
+  await section("DcBase.webglFloorDecor : étiquettes d'étage par plan dessiné (attentes en dur)", async () => {
+    // Deux sites SANS GPS : le second est posé au repli (5 km à l'est), soit 50 000 mm à l'échelle par
+    // défaut (1 km = 10 m). Hauteur d'étage FORCÉE à 4 000 mm (`height_mm`) pour que les Z de niveaux
+    // soient des valeurs rondes : 4 000 + 2 000 d'écart inter-niveaux = un pas de 6 000 mm.
+    const s = await makeStore();
+    const siteA = await s.create("sites", { name: "Alpha" });
+    const siteB = await s.create("sites", { name: "Beta" });
+    await s.create("floors", { location: siteA.id, floor: "-1", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000 });
+    await s.create("floors", { location: siteA.id, floor: "0", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000 });
+    // ANCRÉ (3 000 ; 1 500) : prouve que l'étiquette suit l'ancrage de SON plan, pas l'origine du bâtiment.
+    await s.create("floors", { location: siteA.id, floor: "1", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000, anchor_x: 3000, anchor_y: 1500 });
+    await s.create("floors", { location: siteB.id, floor: "0", width_mm: 12000, depth_mm: 9000, cell_mm: 600, height_mm: 4000 });
+    const dcAm = await s.create("datacenters", { name: "Salle A-1", location: siteA.id, floor: "-1", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const dcA0 = await s.create("datacenters", { name: "Salle A0", location: siteA.id, floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const dcA1 = await s.create("datacenters", { name: "Salle A1", location: siteA.id, floor: "1", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const dcB0 = await s.create("datacenters", { name: "Salle B0", location: siteB.id, floor: "0", width_mm: 5000, depth_mm: 4000, floor_x: 500, floor_y: 500 });
+    const dv = new DatacenterView(s, {}, {});   // garde headless
+    dv.view = "3d"; dv.useWebGL = true; dv.dcId = dcA0.id; dv.multiDc = true;
+    const decor = () => dv.webglCtx().floorDecor;
+    const lab = (l) => [l.label, l.x, l.y, l.z].join("|");
+
+    dv.visibleDcIds = new Set([dcAm.id, dcA0.id, dcA1.id, dcB0.id]);
+    const fd = decor();
+
+    // ---- FORME du descripteur : plus AUCUN vestige du séparateur ni des bornes du monde ----
+    ck.eq(Object.keys(fd).sort().join(","), "buildings,equips,floorLabels,oobs,planes", "décor : champs exacts (ni maxD, ni topZ — le séparateur était leur seul consommateur)");
+    ck.eq(fd.buildings.filter((b) => "sepX" in b).length, 0, "aucune étiquette de bâtiment ne porte de sepX");
+    ck.eq(fd.floorLabels.filter((l) => "sepX" in l).length, 0, "aucune étiquette d'étage ne porte de sepX");
+
+    // ---- UNE étiquette PAR PLAN DESSINÉ (donc répétée sur chaque site) ----
+    ck.eq(fd.planes.length, 4, "4 plans d'étage dessinés (3 à Alpha, 1 à Beta)");
+    ck.eq(fd.floorLabels.length, 4, "une étiquette d'étage PAR PLAN dessiné (et non un jeu global de niveaux)");
+    ck.eq(fd.floorLabels.map(lab).join(" ; "),
+      "Étage -1|-1200|0|0 ; Étage 0|-1200|0|6000 ; Étage 1|1800|1500|12000 ; Étage 0|48800|0|6000",
+      "étiquettes d'étage : libellé + position, plan par plan");
+    // Répétition PAR SITE : les deux étages « 0 » portent le même libellé à ~50 m d'écart en X.
+    const zero = fd.floorLabels.filter((l) => l.label === "Étage 0");
+    ck.eq(zero.length, 2, "l'étage « 0 » est étiqueté DEUX fois : une par site (répétition demandée)");
+    ck.eq(zero[1].x - zero[0].x, 50000, "les deux étiquettes « Étage 0 » sont séparées par la distance inter-sites (50 m)");
+    // Piège du dépôt : `String(x || "")` écraserait l'étage « 0 » en chaîne vide → libellé « Étage  ».
+    ck.eq(zero[0].label, "Étage 0", "l'étage « 0 » produit bien un libellé (pas de chaîne vide)");
+
+    // ---- POSITION : celle de SON plan, décalée de -gap*0.6 en X (gap = 2 000 → 1 200 mm) ----
+    fd.floorLabels.forEach((l, i) => {
+      ck.eq(l.x, fd.planes[i].ox - 1200, "étiquette " + i + " : x = ancrage du plan − gap*0,6");
+      ck.eq(l.y, fd.planes[i].oy, "étiquette " + i + " : y = ancrage du plan");
+      ck.eq(l.z, fd.planes[i].z, "étiquette " + i + " : z = niveau du plan");
+    });
+    // AUCUNE étiquette n'est restée plantée à l'origine du monde (l'ancien jeu unique y vivait, en y = 0/z = niveau).
+    ck.eq(fd.floorLabels.filter((l) => l.x === -1200 && l.y === 0).length, 2, "seules les étiquettes du site posé à l'origine sont près de l'origine");
+    ck(fd.floorLabels.some((l) => l.x > 40000), "le second site a bien SES propres étiquettes, loin de l'origine");
+
+    // ---- PORTÉE : un étage NON dessiné n'a pas d'étiquette (le repère, lui, ne bouge pas) ----
+    dv.visibleDcIds = new Set([dcA0.id]);
+    const restreint = decor();
+    ck.eq(restreint.planes.length, 3, "portée réduite au bâtiment Alpha : 3 plans dessinés");
+    ck.eq(restreint.floorLabels.length, 3, "portée réduite : une étiquette par plan, ni plus ni moins");
+    ck.eq(restreint.floorLabels.filter((l) => l.x > 40000).length, 0, "portée réduite : plus aucune étiquette du site Beta");
+    ck.eq(restreint.floorLabels.map(lab).join(" ; "),
+      "Étage -1|-1200|0|0 ; Étage 0|-1200|0|6000 ; Étage 1|1800|1500|12000",
+      "portée réduite : les étiquettes restantes n'ont PAS bougé (repère ⊥ portée)");
+
+    // ---- INVALIDATION : l'échelle inter-sites DÉPLACE les étiquettes → signature différente → rebuild.
+    //      (Non-régression du lot 8 : un réglage qui déplace la géométrie doit reconstruire la scène.)
+    dv.visibleDcIds = new Set([dcAm.id, dcA0.id, dcA1.id, dcB0.id]);
+    const ech10 = decor();
+    dv.siteScaleKm = 200;
+    const ech200 = decor();
+    ck.eq(ech200.floorLabels[3].x, 998800, "échelle × 20 : l'étiquette du site Beta suit son plan (5 km × 200 − 1 200)");
+    ck.eq(ech200.floorLabels[0].x, ech10.floorLabels[0].x, "échelle : le site d'origine, lui, ne bouge pas");
+    const sig10 = SceneLayoutSignature.of([], ech10), sig200 = SceneLayoutSignature.of([], ech200);
+    ck(sig10 !== sig200, "échelle inter-sites : le décor change de signature (les étiquettes ont bougé)");
+    ck.eq(SceneLayoutSignature.action({ ids: "M:x", layout: sig10 }, { ids: "M:x", layout: sig200 }, { hasContent: true, deltaEligible: true }), "rebuild", "échelle inter-sites → reconstruction de la scène");
+    ck.eq(SceneLayoutSignature.of([], decor()), sig200, "décor recalculé à l'identique → MÊME signature (aucune reconstruction parasite)");
   });
 };

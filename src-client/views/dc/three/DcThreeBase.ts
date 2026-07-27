@@ -48,12 +48,16 @@ export interface ExtraCable { id: string; color: string | null; line: { x: numbe
 /** Décor multi-salles (repère MONDE) : plans d'étage, OOB, étiquettes étage/bâtiment. */
 export interface FloorPlaneDesc { W: number; D: number; cell: number; ox: number; oy: number; z: number; blocked: string[]; loc: string; floor: string; }
 export interface FloorOobDesc { id: string; x: number; y: number; z: number; baseZ: number; }
-export interface FloorLabelDesc { label: string; x: number; y: number; z: number; sepX?: number | null; }
+/** Étiquette posée dans le monde (billboard). Sert aux étiquettes d'ÉTAGE comme à celles de BÂTIMENT. */
+export interface FloorLabelDesc { label: string; x: number; y: number; z: number; }
 /** Équipement posé sur un ÉTAGE (`placement_mode: "floor"`), hors de toute salle. `x`/`y` = centre au sol en
     coords MONDE ; `baseZ` = Z du NIVEAU seul — la hauteur propre de l'équipement (`dc_z`) est rajoutée par la
     géométrie de boîte côté moteur, comme pour un équipement libre de salle (d'où l'absence de `z` ici). */
 export interface FloorEquipDesc { id: string; x: number; y: number; baseZ: number; }
-export interface FloorDecor { planes: FloorPlaneDesc[]; oobs: FloorOobDesc[]; equips: FloorEquipDesc[]; levels: FloorLabelDesc[]; buildings: FloorLabelDesc[]; maxD: number; topZ: number; }
+/** `floorLabels` = UNE étiquette par plan d'étage DESSINÉ (donc répétée sur chaque site), et non plus un
+    jeu unique de niveaux globaux : depuis que les sites portent une position propre (doctrine §6.9), une
+    colonne d'étiquettes plantée à l'origine du monde ne désignait plus aucun bâtiment en particulier. */
+export interface FloorDecor { planes: FloorPlaneDesc[]; oobs: FloorOobDesc[]; equips: FloorEquipDesc[]; floorLabels: FloorLabelDesc[]; buildings: FloorLabelDesc[]; }
 
 /** Contexte de scène poussé par DcBase au moteur (mono/multi + câbles transversaux + décor d'étage). */
 export interface SceneCtx { multi: { center: { x: number; y: number; z: number }; extent: number; rooms: RoomDesc[] } | null; extraCables: ExtraCable[]; floorDecor: FloorDecor | null; }

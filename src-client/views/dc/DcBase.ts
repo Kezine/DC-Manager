@@ -560,7 +560,8 @@ export abstract class DcBase {
     return { multi, extraCables, floorDecor };
   }
 
-  /** Décor d'étage (repère MONDE) à partir de la disposition `multiLayout` : plans, OOB posés, étiquettes. */
+  /** Décor d'étage (repère MONDE) à partir de la disposition `multiLayout` : plans, OOB posés, équipements
+      d'étage, étiquettes d'étage (UNE par plan dessiné) et de bâtiment. */
   protected webglFloorDecor(m: any): any {
     const shown = new Set(m.floorPlanes.map((fp: any) => (fp.loc || "") + "" + String(fp.floor || "")));
     const planes = m.floorPlanes.map((fp: any) => ({ W: fp.cfg.width_mm, D: fp.cfg.depth_mm, cell: fp.cfg.cell_mm || 600, ox: fp.off.x, oy: fp.off.y, z: fp.off.z, blocked: (fp.cfg.blocked_cells || []).slice(), loc: fp.loc || "", floor: String(fp.floor || "") }));
@@ -578,16 +579,21 @@ export abstract class DcBase {
     const equips = this.store.floorEquipments()
       .filter((e: any) => m.floorPlanes.some((fp: any) => (fp.loc || "") === (e.location || "") && String(fp.floor || "") === String(e.floor || "")))
       .map((e: any) => { const w = this.floor.equipFloorWorld(m, e); return { id: e.id, x: w.x, y: w.y, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(String(e.floor || ""))) }; });
-    const levels = m.levels.map((lv: number, i: number) => ({ label: I18n.t("lists.ph.floorLabel", { n: lv }), x: -m.gap * 0.6, y: 0, z: m.levelZs ? m.levelZs[i] : i * (m.stackH + m.gap) }));
+    // ÉTIQUETTES D'ÉTAGE : UNE PAR PLAN DESSINÉ, posée juste à côté de SON plan. Elles se dérivaient
+    // auparavant de `m.levels` (les niveaux GLOBAUX du monde) et formaient un jeu UNIQUE planté à
+    // l'origine (x = -gap*0.6, y = 0) : lisible du temps où les bâtiments étaient rangés en file depuis
+    // (0,0), mais plus depuis que chaque site porte sa propre position (§6.9) — la colonne d'étiquettes
+    // se retrouvait à côté d'un seul bâtiment, voire d'aucun. En partant de `m.floorPlanes`, chaque
+    // étage est étiqueté DANS son bâtiment, ce qui répète mécaniquement le jeu sur chaque site, et la
+    // PORTÉE reste respectée sans traitement dédié (`floorPlanes` est déjà filtré par ce qu'on dessine).
+    // Le décalage `-gap*0.6` en X est CONSERVÉ : l'étiquette reste légèrement à gauche, hors du plan.
+    // Le numéro passe par `FloorLayout.floorNum` plutôt que par `String(fp.floor || "")` : cette dernière
+    // convention, présente ailleurs dans le dépôt, écrase l'étage « 0 » en chaîne vide (piège connu).
+    const floorLabels = m.floorPlanes.map((fp: any) => ({ label: I18n.t("lists.ph.floorLabel", { n: FloorLayout.floorNum(fp.floor) }), x: fp.off.x - m.gap * 0.6, y: fp.off.y, z: fp.off.z }));
     // ÉTIQUETTE de bâtiment : posée au bord AVANT de SA bande (`y0`), et non plus au bord du monde — les
     // bâtiments ne sont plus alignés sur y = 0 depuis que le site porte une position (§6.9).
-    // SÉPARATEUR vertical : décor HÉRITÉ du rangement linéaire, qui ne sépare que deux bandes consécutives
-    // EN X. On le calcule donc sur une copie triée par x0, l'ordre d'ÉMISSION restant, lui, stable par
-    // libellé (deux bâtiments de même x0 — sites confondus — n'en portent qu'un, ce qui est le cas voulu).
-    const sepX = new Map<string, number>();
-    m.buildings.slice().sort((a: any, b: any) => a.x0 - b.x0).forEach((b: any, i: number, arr: any[]) => { if (i > 0 && b.x0 > arr[i - 1].x0) sepX.set(b.loc, b.x0 - m.gap); });
-    const buildings = m.buildings.map((b: any) => ({ label: this.store.siteLabel(b.loc), x: (b.x0 + b.x1) / 2, y: b.y0 - m.gap * 0.5, z: m.topZ / 2, sepX: sepX.has(b.loc) ? sepX.get(b.loc)! : null }));
-    return { planes, oobs, equips, levels, buildings, maxD: m.maxD, topZ: m.topZ };
+    const buildings = m.buildings.map((b: any) => ({ label: this.store.siteLabel(b.loc), x: (b.x0 + b.x1) / 2, y: b.y0 - m.gap * 0.5, z: m.topZ / 2 }));
+    return { planes, oobs, equips, floorLabels, buildings };
   }
 
   /* ---- WebGL : tooltips + menus contextuels (remontés du moteur → réutilisent la machinerie SVG existante) ---- */

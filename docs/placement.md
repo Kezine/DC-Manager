@@ -397,7 +397,8 @@ document : seuls les bâtiments qu'on a choisi de fixer sont contrôlés. — **
   c'est justement la contrainte qui garantit la cohérence des deux lectures.
 - **Non fait, volontairement** : aucune enveloppe de bâtiment n'est DESSINÉE en 3D. Le lot donne au bâtiment
   une emprise et une contrainte ; matérialiser ses murs est un lot à part, à mener avec le reste du décor de
-  bâtiment (plan séparateur compris — cf. la dette cosmétique de §6.9). La taille n'est pas non plus une
+  bâtiment — dont il ne reste que l'étiquette, le plan séparateur ayant été supprimé depuis (cf. §6.9).
+  La taille n'est pas non plus une
   colonne du listing des sites : le formulaire suffit au principe n°10, comme pour lat/lon.
 
 ### 6.9 Sites/bâtiments : position réelle, échelle COMPRESSÉE — **IMPLÉMENTÉ**
@@ -448,11 +449,25 @@ sans commune mesure avec un monde en millimètres.
   distants de moins de leur propre emprise se chevauchent. C'est un fait géographique, et le curseur
   d'échelle est précisément le remède. On ne « corrige » pas la position pour éviter le chevauchement —
   ce serait réintroduire un rangement, donc §6.8 à l'envers.
-- ⚠ **Dette cosmétique connue** : le plan SÉPARATEUR vertical entre bâtiments (`FloorDecor.sepX`) est un
-  décor hérité du rangement linéaire. Il n'a de sens qu'entre deux bandes consécutives EN X ; il est
-  conservé tel quel (calculé sur les bandes triées par `x0`) et peut paraître arbitraire dès que des
-  coordonnées GPS répartissent les sites en deux dimensions. À revoir quand le décor de bâtiment sera
-  repris — pas dans ce lot.
+- ✅ **Dette cosmétique RÉSORBÉE — le plan séparateur est SUPPRIMÉ.** Le plan vertical translucide entre
+  bâtiments (`FloorDecor.sepX` + `DcThreeScene.buildBuildingSep`) était un décor hérité du rangement
+  linéaire : il ne séparait que deux bandes consécutives EN X, ce qui n'a plus de sens depuis que la
+  position réelle des sites les répartit en DEUX dimensions — il coupait alors le monde à un endroit
+  arbitraire, traversant au passage des bâtiments qu'il n'était pas censé toucher. Retiré en entier
+  (descripteur, calcul et rendu) sur demande de l'utilisateur, avec les bornes du monde `FloorDecor.maxD`
+  et `FloorDecor.topZ` qu'il était seul à consommer. Ce que la hauteur du monde continue de piloter
+  (le Z de l'étiquette de bâtiment) reste porté par cette étiquette, donc par la signature d'invalidation.
+  Le bâtiment n'est toujours PAS matérialisé en 3D — sa séparation d'avec son voisin se lit désormais
+  dans l'écart entre leurs plans d'étage, pas dans un décor rapporté.
+- ✅ **Étiquettes d'étage : UNE PAR PLAN DESSINÉ, donc répétées sur chaque site.** Elles se dérivaient des
+  niveaux GLOBAUX (`MultiLayout.levels`) et formaient un jeu UNIQUE planté à l'origine du monde
+  (`x = -gap*0,6`, `y = 0`) — cohérent tant que les bâtiments partaient de (0,0) en file, absurde une fois
+  chaque site posé à sa position propre : la colonne d'étiquettes désignait au mieux un bâtiment, au pire
+  aucun. Elles se dérivent maintenant de `MultiLayout.floorPlanes` : le libellé porte le numéro d'étage DU
+  PLAN, la position son ancrage (même décalage `-gap*0,6` en X, conservé). Application directe de §6.8 :
+  `floorPlanes` étant DÉJÀ filtré par la portée, la répétition par site et le respect de la portée
+  tombent ensemble, sans traitement dédié — un étage non dessiné n'a simplement pas d'étiquette, et les
+  étiquettes des étages dessinés ne bougent pas quand la portée change (repère ⊥ portée).
 - **Non fait, volontairement** : `lat`/`lon` ne sont pas exposés dans le LISTING des sites (le
   formulaire suffit au principe n°10), et la taille déclarée de bâtiment reste à venir (voir ci-dessous).
 

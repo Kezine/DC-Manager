@@ -36,7 +36,8 @@
   (curseur d'échelle inter-sites, bascule linéaire/logarithmique, bascule « Vue étage » quand la portée affichée ne
   change pas — le cas d'un document mono-salle ou d'une portée réduite à la salle active). La signature couvre
   désormais la disposition ENTIÈRE : origine/orientation/emprise/vide technique de chaque salle **et** décor d'étage
-  (plans + cellules bloquées, OOB, équipements d'étage, étiquettes de niveau et de bâtiment, bornes du monde). Trois
+  (plans + cellules bloquées, OOB, équipements d'étage, étiquettes d'étage — une par plan dessiné — et de
+  bâtiment). Trois
   issues : `keep` (rien n'a bougé — le diff d'options suit son cours), `roomDelta` (l'ENSEMBLE des salles change →
   chemin incrémental inchangé), `rebuild`. Conformément à la note « Rendu 3D » de `CLAUDE.md`, on préfère une
   reconstruction inutile à un mesh périmé. ⚠ **La STABILITÉ de la signature est aussi critique que sa sensibilité** :

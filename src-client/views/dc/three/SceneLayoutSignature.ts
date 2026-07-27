@@ -9,8 +9,8 @@
    POURQUOI CE MODULE EXISTE. `DcThreeScene.applyOptionsDiff` décidait de reconstruire
    la scène à partir d'une clé qui ne portait QUE l'ensemble des identifiants de salles
    (« M:dc-a,dc-b »). Or la vue pousse une DISPOSITION complète : origine et orientation
-   de chaque salle, décor d'étage (plans, étiquettes, séparateurs, OOB, équipements
-   d'étage). Tout ce qui DÉPLACE la géométrie sans changer l'ENSEMBLE des salles était
+   de chaque salle, décor d'étage (plans, étiquettes, OOB, équipements d'étage).
+   Tout ce qui DÉPLACE la géométrie sans changer l'ENSEMBLE des salles était
    donc invisible au diff — la nouvelle disposition était mémorisée mais jamais appliquée
    au graphe de scène. Symptômes constatés : le curseur d'échelle inter-sites, la bascule
    linéaire/logarithmique et la bascule « Vue étage » (quand la portée affichée ne change
@@ -74,20 +74,24 @@ export class SceneLayoutSignature {
   }
 
   /** Décor d'étage : plans (emprise, ancrage, cellules bloquées), OOB posés, équipements d'étage,
-      étiquettes de niveau et de bâtiment (séparateur compris), et les bornes du monde. */
+      étiquettes d'étage et de bâtiment.
+      Les BORNES du monde (`maxD`/`topZ`) ont disparu du descripteur en même temps que le plan
+      séparateur entre bâtiments, seul décor qu'elles dessinaient — rien n'est donc SOUS-invalidé :
+      ce que la hauteur totale du monde continue de piloter (le Z de l'étiquette de bâtiment) est
+      signé par cette étiquette même. Les étiquettes d'étage, elles, comptent PLEINEMENT : leur
+      position suit l'ancrage du plan, donc l'échelle inter-sites et la portée affichée. */
   private static decorTuple(d: FloorDecor): unknown[] {
     return [
       d.planes.map((p) => [p.loc, p.floor, p.W, p.D, p.cell, p.ox, p.oy, p.z, p.blocked]),
       d.oobs.map((o) => [o.id, o.x, o.y, o.z, o.baseZ]),
       d.equips.map((e) => [e.id, e.x, e.y, e.baseZ]),
-      d.levels.map((l) => SceneLayoutSignature.labelTuple(l)),
+      d.floorLabels.map((l) => SceneLayoutSignature.labelTuple(l)),
       d.buildings.map((b) => SceneLayoutSignature.labelTuple(b)),
-      d.maxD, d.topZ,
     ];
   }
 
   private static labelTuple(l: FloorLabelDesc): unknown[] {
-    return [l.label, l.x, l.y, l.z, l.sepX == null ? null : l.sepX];
+    return [l.label, l.x, l.y, l.z];
   }
 
   /** DÉCISION d'invalidation. L'ordre des tests EST la doctrine :
