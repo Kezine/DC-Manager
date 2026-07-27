@@ -140,9 +140,41 @@ export interface Invariant {
     Subsume l'ancien résolveur d'existence : « existe ? » = `fetch(coll, id) != null`. */
 export type EntityFetcher = (collection: string, id: string) => Record<string, any> | null;
 
+/* ---- COLLABORATEURS injectés (modules partagés que ce fichier ne peut pas importer) ----
+   `src-shared/` compile sous DEUX résolutions de modules (front : bundler + webpack ; serveur :
+   NodeNext) : un import relatif entre fichiers partagés devrait porter l'extension `.js` pour le
+   serveur, que la chaîne webpack du front ne sait pas ramener vers le `.ts` (il lui manque
+   `resolve.extensionAlias`). D'où le patron `PowerAnalysis` : le module est REÇU, pas importé.
+   L'interface reste ÉTROITE — strictement ce que les règles consomment (doctrine §6.2). */
+
+/** Géométrie d'ÉTAGÈRE attendue par les règles T2d / V6e — implémentée par `src-shared/TrayGeometry`.
+    Interface STRUCTURELLE : la classe partagée est vérifiée contre elle par `tsc` à chaque point
+    d'injection, donc toute dérive de signature casse la compilation. */
+export interface TrayGeometryPort {
+  plank(cageMm: number, tray: Record<string, any>): { W: number; L: number; availH: number };
+  box(eq: Record<string, any>, plank: { W: number; L: number; availH: number }): { x0: number; x1: number; y0: number; y1: number };
+  overlap(a: { x0: number; x1: number; y0: number; y1: number }, b: { x0: number; x1: number; y0: number; y1: number }): boolean;
+  fitProblem(eq: Record<string, any>, plank: { W: number; L: number; availH: number }): {
+    code: "no_space" | "too_high" | "footprint" | "over_width" | "over_depth";
+    footprint: { w: number; d: number; h: number; rotated: boolean };
+    plank: { W: number; L: number; availH: number };
+    reached: number;
+    at: number;
+  } | null;
+}
+
+/** Collaborateurs de la validation : modules partagés injectés par l'APPELANT (Store client, serveur),
+    qui eux ne sont pas dans `src-shared/` et peuvent donc les importer normalement.
+    ⚠ Une règle privée de son collaborateur ne s'ARRÊTE PAS EN SILENCE : elle échoue FERMÉ (erreur de
+    validation explicite). Une contrainte muette serait pire qu'une contrainte absente — leçon du
+    `FieldSpec.max` déclaré mais inerte (cf. docs/validation.md §4). */
+export interface ValidationCollaborators {
+  trayGeometry?: TrayGeometryPort;
+}
+
 /** Règle CROSS-ENTITÉ (V5) : valide un enregistrement d'après les DONNÉES d'une entité liée (lue via `fetch`),
     pas seulement ses propres champs. Renvoie l'erreur (champ + message) ou `null` si respectée / non applicable. */
-export type CrossEntityRule = (record: Record<string, any>, fetch: EntityFetcher) => { path: string; message: string } | null;
+export type CrossEntityRule = (record: Record<string, any>, fetch: EntityFetcher, collaborators?: ValidationCollaborators) => { path: string; message: string } | null;
 
 /** Recherche d'enregistrements par champ INDEXÉ (dépendance inverse V5b + portée V6) : tous les enregistrements
     de `collection` dont `field` vaut `value`. INJECTÉ — l'UI l'adosse aux index du `Store`, le serveur à une
@@ -153,7 +185,7 @@ export type ChildFinder = RecordFinder;
 /** Règle de PORTÉE (V6) : valide un enregistrement contre l'ENSEMBLE de ses pairs (unicité, non-chevauchement),
     via un `find` par champ (+ `fetch` optionnel pour lire une entité de contexte, ex. la baie). Doit EXCLURE
     l'enregistrement lui-même (par `id`). Renvoie l'erreur ou `null`. */
-export type ScopeRule = (record: Record<string, any>, find: RecordFinder, fetch?: EntityFetcher) => { path: string; message: string } | null;
+export type ScopeRule = (record: Record<string, any>, find: RecordFinder, fetch?: EntityFetcher, collaborators?: ValidationCollaborators) => { path: string; message: string } | null;
 
 /** Forme minimale d'un lot atomique (mêmes champs que la transaction serveur). */
 export interface BatchOps {
@@ -369,80 +401,90 @@ class RackDepth {
 /* ============================================================================
    ÉQUIPEMENT POSÉ SUR UNE ÉTAGÈRE (placement_mode "tray") — l'empreinte doit
    tenir dans la boîte utile du plateau, et deux colocataires ne doivent pas se
-   chevaucher. Formules RÉPLIQUÉES de RackGeometry (trayBoxLocal /
-   trayEquipFitsWhy) — duplication ASSUMÉE (shared/ auto-suffisant), à
-   maintenir en parité. Le repère est le PLATEAU (x = largeur depuis le bord
-   gauche, y = profondeur depuis la face de montage) → le chevauchement se
-   calcule sans repère de baie.
-   ============================================================================ */
-const TRAY_U_MM = 44.45;          // = U_MM (front)
-const TRAY_MOUNT_W = 482.6;       // = RACK_MOUNT_WIDTH (front)
-const TRAY_LEN_FALLBACK = 450;    // = TRAY_DEPTH_DEFAULT_MM (front)
-const TRAY_SHEET_RESERVE = 5;     // = TRAY_SHEET_RESERVE_MM (front) : tôle + renforts transversaux au ras du plateau
-const TRAY_EAR = 15;              // = RACK_EAR_MM (front) : le plateau = corps 19″ (les oreilles s'accrochent aux rails)
-const TRAY_STANDOFF = 3;          // = RACK_EAR_STANDOFF_MM (front) : le tray est posé DEVANT la cage (réserve d'oreilles)
-const TRAY_GUSSET_CLEAR = 4;      // = TRAY_GUSSET_CLEARANCE_MM (front) : garde latérale des renforts (porte-à-faux)
+   chevaucher.
 
+   La GÉOMÉTRIE du plateau ne vit plus ici : elle est écrite UNE SEULE FOIS dans
+   `src-shared/TrayGeometry`, INJECTÉE via `ValidationCollaborators` (ce fichier
+   ne peut pas l'importer — cf. le bloc « COLLABORATEURS injectés »). Ce qui reste
+   ici est ce qui appartient VRAIMENT à la validation : résoudre le contexte
+   (étagère + baie) via `fetch`, énumérer les colocataires via `find`, et traduire
+   un refus géométrique en `path` + message de FORMULAIRE.
+   Cf. `docs/placement.md` §6.7 et `docs/validation.md` (T2d / V6e).
+   ============================================================================ */
 class TrayFit {
-  /** Empreinte au plateau (mm) — l'orientation 90/270 permute largeur/longueur (défauts 200×200×100). */
-  private static footprint(eq: Record<string, any>): { w: number; d: number; h: number } {
-    const fw = Math.max(1, eq.free_w_mm || 200), fl = Math.max(1, eq.free_l_mm || 200), fh = Math.max(1, eq.free_h_mm || 100);
-    const o = (((+eq.dc_orientation || 0) % 360) + 360) % 360;
-    return (o === 90 || o === 270) ? { w: fl, d: fw, h: fh } : { w: fw, d: fl, h: fh };
+  /** Message d'un refus géométrique, en termes de CHAMP DE FORMULAIRE (le front, lui, en fait une
+      phrase d'aide à la saisie — même verdict, deux présentations). Sous rotation, la largeur fautive
+      vient de `free_l_mm` et réciproquement : on désigne donc le champ RÉELLEMENT saisi. */
+  private static explain(problem: NonNullable<ReturnType<TrayGeometryPort["fitProblem"]>>): { path: string; message: string } {
+    const { footprint, plank } = problem;
+    switch (problem.code) {
+      case "no_space":
+        return { path: "tray_item_id", message: "Aucun espace réservé au-dessus du plateau (hauteur réservée = structure du tray)." };
+      case "too_high":
+        return { path: "free_h_mm", message: `Hauteur ${footprint.h} mm > ${Math.round(plank.availH)} mm réservés au-dessus du plateau.` };
+      case "footprint": {
+        const tooWide = footprint.w > plank.W;
+        const path = tooWide ? (footprint.rotated ? "free_l_mm" : "free_w_mm") : (footprint.rotated ? "free_w_mm" : "free_l_mm");
+        return { path, message: `Empreinte ${footprint.w} × ${footprint.d} mm > plateau ${Math.round(plank.W)} × ${Math.round(plank.L)} mm.` };
+      }
+      case "over_width":
+        return { path: "tray_x", message: `Dépasse le plateau en largeur (${Math.round(problem.reached)} > ${Math.round(plank.W)} mm).` };
+      default:
+        return { path: "tray_y", message: `Dépasse le plateau en profondeur (${Math.round(problem.reached)} > ${Math.round(plank.L)} mm).` };
+    }
   }
-  /** Plateau : largeur UTILISABLE (corps 19″ moins la garde des renforts en porte-à-faux), longueur
-      effective, hauteur UTILE au-dessus = TOUTE la réservation moins la réserve de tôle (tray_u = pure
-      indication de dessin, n'exclut rien). Parité RackGeometry.trayBoxLocal/trayLength. */
-  private static plank(rack: Record<string, any>, tray: Record<string, any>): { W: number; L: number; availH: number } {
-    const cage = RackDepth.cage(rack);
-    const uh = Math.max(1, tray.u_height | 0 || 1);
-    const cant = tray.tray_type === "cantilever";
-    // dual : de plan de façade à plan de façade (cage + 2 réserves) — parité RackGeometry.trayLength
-    const L = cant ? Math.min(Math.max(50, tray.depth_mm || TRAY_LEN_FALLBACK), cage) : cage + 2 * TRAY_STANDOFF;
-    const inset = cant ? TRAY_GUSSET_CLEAR : 0;   // garde latérale réservée aux renforts
-    return { W: TRAY_MOUNT_W - 2 * TRAY_EAR - 2 * inset, L, availH: uh * TRAY_U_MM - TRAY_SHEET_RESERVE };
-  }
-  /** Rect au plateau d'un équipement posé (position null = centré). */
-  private static box(eq: Record<string, any>, plank: { W: number; L: number }): { x0: number; x1: number; y0: number; y1: number } {
-    const fp = TrayFit.footprint(eq);
-    const tx = (eq.tray_x != null) ? +eq.tray_x : Math.max(0, (plank.W - fp.w) / 2);
-    const ty = (eq.tray_y != null) ? +eq.tray_y : Math.max(0, (plank.L - fp.d) / 2);
-    return { x0: tx, x1: tx + fp.w, y0: ty, y1: ty + fp.d };
-  }
-  /** Contexte résolu (étagère + baie) d'un équipement posé — null si la règle ne s'applique pas. */
-  private static ctx(eq: Record<string, any>, fetch?: EntityFetcher): { tray: Record<string, any>; rack: Record<string, any> } | null {
+
+  /** Contexte résolu (plateau utile) d'un équipement posé — null si la règle ne s'applique pas.
+      La profondeur de CAGE est calculée ici (politique de baie) et passée en NOMBRE à la géométrie. */
+  private static plank(eq: Record<string, any>, fetch: EntityFetcher | undefined, geometry: TrayGeometryPort): { W: number; L: number; availH: number } | null {
     if (eq.placement_mode !== "tray" || !eq.tray_item_id || !fetch) return null;
     const tray = fetch("rackItems", eq.tray_item_id);
     if (!tray || tray.kind !== "tray" || !tray.rack_id) return null;   // réf. absente/étrangère → autres règles
     const rack = fetch("racks", tray.rack_id);
-    return rack ? { tray, rack } : null;
+    return rack ? geometry.plank(RackDepth.cage(rack), tray) : null;
+  }
+
+  /** `true` si la règle d'étagère DEVRAIT s'appliquer — sert au garde-fou « échec FERMÉ » ci-dessous. */
+  private static applies(eq: Record<string, any>, fetch?: EntityFetcher): boolean {
+    if (eq.placement_mode !== "tray" || !eq.tray_item_id || !fetch) return false;
+    const tray = fetch("rackItems", eq.tray_item_id);
+    return !!(tray && tray.kind === "tray" && tray.rack_id && fetch("racks", tray.rack_id));
+  }
+
+  /** ÉCHEC FERMÉ : sans géométrie injectée, on REFUSE au lieu de laisser passer. Une contrainte muette
+      se lit comme appliquée et laisse écrire des données fausses ; un refus explicite se voit au premier
+      essai. C'est le garde-fou qui remplace ici l'impossible garantie du compilateur (le paramètre ne peut
+      pas être rendu obligatoire après deux paramètres optionnels). */
+  private static missing(): { path: string; message: string } {
+    return { path: "tray_item_id", message: "Contrôle de pose sur étagère IMPOSSIBLE : la géométrie d'étagère n'a pas été injectée (collaborateur « trayGeometry »)." };
   }
 
   /** T2d (cross-entité) : l'équipement TIENT sur l'étagère (empreinte, position, hauteur réservée). */
-  static fits(eq: Record<string, any>, fetch: EntityFetcher): { path: string; message: string } | null {
+  static fits(eq: Record<string, any>, fetch: EntityFetcher, collaborators?: ValidationCollaborators): { path: string; message: string } | null {
     if (eq.placement_mode === "tray" && eq.tray_item_id && fetch) {
       const tray = fetch("rackItems", eq.tray_item_id);
       if (tray && tray.kind !== "tray") return { path: "tray_item_id", message: "L'élément visé n'est pas une étagère (tray)." };
     }
-    const c = TrayFit.ctx(eq, fetch);
-    if (!c) return null;
-    const plank = TrayFit.plank(c.rack, c.tray), fp = TrayFit.footprint(eq), b = TrayFit.box(eq, plank);
-    if (plank.availH < 1) return { path: "tray_item_id", message: "Aucun espace réservé au-dessus du plateau (hauteur réservée = structure du tray)." };
-    if (fp.h > plank.availH + 0.5) return { path: "free_h_mm", message: `Hauteur ${fp.h} mm > ${Math.round(plank.availH)} mm réservés au-dessus du plateau.` };
-    if (b.x1 > plank.W + 0.5) return { path: "tray_x", message: `Dépasse le plateau en largeur (${Math.round(b.x1)} > ${Math.round(plank.W)} mm).` };
-    if (b.y1 > plank.L + 0.5) return { path: "tray_y", message: `Dépasse le plateau en profondeur (${Math.round(b.y1)} > ${Math.round(plank.L)} mm).` };
-    return null;
+    const geometry = collaborators && collaborators.trayGeometry;
+    if (!geometry) return TrayFit.applies(eq, fetch) ? TrayFit.missing() : null;
+    const plank = TrayFit.plank(eq, fetch, geometry);
+    if (!plank) return null;
+    const problem = geometry.fitProblem(eq, plank);
+    return problem ? TrayFit.explain(problem) : null;
   }
 
-  /** V6e (portée) : pas de CHEVAUCHEMENT entre équipements posés sur la MÊME étagère. */
-  static overlap(eq: Record<string, any>, find: RecordFinder, fetch?: EntityFetcher): { path: string; message: string } | null {
-    const c = TrayFit.ctx(eq, fetch);
-    if (!c) return null;
-    const plank = TrayFit.plank(c.rack, c.tray), me = TrayFit.box(eq, plank);
+  /** V6e (portée) : pas de CHEVAUCHEMENT entre équipements posés sur la MÊME étagère.
+      Sans géométrie injectée, T2d a déjà refusé l'enregistrement (échec fermé) — inutile d'en ajouter
+      une seconde ; on se contente donc de ne rien dire ici. */
+  static overlap(eq: Record<string, any>, find: RecordFinder, fetch?: EntityFetcher, collaborators?: ValidationCollaborators): { path: string; message: string } | null {
+    const geometry = collaborators && collaborators.trayGeometry;
+    if (!geometry) return null;
+    const plank = TrayFit.plank(eq, fetch, geometry);
+    if (!plank) return null;
+    const me = geometry.box(eq, plank);
     for (const other of find("equipments", "tray_item_id", eq.tray_item_id)) {
       if (other.id === eq.id || other.placement_mode !== "tray") continue;
-      const ob = TrayFit.box(other, plank);
-      if (me.x0 < ob.x1 - 0.5 && ob.x0 < me.x1 - 0.5 && me.y0 < ob.y1 - 0.5 && ob.y0 < me.y1 - 0.5) {
+      if (geometry.overlap(me, geometry.box(other, plank))) {
         return { path: "tray_x", message: `Chevauche « ${other.name || other.id} » sur l'étagère.` };
       }
     }
@@ -766,7 +808,8 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       // T2c : la PROFONDEUR (mm) doit tenir dans l'espace disponible de la baie (portes/cavités/sécurité incluses).
       (eq, fetch) => RackDepth.fits(eq, fetch),
       // T2d : un équipement POSÉ tient sur son étagère (empreinte, position, hauteur réservée).
-      (eq, fetch) => TrayFit.fits(eq, fetch),
+      //       Géométrie du plateau INJECTÉE (src-shared/TrayGeometry) — cf. docs/placement.md §6.7.
+      (eq, fetch, collaborators) => TrayFit.fits(eq, fetch, collaborators),
     ],
     scope: [
       // V6g : NOM d'équipement UNIQUE dans le document (post-trim, comparaison EXACTE). MÊME mécanisme que
@@ -782,8 +825,8 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       (eq, find, fetch) => RackOccupancy.collision(eq, "equipments", find, fetch),
       // V6d : dos-à-dos au même U — somme des profondeurs ≤ espace partagé (cage + cavités).
       (eq, find, fetch) => RackDepth.backToBack(eq, find, fetch),
-      // V6e : pas de chevauchement entre équipements posés sur la MÊME étagère.
-      (eq, find, fetch) => TrayFit.overlap(eq, find, fetch),
+      // V6e : pas de chevauchement entre équipements posés sur la MÊME étagère (géométrie injectée).
+      (eq, find, fetch, collaborators) => TrayFit.overlap(eq, find, fetch, collaborators),
       // T-POE2 : on ne peut pas RETIRER la capacité POE (poe_device faux) tant qu'un port POE est défini sur
       //          l'équipement (message clair côté équipement ; T-POE1 verrouille aussi côté port via les dependents).
       (eq, find) => {
@@ -1304,8 +1347,10 @@ export class DataValidator {
   /* ---- validation ---- */
   /** Valide un enregistrement (supposé déjà normalisé) contre la spec de sa collection. Renvoie la liste des
       erreurs (vide = valide). Sans spec → aucune erreur. Si `fetch` est fourni, ajoute l'INTÉGRITÉ RÉFÉRENTIELLE
-      (FK existantes — V2) et les règles CROSS-ENTITÉ (d'après les données de l'entité liée — V5). */
-  static validateRecord(collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: RecordFinder): ValidationError[] {
+      (FK existantes — V2) et les règles CROSS-ENTITÉ (d'après les données de l'entité liée — V5).
+      `collaborators` porte les modules partagés que ce fichier ne peut pas importer (cf. `ValidationCollaborators`) :
+      les règles qui en dépendent ÉCHOUENT FERMÉ s'il manque, jamais en silence. */
+  static validateRecord(collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: RecordFinder, collaborators?: ValidationCollaborators): ValidationError[] {
     const spec = COLLECTION_SPECS[collection];
     if (!spec) return [];
     const errors: ValidationError[] = [];
@@ -1366,14 +1411,14 @@ export class DataValidator {
     // règles CROSS-ENTITÉ (V5, si `fetch`) : dépendent des données d'une entité liée (ex. IP ∈ CIDR de son réseau).
     if (fetch) {
       for (const rule of spec.crossEntity || []) {
-        const violation = rule(record, fetch);
+        const violation = rule(record, fetch, collaborators);
         if (violation) fail(violation.path, "cross_entity", violation.message);
       }
     }
     // règles de PORTÉE (V6, si `find`) : unicité / non-chevauchement contre les pairs (ex. adresse IP unique).
     if (find) {
       for (const rule of spec.scope || []) {
-        const violation = rule(record, find, fetch);
+        const violation = rule(record, find, fetch, collaborators);
         if (violation) fail(violation.path, "scope", violation.message);
       }
     }
@@ -1382,9 +1427,9 @@ export class DataValidator {
 
   /** Normalise PUIS valide — l'enchaînement appliqué au serveur avant écriture. `fetch` (optionnel) active
       l'intégrité référentielle (V2) et les règles cross-entité (V5). */
-  static normalizeAndValidate(collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: RecordFinder): { record: Record<string, any>; errors: ValidationError[] } {
+  static normalizeAndValidate(collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: RecordFinder, collaborators?: ValidationCollaborators): { record: Record<string, any>; errors: ValidationError[] } {
     const normalized = DataValidator.normalizeRecord(collection, record);
-    return { record: normalized, errors: DataValidator.validateRecord(collection, normalized, fetch, find) };
+    return { record: normalized, errors: DataValidator.validateRecord(collection, normalized, fetch, find, collaborators) };
   }
 
   /** DÉPENDANCE INVERSE (V5b) : écrire `parentRecord` peut invalider ses ENFANTS (ex. réseau dont le `cidr` change
@@ -1392,7 +1437,7 @@ export class DataValidator {
       les enfants (`findChildren`) et re-joue LEURS règles cross-entité CONTRE LE NOUVEL ÉTAT du parent (pas encore
       persisté → on l'injecte via `fetch`). Renvoie les violations (rattachées à l'enfant fautif). Sur une création,
       l'id du parent est neuf → aucun enfant → no-op. */
-  static validateDependents(parentCollection: string, parentRecord: Record<string, any>, findChildren: ChildFinder, fetch: EntityFetcher): ValidationError[] {
+  static validateDependents(parentCollection: string, parentRecord: Record<string, any>, findChildren: ChildFinder, fetch: EntityFetcher, collaborators?: ValidationCollaborators): ValidationError[] {
     const spec = COLLECTION_SPECS[parentCollection];
     if (!spec || !spec.dependents || !parentRecord.id) return [];
     // le parent en cours d'écriture n'est pas encore persisté : on le superpose à l'état lu pour que les règles
@@ -1402,7 +1447,7 @@ export class DataValidator {
     const errors: ValidationError[] = [];
     for (const dependent of spec.dependents) {
       for (const child of findChildren(dependent.collection, dependent.fkField, parentRecord.id)) {
-        for (const error of DataValidator.validateRecord(dependent.collection, child, fetchWithNewParent)) {
+        for (const error of DataValidator.validateRecord(dependent.collection, child, fetchWithNewParent, undefined, collaborators)) {
           if (error.code === "cross_entity") errors.push({ ...error, message: error.message + ` — incohérent avec la modification de « ${parentCollection} ».` });
         }
       }

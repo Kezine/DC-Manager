@@ -250,9 +250,10 @@ export const TRAY_TYPES: TrayTypeDef[] = [
   { id: "dual", labelKey: "domain.trayType.dual" },
   { id: "cantilever", labelKey: "domain.trayType.cantilever" },
 ];
-export const TRAY_DEPTH_DEFAULT_MM = 450;   // longueur de plateau par défaut d'une étagère en porte-à-faux (mm)
-export const TRAY_SHEET_RESERVE_MM = 5;     // réserve de hauteur INUTILISABLE au ras du plateau (tôle + renforts transversaux du tray)
-export const TRAY_GUSSET_CLEARANCE_MM = 4;  // garde LATÉRALE (mm) de chaque côté réservée aux renforts (porte-à-faux) : les équipements posés n'y empiètent pas
+/* Cotes PROPRES à l'étagère : elles vivent désormais dans `src-shared/TrayGeometry` (source unique
+   consommée à la fois par le rendu et par la validation partagée — cf. docs/placement.md §6.7) et sont
+   simplement RÉ-EXPORTÉES ici, pour que les consommateurs front gardent le même point d'accès. */
+export { TRAY_DEPTH_DEFAULT_MM, TRAY_SHEET_RESERVE_MM, TRAY_GUSSET_CLEARANCE_MM } from "../../src-shared/TrayGeometry";
 
 export const RACK_ITEM_KINDS: RackItemKindDef[] = [
   { id: "blank",     labelKey: "domain.rackItemKind.blank", icon: `<rect x="2" y="8" width="20" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="5.5" cy="12" r="1.1" fill="currentColor"/><circle cx="18.5" cy="12" r="1.1" fill="currentColor"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },

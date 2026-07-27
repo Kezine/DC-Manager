@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { DocumentStore } from "../documents.js";
 import { Logger } from "../logger.js";
-import { DataValidator, type ValidationError } from "../../../src-shared/DataValidation.js";
+import { DataValidator, type ValidationError, type ValidationCollaborators } from "../../../src-shared/DataValidation.js";
+import { TrayGeometry } from "../../../src-shared/TrayGeometry.js";   // collaborateur de validation (cf. docs/placement.md §6.7)
 import { Changeset } from "../../../src-shared/DocumentChangeset.js";
 import type { ProviderConfig, ProviderConfigSource, VmProviderAdapter, VmClusterInfo } from "./VmProvider.js";
 import { PveHttpError } from "./PveHttp.js";
@@ -378,7 +379,10 @@ export class VmSyncService {
     const find = (collection: string, field: string, value: any) => repo.findBy(collection, field, String(value));
     const errors: ValidationError[] = [];
     for (const entry of [...creates, ...updates]) {
-      const result = DataValidator.normalizeAndValidate("vms", entry.record, fetch, find);
+      // Collaborateurs injectés comme partout ailleurs (aucune règle d'étagère sur `vms`, mais la discipline
+      // est UNIFORME : un point de validation qui n'injecte pas est un point qui refusera demain).
+      const collaborators: ValidationCollaborators = { trayGeometry: TrayGeometry };
+      const result = DataValidator.normalizeAndValidate("vms", entry.record, fetch, find, collaborators);
       errors.push(...result.errors);
       entry.record = result.record;
     }

@@ -1,7 +1,7 @@
 /* Tests modules — code PARTAGÉ front/back (schéma, normalisation, validation, cascade).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("shared : DataValidation — champs d'audit (created_by/updated_by/dates) préservés au round-trip", async () => {
@@ -361,7 +361,7 @@ module.exports = async () => {
     const db = { racks: [rack], rackItems: [tray, { id: "B1", kind: "blank", rack_id: "R1" }], equipments: [], waypoints: [], cables: [], cableBundles: [] };
     const find = (coll, field, value) => (db[coll] || []).filter((o) => o[field] === value);
     const fetch = (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
-    const V = (rec) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find);
+    const V = (rec) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find, VALIDATION_COLLABORATORS);
     const base = { id: "E1", name: "posé", type: "other", placement_mode: "tray", tray_item_id: "T1", dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, tray_x: 0, tray_y: 0, dc_orientation: 0 };
     ck.eq(V(base).length, 0, "posé valide (80 ≤ 3 U − 5 mm de tôle) → 0 erreur");
     ck(V(Object.assign({}, base, { tray_item_id: null })).some((x) => x.path === "tray_item_id"), "T1c : mode tray sans étagère → erreur");
@@ -384,6 +384,116 @@ module.exports = async () => {
     const p2 = Cascade.plan("racks", "R1", find, fetch);
     ck(p2.deletes.some((d) => d.c === "rackItems" && d.id === "T1"), "cascade baie : l'étagère est supprimée");
     ck(p2.detaches.some((d) => d.c === "equipments" && d.id === "E9" && d.key === "tray_item_id"), "cascade baie : le posé est détaché (transitif)");
+  }
+  });
+
+  await section("shared : TrayGeometry — géométrie d'étagère, SOURCE UNIQUE (attentes explicites)", async () => {
+  {
+    // Ces attentes sont des valeurs EN DUR, jamais une comparaison entre deux implémentations : depuis que
+    // RackGeometry.tray* DÉLÈGUE à ce module, comparer les deux ne prouverait plus rien (cf. le piège du lot 2).
+    const CAGE = 900;   // profondeur de cage passée en NOMBRE (le module ignore la politique de baie)
+
+    // -- longueur du plateau --
+    ck.eq(TrayGeometry.plankLength(CAGE, { tray_type: "dual", depth_mm: 300 }), 906, "dual : façade à façade = cage + 2 × réserve d'oreilles (depth_mm ignoré)");
+    ck.eq(TrayGeometry.plankLength(CAGE, { tray_type: "cantilever", depth_mm: 400 }), 400, "porte-à-faux : depth_mm");
+    ck.eq(TrayGeometry.plankLength(CAGE, { tray_type: "cantilever", depth_mm: 2000 }), 900, "porte-à-faux : borné à la cage");
+    ck.eq(TrayGeometry.plankLength(CAGE, { tray_type: "cantilever", depth_mm: 10 }), 50, "porte-à-faux : plancher de 50 mm");
+    ck.eq(TrayGeometry.plankLength(CAGE, { tray_type: "cantilever", depth_mm: null }), 450, "porte-à-faux : défaut TRAY_DEPTH_DEFAULT_MM");
+
+    // -- plateau utile --
+    ck.eq(TrayGeometry.fullWidth(), 452.6, "largeur PLEINE = corps 19″ (482,6 − 2 × 15)");
+    ck.eq(TrayGeometry.gussetInset({ tray_type: "cantilever" }), 4, "porte-à-faux : garde latérale des renforts");
+    ck.eq(TrayGeometry.gussetInset({ tray_type: "dual" }), 0, "dual : aucune garde latérale");
+    const dual = TrayGeometry.plank(CAGE, { tray_type: "dual", u_height: 3 });
+    ck.eq(dual.W, 452.6, "dual : largeur utilisable = largeur pleine");
+    ck.eq(dual.L, 906, "dual : longueur = 906");
+    ck(Math.abs(dual.availH - 128.35) < 1e-9, "hauteur libre = 3 U − 5 mm de tôle = 128,35 mm (tray_u n'exclut RIEN)");
+    const cant = TrayGeometry.plank(CAGE, { tray_type: "cantilever", u_height: 3, depth_mm: 400, tray_u: 3 });
+    ck.eq(cant.W, 444.6, "porte-à-faux : largeur utilisable = 452,6 − 2 × 4");
+    ck.eq(cant.L, 400, "porte-à-faux : longueur = depth_mm");
+    ck(Math.abs(cant.availH - 128.35) < 1e-9, "hauteur libre INDÉPENDANTE de tray_u (3 U réservés, structure de 3 U)");
+    ck(Math.abs(TrayGeometry.plank(CAGE, { tray_type: "dual", u_height: 0 }).availH - 39.45) < 1e-9, "u_height absent/0 → 1 U planché (39,45 mm)");
+
+    // -- empreinte (orientation) --
+    const eq = { free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, dc_orientation: 0 };
+    ck.eq(JSON.stringify(TrayGeometry.footprint(eq)), JSON.stringify({ w: 200, d: 300, h: 80, rotated: false }), "empreinte 0° : largeur × longueur");
+    ck.eq(JSON.stringify(TrayGeometry.footprint({ ...eq, dc_orientation: 90 })), JSON.stringify({ w: 300, d: 200, h: 80, rotated: true }), "empreinte 90° : PERMUTÉE (rotated)");
+    ck.eq(JSON.stringify(TrayGeometry.footprint({ ...eq, dc_orientation: 270 })), JSON.stringify({ w: 300, d: 200, h: 80, rotated: true }), "empreinte 270° : permutée");
+    ck.eq(TrayGeometry.footprint({ ...eq, dc_orientation: 180 }).rotated, false, "empreinte 180° : NON permutée");
+    ck.eq(TrayGeometry.footprint({ ...eq, dc_orientation: -90 }).rotated, true, "angle négatif ramené dans [0, 360[");
+    ck.eq(TrayGeometry.footprint({ ...eq, dc_orientation: 450 }).rotated, true, "angle > 360 ramené dans [0, 360[");
+    ck.eq(TrayGeometry.footprint({ ...eq, dc_orientation: 45 }).rotated, false, "angle hors 90/270 : aucune permutation");
+    // TRONCATURE à l'entier : sémantique du DOMAINE (Normalize.rackOrientation), donc du RENDU. La validation
+    // partagée l'ignorait (elle testait l'angle flottant) et pouvait valider une empreinte AUTRE que la dessinée.
+    ck.eq(TrayGeometry.footprint({ ...eq, dc_orientation: 90.5 }).rotated, true, "angle non entier TRONQUÉ (90,5 → 90) — parité avec le rendu");
+    ck.eq(JSON.stringify(TrayGeometry.footprint({})), JSON.stringify({ w: 200, d: 200, h: 100, rotated: false }), "dimensions absentes → défauts prudents 200 × 200 × 100");
+
+    // -- position au plateau --
+    ck.eq(JSON.stringify(TrayGeometry.box({ ...eq, tray_x: 10, tray_y: 10 }, cant)), JSON.stringify({ x0: 10, x1: 210, y0: 10, y1: 310 }), "position saisie : rect au plateau");
+    const centre = TrayGeometry.box(eq, cant);   // (444,6 − 200) / 2 = 122,3 en flottant → comparaison à tolérance
+    ck(Math.abs(centre.x0 - 122.3) < 1e-9 && Math.abs(centre.x1 - 322.3) < 1e-9, "position absente → CENTRÉ en largeur (122,3 mm)");
+    ck.eq(centre.y0, 50, "position absente → CENTRÉ en profondeur ((400 − 300) / 2)");
+    ck.eq(centre.y1, 350, "…rect refermé sur l'empreinte");
+    ck.eq(TrayGeometry.box({ ...eq, free_w_mm: 600, tray_x: null }, cant).x0, 0, "empreinte plus large que le plateau → centrage borné à 0");
+    ck.eq(TrayGeometry.box({ ...eq, tray_x: "10" }, cant).x1, 210, "position en CHAÎNE coercée en nombre (pas de concaténation)");
+
+    // -- chevauchement (tolérance de 0,5 mm) --
+    const r = (x0, x1, y0, y1) => ({ x0, x1, y0, y1 });
+    ck.eq(TrayGeometry.overlap(r(0, 100, 0, 100), r(100, 200, 0, 100)), false, "bord à bord → pas de chevauchement");
+    ck.eq(TrayGeometry.overlap(r(0, 100, 0, 100), r(99.6, 200, 0, 100)), false, "recouvrement de 0,4 mm → toléré");
+    ck.eq(TrayGeometry.overlap(r(0, 100, 0, 100), r(99, 200, 0, 100)), true, "recouvrement de 1 mm → chevauchement");
+    ck.eq(TrayGeometry.overlap(r(0, 100, 0, 100), r(50, 150, 200, 300)), false, "décalés en profondeur → pas de chevauchement");
+
+    // -- verdict de tenue --
+    ck.eq(TrayGeometry.fitProblem({ ...eq, tray_x: 0, tray_y: 0 }, cant), null, "200 × 300 × 80 sur 444,6 × 400 (128,35 utiles) → tient");
+    ck.eq(TrayGeometry.fitProblem({ ...eq, free_h_mm: 150, tray_x: 0, tray_y: 0 }, cant).code, "too_high", "150 mm > 128,35 mm utiles → too_high");
+    ck.eq(TrayGeometry.fitProblem({ ...eq, free_h_mm: 128, tray_x: 0, tray_y: 0 }, cant), null, "128 mm ≤ 128,35 mm → tient (inclusif)");
+    ck.eq(TrayGeometry.fitProblem({ ...eq, free_w_mm: 600, tray_x: 0, tray_y: 0 }, cant).code, "footprint", "empreinte 600 > plateau 444,6 → footprint (indépendant de la position)");
+    ck.eq(TrayGeometry.fitProblem({ ...eq, free_l_mm: 900, tray_x: 0, tray_y: 0 }, cant).code, "footprint", "empreinte trop PROFONDE → footprint");
+    const over = TrayGeometry.fitProblem({ ...eq, tray_x: 400, tray_y: 0 }, cant);
+    ck.eq(over.code, "over_width", "à x = 400, 200 mm de large sort du plateau → over_width");
+    ck.eq(over.reached, 600, "over_width : cote atteinte = 600 mm");
+    ck.eq(over.at, 400, "over_width : position = 400 mm");
+    const deep = TrayGeometry.fitProblem({ ...eq, tray_x: 0, tray_y: 300 }, cant);
+    ck.eq(deep.code, "over_depth", "à y = 300, 300 mm de profond sort du plateau → over_depth");
+    ck.eq(deep.reached, 600, "over_depth : cote atteinte = 600 mm");
+    ck.eq(TrayGeometry.fitProblem({ ...eq, dc_orientation: 90, tray_x: 200, tray_y: 0 }, cant).code, "over_width", "rotation 90° : l'empreinte permutée (300 de large) déborde à x = 200");
+
+    // -- constantes : anti-divergence avec le domaine front (répliques ASSUMÉES, cf. en-tête du module) --
+    const C = D("domain/constants.js");
+    ck.eq(TrayGeom.TRAY_U_MM, C.U_MM, "constante : TRAY_U_MM = U_MM (front)");
+    ck.eq(TrayGeom.TRAY_MOUNT_WIDTH_MM, C.RACK_MOUNT_WIDTH, "constante : TRAY_MOUNT_WIDTH_MM = RACK_MOUNT_WIDTH (front)");
+    ck.eq(TrayGeom.TRAY_EAR_MM, C.RACK_EAR_MM, "constante : TRAY_EAR_MM = RACK_EAR_MM (front)");
+    ck.eq(TrayGeom.TRAY_EAR_STANDOFF_MM, C.RACK_EAR_STANDOFF_MM, "constante : TRAY_EAR_STANDOFF_MM = RACK_EAR_STANDOFF_MM (front)");
+    // les cotes PROPRES à l'étagère, elles, ne sont plus répliquées : le front les RÉ-EXPORTE d'ici.
+    ck.eq(C.TRAY_DEPTH_DEFAULT_MM, TrayGeom.TRAY_DEPTH_DEFAULT_MM, "cote d'étagère : le front ré-exporte la valeur PARTAGÉE (450)");
+    ck.eq(C.TRAY_SHEET_RESERVE_MM, TrayGeom.TRAY_SHEET_RESERVE_MM, "cote d'étagère : réserve de tôle ré-exportée (5)");
+    ck.eq(C.TRAY_GUSSET_CLEARANCE_MM, TrayGeom.TRAY_GUSSET_CLEARANCE_MM, "cote d'étagère : garde des renforts ré-exportée (4)");
+  }
+  });
+
+  await section("shared : géométrie d'étagère INJECTÉE — la validation échoue FERMÉ si le collaborateur manque", async () => {
+  {
+    // `src-shared/DataValidation` ne peut pas importer `src-shared/TrayGeometry` (deux résolutions de modules,
+    // cf. docs/placement.md §6.7) : il le REÇOIT. Le risque de ce patron est qu'un appelant l'oublie et que la
+    // règle s'arrête EN SILENCE — c'est exactement le défaut du `FieldSpec.max` déclaré mais inerte. On vérifie
+    // donc que l'omission REFUSE au lieu de laisser passer.
+    const rack = { id: "R1", name: "R", u_count: 42, depth: 1000, cage_depth_mm: 900, sides: "dual" };
+    const tray = { id: "T1", kind: "tray", rack_id: "R1", u: 10, u_height: 3, tray_u: 1, tray_type: "cantilever", depth_mm: 400, side: "front" };
+    const db = { racks: [rack], rackItems: [tray], equipments: [] };
+    const find = (coll, field, value) => (db[coll] || []).filter((o) => o[field] === value);
+    const fetch = (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
+    const eq = { id: "E1", name: "posé", type: "other", placement_mode: "tray", tray_item_id: "T1", dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, tray_x: 0, tray_y: 0, dc_orientation: 0 };
+    const V = (rec, collab) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find, collab);
+
+    ck.eq(V(eq, VALIDATION_COLLABORATORS).length, 0, "collaborateur injecté : équipement conforme → 0 erreur");
+    const muet = V(eq, undefined);
+    ck.eq(muet.length, 1, "collaborateur OUBLIÉ : l'écriture est REFUSÉE (jamais acceptée en silence)");
+    ck(!!muet[0] && muet[0].message.includes("trayGeometry"), "…avec un message qui NOMME le collaborateur manquant");
+    ck.eq(muet[0] && muet[0].path, "tray_item_id", "…rattaché au champ de l'étagère");
+    // le garde-fou ne se déclenche QUE là où la règle s'appliquerait : aucun bruit ailleurs.
+    ck.eq(V({ id: "E2", name: "racké", placement_mode: "rack", rack_id: "R1", rack_u: 5, u_height: 1 }, undefined).length, 0, "équipement NON posé : aucun faux refus sans collaborateur");
+    ck.eq(V({ ...eq, tray_item_id: "INCONNU" }, undefined).filter((e) => e.code !== "ref_missing").length, 0, "étagère introuvable : la règle ne s'applique pas → aucun faux refus");
   }
   });
 

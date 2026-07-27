@@ -237,17 +237,91 @@ ment, du type de celles que cette doctrine cherche justement à éliminer.
 > l'empilement des hauteurs) et le reste. C'est bien ce qu'annonçait §6.8 : la coupure n'était pas une
 > propriété du domaine, mais la conséquence d'un conteneur sans géométrie.
 
-### 6.7 Duplication `TrayFit` : suppressible, mais à un prix à connaître
+### 6.7 Duplication `TrayFit` ⇄ `RackGeometry` : SUPPRIMÉE — **IMPLÉMENTÉ**
 
 §6.5 affirmait que loger l'abstraction dans `src-shared/` ferait « disparaître » la duplication
-`TrayFit` ⇄ `RackGeometry`. **Précision nécessaire** : déplacer la règle dans un module `src-shared/` ne
-suffit PAS. `DataValidation.ts` est lui-même dans `src-shared/`, où les fichiers sont auto-suffisants — il
-ne pourra donc jamais importer ce module, et la duplication se déplacerait simplement.
+`TrayFit` ⇄ `RackGeometry`. La géométrie de l'étagère vit désormais **une seule fois**, dans
+`src-shared/TrayGeometry.ts`, consommée par le RENDU (`RackGeometry.tray*`, qui délègue) ET par la
+VALIDATION (règles T2d / V6e), avec ses sept constantes.
 
-La suppression reste possible, par la voie que la règle prescrit : **injecter** la fonction de tenue dans
-le point d'entrée de la validation, les deux appelants (Store client, serveur) pouvant tous deux importer
-le module partagé puisqu'ils ne sont pas eux-mêmes dans `src-shared/`. Mais cela change la SIGNATURE de
-`DataValidator`, ce qui est un lot à part entière et non un effet de bord gratuit du chantier.
+> **Correction de la version précédente de ce paragraphe.** Il affirmait que `DataValidation.ts`
+> « ne pourra JAMAIS importer ce module » parce que les fichiers de `src-shared/` sont auto-suffisants.
+> C'est **faux comme énoncé technique**, et la prémisse n'avait jamais été testée. Mesure faite avant de
+> choisir (fichier sonde importé en `./__probe.js`, puis jeté) :
+>
+> | Chaîne | Verdict |
+> |---|---|
+> | `tsc --noEmit` racine (résolution *bundler*) | **PASSE** |
+> | `tsc --noEmit` serveur (NodeNext) | **PASSE** |
+> | `webpack --mode production` | **ÉCHOUE** — `Can't resolve './__probe.js'` |
+>
+> TypeScript 5.9 ramène de lui-même un spécificateur `.js` sur le `.ts` correspondant, dans les DEUX
+> résolutions. Le seul point de rupture est **webpack**, dont la résolution AJOUTE les extensions au lieu
+> de les substituer (il cherche `./__probe.js`, `./__probe.js.ts`, `./__probe.js.js`). Un
+> `resolve.extensionAlias: { ".js": [".ts", ".js"] }` dans `webpack.config.js` fait passer les trois
+> chaînes — vérifié, puis annulé.
+>
+> **L'auto-suffisance de `src-shared/` est donc un choix de CONFIGURATION DE BUILD, révocable en une
+> ligne, pas une fatalité de TypeScript.** Elle est maintenue ici (toucher à la résolution de modules du
+> bundle entier déborde d'un lot de déduplication), mais elle doit être énoncée pour ce qu'elle est.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **Injection par OBJET NOMMÉ, pas par 5ᵉ paramètre anonyme.** `ValidationCollaborators { trayGeometry? }`
+  traverse `validateRecord` / `normalizeAndValidate` / `validateDependents` et descend jusqu'aux règles
+  (`CrossEntityRule` et `ScopeRule` gagnent un paramètre). Le nom du collaborateur reste lisible au point
+  d'appel, et l'objet accueillera les suivants sans nouvelle rupture de signature.
+- **Interface ÉTROITE et STRUCTURELLE** (doctrine §6.2). `DataValidation.ts` déclare `TrayGeometryPort` :
+  exactement les quatre opérations que les règles consomment. Comme il ne peut pas importer le type, la
+  garantie vient du typage structurel — les points d'INJECTION vérifient `TrayGeometry` contre le port, donc
+  toute dérive de signature casse `tsc`. Écarté : un port `any`, qui aurait rendu la dérive indétectable.
+- **Le collaborateur manquant fait ÉCHOUER FERMÉ.** C'est le vrai danger du patron : un appelant qui oublie
+  d'injecter arrêterait la règle **en silence** — exactement le défaut du `FieldSpec.max` déclaré mais inerte
+  (une contrainte muette est pire qu'une contrainte absente). Sans géométrie, T2d REFUSE tout équipement posé,
+  avec un message qui nomme le collaborateur. Écarté : rendre le paramètre **obligatoire** pour que le
+  compilateur serve de garde-fou — impossible sans réordonner les paramètres (`fetch`/`find` sont optionnels
+  et précèdent), et surtout **inopérant là où ça compte** : les 221 appels de la suite de tests sont en JS,
+  que le compilateur ne voit pas. Le garde-fou d'exécution couvre les deux mondes. Vérifié par sonde : le
+  neutraliser fait ROUGIR les tests.
+- **La profondeur de CAGE se passe en NOMBRE** (`plank(cageMm, tray)`), jamais l'enregistrement de baie. La
+  géométrie du plateau n'a pas à connaître la politique de profondeur d'une baie (marges, cavités de portes,
+  bornage). Conséquence assumée : le CALCUL de la cage reste dupliqué (`RackGeometry.cageDepth` ⇄
+  `RackDepth.cage`) — hors périmètre, et **ces deux calculs divergent déjà** (le front ne borne pas
+  `cage_depth_mm` à la profondeur extérieure, la validation si). Passer un nombre PRÉSERVE cette divergence
+  à l'identique au lieu de l'arbitrer en douce.
+- **Les signatures publiques de `RackGeometry.tray*` ne changent pas** (`Resolver3D`, `DcInteract`,
+  `DcThreeScene`, `EquipmentForms`, `RackForms` et leurs tests les consomment) : elles deviennent l'ADAPTATION
+  au repère de baie de primitives exprimées, elles, dans le repère du PLATEAU.
+- **Le VERDICT est partagé, la PHRASE ne l'est pas.** `fitProblem` rend un code + les cotes ; la validation en
+  fait un `path` + un message de formulaire, le front une phrase d'aide à la saisie. Ce sont deux produits
+  différents, pas une duplication — les fusionner aurait fait remonter de la présentation dans la géométrie.
+- **Constantes** : le module partagé est la source unique des cotes PROPRES à l'étagère
+  (`TRAY_DEPTH_DEFAULT_MM`, `TRAY_SHEET_RESERVE_MM`, `TRAY_GUSSET_CLEARANCE_MM`), que
+  `src-client/domain/constants.ts` se contente de RÉ-EXPORTER. Les constantes GÉNÉRALES de baie (`U_MM`,
+  `RACK_MOUNT_WIDTH`, `RACK_EAR_MM`, `RACK_EAR_STANDOFF_MM`) restent RÉPLIQUÉES : elles servent toute la
+  géométrie de baie, les migrer serait un lot à part. Un test anti-divergence verrouille leur égalité.
+- **Parité prouvée AVANT bascule, puis attentes EXPLICITES.** 415 872 comparaisons sur une grille de 6 baies ×
+  64 étagères × 180 équipements, entre l'ancien code (relu depuis git) et le nouveau : **zéro divergence sur
+  tout le chemin de RENDU**, et **zéro bascule accepté ⇄ refusé** sur le chemin de validation. Les tests livrés
+  ne comparent PAS les deux implémentations (elles n'en font plus qu'une : la comparaison serait tautologique,
+  cf. §4.1) mais figent des valeurs EN DUR.
+
+**Deux DIVERGENCES trouvées entre les deux implémentations** (le résultat le plus utile du lot) :
+
+1. **Empreinte trop grande pour le plateau** : le front la signalait comme telle (« empreinte … > plateau … »),
+   la validation la signalait comme un débord de POSITION (`tray_x`/`tray_y`). Même verdict — l'écriture était
+   refusée des deux côtés — mais le formulaire pointait le champ de position alors que la faute est la TAILLE.
+   Version retenue : celle du front. La validation désigne désormais `free_w_mm`/`free_l_mm` (en tenant compte
+   de la rotation, qui échange les deux). Seul changement observable du lot.
+2. **Orientation non entière** : le front TRONQUE l'angle avant de décider de la permutation
+   (`Normalize.rackOrientation`), la validation testait l'angle flottant — à `dc_orientation: 90.5`, le rendu
+   dessinait une empreinte permutée que la validation contrôlait NON permutée. Version retenue : celle du
+   front, pour que ce qui est validé soit ce qui est dessiné.
+
+**Non fait, volontairement** : le mode de placement `tray` n'est PAS migré vers le modèle de conteneur — ce lot
+ne fait que la déduplication. Signalé au passage, non corrigé : la branche `no_space` de `fitProblem` (« aucun
+espace au-dessus du plateau ») est **INATTEIGNABLE** — `availH = max(1, u_height) × 44,45 − 5 ≥ 39,45`. Elle
+existait déjà des deux côtés ; elle est conservée en défense.
 
 ### 6.8 RÈGLE GÉNÉRALE : dériver du MODÈLE DÉCLARÉ, jamais de l'ENSEMBLE AFFICHÉ
 
@@ -375,8 +449,9 @@ sans commune mesure avec un monde en millimètres.
 ### 6.10 Ordre de migration
 
 **étage** (rien n'existe encore → rode l'interface sans risque, et débloque les câbles) → **plateau**
-(supprime la duplication `TrayFit`) → **baie / side / wall** (les trois qui partagent le plus) →
-**salle** en dernier (la plus utilisée et la mieux rodée).
+(supprime la duplication `TrayFit` — **fait**, cf. §6.7 ; la migration du MODE lui-même reste à faire) →
+**baie / side / wall** (les trois qui partagent le plus) → **salle** en dernier (la plus utilisée et la
+mieux rodée).
 
 À chaque étape, l'ancien et le nouveau chemin doivent donner le **même résultat au micron**, prouvé par
 test, AVANT de retirer l'ancien — seule façon de migrer du code non couvert visuellement sans
@@ -389,7 +464,7 @@ régression silencieuse (méthode éprouvée sur la parité `face_up = "top"`).
 | *(site)* | monde | **monde** | s.o. | **migré** — position déclarée (GPS) ou repli 5 km (§6.9) ; TAILLE déclarée optionnelle faisant emprise et contraignant ses plans d'étage (§6.8) |
 | `rack` | baie → salle | local salle | oui | historique, conforme |
 | `side` / `wall` | baie → salle | local salle | oui | historique, conforme |
-| `tray` | étagère → baie → salle | local salle | oui | historique, conforme |
+| `tray` | étagère → baie → salle | local salle | oui | historique, conforme ; **géométrie DÉDUPLIQUÉE** (`src-shared/TrayGeometry`, §6.7) — le MODE reste à migrer |
 | `manual` (libre) | salle | local salle | oui | historique, conforme |
 | `floor` | plan d'étage → étage → bâtiment | **monde** | **en cours** | premier cas migré |
 
@@ -398,6 +473,9 @@ donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
 
 ## 8. Références
 
+- `src-shared/TrayGeometry.ts` — géométrie de l'ÉTAGÈRE, SOURCE UNIQUE (plateau utile, empreinte, position,
+  chevauchement, verdict de tenue) : consommée par le RENDU (`RackGeometry.tray*` délègue) et par la
+  VALIDATION (T2d/V6e), qui la reçoit en collaborateur INJECTÉ (`ValidationCollaborators`).
 - `src-client/geometry/SiteLayout.ts` — position des SITES : `realPositions` (modèle → mètres réels),
   `compress` (mètres réels → millimètres monde, échelle linéaire/log), `worldPositions`.
 - `src-client/geometry/FloorLayout.ts` — `multiLayout` (chaîne bâtiment/étage/salle), `roomToWorld`,

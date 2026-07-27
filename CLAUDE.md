@@ -252,7 +252,16 @@ moteur métier pur, découplé du store (interface injectée) et de la présenta
 - Chaque côté COMPILE la source partagée : le front via son `include` (résolution
   *bundler*, imports SANS extension) ; le serveur via son `include` (NodeNext, imports
   AVEC extension `.js`). Pour rester compatible des deux, **les fichiers de `src-shared/`
-  sont auto-suffisants** (pas d'import relatif entre eux) — on évite ainsi le conflit
-  d'extensions de module. Une dépendance entre concepts partagés se passe par
-  **injection** (paramètre) plutôt que par import.
+  sont auto-suffisants** (pas d'import relatif entre eux). Une dépendance entre concepts
+  partagés se passe par **injection** (paramètre) plutôt que par import — cf. le patron
+  `ValidationCollaborators` (`DataValidation` REÇOIT `TrayGeometry`).
+- ⚠ **Ce que la contrainte est EXACTEMENT** (mesuré le 2026-07-27, pas déduit). Un import
+  relatif `./Foo.js` entre fichiers partagés est accepté par **`tsc` des DEUX côtés**
+  (TypeScript 5.9 ramène le spécificateur `.js` sur le `.ts`, en résolution *bundler*
+  comme en NodeNext). Le seul point de rupture est **webpack** : sa résolution AJOUTE les
+  extensions au lieu de les substituer (`Can't resolve './Foo.js'` — il essaie `./Foo.js`,
+  `./Foo.js.ts`, `./Foo.js.js`). Un `resolve.extensionAlias: { ".js": [".ts", ".js"] }`
+  dans `webpack.config.js` lève l'obstacle (vérifié : les trois chaînes passent alors).
+  L'auto-suffisance reste donc la règle EN VIGUEUR, mais c'est un choix de configuration
+  de build **révocable**, pas une impossibilité de TypeScript.
 - Le serveur émet désormais sous `dist/src-server/src/` (cf. `package.json` `start`).
