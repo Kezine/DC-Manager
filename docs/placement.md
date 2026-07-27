@@ -257,13 +257,22 @@ VALIDATION (règles T2d / V6e), avec ses sept constantes.
 >
 > TypeScript 5.9 ramène de lui-même un spécificateur `.js` sur le `.ts` correspondant, dans les DEUX
 > résolutions. Le seul point de rupture est **webpack**, dont la résolution AJOUTE les extensions au lieu
-> de les substituer (il cherche `./__probe.js`, `./__probe.js.ts`, `./__probe.js.js`). Un
-> `resolve.extensionAlias: { ".js": [".ts", ".js"] }` dans `webpack.config.js` fait passer les trois
-> chaînes — vérifié, puis annulé.
+> de les substituer (il cherche `./__probe.js`, `./__probe.js.ts`, `./__probe.js.js`).
+
+> **Mise à jour — la contrainte est LEVÉE (lot suivant).** Le `resolve.extensionAlias: { ".js": [".ts",
+> ".js"] }` est désormais **posé dans `webpack.config.js`**, et l'auto-suffisance de `src-shared/` n'est
+> plus une règle : **un import relatif entre fichiers partagés est autorisé**, à la condition IMPÉRATIVE
+> d'écrire le spécificateur AVEC l'extension `.js` (`./TrayGeometry.js`) — la seule forme que les trois
+> chaînes acceptent, parce que NodeNext l'EXIGE côté serveur. Re-mesuré à la pose, sonde comprise : les
+> trois chaînes passent, la sonde retirée de la config fait bien ÉCHOUER webpack (donc la ligne travaille),
+> et le bundle est identique **octet pour octet** à celui d'avant — la nouvelle résolution ne dévie rien
+> dans `node_modules` ni ailleurs.
 >
-> **L'auto-suffisance de `src-shared/` est donc un choix de CONFIGURATION DE BUILD, révocable en une
-> ligne, pas une fatalité de TypeScript.** Elle est maintenue ici (toucher à la résolution de modules du
-> bundle entier déborde d'un lot de déduplication), mais elle doit être énoncée pour ce qu'elle est.
+> **Ce que cela ne change PAS** : `ValidationCollaborators` reste en place. Le patron avait été choisi
+> pour contourner la contrainte, mais son retrait est un lot à part — il touche onze points d'appel et le
+> garde-fou d'échec fermé, alors que ce lot-ci ne modifie qu'une ligne de configuration et n'a donc AUCUN
+> effet de bord à surveiller. Le raisonnement « il FAUT injecter » est mort ; l'injection, elle, se
+> défend encore sur ses propres mérites (découplage), et c'est à ce titre qu'elle est conservée.
 
 **Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
 
@@ -272,9 +281,10 @@ VALIDATION (règles T2d / V6e), avec ses sept constantes.
   (`CrossEntityRule` et `ScopeRule` gagnent un paramètre). Le nom du collaborateur reste lisible au point
   d'appel, et l'objet accueillera les suivants sans nouvelle rupture de signature.
 - **Interface ÉTROITE et STRUCTURELLE** (doctrine §6.2). `DataValidation.ts` déclare `TrayGeometryPort` :
-  exactement les quatre opérations que les règles consomment. Comme il ne peut pas importer le type, la
-  garantie vient du typage structurel — les points d'INJECTION vérifient `TrayGeometry` contre le port, donc
-  toute dérive de signature casse `tsc`. Écarté : un port `any`, qui aurait rendu la dérive indétectable.
+  exactement les quatre opérations que les règles consomment. Comme il n'importe pas le type (injection
+  oblige), la garantie vient du typage structurel — les points d'INJECTION vérifient `TrayGeometry` contre le
+  port, donc toute dérive de signature casse `tsc`. Écarté : un port `any`, qui aurait rendu la dérive
+  indétectable.
 - **Le collaborateur manquant fait ÉCHOUER FERMÉ.** C'est le vrai danger du patron : un appelant qui oublie
   d'injecter arrêterait la règle **en silence** — exactement le défaut du `FieldSpec.max` déclaré mais inerte
   (une contrainte muette est pire qu'une contrainte absente). Sans géométrie, T2d REFUSE tout équipement posé,

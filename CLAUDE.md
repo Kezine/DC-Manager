@@ -28,8 +28,8 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
    identifiable et est (ou pourra être) réutilisé/testé séparément, il sort dans un
    module dédié — on ne l'empile PAS dans un fichier/une classe déjà gros (« monolithe »).
    Le couplage à un contexte (vue, store, serveur…) passe par une **interface/des
-   paramètres injectés** (cf. `PositioningTool` ↔ `PositioningHost`, ou les modules
-   `src-shared/` auto-suffisants), pas par des imports en dur. Vaut PARTOUT : front, back,
+   paramètres injectés** (cf. `PositioningTool` ↔ `PositioningHost`, ou `PowerAnalysis`
+   qui REÇOIT son store), pas par des imports en dur. Vaut PARTOUT : front, back,
    géométrie, vues, données — pas seulement la vue Datacenter.
 3. **Favoriser la RÉUTILISATION plutôt que la duplication.** Avant de copier une
    règle, une constante ou un type, se demander où il devrait vivre UNE seule fois.
@@ -250,18 +250,28 @@ moteur métier pur, découplé du store (interface injectée) et de la présenta
 **Contraintes techniques** (deux builds différents) :
 - `src-shared/` ne contient que du **TS PUR** : aucun accès au DOM (front) ni à Node (back).
 - Chaque côté COMPILE la source partagée : le front via son `include` (résolution
-  *bundler*, imports SANS extension) ; le serveur via son `include` (NodeNext, imports
-  AVEC extension `.js`). Pour rester compatible des deux, **les fichiers de `src-shared/`
-  sont auto-suffisants** (pas d'import relatif entre eux). Une dépendance entre concepts
-  partagés se passe par **injection** (paramètre) plutôt que par import — cf. le patron
-  `ValidationCollaborators` (`DataValidation` REÇOIT `TrayGeometry`).
-- ⚠ **Ce que la contrainte est EXACTEMENT** (mesuré le 2026-07-27, pas déduit). Un import
-  relatif `./Foo.js` entre fichiers partagés est accepté par **`tsc` des DEUX côtés**
-  (TypeScript 5.9 ramène le spécificateur `.js` sur le `.ts`, en résolution *bundler*
-  comme en NodeNext). Le seul point de rupture est **webpack** : sa résolution AJOUTE les
-  extensions au lieu de les substituer (`Can't resolve './Foo.js'` — il essaie `./Foo.js`,
-  `./Foo.js.ts`, `./Foo.js.js`). Un `resolve.extensionAlias: { ".js": [".ts", ".js"] }`
-  dans `webpack.config.js` lève l'obstacle (vérifié : les trois chaînes passent alors).
-  L'auto-suffisance reste donc la règle EN VIGUEUR, mais c'est un choix de configuration
-  de build **révocable**, pas une impossibilité de TypeScript.
+  *bundler*) ; le serveur via son `include` (NodeNext). Les imports depuis `src-client/`
+  vers `src-shared/` s'écrivent SANS extension, comme partout dans le front.
+- ✅ **Un import relatif ENTRE fichiers de `src-shared/` est AUTORISÉ** — à une condition
+  IMPÉRATIVE : le spécificateur porte l'extension **`.js`**, `import { X } from "./Foo.js"`
+  pour un fichier `Foo.ts`. C'est la SEULE forme que les trois chaînes acceptent :
+  **NodeNext l'EXIGE** (le serveur émet du JS, le spécificateur doit désigner le fichier
+  ÉMIS), la résolution *bundler* l'accepte, et webpack l'accepte grâce à l'alias ci-dessous.
+  Un import SANS extension entre fichiers partagés compile côté front puis **casse le build
+  serveur** — c'est la faute à ne pas commettre.
+- ⚠ **Pourquoi l'extension, EXACTEMENT** (mesuré le 2026-07-27, pas déduit — cette section a
+  longtemps affirmé le contraire sans l'avoir testé). Un import relatif `./Foo.js` entre
+  fichiers partagés est accepté par **`tsc` des DEUX côtés** (TypeScript 5.9 ramène le
+  spécificateur `.js` sur le `.ts`, en résolution *bundler* comme en NodeNext). Le seul
+  point de rupture était **webpack** : sa résolution AJOUTE les extensions au lieu de les
+  substituer (`Can't resolve './Foo.js'` — il essaie `./Foo.js`, `./Foo.js.ts`,
+  `./Foo.js.js`). D'où le `resolve.extensionAlias: { ".js": [".ts", ".js"] }` de
+  `webpack.config.js`, qui lui apprend à résoudre un spécificateur `.js` sur le `.ts`
+  correspondant. **Ne pas retirer cette ligne** : les trois chaînes en dépendent.
+- L'**injection** d'un concept partagé dans un autre (paramètre plutôt qu'import) reste un
+  patron légitime, mais elle relève désormais du **choix de conception**, plus de la
+  contrainte de build : `PowerAnalysis` reçoit son store et `DataValidation` reçoit
+  `TrayGeometry` (`ValidationCollaborators`) parce que ça découple, pas parce que l'import
+  serait impossible. Les modules partagés existants n'ont, eux, aucun import relatif : la
+  levée de la contrainte ouvre la voie, elle n'ordonne aucune conversion.
 - Le serveur émet désormais sous `dist/src-server/src/` (cf. `package.json` `start`).

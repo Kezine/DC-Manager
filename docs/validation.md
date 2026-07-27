@@ -339,13 +339,17 @@ Les specs sont **partielles** : seuls les champs porteurs de règles sont décla
   hauteur d''étage) et `underfloor_mm` (plancher technique surélevé, consommé par le rendu 3D). `doors` /
   `blocked_cells` restent des passthrough assumés (cf. ci-dessus).
 
-## 11. Collaborateurs INJECTÉS (modules partagés que la validation ne peut pas importer)
+## 11. Collaborateurs INJECTÉS (modules partagés que la validation REÇOIT)
 
 Certaines règles ont besoin d'un **module métier** qui vit lui aussi dans `src-shared/` — typiquement la
-géométrie d'étagère (`src-shared/TrayGeometry`) que consomment T2d et V6e. Or les fichiers de `src-shared/`
-sont **auto-suffisants** (aucun import relatif entre eux, cf. `CLAUDE.md` — contrainte de la chaîne webpack,
-détaillée et mesurée dans `docs/placement.md` §6.7). `DataValidation.ts` ne peut donc PAS importer un tel
-module : il le **REÇOIT**.
+géométrie d'étagère (`src-shared/TrayGeometry`) que consomment T2d et V6e. `DataValidation.ts` ne l'importe
+pas : il le **REÇOIT**.
+
+> ⚠ **Ce n'est plus une IMPOSSIBILITÉ, c'est un CHOIX.** Ce paragraphe a longtemps justifié l'injection par
+> l'auto-suffisance obligatoire des fichiers de `src-shared/`. Cette contrainte est **levée** (cf.
+> `CLAUDE.md` et `docs/placement.md` §6.7) : un import relatif entre fichiers partagés est autorisé, à
+> condition d'écrire le spécificateur avec l'extension `.js`. L'injection est conservée pour ce qu'elle
+> apporte — un moteur de validation découplé de ses collaborateurs — pas parce que l'import échouerait.
 
 ```ts
 ValidationCollaborators = { trayGeometry?: TrayGeometryPort }   // objet NOMMÉ, extensible
