@@ -662,6 +662,14 @@ const SPEC_FIELDS = {
       // ⚠ Ce sont des coordonnées du MODÈLE : l'échelle de rendu, elle, est un réglage de VUE non persisté.
       lat:     { type: "number", nullable: true, default: null, min: -90,  max: 90  },
       lon:     { type: "number", nullable: true, default: null, min: -180, max: 180 },
+      // TAILLE DÉCLARÉE du bâtiment (mm) — OPTIONNELLE (doctrine `docs/placement.md` §6.8, dernier
+      // paragraphe). Le bâtiment épousait jusqu'ici son plus grand plan d'étage : il n'avait pas de
+      // dimension propre. Déclarée, elle FAIT l'emprise du bâtiment et devient une CONTRAINTE — un plan
+      // d'étage ne peut pas en déborder (cf. règle cross-entité de `floors`). Étant OPT-IN, elle ne peut
+      // pas rétro-invalider un document : seuls les bâtiments qu'on a choisi de fixer sont contrôlés.
+      // INDISSOCIABLES (invariant ci-dessous), comme lat/lon : une demi-dimension ne décrit aucune emprise.
+      width_mm: { type: "number", nullable: true, default: null, min: 1 },
+      depth_mm: { type: "number", nullable: true, default: null, min: 1 },
   },
   vms: {
       name:              { type: "string", required: true },
@@ -1062,6 +1070,43 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   floors: {
     fields: SPEC_FIELDS.floors,
+    crossEntity: [
+      // T13 — CROSS-ENTITÉ (V5) : CONTRAINTE DE TAILLE DE BÂTIMENT (doctrine `docs/placement.md` §6.8, dernier
+      // paragraphe) : un plan d'étage ne peut pas DÉBORDER du bâtiment qui le porte. La règle est
+      // cross-entité et non un invariant (V3) parce qu'elle lit le SITE PARENT, hors de l'enregistrement.
+      //
+      // ⚠ DÉFENSIVE PAR CONSTRUCTION. `floors.location` n'est VOLONTAIREMENT pas déclaré `ref: "sites"` :
+      // le dépôt contient des `location` HISTORIQUES (slugs de la table LOCATIONS, cf. Store.siteLabel)
+      // sans enregistrement `sites` correspondant. Déclarer la FK ferait rejeter ces documents par
+      // l'intégrité référentielle (V2) — une rétro-invalidation massive, que la doctrine interdit. Un site
+      // introuvable rend donc la règle NON APPLICABLE, jamais une erreur.
+      //
+      // OPT-IN : sans taille déclarée sur le site, aucune vérification. Un document existant ne peut pas
+      // devenir invalide du fait de cette règle — c'est la condition posée par la doctrine.
+      //
+      // PORTÉE : la collection `floors` n'existe que pour les étages CONFIGURÉS ; un étage non configuré
+      // n'a pas d'enregistrement (FloorLayout.config lui rend un défaut virtuel à `id: null`). La
+      // contrainte ne porte donc que sur les étages configurés — c'est correct et voulu : on ne contraint
+      // que ce que l'utilisateur a effectivement déclaré.
+      (floor, fetch) => {
+        const site = floor.location ? fetch("sites", floor.location) : null;
+        if (!site || site.width_mm == null || site.depth_mm == null) return null;
+        // L'ANCRE fait partie de l'emprise : un plan ancré à 5 000 mm dans un bâtiment de 20 000 mm ne peut
+        // mesurer que 15 000 mm. Contrôler la seule dimension laisserait passer un plan poussé hors du
+        // bâtiment par son ancrage.
+        const axes = [
+          { dim: "width_mm", anchor: "anchor_x", limit: Number(site.width_mm), label: "largeur" },
+          { dim: "depth_mm", anchor: "anchor_y", limit: Number(site.depth_mm), label: "profondeur" },
+        ];
+        for (const axis of axes) {
+          const size = Number(floor[axis.dim]);
+          if (!Number.isFinite(size) || !Number.isFinite(axis.limit)) continue;   // plan sans dimension sur cet axe → rien à comparer
+          const anchor = Number(floor[axis.anchor]) || 0, end = anchor + size;
+          if (end > axis.limit) return { path: axis.dim, message: `Le plan d'étage déborde du bâtiment en ${axis.label} : ancre ${anchor} + ${axis.label} ${size} = ${end} mm, pour un bâtiment de ${axis.limit} mm.` };
+        }
+        return null;
+      },
+    ],
   },
   ipNetworks: {
     fields: SPEC_FIELDS.ipNetworks,
@@ -1175,6 +1220,17 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       // elle désigne un parallèle ou un méridien. Le rendu retomberait silencieusement sur le repli 5 km en
       // laissant croire le site géolocalisé — on rejette donc la saisie à moitié faite plutôt que de l'ignorer.
       { path: "lon", message: "Latitude et longitude vont ensemble : renseignez les deux, ou aucune des deux.", holds: (s) => (s.lat == null) === (s.lon == null) },
+      // Même raisonnement pour la TAILLE : une largeur sans profondeur (ou l'inverse) ne décrit aucune
+      // emprise. Le rendu retomberait silencieusement sur l'emprise déduite des plans d'étage en laissant
+      // croire le bâtiment dimensionné, et la CONTRAINTE de débordement ne s'appliquerait que sur un axe.
+      { path: "depth_mm", message: "Largeur et profondeur du bâtiment vont ensemble : renseignez les deux, ou aucune des deux.", holds: (s) => (s.width_mm == null) === (s.depth_mm == null) },
+    ],
+    // T13 / V5b : RÉTRÉCIR un site (ou lui déclarer une taille pour la première fois) peut faire déborder des
+    // plans d'étage déjà saisis → re-valider ses étages contre le NOUVEL état du bâtiment. Sans cela la
+    // contrainte ne tiendrait qu'à un bout : on refuserait l'étage trop grand, mais on laisserait
+    // silencieusement rapetisser le bâtiment sous ses propres étages.
+    dependents: [
+      { collection: "floors", fkField: "location" },
     ],
   },
   vms: {

@@ -499,6 +499,65 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : T13 — taille de bâtiment DÉCLARÉE, contrainte de débordement des plans d'étage (doctrine §6.8)", async () => {
+  {
+    const DV = Validation.DataValidator;
+    // Deux sites : « s1 » DIMENSIONNÉ (20 m × 10 m), « s2 » sans taille déclarée.
+    const sites = { s1: { id: "s1", name: "Liège", width_mm: 20000, depth_mm: 10000 }, s2: { id: "s2", name: "Herstal" } };
+    const fetch = (coll, id) => (coll === "sites" ? (sites[id] || null) : null);
+    const floor = (over) => ({ id: "f1", location: "s1", floor: "0", width_mm: 6000, depth_mm: 4000, anchor_x: 0, anchor_y: 0, ...over });
+
+    // ---- OPT-IN : la contrainte ne s'applique QU'AUX bâtiments qu'on a choisi de dimensionner. C'est le
+    // verrou ANTI-RÉTRO-INVALIDATION exigé par la doctrine : ce lot ne doit rendre invalide aucun document.
+    ck.eq(DV.validateRecord("floors", floor({ location: "s2", width_mm: 999999, depth_mm: 999999 }), fetch).length, 0, "site SANS taille déclarée → plan de n'importe quelle dimension accepté (opt-in)");
+    // `location` HISTORIQUE (slug LOCATIONS, aucun enregistrement `sites`) : règle NON APPLICABLE. ⚠ C'est
+    // pour ce cas que `floors.location` n'est PAS déclaré `ref: "sites"` — la FK rejetterait ces documents.
+    ck.eq(DV.validateRecord("floors", floor({ location: "liege", width_mm: 999999, depth_mm: 999999 }), fetch).length, 0, "location HISTORIQUE sans enregistrement sites → aucune erreur (règle non applicable)");
+    ck.eq(DV.validateRecord("floors", floor({ location: "" }), fetch).length, 0, "location vide → aucune erreur");
+    ck.eq(DV.validateRecord("floors", floor({ width_mm: 999999 })).length, 0, "sans fetch → aucun contrôle cross-entité (parité avec les autres V5)");
+
+    // ---- Site DIMENSIONNÉ : ce qui TIENT passe, ce qui DÉBORDE est rejeté, sur le bon chemin.
+    ck.eq(DV.validateRecord("floors", floor(), fetch).length, 0, "plan 6000×4000 dans un bâtiment 20000×10000 → accepté");
+    ck.eq(DV.validateRecord("floors", floor({ width_mm: 20000, depth_mm: 10000 }), fetch).length, 0, "plan EXACTEMENT à la taille du bâtiment → accepté (borne inclusive)");
+    const tropLarge = DV.validateRecord("floors", floor({ width_mm: 20001 }), fetch);
+    ck.eq(tropLarge.length, 1, "plan plus LARGE que son bâtiment → 1 erreur");
+    ck.eq(tropLarge[0].code, "cross_entity", "débordement en largeur → code 'cross_entity'");
+    ck.eq(tropLarge[0].path, "width_mm", "débordement en largeur → path 'width_mm'");
+    const tropProfond = DV.validateRecord("floors", floor({ depth_mm: 10001 }), fetch);
+    ck.eq(tropProfond.length, 1, "plan plus PROFOND que son bâtiment → 1 erreur");
+    ck.eq(tropProfond[0].path, "depth_mm", "débordement en profondeur → path 'depth_mm'");
+
+    // ---- L'ANCRE fait partie de l'emprise : un plan qui tiendrait à l'origine déborde une fois ancré.
+    ck.eq(DV.validateRecord("floors", floor({ width_mm: 15000, anchor_x: 5000 }), fetch).length, 0, "ancre X 5000 + largeur 15000 = 20000 → tient EXACTEMENT");
+    ck.eq(DV.validateRecord("floors", floor({ width_mm: 15000, anchor_x: 5001 }), fetch)[0].path, "width_mm", "ancre X 5001 + largeur 15000 > 20000 → rejeté (l'ancre COMPTE)");
+    ck.eq(DV.validateRecord("floors", floor({ depth_mm: 8000, anchor_y: 2000 }), fetch).length, 0, "ancre Y 2000 + profondeur 8000 = 10000 → tient EXACTEMENT");
+    ck.eq(DV.validateRecord("floors", floor({ depth_mm: 8000, anchor_y: 2001 }), fetch)[0].path, "depth_mm", "ancre Y 2001 + profondeur 8000 > 10000 → rejeté");
+    // Le message CITE les valeurs en cause : une erreur muette n'aide personne à corriger sa saisie.
+    const msg = DV.validateRecord("floors", floor({ width_mm: 15000, anchor_x: 5001 }), fetch)[0].message;
+    ck(msg.indexOf("5001") >= 0 && msg.indexOf("15000") >= 0 && msg.indexOf("20000") >= 0, "le message cite l'ancre, la dimension du plan et la taille du bâtiment  (obtenu : " + msg + ")");
+
+    // ---- V5b : la contrainte tient AUX DEUX BOUTS. Rétrécir un bâtiment sous ses étages est refusé —
+    // sinon on interdirait l'étage trop grand tout en laissant silencieusement rapetisser le bâtiment.
+    const etages = [floor({ id: "f1", width_mm: 18000, depth_mm: 9000 })];
+    const findChildren = (coll, fk, pid) => (coll === "floors" && fk === "location" && pid === "s1") ? etages : [];
+    ck.eq(DV.validateDependents("sites", { id: "s1", width_mm: 20000, depth_mm: 10000 }, findChildren, fetch).length, 0, "V5b : bâtiment assez grand pour ses étages → 0 erreur");
+    const retreci = DV.validateDependents("sites", { id: "s1", width_mm: 12000, depth_mm: 10000 }, findChildren, fetch);
+    ck.eq(retreci.some((e) => e.code === "cross_entity" && e.collection === "floors" && e.id === "f1" && e.path === "width_mm"), true, "V5b : RÉTRÉCIR le bâtiment sous un étage existant → erreur sur l'étage");
+    ck.eq(DV.validateDependents("sites", { id: "s1", width_mm: null, depth_mm: null }, findChildren, fetch).length, 0, "V5b : RETIRER la taille déclarée libère la contrainte (opt-in dans les deux sens)");
+
+    // ---- COUPLE INDISSOCIABLE (invariant V3, même raisonnement que lat/lon) : une demi-dimension ne
+    // décrit aucune emprise — le rendu retomberait sur l'emprise déduite en laissant croire le bâtiment fixé.
+    const site = (over) => DV.normalizeRecord("sites", { id: "sX", name: "X", ...over });
+    ck.eq(DV.validateRecord("sites", site({ width_mm: 20000 })).some((e) => e.code === "invariant" && e.path === "depth_mm"), true, "site : largeur SEULE → invariant");
+    ck.eq(DV.validateRecord("sites", site({ depth_mm: 10000 })).some((e) => e.code === "invariant" && e.path === "depth_mm"), true, "site : profondeur SEULE → invariant");
+    ck.eq(DV.validateRecord("sites", site({ width_mm: 20000, depth_mm: 10000 })).length, 0, "site : couple COMPLET → 0 erreur");
+    ck.eq(DV.validateRecord("sites", site({})).length, 0, "site : aucune dimension → 0 erreur (optionnel)");
+    ck.eq(DV.validateRecord("sites", site({ width_mm: 0, depth_mm: 10000 })).some((e) => e.code === "min" && e.path === "width_mm"), true, "site : largeur 0 → 'min' (une dimension nulle n'est pas une emprise)");
+    const norm = site({});
+    ck(norm.width_mm === null && norm.depth_mm === null, "site : dimensions absentes → null à la normalisation");
+  }
+  });
+
   await section("shared : portée V6a (unicité d'adresse IP)", async () => {
   {
     const DV = Validation.DataValidator;

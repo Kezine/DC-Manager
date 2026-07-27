@@ -161,6 +161,12 @@ export class FloorLayout {
     // VIDE des enregistrements non rattachés) : elles ont droit à une place, à la suite et triées.
     const extraLocs = Array.from(new Set(allFloors.map((f) => f.loc))).filter((l) => !knownSiteIds.has(l));
     const sitePos = SiteLayout.worldPositions(siteRecords, extraLocs, opts.siteScale);
+    // TAILLE DÉCLARÉE des bâtiments (§6.8, dernier paragraphe) : optionnelle et INDISSOCIABLE (invariant de
+    // spec — une demi-dimension ne décrit aucune emprise). Renseignée, elle FAIT l'emprise du bâtiment ;
+    // absente, l'emprise reste DÉDUITE des plans d'étage, comme avant. Carte construite une seule fois : la
+    // boucle des bâtiments plus bas n'a qu'à la consulter.
+    const declaredSize = new Map<string, { w: number; d: number }>();
+    this.store.all("sites").forEach((s: any) => { if (s.width_mm != null && s.depth_mm != null) declaredSize.set(String(s.id), { w: s.width_mm, d: s.depth_mm }); });
     const levels = Array.from(new Set(allFloors.map((f) => FloorLayout.floorNum(f.fl)))).sort((a, b) => a - b);
     const stackH = Math.max(42 * U_MM, ...all.map((d: any) => this.zRef(d)));   // hauteur de contenu GLOBALE (modèle) = hauteur d'étage par défaut
     // HAUTEUR PAR ÉTAGE : `height_mm` configurée (la plus grande des plans affichés à ce niveau) sinon défaut `stackH`,
@@ -179,8 +185,15 @@ export class FloorLayout {
     locs.forEach((loc) => {
       const floorStrs = Array.from(new Set(allFloors.filter((f) => f.loc === loc).map((f) => f.fl)));
       if (!floorStrs.length) return;
+      // EMPRISE du bâtiment. Taille DÉCLARÉE ⇒ c'est ELLE qui fait l'emprise : le bâtiment cesse d'épouser
+      // son plus grand plan d'étage, il a enfin une dimension PROPRE. Sinon, le calcul historique est
+      // conservé au micron — la déclaration est OPT-IN, elle ne doit rien changer aux documents qui s'en
+      // passent. Les deux lectures restent cohérentes parce que la validation GARANTIT qu'un plan d'étage
+      // ne déborde pas de son bâtiment déclaré (contrainte cross-entité sur `floors`, cf. §6.8).
+      const declared = declaredSize.get(loc);
       let bw = 0, bd = 0;
-      floorStrs.forEach((fs) => { const cfg = this.config(loc, fs); bw = Math.max(bw, cfg.width_mm + (cfg.anchor_x || 0)); bd = Math.max(bd, cfg.depth_mm + (cfg.anchor_y || 0)); });
+      if (declared) { bw = declared.w; bd = declared.d; }
+      else floorStrs.forEach((fs) => { const cfg = this.config(loc, fs); bw = Math.max(bw, cfg.width_mm + (cfg.anchor_x || 0)); bd = Math.max(bd, cfg.depth_mm + (cfg.anchor_y || 0)); });
       // ORIGINE du bâtiment = la position de son SITE. `sitePos` couvre par construction toute `location`
       // du modèle ; le repli (0,0) ne protège que d'une carte incomplète, il ne doit jamais servir.
       const sp = sitePos.get(loc) || { x: 0, y: 0 };

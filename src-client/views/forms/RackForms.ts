@@ -466,9 +466,17 @@ export class RackForms extends CableForms {
     const lonI = FormControls.number(s && s.lon != null ? s.lon : "", { min: -180, max: 180, step: "any", placeholder: I18n.t("rack.site.lonPlaceholder") });
     root.appendChild(FormControls.fieldRow(I18n.t("rack.site.lat"), latI, I18n.t("rack.site.gpsHint")));
     root.appendChild(FormControls.fieldRow(I18n.t("rack.site.lon"), lonI));
+    // TAILLE DÉCLARÉE du bâtiment (optionnelle) — elle fait l'emprise du bâtiment en 3D et devient une
+    // CONTRAINTE : aucun plan d'étage ne peut en déborder (doctrine §6.8). Ici pour la même raison que le
+    // GPS ci-dessus : le principe n°10 veut que tout attribut, placement compris, soit saisissable au
+    // FORMULAIRE. Vide ⇒ null (l'emprise redevient alors celle du plus grand plan d'étage).
+    const wI = FormControls.number(s && s.width_mm != null ? s.width_mm : "", { min: 1, step: 100, placeholder: I18n.t("rack.site.widthPlaceholder") });
+    const dI = FormControls.number(s && s.depth_mm != null ? s.depth_mm : "", { min: 1, step: 100, placeholder: I18n.t("rack.site.depthPlaceholder") });
+    root.appendChild(FormControls.fieldRow(I18n.t("rack.common.widthMm"), wI, I18n.t("rack.site.sizeHint")));
+    root.appendChild(FormControls.fieldRow(I18n.t("rack.common.depthMm"), dI));
     const descI = FormControls.textArea(s ? s.description : "");
     root.appendChild(FormControls.fieldRow(I18n.t("lists.col.description"), descI));
-    const live = new LiveValidation("sites", { name: nameI, lat: latI, lon: lonI });
+    const live = new LiveValidation("sites", { name: nameI, lat: latI, lon: lonI, width_mm: wI, depth_mm: dI });
     live.clearOnInput();
     host.openModal({
       title: s ? I18n.t("rack.site.titleEdit") : I18n.t("rack.site.titleNew"),
@@ -476,8 +484,8 @@ export class RackForms extends CableForms {
       body: root,
       onSave: async () => {
         const num = (i: HTMLInputElement) => { const raw = i.value.trim(); return raw === "" ? null : Number(raw); };
-        const payload = { name: nameI.value.trim(), address: addrI.value.trim(), lat: num(latI), lon: num(lonI), description: descI.value.trim() };
-        if (live.check(payload).length) return false;   // nom requis, bornes lat/lon, couple complet (surlignés)
+        const payload = { name: nameI.value.trim(), address: addrI.value.trim(), lat: num(latI), lon: num(lonI), width_mm: num(wI), depth_mm: num(dI), description: descI.value.trim() };
+        if (live.check(payload).length) return false;   // nom requis, bornes lat/lon, couples complets GPS + taille (surlignés)
         if (s) await store.update("sites", s.id, payload); else await store.create("sites", payload);
         host.setDirty?.(true); Notify.toast(s ? I18n.t("rack.site.updated") : I18n.t("rack.site.created")); onSaved?.(); return true;
       },

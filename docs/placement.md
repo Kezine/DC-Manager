@@ -278,7 +278,43 @@ Deux corrections que cette règle impose à l'existant :
 
 La déclaration de taille reste souhaitable, mais devient une **CONTRAINTE** (un plan d'étage ne peut
 déborder de son bâtiment) et non un prérequis. Étant opt-in, elle ne peut pas rétro-invalider un
-document : seuls les bâtiments qu'on a choisi de fixer sont contrôlés.
+document : seuls les bâtiments qu'on a choisi de fixer sont contrôlés. — **IMPLÉMENTÉ**
+(`sites.width_mm`/`sites.depth_mm`, règle cross-entité sur `floors`, emprise de `BuildingBand` dans
+`FloorLayout.multiLayout`, champs au formulaire Site).
+
+**Décisions prises À L'IMPLÉMENTATION** — comme en §6.9, avec les alternatives écartées et leur motif :
+
+- **La contrainte est une règle CROSS-ENTITÉ (V5) sur `floors`, pas un invariant (V3).** Un invariant ne
+  voit que son propre enregistrement ; il faut ici lire le SITE PARENT. Écarté : recopier la taille du
+  bâtiment sur chaque étage pour la rendre lisible intra-enregistrement — ce serait exactement la
+  référence croisée que §6.3 supprime, à resynchroniser à la main dès qu'un bâtiment change de taille.
+- **Vérifiée AUX DEUX BOUTS.** La règle V5 refuse l'étage trop grand ; la dépendance inverse (V5b,
+  `sites.dependents` → `floors` par `location`) re-valide les étages quand le bâtiment change. Sans elle la
+  contrainte serait unilatérale : on interdirait d'agrandir le plan tout en laissant RAPETISSER le bâtiment
+  sous lui — le même document incohérent, obtenu par l'autre porte.
+- **`floors.location` reste une CHAÎNE, jamais `ref: "sites"`.** Tentation immédiate : la règle lit le site
+  parent, autant déclarer la clé étrangère. Écarté — le dépôt contient des `location` HISTORIQUES (slugs de
+  la table `LOCATIONS`, cf. `Store.siteLabel`) sans enregistrement `sites`. La FK les ferait rejeter par
+  l'intégrité référentielle (V2) : une rétro-invalidation massive, précisément ce que le caractère opt-in
+  doit empêcher. La règle est donc DÉFENSIVE — site introuvable ⇒ non applicable, jamais une erreur.
+- **La contrainte porte sur `ancre + dimension`, pas sur la dimension seule.** Un plan ancré à 5 000 mm dans
+  un bâtiment de 20 000 mm ne peut mesurer que 15 000 mm. Ne contrôler que la dimension laisserait sortir un
+  plan par son ANCRAGE, c'est-à-dire par le champ non contrôlé.
+- **Seuls les étages CONFIGURÉS sont contraints**, et c'est voulu : la collection `floors` n'existe que pour
+  eux — un étage non configuré n'a pas d'enregistrement (`FloorLayout.config` lui rend un défaut virtuel à
+  `id: null`). Contraindre un défaut virtuel reviendrait à refuser une saisie que personne n'a faite.
+- **Largeur et profondeur sont INDISSOCIABLES** (invariant de spec), même raisonnement que lat/lon : une
+  demi-taille ferait retomber le rendu sur l'emprise déduite en laissant croire le bâtiment fixé, et ne
+  contraindrait qu'un seul axe.
+- **L'emprise déclarée REMPLACE l'emprise déduite, elle ne s'y ajoute pas.** `BuildingBand.x1`/`y1` valent
+  l'origine du site plus la taille déclarée ; sans déclaration, le calcul historique (le plus grand plan
+  d'étage, ancre comprise) est conservé AU MICRON — c'est ce que verrouille le test de parité. Écarté :
+  prendre le MAXIMUM des deux, qui aurait fait taire un débordement au lieu de le rendre visible, alors que
+  c'est justement la contrainte qui garantit la cohérence des deux lectures.
+- **Non fait, volontairement** : aucune enveloppe de bâtiment n'est DESSINÉE en 3D. Le lot donne au bâtiment
+  une emprise et une contrainte ; matérialiser ses murs est un lot à part, à mener avec le reste du décor de
+  bâtiment (plan séparateur compris — cf. la dette cosmétique de §6.9). La taille n'est pas non plus une
+  colonne du listing des sites : le formulaire suffit au principe n°10, comme pour lat/lon.
 
 ### 6.9 Sites/bâtiments : position réelle, échelle COMPRESSÉE — **IMPLÉMENTÉ**
 
@@ -350,7 +386,7 @@ régression silencieuse (méthode éprouvée sur la parité `face_up = "top"`).
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
 |---|---|---|---|---|
-| *(site)* | monde | **monde** | s.o. | **migré** — position déclarée (GPS) ou repli 5 km, cf. §6.9 |
+| *(site)* | monde | **monde** | s.o. | **migré** — position déclarée (GPS) ou repli 5 km (§6.9) ; TAILLE déclarée optionnelle faisant emprise et contraignant ses plans d'étage (§6.8) |
 | `rack` | baie → salle | local salle | oui | historique, conforme |
 | `side` / `wall` | baie → salle | local salle | oui | historique, conforme |
 | `tray` | étagère → baie → salle | local salle | oui | historique, conforme |

@@ -838,6 +838,41 @@ module.exports = async () => {
     ck.eq(wOob.x, gH.x0 + 300, "oobWorld : x mesuré depuis l'origine du bâtiment (x0)");
     ck.eq(wOob.y, gH.y0 + 400, "oobWorld : y mesuré depuis l'origine du bâtiment (y0)");
   }
+  // ---- TAILLE DÉCLARÉE du bâtiment (doctrine §6.8, dernier paragraphe). Le bâtiment n'avait pas de
+  // dimension propre : il épousait son plus grand plan d'étage. Déclarée, la taille FAIT l'emprise ;
+  // absente, l'emprise reste DÉDUITE, à parité stricte avec l'historique. Attentes EXPLICITES (valeurs
+  // écrites en dur) et non une comparaison du nouveau chemin à l'ancien — un tel test resterait vert
+  // en ne prouvant plus rien au moment même de la bascule (doctrine §4.1, piège vécu au lot 2).
+  {
+    const s = await makeStore();
+    const fl = new FloorLayout(s);
+    const ans = await s.create("sites", { name: "Ans" });
+    // Étage CONFIGURÉ 6000 × 4000, ancré à (1000, 500) → emprise DÉDUITE attendue : 7000 × 4500.
+    await s.create("floors", { location: ans.id, floor: "0", width_mm: 6000, depth_mm: 4000, anchor_x: 1000, anchor_y: 500 });
+    await s.create("datacenters", { name: "S", location: ans.id, floor: "0", width_mm: 3000, depth_mm: 2000, floor_x: 0, floor_y: 0 });
+    const bandeDe = (m) => m.buildings.find((b) => b.loc === ans.id);
+    const deduit = bandeDe(fl.multiLayout(null, {}));
+    ck.eq(deduit.x1 - deduit.x0, 7000, "SANS taille déclarée : emprise = plan d'étage + ancre (6000 + 1000) — comportement HISTORIQUE conservé");
+    ck.eq(deduit.y1 - deduit.y0, 4500, "SANS taille déclarée : profondeur = 4000 + 500");
+    // Taille DÉCLARÉE : c'est ELLE qui fait l'emprise — le bâtiment cesse d'épouser son plan d'étage.
+    await s.update("sites", ans.id, { width_mm: 20000, depth_mm: 10000 });
+    const declaree = fl.multiLayout(null, {});
+    const bDecl = bandeDe(declaree);
+    ck.eq(bDecl.x1 - bDecl.x0, 20000, "taille DÉCLARÉE : la largeur de la bande vaut la largeur déclarée");
+    ck.eq(bDecl.y1 - bDecl.y0, 10000, "taille DÉCLARÉE : la profondeur de la bande vaut la profondeur déclarée");
+    ck.eq(bDecl.x0, deduit.x0, "taille DÉCLARÉE : l'ORIGINE du bâtiment (position du site) ne bouge pas");
+    ck.eq(declaree.totalW, 20000, "taille DÉCLARÉE : l'étendue du monde (cadrage caméra) suit la bande déclarée");
+    ck.eq(declaree.maxD, 10000, "taille DÉCLARÉE : la profondeur du monde suit aussi");
+    // Les plans d'étage, eux, gardent leur propre taille : la déclaration borne le bâtiment, elle ne
+    // redimensionne rien de ce qu'il contient.
+    const plan = declaree.floorPlanes.find((fp) => fp.loc === ans.id);
+    ck(plan.cfg.width_mm === 6000 && plan.cfg.depth_mm === 4000, "taille DÉCLARÉE : le plan d'étage garde SA taille (le bâtiment le borne, il ne le redimensionne pas)");
+    // Une DEMI-dimension est refusée à l'écriture (couple indissociable) : l'emprise ne peut donc jamais
+    // se calculer sur une moitié de taille — la géométrie n'a pas à s'en défendre, la validation le fait.
+    await s.update("sites", ans.id, { depth_mm: null });
+    const apresRefus = bandeDe(fl.multiLayout(null, {}));
+    ck.eq(apresRefus.x1 - apresRefus.x0, 20000, "demi-dimension REFUSÉE à l'écriture → l'emprise déclarée reste inchangée");
+  }
   });
 
   await section("Positioning : aide au positionnement (cœur pur — coins, cotes ⟂, placement, accrochage)", async () => {
