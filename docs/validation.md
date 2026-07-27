@@ -53,23 +53,35 @@ FieldSpec = {
   nullable?: boolean,     // null autorisé (FK optionnelle…)
   default?: unknown,      // valeur posée par la normalisation si absent
   enum?: readonly string[], // valeurs autorisées
-  min?: number,           // borne basse (number)
+  min?: number,           // borne basse INCLUSIVE (number) — seul `value < min` est rejeté
+  max?: number,           // borne haute INCLUSIVE (number) — seul `value > max` est rejeté
   format?: "ipv4" | "cidr", // format de chaîne (IPAM) — parseur PARTAGÉ avec core/Ip
   ref?: string,           // collection cible (FK) — utilisé en V2
 }
 CollectionSpec = { fields: Record<string, FieldSpec> }   // + invariants[] en V3
 ```
 
-Le **déclaratif** couvre l'essentiel ; les rares règles inter-champs deviendront des
+Le **déclaratif** couvre l'essentiel ; les rares règles inter-champs deviennent des
 fonctions pures (`invariants`) en V3. Les enums (`CABLE_STATUSES`, `EQUIP_DEPTHS`…) sont
 repris du domaine ; un **test anti-divergence** vérifie que la spec partagée et les
 constantes front restent alignées.
+
+> ⚠️ **Une propriété de spec inconnue est une contrainte MORTE.** Le bloc `SPEC_FIELDS` est
+> `as const` — indispensable, car les types `Records.*` en DÉRIVENT (`RecordOf`) — mais `as const`
+> **seul ne vérifie rien** : sans annotation, TypeScript n'inspecte aucune propriété excédentaire.
+> `sites.lat`/`lon` ont ainsi porté un `max:` que ni `FieldSpec` ni le moteur ne connaissaient : la
+> borne était déclarée mais **inerte** (une latitude de 200 était acceptée), et se lisait pourtant
+> comme appliquée. Le bloc se termine donc par `as const satisfies Record<string, Record<string,
+> FieldSpec>>` : le type littéral est préservé (dérivation intacte) **et** toute propriété hors
+> `FieldSpec` casse la compilation. Corollaire : ajouter une capacité de spec = déclarer le champ
+> dans `FieldSpec` **et** l'appliquer dans le moteur, sinon `tsc` refuse la spec.
 
 ## 5. Forme des erreurs (contrat partagé)
 
 ```ts
 ValidationError = { collection, id?, path, code, message }
-// code ∈ "required" | "type" | "enum" | "min" | "format" | "ref_missing" | "invariant"
+// code ∈ "required" | "type" | "enum" | "min" | "max" | "format" | "ref_missing" | "invariant"
+//       | "cross_entity" | "scope"
 ```
 - **UI** : `path` → champ de formulaire (surlignage, blocage de soumission).
 - **Serveur** : `400 { errors: ValidationError[] }` (autorité). Le client surface les

@@ -558,6 +558,53 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : borne HAUTE `FieldSpec.max` — appliquée par le moteur, INCLUSIVE (parité stricte avec `min`)", async () => {
+  {
+    const DV = Validation.DataValidator;
+    // RÉGRESSION CORRIGÉE : `sites.lat`/`lon` DÉCLARAIENT `max: 90` / `max: 180` alors que ni l'interface
+    // `FieldSpec` ni le moteur ne connaissaient `max` — la borne haute était INERTE. Une latitude de 200
+    // passait donc à l'écriture (API tierce comprise), et la contrainte se LISAIT pourtant comme appliquée.
+    // Ces tests la VERROUILLENT. ⚠ lat/lon étant INDISSOCIABLES (invariant porté par `lon`), chaque cas
+    // renseigne les DEUX coordonnées : sinon l'invariant du couple polluerait le décompte d'erreurs et on
+    // croirait éprouver la borne alors qu'on éprouverait l'appariement.
+    const site = (lat, lon) => DV.normalizeRecord("sites", { id: "sX", name: "X", lat, lon });
+
+    // ---- Le cas qui passait AVANT le correctif : au-delà de la borne → rejet, bon chemin, bon code.
+    const tropAuNord = DV.validateRecord("sites", site(91, 0));
+    ck.eq(tropAuNord.length, 1, "lat 91 → exactement 1 erreur (la borne haute, et rien d'autre)");
+    ck.eq(tropAuNord[0].path, "lat", "lat 91 → path 'lat'");
+    ck.eq(tropAuNord[0].code, "max", "lat 91 → code 'max'");
+    ck(tropAuNord[0].message.indexOf("≤ 90") >= 0, "lat 91 → le message CITE la borne dépassée (obtenu : " + tropAuNord[0].message + ")");
+    const tropALEst = DV.validateRecord("sites", site(0, 181));
+    ck.eq(tropALEst.length, 1, "lon 181 → exactement 1 erreur");
+    ck.eq(tropALEst[0].path, "lon", "lon 181 → path 'lon'");
+    ck.eq(tropALEst[0].code, "max", "lon 181 → code 'max'");
+
+    // ---- INCLUSIVITÉ : la valeur EXACTEMENT égale à la borne est LÉGITIME (±90 est un pôle, ±180 l'antiméridien),
+    // par parité avec `min` dont le moteur ne rejette que `value < min`.
+    ck.eq(DV.validateRecord("sites", site(90, 0)).length, 0, "lat 90 (borne EXACTE) → accepté : la borne haute est INCLUSIVE");
+    ck.eq(DV.validateRecord("sites", site(0, 180)).length, 0, "lon 180 (borne EXACTE) → accepté");
+    ck.eq(DV.validateRecord("sites", site(-90, -180)).length, 0, "lat -90 / lon -180 (bornes basses EXACTES) → accepté : `min` est inclusive de la même façon");
+    ck.eq(DV.validateRecord("sites", site(50.6326, 5.5797)).length, 0, "coordonnées ordinaires (Liège) → 0 erreur");
+
+    // ---- La borne BASSE reste active : le correctif AJOUTE `max`, il ne remplace pas `min`.
+    ck.eq(DV.validateRecord("sites", site(-91, 0))[0].code, "min", "lat -91 → code 'min' (borne basse intacte)");
+    ck.eq(DV.validateRecord("sites", site(0, -181))[0].code, "min", "lon -181 → code 'min'");
+
+    // ---- NULLABLE : un champ non renseigné ne déclenche AUCUNE borne (sinon la coordonnée deviendrait
+    // obligatoire de fait, ce que la doctrine `docs/placement.md` §6.9 interdit — le GPS est OPTIONNEL).
+    ck.eq(DV.validateRecord("sites", site(null, null)).length, 0, "lat/lon null → aucune borne déclenchée (champ nullable)");
+    const normalise = site(null, null);
+    ck(normalise.lat === null && normalise.lon === null, "lat/lon absents → null à la normalisation (inchangé)");
+
+    // ---- AUCUNE contrainte INVENTÉE ailleurs : `sites.lat`/`lon` sont les SEULS champs à déclarer un `max`
+    // (vérifié sur SPEC_FIELDS). Un champ à `min` seul ne se voit donc poser aucun plafond implicite —
+    // c'est la garantie de NON-RÉGRESSION du lot : activer `max` ne peut rétro-invalider aucun document.
+    ck.eq(DV.validateRecord("racks", { name: "R", u_count: 100000, width_mm: 600, depth: 1000 }).length, 0, "champ à `min` SEUL (racks.u_count) → aucune borne haute implicite");
+    ck.eq(DV.validateRecord("datacenters", { name: "X", width_mm: 9999999 }).length, 0, "champ à `min` SEUL (datacenters.width_mm) → aucun plafond inventé");
+  }
+  });
+
   await section("shared : portée V6a (unicité d'adresse IP)", async () => {
   {
     const DV = Validation.DataValidator;

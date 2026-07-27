@@ -70,8 +70,12 @@ export interface FieldSpec {
   trim?: boolean;
   /** Ensemble fermé de valeurs autorisées. */
   enum?: readonly string[];
-  /** Borne inférieure (type `number`). */
+  /** Borne inférieure INCLUSIVE (type `number`) : seul `value < min` est rejeté. */
   min?: number;
+  /** Borne supérieure INCLUSIVE (type `number`) : seul `value > max` est rejeté. Miroir strict de `min` —
+      les deux bornes encadrent une grandeur physique dont les EXTRÊMES sont légitimes (une latitude de ±90
+      est un pôle, pas une erreur), d'où l'inclusivité des deux côtés. */
+  max?: number;
   /** Format attendu (chaîne) : `ipv4` (« a.b.c.d »), `cidr` (« a.b.c.d/n », n ∈ 0..32) ou `hostname`
       (nom d'hôte / FQDN RFC 1123 : labels alphanumériques + tirets, insensible à la casse). */
   format?: "ipv4" | "cidr" | "hostname";
@@ -119,7 +123,7 @@ export interface ValidationError {
   collection: string;
   id?: string;
   path: string;            // champ concerné
-  code: "required" | "type" | "enum" | "min" | "format" | "ref_missing" | "invariant" | "cross_entity" | "scope";
+  code: "required" | "type" | "enum" | "min" | "max" | "format" | "ref_missing" | "invariant" | "cross_entity" | "scope";
   message: string;         // message humain (français)
 }
 
@@ -450,7 +454,12 @@ class TrayFit {
 /* ---- CHAMPS des collections, isolés `as const` : SOURCE UNIQUE des types d'enregistrement (RecordOf) ET
    des specs de validation (COLLECTION_SPECS y référence ses `fields`). `as const` préserve les littéraux de
    `type`/`enum`/défauts pour l'inférence ; les fonctions (invariants/règles) restent dans COLLECTION_SPECS,
-   typées contextuellement par l'annotation (les mettre `as const` ici les rendrait `any` implicites). ---- */
+   typées contextuellement par l'annotation (les mettre `as const` ici les rendrait `any` implicites).
+   ⚠ `as const` SEUL ne vérifie RIEN : sans annotation de type, TypeScript n'inspecte aucune propriété
+   excédentaire — c'est ainsi que `sites.lat`/`lon` ont pu déclarer un `max:` que `FieldSpec` et le moteur
+   ignoraient (contrainte inerte, corrigée depuis). D'où le `satisfies` en fin de bloc : il CONTRÔLE la forme
+   de chaque champ contre `FieldSpec` tout en PRÉSERVANT le type littéral dont `RecordOf` dérive les types
+   `Records.*` (une simple annotation `: Record<...>` élargirait les littéraux et casserait cette dérivation). ---- */
 const SPEC_FIELDS = {
   equipments: {
       name:           { type: "string", required: true, trim: true },   // identité : trimé (unicité fiable — V6g)
@@ -691,7 +700,7 @@ const SPEC_FIELDS = {
       phone: { type: "string", trim: true },                   // optionnel — quasi libre (invariant)
       notes: { type: "string" },                               // notes libres (multi-lignes) — aucune contrainte
   },
-} as const;
+} as const satisfies Record<string, Record<string, FieldSpec>>;
 
 /* Types d'ENREGISTREMENT (formes REST partagées, NORMALISÉES) dérivés de SPEC_FIELDS — SOURCE UNIQUE = la spec.
    Regroupés en NAMESPACE (type-only, effacé au build) pour NE PAS entrer en collision avec les CLASSES de modèle
@@ -1317,13 +1326,22 @@ export class DataValidator {
       }
       if (!DataValidator.matchesType(value, fieldSpec.type)) {
         fail(field, "type", `Le champ « ${field} » doit être de type ${fieldSpec.type}.`);
-        continue;   // mauvais type → enum/min/ref non pertinents
+        continue;   // mauvais type → enum/bornes/ref non pertinents
       }
       if (fieldSpec.enum && !fieldSpec.enum.includes(value as string)) {
         fail(field, "enum", `Valeur « ${value} » invalide pour « ${field} » (attendu : ${fieldSpec.enum.join(", ")}).`);
       }
       if (fieldSpec.min != null && typeof value === "number" && value < fieldSpec.min) {
         fail(field, "min", `Le champ « ${field} » doit être ≥ ${fieldSpec.min}.`);
+      }
+      // Borne HAUTE — miroir strict de `min` (même mécanisme `fail`, même inclusivité). Elle a longtemps été
+      // DÉCLARÉE sans être appliquée : `sites.lat`/`lon` portaient `max: 90` / `max: 180` alors que ni l'interface
+      // `FieldSpec` ni le moteur ne connaissaient `max` — une latitude de 200 était donc acceptée à l'écriture
+      // (API comprise). Une contrainte déclarée mais inerte est PIRE que pas de contrainte : elle se lit comme
+      // appliquée. Le défaut passait la compilation parce que `SPEC_FIELDS` est `as const` — d'où le `satisfies`
+      // posé sur ce bloc, qui fait désormais échouer `tsc` sur toute propriété de spec inconnue.
+      if (fieldSpec.max != null && typeof value === "number" && value > fieldSpec.max) {
+        fail(field, "max", `Le champ « ${field} » doit être ≤ ${fieldSpec.max}.`);
       }
       if (fieldSpec.format && typeof value === "string" && !DataValidator.matchesFormat(value, fieldSpec.format)) {
         const formatLabel = fieldSpec.format === "cidr" ? "un CIDR IPv4 (ex. 10.0.0.0/24)"
