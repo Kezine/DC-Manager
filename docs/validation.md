@@ -55,7 +55,7 @@ FieldSpec = {
   enum?: readonly string[], // valeurs autorisées
   min?: number,           // borne basse INCLUSIVE (number) — seul `value < min` est rejeté
   max?: number,           // borne haute INCLUSIVE (number) — seul `value > max` est rejeté
-  format?: "ipv4" | "cidr", // format de chaîne (IPAM) — parseur PARTAGÉ avec core/Ip
+  format?: "ipv4" | "cidr" | "hostname", // format de chaîne — parseurs PARTAGÉS avec core/Ip (cf. §12 pour `hostname`)
   ref?: string,           // collection cible (FK) — utilisé en V2
 }
 CollectionSpec = { fields: Record<string, FieldSpec> }   // + invariants[] en V3
