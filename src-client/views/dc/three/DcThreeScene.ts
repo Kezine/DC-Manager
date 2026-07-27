@@ -9,6 +9,9 @@ import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { RackGeometry } from "../../../geometry/RackGeometry";
 import { RackDoorGeometry } from "../../../geometry/RackDoorGeometry";
 import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
+// CONTENEUR SALLE : `origin()` = centre d'un contenu en local salle. Ce rendu a FIXÉ la convention
+// « position absente ⇒ demi-empreinte » (docs/placement.md §6.12) ; il la LIT désormais au lieu de la réécrire.
+import { RoomFrame } from "../../../geometry/RoomFrame";
 import { RackLabelLayout } from "../../../geometry/RackLabelLayout";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
@@ -460,7 +463,7 @@ export class DcThreeScene extends DcThreeCamera {
   protected rackGroup(r: any): { group: THREE.Group; height: number } {
     const theme = this.theme;
     const w = r.width_mm || RACK_WIDTH_DEFAULT, d = r.depth || RACK_DEPTH_DEFAULT, H = RackGeometry.physHeight(r);
-    const cx = (r.dc_x != null) ? r.dc_x : w / 2, cy = (r.dc_y != null) ? r.dc_y : d / 2;
+    const c = RoomFrame.origin(RackGeometry.roomPlacement(r)), cx = c.x, cy = c.y;
     const o = Normalize.rackOrientation(r.orientation) * Math.PI / 180;
     const group = new THREE.Group();
     group.position.set(cx, cy, 0);

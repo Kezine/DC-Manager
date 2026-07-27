@@ -583,6 +583,28 @@ module.exports = async () => {
     const auCoin = RoomFrame.place(pl(null, null, 0, 300, 500), { x: 0, y: -500, z: 0 }, { x: 0, y: -1 });
     ck.eq(auCoin.x, 300, "place(sans position) : centre à la demi-largeur du coin [x]");
     ck.eq(auCoin.y, 0, "place(sans position) : la FAÇADE tombe exactement sur le mur y = 0");
+
+    // ---- origin : le CENTRE d'un contenu en local salle = son point local (0, 0) placé par la salle.
+    // C'est la lecture dont ont besoin le cadrage caméra, l'outil de positionnement, le placement
+    // automatique et les deux vues qui dessinent — pour qu'AUCUN d'eux ne recopie la règle de repli.
+    const o0 = RoomFrame.origin(pl(1200, 800, 0, 300, 500));
+    ck.eq(o0.x, 1200, "origin : position déclarée [x]"); ck.eq(o0.y, 800, "origin : position déclarée [y]");
+    const oNul = RoomFrame.origin(pl(null, null, 0, 300, 500));
+    ck.eq(oNul.x, 300, "origin : contenu NON positionné → demi-LARGEUR"); ck.eq(oNul.y, 500, "origin : … demi-PROFONDEUR");
+    // ⚠ le repli n'est PAS permuté par le lacet (contrairement à `halfExtents`) : c'est la convention du
+    // DESSIN, et c'est ce qui distingue `origin` du repli sur les demi-extents orientés que portait
+    // `DcInteract.posScene` — à 90°, les deux ne donnent PAS le même point.
+    for (const yaw of [0, 90, 180, 270]) {
+      const oo = RoomFrame.origin(pl(null, null, yaw, 300, 500));
+      ck(oo.x === 300 && oo.y === 500, "origin(" + yaw + "°) : le repli ne PERMUTE pas largeur/profondeur");
+    }
+    for (const yaw of [0, 90, 180, 270]) {
+      const oo = RoomFrame.origin(pl(1200, 800, yaw, 300, 500));
+      ck(oo.x === 1200 && oo.y === 800, "origin(" + yaw + "°) : le lacet ne DÉPLACE pas l'origine, il tourne autour");
+    }
+    // cohérence stricte avec `pointToRoom` : l'origine EST l'image du point local (0, 0).
+    const viaPoint = RoomFrame.pointToRoom(RoomFrame.basis(pl(null, null, 90, 300, 500)), { x: 0, y: 0, z: 0 });
+    ck(viaPoint.x === oNul.x && viaPoint.y === oNul.y, "origin === pointToRoom(0, 0) : une seule et même règle");
   }
   });
 

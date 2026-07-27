@@ -92,6 +92,17 @@ export class RoomFrame {
     };
   }
 
+  /** ORIGINE d'un contenu en LOCAL SALLE = le CENTRE de son empreinte au sol, c'est-à-dire l'image de son
+      point local (0, 0) par `pointToRoom` (le lacet ne déplace pas l'origine, il tourne autour d'elle).
+      C'est ce que consomment tous les usages qui veulent « où est cet objet dans sa salle » sans point
+      local à composer : le cadrage caméra (« Localiser »), l'outil de positionnement, le placement
+      automatique et les DEUX vues qui dessinent. Sans cette méthode, chacun d'eux recopie la règle de
+      repli — la faute que ce conteneur existe précisément pour supprimer (doctrine §3 règle 1). */
+  static origin(placement: RoomContentPlacement): { x: number; y: number } {
+    const basis = RoomFrame.basis(placement);
+    return { x: basis.originX, y: basis.originY };
+  }
+
   /** POINT local → local salle : rotation par le lacet, PUIS translation à l'origine du contenu. */
   static pointToRoom(basis: RoomBasis, local: ContentLocalPoint): { x: number; y: number; z: number } {
     return {

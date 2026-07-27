@@ -8,6 +8,9 @@ import { Html } from "../../core/Html";
 import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
+// CONTENEUR SALLE : `origin()` donne le centre d'un contenu en local salle — source UNIQUE du repli
+// « position absente ⇒ demi-empreinte » que le cadrage caméra et l'outil de positionnement recopiaient.
+import { RoomFrame } from "../../geometry/RoomFrame";
 import { FloorLayout } from "../../geometry/FloorLayout";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import type { Frame } from "../../geometry/Positioning";
@@ -723,7 +726,10 @@ export abstract class DcInteract extends DcPanels {
       this.racks(dc.id).forEach((r: any) => {
         if (this.hidden3dRacks.has(r.id) || PlacementLock.isLocked(r)) return;   // verrouillé : non déplaçable par l'outil de positionnement
         const ext = this.rackHalfExtents(r), o = Normalize.rackOrientation(r.orientation);
-        rects.push({ id: r.id, name: r.name || I18n.t("lists.ph.rack"), orient: o, anchor: "center", rect: { cx: (r.dc_x != null ? r.dc_x : ext.hx), cy: (r.dc_y != null ? r.dc_y : ext.hy), hx: ext.hx, hy: ext.hy },
+        // ⚠ le repli d'une baie SANS position n'est PAS `ext` : `rackHalfExtents` PERMUTE largeur/profondeur à
+        // 90/270, alors que le dessin pose toujours la baie à (width/2, depth/2). Le conteneur salle tranche.
+        const c = RoomFrame.origin(RackGeometry.roomPlacement(r));
+        rects.push({ id: r.id, name: r.name || I18n.t("lists.ph.rack"), orient: o, anchor: "center", rect: { cx: c.x, cy: c.y, hx: ext.hx, hy: ext.hy },
           commit: async (cx, cy) => {
             const c = clamp(cx, cy, ext.hx, ext.hy, frame);
             if (GridGeometry.spanHitsBlocked(dc.blocked_cells, c.x - ext.hx, c.y - ext.hy, c.x + ext.hx, c.y + ext.hy, dc.cell_mm)) { Notify.toast(I18n.t("dc.common.blockedCell"), "err"); return; }
@@ -806,24 +812,34 @@ export abstract class DcInteract extends DcPanels {
     if (this._focusTarget) { this._three.focusOn(this._focusTarget.p, this._focusTarget.extent, this._focusTarget.face); this._focusTarget = null; }
   }
 
-  /** Centre monde (mm) d'un équipement dans la salle `dcId` (repère salle = monde en mode simple DC), ou null. */
+  /** Centre monde (mm) d'un équipement dans la salle `dcId` (repère salle = monde en mode simple DC), ou null.
+      L'objet visé étant TOUJOURS dans une baie (ou libre), sa position en salle passe par le CONTENEUR SALLE
+      (`RoomFrame.origin` + le placement DÉCLARÉ par la baie) : une baie sans `dc_x`/`dc_y` est posée à sa
+      demi-empreinte, comme elle est DESSINÉE. Cf. docs/placement.md §6.12. */
   protected equipCenter(e: any, dcId: string): Vec3 | null {
     // POSÉ SUR UNE ÉTAGÈRE (tray) : dim_mode "free" MAIS sans dc_id → centre déduit de la baie hôte (via l'étagère).
     // DOIT précéder la branche « libre » (qui exige dc_id) sinon le « Localiser » vise l'origine de la salle.
     if (e.placement_mode === "tray" && e.tray_item_id) {
       const tray: any = this.store.get("rackItems", e.tray_item_id); if (!tray || !tray.rack_id) return null;
       const rk: any = this.store.get("racks", tray.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
-      const b = RackGeometry.trayEquipBoxLocal(rk, tray, e);
-      return { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: (b.z0 + b.z1) / 2 };
+      const b = RackGeometry.trayEquipBoxLocal(rk, tray, e), c = RoomFrame.origin(RackGeometry.roomPlacement(rk));
+      return { x: c.x, y: c.y, z: (b.z0 + b.z1) / 2 };
+    }
+    // MONTÉ EN MARGE / EN PAROI : même piège d'ORDRE que l'étagère, et il était tombé dedans. `dim_mode`
+    // vaut « free » pour tout placement AUTRE que « rack » (cf. `Equipment`, et `RackForms` l'écrit en dur
+    // pour side/wall) : la branche « libre » ci-dessous les interceptait donc et rendait `null`, faute de
+    // `dc_id` — « Localiser » visait alors (0, 0, 0), l'origine de la salle. `Resolver3D` traite déjà ces
+    // deux modes AVANT le mode libre ; cet ordre-ci s'aligne sur lui.
+    if ((e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id) {
+      const rk: any = this.store.get("racks", e.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
+      const c = RoomFrame.origin(RackGeometry.roomPlacement(rk));
+      return { x: c.x, y: c.y, z: RackGeometry.physHeight(rk) / 2 };
     }
     if (e.dim_mode === "free") { if (e.dc_id !== dcId || e.dc_x == null || e.dc_y == null) return null; const b = FreeEquipGeometry.box(e); return { x: e.dc_x, y: e.dc_y, z: b.z + b.h / 2 }; }
     if (e.placement_mode === "rack" && e.rack_id && e.rack_u != null) {
       const rk: any = this.store.get("racks", e.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
-      return { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: RackGeometry.uBaseZ(rk) + ((e.rack_u - 1) + Math.max(1, e.u_height | 0 || 1) / 2) * U_MM };
-    }
-    if ((e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id) {
-      const rk: any = this.store.get("racks", e.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
-      return { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: RackGeometry.physHeight(rk) / 2 };
+      const c = RoomFrame.origin(RackGeometry.roomPlacement(rk));
+      return { x: c.x, y: c.y, z: RackGeometry.uBaseZ(rk) + ((e.rack_u - 1) + Math.max(1, e.u_height | 0 || 1) / 2) * U_MM };
     }
     return null;
   }
@@ -934,8 +950,8 @@ export abstract class DcInteract extends DcPanels {
     const dcId = rk.datacenter_id;
     if (!dcId) { Notify.toast(I18n.t("dc.interact.rackNotInRoom"), "err"); return; }
     this.selRackId = rackId; this.focusEqId = null;
-    const H = RackGeometry.physHeight(rk);
-    this.focus3DAt(dcId, { x: (rk.dc_x != null) ? rk.dc_x : 0, y: (rk.dc_y != null) ? rk.dc_y : 0, z: H / 2 }, H, this.frontAzimuth(rk.orientation));
+    const H = RackGeometry.physHeight(rk), c = RoomFrame.origin(RackGeometry.roomPlacement(rk));   // baie sans position ⇒ demi-empreinte (là où elle est DESSINÉE)
+    this.focus3DAt(dcId, { x: c.x, y: c.y, z: H / 2 }, H, this.frontAzimuth(rk.orientation));
   }
 
   locateCable(cableId: string): void {

@@ -1072,4 +1072,106 @@ module.exports = async () => {
     ck.eq(SceneLayoutSignature.action({ ids: "M:x", layout: sig10 }, { ids: "M:x", layout: sig200 }, { hasContent: true, deltaEligible: true }), "rebuild", "échelle inter-sites → reconstruction de la scène");
     ck.eq(SceneLayoutSignature.of([], decor()), sig200, "décor recalculé à l'identique → MÊME signature (aucune reconstruction parasite)");
   });
+
+  /* ============================================================================================
+     ORIGINE D'UNE BAIE SANS POSITION — les DERNIERS replis sur 0 (cadrage caméra, outil de
+     positionnement, placement automatique). Cf. docs/placement.md §6.12/§6.13.
+
+     ⚠ CORRECTIONS, pas des paritéss : ces valeurs CHANGENT volontairement. Le lot précédent avait
+     tranché que l'origine d'un contenu sans `dc_x`/`dc_y` est sa DEMI-EMPREINTE (là où les deux vues
+     le DESSINENT), et aligné la résolution des ports ; le cadrage caméra, lui, repliait encore sur 0
+     — « Localiser » visait donc le coin de la salle et non la baie. Le placement automatique traitait
+     de même une baie non positionnée comme étant en (0, 0), et pouvait empiler la nouvelle dessus.
+     Les valeurs ci-dessous sont dérivées À LA MAIN du modèle, jamais de la sortie d'une implémentation.
+     ============================================================================================ */
+  await section("Origine d'une baie SANS position : cadrage caméra, positionnement, placement auto (CORRECTIONS)", async () => {
+  {
+    const s = await makeStore();
+    const dc = await s.create("datacenters", { name: "Salle O", width_mm: 6000, depth_mm: 4000, cell_mm: 600 });
+    // marges verticales à 0 + hauteur ronde ⇒ toutes les cotes Z ci-dessous sont exactes à la main.
+    const commun = { u_count: 42, datacenter_id: dc.id, vmargin_mm: 0, vmargin_bottom_mm: 0, height_mm: 2000, width_mm: 600, depth: 1000 };
+    const rkPos = await s.create("racks", Object.assign({ name: "R-posée", dc_x: 1500, dc_y: 2500 }, commun));
+    const rkNu = await s.create("racks", Object.assign({ name: "R-nue" }, commun));                       // SANS dc_x/dc_y
+    const rkNu90 = await s.create("racks", Object.assign({ name: "R-nue90", orientation: 90 }, commun, { width_mm: 800, depth: 1200 }));
+    const dv = new DatacenterView(s, {}, {});   // garde headless
+    dv.dcId = dc.id;
+
+    // ---- « Localiser » un équipement RACKÉ : la caméra vise la baie, pas le coin de la salle ----
+    const eqNu = await s.create("equipments", { name: "eq-nue", placement_mode: "rack", rack_id: rkNu.id, rack_u: 1, u_height: 1 });
+    const cNu = dv.equipCenter(eqNu, dc.id);
+    ck.eq(cNu.x, 300, "equipCenter(baie NUE, mode rack) : x = demi-LARGEUR (600/2), plus 0");
+    ck.eq(cNu.y, 500, "equipCenter(baie NUE, mode rack) : y = demi-PROFONDEUR (1000/2), plus 0");
+    ck.eq(cNu.z, 22.225, "equipCenter : z inchangé = milieu du 1er U (0,5 × 44,45)");
+    const eqPos = await s.create("equipments", { name: "eq-posée", placement_mode: "rack", rack_id: rkPos.id, rack_u: 1, u_height: 1 });
+    const cPos = dv.equipCenter(eqPos, dc.id);
+    ck(cPos.x === 1500 && cPos.y === 2500, "equipCenter(baie POSÉE) : inchangé — la correction ne touche QUE l'absence de position");
+
+    // ---- modes `side` / `wall` : même repli, même correction (z = milieu de la baie) ----
+    // ⚠ 3ᵉ CORRECTION, trouvée par le balayage : cette branche était INATTEIGNABLE. `dim_mode` vaut
+    // « free » pour tout placement autre que « rack » (le formulaire de baie l'écrit en dur pour
+    // side/wall), et la branche « libre » — qui la précédait — rendait `null` faute de `dc_id`.
+    // « Localiser » un équipement monté en marge ou en paroi visait donc (0, 0, 0), même sur une baie
+    // PARFAITEMENT positionnée. D'où les deux assertions sur `rkPos` : elles ne portent pas sur le repli.
+    // `sansNull` : garde de LISIBILITÉ — sans elle, une régression qui refait rendre `null` CRASHE la
+    // section et masque toutes les assertions suivantes (on ne verrait plus QUE le crash).
+    const sansNull = (v) => v || { x: null, y: null, z: null };
+    const eqSide = await s.create("equipments", { name: "eq-side", placement_mode: "side", rack_id: rkNu.id, side_u: 1, free_w_mm: 40, free_h_mm: 40, free_l_mm: 100 });
+    const cSide = sansNull(dv.equipCenter(eqSide, dc.id));
+    ck(cSide.x !== null, "equipCenter(mode side) : la branche side/wall est ATTEIGNABLE (elle rendait `null`)");
+    ck(cSide.x === 300 && cSide.y === 500, "equipCenter(baie NUE, mode side) : centre de la baie DESSINÉE");
+    ck.eq(cSide.z, 1000, "equipCenter(mode side) : z = mi-hauteur (2000/2)");
+    const eqWall = await s.create("equipments", { name: "eq-wall", placement_mode: "wall", rack_id: rkNu.id, wall_u: 1, free_w_mm: 40, free_h_mm: 40, free_l_mm: 100 });
+    const cWall = sansNull(dv.equipCenter(eqWall, dc.id));
+    ck(cWall.x === 300 && cWall.y === 500, "equipCenter(baie NUE, mode wall) : centre de la baie DESSINÉE");
+    const eqSideP = await s.create("equipments", { name: "eq-side-P", placement_mode: "side", rack_id: rkPos.id, side_u: 1, free_w_mm: 40, free_h_mm: 40, free_l_mm: 100 });
+    const cSideP = sansNull(dv.equipCenter(eqSideP, dc.id));
+    ck(cSideP.x === 1500 && cSideP.y === 2500, "equipCenter(mode side, baie POSÉE) : la caméra vise la baie, plus l'origine de la salle");
+    // le mode LIBRE, lui, reste intercepté par sa propre branche (rien ne l'a court-circuité).
+    const eqLibre = await s.create("equipments", { name: "eq-libre", placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 2000, dc_y: 1000, dc_z: 0, free_w_mm: 400, free_l_mm: 400, free_h_mm: 200 });
+    const cLibre = dv.equipCenter(eqLibre, dc.id);
+    ck(cLibre.x === 2000 && cLibre.y === 1000 && cLibre.z === 100, "equipCenter(mode LIBRE) : inchangé (position + mi-hauteur de la boîte)");
+
+    // ---- mode `tray` (posé sur une étagère) : la 3ᵉ ligne qui repliait sur 0 ----
+    const tray = await s.create("rackItems", { kind: "tray", rack_id: rkNu.id, u: 5, u_height: 2, tray_u: 1, side: "front" });
+    const eqTray = await s.create("equipments", { name: "eq-tray", placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 });
+    const cTray = dv.equipCenter(eqTray, dc.id);
+    ck(cTray.x === 300 && cTray.y === 500, "equipCenter(baie NUE, mode tray) : centre de la baie DESSINÉE");
+    ck(cTray.z > 0 && isFinite(cTray.z), "equipCenter(mode tray) : z reste la mi-hauteur de l'espace utile du plateau");
+
+    // ---- « Localiser » une BAIE : même cible ----
+    dv.locateRack(rkNu.id);
+    ck(dv._focusTarget.p.x === 300 && dv._focusTarget.p.y === 500, "locateRack(baie NUE) : la caméra vise la baie (demi-empreinte)");
+    ck.eq(dv._focusTarget.p.z, 1000, "locateRack : z = mi-hauteur de la baie (inchangé)");
+    dv.locateRack(rkPos.id);
+    ck(dv._focusTarget.p.x === 1500 && dv._focusTarget.p.y === 2500, "locateRack(baie POSÉE) : inchangé");
+
+    // ---- isolement d'une baie (cible d'orbite) : même règle ----
+    dv.isolateRack(rkNu.id);
+    ck(dv.camTarget.x === 300 && dv.camTarget.y === 500, "isolateRack(baie NUE) : pivot d'orbite SUR la baie");
+    ck.eq(dv.camTarget.z, 1000, "isolateRack : z = mi-hauteur (inchangé)");
+    dv.hidden3dRacks = new Set();
+
+    // ---- outil de POSITIONNEMENT : le repli n'est pas la demi-empreinte ORIENTÉE ----
+    // ⚠ 2ᵉ correction : `rackHalfExtents` PERMUTE largeur/profondeur à 90/270 ; le dessin, lui, pose
+    // toujours la baie à (width/2, depth/2). L'ancien repli plaçait donc le rectangle de l'outil en
+    // (600, 400) pour une baie 800 × 1200 tournée à 90° — 200 mm à côté de la baie affichée.
+    dv.view = "top";
+    const sc = dv.posScene();
+    const e90 = sc.rects.find((r) => r.id === rkNu90.id);
+    ck.eq(e90.rect.cx, 400, "posScene(baie NUE à 90°) : cx = demi-LARGEUR 800/2 (et non la demi-profondeur 600)");
+    ck.eq(e90.rect.cy, 600, "posScene(baie NUE à 90°) : cy = demi-PROFONDEUR 1200/2 (et non la demi-largeur 400)");
+    ck(e90.rect.hx === 600 && e90.rect.hy === 400, "posScene : l'EMPRISE, elle, reste orientée (permutée à 90°) — seul le repli change");
+    const ePos = sc.rects.find((r) => r.id === rkPos.id);
+    ck(ePos.rect.cx === 1500 && ePos.rect.cy === 2500, "posScene(baie POSÉE) : inchangé");
+
+    // ---- placement AUTOMATIQUE : une baie non positionnée occupe la maille où elle est DESSINÉE ----
+    const dc2 = await s.create("datacenters", { name: "Salle P", width_mm: 6000, depth_mm: 4000, cell_mm: 600 });
+    await s.create("racks", { name: "R-nue-P", u_count: 42, datacenter_id: dc2.id, width_mm: 600, depth: 1000 });   // centre DESSINÉ = (300, 500)
+    const libre = dv.freeCell(dc2);
+    ck(libre.x === 900 && libre.y === 300, "freeCell : la 1re maille (300, 300) est OCCUPÉE par la baie nue dessinée en (300, 500) → (900, 300)");
+    const dc3 = await s.create("datacenters", { name: "Salle Q", width_mm: 6000, depth_mm: 4000, cell_mm: 600 });
+    const libreVide = dv.freeCell(dc3);
+    ck(libreVide.x === 300 && libreVide.y === 300, "freeCell : salle vide → 1re maille, comportement inchangé");
+  }
+  });
 };

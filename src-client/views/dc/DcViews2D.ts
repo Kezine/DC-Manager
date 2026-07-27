@@ -3,6 +3,10 @@ import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { RackDoorGeometry } from "../../geometry/RackDoorGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
+// CONTENEUR SALLE : `origin()` donne le centre d'un contenu en local salle. Le repli « position absente ⇒
+// demi-empreinte » est la convention QUE CE DESSIN A FIXÉE (docs/placement.md §6.12) — il ne la réécrit plus,
+// il la LIT au même endroit que le cadrage caméra et la résolution des ports.
+import { RoomFrame } from "../../geometry/RoomFrame";
 import { FloorLayout } from "../../geometry/FloorLayout";
 import { Format } from "../../core/Format";
 import { Waypoint } from "../../models/Waypoint";
@@ -374,7 +378,7 @@ export abstract class DcViews2D extends DcScene3D {
       cavité comprise : les deux vues montrent désormais le MÊME débattement). Repère LOCAL de la baie. */
   protected doorSwingNode(r: any): SVGElement | null {
     const w = r.width_mm || RACK_WIDTH_DEFAULT, d = r.depth || RACK_DEPTH_DEFAULT;
-    const cx = (r.dc_x != null) ? r.dc_x : w / 2, cy = (r.dc_y != null) ? r.dc_y : d / 2, o = Normalize.rackOrientation(r.orientation);
+    const c = RoomFrame.origin(RackGeometry.roomPlacement(r)), cx = c.x, cy = c.y, o = Normalize.rackOrientation(r.orientation);
     const grp = Dom.svg("g", { transform: `translate(${cx} ${cy}) rotate(${o})`, "pointer-events": "none" });
     let any = false;
     (["front", "rear"] as const).forEach((face) => {
@@ -395,7 +399,7 @@ export abstract class DcViews2D extends DcScene3D {
 
   protected rackNode(r: any): SVGElement {
     const w = r.width_mm || RACK_WIDTH_DEFAULT, d = r.depth || RACK_DEPTH_DEFAULT;
-    const cx = (r.dc_x != null) ? r.dc_x : w / 2, cy = (r.dc_y != null) ? r.dc_y : d / 2, o = Normalize.rackOrientation(r.orientation);
+    const c = RoomFrame.origin(RackGeometry.roomPlacement(r)), cx = c.x, cy = c.y, o = Normalize.rackOrientation(r.orientation);
     // châssis OUVERT (has_caps=false) : vu de dessus, le TOIT est absent → corps quasi transparent (on voit le
     // sol au travers) + contour tireté. Attribut PHYSIQUE (parité avec le rendu fantôme 3D), pas un toggle de vue.
     const grp = Dom.svg("g", { class: "dc-rack" + (this.selRackId === r.id ? " sel" : "") + (r.has_caps === false ? " capless" : ""), transform: `translate(${cx} ${cy}) rotate(${o})`, "data-rack": r.id });
@@ -410,7 +414,7 @@ export abstract class DcViews2D extends DcScene3D {
 
   protected equipNode(e: any): SVGElement {
     const b = FreeEquipGeometry.box(e), o = Normalize.rackOrientation(e.dc_orientation);
-    const cx = (e.dc_x != null) ? e.dc_x : b.w / 2, cy = (e.dc_y != null) ? e.dc_y : b.d / 2;
+    const c = RoomFrame.origin(FreeEquipGeometry.roomPlacement(e)), cx = c.x, cy = c.y;
     const grp = Dom.svg("g", { class: "dc-equip" + (this.selEquipId === e.id ? " sel" : ""), transform: `translate(${cx} ${cy}) rotate(${o})`, "data-equip": e.id });
     grp.appendChild(Dom.svg("rect", { class: "dc-equip-body", x: -b.w / 2, y: -b.d / 2, width: b.w, height: b.d, rx: Math.min(b.w, b.d) * 0.04 }));
     grp.appendChild(Dom.svg("rect", { class: "dc-equip-face", x: -b.w / 2, y: -b.d / 2, width: b.w, height: Math.max(15, b.d * 0.1) }));   // liseré = face AVANT (−Y)

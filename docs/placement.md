@@ -658,7 +658,65 @@ l'ÉQUIPEMENT (`dc_orientation`). Le conteneur baie a donc été GÉNÉRALISÉ, 
 - **Non fait, volontairement** : l'ÉTAGÈRE ne devient pas un conteneur (la baie place directement le posé),
   et les origines repliées sur 0 qui subsistent dans `DcInteract` (cadrage caméra, ancre d'entité) ne sont
   pas touchées — elles ne résolvent aucun point de câblage, elles visent la caméra ; les aligner est un
-  lot à part, à mener avec le reste du cadrage.
+  lot à part, à mener avec le reste du cadrage. ✅ **Fait en §6.13.**
+
+### 6.13 Le repli d'une position absente n'est plus écrit qu'UNE fois — **IMPLÉMENTÉ**
+
+Suite immédiate de §6.12, dont le « non fait, volontairement » désignait précisément ces sites. Le lot
+précédent avait tranché la règle (position absente ⇒ DEMI-EMPREINTE) et aligné la RÉSOLUTION ; il restait des
+consommateurs qui recopiaient l'ancien repli. `RoomFrame.origin(placement)` — le centre d'un contenu en local
+salle, c'est-à-dire l'image de son point local (0, 0) — devient leur source unique.
+
+**Le balayage complet du dépôt a trouvé DOUZE sites**, dont **trois conventions différentes** pour la même
+question, et deux défauts qu'on ne cherchait pas :
+
+| Site | Repli avant | Verdict |
+|---|---|---|
+| `DcInteract.equipCenter` (modes `tray`, `rack`, `side`/`wall`) | **0** | corrigé |
+| `DcInteract.locateRack` · `DcPanels.isolateRack` | **0** | corrigé |
+| `DcPanels.freeCell` (placement AUTOMATIQUE) | **0** (`\|\| 0`) | corrigé |
+| `DcInteract.posScene` (outil de positionnement) | demi-empreinte **PERMUTÉE** par le lacet | corrigé |
+| `DcViews2D.rackNode`/`doorSwingNode`/`equipNode`, `DcThreeScene.rackGroup` | demi-empreinte (la BONNE) | délèguent, à l'identique |
+| `DcInteract` (glisser 2D historique) | position du POINTEUR | **laissé tel quel** (voir plus bas) |
+
+- **`freeCell` traitait une baie non positionnée comme étant en (0, 0)** : le placement AUTOMATIQUE de la
+  baie suivante pouvait donc la poser PILE dessus, puisqu'il la croyait ailleurs. Ce n'est pas du cadrage
+  caméra — c'est une écriture dans le document.
+- **Une TROISIÈME convention existait**, jamais nommée : `posScene` repliait sur `rackHalfExtents`, qui
+  PERMUTE largeur et profondeur à 90/270. Une baie 800 × 1 200 tournée à 90° et non positionnée avait donc
+  son rectangle d'outil en (600, 400) quand le dessin la posait en (400, 600). Le §6.12 avait cité ce site
+  comme « déjà à la bonne convention » : il l'était à 0/180 seulement.
+- ⚠ **Défaut trouvé en écrivant les tests, sans rapport avec le repli : la branche `side`/`wall` de
+  `equipCenter` était INATTEIGNABLE.** `dim_mode` vaut « free » pour tout placement autre que « rack »
+  (le formulaire de baie l'écrit en dur pour side/wall) ; la branche « libre », qui la précédait, rendait
+  donc `null` faute de `dc_id`, et `locateEquipment` repliait sur `{0, 0, 0}`. **« Localiser » un équipement
+  monté en marge ou en paroi visait l'origine de la salle, même sur une baie parfaitement positionnée.**
+  Le piège était pourtant DÉJÀ documenté dans la même méthode, deux lignes plus haut, pour le mode `tray` —
+  et `Resolver3D` traite ces deux modes AVANT le mode libre. L'ordre s'aligne sur lui.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **`origin()` vit sur le CONTENEUR, pas sur chaque contenu.** Écarté : un `RackGeometry.roomCenter` +
+  un `FreeEquipGeometry.roomCenter` jumeaux — ce serait deux copies d'un même une-ligne, donc la
+  duplication qu'on supprime, déplacée d'un cran. Le contenu ne DÉCLARE que son placement
+  (`roomPlacement`, §6.12) ; la règle de repli appartient à la salle.
+- **Les vues qui DESSINENT délèguent aussi, bien qu'elles fussent DÉJÀ correctes.** Écarté : ne toucher
+  que les fautives — il resterait alors quatre copies de la règle et la « source unique » n'en serait pas
+  une ; la prochaine correction devrait à nouveau être portée cinq fois. Ce sont elles qui ont FIXÉ la
+  convention (§6.12), elles la LISENT désormais au lieu de la réécrire. Parité exacte, par construction.
+- **`posScene` garde son emprise ORIENTÉE** (`hx`/`hy` permutés à 90/270) : c'est l'emprise réelle au sol,
+  et elle est juste. Seul le CENTRE de repli change. Confondre les deux — « puisque l'emprise permute, le
+  repli doit permuter » — est exactement l'erreur d'origine.
+- **Le glisser 2D historique n'est PAS aligné.** Il replie sur la position du POINTEUR : une baie sans
+  position saute donc sous le curseur au premier mouvement. Ce n'est pas un repli de REPÈRE mais un choix
+  d'interaction (« pas encore posée ⇒ elle vient là où tu la prends »), et le remplacer par l'origine
+  changerait le ressenti du glisser sans qu'aucun test ne puisse en juger. Signalé, à arbitrer à l'œil.
+- **Changement de comportement ASSUMÉ, couvert par des attentes EN DUR** (pas par une parité, qui serait
+  ici un contresens) : sur une baie sans `dc_x`/`dc_y`, « Localiser » et l'isolement visent désormais la
+  baie et non le coin de la salle ; l'outil de positionnement pose son rectangle SUR la baie dessinée ;
+  le placement automatique ne recouvre plus une baie non positionnée. Un document dont toutes les baies
+  sont positionnées est inchangé — c'est le cas normal, le formulaire proposant d'office le centre de la
+  salle. Sondes de mutation : retour au repli 0 → **17 FAIL** ; branche `side`/`wall` neutralisée → **5 FAIL**.
 
 ## 7. État de la convergence
 
@@ -690,8 +748,9 @@ cascade récursive) — dettes annexes, plus étapes de migration.
   `equipFloorWorld`, `oobWorld`, `levelZ`.
 - `src-client/geometry/RoomFrame.ts` — **CONTENEUR SALLE** (§6.11 sous le nom `RackFrame`, généralisé en
   §6.12) : `basis` (lacet + origine, dérivés du seul placement DÉCLARÉ, position absente ⇒ demi-empreinte),
-  `pointToRoom` (rotation PUIS translation), `dirToRoom` (rotation SEULE, composante verticale recopiée),
-  `place` (les deux, ce que consomment les CINQ modes). `RoomContentPlacement` = l'interface étroite.
+  `origin` (le CENTRE d'un contenu en local salle — source unique du repli, §6.13), `pointToRoom` (rotation
+  PUIS translation), `dirToRoom` (rotation SEULE, composante verticale recopiée), `place` (les deux, ce que
+  consomment les CINQ modes). `RoomContentPlacement` = l'interface étroite.
 - `src-client/geometry/Resolver3D.ts` — `resolveFaceAnchor3D` : les cinq modes délèguent leur composition à
   `RoomFrame` (quatre via leur baie, le mode libre directement), ainsi que la géométrie des waypoints.
   Sortie en **LOCAL SALLE** pour tout le fichier — points, normales et offsets de conduit. `Port3D`.
