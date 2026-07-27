@@ -33,10 +33,11 @@ FACTUELS et vérifiables, pas comme illustration rhétorique :
    « prendre une boîte locale, la tourner par l'orientation de l'hôte, la translater à sa position » —
    une branche par mode de placement. La sixième (étage) est IMPOSSIBLE à écrire dans ce moule, parce
    que son hôte n'est pas une salle.
-   ✅ **Résorbé aux quatre cinquièmes (§6.11)** : les quatre branches hébergées par une BAIE délèguent
-   désormais leur composition au conteneur `RackFrame` ; la cinquième est hébergée par la SALLE et suit
-   l'ordre §6.10. La déduplication a confirmé le diagnostic — la branche `rack`, qui semblait différente,
-   n'était que la même transformée écrite dans une autre notation.
+   ✅ **RÉSORBÉ EN ENTIER (§6.11 puis §6.12)** : les cinq branches délèguent désormais leur composition au
+   CONTENEUR SALLE (`RoomFrame`) — quatre via leur baie, la cinquième directement. La déduplication a
+   confirmé le diagnostic deux fois : la branche `rack`, qui semblait différente, n'était que la même
+   transformée écrite dans une autre notation ; et le mode libre, qu'on croyait « à part » parce que son
+   hôte n'est pas une baie, était la MÊME transformée avec un autre nom de champ d'orientation.
 
 ## 2. La notion manquante : le CONTENEUR DE PLACEMENT
 
@@ -77,12 +78,13 @@ un contenu de bâtiment.
 4. **La géométrie de composition est PURE et vit dans `geometry/`** (principe n°2) ; les vues ne font
    qu'appliquer. Aucune transformée ne se recalcule dans une vue.
 5. **Le repère d'un point résolu doit être EXPLICITE.** « Monde » et « local à la salle » ne se
-   devinent pas. ✅ Dette RÉSORBÉE (§6.11) : `Resolver3D` annonçait « monde » dans huit docstrings alors
-   qu'il rend du **LOCAL SALLE**. Tout le fichier le dit désormais, en tête de classe comme au point
-   d'appel — et dit AUSSI pourquoi ce local-salle est correct (§6.6). ⚠ Reste à corriger, hors de ce
-   fichier : `FreeEquipGeometry.portWorld`/`portWorldC`/`portNormal` portent « monde » jusque dans leur
-   NOM alors qu'elles rendent, elles aussi, du local salle. Un renommage touche leurs consommateurs :
-   à faire quand la SALLE migrera (elle est leur conteneur).
+   devinent pas. ✅ Dette RÉSORBÉE EN ENTIER. Premier temps (§6.11) : `Resolver3D` annonçait « monde »
+   dans huit docstrings alors qu'il rend du **LOCAL SALLE** ; tout le fichier le dit désormais, en tête de
+   classe comme au point d'appel — et dit AUSSI pourquoi ce local-salle est correct (§6.6). Second temps
+   (§6.12) : `FreeEquipGeometry.portWorld`/`portWorldC`/`portNormal` portaient « monde » jusque dans leur
+   NOM ; elles ne composent plus rien et ont cédé la place à `portLocal`/`faceNormalLocal`/`roomPlacement`,
+   dont le nom dit le repère. Le champ `world` de `Resolver3D.sidePinGeom`/`capPinGeom` est renommé
+   `roomPoint` par la même occasion. **Plus aucun identifiant du chemin de résolution n'annonce « monde ».**
 
 ## 4. Stratégie de convergence — par le BAS, jamais big-bang
 
@@ -152,6 +154,12 @@ cinq branches de `resolveFaceAnchor3D`, les trois `…EquipBoxLocal` de `RackGeo
 `FreeEquipGeometry` pour la salle, `RackResize.fallout` pour la cage, `trayArrange`/`trayFindSpot` pour
 le plateau. Chacune sait déjà placer *ses* contenus, mais aucune ne le dit. Nommer le conteneur donne
 un porteur à ces règles, et le chaînage remplace le `switch`.
+
+✅ **Fait pour la RÉSOLUTION** (§6.11 puis §6.12) : les cinq branches de `resolveFaceAnchor3D` et la
+géométrie des waypoints délèguent leur composition au conteneur SALLE (`RoomFrame`), et chaque contenu se
+contente de DÉCLARER son placement. Restent éclatés, hors périmètre de ce chantier : `RackResize.fallout`
+(cage) et `trayArrange`/`trayFindSpot` (placement AUTOMATIQUE sur plateau — qui n'existe que dans deux
+conteneurs sur quatre, donc hors interface de base, cf. §6.2).
 
 ### 6.2 Interface COMMUNE mais ÉTROITE, DÉRIVÉE de l'existant
 
@@ -479,26 +487,37 @@ sans commune mesure avec un monde en millimètres.
 - **Non fait, volontairement** : `lat`/`lon` ne sont pas exposés dans le LISTING des sites (le
   formulaire suffit au principe n°10), et la taille déclarée de bâtiment reste à venir (voir ci-dessous).
 
-### 6.10 Ordre de migration
+### 6.10 Ordre de migration — **ÉPUISÉ**
 
 **étage** (rien n'existe encore → rode l'interface sans risque, et débloque les câbles) → **plateau**
 (supprime la duplication `TrayFit` — **fait**, cf. §6.7 ; la migration du MODE lui-même reste à faire) →
 **baie / side / wall** (les trois qui partagent le plus — **fait**, cf. §6.11, avec `tray` par la même
 occasion : les quatre partagent LE MÊME conteneur) → **salle** en dernier (la plus utilisée et la mieux
-rodée).
+rodée — **fait**, cf. §6.12).
 
 À chaque étape, l'ancien et le nouveau chemin doivent donner le **même résultat au micron**, prouvé par
 test, AVANT de retirer l'ancien — seule façon de migrer du code non couvert visuellement sans
 régression silencieuse (méthode éprouvée sur la parité `face_up = "top"`).
 
+✅ **L'ordre est parcouru en entier.** Ce qui reste ouvert ne relève plus de la migration des MODES mais de
+la profondeur de la chaîne et de dettes annexes : l'**ÉTAGÈRE n'est pas encore un conteneur** (la baie
+place directement le posé, cf. §7), le calcul de **CAGE reste dupliqué** (`RackGeometry.cageDepth` ⇄
+`RackDepth.cage`, et les deux divergent déjà — cf. §6.7), les **constantes générales de baie** restent
+répliquées entre `domain/constants` et `src-shared/TrayGeometry` (test anti-divergence posé), et la
+**cascade récursive** de §6.5 demeure un prérequis non tenu.
+
 ### 6.11 La BAIE devient un conteneur : `rack` / `side` / `wall` / `tray` — **IMPLÉMENTÉ**
 
-C'est le symptôme n°3 du §1 qui se referme : `Resolver3D.resolveFaceAnchor3D` comptait CINQ branches, dont
-**quatre** hébergées par une baie (`side`, `tray`, `wall`, `rack`) et une par la salle (`manual`/libre, non
-migrée — elle est la dernière de l'ordre §6.10). Les quatre recomposaient à la main « rotation de l'hôte
-puis translation », ce que §3 règle 1 désigne comme la signature d'un conteneur manquant. Le conteneur
-s'appelle désormais `src-client/geometry/RackFrame.ts` ; les branches ne produisent plus que leur point et
-leur normale LOCAUX.
+C'est le symptôme n°3 du §1 qui commence à se refermer : `Resolver3D.resolveFaceAnchor3D` comptait CINQ
+branches, dont **quatre** hébergées par une baie (`side`, `tray`, `wall`, `rack`) et une par la salle
+(`manual`/libre, non migrée à ce lot — elle est la dernière de l'ordre §6.10). Les quatre recomposaient à
+la main « rotation de l'hôte puis translation », ce que §3 règle 1 désigne comme la signature d'un
+conteneur manquant. Le conteneur s'appelait `src-client/geometry/RackFrame.ts` ; les branches ne
+produisent plus que leur point et leur normale LOCAUX.
+
+> ⚠ **Lire ce paragraphe au passé.** Le conteneur BAIE a été GÉNÉRALISÉ en conteneur SALLE au lot suivant
+> (`RoomFrame`, §6.12) : c'est le même module, renommé, une fois la deuxième occurrence constatée. Les
+> décisions ci-dessous restent valables telles quelles — seul le NOM a changé.
 
 **Ce que la déduplication a RÉVÉLÉ** — le résultat le plus utile du lot, comme au §6.7 :
 
@@ -554,20 +573,111 @@ leur normale LOCAUX.
   `capPinGeom`) recomposent encore la transformée à la main. Elles ne sont pas des modes d'ATTACHE, et
   elles emploient l'autre convention d'origine ci-dessus : les migrer sans trancher cette divergence
   déplacerait des points de brassage. Le fichier le signale à l'endroit exact.
+  ✅ **Fait au lot suivant**, une fois la divergence arbitrée (§6.12).
+
+### 6.12 La SALLE devient le conteneur : le mode `manual` (libre) — **IMPLÉMENTÉ**
+
+Dernier de l'ordre §6.10, et sa CLÔTURE. La cinquième branche de `resolveFaceAnchor3D` — le mode libre,
+hébergé par la salle et non par une baie — déléguait à `FreeEquipGeometry.portWorld`/`portNormal`, qui
+composaient la même rotation puis la même translation que le conteneur baie, avec le lacet de
+l'ÉQUIPEMENT (`dc_orientation`). Le conteneur baie a donc été GÉNÉRALISÉ, pas dupliqué :
+`src-client/geometry/RackFrame.ts` devient **`RoomFrame.ts`**, le CONTENEUR SALLE.
+
+**Ce que la migration a RÉVÉLÉ — et qui justifie rétrospectivement tout le chantier :**
+
+> **Les ports d'une baie NON POSITIONNÉE n'étaient pas au même endroit que la baie DESSINÉE.** Le §6.11
+> avait constaté deux conventions d'origine sans les arbitrer. En les mettant côte à côte pour de bon, le
+> compte est net : les deux vues qui DESSINENT (`DcThreeScene.rackGroup`, `DcViews2D.rackNode`/`equipNode`),
+> la géométrie des waypoints et `FreeEquipGeometry` repliaient toutes une position absente sur la
+> **demi-empreinte** ; seule la RÉSOLUTION des ports repliait sur **0**. Sur une baie sans `dc_x`/`dc_y`,
+> les ports et les câbles étaient donc résolus à une demi-empreinte de la baie affichée — un port et une
+> brosse de la MÊME baie n'étaient pas dans le même repère.
+>
+> Personne n'aurait trouvé ça en lisant le code : le défaut ne vit dans aucun des deux endroits, il vit
+> dans leur ÉCART. C'est exactement ce que §1 annonce (« chaque couche re-dérive la hiérarchie à sa
+> façon ») et ce que la convergence par le bas est faite de rendre visible. Le défaut PRÉEXISTAIT au
+> §6.11, qui n'a fait que le répliquer fidèlement, et il préexistait probablement à l'ère TypeScript.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **La DEMI-EMPREINTE gagne : la RÉSOLUTION s'aligne sur le RENDU.** Un contenu sans position est posé à
+  RAS DU COIN de sa salle. Écarté : aligner le rendu sur la résolution (origine 0) — cela mettrait le
+  CENTRE du contenu sur le coin de la salle, donc la moitié du contenu hors des murs, et ferait bouger deux
+  vues au lieu d'une couche de calcul. ⚠ C'est un **CHANGEMENT DE COMPORTEMENT VOULU**, pas une parité : il
+  déplace les ports (et donc les câbles et les faisceaux) de toute baie dont `dc_x` et/ou `dc_y` manque, de
+  la demi-largeur en X et de la demi-profondeur en Y — 300 mm et 500 mm pour une baie aux cotes par défaut.
+  Il ne touche NI Z, NI aucune normale (mesuré). Un document dont toutes les baies sont positionnées — le
+  cas normal, puisque le formulaire de baie propose d'office le centre de la salle — est inchangé au micron.
+- **GÉNÉRALISER le conteneur, ne pas le dupliquer.** §4.3 interdit la généralisation spéculative mais
+  ordonne l'extraction à la DEUXIÈME occurrence : une baie et un équipement libre sont, l'un comme l'autre,
+  « un objet posé dans une salle avec position et lacet ». Écarté : un second module `FreeEquipFrame`
+  jumeau, qui aurait figé la duplication au moment précis où elle devenait démontrable.
+- **La généralisation S'ARRÊTE au contenu d'une salle.** Pas de `PlacementFrame` universel : au-dessus de
+  la salle, la transformée relève du LAYOUT et non d'une transformée intrinsèque (§6.6) — une abstraction
+  qui remonterait jusqu'au monde mentirait. Le module le dit dans son en-tête.
+- **La transformée de la SALLE elle-même n'est PAS réécrite.** `FloorLayout.roomToWorld`/`roomLocalToPlan`
+  la portent déjà : elles voient la salle comme un CONTENU de son plan d'étage, quand `RoomFrame` la voit
+  comme un CONTENEUR. Deux rôles, deux modules ; l'en-tête de `RoomFrame` avertit de ne pas les confondre.
+- **Le paramétrage d'attache reste hors interface, y compris pour le repli.** Le conteneur reçoit un
+  `RoomContentPlacement` = position (nullable) + lacet + demi-empreinte de repli — rien d'autre. Chaque
+  contenu le DÉCLARE lui-même (`RackGeometry.roomPlacement`, `FreeEquipGeometry.roomPlacement`) parce que
+  le NOM des champs lui est propre (`orientation` vs `dc_orientation`, `width_mm`/`depth` vs
+  `free_w_mm`/`free_l_mm`). Écarté : donner l'enregistrement brut au conteneur avec un `switch` sur son
+  type — ce serait rouvrir le `switch` que §6.1 remplace par le chaînage. Écarté aussi : faire calculer
+  l'origine de repli par chaque contenu — la règle de repli serait alors dupliquée autant de fois qu'il y
+  a de contenus, alors qu'elle est justement ce que ce lot unifie.
+- **La demi-empreinte de repli n'est PAS permutée par le lacet**, contrairement à `halfExtents`. C'est la
+  convention du DESSIN, qu'on reproduit à l'identique : une baie sans position tombe en (`width/2`,
+  `depth/2`) quelle que soit son orientation. Écarté : « corriger » au passage en permutant — ce serait
+  arbitrer en douce une SECONDE question, et faire diverger à nouveau la résolution du rendu.
+- **La DIRECTION gagne une composante verticale.** Un équipement libre a six faces : celles du dessus et
+  du dessous portent une normale VERTICALE, que le lacet laisse par construction inchangée. C'est la seule
+  chose que la deuxième occurrence a ajoutée à l'interface — conforme à §6.2 (« on n'ajoute que ce qui est
+  constaté »), la baie n'ayant que des faces verticales.
+- **Les trois géométries de WAYPOINT passent enfin par le conteneur.** Elles employaient DÉJÀ la
+  demi-empreinte : une fois la divergence arbitrée en leur faveur, les migrer ne déplace plus rien
+  (prouvé : 72 576 comparaisons, zéro divergence). Ce sont les modes d'attache qui se sont alignés sur
+  elles, et non l'inverse.
+- **Renommages qui suppriment des noms MENTEURS** (§3 règle 5) : `portWorldC`/`portWorld`/`portNormal`
+  cèdent la place à `portLocal`/`faceNormalLocal`/`roomPlacement`, et le champ `world` de
+  `sidePinGeom`/`capPinGeom` devient `roomPoint`. Écarté : les renommer en `portRoom`/`portRoomC` en leur
+  laissant la composition — cela aurait conservé une SECONDE composition à côté du conteneur, c'est-à-dire
+  la duplication que ce lot supprime. Le repère de SORTIE de la résolution, lui, ne bouge pas : local salle.
+- **Parité prouvée AVANT bascule, puis attentes EXPLICITES.** 42 120 résolutions comparées entre l'ancien
+  code régénéré depuis git et le nouveau, sur 144 baies et 108 équipements libres (4 géométries × 6
+  orientations dont 2 non cardinales × 6 positions dont l'absence totale et les deux absences partielles) ×
+  40 à 140 positions de face × les 5 modes. **Hôte POSITIONNÉ : 149 040 comparaisons, ZÉRO divergence,
+  écart maximal 0 — bit pour bit**, signe du zéro compris. **Waypoints : 72 576 comparaisons, zéro
+  divergence.** Le cas « sans position » est EXCLU de la parité (c'est le changement voulu) et mesuré à
+  part : 17 280 résolutions déplacées, de 300 à 721 mm, dont on a vérifié qu'elles se déplacent
+  EXACTEMENT de la demi-empreinte sur le ou les axes manquants, sans toucher Z ni les normales. Les tests
+  livrés ne comparent PAS les deux implémentations — elles n'en font plus qu'une, la comparaison serait
+  tautologique (§4.1) — mais figent des coordonnées dérivées à la main du modèle. Sondes de mutation :
+  signe de rotation inversé → 5 FAIL ; normale translatée → 21 FAIL ; retour à l'ancienne origine 0 →
+  11 FAIL.
+- **Non fait, volontairement** : l'ÉTAGÈRE ne devient pas un conteneur (la baie place directement le posé),
+  et les origines repliées sur 0 qui subsistent dans `DcInteract` (cadrage caméra, ancre d'entité) ne sont
+  pas touchées — elles ne résolvent aucun point de câblage, elles visent la caméra ; les aligner est un
+  lot à part, à mener avec le reste du cadrage.
 
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
 |---|---|---|---|---|
 | *(site)* | monde | **monde** | s.o. | **migré** — position déclarée (GPS) ou repli 5 km (§6.9) ; TAILLE déclarée optionnelle faisant emprise et contraignant ses plans d'étage (§6.8) |
-| `rack` | baie → salle | local salle | oui | **migré** — la BAIE place son contenu (`RackFrame`, §6.11) |
+| `rack` | baie → salle | local salle | oui | **migré** — la SALLE place la baie, la baie place son contenu (`RoomFrame`, §6.11 puis §6.12) |
 | `side` / `wall` | baie → salle | local salle | oui | **migré** — même conteneur que `rack` (§6.11) |
 | `tray` | étagère → baie → salle | local salle | oui | **migré** côté RÉSOLUTION (§6.11) ; géométrie de plateau déjà DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7). Reste : l'ÉTAGÈRE elle-même n'est pas encore un conteneur — la baie place directement le posé |
-| `manual` (libre) | salle | local salle | oui | historique, conforme — **dernier de l'ordre** (§6.10) |
+| `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`RoomFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
+| *(waypoints)* | baie → salle | local salle | s.o. | **migré** — brosses et pins passent par le conteneur (§6.12) ; le champ `world` est renommé `roomPoint` |
 | `floor` | plan d'étage → étage → bâtiment | **monde** | **en cours** | premier cas migré |
 
 Les équipements d'étage sont le premier contenu porté par un conteneur AUTRE qu'une salle. Ils sont
 donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
+
+✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur.** Ce
+qui reste ouvert est listé en fin de §6.10 (étagère-conteneur, cage dupliquée, constantes de baie,
+cascade récursive) — dettes annexes, plus étapes de migration.
 
 ## 8. Références
 
@@ -578,14 +688,17 @@ donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
   `compress` (mètres réels → millimètres monde, échelle linéaire/log), `worldPositions`.
 - `src-client/geometry/FloorLayout.ts` — `multiLayout` (chaîne bâtiment/étage/salle), `roomToWorld`,
   `equipFloorWorld`, `oobWorld`, `levelZ`.
-- `src-client/geometry/RackFrame.ts` — **CONTENEUR BAIE** (§6.11) : `basis` (lacet + origine, dérivés des
-  seuls champs de la baie), `pointToRoom` (rotation PUIS translation), `dirToRoom` (rotation SEULE),
-  `place` (les deux, ce que consomment les quatre modes d'attache).
-- `src-client/geometry/Resolver3D.ts` — `resolveFaceAnchor3D` : quatre modes hébergés par une BAIE, qui
-  délèguent leur composition à `RackFrame`, plus le mode libre hébergé par la SALLE (non migré). Sortie en
-  **LOCAL SALLE** pour tout le fichier — points, normales et offsets de conduit. `Port3D`.
-- `src-client/geometry/FreeEquipGeometry.ts` — point local d'une face (`faceLocal`) et composition
-  paramétrée par le centre et la base (`portWorldC`), déjà indépendante du conteneur.
+- `src-client/geometry/RoomFrame.ts` — **CONTENEUR SALLE** (§6.11 sous le nom `RackFrame`, généralisé en
+  §6.12) : `basis` (lacet + origine, dérivés du seul placement DÉCLARÉ, position absente ⇒ demi-empreinte),
+  `pointToRoom` (rotation PUIS translation), `dirToRoom` (rotation SEULE, composante verticale recopiée),
+  `place` (les deux, ce que consomment les CINQ modes). `RoomContentPlacement` = l'interface étroite.
+- `src-client/geometry/Resolver3D.ts` — `resolveFaceAnchor3D` : les cinq modes délèguent leur composition à
+  `RoomFrame` (quatre via leur baie, le mode libre directement), ainsi que la géométrie des waypoints.
+  Sortie en **LOCAL SALLE** pour tout le fichier — points, normales et offsets de conduit. `Port3D`.
+- `src-client/geometry/FreeEquipGeometry.ts` — géométrie PROPRE de l'équipement libre : `faceLocal`,
+  `portLocal` (point local d'un port), `faceNormalLocal` (normale AVANT lacet) et `roomPlacement` (ce
+  qu'il déclare à son conteneur). Il ne compose plus aucune transformée.
+- `src-client/geometry/RackGeometry.ts` — `roomPlacement` : ce que la BAIE déclare à son conteneur.
 - `src-client/views/dc/DcBase.ts` — repère (`multiDc`) vs portée (`visibleDcIds`), décor d'étage.
 - `docs/persistance.md` — direction relationnelle (cf. §5).
 - `docs/faisceaux.md`, `docs/deduction-reseau.md` — consommateurs de la résolution de ports.

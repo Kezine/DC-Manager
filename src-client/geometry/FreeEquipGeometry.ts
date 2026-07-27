@@ -1,6 +1,9 @@
 import { EQUIP_FREE_DEFAULT_MM } from "../domain/constants";
 import { Normalize } from "../core/Normalize";
 import { EquipFaces } from "../registries/EquipFaces";
+// CONTENEUR SALLE : l'équipement libre lui DÉCLARE son placement ; la composition
+// « local équipement → local salle » lui appartient (cf. docs/placement.md §6.1).
+import type { RoomContentPlacement } from "./RoomFrame";
 
 /** Boîte d'un équipement libre : empreinte w×d, hauteur h, base z. */
 export interface FreeBox { w: number; d: number; h: number; z: number; }
@@ -98,33 +101,53 @@ export class FreeEquipGeometry {
     }
   }
 
-  /** Point MONDE d'un port, paramétré par le centre (cx,cy) et la base z0. */
-  static portWorldC(eq: any, port: any, cx: number, cy: number, z0: number): { x: number; y: number; z: number } {
-    const o = Normalize.rackOrientation(eq.dc_orientation) * Math.PI / 180, co = Math.cos(o), so = Math.sin(o);
-    const fx = (port.face_x != null) ? port.face_x : 0.5, fy = (port.face_y != null) ? port.face_y : 0.5;
-    const { lx, ly, lz } = FreeEquipGeometry.faceLocal(eq, port.face_side, fx, fy, z0);
-    return { x: cx + lx * co - ly * so, y: cy + lx * so + ly * co, z: lz };
-  }
+  /* ---- ce que l'équipement LIBRE donne à son CONTENEUR (la SALLE, cf. `RoomFrame`) ----
 
-  /** Point MONDE d'un port d'un équipement libre posé en salle (centre = dc_x/dc_y). */
-  static portWorld(eq: any, port: any): { x: number; y: number; z: number } {
+     ⚠ CES TROIS MÉTHODES REMPLACENT `portWorldC` / `portWorld` / `portNormal`, qui annonçaient « monde »
+     jusque dans leur NOM alors qu'elles rendaient du LOCAL SALLE — la dette nommée par la doctrine
+     (`docs/placement.md` §3 règle 5), éteinte côté `Resolver3D` au lot précédent, éteinte ici. Elles ne
+     composent PLUS la rotation ni la translation : un contenu produit son point et sa normale LOCAUX, le
+     conteneur les amène au repère de la salle (§6.1). Le repère de SORTIE de la résolution, lui, ne change
+     pas d'un micron : c'est toujours du local salle. */
+
+  /** Point LOCAL du port (origine au centre de l'empreinte de l'équipement, +X à sa droite vue de face,
+      −Y vers sa façade). Les fractions de face absentes valent le CENTRE de la face.
+      ⚠ Z est mesuré depuis le SOL DE LA SALLE (il part de `dc_z`), comme les boîtes locales de baie : le
+      lacet ne touchant jamais Z, le conteneur le recopie tel quel. */
+  static portLocal(eq: any, port: any): { x: number; y: number; z: number } {
     const bx = FreeEquipGeometry.box(eq);
-    const cx = (eq.dc_x != null) ? eq.dc_x : bx.w / 2, cy = (eq.dc_y != null) ? eq.dc_y : bx.d / 2;
-    return FreeEquipGeometry.portWorldC(eq, port, cx, cy, bx.z);
+    const fx = (port.face_x != null) ? port.face_x : 0.5, fy = (port.face_y != null) ? port.face_y : 0.5;
+    const { lx, ly, lz } = FreeEquipGeometry.faceLocal(eq, port.face_side, fx, fy, bx.z);
+    return { x: lx, y: ly, z: lz };
   }
 
-  /** Normale sortante unitaire (monde) de la face d'un port, tournée par dc_orientation. */
-  static portNormal(eq: any, port: any): { x: number; y: number; z: number } {
-    const of = Normalize.rackOrientation(eq.dc_orientation) * Math.PI / 180, cf = Math.cos(of), sf = Math.sin(of);
-    let nx = 0, ny = 0, nz = 0;
-    switch (EquipFaces.norm(port.face_side)) {
-      case "rear": ny = 1; break;
-      case "left": nx = -1; break;
-      case "right": nx = 1; break;
-      case "top": nz = 1; break;
-      case "bottom": nz = -1; break;
-      default: ny = -1; break;   // front
+  /** Normale sortante unitaire d'une FACE, dans le repère LOCAL de l'équipement — donc AVANT tout lacet.
+      Dessus/dessous portent une normale VERTICALE, que le lacet laisse inchangée. */
+  static faceNormalLocal(face: string): { x: number; y: number; z: number } {
+    switch (EquipFaces.norm(face)) {
+      case "rear": return { x: 0, y: 1, z: 0 };
+      case "left": return { x: -1, y: 0, z: 0 };
+      case "right": return { x: 1, y: 0, z: 0 };
+      case "top": return { x: 0, y: 0, z: 1 };
+      case "bottom": return { x: 0, y: 0, z: -1 };
+      default: return { x: 0, y: -1, z: 0 };   // front
     }
-    return { x: nx * cf - ny * sf, y: nx * sf + ny * cf, z: nz };
+  }
+
+  /** Lecture du placement de l'équipement LIBRE dans sa salle, à donner au CONTENEUR SALLE (`RoomFrame`) :
+      la seule chose que le conteneur ait besoin de savoir de lui (doctrine §6.2). Le nom des champs est
+      PROPRE à l'équipement (`dc_orientation`, `free_w_mm`/`free_l_mm`) — d'où cette lecture ici.
+      ⚠ La demi-empreinte de repli n'est PAS permutée par le lacet (contrairement à `halfExtents`) : c'est
+      la convention du dessin (`DcViews2D.equipNode`), qui pose un équipement sans position à `w/2`, `d/2`
+      quelle que soit son orientation. */
+  static roomPlacement(eq: any): RoomContentPlacement {
+    const bx = FreeEquipGeometry.box(eq);
+    return {
+      x: (eq.dc_x != null) ? eq.dc_x : null,
+      y: (eq.dc_y != null) ? eq.dc_y : null,
+      yawDeg: eq.dc_orientation,
+      halfW: bx.w / 2,
+      halfD: bx.d / 2,
+    };
   }
 }

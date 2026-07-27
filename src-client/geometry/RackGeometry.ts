@@ -8,6 +8,9 @@ import { Normalize } from "../core/Normalize";
 // leurs signatures : elles ont beaucoup de consommateurs — Resolver3D, DcInteract, DcThreeScene, formulaires).
 import { TrayGeometry } from "../../src-shared/TrayGeometry";
 import type { TrayFitProblem } from "../../src-shared/TrayGeometry";
+// CONTENEUR SALLE : la baie lui DÉCLARE son placement (position + lacet + demi-empreinte de repli) ;
+// la composition « local baie → local salle » lui appartient (cf. docs/placement.md §6.1).
+import type { RoomContentPlacement } from "./RoomFrame";
 
 /** Demi-extents au sol d'une baie. */
 export interface HalfExtents { hx: number; hy: number; }
@@ -119,6 +122,23 @@ export class RackGeometry {
     const w = rack.width_mm || RACK_WIDTH_DEFAULT, d = rack.depth || RACK_DEPTH_DEFAULT;
     const o = Normalize.rackOrientation(rack.orientation);
     return (o === 90 || o === 270) ? { hx: d / 2, hy: w / 2 } : { hx: w / 2, hy: d / 2 };
+  }
+
+  /** Lecture du placement d'une BAIE dans sa salle, à donner au CONTENEUR SALLE (`RoomFrame`) : c'est la
+      seule chose que le conteneur ait besoin de savoir d'elle (doctrine §6.2). Le nom des champs est PROPRE
+      à la baie (`orientation`, `width_mm`, `depth`) — d'où cette lecture ici plutôt que dans le conteneur,
+      qui n'a pas à connaître ses contenus un par un.
+      ⚠ La demi-empreinte de repli n'est PAS permutée par le lacet (contrairement à `halfExtents`) : c'est la
+      convention du dessin (`DcThreeScene.rackGroup`, `DcViews2D.rackNode`), qui pose une baie sans position
+      à `width/2`, `depth/2` quelle que soit son orientation. */
+  static roomPlacement(rack: any): RoomContentPlacement {
+    return {
+      x: (rack.dc_x != null) ? rack.dc_x : null,
+      y: (rack.dc_y != null) ? rack.dc_y : null,
+      yawDeg: rack.orientation,
+      halfW: (rack.width_mm || RACK_WIDTH_DEFAULT) / 2,
+      halfD: (rack.depth || RACK_DEPTH_DEFAULT) / 2,
+    };
   }
 
   /* ---- montants (occupation) ---- */
