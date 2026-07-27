@@ -315,6 +315,9 @@ VALIDATION (règles T2d / V6e), avec ses sept constantes.
   `RackDepth.cage`) — hors périmètre, et **ces deux calculs divergent déjà** (le front ne borne pas
   `cage_depth_mm` à la profondeur extérieure, la validation si). Passer un nombre PRÉSERVE cette divergence
   à l'identique au lieu de l'arbitrer en douce.
+  > ✅ **Dette RÉSORBÉE en §6.14** : la politique de profondeur vit désormais une seule fois
+  > (`src-shared/RackDepthPolicy`) et la divergence est arbitrée en faveur du BORNAGE. Le choix de passer
+  > la cage en NOMBRE, lui, reste le bon découpage — c'est l'appelant qui décide de quelle cage il parle.
 - **Les signatures publiques de `RackGeometry.tray*` ne changent pas** (`Resolver3D`, `DcInteract`,
   `DcThreeScene`, `EquipmentForms`, `RackForms` et leurs tests les consomment) : elles deviennent l'ADAPTATION
   au repère de baie de primitives exprimées, elles, dans le repère du PLATEAU.
@@ -501,10 +504,11 @@ régression silencieuse (méthode éprouvée sur la parité `face_up = "top"`).
 
 ✅ **L'ordre est parcouru en entier.** Ce qui reste ouvert ne relève plus de la migration des MODES mais de
 la profondeur de la chaîne et de dettes annexes : l'**ÉTAGÈRE n'est pas encore un conteneur** (la baie
-place directement le posé, cf. §7), le calcul de **CAGE reste dupliqué** (`RackGeometry.cageDepth` ⇄
-`RackDepth.cage`, et les deux divergent déjà — cf. §6.7), les **constantes générales de baie** restent
-répliquées entre `domain/constants` et `src-shared/TrayGeometry` (test anti-divergence posé), et la
-**cascade récursive** de §6.5 demeure un prérequis non tenu.
+place directement le posé, cf. §7), ~~le calcul de **CAGE reste dupliqué**~~ **résorbé en §6.14** (source
+unique `src-shared/RackDepthPolicy`, divergence arbitrée en faveur du bornage), les **constantes générales
+de baie** restent répliquées entre `domain/constants` et les modules partagés (`TrayGeometry`,
+`RackDepthPolicy` — tests anti-divergence posés), et la **cascade récursive** de §6.5 demeure un prérequis
+non tenu.
 
 ### 6.11 La BAIE devient un conteneur : `rack` / `side` / `wall` / `tray` — **IMPLÉMENTÉ**
 
@@ -718,6 +722,84 @@ question, et deux défauts qu'on ne cherchait pas :
   sont positionnées est inchangé — c'est le cas normal, le formulaire proposant d'office le centre de la
   salle. Sondes de mutation : retour au repli 0 → **17 FAIL** ; branche `side`/`wall` neutralisée → **5 FAIL**.
 
+### 6.14 La POLITIQUE DE PROFONDEUR de baie n'est plus écrite deux fois — **IMPLÉMENTÉ**
+
+Dette ouverte depuis §6.7, listée en fin de §6.10 : « le calcul de CAGE reste dupliqué
+(`RackGeometry.cageDepth` ⇄ `RackDepth.cage`), et les deux divergent déjà ». Elle est refermée.
+`src-shared/RackDepthPolicy` porte désormais, une seule fois, les cinq règles de lecture de la profondeur
+d'une baie : profondeur extérieure, cage, marges avant/arrière, cavités de portes creuses. Le RENDU
+(`RackGeometry`) et la VALIDATION (`RackDepth`, règles T2c / V6d) n'en sont plus que des consommateurs.
+
+**LES DIVERGENCES TROUVÉES — le résultat le plus utile du lot** (444 528 comparaisons sur une grille de
+7 profondeurs × 18 cages × 12 marges avant × 7 portes avant × 7 portes arrière, entre les deux anciennes
+implémentations relues depuis git) : **exactement DEUX**, et rien d'autre. 26 460 comparaisons divergentes,
+toutes classées dans ces deux familles ; `doorExtra` et `hasDoor` sont identiques BIT POUR BIT, ainsi que
+toutes les gardes de saisie (`!= null`, chaîne vide, valeur négative, valeur en chaîne).
+
+1. **La validation BORNAIT la cage à la profondeur extérieure, le front NON** (9 996 comparaisons). Une baie
+   déclarant une cage plus profonde que son châssis était DESSINÉE avec une cage qui en débordait — et,
+   depuis §6.7, cette valeur NON bornée était injectée telle quelle dans `TrayGeometry.plank` : la longueur
+   de plateau dessinée pouvait dépasser ce que la validation autorise.
+   **Version retenue : la BORNÉE (validation).** Une cage ne peut physiquement pas être plus profonde que le
+   châssis qui la contient — ce n'est pas une question de convention d'affichage, c'est une impossibilité
+   matérielle. Écarté : la version du rendu. ⚠ Ne PAS généraliser la leçon du §6.13, où c'est le chemin qui
+   DESSINE qui avait raison : chaque divergence se juge sur le fond, jamais par une règle de pouce.
+2. **Plancher à 1 sur une cage sub-millimétrique** (16 464 comparaisons, dont 8 232 sur la cage elle-même et
+   8 232 répercutées sur les marges). Pour `cage_depth_mm` dans ]0, 1[, le front rendait 1 (`Math.max(1, …)`
+   appliqué à une valeur déjà tronquée par `| 0`, donc à 0), la validation 0.
+   **Version retenue : celle de la validation (0).** Le `Math.max(1, …)` ne protégeait rien : aucun calcul
+   aval ne divise par la cage (vérifié) — il maquillait une saisie absurde en cage d'un millimètre au lieu
+   de la laisser produire un plateau vide, que la validation refuse déjà.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **La marge de SÉCURITÉ derrière une porte n'entre PAS dans le module partagé.** `RackDepth.avail`/`shared`
+  retranchent `RACK_DEPTH_SAFETY_MM`, `RackGeometry.mountAvailDepth`/`sharedMountDepth` non — et c'est
+  VOULU depuis l'origine (le rendu dessine ce qui existe physiquement, la validation applique une prudence).
+  Ce n'est donc pas une divergence à arbitrer mais deux politiques distinctes sur une même géométrie ; les
+  mutualiser aurait imposé la prudence au dessin, ou l'aurait retirée à la validation. Le commentaire du
+  front qui annonçait « répliqué dans shared/DataValidation — parité à maintenir » est corrigé en
+  conséquence : ce qui est partagé, ce sont les PRIMITIVES, pas la composition.
+- **`DataValidation.ts` IMPORTE ce module, il ne le reçoit pas.** Premier bénéficiaire de la levée de
+  l'auto-suffisance de `src-shared/` (§6.7, mise à jour) : `import { RackDepthPolicy } from
+  "./RackDepthPolicy.js"` — extension `.js` IMPÉRATIVE, NodeNext l'exige côté serveur. Écarté : reproduire
+  le patron `ValidationCollaborators` — il n'a plus de justification technique, et il coûterait ici un
+  garde-fou d'échec fermé et onze points d'injection pour un module que rien ne demande de découpler.
+  ⚠ **Les DEUX patrons coexistent donc dans le même fichier, et c'est assumé** : `TrayGeometry` reste
+  INJECTÉ (retrait possible, non demandé — lot à part). Les trois en-têtes concernés le disent.
+- **`RACK_DEPTH_DEFAULT_MM` reste une RÉPLIQUE**, comme `TRAY_U_MM` et consorts en §6.7, verrouillée par un
+  test anti-divergence. La migrer reviendrait à migrer `src-client/domain/constants.ts` en entier — elle sert
+  toute la géométrie de baie, pas seulement la profondeur.
+- **Les signatures publiques de `RackGeometry` ne changent pas** (`cageDepth`, `frontMargin`, `rearMargin`,
+  `door`, `doorExtraDepth`, `hasDoor`) : elles deviennent de simples alias. Leurs consommateurs sont
+  nombreux — `Resolver3D`, `DcThreeScene`, `DcViews2D`, les formulaires de baie et leurs tests.
+- **Les re-bornages `Math.min(profondeur, cageDepth(...))` DISPARAISSENT** de leurs sept points d'appel
+  (`RackGeometry` ×5, `Resolver3D`, `DcThreeScene`) : la cage étant bornée à la source, ils étaient devenus
+  idempotents. Les garder aurait laissé croire que la valeur rendue peut encore déborder — c'est-à-dire
+  entretenir le doute que ce lot supprime. Aucun effet sur les valeurs (prouvé par la parité).
+- **Parité prouvée AVANT bascule, puis attentes EXPLICITES.** Après bascule : le module partagé est identique
+  BIT POUR BIT à l'ancienne validation (444 528 comparaisons, ZÉRO divergence) et diffère de l'ancien front
+  exactement sur les 26 460 comparaisons des deux familles arbitrées ; `RackGeometry` branché est identique
+  au module partagé (444 528 comparaisons, zéro divergence). Les tests livrés ne comparent PAS les deux
+  implémentations — elles n'en font plus qu'une, la comparaison serait tautologique (§4.1) — mais figent des
+  valeurs EN DUR. Sondes de mutation : bornage retiré → **8 FAIL** ; cavité de porte neutralisée → **3 FAIL** ;
+  cage déclarée ignorée → **27 FAIL**, dont **4 tests de VALIDATION** (T2c ×2, V6d ×2) — c'est cette
+  troisième sonde qui prouve que la validation consomme bien le module, et non une copie restée sur place.
+
+**Changements de comportement OBSERVABLES** (tous dans le sens « le dessin cesse de promettre plus que ce que
+la validation accepte »), sur une baie dont la cage déclarée dépasse sa propre profondeur :
+la CAGE dessinée et les montants s'arrêtent au châssis ; la longueur d'un plateau d'étagère est ramenée ;
+la profondeur d'une brosse (waypoint) est bornée à la cage réelle ; le formulaire de baie AFFICHE la cage
+bornée (et l'enregistre à l'édition). Une baie dont la cage tient dans son châssis — le cas normal, et le
+seul que le formulaire permette de saisir sans forcer — est inchangée au micron.
+
+**Non fait, volontairement** : `RackGeometry.mountAvailDepth`/`sharedMountDepth` et `RackDepth.avail`/`shared`
+composent encore les mêmes primitives chacun de leur côté (à la marge de sécurité près, cf. ci-dessus) ;
+`RackGeometry.frontMountAvailDepth` est, lui, un doublon EXACT de `mountAvailDepth(rack, "front")` —
+duplication interne au front, signalée et non corrigée. `RackGeometry.minDepth` n'a plus AUCUN consommateur
+(code mort), et devient de surcroît vacuité pure puisque la cage est bornée : à retirer au prochain lot qui
+touchera ce fichier.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -725,7 +807,7 @@ question, et deux défauts qu'on ne cherchait pas :
 | *(site)* | monde | **monde** | s.o. | **migré** — position déclarée (GPS) ou repli 5 km (§6.9) ; TAILLE déclarée optionnelle faisant emprise et contraignant ses plans d'étage (§6.8) |
 | `rack` | baie → salle | local salle | oui | **migré** — la SALLE place la baie, la baie place son contenu (`RoomFrame`, §6.11 puis §6.12) |
 | `side` / `wall` | baie → salle | local salle | oui | **migré** — même conteneur que `rack` (§6.11) |
-| `tray` | étagère → baie → salle | local salle | oui | **migré** côté RÉSOLUTION (§6.11) ; géométrie de plateau déjà DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7). Reste : l'ÉTAGÈRE elle-même n'est pas encore un conteneur — la baie place directement le posé |
+| `tray` | étagère → baie → salle | local salle | oui | **migré** côté RÉSOLUTION (§6.11) ; géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). Reste : l'ÉTAGÈRE elle-même n'est pas encore un conteneur — la baie place directement le posé |
 | `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`RoomFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
 | *(waypoints)* | baie → salle | local salle | s.o. | **migré** — brosses et pins passent par le conteneur (§6.12) ; le champ `world` est renommé `roomPoint` |
 | `floor` | plan d'étage → étage → bâtiment | **monde** | **en cours** | premier cas migré |
@@ -733,15 +815,21 @@ question, et deux défauts qu'on ne cherchait pas :
 Les équipements d'étage sont le premier contenu porté par un conteneur AUTRE qu'une salle. Ils sont
 donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
 
-✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur.** Ce
-qui reste ouvert est listé en fin de §6.10 (étagère-conteneur, cage dupliquée, constantes de baie,
-cascade récursive) — dettes annexes, plus étapes de migration.
+✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur**, et la
+règle de repli d'une position absente n'est plus écrite qu'une fois (§6.13). Ce qui reste ouvert est listé
+en fin de §6.10 (étagère-conteneur, constantes générales de baie, cascade récursive) — dettes annexes, plus
+étapes de migration.
 
 ## 8. Références
 
 - `src-shared/TrayGeometry.ts` — géométrie de l'ÉTAGÈRE, SOURCE UNIQUE (plateau utile, empreinte, position,
   chevauchement, verdict de tenue) : consommée par le RENDU (`RackGeometry.tray*` délègue) et par la
-  VALIDATION (T2d/V6e), qui la reçoit en collaborateur INJECTÉ (`ValidationCollaborators`).
+  VALIDATION (T2d/V6e), qui la reçoit en collaborateur INJECTÉ (`ValidationCollaborators`) — par choix de
+  découplage, plus par impossibilité d'import (§6.14).
+- `src-shared/RackDepthPolicy.ts` — POLITIQUE DE PROFONDEUR de baie, SOURCE UNIQUE (§6.14) : `outerDepth`,
+  `cage` (BORNÉE au châssis), `door`/`doorExtra`/`hasDoor`, `frontMargin`, `rearMargin`. Consommée par le
+  RENDU (`RackGeometry` délègue) et par la VALIDATION (T2c/V6d), qui l'IMPORTE directement (`./…​.js`).
+  N'y figure PAS la marge de sécurité derrière une porte : règle de prudence propre à la validation.
 - `src-client/geometry/SiteLayout.ts` — position des SITES : `realPositions` (modèle → mètres réels),
   `compress` (mètres réels → millimètres monde, échelle linéaire/log), `worldPositions`.
 - `src-client/geometry/FloorLayout.ts` — `multiLayout` (chaîne bâtiment/étage/salle), `roomToWorld`,

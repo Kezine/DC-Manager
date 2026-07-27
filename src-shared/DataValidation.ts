@@ -11,10 +11,23 @@
                          invariants V3, cross-entité V5, dépendance inverse V5b).
    Les énumérations, types et la table `COLLECTION_SPECS` restent des exports de données.
 
-   Contrainte `shared/` : fichier AUTO-SUFFISANT (aucun import) → compile sous le front
-   (résolution bundler) ET le serveur (NodeNext). Les enums sont donc déclarés ICI comme
-   source canonique ; un test anti-divergence vérifie l'alignement avec les constantes front.
+   Portée `shared/` : compile sous le front (résolution bundler) ET le serveur (NodeNext).
+   Les enums sont déclarés ICI comme source canonique ; un test anti-divergence vérifie
+   l'alignement avec les constantes front.
+
+   ⚠ DEUX PATRONS de collaboration coexistent, et c'est VOULU (cf. `CLAUDE.md` §« Code partagé ») :
+     - `RackDepthPolicy` (politique de profondeur de baie) est **IMPORTÉ** — l'auto-suffisance de
+       `src-shared/` a été levée, un import relatif entre fichiers partagés est autorisé À CONDITION
+       d'écrire le spécificateur avec l'extension `.js` (NodeNext l'exige côté serveur) ;
+     - `TrayGeometry` (géométrie d'étagère) est **INJECTÉ** (`ValidationCollaborators`, avec un
+       garde-fou d'échec FERMÉ). Ce patron avait été choisi pour contourner l'ancienne contrainte ;
+       il se défend désormais sur son seul mérite de découplage, et son retrait est un lot à part.
+   Ne pas uniformiser à la volée : l'un se lit à l'import, l'autre au point d'appel.
    ============================================================================ */
+
+// POLITIQUE DE PROFONDEUR de baie : SOURCE UNIQUE partagée avec le rendu (`RackGeometry` délègue).
+// ⚠ L'extension `.js` est IMPÉRATIVE — un import sans extension compile côté front et CASSE le serveur.
+import { RackDepthPolicy } from "./RackDepthPolicy.js";
 
 /* ---- énumérations canoniques (alignées au domaine front — cf. test anti-divergence) ---- */
 /** Statuts de câble (cycle de vie). = `CABLE_STATUSES.map(s => s.id)` côté front. */
@@ -140,12 +153,14 @@ export interface Invariant {
     Subsume l'ancien résolveur d'existence : « existe ? » = `fetch(coll, id) != null`. */
 export type EntityFetcher = (collection: string, id: string) => Record<string, any> | null;
 
-/* ---- COLLABORATEURS injectés (modules partagés que ce fichier ne peut pas importer) ----
-   `src-shared/` compile sous DEUX résolutions de modules (front : bundler + webpack ; serveur :
-   NodeNext) : un import relatif entre fichiers partagés devrait porter l'extension `.js` pour le
-   serveur, que la chaîne webpack du front ne sait pas ramener vers le `.ts` (il lui manque
-   `resolve.extensionAlias`). D'où le patron `PowerAnalysis` : le module est REÇU, pas importé.
-   L'interface reste ÉTROITE — strictement ce que les règles consomment (doctrine §6.2). */
+/* ---- COLLABORATEURS injectés (modules partagés REÇUS plutôt qu'importés) ----
+   ⚠ Ce n'est PLUS une contrainte de build. `resolve.extensionAlias` est posé dans
+   `webpack.config.js` : un import relatif entre fichiers partagés compile désormais sous les
+   TROIS chaînes (front bundler, webpack, serveur NodeNext), à condition d'écrire le spécificateur
+   avec l'extension `.js` — et ce fichier importe d'ailleurs `RackDepthPolicy` de cette façon.
+   Ce qui reste du patron `PowerAnalysis`, c'est son mérite propre : le DÉCOUPLAGE. La validation
+   n'a pas à connaître le module de géométrie d'étagère, seulement l'interface ÉTROITE de ce
+   qu'elle consomme (doctrine §6.2). Son retrait est possible et non demandé (lot à part). */
 
 /** Géométrie d'ÉTAGÈRE attendue par les règles T2d / V6e — implémentée par `src-shared/TrayGeometry`.
     Interface STRUCTURELLE : la classe partagée est vérifiée contre elle par `tsc` à chaque point
@@ -315,54 +330,43 @@ class RackOccupancy {
 /* ============================================================================
    PROFONDEUR de montage en baie (mm) — l'équipement doit TENIR dans l'espace
    disponible, et deux montages DOS À DOS au même U ne doivent pas se cumuler
-   au-delà de la cage. Formules RÉPLIQUÉES de RackGeometry (front) : shared/
-   est auto-suffisant (pas d'import du front) — duplication ASSUMÉE, documentée
-   des deux côtés, à maintenir en parité (mountAvailDepth / sharedMountDepth).
+   au-delà de la cage.
+
+   La POLITIQUE DE PROFONDEUR (profondeur extérieure, cage, marges avant/arrière,
+   cavités de portes) ne vit plus ici : elle est écrite UNE SEULE FOIS dans
+   `src-shared/RackDepthPolicy`, IMPORTÉE ci-dessus et consommée aussi par le RENDU
+   (`RackGeometry`, qui délègue). Elle était RÉPLIQUÉE, et les deux copies
+   DIVERGEAIENT — cf. `docs/placement.md` §6.14 pour l'arbitrage.
+
+   Ce qui reste ICI est ce qui appartient VRAIMENT à la validation : la marge de
+   SÉCURITÉ derrière une porte, qui n'est pas une lecture de la géométrie mais une
+   règle de PRUDENCE — le rendu, lui, dessine ce qui existe physiquement et ne la
+   retranche pas. Ce n'est donc pas une divergence, et elle n'est pas mutualisée.
+
    Les règles ne s'appliquent qu'aux enregistrements MIGRÉS (depth_mm présent) :
    un legacy (enum fractionnaire) tient par construction — et le sanctionner
    rendrait d'anciens documents invalides à la première édition.
    ============================================================================ */
 const RACK_DEPTH_SAFETY = 100;    // = RACK_DEPTH_SAFETY_MM (front) : marge de sécurité derrière une porte
-const RACK_DEPTH_FALLBACK = 1000; // = RACK_DEPTH_DEFAULT (front) : profondeur extérieure par défaut
 
 class RackDepth {
-  private static doorExtra(rack: Record<string, any>, face: string): number {
-    const d = face === "rear" ? rack.door_rear : rack.door_front;
-    return (d && d.enabled && d.hollow) ? Math.max(0, d.hollow_mm | 0) : 0;
-  }
-  private static hasDoor(rack: Record<string, any>): boolean {
-    const f = rack.door_front, r = rack.door_rear;
-    return !!((f && f.enabled) || (r && r.enabled));
-  }
   /** Profondeur de cage — aussi utilisée par TrayFit (plateau « dual » = pleine cage). */
-  static cage(rack: Record<string, any>): number {
-    const d = rack.depth || RACK_DEPTH_FALLBACK;
-    return (rack.cage_depth_mm > 0) ? Math.min(d, rack.cage_depth_mm | 0) : d;
-  }
-  private static frontMargin(rack: Record<string, any>): number {
-    const d = rack.depth || RACK_DEPTH_FALLBACK;
-    const fm = (rack.front_margin_mm != null && rack.front_margin_mm !== "") ? Math.max(0, rack.front_margin_mm | 0) : 0;
-    return Math.min(fm, Math.max(0, d - RackDepth.cage(rack)));
-  }
-  private static rearMargin(rack: Record<string, any>): number {
-    const d = rack.depth || RACK_DEPTH_FALLBACK;
-    return Math.max(0, d - RackDepth.cage(rack) - RackDepth.frontMargin(rack));
-  }
+  static cage(rack: Record<string, any>): number { return RackDepthPolicy.cage(rack); }
   /** Dispo pour un montage ancré à `side` (av/ar) : jusqu'à la face opposée + cavités − sécurité derrière porte. */
   private static avail(rack: Record<string, any>, side: string): number {
-    const d = rack.depth || RACK_DEPTH_FALLBACK;
-    const extras = RackDepth.doorExtra(rack, "front") + RackDepth.doorExtra(rack, "rear");
-    return d - (side === "rear" ? RackDepth.rearMargin(rack) : RackDepth.frontMargin(rack)) + extras - (RackDepth.hasDoor(rack) ? RACK_DEPTH_SAFETY : 0);
+    const d = RackDepthPolicy.outerDepth(rack);
+    const extras = RackDepthPolicy.doorExtra(rack, "front") + RackDepthPolicy.doorExtra(rack, "rear");
+    return d - (side === "rear" ? RackDepthPolicy.rearMargin(rack) : RackDepthPolicy.frontMargin(rack)) + extras - (RackDepthPolicy.hasDoor(rack) ? RACK_DEPTH_SAFETY : 0);
   }
   /** Espace PARTAGÉ par deux montages dos à dos au même U : cage + cavités − sécurité derrière porte. */
   private static shared(rack: Record<string, any>): number {
-    return RackDepth.cage(rack) + RackDepth.doorExtra(rack, "front") + RackDepth.doorExtra(rack, "rear") - (RackDepth.hasDoor(rack) ? RACK_DEPTH_SAFETY : 0);
+    return RackDepthPolicy.cage(rack) + RackDepthPolicy.doorExtra(rack, "front") + RackDepthPolicy.doorExtra(rack, "rear") - (RackDepthPolicy.hasDoor(rack) ? RACK_DEPTH_SAFETY : 0);
   }
   /** Profondeur EFFECTIVE d'un occupant : depth_mm, sinon estimation legacy (fraction de cage). */
   private static effDepth(record: Record<string, any>, rack: Record<string, any>): number {
     if (record.depth_mm != null) return Math.max(1, record.depth_mm | 0);
     const frac: Record<string, number> = { full: 1, half: 0.5, quarter: 0.25 };
-    return Math.round((frac[record.depth] != null ? frac[record.depth] : 1) * RackDepth.cage(rack));
+    return Math.round((frac[record.depth] != null ? frac[record.depth] : 1) * RackDepthPolicy.cage(rack));
   }
 
   /** T2c (cross-entité) : un équipement racké (migré) doit TENIR dans la profondeur dispo de sa baie. */
@@ -372,7 +376,7 @@ class RackDepth {
     if (!rack) return null;                                                        // baie absente → intégrité réf. ailleurs
     const limit = RackDepth.avail(rack, eq.rack_side === "rear" ? "rear" : "front");
     return eq.depth_mm <= limit ? null
-      : { path: "depth_mm", message: `La profondeur (${eq.depth_mm} mm) dépasse l'espace disponible de la baie (${Math.round(limit)} mm${RackDepth.hasDoor(rack) ? ", marge de sécurité de porte déduite" : ""}).` };
+      : { path: "depth_mm", message: `La profondeur (${eq.depth_mm} mm) dépasse l'espace disponible de la baie (${Math.round(limit)} mm${RackDepthPolicy.hasDoor(rack) ? ", marge de sécurité de porte déduite" : ""}).` };
   }
 
   /** V6d (portée) : DOS À DOS au même U (baie double, deux faces opposées non verrouillantes) —
@@ -404,8 +408,9 @@ class RackDepth {
    chevaucher.
 
    La GÉOMÉTRIE du plateau ne vit plus ici : elle est écrite UNE SEULE FOIS dans
-   `src-shared/TrayGeometry`, INJECTÉE via `ValidationCollaborators` (ce fichier
-   ne peut pas l'importer — cf. le bloc « COLLABORATEURS injectés »). Ce qui reste
+   `src-shared/TrayGeometry`, INJECTÉE via `ValidationCollaborators` — par CHOIX de
+   découplage, plus par impossibilité d'import (cf. le bloc « COLLABORATEURS
+   injectés »). Ce qui reste
    ici est ce qui appartient VRAIMENT à la validation : résoudre le contexte
    (étagère + baie) via `fetch`, énumérer les colocataires via `find`, et traduire
    un refus géométrique en `path` + message de FORMULAIRE.

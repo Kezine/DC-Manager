@@ -21,13 +21,18 @@
 
    PROFONDEUR DE CAGE reçue en NOMBRE (`cageMm`), jamais l'enregistrement de baie : la
    géométrie du plateau n'a pas à connaître la POLITIQUE de profondeur d'une baie (marges,
-   cavités de portes, bornage). Le calcul de cage reste donc chez chaque appelant
-   (`RackGeometry.cageDepth` côté front, `RackDepth.cage` côté validation) — duplication
-   CONNUE et hors périmètre de ce module, cf. `docs/placement.md` §6.7.
+   cavités de portes, bornage). Cette politique vit désormais dans `src-shared/RackDepthPolicy`
+   — source UNIQUE dont `RackGeometry.cageDepth` et `RackDepth.cage` ne sont plus que des
+   alias (cf. `docs/placement.md` §6.14). Conséquence directe pour ce module : la cage qu'on
+   lui passe est BORNÉE à la profondeur extérieure, donc une longueur de plateau ne peut plus
+   dépasser ce que la validation autorise. Recevoir un NOMBRE reste le bon découpage : c'est
+   l'appelant qui décide de QUELLE cage il parle, pas la géométrie du plateau.
 
-   Contrainte `shared/` : fichier AUTO-SUFFISANT (aucun import) → compile sous le front
-   (résolution bundler + webpack) ET sous le serveur (NodeNext). C'est aussi pourquoi
-   `DataValidation.ts` ne l'importe PAS mais le REÇOIT (collaborateur injecté).
+   Ce fichier n'importe rien, mais ce n'est plus une CONTRAINTE : depuis la levée de
+   l'auto-suffisance de `src-shared/`, un import relatif entre fichiers partagés est autorisé
+   (extension `.js` IMPÉRATIVE — NodeNext l'exige côté serveur). Si `DataValidation.ts` le
+   REÇOIT toujours en collaborateur injecté au lieu de l'importer, c'est un choix de
+   DÉCOUPLAGE assumé, plus une nécessité technique — cf. `CLAUDE.md`, section « Code partagé ».
    ============================================================================ */
 
 /* ---- constantes PROPRES à l'étagère : ce module en est la SOURCE UNIQUE.

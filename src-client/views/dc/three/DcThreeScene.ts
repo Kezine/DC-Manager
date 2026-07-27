@@ -502,7 +502,7 @@ export class DcThreeScene extends DcThreeCamera {
     // Convention du moteur SVG (rackInterior3D) : la face AVANT est en y = -hd (−Y).
     // La PROFONDEUR du caisson = mountSpanMm (idem SVG) → sa face extérieure rejoint exactement le port résolu.
     const baseZ = RackGeometry.uBaseZ(r), hd = d / 2;
-    const fmY = RackGeometry.frontMargin(r), cageY = Math.min(d, RackGeometry.cageDepth(r));
+    const fmY = RackGeometry.frontMargin(r), cageY = RackGeometry.cageDepth(r);
     const fpY = -hd + fmY, rpY = -hd + fmY + cageY;   // plan avant (−Y) · plan arrière (+Y)
     const frontExtra = RackGeometry.doorExtraDepth(r, "front"), rearExtra = RackGeometry.doorExtraDepth(r, "rear");
     const occ = this.scene3d.occupantsElev(r.id);

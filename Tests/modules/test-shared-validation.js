@@ -1,7 +1,7 @@
 /* Tests modules — code PARTAGÉ front/back (schéma, normalisation, validation, cascade).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("shared : DataValidation — champs d'audit (created_by/updated_by/dates) préservés au round-trip", async () => {
@@ -472,12 +472,100 @@ module.exports = async () => {
   }
   });
 
+  /* ============================================================================================
+     POLITIQUE DE PROFONDEUR DE BAIE — source UNIQUE (`src-shared/RackDepthPolicy`), consommée par
+     la VALIDATION (qui l'IMPORTE) et par le RENDU (`RackGeometry`, qui délègue).
+
+     ⚠ Ces attentes sont EN DUR, jamais une comparaison entre les deux implémentations : elles n'en
+     font plus qu'une, la comparaison serait tautologique (doctrine §4.1). La parité a été prouvée
+     À PART, avant la bascule, sur 444 528 comparaisons contre l'ancien code relu depuis git —
+     ZÉRO divergence avec l'ancienne VALIDATION, et exactement 26 460 avec l'ancien FRONT, toutes
+     dans les deux familles ARBITRÉES ci-dessous (§6.14).
+     ============================================================================================ */
+  await section("shared : politique de PROFONDEUR de baie — source unique, et ses deux CORRECTIONS", async () => {
+  {
+    const P = RackDepthPolicy;
+
+    // -- profondeur extérieure : 0 et l'absence retombent sur le défaut --
+    ck.eq(P.outerDepth({ depth: 800 }), 800, "profondeur extérieure : valeur déclarée");
+    ck.eq(P.outerDepth({}), 1000, "profondeur extérieure : absente → défaut 1000");
+    ck.eq(P.outerDepth({ depth: 0 }), 1000, "profondeur extérieure : 0 → défaut (une baie plate n'a pas de sens)");
+
+    // -- cage : non déclarée = toute la profondeur --
+    ck.eq(P.cage({ depth: 1000 }), 1000, "cage non déclarée → profondeur extérieure");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 900 }), 900, "cage déclarée → valeur déclarée");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 899.7 }), 899, "cage : troncature à l'entier (| 0)");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: "" }), 1000, "cage : saisie vide → profondeur extérieure");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: -5 }), 1000, "cage : valeur négative → profondeur extérieure");
+
+    // ⚠ CORRECTION n°1 (arbitrage §6.14) : la cage est BORNÉE à la profondeur extérieure. Le front ne
+    // bornait PAS — il dessinait donc une cage débordant de son propre châssis, et injectait cette valeur
+    // non bornée dans la géométrie de plateau. Une cage ne peut pas être plus profonde que le châssis.
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 1200 }), 1000, "CORRECTION : cage DÉBORDANTE ramenée à la profondeur (1200 → 1000)");
+    ck.eq(P.cage({ cage_depth_mm: 1200 }), 1000, "CORRECTION : bornée aussi quand la profondeur est le DÉFAUT");
+    ck.eq(P.cage({ depth: 600, cage_depth_mm: 1000 }), 600, "CORRECTION : bornée sur une baie peu profonde");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 1000 }), 1000, "cage PILE à la profondeur : inchangée (borne inclusive)");
+
+    // ⚠ CORRECTION n°2 : plus de plancher à 1. Une cage sub-millimétrique vaut 0 (ce que disait déjà la
+    // validation) et non 1 (ce que rendait le front) — un `Math.max(1, …)` sur une valeur déjà tronquée.
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 0.5 }), 0, "CORRECTION : cage de 0,5 mm → 0 (et non 1)");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 1.4 }), 1, "cage de 1,4 mm → 1 (troncature, pas plancher)");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 0 }), 1000, "cage à 0 → non déclarée → profondeur extérieure");
+
+    // -- marges : la marge avant est bornée par ce que la cage laisse ; l'arrière est le reste --
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 900 }), 0, "marge avant non saisie → 0");
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: 50 }), 50, "marge avant saisie → valeur");
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: 500 }), 100, "marge avant BORNÉE : la cage doit tenir (1000 − 900)");
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: "" }), 0, "marge avant : saisie vide ≠ 0 saisi → 0");
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: -20 }), 0, "marge avant : négative → 0");
+    ck.eq(P.rearMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: 50 }), 50, "marge arrière = 1000 − cage 900 − avant 50");
+    ck.eq(P.rearMargin({ depth: 1000, cage_depth_mm: 900 }), 100, "marge arrière = tout le reste quand l'avant est nul");
+    ck.eq(P.rearMargin({ depth: 1000 }), 0, "cage pleine profondeur → aucune marge arrière");
+    // conséquence de la CORRECTION n°1 : une cage débordante ne produit plus de marge négative masquée.
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 1200, front_margin_mm: 50 }), 0, "cage débordante : plus aucune place pour une marge avant");
+    ck.eq(P.rearMargin({ depth: 1000, cage_depth_mm: 1200 }), 0, "cage débordante : marge arrière nulle (jamais négative)");
+
+    // -- portes : cavité d'une porte CREUSE, et présence d'au moins une porte --
+    ck.eq(P.doorExtra({ door_front: { enabled: true, hollow: true, hollow_mm: 60 } }, "front"), 60, "porte creuse → cavité utile");
+    ck.eq(P.doorExtra({ door_front: { enabled: true, hollow: true, hollow_mm: 60 } }, "rear"), 0, "la cavité est lue FACE PAR FACE");
+    ck.eq(P.doorExtra({ door_front: { enabled: false, hollow: true, hollow_mm: 60 } }, "front"), 0, "porte DÉSACTIVÉE → aucune cavité");
+    ck.eq(P.doorExtra({ door_front: { enabled: true, hollow_mm: 60 } }, "front"), 0, "porte pleine (non creuse) → aucune cavité");
+    ck.eq(P.doorExtra({ door_front: { enabled: true, hollow: true, hollow_mm: -3 } }, "front"), 0, "cavité négative → 0");
+    ck.eq(P.doorExtra({}, "front"), 0, "aucune porte → aucune cavité");
+    ck.eq(P.hasDoor({}), false, "aucune porte → hasDoor faux");
+    ck.eq(P.hasDoor({ door_front: { enabled: false } }), false, "porte désactivée → hasDoor faux");
+    ck.eq(P.hasDoor({ door_rear: { enabled: true } }), true, "porte ARRIÈRE activée suffit");
+    ck.eq(P.door({ door_rear: { enabled: true } }, "rear").enabled, true, "door() rend l'enregistrement de la face demandée");
+
+    // -- anti-divergence : la constante RÉPLIQUÉE doit valoir celle du domaine front (cf. en-tête) --
+    const C = D("domain/constants.js");
+    ck.eq(RackDepthPol.RACK_DEPTH_DEFAULT_MM, C.RACK_DEPTH_DEFAULT, "constante : RACK_DEPTH_DEFAULT_MM = RACK_DEPTH_DEFAULT (front)");
+
+    // -- le RENDU délègue : `RackGeometry` n'est plus qu'un alias (mêmes signatures, mêmes valeurs) --
+    ck.eq(RackGeometry.cageDepth({ depth: 1000, cage_depth_mm: 1200 }), 1000, "RackGeometry.cageDepth : borne désormais, comme la validation");
+    ck.eq(RackGeometry.cageDepth({ depth: 1000, cage_depth_mm: 0.5 }), 0, "RackGeometry.cageDepth : plus de plancher à 1");
+    ck.eq(RackGeometry.frontMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: 500 }), 100, "RackGeometry.frontMargin délègue");
+    ck.eq(RackGeometry.rearMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: 50 }), 50, "RackGeometry.rearMargin délègue");
+    ck.eq(RackGeometry.hasDoor({ door_rear: { enabled: true } }), true, "RackGeometry.hasDoor délègue");
+    ck.eq(RackGeometry.doorExtraDepth({ door_front: { enabled: true, hollow: true, hollow_mm: 60 } }, "front"), 60, "RackGeometry.doorExtraDepth délègue");
+
+    // -- effet AVAL de la correction n°1 : le plateau d'une étagère ne peut plus dépasser le châssis --
+    // (la cage non bornée était injectée telle quelle dans `TrayGeometry.plank`, cf. §6.7.)
+    const trayDual = { kind: "tray", tray_type: "dual", u_height: 2, tray_u: 1 };
+    ck.eq(RackGeometry.trayLength({ depth: 1000, cage_depth_mm: 1200 }, trayDual), 1006, "plateau « dual » : cage BORNÉE 1000 + 2 × 3 mm d'oreilles (et non 1206)");
+    ck.eq(RackGeometry.trayLength({ depth: 1000, cage_depth_mm: 900 }, trayDual), 906, "plateau « dual » : cas normal inchangé (900 + 6)");
+    const trayCant = { kind: "tray", tray_type: "cantilever", u_height: 2, tray_u: 1, depth_mm: 1100 };
+    ck.eq(RackGeometry.trayLength({ depth: 1000, cage_depth_mm: 1200 }, trayCant), 1000, "plateau en porte-à-faux : borné à la cage BORNÉE (1000)");
+  }
+  });
+
   await section("shared : géométrie d'étagère INJECTÉE — la validation échoue FERMÉ si le collaborateur manque", async () => {
   {
-    // `src-shared/DataValidation` ne peut pas importer `src-shared/TrayGeometry` (deux résolutions de modules,
-    // cf. docs/placement.md §6.7) : il le REÇOIT. Le risque de ce patron est qu'un appelant l'oublie et que la
-    // règle s'arrête EN SILENCE — c'est exactement le défaut du `FieldSpec.max` déclaré mais inerte. On vérifie
-    // donc que l'omission REFUSE au lieu de laisser passer.
+    // `src-shared/DataValidation` REÇOIT `src-shared/TrayGeometry` au lieu de l'importer — par CHOIX de
+    // découplage désormais, plus par impossibilité technique (cf. §6.14 : la politique de profondeur, elle,
+    // est bel et bien IMPORTÉE). Le risque de ce patron est qu'un appelant l'oublie et que la règle s'arrête
+    // EN SILENCE — c'est exactement le défaut du `FieldSpec.max` déclaré mais inerte. On vérifie donc que
+    // l'omission REFUSE au lieu de laisser passer.
     const rack = { id: "R1", name: "R", u_count: 42, depth: 1000, cage_depth_mm: 900, sides: "dual" };
     const tray = { id: "T1", kind: "tray", rack_id: "R1", u: 10, u_height: 3, tray_u: 1, tray_type: "cantilever", depth_mm: 400, side: "front" };
     const db = { racks: [rack], rackItems: [tray], equipments: [] };

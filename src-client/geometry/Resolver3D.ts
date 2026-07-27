@@ -137,7 +137,7 @@ export class Resolver3D {
     const portFront = geo.face_side !== "rear";
     const emergesFront = mountFront ? portFront : !portFront;
     const dDepth = rack.depth || RACK_DEPTH_DEFAULT, halfD = dDepth / 2;
-    const fm = RackGeometry.frontMargin(rack), cageD = Math.min(dDepth, RackGeometry.cageDepth(rack));
+    const fm = RackGeometry.frontMargin(rack), cageD = RackGeometry.cageDepth(rack);
     const frontPostOff = halfD - fm, rearPostOff = halfD - fm - cageD;
     const span = Depths.mountSpanMm(eq, cageD);
     // FAÇADE DEVANT LA CAGE : la face de montage est posée RACK_EAR_STANDOFF_MM devant le plan des

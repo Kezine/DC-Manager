@@ -8,6 +8,10 @@ import { Normalize } from "../core/Normalize";
 // leurs signatures : elles ont beaucoup de consommateurs — Resolver3D, DcInteract, DcThreeScene, formulaires).
 import { TrayGeometry } from "../../src-shared/TrayGeometry";
 import type { TrayFitProblem } from "../../src-shared/TrayGeometry";
+// POLITIQUE DE PROFONDEUR de baie : SOURCE UNIQUE partagée avec la validation (cf. docs/placement.md §6.14).
+// Les méthodes ci-dessous n'en sont plus que des ALIAS — signatures inchangées, elles ont beaucoup de
+// consommateurs (Resolver3D, DcThreeScene, DcViews2D, formulaires de baie et leurs tests).
+import { RackDepthPolicy } from "../../src-shared/RackDepthPolicy";
 // CONTENEUR SALLE : la baie lui DÉCLARE son placement (position + lacet + demi-empreinte de repli) ;
 // la composition « local baie → local salle » lui appartient (cf. docs/placement.md §6.1).
 import type { RoomContentPlacement } from "./RoomFrame";
@@ -55,16 +59,13 @@ export class RackGeometry {
   static physHeight(rack: any): number { const min = RackGeometry.minHeight(rack); return (rack.height_mm != null && rack.height_mm > min) ? rack.height_mm : min; }
   /** Largeur mini = zone 19″ + 2 marges latérales (mm). */
   static minWidth(rack: any): number { return RACK_MOUNT_WIDTH + 2 * RackGeometry.lMargin(rack); }
-  /** Profondeur de cage (montants av↔ar, mm) ; null = profondeur extérieure. */
-  static cageDepth(rack: any): number { return (rack.cage_depth_mm != null && rack.cage_depth_mm > 0) ? Math.max(1, rack.cage_depth_mm | 0) : (rack.depth || RACK_DEPTH_DEFAULT); }
+  /** Profondeur de cage (montants av↔ar, mm) ; non déclarée = profondeur extérieure, à laquelle elle est
+      aussi BORNÉE (une cage ne peut pas déborder de son châssis — cf. `RackDepthPolicy`, §6.14). */
+  static cageDepth(rack: any): number { return RackDepthPolicy.cage(rack); }
   /** Profondeur mini = cage. */
   static minDepth(rack: any): number { return RackGeometry.cageDepth(rack); }
   /** Marge AVANT (façade → montants avant, mm), bornée pour que la cage tienne. */
-  static frontMargin(rack: any): number {
-    const d = rack.depth || RACK_DEPTH_DEFAULT, cage = Math.min(d, RackGeometry.cageDepth(rack));
-    const fm = (rack.front_margin_mm != null && rack.front_margin_mm !== "") ? Math.max(0, rack.front_margin_mm | 0) : 0;
-    return Math.min(fm, Math.max(0, d - cage));
-  }
+  static frontMargin(rack: any): number { return RackDepthPolicy.frontMargin(rack); }
   /** Largeur UTILE du corps 19″ (panneau − 2 oreilles standard) — largeur max d'un boîtier racké. */
   static mountBodyWidth(): number { return RACK_MOUNT_WIDTH - 2 * RACK_EAR_MM; }
   /** Largeur RÉELLE du boîtier d'un équipement U : `u_width_mm` (bornée au corps utile), sinon pleine largeur.
@@ -82,11 +83,11 @@ export class RackGeometry {
     return a === "left" ? -(full - w) / 2 : (a === "right" ? (full - w) / 2 : 0);
   }
   /** Porte d'une face (avant/arrière). */
-  static door(rack: any, face: string): any { return (face === "rear") ? rack.door_rear : rack.door_front; }
+  static door(rack: any, face: string): any { return RackDepthPolicy.door(rack, face); }
   /** Profondeur utile supplémentaire apportée par la cavité d'une porte creuse (0 sinon). */
-  static doorExtraDepth(rack: any, face: string): number { const d = RackGeometry.door(rack, face); return (d && d.enabled && d.hollow) ? Math.max(0, d.hollow_mm | 0) : 0; }
+  static doorExtraDepth(rack: any, face: string): number { return RackDepthPolicy.doorExtra(rack, face); }
   /** Vrai si la baie porte au moins une porte (avant ou arrière) activée. */
-  static hasDoor(rack: any): boolean { const f = RackGeometry.door(rack, "front"), r = RackGeometry.door(rack, "rear"); return !!((f && f.enabled) || (r && r.enabled)); }
+  static hasDoor(rack: any): boolean { return RackDepthPolicy.hasDoor(rack); }
   /** Profondeur PHYSIQUE disponible pour un montage ancré au plan AVANT (montants en U / brosse) : du plan de
       montage avant jusqu'à la face arrière (`profondeur − marge avant`) + cavités des portes av/ar. Marge de
       sécurité NON retranchée (cf. RACK_DEPTH_SAFETY_MM côté formulaire). */
@@ -95,24 +96,22 @@ export class RackGeometry {
     return d - RackGeometry.frontMargin(rack) + RackGeometry.doorExtraDepth(rack, "front") + RackGeometry.doorExtraDepth(rack, "rear");
   }
   /** Marge ARRIÈRE (montants arrière → face arrière, mm) — complément de la cage et de la marge avant. */
-  static rearMargin(rack: any): number {
-    const d = rack.depth || RACK_DEPTH_DEFAULT, cage = Math.min(d, RackGeometry.cageDepth(rack));
-    return Math.max(0, d - cage - RackGeometry.frontMargin(rack));
-  }
+  static rearMargin(rack: any): number { return RackDepthPolicy.rearMargin(rack); }
   /** Profondeur PHYSIQUE disponible pour un montage en U selon sa face d'ANCRAGE (avant/arrière) :
-      du plan de montage jusqu'à la face opposée + cavités des portes. Marge de sécurité NON retranchée
-      (cf. RACK_DEPTH_SAFETY_MM côté validation, appliquée derrière porte). Répliqué dans
-      shared/DataValidation (RackDepth) — parité à maintenir. */
+      du plan de montage jusqu'à la face opposée + cavités des portes. Marge de sécurité NON retranchée —
+      c'est ce qui distingue cette cote de `RackDepth.avail` (validation), qui compose les MÊMES primitives
+      partagées (`RackDepthPolicy`) puis retranche `RACK_DEPTH_SAFETY_MM` derrière une porte. Deux
+      politiques de PRUDENCE différentes sur une même géométrie, pas une duplication. */
   static mountAvailDepth(rack: any, side: string): number {
     const d = rack.depth || RACK_DEPTH_DEFAULT;
     const extras = RackGeometry.doorExtraDepth(rack, "front") + RackGeometry.doorExtraDepth(rack, "rear");
     return d - (side === "rear" ? RackGeometry.rearMargin(rack) : RackGeometry.frontMargin(rack)) + extras;
   }
   /** Profondeur PARTAGÉE par deux montages DOS À DOS au même U (baie double) : la cage + cavités —
-      la somme de leurs profondeurs ne doit pas la dépasser. */
+      la somme de leurs profondeurs ne doit pas la dépasser. (Marge de sécurité NON retranchée, cf.
+      `mountAvailDepth` ci-dessus.) */
   static sharedMountDepth(rack: any): number {
-    const d = rack.depth || RACK_DEPTH_DEFAULT, cage = Math.min(d, RackGeometry.cageDepth(rack));
-    return cage + RackGeometry.doorExtraDepth(rack, "front") + RackGeometry.doorExtraDepth(rack, "rear");
+    return RackGeometry.cageDepth(rack) + RackGeometry.doorExtraDepth(rack, "front") + RackGeometry.doorExtraDepth(rack, "rear");
   }
 
   /* ---- au sol ---- */
@@ -198,7 +197,7 @@ export class RackGeometry {
     const heightU = RackGeometry.sideEquipHeightU(e);
     const z0 = RackGeometry.uBaseZ(rack) + (Math.max(1, e.side_u | 0) - 1) * U_MM;
     const z1 = z0 + Math.max(U_MM, e.free_h_mm || heightU * U_MM);
-    const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2, cage = Math.min(d, RackGeometry.cageDepth(rack));
+    const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2, cage = RackGeometry.cageDepth(rack);
     const fm = RackGeometry.frontMargin(rack), fp = -hd + fm, rp = -hd + fm + cage;
     const len = Math.min(Math.max(20, e.free_l_mm || cage), cage - 8);
     const front = (e.side_face !== "rear");
@@ -231,7 +230,7 @@ export class RackGeometry {
       TRAY_SHEET_RESERVE_MM, renforts transversaux) au plafond de la réservation (u_height). Sert au
       dessin 3D (espace réservé) et au CONTRÔLE DE PLACEMENT des équipements posés. */
   static trayBoxLocal(rack: any, it: any): any {
-    const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2, cage = Math.min(d, RackGeometry.cageDepth(rack));
+    const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2, cage = RackGeometry.cageDepth(rack);
     const fm = RackGeometry.frontMargin(rack), fp = -hd + fm, rp = -hd + fm + cage;
     const front = it.side !== "rear";
     const len = RackGeometry.trayLength(rack, it);
@@ -365,7 +364,7 @@ export class RackGeometry {
     const xs = (lr === "right") ? [colInner, colOuter] : [-colOuter, -colInner];
     const z0 = RackGeometry.uBaseZ(rack) + (Math.max(1, uTop | 0) - 1) * U_MM + 1, z1 = z0 + Math.max(1, heightU || SIDE_U_STEP) * U_MM - 2;
     const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2;
-    const fm = RackGeometry.frontMargin(rack), cage = Math.min(d, RackGeometry.cageDepth(rack));
+    const fm = RackGeometry.frontMargin(rack), cage = RackGeometry.cageDepth(rack);
     const yPlane = (face === "rear") ? (-hd + fm + cage - 2) : (-hd + fm + 2);
     return { x0: xs[0], x1: xs[1], z0, z1, yPlane, front: face !== "rear" };
   }
@@ -374,7 +373,7 @@ export class RackGeometry {
 
   /** Profondeur de marge (mm) le long de laquelle on monte en paroi. */
   static marginDepth(rack: any, margin: string): number {
-    const d = rack.depth || RACK_DEPTH_DEFAULT, cage = Math.min(d, RackGeometry.cageDepth(rack)), fm = RackGeometry.frontMargin(rack);
+    const d = rack.depth || RACK_DEPTH_DEFAULT, cage = RackGeometry.cageDepth(rack), fm = RackGeometry.frontMargin(rack);
     return (margin === "rear") ? Math.max(0, d - fm - cage) : fm;
   }
   /** Montage en PAROI possible dans cette marge ? Profondeur ≥ 1U ET même AUTORISATION que le side-mount
