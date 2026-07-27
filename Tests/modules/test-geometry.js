@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, PivotBounds, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -639,6 +639,80 @@ module.exports = async () => {
   }
   });
 
+  await section("SiteLayout : position des sites (GPS optionnel, repli 5 km, échelle d'affichage)", async () => {
+  {
+    const near = (a, b, tol, msg) => ck(Math.abs(a - b) <= tol, msg + "  (attendu ≈ " + b + ", obtenu " + a + ")");
+    // ---- REPLI DÉTERMINISTE : sans coordonnées, chaque site est posé à 5 km du PRÉCÉDENT, dans l'ordre
+    // de la COLLECTION (et non par tri : l'ordre d'insertion est le fait du modèle, cf. doctrine §6.9).
+    const trois = SiteLayout.realPositions([{ id: "s1" }, { id: "s2" }, { id: "s3" }]);
+    ck.eq(JSON.stringify(trois.map((p) => p.x)), JSON.stringify([0, 5000, 10000]), "repli : 0 / 5 km / 10 km vers l'est");
+    ck(trois.every((p) => p.y === 0), "repli : chaîne alignée (y = 0)");
+    ck(trois.every((p) => p.fromGps === false), "repli : aucune position marquée GPS");
+    ck.eq(SITE_FALLBACK_STEP_M, 5000, "le pas de repli est bien de 5 km");
+    const ordre = SiteLayout.realPositions([{ id: "zoulou" }, { id: "alpha" }]);
+    ck(ordre[0].location === "zoulou" && ordre[0].x === 0, "repli : ordre de COLLECTION respecté (pas d'ordre alphabétique)");
+    // ---- PROJECTION : le repère s'ancre sur le PREMIER site géolocalisé.
+    const equateur = SiteLayout.realPositions([{ id: "o", lat: 0, lon: 0 }, { id: "e", lat: 0, lon: 1 }]);
+    ck(equateur[0].x === 0 && equateur[0].y === 0, "projection : le site de référence est à l'origine");
+    near(equateur[1].x, 111194.9, 5, "projection : 1° de longitude à l'équateur ≈ 111,19 km à l'EST (x > 0)");
+    near(equateur[1].y, 0, 1e-6, "projection : même latitude → y inchangé");
+    // NORD = -y : sur une vue en plan, le haut de l'écran est le nord (les plans d'étage ont un y qui
+    // croît vers le bas). Un site plus au NORD doit donc avoir un y PLUS PETIT — pas l'inverse.
+    const nord = SiteLayout.realPositions([{ id: "sud", lat: 50, lon: 5 }, { id: "nord", lat: 51, lon: 5 }]);
+    ck(nord[1].y < nord[0].y, "projection : site plus au NORD → y plus petit (nord = -y)");
+    near(nord[1].y, -111194.9, 5, "projection : 1° de latitude ≈ 111,19 km");
+    // resserrement des méridiens avec la latitude : 1° de longitude à 60° N ≈ la moitié de l'équateur.
+    const haut = SiteLayout.realPositions([{ id: "a", lat: 60, lon: 0 }, { id: "b", lat: 60, lon: 1 }]);
+    near(haut[1].x, 111194.9 * Math.cos(60 * Math.PI / 180), 5, "projection : cos(latitude) appliqué à la longitude");
+    // ANTIMÉRIDIEN : deux sites de part et d'autre du 180ᵉ sont VOISINS (2°), pas aux antipodes (358°).
+    const meridien = SiteLayout.realPositions([{ id: "a", lat: 0, lon: 179 }, { id: "b", lat: 0, lon: -179 }]);
+    near(meridien[1].x, 2 * 111194.9, 20, "projection : Δlongitude ramenée dans [-180, 180] (antiméridien)");
+    // ---- MIXTE : un site sans coordonnées suit le PRÉCÉDENT, que celui-ci soit géolocalisé ou non.
+    const mixte = SiteLayout.realPositions([{ id: "gps", lat: 50, lon: 5 }, { id: "sans" }]);
+    ck(mixte[0].fromGps === true && mixte[1].fromGps === false, "mixte : le marqueur fromGps distingue les deux origines");
+    ck.eq(mixte[1].x - mixte[0].x, 5000, "mixte : le site sans coordonnées est à 5 km à l'est du site GPS");
+    ck.eq(mixte[1].y, mixte[0].y, "mixte : …et à la même latitude apparente");
+    // ---- COORDONNÉES INEXPLOITABLES → traitées comme ABSENTES (repli), jamais comme (0,0).
+    ck.eq(SiteLayout.gpsOf({ id: "x", lat: 50 }), null, "gpsOf : latitude seule → null (le couple est indissociable)");
+    ck.eq(SiteLayout.gpsOf({ id: "x", lat: 91, lon: 5 }), null, "gpsOf : latitude hors bornes → null");
+    ck.eq(SiteLayout.gpsOf({ id: "x", lat: 50, lon: 181 }), null, "gpsOf : longitude hors bornes → null");
+    ck(SiteLayout.gpsOf({ id: "x", lat: 0, lon: 0 }) != null, "gpsOf : (0, 0) est une position VALIDE (golfe de Guinée), pas une absence");
+    const partiel = SiteLayout.realPositions([{ id: "a", lat: 50, lon: 5 }, { id: "b", lat: 51 }]);
+    ck.eq(partiel[1].x - partiel[0].x, 5000, "saisie partielle → repli 5 km (et non une projection fantaisiste)");
+    // ---- ÉCHELLE : réglage d'AFFICHAGE. « 1 km réel = N m monde » → mm_monde = m_réels × N.
+    ck.eq(SITE_SCALE_DEFAULT_M_PER_KM, 10, "échelle par défaut : 1 km réel = 10 m monde (facteur 1/100)");
+    const w1 = SiteLayout.compress(SiteLayout.realPositions([{ id: "a" }, { id: "b" }]), null);
+    ck.eq(w1[1].x - w1[0].x, 50000, "échelle par défaut : le repli de 5 km fait 50 000 mm (50 m)");
+    const w2 = SiteLayout.compress(SiteLayout.realPositions([{ id: "a" }, { id: "b" }]), { metresPerKm: 20, log: false });
+    ck.eq(w2[1].x - w2[0].x, 100000, "échelle ×2 : 5 km → 100 000 mm");
+    // Bornage : une échelle absente/nulle/aberrante ne doit jamais confondre les sites à l'origine.
+    ck(SiteLayout.normalizeScale(null).metresPerKm === 10, "normalizeScale : réglage absent → défaut");
+    ck(SiteLayout.normalizeScale({ metresPerKm: 0, log: false }).metresPerKm >= 1, "normalizeScale : 0 borné (sinon tous les sites confondus)");
+    ck(SiteLayout.normalizeScale({ metresPerKm: 1e9, log: false }).metresPerKm <= 200, "normalizeScale : valeur démesurée bornée");
+    ck(SiteLayout.normalizeScale({ metresPerKm: NaN, log: false }).metresPerKm === 10, "normalizeScale : NaN → défaut");
+    // ---- NORMALISATION : le monde commence à l'origine ; le cas MONO-SITE y retombe exactement, ce qui
+    // garantit la PARITÉ STRICTE avec le rangement historique (bâtiment unique posé en x = 0).
+    const solo = SiteLayout.compress(SiteLayout.realPositions([{ id: "seul", lat: 50.6, lon: 5.57 }]), null);
+    ck(solo.length === 1 && solo[0].x === 0 && solo[0].y === 0, "mono-site géolocalisé → (0, 0) : parité stricte avec l'historique");
+    const sud = SiteLayout.compress(SiteLayout.realPositions([{ id: "n", lat: 51, lon: 5 }, { id: "s", lat: 50, lon: 5 }]), null);
+    ck(Math.min(...sud.map((p) => p.x)) === 0 && Math.min(...sud.map((p) => p.y)) === 0, "normalisation : min x = min y = 0");
+    ck(sud[0].y < sud[1].y, "normalisation : l'ORDRE nord/sud est préservé par la translation");
+    // ---- MODE LOGARITHMIQUE : comprime les grandes distances, conserve directions et ordre.
+    const lin = SiteLayout.compress(SiteLayout.realPositions([{ id: "a", lat: 0, lon: 0 }, { id: "b", lat: 0, lon: 5 }]), { metresPerKm: 10, log: false });
+    const lg = SiteLayout.compress(SiteLayout.realPositions([{ id: "a", lat: 0, lon: 0 }, { id: "b", lat: 0, lon: 5 }]), { metresPerKm: 10, log: true });
+    ck(lg[1].x - lg[0].x < lin[1].x - lin[0].x, "log : 556 km comprimés par rapport au linéaire");
+    ck(lg[1].x > lg[0].x, "log : direction (est) conservée");
+    const lgOrdre = SiteLayout.compress(SiteLayout.realPositions([{ id: "a" }, { id: "b" }, { id: "c" }]), { metresPerKm: 10, log: true });
+    ck(lgOrdre[0].x < lgOrdre[1].x && lgOrdre[1].x < lgOrdre[2].x, "log : ordre des sites préservé");
+    ck(Math.min(...lgOrdre.map((p) => p.x)) === 0, "log : normalisation appliquée aussi en logarithmique");
+    // ---- carte de consommation
+    const carte = SiteLayout.worldPositions([{ id: "a" }, { id: "b" }], ["legacy"], null);
+    ck(carte.get("a").x === 0 && carte.get("b").x === 50000 && carte.get("legacy").x === 100000, "worldPositions : sites puis locations historiques, à la suite");
+    ck.eq(carte.get("inconnu"), undefined, "worldPositions : une location hors modèle n'a PAS de position par défaut");
+    ck.eq(JSON.stringify(SiteLayout.compress([], null)), "[]", "compress : modèle vide → aucune position (pas de NaN)");
+  }
+  });
+
   await section("FloorLayout : disposition multi-salles (étages empilés, bâtiments côte à côte)", async () => {
   {
     const s = await makeStore();
@@ -706,6 +780,63 @@ module.exports = async () => {
     const fe = { placement_mode: "floor", location: "liege", floor: "1", floor_x: 500, floor_y: 700, dc_z: 1000 };
     const ew = fl.equipFloorWorld(m3, fe);
     ck(isFinite(ew.x) && isFinite(ew.y) && Math.abs(ew.z - (FloorLayout.levelZ(m3, 1) + 1000)) < 1e-6, "equipFloorWorld : base = niveau étage + dc_z");
+  }
+  // ---- NIVEAU SITE (doctrine §6.9) : la position d'un bâtiment se dérive du SITE (GPS, sinon repli à
+  // 5 km), et non plus d'un rangement par largeur cumulée. Les attentes ci-dessous sont EXPLICITES — pas
+  // une comparaison de l'ancien chemin au nouveau : au lot 2, un test de parité était devenu tautologique
+  // au moment même de la bascule et serait resté vert sans plus rien prouver (méthode, doctrine §4.1).
+  {
+    const s = await makeStore();
+    const fl = new FloorLayout(s);
+    const near = (a, b, tol, msg) => ck(Math.abs(a - b) <= tol, msg + "  (attendu ≈ " + b + ", obtenu " + a + ")");
+    const liege = await s.create("sites", { name: "Liège" });
+    const dc1 = await s.create("datacenters", { name: "R1", location: liege.id, floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 0, floor_y: 0 });
+    // MONO-SITE : le cas de très loin le plus courant doit retomber EXACTEMENT sur l'origine — c'est la
+    // parité stricte avec le rangement historique, et la garantie qu'aucun document existant ne bouge.
+    const mono = fl.multiLayout(dc1, { visibleDcIds: new Set([dc1.id]) });
+    ck(mono.buildings.length === 1 && mono.buildings[0].x0 === 0 && mono.buildings[0].y0 === 0, "mono-site : bâtiment à l'origine (parité stricte avec l'historique)");
+    // DEUX SITES sans coordonnées : le repli de 5 km, à l'échelle par défaut, vaut 50 000 mm.
+    const herstal = await s.create("sites", { name: "Herstal" });
+    const dc2 = await s.create("datacenters", { name: "R2", location: herstal.id, floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 0, floor_y: 0 });
+    const repli = fl.multiLayout(null, {});
+    const bL = repli.buildings.find((b) => b.loc === liege.id), bH = repli.buildings.find((b) => b.loc === herstal.id);
+    ck.eq(bH.x0 - bL.x0, 50000, "deux sites sans GPS : origines distantes de 50 000 mm (5 km au 1/100)");
+    ck.eq(bH.y0, bL.y0, "deux sites sans GPS : chaîne de repli alignée en y");
+    ck(bL.x1 > bL.x0 && bL.y1 > bL.y0, "la bande de bâtiment garde une emprise (x1/y1 = origine + plan d'étage)");
+    // COORDONNÉES RENSEIGNÉES : la position réelle remplace le repli. Herstal est au nord-est de Liège,
+    // à ≈ 3,5 km — donc PLUS PRÈS que les 5 km du repli, et décalée en y (ce que l'ancien modèle à une
+    // seule dimension ne pouvait pas exprimer).
+    await s.update("sites", liege.id, { lat: 50.6326, lon: 5.5797 });
+    await s.update("sites", herstal.id, { lat: 50.6634, lon: 5.6303 });
+    const gps = fl.multiLayout(null, {});
+    const gL = gps.buildings.find((b) => b.loc === liege.id), gH = gps.buildings.find((b) => b.loc === herstal.id);
+    ck(gH.x0 > gL.x0, "GPS : Herstal à l'EST de Liège (x plus grand)");
+    ck(gH.y0 < gL.y0, "GPS : Herstal au NORD de Liège (y plus petit — nord = -y)");
+    ck(Math.hypot(gH.x0 - gL.x0, gH.y0 - gL.y0) < 50000, "GPS : la distance réelle (≈ 3,5 km) remplace bien le repli de 5 km");
+    ck(Math.min(gL.x0, gH.x0) === 0 && Math.min(gL.y0, gH.y0) === 0, "GPS : le monde reste ancré à l'origine (normalisation)");
+    // ÉCHELLE = réglage d'AFFICHAGE : elle change les écarts, jamais l'ordre ni les directions.
+    const x2 = fl.multiLayout(null, { siteScale: { metresPerKm: 20, log: false } });
+    const x2L = x2.buildings.find((b) => b.loc === liege.id), x2H = x2.buildings.find((b) => b.loc === herstal.id);
+    near(x2H.x0 - x2L.x0, 2 * (gH.x0 - gL.x0), 1e-6, "échelle ×2 : l'écart entre bâtiments double");
+    near(x2H.y0 - x2L.y0, 2 * (gH.y0 - gL.y0), 1e-6, "échelle ×2 : l'écart en y double aussi");
+    ck.eq(x2L.x1 - x2L.x0, gL.x1 - gL.x0, "échelle ×2 : l'EMPRISE d'un bâtiment ne change pas (elle est en mm réels)");
+    // §6.8 — masquer retire du DESSIN, jamais du REPÈRE : les bandes ne bougent pas avec la portée.
+    const portee = fl.multiLayout(dc1, { visibleDcIds: new Set([dc1.id]) });
+    ck.eq(JSON.stringify(portee.buildings), JSON.stringify(fl.multiLayout(dc1, { visibleDcIds: new Set([dc1.id, dc2.id]) }).buildings), "portée réduite → bandes de bâtiment INCHANGÉES");
+    // Un site sans aucun étage ni salle est un fait du MODÈLE (il occupe un rang dans la chaîne de repli)
+    // mais n'a rien à dessiner : aucune bande émise.
+    const seraing = await s.create("sites", { name: "Seraing" });
+    ck(!fl.multiLayout(null, {}).buildings.some((b) => b.loc === seraing.id), "site sans étage ni salle → aucune bande de bâtiment émise");
+    // Le contenu POSÉ SUR UN ÉTAGE suit l'origine de son bâtiment en X **et** en Y. Ne lire que `x0`
+    // repliait silencieusement tous les bâtiments sur la même bande — d'où ces deux attentes séparées.
+    const eqFloor = { placement_mode: "floor", location: herstal.id, floor: "0", floor_x: 500, floor_y: 700, dc_z: 0 };
+    const wEq = fl.equipFloorWorld(gps, eqFloor);
+    ck.eq(wEq.x, gH.x0 + 500, "equipFloorWorld : x mesuré depuis l'origine du bâtiment (x0)");
+    ck.eq(wEq.y, gH.y0 + 700, "equipFloorWorld : y mesuré depuis l'origine du bâtiment (y0)");
+    const oobH = await s.create("waypoints", { wp_type: "oob", location: herstal.id, floor: "0", floor_x: 300, floor_y: 400, dc_z: 2000 });
+    const wOob = fl.oobWorld(gps, oobH);
+    ck.eq(wOob.x, gH.x0 + 300, "oobWorld : x mesuré depuis l'origine du bâtiment (x0)");
+    ck.eq(wOob.y, gH.y0 + 400, "oobWorld : y mesuré depuis l'origine du bâtiment (y0)");
   }
   });
 

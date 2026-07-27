@@ -655,6 +655,13 @@ const SPEC_FIELDS = {
   sites: {
       name:    { type: "string", required: true },
       address: { type: "string" },
+      // COORDONNÉES GPS — OPTIONNELLES (doctrine `docs/placement.md` §6.9). Le site était le seul niveau de
+      // la hiérarchie de placement SANS géométrie : faute de position déclarée, la vue 3D rangeait les
+      // bâtiments côte à côte, donc dérivait une géométrie de l'ensemble AFFICHÉ. Renseignées, elles donnent
+      // au site sa position RÉELLE ; absentes, un repli déterministe s'applique (5 km du site précédent).
+      // ⚠ Ce sont des coordonnées du MODÈLE : l'échelle de rendu, elle, est un réglage de VUE non persisté.
+      lat:     { type: "number", nullable: true, default: null, min: -90,  max: 90  },
+      lon:     { type: "number", nullable: true, default: null, min: -180, max: 180 },
   },
   vms: {
       name:              { type: "string", required: true },
@@ -1163,6 +1170,12 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   sites: {
     fields: SPEC_FIELDS.sites,
+    invariants: [
+      // Les coordonnées vont PAR PAIRE : une latitude sans longitude (ou l'inverse) ne désigne aucun point,
+      // elle désigne un parallèle ou un méridien. Le rendu retomberait silencieusement sur le repli 5 km en
+      // laissant croire le site géolocalisé — on rejette donc la saisie à moitié faite plutôt que de l'ignorer.
+      { path: "lon", message: "Latitude et longitude vont ensemble : renseignez les deux, ou aucune des deux.", holds: (s) => (s.lat == null) === (s.lon == null) },
+    ],
   },
   vms: {
     // NB (audit de régularisation 2026-07-20) : `nics` (tableau d'OBJETS source Proxmox, normalisé par

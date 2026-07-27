@@ -5,18 +5,27 @@ import {
   LOCATIONS, U_MM, FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT,
   OOB_HEIGHT_DEFAULT, DC_GAP_DEFAULT,
 } from "../domain/constants";
+import { SiteLayout } from "./SiteLayout";
+import type { SiteScale } from "./SiteLayout";
 
 export interface Vec3 { x: number; y: number; z: number; }
 /** Config d'un étage (entité `floors` ou défaut virtuel). */
 export interface FloorCfg { id: string | null; location: string; floor: string; width_mm: number; depth_mm: number; cell_mm: number; blocked_cells: string[]; anchor_x?: number; anchor_y?: number; height_mm?: number; }
 /** Salle disposée dans la vue multi-salles : centre monde (off), orientation (o, rad), niveau. */
 export interface RoomPlacement { dc: any; off: Vec3; o: number; level: number; }
-export interface BuildingBand { loc: string; x0: number; x1: number; }
+/** Emprise d'un bâtiment dans le monde. `x0`/`y0` = coin d'ORIGINE du site (le point que porte sa
+    position, GPS ou repli) ; `x1`/`y1` = ce coin plus l'emprise de ses plans d'étage. Depuis que le site
+    a une position (doctrine §6.9), la bande n'est plus alignée sur un axe : d'où `y0`/`y1`. */
+export interface BuildingBand { loc: string; x0: number; x1: number; y0: number; y1: number; }
 export interface FloorPlane { loc: string; floor: string; cfg: FloorCfg; off: Vec3; }
 /** Disposition complète de la vue multi-salles (étages empilés, bâtiments côte à côte). */
 export interface MultiLayout {
   rooms: RoomPlacement[]; levels: number[]; stackH: number; gap: number;
-  buildings: BuildingBand[]; floorPlanes: FloorPlane[]; totalW: number; maxD: number; topZ: number; levelStep: number;
+  buildings: BuildingBand[]; floorPlanes: FloorPlane[];
+  /** ÉTENDUE du monde (mm) en X et en Y — mesurée sur les bandes de bâtiment, l'origine étant à (0,0).
+      (Auparavant : largeur CUMULÉE de la file de bâtiments et profondeur du plus profond d'entre eux.) */
+  totalW: number; maxD: number;
+  topZ: number; levelStep: number;
   /** Hauteur (mm) et Z (base, mm) de chaque niveau de `levels`, dans le même ordre — placement vertical NON uniforme. */
   levelHs: number[]; levelZs: number[];
 }
@@ -107,8 +116,9 @@ export class FloorLayout {
   }
 
   /** Disposition multi-salles. `cur` = salle active (peut être null = vue d'ensemble).
-      `opts.visibleDcIds` filtre les salles ; `opts.gap` = écart (mm, défaut DC_GAP_DEFAULT). */
-  multiLayout(cur: any, opts: { visibleDcIds?: Set<string>; gap?: number } = {}): MultiLayout {
+      `opts.visibleDcIds` filtre les salles ; `opts.gap` = écart (mm, défaut DC_GAP_DEFAULT) ;
+      `opts.siteScale` = échelle d'AFFICHAGE des distances inter-sites (réglage de vue, cf. SiteLayout). */
+  multiLayout(cur: any, opts: { visibleDcIds?: Set<string>; gap?: number; siteScale?: SiteScale } = {}): MultiLayout {
     const gap = Math.max(0, opts.gap != null ? opts.gap : DC_GAP_DEFAULT);
     const visibleDcIds = opts.visibleDcIds || new Set<string>();
     const all = this.store.all("datacenters");
@@ -140,6 +150,17 @@ export class FloorLayout {
     // CAMÉRA qui va sur la salle active, pas le monde qui se réarrange autour d'elle.
     const locs = Array.from(new Set(allFloors.map((f) => f.loc)))
       .sort((a, b) => this.store.siteLabel(a).localeCompare(this.store.siteLabel(b)) || a.localeCompare(b));
+    // POSITION des bâtiments (§6.9) : dérivée du MODÈLE — coordonnées GPS des `sites` si elles existent,
+    // sinon repli déterministe à 5 km du site précédent. Elle REMPLACE le rangement par largeur cumulée,
+    // qui était une géométrie improvisée faute de position déclarée (§6.8). Le calcul porte sur TOUS les
+    // sites du document, y compris ceux qu'aucune salle n'occupe : un site est un fait du modèle, pas de
+    // la vue, et sa présence décale les suivants dans la chaîne de repli de façon stable.
+    const siteRecords = this.store.all("sites").map((s: any) => ({ id: String(s.id), lat: s.lat, lon: s.lon }));
+    const knownSiteIds = new Set(siteRecords.map((s: { id: string }) => s.id));
+    // `location` référencées par le modèle sans enregistrement `sites` (ids historiques, et la location
+    // VIDE des enregistrements non rattachés) : elles ont droit à une place, à la suite et triées.
+    const extraLocs = Array.from(new Set(allFloors.map((f) => f.loc))).filter((l) => !knownSiteIds.has(l));
+    const sitePos = SiteLayout.worldPositions(siteRecords, extraLocs, opts.siteScale);
     const levels = Array.from(new Set(allFloors.map((f) => FloorLayout.floorNum(f.fl)))).sort((a, b) => a - b);
     const stackH = Math.max(42 * U_MM, ...all.map((d: any) => this.zRef(d)));   // hauteur de contenu GLOBALE (modèle) = hauteur d'étage par défaut
     // HAUTEUR PAR ÉTAGE : `height_mm` configurée (la plus grande des plans affichés à ce niveau) sinon défaut `stackH`,
@@ -154,29 +175,33 @@ export class FloorLayout {
     const levelZs: number[] = []; { let z = 0; levelHs.forEach((h) => { levelZs.push(z); z += h + gap; }); }
     const levelZ = (lv: number) => { const i = levels.indexOf(lv); return i >= 0 ? levelZs[i] : 0; };
     const rooms: RoomPlacement[] = [], buildings: BuildingBand[] = [], floorPlanes: FloorPlane[] = [];
-    let bx = 0, maxD = 0;
+    let totalW = 0, maxD = 0;
     locs.forEach((loc) => {
       const floorStrs = Array.from(new Set(allFloors.filter((f) => f.loc === loc).map((f) => f.fl)));
       if (!floorStrs.length) return;
       let bw = 0, bd = 0;
       floorStrs.forEach((fs) => { const cfg = this.config(loc, fs); bw = Math.max(bw, cfg.width_mm + (cfg.anchor_x || 0)); bd = Math.max(bd, cfg.depth_mm + (cfg.anchor_y || 0)); });
+      // ORIGINE du bâtiment = la position de son SITE. `sitePos` couvre par construction toute `location`
+      // du modèle ; le repli (0,0) ne protège que d'une carte incomplète, il ne doit jamais servir.
+      const sp = sitePos.get(loc) || { x: 0, y: 0 };
+      const bx = sp.x, by = sp.y;
       // ÉMISSION filtrée par la PORTÉE : la position d'un plan vient du layout complet (ci-dessus), mais
       // on ne DESSINE que les étages affichés. Repère et portée restent ainsi séparés (§6.8).
       floorStrs.forEach((fs) => {
         if (!shownFloors.has(loc + FLOOR_KEY_SEP + fs)) return;
-        const cfg = this.config(loc, fs); floorPlanes.push({ loc, floor: fs, cfg, off: { x: bx + (cfg.anchor_x || 0), y: (cfg.anchor_y || 0), z: levelZ(FloorLayout.floorNum(fs)) } });
+        const cfg = this.config(loc, fs); floorPlanes.push({ loc, floor: fs, cfg, off: { x: bx + (cfg.anchor_x || 0), y: by + (cfg.anchor_y || 0), z: levelZ(FloorLayout.floorNum(fs)) } });
       });
       dcs.filter((d: any) => (d.location || "") === loc).forEach((d: any) => {
         const cfg = this.config(loc, String(d.floor || "")), pos = this.roomPos(d, cfg), fp = FloorLayout.roomFootprint(d);
         const ax = cfg.anchor_x || 0, ay = cfg.anchor_y || 0;
-        rooms.push({ dc: d, off: { x: bx + ax + pos.x + fp.w / 2, y: ay + pos.y + fp.h / 2, z: levelZ(FloorLayout.floorNum(d.floor)) }, o: Normalize.rackOrientation(d.floor_orientation) * Math.PI / 180, level: FloorLayout.floorNum(d.floor) });
+        rooms.push({ dc: d, off: { x: bx + ax + pos.x + fp.w / 2, y: by + ay + pos.y + fp.h / 2, z: levelZ(FloorLayout.floorNum(d.floor)) }, o: Normalize.rackOrientation(d.floor_orientation) * Math.PI / 180, level: FloorLayout.floorNum(d.floor) });
       });
-      maxD = Math.max(maxD, bd);
-      buildings.push({ loc, x0: bx, x1: bx + bw });
-      bx += bw + gap * 2;   // double écart entre bâtiments
+      // ÉTENDUE du monde : les bâtiments n'étant plus rangés en file, elle se mesure, elle ne se cumule plus.
+      // `SiteLayout` normalise les positions à un minimum nul, donc x0 ≥ 0 et y0 ≥ 0 : les maxima suffisent.
+      totalW = Math.max(totalW, bx + bw); maxD = Math.max(maxD, by + bd);
+      buildings.push({ loc, x0: bx, x1: bx + bw, y0: by, y1: by + bd });
     });
     const topZ = levels.length ? levelZs[levels.length - 1] + levelHs[levels.length - 1] : stackH;
-    const totalW = Math.max(0, bx - gap * 2);
     // pas de profondeur entre niveaux : domine toute variation intra-étage (sinon un étage bas se peint au-dessus d'un haut)
     const levelStep = (Math.hypot(Math.max(1, totalW), Math.max(1, maxD)) + Math.max(stackH, ...levelHs, 1) + gap) * 8;
     return { rooms, levels, stackH, gap, buildings, floorPlanes, totalW, maxD, topZ, levelStep, levelHs, levelZs };
@@ -207,15 +232,17 @@ export class FloorLayout {
   /** Point MONDE 3D d'un OOB : localisé (floor_x/floor_y, hauteur dc_z) ou centre du plan à 3 m. */
   oobWorld(m: MultiLayout, wp: any): Vec3 {
     const loc = wp.location || "", fl = String(wp.floor || ""), cfg = this.config(loc, fl);
-    const b = m.buildings.find((x) => (x.loc || "") === loc), bx = b ? b.x0 : 0;
+    // Origine du bâtiment : les DEUX composantes depuis que le site porte une position (§6.9) — ne lire que
+    // `x0` reviendrait à replier tous les bâtiments sur la même bande y, silencieusement.
+    const b = m.buildings.find((x) => (x.loc || "") === loc), bx = b ? b.x0 : 0, by = b ? b.y0 : 0;
     const pos = FloorLayout.oobFloorPos(wp, cfg), h = FloorLayout.oobLocalized(wp) ? FloorLayout.oobHeight(wp) : OOB_HEIGHT_DEFAULT;
-    return { x: bx + (cfg.anchor_x || 0) + pos.x, y: (cfg.anchor_y || 0) + pos.y, z: FloorLayout.levelZ(m, FloorLayout.floorNum(fl)) + h };
+    return { x: bx + (cfg.anchor_x || 0) + pos.x, y: by + (cfg.anchor_y || 0) + pos.y, z: FloorLayout.levelZ(m, FloorLayout.floorNum(fl)) + h };
   }
   /** Point MONDE 3D (base) d'un équipement posé sur un étage (analogue à `oobWorld`). */
   equipFloorWorld(m: MultiLayout, eq: any): Vec3 {
     const loc = eq.location || "", fl = String(eq.floor || ""), cfg = this.config(loc, fl);
-    const b = m.buildings.find((x) => (x.loc || "") === loc), bx = b ? b.x0 : 0;
+    const b = m.buildings.find((x) => (x.loc || "") === loc), bx = b ? b.x0 : 0, by = b ? b.y0 : 0;
     const pos = FloorLayout.floorEquipPos(eq, cfg);
-    return { x: bx + (cfg.anchor_x || 0) + pos.x, y: (cfg.anchor_y || 0) + pos.y, z: FloorLayout.levelZ(m, FloorLayout.floorNum(fl)) + FloorLayout.floorEquipHeight(eq) };
+    return { x: bx + (cfg.anchor_x || 0) + pos.x, y: by + (cfg.anchor_y || 0) + pos.y, z: FloorLayout.levelZ(m, FloorLayout.floorNum(fl)) + FloorLayout.floorEquipHeight(eq) };
   }
 }

@@ -153,6 +153,11 @@ export const rack = {
   site: {
     namePlaceholder: "ex. Liège, DC Nord…",
     addrPlaceholder: "adresse postale",
+    lat: "Latitude",
+    lon: "Longitude",
+    latPlaceholder: "ex. 50.6326",
+    lonPlaceholder: "ex. 5.5797",
+    gpsHint: "Optionnel — position relative des bâtiments en 3D. Sans coordonnées, le site est posé à 5 km du précédent. Latitude et longitude vont ensemble.",
     titleEdit: "Modifier le site",
     titleNew: "Nouveau site",
     updated: "Site mis à jour",

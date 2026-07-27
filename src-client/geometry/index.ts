@@ -19,6 +19,8 @@ export type { NodeSize, BBox } from "./GraphGeometry";
 export { GridGeometry } from "./GridGeometry";
 export { FloorLayout } from "./FloorLayout";
 export type { MultiLayout, RoomPlacement, FloorPlane, BuildingBand, FloorCfg } from "./FloorLayout";
+export { SiteLayout, EARTH_RADIUS_M, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM } from "./SiteLayout";
+export type { SiteGps, SiteRealPos, SiteWorldPos, SiteScale } from "./SiteLayout";
 export { DoorGeometry } from "./DoorGeometry";
 export type { DoorPt, DoorRoom, DoorLike, DoorGeom } from "./DoorGeometry";
 export { Positioning, CORNER_IDS, WALL_IDS } from "./Positioning";

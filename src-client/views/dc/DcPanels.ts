@@ -7,6 +7,7 @@ import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { FloorLayout } from "../../geometry/FloorLayout";
+import { SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM } from "../../geometry/SiteLayout";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Format } from "../../core/Format";
 import { Text } from "../../core/Text";
@@ -878,6 +879,24 @@ export abstract class DcPanels extends DcViews2D {
       const colSel = FormControls.select([{ value: "face", label: I18n.t("dc.panels.byFace") }, { value: "group", label: I18n.t("dc.panels.byGroup") }, { value: "type", label: I18n.t("dc.panels.byType") }], this.colorMode);
       colSel.onchange = () => { this.colorMode = colSel.value as any; r3(); };
       colorRow.append(colTxt, colSel); box.appendChild(colorRow);
+      // ÉCHELLE INTER-SITES (doctrine `docs/placement.md` §6.9). Les distances entre bâtiments sont
+      // GÉOGRAPHIQUES, sans commune mesure avec un monde en millimètres : le curseur se lit « 1 km réel
+      // = N m dans le monde 3D » — l'unité de la doctrine, bien plus parlante qu'un facteur 1/100. La
+      // bascule LOGARITHMIQUE, juste à côté, rapproche des sites très éloignés qu'une échelle linéaire
+      // rendrait inexploitables (un site à 200 km projetterait le reste du monde hors du champ).
+      // Ce sont des réglages d'AFFICHAGE — ils ne touchent pas le document — mais ils déplacent la
+      // GÉOMÉTRIE du monde : d'où le rebuild complet, et le choix de ne le déclencher qu'au RELÂCHEMENT
+      // du curseur (`onChange`) et non à chaque cran — reconstruire la scène à chaque pixel gèlerait l'UI.
+      box.appendChild(this.slider(
+        I18n.t("dc.panels.sSiteScale"), this.siteScaleKm, SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM, 1,
+        (val) => I18n.t("dc.panels.sSiteScaleFmt", { m: Math.round(val) }),
+        (val) => { this.siteScaleKm = Math.round(val); },
+        () => { this.persistView(); r3(); },
+      ));
+      const logRow = document.createElement("div"); logRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px";
+      const logTxt = document.createElement("span"); logTxt.className = "grow"; logTxt.textContent = I18n.t("dc.panels.siteScaleMode");
+      const logTg = FormControls.toggle(I18n.t("dc.panels.siteScaleLog"), this.siteScaleLog, (val) => { this.siteScaleLog = val; this.persistView(); r3(); }, { title: I18n.t("dc.panels.siteScaleLogTip") });
+      logRow.append(logTxt, logTg); box.appendChild(logRow);
       box.appendChild(this.btn(I18n.t("dc.panels.recenterRoom"), () => { this.camTarget = null; this.hidden3dRacks.clear(); this.scale = null; if (this.useWebGL && this._three) this._three.recenter(); else this.render(); }));
     }
     return box;

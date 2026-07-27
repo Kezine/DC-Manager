@@ -231,6 +231,12 @@ jusqu'au monde.** L'interface doit distinguer les niveaux intrinsèques (transfo
 layout (transformée fournie par le contexte d'affichage). Prétendre l'inverse produirait une abstraction qui
 ment, du type de celles que cette doctrine cherche justement à éliminer.
 
+> **Mise à jour (§6.9 livrée).** Le niveau SITE a basculé du côté INTRINSÈQUE : sa position se dérive
+> désormais du modèle (coordonnées déclarées, sinon rang dans la collection), plus d'un rangement. La
+> coupure remonte donc d'un cran — elle ne subsiste qu'entre l'ÉTAGE (dont le Z vient encore de
+> l'empilement des hauteurs) et le reste. C'est bien ce qu'annonçait §6.8 : la coupure n'était pas une
+> propriété du domaine, mais la conséquence d'un conteneur sans géométrie.
+
 ### 6.7 Duplication `TrayFit` : suppressible, mais à un prix à connaître
 
 §6.5 affirmait que loger l'abstraction dans `src-shared/` ferait « disparaître » la duplication
@@ -274,7 +280,7 @@ La déclaration de taille reste souhaitable, mais devient une **CONTRAINTE** (un
 déborder de son bâtiment) et non un prérequis. Étant opt-in, elle ne peut pas rétro-invalider un
 document : seuls les bâtiments qu'on a choisi de fixer sont contrôlés.
 
-### 6.9 Sites/bâtiments : position réelle, échelle COMPRESSÉE
+### 6.9 Sites/bâtiments : position réelle, échelle COMPRESSÉE — **IMPLÉMENTÉ**
 
 Le niveau site suit la même doctrine, avec une spécificité : il porte des distances GÉOGRAPHIQUES,
 sans commune mesure avec un monde en millimètres.
@@ -293,6 +299,43 @@ sans commune mesure avec un monde en millimètres.
   appliquée au RENDU. Les coordonnées monde restent donc, conformément à §6.3, non persistables —
   elles dépendent d'un réglage de vue.
 
+**Décisions prises À L'IMPLÉMENTATION** (module `src-client/geometry/SiteLayout.ts`, pur ; consommé par
+`FloorLayout.multiLayout`) — ce sont les questions qu'on se reposera, elles sont donc tranchées ici :
+
+- **Deux étapes SÉPARÉES, jamais mélangées.** `realPositions` rend des mètres RÉELS dérivés du seul
+  modèle ; `compress` rend des millimètres MONDE après échelle. Fusionner les deux aurait fait entrer un
+  réglage de vue dans la dérivation du modèle — précisément la faute que §6.8 corrige.
+- **La position du site est l'ORIGINE de la bande de bâtiment** (le coin d'où partent ses plans
+  d'étage), pas son centre : `BuildingBand.x0`/`y0` gardent ainsi leur sens, et les plans restent
+  ancrés par `anchor_x`/`anchor_y` comme avant.
+- **La bande devient bidimensionnelle** (`y0`/`y1` ajoutés). Des coordonnées GPS portent un nord-sud :
+  le projeter sur un seul axe aurait jeté la moitié de l'information.
+- **Nord = −y.** Les plans d'étage ont un `y` qui croît vers le bas de la vue en plan ; ancrer le nord
+  sur `−y` fait coïncider « haut de l'écran » et « nord », comme sur une carte.
+- **Projection équirectangulaire locale**, ancrée sur le PREMIER site géolocalisé. Écartée : un
+  barycentre, qui se déplacerait à chaque ajout de site — donc une géométrie instable.
+- **Normalisation à l'origine** : le monde est translaté pour que min(x) = min(y) = 0, sur TOUS les
+  sites du modèle (un site masqué garde donc sa place). Bénéfice décisif : le cas **mono-site** — de
+  très loin le plus courant — retombe EXACTEMENT sur (0, 0), donc à parité stricte avec le rangement
+  historique. Aucun document à un seul site ne bouge.
+- **Compression logarithmique** : la distance au barycentre devient `D₀·ln(1 + d/D₀)`, direction
+  conservée, avec `D₀` = le pas de repli (5 km). Ici le barycentre EST le bon centre : contrairement à
+  l'ancrage de projection, il ne fixe aucune position, il ne fait que centrer une déformation — et il a
+  le mérite de ne pas dépendre de l'ordre d'insertion.
+- **Latitude et longitude vont PAR PAIRE** (invariant de spec). Une saisie à moitié faite retomberait
+  sur le repli en laissant croire le site géolocalisé ; on la rejette au lieu de l'ignorer.
+- **Le RECOUVREMENT de deux bâtiments est possible** et assumé : à l'échelle par défaut, deux sites
+  distants de moins de leur propre emprise se chevauchent. C'est un fait géographique, et le curseur
+  d'échelle est précisément le remède. On ne « corrige » pas la position pour éviter le chevauchement —
+  ce serait réintroduire un rangement, donc §6.8 à l'envers.
+- ⚠ **Dette cosmétique connue** : le plan SÉPARATEUR vertical entre bâtiments (`FloorDecor.sepX`) est un
+  décor hérité du rangement linéaire. Il n'a de sens qu'entre deux bandes consécutives EN X ; il est
+  conservé tel quel (calculé sur les bandes triées par `x0`) et peut paraître arbitraire dès que des
+  coordonnées GPS répartissent les sites en deux dimensions. À revoir quand le décor de bâtiment sera
+  repris — pas dans ce lot.
+- **Non fait, volontairement** : `lat`/`lon` ne sont pas exposés dans le LISTING des sites (le
+  formulaire suffit au principe n°10), et la taille déclarée de bâtiment reste à venir (voir ci-dessous).
+
 ### 6.10 Ordre de migration
 
 **étage** (rien n'existe encore → rode l'interface sans risque, et débloque les câbles) → **plateau**
@@ -307,6 +350,7 @@ régression silencieuse (méthode éprouvée sur la parité `face_up = "top"`).
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
 |---|---|---|---|---|
+| *(site)* | monde | **monde** | s.o. | **migré** — position déclarée (GPS) ou repli 5 km, cf. §6.9 |
 | `rack` | baie → salle | local salle | oui | historique, conforme |
 | `side` / `wall` | baie → salle | local salle | oui | historique, conforme |
 | `tray` | étagère → baie → salle | local salle | oui | historique, conforme |
@@ -318,6 +362,8 @@ donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
 
 ## 8. Références
 
+- `src-client/geometry/SiteLayout.ts` — position des SITES : `realPositions` (modèle → mètres réels),
+  `compress` (mètres réels → millimètres monde, échelle linéaire/log), `worldPositions`.
 - `src-client/geometry/FloorLayout.ts` — `multiLayout` (chaîne bâtiment/étage/salle), `roomToWorld`,
   `equipFloorWorld`, `oobWorld`, `levelZ`.
 - `src-client/geometry/Resolver3D.ts` — `resolveFaceAnchor3D` (les cinq branches), `Port3D`.

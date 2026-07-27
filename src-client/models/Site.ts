@@ -11,11 +11,18 @@ export class Site extends Entity implements Records.Site {
   name: string;
   /** Adresse postale (texte libre). */
   address: string;
+  /** Latitude / longitude (degrés décimaux, WGS84) — OPTIONNELLES, et indissociables (invariant de spec).
+      Elles portent la position RÉELLE du site, d'où la vue 3D dérive la place de son bâtiment ; absentes,
+      le site est posé à 5 km du précédent. Cf. `docs/placement.md` §6.9 et `geometry/SiteLayout`. */
+  lat: number | null;
+  lon: number | null;
 
   constructor(p: Props = {}) {
     super(p);
     this.name = p.name || "";
     this.address = p.address || "";
+    this.lat = p.lat == null ? null : Number(p.lat);
+    this.lon = p.lon == null ? null : Number(p.lon);
     // `description` est porté par Entity.
   }
 }

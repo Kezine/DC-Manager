@@ -10,6 +10,8 @@ import { Normalize } from "../../core/Normalize";
 import { RackScene } from "../../geometry/RackScene";
 import { Resolver3D } from "../../geometry/Resolver3D";
 import { FloorLayout } from "../../geometry/FloorLayout";
+import { SITE_SCALE_DEFAULT_M_PER_KM, SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM } from "../../geometry/SiteLayout";
+import type { SiteScale } from "../../geometry/SiteLayout";
 import { CableRouting } from "../../geometry/CableRouting";
 import { TrunkRouting } from "../../geometry/TrunkRouting";
 import { PositioningTool } from "./PositioningTool";
@@ -86,6 +88,11 @@ export abstract class DcBase {
   cableSplineK = CABLE_SPLINE_K;         // arrondi des câbles (slider)
   markerScale = 1;                       // taille des marqueurs de waypoint + connecteurs de port (slider, 1 = défaut/milieu)
   markerRealSize = false;                // marqueurs en taille RÉELLE (monde : waypoint 5 cm, pastille ⌀ 1 cm à 100 %) — false = taille écran constante
+  // ÉCHELLE INTER-SITES (doctrine `docs/placement.md` §6.9) — réglage d'AFFICHAGE, jamais une donnée du
+  // document : le modèle porte la position RÉELLE des sites (GPS, ou repli à 5 km), la compression n'est
+  // appliquée qu'au rendu. D'où sa place ici, dans l'état de vue persisté en localStorage.
+  siteScaleKm = SITE_SCALE_DEFAULT_M_PER_KM;   // « 1 km réel = N m dans le monde 3D » (défaut 10, soit 1/100)
+  siteScaleLog = false;                        // compression LOGARITHMIQUE — rapproche des sites très éloignés
   showAllCables = true;                 // false → seuls les câbles sélectionnés (selCables) sont tracés
   selCables = new Set<string>();         // câbles explicitement affichés quand showAllCables = false
   searchTerm = "";                       // surlignage + filtrage des listes (équipements / câbles)
@@ -333,6 +340,9 @@ export abstract class DcBase {
     return card;
   }
 
+  /** Échelle d'affichage des distances inter-sites, telle que la consomme `FloorLayout.multiLayout`. */
+  protected siteScale(): SiteScale { return { metresPerKm: this.siteScaleKm, log: this.siteScaleLog }; }
+
   /** Curseur étiqueté générique (oninput = aperçu live ; onchange optionnel). */
   protected slider(label: string, value: number, min: number, max: number, step: number, fmt: (v: number) => string, onInput: (v: number) => void, onChange?: () => void): HTMLElement {
     const row = document.createElement("div"); row.style.cssText = "margin-top:6px;font-size:12px";
@@ -511,7 +521,7 @@ export abstract class DcBase {
     };
     let multi: any = null, floorDecor: any = null;
     if (this.multiDc) {
-      const m = this.floor.multiLayout(this.current(), { visibleDcIds: this.visibleDcIds });
+      const m = this.floor.multiLayout(this.current(), { visibleDcIds: this.visibleDcIds, siteScale: this.siteScale() });
       if (m.rooms.length) {
         // CENTROÏDE DYNAMIQUE : boîte englobante des salles VISIBLES (et non la boîte théorique totalW×maxD×topZ,
         // dominée par la hauteur empilée → caméra mal cadrée). Pivot + cadrage suivent le contenu réellement affiché.
@@ -569,7 +579,14 @@ export abstract class DcBase {
       .filter((e: any) => m.floorPlanes.some((fp: any) => (fp.loc || "") === (e.location || "") && String(fp.floor || "") === String(e.floor || "")))
       .map((e: any) => { const w = this.floor.equipFloorWorld(m, e); return { id: e.id, x: w.x, y: w.y, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(String(e.floor || ""))) }; });
     const levels = m.levels.map((lv: number, i: number) => ({ label: I18n.t("lists.ph.floorLabel", { n: lv }), x: -m.gap * 0.6, y: 0, z: m.levelZs ? m.levelZs[i] : i * (m.stackH + m.gap) }));
-    const buildings = m.buildings.map((b: any, i: number) => ({ label: this.store.siteLabel(b.loc), x: (b.x0 + b.x1) / 2, y: -m.gap * 0.5, z: m.topZ / 2, sepX: i > 0 ? b.x0 - m.gap : null }));
+    // ÉTIQUETTE de bâtiment : posée au bord AVANT de SA bande (`y0`), et non plus au bord du monde — les
+    // bâtiments ne sont plus alignés sur y = 0 depuis que le site porte une position (§6.9).
+    // SÉPARATEUR vertical : décor HÉRITÉ du rangement linéaire, qui ne sépare que deux bandes consécutives
+    // EN X. On le calcule donc sur une copie triée par x0, l'ordre d'ÉMISSION restant, lui, stable par
+    // libellé (deux bâtiments de même x0 — sites confondus — n'en portent qu'un, ce qui est le cas voulu).
+    const sepX = new Map<string, number>();
+    m.buildings.slice().sort((a: any, b: any) => a.x0 - b.x0).forEach((b: any, i: number, arr: any[]) => { if (i > 0 && b.x0 > arr[i - 1].x0) sepX.set(b.loc, b.x0 - m.gap); });
+    const buildings = m.buildings.map((b: any) => ({ label: this.store.siteLabel(b.loc), x: (b.x0 + b.x1) / 2, y: b.y0 - m.gap * 0.5, z: m.topZ / 2, sepX: sepX.has(b.loc) ? sepX.get(b.loc)! : null }));
     return { planes, oobs, equips, levels, buildings, maxD: m.maxD, topZ: m.topZ };
   }
 
@@ -719,7 +736,7 @@ export abstract class DcBase {
   private writeViewState(): void {
     if (this._restoredKey == null) return;
     try {
-      const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], hidden3dEquips: [...this.hidden3dEquips], figure: this.figure, colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
+      const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], hidden3dEquips: [...this.hidden3dEquips], figure: this.figure, colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, siteScaleKm: this.siteScaleKm, siteScaleLog: this.siteScaleLog, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
       DcBase.TOGGLE_KEYS.forEach((k) => { o[k] = (this as any)[k]; });
       window.localStorage.setItem(this.viewStateKey(), JSON.stringify(o));
     } catch (_) { /* quota / indispo → ignoré */ }
@@ -736,6 +753,7 @@ export abstract class DcBase {
     this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showDoorSwing = false; this.showFloorGrid = true; this.cablePortNormal = false;
     this.useWebGL = true; this.webglPerspective = false; this.cablesOnTop = true;   // WebGL = unique moteur 3D ; projection/cables-on-top restaurés depuis TOGGLE_KEYS
     this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1; this.markerRealSize = false;
+    this.siteScaleKm = SITE_SCALE_DEFAULT_M_PER_KM; this.siteScaleLog = false;
     this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set();
     this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeTool.state = null; this.measureTool.state = null;
     this.selCables = new Set(); this.searchTerm = ""; this.focusEqId = null; this.focusPortId = null;
@@ -745,6 +763,8 @@ export abstract class DcBase {
     if (o.colorMode === "face" || o.colorMode === "group" || o.colorMode === "type") this.colorMode = o.colorMode;
     if (typeof o.cableSplineK === "number") this.cableSplineK = Math.max(0, Math.min(0.32, o.cableSplineK));
     if (typeof o.markerScale === "number") this.markerScale = Math.max(0.25, Math.min(1.75, o.markerScale));
+    if (typeof o.siteScaleKm === "number") this.siteScaleKm = Math.max(SITE_SCALE_MIN_M_PER_KM, Math.min(SITE_SCALE_MAX_M_PER_KM, o.siteScaleKm));
+    if (typeof o.siteScaleLog === "boolean") this.siteScaleLog = o.siteScaleLog;
     // caméra
     if (typeof o.az === "number") this.az = o.az;
     if (typeof o.el === "number") this.el = o.el;

@@ -458,17 +458,26 @@ export class RackForms extends CableForms {
     root.appendChild(FormControls.fieldRow(I18n.t("lists.col.name"), nameI));
     const addrI = FormControls.text(s ? s.address : "", I18n.t("rack.site.addrPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("lists.col.address"), addrI));
+    // COORDONNÉES GPS (optionnelles) — le placement des bâtiments dans le monde 3D en dérive (doctrine
+    // §6.9). Elles sont ici, dans le FORMULAIRE, parce que le principe n°10 l'exige : aucun attribut,
+    // placement compris, ne doit dépendre d'une vue 2D/3D pour être saisi. Le pas `any` autorise la
+    // précision décimale usuelle d'un relevé GPS ; vide ⇒ null (le repli 5 km s'applique alors).
+    const latI = FormControls.number(s && s.lat != null ? s.lat : "", { min: -90, max: 90, step: "any", placeholder: I18n.t("rack.site.latPlaceholder") });
+    const lonI = FormControls.number(s && s.lon != null ? s.lon : "", { min: -180, max: 180, step: "any", placeholder: I18n.t("rack.site.lonPlaceholder") });
+    root.appendChild(FormControls.fieldRow(I18n.t("rack.site.lat"), latI, I18n.t("rack.site.gpsHint")));
+    root.appendChild(FormControls.fieldRow(I18n.t("rack.site.lon"), lonI));
     const descI = FormControls.textArea(s ? s.description : "");
     root.appendChild(FormControls.fieldRow(I18n.t("lists.col.description"), descI));
-    const live = new LiveValidation("sites", { name: nameI });
+    const live = new LiveValidation("sites", { name: nameI, lat: latI, lon: lonI });
     live.clearOnInput();
     host.openModal({
       title: s ? I18n.t("rack.site.titleEdit") : I18n.t("rack.site.titleNew"),
       subtitle: s ? Html.escape(s.name) : "",
       body: root,
       onSave: async () => {
-        const payload = { name: nameI.value.trim(), address: addrI.value.trim(), description: descI.value.trim() };
-        if (live.check(payload).length) return false;   // nom requis (surligné)
+        const num = (i: HTMLInputElement) => { const raw = i.value.trim(); return raw === "" ? null : Number(raw); };
+        const payload = { name: nameI.value.trim(), address: addrI.value.trim(), lat: num(latI), lon: num(lonI), description: descI.value.trim() };
+        if (live.check(payload).length) return false;   // nom requis, bornes lat/lon, couple complet (surlignés)
         if (s) await store.update("sites", s.id, payload); else await store.create("sites", payload);
         host.setDirty?.(true); Notify.toast(s ? I18n.t("rack.site.updated") : I18n.t("rack.site.created")); onSaved?.(); return true;
       },
