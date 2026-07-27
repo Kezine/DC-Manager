@@ -7,6 +7,8 @@ export { Painter } from "./Painter";
 export type { LocalBox } from "./Painter";
 export { RackGeometry } from "./RackGeometry";
 export type { HalfExtents, WallGeo } from "./RackGeometry";
+export { RackFrame } from "./RackFrame";
+export type { RackLocalPoint, RackLocalDir, RackBasis, RackPlacedPoint } from "./RackFrame";
 export { RackScene } from "./RackScene";
 export type { OccupantInfo } from "./RackScene";
 export { FreeEquipGeometry } from "./FreeEquipGeometry";

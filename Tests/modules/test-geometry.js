@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, RackFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -500,6 +500,147 @@ module.exports = async () => {
     const wp = await s.create("ports", { equipment_id: we.id, name: "wp", face_x: 0.5, face_y: 0.5 });
     const wr = r3.resolvePort3D(wp.id, dc.id);
     ck(wr && isFinite(wr.x) && isFinite(wr.z), "resolvePort3D(wall) → point fini");
+  }
+  });
+
+  /* ============================================================================================
+     CONTENEUR BAIE (docs/placement.md §3 règle 1, §6.1) — la baie place ses contenus.
+     ⚠ Ces attentes sont EXPLICITES (valeurs EN DUR), volontairement : comparer les branches de
+     `resolveFaceAnchor3D` au conteneur auquel elles délèguent désormais ne prouverait plus rien et
+     resterait VERT (piège du lot 2, cf. doctrine §4.1). La parité avec l'ancien chemin a été prouvée
+     À PART, sur 2 304 000 comparaisons (écart max 2,3·10⁻¹³ mm) ; ce qui est figé ICI, ce sont des
+     coordonnées dérivées à la main du modèle, pas la sortie d'une implémentation.
+     ============================================================================================ */
+  await section("RackFrame : le CONTENEUR BAIE compose rotation PUIS translation (valeurs en dur)", async () => {
+  {
+    const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
+
+    // ---- repère : lacet CARDINAL + origine, dérivés des SEULS champs de la baie
+    const b0 = RackFrame.basis({ orientation: 0, dc_x: 100, dc_y: 200 });
+    ck.eq(b0.cos, 1, "basis(0°) : cosinus = 1"); ck.eq(b0.sin, 0, "basis(0°) : sinus = 0");
+    ck.eq(b0.originX, 100, "basis : origine X = dc_x"); ck.eq(b0.originY, 200, "basis : origine Y = dc_y");
+    const bNul = RackFrame.basis({});
+    ck.eq(bNul.originX, 0, "basis : baie NON positionnée → origine X = 0 (convention des ports)");
+    ck.eq(bNul.originY, 0, "basis : baie NON positionnée → origine Y = 0");
+    // angles NON cardinaux : `Normalize.rackOrientation` les ramène à 0 — le port doit suivre la coque dessinée.
+    ck.eq(RackFrame.basis({ orientation: 45 }).sin, 0, "basis(45°) : angle non cardinal ramené à 0");
+    ck.eq(RackFrame.basis({ orientation: 450 }).sin, 1, "basis(450°) : replié sur 90°");
+
+    // ---- POINT : rotation par le lacet, PUIS translation à l'origine de la baie
+    const p0 = RackFrame.pointToRoom(b0, { x: 10, y: 20, z: 30 });
+    ck.eq(p0.x, 110, "pointToRoom(0°) : x = origine + x local"); ck.eq(p0.y, 220, "pointToRoom(0°) : y = origine + y local");
+    ck.eq(p0.z, 30, "pointToRoom : le lacet ne touche JAMAIS Z");
+    const p90 = RackFrame.pointToRoom(RackFrame.basis({ orientation: 90 }), { x: 10, y: 20, z: 30 });
+    near(p90.x, -20, "pointToRoom(90°) : (10, 20) → (−20, 10) [x]"); near(p90.y, 10, "pointToRoom(90°) : … [y]");
+    const p180 = RackFrame.pointToRoom(RackFrame.basis({ orientation: 180, dc_x: 1000, dc_y: 2000 }), { x: 10, y: 20, z: 30 });
+    near(p180.x, 990, "pointToRoom(180°) : demi-tour puis translation [x]"); near(p180.y, 1980, "pointToRoom(180°) : … [y]");
+    const p270 = RackFrame.pointToRoom(RackFrame.basis({ orientation: 270 }), { x: 10, y: 20, z: 30 });
+    near(p270.x, 20, "pointToRoom(270°) : (10, 20) → (20, −10) [x]"); near(p270.y, -10, "pointToRoom(270°) : … [y]");
+
+    // ---- DIRECTION : rotation SEULE. C'est LA distinction que chaque branche réécrivait à la main —
+    // translater une normale la rendrait non unitaire et enverrait le connecteur 3D à l'autre bout de la salle.
+    const dLoin = RackFrame.dirToRoom(RackFrame.basis({ orientation: 0, dc_x: 9999, dc_y: -4242 }), { x: 0, y: -1 });
+    ck.eq(dLoin.x, 0, "dirToRoom : normale NON translatée par l'origine [x]");
+    ck.eq(dLoin.y, -1, "dirToRoom : normale NON translatée par l'origine [y]");
+    ck.eq(dLoin.z, 0, "dirToRoom : normale HORIZONTALE (z = 0)");
+    const d90 = RackFrame.dirToRoom(RackFrame.basis({ orientation: 90, dc_x: 500, dc_y: 500 }), { x: 0, y: -1 });
+    near(d90.x, 1, "dirToRoom(90°) : façade (0, −1) → (1, 0) [x]"); near(d90.y, 0, "dirToRoom(90°) : … [y]");
+    for (const o of [0, 90, 180, 270]) {
+      const d = RackFrame.dirToRoom(RackFrame.basis({ orientation: o, dc_x: 1234, dc_y: 5678 }), { x: 0, y: -1 });
+      ck(Math.abs(Math.hypot(d.x, d.y) - 1) < 1e-12, "dirToRoom(" + o + "°) : normale reste UNITAIRE");
+    }
+
+    // ---- place : les deux d'un coup, sur la même baie (ce que consomment les 4 modes d'attache)
+    const rack = { orientation: 90, dc_x: 1000, dc_y: 2000 };
+    const placed = RackFrame.place(rack, { x: 10, y: 20, z: 30 }, { x: 0, y: -1 });
+    near(placed.x, 980, "place(90°) : point tourné PUIS translaté [x]");
+    near(placed.y, 2010, "place(90°) : … [y]");
+    ck.eq(placed.z, 30, "place : Z inchangé");
+    near(placed.n.x, 1, "place(90°) : normale tournée SANS translation [x]");
+    near(placed.n.y, 0, "place(90°) : … [y]");
+  }
+  });
+
+  await section("Resolver3D : les 4 modes hébergés par une BAIE délèguent au conteneur (points en dur)", async () => {
+  {
+    const s = await makeStore();
+    const r3 = new Resolver3D(s);
+    const dc = await s.create("datacenters", { name: "DC" });
+    const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
+    const anchor = (eq, geo) => r3.resolveFaceAnchor3D(eq, geo, dc.id);
+
+    // ---- mode `rack` : baie 600 × 1000, marges nulles → cage = 1000, uBaseZ = 0, montants à ±500.
+    // port avant d'un boîtier monté en façade : 500 (montant) + 3 (réserve d'oreilles) devant le centre,
+    // soit y local = −503 ; face_x 0,25 sur un corps de 452,6 mm → x local = −113,15 ;
+    // z = (rack_u−1 + (1−face_y)·u_height) · 44,45 = (4 + 0,25·2) · 44,45 = 200,025.
+    const rk = await s.create("racks", { name: "R", width_mm: 600, depth: 1000, u_count: 42, vmargin_mm: 0, orientation: 0, datacenter_id: dc.id, dc_x: 5000, dc_y: 3000 });
+    const eqR = await s.create("equipments", { name: "SW", placement_mode: "rack", rack_id: rk.id, rack_u: 5, u_height: 2, rack_side: "front" });
+    const aR = anchor(eqR, { face_x: 0.25, face_y: 0.75, face_side: "front" });
+    near(aR.x, 4886.85, "rack/0° : x = dc_x − 113,15 (face_x sur le corps 19″)");
+    near(aR.y, 2497, "rack/0° : y = dc_y − 503 (montant avant + réserve d'oreilles)");
+    near(aR.z, 200.025, "rack/0° : z = (U−1 + zf·u_height) · 44,45");
+    near(aR.n.x, 0, "rack/0° : normale = façade (−Y) [x]"); near(aR.n.y, -1, "rack/0° : … [y]");
+    ck.eq(aR.n.z, 0, "rack : normale horizontale"); ck.eq(aR.rackId, rk.id, "rack : baie hôte exposée");
+    // demi-tour : le MÊME point local, tourné. C'est le conteneur qui tourne, pas la branche.
+    await s.update("racks", rk.id, { orientation: 180 });
+    const aR180 = anchor(eqR, { face_x: 0.25, face_y: 0.75, face_side: "front" });
+    near(aR180.x, 5113.15, "rack/180° : x = dc_x + 113,15 (demi-tour)");
+    near(aR180.y, 3503, "rack/180° : y = dc_y + 503");
+    near(aR180.z, 200.025, "rack/180° : Z insensible au lacet");
+    near(aR180.n.y, 1, "rack/180° : la façade regarde +Y");
+    await s.update("racks", rk.id, { orientation: 0 });
+
+    // ---- mode `side` : baie 800 × 1000 → marge latérale (800 − 482,6)/2 = 158,7, deux colonnes de
+    // (158,7 − 8)/2 = 75,35. Colonne 0 à DROITE, calée au montant : x local ∈ [249,3 ; 309,3].
+    // Profondeur : façade à −500, boîte posée 4 mm derrière → y local = −496. z = (side_u−1)·44,45 = 88,9.
+    const rkS = await s.create("racks", { name: "RS", width_mm: 800, depth: 1000, u_count: 42, vmargin_mm: 0, orientation: 0, allow_side_front: true, datacenter_id: dc.id, dc_x: 0, dc_y: 0 });
+    const eqS = await s.create("equipments", { name: "PDU", placement_mode: "side", dim_mode: "free", rack_id: rkS.id, side_face: "front", side_lr: "right", side_col: 0, side_snap: "post", side_u: 3, free_w_mm: 60, free_h_mm: 100, free_l_mm: 200 });
+    const aS = anchor(eqS, { face_x: 0, face_y: 1, face_side: "front" });
+    near(aS.x, 249.3, "side/0° : x = bord INTÉRIEUR de la colonne (face_x = 0)");
+    near(aS.y, -496, "side/0° : y = façade + 4 mm de jeu");
+    near(aS.z, 88.9, "side/0° : z = base du U (face_y = 1 → bas de la boîte)");
+    near(aS.n.y, -1, "side/0° : normale = façade de la BAIE, pas de la boîte");
+    // quart de tour : (x, y) local → (−y, x). Le seul changement est le repère, pas la boîte.
+    await s.update("racks", rkS.id, { orientation: 90 });
+    const aS90 = anchor(eqS, { face_x: 0, face_y: 1, face_side: "front" });
+    near(aS90.x, 496, "side/90° : x = −y local"); near(aS90.y, 249.3, "side/90° : y = x local");
+    near(aS90.z, 88.9, "side/90° : Z insensible au lacet");
+    near(aS90.n.x, 1, "side/90° : la façade regarde +X");
+
+    // ---- mode `wall` : baie 600 × 1200, marge avant 200, cage 700. Paroi GAUCHE (x local = −300),
+    // orientation « center » → la boîte s'enfonce de 100 mm vers +X ; sa normale sortante est +X, donc
+    // face_x court le long de Y : y local = −600 + 0,5 · 80 = −560. z = 88,9 + 100 (face_y = 0 → haut).
+    const rkW = await s.create("racks", { name: "RW", width_mm: 600, depth: 1200, u_count: 42, vmargin_mm: 0, front_margin_mm: 200, cage_depth_mm: 700, orientation: 0, allow_side_front: true, datacenter_id: dc.id, dc_x: 0, dc_y: 0 });
+    const eqW = await s.create("equipments", { name: "WALL", placement_mode: "wall", dim_mode: "free", rack_id: rkW.id, wall_lr: "left", wall_margin: "front", wall_col: 0, wall_u: 3, wall_orient: "center", free_w_mm: 80, free_h_mm: 100, free_l_mm: 100 });
+    const aW = anchor(eqW, { face_x: 0.5, face_y: 0, face_side: "front" });
+    near(aW.x, -200, "wall/0° : x = paroi gauche + enfoncement (normale +X)");
+    near(aW.y, -560, "wall/0° : y = milieu de la colonne murale");
+    near(aW.z, 188.9, "wall/0° : z = sommet de la boîte (face_y = 0)");
+    near(aW.n.x, 1, "wall/0° : normale portée par la BOÎTE (+X), pas par la façade de la baie");
+    near(aW.n.y, 0, "wall/0° : … [y]");
+
+    // ---- mode `tray` : plateau « dual » sur une baie 600 × 1000 → longueur = cage + 2 × 3 = 1006,
+    // plateau plein de 452,6 de large (donc x local ∈ [−226,3 ; 226,3]), plancher utile à
+    // (u−1)·44,45 + 5 = 93,9. Équipement 100 × 200 × 40 posé en (0, 0) : face avant à y local −503.
+    const rkT = await s.create("racks", { name: "RT", width_mm: 600, depth: 1000, u_count: 42, vmargin_mm: 0, orientation: 0, datacenter_id: dc.id, dc_x: 0, dc_y: 0 });
+    const tray = await s.create("rackItems", { rack_id: rkT.id, kind: "tray", tray_type: "dual", side: "front", u: 3, u_height: 2, tray_u: 1 });
+    const eqT = await s.create("equipments", { name: "BOX", placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, tray_x: 0, tray_y: 0, free_w_mm: 100, free_l_mm: 200, free_h_mm: 40 });
+    const aT = anchor(eqT, { face_x: 0.5, face_y: 0.5, face_side: "front" });
+    near(aT.x, -176.3, "tray/0° : x = bord gauche du plateau + moitié de l'empreinte");
+    near(aT.y, -503, "tray/0° : y = plan de façade du plateau");
+    near(aT.z, 113.9, "tray/0° : z = plancher utile + moitié de la hauteur posée");
+    near(aT.n.y, -1, "tray/0° : port avant d'une étagère avant → normale vers la façade");
+    // port ARRIÈRE d'un posé sur étagère AVANT : la boîte sort par son autre face, la baie ne bouge pas.
+    const aTr = anchor(eqT, { face_x: 0.5, face_y: 0.5, face_side: "rear" });
+    near(aTr.y, -303, "tray : port arrière → face opposée de l'empreinte (−503 + 200)");
+    near(aTr.n.y, 1, "tray : port arrière → normale opposée");
+
+    // ---- le repère de SORTIE est LOCAL SALLE, pas monde : la résolution ne connaît ni l'étage, ni le
+    // bâtiment (§6.6 — au-dessus de la salle la transformée relève du layout, cf. FloorLayout).
+    await s.update("datacenters", dc.id, { location: "site-b", floor: 7 });
+    const aApres = anchor(eqR, { face_x: 0.25, face_y: 0.75, face_side: "front" });
+    near(aApres.x, 4886.85, "changer d'étage/bâtiment ne déplace PAS le point (repère LOCAL SALLE)");
+    near(aApres.y, 2497, "… [y]");
   }
   });
 
