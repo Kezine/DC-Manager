@@ -657,6 +657,11 @@ export class Store {
   /** Adresses IPAM RAPPROCHÉES d'une VM (index `vm_id`, cf. config.ts) — enfants liés listés par la fiche VM (T3.2),
       strict parité avec `ipAddressesOfEquipment` (même relation exclusive equipment_id / vm_id sur `ipAddresses`). */
   ipAddressesOfVm(vmId: string): any[] { return this._byFk("ipAddresses", "vm_id", vmId); }
+  /** VMs HÉBERGÉES par un équipement (index `host_equipment_id`, cf. data/config.ts) — sens INVERSE du lien
+      que la fiche VM suit déjà (`vm.host_equipment_id` → équipement). Passe par l'index secondaire, donc en
+      O(VMs de cet hôte) et jamais en balayage de la collection : le premier consommateur est la BULLE DE
+      SURVOL d'un équipement, reconstruite à chaque mouvement de souris. */
+  vmsOfHost(equipmentId: string): any[] { return this._byFk("vms", "host_equipment_id", equipmentId); }
   dhcpRangesOfNetwork(netId: string): any[] { return this._byFk("dhcpRanges", "network_id", netId); }
   dhcpRangesOfServer(eqId: string): any[] { return this._byFk("dhcpRanges", "server_id", eqId); }
   ipAddressByValue(addr: string): any { const r = this._byFk("ipAddresses", "address", addr); return r.length ? r[0] : null; }

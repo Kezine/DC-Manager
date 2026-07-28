@@ -6,6 +6,8 @@ import { ContextMenu } from "../../ui/ContextMenu";
 import type { CtxSection } from "../../ui/ContextMenu";
 import { Html } from "../../core/Html";
 import { Normalize } from "../../core/Normalize";
+// Bloc « VMs hébergées » de la bulle d'équipement (tri / bornage / échappement) — module PUR dédié.
+import { VmHostTip } from "../../core/VmHostTip";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 // CONTENEUR SALLE : `origin()` donne le centre d'un contenu en local salle — source UNIQUE du repli
@@ -104,7 +106,9 @@ export abstract class DcInteract extends DcPanels {
     return `<div class="tt-title">${Html.escape(r.name || I18n.t("lists.ph.rack"))}</div>` + rows.join("");
   }
 
-  /** Tooltip d'un équipement (type, marque/modèle, série, baie, groupe, nb de ports). */
+  /** Tooltip d'un équipement (type, marque/modèle, série, baie, groupe, nb de ports, VMs hébergées).
+      UNIQUE constructeur du contenu : la 2D (`wireOccupant`) et la 3D (`DcBase.webglTipHtml`, cible
+      « occ »/« eq ») passent toutes deux par ici — rien à mutualiser, les deux vues suivent d'office. */
   protected equipmentTipHtml(eqId: string): string {
     const e: any = this.store.get("equipments", eqId); if (!e) return "";
     const rk: any = e.rack_id ? this.store.get("racks", e.rack_id) : null;
@@ -116,6 +120,11 @@ export abstract class DcInteract extends DcPanels {
     // groupes : primaire (couleur héritée) + secondaires — un swatch par groupe membre.
     this.store.equipmentGroupIds(e).forEach((gid: string) => { const g: any = this.store.get("groups", gid); if (g) rows.push(this.tipRow(`${this.tipSwatch(g.color)}${Html.escape(g.label || "")}`)); });
     rows.push(this.tipRow(`${I18n.t("dc.interact.portCount", { count: nPorts })}`));
+    // VMs HÉBERGÉES (feature VM AMOVIBLE, cf. docs/vm-proxmox.md) : rien du tout quand l'équipement n'en
+    // héberge aucune — `VmHostTip.rows` rend [] et la bulle est strictement inchangée. La lecture passe par
+    // l'index `host_equipment_id` (cf. data/config.ts), donc en O(VMs de cet hôte) : ce builder est rejoué à
+    // CHAQUE mouvement de souris sur l'objet, un balayage de la collection y serait payé en continu.
+    VmHostTip.rows(this.store.vmsOfHost(e.id), (color) => this.tipSwatch(color)).forEach((r) => rows.push(this.tipRow(r)));
     return `<div class="tt-title">${Html.escape(e.name || I18n.t("lists.ph.equipment"))}</div>` + rows.join("");
   }
 

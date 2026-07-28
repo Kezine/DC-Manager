@@ -1,7 +1,7 @@
 /* Tests modules — entités, Store (CRUD, cascade, undo, routes, spares, sites…), helpers core.
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmHostTip, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Entités : normalisation au constructeur", async () => {
@@ -1007,6 +1007,109 @@ module.exports = async () => {
     ck.eq(VmClusterFormat.memGo(4096, null), "4,0 Go", "memGo : total absent → utilisé seul");
     ck.eq(VmClusterFormat.memGo(null, 16384), "? / 16,0 Go", "memGo : utilisé absent mais total présent");
     ck.eq(VmClusterFormat.memGo(null, null), "—", "memGo : tout absent → —");
+  }
+  });
+
+  await section("VmHostTip : bloc « VMs hébergées » de la bulle d'équipement (tri, bornage, échappement)", async () => {
+  {
+    // Fabrique de pastille INJECTÉE — l'appelant réel passe `DcInteract.tipSwatch` ; ici un marqueur
+    // reconnaissable qui laisse la COULEUR visible dans la sortie (c'est elle qu'on veut vérifier).
+    const sw = (color) => "[SW:" + color + "]";
+    const vm = (name, status, orphan) => ({ name, status, orphan: !!orphan });
+
+    // --- AUCUNE VM → AUCUNE ligne : la bulle d'un équipement sans VM doit rester STRICTEMENT inchangée
+    //     (pas de section vide, pas de « 0 VM »). C'est l'exigence n°1 du lot. ---
+    ck.eq(VmHostTip.rows([], sw).length, 0, "rows : liste vide → aucune ligne (bulle inchangée)");
+    ck.eq(VmHostTip.rows(null, sw).length, 0, "rows : null → aucune ligne (tolérant)");
+    ck.eq(VmHostTip.rows(undefined, sw).length, 0, "rows : undefined → aucune ligne (tolérant)");
+    ck.eq(VmHostTip.rows("pas un tableau", sw).length, 0, "rows : entrée non-tableau → aucune ligne (tolérant)");
+    ck.eq(VmHostTip.rows([null, undefined], sw).length, 0, "rows : que des trous → aucune ligne");
+
+    // --- UNE VM : ligne de TÊTE (compte, singulier) + une ligne par VM ---
+    const one = VmHostTip.rows([vm("srv-web-01", "running")], sw);
+    ck.eq(one.length, 2, "rows : 1 VM → 2 lignes (tête + VM)");
+    ck.eq(one[0], "1 VM hébergée", "rows : ligne de tête au SINGULIER (catalogue fr)");
+    ck.eq(one[1], "[SW:var(--ok)]srv-web-01 <span style=\"color:var(--fg-dimmer)\">· running</span>", "rows : pastille injectée + nom + statut BRUT");
+
+    // --- TRI par nom, STABLE : l'ordre d'entrée ne doit jamais transparaître dans la bulle ---
+    const sorted = VmHostTip.rows([vm("zeta", "running"), vm("alpha", "running"), vm("Mid", "running")], sw);
+    ck.eq(sorted[0], "3 VMs hébergées", "rows : ligne de tête au PLURIEL (3 VMs)");
+    ck(sorted[1].indexOf("alpha") >= 0 && sorted[2].indexOf("Mid") >= 0 && sorted[3].indexOf("zeta") >= 0, "rows : VMs triées par nom (alpha < Mid < zeta)");
+
+    // --- STATUTS : pastille par ensemble FERMÉ de couleurs, mot du provider affiché TEL QUEL ---
+    const stopped = VmHostTip.rows([vm("s1", "stopped")], sw);
+    ck.eq(stopped[1], "[SW:var(--fg-dimmer)]s1 <span style=\"color:var(--fg-dimmer)\">· stopped</span>", "rows : stopped → pastille neutre + mot brut");
+    const unknown = VmHostTip.rows([vm("s2", "paused")], sw);
+    ck.eq(unknown[1], "[SW:var(--fg-dimmer)]s2 <span style=\"color:var(--fg-dimmer)\">· paused</span>", "rows : statut INCONNU toléré, affiché tel quel (releases Proxmox)");
+    const noStatus = VmHostTip.rows([vm("s3", "")], sw);
+    ck.eq(noStatus[1], "[SW:var(--fg-dimmer)]s3", "rows : statut absent → nom seul (pas de suffixe vide)");
+    const orphan = VmHostTip.rows([vm("s4", "running", true)], sw);
+    ck.eq(orphan[1], "[SW:var(--err)]s4 <span style=\"color:var(--fg-dimmer)\">· orpheline · running</span>", "rows : orpheline PRIME sur le statut (pastille rouge + mention en tête du suffixe)");
+    ck.eq(VmHostTip.swatchColor({ status: "running" }), "var(--ok)", "swatchColor : running → var(--ok)");
+    ck.eq(VmHostTip.swatchColor({ status: "running", orphan: true }), "var(--err)", "swatchColor : orpheline prime sur running");
+    ck.eq(VmHostTip.swatchColor({}), "var(--fg-dimmer)", "swatchColor : sans statut → neutre");
+
+    // --- NOM absent → placeholder de listing (« (VM) »), jamais une ligne muette ---
+    ck.eq(VmHostTip.rows([{ status: "running" }], sw)[1], "[SW:var(--ok)](VM) <span style=\"color:var(--fg-dimmer)\">· running</span>", "rows : nom absent → placeholder « (VM) »");
+    ck.eq(VmHostTip.rows([vm("  espace  ", "")], sw)[1], "[SW:var(--fg-dimmer)]espace", "rows : nom rogné (trim)");
+
+    // --- BORNAGE : au-delà de la limite, une dernière ligne porte le RESTE ; la tête garde le TOTAL ---
+    const five = [vm("a", "running"), vm("b", "running"), vm("c", "running"), vm("d", "running"), vm("e", "running")];
+    const capped = VmHostTip.rows(five, sw, 3);
+    ck.eq(capped.length, 5, "bornage : limite 3 sur 5 VMs → 5 lignes (tête + 3 noms + reste)");
+    ck.eq(capped[0], "5 VMs hébergées", "bornage : la ligne de tête porte le TOTAL, pas le nombre affiché");
+    ck.eq(capped[4], "<span style=\"color:var(--fg-dimmer)\">… et 2 autres</span>", "bornage : ligne de reste « … et 2 autres »");
+    ck(capped[1].indexOf("a") >= 0 && capped[3].indexOf("c") >= 0, "bornage : ce sont les 3 PREMIÈRES du tri qui sont nommées");
+    const capped1 = VmHostTip.rows(five, sw, 4);
+    ck.eq(capped1[5], "<span style=\"color:var(--fg-dimmer)\">… et 1 autre</span>", "bornage : reste au SINGULIER (« … et 1 autre »)");
+    ck.eq(VmHostTip.rows(five, sw, 5).length, 6, "bornage : limite = total → aucune ligne de reste");
+    ck.eq(VmHostTip.rows(five, sw, 9).length, 6, "bornage : limite > total → aucune ligne de reste");
+    ck.eq(VmHostTip.rows(five, sw, 0).length, 3, "bornage : limite < 1 ramenée à 1 (tête + 1 nom + reste)");
+
+    // --- LIMITE PAR DÉFAUT : valeur EN DUR (le seul endroit à retoucher pour rallonger la bulle) ---
+    ck.eq(VmHostTip.MAX_LISTED, 8, "MAX_LISTED : borne d'affichage par défaut = 8");
+    const nine = [];
+    for (let i = 1; i <= 9; i++) nine.push(vm("vm-" + i, "running"));
+    const byDefault = VmHostTip.rows(nine, sw);
+    ck.eq(byDefault.length, 10, "défaut : 9 VMs → tête + 8 noms + reste = 10 lignes");
+    ck.eq(byDefault[9], "<span style=\"color:var(--fg-dimmer)\">… et 1 autre</span>", "défaut : la 9e VM bascule dans le reste");
+
+    // --- ÉCHAPPEMENT — LE point à ne pas rater : un nom et un statut de VM sont des données SOURCE
+    //     (cluster tiers) posées en innerHTML par `showTip`. Aucune balise ne doit pouvoir naître. ---
+    const hostile = VmHostTip.rows([{ name: '<img src=x onerror="alert(1)">', status: "<b>run</b>" }], sw);
+    ck.eq(hostile[1].indexOf("<img"), -1, "échappement : aucun <img ne survit dans la ligne");
+    ck.eq(hostile[1].indexOf("<b>"), -1, "échappement : aucune balise <b> ne naît d'un STATUT hostile");
+    ck(hostile[1].indexOf("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;") >= 0, "échappement : le nom hostile est rendu en ENTITÉS (lisible, inerte)");
+    ck(hostile[1].indexOf("&lt;b&gt;run&lt;/b&gt;") >= 0, "échappement : le statut hostile est rendu en ENTITÉS");
+    // Sortie de l'attribut `style` par une apostrophe/guillemet : impossible, la couleur ne vient JAMAIS
+    // de la donnée (ensemble fermé de constantes) et le nom est échappé avant d'y arriver.
+    const quoted = VmHostTip.rows([{ name: '" onmouseover="alert(1)', status: "running" }], sw);
+    ck.eq(quoted[1].indexOf('" onmouseover='), -1, "échappement : un guillemet du nom ne peut pas ouvrir un attribut");
+    ck(quoted[1].indexOf("&quot; onmouseover=&quot;alert(1)") >= 0, "échappement : guillemets du nom convertis en entités");
+    ck.eq(quoted[1].indexOf("[SW:var(--ok)]"), 0, "pastille : couleur issue de constantes internes, jamais de la donnée");
+  }
+  });
+
+  await section("Store.vmsOfHost : VMs hébergées par un équipement (index host_equipment_id)", async () => {
+  {
+    const s = await makeStore();
+    const host = await s.create("equipments", { name: "hyperviseur-1" });
+    const other = await s.create("equipments", { name: "hyperviseur-2" });
+    const v1 = await s.create("vms", { name: "web", ext_id: "c/100", host_equipment_id: host.id });
+    await s.create("vms", { name: "db", ext_id: "c/101", host_equipment_id: other.id });
+    await s.create("vms", { name: "sans-hote", ext_id: "c/102" });
+
+    ck.eq(s.vmsOfHost(host.id).length, 1, "vmsOfHost : 1 VM hébergée par l'hôte");
+    ck.eq(s.vmsOfHost(host.id)[0].id, v1.id, "vmsOfHost : c'est bien la VM rattachée");
+    ck.eq(s.vmsOfHost(other.id).length, 1, "vmsOfHost : l'autre hôte a la sienne (pas de fuite entre hôtes)");
+    ck.eq(s.vmsOfHost("inconnu").length, 0, "vmsOfHost : équipement sans VM → [] (donc bulle inchangée)");
+    // L'index SECONDAIRE est ce qui rend la lecture bon marché au survol : sans lui, `_byFk` retomberait
+    // en balayage de la collection à CHAQUE mouvement de souris.
+    ck(s._fk.vms && s._fk.vms.has("host_equipment_id"), "vmsOfHost : le champ est bien INDEXÉ (pas de balayage)");
+    // Cascade : supprimer l'hôte DÉTACHE la VM (elle n'est pas supprimée) → elle sort de la bulle.
+    await s.remove("equipments", host.id);
+    ck.eq(s.vmsOfHost(host.id).length, 0, "vmsOfHost : hôte supprimé → plus aucune VM hébergée (VM détachée, pas supprimée)");
+    ck.eq(s.get("vms", v1.id).host_equipment_id, null, "cascade : la VM survit, host_equipment_id détaché");
   }
   });
 
