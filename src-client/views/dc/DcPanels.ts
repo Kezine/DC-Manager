@@ -7,7 +7,7 @@ import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 // CONTENEUR SALLE : `origin()` donne le centre d'un contenu en local salle (position absente ⇒ demi-empreinte).
-import { RoomFrame } from "../../geometry/RoomFrame";
+import { PlacementFrame } from "../../geometry/PlacementFrame";
 import { FloorLayout } from "../../geometry/FloorLayout";
 import { SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM } from "../../geometry/SiteLayout";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
@@ -132,7 +132,7 @@ export abstract class DcPanels extends DcViews2D {
     const dc = this.current(); if (!dc) return;
     this.hidden3dRacks = new Set(this.displayedDcIds(dc).flatMap((d) => this.store.racksOfDc(d)).map((r: any) => r.id)); this.hidden3dRacks.delete(id);
     const r: any = this.store.get("racks", id);
-    if (r) { const c = RoomFrame.origin(RackGeometry.roomPlacement(r)); this.camTarget = { x: c.x, y: c.y, z: RackGeometry.physHeight(r) / 2 }; }   // baie sans position ⇒ demi-empreinte (là où elle est DESSINÉE)
+    if (r) { const c = PlacementFrame.origin(RackGeometry.roomPlacement(r)); this.camTarget = { x: c.x, y: c.y, z: RackGeometry.physHeight(r) / 2 }; }   // baie sans position ⇒ demi-empreinte (là où elle est DESSINÉE)
     this.selRackId = id; this.scale = null; this.render();
   }
 
@@ -145,7 +145,7 @@ export abstract class DcPanels extends DcViews2D {
       baie sur elle. Centres calculés UNE fois (le balayage teste chaque maille contre chaque baie). */
   protected freeCell(dc: any): { x: number; y: number } {
     const cell = dc.cell_mm, placed = this.store.racksOfDc(dc.id);
-    const centers = placed.map((r: any) => RoomFrame.origin(RackGeometry.roomPlacement(r)));
+    const centers = placed.map((r: any) => PlacementFrame.origin(RackGeometry.roomPlacement(r)));
     const occupied = (x: number, y: number) => centers.some((c) => Math.abs(c.x - x) < cell * 0.5 && Math.abs(c.y - y) < cell * 0.5);
     for (let y = cell / 2; y <= dc.depth_mm; y += cell) for (let x = cell / 2; x <= dc.width_mm; x += cell) if (!occupied(x, y)) return { x, y };
     return { x: cell / 2, y: cell / 2 };

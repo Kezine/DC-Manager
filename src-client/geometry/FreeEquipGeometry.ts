@@ -3,7 +3,7 @@ import { Normalize } from "../core/Normalize";
 import { EquipFaces } from "../registries/EquipFaces";
 // CONTENEUR SALLE : l'équipement libre lui DÉCLARE son placement ; la composition
 // « local équipement → local salle » lui appartient (cf. docs/placement.md §6.1).
-import type { RoomContentPlacement } from "./RoomFrame";
+import type { ContentPlacement } from "./PlacementFrame";
 
 /** Boîte d'un équipement libre : empreinte w×d, hauteur h, base z. */
 export interface FreeBox { w: number; d: number; h: number; z: number; }
@@ -101,7 +101,7 @@ export class FreeEquipGeometry {
     }
   }
 
-  /* ---- ce que l'équipement LIBRE donne à son CONTENEUR (la SALLE, cf. `RoomFrame`) ----
+  /* ---- ce que l'équipement LIBRE donne à son CONTENEUR (la SALLE, cf. `PlacementFrame`) ----
 
      ⚠ CES TROIS MÉTHODES REMPLACENT `portWorldC` / `portWorld` / `portNormal`, qui annonçaient « monde »
      jusque dans leur NOM alors qu'elles rendaient du LOCAL SALLE — la dette nommée par la doctrine
@@ -134,13 +134,14 @@ export class FreeEquipGeometry {
     }
   }
 
-  /** Lecture du placement de l'équipement LIBRE dans sa salle, à donner au CONTENEUR SALLE (`RoomFrame`) :
-      la seule chose que le conteneur ait besoin de savoir de lui (doctrine §6.2). Le nom des champs est
+  /** Lecture du placement de l'équipement LIBRE dans sa salle, à donner à son CONTENEUR — la SALLE, dont
+      `PlacementFrame` compose le repère : la seule chose que le conteneur ait besoin de savoir de lui
+      (doctrine §6.2). Le nom des champs est
       PROPRE à l'équipement (`dc_orientation`, `free_w_mm`/`free_l_mm`) — d'où cette lecture ici.
       ⚠ La demi-empreinte de repli n'est PAS permutée par le lacet (contrairement à `halfExtents`) : c'est
       la convention du dessin (`DcViews2D.equipNode`), qui pose un équipement sans position à `w/2`, `d/2`
       quelle que soit son orientation. */
-  static roomPlacement(eq: any): RoomContentPlacement {
+  static roomPlacement(eq: any): ContentPlacement {
     const bx = FreeEquipGeometry.box(eq);
     return {
       x: (eq.dc_x != null) ? eq.dc_x : null,

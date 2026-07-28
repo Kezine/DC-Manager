@@ -29,6 +29,51 @@ const mkStorage = () => {
 };
 global.window = { localStorage: mkStorage(), sessionStorage: mkStorage() };
 
+/* -------- lecture des IMPORTS d'une SOURCE TypeScript (verrous d'architecture) --------
+   Deux verrous en dépendent, et un seul détecteur les sert (principe n°3 : réutiliser plutôt que
+   dupliquer) : l'ISOLEMENT de `src-shared/` (test-shared-validation.js, doctrine §6.19) et la BORNE
+   §6.6 de `PlacementFrame` (test-geometry.js, §6.22). Tous deux relisent les SOURCES `.ts` et jamais
+   le compilé : c'est le spécificateur ÉCRIT par le contributeur qu'on contrôle, le compilé ayant déjà
+   résolu les alias. Le contrôle de DISCRIMINATION qui prouve que ce détecteur voit chaque forme
+   d'import vit dans la section d'isolement de `src-shared/`, et couvre donc les deux usages. */
+class TsImports {
+  /** Spécificateurs de module d'une source TS, TOUTES FORMES CONFONDUES → Map(spécificateur → ligne 1-based).
+      Passer par le PARSEUR TypeScript plutôt que par une expression régulière n'est pas un luxe : les
+      fichiers concernés DOCUMENTENT leurs propres imports en commentaire (`import { X } from "./Foo.js"` y
+      figure en prose), et une regex y verrait des faux positifs.
+      ⚠ `ts.preProcessFile` seul NE SUFFIT PAS — mesuré sur sonde : il RATE `export * as N from "x"`.
+      On prend donc l'UNION d'un parcours d'AST (exhaustif) et de `preProcessFile` (filet contre un type de
+      nœud oublié dans le parcours). Un verrou qui rate une forme donne une FAUSSE sécurité — c'est le
+      défaut `FieldSpec.max` (contrainte déclarée mais inerte) qu'on ne veut pas reproduire. */
+  static specifiersOf(text, fileName) {
+    const ts = require("typescript");
+    const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
+    const found = new Map();
+    const noteAt = (spec, pos) => {
+      if (typeof spec !== "string" || found.has(spec)) return;
+      found.set(spec, sf.getLineAndCharacterOfPosition(pos).line + 1);
+    };
+    const literalOf = (node) => (node && ts.isStringLiteralLike(node) ? node.text : null);
+    const visit = (node) => {
+      // `import … from "x"` / `import "x"` (effet de bord) / `import type … from "x"`
+      if (ts.isImportDeclaration(node)) noteAt(literalOf(node.moduleSpecifier), node.getStart(sf));
+      // `export … from "x"` / `export * from "x"` / `export * as N from "x"` / `export type { … } from "x"`
+      else if (ts.isExportDeclaration(node) && node.moduleSpecifier) noteAt(literalOf(node.moduleSpecifier), node.getStart(sf));
+      // `import X = require("x")` (forme TS)
+      else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) noteAt(literalOf(node.moduleReference.expression), node.getStart(sf));
+      // `import("x")` dynamique — et `require("x")` (CommonJS), refusé au même titre
+      else if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        if (callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.text === "require")) noteAt(literalOf(node.arguments[0]), node.getStart(sf));
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    for (const imported of ts.preProcessFile(text, true, true).importedFiles) noteAt(imported.fileName, imported.pos);
+    return found;
+  }
+}
+
 /* -------- localisation : init AVANT tout (lot B2a) --------
    Les registres de libellés (EquipmentTypes/SpareStatuses/Depths…) résolvent désormais leur libellé
    via `I18n.t(labelKey)` au POINT DE RENDU. Comme certaines sections testent `.label()` directement,
@@ -48,8 +93,9 @@ const { Projection } = D("geometry/Projection.js");
 const { Box } = D("geometry/Box.js");
 const { Painter } = D("geometry/Painter.js");
 const { RackGeometry } = D("geometry/RackGeometry.js");
-// CONTENEUR SALLE : composition « point local d'un contenu → local salle » (docs/placement.md §3 règle 1, §6.1).
-const { RoomFrame } = D("geometry/RoomFrame.js");
+// REPÈRE D'UN CONTENU PLACÉ : composition « point local d'un contenu → repère de l'origine fournie »
+// (docs/placement.md §3 règle 1, §6.1, §6.22).
+const { PlacementFrame } = D("geometry/PlacementFrame.js");
 const { GraphGeometry } = D("geometry/GraphGeometry.js");
 const { RouteGraphLayout, ROUTE_GRAPH } = D("geometry/RouteGraphLayout.js");
 const { LeaderLayout } = D("geometry/LeaderLayout.js");
@@ -159,4 +205,4 @@ function summary() {
   process.exit(0);
 }
 
-module.exports = { ck, section, summary, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, RoomFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, FieldFacet, Ip, Markdown, RichTooltip, VmNetMapping, VmIpMatch, VmClusterFormat, VmHostTip, VmLocate, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore };
+module.exports = { ck, section, summary, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, FieldFacet, Ip, Markdown, RichTooltip, VmNetMapping, VmIpMatch, VmClusterFormat, VmHostTip, VmLocate, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore };

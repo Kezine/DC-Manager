@@ -1,7 +1,7 @@
 /* Tests modules — code PARTAGÉ front/back (schéma, normalisation, validation, cascade).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("shared : DataValidation — champs d'audit (created_by/updated_by/dates) préservés au round-trip", async () => {
@@ -491,43 +491,13 @@ module.exports = async () => {
        Le verrou lit les SOURCES `.ts`, jamais le compilé : c'est le spécificateur ÉCRIT par le
        contributeur qu'on contrôle (le compilé, lui, a déjà résolu les alias). */
     const fs = require("fs");
-    const ts = require("typescript");
     const sharedDir = path.join(__dirname, "..", "..", "src-shared");
 
-    /** Spécificateurs de module d'une source TS, TOUTES FORMES CONFONDUES → Map(spécificateur → ligne 1-based).
-        Passer par le PARSEUR TypeScript plutôt que par une expression régulière n'est pas un luxe : ces
-        fichiers DOCUMENTENT leurs propres imports en commentaire (`import { X } from "./Foo.js"` y figure
-        en prose), et une regex y verrait des faux positifs.
-        ⚠ `ts.preProcessFile` seul NE SUFFIT PAS — mesuré sur sonde : il RATE `export * as N from "x"`.
-        On prend donc l'UNION d'un parcours d'AST (exhaustif) et de `preProcessFile` (filet contre un
-        type de nœud oublié dans le parcours). Un verrou qui rate une forme donne une FAUSSE sécurité —
-        c'est le défaut `FieldSpec.max` (contrainte déclarée mais inerte) qu'on ne veut pas reproduire. */
-    const moduleSpecifiersOf = (text, fileName) => {
-      const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
-      const found = new Map();
-      const noteAt = (spec, pos) => {
-        if (typeof spec !== "string" || found.has(spec)) return;
-        found.set(spec, sf.getLineAndCharacterOfPosition(pos).line + 1);
-      };
-      const literalOf = (node) => (node && ts.isStringLiteralLike(node) ? node.text : null);
-      const visit = (node) => {
-        // `import … from "x"` / `import "x"` (effet de bord) / `import type … from "x"`
-        if (ts.isImportDeclaration(node)) noteAt(literalOf(node.moduleSpecifier), node.getStart(sf));
-        // `export … from "x"` / `export * from "x"` / `export * as N from "x"` / `export type { … } from "x"`
-        else if (ts.isExportDeclaration(node) && node.moduleSpecifier) noteAt(literalOf(node.moduleSpecifier), node.getStart(sf));
-        // `import X = require("x")` (forme TS)
-        else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) noteAt(literalOf(node.moduleReference.expression), node.getStart(sf));
-        // `import("x")` dynamique — et `require("x")` (CommonJS), refusé au même titre
-        else if (ts.isCallExpression(node)) {
-          const callee = node.expression;
-          if (callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.text === "require")) noteAt(literalOf(node.arguments[0]), node.getStart(sf));
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(sf);
-      for (const imported of ts.preProcessFile(text, true, true).importedFiles) noteAt(imported.fileName, imported.pos);
-      return found;
-    };
+    /* Le DÉTECTEUR d'imports vit dans le harnais (`TsImports.specifiersOf`) : la BORNE §6.6 de
+       `PlacementFrame` (test-geometry.js, doctrine §6.22) s'en sert aussi, et le dupliquer serait
+       exactement la faute que ces verrous existent pour prévenir (principe n°3). Le contrôle de
+       DISCRIMINATION ci-dessous reste ICI, et couvre donc les DEUX verrous. */
+    const moduleSpecifiersOf = (text, fileName) => TsImports.specifiersOf(text, fileName);
 
     // -- contrôle de DISCRIMINATION : le détecteur voit-il VRAIMENT chaque forme, et RIEN d'autre ? --
     // Sans lui, le verrou passerait au vert en ne détectant rien du tout — le pire des états.

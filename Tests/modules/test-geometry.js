@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, RoomFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -616,11 +616,13 @@ module.exports = async () => {
   });
 
   /* ============================================================================================
-     CONTENEUR SALLE (docs/placement.md §3 règle 1, §6.1) — la salle place ses contenus : les BAIES
-     comme les ÉQUIPEMENTS LIBRES, qui sont l'un et l'autre « un objet posé dans une salle avec
-     position et lacet ». Le conteneur s'appelait `RackFrame` (conteneur BAIE) tant qu'il n'y avait
-     qu'un seul contenu de cette forme ; le mode libre est la DEUXIÈME occurrence, donc le moment
-     d'extraire (§4.3) — pas avant.
+     REPÈRE D'UN CONTENU PLACÉ (docs/placement.md §3 règle 1, §6.1) — le conteneur place ses contenus :
+     les BAIES comme les ÉQUIPEMENTS LIBRES, qui sont l'un et l'autre « un objet posé avec une position
+     et un lacet ». Le module s'appelait `RackFrame` (conteneur BAIE) tant qu'il n'y avait qu'un seul
+     contenu de cette forme, puis `RoomFrame` quand le mode libre a fourni la DEUXIÈME occurrence — le
+     moment d'extraire (§4.3), pas avant. Il est devenu `PlacementFrame` à la TROISIÈME (l'équipement
+     posé sur un ÉTAGE, §6.20), une fois constaté qu'AUCUN champ de la salle n'entrait dans son calcul :
+     il ne lit que ceux du CONTENU (§6.22).
      ⚠ Ces attentes sont EXPLICITES (valeurs EN DUR), volontairement : comparer les branches de
      `resolveFaceAnchor3D` au conteneur auquel elles délèguent désormais ne prouverait plus rien et
      resterait VERT (piège du lot 2, cf. doctrine §4.1). La parité avec l'ancien chemin a été prouvée
@@ -628,95 +630,161 @@ module.exports = async () => {
      72 576 comparaisons de waypoints (idem) ; ce qui est figé ICI, ce sont des coordonnées dérivées à
      la main du modèle, pas la sortie d'une implémentation.
      ============================================================================================ */
-  await section("RoomFrame : le CONTENEUR SALLE compose rotation PUIS translation (valeurs en dur)", async () => {
+  await section("PlacementFrame : le repère d'un contenu compose rotation PUIS translation (valeurs en dur)", async () => {
   {
     const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
     // placement DÉCLARÉ d'un contenu : position (nullable) + lacet + demi-empreinte de repli.
     const pl = (x, y, yawDeg, halfW, halfD) => ({ x, y, yawDeg, halfW, halfD: (halfD == null) ? halfW : halfD });
 
     // ---- repère : lacet CARDINAL + origine, dérivés des SEULS champs déclarés par le contenu
-    const b0 = RoomFrame.basis(pl(100, 200, 0, 300, 500));
+    const b0 = PlacementFrame.basis(pl(100, 200, 0, 300, 500));
     ck.eq(b0.cos, 1, "basis(0°) : cosinus = 1"); ck.eq(b0.sin, 0, "basis(0°) : sinus = 0");
     ck.eq(b0.originX, 100, "basis : origine X = position déclarée"); ck.eq(b0.originY, 200, "basis : origine Y = position déclarée");
     // ⚠ CORRECTION de ce lot (arbitrage tranché) : un contenu SANS position est posé à RAS DU COIN de la
     // salle, donc à sa DEMI-EMPREINTE — convention que suivaient déjà les DEUX vues qui dessinent et la
     // géométrie des waypoints. La résolution des ports repliait, elle, sur 0 : elle plaçait les ports une
     // demi-empreinte à côté de la baie affichée. C'est la RÉSOLUTION qui s'aligne sur le RENDU.
-    const bNul = RoomFrame.basis(pl(null, null, 0, 300, 500));
+    const bNul = PlacementFrame.basis(pl(null, null, 0, 300, 500));
     ck.eq(bNul.originX, 300, "basis : contenu NON positionné → origine X = demi-LARGEUR (ras du coin)");
     ck.eq(bNul.originY, 500, "basis : contenu NON positionné → origine Y = demi-PROFONDEUR");
     // les deux axes sont INDÉPENDANTS : une saisie à moitié faite ne fait retomber QUE l'axe manquant.
-    const bMix = RoomFrame.basis(pl(700, null, 0, 300, 500));
+    const bMix = PlacementFrame.basis(pl(700, null, 0, 300, 500));
     ck.eq(bMix.originX, 700, "basis : X saisi → X conservé"); ck.eq(bMix.originY, 500, "basis : Y absent → demi-profondeur");
-    ck.eq(RoomFrame.basis(pl(0, 0, 0, 300, 500)).originX, 0, "basis : X = 0 SAISI n'est pas « absent » (0 ≠ null)");
+    ck.eq(PlacementFrame.basis(pl(0, 0, 0, 300, 500)).originX, 0, "basis : X = 0 SAISI n'est pas « absent » (0 ≠ null)");
     // angles NON cardinaux : `Normalize.rackOrientation` les ramène à 0 — le port doit suivre la coque dessinée.
-    ck.eq(RoomFrame.basis(pl(0, 0, 45, 0)).sin, 0, "basis(45°) : angle non cardinal ramené à 0");
-    ck.eq(RoomFrame.basis(pl(0, 0, 450, 0)).sin, 1, "basis(450°) : replié sur 90°");
+    ck.eq(PlacementFrame.basis(pl(0, 0, 45, 0)).sin, 0, "basis(45°) : angle non cardinal ramené à 0");
+    ck.eq(PlacementFrame.basis(pl(0, 0, 450, 0)).sin, 1, "basis(450°) : replié sur 90°");
 
     // ---- POINT : rotation par le lacet, PUIS translation à l'origine du contenu
-    const p0 = RoomFrame.pointToRoom(b0, { x: 10, y: 20, z: 30 });
+    const p0 = PlacementFrame.pointToRoom(b0, { x: 10, y: 20, z: 30 });
     ck.eq(p0.x, 110, "pointToRoom(0°) : x = origine + x local"); ck.eq(p0.y, 220, "pointToRoom(0°) : y = origine + y local");
     ck.eq(p0.z, 30, "pointToRoom : le lacet ne touche JAMAIS Z");
-    const p90 = RoomFrame.pointToRoom(RoomFrame.basis(pl(0, 0, 90, 0)), { x: 10, y: 20, z: 30 });
+    const p90 = PlacementFrame.pointToRoom(PlacementFrame.basis(pl(0, 0, 90, 0)), { x: 10, y: 20, z: 30 });
     near(p90.x, -20, "pointToRoom(90°) : (10, 20) → (−20, 10) [x]"); near(p90.y, 10, "pointToRoom(90°) : … [y]");
-    const p180 = RoomFrame.pointToRoom(RoomFrame.basis(pl(1000, 2000, 180, 0)), { x: 10, y: 20, z: 30 });
+    const p180 = PlacementFrame.pointToRoom(PlacementFrame.basis(pl(1000, 2000, 180, 0)), { x: 10, y: 20, z: 30 });
     near(p180.x, 990, "pointToRoom(180°) : demi-tour puis translation [x]"); near(p180.y, 1980, "pointToRoom(180°) : … [y]");
-    const p270 = RoomFrame.pointToRoom(RoomFrame.basis(pl(0, 0, 270, 0)), { x: 10, y: 20, z: 30 });
+    const p270 = PlacementFrame.pointToRoom(PlacementFrame.basis(pl(0, 0, 270, 0)), { x: 10, y: 20, z: 30 });
     near(p270.x, 20, "pointToRoom(270°) : (10, 20) → (20, −10) [x]"); near(p270.y, -10, "pointToRoom(270°) : … [y]");
 
     // ---- DIRECTION : rotation SEULE. C'est LA distinction que chaque branche réécrivait à la main —
     // translater une normale la rendrait non unitaire et enverrait le connecteur 3D à l'autre bout de la salle.
-    const dLoin = RoomFrame.dirToRoom(RoomFrame.basis(pl(9999, -4242, 0, 0)), { x: 0, y: -1 });
+    const dLoin = PlacementFrame.dirToRoom(PlacementFrame.basis(pl(9999, -4242, 0, 0)), { x: 0, y: -1 });
     ck.eq(dLoin.x, 0, "dirToRoom : normale NON translatée par l'origine [x]");
     ck.eq(dLoin.y, -1, "dirToRoom : normale NON translatée par l'origine [y]");
     ck.eq(dLoin.z, 0, "dirToRoom : direction sans composante verticale → z = 0");
-    const d90 = RoomFrame.dirToRoom(RoomFrame.basis(pl(500, 500, 90, 0)), { x: 0, y: -1 });
+    const d90 = PlacementFrame.dirToRoom(PlacementFrame.basis(pl(500, 500, 90, 0)), { x: 0, y: -1 });
     near(d90.x, 1, "dirToRoom(90°) : façade (0, −1) → (1, 0) [x]"); near(d90.y, 0, "dirToRoom(90°) : … [y]");
     for (const o of [0, 90, 180, 270]) {
-      const d = RoomFrame.dirToRoom(RoomFrame.basis(pl(1234, 5678, o, 0)), { x: 0, y: -1 });
+      const d = PlacementFrame.dirToRoom(PlacementFrame.basis(pl(1234, 5678, o, 0)), { x: 0, y: -1 });
       ck(Math.abs(Math.hypot(d.x, d.y) - 1) < 1e-12, "dirToRoom(" + o + "°) : normale reste UNITAIRE");
     }
     // GÉNÉRALISATION apportée par le mode libre : une face peut être HORIZONTALE (dessus/dessous d'un
     // équipement libre). Le lacet est un lacet PUR : il laisse la composante verticale intacte.
     for (const o of [0, 90, 180, 270]) {
-      const dv = RoomFrame.dirToRoom(RoomFrame.basis(pl(1234, 5678, o, 0)), { x: 0, y: 0, z: 1 });
+      const dv = PlacementFrame.dirToRoom(PlacementFrame.basis(pl(1234, 5678, o, 0)), { x: 0, y: 0, z: 1 });
       ck.eq(dv.z, 1, "dirToRoom(" + o + "°) : normale VERTICALE inchangée par le lacet [z]");
       ck(Math.abs(dv.x) < 1e-12 && Math.abs(dv.y) < 1e-12, "dirToRoom(" + o + "°) : … et sans composante horizontale");
     }
 
     // ---- place : les deux d'un coup (ce que consomment les CINQ modes de placement)
-    const placed = RoomFrame.place(pl(1000, 2000, 90, 300, 500), { x: 10, y: 20, z: 30 }, { x: 0, y: -1 });
+    const placed = PlacementFrame.place(pl(1000, 2000, 90, 300, 500), { x: 10, y: 20, z: 30 }, { x: 0, y: -1 });
     near(placed.x, 980, "place(90°) : point tourné PUIS translaté [x]");
     near(placed.y, 2010, "place(90°) : … [y]");
     ck.eq(placed.z, 30, "place : Z inchangé");
     near(placed.n.x, 1, "place(90°) : normale tournée SANS translation [x]");
     near(placed.n.y, 0, "place(90°) : … [y]");
     // « à ras du coin », vu du contenu : la façade d'une boîte 600 × 1000 non positionnée tombe SUR le mur.
-    const auCoin = RoomFrame.place(pl(null, null, 0, 300, 500), { x: 0, y: -500, z: 0 }, { x: 0, y: -1 });
+    const auCoin = PlacementFrame.place(pl(null, null, 0, 300, 500), { x: 0, y: -500, z: 0 }, { x: 0, y: -1 });
     ck.eq(auCoin.x, 300, "place(sans position) : centre à la demi-largeur du coin [x]");
     ck.eq(auCoin.y, 0, "place(sans position) : la FAÇADE tombe exactement sur le mur y = 0");
 
     // ---- origin : le CENTRE d'un contenu en local salle = son point local (0, 0) placé par la salle.
     // C'est la lecture dont ont besoin le cadrage caméra, l'outil de positionnement, le placement
     // automatique et les deux vues qui dessinent — pour qu'AUCUN d'eux ne recopie la règle de repli.
-    const o0 = RoomFrame.origin(pl(1200, 800, 0, 300, 500));
+    const o0 = PlacementFrame.origin(pl(1200, 800, 0, 300, 500));
     ck.eq(o0.x, 1200, "origin : position déclarée [x]"); ck.eq(o0.y, 800, "origin : position déclarée [y]");
-    const oNul = RoomFrame.origin(pl(null, null, 0, 300, 500));
+    const oNul = PlacementFrame.origin(pl(null, null, 0, 300, 500));
     ck.eq(oNul.x, 300, "origin : contenu NON positionné → demi-LARGEUR"); ck.eq(oNul.y, 500, "origin : … demi-PROFONDEUR");
     // ⚠ le repli n'est PAS permuté par le lacet (contrairement à `halfExtents`) : c'est la convention du
     // DESSIN, et c'est ce qui distingue `origin` du repli sur les demi-extents orientés que portait
     // `DcInteract.posScene` — à 90°, les deux ne donnent PAS le même point.
     for (const yaw of [0, 90, 180, 270]) {
-      const oo = RoomFrame.origin(pl(null, null, yaw, 300, 500));
+      const oo = PlacementFrame.origin(pl(null, null, yaw, 300, 500));
       ck(oo.x === 300 && oo.y === 500, "origin(" + yaw + "°) : le repli ne PERMUTE pas largeur/profondeur");
     }
     for (const yaw of [0, 90, 180, 270]) {
-      const oo = RoomFrame.origin(pl(1200, 800, yaw, 300, 500));
+      const oo = PlacementFrame.origin(pl(1200, 800, yaw, 300, 500));
       ck(oo.x === 1200 && oo.y === 800, "origin(" + yaw + "°) : le lacet ne DÉPLACE pas l'origine, il tourne autour");
     }
     // cohérence stricte avec `pointToRoom` : l'origine EST l'image du point local (0, 0).
-    const viaPoint = RoomFrame.pointToRoom(RoomFrame.basis(pl(null, null, 90, 300, 500)), { x: 0, y: 0, z: 0 });
+    const viaPoint = PlacementFrame.pointToRoom(PlacementFrame.basis(pl(null, null, 90, 300, 500)), { x: 0, y: 0, z: 0 });
     ck(viaPoint.x === oNul.x && viaPoint.y === oNul.y, "origin === pointToRoom(0, 0) : une seule et même règle");
+  }
+  });
+
+  /* ============================================================================================
+     BORNE §6.6 — VERROU MÉCANIQUE. `PlacementFrame` ne doit connaître NI étage, NI bâtiment, NI site,
+     NI layout. SOUS la salle, la transformée d'un contenu est INTRINSÈQUE (déductible des seuls champs
+     de l'enregistrement, donc composable ici) ; AU-DESSUS, elle est une DÉCISION DE LAYOUT qui dépend
+     de l'ENSEMBLE AFFICHÉ. L'y faire entrer ferait dépendre la position d'un port de ce qui est à
+     l'écran — l'inverse exact de §6.8 — et produirait un repère qui prétend remonter seul au monde.
+     ⚠ POURQUOI CE VERROU EXISTE MAINTENANT, ET PAS AVANT : le NOM faisait le travail. « Rack » puis
+     « Room » bornaient la portée, et personne n'aurait songé à verser une transformée d'étage dans un
+     module nommé d'après la salle. `PlacementFrame` (§6.22) est EXACT — le calcul ne lit que les champs
+     du CONTENU — mais il n'interdit plus rien : il INVITE à y verser tout le placement. La borne est
+     donc portée par l'en-tête du module ET par ceci, exactement comme §6.19 l'a fait pour l'isolement
+     de `src-shared/` : une règle qu'aucune machine ne tient finit toujours par ne plus être tenue.
+     Le détecteur d'imports est celui du harnais (`TsImports.specifiersOf`) ; sa DISCRIMINATION (douze
+     formes vues, commentaires et chaînes littérales ignorés) est prouvée dans test-shared-validation.js
+     et vaut donc pour ce verrou-ci aussi.
+     ============================================================================================ */
+  await section("PlacementFrame : BORNE §6.6 — le repère n'importe NI layout NI vue (verrou)", async () => {
+  {
+    const fs = require("fs");
+    const source = path.join(__dirname, "..", "..", "src-client", "geometry", "PlacementFrame.ts");
+
+    /* LISTE BLANCHE, pas liste noire. Un simple refus par motif raterait le layout atteint
+       INDIRECTEMENT — par le barrel `./index`, par un module qui le ré-exporte, par un voisin neutre
+       aujourd'hui et porteur demain (le même effet TRANSITIF que §6.19 décrit pour `src-shared/`).
+       Ajouter une entrée ici doit rester un ACTE, relu comme tel : si l'import se défend, c'est la
+       doctrine §6.6 qu'il faut rouvrir d'abord — pas cette liste. */
+    const AUTORISES = new Set(["../core/Normalize"]);
+    // Motifs cités uniquement pour DIRE POURQUOI un refus tombe : ils n'élargissent ni ne restreignent
+    // la règle, qui reste « tout ce qui n'est pas sur la liste blanche est refusé ».
+    const PORTE_LE_LAYOUT = /(FloorLayout|SiteLayout|MultiLayout|PivotBounds|CameraFraming)/;
+    const PORTE_UNE_VUE = /(^|\/)(views|app|store|data|sync|ui)(\/|$)/;
+
+    const violationsDe = (texte, nom) => {
+      const refus = [];
+      for (const [spec, ligne] of TsImports.specifiersOf(texte, nom)) {
+        if (AUTORISES.has(spec)) continue;
+        const ou = nom + ":" + ligne + ' → "' + spec + '"';
+        if (PORTE_LE_LAYOUT.test(spec)) refus.push(ou + " — PORTE LE LAYOUT (§6.6 : au-dessus de la salle, la transformée dépend de l'ensemble AFFICHÉ)");
+        else if (PORTE_UNE_VUE.test(spec)) refus.push(ou + " — module de VUE / d'ÉTAT : ce repère est une géométrie PURE");
+        else refus.push(ou + " — hors LISTE BLANCHE (cf. la borne en tête de PlacementFrame.ts)");
+      }
+      return refus;
+    };
+
+    // -- le VERROU proprement dit, sur la SOURCE réelle (jamais le compilé : c'est le spécificateur ÉCRIT
+    //    qu'on contrôle, cf. §6.19) --
+    const texte = fs.readFileSync(source, "utf8");
+    ck(/export class PlacementFrame/.test(texte), "BORNE : la source lue est bien celle de PlacementFrame (anti-vacuité)");
+    const vus = TsImports.specifiersOf(texte, "PlacementFrame.ts");
+    ck(vus.has("../core/Normalize"), "BORNE : le détecteur lit des imports RÉELS — vus : " + ([...vus.keys()].join(", ") || "AUCUN"));
+    ck.eq(violationsDe(texte, "PlacementFrame.ts").join("  |  "), "",
+      "PlacementFrame : BORNE §6.6 — aucun import de layout, de vue, ni hors liste blanche");
+
+    // -- preuve que le verrou MORD : sondes SYNTHÉTIQUES, la source réelle n'est jamais modifiée --
+    ck(violationsDe('import { FloorLayout } from "./FloorLayout";', "sonde.ts").join("").includes("PORTE LE LAYOUT"),
+      "BORNE : un import de `FloorLayout` est REFUSÉ, et le motif nomme la raison");
+    ck.eq(violationsDe('import { SiteLayout } from "./SiteLayout";', "sonde.ts").length, 1, "BORNE : `SiteLayout` REFUSÉ");
+    ck(violationsDe('import { DcBase } from "../views/dc/DcBase";', "sonde.ts").join("").includes("VUE"),
+      "BORNE : un import de module de VUE est REFUSÉ");
+    ck.eq(violationsDe('const m = import("./FloorLayout");', "sonde.ts").length, 1,
+      "BORNE : un import DYNAMIQUE ne contourne pas le verrou");
+    ck.eq(violationsDe('import { Normalize } from "../core/Normalize";', "sonde.ts").length, 0,
+      "BORNE : l'import LÉGITIME de la liste blanche PASSE (le verrou n'est pas un refus aveugle)");
   }
   });
 

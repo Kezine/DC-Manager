@@ -1,9 +1,9 @@
 import type { Store } from "../store";
 import { RackGeometry } from "./RackGeometry";
-// CONTENEUR SALLE : la composition « point local d'un contenu → local salle » lui appartient
-// (docs/placement.md §3 règle 1 et §6.1). Les branches ci-dessous — baies ET équipements libres — ne
-// produisent plus que leur point/normale LOCAUX.
-import { RoomFrame } from "./RoomFrame";
+// REPÈRE D'UN CONTENU PLACÉ : la composition « point local d'un contenu → repère de l'origine fournie »
+// lui appartient (docs/placement.md §3 règle 1, §6.1 et §6.22). Les branches ci-dessous — baies ET
+// équipements libres — ne produisent plus que leur point/normale LOCAUX.
+import { PlacementFrame } from "./PlacementFrame";
 import { FreeEquipGeometry } from "./FreeEquipGeometry";
 import { Depths } from "../registries/Depths";
 import {
@@ -109,14 +109,14 @@ export class Resolver3D {
     const eq = s.get("equipments", port.equipment_id); if (!eq) return null;
     if (eq.dim_mode !== "free") return null;   // seul un dimensionnement LIBRE porte une boîte 6 faces
     // COMPOSITION : lacet PROPRE du contenu, PUIS translation à l'origine de son conteneur. C'est
-    // exactement ce que compose `RoomFrame` — on le RÉUTILISE plutôt que de réécrire ici une n-ième
+    // exactement ce que compose `PlacementFrame` — on le RÉUTILISE plutôt que de réécrire ici une n-ième
     // « rotation de l'hôte puis translation », ce que §3 règle 1 désigne comme la signature d'un conteneur
     // manquant. Ce qui change n'est PAS la composition mais la PROVENANCE de l'origine : un contenu de
-    // salle la DÉCLARE (`dc_x`/`dc_y`), un contenu d'étage la reçoit du LAYOUT (§6.6). `RoomFrame` compose
-    // donc dans le repère de l'origine qu'on lui donne — d'où du monde ici.
+    // salle la DÉCLARE (`dc_x`/`dc_y`), un contenu d'étage la reçoit du LAYOUT (§6.6). `PlacementFrame`
+    // compose donc dans le repère de l'origine qu'on lui donne — d'où du monde ici.
     // ⚠ `halfW`/`halfD` sont INERTES : ils ne servent que de REPLI quand la position manque, or l'origine
     // du conteneur est toujours fournie. Ils valent 0 pour dire « aucun repli à faire », pas une demi-taille.
-    const p = RoomFrame.place(
+    const p = PlacementFrame.place(
       { x: worldOriginX, y: worldOriginY, yawDeg: eq.dc_orientation, halfW: 0, halfD: 0 },
       FreeEquipGeometry.portLocal(eq, geo),
       FreeEquipGeometry.faceNormalLocal(geo.face_side),
@@ -137,8 +137,8 @@ export class Resolver3D {
 
       Les CINQ modes ne calculent plus que leur point d'ancrage et leur normale dans le repère LOCAL de
       leur hôte — la BAIE pour `side`/`tray`/`wall`/`rack`, l'ÉQUIPEMENT lui-même pour le mode libre
-      (`manual`) ; c'est le CONTENEUR SALLE (`RoomFrame`) qui les amène au repère de la salle, une baie et
-      un équipement libre étant l'un comme l'autre un objet posé dans une salle avec position et lacet. Ce
+      (`manual`) ; c'est `PlacementFrame` qui les amène au repère de la salle, une baie et un équipement
+      libre étant l'un comme l'autre un objet posé dans une salle avec position et lacet. Ce
       qui reste propre à chaque mode est son paramétrage d'ATTACHE (colonne de marge, plateau, paroi,
       index U + face de montage, face du boîtier) — hors interface commune, cf. doctrine §6.2. */
   resolveFaceAnchor3D(eq: any, geo: FaceGeo | any, dcId: string): Port3D | null {
@@ -153,7 +153,7 @@ export class Resolver3D {
       const xl = xMin + fx * (xMax - xMin);
       const yl = b.front ? yMin : yMax;
       const zl = b.z0 + (1 - fy) * (b.z1 - b.z0);
-      const p = RoomFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: 0, y: sgn });
+      const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: 0, y: sgn });
       return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
     }
     if (eq.placement_mode === "tray" && eq.tray_item_id) {
@@ -169,7 +169,7 @@ export class Resolver3D {
       const xl = xMin + fx * (xMax - xMin);
       const yl = (sgn < 0) ? yMin : yMax;
       const zl = b.z0 + (1 - fy) * (b.z1 - b.z0);
-      const p = RoomFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: 0, y: sgn });
+      const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: 0, y: sgn });
       return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
     }
     if (eq.placement_mode === "wall" && eq.rack_id) {
@@ -182,7 +182,7 @@ export class Resolver3D {
       else { yl = (b.n.y > 0) ? yMax : yMin; xl = xMin + fx * (xMax - xMin); }
       const zl = b.z0 + (1 - fy) * (b.z1 - b.z0);
       // seul mode BAIE dont la normale locale est portée par la BOÎTE (paroi gauche/droite ou fond de marge).
-      const p = RoomFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: b.n.x, y: b.n.y });
+      const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: b.n.x, y: b.n.y });
       return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
     }
     if (eq.dim_mode === "free") {
@@ -190,7 +190,7 @@ export class Resolver3D {
       // normale LOCAUX (boîte 6 faces) ; le conteneur applique son lacet propre (`dc_orientation`) et sa
       // position. Seule face à pouvoir être HORIZONTALE (dessus/dessous) — d'où une normale à 3 composantes.
       if (eq.dc_id !== dcId || eq.dc_x == null || eq.dc_y == null) return null;
-      const p = RoomFrame.place(FreeEquipGeometry.roomPlacement(eq), FreeEquipGeometry.portLocal(eq, geo), FreeEquipGeometry.faceNormalLocal(geo.face_side));
+      const p = PlacementFrame.place(FreeEquipGeometry.roomPlacement(eq), FreeEquipGeometry.portLocal(eq, geo), FreeEquipGeometry.faceNormalLocal(geo.face_side));
       return { x: p.x, y: p.y, z: p.z, rackId: null, n: p.n };
     }
     if (eq.placement_mode !== "rack" || !eq.rack_id || eq.rack_u == null) return null;
@@ -220,7 +220,7 @@ export class Resolver3D {
     // d'où le signe. Cette branche composait la même rotation que les trois autres, mais écrite sur la base
     // (avant, largeur) plutôt qu'en (cosinus, sinus) — deux notations d'UNE mécanique, ce que la
     // délégation au conteneur rend enfin visible.
-    const p = RoomFrame.place(
+    const p = PlacementFrame.place(
       RackGeometry.roomPlacement(rack),
       { x: lateral, y: -off, z: RackGeometry.uBaseZ(rack) + ((eq.rack_u - 1) + zf * uh) * U_MM },
       { x: 0, y: -ns },
@@ -265,7 +265,7 @@ export class Resolver3D {
      avait laissées de côté pour une raison précise : elles employaient l'AUTRE convention d'origine pour
      une baie non positionnée (`dc_x`/`dc_y` absents = DEMI-EMPREINTE, quand les modes d'attache repliaient
      sur 0). Cette divergence est désormais ARBITRÉE en faveur de la demi-empreinte — celle du dessin, cf.
-     l'en-tête de `RoomFrame` —, donc les unifier ne déplace plus rien : ces trois méthodes passent par le
+     l'en-tête de `PlacementFrame` —, donc les unifier ne déplace plus rien : ces trois méthodes passent par le
      conteneur SANS changer d'un micron ce qu'elles rendaient. Ce sont les MODES D'ATTACHE qui se sont
      alignés sur elles, et non l'inverse.
 
@@ -277,16 +277,16 @@ export class Resolver3D {
     const s = this.store;
     if (wp.kind !== "brush" || !wp.rack_id) return null;
     const rack = s.get("racks", wp.rack_id); if (!rack) return null;
-    const basis = RoomFrame.basis(RackGeometry.roomPlacement(rack));
+    const basis = PlacementFrame.basis(RackGeometry.roomPlacement(rack));
     const hd = (rack.depth || RACK_DEPTH_DEFAULT) / 2;
     const u0 = Math.max(1, wp.rack_u | 0), uh = Math.max(1, wp.u_height | 0);
     const z0 = RackGeometry.uBaseZ(rack) + (u0 - 1) * U_MM, z1 = z0 + uh * U_MM, zc = (z0 + z1) / 2;
     const depth = Math.min(Math.max(1, wp.depth_mm || 100), RackGeometry.cageDepth(rack));
     const fm = RackGeometry.frontMargin(rack);
-    const toRoom = (lx: number, ly: number, lz: number) => RoomFrame.pointToRoom(basis, { x: lx, y: ly, z: lz });
+    const toRoom = (lx: number, ly: number, lz: number) => PlacementFrame.pointToRoom(basis, { x: lx, y: ly, z: lz });
     const e0 = toRoom(0, -hd + fm + 2, zc), e1 = toRoom(0, -hd + fm + 2 + depth, zc);
     // section de la brosse : sa largeur suit l'axe +X LOCAL de la baie (une DIRECTION, donc tournée SEULE).
-    const right = RoomFrame.dirToRoom(basis, { x: 1, y: 0 }), up = { x: 0, y: 0, z: 1 };
+    const right = PlacementFrame.dirToRoom(basis, { x: 1, y: 0 }), up = { x: 0, y: 0, z: 1 };
     const bodyHW = RACK_MOUNT_WIDTH / 2 - RACK_EAR_MM;
     return { rack, co: basis.cos, so: basis.sin, cx: basis.originX, cy: basis.originY, hd, e0, e1, right, up, z0, z1, zc, depth,
       halfW: bodyHW, usableW: Math.max(0, 2 * bodyHW - 2 * BRUSH_PADDING_MM),
@@ -302,7 +302,7 @@ export class Resolver3D {
     const col = (wp.side_col === 1) ? 1 : 0, uTop = Math.max(1, wp.side_u | 0);
     const b = RackGeometry.sideSlotBoxLocal(rack, face, lr, col, uTop, SIDE_U_STEP);
     const lx = (Math.min(b.x0, b.x1) + Math.max(b.x0, b.x1)) / 2, lz = (b.z0 + b.z1) / 2, ly = b.yPlane;
-    const roomPoint = RoomFrame.pointToRoom(RoomFrame.basis(RackGeometry.roomPlacement(rack)), { x: lx, y: ly, z: lz });
+    const roomPoint = PlacementFrame.pointToRoom(PlacementFrame.basis(RackGeometry.roomPlacement(rack)), { x: lx, y: ly, z: lz });
     return { rack, face, lr, col, uTop, dcId: rack.datacenter_id, roomPoint };
   }
 
@@ -313,7 +313,7 @@ export class Resolver3D {
     const rack = s.get("racks", wp.rack_id); if (!rack) return null;
     const c = RackGeometry.capCellLocalCenter(rack, wp.cap_cx | 0, wp.cap_cy | 0);
     const z = (wp.cap_face === "floor") ? 0 : RackGeometry.physHeight(rack);
-    const roomPoint = RoomFrame.pointToRoom(RoomFrame.basis(RackGeometry.roomPlacement(rack)), { x: c.lx, y: c.ly, z });
+    const roomPoint = PlacementFrame.pointToRoom(PlacementFrame.basis(RackGeometry.roomPlacement(rack)), { x: c.lx, y: c.ly, z });
     return { rack, face: wp.cap_face, cx: wp.cap_cx | 0, cy: wp.cap_cy | 0, dcId: rack.datacenter_id, roomPoint };
   }
 

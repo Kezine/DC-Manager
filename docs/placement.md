@@ -34,7 +34,8 @@ FACTUELS et vérifiables, pas comme illustration rhétorique :
    une branche par mode de placement. La sixième (étage) est IMPOSSIBLE à écrire dans ce moule, parce
    que son hôte n'est pas une salle.
    ✅ **RÉSORBÉ EN ENTIER (§6.11 puis §6.12)** : les cinq branches délèguent désormais leur composition au
-   CONTENEUR SALLE (`RoomFrame`) — quatre via leur baie, la cinquième directement. La déduplication a
+   REPÈRE DU CONTENU PLACÉ (`PlacementFrame`, nommé `RoomFrame` jusqu'à §6.22) — quatre via leur baie, la
+   cinquième directement. La déduplication a
    confirmé le diagnostic deux fois : la branche `rack`, qui semblait différente, n'était que la même
    transformée écrite dans une autre notation ; et le mode libre, qu'on croyait « à part » parce que son
    hôte n'est pas une baie, était la MÊME transformée avec un autre nom de champ d'orientation.
@@ -96,10 +97,16 @@ l'application. Une réécriture d'un bloc serait déraisonnable. La convergence 
    a rien à casser.
 2. **Migrer UN mode de placement à la fois**, derrière les tests existants (`Tests/modules/`, modules
    purs) qui servent de filet.
-3. **Extraire l'abstraction à la DEUXIÈME occurrence, pas à la première.** On ne fabrique pas un
-   `PlacementFrame` générique sur un seul cas : sa forme n'est pas encore connue et on figerait une
+3. **Extraire l'abstraction à la DEUXIÈME occurrence, pas à la première.** On ne fabrique pas un repère
+   de placement générique sur un seul cas : sa forme n'est pas encore connue et on figerait une
    généralisation spéculative. On nomme le conteneur, on compose explicitement, et on extrait quand le
    deuxième mode migre.
+   > ⚠ **Le module `PlacementFrame` existe aujourd'hui (§6.22), et il n'est PAS le contre-exemple de
+   > cette règle : il en est l'APPLICATION.** Cette règle citait autrefois son nom comme celui de la
+   > mauvaise chose à faire ; ce qu'elle proscrit n'est pas le nom, c'est la CHRONOLOGIE. Le module a
+   > été extrait à la DEUXIÈME occurrence sous un nom étroit (`RackFrame`, §6.11), élargi à la troisième
+   > seulement (§6.12 puis §6.22), et à chaque fois sur des occurrences CONSTATÉES. Le fabriquer
+   > d'emblée, sur un seul cas, reste exactement aussi proscrit qu'avant.
 4. **Aucun élargissement de périmètre non demandé.** Un lot = un mode, vérifié, commité.
 
 ### 4.1 Méthode de vérification d'une migration
@@ -156,7 +163,7 @@ le plateau. Chacune sait déjà placer *ses* contenus, mais aucune ne le dit. No
 un porteur à ces règles, et le chaînage remplace le `switch`.
 
 ✅ **Fait pour la RÉSOLUTION** (§6.11 puis §6.12) : les cinq branches de `resolveFaceAnchor3D` et la
-géométrie des waypoints délèguent leur composition au conteneur SALLE (`RoomFrame`), et chaque contenu se
+géométrie des waypoints délèguent leur composition à `PlacementFrame` (§6.22), et chaque contenu se
 contente de DÉCLARER son placement. Restent éclatés, hors périmètre de ce chantier : `RackResize.fallout`
 (cage) et `trayArrange`/`trayFindSpot` (placement AUTOMATIQUE sur plateau — qui n'existe que dans deux
 conteneurs sur quatre, donc hors interface de base, cf. §6.2).
@@ -529,8 +536,9 @@ conteneur manquant. Le conteneur s'appelait `src-client/geometry/RackFrame.ts` ;
 produisent plus que leur point et leur normale LOCAUX.
 
 > ⚠ **Lire ce paragraphe au passé.** Le conteneur BAIE a été GÉNÉRALISÉ en conteneur SALLE au lot suivant
-> (`RoomFrame`, §6.12) : c'est le même module, renommé, une fois la deuxième occurrence constatée. Les
-> décisions ci-dessous restent valables telles quelles — seul le NOM a changé.
+> (`RoomFrame`, §6.12) une fois la deuxième occurrence constatée, puis renommé **`PlacementFrame`** à la
+> troisième (§6.22). C'est le même module de bout en bout, et les décisions ci-dessous restent valables
+> telles quelles — seul le NOM a changé, deux fois.
 
 **Ce que la déduplication a RÉVÉLÉ** — le résultat le plus utile du lot, comme au §6.7 :
 
@@ -551,11 +559,16 @@ produisent plus que leur point et leur normale LOCAUX.
 
 **Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
 
-- **Un conteneur BAIE, pas un `PlacementFrame` générique.** §4.3 autorise l'extraction dès la deuxième
-  occurrence — il y en avait quatre — mais pas la généralisation spéculative. Écarté : couvrir du même
-  geste la salle et l'étage. Leurs transformées ne sont pas de même nature (§6.6 : l'étage relève du
+- **Un conteneur BAIE, pas un repère de placement générique d'emblée.** §4.3 autorise l'extraction dès la
+  deuxième occurrence — il y en avait quatre — mais pas la généralisation spéculative. Écarté : couvrir du
+  même geste la salle et l'étage. Leurs transformées ne sont pas de même nature (§6.6 : l'étage relève du
   LAYOUT, pas d'une transformée intrinsèque), et la salle est le morceau le plus utilisé et le mieux rodé :
   la fusionner ici aurait mêlé le risque maximal à un lot qui n'en portait aucun.
+  ⚠ Ce point s'écrivait « pas un `PlacementFrame` générique », en citant ce nom comme celui du travers à
+  éviter. Le module le PORTE désormais (§6.22) — non par renoncement, mais parce que l'élargissement s'est
+  fait dans l'ordre que ce point exigeait : un nom étroit tant qu'une seule forme de contenu était
+  constatée, élargi seulement à mesure que les suivantes l'étaient. La borne §6.6 invoquée ici, elle, n'a
+  pas bougé d'un pouce.
 - **L'interface sépare POINT et DIRECTION.** `pointToRoom` tourne PUIS translate ; `dirToRoom` tourne
   SEULEMENT. C'est exactement la distinction que les quatre branches réécrivaient à la main, et la faute
   qu'on commet en recopiant — une normale translatée cesse d'être unitaire et expédie le connecteur 3D à
@@ -596,6 +609,12 @@ composaient la même rotation puis la même translation que le conteneur baie, a
 l'ÉQUIPEMENT (`dc_orientation`). Le conteneur baie a donc été GÉNÉRALISÉ, pas dupliqué :
 `src-client/geometry/RackFrame.ts` devient **`RoomFrame.ts`**, le CONTENEUR SALLE.
 
+> ⚠ **Lire les noms de ce paragraphe au passé.** `RoomFrame` s'appelle **`PlacementFrame`** depuis §6.22,
+> et ses types avec lui (`RoomContentPlacement` → `ContentPlacement`, `RoomBasis` → `PlacementBasis`,
+> `RoomPlacedPoint` → `PlacedPoint`). C'est le même module, et toutes les décisions ci-dessous valent
+> telles quelles. Ce que §6.22 a corrigé n'est aucune d'elles : c'est le constat, fait ici même, que le
+> module ne lit QUE les champs du CONTENU — la salle n'y a jamais été qu'un espace de coordonnées.
+
 **Ce que la migration a RÉVÉLÉ — et qui justifie rétrospectivement tout le chantier :**
 
 > **Les ports d'une baie NON POSITIONNÉE n'étaient pas au même endroit que la baie DESSINÉE.** Le §6.11
@@ -625,9 +644,17 @@ l'ÉQUIPEMENT (`dc_orientation`). Le conteneur baie a donc été GÉNÉRALISÉ, 
   ordonne l'extraction à la DEUXIÈME occurrence : une baie et un équipement libre sont, l'un comme l'autre,
   « un objet posé dans une salle avec position et lacet ». Écarté : un second module `FreeEquipFrame`
   jumeau, qui aurait figé la duplication au moment précis où elle devenait démontrable.
-- **La généralisation S'ARRÊTE au contenu d'une salle.** Pas de `PlacementFrame` universel : au-dessus de
-  la salle, la transformée relève du LAYOUT et non d'une transformée intrinsèque (§6.6) — une abstraction
-  qui remonterait jusqu'au monde mentirait. Le module le dit dans son en-tête.
+- **La généralisation S'ARRÊTE là où la transformée cesse d'être INTRINSÈQUE.** Au-dessus de la salle,
+  elle relève du LAYOUT (§6.6) — une abstraction qui remonterait d'elle-même jusqu'au monde mentirait.
+  Le module le dit dans son en-tête.
+  > ⚠ **Mise à jour (§6.22) — ce point s'écrivait « pas de `PlacementFrame` universel », et le module
+  > porte aujourd'hui ce nom.** Ce qui était visé n'était pas le NOM mais une CAPACITÉ : composer seul
+  > jusqu'au monde. Cette capacité reste proscrite, et elle n'est plus seulement affirmée — un verrou de
+  > test refuse tout import porteur de layout ou de vue (§6.22). Ce qui a changé est la PRÉMISSE : le
+  > point supposait que la limite passait à la frontière de la SALLE, alors qu'elle passe à la frontière
+  > de l'INTRINSÈQUE. Le module ne connaît toujours ni étage, ni bâtiment, ni layout ; il compose dans le
+  > repère de l'origine qu'on lui donne, d'où qu'elle vienne — c'est ce qui a rendu §6.20 possible sans
+  > y toucher, et ce qui a fini par rendre le nom « Room » faux.
 - **La transformée de la SALLE elle-même n'est PAS réécrite.** `FloorLayout.roomToWorld`/`roomLocalToPlan`
   la portent déjà : elles voient la salle comme un CONTENU de son plan d'étage, quand `RoomFrame` la voit
   comme un CONTENEUR. Deux rôles, deux modules ; l'en-tête de `RoomFrame` avertit de ne pas les confondre.
@@ -677,7 +704,7 @@ l'ÉQUIPEMENT (`dc_orientation`). Le conteneur baie a donc été GÉNÉRALISÉ, 
 
 Suite immédiate de §6.12, dont le « non fait, volontairement » désignait précisément ces sites. Le lot
 précédent avait tranché la règle (position absente ⇒ DEMI-EMPREINTE) et aligné la RÉSOLUTION ; il restait des
-consommateurs qui recopiaient l'ancien repli. `RoomFrame.origin(placement)` — le centre d'un contenu en local
+consommateurs qui recopiaient l'ancien repli. `PlacementFrame.origin(placement)` — le centre d'un contenu en local
 salle, c'est-à-dire l'image de son point local (0, 0) — devient leur source unique.
 
 **Le balayage complet du dépôt a trouvé DOUZE sites**, dont **trois conventions différentes** pour la même
@@ -873,7 +900,7 @@ nombres et rend un nombre, ce qui la rend testable en Node — le moteur 3D, lui
 - **13ᵉ SITE du balayage de §6.13, trouvé ici** : la branche LIBRE de `equipCenter` rendait `null` quand `dc_x`/`dc_y`
   manquaient, et « Localiser » repliait alors sur (0, 0, 0) — le coin de la salle. Le balayage l'avait manqué parce
   que le repli n'y était pas écrit `|| 0` mais caché derrière un `return null` chez l'appelant. Elle passe désormais
-  par `RoomFrame.origin(FreeEquipGeometry.roomPlacement(e))`, comme les quatre autres : l'objet est visé là où il est
+  par `PlacementFrame.origin(FreeEquipGeometry.roomPlacement(e))`, comme les quatre autres : l'objet est visé là où il est
   DESSINÉ. La garde de salle (`dc_id !== dcId`) est conservée.
 - **Les trois cibles PONCTUELLES gardent leur cadrage actuel** (port, extrémité de câble, waypoint). Un point n'a pas
   de taille : ce qu'on cadre autour de lui est un rayon de CONTEXTE, réglé à l'œil contre l'ancienne formule. Leurs
@@ -1280,7 +1307,7 @@ aurait donc compilé sur une API morte.
   monde de l'étage (`FloorLayout.equipFloorWorld` pour x/y, `FloorLayout.levelZ` pour le socle). Écarté :
   injecter le `MultiLayout` dans `Resolver3D` pour qu'il aille la chercher — cela ferait dépendre la position
   d'un port de l'ensemble AFFICHÉ, exactement l'inverse de §6.8, et c'est déjà l'alternative écartée en §6.11.
-- **La composition est DÉLÉGUÉE à `RoomFrame`, pas réécrite.** Ce qu'il faut composer — « lacet PROPRE du
+- **La composition est DÉLÉGUÉE à `PlacementFrame`, pas réécrite.** Ce qu'il faut composer — « lacet PROPRE du
   contenu, PUIS translation à son origine » — est *mot pour mot* ce que fait le conteneur salle ; seule la
   PROVENANCE de l'origine change (déclarée dans l'enregistrement pour un contenu de salle, fournie par le
   layout pour un contenu d'étage). Écarté : recomposer `cos`/`sin` dans `Resolver3D`, ce que §3 règle 1
@@ -1292,9 +1319,13 @@ aurait donc compilé sur une API morte.
   « posés avec une position et un lacet ». §4.3 autoriserait d'extraire. On ne l'a délibérément PAS fait :
   §6.12 a borné la généralisation au contenu d'une SALLE en s'appuyant sur §6.6, et la lever est une décision
   de doctrine, pas un effet de bord d'un lot de rendu. Ce qui est acquis et vérifiable est plus modeste, et
-  suffit : **`RoomFrame` compose dans le repère de l'origine qu'on lui donne**, il ne connaît toujours ni
+  suffit : **le module compose dans le repère de l'origine qu'on lui donne**, il ne connaît toujours ni
   étage, ni bâtiment, ni layout. Son en-tête le dit désormais, et pose la question ouverte plutôt que d'y
   répondre seul.
+  ✅ **Question TRANCHÉE en §6.22**, par l'utilisateur et non par un effet de bord : le module s'appelle
+  `PlacementFrame`. La constatation faite ici est exactement ce qui a rendu la décision possible ; ce qui
+  est resté intact, c'est la borne (le module ne remonte toujours pas au monde tout seul), et elle est
+  passée de l'affirmation au VERROU DE TEST.
 - **`worldOriginZ` ne porte QUE le socle du conteneur.** La hauteur propre (`dc_z`) est déjà dans le point
   local (`portLocal` part de `box().z`) : elle est ajoutée UNE fois, du côté du résolveur. C'est la même
   convention que `DcThreeScene.buildEquipBox`, qui pose son groupe sur le socle puis sa boîte sur `box().z` —
@@ -1406,17 +1437,88 @@ d'étage sélectionnables par le raycast du pivot, ce qui reviendrait sur une d�
 **Sondes de mutation** : axe Z neutralisé → **8 FAIL** ; bornes monde jamais émises par la vue → **8 FAIL** ;
 filtre des bâtiments dessinés retiré → **2 FAIL** ; bornes monde non signées → **10 FAIL**.
 
+### 6.22 `RoomFrame` devient `PlacementFrame` — **IMPLÉMENTÉ**
+
+Renommage PUR, décidé par l'utilisateur : zéro changement de comportement, aucune signature touchée
+au-delà des noms, aucune valeur d'assertion modifiée. Ce qui suit explique pourquoi le nom était devenu
+faux, et surtout **ce que la doctrine doit corriger d'elle-même** — car elle citait `PlacementFrame`,
+en trois endroits, comme le nom de ce qu'il ne fallait PAS faire.
+
+**Le nom mentait, et pas d'un cheveu.** Le module s'appelait « le repère de la SALLE », mais **aucun
+champ de la salle n'entre dans son calcul** : il reçoit un `RoomContentPlacement { x, y, yawDeg, halfW,
+halfD }`, qui sont entièrement les champs du **CONTENU**. La salle n'était que l'espace de coordonnées
+d'arrivée. Depuis §6.20, même cela avait cessé d'être vrai : `Resolver3D.resolvePortWorld3D` lui passe
+l'origine MONDE d'un conteneur ÉTAGE et récupère du MONDE. Le symptôme était visible dans le fichier
+lui-même — son en-tête portait **deux paragraphes dont le seul objet était de désamorcer son propre nom
+de classe**. Le code s'était généralisé de lui-même ; seul le nom était en retard.
+
+**Ce que la doctrine disait, et ce qu'elle dit maintenant.** §4.3, §6.11 et §6.12 employaient
+`PlacementFrame` comme CONTRE-EXEMPLE. Les laisser en l'état aurait rendu ce document *activement*
+trompeur — exactement le défaut que §6.7, §6.18 et §6.19 ont passé leur temps à réparer (« une doc qui
+dit *auto-suffisant* fait DUPLIQUER »). Les trois passages sont donc corrigés SUR PLACE, en distinguant :
+
+| | Statut |
+|---|---|
+| « On n'extrait pas une abstraction générique SPÉCULATIVEMENT, sur un seul cas » (§4.3) | **INTACT.** Le module en est même l'application : nom étroit à la 2ᵉ occurrence, élargi à la 3ᵉ, jamais avant |
+| « La généralisation s'arrête au contenu d'une SALLE » (§6.12) | **PRÉMISSE CORRIGÉE.** La limite ne passe pas à la frontière de la salle mais à celle de l'INTRINSÈQUE (§6.6) |
+| « Pas de repère qui remonte tout seul jusqu'au monde » (§6.6) | **INTACT, et désormais VERROUILLÉ** au lieu d'être seulement affirmé |
+
+L'extraction n'est plus spéculative parce qu'elle n'est plus une extraction : **trois occurrences sont
+CONSTATÉES** (baie en salle, équipement libre en salle, équipement libre sur étage), et le module s'est
+révélé être le repère du CONTENU, pas d'un conteneur particulier.
+
+**Décisions prises À L'IMPLÉMENTATION :**
+
+- **Le NOM faisait un travail de SÛRETÉ ; il fallait le remplacer, pas seulement le changer.** « Room »
+  BORNAIT la portée : personne n'aurait songé à verser une transformée d'étage dans un module nommé
+  d'après la salle. `PlacementFrame` ne borne plus rien — il INVITE au contraire à y verser tout le
+  placement, layout compris. C'est le prix du renommage, et il est payé en deux endroits : la borne §6.6
+  passe **en tête** de l'en-tête (elle y était jusqu'ici noyée en quatrième position), et un **VERROU
+  MÉCANIQUE** la tient.
+- **Le verrou** — section *« PlacementFrame : BORNE §6.6 »* de `Tests/modules/test-geometry.js`, calquée
+  sur §6.19. Il relit la **SOURCE** `src-client/geometry/PlacementFrame.ts` et refuse tout spécificateur
+  hors **LISTE BLANCHE** (aujourd'hui : `../core/Normalize`), en nommant fichier, ligne et spécificateur.
+  Liste BLANCHE et non noire : un refus par motif raterait le layout atteint **indirectement** — par le
+  barrel `./index`, par un module qui le ré-exporte, par un voisin neutre aujourd'hui et porteur demain
+  (le même effet TRANSITIF que §6.19 décrit pour `src-shared/`). Les motifs « porte le layout » / « module
+  de vue » ne servent qu'à DIRE pourquoi un refus tombe. **Preuve qu'il mord** : quatre sondes
+  synthétiques (import de `FloorLayout`, de `SiteLayout`, d'une vue, et `import()` DYNAMIQUE) produisent
+  chacune un refus, et une cinquième vérifie que l'import légitime passe — sans quoi le verrou serait un
+  refus aveugle. Le détecteur d'imports est CELUI de §6.19, déplacé dans le harnais
+  (`TsImports.specifiersOf`) plutôt que dupliqué ; son contrôle de DISCRIMINATION (douze formes vues,
+  commentaires et chaînes littérales ignorés) reste dans `test-shared-validation.js` et couvre donc les
+  deux verrous.
+- **Les TYPES suivent, et la COLLISION est évitée par construction.** `RoomContentPlacement` →
+  **`ContentPlacement`**, `RoomBasis` → **`PlacementBasis`**, `RoomPlacedPoint` → **`PlacedPoint`**.
+  `ContentLocalPoint`/`ContentLocalDir` ne changent PAS : ils nomment déjà le CONTENU, c'est-à-dire la
+  thèse même de ce lot. ⚠ `FloorLayout.RoomPlacement` existe et désigne autre chose — la salle comme
+  CONTENU de son plan d'étage. Aucun nom retenu ne s'en approche (`ContentPlacement` n'est pas
+  `RoomPlacement`), et l'avertissement de l'en-tête est CONSERVÉ : il reste utile, les deux modules
+  parlant de la salle dans des rôles inverses.
+- **⚠ `pointToRoom`/`dirToRoom` et `roomPlacement` GARDENT leur nom — SIGNALÉ, non arbitré.** Ces deux
+  méthodes ne sont appelées, dans le code tel qu'il est, qu'avec une origine LOCALE SALLE (la géométrie
+  des waypoints) ; seul `place` reçoit parfois une origine monde. Leur nom ne ment donc à aucun point
+  d'appel. Les renommer serait un SECOND arbitrage, qui devrait trancher du même geste
+  `RackGeometry.roomPlacement` et `FreeEquipGeometry.roomPlacement` — des noms que §6.12 a posés
+  délibérément, dans un lot dont c'était le sujet. Le précédent de §6.11 (les deux conventions d'origine,
+  signalées puis tranchées un lot plus tard) s'applique : une question qui apparaît en cours de route se
+  signale, elle ne s'arbitre pas en douce. `toParent()` reste, lui, explicitement proscrit (§6.6).
+- **L'histoire n'est pas effacée.** §6.11 et §6.12 GARDENT `RackFrame`/`RoomFrame` dans leur corps, sous
+  un avertissement « lire au passé » — la même forme que §6.6 (« Mise à jour ») et §6.19. Un lecteur qui
+  remonte un `git blame` doit retrouver les noms de l'époque ; un lecteur qui cherche le code d'aujourd'hui
+  est renvoyé ici.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
 |---|---|---|---|---|
 | *(site)* | monde | **monde** | s.o. | **migré** — position déclarée (GPS) ou repli 5 km (§6.9) ; TAILLE déclarée optionnelle faisant emprise et contraignant ses plans d'étage (§6.8) |
-| `rack` | baie → salle | local salle | oui | **migré** — la SALLE place la baie, la baie place son contenu (`RoomFrame`, §6.11 puis §6.12) |
+| `rack` | baie → salle | local salle | oui | **migré** — la SALLE place la baie, la baie place son contenu (`PlacementFrame`, §6.11 puis §6.12) |
 | `side` / `wall` | baie → salle | local salle | oui | **migré** — même conteneur que `rack` (§6.11) |
 | `tray` | étagère → baie → salle | local salle | oui | **migré** côté RÉSOLUTION (§6.11) ; géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). Reste : l'ÉTAGÈRE elle-même n'est pas encore un conteneur — la baie place directement le posé |
-| `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`RoomFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
+| `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`PlacementFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
 | *(waypoints)* | baie → salle | local salle | s.o. | **migré** — brosses et pins passent par le conteneur (§6.12) ; le champ `world` est renommé `roomPoint` |
-| `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `RoomFrame` |
+| `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `PlacementFrame` |
 
 Les équipements d'étage sont le premier contenu porté par un conteneur AUTRE qu'une salle. Ils sont
 donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
@@ -1467,15 +1569,18 @@ chaînage porte un garde anti-cycle (§6.16).
 - `src-client/geometry/CameraFraming.ts` — **RÈGLE DE CADRAGE** de « Localiser » (§6.15), pure : `FILL_RATIO` (90 %
   de la vue), `MIN_FRAMED_EXTENT_MM` (limite de zoom = une largeur de baie), `FOCUS_ELEVATION_RAD` (plongée par
   défaut), `objectExtent` (plus grande cote) et `halfExtentFor` (demi-étendue monde à cadrer, aspect compris).
-- `src-client/geometry/RoomFrame.ts` — **CONTENEUR SALLE** (§6.11 sous le nom `RackFrame`, généralisé en
-  §6.12) : `basis` (lacet + origine, dérivés du seul placement DÉCLARÉ, position absente ⇒ demi-empreinte),
-  `origin` (le CENTRE d'un contenu en local salle — source unique du repli, §6.13), `pointToRoom` (rotation
-  PUIS translation), `dirToRoom` (rotation SEULE, composante verticale recopiée), `place` (les deux, ce que
-  consomment les CINQ modes). `RoomContentPlacement` = l'interface étroite. ⚠ Il compose dans le repère de
-  l'ORIGINE qu'on lui donne : local salle pour ses appelants de salle, MONDE pour le résolveur d'étage
-  (§6.20). La transformée du conteneur étage n'est PAS ici — elle lui est fournie.
+- `src-client/geometry/PlacementFrame.ts` — **REPÈRE D'UN CONTENU PLACÉ** (`RackFrame` en §6.11,
+  `RoomFrame` en §6.12, nom actuel depuis §6.22) : `basis` (lacet + origine, dérivés du seul placement
+  DÉCLARÉ, position absente ⇒ demi-empreinte), `origin` (le CENTRE d'un contenu en local salle — source
+  unique du repli, §6.13), `pointToRoom` (rotation PUIS translation), `dirToRoom` (rotation SEULE,
+  composante verticale recopiée), `place` (les deux, ce que consomment les CINQ modes de salle ET le
+  résolveur d'étage). `ContentPlacement` = l'interface étroite, faite des SEULS champs du contenu.
+  ⚠ Il compose dans le repère de l'ORIGINE qu'on lui donne : local salle pour ses appelants de salle,
+  MONDE pour le résolveur d'étage (§6.20). La transformée du conteneur étage n'est PAS ici — elle lui est
+  fournie. ⚠ **BORNE §6.6** : il ne connaît ni étage, ni bâtiment, ni site, ni layout — le NOM ne le dit
+  plus, un VERROU de `Tests/modules/test-geometry.js` le tient (§6.22).
 - `src-client/geometry/Resolver3D.ts` — `resolveFaceAnchor3D` : les cinq modes délèguent leur composition à
-  `RoomFrame` (quatre via leur baie, le mode libre directement), ainsi que la géométrie des waypoints.
+  `PlacementFrame` (quatre via leur baie, le mode libre directement), ainsi que la géométrie des waypoints.
   Sortie en **LOCAL SALLE** pour tout ce qui est résolu DANS une salle — points, normales et offsets de
   conduit. `Port3D`. ⚠ **Une exception, annoncée par son nom** : `resolvePortWorld3D(portId, worldOriginX,
   worldOriginY, worldOriginZ)` résout un contenu placé sur un conteneur SANS salle (équipement d'étage) et

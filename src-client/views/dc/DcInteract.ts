@@ -12,7 +12,7 @@ import { RackGeometry } from "../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 // CONTENEUR SALLE : `origin()` donne le centre d'un contenu en local salle — source UNIQUE du repli
 // « position absente ⇒ demi-empreinte » que le cadrage caméra et l'outil de positionnement recopiaient.
-import { RoomFrame } from "../../geometry/RoomFrame";
+import { PlacementFrame } from "../../geometry/PlacementFrame";
 // Règle de CADRAGE : quelle étendue monde embrasser pour qu'une cible occupe la fraction voulue de la vue.
 import { CameraFraming } from "../../geometry/CameraFraming";
 import { FloorLayout } from "../../geometry/FloorLayout";
@@ -749,7 +749,7 @@ export abstract class DcInteract extends DcPanels {
         const ext = this.rackHalfExtents(r), o = Normalize.rackOrientation(r.orientation);
         // ⚠ le repli d'une baie SANS position n'est PAS `ext` : `rackHalfExtents` PERMUTE largeur/profondeur à
         // 90/270, alors que le dessin pose toujours la baie à (width/2, depth/2). Le conteneur salle tranche.
-        const c = RoomFrame.origin(RackGeometry.roomPlacement(r));
+        const c = PlacementFrame.origin(RackGeometry.roomPlacement(r));
         rects.push({ id: r.id, name: r.name || I18n.t("lists.ph.rack"), orient: o, anchor: "center", rect: { cx: c.x, cy: c.y, hx: ext.hx, hy: ext.hy },
           commit: async (cx, cy) => {
             const c = clamp(cx, cy, ext.hx, ext.hy, frame);
@@ -834,8 +834,8 @@ export abstract class DcInteract extends DcPanels {
   }
 
   /** Centre monde (mm) d'un équipement dans la salle `dcId` (repère salle = monde en mode simple DC), ou null.
-      L'objet visé étant TOUJOURS dans une baie (ou libre), sa position en salle passe par le CONTENEUR SALLE
-      (`RoomFrame.origin` + le placement DÉCLARÉ par la baie) : une baie sans `dc_x`/`dc_y` est posée à sa
+      L'objet visé étant TOUJOURS dans une baie (ou libre), sa position en salle passe par son CONTENEUR
+      (`PlacementFrame.origin` + le placement DÉCLARÉ par la baie) : une baie sans `dc_x`/`dc_y` est posée à sa
       demi-empreinte, comme elle est DESSINÉE. Cf. docs/placement.md §6.12. */
   protected equipCenter(e: any, dcId: string): Vec3 | null {
     // POSÉ SUR UNE ÉTAGÈRE (tray) : dim_mode "free" MAIS sans dc_id → centre déduit de la baie hôte (via l'étagère).
@@ -843,7 +843,7 @@ export abstract class DcInteract extends DcPanels {
     if (e.placement_mode === "tray" && e.tray_item_id) {
       const tray: any = this.store.get("rackItems", e.tray_item_id); if (!tray || !tray.rack_id) return null;
       const rk: any = this.store.get("racks", tray.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
-      const b = RackGeometry.trayEquipBoxLocal(rk, tray, e), c = RoomFrame.origin(RackGeometry.roomPlacement(rk));
+      const b = RackGeometry.trayEquipBoxLocal(rk, tray, e), c = PlacementFrame.origin(RackGeometry.roomPlacement(rk));
       return { x: c.x, y: c.y, z: (b.z0 + b.z1) / 2 };
     }
     // MONTÉ EN MARGE / EN PAROI : même piège d'ORDRE que l'étagère, et il était tombé dedans. `dim_mode`
@@ -853,7 +853,7 @@ export abstract class DcInteract extends DcPanels {
     // deux modes AVANT le mode libre ; cet ordre-ci s'aligne sur lui.
     if ((e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id) {
       const rk: any = this.store.get("racks", e.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
-      const c = RoomFrame.origin(RackGeometry.roomPlacement(rk));
+      const c = PlacementFrame.origin(RackGeometry.roomPlacement(rk));
       return { x: c.x, y: c.y, z: RackGeometry.physHeight(rk) / 2 };
     }
     // LIBRE : le centre vient du CONTENEUR SALLE, comme pour les modes ci-dessus — une position absente se
@@ -862,12 +862,12 @@ export abstract class DcInteract extends DcPanels {
     // 13ᵉ site du balayage de §6.13, invisible parce que caché derrière un `return null` et non un `|| 0`.
     if (e.dim_mode === "free") {
       if (e.dc_id !== dcId) return null;
-      const b = FreeEquipGeometry.box(e), c = RoomFrame.origin(FreeEquipGeometry.roomPlacement(e));
+      const b = FreeEquipGeometry.box(e), c = PlacementFrame.origin(FreeEquipGeometry.roomPlacement(e));
       return { x: c.x, y: c.y, z: b.z + b.h / 2 };
     }
     if (e.placement_mode === "rack" && e.rack_id && e.rack_u != null) {
       const rk: any = this.store.get("racks", e.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
-      const c = RoomFrame.origin(RackGeometry.roomPlacement(rk));
+      const c = PlacementFrame.origin(RackGeometry.roomPlacement(rk));
       return { x: c.x, y: c.y, z: RackGeometry.uBaseZ(rk) + ((e.rack_u - 1) + Math.max(1, e.u_height | 0 || 1) / 2) * U_MM };
     }
     return null;
@@ -897,7 +897,7 @@ export abstract class DcInteract extends DcPanels {
       « Localiser une baie » et « Localiser un équipement MONTÉ dans une baie » — les deux cadrent la
       MÊME chose, la baie entière (l'équipement, lui, se repère à sa surbrillance ambre). */
   protected rackFocus(rk: any): { p: Vec3; extent: number } {
-    const c = RoomFrame.origin(RackGeometry.roomPlacement(rk)), h = RackGeometry.physHeight(rk), he = RackGeometry.halfExtents(rk);
+    const c = PlacementFrame.origin(RackGeometry.roomPlacement(rk)), h = RackGeometry.physHeight(rk), he = RackGeometry.halfExtents(rk);
     return { p: { x: c.x, y: c.y, z: h / 2 }, extent: CameraFraming.objectExtent(2 * he.hx, 2 * he.hy, h) };
   }
 
