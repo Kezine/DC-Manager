@@ -5,13 +5,16 @@
    ============================================================================= */
 
 /* ---- géométrie de base ---- */
-export const U_MM = 44.45;                    // hauteur d'un U (mm)
+/* Cotes GÉNÉRALES de baie : la source unique est `src-shared/RackConstants` (la validation partagée en
+   dépend autant que la géométrie du front). Elles étaient DÉCLARÉES ici et RÉPLIQUÉES là-bas ; le sens
+   de la dépendance suit désormais celui que les cotes d'étagère suivaient déjà (cf. plus bas).
+   ⚠ Les noms HISTORIQUES du front sont conservés par ALIAS : ce lot déduplique des VALEURS, il ne
+   renomme pas une API que des dizaines de fichiers importent. */
+export { U_MM, RACK_EAR_MM, RACK_EAR_STANDOFF_MM } from "../../src-shared/RackConstants";
+export { RACK_MOUNT_WIDTH_MM as RACK_MOUNT_WIDTH, RACK_DEPTH_DEFAULT_MM as RACK_DEPTH_DEFAULT } from "../../src-shared/RackConstants";
+import { U_MM } from "../../src-shared/RackConstants";   // utilisée plus bas (WALL_COL_MIN)
 export const RACK_WIDTH_DEFAULT = 600;        // largeur EXTÉRIEURE de rack par défaut (mm)
 export const RACK_MOUNT_MARGIN_DEFAULT = 50;  // marge par défaut (mm) — repli latéral ET vertical (≤ v108)
-export const RACK_MOUNT_WIDTH = 482.6;        // entraxe des rails 19″ (mm) = largeur zone de montage
-export const RACK_EAR_MM = 15;                // largeur d'une oreille de montage, par côté (mm)
-export const RACK_EAR_STANDOFF_MM = 3;        // épaisseur standard RÉSERVÉE aux oreilles DEVANT la cage : la façade de tout occupant (équipement ou pseudo) est posée à cette distance du plan de montage — les oreilles remplissent la réserve, dans la continuité de la face, sans collision avec les montants
-export const RACK_DEPTH_DEFAULT = 1000;       // profondeur EXTÉRIEURE par défaut (mm)
 export const RACK_DEPTHS = [600, 800, 1000, 1200];
 export const RACK_ORIENTATIONS = [0, 90, 180, 270];   // pas de 90° (sens horaire)
 /** Faces de baie (simple / double). Libellés i18n (résolus au rendu, cf. domaine `domain`). */

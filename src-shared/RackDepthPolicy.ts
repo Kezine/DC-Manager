@@ -43,12 +43,13 @@
    (serveur) l'exige ; l'omettre compile côté front et CASSE le build serveur.
    ============================================================================ */
 
-/* ---- constante GÉNÉRALE de baie : RÉPLIQUE ASSUMÉE de `src-client/domain/constants.ts`.
-   Même choix qu'en tête de `TrayGeometry` : l'unifier reviendrait à migrer
-   `domain/constants.ts` en entier (elle sert toute la géométrie de baie), très au-delà du
-   besoin de ce module. Un test anti-divergence verrouille l'égalité. ---- */
-/** Profondeur EXTÉRIEURE par défaut d'une baie (mm) = `RACK_DEPTH_DEFAULT` (front). */
-export const RACK_DEPTH_DEFAULT_MM = 1000;
+/* ---- cote GÉNÉRALE de baie : IMPORTÉE de sa source unique (`RackConstants`). Elle était
+   RÉPLIQUÉE ici, sous le même argument qu'en tête de `TrayGeometry` — « l'unifier reviendrait
+   à migrer `domain/constants.ts` en entier ». C'était faux : cinq cotes suffisaient.
+   RÉ-EXPORTÉE pour ne rien casser chez qui l'importait d'ici, et parce que la profondeur par
+   défaut fait partie de la POLITIQUE que ce module publie. ---- */
+export { RACK_DEPTH_DEFAULT_MM } from "./RackConstants.js";
+import { RACK_DEPTH_DEFAULT_MM } from "./RackConstants.js";
 
 export class RackDepthPolicy {
   /** Profondeur EXTÉRIEURE (mm) : celle du châssis. `0` et l'absence retombent sur le défaut —

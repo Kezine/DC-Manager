@@ -819,12 +819,29 @@ module.exports = async () => {
     ck.eq(deep.reached, 600, "over_depth : cote atteinte = 600 mm");
     ck.eq(TrayGeometry.fitProblem({ ...eq, dc_orientation: 90, tray_x: 200, tray_y: 0 }, cant).code, "over_width", "rotation 90° : l'empreinte permutée (300 de large) déborde à x = 200");
 
-    // -- constantes : anti-divergence avec le domaine front (répliques ASSUMÉES, cf. en-tête du module) --
+    /* -- cotes GÉNÉRALES de baie : la RÉPLIQUE est SUPPRIMÉE, elles ont une source unique.
+       ⚠ Les anciennes assertions d'anti-divergence (`TRAY_U_MM === C.U_MM`) sont devenues TAUTOLOGIQUES
+       le jour de la bascule : les deux noms désignent désormais le MÊME binding, l'égalité ne pouvait
+       plus échouer. Elles sont donc remplacées par des attentes EXPLICITES sur les VALEURS (recette de
+       la doctrine §4.1) — seules capables de détecter qu'une cote a été changée par erreur — plus une
+       vérification que le front RÉ-EXPORTE bien la source unique au lieu de la redéclarer. */
     const C = D("domain/constants.js");
-    ck.eq(TrayGeom.TRAY_U_MM, C.U_MM, "constante : TRAY_U_MM = U_MM (front)");
-    ck.eq(TrayGeom.TRAY_MOUNT_WIDTH_MM, C.RACK_MOUNT_WIDTH, "constante : TRAY_MOUNT_WIDTH_MM = RACK_MOUNT_WIDTH (front)");
-    ck.eq(TrayGeom.TRAY_EAR_MM, C.RACK_EAR_MM, "constante : TRAY_EAR_MM = RACK_EAR_MM (front)");
-    ck.eq(TrayGeom.TRAY_EAR_STANDOFF_MM, C.RACK_EAR_STANDOFF_MM, "constante : TRAY_EAR_STANDOFF_MM = RACK_EAR_STANDOFF_MM (front)");
+    const RC = SHARED("src-shared/RackConstants.js");
+    ck.eq(RC.U_MM, 44.45, "cote 19″ : hauteur d'un U (mm)");
+    ck.eq(RC.RACK_MOUNT_WIDTH_MM, 482.6, "cote 19″ : entraxe des rails (mm)");
+    ck.eq(RC.RACK_EAR_MM, 15, "cote 19″ : largeur d'une oreille, par côté (mm)");
+    ck.eq(RC.RACK_EAR_STANDOFF_MM, 3, "cote 19″ : réserve d'oreilles devant la cage (mm)");
+    ck.eq(RC.RACK_DEPTH_DEFAULT_MM, 1000, "cote de baie : profondeur extérieure par défaut (mm)");
+    // le front RÉ-EXPORTE (noms historiques conservés par alias) — plus aucune valeur écrite deux fois.
+    ck.eq(C.U_MM, RC.U_MM, "front : `U_MM` ré-exporté depuis la source unique");
+    ck.eq(C.RACK_MOUNT_WIDTH, RC.RACK_MOUNT_WIDTH_MM, "front : `RACK_MOUNT_WIDTH` = alias de `RACK_MOUNT_WIDTH_MM`");
+    ck.eq(C.RACK_EAR_MM, RC.RACK_EAR_MM, "front : `RACK_EAR_MM` ré-exporté");
+    ck.eq(C.RACK_EAR_STANDOFF_MM, RC.RACK_EAR_STANDOFF_MM, "front : `RACK_EAR_STANDOFF_MM` ré-exporté");
+    ck.eq(C.RACK_DEPTH_DEFAULT, RC.RACK_DEPTH_DEFAULT_MM, "front : `RACK_DEPTH_DEFAULT` = alias de `RACK_DEPTH_DEFAULT_MM`");
+    // et les noms préfixés `TRAY_*` — qui n'avaient rien de propre à une étagère — ont DISPARU.
+    ck.eq(TrayGeom.TRAY_U_MM, undefined, "les alias `TRAY_*` des cotes GÉNÉRALES ont disparu (elles ne sont pas propres à l'étagère)");
+    ck.eq(TrayGeom.TRAY_MOUNT_WIDTH_MM, undefined, "… idem pour l'entraxe");
+    ck(TrayGeom.TRAY_DEPTH_DEFAULT_MM != null, "…mais les cotes VRAIMENT propres à l'étagère restent publiées ici (anti-vacuité)");
     // les cotes PROPRES à l'étagère, elles, ne sont plus répliquées : le front les RÉ-EXPORTE d'ici.
     ck.eq(C.TRAY_DEPTH_DEFAULT_MM, TrayGeom.TRAY_DEPTH_DEFAULT_MM, "cote d'étagère : le front ré-exporte la valeur PARTAGÉE (450)");
     ck.eq(C.TRAY_SHEET_RESERVE_MM, TrayGeom.TRAY_SHEET_RESERVE_MM, "cote d'étagère : réserve de tôle ré-exportée (5)");
@@ -897,9 +914,13 @@ module.exports = async () => {
     ck.eq(P.hasDoor({ door_rear: { enabled: true } }), true, "porte ARRIÈRE activée suffit");
     ck.eq(P.door({ door_rear: { enabled: true } }, "rear").enabled, true, "door() rend l'enregistrement de la face demandée");
 
-    // -- anti-divergence : la constante RÉPLIQUÉE doit valoir celle du domaine front (cf. en-tête) --
-    const C = D("domain/constants.js");
-    ck.eq(RackDepthPol.RACK_DEPTH_DEFAULT_MM, C.RACK_DEPTH_DEFAULT, "constante : RACK_DEPTH_DEFAULT_MM = RACK_DEPTH_DEFAULT (front)");
+    // -- la constante n'est plus RÉPLIQUÉE : ce module la RÉ-EXPORTE depuis `RackConstants`, où elle
+    //    est vérifiée par sa VALEUR (l'ancienne comparaison front ⇄ partagé serait tautologique).
+    //    Ce qui est éprouvé ICI est que la POLITIQUE de profondeur continue de la publier et de s'en
+    //    servir comme repli — c'est son comportement, pas l'égalité de deux noms.
+    ck.eq(RackDepthPol.RACK_DEPTH_DEFAULT_MM, 1000, "la politique publie toujours la profondeur par défaut (1000 mm)");
+    ck.eq(RackDepthPol.RackDepthPolicy.outerDepth({}), 1000, "…et s'en sert de repli quand la baie n'en déclare pas");
+    ck.eq(RackDepthPol.RackDepthPolicy.outerDepth({ depth: 0 }), 1000, "…y compris pour une profondeur NULLE (qui n'a pas de sens)");
 
     // -- le RENDU délègue : `RackGeometry` n'est plus qu'un alias (mêmes signatures, mêmes valeurs) --
     ck.eq(RackGeometry.cageDepth({ depth: 1000, cage_depth_mm: 1200 }), 1000, "RackGeometry.cageDepth : borne désormais, comme la validation");

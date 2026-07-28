@@ -45,22 +45,12 @@ export const TRAY_SHEET_RESERVE_MM = 5;
 /** Garde LATÉRALE (mm) de chaque côté réservée aux renforts (porte-à-faux) : les posés n'y empiètent pas. */
 export const TRAY_GUSSET_CLEARANCE_MM = 4;
 
-/* ---- constantes GÉNÉRALES de baie dont le plateau dépend : RÉPLIQUES assumées des
-   constantes front (`src-client/domain/constants.ts`). Les unifier déborderait très
-   largement du besoin de l'étagère (elles servent toute la géométrie de baie) — c'est
-   un lot à part. Un test anti-divergence verrouille leur égalité, comme pour les enums
-   de `DataValidation.ts`. ---- */
-/** Hauteur d'un U (mm) = `U_MM` (front). */
-export const TRAY_U_MM = 44.45;
-/** Entraxe des rails 19″ (mm) = `RACK_MOUNT_WIDTH` (front). */
-export const TRAY_MOUNT_WIDTH_MM = 482.6;
-/** Largeur d'une oreille de montage, par côté (mm) = `RACK_EAR_MM` (front) : le plateau
-    est le CORPS 19″, les oreilles s'accrochant aux rails. */
-export const TRAY_EAR_MM = 15;
-/** Réserve d'oreilles DEVANT la cage (mm) = `RACK_EAR_STANDOFF_MM` (front) : le plateau
-    « dual » est posé de plan de façade à plan de façade, donc déborde de cette réserve
-    à chaque extrémité. */
-export const TRAY_EAR_STANDOFF_MM = 3;
+/* ---- cotes GÉNÉRALES de baie dont le plateau dépend : IMPORTÉES de leur source unique.
+   Elles étaient RÉPLIQUÉES ici sous des noms préfixés `TRAY_*`, alors qu'elles n'ont rien
+   de propre à une étagère — et l'en-tête justifiait la réplique par « l'unifier reviendrait
+   à migrer `domain/constants.ts` en entier ». C'était faux : il suffisait d'en extraire les
+   cinq cotes réellement partagées (cf. `RackConstants`). ---- */
+import { U_MM, RACK_MOUNT_WIDTH_MM, RACK_EAR_MM, RACK_EAR_STANDOFF_MM } from "./RackConstants.js";
 
 /** Plateau utile : largeur UTILISABLE, longueur effective, hauteur libre au-dessus (mm). */
 export interface TrayPlank {
@@ -120,14 +110,14 @@ export class TrayGeometry {
   /** Largeur PLEINE du plateau (mm) = corps 19″ entre rails, renforts NON déduits. C'est la
       largeur DESSINÉE ; la largeur de POSE est `plank().W`. */
   static fullWidth(): number {
-    return TRAY_MOUNT_WIDTH_MM - 2 * TRAY_EAR_MM;
+    return RACK_MOUNT_WIDTH_MM - 2 * RACK_EAR_MM;
   }
 
   /** Longueur EFFECTIVE du plateau (mm). En « dual » (posé avant + arrière), de PLAN DE FAÇADE à
       PLAN DE FAÇADE : la cage plus les deux réserves d'oreilles — le plateau déborde devant chaque
       rail comme la façade des équipements. En porte-à-faux : `depth_mm` (plancher 50 mm, borné à la cage). */
   static plankLength(cageMm: number, tray: Record<string, any>): number {
-    if (tray.tray_type !== "cantilever") return cageMm + 2 * TRAY_EAR_STANDOFF_MM;
+    if (tray.tray_type !== "cantilever") return cageMm + 2 * RACK_EAR_STANDOFF_MM;
     return Math.min(Math.max(50, tray.depth_mm || TRAY_DEPTH_DEFAULT_MM), cageMm);
   }
 
@@ -139,7 +129,7 @@ export class TrayGeometry {
     return {
       W: TrayGeometry.fullWidth() - 2 * TrayGeometry.gussetInset(tray),
       L: TrayGeometry.plankLength(cageMm, tray),
-      availH: heightU * TRAY_U_MM - TRAY_SHEET_RESERVE_MM,
+      availH: heightU * U_MM - TRAY_SHEET_RESERVE_MM,
     };
   }
 
