@@ -108,8 +108,10 @@ const { PAGE_SIZE_DEFAULT } = D("data/config.js");
 const Validation = SHARED("src-shared/DataValidation.js");
 const { Cascade } = SHARED("src-shared/Cascade.js");
 const { PowerAnalysis } = SHARED("src-shared/PowerAnalysis.js");   // moteur énergie migré dans src-shared/ (cf. Validation/Cascade)
-// Géométrie d'ÉTAGÈRE : source UNIQUE consommée par le rendu (RackGeometry) ET par la validation
-// (collaborateur INJECTÉ — DataValidation ne peut pas l'importer). Cf. docs/placement.md §6.7.
+// Géométrie d'ÉTAGÈRE : source UNIQUE consommée par le rendu (RackGeometry) ET par la validation, qui la
+// reçoit en COLLABORATEUR INJECTÉ. ⚠ L'injection est un CHOIX CONSERVÉ, pas une contrainte : depuis le
+// lot 7, `DataValidation` POURRAIT l'importer (cf. `RackDepthPolicy` quatre lignes plus bas, qui le fait).
+// Cf. docs/placement.md §6.7.
 const TrayGeom = SHARED("src-shared/TrayGeometry.js");
 const { TrayGeometry } = TrayGeom;
 // POLITIQUE DE PROFONDEUR de baie : source UNIQUE consommée par le rendu (RackGeometry délègue) ET par
