@@ -12,14 +12,22 @@
    de breakout → câbles) se propage donc jusqu'au bout SANS que chaque maillon ait à réécrire à la
    main la transitivité du maillon suivant. Trois garanties portées par le moteur, donc valables
    pour TOUTE règle présente ou future :
-     - ANTI-CYCLE / DÉDUPLICATION : un couple (collection, id) n'est traité qu'UNE fois — la cible
-       elle-même est marquée d'entrée, donc un cycle de références (ports.parent_port_id) termine
+     - ANTI-CYCLE / DÉDUPLICATION : un couple (collection, id) n'est traité qu'UNE fois — les cibles
+       elles-mêmes sont marquées d'entrée, donc un cycle de références (ports.parent_port_id) termine
        et ne peut pas se ré-supprimer ;
      - un DÉTACHEMENT visant une entité que le plan SUPPRIME est ÉCARTÉ : inutile en mode fichier,
        DANGEREUX en mode API (`Repository.transact` applique les deletes PUIS les updates → un
        update sur une ligne supprimée la RESSUSCITE par upsert ; c'est déjà la garde d'ApiRules) ;
      - les détachements sont RÉDUITS à un par (collection, id, clé) — la DERNIÈRE valeur gagne,
        exactement comme les deux exécuteurs qui les appliquent en séquence.
+
+   Le moteur est MULTI-RACINES (`planMany`, cf. docs/placement.md §6.17) : un LOT de suppressions se
+   calcule en UN SEUL plan, pas un plan par entité. C'est une exigence de CORRECTION, pas une
+   optimisation : les garanties ci-dessus sont portées par des accumulateurs (`seen`, les détachements
+   planifiés) qui ne valent QUE dans la portée d'un appel. Deux appels séparés ne composent pas — deux
+   waypoints d'une même route, supprimés dans le même lot, produiraient deux valeurs ABSOLUES de
+   `waypoint_ids` calculées chacune sur la route d'ORIGINE, et la dernière écraserait la première (un
+   seul des deux retiré). `plan()` n'est plus qu'une enveloppe à une racine.
 
    Capacités INJECTÉES (mêmes que la validation V5b/V6) :
      - `find(collection, field, value)` → enregistrements dont `field` vaut `value` (index/where) ;
@@ -40,6 +48,10 @@ type Fetch = (collection: string, id: string) => Record<string, any> | null;
 
 /** Entité à SUPPRIMER (effet de cascade). */
 export interface CascadeDelete { c: string; id: string; }
+/** Entité dont l'appelant DEMANDE la suppression (racine d'un plan). Champ `collection` en toutes lettres —
+    même vocabulaire que `plan(collection, id, …)` et que les lots `/transact` du serveur, dont la liste de
+    suppressions se passe telle quelle à `planMany`. La forme terse `{ c, id }` reste réservée aux EFFETS. */
+export interface CascadeTarget { collection: string; id: string; }
 /** Champ à NETTOYER sur une entité conservée (FK détachée). */
 export interface CascadeDetach { c: string; id: string; key: string; value: any; }
 /** Plan complet d'une suppression : suppressions enfants + détachements de FK. */
@@ -82,11 +94,13 @@ export class Cascade {
 
   /** Valeur COURANTE d'un champ en cours de détachement : la dernière valeur déjà PLANIFIÉE pour
       (collection, id, clé), sinon `fallback` (la valeur de l'enregistrement).
-      INDISPENSABLE dès qu'un détachement RETIRE un élément d'une LISTE : sous cascade récursive, la même
-      liste peut être amputée plusieurs fois dans un seul plan (supprimer une baie supprime ses N brosses,
-      donc rejoue N fois la règle `waypoints` sur la MÊME route). Chaque valeur étant ABSOLUE et le dernier
-      écrit gagnant chez les deux exécuteurs, calculer chaque retrait sur l'enregistrement ORIGINAL ne
-      retirerait qu'UN seul élément — les autres réapparaîtraient. On compose donc sur le planifié. */
+      INDISPENSABLE dès qu'un détachement RETIRE un élément d'une LISTE : la même liste peut être amputée
+      plusieurs fois dans un seul plan, pour DEUX raisons cumulables — la RÉCURSION (supprimer une baie
+      supprime ses N brosses, donc rejoue N fois la règle `waypoints` sur la MÊME route) et le LOT
+      (`planMany` : deux waypoints, deux groupes ou deux réseaux supprimés ensemble touchent le même
+      porteur). Chaque valeur étant ABSOLUE et le dernier écrit gagnant chez les deux exécuteurs, calculer
+      chaque retrait sur l'enregistrement ORIGINAL ne retirerait qu'UN seul élément — les autres
+      réapparaîtraient, en référence à une entité pourtant supprimée. On compose donc sur le planifié. */
   private static pendingValue(detaches: CascadeDetach[], collection: string, id: string, key: string, fallback: any): any {
     for (let i = detaches.length - 1; i >= 0; i--) {
       const d = detaches[i];
@@ -99,15 +113,19 @@ export class Cascade {
       le PRIMAIRE sur le premier groupe restant (ou null), sinon inchangé — même sémantique que le détachement
       multi-réseaux (networks/network_ids). Mutualisé equipments/vms (principe n°3) : dupliquer le bloc aurait
       laissé les deux copies diverger au premier ajustement.
-      (Un seul groupe pouvant être supprimé par plan — aucune règle ne SUPPRIME de `groups` —, la composition de
-      `pendingValue` n'est pas nécessaire ici ; elle le deviendrait le jour où une règle supprimerait des groupes.) */
+      ⚠ COMPOSE sur le déjà planifié (`pendingValue`), liste ET primaire : aucune règle ne SUPPRIME de `groups`,
+      mais un LOT `/transact` peut en supprimer PLUSIEURS, et `planMany` les développe dans le MÊME plan. Sans
+      composition, deux groupes d'un même équipement retirés ensemble n'en retireraient qu'UN (dernier écrit
+      gagnant) — l'autre resterait dans `group_ids`, en référence à un groupe supprimé. */
   private static detachGroupFromMembers(find: Find, collection: string, groupId: string, detaches: CascadeDetach[]): void {
     Cascade.groupMembers(find, collection, groupId).forEach((e) => {
-      const ids = Array.isArray(e.group_ids) ? e.group_ids : (e.group_id ? [e.group_id] : []);
+      const declared = Array.isArray(e.group_ids) ? e.group_ids : (e.group_id ? [e.group_id] : []);
+      const ids = Cascade.pendingValue(detaches, collection, e.id, "group_ids", declared);
       const gids = ids.filter((x: string) => x !== groupId);
       detaches.push({ c: collection, id: e.id, key: "group_ids", value: gids });
       // primaire supprimé → repointe sur le premier groupe restant (ou aucun), sinon inchangé.
-      const prim = (e.group_id === groupId) ? (gids.length ? gids[0] : null) : (e.group_id || null);
+      const primary = Cascade.pendingValue(detaches, collection, e.id, "group_id", e.group_id || null);
+      const prim = (primary === groupId) ? (gids.length ? gids[0] : null) : (primary || null);
       detaches.push({ c: collection, id: e.id, key: "group_id", value: prim });
     });
   }
@@ -167,13 +185,17 @@ export class Cascade {
     networks: {
       // multi-réseaux : retire l'id de network_ids et repointe le principal. S'applique aux CÂBLES (legacy, champs
       // dormants) ET aux PORTS terminaux (source unique actuelle du réseau) — même logique de détachement.
+      // ⚠ COMPOSE sur le déjà planifié, pour la même raison que `detachGroupFromMembers` : un LOT peut supprimer
+      // PLUSIEURS réseaux portés par le MÊME câble/port, et `planMany` les développe dans le même plan.
       custom: (find, _fetch, id, _deletes, detaches) => {
         const detachFrom = (coll: string, rows: any[]) => rows.forEach((r) => {
-          const ids = Array.isArray(r.network_ids) ? r.network_ids : (r.network_id ? [r.network_id] : []);
+          const declared = Array.isArray(r.network_ids) ? r.network_ids : (r.network_id ? [r.network_id] : []);
+          const ids = Cascade.pendingValue(detaches, coll, r.id, "network_ids", declared);
           if (!ids.includes(id)) return;
           const nids = ids.filter((x: string) => x !== id);
           detaches.push({ c: coll, id: r.id, key: "network_ids", value: nids });
-          const prim = (r.network_id === id) ? (nids.length ? nids[0] : null) : r.network_id;
+          const primary = Cascade.pendingValue(detaches, coll, r.id, "network_id", r.network_id);
+          const prim = (primary === id) ? (nids.length ? nids[0] : null) : primary;
           detaches.push({ c: coll, id: r.id, key: "network_id", value: prim });
         });
         detachFrom("cables", Cascade.cablesOnNetwork(find, id));
@@ -250,21 +272,35 @@ export class Cascade {
     });
   }
 
-  /** Calcule le plan de cascade pour supprimer `id` de `collection`. PUR : toutes les résolutions inverses
-      passent par `find`/`fetch`.
+  /** Calcule le plan de cascade pour supprimer `id` de `collection`. Enveloppe à UNE racine de `planMany` :
+      c'est là que vivent la récursion, les garanties et leur commentaire. Signature et résultat INCHANGÉS —
+      ses appelants (mode fichier `Store.remove`, mode API `Api.remove`) suppriment une seule entité. */
+  static plan(collection: string, id: string, find: Find, fetch: Fetch): CascadePlan {
+    return Cascade.planMany([{ collection, id }], find, fetch);
+  }
+
+  /** Calcule EN UN SEUL PLAN la cascade d'un LOT de suppressions (`/transact`). PUR : toutes les résolutions
+      inverses passent par `find`/`fetch`. Les cibles sont supposées bien formées (l'appelant les filtre).
 
       RÉCURSIF jusqu'au POINT FIXE : la règle de chaque entité marquée pour suppression est rejouée sur elle.
       Terminaison GARANTIE sans garde de profondeur arbitraire — l'ensemble `seen` n'accepte chaque couple
       (collection, id) qu'une fois, donc la file est bornée par le nombre d'entités du document, et un cycle de
-      références (`ports.parent_port_id`) est coupé au deuxième passage. La CIBLE y est inscrite d'entrée : elle
-      ne peut donc ni réapparaître dans `deletes` (l'appelant la supprime lui-même) ni être « détachée ».
+      références (`ports.parent_port_id`) est coupé au deuxième passage. TOUTES les cibles y sont inscrites
+      d'entrée : aucune ne peut réapparaître dans `deletes` (l'appelant les supprime lui-même) ni être
+      « détachée » par la cascade d'une AUTRE cible du lot — la garde anti-résurrection vaut donc à l'échelle
+      du LOT, et non plus seulement de la racine courante.
+
+      UN SEUL accumulateur de détachements pour tout le lot : c'est ce qui fait composer `pendingValue` D'UNE
+      CIBLE À L'AUTRE. Sans lui, deux waypoints d'une même route supprimés dans le même lot produiraient deux
+      valeurs ABSOLUES de `waypoint_ids` calculées chacune sur la route d'ORIGINE, dont la dernière écraserait
+      la première (cf. en-tête du fichier).
 
       Le plan rendu est un ENSEMBLE : `deletes` sans doublon, `detaches` réduits à un par (collection, id, clé)
       et privés de ceux qui viseraient une entité supprimée (cf. en-tête du fichier). */
-  static plan(collection: string, id: string, find: Find, fetch: Fetch): CascadePlan {
+  static planMany(targets: ReadonlyArray<CascadeTarget>, find: Find, fetch: Fetch): CascadePlan {
     const deletes: CascadeDelete[] = [];
     const planned: CascadeDetach[] = [];
-    const seen = new Set<string>([Cascade.key(collection, id)]);
+    const seen = new Set<string>(targets.map((t) => Cascade.key(t.collection, t.id)));
     const queue: CascadeDelete[] = [];
 
     /** Joue la règle d'UNE entité : ses suppressions vont dans la file (après dédup), ses détachements au plan. */
@@ -287,7 +323,9 @@ export class Cascade {
       }
     };
 
-    expand(collection, id);
+    // Toutes les racines sont développées AVANT le parcours : leurs règles se voient donc mutuellement
+    // (composition des retraits de liste, garde anti-résurrection à l'échelle du lot).
+    for (const t of targets) expand(t.collection, t.id);
     // Parcours EN LARGEUR par index (pas de `shift()` : coût linéaire, et la file ne grandit plus une fois
     // toutes les entités atteignables vues). `queue` s'allonge pendant l'itération — c'est voulu.
     for (let i = 0; i < queue.length; i++) expand(queue[i].c, queue[i].id);

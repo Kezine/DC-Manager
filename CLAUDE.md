@@ -129,7 +129,7 @@ src-shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) �
   Schema.ts     #   liste canonique des collections + champs tableau + normSearch + page size
   DocumentChangeset.ts #   type + helpers du changeset (rechargement granulaire)
   DataValidation.ts #   normalisation + validation des enregistrements (spec déclarative par collection)
-  Cascade.ts    #   cascade de suppression RÉCURSIVE (intégrité référentielle en DELETE) — Store (fichier) + serveur (API)
+  Cascade.ts    #   cascade de suppression RÉCURSIVE et MULTI-RACINES (intégrité référentielle en DELETE) — Store (fichier) + serveur (API/transact)
   PowerAnalysis.ts #   moteur d'analyse énergie (graphe source→sink, charges, warnings codes+params) — store injecté par interface
 docs/           # documentation d'architecture (voir index)
 Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compilés

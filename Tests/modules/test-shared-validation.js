@@ -304,6 +304,137 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : Cascade.planMany (plan MULTI-RACINES d'un LOT — composition, dédup, anti-résurrection)", async () => {
+  {
+    /* UN SEUL plan pour tout un lot de suppressions (docs/placement.md §6.17). Les garanties du moteur
+       (composition des retraits de LISTE, anti-cycle, écart des détachements sur entité supprimée) sont
+       portées par des accumulateurs valables dans la portée d'UN appel : elles ne valaient donc PAS entre
+       deux appels. Attentes EN DUR — comparer `planMany` à `planMany` (ou à `plan`, qui lui délègue
+       désormais) serait tautologique. */
+    const finderOf = (db) => (coll, field, value) => (db[coll] || []).filter((o) => {
+      const v = o[field];
+      return Array.isArray(v) ? v.includes(value) : v === value;
+    });
+    const fetcherOf = (db) => (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
+    const idsOf = (list, coll) => list.filter((d) => d.c === coll).map((d) => d.id).sort().join(",");
+    const valueOf = (list, coll, id, key) => {
+      const hits = list.filter((d) => d.c === coll && d.id === id && d.key === key);
+      return { count: hits.length, value: hits.length ? hits[hits.length - 1].value : undefined };
+    };
+
+    // -- 1) LE cas décisif : DEUX waypoints d'une même route, supprimés dans le MÊME lot --
+    {
+      const db = {
+        waypoints: [{ id: "w1" }, { id: "w2" }, { id: "w3" }],
+        cables: [{ id: "CW", waypoint_ids: ["w1", "garde", "w2", "w3"] }],
+        cableBundles: [{ id: "BU", waypoint_ids: ["w2", "w1"] }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const two = Cascade.planMany([{ collection: "waypoints", id: "w1" }, { collection: "waypoints", id: "w2" }], find, fetch);
+      const cw = valueOf(two.detaches, "cables", "CW", "waypoint_ids");
+      ck.eq(cw.count, 1, "lot de 2 waypoints : UN SEUL détachement waypoint_ids sur le câble");
+      ck.eq(JSON.stringify(cw.value), JSON.stringify(["garde", "w3"]), "lot de 2 waypoints : les DEUX sont retirés de la route (composition INTER-CIBLES)");
+      const bu = valueOf(two.detaches, "cableBundles", "BU", "waypoint_ids");
+      ck.eq(JSON.stringify(bu.value), JSON.stringify([]), "lot de 2 waypoints : la route du faisceau perd les deux aussi");
+      const three = Cascade.planMany([{ collection: "waypoints", id: "w1" }, { collection: "waypoints", id: "w2" }, { collection: "waypoints", id: "w3" }], find, fetch);
+      ck.eq(JSON.stringify(valueOf(three.detaches, "cables", "CW", "waypoint_ids").value), JSON.stringify(["garde"]),
+        "lot de 3 waypoints : les TROIS retirés, seul le waypoint épargné subsiste");
+      ck.eq(three.deletes.length, 0, "lot de waypoints : aucune suppression en cascade (les cibles sont exclues)");
+    }
+
+    // -- 2) DEUX groupes d'un même équipement : la liste ET le primaire se composent --
+    {
+      const db = {
+        groups: [{ id: "g1" }, { id: "g2" }, { id: "g3" }],
+        equipments: [{ id: "E", group_id: "g1", group_ids: ["g1", "g2", "g3"] }],
+        vms: [{ id: "V", group_id: "g2", group_ids: ["g1", "g2"] }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const two = Cascade.planMany([{ collection: "groups", id: "g1" }, { collection: "groups", id: "g2" }], find, fetch);
+      ck.eq(JSON.stringify(valueOf(two.detaches, "equipments", "E", "group_ids").value), JSON.stringify(["g3"]),
+        "lot de 2 groupes : les DEUX retirés de group_ids de l'équipement");
+      ck.eq(valueOf(two.detaches, "equipments", "E", "group_id").value, "g3", "lot de 2 groupes : primaire repointé sur le SEUL groupe survivant");
+      ck.eq(JSON.stringify(valueOf(two.detaches, "vms", "V", "group_ids").value), JSON.stringify([]), "lot de 2 groupes : la VM membre est nettoyée pareillement");
+      ck.eq(valueOf(two.detaches, "vms", "V", "group_id").value, null, "lot de 2 groupes : primaire de la VM effacé (aucun groupe restant)");
+      const all = Cascade.planMany([{ collection: "groups", id: "g1" }, { collection: "groups", id: "g2" }, { collection: "groups", id: "g3" }], find, fetch);
+      ck.eq(JSON.stringify(valueOf(all.detaches, "equipments", "E", "group_ids").value), JSON.stringify([]), "lot de 3 groupes : group_ids vidé");
+      ck.eq(valueOf(all.detaches, "equipments", "E", "group_id").value, null, "lot de 3 groupes : primaire effacé");
+    }
+
+    // -- 3) DEUX réseaux d'un même port (et d'un même câble legacy) : idem --
+    {
+      const db = {
+        networks: [{ id: "n1" }, { id: "n2" }, { id: "n3" }],
+        ports: [{ id: "P", network_id: "n1", network_ids: ["n1", "n2", "n3"] }],
+        cables: [{ id: "C", network_id: "n2", network_ids: ["n1", "n2"] }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const two = Cascade.planMany([{ collection: "networks", id: "n1" }, { collection: "networks", id: "n2" }], find, fetch);
+      ck.eq(JSON.stringify(valueOf(two.detaches, "ports", "P", "network_ids").value), JSON.stringify(["n3"]),
+        "lot de 2 réseaux : les DEUX retirés de network_ids du port terminal");
+      ck.eq(valueOf(two.detaches, "ports", "P", "network_id").value, "n3", "lot de 2 réseaux : principal du port repointé sur le survivant");
+      ck.eq(JSON.stringify(valueOf(two.detaches, "cables", "C", "network_ids").value), JSON.stringify([]), "lot de 2 réseaux : le câble legacy est nettoyé des deux");
+      ck.eq(valueOf(two.detaches, "cables", "C", "network_id").value, null, "lot de 2 réseaux : principal du câble effacé");
+    }
+
+    // -- 4) DÉDUPLICATION à l'échelle du LOT : une cible du lot n'est jamais re-supprimée par la cascade d'une autre --
+    {
+      const db = {
+        equipments: [{ id: "E" }],
+        ports: [{ id: "PA", equipment_id: "E" }, { id: "PB", equipment_id: "E" }],
+        cables: [{ id: "CC", from_port_id: "PA", to_port_id: "PB" }],
+        aggregates: [{ id: "AG", equipment_id: "E" }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const plan = Cascade.planMany([{ collection: "equipments", id: "E" }, { collection: "ports", id: "PA" }], find, fetch);
+      ck.eq(idsOf(plan.deletes, "ports"), "PB", "lot équipement + un de ses ports : le port CIBLE n'est pas re-supprimé, l'autre l'est");
+      ck.eq(idsOf(plan.deletes, "cables"), "CC", "lot équipement + un de ses ports : le câble partagé n'est supprimé qu'une fois");
+      ck.eq(plan.deletes.length, 3, "lot équipement + un de ses ports : 3 suppressions (PB + CC + AG)");
+      ck.eq(new Set(plan.deletes.map((d) => d.c + "/" + d.id)).size, plan.deletes.length, "lot : aucune entité en double dans deletes");
+    }
+
+    // -- 5) ANTI-RÉSURRECTION à l'échelle du LOT : un détachement visant une CIBLE du lot est écarté PAR LE PLAN --
+    {
+      const db = {
+        aggregates: [{ id: "AG" }],
+        // X est rattaché à l'agrégat ET supprimé par le même lot : le détacher produirait un update
+        // sur une ligne supprimée (RESSUSCITANTE côté API), Y survit et doit bien être détaché.
+        ports: [{ id: "X", aggregate_id: "AG" }, { id: "Y", aggregate_id: "AG" }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const plan = Cascade.planMany([{ collection: "aggregates", id: "AG" }, { collection: "ports", id: "X" }], find, fetch);
+      ck.eq(plan.detaches.filter((d) => d.c === "ports").map((d) => d.id).join(","), "Y",
+        "lot : le détachement visant une CIBLE du lot est écarté, celui du port survivant est conservé");
+      ck.eq(plan.detaches.some((d) => d.id === "X"), false, "lot : aucune trace de détachement sur une cible du lot");
+    }
+
+    // -- 6) `plan()` = ENVELOPPE à une racine : attentes EN DUR, identiques à celles d'une racine unique --
+    {
+      const db = {
+        racks: [{ id: "R" }],
+        waypoints: [{ id: "b1", kind: "brush", rack_id: "R" }, { id: "b2", kind: "brush", rack_id: "R" }],
+        cables: [{ id: "CR", waypoint_ids: ["b1", "b2", "hors"] }],
+        rackItems: [{ id: "RI", rack_id: "R" }],
+        equipments: [{ id: "EQ", rack_id: "R", placement_mode: "rack" }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const single = Cascade.planMany([{ collection: "racks", id: "R" }], find, fetch);
+      ck.eq(idsOf(single.deletes, "waypoints"), "b1,b2", "une seule racine : les 2 brosses de la baie sont supprimées");
+      ck.eq(idsOf(single.deletes, "rackItems"), "RI", "une seule racine : l'étagère est supprimée");
+      ck.eq(single.deletes.length, 3, "une seule racine : 3 suppressions");
+      ck.eq(JSON.stringify(valueOf(single.detaches, "cables", "CR", "waypoint_ids").value), JSON.stringify(["hors"]),
+        "une seule racine : la composition RÉCURSIVE (2 brosses) est intacte");
+      ck.eq(valueOf(single.detaches, "equipments", "EQ", "placement_mode").value, "manual", "une seule racine : l'équipement de la baie repasse en manuel");
+    }
+
+    // -- 7) Lot VIDE : plan vide (aucune racine à développer) --
+    {
+      const empty = Cascade.planMany([], finderOf({}), fetcherOf({}));
+      ck.eq(empty.deletes.length + empty.detaches.length, 0, "lot vide → plan vide");
+    }
+  }
+  });
+
   await section("shared : schéma PARTAGÉ (garde anti-divergence front ⇄ back)", async () => {
   {
     // La liste canonique de shared/Schema DOIT correspondre EXACTEMENT aux classes du registre front (même ordre).

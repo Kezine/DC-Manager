@@ -75,29 +75,40 @@ export class ApiRules {
   /** CASCADE RÉSIDUELLE d'un lot `/transact` (autorité serveur — même garantie que le DELETE unitaire) : le client
       packagé envoie la cascade calculée sur SON instantané ; si le document a bougé entre-temps (ex. un câble
       branché par un autre client sur un port que ce lot supprime), le lot laisserait des FK pendantes. Avec des
-      lecteurs CONSCIENTS DU LOT (état post-lot), `Cascade.plan` ne renvoie que le travail MANQUANT.
+      lecteurs CONSCIENTS DU LOT (état post-lot), la cascade ne renvoie que le travail MANQUANT.
+
+      UN SEUL PLAN pour TOUT le lot (`Cascade.planMany`, cf. docs/placement.md §6.17), et non un plan par
+      suppression. Ce n'est pas qu'une économie : les garanties du moteur (composition des retraits de liste,
+      garde anti-cycle, écart des détachements sur entité supprimée) sont portées par des accumulateurs valables
+      dans la portée d'UN appel. Un plan par suppression les perdait ENTRE les suppressions du lot — deux
+      waypoints d'une même route n'en faisaient retirer qu'un (chaque valeur de `waypoint_ids`, ABSOLUE et
+      calculée sur la route d'origine, écrasait la précédente).
+
       GARDE ANTI-RÉSURRECTION : transact applique deletes PUIS updates — un update sur un record supprimé par le
       lot (ou par la cascade résiduelle) le RECRÉERAIT ; tout détachement d'un record supprimé est donc écarté.
+      Elle joue désormais à DEUX niveaux : dans le plan (les cibles du lot amorcent son `seen`), et ici pour les
+      suppressions RÉSIDUELLES, que le plan ne peut pas connaître comme « déjà dans le lot ».
       Détachements FUSIONNÉS par enregistrement : un même record peut recevoir plusieurs clés (cf. Api.remove). */
   static residualCascade(deletes: any[], find: ChildFinder, fetch: EntityFetcher): ResidualPlan {
-    const batchDeletes: WriteTarget[] = (deletes || []).filter((d: any) => d && d.collection && d.id);
-    const extraDeletes: WriteTarget[] = [];
+    const batchDeletes: WriteTarget[] = (deletes || []).filter((d: any) => d && d.collection && d.id)
+      .map((d: any) => ({ collection: d.collection, id: d.id }));
+    const plan = Cascade.planMany(batchDeletes, find, fetch);
+    // RÉSIDU : ce que le lot ne fait PAS déjà. `plan.deletes` exclut déjà les cibles du lot (elles amorcent son
+    // `seen`) ; l'ensemble reste construit ici parce qu'il sert aussi à filtrer les updates ci-dessous.
     const deleted = new Set<string>(batchDeletes.map((d) => d.collection + " " + d.id));
+    const extraDeletes: WriteTarget[] = [];
+    for (const x of plan.deletes) {
+      const key = x.c + " " + x.id;
+      if (deleted.has(key)) continue;
+      deleted.add(key);
+      extraDeletes.push({ collection: x.c, id: x.id });
+    }
     const patched = new Map<string, { collection: string; record: Record<string, any> }>();
-    for (const d of batchDeletes) {
-      const plan = Cascade.plan(d.collection, d.id, find, fetch);
-      for (const x of plan.deletes) {
-        const key = x.c + " " + x.id;
-        if (deleted.has(key)) continue;
-        deleted.add(key);
-        extraDeletes.push({ collection: x.c, id: x.id });
-      }
-      for (const det of plan.detaches) {
-        const key = det.c + " " + det.id;
-        let entry = patched.get(key);
-        if (!entry) { const rec = fetch(det.c, det.id); if (!rec) continue; entry = { collection: det.c, record: { ...rec } }; patched.set(key, entry); }
-        entry.record[det.key] = det.value;
-      }
+    for (const det of plan.detaches) {
+      const key = det.c + " " + det.id;
+      let entry = patched.get(key);
+      if (!entry) { const rec = fetch(det.c, det.id); if (!rec) continue; entry = { collection: det.c, record: { ...rec } }; patched.set(key, entry); }
+      entry.record[det.key] = det.value;
     }
     const updates = [...patched.entries()].filter(([key]) => !deleted.has(key)).map(([, entry]) => entry);
     return { deletes: extraDeletes, updates };

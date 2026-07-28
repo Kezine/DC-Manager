@@ -1018,12 +1018,107 @@ entité supprimée). En mode API, chaque `find` est un balayage complet de table
 supprimer un équipement de 88 ports passe d'environ 180 à 270 requêtes. C'est le prix de la fermeture, et il
 disparaîtra avec la migration relationnelle (§5), où ces `find` deviendront des index.
 
-**Non fait, volontairement** : `ApiRules.residualCascade` appelle `Cascade.plan` UNE FOIS PAR suppression du
-lot et fusionne les détachements entre appels — la composition des retraits de liste ne joue donc qu'À
-L'INTÉRIEUR d'un appel. Un lot `/transact` qui supprimerait explicitement DEUX waypoints d'une même route
-ne lui en retirerait qu'un. Le défaut est **PRÉEXISTANT** (l'ancien plan produisait déjà un détachement par
-waypoint) et **inchangé** par ce lot ; le corriger demande de faire circuler l'état planifié entre les
-appels, ce qui relève du chemin `/transact`, pas de la cascade. Signalé, non traité.
+~~**Non fait, volontairement** : `ApiRules.residualCascade` appelle `Cascade.plan` UNE FOIS PAR suppression
+du lot…~~ ✅ **CORRIGÉ en §6.17** : le lot se calcule désormais en UN SEUL plan (`Cascade.planMany`).
+
+### 6.17 Le LOT se calcule en UN SEUL plan — **IMPLÉMENTÉ**
+
+Dette nommée par §6.16 (« la composition ne joue qu'à l'intérieur d'un appel »), refermée ici.
+`ApiRules.residualCascade` bouclait `Cascade.plan` **une fois par suppression du lot** et fusionnait les
+résultats après coup. Or les trois garanties du moteur (composition des retraits de liste, garde
+anti-cycle/dédup, écart des détachements sur entité supprimée) sont portées par des **accumulateurs**
+(`seen`, la liste des détachements planifiés) qui ne valent que dans la portée d'UN appel : **entre deux
+appels, rien ne compose**.
+
+**Le défaut était RÉEL, pas théorique.** Un détachement qui retire un id d'une LISTE porte une valeur
+ABSOLUE, et le dernier écrit gagne chez les deux exécuteurs. Deux waypoints d'une même route supprimés
+dans le même lot produisaient donc deux valeurs de `waypoint_ids` calculées chacune sur la route
+d'ORIGINE : la seconde écrasait la première, **un seul des deux sortait de la route**, et le câble
+conservait une référence vers un waypoint pourtant supprimé — exactement l'orphelin que la cascade existe
+pour empêcher. Mesuré sur les documents réels : sur `demo-infra.json`, un lot supprimant deux waypoints du
+câble `cbl-core01-swb01` laissait `wp-a-chemin` dans sa route ; sur le document de PRODUCTION, un lot
+supprimant deux groupes d'un même équipement laissait le groupe supprimé dans `group_ids` **et l'y
+repointait comme groupe PRIMAIRE**. Sur un lot de stress (400 waypoints sur 200 câbles à routes
+partagées), **200 câbles sur 200** gardaient au moins une référence pendante ; après correction, **0**.
+
+**Ce qui a été fait** : `Cascade.planMany(targets, find, fetch)` calcule le plan de TOUT un lot en une
+passe — un seul `seen` (amorcé avec TOUTES les cibles), un seul accumulateur de détachements, une seule
+réduction finale. `Cascade.plan(collection, id, …)` devient une **enveloppe à une racine** ; ses deux
+appelants (`Store.remove`, `Api.remove`) ne bougent pas. `residualCascade` appelle `planMany` **une fois**
+puis retranche ce que le lot contient déjà — son CONTRAT (ne rendre que le travail MANQUANT) est inchangé.
+
+**RAYON D'ACTION.** Ancien moteur relu depuis le build de HEAD (§4.1), jamais retranscrit :
+
+| Mesure | Document | Résultat |
+|---|---|---|
+| Balayage MONO-suppression (parité stricte du chemin `plan`) | `demo-infra.json` (246) + PRODUCTION (644) | **890 lots, 0 différence** — ni suppression, ni détachement, ni valeur |
+| Lots multi-suppressions ciblés (2 waypoints d'une route, 2 ports d'un équipement, équipement + un de ses ports, baie + une de ses étagères, 2 groupes, 2 réseaux, lot client complet, « tous les waypoints/groupes/réseaux ») | les deux documents | **0 suppression perdue, 0 gagnée, 0 update perdu ou apparu** — seules changent les VALEURS des retraits de liste |
+| Fuzz de lots aléatoires (2 à 7 suppressions) | 8 000 lots sur les deux documents | **0 régression** ; 6 champs changent, tous sur `demo-infra` — et ce sont exactement les 6 listes qui gardaient une référence PENDANTE (**6 → 0**) |
+
+**Le plan reste un SUR-ENSEMBLE de l'ancien** : aucune entité ne DISPARAÎT des suppressions, aucun
+détachement ne disparaît sur une cible survivante. La seule différence observable est la **valeur** d'un
+retrait de liste, toujours dans le sens « la référence supprimée sort enfin ».
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **`plan()` DÉLÈGUE à `planMany([une cible])`** plutôt que de coexister avec elle. Une seule
+  implémentation de la récursion, des garanties et de leur commentaire. Écarté : dupliquer la boucle pour
+  « ne pas risquer » le chemin unitaire — c'est précisément la duplication que le principe n°3 interdit, et
+  la parité est prouvée par balayage (890 suppressions, Δ = 0) plutôt que par prudence.
+- **Les cibles s'écrivent `{ collection, id }`, les effets `{ c, id }`.** Le vocabulaire d'entrée est celui
+  de `plan(collection, id, …)` et des lots `/transact`, dont la liste de suppressions se passe **telle
+  quelle** à `planMany` (aucun remaniement de forme au point d'appel). La forme terse reste aux effets.
+- **La composition est ÉTENDUE aux GROUPES et aux RÉSEAUX** (`detachGroupFromMembers`, hook `networks`).
+  Elle n'y était pas, et son absence était explicitement documentée comme sûre : « un seul groupe pouvant
+  être supprimé par plan ». **`planMany` rend cette prémisse fausse** — un lot peut en supprimer plusieurs,
+  et ils atterrissent dans le même plan. Sans cette extension, le lot aurait *créé* la version « groupes »
+  du bug qu'il corrige pour les waypoints. La liste ET le primaire se composent (repointer le primaire sur
+  un groupe que le même lot supprime serait une seconde façon de laisser une référence pendante). Écarté :
+  s'en tenir à la lettre du besoin (les waypoints) — trois règles retirent d'une liste, la garantie doit
+  valoir pour les trois, sinon elle n'est pas une garantie. Le chemin à UNE racine est inchangé au champ
+  près (aucune règle ne supprime de groupes ni de réseaux, donc rien à composer).
+- **La garde anti-résurrection ne ferme PAS de trou au niveau `/transact`** — vérifié, et dit ici pour
+  qu'on ne le « redécouvre » pas comme un gain. `residualCascade` filtrait déjà ses updates contre
+  l'ensemble COMPLET des entités supprimées (lot + résidu), constitué avant le filtrage : les deux ordres
+  de suppression étaient donc couverts, et la sonde le confirme (neutraliser l'amorçage de `seen` ne fait
+  rougir AUCUN test serveur). Ce que l'amorçage apporte : la garantie descend **dans le plan**, donc elle
+  vaut pour tout futur consommateur de `planMany` qui ne re-filtrerait pas, et le plan cesse de produire
+  des détachements voués à être jetés (avec le `fetch` inutile qui va avec).
+- **`residualCascade` GARDE son filtre final** bien que le plan exclue déjà les cibles du lot. Il n'est
+  redondant que pour les cibles : les suppressions **RÉSIDUELLES**, que le plan découvre et que le lot ne
+  contient pas, ne peuvent être écartées qu'ici. Écarté : le supprimer au motif qu'il « ne sert plus » —
+  il sert, pour l'autre moitié des cas.
+- **Attentes EXPLICITES, jamais de parité** (§4.1). L'ancien moteur a servi à MESURER, puis a été jeté :
+  les tests livrés figent des valeurs de liste EN DUR. Le test décisif (« un lot de deux waypoints d'une
+  même route les retire tous les deux ») a été exécuté contre l'ANCIEN moteur : **il échoue**, en rendant
+  `["w1","w3"]` au lieu de `["w3"]` — la preuve que le défaut existait.
+- **Sondes de mutation** : composition INTER-RACINES neutralisée (plancher de balayage de `pendingValue`
+  ramené au début de la racine courante) → **19 FAIL**, et aucun test préexistant — c'est ce qui montre que
+  la sonde isole bien le lot, la composition RÉCURSIVE de §6.16 restant intacte ; `seen` amorcé avec la
+  PREMIÈRE cible seulement → **4 FAIL**, tous au niveau du PLAN (voir la décision ci-dessus).
+
+**COÛT — mesuré, et sans triomphalisme.** Le nombre de **parcours de plan** passe de N à **1** pour un lot
+de N suppressions. En appels `find` (chacun étant un balayage complet de table côté serveur, cf.
+`persistance.md`) le gain dépend du régime de lecteurs :
+
+| Lot | Parcours de plan | `find()` — lecteurs BRUTS | `find()` — lecteurs CONSCIENTS DU LOT |
+|---|---|---|---|
+| Équipement de 53 ports + TOUTE sa cascade (PRODUCTION, N = 54) | 54 → **1** | 327 → **168** (−49 %) | 168 → 168 (**inchangé**) |
+| Baie + toute sa cascade (PRODUCTION, N = 4) | 4 → **1** | 11 → **7** (−36 %) | 7 → 7 (**inchangé**) |
+| Chaîne de breakout de 40 ports supprimée en un lot | 40 → **1** | 2 460 → **120** (−95 %) | 120 → 120 (**inchangé**) |
+
+Autrement dit : le coût **quadratique** est réel (dernière ligne : chaque plan re-descendait toute la
+chaîne), mais sur le chemin `/transact` d'aujourd'hui il était déjà **masqué** par les lecteurs conscients
+du lot, qui cachent au plan les entités que le lot supprime lui-même. Ce qui disparaît à coup sûr, c'est le
+travail par-plan (N allocations + N réductions + N fusions de détachements) : sur le lot de stress de
+400 waypoints, **69 ms → 21 ms**. Le gain en `find` se matérialise dès que les cascades des cibles se
+recouvrent sans être masquées — c'est-à-dire précisément quand l'instantané du client est périmé, la
+situation pour laquelle `residualCascade` existe.
+
+**Non fait, volontairement** : `Store.remove` (mode fichier) et `Api.remove` (DELETE unitaire) continuent
+d'appeler `plan()` — ils suppriment UNE entité, `planMany` ne leur apporterait rien. Le jour où le mode
+fichier offrira une suppression multiple, c'est `planMany` qu'il devra appeler, pour exactement les raisons
+ci-dessus.
 
 ## 7. État de la convergence
 
@@ -1048,11 +1143,19 @@ chaînage porte un garde anti-cycle (§6.16).
 
 ## 8. Références
 
-- `src-shared/Cascade.ts` — **CASCADE DE SUPPRESSION** partagée front ⇄ back (§6.16). `plan()` est RÉCURSIF
-  jusqu'au point fixe, avec garde anti-cycle + déduplication (ensemble des couples (collection, id) traités,
-  cible incluse), écart des détachements visant une entité SUPPRIMÉE, et réduction à un détachement par
-  (collection, id, clé). ⚠ Un détachement qui retire un élément d'une LISTE doit se composer sur la valeur
-  déjà planifiée (`pendingValue`), sinon la récursion n'en retire qu'un seul.
+- `src-shared/Cascade.ts` — **CASCADE DE SUPPRESSION** partagée front ⇄ back (§6.16, §6.17). `planMany()`
+  est le moteur : MULTI-RACINES (un LOT de suppressions = UN plan) et RÉCURSIF jusqu'au point fixe, avec
+  garde anti-cycle + déduplication (ensemble des couples (collection, id) traités, **toutes les cibles**
+  incluses), écart des détachements visant une entité SUPPRIMÉE, et réduction à un détachement par
+  (collection, id, clé). `plan(collection, id, …)` en est l'enveloppe à une racine. ⚠ Un détachement qui
+  retire un élément d'une LISTE doit se composer sur la valeur déjà planifiée (`pendingValue`), sinon on
+  n'en retire qu'UN seul — vrai sous récursion (une baie et ses N brosses) comme au sein d'un LOT (deux
+  waypoints, deux groupes ou deux réseaux supprimés ensemble). Les trois règles concernées le font :
+  `pruneWaypointsFromRoutes`, `detachGroupFromMembers`, hook `networks`.
+- `src-server/src/ApiRules.ts` — `residualCascade` : cascade RÉSIDUELLE d'un `/transact`, calculée en UN
+  SEUL `planMany` sur toutes les suppressions du lot, puis retranchée de ce que le lot contient déjà
+  (§6.17). Le filtre final reste indispensable pour les suppressions RÉSIDUELLES, que le plan ne peut pas
+  connaître comme « déjà dans le lot ».
 - `src-shared/TrayGeometry.ts` — géométrie de l'ÉTAGÈRE, SOURCE UNIQUE (plateau utile, empreinte, position,
   chevauchement, verdict de tenue) : consommée par le RENDU (`RackGeometry.tray*` délègue) et par la
   VALIDATION (T2d/V6e), qui la reçoit en collaborateur INJECTÉ (`ValidationCollaborators`) — par choix de
