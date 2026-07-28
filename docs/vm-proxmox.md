@@ -92,8 +92,9 @@ par construction. Un test d'invariant vérifie la liste contre le modèle.
 | `views/forms/VmSyncClient.ts` | Accès aux endpoints vm (contexte REST minimal injecté) : synchro/statut + CRUD/test des providers ; DTOs miroirs du serveur (dupliqués, assumés/commentés). Le jeton ne part qu'à l'envoi (écriture seule). |
 | `views/VmClustersView.ts` | Sous-onglet « Clusters » (mode API) : cartes par provider — version/gamme, quorum, état de synchro, table des nœuds (métriques, équipement rapproché, VMs par nœud) ; en-tête : « Providers… » (gestion) + « Actualiser » (l'état cluster est en mémoire serveur, sans push SSE). |
 | `core/VmHostTip.ts` | Bloc « VMs hébergées » de la **bulle de survol d'un équipement** en vue Datacenter (PUR : ni DOM, ni store). Reçoit les VMs de l'hôte, rend des LIGNES HTML **déjà échappées** — tri par nom, bornage `MAX_LISTED`, pastille de statut. Cf. « VMs dans la bulle d'un équipement » plus bas. |
+| `core/VmLocate.ts` | « Localiser en 3D » une VM = localiser son **HÔTE** (PUR : store injecté par interface étroite). Rend l'**id de l'équipement à viser**, ou `null` si la localisation ne peut pas aboutir. Cf. « Localiser une VM » plus bas. |
 | `core/VmClusterFormat.ts` | Helpers PURS de la vue Clusters : rapprochement nœud→équipement — **MIROIR EXACT de la hiérarchie v3** du serveur (`VmSyncService`), à synchroniser des deux côtés : ① hostnames des IP rattachées (complet ou 1er label, casse/trim), ② nom exact insensible à la casse, ③ 1er label FQDN du nom ; à chaque niveau unique→résolu, plusieurs→null (sans descendre), zéro→suivant. Reçoit les `ipAddresses` en plus des équipements. Formatage uptime/CPU/Go. |
-| Branchements fins | `EntityRegistry` (collection), `ListConfigs.vms` + `addListTab` (onglet), `DetailForms.detail` (case `vms`), `IpamForms`/`shared.ts` (sélecteur VM des adresses), `Store.ipAddressesOfVm`, `Store.vmsOfHost`, `DcInteract.equipmentTipHtml` (bloc « VMs hébergées »), `INDEX_SPEC`, `RenderImpact: "none"`. |
+| Branchements fins | `EntityRegistry` (collection), `ListConfigs.vms` + `addListTab` (onglet, dont `locate`/`locateTarget`), `DetailForms.detail` (case `vms`), `IpamForms`/`shared.ts` (sélecteur VM des adresses), `Store.ipAddressesOfVm`, `Store.vmsOfHost`, `DcInteract.equipmentTipHtml` (bloc « VMs hébergées »), `INDEX_SPEC`, `RenderImpact: "none"`. |
 
 ## Frontière SOURCE / LOCAUX
 
@@ -180,6 +181,33 @@ la synchro, cf. « Frontière SOURCE / LOCAUX ») —, la bulle liste ces VMs **
   `innerHTML`. `VmHostTip` les échappe LUI-MÊME (`Html.escape`) et ne laisse jamais une donnée du
   provider entrer dans un attribut `style` (les couleurs sont un ensemble fermé de constantes internes).
   Verrouillé par des tests dédiés (`Tests/modules/test-core-store.js`).
+
+## « Localiser en 3D » une VM (= localiser son HÔTE)
+
+Une VM n'a **aucune existence** dans la scène 3D : ni position, ni conteneur de placement
+(cf. [`placement.md`](placement.md)). Ce qui est localisable, c'est son **hôte** — l'équipement
+physique qui l'exécute, rapproché par la synchro dans `host_equipment_id`. « Localiser une VM »
+signifie donc, très exactement, **« localiser son hôte »**, et l'action réutilise TEL QUEL le
+chemin « Localiser » des équipements (même icône `Icons.LOCATE`, même `dcView.locate("equipment", …)`,
+même bouton « Retour »).
+
+- **Où** : le **listing VMs** (action de ligne, dans le menu « … » comme partout) et la **fiche VM**
+  (bouton du pied d'actions, à côté de « Modifier » — même idiome que la fiche équipement).
+- **Version SOBRE** (choix produit) : le bouton n'apparaît **QUE** si la localisation peut aboutir.
+  Jamais de bouton grisé, jamais de bouton qui n'ouvrirait qu'un toast d'erreur.
+- **Prédicat unique** : `core/VmLocate.hostEquipmentId(vm, store)` rend **l'id de l'équipement à viser**
+  ou `null`. Les deux points d'entrée (listing, fiche) l'appellent — la règle n'est écrite qu'une fois.
+  Trois conditions, toutes nécessaires : (1) la VM porte un `host_equipment_id` ; (2) cet équipement
+  EXISTE encore dans le document (la référence peut pendre — la synchro pose le champ, seul le passage
+  par l'app garantit le détachement en cascade) ; (3) `Store.equipmentDcId` le résout en une **salle**.
+- **L'autorité de (3) est `Store.equipmentDcId`**, qui délègue à `src-shared/PlacementContainers` : hôte
+  monté en baie, libre positionné, en marge/paroi ou posé sur une étagère (baie en salle) ⇒ localisable ;
+  hôte libre sans position, en « pool » de baie (`rack_id` sans `rack_u`), ou dans une baie hors salle
+  ⇒ non localisable.
+- ⚠ **Hôte posé sur un ÉTAGE (`placement_mode: "floor"`) : NON localisable, par conception.** Un
+  équipement d'étage n'est dans aucune salle et la vue « Localiser » ne sait viser qu'une salle — le
+  bouton ne s'affiche donc pas. Ce n'est pas un défaut de cette feature : c'est le blocage général des
+  équipements d'étage (ni localisables, ni câblables), cadré dans `placement.md` §6.4.
 
 ## VMs dans la vue graphe (Netmap)
 
@@ -457,13 +485,16 @@ confinée à l'adaptateur (le reste de l'application ne connaît que `VmRecord`)
    fichiers de config s'ils existent : `vm-providers.db` et un éventuel
    `vm-providers.json`(`.imported-*`).
 2. **Client** : supprimer `models/Vm.ts`, `core/VmNetMapping.ts`, `core/VmHostTip.ts`,
-   `views/forms/VmForms.ts`, `views/forms/VmProvidersForm.ts`,
+   `core/VmLocate.ts`, `views/forms/VmForms.ts`, `views/forms/VmProvidersForm.ts`,
    `views/forms/VmSyncClient.ts` ; retirer les
    branchements fins : entrée `vms` d'`EntityRegistry`, `ListConfigs.vms` +
-   l'onglet dans `main.ts`, le `case "vms"` de `DetailForms`, le sélecteur VM
+   l'onglet dans `main.ts` (dont son `locate`/`locateTarget` — l'option
+   `TabOpts.locateTarget` elle-même n'a plus d'utilisateur et peut partir avec),
+   le `case "vms"` de `DetailForms`, le sélecteur VM
    d'`IpamForms`/`FormUi.vmOptions`, `Store.ipAddressesOfVm`, `Store.vmsOfHost`,
    le bloc « VMs hébergées » de `DcInteract.equipmentTipHtml` (+ les clés i18n
-   `dc.interact.vmCount`/`vmMore`), `INDEX_SPEC.vms`
+   `dc.interact.vmCount`/`vmMore`), le bouton « Localiser » de `DetailForms.vmDetail`
+   (+ la clé i18n `detail.vm.locateHost`), `INDEX_SPEC.vms`
    (+ `vm_id` d'`ipAddresses`), l'entrée `RenderImpact`.
 3. **Partagé** : retirer `"vms"` de `Schema.COLLECTIONS`, la spec `vms` (+ champ
    `vm_id` et invariant d'exclusivité d'`ipAddresses`) de `DataValidation.ts`,

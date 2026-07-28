@@ -220,6 +220,9 @@ export const detail = {
     attached: "Adresse rattachée à la VM",
     hostSection: "Hôte hébergeur",
     openHost: "Ouvrir la fiche de l'hôte",
+    // Tooltip du bouton « Localiser en 3D » de la fiche VM : une VM n'existe pas dans la scène, c'est son
+    // hôte qui est visé — le libellé du bouton reste celui de tous les « Localiser » de l'app.
+    locateHost: "Localiser l'équipement hôte en 3D",
     sourceNode: "Nœud (source)",
     notMatched: "non rapproché",
     localSection: "Enrichissements locaux",

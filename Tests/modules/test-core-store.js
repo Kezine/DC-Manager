@@ -1,7 +1,7 @@
 /* Tests modules — entités, Store (CRUD, cascade, undo, routes, spares, sites…), helpers core.
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmHostTip, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmHostTip, VmLocate, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Entités : normalisation au constructeur", async () => {
@@ -1110,6 +1110,81 @@ module.exports = async () => {
     await s.remove("equipments", host.id);
     ck.eq(s.vmsOfHost(host.id).length, 0, "vmsOfHost : hôte supprimé → plus aucune VM hébergée (VM détachée, pas supprimée)");
     ck.eq(s.get("vms", v1.id).host_equipment_id, null, "cascade : la VM survit, host_equipment_id détaché");
+  }
+  });
+
+  await section("VmLocate : « Localiser » une VM vise son HÔTE — et SEULEMENT s'il est localisable (version sobre)", async () => {
+  {
+    // --- Partie 1 : TOLÉRANCE et référence PENDANTE, sur un store STUB (aucune donnée réelle nécessaire).
+    //     Le store stub compte ses lectures : on vérifie aussi qu'une VM sans hôte ne coûte AUCUNE lecture
+    //     (le prédicat est évalué par LIGNE de listing, à chaque re-rendu). ---
+    let lectures = 0;
+    const stub = (equipments, dcOf) => ({
+      get: (coll, id) => { lectures++; return coll === "equipments" ? (equipments[id] || null) : null; },
+      equipmentDcId: (eq) => (eq ? dcOf(eq) : null),
+    });
+    const vide = stub({}, () => null);
+    ck.eq(VmLocate.hostEquipmentId(null, vide), null, "VM null → null (tolérant)");
+    ck.eq(VmLocate.hostEquipmentId(undefined, vide), null, "VM undefined → null (tolérant)");
+    ck.eq(VmLocate.hostEquipmentId({}, vide), null, "VM sans host_equipment_id → null (hôte ABSENT)");
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: null }, vide), null, "host_equipment_id null → null");
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "" }, vide), null, "host_equipment_id vide → null");
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "   " }, vide), null, "host_equipment_id blanc → null (trimé)");
+    ck.eq(lectures, 0, "VM sans hôte : AUCUNE lecture du store (le prédicat est évalué par ligne de listing)");
+    // Référence PENDANTE : la synchro POSE ce champ, rien ne garantit que l'équipement survit (import, écriture
+    // d'API tierce…). La cascade le détache quand la suppression passe par l'app, pas dans les autres cas.
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "eq-disparu" }, vide), null, "hôte INEXISTANT dans le document → null (référence pendante)");
+    ck.eq(lectures, 1, "hôte inexistant : une seule lecture, et on s'arrête là");
+    // Hôte présent et localisable → l'ID DE L'HÔTE est rendu (pas un booléen, pas l'id de la VM).
+    const peuple = stub({ "eq-1": { id: "eq-1" } }, () => "dc-x");
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "eq-1" }, peuple), "eq-1", "hôte présent et localisable → id de l'HÔTE");
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "  eq-1  " }, peuple), "eq-1", "id d'hôte trimé avant lecture ET en sortie");
+    // L'AUTORITÉ est `equipmentDcId` : le même hôte, non localisable, ne donne rien.
+    const horsSalle = stub({ "eq-1": { id: "eq-1" } }, () => null);
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "eq-1" }, horsSalle), null, "hôte présent mais equipmentDcId → null ⇒ AUCUN bouton");
+
+    // --- Partie 2 : INTÉGRATION sur un vrai Store, un cas par MODE DE PLACEMENT de l'hôte. C'est la partie
+    //     qui fait foi : elle traverse `Store.equipmentDcId` → `PlacementContainers`, l'autorité réelle. ---
+    const s = await makeStore();
+    const dc = await s.create("datacenters", { name: "Salle A", location: "liege", floor: "0" });
+    const rack = await s.create("racks", { name: "R1", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dc.id, dc_x: 500, dc_y: 500 });
+    const rackHorsSalle = await s.create("racks", { name: "R-pool", width_mm: 600, depth: 1000, u_count: 42, location: "liege" });
+    const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", side: "front", u: 10, u_height: 2 });
+
+    let n = 0;
+    /** Crée un hôte dans le mode voulu + une VM qui le désigne, et vérifie la cible attendue (EN DUR). */
+    const cas = async (label, placement, localisable) => {
+      const eq = await s.create("equipments", Object.assign({ name: "hote-" + (++n) }, placement));
+      const vm = await s.create("vms", { name: "vm-" + n, ext_id: "c/" + (200 + n), host_equipment_id: eq.id });
+      ck.eq(VmLocate.hostEquipmentId(s.get("vms", vm.id), s), localisable ? eq.id : null, "hôte " + label + (localisable ? " → localisable (id de l'hôte)" : " → NON localisable (aucun bouton)"));
+      return eq;
+    };
+    await cas("monté en baie (rack + rack_u), baie posée en salle", { placement_mode: "rack", rack_id: rack.id, rack_u: 5 }, true);
+    await cas("libre POSITIONNÉ en salle (dc_id)", { placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 100, dc_y: 100 }, true);
+    await cas("en marge latérale d'une baie en salle", { placement_mode: "side", rack_id: rack.id }, true);
+    await cas("en paroi d'une baie en salle", { placement_mode: "wall", rack_id: rack.id }, true);
+    await cas("posé sur une étagère d'une baie en salle", { placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 }, true);
+    await cas("libre SANS position (inventaire pur)", { placement_mode: "manual", dim_mode: "free" }, false);
+    await cas("en POOL d'une baie (rack_id SANS rack_u)", { placement_mode: "rack", rack_id: rack.id }, false);
+    await cas("monté dans une baie HORS salle", { placement_mode: "rack", rack_id: rackHorsSalle.id, rack_u: 3 }, false);
+    // ⚠ ÉTAGE : `equipmentDcId` rend `null` PAR CONCEPTION (un équipement d'étage n'est dans aucune salle).
+    // En version SOBRE, le bouton n'apparaît donc pas. Ce n'est PAS un défaut à corriger ici — cf. VmLocate.
+    await cas("posé sur un ÉTAGE (placement_mode « floor »)", { placement_mode: "floor", location: "liege", floor: "1", floor_x: 200, floor_y: 300 }, false);
+
+    // Une VM SANS hôte, sur un vrai store : rien à viser (cas le plus fréquent avant le 1er rapprochement).
+    const orpheline = await s.create("vms", { name: "vm-sans-hote", ext_id: "c/999" });
+    ck.eq(VmLocate.hostEquipmentId(s.get("vms", orpheline.id), s), null, "VM jamais rapprochée à un équipement → null");
+    // DISCRIMINATION : deux VMs sur des hôtes différents ne se confondent pas (le module lit bien SA VM).
+    const eqA = await s.create("equipments", { name: "hyp-A", placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 1, dc_y: 1 });
+    const eqB = await s.create("equipments", { name: "hyp-B", placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 2, dc_y: 2 });
+    const vmA = await s.create("vms", { name: "vm-A", ext_id: "c/900", host_equipment_id: eqA.id });
+    const vmB = await s.create("vms", { name: "vm-B", ext_id: "c/901", host_equipment_id: eqB.id });
+    ck.eq(VmLocate.hostEquipmentId(s.get("vms", vmA.id), s), eqA.id, "discrimination : vm-A vise hyp-A");
+    ck.eq(VmLocate.hostEquipmentId(s.get("vms", vmB.id), s), eqB.id, "discrimination : vm-B vise hyp-B");
+    // Un hôte qui SORT de sa salle rend la VM non localisable sans que la VM ait bougé (le prédicat se
+    // recalcule à chaque rendu, il n'est jamais mémorisé).
+    await s.update("equipments", eqA.id, { dc_id: null });
+    ck.eq(VmLocate.hostEquipmentId(s.get("vms", vmA.id), s), null, "hôte DÉPLACÉ hors salle → la VM cesse d'être localisable");
   }
   });
 

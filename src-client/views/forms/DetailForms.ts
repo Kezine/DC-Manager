@@ -21,6 +21,7 @@ import type { FormHost } from "./shared";
 import { IpamForms } from "./IpamForms";
 import { VmNetMapping } from "../../core/VmNetMapping";
 import { VmIpMatch } from "../../core/VmIpMatch";
+import { VmLocate } from "../../core/VmLocate";   // « Localiser » une VM = localiser son HÔTE (prédicat PUR partagé avec le listing)
 import { VmForms } from "./VmForms";
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
@@ -731,6 +732,18 @@ export class DetailForms extends IpamForms {
         Notify.toast(I18n.t("detail.vm.deleted"));
       };
       actions.appendChild(delBtn);
+    }
+    // « Localiser en 3D » — MÊME chemin que la fiche équipement (bouton ghost + Icons.LOCATE + host.locate),
+    // à une traduction près : une VM n'existe pas dans la scène, on vise donc son ÉQUIPEMENT HÔTE. Le prédicat
+    // et la cible viennent du module PARTAGÉ avec le listing (`VmLocate`) — aucune règle réécrite ici. Version
+    // SOBRE : rien à localiser (VM non rapprochée, hôte supprimé, hôte non localisable) ⇒ AUCUN bouton.
+    const hostToLocate = host.locate ? VmLocate.hostEquipmentId(vm, store) : null;
+    if (hostToLocate) {
+      const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost";
+      locBtn.title = I18n.t("detail.vm.locateHost");   // le libellé dit « Localiser », le tooltip dit SUR QUOI
+      locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`;
+      locBtn.onclick = () => host.locate!("equipment", hostToLocate, () => this.vmDetail(store, host, id, onChanged));
+      actions.appendChild(locBtn);
     }
     if (!this.isViewer()) {
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary";
