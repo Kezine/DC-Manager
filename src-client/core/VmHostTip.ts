@@ -24,27 +24,27 @@
    noms, la liste est tronquée et une dernière ligne porte le reste (« … et N
    autres ») — la bulle ne peut donc pas couvrir l'écran.
 
-   VOCABULAIRE : le statut est affiché TEL QUEL (« running », « stopped », …),
-   jamais traduit — c'est déjà la convention du listing VMs et de la fiche VM
-   (tolérance aux releases Proxmox : un statut inconnu reste lisible). La pastille
-   de couleur reprend la même sémantique : vert = en marche, gris = autre, rouge =
-   orpheline (VM disparue du dernier inventaire).
+   VOCABULAIRE ET COULEURS : délégués à `core/VmStatus`, qui porte la règle pour ce
+   module, le listing VMs et la fiche VM — statut affiché TEL QUEL et jamais traduit
+   (tolérance aux releases Proxmox : un statut inconnu reste lisible), vert = en
+   marche, gris = autre, rouge = orpheline (VM disparue du dernier inventaire),
+   l'orphelinat primant sur le statut. Ce fichier ne garde que ce qui lui est
+   PROPRE : le tri, le bornage et la mise en lignes.
 
    FEATURE VM AMOVIBLE : supprimer l'inventaire VM = supprimer ce fichier + l'appel
    dans `equipmentTipHtml` + `Store.vmsOfHost` (cf. docs/vm-proxmox.md, §Suppression).
    ============================================================================= */
 import { Html } from "./Html";
 import { I18n } from "../i18n/I18n";
+import { VmStatus, VmStatusVm } from "./VmStatus";
 
 /** Vue MINIMALE d'une VM pour la bulle — le module ne dépend NI du modèle `Vm`, NI du store.
-    Forme TOLÉRANTE (champs optionnels) : les enregistrements arrivent d'une synchro tierce. */
-export interface VmHostTipVm {
+    Forme TOLÉRANTE (champs optionnels) : les enregistrements arrivent d'une synchro tierce.
+    Le STATUT et l'ORPHELINAT sont hérités de `VmStatusVm` : c'est `VmStatus` qui en porte la
+    règle, ici comme au listing et à la fiche VM. */
+export interface VmHostTipVm extends VmStatusVm {
   /** Nom d'affichage remonté par le provider. Vide/absent → placeholder « (VM) ». */
   name?: string | null;
-  /** Statut BRUT du provider (« running » | « stopped » | valeur inconnue). */
-  status?: string | null;
-  /** VM disparue du dernier inventaire (jamais supprimée automatiquement). */
-  orphan?: boolean;
 }
 
 export class VmHostTip {
@@ -56,28 +56,17 @@ export class VmHostTip {
       le compte TOTAL est donné en tête, la liste complète vit dans l'onglet VMs. */
   static readonly MAX_LISTED = 8;
 
-  /* Couleurs de pastille — ensemble FERMÉ de constantes internes : AUCUNE donnée du provider n'entre
-     jamais dans un attribut `style`, ce qui rend l'injection impossible par cette voie. Mêmes variables
-     sémantiques que les pastilles de statut du listing VMs et de la fiche VM. */
-  private static readonly COLOR_ORPHAN = "var(--err)";
-  private static readonly COLOR_RUNNING = "var(--ok)";
-  private static readonly COLOR_OTHER = "var(--fg-dimmer)";
-
   /** Nom BRUT (trimé) d'une VM, "" si absent — sert au tri comme à l'affichage. */
   private static nameOf(vm: VmHostTipVm): string {
     return typeof vm.name === "string" ? vm.name.trim() : "";
   }
 
-  /** Statut BRUT (trimé) d'une VM, "" si absent. */
-  private static statusOf(vm: VmHostTipVm): string {
-    return typeof vm.status === "string" ? vm.status.trim() : "";
-  }
-
-  /** Couleur de pastille d'une VM. L'ORPHELINAT PRIME sur le statut (c'est l'information dominante :
-      la VM n'existe plus au cluster), exactement comme la pastille « orpheline » du listing. */
+  /** Couleur de pastille d'une VM. DÉLÈGUE à `VmStatus` : les couleurs et la priorité de l'orphelinat
+      sur le statut sont la MÊME règle qu'au listing et à la fiche, elle ne vit qu'à un endroit.
+      Conservée ici comme point d'appel nommé (la bulle demande « la couleur de CETTE VM », pas une
+      classification), et parce que c'est l'API que le rendu 2D/3D appelle. */
   static swatchColor(vm: VmHostTipVm): string {
-    if (vm.orphan) return VmHostTip.COLOR_ORPHAN;
-    return VmHostTip.statusOf(vm) === "running" ? VmHostTip.COLOR_RUNNING : VmHostTip.COLOR_OTHER;
+    return VmStatus.swatchColor(vm);
   }
 
   /** Lignes de la bulle décrivant les VMs hébergées par un équipement — HTML SÛR (tout est échappé),
@@ -106,7 +95,7 @@ export class VmHostTip {
       const name = Html.escape(VmHostTip.nameOf(vm) || I18n.t("lists.ph.vm"));
       // Suffixe d'état : « orpheline » d'abord (elle prime), puis le statut brut du provider. Les deux
       // sont échappés — le statut est une donnée SOURCE, tolérée telle quelle donc jamais présumée sûre.
-      const bits = [vm.orphan ? I18n.t("lists.ph.orphan") : "", VmHostTip.statusOf(vm)].filter((b) => b !== "");
+      const bits = [VmStatus.isOrphan(vm) ? I18n.t("lists.ph.orphan") : "", VmStatus.raw(vm)].filter((b) => b !== "");
       const suffix = bits.length ? ` <span style="color:var(--fg-dimmer)">· ${Html.escape(bits.join(" · "))}</span>` : "";
       rows.push(`${swatch(VmHostTip.swatchColor(vm))}${name}${suffix}`);
     }

@@ -22,6 +22,7 @@ import { IpamForms } from "./IpamForms";
 import { VmNetMapping } from "../../core/VmNetMapping";
 import { VmIpMatch } from "../../core/VmIpMatch";
 import { VmLocate } from "../../core/VmLocate";   // « Localiser » une VM = localiser son HÔTE (prédicat PUR partagé avec le listing)
+import { VmStatus } from "../../core/VmStatus";   // pastilles statut/orphelinat — règle unique partagée avec le listing et la bulle
 import { VmForms } from "./VmForms";
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
@@ -541,13 +542,9 @@ export class DetailForms extends IpamForms {
     const root = document.createElement("div");
 
     // -- IDENTITÉ SOURCE (lecture seule) --
-    // Statut : pastille sémantique (running=ok, stopped=neutre, autre valeur affichée telle quelle — tolérance
-    // aux releases Proxmox) ; une VM ORPHELINE (disparue au dernier sync) prime avec une pastille d'erreur EN TÊTE.
-    const s = String(vm.status || "");
-    const statusPill = (s === "running") ? `<span class="pill" style="border-color:var(--ok);color:var(--ok)">running</span>`
-      : (s === "stopped") ? `<span class="pill" style="border-color:var(--fg-dimmer);color:var(--fg-dim)">stopped</span>`
-      : s ? `<span class="pill">${Html.escape(s)}</span>` : this.MUTED;
-    const orphanPill = vm.orphan ? `<span class="pill" style="border-color:var(--err);color:var(--err)" title="${I18n.t("detail.vm.orphanTitle")}">${I18n.t("lists.ph.orphan")}</span> ` : "";
+    // Statut : règle unique dans `core/VmStatus`, partagée avec le LISTING VMs et la bulle d'équipement.
+    // La fiche a la place d'EXPLIQUER l'orphelinat → elle passe l'infobulle que le listing omet.
+    const statusHtml = VmStatus.pills(vm, I18n.t("detail.vm.orphanTitle"));
     // RAM : Mo → lisible (Go dès 1024 Mo, avec le détail en Mo) ; disque déjà en Go côté source.
     const ramHtml = vm.ram_mb != null
       ? (vm.ram_mb >= 1024
@@ -558,7 +555,7 @@ export class DetailForms extends IpamForms {
     root.appendChild(this.grid([
       [I18n.t("lists.col.name"), Html.escape(vm.name || I18n.t("lists.ph.vm"))],
       [I18n.t("lists.col.type"), vm.vm_type ? `<span class="pill">${Html.escape(vm.vm_type)}</span>` : this.MUTED],
-      [I18n.t("lists.col.status"), orphanPill + statusPill],
+      [I18n.t("lists.col.status"), statusHtml],
       [I18n.t("detail.vm.vcpu"), vm.cpu != null ? `<span class="pill">${vm.cpu}</span>` : this.MUTED],
       [I18n.t("detail.vm.memory"), ramHtml],
       [I18n.t("detail.vm.disk"), vm.disk_gb != null ? `${vm.disk_gb} Go` : this.MUTED],

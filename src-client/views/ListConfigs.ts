@@ -2,6 +2,7 @@ import type { Store } from "../store";
 import { Icons } from "../ui/Icons";
 import { Html } from "../core/Html";
 import { Ip } from "../core/Ip";
+import { VmStatus } from "../core/VmStatus";
 import { I18n } from "../i18n/I18n";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { EquipFaces } from "../registries/EquipFaces";
@@ -457,19 +458,10 @@ export class ListConfigs {
       (v.nics || []).forEach((n: any) => (n && Array.isArray(n.ips) ? n.ips : []).forEach((ip: string) => { if (ip && !out.includes(ip)) out.push(ip); }));
       return out;
     };
-    // Pastille de STATUT : réutilise le style de `kindPill` (classe .pill + variables SÉMANTIQUES du thème) —
-    // running = --ok (vert), stopped = --fg-dim (neutre/gris), toute autre valeur affichée TELLE QUELLE (tolérance
-    // aux releases Proxmox). Une VM ORPHELINE (disparue au dernier sync) prime : pastille d'erreur « orpheline »
-    // rendue EN PLUS du statut (l'info « était running/stopped » reste utile pour décider de la purger).
-    const statusPill = (v: any): string => {
-      const s = String(v.status || "");
-      let pill: string;
-      if (s === "running") pill = `<span class="pill" style="border-color:var(--ok);color:var(--ok)">running</span>`;
-      else if (s === "stopped") pill = `<span class="pill" style="border-color:var(--fg-dimmer);color:var(--fg-dim)">stopped</span>`;
-      else pill = s ? `<span class="pill">${Html.escape(s)}</span>` : dim("—");
-      const orphan = v.orphan ? `<span class="pill" style="border-color:var(--err);color:var(--err)">${I18n.t("lists.ph.orphan")}</span> ` : "";
-      return orphan + pill;
-    };
+    // Pastilles de STATUT (orphelinat + statut source) : règle unique dans `core/VmStatus`, partagée avec la
+    // FICHE VM (`DetailForms.vmDetail`) et la bulle d'équipement (`core/VmHostTip`) — les trois en redisaient
+    // chacun sa version. Le listing ne pose PAS de `title` sur la pastille « orpheline » : la colonne est
+    // étroite et la pastille y est répétée à chaque ligne (la fiche, elle, l'explicite).
     // Options de FILTRE calculées à la volée sur les vms DU DOCUMENT (dynamiques : elles suivent la synchro —
     // le mécanisme de filtres réévalue `options()` à chaque re-rendu, cf. ListView._ensureToolbar).
     // Tags : union TRIÉE des tags_src portés par au moins une VM. Le filtre est une APPARTENANCE (valueOf renvoie
@@ -492,7 +484,7 @@ export class ListConfigs {
       actions: { view: true },   // lecture seule : alimentée par la synchro (ni + créer, ni éditer/cloner/supprimer en v1)
       emptyText: I18n.t("lists.empty.vms"),
       // Recherche plein texte : nom, type, statut (+ « orpheline »), hôte résolu ET nom de nœud brut, IPs, tags, notes.
-      searchFields: (v) => [v.name, v.vm_type, v.status, v.orphan ? "orpheline" : "", hostText(v), v.host_node, ...vmIps(v), ...(v.tags_src || []), v.description_src, v.notes],
+      searchFields: (v) => [v.name, v.vm_type, ...VmStatus.searchTerms(v), hostText(v), v.host_node, ...vmIps(v), ...(v.tags_src || []), v.description_src, v.notes],
       columns: [
         { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (v) => v.name, render: (v) => Html.escape(v.name || I18n.t("lists.ph.vm")) },
         {
@@ -501,7 +493,7 @@ export class ListConfigs {
           filter: { label: I18n.t("lists.col.type"), options: () => [{ id: "qemu", label: "QEMU" }, { id: "lxc", label: "LXC" }], valueOf: (v) => v.vm_type },
         },
         // tri : orphelines groupées à part, puis par statut (l'orphelinat est l'info dominante de la colonne).
-        { head: I18n.t("lists.col.status"), essential: true, sortKey: "status", sort: (v) => (v.orphan ? "1_" : "0_") + (v.status || ""), render: (v) => statusPill(v) },
+        { head: I18n.t("lists.col.status"), essential: true, sortKey: "status", sort: (v) => VmStatus.sortKey(v), render: (v) => VmStatus.pills(v) },
         {
           head: I18n.t("lists.col.host"), essential: true, sortKey: "host", sort: (v) => hostText(v),
           render: (v) => { const t = hostText(v); return t ? Html.escape(t) : dim("—"); },

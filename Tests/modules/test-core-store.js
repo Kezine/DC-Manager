@@ -1,7 +1,7 @@
 /* Tests modules — entités, Store (CRUD, cascade, undo, routes, spares, sites…), helpers core.
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmHostTip, VmLocate, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Entités : normalisation au constructeur", async () => {
@@ -1007,6 +1007,68 @@ module.exports = async () => {
     ck.eq(VmClusterFormat.memGo(4096, null), "4,0 Go", "memGo : total absent → utilisé seul");
     ck.eq(VmClusterFormat.memGo(null, 16384), "? / 16,0 Go", "memGo : utilisé absent mais total présent");
     ck.eq(VmClusterFormat.memGo(null, null), "—", "memGo : tout absent → —");
+  }
+  });
+
+  await section("VmStatus : état d'une VM (statut + orphelinat) — SOURCE UNIQUE des trois anciens sites", async () => {
+  {
+    // La règle « orphelinat prime, running vert, stopped neutre, le reste tel quel » était RÉÉCRITE dans
+    // `ListConfigs.vms`, `DetailForms.vmDetail` et `VmHostTip`. Les attentes ci-dessous sont EXPLICITES et
+    // byte-exactes — dérivées de l'ANCIEN code REGÉNÉRÉ depuis git (`git show HEAD:…`), jamais retranscrit
+    // de mémoire, et posées comme attentes littérales plutôt que comparées à la nouvelle fonction (sinon
+    // elles compareraient une fonction à elle-même et resteraient vertes sans rien prouver).
+    const vm = (status, orphan) => ({ status, orphan: !!orphan });
+
+    // ---- PARITÉ EXACTE avec les pastilles de l'ancien LISTING (sans `title`).
+    ck.eq(VmStatus.pills(vm("running")), '<span class="pill" style="border-color:var(--ok);color:var(--ok)">running</span>', "listing : running → pastille verte, à l'octet près");
+    ck.eq(VmStatus.pills(vm("stopped")), '<span class="pill" style="border-color:var(--fg-dimmer);color:var(--fg-dim)">stopped</span>', "listing : stopped → bordure neutre + texte --fg-dim (les DEUX variables diffèrent, c'est voulu)");
+    ck.eq(VmStatus.pills(vm("paused")), '<span class="pill">paused</span>', "listing : statut inconnu → pastille nue, mot du provider TEL QUEL");
+    ck.eq(VmStatus.pills(vm("")), '<span style="color:var(--fg-dimmer)">—</span>', "listing : aucun statut → tiret discret (identique à `dim(\"—\")` et à `DetailForms.MUTED`)");
+    ck.eq(VmStatus.pills(vm("running", true)), '<span class="pill" style="border-color:var(--err);color:var(--err)">orpheline</span> <span class="pill" style="border-color:var(--ok);color:var(--ok)">running</span>', "listing : orpheline EN TÊTE + statut conservé (espace séparatrice comprise)");
+
+    // ---- PARITÉ EXACTE avec la FICHE : même sortie, plus l'infobulle sur la seule pastille « orpheline ».
+    ck.eq(VmStatus.pills(vm("running"), "Disparue à la dernière synchronisation"), VmStatus.pills(vm("running")), "fiche : VM non orpheline → le `title` ne change RIEN (aucune pastille où le poser)");
+    ck.eq(VmStatus.pills(vm("stopped", true), "Disparue à la dernière synchronisation"), '<span class="pill" style="border-color:var(--err);color:var(--err)" title="Disparue à la dernière synchronisation">orpheline</span> <span class="pill" style="border-color:var(--fg-dimmer);color:var(--fg-dim)">stopped</span>', "fiche : orpheline + `title` → attribut posé APRÈS le style, comme avant");
+
+    // ---- CLASSIFICATION : ensemble fermé, l'orphelinat est une dimension INDÉPENDANTE du statut.
+    ck.eq(VmStatus.kindOf(vm("running")), "running", "kindOf : running");
+    ck.eq(VmStatus.kindOf(vm("stopped")), "stopped", "kindOf : stopped");
+    ck.eq(VmStatus.kindOf(vm("paused")), "other", "kindOf : statut présent mais inconnu → 'other'");
+    ck.eq(VmStatus.kindOf(vm("")), "none", "kindOf : statut absent → 'none' (≠ 'other')");
+    ck.eq(VmStatus.kindOf(vm("running", true)), "running", "kindOf : l'orphelinat ne CONTAMINE pas la classification du statut");
+
+    // ---- COULEURS de la bulle : 3 seulement, l'orphelinat prime (parité `VmHostTip.swatchColor` d'origine).
+    ck.eq(VmStatus.swatchColor(vm("running")), "var(--ok)", "swatchColor : running → --ok");
+    ck.eq(VmStatus.swatchColor(vm("stopped")), "var(--fg-dimmer)", "swatchColor : stopped → neutre (la bulle n'a pas la nuance du listing)");
+    ck.eq(VmStatus.swatchColor(vm("running", true)), "var(--err)", "swatchColor : orpheline PRIME sur running");
+    ck.eq(VmHostTip.swatchColor(vm("running", true)), VmStatus.swatchColor(vm("running", true)), "VmHostTip.swatchColor DÉLÈGUE (API conservée pour ses appelants 2D/3D)");
+
+    // ---- TRI : orphelines groupées à part, puis alphabétique — parité avec `(v.orphan ? "1_" : "0_") + (v.status || "")`.
+    ck.eq(VmStatus.sortKey(vm("running")), "0_running", "sortKey : non orpheline → préfixe '0_'");
+    ck.eq(VmStatus.sortKey(vm("running", true)), "1_running", "sortKey : orpheline → préfixe '1_' (groupées en fin de tri croissant)");
+    ck.eq(VmStatus.sortKey(vm("")), "0_", "sortKey : sans statut → préfixe seul");
+
+    // ---- RECHERCHE : le mot « orpheline » était écrit EN DUR en français dans `ListConfigs.searchFields`.
+    // Il passe par le catalogue → en interface anglaise, « orphan » (le mot AFFICHÉ) devient cherchable.
+    ck.eq(VmStatus.searchTerms(vm("running", true)).join("|"), "running|orpheline", "searchTerms : statut + mot LOCALISÉ (catalogue fr)");
+    ck.eq(VmStatus.searchTerms(vm("running")).join("|"), "running|", "searchTerms : non orpheline → terme vide (le champ de recherche les ignore)");
+
+    // ---- ÉCHAPPEMENT : `status` est une donnée SOURCE d'un cluster tiers, posée en innerHTML.
+    ck.eq(VmStatus.pills(vm("<img src=x onerror=alert(1)>")), '<span class="pill">&lt;img src=x onerror=alert(1)&gt;</span>', "statut hostile → ÉCHAPPÉ (aucune balise ne sort d'ici)");
+    ck(VmStatus.pills(vm("\"><script>")).indexOf("<script>") < 0, "évasion d'attribut → neutralisée");
+
+    // ---- CONVERGENCE ASSUMÉE au regroupement : le statut est désormais ROGNÉ partout. Avant, le listing et
+    // la fiche comparaient la chaîne BRUTE — « running » espacé y tombait dans « inconnu » (pastille nue)
+    // alors que la bulle le montrait vert. Aucun provider n'émet ça ; l'incohérence n'avait pas à survivre.
+    ck.eq(VmStatus.raw({ status: "  running  " }), "running", "raw : statut rogné");
+    ck.eq(VmStatus.kindOf({ status: "  running  " }), "running", "statut espacé → running aux TROIS endroits (était 'other' au listing et à la fiche)");
+
+    // ---- TOLÉRANCE : les enregistrements viennent d'une synchro tierce, rien n'est présumé présent.
+    ck.eq(VmStatus.kindOf(null), "none", "entrée null → 'none', aucune exception");
+    ck.eq(VmStatus.kindOf(undefined), "none", "entrée undefined → 'none'");
+    ck.eq(VmStatus.kindOf({}), "none", "objet sans statut → 'none'");
+    ck.eq(VmStatus.kindOf({ status: 42 }), "none", "statut non-chaîne → 'none' (jamais coercé)");
+    ck.eq(VmStatus.isOrphan({ orphan: "oui" }), true, "orphan truthy non booléen → normalisé en booléen");
   }
   });
 
