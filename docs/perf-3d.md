@@ -90,6 +90,19 @@
   HORS mais rayon traversant → point de SORTIE (mur le plus loin) ; rayon qui rate → sol clampé au bord ; ni sol ni
   traversée → pivot non déplacé. Murs traités comme INFINIMENT hauts (bornage purement XY, aucune contrainte Z) —
   corrige le pivot délirant sous un angle rasant (multi-DC/multi-étage surtout). Géométrie PURE testée en Node.
+- **Marqueur du pivot LISIBLE SUR LES DEUX THÈMES** (`views/dc/three/PivotMarker`, module PUR — style, tracé
+  et clé de cache ; `DcThreeBase.pivotTexture`/`updatePivot` ne font que fournir le canvas et poser le sprite).
+  Le marqueur était dessiné dans une couleur EN DUR (`#c8d2e0`, le `--fg` du thème SOMBRE) à `opacity: 0.55` :
+  invisible sur fond clair. Il se décline désormais sur le thème — trait de la teinte OPPOSÉE au fond, **halo**
+  (liseré de contraste, tracé SOUS le trait en une 1re passe plus épaisse) de la teinte du fond. Le halo est ce
+  qui garantit la lisibilité PAR-DESSUS n'importe quel contenu, `depthTest: false` obligeant (baie sombre, sol
+  clair, image de façade). Silhouette, taille écran (~46 px) et épaisseur apparente INCHANGÉES ; seule l'opacité
+  monte à 0,85. Tous les réglages sont des constantes de `PivotMarker`.
+  ⚠ **La clé de cache de la texture DÉPEND du thème** (`##pivot|light` / `##pivot|dark`) : les clés `##…` de
+  `texCache` sont PERMANENTES (jamais évincées, cf. `pruneLabelTextureCache`), donc une clé fixe aurait resservi
+  à vie la texture du premier thème rencontré. Deux entrées permanentes au maximum. Corollaire :
+  `applyThemeChange` rappelle `updatePivot()` — le pivot est un sprite TEXTURÉ, hors des groupes dont il remappe
+  les couleurs de matériau.
 - **Dalle de PLANCHER TECHNIQUE** (`DcThreeScene.buildUnderfloorSlab`) : si une salle déclare `underfloor_mm > 0`,
   une seconde dalle légèrement BLEUTÉE (couleur de sol du thème mixée vers l'accent) est posée `underfloor_mm` mm
   sous le faux-plancher, matérialisant le vide technique. Même idiome que le sol de salle (plan horizontal dans

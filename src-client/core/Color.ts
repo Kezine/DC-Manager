@@ -54,6 +54,18 @@ export class Color {
     return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
   }
 
+  /** Un fond 0xRRGGBB est-il CLAIR ? Règle du thème de la vue 3D : moyenne NON pondérée des trois
+      composantes > 128. C'est ce test — et non la luminance perçue de `contrastText` — qui décline
+      déjà les portes de baie en clair/sombre (`DcThreeBase.readTheme`) ; le marqueur de pivot
+      (`PivotMarker`) doit se décliner AVEC elles, sinon deux éléments de la même scène basculeraient
+      sur deux seuils différents. Les deux règles coexistent donc à dessein : `contrastText` choisit
+      une ENCRE lisible sur une pastille, celle-ci qualifie l'AMBIANCE d'une scène.
+      Entrée = entier (issu de `cssToHex`), pas une chaîne : c'est sous cette forme que le moteur 3D
+      manipule les couleurs. */
+  static isLightHex(hex: number): boolean {
+    return (((hex >> 16) & 255) + ((hex >> 8) & 255) + (hex & 255)) / 3 > 128;
+  }
+
   /** Couleur de texte lisible (#000 / #fff) sur un fond donné. */
   static contrastText(hex: string): string {
     const rgb = Color.hexToRgb(hex);

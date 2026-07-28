@@ -20,6 +20,7 @@ import { FloorLayout } from "../../../geometry/FloorLayout";
 // Boîte de bornage du PIVOT d'orbite : le TYPE seul (effacé à la compilation). Le décor d'étage la
 // transporte, la couche caméra la consomme — une seule définition pour les deux (principe n°3).
 import type { PivotAabb } from "../../../geometry/PivotBounds";
+import { PivotMarker } from "./PivotMarker";   // style + tracé PURS du marqueur de centre de rotation (thème, halo, cache)
 import type { DatacenterHost } from "../shared";
 
 /** Labels À PLAT (noms d'équipement ET de baie) : réglages PARTAGÉS entre couches (principe n°3, réutilisés par
@@ -237,7 +238,7 @@ export abstract class DcThreeBase {
       return isFinite(c) ? c : fallback;
     };
     const bg = col("--bg", 0x0a0a0a);
-    const light = (((bg >> 16) & 255) + ((bg >> 8) & 255) + (bg & 255)) / 3 > 128;   // thème clair = fond lumineux
+    const light = Color.isLightHex(bg);   // thème clair = fond lumineux (règle PARTAGÉE, cf. Color.isLightHex)
     return {
       bg,
       floor: col("--bg-2", 0x1b2230),
@@ -248,6 +249,8 @@ export abstract class DcThreeBase {
       front: col("--accent", 0x4ea1ff),
       // portes de baie : métal + panneau perforé, déclinés clair/sombre (sinon trop sombres sur fond clair).
       doorMetal: light ? 0x868d97 : 0x59616e,
+      // ⚠ Le marqueur de PIVOT se décline sur LA MÊME règle (`Color.isLightHex`) — cf. `PivotMarker`.
+      // Deux éléments de la même scène ne doivent pas basculer sur deux seuils différents.
       doorPanel: light ? 0x9aa0aa : 0x767f8d,
     };
   }
@@ -463,33 +466,47 @@ export abstract class DcThreeBase {
     const tex = new THREE.CanvasTexture(cv); tex.needsUpdate = true; this.texCache.set(key, tex); return tex;
   }
 
-  /** Texture (mutualisée) du marqueur de CENTRE DE ROTATION : anneau + croix en pointillés (cf. SVG `.dc-cam-pivot`). */
+  /** Texture (mutualisée) du marqueur de CENTRE DE ROTATION : anneau + croix en pointillés, cerclés d'un
+      liseré de contraste. Le STYLE et le TRACÉ vivent dans le module pur `PivotMarker` (testable) ; ici on
+      ne fait que fournir le canvas et gérer le cache.
+
+      ⚠ CLÉ DE CACHE DÉPENDANTE DU THÈME. Les clés « ##… » ne sont JAMAIS évincées (cf.
+      `pruneLabelTextureCache`) : avec une clé fixe, la texture du PREMIER thème rencontré aurait été
+      resservie à vie, et basculer clair↔sombre n'aurait rien changé au marqueur. `PivotMarker.cacheKey`
+      encode donc la variante — deux entrées permanentes au maximum. */
   protected pivotTexture(): THREE.CanvasTexture | null {
     if (typeof document === "undefined") return null;
-    const key = "##pivot"; const cached = this.texCache.get(key); if (cached) return cached;
-    const s = 64, cv = document.createElement("canvas"); cv.width = cv.height = s;
+    // `theme` est renseigné par `build()` ; avant lui (fenêtre très courte), on retombe sur le thème SOMBRE,
+    // qui est le défaut historique de `readTheme`.
+    const backgroundHex = this.theme ? this.theme.bg : 0x0e1116;
+    const key = PivotMarker.cacheKey(backgroundHex);
+    const cached = this.texCache.get(key); if (cached) return cached;
+    const s = PivotMarker.TEXTURE_SIZE_PX, cv = document.createElement("canvas"); cv.width = cv.height = s;
     const g = cv.getContext("2d"); if (!g) return null;
-    const c = s / 2, r = s * 0.27;
-    g.strokeStyle = "#c8d2e0"; g.lineWidth = 2.5; g.setLineDash([4, 3]); g.lineCap = "round";
-    g.beginPath(); g.arc(c, c, r, 0, Math.PI * 2); g.stroke();                                  // anneau
-    g.beginPath(); g.moveTo(c - s * 0.45, c); g.lineTo(c + s * 0.45, c);                         // croix horizontale
-    g.moveTo(c, c - s * 0.45); g.lineTo(c, c + s * 0.45); g.stroke();                            // croix verticale
+    PivotMarker.draw(g, s, PivotMarker.ink(backgroundHex));
     const tex = new THREE.CanvasTexture(cv); tex.needsUpdate = true; this.texCache.set(key, tex); return tex;
   }
 
   /** (Re)pose et dimensionne le marqueur de centre de rotation sur la cible caméra (taille ÉCRAN constante),
-      ou le masque si l'option est désactivée. Appelé à chaque mise à jour de caméra (suit le pivot). */
+      ou le masque si l'option est désactivée. Appelé à chaque mise à jour de caméra (suit le pivot) ET après
+      un changement de thème (cf. `applyThemeChange`). */
   protected updatePivot(): void {
     if (!this.scene) return;
     if (!this.opts.showPivot) { if (this._pivot) this._pivot.visible = false; return; }
+    const tex = this.pivotTexture(); if (!tex) return;
     if (!this._pivot || this._pivot.parent !== this.scene) {
-      const tex = this.pivotTexture(); if (!tex) return;
-      this._pivot = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.55, depthTest: false, depthWrite: false }));
+      this._pivot = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: PivotMarker.OPACITY, depthTest: false, depthWrite: false }));
       this._pivot.renderOrder = 30; this.scene.add(this._pivot);
+    } else {
+      // Le sprite n'est créé QU'UNE FOIS : sans cette réaffectation, il garderait la texture du thème
+      // dans lequel il est né. `applyThemeChange` ne le rattraperait pas — il ne remappe que des COULEURS
+      // de matériau, jamais des textures, et le pivot vit sous `scene` (hors des groupes qu'il parcourt).
+      const mat = this._pivot.material as THREE.SpriteMaterial;
+      if (mat.map !== tex) { mat.map = tex; mat.needsUpdate = true; }
     }
     this._pivot.visible = true;
     this._pivot.position.copy(this.target);
-    this._pivot.scale.setScalar(46 * this.worldPerPixel());   // ~46 px à l'écran, quel que soit le zoom
+    this._pivot.scale.setScalar(PivotMarker.SCREEN_SIZE_PX * this.worldPerPixel());   // taille écran constante, quel que soit le zoom
   }
 
   /** Texture (mutualisée) d'un DISQUE plein blanc — teinté par la couleur du sprite (pastille de câble 2D). */

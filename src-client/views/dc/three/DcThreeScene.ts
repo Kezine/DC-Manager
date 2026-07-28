@@ -1547,6 +1547,11 @@ export class DcThreeScene extends DcThreeCamera {
     // on évite les groupes de CÂBLES (couleurs réseau, indépendantes du thème).
     [this.gDecor, this.gRacks, this.gFree, this.gWaypoints, this.gFloorDecor].forEach((grp) => grp && grp.traverse((o: any) => { const m = o.material; if (!m) return; (Array.isArray(m) ? m : [m]).forEach(apply); }));
     this.theme = neu;
+    // Le marqueur de PIVOT n'est PAS un matériau remappable : c'est un sprite TEXTURÉ, posé sous `scene`
+    // (donc hors des groupes parcourus ci-dessus), et sa couleur vit dans les pixels de la texture. On le
+    // rejoue explicitement — APRÈS l'affectation du nouveau thème, dont `pivotTexture()` dérive sa clé de
+    // cache. Sans cet appel, il resterait à l'ancienne encre jusqu'à la prochaine manipulation de caméra.
+    this.updatePivot();
     this.request();
   }
 

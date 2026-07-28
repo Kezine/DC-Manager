@@ -1,7 +1,7 @@
 /* Tests modules — vues & outils pilotés par hôte injecté (Graph/Datacenter, outils 2D/3D, images).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, PivotBounds, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, PivotBounds, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("FilterChips : modèle pur des filtres actifs (barre de contrôles unifiée, lot C)", async () => {
@@ -1186,6 +1186,113 @@ module.exports = async () => {
     ck(SceneLayoutSignature.of([], apres) !== avantSig, "…et la signature de disposition CHANGE (sinon le pivot resterait borné à l'ancien monde)");
     ck.eq(SceneLayoutSignature.action({ ids: "M:x", layout: avantSig }, { ids: "M:x", layout: SceneLayoutSignature.of([], apres) }, { hasContent: true, deltaEligible: true }), "rebuild", "bornes monde modifiées → reconstruction de la scène");
     ck.eq(SceneLayoutSignature.of([], decorOf(dv.webglCtx())), SceneLayoutSignature.of([], apres), "bornes recalculées à l'identique → MÊME signature (aucune reconstruction parasite)");
+  });
+
+  /* ============================================================================================
+     MARQUEUR DU PIVOT D'ORBITE — style, thème et CLÉ DE CACHE (`PivotMarker`).
+
+     Bug utilisateur : « le marqueur de pivot n'est vraiment pas visible en version light ». Deux
+     causes cumulées, retrouvées dans le code : une couleur EN DUR (`#c8d2e0`, le `--fg` du thème
+     SOMBRE) et une opacité de 0,55 qui écrasait le contraste.
+
+     ⚠ CE QUI NE SE TESTE PAS : la RASTÉRISATION et le contraste perçu. Un canvas n'existe pas en
+     Node, et « est-ce lisible ? » est un jugement d'œil. Ce qui SE teste — et qui est testé ici —
+     c'est tout ce dont dépend la lisibilité : que les encres suivent le thème, que la CLÉ DE CACHE
+     le suive aussi (le piège du lot : les clés « ##… » ne sont jamais évincées, une clé fixe
+     resservirait éternellement la texture du premier thème rencontré), et que le tracé pose bien
+     le halo SOUS le trait, strictement plus épais. Le contexte 2D est ENREGISTRÉ par un stub —
+     l'interface `PivotMarkerCanvas` est étroite exprès pour ça.
+     ============================================================================================ */
+  await section("PivotMarker : le marqueur de pivot suit le THÈME, halo compris (clé de cache incluse)", async () => {
+    const NOIR = 0x0e1116, BLANC = 0xffffff;   // fonds réels : --bg du thème sombre / du thème clair
+
+    // ---- bascule clair/sombre : seuil EXACT (moyenne non pondérée > 128), partagé avec readTheme ----
+    ck.eq(PivotMarker.isLight(NOIR), false, "fond sombre (#0e1116) → thème sombre");
+    ck.eq(PivotMarker.isLight(BLANC), true, "fond blanc → thème clair");
+    ck.eq(PivotMarker.isLight(0x808080), false, "gris 128 : la borne est STRICTE (> 128), donc sombre");
+    ck.eq(PivotMarker.isLight(0x818181), true, "gris 129 → clair");
+    ck.eq(Color.isLightHex(0x818181), true, "…et c'est bien la règle PARTAGÉE Color.isLightHex (aucune 2ᵉ règle)");
+
+    // ---- ENCRES : le trait prend la teinte OPPOSÉE au fond, le halo celle du fond ----
+    const surSombre = PivotMarker.ink(NOIR), surClair = PivotMarker.ink(BLANC);
+    ck.eq(surSombre.core, "#f2f6fc", "fond sombre → trait quasi BLANC");
+    ck.eq(surSombre.halo, "rgba(6,9,13,0.9)", "fond sombre → halo quasi NOIR");
+    ck.eq(surClair.core, "#0f141b", "fond clair → trait quasi NOIR (c'était le bug : il restait clair)");
+    ck.eq(surClair.halo, "rgba(255,255,255,0.92)", "fond clair → halo BLANC");
+    ck(surClair.core !== surSombre.core, "les deux thèmes ne partagent PAS la même encre de trait");
+    ck(surClair.halo !== surSombre.halo, "…ni le même halo");
+
+    // ---- CLÉ DE CACHE : LE piège du lot. Deux variantes, jamais une seule. ----
+    ck.eq(PivotMarker.cacheKey(NOIR), "##pivot|dark", "clé de cache : variante SOMBRE nommée");
+    ck.eq(PivotMarker.cacheKey(BLANC), "##pivot|light", "clé de cache : variante CLAIRE nommée");
+    ck(PivotMarker.cacheKey(NOIR) !== PivotMarker.cacheKey(BLANC), "clé de cache DIFFÉRENTE par thème (sinon l'ancienne texture serait resservie à vie)");
+    ck.eq(PivotMarker.cacheKey(0x1b2230), PivotMarker.cacheKey(NOIR), "deux fonds sombres distincts → MÊME clé (2 entrées permanentes au maximum)");
+    ck.eq(PivotMarker.cacheKey(BLANC).slice(0, 2), "##", "clé « ## » : texture MUTUALISÉE, exemptée de l'éviction LRU des étiquettes");
+
+    // ---- TRACÉ : contexte 2D ENREGISTREUR (aucun canvas, aucun DOM) ----
+    const recorder = () => {
+      const ops = [];
+      const g = {
+        strokeStyle: "", lineWidth: 0, lineCap: "",
+        setLineDash: (d) => ops.push({ op: "dash", d: d.slice() }),
+        beginPath: () => ops.push({ op: "begin" }),
+        arc: (x, y, r) => ops.push({ op: "arc", x, y, r, color: g.strokeStyle, width: g.lineWidth }),
+        moveTo: (x, y) => ops.push({ op: "move", x, y }),
+        lineTo: (x, y) => ops.push({ op: "line", x, y, color: g.strokeStyle, width: g.lineWidth }),
+        stroke: () => ops.push({ op: "stroke", color: g.strokeStyle, width: g.lineWidth }),
+      };
+      return { g, ops };
+    };
+    const S = 128;
+    const { g, ops } = recorder();
+    PivotMarker.draw(g, S, PivotMarker.ink(BLANC));
+    const strokes = ops.filter((o) => o.op === "stroke");
+    ck.eq(strokes.length, 4, "tracé : 4 stroke() = (anneau + croix) × 2 PASSES");
+    // ORDRE : halo D'ABORD, trait ENSUITE — inversé, le halo effacerait le trait.
+    ck.eq(strokes[0].color, "rgba(255,255,255,0.92)", "passe 1 = HALO (fond clair)");
+    ck.eq(strokes[1].color, "rgba(255,255,255,0.92)", "passe 1 : la croix aussi est halotée");
+    ck.eq(strokes[2].color, "#0f141b", "passe 2 = TRAIT, posé PAR-DESSUS le halo");
+    ck.eq(strokes[3].color, "#0f141b", "passe 2 : croix");
+    // ÉPAISSEURS : le halo doit strictement DÉBORDER, sinon il ne produit aucun liseré.
+    ck.eq(strokes[2].width, 5, "trait : (2,5/64) × 128 = 5 px canvas (≈ 1,8 px écran — épaisseur historique)");
+    ck.eq(strokes[0].width, 11, "halo : 5 + 2 × 3 (liseré de ~1,1 px écran de CHAQUE côté)");
+    ck(strokes[0].width > strokes[2].width, "le halo est STRICTEMENT plus épais que le trait (sans quoi : aucun liseré)");
+    // POINTILLÉS : posés UNE fois, donc les deux passes tombent sur les MÊMES segments.
+    const dashes = ops.filter((o) => o.op === "dash");
+    ck.eq(dashes.length, 1, "pointillés posés UNE seule fois (les deux passes partagent la découpe)");
+    ck.eq(JSON.stringify(dashes[0].d), JSON.stringify([8, 6]), "pointillés : [8, 6] px canvas = [4, 3] de l'ancienne texture 64 px (longueurs apparentes inchangées)");
+    ck.eq(g.lineCap, "round", "extrémités arrondies (le halo enveloppe aussi les bouts de pointillé)");
+    // GÉOMÉTRIE : silhouette INCHANGÉE (anneau centré + croix), le marqueur n'a pas grossi.
+    const arcs = ops.filter((o) => o.op === "arc");
+    ck.eq(arcs.length, 2, "un anneau par passe");
+    ck.eq(arcs[0].x, 64, "anneau centré en x");
+    ck.eq(arcs[0].y, 64, "anneau centré en y");
+    ck.eq(arcs[0].r, 34.56, "rayon d'anneau : 0,27 × 128 (= 0,27 × 64 de l'ancienne texture, à l'échelle)");
+    const lines = ops.filter((o) => o.op === "line");
+    ck.eq(lines.length, 4, "deux bras par passe (horizontal + vertical)");
+    ck.eq(lines[0].x, 64 + 57.6, "bras horizontal : demi-longueur 0,45 × 128");
+    ck.eq(lines[1].y, 64 + 57.6, "bras vertical : même demi-longueur");
+
+    // ---- DISCRIMINATION : le tracé prend bien SES encres du paramètre (une fonction qui les
+    //      ignorerait passerait au vert sur le seul test ci-dessus). ----
+    const { g: g2, ops: ops2 } = recorder();
+    PivotMarker.draw(g2, S, PivotMarker.ink(NOIR));
+    const strokes2 = ops2.filter((o) => o.op === "stroke");
+    ck.eq(strokes2[0].color, "rgba(6,9,13,0.9)", "discrimination : fond SOMBRE → halo noir");
+    ck.eq(strokes2[2].color, "#f2f6fc", "discrimination : fond SOMBRE → trait blanc");
+    // …et la TAILLE est bien un PARAMÈTRE (tout est exprimé en ratios du côté) : redessiné sur la
+    // texture 64 px d'origine, le tracé retombe EXACTEMENT sur les cotes historiques. C'est ce qui
+    // prouve que la silhouette n'a pas bougé — seul le contraste a changé.
+    const petit = recorder();
+    PivotMarker.draw(petit.g, 64, PivotMarker.ink(NOIR));
+    ck.eq(petit.ops.filter((o) => o.op === "arc")[0].r, 17.28, "côté 64 → rayon 17,28 (= 0,27 × 64, l'ancien rayon)");
+    ck.eq(JSON.stringify(petit.ops.filter((o) => o.op === "dash")[0].d), JSON.stringify([4, 3]), "côté 64 → pointillés [4, 3] (exactement l'ancien tracé)");
+    ck.eq(petit.ops.filter((o) => o.op === "stroke")[2].width, 2.5, "côté 64 → trait 2,5 px (exactement l'ancienne épaisseur)");
+
+    // ---- RÉGLAGES : valeurs EN DUR, pour que toute retouche à l'œil se voie ici ----
+    ck.eq(PivotMarker.SCREEN_SIZE_PX, 46, "taille écran conservée (~46 px, quel que soit le zoom)");
+    ck.eq(PivotMarker.OPACITY, 0.85, "opacité relevée de 0,55 à 0,85 (0,55 dissolvait le trait sur fond clair)");
+    ck.eq(PivotMarker.TEXTURE_SIZE_PX, 128, "texture 128 px : le liseré est un détail FIN, 64 px les confondait");
   });
 
   /* ============================================================================================
