@@ -214,7 +214,7 @@ export interface ParsedCidr { base: number; prefix: number; mask: number; networ
 
 /** Brins (fibres physiques) piochés par un port de patch = ses `strand_a`/`strand_b` non nuls. Concept PARTAGÉ entre
     la VALIDATION (unicité/capacité des brins — V6/T6) et la DÉDUCTION réseau (arête « même fibre » — Store) : d'où sa
-    place ici (shared/, auto-suffisant). Évite le motif `[p.strand_a, p.strand_b].filter(v => v != null)` répété. */
+    place ici, dans `src-shared/`. Évite le motif `[p.strand_a, p.strand_b].filter(v => v != null)` répété. */
 export class PortStrands {
   static of(port: { strand_a?: number | null; strand_b?: number | null }): number[] {
     return [port.strand_a, port.strand_b].filter((v): v is number => v != null);
@@ -970,8 +970,11 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       //       de rôle « data » avec une direction résiduelle écrite par API/import devient un faux départ / une fausse
       //       charge SECTEUR : PowerAnalysis.eqPortsByDir sélectionne les ports par `direction` en n'excluant QUE le
       //       rôle "poe" (le PoE vit sur son propre graphe) — un data+source passerait donc pour un départ secteur.
-      //       Rôles en DUR ici : la source de vérité PortRoles vit côté client et n'est pas importable (shared/ est
-      //       auto-suffisant) ; leurs ids ("power"/"poe") sont STABLES. L'UI neutralise déjà la direction au save
+      //       Rôles en DUR ici : la source de vérité PortRoles vit côté CLIENT (`src-client/registries/`), et c'est
+      //       ÇA qui la rend inimportable — un fichier partagé ne peut pas dépendre du front. (Rien à voir avec
+      //       l'auto-suffisance de `src-shared/`, LEVÉE : un autre fichier PARTAGÉ, lui, s'importerait très bien —
+      //       cf. `RackDepthPolicy` en tête de fichier.) Leurs ids ("power"/"poe") sont STABLES.
+      //       L'UI neutralise déjà la direction au save
       //       (EquipmentForms, au changement de rôle) — cette règle ferme le même trou côté serveur/import.
       { path: "direction", message: "La direction (source/sink) ne se déclare que sur un port d'énergie (rôle power ou poe).", holds: (p) => !p.direction || p.role === "power" || p.role === "poe" },
     ],

@@ -272,6 +272,17 @@ moteur métier pur, découplé du store (interface injectée) et de la présenta
   patron légitime, mais elle relève désormais du **choix de conception**, plus de la
   contrainte de build : `PowerAnalysis` reçoit son store et `DataValidation` reçoit
   `TrayGeometry` (`ValidationCollaborators`) parce que ça découple, pas parce que l'import
-  serait impossible. Les modules partagés existants n'ont, eux, aucun import relatif : la
-  levée de la contrainte ouvre la voie, elle n'ordonne aucune conversion.
+  serait impossible.
+- ⚠ **LES DEUX PATRONS COEXISTENT dans `DataValidation.ts`, et c'est VOULU** — ne pas
+  uniformiser à la volée. `RackDepthPolicy` (politique de profondeur de baie) y est
+  **IMPORTÉ** (`import { RackDepthPolicy } from "./RackDepthPolicy.js"`) : rien ne demande de
+  le découpler, et lui appliquer l'injection aurait coûté onze points d'appel et un garde-fou
+  d'échec fermé pour un bénéfice nul. `TrayGeometry` (géométrie d'étagère) y reste **INJECTÉ**
+  parce que le découplage se défend sur son propre mérite — son retrait est un lot à part,
+  possible et non demandé. L'un se lit à l'import, l'autre au point d'appel.
+- ⚠ **Une doc qui dit « auto-suffisant » fait DUPLIQUER.** Le seul vrai danger de la
+  contrainte périmée n'est pas qu'elle vieillisse : c'est qu'un contributeur y renonce à un
+  import légitime et **réécrive la règle sur place** — la dette exacte que les déduplications
+  `TrayGeometry` / `RackDepthPolicy` ont eu à résorber. Si un en-tête ou un commentaire
+  affirme encore l'auto-suffisance, c'est un **bug** (principe n°13) : le corriger.
 - Le serveur émet désormais sous `dist/src-server/src/` (cf. `package.json` `start`).
