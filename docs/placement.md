@@ -1790,7 +1790,7 @@ seul verrou réel est le filtre `shownFloors`. Le lever demande une portée expr
 **Sondes de mutation** : branche d'étage neutralisée dans `locateEquipment` → la section entière tombe
 (38 assertions perdues, l'ancien chemin partant sur le toast « non placé dans une salle ») ; `dc_z` compté
 DEUX fois dans `equipFloorOrigin` → **8 FAIL**, répartis sur les quatre couches (descripteur poussé au
-moteur, chaîne port, origine pure, cible caméra) ; portée NON élargie → **3 FAIL** dont « le posé n'est pas
+moteur, chaîne port, origine pure, cible caméra) ; portée NON élargie → **4 FAIL** dont « le posé n'est pas
 dessiné » alors que la caméra le vise ; garde du bâtiment sans salle retirée → **3 FAIL**.
 
 **Non couvert par les tests, à juger À L'ŒIL** : la surbrillance ambre elle-même et le confort du cadrage

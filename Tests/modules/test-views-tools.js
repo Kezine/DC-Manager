@@ -1642,7 +1642,7 @@ module.exports = async () => {
     ck.eq(dessines.length, 1, "portée élargie : le posé d'étage est maintenant DESSINÉ");
     // Garde de LISIBILITÉ (même motif que `sansNull` plus haut) : si la portée cessait d'être élargie, un
     // accès direct à `dessines[0]` CRASHERAIT la section et masquerait la répartition des échecs — or c'est
-    // elle qui informe (sonde mesurée : 2 FAIL + 1 crash, contre 3 FAIL lisibles avec cette garde).
+    // elle qui informe. Sonde mesurée des DEUX côtés : 2 FAIL + 1 crash sans cette garde, 4 FAIL lisibles avec.
     const premier = dessines[0] || { id: null, x: null, y: null, baseZ: null };
     ck.eq(premier.id, eqF.id, "…et c'est bien celui qu'on localise");
     ck(premier.x === dv._focusTarget.p.x && premier.y === dv._focusTarget.p.y,
