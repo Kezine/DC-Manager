@@ -1163,6 +1163,51 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : `nullable` n'est PAS vérifié à la validation — trou MESURÉ, verrouillé en l'état", async () => {
+  {
+    const DV = Validation.DataValidator;
+    // MÊME FAMILLE que la borne `max` ci-dessus — une propriété de spec qui se LIT comme appliquée sans l'être —
+    // mais l'arbitrage est INVERSE, et c'est le sujet de cette section. `max` a été ACTIVÉE (aucun document ne
+    // pouvait être rétro-invalidé) ; `nullable`, lui, reste INERTE À LA VALIDATION, parce que l'activer
+    // DURCIRAIT une porte d'écriture. Le moteur portait une branche `if (value === null) { if (!nullable) fail }`
+    // INATTEIGNABLE : `isEmpty` absorbe `null` et fait `continue` juste avant. Elle a été retirée ; ces tests
+    // remplacent le code mort par l'attente EXPLICITE du comportement réel, pour qu'un rétablissement futur soit
+    // un CHOIX (un test à réécrire) et non un effet de bord silencieux.
+
+    // ---- Le trou : `null` explicite sur un champ ni `required`, ni `nullable`, ni pourvu d'un `default`.
+    // `racks.width_mm` / `racks.depth` sont exactement ce cas (type "number", `min: 1`, rien d'autre).
+    const baie = (extra) => DV.validateRecord("racks", Object.assign({ id: "r1", name: "R", u_count: 42, width_mm: 600, depth: 1000 }, extra));
+    ck.eq(baie({}).length, 0, "baie complète → 0 erreur (témoin)");
+    ck.eq(baie({ width_mm: null }).length, 0, "width_mm null sur champ NON nullable → ACCEPTÉ (le trou, tel qu'il est aujourd'hui)");
+    ck.eq(baie({ depth: null }).length, 0, "depth null → accepté de la même façon");
+    ck.eq(DV.validateRecord("contacts", { id: "c1", name: "N", email: null }).length, 0, "contacts.email null → accepté (même cas, type string)");
+
+    // ---- Ce que `null` NE contourne PAS : `required` le rattrape, parce qu'il est testé DANS la branche `isEmpty`.
+    // C'est la raison pour laquelle le trou est resté sans conséquence — les champs qui comptent sont requis.
+    const sansNom = baie({ name: null });
+    ck.eq(sansNom.length, 1, "name null (champ REQUIS) → exactement 1 erreur");
+    ck.eq(sansNom[0].code, "required", "name null → code 'required' (et non 'type') : `isEmpty` traite null comme un vide");
+
+    // ---- `nullable` n'est pas pour autant décoratif : il gouverne la NORMALISATION et le type dérivé.
+    const normalisee = DV.normalizeRecord("racks", { id: "r1", name: "R", datacenter_id: undefined, width_mm: undefined });
+    ck(normalisee.datacenter_id === null, "champ nullable + default null → normalisé à null (rôle RÉEL de `nullable`)");
+    ck(normalisee.width_mm === undefined, "champ ni nullable ni pourvu d'un default → laissé TEL QUEL par la normalisation");
+
+    // ---- MESURE du rayon d'action, verrouillée : combien de champs sont dans ce cas. Si ce compte bouge, c'est
+    // qu'une spec a gagné (ou perdu) un champ exposé au trou → le relire et DÉCIDER, plutôt que de le découvrir
+    // en production. Mesuré à 20 le 2026-07-28, pour 0 enregistrement concerné dans les corpus réel et de démo.
+    const exposes = [];
+    for (const [collection, spec] of Object.entries(Validation.COLLECTION_SPECS)) {
+      for (const [field, fieldSpec] of Object.entries(spec.fields || {})) {
+        const aUnDefaut = Object.prototype.hasOwnProperty.call(fieldSpec, "default");
+        if (!fieldSpec.required && !fieldSpec.nullable && !aUnDefaut) exposes.push(collection + "." + field);
+      }
+    }
+    ck.eq(exposes.length, 20, "champs exposés au `null` silencieux (ni required, ni nullable, ni default) — compte VERROUILLÉ");
+    ck(exposes.indexOf("racks.width_mm") >= 0 && exposes.indexOf("contacts.email") >= 0, "les représentants testés ci-dessus font bien partie de l'ensemble mesuré");
+  }
+  });
+
   await section("shared : portée V6a (unicité d'adresse IP)", async () => {
   {
     const DV = Validation.DataValidator;

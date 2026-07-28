@@ -1369,13 +1369,22 @@ export class DataValidator {
     for (const [field, fieldSpec] of Object.entries(spec.fields)) {
       const value = record[field];
 
+      // `isEmpty` ABSORBE `null` (avec `undefined` et `""`) : passé ce point, `value` n'est plus jamais `null`.
+      // Une branche `if (value === null) { if (!fieldSpec.nullable) fail(…) }` a longtemps suivi ce bloc —
+      // INATTEIGNABLE, donc `nullable` n'a JAMAIS été vérifié à la validation (il ne gouverne que la
+      // normalisation, cf. `normalizeField`, et le TYPE dérivé `FieldValue`).
+      // ⚠ CONSÉQUENCE MESURÉE, laissée en l'état À DESSEIN — ce n'est pas un oubli : 20 champs ne sont ni
+      // `required`, ni `nullable`, ni pourvus d'un `default` (cables.name, racks.width_mm, racks.depth,
+      // ports.name, contacts.email…). Sur ceux-là un `null` EXPLICITE traverse normalisation ET validation,
+      // alors que leur type dérivé promet du non-null. Aucun enregistrement réel ou de démonstration n'est dans
+      // ce cas (0 sur les deux corpus, mesuré le 2026-07-28), mais une écriture API/import pourrait l'être.
+      // RÉTABLIR la règle est un CHANGEMENT DE COMPORTEMENT sur une porte d'écriture (à arbitrer, pas à glisser
+      // dans un nettoyage) : il faudrait tester `value === null` AVANT `isEmpty`. Le comportement actuel est
+      // verrouillé par un test explicite (`test-shared-validation.js`, « null sur champ non-nullable »), pour
+      // qu'un rétablissement soit un choix ASSUMÉ et non un effet de bord.
       if (DataValidator.isEmpty(value)) {
         if (fieldSpec.required) fail(field, "required", `Le champ « ${field} » est obligatoire.`);
         continue;   // vide non requis → rien d'autre à vérifier
-      }
-      if (value === null) {
-        if (!fieldSpec.nullable) fail(field, "type", `Le champ « ${field} » ne peut pas être null.`);
-        continue;
       }
       if (!DataValidator.matchesType(value, fieldSpec.type)) {
         fail(field, "type", `Le champ « ${field} » doit être de type ${fieldSpec.type}.`);
@@ -1533,7 +1542,9 @@ export class DataValidator {
     }
   }
 
-  /** Vrai si la valeur correspond bien au type déclaré (hors `null`, géré à part par `nullable`). */
+  /** Vrai si la valeur correspond bien au type déclaré. `null` n'arrive JAMAIS ici : il est absorbé en amont
+      par `isEmpty` (cf. la note du bloc de validation) — et NON « géré à part par `nullable` », comme
+      l'affirmait cette ligne du temps où une branche `value === null`, en réalité inatteignable, la suivait. */
   private static matchesType(value: unknown, type: FieldType): boolean {
     switch (type) {
       case "number": return typeof value === "number" && Number.isFinite(value);
