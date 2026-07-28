@@ -469,6 +469,128 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : ISOLEMENT du dossier — aucun import hors de src-shared/ (verrou PERMANENT)", async () => {
+  {
+    /* DEUX RÈGLES DISTINCTES gouvernent les imports de `src-shared/` ; la formulation historique
+       « fichier auto-suffisant » les CONFONDAIT (cf. `CLAUDE.md` § « Code partagé front/back ») :
+
+         (1) ISOLEMENT DU DOSSIER — PERMANENT, et c'est CETTE section qui le verrouille. Un fichier
+             partagé n'importe RIEN hors de `src-shared/` : ni `src-client/`, ni `src-server/`, ni
+             aucun paquet npm / module natif Node. Aucune configuration ne lèvera la règle : importer
+             du client ferait embarquer du DOM dans le build SERVEUR, importer du serveur ferait
+             embarquer du Node dans le FRONT — et de façon TRANSITIVE, donc INVISIBLE à la relecture
+             (le module importé peut être pur aujourd'hui et cesser de l'être demain, sans que
+             personne n'ait touché à `src-shared/`). La règle « TS PUR » de `CLAUDE.md` ne parle, elle,
+             que du CONTENU d'un fichier : on peut la respecter à la lettre en violant celle-ci.
+         (2) IMPORTS ENTRE FICHIERS PARTAGÉS — AUTORISÉS depuis le lot 7 (`resolve.extensionAlias` de
+             `webpack.config.js`, cf. docs/placement.md §6.7), à condition IMPÉRATIVE de porter
+             l'extension `.js` : NodeNext l'exige côté serveur, l'omettre compile côté front et CASSE
+             le build serveur. Vérifié ici aussi, faute de quoi la seule forme légale resterait une
+             convention non tenue.
+
+       Le verrou lit les SOURCES `.ts`, jamais le compilé : c'est le spécificateur ÉCRIT par le
+       contributeur qu'on contrôle (le compilé, lui, a déjà résolu les alias). */
+    const fs = require("fs");
+    const ts = require("typescript");
+    const sharedDir = path.join(__dirname, "..", "..", "src-shared");
+
+    /** Spécificateurs de module d'une source TS, TOUTES FORMES CONFONDUES → Map(spécificateur → ligne 1-based).
+        Passer par le PARSEUR TypeScript plutôt que par une expression régulière n'est pas un luxe : ces
+        fichiers DOCUMENTENT leurs propres imports en commentaire (`import { X } from "./Foo.js"` y figure
+        en prose), et une regex y verrait des faux positifs.
+        ⚠ `ts.preProcessFile` seul NE SUFFIT PAS — mesuré sur sonde : il RATE `export * as N from "x"`.
+        On prend donc l'UNION d'un parcours d'AST (exhaustif) et de `preProcessFile` (filet contre un
+        type de nœud oublié dans le parcours). Un verrou qui rate une forme donne une FAUSSE sécurité —
+        c'est le défaut `FieldSpec.max` (contrainte déclarée mais inerte) qu'on ne veut pas reproduire. */
+    const moduleSpecifiersOf = (text, fileName) => {
+      const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
+      const found = new Map();
+      const noteAt = (spec, pos) => {
+        if (typeof spec !== "string" || found.has(spec)) return;
+        found.set(spec, sf.getLineAndCharacterOfPosition(pos).line + 1);
+      };
+      const literalOf = (node) => (node && ts.isStringLiteralLike(node) ? node.text : null);
+      const visit = (node) => {
+        // `import … from "x"` / `import "x"` (effet de bord) / `import type … from "x"`
+        if (ts.isImportDeclaration(node)) noteAt(literalOf(node.moduleSpecifier), node.getStart(sf));
+        // `export … from "x"` / `export * from "x"` / `export * as N from "x"` / `export type { … } from "x"`
+        else if (ts.isExportDeclaration(node) && node.moduleSpecifier) noteAt(literalOf(node.moduleSpecifier), node.getStart(sf));
+        // `import X = require("x")` (forme TS)
+        else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) noteAt(literalOf(node.moduleReference.expression), node.getStart(sf));
+        // `import("x")` dynamique — et `require("x")` (CommonJS), refusé au même titre
+        else if (ts.isCallExpression(node)) {
+          const callee = node.expression;
+          if (callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.text === "require")) noteAt(literalOf(node.arguments[0]), node.getStart(sf));
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+      for (const imported of ts.preProcessFile(text, true, true).importedFiles) noteAt(imported.fileName, imported.pos);
+      return found;
+    };
+
+    // -- contrôle de DISCRIMINATION : le détecteur voit-il VRAIMENT chaque forme, et RIEN d'autre ? --
+    // Sans lui, le verrou passerait au vert en ne détectant rien du tout — le pire des états.
+    {
+      const sonde = [
+        'import { A } from "./A.js";',
+        'import "./B.js";',
+        'import type { C } from "./C.js";',
+        'import type D from "./D.js";',
+        'export { E } from "./E.js";',
+        'export * from "./F.js";',
+        'export * as G from "./G.js";',
+        'export type { H } from "./H.js";',
+        'const i = import("./I.js");',
+        'import J = require("./J.js");',
+        'const k = require("./K.js");',
+        'import {\n  L,\n  M\n} from "./L.js";',
+        '// import { Faux } from "../src-client/nope.js";',
+        '/* import { Faux2 } from "../src-server/nope2.js"; */',
+        'const s = "import { Faux3 } from \\"paquet-npm\\"";',
+      ].join("\n");
+      const vus = moduleSpecifiersOf(sonde, "sonde.ts");
+      const formes = { "./A.js": "import … from", "./B.js": 'import "x" (effet de bord)', "./C.js": "import type { … } from", "./D.js": "import type X from", "./E.js": "export { … } from", "./F.js": "export * from", "./G.js": "export * as N from (RATÉE par preProcessFile seul)", "./H.js": "export type { … } from", "./I.js": "import() dynamique", "./J.js": "import X = require()", "./K.js": "require()", "./L.js": "import multi-lignes" };
+      for (const [spec, forme] of Object.entries(formes)) ck(vus.has(spec), "détecteur d'imports : forme COUVERTE — " + forme);
+      ck.eq([...vus.keys()].filter((s) => s.includes("nope") || s === "paquet-npm").join(","), "",
+        "détecteur d'imports : commentaires et chaînes littérales IGNORÉS (aucun faux positif)");
+    }
+
+    // -- le VERROU proprement dit, sur les sources RÉELLES --
+    // Parcours RÉCURSIF : `src-shared/` est plat aujourd'hui, la règle doit tenir s'il cesse de l'être.
+    const sourcesPartagees = [];
+    (function collecte(dir) {
+      for (const entree of fs.readdirSync(dir, { withFileTypes: true })) {
+        const chemin = path.join(dir, entree.name);
+        if (entree.isDirectory()) collecte(chemin);
+        else if (entree.name.endsWith(".ts")) sourcesPartagees.push(chemin);
+      }
+    })(sharedDir);
+    sourcesPartagees.sort();
+    ck(sourcesPartagees.length >= 5, "src-shared/ : les sources .ts sont bien atteintes (" + sourcesPartagees.length + " fichiers lus)");
+
+    const violations = [];
+    const importsInternes = [];
+    for (const chemin of sourcesPartagees) {
+      const nom = path.relative(sharedDir, chemin).split(path.sep).join("/");
+      for (const [spec, ligne] of moduleSpecifiersOf(fs.readFileSync(chemin, "utf8"), nom)) {
+        const ou = nom + ":" + ligne + ' → "' + spec + '"';
+        if (path.isAbsolute(spec) || /^[A-Za-z]:[\\/]/.test(spec)) { violations.push(ou + " — chemin ABSOLU"); continue; }
+        if (!spec.startsWith("./") && !spec.startsWith("../")) { violations.push(ou + " — spécificateur NON relatif (paquet npm ou module natif Node)"); continue; }
+        const cible = path.resolve(path.dirname(chemin), spec);
+        if (cible !== sharedDir && !cible.startsWith(sharedDir + path.sep)) { violations.push(ou + " — SORT de src-shared/"); continue; }
+        // Import INTERNE légal (règle 2) : l'extension `.js` reste IMPÉRATIVE.
+        if (!spec.endsWith(".js")) violations.push(ou + " — import interne SANS extension `.js` (NodeNext l'exige : compile côté front, CASSE le build serveur)");
+        else importsInternes.push(nom + " → " + spec);
+      }
+    }
+    ck.eq(violations.join("  |  "), "",
+      "src-shared/ : ISOLEMENT — aucun import hors du dossier (règle PERMANENTE, cf. CLAUDE.md § « Code partagé front/back »)");
+    // Anti-vacuité : le verrou doit avoir VU des imports réels, sinon il pourrait « passer » sur des fichiers vides.
+    ck(importsInternes.length >= 1, "src-shared/ : le verrou lit des sources RÉELLES — imports internes vus : " + (importsInternes.join(", ") || "AUCUN"));
+  }
+  });
+
   await section("shared : baie sans capots (châssis ouvert) — T3/T3b + V6f + waypoint toit", async () => {
   {
     const base = { id: "R1", name: "baie", u_count: 42, width_mm: 600, depth: 1000, sides: "single" };

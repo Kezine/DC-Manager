@@ -252,13 +252,45 @@ moteur métier pur, découplé du store (interface injectée) et de la présenta
 - Chaque côté COMPILE la source partagée : le front via son `include` (résolution
   *bundler*) ; le serveur via son `include` (NodeNext). Les imports depuis `src-client/`
   vers `src-shared/` s'écrivent SANS extension, comme partout dans le front.
+
+> ⚠️ **DEUX RÈGLES DISTINCTES gouvernent les imports de `src-shared/`, et elles ne sont pas de
+> même nature.** La formulation historique — « les fichiers de `src-shared/` sont
+> **auto-suffisants** » — les CONFONDAIT en une seule phrase, justifiant la première (permanente)
+> par la contrainte de build de la seconde (un simple réglage webpack). Quand cette contrainte est
+> tombée, la phrase entière a paru tomber avec elle. C'est ce mélange qui a fait durer une
+> duplication inutile pendant cinq lots.
+
+**(1) ISOLEMENT DU DOSSIER — règle PERMANENTE.** Un fichier de `src-shared/` n'importe **RIEN hors
+de `src-shared/`** : ni `src-client/`, ni `src-server/`, ni aucun **paquet npm** ou module natif
+Node. Aucune configuration ne la lèvera, parce qu'elle n'est pas un artefact de build mais la
+raison d'être du dossier : importer du client ferait embarquer du **DOM** dans le build SERVEUR,
+importer du serveur ferait embarquer du **Node** dans le FRONT, et un paquet npm n'est pas garanti
+présent des deux côtés. Surtout, l'effet est **TRANSITIF**, donc **invisible à la relecture** : le
+module importé peut être pur *aujourd'hui* et cesser de l'être demain — la violation apparaîtrait
+sans que personne n'ait touché à `src-shared/`. C'est la **raison de fond** de tout ce qui précède ;
+la règle « TS PUR » ci-dessus ne parle, elle, que du **contenu** d'un fichier, et on peut la
+respecter à la lettre en violant celle-ci.
+- ✅ **Vérifiée MÉCANIQUEMENT** (plus seulement affirmée) par la section
+  *« shared : ISOLEMENT du dossier »* de `Tests/modules/test-shared-validation.js` : elle relit les
+  **SOURCES** `src-shared/**/*.ts` — pas le compilé, car c'est le spécificateur ÉCRIT qu'on contrôle —
+  et échoue en **nommant le fichier, la ligne et le spécificateur** fautifs. Elle couvre toutes les
+  formes (`import … from`, `import "x"`, `import type`, `export … from`, `export * as N from`,
+  `import()` dynamique, `require`) via le **parseur TypeScript**, donc sans faux positif sur les
+  commentaires — ces fichiers documentent leurs propres imports en prose. Un contrôle de
+  discrimination, dans la même section, prouve que le détecteur voit bien chacune de ces formes.
+
+**(2) IMPORTS ENTRE FICHIERS PARTAGÉS — AUTORISÉS** (levés au lot 7, cf. `docs/placement.md` §6.7).
+Artefact de build, et non règle de conception : c'était un défaut de configuration webpack, mesuré
+puis corrigé.
 - ✅ **Un import relatif ENTRE fichiers de `src-shared/` est AUTORISÉ** — à une condition
   IMPÉRATIVE : le spécificateur porte l'extension **`.js`**, `import { X } from "./Foo.js"`
   pour un fichier `Foo.ts`. C'est la SEULE forme que les trois chaînes acceptent :
   **NodeNext l'EXIGE** (le serveur émet du JS, le spécificateur doit désigner le fichier
   ÉMIS), la résolution *bundler* l'accepte, et webpack l'accepte grâce à l'alias ci-dessous.
   Un import SANS extension entre fichiers partagés compile côté front puis **casse le build
-  serveur** — c'est la faute à ne pas commettre.
+  serveur** — c'est la faute à ne pas commettre. La même section de test que la règle (1)
+  **vérifie aussi cette extension** : une convention non tenue par une machine finit toujours
+  par ne plus être tenue.
 - ⚠ **Pourquoi l'extension, EXACTEMENT** (mesuré le 2026-07-27, pas déduit — cette section a
   longtemps affirmé le contraire sans l'avoir testé). Un import relatif `./Foo.js` entre
   fichiers partagés est accepté par **`tsc` des DEUX côtés** (TypeScript 5.9 ramène le
@@ -284,5 +316,7 @@ moteur métier pur, découplé du store (interface injectée) et de la présenta
   contrainte périmée n'est pas qu'elle vieillisse : c'est qu'un contributeur y renonce à un
   import légitime et **réécrive la règle sur place** — la dette exacte que les déduplications
   `TrayGeometry` / `RackDepthPolicy` ont eu à résorber. Si un en-tête ou un commentaire
-  affirme encore l'auto-suffisance, c'est un **bug** (principe n°13) : le corriger.
+  affirme encore l'auto-suffisance, c'est un **bug** (principe n°13) : le corriger. Le mot est
+  d'ailleurs à BANNIR même pour dire vrai : il désigne indistinctement la règle (1) et la
+  règle (2). Écrire laquelle des deux on invoque.
 - Le serveur émet désormais sous `dist/src-server/src/` (cf. `package.json` `start`).

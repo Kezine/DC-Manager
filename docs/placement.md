@@ -292,6 +292,12 @@ VALIDATION (règles T2d / V6e), avec ses sept constantes.
 > garde-fou d'échec fermé, alors que ce lot-ci ne modifie qu'une ligne de configuration et n'a donc AUCUN
 > effet de bord à surveiller. Le raisonnement « il FAUT injecter » est mort ; l'injection, elle, se
 > défend encore sur ses propres mérites (découplage), et c'est à ce titre qu'elle est conservée.
+>
+> ⚠ **Précision APPORTÉE EN §6.19 — « l'auto-suffisance n'est plus une règle » dit trop.** Ce qui est
+> levé, c'est le seul interdit d'importer un AUTRE FICHIER PARTAGÉ. L'interdit d'importer **hors de
+> `src-shared/`** (client, serveur, paquet npm), lui, est PERMANENT et n'a jamais dépendu d'une
+> configuration. La formule « auto-suffisant » confondait les deux ; §6.19 les sépare et verrouille la
+> première par un test.
 
 **Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
 
@@ -1180,6 +1186,65 @@ suppression.
 
 **Aucun changement de comportement observable** : les quatre points sont de la doc, du code sans appelant,
 un alias prouvé équivalent et une règle CSS que rien ne sélectionne.
+
+### 6.19 L'isolement de `src-shared/` devient MÉCANIQUE — **IMPLÉMENTÉ**
+
+§6.7 et §6.18 ont corrigé une doctrine périmée. Ce lot corrige la doctrine qui la remplaçait : elle
+**confondait deux règles** que rien ne rendait comparables.
+
+| Règle | Nature | État avant ce lot |
+|---|---|---|
+| (1) un fichier partagé n'importe RIEN **hors de `src-shared/`** | **PERMANENTE** — aucune configuration ne la lèvera | jamais énoncée explicitement |
+| (2) les fichiers partagés ne peuvent pas s'importer **entre eux** | artefact de build (résolution webpack) | **LEVÉE en §6.7** |
+
+L'énoncé historique — « les fichiers de `src-shared/` sont **auto-suffisants** » — les tenait en une seule
+phrase, et **justifiait la (1) par la contrainte de build de la (2)**. Quand §6.7 a démoli cette
+justification par la mesure, la phrase entière a paru tomber : c'est ce glissement qu'il fallait arrêter.
+
+**Pourquoi (1) est permanente, et pourquoi elle est GRAVE.** Un `src-shared/X.ts` qui importerait un module
+de `src-client/` ferait embarquer du **DOM** dans le build SERVEUR ; un import vers `src-server/` ferait
+embarquer du **Node** dans le FRONT. Un paquet npm tombe sous la même règle : rien ne garantit sa présence
+des deux côtés. Et l'effet est **TRANSITIF**, donc **invisible à la relecture** — le module importé peut
+être pur *aujourd'hui* et cesser de l'être demain, la violation apparaissant sans que personne n'ait
+touché à `src-shared/`. `CLAUDE.md` n'énonçait qu'une règle sur le **CONTENU** (« TS PUR : ni DOM ni
+Node ») ; on pouvait la respecter à la lettre en violant la **fermeture transitive**.
+
+**Le verrou.** Section *« shared : ISOLEMENT du dossier »* de `Tests/modules/test-shared-validation.js`,
+posée à côté des gardes anti-divergence existantes (même forme : `section()` + `ck`, aucun mécanisme
+parallèle). Elle relit les **SOURCES** `src-shared/**/*.ts` — jamais le compilé, car c'est le spécificateur
+ÉCRIT par le contributeur qu'on contrôle — et échoue en **nommant le fichier, la ligne et le spécificateur**
+fautifs. Accepté : un relatif qui reste dans le dossier ET porte l'extension `.js` (règle (2)). Refusé :
+tout ce qui sort, tout chemin absolu, tout spécificateur nu (npm / natif Node), et — au titre de la règle
+(2) — un import interne sans extension.
+
+**Décisions prises à l'implémentation :**
+
+- **Parseur TypeScript, pas d'expression régulière.** Ces fichiers **documentent leurs propres imports en
+  prose** (`import { RackDepthPolicy } from "./RackDepthPolicy.js"` figure en commentaire dans plusieurs
+  d'entre eux) : une regex y verrait des faux positifs, et un jour un faux négatif. Le parcours d'AST
+  ignore commentaires et chaînes littérales par construction.
+- **`ts.preProcessFile` seul NE SUFFIT PAS — mesuré, pas supposé.** Sur une sonde couvrant douze formes, il
+  **RATE `export * as N from "x"`**. C'est précisément le défaut qu'on cherchait à éviter — une contrainte
+  déclarée mais inerte, comme le `FieldSpec.max` du lot 12c. Le détecteur prend donc l'**UNION** d'un
+  parcours d'AST (exhaustif) et de `preProcessFile` (filet contre un type de nœud oublié).
+- **Un contrôle de DISCRIMINATION accompagne le verrou**, dans la même section : douze formes d'import
+  synthétiques doivent être VUES (`import … from`, `import "x"`, `import type` sous ses deux formes,
+  `export { … } from`, `export * from`, `export * as N from`, `export type { … } from`, `import()`
+  dynamique, `import X = require()`, `require()`, import multi-lignes) et trois leurres — deux
+  commentaires et une chaîne littérale — doivent être IGNORÉS. Sans lui, le verrou passerait au vert en
+  ne détectant rien du tout. Une assertion d'anti-vacuité vérifie en outre qu'il a bien LU des sources
+  réelles (au moins un import interne effectivement vu).
+- **Parcours RÉCURSIF du dossier**, bien qu'il soit plat aujourd'hui : la règle doit tenir s'il cesse de
+  l'être, et un spécificateur est résolu contre le répertoire de SON fichier.
+
+**Preuve que le verrou MORD** (sonde posée puis retirée par copie) : un `import { Html } from
+"../src-client/core/Html.js"` ajouté à `src-shared/Schema.ts` fait rougir la suite avec
+`src-shared/ : ISOLEMENT — aucun import hors du dossier … (attendu "", obtenu
+"Schema.ts:26 → \"../src-client/core/Html.js\" — SORT de src-shared/")`.
+
+**État constaté** : **aucune violation**. Un seul import existe dans tout `src-shared/`
+(`DataValidation.ts:30 → "./RackDepthPolicy.js"`), et **aucun fichier partagé n'importe de paquet npm** —
+l'invariant tenait déjà, par convention seule ; il tient désormais par construction.
 
 ## 7. État de la convergence
 
