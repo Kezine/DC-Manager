@@ -353,7 +353,7 @@ export class RackForms extends CableForms {
     const removeMount = async (kind: string, mid: string) => {
       if (kind === "equipment") {
         if (!store.get("equipments", mid)) return;
-        const downs = store.equipmentDcId(mid) ? store.cableDowngradeOps([mid]) : [];
+        const downs = store.equipmentContainer(mid) ? store.cableDowngradeOps([mid]) : [];   // clé généralisée (cf. DcInteract, même garde)
         if (!await FormSave.batch(store, [{ collection: "equipments", id: mid, patch: { placement_mode: "manual", rack_id: null, rack_u: null } }].concat(downs as any))) return;   // refusé par le Store (toast rouge) : ne rien annoncer
         Notify.toast(I18n.t("rack.rackContent.equipRemoved") + (downs.length ? I18n.t("rack.rackContent.cablesReplanned") : ""));
       } else if (kind === "brush") {

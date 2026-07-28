@@ -346,6 +346,57 @@ module.exports = async () => {
     cases.forEach(({ label, e }) => ck(PlacementContainers.chain(e, fetch).length <= PlacementContainers.MAX_DEPTH, "chaîne bornée — " + label));
     // Référence PENDANTE : une étagère dont la baie a disparu ne doit rien inventer.
     ck.eq(PlacementContainers.roomIdOf({ placement_mode: "tray", tray_item_id: "inexistant" }, fetch), null, "étagère fantôme → aucune salle");
+
+    /* ================= LA CLÉ GÉNÉRALISÉE — `Store.equipmentContainer` & co (lot 1 du câblage d'étage)
+       Le trio `*Container` rend le conteneur IMMÉDIAT, là où le trio `*DcId` PROJETTE la chaîne sur son
+       maillon « salle » et jette le reste. Les attentes ci-dessous sont EXPLICITES (le conteneur voulu,
+       écrit à la main) et non « === PlacementContainers.of(e) », qui serait tautologique — `Store` y
+       délègue. ================= */
+    const conteneurAttendu = {
+      "racké à un U": { kind: "rack", id: rack.id },
+      "pool de baie (rack_id SANS rack_u)": null,
+      "marge latérale": { kind: "rack", id: rack.id },
+      "paroi": { kind: "rack", id: rack.id },
+      "posé sur étagère": { kind: "tray", id: tray.id },
+      "libre EN salle": { kind: "room", id: dc.id },
+      "libre NON placé": null,
+      "posé sur un ÉTAGE": { kind: "floor", location: "liege", floor: "1" },
+      "racké dans une baie HORS salle": { kind: "rack", id: rackPool.id },
+    };
+    cases.forEach(({ label, e }) => {
+      ck.eq(JSON.stringify(s.equipmentContainer(e)), JSON.stringify(conteneurAttendu[label]), "conteneur immédiat attendu — " + label);
+    });
+
+    /* CE QUE LA GÉNÉRALISATION CHANGE, et c'est TOUT le sujet du chantier : deux placements ont un
+       conteneur parfaitement valide alors que la clé « salle » les déclare introuvables. C'est la
+       raison unique pour laquelle un équipement d'étage n'est pas câblable (doctrine §6.4). */
+    const gagnes = cases.filter(({ e }) => s.equipmentDcId(e) === null && s.equipmentContainer(e) !== null).map((c) => c.label);
+    ck.eq(JSON.stringify(gagnes.sort()), JSON.stringify(["posé sur un ÉTAGE", "racké dans une baie HORS salle"]),
+      "EXACTEMENT deux placements deviennent localisables : l'étage et la baie hors salle");
+    // …et RIEN ne se perd dans l'autre sens : tout ce qui avait une salle garde un conteneur.
+    const perdus = cases.filter(({ e }) => s.equipmentDcId(e) !== null && s.equipmentContainer(e) === null);
+    ck.eq(perdus.length, 0, "aucun placement localisable aujourd'hui ne devient introuvable");
+
+    // PORT et CÂBLE : mêmes règles, même priorité A-puis-B que `cableDcId` (le cadrage d'un câble à deux
+    // bouts placés ne doit pas se déplacer quand on généralisera les appelants).
+    const eqEtage = byLabel("posé sur un ÉTAGE"), eqSalle = byLabel("libre EN salle");
+    const pEtage = await s.create("ports", { equipment_id: eqEtage.id, name: "p-etage" });
+    const pSalle = await s.create("ports", { equipment_id: eqSalle.id, name: "p-salle" });
+    ck.eq(JSON.stringify(s.portContainer(pEtage.id)), JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "portContainer : port d'un équipement d'ÉTAGE (là où portDcId rend null)");
+    ck.eq(s.portDcId(pEtage.id), null, "…et l'ancienne clé le déclare toujours hors salle (le contraste EST la mesure)");
+    ck.eq(JSON.stringify(s.portContainer(pSalle.id)), JSON.stringify({ kind: "room", id: dc.id }), "portContainer : port d'un équipement de salle");
+    ck.eq(s.portContainer("inexistant"), null, "portContainer : port inconnu → null (tolérant)");
+
+    const cab = await s.create("cables", { name: "c1", from_port_id: pEtage.id, to_port_id: pSalle.id });
+    ck.eq(JSON.stringify(s.cableContainer(cab)), JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "cableContainer : PREMIÈRE extrémité localisable (A), comme cableDcId");
+    // ⚠ Deux ports NEUFS : la règle de portée V6b n'autorise qu'UN câble par port — réutiliser les
+    // précédents ferait REFUSER la création, et `create` rend alors `null` en silence (cf. `FormSave`).
+    const pEtage2 = await s.create("ports", { equipment_id: eqEtage.id, name: "p-etage-2" });
+    const pSalle2 = await s.create("ports", { equipment_id: eqSalle.id, name: "p-salle-2" });
+    const cabInverse = await s.create("cables", { name: "c2", from_port_id: pSalle2.id, to_port_id: pEtage2.id });
+    ck.eq(JSON.stringify(s.cableContainer(cabInverse)), JSON.stringify({ kind: "room", id: dc.id }), "cableContainer : priorité A-puis-B RESPECTÉE (l'ordre des bouts décide)");
+    ck.eq(s.cableContainer({ from_port_id: null, to_port_id: null }), null, "cableContainer : aucun bout placé → null");
+    ck.eq(s.cableContainer("inexistant"), null, "cableContainer : câble inconnu → null (tolérant)");
   }
   });
 

@@ -20,6 +20,7 @@ import { DataValidator, PortStrands } from "../../src-shared/DataValidation";
 import type { ValidationError, EntityFetcher, ChildFinder, ValidationCollaborators } from "../../src-shared/DataValidation";
 import { TrayGeometry } from "../../src-shared/TrayGeometry";
 import { PlacementContainers } from "../../src-shared/PlacementContainers";
+import type { PlacementContainer } from "../../src-shared/PlacementContainers";
 import { CableRouteAnalyzer as RouteAnalyzerImpl } from "./CableRouteAnalyzer";
 import type { RouteError as RouteErrorT, RouteAnalysis as RouteAnalysisT } from "./CableRouteAnalyzer";
 
@@ -745,6 +746,49 @@ export class Store {
     const c: any = (typeof cableOrId === "object") ? cableOrId : this.get("cables", cableOrId);
     if (!c) return null;
     return this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id);
+  }
+
+  /* ---- placement : CONTENEUR (généralisation de la clé « salle ») ----
+
+     Le trio ci-dessous GÉNÉRALISE `equipmentDcId`/`portDcId`/`cableDcId`. La différence tient en une
+     ligne : là où les anciens PROJETTENT la chaîne d'attache sur son maillon « salle » et jettent le
+     reste (`PlacementContainers.roomIdOf`), ceux-ci rendent le conteneur IMMÉDIAT tel quel.
+
+     ⚠ POURQUOI ÇA COMPTE — un équipement posé sur un ÉTAGE a une chaîne parfaitement valide
+     (`floor` → `building`) ; `equipmentDcId` rend pourtant `null` pour lui, uniquement parce qu'aucun
+     de ses maillons ne s'appelle `room`. C'est le cas particulier que la doctrine §6.4 demande de
+     RETIRER, pas une fonctionnalité à ajouter — et c'est la cause unique du blocage « les équipements
+     d'étage ne sont pas câblables ».
+
+     ⚠ ADDITIF ET NON BRANCHÉ à ce lot, délibérément (même patron que `PlacementContainers` lui-même) :
+     les appelants migrent par familles, et la famille qui sert de CLÉ DE PORTÉE (résolution 3D, tracé
+     inter-salles) attend des décisions d'architecture non tranchées — cf. le cadrage
+     `.notes/toDos/cablage-equipements-etage-cadrage-2026-07-29.md`. Livrer la clé sans ses
+     consommateurs est ce qui permet de la prouver AVANT de s'en servir (doctrine §4.1).
+
+     ⚠ Comparer deux conteneurs se fait avec `PlacementContainers.same`, JAMAIS par égalité d'id :
+     l'identité d'un ÉTAGE est le COUPLE (bâtiment, étage) et un étage non configuré n'a pas d'id. */
+
+  /** Conteneur IMMÉDIAT d'un équipement (baie, étagère, salle, étage…), ou null s'il n'est attaché à
+      rien de localisable (« pool »). Généralise `equipmentDcId`. */
+  equipmentContainer(eqOrId: any): PlacementContainer | null {
+    const eq = (typeof eqOrId === "object") ? eqOrId : this.get("equipments", eqOrId);
+    return PlacementContainers.of(eq);
+  }
+
+  /** Conteneur où se résout un PORT : celui de son équipement porteur. Généralise `portDcId`. */
+  portContainer(portId: string | null): PlacementContainer | null {
+    const p: any = this.get("ports", portId);
+    return p ? this.equipmentContainer(p.equipment_id) : null;
+  }
+
+  /** Conteneur où se résout un CÂBLE : celui de la PREMIÈRE extrémité localisable — même règle de
+      priorité que `cableDcId` (A puis B), pour que la généralisation ne déplace pas le cadrage d'un
+      câble dont les deux bouts sont placés. Généralise `cableDcId`. */
+  cableContainer(cableOrId: any): PlacementContainer | null {
+    const c: any = (typeof cableOrId === "object") ? cableOrId : this.get("cables", cableOrId);
+    if (!c) return null;
+    return this.portContainer(c.from_port_id) || this.portContainer(c.to_port_id);
   }
 
   /* ---- faisceaux (trunks) : pool de fibres pioché par les PORTS des patchs d'extrémité ---- */

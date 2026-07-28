@@ -705,7 +705,11 @@ export abstract class DcInteract extends DcPanels {
     ];
     if (FloorLayout.floorEquipLocalized(eq)) items.push({ label: I18n.t("dc.interact.delocate"), danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: async () => { await this.store.update("equipments", eq.id, { floor_x: null, floor_y: null }); this.selFloorEquip = null; this.setDirty(); } });
     items.push({ label: I18n.t("dc.interact.removeFromFloor"), danger: true, disabled: locked, title: locked ? PlacementLock.BLOCKED_HINT : undefined, action: async () => {
-      const downs = this.store.equipmentDcId(eq.id) ? this.store.cableDowngradeOps([eq.id]) : [];
+      // CLÉ GÉNÉRALISÉE : la question est « cet équipement était-il attaché à quelque chose ? », pas
+      // « était-il dans une SALLE ». Avec l'ancienne clé, un équipement d'ÉTAGE rendait toujours null —
+      // ses câbles n'auraient donc JAMAIS été déclassés en le retirant de son étage. Inerte aujourd'hui
+      // (un équipement d'étage n'est pas encore câblable), juste le jour où il le sera.
+      const downs = this.store.equipmentContainer(eq.id) ? this.store.cableDowngradeOps([eq.id]) : [];
       await this.store.updateBatch(([{ collection: "equipments", id: eq.id, patch: { placement_mode: "manual", floor_x: null, floor_y: null } }] as any[]).concat(downs as any));
       this.selFloorEquip = null; this.setDirty(); Notify.toast(I18n.t("dc.interact.equipRemovedFloor"));
     } });
