@@ -25,5 +25,6 @@ export { SiteLayout, EARTH_RADIUS_M, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_
 export type { SiteGps, SiteRealPos, SiteWorldPos, SiteScale } from "./SiteLayout";
 export { DoorGeometry } from "./DoorGeometry";
 export type { DoorPt, DoorRoom, DoorLike, DoorGeom } from "./DoorGeometry";
+export { CameraFraming } from "./CameraFraming";
 export { Positioning, CORNER_IDS, WALL_IDS } from "./Positioning";
 export type { Pt, Rect, Frame, CornerId, WallId, Axis, Ref, Cote, SnapResult } from "./Positioning";

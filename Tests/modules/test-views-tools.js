@@ -1,7 +1,7 @@
 /* Tests modules — vues & outils pilotés par hôte injecté (Graph/Datacenter, outils 2D/3D, images).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("FilterChips : modèle pur des filtres actifs (barre de contrôles unifiée, lot C)", async () => {
@@ -1172,6 +1172,86 @@ module.exports = async () => {
     const dc3 = await s.create("datacenters", { name: "Salle Q", width_mm: 6000, depth_mm: 4000, cell_mm: 600 });
     const libreVide = dv.freeCell(dc3);
     ck(libreVide.x === 300 && libreVide.y === 300, "freeCell : salle vide → 1re maille, comportement inchangé");
+  }
+  });
+
+  /* ============================================================================================
+     « LOCALISER » : CE QUI EST CADRÉ, ET À QUELLE TAILLE — attentes EN DUR (comportement CHANGÉ).
+     Le cadrage ne dépendait d'aucune règle nommée : l'étendue poussée au moteur valait la seule
+     HAUTEUR de la baie (une baie murale plus large que haute était donc cadrée trop serré), et une
+     CONSTANTE de 1 600 mm pour tout équipement libre, quelle que soit sa taille réelle — d'où un
+     gros coffret qui débordait de la vue et un petit boîtier qui s'y perdait. Les valeurs ci-dessous
+     sont dérivées à la main du modèle et de `CameraFraming`, jamais de la sortie d'une implémentation.
+     ============================================================================================ */
+  await section("« Localiser » : on cadre LA BAIE (équipement monté) ou L'OBJET (libre), à sa taille RÉELLE", async () => {
+  {
+    const s = await makeStore();
+    const dc = await s.create("datacenters", { name: "Salle L", width_mm: 8000, depth_mm: 6000, cell_mm: 600 });
+    const commun = { u_count: 42, datacenter_id: dc.id, vmargin_mm: 0, vmargin_bottom_mm: 0, height_mm: 2000, width_mm: 600, depth: 1000, dc_x: 2000, dc_y: 3000 };
+    const rk = await s.create("racks", Object.assign({ name: "R-42U" }, commun));
+    const dv = new DatacenterView(s, {}, {});   // garde headless
+    dv.dcId = dc.id;
+
+    // ---- équipement MONTÉ EN BAIE : la cible est la BAIE, centrée (et non l'équipement) ----
+    const eq1u = await s.create("equipments", { name: "sw-1U", placement_mode: "rack", rack_id: rk.id, rack_u: 1, u_height: 1 });
+    dv.locateEquipment(eq1u.id);
+    ck(dv._focusTarget.p.x === 2000 && dv._focusTarget.p.y === 3000, "équipement en baie : la caméra vise la baie en X/Y");
+    ck.eq(dv._focusTarget.p.z, 1000, "équipement en baie : z = MI-HAUTEUR DE LA BAIE (2000/2) — la baie est CENTRÉE, l'équipement se repère à sa surbrillance");
+    ck.eq(dv._focusTarget.extent, 2000, "équipement en baie : étendue cadrée = plus grande cote de la BAIE (2 000 mm)");
+    ck.eq(CameraFraming.halfExtentFor(dv._focusTarget.extent), 1111.111111111111, "…soit 2 222 mm de monde cadré : la baie occupe 90 % de la vue (contre 62,5 % avant)");
+    // l'équipement lui-même reste résolu par `equipCenter` (son U), qui n'est PAS ce qu'on cadre.
+    ck.eq(dv.equipCenter(eq1u, dc.id).z, 22.225, "equipCenter : rend toujours le centre de l'ÉQUIPEMENT (milieu du 1er U) — le cadrage, lui, vise la baie");
+    // même règle pour un monté en marge (side) et un posé sur étagère (tray) : c'est la baie qu'on cadre.
+    const eqSide = await s.create("equipments", { name: "eq-side", placement_mode: "side", rack_id: rk.id, side_u: 1, free_w_mm: 40, free_h_mm: 40, free_l_mm: 100 });
+    dv.locateEquipment(eqSide.id);
+    ck(dv._focusTarget.p.z === 1000 && dv._focusTarget.extent === 2000, "équipement en MARGE : même cadrage — la baie entière");
+    const tray = await s.create("rackItems", { kind: "tray", rack_id: rk.id, u: 5, u_height: 2, tray_u: 1, side: "front" });
+    const eqTray = await s.create("equipments", { name: "eq-tray", placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 });
+    dv.locateEquipment(eqTray.id);
+    ck(dv._focusTarget.p.z === 1000 && dv._focusTarget.extent === 2000, "équipement sur ÉTAGÈRE : même cadrage — la baie entière");
+
+    // ---- baie visée DIRECTEMENT : l'étendue n'est plus la seule hauteur ----
+    dv.locateRack(rk.id);
+    ck.eq(dv._focusTarget.extent, 2000, "locateRack(42U) : étendue = 2 000 mm (la hauteur domine ici)");
+    const rkMural = await s.create("racks", { name: "R-mural", u_count: 6, datacenter_id: dc.id, vmargin_mm: 0, vmargin_bottom_mm: 0, height_mm: 400, width_mm: 600, depth: 600, dc_x: 5000, dc_y: 1000 });
+    dv.locateRack(rkMural.id);
+    ck.eq(dv._focusTarget.extent, 600, "locateRack(baie MURALE 600 × 600 × 400) : étendue = sa LARGEUR — cadrer sa seule hauteur (400) l'aurait tronquée");
+    ck.eq(dv._focusTarget.p.z, 200, "locateRack(murale) : z = mi-hauteur (400/2)");
+    ck.eq(CameraFraming.halfExtentFor(600), 333.3333333333333, "…666 mm de monde cadré : 90 % de la vue, au-dessus de la limite de zoom");
+
+    // ---- une baie MASQUÉE ne peut pas être localisée : « Localiser » la démasque ----
+    dv.hidden3dRacks = new Set([rk.id, rkMural.id]);
+    dv.locateRack(rk.id);
+    ck(!dv.hidden3dRacks.has(rk.id), "locateRack : la baie visée est DÉMASQUÉE (un isolement laissé par un focus précédent la rendait invisible)");
+    ck(dv.hidden3dRacks.has(rkMural.id), "locateRack : les AUTRES masquages sont respectés (on ne réinitialise pas un choix de l'utilisateur)");
+    dv.hidden3dRacks = new Set();
+
+    // ---- équipement LIBRE : l'étendue suit la taille RÉELLE de l'objet, plus une constante ----
+    const gros = await s.create("equipments", { name: "armoire", placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 1000, dc_y: 1000, dc_z: 0, free_w_mm: 2000, free_l_mm: 1000, free_h_mm: 3000 });
+    dv.locateEquipment(gros.id);
+    ck.eq(dv._focusTarget.extent, 3000, "équipement LIBRE (2000 × 1000 × 3000) : étendue = sa plus grande cote — l'ancienne valait 1 600 mm et l'objet DÉBORDAIT de la vue");
+    ck(dv._focusTarget.p.x === 1000 && dv._focusTarget.p.y === 1000, "équipement LIBRE : la caméra vise l'objet");
+    ck.eq(dv._focusTarget.p.z, 1500, "équipement LIBRE : z = mi-hauteur de sa boîte");
+    const petit = await s.create("equipments", { name: "boitier", placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 4000, dc_y: 2000, dc_z: 0, free_w_mm: 100, free_l_mm: 100, free_h_mm: 100 });
+    dv.locateEquipment(petit.id);
+    ck.eq(dv._focusTarget.extent, 100, "petit boîtier LIBRE : étendue = 100 mm…");
+    ck.eq(CameraFraming.halfExtentFor(dv._focusTarget.extent), 300, "…mais la LIMITE DE ZOOM cadre quand même 600 mm de monde (sinon 111 mm : plus aucun contexte)");
+
+    // ---- équipement LIBRE SANS position : viser l'objet là où il est DESSINÉ (13e site du balayage §6.13) ----
+    const nu = await s.create("equipments", { name: "libre-nu", placement_mode: "manual", dim_mode: "free", dc_id: dc.id, free_w_mm: 800, free_l_mm: 600, free_h_mm: 400 });
+    const cNu = dv.equipCenter(nu, dc.id) || { x: null, y: null, z: null };
+    ck(cNu.x !== null, "equipCenter(libre SANS position) : ne rend plus `null` (« Localiser » repliait sur le coin de la salle)");
+    ck(cNu.x === 400 && cNu.y === 300, "equipCenter(libre SANS position) : demi-empreinte (800/2, 600/2) — là où l'objet est DESSINÉ");
+    ck.eq(cNu.z, 200, "equipCenter(libre SANS position) : z = mi-hauteur de la boîte");
+    const ailleurs = await s.create("datacenters", { name: "Salle M", width_mm: 3000, depth_mm: 3000, cell_mm: 600 });
+    ck.eq(dv.equipCenter(nu, ailleurs.id), null, "equipCenter : un équipement d'UNE AUTRE salle reste `null` (la garde de salle est conservée)");
+
+    // ---- cibles PONCTUELLES : cadrage volontairement PRÉSERVÉ (constantes recalibrées) ----
+    const wp = await s.create("waypoints", { kind: "brush", wp_type: "datacenter", name: "brosse", datacenter_id: dc.id, rack_id: rk.id, rack_u: 10, u_height: 2, depth_mm: 100 });
+    dv.locateWaypoint(wp.id);
+    ck.eq(dv._focusTarget.extent, 1900, "waypoint : étendue de CONTEXTE recalibrée (1 900 mm)…");
+    const mondeWp = 2 * CameraFraming.halfExtentFor(dv._focusTarget.extent);
+    ck(Math.abs(mondeWp - 2080) / 2080 < 0.02, "…pour que le monde cadré reste celui d'avant (2 080 mm) à 2 % près — ce lot ne retouche pas ces trois cibles");
   }
   });
 };

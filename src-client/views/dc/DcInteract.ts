@@ -11,6 +11,8 @@ import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 // CONTENEUR SALLE : `origin()` donne le centre d'un contenu en local salle — source UNIQUE du repli
 // « position absente ⇒ demi-empreinte » que le cadrage caméra et l'outil de positionnement recopiaient.
 import { RoomFrame } from "../../geometry/RoomFrame";
+// Règle de CADRAGE : quelle étendue monde embrasser pour qu'une cible occupe la fraction voulue de la vue.
+import { CameraFraming } from "../../geometry/CameraFraming";
 import { FloorLayout } from "../../geometry/FloorLayout";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import type { Frame } from "../../geometry/Positioning";
@@ -27,6 +29,16 @@ import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, U_MM, TRAY_SHEET_RESERVE_MM } f
 import { I18n } from "../../i18n/I18n";
 import type { Vec3 } from "./shared";
 import { DcPanels } from "./DcPanels";
+
+/* ÉTENDUES DE CONTEXTE des cibles PONCTUELLES de « Localiser » (mm). Un port, une extrémité de câble ou un
+   waypoint n'ont pas de taille propre : ce qu'on cadre autour d'eux n'est pas leur emprise mais un rayon de
+   contexte, réglé à l'œil. Ces trois valeurs sont CALIBRÉES pour que leur cadrage reste, à ~1,5 % près,
+   celui d'avant la règle de remplissage — ce lot ne change délibérément que les cibles VOLUMIQUES (baie,
+   équipement), les seules dont le cadrage est signalé. Les reprendre telles quelles aurait resserré ces
+   trois vues de 30 à 45 % au passage, sans que personne l'ait demandé. */
+const FOCUS_CONTEXT_PORT_MM = 1250;       // cadrait 1 380 mm de monde ; en cadre 1 389
+const FOCUS_CONTEXT_CABLE_MM = 3500;      // cadrait 3 900 mm ; en cadre 3 889
+const FOCUS_CONTEXT_WAYPOINT_MM = 1900;   // cadrait 2 080 mm ; en cadre 2 111
 
 export abstract class DcInteract extends DcPanels {
 
@@ -835,7 +847,15 @@ export abstract class DcInteract extends DcPanels {
       const c = RoomFrame.origin(RackGeometry.roomPlacement(rk));
       return { x: c.x, y: c.y, z: RackGeometry.physHeight(rk) / 2 };
     }
-    if (e.dim_mode === "free") { if (e.dc_id !== dcId || e.dc_x == null || e.dc_y == null) return null; const b = FreeEquipGeometry.box(e); return { x: e.dc_x, y: e.dc_y, z: b.z + b.h / 2 }; }
+    // LIBRE : le centre vient du CONTENEUR SALLE, comme pour les modes ci-dessus — une position absente se
+    // replie donc sur la demi-empreinte, là où l'équipement est DESSINÉ (§6.13). Avant, cette branche rendait
+    // `null` faute de `dc_x`/`dc_y` et « Localiser » repliait sur (0, 0, 0), le coin de la salle : c'était le
+    // 13ᵉ site du balayage de §6.13, invisible parce que caché derrière un `return null` et non un `|| 0`.
+    if (e.dim_mode === "free") {
+      if (e.dc_id !== dcId) return null;
+      const b = FreeEquipGeometry.box(e), c = RoomFrame.origin(FreeEquipGeometry.roomPlacement(e));
+      return { x: c.x, y: c.y, z: b.z + b.h / 2 };
+    }
     if (e.placement_mode === "rack" && e.rack_id && e.rack_u != null) {
       const rk: any = this.store.get("racks", e.rack_id); if (!rk || rk.datacenter_id !== dcId) return null;
       const c = RoomFrame.origin(RackGeometry.roomPlacement(rk));
@@ -846,8 +866,9 @@ export abstract class DcInteract extends DcPanels {
 
   protected portDcId(portId: string | null): string | null { return this.store.portDcId(portId); }   // résolveur PARTAGÉ (Store) — même règle pour la vue 3D et les boutons « Localiser »
 
-  /** Bascule en 3D sur la salle `dcId` (mode simple DC) et programme le focus caméra sur `p` (emprise `extent` mm).
-      `face` (optionnel) oriente la caméra face au front de l'objet ; sinon l'angle courant est conservé. */
+  /** Bascule en 3D sur la salle `dcId` (mode simple DC) et programme le focus caméra sur `p`. `extent` (mm) est
+      la TAILLE de ce qu'on cadre — le moteur en dérive la vue via `CameraFraming` (90 % de la vue, limite de zoom).
+      `face` (optionnel) oriente la caméra face au front de l'objet ; sinon seul l'azimut courant est conservé. */
   protected focus3DAt(dcId: string, p: Vec3, extent: number, face?: { az: number; el: number } | null): void {
     this.view = "3d"; this.multiDc = false; this.dcId = dcId;
     this._focusTarget = { p, extent, face: face || null };
@@ -855,10 +876,20 @@ export abstract class DcInteract extends DcPanels {
   }
 
   /** Angle caméra « en face » d'une face, tournée de `orientationDeg`. Face avant = −Y local (normale monde
-      (sin o, −cos o)) ; `rear` vise la face ARRIÈRE (+Y local). Caméra de ce côté, légèrement en surplomb (~20°). */
+      (sin o, −cos o)) ; `rear` vise la face ARRIÈRE (+Y local). Caméra de ce côté, légèrement PLONGEANTE —
+      l'élévation vient de `CameraFraming`, source unique de cet angle (le moteur l'applique aussi par défaut
+      quand aucune face n'est visée). */
   protected frontAzimuth(orientationDeg: number, rear = false): { az: number; el: number } {
     const o = Normalize.rackOrientation(orientationDeg) * Math.PI / 180, s = rear ? -1 : 1;
-    return { az: Math.atan2(-s * Math.cos(o), s * Math.sin(o)), el: Math.PI / 9 };
+    return { az: Math.atan2(-s * Math.cos(o), s * Math.sin(o)), el: CameraFraming.FOCUS_ELEVATION_RAD };
+  }
+
+  /** Cible « Localiser » d'une BAIE : son centre en local salle + l'étendue à cadrer. Partagé par
+      « Localiser une baie » et « Localiser un équipement MONTÉ dans une baie » — les deux cadrent la
+      MÊME chose, la baie entière (l'équipement, lui, se repère à sa surbrillance ambre). */
+  protected rackFocus(rk: any): { p: Vec3; extent: number } {
+    const c = RoomFrame.origin(RackGeometry.roomPlacement(rk)), h = RackGeometry.physHeight(rk), he = RackGeometry.halfExtents(rk);
+    return { p: { x: c.x, y: c.y, z: h / 2 }, extent: CameraFraming.objectExtent(2 * he.hx, 2 * he.hy, h) };
   }
 
   /** Prépare le focus sur un équipement : surbrillance (focusEqId) + isolement de la baie s'il est en baie.
@@ -939,10 +970,15 @@ export abstract class DcInteract extends DcPanels {
     const dcId = this.store.equipmentDcId(eqId);
     if (!dcId) { Notify.toast(I18n.t("dc.interact.equipNotInRoom"), "err"); return; }
     const face = this.aimAtEquip(e, dcId);
-    // en baie : emprise = hauteur de la baie isolée (on la voit entière) ; sinon ~1,6 m autour du boîtier.
+    // MONTÉ DANS UNE BAIE (`aimAtEquip` l'a isolée et posé `selRackId`) : on cadre LA BAIE, centrée et
+    // entière — c'est le cadrage que l'utilisateur juge bon, et l'équipement s'y repère à sa surbrillance.
+    // LIBRE : on cadre l'objet lui-même, à sa taille RÉELLE. Avant, l'étendue valait 1 600 mm quelle que
+    // soit cette taille : un gros coffret débordait de la vue (d'où « il faut dé-zoomer ») et un petit
+    // boîtier s'y perdait. La limite de zoom de `CameraFraming` protège désormais le second cas.
     const rk: any = (this.selRackId) ? this.store.get("racks", this.selRackId) : null;
-    const extent = rk ? Math.max(RackGeometry.physHeight(rk), 1600) : 1600;
-    this.focus3DAt(dcId, this.equipCenter(e, dcId) || { x: 0, y: 0, z: 0 }, extent, face);
+    if (rk) { const t = this.rackFocus(rk); this.focus3DAt(dcId, t.p, t.extent, face); return; }
+    const b = FreeEquipGeometry.box(e);
+    this.focus3DAt(dcId, this.equipCenter(e, dcId) || { x: 0, y: 0, z: 0 }, CameraFraming.objectExtent(b.w, b.d, b.h), face);
   }
 
   locateRack(rackId: string): void {
@@ -950,8 +986,9 @@ export abstract class DcInteract extends DcPanels {
     const dcId = rk.datacenter_id;
     if (!dcId) { Notify.toast(I18n.t("dc.interact.rackNotInRoom"), "err"); return; }
     this.selRackId = rackId; this.focusEqId = null;
-    const H = RackGeometry.physHeight(rk), c = RoomFrame.origin(RackGeometry.roomPlacement(rk));   // baie sans position ⇒ demi-empreinte (là où elle est DESSINÉE)
-    this.focus3DAt(dcId, { x: c.x, y: c.y, z: H / 2 }, H, this.frontAzimuth(rk.orientation));
+    this.hidden3dRacks.delete(rackId);   // on ne peut pas LOCALISER une baie masquée (isolement laissé par un focus précédent) — les autres masquages sont respectés
+    const t = this.rackFocus(rk);        // baie sans position ⇒ demi-empreinte (là où elle est DESSINÉE)
+    this.focus3DAt(dcId, t.p, t.extent, this.frontAzimuth(rk.orientation));
   }
 
   locateCable(cableId: string): void {
@@ -961,7 +998,7 @@ export abstract class DcInteract extends DcPanels {
     const a = this.resolver.resolvePort3D(c.from_port_id, dcId) || this.resolver.resolvePort3D(c.to_port_id, dcId);
     if (!a) { Notify.toast(I18n.t("dc.interact.cableEndNotFound"), "err"); return; }
     this.selCables.add(cableId); this.showAllCables = true; this.focusEqId = null;
-    this.focus3DAt(dcId, { x: a.x, y: a.y, z: a.z }, 2500);
+    this.focus3DAt(dcId, { x: a.x, y: a.y, z: a.z }, FOCUS_CONTEXT_CABLE_MM);
   }
 
   locateWaypoint(wpId: string): void {
@@ -970,7 +1007,7 @@ export abstract class DcInteract extends DcPanels {
     if (!dcId || !this.store.waypointIsPlaced(wp)) { Notify.toast(I18n.t("dc.interact.wpNotInRoom"), "err"); return; }
     this.focusEqId = null; this.selRackId = null; this.selWaypointId = wpId;
     const a = this.resolver.waypointAnchor(wp);
-    this.focus3DAt(dcId, { x: a.x, y: a.y, z: a.z }, 1200);
+    this.focus3DAt(dcId, { x: a.x, y: a.y, z: a.z }, FOCUS_CONTEXT_WAYPOINT_MM);
   }
 
   locatePort(portId: string): void {
@@ -983,7 +1020,7 @@ export abstract class DcInteract extends DcPanels {
     // surbrillance de l'équipement ET du PORT + isolement de sa baie + orientation « en face » ; cadrage serré.
     const face = e ? this.aimAtEquip(e, dcId) : null;
     this.focusPortId = portId;   // le port lui-même est mis en évidence (même ambre que l'équipement)
-    this.focus3DAt(dcId, { x: pt.x, y: pt.y, z: pt.z }, 700, face);
+    this.focus3DAt(dcId, { x: pt.x, y: pt.y, z: pt.z }, FOCUS_CONTEXT_PORT_MM, face);
   }
 
 }

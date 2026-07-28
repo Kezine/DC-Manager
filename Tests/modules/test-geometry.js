@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, RoomFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, RoomFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -1653,6 +1653,62 @@ module.exports = async () => {
       const n = OUT[face], dot = cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2];
       ck(dot > 0, "non miroir " + face + " : (droite × haut) orienté comme la normale sortante");
     });
+  }
+  });
+
+  /* ============================================================================================
+     CameraFraming — la RÈGLE DE CADRAGE de « Localiser », désormais nommée et exprimée en TAUX
+     DE REMPLISSAGE. L'ancienne (`Math.max(400, extent * 0.7 + 200)`) faisait dépendre ce taux de
+     la TAILLE de l'objet : 62 % pour une baie de 2 m, 48 % pour 600 mm, 25 % pour 200 mm. Les
+     attentes ci-dessous sont EN DUR, dérivées à la main de la règle voulue (90 %, plancher à une
+     largeur de baie), jamais de la sortie d'une implémentation.
+     ============================================================================================ */
+  await section("CameraFraming : taux de remplissage à 90 %, limite de zoom, monotonie, aspect", async () => {
+  {
+    const half = (e, a) => CameraFraming.halfExtentFor(e, a);
+    const taux = (e, a) => e / (2 * half(e, a));   // fraction de la HAUTEUR de vue occupée par l'objet
+
+    // ---- constantes NOMMÉES (la valeur visée est une décision, pas un nombre noyé dans une formule) ----
+    ck.eq(CameraFraming.FILL_RATIO, 0.9, "FILL_RATIO : 90 % de la vue, demandé explicitement");
+    ck.eq(CameraFraming.MIN_FRAMED_EXTENT_MM, 600, "MIN_FRAMED_EXTENT_MM : limite de zoom = une largeur de baie standard (600 mm)");
+    ck.eq(CameraFraming.FOCUS_ELEVATION_RAD, Math.PI / 9, "FOCUS_ELEVATION_RAD : caméra légèrement plongeante (20°)");
+
+    // ---- le taux visé est ATTEINT, quelle que soit la taille (c'est tout l'enjeu du lot) ----
+    ck.eq(half(2000), 1111.111111111111, "baie de 2 000 mm : demi-étendue = 2000 / 1,8");
+    ck(Math.abs(taux(2000) - 0.9) < 1e-12, "objet de 2 000 mm : 90 % de la vue");
+    ck(Math.abs(taux(667) - 0.9) < 1e-12, "objet de 667 mm : 90 % — le taux ne dépend PLUS de la taille");
+    ck(Math.abs(taux(12000) - 0.9) < 1e-12, "objet de 12 000 mm : 90 % (l'ancienne règle plafonnait à 71,4 %)");
+    ck.eq(half(2222.2222222222226), 1234.5679012345681, "demi-étendue = extent / (2 × 0,9), sans rembourrage constant");
+
+    // ---- LIMITE DE ZOOM : sous 600 mm d'objet, on cadre 600 mm de monde et pas moins ----
+    ck.eq(half(100), 300, "boîtier de 100 mm : plancher — 600 mm de monde cadré (et non 111)");
+    ck.eq(half(0), 300, "étendue nulle (donnée absente) : plancher, jamais une vue dégénérée");
+    ck.eq(half(-500), 300, "étendue négative (saisie absurde) : plancher, pas de demi-étendue négative");
+    ck(Math.abs(taux(100) - 1 / 6) < 1e-12, "boîtier de 100 mm : 16,7 % de la vue — visible, mais on garde le contexte");
+    ck.eq(half(540), 300, "540 mm (= 600 × 0,9) : DERNIÈRE taille encore bornée par le plancher");
+    ck(half(541) > 300, "541 mm : au-delà du plancher, la règle des 90 % reprend la main");
+    ck(CameraFraming.MIN_FRAMED_EXTENT_MM / U_MM > 13, "la limite de zoom laisse voir plus de 13 U — un 1U localisé garde ~6 U de contexte de part et d'autre");
+
+    // ---- MONOTONIE : un objet plus grand n'est JAMAIS cadré plus serré ----
+    let mono = true, prec = -1;
+    for (let e = 0; e <= 6000; e += 25) { const h = half(e); if (h < prec - 1e-9) mono = false; prec = h; }
+    ck(mono, "monotonie : la demi-étendue cadrée ne DÉCROÎT jamais quand l'objet grandit");
+    ck(half(3000) > half(1000) && half(1000) > half(700), "monotonie STRICTE au-dessus du plancher");
+
+    // ---- ÉTENDUE CADRABLE d'un objet = sa plus grande cote (l'angle de vue n'est pas connu du cadrage) ----
+    ck.eq(CameraFraming.objectExtent(600, 1000, 2000), 2000, "objectExtent(baie 42U) : la hauteur domine");
+    ck.eq(CameraFraming.objectExtent(600, 600, 400), 600, "objectExtent(baie murale 6U) : la LARGEUR domine — l'ancien cadrage sur la seule hauteur l'ignorait");
+    ck.eq(CameraFraming.objectExtent(2000, 1000, 900), 2000, "objectExtent : objet large et bas → sa largeur");
+    ck.eq(CameraFraming.objectExtent(0, null, undefined), 0, "objectExtent : cotes absentes → 0 (le plancher prendra le relais)");
+
+    // ---- ASPECT : en PAYSAGE la hauteur borne (aucun effet) ; en PORTRAIT c'est la largeur ----
+    ck.eq(half(2000, 1.6), half(2000), "aspect 1,6 (paysage) : sans effet — la hauteur est la dimension qui borne");
+    ck.eq(half(2000, 1), half(2000), "aspect 1 (carré) : sans effet");
+    ck.eq(half(2000, 0.5), 2 * half(2000), "aspect 0,5 (portrait) : le cadrage double pour que l'objet tienne EN LARGEUR");
+    ck.eq(half(2000, 0), half(2000), "aspect nul/absurde (canevas non mesurable) : repli sur le cadrage paysage");
+    // en portrait, l'objet occupe bien 90 % de la LARGEUR de vue (= aspect × hauteur de vue)
+    const hp = half(2000, 0.5), largeurVue = 0.5 * 2 * hp;
+    ck(Math.abs(2000 / largeurVue - 0.9) < 1e-12, "portrait : la promesse « 90 % de la vue » vaut aussi en largeur");
   }
   });
 

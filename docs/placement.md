@@ -800,6 +800,99 @@ duplication interne au front, signalée et non corrigée. `RackGeometry.minDepth
 (code mort), et devient de surcroît vacuité pure puisque la cage est bornée : à retirer au prochain lot qui
 touchera ce fichier.
 
+### 6.15 Le CADRAGE de « Localiser » devient une règle nommée — **IMPLÉMENTÉ**
+
+Suite de §6.13, qui avait corrigé **où** la caméra vise sans jamais toucher à **combien** elle embrasse. Signalé
+par l'utilisateur : « pour les équipements en rack c'est bien centré dans la vue ; pour les équipements libres et
+les baies c'est pas top, et il faut dé-zoomer en plus ».
+
+**Le défaut était dans les DEUX, et c'est l'enquête qui le dit** — pas la lecture d'une ligne :
+
+- **La formule** (`DcThreeCamera.applyPendingFocus`) valait `baseHalf = max(400, extent × 0,7 + 200)`. Elle mêlait un
+  facteur, un rembourrage constant et un plancher, et n'exprimait donc AUCUN taux de remplissage : un objet occupait
+  `extent / (1,4·extent + 400)` de la vue, soit **62 %** pour une baie de 2 m, **48 %** à 600 mm, **25 %** à 200 mm,
+  **71 %** à la limite des très grands objets. Le cadrage dépendait de la TAILLE de la cible, ce qui est exactement
+  ce que décrit l'utilisateur.
+- **L'étendue fournie** était fausse dans deux cas sur quatre. Équipement LIBRE : une **constante de 1 600 mm**,
+  sans aucun rapport avec l'objet — c'est le seul chemin capable de faire DÉBORDER la cible de la vue (au-delà de
+  ~2 640 mm de haut), donc la seule cause possible du « il faut dé-zoomer », la formule ne cadrant jamais plus serré
+  que 71 % de l'objet. Baie visée directement : sa seule **HAUTEUR**, ce qui tronque une baie murale plus large que
+  haute. Équipement en baie : l'étendue était bien celle de la baie, mais la cible restait le centre de
+  l'ÉQUIPEMENT — la baie n'était donc pas centrée, et son sommet sortait du cadre dès que l'objet était bas.
+
+**La règle vit désormais dans `src-client/geometry/CameraFraming.ts`** (§3 règle 4 : la géométrie pure vit dans
+`geometry/`, les vues ne font qu'appliquer). Elle ne connaît ni THREE, ni le DOM, ni le store : elle prend des
+nombres et rend un nombre, ce qui la rend testable en Node — le moteur 3D, lui, ne l'est pas.
+
+| Objet localisé | monde cadré AVANT | remplissage AVANT | monde cadré APRÈS | remplissage APRÈS |
+|---|---|---|---|---|
+| Baie 42U (600 × 1000 × 2000) | 3 200 mm | 62,5 % | 2 222 mm | **90 %** |
+| Baie murale 6U (600 × 600 × 400) | 960 mm | 62,5 % | 667 mm | **90 %** |
+| Équipement 1U dans la baie 42U (on cadre LA BAIE) | 3 200 mm | 62,5 %, baie NON centrée | 2 222 mm | **90 %**, baie centrée |
+| Coffret libre 600 × 600 × 600 | 2 640 mm | 22,7 % | 667 mm | **90 %** |
+| Grande armoire libre 800 × 1200 × 2200 | 2 640 mm | 83,3 % | 2 444 mm | **90 %** |
+| Très grande armoire libre 2000 × 1000 × 3000 | 2 640 mm | **113,6 % — DÉBORDE** | 3 333 mm | **90 %** |
+| Petit boîtier libre 100 × 100 × 100 | 2 640 mm | 3,8 % | 600 mm (**limite de zoom**) | 16,7 % |
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **Le taux visé est une CONSTANTE NOMMÉE** (`FILL_RATIO = 0,9`), pas un facteur noyé dans une formule. C'est ce
+  qui rend le cadrage PRÉVISIBLE : la même promesse pour un boîtier et pour une armoire. Écarté : ajuster le
+  couple facteur/rembourrage existant — on aurait déplacé la courbe sans lui donner de sens, et le taux serait
+  resté fonction de la taille.
+- **LIMITE DE ZOOM = une largeur de baie standard** (`MIN_FRAMED_EXTENT_MM = RACK_WIDTH_DEFAULT`, 600 mm), et non
+  un nombre choisi au jugé. Justification : en deçà, la vue ne contient plus aucun élément structurel
+  reconnaissable du datacenter — un fragment de panneau, sans repère d'échelle. 600 mm valent ~13,5 U : localiser
+  un 1U laisse encore voir ~6 U de baie de part et d'autre. Sans elle, un boîtier de 100 mm serait cadré sur
+  111 mm de monde. ⚠ Le plancher se pose sur la demi-étendue CADRÉE (il empêche de trop zoomer AVANT), au même
+  endroit que l'ancien `max(400, …)` : le « il faut dé-zoomer » ne venait PAS de la limite mais de l'étendue
+  sous-évaluée — vérifié par le calcul, l'ancienne formule ne cadrant jamais plus serré que 71 % de son
+  `extent`.
+- **L'étendue cadrable d'un objet est sa PLUS GRANDE COTE** (`objectExtent`). Le cadrage ne connaît pas l'azimut
+  sous lequel l'objet sera regardé : sa hauteur écran varie avec l'élévation, sa largeur écran entre sa largeur et
+  la diagonale de son empreinte. La plus grande cote est la borne SÛRE. Écarté : projeter la boîte sous l'angle
+  courant — exact, mais cela ferait dépendre le cadrage de l'orientation de la caméra, donc changer la taille
+  apparente de l'objet à chaque orbite.
+- **Équipement MONTÉ en baie : on cadre LA BAIE, centrée.** L'équipement se repère à sa surbrillance ambre, déjà
+  posée par `setFocusEquip`. Écarté : garder l'équipement au centre et élargir le cadrage jusqu'à englober la baie
+  — il faudrait embrasser deux fois la distance du centre de l'équipement au bout le plus lointain de la baie (près
+  de 4 m pour un 1U en bas d'une baie de 2 m), et la baie n'occuperait alors que ~50 % de la vue, en position
+  décentrée. C'est le contraire de la demande.
+- **`equipCenter` n'est PAS déplacée** : elle rend toujours le centre de l'ÉQUIPEMENT, et reste la cible du mode
+  LIBRE. Ses branches `rack`/`side`/`wall`/`tray` (corrigées en §6.13) ne sont simplement plus CONSULTÉES par
+  « Localiser », qui cadre la baie — elles restent la lecture canonique de « où est cet équipement dans sa salle »,
+  et leur verrouillage par test est conservé. Écarté : les retirer, ce qui aurait mêlé un nettoyage à un
+  changement de comportement.
+- **13ᵉ SITE du balayage de §6.13, trouvé ici** : la branche LIBRE de `equipCenter` rendait `null` quand `dc_x`/`dc_y`
+  manquaient, et « Localiser » repliait alors sur (0, 0, 0) — le coin de la salle. Le balayage l'avait manqué parce
+  que le repli n'y était pas écrit `|| 0` mais caché derrière un `return null` chez l'appelant. Elle passe désormais
+  par `RoomFrame.origin(FreeEquipGeometry.roomPlacement(e))`, comme les quatre autres : l'objet est visé là où il est
+  DESSINÉ. La garde de salle (`dc_id !== dcId`) est conservée.
+- **Les trois cibles PONCTUELLES gardent leur cadrage actuel** (port, extrémité de câble, waypoint). Un point n'a pas
+  de taille : ce qu'on cadre autour de lui est un rayon de CONTEXTE, réglé à l'œil contre l'ancienne formule. Leurs
+  constantes sont donc RECALIBRÉES (700 → 1 250, 2 500 → 3 500, 1 200 → 1 900) pour que le monde cadré reste celui
+  d'avant à 1,5 % près. Écarté : les reprendre telles quelles — la nouvelle règle aurait resserré ces trois vues
+  de 30 à 45 %, alors que le lot ne doit changer que ce qui est signalé.
+- **PLONGÉE par défaut** (`FOCUS_ELEVATION_RAD = π/9`, 20°), extraite de `frontAzimuth` où elle était un littéral.
+  Arbitrage : **une face visée GAGNE toujours** (« se positionner en face » est une intention exprimée sur CET objet) ;
+  sans face — câble, waypoint, des POINTS sans façade — on **conserve l'azimut** (« de quel côté je regarde » reste un
+  choix de l'utilisateur, et rien ne permet d'en deviner un meilleur) mais on **impose l'élévation** : une caméra restée
+  rasante ou au zénith rend la cible illisible. Écarté : ne replonger que si l'élévation courante sort d'une plage
+  « lisible » — un seuil de plus à justifier, pour un gain nul dans les deux cas qui comptent.
+- **L'ASPECT du canevas entre dans la règle**, lu par le moteur et passé en paramètre. En paysage (`aspect ≥ 1`, le
+  cas normal) il est inerte ; en portrait c'est la LARGEUR qui borne, et le cadrage s'élargit pour que « 90 % de la
+  vue » reste vrai. Écarté : cadrer la seule hauteur — la promesse serait fausse dès qu'on rétrécit la fenêtre.
+- **Une baie MASQUÉE est démasquée quand on la localise.** Défaut trouvé en enquêtant : `locateEquipment` ISOLE la
+  baie hôte (`hidden3dRacks` = toutes sauf elle) et personne ne défait cet isolement — localiser ENSUITE une autre
+  baie visait donc une baie invisible. Seule la baie VISÉE est démasquée : les autres masquages sont des choix de
+  l'utilisateur. Écarté : réinitialiser tout le masquage, qui détruirait un isolement voulu.
+- **Sondes de mutation** : taux ramené à l'ancien 62,5 % → **11 FAIL** ; limite de zoom neutralisée → **7 FAIL** ;
+  cadrage de la baie court-circuité → **5 FAIL** ; ancien repli `null` du mode libre rétabli → **3 FAIL**.
+
+**Non couvert par les tests, à juger À L'ŒIL** : l'élévation de 20° (`CameraFraming.FOCUS_ELEVATION_RAD`, constante
+UNIQUE à retoucher) et le confort réel des 90 % — `DcThreeCamera` importe THREE, hors de portée du harnais CJS. Ce
+qui est testable l'est : la règle pure, et l'étendue + la cible poussées au moteur par chaque « Localiser ».
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -834,6 +927,9 @@ en fin de §6.10 (étagère-conteneur, constantes générales de baie, cascade r
   `compress` (mètres réels → millimètres monde, échelle linéaire/log), `worldPositions`.
 - `src-client/geometry/FloorLayout.ts` — `multiLayout` (chaîne bâtiment/étage/salle), `roomToWorld`,
   `equipFloorWorld`, `oobWorld`, `levelZ`.
+- `src-client/geometry/CameraFraming.ts` — **RÈGLE DE CADRAGE** de « Localiser » (§6.15), pure : `FILL_RATIO` (90 %
+  de la vue), `MIN_FRAMED_EXTENT_MM` (limite de zoom = une largeur de baie), `FOCUS_ELEVATION_RAD` (plongée par
+  défaut), `objectExtent` (plus grande cote) et `halfExtentFor` (demi-étendue monde à cadrer, aspect compris).
 - `src-client/geometry/RoomFrame.ts` — **CONTENEUR SALLE** (§6.11 sous le nom `RackFrame`, généralisé en
   §6.12) : `basis` (lacet + origine, dérivés du seul placement DÉCLARÉ, position absente ⇒ demi-empreinte),
   `origin` (le CENTRE d'un contenu en local salle — source unique du repli, §6.13), `pointToRoom` (rotation
