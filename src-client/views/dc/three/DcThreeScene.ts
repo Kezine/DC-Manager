@@ -9,6 +9,7 @@ import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { RackGeometry } from "../../../geometry/RackGeometry";
 import { RackDoorGeometry } from "../../../geometry/RackDoorGeometry";
 import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
+import type { FreeBox } from "../../../geometry/FreeEquipGeometry";
 // CONTENEUR SALLE : `origin()` = centre d'un contenu en local salle. Ce rendu a FIXÉ la convention
 // « position absente ⇒ demi-empreinte » (docs/placement.md §6.12) ; il la LIT désormais au lieu de la réécrire.
 import { PlacementFrame } from "../../../geometry/PlacementFrame";
@@ -603,17 +604,19 @@ export class DcThreeScene extends DcThreeCamera {
       }
     });
 
-    // équipements montés en MARGE LATÉRALE (side) et en PAROI (wall) : boîtes pleines (dims libres).
-    this.scene3d.sideOccupants(r.id, null, null).forEach((e: any) => {
-      const eqSide = e.side_face !== "rear" ? "front" : "rear";
-      const b = RackGeometry.sideEquipBoxLocal(r, e);
-      this.localBox(group, b.x0, b.x1, b.y0, b.y1, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
-    });
-    this.scene3d.wallOccupants(r.id, null, null).forEach((e: any) => {
-      const eqSide = e.wall_margin !== "rear" ? "front" : "rear";
-      const b = RackGeometry.wallEquipBoxLocal(r, e);
-      this.localBox(group, b.x0, b.x1, b.y0, b.y1, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
-    });
+    /* équipements montés en MARGE LATÉRALE (side) et en PAROI (wall).
+       Ils étaient dessinés en boîtes NUES : ni nom, ni image de façade, ni repère d'orientation, alors
+       que leurs ports étaient bel et bien résolus — des connecteurs sur un volume gris anonyme. Ils
+       passent maintenant par le rendu COMMUN des boîtiers (§6.25), qui leur apporte les trois.
+       ⚠ La boîte est FOURNIE, pas déduite : ces deux modes BORNENT les cotes déclarées (largeur à leur
+       colonne, longueur à la cage) et c'est la boîte BORNÉE que les ports utilisent. Dessiner les cotes
+       déclarées ferait glisser la coque hors de ses propres connecteurs. */
+    const buildMounted = (e: any, eqSide: string) => {
+      const m = RackGeometry.mountedContentPlacement(r, e);
+      this.buildEquipBox(group, e, m.x, m.y, m.baseZ, { yawDeg: m.yawDeg, elevation: 0, extra: { eqSide }, box: m.box });
+    };
+    this.scene3d.sideOccupants(r.id, null, null).forEach((e: any) => buildMounted(e, e.side_face !== "rear" ? "front" : "rear"));
+    this.scene3d.wallOccupants(r.id, null, null).forEach((e: any) => buildMounted(e, e.wall_margin !== "rear" ? "front" : "rear"));
     /* équipements POSÉS sur les étagères (tray) de la baie.
        Un posé n'est rien d'autre qu'un BOÎTIER LIBRE juché sur un plateau : il passe donc par le MÊME
        `buildEquipBox` que les équipements libres d'une salle et que ceux d'un étage (principe n°3), au
@@ -1183,10 +1186,14 @@ export class DcThreeScene extends DcThreeCamera {
       • `elevation` — hauteur propre au-dessus de `originZ`, quand `dc_z` ne s'applique pas. Un posé
         REPOSE sur son plateau : son élévation est nulle, son socle est le plateau.
       • `extra` — userData de couche/côté (`eqSide`) à tamponner sur tous les meshes produits, pour que
-        le posé se masque avec la face de baie qui le porte (`hideAv`/`hideAr`). */
+        le posé se masque avec la face de baie qui le porte (`hideAv`/`hideAr`).
+      • `box` — cotes DESSINÉES, quand elles ne sont pas les cotes déclarées. Les montages en MARGE et
+        en PAROI (§6.25) BORNENT la largeur à leur colonne et la longueur à la cage : c'est cette boîte
+        bornée que les ports utilisent, donc la seule qu'on ait le droit de dessiner. Les UV de face en
+        dérivent aussi (`faceFractionIn`), sans quoi l'image glisserait sur la coque. */
   protected buildEquipBox(root: THREE.Group, e: any, cx: number, cy: number, originZ: number,
-                          opts?: { yawDeg?: number; elevation?: number; extra?: any }): void {
-    const b = FreeEquipGeometry.box(e);
+                          opts?: { yawDeg?: number; elevation?: number; extra?: any; box?: FreeBox }): void {
+    const b = (opts && opts.box) ? opts.box : FreeEquipGeometry.box(e);
     const yawDeg = (opts && opts.yawDeg != null) ? opts.yawDeg : e.dc_orientation;
     const elevation = (opts && opts.elevation != null) ? opts.elevation : b.z;
     const extra = opts && opts.extra;
@@ -1206,7 +1213,7 @@ export class DcThreeScene extends DcThreeCamera {
       for (let i = 0; i < pos.count; i++) {
         const face = FACE_BY_MAT[Math.floor(i / 4)];
         // géométrie centrée (z ∈ [−h/2, +h/2]) → repère faceLocal (base z0 = 0, z ∈ [0, h])
-        const f = FreeEquipGeometry.faceFraction(e, face, pos.getX(i), pos.getY(i), pos.getZ(i) + b.h / 2, 0);
+        const f = FreeEquipGeometry.faceFractionIn(b, face, pos.getX(i), pos.getY(i), pos.getZ(i) + b.h / 2, 0);
         uv.setXY(i, f.fx, 1 - f.fy);   // uv.y = 1 ↔ HAUT de l'image (flipY par défaut du TextureLoader)
       }
       uv.needsUpdate = true;

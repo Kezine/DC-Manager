@@ -1647,13 +1647,58 @@ rotation de 180° laissant une enveloppe alignée inchangée. Le demi-tour est c
 la section de résolution (avant et arrière exactement opposées). Les deux ensemble couvrent les quatre
 orientations ; croire que l'un suffit serait la fausse sécurité que §6.19 nomme.
 
+### 6.25 Les montages MARGE et PAROI rejoignent le rendu commun des boîtiers — **IMPLÉMENTÉ**
+
+Constat fait en répondant à une question de l'utilisateur — « est-ce la même primitive qui dessine tous
+les équipements ? » — et non en cherchant un défaut : **non**, et l'inventaire est instructif. Sur les six
+modes de placement, `buildEquipBox` en servait trois (libre en salle, étage, posé sur étagère depuis
+§6.24) ; le mode `rack` a son chemin propre ; `side` et `wall` étaient dessinés par un `localBox` de trois
+lignes. Or il n'existe, dans TOUTE la scène 3D, que deux appels à `faceLabel` et deux à `faceImageUrl` —
+aucun ne venait de ces deux modes. **Un équipement monté en marge ou en paroi n'avait donc ni nom, ni
+image de façade, ni repère d'orientation**, alors que ses PORTS étaient bel et bien résolus : des
+connecteurs flottant sur un volume gris anonyme. Personne ne l'avait signalé parce que rien ne le disait :
+il fallait comparer les modes entre eux.
+
+**Le mode `rack` reste à part, et c'est délibéré.** Un équipement monté en U s'inscrit entre les rails,
+son Z vient de la grille de U, son image de façade doit être ROGNÉE à la largeur du corps (les oreilles
+19″ n'en font pas partie) et il n'a pas de lacet libre — il est avant ou arrière. Le faire entrer dans la
+même primitive produirait la fonction à drapeaux que le principe n°2 proscrit. Trois modes sur six, ce
+n'est pas un demi-échec : c'est exactement la famille « boîtier posé par position + lacet », celle que la
+doctrine des conteneurs décrit.
+
+**L'obstacle réel, et pourquoi ce n'était pas un simple branchement.** `sideEquipBoxLocal` et
+`wallEquipBoxLocal` **BORNENT** les cotes déclarées — largeur ramenée à la colonne, longueur à la cage
+moins 8 mm, hauteur plancher à 1 U — tandis que `buildEquipBox` lisait les cotes BRUTES de
+l'enregistrement. Un branchement direct aurait redimensionné les équipements, et surtout **détaché la
+coque de ses ports**, qui sont résolus sur la boîte BORNÉE. D'où deux ajustements :
+
+- `buildEquipBox` accepte désormais une **boîte fournie** (`box`), et les UV de face en dérivent via
+  `FreeEquipGeometry.faceFractionIn` — extrait de `faceFraction`, parce que ces fractions sont une
+  propriété de la BOÎTE et jamais de l'enregistrement. Les plaquer sur les cotes déclarées ferait glisser
+  l'image hors de la coque.
+- `RackGeometry.mountedContentPlacement` **DÉRIVE** centre, lacet et cotes de l'enveloppe existante,
+  au lieu de re-calculer les bornes — les dupliquer aurait recréé la divergence que ce lot supprime.
+
+**Le lacet est la seule inconnue, donc le seul vrai test.** Il doit amener la façade du boîtier (−Y local)
+sur la normale sortante de son montage : ±Y pour `side`, ±X ou ±Y pour `wall` selon qu'il est posé « en
+travers » de sa paroi ou dans son plan. Un test CROISE donc deux chemins indépendants sur les **32
+configurations** (16 marge × 16 paroi) : le lacet déduit par le rendu, et la normale rendue par
+`Resolver3D`. Les quatre lacets 0°/90°/180°/270° sont exercés — sans quoi le test comparerait un cas
+unique à lui-même. **Les deux vérifications MORDENT**, mesuré et non supposé : lacet forcé à 0 → 20 échecs
+sur 32 ; cotes non permutées à 90°/270° → 8 sur 32.
+
+⚠ **Ce qui devient VISIBLE, et n'existait pas avant** : nom, image de façade sur les six faces et repère
+d'orientation (arêtes de la face avant) sur les équipements en marge et en paroi. Aucune donnée n'est
+concernée aujourd'hui — les deux corpus en comptent **zéro** — mais c'est un ajout d'affichage franc,
+**à juger à l'œil** dès qu'un tel montage existera.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
 |---|---|---|---|---|
 | *(site)* | monde | **monde** | s.o. | **migré** — position déclarée (GPS) ou repli 5 km (§6.9) ; TAILLE déclarée optionnelle faisant emprise et contraignant ses plans d'étage (§6.8) |
 | `rack` | baie → salle | local salle | oui | **migré** — la SALLE place la baie, la baie place son contenu (`PlacementFrame`, §6.11 puis §6.12) |
-| `side` / `wall` | baie → salle | local salle | oui | **migré** — même conteneur que `rack` (§6.11) |
+| `side` / `wall` | baie → salle | local salle | oui | **migré** — même conteneur que `rack` (§6.11) ; RENDU rejoint la primitive commune des boîtiers (§6.25), avec nom, image de façade et repère d'orientation qu'ils n'avaient pas |
 | `tray` | étagère → baie → salle | local salle | oui | **migré de bout en bout** — l'ÉTAGÈRE place ses contenus (`TrayFrame`, §6.23), la baie place l'étagère, la salle place la baie (`PlacementFrame`, §6.11). Géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). **Seule chaîne à TROIS conteneurs emboîtés** ; le lacet PROPRE d'un posé s'y compose enfin (§6.24) et une étagère arrière est une vraie ROTATION |
 | `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`PlacementFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
 | *(waypoints)* | baie → salle | local salle | s.o. | **migré** — brosses et pins passent par le conteneur (§6.12) ; le champ `world` est renommé `roomPoint` |

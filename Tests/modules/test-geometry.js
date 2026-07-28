@@ -1979,6 +1979,64 @@ module.exports = async () => {
   }
   });
 
+  await section("Montages MARGE / PAROI : la coque DESSINÉE regarde là où sortent les ports (§6.25)", async () => {
+  {
+    /* Les modes `side` et `wall` étaient dessinés en boîtes NUES (ni nom, ni image, ni repère
+       d'orientation) alors que leurs ports étaient résolus. Les faire passer par le rendu COMMUN des
+       boîtiers demande de leur donner un LACET — et c'est là qu'on peut se tromper sans que rien ne le
+       dise. Ce test croise DEUX chemins indépendants : le lacet déduit par `mountedContentPlacement`
+       (rendu) et la normale rendue par `Resolver3D` (ports). S'ils divergent, la coque tourne le dos à
+       ses propres connecteurs — exactement le défaut que §6.24 vient de corriger pour les étagères.
+       ⚠ Les deux vérifications MORDENT, mesuré par sonde et non supposé : lacet forcé à 0 → 20 cas sur
+       32 en échec ; cotes non permutées à 90°/270° → 8 sur 32. */
+    const s = await makeStore();
+    const dc = await s.create("datacenters", { name: "S", width_mm: 5000, depth_mm: 5000 });
+    const rack = await s.create("racks", { name: "R", datacenter_id: dc.id, dc_x: 0, dc_y: 0, orientation: 0,
+      u_count: 42, depth: 1200, width_mm: 800, cage_depth_mm: 700, front_margin_mm: 200, allow_side_front: true, allow_side_rear: true });
+    const rk = s.get("racks", rack.id), r = new Resolver3D(s);
+    const GEO = { face_side: "front", face_x: 0.5, face_y: 0.5 };
+    const arr = (v) => Math.round(v * 1000) / 1000;
+
+    let cas = 0, facadeOk = 0, enveloppeOk = 0, lacets = new Set();
+    const essai = async (rec, label) => {
+      const e = await s.create("equipments", Object.assign({ dim_mode: "free", rack_id: rack.id, free_w_mm: 60, free_l_mm: 300, free_h_mm: 150 }, rec));
+      ck(!!e, "montage créé : " + label);
+      if (!e) return;
+      cas++;
+      const m = RackGeometry.mountedContentPlacement(rk, e);
+      const b = (e.placement_mode === "wall") ? RackGeometry.wallEquipBoxLocal(rk, e) : RackGeometry.sideEquipBoxLocal(rk, e);
+      lacets.add(m.yawDeg);
+      // ① la FAÇADE dessinée (façade locale −Y tournée du lacet) ≡ la normale du port RÉSOLU
+      const yaw = m.yawDeg * Math.PI / 180;
+      const p = r.resolveFaceAnchor3D(e, GEO, dc.id);
+      if (p && arr(Math.sin(yaw)) === arr(p.n.x) && arr(-Math.cos(yaw)) === arr(p.n.y)) facadeOk++;
+      // ② l'ENVELOPPE dessinée (cotes propres, permutées par un quart de tour) ≡ celle rapportée
+      const tourne = (m.yawDeg === 90 || m.yawDeg === 270);
+      const ex = tourne ? m.box.d : m.box.w, ey = tourne ? m.box.w : m.box.d;
+      if (Math.abs((m.x - ex / 2) - b.x0) < 1e-9 && Math.abs((m.x + ex / 2) - b.x1) < 1e-9
+        && Math.abs((m.y - ey / 2) - b.y0) < 1e-9 && Math.abs((m.y + ey / 2) - b.y1) < 1e-9) enveloppeOk++;
+      // ③ la base Z dessinée est celle de la boîte (le boîtier ne flotte pas au-dessus de son montage)
+      ck(Math.abs(m.baseZ - b.z0) < 1e-9 && Math.abs(m.box.h - (b.z1 - b.z0)) < 1e-9, "base et hauteur dessinées ≡ rapportées : " + label);
+    };
+
+    let i = 0;
+    for (const face of ["front", "rear"]) for (const lr of ["left", "right"]) for (const col of [0, 1]) for (const snap of ["wall", "inner"]) {
+      await essai({ name: "S" + (i++), placement_mode: "side", side_face: face, side_lr: lr, side_col: col, side_snap: snap, side_u: 5 },
+        "side " + face + "/" + lr + "/col" + col + "/" + snap);
+    }
+    for (const lr of ["left", "right"]) for (const mg of ["front", "rear"]) for (const or of ["center", "facade"]) for (const col of [0, 1]) {
+      await essai({ name: "W" + (i++), placement_mode: "wall", wall_lr: lr, wall_margin: mg, wall_orient: or, wall_col: col, wall_u: 5 },
+        "wall " + lr + "/" + mg + "/" + or + "/col" + col);
+    }
+
+    ck.eq(cas, 32, "les 32 configurations de montage sont couvertes (16 marge × 16 paroi)");
+    ck.eq(facadeOk, cas, "la FAÇADE dessinée regarde EXACTEMENT là où sort le port résolu, sur les 32 cas");
+    ck.eq(enveloppeOk, cas, "l'ENVELOPPE dessinée est EXACTEMENT celle rapportée par la géométrie de baie (cotes BORNÉES, pas déclarées)");
+    // anti-vacuité : si toutes les configurations donnaient le même lacet, ① passerait sans rien prouver.
+    ck(lacets.size >= 3, "les configurations produisent des lacets VARIÉS (obtenus : " + [...lacets].sort((a, b) => a - b).join("°, ") + "°) — le test ne compare pas un cas unique à lui-même");
+  }
+  });
+
   await section("Resolver3D : le lacet PROPRE d'un posé atteint enfin ses ports (§6.24 — défaut CONFIRMÉ par sonde)", async () => {
   {
     /* DÉFAUT MESURÉ AVANT CORRECTION : la branche `tray` interpolait sur les seules faces ±Y de la

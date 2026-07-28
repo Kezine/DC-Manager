@@ -89,7 +89,16 @@ export class FreeEquipGeometry {
       avec la MÊME convention que les ports (les UVs de BoxGeometry supposent un monde Y-up ; ici Z-up →
       rear/top/bottom sortaient à 180°, left/right à ±90°). Testé en aller-retour avec faceLocal. */
   static faceFraction(eq: any, face: string, lx: number, ly: number, lz: number, z0: number): { fx: number; fy: number } {
-    const bx = FreeEquipGeometry.box(eq);
+    return FreeEquipGeometry.faceFractionIn(FreeEquipGeometry.box(eq), face, lx, ly, lz, z0);
+  }
+
+  /** Même règle que `faceFraction`, mais sur une BOÎTE donnée plutôt que sur l'enregistrement.
+      Ces fractions sont une propriété de la BOÎTE, jamais de l'équipement : les en extraire permet de
+      servir les contenus dont les cotes DESSINÉES ne sont pas les cotes déclarées — un équipement monté
+      en MARGE ou en PAROI voit sa largeur ramenée à sa colonne et sa longueur à la cage
+      (`RackGeometry.sideEquipBoxLocal`/`wallEquipBoxLocal`). Leur plaquer des UV calculées sur les cotes
+      DÉCLARÉES décalerait l'image de la boîte, et donc des ports. */
+  static faceFractionIn(bx: FreeBox, face: string, lx: number, ly: number, lz: number, z0: number): { fx: number; fy: number } {
     const fyV = 1 - (lz - z0) / bx.h;   // faces VERTICALES : fy = 0 en HAUT (z1)
     switch (EquipFaces.norm(face)) {
       case "rear":   return { fx: 0.5 - lx / bx.w, fy: fyV };

@@ -20,6 +20,7 @@ import type { ContentPlacement } from "./PlacementFrame";
 // Un posé sur étagère est un boîtier LIBRE : ses cotes propres (et leurs défauts) se lisent là,
 // une seule fois — `TrayGeometry.footprint` lit déjà les mêmes champs pour l'empreinte au plateau.
 import { FreeEquipGeometry } from "./FreeEquipGeometry";
+import type { FreeBox } from "./FreeEquipGeometry";
 
 /** Demi-extents au sol d'une baie. */
 export interface HalfExtents { hx: number; hy: number; }
@@ -201,6 +202,38 @@ export class RackGeometry {
     let y0, y1;
     if (front) { y0 = fp + 4; y1 = fp + 4 + len; } else { y1 = rp - 4; y0 = rp - 4 - len; }
     return { x0: xs[0], x1: xs[1], y0, y1, z0, z1, front, col, lr, heightU };
+  }
+
+  /** Placement, dans le repère de la BAIE, d'un équipement monté en MARGE LATÉRALE (`side`) ou en
+      PAROI (`wall`) — de quoi le faire dessiner par le rendu COMMUN des boîtiers (`buildEquipBox`),
+      au lieu des boîtes nues qui le représentaient sans nom ni image de façade (doctrine §6.25).
+
+      ⚠ DÉRIVÉ de la boîte existante, jamais re-calculé. Ces deux modes BORNENT les cotes déclarées
+      (largeur ramenée à la colonne, longueur à la cage moins 8 mm, hauteur plancher à 1 U) ; re-dériver
+      ces bornes ici les aurait DUPLIQUÉES, et un rendu nourri des cotes DÉCLARÉES aurait décalé la
+      coque de ses ports — qui sont résolus, eux, sur la boîte BORNÉE. On lit donc l'enveloppe, et on en
+      déduit centre, lacet et cotes.
+
+      Le LACET est celui qui amène la façade du boîtier (−Y local) sur la normale sortante de son
+      montage : `side` regarde toujours ±Y (0° ou 180°), `wall` peut regarder ±X (90° / 270°) quand il
+      est posé « en travers » de sa paroi — d'où la permutation des cotes dans ce cas. */
+  static mountedContentPlacement(rack: any, e: any): { x: number; y: number; yawDeg: number; box: FreeBox; baseZ: number } {
+    const wall = e.placement_mode === "wall";
+    const b = wall ? RackGeometry.wallEquipBoxLocal(rack, e) : RackGeometry.sideEquipBoxLocal(rack, e);
+    // normale sortante : portée par la BOÎTE en paroi (gauche/droite ou fond de marge), déduite de la
+    // face de montage en marge — exactement la distinction que `Resolver3D` fait déjà entre ses deux
+    // branches, reprise ici pour que la coque regarde là où sortent les ports.
+    const n = wall ? b.n : { x: 0, y: b.front ? -1 : 1 };
+    const yawDeg = (n.x > 0) ? 90 : (n.x < 0) ? 270 : (n.y > 0) ? 180 : 0;
+    const etendueX = b.x1 - b.x0, etendueY = b.y1 - b.y0, tourne = (yawDeg === 90 || yawDeg === 270);
+    return {
+      x: (b.x0 + b.x1) / 2,
+      y: (b.y0 + b.y1) / 2,
+      yawDeg,
+      // cotes PROPRES du boîtier : l'enveloppe les permute quand il est tourné d'un quart de tour.
+      box: { w: tourne ? etendueY : etendueX, d: tourne ? etendueX : etendueY, h: b.z1 - b.z0, z: 0 },
+      baseZ: b.z0,
+    };
   }
 
   /* ---- tray (étagère) ----
