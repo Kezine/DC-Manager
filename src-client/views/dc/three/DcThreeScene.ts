@@ -347,7 +347,7 @@ export class DcThreeScene extends DcThreeCamera {
       if (it.kind !== "tray" || it.u == null) return;
       // même règle qu'au dessin des posés (`buildRackTrays`) : c'est l'ÉTAGÈRE qui dit de quel côté
       // regardent ses contenus, donc de quel côté leurs ports se masquent avec la baie.
-      const eqSide = TrayFrame.facesFront(RackGeometry.trayPlacement(r, it)) ? "front" : "rear";
+      const eqSide = TrayFrame.facesFront(RackGeometry.trayPlacementInRack(r, it)) ? "front" : "rear";
       this.store.equipmentsOnTray(it.id).forEach((e: any) => add(e.id, eqSide));
     });
   }
@@ -612,7 +612,7 @@ export class DcThreeScene extends DcThreeCamera {
        colonne, longueur à la cage) et c'est la boîte BORNÉE que les ports utilisent. Dessiner les cotes
        déclarées ferait glisser la coque hors de ses propres connecteurs. */
     const buildMounted = (e: any, eqSide: string) => {
-      const m = RackGeometry.mountedContentPlacement(r, e);
+      const m = RackGeometry.mountedContentPlacementInRack(r, e);
       this.buildEquipBox(group, e, m.x, m.y, m.baseZ, { yawDeg: m.yawDeg, elevation: 0, extra: { eqSide }, box: m.box });
     };
     this.scene3d.sideOccupants(r.id, null, null).forEach((e: any) => buildMounted(e, e.side_face !== "rear" ? "front" : "rear"));
@@ -625,7 +625,7 @@ export class DcThreeScene extends DcThreeCamera {
        l'image de façade sur ses faces ±Y, sans jamais consulter `dc_orientation`. Un posé tourné était donc
        dessiné droit alors que ses ports, eux, suivent désormais son lacet — la boîte et les connecteurs
        auraient divergé. Ici la boîte est TOURNÉE du même lacet effectif que la résolution
-       (`trayContentPlacement`), et ses UV de face dérivent de `FreeEquipGeometry.faceFraction`, la source
+       (`trayContentPlacementInRack`), et ses UV de face dérivent de `FreeEquipGeometry.faceFraction`, la source
        de vérité qui place aussi les ports : image et connecteurs coïncident par CONSTRUCTION, sur les
        six faces et plus seulement sur deux. */
     this.store.rackItemsOf(r.id).forEach((it: any) => {
@@ -633,15 +633,15 @@ export class DcThreeScene extends DcThreeCamera {
       // C'est l'ÉTAGÈRE qui sait vers où regardent ses contenus (`TrayFrame`) : cette vue relisait
       // `it.side` pour le re-déduire, comme le résolveur de ports et la géométrie de baie le faisaient
       // chacun de son côté. Calculé UNE fois par étagère, pas par équipement posé.
-      const trayPlacement = RackGeometry.trayPlacement(r, it);
+      const trayPlacementInRack = RackGeometry.trayPlacementInRack(r, it);
       // le côté de MASQUAGE reste celui de l'ÉTAGÈRE, jamais le lacet du posé : « masquer l'avant »
       // parle de la face de baie qu'on regarde, pas de l'orientation d'un boîtier.
-      const eqSide = TrayFrame.facesFront(trayPlacement) ? "front" : "rear";
+      const eqSide = TrayFrame.facesFront(trayPlacementInRack) ? "front" : "rear";
       this.store.equipmentsOnTray(it.id).forEach((e: any) => {
-        const posed = RackGeometry.trayContentPlacement(r, it, e);
+        const posed = RackGeometry.trayContentPlacementInRack(r, it, e);
         // socle = le DESSUS DU PLATEAU (et non `dc_z` : un posé repose sur son étagère) — même base Z
         // que celle donnée à `faceLocal` par le résolveur de ports.
-        this.buildEquipBox(group, e, posed.x as number, posed.y as number, trayPlacement.plankZ,
+        this.buildEquipBox(group, e, posed.x as number, posed.y as number, trayPlacementInRack.plankZ,
           { yawDeg: posed.yawDeg, elevation: 0, extra: { eqSide } });
       });
     });

@@ -656,34 +656,34 @@ module.exports = async () => {
     ck.eq(PlacementFrame.basis(pl(0, 0, 450, 0)).sin, 1, "basis(450°) : replié sur 90°");
 
     // ---- POINT : rotation par le lacet, PUIS translation à l'origine du contenu
-    const p0 = PlacementFrame.pointToRoom(b0, { x: 10, y: 20, z: 30 });
-    ck.eq(p0.x, 110, "pointToRoom(0°) : x = origine + x local"); ck.eq(p0.y, 220, "pointToRoom(0°) : y = origine + y local");
-    ck.eq(p0.z, 30, "pointToRoom : le lacet ne touche JAMAIS Z");
-    const p90 = PlacementFrame.pointToRoom(PlacementFrame.basis(pl(0, 0, 90, 0)), { x: 10, y: 20, z: 30 });
-    near(p90.x, -20, "pointToRoom(90°) : (10, 20) → (−20, 10) [x]"); near(p90.y, 10, "pointToRoom(90°) : … [y]");
-    const p180 = PlacementFrame.pointToRoom(PlacementFrame.basis(pl(1000, 2000, 180, 0)), { x: 10, y: 20, z: 30 });
-    near(p180.x, 990, "pointToRoom(180°) : demi-tour puis translation [x]"); near(p180.y, 1980, "pointToRoom(180°) : … [y]");
-    const p270 = PlacementFrame.pointToRoom(PlacementFrame.basis(pl(0, 0, 270, 0)), { x: 10, y: 20, z: 30 });
-    near(p270.x, 20, "pointToRoom(270°) : (10, 20) → (20, −10) [x]"); near(p270.y, -10, "pointToRoom(270°) : … [y]");
+    const p0 = PlacementFrame.composePoint(b0, { x: 10, y: 20, z: 30 });
+    ck.eq(p0.x, 110, "composePoint(0°) : x = origine + x local"); ck.eq(p0.y, 220, "composePoint(0°) : y = origine + y local");
+    ck.eq(p0.z, 30, "composePoint : le lacet ne touche JAMAIS Z");
+    const p90 = PlacementFrame.composePoint(PlacementFrame.basis(pl(0, 0, 90, 0)), { x: 10, y: 20, z: 30 });
+    near(p90.x, -20, "composePoint(90°) : (10, 20) → (−20, 10) [x]"); near(p90.y, 10, "composePoint(90°) : … [y]");
+    const p180 = PlacementFrame.composePoint(PlacementFrame.basis(pl(1000, 2000, 180, 0)), { x: 10, y: 20, z: 30 });
+    near(p180.x, 990, "composePoint(180°) : demi-tour puis translation [x]"); near(p180.y, 1980, "composePoint(180°) : … [y]");
+    const p270 = PlacementFrame.composePoint(PlacementFrame.basis(pl(0, 0, 270, 0)), { x: 10, y: 20, z: 30 });
+    near(p270.x, 20, "composePoint(270°) : (10, 20) → (20, −10) [x]"); near(p270.y, -10, "composePoint(270°) : … [y]");
 
     // ---- DIRECTION : rotation SEULE. C'est LA distinction que chaque branche réécrivait à la main —
     // translater une normale la rendrait non unitaire et enverrait le connecteur 3D à l'autre bout de la salle.
-    const dLoin = PlacementFrame.dirToRoom(PlacementFrame.basis(pl(9999, -4242, 0, 0)), { x: 0, y: -1 });
-    ck.eq(dLoin.x, 0, "dirToRoom : normale NON translatée par l'origine [x]");
-    ck.eq(dLoin.y, -1, "dirToRoom : normale NON translatée par l'origine [y]");
-    ck.eq(dLoin.z, 0, "dirToRoom : direction sans composante verticale → z = 0");
-    const d90 = PlacementFrame.dirToRoom(PlacementFrame.basis(pl(500, 500, 90, 0)), { x: 0, y: -1 });
-    near(d90.x, 1, "dirToRoom(90°) : façade (0, −1) → (1, 0) [x]"); near(d90.y, 0, "dirToRoom(90°) : … [y]");
+    const dLoin = PlacementFrame.composeDir(PlacementFrame.basis(pl(9999, -4242, 0, 0)), { x: 0, y: -1 });
+    ck.eq(dLoin.x, 0, "composeDir : normale NON translatée par l'origine [x]");
+    ck.eq(dLoin.y, -1, "composeDir : normale NON translatée par l'origine [y]");
+    ck.eq(dLoin.z, 0, "composeDir : direction sans composante verticale → z = 0");
+    const d90 = PlacementFrame.composeDir(PlacementFrame.basis(pl(500, 500, 90, 0)), { x: 0, y: -1 });
+    near(d90.x, 1, "composeDir(90°) : façade (0, −1) → (1, 0) [x]"); near(d90.y, 0, "composeDir(90°) : … [y]");
     for (const o of [0, 90, 180, 270]) {
-      const d = PlacementFrame.dirToRoom(PlacementFrame.basis(pl(1234, 5678, o, 0)), { x: 0, y: -1 });
-      ck(Math.abs(Math.hypot(d.x, d.y) - 1) < 1e-12, "dirToRoom(" + o + "°) : normale reste UNITAIRE");
+      const d = PlacementFrame.composeDir(PlacementFrame.basis(pl(1234, 5678, o, 0)), { x: 0, y: -1 });
+      ck(Math.abs(Math.hypot(d.x, d.y) - 1) < 1e-12, "composeDir(" + o + "°) : normale reste UNITAIRE");
     }
     // GÉNÉRALISATION apportée par le mode libre : une face peut être HORIZONTALE (dessus/dessous d'un
     // équipement libre). Le lacet est un lacet PUR : il laisse la composante verticale intacte.
     for (const o of [0, 90, 180, 270]) {
-      const dv = PlacementFrame.dirToRoom(PlacementFrame.basis(pl(1234, 5678, o, 0)), { x: 0, y: 0, z: 1 });
-      ck.eq(dv.z, 1, "dirToRoom(" + o + "°) : normale VERTICALE inchangée par le lacet [z]");
-      ck(Math.abs(dv.x) < 1e-12 && Math.abs(dv.y) < 1e-12, "dirToRoom(" + o + "°) : … et sans composante horizontale");
+      const dv = PlacementFrame.composeDir(PlacementFrame.basis(pl(1234, 5678, o, 0)), { x: 0, y: 0, z: 1 });
+      ck.eq(dv.z, 1, "composeDir(" + o + "°) : normale VERTICALE inchangée par le lacet [z]");
+      ck(Math.abs(dv.x) < 1e-12 && Math.abs(dv.y) < 1e-12, "composeDir(" + o + "°) : … et sans composante horizontale");
     }
 
     // ---- place : les deux d'un coup (ce que consomment les CINQ modes de placement)
@@ -716,9 +716,9 @@ module.exports = async () => {
       const oo = PlacementFrame.origin(pl(1200, 800, yaw, 300, 500));
       ck(oo.x === 1200 && oo.y === 800, "origin(" + yaw + "°) : le lacet ne DÉPLACE pas l'origine, il tourne autour");
     }
-    // cohérence stricte avec `pointToRoom` : l'origine EST l'image du point local (0, 0).
-    const viaPoint = PlacementFrame.pointToRoom(PlacementFrame.basis(pl(null, null, 90, 300, 500)), { x: 0, y: 0, z: 0 });
-    ck(viaPoint.x === oNul.x && viaPoint.y === oNul.y, "origin === pointToRoom(0, 0) : une seule et même règle");
+    // cohérence stricte avec `composePoint` : l'origine EST l'image du point local (0, 0).
+    const viaPoint = PlacementFrame.composePoint(PlacementFrame.basis(pl(null, null, 90, 300, 500)), { x: 0, y: 0, z: 0 });
+    ck(viaPoint.x === oNul.x && viaPoint.y === oNul.y, "origin === composePoint(0, 0) : une seule et même règle");
   }
   });
 
@@ -1923,19 +1923,19 @@ module.exports = async () => {
     ck.eq(TrayFrame.facesFront(avant), true, "facesFront : étagère avant");
     ck.eq(TrayFrame.facesFront(arriere), false, "facesFront : étagère arrière");
 
-    // `trayPlacement` DÉRIVE ce placement de la boîte de l'étagère — pendant exact de `roomPlacement`.
+    // `trayPlacementInRack` DÉRIVE ce placement de la boîte de l'étagère — pendant exact de `roomPlacement`.
     const rk = { u_count: 42, depth: 1000, cage_depth_mm: 900, front_margin_mm: 50, width_mm: 600 };
     const tAv = { u: 10, u_height: 3, tray_u: 1, tray_type: "cantilever", depth_mm: 400, side: "front" };
     const tAr = Object.assign({}, tAv, { side: "rear" });
-    const bAv = RackGeometry.trayBoxLocal(rk, tAv), pAv = RackGeometry.trayPlacement(rk, tAv);
-    const bAr = RackGeometry.trayBoxLocal(rk, tAr), pAr = RackGeometry.trayPlacement(rk, tAr);
+    const bAv = RackGeometry.trayBoxLocal(rk, tAv), pAv = RackGeometry.trayPlacementInRack(rk, tAv);
+    const bAr = RackGeometry.trayBoxLocal(rk, tAr), pAr = RackGeometry.trayPlacementInRack(rk, tAr);
     const largeurUtile = TrayGeometry.plank(RackGeometry.cageDepth(rk), tAv).W;
-    ck(pAv.dir === 1 && pAr.dir === -1, "trayPlacement : le SENS des DEUX axes vient de la face de montage");
-    ck(Math.abs(pAv.originY - bAv.y0) < 1e-12, "trayPlacement AVANT : l'origine des profondeurs est le bord AVANT du plateau");
-    ck(Math.abs(pAr.originY - bAr.y1) < 1e-12, "trayPlacement ARRIÈRE : l'origine est le bord ARRIÈRE");
-    ck(Math.abs(pAv.originX - (bAv.x0 + bAv.xInset)) < 1e-12, "trayPlacement AVANT : origine = bord utilisable GAUCHE (garde des renforts déjà déduite)");
-    ck(Math.abs(pAr.originX - (bAr.x0 + bAr.xInset + largeurUtile)) < 1e-12, "trayPlacement ARRIÈRE : origine = bord utilisable DROIT — `tray_x` se compte depuis la gauche de QUI REGARDE");
-    ck(Math.abs(pAv.plankZ - bAv.z0) < 1e-12, "trayPlacement : les posés reposent sur le DESSUS du plateau");
+    ck(pAv.dir === 1 && pAr.dir === -1, "trayPlacementInRack : le SENS des DEUX axes vient de la face de montage");
+    ck(Math.abs(pAv.originY - bAv.y0) < 1e-12, "trayPlacementInRack AVANT : l'origine des profondeurs est le bord AVANT du plateau");
+    ck(Math.abs(pAr.originY - bAr.y1) < 1e-12, "trayPlacementInRack ARRIÈRE : l'origine est le bord ARRIÈRE");
+    ck(Math.abs(pAv.originX - (bAv.x0 + bAv.xInset)) < 1e-12, "trayPlacementInRack AVANT : origine = bord utilisable GAUCHE (garde des renforts déjà déduite)");
+    ck(Math.abs(pAr.originX - (bAr.x0 + bAr.xInset + largeurUtile)) < 1e-12, "trayPlacementInRack ARRIÈRE : origine = bord utilisable DROIT — `tray_x` se compte depuis la gauche de QUI REGARDE");
+    ck(Math.abs(pAv.plankZ - bAv.z0) < 1e-12, "trayPlacementInRack : les posés reposent sur le DESSUS du plateau");
 
     // Le posé d'une étagère ARRIÈRE est bien RETOURNÉ — les DEUX axes (rotation, §6.24).
     const eq0 = { free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, dc_orientation: 0, tray_x: 0, tray_y: 0 };
@@ -1949,7 +1949,7 @@ module.exports = async () => {
 
     /* ---- La boîte DESSINÉE et la boîte RAPPORTÉE décrivent le MÊME solide ----
        `DcThreeScene` ne dessine plus l'enveloppe rendue par `trayEquipBoxLocal` : il pose un boîtier
-       de cotes PROPRES (w × d) au centre déclaré par `trayContentPlacement`, TOURNÉ de son lacet
+       de cotes PROPRES (w × d) au centre déclaré par `trayContentPlacementInRack`, TOURNÉ de son lacet
        effectif. Les deux descriptions doivent coïncider, sinon la coque et les connecteurs divergent —
        exactement la divergence que §6.24 a corrigée. Ce verrou l'empêche de revenir, et il est le seul
        moyen de tester du RENDU sans moteur 3D : on compare ses ENTRÉES à la géométrie de référence.
@@ -1964,7 +1964,7 @@ module.exports = async () => {
       for (const ori of [0, 90, 180, 270]) {
         const e = { free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, dc_orientation: ori, tray_x: 20, tray_y: 30 };
         const rapportee = RackGeometry.trayEquipBoxLocal(rk, t, e);
-        const dessinee = RackGeometry.trayContentPlacement(rk, t, e);
+        const dessinee = RackGeometry.trayContentPlacementInRack(rk, t, e);
         // enveloppe de la boîte DESSINÉE : cotes propres, permutées par le lacet EFFECTIF (0/180 → non).
         const yaw = ((dessinee.yawDeg % 360) + 360) % 360;
         const tourne = (yaw === 90 || yaw === 270);
@@ -1984,7 +1984,7 @@ module.exports = async () => {
     /* Les modes `side` et `wall` étaient dessinés en boîtes NUES (ni nom, ni image, ni repère
        d'orientation) alors que leurs ports étaient résolus. Les faire passer par le rendu COMMUN des
        boîtiers demande de leur donner un LACET — et c'est là qu'on peut se tromper sans que rien ne le
-       dise. Ce test croise DEUX chemins indépendants : le lacet déduit par `mountedContentPlacement`
+       dise. Ce test croise DEUX chemins indépendants : le lacet déduit par `mountedContentPlacementInRack`
        (rendu) et la normale rendue par `Resolver3D` (ports). S'ils divergent, la coque tourne le dos à
        ses propres connecteurs — exactement le défaut que §6.24 vient de corriger pour les étagères.
        ⚠ Les deux vérifications MORDENT, mesuré par sonde et non supposé : lacet forcé à 0 → 20 cas sur
@@ -2003,7 +2003,7 @@ module.exports = async () => {
       ck(!!e, "montage créé : " + label);
       if (!e) return;
       cas++;
-      const m = RackGeometry.mountedContentPlacement(rk, e);
+      const m = RackGeometry.mountedContentPlacementInRack(rk, e);
       const b = (e.placement_mode === "wall") ? RackGeometry.wallEquipBoxLocal(rk, e) : RackGeometry.sideEquipBoxLocal(rk, e);
       lacets.add(m.yawDeg);
       // ① la FAÇADE dessinée (façade locale −Y tournée du lacet) ≡ la normale du port RÉSOLU

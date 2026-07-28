@@ -159,7 +159,7 @@ export class Resolver3D {
     if (eq.placement_mode === "tray" && eq.tray_item_id) {
       // POSÉ SUR UNE ÉTAGÈRE : la seule chaîne à TROIS conteneurs emboîtés, chacun dans son rôle.
       // L'ÉTAGÈRE situe le posé dans sa baie et lui ajoute son demi-tour éventuel
-      // (`RackGeometry.trayContentPlacement` via `TrayFrame`) ; le POSÉ produit le point et la normale
+      // (`RackGeometry.trayContentPlacementInRack` via `TrayFrame`) ; le POSÉ produit le point et la normale
       // LOCAUX de sa face, exactement comme un équipement libre — c'est le MÊME `FreeEquipGeometry`,
       // un posé sur plateau n'étant rien d'autre qu'un boîtier libre juché plus haut ; la BAIE amène
       // enfin le tout au repère de la salle.
@@ -172,11 +172,11 @@ export class Resolver3D {
       // d'un posé deviennent résolvables, comme elles le sont déjà en mode libre.
       const tray = s.get("rackItems", eq.tray_item_id); if (!tray || !tray.rack_id) return null;
       const rack = s.get("racks", tray.rack_id); if (!rack || rack.datacenter_id !== dcId) return null;
-      const plankZ = RackGeometry.trayPlacement(rack, tray).plankZ;
+      const plankZ = RackGeometry.trayPlacementInRack(rack, tray).plankZ;
       const fx = (geo.face_x != null) ? geo.face_x : 0.5, fy = (geo.face_y != null) ? geo.face_y : 0.5;
       // base Z = le DESSUS DU PLATEAU, et non `dc_z` : un posé repose sur son étagère.
       const face = FreeEquipGeometry.faceLocal(eq, geo.face_side, fx, fy, plankZ);
-      const inRack = PlacementFrame.place(RackGeometry.trayContentPlacement(rack, tray, eq),
+      const inRack = PlacementFrame.place(RackGeometry.trayContentPlacementInRack(rack, tray, eq),
         { x: face.lx, y: face.ly, z: face.lz }, FreeEquipGeometry.faceNormalLocal(geo.face_side));
       const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: inRack.x, y: inRack.y, z: inRack.z }, inRack.n);
       return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
@@ -292,10 +292,10 @@ export class Resolver3D {
     const z0 = RackGeometry.uBaseZ(rack) + (u0 - 1) * U_MM, z1 = z0 + uh * U_MM, zc = (z0 + z1) / 2;
     const depth = Math.min(Math.max(1, wp.depth_mm || 100), RackGeometry.cageDepth(rack));
     const fm = RackGeometry.frontMargin(rack);
-    const toRoom = (lx: number, ly: number, lz: number) => PlacementFrame.pointToRoom(basis, { x: lx, y: ly, z: lz });
+    const toRoom = (lx: number, ly: number, lz: number) => PlacementFrame.composePoint(basis, { x: lx, y: ly, z: lz });
     const e0 = toRoom(0, -hd + fm + 2, zc), e1 = toRoom(0, -hd + fm + 2 + depth, zc);
     // section de la brosse : sa largeur suit l'axe +X LOCAL de la baie (une DIRECTION, donc tournée SEULE).
-    const right = PlacementFrame.dirToRoom(basis, { x: 1, y: 0 }), up = { x: 0, y: 0, z: 1 };
+    const right = PlacementFrame.composeDir(basis, { x: 1, y: 0 }), up = { x: 0, y: 0, z: 1 };
     const bodyHW = RACK_MOUNT_WIDTH / 2 - RACK_EAR_MM;
     return { rack, co: basis.cos, so: basis.sin, cx: basis.originX, cy: basis.originY, hd, e0, e1, right, up, z0, z1, zc, depth,
       halfW: bodyHW, usableW: Math.max(0, 2 * bodyHW - 2 * BRUSH_PADDING_MM),
@@ -311,7 +311,7 @@ export class Resolver3D {
     const col = (wp.side_col === 1) ? 1 : 0, uTop = Math.max(1, wp.side_u | 0);
     const b = RackGeometry.sideSlotBoxLocal(rack, face, lr, col, uTop, SIDE_U_STEP);
     const lx = (Math.min(b.x0, b.x1) + Math.max(b.x0, b.x1)) / 2, lz = (b.z0 + b.z1) / 2, ly = b.yPlane;
-    const roomPoint = PlacementFrame.pointToRoom(PlacementFrame.basis(RackGeometry.roomPlacement(rack)), { x: lx, y: ly, z: lz });
+    const roomPoint = PlacementFrame.composePoint(PlacementFrame.basis(RackGeometry.roomPlacement(rack)), { x: lx, y: ly, z: lz });
     return { rack, face, lr, col, uTop, dcId: rack.datacenter_id, roomPoint };
   }
 
@@ -322,7 +322,7 @@ export class Resolver3D {
     const rack = s.get("racks", wp.rack_id); if (!rack) return null;
     const c = RackGeometry.capCellLocalCenter(rack, wp.cap_cx | 0, wp.cap_cy | 0);
     const z = (wp.cap_face === "floor") ? 0 : RackGeometry.physHeight(rack);
-    const roomPoint = PlacementFrame.pointToRoom(PlacementFrame.basis(RackGeometry.roomPlacement(rack)), { x: c.lx, y: c.ly, z });
+    const roomPoint = PlacementFrame.composePoint(PlacementFrame.basis(RackGeometry.roomPlacement(rack)), { x: c.lx, y: c.ly, z });
     return { rack, face: wp.cap_face, cx: wp.cap_cx | 0, cy: wp.cap_cy | 0, dcId: rack.datacenter_id, roomPoint };
   }
 

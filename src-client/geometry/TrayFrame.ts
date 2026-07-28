@@ -56,7 +56,7 @@ import type { TrayRect } from "../../src-shared/TrayGeometry";
    ============================================================================= */
 
 /** Placement DÉCLARÉ d'une ÉTAGÈRE dans sa baie — ce que le conteneur doit savoir de lui-même, et
-    rien d'autre. Dérivé de la boîte de l'étagère par `RackGeometry.trayPlacement`, exactement comme
+    rien d'autre. Dérivé de la boîte de l'étagère par `RackGeometry.trayPlacementInRack`, exactement comme
     `RackGeometry.roomPlacement` dérive le placement d'une BAIE dans sa salle. */
 export interface TrayPlacement {
   /** X (repère baie) de l'ORIGINE des largeurs du plateau : son bord utilisable GAUCHE pour une

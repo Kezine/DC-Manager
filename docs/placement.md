@@ -569,7 +569,7 @@ produisent plus que leur point et leur normale LOCAUX.
   fait dans l'ordre que ce point exigeait : un nom étroit tant qu'une seule forme de contenu était
   constatée, élargi seulement à mesure que les suivantes l'étaient. La borne §6.6 invoquée ici, elle, n'a
   pas bougé d'un pouce.
-- **L'interface sépare POINT et DIRECTION.** `pointToRoom` tourne PUIS translate ; `dirToRoom` tourne
+- **L'interface sépare POINT et DIRECTION.** `composePoint` tourne PUIS translate ; `composeDir` tourne
   SEULEMENT. C'est exactement la distinction que les quatre branches réécrivaient à la main, et la faute
   qu'on commet en recopiant — une normale translatée cesse d'être unitaire et expédie le connecteur 3D à
   l'autre bout de la salle. Écarté : une seule opération « transformer », qui aurait laissé le choix du
@@ -1503,6 +1503,12 @@ révélé être le repère du CONTENU, pas d'un conteneur particulier.
   délibérément, dans un lot dont c'était le sujet. Le précédent de §6.11 (les deux conventions d'origine,
   signalées puis tranchées un lot plus tard) s'applique : une question qui apparaît en cours de route se
   signale, elle ne s'arbitre pas en douce. `toParent()` reste, lui, explicitement proscrit (§6.6).
+
+  > **Mise à jour — ARBITRÉ en §6.26, et l'argument ci-dessus était le mauvais.** « Aucun point d'appel
+  > n'en souffre ENCORE » décrit un mensonge sans conséquence, pas un nom juste : la destination de ces
+  > deux méthodes N'EST PAS la salle, elle est le repère de l'origine reçue, parfois MONDE. Elles
+  > s'appellent `composePoint`/`composeDir` — l'OPÉRATION, seule chose qui ne dépende pas de l'appelant.
+  > `roomPlacement`, en revanche, garde son nom pour de bon : une baie EST placée dans une salle.
 - **L'histoire n'est pas effacée.** §6.11 et §6.12 GARDENT `RackFrame`/`RoomFrame` dans leur corps, sous
   un avertissement « lire au passé » — la même forme que §6.6 (« Mise à jour ») et §6.19. Un lecteur qui
   remonte un `git blame` doit retrouver les noms de l'époque ; un lecteur qui cherche le code d'aujourd'hui
@@ -1547,7 +1553,7 @@ l'étagère n'étant qu'un intermédiaire de calcul. Le conteneur s'appelle
   exactement l'union qui fuit que §6.2 proscrit : deux repères voisins, deux transformées de nature
   différente. Écarté également : exprimer l'étagère comme un `ContentPlacement` à lacet 0/180 — cela
   aurait changé le comportement en douce, sous couvert d'unification.
-- **Le conteneur REÇOIT son placement, il ne le calcule pas.** `RackGeometry.trayPlacement(rack, tray)`
+- **Le conteneur REÇOIT son placement, il ne le calcule pas.** `RackGeometry.trayPlacementInRack(rack, tray)`
   dérive `TrayPlacement` de la boîte de l'étagère — pendant EXACT de `roomPlacement`, un cran plus bas.
   `TrayFrame` n'importe donc ni `RackGeometry` (ce qui BOUCLERAIT) ni quoi que ce soit d'autre que le
   TYPE du rectangle qu'il transporte. Le **verrou de borne §6.6** de `PlacementFrame` a été ÉTENDU à ce
@@ -1626,7 +1632,7 @@ n'est rien d'autre qu'un boîtier libre juché sur un plateau, ce que la résolu
 réutilisant `FreeEquipGeometry`. C'est le troisième conteneur servi par ce rendu, et le principe n°3
 appliqué au bout : le lot ne corrige pas deux chemins, il en retire un.
 
-- La boîte est TOURNÉE du lacet EFFECTIF (`trayContentPlacement`), le même que celui de la résolution.
+- La boîte est TOURNÉE du lacet EFFECTIF (`trayContentPlacementInRack`), le même que celui de la résolution.
 - Ses UV de face dérivent de `FreeEquipGeometry.faceFraction`, la source de vérité qui place aussi les
   ports : image et connecteurs coïncident **par construction**, sur les SIX faces et non plus deux.
 - `buildEquipBox` gagne trois options — `yawDeg` (lacet effectif), `elevation` (un posé REPOSE sur son
@@ -1681,7 +1687,7 @@ coque de ses ports**, qui sont résolus sur la boîte BORNÉE. D'où deux ajuste
   `FreeEquipGeometry.faceFractionIn` — extrait de `faceFraction`, parce que ces fractions sont une
   propriété de la BOÎTE et jamais de l'enregistrement. Les plaquer sur les cotes déclarées ferait glisser
   l'image hors de la coque.
-- `RackGeometry.mountedContentPlacement` **DÉRIVE** centre, lacet et cotes de l'enveloppe existante,
+- `RackGeometry.mountedContentPlacementInRack` **DÉRIVE** centre, lacet et cotes de l'enveloppe existante,
   au lieu de re-calculer les bornes — les dupliquer aurait recréé la divergence que ce lot supprime.
 
 **Le lacet est la seule inconnue, donc le seul vrai test.** Il doit amener la façade du boîtier (−Y local)
@@ -1696,6 +1702,34 @@ sur 32 ; cotes non permutées à 90°/270° → 8 sur 32.
 d'orientation (arêtes de la face avant) sur les équipements en marge et en paroi. Aucune donnée n'est
 concernée aujourd'hui — les deux corpus en comptent **zéro** — mais c'est un ajout d'affichage franc,
 **à juger à l'œil** dès qu'un tel montage existera.
+
+### 6.26 Les noms qui MENTAIENT sont corrigés — les autres sont gardés — **IMPLÉMENTÉ**
+
+Deux dettes de nommage traînaient depuis §6.22, sous la même formule : « ne trompe à aucun point d'appel
+AUJOURD'HUI ». C'est le raisonnement qu'on refait à chaque fois qu'un nom faux survit — il décrit un
+mensonge sans conséquence, pas un nom juste, et il perd sa validité au premier appelant qui change.
+
+**Renommés, parce qu'ils désignaient une DESTINATION qui n'est pas la leur :**
+
+| Avant | Après | Pourquoi c'était faux |
+|---|---|---|
+| `PlacementFrame.pointToRoom` | `composePoint` | Le module rend dans le repère de l'ORIGINE reçue — parfois MONDE (résolveur d'étage, §6.20). « Room » nommait une destination que l'appelant choisit. |
+| `PlacementFrame.dirToRoom` | `composeDir` | Idem. |
+| `RackGeometry.trayPlacement` | `trayPlacementInRack` | Se lisait « placement DE l'étagère » ou « placement DANS l'étagère » — deux lectures opposées, et c'est la première qui est juste, exprimée dans le repère de la BAIE. |
+| `RackGeometry.trayContentPlacement` | `trayContentPlacementInRack` | Même ambiguïté ; le repère de sortie est celui de la baie, pas du plateau. |
+| `RackGeometry.mountedContentPlacement` | `mountedContentPlacementInRack` | Idem. |
+
+Les trois derniers dataient de §6.23–§6.25, c'est-à-dire de la veille : une dette de nommage se contracte
+vite, et la corriger tant qu'elle n'a que huit points d'appel coûte le dixième de ce qu'elle coûtera plus
+tard.
+
+**GARDÉS, et pas par prudence** : `RackGeometry.roomPlacement` et `FreeEquipGeometry.roomPlacement`. Une
+baie EST placée dans une salle, un équipement libre AUSSI — ces noms sont exacts. §6.22 annonçait que les
+renommer serait « un SECOND arbitrage à trancher du même geste » ; vérification faite, il n'y avait rien à
+trancher. Le périmètre d'un lot de renommage est **ce qui est faux**, pas ce qui est ancien.
+
+`toParent()` reste explicitement proscrit (§6.6) — c'est d'ailleurs pourquoi `composePoint` ne s'appelle
+pas `pointToParent` : le mot inviterait précisément l'abstraction que la borne interdit.
 
 ## 7. État de la convergence
 
@@ -1766,7 +1800,7 @@ du besoin — verrouillé par des tests anti-divergence).
 - `src-client/geometry/PlacementFrame.ts` — **REPÈRE D'UN CONTENU PLACÉ** (`RackFrame` en §6.11,
   `RoomFrame` en §6.12, nom actuel depuis §6.22) : `basis` (lacet + origine, dérivés du seul placement
   DÉCLARÉ, position absente ⇒ demi-empreinte), `origin` (le CENTRE d'un contenu en local salle — source
-  unique du repli, §6.13), `pointToRoom` (rotation PUIS translation), `dirToRoom` (rotation SEULE,
+  unique du repli, §6.13), `composePoint` (rotation PUIS translation), `composeDir` (rotation SEULE,
   composante verticale recopiée), `place` (les deux, ce que consomment les CINQ modes de salle ET le
   résolveur d'étage). `ContentPlacement` = l'interface étroite, faite des SEULS champs du contenu.
   ⚠ Il compose dans le repère de l'ORIGINE qu'on lui donne : local salle pour ses appelants de salle,

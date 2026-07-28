@@ -217,7 +217,7 @@ export class RackGeometry {
       Le LACET est celui qui amène la façade du boîtier (−Y local) sur la normale sortante de son
       montage : `side` regarde toujours ±Y (0° ou 180°), `wall` peut regarder ±X (90° / 270°) quand il
       est posé « en travers » de sa paroi — d'où la permutation des cotes dans ce cas. */
-  static mountedContentPlacement(rack: any, e: any): { x: number; y: number; yawDeg: number; box: FreeBox; baseZ: number } {
+  static mountedContentPlacementInRack(rack: any, e: any): { x: number; y: number; yawDeg: number; box: FreeBox; baseZ: number } {
     const wall = e.placement_mode === "wall";
     const b = wall ? RackGeometry.wallEquipBoxLocal(rack, e) : RackGeometry.sideEquipBoxLocal(rack, e);
     // normale sortante : portée par la BOÎTE en paroi (gauche/droite ou fond de marge), déduite de la
@@ -291,7 +291,7 @@ export class RackGeometry {
       lui-même (cf. `TrayFrame`). Pendant EXACT de `roomPlacement` un cran plus bas dans la chaîne :
       là, une baie déclare son placement dans sa salle ; ici, une étagère déclare le sien dans sa baie.
       C'est ce qui permet à `TrayFrame` de ne connaître ni baie, ni enregistrement, ni face. */
-  static trayPlacement(rack: any, tray: any): TrayPlacement {
+  static trayPlacementInRack(rack: any, tray: any): TrayPlacement {
     const b = RackGeometry.trayBoxLocal(rack, tray);
     const usableX0 = b.x0 + b.xInset, usableW = RackGeometry.trayPlank(rack, tray).W;
     return {
@@ -315,8 +315,8 @@ export class RackGeometry {
       ⚠ Le CENTRE vient de la boîte `TrayGeometry.box`, qui est l'enveloppe alignée sur les axes du
       posé DÉJÀ tourné (l'empreinte y est permutée à 90/270). Le centre d'une enveloppe alignée est
       le centre de l'objet : c'est bien autour de lui que le lacet doit tourner. */
-  static trayContentPlacement(rack: any, tray: any, eq: any): ContentPlacement {
-    const placement = RackGeometry.trayPlacement(rack, tray);
+  static trayContentPlacementInRack(rack: any, tray: any, eq: any): ContentPlacement {
+    const placement = RackGeometry.trayPlacementInRack(rack, tray);
     const box = TrayGeometry.box(eq, RackGeometry.trayPlank(rack, tray));
     const centre = TrayFrame.pointToRack(placement, { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 });
     const bx = FreeEquipGeometry.box(eq);
@@ -337,7 +337,7 @@ export class RackGeometry {
       (`TrayFrame.rectToRack`). Le transport était écrit ici à la main ; il vit maintenant dans le
       conteneur, avec les deux autres sites qui le re-dérivaient. Cf. docs/placement.md §6.23. */
   static trayEquipBoxLocal(rack: any, tray: any, eq: any): any {
-    const placement = RackGeometry.trayPlacement(rack, tray);
+    const placement = RackGeometry.trayPlacementInRack(rack, tray);
     const plank = RackGeometry.trayPlank(rack, tray);
     const fp = TrayGeometry.footprint(eq);
     const r = TrayFrame.rectToRack(placement, TrayGeometry.box(eq, plank));

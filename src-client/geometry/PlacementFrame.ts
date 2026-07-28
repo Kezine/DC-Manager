@@ -55,14 +55,19 @@ import { Normalize } from "../core/Normalize";
    lacet et sa demi-empreinte de repli : AUCUN champ de la salle n'entre dans le
    calcul, et c'est le constat qui a motivé le renommage.
 
-   ⚠ `pointToRoom`/`dirToRoom` GARDENT leur nom — SIGNALÉ, pas oublié. Ces deux
-   méthodes ne sont appelées aujourd'hui qu'avec une origine LOCALE SALLE (la
-   géométrie des waypoints) ; seul `place` reçoit parfois une origine monde. Leur
-   nom ne ment donc à aucun point d'appel. Les renommer serait un SECOND arbitrage,
-   qui devrait trancher du même geste `RackGeometry.roomPlacement` et
-   `FreeEquipGeometry.roomPlacement` — des noms que §6.12 a posés délibérément. Le
-   précédent de §6.11 s'applique : une question qui apparaît en cours de lot se
-   SIGNALE, elle ne s'arbitre pas en douce.
+   ⚠ CES MÉTHODES S'APPELAIENT `pointToRoom`/`dirToRoom` — renommées en §6.26.
+   « Room » y désignait la DESTINATION, et c'était faux : ce module rend dans le
+   repère de l'ORIGINE qu'on lui donne, laquelle est parfois MONDE (résolveur
+   d'étage). Le nom n'a été corrigé qu'une fois établi qu'il MENTAIT — la version
+   précédente de ce paragraphe le défendait en observant qu'aucun point d'appel
+   n'en souffrait ENCORE, ce qui décrit un mensonge sans conséquence, pas un nom
+   juste. `composePoint`/`composeDir` ne nomment plus une destination mais
+   l'OPÉRATION, la seule chose qui ne dépende pas de l'appelant.
+
+   ⚠ `RackGeometry.roomPlacement` et `FreeEquipGeometry.roomPlacement` GARDENT le
+   leur, et pas par prudence : une baie EST placée dans une salle, un équipement
+   libre AUSSI. Ces noms-là sont exacts, donc hors du périmètre de §6.26 — qui n'a
+   renommé que ce qui était faux.
 
    REPÈRES — ce que ce module transforme, et vers QUOI
    ---------------------------------------------------------------------------
@@ -129,7 +134,7 @@ export class PlacementFrame {
   }
 
   /** ORIGINE d'un contenu en LOCAL SALLE = le CENTRE de son empreinte au sol, c'est-à-dire l'image de son
-      point local (0, 0) par `pointToRoom` (le lacet ne déplace pas l'origine, il tourne autour d'elle).
+      point local (0, 0) par `composePoint` (le lacet ne déplace pas l'origine, il tourne autour d'elle).
       C'est ce que consomment tous les usages qui veulent « où est cet objet dans sa salle » sans point
       local à composer : le cadrage caméra (« Localiser »), l'outil de positionnement, le placement
       automatique et les DEUX vues qui dessinent. Sans cette méthode, chacun d'eux recopie la règle de
@@ -140,7 +145,7 @@ export class PlacementFrame {
   }
 
   /** POINT local → local salle : rotation par le lacet, PUIS translation à l'origine du contenu. */
-  static pointToRoom(basis: PlacementBasis, local: ContentLocalPoint): { x: number; y: number; z: number } {
+  static composePoint(basis: PlacementBasis, local: ContentLocalPoint): { x: number; y: number; z: number } {
     return {
       x: basis.originX + local.x * basis.cos - local.y * basis.sin,
       y: basis.originY + local.x * basis.sin + local.y * basis.cos,
@@ -152,7 +157,7 @@ export class PlacementFrame {
       distinction que chaque branche réécrivait à la main — et la première chose qu'on se trompe à
       recopier, une normale translatée cessant d'être unitaire. La composante verticale, elle, est
       INSENSIBLE au lacet : elle est recopiée. */
-  static dirToRoom(basis: PlacementBasis, local: ContentLocalDir): { x: number; y: number; z: number } {
+  static composeDir(basis: PlacementBasis, local: ContentLocalDir): { x: number; y: number; z: number } {
     return {
       x: local.x * basis.cos - local.y * basis.sin,
       y: local.x * basis.sin + local.y * basis.cos,
@@ -167,7 +172,7 @@ export class PlacementFrame {
       (doctrine §6.2). */
   static place(placement: ContentPlacement, local: ContentLocalPoint, dir: ContentLocalDir): PlacedPoint {
     const basis = PlacementFrame.basis(placement);
-    const p = PlacementFrame.pointToRoom(basis, local);
-    return { x: p.x, y: p.y, z: p.z, n: PlacementFrame.dirToRoom(basis, dir) };
+    const p = PlacementFrame.composePoint(basis, local);
+    return { x: p.x, y: p.y, z: p.z, n: PlacementFrame.composeDir(basis, dir) };
   }
 }
