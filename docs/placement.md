@@ -1662,9 +1662,14 @@ il fallait comparer les modes entre eux.
 **Le mode `rack` reste à part, et c'est délibéré.** Un équipement monté en U s'inscrit entre les rails,
 son Z vient de la grille de U, son image de façade doit être ROGNÉE à la largeur du corps (les oreilles
 19″ n'en font pas partie) et il n'a pas de lacet libre — il est avant ou arrière. Le faire entrer dans la
-même primitive produirait la fonction à drapeaux que le principe n°2 proscrit. Trois modes sur six, ce
-n'est pas un demi-échec : c'est exactement la famille « boîtier posé par position + lacet », celle que la
-doctrine des conteneurs décrit.
+même primitive produirait la fonction à drapeaux que le principe n°2 proscrit.
+
+**Décompte, à ne pas confondre avec le nombre de points d'appel.** `EQUIPMENT_PLACEMENT_MODES` en compte
+SIX (`manual`, `rack`, `side`, `wall`, `floor`, `tray`). Après ce lot, `buildEquipBox` en sert **CINQ** —
+tous sauf `rack` — depuis QUATRE points d'appel seulement, `side` et `wall` partageant le leur. Compter
+les appels au lieu des modes fait dire « quatre sur six », ce qui est faux d'une unité et suggère qu'il
+resterait du travail au-delà de `rack` : il n'en reste aucun. Ce qui échappe à la primitive commune n'est
+pas un reliquat, c'est le SEUL mode qui ne soit pas un « boîtier posé par position + lacet ».
 
 **L'obstacle réel, et pourquoi ce n'était pas un simple branchement.** `sideEquipBoxLocal` et
 `wallEquipBoxLocal` **BORNENT** les cotes déclarées — largeur ramenée à la colonne, longueur à la cage
