@@ -98,6 +98,30 @@ module.exports = async () => {
     ck.eq(s.get("ports", p2.id), null, "port 2 supprimé (cascade)");
     ck.eq(s.get("cables", cab.id), null, "câble supprimé (cascade, dédup)");
   }
+  {
+    /* CASCADE RÉCURSIVE de bout en bout, à travers l'EXÉCUTEUR du mode fichier (Store.remove) :
+       un breakout IMBRIQUÉ (trunk → lane → sous-lane) doit partir en ENTIER. Avant la récursion, la
+       règle portée par `ports` n'était rejouée sur aucune lane supprimée : la sous-lane survivait,
+       orpheline, avec son câble (docs/placement.md §6.16). */
+    const s = await makeStore();
+    const eq = await s.create("equipments", { name: "sw-breakout" });
+    const peer = await s.create("equipments", { name: "peer" });
+    const farA = await s.create("ports", { equipment_id: peer.id, name: "far-a" });
+    const farB = await s.create("ports", { equipment_id: peer.id, name: "far-b" });   // un port ne porte qu'UN câble
+    const trunk = await s.create("ports", { equipment_id: eq.id, name: "Trunk" });
+    const lane = await s.create("ports", { equipment_id: eq.id, name: "Trunk/1", parent_port_id: trunk.id, lane: 1 });
+    const sub = await s.create("ports", { equipment_id: eq.id, name: "Trunk/1/1", parent_port_id: lane.id, lane: 1 });
+    const cLane = await s.create("cables", { from_port_id: lane.id, to_port_id: farA.id });
+    const cSub = await s.create("cables", { from_port_id: sub.id, to_port_id: farB.id });
+    await s.remove("ports", trunk.id);
+    ck.eq(s.get("ports", trunk.id), null, "breakout : trunk supprimé");
+    ck.eq(s.get("ports", lane.id), null, "breakout : lane supprimée (1er niveau)");
+    ck.eq(s.get("ports", sub.id), null, "breakout IMBRIQUÉ : sous-lane supprimée (récursion)");
+    ck.eq(s.get("cables", cLane.id), null, "breakout : câble de la lane supprimé");
+    ck.eq(s.get("cables", cSub.id), null, "breakout IMBRIQUÉ : câble de la sous-lane supprimé (récursion)");
+    ck(!!s.get("ports", farA.id), "breakout : le port distant SURVIT (rien au-delà de la chaîne)");
+    ck(!!s.get("equipments", peer.id), "breakout : l'équipement distant SURVIT (le rayon d'action reste borné)");
+  }
   });
 
   await section("Store : rechargement granulaire (P2 — reloadCollections / reloadMeta)", async () => {

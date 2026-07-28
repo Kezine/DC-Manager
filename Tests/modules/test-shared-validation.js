@@ -167,6 +167,143 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : Cascade.plan RÉCURSIVE (point fixe, anti-cycle, détachements réduits)", async () => {
+  {
+    /* Le plan REJOUE la règle de chaque entité qu'il marque pour suppression, jusqu'au point fixe
+       (docs/placement.md §6.16). Ces attentes sont EN DUR : elles ne comparent aucune implémentation à
+       une autre (une parité serait tautologique — la cascade non récursive n'existe plus). */
+    const mk = () => ({
+      equipments: [{ id: "E1", name: "sw" }, { id: "E2", name: "peer" }],
+      // Chaîne PROFONDE : trunk → lane → sous-lane → sous-sous-lane. L2 n'a PAS d'equipment_id
+      // (cas produit par une écriture d'API tierce) : sans récursion, elle survivait à E1.
+      ports: [
+        { id: "T", equipment_id: "E1", aggregate_id: "A1" },
+        { id: "L1", equipment_id: "E1", parent_port_id: "T" },
+        { id: "L2", parent_port_id: "T" },
+        { id: "L2a", parent_port_id: "L2" },
+        { id: "L2b", parent_port_id: "L2a" },
+        // Port d'un AUTRE équipement rattaché au MÊME agrégat (anomalie de données) : l'agrégat étant
+        // supprimé avec E1, sa FK doit être détachée — c'est la récursion qui atteint cette règle.
+        { id: "X", equipment_id: "E2", aggregate_id: "A1" },
+      ],
+      aggregates: [{ id: "A1", equipment_id: "E1" }],
+      cables: [
+        { id: "cT", from_port_id: "T", to_port_id: "X" },
+        { id: "cL1", from_port_id: "L1", to_port_id: "X" },
+        { id: "cL2", from_port_id: "L2", to_port_id: "X" },
+        { id: "cL2a", from_port_id: "L2a", to_port_id: "X" },
+        { id: "cL2b", from_port_id: "L2b", to_port_id: "X" },
+      ],
+    });
+    const finderOf = (db) => (coll, field, value) => (db[coll] || []).filter((o) => {
+      const v = o[field];
+      return Array.isArray(v) ? v.includes(value) : v === value;
+    });
+    const fetcherOf = (db) => (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
+    const idsOf = (list, coll) => list.filter((d) => d.c === coll).map((d) => d.id).sort().join(",");
+
+    // -- 1) ÉQUIPEMENT : la chaîne entière part, y compris les lanes sans equipment_id et leurs câbles --
+    {
+      const db = mk(); const find = finderOf(db), fetch = fetcherOf(db);
+      const plan = Cascade.plan("equipments", "E1", find, fetch);
+      ck.eq(idsOf(plan.deletes, "ports"), "L1,L2,L2a,L2b,T", "récursion : équipement → trunk + lane + sous-lane + sous-sous-lane");
+      ck.eq(idsOf(plan.deletes, "cables"), "cL1,cL2,cL2a,cL2b,cT", "récursion : les câbles de TOUTE la chaîne de ports partent");
+      ck.eq(idsOf(plan.deletes, "aggregates"), "A1", "équipement : agrégat supprimé");
+      ck.eq(plan.deletes.length, 11, "équipement : 11 entités supprimées au total (5 ports + 5 câbles + 1 agrégat)");
+      // dédup : le plan est un ENSEMBLE, même si une entité est atteinte par plusieurs chemins.
+      ck.eq(new Set(plan.deletes.map((d) => d.c + "/" + d.id)).size, plan.deletes.length, "plan : aucune entité en double dans deletes");
+      // détachement de l'agrégat : le port SURVIVANT est détaché, les ports SUPPRIMÉS ne le sont pas.
+      ck.eq(plan.detaches.filter((d) => d.c === "ports" && d.key === "aggregate_id").map((d) => d.id).join(","), "X",
+        "agrégat supprimé : seul le port SURVIVANT est détaché (les ports supprimés ne le sont pas)");
+      ck.eq(plan.detaches.some((d) => d.c === "ports" && d.id === "T"), false, "détachement visant une entité SUPPRIMÉE : ÉCARTÉ (anti-résurrection)");
+      ck.eq(plan.deletes.some((d) => d.c === "equipments" && d.id === "E1"), false, "la CIBLE ne figure jamais dans son propre plan");
+    }
+
+    // -- 2) PORT : un breakout IMBRIQUÉ part en entier (l'ancien plan s'arrêtait au 1er niveau de lanes) --
+    {
+      const db = mk(); const find = finderOf(db), fetch = fetcherOf(db);
+      const plan = Cascade.plan("ports", "T", find, fetch);
+      ck.eq(idsOf(plan.deletes, "ports"), "L1,L2,L2a,L2b", "récursion : port trunk → lanes ET sous-lanes (breakout imbriqué)");
+      ck.eq(idsOf(plan.deletes, "cables"), "cL1,cL2,cL2a,cL2b,cT", "récursion : câbles du trunk ET de toutes ses lanes");
+      ck.eq(plan.deletes.length, 9, "port trunk : 9 entités supprimées (4 lanes + 5 câbles)");
+      const sub = Cascade.plan("ports", "L2", find, fetch);
+      ck.eq(idsOf(sub.deletes, "ports"), "L2a,L2b", "récursion : depuis une lane, le sous-breakout part aussi");
+      ck.eq(sub.deletes.length, 5, "lane L2 : 5 entités supprimées (2 sous-lanes + 3 câbles)");
+    }
+
+    // -- 3) ANTI-CYCLE : un cycle de références TERMINE et ne double aucune entité --
+    {
+      const db = {
+        // cycle à 3 : Y1 ← Y3 ← Y2 ← Y1 (chaque port est le parent du suivant)
+        ports: [{ id: "Y1", parent_port_id: "Y2" }, { id: "Y2", parent_port_id: "Y3" }, { id: "Y3", parent_port_id: "Y1" },
+          { id: "Z", parent_port_id: "Z" }],
+        cables: [{ id: "cY", from_port_id: "Y2", to_port_id: "Y3" }, { id: "cZ", from_port_id: "Z", to_port_id: "Z" }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const cyc = Cascade.plan("ports", "Y1", find, fetch);
+      ck.eq(idsOf(cyc.deletes, "ports"), "Y2,Y3", "anti-cycle : cycle à 3 → les 2 AUTRES ports, une seule fois chacun");
+      ck.eq(cyc.deletes.some((d) => d.id === "Y1"), false, "anti-cycle : la cible ne se re-supprime pas via le cycle");
+      ck.eq(idsOf(cyc.deletes, "cables"), "cY", "anti-cycle : le câble du cycle est supprimé une seule fois");
+      ck.eq(cyc.deletes.length, 3, "anti-cycle : plan de 3 entités, terminaison prouvée");
+      const self = Cascade.plan("ports", "Z", find, fetch);
+      ck.eq(self.deletes.length, 1, "anti-cycle : port parent DE LUI-MÊME → seul son câble part (le port est la cible)");
+      ck.eq(idsOf(self.deletes, "cables"), "cZ", "anti-cycle : boucle sur soi → aucune boucle infinie");
+    }
+
+    // -- 4) POINT FIXE sur une chaîne LONGUE (terminaison + coût linéaire) --
+    {
+      const N = 60;
+      const ports = [{ id: "c0" }];
+      for (let i = 1; i < N; i++) ports.push({ id: "c" + i, parent_port_id: "c" + (i - 1) });
+      const db = { ports, cables: [] };
+      const chain = Cascade.plan("ports", "c0", finderOf(db), fetcherOf(db));
+      ck.eq(chain.deletes.length, N - 1, "point fixe : chaîne de 60 ports → 59 suppressions (la cible exclue)");
+      ck.eq(chain.deletes[chain.deletes.length - 1].id, "c" + (N - 1), "point fixe : le DERNIER maillon de la chaîne est atteint");
+    }
+
+    // -- 5) DÉTACHEMENTS RÉDUITS : un seul par (collection, id, clé), valeur FINALE composée --
+    {
+      const db = {
+        racks: [{ id: "R" }],
+        // trois brosses montées dans la baie, toutes sur la MÊME route de câble
+        waypoints: [{ id: "B1", kind: "brush", rack_id: "R" }, { id: "B2", kind: "brush", rack_id: "R" }, { id: "B3", kind: "brush", rack_id: "R" }],
+        cables: [{ id: "CW", waypoint_ids: ["B1", "W", "B2", "B3"] }],
+        cableBundles: [{ id: "BU", waypoint_ids: ["B3", "B1"] }],
+        rackItems: [{ id: "RI", rack_id: "R" }],
+        equipments: [{ id: "EG", tray_item_id: "RI", placement_mode: "tray", tray_x: 10, tray_y: 20 }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const plan = Cascade.plan("racks", "R", find, fetch);
+      ck.eq(idsOf(plan.deletes, "waypoints"), "B1,B2,B3", "baie : les 3 brosses montées sont supprimées");
+      ck.eq(idsOf(plan.deletes, "rackItems"), "RI", "baie : l'étagère est supprimée");
+      const cw = plan.detaches.filter((d) => d.c === "cables" && d.id === "CW" && d.key === "waypoint_ids");
+      ck.eq(cw.length, 1, "route : UN SEUL détachement waypoint_ids par câble (réduction par clé)");
+      ck.eq(JSON.stringify(cw[0] && cw[0].value), JSON.stringify(["W"]), "route : les TROIS brosses retirées d'un coup (composition, pas dernier-gagne)");
+      const bu = plan.detaches.filter((d) => d.c === "cableBundles" && d.id === "BU" && d.key === "waypoint_ids");
+      ck.eq(bu.length, 1, "route de faisceau : un seul détachement waypoint_ids");
+      ck.eq(JSON.stringify(bu[0] && bu[0].value), JSON.stringify([]), "route de faisceau : les 2 brosses retirées d'un coup");
+      // étagère supprimée par récursion → son hôte redevient « non placé » (4 clés, une entrée chacune)
+      const guest = plan.detaches.filter((d) => d.c === "equipments" && d.id === "EG");
+      ck.eq(guest.length, 4, "étagère supprimée par la baie : 4 détachements sur l'équipement posé (pas de doublon)");
+      ck.eq((guest.find((d) => d.key === "placement_mode") || {}).value, "manual", "équipement posé : replacé en « manual »");
+      ck.eq((guest.find((d) => d.key === "tray_item_id") || {}).value, null, "équipement posé : tray_item_id détaché");
+    }
+
+    // -- 6) Une entité déjà supprimée par un autre chemin n'est ni re-supprimée ni détachée --
+    {
+      const db = {
+        equipments: [{ id: "E" }],
+        ports: [{ id: "PA", equipment_id: "E" }, { id: "PB", equipment_id: "E" }],
+        // un câble entre DEUX ports du même équipement est atteint par les deux ports
+        cables: [{ id: "CC", from_port_id: "PA", to_port_id: "PB" }],
+      };
+      const plan = Cascade.plan("equipments", "E", finderOf(db), fetcherOf(db));
+      ck.eq(plan.deletes.filter((d) => d.c === "cables").length, 1, "dédup : câble atteint par ses DEUX ports → une seule suppression");
+      ck.eq(plan.deletes.length, 3, "dédup : 2 ports + 1 câble");
+    }
+  }
+  });
+
   await section("shared : schéma PARTAGÉ (garde anti-divergence front ⇄ back)", async () => {
   {
     // La liste canonique de shared/Schema DOIT correspondre EXACTEMENT aux classes du registre front (même ordre).

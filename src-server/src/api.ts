@@ -493,6 +493,11 @@ export class Api {
     // CASCADE DE SUPPRESSION (intégrité référentielle, autorité serveur) : on calcule via la logique PARTAGÉE
     // `Cascade.plan` — la même qu'en mode fichier — les entités à supprimer (enfants) et les FK à détacher.
     // Sans ça, un `DELETE` naïf laisserait des FK pendantes (orphelins) que rien ne rattraperait côté serveur.
+    // Le plan est RÉCURSIF (chaîne complète, jusqu'au point fixe) : il peut donc être bien plus profond qu'une
+    // liste d'enfants directs. Rien à adapter ici — l'ordre d'application ne compte pas (les suppressions sont
+    // un ENSEMBLE) et le plan GARANTIT qu'aucun détachement ne vise une entité qu'il supprime, ce qui serait
+    // fatal en aval : `Repository.transact` applique les deletes PUIS les updates, donc un update sur une ligne
+    // supprimée la RESSUSCITE par upsert (cf. la garde jumelle d'`ApiRules.residualCascade`).
     const find = this.repoChildFinder(req);
     const fetch = this.repoFetcher(req);
     const plan = Cascade.plan(collection, id, find, fetch);

@@ -215,10 +215,13 @@ Ce couple est déjà l'identité de fait (`allFloorKeys`, `oobWorld`, filtre des
 
 ### 6.5 Prérequis et garde-fous
 
-- **Cascade RÉCURSIVE requise.** Sous chaînage pur, supprimer une salle doit propager jusqu'au bout de
-  la chaîne. La cascade actuelle est non récursive (dette connue produisant des orphelins) : elle
-  devient un **prérequis** de ce modèle, plus un nettoyage optionnel.
-- **Garde de profondeur** sur le chaînage (cycle de références → boucle infinie).
+- ✅ **Cascade RÉCURSIVE requise — LEVÉE en §6.16.** Sous chaînage pur, supprimer une salle doit propager
+  jusqu'au bout de la chaîne. La cascade était non récursive (dette connue produisant des orphelins) :
+  elle était un **prérequis** de ce modèle, plus un nettoyage optionnel. `Cascade.plan` rejoue désormais
+  la règle de chaque entité qu'il marque pour suppression, jusqu'au point fixe.
+- **Garde de profondeur** sur le chaînage (cycle de références → boucle infinie). ✅ Posée pour la
+  cascade en §6.16, sous la forme d'un ENSEMBLE des couples (collection, id) déjà traités — qui borne
+  le parcours au nombre d'entités du document et rend toute garde de profondeur *arbitraire* inutile.
 - **Validation renforcée ET simplifiée** : « exactement une référence de conteneur, cohérente avec le
   mode » interdit par construction les combinaisons illégales aujourd'hui écrivables (`rack_id` ET
   `tray_item_id` renseignés).
@@ -507,8 +510,8 @@ la profondeur de la chaîne et de dettes annexes : l'**ÉTAGÈRE n'est pas encor
 place directement le posé, cf. §7), ~~le calcul de **CAGE reste dupliqué**~~ **résorbé en §6.14** (source
 unique `src-shared/RackDepthPolicy`, divergence arbitrée en faveur du bornage), les **constantes générales
 de baie** restent répliquées entre `domain/constants` et les modules partagés (`TrayGeometry`,
-`RackDepthPolicy` — tests anti-divergence posés), et la **cascade récursive** de §6.5 demeure un prérequis
-non tenu.
+`RackDepthPolicy` — tests anti-divergence posés). ~~et la **cascade récursive** de §6.5 demeure un prérequis
+non tenu~~ **tenu en §6.16**.
 
 ### 6.11 La BAIE devient un conteneur : `rack` / `side` / `wall` / `tray` — **IMPLÉMENTÉ**
 
@@ -893,6 +896,135 @@ nombres et rend un nombre, ce qui la rend testable en Node — le moteur 3D, lui
 UNIQUE à retoucher) et le confort réel des 90 % — `DcThreeCamera` importe THREE, hors de portée du harnais CJS. Ce
 qui est testable l'est : la règle pure, et l'étendue + la cible poussées au moteur par chaque « Localiser ».
 
+### 6.16 La CASCADE DE SUPPRESSION devient RÉCURSIVE — **IMPLÉMENTÉ**
+
+Prérequis nommé par §6.5, resté ouvert tout le chantier. `Cascade.plan` ne jouait la règle QUE de l'entité
+visée : il ne la rejouait jamais sur les entités qu'il venait de marquer pour suppression. La transitivité
+était rattrapée À LA MAIN dans des hooks `custom`, et ce qui n'y figurait pas laissait des orphelins **en
+usage normal**, pas seulement par appel d'API brut. Le moteur rejoue désormais la règle de chaque entité
+supprimée, **jusqu'au point fixe**.
+
+**Le vrai travail du lot n'est pas la boucle : c'est le CLASSEMENT des hooks `custom`.** Plusieurs
+n'existaient que pour compenser l'absence de récursion. Les laisser en place aurait au mieux doublé le
+travail — au pire changé la sémantique (voir la composition des listes, plus bas). Chacun a donc été classé
+en (A) « compense la récursion manquante », donc retirable, ou (B) « encode autre chose qu'une cascade de
+FK », donc à conserver :
+
+| Hook `custom` | Classement | Motif |
+|---|---|---|
+| `equipments` — câbles des ports | **(A) retiré** | La règle `delete` supprime déjà les ports ; la récursion rejoue `ports`, qui emporte leurs câbles. Ensemble IDENTIQUE (mesuré). |
+| `equipments` — spares | **(B) conservé** | Pas une cascade de FK : écrit une valeur CALCULÉE à partir du parent (le nom de l'équipement, préservé en texte libre). |
+| `ports` — câbles branchés | **(B) conservé** | Deux champs d'extrémité (`from_port_id`/`to_port_id`) à dédupliquer : non réductible à une FK simple. |
+| `ports` — lanes de breakout | **(A) devenu déclaratif** | `find("ports", "parent_port_id", …)` est une FK simple → passe en `delete`. Leurs câbles ET un breakout IMBRIQUÉ suivent par récursion — ce que le hook ne faisait PAS. |
+| `networks` | **(B) conservé** | Retrait d'un id d'une LISTE + repointage du principal : ni suppression, ni nullification de FK. |
+| `groups` | **(B) conservé** | Même modèle multi-valeurs, sur `equipments` **et** `vms`. |
+| `racks` — équipements posés sur les étagères | **(A) retiré** | Le commentaire le disait lui-même (« TRANSITIF, plan non récursif »). La récursion sur `rackItems` produit exactement les mêmes détachements (mesuré, entrée pour entrée). |
+| `racks` — suppression des brosses | **(A) devenu déclaratif** | `find("waypoints", "rack_id", …)` est une FK simple → passe en `delete`. |
+| `racks` — nettoyage des routes | **(A) retiré** | La récursion sur `waypoints` le fait, une fois par brosse — **à condition** de composer les valeurs (voir décision ci-dessous). |
+| `rackItems` | **(B) conservé** | Règle PROPRE de l'étagère (et non une transitivité) : détache ses posés en écrivant quatre champs. |
+| `waypoints` | **(B) conservé** | Règle PROPRE du waypoint : retrait d'un id d'une LISTE (`waypoint_ids`) de câbles et de faisceaux. |
+
+**RAYON D'ACTION — la question qui pouvait faire échouer le lot.** Une cascade récursive peut, via une FK
+mal déclarée, emporter tout un document. Mesuré AVANT/APRÈS sur **chaque enregistrement de chaque
+collection**, avec l'ancien moteur relu depuis git (§4.1) :
+
+| Document | Suppressions AVANT | APRÈS | Δ | Détachements AVANT | APRÈS | Δ |
+|---|---|---|---|---|---|---|
+| `samples-public/demo-infra.json` (246 enreg.) | 204 | 204 | **0** | 343 | 343 | **0** |
+| Document de PRODUCTION (656 enreg., non versionné) | 498 | 498 | **0** | 692 | 692 | **0** |
+| Jeu de test à chaînes PROFONDES (breakout imbriqué, lane sans `equipment_id`, cycles) | 50 | 61 | **+11** | 59 | 59 | **0** |
+
+**Sur des données réelles, le rayon d'action ne bouge PAS D'UNE ENTITÉ** — et c'est le résultat attendu, pas
+une déception : les hooks `custom` couvraient bien les cas produits par l'application. Ce que la récursion
+ajoute est une **garantie de FERMETURE**, valable pour les cas que l'UI ne produit pas (écriture d'API
+tierce, import) et pour toute règle FUTURE. Le delta n'apparaît que sur le jeu à chaînes profondes, et
+chaque entité s'y justifie nommément :
+
+- depuis l'**ÉQUIPEMENT** (+6) : une lane portée par un port de l'équipement mais **sans `equipment_id`**
+  (donc invisible à la règle `delete` de l'équipement), ses deux niveaux de sous-lanes, et leurs 3 câbles ;
+- depuis les **PORTS** (+6) : les sous-lanes et sous-sous-lanes d'un **breakout IMBRIQUÉ** et leurs câbles —
+  l'ancien plan ne descendait jamais là, il ne regardait qu'UN niveau sous le port supprimé ;
+- **−1** : le port déclaré parent DE LUI-MÊME, qui figurait dans son propre plan (voir le sur-ensemble
+  ci-dessous).
+
+Aucune collection sans lien logique avec la racine n'est atteinte : les seules collections gagnantes sont
+`ports` et `cables`, à partir de `equipments` et de `ports`.
+
+**Le plan est un SUR-ENSEMBLE de l'ancien** : sur les trois documents, **aucune** entité ne DISPARAÎT des
+suppressions — à une exception, voulue et vérifiée : un port déclaré parent DE LUI-MÊME figurait dans son
+propre plan (l'appelant le supprimait donc deux fois). Le garde anti-cycle l'écarte. Côté détachements,
+les seules entrées qui disparaissent sont celles visant une entité que le plan SUPPRIME (voir décision
+ci-dessous) ; sur données réelles, il n'y en a aucune.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **Le garde ANTI-CYCLE est un ENSEMBLE des couples (collection, id) déjà traités, et la CIBLE y est
+  inscrite d'entrée.** Il sert trois choses d'un coup : terminaison sur un cycle de références
+  (`ports.parent_port_id` peut en former un — le dépôt ne l'interdit pas), déduplication d'une entité
+  atteinte par deux chemins, et exclusion de la cible elle-même (que l'appelant supprime). Écarté : une
+  **garde de profondeur** chiffrée, comme le suggérait §6.5 — elle aurait fixé une limite arbitraire, et
+  se serait tue en tronquant le plan au lieu de le clore. Ici la borne est structurelle : chaque entité est
+  traitée au plus une fois, donc le parcours est borné par la taille du document.
+- **Un détachement visant une entité que le plan SUPPRIME est ÉCARTÉ.** Inutile en mode fichier ; **fatal**
+  en mode API : `Repository.transact` applique les *deletes* PUIS les *updates*, donc un update sur une
+  ligne supprimée la RESSUSCITE par upsert — comportement déjà verrouillé par un test, et déjà gardé par
+  `ApiRules.residualCascade` pour le lot `/transact`. Le cas ne pouvait PAS se produire avant la récursion ;
+  il le peut maintenant (supprimer un équipement supprime ses agrégats, dont la règle détache des ports que
+  le même plan supprime). Écarté : laisser passer et compter sur les exécuteurs — le `Store` s'en sortait
+  par accident (il relit l'enregistrement après suppression et le filtre), `Api.remove` non. La garantie
+  appartient au plan, pas à celui qui l'applique.
+- **Les détachements sont RÉDUITS à un par (collection, id, clé), la DERNIÈRE valeur gagnant.** C'est
+  exactement ce que produisent les deux exécuteurs, qui les appliquent en séquence : la réduction ne change
+  aucun résultat, elle empêche seulement le plan d'enfler d'un facteur égal au nombre de chemins.
+- **Un détachement qui RETIRE un élément d'une LISTE doit se composer sur la valeur DÉJÀ PLANIFIÉE
+  (`pendingValue`), pas sur l'enregistrement d'origine.** C'est le piège central du lot, et il n'a rien
+  d'académique : supprimer une baie supprime ses N brosses, donc rejoue N fois la règle `waypoints` sur les
+  MÊMES routes. Chaque valeur étant ABSOLUE et le dernier écrit gagnant, calculer chaque retrait sur la route
+  ORIGINALE n'en aurait retiré qu'UNE SEULE — les autres brosses seraient restées dans les `waypoint_ids`,
+  pointant des waypoints supprimés. La cascade récursive aurait donc **créé** l'orphelin qu'elle prétend
+  supprimer. Écarté : conserver le nettoyage EN LOT du hook `racks` (il masquait le problème sans le
+  résoudre — il serait resté faux pour toute autre règle supprimant plusieurs waypoints), et écarté aussi
+  un post-traitement par INTERSECTION des valeurs proposées (correct pour un retrait, faux pour tout autre
+  détachement, et magique). Vérifié par sonde : sans la composition, une route de trois brosses n'en perd
+  qu'une.
+- **Deux hooks deviennent des règles `delete` DÉCLARATIVES** (lanes de breakout, brosses d'une baie) plutôt
+  que d'être réécrits en `custom` allégés. Ce sont des FK simples ; l'en-tête du fichier pose depuis toujours
+  la règle « une entrée déclarative, un `custom` seulement pour ce qui n'est pas une FK simple ». La
+  récursion est ce qui les rend enfin exprimables ainsi. Écarté : garder les `custom` amputés — même
+  ensemble d'entités, mais deux règles qui se lisent comme des exceptions.
+- **La spec de cascade n'est PAS redessinée.** Aucune relation n'est ajoutée ni retirée : les deux entrées
+  `delete` nouvelles sont les MÊMES `find(...)` que les `custom` qu'elles remplacent, et le rayon d'action
+  mesuré sur données réelles le confirme (Δ = 0). Écarté : profiter du lot pour convertir `rackItems` en
+  `detach` avec `set` (c'est possible), ou pour combler des cascades manquantes — un lot qui touche la
+  SUPPRESSION DE DONNÉES ne mélange pas deux sources de changement.
+- **Aucune adaptation des deux exécuteurs.** `Store.remove` (mode fichier) applique les détachements PUIS
+  les suppressions, en un seul lot où l'ordre des suppressions est indifférent ; `Api.remove` (mode API)
+  fusionne les détachements par enregistrement puis délègue à une transaction SQLite unique. Un plan plus
+  PROFOND n'est pour eux qu'un plan plus LONG. Les deux reçoivent un commentaire expliquant *pourquoi* ils
+  n'ont rien à faire — la propriété qui les sauve (aucun détachement sur une entité supprimée) est
+  désormais garantie en amont, et il faut que ça se lise à l'endroit qui en dépend.
+- **Attentes EXPLICITES, jamais de parité** (§4.1). L'ancien moteur a servi à MESURER le rayon d'action
+  (relu depuis git, jamais retranscrit), puis a été jeté : les tests livrés figent des ensembles d'ids et des
+  comptes EN DUR. Comparer le plan récursif au plan récursif n'aurait rien prouvé.
+- **Sondes de mutation** : récursion neutralisée (la file n'est plus alimentée) → **31 FAIL**, dont **5
+  tests PRÉEXISTANTS** — c'est ce qui prouve que la récursion porte bien le comportement des hooks retirés ;
+  garde anti-cycle neutralisé → **12 FAIL** (dont des plans de 2 000 entités sur un cycle, plafonnés par la
+  sonde) ; filtre « détachement sur entité supprimée » neutralisé → **2 FAIL** ; composition des retraits de
+  liste neutralisée → **3 FAIL**, dont **1 test PRÉEXISTANT** (« les 2 brosses retirées de la route en une
+  passe »).
+
+**Coût mesuré, assumé** : la récursion appelle `find` un peu plus souvent (une passe supplémentaire par
+entité supprimée). En mode API, chaque `find` est un balayage complet de table (cf. `persistance.md`) —
+supprimer un équipement de 88 ports passe d'environ 180 à 270 requêtes. C'est le prix de la fermeture, et il
+disparaîtra avec la migration relationnelle (§5), où ces `find` deviendront des index.
+
+**Non fait, volontairement** : `ApiRules.residualCascade` appelle `Cascade.plan` UNE FOIS PAR suppression du
+lot et fusionne les détachements entre appels — la composition des retraits de liste ne joue donc qu'À
+L'INTÉRIEUR d'un appel. Un lot `/transact` qui supprimerait explicitement DEUX waypoints d'une même route
+ne lui en retirerait qu'un. Le défaut est **PRÉEXISTANT** (l'ancien plan produisait déjà un détachement par
+waypoint) et **inchangé** par ce lot ; le corriger demande de faire circuler l'état planifié entre les
+appels, ce qui relève du chemin `/transact`, pas de la cascade. Signalé, non traité.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -910,11 +1042,17 @@ donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
 
 ✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur**, et la
 règle de repli d'une position absente n'est plus écrite qu'une fois (§6.13). Ce qui reste ouvert est listé
-en fin de §6.10 (étagère-conteneur, constantes générales de baie, cascade récursive) — dettes annexes, plus
-étapes de migration.
+en fin de §6.10 (étagère-conteneur, constantes générales de baie) — dettes annexes, plus étapes de
+migration. Les deux **prérequis** de §6.5 qui restaient dus sont tenus : la cascade est RÉCURSIVE et le
+chaînage porte un garde anti-cycle (§6.16).
 
 ## 8. Références
 
+- `src-shared/Cascade.ts` — **CASCADE DE SUPPRESSION** partagée front ⇄ back (§6.16). `plan()` est RÉCURSIF
+  jusqu'au point fixe, avec garde anti-cycle + déduplication (ensemble des couples (collection, id) traités,
+  cible incluse), écart des détachements visant une entité SUPPRIMÉE, et réduction à un détachement par
+  (collection, id, clé). ⚠ Un détachement qui retire un élément d'une LISTE doit se composer sur la valeur
+  déjà planifiée (`pendingValue`), sinon la récursion n'en retire qu'un seul.
 - `src-shared/TrayGeometry.ts` — géométrie de l'ÉTAGÈRE, SOURCE UNIQUE (plateau utile, empreinte, position,
   chevauchement, verdict de tenue) : consommée par le RENDU (`RackGeometry.tray*` délègue) et par la
   VALIDATION (T2d/V6e), qui la reçoit en collaborateur INJECTÉ (`ValidationCollaborators`) — par choix de

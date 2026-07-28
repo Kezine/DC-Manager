@@ -511,7 +511,11 @@ export class Store {
 
   /* Plan de cascade (intégrité référentielle) : entités à SUPPRIMER + à DÉTACHER. Délègue au calcul
      PARTAGÉ `Cascade.plan` (même logique côté serveur sur `DELETE`), alimenté par nos capacités
-     injectées : résolutions inverses via les index secondaires (`recordFinder`), lecture via `entityFetcher`. */
+     injectées : résolutions inverses via les index secondaires (`recordFinder`), lecture via `entityFetcher`.
+     Le plan est RÉCURSIF (chaîne complète, jusqu'au point fixe — cf. docs/placement.md §6.16) : il peut donc
+     être bien plus profond qu'une liste d'enfants directs. `remove` n'a rien à y adapter — les suppressions
+     forment un ENSEMBLE (aucun ordre à respecter) et le plan garantit qu'aucun détachement ne vise une entité
+     qu'il supprime, donc l'étape 2 ne peut plus « nettoyer » une FK sur un enregistrement qui part juste après. */
   private _cascadePlan(collection: string, id: string): { deletes: CascadeDelete[]; detaches: CascadeDetach[] } {
     return Cascade.plan(collection, id, this.recordFinder, this.entityFetcher);
   }
