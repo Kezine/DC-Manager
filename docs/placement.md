@@ -1617,11 +1617,35 @@ son étagère, et `PlacementFrame` fait le reste. Le résolveur ne calcule plus 
   le comportement des étagères ARRIÈRE n'était couvert par **aucun** test — ce que le lot précédent
   n'avait pas dit, et qu'il aurait dû.
 
-**Reste ouvert, et cette fois c'est du DESSIN** : `DcThreeScene` dessine un posé comme une boîte alignée
-sur les axes et plaque son image de façade sur les faces ±Y, sans consulter `dc_orientation`. Un posé
-tourné aura donc désormais ses PORTS au bon endroit et son IMAGE au mauvais — incohérence introduite
-ici, assumée, et sans effet sur les données actuelles (aucun posé). La corriger demande de dessiner une
-boîte TOURNÉE (et non son enveloppe), ce qui relève du rendu et **doit être validé à l'œil**.
+**Le DESSIN suit, et par RÉUTILISATION plutôt que par correction.** L'ancien rendu des posés dessinait
+l'ENVELOPPE alignée sur les axes et plaquait l'image de façade sur ses seules faces ±Y, sans consulter
+`dc_orientation` — la boîte et les connecteurs auraient donc divergé dès que la résolution s'est mise à
+suivre le lacet. Plutôt que de rattraper ce rendu parallèle, il est SUPPRIMÉ : un posé passe désormais
+par le MÊME `buildEquipBox` que les équipements libres d'une salle et que ceux d'un étage — un posé
+n'est rien d'autre qu'un boîtier libre juché sur un plateau, ce que la résolution affirmait déjà en
+réutilisant `FreeEquipGeometry`. C'est le troisième conteneur servi par ce rendu, et le principe n°3
+appliqué au bout : le lot ne corrige pas deux chemins, il en retire un.
+
+- La boîte est TOURNÉE du lacet EFFECTIF (`trayContentPlacement`), le même que celui de la résolution.
+- Ses UV de face dérivent de `FreeEquipGeometry.faceFraction`, la source de vérité qui place aussi les
+  ports : image et connecteurs coïncident **par construction**, sur les SIX faces et non plus deux.
+- `buildEquipBox` gagne trois options — `yawDeg` (lacet effectif), `elevation` (un posé REPOSE sur son
+  plateau, `dc_z` ne s'y applique pas) et `extra` (le `eqSide` de masquage). Le côté de masquage reste
+  celui de l'ÉTAGÈRE : « masquer l'avant » parle de la face de baie qu'on regarde, pas de l'orientation
+  d'un boîtier.
+
+⚠ **Deux comportements VISIBLES changent** — conséquence de l'alignement sur le rendu des équipements
+libres, pas d'un choix propre à l'étagère : le nom d'un posé n'est plus écrit sur les DEUX faces ±Y mais
+sur sa PROPRE façade ; et son image de façade n'obéit plus à la bascule « images de façade », qui n'a
+jamais agi sur les équipements libres (l'image y est un MATÉRIAU de la boîte, pas un plan taggé). À
+juger à l'œil.
+
+**Ce que le verrou de cohérence couvre, exactement** : un test compare la boîte que le rendu DESSINE
+(cotes propres + lacet effectif) à celle que `trayEquipBoxLocal` RAPPORTE, sur les 8 combinaisons. Sondé,
+il MORD sur 4 cas si le lacet est ignoré (les 90°/270°) — mais il est **AVEUGLE au demi-tour**, une
+rotation de 180° laissant une enveloppe alignée inchangée. Le demi-tour est couvert par les NORMALES de
+la section de résolution (avant et arrière exactement opposées). Les deux ensemble couvrent les quatre
+orientations ; croire que l'un suffit serait la fausse sécurité que §6.19 nomme.
 
 ## 7. État de la convergence
 

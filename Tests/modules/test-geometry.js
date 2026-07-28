@@ -1946,6 +1946,36 @@ module.exports = async () => {
     ck(Math.abs(posAv.x0 - (bAv.x0 + bAv.xInset)) < 1e-9, "posé AVANT, tray_x = 0 → collé au bord GAUCHE de la baie");
     ck(Math.abs(posAr.x1 - (bAr.x0 + bAr.xInset + largeurUtile)) < 1e-9, "posé ARRIÈRE, tray_x = 0 → collé au bord DROIT de la baie (= sa gauche, vue de derrière)");
     ck(Math.abs((posAv.x1 - posAv.x0) - (posAr.x1 - posAr.x0)) < 1e-12, "posé : mêmes cotes des deux côtés");
+
+    /* ---- La boîte DESSINÉE et la boîte RAPPORTÉE décrivent le MÊME solide ----
+       `DcThreeScene` ne dessine plus l'enveloppe rendue par `trayEquipBoxLocal` : il pose un boîtier
+       de cotes PROPRES (w × d) au centre déclaré par `trayContentPlacement`, TOURNÉ de son lacet
+       effectif. Les deux descriptions doivent coïncider, sinon la coque et les connecteurs divergent —
+       exactement la divergence que §6.24 a corrigée. Ce verrou l'empêche de revenir, et il est le seul
+       moyen de tester du RENDU sans moteur 3D : on compare ses ENTRÉES à la géométrie de référence.
+       ⚠ PORTÉE EXACTE DE CE VERROU, mesurée par sonde et non supposée : il MORD sur 4 des 8 cas si le
+       rendu ignore le lacet (les 90°/270°, qui permutent l'enveloppe), mais il est AVEUGLE à une erreur
+       de DEMI-TOUR — une rotation de 180° laisse une enveloppe alignée sur les axes inchangée. Le
+       demi-tour est couvert ailleurs, par les NORMALES de la section « le lacet propre d'un posé
+       atteint ses ports » (avant et arrière y sont exactement opposées). Les deux ensemble couvrent les
+       quatre orientations ; ni l'un ni l'autre ne suffirait, et le croire serait la fausse sécurité que
+       §6.19 nomme. */
+    for (const t of [tAv, tAr]) {
+      for (const ori of [0, 90, 180, 270]) {
+        const e = { free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, dc_orientation: ori, tray_x: 20, tray_y: 30 };
+        const rapportee = RackGeometry.trayEquipBoxLocal(rk, t, e);
+        const dessinee = RackGeometry.trayContentPlacement(rk, t, e);
+        // enveloppe de la boîte DESSINÉE : cotes propres, permutées par le lacet EFFECTIF (0/180 → non).
+        const yaw = ((dessinee.yawDeg % 360) + 360) % 360;
+        const tourne = (yaw === 90 || yaw === 270);
+        const demiX = (tourne ? 300 : 200) / 2, demiY = (tourne ? 200 : 300) / 2;
+        const quoi = " [étagère " + t.side + ", " + ori + "°]";
+        ck(Math.abs((dessinee.x - demiX) - rapportee.x0) < 1e-9 && Math.abs((dessinee.x + demiX) - rapportee.x1) < 1e-9,
+          "boîte dessinée ≡ boîte rapportée en X" + quoi);
+        ck(Math.abs((dessinee.y - demiY) - rapportee.y0) < 1e-9 && Math.abs((dessinee.y + demiY) - rapportee.y1) < 1e-9,
+          "boîte dessinée ≡ boîte rapportée en Y" + quoi);
+      }
+    }
   }
   });
 

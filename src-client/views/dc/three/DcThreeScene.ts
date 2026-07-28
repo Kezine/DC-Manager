@@ -614,34 +614,32 @@ export class DcThreeScene extends DcThreeCamera {
       const b = RackGeometry.wallEquipBoxLocal(r, e);
       this.localBox(group, b.x0, b.x1, b.y0, b.y1, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
     });
-    // équipements POSÉS sur les étagères (tray) de la baie : boîtes pleines sur le plateau, cliquables — avec, comme
-    // les occupants U, le NOM sur les deux faces ±Y et l'IMAGE de façade front/rear. Même montage d'offsets que les
-    // occupants U (l.504-505 / 535-536) : label ET image reçoivent la coordonnée de face décalée de 0,5 mm
-    // (yLo − 0,5 / yHi + 0,5), et faceLabel ajoute EN PLUS sa propre saillie FACE_LABEL_STANDOFF_MM (0,5 mm) → le
-    // label finit à 1 mm, l'image à 0,5 mm : aucun z-fighting entre les deux.
+    /* équipements POSÉS sur les étagères (tray) de la baie.
+       Un posé n'est rien d'autre qu'un BOÎTIER LIBRE juché sur un plateau : il passe donc par le MÊME
+       `buildEquipBox` que les équipements libres d'une salle et que ceux d'un étage (principe n°3), au
+       lieu du rendu parallèle qui vivait ici.
+       ⚠ CE QUE ÇA CORRIGE (§6.24) : l'ancien rendu dessinait l'ENVELOPPE alignée sur les axes et plaquait
+       l'image de façade sur ses faces ±Y, sans jamais consulter `dc_orientation`. Un posé tourné était donc
+       dessiné droit alors que ses ports, eux, suivent désormais son lacet — la boîte et les connecteurs
+       auraient divergé. Ici la boîte est TOURNÉE du même lacet effectif que la résolution
+       (`trayContentPlacement`), et ses UV de face dérivent de `FreeEquipGeometry.faceFraction`, la source
+       de vérité qui place aussi les ports : image et connecteurs coïncident par CONSTRUCTION, sur les
+       six faces et plus seulement sur deux. */
     this.store.rackItemsOf(r.id).forEach((it: any) => {
       if (it.kind !== "tray" || it.u == null) return;
       // C'est l'ÉTAGÈRE qui sait vers où regardent ses contenus (`TrayFrame`) : cette vue relisait
       // `it.side` pour le re-déduire, comme le résolveur de ports et la géométrie de baie le faisaient
       // chacun de son côté. Calculé UNE fois par étagère, pas par équipement posé.
       const trayPlacement = RackGeometry.trayPlacement(r, it);
-      const front = TrayFrame.facesFront(trayPlacement);   // étagère avant → la FACE AVANT du posé regarde −Y
-      const eqSide = front ? "front" : "rear";
+      // le côté de MASQUAGE reste celui de l'ÉTAGÈRE, jamais le lacet du posé : « masquer l'avant »
+      // parle de la face de baie qu'on regarde, pas de l'orientation d'un boîtier.
+      const eqSide = TrayFrame.facesFront(trayPlacement) ? "front" : "rear";
       this.store.equipmentsOnTray(it.id).forEach((e: any) => {
-        const b = RackGeometry.trayEquipBoxLocal(r, it, e);
-        const yLo = Math.min(b.y0, b.y1), yHi = Math.max(b.y0, b.y1);
-        this.localBox(group, b.x0, b.x1, yLo, yHi, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
-        const bw = b.x1 - b.x0, bh = b.z1 - b.z0;
-        const xc = (b.x0 + b.x1) / 2, zc = (b.z0 + b.z1) / 2;
-        if (e.name) {
-          this.faceLabel(group, e.name, xc, yLo - 0.5, zc, bw * 0.94, bh * 0.9, true, { eqSide });    // face −Y (avant)
-          this.faceLabel(group, e.name, xc, yHi + 0.5, zc, bw * 0.94, bh * 0.9, false, { eqSide });   // face +Y (arrière)
-        }
-        // Équipement LIBRE sur étagère : pas d'oreilles 19″ → largeur = corps, aucun trim.
-        const imgLo = this.host.faceImageUrl?.(e.id, front ? "front" : "rear");
-        const imgHi = this.host.faceImageUrl?.(e.id, front ? "rear" : "front");
-        if (imgLo) this.faceImagePlane(group, imgLo.url, xc, yLo - 0.5, zc, bw, bh, true, { layer: "faceImage", eqSide, eqId: e.id });
-        if (imgHi) this.faceImagePlane(group, imgHi.url, xc, yHi + 0.5, zc, bw, bh, false, { layer: "faceImage", eqSide, eqId: e.id });
+        const posed = RackGeometry.trayContentPlacement(r, it, e);
+        // socle = le DESSUS DU PLATEAU (et non `dc_z` : un posé repose sur son étagère) — même base Z
+        // que celle donnée à `faceLocal` par le résolveur de ports.
+        this.buildEquipBox(group, e, posed.x as number, posed.y as number, trayPlacement.plankZ,
+          { yawDeg: posed.yawDeg, elevation: 0, extra: { eqSide } });
       });
     });
 
@@ -1175,10 +1173,24 @@ export class DcThreeScene extends DcThreeCamera {
       Les PORTS restent à la charge de l'appelant, parce que leur RÉSOLUTION dépend du conteneur alors que
       cette boîte n'en dépend pas : en salle `resolvePort3D` (scopé par `dcId`), sur un étage
       `resolvePortWorld3D` (composé depuis l'origine monde du conteneur). Les deux appellent ensuite le
-      MÊME `addPortAt`. */
-  protected buildEquipBox(root: THREE.Group, e: any, cx: number, cy: number, originZ: number): void {
+      MÊME `addPortAt`.
+
+      `opts` ouvre ce rendu à un TROISIÈME conteneur, l'ÉTAGÈRE (§6.24), sans le dupliquer :
+      • `yawDeg` — lacet EFFECTIF dans le repère du parent, quand il ne se lit pas sur l'équipement seul.
+        Sur une étagère il vaut `dc_orientation` PLUS le demi-tour éventuel de l'étagère
+        (`TrayFrame.contentYawDeg`) : c'est ce qui fait coïncider la boîte DESSINÉE avec les ports RÉSOLUS,
+        les deux composant désormais le même lacet.
+      • `elevation` — hauteur propre au-dessus de `originZ`, quand `dc_z` ne s'applique pas. Un posé
+        REPOSE sur son plateau : son élévation est nulle, son socle est le plateau.
+      • `extra` — userData de couche/côté (`eqSide`) à tamponner sur tous les meshes produits, pour que
+        le posé se masque avec la face de baie qui le porte (`hideAv`/`hideAr`). */
+  protected buildEquipBox(root: THREE.Group, e: any, cx: number, cy: number, originZ: number,
+                          opts?: { yawDeg?: number; elevation?: number; extra?: any }): void {
     const b = FreeEquipGeometry.box(e);
-    const o = Normalize.rackOrientation(e.dc_orientation) * Math.PI / 180;
+    const yawDeg = (opts && opts.yawDeg != null) ? opts.yawDeg : e.dc_orientation;
+    const elevation = (opts && opts.elevation != null) ? opts.elevation : b.z;
+    const extra = opts && opts.extra;
+    const o = Normalize.rackOrientation(yawDeg) * Math.PI / 180;
     const color = this.occColor({ kind: "eq", id: e.id });
     const grp = new THREE.Group(); grp.position.set(cx, cy, originZ); grp.rotation.z = o; root.add(grp);
     const geo = new THREE.BoxGeometry(b.w, b.d, b.h);
@@ -1208,15 +1220,15 @@ export class DcThreeScene extends DcThreeCamera {
       return new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 });
     });
     const mesh = new THREE.Mesh(geo, mats);
-    mesh.position.set(0, 0, b.z + b.h / 2);
-    mesh.userData = { pick: { type: "occ", kind: "eq", id: e.id } };   // même traitement que les occupants (détail + survol)
+    mesh.position.set(0, 0, elevation + b.h / 2);
+    mesh.userData = Object.assign({ pick: { type: "occ", kind: "eq", id: e.id } }, extra);   // même traitement que les occupants (détail + survol)
     grp.add(mesh);
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
-    edges.position.copy(mesh.position); grp.add(edges);
+    edges.position.copy(mesh.position); if (extra) edges.userData = Object.assign({}, extra); grp.add(edges);
     // Mise en évidence de la FACE AVANT (−Y local) : ses 4 ARÊTES à l'accent → repère d'orientation. INUTILE quand une
     // image de face avant est posée (elle indique déjà l'avant). Couche "orient" (basculable via showOrientMarks).
     if (!hasFrontImg) {
-      const hw = b.w / 2, yF = -b.d / 2 - 1, z0 = b.z, z1 = b.z + b.h;   // yF : 1 mm en saillie → pas de z-fighting avec les arêtes noires
+      const hw = b.w / 2, yF = -b.d / 2 - 1, z0 = elevation, z1 = elevation + b.h;   // yF : 1 mm en saillie → pas de z-fighting avec les arêtes noires
       const fg = new THREE.BufferGeometry();
       fg.setAttribute("position", new THREE.Float32BufferAttribute([
         -hw, yF, z0, hw, yF, z0,   // arête basse
@@ -1225,13 +1237,13 @@ export class DcThreeScene extends DcThreeCamera {
         hw, yF, z0, hw, yF, z1,    // arête droite
       ], 3));
       const frontEdges = new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: this.theme.front }));
-      frontEdges.userData = { layer: "orient" };
+      frontEdges.userData = Object.assign({ layer: "orient" }, extra);
       grp.add(frontEdges);
     }
     // nom posé à plat SUR la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild. On passe
     // la face elle-même (−b.d/2) : la saillie anti z-fighting (1 mm EN SAILLIE devant la face) est désormais bakée
     // par faceLabel le long de la normale. (Auparavant −b.d/2 + 1 posait le label 1 mm À L'INTÉRIEUR — mauvais sens.)
-    if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2, b.z + b.h / 2, b.w * 0.9, b.h * 0.9, true);
+    if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2, elevation + b.h / 2, b.w * 0.9, b.h * 0.9, true, extra);
   }
 
   /** Humanoïde procédural (~1,75 m) = repère d'échelle. Primitives Three.js (autonome, hors-ligne) ; posé debout
