@@ -488,6 +488,30 @@ module.exports = async () => {
     const fr = r3.resolvePort3D(fp.id, dc.id);
     ck(fr && isFinite(fr.x) && isFinite(fr.z), "resolvePort3D(libre) → point fini");
     ck(fr && fr.n && (Math.abs(fr.n.x) + Math.abs(fr.n.y) + Math.abs(fr.n.z)) > 0, "resolvePort3D(libre) → normale non nulle");
+    // CONTENEUR SANS SALLE (équipement posé sur un ÉTAGE — cf. docs/placement.md §1 symptôme 3). `resolvePort3D`
+    // ne sait pas le résoudre : `resolvePortWorld3D` compose depuis l'ORIGINE MONDE du conteneur. ÉQUIVALENCE —
+    // le même équipement doit retomber au MÊME point que posé en salle, simplement DÉCALÉ de cette origine.
+    // C'est la meilleure preuve que la chaîne est correcte : les deux chemins partagent le point LOCAL et la
+    // normale, seule la provenance de l'origine change.
+    const atO = r3.resolvePortWorld3D(fp.id, 800, 800, 0);
+    ck(atO && Math.abs(atO.x - fr.x) < 1e-6 && Math.abs(atO.y - fr.y) < 1e-6 && Math.abs(atO.z - fr.z) < 1e-6,
+      "resolvePortWorld3D : origine (800,800,0) ≡ même équipement posé en salle en (800,800)");
+    ck(atO && Math.abs(atO.n.x - fr.n.x) < 1e-12 && Math.abs(atO.n.y - fr.n.y) < 1e-12 && Math.abs(atO.n.z - fr.n.z) < 1e-12,
+      "resolvePortWorld3D : la NORMALE est la même qu'en salle (le conteneur ne tourne pas)");
+    ck.eq(atO ? atO.rackId : "absent", null, "resolvePortWorld3D : aucune baie hôte (le conteneur est l'étage)");
+    const atLvl = r3.resolvePortWorld3D(fp.id, 800, 800, 4000);
+    ck(atLvl && Math.abs(atLvl.z - (fr.z + 4000)) < 1e-6, "socle de niveau 4000 mm → port monté d'exactement 4000 mm");
+    ck(atLvl && Math.abs(atLvl.x - fr.x) < 1e-9 && Math.abs(atLvl.y - fr.y) < 1e-9, "socle de niveau : X et Y INCHANGÉS (translation verticale pure)");
+    // PIÈGE VERROUILLÉ : `worldOriginZ` ne porte QUE le socle du conteneur ; la hauteur propre `dc_z` est
+    // ajoutée par le résolveur (elle est déjà dans le point LOCAL). Elle ne doit donc jamais être comptée
+    // deux fois quand socle ET hauteur propre sont tous deux non nuls.
+    await s.update("equipments", fe.id, { dc_z: 250 });
+    const frZ = r3.resolvePort3D(fp.id, dc.id), atZ = r3.resolvePortWorld3D(fp.id, 800, 800, 4000);
+    ck(frZ && atZ && Math.abs(atZ.z - (frZ.z + 4000)) < 1e-6, "dc_z (250) comptée UNE seule fois en plus du socle");
+    ck(atZ && Math.abs(atZ.z - (4000 + 250 + 50)) < 1e-6, "dc_z comptée une fois : z = socle 4000 + dc_z 250 + demi-hauteur 50");
+    await s.update("equipments", fe.id, { dc_z: 0 });
+    ck.eq(r3.resolvePortWorld3D(p.id, 0, 0, 0), null, "resolvePortWorld3D : équipement RACKÉ (dim_mode « u ») → null");
+    ck.eq(r3.resolvePortWorld3D("port-inexistant", 0, 0, 0), null, "resolvePortWorld3D : port inconnu → null");
     // side
     const rk2 = await s.create("racks", { name: "R2", width_mm: 800, depth: 1000, u_count: 42, allow_side_front: true, datacenter_id: dc.id, dc_x: 2000, dc_y: 2000 });
     const se = await s.create("equipments", { name: "PDU", placement_mode: "side", dim_mode: "free", rack_id: rk2.id, side_face: "front", side_lr: "left", side_u: 5, free_w_mm: 60, free_h_mm: 150, free_l_mm: 300 });
@@ -825,6 +849,211 @@ module.exports = async () => {
     const aApres = anchor(eqR, { face_x: 0.25, face_y: 0.75, face_side: "front" });
     near(aApres.x, 4886.85, "changer d'étage/bâtiment ne déplace PAS le point (repère LOCAL SALLE)");
     near(aApres.y, 2497, "… [y]");
+  }
+  });
+
+  /* ============================================================================================
+     CONTENEUR SANS SALLE — les PORTS d'un équipement posé sur un ÉTAGE
+     (`docs/placement.md` §1 symptôme 3, §6.6, §6.20).
+
+     C'est le cas que la doctrine désigne comme IMPOSSIBLE à écrire dans le moule des cinq
+     branches de `resolveFaceAnchor3D` : elles exigent toutes un `dcId`, et un équipement d'étage
+     n'a pas de salle. `resolvePortWorld3D` en est le pendant SANS SALLE ; il rend du MONDE parce
+     que son conteneur n'a pas de transformée intrinsèque à composer (§6.6) — il la REÇOIT.
+
+     ⚠ Attentes EXPLICITES (valeurs EN DUR) dérivées À LA MAIN du modèle, jamais de la sortie d'une
+     implémentation : l'équivalence avec le chemin de salle est vérifiée EN PLUS, jamais À LA PLACE.
+     Un test purement relatif resterait vert si les DEUX chemins dérivaient ensemble (piège du lot 2,
+     cf. §4.1) ; c'est la valeur absolue qui attrape ça, et la relative qui dit l'intention.
+
+     Boîte de référence : 200 (largeur) × 400 (profondeur) × 300 (hauteur), posée à `dc_z` = 250 mm
+     au-dessus du sol de son étage. Port AVANT à (face_x 0,25 ; face_y 0,5), donc en local
+     (−50 ; −200 ; 250 + 150 = 400) — origine au centre de l'empreinte, façade en −Y.
+     ============================================================================================ */
+  await section("Resolver3D.resolvePortWorld3D : ports d'un équipement d'ÉTAGE (valeurs en dur)", async () => {
+  {
+    const s = await makeStore();
+    const r3 = new Resolver3D(s);
+    const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
+    const OX = 1500, OY = -700, OZ = 3200;   // origine MONDE du conteneur (bande de bâtiment + ancrage du plan ; Z du niveau)
+
+    const eqF = await s.create("equipments", {
+      name: "ONDULEUR", placement_mode: "floor", dim_mode: "free",
+      location: "site-a", floor: "1", floor_x: 5000, floor_y: 3000,
+      dc_z: 250, dc_orientation: 0, free_w_mm: 200, free_l_mm: 400, free_h_mm: 300,
+    });
+    const pF = await s.create("ports", { equipment_id: eqF.id, name: "in", face_x: 0.25, face_y: 0.5, face_side: "front" });
+    const at = (ox, oy, oz) => r3.resolvePortWorld3D(pF.id, ox, oy, oz) || { x: null, y: null, z: null, n: { x: null, y: null, z: null }, rackId: "absent" };
+
+    // ---- POINT + NORMALE aux QUATRE lacets cardinaux, valeurs en dur ----
+    // Le lacet tourne le point local AUTOUR du centre de l'empreinte, puis on translate à l'origine du
+    // conteneur. À 90°, le local (−50 ; −200) devient (+200 ; −50) : la façade regarde l'EST.
+    const ATTENDU = {
+      0:   { x: 1450, y: -900, n: [0, -1] },
+      90:  { x: 1700, y: -750, n: [1, 0] },
+      180: { x: 1550, y: -500, n: [0, 1] },
+      270: { x: 1300, y: -650, n: [-1, 0] },
+    };
+    for (const deg of [0, 90, 180, 270]) {
+      await s.update("equipments", eqF.id, { dc_orientation: deg });
+      const w = at(OX, OY, OZ), exp = ATTENDU[deg];
+      ck(w.x != null, "lacet " + deg + "° : port RÉSOLU (non null)");
+      near(w.x, exp.x, "lacet " + deg + "° : x monde");
+      near(w.y, exp.y, "lacet " + deg + "° : y monde");
+      near(w.z, 3600, "lacet " + deg + "° : z monde = socle 3200 + dc_z 250 + demi-hauteur 150");
+      near(w.n.x, exp.n[0], "lacet " + deg + "° : normale x (lacet PROPRE seul — le conteneur ne tourne pas)");
+      near(w.n.y, exp.n[1], "lacet " + deg + "° : normale y");
+      near(w.n.z, 0, "lacet " + deg + "° : normale z nulle (face VERTICALE)");
+      // ---- CONTENEUR = pure TRANSLATION : poser le même équipement à une autre origine décale ses ports
+      // d'EXACTEMENT ce vecteur, quel que soit le lacet. C'est l'invariant dont dépend tout le placement
+      // d'étage (bande de bâtiment en X/Y, niveau en Z — aucune rotation de conteneur nulle part).
+      const w0 = at(0, 0, 0);
+      near(w.x - w0.x, OX, "lacet " + deg + "° : translation pure — dx");
+      near(w.y - w0.y, OY, "lacet " + deg + "° : translation pure — dy");
+      near(w.z - w0.z, OZ, "lacet " + deg + "° : translation pure — dz");
+      near(w.n.x - w0.n.x, 0, "lacet " + deg + "° : l'origine du conteneur ne touche PAS la normale [x]");
+      near(w.n.y - w0.n.y, 0, "lacet " + deg + "° : … [y]");
+    }
+
+    // ---- PIÈGE DU `dc_z` COMPTÉ DEUX FOIS : `worldOriginZ` ne porte QUE le socle du conteneur ----
+    // La hauteur propre est DÉJÀ dans le point local (portLocal part de `dc_z`) : la compter aussi dans
+    // l'origine ferait monter le port de 250 mm de trop, exactement au-dessus de la boîte dessinée.
+    await s.update("equipments", eqF.id, { dc_orientation: 0 });
+    near(at(OX, OY, OZ).z, OZ + 250 + 150, "dc_z comptée UNE fois : z = socle + dc_z + demi-hauteur");
+    ck(Math.abs(at(OX, OY, OZ).z - (OZ + 2 * 250 + 150)) > 1, "dc_z n'est PAS comptée deux fois (le z double serait 3850)");
+    await s.update("equipments", eqF.id, { dc_z: 0 });
+    near(at(OX, OY, OZ).z, OZ + 150, "dc_z = 0 : z = socle + demi-hauteur");
+    await s.update("equipments", eqF.id, { dc_z: 1000 });
+    near(at(OX, OY, OZ).z, OZ + 1000 + 150, "dc_z portée à 1000 : z monte d'exactement 750 de plus");
+    await s.update("equipments", eqF.id, { dc_z: 250 });
+    // Le socle, lui, ne touche QUE le z.
+    near(at(OX, OY, OZ + 5000).z - at(OX, OY, OZ).z, 5000, "socle + 5000 → z + 5000, ni plus ni moins");
+    near(at(OX, OY, OZ + 5000).x, at(OX, OY, OZ).x, "socle : x inchangé");
+
+    // ---- FACE HORIZONTALE : la normale VERTICALE traverse le lacet inchangée ----
+    const pTop = await s.create("ports", { equipment_id: eqF.id, name: "top", face_x: 0.25, face_y: 0.5, face_side: "top" });
+    for (const deg of [0, 90, 180, 270]) {
+      await s.update("equipments", eqF.id, { dc_orientation: deg });
+      const t = r3.resolvePortWorld3D(pTop.id, OX, OY, OZ);
+      ck(t && Math.abs(t.n.z - 1) < 1e-12 && Math.abs(t.n.x) < 1e-9 && Math.abs(t.n.y) < 1e-9,
+        "face DESSUS au lacet " + deg + "° : normale strictement verticale (+Z)");
+      ck(t && Math.abs(t.z - (OZ + 250 + 300)) < 1e-9, "face DESSUS au lacet " + deg + "° : z = socle + dc_z + hauteur (sommet)");
+    }
+    await s.update("equipments", eqF.id, { dc_orientation: 90 });
+    const tW = r3.resolvePortWorld3D(pTop.id, OX, OY, OZ);
+    near(tW.x, 1500, "dessus/90° : x monde (le local (−50 ; 0) tourné donne (0 ; −50))");
+    near(tW.y, -750, "dessus/90° : y monde");
+    await s.update("equipments", eqF.id, { dc_orientation: 0 });
+
+    // ---- BREAKOUT : une lane émerge du connecteur du TRUNK (règle de `resolvePort3D`, reprise ici) ----
+    // C'est la correction que la version INLINÉE dans la vue n'avait pas : elle résolvait la lane sur SES
+    // propres fractions de face, donc à un endroit où aucun connecteur n'est dessiné.
+    const pTrunk = await s.create("ports", { equipment_id: eqF.id, name: "trunk", face_x: 0.75, face_y: 0.25, face_side: "front" });
+    const pLane = await s.create("ports", { equipment_id: eqF.id, name: "lane-1", parent_port_id: pTrunk.id, face_x: 0.1, face_y: 0.9, face_side: "front" });
+    const wTrunk = r3.resolvePortWorld3D(pTrunk.id, OX, OY, OZ), wLane = r3.resolvePortWorld3D(pLane.id, OX, OY, OZ);
+    near(wTrunk.x, 1550, "trunk (face_x 0,75) : x monde");
+    near(wTrunk.y, -900, "trunk : y monde (façade en −Y, lacet 0°)");
+    near(wTrunk.z, 3675, "trunk (face_y 0,25) : z monde = 3200 + 250 + 0,75 × 300");
+    ck(wLane && Math.abs(wLane.x - wTrunk.x) < 1e-12 && Math.abs(wLane.y - wTrunk.y) < 1e-12 && Math.abs(wLane.z - wTrunk.z) < 1e-12,
+      "BREAKOUT : la lane émerge du connecteur du TRUNK, pas de ses propres fractions de face");
+    // discrimination : ses fractions PROPRES donneraient un autre point — le test ci-dessus n'est pas trivial.
+    const pSolo = await s.create("ports", { equipment_id: eqF.id, name: "solo", face_x: 0.1, face_y: 0.9, face_side: "front" });
+    const wSolo = r3.resolvePortWorld3D(pSolo.id, OX, OY, OZ);
+    ck(Math.abs(wSolo.x - wTrunk.x) > 1 && Math.abs(wSolo.z - wTrunk.z) > 1, "discrimination : un port aux MÊMES fractions mais SANS parent tombe ailleurs");
+
+    // ---- ÉQUIVALENCE salle ⇄ étage : même boîte, même port, origines égales ⇒ MÊME point ----
+    // La preuve que la chaîne est correcte : les deux chemins partagent le point LOCAL et la normale ;
+    // seule la PROVENANCE de l'origine change (déclarée dans l'enregistrement / fournie par le layout).
+    const dcE = await s.create("datacenters", { name: "DC-jumeau", width_mm: 20000, depth_mm: 15000 });
+    const eqR = await s.create("equipments", {
+      name: "ONDULEUR-jumeau", dim_mode: "free", dc_id: dcE.id, dc_x: 5000, dc_y: 3000,
+      dc_z: 250, dc_orientation: 0, free_w_mm: 200, free_l_mm: 400, free_h_mm: 300,
+    });
+    const pR = await s.create("ports", { equipment_id: eqR.id, name: "in", face_x: 0.25, face_y: 0.5, face_side: "front" });
+    for (const deg of [0, 90, 180, 270]) {
+      await s.update("equipments", eqF.id, { dc_orientation: deg });
+      await s.update("equipments", eqR.id, { dc_orientation: deg });
+      const salle = r3.resolvePort3D(pR.id, dcE.id), etage = r3.resolvePortWorld3D(pF.id, 5000, 3000, 0);
+      ck(salle && etage, "équivalence " + deg + "° : les deux chemins résolvent");
+      near(etage.x, salle.x, "équivalence " + deg + "° : x identique à l'équipement posé EN SALLE");
+      near(etage.y, salle.y, "équivalence " + deg + "° : y identique");
+      near(etage.z, salle.z, "équivalence " + deg + "° : z identique (socle nul)");
+      near(etage.n.x, salle.n.x, "équivalence " + deg + "° : normale identique [x]");
+      near(etage.n.y, salle.n.y, "équivalence " + deg + "° : … [y]");
+      // socle non nul : le MÊME point, décalé d'EXACTEMENT le socle, et sur le seul axe Z.
+      const haut = r3.resolvePortWorld3D(pF.id, 5000, 3000, 6000);
+      near(haut.z - salle.z, 6000, "équivalence " + deg + "° : socle 6000 → décalage vertical EXACT");
+      near(haut.x - salle.x, 0, "équivalence " + deg + "° : socle → aucun décalage horizontal [x]");
+      near(haut.y - salle.y, 0, "équivalence " + deg + "° : … [y]");
+    }
+    await s.update("equipments", eqF.id, { dc_orientation: 0 });
+
+    // ---- REFUS : ce résolveur ne connaît que la boîte 6 faces ----
+    const rk = await s.create("racks", { name: "R", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dcE.id, dc_x: 500, dc_y: 500 });
+    const eqU = await s.create("equipments", { name: "SW", placement_mode: "rack", rack_id: rk.id, rack_u: 10 });
+    const pU = await s.create("ports", { equipment_id: eqU.id, name: "p", face_x: 0.3, face_y: 0.4, face_side: "front" });
+    ck.eq(r3.resolvePortWorld3D(pU.id, 0, 0, 0), null, "équipement RACKÉ (dim_mode « u ») → null : pas de boîte 6 faces");
+    const orphelin = await s.create("ports", { name: "sans équipement", face_x: 0.5, face_y: 0.5 });
+    ck.eq(r3.resolvePortWorld3D(orphelin.id, 0, 0, 0), null, "port sans équipement → null");
+    ck.eq(r3.resolvePortWorld3D("inconnu", 0, 0, 0), null, "port inconnu → null");
+  }
+  });
+
+  /* ============================================================================================
+     CHAÎNE COMPLÈTE — ce que la VUE pousse au résolveur. Le rendu 3D n'a aucune couverture
+     automatique, mais `DatacenterView` s'instancie en HEADLESS : `webglCtx().floorDecor` rend un
+     descripteur PUR, donc on peut verrouiller les nombres que `DcThreeScene` passe ensuite à
+     `resolvePortWorld3D`. C'est là que le piège du `dc_z` se joue VRAIMENT : le descripteur ne
+     porte QUE le socle du niveau, la hauteur propre étant ajoutée par la géométrie.
+     ============================================================================================ */
+  await section("Chaîne étage → port : le descripteur pousse le SOCLE, le résolveur ajoute la hauteur propre", async () => {
+  {
+    const s = await makeStore();
+    const r3 = new Resolver3D(s);
+    const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
+    // Site UNIQUE et sans GPS → posé à l'origine du monde (parité stricte avec le rangement historique).
+    // Hauteur d'étage FORCÉE à 4 000 mm pour que les Z de niveaux soient ronds : 4 000 + 2 000 d'écart
+    // inter-niveaux (DC_GAP_DEFAULT) → l'étage 1 a son socle à 6 000 mm.
+    const site = await s.create("sites", { name: "Alpha" });
+    await s.create("floors", { location: site.id, floor: "0", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000 });
+    await s.create("floors", { location: site.id, floor: "1", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000 });
+    const dc = await s.create("datacenters", { name: "Salle 0", location: site.id, floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const eqF = await s.create("equipments", {
+      name: "ONDULEUR", placement_mode: "floor", dim_mode: "free",
+      location: site.id, floor: "1", floor_x: 5000, floor_y: 3000,
+      dc_z: 250, dc_orientation: 90, free_w_mm: 200, free_l_mm: 400, free_h_mm: 300,
+    });
+    const pF = await s.create("ports", { equipment_id: eqF.id, name: "in", face_x: 0.25, face_y: 0.5, face_side: "front" });
+
+    const dv = new DatacenterView(s, {}, {});   // garde headless
+    dv.view = "3d"; dv.useWebGL = true; dv.dcId = dc.id; dv.multiDc = true;
+    dv.visibleDcIds = new Set([dc.id]);
+    const fd = dv.webglCtx().floorDecor;
+
+    ck.eq(fd.equips.length, 1, "l'équipement d'étage est transmis au moteur 3D");
+    const fe = fd.equips[0];
+    ck.eq(fe.id, eqF.id, "descripteur : l'équipement attendu");
+    ck.eq(fe.x, 5000, "descripteur : x monde = origine du site + ancrage du plan + floor_x");
+    ck.eq(fe.y, 3000, "descripteur : y monde = … + floor_y");
+    ck.eq(fe.baseZ, 6000, "descripteur : baseZ = SOCLE du niveau 1 (4 000 de hauteur + 2 000 d'écart)");
+    ck(!("z" in fe), "descripteur : AUCUN champ z — le socle seul est transmis, la hauteur propre est ajoutée en aval");
+    ck.eq(fe.baseZ, 6000, "descripteur : baseZ n'inclut PAS dc_z (6 250 signalerait le double comptage)");
+
+    // Ce que `DcThreeScene.buildFloorDecor` fait ensuite, à l'identique.
+    const w = r3.resolvePortWorld3D(pF.id, fe.x, fe.y, fe.baseZ);
+    ck(w, "chaîne complète : le port de l'équipement d'étage est résolu");
+    near(w.x, 5200, "chaîne complète : x = 5000 + 200 (local (−50 ; −200) tourné de 90°)");
+    near(w.y, 2950, "chaîne complète : y = 3000 − 50");
+    near(w.z, 6400, "chaîne complète : z = socle 6000 + dc_z 250 + demi-hauteur 150");
+    near(w.n.x, 1, "chaîne complète : façade tournée vers l'EST au lacet 90°");
+    near(w.n.y, 0, "chaîne complète : … [y]");
+
+    // La boîte DESSINÉE et le PORT partent du même socle : `buildEquipBox` pose son groupe sur `baseZ`
+    // puis sa boîte sur `box().z`, exactement la somme que le résolveur compose. Le port est donc à
+    // mi-hauteur de la boîte, jamais 250 mm au-dessus d'elle.
+    const bas = fe.baseZ + 250, haut = fe.baseZ + 250 + 300;
+    ck(w.z > bas && w.z < haut, "le port tombe DANS la hauteur de la boîte dessinée (socle + dc_z … + hauteur)");
+    near(w.z, (bas + haut) / 2, "port à face_y 0,5 → exactement à mi-hauteur de la boîte");
   }
   });
 

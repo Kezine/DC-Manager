@@ -16,7 +16,11 @@ export interface Vec3 { x: number; y: number; z: number; }
 /** Dimensions UTILES de la section d'un conduit (marge d'exclusion déduite). */
 export interface ConduitDims { usableW: number; usableH: number; kind: "segment" | "brush" | "pin"; }
 
-/** Point 3D résolu d'un port : LOCAL SALLE (mm) + normale sortante + baie hôte. */
+/** Point 3D résolu d'un port : (mm) + normale sortante + baie hôte.
+    ⚠ REPÈRE : celui qu'annonce la MÉTHODE qui l'a produit — LOCAL SALLE pour `resolvePort3D` et tout ce qui
+    passe par `resolveFaceAnchor3D` (le cas général), MONDE pour `resolvePortWorld3D` (contenu placé sur un
+    conteneur SANS salle). Le type ne peut pas porter cette distinction sans se dédoubler pour rien : les deux
+    portent exactement les mêmes champs, et c'est le point d'appel qui sait d'où il vient (cf. l'en-tête). */
 export interface Port3D { x: number; y: number; z: number; rackId: string | null; n: { x: number; y: number; z: number }; }
 
 /** Position sur une FACE d'équipement (fraction 0..1 de la largeur/hauteur + face) — sous-ensemble des champs
@@ -34,15 +38,25 @@ export const TRUNK_UPLINK_GEO: FaceGeo = { face_x: 0.5, face_y: 0.5, face_side: 
      - resolvePort3D : point d'un port (rack / side / wall / tray / libre) ;
      - géométrie des waypoints (ancre, points de passage) et des pins/brosses.
 
-   ⚠ REPÈRE DE SORTIE : **LOCAL SALLE**, jamais monde — pour TOUT ce fichier
-   (points, normales, offsets de conduit). Les docstrings annonçaient « monde »,
-   ce qui était FAUX : dette nommée par la doctrine (`docs/placement.md` §3
-   règle 5), corrigée ici. Et ce n'est pas un défaut à réparer, c'est le repère
-   CORRECT (§6.6) : au-dessus de la salle il n'existe aucune transformée
-   intrinsèque à appliquer — la position d'une salle dans son étage, d'un étage
-   dans son bâtiment et d'un bâtiment dans le monde relève du LAYOUT, qui dépend
-   de l'ensemble affiché et vit dans `FloorLayout` (`roomToWorld`, `multiLayout`).
-   Un consommateur qui veut du monde compose donc lui-même ce dernier maillon.
+   ⚠ REPÈRE DE SORTIE : **LOCAL SALLE**, jamais monde — pour tout ce que ce
+   fichier résout À L'INTÉRIEUR d'une salle (points, normales, offsets de
+   conduit). Les docstrings annonçaient « monde », ce qui était FAUX : dette
+   nommée par la doctrine (`docs/placement.md` §3 règle 5), corrigée ici. Et ce
+   n'est pas un défaut à réparer, c'est le repère CORRECT (§6.6) : au-dessus de la
+   salle il n'existe aucune transformée intrinsèque à appliquer — la position
+   d'une salle dans son étage, d'un étage dans son bâtiment et d'un bâtiment dans
+   le monde relève du LAYOUT, qui dépend de l'ensemble affiché et vit dans
+   `FloorLayout` (`roomToWorld`, `multiLayout`). Un consommateur qui veut du monde
+   compose donc lui-même ce dernier maillon.
+
+   ⚠ UNE SEULE EXCEPTION, ET SON NOM LE DIT : `resolvePortWorld3D` rend du MONDE.
+   Elle résout un contenu placé sur un conteneur SANS SALLE (un équipement posé
+   sur un ÉTAGE), donc un cas où « local salle » n'a aucun sens — c'est le cas que
+   §1 symptôme 3 désigne comme impossible à écrire dans le moule des cinq branches.
+   Elle ne CALCULE pas la transformée du conteneur (elle relève du layout, §6.6) :
+   elle la REÇOIT, sous forme d'origine monde. L'asymétrie des deux repères de
+   sortie est donc voulue, et elle est ANNONCÉE dans les deux noms — c'est
+   exactement ce qu'exige §3 règle 5, dont ce fichier avait été le contre-exemple.
 
    La machinerie de RÉPARTITION conduit (offsets dans la section) vit désormais ici
    (`waypointConduitDims`/`conduitGrid`/`conduitCell`/`conduitCablesOf`/`conduitBasis`/
@@ -60,6 +74,54 @@ export class Resolver3D {
     const geo = port.parent_port_id ? (s.get("ports", port.parent_port_id) || port) : port;
     const eq = s.get("equipments", port.equipment_id); if (!eq) return null;
     return this.resolveFaceAnchor3D(eq, geo, dcId);
+  }
+
+  /** Résout un port porté par un contenu placé DIRECTEMENT sur un conteneur SANS SALLE — aujourd'hui un
+      équipement posé sur un ÉTAGE (`placement_mode: "floor"`). C'est le PENDANT de `resolvePort3D`, qui ne
+      sait travailler qu'À L'INTÉRIEUR d'une salle : ses cinq branches exigent toutes un `dcId` et rendent
+      null sans lui. La doctrine désigne précisément ce cas (`docs/placement.md` §1, symptôme 3) : « la
+      sixième branche (étage) est IMPOSSIBLE à écrire dans ce moule, parce que son hôte n'est pas une salle ».
+
+      ⚠ REPÈRE DE SORTIE : **MONDE** — d'où le `World` du nom (§3 règle 5 : le repère d'un point résolu doit
+      être EXPLICITE, y compris quand il diffère de celui de ses voisins). Le contrat est exactement : origine
+      MONDE en entrée ⇒ point MONDE en sortie. Ce n'est pas une entorse à l'en-tête du fichier mais sa
+      conséquence : au-dessus de la salle il n'existe aucune transformée INTRINSÈQUE à composer (§6.6), la
+      position d'un étage relevant du LAYOUT. Le conteneur ne peut donc pas se calculer ici — il se FOURNIT,
+      par son origine monde (`FloorLayout.equipFloorWorld` pour x/y, `FloorLayout.levelZ` pour z).
+
+      ⚠ `worldOriginZ` ne porte QUE le socle du CONTENEUR (Z du niveau). La hauteur propre de l'équipement
+      (`dc_z`) est déjà comprise dans le point local rendu par `FreeEquipGeometry.portLocal` — elle est donc
+      ajoutée ICI, et une seule fois. Même convention que `DcThreeScene.buildEquipBox`, qui pose son groupe
+      sur le socle et sa boîte sur `box().z` : c'est ce qui interdit de compter `dc_z` deux fois entre
+      l'appelant et la géométrie (piège verrouillé par test).
+
+      ⚠ La NORMALE ne subit AUCUNE rotation de conteneur : bâtiment et étage sont de pures TRANSLATIONS
+      (position du site, ancrage du plan, Z du niveau) — re-vérifié après l'arrivée de la position et de la
+      taille déclarée des sites, dont la spec ne porte toujours aucune orientation. Seul le lacet PROPRE de
+      l'équipement (`dc_orientation`) tourne. À revoir si un conteneur acquiert un jour une orientation. */
+  resolvePortWorld3D(portId: string, worldOriginX: number, worldOriginY: number, worldOriginZ: number): Port3D | null {
+    const s = this.store;
+    const port = s.get("ports", portId); if (!port) return null;
+    // BREAKOUT : une lane émerge du connecteur du TRUNK — MÊME règle que `resolvePort3D`. C'est tout
+    // l'intérêt d'un résolveur partagé : la version qui composait cette chaîne dans la vue avait oublié
+    // cette règle, et rien ne l'aurait signalé.
+    const geo = port.parent_port_id ? (s.get("ports", port.parent_port_id) || port) : port;
+    const eq = s.get("equipments", port.equipment_id); if (!eq) return null;
+    if (eq.dim_mode !== "free") return null;   // seul un dimensionnement LIBRE porte une boîte 6 faces
+    // COMPOSITION : lacet PROPRE du contenu, PUIS translation à l'origine de son conteneur. C'est
+    // exactement ce que compose `RoomFrame` — on le RÉUTILISE plutôt que de réécrire ici une n-ième
+    // « rotation de l'hôte puis translation », ce que §3 règle 1 désigne comme la signature d'un conteneur
+    // manquant. Ce qui change n'est PAS la composition mais la PROVENANCE de l'origine : un contenu de
+    // salle la DÉCLARE (`dc_x`/`dc_y`), un contenu d'étage la reçoit du LAYOUT (§6.6). `RoomFrame` compose
+    // donc dans le repère de l'origine qu'on lui donne — d'où du monde ici.
+    // ⚠ `halfW`/`halfD` sont INERTES : ils ne servent que de REPLI quand la position manque, or l'origine
+    // du conteneur est toujours fournie. Ils valent 0 pour dire « aucun repli à faire », pas une demi-taille.
+    const p = RoomFrame.place(
+      { x: worldOriginX, y: worldOriginY, yawDeg: eq.dc_orientation, halfW: 0, halfD: 0 },
+      FreeEquipGeometry.portLocal(eq, geo),
+      FreeEquipGeometry.faceNormalLocal(geo.face_side),
+    );
+    return { x: p.x, y: p.y, z: p.z + worldOriginZ, rackId: null, n: p.n };
   }
 
   /** Résout le PORT UPLINK virtuel d'un faisceau sur son équipement d'extrémité (patch) : centre de la face

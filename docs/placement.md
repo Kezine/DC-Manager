@@ -1246,6 +1246,101 @@ tout ce qui sort, tout chemin absolu, tout spécificateur nu (npm / natif Node),
 (`DataValidation.ts:30 → "./RackDepthPolicy.js"`), et **aucun fichier partagé n'importe de paquet npm** —
 l'invariant tenait déjà, par convention seule ; il tient désormais par construction.
 
+### 6.20 Les PORTS d'un équipement posé sur un ÉTAGE — **IMPLÉMENTÉ**
+
+Le cas que §1 symptôme 3 désigne nommément : « la sixième branche (étage) est IMPOSSIBLE à écrire dans ce
+moule, parce que son hôte n'est pas une salle ». Les cinq branches de `resolveFaceAnchor3D` exigent toutes
+un `dcId` ; un équipement d'étage n'en a pas, donc `resolvePort3D` rend `null` pour tous ses ports — ils
+étaient DESSINÉS en 3D depuis le lot du décor d'étage, mais sans un seul connecteur. `Resolver3D`
+gagne le PENDANT sans salle, `resolvePortWorld3D(portId, worldOriginX, worldOriginY, worldOriginZ)`, et
+`DcThreeScene` sépare enfin le DESSIN d'un port (`addPortAt`) de sa RÉSOLUTION.
+
+C'est aussi le seul lot du chantier à appliquer §4.1 point 1 à la lettre — **commencer par le cas qui ne
+rentre pas** — puisque rien n'existait : il n'y a aucune parité à prouver, seulement des attentes à écrire.
+
+**TRAVAIL REPRIS, pas réécrit.** Une première implémentation avait été faite puis RETIRÉE de `dev` sur
+demande ; elle vit dans le tag `sauvegarde-avant-scrap-2026-07-27` (commits `35d8190` et `8c9fa33`). Le
+DESIGN, les DÉCISIONS et les TESTS en sont repris ; le CODE, lui, a dû être RÉ-EXPRIMÉ, parce que les trois
+méthodes qu'il appelait (`FreeEquipGeometry.portWorldC`/`portWorld`/`portNormal`) n'existent plus — §6.12 les
+a remplacées par `portLocal`/`faceNormalLocal`/`roomPlacement`, qui ne composent plus rien. Un cherry-pick
+aurait donc compilé sur une API morte.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **Le repère de sortie est DANS LE NOM** : `resolvePortWorld3D` rend du **MONDE**, quand tout le reste du
+  fichier rend du LOCAL SALLE. L'asymétrie n'est pas un défaut à corriger : au-dessus de la salle il n'existe
+  aucune transformée INTRINSÈQUE à composer (§6.6), la position d'un étage relevant du LAYOUT. Le contrat est
+  donc « origine MONDE en entrée ⇒ point MONDE en sortie », et les paramètres se nomment `worldOrigin*` pour
+  qu'il ne se lise pas de travers. ⚠ §6.12 se terminait sur « plus aucun identifiant du chemin de résolution
+  n'annonce *monde* » : ce lot en réintroduit un, et ce n'est PAS une rechute. La dette d'alors était que le
+  nom MENTAIT ; §3 règle 5 n'exige pas le silence sur le repère, elle exige qu'il soit EXPLICITE. Écarté :
+  taire le monde pour préserver l'uniformité du fichier — on aurait rendu implicite la seule chose que la
+  règle demande d'annoncer.
+- **La transformée du conteneur est REÇUE, jamais calculée par le résolveur.** L'appelant lui donne l'origine
+  monde de l'étage (`FloorLayout.equipFloorWorld` pour x/y, `FloorLayout.levelZ` pour le socle). Écarté :
+  injecter le `MultiLayout` dans `Resolver3D` pour qu'il aille la chercher — cela ferait dépendre la position
+  d'un port de l'ensemble AFFICHÉ, exactement l'inverse de §6.8, et c'est déjà l'alternative écartée en §6.11.
+- **La composition est DÉLÉGUÉE à `RoomFrame`, pas réécrite.** Ce qu'il faut composer — « lacet PROPRE du
+  contenu, PUIS translation à son origine » — est *mot pour mot* ce que fait le conteneur salle ; seule la
+  PROVENANCE de l'origine change (déclarée dans l'enregistrement pour un contenu de salle, fournie par le
+  layout pour un contenu d'étage). Écarté : recomposer `cos`/`sin` dans `Resolver3D`, ce que §3 règle 1
+  désigne comme la signature d'un conteneur manquant — et ce que le tag faisait *de facto*, en appelant un
+  `portWorldC` qui composait à l'intérieur de `FreeEquipGeometry`. Écarté aussi : un module `FloorFrame`
+  jumeau, qui aurait figé une duplication ligne pour ligne.
+- **⚠ TROISIÈME OCCURRENCE CONSTATÉE, généralisation NON FAITE — et c'est un ARBITRAGE, pas un oubli.** Une
+  baie dans une salle, un équipement libre dans une salle, un équipement libre sur un étage : trois contenus
+  « posés avec une position et un lacet ». §4.3 autoriserait d'extraire. On ne l'a délibérément PAS fait :
+  §6.12 a borné la généralisation au contenu d'une SALLE en s'appuyant sur §6.6, et la lever est une décision
+  de doctrine, pas un effet de bord d'un lot de rendu. Ce qui est acquis et vérifiable est plus modeste, et
+  suffit : **`RoomFrame` compose dans le repère de l'origine qu'on lui donne**, il ne connaît toujours ni
+  étage, ni bâtiment, ni layout. Son en-tête le dit désormais, et pose la question ouverte plutôt que d'y
+  répondre seul.
+- **`worldOriginZ` ne porte QUE le socle du conteneur.** La hauteur propre (`dc_z`) est déjà dans le point
+  local (`portLocal` part de `box().z`) : elle est ajoutée UNE fois, du côté du résolveur. C'est la même
+  convention que `DcThreeScene.buildEquipBox`, qui pose son groupe sur le socle puis sa boîte sur `box().z` —
+  donc que le descripteur `FloorEquipDesc`, qui ne porte volontairement aucun `z`. Écarté : passer l'origine
+  déjà sommée (`equipFloorWorld().z`, qui inclut `dc_z`) — le port serait monté de `dc_z` AU-DESSUS de la
+  boîte, un décalage d'autant plus traître qu'il est invisible tant que l'équipement est posé au sol.
+- **Le DESSIN d'un port est séparé de sa RÉSOLUTION** (`addPortAt`). Le connecteur, sa couleur, sa taille
+  physique, son cadre noir, sa couche « port » et son `pick` ne dépendent PAS du conteneur ; seule la
+  résolution en dépend. Les deux conteneurs partagent donc un seul rendu — d'où le fait, gratuit, qu'un port
+  d'étage se comporte exactement comme un port de salle vis-à-vis de `showPorts` et du masquage individuel.
+  Écarté : un second chemin de dessin pour l'étage, qui aurait divergé au premier réglage ajouté.
+- **La règle du BREAKOUT est retrouvée par construction.** Une lane émerge du connecteur de son TRUNK
+  (`parent_port_id`) : la version qui composait la chaîne DANS la vue l'avait oubliée, et rien ne l'aurait
+  signalé. Ce n'est pas un détail d'implémentation mais l'argument le plus concret contre un second chemin de
+  résolution parallèle — la règle vit là où les deux conteneurs la lisent.
+- **Aucune ROTATION de conteneur, RE-VÉRIFIÉE et non supposée.** L'invariant est daté du premier jet, avant
+  que le site n'acquière une position (§6.9) puis une taille déclarée (§6.8) : il fallait donc le remesurer.
+  Verdict : il TIENT. La spec `sites` ne porte que `name`, `address`, `lat`, `lon`, `width_mm`, `depth_mm` —
+  aucune orientation ; `SiteLayout` rend des `{x, y}` (la compression logarithmique déplace un point le long
+  d'un rayon, elle ne tourne rien) ; `multiLayout` ne compose pour un plan d'étage que `bx + anchor_x`,
+  `by + anchor_y` et `levelZ` ; le seul angle du layout est le `floor_orientation` d'une SALLE, qui est la
+  transformée de la salle en tant que CONTENU, pas celle d'un conteneur d'équipement d'étage. Seul le lacet
+  propre de l'équipement tourne. À revoir si un conteneur acquiert un jour une orientation — le résolveur le
+  dit à l'endroit exact.
+- **Attentes EXPLICITES, plus une équivalence — les deux, jamais l'une à la place de l'autre.** Les
+  coordonnées sont figées EN DUR, dérivées à la main du modèle (boîte 200 × 400 × 300 à `dc_z` 250, port avant
+  à 0,25 / 0,5 ⇒ local (−50 ; −200 ; 400)), aux QUATRE lacets cardinaux. S'y ajoute le test d'équivalence que
+  le tag prévoyait : **le même équipement posé en salle et posé sur un étage donne des ports au même endroit,
+  au décalage du socle près** — vérifié aux quatre lacets, sur le point ET la normale. Le relatif dit
+  l'intention (un seul repère), l'absolu dit la valeur ; un test purement relatif resterait vert si les deux
+  chemins dérivaient ENSEMBLE (piège du lot 2, §4.1).
+- **La CHAÎNE COMPLÈTE est verrouillée, pas seulement le résolveur.** `DatacenterView` s'instancie en
+  headless : `webglCtx().floorDecor` rend un descripteur PUR, donc on peut figer ce que la vue POUSSE au
+  résolveur — `baseZ = 6 000` (socle du niveau 1) et **pas** `6 250`, l'absence de champ `z`, puis le port à
+  `z = 6 400`. C'est là que le piège du `dc_z` se joue réellement : entre deux couches, pas dans une seule.
+- **Sondes de mutation** : `dc_z` comptée DEUX fois → **25 FAIL** ; normale TRANSLATÉE par l'origine du
+  conteneur → **31 FAIL** ; règle du breakout neutralisée → **1 FAIL** (l'assertion dédiée, doublée d'un
+  contrôle de discrimination prouvant qu'un port aux mêmes fractions SANS parent tombe ailleurs — sans quoi
+  l'assertion serait tautologique).
+- **Non fait, volontairement — LES ÉQUIPEMENTS D'ÉTAGE NE SONT TOUJOURS PAS CÂBLABLES**, et ce lot ne le
+  prétend pas. `Store.equipmentDcId` rend `null` pour eux PAR CONCEPTION, et toute la machinerie de câblage ne
+  connaît que « dans la salle X » ou « non placé » : un câble ne peut donc toujours pas s'y raccorder, et les
+  connecteurs nouvellement dessinés resteront gris (non câblés) tant que ce blocage tient. C'est le chantier
+  que §6.4 décrit — généraliser la CLÉ de la machinerie de câblage de « salle » à « conteneur » — et il est
+  distinct. Ce lot le rend simplement VISIBLE : on voit désormais où les câbles devront arriver.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -1256,10 +1351,15 @@ l'invariant tenait déjà, par convention seule ; il tient désormais par constr
 | `tray` | étagère → baie → salle | local salle | oui | **migré** côté RÉSOLUTION (§6.11) ; géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). Reste : l'ÉTAGÈRE elle-même n'est pas encore un conteneur — la baie place directement le posé |
 | `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`RoomFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
 | *(waypoints)* | baie → salle | local salle | s.o. | **migré** — brosses et pins passent par le conteneur (§6.12) ; le champ `world` est renommé `roomPoint` |
-| `floor` | plan d'étage → étage → bâtiment | **monde** | **en cours** | premier cas migré |
+| `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `RoomFrame` |
 
 Les équipements d'étage sont le premier contenu porté par un conteneur AUTRE qu'une salle. Ils sont
 donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
+
+⚠ **Leurs ports sont RÉSOLUS et DESSINÉS, ils ne sont pas CÂBLABLES** (§6.20, dernier point).
+`Store.equipmentDcId` rend `null` pour un équipement d'étage par conception, et la machinerie de câblage ne
+connaît que « dans la salle X » ou « non placé ». Généraliser cette clé de « salle » à « conteneur » est le
+chantier décrit en §6.4 — il reste entier.
 
 ✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur**, et la
 règle de repli d'une position absente n'est plus écrite qu'une fois (§6.13). Ce qui reste ouvert est listé
@@ -1301,14 +1401,26 @@ chaînage porte un garde anti-cycle (§6.16).
   §6.12) : `basis` (lacet + origine, dérivés du seul placement DÉCLARÉ, position absente ⇒ demi-empreinte),
   `origin` (le CENTRE d'un contenu en local salle — source unique du repli, §6.13), `pointToRoom` (rotation
   PUIS translation), `dirToRoom` (rotation SEULE, composante verticale recopiée), `place` (les deux, ce que
-  consomment les CINQ modes). `RoomContentPlacement` = l'interface étroite.
+  consomment les CINQ modes). `RoomContentPlacement` = l'interface étroite. ⚠ Il compose dans le repère de
+  l'ORIGINE qu'on lui donne : local salle pour ses appelants de salle, MONDE pour le résolveur d'étage
+  (§6.20). La transformée du conteneur étage n'est PAS ici — elle lui est fournie.
 - `src-client/geometry/Resolver3D.ts` — `resolveFaceAnchor3D` : les cinq modes délèguent leur composition à
   `RoomFrame` (quatre via leur baie, le mode libre directement), ainsi que la géométrie des waypoints.
-  Sortie en **LOCAL SALLE** pour tout le fichier — points, normales et offsets de conduit. `Port3D`.
+  Sortie en **LOCAL SALLE** pour tout ce qui est résolu DANS une salle — points, normales et offsets de
+  conduit. `Port3D`. ⚠ **Une exception, annoncée par son nom** : `resolvePortWorld3D(portId, worldOriginX,
+  worldOriginY, worldOriginZ)` résout un contenu placé sur un conteneur SANS salle (équipement d'étage) et
+  rend du **MONDE** (§6.20). `worldOriginZ` = le SOCLE du conteneur seul ; la hauteur propre (`dc_z`) est
+  ajoutée par le résolveur, jamais par l'appelant.
 - `src-client/geometry/FreeEquipGeometry.ts` — géométrie PROPRE de l'équipement libre : `faceLocal`,
   `portLocal` (point local d'un port), `faceNormalLocal` (normale AVANT lacet) et `roomPlacement` (ce
   qu'il déclare à son conteneur). Il ne compose plus aucune transformée.
 - `src-client/geometry/RackGeometry.ts` — `roomPlacement` : ce que la BAIE déclare à son conteneur.
 - `src-client/views/dc/DcBase.ts` — repère (`multiDc`) vs portée (`visibleDcIds`), décor d'étage.
+  `webglFloorDecor` produit `FloorEquipDesc { id, x, y, baseZ }` : `baseZ` = **socle du niveau seul**, sans
+  `dc_z` — c'est ce contrat qui interdit le double comptage côté moteur (§6.20).
+- `src-client/views/dc/three/DcThreeScene.ts` — `addPort` (résolution EN SALLE puis dessin) et `addPortAt`
+  (dessin SEUL, à un point déjà résolu) : la RÉSOLUTION dépend du conteneur, le DESSIN non. Les ports
+  d'étage passent par `resolvePortWorld3D` puis par le MÊME `addPortAt` — d'où leur comportement identique
+  vis-à-vis de `showPorts` et du masquage individuel (§6.20).
 - `docs/persistance.md` — direction relationnelle (cf. §5).
 - `docs/faisceaux.md`, `docs/deduction-reseau.md` — consommateurs de la résolution de ports.

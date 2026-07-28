@@ -344,6 +344,16 @@ export class DcThreeScene extends DcThreeCamera {
   protected addPort(group: THREE.Group, p: any, dcId: string, extra?: any): void {
     if (p.face_x == null || p.face_y == null) return;
     const pt: any = this.resolver.resolvePort3D(p.id, dcId); if (!pt) return;
+    this.addPortAt(group, p, pt, extra);
+  }
+
+  /** DESSIN d'un port à un point DÉJÀ RÉSOLU. Séparé de `addPort` parce que la RÉSOLUTION dépend du
+      CONTENEUR (salle : `resolvePort3D`, scopé par `dcId` ; étage : `resolvePortWorld3D`, composé depuis
+      l'origine monde du conteneur) alors que le DESSIN, lui, n'en dépend pas — cf. `docs/placement.md`
+      §3 règle 1. Les deux conteneurs partagent donc ce rendu au lieu d'en entretenir deux copies, et un
+      port d'étage se comporte comme un port de salle vis-à-vis des bascules d'affichage (couche « port »).
+      `pt` est exprimé dans le repère de `group`. */
+  protected addPortAt(group: THREE.Group, p: any, pt: any, extra?: any): void {
     const cab = this.store.cableOnPort(p.id);
     const col = cab ? this.cableColorHex(cab) : 0x8893a5;
     const csz = this.store.portConnectorSize(p);
@@ -1146,8 +1156,10 @@ export class DcThreeScene extends DcThreeCamera {
       repère d'orientation, même libellé — seule l'ORIGINE change (principe n°3, plutôt qu'un second rendu
       parallèle qui aurait divergé). La hauteur propre de l'équipement (`box().z` = `dc_z`) reste appliquée en
       LOCAL, donc `originZ` ne porte que le socle (0 en salle, Z du niveau sur un étage).
-      Les PORTS restent à la charge de l'appelant : ils ne se résolvent que dans une salle (Resolver3D est
-      scopé par dcId), un équipement d'étage n'en a donc pas. */
+      Les PORTS restent à la charge de l'appelant, parce que leur RÉSOLUTION dépend du conteneur alors que
+      cette boîte n'en dépend pas : en salle `resolvePort3D` (scopé par `dcId`), sur un étage
+      `resolvePortWorld3D` (composé depuis l'origine monde du conteneur). Les deux appellent ensuite le
+      MÊME `addPortAt`. */
   protected buildEquipBox(root: THREE.Group, e: any, cx: number, cy: number, originZ: number): void {
     const b = FreeEquipGeometry.box(e);
     const o = Normalize.rackOrientation(e.dc_orientation) * Math.PI / 180;
@@ -1380,6 +1392,17 @@ export class DcThreeScene extends DcThreeCamera {
       if (this.opts.hiddenEquips && this.opts.hiddenEquips.has(fe.id)) return;
       const e: any = this.store.get("equipments", fe.id); if (!e) return;
       this.buildEquipBox(root, e, fe.x, fe.y, fe.baseZ);
+      // PORTS de l'équipement d'étage. `resolvePort3D` ne peut PAS les résoudre (scopé par SALLE, un
+      // équipement d'étage n'en a pas) : on passe par le pendant SANS SALLE du résolveur, qui compose la
+      // chaîne conteneur → face et rend du MONDE — le repère de `root` pour ce décor. La vue ne calcule
+      // donc AUCUNE transformée elle-même (docs/placement.md §3 règle 4). `fe.baseZ` ne porte que le socle
+      // du niveau : la hauteur propre (`dc_z`) est ajoutée par le résolveur, comme la boîte l'ajoute au
+      // dessin — d'où une seule et même convention des deux côtés.
+      this.store.portsOf(e.id).forEach((p: any) => {
+        if (p.face_x == null || p.face_y == null) return;   // même garde que `addPort` (port sans position de face)
+        const pt = this.resolver.resolvePortWorld3D(p.id, fe.x, fe.y, fe.baseZ);
+        if (pt) this.addPortAt(root, p, pt);
+      });
     });
     // Étiquettes d'ÉTAGE : une par plan dessiné, donc répétées sur chaque site (cf. `FloorDecor.floorLabels`).
     fd.floorLabels.forEach((l) => this.addLabelSprite(root, l.label, l.x, l.y, l.z));

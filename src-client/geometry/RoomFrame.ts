@@ -29,6 +29,21 @@ import { Normalize } from "../core/Normalize";
    intrinsèque, elle est une décision de LAYOUT qui dépend de l'ensemble affiché
    (§6.6). Un `PlacementFrame` universel mentirait sur ce point.
 
+   ⚠ CE QUE CE MODULE COMPOSE, ET DANS QUEL REPÈRE IL REND (précisé au lot ÉTAGE)
+   ---------------------------------------------------------------------------
+   La composition est « lacet du CONTENU, PUIS translation à son ORIGINE ». Elle
+   rend donc dans le repère de l'ORIGINE qu'on lui donne. Ses appelants de salle
+   lui passent une position LOCALE SALLE (`dc_x`/`dc_y`), d'où un résultat local
+   salle. `Resolver3D.resolvePortWorld3D` — les ports d'un équipement posé sur un
+   ÉTAGE — lui passe, lui, l'ORIGINE MONDE que le layout calcule pour le conteneur
+   étage, et obtient donc du MONDE.
+   Ce n'est PAS la levée de la borne ci-dessus : la transformée du conteneur étage
+   n'est toujours pas ici, elle est FOURNIE — ce module ne connaît ni étage, ni
+   bâtiment, ni layout. La question « faut-il renommer ce conteneur en frame
+   générique, la troisième occurrence étant constatée ? » est OUVERTE et
+   délibérément NON tranchée : §4.3 fait de l'extraction un ARBITRAGE, pas un
+   réflexe, et la renommer sans décision figerait une généralisation de plus.
+
    REPÈRES — ce que ce module transforme, et vers QUOI
    ---------------------------------------------------------------------------
    • Repère LOCAL D'UN CONTENU : origine au CENTRE de son empreinte au sol, +X
