@@ -12,6 +12,7 @@ import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
 // CONTENEUR SALLE : `origin()` = centre d'un contenu en local salle. Ce rendu a FIXÉ la convention
 // « position absente ⇒ demi-empreinte » (docs/placement.md §6.12) ; il la LIT désormais au lieu de la réécrire.
 import { PlacementFrame } from "../../../geometry/PlacementFrame";
+import { TrayFrame } from "../../../geometry/TrayFrame";
 import { RackLabelLayout } from "../../../geometry/RackLabelLayout";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
@@ -343,7 +344,9 @@ export class DcThreeScene extends DcThreeCamera {
     this.scene3d.wallOccupants(r.id, null, null).forEach((e: any) => add(e.id, e.wall_margin !== "rear" ? "front" : "rear"));
     this.store.rackItemsOf(r.id).forEach((it: any) => {
       if (it.kind !== "tray" || it.u == null) return;
-      const eqSide = it.side !== "rear" ? "front" : "rear";
+      // même règle qu'au dessin des posés (`buildRackTrays`) : c'est l'ÉTAGÈRE qui dit de quel côté
+      // regardent ses contenus, donc de quel côté leurs ports se masquent avec la baie.
+      const eqSide = TrayFrame.facesFront(RackGeometry.trayPlacement(r, it)) ? "front" : "rear";
       this.store.equipmentsOnTray(it.id).forEach((e: any) => add(e.id, eqSide));
     });
   }
@@ -618,14 +621,18 @@ export class DcThreeScene extends DcThreeCamera {
     // label finit à 1 mm, l'image à 0,5 mm : aucun z-fighting entre les deux.
     this.store.rackItemsOf(r.id).forEach((it: any) => {
       if (it.kind !== "tray" || it.u == null) return;
-      const eqSide = it.side !== "rear" ? "front" : "rear";
+      // C'est l'ÉTAGÈRE qui sait vers où regardent ses contenus (`TrayFrame`) : cette vue relisait
+      // `it.side` pour le re-déduire, comme le résolveur de ports et la géométrie de baie le faisaient
+      // chacun de son côté. Calculé UNE fois par étagère, pas par équipement posé.
+      const trayPlacement = RackGeometry.trayPlacement(r, it);
+      const front = TrayFrame.facesFront(trayPlacement);   // étagère avant → la FACE AVANT du posé regarde −Y
+      const eqSide = front ? "front" : "rear";
       this.store.equipmentsOnTray(it.id).forEach((e: any) => {
         const b = RackGeometry.trayEquipBoxLocal(r, it, e);
         const yLo = Math.min(b.y0, b.y1), yHi = Math.max(b.y0, b.y1);
         this.localBox(group, b.x0, b.x1, yLo, yHi, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
         const bw = b.x1 - b.x0, bh = b.z1 - b.z0;
         const xc = (b.x0 + b.x1) / 2, zc = (b.z0 + b.z1) / 2;
-        const front = it.side !== "rear";   // étagère côté avant → la FACE AVANT du device regarde −Y
         if (e.name) {
           this.faceLabel(group, e.name, xc, yLo - 0.5, zc, bw * 0.94, bh * 0.9, true, { eqSide });    // face −Y (avant)
           this.faceLabel(group, e.name, xc, yHi + 0.5, zc, bw * 0.94, bh * 0.9, false, { eqSide });   // face +Y (arrière)

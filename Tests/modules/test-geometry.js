@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -754,10 +754,10 @@ module.exports = async () => {
     const PORTE_LE_LAYOUT = /(FloorLayout|SiteLayout|MultiLayout|PivotBounds|CameraFraming)/;
     const PORTE_UNE_VUE = /(^|\/)(views|app|store|data|sync|ui)(\/|$)/;
 
-    const violationsDe = (texte, nom) => {
+    const violationsDe = (texte, nom, autorises = AUTORISES) => {
       const refus = [];
       for (const [spec, ligne] of TsImports.specifiersOf(texte, nom)) {
-        if (AUTORISES.has(spec)) continue;
+        if (autorises.has(spec)) continue;
         const ou = nom + ":" + ligne + ' → "' + spec + '"';
         if (PORTE_LE_LAYOUT.test(spec)) refus.push(ou + " — PORTE LE LAYOUT (§6.6 : au-dessus de la salle, la transformée dépend de l'ensemble AFFICHÉ)");
         else if (PORTE_UNE_VUE.test(spec)) refus.push(ou + " — module de VUE / d'ÉTAT : ce repère est une géométrie PURE");
@@ -785,6 +785,22 @@ module.exports = async () => {
       "BORNE : un import DYNAMIQUE ne contourne pas le verrou");
     ck.eq(violationsDe('import { Normalize } from "../core/Normalize";', "sonde.ts").length, 0,
       "BORNE : l'import LÉGITIME de la liste blanche PASSE (le verrou n'est pas un refus aveugle)");
+
+    /* -- MÊME BORNE pour `TrayFrame` (§6.23). Le conteneur ÉTAGÈRE est un cran plus bas dans la même
+       chaîne : sa transformée est INTRINSÈQUE au même titre, et il court le même risque de se voir
+       verser du layout ou de la vue « puisqu'il place des choses ». La liste blanche y est encore plus
+       étroite — un seul TYPE, celui du rectangle qu'il transporte. Le verrou est le même code : ce qui
+       s'ajoute est une liste blanche, pas un second détecteur (principe n°3). */
+    const sourceTray = path.join(__dirname, "..", "..", "src-client", "geometry", "TrayFrame.ts");
+    const texteTray = fs.readFileSync(sourceTray, "utf8");
+    const AUTORISES_TRAY = new Set(["../../src-shared/TrayGeometry"]);
+    ck(/export class TrayFrame/.test(texteTray), "BORNE : la source lue est bien celle de TrayFrame (anti-vacuité)");
+    const vusTray = TsImports.specifiersOf(texteTray, "TrayFrame.ts");
+    ck(vusTray.has("../../src-shared/TrayGeometry"), "BORNE : le détecteur lit des imports RÉELS dans TrayFrame — vus : " + ([...vusTray.keys()].join(", ") || "AUCUN"));
+    ck.eq(violationsDe(texteTray, "TrayFrame.ts", AUTORISES_TRAY).join("  |  "), "",
+      "TrayFrame : BORNE §6.6 — aucun import de layout, de vue, ni hors liste blanche");
+    ck.eq(violationsDe('import { RackGeometry } from "./RackGeometry";', "sonde.ts", AUTORISES_TRAY).length, 1,
+      "BORNE TrayFrame : même `RackGeometry` est REFUSÉ — le conteneur REÇOIT son placement, il ne le calcule pas (et l'importer BOUCLERAIT)");
   }
   });
 
@@ -1863,6 +1879,64 @@ module.exports = async () => {
     });
     ck(!!okInv, "invert : aller-retour h⁻¹∘h = identité");
     ck.eq(Homography.invert([1, 2, 3, 2, 4, 6, 0, 0, 0]), null, "invert : matrice dégénérée → null");
+  }
+  });
+
+  await section("TrayFrame : l'ÉTAGÈRE est un CONTENEUR — plateau → baie (doctrine §6.23)", async () => {
+  {
+    // Le transport plateau → baie était écrit à la main dans `RackGeometry.trayEquipBoxLocal`, et la règle
+    // « une étagère arrière retourne ses contenus » RE-DÉRIVÉE dans QUATRE sites (`RackGeometry`,
+    // `Resolver3D`, `DcThreeScene.buildRackTrays` et `.buildRackPorts`). Les attentes ci-dessous sont
+    // EXPLICITES — dérivées du modèle à la main — et non une comparaison à l'ancienne fonction : celle-ci
+    // n'existe plus, la comparer à elle-même resterait verte sans rien prouver (doctrine §4.1).
+    // La parité a été prouvée AVANT bascule contre l'ancien corps RÉGÉNÉRÉ depuis git : 2 488 320 cas /
+    // 22 394 880 comparaisons BIT POUR BIT ; sur un balayage de valeurs délibérément non représentables,
+    // seules les bornes HAUTES x1/y1 bougent, d'au plus 1,14·10⁻¹³ mm (ré-association d'une somme
+    // flottante — l'ancien code faisait `x1 = x0 + largeur`, le conteneur transporte la borne elle-même).
+
+    // Repère PLATEAU → repère BAIE : translation, plus RETOURNEMENT de l'axe Y si l'étagère est arrière.
+    const avant = { usableX0: -100, faceY: -400, dirY: 1, plankZ: 50 };
+    const arriere = { usableX0: -100, faceY: 400, dirY: -1, plankZ: 50 };
+    const rect = { x0: 10, x1: 60, y0: 5, y1: 35 };
+
+    const rAv = TrayFrame.rectToRack(avant, rect);
+    ck(rAv.x0 === -90 && rAv.x1 === -40, "étagère AVANT : x translaté du bord utilisable (−100 + 10 / + 60)");
+    ck(rAv.y0 === -395 && rAv.y1 === -365, "étagère AVANT : les profondeurs s'enfoncent vers les +Y depuis la face");
+
+    const rAr = TrayFrame.rectToRack(arriere, rect);
+    ck(rAr.x0 === -90 && rAr.x1 === -40, "étagère ARRIÈRE : x IDENTIQUE — l'axe des largeurs n'est PAS retourné (comportement existant, SIGNALÉ dans l'en-tête, non arbitré)");
+    ck(rAr.y0 === 365 && rAr.y1 === 395, "étagère ARRIÈRE : profondeurs vers les −Y depuis la face arrière");
+    ck(rAr.y0 <= rAr.y1, "bornes RÉORDONNÉES : le retournement inverse l'intervalle, tous les appelants attendent y0 ≤ y1");
+    ck((rAv.y1 - rAv.y0) === (rAr.y1 - rAr.y0), "retourner ne DÉFORME pas : même profondeur des deux côtés");
+
+    // Face d'un contenu : les −Y de la baie sont sa FAÇADE ; une étagère arrière retourne les deux faces.
+    ck.eq(TrayFrame.contentFaceDirY(avant, true), -1, "étagère avant, façade du posé → sort vers −Y (la façade de la baie)");
+    ck.eq(TrayFrame.contentFaceDirY(avant, false), 1, "étagère avant, dos du posé → +Y");
+    ck.eq(TrayFrame.contentFaceDirY(arriere, true), 1, "étagère ARRIÈRE, façade du posé → +Y (le posé est retourné avec son étagère)");
+    ck.eq(TrayFrame.contentFaceDirY(arriere, false), -1, "étagère ARRIÈRE, dos du posé → −Y");
+    ck.eq(TrayFrame.facesFront(avant), true, "facesFront : étagère avant");
+    ck.eq(TrayFrame.facesFront(arriere), false, "facesFront : étagère arrière");
+
+    // `trayPlacement` DÉRIVE ce placement de la boîte de l'étagère — pendant exact de `roomPlacement`.
+    const rk = { u_count: 42, depth: 1000, cage_depth_mm: 900, front_margin_mm: 50, width_mm: 600 };
+    const tAv = { u: 10, u_height: 3, tray_u: 1, tray_type: "cantilever", depth_mm: 400, side: "front" };
+    const tAr = Object.assign({}, tAv, { side: "rear" });
+    const bAv = RackGeometry.trayBoxLocal(rk, tAv), pAv = RackGeometry.trayPlacement(rk, tAv);
+    const bAr = RackGeometry.trayBoxLocal(rk, tAr), pAr = RackGeometry.trayPlacement(rk, tAr);
+    ck(pAv.dirY === 1 && pAr.dirY === -1, "trayPlacement : le SENS des profondeurs vient de la face de montage");
+    ck(Math.abs(pAv.faceY - bAv.y0) < 1e-12, "trayPlacement AVANT : l'origine des profondeurs est le bord AVANT du plateau");
+    ck(Math.abs(pAr.faceY - bAr.y1) < 1e-12, "trayPlacement ARRIÈRE : l'origine est le bord ARRIÈRE");
+    ck(Math.abs(pAv.usableX0 - (bAv.x0 + bAv.xInset)) < 1e-12, "trayPlacement : la garde des renforts est DÉJÀ déduite du bord utilisable");
+    ck(Math.abs(pAv.plankZ - bAv.z0) < 1e-12, "trayPlacement : les posés reposent sur le DESSUS du plateau");
+
+    // Le posé d'une étagère ARRIÈRE est bien retourné : à `tray_y` = 0 il est collé au bord ARRIÈRE.
+    const eq0 = { free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, dc_orientation: 0, tray_x: 0, tray_y: 0 };
+    const posAv = RackGeometry.trayEquipBoxLocal(rk, tAv, eq0);
+    const posAr = RackGeometry.trayEquipBoxLocal(rk, tAr, eq0);
+    ck(Math.abs(posAv.y0 - bAv.y0) < 1e-9, "posé sur étagère AVANT, tray_y = 0 → collé au bord AVANT du plateau");
+    ck(Math.abs(posAr.y1 - bAr.y1) < 1e-9, "posé sur étagère ARRIÈRE, tray_y = 0 → collé au bord ARRIÈRE (retourné)");
+    ck(Math.abs(posAv.x0 - posAr.x0) < 1e-12, "posé : MÊME x des deux côtés — l'axe des largeurs n'est pas retourné");
+    ck(Math.abs((posAv.y1 - posAv.y0) - (posAr.y1 - posAr.y0)) < 1e-12, "posé : même profondeur des deux côtés");
   }
   });
 

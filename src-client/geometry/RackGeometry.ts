@@ -8,6 +8,8 @@ import { Normalize } from "../core/Normalize";
 // leurs signatures : elles ont beaucoup de consommateurs — Resolver3D, DcInteract, DcThreeScene, formulaires).
 import { TrayGeometry } from "../../src-shared/TrayGeometry";
 import type { TrayFitProblem } from "../../src-shared/TrayGeometry";
+import { TrayFrame } from "./TrayFrame";
+import type { TrayPlacement } from "./TrayFrame";
 // POLITIQUE DE PROFONDEUR de baie : SOURCE UNIQUE partagée avec la validation (cf. docs/placement.md §6.14).
 // Les méthodes ci-dessous n'en sont plus que des ALIAS — signatures inchangées, elles ont beaucoup de
 // consommateurs (Resolver3D, DcThreeScene, DcViews2D, formulaires de baie et leurs tests).
@@ -249,20 +251,33 @@ export class RackGeometry {
     return { w, d, h };
   }
 
+  /** Placement DÉCLARÉ de l'ÉTAGÈRE dans sa baie — ce que le conteneur « étagère » doit savoir de
+      lui-même (cf. `TrayFrame`). Pendant EXACT de `roomPlacement` un cran plus bas dans la chaîne :
+      là, une baie déclare son placement dans sa salle ; ici, une étagère déclare le sien dans sa baie.
+      C'est ce qui permet à `TrayFrame` de ne connaître ni baie, ni enregistrement, ni face. */
+  static trayPlacement(rack: any, tray: any): TrayPlacement {
+    const b = RackGeometry.trayBoxLocal(rack, tray);
+    return {
+      usableX0: b.x0 + b.xInset,
+      // l'origine des profondeurs est la FACE DE MONTAGE : bord avant pour une étagère avant, bord
+      // arrière pour une étagère arrière — et les profondeurs s'y enfoncent en sens inverse.
+      faceY: b.front ? b.y0 : b.y1,
+      dirY: b.front ? 1 : -1,
+      plankZ: b.z0,
+    };
+  }
+
   /** Boîte LOCALE (repère baie) d'un équipement POSÉ sur une étagère : empreinte à (tray_x, tray_y) sur le
       plateau (null = centré), posée sur son dessus. tray_y se mesure depuis la FACE DE MONTAGE de l'étagère.
-      = la boîte PLATEAU de `TrayGeometry.box`, transportée dans le repère de la baie : décalage du bord
-      utilisable en x, et — pour une étagère ARRIÈRE — profondeur comptée vers les −Y depuis la face. */
+      = la boîte PLATEAU de `TrayGeometry.box`, que l'ÉTAGÈRE transporte dans le repère de sa baie
+      (`TrayFrame.rectToRack`). Le transport était écrit ici à la main ; il vit maintenant dans le
+      conteneur, avec les deux autres sites qui le re-dérivaient. Cf. docs/placement.md §6.23. */
   static trayEquipBoxLocal(rack: any, tray: any, eq: any): any {
-    const b = RackGeometry.trayBoxLocal(rack, tray);
+    const placement = RackGeometry.trayPlacement(rack, tray);
     const plank = RackGeometry.trayPlank(rack, tray);
-    const box = TrayGeometry.box(eq, plank);
     const fp = TrayGeometry.footprint(eq);
-    const x0 = b.x0 + b.xInset + box.x0, x1 = x0 + fp.w;
-    // profondeur depuis la face de montage : avant → +Y depuis b.y0 ; arrière → −Y depuis b.y1
-    const y0 = b.front ? b.y0 + box.y0 : b.y1 - box.y1;
-    const y1 = y0 + fp.d;
-    return { x0, x1, y0, y1, z0: b.z0, z1: b.z0 + fp.h, w: fp.w, d: fp.d, h: fp.h, tx: box.x0, ty: box.y0 };
+    const r = TrayFrame.rectToRack(placement, TrayGeometry.box(eq, plank));
+    return { x0: r.x0, x1: r.x1, y0: r.y0, y1: r.y1, z0: placement.plankZ, z1: placement.plankZ + fp.h, w: fp.w, d: fp.d, h: fp.h };
   }
 
   /** L'équipement TIENT-il sur l'étagère (et sans chevaucher ses colocataires) ? null = oui, sinon la RAISON

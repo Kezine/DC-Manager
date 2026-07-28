@@ -1508,6 +1508,65 @@ révélé être le repère du CONTENU, pas d'un conteneur particulier.
   remonte un `git blame` doit retrouver les noms de l'époque ; un lecteur qui cherche le code d'aujourd'hui
   est renvoyé ici.
 
+### 6.23 L'ÉTAGÈRE devient un conteneur : le repère PLATEAU → BAIE — **IMPLÉMENTÉ**
+
+Dernier maillon manquant de la chaîne étagère → baie → salle. `src-shared/PlacementContainers` la
+déclarait depuis le lot 1 et `src-shared/TrayGeometry` tenait la géométrie du plateau depuis §6.7,
+mais la GÉOMÉTRIE DE PLACEMENT ne suivait pas : c'était la BAIE qui plaçait directement le posé,
+l'étagère n'étant qu'un intermédiaire de calcul. Le conteneur s'appelle
+`src-client/geometry/TrayFrame.ts`.
+
+**Ce que l'extraction a RÉVÉLÉ** — comme en §6.7, §6.11 et §6.12, c'est le résultat le plus utile :
+
+- **QUATRE sites re-dérivaient `tray.side !== "rear"`**, et chacun en tirait sa propre conséquence
+  sans jamais nommer la règle commune (« une étagère arrière retourne ses contenus ») :
+  `RackGeometry.trayEquipBoxLocal` pour retourner l'axe des profondeurs, `Resolver3D` pour le signe de
+  la normale d'un port, `DcThreeScene.buildRackTrays` pour la face qui porte l'image de façade, et
+  `DcThreeScene.buildRackPorts` pour le côté de masquage des ports. Le recensement en annonçait trois ;
+  le quatrième n'est apparu qu'en cherchant les occurrences restantes après migration — la raison même
+  pour laquelle on balaie au lieu de se fier à la liste établie (§4.1).
+- **L'axe X n'est PAS retourné, l'axe Y l'est.** `tray_x` reste compté depuis la gauche DE LA BAIE, y
+  compris sur une étagère arrière — donc pas depuis la gauche que voit un opérateur placé derrière.
+  ⚠ **Constaté, SIGNALÉ, NON arbitré.** Ce n'est pas une divergence à réparer (les quatre sites étaient
+  d'accord), c'est une question de domaine : trancher déplacerait des équipements déjà saisis. Même
+  traitement qu'en §6.11 pour les deux conventions d'origine — qui ont été arbitrées un lot plus tard,
+  une fois la question posée clairement.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **Un conteneur SÉPARÉ, pas une extension de `PlacementFrame`.** La transformée plateau → baie est une
+  TRANSLATION plus un RETOURNEMENT de l'axe Y ; celle de `PlacementFrame` est un LACET plus une
+  translation. Un retournement n'est pas une rotation de 180° — celle-ci inverserait AUSSI l'axe X, ce
+  que le comportement existant ne fait pas. Les faire entrer dans un seul module aurait produit
+  exactement l'union qui fuit que §6.2 proscrit : deux repères voisins, deux transformées de nature
+  différente. Écarté également : exprimer l'étagère comme un `ContentPlacement` à lacet 0/180 — cela
+  aurait changé le comportement en douce, sous couvert d'unification.
+- **Le conteneur REÇOIT son placement, il ne le calcule pas.** `RackGeometry.trayPlacement(rack, tray)`
+  dérive `TrayPlacement` de la boîte de l'étagère — pendant EXACT de `roomPlacement`, un cran plus bas.
+  `TrayFrame` n'importe donc ni `RackGeometry` (ce qui BOUCLERAIT) ni quoi que ce soit d'autre que le
+  TYPE du rectangle qu'il transporte. Le **verrou de borne §6.6** de `PlacementFrame` a été ÉTENDU à ce
+  module, avec sa propre liste blanche : même code de détection, une liste de plus (principe n°3).
+- **Interface ÉTROITE, littéralement (§6.2).** Seuls des RECTANGLES sont transportés — aucun appelant ne
+  transporte un point ni une direction du plateau vers la baie. Pas de `pointToRack`/`dirToRack`
+  spéculatifs, alors même que `PlacementFrame` en a l'équivalent : ce qui vaut pour un conteneur ne
+  se recopie pas chez le voisin sans constat.
+- **Parité prouvée AVANT bascule, puis attentes EXPLICITES.** L'ancien corps a été RÉGÉNÉRÉ depuis git
+  (§4.1) et comparé au nouveau sur **2 488 320 cas / 22 394 880 comparaisons** — 24 baies × 96 étagères
+  × 1 080 équipements posés : **identiques BIT POUR BIT**. Un second balayage, sur des valeurs
+  délibérément non représentables en binaire, isole la seule différence possible : les bornes **hautes**
+  `x1`/`y1` diffèrent d'au plus **1,14·10⁻¹³ mm** (l'ancien code faisait `x1 = x0 + largeur`, le
+  conteneur transporte la borne elle-même — ré-association d'une somme flottante, 7 ordres de grandeur
+  sous le micron exigé par §6.10). `x0`, `y0`, `z0`, `z1` et l'empreinte sont bit pour bit partout.
+- **Une conséquence heureuse, vérifiée et non exploitée** : `trayEquipBoxLocal` rendait deux champs
+  `tx`/`ty` (coordonnées plateau) que PLUS AUCUN appelant ne lisait. Ils disparaissent avec le transport
+  manuel — le conteneur rend un rectangle, pas un fourre-tout.
+
+**Reste ouvert, signalé ici** : un équipement posé dont l'orientation propre est 90° ou 270° voit son
+EMPREINTE permutée par `TrayGeometry.footprint` (le dessin est donc juste), mais ses PORTS continuent de
+sortir par les faces ±Y de sa boîte, comme s'il n'avait pas tourné. À vérifier et arbitrer à part : c'est
+un défaut de RÉSOLUTION potentiel, pas une conséquence de ce lot, et le corriger déplacerait des
+connecteurs.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -1515,7 +1574,7 @@ révélé être le repère du CONTENU, pas d'un conteneur particulier.
 | *(site)* | monde | **monde** | s.o. | **migré** — position déclarée (GPS) ou repli 5 km (§6.9) ; TAILLE déclarée optionnelle faisant emprise et contraignant ses plans d'étage (§6.8) |
 | `rack` | baie → salle | local salle | oui | **migré** — la SALLE place la baie, la baie place son contenu (`PlacementFrame`, §6.11 puis §6.12) |
 | `side` / `wall` | baie → salle | local salle | oui | **migré** — même conteneur que `rack` (§6.11) |
-| `tray` | étagère → baie → salle | local salle | oui | **migré** côté RÉSOLUTION (§6.11) ; géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). Reste : l'ÉTAGÈRE elle-même n'est pas encore un conteneur — la baie place directement le posé |
+| `tray` | étagère → baie → salle | local salle | oui | **migré de bout en bout** — l'ÉTAGÈRE place ses contenus (`TrayFrame`, §6.23), la baie place l'étagère, la salle place la baie (`PlacementFrame`, §6.11). Géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). **Seule chaîne à TROIS conteneurs emboîtés** |
 | `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`PlacementFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
 | *(waypoints)* | baie → salle | local salle | s.o. | **migré** — brosses et pins passent par le conteneur (§6.12) ; le champ `world` est renommé `roomPoint` |
 | `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `PlacementFrame` |
@@ -1529,10 +1588,15 @@ connaît que « dans la salle X » ou « non placé ». Généraliser cette clé
 chantier décrit en §6.4 — il reste entier.
 
 ✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur**, et la
-règle de repli d'une position absente n'est plus écrite qu'une fois (§6.13). Ce qui reste ouvert est listé
-en fin de §6.10 (étagère-conteneur, constantes générales de baie) — dettes annexes, plus étapes de
-migration. Les deux **prérequis** de §6.5 qui restaient dus sont tenus : la cascade est RÉCURSIVE et le
-chaînage porte un garde anti-cycle (§6.16).
+règle de repli d'une position absente n'est plus écrite qu'une fois (§6.13). Les deux **prérequis** de §6.5
+qui restaient dus sont tenus : la cascade est RÉCURSIVE et le chaînage porte un garde anti-cycle (§6.16).
+
+✅ **La CHAÎNE est désormais complète sous la salle** (§6.23) : étagère → baie → salle, chaque maillon
+plaçant ses propres contenus. C'était le dernier endroit où un conteneur déclaré dans
+`src-shared/PlacementContainers` n'avait pas de géométrie en face. Ce qui reste de §6.10 n'est plus une
+étape de migration mais une dette annexe : les constantes GÉNÉRALES de baie répliquées dans
+`TrayGeometry`/`RackDepthPolicy` (unifier = migrer `domain/constants.ts` vers `src-shared/`, très au-delà
+du besoin — verrouillé par des tests anti-divergence).
 
 ## 8. Références
 
