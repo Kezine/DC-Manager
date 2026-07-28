@@ -17,6 +17,9 @@ import { RackDepthPolicy } from "../../src-shared/RackDepthPolicy";
 // CONTENEUR SALLE : la baie lui DÉCLARE son placement (position + lacet + demi-empreinte de repli) ;
 // la composition « local baie → local salle » lui appartient (cf. docs/placement.md §6.1).
 import type { ContentPlacement } from "./PlacementFrame";
+// Un posé sur étagère est un boîtier LIBRE : ses cotes propres (et leurs défauts) se lisent là,
+// une seule fois — `TrayGeometry.footprint` lit déjà les mêmes champs pour l'empreinte au plateau.
+import { FreeEquipGeometry } from "./FreeEquipGeometry";
 
 /** Demi-extents au sol d'une baie. */
 export interface HalfExtents { hx: number; hy: number; }
@@ -257,13 +260,41 @@ export class RackGeometry {
       C'est ce qui permet à `TrayFrame` de ne connaître ni baie, ni enregistrement, ni face. */
   static trayPlacement(rack: any, tray: any): TrayPlacement {
     const b = RackGeometry.trayBoxLocal(rack, tray);
+    const usableX0 = b.x0 + b.xInset, usableW = RackGeometry.trayPlank(rack, tray).W;
     return {
-      usableX0: b.x0 + b.xInset,
+      // L'origine TOURNE avec l'étagère (rotation de 180°, cf. `TrayFrame` et doctrine §6.24) : bord
+      // utilisable GAUCHE pour une étagère avant, bord utilisable DROIT pour une arrière. `tray_x` se
+      // compte donc toujours depuis la gauche de QUI REGARDE l'étagère.
+      originX: b.front ? usableX0 : usableX0 + usableW,
       // l'origine des profondeurs est la FACE DE MONTAGE : bord avant pour une étagère avant, bord
       // arrière pour une étagère arrière — et les profondeurs s'y enfoncent en sens inverse.
-      faceY: b.front ? b.y0 : b.y1,
-      dirY: b.front ? 1 : -1,
+      originY: b.front ? b.y0 : b.y1,
+      dir: b.front ? 1 : -1,
       plankZ: b.z0,
+    };
+  }
+
+  /** Placement, DANS LE REPÈRE DE LA BAIE, d'un équipement POSÉ sur une étagère — ce que le conteneur
+      SALLE puis le résolveur de ports ont besoin de savoir de lui. Deux conteneurs s'y composent :
+      l'ÉTAGÈRE situe le centre du posé et ajoute son éventuel demi-tour, le posé apporte son lacet
+      PROPRE (`dc_orientation`). C'est cette composition qui manquait : la résolution des ports
+      ignorait purement et simplement le lacet d'un posé (doctrine §6.24).
+      ⚠ Le CENTRE vient de la boîte `TrayGeometry.box`, qui est l'enveloppe alignée sur les axes du
+      posé DÉJÀ tourné (l'empreinte y est permutée à 90/270). Le centre d'une enveloppe alignée est
+      le centre de l'objet : c'est bien autour de lui que le lacet doit tourner. */
+  static trayContentPlacement(rack: any, tray: any, eq: any): ContentPlacement {
+    const placement = RackGeometry.trayPlacement(rack, tray);
+    const box = TrayGeometry.box(eq, RackGeometry.trayPlank(rack, tray));
+    const centre = TrayFrame.pointToRack(placement, { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 });
+    const bx = FreeEquipGeometry.box(eq);
+    return {
+      x: centre.x,
+      y: centre.y,
+      yawDeg: TrayFrame.contentYawDeg(placement, eq.dc_orientation),
+      // demi-empreinte NON permutée, comme partout ailleurs : elle ne sert que de repli à une position
+      // absente, cas qui ne peut pas se produire ici (le centre est toujours calculable).
+      halfW: bx.w / 2,
+      halfD: bx.d / 2,
     };
   }
 

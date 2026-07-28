@@ -4,7 +4,6 @@ import { RackGeometry } from "./RackGeometry";
 // lui appartient (docs/placement.md §3 règle 1, §6.1 et §6.22). Les branches ci-dessous — baies ET
 // équipements libres — ne produisent plus que leur point/normale LOCAUX.
 import { PlacementFrame } from "./PlacementFrame";
-import { TrayFrame } from "./TrayFrame";
 import { FreeEquipGeometry } from "./FreeEquipGeometry";
 import { Depths } from "../registries/Depths";
 import {
@@ -158,20 +157,28 @@ export class Resolver3D {
       return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
     }
     if (eq.placement_mode === "tray" && eq.tray_item_id) {
-      // POSÉ SUR UNE ÉTAGÈRE : DEUX conteneurs emboîtés, chacun dans son rôle. L'ÉTAGÈRE dit vers où
-      // regarde la face d'un contenu qu'elle porte (`TrayFrame`, qui seul sait qu'une étagère arrière
-      // retourne ses posés) ; la BAIE amène le résultat au repère de la salle (`PlacementFrame`). Le
-      // résolveur n'a plus à savoir ce que `tray.side` signifie — il le demandait auparavant à la main.
+      // POSÉ SUR UNE ÉTAGÈRE : la seule chaîne à TROIS conteneurs emboîtés, chacun dans son rôle.
+      // L'ÉTAGÈRE situe le posé dans sa baie et lui ajoute son demi-tour éventuel
+      // (`RackGeometry.trayContentPlacement` via `TrayFrame`) ; le POSÉ produit le point et la normale
+      // LOCAUX de sa face, exactement comme un équipement libre — c'est le MÊME `FreeEquipGeometry`,
+      // un posé sur plateau n'étant rien d'autre qu'un boîtier libre juché plus haut ; la BAIE amène
+      // enfin le tout au repère de la salle.
+      //
+      // ⚠ CORRECTION (§6.24) : cette branche interpolait auparavant sur les seules faces ±Y de la
+      // boîte, sans jamais consulter `dc_orientation`. Un posé tourné avait donc TOUS ses ports
+      // résolus comme s'il ne l'était pas — mesuré : une seule normale pour les quatre orientations,
+      // là où le mode libre en donne quatre. Le lacet passe désormais par `PlacementFrame`, à qui
+      // cette composition appartient. Effet de bord voulu : les faces HORIZONTALES (dessus/dessous)
+      // d'un posé deviennent résolvables, comme elles le sont déjà en mode libre.
       const tray = s.get("rackItems", eq.tray_item_id); if (!tray || !tray.rack_id) return null;
       const rack = s.get("racks", tray.rack_id); if (!rack || rack.datacenter_id !== dcId) return null;
-      const b = RackGeometry.trayEquipBoxLocal(rack, tray, eq);
-      const xMin = Math.min(b.x0, b.x1), xMax = Math.max(b.x0, b.x1), yMin = Math.min(b.y0, b.y1), yMax = Math.max(b.y0, b.y1);
+      const plankZ = RackGeometry.trayPlacement(rack, tray).plankZ;
       const fx = (geo.face_x != null) ? geo.face_x : 0.5, fy = (geo.face_y != null) ? geo.face_y : 0.5;
-      const sgn = TrayFrame.contentFaceDirY(RackGeometry.trayPlacement(rack, tray), geo.face_side !== "rear");
-      const xl = xMin + fx * (xMax - xMin);
-      const yl = (sgn < 0) ? yMin : yMax;
-      const zl = b.z0 + (1 - fy) * (b.z1 - b.z0);
-      const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: 0, y: sgn });
+      // base Z = le DESSUS DU PLATEAU, et non `dc_z` : un posé repose sur son étagère.
+      const face = FreeEquipGeometry.faceLocal(eq, geo.face_side, fx, fy, plankZ);
+      const inRack = PlacementFrame.place(RackGeometry.trayContentPlacement(rack, tray, eq),
+        { x: face.lx, y: face.ly, z: face.lz }, FreeEquipGeometry.faceNormalLocal(geo.face_side));
+      const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: inRack.x, y: inRack.y, z: inRack.z }, inRack.n);
       return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
     }
     if (eq.placement_mode === "wall" && eq.rack_id) {

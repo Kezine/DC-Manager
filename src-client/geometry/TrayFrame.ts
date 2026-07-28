@@ -30,39 +30,44 @@ import type { TrayRect } from "../../src-shared/TrayGeometry";
      partagée, qui n'a aucun repère de baie sous la main.
    • Repère BAIE : celui des `*BoxLocal` de `RackGeometry`.
 
-   La transformée est une TRANSLATION, plus un RETOURNEMENT de l'axe Y quand
-   l'étagère est montée à l'arrière. Ce n'est PAS un lacet : `PlacementFrame` ne
-   peut donc pas l'exprimer, et l'y forcer serait l'union qui fuit que §6.2
-   proscrit. Deux repères voisins, deux transformées de nature différente.
+   La transformée est une TRANSLATION, plus — pour une étagère montée à l'ARRIÈRE —
+   une ROTATION DE 180° autour de la verticale. Les deux axes se retournent
+   ensemble : l'étagère arrière pivote comme un meuble qu'on retourne.
 
-   ⚠ L'AXE X N'EST PAS RETOURNÉ, ET CE N'EST PAS UN OUBLI — c'est le comportement
-   EXISTANT, reproduit à l'identique et SIGNALÉ plutôt qu'arbitré. Une étagère
-   arrière retourne les profondeurs mais pas les largeurs : `tray_x` reste compté
-   depuis la gauche DE LA BAIE, jamais depuis la gauche vue par un opérateur placé
-   derrière. Est-ce voulu ? La question est réelle — les trois sites d'origine
-   s'accordaient sur ce point, donc ce n'est pas une divergence à réparer mais un
-   ARBITRAGE à prendre, et le trancher ici déplacerait des équipements déjà saisis.
-   Même principe qu'en §6.11 pour les deux conventions d'origine : on constate, on
-   nomme, on ne tranche pas dans un lot de déduplication.
+   ⚠ CE POINT A ÉTÉ ARBITRÉ (décision utilisateur, §6.24), il ne l'était pas au
+   lot précédent. Le code d'origine ne retournait QUE l'axe Y — `tray_x` restait
+   compté depuis la gauche DE LA BAIE, donc depuis la DROITE de l'opérateur placé
+   derrière. C'était une RÉFLEXION, pas une rotation. Une réflexion n'existe pas
+   physiquement (on ne retourne pas un boîtier comme un gant) et surtout elle NE SE
+   COMPOSE PAS avec les lacets : c'est ce qui empêchait de faire remonter
+   l'orientation propre d'un posé jusqu'à ses ports. Retenir la rotation vraie rend
+   toute la chaîne composable — et c'est ce qui a permis de corriger le défaut des
+   ports du même geste.
 
-   INTERFACE ÉTROITE (§6.2) : n'est offert que ce qui est CONSTATÉ. Seuls des
-   RECTANGLES sont transportés aujourd'hui — il n'existe pas un seul appelant qui
-   transporte un point ou une direction du plateau vers la baie, donc pas de
-   `pointToRack` ni de `dirToRack` spéculatifs. Le paramétrage d'ATTACHE d'un posé
-   (`tray_x`/`tray_y`, empreinte, orientation propre) reste chez `TrayGeometry`.
+   `tray_x` se compte donc depuis la gauche de qui REGARDE l'étagère : la gauche de
+   la baie pour une étagère avant, sa droite pour une arrière.
+
+   INTERFACE ÉTROITE (§6.2) : n'est offert que ce qui est CONSTATÉ. Les rectangles
+   sont transportés (boîte d'un posé), les points aussi (centre d'un posé, dont le
+   résolveur de ports a besoin pour composer le lacet) — mais pas les DIRECTIONS :
+   aucun appelant n'en transporte, et le lacet d'un contenu s'exprime déjà par
+   `contentYawDeg` + `PlacementFrame`, qui tourne les normales. Le paramétrage
+   d'ATTACHE d'un posé (`tray_x`/`tray_y`, empreinte) reste chez `TrayGeometry`.
    ============================================================================= */
 
 /** Placement DÉCLARÉ d'une ÉTAGÈRE dans sa baie — ce que le conteneur doit savoir de lui-même, et
     rien d'autre. Dérivé de la boîte de l'étagère par `RackGeometry.trayPlacement`, exactement comme
     `RackGeometry.roomPlacement` dérive le placement d'une BAIE dans sa salle. */
 export interface TrayPlacement {
-  /** X (repère baie) du bord UTILISABLE gauche du plateau — garde des renforts DÉJÀ déduite. */
-  usableX0: number;
+  /** X (repère baie) de l'ORIGINE des largeurs du plateau : son bord utilisable GAUCHE pour une
+      étagère avant, son bord utilisable DROIT pour une arrière (l'origine tourne avec l'étagère). */
+  originX: number;
   /** Y (repère baie) de la FACE DE MONTAGE : l'origine depuis laquelle `tray_y` se mesure. */
-  faceY: number;
-  /** Sens des +Y du plateau dans la baie : `+1` étagère AVANT, `-1` étagère ARRIÈRE (profondeurs
-      retournées — le contenu s'enfonce vers la façade avant de la baie). */
-  dirY: 1 | -1;
+  originY: number;
+  /** Sens des DEUX axes du plateau dans la baie : `+1` étagère AVANT, `-1` étagère ARRIÈRE. Un seul
+      signe pour x ET y — c'est ce qui fait de la transformée une ROTATION de 180° et non une
+      réflexion (cf. l'en-tête : une réflexion ne se composerait pas avec les lacets). */
+  dir: 1 | -1;
   /** Z (repère baie) du DESSUS du plateau : le plan sur lequel les contenus REPOSENT. */
   plankZ: number;
 }
@@ -71,17 +76,26 @@ export interface TrayPlacement {
 export interface TrayRackRect { x0: number; x1: number; y0: number; y1: number; }
 
 export class TrayFrame {
-  /** Rectangle du repère PLATEAU → repère BAIE. Les bornes sont RÉORDONNÉES après transformation :
-      sur une étagère arrière le retournement inverse l'intervalle Y, et tous les appelants attendent
-      `y0 ≤ y1` (l'ancien code le garantissait par construction, en repartant du bord opposé). */
-  static rectToRack(placement: TrayPlacement, rect: TrayRect): TrayRackRect {
-    const ya = placement.faceY + placement.dirY * rect.y0;
-    const yb = placement.faceY + placement.dirY * rect.y1;
+  /** POINT du repère PLATEAU → repère BAIE. C'est la composition élémentaire dont les deux autres
+      méthodes découlent ; le résolveur de ports s'en sert pour situer le CENTRE d'un posé, autour
+      duquel `PlacementFrame` fera ensuite tourner son lacet propre. */
+  static pointToRack(placement: TrayPlacement, point: { x: number; y: number }): { x: number; y: number } {
     return {
-      x0: placement.usableX0 + rect.x0,
-      x1: placement.usableX0 + rect.x1,
-      y0: Math.min(ya, yb),
-      y1: Math.max(ya, yb),
+      x: placement.originX + placement.dir * point.x,
+      y: placement.originY + placement.dir * point.y,
+    };
+  }
+
+  /** Rectangle du repère PLATEAU → repère BAIE. Les bornes sont RÉORDONNÉES après transformation :
+      sur une étagère arrière la rotation inverse les DEUX intervalles, et tous les appelants
+      attendent `x0 ≤ x1` / `y0 ≤ y1`. Une rotation de 180° laisse une boîte alignée sur les axes
+      alignée sur les axes — seuls ses coins s'échangent, d'où le simple réordonnancement. */
+  static rectToRack(placement: TrayPlacement, rect: TrayRect): TrayRackRect {
+    const a = TrayFrame.pointToRack(placement, { x: rect.x0, y: rect.y0 });
+    const b = TrayFrame.pointToRack(placement, { x: rect.x1, y: rect.y1 });
+    return {
+      x0: Math.min(a.x, b.x), x1: Math.max(a.x, b.x),
+      y0: Math.min(a.y, b.y), y1: Math.max(a.y, b.y),
     };
   }
 
@@ -89,18 +103,16 @@ export class TrayFrame {
       est-elle montée à l'avant ? C'est la question que `DcThreeScene` posait en relisant `tray.side`,
       pour décider quelle face du posé porte son image de façade. */
   static facesFront(placement: TrayPlacement): boolean {
-    return placement.dirY > 0;
+    return placement.dir > 0;
   }
 
-  /** Signe, en Y de la BAIE, de la normale SORTANTE d'une face d'un contenu posé. `faceIsFront` dit
-      de quelle face du CONTENU il s'agit (sa façade, ou son dos).
-
-      Les −Y de la baie sont sa FAÇADE : la façade d'un contenu posé sur une étagère AVANT sort donc
-      vers les −Y, et une étagère ARRIÈRE retourne les deux faces d'un coup. C'est la règle que
-      `Resolver3D` réécrivait sous la forme `(portFront === trayFront) ? -1 : 1` — même verdict, mais
-      sans que le résolveur ait à savoir ce que `tray.side` signifie. */
-  static contentFaceDirY(placement: TrayPlacement, faceIsFront: boolean): 1 | -1 {
-    const outward = faceIsFront ? -1 : 1;
-    return (outward * placement.dirY) as 1 | -1;
+  /** Lacet d'un contenu DANS LE REPÈRE DE LA BAIE : son lacet propre, plus le demi-tour de l'étagère
+      si elle est montée à l'arrière. C'est la clé de voûte du lot §6.24 — parce que la transformée de
+      l'étagère est une ROTATION, les deux lacets s'ADDITIONNENT, et `PlacementFrame` peut composer
+      l'ensemble d'un bloc. Avec l'ancienne réflexion, cette addition n'aurait pas eu de sens : le
+      lacet propre d'un posé n'atteignait donc jamais ses ports, tous résolus comme s'il n'avait pas
+      tourné (défaut confirmé par sonde, cf. §6.24). */
+  static contentYawDeg(placement: TrayPlacement, contentYawDeg: number): number {
+    return (contentYawDeg || 0) + (placement.dir > 0 ? 0 : 180);
   }
 }

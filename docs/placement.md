@@ -1532,6 +1532,12 @@ l'étagère n'étant qu'un intermédiaire de calcul. Le conteneur s'appelle
   traitement qu'en §6.11 pour les deux conventions d'origine — qui ont été arbitrées un lot plus tard,
   une fois la question posée clairement.
 
+  > **Mise à jour — ARBITRÉ en §6.24, exactement comme §6.11 l'avait été.** L'utilisateur a tranché :
+  > c'est une **ROTATION de 180°**, donc les DEUX axes se retournent. Le paragraphe ci-dessus décrit
+  > l'état d'avant cet arbitrage, et le délai entre les deux lots n'a duré qu'une question — parce que
+  > le lot suivant a montré que la réflexion ne pouvait pas être correcte : elle NE SE COMPOSE PAS avec
+  > les lacets, ce qui bloquait la correction d'un défaut réel.
+
 **Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
 
 - **Un conteneur SÉPARÉ, pas une extension de `PlacementFrame`.** La transformée plateau → baie est une
@@ -1567,6 +1573,56 @@ sortir par les faces ±Y de sa boîte, comme s'il n'avait pas tourné. À vérif
 un défaut de RÉSOLUTION potentiel, pas une conséquence de ce lot, et le corriger déplacerait des
 connecteurs.
 
+> **Mise à jour — VÉRIFIÉ, plus large qu'annoncé, et CORRIGÉ en §6.24.** La sonde montre que les QUATRE
+> orientations rendaient la même normale : le défaut ne touchait pas que 90°/270°, mais aussi **180°** —
+> le cas le plus net, puisque la boîte y est identique et que seule la façade s'inverse. Ce paragraphe
+> disait « à vérifier » à juste titre : l'énoncé déduit du code était incomplet.
+
+### 6.24 Le LACET PROPRE d'un posé atteint ses ports, et l'étagère arrière TOURNE — **IMPLÉMENTÉ**
+
+Suite immédiate de §6.23, et démonstration de ce que la doctrine attend d'un signalement : les deux
+points laissés ouverts n'en formaient qu'UN, et l'un ne pouvait pas se corriger sans que l'autre soit
+tranché.
+
+**Le défaut, MESURÉ et non déduit.** Une sonde compare la résolution d'un port sur un posé aux quatre
+orientations, en mode `tray` puis en mode LIBRE, boîtier identique : le mode libre rend **quatre**
+normales distinctes, le mode `tray` rend **(0, −1) pour les quatre**. La branche `tray` interpolait sur
+les seules faces ±Y de la boîte et ne lisait jamais `dc_orientation`. L'énoncé initial de §6.23 (« les
+90°/270° ») était donc incomplet : **180° était touché aussi**, et le plus visiblement — empreinte
+inchangée, façade inversée, port immobile.
+
+**Pourquoi les deux points n'en font qu'un.** Corriger le défaut demande de faire remonter le lacet du
+posé jusqu'à `PlacementFrame`. Or une RÉFLEXION — ce que faisait l'étagère arrière — ne se compose pas
+avec des lacets : le « lacet effectif » d'un contenu dans sa baie n'aurait pas été une addition. Sous
+réflexion, un boîtier tourné à 90° aurait regardé la **même direction absolue** sur une étagère avant et
+sur une arrière, ce qui contredit l'idée même qu'une étagère arrière retourne ses contenus.
+
+**Décision (utilisateur) : ROTATION de 180°.** Les deux axes se retournent. `tray_x` se compte depuis la
+gauche de QUI REGARDE l'étagère — la gauche de la baie pour une avant, sa droite pour une arrière. Dès
+lors tout se compose : `TrayFrame.contentYawDeg` ADDITIONNE le lacet du posé et le demi-tour éventuel de
+son étagère, et `PlacementFrame` fait le reste. Le résolveur ne calcule plus aucun signe à la main.
+
+**Conséquences, toutes vérifiées :**
+
+- Les posés produisent leur point et leur normale LOCAUX via **le même `FreeEquipGeometry`** que les
+  équipements libres — un posé sur plateau n'est rien d'autre qu'un boîtier libre juché plus haut. Ce qui
+  reste propre à l'étagère est la BASE Z (le dessus du plateau, et non `dc_z`).
+- **Effet de bord voulu** : les faces HORIZONTALES (dessus / dessous) d'un posé deviennent résolvables,
+  comme elles l'étaient déjà en mode libre. L'ancienne branche ne savait produire que des faces ±Y.
+- **Rayon d'action mesuré AVANT de toucher au code** : les deux corpus (réel et démonstration) portent
+  **1 étagère, avant, vide** — zéro posé, zéro posé tourné, zéro étagère arrière. Aucune donnée existante
+  ne bouge. C'était le moment le moins cher possible pour trancher, et c'est ce qui a permis de le faire
+  sans migration.
+- Aucun test existant ne rougit : la seule section à réécrire est celle du lot précédent. Autrement dit
+  le comportement des étagères ARRIÈRE n'était couvert par **aucun** test — ce que le lot précédent
+  n'avait pas dit, et qu'il aurait dû.
+
+**Reste ouvert, et cette fois c'est du DESSIN** : `DcThreeScene` dessine un posé comme une boîte alignée
+sur les axes et plaque son image de façade sur les faces ±Y, sans consulter `dc_orientation`. Un posé
+tourné aura donc désormais ses PORTS au bon endroit et son IMAGE au mauvais — incohérence introduite
+ici, assumée, et sans effet sur les données actuelles (aucun posé). La corriger demande de dessiner une
+boîte TOURNÉE (et non son enveloppe), ce qui relève du rendu et **doit être validé à l'œil**.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -1574,7 +1630,7 @@ connecteurs.
 | *(site)* | monde | **monde** | s.o. | **migré** — position déclarée (GPS) ou repli 5 km (§6.9) ; TAILLE déclarée optionnelle faisant emprise et contraignant ses plans d'étage (§6.8) |
 | `rack` | baie → salle | local salle | oui | **migré** — la SALLE place la baie, la baie place son contenu (`PlacementFrame`, §6.11 puis §6.12) |
 | `side` / `wall` | baie → salle | local salle | oui | **migré** — même conteneur que `rack` (§6.11) |
-| `tray` | étagère → baie → salle | local salle | oui | **migré de bout en bout** — l'ÉTAGÈRE place ses contenus (`TrayFrame`, §6.23), la baie place l'étagère, la salle place la baie (`PlacementFrame`, §6.11). Géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). **Seule chaîne à TROIS conteneurs emboîtés** |
+| `tray` | étagère → baie → salle | local salle | oui | **migré de bout en bout** — l'ÉTAGÈRE place ses contenus (`TrayFrame`, §6.23), la baie place l'étagère, la salle place la baie (`PlacementFrame`, §6.11). Géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). **Seule chaîne à TROIS conteneurs emboîtés** ; le lacet PROPRE d'un posé s'y compose enfin (§6.24) et une étagère arrière est une vraie ROTATION |
 | `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`PlacementFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
 | *(waypoints)* | baie → salle | local salle | s.o. | **migré** — brosses et pins passent par le conteneur (§6.12) ; le champ `world` est renommé `roomPoint` |
 | `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `PlacementFrame` |

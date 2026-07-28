@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -1894,9 +1894,11 @@ module.exports = async () => {
     // seules les bornes HAUTES x1/y1 bougent, d'au plus 1,14·10⁻¹³ mm (ré-association d'une somme
     // flottante — l'ancien code faisait `x1 = x0 + largeur`, le conteneur transporte la borne elle-même).
 
-    // Repère PLATEAU → repère BAIE : translation, plus RETOURNEMENT de l'axe Y si l'étagère est arrière.
-    const avant = { usableX0: -100, faceY: -400, dirY: 1, plankZ: 50 };
-    const arriere = { usableX0: -100, faceY: 400, dirY: -1, plankZ: 50 };
+    // Repère PLATEAU → repère BAIE : translation, plus ROTATION DE 180° si l'étagère est arrière —
+    // les DEUX axes se retournent ensemble (décision utilisateur, §6.24). Plateau utilisable large de
+    // 100 : l'origine d'une étagère arrière est donc son bord DROIT, à −100 + 100 = 0.
+    const avant = { originX: -100, originY: -400, dir: 1, plankZ: 50 };
+    const arriere = { originX: 0, originY: 400, dir: -1, plankZ: 50 };
     const rect = { x0: 10, x1: 60, y0: 5, y1: 35 };
 
     const rAv = TrayFrame.rectToRack(avant, rect);
@@ -1904,16 +1906,20 @@ module.exports = async () => {
     ck(rAv.y0 === -395 && rAv.y1 === -365, "étagère AVANT : les profondeurs s'enfoncent vers les +Y depuis la face");
 
     const rAr = TrayFrame.rectToRack(arriere, rect);
-    ck(rAr.x0 === -90 && rAr.x1 === -40, "étagère ARRIÈRE : x IDENTIQUE — l'axe des largeurs n'est PAS retourné (comportement existant, SIGNALÉ dans l'en-tête, non arbitré)");
+    ck(rAr.x0 === -60 && rAr.x1 === -10, "étagère ARRIÈRE : x RETOURNÉ aussi — c'est une ROTATION, pas une réflexion");
     ck(rAr.y0 === 365 && rAr.y1 === 395, "étagère ARRIÈRE : profondeurs vers les −Y depuis la face arrière");
-    ck(rAr.y0 <= rAr.y1, "bornes RÉORDONNÉES : le retournement inverse l'intervalle, tous les appelants attendent y0 ≤ y1");
-    ck((rAv.y1 - rAv.y0) === (rAr.y1 - rAr.y0), "retourner ne DÉFORME pas : même profondeur des deux côtés");
+    ck(rAr.y0 <= rAr.y1 && rAr.x0 <= rAr.x1, "bornes RÉORDONNÉES : la rotation échange les coins, les appelants attendent x0 ≤ x1 / y0 ≤ y1");
+    ck((rAv.y1 - rAv.y0) === (rAr.y1 - rAr.y0) && (rAv.x1 - rAv.x0) === (rAr.x1 - rAr.x0), "tourner ne DÉFORME pas : mêmes cotes des deux côtés");
+    // C'EST une rotation : les deux images sont symétriques par rapport au CENTRE du plateau (−50, …).
+    ck(((rAv.x0 + rAr.x1) / 2) === -50 && ((rAv.x1 + rAr.x0) / 2) === -50, "les deux images sont symétriques par rapport au CENTRE du plateau (signature d'un demi-tour)");
 
-    // Face d'un contenu : les −Y de la baie sont sa FAÇADE ; une étagère arrière retourne les deux faces.
-    ck.eq(TrayFrame.contentFaceDirY(avant, true), -1, "étagère avant, façade du posé → sort vers −Y (la façade de la baie)");
-    ck.eq(TrayFrame.contentFaceDirY(avant, false), 1, "étagère avant, dos du posé → +Y");
-    ck.eq(TrayFrame.contentFaceDirY(arriere, true), 1, "étagère ARRIÈRE, façade du posé → +Y (le posé est retourné avec son étagère)");
-    ck.eq(TrayFrame.contentFaceDirY(arriere, false), -1, "étagère ARRIÈRE, dos du posé → −Y");
+    // Le lacet d'un contenu s'ADDITIONNE à celui de son étagère — ce qui n'aurait aucun sens avec une
+    // réflexion, et c'est précisément ce qui rend la chaîne composable jusqu'aux ports.
+    ck.eq(TrayFrame.contentYawDeg(avant, 0), 0, "contentYawDeg : étagère avant → lacet propre inchangé");
+    ck.eq(TrayFrame.contentYawDeg(avant, 90), 90, "contentYawDeg : … quel que soit le lacet");
+    ck.eq(TrayFrame.contentYawDeg(arriere, 0), 180, "contentYawDeg : étagère ARRIÈRE → demi-tour ajouté");
+    ck.eq(TrayFrame.contentYawDeg(arriere, 90), 270, "contentYawDeg : les deux lacets s'ADDITIONNENT");
+    ck.eq(TrayFrame.contentYawDeg(avant, null), 0, "contentYawDeg : lacet absent → 0 (tolérant)");
     ck.eq(TrayFrame.facesFront(avant), true, "facesFront : étagère avant");
     ck.eq(TrayFrame.facesFront(arriere), false, "facesFront : étagère arrière");
 
@@ -1923,20 +1929,69 @@ module.exports = async () => {
     const tAr = Object.assign({}, tAv, { side: "rear" });
     const bAv = RackGeometry.trayBoxLocal(rk, tAv), pAv = RackGeometry.trayPlacement(rk, tAv);
     const bAr = RackGeometry.trayBoxLocal(rk, tAr), pAr = RackGeometry.trayPlacement(rk, tAr);
-    ck(pAv.dirY === 1 && pAr.dirY === -1, "trayPlacement : le SENS des profondeurs vient de la face de montage");
-    ck(Math.abs(pAv.faceY - bAv.y0) < 1e-12, "trayPlacement AVANT : l'origine des profondeurs est le bord AVANT du plateau");
-    ck(Math.abs(pAr.faceY - bAr.y1) < 1e-12, "trayPlacement ARRIÈRE : l'origine est le bord ARRIÈRE");
-    ck(Math.abs(pAv.usableX0 - (bAv.x0 + bAv.xInset)) < 1e-12, "trayPlacement : la garde des renforts est DÉJÀ déduite du bord utilisable");
+    const largeurUtile = TrayGeometry.plank(RackGeometry.cageDepth(rk), tAv).W;
+    ck(pAv.dir === 1 && pAr.dir === -1, "trayPlacement : le SENS des DEUX axes vient de la face de montage");
+    ck(Math.abs(pAv.originY - bAv.y0) < 1e-12, "trayPlacement AVANT : l'origine des profondeurs est le bord AVANT du plateau");
+    ck(Math.abs(pAr.originY - bAr.y1) < 1e-12, "trayPlacement ARRIÈRE : l'origine est le bord ARRIÈRE");
+    ck(Math.abs(pAv.originX - (bAv.x0 + bAv.xInset)) < 1e-12, "trayPlacement AVANT : origine = bord utilisable GAUCHE (garde des renforts déjà déduite)");
+    ck(Math.abs(pAr.originX - (bAr.x0 + bAr.xInset + largeurUtile)) < 1e-12, "trayPlacement ARRIÈRE : origine = bord utilisable DROIT — `tray_x` se compte depuis la gauche de QUI REGARDE");
     ck(Math.abs(pAv.plankZ - bAv.z0) < 1e-12, "trayPlacement : les posés reposent sur le DESSUS du plateau");
 
-    // Le posé d'une étagère ARRIÈRE est bien retourné : à `tray_y` = 0 il est collé au bord ARRIÈRE.
+    // Le posé d'une étagère ARRIÈRE est bien RETOURNÉ — les DEUX axes (rotation, §6.24).
     const eq0 = { free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, dc_orientation: 0, tray_x: 0, tray_y: 0 };
     const posAv = RackGeometry.trayEquipBoxLocal(rk, tAv, eq0);
     const posAr = RackGeometry.trayEquipBoxLocal(rk, tAr, eq0);
     ck(Math.abs(posAv.y0 - bAv.y0) < 1e-9, "posé sur étagère AVANT, tray_y = 0 → collé au bord AVANT du plateau");
     ck(Math.abs(posAr.y1 - bAr.y1) < 1e-9, "posé sur étagère ARRIÈRE, tray_y = 0 → collé au bord ARRIÈRE (retourné)");
-    ck(Math.abs(posAv.x0 - posAr.x0) < 1e-12, "posé : MÊME x des deux côtés — l'axe des largeurs n'est pas retourné");
-    ck(Math.abs((posAv.y1 - posAv.y0) - (posAr.y1 - posAr.y0)) < 1e-12, "posé : même profondeur des deux côtés");
+    ck(Math.abs(posAv.x0 - (bAv.x0 + bAv.xInset)) < 1e-9, "posé AVANT, tray_x = 0 → collé au bord GAUCHE de la baie");
+    ck(Math.abs(posAr.x1 - (bAr.x0 + bAr.xInset + largeurUtile)) < 1e-9, "posé ARRIÈRE, tray_x = 0 → collé au bord DROIT de la baie (= sa gauche, vue de derrière)");
+    ck(Math.abs((posAv.x1 - posAv.x0) - (posAr.x1 - posAr.x0)) < 1e-12, "posé : mêmes cotes des deux côtés");
+  }
+  });
+
+  await section("Resolver3D : le lacet PROPRE d'un posé atteint enfin ses ports (§6.24 — défaut CONFIRMÉ par sonde)", async () => {
+  {
+    /* DÉFAUT MESURÉ AVANT CORRECTION : la branche `tray` interpolait sur les seules faces ±Y de la
+       boîte, sans jamais lire `dc_orientation`. Sonde : les QUATRE orientations rendaient la MÊME
+       normale (0, −1), là où le même boîtier en mode LIBRE en rend quatre distinctes. Ce n'était donc
+       pas un défaut des seuls 90°/270° (empreinte permutée) : 180° l'était aussi, et de la façon la
+       plus nette — boîte identique, façade inversée, port immobile. La correction fait passer le
+       lacet par `PlacementFrame`, à qui cette composition appartient. */
+    const s = await makeStore();
+    const dc = await s.create("datacenters", { name: "S", width_mm: 5000, depth_mm: 5000 });
+    const rack = await s.create("racks", { name: "R", datacenter_id: dc.id, dc_x: 0, dc_y: 0, orientation: 0,
+      u_count: 42, depth: 1000, width_mm: 600, cage_depth_mm: 900, front_margin_mm: 50 });
+    const r = new Resolver3D(s);
+    const GEO = { face_side: "front", face_x: 0.5, face_y: 0.5 };
+    const arr = (v) => Math.round(v * 100) / 100;
+
+    // Une étagère PAR CAS : deux posés au même endroit d'un même plateau se CHEVAUCHENT, et la
+    // validation les refuse silencieusement (`create` rend null) — piège rencontré en écrivant la
+    // sonde, consigné ici pour qu'on ne le redécouvre pas.
+    const normalesDe = async (side, u0) => {
+      const out = [];
+      for (const [i, ori] of [0, 90, 180, 270].entries()) {
+        const t = await s.create("rackItems", { rack_id: rack.id, kind: "tray", u: u0 + i * 4, u_height: 3, tray_u: 1, tray_type: "dual", side });
+        const eq = await s.create("equipments", { name: side + ori, placement_mode: "tray", dim_mode: "free",
+          tray_item_id: t.id, free_w_mm: 200, free_l_mm: 400, free_h_mm: 80, dc_orientation: ori, tray_x: 0, tray_y: 0 });
+        const p = eq && r.resolveFaceAnchor3D(eq, GEO, dc.id);
+        out.push(p ? arr(p.n.x) + "," + arr(p.n.y) : "NULL");
+      }
+      return out;
+    };
+
+    const nAvant = await normalesDe("front", 3);
+    ck.eq(nAvant.join(" | "), "0,-1 | 1,0 | 0,1 | -1,0",
+      "étagère AVANT : la façade d'un posé suit son lacet — 4 normales, une par orientation (avant correction : (0,−1) partout)");
+    ck.eq(new Set(nAvant).size, 4, "les 4 normales sont DISTINCTES (anti-vacuité : c'est exactement ce qui manquait)");
+
+    const nArriere = await normalesDe("rear", 23);
+    ck.eq(nArriere.join(" | "), "0,1 | -1,0 | 0,-1 | 1,0",
+      "étagère ARRIÈRE : les mêmes, RETOURNÉES d'un demi-tour — les deux lacets se composent");
+    for (let i = 0; i < 4; i++) {
+      const [ax, ay] = nAvant[i].split(",").map(Number), [bx, by] = nArriere[i].split(",").map(Number);
+      ck(ax === -bx && ay === -by, "orientation " + [0, 90, 180, 270][i] + "° : avant et arrière exactement OPPOSÉES (demi-tour, pas réflexion)");
+    }
   }
   });
 
