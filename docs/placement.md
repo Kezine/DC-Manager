@@ -1341,6 +1341,71 @@ aurait donc compilé sur une API morte.
   que §6.4 décrit — généraliser la CLÉ de la machinerie de câblage de « salle » à « conteneur » — et il est
   distinct. Ce lot le rend simplement VISIBLE : on voit désormais où les câbles devront arriver.
 
+### 6.21 Le PIVOT D'ORBITE suit le REPÈRE, et devient une boîte 3D — **IMPLÉMENTÉ**
+
+Signalé par l'utilisateur : en « Vue étage », la contrainte de rotation de la caméra **reste liée à la salle
+active** au lieu de suivre les enveloppes de bâtiment ; pointer hors d'un bâtiment envoie le pivot sur un plan
+que rien ne dessine ; les limites devraient être une boîte englobant les sites affichés.
+
+Cause, vérifiée : `DcThreeScene.recomputePivotAabb` posait `pivotAabb` = l'union des **SALLES** affichées, en
+**XY seul**. C'est le symptôme n°1 du §1 une couche plus loin — un comportement de **REPÈRE** dérivé d'un
+sous-arbre de **PORTÉE**. Le repli du pivot (aucune surface au centre de l'écran) tombe, lui, sur le plan de sol
+`z = 0` **infini et invisible** de `DcThreeBase`, puis était ramené dans cette boîte de salle.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **L'enveloppe est celle des BÂTIMENTS** (`MultiLayout.buildings`), donc la taille **DÉCLARÉE** du site quand
+  elle existe (§6.8), sinon l'emprise déduite de ses plans. Écarté : l'union des **plans d'étage** dessinés —
+  elle se confond avec l'enveloppe tant que rien n'est déclaré, mais un bâtiment déclaré plus grand que ses
+  plans est précisément le cas où les deux lectures divergent, et c'est l'enveloppe qui fait foi.
+- **Les bandes sont FILTRÉES par la portée, les positions ne le sont pas.** `multiLayout` émet une bande pour
+  chaque bâtiment du **MODÈLE** (§6.8 : masquer retire du dessin, pas du repère) ; on n'en retient que celles
+  qui ont au moins un plan **dessiné**. C'est le corollaire opératoire de §6.8 appliqué à la lettre — layout
+  complet, puis on filtre ce qu'on ÉMET —, et aucune bande ne change de position selon la portée. Écarté :
+  englober tous les bâtiments du modèle, ce qui ferait orbiter autour de **kilomètres de vide** dès qu'un site
+  est hors portée : le défaut même qu'on corrige, réintroduit par l'autre bout.
+- **⚠ ASYMÉTRIE ASSUMÉE en Z** : la hauteur reste `MultiLayout.topZ`, celle du **modèle**, non celle des seuls
+  niveaux dessinés. La filtrer demanderait de recomposer la pile des niveaux **dans la vue**, ce que §3 règle 4
+  interdit, pour un écart borné par la hauteur du monde — là où l'écart en XY est kilométrique. Signalé ici
+  plutôt que laissé implicite.
+- **Une VRAIE boîte 3D, et le plan `z = 0` RÉTROGRADÉ.** `PivotBounds.slabExitT` faisait la méthode du slab sur
+  X puis Y ; elle la fait désormais sur les **trois** axes. Conséquence directe : le point de sortie du rayon ne
+  quitte plus le monde (il sortait 500 mm sous le plancher ou 2 000 mm au-dessus du toit dans les cas mesurés),
+  et un sol sous le plancher n'est plus « dans la boîte ». Le plan `z = 0` n'est plus qu'une **entrée de dernier
+  recours, elle-même ramenée dans la boîte**.
+- **Le bornage en Z est OPTIONNEL, et son absence a un sens.** `PivotAabb.minZ`/`maxZ` absents = « parois
+  verticales infiniment hautes » : c'est ce que rend `unionAabb` (repère salle), dont le comportement est ainsi
+  conservé **au micron** — hors Vue étage, rien ne change. Écarté : borner aussi la salle en Z, qui aurait
+  changé le ressenti d'un mode que personne n'a signalé comme fautif.
+- **Le DISCRIMINANT est la PRÉSENCE d'un décor d'étage, jamais un COMPTAGE.** `DcBase.webglCtx` ne pousse un
+  `floorDecor` qu'en Vue étage et pose `floorDecor = null` en salle unique : c'est donc une propriété du repère.
+  Écarté (et interdit par §3 règle 2) : tester le nombre de salles — `webglCtx` décrit la salle unique comme un
+  « multi » à **une** salle, un comptage mentirait. C'est le piège exact qui avait égaré le diagnostic du lot 8,
+  et un test le fige : une salle unique affichée en Vue étage voit l'enveloppe de **son bâtiment**.
+- **La SIGNATURE d'invalidation suit** (`SceneLayoutSignature`), bien que ces bornes ne DESSINENT rien —
+  justement parce qu'elles ne dessinent rien : `recomputePivotAabb` n'est rejoué qu'à la (re)construction de la
+  scène, donc une enveloppe qui changerait sans changer la signature laisserait le pivot borné à l'ANCIEN monde
+  jusqu'au rechargement — la sous-invalidation du lot 8, déplacée du dessin vers la caméra. Écarté : se reposer
+  sur le fait que l'étiquette de bâtiment bouge « en général » quand sa bande bouge — un test le réfute, en
+  déclarant une profondeur de site qui ne déplace **aucune** étiquette.
+- **Un champ UNIQUE et nommé** (`FloorDecor.world`), et non le retour des `maxD`/`topZ` retirés au lot 9 : ceux-là
+  DESSINAIENT le plan séparateur, supprimé depuis. Le besoin est distinct (un REPÈRE de caméra), d'où un champ qui
+  le dit, plutôt que deux cotes éparses à recomposer chez le consommateur.
+
+**⚠ LIMITE CONNUE, mesurée et NON corrigée — le pivot ne se pose pas au NIVEAU regardé.** Le raycast prioritaire
+(`DcThreeCamera.recenterPivotOnView`) porte sur `gDecor`/`gRacks`/`gFree`/`gWaypoints` et **EXCLUT
+délibérément `gFloorDecor`** — « le décor d'étage ne doit jamais influencer le centre de rotation ». Un plan
+d'étage n'est donc **jamais** touché : en Vue étage, viser une zone vide d'un étage haut emprunte toujours le
+repli. La boîte 3D borne désormais ce repli au monde (c'était le défaut criant), mais le point obtenu est une
+**paroi du monde le long du rayon**, pas le plan du niveau regardé : sur un étage haut, le pivot peut encore
+descendre de quelques mètres. Le remède serait un repli « plan du niveau regardé » ; il n'est **pas** implémenté —
+il suppose de connaître le niveau visé, donc d'ajouter un critère au repli, et la simplicité l'emporte tant que
+l'utilisateur n'a pas jugé le résultat à l'œil. Alternative annexe, également écartée ici : rendre les plans
+d'étage sélectionnables par le raycast du pivot, ce qui reviendrait sur une décision d'un lot antérieur.
+
+**Sondes de mutation** : axe Z neutralisé → **8 FAIL** ; bornes monde jamais émises par la vue → **8 FAIL** ;
+filtre des bâtiments dessinés retiré → **2 FAIL** ; bornes monde non signées → **10 FAIL**.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -1394,6 +1459,11 @@ chaînage porte un garde anti-cycle (§6.16).
   `compress` (mètres réels → millimètres monde, échelle linéaire/log), `worldPositions`.
 - `src-client/geometry/FloorLayout.ts` — `multiLayout` (chaîne bâtiment/étage/salle), `roomToWorld`,
   `equipFloorWorld`, `oobWorld`, `levelZ`.
+- `src-client/geometry/PivotBounds.ts` — **BORNAGE DU PIVOT D'ORBITE** (§6.21), pur : `rectCorners`/`unionAabb`
+  (repère SALLE, boîte **XY seule** — bornes en Z absentes = parois infinies), `worldBounds` (repère BÂTIMENT,
+  boîte **3D** = bandes de bâtiment dessinées × hauteur du monde) et `clampPivot` (méthode du slab sur les TROIS
+  axes). Ne borne QUE le repli « plan de sol infini » : le contenu réellement touché par le raycast reste
+  prioritaire. La boîte est CHOISIE par `DcThreeScene.recomputePivotAabb`, sur la PRÉSENCE d'un décor d'étage.
 - `src-client/geometry/CameraFraming.ts` — **RÈGLE DE CADRAGE** de « Localiser » (§6.15), pure : `FILL_RATIO` (90 %
   de la vue), `MIN_FRAMED_EXTENT_MM` (limite de zoom = une largeur de baie), `FOCUS_ELEVATION_RAD` (plongée par
   défaut), `objectExtent` (plus grande cote) et `halfExtentFor` (demi-étendue monde à cadrer, aspect compris).
@@ -1417,7 +1487,10 @@ chaînage porte un garde anti-cycle (§6.16).
 - `src-client/geometry/RackGeometry.ts` — `roomPlacement` : ce que la BAIE déclare à son conteneur.
 - `src-client/views/dc/DcBase.ts` — repère (`multiDc`) vs portée (`visibleDcIds`), décor d'étage.
   `webglFloorDecor` produit `FloorEquipDesc { id, x, y, baseZ }` : `baseZ` = **socle du niveau seul**, sans
-  `dc_z` — c'est ce contrat qui interdit le double comptage côté moteur (§6.20).
+  `dc_z` — c'est ce contrat qui interdit le double comptage côté moteur (§6.20). Il produit aussi
+  `FloorDecor.world`, les **BORNES MONDE** (bandes de bâtiment DESSINÉES × hauteur du monde) que le moteur
+  utilise pour borner le pivot d'orbite (§6.21) — un champ qui ne dessine rien, donc à ne pas oublier dans
+  `SceneLayoutSignature`.
 - `src-client/views/dc/three/DcThreeScene.ts` — `addPort` (résolution EN SALLE puis dessin) et `addPortAt`
   (dessin SEUL, à un point déjà résolu) : la RÉSOLUTION dépend du conteneur, le DESSIN non. Les ports
   d'étage passent par `resolvePortWorld3D` puis par le MÊME `addPortAt` — d'où leur comportement identique

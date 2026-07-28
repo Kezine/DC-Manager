@@ -115,10 +115,19 @@ export class DcThreeScene extends DcThreeCamera {
 
   protected roomsKey(): string { return this.rooms.map((r) => r.dcId).join(","); }
 
-  /** (Re)calcule `pivotAabb` = boîte englobante XY de l'UNION des salles affichées (leurs 4 coins monde, MÊME
-      transformée que `roomUnder`), lue par la caméra pour BORNER le pivot d'orbite aux murs virtuels. Aucune salle
-      → null (bornage désactivé). Cf. PivotBounds. */
+  /** (Re)calcule `pivotAabb`, la boîte qui BORNE le pivot d'orbite au repli « sol infini » (cf. PivotBounds).
+      Le choix de la boîte suit le REPÈRE de la vue, jamais le NOMBRE d'éléments affichés (docs/placement.md
+      §3 règle 2) :
+        - « Vue étage » → les BORNES MONDE portées par le décor d'étage (bandes de bâtiment × hauteur du monde,
+          donc une vraie boîte 3D) : le monde regardé est le bâtiment, pas la salle active ;
+        - sinon → l'union XY des salles affichées (leurs 4 coins monde, MÊME transformée que `roomUnder`),
+          comportement historique inchangé ; aucune salle → null (bornage désactivé).
+      DISCRIMINANT : la PRÉSENCE d'un décor d'étage. `DcBase.webglCtx` ne le pousse qu'en Vue étage et pose
+      `floorDecor = null` en salle unique — c'est donc une propriété du repère. Un comptage de salles mentirait :
+      la salle unique y est décrite comme un « multi » à UNE salle (piège du lot 8, doctrine §2). */
   protected recomputePivotAabb(): void {
+    const world = this.floorDecor ? this.floorDecor.world : null;
+    if (world) { this.pivotAabb = world; return; }
     this.pivotAabb = this.rooms.length
       ? PivotBounds.unionAabb(this.rooms.map((r) => PivotBounds.rectCorners(r.ox, r.oy, r.o, r.w, r.d)))
       : null;

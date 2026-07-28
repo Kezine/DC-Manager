@@ -14,6 +14,7 @@ import { SITE_SCALE_DEFAULT_M_PER_KM, SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_
 import type { SiteScale } from "../../geometry/SiteLayout";
 import { CableRouting } from "../../geometry/CableRouting";
 import { TrunkRouting } from "../../geometry/TrunkRouting";
+import { PivotBounds } from "../../geometry/PivotBounds";   // bornes MONDE du décor d'étage (bornage du pivot d'orbite) — géométrie pure
 import { PositioningTool } from "./PositioningTool";
 import type { PositioningHost } from "./PositioningTool";
 import { DoorTool } from "./DoorTool";
@@ -561,7 +562,7 @@ export abstract class DcBase {
   }
 
   /** Décor d'étage (repère MONDE) à partir de la disposition `multiLayout` : plans, OOB posés, équipements
-      d'étage, étiquettes d'étage (UNE par plan dessiné) et de bâtiment. */
+      d'étage, étiquettes d'étage (UNE par plan dessiné), étiquettes de bâtiment et BORNES MONDE. */
   protected webglFloorDecor(m: any): any {
     const shown = new Set(m.floorPlanes.map((fp: any) => (fp.loc || "") + "" + String(fp.floor || "")));
     const planes = m.floorPlanes.map((fp: any) => ({ W: fp.cfg.width_mm, D: fp.cfg.depth_mm, cell: fp.cfg.cell_mm || 600, ox: fp.off.x, oy: fp.off.y, z: fp.off.z, blocked: (fp.cfg.blocked_cells || []).slice(), loc: fp.loc || "", floor: String(fp.floor || "") }));
@@ -593,7 +594,22 @@ export abstract class DcBase {
     // ÉTIQUETTE de bâtiment : posée au bord AVANT de SA bande (`y0`), et non plus au bord du monde — les
     // bâtiments ne sont plus alignés sur y = 0 depuis que le site porte une position (§6.9).
     const buildings = m.buildings.map((b: any) => ({ label: this.store.siteLabel(b.loc), x: (b.x0 + b.x1) / 2, y: b.y0 - m.gap * 0.5, z: m.topZ / 2 }));
-    return { planes, oobs, equips, floorLabels, buildings };
+    // BORNES MONDE du repère bâtiment : union des BANDES (`m.buildings`, qui suivent la taille DÉCLARÉE du site
+    // quand elle existe — §6.8) et hauteur du monde (0 → `m.topZ`). Elles ne dessinent rien : elles bornent le
+    // PIVOT D'ORBITE, qui restait sinon collé à l'emprise des salles alors que la Vue étage regarde le bâtiment.
+    // On part des BANDES et non des plans d'étage parce que l'enveloppe d'un bâtiment est sa taille propre, qui
+    // peut être plus grande que le plus grand de ses plans.
+    // FILTRÉES par la PORTÉE, exactement comme les plans et leurs étiquettes : `multiLayout` calcule une bande
+    // pour CHAQUE bâtiment du MODÈLE (§6.8 — masquer retire du dessin, pas du repère), et englober un site qu'on
+    // ne dessine pas ferait orbiter autour de kilomètres de vide, c'est-à-dire le défaut même qu'on corrige.
+    // C'est le corollaire opératoire de §6.8 appliqué à la lettre : layout COMPLET, puis on filtre ce qu'on ÉMET —
+    // aucune bande ne CHANGE de position selon la portée, on choisit seulement lesquelles comptent.
+    // ⚠ ASYMÉTRIE ASSUMÉE en Z : `m.topZ` reste la hauteur du MODÈLE, non celle des seuls niveaux dessinés. La
+    // filtrer demanderait de recomposer la pile des niveaux DANS la vue (§3 règle 4 l'interdit) pour un écart
+    // borné par la hauteur du monde, là où l'écart en XY est KILOMÉTRIQUE (distances inter-sites).
+    const drawnLocs = new Set(m.floorPlanes.map((fp: any) => fp.loc || ""));
+    const world = PivotBounds.worldBounds(m.buildings.filter((b: any) => drawnLocs.has(b.loc || "")), m.topZ);
+    return { planes, oobs, equips, floorLabels, buildings, world };
   }
 
   /* ---- WebGL : tooltips + menus contextuels (remontés du moteur → réutilisent la machinerie SVG existante) ---- */

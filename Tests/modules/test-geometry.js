@@ -73,6 +73,94 @@ module.exports = async () => {
   }
   });
 
+  /* ============================================================================================
+     PIVOT D'ORBITE EN « VUE ÉTAGE » — la boîte devient une VRAIE boîte 3D, et son enveloppe
+     devient celle des BÂTIMENTS. Cf. docs/placement.md §6.21.
+
+     Le bug : `pivotAabb` était l'union des SALLES affichées, en XY seul. En Vue étage, le monde
+     regardé est le BÂTIMENT (voire plusieurs sites), et le repli du pivot tombait sur un plan
+     z = 0 INFINI que rien ne dessine — d'où un pivot ramené de force dans l'emprise de la salle
+     active, et une hauteur de pivot quittant le monde par le haut ou par le bas.
+
+     ⚠ Les valeurs ci-dessous sont dérivées À LA MAIN (méthode du slab), jamais lues dans la
+     sortie de l'implémentation. Le contraste boîte 3D ⇄ boîte XY seule est SYSTÉMATIQUE : il
+     prouve d'un même geste que le bornage en Z travaille ET que le chemin historique (repère
+     SALLE, parois infinies en Z) est conservé au micron.
+     ============================================================================================ */
+  await section("PivotBounds : BOÎTE 3D (bornage en Z) + bornes monde des bandes de bâtiment", async () => {
+  {
+    const j = (p) => JSON.stringify(p);
+    // MÊME emprise XY, seule la contrainte en Z diffère → tout écart observé vient d'elle.
+    const box3 = { minX: 0, maxX: 1000, minY: 0, maxY: 1000, minZ: 0, maxZ: 600 };
+    const boxXY = { minX: 0, maxX: 1000, minY: 0, maxY: 1000 };            // bornes en Z ABSENTES = parois infinies
+    const boxInf = { minX: 0, maxX: 1000, minY: 0, maxY: 1000, minZ: -Infinity, maxZ: Infinity };   // même chose, écrite explicitement
+
+    // ---- (A) rayon PLONGEANT : sans bornage en Z la sortie passe SOUS le plancher du monde ----
+    const oA = { x: -500, y: 500, z: 1000 }, dA = { x: 1, y: 0, z: -1 };
+    const a3 = PivotBounds.clampPivot(oA, dA, null, box3);
+    ck.eq(a3.x, 500, "boîte 3D : rayon plongeant → sortie par le PLANCHER (x = 500)");
+    ck.eq(a3.y, 500, "boîte 3D : y conservé sur la sortie");
+    ck.eq(a3.z, 0, "boîte 3D : la sortie est POSÉE sur le plancher du monde (z = 0)");
+    const aXY = PivotBounds.clampPivot(oA, dA, null, boxXY);
+    ck.eq(aXY.x, 1000, "boîte XY seule : la sortie va jusqu'au mur LOINTAIN (x = 1000)");
+    ck.eq(aXY.z, -500, "boîte XY seule : …et le pivot part 500 mm SOUS le monde (le défaut corrigé)");
+
+    // ---- (B) rayon MONTANT : le plafond du monde borne, au lieu de laisser filer vers le ciel ----
+    const oB = { x: 500, y: 500, z: 100 }, dB = { x: 0.2, y: 0, z: 1 };
+    const b3 = PivotBounds.clampPivot(oB, dB, null, box3);
+    ck.eq(b3.x, 600, "boîte 3D : rayon montant → sortie par le PLAFOND (x = 600)");
+    ck.eq(b3.z, 600, "boîte 3D : la sortie est plaquée au sommet du monde (z = maxZ)");
+    const bXY = PivotBounds.clampPivot(oB, dB, null, boxXY);
+    ck.eq(bXY.z, 2600, "boîte XY seule : le pivot montait à 2 600 mm, très au-dessus du monde");
+
+    // ---- (C) rayon VERTICAL : le cas où la boîte XY seule n'a AUCUNE sortie finie ----
+    const oC = { x: 500, y: 500, z: 1000 }, dC = { x: 0, y: 0, z: -1 };
+    ck.eq(PivotBounds.clampPivot(oC, dC, null, boxXY), null, "boîte XY seule : rayon vertical inscrit dans le slab → aucune sortie (null)");
+    ck.eq(j(PivotBounds.clampPivot(oC, dC, null, box3)), j({ x: 500, y: 500, z: 0 }), "boîte 3D : le rayon vertical SORT enfin — par le plancher");
+
+    // ---- (D) « dans la boîte » compte désormais le Z : un sol SOUS le monde n'est plus accepté tel quel ----
+    const solBas = { x: 500, y: 500, z: -50 };
+    ck.eq(j(PivotBounds.clampPivot(oC, dC, solBas, boxXY)), j(solBas), "boîte XY seule : un sol à z = −50 est « dans la boîte » (Z non borné) → inchangé");
+    ck.eq(j(PivotBounds.clampPivot(oC, dC, solBas, box3)), j({ x: 500, y: 500, z: 0 }), "boîte 3D : ce même sol est HORS boîte → ramené dans le monde");
+
+    // ---- (E) rabat au bord sur les TROIS axes (règle 3 : le rayon rate la boîte) ----
+    const oE = { x: -500, y: 5000, z: 1000 }, dE = { x: 1, y: 0, z: 0 };   // y = 5 000 : parallèle et hors slab → aucune traversée
+    ck.eq(j(PivotBounds.clampPivot(oE, dE, { x: 3000, y: 5000, z: -800 }, box3)), j({ x: 1000, y: 1000, z: 0 }), "boîte 3D : rabat au bord en X, en Y ET en Z (par le bas)");
+    ck.eq(j(PivotBounds.clampPivot(oE, dE, { x: 3000, y: 5000, z: 5000 }, box3)), j({ x: 1000, y: 1000, z: 600 }), "boîte 3D : rabat au bord en Z par le HAUT (plafond du monde)");
+    ck.eq(j(PivotBounds.clampPivot(oE, dE, { x: 3000, y: 5000, z: -800 }, boxXY)), j({ x: 1000, y: 1000, z: -800 }), "boîte XY seule : le z est TRANSPORTÉ, jamais rabattu (comportement historique)");
+
+    // ---- (F) bornes en Z ABSENTES ≡ bornes INFINIES : l'absence a bien le sens documenté ----
+    ck.eq(j(PivotBounds.clampPivot(oA, dA, null, boxXY)), j(PivotBounds.clampPivot(oA, dA, null, boxInf)), "bornes Z absentes ≡ ±Infinity (rayon plongeant)");
+    ck.eq(j(PivotBounds.clampPivot(oE, dE, { x: 3000, y: 5000, z: -800 }, boxXY)), j(PivotBounds.clampPivot(oE, dE, { x: 3000, y: 5000, z: -800 }, boxInf)), "bornes Z absentes ≡ ±Infinity (rabat au bord)");
+    ck.eq(PivotBounds.clampPivot(oC, dC, null, boxXY), PivotBounds.clampPivot(oC, dC, null, boxInf), "bornes Z absentes ≡ ±Infinity (aucune sortie finie)");
+
+    // ---- (G) worldBounds : union des BANDES de bâtiment (alignées aux axes) × hauteur du monde ----
+    const bandes = [
+      { loc: "a", x0: 0, x1: 20000, y0: 0, y1: 15000 },
+      { loc: "b", x0: 50000, x1: 62000, y0: -3000, y1: 9000 },
+    ];
+    ck.eq(j(PivotBounds.worldBounds(bandes, 18000)), j({ minX: 0, maxX: 62000, minY: -3000, maxY: 15000, minZ: 0, maxZ: 18000 }), "worldBounds : union des deux bandes + hauteur du monde");
+    ck.eq(PivotBounds.worldBounds([], 5000), null, "worldBounds : aucune bande → null (bornage désactivé)");
+    ck.eq(j(PivotBounds.worldBounds([{ loc: "z", x0: 100, x1: 50, y0: 10, y1: 0 }], -5)), j({ minX: 50, maxX: 100, minY: 0, maxY: 10, minZ: 0, maxZ: 0 }), "worldBounds : bornes remises dans l'ordre + monde de hauteur nulle jamais INVERSÉ");
+
+    // ---- (H) repère SALLE : `unionAabb` ne borne TOUJOURS que X et Y (mono-salle inchangée) ----
+    const salle = PivotBounds.unionAabb([PivotBounds.rectCorners(3000, 2000, 0, 6000, 4000)]);
+    ck.eq(j(salle), j({ minX: 0, maxX: 6000, minY: 0, maxY: 4000 }), "unionAabb : boîte de la salle, sans aucune borne en Z");
+    ck.eq("minZ" in salle, false, "unionAabb : minZ ABSENT (parois infinies — le repère salle n'a pas de plafond)");
+    ck.eq("maxZ" in salle, false, "unionAabb : maxZ ABSENT");
+
+    // ---- (I) le SYMPTÔME de l'utilisateur, sur un même rayon : salle vs bâtiment ----
+    // Salle de 6 × 4 m ancrée en (1 000 ; 1 000) dans un bâtiment de 20 × 15 m et 18 m de haut ;
+    // caméra à 10 m à l'ouest, à la hauteur du toit, plongeant d'une demi-unité par unité parcourue.
+    const salleBox = { minX: 1000, maxX: 7000, minY: 1000, maxY: 5000 };
+    const mondeBox = { minX: 0, maxX: 20000, minY: 0, maxY: 15000, minZ: 0, maxZ: 18000 };
+    const oI = { x: -10000, y: 3000, z: 18000 }, dI = { x: 1, y: 0, z: -0.5 };
+    const solI = { x: 26000, y: 3000, z: 0 };   // le rayon atteint z = 0 à 26 m : DEHORS, d'où le repli borné
+    ck.eq(j(PivotBounds.clampPivot(oI, dI, solI, salleBox)), j({ x: 7000, y: 3000, z: 9500 }), "AVANT : le pivot est ramené au mur de la SALLE (x = 7 000)");
+    ck.eq(j(PivotBounds.clampPivot(oI, dI, solI, mondeBox)), j({ x: 20000, y: 3000, z: 3000 }), "APRÈS : le pivot atteint le bord du BÂTIMENT (x = 20 000), à une hauteur du monde");
+  }
+  });
+
   await section("LeaderLayout : étiquettes déportées (répulsion pure)", async () => {
   {
     ck.eq(JSON.stringify(LeaderLayout.layout([])), "[]", "layout([]) = [] (aucun port)");

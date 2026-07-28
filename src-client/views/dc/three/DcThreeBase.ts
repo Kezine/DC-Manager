@@ -17,6 +17,9 @@ import { Resolver3D } from "../../../geometry/Resolver3D";
 import { CableRouting } from "../../../geometry/CableRouting";
 import { TrunkRouting } from "../../../geometry/TrunkRouting";
 import { FloorLayout } from "../../../geometry/FloorLayout";
+// Boîte de bornage du PIVOT d'orbite : le TYPE seul (effacé à la compilation). Le décor d'étage la
+// transporte, la couche caméra la consomme — une seule définition pour les deux (principe n°3).
+import type { PivotAabb } from "../../../geometry/PivotBounds";
 import type { DatacenterHost } from "../shared";
 
 /** Labels À PLAT (noms d'équipement ET de baie) : réglages PARTAGÉS entre couches (principe n°3, réutilisés par
@@ -57,7 +60,13 @@ export interface FloorEquipDesc { id: string; x: number; y: number; baseZ: numbe
 /** `floorLabels` = UNE étiquette par plan d'étage DESSINÉ (donc répétée sur chaque site), et non plus un
     jeu unique de niveaux globaux : depuis que les sites portent une position propre (doctrine §6.9), une
     colonne d'étiquettes plantée à l'origine du monde ne désignait plus aucun bâtiment en particulier. */
-export interface FloorDecor { planes: FloorPlaneDesc[]; oobs: FloorOobDesc[]; equips: FloorEquipDesc[]; floorLabels: FloorLabelDesc[]; buildings: FloorLabelDesc[]; }
+/** `world` = BORNES MONDE de la Vue étage : union des BANDES DE BÂTIMENT (XY) et hauteur du monde (Z), calculées
+    par `DcBase.webglFloorDecor` via `PivotBounds.worldBounds`. Elles ne DESSINENT rien — elles donnent au bornage
+    du pivot d'orbite un repère à la mesure de ce qu'on regarde, les salles seules ne décrivant plus le monde dès
+    qu'on passe en Vue étage. ⚠ Ce n'est PAS le retour des `maxD`/`topZ` retirés au lot 9 avec le plan séparateur :
+    ceux-là servaient à DESSINER un décor supprimé depuis ; ce champ-ci sert au REPÈRE de la caméra, un besoin
+    différent — d'où un champ UNIQUE et nommé, plutôt que deux cotes éparses à recomposer chez le consommateur. */
+export interface FloorDecor { planes: FloorPlaneDesc[]; oobs: FloorOobDesc[]; equips: FloorEquipDesc[]; floorLabels: FloorLabelDesc[]; buildings: FloorLabelDesc[]; world: PivotAabb | null; }
 
 /** Contexte de scène poussé par DcBase au moteur (mono/multi + câbles transversaux + décor d'étage). */
 export interface SceneCtx { multi: { center: { x: number; y: number; z: number }; extent: number; rooms: RoomDesc[] } | null; extraCables: ExtraCable[]; floorDecor: FloorDecor | null; }
@@ -127,10 +136,12 @@ export abstract class DcThreeBase {
   /** Descripteur MULTI-SALLES (null = mono-salle). Posé par DcBase : { center, extent, rooms[] } en repère MONDE. */
   protected multiInfo: { center: { x: number; y: number; z: number }; extent: number; rooms: RoomDesc[] } | null = null;
   protected rooms: RoomDesc[] = [];                    // salles AFFICHÉES (mono = 1)
-  // AABB (monde, XY) de l'UNION des salles affichées → « murs virtuels » bornant le pivot d'orbite au repli sol
-  // infini (cf. PivotBounds + DcThreeCamera.recenterPivotOnView). ÉCRITE par la couche scène à chaque (re)build,
-  // LUE par la couche caméra ; null = aucune salle (bornage désactivé → comportement historique).
-  protected pivotAabb: { minX: number; maxX: number; minY: number; maxY: number } | null = null;
+  // Boîte (monde) bornant le pivot d'orbite au repli « sol infini » (cf. PivotBounds +
+  // DcThreeCamera.recenterPivotOnView). Son CONTENU dépend du REPÈRE, jamais du nombre de salles :
+  // union des salles affichées en XY seul (repère salle), ou bandes de bâtiment × hauteur du monde
+  // en XYZ (repère bâtiment = « Vue étage »). ÉCRITE par la couche scène à chaque (re)build, LUE par
+  // la couche caméra ; null = aucun repère exploitable (bornage désactivé → comportement historique).
+  protected pivotAabb: PivotAabb | null = null;
   // CACHE CHAUD : les salles qui sortent du champ sont MASQUÉES (visible=false), pas détruites → bascule
   // simple↔multi / changement de portée instantanée (réveil au lieu de reconstruction). Borné par éviction LRU.
   protected _warm = new Map<string, number>();         // dcId d'une salle CONSTRUITE (visible ou masquée) → tick LRU

@@ -1,7 +1,7 @@
 /* Tests modules — vues & outils pilotés par hôte injecté (Graph/Datacenter, outils 2D/3D, images).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, PivotBounds, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("FilterChips : modèle pur des filtres actifs (barre de contrôles unifiée, lot C)", async () => {
@@ -851,6 +851,13 @@ module.exports = async () => {
       equips: [{ id: "eq1", x: 40, y: 50, baseZ: 0 }],
       floorLabels: [{ label: "Étage 0", x: -1, y: 0, z: 0 }],
       buildings: [{ label: "Siège", x: 5, y: 6, z: 7 }],
+      // BORNES MONDE (lot 20) : elles ne DESSINENT rien, elles bornent le PIVOT D'ORBITE — et c'est
+      // précisément pourquoi elles doivent être signées. `recomputePivotAabb` n'est rejoué qu'à la
+      // (re)construction de la scène : une enveloppe de bâtiment qui changerait sans changer la
+      // signature laisserait le pivot borné à l'ANCIEN monde jusqu'au rechargement (lot 8, déplacé
+      // du dessin vers la caméra). Cf. la section « bornes monde » plus bas pour le cas RÉEL où
+      // rien d'autre que ce champ ne bouge.
+      world: { minX: 0, maxX: 62000, minY: 0, maxY: 16500, minZ: 0, maxZ: 16000 },
     };
 
     // ---- forme EXACTE de la signature (verrou : toute évolution du format se voit ici) ----
@@ -860,8 +867,8 @@ module.exports = async () => {
     ck.eq(SceneLayoutSignature.of([{ ...ROOM, underfloorMm: 450 }], null), '[[["dc-a",100,200,0,0,4000,3000,450]],null]', "signature : vide technique porté (dalle dessinée)");
     ck.eq(
       SceneLayoutSignature.of([ROOM], DECOR),
-      '[[["dc-a",100,200,0,0,4000,3000,null]],[[["s1","0",20000,10000,600,0,0,0,["1,1"]]],[["wp1",10,20,30,0]],[["eq1",40,50,0]],[["Étage 0",-1,0,0]],[["Siège",5,6,7]]]]',
-      "signature : salle + décor d'étage complet",
+      '[[["dc-a",100,200,0,0,4000,3000,null]],[[["s1","0",20000,10000,600,0,0,0,["1,1"]]],[["wp1",10,20,30,0]],[["eq1",40,50,0]],[["Étage 0",-1,0,0]],[["Siège",5,6,7]],[0,62000,0,16500,0,16000]]]',
+      "signature : salle + décor d'étage complet (bornes monde comprises)",
     );
 
     // ---- STABILITÉ : deux calculs de la MÊME disposition (objets distincts) rendent la MÊME chaîne.
@@ -905,6 +912,20 @@ module.exports = async () => {
     decorDiff({ floorLabels: [] }, "une étiquette d'étage retirée de la portée");
     decorDiff({ buildings: [{ ...DECOR.buildings[0], label: "Secours" }] }, "un bâtiment renommé");
     decorDiff({ buildings: [{ ...DECOR.buildings[0], z: 8000 }] }, "une étiquette de bâtiment remontée (hauteur totale du monde)");
+    // BORNES MONDE : chacune des six cotes borne le pivot d'orbite → chacune doit peser dans la signature.
+    decorDiff({ world: null }, "la disparition des bornes monde (retour au bornage à la salle)");
+    decorDiff({ world: { ...DECOR.world, minX: -1000 } }, "une enveloppe de bâtiment étendue vers l'ouest");
+    decorDiff({ world: { ...DECOR.world, maxX: 63000 } }, "une enveloppe de bâtiment élargie (taille de site déclarée)");
+    decorDiff({ world: { ...DECOR.world, minY: -1 } }, "une enveloppe de bâtiment étendue vers le nord");
+    decorDiff({ world: { ...DECOR.world, maxY: 25000 } }, "une enveloppe de bâtiment APPROFONDIE — le cas où RIEN d'autre ne bouge");
+    decorDiff({ world: { ...DECOR.world, minZ: -500 } }, "un plancher de monde abaissé");
+    decorDiff({ world: { ...DECOR.world, maxZ: 20000 } }, "un étage ajouté au-dessus (plafond du monde)");
+    // STABILITÉ des bornes : champ ABSENT ≡ null, et bornes en Z absentes ≡ null (l'absence a un sens
+    // documenté — parois infinies — mais elle ne doit pas produire DEUX signatures pour un même monde).
+    ck.eq(SceneLayoutSignature.of([ROOM], { ...DECOR, world: undefined }), SceneLayoutSignature.of([ROOM], { ...DECOR, world: null }), "stabilité : bornes monde absentes ≡ null");
+    ck.eq(SceneLayoutSignature.of([ROOM], { ...DECOR, world: { minX: 0, maxX: 1, minY: 0, maxY: 1 } }),
+          SceneLayoutSignature.of([ROOM], { ...DECOR, world: { minX: 0, maxX: 1, minY: 0, maxY: 1, minZ: undefined, maxZ: undefined } }),
+          "stabilité : bornes en Z absentes ≡ undefined explicite");
     // Un libellé contenant le séparateur ne doit pas pouvoir imiter une AUTRE disposition (JSON échappe).
     ck(SceneLayoutSignature.of([ROOM], { ...DECOR, buildings: [{ label: '","x', x: 5, y: 6, z: 7 }] })
        !== SceneLayoutSignature.of([ROOM], { ...DECOR, buildings: [{ label: '\\","x', x: 5, y: 6, z: 7 }] }), "aucune collision par libellé contenant des séparateurs");
@@ -1022,7 +1043,12 @@ module.exports = async () => {
     const fd = decor();
 
     // ---- FORME du descripteur : plus AUCUN vestige du séparateur ni des bornes du monde ----
-    ck.eq(Object.keys(fd).sort().join(","), "buildings,equips,floorLabels,oobs,planes", "décor : champs exacts (ni maxD, ni topZ — le séparateur était leur seul consommateur)");
+    // ⚠ `world` s'est AJOUTÉ au lot 20 : ce sont les BORNES MONDE du bornage du pivot d'orbite (cf. section
+    // dédiée plus bas). Ce n'est PAS le retour de `maxD`/`topZ` — ceux-là DESSINAIENT le plan séparateur,
+    // supprimé depuis ; les deux assertions qui suivent vérifient qu'ils n'ont pas reparu au passage.
+    ck.eq(Object.keys(fd).sort().join(","), "buildings,equips,floorLabels,oobs,planes,world", "décor : champs exacts (bornes monde comprises)");
+    ck.eq("maxD" in fd, false, "décor : toujours pas de maxD (le séparateur était son seul consommateur)");
+    ck.eq("topZ" in fd, false, "décor : toujours pas de topZ épars — la hauteur du monde vit dans `world.maxZ`");
     ck.eq(fd.buildings.filter((b) => "sepX" in b).length, 0, "aucune étiquette de bâtiment ne porte de sepX");
     ck.eq(fd.floorLabels.filter((l) => "sepX" in l).length, 0, "aucune étiquette d'étage ne porte de sepX");
 
@@ -1071,6 +1097,95 @@ module.exports = async () => {
     ck(sig10 !== sig200, "échelle inter-sites : le décor change de signature (les étiquettes ont bougé)");
     ck.eq(SceneLayoutSignature.action({ ids: "M:x", layout: sig10 }, { ids: "M:x", layout: sig200 }, { hasContent: true, deltaEligible: true }), "rebuild", "échelle inter-sites → reconstruction de la scène");
     ck.eq(SceneLayoutSignature.of([], decor()), sig200, "décor recalculé à l'identique → MÊME signature (aucune reconstruction parasite)");
+  });
+
+  /* ==========================================================================
+     BORNES MONDE DU DÉCOR D'ÉTAGE (lot 20) — ce qui BORNE le pivot d'orbite.
+     Cf. docs/placement.md §6.21.
+
+     Le pivot d'orbite était borné à l'union des SALLES affichées : en Vue étage,
+     tourner autour d'un point hors salle ramenait le pivot dans l'emprise de la
+     salle active alors que le monde regardé est le BÂTIMENT. La boîte devient
+     l'union des BANDES DE BÂTIMENT DESSINÉES, et gagne une hauteur.
+
+     ⚠ Toutes les cotes ci-dessous sont dérivées À LA MAIN du modèle :
+       - Alpha (sans GPS) est à l'origine, Beta au repli de 5 km = 50 000 mm ;
+       - bande Alpha : ses plans font 20 000 × 15 000, mais le 1er étage est ancré
+         en (3 000 ; 1 500) → emprise 23 000 × 16 500 ;
+       - bande Beta : 12 000 × 9 000 depuis 50 000 → 50 000…62 000 ;
+       - hauteur : 3 niveaux de 4 000 mm espacés de 2 000 → socles 0 / 6 000 /
+         12 000, sommet du monde = 12 000 + 4 000 = 16 000.
+     ========================================================================== */
+  await section("DcBase.webglFloorDecor : BORNES MONDE = enveloppes de BÂTIMENT × hauteur (attentes en dur)", async () => {
+    const s = await makeStore();
+    const siteA = await s.create("sites", { name: "Alpha" });
+    const siteB = await s.create("sites", { name: "Beta" });
+    await s.create("floors", { location: siteA.id, floor: "-1", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000 });
+    await s.create("floors", { location: siteA.id, floor: "0", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000 });
+    await s.create("floors", { location: siteA.id, floor: "1", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000, anchor_x: 3000, anchor_y: 1500 });
+    await s.create("floors", { location: siteB.id, floor: "0", width_mm: 12000, depth_mm: 9000, cell_mm: 600, height_mm: 4000 });
+    const dcAm = await s.create("datacenters", { name: "Salle A-1", location: siteA.id, floor: "-1", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const dcA0 = await s.create("datacenters", { name: "Salle A0", location: siteA.id, floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const dcA1 = await s.create("datacenters", { name: "Salle A1", location: siteA.id, floor: "1", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const dcB0 = await s.create("datacenters", { name: "Salle B0", location: siteB.id, floor: "0", width_mm: 5000, depth_mm: 4000, floor_x: 500, floor_y: 500 });
+    const dv = new DatacenterView(s, {}, {});   // garde headless
+    dv.view = "3d"; dv.useWebGL = true; dv.dcId = dcA0.id; dv.multiDc = true;
+    const j = (o) => JSON.stringify(o);
+    // Gardes de LISIBILITÉ (même motif que `sansNull` plus bas) : sans elles, une régression qui fait rendre
+    // `floorDecor` ou `world` à null CRASHE la section et masque toutes les assertions suivantes — on ne
+    // verrait plus QUE le crash, alors que c'est justement la répartition des FAIL qui informe.
+    const DECOR_VIDE = { planes: [], oobs: [], equips: [], floorLabels: [], buildings: [], world: null };
+    const BORNES_VIDES = { minX: null, maxX: null, minY: null, maxY: null, minZ: null, maxZ: null };
+    const decorOf = (ctx) => ctx.floorDecor || DECOR_VIDE;
+    const bornes = (ctx) => decorOf(ctx).world || BORNES_VIDES;
+
+    // ---- PORTÉE COMPLÈTE : la boîte englobe les DEUX bâtiments, et le monde a un plafond ----
+    dv.visibleDcIds = new Set([dcAm.id, dcA0.id, dcA1.id, dcB0.id]);
+    const ctxPlein = dv.webglCtx();
+    ck.eq(j(bornes(ctxPlein)), j({ minX: 0, maxX: 62000, minY: 0, maxY: 16500, minZ: 0, maxZ: 16000 }), "bornes monde : union des deux bandes de bâtiment + hauteur du monde");
+
+    // ---- CONTRASTE avec l'ancienne boîte (union des SALLES), calculée par le MÊME module que le moteur ----
+    const sallesBox = PivotBounds.unionAabb(ctxPlein.multi.rooms.map((r) => PivotBounds.rectCorners(r.ox, r.oy, r.o, r.w, r.d)));
+    ck.eq(j(sallesBox), j({ minX: 1000, maxX: 55500, minY: 500, maxY: 6500 }), "l'ANCIENNE boîte (union des salles) — dérivée à la main : 4 salles de 6×4 m posées sur leurs plans");
+    ck(sallesBox.maxY < bornes(ctxPlein).maxY, "la boîte des salles est bien PLUS ÉTROITE que le bâtiment en Y (16 500 contre 6 500)");
+    ck.eq("minZ" in sallesBox, false, "la boîte des salles n'a AUCUNE borne en Z (parois infinies) — c'est le repère salle, conservé");
+
+    // ---- PORTÉE RÉDUITE À UNE SEULE SALLE : le repère reste le BÂTIMENT (ce n'est PAS un comptage) ----
+    // Doctrine §3 règle 2 : conditionner un comportement de REPÈRE au NOMBRE d'éléments est un bug par
+    // construction. Une salle unique affichée en Vue étage doit donc voir l'enveloppe de SON bâtiment,
+    // pas son propre pourtour (5 000 × 4 000 mm posés en 500/500).
+    dv.dcId = dcB0.id; dv.visibleDcIds = new Set([dcB0.id]);
+    const ctxSeul = dv.webglCtx();
+    ck.eq(ctxSeul.multi.rooms.length, 1, "portée réduite : UNE seule salle affichée");
+    ck.eq(j(bornes(ctxSeul)), j({ minX: 50000, maxX: 62000, minY: 0, maxY: 9000, minZ: 0, maxZ: 16000 }), "une salle unique en Vue étage : la boîte reste celle de SON bâtiment");
+    // Repère ⊥ portée : la bande de Beta n'a pas BOUGÉ, seul le bâtiment non dessiné est sorti de l'union.
+    ck.eq(bornes(ctxSeul).maxX, bornes(ctxPlein).maxX, "portée réduite : la bande de Beta ne bouge pas (repère ⊥ portée)");
+    ck.eq(bornes(ctxSeul).minX, 50000, "portée réduite : le bâtiment NON DESSINÉ (Alpha) sort de l'union — on n'orbite pas autour de 5 km de vide");
+    // ⚠ ASYMÉTRIE ASSUMÉE : la hauteur reste celle du MODÈLE (les 3 niveaux d'Alpha), non celle des seuls
+    // niveaux dessinés — écart borné par la hauteur du monde, là où l'écart en XY serait kilométrique.
+    ck.eq(bornes(ctxSeul).maxZ, 16000, "portée réduite : la hauteur reste celle du MODÈLE (asymétrie documentée)");
+
+    // ---- SALLE UNIQUE (hors Vue étage) : aucun décor, donc aucune borne monde → bornage à la salle ----
+    dv.multiDc = false;
+    ck.eq(dv.webglCtx().floorDecor, null, "hors Vue étage : aucun décor d'étage → aucune borne monde (le moteur retombe sur l'union des salles)");
+    dv.multiDc = true; dv.dcId = dcA0.id; dv.visibleDcIds = new Set([dcAm.id, dcA0.id, dcA1.id, dcB0.id]);
+
+    // ---- INVALIDATION : le cas où SEULES les bornes monde changent ----
+    // Taille DÉCLARÉE d'Alpha : largeur 23 000 (exactement l'emprise déduite) et profondeur 25 000. Choix
+    // délibéré — l'étiquette de bâtiment est posée en x = (x0+x1)/2 et en y = y0 − gap/2, donc elle ne bouge
+    // NI par la largeur inchangée NI par la profondeur. Les plans, les OOB, les équipements et les étiquettes
+    // d'étage ne dépendent pas non plus de l'emprise. Résultat : `world.maxY` est le SEUL champ du décor à
+    // changer — sans lui dans la signature, le pivot resterait borné à l'ancienne enveloppe jusqu'au F5.
+    const sansWorld = (fd) => j([fd.planes, fd.oobs, fd.equips, fd.floorLabels, fd.buildings]);
+    const avant = decorOf(dv.webglCtx());
+    const avantSig = SceneLayoutSignature.of([], avant), avantReste = sansWorld(avant);
+    await s.update("sites", siteA.id, { width_mm: 23000, depth_mm: 25000 });
+    const apres = decorOf(dv.webglCtx());
+    ck.eq(sansWorld(apres), avantReste, "taille de bâtiment déclarée : TOUT le reste du décor est inchangé, à l'octet");
+    ck.eq(j(apres.world || BORNES_VIDES), j({ minX: 0, maxX: 62000, minY: 0, maxY: 25000, minZ: 0, maxZ: 16000 }), "taille déclarée : l'enveloppe suit la profondeur DÉCLARÉE (25 000), plus grande que les plans (16 500)");
+    ck(SceneLayoutSignature.of([], apres) !== avantSig, "…et la signature de disposition CHANGE (sinon le pivot resterait borné à l'ancien monde)");
+    ck.eq(SceneLayoutSignature.action({ ids: "M:x", layout: avantSig }, { ids: "M:x", layout: SceneLayoutSignature.of([], apres) }, { hasContent: true, deltaEligible: true }), "rebuild", "bornes monde modifiées → reconstruction de la scène");
+    ck.eq(SceneLayoutSignature.of([], decorOf(dv.webglCtx())), SceneLayoutSignature.of([], apres), "bornes recalculées à l'identique → MÊME signature (aucune reconstruction parasite)");
   });
 
   /* ============================================================================================

@@ -74,19 +74,30 @@ export class SceneLayoutSignature {
   }
 
   /** Décor d'étage : plans (emprise, ancrage, cellules bloquées), OOB posés, équipements d'étage,
-      étiquettes d'étage et de bâtiment.
-      Les BORNES du monde (`maxD`/`topZ`) ont disparu du descripteur en même temps que le plan
-      séparateur entre bâtiments, seul décor qu'elles dessinaient — rien n'est donc SOUS-invalidé :
-      ce que la hauteur totale du monde continue de piloter (le Z de l'étiquette de bâtiment) est
-      signé par cette étiquette même. Les étiquettes d'étage, elles, comptent PLEINEMENT : leur
-      position suit l'ancrage du plan, donc l'échelle inter-sites et la portée affichée. */
+      étiquettes d'étage et de bâtiment, et BORNES MONDE.
+      Les étiquettes d'étage comptent PLEINEMENT : leur position suit l'ancrage du plan, donc l'échelle
+      inter-sites et la portée affichée.
+      Les BORNES MONDE (`world`) sont signées BIEN QU'ELLES NE DESSINENT RIEN, et c'est justement pourquoi
+      il faut le dire : elles alimentent `DcThreeScene.recomputePivotAabb`, qui n'est rejoué qu'à la
+      (re)construction de la scène. Une enveloppe de bâtiment qui changerait sans changer la signature
+      laisserait donc le pivot d'orbite borné à l'ANCIEN monde jusqu'au rechargement — exactement la
+      sous-invalidation du lot 8, déplacée du dessin vers la caméra. On ne se repose PAS sur le fait que
+      l'étiquette de bâtiment bouge « en général » quand la bande bouge : un raisonnement de ce genre est
+      précisément ce que la règle d'arbitrage interdit.
+      (Les anciennes bornes `maxD`/`topZ` avaient disparu avec le plan séparateur, seul décor qu'elles
+      DESSINAIENT ; `world` est un besoin distinct, cf. `FloorDecor`.) */
   private static decorTuple(d: FloorDecor): unknown[] {
+    const w = d.world;
     return [
       d.planes.map((p) => [p.loc, p.floor, p.W, p.D, p.cell, p.ox, p.oy, p.z, p.blocked]),
       d.oobs.map((o) => [o.id, o.x, o.y, o.z, o.baseZ]),
       d.equips.map((e) => [e.id, e.x, e.y, e.baseZ]),
       d.floorLabels.map((l) => SceneLayoutSignature.labelTuple(l)),
       d.buildings.map((b) => SceneLayoutSignature.labelTuple(b)),
+      // `?? null` sur les bornes en Z : elles sont OPTIONNELLES (absentes = parois infinies), et `undefined`
+      // n'a pas de représentation JSON dans un tableau — il s'y sérialise en `null` de toute façon. On le
+      // rend EXPLICITE pour que la stabilité de la signature ne dépende pas de ce détail de sérialisation.
+      w ? [w.minX, w.maxX, w.minY, w.maxY, w.minZ == null ? null : w.minZ, w.maxZ == null ? null : w.maxZ] : null,
     ];
   }
 
