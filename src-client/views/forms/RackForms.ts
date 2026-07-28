@@ -22,6 +22,7 @@ import {
   FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT
 } from "../../domain/constants";
 import { FormUi, ORIENT_OPTS } from "./shared";
+import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import type { FormHost } from "./shared";
 import { CableForms } from "./CableForms";
 import { EquipmentForms } from "./EquipmentForms";   // fiche équipement (nom cliquable dans le contenu de baie)
@@ -257,7 +258,7 @@ export class RackForms extends CableForms {
             host.setDirty?.(true); Notify.toast(I18n.t("rack.rack.resized")); onSaved?.(); return true;
           }
         }
-        if (rk) await store.update("racks", rk.id, payload); else await store.create("racks", payload);
+        if (!await FormSave.record(store, "racks", rk && rk.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(rk ? I18n.t("rack.rack.updated") : I18n.t("rack.rack.created")); onSaved?.(); return true;
       },
     });
@@ -353,11 +354,11 @@ export class RackForms extends CableForms {
       if (kind === "equipment") {
         if (!store.get("equipments", mid)) return;
         const downs = store.equipmentDcId(mid) ? store.cableDowngradeOps([mid]) : [];
-        await store.updateBatch([{ collection: "equipments", id: mid, patch: { placement_mode: "manual", rack_id: null, rack_u: null } }].concat(downs as any));
+        if (!await FormSave.batch(store, [{ collection: "equipments", id: mid, patch: { placement_mode: "manual", rack_id: null, rack_u: null } }].concat(downs as any))) return;   // refusé par le Store (toast rouge) : ne rien annoncer
         Notify.toast(I18n.t("rack.rackContent.equipRemoved") + (downs.length ? I18n.t("rack.rackContent.cablesReplanned") : ""));
       } else if (kind === "brush") {
         if (!store.get("waypoints", mid)) return;
-        await store.update("waypoints", mid, { rack_id: null });
+        if (!await FormSave.record(store, "waypoints", mid, { rack_id: null })) return; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
         Notify.toast(I18n.t("rack.rackContent.brushRemoved"));
       } else { await store.remove("rackItems", mid); Notify.toast(I18n.t("rack.rackContent.itemRemoved")); }
       host.setDirty?.(true); render();
@@ -441,7 +442,7 @@ export class RackForms extends CableForms {
       body.appendChild(FormControls.fieldRow(I18n.t("rack.common.equipField"), eqI, I18n.t("rack.rackContent.freeEquipHint")));
       const res = await Dialog.custom({ title: I18n.t("rack.rackContent.freeDialogTitle"), confirmLabel: I18n.t("rack.rackContent.assign"), build: (r: HTMLElement) => { r.appendChild(body); return { validate: () => eqI.value ? true as const : I18n.t("rack.common.chooseEquip"), collect: () => eqI.value }; } });
       if (!res) return;
-      await store.update("equipments", res, { placement_mode: "rack", rack_id: rack.id, rack_u: null, rack_side: "front" });
+      if (!await FormSave.record(store, "equipments", res, { placement_mode: "rack", rack_id: rack.id, rack_u: null, rack_side: "front" })) return; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
       Notify.toast(I18n.t("rack.rackContent.freeAssigned")); done();
     };
 
@@ -486,7 +487,7 @@ export class RackForms extends CableForms {
         const num = (i: HTMLInputElement) => { const raw = i.value.trim(); return raw === "" ? null : Number(raw); };
         const payload = { name: nameI.value.trim(), address: addrI.value.trim(), lat: num(latI), lon: num(lonI), width_mm: num(wI), depth_mm: num(dI), description: descI.value.trim() };
         if (live.check(payload).length) return false;   // nom requis, bornes lat/lon, couples complets GPS + taille (surlignés)
-        if (s) await store.update("sites", s.id, payload); else await store.create("sites", payload);
+        if (!await FormSave.record(store, "sites", s && s.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(s ? I18n.t("rack.site.updated") : I18n.t("rack.site.created")); onSaved?.(); return true;
       },
     });
@@ -519,7 +520,7 @@ export class RackForms extends CableForms {
       onSave: async () => {
         const payload = { name: nameI.value.trim(), email: emailI.value.trim(), phone: phoneI.value.trim(), notes: notesI.value.trim() };
         if (live.check(payload).length) return false;   // nom requis + e-mail/téléphone invalides (surlignés)
-        if (c) await store.update("contacts", c.id, payload); else await store.create("contacts", payload);
+        if (!await FormSave.record(store, "contacts", c && c.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(c ? I18n.t("rack.contact.updated") : I18n.t("rack.contact.created")); onSaved?.(); return true;
       },
     });
@@ -566,7 +567,7 @@ export class RackForms extends CableForms {
           location: locI.value || "", floor: floorI.value, room: roomI.value.trim(),
         };
         if (live.check(payload).length) return false;   // nom requis (surligné)
-        if (dc) await store.update("datacenters", dc.id, payload); else await store.create("datacenters", payload);
+        if (!await FormSave.record(store, "datacenters", dc && dc.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(dc ? I18n.t("rack.datacenter.updated") : I18n.t("rack.datacenter.created")); onSaved?.(); return true;
       },
     });
@@ -603,7 +604,7 @@ export class RackForms extends CableForms {
       title: I18n.t("rack.door.title"), subtitle: Html.escape(dc.name || ""), body: root, wide: true,
       onSave: async () => {
         const patch = { wall: wallI.value, offset: Math.max(0, parseInt(offI.value, 10) || 0), width_mm: Math.max(100, parseInt(wI.value, 10) || 900), height_mm: Math.max(100, parseInt(hI.value, 10) || 2100), frame_mm: Math.max(0, parseInt(fI.value, 10) || 0), hinge: hinI.value === "right" ? "right" : "left", leaves: leavesI.value === "2" ? 2 : 1, opening: opI.value === "exterior" ? "exterior" : "interior" };
-        await store.update("datacenters", dcId, { doors: (dc.doors || []).map((d: any) => (d.id === doorId ? { ...d, ...patch } : d)) });
+        if (!await FormSave.record(store, "datacenters", dcId, { doors: (dc.doors || []).map((d: any) => (d.id === doorId ? { ...d, ...patch } : d)) })) return false; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(I18n.t("rack.door.updated")); onSaved?.(); return true;
       },
     });
@@ -698,7 +699,7 @@ export class RackForms extends CableForms {
           if (!scene.sideSlotFree(wp.rack_id, face, pinChosen.lr, pinChosen.col, pinChosen.u, SIDE_U_STEP, wp.id)) { Notify.toast(I18n.t("rack.common.slotOccupied"), "err"); return false; }
           payload.side_lr = pinChosen.lr; payload.side_col = pinChosen.col; payload.side_u = pinChosen.u;
         }
-        await store.update("waypoints", wp.id, payload);
+        if (!await FormSave.record(store, "waypoints", wp.id, payload)) return false; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(I18n.t("rack.waypoint.updated")); return true;
       },
     });
@@ -764,7 +765,7 @@ export class RackForms extends CableForms {
         if (pick && floorExists(L, F)) { Notify.toast(I18n.t("rack.floor.floorExists")); opts.onPicked?.(L, F); return true; }
         const ex: any = store.floorFor(L, F);
         const payload = { location: L, floor: F, width_mm: Math.max(1, parseInt(wI.value, 10) || FLOOR_WIDTH_DEFAULT), depth_mm: Math.max(1, parseInt(dI.value, 10) || FLOOR_DEPTH_DEFAULT), cell_mm: Math.max(1, parseInt(cI.value, 10) || FLOOR_CELL_DEFAULT), anchor_x: parseInt(axI.value, 10) || 0, anchor_y: parseInt(ayI.value, 10) || 0, height_mm: Math.max(0, parseInt(hI.value, 10) || 0), description: descI.value.trim() };
-        if (ex) await store.update("floors", ex.id, payload); else await store.create("floors", payload);
+        if (!await FormSave.record(store, "floors", ex && ex.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(pick ? I18n.t("rack.floor.created") : I18n.t("rack.floor.planSaved"));
         if (pick) opts.onPicked?.(L, F);
         return true;
@@ -928,12 +929,12 @@ export class RackForms extends CableForms {
                 confirmLabel: I18n.t("rack.item.emptyAndApply"), danger: true,
               });
               if (!ok) return false;
-              for (const g of guests) await store.update("equipments", g.id, { placement_mode: "manual", tray_item_id: null, tray_x: null, tray_y: null });
+              for (const g of guests) if (!await FormSave.record(store, "equipments", g.id, { placement_mode: "manual", tray_item_id: null, tray_x: null, tray_y: null })) return false; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
               Notify.toast(I18n.t("rack.item.detached", { count: guests.length }));
             }
           }
         }
-        await store.update("rackItems", it.id, payload);
+        if (!await FormSave.record(store, "rackItems", it.id, payload)) return false; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(I18n.t("rack.item.updated")); onSaved?.(); return true;
       },
     });
@@ -1054,14 +1055,14 @@ export class RackForms extends CableForms {
     });
     if (!res) return;
     if (res.kind === "pin") {
-      await store.create("waypoints", { name: res.name || "PIN", kind: "point", wp_type: "datacenter", datacenter_id: rack.datacenter_id, rack_id: rack.id, side_face: face, side_lr: lr, side_col: col, side_u: uTop });
+      if (!await FormSave.record(store, "waypoints", null, { name: res.name || "PIN", kind: "point", wp_type: "datacenter", datacenter_id: rack.datacenter_id, rack_id: rack.id, side_face: face, side_lr: lr, side_col: col, side_u: uTop })) return;   // refusé par le Store (toast rouge) : ne rien annoncer
       Notify.toast(I18n.t("rack.side.pinPlaced")); host.setDirty?.(true); onDone?.(); return;
     }
     const e = store.get("equipments", res.eid); if (!e) return;
     const free_w_mm = (e.free_w_mm != null) ? Math.min(e.free_w_mm, Math.round(colW)) : Math.round(Math.min(colW, 50));
     const free_h_mm = (e.free_h_mm != null) ? e.free_h_mm : (e.u_height ? e.u_height * U_MM : SIDE_U_STEP * U_MM);
     const free_l_mm = (e.free_l_mm != null) ? e.free_l_mm : Math.min(RackGeometry.cageDepth(rack), 300);
-    await store.update("equipments", res.eid, { placement_mode: "side", dim_mode: "free", rack_id: rack.id, rack_u: null, rack_side: "front", side_face: face, side_lr: lr, side_col: col, side_u: uTop, side_snap: snap, free_w_mm, free_h_mm, free_l_mm });
+    if (!await FormSave.record(store, "equipments", res.eid, { placement_mode: "side", dim_mode: "free", rack_id: rack.id, rack_u: null, rack_side: "front", side_face: face, side_lr: lr, side_col: col, side_u: uTop, side_snap: snap, free_w_mm, free_h_mm, free_l_mm })) return;   // refusé par le Store (toast rouge) : ne rien annoncer
     Notify.toast(I18n.t("rack.side.equipMounted")); host.setDirty?.(true); await store.applyCableBreaks(res.eid); onDone?.();
   }
 
@@ -1131,7 +1132,7 @@ export class RackForms extends CableForms {
       }; },
     });
     if (!res) return;
-    await store.create("waypoints", { name: res.name || "PIN", kind: "point", wp_type: "datacenter", datacenter_id: rack.datacenter_id, rack_id: rack.id, cap_face: face, cap_cx: cx, cap_cy: cy });
+    if (!await FormSave.record(store, "waypoints", null, { name: res.name || "PIN", kind: "point", wp_type: "datacenter", datacenter_id: rack.datacenter_id, rack_id: rack.id, cap_face: face, cap_cx: cx, cap_cy: cy })) return;   // refusé par le Store (toast rouge) : ne rien annoncer
     Notify.toast(I18n.t("rack.cap.pinPlaced")); host.setDirty?.(true); onDone?.();
   }
 }

@@ -15,6 +15,7 @@ import {
   CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW
 } from "../../domain/constants";
 import { FormUi } from "./shared";
+import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import type { FormHost } from "./shared";
 import { EquipmentForms } from "./EquipmentForms";
 
@@ -69,7 +70,7 @@ export class CableForms extends EquipmentForms {
           description: descI.value.trim(),
         };
         if (live.check(payload).length) return false;   // label requis (surligné)
-        if (net) await store.update("networks", net.id, payload); else await store.create("networks", payload);
+        if (!await FormSave.record(store, "networks", net && net.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(net ? I18n.t("cable.net.updated") : I18n.t("cable.net.created")); onSaved?.(); return true;
       },
     });

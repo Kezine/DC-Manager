@@ -10,6 +10,7 @@
    eligibleImages, promptImageFile…) SANS rejoindre la chaîne d'héritage Forms.
    ============================================================================= */
 import type { Store } from "../../store";
+import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
@@ -418,7 +419,7 @@ export class FaceEditor extends FormBase {
       faces.forEach((f) => { facePatch[EQUIP_FACE_IMG_FIELD[f]] = fids[f] || null; });
       const ops: any[] = [{ collection: "equipments", id: eq.id, patch: facePatch }];
       ports.forEach((p) => { const pos = place[p.id]; ops.push({ collection: "ports", id: p.id, patch: pos ? { face_x: pos.x, face_y: pos.y, face_side: pos.side } : { face_x: null, face_y: null } }); });
-      await store.updateBatch(ops);
+      if (!await FormSave.batch(store, ops)) return; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
       host.setDirty?.(true); Notify.toast(I18n.t("face.saved"));
       opts.onSaved?.();   // appelant empilé (fiche détail) → reconstruit sa vue avec l'état frais du store
     };

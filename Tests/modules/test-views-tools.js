@@ -1,9 +1,109 @@
 /* Tests modules — vues & outils pilotés par hôte injecté (Graph/Datacenter, outils 2D/3D, images).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, PivotBounds, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, FormSave, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, PivotBounds, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
+  await section("FormSave : un formulaire n'annonce JAMAIS un succès que le Store a REFUSÉ", async () => {
+  {
+    /* DÉFAUT FERMÉ : onze formulaires écrivaient `await store.update(...)` puis annonçaient le succès
+       SANS regarder le retour. Or `create`/`update` rendent `null` quand la validation refuse — sans
+       lever d'exception. La modale se fermait donc sur « … mis à jour » pendant que le Store affichait
+       un toast ROUGE, et la saisie était perdue. */
+    const s = await makeStore();
+
+    // ---- CRÉATION acceptée : l'enregistrement est rendu (l'appelant a besoin de l'id tout juste créé)
+    const cree = await FormSave.record(s, "sites", null, { name: "Site A" });
+    ck(!!cree && !!cree.id, "création acceptée → l'enregistrement est rendu, avec son id");
+    ck.eq(s.all("sites").length, 1, "…et il est bien dans le document");
+
+    // ---- MISE À JOUR acceptée : c'est bien l'existant qui est patché, pas un doublon qui est créé
+    const maj = await FormSave.record(s, "sites", cree.id, { name: "Site B" });
+    ck(!!maj, "mise à jour acceptée → enregistrement rendu");
+    ck.eq(s.all("sites").length, 1, "mise à jour : AUCUN doublon créé (l'id fourni discrimine create/update)");
+    ck.eq(s.get("sites", cree.id).name, "Site B", "mise à jour : la valeur est bien écrite");
+
+    // ---- REFUS : `name` est requis → le Store rend null, et RIEN n'est écrit.
+    let signale = 0;
+    s.onInvalid = () => { signale++; };
+    const refuse = await FormSave.record(s, "sites", null, { name: "" });
+    ck.eq(refuse, null, "création REFUSÉE (nom requis) → null, et non une exception : c'est tout le piège");
+    ck.eq(s.all("sites").length, 1, "refus : rien n'est ajouté au document");
+    ck(signale > 0, "refus : le Store NOTIFIE la raison (`onInvalid`) — d'où l'inutilité d'un second message générique");
+
+    const refuseMaj = await FormSave.record(s, "sites", cree.id, { name: "" });
+    ck.eq(refuseMaj, null, "mise à jour REFUSÉE → null");
+    ck.eq(s.get("sites", cree.id).name, "Site B", "refus de mise à jour : la valeur PRÉCÉDENTE est intacte");
+
+    // ---- id absent/vide ⇒ CRÉATION (le ternaire que les onze formulaires réécrivaient)
+    const vide = await FormSave.record(s, "sites", "", { name: "Site C" });
+    ck(!!vide && vide.id !== cree.id, "id vide → CRÉATION (et non une mise à jour de l'existant)");
+    ck.eq(s.all("sites").length, 2, "…deux sites au total");
+  }
+  });
+
+  await section("VERROU : aucun formulaire ne réintroduit l'écriture directe suivie d'un toast de succès", async () => {
+  {
+    /* Le module ne sert à rien si un formulaire suivant repart de l'écriture directe. Ce verrou relit les
+       SOURCES de `views/forms/` et refuse le motif exact qui portait le défaut : un `await store.create(`
+       ou `store.update(` dont le résultat est JETÉ, immédiatement suivi d'un `Notify.toast` qui n'est pas
+       une erreur. Il ne juge pas les écritures dont le retour est CAPTURÉ (`const x = await …`) : celles-là
+       peuvent être contrôlées, et plusieurs le sont déjà. */
+    const fs = require("fs"), dir = path.join(__dirname, "..", "..", "src-client", "views", "forms");
+    // `updateBatch` est du même défaut : il rend le NOMBRE d'écritures, donc 0 en cas de refus.
+    const ECRITURE_JETEE = /(^|[^=]\s|\{\s*)await\s+(this\.)?store\.(create|update|updateBatch)\s*\(/;
+    const SUCCES = /Notify\.toast\(/;
+    /* ⚠ NEUTRALISER LES COMMENTAIRES avant de juger — sinon le verrou mord sur la PROSE. Il l'a fait :
+       l'en-tête de `FormSave.ts` CITE le motif fautif pour l'expliquer, et se faisait accuser de le
+       commettre. Même piège qu'au verrou d'isolement de `src-shared/` (§6.19), résolu là-bas par le
+       parseur TS. Ici les blocs sont remplacés par des espaces (les NUMÉROS DE LIGNE sont préservés,
+       sans quoi les messages désigneraient la mauvaise ligne). */
+    const sansCommentaires = (t) => t
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+      .replace(/(^|[^:])\/\/.*/g, (m, p) => p);
+
+    const fautesDe = (texteBrut, nom) => {
+      const texte = sansCommentaires(texteBrut);
+      const lignes = texte.split(/\r?\n/), fautes = [];
+      for (let i = 0; i < lignes.length; i++) {
+        if (!ECRITURE_JETEE.test(lignes[i]) || /=\s*await/.test(lignes[i])) continue;
+        // la ligne SUIVANTE annonce-t-elle un succès ? (un toast d'ERREUR est légitime, lui)
+        const suivante = lignes[i + 1] || "";
+        if (SUCCES.test(suivante) && !/"err"|'err'/.test(suivante)) {
+          fautes.push(nom + ":" + (i + 1) + " → écriture au résultat JETÉ, puis annonce de succès");
+        }
+      }
+      return fautes;
+    };
+
+    const fichiers = fs.readdirSync(dir).filter((f) => f.endsWith(".ts"));
+    ck(fichiers.length > 10, "le verrou lit bien le dossier des formulaires (" + fichiers.length + " fichiers) — anti-vacuité");
+    const fautes = [];
+    fichiers.forEach((f) => fautes.push(...fautesDe(fs.readFileSync(path.join(dir, f), "utf8"), f)));
+    ck.eq(fautes.join("  |  "), "", "aucun formulaire n'annonce un succès sans regarder le retour du Store");
+
+    // -- preuve que le verrou MORD : sondes SYNTHÉTIQUES, aucune source réelle n'est modifiée --
+    const sondeFautive = '        if (x) await store.update("sites", x.id, p); else await store.create("sites", p);\n        Notify.toast(I18n.t("rack.site.updated")); return true;';
+    ck.eq(fautesDe(sondeFautive, "sonde.ts").length, 1, "VERROU : le motif d'origine EXACT est refusé (sinon le verrou ne prouverait rien)");
+    const sondeCorrigee = '        if (!await FormSave.record(store, "sites", x && x.id, p)) return false;\n        Notify.toast(I18n.t("rack.site.updated")); return true;';
+    ck.eq(fautesDe(sondeCorrigee, "sonde.ts").length, 0, "VERROU : la forme CORRIGÉE passe (ce n'est pas un refus aveugle du mot `Notify.toast`)");
+    const sondeCapturee = '        const ok = await store.update("sites", x.id, p);\n        Notify.toast(I18n.t("rack.site.updated")); return true;';
+    ck.eq(fautesDe(sondeCapturee, "sonde.ts").length, 0, "VERROU : un retour CAPTURÉ n'est pas jugé ici (le contrôle lui appartient)");
+    const sondeErreur = '        if (x) await store.update("sites", x.id, p); else await store.create("sites", p);\n        Notify.toast(I18n.t("x.failed"), "err"); return false;';
+    ck.eq(fautesDe(sondeErreur, "sonde.ts").length, 0, "VERROU : un toast d'ERREUR après écriture n'est pas une annonce de succès");
+    const sondeLot = '        await store.updateBatch(ops);\n        Notify.toast(I18n.t("face.saved"));';
+    ck.eq(fautesDe(sondeLot, "sonde.ts").length, 1, "VERROU : `updateBatch` est couvert (il rend 0 au refus, donc le même piège)");
+    // -- le décommentage ne doit NI aveugler le verrou, NI le laisser mordre sur de la prose --
+    const sondeProse = '/* Exemple à NE PAS suivre :\n       await store.update("sites", x.id, p);\n       Notify.toast("Site mis à jour");\n    */';
+    ck.eq(fautesDe(sondeProse, "sonde.ts").length, 0, "VERROU : le motif CITÉ dans un commentaire n'est pas une faute (c'est le cas de l'en-tête de FormSave)");
+    const sondeProseLigne = '        // await store.update("sites", x.id, p);\n        // Notify.toast("Site mis à jour");';
+    ck.eq(fautesDe(sondeProseLigne, "sonde.ts").length, 0, "VERROU : … y compris en commentaire de LIGNE");
+    const sondeApresProse = '/* du blabla\n   sur deux lignes */\n        if (x) await store.update("sites", x.id, p); else await store.create("sites", p);\n        Notify.toast("ok");';
+    ck.eq(fautesDe(sondeApresProse, "sonde.ts").length, 1, "VERROU : le décommentage ne l'AVEUGLE pas — une vraie faute qui suit un commentaire est toujours vue");
+    ck(fautesDe(sondeApresProse, "sonde.ts")[0].indexOf(":3") > 0, "VERROU : le décommentage PRÉSERVE les numéros de ligne (faute annoncée en ligne 3)");
+  }
+  });
+
   await section("FilterChips : modèle pur des filtres actifs (barre de contrôles unifiée, lot C)", async () => {
     const dims = [
       { key: "type", label: "Type", options: [{ id: "switch", label: "Switch" }, { id: "server", label: "Serveur" }] },

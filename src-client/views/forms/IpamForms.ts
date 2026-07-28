@@ -4,6 +4,7 @@ import { Notify } from "../../ui/Notify";
 import { Html } from "../../core/Html";
 import { Ip } from "../../core/Ip";
 import { FormUi } from "./shared";
+import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import type { FormHost } from "./shared";
 import { RackForms } from "./RackForms";
 import { LiveValidation } from "./LiveValidation";
@@ -58,7 +59,7 @@ export class IpamForms extends RackForms {
           if (badR) { Notify.toast(I18n.t("ipam.net.rangeOutOfCidr", { start: badR.start_ip, end: badR.end_ip, cidr }), "err"); return false; }
         }
         const payload = { label: labelI.value.trim(), cidr, description: descI.value.trim(), gateway, dns_servers, dhcp_server_id };
-        if (net) await store.update("ipNetworks", net.id, payload); else await store.create("ipNetworks", payload);
+        if (!await FormSave.record(store, "ipNetworks", net && net.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(net ? I18n.t("ipam.net.updated") : I18n.t("ipam.net.created")); onSaved?.(); return true;
       },
     });
@@ -121,7 +122,7 @@ export class IpamForms extends RackForms {
         const payload = { id: addr ? addr.id : undefined, network_id: networkId, address, hostname: hostI.value.trim(), equipment_id: eqSel.value || null, vm_id: vmId, description: descI.value.trim() };
         // surlignés par la validation live : format + IP ∈ CIDR + unicité (V6a) + pas dans une plage DHCP (V6b).
         if (live.check(payload).length) return false;
-        if (addr) await store.update("ipAddresses", addr.id, payload); else await store.create("ipAddresses", payload);
+        if (!await FormSave.record(store, "ipAddresses", addr && addr.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(addr ? I18n.t("ipam.addr.updated") : I18n.t("ipam.addr.created")); onSaved?.(); return true;
       },
     });
@@ -165,7 +166,7 @@ export class IpamForms extends RackForms {
         if (live.check(record).length) return false;
         const s = Ip.toInt(record.start_ip)!, e = Ip.toInt(record.end_ip)!;   // valides après la validation live
         const payload = { network_id: networkId, start_ip: Ip.toStr(s), end_ip: Ip.toStr(e), server_id: srvSel.value || null, description: descI.value.trim() };
-        if (rng) await store.update("dhcpRanges", rng.id, payload); else await store.create("dhcpRanges", payload);
+        if (!await FormSave.record(store, "dhcpRanges", rng && rng.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(rng ? I18n.t("ipam.range.updated") : I18n.t("ipam.range.created")); onSaved?.(); return true;
       },
     });

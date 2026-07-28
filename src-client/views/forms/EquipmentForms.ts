@@ -37,6 +37,7 @@ import {
   PORT_DIRECTIONS, POE_CLASSES
 } from "../../domain/constants";
 import { FormUi, ORIENT_OPTS } from "./shared";
+import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
 import { FaceEditor } from "./FaceEditor";
@@ -355,7 +356,7 @@ export class EquipmentForms extends FormBase {
       onSave: async () => {
         const payload = { label: labelI.value.trim(), type: typeI.value || GroupTypes.DEFAULT, color: color || null, description: descI.value.trim() };
         if (live.check(payload).length) return false;   // label requis (surligné)
-        if (grp) await store.update("groups", grp.id, payload); else await store.create("groups", payload);
+        if (!await FormSave.record(store, "groups", grp && grp.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(grp ? I18n.t("equipment.group.updated") : I18n.t("equipment.group.created")); onSaved?.(); return true;
       },
     });
@@ -485,7 +486,7 @@ export class EquipmentForms extends FormBase {
           // autre
           specs: type === "other" ? specsI.value.trim() : "",
         };
-        if (sp) await store.update("spares", sp.id, payload); else await store.create("spares", payload);
+        if (!await FormSave.record(store, "spares", sp && sp.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(sp ? I18n.t("equipment.spare.updated") : I18n.t("equipment.spare.created")); onSaved?.(); return true;
       },
     });

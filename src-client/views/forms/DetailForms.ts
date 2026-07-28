@@ -22,7 +22,8 @@ import { IpamForms } from "./IpamForms";
 import { VmNetMapping } from "../../core/VmNetMapping";
 import { VmIpMatch } from "../../core/VmIpMatch";
 import { VmLocate } from "../../core/VmLocate";   // « Localiser » une VM = localiser son HÔTE (prédicat PUR partagé avec le listing)
-import { VmStatus } from "../../core/VmStatus";   // pastilles statut/orphelinat — règle unique partagée avec le listing et la bulle
+import { VmStatus } from "../../core/VmStatus";
+import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »   // pastilles statut/orphelinat — règle unique partagée avec le listing et la bulle
 import { VmForms } from "./VmForms";
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
@@ -654,7 +655,7 @@ export class DetailForms extends IpamForms {
             }
             // Patch MINIMAL passé au store (comme les autres écritures de fiche) : la validation PARTAGÉE fusionne et
             // vérifie l'invariant d'exclusivité. On vide `equipment_id` pour respecter la bascule côté équipement.
-            await store.update("ipAddresses", addrId, { vm_id: id, equipment_id: null });
+            if (!await FormSave.record(store, "ipAddresses", addrId, { vm_id: id, equipment_id: null })) return; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
             Notify.toast(I18n.t("detail.vm.attached"));
             onChanged?.();                                   // rafraîchit la liste/vue d'origine
             this.vmDetail(store, host, id, onChanged);       // re-rendu de la fiche (l'adresse passe en « liées »)
