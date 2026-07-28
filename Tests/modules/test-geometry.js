@@ -1506,6 +1506,24 @@ module.exports = async () => {
     const fe = { placement_mode: "floor", location: "liege", floor: "1", floor_x: 500, floor_y: 700, dc_z: 1000 };
     const ew = fl.equipFloorWorld(m3, fe);
     ck(isFinite(ew.x) && isFinite(ew.y) && Math.abs(ew.z - (FloorLayout.levelZ(m3, 1) + 1000)) < 1e-6, "equipFloorWorld : base = niveau étage + dc_z");
+    // ORIGINE du repère PROPRE du posé (source unique du décor 3D ET du cadrage « Localiser ») : même x/y
+    // que ci-dessus, mais un Z qui ne porte QUE le SOCLE. C'est la frontière exacte du piège du `dc_z` :
+    // l'origine l'ignore, `equipFloorWorld` (et le résolveur de ports) l'ajoute — une seule fois chacun.
+    const fo = fl.equipFloorOrigin(m3, fe);
+    ck(fo.x === ew.x && fo.y === ew.y, "equipFloorOrigin : mêmes x/y que equipFloorWorld (une seule règle de position sur le plan)");
+    ck.eq(fo.baseZ, FloorLayout.levelZ(m3, 1), "equipFloorOrigin : baseZ = SOCLE du niveau, SANS la hauteur propre");
+    // Tolérance : le socle de ce niveau n'est pas un nombre rond (hauteur de contenu = 42 × 44,45 mm),
+    // l'écart mesuré porte donc l'erreur d'arrondi de la somme — pas celle de la règle.
+    ck(Math.abs((ew.z - fo.baseZ) - 1000) < 1e-6, "equipFloorWorld = origine + dc_z : la hauteur propre est ajoutée UNE fois, et là seulement");
+    ck(!("z" in fo), "equipFloorOrigin : aucun champ `z` — le nom `baseZ` interdit de le confondre avec une altitude d'objet");
+    // Un posé NON localisé retombe au CENTRE de son plan, comme il est DESSINÉ (parité `floorEquipPos`).
+    // Mesuré par ÉCART avec le posé localisé ci-dessus (même bâtiment, même étage) : l'origine du bâtiment
+    // et l'ancrage du plan s'annulent, l'attente ne dépend donc que du modèle.
+    const cfg1 = fl.config("liege", "1");
+    const foAuto = fl.equipFloorOrigin(m3, { placement_mode: "floor", location: "liege", floor: "1" });
+    ck.eq(foAuto.x - fo.x, cfg1.width_mm / 2 - 500, "equipFloorOrigin(non localisé) : x = centre du plan (écart au posé en floor_x 500)");
+    ck.eq(foAuto.y - fo.y, cfg1.depth_mm / 2 - 700, "equipFloorOrigin(non localisé) : y = centre du plan (écart au posé en floor_y 700)");
+    ck.eq(foAuto.baseZ, fo.baseZ, "equipFloorOrigin(non localisé) : même socle — seule la position sur le plan diffère");
   }
   // ---- NIVEAU SITE (doctrine §6.9) : la position d'un bâtiment se dérive du SITE (GPS, sinon repli à
   // 5 km), et non plus d'un rangement par largeur cumulée. Les attentes ci-dessous sont EXPLICITES — pas

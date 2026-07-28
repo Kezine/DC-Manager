@@ -462,6 +462,9 @@ export const dc = {
     wpNotInRoom: "Waypoint non posé dans une salle",
     portEquipNotInRoom: "Port : équipement non placé dans une salle",
     portNotFound3d: "Port introuvable en 3D (façade non posée ?)",
+    // Posé sur un ÉTAGE : la Vue étage n'affiche les plans que des bâtiments dont une salle est visible ;
+    // un bâtiment sans aucune salle ne peut donc pas entrer dans la portée d'affichage.
+    floorNoRoomInBuilding: "Bâtiment sans salle : la vue 3D ne peut pas encore afficher son plan d'étage",
   },
   base: {
     noFloor: "Aucun étage. Créez une salle (avec bâtiment + étage) pour afficher son plan.",

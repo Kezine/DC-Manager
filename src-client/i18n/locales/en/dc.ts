@@ -452,6 +452,7 @@ export const dc = {
     wpNotInRoom: "Waypoint not placed in a room",
     portEquipNotInRoom: "Port: equipment not placed in a room",
     portNotFound3d: "Port not found in 3D (face not placed?)",
+    floorNoRoomInBuilding: "Building without a room: the 3D view cannot show its floor plan yet",
   },
   base: {
     noFloor: "No floor. Create a room (with building + floor) to show its plan.",

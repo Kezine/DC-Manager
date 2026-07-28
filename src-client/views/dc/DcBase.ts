@@ -10,6 +10,7 @@ import { Normalize } from "../../core/Normalize";
 import { RackScene } from "../../geometry/RackScene";
 import { Resolver3D } from "../../geometry/Resolver3D";
 import { FloorLayout } from "../../geometry/FloorLayout";
+import type { MultiLayout } from "../../geometry/FloorLayout";
 import { SITE_SCALE_DEFAULT_M_PER_KM, SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM } from "../../geometry/SiteLayout";
 import type { SiteScale } from "../../geometry/SiteLayout";
 import { CableRouting } from "../../geometry/CableRouting";
@@ -503,6 +504,14 @@ export abstract class DcBase {
     this.figure = { dcX: cx, dcY: cy, orient: 0, floorX: fx, floorY: fy };
   }
 
+  /** DISPOSITION multi-salles COURANTE (repère MONDE de la Vue étage) : le layout du MODÈLE complet, filtré
+      par la PORTÉE d'affichage (`visibleDcIds`) et compressé par l'échelle inter-sites réglée (§6.8/§6.9).
+      SOURCE UNIQUE de ce monde : le décor 3D et le cadrage « Localiser » d'un contenu d'ÉTAGE doivent voir
+      exactement la même disposition, sinon la caméra viserait un point que la scène ne dessine pas là. */
+  protected currentMultiLayout(): MultiLayout {
+    return this.floor.multiLayout(this.current(), { visibleDcIds: this.visibleDcIds, siteScale: this.siteScale() });
+  }
+
   /** Contexte de scène pour le moteur WebGL : descripteur multi-salles + câbles transversaux (repère MONDE).
       La logique de routage (inter-DC / stubs sortants) reste ici (réutilise les helpers SVG) ; le moteur ne fait
       que tracer les tubes — pas de réimplémentation côté Three. */
@@ -522,7 +531,7 @@ export abstract class DcBase {
     };
     let multi: any = null, floorDecor: any = null;
     if (this.multiDc) {
-      const m = this.floor.multiLayout(this.current(), { visibleDcIds: this.visibleDcIds, siteScale: this.siteScale() });
+      const m = this.currentMultiLayout();
       if (m.rooms.length) {
         // CENTROÏDE DYNAMIQUE : boîte englobante des salles VISIBLES (et non la boîte théorique totalW×maxD×topZ,
         // dominée par la hauteur empilée → caméra mal cadrée). Pivot + cadrage suivent le contenu réellement affiché.
@@ -570,16 +579,16 @@ export abstract class DcBase {
       .filter((wp: any) => shown.has((wp.location || "") + "" + String(wp.floor || "")))
       .map((wp: any) => { const w = this.floor.oobWorld(m, wp); return { id: wp.id, x: w.x, y: w.y, z: w.z, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(String(wp.floor || ""))) }; });
     // ÉQUIPEMENTS D'ÉTAGE (`placement_mode: "floor"`) : posés sur le plan de leur étage, hors de toute salle.
-    // Ils n'étaient JAMAIS transmis au moteur 3D — seule la vue 2D Plan d'étage les montrait. La position monde
-    // est déléguée à `FloorLayout.equipFloorWorld`, l'analogue d'`oobWorld` qui existait déjà SANS consommateur.
-    // `baseZ` ne porte QUE le Z du niveau : la hauteur propre (`dc_z`) est ajoutée par la géométrie de boîte au
-    // moteur, sinon elle compterait double.
+    // Ils n'étaient JAMAIS transmis au moteur 3D — seule la vue 2D Plan d'étage les montrait. Le repère monde
+    // est délégué à `FloorLayout.equipFloorOrigin`, SOURCE UNIQUE partagée avec le cadrage « Localiser » :
+    // `baseZ` ne porte QUE le Z du niveau, la hauteur propre (`dc_z`) étant ajoutée par la géométrie de boîte
+    // au moteur — la composer ici la compterait double.
     // NB : on filtre en comparant lieu et étage CHAMP À CHAMP plutôt qu'en réutilisant la clé concaténée de
     // `shown` — le séparateur de cette clé est un NUL BRUT dans le littéral TS (piège connu du dépôt), qu'on
     // évite de retaper.
     const equips = this.store.floorEquipments()
       .filter((e: any) => m.floorPlanes.some((fp: any) => (fp.loc || "") === (e.location || "") && String(fp.floor || "") === String(e.floor || "")))
-      .map((e: any) => { const w = this.floor.equipFloorWorld(m, e); return { id: e.id, x: w.x, y: w.y, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(String(e.floor || ""))) }; });
+      .map((e: any) => { const o = this.floor.equipFloorOrigin(m, e); return { id: e.id, x: o.x, y: o.y, baseZ: o.baseZ }; });
     // ÉTIQUETTES D'ÉTAGE : UNE PAR PLAN DESSINÉ, posée juste à côté de SON plan. Elles se dérivaient
     // auparavant de `m.levels` (les niveaux GLOBAUX du monde) et formaient un jeu UNIQUE planté à
     // l'origine (x = -gap*0.6, y = 0) : lisible du temps où les bâtiments étaient rangés en file depuis

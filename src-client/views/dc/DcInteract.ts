@@ -874,6 +874,12 @@ export abstract class DcInteract extends DcPanels {
       const c = PlacementFrame.origin(RackGeometry.roomPlacement(rk));
       return { x: c.x, y: c.y, z: RackGeometry.uBaseZ(rk) + ((e.rack_u - 1) + Math.max(1, e.u_height | 0 || 1) / 2) * U_MM };
     }
+    // ⚠ AUCUNE branche pour le mode `floor`, et c'est VOULU : cette méthode répond « où est cet équipement
+    // DANS la salle `dcId` », question qui n'a pas de réponse pour un posé d'ÉTAGE — son conteneur n'est
+    // aucune salle (doctrine §6.4). Il ressort donc `null` par la branche « libre » ci-dessus (`dc_id` vide),
+    // ce qui est le verdict JUSTE et non le piège d'ordre des modes `tray`/`side`/`wall`. Son cadrage passe
+    // par le chemin MONDE (`locateFloorEquip`) ; lui ajouter ici une branche obligerait à inventer un repère
+    // salle pour un objet qui n'en a pas.
     return null;
   }
 
@@ -884,6 +890,23 @@ export abstract class DcInteract extends DcPanels {
       `face` (optionnel) oriente la caméra face au front de l'objet ; sinon seul l'azimut courant est conservé. */
   protected focus3DAt(dcId: string, p: Vec3, extent: number, face?: { az: number; el: number } | null): void {
     this.view = "3d"; this.multiDc = false; this.dcId = dcId;
+    this._focusTarget = { p, extent, face: face || null };
+    this.buildToolbar(); this.render();
+  }
+
+  /** PENDANT MONDE de `focus3DAt` : bascule en 3D **Vue étage** (repère BÂTIMENT) et programme le focus
+      caméra sur un point exprimé en MONDE.
+
+      Pourquoi un second point d'entrée plutôt qu'un paramètre : `focus3DAt` FORCE `multiDc = false` et
+      reçoit un point en repère SALLE (« repère salle = monde en mode simple DC »). Un contenu d'ÉTAGE n'a
+      pas de salle — sa position n'existe QUE dans le repère bâtiment, celui de la Vue étage — donc aucune
+      valeur de paramètre ne rendrait `focus3DAt` applicable : les deux repères de départ sont différents,
+      et c'est ce que les deux noms disent (doctrine §3 règle 5, le repère doit être EXPLICITE).
+
+      La salle ACTIVE n'est PAS déplacée : la Vue étage montre un bâtiment, pas une salle en particulier, et
+      changer `dcId` emporterait aussi le panneau latéral et les vues 2D sans que rien ne l'ait demandé. */
+  protected focusWorld3DAt(p: Vec3, extent: number, face?: { az: number; el: number } | null): void {
+    this.view = "3d"; this.multiDc = true;
     this._focusTarget = { p, extent, face: face || null };
     this.buildToolbar(); this.render();
   }
@@ -908,12 +931,16 @@ export abstract class DcInteract extends DcPanels {
   /** Prépare le focus sur un équipement : surbrillance (focusEqId) + isolement de la baie s'il est en baie.
       Retourne l'angle « en face de L'ÉQUIPEMENT » (et non de la baie) : un équipement monté à l'arrière (rack_side
       « rear ») se regarde depuis l'arrière de la baie ; un boîtier libre depuis sa propre orientation. */
-  protected aimAtEquip(e: any, dcId: string): { az: number; el: number } {
+  protected aimAtEquip(e: any, dcId: string | null): { az: number; el: number } {
     this.focusEqId = e.id;
     // baie hôte : DIRECTE (rack/side/wall) OU DÉRIVÉE de l'étagère (tray → rackItem → rack) pour un posé.
     let rackId: string | null = ((e.placement_mode === "rack" || e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id) ? e.rack_id : null;
     if (!rackId && e.placement_mode === "tray" && e.tray_item_id) { const tray: any = this.store.get("rackItems", e.tray_item_id); rackId = (tray && tray.rack_id) ? tray.rack_id : null; }
-    if (rackId) {
+    // `dcId` est null pour un contenu HORS SALLE (posé d'ÉTAGE) : il n'a alors NI baie hôte NI salle où
+    // isoler quoi que ce soit — aucun des quatre modes qui donnent une baie ne s'applique à `floor`, donc
+    // `rackId` y est déjà null. La garde ne fait qu'exprimer cette impossibilité au compilateur, plutôt que
+    // de laisser un `racksOfDc(null)` traverser le code.
+    if (rackId && dcId) {
       const rk: any = this.store.get("racks", rackId);
       this.selRackId = rackId;
       // isoler la baie : ne montrer que celle-ci dans la salle (les autres baies sont masquées)
@@ -978,8 +1005,79 @@ export abstract class DcInteract extends DcPanels {
     this.buildToolbar(); this.render();
   }
 
+  /* ---- « Localiser » un contenu d'ÉTAGE : le conteneur n'est pas une salle (doctrine §6.4) ---- */
+
+  /** Amène le BÂTIMENT `location` dans la PORTÉE d'affichage de la Vue étage, pour que son plan d'étage soit
+      effectivement ÉMIS par `multiLayout` — et donc que le contenu qu'on localise soit DESSINÉ. Rend `false`
+      quand c'est impossible.
+
+      ⚠ POURQUOI C'EST NÉCESSAIRE, et pas seulement confortable : `multiLayout` n'émet que les étages des
+      bâtiments dont une salle est AFFICHÉE. Localiser un posé d'étage d'un AUTRE bâtiment que la salle
+      active cadrerait donc parfaitement… un point vide, l'objet n'étant tout simplement pas dans la scène.
+      Le REPÈRE, lui, ne bouge pas (§6.8) : élargir la portée ne déplace rien, ça ne fait qu'ajouter au
+      dessin — la cible calculée est la même avant et après.
+
+      ⚠ On AJOUTE les salles du bâtiment, on ne REMPLACE pas la portée : les autres salles affichées sont un
+      choix de l'utilisateur, comme les masquages que `locateRack` respecte déjà. La salle ACTIVE, elle, est
+      toujours dans la portée par construction (`multiLayout` l'ajoute d'office).
+
+      ⚠ LIMITE ASSUMÉE : un bâtiment SANS AUCUNE salle n'a aucun moyen d'entrer dans cette portée — elle
+      s'exprime en salles. Le contenu d'un tel bâtiment reste donc non affichable, et l'appelant le DIT au
+      lieu de viser le vide. Lever cette limite demande une portée exprimée en BÂTIMENTS (option de
+      `multiLayout` + réglage de vue persisté + contrôle pour en sortir) : un lot à part. */
+  protected scopeFloorBuilding(location: string): boolean {
+    const rooms = this.store.all("datacenters").filter((d: any) => (d.location || "") === location);
+    if (!rooms.length) return false;
+    rooms.forEach((d: any) => this.visibleDcIds.add(d.id));
+    return true;
+  }
+
+  /** « Localiser » un équipement posé sur un ÉTAGE (`placement_mode: "floor"`) : Vue étage cadrée sur
+      l'objet, EN MONDE. Rend `false` si `e` n'est pas un contenu d'étage — l'appelant poursuit alors par le
+      chemin SALLE ; `true` s'il l'est, Y COMPRIS quand la localisation est refusée (l'utilisateur a reçu un
+      toast, il n'y a plus rien à tenter derrière).
+
+      ⚠ Ce chemin DOIT PRÉCÉDER la résolution par salle : `Store.equipmentDcId` rend `null` pour un posé
+      d'étage PAR CONCEPTION (aucun maillon « salle » dans sa chaîne de conteneurs), et l'appelant
+      s'arrêterait sur « non placé dans une salle » alors que l'objet est parfaitement placé. */
+  protected locateFloorEquip(e: any): boolean {
+    const c = this.store.equipmentContainer(e);
+    if (!c || c.kind !== "floor") return false;
+    if (!this.scopeFloorBuilding(c.location)) { Notify.toast(I18n.t("dc.interact.floorNoRoomInBuilding"), "err"); return true; }
+    const face = this.aimAtEquip(e, null);   // aucune baie hôte : surbrillance + azimut « en face » de SA façade
+    const o = this.floor.equipFloorOrigin(this.currentMultiLayout(), e);
+    const b = FreeEquipGeometry.box(e);
+    // Z du centre = socle du niveau + hauteur propre + demi-hauteur : la MÊME somme que `buildEquipBox`
+    // (groupe posé sur le socle, boîte posée sur `box().z`). `equipFloorOrigin` ne rend QUE le socle, donc
+    // `dc_z` n'est ajoutée qu'ICI — la compter deux fois viserait au-dessus de l'objet dessiné.
+    // L'étendue cadrée est celle de l'objet, comme pour un équipement LIBRE de salle : mêmes cotes, même
+    // règle de remplissage (§6.15), donc mêmes 90 % de la vue.
+    this.focusWorld3DAt({ x: o.x, y: o.y, z: o.baseZ + b.z + b.h / 2 }, CameraFraming.objectExtent(b.w, b.d, b.h), face);
+    return true;
+  }
+
+  /** « Localiser » un PORT porté par un équipement posé sur un ÉTAGE. Même contrat de retour que
+      `locateFloorEquip`, et même raison d'être prioritaire sur le chemin salle. */
+  protected locateFloorPort(e: any, portId: string): boolean {
+    const c = this.store.equipmentContainer(e);
+    if (!c || c.kind !== "floor") return false;
+    if (!this.scopeFloorBuilding(c.location)) { Notify.toast(I18n.t("dc.interact.floorNoRoomInBuilding"), "err"); return true; }
+    const o = this.floor.equipFloorOrigin(this.currentMultiLayout(), e);
+    // `resolvePort3D` est scopé par SALLE (ses cinq branches exigent un `dcId`) : on passe par son PENDANT
+    // sans salle, qui compose depuis l'origine monde du conteneur (§6.20). C'est l'appel EXACT que
+    // `DcThreeScene.buildFloorDecor` fait pour DESSINER ce connecteur — la caméra vise donc, par
+    // construction, le connecteur affiché et non un point recalculé à côté.
+    const pt = this.resolver.resolvePortWorld3D(portId, o.x, o.y, o.baseZ);
+    if (!pt) { Notify.toast(I18n.t("dc.interact.portNotFound3d"), "err"); return true; }
+    const face = this.aimAtEquip(e, null);
+    this.focusPortId = portId;   // le port lui-même est mis en évidence (même ambre que l'équipement)
+    this.focusWorld3DAt({ x: pt.x, y: pt.y, z: pt.z }, FOCUS_CONTEXT_PORT_MM, face);
+    return true;
+  }
+
   locateEquipment(eqId: string): void {
     const e: any = this.store.get("equipments", eqId); if (!e) return;
+    if (this.locateFloorEquip(e)) return;   // posé sur un ÉTAGE : chemin MONDE (cf. `locateFloorEquip`)
     const dcId = this.store.equipmentDcId(eqId);
     if (!dcId) { Notify.toast(I18n.t("dc.interact.equipNotInRoom"), "err"); return; }
     const face = this.aimAtEquip(e, dcId);
@@ -1025,11 +1123,12 @@ export abstract class DcInteract extends DcPanels {
 
   locatePort(portId: string): void {
     const p: any = this.store.get("ports", portId); if (!p) return;
+    const e: any = this.store.get("equipments", p.equipment_id);
+    if (e && this.locateFloorPort(e, portId)) return;   // port d'un posé d'ÉTAGE : chemin MONDE
     const dcId = this.store.equipmentDcId(p.equipment_id);
     if (!dcId) { Notify.toast(I18n.t("dc.interact.portEquipNotInRoom"), "err"); return; }
     const pt = this.resolver.resolvePort3D(portId, dcId);
     if (!pt) { Notify.toast(I18n.t("dc.interact.portNotFound3d"), "err"); return; }
-    const e: any = this.store.get("equipments", p.equipment_id);
     // surbrillance de l'équipement ET du PORT + isolement de sa baie + orientation « en face » ; cadrage serré.
     const face = e ? this.aimAtEquip(e, dcId) : null;
     this.focusPortId = portId;   // le port lui-même est mis en évidence (même ambre que l'équipement)

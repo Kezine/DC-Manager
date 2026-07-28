@@ -1576,4 +1576,123 @@ module.exports = async () => {
     ck(Math.abs(mondeWp - 2080) / 2080 < 0.02, "…pour que le monde cadré reste celui d'avant (2 080 mm) à 2 % près — ce lot ne retouche pas ces trois cibles");
   }
   });
+
+  /* ============================================================================================
+     « LOCALISER » UN CONTENU D'ÉTAGE — cadrage en MONDE, Vue étage, et PORTÉE amenée à la cible.
+     Cf. docs/placement.md §6.27 (et §6.4 : l'étage est un CONTENEUR, pas une salle virtuelle).
+
+     Il n'y a AUCUNE parité à prouver ici : le chemin n'existait pas. `Store.equipmentDcId` rend
+     `null` pour un posé d'étage PAR CONCEPTION, donc « Localiser » s'arrêtait sur le toast « non
+     placé dans une salle ». Toutes les valeurs ci-dessous sont dérivées À LA MAIN du modèle.
+
+     Repères du décor, identiques à ceux des sections « décor d'étage » plus haut : deux sites SANS
+     GPS → Alpha à l'origine, Beta au repli de 5 km (50 000 mm à l'échelle par défaut) ; hauteur
+     d'étage forcée à 4 000 mm + 2 000 mm d'écart inter-niveaux → socles 0 et 6 000.
+     ============================================================================================ */
+  await section("« Localiser » un posé d'ÉTAGE : Vue étage, cible en MONDE, portée amenée au bâtiment", async () => {
+  {
+    const s = await makeStore();
+    const siteA = await s.create("sites", { name: "Alpha" });
+    const siteB = await s.create("sites", { name: "Beta" });
+    const siteC = await s.create("sites", { name: "Gamma" });
+    await s.create("floors", { location: siteA.id, floor: "0", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000 });
+    await s.create("floors", { location: siteA.id, floor: "1", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000 });
+    await s.create("floors", { location: siteB.id, floor: "0", width_mm: 12000, depth_mm: 9000, cell_mm: 600, height_mm: 4000 });
+    const dcA0 = await s.create("datacenters", { name: "Salle A0", location: siteA.id, floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const dcB0 = await s.create("datacenters", { name: "Salle B0", location: siteB.id, floor: "0", width_mm: 5000, depth_mm: 4000, floor_x: 500, floor_y: 500 });
+    // ONDULEUR posé sur le plan de Beta / étage 0, dans un AUTRE bâtiment que la salle active : c'est le
+    // cas qui met la PORTÉE en défaut (le plan de Beta n'est pas émis tant qu'aucune de ses salles ne l'est).
+    const eqF = await s.create("equipments", {
+      name: "ONDULEUR", placement_mode: "floor", dim_mode: "free",
+      location: siteB.id, floor: "0", floor_x: 4000, floor_y: 2000,
+      dc_z: 250, dc_orientation: 90, free_w_mm: 200, free_l_mm: 400, free_h_mm: 300,
+    });
+    const pF = await s.create("ports", { equipment_id: eqF.id, name: "in", face_x: 0.25, face_y: 0.5, face_side: "front" });
+    const dv = new DatacenterView(s, {}, {});   // garde headless
+    dv.view = "3d"; dv.useWebGL = true; dv.dcId = dcA0.id; dv.multiDc = true; dv.visibleDcIds = new Set([dcA0.id]);
+
+    // ---- LE PIÈGE, d'abord CONSTATÉ : hors portée, l'objet n'est pas dans la scène ----
+    const equipsDessines = () => (dv.webglCtx().floorDecor || { equips: [] }).equips;
+    ck.eq(equipsDessines().length, 0, "portée limitée à Alpha : le posé de Beta n'est PAS dessiné (son plan d'étage n'est pas émis)");
+    // …et pourtant le REPÈRE, lui, est déjà complet : la cible ne dépend pas de ce qu'on affiche (§6.8).
+    const oHorsPortee = dv.floor.equipFloorOrigin(dv.currentMultiLayout(), eqF);
+
+    // ---- « LOCALISER » : bascule en Vue étage + cadrage MONDE ----
+    dv.multiDc = false; dv.view = "top";   // état de départ quelconque : la localisation doit le corriger
+    dv.locateEquipment(eqF.id);
+    ck.eq(dv.view, "3d", "posé d'étage : « Localiser » bascule en 3D");
+    ck.eq(dv.multiDc, true, "posé d'étage : … en VUE ÉTAGE (repère bâtiment) — le repère salle ne peut pas l'exprimer");
+    ck.eq(dv.dcId, dcA0.id, "posé d'étage : la salle ACTIVE n'est pas déplacée (la Vue étage montre un bâtiment)");
+    // Cible : origine du bâtiment Beta (50 000) + floor_x 4 000 ; y = 0 + floor_y 2 000 ; z = socle 0 + dc_z 250 + demi-hauteur 150.
+    ck.eq(dv._focusTarget.p.x, 54000, "cible x = origine du bâtiment Beta (50 000) + floor_x (4 000)");
+    ck.eq(dv._focusTarget.p.y, 2000, "cible y = origine du bâtiment Beta (0) + floor_y (2 000)");
+    ck.eq(dv._focusTarget.p.z, 400, "cible z = socle du niveau (0) + dc_z (250) + demi-hauteur (150) — 650 signalerait un dc_z compté DEUX fois");
+    ck.eq(dv._focusTarget.extent, 400, "étendue cadrée = plus grande cote de l'objet (200 × 400 × 300), comme un libre de salle");
+    ck.eq(CameraFraming.halfExtentFor(dv._focusTarget.extent), 300, "…et la LIMITE DE ZOOM cadre 600 mm de monde (l'objet est plus petit qu'une baie)");
+    ck(Math.abs(dv._focusTarget.face.az) < 1e-9, "azimut « en face » : lacet 90° → façade vers l'EST → caméra sur +X (az = 0)");
+    ck.eq(dv._focusTarget.face.el, CameraFraming.FOCUS_ELEVATION_RAD, "élévation = la plongée par défaut (source unique CameraFraming)");
+    ck.eq(dv.focusEqId, eqF.id, "l'équipement est mis en SURBRILLANCE (le moteur l'allume désormais aussi dans le décor d'étage)");
+    ck.eq(dv.selRackId, null, "aucune baie hôte : rien à isoler");
+    ck.eq(dv.focusPortId, null, "localiser l'ÉQUIPEMENT ne met aucun port en évidence");
+
+    // ---- PORTÉE : le bâtiment de la cible est entré dans la scène, donc l'objet est DESSINÉ ----
+    ck(dv.visibleDcIds.has(dcB0.id), "portée : la salle du bâtiment visé est ajoutée (sinon la caméra cadrerait un point VIDE)");
+    ck(dv.visibleDcIds.has(dcA0.id), "portée : les salles déjà affichées sont CONSERVÉES (on ajoute, on ne remplace pas)");
+    const dessines = equipsDessines();
+    ck.eq(dessines.length, 1, "portée élargie : le posé d'étage est maintenant DESSINÉ");
+    // Garde de LISIBILITÉ (même motif que `sansNull` plus haut) : si la portée cessait d'être élargie, un
+    // accès direct à `dessines[0]` CRASHERAIT la section et masquerait la répartition des échecs — or c'est
+    // elle qui informe (sonde mesurée : 2 FAIL + 1 crash, contre 3 FAIL lisibles avec cette garde).
+    const premier = dessines[0] || { id: null, x: null, y: null, baseZ: null };
+    ck.eq(premier.id, eqF.id, "…et c'est bien celui qu'on localise");
+    ck(premier.x === dv._focusTarget.p.x && premier.y === dv._focusTarget.p.y,
+      "la caméra vise EXACTEMENT là où la scène dessine l'objet (même source : FloorLayout.equipFloorOrigin)");
+    ck.eq(premier.baseZ + 250 + 150, dv._focusTarget.p.z, "…et le z de la cible se recompose depuis le socle poussé au moteur");
+    // REPÈRE ⊥ PORTÉE : élargir la portée n'a RIEN déplacé — la cible était déjà calculable avant.
+    const oDansPortee = dv.floor.equipFloorOrigin(dv.currentMultiLayout(), eqF);
+    ck.eq(JSON.stringify(oDansPortee), JSON.stringify(oHorsPortee), "l'origine du posé est la MÊME hors portée et dans la portée (repère ⊥ portée)");
+
+    // ---- « LOCALISER » UN PORT du posé : même chemin, cadrage serré sur le connecteur ----
+    dv.locatePort(pF.id);
+    ck.eq(dv.multiDc, true, "port d'un posé d'étage : Vue étage également");
+    ck.eq(dv.focusPortId, pF.id, "port : le connecteur lui-même est mis en évidence");
+    ck.eq(dv.focusEqId, eqF.id, "port : son équipement porteur aussi");
+    ck.eq(dv._focusTarget.extent, 1250, "port : étendue de CONTEXTE (cible PONCTUELLE), inchangée par rapport aux ports de salle");
+    // local (−50 ; −200 ; 400) tourné de 90° → (+200 ; −50) ; z = 250 + 150 (face_y 0,5 → mi-hauteur).
+    ck(Math.abs(dv._focusTarget.p.x - 54200) < 1e-9, "port : x = 54 000 + 200 (local tourné de 90°)");
+    ck(Math.abs(dv._focusTarget.p.y - 1950) < 1e-9, "port : y = 2 000 − 50");
+    ck(Math.abs(dv._focusTarget.p.z - 400) < 1e-9, "port : z = socle 0 + dc_z 250 + mi-hauteur 150 — le port tombe DANS la boîte dessinée");
+    // Le résolveur consulté est bien le pendant SANS SALLE : `resolvePort3D` (scopé par salle) ne sait pas.
+    const r3 = new Resolver3D(s);
+    ck.eq(r3.resolvePort3D(pF.id, dcB0.id), null, "contrôle de discrimination : `resolvePort3D` (scopé par SALLE) ne résout PAS ce port — c'est bien l'autre chemin qui travaille");
+
+    // ---- NON-RÉGRESSION : un équipement de SALLE reste sur le chemin salle (repère salle, mono-DC) ----
+    const eqSalle = await s.create("equipments", { name: "coffret", placement_mode: "manual", dim_mode: "free", dc_id: dcB0.id, dc_x: 1000, dc_y: 800, dc_z: 0, free_w_mm: 400, free_l_mm: 400, free_h_mm: 200 });
+    dv.locateEquipment(eqSalle.id);
+    ck.eq(dv.multiDc, false, "équipement de SALLE : chemin inchangé — repère salle, Vue étage désactivée");
+    ck.eq(dv.dcId, dcB0.id, "équipement de SALLE : la salle active devient la sienne (comportement historique)");
+    ck(dv._focusTarget.p.x === 1000 && dv._focusTarget.p.y === 800, "équipement de SALLE : cible en LOCAL SALLE, inchangée");
+    ck.eq(dv.locateFloorEquip(eqSalle), false, "le chemin d'étage se DÉSISTE pour un contenu de salle (l'appelant poursuit)");
+
+    // ---- BÂTIMENT SANS AUCUNE SALLE : refus explicite, jamais un cadrage sur le vide ----
+    // La portée d'affichage s'exprime en SALLES : un bâtiment qui n'en a aucune ne peut pas y entrer.
+    const eqG = await s.create("equipments", {
+      name: "GROUPE", placement_mode: "floor", dim_mode: "free",
+      location: siteC.id, floor: "0", floor_x: 1000, floor_y: 1000, free_w_mm: 500, free_l_mm: 500, free_h_mm: 500,
+    });
+    const porteeAvant = [...dv.visibleDcIds].sort().join(",");
+    ck.eq(dv.scopeFloorBuilding(siteC.id), false, "bâtiment SANS salle : impossible de l'amener dans la portée");
+    ck.eq([...dv.visibleDcIds].sort().join(","), porteeAvant, "…et l'échec ne touche à RIEN (portée inchangée)");
+    ck.eq(dv.scopeFloorBuilding(siteB.id), true, "bâtiment AVEC salle : la portée peut l'accueillir");
+    dv.multiDc = false; dv.view = "top"; dv._focusTarget = null;
+    // `Notify.toast` exige un DOM, absent du harnais : l'exception LEVÉE est donc la PREUVE que le chemin
+    // de refus est emprunté. Si la garde disparaissait, `focusWorld3DAt` (headless-safe) programmerait une
+    // cible sans lever quoi que ce soit — les deux assertions basculeraient ensemble.
+    let refus = null;
+    try { dv.locateEquipment(eqG.id); } catch (err) { refus = err; }
+    ck(refus !== null, "bâtiment sans salle : le chemin de REFUS est bien emprunté (le toast réclame un DOM)");
+    ck.eq(dv._focusTarget, null, "…et AUCUNE cible caméra n'est programmée : on refuse au lieu de viser le vide");
+    ck.eq(dv.view, "top", "…la vue courante n'est pas non plus basculée pour rien");
+  }
+  });
 };

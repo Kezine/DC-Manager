@@ -1731,6 +1731,71 @@ trancher. Le périmètre d'un lot de renommage est **ce qui est faux**, pas ce q
 `toParent()` reste explicitement proscrit (§6.6) — c'est d'ailleurs pourquoi `composePoint` ne s'appelle
 pas `pointToParent` : le mot inviterait précisément l'abstraction que la borne interdit.
 
+### 6.27 « Localiser » atteint les contenus d'ÉTAGE — **IMPLÉMENTÉ**
+
+Premier lot du chantier « câbler les équipements d'étage » (§6.4) à toucher l'expérience. Il est PRÉALABLE
+à la migration des appelants de `Store.equipmentDcId` vers la clé CONTENEUR : cinq de ces appelants
+commandent l'affichage du bouton « Localiser », et `DcInteract` n'avait aucun chemin pour un posé d'étage —
+les migrer d'abord aurait ouvert un **bouton mort**. On rend donc l'action possible AVANT d'ouvrir son bouton.
+
+**Deux repères, deux points d'entrée — et c'est irréductible.** `focus3DAt` force `multiDc = false` et reçoit
+un point en LOCAL SALLE (« repère salle = monde en mode simple DC »). Un contenu d'étage n'a pas de salle : sa
+position n'existe QUE dans le repère bâtiment. Aucune valeur de paramètre ne rendrait `focus3DAt` applicable —
+d'où `focusWorld3DAt`, qui bascule en **Vue étage** et prend du MONDE. Le repère est dans le nom (§3 règle 5),
+exactement comme `resolvePortWorld3D` en §6.20.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **`FloorLayout.equipFloorOrigin` devient la SOURCE UNIQUE de l'origine d'un posé d'étage** (`x`, `y`,
+  `baseZ`), et `equipFloorWorld` n'en est plus qu'un consommateur (`baseZ + dc_z`). La vue 3D recomposait
+  cette origine à la main — position par `equipFloorWorld`, socle par un second appel à `levelZ` — et le
+  cadrage caméra aurait été le TROISIÈME site à répondre à la question du `dc_z`. Écarté : recopier le
+  motif dans `DcInteract` ; il suffit d'y répondre une fois de travers pour que la caméra vise 250 mm
+  au-dessus de ce que la scène dessine, et rien ne le signalerait.
+- **La PORTÉE est amenée à la cible, sinon on cadre le vide.** `multiLayout` n'émet les plans d'étage que des
+  bâtiments dont une salle est AFFICHÉE : localiser un posé d'un AUTRE bâtiment que la salle active cadrait
+  donc parfaitement un point où la scène ne dessine rien. « Localiser » AJOUTE les salles du bâtiment visé à
+  `visibleDcIds` (il ne remplace pas la portée — les autres salles affichées sont un choix de l'utilisateur,
+  comme les masquages que `locateRack` respecte déjà). ⚠ Le REPÈRE, lui, ne bouge pas : l'origine calculée est
+  **identique avant et après** l'élargissement (§6.8, verrouillé par test).
+- **La salle ACTIVE n'est pas déplacée.** Écarté : poser `dcId` sur une salle du bâtiment visé, ce qui aurait
+  emporté le panneau latéral et les vues 2D sans que rien ne l'ait demandé. La Vue étage montre un BÂTIMENT ;
+  la portée suffit à l'y faire entrer.
+- **`equipCenter` ne reçoit PAS de branche `floor`, et c'est un choix.** Elle répond « où est cet équipement
+  DANS la salle `dcId` » — question sans réponse pour un posé d'étage. Il en ressort `null` par la branche
+  « libre » (pas de `dc_id`), ce qui est le verdict JUSTE et non le piège d'ordre qui avait frappé `tray`
+  puis `side`/`wall` (§6.13). Écarté : y ajouter une branche « pour la cohérence » — il aurait fallu inventer
+  un repère salle à un objet qui n'en a pas.
+- **La SURBRILLANCE ambre a dû suivre.** `DcThreeCamera.setFocusEquip` ne parcourait que `gRacks` et `gFree` ;
+  les posés d'étage vivent dans `gFloorDecor`. Ils y sont pourtant construits par le MÊME `buildEquipBox`
+  (donc même `pick.type === "occ"`) et leurs ports par le MÊME `addPortAt` (donc même `pick.type === "port"`) :
+  il suffisait d'ajouter le troisième groupe à la traversée. Sans cela, « Localiser » cadrait la caméra sans
+  rien allumer.
+- **Deux traversées JUMELLES ont été mesurées puis LAISSÉES EN PLACE**, parce qu'elles ne relèvent pas de ce
+  lot : `DcThreeCamera.applyHover` (survol) — sans effet observable, le seul mesh d'une boîte d'équipement à
+  porter un `pick` étant celui que le raycast a déjà touché ; et `DcThreeScene.applyColorMode`, qui recolore
+  EN PLACE lors d'un changement de mode de couleur et **saute donc les posés d'étage** jusqu'au prochain
+  rebuild complet. Ce second point est un vrai défaut, étranger à « Localiser » — signalé, non corrigé (§3 :
+  on ne « rationalise » pas hors périmètre).
+
+**LIMITE ASSUMÉE, et son diagnostic exact** : un bâtiment SANS AUCUNE SALLE reste inaffichable en 3D. La
+portée s'exprime en SALLES (`visibleDcIds`) : un tel bâtiment n'a aucun moyen d'y entrer, donc son plan
+d'étage n'est jamais émis et son contenu n'est jamais dessiné. « Localiser » le DIT (toast) au lieu de viser
+le vide. ⚠ Le diagnostic naturel — « `DcBase.webglCtx` teste `m.rooms.length`, donc la scène entière
+disparaît » — est **faux, mesuré** : `multiLayout` place TOUJOURS la salle active dans `rooms`, et `render()`
+sort avant sur « aucune salle » ; ce garde-là est inatteignable, et le corriger n'aurait rien débloqué. Le
+seul verrou réel est le filtre `shownFloors`. Le lever demande une portée exprimée en BÂTIMENTS (option de
+`multiLayout`, réglage de vue persisté, et un contrôle pour en sortir) : **lot à part, non fait**.
+
+**Sondes de mutation** : branche d'étage neutralisée dans `locateEquipment` → la section entière tombe
+(38 assertions perdues, l'ancien chemin partant sur le toast « non placé dans une salle ») ; `dc_z` compté
+DEUX fois dans `equipFloorOrigin` → **8 FAIL**, répartis sur les quatre couches (descripteur poussé au
+moteur, chaîne port, origine pure, cible caméra) ; portée NON élargie → **3 FAIL** dont « le posé n'est pas
+dessiné » alors que la caméra le vise ; garde du bâtiment sans salle retirée → **3 FAIL**.
+
+**Non couvert par les tests, à juger À L'ŒIL** : la surbrillance ambre elle-même et le confort du cadrage
+(`DcThreeCamera` importe THREE, hors de portée du harnais), et le toast de refus (il exige un DOM).
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -1741,15 +1806,16 @@ pas `pointToParent` : le mot inviterait précisément l'abstraction que la borne
 | `tray` | étagère → baie → salle | local salle | oui | **migré de bout en bout** — l'ÉTAGÈRE place ses contenus (`TrayFrame`, §6.23), la baie place l'étagère, la salle place la baie (`PlacementFrame`, §6.11). Géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). **Seule chaîne à TROIS conteneurs emboîtés** ; le lacet PROPRE d'un posé s'y compose enfin (§6.24) et une étagère arrière est une vraie ROTATION |
 | `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`PlacementFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
 | *(waypoints)* | baie → salle | local salle | s.o. | **migré** — brosses et pins passent par le conteneur (§6.12) ; le champ `world` est renommé `roomPoint` |
-| `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `PlacementFrame` |
+| `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `PlacementFrame`. **LOCALISABLE** depuis §6.27 (équipement et ports), via `focusWorld3DAt` + `FloorLayout.equipFloorOrigin` |
 
 Les équipements d'étage sont le premier contenu porté par un conteneur AUTRE qu'une salle. Ils sont
 donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
 
-⚠ **Leurs ports sont RÉSOLUS et DESSINÉS, ils ne sont pas CÂBLABLES** (§6.20, dernier point).
-`Store.equipmentDcId` rend `null` pour un équipement d'étage par conception, et la machinerie de câblage ne
-connaît que « dans la salle X » ou « non placé ». Généraliser cette clé de « salle » à « conteneur » est le
-chantier décrit en §6.4 — il reste entier.
+⚠ **Leurs ports sont RÉSOLUS, DESSINÉS et LOCALISABLES ; ils ne sont toujours pas CÂBLABLES** (§6.20 puis
+§6.27). `Store.equipmentDcId` rend `null` pour un équipement d'étage par conception, et la machinerie de
+câblage ne connaît que « dans la salle X » ou « non placé ». Généraliser cette clé de « salle » à
+« conteneur » est le chantier décrit en §6.4 ; il est OUVERT — `Store.equipmentContainer`/`portContainer`/
+`cableContainer` existent, et §6.27 a débloqué le seul prérequis d'expérience (un « Localiser » opérant).
 
 ✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur**, et la
 règle de repli d'une position absente n'est plus écrite qu'une fois (§6.13). Les deux **prérequis** de §6.5
@@ -1788,7 +1854,9 @@ du besoin — verrouillé par des tests anti-divergence).
 - `src-client/geometry/SiteLayout.ts` — position des SITES : `realPositions` (modèle → mètres réels),
   `compress` (mètres réels → millimètres monde, échelle linéaire/log), `worldPositions`.
 - `src-client/geometry/FloorLayout.ts` — `multiLayout` (chaîne bâtiment/étage/salle), `roomToWorld`,
-  `equipFloorWorld`, `oobWorld`, `levelZ`.
+  `equipFloorOrigin` (**source unique** de l'origine monde d'un posé d'étage : `x`/`y` sur le plan et
+  `baseZ` = SOCLE du niveau, **sans `dc_z`**), `equipFloorWorld` (= cette origine + `dc_z`, seule addition
+  du chemin), `oobWorld`, `levelZ`.
 - `src-client/geometry/PivotBounds.ts` — **BORNAGE DU PIVOT D'ORBITE** (§6.21), pur : `rectCorners`/`unionAabb`
   (repère SALLE, boîte **XY seule** — bornes en Z absentes = parois infinies), `worldBounds` (repère BÂTIMENT,
   boîte **3D** = bandes de bâtiment dessinées × hauteur du monde) et `clampPivot` (méthode du slab sur les TROIS
@@ -1824,6 +1892,11 @@ du besoin — verrouillé par des tests anti-divergence).
   `FloorDecor.world`, les **BORNES MONDE** (bandes de bâtiment DESSINÉES × hauteur du monde) que le moteur
   utilise pour borner le pivot d'orbite (§6.21) — un champ qui ne dessine rien, donc à ne pas oublier dans
   `SceneLayoutSignature`.
+- `src-client/views/dc/DcInteract.ts` — « Localiser ». DEUX points d'entrée, un par REPÈRE (§6.27) :
+  `focus3DAt` (local SALLE, force le mode simple DC) et `focusWorld3DAt` (**MONDE**, bascule en Vue étage,
+  pour les contenus sans salle). `locateFloorEquip`/`locateFloorPort` précèdent le chemin salle et se
+  désistent (`false`) pour tout autre conteneur ; `scopeFloorBuilding` amène le bâtiment visé dans la
+  PORTÉE, sans quoi la caméra cadrerait un point que la scène ne dessine pas.
 - `src-client/views/dc/three/DcThreeScene.ts` — `addPort` (résolution EN SALLE puis dessin) et `addPortAt`
   (dessin SEUL, à un point déjà résolu) : la RÉSOLUTION dépend du conteneur, le DESSIN non. Les ports
   d'étage passent par `resolvePortWorld3D` puis par le MÊME `addPortAt` — d'où leur comportement identique

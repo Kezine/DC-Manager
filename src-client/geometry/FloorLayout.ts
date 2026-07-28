@@ -251,11 +251,33 @@ export class FloorLayout {
     const pos = FloorLayout.oobFloorPos(wp, cfg), h = FloorLayout.oobLocalized(wp) ? FloorLayout.oobHeight(wp) : OOB_HEIGHT_DEFAULT;
     return { x: bx + (cfg.anchor_x || 0) + pos.x, y: by + (cfg.anchor_y || 0) + pos.y, z: FloorLayout.levelZ(m, FloorLayout.floorNum(fl)) + h };
   }
-  /** Point MONDE 3D (base) d'un équipement posé sur un étage (analogue à `oobWorld`). */
-  equipFloorWorld(m: MultiLayout, eq: any): Vec3 {
+  /** ORIGINE MONDE du repère PROPRE d'un équipement posé sur un ÉTAGE : `x`/`y` = sa position sur le plan de
+      son étage (origine du bâtiment + ancrage du plan + `floor_x`/`floor_y`, ou centre du plan à défaut), et
+      `baseZ` = SOCLE du niveau. C'est le repère depuis lequel se composent TOUS ses contenus propres — sa
+      boîte dessinée comme ses ports.
+
+      ⚠ `baseZ` ne porte QUE le socle : la hauteur propre (`dc_z`) N'Y EST PAS. C'est la convention de toute
+      la chaîne d'étage — `DcThreeScene.buildEquipBox` pose son groupe sur le socle PUIS sa boîte sur
+      `box().z`, et `Resolver3D.resolvePortWorld3D` ajoute `dc_z` du côté du résolveur (doctrine §6.20).
+      L'ajouter ici la compterait DEUX fois, décalage d'autant plus traître qu'il reste invisible tant que
+      l'équipement est posé au sol.
+
+      EXTRAIT pour être la SOURCE UNIQUE de cette origine : le décor 3D (`DcBase.webglFloorDecor`) et le
+      cadrage « Localiser » d'un posé d'étage en ont besoin tous les deux. La recalculer chez chaque
+      consommateur reposerait la question du `dc_z` à chacun d'eux — et il suffit d'y répondre une fois de
+      travers pour que la caméra vise à côté de ce que la scène dessine. */
+  equipFloorOrigin(m: MultiLayout, eq: any): { x: number; y: number; baseZ: number } {
     const loc = eq.location || "", fl = String(eq.floor || ""), cfg = this.config(loc, fl);
+    // Origine du bâtiment : les DEUX composantes depuis que le site porte une position (§6.9) — ne lire que
+    // `x0` replierait silencieusement tous les bâtiments sur la même bande y (même piège qu'`oobWorld`).
     const b = m.buildings.find((x) => (x.loc || "") === loc), bx = b ? b.x0 : 0, by = b ? b.y0 : 0;
     const pos = FloorLayout.floorEquipPos(eq, cfg);
-    return { x: bx + (cfg.anchor_x || 0) + pos.x, y: by + (cfg.anchor_y || 0) + pos.y, z: FloorLayout.levelZ(m, FloorLayout.floorNum(fl)) + FloorLayout.floorEquipHeight(eq) };
+    return { x: bx + (cfg.anchor_x || 0) + pos.x, y: by + (cfg.anchor_y || 0) + pos.y, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(fl)) };
+  }
+  /** Point MONDE 3D (base) d'un équipement posé sur un étage (analogue à `oobWorld`) : son ORIGINE ci-dessus,
+      PLUS sa hauteur propre (`dc_z`). C'est le seul endroit du chemin d'étage où `dc_z` s'additionne. */
+  equipFloorWorld(m: MultiLayout, eq: any): Vec3 {
+    const o = this.equipFloorOrigin(m, eq);
+    return { x: o.x, y: o.y, z: o.baseZ + FloorLayout.floorEquipHeight(eq) };
   }
 }

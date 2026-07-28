@@ -119,7 +119,12 @@ export abstract class DcThreeCamera extends DcThreeBase {
     this._focusObjs.forEach((o) => this.setFocusHi(o, false));
     this._focusObjs = [];
     if (eqId || portId) {
-      [this.gRacks, this.gFree].forEach((g) => g && g.traverse((o: any) => {
+      // `gFloorDecor` compte AUSSI : les équipements posés sur un ÉTAGE y sont construits par le MÊME
+      // `buildEquipBox` que ceux d'une salle (donc même `pick.type === "occ"`) et leurs ports par le MÊME
+      // `addPortAt` (donc même `pick.type === "port"`). Cette traversée est le SEUL chemin qui les trouve —
+      // il n'y a pas d'objet visé par un raycast pour rattraper l'oubli, contrairement au survol. Sans ce
+      // troisième groupe, « Localiser » un posé d'étage cadrait la caméra sans rien allumer.
+      [this.gRacks, this.gFree, this.gFloorDecor].forEach((g) => g && g.traverse((o: any) => {
         const ud = o.userData; if (!ud) return;
         const p = ud.pick;
         if (eqId && ((p && p.type === "occ" && p.id === eqId) || ud.eqId === eqId)) this._focusObjs.push(o);   // équipement (+ ses plans d'image, tagués eqId)
