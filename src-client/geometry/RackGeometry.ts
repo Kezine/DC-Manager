@@ -62,8 +62,6 @@ export class RackGeometry {
   /** Profondeur de cage (montants av↔ar, mm) ; non déclarée = profondeur extérieure, à laquelle elle est
       aussi BORNÉE (une cage ne peut pas déborder de son châssis — cf. `RackDepthPolicy`, §6.14). */
   static cageDepth(rack: any): number { return RackDepthPolicy.cage(rack); }
-  /** Profondeur mini = cage. */
-  static minDepth(rack: any): number { return RackGeometry.cageDepth(rack); }
   /** Marge AVANT (façade → montants avant, mm), bornée pour que la cage tienne. */
   static frontMargin(rack: any): number { return RackDepthPolicy.frontMargin(rack); }
   /** Largeur UTILE du corps 19″ (panneau − 2 oreilles standard) — largeur max d'un boîtier racké. */
@@ -88,13 +86,6 @@ export class RackGeometry {
   static doorExtraDepth(rack: any, face: string): number { return RackDepthPolicy.doorExtra(rack, face); }
   /** Vrai si la baie porte au moins une porte (avant ou arrière) activée. */
   static hasDoor(rack: any): boolean { return RackDepthPolicy.hasDoor(rack); }
-  /** Profondeur PHYSIQUE disponible pour un montage ancré au plan AVANT (montants en U / brosse) : du plan de
-      montage avant jusqu'à la face arrière (`profondeur − marge avant`) + cavités des portes av/ar. Marge de
-      sécurité NON retranchée (cf. RACK_DEPTH_SAFETY_MM côté formulaire). */
-  static frontMountAvailDepth(rack: any): number {
-    const d = rack.depth || RACK_DEPTH_DEFAULT;
-    return d - RackGeometry.frontMargin(rack) + RackGeometry.doorExtraDepth(rack, "front") + RackGeometry.doorExtraDepth(rack, "rear");
-  }
   /** Marge ARRIÈRE (montants arrière → face arrière, mm) — complément de la cage et de la marge avant. */
   static rearMargin(rack: any): number { return RackDepthPolicy.rearMargin(rack); }
   /** Profondeur PHYSIQUE disponible pour un montage en U selon sa face d'ANCRAGE (avant/arrière) :

@@ -638,7 +638,8 @@ export class RackForms extends CableForms {
     let bdepthI: HTMLInputElement | null = null, bheightI: HTMLInputElement | null = null;
     const brushRack: any = isBrush ? store.get("racks", wp.rack_id) : null;
     const brushHasDoor = !!(brushRack && RackGeometry.hasDoor(brushRack));
-    const brushAvail = brushRack ? RackGeometry.frontMountAvailDepth(brushRack) : Infinity;   // dispo physique (depth − marge avant + cavités)
+    // dispo physique (depth − marge avant + cavités). Une brosse est ancrée au plan de montage AVANT, d'où `"front"`.
+    const brushAvail = brushRack ? RackGeometry.mountAvailDepth(brushRack, "front") : Infinity;
     const brushMaxDepth = brushHasDoor ? Math.max(1, brushAvail - RACK_DEPTH_SAFETY_MM) : Infinity;   // − marge de sécurité (app-wide)
     if (isBrush) {
       bdepthI = FormControls.number(wp.depth_mm != null ? wp.depth_mm : 100, brushHasDoor ? { min: 1, step: 10, max: Math.round(brushMaxDepth) } : { min: 1, step: 10 });
@@ -802,7 +803,7 @@ export class RackForms extends CableForms {
     const prow = FormControls.fieldRow(I18n.t("rack.common.heightU"), pheightI); body.appendChild(prow);
     // une PORTE borne la profondeur dispo (depth − marge avant + cavités − marge de sécurité) ; sans porte, libre.
     const brushHasDoor = RackGeometry.hasDoor(rack);
-    const brushAvail = RackGeometry.frontMountAvailDepth(rack);
+    const brushAvail = RackGeometry.mountAvailDepth(rack, "front");   // brosse = ancrage au plan de montage AVANT
     const brushMaxDepth = brushHasDoor ? Math.max(1, brushAvail - RACK_DEPTH_SAFETY_MM) : Infinity;
     const bdepthI = FormControls.number("100", brushHasDoor ? { min: 1, step: 10, max: Math.round(brushMaxDepth) } : { min: 1, step: 10 });
     const bdepthRow = FormControls.fieldRow(I18n.t("rack.assign.brushDepth"), bdepthI, brushHasDoor ? I18n.t("rack.waypoint.depthDoorHint", { max: Math.round(brushMaxDepth), avail: Math.round(brushAvail), safety: RACK_DEPTH_SAFETY_MM }) : I18n.t("rack.waypoint.depthFreeHint")); body.appendChild(bdepthRow);

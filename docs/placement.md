@@ -797,11 +797,9 @@ bornée (et l'enregistre à l'édition). Une baie dont la cage tient dans son ch
 seul que le formulaire permette de saisir sans forcer — est inchangée au micron.
 
 **Non fait, volontairement** : `RackGeometry.mountAvailDepth`/`sharedMountDepth` et `RackDepth.avail`/`shared`
-composent encore les mêmes primitives chacun de leur côté (à la marge de sécurité près, cf. ci-dessus) ;
-`RackGeometry.frontMountAvailDepth` est, lui, un doublon EXACT de `mountAvailDepth(rack, "front")` —
-duplication interne au front, signalée et non corrigée. `RackGeometry.minDepth` n'a plus AUCUN consommateur
-(code mort), et devient de surcroît vacuité pure puisque la cage est bornée : à retirer au prochain lot qui
-touchera ce fichier.
+composent encore les mêmes primitives chacun de leur côté (à la marge de sécurité près, cf. ci-dessus).
+✅ Les deux autres dettes signalées ici — le doublon `RackGeometry.frontMountAvailDepth` et le code mort
+`RackGeometry.minDepth` — sont **RÉSORBÉES en §6.18**.
 
 ### 6.15 Le CADRAGE de « Localiser » devient une règle nommée — **IMPLÉMENTÉ**
 
@@ -1119,6 +1117,69 @@ situation pour laquelle `residualCascade` existe.
 d'appeler `plan()` — ils suppriment UNE entité, `planMany` ne leur apporterait rien. Le jour où le mode
 fichier offrira une suppression multiple, c'est `planMany` qu'il devra appeler, pour exactement les raisons
 ci-dessus.
+
+### 6.18 Les dettes laissées par le chantier sont refermées — **IMPLÉMENTÉ**
+
+Lot de NETTOYAGE, sans nouveau concept. Il solde ce que §6.7, §6.14 et le lot 9 avaient explicitement
+laissé derrière eux. Un seul de ses quatre points est un vrai défaut ; les trois autres sont du résidu.
+
+**1. Quatre fichiers de `src-shared/` AFFIRMAIENT ENCORE une contrainte abolie — et c'est un BUG, pas un
+détail de forme.** `Schema.ts`, `DocumentChangeset.ts`, `VmSync.ts` portaient en en-tête « Contrainte
+`shared/` : fichier AUTO-SUFFISANT (aucun import relatif) », et `DataValidation.ts` répétait la même chose
+en deux commentaires internes — alors qu'il **importe** `./RackDepthPolicy.js` depuis §6.14, six lignes
+plus haut. La contrainte est levée depuis §6.7 (mise à jour).
+
+> **Pourquoi ce n'est pas cosmétique.** Une doc périmée qui *interdit* quelque chose ne se contente pas de
+> vieillir : elle **fabrique la dette qu'elle prétendait éviter**. Un contributeur qui lit « auto-suffisant »
+> renonce à un import légitime et RÉÉCRIT la règle sur place — c'est-à-dire exactement la duplication
+> `TrayFit` ⇄ `RackGeometry` (§6.7) et `RackDepth` ⇄ `RackGeometry` (§6.14), qui ont coûté deux lots et fait
+> apparaître **quatre divergences silencieuses** entre les copies. La règle générale : un énoncé de doc qui
+> **empêche** une action est plus dangereux qu'un énoncé qui la décrit, parce que son effet ne se voit nulle
+> part dans le code — seulement dans le code qu'on n'a PAS écrit.
+
+Les en-têtes disent désormais la règle RÉELLE : import relatif AUTORISÉ entre fichiers partagés, extension
+`.js` IMPÉRATIVE (NodeNext l'exige côté serveur ; l'omettre compile côté front et casse le build serveur),
+et l'avertissement de ne pas dupliquer une règle « pour rester auto-suffisant ». Corrigés au passage, même
+défaut : la phrase de `CLAUDE.md` « les modules partagés existants n'ont, eux, aucun import relatif »
+(fausse depuis §6.14) et la justification « shared/ auto-suffisant » de la ligne T12/T9b de
+`validation.md`. ⚠ Deux occurrences SUBSISTENT, dans le harnais de tests (`Tests/modules/harness.js`,
+`test-sync.js`) : hors périmètre de ce lot, signalées.
+
+**2. `RackGeometry.frontMountAvailDepth` était bien un doublon — mais la preuve a trouvé une nuance.**
+§6.14 l'annonçait « doublon EXACT de `mountAvailDepth(rack, "front")` ». Vérifié avant de retirer (méthode
+§4.1, sur le code COMPILÉ, jamais retranscrit) : **257 400 comparaisons** sur une grille de 18 profondeurs
+× 13 cages × 11 marges avant × 10 portes avant × 10 portes arrière (valeurs absentes, vides, nulles,
+négatives, fractionnaires, en chaîne et non numériques comprises) → **205 divergences**, **TOUTES** sur la
+seule profondeur `2^53` mm (≈ 9 milliards de km), écart maximal **2 mm**, soit **un ULP** à cette
+magnitude. Sur les 228 800 comparaisons restantes — toute profondeur physiquement représentable — **ZÉRO
+divergence**, NaN et signe du zéro compris.
+
+> La cause n'est pas une différence de RÈGLE mais d'**associativité IEEE 754** : `((d − marge) + av) + ar`
+> contre `(d − marge) + (av + ar)`. Les deux expressions sont la même somme regroupée autrement, et
+> l'addition flottante n'est pas associative. Verdict : **équivalents**. La méthode reste bonne — c'est
+> précisément parce que la sonde couvrait des valeurs absurdes qu'on peut affirmer *où* est la limite au
+> lieu de l'espérer. Contrôle de discrimination posé dans la même sonde : `mountAvailDepth(rack, "rear")`
+> diffère bien de la forme `"front"` sur 1 027 des 2 574 formes testées — sans quoi la sonde aurait aussi
+> bien pu comparer une fonction qui ignore son argument.
+
+Les deux appelants (`RackForms`, hauteur de brosse) passent à la forme paramétrée, dans le même fichier et
+la même fonction qu'un `mountAvailDepth(rack, side)` déjà présent. Le doublon disparaît.
+
+**3. Code MORT retiré**, après recherche exhaustive d'usages (`src-client/`, `src-server/`, `Tests/`,
+`design-system/`, usages dynamiques et chaînes comprises) : `RackGeometry.minDepth` (aucun appelant, et
+vacuité pure depuis §6.14 — il ne faisait que déléguer à `cageDepth`, la cage étant désormais bornée) et
+`DcCamera.setMultiDc()` (aucun appelant : la bascule « Vue étage » écrit `this.multiDc` puis `refit()`
+depuis `DcPanels`). Aucun test ne les nommait : **aucun test retiré**.
+
+**4. CSS orpheline retirée** : la règle `.dc-bldg-sep`, vestige 2D du plan séparateur inter-bâtiments
+supprimé au lot 9 (§6.9 / « ce que le lot 4 a laissé de côté »). Aucun code TS ne l'émet plus — vérifié, y
+compris pour un nom de classe CONSTRUIT. Le commentaire de bloc qui l'annonçait (« PAROI pointillée
+translucide marquant le passage à un autre bâtiment ») part avec elle. Les 23 previews de `design-system/`
+inlinent le CSS de l'app : régénérées par `design-system/build.js`, leur diff ne contient QUE cette
+suppression.
+
+**Aucun changement de comportement observable** : les quatre points sont de la doc, du code sans appelant,
+un alias prouvé équivalent et une règle CSS que rien ne sélectionne.
 
 ## 7. État de la convergence
 
