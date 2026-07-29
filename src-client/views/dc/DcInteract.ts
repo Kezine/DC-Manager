@@ -885,8 +885,6 @@ export abstract class DcInteract extends DcPanels {
     return null;
   }
 
-  protected portDcId(portId: string | null): string | null { return this.store.portDcId(portId); }   // résolveur PARTAGÉ (Store) — même règle pour la vue 3D et les boutons « Localiser »
-
   /** Bascule en 3D sur la salle `dcId` (mode simple DC) et programme le focus caméra sur `p`. `extent` (mm) est
       la TAILLE de ce qu'on cadre — le moteur en dérive la vue via `CameraFraming` (90 % de la vue, limite de zoom).
       `face` (optionnel) oriente la caméra face au front de l'objet ; sinon seul l'azimut courant est conservé. */
@@ -1044,9 +1042,10 @@ export abstract class DcInteract extends DcPanels {
       chemin SALLE ; `true` s'il l'est, Y COMPRIS quand la localisation est refusée (l'utilisateur a reçu un
       toast, il n'y a plus rien à tenter derrière).
 
-      ⚠ Ce chemin DOIT PRÉCÉDER la résolution par salle : `Store.equipmentDcId` rend `null` pour un posé
-      d'étage PAR CONCEPTION (aucun maillon « salle » dans sa chaîne de conteneurs), et l'appelant
-      s'arrêterait sur « non placé dans une salle » alors que l'objet est parfaitement placé. */
+      ⚠ Ce chemin DOIT PRÉCÉDER la résolution par salle, et c'est ce qui autorise cette dernière à
+      AFFIRMER qu'elle tient une salle (§6.33) : la chaîne d'un posé d'étage ne comporte aucun maillon
+      « salle », si bien que le chemin salle s'arrêterait sur « non placé dans une salle » alors que
+      l'objet est parfaitement placé — c'est ce que faisait l'historique `Store.equipmentDcId`. */
   protected locateFloorEquip(e: any): boolean {
     const c = this.store.equipmentContainer(e);
     if (!c || c.kind !== "floor") return false;
@@ -1085,8 +1084,23 @@ export abstract class DcInteract extends DcPanels {
   locateEquipment(eqId: string): void {
     const e: any = this.store.get("equipments", eqId); if (!e) return;
     if (this.locateFloorEquip(e)) return;   // posé sur un ÉTAGE : chemin MONDE (cf. `locateFloorEquip`)
-    const dcId = this.store.equipmentDcId(eqId);
-    if (!dcId) { Notify.toast(I18n.t("dc.interact.equipNotInRoom"), "err"); return; }
+    /* ⚠ ICI, ET AUX DEUX AUTRES CHEMINS SALLE (`locateCable`, `locatePort`), L'HYPOTHÈSE « c'est une
+       SALLE » EST AFFIRMÉE SUR PLACE — elle ne se cache plus dans une primitive du store (doctrine
+       §6.33). Elle tient à deux faits LOCAUX, tous deux vérifiables à la lecture de ces lignes :
+       la branche ÉTAGE vient de passer (`locateFloorEquip` a rendu `false`, donc le conteneur immédiat
+       n'est pas un étage) ; et tout ce qui suit — `aimAtEquip`, `rackFocus`, `equipCenter`, `focus3DAt` —
+       est scopé SALLE PAR CONCEPTION, la résolution en MONDE étant l'exception annoncée par le nom des
+       méthodes (§6.20). L'union `PlacementContainer` étant DISCRIMINÉE, c'est `tsc` qui vérifie la
+       restriction : sans le `kind === "room"`, `k.id` ne compile pas.
+
+       ⚠ C'est le conteneur de CHAÎNE qu'on restreint (`equipmentNamedContainer` : la salle traversée,
+       sinon l'étage immédiat), JAMAIS le conteneur IMMÉDIAT — celui d'un serveur monté est sa BAIE et
+       celui d'un boîtier posé son ÉTAGÈRE, si bien que `equipmentContainer` déclarerait « non placé »
+       tout équipement monté en baie. C'est très exactement le verdict qu'avait l'historique
+       `Store.equipmentDcId`, retiré au profit de cette restriction locale. */
+    const k = this.store.equipmentNamedContainer(e);
+    if (!k || k.kind !== "room") { Notify.toast(I18n.t("dc.interact.equipNotInRoom"), "err"); return; }
+    const dcId = k.id;
     const face = this.aimAtEquip(e, dcId);
     // MONTÉ DANS UNE BAIE (`aimAtEquip` l'a isolée et posé `selRackId`) : on cadre LA BAIE, centrée et
     // entière — c'est le cadrage que l'utilisateur juge bon, et l'équipement s'y repère à sa surbrillance.
@@ -1151,7 +1165,8 @@ export abstract class DcInteract extends DcPanels {
     // EXTRÉMITÉ RETENUE : la première LOCALISABLE (A puis B). La règle vit dans `core/Locatable`, où le
     // PRÉDICAT des boutons « Localiser » la lit aussi — les deux ne peuvent donc pas diverger, et c'est ce
     // qui interdit le bouton MORT (décision D6, doctrine §6.28 puis §6.32). L'expression historique
-    // `portDcId(A) || portDcId(B)` en est le cas particulier « salle », qu'elle reproduit à l'identique.
+    // `portDcId(A) || portDcId(B)` (RETIRÉE §6.33) en était le cas particulier « salle », qu'elle
+    // reproduit à l'identique.
     const portId = this.store.cableLocatableEnd(c);
     if (!portId) {
       // AUCUNE extrémité atteignable. Si l'une d'elles est pourtant POSÉE SUR UN ÉTAGE, la cause n'est pas
@@ -1162,10 +1177,14 @@ export abstract class DcInteract extends DcPanels {
       return;
     }
     if (this.locateFloorCable(cableId, portId)) return;   // extrémité posée sur un ÉTAGE : chemin MONDE
-    const dcId = this.portDcId(portId);
-    // Non-null par construction : une extrémité localisable qui n'est pas sur un étage traverse une SALLE
+    // SALLE de l'extrémité retenue — restriction locale du conteneur de CHAÎNE, cf. le commentaire de
+    // `locateEquipment`. Un port n'a pas de placement propre : c'est celui de son équipement porteur.
+    const pRetenu: any = this.store.get("ports", portId);
+    const k = pRetenu ? this.store.equipmentNamedContainer(pRetenu.equipment_id) : null;
+    // Une salle par construction : une extrémité localisable qui n'est pas sur un étage traverse une SALLE
     // (les deux seules branches de `core/Locatable`). La garde reste, fermée, plutôt qu'un `!` de complaisance.
-    if (!dcId) { Notify.toast(I18n.t("dc.interact.cableNotInRoom"), "err"); return; }
+    if (!k || k.kind !== "room") { Notify.toast(I18n.t("dc.interact.cableNotInRoom"), "err"); return; }
+    const dcId = k.id;
     // ⚠ LE REPLI SUR L'AUTRE BOUT EST CONSERVÉ TEL QUEL : l'extrémité retenue peut être jugée localisable
     // sans que la 3D sache la résoudre (libre rattaché à une salle mais sans `dc_x`/`dc_y` — écart connu et
     // ANTÉRIEUR, §6.28) ; on cadre alors l'autre bout s'il vit dans la MÊME salle, comme avant ce lot.
@@ -1188,8 +1207,10 @@ export abstract class DcInteract extends DcPanels {
     const p: any = this.store.get("ports", portId); if (!p) return;
     const e: any = this.store.get("equipments", p.equipment_id);
     if (e && this.locateFloorPort(e, portId)) return;   // port d'un posé d'ÉTAGE : chemin MONDE
-    const dcId = this.store.equipmentDcId(p.equipment_id);
-    if (!dcId) { Notify.toast(I18n.t("dc.interact.portEquipNotInRoom"), "err"); return; }
+    // SALLE de l'équipement porteur — restriction locale du conteneur de CHAÎNE, cf. `locateEquipment`.
+    const k = this.store.equipmentNamedContainer(p.equipment_id);
+    if (!k || k.kind !== "room") { Notify.toast(I18n.t("dc.interact.portEquipNotInRoom"), "err"); return; }
+    const dcId = k.id;
     const pt = this.resolver.resolvePort3D(portId, dcId);
     if (!pt) { Notify.toast(I18n.t("dc.interact.portNotFound3d"), "err"); return; }
     // surbrillance de l'équipement ET du PORT + isolement de sa baie + orientation « en face » ; cadrage serré.

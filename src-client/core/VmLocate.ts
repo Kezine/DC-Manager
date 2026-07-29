@@ -27,7 +27,8 @@
    Datacenter) ; il DÉLÈGUE à `core/Locatable`, seule écriture de la règle. On ne
    la réimplémente surtout pas ici : une deuxième règle de localisabilité
    divergerait au premier mode de placement ajouté — c'est exactement ce qui
-   s'était produit avec les sept copies de `!!equipmentDcId(x)`.
+   s'était produit avec les sept copies de `!!equipmentDcId(x)` — clé « salle »
+   historique, RETIRÉE du dépôt au lot 7 du chantier (doctrine §6.33).
    Ce qu'il rend, mode par mode (verrouillé par le test d'ÉQUIVALENCE de
    `core/Locatable` : prédicat vrai ⟺ « Localiser » programme une cible caméra) :
      - monté en baie (`rack` + `rack_u`) posée en salle . . . . . . . localisable
@@ -50,8 +51,8 @@
 
    ⚠ Ne pas confondre les numérotations de lots : le « lot 2 » que citait cet
    en-tête était celui du chantier CONTENEUR DE PLACEMENT (la délégation de
-   `equipmentDcId` à `src-shared/PlacementContainers`), sans rapport avec le lot 2
-   du chantier « câblage des équipements d'étage » qui a écrit ces lignes.
+   l'ancien `equipmentDcId` à `src-shared/PlacementContainers`), sans rapport avec
+   le lot 2 du chantier « câblage des équipements d'étage » qui a écrit ces lignes.
 
    FEATURE VM AMOVIBLE : supprimer l'inventaire VM = supprimer ce fichier + le
    `locateTarget` de l'onglet VMs (`app/main.ts`) + le bouton de `DetailForms.vmDetail`

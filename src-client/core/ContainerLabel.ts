@@ -11,10 +11,19 @@
    panneau câbles, sélecteurs d'équipement et d'extrémité des formulaires de
    câble/faisceau, extrémités du mini-graphe de tracé. Tous écrivaient la même
    ligne : `const dc = store.equipmentDcId(x); … dc ? store.dcName(dc) : «non
-   placé»`. Or `equipmentDcId` PROJETTE la chaîne d'attache sur son seul maillon
-   « salle » : un équipement POSÉ SUR UN ÉTAGE a une chaîne parfaitement valide
-   (`floor` → `building`) et se voyait pourtant annoncer « non placé ». Le
+   placé»`. Or cette clé « salle » PROJETAIT la chaîne d'attache sur son seul
+   maillon « salle » : un équipement POSÉ SUR UN ÉTAGE a une chaîne parfaitement
+   valide (`floor` → `building`) et se voyait pourtant annoncer « non placé ». Le
    libellé MENTAIT — l'objet est placé, il n'est simplement pas dans une salle.
+
+   ⚠ CE MODULE N'EST PLUS SEULEMENT UN LIBELLÉ, et son nom est en retard sur son
+   emploi. `namedOfChain` est LA réponse de l'application à « dans quel conteneur
+   ce contenu vit-il ? » : la grammaire de route la consomme (§6.31), le tracé des
+   faisceaux aussi, et depuis le retrait du trio historique
+   `equipmentDcId`/`portDcId`/`cableDcId` (lot 7, doctrine §6.33) les trois chemins
+   SALLE de « Localiser » la lisent puis la RESTREIGNENT (`kind === "room"`). Les
+   mentions de ce trio, ici et plus bas, sont donc HISTORIQUES : elles disent d'où
+   vient la règle, elles ne renvoient plus à du code existant.
 
    LA RÈGLE, en trois branches et rien de plus :
 
@@ -40,7 +49,7 @@
    ⚠ CE QUI N'EST DÉLIBÉRÉMENT PAS NOMMÉ : une baie HORS SALLE (chaîne
    `rack` → `building`). Sa chaîne ne traverse aucune salle et son conteneur
    immédiat n'est pas un étage → branche 3, donc `null`, EXACTEMENT comme
-   `equipmentDcId` le rendait. Nommer son BÂTIMENT serait truthful mais
+   `equipmentDcId` le rendait alors. Nommer son BÂTIMENT serait truthful mais
    changerait un libellé existant, ce que ce lot s'interdit (il est PROSPECTIF :
    aucun équipement d'étage dans les corpus, donc rien ne doit bouger à l'écran).
    Ce choix est un ARBITRAGE, pas un oubli — cf. §6.29.
@@ -78,7 +87,13 @@ export class ContainerLabel {
   /** Le conteneur que l'utilisateur VOIT nommé, dérivé d'une chaîne d'attache : la SALLE traversée,
       sinon l'ÉTAGE immédiat, sinon `null`. C'est la généralisation exacte de
       `PlacementContainers.roomIdOf` — même verdict sur tous les modes existants, une réponse EN PLUS
-      pour le mode `floor` (doctrine §6.29).
+      pour le mode `floor` (doctrine §6.29). ⚠ `roomIdOf` a depuis été RETIRÉ avec le trio du store
+      (§6.33) : cette méthode n'est plus « la généralisation de », elle est LA règle.
+
+      ⚠ Un site qui a besoin d'un repère SALLE (les trois chemins salle de « Localiser ») lit cette
+      méthode et la RESTREINT sur place à `kind === "room"` : c'est l'expression EXACTE de l'ancien
+      `PlacementContainers.roomIdOf`, mais écrite là où l'hypothèse se lit — la primitive, elle, a été
+      retirée pour que le cas particulier ne repousse pas (§6.33).
 
       ⚠ L'étage n'est cherché qu'en TÊTE de chaîne, comme dans `Locatable.ofChain` et pour la même
       raison : un maillon `floor` apparaît PLUS LOIN dans la chaîne de tout contenu de salle (il est le
@@ -90,7 +105,8 @@ export class ContainerLabel {
     return chain[0].kind === "floor" ? chain[0] : null;
   }
 
-  /** Conteneur NOMMÉ d'un équipement (enregistrement OU id, mêmes tolérances que `Store.equipmentDcId`). */
+  /** Conteneur NOMMÉ d'un équipement (enregistrement OU id — tolérances héritées de l'ancien
+      `Store.equipmentDcId`, dont ce point d'entrée a pris la place). */
   static ofEquipment(eqOrId: any, store: ContainerLabelStore): PlacementContainer | null {
     const eq = (eqOrId && typeof eqOrId === "object") ? eqOrId : store.get("equipments", eqOrId);
     if (!eq) return null;

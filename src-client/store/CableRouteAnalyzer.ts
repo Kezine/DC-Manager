@@ -133,8 +133,9 @@ export interface RouteStoreView {
   get(collection: string, id: string | null | undefined): any;
   waypointIsPlaced(wp: any): boolean;
   /** Conteneur de niveau ROUTE d'un équipement : la SALLE de sa chaîne, sinon l'ÉTAGE immédiat, sinon
-      `null`. Généralise l'ancien `equipmentDcId`, dont c'est le verdict EXACT sur tous les modes de
-      placement existants (cf. `core/ContainerLabel.namedOfChain`, doctrine §6.29). */
+      `null`. A généralisé l'ancien `equipmentDcId` — RETIRÉ du dépôt depuis (§6.33) — dont c'était le
+      verdict EXACT sur tous les modes de placement existants (cf. `core/ContainerLabel.namedOfChain`,
+      doctrine §6.29). */
   equipmentNamedContainer(eqOrId: any): PlacementContainer | null;
   /** Libellé affichable d'un conteneur (« Salle A », « Bât. X · ét. 1 »), `null` s'il n'y a rien à nommer. */
   containerLabel(container: PlacementContainer | null): string | null;

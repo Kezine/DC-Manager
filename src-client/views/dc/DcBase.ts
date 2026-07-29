@@ -901,7 +901,6 @@ export abstract class DcBase {
   protected abstract onEquipPointerDown(ev: MouseEvent, eq: any): void;
   protected abstract syncWebglTool(): void;
   protected abstract applyFocus3D(): void;
-  protected abstract portDcId(portId: string | null): string | null;
   abstract locate(kind: "equipment" | "rack" | "cable" | "port" | "room" | "waypoint", id: string): void;
   abstract clearHighlight(): void;
   abstract setReturnAction(fn: (() => void) | null): void;

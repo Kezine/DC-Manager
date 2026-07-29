@@ -200,15 +200,20 @@ même bouton « Retour »).
   ou `null`. Les deux points d'entrée (listing, fiche) l'appellent — la règle n'est écrite qu'une fois.
   Trois conditions, toutes nécessaires : (1) la VM porte un `host_equipment_id` ; (2) cet équipement
   EXISTE encore dans le document (la référence peut pendre — la synchro pose le champ, seul le passage
-  par l'app garantit le détachement en cascade) ; (3) `Store.equipmentDcId` le résout en une **salle**.
-- **L'autorité de (3) est `Store.equipmentDcId`**, qui délègue à `src-shared/PlacementContainers` : hôte
-  monté en baie, libre positionné, en marge/paroi ou posé sur une étagère (baie en salle) ⇒ localisable ;
-  hôte libre sans position, en « pool » de baie (`rack_id` sans `rack_u`), ou dans une baie hors salle
-  ⇒ non localisable.
-- ⚠ **Hôte posé sur un ÉTAGE (`placement_mode: "floor"`) : NON localisable, par conception.** Un
-  équipement d'étage n'est dans aucune salle et la vue « Localiser » ne sait viser qu'une salle — le
-  bouton ne s'affiche donc pas. Ce n'est pas un défaut de cette feature : c'est le blocage général des
-  équipements d'étage (ni localisables, ni câblables), cadré dans `placement.md` §6.4.
+  par l'app garantit le détachement en cascade) ; (3) la vue 3D sait **atteindre** cet équipement.
+- **L'autorité de (3) est `Store.equipmentLocatable`** (→ `core/Locatable`, règle UNIQUE des boutons
+  « Localiser », `placement.md` §6.28) : hôte monté en baie, libre positionné, en marge/paroi ou posé
+  sur une étagère (baie en salle) ⇒ localisable ; hôte libre sans position, en « pool » de baie
+  (`rack_id` sans `rack_u`), ou dans une baie hors salle ⇒ non localisable.
+  ⚠ L'autorité était `Store.equipmentDcId` (« se résout-il en une SALLE ? ») ; cette clé a été
+  **RETIRÉE** avec le chantier « câblage des équipements d'étage » (`placement.md` §6.33), parce que
+  projeter un placement sur une salle déclarait « nulle part » tout contenu d'étage.
+- ✅ **Hôte posé sur un ÉTAGE (`placement_mode: "floor"`) : LOCALISABLE depuis `placement.md` §6.27/§6.28**
+  — « Localiser » cadre un posé d'étage en MONDE (Vue étage), donc le bouton s'affiche pour la VM qu'il
+  héberge. ⚠ Une **exception subsiste** : le posé d'un bâtiment n'ayant **AUCUNE SALLE** reste non
+  localisable, la portée d'affichage de la Vue étage s'exprimant en salles (limite §6.27). ⚠ Cette puce
+  affirmait l'inverse « par conception » jusqu'au lot 2 de ce chantier ; c'était vrai tant que la vue ne
+  savait viser qu'une salle.
 
 ## VMs dans la vue graphe (Netmap)
 

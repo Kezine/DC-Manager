@@ -721,78 +721,53 @@ export class Store {
     return (key && PORT_CONNECTOR_MM[key]) ? PORT_CONNECTOR_MM[key] : PORT_CONNECTOR_DEFAULT;
   }
 
-  /* ---- placement : salle (datacenter) d'un équipement ---- */
+  /* ---- placement : CONTENEUR (la clé « salle », GÉNÉRALISÉE) ----
 
-  /** Salle (datacenter_id) d'un équipement, via sa baie hôte ou sa pose libre. null = hors salle.
+     ⚠ CE BLOC A REMPLACÉ UN TRIO HISTORIQUE, `equipmentDcId`/`portDcId`/`cableDcId`, RETIRÉ ICI MÊME
+     (doctrine `docs/placement.md` §6.33, décision D5 du chantier « câblage des équipements d'étage »).
+     Ces trois méthodes rendaient un ID DE SALLE : elles PROJETAIENT la chaîne d'attache du contenu sur
+     son seul maillon « salle » et jetaient le reste. Un équipement posé sur un ÉTAGE — dont la chaîne
+     (`floor` → `building`) est pourtant parfaitement valide — s'en voyait déclarer NULLE PART, pour la
+     seule raison qu'aucun de ses maillons ne s'appelle `room`. C'était la cause unique du blocage
+     « les équipements d'étage ne sont pas câblables » (§6.4), et leur RETRAIT est ce qui a fait
+     désigner par le COMPILATEUR les derniers appelants, plutôt que par un relevé à la main.
 
-      MIGRÉ vers la CHAÎNE DE CONTENEURS (`src-shared/PlacementContainers`, doctrine `docs/placement.md`) :
-      la salle n'est plus déduite par une cascade de cas particuliers ici, mais en remontant la chaîne
-      d'attache du contenu — étagère → baie → salle → étage → bâtiment. Un contenu ne porte qu'UNE
-      référence, celle de son conteneur immédiat ; tout le reste se déduit.
+     ⚠ NE PAS LES RÉTABLIR SOUS UN AUTRE NOM. La salle est UN maillon de la chaîne, pas l'identité d'un
+     placement : une primitive de store qui la projette redevient aussitôt la réponse par défaut de
+     « où est cet objet ? », et le cas particulier repousse. Un site qui a réellement besoin d'un repère
+     SALLE — c'est légitime, la résolution en salle est la règle et le MONDE l'exception (§6.20) — lit
+     le conteneur et le RESTREINT SUR PLACE (`kind === "room"`), ce qui rend l'hypothèse visible à la
+     lecture et vérifiée par `tsc` (l'union est discriminée). Les trois chemins salle de
+     `DcInteract.locateEquipment`/`locatePort`/`locateCable` sont les seuls à le faire.
 
-      Le basculement a été fait APRÈS avoir prouvé la parité stricte des deux chemins sur un cas par mode
-      de placement (cf. `test-core-store.js`), conformément à la méthode de la doctrine §4.1. Le corps
-      historique a ensuite été retiré : le garde-fou n'est plus une comparaison entre deux implémentations
-      — qui deviendrait tautologique une fois l'une déléguée à l'autre — mais des ATTENTES EXPLICITES par
-      mode dans ce même test. Les suites route/câble, qui traversent massivement cette fonction, servent
-      de vérification d'intégration. */
-  equipmentDcId(eqOrId: any): string | null {
-    const eq = (typeof eqOrId === "object") ? eqOrId : this.get("equipments", eqOrId);
-    return PlacementContainers.roomIdOf(eq, (coll, id) => this.get(coll as any, id as any));
-  }
-
-  /** Salle où se résout un PORT : celle de son équipement porteur. null = port inconnu ou équipement hors salle.
-      Résolveur PARTAGÉ (vue 3D, boutons « Localiser ») — même règle que `equipmentDcId`. */
-  portDcId(portId: string | null): string | null {
-    const p: any = this.get("ports", portId);
-    return p ? this.equipmentDcId(p.equipment_id) : null;
-  }
-
-  /** Salle où se résout un CÂBLE : première extrémité dont le port est localisable (parité avec
-      `locateCable` de la vue 3D). null = aucune extrémité en salle → câble non localisable. */
-  cableDcId(cableOrId: any): string | null {
-    const c: any = (typeof cableOrId === "object") ? cableOrId : this.get("cables", cableOrId);
-    if (!c) return null;
-    return this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id);
-  }
-
-  /* ---- placement : CONTENEUR (généralisation de la clé « salle ») ----
-
-     Le trio ci-dessous GÉNÉRALISE `equipmentDcId`/`portDcId`/`cableDcId`. La différence tient en une
-     ligne : là où les anciens PROJETTENT la chaîne d'attache sur son maillon « salle » et jettent le
-     reste (`PlacementContainers.roomIdOf`), ceux-ci rendent le conteneur IMMÉDIAT tel quel.
-
-     ⚠ POURQUOI ÇA COMPTE — un équipement posé sur un ÉTAGE a une chaîne parfaitement valide
-     (`floor` → `building`) ; `equipmentDcId` rend pourtant `null` pour lui, uniquement parce qu'aucun
-     de ses maillons ne s'appelle `room`. C'est le cas particulier que la doctrine §6.4 demande de
-     RETIRER, pas une fonctionnalité à ajouter — et c'est la cause unique du blocage « les équipements
-     d'étage ne sont pas câblables ».
-
-     ⚠ ADDITIF ET NON BRANCHÉ à ce lot, délibérément (même patron que `PlacementContainers` lui-même) :
-     les appelants migrent par familles, et la famille qui sert de CLÉ DE PORTÉE (résolution 3D, tracé
-     inter-salles) attend des décisions d'architecture non tranchées — cf. le cadrage
-     `.notes/toDos/cablage-equipements-etage-cadrage-2026-07-29.md`. Livrer la clé sans ses
-     consommateurs est ce qui permet de la prouver AVANT de s'en servir (doctrine §4.1).
+     ⚠ DEUX QUESTIONS DISTINCTES, DEUX MÉTHODES — ne pas les confondre. `equipmentContainer` rend le
+     conteneur IMMÉDIAT (la BAIE d'un serveur monté, l'ÉTAGÈRE d'un boîtier posé) ; `equipmentNamedContainer`
+     (plus bas) rend le conteneur de niveau CHAÎNE — la salle traversée, sinon l'étage immédiat. C'est ce
+     SECOND qui généralise l'ancien `equipmentDcId`, et c'est lui que consomment la grammaire de route,
+     le tracé, les libellés et les chemins salle de « Localiser ». Le premier ne répond QUE de l'attache
+     immédiate (contraintes de dépose, dégradation d'un câble) : l'employer là où l'on attend une salle
+     déclarerait « non placé » tout équipement monté en baie.
 
      ⚠ Comparer deux conteneurs se fait avec `PlacementContainers.same`, JAMAIS par égalité d'id :
      l'identité d'un ÉTAGE est le COUPLE (bâtiment, étage) et un étage non configuré n'a pas d'id. */
 
   /** Conteneur IMMÉDIAT d'un équipement (baie, étagère, salle, étage…), ou null s'il n'est attaché à
-      rien de localisable (« pool »). Généralise `equipmentDcId`. */
+      rien de localisable (« pool »). ⚠ PAS la salle : cf. l'avertissement ci-dessus. */
   equipmentContainer(eqOrId: any): PlacementContainer | null {
     const eq = (typeof eqOrId === "object") ? eqOrId : this.get("equipments", eqOrId);
     return PlacementContainers.of(eq);
   }
 
-  /** Conteneur où se résout un PORT : celui de son équipement porteur. Généralise `portDcId`. */
+  /** Conteneur IMMÉDIAT où se résout un PORT : celui de son équipement porteur (l'historique `portDcId`
+      en projetait la salle ; il est RETIRÉ, §6.33). */
   portContainer(portId: string | null): PlacementContainer | null {
     const p: any = this.get("ports", portId);
     return p ? this.equipmentContainer(p.equipment_id) : null;
   }
 
   /** Conteneur où se résout un CÂBLE : celui de la PREMIÈRE extrémité localisable — même règle de
-      priorité que `cableDcId` (A puis B), pour que la généralisation ne déplace pas le cadrage d'un
-      câble dont les deux bouts sont placés. Généralise `cableDcId`. */
+      priorité que l'historique `cableDcId` (A puis B, RETIRÉ §6.33), pour que la généralisation n'ait
+      pas déplacé le cadrage d'un câble dont les deux bouts sont placés. */
   cableContainer(cableOrId: any): PlacementContainer | null {
     const c: any = (typeof cableOrId === "object") ? cableOrId : this.get("cables", cableOrId);
     if (!c) return null;
@@ -806,17 +781,18 @@ export class Store {
      n'apparaisse dans sa chaîne, et un posé d'ÉTAGE d'un bâtiment SANS SALLE en donne un que la portée
      d'affichage — exprimée en salles — ne peut pas atteindre. La règle vit donc UNE FOIS, dans
      `core/Locatable`, dont ces deux méthodes ne sont que le point d'entrée depuis le store (même patron
-     que `equipmentDcId` → `PlacementContainers`). */
+     de délégation que le trio « conteneur » ci-dessus vers `src-shared/PlacementContainers`). */
 
   /** L'équipement est-il localisable en 3D ? Prédicat des boutons « Localiser » — MIROIR des refus de
-      `DcInteract.locateEquipment` (verrouillé par un test d'équivalence). Généralise `!!equipmentDcId`,
-      qui cachait le bouton d'un posé d'ÉTAGE alors que l'action aboutit (doctrine §6.27 puis §6.28). */
+      `DcInteract.locateEquipment` (verrouillé par un test d'équivalence). A remplacé le prédicat
+      historique `!!equipmentDcId` (RETIRÉ §6.33), qui cachait le bouton d'un posé d'ÉTAGE alors que
+      l'action aboutit (doctrine §6.27 puis §6.28). */
   equipmentLocatable(eqOrId: any): boolean { return Locatable.equipment(eqOrId, this); }
 
-  /** Le PORT est-il localisable en 3D ? Même règle que son équipement porteur. Généralise `!!portDcId`. */
+  /** Le PORT est-il localisable en 3D ? Même règle que son équipement porteur (a remplacé `!!portDcId`). */
   portLocatable(portId: string | null): boolean { return Locatable.port(portId, this); }
 
-  /** La LIAISON est-elle localisable en 3D ? Généralise `!!cableDcId`, qui ne reconnaissait qu'une
+  /** La LIAISON est-elle localisable en 3D ? A remplacé `!!cableDcId`, qui ne reconnaissait qu'une
       extrémité posée en SALLE et cachait donc le bouton d'un câble aboutissant sur un ÉTAGE. */
   cableLocatable(cableOrId: any): boolean { return Locatable.cable(cableOrId, this); }
 
@@ -830,11 +806,18 @@ export class Store {
      ⚠ ENCORE UNE AUTRE QUESTION que les deux blocs précédents, et c'est pourquoi c'est un TROISIÈME
      module. `equipmentContainer` rend le conteneur IMMÉDIAT (une baie, une étagère) ; `equipmentLocatable`
      dit si la VUE 3D peut le montrer. Nommer, c'est lire la CHAÎNE : le conteneur immédiat d'un serveur
-     monté est sa baie, mais l'utilisateur veut lire « Salle A » — ce que `dcName(equipmentDcId(x))`
-     affichait. La règle vit UNE FOIS dans `core/ContainerLabel` (doctrine §6.29). */
+     monté est sa baie, mais l'utilisateur veut lire « Salle A » — ce qu'affichait l'expression historique
+     `dcName(equipmentDcId(x))`. La règle vit UNE FOIS dans `core/ContainerLabel` (doctrine §6.29).
 
-  /** Conteneur NOMMÉ d'un équipement : la SALLE de sa chaîne, sinon l'ÉTAGE immédiat, sinon null.
-      Généralise `equipmentDcId` du côté de l'AFFICHAGE (l'ancien ne savait rendre qu'une salle). */
+     ⚠ CE MODULE PORTE DÉSORMAIS PLUS QUE DES LIBELLÉS, et son nom est en retard sur son emploi : la
+     GRAMMAIRE DE ROUTE (§6.31), le TRACÉ des faisceaux et les chemins salle de « Localiser » (§6.33)
+     consomment `equipmentNamedContainer` comme LEUR conteneur de référence — c'est lui, et non
+     `equipmentContainer`, qui a succédé à `equipmentDcId`. Le renommer (`equipmentChainContainer` ?)
+     est une dette de nommage assumée, pas un lot du chantier de câblage. */
+
+  /** Conteneur de niveau CHAÎNE d'un équipement : la SALLE traversée, sinon l'ÉTAGE immédiat, sinon null.
+      C'est la GÉNÉRALISATION EXACTE de l'historique `equipmentDcId` (RETIRÉ §6.33) : même verdict sur
+      tous les modes de placement existants, une réponse EN PLUS pour le mode `floor`. */
   equipmentNamedContainer(eqOrId: any): PlacementContainer | null { return ContainerLabel.ofEquipment(eqOrId, this); }
 
   /** Libellé d'un conteneur nommé (« Salle A », « Bât. X · ét. 1 »), null s'il n'y a rien à nommer.
@@ -842,7 +825,7 @@ export class Store {
       « ? », suffixe vide), et les uniformiser changerait des libellés existants. */
   containerLabel(container: PlacementContainer | null): string | null { return ContainerLabel.label(container, this); }
 
-  /** Raccourci des sites qui n'ont qu'un équipement en main. Remplace `dcName(equipmentDcId(x))`. */
+  /** Raccourci des sites qui n'ont qu'un équipement en main. A remplacé `dcName(equipmentDcId(x))`. */
   equipmentContainerLabel(eqOrId: any): string | null { return ContainerLabel.ofEquipmentLabel(eqOrId, this); }
 
   /* ---- faisceaux (trunks) : pool de fibres pioché par les PORTS des patchs d'extrémité ---- */

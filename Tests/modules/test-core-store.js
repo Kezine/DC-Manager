@@ -284,7 +284,7 @@ module.exports = async () => {
   }
   });
 
-  await section("PlacementContainers : chaîne d'attache — PARITÉ STRICTE avec Store.equipmentDcId", async () => {
+  await section("PlacementContainers : chaîne d'attache — PARITÉ STRICTE avec la règle « salle » historique", async () => {
   {
     const { PlacementContainers } = SHARED("src-shared/PlacementContainers.js");
     const s = await makeStore();
@@ -295,10 +295,12 @@ module.exports = async () => {
     const rackPool = await s.create("racks", { name: "R-pool", width_mm: 600, depth: 1000, u_count: 42, location: "liege" });   // baie HORS salle
     const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", side: "front", u: 10, u_height: 2 });
 
-    // Un cas par MODE de placement, bords compris — c'est le jeu qui fait foi pour la migration.
-    // `attendu` = la salle EXPLICITEMENT attendue. On n'écrit SURTOUT pas « === s.equipmentDcId(e) » :
-    // celui-ci délègue désormais à `roomIdOf`, la comparaison serait donc TAUTOLOGIQUE et ne prouverait
-    // plus rien. Les attentes ci-dessous sont les valeurs qu'avait la règle historique, figées à la main.
+    /* Un cas par MODE de placement, bords compris — c'est le jeu qui fait foi pour la migration.
+       `attendu` = la salle EXPLICITEMENT attendue, figée à la main d'après la règle HISTORIQUE
+       (`Store.equipmentDcId`, retiré au lot 7 / doctrine §6.33 : il projetait la chaîne sur son maillon
+       « salle »). On n'a JAMAIS écrit « === s.equipmentDcId(e) » — la comparaison aurait été
+       tautologique dès la délégation de cette méthode à la chaîne, et elle serait aujourd'hui
+       impossible. C'est bien ce jeu de constantes qui porte la parité, et il survit donc au retrait. */
     const cases = [];
     const add = async (label, attendu, payload) => { cases.push({ label, attendu, e: await s.create("equipments", Object.assign({ name: label }, payload)) }); };
     await add("racké à un U", () => dc.id, { placement_mode: "rack", rack_id: rack.id, rack_u: 5 });
@@ -311,12 +313,17 @@ module.exports = async () => {
     await add("posé sur un ÉTAGE", () => null, { placement_mode: "floor", location: "liege", floor: "1", floor_x: 200, floor_y: 300 });
     await add("racké dans une baie HORS salle", () => null, { placement_mode: "rack", rack_id: rackPool.id, rack_u: 3 });
 
-    // La chaîne rend la salle ATTENDUE, mode par mode — et `Store.equipmentDcId`, qui délègue désormais
-    // à cette chaîne, la rend aussi (on vérifie le point d'entrée réel de l'application, pas seulement
-    // le module). C'est ce jeu qui remplace l'ancienne comparaison entre deux implémentations.
+    /* La RÈGLE HISTORIQUE, transcrite ICI et nulle part ailleurs (le dépôt ne la porte plus, §6.33) :
+       la chaîne d'attache PROJETÉE sur son maillon « salle ». Elle sert d'oracle de parité. */
+    const salleDeLaChaine = (eq) => { const r = PlacementContainers.chain(eq, fetch).find((c) => c.kind === "room"); return r ? r.id : null; };
+    /* La chaîne rend la salle ATTENDUE, mode par mode — et le point d'entrée VIVANT de l'application
+       (`equipmentNamedContainer`, RESTREINT à « salle » comme le font les trois chemins salle de
+       « Localiser ») rend exactement la même. C'est ce couple qui remplace l'ancienne comparaison entre
+       deux implémentations : une constante écrite à la main d'un côté, l'API réelle de l'autre. */
     cases.forEach(({ label, attendu, e }) => {
-      ck.eq(PlacementContainers.roomIdOf(e, fetch), attendu(), "salle attendue — " + label);
-      ck.eq(s.equipmentDcId(e), attendu(), "Store.equipmentDcId (délégué) — " + label);
+      ck.eq(salleDeLaChaine(e), attendu(), "salle attendue — " + label);
+      const k = s.equipmentNamedContainer(e);
+      ck.eq(k && k.kind === "room" ? k.id : null, attendu(), "Store.equipmentNamedContainer restreint à la salle — " + label);
     });
 
     // STRUCTURE de la chaîne : une étagère remonte étagère → baie → salle → étage → bâtiment.
@@ -345,7 +352,7 @@ module.exports = async () => {
     // Chaîne BORNÉE (garde défensive contre une donnée cyclique — la hiérarchie saine décroît toujours).
     cases.forEach(({ label, e }) => ck(PlacementContainers.chain(e, fetch).length <= PlacementContainers.MAX_DEPTH, "chaîne bornée — " + label));
     // Référence PENDANTE : une étagère dont la baie a disparu ne doit rien inventer.
-    ck.eq(PlacementContainers.roomIdOf({ placement_mode: "tray", tray_item_id: "inexistant" }, fetch), null, "étagère fantôme → aucune salle");
+    ck.eq(salleDeLaChaine({ placement_mode: "tray", tray_item_id: "inexistant" }), null, "étagère fantôme → aucune salle");
 
     /* ================= LA CLÉ GÉNÉRALISÉE — `Store.equipmentContainer` & co (lot 1 du câblage d'étage)
        Le trio `*Container` rend le conteneur IMMÉDIAT, là où le trio `*DcId` PROJETTE la chaîne sur son
@@ -370,25 +377,25 @@ module.exports = async () => {
     /* CE QUE LA GÉNÉRALISATION CHANGE, et c'est TOUT le sujet du chantier : deux placements ont un
        conteneur parfaitement valide alors que la clé « salle » les déclare introuvables. C'est la
        raison unique pour laquelle un équipement d'étage n'est pas câblable (doctrine §6.4). */
-    const gagnes = cases.filter(({ e }) => s.equipmentDcId(e) === null && s.equipmentContainer(e) !== null).map((c) => c.label);
+    const gagnes = cases.filter(({ attendu, e }) => attendu() === null && s.equipmentContainer(e) !== null).map((c) => c.label);
     ck.eq(JSON.stringify(gagnes.sort()), JSON.stringify(["posé sur un ÉTAGE", "racké dans une baie HORS salle"]),
       "EXACTEMENT deux placements deviennent localisables : l'étage et la baie hors salle");
     // …et RIEN ne se perd dans l'autre sens : tout ce qui avait une salle garde un conteneur.
-    const perdus = cases.filter(({ e }) => s.equipmentDcId(e) !== null && s.equipmentContainer(e) === null);
+    const perdus = cases.filter(({ attendu, e }) => attendu() !== null && s.equipmentContainer(e) === null);
     ck.eq(perdus.length, 0, "aucun placement localisable aujourd'hui ne devient introuvable");
 
-    // PORT et CÂBLE : mêmes règles, même priorité A-puis-B que `cableDcId` (le cadrage d'un câble à deux
-    // bouts placés ne doit pas se déplacer quand on généralisera les appelants).
+    // PORT et CÂBLE : mêmes règles, même priorité A-puis-B que l'historique `cableDcId` (le cadrage d'un
+    // câble à deux bouts placés ne devait pas se déplacer en généralisant les appelants — il ne l'a pas fait).
     const eqEtage = byLabel("posé sur un ÉTAGE"), eqSalle = byLabel("libre EN salle");
     const pEtage = await s.create("ports", { equipment_id: eqEtage.id, name: "p-etage" });
     const pSalle = await s.create("ports", { equipment_id: eqSalle.id, name: "p-salle" });
-    ck.eq(JSON.stringify(s.portContainer(pEtage.id)), JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "portContainer : port d'un équipement d'ÉTAGE (là où portDcId rend null)");
-    ck.eq(s.portDcId(pEtage.id), null, "…et l'ancienne clé le déclare toujours hors salle (le contraste EST la mesure)");
+    ck.eq(JSON.stringify(s.portContainer(pEtage.id)), JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "portContainer : port d'un équipement d'ÉTAGE (là où l'historique portDcId rendait null)");
+    ck.eq(salleDeLaChaine(eqEtage), null, "…alors que sa chaîne ne traverse AUCUNE salle : c'est tout ce que voyait l'ancienne clé, et c'était le blocage");
     ck.eq(JSON.stringify(s.portContainer(pSalle.id)), JSON.stringify({ kind: "room", id: dc.id }), "portContainer : port d'un équipement de salle");
     ck.eq(s.portContainer("inexistant"), null, "portContainer : port inconnu → null (tolérant)");
 
     const cab = await s.create("cables", { name: "c1", from_port_id: pEtage.id, to_port_id: pSalle.id });
-    ck.eq(JSON.stringify(s.cableContainer(cab)), JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "cableContainer : PREMIÈRE extrémité localisable (A), comme cableDcId");
+    ck.eq(JSON.stringify(s.cableContainer(cab)), JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "cableContainer : PREMIÈRE extrémité localisable (A), comme le faisait cableDcId");
     // ⚠ Deux ports NEUFS : la règle de portée V6b n'autorise qu'UN câble par port — réutiliser les
     // précédents ferait REFUSER la création, et `create` rend alors `null` en silence (cf. `FormSave`).
     const pEtage2 = await s.create("ports", { equipment_id: eqEtage.id, name: "p-etage-2" });
@@ -544,32 +551,38 @@ module.exports = async () => {
     // #9 — cache de déduction invalidé à la mutation : changer le réseau du port change le résultat.
     await s.update("ports", pMulti.id, { network_ids: [netN.id], network_id: netN.id });
     ck.eq(s.cablePrimaryNetworkId(jm), netN.id, "#9 : cache réseau invalidé après mutation d'un port");
-    // equipmentDcId via baie hôte
+    /* SALLE d'un contenu = son conteneur de CHAÎNE restreint à « salle », l'expression exacte qu'emploient
+       les trois chemins salle de « Localiser » depuis le retrait du trio `*DcId` (doctrine §6.33). */
+    const salleDe = (eqOrId) => { const k = s.equipmentNamedContainer(eqOrId); return k && k.kind === "room" ? k.id : null; };
+    const salleDuPort = (pid) => { const p = s.get("ports", pid); return p ? salleDe(p.equipment_id) : null; };
+    // salle via baie hôte
     const eqInA = s.get("ports", pA1) ? s.get("equipments", s.get("ports", pA1).equipment_id) : null;
-    ck.eq(s.equipmentDcId(eqInA.id), dcA.id, "equipmentDcId(équipement racké) → salle de la baie");
-    // equipmentDcId via ÉTAGÈRE (tray) : posé sur une étagère d une baie placée → salle de la baie hôte.
+    ck.eq(salleDe(eqInA.id), dcA.id, "salle d'un équipement racké → salle de la baie");
+    // salle via ÉTAGÈRE (tray) : posé sur une étagère d une baie placée → salle de la baie hôte.
     // Bug corrigé : le placement tray retombait à null (« non placé »), bloquant un câble vers ce posé à « planifié ».
     const rkTray = await s.create("racks", { name: "RTray", u_count: 42, datacenter_id: dcA.id, dc_x: 500, dc_y: 500 });
     const trayIt = await s.create("rackItems", { rack_id: rkTray.id, kind: "tray", tray_type: "cantilever", u: 10, u_height: 3, tray_u: 1, depth_mm: 400 });
     const eqOnTray = await s.create("equipments", { name: "surEtagere", dim_mode: "free", placement_mode: "tray", tray_item_id: trayIt.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 });
-    ck.eq(s.equipmentDcId(eqOnTray.id), dcA.id, "equipmentDcId(posé sur étagère) → salle de la baie hôte (bug tray corrigé)");
+    ck.eq(salleDe(eqOnTray.id), dcA.id, "salle d'un posé sur étagère → salle de la baie hôte (bug tray corrigé)");
 
     // contrainte de placement (câblage) : un équipement LIBRE câblé intra-salle vers pA1 (Salle A)
     const eqX = await s.create("equipments", { name: "X" });
     const pX = (await s.create("ports", { equipment_id: eqX.id, name: "pX" })).id;
     const lien = await s.create("cables", { name: "lien", from_port_id: pX, to_port_id: pA1 });
-    // portDcId / cableDcId : résolveurs PARTAGÉS des boutons « Localiser en 3D » (parité locatePort/locateCable
-    // de la vue 3D) — à ce stade eqX est encore NON PLACÉ (il n'est mis en baie que plus bas).
-    ck.eq(s.portDcId(pA1), dcA.id, "portDcId : port d'un équipement racké → salle de la baie");
-    ck.eq(s.portDcId(pX), null, "portDcId : port d'un équipement non placé → null");
-    ck.eq(s.cableDcId(lien.id), dcA.id, "cableDcId : une extrémité localisable suffit → sa salle");
-    ck.eq(s.cableDcId(jm), null, "cableDcId : aucune extrémité en salle → null (bouton Localiser masqué)");
+    /* SALLE d'un PORT / d'une LIAISON : ce que résolvaient les anciens `portDcId`/`cableDcId`, résolveurs
+       partagés des boutons « Localiser en 3D » (parité locatePort/locateCable de la vue 3D). Ils sont
+       RETIRÉS (§6.33) ; leurs verdicts restent verrouillés ici, contre des salles écrites à la main.
+       À ce stade eqX est encore NON PLACÉ (il n'est mis en baie que plus bas). */
+    ck.eq(salleDuPort(pA1), dcA.id, "salle d'un port d'équipement racké → salle de la baie");
+    ck.eq(salleDuPort(pX), null, "salle d'un port d'équipement non placé → null");
+    ck.eq(salleDuPort(lien.from_port_id) || salleDuPort(lien.to_port_id), dcA.id, "liaison : une extrémité localisable suffit → sa salle (priorité A puis B)");
+    ck.eq(salleDuPort(jm.from_port_id) || salleDuPort(jm.to_port_id), null, "liaison : aucune extrémité en salle → null (bouton Localiser masqué)");
     /* PARITÉ du chemin CONTENEUR sur une liaison de SALLE (§6.32) : le prédicat et l'extrémité retenue
-       reproduisent exactement le verdict historique. `cableDcId` est encore là (son retrait est un lot à
-       part), donc la comparaison porte sur la fonction VIVANTE et non sur une transcription. */
-    ck.eq(s.cableLocatable(lien.id), true, "cableLocatable : même verdict que `!!cableDcId` sur une liaison de salle");
+       reproduisent exactement le verdict historique — désormais épinglé à des constantes, l'ancienne
+       fonction n'étant plus là pour servir d'oracle vivant (§6.33). */
+    ck.eq(s.cableLocatable(lien.id), true, "cableLocatable : même verdict que l'ancien `!!cableDcId` sur une liaison de salle");
     ck.eq(s.cableLocatableEnd(lien.id), pA1, "cableLocatableEnd : l'extrémité RETENUE est la première localisable — pX n'est pas placé, c'est donc pA1");
-    ck.eq(s.portDcId(s.cableLocatableEnd(lien.id)), s.cableDcId(lien.id), "…et la salle qu'elle désigne est CELLE de `cableDcId` : le cadrage ne bouge pas");
+    ck.eq(salleDuPort(s.cableLocatableEnd(lien.id)), dcA.id, "…et la salle qu'elle désigne est bien la Salle A, celle que cadrait `cableDcId` : le cadrage ne bouge pas");
     ck.eq(s.cableLocatable(jm), false, "cableLocatable : aucune extrémité atteignable → false (parité `!!cableDcId`)");
     ck.eq(s.cableLocatableEnd(jm), null, "…et aucune extrémité retenue");
     ck.eq(s.equipmentPlacementBlockedReason(eqX.id, dcA.id), null, "blockedReason : pose dans la salle câblée → autorisée");
@@ -1396,8 +1409,10 @@ module.exports = async () => {
     ck.eq(Locatable.ofChain([{ kind: "building", location: "liege" }], scope), false,
       "conteneur BÂTIMENT seul (jamais produit aujourd'hui) → NON localisable : rien de plus fin à viser");
 
-    /* TOLÉRANCE des deux adaptateurs (mêmes contrats que `equipmentDcId`/`portDcId` : id OU enregistrement,
-       et référence pendante rendue `false` plutôt que levée). */
+    /* TOLÉRANCE des deux adaptateurs (mêmes contrats que les anciens `equipmentDcId`/`portDcId`, RETIRÉS
+       au lot 7 / §6.33 : id OU enregistrement, et référence pendante rendue `false` plutôt que levée).
+       Les mentions de ce trio, ici et dans les messages ci-dessous, sont HISTORIQUES : elles disent d'où
+       vient la règle, elles ne désignent plus rien qu'on puisse aller lire. */
     const docs = { equipments: { "eq-1": { id: "eq-1", placement_mode: "manual", dim_mode: "free", dc_id: "dc-1" } }, ports: { "p-1": { id: "p-1", equipment_id: "eq-1" }, "p-orph": { id: "p-orph", equipment_id: "eq-disparu" } } };
     const store = { get: (coll, id) => (docs[coll] ? (docs[coll][id] || null) : null), roomsOfBuilding: () => [] };
     ck.eq(Locatable.equipment("eq-1", store), true, "équipement par ID → lu dans le store");
@@ -1410,7 +1425,9 @@ module.exports = async () => {
 
     /* ---- LIAISONS (câbles) : `cableEnd` est LA RÈGLE, `cable` n'en est que le constat (§6.32) ----
        Ce qu'on cadre, ce n'est pas « le câble » (il n'a pas de placement) mais UNE de ses extrémités.
-       Écrire le prédicat ailleurs que le choix de cette extrémité, c'est rouvrir le bouton MORT (D6). */
+       Écrire le prédicat ailleurs que le choix de cette extrémité, c'est rouvrir le bouton MORT (D6).
+       La priorité « A puis B » est héritée de l'ancien `cableDcId` (RETIRÉ, §6.33) : les messages qui le
+       citent ci-dessous rappellent cette filiation, ils ne renvoient plus à du code existant. */
     const dEq = {
       "eq-salle": { id: "eq-salle", placement_mode: "manual", dim_mode: "free", dc_id: "dc-1" },
       "eq-salle2": { id: "eq-salle2", placement_mode: "manual", dim_mode: "free", dc_id: "dc-2" },
@@ -1480,7 +1497,7 @@ module.exports = async () => {
     ck.eq(JSON.stringify(ContainerLabel.namedOfChain([{ kind: "floor", location: "liege", floor: "1" }, { kind: "building", location: "liege" }])),
       JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "posé d'ÉTAGE : l'étage IMMÉDIAT est le conteneur nommé");
     ck.eq(ContainerLabel.namedOfChain([{ kind: "rack", id: "r1" }, { kind: "building", location: "liege" }]), null,
-      "baie HORS salle : rien de nommable — parité EXACTE avec `equipmentDcId` (arbitrage §6.29, pas un oubli)");
+      "baie HORS salle : rien de nommable — parité EXACTE avec l'ancien `equipmentDcId` (arbitrage §6.29, pas un oubli)");
     ck.eq(ContainerLabel.namedOfChain([{ kind: "tray", id: "t1" }, { kind: "rack", id: "r1" }, { kind: "building", location: "liege" }]), null,
       "étagère d'une baie hors salle : rien de nommable non plus");
 
@@ -1523,8 +1540,14 @@ module.exports = async () => {
     const rack = await s.create("racks", { name: "R1", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dc.id, dc_x: 500, dc_y: 500 });
     const rackHorsSalle = await s.create("racks", { name: "R-pool", width_mm: 600, depth: 1000, u_count: 42, location: site.id });
     const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", side: "front", u: 10, u_height: 2 });
-    // Expression HISTORIQUE, telle qu'elle était écrite dans les six sites migrés (cf. `git show`).
-    const ancien = (e) => { const d = s.equipmentDcId(e); return d ? s.dcName(d) : null; };
+    /* Expression HISTORIQUE, telle qu'elle était écrite dans les six sites migrés (cf. `git show`) :
+       `dcName(equipmentDcId(x))`. `Store.equipmentDcId` étant RETIRÉ (§6.33), sa projection est
+       transcrite ici — et DÉLIBÉRÉMENT depuis `PlacementContainers.chain`, PAS depuis
+       `equipmentNamedContainer` : ce dernier passe par `ContainerLabel.namedOfChain`, c'est-à-dire par
+       la fonction MÊME que cette section éprouve. L'oracle serait alors une comparaison de la règle
+       avec elle-même, verte quoi qu'il arrive. */
+    const salleHistorique = (e) => { const r = PlacementContainers.chain(e, (coll, id) => s.get(coll, id)).find((c) => c.kind === "room"); return r ? r.id : null; };
+    const ancien = (e) => { const d = salleHistorique(e); return d ? s.dcName(d) : null; };
 
     let k = 0;
     const cas = async (libelle, placement, attendu, memeQuAvant) => {
@@ -1554,7 +1577,7 @@ module.exports = async () => {
     ck.eq(s.equipmentContainerLabel(orphelin.id), "namur · ét. 3", "posé d'étage d'un bâtiment SANS salle → NOMMÉ malgré tout");
     ck.eq(s.equipmentLocatable(orphelin.id), false, "…et pourtant NON localisable : `ContainerLabel` et `Locatable` répondent à DEUX questions");
 
-    // Tolérances (mêmes contrats que `equipmentDcId`) + point d'entrée « conteneur » du mini-graphe.
+    // Tolérances (mêmes contrats que l'ancien `equipmentDcId`) + point d'entrée « conteneur » du mini-graphe.
     ck.eq(s.equipmentContainerLabel("eq-disparu"), null, "équipement inexistant → null (et non une exception)");
     ck.eq(s.equipmentContainerLabel(null), null, "équipement null → null (tolérant)");
     ck.eq(s.containerLabel(null), null, "containerLabel(null) → null");
@@ -1618,7 +1641,8 @@ module.exports = async () => {
     await cas("en POOL d'une baie (rack_id SANS rack_u)", { placement_mode: "rack", rack_id: rack.id }, false);
     await cas("monté dans une baie HORS salle", { placement_mode: "rack", rack_id: rackHorsSalle.id, rack_u: 3 }, false);
     // ⚠ ÉTAGE — CHANGEMENT DE COMPORTEMENT (doctrine §6.27 puis §6.28). Ce cas attendait `false` : le
-    // prédicat était `equipmentDcId`, qui rend `null` pour un posé d'étage. « Localiser » sait désormais le
+    // prédicat était `equipmentDcId` (retiré depuis, §6.33), qui rendait `null` pour un posé d'étage.
+    // « Localiser » sait désormais le
     // cadrer en MONDE, donc la VM qu'il héberge devient localisable — À CONDITION que son bâtiment ait au
     // moins une salle (la portée d'affichage s'exprime en salles). Ici `dc` est une salle du bâtiment
     // « liege », d'où `true` ; le cas SANS salle est vérifié juste après.

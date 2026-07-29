@@ -385,7 +385,8 @@ async function boot(): Promise<void> {
             : opts.locate === "rack" ? (id: string) => { const rk: any = store.get("racks", id); return !!(rk && rk.datacenter_id); }
             // CÂBLE : prédicat PARTAGÉ (`core/Locatable`) — et plus qu'un miroir, c'est la MÊME règle que
             // consomme `DcInteract.locateCable` pour choisir l'extrémité qu'il cadre (doctrine §6.32). Il
-            // reconnaît désormais une extrémité posée sur un ÉTAGE, que `cableDcId` déclarait « non placée ».
+            // reconnaît une extrémité posée sur un ÉTAGE, que l'ancien `cableDcId` (retiré, §6.33)
+            // déclarait « non placée ».
             : opts.locate === "cable" ? (id: string) => store.cableLocatable(id)
             : null;
           const canLocate = isLocatable ? (id: string) => { const target = locateTargetOf(id); return !!target && isLocatable(target); } : undefined;

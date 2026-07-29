@@ -1602,9 +1602,10 @@ module.exports = async () => {
      « LOCALISER » UN CONTENU D'ÉTAGE — cadrage en MONDE, Vue étage, et PORTÉE amenée à la cible.
      Cf. docs/placement.md §6.27 (et §6.4 : l'étage est un CONTENEUR, pas une salle virtuelle).
 
-     Il n'y a AUCUNE parité à prouver ici : le chemin n'existait pas. `Store.equipmentDcId` rend
-     `null` pour un posé d'étage PAR CONCEPTION, donc « Localiser » s'arrêtait sur le toast « non
-     placé dans une salle ». Toutes les valeurs ci-dessous sont dérivées À LA MAIN du modèle.
+     Il n'y a AUCUNE parité à prouver ici : le chemin n'existait pas. La clé « salle » historique
+     (`Store.equipmentDcId`, retirée depuis — §6.33) rendait `null` pour un posé d'étage PAR
+     CONCEPTION, donc « Localiser » s'arrêtait sur le toast « non placé dans une salle ». Toutes les
+     valeurs ci-dessous sont dérivées À LA MAIN du modèle.
 
      Repères du décor, identiques à ceux des sections « décor d'étage » plus haut : deux sites SANS
      GPS → Alpha à l'origine, Beta au repli de 5 km (50 000 mm à l'échelle par défaut) ; hauteur
@@ -1726,7 +1727,8 @@ module.exports = async () => {
      de `Locatable` (test-core-store.js) éprouvent la RÈGLE ; ceux-ci éprouvent qu'elle correspond, mode
      de placement par mode de placement, à ce que l'action fait RÉELLEMENT. Sans cette section, les deux
      côtés peuvent dériver sans qu'aucun test ne rougisse — exactement la panne que le lot corrige (le
-     prédicat historique `!!equipmentDcId` cachait le bouton d'un posé d'étage que l'action sait viser).
+     prédicat historique `!!equipmentDcId`, retiré depuis, cachait le bouton d'un posé d'étage que
+     l'action sait viser).
 
      CONVENTION DE MESURE : « l'action aboutit » = elle programme une cible caméra (`_focusTarget`). Un
      refus passe par `Notify.toast`, qui exige un DOM absent du harnais et LÈVE donc — l'exception est
@@ -1804,8 +1806,8 @@ module.exports = async () => {
        porte sur `locateEquipment`. Pour les PORTS, un libre rattaché à une salle mais SANS `dc_x`/`dc_y`
        est jugé localisable (son équipement l'est) alors que `Resolver3D` refuse de résoudre ses ports
        (garde `dc_x == null`) et que la scène ne le dessine pas. Le bouton « Localiser » d'un tel port
-       n'ouvre donc qu'un toast. C'est ANTÉRIEUR au lot (`portDcId` se comportait à l'identique) et 0
-       occurrence dans les deux corpus ; on le VERROUILLE pour qu'il soit constaté et non redécouvert. */
+       n'ouvre donc qu'un toast. C'est ANTÉRIEUR au lot (l'ancien `portDcId` se comportait à l'identique)
+       et 0 occurrence dans les deux corpus ; on le VERROUILLE pour qu'il soit constaté et non redécouvert. */
     const sansPos = await s.create("equipments", { name: "libre-sans-position", placement_mode: "manual", ...libre, dc_id: dc.id });
     const portSansPos = await s.create("ports", { equipment_id: sansPos.id, name: "p", face_x: 0.5, face_y: 0.5, face_side: "front" });
     ck.eq(s.portLocatable(portSansPos.id), true, "écart connu : le port d'un libre NON positionné est jugé localisable…");
@@ -1813,6 +1815,102 @@ module.exports = async () => {
     let leve2 = false;
     try { dv2.locatePort(portSansPos.id); } catch (_) { leve2 = true; }
     ck(leve2 && dv2._focusTarget === null, "…alors que `locatePort` REFUSE (port non résolu en 3D) — écart PRÉ-EXISTANT, hors périmètre du lot");
+  }
+  });
+
+  /* ============================================================================================
+     LE CHEMIN SALLE DE « LOCALISER » NOMME SA SALLE LUI-MÊME — retrait du trio `*DcId`.
+     Cf. docs/placement.md §6.33, décision D5 du chantier « câblage des équipements d'étage » (lot 7).
+
+     `Store.equipmentDcId`/`portDcId`/`cableDcId` sont SUPPRIMÉS. Les trois chemins salle de
+     « Localiser » lisent désormais le conteneur de CHAÎNE (`Store.equipmentNamedContainer`) et le
+     RESTREIGNENT sur place à `kind === "room"` : l'hypothèse « ici c'est une salle » cesse d'être
+     enfouie dans une primitive du store pour devenir une affirmation locale, que `tsc` vérifie
+     (l'union `PlacementContainer` est discriminée).
+
+     ⚠ CE QUE CETTE SECTION MESURE, ET QUE L'ÉQUIVALENCE CI-DESSUS NE VOIT PAS. Celle-ci demande
+     « l'action aboutit-elle ? » ; celle-là demande « QUELLE salle a-t-elle cadrée ? ». La distinction
+     porte tout le risque du lot : la restriction s'applique au conteneur de CHAÎNE, jamais au conteneur
+     IMMÉDIAT — celui d'un serveur monté est sa BAIE, celui d'un boîtier posé son ÉTAGÈRE. C'est le
+     piège symétrique de §6.29 (nommer la baie au lieu de la salle), et il se mesure ici sur la salle
+     RÉELLEMENT visée. D'où DEUX salles dans le décor : la vue démarre sur A et doit basculer sur B — à
+     une seule salle, garder la salle ambiante donnerait exactement le même verdict que la lire.
+     ============================================================================================ */
+  await section("« Localiser » (chemin SALLE) : la salle visée est celle de la CHAÎNE, pas le conteneur immédiat", async () => {
+  {
+    const s = await makeStore();
+    const site = await s.create("sites", { name: "Liege" });
+    await s.create("floors", { location: site.id, floor: "0", width_mm: 30000, depth_mm: 20000, cell_mm: 600, height_mm: 4000 });
+    const dcA = await s.create("datacenters", { name: "Salle A", location: site.id, floor: "0", width_mm: 8000, depth_mm: 6000, floor_x: 1000, floor_y: 1000 });
+    const dcB = await s.create("datacenters", { name: "Salle B", location: site.id, floor: "0", width_mm: 8000, depth_mm: 6000, floor_x: 12000, floor_y: 1000 });
+    const rackB = await s.create("racks", { name: "R-B", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dcB.id, dc_x: 1000, dc_y: 1000 });
+    const rackNu = await s.create("racks", { name: "R-hors-salle", width_mm: 600, depth: 1000, u_count: 42, location: site.id });
+    const trayB = await s.create("rackItems", { rack_id: rackB.id, kind: "tray", tray_type: "cantilever", u: 10, u_height: 3, tray_u: 1, depth_mm: 400 });
+    const libre = { dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 150 };
+    // ⚠ Cotes RÉDUITES sur l'étagère : la validation BORNE un posé au volume utile au-dessus du plateau
+    // (même piège que la section d'équivalence ci-dessus — un boîtier de 150 mm y serait REFUSÉ).
+    const petit = { dim_mode: "free", free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 };
+
+    /* Un cas par nature de CONTENEUR IMMÉDIAT — c'est la variable qui décide, pas le mode de placement.
+       Colonne 3 = le `kind` immédiat ATTENDU (écrit à la main), colonne 4 = la SALLE que le chemin doit
+       viser (idem). Les deux derniers cas n'ont aucune salle dans leur chaîne : ils doivent REFUSER. */
+    const cas = [
+      ["monté en baie — conteneur immédiat = BAIE", { placement_mode: "rack", rack_id: rackB.id, rack_u: 5, u_height: 1 }, "rack", dcB.id],
+      ["en MARGE d'une baie — conteneur immédiat = BAIE", { placement_mode: "side", ...libre, rack_id: rackB.id, rack_side_pos: "left" }, "rack", dcB.id],
+      ["en PAROI d'une baie — conteneur immédiat = BAIE", { placement_mode: "wall", ...libre, rack_id: rackB.id }, "rack", dcB.id],
+      ["posé sur une ÉTAGÈRE — conteneur immédiat = ÉTAGÈRE", { placement_mode: "tray", ...petit, tray_item_id: trayB.id, tray_x: 10, tray_y: 10 }, "tray", dcB.id],
+      ["libre POSITIONNÉ en salle — conteneur immédiat = SALLE", { placement_mode: "manual", ...libre, dc_id: dcB.id, dc_x: 2000, dc_y: 1500 }, "room", dcB.id],
+      ["monté dans une baie HORS salle — conteneur VALIDE, aucune salle dans la chaîne", { placement_mode: "rack", rack_id: rackNu.id, rack_u: 3 }, "rack", null],
+      ["libre SANS salle (inventaire pur) — aucun conteneur", { placement_mode: "manual", ...libre }, null, null],
+    ];
+
+    /* Une vue NEUVE par mesure, toujours posée sur la salle A : ni portée ni salle active héritées du
+       cas précédent. Un refus passe par `Notify.toast`, qui LÈVE faute de DOM — on le rattrape, la
+       mesure étant `_focusTarget`. */
+    const joue = (fn) => {
+      const dv = new DatacenterView(s, {}, {});
+      dv.view = "3d"; dv.multiDc = false; dv.dcId = dcA.id; dv.visibleDcIds = new Set([dcA.id, dcB.id]); dv._focusTarget = null;
+      try { fn(dv); } catch (_) { /* refus : toast sans DOM */ }
+      return dv;
+    };
+
+    let vus = 0;
+    for (const [label, props, kindImmediat, salle] of cas) {
+      const eq = await s.create("equipments", { name: "eq-" + (++vus), ...props });
+      ck(eq, `fixture créée — ${label} (un null ici = enregistrement REFUSÉ par la validation, pas un défaut du chemin)`);
+      if (!eq) continue;
+      const port = await s.create("ports", { equipment_id: eq.id, name: "p" + vus, face_x: 0.5, face_y: 0.5, face_side: "front" });
+      const cab = await s.create("cables", { name: "c" + vus, from_port_id: port.id, to_port_id: null });
+
+      // 1. LE CONTRASTE, mesuré et non supposé : quatre placements sur cinq ont un conteneur immédiat
+      //    qui N'EST PAS une salle. C'est ce qui rend `equipmentContainer` inutilisable ici.
+      const immediat = s.equipmentContainer(eq.id);
+      ck.eq(immediat ? immediat.kind : null, kindImmediat, `conteneur IMMÉDIAT — ${label}`);
+
+      // 2. …et les TROIS chemins salle visent pourtant la salle de la CHAÎNE, écrite à la main.
+      const dvE = joue((dv) => dv.locateEquipment(eq.id));
+      ck.eq(dvE._focusTarget ? dvE.dcId : null, salle, `locateEquipment vise la salle de la CHAÎNE — ${label}`);
+      const dvP = joue((dv) => dv.locatePort(port.id));
+      ck.eq(dvP._focusTarget ? dvP.dcId : null, salle, `locatePort vise la même salle — ${label}`);
+      const dvC = joue((dv) => dv.locateCable(cab.id));
+      ck.eq(dvC._focusTarget ? dvC.dcId : null, salle, `locateCable (bout unique) vise la même salle — ${label}`);
+
+      // 3. Un REFUS ne déplace pas la salle active : le chemin salle sort AVANT toute écriture d'état.
+      if (salle === null) ck.eq(dvE.dcId, dcA.id, `refus — ${label} : la salle active n'a pas bougé`);
+    }
+    ck.eq(vus, 7, "les sept placements ont bien été joués (garde anti-boucle vide : une liste tronquée passerait sinon au vert)");
+
+    /* PARITÉ avec la règle HISTORIQUE, transcrite ici puisque le dépôt ne la porte plus : la chaîne
+       PROJETÉE sur son maillon « salle », c'est-à-dire l'ancien `Store.equipmentDcId` mot pour mot. */
+    const salleHistorique = (eqId) => { const r = PlacementContainers.chain(s.get("equipments", eqId), (coll, id) => s.get(coll, id)).find((c) => c.kind === "room"); return r ? r.id : null; };
+    let compares = 0;
+    for (let i = 1; i <= vus; i++) {
+      const eq = s.all("equipments").find((e) => e.name === "eq-" + i);
+      const k = s.equipmentNamedContainer(eq.id);
+      ck.eq(k && k.kind === "room" ? k.id : null, salleHistorique(eq.id), `PARITÉ avec la clé « salle » historique — eq-${i}`);
+      compares++;
+    }
+    ck.eq(compares, 7, "…sur les sept placements (et non sur un sous-ensemble muet)");
   }
   });
 
@@ -1913,7 +2011,8 @@ module.exports = async () => {
       const dv4 = vueNeuve(); dv4.locateCable(cEtageSalle.id);
       ck.eq(dv4.multiDc, true, "étage en A, salle en B : c'est A qui cadre (même priorité, autre nature de conteneur)");
       ck.eq(cible(dv4).p.z, 6400, "…et la cible est bien celle du posé d'étage");
-      // Bout A NON localisable : on le SAUTE, on ne s'arrête pas dessus (parité `portDcId(A) || portDcId(B)`).
+      // Bout A NON localisable : on le SAUTE, on ne s'arrête pas dessus (parité avec l'expression
+      // historique `portDcId(A) || portDcId(B)`, retirée au lot 7).
       const cRienSalle = await mkCable("non placé → salle", eqRien, eqLibre);
       const dv5 = vueNeuve(); dv5.locateCable(cRienSalle.id);
       ck(cible(dv5).p.x === 2000, "bout A non placé : l'extrémité B est retenue (le chemin historique faisait déjà cela)");
@@ -1982,11 +2081,14 @@ module.exports = async () => {
       /* ⚠ ÉCART CONNU, NOMMÉ ET VERROUILLÉ — il n'est PAS une exception à l'équivalence ci-dessus, dont
          aucun cas ne le met en jeu. Un libre rattaché à une salle mais SANS `dc_x`/`dc_y` est jugé
          localisable (§6.28) alors que `Resolver3D` refuse de résoudre ses PORTS : une liaison qui n'a que
-         ce bout-là voit son bouton proposé et n'obtient qu'un toast. C'est ANTÉRIEUR à ce lot — `cableDcId`
-         se comportait à l'identique — et sans occurrence dans les deux corpus. */
+         ce bout-là voit son bouton proposé et n'obtient qu'un toast. C'est ANTÉRIEUR à ce lot — l'ancien
+         `cableDcId` se comportait à l'identique — et sans occurrence dans les deux corpus. */
       const cSansPos = await mkCable("libre sans position → rien", eqSansPos, null);
       ck.eq(s.cableLocatable(cSansPos), true, "écart connu : la liaison d'un libre NON positionné est jugée localisable…");
-      ck.eq(!!s.cableDcId(cSansPos), true, "…exactement comme le faisait `cableDcId` : l'écart n'est ni créé ni refermé par ce lot");
+      // …et pour la RAISON qui le rendait déjà vrai avant : la chaîne du bout A traverse bien la salle,
+      // ce qui suffisait à l'ancien `cableDcId` (RETIRÉ §6.33) comme cela suffit au prédicat actuel.
+      ck.eq(JSON.stringify(s.equipmentNamedContainer(eqSansPos.id)), JSON.stringify({ kind: "room", id: dcA.id }),
+        "…parce que sa chaîne traverse la salle — l'écart n'est ni créé ni refermé, ni par le lot 6 ni par le retrait du lot 7");
       const dv10 = vueNeuve(); dernierToast = null; dv10.locateCable(cSansPos.id);
       ck.eq(dv10._focusTarget, null, "…alors que « Localiser » REFUSE (bout non résolu en 3D)");
       ck.eq(dernierToast, I18n.t("dc.interact.cableEndNotFound"), "…avec le message de SALLE, puisque c'est bien une salle qu'on n'a pas su résoudre");
@@ -2069,9 +2171,13 @@ module.exports = async () => {
     ck.eq(trunksDe(multiTout, dcA), "T-AB,T-AF,T-FF", "Vue étage, deux salles : les trois faisceaux sont pilotables — dont celui dont les DEUX bouts sont sur l'étage");
     ck.eq(trunksDe(mono, dcA), "T-AB,T-AF", "salle unique A : seuls les faisceaux touchant A (le T-FF, purement d'étage, disparaît)");
     ck.eq(trunksDe(vue("3d", false, [dcB.id]), dcB), "T-AB", "salle unique B : seul le faisceau qui la touche");
-    // PARITÉ : sur des données SANS aucun posé d'étage, la nouvelle portée est celle de l'ancienne.
-    const ancienneTrunks = (dv, dc) => { const shown = new Set(dv.displayedDcIds(dc)); return s.all("cableBundles").filter((b) => { const da = b.endpoint_a_equipment_id ? s.equipmentDcId(b.endpoint_a_equipment_id) : null; const db = b.endpoint_b_equipment_id ? s.equipmentDcId(b.endpoint_b_equipment_id) : null; return (da != null && shown.has(da)) || (db != null && shown.has(db)); }).map((b) => b.name).sort().join(","); };
-    ck.eq(ancienneTrunks(mono, dcA), "T-AB,T-AF", "…et l'expression HISTORIQUE (`equipmentDcId` ∈ salles affichées) dit exactement la même chose en salle unique");
+    /* PARITÉ : sur des données SANS aucun posé d'étage, la nouvelle portée est celle de l'ancienne.
+       ⚠ La règle historique — « la SALLE du bout appartient-elle aux salles affichées ? » — est
+       TRANSCRITE ici depuis la chaîne d'attache : `Store.equipmentDcId` est RETIRÉ (§6.33), et c'est
+       exactement pour cela qu'un oracle de parité doit vivre dans le test, pas dans le dépôt. */
+    const salleHistorique = (eqId) => { const r = PlacementContainers.chain(s.get("equipments", eqId), (coll, id) => s.get(coll, id)).find((c) => c.kind === "room"); return r ? r.id : null; };
+    const ancienneTrunks = (dv, dc) => { const shown = new Set(dv.displayedDcIds(dc)); return s.all("cableBundles").filter((b) => { const da = b.endpoint_a_equipment_id ? salleHistorique(b.endpoint_a_equipment_id) : null; const db = b.endpoint_b_equipment_id ? salleHistorique(b.endpoint_b_equipment_id) : null; return (da != null && shown.has(da)) || (db != null && shown.has(db)); }).map((b) => b.name).sort().join(","); };
+    ck.eq(ancienneTrunks(mono, dcA), "T-AB,T-AF", "…et l'expression HISTORIQUE (salle de la chaîne ∈ salles affichées) dit exactement la même chose en salle unique");
     ck.eq(ancienneTrunks(multiTout, dcA), "T-AB,T-AF", "…tandis qu'en Vue étage elle RATE le faisceau d'étage : c'est très exactement ce que D3 corrige");
 
     // ---- LISTE DE CÂBLES de la carte (branche multi-salles) ----
@@ -2084,7 +2190,7 @@ module.exports = async () => {
     const cNu = await s.create("cables", { name: "C-NULLE-PART", from_port_id: await p(eqNu), to_port_id: null });
     const trouve = (q) => multiTout.searchResults(q).filter((r) => r.kind === "cable").map((r) => r.label).join(",");
     ck.eq(trouve("C-AB"), "C-AB", "recherche 3D : un câble de SALLE reste proposé (parité)");
-    ck.eq(trouve("C-FF"), "C-FF", "recherche 3D : un câble entre deux posés d'ÉTAGE est désormais proposé — `cableDcId` le déclarait « non placé »");
+    ck.eq(trouve("C-FF"), "C-FF", "recherche 3D : un câble entre deux posés d'ÉTAGE est désormais proposé — l'ancien `cableDcId` le déclarait « non placé »");
     ck.eq(trouve("C-NULLE-PART"), "", "recherche 3D : un câble dont aucune extrémité n'est atteignable reste ÉCARTÉ (pas de bouton mort)");
     ck(cNu, "fixture câble non plaçable créée");
   }

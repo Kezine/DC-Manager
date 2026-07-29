@@ -10,12 +10,21 @@
 
        bâtiment  →  étage  →  salle  →  baie  →  étagère
 
-   ÉTAT DE LA MIGRATION : ce module est BRANCHÉ. `Store.equipmentDcId` lui délègue
-   (via `roomIdOf`), les libellés le lisent (`core/ContainerLabel`), les boutons
-   « Localiser » aussi (`core/Locatable`), et depuis la doctrine §6.31 la GRAMMAIRE
-   DE ROUTE (`store/CableRouteAnalyzer`) raisonne directement sur ses conteneurs.
+   ÉTAT DE LA MIGRATION : TERMINÉE (doctrine §6.33). Les libellés lisent ce module
+   (`core/ContainerLabel`), les boutons « Localiser » aussi (`core/Locatable`), la
+   GRAMMAIRE DE ROUTE (`store/CableRouteAnalyzer`) raisonne directement sur ses
+   conteneurs depuis §6.31, et le trio historique du store qui PROJETAIT la chaîne
+   sur son maillon « salle » (`equipmentDcId`/`portDcId`/`cableDcId`) est RETIRÉ.
    Chaque bascule a été faite APRÈS preuve de parité avec la règle historique,
    conformément à la méthode de vérification (doctrine §4.1).
+
+   ⚠ IL N'Y A PLUS DE RACCOURCI « SALLE » ICI, ET C'EST VOULU. `roomIdOf(eq, fetch)`
+   — la projection `chain(...).find(kind === "room")` — a été retirée avec son
+   dernier consommateur : offrir la projection, c'est la voir redevenir la réponse
+   par défaut à « où est cet objet ? », et un contenu d'ÉTAGE y redevient aussitôt
+   « nulle part ». Un site qui a réellement besoin d'un repère SALLE lit le
+   conteneur de chaîne (`core/ContainerLabel.namedOfChain`) et le RESTREINT sur
+   place : l'union étant discriminée, `tsc` vérifie la restriction.
    ============================================================================= */
 
 /** Nature d'un conteneur. L'ordre reflète la hiérarchie, du plus large au plus fin. */
@@ -63,7 +72,8 @@ export class PlacementContainers {
 
   /** Conteneur IMMÉDIAT d'un équipement, ou null s'il n'est attaché à rien de localisable (« pool »).
 
-      ⚠ L'ORDRE des cas est SIGNIFIANT et réplique exactement `Store.equipmentDcId` :
+      ⚠ L'ORDRE des cas est SIGNIFIANT — il répliquait exactement la cascade de l'ancien
+      `Store.equipmentDcId` (RETIRÉ, §6.33), dont ce module a hérité les deux pièges :
       — l'étagère DOIT précéder le repli « libre », car un équipement posé est `dim_mode: "free"` mais
         n'a pas de `dc_id` (il est rattaché par `tray_item_id`) ; l'inverse le rendrait « non placé » et
         un câble vers lui resterait bloqué à « planifié » ;
@@ -112,13 +122,6 @@ export class PlacementContainers {
     let depth = 0;
     while (cur && depth++ < PlacementContainers.MAX_DEPTH) { out.push(cur); cur = PlacementContainers.parentOf(cur, fetch); }
     return out;
-  }
-
-  /** Salle de la chaîne, ou null si le contenu n'en traverse aucune (posé sur un étage, en pool, baie hors
-      salle…). REMPLACERA `Store.equipmentDcId` une fois la parité prouvée puis l'ancien chemin retiré. */
-  static roomIdOf(eq: Record<string, any> | null | undefined, fetch: ContainerFetcher): string | null {
-    const room = PlacementContainers.chain(eq, fetch).find((c) => c.kind === "room");
-    return room && room.kind === "room" ? room.id : null;
   }
 
   /** Deux conteneurs désignent-ils le MÊME ? (comparaison structurelle — cf. l'union discriminée). */

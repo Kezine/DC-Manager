@@ -1366,7 +1366,8 @@ aurait donc compilé sur une API morte.
   contrôle de discrimination prouvant qu'un port aux mêmes fractions SANS parent tombe ailleurs — sans quoi
   l'assertion serait tautologique).
 - **Non fait, volontairement — LES ÉQUIPEMENTS D'ÉTAGE NE SONT TOUJOURS PAS CÂBLABLES**, et ce lot ne le
-  prétend pas. `Store.equipmentDcId` rend `null` pour eux PAR CONCEPTION, et toute la machinerie de câblage ne
+  prétend pas. `Store.equipmentDcId` — la clé « salle » de l'époque, RETIRÉE depuis (§6.33) — rendait `null`
+  pour eux PAR CONCEPTION, et toute la machinerie de câblage ne
   connaît que « dans la salle X » ou « non placé » : un câble ne peut donc toujours pas s'y raccorder, et les
   connecteurs nouvellement dessinés resteront gris (non câblés) tant que ce blocage tient. C'est le chantier
   que §6.4 décrit — généraliser la CLÉ de la machinerie de câblage de « salle » à « conteneur » — et il est
@@ -2275,6 +2276,90 @@ son cadrage (une extrémité de câble se cadre avec la même étendue de contex
 à l'œil en Vue étage où les distances sont d'un autre ordre), et l'arrivée dans la carte « câbles » des
 faisceaux et câbles purement d'étage.
 
+### 6.33 La clé « SALLE » est RETIRÉE du store — le chantier est CLOS — **IMPLÉMENTÉ**
+
+Dernier lot du chantier « câblage des équipements d'étage » (§6.4), et application de sa décision **D5** :
+`Store.equipmentDcId`, `Store.portDcId` et `Store.cableDcId` sont **SUPPRIMÉS**. Cette décision avait été
+prise dès l'ouverture, et dans ce but précis — *« pour que `tsc` désigne les sites un par un et force leur
+relecture »*. Le lot 5 l'a validée en cours de route : le compilateur y avait désigné **onze** sites
+qu'aucun relevé à la main n'avait vus (§6.31). La bonne unité de rayon d'action n'est pas « les appelants
+d'une méthode » mais « ce que le TYPE touche ».
+
+**CE QUE PROJETER SUR UNE SALLE COÛTAIT.** Les trois méthodes rendaient un ID DE SALLE en réduisant la
+chaîne d'attache à son maillon `room` (`PlacementContainers.roomIdOf`) et en jetant le reste. Un contenu
+posé sur un ÉTAGE a pourtant une chaîne parfaitement valide (`floor` → `building`) : il s'en voyait
+déclarer NULLE PART, pour la seule raison qu'aucun de ses maillons ne s'appelle `room`. C'est le « cas
+particulier à RETIRER » de §6.4 — la cause unique, et non l'une des causes, du blocage « les équipements
+d'étage ne sont pas câblables ».
+
+**L'ARBITRAGE DU LOT : où mettre l'hypothèse « ici, c'est une salle ».** Trois sites en ont encore besoin,
+et c'est LÉGITIME — les chemins salle de `DcInteract.locateEquipment` / `locatePort` / `locateCable`
+appellent `equipCenter`, `rackFocus`, `resolvePort3D` et `focus3DAt`, tous scopés SALLE par conception
+(§6.20 : la résolution en MONDE est l'exception, annoncée par le nom de la méthode). Deux voies :
+
+- **(a) rendre la projection sous un autre nom** — elle existait déjà (`roomIdOf`). Écartée : on aurait
+  RENOMMÉ le cas particulier au lieu de le retirer, et une primitive disponible redevient la réponse par
+  défaut à « où est cet objet ? » — le lot suivant l'aurait reprise.
+- **(b) RETENUE — lire le conteneur et le RESTREINDRE sur place.** Les trois sites écrivent
+  `const k = store.equipmentNamedContainer(x); if (!k || k.kind !== "room") { refus } ; const dcId = k.id;`.
+  L'hypothèse cesse d'être enfouie dans une primitive et devient une **affirmation locale**, adossée à
+  deux faits lisibles sur place : la branche ÉTAGE vient de passer, et la suite est scopée salle.
+
+**⚠ MESURE QUI CORRIGE L'ÉNONCÉ DE (b) — c'est le vrai piège du lot.** « Lire LE conteneur » ne veut pas
+dire `equipmentContainer`, qui rend le conteneur **IMMÉDIAT** : celui d'un serveur monté est sa **BAIE**,
+celui d'un boîtier posé son **ÉTAGÈRE**. Restreindre CELUI-LÀ à `kind === "room"` déclarerait « non placé »
+tout équipement monté en baie — une régression massive. Ce qu'on restreint est le conteneur de **CHAÎNE**
+(`equipmentNamedContainer` → `core/ContainerLabel.namedOfChain`), et l'expression obtenue est alors,
+**exactement**, celle de l'ancien `equipmentDcId`. Même piège qu'en §6.29 et §6.31 (« le conteneur d'un
+bout se lit sur la CHAÎNE »), rencontré une troisième fois : c'est désormais la règle générale, pas une
+particularité de lot. Sonde de mutation : `equipmentContainer` lu aux trois sites → **25 FAIL** (12 dans la
+section neuve, 12 dans l'équivalence prédicat⟺action de §6.28, et **un CRASH** qui emporte 23 assertions
+de la section de cadrage).
+
+**LE COMPILATEUR VÉRIFIE LA RESTRICTION, ce qui n'était pas vrai de la primitive.** `PlacementContainer`
+est une **union discriminée** : sans le `kind === "room"`, `k.id` ne compile pas. Sonde de mutation :
+restriction retirée aux trois sites → **3 erreurs de COMPILATION**, une par site
+(`Property 'id' does not exist on type '{ kind: "building"; location: string; }'`). L'ancienne écriture,
+elle, rendait un `string | null` : rien n'y distinguait « la salle de cet objet » de « une salle ».
+
+**⚠ CE QUE `tsc` A RÉELLEMENT DÉSIGNÉ : TROIS SITES, PAS CINQ — et la différence accuse le PONT.** Mesure
+faite en confrontant la chaîne de vues d'AVANT au `Store` d'APRÈS : `DcInteract` ~888 (le pont), ~1088
+(`locateEquipment`), ~1191 (`locatePort`). Les deux autres — l'abstrait `DcBase.portDcId` et l'appel
+`this.portDcId(portId)` de `locateCable` — **ne lèvent aucune erreur**, parce qu'ils passent par un membre
+de la VUE qui porte le même nom et existe toujours. Un pont d'accès transitoire ne fait donc pas que
+dupliquer une méthode : il **soustrait ses consommateurs à l'inventaire du compilateur**. C'est la raison
+de fond pour laquelle il devait disparaître plutôt qu'être renommé (dette des ponts de `DcBase`, cf.
+`CLAUDE.md`).
+
+**`PlacementContainers.roomIdOf` EST RETIRÉE AUSSI**, et ce n'est pas un extra : c'est la projection
+elle-même, un cran plus bas. Son unique consommateur était `Store.equipmentDcId` ; la laisser aurait
+maintenu dans le module PARTAGÉ une API publique sans emploi dont le seul effet possible est de rendre à
+nouveau disponible la réduction qu'on vient de retirer. La règle historique survit là où elle doit
+survivre : **transcrite à la main dans les tests**, comme oracle de parité.
+
+**PARITÉ — et un piège de tautologie évité, pas seulement cité.** Trois oracles de parité vivaient dans
+les tests en appelant les fonctions retirées ; ils sont transcrits depuis `PlacementContainers.chain`.
+⚠ La transcription du banc de §6.29 (libellés) est **délibérément écrite sur la chaîne et non sur
+`equipmentNamedContainer`** : ce dernier passe par `ContainerLabel.namedOfChain`, c'est-à-dire par la
+fonction MÊME que la section éprouve — l'oracle aurait comparé la règle à elle-même et serait resté vert
+quoi qu'il arrive (piège du lot 2 du chantier conteneur, §4.1). La section neuve mesure, sur **sept
+placements** et **DEUX salles** (la vue démarre sur A et doit basculer sur B — à une seule salle, garder la
+salle ambiante donnerait le même verdict que la lire), le `kind` du conteneur immédiat, la salle
+réellement visée par les **trois** chemins, le fait qu'un refus ne déplace pas la salle active, et
+l'égalité avec la règle historique transcrite.
+
+**Ce que le lot NE fait PAS**, et qui reste ouvert : `equipmentNamedContainer` porte un nom de LIBELLÉ
+alors qu'il est devenu la réponse de l'application à « dans quel conteneur ce contenu vit-il ? » (grammaire
+de route, tracé, libellés, et maintenant « Localiser ») — dette de NOMMAGE signalée dans `Store` et dans
+`core/ContainerLabel`, à traiter à part. Et il n'existe pas de pendant `portNamedContainer` : **cinq**
+sites écrivent à la main `p ? equipmentNamedContainer(p.equipment_id) : null` (`CableRouteAnalyzer`,
+`TrunkRouting`, `CableForms`, `DetailForms`, et depuis ce lot `locateCable`) — dédup possible, hors
+périmètre d'un lot de RETRAIT.
+
+**CE QUI CHANGE VISUELLEMENT** : **rien**, sur aucun document. Le lot est un retrait à comportement
+constant, et les trois expressions nouvelles sont l'équivalent exact des anciennes (parité mesurée
+ci-dessus, sur les sept placements). Aucun réglage à juger à l'œil n'en découle.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -2300,12 +2385,19 @@ et un équipement posé sur un étage est analysé, accepté, et dessiné.
 les trois gardes de bouton correspondantes sont ouvertes, et la carte « câbles » du panneau latéral exprime sa
 portée en CONTENEURS affichés (`DcBase.containerShown`) — faisceaux comme câbles.
 
-⚠ **CE QUI RESTE du chantier §6.4** : le trio historique `equipmentDcId`/`portDcId`/`cableDcId` survit
-(lot 7 — sa suppression est ce qui fera désigner par `tsc` les appelants restants, décision D5). Il n'a plus
-que **cinq points d'appel** hors du `Store`, tous sur le chemin SALLE de `locateEquipment`/`locatePort` (dont
-la branche `floor` les PRÉCÈDE déjà) et le pont `DcBase.portDcId`. Restent aussi, hors chantier :
-`EntityViz.equipmentLocationShort`, qui affiche « — » pour un posé d'étage (dette de libellé signalée au lot
-3), et les `String(x || "")` d'étage que `PlacementContainers.floorOf` doit résorber.
+✅ **LE CHANTIER §6.4 EST CLOS** (§6.33, décision D5) : le trio historique
+`equipmentDcId`/`portDcId`/`cableDcId` est **RETIRÉ**, ainsi que la projection `PlacementContainers.roomIdOf`
+qu'il consommait. L'application n'a plus AUCUNE écriture qui réduise un placement à une salle : les trois
+chemins salle de « Localiser » lisent le conteneur de CHAÎNE et le RESTREIGNENT sur place
+(`kind === "room"`), restriction que `tsc` vérifie puisque l'union est discriminée. Le pont
+`DcBase.portDcId` a disparu avec eux — un pont de vue soustrait ses consommateurs à l'inventaire du
+compilateur, ce que la mesure de §6.33 établit.
+
+⚠ **DETTES NOMMÉES, hors chantier** : `EntityViz.equipmentLocationShort` affiche « — » pour un posé d'étage
+(dette de libellé signalée au lot 3) ; les `String(x || "")` d'étage que `PlacementContainers.floorOf` doit
+résorber ; le nom `equipmentNamedContainer`, en retard sur son emploi (il ne sert plus qu'accessoirement aux
+libellés) ; l'absence d'un `portNamedContainer`, réécrit à la main par cinq sites ; et le champ interne
+`multiDc`, que l'UI appelle « Vue étage ».
 
 ✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur**, et la
 règle de repli d'une position absente n'est plus écrite qu'une fois (§6.13). Les deux **prérequis** de §6.5
@@ -2402,7 +2494,10 @@ du besoin — verrouillé par des tests anti-divergence).
   salle et se désistent (`false`) pour tout autre conteneur ; `scopeFloorBuilding` amène le bâtiment visé
   dans la PORTÉE, sans quoi la caméra cadrerait un point que la scène ne dessine pas. `locateCable` choisit
   son extrémité par `Store.cableLocatableEnd` — **la méthode même** que lisent les gardes de son bouton
-  (§6.32), si bien que prédicat et action ne peuvent pas diverger.
+  (§6.32), si bien que prédicat et action ne peuvent pas diverger. ⚠ Les **trois chemins SALLE** sont les
+  seuls sites de l'app à réduire un placement à une salle, et ils le font **SUR PLACE** :
+  `equipmentNamedContainer(x)` puis `kind === "room"` (§6.33). Le conteneur de **CHAÎNE**, jamais
+  `equipmentContainer` (immédiat = la BAIE d'un monté, l'ÉTAGÈRE d'un posé).
 - `src-client/core/Locatable.ts` — « cet objet est-il LOCALISABLE ? », règle UNIQUE des boutons « Localiser »
   (pure, store injecté) : `equipment`/`port` (§6.28) et, pour une LIAISON, `cableEnd` (l'extrémité RETENUE —
   première localisable, A puis B) dont `cable` n'est que le constat (§6.32). ⚠ Ce n'est PAS

@@ -10,9 +10,13 @@
    faisceau, contenu d'une baie, panneau de recherche 3D, « Localiser une VM »).
    Ils écrivaient tous la même question sous la forme `!!store.equipmentDcId(x)` —
    sept copies d'une règle qui ne demandait qu'à diverger. Le dépôt s'en est déjà
-   fait mordre : `equipmentDcId` rend `null` pour un équipement posé sur un ÉTAGE
-   (doctrine `docs/placement.md` §6.4), si bien que le bouton restait caché alors
-   que l'action, elle, aboutit depuis §6.27.
+   fait mordre : cette clé « salle » rendait `null` pour un équipement posé sur un
+   ÉTAGE (doctrine `docs/placement.md` §6.4), si bien que le bouton restait caché
+   alors que l'action, elle, aboutit depuis §6.27.
+   ⚠ TOUTES LES MENTIONS DU TRIO `equipmentDcId`/`portDcId`/`cableDcId` DANS CE
+   FICHIER SONT HISTORIQUES : il a été RETIRÉ du dépôt au lot 7 du chantier
+   (doctrine §6.33, décision D5) — elles disent d'où vient la règle, elles ne
+   renvoient plus à du code qu'on puisse aller lire.
 
    VERSION « SOBRE » (choix utilisateur, cf. `VmLocate`) : on ne propose le bouton
    QUE si la localisation peut ABOUTIR. Jamais de bouton grisé, jamais de bouton
@@ -67,8 +71,9 @@
    la demi-empreinte (§6.13) — alors que `Resolver3D.resolveFaceAnchor3D` refuse
    de résoudre ses PORTS (garde `dc_x == null`) et que la scène 3D ne le dessine
    pas (`buildFreeEquip` l'ignore). Le bouton « Localiser » d'un tel PORT n'ouvre
-   donc qu'un toast, avec `portDcId` comme avec `portLocatable` : ce lot ne crée
-   ni ne referme cet écart, il le NOMME et le verrouille par un test. Le refermer
+   donc qu'un toast, hier avec `portDcId` comme aujourd'hui avec `portLocatable` :
+   ce lot ne crée ni ne referme cet écart, il le NOMME et le verrouille par un
+   test. Le refermer
    demande de trancher où l'on dessine un libre non positionné — hors périmètre.
    ============================================================================= */
 import { PlacementContainers } from "../../src-shared/PlacementContainers";
@@ -85,7 +90,8 @@ export interface LocatableStore {
 }
 
 export class Locatable {
-  /** L'équipement `eqOrId` (enregistrement OU id, comme `Store.equipmentDcId`) est-il localisable ? */
+  /** L'équipement `eqOrId` (enregistrement OU id — tolérance héritée de l'ancien `Store.equipmentDcId`)
+      est-il localisable ? */
   static equipment(eqOrId: any, store: LocatableStore): boolean {
     const eq = (eqOrId && typeof eqOrId === "object") ? eqOrId : store.get("equipments", eqOrId);
     if (!eq) return false;
@@ -93,7 +99,7 @@ export class Locatable {
   }
 
   /** Le PORT `portId` est-il localisable ? Même règle que son équipement porteur — un port n'a pas de
-      placement propre, il émerge d'une face de son équipement (parité avec `Store.portDcId`). */
+      placement propre, il émerge d'une face de son équipement (parité avec l'ancien `Store.portDcId`). */
   static port(portId: string | null, store: LocatableStore): boolean {
     const p = store.get("ports", portId);
     return p ? Locatable.equipment(p.equipment_id, store) : false;
@@ -101,7 +107,7 @@ export class Locatable {
 
   /** Extrémité RETENUE pour cadrer une LIAISON : le port de la première extrémité LOCALISABLE (A puis B),
       `null` si aucune des deux ne l'est. `cableOrId` = enregistrement OU id (mêmes tolérances que
-      `Store.cableDcId`) ; convient aussi bien à un câble qu'à toute liaison portant `from_port_id`/
+      l'ancien `Store.cableDcId`) ; convient aussi bien à un câble qu'à toute liaison portant `from_port_id`/
       `to_port_id`.
 
       ⚠ CETTE MÉTHODE EST LA RÈGLE, `cable` n'en est que le CONSTAT — et c'est ce qui rend le bouton mort
@@ -116,7 +122,7 @@ export class Locatable {
     return null;
   }
 
-  /** La LIAISON est-elle localisable ? = « existe-t-il une extrémité à cadrer ? ». Généralise
+  /** La LIAISON est-elle localisable ? = « existe-t-il une extrémité à cadrer ? ». A généralisé
       `!!Store.cableDcId`, qui ne savait reconnaître qu'une extrémité posée en SALLE. */
   static cable(cableOrId: any, store: LocatableStore): boolean {
     return Locatable.cableEnd(cableOrId, store) !== null;
