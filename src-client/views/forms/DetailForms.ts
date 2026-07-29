@@ -27,6 +27,7 @@ import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais a
 import { VmForms } from "./VmForms";
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
+import { SubEquipmentForms } from "./SubEquipmentForms";   // fiche + formulaire des sous-équipements (hors chaîne d'héritage, cf. son en-tête)
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (résolue via l'annuaire, mode API)
 
 /* =============================================================================
@@ -45,31 +46,11 @@ import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {aute
 export class DetailForms extends IpamForms {
   private static readonly MUTED = `<span style="color:var(--fg-dimmer)">—</span>`;
 
-  /** Grille clé→valeur (valeurs = HTML déjà échappé par l'appelant). */
-  private static grid(pairs: Array<[string, string]>): HTMLElement {
-    const g = document.createElement("div"); g.className = "detail-grid";
-    pairs.forEach(([k, v]) => { g.appendChild(this.dt(k)); g.appendChild(this.dd(v)); });
-    return g;
-  }
-  /** Intercalaire de section (avec compte optionnel). */
-  private static sect(root: HTMLElement, label: string): void {
-    const d = document.createElement("div"); d.className = "section-divider"; d.textContent = label; root.appendChild(d);
-  }
-  /** Tableau compact (cellules = HTML). `empty` affiché à la place si aucune ligne. */
-  private static tbl(root: HTMLElement, headers: string[], rows: string[][], empty: string): HTMLElement | null {
-    if (!rows.length) { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = empty; root.appendChild(e); return null; }
-    const tw = document.createElement("div"); tw.className = "table-wrap";
-    const head = headers.map((h) => `<th>${Html.escape(h)}</th>`).join("");
-    const body = rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("");
-    tw.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
-    root.appendChild(tw); return tw;
-  }
-  /** Pied de fiche : « Modifier » (si un éditeur est fourni et hors mode visualiseur). */
-  private static footer(root: HTMLElement, edit?: () => void): void {
-    const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (edit && !this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = edit; actions.appendChild(b); }
-    root.appendChild(actions);
-  }
+  /* ⚠ `grid` / `sect` / `tbl` / `footer` ONT ÉTÉ REMONTÉS dans `FormBase` (protégés) et restent utilisables
+     ici À L'IDENTIQUE par héritage — aucun point d'appel n'a bougé. Motif : ce sont les primitives de TOUTE
+     fiche détail, et `SubEquipmentForms` (hors de cette chaîne d'héritage, comme `FaceEditor`) en a besoin ;
+     les laisser `private` ici aurait obligé à les dupliquer (principe n°3). */
+
   /** Étiquette « équipement : port » résolue (— si absent). */
   private static portRef(store: Store, portId: string | null): string {
     const p: any = portId ? store.get("ports", portId) : null; if (!p) return this.MUTED;
@@ -84,6 +65,9 @@ export class DetailForms extends IpamForms {
       // → accessibles ici en statique. Leur ABSENCE de ce dispatcher rendait le clic sur un ÉQUIPEMENT lié
       // d'une intervention muet (openTargetDetail → detail() → false silencieux), alors que VM/spare ouvraient.
       case "equipments": this.equipmentDetail(store, host, id, onChanged); return true;
+      // Déclarer la fiche ICI ne sert pas qu'au routage : c'est ce qui rend la collection ouvrable par
+      // `openTargetDetail` (app/main.ts) — donc par un lien d'intervention, sans travail supplémentaire.
+      case "subEquipments": SubEquipmentForms.detail(store, host, id, onChanged); return true;
       case "racks": this.rackDetail(store, host, id, onChanged); return true;
       case "cables": this.cableDetail(store, host, id, onChanged); return true;
       case "cableBundles": this.cableBundleDetail(store, host, id, onChanged); return true;
@@ -457,6 +441,12 @@ export class DetailForms extends IpamForms {
       return [`${Html.escape(e.name || I18n.t("lists.ph.equipment"))}${primary ? ` <span class="pill">${I18n.t("detail.group.primary")}</span>` : ""}`, `<span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span>`, EntityViz.equipmentLocationShort(store, e), `<span class="cell-actions">${view}</span>`];
     }), I18n.t("detail.group.membersEmpty"));
     tw?.querySelectorAll("[data-eq-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.equipmentDetail(store, host, (el as HTMLElement).dataset.eqView!, onChanged); });
+    // SOUS-ÉQUIPEMENTS membres : ils portent des groupes exactement comme les équipements (parité stricte de
+    // la spec). Sans cette section, les mettre dans un groupe serait une écriture sans aucune lecture — la
+    // fonctionnalité existerait sans se voir. Section MASQUÉE s'il n'y en a aucun (cas de tous les documents
+    // actuels) : on n'ajoute pas un bloc vide à une fiche déjà dense.
+    const subEqs = store.subEquipmentsOfGroup(id);
+    if (subEqs.length) SubEquipmentForms.attachSection(store, host, root, subEqs, { reopen: () => this.groupDetail(store, host, id, onChanged) });
     AuditLine.attach(root, g, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.group(store, host, id, onChanged));
     host.openModal({ title: I18n.t("detail.group.title"), subtitle: Html.escape(g.label || ""), body: root, hideFooter: true, wide: true });

@@ -610,6 +610,16 @@ const SPEC_FIELDS = {
       // existence — c'est l'énoncé même du besoin. ⚠ Divergence VOULUE avec `aggregates.equipment_id`, qui est
       // nullable par héritage historique et non par décision ; ne pas « harmoniser » les deux.
       equipment_id: { type: "string", required: true, ref: "equipments" },
+      // IDENTITÉ MATÉRIELLE (D5) : le NUMÉRO DE SÉRIE est souvent la raison même d'inventorier un drive
+      // (SAV, RMA, garantie constructeur). ⚠ Les champs d'ACHAT et de GARANTIE sont VOLONTAIREMENT absents :
+      // sans onglet de listing (D2), des dates qu'on ne peut ni trier ni filtrer seraient de la saisie morte.
+      brand:        { type: "string", default: "" },
+      model:        { type: "string", default: "" },
+      serial:       { type: "string", default: "" },
+      // REPÈRE dans le maître (D6) : TEXTE LIBRE (« Étagère A / baie 3 »), jamais une coordonnée. C'est une
+      // ÉTIQUETTE, pas une géométrie — la contrainte « aucun placement » tient. Ne pas le transformer en
+      // index numérique contraint : ce serait rouvrir la porte que la collection séparée referme.
+      slot:         { type: "string", default: "", trim: true },
       // ⚠ `default: ""` DÉLIBÉRÉ, et non décoratif : sans lui, `normalizeField` renvoie un `null` explicite
       // TEL QUEL (il n'est ni `required`, ni `nullable`, ni pourvu d'un défaut) et ce `null` traverse
       // normalisation ET validation alors que le type dérivé promet `string`. C'est l'exposition que compte le

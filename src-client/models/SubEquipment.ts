@@ -16,6 +16,15 @@ export class SubEquipment extends Entity implements Records.SubEquipment {
   name: string;
   /** FK → equipments : le MAÎTRE. Obligatoire — sans lui l'objet n'a aucune existence. */
   equipment_id: string;
+  /** Marque. */
+  brand: string;
+  /** Modèle. */
+  model: string;
+  /** Numéro de série — souvent la raison même d'inventorier un sous-équipement (SAV, RMA, garantie). */
+  serial: string;
+  /** Repère dans le maître, TEXTE LIBRE (« Étagère A / baie 3 »). ⚠ Étiquette, jamais une coordonnée :
+      un sous-équipement n'a aucun placement (cf. la spec partagée). */
+  slot: string;
   /** Description libre. */
   description: string;
   /** FK → groups : groupe PRIMAIRE (parité Equipment / Vm). `null` = aucun. TOUJOURS ∈ `group_ids`. */
@@ -29,6 +38,10 @@ export class SubEquipment extends Entity implements Records.SubEquipment {
     // propre, avant même la re-sauvegarde qui nettoie le stocké (parité avec la normalisation partagée).
     this.name = (p.name || "").trim();
     this.equipment_id = p.equipment_id || "";
+    this.brand = p.brand || "";
+    this.model = p.model || "";
+    this.serial = p.serial || "";
+    this.slot = (p.slot || "").trim();
     this.description = p.description || "";
     // GROUPES : parité STRICTE avec Equipment et Vm — le primaire est TOUJOURS membre de group_ids
     // (invariant partagé), en TÊTE de liste. Pas de migration legacy à prévoir ici (la collection est

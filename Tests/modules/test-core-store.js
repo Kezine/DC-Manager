@@ -238,6 +238,18 @@ module.exports = async () => {
     ck.eq(s.equipmentsOfGroup(grp.id).some((e) => e.id === multiEq.id), true, "equipmentsOfGroup : trouve par groupe PRIMAIRE");
     ck.eq(s.equipmentsOfGroup(g2.id).some((e) => e.id === multiEq.id), true, "equipmentsOfGroup : trouve par groupe SECONDAIRE");
     ck.eq(JSON.stringify(s.equipmentGroupIds(multiEq)), JSON.stringify([grp.id, g2.id]), "equipmentGroupIds : primaire + secondaires");
+    // SOUS-ÉQUIPEMENTS : mêmes champs de groupe, donc MÊME règle d'appartenance. `equipmentGroupIds` DÉLÈGUE
+    // désormais à `groupIdsOf` (source unique) — sans cette délégation, la règle aurait été recopiée une 2ᵉ fois.
+    const seMaster = await s.create("equipments", { name: "Librairie" });
+    const se1 = await s.create("subEquipments", { name: "Drive 2", equipment_id: seMaster.id, group_id: grp.id, group_ids: [grp.id, g2.id] });
+    const se2 = await s.create("subEquipments", { name: "Drive 1", equipment_id: seMaster.id });
+    ck.eq(JSON.stringify(s.groupIdsOf(se1)), JSON.stringify([grp.id, g2.id]), "groupIdsOf : marche sur un SOUS-ÉQUIPEMENT (règle non liée à la collection)");
+    ck.eq(JSON.stringify(s.groupIdsOf(multiEq)), JSON.stringify(s.equipmentGroupIds(multiEq)), "groupIdsOf ≡ equipmentGroupIds (la délégation ne change rien)");
+    ck.eq(s.subEquipmentsOfGroup(grp.id).some((x) => x.id === se1.id), true, "subEquipmentsOfGroup : trouve par groupe PRIMAIRE");
+    ck.eq(s.subEquipmentsOfGroup(g2.id).some((x) => x.id === se1.id), true, "subEquipmentsOfGroup : trouve par groupe SECONDAIRE");
+    ck.eq(s.subEquipmentsOfGroup(g2.id).some((x) => x.id === se2.id), false, "subEquipmentsOfGroup : ignore un sous-équipement SANS groupe");
+    // Tri par NOM : c'est la seule identité d'un sous-équipement (ni type, ni position) — donc le seul ordre stable.
+    ck.eq(JSON.stringify(s.subEquipmentsOf(seMaster.id).map((x) => x.name)), JSON.stringify(["Drive 1", "Drive 2"]), "subEquipmentsOf : triés par NOM, pas par ordre de création");
     // RETRAIT DE BAIE (équipement U) : la convention « pool » = placement_mode "rack" + rack_id/rack_u null.
     // T1 corrigé (teste rack_u, pas placement_mode) → le retrait N'EST PLUS silencieusement rejeté.
     const racked = await s.create("equipments", { name: "U-eq", rack_id: rk2.id, placement_mode: "rack", rack_u: 30 });

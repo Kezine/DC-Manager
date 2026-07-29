@@ -41,6 +41,7 @@ import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais a
 import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
 import { FaceEditor } from "./FaceEditor";
+import { SubEquipmentForms } from "./SubEquipmentForms";   // section « Sous-équipements » de la fiche (import croisé différé, cf. son en-tête)
 import { PerspectiveEditor } from "../../ui/PerspectiveEditor";
 import { StitchEditor } from "../../ui/StitchEditor";
 import { Download } from "../../core/Download";
@@ -172,6 +173,13 @@ export class EquipmentForms extends FormBase {
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("equipment.detail.colCable")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("lists.col.link")}</th><th>${I18n.t("lists.col.network")}</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
     } else { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = I18n.t("equipment.detail.noCables"); root.appendChild(e); }
+
+    // SOUS-ÉQUIPEMENTS : contenu LOGIQUE de cet équipement (drives d'une librairie, cartes d'un châssis).
+    // Section TOUJOURS rendue, même vide, contrairement aux spares : c'est ici qu'on en CRÉE un (« + … »),
+    // et l'absence de la section rendrait la fonctionnalité inatteignable sur un équipement neuf.
+    SubEquipmentForms.attachSection(store, host, root, store.subEquipmentsOf(eq.id), {
+      addTo: eq.id, reopen: () => this.equipmentDetail(store, host, eq.id, onChanged),
+    });
 
     // spares (pièces de rechange) affectés à cet équipement
     const spares = store.sparesOfEquipment(eq.id);

@@ -117,6 +117,37 @@ export class FormBase {
   protected static dd(html: string): HTMLElement { const e = document.createElement("div"); e.className = "dd"; e.innerHTML = html; return e; }
   /** Mode VISUALISEUR autonome (lecture seule) ? → on retire les entrées d'ÉDITION des fiches (façade, « Modifier »…). */
   protected static isViewer(): boolean { return typeof document !== "undefined" && document.body.classList.contains("viewer-mode"); }
+
+  /* ---- primitives de FICHE DÉTAIL, communes à toutes les fiches ----
+     Elles vivaient `private` dans `DetailForms` ; elles sont ici parce que `SubEquipmentForms` en a besoin
+     sans appartenir à cette chaîne d'héritage (même position que `FaceEditor` : étend `FormBase`, appelé par
+     son nom). Les remonter était le seul moyen de ne pas les dupliquer (principe n°3) ; les points d'appel de
+     `DetailForms` ne changent pas d'un caractère, ils les héritent. */
+  /** Grille clé→valeur (valeurs = HTML déjà échappé par l'appelant). */
+  protected static grid(pairs: Array<[string, string]>): HTMLElement {
+    const g = document.createElement("div"); g.className = "detail-grid";
+    pairs.forEach(([k, v]) => { g.appendChild(this.dt(k)); g.appendChild(this.dd(v)); });
+    return g;
+  }
+  /** Intercalaire de section (avec compte optionnel). */
+  protected static sect(root: HTMLElement, label: string): void {
+    const d = document.createElement("div"); d.className = "section-divider"; d.textContent = label; root.appendChild(d);
+  }
+  /** Tableau compact (cellules = HTML). `empty` affiché à la place si aucune ligne. */
+  protected static tbl(root: HTMLElement, headers: string[], rows: string[][], empty: string): HTMLElement | null {
+    if (!rows.length) { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = empty; root.appendChild(e); return null; }
+    const tw = document.createElement("div"); tw.className = "table-wrap";
+    const head = headers.map((h) => `<th>${Html.escape(h)}</th>`).join("");
+    const body = rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("");
+    tw.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    root.appendChild(tw); return tw;
+  }
+  /** Pied de fiche : « Modifier » (si un éditeur est fourni et hors mode visualiseur). */
+  protected static footer(root: HTMLElement, edit?: () => void): void {
+    const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
+    if (edit && !this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = edit; actions.appendChild(b); }
+    root.appendChild(actions);
+  }
   /** Bits de localisation d'un équipement (hérités du rack / de la salle, ou saisis). */
   protected static equipLocationBits(store: Store, e: any): string[] {
     const bits = (loc: any, fl: any, rm: any) => [store.siteLabel(loc || ""), fl, rm].filter((x) => x && x !== "—");

@@ -1637,6 +1637,17 @@ module.exports = async () => {
     ck.eq(JSON.stringify(refsToSelf), JSON.stringify([]), "sous-équip. : aucune FK ne le vise encore (ports.sub_equipment_id = lot 4)");
     ck.eq(Object.values(Validation.COLLECTION_SPECS.subEquipments.fields).some((f) => f.ref === "subEquipments"), false, "sous-équip. : AUCUNE FK auto-référente (hiérarchie plate, pas de garde anti-cycle à écrire)");
 
+    // IDENTITÉ MATÉRIELLE + REPÈRE (lot 3, D5/D6) : chaînes libres à DÉFAUT "" — donc pas de null silencieux.
+    ck.eq(errs({ ...ok, brand: "Quantum", model: "SL-X", serial: "SN-42", slot: "Étagère A / 3" }).length, 0, "sous-équip. : marque/modèle/série/repère → valides");
+    ["brand", "model", "serial", "slot"].forEach((field) => {
+      ck.eq(V.normalizeRecord("subEquipments", { ...ok, [field]: null })[field], "", "sous-équip. : « " + field + " » null → \"\"");
+    });
+    // Le REPÈRE est TRIMÉ, comme le nom : spec ET classe doivent s'accorder (elles ont divergé une fois).
+    ck.eq(V.normalizeRecord("subEquipments", { ...ok, slot: "  Étagère A  " }).slot, "Étagère A", "sous-équip. : repère trimé à la normalisation");
+    ck.eq(new (EntityRegistry.classOf("subEquipments"))({ ...ok, slot: "  Étagère A  " }).slot, "Étagère A", "sous-équip. : repère trimé aussi par la CLASSE (accord spec ⇄ classe)");
+    // ⚠ Le repère est un TEXTE, jamais une coordonnée : aucune contrainte de format, aucune borne.
+    ck.eq(errs({ ...ok, slot: "n'importe quoi / 3 · B" }).length, 0, "sous-équip. : repère = texte LIBRE (aucun format imposé)");
+
     // GROUPES (lot 2) — PARITÉ STRICTE avec equipments/vms : primaire ⊂ group_ids (T1d), 3ᵉ copie de la règle.
     ck.eq(errs({ ...ok, group_id: "G1", group_ids: ["G1", "G2"] }).length, 0, "sous-équip. : primaire membre de group_ids → valide");
     ck.eq(errs({ ...ok, group_id: "G1", group_ids: ["G2"] }).some((e) => e.path === "group_id" && e.code === "invariant"), true, "sous-équip. : primaire ABSENT de group_ids → invariant (parité T1d)");

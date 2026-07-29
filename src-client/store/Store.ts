@@ -630,11 +630,22 @@ export class Store {
     this._byFk("equipments", "group_id", groupId).forEach((e) => { if (!out.includes(e)) out.push(e); });
     return out.filter((e) => this.equipmentGroupIds(e).includes(groupId));
   }
-  /** Tous les groupes d'un équipement (primaire inclus), dédupliqués — source unique pour l'appartenance. */
-  equipmentGroupIds(eq: any): string[] {
-    let ids: string[] = Array.isArray(eq && eq.group_ids) ? eq.group_ids.filter((x: any): x is string => typeof x === "string" && !!x) : [];
-    if (eq && eq.group_id) ids = [eq.group_id, ...ids.filter((x) => x !== eq.group_id)];   // primaire TOUJOURS en tête
+  /** Tous les groupes d'un enregistrement PORTEUR DE GROUPES (primaire inclus), dédupliqués, primaire en TÊTE.
+      SOURCE UNIQUE de l'appartenance : la règle ne dépend pas de la collection, seulement du couple de champs
+      `group_id`/`group_ids` — que portent aujourd'hui `equipments`, `vms` et `subEquipments` (parité stricte,
+      cf. la spec partagée). L'écrire une fois par collection l'aurait fait diverger. */
+  groupIdsOf(record: any): string[] {
+    let ids: string[] = Array.isArray(record && record.group_ids) ? record.group_ids.filter((x: any): x is string => typeof x === "string" && !!x) : [];
+    if (record && record.group_id) ids = [record.group_id, ...ids.filter((x) => x !== record.group_id)];   // primaire TOUJOURS en tête
     return [...new Set(ids)];
+  }
+  /** Tous les groupes d'un équipement — DÉLÈGUE à `groupIdsOf`. Nom conservé pour ses nombreux points d'appel. */
+  equipmentGroupIds(eq: any): string[] { return this.groupIdsOf(eq); }
+  /** Sous-équipements MEMBRES d'un groupe (primaire OU secondaire) — même forme que `equipmentsOfGroup`. */
+  subEquipmentsOfGroup(groupId: string): any[] {
+    const out = this._byFk("subEquipments", "group_ids", groupId);
+    this._byFk("subEquipments", "group_id", groupId).forEach((se) => { if (!out.includes(se)) out.push(se); });
+    return out.filter((se) => this.groupIdsOf(se).includes(groupId)).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }
   portsOfType(portTypeId: string): any[] { return this._byFk("ports", "port_type_id", portTypeId); }
   cablesOfType(cableTypeId: string): any[] { return this._byFk("cables", "cable_type_id", cableTypeId); }
