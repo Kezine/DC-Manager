@@ -1,7 +1,7 @@
 import type { Store } from "../store";
 import { Resolver3D } from "./Resolver3D";
 import { FloorLayout } from "./FloorLayout";
-import type { MultiLayout, RoomPlacement } from "./FloorLayout";
+import type { MultiLayout, RoomPlacement, WorldEnd } from "./FloorLayout";
 import { Waypoint } from "../models/Waypoint";
 
 /** Point monde (mm) : X = largeur, Y = profondeur, Z = hauteur. */
@@ -72,13 +72,10 @@ export class CableRouting {
     return { pts, linePts, straight, stubAt };
   }
 
-  /** Normale d'un bout résolu (repère LOCAL salle) tournée dans le repère MONDE de sa salle (W affine). */
-  worldEndNormal(room: RoomPlacement, res: any): Vec3 | null {
-    if (!res || !res.n) return null;
-    const w0 = FloorLayout.roomToWorld(room, res as Vec3);
-    const w1 = FloorLayout.roomToWorld(room, { x: res.x + res.n.x, y: res.y + res.n.y, z: res.z + res.n.z });
-    return { x: w1.x - w0.x, y: w1.y - w0.y, z: w1.z - w0.z };
-  }
+  /* ⚠ `worldEndNormal(room, res)` VIVAIT ICI. Elle tournait la normale d'un bout en composant DEUX
+     `roomToWorld` — donc elle appliquait, dans le TRACEUR, la transformée d'un CONTENEUR. Elle est
+     devenue `FloorLayout.roomDirToWorld`, à l'endroit qui possède déjà cette transformée, et le
+     traceur ne reçoit plus que des extrémités DÉJÀ EN MONDE (doctrine §6.30). */
 
   /** Points de passage TAGUÉS d'une liaison sur une suite de waypoints (répartition conduit incluse) — mécanique
       UNIQUE partagée par les câbles ET les faisceaux (TrunkRouting), en intra-salle comme sur un stub. `linkId`
@@ -180,13 +177,25 @@ export class CableRouting {
     return via;
   }
 
-  /** Ligne MONDE d'une liaison inter-salles (câble OU faisceau) : bouts locaux `a`/`b` (résolus dans `ra`/`rb`)
-      portés au monde (normales tournées), points de passage de la route, tracé. Mécanique UNIQUE câbles ⇄ faisceaux. */
-  worldLine(m: MultiLayout, roomById: Map<string, RoomPlacement>, ra: RoomPlacement, rb: RoomPlacement, a: any, b: any, routeSteps: any[], linkId: string, portNormal: boolean): { pts: Vec3[]; linePts: Vec3[]; straight: Set<number>; stubAt: Set<number> } {
-    const aw: any = FloorLayout.roomToWorld(ra, a as Vec3), bw: any = FloorLayout.roomToWorld(rb, b as Vec3);
-    aw.n = this.worldEndNormal(ra, a); bw.n = this.worldEndNormal(rb, b);
-    const via = this.buildWorldVia(routeSteps, roomById, m, aw, bw, linkId);
-    return this.cableLine(aw, bw, via, portNormal);
+  /** Ligne MONDE d'une liaison inter-conteneurs (câble OU faisceau) : extrémités DÉJÀ EXPRIMÉES EN MONDE,
+      points de passage de la route, tracé. Mécanique UNIQUE câbles ⇄ faisceaux.
+
+      ⚠ CE QUI A CHANGÉ, ET POURQUOI (doctrine §6.30, décision D1). Cette méthode prenait deux bouts en
+      LOCAL SALLE plus la transformée de LEUR salle (`ra`/`rb`), et les portait au monde elle-même. Elle
+      exigeait donc que toute extrémité de liaison VIVE DANS UNE SALLE — ce qu'un équipement posé sur un
+      ÉTAGE ne fait pas, et ce qui bloquait son câblage. Elle ne connaît plus la NATURE des conteneurs :
+      c'est l'APPELANT qui résout chaque bout dans le sien (`FloorLayout.roomEndToWorld` pour une salle,
+      `Resolver3D.resolvePortWorld3D` pour un étage). Ce n'est pas un contrôle perdu : la grammaire des
+      exits vit dans `CableRouteAnalyzer`, dont on ne fait ici que CONSOMMER le verdict (`r.valid`,
+      `r.hasExits`). Et c'est le traitement que `buildWorldVia` réservait DÉJÀ aux points de PASSAGE —
+      un waypoint d'étage part droit en monde, un waypoint de salle passe par sa salle ; seules les
+      extrémités étaient restées câblées en dur sur « salle ».
+
+      ⚠ `m` et `roomById` RESTENT, et ce n'est pas une inconséquence : ils servent aux points de PASSAGE
+      (`buildWorldVia`), pas aux extrémités. Les généraliser est le lot de la grammaire de route. */
+  worldLine(m: MultiLayout, roomById: Map<string, RoomPlacement>, aWorld: WorldEnd, bWorld: WorldEnd, routeSteps: any[], linkId: string, portNormal: boolean): { pts: Vec3[]; linePts: Vec3[]; straight: Set<number>; stubAt: Set<number> } {
+    const via = this.buildWorldVia(routeSteps, roomById, m, aWorld, bWorld, linkId);
+    return this.cableLine(aWorld, bWorld, via, portNormal);
   }
 
   /** Câbles inter-salles : route valide avec exits, 2 bouts résolus dans des salles AFFICHÉES. pts en MONDE. */
@@ -200,7 +209,10 @@ export class CableRouting {
       if (!ra || !rb) return;
       const a = this.resolver.resolvePort3D(c.from_port_id, r.dcA), b = this.resolver.resolvePort3D(c.to_port_id, r.dcB);
       if (!a || !b) return;
-      const sp = this.worldLine(m, roomById, ra, rb, a, b, r.steps, c.id, portNormal);
+      // Chaque bout est porté au MONDE par SON conteneur AVANT d'entrer dans le tracé (§6.30). Ici les deux
+      // conteneurs sont des salles, parce que `cableRoute` ne rend encore que des salles (`dcA`/`dcB`) : la
+      // généralisation de l'analyseur est le lot suivant, et elle n'aura plus à toucher au tracé.
+      const sp = this.worldLine(m, roomById, FloorLayout.roomEndToWorld(ra, a), FloorLayout.roomEndToWorld(rb, b), r.steps, c.id, portNormal);
       out.push({ cable: c, a, b, pts: sp.pts, linePts: sp.linePts, straight: sp.straight, stubAt: sp.stubAt });
     });
     return out;

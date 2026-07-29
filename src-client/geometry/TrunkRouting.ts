@@ -102,7 +102,9 @@ export class TrunkRouting {
       if (!ra || !rb) return;
       const a = this.endpoint3D(bundle, sideStart, r.startDc), b = this.endpoint3D(bundle, sideEnd, r.endDc);
       if (!a || !b) return;
-      const sp = this.cables.worldLine(m, roomById, ra, rb, a, b, r.steps, bundle.id, portNormal);
+      // Bouts portés au MONDE par LEUR conteneur avant le tracé — parité STRICTE avec les câbles (§6.30) :
+      // la mécanique de polyligne reste UNIQUE, et c'est l'appelant qui sait dans quel conteneur il résout.
+      const sp = this.cables.worldLine(m, roomById, FloorLayout.roomEndToWorld(ra, a), FloorLayout.roomEndToWorld(rb, b), r.steps, bundle.id, portNormal);
       out.push({ bundle, pts: sp.pts, linePts: sp.linePts, straight: sp.straight, stubAt: sp.stubAt });
     });
     return out;

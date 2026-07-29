@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -1685,6 +1685,148 @@ module.exports = async () => {
     await s.update("sites", ans.id, { depth_mm: null });
     const apresRefus = bandeDe(fl.multiLayout(null, {}));
     ck.eq(apresRefus.x1 - apresRefus.x0, 20000, "demi-dimension REFUSÉE à l'écriture → l'emprise déclarée reste inchangée");
+  }
+  });
+
+  await section("FloorLayout : le conteneur SALLE sait tourner une NORMALE (roomDirToWorld / roomEndToWorld — §6.30)", async () => {
+  {
+    // Aucun layout ici, et c'est VOULU : le `RoomPlacement` est écrit À LA MAIN, donc toutes les valeurs
+    // attendues plus bas se dérivent du modèle au crayon (centre de salle (3000 ; 2000), origine monde
+    // (10000 ; 20000 ; 3000)) au lieu d'être recopiées d'une exécution. Ce sont des ATTENTES, pas des
+    // empreintes. La composition avec le layout, elle, est vérifiée dans la section `worldLine` suivante.
+    const approx = (a, b, name, eps) => ck(Math.abs(a - b) <= (eps || 1e-9), name + "  (attendu ≈" + b + ", obtenu " + a + ")");
+    const salle = (deg) => ({ dc: { width_mm: 6000, depth_mm: 4000 }, off: { x: 10000, y: 20000, z: 3000 }, o: deg * Math.PI / 180, level: 0 });
+    const local = { x: 1500, y: 500, z: 700 };            // → écart au centre : (−1500 ; −1500)
+    const normaleAvant = { x: 0, y: -1, z: 0 };           // normale sortante d'une FAÇADE (−Y local)
+    // Point : le lacet de la salle fait tourner l'écart au centre autour de `off`.
+    const ptAttendu = { 0: [8500, 18500], 90: [11500, 18500], 180: [11500, 21500], 270: [8500, 21500] };
+    // Normale : ROTATION SEULE — jamais de translation, jamais d'origine de salle.
+    const nAttendue = { 0: [0, -1], 90: [1, 0], 180: [0, 1], 270: [-1, 0] };
+    [0, 90, 180, 270].forEach((deg) => {
+      const room = salle(deg);
+      const bout = FloorLayout.roomEndToWorld(room, { x: local.x, y: local.y, z: local.z, n: normaleAvant });
+      approx(bout.x, ptAttendu[deg][0], "roomEndToWorld " + deg + "° : x MONDE");
+      approx(bout.y, ptAttendu[deg][1], "roomEndToWorld " + deg + "° : y MONDE");
+      approx(bout.z, 3700, "roomEndToWorld " + deg + "° : z = z local + socle du niveau");
+      approx(bout.n.x, nAttendue[deg][0], "roomDirToWorld " + deg + "° : normale x");
+      approx(bout.n.y, nAttendue[deg][1], "roomDirToWorld " + deg + "° : normale y");
+      // ⚠ LE VERROU QUI MORD sur la faute la plus probable : une normale TRANSLATÉE par l'origine de la
+      // salle reste « plausible » (elle pointe encore quelque part) mais mesure des milliers de mm. Sa
+      // NORME est donc le contrôle décisif, bien plus que ses composantes prises une à une.
+      approx(Math.hypot(bout.n.x, bout.n.y, bout.n.z), 1, "roomDirToWorld " + deg + "° : la normale reste UNITAIRE (aucune translation)");
+      approx(bout.n.z, 0, "roomDirToWorld " + deg + "° : un lacet ne bascule jamais une normale (z inchangé)");
+      // ÉQUIVALENCE des deux mesures : le composite ne doit pas dériver de la primitive POINT dont il est
+      // fait. Épinglé à ses seules constantes, il pourrait s'en écarter sans que rien ne rougisse.
+      const pt = FloorLayout.roomToWorld(room, local);
+      ck(bout.x === pt.x && bout.y === pt.y && bout.z === pt.z, "roomEndToWorld " + deg + "° : le POINT est EXACTEMENT celui de roomToWorld (une seule transformée)");
+    });
+    // Normale VERTICALE (face du dessus d'un équipement libre) : insensible au lacet, aux quatre orientations.
+    [0, 90, 180, 270].forEach((deg) => {
+      const n = FloorLayout.roomEndToWorld(salle(deg), { x: local.x, y: local.y, z: local.z, n: { x: 0, y: 0, z: 1 } }).n;
+      approx(Math.hypot(n.x, n.y), 0, "roomDirToWorld " + deg + "° : normale VERTICALE non tournée (composantes horizontales nulles)");
+      approx(n.z, 1, "roomDirToWorld " + deg + "° : normale VERTICALE conservée");
+    });
+    // Bout SANS normale → `n` nul (le tracé se passe alors d'amorce ⊥) : comportement conservé du traceur.
+    ck.eq(FloorLayout.roomEndToWorld(salle(0), { x: 1, y: 2, z: 3 }).n, null, "roomEndToWorld : bout sans normale → n = null");
+    ck.eq(FloorLayout.roomEndToWorld(salle(0), { x: 1, y: 2, z: 3, n: null }).n, null, "roomEndToWorld : normale explicitement nulle → n = null");
+    // DISCRIMINATION (anti-vacuité) : sans elle, les assertions ci-dessus passeraient aussi si la
+    // transformée était l'identité. Elle prouve que « local » et « monde » sont bien deux repères.
+    const l = FloorLayout.roomEndToWorld(salle(90), { x: local.x, y: local.y, z: local.z, n: normaleAvant });
+    ck(Math.hypot(l.x - local.x, l.y - local.y, l.z - local.z) > 1000, "roomEndToWorld : le point MONDE diffère franchement du point LOCAL (le détecteur n'est pas vide)");
+  }
+  });
+
+  await section("CableRouting.worldLine : les BOUTS entrent DÉJÀ EN MONDE (§6.30 — parité figée sur HEAD)", async () => {
+  {
+    /* Lot 4 du chantier « câblage des équipements d'étage » (décision D1). `worldLine` recevait deux bouts
+       en LOCAL SALLE plus la transformée de LEUR salle ; elle reçoit des `WorldEnd`. Ce lot est un REFACTOR
+       À COMPORTEMENT CONSTANT : les valeurs figées ci-dessous ont été mesurées sur le code RÉGÉNÉRÉ DEPUIS
+       GIT (`git show HEAD:src-client/geometry/CableRouting.ts`, avant bascule) sur EXACTEMENT cette scène,
+       puis écrites EN DUR. Elles ne comparent donc pas la fonction à elle-même (piège du lot 2 du chantier
+       conteneur) : elles disent ce que le tracé VALAIT avant, et il doit continuer de le valoir. */
+    const s = await makeStore();
+    const dcA = await s.create("datacenters", { name: "A", width_mm: 6000, depth_mm: 4000, location: "", floor: "0", floor_x: 0, floor_y: 0, floor_orientation: 90 });
+    const dcB = await s.create("datacenters", { name: "B", width_mm: 5000, depth_mm: 7000, location: "", floor: "1", floor_x: 2000, floor_y: 1000, floor_orientation: 180 });
+    const rkA = await s.create("racks", { name: "RA", u_count: 42, datacenter_id: dcA.id, dc_x: 1200, dc_y: 900, orientation: 0 });
+    const rkB = await s.create("racks", { name: "RB", u_count: 42, datacenter_id: dcB.id, dc_x: 2500, dc_y: 3000, orientation: 270 });
+    const eqA = await s.create("equipments", { name: "EA", placement_mode: "rack", rack_id: rkA.id, rack_u: 5 });
+    const eqB = await s.create("equipments", { name: "EB", placement_mode: "rack", rack_id: rkB.id, rack_u: 9 });
+    const pA = (await s.create("ports", { equipment_id: eqA.id, name: "pa", face_x: 0.3, face_y: 0.7, face_side: "front" })).id;
+    const pB = (await s.create("ports", { equipment_id: eqB.id, name: "pb", face_x: 0.6, face_y: 0.2, face_side: "front" })).id;
+    const exA = await s.create("waypoints", { wp_type: "exit", datacenter_id: dcA.id, dc_x: 100, dc_y: 200 });
+    const exB = await s.create("waypoints", { wp_type: "exit", datacenter_id: dcB.id, dc_x: 300, dc_y: 400 });
+    await s.create("cables", { name: "inter", from_port_id: pA, to_port_id: pB, waypoint_ids: [exA.id, exB.id] });
+    const paA = await s.create("equipments", { name: "PA", type: "patch_panel", placement_mode: "rack", rack_id: rkA.id, rack_u: 20 });
+    const paB = await s.create("equipments", { name: "PB", type: "patch_panel", placement_mode: "rack", rack_id: rkB.id, rack_u: 22 });
+    await s.create("cableBundles", { name: "T", endpoint_a_equipment_id: paA.id, endpoint_b_equipment_id: paB.id, waypoint_ids: [exA.id, exB.id] });
+
+    const floor = new FloorLayout(s), resolver = new Resolver3D(s);
+    const routing = new CableRouting(s, resolver, floor), trunks = new TrunkRouting(s, resolver, routing);
+    const m = floor.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcB.id]) });
+    const route = routing.interDcRoutes(m, true)[0], trunk = trunks.interDcTrunks(m, true)[0];
+    ck(!!route && !!trunk, "scène : 1 câble ET 1 faisceau inter-salles tracés");
+
+    const memePoint = (p, q) => p && q && p.x === q.x && p.y === q.y && p.z === q.z;
+    const memeTrace = (obtenus, attendus, quoi) => {
+      ck.eq(obtenus.length, attendus.length, quoi + " : nombre de points du tracé");
+      ck(obtenus.every((p, i) => memePoint(p, attendus[i])), quoi + " : TOUS les points identiques à la valeur d'avant bascule");
+    };
+    // ---- VALEURS FIGÉES (mesurées sur le code d'avant bascule, régénéré par `git show HEAD:`) ----
+    memeTrace(route.linePts, [
+      { x: 3603, y: 1109.48, z: 241.135 },      // bout A monde
+      { x: 3623, y: 1109.48, z: 241.135 },      // amorce ⊥ de 20 mm — c'est ELLE qui atteste de la NORMALE monde
+      { x: 3800, y: 100, z: 2400 },             // exit salle A
+      { x: 6700, y: 7600, z: 6266.9 },          // exit salle B (autre étage → z du niveau 1)
+      { x: 5023, y: 5045.26, z: 4308.06 },      // amorce ⊥ du bout B
+      { x: 5003, y: 5045.26, z: 4308.06 },      // bout B monde
+    ], "câble inter-salles");
+    ck.eq(JSON.stringify(Array.from(route.straight)), JSON.stringify([0, 4]), "câble : segments DROITS inchangés");
+    ck.eq(JSON.stringify(Array.from(route.stubAt)), JSON.stringify([1, 4]), "câble : indices d'AMORCE inchangés");
+    memeTrace(route.pts, [
+      { x: 3603, y: 1109.48, z: 241.135 }, { x: 3800, y: 100, z: 2400 },
+      { x: 6700, y: 7600, z: 6266.9 }, { x: 5003, y: 5045.26, z: 4308.06 },
+    ], "câble : pastilles (pts)");
+    memeTrace(trunk.linePts, [
+      { x: 2603, y: 1200, z: 916.7750000000001 },
+      { x: 2583, y: 1200, z: 916.7750000000001 },
+      { x: 3800, y: 100, z: 2400 },
+      { x: 6700, y: 7600, z: 6266.9 },
+      { x: 3983, y: 5000, z: 4872.575 },
+      { x: 4003, y: 5000, z: 4872.575 },
+    ], "faisceau inter-salles");
+    ck.eq(JSON.stringify(Array.from(trunk.straight)), JSON.stringify([0, 4]), "faisceau : segments DROITS inchangés");
+    ck.eq(JSON.stringify(Array.from(trunk.stubAt)), JSON.stringify([1, 4]), "faisceau : indices d'AMORCE inchangés");
+    // MÉCANIQUE UNIQUE câbles ⇄ faisceaux : les deux passent par le MÊME `worldLine`, donc les points de
+    // PASSAGE d'une même route sont les mêmes objets géométriques. Une bascule qui n'aurait migré qu'un
+    // des deux appelants romprait cette égalité.
+    ck(memePoint(route.linePts[2], trunk.linePts[2]) && memePoint(route.linePts[3], trunk.linePts[3]), "worldLine PARTAGÉ : câble et faisceau traversent les MÊMES points de passage");
+
+    // ---- ÉQUIVALENCE : le tracé monde et la résolution locale racontent la même chose ----
+    // Le bout A du tracé doit valoir l'image du port LOCAL par `roomToWorld` — la primitive de point que ce
+    // lot n'a PAS touchée. C'est le contrôle qui prouve que le repère n'a pas glissé, indépendamment des
+    // constantes ci-dessus (deux MESURES comparées entre elles, pas chacune à un nombre écrit à la main).
+    const roomA = m.rooms.find((x) => x.dc.id === dcA.id), roomB = m.rooms.find((x) => x.dc.id === dcB.id);
+    const locA = resolver.resolvePort3D(pA, dcA.id), locB = resolver.resolvePort3D(pB, dcB.id);
+    ck(memePoint(route.linePts[0], FloorLayout.roomToWorld(roomA, locA)), "bout A : le tracé part EXACTEMENT du port local porté au monde par SA salle");
+    ck(memePoint(route.linePts[5], FloorLayout.roomToWorld(roomB, locB)), "bout B : idem pour l'autre salle (chaque bout par SON conteneur)");
+    // La NORMALE monde attendue est écrite ici avec la formule que portait HEAD (différence de deux images
+    // par `roomToWorld`) : l'expression a quitté le traceur, l'ATTENTE la garde.
+    const w0 = FloorLayout.roomToWorld(roomA, locA);
+    const w1 = FloorLayout.roomToWorld(roomA, { x: locA.x + locA.n.x, y: locA.y + locA.n.y, z: locA.z + locA.n.z });
+    const nHead = { x: w1.x - w0.x, y: w1.y - w0.y, z: w1.z - w0.z };
+    const nBout = FloorLayout.roomEndToWorld(roomA, locA).n;
+    ck(memePoint(nBout, nHead), "normale MONDE du bout A : identique AU BIT près à la formule d'avant bascule");
+    // …et cette normale est bien celle que le TRACÉ a employée : l'amorce de 20 mm part dans sa direction.
+    const u = Math.hypot(nHead.x, nHead.y, nHead.z);
+    const amorce = { x: route.linePts[0].x + nHead.x / u * 20, y: route.linePts[0].y + nHead.y / u * 20, z: route.linePts[0].z + nHead.z / u * 20 };
+    ck(Math.hypot(route.linePts[1].x - amorce.x, route.linePts[1].y - amorce.y, route.linePts[1].z - amorce.z) < 1e-9, "amorce ⊥ : 20 mm le long de la normale MONDE du bout");
+
+    // ---- DISCRIMINATION du REPÈRE (ce que le type `WorldEnd` empêche à la compilation) ----
+    // Le typage refuse désormais un point LOCAL là où `worldLine` attend du MONDE ; à l'exécution les types
+    // sont effacés, donc on peut MESURER ce que coûterait la confusion. Sans cet écart, le marqueur de
+    // repère garderait quelque chose d'inoffensif — et ne mériterait pas son coût.
+    const enLocal = routing.worldLine(m, new Map(m.rooms.map((r) => [r.dc.id, r])), locA, locB, s.cableRoute(s.all("cables")[0]).steps, "sonde", true);
+    ck(Math.hypot(enLocal.linePts[0].x - route.linePts[0].x, enLocal.linePts[0].y - route.linePts[0].y, enLocal.linePts[0].z - route.linePts[0].z) > 1000, "repère : un bout LOCAL passé au tracé déplacerait le câble de plus d'un mètre (le marqueur `WorldEnd` garde un écart RÉEL)");
   }
   });
 

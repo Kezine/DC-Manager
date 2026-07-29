@@ -1950,6 +1950,98 @@ bulle (« Bât. X · ét. 1 » est plus long qu'un nom de salle, et le mini-grap
 bande), et le choix du mot « emplacement(s) » dans le décompte. Rien de tout cela n'apparaît tant qu'aucun
 équipement d'étage n'existe.
 
+### 6.30 Le TRACÉ reçoit des bouts DÉJÀ EN MONDE — il cesse de connaître les salles — **IMPLÉMENTÉ**
+
+Application de la décision **D1** du chantier « câblage des équipements d'étage », et le seul de ses lots qui
+ENGAGE : il change la signature de `CableRouting.worldLine`, la fonction par où passent TOUS les tracés
+inter-conteneurs, câbles comme faisceaux.
+
+**Le nœud tenait en quatre lignes.** `worldLine(m, roomById, ra, rb, a, b, …)` recevait deux bouts en LOCAL
+SALLE plus la transformée de LEUR salle, puis les portait au monde elle-même (`roomToWorld` pour le point,
+`worldEndNormal` pour la normale). Elle exigeait donc que toute extrémité de liaison VIVE DANS UNE SALLE — ce
+qu'un équipement posé sur un ÉTAGE ne fait pas. Une fois `aw`/`bw` calculés, le reste (`buildWorldVia`,
+`cableLine`) ne parlait déjà plus que MONDE. Elle prend désormais deux `WorldEnd`, et c'est l'APPELANT qui
+résout chaque bout dans SON conteneur.
+
+**⚠ AUCUN CONTRÔLE N'EST PERDU, et l'objection méritait d'être vérifiée** : « connaître la nature du
+conteneur ne sert-il pas à EXIGER un exit pour sortir d'une salle ? » Non — la grammaire des exits vit dans
+`CableRouteAnalyzer`, automate PUR qui rend `{ valid, hasExits, errors… }` ; `CableRouting` ne fait que
+CONSOMMER ce verdict (`if (!r.valid || !r.hasExits) return`). Le traceur ne calculait aucun contrôle, il n'en
+perd donc aucun. L'objection était juste sur le fond (quelque chose DOIT savoir qu'on quitte un conteneur) et
+ce quelque chose est l'analyseur, dont la généralisation est le lot suivant.
+
+**⚠ CE LOT NE REND PAS LES ÉQUIPEMENTS D'ÉTAGE CÂBLABLES.** `interDcRoutes` se ferme toujours sur `r.dcA`/
+`r.dcB`, que l'analyseur exprime en SALLES. C'est un REFACTOR À COMPORTEMENT CONSTANT : il retire la
+dépendance « salle » du TRACEUR pour que la généralisation de la grammaire n'ait plus à y toucher.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
+
+- **Le « pendant salle » vit dans `FloorLayout`, à côté de `roomToWorld`.** Trois maisons étaient possibles,
+  et deux se disqualifient : dans `Resolver3D` (par symétrie avec `resolvePortWorld3D`) il faudrait importer
+  `FloorLayout`, donc faire connaître le LAYOUT au résolveur — l'inverse de §6.6, et le démenti de son
+  en-tête, qui pose qu'« un consommateur qui veut du monde compose lui-même ce dernier maillon » ; dans
+  `CableRouting` (où le code était) le traceur resterait propriétaire d'une transformée de conteneur, c'est-
+  à-dire exactement ce que le lot retire. §6.6 dit que la transformée AU-DESSUS de la salle relève du layout :
+  le module qui possède déjà `roomToWorld` est le seul endroit juste.
+- **Le conteneur SALLE n'avait pas de `composeDir` — c'est le vrai défaut trouvé.** `PlacementFrame` distingue
+  `composePoint` (rotation + translation) de `composeDir` (rotation SEULE) ; la paire `roomToWorld`/
+  `roomToLocal` ne portait, elle, que le POINT. Le traceur y suppléait en composant DEUX `roomToWorld` et en
+  les soustrayant : la « signature d'un conteneur manquant » de §3 règle 1, dans une variante inhabituelle —
+  non pas un `cos`/`sin` recopié, mais une transformée dérivée là où elle n'appartenait pas. D'où
+  `FloorLayout.roomDirToWorld` (direction) et `roomEndToWorld` (point + normale), qui achèvent la paire.
+- **La différence de deux images est CONSERVÉE comme implémentation, et c'est un choix.** Réécrire `cos`/`sin`
+  dans `roomDirToWorld` donnerait une SECONDE copie de la rotation de salle, libre de diverger de
+  `roomToWorld` (une salle qui gagnerait une échelle, un miroir, un pivot autre que son centre) ; la dériver
+  de la transformée elle-même la rend juste PAR CONSTRUCTION pour toute transformée affine — et, accessoire
+  décisif ici, **au BIT près** identique à l'expression d'avant, ce qui rend la parité EXACTE au lieu
+  d'approchée. Coût assumé : la linéarisation en virgule flottante perd ~1e-12 de précision sur une normale
+  unitaire, sans effet (elle est renormalisée avant usage).
+- **Le repère entre dans le TYPE, à cette frontière-là seulement.** `Port3D` est rendu tantôt en local salle,
+  tantôt en monde, et son en-tête assume de s'en remettre au POINT D'APPEL (§6.20) : l'arbitrage tient tant
+  que le repère se lit dans le nom de la méthode appelée. Il cesse de tenir quand un point résolu TRAVERSE
+  une frontière de module — le traceur ne voit plus qui l'a produit, et un point local passé là où on attend
+  du monde ne lève AUCUNE erreur : il dessine le câble ailleurs. `FloorLayout.WorldEnd` porte donc un
+  MARQUEUR purement typé (`declare const` + `unique symbol` : aucune ligne émise, aucune propriété à
+  l'exécution) dont la seule fonction est d'empêcher qu'un `Port3D` soit accepté par typage STRUCTUREL — sans
+  lui il le serait, les champs étant identiques. Écarté : dédoubler `Port3D` en deux types (ce que son
+  en-tête refuse à juste titre — la distinction n'y est pas load-bearing) ; écarté aussi : se contenter de
+  nommer les paramètres `aWorld`/`bWorld`, qui documente sans rien empêcher.
+- **`m` et `roomById` RESTENT dans la signature**, et ce n'est pas une inconséquence : ils servent aux points
+  de PASSAGE (`buildWorldVia`), pas aux extrémités. `buildWorldVia` traitait DÉJÀ les waypoints comme il faut
+  — un waypoint d'étage part droit en monde (`oobWorld`), un waypoint de salle passe par sa salle ; **seules
+  les extrémités étaient restées câblées en dur sur « salle »**. Les généraliser appartient à la grammaire.
+
+**PARITÉ PROUVÉE AVANT BASCULE** (§4.1), par RÉGÉNÉRATION du code depuis git (`git show HEAD:` sur
+`CableRouting.ts` et `TrunkRouting.ts`, compilés à côté des modules courants) : ancien et nouveau exécutés sur
+les MÊMES stores, **80 770 nombres comparés, 0 différent, écart maximal 0** — identité BIT POUR BIT, pas
+approchée. Assiette : les deux corpus (réel et démo) sur toutes les salles actives × les deux réglages
+d'amorce, plus un balayage synthétique de **512 configurations** (4 orientations de salle A × 4 de salle B × 4
+de baie × 4 de lacet libre × 2 réglages) × 4 routes de complexité croissante (exit-exit, conduit, waypoint
+d'étage, les trois) × ports rackés ET libres sur les 4 faces × câbles ET faisceaux = 3 072 tracés, 18 432
+points. Les assertions de parité ont ensuite été **converties en attentes EXPLICITES** : la scène du test
+committé porte les 6 points du câble et les 6 du faisceau ÉCRITS EN DUR, mesurés sur le code régénéré —
+elles ne comparent donc pas la fonction à elle-même (piège du lot 2 du chantier conteneur).
+
+**⚠ MESURE QUI CORRIGE LE CADRAGE : le corpus RÉEL ne contient AUCUN câble** (0 `cables`, 1 faisceau
+inter-salles), et la démo n'en a qu'UN d'inter-salles sur 24. Le « meilleur banc d'essai » de ce lot n'était
+donc pas les données vraies mais le balayage synthétique : sur les corpus, la bascule ne pouvait mettre en jeu
+que **2 tracés distincts**. C'est le même enseignement que la mesure d'ouverture du chantier (0 équipement
+d'étage) : ce chantier est prospectif de bout en bout, y compris là où l'on croyait tenir un existant riche.
+
+**Sondes de mutation** : normale TRANSLATÉE par l'origine de la salle (`w1` au lieu de `w1 − w0`) → **28
+FAIL** (et 27 948 nombres divergents au banc de parité, écart max 142 584 mm) ; bouts convertis par la
+MAUVAISE salle (`ra`/`rb` permutés) → **5 FAIL** côté câbles, la section faisceaux restant verte puisque le
+site permuté est celui des câbles — la preuve que les deux appelants sont mesurés séparément ; normale PERDUE
+à la conversion (`n: null`) → **13 FAIL** ; bouts LOCAUX passés au tracé (l'appel à `roomEndToWorld` retiré)
+→ **erreur de COMPILATION**, une par appelant, `Property '[REPERE_MONDE]' is missing in type 'Port3D'` — le
+marqueur mord des deux côtés, câbles et faisceaux. Un contrôle de DISCRIMINATION mesure ce que coûterait cette
+confusion à l'exécution (types effacés) : plus d'un mètre de décalage — sans quoi le marqueur garderait
+quelque chose d'inoffensif et ne mériterait pas son coût.
+
+**Non couvert par les tests, à juger À L'ŒIL** : rien de nouveau. Le tracé est identique au bit près, donc
+l'affichage 3D et 2D des câbles et faisceaux inter-salles est inchangé par construction — c'est précisément ce
+que la parité établit, et il n'y a pas d'autre effet observable.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -1969,7 +2061,9 @@ donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
 §6.27). `Store.equipmentDcId` rend `null` pour un équipement d'étage par conception, et la machinerie de
 câblage ne connaît que « dans la salle X » ou « non placé ». Généraliser cette clé de « salle » à
 « conteneur » est le chantier décrit en §6.4 ; il est OUVERT — `Store.equipmentContainer`/`portContainer`/
-`cableContainer` existent, et §6.27 a débloqué le seul prérequis d'expérience (un « Localiser » opérant).
+`cableContainer` existent, §6.27 a débloqué le seul prérequis d'expérience (un « Localiser » opérant), et
+depuis §6.30 le TRACÉ lui-même ne connaît plus les salles : il reçoit des extrémités en MONDE. Ce qui bloque
+encore est la GRAMMAIRE DE ROUTE (`CableRouteAnalyzer`, qui rend `dcA`/`dcB`), puis les sélecteurs de port.
 
 ✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur**, et la
 règle de repli d'une position absente n'est plus écrite qu'une fois (§6.13). Les deux **prérequis** de §6.5
@@ -2010,7 +2104,11 @@ du besoin — verrouillé par des tests anti-divergence).
 - `src-client/geometry/FloorLayout.ts` — `multiLayout` (chaîne bâtiment/étage/salle), `roomToWorld`,
   `equipFloorOrigin` (**source unique** de l'origine monde d'un posé d'étage : `x`/`y` sur le plan et
   `baseZ` = SOCLE du niveau, **sans `dc_z`**), `equipFloorWorld` (= cette origine + `dc_z`, seule addition
-  du chemin), `oobWorld`, `levelZ`.
+  du chemin), `oobWorld`, `levelZ`. Depuis §6.30, le conteneur SALLE sait aussi tourner une DIRECTION :
+  `roomDirToWorld` (partie linéaire de `roomToWorld`, dérivée de la transformée plutôt que réécrite) et
+  `roomEndToWorld` (point + normale ⇒ `WorldEnd`) — le pendant SALLE de `Resolver3D.resolvePortWorld3D`.
+  `WorldEnd` porte un MARQUEUR de repère purement typé (`unique symbol`, rien à l'exécution) : c'est lui
+  qui interdit à `tsc` de laisser passer un point LOCAL là où le tracé attend du MONDE.
 - `src-client/geometry/PivotBounds.ts` — **BORNAGE DU PIVOT D'ORBITE** (§6.21), pur : `rectCorners`/`unionAabb`
   (repère SALLE, boîte **XY seule** — bornes en Z absentes = parois infinies), `worldBounds` (repère BÂTIMENT,
   boîte **3D** = bandes de bâtiment dessinées × hauteur du monde) et `clampPivot` (méthode du slab sur les TROIS
@@ -2036,6 +2134,12 @@ du besoin — verrouillé par des tests anti-divergence).
   worldOriginY, worldOriginZ)` résout un contenu placé sur un conteneur SANS salle (équipement d'étage) et
   rend du **MONDE** (§6.20). `worldOriginZ` = le SOCLE du conteneur seul ; la hauteur propre (`dc_z`) est
   ajoutée par le résolveur, jamais par l'appelant.
+- `src-client/geometry/CableRouting.ts` / `TrunkRouting.ts` — TRACÉ des liaisons, mécanique UNIQUE câbles ⇄
+  faisceaux. `worldLine(m, roomById, aWorld, bWorld, …)` prend des extrémités **DÉJÀ EN MONDE** (§6.30) : elle
+  ne connaît plus la NATURE des conteneurs, chaque appelant résolvant son bout dans le sien. Elle ne calcule
+  aucun contrôle de route — elle CONSOMME le verdict de `CableRouteAnalyzer` (`valid`/`hasExits`). `m` et
+  `roomById` n'y servent plus qu'aux points de PASSAGE (`buildWorldVia`), qui traitent déjà un waypoint
+  d'étage en monde et un waypoint de salle par sa salle.
 - `src-client/geometry/FreeEquipGeometry.ts` — géométrie PROPRE de l'équipement libre : `faceLocal`,
   `portLocal` (point local d'un port), `faceNormalLocal` (normale AVANT lacet) et `roomPlacement` (ce
   qu'il déclare à son conteneur). Il ne compose plus aucune transformée.

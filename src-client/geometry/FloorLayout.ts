@@ -13,6 +13,24 @@ export interface Vec3 { x: number; y: number; z: number; }
 export interface FloorCfg { id: string | null; location: string; floor: string; width_mm: number; depth_mm: number; cell_mm: number; blocked_cells: string[]; anchor_x?: number; anchor_y?: number; height_mm?: number; }
 /** Salle disposée dans la vue multi-salles : centre monde (off), orientation (o, rad), niveau. */
 export interface RoomPlacement { dc: any; off: Vec3; o: number; level: number; }
+
+/* ---- EXTRÉMITÉ DE LIAISON EXPRIMÉE EN MONDE (doctrine §6.30) ----
+   ⚠ POURQUOI UN TYPE À PART, alors que `Resolver3D.Port3D` porte déjà exactement les mêmes champs.
+   `Port3D` est rendu tantôt en LOCAL SALLE (`resolvePort3D`), tantôt en MONDE (`resolvePortWorld3D`) :
+   son en-tête l'assume et s'en remet au POINT D'APPEL pour savoir d'où vient la valeur. Cet arbitrage
+   tient tant que le repère se lit dans le nom de la méthode APPELÉE. Il cesse de tenir dès qu'un point
+   résolu TRAVERSE une frontière de module : le tracé (`CableRouting.worldLine`) ne voit plus quelle
+   méthode l'a produit, et un point LOCAL passé là où on attend du MONDE ne lève AUCUNE erreur — il
+   dessine simplement le câble ailleurs. C'est la faute silencieuse que ce type interdit.
+   Le champ `[REPERE_MONDE]` est un MARQUEUR PUREMENT TYPÉ (`declare const` + `unique symbol` : aucune
+   ligne émise, aucune propriété à l'exécution). Sa seule fonction est d'empêcher qu'un `Port3D` local
+   soit accepté par typage STRUCTUREL — sans lui, il le serait, les champs étant identiques. On ne
+   fabrique donc un `WorldEnd` que par les producteurs qui SAVENT dans quel repère ils rendent. */
+declare const REPERE_MONDE: unique symbol;
+
+/** Point + normale sortante d'une extrémité de liaison, dans le repère MONDE. `n` est `null` quand
+    l'extrémité n'annonce pas de normale (le tracé se passe alors d'amorce ⊥). */
+export interface WorldEnd { x: number; y: number; z: number; n: Vec3 | null; readonly [REPERE_MONDE]: true; }
 /** Emprise d'un bâtiment dans le monde. `x0`/`y0` = coin d'ORIGINE du site (le point que porte sa
     position, GPS ou repli) ; `x1`/`y1` = ce coin plus l'emprise de ses plans d'étage. Depuis que le site
     a une position (doctrine §6.9), la bande n'est plus alignée sur un axe : d'où `y0`/`y1`. */
@@ -230,6 +248,43 @@ export class FloorLayout {
     const co = Math.cos(room.o), so = Math.sin(room.o);
     const rx = pw.x - room.off.x, ry = pw.y - room.off.y;
     return { x: room.dc.width_mm / 2 + (rx * co + ry * so), y: room.dc.depth_mm / 2 + (-rx * so + ry * co), z: pw.z - room.off.z };
+  }
+  /** DIRECTION locale de salle → MONDE : la PARTIE LINÉAIRE de `roomToWorld`, c'est-à-dire sa rotation
+      SANS sa translation. C'est le pendant exact de `PlacementFrame.composeDir` face à `composePoint` :
+      la paire `roomToWorld`/`roomToLocal` ne portait que le POINT, et le conteneur salle n'avait donc
+      aucun moyen de tourner une normale. Ce manque se voyait — la normale d'un bout de câble était
+      tournée DANS le traceur (`CableRouting.worldEndNormal`), c'est-à-dire à un endroit qui n'a pas à
+      connaître la transformée d'un conteneur (doctrine §3 règle 1, §6.30).
+
+      ⚠ LA DIFFÉRENCE DE DEUX IMAGES EST VOULUE, ce n'est pas un contournement. Réécrire ici `cos`/`sin`
+      donnerait une SECONDE copie de la rotation de salle, libre de diverger de `roomToWorld` au premier
+      changement (une salle qui gagnerait une échelle, un miroir, un pivot autre que son centre) ; la
+      dériver de la transformée elle-même la rend juste PAR CONSTRUCTION, pour toute transformée AFFINE.
+      C'est aussi ce qui rend le résultat IDENTIQUE AU BIT près à l'expression qui vivait dans le
+      traceur — propriété sur laquelle repose la preuve de parité du lot. `at` est le point d'application
+      (sans effet en arithmétique exacte, il fixe le point de linéarisation en virgule flottante). */
+  static roomDirToWorld(room: RoomPlacement, at: Vec3, dir: Vec3): Vec3 {
+    const w0 = FloorLayout.roomToWorld(room, at);
+    const w1 = FloorLayout.roomToWorld(room, { x: at.x + dir.x, y: at.y + dir.y, z: at.z + dir.z });
+    return { x: w1.x - w0.x, y: w1.y - w0.y, z: w1.z - w0.z };
+  }
+  /** EXTRÉMITÉ résolue en LOCAL SALLE → extrémité MONDE (point ET normale). C'est le « pendant salle »
+      de `Resolver3D.resolvePortWorld3D`, qui rend déjà du MONDE pour un contenu posé sur un ÉTAGE : les
+      deux conteneurs offrent désormais la même chose au tracé, un `WorldEnd`, et c'est ce qui permet à
+      `CableRouting.worldLine` d'ignorer leur NATURE (doctrine §6.30, décision D1 du chantier).
+
+      ⚠ ELLE VIT ICI, ET PAS DANS `Resolver3D`. La transformée d'une salle vers le monde relève du
+      LAYOUT (§6.6) : elle dépend de l'ensemble affiché, pas des seuls enregistrements. `Resolver3D` la
+      REÇOIT toujours (trois nombres pour l'étage) et ne l'a jamais calculée — son en-tête pose que « un
+      consommateur qui veut du monde compose lui-même ce dernier maillon ». L'y installer l'obligerait à
+      importer ce module, donc à connaître le layout. Et la laisser dans `CableRouting` (où elle était)
+      maintiendrait le traceur propriétaire d'une transformée de conteneur, c'est-à-dire exactement ce
+      que ce lot retire. Le module qui POSSÈDE `roomToWorld` est le seul endroit juste. */
+  static roomEndToWorld(room: RoomPlacement, end: { x: number; y: number; z: number; n?: Vec3 | null }): WorldEnd {
+    const p = FloorLayout.roomToWorld(room, end);
+    // Le marqueur de repère n'existe qu'au typage : l'assertion est l'endroit UNIQUE où l'on AFFIRME
+    // « ce point est en monde », et elle est ici justifiée par `roomToWorld` juste au-dessus.
+    return { x: p.x, y: p.y, z: p.z, n: end.n ? FloorLayout.roomDirToWorld(room, end, end.n) : null } as WorldEnd;
   }
   /** Z (base du niveau) d'un étage, INTERPOLÉ entre niveaux affichés (OOB d'un étage sans salle affichée). Tient
       compte des hauteurs d'étage NON uniformes (levelZs/levelHs) ; extrapole avec la hauteur du niveau extrême. */
