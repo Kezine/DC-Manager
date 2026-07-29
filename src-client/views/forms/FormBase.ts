@@ -10,6 +10,7 @@ import { PortRoles } from "../../registries/PortRoles";
 import { EquipFaces } from "../../registries/EquipFaces";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
+import { FacePanelBands } from "../../geometry/FacePanelBands";   // bandes boîtier/oreilles du panneau 19″ (partagé avec l'éditeur de façade)
 import { RackScene } from "../../geometry/RackScene";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { RackItemKinds } from "../../domain/RackItemKinds";
@@ -127,9 +128,17 @@ export class FormBase {
       Deux rendus (fiche détail, lecture seule) :
       - CLASSIQUE (défaut) : étiquettes posées SUR les ports (peut se chevaucher si façade dense) ;
       - HAUTE DENSITÉ (`dense`) : pastilles seules + RANGÉE DE CHIPS sous la face (même présentation que la
-        palette « ports à poser » de l'éditeur) ; survol CROISÉ pastille ↔ chip avec bulle déportée reliée. */
+        palette « ports à poser » de l'éditeur) ; survol CROISÉ pastille ↔ chip avec bulle déportée reliée.
+
+      ⚠ DEUX BOÎTES, et c'est le cœur du rendu : le PANNEAU (19″ en mode U, la face réelle en libre) et,
+      dedans, le BOÎTIER. Un équipement plus étroit que 19″ (`u_width_mm` + `u_align`) n'occupe qu'une BANDE
+      du panneau, le reste étant ses oreilles de montage — et `face_x`/`face_y` d'un port sont des fractions
+      du BOÎTIER, pas du panneau. Les confondre dessinait la coque en pleine largeur ET décalait tous les
+      ports. Le découpage est celui de l'éditeur de façade, source unique `geometry/FacePanelBands`. */
   protected static facePreview(store: Store, eq: any, face: string, dense = false): HTMLElement | null {
-    const url = (this.images && eq[(EQUIP_FACE_IMG_FIELD as any)[face]]) ? (this.images.get(eq[(EQUIP_FACE_IMG_FIELD as any)[face]]) || {}).url || null : null;
+    const imageId = eq[(EQUIP_FACE_IMG_FIELD as any)[face]];
+    const image: any = (this.images && imageId) ? (this.images.get(imageId) || null) : null;
+    const url: string | null = image ? (image.url || null) : null;
     const ports = store.portsOf(eq.id).filter((p: any) => p.face_x != null && p.face_y != null && EquipFaces.norm(p.face_side) === face);
     if (!url && !ports.length) return null;
     const isFree = eq.dim_mode === "free";
@@ -138,33 +147,51 @@ export class FormBase {
     // pour PRÉSERVER le ratio (width:100% + max-height seul l'aplatissait).
     const wh = isFree ? FreeEquipGeometry.faceWH(eq, face) : { W: 19, H: 1.75 * Math.max(1, eq.u_height || 1) };
     const MAXVH = 60;
-    const stage = document.createElement("div"); stage.className = "face-preview";
-    stage.style.aspectRatio = wh.W + " / " + wh.H;
-    stage.style.maxHeight = MAXVH + "vh";
-    stage.style.maxWidth = "calc(" + MAXVH + "vh * " + (wh.W / wh.H).toFixed(4) + ")";
-    stage.style.margin = "0 auto";
-    if (url) { const im = document.createElement("img"); im.className = "face-bg"; im.src = url; im.alt = ""; stage.appendChild(im); }
+    const panel = document.createElement("div"); panel.className = "face-preview";
+    panel.style.aspectRatio = wh.W + " / " + wh.H;
+    panel.style.maxHeight = MAXVH + "vh";
+    panel.style.maxWidth = "calc(" + MAXVH + "vh * " + (wh.W / wh.H).toFixed(4) + ")";
+    panel.style.margin = "0 auto";
+    // En LIBRE, la face n'a ni oreilles ni boîtier rétréci : le boîtier EST le panneau (bande pleine).
+    const band = isFree ? { left: 0, width: 1 } : FacePanelBands.body(eq, face);
+    const body = document.createElement("div");
+    body.style.cssText = "position:absolute;top:0;height:100%;left:" + (band.left * 100) + "%;width:" + (band.width * 100) + "%;";
+    // OREILLES : face AVANT d'un équipement racké uniquement (l'arrière n'en a jamais). Une image « avec
+    // oreilles » couvre le panneau COMPLET ; une image « face seule » se confine au boîtier — parité avec
+    // l'éditeur de façade, sans quoi l'image et les ports ne se superposeraient plus.
+    const hasEars = !isFree && face === "front";
+    const withEars = hasEars && (image ? image.with_ears !== false : true);
+    if (url) {
+      const im = document.createElement("img"); im.className = "face-bg"; im.src = url; im.alt = "";
+      const imageBand = withEars ? { left: 0, width: 1 } : band;
+      im.style.cssText = "top:0;height:100%;left:" + (imageBand.left * 100) + "%;width:" + (imageBand.width * 100) + "%;right:auto;bottom:auto;";
+      panel.appendChild(im);
+    }
+    if (hasEars) FacePanelBands.ears(eq, face).forEach((ear) => { const e = document.createElement("div"); e.className = "face-ear"; e.style.cssText = "left:" + (ear.left * 100) + "%;width:" + (ear.width * 100) + "%;top:0;height:100%;bottom:auto;"; panel.appendChild(e); });
+    panel.appendChild(body);
     const roleCls = (p: any) => PortRoles.markerRoleClass(p.role);   // "" (data) · role-mgmt/power/poe
     if (!dense) {
-      ports.forEach((p: any) => { const mk = document.createElement("div"); mk.className = "face-marker" + roleCls(p); mk.style.left = (p.face_x * 100) + "%"; mk.style.top = (p.face_y * 100) + "%"; mk.textContent = p.name || "(port)"; stage.appendChild(mk); });
-      return stage;
+      ports.forEach((p: any) => { const mk = document.createElement("div"); mk.className = "face-marker" + roleCls(p); mk.style.left = (p.face_x * 100) + "%"; mk.style.top = (p.face_y * 100) + "%"; mk.textContent = p.name || "(port)"; body.appendChild(mk); });
+      return panel;
     }
-    return this.facePreviewDense(stage, ports, roleCls);
+    return this.facePreviewDense(panel, body, ports, roleCls);
   }
 
   /** Rendu HAUTE DENSITÉ de l'aperçu (cf. facePreview) : pastilles + chips + survol croisé avec bulle déportée.
-      La bulle reste DANS le cadre (overflow:hidden du stage) : repli sous/au-dessus du port + clamp horizontal. */
-  private static facePreviewDense(stage: HTMLElement, ports: any[], roleCls: (p: any) => string): HTMLElement {
+      La bulle reste DANS le cadre (overflow:hidden du PANNEAU) : repli sous/au-dessus du port + clamp horizontal.
+      ⚠ Deux boîtes distinctes (cf. facePreview) : `panel` est le cadre visible et clippant, `body` le BOÎTIER
+      dont les fractions `face_x`/`face_y` sont issues — pastilles, bulles et lignes vivent donc dans `body`. */
+  private static facePreviewDense(panel: HTMLElement, body: HTMLElement, ports: any[], roleCls: (p: any) => string): HTMLElement {
     const wrap = document.createElement("div");
-    wrap.appendChild(stage);
+    wrap.appendChild(panel);
     // couche du survol (ligne SVG + bulle) — au-dessus des pastilles, transparente aux événements.
     const NS = "http://www.w3.org/2000/svg";
-    const hoverLayer = document.createElement("div"); hoverLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:5;"; stage.appendChild(hoverLayer);
+    const hoverLayer = document.createElement("div"); hoverLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:5;"; body.appendChild(hoverLayer);
     const dots = ports.map((p: any) => {
       const dot = document.createElement("div"); dot.className = "face-dot" + roleCls(p);
       dot.style.cursor = "default"; dot.title = p.name || "(port)";
       dot.style.left = (p.face_x * 100) + "%"; dot.style.top = (p.face_y * 100) + "%";
-      stage.appendChild(dot); return dot;
+      body.appendChild(dot); return dot;
     });
     // chips sous la face — même présentation que la palette « ports à poser » de l'éditeur de façade.
     const chipsRow = document.createElement("div"); chipsRow.className = "face-palette"; chipsRow.style.marginTop = "6px";
@@ -181,8 +208,8 @@ export class FormBase {
       bubble.textContent = p.name || "(port)";
       bubble.style.left = (p.face_x * 100) + "%"; bubble.style.top = (by * 100) + "%";
       hoverLayer.appendChild(bubble);
-      // clamp HORIZONTAL (le stage clippe) : re-mesure puis borne le centre à [demi-largeur, 100%−demi-largeur].
-      const sw = stage.clientWidth || 1, bw = bubble.getBoundingClientRect().width;
+      // clamp HORIZONTAL (le panneau clippe) : re-mesure puis borne le centre à [demi-largeur, 100%−demi-largeur].
+      const sw = body.clientWidth || 1, bw = bubble.getBoundingClientRect().width;
       const half = (bw / sw) / 2 + 0.005;
       const bx = Math.max(half, Math.min(1 - half, p.face_x));
       bubble.style.left = (bx * 100) + "%";

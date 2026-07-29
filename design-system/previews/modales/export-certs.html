@@ -987,7 +987,13 @@
      sur un ruban plat (ex. 1U 19″). Le `max-height: 70vh` du frame borne cette hauteur (le viewport suit) — cap
      de sécurité (en pratique les faces larges affichées restent bien en dessous). */
   .face-viewport { position: relative; overflow: hidden; margin: 0 auto; touch-action: none; }
-  .face-frame { position: relative; width: 100%; max-height: 70vh; margin: 0 auto; transform-origin: 0 0; will-change: transform; }
+  /* PAS de `will-change: transform` ici, et c'est DELIBERE : il promeut le frame en couche composite
+     rasterisee UNE FOIS a l'echelle 1, que le GPU se contente ensuite d'agrandir. Les etiquettes de port,
+     contre-echelees en scale(var(--inv-zoom)), etaient alors dessinees a 1/zoom de leur taille ecran finale
+     puis reagrandies d'autant -- d'ou une perte de nettete croissant exactement avec le zoom. Sans lui, le
+     navigateur re-rasterise a la nouvelle echelle : texte net a tous les niveaux, au prix d'un repaint par
+     palier de zoom (le zoom est discret ici -- molette/boutons --, pas une animation continue). */
+  .face-frame { position: relative; width: 100%; max-height: 70vh; margin: 0 auto; transform-origin: 0 0; }
   .face-stage { position: absolute; inset: 0; background: transparent; border: 1px solid var(--line-2); overflow: hidden; user-select: none; z-index: 2; }
   .face-stage.empty { background-color: var(--bg); background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 22px 22px; }
   .face-stage .face-empty-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px; color: var(--fg-dim); font-size: 11px; font-family: var(--sans); }   /* état vide (prose) → --sans */
@@ -1005,6 +1011,12 @@
   .face-marker.role-power { background: var(--role-power, #f59e0b); }
   .face-marker.role-poe { background: var(--role-poe); }
   .face-marker.dragging { cursor: grabbing; opacity: 0.97; }
+  /* Deplacement d'un port : le curseur DISPARAIT jusqu'au relachement, pour ne rien masquer du point de
+     pose (la pastille fait quelques pixels, le curseur la recouvrait). Pose sur <body> et non sur le
+     viewport parce que le glisser est suivi au niveau DOCUMENT (pointermove/pointerup) : le pointeur peut
+     sortir du cadre sans que le glisser s'arrete. `!important` + `*` pour battre les curseurs explicites
+     des elements survoles (grab/grabbing/pointer/default). Pose et retire par FaceEditor.startDrag. */
+  body.face-drag-nocursor, body.face-drag-nocursor * { cursor: none !important; }
   .face-marker .fm-x { cursor: pointer; font-weight: 700; opacity: 0.75; }
   .face-marker .fm-x:hover { opacity: 1; }
   /* Pendant un GLISSER (classe sur le frame), ou la POSE en 2 clics (port actif) : les ports posés se réduisent à des

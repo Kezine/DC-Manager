@@ -21,8 +21,8 @@ import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { LeaderLayout, LeaderAnchor } from "../../geometry/LeaderLayout";
 import { FaceAlign } from "../../geometry/FaceAlign";
 import type { FaceAlignRef, FaceAlignResult } from "../../geometry/FaceAlign";
-import { EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD, RACK_MOUNT_WIDTH } from "../../domain/constants";
-import { RackGeometry } from "../../geometry/RackGeometry";
+import { EQUIP_FACE_IDS, EQUIP_FACE_IMG_FIELD } from "../../domain/constants";
+import { FacePanelBands } from "../../geometry/FacePanelBands";   // bandes boîtier/oreilles du panneau 19″ (partagé avec l'aperçu de la fiche)
 import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
 import { EquipmentForms } from "./EquipmentForms";   // modale complète de création d'image (import « + Importer »)
@@ -61,15 +61,12 @@ export class FaceEditor extends FormBase {
     // à chaque déplacement (insensible au zoom et au ratio de la face, cf. FaceAlign / alignTol).
     const SNAP_PX = 8;
     // Oreilles 19″ : le CORPS (zone de placement des ports) = fraction du panneau occupée par le BOÎTIER — pleine
-    // largeur (oreilles standard EAR_FRAC de chaque côté) ou RÉTRÉCIE (u_width_mm + u_align : les oreilles
-    // s'étendent des rails jusqu'au boîtier, asymétriques). Fractions PAR FACE : l'arrière est un MIROIR
-    // horizontal (le décalage d'alignement s'inverse vu de derrière). Parité avec DcThreeScene / Resolver3D.
-    const bodyW = RackGeometry.eqBodyWidth(eq), bodyOff = RackGeometry.eqBodyOffsetX(eq);
-    const BODY_FRAC = bodyW / RACK_MOUNT_WIDTH;
-    const bodyLeftFrac = (f: string): number => {
-      const off = (f === "rear") ? -bodyOff : bodyOff;   // vu de la face : miroir à l'arrière
-      return (RACK_MOUNT_WIDTH / 2 + off - bodyW / 2) / RACK_MOUNT_WIDTH;
-    };
+    // largeur (oreilles standard de chaque côté) ou RÉTRÉCIE (u_width_mm + u_align : les oreilles s'étendent des
+    // rails jusqu'au boîtier, asymétriques). Le découpage vit dans `geometry/FacePanelBands` (pur, testé) : il est
+    // PARTAGÉ avec l'aperçu de la fiche détail (`FormBase.facePreview`), qui dessinait auparavant tout équipement
+    // en pleine largeur. Fractions PAR FACE — l'arrière est un MIROIR horizontal, porté par le module.
+    const BODY_FRAC = FacePanelBands.body(eq, "front").width;   // largeur : identique sur les deux faces
+    const bodyLeftFrac = (f: string): number => FacePanelBands.body(eq, f).left;
     const panelMode = !isFree;
     // Affichage des ports : "chip" (label SUR le port, défaut) | "leader" (pastille + label déporté relié).
     let portDisplay: "chip" | "leader" = "chip";
@@ -222,8 +219,13 @@ export class FaceEditor extends FormBase {
       const cols = Math.max(1, Math.round(Math.sqrt(n * aspect))); const rows = Math.ceil(n / cols);
       list.forEach((p, i) => { const c = i % cols, r = Math.floor(i / cols); place[p.id] = { x: clamp01((c + 0.5) / cols), y: clamp01((r + 0.5) / rows), side }; });
     };
+    // CURSEUR MASQUÉ pendant un glisser : la pastille de port fait quelques pixels et le curseur la recouvrait,
+    // on ne voyait donc plus OÙ l'on pose. La classe vit sur <body> (et non sur le viewport) parce que le glisser
+    // est suivi au niveau DOCUMENT : le pointeur peut sortir du cadre sans que le glisser s'arrête (cf. CSS).
+    const NO_CURSOR_CLASS = "face-drag-nocursor";
     const startDrag = (ev: PointerEvent, id: string, markerEl: HTMLElement) => {
       ev.preventDefault(); markerEl.classList.add("dragging");
+      document.body.classList.add(NO_CURSOR_CLASS);
       frame.classList.add("dragging-ports");   // masque les labels : tous les ports posés se réduisent à des pastilles (cf. CSS)
       const move = (e: PointerEvent) => {
         markDirty();
@@ -238,6 +240,7 @@ export class FaceEditor extends FormBase {
       const up = () => {
         // La classe pastille reste si un port est ACTIVÉ (pose 2 clics : les références restent des pastilles).
         markerEl.classList.remove("dragging"); frame.classList.toggle("dragging-ports", !!activePortId); clearGuides();
+        document.body.classList.remove(NO_CURSOR_CLASS);   // le curseur revient au relâchement
         document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
         if (portDisplay === "leader") render();
       };
@@ -282,7 +285,7 @@ export class FaceEditor extends FormBase {
       // OREILLES de montage 19″ (AVANT uniquement) : bandes latérales NON cliquables (le placement reste sur le
       // corps) — des RAILS jusqu'aux bords du boîtier (asymétriques si boîtier rétréci/aligné).
       if (faceHasEars) {
-        [[0, bLeft], [bLeft + BODY_FRAC, 1]].forEach(([x0, x1]) => { if (x1 - x0 <= 0.0005) return; const e = document.createElement("div"); e.className = "face-ear"; e.style.cssText = "left:" + (x0 * 100) + "%;width:" + ((x1 - x0) * 100) + "%;top:" + vt + "%;height:" + vh + "%;bottom:auto;"; frame.appendChild(e); });
+        FacePanelBands.ears(eq, side).forEach((band) => { const e = document.createElement("div"); e.className = "face-ear"; e.style.cssText = "left:" + (band.left * 100) + "%;width:" + (band.width * 100) + "%;top:" + vt + "%;height:" + vh + "%;bottom:auto;"; frame.appendChild(e); });
       }
 
       // GUIDES d'alignement (overlay du stage) : vide au repos, rempli pendant un glisser / un aperçu de pose
@@ -427,7 +430,11 @@ export class FaceEditor extends FormBase {
       title: I18n.t("face.title", { name: Html.escape(eq.name || I18n.t("face.equipName")) }), message: subtitle, wide: true,
       confirmLabel: opts.onApply ? I18n.t("face.apply") : I18n.t("ui.action.save"), cancelLabel: I18n.t("ui.action.close"),
       build: (h2) => { h2.appendChild(root); return { validate: () => true as const, collect: () => true }; },
-    }).then(async (res) => { document.removeEventListener("keydown", onKey, true); if (res) await applyResult(); });
+    }).then(async (res) => {
+      document.removeEventListener("keydown", onKey, true);
+      document.body.classList.remove(NO_CURSOR_CLASS);   // filet : une fermeture EN COURS de glisser laisserait le curseur masqué pour toute l'app
+      if (res) await applyResult();
+    });
   }
 
   /** Sélecteur d'image éligible → { id } ou null. `free` (équipement en dimensionnement libre) = AUCUN filtre :

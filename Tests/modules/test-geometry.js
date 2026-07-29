@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, FacePanelBands, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -243,6 +243,60 @@ module.exports = async () => {
     ck(!!r.guideX && r.guideX.x === 0.5, "tolérances distinctes : X accroche (tolX 0.05)");
     ck.eq(r.guideY, null, "tolérances distinctes : Y n'accroche pas (tolY 0.01)");
     ck.eq(r.x, 0.5, "tolérances distinctes : x calé"); approx(r.y, 0.53, "tolérances distinctes : y brut");
+  }
+  });
+
+  await section("FacePanelBands : bandes boîtier/oreilles d'une face de panneau 19″ (pur)", async () => {
+  {
+    const approx = (a, b, name, eps) => ck(Math.abs(a - b) <= (eps || 1e-9), name + "  (attendu ≈" + b + ", obtenu " + a + ")");
+    const BODY = RackGeometry.mountBodyWidth();   // corps utile 19″ = panneau − 2 oreilles standard
+
+    // 1) PLEINE LARGEUR (cas courant, u_width_mm absente) : le boîtier occupe le corps utile, CENTRÉ.
+    const full = FacePanelBands.body({}, "front");
+    approx(full.width, BODY / RACK_MOUNT_WIDTH, "pleine largeur : bande = corps utile / panneau");
+    approx(full.left, (RACK_MOUNT_WIDTH - BODY) / 2 / RACK_MOUNT_WIDTH, "pleine largeur : centrée (une oreille standard de chaque côté)");
+    approx(full.left * 2 + full.width, 1, "pleine largeur : bande symétrique dans le panneau");
+    ck.eq(FacePanelBands.ears({}, "front").length, 2, "pleine largeur : DEUX oreilles standard (bandes non négligeables)");
+
+    // 2) BOÎTIER RÉTRÉCI CENTRÉ : la bande se réduit, reste centrée, les deux oreilles s'élargissent également.
+    const narrow = FacePanelBands.body({ u_width_mm: 200 }, "front");
+    approx(narrow.width, 200 / RACK_MOUNT_WIDTH, "rétréci : largeur = u_width_mm / panneau");
+    approx(narrow.left, (RACK_MOUNT_WIDTH - 200) / 2 / RACK_MOUNT_WIDTH, "rétréci centré : bande centrée");
+    ck(narrow.width < full.width, "rétréci : bande PLUS ÉTROITE que la pleine largeur");
+
+    // 3) ALIGNEMENT : left colle à l'oreille GAUCHE (bande la plus à gauche), right à la droite.
+    const left = FacePanelBands.body({ u_width_mm: 200, u_align: "left" }, "front");
+    const right = FacePanelBands.body({ u_width_mm: 200, u_align: "right" }, "front");
+    ck(left.left < narrow.left && narrow.left < right.left, "alignement : left < center < right");
+    approx(left.width, right.width, "alignement : la LARGEUR ne dépend pas de l'alignement");
+    approx(left.left, (RACK_MOUNT_WIDTH - BODY) / 2 / RACK_MOUNT_WIDTH, "align left : bord gauche du boîtier = bord gauche du corps utile");
+    approx(right.left + right.width, 1 - (RACK_MOUNT_WIDTH - BODY) / 2 / RACK_MOUNT_WIDTH, "align right : bord droit du boîtier = bord droit du corps utile");
+
+    // 4) MIROIR ARRIÈRE : vu de derrière, gauche et droite s'échangent — un boîtier calé à GAUCHE apparaît
+    //    à DROITE. C'est le piège que l'aperçu de la fiche détail ignorait ; il est ici verrouillé.
+    const leftRear = FacePanelBands.body({ u_width_mm: 200, u_align: "left" }, "rear");
+    approx(leftRear.left, right.left, "miroir arrière : « left » vu de derrière = position de « right » vu de face");
+    approx(leftRear.width, left.width, "miroir arrière : largeur inchangée");
+    const centerRear = FacePanelBands.body({ u_width_mm: 200 }, "rear");
+    approx(centerRear.left, narrow.left, "miroir arrière : un boîtier CENTRÉ ne bouge pas");
+    approx(FacePanelBands.body({}, "rear").left, full.left, "miroir arrière : pleine largeur ne bouge pas");
+
+    // 5) OREILLES = ce qui RESTE du panneau, de part et d'autre — complémentaires de la bande du boîtier.
+    const earsLeft = FacePanelBands.ears({ u_width_mm: 200, u_align: "left" }, "front");
+    ck.eq(earsLeft.length, 2, "align left : deux oreilles (la gauche est l'oreille standard, la droite s'étend)");
+    approx(earsLeft[0].width, left.left, "oreille gauche : de 0 au bord du boîtier");
+    approx(earsLeft[1].left, left.left + left.width, "oreille droite : démarre au bord droit du boîtier");
+    approx(earsLeft[0].width + left.width + earsLeft[1].width, 1, "oreilles + boîtier = le panneau ENTIER");
+    ck(earsLeft[1].width > earsLeft[0].width, "align left : l'oreille DROITE est la plus large (asymétrie)");
+
+    // 6) BORNAGE : u_width_mm démesurée est ramenée au corps utile (règle de RackGeometry, ici seulement relayée).
+    approx(FacePanelBands.body({ u_width_mm: 9999 }, "front").width, full.width, "u_width_mm démesurée : bornée au corps utile");
+
+    // 7) SEUIL des oreilles : une bande négligeable n'est pas matérialisée. Boîtier = corps utile ENTIER et
+    //    panneau = corps utile ⇒ aucune oreille ; ici le panneau est plus large, donc les deux subsistent.
+    ck(FacePanelBands.MIN_EAR_FRAC > 0, "seuil d'oreille strictement positif (évite les bandes à 1e-16)");
+    const tiny = FacePanelBands.ears({ u_width_mm: BODY - 0.01, u_align: "left" }, "front");
+    ck(tiny.every((band) => band.width > FacePanelBands.MIN_EAR_FRAC), "toute bande rendue dépasse le seuil");
   }
   });
 
