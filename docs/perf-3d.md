@@ -54,6 +54,13 @@
   juste **masqué** (`display:none`), pas détaché. Au retour en 3D, comme il est toujours attaché, la garde de
   révision (`_webglRev`) prend le chemin diff (no-op si données inchangées) → **aucune reconstruction**. (Avant : le
   canvas était détaché → `mount→build` complet au retour = re-dessin de toute la scène multi-salles.)
+  - **La VISIBILITÉ de cet hôte est une DÉCISION PURE** (`core/WebglHostVisibility.visible(view, useWebGL, hasRoom)`) :
+    visible si, et seulement si, on est en 3D-WebGL **AVEC une salle à montrer**. La condition « salle » n'est pas
+    cosmétique : sans elle, charger un document SANS SALLE en vue 3D laissait affiché le canevas — donc la scène — du
+    document PRÉCÉDENT sous le message « Aucune salle » (deux lignes de `render()` décidaient chacune de leur côté et se
+    contredisaient — dette n°7, corrigée). L'hôte reste masqué sans être détaché, donc le moteur reste chaud. Extraire
+    la règle d'un `render()` non atteignable en test (garde headless `typeof document === "undefined"`) la rend
+    VERROUILLABLE — table de vérité éprouvée dans `test-core-store.js`.
 - **Cache de textures d'images de façade** (`imgTexCache`, par URL) : réutilisées synchroniquement d'un build à
   l'autre (plus de rechargement TextureLoader à chaque reconstruction), élaguées après chaque build COMPLET
   (`pruneFaceTextureCache` : toute URL non reposée par ce build est libérée) + libération au `dispose` final.

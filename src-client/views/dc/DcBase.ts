@@ -7,6 +7,7 @@ import { ContextMenu } from "../../ui/ContextMenu";
 import type { CtxSection } from "../../ui/ContextMenu";
 import { TouchNav } from "../../ui/TouchNav";
 import { Normalize } from "../../core/Normalize";
+import { WebglHostVisibility } from "../../core/WebglHostVisibility";
 import { RackScene } from "../../geometry/RackScene";
 import { Resolver3D } from "../../geometry/Resolver3D";
 import { FloorLayout } from "../../geometry/FloorLayout";
@@ -468,20 +469,27 @@ export abstract class DcBase {
     // stage. On le PRÉSERVE en changeant d'onglet ou de sous-vue (Dessus/Étage) : le canvas est détaché par
     // clearStage mais le contexte/scène persistent (réattachés au retour) → pas de réinitialisation coûteuse.
     if (this._three && this.view === "3d" && !this.useWebGL) { this._three.dispose(); this._three = null; this._webglHost = null; }
-    // hôte WebGL PERSISTANT : visible seulement en 3D-WebGL, sinon MASQUÉ mais conservé attaché (exclu de clearStage)
-    // → au retour en 3D, la garde de révision évite la reconstruction (pas de re-dessin de toute la scène).
-    if (this._webglHost) this._webglHost.style.display = (this.view === "3d" && this.useWebGL) ? "" : "none";
+    // Salle courante résolue UNE FOIS, en tête : la VISIBILITÉ de l'hôte WebGL en dépend (une 3D sans salle
+    // ne doit RIEN montrer), et les deux branches d'affichage la réutilisent. `current()` est une simple
+    // lecture du store, sans effet de bord — la remonter ne change donc que ce qu'on veut corriger.
+    const dc = this.current();
+    // hôte WebGL PERSISTANT : visible seulement en 3D-WebGL AVEC une salle à montrer, sinon MASQUÉ mais
+    // conservé attaché (exclu de clearStage) → au retour en 3D, la garde de révision évite la reconstruction.
+    // La DÉCISION est extraite dans `WebglHostVisibility` (pure, testable) : `render()` n'étant pas atteignable
+    // en test (sort sur `typeof document === "undefined"`), la laisser ici l'exposerait à la régression que
+    // corrige la dette n°7 — deux lignes décidaient chacune de leur côté et se contredisaient sur un document
+    // sans salle (le canevas du document PRÉCÉDENT restait affiché). Elle est désormais consommée À UN SEUL endroit.
+    if (this._webglHost) this._webglHost.style.display = WebglHostVisibility.visible(this.view, this.useWebGL, !!dc) ? "" : "none";
     const showControls = (on: boolean) => { if (this.controlsEl) this.controlsEl.style.display = on ? "flex" : "none"; };
     this.updateControls();
     if (this.floorRail && this.view !== "floor") this.floorRail.style.display = "none";   // rail d'étages : vue Étage uniquement
     // VUE ÉTAGE : pilotée par un étage cible (indépendante d'une salle active)
     if (this.view === "floor") {
-      const dc = this.current(); this.renderSide(dc);
+      this.renderSide(dc);
       const ft = this.floorTargetResolve();
       if (!ft) { showControls(false); this.clearStage(); const p = document.createElement("p"); p.style.cssText = "padding:24px;color:var(--fg-dim)"; p.textContent = I18n.t("dc.base.noFloor"); this.stage.appendChild(p); return; }
       showControls(true); this.renderFloor(ft); return;
     }
-    const dc = this.current();
     this.renderSide(dc);
     if (!dc) { showControls(false); this.clearStage(); const p = document.createElement("p"); p.style.cssText = "padding:24px;color:var(--fg-dim)"; p.textContent = I18n.t("dc.base.noRoom"); this.stage.appendChild(p); return; }
     showControls(true);

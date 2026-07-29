@@ -1,7 +1,7 @@
 /* Tests modules — entités, Store (CRUD, cascade, undo, routes, spares, sites…), helpers core.
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, WebglHostVisibility, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Entités : normalisation au constructeur", async () => {
@@ -1583,6 +1583,31 @@ module.exports = async () => {
     ck.eq(s.containerLabel(null), null, "containerLabel(null) → null");
     ck.eq(JSON.stringify(s.equipmentNamedContainer(orphelin.id)), JSON.stringify({ kind: "floor", location: "namur", floor: "3" }),
       "equipmentNamedContainer : le CONTENEUR lui-même (ce que consomme le mini-graphe de tracé)");
+  }
+  });
+
+  await section("WebglHostVisibility : l'hôte 3D visible SEULEMENT en 3D-WebGL AVEC une salle (dette n°7)", async () => {
+  {
+    /* La règle NUE, table de vérité complète. Ce verrou est le SEUL possible : `DcBase.render()` sort
+       d'emblée sur `typeof document === "undefined"` (Node sans DOM), donc la décision devait sortir
+       dans un module PUR pour être testable — c'est tout l'objet de la dette n°7. */
+    const V = WebglHostVisibility;
+    // LE cas fautif que corrige la dette n°7 : 3D-WebGL mais AUCUNE salle → hôte MASQUÉ (avant, le canevas
+    // du document précédent restait affiché sous le message « Aucune salle »).
+    ck.eq(V.visible("3d", true, false), false, "3D-WebGL SANS salle → MASQUÉ (le correctif ; c'est ce cas qui rougit si on retire `hasRoom`)");
+    // Cas nominal, INCHANGÉ : une 3D-WebGL avec une salle montre bien son canevas.
+    ck.eq(V.visible("3d", true, true), true, "3D-WebGL AVEC salle → VISIBLE (comportement nominal préservé)");
+    // Moteur legacy SVG (useWebGL = false) : l'hôte Three est démonté ailleurs, jamais montré.
+    ck.eq(V.visible("3d", false, true), false, "3D LEGACY (SVG) → hôte WebGL MASQUÉ, salle ou pas");
+    ck.eq(V.visible("3d", false, false), false, "3D LEGACY sans salle → MASQUÉ");
+    // Vue Dessus (2D SVG) : jamais l'hôte WebGL, quelle que soit la présence de salle.
+    ck.eq(V.visible("top", true, true), false, "vue DESSUS → MASQUÉ (rendu 2D SVG)");
+    ck.eq(V.visible("top", true, false), false, "vue DESSUS sans salle → MASQUÉ");
+    // Vue Étage (« floor ») : rendu 2D également ; c'est pourquoi l'étage cible n'ENTRE PAS dans la règle
+    // (la « Vue étage 3D » empilée est une vue « 3d » avec multiDc, pas la vue « floor »). Cette branche
+    // n'était PAS touchée par le bug — la ligne `view === "3d"` la masquait déjà — et le reste vérifié.
+    ck.eq(V.visible("floor", true, true), false, "vue ÉTAGE (2D) → MASQUÉ même avec une salle (l'étage cible n'est pas un paramètre)");
+    ck.eq(V.visible("floor", true, false), false, "vue ÉTAGE sans salle → MASQUÉ");
   }
   });
 
