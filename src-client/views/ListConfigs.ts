@@ -33,7 +33,11 @@ export class ListConfigs {
       collection: "equipments",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.equipments"),
-      searchFields: (e) => { const gl = store.equipmentGroupIds(e).map((gid: string) => { const g: any = store.get("groups", gid); return g && g.label; }).filter(Boolean); return [e.name, e.type, EquipmentTypes.label(e.type), e.brand, e.model, e.serial, ...gl, e.description]; },
+      // ⚠ Les NOMS (et séries) des SOUS-ÉQUIPEMENTS font partie des termes de recherche du MAÎTRE : sans onglet
+      // dédié (décision D2), c'est LE moyen de retrouver un drive — taper « Drive LTO » fait ressortir la
+      // librairie, d'où l'on ouvre sa fiche. Ce n'est pas une recherche DE sous-équipements (elle n'existe
+      // pas) : c'est la librairie qui matche.
+      searchFields: (e) => { const gl = store.equipmentGroupIds(e).map((gid: string) => { const g: any = store.get("groups", gid); return g && g.label; }).filter(Boolean); const se = store.subEquipmentsOf(e.id).flatMap((s: any) => [s.name, s.serial]); return [e.name, e.type, EquipmentTypes.label(e.type), e.brand, e.model, e.serial, ...gl, ...se, e.description]; },
       columns: [
         { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (e) => e.name, render: (e) => Html.escape(e.name || I18n.t("lists.ph.noName")) },
         {
@@ -52,6 +56,9 @@ export class ListConfigs {
         { head: I18n.t("lists.col.location"), essential: true, sortKey: "place", sort: (e) => ListConfigs._placeText(store, e), render: (e) => EntityViz.equipmentLocation(store, e) },
         { head: I18n.t("lists.col.ports"), cls: "cell-num", sort: (e) => store.portsOf(e.id).length, render: (e) => `<span class="pill">${store.portsOf(e.id).length}</span>` },
         { head: I18n.t("lists.col.aggregates"), cls: "cell-num", sort: (e) => store.aggregatesOf(e.id).length, render: (e) => `<span class="pill">${store.aggregatesOf(e.id).length}</span>` },
+        // Compte de SOUS-ÉQUIPEMENTS — même forme que la colonne Agrégats. Estompé à zéro (le cas de la
+        // quasi-totalité des équipements) pour ne pas ajouter une colonne de « 0 » à une table déjà large.
+        { head: I18n.t("lists.col.subEquipments"), cls: "cell-num", sort: (e) => store.subEquipmentsOf(e.id).length, render: (e) => { const n = store.subEquipmentsOf(e.id).length; return n ? `<span class="pill">${n}</span>` : dim("—"); } },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (e) => e.description || "", render: descCell },
       ],
     };

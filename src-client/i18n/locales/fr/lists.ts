@@ -45,6 +45,7 @@ export const lists = {
     location: "Emplacement",
     ports: "Ports",
     aggregates: "Agrégats",
+    subEquipments: "Sous-équip.",
     description: "Description",
     color: "Couleur",
     label: "Label",

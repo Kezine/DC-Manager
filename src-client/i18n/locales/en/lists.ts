@@ -39,6 +39,7 @@ export const lists = {
     location: "Location",
     ports: "Ports",
     aggregates: "Aggregates",
+    subEquipments: "Sub-equip.",
     description: "Description",
     color: "Colour",
     label: "Label",
