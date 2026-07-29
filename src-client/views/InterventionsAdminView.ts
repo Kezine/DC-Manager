@@ -789,7 +789,10 @@ export class InterventionsAdminView {
     return IconButton.build({ icon, label, danger, onClick });
   }
 
-  /** Icône de FAMILLE d'une cible liable (equipment/vm/spare) — repère visuel de la liste des objets liés. */
+  /** Icône de FAMILLE d'une cible liable — repère visuel de la liste des objets liés.
+      `sub_equipment` réutilise DÉLIBÉRÉMENT l'icône d'équipement : un sous-équipement est le contenu
+      logique d'un équipement, pas une famille visuelle de plus — et le libellé (colonne famille) fait
+      déjà la distinction. Le défaut EQUIPMENT reste le repli des slugs inconnus. */
   private static familyIcon(kind: string): string {
     return kind === "vm" ? Icons.VM : kind === "spare" ? Icons.SPARE : Icons.EQUIPMENT;
   }

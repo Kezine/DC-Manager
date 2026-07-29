@@ -3050,6 +3050,10 @@ module.exports = async () => {
       ck(!!gManyLinks && gManyLinks.some((i) => /links/.test(i)), "validation : > 200 liens → grief");
       const gLinkKind = grief({ kind: "intervention", title: "X", status: "planned", priority: "low", links: [{ target_kind: "planet", target_id: "x" }] });
       ck(!!gLinkKind && gLinkKind.some((i) => /target_kind/.test(i)), "validation : target_kind de lien inconnu → grief");
+      // 4ᵉ famille (lot 5) : un lien vers un SOUS-ÉQUIPEMENT est accepté et persiste tel quel — l'anti-vacuité
+      // est portée par le grief « planet » juste au-dessus (le contrôle de famille existe bel et bien).
+      const okSubEq = db.save("doc-A", "ise", { kind: "incident", title: "Drive HS", status: "declared", priority: "high", links: [{ target_kind: "sub_equipment", target_id: "se-1" }] }, "Testeur");
+      ck.eq(okSubEq.links.map((l) => l.target_kind + ":" + l.target_id).join(","), "sub_equipment:se-1", "validation : lien sub_equipment ACCEPTÉ (4ᵉ famille, remplacement de drive)");
       const gMulti = grief({ kind: "?", title: "", status: "?", priority: "?" });
       ck(!!gMulti && gMulti.length >= 4, "validation : griefs GROUPÉS (title + kind + status + priority cumulés en une passe)");
       ck.eq(raw.prepare("SELECT COUNT(*) AS n FROM interventions WHERE id='bad'").get().n, 0, "validation : un candidat rejeté n'écrit RIEN (parse avant transaction)");

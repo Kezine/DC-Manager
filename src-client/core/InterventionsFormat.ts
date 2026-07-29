@@ -29,7 +29,7 @@ export class InterventionsFormat {
   /** Priorités (ordre de traitement) — MIROIR de INTERVENTION_PRIORITIES (serveur), du plus faible au plus fort. */
   static readonly PRIORITY_SLUGS: readonly string[] = ["low", "normal", "high", "critical"];
   /** Familles de cibles liables — MIROIR de INTERVENTION_TARGET_KINDS (serveur). */
-  static readonly TARGET_KIND_SLUGS: readonly string[] = ["equipment", "vm", "spare"];
+  static readonly TARGET_KIND_SLUGS: readonly string[] = ["equipment", "vm", "spare", "sub_equipment"];
 
   /* ---- Clés i18n (la vue appelle I18n.t dessus) ---- */
 

@@ -23,11 +23,13 @@ export const interventions = {
     equipment: "Équipement",
     vm: "VM",
     spare: "Pièce (spare)",
+    sub_equipment: "Sous-équipement",
     unknown: "(introuvable)",
     fallback: {
       equipment: "(équipement)",
       vm: "(VM)",
       spare: "(spare)",
+      sub_equipment: "(sous-équipement)",
     },
   },
   fiche: {

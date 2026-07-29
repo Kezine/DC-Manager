@@ -4,7 +4,7 @@
    - InterventionsClient.buildQuery : construction PURE de la query string (filtres RÉPÉTABLES).
    Les nouvelles CLÉS i18n (interventions.*) sont couvertes par test-i18n (complétude fr ⇄ en). */
 "use strict";
-const { ck, section, D, SharedSchema } = require("./harness.js");
+const { ck, section, D, SERVER, SharedSchema } = require("./harness.js");
 
 module.exports = async () => {
   const { InterventionsFormat } = D("core/InterventionsFormat.js");
@@ -21,7 +21,12 @@ module.exports = async () => {
     ck.eq(InterventionsFormat.KIND_SLUGS.join(","), "incident,intervention", "KIND_SLUGS = miroir serveur");
     ck.eq(InterventionsFormat.STATUS_SLUGS.join(","), "declared,planned,in_progress,closed,cancelled", "STATUS_SLUGS = miroir serveur (ordre cycle de vie)");
     ck.eq(InterventionsFormat.PRIORITY_SLUGS.join(","), "low,normal,high,critical", "PRIORITY_SLUGS = miroir serveur (ordre croissant)");
-    ck.eq(InterventionsFormat.TARGET_KIND_SLUGS.join(","), "equipment,vm,spare", "TARGET_KIND_SLUGS = miroir serveur");
+    // Miroir des familles : comparé au VRAI enum serveur, plus à une chaîne écrite à la main — celle-ci
+    // aurait dû être retouchée à CHAQUE ajout de famille (elle a raté « sub_equipment » à l'écriture même
+    // de ce lot), alors que le but du test est précisément d'attraper une dérive entre les deux côtés.
+    const { INTERVENTION_TARGET_KINDS } = SERVER("interventions/InterventionsValidate.js");
+    ck.eq(InterventionsFormat.TARGET_KIND_SLUGS.join(","), INTERVENTION_TARGET_KINDS.join(","), "TARGET_KIND_SLUGS = miroir serveur (comparé à l'enum RÉEL)");
+    ck(InterventionsFormat.TARGET_KIND_SLUGS.includes("sub_equipment"), "TARGET_KIND_SLUGS : la famille sub_equipment est liable (lot 5)");
     // OPEN_STATUS_SLUGS : sous-ensemble ACTIF de STATUS_SLUGS (badge de comptage d'onglet) — dérivé de
     // l'énumération, donc toujours un vrai sous-ensemble, et excluant bien les états terminaux closed/cancelled.
     ck.eq(InterventionsFormat.OPEN_STATUS_SLUGS.join(","), "declared,planned,in_progress", "OPEN_STATUS_SLUGS = statuts ouverts (ni closed ni cancelled)");

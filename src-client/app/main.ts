@@ -727,20 +727,40 @@ async function boot(): Promise<void> {
   // TOUJOURS enregistrée : `interventionsClient` est null hors mode API → la vue affiche « mode API requis »
   // (feature AMOVIBLE : retirer = supprimer InterventionsAdminView + InterventionsClient + InterventionsFormat
   // + ces lignes). Les cibles liables viennent d'une interface hôte INJECTÉE (la vue ne touche jamais le Store).
-  const targetFallback = (kind: string): string => I18n.t(kind === "equipment" ? "interventions.target.fallback.equipment" : kind === "vm" ? "interventions.target.fallback.vm" : "interventions.target.fallback.spare");
+  // FAMILLES de cibles liables — UNE SEULE table, MIROIR de INTERVENTION_TARGET_KINDS (serveur).
+  // ⚠ Elle remplace trois chaînes de ternaires (`targetFallback`, `targetCollection` et la liste `families`
+  // ci-dessous) dont le DÉFAUT était « spare » : une 4ᵉ famille non déclarée s'y résolvait SILENCIEUSEMENT en
+  // spare — mauvaise collection lue, mauvais libellé de repli, aucune erreur. Ajouter une famille = ajouter
+  // UNE entrée ici ; un slug inconnu rend désormais `undefined` et se voit (cf. les gardes ci-dessous).
+  const TARGET_FAMILIES: Record<string, { collection: string; fallbackKey: string }> = {
+    equipment:     { collection: "equipments",    fallbackKey: "interventions.target.fallback.equipment" },
+    vm:            { collection: "vms",           fallbackKey: "interventions.target.fallback.vm" },
+    spare:         { collection: "spares",        fallbackKey: "interventions.target.fallback.spare" },
+    sub_equipment: { collection: "subEquipments", fallbackKey: "interventions.target.fallback.sub_equipment" },
+  };
+  const targetFallback = (kind: string): string => {
+    const family = TARGET_FAMILIES[kind];
+    return family ? I18n.t(family.fallbackKey) : I18n.t("interventions.target.unknown");
+  };
   const targetLabel = (kind: string, r: any): string => {
+    // Un spare n'a pas toujours de `name` : son identité lisible est calculée (displayName), avec le numéro de
+    // série en dernier recours. Les autres familles portent un `name` — un sous-équipement en a un REQUIS.
     if (kind === "spare") return (r.displayName ? r.displayName() : r.name) || r.serial || targetFallback(kind);
     return r.name || targetFallback(kind);
   };
-  const targetCollection = (kind: string): string => (kind === "equipment" ? "equipments" : kind === "vm" ? "vms" : "spares");
+  const targetCollection = (kind: string): string => {
+    const family = TARGET_FAMILIES[kind];
+    return family ? family.collection : "";   // slug inconnu → collection vide : `store.get("")` rend null, la cible s'affiche « introuvable »
+  };
   const interventionTargets: InterventionTargetSource = {
     labelOf: (kind, id) => { const r: any = store.get(targetCollection(kind), id); return r ? targetLabel(kind, r) : null; },
     // Recherche UNIFIÉE des cibles liables : concatène les 3 familles en items {kind,id,label} puis délègue le
     // tri de pertinence (préfixe avant inclusion), le plafond et la dédup (cibles déjà liées) au module pur
     // TargetSearch, avec la normalisation PARTAGÉE Schema.normSearch (insensibilité casse/accents).
     search: (query, excluded) => {
-      const families: ReadonlyArray<readonly [string, string]> = [["equipment", "equipments"], ["vm", "vms"], ["spare", "spares"]];
-      const items = families.flatMap(([kind, coll]) => store.all(coll).map((r: any) => ({ kind, id: r.id, label: targetLabel(kind, r) })));
+      // La liste des familles DÉRIVE de TARGET_FAMILIES : plus de tableau parallèle à garder en phase.
+      const items = Object.entries(TARGET_FAMILIES).flatMap(([kind, family]) =>
+        store.all(family.collection).map((r: any) => ({ kind, id: r.id, label: targetLabel(kind, r) })));
       return TargetSearch.rank(items, query, { normalize: Schema.normSearch, limit: 12, excluded });
     },
     // Ouvre la FICHE DE DÉTAIL existante de la cible (equipment/vm/spare) via la machinerie des fiches. Le

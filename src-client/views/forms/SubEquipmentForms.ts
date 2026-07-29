@@ -33,6 +33,7 @@ import { GroupTypes } from "../../domain/GroupTypes";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { I18n } from "../../i18n/I18n";
 import { AuditLine } from "./AuditLine";
+import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
 import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import { FormBase } from "./FormBase";
 import { EquipmentForms } from "./EquipmentForms";   // rebond vers la fiche du MAÎTRE (usage différé, cf. en-tête)
@@ -100,6 +101,11 @@ export class SubEquipmentForms extends FormBase {
     const note = document.createElement("div"); note.className = "form-hint"; note.style.marginTop = "10px";
     note.textContent = I18n.t("subEquipment.natureHint");
     root.appendChild(note);
+
+    // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors
+    // mode API) — même rangée que les fiches équipement/VM/spare. Remplacer un drive en panne est LE motif
+    // d'intervention type sur ce genre de matériel : la 4ᵉ famille se déclare ici, pas seulement dans l'enum.
+    InterventionFicheRow.attach(root, host.interventionHooks, { kind: "sub_equipment", id: se.id, label: se.name || "" }, () => host.closeModal?.());
 
     AuditLine.attach(root, se, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.form(store, host, se.equipment_id, se.id, onChanged));
