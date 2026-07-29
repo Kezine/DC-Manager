@@ -29,6 +29,22 @@
      2. le conteneur IMMÉDIAT est un ÉTAGE          → localisable SI ce bâtiment
         a au moins une SALLE.
 
+   POUR UNE LIAISON (câble, faisceau), la question n'est pas « ce câble est-il
+   placé ? » — un câble n'a pas de placement propre — mais « par QUELLE extrémité
+   la vue va-t-elle le cadrer ? ». La réponse est donc un PORT, pas un booléen :
+   `cableEnd` rend l'extrémité RETENUE (la première LOCALISABLE, A puis B) et
+   `cable` n'est que le constat qu'il en existe une. Écrire le prédicat à part
+   aurait recréé la panne que ce module ferme : deux endroits posant la même
+   question finissent par y répondre différemment, et l'écart s'appelle un bouton
+   MORT (décision D6). `DcInteract.locateCable` consomme donc `cableEnd` — le
+   miroir n'est plus VÉRIFIÉ, il est STRUCTUREL.
+   ⚠ La priorité A puis B est celle de l'historique `Store.cableDcId`
+   (`portDcId(A) || portDcId(B)`), pour que la généralisation ne DÉPLACE pas le
+   cadrage d'un câble dont les deux bouts sont placés. Et elle saute une extrémité
+   NON localisable au lieu de s'y arrêter : un câble dont le bout A pend dans une
+   baie hors salle et dont le bout B est en salle se cadre par B, hier comme
+   aujourd'hui.
+
    ⚠ POURQUOI LA CONDITION 2 N'EST PAS « la chaîne a un conteneur ». Un posé
    d'étage se cadre en MONDE, en Vue étage — mais la PORTÉE d'affichage de cette
    vue s'exprime en SALLES (`visibleDcIds`) : le plan d'étage d'un bâtiment n'est
@@ -81,6 +97,29 @@ export class Locatable {
   static port(portId: string | null, store: LocatableStore): boolean {
     const p = store.get("ports", portId);
     return p ? Locatable.equipment(p.equipment_id, store) : false;
+  }
+
+  /** Extrémité RETENUE pour cadrer une LIAISON : le port de la première extrémité LOCALISABLE (A puis B),
+      `null` si aucune des deux ne l'est. `cableOrId` = enregistrement OU id (mêmes tolérances que
+      `Store.cableDcId`) ; convient aussi bien à un câble qu'à toute liaison portant `from_port_id`/
+      `to_port_id`.
+
+      ⚠ CETTE MÉTHODE EST LA RÈGLE, `cable` n'en est que le CONSTAT — et c'est ce qui rend le bouton mort
+      structurellement impossible. Tant que le prédicat vivait ici et le choix de l'extrémité dans
+      `DcInteract`, rien n'obligeait les deux à s'accorder : c'est très exactement ce qui s'était produit
+      pour les équipements (le bouton restait caché alors que l'action aboutissait, doctrine §6.28). */
+  static cableEnd(cableOrId: any, store: LocatableStore): string | null {
+    const c = (cableOrId && typeof cableOrId === "object") ? cableOrId : store.get("cables", cableOrId);
+    if (!c) return null;
+    if (Locatable.port(c.from_port_id, store)) return String(c.from_port_id);
+    if (Locatable.port(c.to_port_id, store)) return String(c.to_port_id);
+    return null;
+  }
+
+  /** La LIAISON est-elle localisable ? = « existe-t-il une extrémité à cadrer ? ». Généralise
+      `!!Store.cableDcId`, qui ne savait reconnaître qu'une extrémité posée en SALLE. */
+  static cable(cableOrId: any, store: LocatableStore): boolean {
+    return Locatable.cableEnd(cableOrId, store) !== null;
   }
 
   /** La règle NUE, sur une chaîne de conteneurs déjà calculée (du conteneur IMMÉDIAT à la racine, telle

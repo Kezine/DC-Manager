@@ -152,14 +152,11 @@ export class DetailForms extends IpamForms {
     AuditLine.attach(root, c, host.userDirectory);   // « Créé/Modifié par » (mode API)
 
     // actions : Localiser en 3D + Modifier (mêmes conventions que equipment/rackDetail)
-    // « Localiser » seulement si une extrémité au moins se résout en salle (même prédicat que locateCable).
-    // ⚠ LE CÂBLE RESTE SUR LA CLÉ « SALLE » alors que l'ÉQUIPEMENT et le PORT sont passés au prédicat
-    // CONTENEUR — ce n'est PAS un oubli. `DcInteract.locateCable` cadre par `resolvePort3D`, scopé par salle,
-    // et n'a aucune branche pour un conteneur d'étage : afficher ce bouton pour un câble dont les deux
-    // extrémités sont des posés d'étage ne rendrait qu'un toast (bouton MORT, interdit par la décision D6 du
-    // chantier « câblage des équipements d'étage »). Ce prédicat se migrera AVEC son action.
+    // « Localiser » seulement si une extrémité au moins est ATTEIGNABLE par la vue — prédicat PARTAGÉ
+    // (`core/Locatable`), qui est aussi la règle par laquelle `locateCable` choisit l'extrémité à cadrer
+    // (doctrine §6.32). Une extrémité posée sur un ÉTAGE compte désormais, comme partout ailleurs.
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (host.locate && store.cableDcId(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
+    if (host.locate && store.cableLocatable(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = () => this.cable(store, host, id, onChanged); actions.appendChild(b); }
     root.appendChild(actions);
     host.openModal({ title: I18n.t("detail.cable.title"), subtitle: Html.escape(c.name || ""), body: root, hideFooter: true, wide: true });

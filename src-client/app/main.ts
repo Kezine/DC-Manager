@@ -383,12 +383,10 @@ async function boot(): Promise<void> {
           const isLocatable =
             opts.locate === "equipment" ? (id: string) => store.equipmentLocatable(id)
             : opts.locate === "rack" ? (id: string) => { const rk: any = store.get("racks", id); return !!(rk && rk.datacenter_id); }
-            // ⚠ LE CÂBLE RESTE SUR LA CLÉ « SALLE », DÉLIBÉRÉMENT — ce n'est PAS un oubli. `DcInteract.locateCable`
-            // n'a AUCUNE branche pour un conteneur d'étage : il cadre par `resolvePort3D`, scopé par salle. Migrer
-            // ce prédicat vers `cableContainer` afficherait le bouton d'un câble dont les deux extrémités sont des
-            // posés d'étage, et le clic ne rendrait qu'un toast — le bouton MORT que la décision D6 du chantier
-            // « câblage des équipements d'étage » interdit. Il se migrera avec son action (lot `worldLine`).
-            : opts.locate === "cable" ? (id: string) => !!store.cableDcId(id)
+            // CÂBLE : prédicat PARTAGÉ (`core/Locatable`) — et plus qu'un miroir, c'est la MÊME règle que
+            // consomme `DcInteract.locateCable` pour choisir l'extrémité qu'il cadre (doctrine §6.32). Il
+            // reconnaît désormais une extrémité posée sur un ÉTAGE, que `cableDcId` déclarait « non placée ».
+            : opts.locate === "cable" ? (id: string) => store.cableLocatable(id)
             : null;
           const canLocate = isLocatable ? (id: string) => { const target = locateTargetOf(id); return !!target && isLocatable(target); } : undefined;
           view = new ListView(store, container, {

@@ -1109,13 +1109,69 @@ export abstract class DcInteract extends DcPanels {
     this.focus3DAt(dcId, t.p, t.extent, this.frontAzimuth(rk.orientation));
   }
 
+  /** État de sélection commun aux DEUX chemins de « Localiser un câble » (salle et étage) : le câble visé
+      est sélectionné, l'affichage « tous les câbles » forcé, et toute surbrillance d'équipement levée.
+      Posé APRÈS les refus dans les deux cas — un refus ne doit rien sélectionner (comportement historique). */
+  private markCableFocused(cableId: string): void {
+    this.selCables.add(cableId); this.showAllCables = true; this.focusEqId = null;
+  }
+
+  /** « Localiser » une LIAISON dont l'extrémité RETENUE est portée par un équipement posé sur un ÉTAGE :
+      Vue étage cadrée sur ce connecteur, EN MONDE. Même contrat de retour que `locateFloorEquip` : `false`
+      si cette extrémité n'est pas sur un étage (l'appelant poursuit par le chemin SALLE), `true` sinon —
+      Y COMPRIS quand la localisation est refusée (l'utilisateur a reçu un toast).
+
+      ⚠ LE POINT VISÉ EST CELUI QUE LE TRACÉ EMPLOIE, pas un recalcul : `CableRouting.portOnFloorWorld` est
+      exactement ce que `worldEndIn` appelle pour porter au monde un bout de liaison posé sur un étage
+      (doctrine §6.31). La caméra vise donc, par construction, le point d'où part le câble DESSINÉ —
+      recomposer ici « origine du posé + résolution du port » reposerait la question du `dc_z`, et il
+      suffit d'y répondre une fois de travers pour cadrer 250 mm à côté (§6.27). */
+  protected locateFloorCable(cableId: string, portId: string): boolean {
+    const p: any = this.store.get("ports", portId);
+    const e: any = p ? this.store.get("equipments", p.equipment_id) : null;
+    if (!e) return false;
+    const c = this.store.equipmentContainer(e);
+    if (!c || c.kind !== "floor") return false;
+    // GARDE FERMÉE, et non un second filtre : l'extrémité retenue est LOCALISABLE par construction
+    // (`Store.cableLocatableEnd`), et `core/Locatable` n'accorde ce verdict à un posé d'étage que si son
+    // bâtiment a au moins une salle — la MÊME question, posée au MÊME `Store.roomsOfBuilding` que
+    // `scopeFloorBuilding`. Ce refus est donc inatteignable DEPUIS `locateCable` ; on le garde parce qu'il
+    // est le seul comportement juste si l'on appelait cette méthode sans passer par la règle d'extrémité,
+    // et parce qu'ignorer un verdict d'échec vaudrait cadrage sur le vide (§6.27).
+    if (!this.scopeFloorBuilding(c.location)) { Notify.toast(I18n.t("dc.interact.floorNoRoomInBuilding"), "err"); return true; }
+    const pt = this.routing.portOnFloorWorld(this.currentMultiLayout(), portId);
+    if (!pt) { Notify.toast(I18n.t("dc.interact.cableEndNotFoundFloor"), "err"); return true; }
+    this.markCableFocused(cableId);
+    this.focusWorld3DAt({ x: pt.x, y: pt.y, z: pt.z }, FOCUS_CONTEXT_CABLE_MM);
+    return true;
+  }
+
   locateCable(cableId: string): void {
     const c: any = this.store.get("cables", cableId); if (!c) return;
-    const dcId = this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id);
+    // EXTRÉMITÉ RETENUE : la première LOCALISABLE (A puis B). La règle vit dans `core/Locatable`, où le
+    // PRÉDICAT des boutons « Localiser » la lit aussi — les deux ne peuvent donc pas diverger, et c'est ce
+    // qui interdit le bouton MORT (décision D6, doctrine §6.28 puis §6.32). L'expression historique
+    // `portDcId(A) || portDcId(B)` en est le cas particulier « salle », qu'elle reproduit à l'identique.
+    const portId = this.store.cableLocatableEnd(c);
+    if (!portId) {
+      // AUCUNE extrémité atteignable. Si l'une d'elles est pourtant POSÉE SUR UN ÉTAGE, la cause n'est pas
+      // « pas de salle » mais la limite de portée (§6.27) : on donne alors la MÊME explication que
+      // « Localiser » un équipement d'étage, plutôt qu'un message qui nierait un placement bien réel (D4).
+      const surEtage = [c.from_port_id, c.to_port_id].some((id: any) => { const k = this.store.portContainer(id); return !!k && k.kind === "floor"; });
+      Notify.toast(I18n.t(surEtage ? "dc.interact.floorNoRoomInBuilding" : "dc.interact.cableNotInRoom"), "err");
+      return;
+    }
+    if (this.locateFloorCable(cableId, portId)) return;   // extrémité posée sur un ÉTAGE : chemin MONDE
+    const dcId = this.portDcId(portId);
+    // Non-null par construction : une extrémité localisable qui n'est pas sur un étage traverse une SALLE
+    // (les deux seules branches de `core/Locatable`). La garde reste, fermée, plutôt qu'un `!` de complaisance.
     if (!dcId) { Notify.toast(I18n.t("dc.interact.cableNotInRoom"), "err"); return; }
+    // ⚠ LE REPLI SUR L'AUTRE BOUT EST CONSERVÉ TEL QUEL : l'extrémité retenue peut être jugée localisable
+    // sans que la 3D sache la résoudre (libre rattaché à une salle mais sans `dc_x`/`dc_y` — écart connu et
+    // ANTÉRIEUR, §6.28) ; on cadre alors l'autre bout s'il vit dans la MÊME salle, comme avant ce lot.
     const a = this.resolver.resolvePort3D(c.from_port_id, dcId) || this.resolver.resolvePort3D(c.to_port_id, dcId);
     if (!a) { Notify.toast(I18n.t("dc.interact.cableEndNotFound"), "err"); return; }
-    this.selCables.add(cableId); this.showAllCables = true; this.focusEqId = null;
+    this.markCableFocused(cableId);
     this.focus3DAt(dcId, { x: a.x, y: a.y, z: a.z }, FOCUS_CONTEXT_CABLE_MM);
   }
 

@@ -27,6 +27,7 @@ import type { RouteHost } from "./RouteTool";
 import { U_MM } from "../../domain/constants";
 import { CABLE_SPLINE_K, CAM_PRESETS } from "./shared";
 import type { Vec3, DatacenterHost } from "./shared";
+import type { PlacementContainer } from "../../../src-shared/PlacementContainers";
 // SPIKE : moteur 3D WebGL parallèle — importé DYNAMIQUEMENT (webpackMode "eager" → reste inliné single-file ;
 // et la chaîne require() CJS du harnais de test ne charge pas ses dépendances ESM-only comme Line2).
 
@@ -267,6 +268,32 @@ export abstract class DcBase {
     if (this.visibleDcIds.size) this.visibleDcIds.forEach((id) => { if (this.store.get("datacenters", id)) ids.add(id); });
     else if (!dc) this.store.all("datacenters").forEach((d: any) => ids.add(d.id));
     return [...ids];
+  }
+
+  /** Ce CONTENEUR est-il AFFICHÉ par la vue courante ? PENDANT « conteneur » de `displayedDcIds`, dont il
+      partage exactement la portée : les cartes latérales des vues 3D et Dessus (le Plan d'étage 2D a la
+      sienne, `floorTargetResolve`, et ne passe pas par ici).
+
+      DÉCISION D3 du chantier « câblage des équipements d'étage » : un ÉTAGE est un conteneur affichable au
+      même titre qu'une SALLE. Ce que le rendu applique déjà au tracé des liaisons (`CableRouting.worldEndIn`
+      : `roomById.get` d'un côté, `FloorLayout.floorShown` de l'autre) vaut aussi pour les panneaux qui
+      demandent « cet objet est-il dans ce que je montre ? » — sans quoi une liaison serait DESSINÉE dans la
+      scène et absente de la carte qui prétend la piloter.
+
+      ⚠ LA GARDE « VUE ÉTAGE » N'EST PAS REDONDANTE. `currentMultiLayout()` calcule la disposition du MODÈLE
+      quelle que soit la vue : ses `floorPlanes` existent même en salle unique, où aucun plan d'étage n'est
+      dessiné (`webglCtx` ne produit de décor d'étage que sous `multiDc`). Lire `floorShown` sans cette garde
+      dirait « affiché » d'un étage que l'utilisateur ne voit pas — le REPÈRE pris pour la PORTÉE (§6.8).
+
+      Une BAIE ou une ÉTAGÈRE rend `false` : ce ne sont pas des conteneurs d'affichage, leurs contenus
+      apparaissent dans la SALLE qui les porte (et c'est bien celle-là qu'il faut interroger). */
+  protected containerShown(container: PlacementContainer | null, dc: any): boolean {
+    if (!container) return false;
+    if (container.kind === "room") return this.displayedDcIds(dc).includes(container.id);
+    if (container.kind !== "floor") return false;
+    if (this.view !== "3d" || !this.multiDc) return false;
+    if (this.view !== "3d" || !this.multiDc) return false;
+    return FloorLayout.floorShown(this.currentMultiLayout(), container.location, container.floor);
   }
 
   protected setDirty(): void { this.host.setDirty?.(true); }

@@ -564,6 +564,14 @@ module.exports = async () => {
     ck.eq(s.portDcId(pX), null, "portDcId : port d'un équipement non placé → null");
     ck.eq(s.cableDcId(lien.id), dcA.id, "cableDcId : une extrémité localisable suffit → sa salle");
     ck.eq(s.cableDcId(jm), null, "cableDcId : aucune extrémité en salle → null (bouton Localiser masqué)");
+    /* PARITÉ du chemin CONTENEUR sur une liaison de SALLE (§6.32) : le prédicat et l'extrémité retenue
+       reproduisent exactement le verdict historique. `cableDcId` est encore là (son retrait est un lot à
+       part), donc la comparaison porte sur la fonction VIVANTE et non sur une transcription. */
+    ck.eq(s.cableLocatable(lien.id), true, "cableLocatable : même verdict que `!!cableDcId` sur une liaison de salle");
+    ck.eq(s.cableLocatableEnd(lien.id), pA1, "cableLocatableEnd : l'extrémité RETENUE est la première localisable — pX n'est pas placé, c'est donc pA1");
+    ck.eq(s.portDcId(s.cableLocatableEnd(lien.id)), s.cableDcId(lien.id), "…et la salle qu'elle désigne est CELLE de `cableDcId` : le cadrage ne bouge pas");
+    ck.eq(s.cableLocatable(jm), false, "cableLocatable : aucune extrémité atteignable → false (parité `!!cableDcId`)");
+    ck.eq(s.cableLocatableEnd(jm), null, "…et aucune extrémité retenue");
     ck.eq(s.equipmentPlacementBlockedReason(eqX.id, dcA.id), null, "blockedReason : pose dans la salle câblée → autorisée");
     ck(typeof s.equipmentPlacementBlockedReason(eqX.id, dcB.id) === "string", "blockedReason : pose dans une AUTRE salle → bloquée");
     ck(s.equipmentRequiredContainers(eqX.id).some((x) => x.container.kind === "room" && x.container.id === dcA.id), "equipmentRequiredContainers : contraint à la Salle A");
@@ -1399,6 +1407,61 @@ module.exports = async () => {
     ck.eq(Locatable.port("p-1", store), true, "port → règle de son ÉQUIPEMENT porteur");
     ck.eq(Locatable.port("p-orph", store), false, "port dont l'équipement a disparu → false");
     ck.eq(Locatable.port(null, store), false, "port null → false (tolérant)");
+
+    /* ---- LIAISONS (câbles) : `cableEnd` est LA RÈGLE, `cable` n'en est que le constat (§6.32) ----
+       Ce qu'on cadre, ce n'est pas « le câble » (il n'a pas de placement) mais UNE de ses extrémités.
+       Écrire le prédicat ailleurs que le choix de cette extrémité, c'est rouvrir le bouton MORT (D6). */
+    const dEq = {
+      "eq-salle": { id: "eq-salle", placement_mode: "manual", dim_mode: "free", dc_id: "dc-1" },
+      "eq-salle2": { id: "eq-salle2", placement_mode: "manual", dim_mode: "free", dc_id: "dc-2" },
+      "eq-etage": { id: "eq-etage", placement_mode: "floor", dim_mode: "free", location: "liege", floor: "1" },
+      "eq-etage-nu": { id: "eq-etage-nu", placement_mode: "floor", dim_mode: "free", location: "namur", floor: "0" },
+      "eq-hors-salle": { id: "eq-hors-salle", placement_mode: "rack", rack_id: "rk-nu", rack_u: 3 },
+      "eq-rien": { id: "eq-rien", placement_mode: "manual", dim_mode: "free" },
+    };
+    const dPorts = {}; Object.keys(dEq).forEach((k) => { dPorts["p-" + k] = { id: "p-" + k, equipment_id: k }; });
+    const dCables = {
+      "c-salle-salle": { id: "c-salle-salle", from_port_id: "p-eq-salle", to_port_id: "p-eq-salle2" },
+      "c-rien-salle": { id: "c-rien-salle", from_port_id: "p-eq-rien", to_port_id: "p-eq-salle2" },
+      "c-horsSalle-salle": { id: "c-horsSalle-salle", from_port_id: "p-eq-hors-salle", to_port_id: "p-eq-salle2" },
+      "c-etage-rien": { id: "c-etage-rien", from_port_id: "p-eq-etage", to_port_id: "p-eq-rien" },
+      "c-salle-etage": { id: "c-salle-etage", from_port_id: "p-eq-salle", to_port_id: "p-eq-etage" },
+      "c-etageNu-salle": { id: "c-etageNu-salle", from_port_id: "p-eq-etage-nu", to_port_id: "p-eq-salle2" },
+      "c-rien-rien": { id: "c-rien-rien", from_port_id: "p-eq-rien", to_port_id: null },
+      "c-vide": { id: "c-vide", from_port_id: null, to_port_id: null },
+    };
+    const bancs = { equipments: dEq, ports: dPorts, cables: dCables, racks: { "rk-nu": { id: "rk-nu", location: "liege" } } };
+    const sL = { get: (coll, id) => (bancs[coll] ? (bancs[coll][id] || null) : null), roomsOfBuilding: (loc) => (bâtimentsPeuplés.has(loc) ? [{ id: "dc-1" }] : []) };
+
+    ck.eq(Locatable.cableEnd("c-salle-salle", sL), "p-eq-salle", "deux bouts placés → l'extrémité A est RETENUE (priorité historique de `cableDcId`)");
+    ck.eq(Locatable.cableEnd("c-rien-salle", sL), "p-eq-salle2", "bout A non placé → on passe à B, on ne s'arrête pas dessus");
+    ck.eq(Locatable.cableEnd("c-horsSalle-salle", sL), "p-eq-salle2",
+      "bout A dans une baie HORS SALLE : il a un CONTENEUR mais n'est pas atteignable → B retenu (parité stricte avec `cableDcId`)");
+    ck.eq(Locatable.cableEnd("c-etage-rien", sL), "p-eq-etage", "bout A posé sur un ÉTAGE atteignable → retenu (l'ancien rendait null : bouton caché)");
+    ck.eq(Locatable.cableEnd("c-salle-etage", sL), "p-eq-salle", "salle en A, étage en B → A reste retenu : la généralisation ne DÉPLACE pas un cadrage existant");
+    ck.eq(Locatable.cableEnd("c-etageNu-salle", sL), "p-eq-salle2", "étage d'un bâtiment SANS salle en A → non atteignable, B retenu");
+    ck.eq(Locatable.cableEnd("c-rien-rien", sL), null, "aucun bout atteignable → aucune extrémité");
+    ck.eq(Locatable.cableEnd("c-vide", sL), null, "câble sans aucun port → aucune extrémité (et non une exception)");
+    ck.eq(Locatable.cableEnd("c-inexistant", sL), null, "câble inconnu → null (tolérant)");
+    ck.eq(Locatable.cableEnd(dCables["c-salle-salle"], sL), "p-eq-salle", "liaison par ENREGISTREMENT → aucune relecture (parité `cableDcId`)");
+
+    /* Le PRÉDICAT : attente ÉCRITE cas par cas (colonne 2), PUIS l'équivalence avec la règle (colonne
+       « existe-t-il une extrémité retenue ? »). Les deux, et pas seulement la seconde : épinglée à la
+       règle seule, l'assertion resterait verte si `cable` était réécrit à l'identique DE TRAVERS. */
+    const attentes = [
+      ["c-salle-salle", true], ["c-rien-salle", true], ["c-horsSalle-salle", true],
+      ["c-etage-rien", true],       // ⚠ NOUVEAU : `!!cableDcId` rendait false — bouton caché sur un câble atteignable
+      ["c-salle-etage", true], ["c-etageNu-salle", true],
+      ["c-rien-rien", false], ["c-vide", false],
+    ];
+    let cablesVus = 0;
+    for (const [id, attendu] of attentes) {
+      cablesVus++;
+      ck.eq(Locatable.cable(id, sL), attendu, `prédicat de liaison — ${id}`);
+      ck.eq(Locatable.cable(id, sL), Locatable.cableEnd(id, sL) !== null,
+        `…et il est le CONSTAT de la règle, pas une seconde écriture — ${id}`);
+    }
+    ck.eq(cablesVus, 8, "les huit liaisons du banc ont bien été jouées (garde anti-boucle vide)");
   }
   });
 

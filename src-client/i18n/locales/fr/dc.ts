@@ -464,6 +464,9 @@ export const dc = {
     rackNotInRoom: "Baie non placée dans une salle",
     cableNotInRoom: "Câble non raccordé dans une salle",
     cableEndNotFound: "Extrémité du câble introuvable dans cette salle",
+    // BASCULE selon le conteneur (décision D4) : le message nomme ce que l'utilisateur VOIT. Tant que
+    // l'extrémité cadrée vit dans une salle, c'est le libellé HISTORIQUE ci-dessus, au caractère près.
+    cableEndNotFoundFloor: "Extrémité du câble introuvable sur cet étage",
     wpNotInRoom: "Waypoint non posé dans une salle",
     portEquipNotInRoom: "Port : équipement non placé dans une salle",
     portNotFound3d: "Port introuvable en 3D (façade non posée ?)",

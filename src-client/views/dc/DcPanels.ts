@@ -10,7 +10,6 @@ import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 import { PlacementFrame } from "../../geometry/PlacementFrame";
 import { FloorLayout } from "../../geometry/FloorLayout";
 import { PlacementContainers } from "../../../src-shared/PlacementContainers";
-import type { PlacementContainer } from "../../../src-shared/PlacementContainers";
 import { SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM } from "../../geometry/SiteLayout";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Format } from "../../core/Format";
@@ -126,11 +125,9 @@ export abstract class DcPanels extends DcViews2D {
     // ÉQUIPEMENTS : prédicat PARTAGÉ (`core/Locatable`) — la recherche ne propose que ce que « Localiser »
     // sait atteindre, y compris désormais un posé d'ÉTAGE (doctrine §6.27 puis §6.28).
     n = 0; for (const e of this.store.all("equipments")) { if (n >= CAP) break; if (!this.store.equipmentLocatable(e.id)) continue; if (m(e.name, e.type, e.brand, e.model)) { out.push({ kind: "equipment", id: e.id, label: e.name || I18n.t("lists.ph.equipment"), tag: I18n.t("dc.panels.tagEquip") }); n++; } }
-    // ⚠ CÂBLES : la clé « salle » est CONSERVÉE, délibérément. `locateCable` cadre par `resolvePort3D`
-    // (scopé par salle) et n'a aucune branche pour un conteneur d'étage : proposer ici un câble entre deux
-    // posés d'étage ne rendrait qu'un toast — le bouton MORT qu'interdit la décision D6 du chantier
-    // « câblage des équipements d'étage ». Cette ligne se migrera AVEC son action.
-    n = 0; for (const c of this.store.all("cables")) { if (n >= CAP) break; const lab = this.cableLabelShort(c); if (m(c.name, lab) && (this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id))) { out.push({ kind: "cable", id: c.id, label: lab, tag: I18n.t("dc.panels.tagCable") }); n++; } }
+    // CÂBLES : prédicat PARTAGÉ (`core/Locatable`) — la recherche ne propose que ce que « Localiser » sait
+    // atteindre, extrémité posée sur un ÉTAGE comprise (doctrine §6.32).
+    n = 0; for (const c of this.store.all("cables")) { if (n >= CAP) break; const lab = this.cableLabelShort(c); if (m(c.name, lab) && this.store.cableLocatable(c)) { out.push({ kind: "cable", id: c.id, label: lab, tag: I18n.t("dc.panels.tagCable") }); n++; } }
     n = 0; for (const w of this.store.all("waypoints")) { if (n >= CAP) break; if (!w.datacenter_id || !this.store.waypointIsPlaced(w)) continue; if (m(w.name)) { out.push({ kind: "waypoint", id: w.id, label: Waypoint.glyph(w) + " " + (w.name || I18n.t("dc.common.waypoint")), tag: I18n.t("dc.panels.tagWaypoint") }); n++; } }
     return out;
   }
@@ -176,10 +173,11 @@ export abstract class DcPanels extends DcViews2D {
     const add = (c: any) => { if (!seen.has(c.id)) { seen.add(c.id); out.push({ cable: c }); } };
     dcIds.forEach((id) => this.resolvedCables(id).forEach((rc) => add(rc.cable)));
     if (dcIds.length === 1) this.outgoingCableStubs(dcIds[0]).forEach((st) => add(st.cable));
-    // ⚠ Cette carte liste les câbles DESSINABLES dans la vue, dont la portée s'exprime en SALLES affichées :
-    // un bout d'étage n'y entre donc pas (il n'a pas de salle à comparer). C'est la même limite que la
-    // portée d'affichage elle-même (§6.27), pas une régression du chantier.
-    else { const dset = new Set(dcIds); this.store.all("cables").forEach((c: any) => { const da = this.store.cableEndContainer(c, "A"), db = this.store.cableEndContainer(c, "B"); const dansPortee = (x: PlacementContainer | null) => !!x && x.kind === "room" && dset.has(x.id); if (dansPortee(da) || dansPortee(db)) add(c); }); }
+    // ⚠ La portée de cette carte se dit en CONTENEURS AFFICHÉS et non en salles (décision D3, doctrine
+    // §6.32) : un câble aboutissant sur un posé d'ÉTAGE est DESSINÉ dès que cet étage est visible, et une
+    // carte qui prétend piloter les câbles de la vue doit lister ceux qu'elle montre. La restriction aux
+    // salles datait de §6.27, quand la localisation elle-même s'y limitait.
+    else { this.store.all("cables").forEach((c: any) => { if (this.containerShown(this.store.cableEndContainer(c, "A"), dc) || this.containerShown(this.store.cableEndContainer(c, "B"), dc)) add(c); }); }
     return out;
   }
 
@@ -732,15 +730,17 @@ export abstract class DcPanels extends DcViews2D {
         this.btn("◎", () => delSel(ids()), I18n.t("dc.panels.eyeHideTitle", { what })),
       );
     };
-    // FAISCEAUX (trunks) dont une extrémité (patch) touche les salles affichées — mêmes ◉/◎ que les réseaux
+    // FAISCEAUX (trunks) dont une extrémité (patch) touche un CONTENEUR AFFICHÉ — mêmes ◉/◎ que les réseaux
     // (la sélection partage `selCables` : ids uniques toutes collections). Avant le retour anticipé : une salle
     // peut n'avoir AUCUN câble raccordable mais des trunks à piloter.
-    const shownDcIds = new Set(this.displayedDcIds(dc));
-    const trunkIds = () => this.store.all("cableBundles").filter((b: any) => {
-      const da = b.endpoint_a_equipment_id ? this.store.equipmentDcId(b.endpoint_a_equipment_id) : null;
-      const db = b.endpoint_b_equipment_id ? this.store.equipmentDcId(b.endpoint_b_equipment_id) : null;
-      return (da != null && shownDcIds.has(da)) || (db != null && shownDcIds.has(db));
-    }).map((b: any) => b.id);
+    // ⚠ DÉCISION D3 : l'appartenance à « ce qui est affiché » se dit en CONTENEURS, pas en ids de salles — un
+    // ÉTAGE n'a pas d'id (son identité est le couple bâtiment + étage), et un patch posé sur un étage affiché
+    // est aussi présent à l'écran qu'un patch d'une salle affichée. Le conteneur d'une extrémité se lit sur la
+    // CHAÎNE (`TrunkRouting.endpointContainer`, la MÊME source que le tracé), jamais sur le conteneur immédiat :
+    // celui d'un patch monté en baie est sa BAIE, et une liaison ne traverse pas les baies (§6.31).
+    const trunkIds = () => this.store.all("cableBundles").filter((b: any) =>
+      this.containerShown(this.trunks.endpointContainer(b, "A"), dc) || this.containerShown(this.trunks.endpointContainer(b, "B"), dc),
+    ).map((b: any) => b.id);
     if (trunkIds().length) {
       const row = document.createElement("div"); row.className = "dc-layer-row";
       const ttx = document.createElement("span"); ttx.className = "grow"; ttx.textContent = I18n.t("dc.panels.trunksLabel", { n: trunkIds().length });

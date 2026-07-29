@@ -816,6 +816,15 @@ export class Store {
   /** Le PORT est-il localisable en 3D ? Même règle que son équipement porteur. Généralise `!!portDcId`. */
   portLocatable(portId: string | null): boolean { return Locatable.port(portId, this); }
 
+  /** La LIAISON est-elle localisable en 3D ? Généralise `!!cableDcId`, qui ne reconnaissait qu'une
+      extrémité posée en SALLE et cachait donc le bouton d'un câble aboutissant sur un ÉTAGE. */
+  cableLocatable(cableOrId: any): boolean { return Locatable.cable(cableOrId, this); }
+
+  /** Extrémité RETENUE pour cadrer une liaison : le port de la première extrémité localisable (A puis B).
+      ⚠ C'est la MÊME méthode que consomme `DcInteract.locateCable` — le prédicat ci-dessus n'est que
+      « cette extrémité existe-t-elle ? », si bien que bouton et action ne peuvent pas diverger. */
+  cableLocatableEnd(cableOrId: any): string | null { return Locatable.cableEnd(cableOrId, this); }
+
   /* ---- placement : « comment s'appelle l'endroit de cet objet ? » (LIBELLÉS) ----
 
      ⚠ ENCORE UNE AUTRE QUESTION que les deux blocs précédents, et c'est pourquoi c'est un TROISIÈME

@@ -1815,4 +1815,278 @@ module.exports = async () => {
     ck(leve2 && dv2._focusTarget === null, "…alors que `locatePort` REFUSE (port non résolu en 3D) — écart PRÉ-EXISTANT, hors périmètre du lot");
   }
   });
+
+  /* ============================================================================================
+     « LOCALISER » UNE LIAISON dont une extrémité est posée sur un ÉTAGE + ÉQUIVALENCE prédicat ⟺ action.
+     Cf. docs/placement.md §6.32, et la décision D6 du chantier « câblage des équipements d'étage ».
+
+     §6.28 avait laissé les trois gardes de CÂBLE sur la clé « salle », DÉLIBÉRÉMENT : `locateCable` n'avait
+     aucune branche pour un conteneur d'étage, et migrer ces gardes aurait ouvert le bouton d'un câble dont
+     le clic ne rendait qu'un toast. Ce lot livre l'ACTION puis ses gardes — dans cet ordre.
+
+     ⚠ LE MIROIR N'EST PLUS SEULEMENT VÉRIFIÉ, IL EST STRUCTUREL : `locateCable` consomme la MÊME méthode
+     que le prédicat (`Locatable.cableEnd` via `Store.cableLocatableEnd`). L'équivalence mesurée plus bas
+     n'en devient pas superflue — elle couvre ce que la règle ne décide pas : la RÉSOLUTION 3D du bout
+     retenu, et la portée d'affichage.
+
+     REPÈRES DU DÉCOR (dérivés à la main du modèle, comme la section §6.27 plus haut) : un seul site
+     `liege` → origine du bâtiment à (0 ; 0) ; hauteur d'étage 4 000 mm + 2 000 mm d'écart inter-niveaux →
+     socle du niveau 1 à 6 000 mm.
+     ============================================================================================ */
+  await section("« Localiser » une LIAISON : bout d'ÉTAGE atteint, et le bouton est le MIROIR de l'action", async () => {
+  {
+    const { Notify } = D("ui/Notify.js");
+    const { I18n } = D("i18n/I18n.js");   // catalogues déjà initialisés par le harnais (locale « fr »)
+    const toastOrigine = Notify.toast;
+    let dernierToast = null;
+    // On INTERCEPTE le toast au lieu de compter sur l'exception qu'il lève faute de DOM : le lot fait
+    // BASCULER des messages selon le conteneur (décision D4), et une exception ne dit pas LEQUEL.
+    Notify.toast = (msg) => { dernierToast = msg; };
+    try {
+      const s = await makeStore();
+      const liege = await s.create("sites", { name: "Liege" });
+      const namur = await s.create("sites", { name: "Namur" });
+      await s.create("floors", { location: liege.id, floor: "0", width_mm: 30000, depth_mm: 20000, cell_mm: 600, height_mm: 4000 });
+      await s.create("floors", { location: liege.id, floor: "1", width_mm: 30000, depth_mm: 20000, cell_mm: 600, height_mm: 4000 });
+      await s.create("floors", { location: namur.id, floor: "0", width_mm: 12000, depth_mm: 9000, cell_mm: 600, height_mm: 4000 });
+      const dcA = await s.create("datacenters", { name: "Salle A", location: liege.id, floor: "0", width_mm: 8000, depth_mm: 6000, floor_x: 1000, floor_y: 1000 });
+      const libre = { dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 150 };
+      const boite = { dim_mode: "free", free_w_mm: 200, free_l_mm: 400, free_h_mm: 300 };
+      // LIBRE POSITIONNÉ en salle : cible entièrement dérivable à la main (le chemin SALLE, inchangé).
+      const eqLibre = await s.create("equipments", { name: "coffret", placement_mode: "manual", ...libre, dc_id: dcA.id, dc_x: 2000, dc_y: 1500, dc_z: 0 });
+      // POSÉS D'ÉTAGE : `eqF` porte une hauteur propre (dc_z) pour que le double comptage se voie.
+      const eqF = await s.create("equipments", { name: "ONDULEUR", placement_mode: "floor", ...boite, location: liege.id, floor: "1", floor_x: 4000, floor_y: 2000, dc_z: 250 });
+      const eqF2 = await s.create("equipments", { name: "GROUPE", placement_mode: "floor", ...boite, location: liege.id, floor: "1", floor_x: 9000, floor_y: 5000 });
+      const eqNamur = await s.create("equipments", { name: "hors-portée", placement_mode: "floor", ...boite, location: namur.id, floor: "0", floor_x: 3000, floor_y: 2000 });
+      const eqRien = await s.create("equipments", { name: "inventaire", placement_mode: "manual", ...libre });
+      const eqSansPos = await s.create("equipments", { name: "libre-sans-position", placement_mode: "manual", ...libre, dc_id: dcA.id });
+      // ⚠ UN PORT NE PORTE QU'UN CÂBLE : chaque liaison du banc reçoit ses PROPRES ports.
+      let np = 0;
+      const mkPort = async (eq) => (await s.create("ports", { equipment_id: eq.id, name: "p" + (++np), face_x: 0.5, face_y: 0.5, face_side: "front" })).id;
+      const mkCable = async (nom, a, b) => s.create("cables", { name: nom, from_port_id: a ? await mkPort(a) : null, to_port_id: b ? await mkPort(b) : null });
+      const vueNeuve = () => { const dv = new DatacenterView(s, {}, {}); dv.view = "3d"; dv.multiDc = false; dv.dcId = dcA.id; dv.visibleDcIds = new Set([dcA.id]); dv._focusTarget = null; return dv; };
+      /* Garde de LISIBILITÉ (même motif que `premier` dans la section §6.27) : si la localisation cessait
+         d'aboutir, un accès direct à `_focusTarget.p` CRASHERAIT la section et masquerait la répartition
+         des échecs — or c'est elle qui informe. Sonde mesurée des DEUX côtés : 1 FAIL + 1 crash sans cette
+         garde (86 assertions perdues), 16 FAIL lisibles avec. */
+      const cible = (dv) => dv._focusTarget || { p: { x: null, y: null, z: null }, extent: null, face: undefined };
+
+      /* ---- 1. LE CHEMIN NOUVEAU : un bout d'ÉTAGE, cadré en MONDE ----
+         Cible attendue, DÉRIVÉE À LA MAIN : origine du posé (4 000 ; 2 000 ; socle 6 000) + port au centre
+         de la FACE AVANT d'une boîte 200 × 400 × 300 posée à dc_z = 250 → local (0 ; −200 ; 250 + 150). */
+      const cEtage = await mkCable("étage → non branché", eqF, null);
+      const dv = vueNeuve();
+      dv.locateCable(cEtage.id);
+      ck.eq(dv.view, "3d", "liaison à bout d'étage : « Localiser » bascule en 3D");
+      ck.eq(dv.multiDc, true, "…en VUE ÉTAGE (repère bâtiment) — un posé d'étage n'a pas de repère salle");
+      ck.eq(dv.dcId, dcA.id, "…et la salle ACTIVE n'est pas déplacée (comme pour un posé d'étage, §6.27)");
+      ck.eq(cible(dv).p.x, 4000, "cible x = origine du bâtiment (0) + floor_x (4 000)");
+      ck.eq(cible(dv).p.y, 1800, "cible y = floor_y (2 000) − demi-profondeur (200) : le port est sur la FACE AVANT");
+      ck.eq(cible(dv).p.z, 6400, "cible z = socle du niveau 1 (6 000) + dc_z (250) + mi-hauteur (150) — 6 650 signalerait un dc_z compté DEUX fois");
+      ck.eq(cible(dv).extent, 3500, "étendue = celle d'une extrémité de câble (cible PONCTUELLE), la MÊME qu'en salle");
+      ck.eq(cible(dv).face, null, "aucune face visée : localiser un CÂBLE ne tourne pas la caméra (comportement historique)");
+      ck(dv.selCables.has(cEtage.id) && dv.showAllCables === true, "…le câble est SÉLECTIONNÉ et l'affichage « tous les câbles » forcé, comme sur le chemin salle");
+      ck.eq(dv.focusEqId, null, "…et aucune surbrillance d'équipement (idem chemin salle)");
+      ck(dv.visibleDcIds.has(dcA.id), "portée : le bâtiment visé est amené dans la scène (sinon la caméra cadrerait un point que rien ne dessine)");
+      // ÉQUIVALENCE DE SOURCE : la caméra vise le point d'où le TRACÉ fait partir le câble, pas un recalcul.
+      const ptTrace = dv.routing.portOnFloorWorld(dv.currentMultiLayout(), s.cableLocatableEnd(cEtage));
+      ck(ptTrace && ptTrace.x === cible(dv).p.x && ptTrace.y === cible(dv).p.y && ptTrace.z === cible(dv).p.z,
+        "la cible caméra est EXACTEMENT le bout que le traceur porte au monde (même source : CableRouting.portOnFloorWorld)");
+
+      /* ---- 2. LE CHEMIN SALLE, INCHANGÉ (non-régression) — cible dérivée à la main ---- */
+      const cSalle = await mkCable("salle → non branché", eqLibre, null);
+      const dv2 = vueNeuve();
+      dv2.locateCable(cSalle.id);
+      ck.eq(dv2.multiDc, false, "liaison de SALLE : chemin inchangé — repère salle, Vue étage désactivée");
+      ck.eq(dv2.dcId, dcA.id, "…et la salle active devient la sienne (comportement historique)");
+      ck.eq(cible(dv2).p.x, 2000, "cible x = dc_x du libre (2 000)");
+      ck.eq(cible(dv2).p.y, 1350, "cible y = dc_y (1 500) − demi-profondeur (150)");
+      ck.eq(cible(dv2).p.z, 75, "cible z = dc_z (0) + mi-hauteur (75)");
+      ck.eq(cible(dv2).extent, 3500, "étendue inchangée");
+
+      /* ---- 3. LA PRIORITÉ A PUIS B EST PRÉSERVÉE — c'est la parité à ne pas casser ---- */
+      const cSalleEtage = await mkCable("salle → étage", eqLibre, eqF);
+      const dv3 = vueNeuve(); dv3.locateCable(cSalleEtage.id);
+      ck.eq(dv3.multiDc, false, "salle en A, étage en B : c'est A qui cadre — la généralisation ne DÉPLACE aucun cadrage existant");
+      ck(cible(dv3).p.x === 2000 && cible(dv3).p.y === 1350, "…et c'est bien le bout de salle qui est visé");
+      const cEtageSalle = await mkCable("étage → salle", eqF, eqLibre);
+      const dv4 = vueNeuve(); dv4.locateCable(cEtageSalle.id);
+      ck.eq(dv4.multiDc, true, "étage en A, salle en B : c'est A qui cadre (même priorité, autre nature de conteneur)");
+      ck.eq(cible(dv4).p.z, 6400, "…et la cible est bien celle du posé d'étage");
+      // Bout A NON localisable : on le SAUTE, on ne s'arrête pas dessus (parité `portDcId(A) || portDcId(B)`).
+      const cRienSalle = await mkCable("non placé → salle", eqRien, eqLibre);
+      const dv5 = vueNeuve(); dv5.locateCable(cRienSalle.id);
+      ck(cible(dv5).p.x === 2000, "bout A non placé : l'extrémité B est retenue (le chemin historique faisait déjà cela)");
+      // Bout A sur un étage HORS PORTÉE : non localisable, donc sauté lui aussi — le câble reste atteignable par B.
+      const cNamurSalle = await mkCable("étage sans salle → salle", eqNamur, eqLibre);
+      const dv6 = vueNeuve(); dv6.locateCable(cNamurSalle.id);
+      ck.eq(dv6.multiDc, false, "bout A sur un étage INATTEIGNABLE : sauté, et B (salle) cadre — le câble n'est pas perdu pour autant");
+
+      /* ---- 4. LES REFUS, ET LE MOT JUSTE (décision D4) ---- */
+      const cRien = await mkCable("non placé → rien", eqRien, null);
+      const dv7 = vueNeuve(); dernierToast = null; dv7.locateCable(cRien.id);
+      ck.eq(dv7._focusTarget, null, "aucune extrémité atteignable → AUCUNE cible caméra");
+      ck.eq(dernierToast, I18n.t("dc.interact.cableNotInRoom"), "…et le message HISTORIQUE, au caractère près (rien d'un étage n'est en jeu)");
+      ck.eq(dv7.selCables.size, 0, "…et un refus ne SÉLECTIONNE rien (comportement historique)");
+      const cNamur = await mkCable("étage sans salle → rien", eqNamur, null);
+      const dv8 = vueNeuve(); dernierToast = null; dv8.locateCable(cNamur.id);
+      ck.eq(dv8._focusTarget, null, "bout posé sur un étage d'un bâtiment SANS salle → refus (la portée s'exprime en salles, §6.27)");
+      ck.eq(dernierToast, I18n.t("dc.interact.floorNoRoomInBuilding"),
+        "…et le message dit la VRAIE cause (D4) : ce bout EST placé, c'est la vue qui ne peut pas l'atteindre");
+      ck.eq(dv8.selCables.size, 0, "…et rien n'est sélectionné (aucune extrémité n'a été retenue)");
+
+      /* ---- 5. LE CHEMIN D'ÉTAGE SE DÉSISTE pour un bout de salle (contrat de `locateFloorEquip`) ---- */
+      const dv9 = vueNeuve();
+      ck.eq(dv9.locateFloorCable(cSalle.id, s.cableLocatableEnd(cSalle)), false, "locateFloorCable : bout de SALLE → se désiste, l'appelant poursuit");
+      ck.eq(dv9._focusTarget, null, "…sans rien programmer au passage");
+      // GARDE FERMÉE, atteignable seulement en contournant la règle d'extrémité : on la mesure telle quelle.
+      dernierToast = null;
+      ck.eq(dv9.locateFloorCable(cNamur.id, s.get("cables", cNamur.id).from_port_id), true, "locateFloorCable : bout d'étage → PREND la main (même quand il refuse)");
+      ck.eq(dernierToast, I18n.t("dc.interact.floorNoRoomInBuilding"), "…et refuse par le toast quand le bâtiment n'a aucune salle");
+      ck.eq(dv9._focusTarget, null, "…sans cadrer le vide");
+      ck.eq(dv9.selCables.size, 0, "…et sans rien sélectionner : le chemin d'ÉTAGE pose l'état de sélection APRÈS ses refus, comme le chemin salle");
+
+      /* ---- 6. L'ÉQUIVALENCE, énoncée entre les DEUX MESURES et non contre la constante ----
+         Une dérive SIMULTANÉE (on « corrige » l'attente en même temps que le code) passerait au vert si
+         chaque côté n'était épinglé qu'à `attendu` ; c'est la leçon mesurée du lot 2 (§6.28). */
+      const cEtageEtage = await mkCable("étage → même étage", eqF, eqF2);
+      const cVide = await s.create("cables", { name: "aucun port", from_port_id: null, to_port_id: null });
+      const cas = [
+        ["libre positionné en salle", cSalle, true],
+        ["non placé → libre en salle", cRienSalle, true],
+        ["posé d'ÉTAGE (bâtiment ayant une salle)", cEtage, true],
+        ["salle en A, étage en B", cSalleEtage, true],
+        ["étage en A, salle en B", cEtageSalle, true],
+        ["DEUX bouts sur le même étage", cEtageEtage, true],
+        ["étage en A d'un bâtiment SANS salle, salle en B", cNamurSalle, true],
+        ["posé d'étage d'un bâtiment SANS salle, seul", cNamur, false],
+        ["deux bouts non placés", cRien, false],
+        ["câble sans aucun port", cVide, false],
+      ];
+      let vus = 0;
+      for (const [nom, cable, attendu] of cas) {
+        vus++;
+        ck(cable, `fixture créée — ${nom} (un null ici = liaison REFUSÉE par la validation, pas un défaut du prédicat)`);
+        if (!cable) continue;
+        const propose = s.cableLocatable(cable);
+        ck.eq(propose, attendu, `prédicat — ${nom}`);
+        const dvc = vueNeuve(); dernierToast = null;
+        dvc.locateCable(cable.id);
+        const aAbouti = dvc._focusTarget !== null;
+        ck.eq(aAbouti, attendu, `action — ${nom} : « Localiser » programme une cible caméra`);
+        ck.eq(aAbouti, propose, `ÉQUIVALENCE — ${nom} : bouton proposé ⟺ « Localiser » aboutit`);
+        ck.eq(dernierToast === null, attendu, `…et le refus passe bien par un toast (signal redondant, il ne doit pas diverger de la cible)`);
+      }
+      ck.eq(vus, 10, "les dix liaisons ont bien été jouées (garde anti-boucle vide : une liste tronquée passerait sinon au vert)");
+
+      /* ⚠ ÉCART CONNU, NOMMÉ ET VERROUILLÉ — il n'est PAS une exception à l'équivalence ci-dessus, dont
+         aucun cas ne le met en jeu. Un libre rattaché à une salle mais SANS `dc_x`/`dc_y` est jugé
+         localisable (§6.28) alors que `Resolver3D` refuse de résoudre ses PORTS : une liaison qui n'a que
+         ce bout-là voit son bouton proposé et n'obtient qu'un toast. C'est ANTÉRIEUR à ce lot — `cableDcId`
+         se comportait à l'identique — et sans occurrence dans les deux corpus. */
+      const cSansPos = await mkCable("libre sans position → rien", eqSansPos, null);
+      ck.eq(s.cableLocatable(cSansPos), true, "écart connu : la liaison d'un libre NON positionné est jugée localisable…");
+      ck.eq(!!s.cableDcId(cSansPos), true, "…exactement comme le faisait `cableDcId` : l'écart n'est ni créé ni refermé par ce lot");
+      const dv10 = vueNeuve(); dernierToast = null; dv10.locateCable(cSansPos.id);
+      ck.eq(dv10._focusTarget, null, "…alors que « Localiser » REFUSE (bout non résolu en 3D)");
+      ck.eq(dernierToast, I18n.t("dc.interact.cableEndNotFound"), "…avec le message de SALLE, puisque c'est bien une salle qu'on n'a pas su résoudre");
+
+      /* ⚠ CET ÉCART A UN JUMEAU CÔTÉ ÉTAGE, trouvé en éprouvant ce lot et VERROUILLÉ ici. `dim_mode` est
+         conservé tel quel quand il vaut « u » (`Equipment.ts` ~224), quel que soit le `placement_mode` :
+         un posé d'étage peut donc porter un dimensionnement en U, et `Resolver3D.resolveFaceAnchorWorld3D`
+         refuse alors de résoudre ses ports (« seul un dimensionnement LIBRE porte une boîte 6 faces »).
+         La garde `!pt` de `locateFloorCable` n'est donc PAS défensive — elle est atteignable, et c'est
+         pourquoi elle mérite son propre message (D4 : « sur cet étage », pas « dans cette salle »).
+         Même famille que l'écart ci-dessus, et tout aussi ANTÉRIEUR : `locateFloorPort` refuse déjà de la
+         même façon depuis §6.27. 0 occurrence dans les deux corpus (aucun posé d'étage). */
+      const eqFU = await s.create("equipments", { name: "posé-en-U", placement_mode: "floor", dim_mode: "u", u_height: 2, location: liege.id, floor: "1", floor_x: 6000, floor_y: 3000 });
+      ck(eqFU, "fixture créée — posé d'étage au dimensionnement « u »");
+      const cFU = eqFU ? await mkCable("étage dim_mode u → rien", eqFU, null) : null;
+      if (cFU) {
+        ck.eq(s.cableLocatable(cFU), true, "écart JUMEAU : la liaison d'un posé d'étage en dim_mode « u » est jugée localisable…");
+        const dv11 = vueNeuve(); dernierToast = null; dv11.locateCable(cFU.id);
+        ck.eq(dv11._focusTarget, null, "…alors que « Localiser » REFUSE (aucune boîte 6 faces d'où faire émerger le port)");
+        ck.eq(dernierToast, I18n.t("dc.interact.cableEndNotFoundFloor"), "…et le message dit ÉTAGE, pas « dans cette salle » (D4)");
+        ck.eq(dv11.selCables.size, 0, "…et ce refus-là non plus ne sélectionne rien (le SEUL refus atteignable DANS le chemin d'étage)");
+      }
+    } finally {
+      Notify.toast = toastOrigine;   // le stub ne doit pas fuir dans les sections suivantes
+    }
+  }
+  });
+
+  /* ============================================================================================
+     PORTÉE DU PANNEAU LATÉRAL : l'appartenance à « ce qui est affiché » se dit en CONTENEURS (D3).
+     Cf. docs/placement.md §6.32. `DcBase.containerShown` est le pendant « conteneur » de
+     `displayedDcIds` — la même question que `CableRouting.worldEndIn` pose au TRACÉ, posée aux cartes.
+     ============================================================================================ */
+  await section("Portée du panneau : un ÉTAGE affiché compte comme une salle affichée (D3)", async () => {
+  {
+    const s = await makeStore();
+    const liege = await s.create("sites", { name: "Liege" });
+    await s.create("floors", { location: liege.id, floor: "0", width_mm: 30000, depth_mm: 20000, cell_mm: 600, height_mm: 4000 });
+    await s.create("floors", { location: liege.id, floor: "1", width_mm: 30000, depth_mm: 20000, cell_mm: 600, height_mm: 4000 });
+    const dcA = await s.create("datacenters", { name: "A", location: liege.id, floor: "0", width_mm: 8000, depth_mm: 6000, floor_x: 1000, floor_y: 1000 });
+    const dcB = await s.create("datacenters", { name: "B", location: liege.id, floor: "0", width_mm: 8000, depth_mm: 6000, floor_x: 12000, floor_y: 1000 });
+    const rA = await s.create("racks", { name: "RA", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dcA.id, dc_x: 1000, dc_y: 1000 });
+    const rB = await s.create("racks", { name: "RB", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dcB.id, dc_x: 2000, dc_y: 2000 });
+    const libre = { dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 150 };
+    // ⚠ T11 : une extrémité de FAISCEAU doit être un `patch_panel` — sans ce type, `create` rend `null`.
+    const patchA = await s.create("equipments", { name: "patchA", type: "patch_panel", placement_mode: "rack", rack_id: rA.id, rack_u: 5, u_height: 1 });
+    const patchB = await s.create("equipments", { name: "patchB", type: "patch_panel", placement_mode: "rack", rack_id: rB.id, rack_u: 5, u_height: 1 });
+    const patchF = await s.create("equipments", { name: "patchF", type: "patch_panel", placement_mode: "floor", ...libre, location: liege.id, floor: "1", floor_x: 3000, floor_y: 2000 });
+    const patchF2 = await s.create("equipments", { name: "patchF2", type: "patch_panel", placement_mode: "floor", ...libre, location: liege.id, floor: "1", floor_x: 9000, floor_y: 4000 });
+    const ct = await s.create("cableTypes", { name: "OM4", family: "fibre" });
+    const tAB = await s.create("cableBundles", { name: "T-AB", cable_type_id: ct.id, fiber_count: 12, endpoint_a_equipment_id: patchA.id, endpoint_b_equipment_id: patchB.id });
+    const tAF = await s.create("cableBundles", { name: "T-AF", cable_type_id: ct.id, fiber_count: 12, endpoint_a_equipment_id: patchA.id, endpoint_b_equipment_id: patchF.id });
+    const tFF = await s.create("cableBundles", { name: "T-FF", cable_type_id: ct.id, fiber_count: 12, endpoint_a_equipment_id: patchF.id, endpoint_b_equipment_id: patchF2.id });
+    ck(tAB && tAF && tFF, "fixtures faisceaux créées (un null = extrémité refusée par T11, pas un défaut de portée)");
+    let np = 0;
+    const p = async (eq) => (await s.create("ports", { equipment_id: eq.id, name: "p" + (++np), face_x: 0.5, face_y: 0.5, face_side: "front" })).id;
+    const cAB = await s.create("cables", { name: "C-AB", from_port_id: await p(patchA), to_port_id: await p(patchB) });
+    const cFF = await s.create("cables", { name: "C-FF", from_port_id: await p(patchF), to_port_id: await p(patchF2) });
+
+    const salle = (id) => ({ kind: "room", id });
+    const etage1 = { kind: "floor", location: liege.id, floor: "1" };
+
+    // ---- LA RÈGLE, état de vue par état de vue ----
+    const vue = (v, multi, visibles) => { const dv = new DatacenterView(s, {}, {}); dv.view = v; dv.multiDc = multi; dv.dcId = dcA.id; dv.visibleDcIds = new Set(visibles); return dv; };
+    const multiTout = vue("3d", true, [dcA.id, dcB.id]);
+    ck.eq(multiTout.containerShown(null, dcA), false, "aucun conteneur → jamais affiché");
+    ck.eq(multiTout.containerShown({ kind: "rack", id: rA.id }, dcA), false, "une BAIE n'est pas un conteneur d'affichage : c'est sa SALLE qu'il faut interroger");
+    ck.eq(multiTout.containerShown({ kind: "tray", id: "t1" }, dcA), false, "une ÉTAGÈRE non plus");
+    ck.eq(multiTout.containerShown(salle(dcA.id), dcA), true, "salle affichée → true");
+    ck.eq(multiTout.containerShown(salle(dcB.id), dcA), true, "seconde salle affichée → true");
+    ck.eq(multiTout.containerShown(etage1, dcA), true, "ÉTAGE dont le bâtiment a une salle affichée, en Vue étage → true (D3)");
+    const mono = vue("3d", false, [dcA.id, dcB.id]);
+    ck.eq(mono.containerShown(salle(dcB.id), dcA), false, "salle unique : les autres salles ne sont PAS affichées");
+    ck.eq(mono.containerShown(etage1, dcA), false,
+      "salle unique : AUCUN plan d'étage n'est dessiné — la garde « Vue étage » n'est pas redondante avec `floorShown`");
+    ck.eq(vue("top", true, [dcA.id, dcB.id]).containerShown(etage1, dcA), false, "vue DESSUS : pas davantage de plan d'étage, quoi qu'en dise le layout");
+
+    // ---- BOUTS DE FAISCEAU : ce que la carte « câbles » propose de piloter ----
+    const trunksDe = (dv, dc) => s.all("cableBundles").filter((b) => dv.containerShown(dv.trunks.endpointContainer(b, "A"), dc) || dv.containerShown(dv.trunks.endpointContainer(b, "B"), dc)).map((b) => b.name).sort().join(",");
+    ck.eq(trunksDe(multiTout, dcA), "T-AB,T-AF,T-FF", "Vue étage, deux salles : les trois faisceaux sont pilotables — dont celui dont les DEUX bouts sont sur l'étage");
+    ck.eq(trunksDe(mono, dcA), "T-AB,T-AF", "salle unique A : seuls les faisceaux touchant A (le T-FF, purement d'étage, disparaît)");
+    ck.eq(trunksDe(vue("3d", false, [dcB.id]), dcB), "T-AB", "salle unique B : seul le faisceau qui la touche");
+    // PARITÉ : sur des données SANS aucun posé d'étage, la nouvelle portée est celle de l'ancienne.
+    const ancienneTrunks = (dv, dc) => { const shown = new Set(dv.displayedDcIds(dc)); return s.all("cableBundles").filter((b) => { const da = b.endpoint_a_equipment_id ? s.equipmentDcId(b.endpoint_a_equipment_id) : null; const db = b.endpoint_b_equipment_id ? s.equipmentDcId(b.endpoint_b_equipment_id) : null; return (da != null && shown.has(da)) || (db != null && shown.has(db)); }).map((b) => b.name).sort().join(","); };
+    ck.eq(ancienneTrunks(mono, dcA), "T-AB,T-AF", "…et l'expression HISTORIQUE (`equipmentDcId` ∈ salles affichées) dit exactement la même chose en salle unique");
+    ck.eq(ancienneTrunks(multiTout, dcA), "T-AB,T-AF", "…tandis qu'en Vue étage elle RATE le faisceau d'étage : c'est très exactement ce que D3 corrige");
+
+    // ---- LISTE DE CÂBLES de la carte (branche multi-salles) ----
+    const listeDe = (dv, dc) => dv.panelCables(dc).map((o) => o.cable.name).sort().join(",");
+    ck.eq(listeDe(multiTout, dcA), "C-AB,C-FF", "Vue étage : le câble entre deux posés d'étage est listé par la carte qui prétend le piloter");
+    ck(cAB && cFF, "fixtures câbles créées");
+
+    // ---- PANNEAU DE RECHERCHE 3D : il ne propose que ce que « Localiser » sait atteindre ----
+    const eqNu = await s.create("equipments", { name: "inventaire", dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 150 });
+    const cNu = await s.create("cables", { name: "C-NULLE-PART", from_port_id: await p(eqNu), to_port_id: null });
+    const trouve = (q) => multiTout.searchResults(q).filter((r) => r.kind === "cable").map((r) => r.label).join(",");
+    ck.eq(trouve("C-AB"), "C-AB", "recherche 3D : un câble de SALLE reste proposé (parité)");
+    ck.eq(trouve("C-FF"), "C-FF", "recherche 3D : un câble entre deux posés d'ÉTAGE est désormais proposé — `cableDcId` le déclarait « non placé »");
+    ck.eq(trouve("C-NULLE-PART"), "", "recherche 3D : un câble dont aucune extrémité n'est atteignable reste ÉCARTÉ (pas de bouton mort)");
+    ck(cNu, "fixture câble non plaçable créée");
+  }
+  });
 };

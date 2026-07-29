@@ -2166,6 +2166,115 @@ décision **D5** (supprimer le trio pour que `tsc` désigne les survivants).
 apparaissent : le tracé 3D et 2D des câbles et faisceaux vers un posé d'étage, la bande d'un PIN d'étage dans
 le mini-graphe de tracé (et son décompte en « emplacement(s) »), et les messages d'erreur au mot « étage ».
 
+### 6.32 « Localiser » atteint une LIAISON par son bout d'ÉTAGE — et le prédicat cesse d'être un miroir — **IMPLÉMENTÉ**
+
+§6.31 a rendu la liaison vers un posé d'étage ANALYSABLE et TRAÇABLE ; il restait que l'utilisateur ne pouvait
+pas la faire montrer. Trois gardes de bouton « Localiser » d'un CÂBLE étaient restées sur la clé « salle »,
+DÉLIBÉRÉMENT (§6.28) : `DcInteract.locateCable` cadrait par `resolvePort3D`, scopé salle, et les migrer
+d'abord aurait ouvert le **bouton mort** que la décision D6 interdit. Ce lot livre l'ACTION, puis ses gardes.
+
+**⚠ CE LOT N'EST PAS CELUI QUE LE CADRAGE ANNONÇAIT.** Le découpage prévoyait ici « sélecteurs de port et
+formulaires de câble : proposer les équipements d'étage » — or §6.31 l'a déjà fait (`CableForms` passe par
+`equipmentNamedContainer`, `PlacementContainers.same` et les suffixes `equipmentContainerLabel`). Le relevé
+des appels RÉELS restants du trio `equipmentDcId`/`portDcId`/`cableDcId` hors du `Store` en donne **neuf**,
+et ils se groupent tous sur **la LIAISON** : l'action `locateCable`, ses trois gardes de bouton (listing,
+fiche, panneau de recherche 3D), la portée des bouts de FAISCEAU dans la carte « câbles », et — pour le lot
+suivant — les chemins salle résiduels de `locateEquipment`/`locatePort` plus le pont `DcBase.portDcId`.
+
+**LE PRÉDICAT N'EST PLUS UN MIROIR : IL EST LE MÊME CODE.** §6.28 posait `core/Locatable` comme « miroir des
+refus » et le VÉRIFIAIT par un test d'équivalence. Pour une liaison, on peut faire mieux, et la raison est
+dans la question : ce qu'on cadre n'est pas « le câble » (il n'a aucun placement) mais **une de ses
+extrémités**. La réponse utile est donc un PORT, pas un booléen — d'où `Locatable.cableEnd`, qui rend
+l'extrémité RETENUE (la première LOCALISABLE, A puis B), `Locatable.cable` n'étant que le constat qu'il en
+existe une. `locateCable` consomme **cette même méthode** (`Store.cableLocatableEnd`) : bouton et action ne
+peuvent plus diverger, non parce qu'on le vérifie mais parce qu'il n'y a qu'une écriture. Le test
+d'équivalence reste — il couvre ce que la règle ne décide PAS : la résolution 3D du bout retenu.
+
+**⚠ LA PRIORITÉ « A PUIS B » EST UNE PARITÉ, PAS UN DÉTAIL.** L'historique `cableDcId` valait
+`portDcId(A) || portDcId(B)` : il retient le premier bout **qui a une salle**, donc il SAUTE un bout non
+localisable au lieu de s'y arrêter. `cableEnd` fait exactement cela avec « localisable » à la place de « a une
+salle » — un câble dont le bout A pend dans une baie hors salle se cadre par B, hier comme aujourd'hui.
+Prendre `Store.cableContainer` (conteneur IMMÉDIAT de la première extrémité qui en a un) aurait au contraire
+retenu cette baie hors salle et **déplacé un cadrage existant** : la généralisation qui casse ce qu'elle
+généralise.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées :
+
+- **La cible d'un bout d'étage est celle du TRACÉ, pas un recalcul** : `CableRouting.portOnFloorWorld`, c'est-
+  à-dire l'appel EXACT que `worldEndIn` fait pour porter ce bout au monde (§6.31). Écarté : recomposer
+  « origine du posé + résolution du port » comme le fait `locateFloorPort` — ce serait un troisième site à
+  répondre à la question du `dc_z`, et il suffit d'y répondre une fois de travers pour viser 250 mm au-dessus
+  de ce que la scène dessine. Sonde de mutation : `dc_z` compté deux fois → **3 FAIL**, dont l'assertion de
+  source commune.
+- **Le refus de `scopeFloorBuilding` est une garde FERMÉE, pas un second filtre — et on le dit.** L'extrémité
+  retenue est localisable par construction, et `Locatable` n'accorde ce verdict à un posé d'étage que si son
+  bâtiment a au moins une salle : la MÊME question, au MÊME `Store.roomsOfBuilding`. Ce refus est donc
+  INATTEIGNABLE depuis `locateCable`, et le test l'atteint en appelant `locateFloorCable` directement.
+  Écarté : le retirer — ignorer un verdict d'échec vaudrait cadrage sur le vide.
+- **Le repli sur l'autre bout est CONSERVÉ TEL QUEL** (`resolvePort3D(A, dcId) || resolvePort3D(B, dcId)`) :
+  c'est lui qui rattrape l'écart connu de §6.28 (un libre rattaché à une salle mais sans `dc_x`/`dc_y` est
+  jugé localisable alors que ses PORTS ne se résolvent pas) quand l'autre bout vit dans la même salle.
+- **D4 — deux messages BASCULENT.** Quand aucune extrémité n'est atteignable mais que l'une d'elles est
+  POSÉE SUR UN ÉTAGE, la cause n'est pas « pas de salle » mais la limite de portée : on donne alors la MÊME
+  explication que « Localiser » un équipement d'étage (`floorNoRoomInBuilding`), plutôt qu'un message qui
+  nierait un placement bien réel. Et l'échec de résolution d'un bout d'étage a sa clé
+  (`cableEndNotFoundFloor`, fr + en) : « sur cet étage », pas « dans cette salle ». Sur toute liaison ne
+  mettant en jeu que des salles, les libellés historiques sortent **au caractère près**.
+- **`DcBase.containerShown` est le pendant « conteneur » de `displayedDcIds`** — la question que
+  `CableRouting.worldEndIn` pose au TRACÉ (`roomById.get` d'un côté, `FloorLayout.floorShown` de l'autre),
+  posée aux CARTES. ⚠ Sa garde « Vue étage » n'est pas redondante avec `floorShown` : `currentMultiLayout()`
+  calcule la disposition du MODÈLE quelle que soit la vue, et ses `floorPlanes` existent même en salle unique
+  où aucun plan n'est dessiné — la lire sans garde reviendrait à prendre le REPÈRE pour la PORTÉE (§6.8).
+
+**⚠ ÉCART DE PÉRIMÈTRE ASSUMÉ : la LISTE de câbles de la carte latérale a suivi les bouts de faisceau.** Le
+lot n'annonçait que la portée des faisceaux (`DcPanels` ~740, décision D3). Migrer celle-là seule aurait rendu
+le panneau incohérent avec lui-même : la carte aurait proposé de piloter un faisceau touchant un étage affiché
+tout en refusant de lister un câble touchant le MÊME étage — alors que la scène dessine les deux. Une ligne,
+le même `containerShown`, et §7 cesse de devoir mentionner une exception.
+
+**⚠ CE LOT RÉVÈLE UN JUMEAU À L'ÉCART CONNU DE §6.28, et il est verrouillé ici.** `Equipment.ts` (~224)
+conserve `dim_mode` tel quel quand il vaut « u », **quel que soit** le `placement_mode` : un posé d'ÉTAGE peut
+donc porter un dimensionnement en U, et `Resolver3D.resolveFaceAnchorWorld3D` refuse alors de résoudre ses
+ports (« seul un dimensionnement LIBRE porte une boîte 6 faces »). Le bouton d'une liaison qui n'a que ce
+bout-là est proposé et n'ouvre qu'un toast — exactement comme pour un libre de salle sans `dc_x`/`dc_y`. C'est
+ANTÉRIEUR au lot (`locateFloorPort` refuse déjà de la même façon depuis §6.27) et sans occurrence dans les
+deux corpus ; on le NOMME et on le verrouille plutôt que de le laisser redécouvrir. C'est aussi ce qui rend la
+garde `!pt` de `locateFloorCable` ATTEIGNABLE, donc digne de son propre message.
+
+**PARITÉ PROUVÉE — et par la fonction VIVANTE, non par une régénération.** `Store.cableDcId` est encore là
+(son retrait est le lot suivant, décision D5) : la comparaison porte donc sur l'historique lui-même, ce qui
+vaut mieux qu'un `git show` recompilé à côté. Deux bancs :
+
+- **liaisons** : 55 câbles synthétiques (9 modes de placement croisés deux à deux, plus les bouts non
+  branchés) + les DEUX corpus = **79 liaisons**, jusqu'à **9 grandeurs** comparées chacune (prédicat, clé de
+  cadrage, verdict, repère, salle active, x, y, z, étendue) → **11 divergences, TOUTES des gains, et 0
+  divergence dès lors qu'aucun étage n'est en jeu** ;
+- **portée du panneau** : balayage de **137 états de vue** (vue × Vue étage × trois jeux de salles visibles ×
+  salle active), sur le banc synthétique et les deux corpus → 9 divergences, **toutes des ajouts** (aucun
+  faisceau ni câble ne DISPARAÎT jamais), toutes portant sur un bout d'étage, **0 sur les corpus**.
+
+Les assertions de parité ont été **converties en attentes EXPLICITES** : les cibles caméra committées sont
+écrites en dur et dérivées À LA MAIN du modèle (origine du bâtiment 0 + `floor_x`, socle du niveau 1 à
+6 000 mm, demi-profondeur de la boîte…), pas recopiées d'une mesure.
+
+**Sondes de mutation** : règle d'extrémité qui ne SAUTE plus un bout non localisable → **20 FAIL** ;
+`locateCable` revenu à l'expression « salle » au lieu de la règle partagée → **16 FAIL** ; chemin d'étage
+débranché de `locateCable` → **19 FAIL** ; garde « Vue étage » retirée de `containerShown` → **4 FAIL** ;
+branche ÉTAGE de `containerShown` neutralisée → **3 FAIL** sur trois couches (règle nue, faisceaux, liste de
+câbles) ; bascule D4 des deux messages supprimée → **2 FAIL** ; sélection posée AVANT les refus → **2 FAIL** ;
+`dc_z` compté deux fois → **3 FAIL**. ⚠ Deux de ces sondes ont TROUVÉ quelque chose plutôt que de le
+confirmer : la sélection-avant-refus ne donnait d'abord **0 FAIL** (l'invariant n'était mesuré que sur le
+refus de SALLE — les deux refus atteignables du chemin d'étage sont désormais couverts), et le débranchement
+du chemin d'étage donnait **2 FAIL + un CRASH** qui emportait 86 assertions, d'où la garde de lisibilité
+`cible(dv)` (même motif que §6.27).
+
+**CE QUI CHANGE VISUELLEMENT, et n'est pas couvrable par test** : rien sur les documents existants (parité
+ci-dessus, et les deux corpus ne contiennent aucun posé d'étage). Sur un document en COMPORTANT apparaissent :
+le bouton « Localiser » d'un câble dont un bout est sur un étage (listing, fiche, recherche 3D), le CONFORT de
+son cadrage (une extrémité de câble se cadre avec la même étendue de contexte de 3 500 mm qu'en salle, à juger
+à l'œil en Vue étage où les distances sont d'un autre ordre), et l'arrivée dans la carte « câbles » des
+faisceaux et câbles purement d'étage.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -2176,7 +2285,7 @@ le mini-graphe de tracé (et son décompte en « emplacement(s) »), et les mess
 | `tray` | étagère → baie → salle | local salle | oui | **migré de bout en bout** — l'ÉTAGÈRE place ses contenus (`TrayFrame`, §6.23), la baie place l'étagère, la salle place la baie (`PlacementFrame`, §6.11). Géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). **Seule chaîne à TROIS conteneurs emboîtés** ; le lacet PROPRE d'un posé s'y compose enfin (§6.24) et une étagère arrière est une vraie ROTATION |
 | `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`PlacementFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
 | *(waypoints)* | baie → salle | local salle | s.o. | **migré** — brosses et pins passent par le conteneur (§6.12) ; le champ `world` est renommé `roomPoint` |
-| `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `PlacementFrame`. **LOCALISABLE** depuis §6.27 (équipement et ports), via `focusWorld3DAt` + `FloorLayout.equipFloorOrigin`. **CÂBLABLE** depuis §6.31 : la grammaire de route accepte un étage comme conteneur d'arrivée, et le tracé 3D comme 2D l'atteint |
+| `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `PlacementFrame`. **LOCALISABLE** depuis §6.27 (équipement et ports), via `focusWorld3DAt` + `FloorLayout.equipFloorOrigin`. **CÂBLABLE** depuis §6.31 : la grammaire de route accepte un étage comme conteneur d'arrivée, et le tracé 3D comme 2D l'atteint. Ses LIAISONS sont localisables depuis §6.32, et un étage affiché compte comme une salle affichée dans la portée des cartes latérales |
 
 Les équipements d'étage sont le premier contenu porté par un conteneur AUTRE qu'une salle. Ils sont
 donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
@@ -2187,12 +2296,16 @@ généralisée en « conteneur » sur toute la chaîne qui décide d'une liaison
 TRACÉ 3D et 2D, les contraintes de placement et les filtres des formulaires de câble. Un câble entre une baie
 et un équipement posé sur un étage est analysé, accepté, et dessiné.
 
-⚠ **CE QUI RESTE du chantier §6.4** : les SÉLECTEURS de port et d'équipement ne PROPOSENT pas encore
-spontanément un posé d'étage partout où c'est pertinent (lot 6), et le trio historique
-`equipmentDcId`/`portDcId`/`cableDcId` survit (lot 7 — sa suppression est ce qui fera désigner par `tsc` les
-appelants restants, décision D5). Restent aussi sur la clé « salle », délibérément : le prédicat du bouton
-« Localiser » d'un CÂBLE (`DcInteract.locateCable` cadre par `resolvePort3D`, scopé salle — §6.28) et la
-carte « câbles » du panneau latéral, dont la portée s'exprime en salles affichées (§6.27).
+✅ **Et ils sont LOCALISABLES par leurs LIAISONS** (§6.32) : « Localiser » un câble atteint son bout d'étage,
+les trois gardes de bouton correspondantes sont ouvertes, et la carte « câbles » du panneau latéral exprime sa
+portée en CONTENEURS affichés (`DcBase.containerShown`) — faisceaux comme câbles.
+
+⚠ **CE QUI RESTE du chantier §6.4** : le trio historique `equipmentDcId`/`portDcId`/`cableDcId` survit
+(lot 7 — sa suppression est ce qui fera désigner par `tsc` les appelants restants, décision D5). Il n'a plus
+que **cinq points d'appel** hors du `Store`, tous sur le chemin SALLE de `locateEquipment`/`locatePort` (dont
+la branche `floor` les PRÉCÈDE déjà) et le pont `DcBase.portDcId`. Restent aussi, hors chantier :
+`EntityViz.equipmentLocationShort`, qui affiche « — » pour un posé d'étage (dette de libellé signalée au lot
+3), et les `String(x || "")` d'étage que `PlacementContainers.floorOf` doit résorber.
 
 ✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur**, et la
 règle de repli d'une position absente n'est plus écrite qu'une fois (§6.13). Les deux **prérequis** de §6.5
@@ -2274,6 +2387,10 @@ du besoin — verrouillé par des tests anti-divergence).
   qu'il déclare à son conteneur). Il ne compose plus aucune transformée.
 - `src-client/geometry/RackGeometry.ts` — `roomPlacement` : ce que la BAIE déclare à son conteneur.
 - `src-client/views/dc/DcBase.ts` — repère (`multiDc`) vs portée (`visibleDcIds`), décor d'étage.
+  `containerShown` = pendant « conteneur » de `displayedDcIds` pour les cartes latérales (§6.32, décision
+  D3) : une SALLE affichée, ou un ÉTAGE dont le plan est émis en Vue étage ; ni baie ni étagère (leurs
+  contenus s'affichent dans la salle porteuse). ⚠ Sa garde « Vue étage » n'est pas redondante avec
+  `FloorLayout.floorShown` — le layout décrit le MODÈLE, pas ce qu'on dessine (§6.8).
   `webglFloorDecor` produit `FloorEquipDesc { id, x, y, baseZ }` : `baseZ` = **socle du niveau seul**, sans
   `dc_z` — c'est ce contrat qui interdit le double comptage côté moteur (§6.20). Il produit aussi
   `FloorDecor.world`, les **BORNES MONDE** (bandes de bâtiment DESSINÉES × hauteur du monde) que le moteur
@@ -2281,9 +2398,16 @@ du besoin — verrouillé par des tests anti-divergence).
   `SceneLayoutSignature`.
 - `src-client/views/dc/DcInteract.ts` — « Localiser ». DEUX points d'entrée, un par REPÈRE (§6.27) :
   `focus3DAt` (local SALLE, force le mode simple DC) et `focusWorld3DAt` (**MONDE**, bascule en Vue étage,
-  pour les contenus sans salle). `locateFloorEquip`/`locateFloorPort` précèdent le chemin salle et se
-  désistent (`false`) pour tout autre conteneur ; `scopeFloorBuilding` amène le bâtiment visé dans la
-  PORTÉE, sans quoi la caméra cadrerait un point que la scène ne dessine pas.
+  pour les contenus sans salle). `locateFloorEquip`/`locateFloorPort`/`locateFloorCable` précèdent le chemin
+  salle et se désistent (`false`) pour tout autre conteneur ; `scopeFloorBuilding` amène le bâtiment visé
+  dans la PORTÉE, sans quoi la caméra cadrerait un point que la scène ne dessine pas. `locateCable` choisit
+  son extrémité par `Store.cableLocatableEnd` — **la méthode même** que lisent les gardes de son bouton
+  (§6.32), si bien que prédicat et action ne peuvent pas diverger.
+- `src-client/core/Locatable.ts` — « cet objet est-il LOCALISABLE ? », règle UNIQUE des boutons « Localiser »
+  (pure, store injecté) : `equipment`/`port` (§6.28) et, pour une LIAISON, `cableEnd` (l'extrémité RETENUE —
+  première localisable, A puis B) dont `cable` n'est que le constat (§6.32). ⚠ Ce n'est PAS
+  `!!equipmentContainer(x)` : une baie hors salle et un posé d'étage d'un bâtiment sans salle ont un
+  conteneur VALIDE sans être atteignables.
 - `src-client/views/dc/three/DcThreeScene.ts` — `addPort` (résolution EN SALLE puis dessin) et `addPortAt`
   (dessin SEUL, à un point déjà résolu) : la RÉSOLUTION dépend du conteneur, le DESSIN non. Les ports
   d'étage passent par `resolvePortWorld3D` puis par le MÊME `addPortAt` — d'où leur comportement identique

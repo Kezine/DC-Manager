@@ -454,6 +454,7 @@ export const dc = {
     rackNotInRoom: "Rack not placed in a room",
     cableNotInRoom: "Cable not connected in a room",
     cableEndNotFound: "Cable end not found in this room",
+    cableEndNotFoundFloor: "Cable end not found on this floor",
     wpNotInRoom: "Waypoint not placed in a room",
     portEquipNotInRoom: "Port: equipment not placed in a room",
     portNotFound3d: "Port not found in 3D (face not placed?)",
