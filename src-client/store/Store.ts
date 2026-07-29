@@ -592,6 +592,12 @@ export class Store {
   /* ---- helpers métier (résolution inverse via index secondaires) ---- */
   portsOf(equipmentId: string): any[] { return this._byFk("ports", "equipment_id", equipmentId); }
   aggregatesOf(equipmentId: string): any[] { return this._byFk("aggregates", "equipment_id", equipmentId); }
+  /** Sous-équipements d'un équipement MAÎTRE (contenu logique : drives d'une librairie, cartes d'un châssis…).
+      Triés par NOM : c'est leur seule identité (pas de type, pas de position — cf. la spec `subEquipments`),
+      donc le seul ordre stable et lisible qu'on puisse leur donner. */
+  subEquipmentsOf(equipmentId: string): any[] {
+    return this._byFk("subEquipments", "equipment_id", equipmentId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
   /** Spares (pièces de rechange) attribués à un équipement. */
   sparesOfEquipment(equipmentId: string): any[] { return this._byFk("spares", "assigned_equipment_id", equipmentId); }
   breakoutLanes(parentPortId: string): any[] { return this._byFk("ports", "parent_port_id", parentPortId).sort((a, b) => (a.lane || 0) - (b.lane || 0)); }

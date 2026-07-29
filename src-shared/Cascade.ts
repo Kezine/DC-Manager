@@ -154,7 +154,8 @@ export class Cascade {
   /** Règles de cascade par collection supprimée. */
   private static readonly SPEC: Record<string, CascadeRule> = {
     equipments: {
-      delete: [{ coll: "ports", fk: "equipment_id" }, { coll: "aggregates", fk: "equipment_id" }],
+      // Les SOUS-ÉQUIPEMENTS suivent le maître : ils n'ont d'existence que par lui (parité `aggregates`).
+      delete: [{ coll: "ports", fk: "equipment_id" }, { coll: "aggregates", fk: "equipment_id" }, { coll: "subEquipments", fk: "equipment_id" }],
       // détache aussi les 2 extrémités de faisceau qui pointaient cet équipement (patch supprimé → trunk demi-terminé).
       // détache aussi les VMs HÉBERGÉES par cet équipement (host_equipment_id → null) : le lien est LÉGER (la VM
       // survit, juste « sans hôte connu »), jamais une suppression.

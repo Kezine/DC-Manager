@@ -28,6 +28,7 @@ export const INDEX_SPEC: Record<string, string[]> = {
   cables:      ["from_port_id", "to_port_id", "cable_type_id", "network_id", "network_ids", "waypoint_ids"],
   cableBundles: ["cable_type_id", "waypoint_ids", "endpoint_a_equipment_id", "endpoint_b_equipment_id"],
   aggregates:  ["equipment_id"],
+  subEquipments: ["equipment_id"],   // cascade du maître + liste des sous-équipements d'un équipement (parité aggregates)
   racks:       ["datacenter_id"],
   rackItems:   ["rack_id"],
   waypoints:   ["datacenter_id", "rack_id"],

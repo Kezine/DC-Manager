@@ -148,11 +148,16 @@ ValidationError = { collection, id?, path, code, message }
 | **T13** | **taille de bâtiment déclarée** (`sites.width_mm`/`depth_mm`, mm, OPTIONNELS et indissociables — invariant, même patron que `lat`/`lon`). Cross-entité sur `floors` : un plan d'étage ne peut pas DÉBORDER de son bâtiment (`anchor + dimension ≤ taille du site`, sur les deux axes) ; `dependents` sur `sites` → `floors` par `location` pour que RÉTRÉCIR un bâtiment re-valide ses étages (la contrainte tient aux DEUX bouts). **OPT-IN** : sans taille déclarée, aucune vérification — aucun document existant ne peut devenir invalide. ⚠ `floors.location` reste une CHAÎNE (jamais `ref: "sites"`) : le dépôt contient des `location` historiques sans enregistrement `sites`, que la FK ferait rejeter (V2) ; la règle est donc défensive — site introuvable ⇒ non applicable. Cf. `docs/placement.md` §6.8 | ✅ |
 
 Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
-FK, tableaux). **Couverture étendue aux 19 collections** : chaque collection a une spec
-(partielle — identité + énumérations + clés étrangères). Un test d'invariant vérifie que
-(a) toutes les collections sont couvertes, et (b) l'entité par défaut de chaque constructeur
-front satisfait sa spec (aucune sur-contrainte). Les enums repris du domaine sont gardés
-alignés par des tests anti-divergence.
+FK, tableaux). **Couverture : TOUTES les collections** — chacune a une spec (partielle —
+identité + énumérations + clés étrangères). Un test d'invariant vérifie que (a) toutes les
+collections sont couvertes, et (b) l'entité par défaut de chaque constructeur front satisfait
+sa spec (aucune sur-contrainte). Les enums repris du domaine sont gardés alignés par des tests
+anti-divergence.
+
+> ⚠ Cette phrase a longtemps annoncé « les **19** collections » alors que le modèle en comptait
+> déjà 21 : un COMPTE écrit à la main dans une doc se périme au premier ajout, en silence, et
+> personne ne le relit. Le nombre est retiré à dessein — c'est le test d'invariant qui compte, pas
+> la prose. Ne pas le réintroduire.
 
 ## 8. V5 — règles cross-entité (cadrage)
 

@@ -595,6 +595,28 @@ const SPEC_FIELDS = {
       name:         { type: "string" },
       equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
   },
+  // SOUS-ÉQUIPEMENT : contenu LOGIQUE d'un équipement maître (drive d'une librairie à bandes, carte d'un
+  // châssis…). Il n'a AUCUNE existence physique propre — c'est le maître qui la lui donne. Ce que cette spec
+  // NE contient PAS est aussi important que ce qu'elle contient : ni `type` (la sémantique vit dans le NOM),
+  // ni champ d'attribution, ni placement, ni dimension, ni port propre. Ces absences ne sont pas des oublis :
+  // elles sont la RAISON d'être d'une collection séparée plutôt qu'un drapeau sur `equipments` — un champ
+  // absent n'a besoin d'être neutralisé nulle part, alors qu'un drapeau doit être testé par chaque
+  // consommateur (cf. `inventory_only`, vérifié À LA MAIN dans 6 sites).
+  // ⚠ Hiérarchie PLATE, un seul niveau (arbitrage utilisateur) : AUCUNE FK vers `subEquipments` elle-même —
+  // ni ici, ni ailleurs. D'où l'absence de garde anti-cycle : il ne peut pas y avoir de cycle.
+  subEquipments: {
+      name:         { type: "string", required: true, trim: true },   // identité : la SÉMANTIQUE est ici (pas de champ `type`)
+      // Le MAÎTRE. `required` (et non `nullable`) : un sous-équipement sans maître n'a par définition aucune
+      // existence — c'est l'énoncé même du besoin. ⚠ Divergence VOULUE avec `aggregates.equipment_id`, qui est
+      // nullable par héritage historique et non par décision ; ne pas « harmoniser » les deux.
+      equipment_id: { type: "string", required: true, ref: "equipments" },
+      // ⚠ `default: ""` DÉLIBÉRÉ, et non décoratif : sans lui, `normalizeField` renvoie un `null` explicite
+      // TEL QUEL (il n'est ni `required`, ni `nullable`, ni pourvu d'un défaut) et ce `null` traverse
+      // normalisation ET validation alors que le type dérivé promet `string`. C'est l'exposition que compte le
+      // verrou « champs exposés au null silencieux » de `test-shared-validation.js` — il a mordu à l'écriture
+      // de ce champ. On ne monte pas le compte verrouillé : on retire l'exposition.
+      description:  { type: "string", default: "" },
+  },
   networks: {
       label:         { type: "string", required: true },
       kind:          { type: "string", enum: DATA_OR_POWER, default: "data" },
@@ -760,6 +782,7 @@ export namespace Records {
   export type Rack       = RecordOf<typeof SPEC_FIELDS.racks>;
   export type Port       = RecordOf<typeof SPEC_FIELDS.ports>;
   export type Aggregate  = RecordOf<typeof SPEC_FIELDS.aggregates>;
+  export type SubEquipment = RecordOf<typeof SPEC_FIELDS.subEquipments>;
   export type Network    = RecordOf<typeof SPEC_FIELDS.networks>;
   export type Group      = RecordOf<typeof SPEC_FIELDS.groups>;
   export type RackItem   = RecordOf<typeof SPEC_FIELDS.rackItems>;
@@ -1044,6 +1067,13 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   aggregates: {
     fields: SPEC_FIELDS.aggregates,
+  },
+  subEquipments: {
+    fields: SPEC_FIELDS.subEquipments,
+    // Aucun invariant ni règle cross-entité pour l'instant : `equipment_id` est déjà couvert par `required`
+    // (V1) et par l'intégrité référentielle `ref` (V2). La règle d'APPARTENANCE d'un port à un
+    // sous-équipement de SON équipement viendra avec `ports.sub_equipment_id` (lot 4, cf. le cadrage §8.2) —
+    // elle n'a pas de sens tant que le champ n'existe pas.
   },
   networks: {
     fields: SPEC_FIELDS.networks,

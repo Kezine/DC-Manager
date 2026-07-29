@@ -74,6 +74,8 @@ module.exports = async () => {
         { id: "P4", equipment_id: "E2", network_ids: ["NET1"], network_id: "NET1" }],
       networks: [{ id: "NET1", label: "VLAN" }],
       aggregates: [{ id: "A1", equipment_id: "E1" }],
+      // sous-équipements : SE1 sur E1 (emporté par le maître), SE2 sur E2 (épargné) — parité aggregates.
+      subEquipments: [{ id: "SE1", name: "Drive 1", equipment_id: "E1" }, { id: "SE2", name: "Drive 2", equipment_id: "E2" }],
       // faisceau rattaché à 2 patchs (E1 côté A) — la suppression de E1 doit détacher l'extrémité A.
       cableBundles: [{ id: "B1", endpoint_a_equipment_id: "E1", endpoint_b_equipment_id: "E2" }],
       cables: [
@@ -117,6 +119,10 @@ module.exports = async () => {
     const eqPlan = Cascade.plan("equipments", "E1", find, fetch);
     ck.eq(eqPlan.deletes.some((d) => d.c === "ports" && d.id === "P1"), true, "équip. : port supprimé");
     ck.eq(eqPlan.deletes.some((d) => d.c === "aggregates" && d.id === "A1"), true, "équip. : agrégat supprimé");
+    // sous-équipements : ils n'ont d'existence QUE par leur maître → emportés avec lui ; ceux d'un AUTRE
+    // maître sont épargnés (la règle suit la FK, elle ne balaie pas la collection).
+    ck.eq(eqPlan.deletes.some((d) => d.c === "subEquipments" && d.id === "SE1"), true, "équip. : sous-équipement supprimé avec le maître");
+    ck.eq(eqPlan.deletes.some((d) => d.c === "subEquipments" && d.id === "SE2"), false, "équip. : sous-équipement d'un AUTRE maître épargné");
     ck.eq(eqPlan.deletes.some((d) => d.c === "cables" && d.id === "C1"), true, "équip. : câble des ports supprimé");
     ck.eq(eqPlan.detaches.some((d) => d.c === "ipAddresses" && d.key === "equipment_id" && d.value === null), true, "équip. : IP détachée (registre conservé)");
     ck.eq(eqPlan.detaches.some((d) => d.c === "dhcpRanges" && d.key === "server_id" && d.value === null), true, "équip. : rôle serveur DHCP détaché");
@@ -1546,6 +1552,10 @@ module.exports = async () => {
       networks: { label: "x" }, groups: { label: "x" },
       ipNetworks: { cidr: "10.0.0.0/24", label: "x" }, ipAddresses: { address: "10.0.0.5" },
       dhcpRanges: { start_ip: "10.0.0.10", end_ip: "10.0.0.20" }, vms: { name: "x" }, contacts: { name: "x" },
+      // subEquipments : `equipment_id` est REQUIS (un sous-équipement sans maître n'a aucune existence) —
+      // divergence VOULUE avec aggregates.equipment_id, nullable. `validateRecord` sans `fetch` ne contrôle
+      // pas la FK, l'id fourni n'a donc pas besoin d'exister ici (l'intégrité V2 est testée à part).
+      subEquipments: { name: "x", equipment_id: "eq-1" },
     };
     const specced = Object.keys(Validation.COLLECTION_SPECS);
     ck.eq(specced.length, EntityRegistry.COLLECTIONS.length, "specs : TOUTES les collections couvertes (" + specced.length + "/" + EntityRegistry.COLLECTIONS.length + ")");
@@ -1554,6 +1564,53 @@ module.exports = async () => {
       const entity = new Cls(requiredSample[collection] || {});
       ck.eq(Validation.DataValidator.validateRecord(collection, entity.toJSON()).length, 0, collection + " : entité par défaut satisfait la spec");
     }
+  }
+  });
+
+  await section("shared : validation des SOUS-ÉQUIPEMENTS (nom + maître requis ; absences DÉLIBÉRÉES)", async () => {
+  {
+    const V = Validation.DataValidator;
+    const errs = (rec) => V.validateRecord("subEquipments", V.normalizeRecord("subEquipments", rec));
+    const ok = { name: "Drive LTO-8 n°2", equipment_id: "E1" };
+    ck.eq(errs(ok).length, 0, "sous-équip. : nom + maître → valide");
+
+    // NOM requis, et TRIMÉ (la sémantique vit dans le nom, il n'y a pas de champ `type` pour la porter).
+    ck.eq(errs({ ...ok, name: "" }).some((e) => e.path === "name" && e.code === "required"), true, "sous-équip. : nom vide → 'required'");
+    ck.eq(errs({ ...ok, name: "   " }).some((e) => e.path === "name" && e.code === "required"), true, "sous-équip. : nom tout-espaces (trimé) → 'required'");
+    ck.eq(V.normalizeRecord("subEquipments", { ...ok, name: "  Drive 1  " }).name, "Drive 1", "sous-équip. : nom trimé à la normalisation");
+
+    // MAÎTRE requis — c'est LA divergence voulue avec aggregates.equipment_id (nullable). Un sous-équipement
+    // sans maître n'a aucune existence : le refus doit être explicite, pas un orphelin toléré.
+    ck.eq(errs({ name: "x" }).some((e) => e.path === "equipment_id" && e.code === "required"), true, "sous-équip. : sans maître → 'required'");
+    ck.eq(errs({ name: "x", equipment_id: null }).some((e) => e.path === "equipment_id" && e.code === "required"), true, "sous-équip. : maître null → 'required'");
+    ck.eq(Validation.COLLECTION_SPECS.aggregates.fields.equipment_id.nullable, true, "témoin : aggregates.equipment_id est bien NULLABLE (la divergence est réelle, pas imaginée)");
+
+    // INTÉGRITÉ RÉFÉRENTIELLE (V2, avec fetch) : le maître doit EXISTER.
+    const fetch = (coll, id) => (coll === "equipments" && id === "E1") ? { id: "E1" } : null;
+    ck.eq(V.validateRecord("subEquipments", V.normalizeRecord("subEquipments", ok), fetch).length, 0, "sous-équip. : maître existant → valide");
+    ck.eq(V.validateRecord("subEquipments", V.normalizeRecord("subEquipments", { ...ok, equipment_id: "GHOST" }), fetch)
+      .some((e) => e.path === "equipment_id" && e.code === "ref_missing"), true, "sous-équip. : maître introuvable → 'ref_missing'");
+
+    // `description` porte un DÉFAUT : un null explicite est ramené à "" (sinon il traverserait normalisation
+    // ET validation alors que le type dérivé promet `string` — c'est le verrou « null silencieux »).
+    ck.eq(V.normalizeRecord("subEquipments", { ...ok, description: null }).description, "", "sous-équip. : description null → \"\" (pas de null silencieux)");
+
+    // LES ABSENCES SONT LA FONCTIONNALITÉ — ce verrou est le cœur du lot. Si l'un de ces champs apparaît un
+    // jour dans la spec, c'est que la collection est en train de redevenir un `equipments` : le test doit
+    // rougir pour forcer la DÉCISION, pas laisser la dérive passer.
+    const fields = Object.keys(Validation.COLLECTION_SPECS.subEquipments.fields);
+    ["type", "placement_mode", "dim_mode", "u_height", "u_width_mm", "free_l_mm", "free_w_mm", "free_h_mm",
+      "rack_id", "dc_id", "dc_x", "dc_y", "dc_z", "tray_item_id", "floor_x", "floor_y", "location", "floor", "room",
+      "assigned_to", "assigned_date", "inventory_only", "locked",
+      "sub_equipment_id", "parent_id", "sub_equipments"].forEach((forbidden) => {
+      ck.eq(fields.includes(forbidden), false, "sous-équip. : AUCUN champ « " + forbidden + " » (ni type, ni placement, ni dimension, ni attribution, ni imbrication)");
+    });
+    // Hiérarchie PLATE : aucune FK du modèle ENTIER ne vise `subEquipments` pour l'instant. Le jour où le lot 4
+    // ajoutera `ports.sub_equipment_id`, ce compte passera à 1 — et ce test dira lequel, ce qui est le but.
+    const refsToSelf = Object.entries(Validation.COLLECTION_SPECS).flatMap(([coll, spec]) =>
+      Object.entries(spec.fields).filter(([, f]) => f.ref === "subEquipments").map(([field]) => coll + "." + field));
+    ck.eq(JSON.stringify(refsToSelf), JSON.stringify([]), "sous-équip. : aucune FK ne le vise encore (ports.sub_equipment_id = lot 4)");
+    ck.eq(Object.values(Validation.COLLECTION_SPECS.subEquipments.fields).some((f) => f.ref === "subEquipments"), false, "sous-équip. : AUCUNE FK auto-référente (hiérarchie plate, pas de garde anti-cycle à écrire)");
   }
   });
 

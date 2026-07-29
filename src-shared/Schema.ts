@@ -22,7 +22,7 @@
 export class Schema {
   /** Collections du modèle, dans l'ordre canonique (= clés de `EntityRegistry.CLASSES`, vérifié par test d'invariant). */
   static readonly COLLECTIONS: readonly string[] = [
-    "equipments", "ports", "aggregates", "cables", "networks", "groups", "racks",
+    "equipments", "ports", "aggregates", "subEquipments", "cables", "networks", "groups", "racks",
     "rackItems", "portTypes", "cableTypes", "cableBundles", "datacenters",
     "waypoints", "floors", "ipNetworks", "ipAddresses", "dhcpRanges", "spares", "sites", "vms", "contacts",
   ];

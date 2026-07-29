@@ -2,6 +2,7 @@ import { Entity, Props } from "./Entity";
 import { Equipment } from "./Equipment";
 import { Port } from "./Port";
 import { Aggregate } from "./Aggregate";
+import { SubEquipment } from "./SubEquipment";
 import { Cable } from "./Cable";
 import { Network } from "./Network";
 import { Group } from "./Group";
@@ -32,6 +33,7 @@ const CLASSES_TYPED = {
   equipments: Equipment,
   ports: Port,
   aggregates: Aggregate,
+  subEquipments: SubEquipment,
   cables: Cable,
   networks: Network,
   groups: Group,

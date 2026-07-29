@@ -45,6 +45,11 @@ export const COLLECTION_THREE_IMPACT: Record<string, ThreeImpact> = {
   dhcpRanges:   "none",      // adressage — vues liste
   spares:       "none",      // inventaire de pièces de rechange — vue liste
   aggregates:   "none",      // agrégats de ports (LAG) — détail/graphe, pas la 3D
+  // Sous-équipements : contenu LOGIQUE d'un équipement (drive d'une librairie…). `none` n'est pas ici un
+  // classement PRUDENT mais une propriété du modèle : la collection n'a ni placement, ni dimension, ni port,
+  // donc AUCUN mesh, label ou texture ne peut en dépendre. Le tooltip de port qui les nommera (lot 4) se
+  // construit au SURVOL depuis le store — ce n'est pas de la géométrie reconstruite.
+  subEquipments: "none",
   vms:          "none",      // équipements virtuels (VMs) — sous-onglet liste/fiche, jamais rendus en 3D
   contacts:     "none",      // carnet de destinataires des notifications (email/sms) — vue liste, jamais dessiné
 };
