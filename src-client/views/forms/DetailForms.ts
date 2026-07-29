@@ -57,35 +57,46 @@ export class DetailForms extends IpamForms {
     const eq: any = store.get("equipments", p.equipment_id);
     return `${Html.escape(eq ? (eq.name || "?") : "?")} <span style="color:var(--fg-dimmer)">:</span> ${Html.escape(p.name || "(port)")}`;
   }
+  /** Ouvreurs de fiche par collection — carte DÉCLARATIVE (remplace le switch historique). Deux raisons :
+      (1) `DETAIL_COLLECTIONS` en DÉRIVE mécaniquement — « quelles collections ont une fiche » n'est plus une
+      liste écrite à la main quelque part, c'est CETTE carte, et la recherche globale s'y adosse (un corpus qui
+      viserait une collection sans fiche produirait des résultats cliquables sans effet — l'asymétrie
+      prédicat ⇄ action déjà résorbée deux fois ailleurs) ; (2) un `case` oublié était un `false` SILENCIEUX —
+      c'est arrivé aux équipements/baies (clic muet sur un lien d'intervention, cf. l'historique de `detail`).
+      Équipements et baies : leurs fiches vivent chez des ANCÊTRES de la chaîne (EquipmentForms/RackForms) —
+      accessibles ici en statique ; `subEquipments` délègue à sa classe dédiée (hors chaîne, comme FaceEditor).
+      Les corps de flèche s'exécutent à l'APPEL, pas à l'initialisation : aucun souci d'ordre de définition. */
+  private static readonly DETAIL_OPENERS: Record<string, (store: Store, host: FormHost, id: string, onChanged?: () => void) => void> = {
+    equipments: (s, h, i, c) => DetailForms.equipmentDetail(s, h, i, c),
+    subEquipments: (s, h, i, c) => SubEquipmentForms.detail(s, h, i, c),
+    racks: (s, h, i, c) => DetailForms.rackDetail(s, h, i, c),
+    cables: (s, h, i, c) => DetailForms.cableDetail(s, h, i, c),
+    cableBundles: (s, h, i, c) => DetailForms.cableBundleDetail(s, h, i, c),
+    networks: (s, h, i, c) => DetailForms.networkDetail(s, h, i, c),
+    ipNetworks: (s, h, i, c) => DetailForms.ipNetworkDetail(s, h, i, c),
+    ipAddresses: (s, h, i, c) => DetailForms.ipAddressDetail(s, h, i, c),
+    dhcpRanges: (s, h, i, c) => DetailForms.dhcpRangeDetail(s, h, i, c),
+    datacenters: (s, h, i, c) => DetailForms.datacenterDetail(s, h, i, c),
+    sites: (s, h, i, c) => DetailForms.siteDetail(s, h, i, c),
+    groups: (s, h, i, c) => DetailForms.groupDetail(s, h, i, c),
+    floors: (s, h, i, c) => DetailForms.floorDetail(s, h, i, c),
+    spares: (s, h, i, c) => DetailForms.spareDetail(s, h, i, c),
+    contacts: (s, h, i, c) => DetailForms.contactDetail(s, h, i, c),
+    vms: (s, h, i, c) => DetailForms.vmDetail(s, h, i, c),
+    cableTypes: (s, h, i) => DetailForms.cableTypeDetail(s, h, i),
+    portTypes: (s, h, i) => DetailForms.portTypeDetail(s, h, i),
+  };
+  /** Collections OUVRABLES en fiche — dérivée de la carte, JAMAIS écrite à la main. C'est le critère
+      d'inclusion du corpus de la recherche globale (cf. `views/GlobalSearchSources`, invariant testé). */
+  static readonly DETAIL_COLLECTIONS: readonly string[] = Object.keys(DetailForms.DETAIL_OPENERS);
+
   /** Ouvre la fiche détail générique correcte selon la collection — POINT D'ENTRÉE unique (remplace `openDetail`
       du shell pour les collections couvertes ; renvoie false si aucune fiche dédiée n'existe → repli générique). */
   static detail(store: Store, host: FormHost, collection: string, id: string, onChanged?: () => void): boolean {
-    switch (collection) {
-      // Équipements et baies : leurs fiches vivent chez des ANCÊTRES de la chaîne (EquipmentForms/RackForms)
-      // → accessibles ici en statique. Leur ABSENCE de ce dispatcher rendait le clic sur un ÉQUIPEMENT lié
-      // d'une intervention muet (openTargetDetail → detail() → false silencieux), alors que VM/spare ouvraient.
-      case "equipments": this.equipmentDetail(store, host, id, onChanged); return true;
-      // Déclarer la fiche ICI ne sert pas qu'au routage : c'est ce qui rend la collection ouvrable par
-      // `openTargetDetail` (app/main.ts) — donc par un lien d'intervention, sans travail supplémentaire.
-      case "subEquipments": SubEquipmentForms.detail(store, host, id, onChanged); return true;
-      case "racks": this.rackDetail(store, host, id, onChanged); return true;
-      case "cables": this.cableDetail(store, host, id, onChanged); return true;
-      case "cableBundles": this.cableBundleDetail(store, host, id, onChanged); return true;
-      case "networks": this.networkDetail(store, host, id, onChanged); return true;
-      case "ipNetworks": this.ipNetworkDetail(store, host, id, onChanged); return true;
-      case "ipAddresses": this.ipAddressDetail(store, host, id, onChanged); return true;
-      case "dhcpRanges": this.dhcpRangeDetail(store, host, id, onChanged); return true;
-      case "datacenters": this.datacenterDetail(store, host, id, onChanged); return true;
-      case "sites": this.siteDetail(store, host, id, onChanged); return true;
-      case "groups": this.groupDetail(store, host, id, onChanged); return true;
-      case "floors": this.floorDetail(store, host, id, onChanged); return true;
-      case "spares": this.spareDetail(store, host, id, onChanged); return true;
-      case "contacts": this.contactDetail(store, host, id, onChanged); return true;
-      case "vms": this.vmDetail(store, host, id, onChanged); return true;
-      case "cableTypes": this.cableTypeDetail(store, host, id); return true;
-      case "portTypes": this.portTypeDetail(store, host, id); return true;
-    }
-    return false;
+    const opener = DetailForms.DETAIL_OPENERS[collection];
+    if (!opener) return false;
+    opener(store, host, id, onChanged);
+    return true;
   }
 
   /* ---- CÂBLE ---- */

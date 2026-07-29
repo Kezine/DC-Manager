@@ -6,6 +6,7 @@ export const shell = {
     placeholder: "Document name",
   },
   topbar: {
+    globalSearch: "Global search (Ctrl+K)",
     new: "New document (Ctrl+N)",
     open: "Open a file (Ctrl+O)",
     save: "Save (Ctrl+S)",

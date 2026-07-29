@@ -12,6 +12,7 @@ import { RuntimeConfigLoader } from "./RuntimeConfig";
 import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
 import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
 import { FormBase } from "../views/forms/FormBase";
+import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
@@ -136,6 +137,14 @@ async function boot(): Promise<void> {
 
   const modal = new Modal();
   const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
+  // RECHERCHE GLOBALE (palette) — UNE implémentation pour les DEUX chemins (loupe topbar + Ctrl+K).
+  // Garde d'overlay = le pattern des raccourcis undo/redo (sélecteurs DOM) : `Modal.open()` REMPLACE le
+  // contenu sans confirmation (mécanisme voulu des fiches chaînées), donc ouvrir la palette par-dessus un
+  // FORMULAIRE en cours écraserait la saisie. Ignorée aussi sur l'accueil (aucun document → corpus vide).
+  const openGlobalSearch = (): void => {
+    if (document.querySelector(".modal-overlay.open, .dialog-overlay") || document.body.classList.contains("welcome-active")) return;
+    GlobalSearchPalette.open(store, formHost);
+  };
   // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
   // backend d'images selon le mode : IndexedDB (fichier, + compagnon .nmfb) · endpoints blob (REST). Cf. P2.
   const imageBackend = REST_MODE ? new RestImageBackend(API_BASE_URL) : new IdbImageBackend();
@@ -267,6 +276,7 @@ async function boot(): Promise<void> {
     onSaveAs: () => { void files.doSaveAs(); },
     onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
     onRedo: () => { void doRedo(); },
+    onGlobalSearch: () => openGlobalSearch(),   // loupe topbar — même implémentation (et même garde) que Ctrl+K
     onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); shell.setTheme(prefs.theme); dcView.onThemeChanged(); },
     onUiScale: (value) => { prefs.uiScale = value; applyUiScale(prefs.uiScale); shell.setUiScale(prefs.uiScale); },
     onModalFullscreen: (on) => { prefs.modalFullscreen = on; applyModalFullscreen(prefs.modalFullscreen); shell.setModalFullscreen(prefs.modalFullscreen); },   // une modale DÉJÀ ouverte s'adapte par le CSS seul
@@ -1016,6 +1026,17 @@ async function boot(): Promise<void> {
     e.preventDefault();
     const redo = (k === "y") || (k === "z" && e.shiftKey);
     void (redo ? doRedo() : doUndo());   // timeline unifiée (modèle + images)
+  });
+
+  // raccourci clavier RECHERCHE GLOBALE (Ctrl/Cmd+K) — la garde d'overlay vit dans `openGlobalSearch`
+  // (partagée avec la loupe topbar). `preventDefault` AVANT la garde : même quand la palette refuse de
+  // s'ouvrir (modale en cours), Ctrl+K ne doit pas partir au NAVIGATEUR (Firefox : focus de la barre de
+  // recherche) — un raccourci qui tantôt agit dans l'app et tantôt sort de la page serait déroutant.
+  document.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    if (e.key.toLowerCase() !== "k") return;
+    e.preventDefault();
+    openGlobalSearch();
   });
 
   applyAutosave();        // initialise l'état auto-save + le popover
