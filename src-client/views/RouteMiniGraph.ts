@@ -120,20 +120,21 @@ export class RouteMiniGraph {
       });
     };
     pushEndpoint(opts.endpointA);
-    route.steps.forEach((s: any) => {
+    route.steps.forEach((s) => {
       const wp = s.wp, floor = s.type === "floor";
       const placed = floor || !!wp.datacenter_id;
-      const pinLevel = parseFloat(wp.floor);   // pin d'étage : son étage propre (même convention)
-      /* ⚠ Un PIN D'ÉTAGE reste SANS conteneur, et c'est délibéré : il coupe la bande comme avant. Lui
-         donner son conteneur étage ferait APPARAÎTRE une bande sur des documents existants, alors que ce
-         lot ne touche qu'aux EXTRÉMITÉS (les seules à passer par `RouteEndpointSpec`). Les points de
-         PASSAGE se généralisent avec la grammaire de route — lot 5 du chantier. */
-      const container: PlacementContainer | null = (!floor && wp.datacenter_id) ? { kind: "room", id: String(wp.datacenter_id) } : null;
+      /* Le CONTENEUR de l'étape vient désormais de la GRAMMAIRE (`RouteStep.container`), qui le déclare
+         pour TOUTES les étapes — salle d'un waypoint, ÉTAGE d'un pin. Ce fichier le recomposait et
+         laissait un pin sans conteneur : arbitrage de §6.29, qui renvoyait explicitement sa levée à la
+         généralisation de la grammaire (§6.31). ⚠ Un pin d'étage a donc maintenant sa bande, et compte
+         comme emplacement traversé — sans effet sur les documents existants : les DEUX corpus sont
+         mesurés à ZÉRO pin d'étage employé dans une route. */
+      const container = s.container;
       nodes.push({
         container,
         roomLabel: store.containerLabel(container) || "",
         z: (wp.dc_z != null && isFinite(wp.dc_z)) ? wp.dc_z : null,
-        level: floor ? (isFinite(pinLevel) ? pinLevel : 0) : levelOf(container),
+        level: levelOf(container),
         glyph: Waypoint.glyph(wp),
         label: wp.name || (floor ? Waypoint.floorLabel(wp) : I18n.t("dc.common.waypoint")),
         sub: this.stepSub(wp, s.type) + (placed ? "" : I18n.t("dc.routeMini.notPlacedSuffix")),

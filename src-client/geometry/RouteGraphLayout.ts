@@ -98,16 +98,13 @@ export class RouteGraphLayout {
   /** Deux nœuds sont-ils dans le MÊME conteneur ? Sert aux trois endroits qui détectaient un
       CHANGEMENT de salle : la respiration horizontale, les bandes, les séparateurs du profil.
 
-      ⚠ LE CAS `null`/`null` EST LE PIÈGE DU LOT, et il se règle ICI une fois pour toutes.
-      `PlacementContainers.same(null, null)` rend **`false`** — à raison : l'absence de conteneur n'est
-      pas un conteneur commun, et deux équipements non placés ne sont pas « dans la même salle ». Mais la
-      question posée ici n'est pas « sont-ils au même endroit ? », c'est « y a-t-il une TRANSITION entre
-      ces deux nœuds ? » — et deux nœuds hors conteneur consécutifs n'en constituent pas une. C'est le
-      comportement historique (`a.roomId !== b.roomId`, faux pour deux `null`) ; s'en remettre à `same`
-      seul aurait inséré une respiration et un séparateur entre deux waypoints non posés. */
+      ⚠ LE CAS `null`/`null` EST LE PIÈGE DU CHANTIER, et il ne se règle PLUS ici : la règle est
+      descendue dans `PlacementContainers.sameOrNone` quand la grammaire de route en est devenue le
+      second consommateur (doctrine §6.31). Cette méthode reste le point d'entrée du layout — son nom
+      dit la question posée AU LAYOUT — mais elle ne réécrit pas la règle. Le détail (pourquoi `same`
+      seul insérerait une bande entre deux waypoints non posés) vit avec elle, en un seul endroit. */
   static sameContainer(a: PlacementContainer | null, b: PlacementContainer | null): boolean {
-    if (!a && !b) return true;
-    return PlacementContainers.same(a, b);
+    return PlacementContainers.sameOrNone(a, b);
   }
 
   /** Abscisses des centres : écart large autour des extrémités, resserré entre waypoints,

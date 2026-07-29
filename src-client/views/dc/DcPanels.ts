@@ -9,6 +9,8 @@ import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 // CONTENEUR SALLE : `origin()` donne le centre d'un contenu en local salle (position absente ⇒ demi-empreinte).
 import { PlacementFrame } from "../../geometry/PlacementFrame";
 import { FloorLayout } from "../../geometry/FloorLayout";
+import { PlacementContainers } from "../../../src-shared/PlacementContainers";
+import type { PlacementContainer } from "../../../src-shared/PlacementContainers";
 import { SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM } from "../../geometry/SiteLayout";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Format } from "../../core/Format";
@@ -157,8 +159,9 @@ export abstract class DcPanels extends DcViews2D {
     return { x: cell / 2, y: cell / 2 };
   }
 
-  /** Câble « inter-DC » : ses deux bouts résolvent dans des salles différentes. */
-  protected isInterDc(c: any): boolean { const a = this.store.cableEndDcId(c, "A"), b = this.store.cableEndDcId(c, "B"); return !!(a && b && a !== b); }
+  /** Câble « inter-DC » : ses deux bouts résolvent dans des CONTENEURS différents (deux salles, ou une
+      salle et un étage — comparaison structurelle, un étage n'ayant pas d'id, doctrine §6.31). */
+  protected isInterDc(c: any): boolean { const a = this.store.cableEndContainer(c, "A"), b = this.store.cableEndContainer(c, "B"); return !!(a && b && !PlacementContainers.same(a, b)); }
 
   protected cableLabelShort(c: any): string {
     if (c.name) return c.name;
@@ -173,7 +176,10 @@ export abstract class DcPanels extends DcViews2D {
     const add = (c: any) => { if (!seen.has(c.id)) { seen.add(c.id); out.push({ cable: c }); } };
     dcIds.forEach((id) => this.resolvedCables(id).forEach((rc) => add(rc.cable)));
     if (dcIds.length === 1) this.outgoingCableStubs(dcIds[0]).forEach((st) => add(st.cable));
-    else { const dset = new Set(dcIds); this.store.all("cables").forEach((c: any) => { const da = this.store.cableEndDcId(c, "A"), db = this.store.cableEndDcId(c, "B"); if ((da && dset.has(da)) || (db && dset.has(db))) add(c); }); }
+    // ⚠ Cette carte liste les câbles DESSINABLES dans la vue, dont la portée s'exprime en SALLES affichées :
+    // un bout d'étage n'y entre donc pas (il n'a pas de salle à comparer). C'est la même limite que la
+    // portée d'affichage elle-même (§6.27), pas une régression du chantier.
+    else { const dset = new Set(dcIds); this.store.all("cables").forEach((c: any) => { const da = this.store.cableEndContainer(c, "A"), db = this.store.cableEndContainer(c, "B"); const dansPortee = (x: PlacementContainer | null) => !!x && x.kind === "room" && dset.has(x.id); if (dansPortee(da) || dansPortee(db)) add(c); }); }
     return out;
   }
 

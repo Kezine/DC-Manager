@@ -1006,16 +1006,16 @@ export class Store {
      comme avant ; le détail est consultable (et testable) sur `store.routes`. */
   readonly routes: RouteAnalyzerImpl = new RouteAnalyzerImpl(this);
 
-  /** Salle du bout A|B d'un câble (null = port absent OU équipement non placé). */
-  cableEndDcId(cable: any, side: "A" | "B"): string | null { return this.routes.cableEndDcId(cable, side); }
+  /** Conteneur du bout A|B d'un câble (null = port absent OU équipement rattaché à rien de traversable). */
+  cableEndContainer(cable: any, side: "A" | "B"): PlacementContainer | null { return this.routes.cableEndContainer(cable, side); }
   /** Analyse de la route (grammaire + cohérence des bouts posés) — cf. CableRouteAnalyzer.cableRoute. */
   cableRoute(cable: any): RouteAnalysisT { return this.routes.cableRoute(cable); }
   /** Violation de COHÉRENCE DE SALLE (« exit terminal ») ? — cf. CableRouteAnalyzer. */
   routeHasRoomBreak(cable: any): boolean { return this.routes.routeHasRoomBreak(cable); }
   /** Première erreur STRUCTURELLE de route, ou null — cf. CableRouteAnalyzer. */
   routeStructuralError(cable: any): RouteErrorT | null { return this.routes.routeStructuralError(cable); }
-  /** Contrainte de salle d'un BOUT ("A"|"B"), évaluée SANS son port — cf. CableRouteAnalyzer. */
-  cableSideConstraint(cable: any, side: "A" | "B"): { dcId: string | null; onlyUnplaced: boolean; route: RouteAnalysisT } { return this.routes.cableSideConstraint(cable, side); }
+  /** Contrainte de CONTENEUR d'un BOUT ("A"|"B"), évaluée SANS son port — cf. CableRouteAnalyzer. */
+  cableSideConstraint(cable: any, side: "A" | "B"): { container: PlacementContainer | null; onlyUnplaced: boolean; route: RouteAnalysisT } { return this.routes.cableSideConstraint(cable, side); }
   /** Résumé lisible de la route : « ◆ Salle A → ⏏ Salle A → ◎ ét. 1 → ⏏ Salle B ». */
   cableRouteSummary(r: any): string { return this.routes.cableRouteSummary(r); }
   /** Nom d'une salle (datacenter) — "?" si absente, "(salle)" si sans nom. */
@@ -1027,15 +1027,18 @@ export class Store {
 
   /* ---- contrainte physique de placement (câblage) — logique dans CableRouteAnalyzer, délégations ---- */
 
-  /** Salles où un câble POSÉ contraint l'équipement à être : Map<dcId, cables[]> — cf. CableRouteAnalyzer. */
-  equipmentRequiredDcs(eqId: string): Map<string, any[]> { return this.routes.equipmentRequiredDcs(eqId); }
+  /** Conteneurs où un câble POSÉ contraint l'équipement à être, et les câbles qui l'imposent — cf. CableRouteAnalyzer. */
+  equipmentRequiredContainers(eqId: string): Array<{ container: PlacementContainer; cables: any[] }> { return this.routes.equipmentRequiredContainers(eqId); }
   /** Motif de blocage du placement dans la salle cible (null = autorisé) — cf. CableRouteAnalyzer. */
   equipmentPlacementBlockedReason(eqId: string, targetDcId: string): string | null { return this.routes.equipmentPlacementBlockedReason(eqId, targetDcId); }
   /** Idem pour un RACK entier (vérifie chaque équipement monté en U). null = autorisé. */
   rackPlacementBlockedReason(rackId: string, targetDcId: string): string | null { return this.routes.rackPlacementBlockedReason(rackId, targetDcId); }
-  /** Contexte physique d'un équipement : id de salle, « floor:loc:étage », ou null — cf. CableRouteAnalyzer. */
-  equipmentContext(eq: any): string | null { return this.routes.equipmentContext(eq); }
-  /** Un câble est-il valide compte tenu des contextes physiques de ses deux bouts ? — cf. CableRouteAnalyzer. */
+  /* ⚠ `equipmentContext` A DISPARU (doctrine §6.31), et ce n'est pas un oubli. Elle rendait « le contexte
+     physique » d'un équipement sous forme de chaîne — un id de salle, ou « floor:<bâtiment>:<étage> » —
+     c'est-à-dire une SECONDE écriture de la question à laquelle `equipmentNamedContainer` répond déjà, et
+     une identité d'étage ENCODÉE à la main (avec le `String(x || "")` qui écrase le rez-de-chaussée). Les
+     appelants lisent désormais `equipmentNamedContainer` et comparent par `PlacementContainers.same`. */
+  /** Un câble est-il valide compte tenu des conteneurs physiques de ses deux bouts ? — cf. CableRouteAnalyzer. */
   cableContextValid(c: any): boolean { return this.routes.cableContextValid(c); }
   /** Patchs de CASSE des câbles dont la route n'est plus valide après (dé)placement — cf. CableRouteAnalyzer. */
   cableBreakOps(eqId: string): Array<{ collection: string; id: string; patch: Record<string, any> }> { return this.routes.cableBreakOps(eqId); }
@@ -1087,7 +1090,9 @@ export class Store {
   /** Brouillons de câble (un seul bout) compatibles avec ce port — candidats à l'affectation au clic. */
   cableDraftCandidatesForPort(portId: string): any[] {
     const port = this.get("ports", portId); if (!port) return [];
-    const fam = this.portFamily(port), myDc = this.equipmentDcId(port.equipment_id);
+    // CONTENEUR (et non plus salle) du port : un brouillon peut désormais s'affecter à un port d'équipement
+    // posé sur un ÉTAGE, la contrainte de route sachant désigner un étage (doctrine §6.31).
+    const fam = this.portFamily(port), monConteneur = this.equipmentNamedContainer(port.equipment_id);
     return this.all("cables").filter((c: any) => {
       if (c.status !== CABLE_STATUS_DRAFT) return false;
       const missA = !c.from_port_id, missB = !c.to_port_id;
@@ -1097,7 +1102,7 @@ export class Store {
       if (ct && fam && ct.family !== fam) return false;
       const otherPid = missA ? c.to_port_id : c.from_port_id;
       if (otherPid) { const f2 = this.portFamily(this.get("ports", otherPid)); if (f2 && fam && f2 !== fam) return false; }
-      const fits = (side: "A" | "B") => { const k = this.cableSideConstraint(c, side); if (k.onlyUnplaced) return myDc == null; return !k.dcId || !myDc || k.dcId === myDc; };
+      const fits = (side: "A" | "B") => { const k = this.cableSideConstraint(c, side); if (k.onlyUnplaced) return monConteneur == null; return !k.container || !monConteneur || PlacementContainers.same(k.container, monConteneur); };
       return (missA && fits("A")) || (missB && fits("B"));
     });
   }

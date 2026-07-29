@@ -286,6 +286,31 @@ export class FloorLayout {
     // « ce point est en monde », et elle est ici justifiée par `roomToWorld` juste au-dessus.
     return { x: p.x, y: p.y, z: p.z, n: end.n ? FloorLayout.roomDirToWorld(room, end, end.n) : null } as WorldEnd;
   }
+  /** PENDANT ÉTAGE de `roomEndToWorld` : une extrémité DÉJÀ résolue en monde devient un `WorldEnd`.
+
+      ⚠ ELLE NE CALCULE RIEN, ET C'EST LE POINT. Un conteneur ÉTAGE n'a pas de transformée à composer ici :
+      le résolveur (`Resolver3D.resolvePortWorld3D`) a REÇU l'origine monde du conteneur et a déjà composé.
+      Ce qui manquait n'était donc pas un calcul mais l'AFFIRMATION du repère — le marqueur `WorldEnd`
+      n'existant qu'au typage, il faut un endroit NOMMÉ où l'on déclare « ce point est en monde », plutôt
+      qu'un `as WorldEnd` disséminé chez les appelants. Les deux producteurs vivent ainsi côte à côte, dans
+      le module qui possède la géométrie des conteneurs de haut niveau (doctrine §6.30 puis §6.31).
+
+      ⚠ À N'APPELER QUE sur un point produit par un résolveur MONDE. Le marqueur protège les appelants les
+      uns des autres (un `Port3D` local ne compile pas là où l'on attend du monde) ; il ne protège pas d'un
+      mensonge délibéré à cet endroit précis — comme `roomEndToWorld`, c'est la frontière de confiance. */
+  static worldEndOf(end: { x: number; y: number; z: number; n?: Vec3 | null }): WorldEnd {
+    return { x: end.x, y: end.y, z: end.z, n: end.n || null } as WorldEnd;
+  }
+  /** L'étage (bâtiment, étage) est-il AFFICHÉ, c'est-à-dire son plan est-il émis par ce layout ?
+
+      C'est le PENDANT, pour un conteneur étage, du `roomById.get(...)` que les tracés inter-conteneurs
+      appliquent à une salle (décision D3 : un étage est un conteneur affichable au même titre qu'une
+      salle — un câble qui y aboutit n'est tracé que s'il est affiché, et disparaît sinon). La portée vit
+      dans `floorPlanes`, filtré par `shownFloors` : c'est la SEULE lecture juste, `m.levels` couvrant tous
+      les niveaux du MODÈLE et non ceux qu'on dessine (§6.8). */
+  static floorShown(m: MultiLayout, location: string, floor: string): boolean {
+    return m.floorPlanes.some((p) => (p.loc || "") === (location || "") && String(p.floor) === String(floor));
+  }
   /** Z (base du niveau) d'un étage, INTERPOLÉ entre niveaux affichés (OOB d'un étage sans salle affichée). Tient
       compte des hauteurs d'étage NON uniformes (levelZs/levelHs) ; extrapole avec la hauteur du niveau extrême. */
   static levelZ(m: MultiLayout, lv: number): number {

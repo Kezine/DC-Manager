@@ -10,11 +10,12 @@
 
        bâtiment  →  étage  →  salle  →  baie  →  étagère
 
-   ÉTAT DE LA MIGRATION : ce module est pour l'instant ADDITIF — il n'est branché
-   nulle part en production. Sa raison d'être immédiate est d'être prouvé À PARITÉ
-   STRICTE avec la règle historique `Store.equipmentDcId`, conformément à la
-   méthode de vérification (doctrine §4.1) : on ne retire l'ancien chemin qu'une
-   fois le nouveau prouvé identique.
+   ÉTAT DE LA MIGRATION : ce module est BRANCHÉ. `Store.equipmentDcId` lui délègue
+   (via `roomIdOf`), les libellés le lisent (`core/ContainerLabel`), les boutons
+   « Localiser » aussi (`core/Locatable`), et depuis la doctrine §6.31 la GRAMMAIRE
+   DE ROUTE (`store/CableRouteAnalyzer`) raisonne directement sur ses conteneurs.
+   Chaque bascule a été faite APRÈS preuve de parité avec la règle historique,
+   conformément à la méthode de vérification (doctrine §4.1).
    ============================================================================= */
 
 /** Nature d'un conteneur. L'ordre reflète la hiérarchie, du plus large au plus fin. */
@@ -45,6 +46,21 @@ export class PlacementContainers {
       l'unification des sites historiques reste à faire. */
   private static floorKey(v: unknown): string { return String(v == null ? "" : v); }
 
+  /** Conteneur ÉTAGE construit depuis le couple (bâtiment, étage) — POINT D'ENTRÉE UNIQUE de la
+      fabrication d'une clé d'étage, pour tout site qui tient ce couple en main (un enregistrement
+      d'équipement, un pin d'étage, une salle…).
+
+      ⚠ POURQUOI UNE FABRIQUE PLUTÔT QU'UN LITTÉRAL. `floorKey` est privée, et c'est délibéré : la
+      seule façon correcte d'écrire la clé doit être la seule DISPONIBLE. Le dépôt s'est fait prendre
+      deux fois au même endroit — `CableRouteAnalyzer.equipmentContext` ENCODAIT le couple en chaîne
+      (« floor:<bâtiment>:<étage> ») ET employait `String(x || "")`, qui écrase le rez-de-chaussée
+      (`0` → `""`) et confond donc l'étage 0 avec l'étage « vide ». Les deux défauts n'en faisaient
+      qu'un : là où l'on RECOPIE la construction d'une identité, on finit par la construire de
+      travers (doctrine §6.31). */
+  static floorOf(location: unknown, floor: unknown): PlacementContainer {
+    return { kind: "floor", location: String(location || ""), floor: PlacementContainers.floorKey(floor) };
+  }
+
   /** Conteneur IMMÉDIAT d'un équipement, ou null s'il n'est attaché à rien de localisable (« pool »).
 
       ⚠ L'ORDRE des cas est SIGNIFIANT et réplique exactement `Store.equipmentDcId` :
@@ -55,7 +71,7 @@ export class PlacementContainers {
         dans son POOL, et n'a donc volontairement aucun conteneur localisable. */
   static of(eq: Record<string, any> | null | undefined): PlacementContainer | null {
     if (!eq) return null;
-    if (eq.placement_mode === "floor") return { kind: "floor", location: eq.location || "", floor: PlacementContainers.floorKey(eq.floor) };
+    if (eq.placement_mode === "floor") return PlacementContainers.floorOf(eq.location, eq.floor);
     if ((eq.placement_mode === "side" || eq.placement_mode === "wall") && eq.rack_id) return { kind: "rack", id: String(eq.rack_id) };
     if (eq.placement_mode === "tray" && eq.tray_item_id) return { kind: "tray", id: String(eq.tray_item_id) };
     if (eq.dim_mode === "free") return eq.dc_id ? { kind: "room", id: String(eq.dc_id) } : null;
@@ -83,7 +99,7 @@ export class PlacementContainers {
     if (container.kind === "room") {
       const dc = fetch("datacenters", container.id);
       if (!dc) return null;
-      return { kind: "floor", location: dc.location || "", floor: PlacementContainers.floorKey(dc.floor) };
+      return PlacementContainers.floorOf(dc.location, dc.floor);
     }
     if (container.kind === "floor") return { kind: "building", location: container.location };
     return null;   // building = racine
@@ -111,5 +127,24 @@ export class PlacementContainers {
     if (a.kind === "floor" && b.kind === "floor") return a.location === b.location && a.floor === b.floor;
     if (a.kind === "building" && b.kind === "building") return a.location === b.location;
     return (a as { id: string }).id === (b as { id: string }).id;
+  }
+
+  /** Y a-t-il une TRANSITION de conteneur entre `a` et `b` ? (rendu inversé : `true` = pas de transition.)
+
+      ⚠ CE N'EST PAS `same`, ET LA NUANCE EST LE PIÈGE DU CHANTIER. `same(null, null)` rend `false`,
+      à raison : l'absence de conteneur n'est pas un conteneur commun, et deux objets non placés ne
+      sont pas « au même endroit ». Mais la question que posent les PARCOURS (le regroupement en
+      bandes du mini-graphe de tracé, le résumé textuel d'une route) n'est pas celle-là : c'est
+      « franchit-on une frontière entre ces deux étapes ? », et deux étapes hors conteneur
+      consécutives n'en franchissent aucune. C'est exactement ce que rendait l'expression historique
+      `a.roomId !== b.roomId` sur deux `null` ; s'en remettre à `same` seul insérerait une bande, une
+      respiration et un séparateur ENTRE DEUX WAYPOINTS NON POSÉS de documents existants.
+
+      La règle a d'abord vécu dans `RouteGraphLayout.sameContainer` (doctrine §6.29, un seul
+      consommateur) ; la grammaire de route en est devenue le second (§6.31), ce qui la fait
+      descendre ici — auprès de `same`, dont elle n'est qu'une variante, plutôt que recopiée. */
+  static sameOrNone(a: PlacementContainer | null | undefined, b: PlacementContainer | null | undefined): boolean {
+    if (!a && !b) return true;
+    return PlacementContainers.same(a, b);
   }
 }

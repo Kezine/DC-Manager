@@ -107,6 +107,22 @@ export class Resolver3D {
     // cette règle, et rien ne l'aurait signalé.
     const geo = port.parent_port_id ? (s.get("ports", port.parent_port_id) || port) : port;
     const eq = s.get("equipments", port.equipment_id); if (!eq) return null;
+    return this.resolveFaceAnchorWorld3D(eq, geo, worldOriginX, worldOriginY, worldOriginZ);
+  }
+
+  /** Résout le PORT UPLINK virtuel d'un faisceau sur un patch posé DIRECTEMENT sur un conteneur SANS
+      SALLE — pendant MONDE de `resolveTrunkUplink3D`, exactement comme `resolvePortWorld3D` l'est de
+      `resolvePort3D`. Le doublet existe des deux côtés pour que faisceaux et câbles restent traités par la
+      MÊME mécanique (docs/faisceaux.md : parité stricte), y compris sur un étage (doctrine §6.31). */
+  resolveTrunkUplinkWorld3D(equipmentId: string | null, worldOriginX: number, worldOriginY: number, worldOriginZ: number): Port3D | null {
+    const eq = equipmentId ? this.store.get("equipments", equipmentId) : null; if (!eq) return null;
+    return this.resolveFaceAnchorWorld3D(eq, TRUNK_UPLINK_GEO, worldOriginX, worldOriginY, worldOriginZ);
+  }
+
+  /** Point MONDE d'une position de FACE sur un contenu placé sur un conteneur SANS SALLE — mécanique
+      UNIQUE partagée par les ports persistés et l'uplink virtuel d'un faisceau, miroir exact de
+      `resolveFaceAnchor3D` pour le chemin d'étage. */
+  private resolveFaceAnchorWorld3D(eq: any, geo: FaceGeo | any, worldOriginX: number, worldOriginY: number, worldOriginZ: number): Port3D | null {
     if (eq.dim_mode !== "free") return null;   // seul un dimensionnement LIBRE porte une boîte 6 faces
     // COMPOSITION : lacet PROPRE du contenu, PUIS translation à l'origine de son conteneur. C'est
     // exactement ce que compose `PlacementFrame` — on le RÉUTILISE plutôt que de réécrire ici une n-ième

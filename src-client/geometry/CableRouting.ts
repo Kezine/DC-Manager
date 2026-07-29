@@ -1,7 +1,10 @@
 import type { Store } from "../store";
 import { Resolver3D } from "./Resolver3D";
+import type { Port3D } from "./Resolver3D";
 import { FloorLayout } from "./FloorLayout";
-import type { MultiLayout, RoomPlacement, WorldEnd } from "./FloorLayout";
+import type { FloorCfg, MultiLayout, RoomPlacement, WorldEnd } from "./FloorLayout";
+import { PlacementContainers } from "../../src-shared/PlacementContainers";
+import type { PlacementContainer } from "../../src-shared/PlacementContainers";
 import { Waypoint } from "../models/Waypoint";
 
 /** Point monde (mm) : X = largeur, Y = profondeur, Z = hauteur. */
@@ -198,21 +201,99 @@ export class CableRouting {
     return this.cableLine(aWorld, bWorld, via, portNormal);
   }
 
-  /** Câbles inter-salles : route valide avec exits, 2 bouts résolus dans des salles AFFICHÉES. pts en MONDE. */
-  interDcRoutes(m: MultiLayout, portNormal: boolean): Array<{ cable: any; a: any; b: any; pts: Vec3[]; linePts: Vec3[]; straight?: Set<number>; stubAt?: Set<number> }> {
+  /** Extrémité d'une liaison portée au MONDE depuis SON conteneur — l'UNIQUE endroit du traceur qui
+      regarde encore la NATURE d'un conteneur, et seulement pour savoir QUI le résout et OÙ vérifier qu'il
+      est affiché. Le reste du tracé ne voit que des points monde (doctrine §6.30 puis §6.31).
+
+      `enSalle` résout le bout en LOCAL SALLE (`resolvePort3D`, la transformée de la salle est appliquée
+      ici) ; `surEtage` le résout DÉJÀ EN MONDE (`resolvePortWorld3D`, qui a reçu l'origine du plan
+      d'étage). Les deux sont fournis par l'appelant parce que lui seul sait CE QU'il résout : un port
+      persisté pour un câble, l'uplink virtuel pour un faisceau.
+
+      ⚠ DÉCISION D3 : un ÉTAGE est un conteneur AFFICHABLE au même titre qu'une salle. Une salle non
+      affichée fait déjà disparaître le tracé (`roomById.get` → `undefined`) ; un étage non affiché le fait
+      aussi (`FloorLayout.floorShown`). Aucun cas particulier, dans un sens ni dans l'autre.
+
+      null = conteneur absent, non affiché, non traçable (une baie n'est pas un conteneur d'extrémité de
+      liaison : ses contenus se résolvent dans la salle qui la porte), ou bout non résolu. */
+  worldEndIn(m: MultiLayout, roomById: Map<string, RoomPlacement>, container: PlacementContainer | null,
+             enSalle: (dcId: string) => Port3D | null, surEtage: () => Port3D | null): WorldEnd | null {
+    if (!container) return null;
+    if (container.kind === "room") {
+      const room = roomById.get(container.id); if (!room) return null;
+      const p = enSalle(container.id); return p ? FloorLayout.roomEndToWorld(room, p) : null;
+    }
+    if (container.kind === "floor") {
+      if (!FloorLayout.floorShown(m, container.location, container.floor)) return null;
+      const p = surEtage(); return p ? FloorLayout.worldEndOf(p) : null;
+    }
+    return null;
+  }
+
+  /** Origine MONDE du repère propre d'un équipement posé sur un ÉTAGE — relais vers la SOURCE UNIQUE
+      (`FloorLayout.equipFloorOrigin`, doctrine §6.27) pour les appelants qui consomment ce service sans
+      avoir le layout injecté (`TrunkRouting`). Recalculer cette origine chez eux reposerait la question du
+      `dc_z`, et il suffit d'y répondre une fois de travers pour que le tracé parte à côté du dessin. */
+  floorOriginOf(m: MultiLayout, eq: any): { x: number; y: number; baseZ: number } {
+    return this.floor.equipFloorOrigin(m, eq);
+  }
+
+  /** Port d'un équipement posé sur un ÉTAGE, résolu en MONDE (origine du posé + composition du résolveur). */
+  portOnFloorWorld(m: MultiLayout, portId: string | null): Port3D | null {
+    const p = portId ? this.store.get("ports", portId) : null; if (!p) return null;
+    const eq = this.store.get("equipments", p.equipment_id); if (!eq) return null;
+    const o = this.floorOriginOf(m, eq);
+    return this.resolver.resolvePortWorld3D(String(portId), o.x, o.y, o.baseZ);
+  }
+
+  /** Port d'un équipement posé sur un ÉTAGE, résolu en coordonnées PLAN de son étage (vue 2D).
+
+      ⚠ ON RÉUTILISE LE RÉSOLVEUR MONDE, ET C'EST JUSTE : la transformée « plan d'étage → monde » n'est
+      qu'une TRANSLATION (origine du bâtiment + ancrage du plan + Z du niveau — aucun conteneur au-dessus
+      de la salle ne porte d'orientation, cf. `Resolver3D.resolvePortWorld3D`). Lui donner l'origine PLAN
+      du posé au lieu de son origine MONDE lui fait donc rendre du PLAN, exactement. Écrire une seconde
+      géométrie de port « pour la 2D » dupliquerait la composition lacet + faces (§3 règle 1). */
+  portOnFloorPlan(portId: string | null, cfg: FloorCfg): Port3D | null {
+    const p = portId ? this.store.get("ports", portId) : null; if (!p) return null;
+    const eq = this.store.get("equipments", p.equipment_id); if (!eq) return null;
+    const pos = FloorLayout.floorEquipPos(eq, cfg);
+    return this.resolver.resolvePortWorld3D(String(portId), pos.x, pos.y, 0);
+  }
+
+  /** Extrémité d'une liaison en coordonnées PLAN d'étage — PENDANT 2D de `worldEndIn`, même découpage :
+      la portée d'abord (la salle est-elle sur CET étage ? l'étage est-il CELUI qu'on dessine ?), puis la
+      résolution déléguée à l'appelant, qui seul sait ce qu'il résout. */
+  planEndIn(dcsOnFloor: Map<string, any>, etage: PlacementContainer, container: PlacementContainer | null,
+            planOf: (dc: any, p: Vec3) => Vec3, enSalle: (dcId: string) => Port3D | null, surEtage: () => Port3D | null): Vec3 | null {
+    if (!container) return null;
+    if (container.kind === "room") {
+      const dc = dcsOnFloor.get(container.id); if (!dc) return null;
+      const p = enSalle(container.id); return p ? planOf(dc, { x: p.x, y: p.y, z: 0 }) : null;
+    }
+    if (container.kind === "floor") {
+      if (!PlacementContainers.same(container, etage)) return null;   // bout sur un AUTRE étage → pas ici
+      const p = surEtage(); return p ? { x: p.x, y: p.y, z: 0 } : null;
+    }
+    return null;
+  }
+
+  /** Câbles inter-CONTENEURS : route valide avec exits, 2 bouts résolus dans des conteneurs AFFICHÉS
+      (salle ou ÉTAGE). pts en MONDE.
+
+      ⚠ C'EST ICI QU'UN CÂBLE BAIE → ÉQUIPEMENT D'ÉTAGE DEVIENT VISIBLE. La garde lisait `r.dcA`/`r.dcB`,
+      que l'analyseur n'exprimait qu'en SALLES : un bout d'étage y valait `null` et le câble n'était jamais
+      tracé, quand bien même sa route eût été valide. Elle lit maintenant les CONTENEURS de l'analyseur
+      (doctrine §6.31) — la généralisation de la grammaire et celle du tracé se rejoignent exactement là. */
+  interDcRoutes(m: MultiLayout, portNormal: boolean): Array<{ cable: any; a: WorldEnd; b: WorldEnd; pts: Vec3[]; linePts: Vec3[]; straight?: Set<number>; stubAt?: Set<number> }> {
     const roomById = new Map<string, RoomPlacement>(m.rooms.map((r) => [r.dc.id, r]));
-    const out: Array<{ cable: any; a: any; b: any; pts: Vec3[]; linePts: Vec3[]; straight?: Set<number>; stubAt?: Set<number> }> = [];
+    const out: Array<{ cable: any; a: WorldEnd; b: WorldEnd; pts: Vec3[]; linePts: Vec3[]; straight?: Set<number>; stubAt?: Set<number> }> = [];
     this.store.all("cables").forEach((c: any) => {
       const r = this.store.cableRoute(c);
-      if (!r.valid || !r.hasExits || !r.dcA || !r.dcB) return;
-      const ra = roomById.get(r.dcA), rb = roomById.get(r.dcB);
-      if (!ra || !rb) return;
-      const a = this.resolver.resolvePort3D(c.from_port_id, r.dcA), b = this.resolver.resolvePort3D(c.to_port_id, r.dcB);
+      if (!r.valid || !r.hasExits) return;
+      const a = this.worldEndIn(m, roomById, r.containerA, (dcId) => this.resolver.resolvePort3D(c.from_port_id, dcId), () => this.portOnFloorWorld(m, c.from_port_id));
+      const b = this.worldEndIn(m, roomById, r.containerB, (dcId) => this.resolver.resolvePort3D(c.to_port_id, dcId), () => this.portOnFloorWorld(m, c.to_port_id));
       if (!a || !b) return;
-      // Chaque bout est porté au MONDE par SON conteneur AVANT d'entrer dans le tracé (§6.30). Ici les deux
-      // conteneurs sont des salles, parce que `cableRoute` ne rend encore que des salles (`dcA`/`dcB`) : la
-      // généralisation de l'analyseur est le lot suivant, et elle n'aura plus à toucher au tracé.
-      const sp = this.worldLine(m, roomById, FloorLayout.roomEndToWorld(ra, a), FloorLayout.roomEndToWorld(rb, b), r.steps, c.id, portNormal);
+      const sp = this.worldLine(m, roomById, a, b, r.steps, c.id, portNormal);
       out.push({ cable: c, a, b, pts: sp.pts, linePts: sp.linePts, straight: sp.straight, stubAt: sp.stubAt });
     });
     return out;

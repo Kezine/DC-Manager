@@ -1,7 +1,7 @@
 /* Tests modules — vues & outils pilotés par hôte injecté (Graph/Datacenter, outils 2D/3D, images).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, FormSave, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, PivotBounds, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, FormSave, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, PivotBounds, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("FormSave : un formulaire n'annonce JAMAIS un succès que le Store a REFUSÉ", async () => {
@@ -313,9 +313,28 @@ module.exports = async () => {
       const cfg = flLayout.config("", "");
       const onFloor = new Map(); s.dcsOfFloor("", "").forEach((d) => onFloor.set(d.id, d));
       const planOf = (d, p) => FloorLayout.roomLocalToPlan(d, flLayout.roomPos(d, cfg), p);
-      const flT = dv.trunks.interDcTrunksFloor(onFloor, cfg, planOf);
+      // L'étage DESSINÉ est passé en conteneur : c'est la portée des extrémités posées à même l'étage (D3).
+      const flT = dv.trunks.interDcTrunksFloor(onFloor, cfg, PlacementContainers.floorOf("", ""), planOf);
       ck.eq(flT.length, 2, "trunks.interDcTrunksFloor : faisceaux inter-DC de l'étage (coords plan)");
       ck(flT.every((rt) => rt.pts.length >= 2 && rt.pts.every((p) => isFinite(p.x) && isFinite(p.y))), "trunks.interDcTrunksFloor : points plan finis");
+      /* PLAN D'ÉTAGE 2D : un câble baie → POSÉ D'ÉTAGE y est tracé lui aussi (doctrine §6.31, D3). La vue
+         DESSINE déjà les posés d'étage (`floorEquipNode2D`) ; il eût été incohérent d'y montrer l'objet
+         sans son câble. Le bout d'étage est résolu en coordonnées PLAN — la transformée étage → monde
+         n'étant qu'une translation, c'est le MÊME résolveur qui sert, avec une autre origine. */
+      const feq = await s.create("equipments", { name: "posé-étage", placement_mode: "floor", location: "", floor: "", floor_x: 1500, floor_y: 1500, width_mm: 400, height_mm: 300, depth_mm: 200 });
+      const pfeq = (await s.create("ports", { equipment_id: feq.id, name: "pfe", face_x: 0.5, face_y: 0.5, face_side: "front" })).id;
+      const pinEtage = await s.create("waypoints", { name: "gaine-plan", wp_type: "oob", location: "", floor: "", floor_x: 1200, floor_y: 1200 });
+      const paFloor = await mkEqPort(5);   // U (et donc NOM) libre : « e4 » sert plus bas au brouillon de câble
+      await s.create("cables", { name: "vers-posé", from_port_id: paFloor, to_port_id: pfeq, waypoint_ids: [exit1.id, pinEtage.id] });
+      const flCables = dv.interDcRoutesFloor("", "", cfg);
+      ck(flCables.some((rc) => rc.cable.name === "vers-posé"), "interDcRoutesFloor : le câble baie → posé d'étage est tracé sur le PLAN D'ÉTAGE");
+      const rcPose = flCables.find((rc) => rc.cable.name === "vers-posé");
+      ck(rcPose.pts.length >= 3 && rcPose.pts.every((p) => isFinite(p.x) && isFinite(p.y)), "…port → exit → pin d'étage → posé, points plan finis");
+      // ÉQUIVALENCE : le dernier point vaut le port résolu depuis la position PLAN du posé (deux mesures).
+      const posPlan = FloorLayout.floorEquipPos(s.get("equipments", feq.id), cfg);
+      const attenduPlan = dv.resolver.resolvePortWorld3D(pfeq, posPlan.x, posPlan.y, 0);
+      const finPlan = rcPose.pts[rcPose.pts.length - 1];
+      ck(finPlan.x === attenduPlan.x && finPlan.y === attenduPlan.y, "…et il finit EXACTEMENT sur le port du posé, en coordonnées plan");
     }
     // visibilité : MÊME modèle que les câbles (« Tout afficher » + sélection partagée selCables)
     dv.showAllCables = false;
@@ -730,14 +749,16 @@ module.exports = async () => {
     const view = {
       get: (c, id) => (data[c] && data[c][id]) || null,
       waypointIsPlaced: (wp) => wp.dc_x != null,
-      equipmentDcId: () => null,
+      // L'hôte rend désormais des CONTENEURS (doctrine §6.31) : aucun équipement ici, donc aucun conteneur.
+      equipmentNamedContainer: () => null,
+      containerLabel: (c) => (c && c.kind === "room" ? ((data.datacenters[c.id] || {}).name || "(salle)") : null),
       effectiveWaypointIds: (cable) => cable.waypoint_ids || [],
       portsOf: () => [], cableOnPort: () => null, cablesOfEquipment: () => [], equipmentsOfRack: () => [],
       cableIsComplete: () => false,
     };
     const ra = new CableRouteAnalyzer(view);
     const ok = ra.cableRoute({ waypoint_ids: ["w1", "x1", "x2"] });
-    ck(ok.valid && ok.hasExits && ok.startDc === "dc1" && ok.endDc === "dc2", "salle A → exit A → exit B : valide, bouts déduits");
+    ck(ok.valid && ok.hasExits && ok.startContainer.id === "dc1" && ok.endContainer.id === "dc2", "salle A → exit A → exit B : valide, bouts déduits");
     ck(ra.cableRoute({ waypoint_ids: ["x1"] }).errors.some((e) => e.code === "exit_unpaired"), "exit seul → exit_unpaired");
     ck(ra.cableRoute({ waypoint_ids: ["x1", "w1"] }).errors.some((e) => e.code === "room_wp_outside"), "waypoint de salle dans le tronçon hors salle → room_wp_outside");
     ck.eq(ra.routeHasRoomBreak({ waypoint_ids: ["x1", "w1"] }), true, "routeHasRoomBreak (codes stables) via l'hôte simulé");

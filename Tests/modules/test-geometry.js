@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -1827,6 +1827,73 @@ module.exports = async () => {
     // repère garderait quelque chose d'inoffensif — et ne mériterait pas son coût.
     const enLocal = routing.worldLine(m, new Map(m.rooms.map((r) => [r.dc.id, r])), locA, locB, s.cableRoute(s.all("cables")[0]).steps, "sonde", true);
     ck(Math.hypot(enLocal.linePts[0].x - route.linePts[0].x, enLocal.linePts[0].y - route.linePts[0].y, enLocal.linePts[0].z - route.linePts[0].z) > 1000, "repère : un bout LOCAL passé au tracé déplacerait le câble de plus d'un mètre (le marqueur `WorldEnd` garde un écart RÉEL)");
+  }
+  });
+
+  await section("Tracé : un câble BAIE → ÉQUIPEMENT D'ÉTAGE est enfin DESSINÉ (§6.31, décision D3)", async () => {
+  {
+    /* Lot 5 du chantier « câblage des équipements d'étage ». §6.30 avait retiré la dépendance « salle » du
+       TRACEUR sans rien débloquer : `interDcRoutes` se fermait toujours sur `r.dcA`/`r.dcB`, que l'analyseur
+       n'exprimait qu'en salles. La grammaire parlant conteneurs, la garde lit `containerA`/`containerB` et
+       le bout d'étage est porté au monde par SON conteneur. C'est la mesure qui prouve la LIVRAISON. */
+    const s = await makeStore();
+    const site = await s.create("sites", { name: "Liège" });
+    const dcA = await s.create("datacenters", { name: "A", width_mm: 6000, depth_mm: 4000, location: site.id, floor: "1", floor_x: 0, floor_y: 0 });
+    const rkA = await s.create("racks", { name: "RA", u_count: 42, datacenter_id: dcA.id, dc_x: 1200, dc_y: 900, orientation: 0 });
+    const eqA = await s.create("equipments", { name: "EA", placement_mode: "rack", rack_id: rkA.id, rack_u: 5 });
+    const pA = (await s.create("ports", { equipment_id: eqA.id, name: "pa", face_x: 0.3, face_y: 0.7, face_side: "front" })).id;
+    // POSÉ D'ÉTAGE : même bâtiment, même étage que la salle → son plan d'étage est émis par le layout.
+    const eqF = await s.create("equipments", { name: "EF", placement_mode: "floor", location: site.id, floor: "1", floor_x: 3000, floor_y: 2500, dc_z: 250, width_mm: 400, height_mm: 300, depth_mm: 200 });
+    const pF = (await s.create("ports", { equipment_id: eqF.id, name: "pf", face_x: 0.5, face_y: 0.5, face_side: "front" })).id;
+    const exA = await s.create("waypoints", { name: "sortieA", wp_type: "exit", datacenter_id: dcA.id, dc_x: 100, dc_y: 200 });
+    const pin = await s.create("waypoints", { name: "gaine", wp_type: "oob", location: site.id, floor: "1", floor_x: 2500, floor_y: 2500 });
+    const cable = await s.create("cables", { name: "baie→étage", from_port_id: pA, to_port_id: pF, waypoint_ids: [exA.id, pin.id] });
+
+    const floor = new FloorLayout(s), resolver = new Resolver3D(s);
+    const routing = new CableRouting(s, resolver, floor);
+    const m = floor.multiLayout(dcA, { visibleDcIds: new Set([dcA.id]) });
+
+    const r = s.cableRoute(cable);
+    ck(r.valid && r.hasExits, "grammaire : la route baie → pin d'étage est VALIDE avec sortie");
+    ck.eq(JSON.stringify(r.containerB), JSON.stringify(PlacementContainers.floorOf(site.id, "1")), "…et son bout B est le conteneur ÉTAGE");
+
+    const traces = routing.interDcRoutes(m, true);
+    ck.eq(traces.length, 1, "interDcRoutes : le câble baie → posé d'étage est TRACÉ (avant ce lot : aucun)");
+    const t = traces[0];
+    ck(t.linePts.length >= 4 && t.linePts.every((p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z)), "…points monde finis, amorces comprises");
+    /* ÉQUIVALENCE (deux mesures comparées entre elles, pas à une constante) : le bout d'étage du tracé doit
+       valoir EXACTEMENT le port résolu en monde depuis l'origine du posé — la source unique §6.27. */
+    const o = floor.equipFloorOrigin(m, s.get("equipments", eqF.id));
+    const attendu = resolver.resolvePortWorld3D(pF, o.x, o.y, o.baseZ);
+    const dernier = t.linePts[t.linePts.length - 1];
+    ck(dernier.x === attendu.x && dernier.y === attendu.y && dernier.z === attendu.z, "bout d'étage : le tracé finit EXACTEMENT sur le port résolu en monde (origine = equipFloorOrigin)");
+    // …et le bout de SALLE reste porté par la transformée de sa salle (rien n'a bougé de ce côté).
+    const roomA = m.rooms.find((x) => x.dc.id === dcA.id), locA = resolver.resolvePort3D(pA, dcA.id);
+    const w0 = FloorLayout.roomToWorld(roomA, locA);
+    ck(t.linePts[0].x === w0.x && t.linePts[0].y === w0.y && t.linePts[0].z === w0.z, "bout de salle : inchangé — chaque bout est porté par SON conteneur");
+
+    /* D3 — un ÉTAGE est un conteneur AFFICHABLE : masqué, le câble disparaît, comme pour une salle. Un
+       bâtiment dont aucune salle n'est affichée ne voit pas son plan d'étage émis (filtre `shownFloors`). */
+    const site2 = await s.create("sites", { name: "Namur" });
+    const eqF2 = await s.create("equipments", { name: "EF2", placement_mode: "floor", location: site2.id, floor: "0", floor_x: 1000, floor_y: 1000, width_mm: 400, height_mm: 300, depth_mm: 200 });
+    const pF2 = (await s.create("ports", { equipment_id: eqF2.id, name: "pf2", face_x: 0.5, face_y: 0.5, face_side: "front" })).id;
+    const pin2 = await s.create("waypoints", { name: "gaine2", wp_type: "oob", location: site2.id, floor: "0", floor_x: 900, floor_y: 900 });
+    const eqA2 = await s.create("equipments", { name: "EA2", placement_mode: "rack", rack_id: rkA.id, rack_u: 9 });
+    const pA2 = (await s.create("ports", { equipment_id: eqA2.id, name: "pa2", face_x: 0.3, face_y: 0.7, face_side: "front" })).id;
+    await s.create("cables", { name: "baie→autre bâtiment", from_port_id: pA2, to_port_id: pF2, waypoint_ids: [exA.id, pin2.id] });
+    const rHors = s.cableRoute(s.get("cables", s.all("cables").find((c) => c.name === "baie→autre bâtiment").id));
+    ck(rHors.valid && rHors.hasExits, "route vers un posé d'un AUTRE bâtiment : grammaticalement valide");
+    const m2 = floor.multiLayout(dcA, { visibleDcIds: new Set([dcA.id]) });
+    ck.eq(FloorLayout.floorShown(m2, site2.id, "0"), false, "portée : l'étage de l'autre bâtiment n'est PAS affiché (aucune salle ne l'y fait entrer)");
+    ck.eq(routing.interDcRoutes(m2, true).length, 1, "D3 : seul le câble dont l'étage est AFFICHÉ est tracé — l'autre disparaît, comme pour une salle masquée");
+    ck.eq(FloorLayout.floorShown(m2, site.id, "1"), true, "…et l'étage de la salle affichée, lui, est bien émis");
+    /* La garde OUVRE aussi bien qu'elle FERME : une salle du second bâtiment entre dans la portée, son plan
+       d'étage est émis, et le câble apparaît. Deux mesures comparées entre elles (« affiché ? » ⇄ « tracé ? »)
+       plutôt qu'un seul décompte épinglé à une constante. */
+    const dcN = await s.create("datacenters", { name: "N", width_mm: 3000, depth_mm: 3000, location: site2.id, floor: "0", floor_x: 0, floor_y: 0 });
+    const m3 = floor.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcN.id]) });
+    ck.eq(FloorLayout.floorShown(m3, site2.id, "0"), true, "portée élargie : l'étage de l'autre bâtiment devient AFFICHÉ");
+    ck.eq(routing.interDcRoutes(m3, true).length, 2, "…et le second câble est alors tracé (la garde ouvre comme elle ferme)");
   }
   });
 

@@ -2042,6 +2042,130 @@ quelque chose d'inoffensif et ne mériterait pas son coût.
 l'affichage 3D et 2D des câbles et faisceaux inter-salles est inchangé par construction — c'est précisément ce
 que la parité établit, et il n'y a pas d'autre effet observable.
 
+### 6.31 La GRAMMAIRE DE ROUTE parle CONTENEURS : un équipement d'étage devient CÂBLABLE — **IMPLÉMENTÉ**
+
+Aboutissement du chantier ouvert en §6.4. §6.27 a rendu un posé d'étage LOCALISABLE, §6.28 a ouvert son
+bouton, §6.29 lui a donné son NOM, §6.30 a retiré la dépendance « salle » du TRACEUR. Il restait le verrou
+lui-même : l'ANALYSEUR de route, seul juge de ce qu'une liaison a le droit d'être.
+
+**LE NŒUD tenait en un booléen.** `CableRouteAnalyzer.cableRoute` portait un état `outside` : un exit le
+levait, un SECOND exit le refermait, et une route qui finissait `outside` était refusée (`exit_unpaired`).
+Or un pin d'ÉTAGE n'était accepté qu'ENTRE deux exits — donc, dans ce modèle, **« être sur un étage » c'était
+DÉJÀ être dehors**. Une route qui ABOUTIT à un équipement posé sur un étage se terminait légitimement dehors,
+et se faisait refuser. Ce n'était pas un cas oublié : c'était la conséquence exacte d'un automate dont les
+états étaient *dedans/dehors* au lieu d'être des CONTENEURS.
+
+**LE CHANGEMENT GRAMMATICAL, en une phrase** : la fermeture d'un tronçon n'est plus « un second exit », c'est
+**ARRIVER DANS UN CONTENEUR**. Une SALLE s'atteint par un exit ; un ÉTAGE, non — un pin d'étage NOMME l'étage
+sur lequel on se trouve, et l'on y est déjà. L'état devient donc `dans(conteneur)` ou `transit`, et seul le
+TRANSIT est incomplet en fin de route. Deux comportements changent, et deux seulement : **(a)** un pin d'étage
+n'est plus refusé faute d'exit PRÉCÉDENT (il ne l'est plus qu'à l'INTÉRIEUR d'une salle, où il n'a pas sa
+place) — d'où une route qui COMMENCE sur un étage ; **(b)** une route qui se termine sur un pin d'étage est
+VALIDE, son conteneur d'arrivée étant cet étage.
+
+**CONSÉQUENCE ASSUMÉE, qui n'est pas une limite mais la règle** : une liaison vers un posé d'étage exige un
+PIN d'étage dans sa route. Sans lui, la route quitte sa salle sans dire où elle va ; `exit_unpaired` reste
+juste. C'est ce qui ÉVITE l'exception « finir dehors est légal » que §6.4 s'interdisait : on ne relâche pas
+la grammaire, on lui apprend un second type d'arrivée.
+
+**LES QUATRE MOTS DU LOT** — décisions D2/D3/D4 du chantier, appliquées sans branche propre à l'étage :
+
+- **D2 — même conteneur ⇒ aucune sortie.** `ports_split` et `cableContextValid` comparent des conteneurs par
+  `PlacementContainers.same`. ⚠ **`cableContextValid` avait un TROU**, refermé ici : il n'exigeait une route
+  à exits que si « au moins l'un des deux contextes est une SALLE » — deux ÉTAGES DIFFÉRENTS retombaient donc
+  sur « valide », sans aucune exigence. La règle se lit maintenant telle quelle, sans énumérer les natures.
+- **D3 — un étage est AFFICHABLE comme une salle.** Une salle non affichée fait disparaître le tracé
+  (`roomById.get`) ; un étage non affiché aussi (`FloorLayout.floorShown`, lu sur `floorPlanes`, la seule
+  source qui distingue le MODÈLE de la PORTÉE — §6.8). Verrouillé dans les DEUX sens : la garde ouvre quand
+  une salle du bâtiment entre dans la portée.
+- **D4 — le mot juste.** Dix messages étaient des littéraux FRANÇAIS en dur ; ils passent par `I18n.t`
+  (`analysis.route.*`, fr + en). Cinq d'entre eux BASCULENT selon le conteneur (« salle » ⇄ « étage »,
+  « salles » ⇄ « emplacements »), sur le modèle du décompte du mini-graphe (§6.29) : tant que la route ne
+  traverse que des salles, c'est le libellé HISTORIQUE, au caractère près. ⚠ Les **CODES** (`RouteErrorCode`)
+  sont INCHANGÉS — aucun ajout, aucun retrait, aucun renommage ; seul `floor_outside` voit son SENS se
+  resserrer (« pin d'étage dans une salle » au lieu de « pin hors d'une paire d'exits »).
+- **Le conteneur d'un bout se lit sur la CHAÎNE, pas sur le conteneur IMMÉDIAT** — même piège qu'en §6.29 :
+  le conteneur immédiat d'un serveur monté est sa BAIE, or une route ne traverse ni baies ni étagères. La
+  règle existait déjà (`Store.equipmentNamedContainer` / `core/ContainerLabel`) ; l'analyseur la REÇOIT par
+  son interface hôte plutôt que d'en écrire une seconde.
+
+**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées :
+
+- **`equipmentContext` est SUPPRIMÉE, pas réécrite.** Elle rendait « le contexte physique » sous forme de
+  chaîne — un id de salle, ou `"floor:" + location + ":" + String(floor || "")`. Deux défauts n'en faisaient
+  qu'un : elle ENCODAIT une identité que `PlacementContainers` modélise déjà (« on modélise le couple, on ne
+  l'encode pas »), et son `String(x || "")` **écrasait le rez-de-chaussée en chaîne vide**, confondant
+  l'étage 0 avec l'étage « vide ». La réécrire aurait laissé deux noms pour une seule question. Écarté :
+  garder la méthode en délégation — c'est exactement la duplication que `CLAUDE.md` interdit.
+- **`PlacementContainers.floorOf(location, floor)` devient la FABRIQUE unique d'une clé d'étage**, `floorKey`
+  restant privée : la seule écriture correcte doit être la seule DISPONIBLE. Trois sites la consomment déjà
+  (mode `floor`, parent d'une salle, pin d'étage de la grammaire).
+- **`sameOrNone` descend dans `src-shared/PlacementContainers`.** La règle « deux absences ne constituent pas
+  une TRANSITION » vivait dans `RouteGraphLayout.sameContainer` (§6.29, un seul consommateur) ; le résumé de
+  route en est devenu le second. `sameContainer` reste le point d'entrée du layout, mais ne réécrit plus la
+  règle. ⚠ Sans elle, `same(null, null) === false` insérerait une étape ENTRE DEUX WAYPOINTS NON POSÉS de
+  documents existants — le changement silencieux que le lot s'interdit.
+- **Le RÉSUMÉ de route devient une chaîne de CONTENEURS.** Un pin d'étage y suivait sa propre règle (toujours
+  écrit, jamais dédoublonné) ; il suit désormais celle des autres. Sur toute route ne traversant que des
+  salles, la sortie est identique au caractère près (vérifié au banc).
+- **`RouteStep` porte son CONTENEUR**, et le mini-graphe le LIT au lieu de le recomposer. Cela lève
+  l'arbitrage de §6.29 (« un pin d'étage reste sans conteneur ») que ce paragraphe renvoyait explicitement
+  au présent lot : un pin a maintenant sa bande et compte comme emplacement traversé. ⚠ **Effet nul sur les
+  documents existants — mesuré, pas supposé : les DEUX corpus contiennent ZÉRO pin d'étage employé dans une
+  route** (1 route dans le corpus réel, 3 dans la démo, toutes exclusivement à exits).
+- **Les FAISCEAUX suivent, et la symétrie du résolveur est complétée.** `Resolver3D` avait
+  `resolvePort3D`/`resolveTrunkUplink3D`/`resolveFaceAnchor3D` côté salle mais seulement `resolvePortWorld3D`
+  côté étage : d'où `resolveTrunkUplinkWorld3D` + `resolveFaceAnchorWorld3D` (mécanique partagée). Laisser
+  les trunks derrière aurait rouvert un cas particulier là où `docs/faisceaux.md` promet la parité.
+- **Le PLAN D'ÉTAGE 2D suit aussi.** La vue DESSINE déjà les posés d'étage (`floorEquipNode2D`) ; y montrer
+  l'objet sans son câble aurait été incohérent. Le bout d'étage s'y résout en coordonnées PLAN **par le même
+  résolveur monde**, avec une autre origine — la transformée étage → monde n'étant qu'une TRANSLATION
+  (aucun conteneur au-dessus de la salle ne porte d'orientation). Écarté : une seconde géométrie de port
+  « pour la 2D », qui aurait dupliqué la composition lacet + faces.
+- **`equipmentRequiredDcs` devient `equipmentRequiredContainers` et rend une LISTE.** Un étage n'a pas d'id :
+  il ne peut pas être la clé d'une `Map`. Le dédoublonnage se fait par `same`.
+- **La CIBLE de `equipmentPlacementBlockedReason` reste une SALLE**, et c'est un choix : les vues 2D/3D et
+  les formulaires ne proposent que de déposer un équipement DANS une salle. Une contrainte vers un étage
+  bloque donc toute salle — et le message le DIT, avec le mot juste.
+
+**PARITÉ PROUVÉE AVANT BASCULE** (§4.1), par RÉGÉNÉRATION de l'analyseur depuis git (`git show
+HEAD:src-client/store/CableRouteAnalyzer.ts`, compilé à part et exécuté sur les MÊMES hôtes) :
+
+- banc SYNTHÉTIQUE de **66 420 analyses** (1 464 routes de 0 à 3 waypoints × 49 couples de ports, sur une
+  scène portant 3 salles, 2 étages, le rez-de-chaussée, l'étage « vide », un waypoint non posé et un exit
+  sans salle), **15 grandeurs comparées** par analyse (codes ordonnés, `valid`, `hasExits`, les 4 conteneurs
+  projetés sur leur salle, types d'étapes, statut maximal, `cableContextValid`, résumé, et les 2 × 2 champs
+  de la contrainte de bout) — **996 300 comparaisons**. Sur le sous-ensemble **SANS AUCUN ÉTAGE** (ni pin,
+  ni bout posé sur un étage), soit **6 400 analyses : 0 divergence**. Et **0 divergence inattendue** au total :
+  toute différence met un étage en jeu, sans exception ;
+- les DEUX corpus rejoués liaison par liaison : **26 liaisons, 390 grandeurs, 0 écart**.
+
+Les assertions de parité ont ensuite été **converties en attentes EXPLICITES** : la section committée porte
+les verdicts d'avant bascule ÉCRITS EN DUR, marqués « (HEAD) », face aux changements voulus marqués
+« (NOUVEAU) » avec l'ancien verdict rappelé. Elles ne comparent donc pas la fonction à elle-même.
+
+**Sondes de mutation** : pin d'étage qui ne ferme plus le tronçon (retour à `outside`) → **13 FAIL** ; garde
+d'affichage D3 neutralisée → **1 FAIL** (l'assertion qui la mesure, dans ses deux sens) ; trou de
+`cableContextValid` rouvert → **1 FAIL** ; `floorKey` ramenée à `String(x || "")` → **2 FAIL** (le
+rez-de-chaussée se confond avec l'étage vide) ; `sameOrNone` réduite à `same` → **5 FAIL** sur trois couches
+(règle nue, résumé de route, layout du mini-graphe) — contre 4 avant que le résumé ne soit verrouillé ;
+conteneur IMMÉDIAT lu au lieu du conteneur de chaîne → **25 FAIL** ; tracé 3D ignorant les conteneurs étage
+→ **2 FAIL** (le câble du lot disparaît) ; idem sur le plan d'étage 2D → **2 FAIL**.
+
+**⚠ MESURE QUI CORRIGE LE CADRAGE**. Le cadrage classait `CableForms.endDcOf`, `roomOf` et la garde
+`k.dcId === dcP` comme trois sites d'« égalité » à migrer. Ce sont bien trois sites, mais le lot en a touché
+**onze** de plus que la famille annoncée, tous découverts par le compilateur : `cableEndDcId` (2 sites de
+`DcPanels`, dont le prédicat « câble inter-DC »), `equipmentRequiredDcs`, `Store.cableDraftCandidatesForPort`,
+`TrunkRouting` (4 sites), `DcViews2D.interDcRoutesFloor`, `RouteMiniGraph`. La bonne unité de mesure n'était
+pas « les appelants de `equipmentDcId` » mais « ce que le TYPE `RouteAnalysis` touche » — le renommage de ses
+quatre champs est ce qui a fait apparaître la liste complète, et c'est l'argument le plus net en faveur de la
+décision **D5** (supprimer le trio pour que `tsc` désigne les survivants).
+
+**CE QUI CHANGE VISUELLEMENT, et n'est pas couvrable par test** : rien sur les documents existants (parité
+établie ci-dessus). Sur un document COMPORTANT des équipements d'étage — il n'en existe aucun aujourd'hui —
+apparaissent : le tracé 3D et 2D des câbles et faisceaux vers un posé d'étage, la bande d'un PIN d'étage dans
+le mini-graphe de tracé (et son décompte en « emplacement(s) »), et les messages d'erreur au mot « étage ».
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |
@@ -2052,18 +2176,23 @@ que la parité établit, et il n'y a pas d'autre effet observable.
 | `tray` | étagère → baie → salle | local salle | oui | **migré de bout en bout** — l'ÉTAGÈRE place ses contenus (`TrayFrame`, §6.23), la baie place l'étagère, la salle place la baie (`PlacementFrame`, §6.11). Géométrie de plateau DÉDUPLIQUÉE (`src-shared/TrayGeometry`, §6.7) et profondeur de cage aussi (`src-shared/RackDepthPolicy`, §6.14). **Seule chaîne à TROIS conteneurs emboîtés** ; le lacet PROPRE d'un posé s'y compose enfin (§6.24) et une étagère arrière est une vraie ROTATION |
 | `manual` (libre) | salle | local salle | oui | **migré** — la SALLE place directement l'équipement, MÊME conteneur que les baies (`PlacementFrame`, §6.12) ; l'origine d'un contenu non positionné est CORRIGÉE |
 | *(waypoints)* | baie → salle | local salle | s.o. | **migré** — brosses et pins passent par le conteneur (§6.12) ; le champ `world` est renommé `roomPoint` |
-| `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `PlacementFrame`. **LOCALISABLE** depuis §6.27 (équipement et ports), via `focusWorld3DAt` + `FloorLayout.equipFloorOrigin` |
+| `floor` | plan d'étage → étage → bâtiment | **monde** | oui | **migré** — `Resolver3D.resolvePortWorld3D` compose depuis l'origine MONDE que le layout fournit au conteneur (§6.20) ; la composition elle-même est celle de `PlacementFrame`. **LOCALISABLE** depuis §6.27 (équipement et ports), via `focusWorld3DAt` + `FloorLayout.equipFloorOrigin`. **CÂBLABLE** depuis §6.31 : la grammaire de route accepte un étage comme conteneur d'arrivée, et le tracé 3D comme 2D l'atteint |
 
 Les équipements d'étage sont le premier contenu porté par un conteneur AUTRE qu'une salle. Ils sont
 donc le banc d'essai de cette doctrine — d'où le choix de commencer par eux.
 
-⚠ **Leurs ports sont RÉSOLUS, DESSINÉS et LOCALISABLES ; ils ne sont toujours pas CÂBLABLES** (§6.20 puis
-§6.27). `Store.equipmentDcId` rend `null` pour un équipement d'étage par conception, et la machinerie de
-câblage ne connaît que « dans la salle X » ou « non placé ». Généraliser cette clé de « salle » à
-« conteneur » est le chantier décrit en §6.4 ; il est OUVERT — `Store.equipmentContainer`/`portContainer`/
-`cableContainer` existent, §6.27 a débloqué le seul prérequis d'expérience (un « Localiser » opérant), et
-depuis §6.30 le TRACÉ lui-même ne connaît plus les salles : il reçoit des extrémités en MONDE. Ce qui bloque
-encore est la GRAMMAIRE DE ROUTE (`CableRouteAnalyzer`, qui rend `dcA`/`dcB`), puis les sélecteurs de port.
+✅ **Leurs ports sont RÉSOLUS, DESSINÉS, LOCALISABLES et — depuis §6.31 — CÂBLABLES.** La clé « salle » est
+généralisée en « conteneur » sur toute la chaîne qui décide d'une liaison : la GRAMMAIRE de route
+(`CableRouteAnalyzer`, qui rend désormais `startContainer`/`endContainer`/`containerA`/`containerB`), le
+TRACÉ 3D et 2D, les contraintes de placement et les filtres des formulaires de câble. Un câble entre une baie
+et un équipement posé sur un étage est analysé, accepté, et dessiné.
+
+⚠ **CE QUI RESTE du chantier §6.4** : les SÉLECTEURS de port et d'équipement ne PROPOSENT pas encore
+spontanément un posé d'étage partout où c'est pertinent (lot 6), et le trio historique
+`equipmentDcId`/`portDcId`/`cableDcId` survit (lot 7 — sa suppression est ce qui fera désigner par `tsc` les
+appelants restants, décision D5). Restent aussi sur la clé « salle », délibérément : le prédicat du bouton
+« Localiser » d'un CÂBLE (`DcInteract.locateCable` cadre par `resolvePort3D`, scopé salle — §6.28) et la
+carte « câbles » du panneau latéral, dont la portée s'exprime en salles affichées (§6.27).
 
 ✅ **L'ordre de migration §6.10 est ÉPUISÉ : tous les modes de placement passent par un conteneur**, et la
 règle de repli d'une position absente n'est plus écrite qu'une fois (§6.13). Les deux **prérequis** de §6.5

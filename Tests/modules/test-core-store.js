@@ -1,7 +1,7 @@
 /* Tests modules — entités, Store (CRUD, cascade, undo, routes, spares, sites…), helpers core.
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Entités : normalisation au constructeur", async () => {
@@ -464,19 +464,23 @@ module.exports = async () => {
     // deux salles SANS exits → invalide
     r = s.cableRoute({ from_port_id: pA1, to_port_id: pB1, waypoint_ids: [] });
     ck(!r.valid, "ports dans deux salles sans exits → invalide");
-    // route inter-salles exitA → OOB → exitB → valide, startDc/endDc
+    // route inter-conteneurs exitA → pin d'étage → exitB → valide, conteneurs de départ/arrivée
     r = s.cableRoute({ from_port_id: pA1, to_port_id: pB1, waypoint_ids: [exitA.id, oob.id, exitB.id] });
-    ck(r.valid && r.hasExits, "exit A → OOB → exit B → valide, hasExits");
-    ck.eq(r.startDc, dcA.id, "route : startDc = Salle A");
-    ck.eq(r.endDc, dcB.id, "route : endDc = Salle B");
-    // OOB hors d'un tronçon exit → invalide
+    ck(r.valid && r.hasExits, "exit A → pin d'étage → exit B → valide, hasExits");
+    ck.eq(JSON.stringify(r.startContainer), JSON.stringify({ kind: "room", id: dcA.id }), "route : conteneur de DÉPART = Salle A");
+    ck.eq(JSON.stringify(r.endContainer), JSON.stringify({ kind: "room", id: dcB.id }), "route : conteneur d'ARRIVÉE = Salle B");
+    /* ⚠ CHANGEMENT DE GRAMMAIRE VOULU (doctrine §6.31, décisions D2/D3). Un pin d'étage n'est plus refusé
+       faute d'exit PRÉCÉDENT : il NOMME l'étage sur lequel la route se trouve, et une route peut donc
+       commencer ET finir sur un étage. L'ancienne grammaire rendait `floor_outside` sur ce cas. */
     r = s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [oob.id] });
-    ck(!r.valid, "OOB hors d'une paire d'exits → invalide");
+    ck(r.valid, "pin d'étage SEUL → VALIDE (l'ancienne grammaire refusait par floor_outside)");
+    ck.eq(JSON.stringify(r.endContainer), JSON.stringify({ kind: "floor", location: "", floor: "1" }), "…et la route ARRIVE sur cet étage (conteneur = couple bâtiment+étage)");
     // exit non appairé → invalide
     r = s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [exitA.id] });
     ck(!r.valid, "exit non appairé → invalide");
     // -- CODES STABLES d'erreur + helpers (les appelants réagissent au code, PAS au libellé) --
-    ck.eq(s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [oob.id] }).errors[0].code, "floor_outside", "code : pin d'étage hors tronçon → floor_outside");
+    // `floor_outside` SUBSISTE, avec un sens resserré : un pin d'étage À L'INTÉRIEUR d'une salle.
+    ck.eq(s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [dcWpA.id, oob.id] }).errors[0].code, "floor_outside", "code : pin d'étage À L'INTÉRIEUR d'une salle → floor_outside");
     ck.eq(r.errors.some((e) => e.code === "exit_unpaired"), true, "code : exit seul → exit_unpaired");
     // routeHasRoomBreak : waypoint de salle APRÈS l'exit de sa salle (exit terminal) → rupture de cohérence
     ck.eq(s.routeHasRoomBreak({ from_port_id: null, to_port_id: null, waypoint_ids: [exitA.id, dcWpA.id] }), true, "routeHasRoomBreak : wp de salle après son exit → true");
@@ -493,7 +497,7 @@ module.exports = async () => {
     ck.eq(s.cableMaxStatus({ from_port_id: pA1, to_port_id: null, cable_type_id: null, waypoint_ids: [] }), "brouillon", "cableMaxStatus(incomplet) → brouillon");
     // contrainte de salle d'un bout
     const k = s.cableSideConstraint({ from_port_id: null, to_port_id: pB1, waypoint_ids: [exitA.id, oob.id, exitB.id] }, "A");
-    ck.eq(k.dcId, dcA.id, "cableSideConstraint(A) impose la salle de départ");
+    ck.eq(JSON.stringify(k.container), JSON.stringify({ kind: "room", id: dcA.id }), "cableSideConstraint(A) impose le CONTENEUR de départ");
 
     // faisceaux : occupation du pool de fibres — piochée par les PORTS de patch (source UNIQUE des brins)
     const ct = s.all("cableTypes")[0];
@@ -562,7 +566,7 @@ module.exports = async () => {
     ck.eq(s.cableDcId(jm), null, "cableDcId : aucune extrémité en salle → null (bouton Localiser masqué)");
     ck.eq(s.equipmentPlacementBlockedReason(eqX.id, dcA.id), null, "blockedReason : pose dans la salle câblée → autorisée");
     ck(typeof s.equipmentPlacementBlockedReason(eqX.id, dcB.id) === "string", "blockedReason : pose dans une AUTRE salle → bloquée");
-    ck(s.equipmentRequiredDcs(eqX.id).has(dcA.id), "equipmentRequiredDcs : contraint à la Salle A");
+    ck(s.equipmentRequiredContainers(eqX.id).some((x) => x.container.kind === "room" && x.container.id === dcA.id), "equipmentRequiredContainers : contraint à la Salle A");
     // applyCableBreaks : deux bouts dans des salles différentes SANS exits → câble cassé (bout distant déconnecté)
     const eqY = await s.create("equipments", { name: "Y", placement_mode: "rack", rack_id: rkB.id, rack_u: 5 });
     const pY = (await s.create("ports", { equipment_id: eqY.id, name: "pY" })).id;
@@ -574,6 +578,139 @@ module.exports = async () => {
     ck.eq(n, 1, "applyCableBreaks : 1 câble cassé");
     const brk2 = s.get("cables", brk.id);
     ck(brk2.status === "casse" && brk2.to_port_id === null, "applyCableBreaks : statut « cassé » + bout distant déconnecté");
+  }
+  });
+
+  await section("Grammaire de route : l'automate parle CONTENEURS (§6.31 — parité figée sur HEAD)", async () => {
+  {
+    /* Lot 5 du chantier « câblage des équipements d'étage » (décisions D2/D3/D4). L'automate tenait un
+       booléen `outside` refermé par un SECOND exit ; il tient maintenant un CONTENEUR, et un pin d'étage
+       ferme le tronçon en NOMMANT l'étage atteint. Deux familles d'assertions cohabitent ici :
+
+       — PARITÉ : les valeurs marquées « (HEAD) » ont été MESURÉES sur l'analyseur d'avant bascule,
+         régénéré depuis git (`git show HEAD:src-client/store/CableRouteAnalyzer.ts`, compilé à part) sur
+         EXACTEMENT cette scène, puis écrites EN DUR. Elles ne comparent donc pas la fonction à elle-même
+         (piège du lot 2 du chantier conteneur) : elles disent ce que l'analyse VALAIT, et doit valoir.
+         Le banc complet (66 420 analyses, 6 400 sans aucun étage, 0 divergence) a servi à établir qu'AUCUN
+         autre cas ne bouge ; ces cas-ci en sont les représentants figés.
+       — CHANGEMENTS VOULUS : marqués « (NOUVEAU) », avec l'ancien verdict rappelé en commentaire. */
+    const s = await makeStore();
+    const dcA = await s.create("datacenters", { name: "Salle A", location: "liege", floor: "1" });
+    const dcB = await s.create("datacenters", { name: "Salle B", location: "liege", floor: "1" });
+    const rkA = await s.create("racks", { name: "RA", u_count: 42, datacenter_id: dcA.id, dc_x: 500, dc_y: 500 });
+    const rkB = await s.create("racks", { name: "RB", u_count: 42, datacenter_id: dcB.id, dc_x: 500, dc_y: 500 });
+    const mk = async (nom, patch) => { const e = await s.create("equipments", Object.assign({ name: nom }, patch)); return { e, p: (await s.create("ports", { equipment_id: e.id, name: "p" + nom })).id }; };
+    const A = await mk("A", { placement_mode: "rack", rack_id: rkA.id, rack_u: 1 });
+    const A2 = await mk("A2", { placement_mode: "rack", rack_id: rkA.id, rack_u: 2 });
+    const B = await mk("B", { placement_mode: "rack", rack_id: rkB.id, rack_u: 1 });
+    const F1 = await mk("F1", { placement_mode: "floor", location: "liege", floor: "1", floor_x: 1000, floor_y: 1000 });
+    const F1b = await mk("F1b", { placement_mode: "floor", location: "liege", floor: "1", floor_x: 3000, floor_y: 1000 });
+    const F2 = await mk("F2", { placement_mode: "floor", location: "liege", floor: "2", floor_x: 1000, floor_y: 1000 });
+    const exA = await s.create("waypoints", { name: "sortieA", wp_type: "exit", datacenter_id: dcA.id, dc_x: 0, dc_y: 0 });
+    const exB = await s.create("waypoints", { name: "sortieB", wp_type: "exit", datacenter_id: dcB.id, dc_x: 0, dc_y: 0 });
+    const pin1 = await s.create("waypoints", { name: "gaine1", wp_type: "oob", location: "liege", floor: "1", floor_x: 2000, floor_y: 2000 });
+    const pin2 = await s.create("waypoints", { name: "gaine2", wp_type: "oob", location: "liege", floor: "2", floor_x: 2000, floor_y: 2000 });
+    const wpA = await s.create("waypoints", { name: "ptA", wp_type: "datacenter", datacenter_id: dcA.id, dc_x: 600, dc_y: 600 });
+
+    const salle = (d) => ({ kind: "room", id: d.id });
+    const etage = (f) => PlacementContainers.floorOf("liege", f);
+    const route = (fa, fb, wps) => s.cableRoute({ id: "sonde", from_port_id: fa, to_port_id: fb, waypoint_ids: wps });
+    const codes = (r) => r.errors.map((e) => e.code).join(",");
+    const bilan = (r) => JSON.stringify([codes(r), r.valid, r.hasExits, r.startContainer, r.endContainer, r.containerA, r.containerB]);
+    const attendu = (c, valid, hasExits, start, end, ca, cb) => JSON.stringify([c, valid, hasExits, start, end, ca, cb]);
+
+    /* ---------- PARITÉ (valeurs mesurées sur HEAD, écrites en dur) ---------- */
+    ck.eq(bilan(route(A.p, A2.p, [])), attendu("", true, false, null, null, salle(dcA), salle(dcA)),
+      "(HEAD) intra-salle sans waypoint : valide, sans exit, deux bouts en Salle A");
+    ck.eq(bilan(route(A.p, B.p, [exA.id, exB.id])), attendu("", true, true, salle(dcA), salle(dcB), salle(dcA), salle(dcB)),
+      "(HEAD) salle A → salle B par deux exits : valide, départ et arrivée déduits");
+    ck.eq(bilan(route(A.p, B.p, [exA.id, pin1.id, exB.id])), attendu("", true, true, salle(dcA), salle(dcB), salle(dcA), salle(dcB)),
+      "(HEAD) salle A → pin d'étage → salle B : le pin ne change ni le départ ni l'arrivée");
+    ck.eq(bilan(route(A.p, B.p, [])), attendu("ports_split", false, false, null, null, salle(dcA), salle(dcB)),
+      "(HEAD) deux salles sans exit → ports_split");
+    ck.eq(bilan(route(A.p, null, [exA.id])), attendu("exit_unpaired", false, true, salle(dcA), null, salle(dcA), null),
+      "(HEAD) exit seul → exit_unpaired (la route quitte sans arriver)");
+    ck.eq(codes(route(null, null, [exA.id, wpA.id])), "room_wp_outside,exit_unpaired",
+      "(HEAD) waypoint de salle APRÈS son exit → room_wp_outside + exit_unpaired");
+    ck.eq(codes(route(null, null, [wpA.id, pin1.id])), "floor_outside",
+      "(HEAD) pin d'étage à l'INTÉRIEUR d'une salle → floor_outside (seul cas où le code subsiste)");
+    ck.eq(codes(route(null, null, [exA.id, exA.id])), "exit_reentry",
+      "(HEAD) ré-entrée par l'exit de la salle quittée → exit_reentry SEUL (le second exit referme bien le tronçon)");
+    ck.eq(codes(route(null, null, [wpA.id, exB.id])), "exit_wrong_room,exit_unpaired",
+      "(HEAD) exit d'une AUTRE salle que le segment courant → exit_wrong_room");
+    ck.eq(s.cableRouteSummary(route(A.p, B.p, [exA.id, exB.id])), "⏏ Salle A → ⏏ Salle B",
+      "(HEAD) résumé d'une route entre deux salles : inchangé au caractère près");
+    /* Le résumé est devenu une CHAÎNE DE CONTENEURS ; le piège `same(null, null) === false` y mordrait.
+       Deux waypoints flottants ne franchissent aucune frontière : le résumé reste VIDE, comme sur HEAD. */
+    const flotA = await s.create("waypoints", { name: "flottant1" });
+    const flotB = await s.create("waypoints", { name: "flottant2" });
+    ck.eq(s.cableRouteSummary(route(null, null, [flotA.id, flotB.id])), "",
+      "(HEAD) deux waypoints NON POSÉS d'affilée : aucune étape au résumé (deux absences ne font pas une transition)");
+    ck.eq(codes(route(null, null, [flotA.id, flotB.id])), "unplaced,unplaced", "(HEAD) …et chacun est signalé « non posé »");
+
+    /* ---------- CHANGEMENTS VOULUS ---------- */
+    // (NOUVEAU) LE CAS DU LOT : une baie sort de sa salle et ARRIVE sur un étage. HEAD : exit_unpaired.
+    const versEtage = route(A.p, F1.p, [exA.id, pin1.id]);
+    ck.eq(bilan(versEtage), attendu("", true, true, salle(dcA), etage("1"), salle(dcA), etage("1")),
+      "(NOUVEAU) salle A → pin d'étage : VALIDE, la route ARRIVE sur l'étage (HEAD : exit_unpaired)");
+    ck.eq(s.cableContextValid({ from_port_id: A.p, to_port_id: F1.p, waypoint_ids: [exA.id, pin1.id] }), true,
+      "(NOUVEAU) …et le câble baie → posé d'étage est jugé COHÉRENT (HEAD : invalide → cassé au déplacement)");
+    // (NOUVEAU) symétrique : une route peut COMMENCER sur un étage. HEAD : floor_outside + exit_unpaired.
+    ck.eq(bilan(route(F1.p, A.p, [pin1.id, exA.id])), attendu("", true, true, etage("1"), salle(dcA), etage("1"), salle(dcA)),
+      "(NOUVEAU) pin d'étage → exit : la route COMMENCE sur l'étage (HEAD : floor_outside)");
+    // (NOUVEAU) un pin d'étage SEUL décrit une route entièrement sur cet étage. HEAD : floor_outside.
+    ck.eq(bilan(route(F1.p, F1b.p, [pin1.id])), attendu("", true, false, etage("1"), etage("1"), etage("1"), etage("1")),
+      "(NOUVEAU) pin d'étage seul entre deux posés du même étage : valide, sans exit");
+    // D2 — MÊME conteneur ⇒ aucune sortie exigée ; conteneurs DIFFÉRENTS ⇒ sortie exigée. Aucune branche
+    // propre à l'étage : c'est la règle des salles, avec « conteneur » à la place de « salle ».
+    ck.eq(codes(route(F1.p, F1b.p, [])), "",
+      "(D2) deux posés du MÊME étage, aucun waypoint → valide (comme deux équipements d'une même salle)");
+    ck.eq(codes(route(F1.p, F2.p, [])), "ports_split",
+      "(D2) deux posés d'étages DIFFÉRENTS, aucun waypoint → ports_split (HEAD : accepté — c'était un TROU)");
+    ck.eq(s.cableContextValid({ from_port_id: F1.p, to_port_id: F2.p, waypoint_ids: [] }), false,
+      "(D2) …et `cableContextValid` l'exige aussi : le trou « au moins l'un est une salle » est refermé");
+    ck.eq(s.cableContextValid({ from_port_id: F1.p, to_port_id: F1b.p, waypoint_ids: [] }), true,
+      "(D2) même étage ⇒ aucune exigence de sortie");
+    // Le port doit être DANS le conteneur d'arrivée — la vérification suit l'étage comme elle suivait la salle.
+    ck.eq(codes(route(A.p, F2.p, [exA.id, pin1.id])), "portB_room",
+      "port B sur l'étage 2 alors que la route arrive à l'étage 1 → portB_room");
+    ck.eq(codes(route(A.p, F2.p, [exA.id, pin2.id])), "",
+      "…et la même route menée au BON étage est valide");
+    // CONSÉQUENCE ASSUMÉE de la grammaire : l'étage d'arrivée doit être NOMMÉ. Sans pin, la route quitte
+    // la salle sans dire où elle va — elle reste donc incomplète, exactement comme avant.
+    ck.eq(codes(route(A.p, F1.p, [exA.id])), "exit_unpaired",
+      "salle → étage SANS pin d'étage : la route ne nomme aucune arrivée → exit_unpaired (inchangé)");
+
+    /* ---------- D4 : le mot JUSTE selon le conteneur ---------- */
+    const msg = (r, code) => (r.errors.find((e) => e.code === code) || {}).message || "";
+    const msgB = msg(route(A.p, F2.p, [exA.id, pin1.id]), "portB_room");
+    ck(msgB.indexOf("étage") >= 0 && msgB.indexOf("salle") < 0, "(D4) arrivée sur un ÉTAGE : le message dit « étage », pas « salle »");
+    const msgBSalle = msg(route(A.p, F1.p, [exA.id, exB.id]), "portB_room");
+    ck(msgBSalle.indexOf("salle") >= 0, "(D4) arrivée dans une SALLE : le message dit « salle » (libellé historique)");
+    ck(msgB.indexOf("analysis.") < 0 && msgBSalle.indexOf("analysis.") < 0, "les messages sont TRADUITS (aucune clé i18n brute ne fuit)");
+    ck(codes(route(F1.p, F2.p, [])) === "ports_split" && msg(route(F1.p, F2.p, []), "ports_split").indexOf("emplacements") >= 0,
+      "(D4) deux ÉTAGES : « emplacements » ; deux salles gardent le mot « salles »");
+    ck(msg(route(A.p, B.p, []), "ports_split").indexOf("salles") >= 0, "(D4) deux SALLES : le message historique, mot pour mot");
+
+    /* ---------- contrainte de placement : elle peut désormais désigner un ÉTAGE ---------- */
+    const libre = await s.create("equipments", { name: "Libre" });
+    const pLibre = (await s.create("ports", { equipment_id: libre.id, name: "pL" })).id;
+    await s.create("cables", { name: "vers-etage", from_port_id: pLibre, to_port_id: F1.p, waypoint_ids: [pin1.id] });
+    const req = s.equipmentRequiredContainers(libre.id);
+    ck.eq(JSON.stringify(req.map((x) => x.container)), JSON.stringify([etage("1")]), "equipmentRequiredContainers : contrainte vers un ÉTAGE (l'ancienne Map par id de salle ne savait pas l'exprimer)");
+    const why = s.equipmentPlacementBlockedReason(libre.id, dcA.id);
+    ck(typeof why === "string" && why.indexOf("analysis.") < 0, "…et poser cet équipement dans une salle est BLOQUÉ, avec un motif traduit");
+
+    /* ---------- l'identité d'un étage : le couple, jamais une chaîne encodée ---------- */
+    ck.eq(PlacementContainers.same(PlacementContainers.floorOf("liege", 0), PlacementContainers.floorOf("liege", "")), false,
+      "floorOf : le rez-de-chaussée (0) et l'étage VIDE restent DEUX conteneurs distincts (piège `String(x || \"\")`)");
+    ck.eq(PlacementContainers.same(PlacementContainers.floorOf("liege", 1), PlacementContainers.floorOf("liege", "1")), true,
+      "floorOf : nombre et chaîne désignent le MÊME étage");
+    ck.eq(PlacementContainers.same(PlacementContainers.floorOf("liege", "1"), PlacementContainers.floorOf("namur", "1")), false,
+      "floorOf : même numéro d'étage dans deux BÂTIMENTS ≠ même conteneur");
+    ck.eq(PlacementContainers.same(null, null), false, "same(null, null) = false : deux absences ne sont pas un même endroit");
+    ck.eq(PlacementContainers.sameOrNone(null, null), true, "sameOrNone(null, null) = true : deux absences ne constituent pas une TRANSITION");
+    ck.eq(PlacementContainers.sameOrNone(salle(dcA), null), false, "sameOrNone : une absence suivie d'un conteneur EST une transition");
   }
   });
 
