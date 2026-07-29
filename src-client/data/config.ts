@@ -24,7 +24,7 @@ export const IDX_NULL = "∅";
    « éléments non rattachés » sans parcourir la collection. */
 export const INDEX_SPEC: Record<string, string[]> = {
   equipments: ["group_id", "group_ids", "rack_id", "dc_id", "tray_item_id", "face_image_id", "face_image_rear_id", "face_image_top_id", "face_image_bottom_id", "face_image_left_id", "face_image_right_id"],
-  ports:       ["equipment_id", "parent_port_id", "port_type_id", "aggregate_id", "bundle_id", "network_id", "network_ids"],
+  ports:       ["equipment_id", "parent_port_id", "port_type_id", "aggregate_id", "sub_equipment_id", "bundle_id", "network_id", "network_ids"],
   cables:      ["from_port_id", "to_port_id", "cable_type_id", "network_id", "network_ids", "waypoint_ids"],
   cableBundles: ["cable_type_id", "waypoint_ids", "endpoint_a_equipment_id", "endpoint_b_equipment_id"],
   aggregates:  ["equipment_id"],

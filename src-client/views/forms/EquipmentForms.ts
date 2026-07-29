@@ -156,6 +156,10 @@ export class EquipmentForms extends FormBase {
         let bk = "";
         if (store.isBreakoutParent(p)) bk = ` <span class="pill">${I18n.t("equipment.detail.trunkPill", { n: store.breakoutLanes(p.id).length })}</span>`;
         else if (p.parent_port_id) { const par: any = store.get("ports", p.parent_port_id); bk = ` <span class="pill">${I18n.t("equipment.detail.lanePill", { lane: p.lane || "?", trunk: Html.escape(par ? (par.name || I18n.t("equipment.detail.trunkWord")) : I18n.t("equipment.detail.trunkWord")) })}</span>`; }
+        // SOUS-ÉQUIPEMENT desservi : PASTILLE sous le nom du port, et non une 6ᵉ colonne — la table en a déjà
+        // cinq (port, type, rôle, agrégat, 3D) et une de plus la rendrait illisible dans une modale.
+        const seRow: any = p.sub_equipment_id ? store.get("subEquipments", p.sub_equipment_id) : null;
+        if (seRow) bk += `<div class="form-hint" style="margin:2px 0 0">${Html.escape(I18n.t("dc.interact.subEquipmentPrefix"))}${Html.escape(seRow.name || I18n.t("subEquipment.fallback"))}</div>`;
         return `<tr><td class="cell-name">${Html.escape(p.name || I18n.t("equipment.common.portParen"))}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : `<span style="color:var(--err)">${I18n.t("equipment.detail.typeUnknown")}</span>`}</td><td><span class="pill ${PortRoles.pillClass(p.role)}">${PortRoles.isPoe(p.role) ? Icons.POE_BOLT : ""}${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || I18n.t("equipment.detail.aggFallback")) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate && store.portLocatable(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-locate="${p.id}" title="${I18n.t("equipment.detail.locatePort")}" aria-label="${I18n.t("equipment.detail.locatePort")}">${Icons.LOCATE}</button>` : ""}</td></tr>`;
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("equipment.detail.colPort")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("equipment.detail.colRole")}</th><th>${I18n.t("equipment.detail.colAgg")}</th><th style="text-align:right;">${I18n.t("equipment.detail.col3d")}</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -512,7 +516,7 @@ export class EquipmentForms extends FormBase {
     // brouillons (ids réels → FK ports↔agrégats tiennent avant l'enregistrement)
     const draftAggs: any[] = eq ? store.aggregatesOf(eq.id).map((a: any) => ({ id: a.id, name: a.name, description: a.description })) : [];
     const draftPorts: PortDraft[] = eq ? store.portsOf(eq.id).map((p: any) => ({
-      id: p.id, name: p.name, port_type_id: p.port_type_id, role: p.role, aggregate_id: p.aggregate_id, description: p.description,
+      id: p.id, name: p.name, port_type_id: p.port_type_id, role: p.role, aggregate_id: p.aggregate_id, sub_equipment_id: p.sub_equipment_id, description: p.description,
       parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: p.face_x, face_y: p.face_y, face_side: p.face_side,
       // terminaison de faisceau (patch) : faisceau + brins physiques piochés
       bundle_id: p.bundle_id || null, strand_a: (p.strand_a != null) ? p.strand_a : null, strand_b: (p.strand_b != null) ? p.strand_b : null,
@@ -813,6 +817,26 @@ export class EquipmentForms extends FormBase {
       return FormControls.select(opts, selected || "");
     };
     const aggOptionsFor = (p: any) => FormControls.select([{ value: "", label: I18n.t("forms.opt.none") }].concat(draftAggs.map((a) => ({ value: a.id, label: a.name || I18n.t("equipment.equip.aggFallback") }))), p.aggregate_id || "");
+    // SOUS-ÉQUIPEMENTS du maître : liste COURTE et fermée (les drives d'une librairie se comptent sur les
+    // doigts) → un `<select>`, comme l'agrégat juste au-dessus. Principe n°14 : `entityPicker` est pour les
+    // listes longues et croissantes d'entités, pas pour une énumération de quelques éléments.
+    // ⚠ Lus DEPUIS LE STORE et non d'un brouillon : un sous-équipement s'édite dans SA modale (lot 3), il n'est
+    // pas un brouillon de ce formulaire. Conséquence assumée : en CRÉATION d'équipement la liste est vide (il
+    // n'y a pas encore de maître auquel les rattacher) — le champ est alors masqué.
+    const subEqsOfMaster = (): any[] => (eq ? store.subEquipmentsOf(eq.id) : []);
+    const subEqOptionsFor = (p: any) => FormControls.select([{ value: "", label: I18n.t("forms.opt.none") }].concat(subEqsOfMaster().map((se: any) => ({ value: se.id, label: se.name || I18n.t("subEquipment.fallback") }))), p.sub_equipment_id || "");
+    /** Ligne « Sous-équipement » d'un port — RIEN si l'équipement n'en a aucun : un `<select>` à une seule
+        option « — » n'apprend rien et alourdit une modale déjà dense. Ajoutée aux DEUX branches (port terminal
+        et port de patch) : un patch de librairie a autant de raisons de désigner un drive qu'un port actif.
+        ⚠ Les LANES de breakout y ont droit AUSSI, individuellement : un trunk éclaté vers plusieurs drives est
+        précisément le cas d'usage d'une librairie à backplane. Ne pas confondre avec la POSITION de façade,
+        qui, elle, est héritée du trunk (cf. FaceEditor) — deux règles différentes sur les mêmes objets. */
+    const appendSubEqRow = (grid: HTMLElement, p: any): void => {
+      if (!subEqsOfMaster().length) return;
+      const sel = subEqOptionsFor(p);
+      sel.onchange = () => { p.sub_equipment_id = sel.value || null; };
+      grid.appendChild(FormControls.fieldRow(I18n.t("subEquipment.portField"), sel, I18n.t("subEquipment.portFieldHint")));
+    };
     const bump = (s: string) => { s = String(s || ""); const m = s.match(/^(.*?)(\d+)(\D*)$/); return m ? m[1] + String(parseInt(m[2], 10) + 1).padStart(m[2].length, "0") + m[3] : (s ? s + "2" : ""); };
 
     // -- PATCH : affectation de brins par port. Sur un patch, chaque port « pioche » 1 (simplex) ou 2 (duplex Tx/Rx)
@@ -1003,10 +1027,12 @@ export class EquipmentForms extends FormBase {
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.poeBudget"), budgetWrap, I18n.t("forms.port.poeBudgetHint")));
         }
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.network"), terminalNetworkControl(p)));
+        appendSubEqRow(grid, p);
       } else {
         const ag = aggOptionsFor(p); ag.onchange = () => { p.aggregate_id = ag.value || null; };
         grid.appendChild(FormControls.fieldRow(I18n.t("equipment.equip.aggregates"), ag));
         grid.appendChild(FormControls.fieldRow(I18n.t("forms.port.network"), terminalNetworkControl(p)));
+        appendSubEqRow(grid, p);
       }
       body.appendChild(grid);
       if (overHere) {
@@ -1293,6 +1319,11 @@ export class EquipmentForms extends FormBase {
         const draftPortIds = new Set(draftPorts.map((p) => p.id));
         for (const p of draftPorts) {
           const agg = p.aggregate_id && draftAggIds.has(p.aggregate_id) ? p.aggregate_id : null;
+          // Sous-équipement : on ne conserve la liaison que si elle vise TOUJOURS un sous-équipement de CET
+          // équipement — sinon on écrirait une FK que la règle T2c rejetterait (et le formulaire annoncerait un
+          // échec au lieu d'un succès). Filtre de PORTE D'ÉCRITURE, la règle partagée reste l'autorité.
+          const ownSubEqIds = new Set(subEqsOfMaster().map((se: any) => se.id));
+          const subEq = p.sub_equipment_id && ownSubEqIds.has(p.sub_equipment_id) ? p.sub_equipment_id : null;
           // affectation de brins : seulement si un faisceau est désigné (sinon on n'écrit pas de brins pendants).
           const bundleId = p.bundle_id || null;
           const strandA = bundleId && p.strand_a != null ? p.strand_a : null;
@@ -1315,7 +1346,7 @@ export class EquipmentForms extends FormBase {
           // budget de port = CAPACITÉ de SOURCE → conservé uniquement sur un port PSE de switch, neutralisé sinon.
           const poeBudgetW = (isPoePort && poeSourceEq && p.poe_budget_w != null) ? p.poe_budget_w : null;
           const poeEnabled = isPoePort ? (p.poe_enabled !== false) : true;   // injection/conso PoE (défaut true) — sans effet hors PoE
-          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role, aggregate_id: agg, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase, poe_budget_w: poeBudgetW, poe_enabled: poeEnabled };
+          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role, aggregate_id: agg, sub_equipment_id: subEq, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase, poe_budget_w: poeBudgetW, poe_enabled: poeEnabled };
           const ex: any = store.get("ports", p.id);
           const saved = ex ? await store.update("ports", p.id, patch) : await store.create("ports", Object.assign({ id: p.id }, patch));
           if (!saved) saveError = true;   // validation refusée (ex. brin en double, Tx=Rx) → échec signalé plus bas

@@ -573,6 +573,11 @@ const SPEC_FIELDS = {
       port_type_id:   { type: "string", nullable: true, default: null, ref: "portTypes" },
       parent_port_id: { type: "string", nullable: true, default: null, ref: "ports" },
       aggregate_id:   { type: "string", nullable: true, default: null, ref: "aggregates" },
+      // SOUS-ÉQUIPEMENT DESSERVI par ce port (drive d'une librairie, carte d'un châssis). Le port reste celui du
+      // MAÎTRE — c'est une ÉTIQUETTE de destination, pas un déplacement de connectique : le câble, le réseau
+      // déduit, l'analyse énergie et le graphe sont INCHANGÉS. Même forme qu'`aggregate_id` juste au-dessus
+      // (N ports → 1 sous-équipement), et même règle cross-entité d'appartenance (T2c).
+      sub_equipment_id: { type: "string", nullable: true, default: null, ref: "subEquipments" },
       face_side:      { type: "string", enum: EQUIPMENT_FACE_IDS, default: "front" },
       // TERMINAISON DE FAISCEAU (ports de patch) : quel faisceau, quels brins physiques piochés.
       bundle_id:      { type: "string", nullable: true, default: null, ref: "cableBundles" },
@@ -1033,6 +1038,20 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
         return (aggregate && aggregate.equipment_id && aggregate.equipment_id !== port.equipment_id)
           ? { path: "aggregate_id", message: "L'agrégat doit appartenir au même équipement." } : null;
       },
+      // T2c : un port et le SOUS-ÉQUIPEMENT auquel il est assigné appartiennent au même équipement.
+      //       Décalque exact de la règle d'agrégat ci-dessus, et pour la même raison : sans elle, on assigne
+      //       le port du switch A au drive de la librairie B — la FK reste VALIDE (l'enregistrement existe) et
+      //       le modèle devient faux EN SILENCE. Le sélecteur de l'UI ne propose que les sous-équipements du
+      //       maître, mais un sélecteur n'est pas une garantie : l'API et l'import écrivent sans lui.
+      //       ⚠ Cette règle est aussi rejouée DEPUIS `subEquipments` (ses `dependents`) : elle est vérifiée à
+      //       l'écriture du PORT, or c'est le SOUS-ÉQUIPEMENT qui peut changer de maître et la casser sans
+      //       qu'on ait touché au port.
+      (port, fetch) => {
+        if (!port.sub_equipment_id || !port.equipment_id) return null;
+        const subEquipment = fetch("subEquipments", port.sub_equipment_id);
+        return (subEquipment && subEquipment.equipment_id && subEquipment.equipment_id !== port.equipment_id)
+          ? { path: "sub_equipment_id", message: "Le sous-équipement doit appartenir au même équipement." } : null;
+      },
       // T6 : les brins piochés ne dépassent pas la capacité (fiber_count) du faisceau.
       (port, fetch) => {
         if (!port.bundle_id || (port.strand_a == null && port.strand_b == null)) return null;
@@ -1096,6 +1115,15 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       // relation. ⚠ Troisième copie de la même règle : duplication ASSUMÉE (une par collection porteuse),
       // pas un oubli de factorisation — c'est le choix déjà fait entre equipments et vms.
       { path: "group_id", message: "Le groupe primaire doit faire partie des groupes du sous-équipement.", holds: (se) => !se.group_id || (Array.isArray(se.group_ids) && se.group_ids.includes(se.group_id)) },
+    ],
+    // V5b — LE cas que la règle T2c des ports ne peut PAS attraper seule (cf. le cadrage §8.3, décision D10) :
+    // T2c est vérifiée à l'écriture du PORT, mais c'est le SOUS-ÉQUIPEMENT qui peut changer de maître. Sans ce
+    // `dependents`, déplacer un drive vers une autre librairie laisserait ses ports assignés à un
+    // sous-équipement d'un AUTRE équipement — incohérence muette, exactement ce que la doctrine proscrit.
+    // Le choix est de REFUSER le mouvement (l'erreur remonte à l'écriture du sous-équipement) plutôt que de
+    // nettoyer la liaison en silence : on ne détruit pas une saisie sans le dire.
+    dependents: [
+      { collection: "ports", fkField: "sub_equipment_id" },
     ],
   },
   networks: {

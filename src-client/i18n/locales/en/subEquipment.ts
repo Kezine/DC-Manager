@@ -34,4 +34,9 @@ export const subEquipment = {
   section: "Sub-equipments ({{count}})",
   sectionEmpty: "No sub-equipment.",
   add: "+ Sub-equipment",
+  portField: "Sub-equipment",
+  portFieldHint: "The port still belongs to the parent equipment; this only states what it serves.",
+  portsSection: "Parent ports serving it ({{count}})",
+  portsEmpty: "No parent port is assigned to it.",
+  portCable: "Cable",
 } as const;

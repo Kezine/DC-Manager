@@ -1630,11 +1630,13 @@ module.exports = async () => {
       "sub_equipment_id", "parent_id", "sub_equipments"].forEach((forbidden) => {
       ck.eq(fields.includes(forbidden), false, "sous-équip. : AUCUN champ « " + forbidden + " » (ni type, ni placement, ni dimension, ni attribution, ni imbrication)");
     });
-    // Hiérarchie PLATE : aucune FK du modèle ENTIER ne vise `subEquipments` pour l'instant. Le jour où le lot 4
-    // ajoutera `ports.sub_equipment_id`, ce compte passera à 1 — et ce test dira lequel, ce qui est le but.
+    // Hiérarchie PLATE : on ÉNUMÈRE les FK du modèle entier qui visent `subEquipments`. Au lot 1 la liste était
+    // VIDE et ce test annonçait qu'elle passerait à `ports.sub_equipment_id` au lot 4 : c'est arrivé, et il l'a
+    // dit de lui-même. Le garder EXHAUSTIF (et non « au moins celle-là ») est ce qui fait qu'une FK ajoutée
+    // ailleurs — surtout une FK depuis `subEquipments` vers elle-même — ne peut pas passer inaperçue.
     const refsToSelf = Object.entries(Validation.COLLECTION_SPECS).flatMap(([coll, spec]) =>
       Object.entries(spec.fields).filter(([, f]) => f.ref === "subEquipments").map(([field]) => coll + "." + field));
-    ck.eq(JSON.stringify(refsToSelf), JSON.stringify([]), "sous-équip. : aucune FK ne le vise encore (ports.sub_equipment_id = lot 4)");
+    ck.eq(JSON.stringify(refsToSelf), JSON.stringify(["ports.sub_equipment_id"]), "sous-équip. : UNE SEULE FK le vise (le port qui le dessert)");
     ck.eq(Object.values(Validation.COLLECTION_SPECS.subEquipments.fields).some((f) => f.ref === "subEquipments"), false, "sous-équip. : AUCUNE FK auto-référente (hiérarchie plate, pas de garde anti-cycle à écrire)");
 
     // IDENTITÉ MATÉRIELLE + REPÈRE (lot 3, D5/D6) : chaînes libres à DÉFAUT "" — donc pas de null silencieux.
@@ -1657,6 +1659,49 @@ module.exports = async () => {
     ck.eq(JSON.stringify(new SubCls({ ...ok, group_id: "G1" }).group_ids), JSON.stringify(["G1"]), "sous-équip. : classe — primaire semé dans group_ids");
     ck.eq(JSON.stringify(new SubCls({ ...ok, group_id: "G1", group_ids: ["G2", "G1"] }).group_ids), JSON.stringify(["G1", "G2"]), "sous-équip. : classe — primaire remis EN TÊTE, sans doublon");
     ck.eq(Validation.DataValidator.validateRecord("subEquipments", new SubCls({ ...ok, group_id: "G1", group_ids: ["G2"] }).toJSON()).length, 0, "sous-équip. : classe — l'entité construite satisfait T1d même sur une entrée incohérente");
+  }
+  });
+
+  await section("shared : liaison PORT ⇄ SOUS-ÉQUIPEMENT (T2c d'appartenance + dependents, lot 4)", async () => {
+  {
+    const V = Validation.DataValidator;
+    // E1 porte le drive SE1 ; E2 est un AUTRE équipement, avec son propre sous-équipement SE2.
+    const db = {
+      equipments: [{ id: "E1", name: "Librairie" }, { id: "E2", name: "Switch" }],
+      subEquipments: [{ id: "SE1", name: "Drive 1", equipment_id: "E1" }, { id: "SE2", name: "Carte", equipment_id: "E2" }],
+      ports: [{ id: "P1", name: "FC-1", equipment_id: "E1", sub_equipment_id: "SE1" }],
+    };
+    const fetch = (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
+    const find = (coll, field, value) => (db[coll] || []).filter((o) => {
+      const v = o[field]; return Array.isArray(v) ? v.includes(value) : v === value;
+    });
+    const portErrs = (port) => V.validateRecord("ports", V.normalizeRecord("ports", port), fetch, find, VALIDATION_COLLABORATORS);
+
+    // T2c — le cas LÉGITIME, puis celui qui rend le modèle faux en silence si rien ne l'arrête.
+    ck.eq(portErrs({ id: "P1", equipment_id: "E1", sub_equipment_id: "SE1" }).length, 0, "T2c : port et sous-équipement du MÊME équipement → valide");
+    const cross = portErrs({ id: "P1", equipment_id: "E1", sub_equipment_id: "SE2" });
+    ck.eq(cross.some((e) => e.path === "sub_equipment_id" && e.code === "cross_entity"), true, "T2c : sous-équipement d'un AUTRE équipement → cross_entity");
+    ck.eq(portErrs({ id: "P1", equipment_id: "E1", sub_equipment_id: null }).length, 0, "T2c : pas de liaison → aucune contrainte");
+    // FK inexistante : c'est V2 (ref_missing) qui parle, pas T2c — les deux niveaux restent distincts.
+    ck.eq(portErrs({ id: "P1", equipment_id: "E1", sub_equipment_id: "GHOST" }).some((e) => e.code === "ref_missing"), true, "liaison : sous-équipement inexistant → ref_missing (V2), pas cross_entity");
+
+    // 🚨 D10 — LE cas que T2c ne peut PAS attraper seule : c'est le SOUS-ÉQUIPEMENT qui déménage, le port n'est
+    // pas touché. Sans le `dependents` de `subEquipments`, l'incohérence s'installerait en silence.
+    const moved = { id: "SE1", name: "Drive 1", equipment_id: "E2" };   // le drive passe sous E2, son port reste sur E1
+    const deps = V.validateDependents("subEquipments", moved, find, fetch, VALIDATION_COLLABORATORS);
+    ck.eq(deps.some((e) => e.collection === "ports" && e.path === "sub_equipment_id" && e.code === "cross_entity"), true,
+      "D10 : déplacer un sous-équipement sous un AUTRE maître est REFUSÉ (ses ports redeviennent incohérents)");
+    ck.eq(deps.length > 0 && deps.every((e) => /incohérent avec la modification/.test(e.message)), true,
+      "D10 : le message dit que c'est la MODIFICATION du parent qui est en cause (pas le port)");
+    // Témoin d'anti-vacuité : le même sous-équipement, NON déplacé, ne produit aucune erreur.
+    ck.eq(V.validateDependents("subEquipments", { id: "SE1", name: "Drive 1", equipment_id: "E1" }, find, fetch, VALIDATION_COLLABORATORS).length, 0,
+      "D10 : sous-équipement inchangé → aucun refus (le verrou n'est pas vacant)");
+
+    // CASCADE : un sous-équipement supprimé DÉTACHE ses ports, il ne les supprime pas — le port est au maître.
+    const plan = Cascade.plan("subEquipments", "SE1", find, fetch);
+    ck.eq(plan.deletes.length, 0, "cascade : supprimer un sous-équipement ne supprime AUCUN port");
+    ck.eq(plan.detaches.some((d) => d.c === "ports" && d.id === "P1" && d.key === "sub_equipment_id" && d.value === null), true,
+      "cascade : le port est DÉTACHÉ (il survit à la disparition du sous-équipement)");
   }
   });
 

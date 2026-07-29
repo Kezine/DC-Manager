@@ -15,6 +15,11 @@ export class Port extends Entity implements Records.Port {
   role: string;
   /** FK → aggregates. null = pas dans un agrégat. */
   aggregate_id: string | null;
+  /** FK → subEquipments : le SOUS-ÉQUIPEMENT que ce port dessert (drive d'une librairie, carte d'un châssis).
+      null = aucun. ⚠ Le port reste celui du MAÎTRE — c'est une étiquette de destination, pas un déplacement :
+      le câble, le réseau déduit et l'analyse énergie ne changent pas. Le sous-équipement visé doit appartenir
+      au même équipement que le port (règle cross-entité T2c). */
+  sub_equipment_id: string | null;
   /** BREAKOUT : FK → ports (le trunk parent). null = port normal/trunk. */
   parent_port_id: string | null;
   /** Index de lane (1..N) si breakout. null = non-lane. */
@@ -74,6 +79,7 @@ export class Port extends Entity implements Records.Port {
     this.port_type_id = p.port_type_id || null;
     this.role = p.role || "data";
     this.aggregate_id = p.aggregate_id || null;
+    this.sub_equipment_id = p.sub_equipment_id || null;
     this.parent_port_id = p.parent_port_id || null;
     this.lane = (p.lane != null) ? (p.lane | 0) : null;
     this.face_x = (p.face_x != null) ? p.face_x : null;

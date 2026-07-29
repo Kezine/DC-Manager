@@ -342,6 +342,7 @@ export const dc = {
     portFree: "Port libre — cliquer pour créer ou affecter un câble",
     typePrefix: "Type : ",
     aggregatePrefix: "Agrégat : ",
+    subEquipmentPrefix: "Dessert : ",
     lengthPrefix: "Longueur : ",
     endAPrefix: "A : ",
     endBPrefix: "B : ",

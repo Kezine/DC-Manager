@@ -28,6 +28,8 @@ export interface PortDraft {
   port_type_id: string | null;
   role: string;
   aggregate_id: string | null;
+  /** Sous-équipement DESSERVI par ce port (étiquette de destination — le port reste au maître). */
+  sub_equipment_id?: string | null;
   description: string;
   parent_port_id?: string | null;
   lane?: number | null;

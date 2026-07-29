@@ -37,4 +37,9 @@ export const subEquipment = {
   section: "Sous-équipements ({{count}})",
   sectionEmpty: "Aucun sous-équipement.",
   add: "+ Sous-équipement",
+  portField: "Sous-équipement",
+  portFieldHint: "Le port reste celui de l'équipement maître ; on désigne seulement ce qu'il dessert.",
+  portsSection: "Ports du maître qui le desservent ({{count}})",
+  portsEmpty: "Aucun port du maître ne lui est assigné.",
+  portCable: "Câble",
 } as const;

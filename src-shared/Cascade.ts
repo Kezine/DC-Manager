@@ -183,6 +183,9 @@ export class Cascade {
       },
     },
     aggregates: { detach: [{ coll: "ports", fk: "aggregate_id" }] },
+    // Sous-équipement supprimé → ses ports sont DÉTACHÉS, jamais supprimés : le port appartient au MAÎTRE et
+    // lui survit (le sous-équipement n'était qu'une étiquette de destination). Strictement parité `aggregates`.
+    subEquipments: { detach: [{ coll: "ports", fk: "sub_equipment_id" }] },
     networks: {
       // multi-réseaux : retire l'id de network_ids et repointe le principal. S'applique aux CÂBLES (legacy, champs
       // dormants) ET aux PORTS terminaux (source unique actuelle du réseau) — même logique de détachement.

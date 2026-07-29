@@ -641,6 +641,11 @@ export class Store {
   }
   /** Tous les groupes d'un équipement — DÉLÈGUE à `groupIdsOf`. Nom conservé pour ses nombreux points d'appel. */
   equipmentGroupIds(eq: any): string[] { return this.groupIdsOf(eq); }
+  /** Ports du MAÎTRE assignés à ce sous-équipement (« ce drive est desservi par FC-1 et FC-2 »).
+      Triés par NOM de port — l'ordre de création n'a aucun sens à la lecture. */
+  portsOfSubEquipment(subEquipmentId: string): any[] {
+    return this._byFk("ports", "sub_equipment_id", subEquipmentId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
   /** Sous-équipements MEMBRES d'un groupe (primaire OU secondaire) — même forme que `equipmentsOfGroup`. */
   subEquipmentsOfGroup(groupId: string): any[] {
     const out = this._byFk("subEquipments", "group_ids", groupId);

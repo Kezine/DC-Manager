@@ -80,6 +80,21 @@ export class SubEquipmentForms extends FormBase {
     pairs.push([I18n.t("detail.common.updated"), Html.escape(Format.dateTime(se.updated_date))]);
     root.appendChild(this.grid(pairs));
 
+    // PORTS DU MAÎTRE qui desservent ce sous-équipement — le MIROIR de `ports.sub_equipment_id`, et la vue de
+    // contrôle de la saisie. ⚠ Le libellé insiste : ce sont les ports DU MAÎTRE. Un sous-équipement n'a pas de
+    // port propre (contrainte C3) ; les afficher ici sans le dire ferait croire le contraire.
+    // ⚠ LECTURE SEULE, délibérément : l'assignation se fait DEPUIS LE PORT (formulaire d'équipement), un seul
+    // chemin d'écriture pour un seul champ — deux chemins, c'est deux occasions de diverger.
+    const servingPorts = store.portsOfSubEquipment(se.id);
+    this.sect(root, I18n.t("subEquipment.portsSection", { count: servingPorts.length }));
+    this.tbl(root, [I18n.t("equipment.detail.colPort"), I18n.t("lists.col.type"), I18n.t("subEquipment.portCable")], servingPorts.map((p: any) => {
+      const pt: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null;
+      const cab: any = store.cableOnPort(p.id);
+      return [Html.escape(p.name || I18n.t("equipment.common.portParen")),
+        pt ? Html.escape(pt.name) : '<span style="color:var(--fg-dimmer)">—</span>',
+        cab ? Html.escape(cab.name || I18n.t("lists.ph.cable")) : '<span style="color:var(--fg-dimmer)">—</span>'];
+    }), I18n.t("subEquipment.portsEmpty"));
+
     // Rappel EXPLICITE de ce qu'un sous-équipement n'est pas. Sans cette ligne, une fiche sans emplacement ni
     // ports se lit comme une fiche INCOMPLÈTE ; c'est au contraire sa définition.
     const note = document.createElement("div"); note.className = "form-hint"; note.style.marginTop = "10px";

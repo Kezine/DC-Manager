@@ -134,6 +134,11 @@ export abstract class DcInteract extends DcPanels {
     const eq: any = this.store.get("equipments", port.equipment_id);
     const head = (eq ? (eq.name || I18n.t("lists.ph.equipment")) + " : " : "") + (port.name || I18n.t("dc.common.port"));
     const rows: string[] = [];
+    // SOUS-ÉQUIPEMENT desservi, EN PREMIÈRE LIGNE et avant le rôle : il dit à quoi SERT ce port, c'est une
+    // précision d'IDENTITÉ — là où l'agrégat, le réseau et l'état de câblage sont des propriétés. Le titre reste
+    // « maître : port » (c'est la vérité physique : le port est sur le maître) et cette ligne le complète.
+    const subEq: any = port.sub_equipment_id ? this.store.get("subEquipments", port.sub_equipment_id) : null;
+    if (subEq) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.subEquipmentPrefix"))}<b>${Html.escape(subEq.name || I18n.t("subEquipment.fallback"))}</b>`));
     // rôle + connecteur (type de port + famille) sur une ligne
     const pt: any = port.port_type_id ? this.store.get("portTypes", port.port_type_id) : null;
     rows.push(this.tipRow(`<b>${Html.escape(PortRoles.label(port.role))}</b>${pt ? " · " + Html.escape(pt.name) + (pt.family ? " (" + Html.escape(pt.family) + ")" : "") : ""}`));
