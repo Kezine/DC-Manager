@@ -42,12 +42,17 @@ export const dc = {
     cableCount_one: "{{count}} câble",
     cableCount_other: "{{count}} câbles",
     floorShort: "ét. {{n}}",
+    /* Nom d'un conteneur ÉTAGE : son identité EST le couple (bâtiment, étage), le libellé aussi. */
+    floorInSite: "{{site}} · {{floor}}",
   },
   routeMini: {
     empty: "Aucun tracé à afficher (extrémités non posées).",
     modeChain: "Chaîne",
     modeProfile: "Profil",
     stepsRooms: "{{steps}} étape(s) · {{rooms}} salle(s)",
+    /* Variante employée dès qu'un ÉTAGE est traversé : « salle(s) » serait alors FAUX (décision D4 —
+       le message nomme ce que l'utilisateur voit). Le mot couvre les deux natures sans jargon. */
+    stepsPlaces: "{{steps}} étape(s) · {{places}} emplacement(s)",
     notPlacedSuffix: " (non posé)",
     floorPin: "pin d'étage · {{floor}}",
     roomExit: "sortie de salle",
@@ -305,6 +310,11 @@ export const dc = {
     tPivot: "Centre de rotation",
     sCableSpline: "Arrondi des câbles",
     sMarkerSize: "Taille marqueurs / ports",
+    sSiteScale: "Échelle inter-sites",
+    sSiteScaleFmt: "1 km = {{m}} m",
+    siteScaleMode: "Distances entre sites",
+    siteScaleLog: "logarithmique",
+    siteScaleLogTip: "Compresse les grandes distances : rapproche des sites éloignés sans les confondre.",
     coloration: "Coloration",
     recenterRoom: "Recentrer sur la salle",
   },
@@ -323,6 +333,10 @@ export const dc = {
     rackPrefix: "Baie : ",
     portCount_one: "{{count}} port",
     portCount_other: "{{count}} ports",
+    vmCount_one: "{{count}} VM hébergée",
+    vmCount_other: "{{count}} VMs hébergées",
+    vmMore_one: "… et {{count}} autre",
+    vmMore_other: "… et {{count}} autres",
     cablePrefix: "Câble : ",
     clickEditCableSuffix: " — cliquer pour l'éditer",
     portFree: "Port libre — cliquer pour créer ou affecter un câble",
@@ -450,9 +464,15 @@ export const dc = {
     rackNotInRoom: "Baie non placée dans une salle",
     cableNotInRoom: "Câble non raccordé dans une salle",
     cableEndNotFound: "Extrémité du câble introuvable dans cette salle",
+    // BASCULE selon le conteneur (décision D4) : le message nomme ce que l'utilisateur VOIT. Tant que
+    // l'extrémité cadrée vit dans une salle, c'est le libellé HISTORIQUE ci-dessus, au caractère près.
+    cableEndNotFoundFloor: "Extrémité du câble introuvable sur cet étage",
     wpNotInRoom: "Waypoint non posé dans une salle",
     portEquipNotInRoom: "Port : équipement non placé dans une salle",
     portNotFound3d: "Port introuvable en 3D (façade non posée ?)",
+    // Posé sur un ÉTAGE : la Vue étage n'affiche les plans que des bâtiments dont une salle est visible ;
+    // un bâtiment sans aucune salle ne peut donc pas entrer dans la portée d'affichage.
+    floorNoRoomInBuilding: "Bâtiment sans salle : la vue 3D ne peut pas encore afficher son plan d'étage",
   },
   base: {
     noFloor: "Aucun étage. Créez une salle (avec bâtiment + étage) pour afficher son plan.",

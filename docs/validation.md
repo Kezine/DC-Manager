@@ -53,23 +53,35 @@ FieldSpec = {
   nullable?: boolean,     // null autorisé (FK optionnelle…)
   default?: unknown,      // valeur posée par la normalisation si absent
   enum?: readonly string[], // valeurs autorisées
-  min?: number,           // borne basse (number)
-  format?: "ipv4" | "cidr", // format de chaîne (IPAM) — parseur PARTAGÉ avec core/Ip
+  min?: number,           // borne basse INCLUSIVE (number) — seul `value < min` est rejeté
+  max?: number,           // borne haute INCLUSIVE (number) — seul `value > max` est rejeté
+  format?: "ipv4" | "cidr" | "hostname", // format de chaîne — parseurs PARTAGÉS avec core/Ip (cf. §12 pour `hostname`)
   ref?: string,           // collection cible (FK) — utilisé en V2
 }
 CollectionSpec = { fields: Record<string, FieldSpec> }   // + invariants[] en V3
 ```
 
-Le **déclaratif** couvre l'essentiel ; les rares règles inter-champs deviendront des
+Le **déclaratif** couvre l'essentiel ; les rares règles inter-champs deviennent des
 fonctions pures (`invariants`) en V3. Les enums (`CABLE_STATUSES`, `EQUIP_DEPTHS`…) sont
 repris du domaine ; un **test anti-divergence** vérifie que la spec partagée et les
 constantes front restent alignées.
+
+> ⚠️ **Une propriété de spec inconnue est une contrainte MORTE.** Le bloc `SPEC_FIELDS` est
+> `as const` — indispensable, car les types `Records.*` en DÉRIVENT (`RecordOf`) — mais `as const`
+> **seul ne vérifie rien** : sans annotation, TypeScript n'inspecte aucune propriété excédentaire.
+> `sites.lat`/`lon` ont ainsi porté un `max:` que ni `FieldSpec` ni le moteur ne connaissaient : la
+> borne était déclarée mais **inerte** (une latitude de 200 était acceptée), et se lisait pourtant
+> comme appliquée. Le bloc se termine donc par `as const satisfies Record<string, Record<string,
+> FieldSpec>>` : le type littéral est préservé (dérivation intacte) **et** toute propriété hors
+> `FieldSpec` casse la compilation. Corollaire : ajouter une capacité de spec = déclarer le champ
+> dans `FieldSpec` **et** l'appliquer dans le moteur, sinon `tsc` refuse la spec.
 
 ## 5. Forme des erreurs (contrat partagé)
 
 ```ts
 ValidationError = { collection, id?, path, code, message }
-// code ∈ "required" | "type" | "enum" | "min" | "format" | "ref_missing" | "invariant"
+// code ∈ "required" | "type" | "enum" | "min" | "max" | "format" | "ref_missing" | "invariant"
+//       | "cross_entity" | "scope"
 ```
 - **UI** : `path` → champ de formulaire (surlignage, blocage de soumission).
 - **Serveur** : `400 { errors: ValidationError[] }` (autorité). Le client surface les
@@ -129,10 +141,11 @@ ValidationError = { collection, id?, path, code, message }
 | **V6a** | contraintes de **portée — unicité simple** : `ScopeRule` + `RecordFinder` injecté (recherche par champ indexé, conscient du lot via `buildBatchChildFinder`) ; `ipAddresses.address` unique (« sauf moi-même »). Câblé Store + serveur + live | ✅ |
 | **V6b** | portée — relations & intervalles : **1 câble par port** (périmètre `from`/`to`), **chevauchement** de plages DHCP, **IP ∈ plage** (exclusion bidirectionnelle adresse ↔ plage). Câblé Store + serveur + live (IPAM) | ✅ |
 | **V6c** | portée — **empilement de baie** : pas de collision de cellule `U:face` entre occupants (équipements rackés + rackItems + brosses), via `RackOccupancy` (réplique fidèle de `RackGeometry.mountSides`/`RackScene.occupants`) ; index `waypoints.rack_id` ajouté ; les règles `scope` reçoivent aussi `fetch` (lecture de la baie) | ✅ |
-| **T2c/V6d** | **profondeur de baie en mm** (`depth_mm` remplace l'enum full/half/quarter — migré one-shot au chargement, `Store._migrateDepths` ; l'occupation des 2 faces est DÉCOUPLÉE via `locks_u`). T2c (cross-entité) : la profondeur d'un équipement racké tient dans l'espace disponible de sa baie (marges, cavités de portes, − 100 mm de sécurité derrière porte — parité brosses). V6d (portée) : **dos-à-dos** au même U d'une baie double, somme des profondeurs ≤ espace partagé (cage + cavités). Formules `RackDepth` = réplique documentée de `RackGeometry.mountAvailDepth`/`sharedMountDepth`. Les enregistrements legacy (sans `depth_mm`) ne sont JAMAIS sanctionnés | ✅ |
-| **T1c/T2d/V6e** | **équipement POSÉ sur une étagère** (`placement_mode: "tray"`, FK `tray_item_id` → rackItems kind "tray"). T1c (invariant) : mode tray ⇒ étagère référencée. T2d (cross-entité) : l'empreinte (orientation 90/270 permutée), la position (`tray_x`/`tray_y`) et la hauteur tiennent dans la boîte utile du plateau (TOUTE la réservation `u_height` moins 5 mm de réserve de tôle — `tray_u` = hauteur de la structure qui porte le plateau, pure indication de dessin). V6e (portée) : pas de **chevauchement** entre colocataires du même plateau. Formules `TrayFit` = réplique de `RackGeometry.trayBoxLocal`/`trayEquipFitsWhy`. Cascade : supprimer l'étagère (ou sa baie, transitif) DÉTACHE les posés (retour « non placé », jamais supprimés) | ✅ |
+| **T2c/V6d** | **profondeur de baie en mm** (`depth_mm` remplace l'enum full/half/quarter — migré one-shot au chargement, `Store._migrateDepths` ; l'occupation des 2 faces est DÉCOUPLÉE via `locks_u`). T2c (cross-entité) : la profondeur d'un équipement racké tient dans l'espace disponible de sa baie (marges, cavités de portes, − 100 mm de sécurité derrière porte — parité brosses). V6d (portée) : **dos-à-dos** au même U d'une baie double, somme des profondeurs ≤ espace partagé (cage + cavités). La **politique de profondeur** (profondeur extérieure, cage BORNÉE au châssis, marges avant/arrière, cavités de portes) n'est plus répliquée : elle vit dans le module PARTAGÉ `src-shared/RackDepthPolicy`, **IMPORTÉ** ici (`"./RackDepthPolicy.js"`, extension impérative) et consommé aussi par le rendu (`RackGeometry` délègue) — cf. §11 et `docs/placement.md` §6.14, qui documente les DEUX divergences arbitrées. Reste propre à la validation, et volontairement NON mutualisée : la marge de sécurité de 100 mm derrière une porte (règle de prudence, pas de géométrie — le rendu ne la retranche pas). Les enregistrements legacy (sans `depth_mm`) ne sont JAMAIS sanctionnés | ✅ |
+| **T1c/T2d/V6e** | **équipement POSÉ sur une étagère** (`placement_mode: "tray"`, FK `tray_item_id` → rackItems kind "tray"). T1c (invariant) : mode tray ⇒ étagère référencée. T2d (cross-entité) : l'empreinte (orientation 90/270 permutée), la position (`tray_x`/`tray_y`) et la hauteur tiennent dans la boîte utile du plateau (TOUTE la réservation `u_height` moins 5 mm de réserve de tôle — `tray_u` = hauteur de la structure qui porte le plateau, pure indication de dessin). V6e (portée) : pas de **chevauchement** entre colocataires du même plateau. Géométrie du plateau = module PARTAGÉ `src-shared/TrayGeometry` (source unique consommée aussi par le rendu), **INJECTÉ** dans la validation via `ValidationCollaborators` — cf. §11 et `docs/placement.md` §6.7 (la réplique `TrayFit` ⇄ `RackGeometry` a été supprimée). Cascade : supprimer l'étagère DÉTACHE les posés (retour « non placé », jamais supprimés) — et supprimer sa BAIE aussi, par RÉCURSION de la cascade (la baie supprime ses étagères, dont la règle rejoue ; cf. `docs/placement.md` §6.16) | ✅ |
 | **V6h** | portée — **unicité du nom de câble** : `cables.name` UNIQUE (non vide) dans le document, post-trim, comparaison EXACTE (casse discriminante), « sauf moi-même » par `id`, conscient du lot. Nom vide toléré en multiple (des câbles sans nom restent légaux — champ non `required`). MIROIR de l'unicité du nom d'équipement V6g (même mécanisme que V6a) ; l'invariant se manifeste à la prochaine écriture d'un câble concerné (des doublons préexistants ne sont pas rejetés rétroactivement). Câblé Store + serveur (au save/import) | ✅ |
-| **T12/T9b** | **intégrité énergie (direction & genre)**. T12 (`ports`, invariant) : la **direction** (source/sink) ne se déclare que sur un port d'ÉNERGIE (rôle `power` ou `poe`) — un port `data` à direction résiduelle deviendrait un faux départ/charge SECTEUR (`PowerAnalysis.eqPortsByDir` sélectionne par `direction` en n'excluant que `poe`). T9b (`cables`, cross-entité) : un câble d'énergie relie deux ports de **même genre** — power↔power ou PoE↔PoE, jamais poe↔power (sinon un port PoE fuiterait dans le graphe secteur) ; complète T9 (source↔sink). Ferment le chemin API/import ; l'UI neutralise déjà la direction au save (changement de rôle). Rôles en dur (shared/ auto-suffisant, ids stables) ; rejeu au changement de rôle/direction d'un port câblé via les `dependents` ports→cables | ✅ |
+| **T12/T9b** | **intégrité énergie (direction & genre)**. T12 (`ports`, invariant) : la **direction** (source/sink) ne se déclare que sur un port d'ÉNERGIE (rôle `power` ou `poe`) — un port `data` à direction résiduelle deviendrait un faux départ/charge SECTEUR (`PowerAnalysis.eqPortsByDir` sélectionne par `direction` en n'excluant que `poe`). T9b (`cables`, cross-entité) : un câble d'énergie relie deux ports de **même genre** — power↔power ou PoE↔PoE, jamais poe↔power (sinon un port PoE fuiterait dans le graphe secteur) ; complète T9 (source↔sink). Ferment le chemin API/import ; l'UI neutralise déjà la direction au save (changement de rôle). Rôles en dur — leur source de vérité `PortRoles` vit côté CLIENT, donc hors de portée d'un fichier partagé : c'est la règle d'**ISOLEMENT** de `src-shared/` (PERMANENTE, cf. `CLAUDE.md`), et non l'interdit d'importer un autre fichier PARTAGÉ (celui-là est levé, cf. §11) ; ids stables ; rejeu au changement de rôle/direction d'un port câblé via les `dependents` ports→cables | ✅ |
+| **T13** | **taille de bâtiment déclarée** (`sites.width_mm`/`depth_mm`, mm, OPTIONNELS et indissociables — invariant, même patron que `lat`/`lon`). Cross-entité sur `floors` : un plan d'étage ne peut pas DÉBORDER de son bâtiment (`anchor + dimension ≤ taille du site`, sur les deux axes) ; `dependents` sur `sites` → `floors` par `location` pour que RÉTRÉCIR un bâtiment re-valide ses étages (la contrainte tient aux DEUX bouts). **OPT-IN** : sans taille déclarée, aucune vérification — aucun document existant ne peut devenir invalide. ⚠ `floors.location` reste une CHAÎNE (jamais `ref: "sites"`) : le dépôt contient des `location` historiques sans enregistrement `sites`, que la FK ferait rejeter (V2) ; la règle est donc défensive — site introuvable ⇒ non applicable. Cf. `docs/placement.md` §6.8 | ✅ |
 
 Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
 FK, tableaux). **Couverture étendue aux 19 collections** : chaque collection a une spec
@@ -325,3 +338,50 @@ Les specs sont **partielles** : seuls les champs porteurs de règles sont décla
   champs de HAUTEUR nullables : `height_mm` (plafond de la salle, usage futur — distinct de `floors.height_mm`,
   hauteur d''étage) et `underfloor_mm` (plancher technique surélevé, consommé par le rendu 3D). `doors` /
   `blocked_cells` restent des passthrough assumés (cf. ci-dessus).
+
+## 11. Collaborateurs INJECTÉS (modules partagés que la validation REÇOIT)
+
+Certaines règles ont besoin d'un **module métier** qui vit lui aussi dans `src-shared/` — typiquement la
+géométrie d'étagère (`src-shared/TrayGeometry`) que consomment T2d et V6e. `DataValidation.ts` ne l'importe
+pas : il le **REÇOIT**.
+
+> ⚠ **Ce n'est plus une IMPOSSIBILITÉ, c'est un CHOIX.** Ce paragraphe a longtemps justifié l'injection par
+> l'auto-suffisance obligatoire des fichiers de `src-shared/`. Cette contrainte est **levée** (cf.
+> `CLAUDE.md` et `docs/placement.md` §6.7) : un import relatif entre fichiers partagés est autorisé, à
+> condition d'écrire le spécificateur avec l'extension `.js`. L'injection est conservée pour ce qu'elle
+> apporte — un moteur de validation découplé de ses collaborateurs — pas parce que l'import échouerait.
+>
+> ⚠ **Ne PAS en déduire l'inverse.** Seul l'interdit d'importer un autre fichier **partagé** est tombé.
+> L'interdit d'importer **hors de `src-shared/`** (client, serveur, paquet npm) est **PERMANENT** — c'est
+> la règle (1) de `CLAUDE.md` § « Code partagé front/back », vérifiée par la section *« shared : ISOLEMENT
+> du dossier »* de `Tests/modules/test-shared-validation.js` (cf. `docs/placement.md` §6.19). Le mot
+> « auto-suffisant » désignait les deux règles à la fois : c'est pourquoi il est banni de cette doc.
+>
+> **DEUX PATRONS COEXISTENT DONC, et c'est assumé** (`docs/placement.md` §6.14) : `src-shared/RackDepthPolicy`
+> (politique de profondeur de baie, règles T2c/V6d) est **IMPORTÉ** — `import { RackDepthPolicy } from
+> "./RackDepthPolicy.js"` — tandis que `src-shared/TrayGeometry` reste **INJECTÉ**. Rien ne demande de
+> découpler la politique de profondeur, et lui appliquer le patron d'injection aurait coûté un garde-fou
+> d'échec fermé et onze points d'injection pour un bénéfice nul. Ne pas uniformiser à la volée : le retrait
+> de `ValidationCollaborators` est un lot à part, possible et non demandé.
+
+```ts
+ValidationCollaborators = { trayGeometry?: TrayGeometryPort }   // objet NOMMÉ, extensible
+DataValidator.validateRecord(collection, record, fetch?, find?, collaborators?)
+DataValidator.normalizeAndValidate(collection, record, fetch?, find?, collaborators?)
+DataValidator.validateDependents(parentColl, parentRecord, findChildren, fetch, collaborators?)
+// → transmis aux règles : CrossEntityRule(record, fetch, collaborators?) · ScopeRule(record, find, fetch?, collaborators?)
+```
+
+Trois propriétés à respecter pour tout collaborateur ajouté ici :
+
+1. **Interface ÉTROITE et déclarée LOCALEMENT** (`TrayGeometryPort`) : strictement les opérations que les
+   règles consomment. Le type ne peut pas être importé, mais le typage STRUCTUREL vérifie l'implémentation
+   **au point d'injection** — une dérive de signature casse la compilation.
+2. **ÉCHEC FERMÉ, jamais silencieux.** Si le collaborateur manque là où la règle s'appliquerait, la règle
+   REFUSE l'enregistrement avec un message qui la nomme. Une contrainte muette se lit comme appliquée : c'est
+   le défaut du `FieldSpec.max` déclaré mais inerte (§4), en pire — ici les données fausses seraient écrites.
+   Le paramètre ne peut pas être rendu OBLIGATOIRE (il suit deux paramètres optionnels), et le compilateur ne
+   verrait de toute façon pas les appels de la suite de tests, qui est en JS.
+3. **Injecté à TOUS les points d'application** (cf. §5) : `Store` client, `LiveValidation`, serveur
+   (`create`/`update`/`transact`/`snapshot`), `VmSyncService`. Un point qui n'injecte pas est un point qui
+   refusera — ce qui est le comportement voulu, mais doit être corrigé, pas subi.

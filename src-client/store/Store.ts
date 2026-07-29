@@ -11,13 +11,18 @@ import { Waypoint } from "../models/Waypoint";
 import { PortRoles } from "../registries/PortRoles";
 import { Id } from "../core/Id";
 import { Text } from "../core/Text";
+import { Locatable } from "../core/Locatable";
+import { ContainerLabel } from "../core/ContainerLabel";
 import { I18n } from "../i18n/I18n";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT, LOCATIONS, RACK_DEPTH_DEFAULT } from "../domain/constants";
 import { Depths } from "../registries/Depths";
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
 import { Cascade, CascadeDelete, CascadeDetach } from "./cascadeSpec";
 import { DataValidator, PortStrands } from "../../src-shared/DataValidation";
-import type { ValidationError, EntityFetcher, ChildFinder } from "../../src-shared/DataValidation";
+import type { ValidationError, EntityFetcher, ChildFinder, ValidationCollaborators } from "../../src-shared/DataValidation";
+import { TrayGeometry } from "../../src-shared/TrayGeometry";
+import { PlacementContainers } from "../../src-shared/PlacementContainers";
+import type { PlacementContainer } from "../../src-shared/PlacementContainers";
 import { CableRouteAnalyzer as RouteAnalyzerImpl } from "./CableRouteAnalyzer";
 import type { RouteError as RouteErrorT, RouteAnalysis as RouteAnalysisT } from "./CableRouteAnalyzer";
 
@@ -395,6 +400,10 @@ export class Store {
      retour immédiat AVANT l'écriture réseau (le serveur reste l'autorité et re-valide). */
   /** Notifié quand une écriture est BLOQUÉE car non conforme (parité avec le rejet 400 serveur). */
   onInvalid: ((errors: ValidationError[]) => void) | null = null;
+  /** Modules partagés que `src-shared/DataValidation` ne peut pas importer lui-même et REÇOIT donc de son
+      appelant (cf. `ValidationCollaborators`, doctrine `docs/placement.md` §6.7). Sans eux, les règles
+      concernées échouent FERMÉ — les injecter ici est ce qui rend la validation d'étagère opérante. */
+  private static readonly VALIDATION_COLLABORATORS: ValidationCollaborators = { trayGeometry: TrayGeometry };
   /** Lecteur d'entité (intégrité référentielle V2 + cross-entité V5) adossé au cache hydraté. */
   private entityFetcher: EntityFetcher = (collection, id) => this.get(collection, id) || null;
   /** Recherche d'enregistrements par champ INDEXÉ (dépendance inverse V5b + portée V6) via les index secondaires. */
@@ -409,8 +418,8 @@ export class Store {
   /** Comme `accepts`, mais avec des lecteurs INJECTÉS (pour la validation CONSCIENTE DU LOT — cf. updateBatch,
       parité avec le `/transact` serveur : chaque op est validée contre l'état POST-lot). */
   private acceptsWith(collection: string, record: Record<string, any>, fetcher: EntityFetcher, finder: ChildFinder): boolean {
-    const errors = DataValidator.validateRecord(collection, record, fetcher, finder);
-    if (!errors.length) errors.push(...DataValidator.validateDependents(collection, record, finder, fetcher));
+    const errors = DataValidator.validateRecord(collection, record, fetcher, finder, Store.VALIDATION_COLLABORATORS);
+    if (!errors.length) errors.push(...DataValidator.validateDependents(collection, record, finder, fetcher, Store.VALIDATION_COLLABORATORS));
     if (errors.length) { this.onInvalid?.(errors); return false; }
     return true;
   }
@@ -505,7 +514,11 @@ export class Store {
 
   /* Plan de cascade (intégrité référentielle) : entités à SUPPRIMER + à DÉTACHER. Délègue au calcul
      PARTAGÉ `Cascade.plan` (même logique côté serveur sur `DELETE`), alimenté par nos capacités
-     injectées : résolutions inverses via les index secondaires (`recordFinder`), lecture via `entityFetcher`. */
+     injectées : résolutions inverses via les index secondaires (`recordFinder`), lecture via `entityFetcher`.
+     Le plan est RÉCURSIF (chaîne complète, jusqu'au point fixe — cf. docs/placement.md §6.16) : il peut donc
+     être bien plus profond qu'une liste d'enfants directs. `remove` n'a rien à y adapter — les suppressions
+     forment un ENSEMBLE (aucun ordre à respecter) et le plan garantit qu'aucun détachement ne vise une entité
+     qu'il supprime, donc l'étape 2 ne peut plus « nettoyer » une FK sur un enregistrement qui part juste après. */
   private _cascadePlan(collection: string, id: string): { deletes: CascadeDelete[]; detaches: CascadeDetach[] } {
     return Cascade.plan(collection, id, this.recordFinder, this.entityFetcher);
   }
@@ -634,8 +647,14 @@ export class Store {
   sitesSorted(): any[] { return this.all("sites").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")); }
   /** Libellé d'un site : nom de l'entité → libellé legacy (LOCATIONS) → id. */
   siteLabel(id: string): string { if (!id) return "—"; const s: any = this.get("sites", id); if (s) return s.name || id; const l = LOCATIONS.find((x) => x.id === id); return l ? l.label : id; }
+  /** Salles d'un BÂTIMENT (site), tous étages confondus. Question du MODÈLE qui décide aussi d'une question
+      de VUE : la PORTÉE d'affichage de la Vue étage s'exprime en salles (`visibleDcIds`), donc un bâtiment
+      sans aucune salle ne peut pas entrer dans la scène. `DcInteract.scopeFloorBuilding` (qui élargit la
+      portée) et `core/Locatable` (qui décide d'afficher le bouton « Localiser ») posent tous deux CETTE
+      question — d'où une seule requête, ici, plutôt que deux filtres jumeaux qui divergeraient. */
+  roomsOfBuilding(location: string | null): any[] { return this.all("datacenters").filter((d) => (d.location || "") === (location || "")); }
   /** Salles d'un étage (location + floor). */
-  dcsOfFloor(location: string | null, floor: any): any[] { const f = String(floor != null ? floor : ""); return this.all("datacenters").filter((d) => (d.location || "") === (location || "") && String(d.floor || "") === f); }
+  dcsOfFloor(location: string | null, floor: any): any[] { const f = String(floor != null ? floor : ""); return this.roomsOfBuilding(location).filter((d) => String(d.floor || "") === f); }
   /** Waypoints hors-salle (OOB). */
   /** Pins d'ÉTAGE (ex-OOB) : pins hors salle rattachés à un bâtiment/étage. */
   oobWaypoints(): any[] { return this.all("waypoints").filter((w) => Waypoint.isFloorLevel(w)); }
@@ -647,6 +666,11 @@ export class Store {
   /** Adresses IPAM RAPPROCHÉES d'une VM (index `vm_id`, cf. config.ts) — enfants liés listés par la fiche VM (T3.2),
       strict parité avec `ipAddressesOfEquipment` (même relation exclusive equipment_id / vm_id sur `ipAddresses`). */
   ipAddressesOfVm(vmId: string): any[] { return this._byFk("ipAddresses", "vm_id", vmId); }
+  /** VMs HÉBERGÉES par un équipement (index `host_equipment_id`, cf. data/config.ts) — sens INVERSE du lien
+      que la fiche VM suit déjà (`vm.host_equipment_id` → équipement). Passe par l'index secondaire, donc en
+      O(VMs de cet hôte) et jamais en balayage de la collection : le premier consommateur est la BULLE DE
+      SURVOL d'un équipement, reconstruite à chaque mouvement de souris. */
+  vmsOfHost(equipmentId: string): any[] { return this._byFk("vms", "host_equipment_id", equipmentId); }
   dhcpRangesOfNetwork(netId: string): any[] { return this._byFk("dhcpRanges", "network_id", netId); }
   dhcpRangesOfServer(eqId: string): any[] { return this._byFk("dhcpRanges", "server_id", eqId); }
   ipAddressByValue(addr: string): any { const r = this._byFk("ipAddresses", "address", addr); return r.length ? r[0] : null; }
@@ -697,47 +721,112 @@ export class Store {
     return (key && PORT_CONNECTOR_MM[key]) ? PORT_CONNECTOR_MM[key] : PORT_CONNECTOR_DEFAULT;
   }
 
-  /* ---- placement : salle (datacenter) d'un équipement ---- */
+  /* ---- placement : CONTENEUR (la clé « salle », GÉNÉRALISÉE) ----
 
-  /** Salle (datacenter_id) d'un équipement, via sa baie hôte ou sa pose libre. null = hors salle. */
-  equipmentDcId(eqOrId: any): string | null {
+     ⚠ CE BLOC A REMPLACÉ UN TRIO HISTORIQUE, `equipmentDcId`/`portDcId`/`cableDcId`, RETIRÉ ICI MÊME
+     (doctrine `docs/placement.md` §6.33, décision D5 du chantier « câblage des équipements d'étage »).
+     Ces trois méthodes rendaient un ID DE SALLE : elles PROJETAIENT la chaîne d'attache du contenu sur
+     son seul maillon « salle » et jetaient le reste. Un équipement posé sur un ÉTAGE — dont la chaîne
+     (`floor` → `building`) est pourtant parfaitement valide — s'en voyait déclarer NULLE PART, pour la
+     seule raison qu'aucun de ses maillons ne s'appelle `room`. C'était la cause unique du blocage
+     « les équipements d'étage ne sont pas câblables » (§6.4), et leur RETRAIT est ce qui a fait
+     désigner par le COMPILATEUR les derniers appelants, plutôt que par un relevé à la main.
+
+     ⚠ NE PAS LES RÉTABLIR SOUS UN AUTRE NOM. La salle est UN maillon de la chaîne, pas l'identité d'un
+     placement : une primitive de store qui la projette redevient aussitôt la réponse par défaut de
+     « où est cet objet ? », et le cas particulier repousse. Un site qui a réellement besoin d'un repère
+     SALLE — c'est légitime, la résolution en salle est la règle et le MONDE l'exception (§6.20) — lit
+     le conteneur et le RESTREINT SUR PLACE (`kind === "room"`), ce qui rend l'hypothèse visible à la
+     lecture et vérifiée par `tsc` (l'union est discriminée). Les trois chemins salle de
+     `DcInteract.locateEquipment`/`locatePort`/`locateCable` sont les seuls à le faire.
+
+     ⚠ DEUX QUESTIONS DISTINCTES, DEUX MÉTHODES — ne pas les confondre. `equipmentContainer` rend le
+     conteneur IMMÉDIAT (la BAIE d'un serveur monté, l'ÉTAGÈRE d'un boîtier posé) ; `equipmentNamedContainer`
+     (plus bas) rend le conteneur de niveau CHAÎNE — la salle traversée, sinon l'étage immédiat. C'est ce
+     SECOND qui généralise l'ancien `equipmentDcId`, et c'est lui que consomment la grammaire de route,
+     le tracé, les libellés et les chemins salle de « Localiser ». Le premier ne répond QUE de l'attache
+     immédiate (contraintes de dépose, dégradation d'un câble) : l'employer là où l'on attend une salle
+     déclarerait « non placé » tout équipement monté en baie.
+
+     ⚠ Comparer deux conteneurs se fait avec `PlacementContainers.same`, JAMAIS par égalité d'id :
+     l'identité d'un ÉTAGE est le COUPLE (bâtiment, étage) et un étage non configuré n'a pas d'id. */
+
+  /** Conteneur IMMÉDIAT d'un équipement (baie, étagère, salle, étage…), ou null s'il n'est attaché à
+      rien de localisable (« pool »). ⚠ PAS la salle : cf. l'avertissement ci-dessus. */
+  equipmentContainer(eqOrId: any): PlacementContainer | null {
     const eq = (typeof eqOrId === "object") ? eqOrId : this.get("equipments", eqOrId);
-    if (!eq) return null;
-    if (eq.placement_mode === "floor") return null;   // posé sur un étage (hors DC)
-    if ((eq.placement_mode === "side" || eq.placement_mode === "wall") && eq.rack_id) {
-      const rack = this.get("racks", eq.rack_id);
-      return (rack && rack.datacenter_id) ? rack.datacenter_id : null;
-    }
-    // POSÉ SUR UNE ÉTAGÈRE (tray) : la salle est celle de la BAIE hôte de l'étagère (tray → rackItem → rack → DC).
-    // DOIT précéder le repli « libre » : un équipement posé est dim_mode "free" MAIS sans dc_id (rattaché via
-    // tray_item_id). Sans ce cas il retombait à null (« non placé ») → un câble vers lui restait bloqué à « planifié ».
-    if (eq.placement_mode === "tray" && eq.tray_item_id) {
-      const tray = this.get("rackItems", eq.tray_item_id);
-      const rack = tray && tray.rack_id ? this.get("racks", tray.rack_id) : null;
-      return (rack && rack.datacenter_id) ? rack.datacenter_id : null;
-    }
-    if (eq.dim_mode === "free") return eq.dc_id || null;
-    if (eq.placement_mode === "rack" && eq.rack_id && eq.rack_u != null) {
-      const rack = this.get("racks", eq.rack_id);
-      return (rack && rack.datacenter_id) ? rack.datacenter_id : null;
-    }
-    return null;
+    return PlacementContainers.of(eq);
   }
 
-  /** Salle où se résout un PORT : celle de son équipement porteur. null = port inconnu ou équipement hors salle.
-      Résolveur PARTAGÉ (vue 3D, boutons « Localiser ») — même règle que `equipmentDcId`. */
-  portDcId(portId: string | null): string | null {
+  /** Conteneur IMMÉDIAT où se résout un PORT : celui de son équipement porteur (l'historique `portDcId`
+      en projetait la salle ; il est RETIRÉ, §6.33). */
+  portContainer(portId: string | null): PlacementContainer | null {
     const p: any = this.get("ports", portId);
-    return p ? this.equipmentDcId(p.equipment_id) : null;
+    return p ? this.equipmentContainer(p.equipment_id) : null;
   }
 
-  /** Salle où se résout un CÂBLE : première extrémité dont le port est localisable (parité avec
-      `locateCable` de la vue 3D). null = aucune extrémité en salle → câble non localisable. */
-  cableDcId(cableOrId: any): string | null {
+  /** Conteneur où se résout un CÂBLE : celui de la PREMIÈRE extrémité localisable — même règle de
+      priorité que l'historique `cableDcId` (A puis B, RETIRÉ §6.33), pour que la généralisation n'ait
+      pas déplacé le cadrage d'un câble dont les deux bouts sont placés. */
+  cableContainer(cableOrId: any): PlacementContainer | null {
     const c: any = (typeof cableOrId === "object") ? cableOrId : this.get("cables", cableOrId);
     if (!c) return null;
-    return this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id);
+    return this.portContainer(c.from_port_id) || this.portContainer(c.to_port_id);
   }
+
+  /* ---- placement : « cet objet est-il LOCALISABLE ? » (véracité des boutons « Localiser ») ----
+
+     ⚠ CE N'EST PAS `!!equipmentContainer(x)`. Un contenu peut avoir un conteneur parfaitement valide et
+     rester injoignable par la vue : une baie HORS SALLE en donne un (`kind: "rack"`) sans qu'aucune salle
+     n'apparaisse dans sa chaîne, et un posé d'ÉTAGE d'un bâtiment SANS SALLE en donne un que la portée
+     d'affichage — exprimée en salles — ne peut pas atteindre. La règle vit donc UNE FOIS, dans
+     `core/Locatable`, dont ces deux méthodes ne sont que le point d'entrée depuis le store (même patron
+     de délégation que le trio « conteneur » ci-dessus vers `src-shared/PlacementContainers`). */
+
+  /** L'équipement est-il localisable en 3D ? Prédicat des boutons « Localiser » — MIROIR des refus de
+      `DcInteract.locateEquipment` (verrouillé par un test d'équivalence). A remplacé le prédicat
+      historique `!!equipmentDcId` (RETIRÉ §6.33), qui cachait le bouton d'un posé d'ÉTAGE alors que
+      l'action aboutit (doctrine §6.27 puis §6.28). */
+  equipmentLocatable(eqOrId: any): boolean { return Locatable.equipment(eqOrId, this); }
+
+  /** Le PORT est-il localisable en 3D ? Même règle que son équipement porteur (a remplacé `!!portDcId`). */
+  portLocatable(portId: string | null): boolean { return Locatable.port(portId, this); }
+
+  /** La LIAISON est-elle localisable en 3D ? A remplacé `!!cableDcId`, qui ne reconnaissait qu'une
+      extrémité posée en SALLE et cachait donc le bouton d'un câble aboutissant sur un ÉTAGE. */
+  cableLocatable(cableOrId: any): boolean { return Locatable.cable(cableOrId, this); }
+
+  /** Extrémité RETENUE pour cadrer une liaison : le port de la première extrémité localisable (A puis B).
+      ⚠ C'est la MÊME méthode que consomme `DcInteract.locateCable` — le prédicat ci-dessus n'est que
+      « cette extrémité existe-t-elle ? », si bien que bouton et action ne peuvent pas diverger. */
+  cableLocatableEnd(cableOrId: any): string | null { return Locatable.cableEnd(cableOrId, this); }
+
+  /* ---- placement : « comment s'appelle l'endroit de cet objet ? » (LIBELLÉS) ----
+
+     ⚠ ENCORE UNE AUTRE QUESTION que les deux blocs précédents, et c'est pourquoi c'est un TROISIÈME
+     module. `equipmentContainer` rend le conteneur IMMÉDIAT (une baie, une étagère) ; `equipmentLocatable`
+     dit si la VUE 3D peut le montrer. Nommer, c'est lire la CHAÎNE : le conteneur immédiat d'un serveur
+     monté est sa baie, mais l'utilisateur veut lire « Salle A » — ce qu'affichait l'expression historique
+     `dcName(equipmentDcId(x))`. La règle vit UNE FOIS dans `core/ContainerLabel` (doctrine §6.29).
+
+     ⚠ CE MODULE PORTE DÉSORMAIS PLUS QUE DES LIBELLÉS, et son nom est en retard sur son emploi : la
+     GRAMMAIRE DE ROUTE (§6.31), le TRACÉ des faisceaux et les chemins salle de « Localiser » (§6.33)
+     consomment `equipmentNamedContainer` comme LEUR conteneur de référence — c'est lui, et non
+     `equipmentContainer`, qui a succédé à `equipmentDcId`. Le renommer (`equipmentChainContainer` ?)
+     est une dette de nommage assumée, pas un lot du chantier de câblage. */
+
+  /** Conteneur de niveau CHAÎNE d'un équipement : la SALLE traversée, sinon l'ÉTAGE immédiat, sinon null.
+      C'est la GÉNÉRALISATION EXACTE de l'historique `equipmentDcId` (RETIRÉ §6.33) : même verdict sur
+      tous les modes de placement existants, une réponse EN PLUS pour le mode `floor`. */
+  equipmentNamedContainer(eqOrId: any): PlacementContainer | null { return ContainerLabel.ofEquipment(eqOrId, this); }
+
+  /** Libellé d'un conteneur nommé (« Salle A », « Bât. X · ét. 1 »), null s'il n'y a rien à nommer.
+      Les replis d'absence restent chez l'appelant — ils diffèrent d'un site à l'autre (« non placé »,
+      « ? », suffixe vide), et les uniformiser changerait des libellés existants. */
+  containerLabel(container: PlacementContainer | null): string | null { return ContainerLabel.label(container, this); }
+
+  /** Raccourci des sites qui n'ont qu'un équipement en main. A remplacé `dcName(equipmentDcId(x))`. */
+  equipmentContainerLabel(eqOrId: any): string | null { return ContainerLabel.ofEquipmentLabel(eqOrId, this); }
 
   /* ---- faisceaux (trunks) : pool de fibres pioché par les PORTS des patchs d'extrémité ---- */
 
@@ -909,16 +998,16 @@ export class Store {
      comme avant ; le détail est consultable (et testable) sur `store.routes`. */
   readonly routes: RouteAnalyzerImpl = new RouteAnalyzerImpl(this);
 
-  /** Salle du bout A|B d'un câble (null = port absent OU équipement non placé). */
-  cableEndDcId(cable: any, side: "A" | "B"): string | null { return this.routes.cableEndDcId(cable, side); }
+  /** Conteneur du bout A|B d'un câble (null = port absent OU équipement rattaché à rien de traversable). */
+  cableEndContainer(cable: any, side: "A" | "B"): PlacementContainer | null { return this.routes.cableEndContainer(cable, side); }
   /** Analyse de la route (grammaire + cohérence des bouts posés) — cf. CableRouteAnalyzer.cableRoute. */
   cableRoute(cable: any): RouteAnalysisT { return this.routes.cableRoute(cable); }
   /** Violation de COHÉRENCE DE SALLE (« exit terminal ») ? — cf. CableRouteAnalyzer. */
   routeHasRoomBreak(cable: any): boolean { return this.routes.routeHasRoomBreak(cable); }
   /** Première erreur STRUCTURELLE de route, ou null — cf. CableRouteAnalyzer. */
   routeStructuralError(cable: any): RouteErrorT | null { return this.routes.routeStructuralError(cable); }
-  /** Contrainte de salle d'un BOUT ("A"|"B"), évaluée SANS son port — cf. CableRouteAnalyzer. */
-  cableSideConstraint(cable: any, side: "A" | "B"): { dcId: string | null; onlyUnplaced: boolean; route: RouteAnalysisT } { return this.routes.cableSideConstraint(cable, side); }
+  /** Contrainte de CONTENEUR d'un BOUT ("A"|"B"), évaluée SANS son port — cf. CableRouteAnalyzer. */
+  cableSideConstraint(cable: any, side: "A" | "B"): { container: PlacementContainer | null; onlyUnplaced: boolean; route: RouteAnalysisT } { return this.routes.cableSideConstraint(cable, side); }
   /** Résumé lisible de la route : « ◆ Salle A → ⏏ Salle A → ◎ ét. 1 → ⏏ Salle B ». */
   cableRouteSummary(r: any): string { return this.routes.cableRouteSummary(r); }
   /** Nom d'une salle (datacenter) — "?" si absente, "(salle)" si sans nom. */
@@ -930,15 +1019,18 @@ export class Store {
 
   /* ---- contrainte physique de placement (câblage) — logique dans CableRouteAnalyzer, délégations ---- */
 
-  /** Salles où un câble POSÉ contraint l'équipement à être : Map<dcId, cables[]> — cf. CableRouteAnalyzer. */
-  equipmentRequiredDcs(eqId: string): Map<string, any[]> { return this.routes.equipmentRequiredDcs(eqId); }
+  /** Conteneurs où un câble POSÉ contraint l'équipement à être, et les câbles qui l'imposent — cf. CableRouteAnalyzer. */
+  equipmentRequiredContainers(eqId: string): Array<{ container: PlacementContainer; cables: any[] }> { return this.routes.equipmentRequiredContainers(eqId); }
   /** Motif de blocage du placement dans la salle cible (null = autorisé) — cf. CableRouteAnalyzer. */
   equipmentPlacementBlockedReason(eqId: string, targetDcId: string): string | null { return this.routes.equipmentPlacementBlockedReason(eqId, targetDcId); }
   /** Idem pour un RACK entier (vérifie chaque équipement monté en U). null = autorisé. */
   rackPlacementBlockedReason(rackId: string, targetDcId: string): string | null { return this.routes.rackPlacementBlockedReason(rackId, targetDcId); }
-  /** Contexte physique d'un équipement : id de salle, « floor:loc:étage », ou null — cf. CableRouteAnalyzer. */
-  equipmentContext(eq: any): string | null { return this.routes.equipmentContext(eq); }
-  /** Un câble est-il valide compte tenu des contextes physiques de ses deux bouts ? — cf. CableRouteAnalyzer. */
+  /* ⚠ `equipmentContext` A DISPARU (doctrine §6.31), et ce n'est pas un oubli. Elle rendait « le contexte
+     physique » d'un équipement sous forme de chaîne — un id de salle, ou « floor:<bâtiment>:<étage> » —
+     c'est-à-dire une SECONDE écriture de la question à laquelle `equipmentNamedContainer` répond déjà, et
+     une identité d'étage ENCODÉE à la main (avec le `String(x || "")` qui écrase le rez-de-chaussée). Les
+     appelants lisent désormais `equipmentNamedContainer` et comparent par `PlacementContainers.same`. */
+  /** Un câble est-il valide compte tenu des conteneurs physiques de ses deux bouts ? — cf. CableRouteAnalyzer. */
   cableContextValid(c: any): boolean { return this.routes.cableContextValid(c); }
   /** Patchs de CASSE des câbles dont la route n'est plus valide après (dé)placement — cf. CableRouteAnalyzer. */
   cableBreakOps(eqId: string): Array<{ collection: string; id: string; patch: Record<string, any> }> { return this.routes.cableBreakOps(eqId); }
@@ -990,7 +1082,9 @@ export class Store {
   /** Brouillons de câble (un seul bout) compatibles avec ce port — candidats à l'affectation au clic. */
   cableDraftCandidatesForPort(portId: string): any[] {
     const port = this.get("ports", portId); if (!port) return [];
-    const fam = this.portFamily(port), myDc = this.equipmentDcId(port.equipment_id);
+    // CONTENEUR (et non plus salle) du port : un brouillon peut désormais s'affecter à un port d'équipement
+    // posé sur un ÉTAGE, la contrainte de route sachant désigner un étage (doctrine §6.31).
+    const fam = this.portFamily(port), monConteneur = this.equipmentNamedContainer(port.equipment_id);
     return this.all("cables").filter((c: any) => {
       if (c.status !== CABLE_STATUS_DRAFT) return false;
       const missA = !c.from_port_id, missB = !c.to_port_id;
@@ -1000,7 +1094,7 @@ export class Store {
       if (ct && fam && ct.family !== fam) return false;
       const otherPid = missA ? c.to_port_id : c.from_port_id;
       if (otherPid) { const f2 = this.portFamily(this.get("ports", otherPid)); if (f2 && fam && f2 !== fam) return false; }
-      const fits = (side: "A" | "B") => { const k = this.cableSideConstraint(c, side); if (k.onlyUnplaced) return myDc == null; return !k.dcId || !myDc || k.dcId === myDc; };
+      const fits = (side: "A" | "B") => { const k = this.cableSideConstraint(c, side); if (k.onlyUnplaced) return monConteneur == null; return !k.container || !monConteneur || PlacementContainers.same(k.container, monConteneur); };
       return (missA && fits("A")) || (missB && fits("B"));
     });
   }

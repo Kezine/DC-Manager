@@ -35,7 +35,19 @@ module.exports = (env, argv) => {
       publicPath: "auto",   // URLs d'assets RELATIVES → l'app se charge à la racine ou sous un sous-dossier (reverse-proxy)
       clean: true,
     },
-    resolve: { extensions: [".ts", ".js"] },
+    resolve: {
+      extensions: [".ts", ".js"],
+      /* POURQUOI `extensionAlias` : il autorise les imports relatifs ENTRE fichiers de `src-shared/`.
+         Ce code est compilé par DEUX chaînes, et NodeNext (serveur) EXIGE que le spécificateur porte
+         l'extension du fichier ÉMIS — donc `./TrayGeometry.js` pour importer `TrayGeometry.ts`.
+         `tsc` ramène de lui-même ce `.js` sur le `.ts` correspondant (résolution *bundler* comme
+         NodeNext), mais webpack, lui, ne SUBSTITUE pas les extensions : il les AJOUTE. Sans alias il
+         cherche donc `./TrayGeometry.js`, `./TrayGeometry.js.ts`, `./TrayGeometry.js.js` — tous
+         inexistants — et échoue en `Can't resolve`. `extensionAlias` lui dit qu'un spécificateur en
+         `.js` peut se résoudre sur un `.ts` (essayé d'abord, c'est la source du dépôt) ou sur un
+         vrai `.js` (repli : les `.js` de `node_modules` et de `src-client/pwa/` restent résolus). */
+      extensionAlias: { ".js": [".ts", ".js"] },
+    },
     module: {
       rules: [
         { test: /\.ts$/, use: "ts-loader", exclude: /node_modules/ },

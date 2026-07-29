@@ -152,16 +152,6 @@ export abstract class DcCamera extends DcBase {
     const p = CAM_PRESETS[name] || CAM_PRESETS.iso; this.az = p[0]; this.el = p[1];
     this.scale = null; this.render();
   }
-  /** Active/désactive la vue multi-salles. À l'activation, affiche TOUTES les salles (visibleDcIds = tout)
-      et recadre sur l'ensemble ; à la désactivation, revient à la salle active. */
-
-  setMultiDc(on: boolean): void {
-    this.multiDc = !!on;
-    if (this.multiDc) this.visibleDcIds = new Set(this.store.all("datacenters").map((d: any) => d.id));
-    this.camTarget = null; this.scale = null;
-    this.buildToolbar(); this.render();
-  }
-
 
   /* ---- cadrage (vues 2D : Plan de salle / Plan d'étage ; la 3D est cadrée par le moteur WebGL) ---- */
   protected sceneBounds(dc: any): { minH: number; minV: number; maxH: number; maxV: number } {

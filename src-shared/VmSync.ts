@@ -14,7 +14,16 @@
    champs listés ici — une divergence de sémantique entre les deux côtés est
    ainsi impossible par construction (principe n°3, réutilisation).
 
-   Contrainte src-shared : fichier AUTO-SUFFISANT (aucun import), ni DOM ni Node.
+   Portée `src-shared/` : TS PUR (ni DOM ni Node), compilé des DEUX côtés — front (résolution
+   *bundler*) et serveur (NodeNext). Ce fichier n'importe rien : c'est un CONSTAT, plus une
+   contrainte. L'auto-suffisance de `src-shared/` est LEVÉE (cf. `CLAUDE.md` § « Code partagé
+   front/back ») — un import relatif vers un autre fichier partagé est AUTORISÉ, à une
+   condition IMPÉRATIVE : écrire le spécificateur avec l'extension `.js`
+   (`import { X } from "./Foo.js"` pour un fichier `Foo.ts`). NodeNext l'EXIGE côté serveur ;
+   l'omettre compile côté front puis CASSE le build serveur.
+   ⚠ Donc : ne JAMAIS dupliquer ici une règle qui vit déjà dans un autre fichier partagé au
+   motif de « rester auto-suffisant » — c'est exactement la dette que les lots de
+   déduplication (`TrayGeometry`, `RackDepthPolicy`) ont eu à résorber.
    ============================================================================= */
 
 /** vNIC EMBARQUÉE telle que STOCKÉE dans le document (forme normalisée : chaînes

@@ -22,6 +22,7 @@ import {
   FLOOR_WIDTH_DEFAULT, FLOOR_DEPTH_DEFAULT, FLOOR_CELL_DEFAULT
 } from "../../domain/constants";
 import { FormUi, ORIENT_OPTS } from "./shared";
+import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import type { FormHost } from "./shared";
 import { CableForms } from "./CableForms";
 import { EquipmentForms } from "./EquipmentForms";   // fiche équipement (nom cliquable dans le contenu de baie)
@@ -257,7 +258,7 @@ export class RackForms extends CableForms {
             host.setDirty?.(true); Notify.toast(I18n.t("rack.rack.resized")); onSaved?.(); return true;
           }
         }
-        if (rk) await store.update("racks", rk.id, payload); else await store.create("racks", payload);
+        if (!await FormSave.record(store, "racks", rk && rk.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(rk ? I18n.t("rack.rack.updated") : I18n.t("rack.rack.created")); onSaved?.(); return true;
       },
     });
@@ -297,11 +298,15 @@ export class RackForms extends CableForms {
     const dE = document.createElement("div"); dE.className = "section-divider"; dE.textContent = I18n.t("rack.rackDetail.equipsSection", { count: eqs.length }); root.appendChild(dE);
     if (eqs.length) {
       const tw = document.createElement("div"); tw.className = "table-wrap";
+      // Bouton « Localiser » par ligne, sous le prédicat PARTAGÉ `store.equipmentLocatable` (`core/Locatable`).
+      // ⚠ Aucun posé d'ÉTAGE ne peut figurer dans ce tableau (il liste le contenu d'une BAIE) : la migration
+      // n'y change donc STRICTEMENT RIEN. Elle est faite pour que la règle reste écrite au même endroit —
+      // c'est la divergence entre copies d'un même prédicat qui a produit le défaut que ce lot corrige.
       const rows = eqs.map((e: any) => {
         const uPos = (e.placement_mode === "rack" && e.rack_u != null)
           ? ("U" + e.rack_u + ((e.u_height || 1) > 1 ? "–U" + (e.rack_u + (e.u_height || 1) - 1) : ""))
           : (e.placement_mode === "side" ? I18n.t("rack.rackDetail.uSide") : e.placement_mode === "wall" ? I18n.t("rack.rackDetail.uWall") : "—");
-        return `<tr><td class="cell-name">${Html.escape(e.name || I18n.t("lists.ph.equipment"))}</td><td><span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span></td><td style="font-family:var(--mono)">${Html.escape(uPos)}</td><td class="cell-actions">${host.locate && store.equipmentDcId(e) ? `<button class="btn btn-ghost btn-sm icon-action" data-eq-loc="${e.id}" title="${I18n.t("lists.chrome.rowLocate")}" aria-label="${I18n.t("lists.chrome.rowLocate")}">${Icons.LOCATE}</button>` : ""}<button class="btn btn-ghost btn-sm icon-action" data-eq-view="${e.id}" title="${I18n.t("lists.chrome.rowView")}" aria-label="${I18n.t("lists.chrome.rowView")}">${Icons.INFO}</button></td></tr>`;
+        return `<tr><td class="cell-name">${Html.escape(e.name || I18n.t("lists.ph.equipment"))}</td><td><span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span></td><td style="font-family:var(--mono)">${Html.escape(uPos)}</td><td class="cell-actions">${host.locate && store.equipmentLocatable(e) ? `<button class="btn btn-ghost btn-sm icon-action" data-eq-loc="${e.id}" title="${I18n.t("lists.chrome.rowLocate")}" aria-label="${I18n.t("lists.chrome.rowLocate")}">${Icons.LOCATE}</button>` : ""}<button class="btn btn-ghost btn-sm icon-action" data-eq-view="${e.id}" title="${I18n.t("lists.chrome.rowView")}" aria-label="${I18n.t("lists.chrome.rowView")}">${Icons.INFO}</button></td></tr>`;
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("lists.col.equipment")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("rack.rackDetail.colU")}</th><th style="text-align:right;">${I18n.t("lists.chrome.actions")}</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
@@ -352,12 +357,12 @@ export class RackForms extends CableForms {
     const removeMount = async (kind: string, mid: string) => {
       if (kind === "equipment") {
         if (!store.get("equipments", mid)) return;
-        const downs = store.equipmentDcId(mid) ? store.cableDowngradeOps([mid]) : [];
-        await store.updateBatch([{ collection: "equipments", id: mid, patch: { placement_mode: "manual", rack_id: null, rack_u: null } }].concat(downs as any));
+        const downs = store.equipmentContainer(mid) ? store.cableDowngradeOps([mid]) : [];   // clé généralisée (cf. DcInteract, même garde)
+        if (!await FormSave.batch(store, [{ collection: "equipments", id: mid, patch: { placement_mode: "manual", rack_id: null, rack_u: null } }].concat(downs as any))) return;   // refusé par le Store (toast rouge) : ne rien annoncer
         Notify.toast(I18n.t("rack.rackContent.equipRemoved") + (downs.length ? I18n.t("rack.rackContent.cablesReplanned") : ""));
       } else if (kind === "brush") {
         if (!store.get("waypoints", mid)) return;
-        await store.update("waypoints", mid, { rack_id: null });
+        if (!await FormSave.record(store, "waypoints", mid, { rack_id: null })) return; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
         Notify.toast(I18n.t("rack.rackContent.brushRemoved"));
       } else { await store.remove("rackItems", mid); Notify.toast(I18n.t("rack.rackContent.itemRemoved")); }
       host.setDirty?.(true); render();
@@ -441,7 +446,7 @@ export class RackForms extends CableForms {
       body.appendChild(FormControls.fieldRow(I18n.t("rack.common.equipField"), eqI, I18n.t("rack.rackContent.freeEquipHint")));
       const res = await Dialog.custom({ title: I18n.t("rack.rackContent.freeDialogTitle"), confirmLabel: I18n.t("rack.rackContent.assign"), build: (r: HTMLElement) => { r.appendChild(body); return { validate: () => eqI.value ? true as const : I18n.t("rack.common.chooseEquip"), collect: () => eqI.value }; } });
       if (!res) return;
-      await store.update("equipments", res, { placement_mode: "rack", rack_id: rack.id, rack_u: null, rack_side: "front" });
+      if (!await FormSave.record(store, "equipments", res, { placement_mode: "rack", rack_id: rack.id, rack_u: null, rack_side: "front" })) return; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
       Notify.toast(I18n.t("rack.rackContent.freeAssigned")); done();
     };
 
@@ -458,18 +463,35 @@ export class RackForms extends CableForms {
     root.appendChild(FormControls.fieldRow(I18n.t("lists.col.name"), nameI));
     const addrI = FormControls.text(s ? s.address : "", I18n.t("rack.site.addrPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("lists.col.address"), addrI));
+    // COORDONNÉES GPS (optionnelles) — le placement des bâtiments dans le monde 3D en dérive (doctrine
+    // §6.9). Elles sont ici, dans le FORMULAIRE, parce que le principe n°10 l'exige : aucun attribut,
+    // placement compris, ne doit dépendre d'une vue 2D/3D pour être saisi. Le pas `any` autorise la
+    // précision décimale usuelle d'un relevé GPS ; vide ⇒ null (le repli 5 km s'applique alors).
+    const latI = FormControls.number(s && s.lat != null ? s.lat : "", { min: -90, max: 90, step: "any", placeholder: I18n.t("rack.site.latPlaceholder") });
+    const lonI = FormControls.number(s && s.lon != null ? s.lon : "", { min: -180, max: 180, step: "any", placeholder: I18n.t("rack.site.lonPlaceholder") });
+    root.appendChild(FormControls.fieldRow(I18n.t("rack.site.lat"), latI, I18n.t("rack.site.gpsHint")));
+    root.appendChild(FormControls.fieldRow(I18n.t("rack.site.lon"), lonI));
+    // TAILLE DÉCLARÉE du bâtiment (optionnelle) — elle fait l'emprise du bâtiment en 3D et devient une
+    // CONTRAINTE : aucun plan d'étage ne peut en déborder (doctrine §6.8). Ici pour la même raison que le
+    // GPS ci-dessus : le principe n°10 veut que tout attribut, placement compris, soit saisissable au
+    // FORMULAIRE. Vide ⇒ null (l'emprise redevient alors celle du plus grand plan d'étage).
+    const wI = FormControls.number(s && s.width_mm != null ? s.width_mm : "", { min: 1, step: 100, placeholder: I18n.t("rack.site.widthPlaceholder") });
+    const dI = FormControls.number(s && s.depth_mm != null ? s.depth_mm : "", { min: 1, step: 100, placeholder: I18n.t("rack.site.depthPlaceholder") });
+    root.appendChild(FormControls.fieldRow(I18n.t("rack.common.widthMm"), wI, I18n.t("rack.site.sizeHint")));
+    root.appendChild(FormControls.fieldRow(I18n.t("rack.common.depthMm"), dI));
     const descI = FormControls.textArea(s ? s.description : "");
     root.appendChild(FormControls.fieldRow(I18n.t("lists.col.description"), descI));
-    const live = new LiveValidation("sites", { name: nameI });
+    const live = new LiveValidation("sites", { name: nameI, lat: latI, lon: lonI, width_mm: wI, depth_mm: dI });
     live.clearOnInput();
     host.openModal({
       title: s ? I18n.t("rack.site.titleEdit") : I18n.t("rack.site.titleNew"),
       subtitle: s ? Html.escape(s.name) : "",
       body: root,
       onSave: async () => {
-        const payload = { name: nameI.value.trim(), address: addrI.value.trim(), description: descI.value.trim() };
-        if (live.check(payload).length) return false;   // nom requis (surligné)
-        if (s) await store.update("sites", s.id, payload); else await store.create("sites", payload);
+        const num = (i: HTMLInputElement) => { const raw = i.value.trim(); return raw === "" ? null : Number(raw); };
+        const payload = { name: nameI.value.trim(), address: addrI.value.trim(), lat: num(latI), lon: num(lonI), width_mm: num(wI), depth_mm: num(dI), description: descI.value.trim() };
+        if (live.check(payload).length) return false;   // nom requis, bornes lat/lon, couples complets GPS + taille (surlignés)
+        if (!await FormSave.record(store, "sites", s && s.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(s ? I18n.t("rack.site.updated") : I18n.t("rack.site.created")); onSaved?.(); return true;
       },
     });
@@ -502,7 +524,7 @@ export class RackForms extends CableForms {
       onSave: async () => {
         const payload = { name: nameI.value.trim(), email: emailI.value.trim(), phone: phoneI.value.trim(), notes: notesI.value.trim() };
         if (live.check(payload).length) return false;   // nom requis + e-mail/téléphone invalides (surlignés)
-        if (c) await store.update("contacts", c.id, payload); else await store.create("contacts", payload);
+        if (!await FormSave.record(store, "contacts", c && c.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(c ? I18n.t("rack.contact.updated") : I18n.t("rack.contact.created")); onSaved?.(); return true;
       },
     });
@@ -549,7 +571,7 @@ export class RackForms extends CableForms {
           location: locI.value || "", floor: floorI.value, room: roomI.value.trim(),
         };
         if (live.check(payload).length) return false;   // nom requis (surligné)
-        if (dc) await store.update("datacenters", dc.id, payload); else await store.create("datacenters", payload);
+        if (!await FormSave.record(store, "datacenters", dc && dc.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(dc ? I18n.t("rack.datacenter.updated") : I18n.t("rack.datacenter.created")); onSaved?.(); return true;
       },
     });
@@ -586,7 +608,7 @@ export class RackForms extends CableForms {
       title: I18n.t("rack.door.title"), subtitle: Html.escape(dc.name || ""), body: root, wide: true,
       onSave: async () => {
         const patch = { wall: wallI.value, offset: Math.max(0, parseInt(offI.value, 10) || 0), width_mm: Math.max(100, parseInt(wI.value, 10) || 900), height_mm: Math.max(100, parseInt(hI.value, 10) || 2100), frame_mm: Math.max(0, parseInt(fI.value, 10) || 0), hinge: hinI.value === "right" ? "right" : "left", leaves: leavesI.value === "2" ? 2 : 1, opening: opI.value === "exterior" ? "exterior" : "interior" };
-        await store.update("datacenters", dcId, { doors: (dc.doors || []).map((d: any) => (d.id === doorId ? { ...d, ...patch } : d)) });
+        if (!await FormSave.record(store, "datacenters", dcId, { doors: (dc.doors || []).map((d: any) => (d.id === doorId ? { ...d, ...patch } : d)) })) return false; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(I18n.t("rack.door.updated")); onSaved?.(); return true;
       },
     });
@@ -621,7 +643,8 @@ export class RackForms extends CableForms {
     let bdepthI: HTMLInputElement | null = null, bheightI: HTMLInputElement | null = null;
     const brushRack: any = isBrush ? store.get("racks", wp.rack_id) : null;
     const brushHasDoor = !!(brushRack && RackGeometry.hasDoor(brushRack));
-    const brushAvail = brushRack ? RackGeometry.frontMountAvailDepth(brushRack) : Infinity;   // dispo physique (depth − marge avant + cavités)
+    // dispo physique (depth − marge avant + cavités). Une brosse est ancrée au plan de montage AVANT, d'où `"front"`.
+    const brushAvail = brushRack ? RackGeometry.mountAvailDepth(brushRack, "front") : Infinity;
     const brushMaxDepth = brushHasDoor ? Math.max(1, brushAvail - RACK_DEPTH_SAFETY_MM) : Infinity;   // − marge de sécurité (app-wide)
     if (isBrush) {
       bdepthI = FormControls.number(wp.depth_mm != null ? wp.depth_mm : 100, brushHasDoor ? { min: 1, step: 10, max: Math.round(brushMaxDepth) } : { min: 1, step: 10 });
@@ -680,7 +703,7 @@ export class RackForms extends CableForms {
           if (!scene.sideSlotFree(wp.rack_id, face, pinChosen.lr, pinChosen.col, pinChosen.u, SIDE_U_STEP, wp.id)) { Notify.toast(I18n.t("rack.common.slotOccupied"), "err"); return false; }
           payload.side_lr = pinChosen.lr; payload.side_col = pinChosen.col; payload.side_u = pinChosen.u;
         }
-        await store.update("waypoints", wp.id, payload);
+        if (!await FormSave.record(store, "waypoints", wp.id, payload)) return false; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(I18n.t("rack.waypoint.updated")); return true;
       },
     });
@@ -746,7 +769,7 @@ export class RackForms extends CableForms {
         if (pick && floorExists(L, F)) { Notify.toast(I18n.t("rack.floor.floorExists")); opts.onPicked?.(L, F); return true; }
         const ex: any = store.floorFor(L, F);
         const payload = { location: L, floor: F, width_mm: Math.max(1, parseInt(wI.value, 10) || FLOOR_WIDTH_DEFAULT), depth_mm: Math.max(1, parseInt(dI.value, 10) || FLOOR_DEPTH_DEFAULT), cell_mm: Math.max(1, parseInt(cI.value, 10) || FLOOR_CELL_DEFAULT), anchor_x: parseInt(axI.value, 10) || 0, anchor_y: parseInt(ayI.value, 10) || 0, height_mm: Math.max(0, parseInt(hI.value, 10) || 0), description: descI.value.trim() };
-        if (ex) await store.update("floors", ex.id, payload); else await store.create("floors", payload);
+        if (!await FormSave.record(store, "floors", ex && ex.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(pick ? I18n.t("rack.floor.created") : I18n.t("rack.floor.planSaved"));
         if (pick) opts.onPicked?.(L, F);
         return true;
@@ -785,7 +808,7 @@ export class RackForms extends CableForms {
     const prow = FormControls.fieldRow(I18n.t("rack.common.heightU"), pheightI); body.appendChild(prow);
     // une PORTE borne la profondeur dispo (depth − marge avant + cavités − marge de sécurité) ; sans porte, libre.
     const brushHasDoor = RackGeometry.hasDoor(rack);
-    const brushAvail = RackGeometry.frontMountAvailDepth(rack);
+    const brushAvail = RackGeometry.mountAvailDepth(rack, "front");   // brosse = ancrage au plan de montage AVANT
     const brushMaxDepth = brushHasDoor ? Math.max(1, brushAvail - RACK_DEPTH_SAFETY_MM) : Infinity;
     const bdepthI = FormControls.number("100", brushHasDoor ? { min: 1, step: 10, max: Math.round(brushMaxDepth) } : { min: 1, step: 10 });
     const bdepthRow = FormControls.fieldRow(I18n.t("rack.assign.brushDepth"), bdepthI, brushHasDoor ? I18n.t("rack.waypoint.depthDoorHint", { max: Math.round(brushMaxDepth), avail: Math.round(brushAvail), safety: RACK_DEPTH_SAFETY_MM }) : I18n.t("rack.waypoint.depthFreeHint")); body.appendChild(bdepthRow);
@@ -910,12 +933,12 @@ export class RackForms extends CableForms {
                 confirmLabel: I18n.t("rack.item.emptyAndApply"), danger: true,
               });
               if (!ok) return false;
-              for (const g of guests) await store.update("equipments", g.id, { placement_mode: "manual", tray_item_id: null, tray_x: null, tray_y: null });
+              for (const g of guests) if (!await FormSave.record(store, "equipments", g.id, { placement_mode: "manual", tray_item_id: null, tray_x: null, tray_y: null })) return false; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
               Notify.toast(I18n.t("rack.item.detached", { count: guests.length }));
             }
           }
         }
-        await store.update("rackItems", it.id, payload);
+        if (!await FormSave.record(store, "rackItems", it.id, payload)) return false; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(I18n.t("rack.item.updated")); onSaved?.(); return true;
       },
     });
@@ -1036,14 +1059,14 @@ export class RackForms extends CableForms {
     });
     if (!res) return;
     if (res.kind === "pin") {
-      await store.create("waypoints", { name: res.name || "PIN", kind: "point", wp_type: "datacenter", datacenter_id: rack.datacenter_id, rack_id: rack.id, side_face: face, side_lr: lr, side_col: col, side_u: uTop });
+      if (!await FormSave.record(store, "waypoints", null, { name: res.name || "PIN", kind: "point", wp_type: "datacenter", datacenter_id: rack.datacenter_id, rack_id: rack.id, side_face: face, side_lr: lr, side_col: col, side_u: uTop })) return;   // refusé par le Store (toast rouge) : ne rien annoncer
       Notify.toast(I18n.t("rack.side.pinPlaced")); host.setDirty?.(true); onDone?.(); return;
     }
     const e = store.get("equipments", res.eid); if (!e) return;
     const free_w_mm = (e.free_w_mm != null) ? Math.min(e.free_w_mm, Math.round(colW)) : Math.round(Math.min(colW, 50));
     const free_h_mm = (e.free_h_mm != null) ? e.free_h_mm : (e.u_height ? e.u_height * U_MM : SIDE_U_STEP * U_MM);
     const free_l_mm = (e.free_l_mm != null) ? e.free_l_mm : Math.min(RackGeometry.cageDepth(rack), 300);
-    await store.update("equipments", res.eid, { placement_mode: "side", dim_mode: "free", rack_id: rack.id, rack_u: null, rack_side: "front", side_face: face, side_lr: lr, side_col: col, side_u: uTop, side_snap: snap, free_w_mm, free_h_mm, free_l_mm });
+    if (!await FormSave.record(store, "equipments", res.eid, { placement_mode: "side", dim_mode: "free", rack_id: rack.id, rack_u: null, rack_side: "front", side_face: face, side_lr: lr, side_col: col, side_u: uTop, side_snap: snap, free_w_mm, free_h_mm, free_l_mm })) return;   // refusé par le Store (toast rouge) : ne rien annoncer
     Notify.toast(I18n.t("rack.side.equipMounted")); host.setDirty?.(true); await store.applyCableBreaks(res.eid); onDone?.();
   }
 
@@ -1113,7 +1136,7 @@ export class RackForms extends CableForms {
       }; },
     });
     if (!res) return;
-    await store.create("waypoints", { name: res.name || "PIN", kind: "point", wp_type: "datacenter", datacenter_id: rack.datacenter_id, rack_id: rack.id, cap_face: face, cap_cx: cx, cap_cy: cy });
+    if (!await FormSave.record(store, "waypoints", null, { name: res.name || "PIN", kind: "point", wp_type: "datacenter", datacenter_id: rack.datacenter_id, rack_id: rack.id, cap_face: face, cap_cx: cx, cap_cy: cy })) return;   // refusé par le Store (toast rouge) : ne rien annoncer
     Notify.toast(I18n.t("rack.cap.pinPlaced")); host.setDirty?.(true); onDone?.();
   }
 }

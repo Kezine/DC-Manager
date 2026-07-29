@@ -7,11 +7,16 @@ import { ContextMenu } from "../../ui/ContextMenu";
 import type { CtxSection } from "../../ui/ContextMenu";
 import { TouchNav } from "../../ui/TouchNav";
 import { Normalize } from "../../core/Normalize";
+import { WebglHostVisibility } from "../../core/WebglHostVisibility";
 import { RackScene } from "../../geometry/RackScene";
 import { Resolver3D } from "../../geometry/Resolver3D";
 import { FloorLayout } from "../../geometry/FloorLayout";
+import type { MultiLayout } from "../../geometry/FloorLayout";
+import { SITE_SCALE_DEFAULT_M_PER_KM, SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM } from "../../geometry/SiteLayout";
+import type { SiteScale } from "../../geometry/SiteLayout";
 import { CableRouting } from "../../geometry/CableRouting";
 import { TrunkRouting } from "../../geometry/TrunkRouting";
+import { PivotBounds } from "../../geometry/PivotBounds";   // bornes MONDE du décor d'étage (bornage du pivot d'orbite) — géométrie pure
 import { PositioningTool } from "./PositioningTool";
 import type { PositioningHost } from "./PositioningTool";
 import { DoorTool } from "./DoorTool";
@@ -23,6 +28,7 @@ import type { RouteHost } from "./RouteTool";
 import { U_MM } from "../../domain/constants";
 import { CABLE_SPLINE_K, CAM_PRESETS } from "./shared";
 import type { Vec3, DatacenterHost } from "./shared";
+import type { PlacementContainer } from "../../../src-shared/PlacementContainers";
 // SPIKE : moteur 3D WebGL parallèle — importé DYNAMIQUEMENT (webpackMode "eager" → reste inliné single-file ;
 // et la chaîne require() CJS du harnais de test ne charge pas ses dépendances ESM-only comme Line2).
 
@@ -86,6 +92,11 @@ export abstract class DcBase {
   cableSplineK = CABLE_SPLINE_K;         // arrondi des câbles (slider)
   markerScale = 1;                       // taille des marqueurs de waypoint + connecteurs de port (slider, 1 = défaut/milieu)
   markerRealSize = false;                // marqueurs en taille RÉELLE (monde : waypoint 5 cm, pastille ⌀ 1 cm à 100 %) — false = taille écran constante
+  // ÉCHELLE INTER-SITES (doctrine `docs/placement.md` §6.9) — réglage d'AFFICHAGE, jamais une donnée du
+  // document : le modèle porte la position RÉELLE des sites (GPS, ou repli à 5 km), la compression n'est
+  // appliquée qu'au rendu. D'où sa place ici, dans l'état de vue persisté en localStorage.
+  siteScaleKm = SITE_SCALE_DEFAULT_M_PER_KM;   // « 1 km réel = N m dans le monde 3D » (défaut 10, soit 1/100)
+  siteScaleLog = false;                        // compression LOGARITHMIQUE — rapproche des sites très éloignés
   showAllCables = true;                 // false → seuls les câbles sélectionnés (selCables) sont tracés
   selCables = new Set<string>();         // câbles explicitement affichés quand showAllCables = false
   searchTerm = "";                       // surlignage + filtrage des listes (équipements / câbles)
@@ -260,6 +271,31 @@ export abstract class DcBase {
     return [...ids];
   }
 
+  /** Ce CONTENEUR est-il AFFICHÉ par la vue courante ? PENDANT « conteneur » de `displayedDcIds`, dont il
+      partage exactement la portée : les cartes latérales des vues 3D et Dessus (le Plan d'étage 2D a la
+      sienne, `floorTargetResolve`, et ne passe pas par ici).
+
+      DÉCISION D3 du chantier « câblage des équipements d'étage » : un ÉTAGE est un conteneur affichable au
+      même titre qu'une SALLE. Ce que le rendu applique déjà au tracé des liaisons (`CableRouting.worldEndIn`
+      : `roomById.get` d'un côté, `FloorLayout.floorShown` de l'autre) vaut aussi pour les panneaux qui
+      demandent « cet objet est-il dans ce que je montre ? » — sans quoi une liaison serait DESSINÉE dans la
+      scène et absente de la carte qui prétend la piloter.
+
+      ⚠ LA GARDE « VUE ÉTAGE » N'EST PAS REDONDANTE. `currentMultiLayout()` calcule la disposition du MODÈLE
+      quelle que soit la vue : ses `floorPlanes` existent même en salle unique, où aucun plan d'étage n'est
+      dessiné (`webglCtx` ne produit de décor d'étage que sous `multiDc`). Lire `floorShown` sans cette garde
+      dirait « affiché » d'un étage que l'utilisateur ne voit pas — le REPÈRE pris pour la PORTÉE (§6.8).
+
+      Une BAIE ou une ÉTAGÈRE rend `false` : ce ne sont pas des conteneurs d'affichage, leurs contenus
+      apparaissent dans la SALLE qui les porte (et c'est bien celle-là qu'il faut interroger). */
+  protected containerShown(container: PlacementContainer | null, dc: any): boolean {
+    if (!container) return false;
+    if (container.kind === "room") return this.displayedDcIds(dc).includes(container.id);
+    if (container.kind !== "floor") return false;
+    if (this.view !== "3d" || !this.multiDc) return false;
+    return FloorLayout.floorShown(this.currentMultiLayout(), container.location, container.floor);
+  }
+
   protected setDirty(): void { this.host.setDirty?.(true); }
 
   /* ---- DoorHost : services fournis au DoorTool (cf. DoorTool.ts) ---- */
@@ -332,6 +368,9 @@ export abstract class DcBase {
     });
     return card;
   }
+
+  /** Échelle d'affichage des distances inter-sites, telle que la consomme `FloorLayout.multiLayout`. */
+  protected siteScale(): SiteScale { return { metresPerKm: this.siteScaleKm, log: this.siteScaleLog }; }
 
   /** Curseur étiqueté générique (oninput = aperçu live ; onchange optionnel). */
   protected slider(label: string, value: number, min: number, max: number, step: number, fmt: (v: number) => string, onInput: (v: number) => void, onChange?: () => void): HTMLElement {
@@ -430,20 +469,27 @@ export abstract class DcBase {
     // stage. On le PRÉSERVE en changeant d'onglet ou de sous-vue (Dessus/Étage) : le canvas est détaché par
     // clearStage mais le contexte/scène persistent (réattachés au retour) → pas de réinitialisation coûteuse.
     if (this._three && this.view === "3d" && !this.useWebGL) { this._three.dispose(); this._three = null; this._webglHost = null; }
-    // hôte WebGL PERSISTANT : visible seulement en 3D-WebGL, sinon MASQUÉ mais conservé attaché (exclu de clearStage)
-    // → au retour en 3D, la garde de révision évite la reconstruction (pas de re-dessin de toute la scène).
-    if (this._webglHost) this._webglHost.style.display = (this.view === "3d" && this.useWebGL) ? "" : "none";
+    // Salle courante résolue UNE FOIS, en tête : la VISIBILITÉ de l'hôte WebGL en dépend (une 3D sans salle
+    // ne doit RIEN montrer), et les deux branches d'affichage la réutilisent. `current()` est une simple
+    // lecture du store, sans effet de bord — la remonter ne change donc que ce qu'on veut corriger.
+    const dc = this.current();
+    // hôte WebGL PERSISTANT : visible seulement en 3D-WebGL AVEC une salle à montrer, sinon MASQUÉ mais
+    // conservé attaché (exclu de clearStage) → au retour en 3D, la garde de révision évite la reconstruction.
+    // La DÉCISION est extraite dans `WebglHostVisibility` (pure, testable) : `render()` n'étant pas atteignable
+    // en test (sort sur `typeof document === "undefined"`), la laisser ici l'exposerait à la régression que
+    // corrige la dette n°7 — deux lignes décidaient chacune de leur côté et se contredisaient sur un document
+    // sans salle (le canevas du document PRÉCÉDENT restait affiché). Elle est désormais consommée À UN SEUL endroit.
+    if (this._webglHost) this._webglHost.style.display = WebglHostVisibility.visible(this.view, this.useWebGL, !!dc) ? "" : "none";
     const showControls = (on: boolean) => { if (this.controlsEl) this.controlsEl.style.display = on ? "flex" : "none"; };
     this.updateControls();
     if (this.floorRail && this.view !== "floor") this.floorRail.style.display = "none";   // rail d'étages : vue Étage uniquement
     // VUE ÉTAGE : pilotée par un étage cible (indépendante d'une salle active)
     if (this.view === "floor") {
-      const dc = this.current(); this.renderSide(dc);
+      this.renderSide(dc);
       const ft = this.floorTargetResolve();
       if (!ft) { showControls(false); this.clearStage(); const p = document.createElement("p"); p.style.cssText = "padding:24px;color:var(--fg-dim)"; p.textContent = I18n.t("dc.base.noFloor"); this.stage.appendChild(p); return; }
       showControls(true); this.renderFloor(ft); return;
     }
-    const dc = this.current();
     this.renderSide(dc);
     if (!dc) { showControls(false); this.clearStage(); const p = document.createElement("p"); p.style.cssText = "padding:24px;color:var(--fg-dim)"; p.textContent = I18n.t("dc.base.noRoom"); this.stage.appendChild(p); return; }
     showControls(true);
@@ -492,6 +538,14 @@ export abstract class DcBase {
     this.figure = { dcX: cx, dcY: cy, orient: 0, floorX: fx, floorY: fy };
   }
 
+  /** DISPOSITION multi-salles COURANTE (repère MONDE de la Vue étage) : le layout du MODÈLE complet, filtré
+      par la PORTÉE d'affichage (`visibleDcIds`) et compressé par l'échelle inter-sites réglée (§6.8/§6.9).
+      SOURCE UNIQUE de ce monde : le décor 3D et le cadrage « Localiser » d'un contenu d'ÉTAGE doivent voir
+      exactement la même disposition, sinon la caméra viserait un point que la scène ne dessine pas là. */
+  protected currentMultiLayout(): MultiLayout {
+    return this.floor.multiLayout(this.current(), { visibleDcIds: this.visibleDcIds, siteScale: this.siteScale() });
+  }
+
   /** Contexte de scène pour le moteur WebGL : descripteur multi-salles + câbles transversaux (repère MONDE).
       La logique de routage (inter-DC / stubs sortants) reste ici (réutilise les helpers SVG) ; le moteur ne fait
       que tracer les tubes — pas de réimplémentation côté Three. */
@@ -511,7 +565,7 @@ export abstract class DcBase {
     };
     let multi: any = null, floorDecor: any = null;
     if (this.multiDc) {
-      const m = this.floor.multiLayout(this.current(), { visibleDcIds: this.visibleDcIds });
+      const m = this.currentMultiLayout();
       if (m.rooms.length) {
         // CENTROÏDE DYNAMIQUE : boîte englobante des salles VISIBLES (et non la boîte théorique totalW×maxD×topZ,
         // dominée par la hauteur empilée → caméra mal cadrée). Pivot + cadrage suivent le contenu réellement affiché.
@@ -550,7 +604,8 @@ export abstract class DcBase {
     return { multi, extraCables, floorDecor };
   }
 
-  /** Décor d'étage (repère MONDE) à partir de la disposition `multiLayout` : plans, OOB posés, étiquettes. */
+  /** Décor d'étage (repère MONDE) à partir de la disposition `multiLayout` : plans, OOB posés, équipements
+      d'étage, étiquettes d'étage (UNE par plan dessiné), étiquettes de bâtiment et BORNES MONDE. */
   protected webglFloorDecor(m: any): any {
     const shown = new Set(m.floorPlanes.map((fp: any) => (fp.loc || "") + "" + String(fp.floor || "")));
     const planes = m.floorPlanes.map((fp: any) => ({ W: fp.cfg.width_mm, D: fp.cfg.depth_mm, cell: fp.cfg.cell_mm || 600, ox: fp.off.x, oy: fp.off.y, z: fp.off.z, blocked: (fp.cfg.blocked_cells || []).slice(), loc: fp.loc || "", floor: String(fp.floor || "") }));
@@ -558,19 +613,46 @@ export abstract class DcBase {
       .filter((wp: any) => shown.has((wp.location || "") + "" + String(wp.floor || "")))
       .map((wp: any) => { const w = this.floor.oobWorld(m, wp); return { id: wp.id, x: w.x, y: w.y, z: w.z, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(String(wp.floor || ""))) }; });
     // ÉQUIPEMENTS D'ÉTAGE (`placement_mode: "floor"`) : posés sur le plan de leur étage, hors de toute salle.
-    // Ils n'étaient JAMAIS transmis au moteur 3D — seule la vue 2D Plan d'étage les montrait. La position monde
-    // est déléguée à `FloorLayout.equipFloorWorld`, l'analogue d'`oobWorld` qui existait déjà SANS consommateur.
-    // `baseZ` ne porte QUE le Z du niveau : la hauteur propre (`dc_z`) est ajoutée par la géométrie de boîte au
-    // moteur, sinon elle compterait double.
+    // Ils n'étaient JAMAIS transmis au moteur 3D — seule la vue 2D Plan d'étage les montrait. Le repère monde
+    // est délégué à `FloorLayout.equipFloorOrigin`, SOURCE UNIQUE partagée avec le cadrage « Localiser » :
+    // `baseZ` ne porte QUE le Z du niveau, la hauteur propre (`dc_z`) étant ajoutée par la géométrie de boîte
+    // au moteur — la composer ici la compterait double.
     // NB : on filtre en comparant lieu et étage CHAMP À CHAMP plutôt qu'en réutilisant la clé concaténée de
     // `shown` — le séparateur de cette clé est un NUL BRUT dans le littéral TS (piège connu du dépôt), qu'on
     // évite de retaper.
     const equips = this.store.floorEquipments()
       .filter((e: any) => m.floorPlanes.some((fp: any) => (fp.loc || "") === (e.location || "") && String(fp.floor || "") === String(e.floor || "")))
-      .map((e: any) => { const w = this.floor.equipFloorWorld(m, e); return { id: e.id, x: w.x, y: w.y, baseZ: FloorLayout.levelZ(m, FloorLayout.floorNum(String(e.floor || ""))) }; });
-    const levels = m.levels.map((lv: number, i: number) => ({ label: I18n.t("lists.ph.floorLabel", { n: lv }), x: -m.gap * 0.6, y: 0, z: m.levelZs ? m.levelZs[i] : i * (m.stackH + m.gap) }));
-    const buildings = m.buildings.map((b: any, i: number) => ({ label: this.store.siteLabel(b.loc), x: (b.x0 + b.x1) / 2, y: -m.gap * 0.5, z: m.topZ / 2, sepX: i > 0 ? b.x0 - m.gap : null }));
-    return { planes, oobs, equips, levels, buildings, maxD: m.maxD, topZ: m.topZ };
+      .map((e: any) => { const o = this.floor.equipFloorOrigin(m, e); return { id: e.id, x: o.x, y: o.y, baseZ: o.baseZ }; });
+    // ÉTIQUETTES D'ÉTAGE : UNE PAR PLAN DESSINÉ, posée juste à côté de SON plan. Elles se dérivaient
+    // auparavant de `m.levels` (les niveaux GLOBAUX du monde) et formaient un jeu UNIQUE planté à
+    // l'origine (x = -gap*0.6, y = 0) : lisible du temps où les bâtiments étaient rangés en file depuis
+    // (0,0), mais plus depuis que chaque site porte sa propre position (§6.9) — la colonne d'étiquettes
+    // se retrouvait à côté d'un seul bâtiment, voire d'aucun. En partant de `m.floorPlanes`, chaque
+    // étage est étiqueté DANS son bâtiment, ce qui répète mécaniquement le jeu sur chaque site, et la
+    // PORTÉE reste respectée sans traitement dédié (`floorPlanes` est déjà filtré par ce qu'on dessine).
+    // Le décalage `-gap*0.6` en X est CONSERVÉ : l'étiquette reste légèrement à gauche, hors du plan.
+    // Le numéro passe par `FloorLayout.floorNum` plutôt que par `String(fp.floor || "")` : cette dernière
+    // convention, présente ailleurs dans le dépôt, écrase l'étage « 0 » en chaîne vide (piège connu).
+    const floorLabels = m.floorPlanes.map((fp: any) => ({ label: I18n.t("lists.ph.floorLabel", { n: FloorLayout.floorNum(fp.floor) }), x: fp.off.x - m.gap * 0.6, y: fp.off.y, z: fp.off.z }));
+    // ÉTIQUETTE de bâtiment : posée au bord AVANT de SA bande (`y0`), et non plus au bord du monde — les
+    // bâtiments ne sont plus alignés sur y = 0 depuis que le site porte une position (§6.9).
+    const buildings = m.buildings.map((b: any) => ({ label: this.store.siteLabel(b.loc), x: (b.x0 + b.x1) / 2, y: b.y0 - m.gap * 0.5, z: m.topZ / 2 }));
+    // BORNES MONDE du repère bâtiment : union des BANDES (`m.buildings`, qui suivent la taille DÉCLARÉE du site
+    // quand elle existe — §6.8) et hauteur du monde (0 → `m.topZ`). Elles ne dessinent rien : elles bornent le
+    // PIVOT D'ORBITE, qui restait sinon collé à l'emprise des salles alors que la Vue étage regarde le bâtiment.
+    // On part des BANDES et non des plans d'étage parce que l'enveloppe d'un bâtiment est sa taille propre, qui
+    // peut être plus grande que le plus grand de ses plans.
+    // FILTRÉES par la PORTÉE, exactement comme les plans et leurs étiquettes : `multiLayout` calcule une bande
+    // pour CHAQUE bâtiment du MODÈLE (§6.8 — masquer retire du dessin, pas du repère), et englober un site qu'on
+    // ne dessine pas ferait orbiter autour de kilomètres de vide, c'est-à-dire le défaut même qu'on corrige.
+    // C'est le corollaire opératoire de §6.8 appliqué à la lettre : layout COMPLET, puis on filtre ce qu'on ÉMET —
+    // aucune bande ne CHANGE de position selon la portée, on choisit seulement lesquelles comptent.
+    // ⚠ ASYMÉTRIE ASSUMÉE en Z : `m.topZ` reste la hauteur du MODÈLE, non celle des seuls niveaux dessinés. La
+    // filtrer demanderait de recomposer la pile des niveaux DANS la vue (§3 règle 4 l'interdit) pour un écart
+    // borné par la hauteur du monde, là où l'écart en XY est KILOMÉTRIQUE (distances inter-sites).
+    const drawnLocs = new Set(m.floorPlanes.map((fp: any) => fp.loc || ""));
+    const world = PivotBounds.worldBounds(m.buildings.filter((b: any) => drawnLocs.has(b.loc || "")), m.topZ);
+    return { planes, oobs, equips, floorLabels, buildings, world };
   }
 
   /* ---- WebGL : tooltips + menus contextuels (remontés du moteur → réutilisent la machinerie SVG existante) ---- */
@@ -719,7 +801,7 @@ export abstract class DcBase {
   private writeViewState(): void {
     if (this._restoredKey == null) return;
     try {
-      const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], hidden3dEquips: [...this.hidden3dEquips], figure: this.figure, colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
+      const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], hidden3dEquips: [...this.hidden3dEquips], figure: this.figure, colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, siteScaleKm: this.siteScaleKm, siteScaleLog: this.siteScaleLog, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
       DcBase.TOGGLE_KEYS.forEach((k) => { o[k] = (this as any)[k]; });
       window.localStorage.setItem(this.viewStateKey(), JSON.stringify(o));
     } catch (_) { /* quota / indispo → ignoré */ }
@@ -736,6 +818,7 @@ export abstract class DcBase {
     this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showDoorSwing = false; this.showFloorGrid = true; this.cablePortNormal = false;
     this.useWebGL = true; this.webglPerspective = false; this.cablesOnTop = true;   // WebGL = unique moteur 3D ; projection/cables-on-top restaurés depuis TOGGLE_KEYS
     this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1; this.markerRealSize = false;
+    this.siteScaleKm = SITE_SCALE_DEFAULT_M_PER_KM; this.siteScaleLog = false;
     this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set();
     this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeTool.state = null; this.measureTool.state = null;
     this.selCables = new Set(); this.searchTerm = ""; this.focusEqId = null; this.focusPortId = null;
@@ -745,6 +828,8 @@ export abstract class DcBase {
     if (o.colorMode === "face" || o.colorMode === "group" || o.colorMode === "type") this.colorMode = o.colorMode;
     if (typeof o.cableSplineK === "number") this.cableSplineK = Math.max(0, Math.min(0.32, o.cableSplineK));
     if (typeof o.markerScale === "number") this.markerScale = Math.max(0.25, Math.min(1.75, o.markerScale));
+    if (typeof o.siteScaleKm === "number") this.siteScaleKm = Math.max(SITE_SCALE_MIN_M_PER_KM, Math.min(SITE_SCALE_MAX_M_PER_KM, o.siteScaleKm));
+    if (typeof o.siteScaleLog === "boolean") this.siteScaleLog = o.siteScaleLog;
     // caméra
     if (typeof o.az === "number") this.az = o.az;
     if (typeof o.el === "number") this.el = o.el;
@@ -824,7 +909,6 @@ export abstract class DcBase {
   protected abstract onEquipPointerDown(ev: MouseEvent, eq: any): void;
   protected abstract syncWebglTool(): void;
   protected abstract applyFocus3D(): void;
-  protected abstract portDcId(portId: string | null): string | null;
   abstract locate(kind: "equipment" | "rack" | "cable" | "port" | "room" | "waypoint", id: string): void;
   abstract clearHighlight(): void;
   abstract setReturnAction(fn: (() => void) | null): void;

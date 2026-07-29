@@ -34,7 +34,7 @@ module.exports = async () => {
     const coerced = Changeset.coerce({ collections: ["racks", 42, "cables"], meta: 1, images: 0 });
     ck.eq(JSON.stringify(coerced.collections), JSON.stringify(["racks", "cables"]), "coerce : collections filtrées (non-strings retirées)");
     ck.eq(coerced.meta, true, "coerce : meta coercé en booléen");
-    // prédicat INJECTÉ (garde `shared/` auto-suffisant) : filtre les collections inconnues
+    // prédicat INJECTÉ — découplage CHOISI, et non plus une contrainte de build : filtre les collections inconnues
     const filtered = Changeset.coerce({ collections: ["racks", "bidon", "cables"] }, (c) => c === "racks" || c === "cables");
     ck.eq(JSON.stringify(filtered.collections), JSON.stringify(["racks", "cables"]), "coerce : collection inconnue retirée via prédicat");
     ck.eq(Changeset.coerce({ collections: ["racks", "bidon"] }).collections.length, 2, "coerce : sans prédicat → aucun filtre (compat)");

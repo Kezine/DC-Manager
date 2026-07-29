@@ -147,6 +147,144 @@ module.exports = async () => {
   /* ============ SERVEUR : Repository + DocumentStore (SQLite RÉEL) ============ */
   });
 
+  await section("Serveur : ApiRules — lot MULTI-SUPPRESSIONS, cascade résiduelle en UN SEUL plan", async () => {
+  {
+    /* Le résidu d'un lot se calcule en UN SEUL plan (`Cascade.planMany`), pas un par suppression
+       (docs/placement.md §6.17). Ce n'est pas qu'une économie : la composition des retraits de LISTE
+       vit dans la portée d'UN plan, donc elle ne jouait PAS entre les suppressions d'un même lot —
+       deux waypoints d'une même route n'en faisaient retirer qu'un, laissant une référence PENDANTE
+       vers un waypoint pourtant supprimé. Attentes EN DUR (valeurs finales complètes). */
+    const { ApiRules } = SERVER("ApiRules.js");
+    const findersOn = (data, body) => {
+      const find = (c, f, v) => (data[c] || []).filter((r) => (Array.isArray(r[f]) ? r[f].includes(v) : r[f] === v));
+      const fetch = (c, id) => (data[c] || []).find((r) => r.id === id) || null;
+      return { find: Validation.DataValidator.buildBatchChildFinder(find, body), fetch: Validation.DataValidator.buildBatchFetcher(fetch, body) };
+    };
+    const recOf = (plan, collection, id) => (plan.updates.find((u) => u.collection === collection && u.record.id === id) || { record: null }).record;
+
+    // 1) LE cas décisif : un lot supprimant DEUX waypoints d'une même route les retire TOUS LES DEUX.
+    {
+      const data = {
+        waypoints: [{ id: "w1" }, { id: "w2" }, { id: "w3" }],
+        cables: [{ id: "c1", waypoint_ids: ["w1", "w2", "w3"] }],
+        cableBundles: [{ id: "b1", waypoint_ids: ["w2", "w1"] }],
+      };
+      const body = { deletes: [{ collection: "waypoints", id: "w1" }, { collection: "waypoints", id: "w2" }] };
+      const { find, fetch } = findersOn(data, body);
+      const plan = ApiRules.residualCascade(body.deletes, find, fetch);
+      ck.eq(plan.updates.length, 2, "lot de 2 waypoints : un update par porteur de route (câble + faisceau)");
+      ck.eq(JSON.stringify(recOf(plan, "cables", "c1").waypoint_ids), JSON.stringify(["w3"]),
+        "DÉCISIF : les DEUX waypoints du lot sortent de la route (aucune référence pendante)");
+      ck.eq(JSON.stringify(recOf(plan, "cableBundles", "b1").waypoint_ids), JSON.stringify([]),
+        "lot de 2 waypoints : la route du faisceau perd les deux aussi");
+      ck.eq(plan.deletes.length, 0, "lot de 2 waypoints : aucune suppression résiduelle");
+    }
+
+    // 2) DEUX groupes d'un même équipement : liste ET primaire tiennent compte des deux suppressions.
+    {
+      const data = {
+        groups: [{ id: "g1" }, { id: "g2" }, { id: "g3" }],
+        equipments: [{ id: "e1", name: "sw", group_id: "g1", group_ids: ["g1", "g2", "g3"] }],
+      };
+      const body = { deletes: [{ collection: "groups", id: "g1" }, { collection: "groups", id: "g2" }] };
+      const { find, fetch } = findersOn(data, body);
+      const plan = ApiRules.residualCascade(body.deletes, find, fetch);
+      const e1 = recOf(plan, "equipments", "e1");
+      ck.eq(JSON.stringify(e1 && e1.group_ids), JSON.stringify(["g3"]), "lot de 2 groupes : les DEUX sortent de group_ids");
+      ck.eq(e1 && e1.group_id, "g3", "lot de 2 groupes : le primaire vise le SEUL groupe survivant");
+      ck.eq(e1 && e1.name, "sw", "update de cascade : l'enregistrement complet est renvoyé (champs non touchés préservés)");
+    }
+
+    // 3) DEUX réseaux d'un même port terminal.
+    {
+      const data = {
+        networks: [{ id: "n1" }, { id: "n2" }, { id: "n3" }],
+        ports: [{ id: "p1", equipment_id: "e9", network_id: "n1", network_ids: ["n1", "n2", "n3"] }],
+      };
+      const body = { deletes: [{ collection: "networks", id: "n1" }, { collection: "networks", id: "n2" }] };
+      const { find, fetch } = findersOn(data, body);
+      const plan = ApiRules.residualCascade(body.deletes, find, fetch);
+      const p1 = recOf(plan, "ports", "p1");
+      ck.eq(JSON.stringify(p1 && p1.network_ids), JSON.stringify(["n3"]), "lot de 2 réseaux : les DEUX sortent de network_ids");
+      ck.eq(p1 && p1.network_id, "n3", "lot de 2 réseaux : le réseau principal vise le survivant");
+    }
+
+    // 4) ÉQUIPEMENT + un de ses propres ports : le résidu ne double rien et n'oublie rien.
+    {
+      const data = {
+        equipments: [{ id: "e1" }],
+        ports: [{ id: "pa", equipment_id: "e1" }, { id: "pb", equipment_id: "e1" }],
+        cables: [{ id: "cc", from_port_id: "pa", to_port_id: "pb" }],
+        aggregates: [{ id: "ag", equipment_id: "e1" }],
+      };
+      const body = { deletes: [{ collection: "equipments", id: "e1" }, { collection: "ports", id: "pa" }] };
+      const { find, fetch } = findersOn(data, body);
+      const plan = ApiRules.residualCascade(body.deletes, find, fetch);
+      const ids = plan.deletes.map((d) => d.collection + "/" + d.id).sort().join(",");
+      ck.eq(ids, "aggregates/ag,cables/cc,ports/pb", "équipement + un de ses ports : résidu = le port restant, son câble et l'agrégat");
+      ck(!plan.deletes.some((d) => d.id === "pa" || d.id === "e1"), "équipement + un de ses ports : rien de ce que le LOT supprime déjà n'est redemandé");
+      ck.eq(plan.updates.length, 0, "équipement + un de ses ports : aucun update (tout ce qui est touché est supprimé)");
+    }
+
+    // 5) BAIE + une de ses étagères : l'équipement POSÉ sur l'étagère est détaché une seule fois.
+    {
+      const data = {
+        racks: [{ id: "r1" }],
+        rackItems: [{ id: "ri1", rack_id: "r1" }, { id: "ri2", rack_id: "r1" }],
+        equipments: [{ id: "eg", tray_item_id: "ri1", placement_mode: "tray", tray_x: 10, tray_y: 20 }],
+      };
+      const body = { deletes: [{ collection: "racks", id: "r1" }, { collection: "rackItems", id: "ri1" }] };
+      const { find, fetch } = findersOn(data, body);
+      const plan = ApiRules.residualCascade(body.deletes, find, fetch);
+      ck.eq(plan.deletes.map((d) => d.collection + "/" + d.id).join(","), "rackItems/ri2", "baie + une de ses étagères : seule l'AUTRE étagère est un résidu");
+      ck.eq(plan.updates.length, 1, "baie + une de ses étagères : un seul update (l'équipement posé)");
+      const eg = recOf(plan, "equipments", "eg");
+      ck(eg && eg.tray_item_id === null && eg.tray_x === null && eg.tray_y === null && eg.placement_mode === "manual",
+        "baie + une de ses étagères : l'équipement posé redevient « non placé » (4 clés fusionnées en un update)");
+    }
+
+    // 6) ANTI-RÉSURRECTION à DEUX niveaux : cible du lot (écartée par le plan) ET suppression RÉSIDUELLE
+    //    (écartée ici, le plan ne peut pas la connaître comme « déjà dans le lot »).
+    {
+      const data = {
+        aggregates: [{ id: "ag" }],
+        ports: [{ id: "px", aggregate_id: "ag", equipment_id: "e1" }, { id: "py", aggregate_id: "ag", equipment_id: "e2" }],
+        equipments: [{ id: "e1" }, { id: "e2" }],
+      };
+      // px est supprimé PAR LE LOT ; py sera supprimé par la cascade RÉSIDUELLE de e2.
+      const body = { deletes: [{ collection: "aggregates", id: "ag" }, { collection: "ports", id: "px" }, { collection: "equipments", id: "e2" }] };
+      const { find, fetch } = findersOn(data, body);
+      const plan = ApiRules.residualCascade(body.deletes, find, fetch);
+      ck.eq(plan.deletes.map((d) => d.collection + "/" + d.id).join(","), "ports/py", "anti-résurrection : py est bien un résidu de suppression");
+      ck.eq(plan.updates.length, 0, "anti-résurrection : AUCUN update — ni sur une cible du lot (px), ni sur une suppression résiduelle (py)");
+    }
+
+    // 7) CONTRAT INCHANGÉ : un lot déjà COMPLET (cascade calculée par le client) ne produit aucun résidu.
+    {
+      const data = {
+        waypoints: [{ id: "w1" }, { id: "w2" }],
+        cables: [{ id: "c1", waypoint_ids: ["w1", "w2", "w3"] }],
+      };
+      const body = {
+        deletes: [{ collection: "waypoints", id: "w1" }, { collection: "waypoints", id: "w2" }],
+        updates: [{ collection: "cables", record: { id: "c1", waypoint_ids: ["w3"] } }],
+      };
+      const { find, fetch } = findersOn(data, body);
+      const plan = ApiRules.residualCascade(body.deletes, find, fetch);
+      ck.eq(plan.deletes.length + plan.updates.length, 0, "lot multi COMPLET → résidu vide (pas de double travail)");
+    }
+
+    // 8) Entrées MALFORMÉES du corps HTTP : ignorées, sans faire échouer le lot.
+    {
+      const body = { deletes: [null, { collection: "waypoints" }, { id: "w1" }, { collection: "waypoints", id: "w1" }] };
+      const { find, fetch } = findersOn({ waypoints: [{ id: "w1" }], cables: [{ id: "c1", waypoint_ids: ["w1", "w2"] }] }, body);
+      const plan = ApiRules.residualCascade(body.deletes, find, fetch);
+      ck.eq(JSON.stringify((plan.updates[0] || { record: {} }).record.waypoint_ids), JSON.stringify(["w2"]),
+        "entrées malformées ignorées : seule la suppression valide est cascadée");
+    }
+  }
+  });
+
   await section("Serveur : Repository / DocumentStore (better-sqlite3 réel)", async () => {
   let SqliteDatabase = null;
   // PROBE complet (require + ouverture) : le module peut être présent mais son BINAIRE NATIF absent ou compilé

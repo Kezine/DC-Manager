@@ -14,15 +14,24 @@
      multi-étages empile donc UN RÉFÉRENTIEL PAR ÉTAGE traversé (une dalle par
      étage, zone faux-plancher sous chacune), avec une échelle z COMMUNE ;
      l'écart vertical ENTRE étages est schématique (pas à l'échelle).
+
+   Le regroupement se fait par CONTENEUR (salle OU étage), pas par id de salle —
+   cf. `RouteGraphNode.container` et `sameContainer` plus bas.
    ============================================================================= */
+import { PlacementContainers } from "../../src-shared/PlacementContainers";
+import type { PlacementContainer } from "../../src-shared/PlacementContainers";
 
 /** Nœud d'entrée du layout — DÉJÀ résolu par l'appelant (aucune FK ici). */
 export interface RouteGraphNode {
   /** Extrémité (boîte large, style nœud de GraphView) plutôt que waypoint (pastille). */
   endpoint?: boolean;
-  /** Salle du nœud (null = hors salle : pin d'étage, waypoint non posé). */
-  roomId: string | null;
-  /** Nom de salle résolu ("" si hors salle). */
+  /** CONTENEUR du nœud (null = aucun : pin d'étage, waypoint non posé, extrémité non placée).
+      ⚠ C'était un `roomId: string | null` ; un id ne peut pas représenter un ÉTAGE, dont l'identité est
+      le COUPLE (bâtiment, étage) et qui n'a pas forcément d'enregistrement (doctrine §6.4). D'où l'union
+      discriminée, et une comparaison STRUCTURELLE (`PlacementContainers.same`) partout où l'on comparait
+      deux chaînes. */
+  container: PlacementContainer | null;
+  /** Nom de conteneur résolu ("" si aucun). */
   roomLabel: string;
   /** Hauteur (mm) — null = inconnue (extrémités : la hauteur exacte du port n'est pas résolue ici). */
   z: number | null;
@@ -32,7 +41,7 @@ export interface RouteGraphNode {
   level?: number | null;
 }
 
-/** Bande de salle : nœuds consécutifs [from..to] d'une même salle + emprise X. */
+/** Bande de conteneur : nœuds consécutifs [from..to] d'un même conteneur + emprise X. */
 export interface RouteRoomBand { from: number; to: number; label: string; x0: number; x1: number }
 
 export interface RouteChainLayout {
@@ -59,7 +68,7 @@ export interface RouteProfileLayout {
   /** Nœud à z inconnue → ordonnée HÉRITÉE du plus proche voisin renseigné (amorce pointillée au rendu). */
   snapped: boolean[];
   bands: RouteRoomBand[];
-  /** Abscisses des séparateurs verticaux (changement de salle entre deux nœuds consécutifs). */
+  /** Abscisses des séparateurs verticaux (changement de conteneur entre deux nœuds consécutifs). */
   separators: number[];
 }
 
@@ -86,8 +95,20 @@ export class RouteGraphLayout {
     return node.endpoint ? ROUTE_GRAPH.EP_W / 2 : ROUTE_GRAPH.WP_R;
   }
 
+  /** Deux nœuds sont-ils dans le MÊME conteneur ? Sert aux trois endroits qui détectaient un
+      CHANGEMENT de salle : la respiration horizontale, les bandes, les séparateurs du profil.
+
+      ⚠ LE CAS `null`/`null` EST LE PIÈGE DU CHANTIER, et il ne se règle PLUS ici : la règle est
+      descendue dans `PlacementContainers.sameOrNone` quand la grammaire de route en est devenue le
+      second consommateur (doctrine §6.31). Cette méthode reste le point d'entrée du layout — son nom
+      dit la question posée AU LAYOUT — mais elle ne réécrit pas la règle. Le détail (pourquoi `same`
+      seul insérerait une bande entre deux waypoints non posés) vit avec elle, en un seul endroit. */
+  static sameContainer(a: PlacementContainer | null, b: PlacementContainer | null): boolean {
+    return PlacementContainers.sameOrNone(a, b);
+  }
+
   /** Abscisses des centres : écart large autour des extrémités, resserré entre waypoints,
-      respiration supplémentaire au changement de salle (bande suivante décollée). */
+      respiration supplémentaire au changement de conteneur (bande suivante décollée). */
   static xPositions(nodes: RouteGraphNode[]): number[] {
     const xs: number[] = [];
     let x = ROUTE_GRAPH.PAD_X;
@@ -95,7 +116,7 @@ export class RouteGraphLayout {
       if (i > 0) {
         const a = nodes[i - 1], b = nodes[i];
         let gap = (a.endpoint || b.endpoint) ? ROUTE_GRAPH.GAP_EP : ROUTE_GRAPH.GAP_WP;
-        if (a.roomId !== b.roomId) gap += ROUTE_GRAPH.GAP_ROOM;
+        if (!this.sameContainer(a.container, b.container)) gap += ROUTE_GRAPH.GAP_ROOM;
         x += gap;
       }
       xs.push(x);
@@ -103,15 +124,15 @@ export class RouteGraphLayout {
     return xs;
   }
 
-  /** Bandes de salles : groupes de nœuds CONSÉCUTIFS d'une même salle (roomId non null).
-      Un nœud hors salle (pin d'étage, non posé) COUPE la bande — deux passages dans une
-      même salle donnent deux bandes distinctes (pas de fusion à travers un tronçon). */
+  /** Bandes de conteneurs : groupes de nœuds CONSÉCUTIFS d'un même conteneur (container non null).
+      Un nœud SANS conteneur (pin d'étage, non posé) COUPE la bande — deux passages dans un
+      même conteneur donnent deux bandes distinctes (pas de fusion à travers un tronçon). */
   static bands(nodes: RouteGraphNode[], xs: number[]): RouteRoomBand[] {
     const out: RouteRoomBand[] = [];
     let cur: RouteRoomBand | null = null;
     nodes.forEach((n, i) => {
-      if (!n.roomId) { cur = null; return; }
-      if (cur && nodes[cur.to].roomId === n.roomId) { cur.to = i; }
+      if (!n.container) { cur = null; return; }
+      if (cur && PlacementContainers.same(nodes[cur.to].container, n.container)) { cur.to = i; }
       else { cur = { from: i, to: i, label: n.roomLabel, x0: 0, x1: 0 }; out.push(cur); }
     });
     out.forEach((b) => {
@@ -200,7 +221,7 @@ export class RouteGraphLayout {
 
     const separators: number[] = [];
     for (let i = 0; i < nodes.length - 1; i++) {
-      if (nodes[i].roomId !== nodes[i + 1].roomId) separators.push((xs[i] + xs[i + 1]) / 2);
+      if (!this.sameContainer(nodes[i].container, nodes[i + 1].container)) separators.push((xs[i] + xs[i + 1]) / 2);
     }
     return {
       xs, ys: resolvedZ.map((z, i) => yOf(z, resolvedLv[i])),

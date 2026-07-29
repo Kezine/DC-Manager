@@ -17,6 +17,10 @@ import { Resolver3D } from "../../../geometry/Resolver3D";
 import { CableRouting } from "../../../geometry/CableRouting";
 import { TrunkRouting } from "../../../geometry/TrunkRouting";
 import { FloorLayout } from "../../../geometry/FloorLayout";
+// Boîte de bornage du PIVOT d'orbite : le TYPE seul (effacé à la compilation). Le décor d'étage la
+// transporte, la couche caméra la consomme — une seule définition pour les deux (principe n°3).
+import type { PivotAabb } from "../../../geometry/PivotBounds";
+import { PivotMarker } from "./PivotMarker";   // style + tracé PURS du marqueur de centre de rotation (thème, halo, cache)
 import type { DatacenterHost } from "../shared";
 
 /** Labels À PLAT (noms d'équipement ET de baie) : réglages PARTAGÉS entre couches (principe n°3, réutilisés par
@@ -48,12 +52,22 @@ export interface ExtraCable { id: string; color: string | null; line: { x: numbe
 /** Décor multi-salles (repère MONDE) : plans d'étage, OOB, étiquettes étage/bâtiment. */
 export interface FloorPlaneDesc { W: number; D: number; cell: number; ox: number; oy: number; z: number; blocked: string[]; loc: string; floor: string; }
 export interface FloorOobDesc { id: string; x: number; y: number; z: number; baseZ: number; }
-export interface FloorLabelDesc { label: string; x: number; y: number; z: number; sepX?: number | null; }
+/** Étiquette posée dans le monde (billboard). Sert aux étiquettes d'ÉTAGE comme à celles de BÂTIMENT. */
+export interface FloorLabelDesc { label: string; x: number; y: number; z: number; }
 /** Équipement posé sur un ÉTAGE (`placement_mode: "floor"`), hors de toute salle. `x`/`y` = centre au sol en
     coords MONDE ; `baseZ` = Z du NIVEAU seul — la hauteur propre de l'équipement (`dc_z`) est rajoutée par la
     géométrie de boîte côté moteur, comme pour un équipement libre de salle (d'où l'absence de `z` ici). */
 export interface FloorEquipDesc { id: string; x: number; y: number; baseZ: number; }
-export interface FloorDecor { planes: FloorPlaneDesc[]; oobs: FloorOobDesc[]; equips: FloorEquipDesc[]; levels: FloorLabelDesc[]; buildings: FloorLabelDesc[]; maxD: number; topZ: number; }
+/** `floorLabels` = UNE étiquette par plan d'étage DESSINÉ (donc répétée sur chaque site), et non plus un
+    jeu unique de niveaux globaux : depuis que les sites portent une position propre (doctrine §6.9), une
+    colonne d'étiquettes plantée à l'origine du monde ne désignait plus aucun bâtiment en particulier. */
+/** `world` = BORNES MONDE de la Vue étage : union des BANDES DE BÂTIMENT (XY) et hauteur du monde (Z), calculées
+    par `DcBase.webglFloorDecor` via `PivotBounds.worldBounds`. Elles ne DESSINENT rien — elles donnent au bornage
+    du pivot d'orbite un repère à la mesure de ce qu'on regarde, les salles seules ne décrivant plus le monde dès
+    qu'on passe en Vue étage. ⚠ Ce n'est PAS le retour des `maxD`/`topZ` retirés au lot 9 avec le plan séparateur :
+    ceux-là servaient à DESSINER un décor supprimé depuis ; ce champ-ci sert au REPÈRE de la caméra, un besoin
+    différent — d'où un champ UNIQUE et nommé, plutôt que deux cotes éparses à recomposer chez le consommateur. */
+export interface FloorDecor { planes: FloorPlaneDesc[]; oobs: FloorOobDesc[]; equips: FloorEquipDesc[]; floorLabels: FloorLabelDesc[]; buildings: FloorLabelDesc[]; world: PivotAabb | null; }
 
 /** Contexte de scène poussé par DcBase au moteur (mono/multi + câbles transversaux + décor d'étage). */
 export interface SceneCtx { multi: { center: { x: number; y: number; z: number }; extent: number; rooms: RoomDesc[] } | null; extraCables: ExtraCable[]; floorDecor: FloorDecor | null; }
@@ -123,10 +137,12 @@ export abstract class DcThreeBase {
   /** Descripteur MULTI-SALLES (null = mono-salle). Posé par DcBase : { center, extent, rooms[] } en repère MONDE. */
   protected multiInfo: { center: { x: number; y: number; z: number }; extent: number; rooms: RoomDesc[] } | null = null;
   protected rooms: RoomDesc[] = [];                    // salles AFFICHÉES (mono = 1)
-  // AABB (monde, XY) de l'UNION des salles affichées → « murs virtuels » bornant le pivot d'orbite au repli sol
-  // infini (cf. PivotBounds + DcThreeCamera.recenterPivotOnView). ÉCRITE par la couche scène à chaque (re)build,
-  // LUE par la couche caméra ; null = aucune salle (bornage désactivé → comportement historique).
-  protected pivotAabb: { minX: number; maxX: number; minY: number; maxY: number } | null = null;
+  // Boîte (monde) bornant le pivot d'orbite au repli « sol infini » (cf. PivotBounds +
+  // DcThreeCamera.recenterPivotOnView). Son CONTENU dépend du REPÈRE, jamais du nombre de salles :
+  // union des salles affichées en XY seul (repère salle), ou bandes de bâtiment × hauteur du monde
+  // en XYZ (repère bâtiment = « Vue étage »). ÉCRITE par la couche scène à chaque (re)build, LUE par
+  // la couche caméra ; null = aucun repère exploitable (bornage désactivé → comportement historique).
+  protected pivotAabb: PivotAabb | null = null;
   // CACHE CHAUD : les salles qui sortent du champ sont MASQUÉES (visible=false), pas détruites → bascule
   // simple↔multi / changement de portée instantanée (réveil au lieu de reconstruction). Borné par éviction LRU.
   protected _warm = new Map<string, number>();         // dcId d'une salle CONSTRUITE (visible ou masquée) → tick LRU
@@ -222,7 +238,7 @@ export abstract class DcThreeBase {
       return isFinite(c) ? c : fallback;
     };
     const bg = col("--bg", 0x0a0a0a);
-    const light = (((bg >> 16) & 255) + ((bg >> 8) & 255) + (bg & 255)) / 3 > 128;   // thème clair = fond lumineux
+    const light = Color.isLightHex(bg);   // thème clair = fond lumineux (règle PARTAGÉE, cf. Color.isLightHex)
     return {
       bg,
       floor: col("--bg-2", 0x1b2230),
@@ -233,6 +249,8 @@ export abstract class DcThreeBase {
       front: col("--accent", 0x4ea1ff),
       // portes de baie : métal + panneau perforé, déclinés clair/sombre (sinon trop sombres sur fond clair).
       doorMetal: light ? 0x868d97 : 0x59616e,
+      // ⚠ Le marqueur de PIVOT se décline sur LA MÊME règle (`Color.isLightHex`) — cf. `PivotMarker`.
+      // Deux éléments de la même scène ne doivent pas basculer sur deux seuils différents.
       doorPanel: light ? 0x9aa0aa : 0x767f8d,
     };
   }
@@ -448,33 +466,47 @@ export abstract class DcThreeBase {
     const tex = new THREE.CanvasTexture(cv); tex.needsUpdate = true; this.texCache.set(key, tex); return tex;
   }
 
-  /** Texture (mutualisée) du marqueur de CENTRE DE ROTATION : anneau + croix en pointillés (cf. SVG `.dc-cam-pivot`). */
+  /** Texture (mutualisée) du marqueur de CENTRE DE ROTATION : anneau + croix en pointillés, cerclés d'un
+      liseré de contraste. Le STYLE et le TRACÉ vivent dans le module pur `PivotMarker` (testable) ; ici on
+      ne fait que fournir le canvas et gérer le cache.
+
+      ⚠ CLÉ DE CACHE DÉPENDANTE DU THÈME. Les clés « ##… » ne sont JAMAIS évincées (cf.
+      `pruneLabelTextureCache`) : avec une clé fixe, la texture du PREMIER thème rencontré aurait été
+      resservie à vie, et basculer clair↔sombre n'aurait rien changé au marqueur. `PivotMarker.cacheKey`
+      encode donc la variante — deux entrées permanentes au maximum. */
   protected pivotTexture(): THREE.CanvasTexture | null {
     if (typeof document === "undefined") return null;
-    const key = "##pivot"; const cached = this.texCache.get(key); if (cached) return cached;
-    const s = 64, cv = document.createElement("canvas"); cv.width = cv.height = s;
+    // `theme` est renseigné par `build()` ; avant lui (fenêtre très courte), on retombe sur le thème SOMBRE,
+    // qui est le défaut historique de `readTheme`.
+    const backgroundHex = this.theme ? this.theme.bg : 0x0e1116;
+    const key = PivotMarker.cacheKey(backgroundHex);
+    const cached = this.texCache.get(key); if (cached) return cached;
+    const s = PivotMarker.TEXTURE_SIZE_PX, cv = document.createElement("canvas"); cv.width = cv.height = s;
     const g = cv.getContext("2d"); if (!g) return null;
-    const c = s / 2, r = s * 0.27;
-    g.strokeStyle = "#c8d2e0"; g.lineWidth = 2.5; g.setLineDash([4, 3]); g.lineCap = "round";
-    g.beginPath(); g.arc(c, c, r, 0, Math.PI * 2); g.stroke();                                  // anneau
-    g.beginPath(); g.moveTo(c - s * 0.45, c); g.lineTo(c + s * 0.45, c);                         // croix horizontale
-    g.moveTo(c, c - s * 0.45); g.lineTo(c, c + s * 0.45); g.stroke();                            // croix verticale
+    PivotMarker.draw(g, s, PivotMarker.ink(backgroundHex));
     const tex = new THREE.CanvasTexture(cv); tex.needsUpdate = true; this.texCache.set(key, tex); return tex;
   }
 
   /** (Re)pose et dimensionne le marqueur de centre de rotation sur la cible caméra (taille ÉCRAN constante),
-      ou le masque si l'option est désactivée. Appelé à chaque mise à jour de caméra (suit le pivot). */
+      ou le masque si l'option est désactivée. Appelé à chaque mise à jour de caméra (suit le pivot) ET après
+      un changement de thème (cf. `applyThemeChange`). */
   protected updatePivot(): void {
     if (!this.scene) return;
     if (!this.opts.showPivot) { if (this._pivot) this._pivot.visible = false; return; }
+    const tex = this.pivotTexture(); if (!tex) return;
     if (!this._pivot || this._pivot.parent !== this.scene) {
-      const tex = this.pivotTexture(); if (!tex) return;
-      this._pivot = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.55, depthTest: false, depthWrite: false }));
+      this._pivot = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: PivotMarker.OPACITY, depthTest: false, depthWrite: false }));
       this._pivot.renderOrder = 30; this.scene.add(this._pivot);
+    } else {
+      // Le sprite n'est créé QU'UNE FOIS : sans cette réaffectation, il garderait la texture du thème
+      // dans lequel il est né. `applyThemeChange` ne le rattraperait pas — il ne remappe que des COULEURS
+      // de matériau, jamais des textures, et le pivot vit sous `scene` (hors des groupes qu'il parcourt).
+      const mat = this._pivot.material as THREE.SpriteMaterial;
+      if (mat.map !== tex) { mat.map = tex; mat.needsUpdate = true; }
     }
     this._pivot.visible = true;
     this._pivot.position.copy(this.target);
-    this._pivot.scale.setScalar(46 * this.worldPerPixel());   // ~46 px à l'écran, quel que soit le zoom
+    this._pivot.scale.setScalar(PivotMarker.SCREEN_SIZE_PX * this.worldPerPixel());   // taille écran constante, quel que soit le zoom
   }
 
   /** Texture (mutualisée) d'un DISQUE plein blanc — teinté par la couleur du sprite (pastille de câble 2D). */

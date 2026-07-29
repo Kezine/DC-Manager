@@ -11,10 +11,23 @@
                          invariants V3, cross-entité V5, dépendance inverse V5b).
    Les énumérations, types et la table `COLLECTION_SPECS` restent des exports de données.
 
-   Contrainte `shared/` : fichier AUTO-SUFFISANT (aucun import) → compile sous le front
-   (résolution bundler) ET le serveur (NodeNext). Les enums sont donc déclarés ICI comme
-   source canonique ; un test anti-divergence vérifie l'alignement avec les constantes front.
+   Portée `shared/` : compile sous le front (résolution bundler) ET le serveur (NodeNext).
+   Les enums sont déclarés ICI comme source canonique ; un test anti-divergence vérifie
+   l'alignement avec les constantes front.
+
+   ⚠ DEUX PATRONS de collaboration coexistent, et c'est VOULU (cf. `CLAUDE.md` §« Code partagé ») :
+     - `RackDepthPolicy` (politique de profondeur de baie) est **IMPORTÉ** — l'auto-suffisance de
+       `src-shared/` a été levée, un import relatif entre fichiers partagés est autorisé À CONDITION
+       d'écrire le spécificateur avec l'extension `.js` (NodeNext l'exige côté serveur) ;
+     - `TrayGeometry` (géométrie d'étagère) est **INJECTÉ** (`ValidationCollaborators`, avec un
+       garde-fou d'échec FERMÉ). Ce patron avait été choisi pour contourner l'ancienne contrainte ;
+       il se défend désormais sur son seul mérite de découplage, et son retrait est un lot à part.
+   Ne pas uniformiser à la volée : l'un se lit à l'import, l'autre au point d'appel.
    ============================================================================ */
+
+// POLITIQUE DE PROFONDEUR de baie : SOURCE UNIQUE partagée avec le rendu (`RackGeometry` délègue).
+// ⚠ L'extension `.js` est IMPÉRATIVE — un import sans extension compile côté front et CASSE le serveur.
+import { RackDepthPolicy } from "./RackDepthPolicy.js";
 
 /* ---- énumérations canoniques (alignées au domaine front — cf. test anti-divergence) ---- */
 /** Statuts de câble (cycle de vie). = `CABLE_STATUSES.map(s => s.id)` côté front. */
@@ -70,8 +83,12 @@ export interface FieldSpec {
   trim?: boolean;
   /** Ensemble fermé de valeurs autorisées. */
   enum?: readonly string[];
-  /** Borne inférieure (type `number`). */
+  /** Borne inférieure INCLUSIVE (type `number`) : seul `value < min` est rejeté. */
   min?: number;
+  /** Borne supérieure INCLUSIVE (type `number`) : seul `value > max` est rejeté. Miroir strict de `min` —
+      les deux bornes encadrent une grandeur physique dont les EXTRÊMES sont légitimes (une latitude de ±90
+      est un pôle, pas une erreur), d'où l'inclusivité des deux côtés. */
+  max?: number;
   /** Format attendu (chaîne) : `ipv4` (« a.b.c.d »), `cidr` (« a.b.c.d/n », n ∈ 0..32) ou `hostname`
       (nom d'hôte / FQDN RFC 1123 : labels alphanumériques + tirets, insensible à la casse). */
   format?: "ipv4" | "cidr" | "hostname";
@@ -119,7 +136,7 @@ export interface ValidationError {
   collection: string;
   id?: string;
   path: string;            // champ concerné
-  code: "required" | "type" | "enum" | "min" | "format" | "ref_missing" | "invariant" | "cross_entity" | "scope";
+  code: "required" | "type" | "enum" | "min" | "max" | "format" | "ref_missing" | "invariant" | "cross_entity" | "scope";
   message: string;         // message humain (français)
 }
 
@@ -136,9 +153,43 @@ export interface Invariant {
     Subsume l'ancien résolveur d'existence : « existe ? » = `fetch(coll, id) != null`. */
 export type EntityFetcher = (collection: string, id: string) => Record<string, any> | null;
 
+/* ---- COLLABORATEURS injectés (modules partagés REÇUS plutôt qu'importés) ----
+   ⚠ Ce n'est PLUS une contrainte de build. `resolve.extensionAlias` est posé dans
+   `webpack.config.js` : un import relatif entre fichiers partagés compile désormais sous les
+   TROIS chaînes (front bundler, webpack, serveur NodeNext), à condition d'écrire le spécificateur
+   avec l'extension `.js` — et ce fichier importe d'ailleurs `RackDepthPolicy` de cette façon.
+   Ce qui reste du patron `PowerAnalysis`, c'est son mérite propre : le DÉCOUPLAGE. La validation
+   n'a pas à connaître le module de géométrie d'étagère, seulement l'interface ÉTROITE de ce
+   qu'elle consomme (doctrine §6.2). Son retrait est possible et non demandé (lot à part). */
+
+/** Géométrie d'ÉTAGÈRE attendue par les règles T2d / V6e — implémentée par `src-shared/TrayGeometry`.
+    Interface STRUCTURELLE : la classe partagée est vérifiée contre elle par `tsc` à chaque point
+    d'injection, donc toute dérive de signature casse la compilation. */
+export interface TrayGeometryPort {
+  plank(cageMm: number, tray: Record<string, any>): { W: number; L: number; availH: number };
+  box(eq: Record<string, any>, plank: { W: number; L: number; availH: number }): { x0: number; x1: number; y0: number; y1: number };
+  overlap(a: { x0: number; x1: number; y0: number; y1: number }, b: { x0: number; x1: number; y0: number; y1: number }): boolean;
+  fitProblem(eq: Record<string, any>, plank: { W: number; L: number; availH: number }): {
+    code: "no_space" | "too_high" | "footprint" | "over_width" | "over_depth";
+    footprint: { w: number; d: number; h: number; rotated: boolean };
+    plank: { W: number; L: number; availH: number };
+    reached: number;
+    at: number;
+  } | null;
+}
+
+/** Collaborateurs de la validation : modules partagés injectés par l'APPELANT (Store client, serveur),
+    qui eux ne sont pas dans `src-shared/` et peuvent donc les importer normalement.
+    ⚠ Une règle privée de son collaborateur ne s'ARRÊTE PAS EN SILENCE : elle échoue FERMÉ (erreur de
+    validation explicite). Une contrainte muette serait pire qu'une contrainte absente — leçon du
+    `FieldSpec.max` déclaré mais inerte (cf. docs/validation.md §4). */
+export interface ValidationCollaborators {
+  trayGeometry?: TrayGeometryPort;
+}
+
 /** Règle CROSS-ENTITÉ (V5) : valide un enregistrement d'après les DONNÉES d'une entité liée (lue via `fetch`),
     pas seulement ses propres champs. Renvoie l'erreur (champ + message) ou `null` si respectée / non applicable. */
-export type CrossEntityRule = (record: Record<string, any>, fetch: EntityFetcher) => { path: string; message: string } | null;
+export type CrossEntityRule = (record: Record<string, any>, fetch: EntityFetcher, collaborators?: ValidationCollaborators) => { path: string; message: string } | null;
 
 /** Recherche d'enregistrements par champ INDEXÉ (dépendance inverse V5b + portée V6) : tous les enregistrements
     de `collection` dont `field` vaut `value`. INJECTÉ — l'UI l'adosse aux index du `Store`, le serveur à une
@@ -149,7 +200,7 @@ export type ChildFinder = RecordFinder;
 /** Règle de PORTÉE (V6) : valide un enregistrement contre l'ENSEMBLE de ses pairs (unicité, non-chevauchement),
     via un `find` par champ (+ `fetch` optionnel pour lire une entité de contexte, ex. la baie). Doit EXCLURE
     l'enregistrement lui-même (par `id`). Renvoie l'erreur ou `null`. */
-export type ScopeRule = (record: Record<string, any>, find: RecordFinder, fetch?: EntityFetcher) => { path: string; message: string } | null;
+export type ScopeRule = (record: Record<string, any>, find: RecordFinder, fetch?: EntityFetcher, collaborators?: ValidationCollaborators) => { path: string; message: string } | null;
 
 /** Forme minimale d'un lot atomique (mêmes champs que la transaction serveur). */
 export interface BatchOps {
@@ -163,7 +214,7 @@ export interface ParsedCidr { base: number; prefix: number; mask: number; networ
 
 /** Brins (fibres physiques) piochés par un port de patch = ses `strand_a`/`strand_b` non nuls. Concept PARTAGÉ entre
     la VALIDATION (unicité/capacité des brins — V6/T6) et la DÉDUCTION réseau (arête « même fibre » — Store) : d'où sa
-    place ici (shared/, auto-suffisant). Évite le motif `[p.strand_a, p.strand_b].filter(v => v != null)` répété. */
+    place ici, dans `src-shared/`. Évite le motif `[p.strand_a, p.strand_b].filter(v => v != null)` répété. */
 export class PortStrands {
   static of(port: { strand_a?: number | null; strand_b?: number | null }): number[] {
     return [port.strand_a, port.strand_b].filter((v): v is number => v != null);
@@ -279,54 +330,43 @@ class RackOccupancy {
 /* ============================================================================
    PROFONDEUR de montage en baie (mm) — l'équipement doit TENIR dans l'espace
    disponible, et deux montages DOS À DOS au même U ne doivent pas se cumuler
-   au-delà de la cage. Formules RÉPLIQUÉES de RackGeometry (front) : shared/
-   est auto-suffisant (pas d'import du front) — duplication ASSUMÉE, documentée
-   des deux côtés, à maintenir en parité (mountAvailDepth / sharedMountDepth).
+   au-delà de la cage.
+
+   La POLITIQUE DE PROFONDEUR (profondeur extérieure, cage, marges avant/arrière,
+   cavités de portes) ne vit plus ici : elle est écrite UNE SEULE FOIS dans
+   `src-shared/RackDepthPolicy`, IMPORTÉE ci-dessus et consommée aussi par le RENDU
+   (`RackGeometry`, qui délègue). Elle était RÉPLIQUÉE, et les deux copies
+   DIVERGEAIENT — cf. `docs/placement.md` §6.14 pour l'arbitrage.
+
+   Ce qui reste ICI est ce qui appartient VRAIMENT à la validation : la marge de
+   SÉCURITÉ derrière une porte, qui n'est pas une lecture de la géométrie mais une
+   règle de PRUDENCE — le rendu, lui, dessine ce qui existe physiquement et ne la
+   retranche pas. Ce n'est donc pas une divergence, et elle n'est pas mutualisée.
+
    Les règles ne s'appliquent qu'aux enregistrements MIGRÉS (depth_mm présent) :
    un legacy (enum fractionnaire) tient par construction — et le sanctionner
    rendrait d'anciens documents invalides à la première édition.
    ============================================================================ */
 const RACK_DEPTH_SAFETY = 100;    // = RACK_DEPTH_SAFETY_MM (front) : marge de sécurité derrière une porte
-const RACK_DEPTH_FALLBACK = 1000; // = RACK_DEPTH_DEFAULT (front) : profondeur extérieure par défaut
 
 class RackDepth {
-  private static doorExtra(rack: Record<string, any>, face: string): number {
-    const d = face === "rear" ? rack.door_rear : rack.door_front;
-    return (d && d.enabled && d.hollow) ? Math.max(0, d.hollow_mm | 0) : 0;
-  }
-  private static hasDoor(rack: Record<string, any>): boolean {
-    const f = rack.door_front, r = rack.door_rear;
-    return !!((f && f.enabled) || (r && r.enabled));
-  }
   /** Profondeur de cage — aussi utilisée par TrayFit (plateau « dual » = pleine cage). */
-  static cage(rack: Record<string, any>): number {
-    const d = rack.depth || RACK_DEPTH_FALLBACK;
-    return (rack.cage_depth_mm > 0) ? Math.min(d, rack.cage_depth_mm | 0) : d;
-  }
-  private static frontMargin(rack: Record<string, any>): number {
-    const d = rack.depth || RACK_DEPTH_FALLBACK;
-    const fm = (rack.front_margin_mm != null && rack.front_margin_mm !== "") ? Math.max(0, rack.front_margin_mm | 0) : 0;
-    return Math.min(fm, Math.max(0, d - RackDepth.cage(rack)));
-  }
-  private static rearMargin(rack: Record<string, any>): number {
-    const d = rack.depth || RACK_DEPTH_FALLBACK;
-    return Math.max(0, d - RackDepth.cage(rack) - RackDepth.frontMargin(rack));
-  }
+  static cage(rack: Record<string, any>): number { return RackDepthPolicy.cage(rack); }
   /** Dispo pour un montage ancré à `side` (av/ar) : jusqu'à la face opposée + cavités − sécurité derrière porte. */
   private static avail(rack: Record<string, any>, side: string): number {
-    const d = rack.depth || RACK_DEPTH_FALLBACK;
-    const extras = RackDepth.doorExtra(rack, "front") + RackDepth.doorExtra(rack, "rear");
-    return d - (side === "rear" ? RackDepth.rearMargin(rack) : RackDepth.frontMargin(rack)) + extras - (RackDepth.hasDoor(rack) ? RACK_DEPTH_SAFETY : 0);
+    const d = RackDepthPolicy.outerDepth(rack);
+    const extras = RackDepthPolicy.doorExtra(rack, "front") + RackDepthPolicy.doorExtra(rack, "rear");
+    return d - (side === "rear" ? RackDepthPolicy.rearMargin(rack) : RackDepthPolicy.frontMargin(rack)) + extras - (RackDepthPolicy.hasDoor(rack) ? RACK_DEPTH_SAFETY : 0);
   }
   /** Espace PARTAGÉ par deux montages dos à dos au même U : cage + cavités − sécurité derrière porte. */
   private static shared(rack: Record<string, any>): number {
-    return RackDepth.cage(rack) + RackDepth.doorExtra(rack, "front") + RackDepth.doorExtra(rack, "rear") - (RackDepth.hasDoor(rack) ? RACK_DEPTH_SAFETY : 0);
+    return RackDepthPolicy.cage(rack) + RackDepthPolicy.doorExtra(rack, "front") + RackDepthPolicy.doorExtra(rack, "rear") - (RackDepthPolicy.hasDoor(rack) ? RACK_DEPTH_SAFETY : 0);
   }
   /** Profondeur EFFECTIVE d'un occupant : depth_mm, sinon estimation legacy (fraction de cage). */
   private static effDepth(record: Record<string, any>, rack: Record<string, any>): number {
     if (record.depth_mm != null) return Math.max(1, record.depth_mm | 0);
     const frac: Record<string, number> = { full: 1, half: 0.5, quarter: 0.25 };
-    return Math.round((frac[record.depth] != null ? frac[record.depth] : 1) * RackDepth.cage(rack));
+    return Math.round((frac[record.depth] != null ? frac[record.depth] : 1) * RackDepthPolicy.cage(rack));
   }
 
   /** T2c (cross-entité) : un équipement racké (migré) doit TENIR dans la profondeur dispo de sa baie. */
@@ -336,7 +376,7 @@ class RackDepth {
     if (!rack) return null;                                                        // baie absente → intégrité réf. ailleurs
     const limit = RackDepth.avail(rack, eq.rack_side === "rear" ? "rear" : "front");
     return eq.depth_mm <= limit ? null
-      : { path: "depth_mm", message: `La profondeur (${eq.depth_mm} mm) dépasse l'espace disponible de la baie (${Math.round(limit)} mm${RackDepth.hasDoor(rack) ? ", marge de sécurité de porte déduite" : ""}).` };
+      : { path: "depth_mm", message: `La profondeur (${eq.depth_mm} mm) dépasse l'espace disponible de la baie (${Math.round(limit)} mm${RackDepthPolicy.hasDoor(rack) ? ", marge de sécurité de porte déduite" : ""}).` };
   }
 
   /** V6d (portée) : DOS À DOS au même U (baie double, deux faces opposées non verrouillantes) —
@@ -365,80 +405,91 @@ class RackDepth {
 /* ============================================================================
    ÉQUIPEMENT POSÉ SUR UNE ÉTAGÈRE (placement_mode "tray") — l'empreinte doit
    tenir dans la boîte utile du plateau, et deux colocataires ne doivent pas se
-   chevaucher. Formules RÉPLIQUÉES de RackGeometry (trayBoxLocal /
-   trayEquipFitsWhy) — duplication ASSUMÉE (shared/ auto-suffisant), à
-   maintenir en parité. Le repère est le PLATEAU (x = largeur depuis le bord
-   gauche, y = profondeur depuis la face de montage) → le chevauchement se
-   calcule sans repère de baie.
-   ============================================================================ */
-const TRAY_U_MM = 44.45;          // = U_MM (front)
-const TRAY_MOUNT_W = 482.6;       // = RACK_MOUNT_WIDTH (front)
-const TRAY_LEN_FALLBACK = 450;    // = TRAY_DEPTH_DEFAULT_MM (front)
-const TRAY_SHEET_RESERVE = 5;     // = TRAY_SHEET_RESERVE_MM (front) : tôle + renforts transversaux au ras du plateau
-const TRAY_EAR = 15;              // = RACK_EAR_MM (front) : le plateau = corps 19″ (les oreilles s'accrochent aux rails)
-const TRAY_STANDOFF = 3;          // = RACK_EAR_STANDOFF_MM (front) : le tray est posé DEVANT la cage (réserve d'oreilles)
-const TRAY_GUSSET_CLEAR = 4;      // = TRAY_GUSSET_CLEARANCE_MM (front) : garde latérale des renforts (porte-à-faux)
+   chevaucher.
 
+   La GÉOMÉTRIE du plateau ne vit plus ici : elle est écrite UNE SEULE FOIS dans
+   `src-shared/TrayGeometry`, INJECTÉE via `ValidationCollaborators` — par CHOIX de
+   découplage, plus par impossibilité d'import (cf. le bloc « COLLABORATEURS
+   injectés »). Ce qui reste
+   ici est ce qui appartient VRAIMENT à la validation : résoudre le contexte
+   (étagère + baie) via `fetch`, énumérer les colocataires via `find`, et traduire
+   un refus géométrique en `path` + message de FORMULAIRE.
+   Cf. `docs/placement.md` §6.7 et `docs/validation.md` (T2d / V6e).
+   ============================================================================ */
 class TrayFit {
-  /** Empreinte au plateau (mm) — l'orientation 90/270 permute largeur/longueur (défauts 200×200×100). */
-  private static footprint(eq: Record<string, any>): { w: number; d: number; h: number } {
-    const fw = Math.max(1, eq.free_w_mm || 200), fl = Math.max(1, eq.free_l_mm || 200), fh = Math.max(1, eq.free_h_mm || 100);
-    const o = (((+eq.dc_orientation || 0) % 360) + 360) % 360;
-    return (o === 90 || o === 270) ? { w: fl, d: fw, h: fh } : { w: fw, d: fl, h: fh };
+  /** Message d'un refus géométrique, en termes de CHAMP DE FORMULAIRE (le front, lui, en fait une
+      phrase d'aide à la saisie — même verdict, deux présentations). Sous rotation, la largeur fautive
+      vient de `free_l_mm` et réciproquement : on désigne donc le champ RÉELLEMENT saisi. */
+  private static explain(problem: NonNullable<ReturnType<TrayGeometryPort["fitProblem"]>>): { path: string; message: string } {
+    const { footprint, plank } = problem;
+    switch (problem.code) {
+      case "no_space":
+        return { path: "tray_item_id", message: "Aucun espace réservé au-dessus du plateau (hauteur réservée = structure du tray)." };
+      case "too_high":
+        return { path: "free_h_mm", message: `Hauteur ${footprint.h} mm > ${Math.round(plank.availH)} mm réservés au-dessus du plateau.` };
+      case "footprint": {
+        const tooWide = footprint.w > plank.W;
+        const path = tooWide ? (footprint.rotated ? "free_l_mm" : "free_w_mm") : (footprint.rotated ? "free_w_mm" : "free_l_mm");
+        return { path, message: `Empreinte ${footprint.w} × ${footprint.d} mm > plateau ${Math.round(plank.W)} × ${Math.round(plank.L)} mm.` };
+      }
+      case "over_width":
+        return { path: "tray_x", message: `Dépasse le plateau en largeur (${Math.round(problem.reached)} > ${Math.round(plank.W)} mm).` };
+      default:
+        return { path: "tray_y", message: `Dépasse le plateau en profondeur (${Math.round(problem.reached)} > ${Math.round(plank.L)} mm).` };
+    }
   }
-  /** Plateau : largeur UTILISABLE (corps 19″ moins la garde des renforts en porte-à-faux), longueur
-      effective, hauteur UTILE au-dessus = TOUTE la réservation moins la réserve de tôle (tray_u = pure
-      indication de dessin, n'exclut rien). Parité RackGeometry.trayBoxLocal/trayLength. */
-  private static plank(rack: Record<string, any>, tray: Record<string, any>): { W: number; L: number; availH: number } {
-    const cage = RackDepth.cage(rack);
-    const uh = Math.max(1, tray.u_height | 0 || 1);
-    const cant = tray.tray_type === "cantilever";
-    // dual : de plan de façade à plan de façade (cage + 2 réserves) — parité RackGeometry.trayLength
-    const L = cant ? Math.min(Math.max(50, tray.depth_mm || TRAY_LEN_FALLBACK), cage) : cage + 2 * TRAY_STANDOFF;
-    const inset = cant ? TRAY_GUSSET_CLEAR : 0;   // garde latérale réservée aux renforts
-    return { W: TRAY_MOUNT_W - 2 * TRAY_EAR - 2 * inset, L, availH: uh * TRAY_U_MM - TRAY_SHEET_RESERVE };
-  }
-  /** Rect au plateau d'un équipement posé (position null = centré). */
-  private static box(eq: Record<string, any>, plank: { W: number; L: number }): { x0: number; x1: number; y0: number; y1: number } {
-    const fp = TrayFit.footprint(eq);
-    const tx = (eq.tray_x != null) ? +eq.tray_x : Math.max(0, (plank.W - fp.w) / 2);
-    const ty = (eq.tray_y != null) ? +eq.tray_y : Math.max(0, (plank.L - fp.d) / 2);
-    return { x0: tx, x1: tx + fp.w, y0: ty, y1: ty + fp.d };
-  }
-  /** Contexte résolu (étagère + baie) d'un équipement posé — null si la règle ne s'applique pas. */
-  private static ctx(eq: Record<string, any>, fetch?: EntityFetcher): { tray: Record<string, any>; rack: Record<string, any> } | null {
+
+  /** Contexte résolu (plateau utile) d'un équipement posé — null si la règle ne s'applique pas.
+      La profondeur de CAGE est calculée ici (politique de baie) et passée en NOMBRE à la géométrie. */
+  private static plank(eq: Record<string, any>, fetch: EntityFetcher | undefined, geometry: TrayGeometryPort): { W: number; L: number; availH: number } | null {
     if (eq.placement_mode !== "tray" || !eq.tray_item_id || !fetch) return null;
     const tray = fetch("rackItems", eq.tray_item_id);
     if (!tray || tray.kind !== "tray" || !tray.rack_id) return null;   // réf. absente/étrangère → autres règles
     const rack = fetch("racks", tray.rack_id);
-    return rack ? { tray, rack } : null;
+    return rack ? geometry.plank(RackDepth.cage(rack), tray) : null;
+  }
+
+  /** `true` si la règle d'étagère DEVRAIT s'appliquer — sert au garde-fou « échec FERMÉ » ci-dessous. */
+  private static applies(eq: Record<string, any>, fetch?: EntityFetcher): boolean {
+    if (eq.placement_mode !== "tray" || !eq.tray_item_id || !fetch) return false;
+    const tray = fetch("rackItems", eq.tray_item_id);
+    return !!(tray && tray.kind === "tray" && tray.rack_id && fetch("racks", tray.rack_id));
+  }
+
+  /** ÉCHEC FERMÉ : sans géométrie injectée, on REFUSE au lieu de laisser passer. Une contrainte muette
+      se lit comme appliquée et laisse écrire des données fausses ; un refus explicite se voit au premier
+      essai. C'est le garde-fou qui remplace ici l'impossible garantie du compilateur (le paramètre ne peut
+      pas être rendu obligatoire après deux paramètres optionnels). */
+  private static missing(): { path: string; message: string } {
+    return { path: "tray_item_id", message: "Contrôle de pose sur étagère IMPOSSIBLE : la géométrie d'étagère n'a pas été injectée (collaborateur « trayGeometry »)." };
   }
 
   /** T2d (cross-entité) : l'équipement TIENT sur l'étagère (empreinte, position, hauteur réservée). */
-  static fits(eq: Record<string, any>, fetch: EntityFetcher): { path: string; message: string } | null {
+  static fits(eq: Record<string, any>, fetch: EntityFetcher, collaborators?: ValidationCollaborators): { path: string; message: string } | null {
     if (eq.placement_mode === "tray" && eq.tray_item_id && fetch) {
       const tray = fetch("rackItems", eq.tray_item_id);
       if (tray && tray.kind !== "tray") return { path: "tray_item_id", message: "L'élément visé n'est pas une étagère (tray)." };
     }
-    const c = TrayFit.ctx(eq, fetch);
-    if (!c) return null;
-    const plank = TrayFit.plank(c.rack, c.tray), fp = TrayFit.footprint(eq), b = TrayFit.box(eq, plank);
-    if (plank.availH < 1) return { path: "tray_item_id", message: "Aucun espace réservé au-dessus du plateau (hauteur réservée = structure du tray)." };
-    if (fp.h > plank.availH + 0.5) return { path: "free_h_mm", message: `Hauteur ${fp.h} mm > ${Math.round(plank.availH)} mm réservés au-dessus du plateau.` };
-    if (b.x1 > plank.W + 0.5) return { path: "tray_x", message: `Dépasse le plateau en largeur (${Math.round(b.x1)} > ${Math.round(plank.W)} mm).` };
-    if (b.y1 > plank.L + 0.5) return { path: "tray_y", message: `Dépasse le plateau en profondeur (${Math.round(b.y1)} > ${Math.round(plank.L)} mm).` };
-    return null;
+    const geometry = collaborators && collaborators.trayGeometry;
+    if (!geometry) return TrayFit.applies(eq, fetch) ? TrayFit.missing() : null;
+    const plank = TrayFit.plank(eq, fetch, geometry);
+    if (!plank) return null;
+    const problem = geometry.fitProblem(eq, plank);
+    return problem ? TrayFit.explain(problem) : null;
   }
 
-  /** V6e (portée) : pas de CHEVAUCHEMENT entre équipements posés sur la MÊME étagère. */
-  static overlap(eq: Record<string, any>, find: RecordFinder, fetch?: EntityFetcher): { path: string; message: string } | null {
-    const c = TrayFit.ctx(eq, fetch);
-    if (!c) return null;
-    const plank = TrayFit.plank(c.rack, c.tray), me = TrayFit.box(eq, plank);
+  /** V6e (portée) : pas de CHEVAUCHEMENT entre équipements posés sur la MÊME étagère.
+      Sans géométrie injectée, T2d a déjà refusé l'enregistrement (échec fermé) — inutile d'en ajouter
+      une seconde ; on se contente donc de ne rien dire ici. */
+  static overlap(eq: Record<string, any>, find: RecordFinder, fetch?: EntityFetcher, collaborators?: ValidationCollaborators): { path: string; message: string } | null {
+    const geometry = collaborators && collaborators.trayGeometry;
+    if (!geometry) return null;
+    const plank = TrayFit.plank(eq, fetch, geometry);
+    if (!plank) return null;
+    const me = geometry.box(eq, plank);
     for (const other of find("equipments", "tray_item_id", eq.tray_item_id)) {
       if (other.id === eq.id || other.placement_mode !== "tray") continue;
-      const ob = TrayFit.box(other, plank);
-      if (me.x0 < ob.x1 - 0.5 && ob.x0 < me.x1 - 0.5 && me.y0 < ob.y1 - 0.5 && ob.y0 < me.y1 - 0.5) {
+      if (geometry.overlap(me, geometry.box(other, plank))) {
         return { path: "tray_x", message: `Chevauche « ${other.name || other.id} » sur l'étagère.` };
       }
     }
@@ -450,7 +501,12 @@ class TrayFit {
 /* ---- CHAMPS des collections, isolés `as const` : SOURCE UNIQUE des types d'enregistrement (RecordOf) ET
    des specs de validation (COLLECTION_SPECS y référence ses `fields`). `as const` préserve les littéraux de
    `type`/`enum`/défauts pour l'inférence ; les fonctions (invariants/règles) restent dans COLLECTION_SPECS,
-   typées contextuellement par l'annotation (les mettre `as const` ici les rendrait `any` implicites). ---- */
+   typées contextuellement par l'annotation (les mettre `as const` ici les rendrait `any` implicites).
+   ⚠ `as const` SEUL ne vérifie RIEN : sans annotation de type, TypeScript n'inspecte aucune propriété
+   excédentaire — c'est ainsi que `sites.lat`/`lon` ont pu déclarer un `max:` que `FieldSpec` et le moteur
+   ignoraient (contrainte inerte, corrigée depuis). D'où le `satisfies` en fin de bloc : il CONTRÔLE la forme
+   de chaque champ contre `FieldSpec` tout en PRÉSERVANT le type littéral dont `RecordOf` dérive les types
+   `Records.*` (une simple annotation `: Record<...>` élargirait les littéraux et casserait cette dérivation). ---- */
 const SPEC_FIELDS = {
   equipments: {
       name:           { type: "string", required: true, trim: true },   // identité : trimé (unicité fiable — V6g)
@@ -655,6 +711,21 @@ const SPEC_FIELDS = {
   sites: {
       name:    { type: "string", required: true },
       address: { type: "string" },
+      // COORDONNÉES GPS — OPTIONNELLES (doctrine `docs/placement.md` §6.9). Le site était le seul niveau de
+      // la hiérarchie de placement SANS géométrie : faute de position déclarée, la vue 3D rangeait les
+      // bâtiments côte à côte, donc dérivait une géométrie de l'ensemble AFFICHÉ. Renseignées, elles donnent
+      // au site sa position RÉELLE ; absentes, un repli déterministe s'applique (5 km du site précédent).
+      // ⚠ Ce sont des coordonnées du MODÈLE : l'échelle de rendu, elle, est un réglage de VUE non persisté.
+      lat:     { type: "number", nullable: true, default: null, min: -90,  max: 90  },
+      lon:     { type: "number", nullable: true, default: null, min: -180, max: 180 },
+      // TAILLE DÉCLARÉE du bâtiment (mm) — OPTIONNELLE (doctrine `docs/placement.md` §6.8, dernier
+      // paragraphe). Le bâtiment épousait jusqu'ici son plus grand plan d'étage : il n'avait pas de
+      // dimension propre. Déclarée, elle FAIT l'emprise du bâtiment et devient une CONTRAINTE — un plan
+      // d'étage ne peut pas en déborder (cf. règle cross-entité de `floors`). Étant OPT-IN, elle ne peut
+      // pas rétro-invalider un document : seuls les bâtiments qu'on a choisi de fixer sont contrôlés.
+      // INDISSOCIABLES (invariant ci-dessous), comme lat/lon : une demi-dimension ne décrit aucune emprise.
+      width_mm: { type: "number", nullable: true, default: null, min: 1 },
+      depth_mm: { type: "number", nullable: true, default: null, min: 1 },
   },
   vms: {
       name:              { type: "string", required: true },
@@ -676,7 +747,7 @@ const SPEC_FIELDS = {
       phone: { type: "string", trim: true },                   // optionnel — quasi libre (invariant)
       notes: { type: "string" },                               // notes libres (multi-lignes) — aucune contrainte
   },
-} as const;
+} as const satisfies Record<string, Record<string, FieldSpec>>;
 
 /* Types d'ENREGISTREMENT (formes REST partagées, NORMALISÉES) dérivés de SPEC_FIELDS — SOURCE UNIQUE = la spec.
    Regroupés en NAMESPACE (type-only, effacé au build) pour NE PAS entrer en collision avec les CLASSES de modèle
@@ -742,7 +813,8 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       // T2c : la PROFONDEUR (mm) doit tenir dans l'espace disponible de la baie (portes/cavités/sécurité incluses).
       (eq, fetch) => RackDepth.fits(eq, fetch),
       // T2d : un équipement POSÉ tient sur son étagère (empreinte, position, hauteur réservée).
-      (eq, fetch) => TrayFit.fits(eq, fetch),
+      //       Géométrie du plateau INJECTÉE (src-shared/TrayGeometry) — cf. docs/placement.md §6.7.
+      (eq, fetch, collaborators) => TrayFit.fits(eq, fetch, collaborators),
     ],
     scope: [
       // V6g : NOM d'équipement UNIQUE dans le document (post-trim, comparaison EXACTE). MÊME mécanisme que
@@ -758,8 +830,8 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       (eq, find, fetch) => RackOccupancy.collision(eq, "equipments", find, fetch),
       // V6d : dos-à-dos au même U — somme des profondeurs ≤ espace partagé (cage + cavités).
       (eq, find, fetch) => RackDepth.backToBack(eq, find, fetch),
-      // V6e : pas de chevauchement entre équipements posés sur la MÊME étagère.
-      (eq, find, fetch) => TrayFit.overlap(eq, find, fetch),
+      // V6e : pas de chevauchement entre équipements posés sur la MÊME étagère (géométrie injectée).
+      (eq, find, fetch, collaborators) => TrayFit.overlap(eq, find, fetch, collaborators),
       // T-POE2 : on ne peut pas RETIRER la capacité POE (poe_device faux) tant qu'un port POE est défini sur
       //          l'équipement (message clair côté équipement ; T-POE1 verrouille aussi côté port via les dependents).
       (eq, find) => {
@@ -898,8 +970,11 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       //       de rôle « data » avec une direction résiduelle écrite par API/import devient un faux départ / une fausse
       //       charge SECTEUR : PowerAnalysis.eqPortsByDir sélectionne les ports par `direction` en n'excluant QUE le
       //       rôle "poe" (le PoE vit sur son propre graphe) — un data+source passerait donc pour un départ secteur.
-      //       Rôles en DUR ici : la source de vérité PortRoles vit côté client et n'est pas importable (shared/ est
-      //       auto-suffisant) ; leurs ids ("power"/"poe") sont STABLES. L'UI neutralise déjà la direction au save
+      //       Rôles en DUR ici : la source de vérité PortRoles vit côté CLIENT (`src-client/registries/`), et c'est
+      //       ÇA qui la rend inimportable — un fichier partagé ne peut pas dépendre du front. (Rien à voir avec
+      //       l'auto-suffisance de `src-shared/`, LEVÉE : un autre fichier PARTAGÉ, lui, s'importerait très bien —
+      //       cf. `RackDepthPolicy` en tête de fichier.) Leurs ids ("power"/"poe") sont STABLES.
+      //       L'UI neutralise déjà la direction au save
       //       (EquipmentForms, au changement de rôle) — cette règle ferme le même trou côté serveur/import.
       { path: "direction", message: "La direction (source/sink) ne se déclare que sur un port d'énergie (rôle power ou poe).", holds: (p) => !p.direction || p.role === "power" || p.role === "poe" },
     ],
@@ -1055,6 +1130,43 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   floors: {
     fields: SPEC_FIELDS.floors,
+    crossEntity: [
+      // T13 — CROSS-ENTITÉ (V5) : CONTRAINTE DE TAILLE DE BÂTIMENT (doctrine `docs/placement.md` §6.8, dernier
+      // paragraphe) : un plan d'étage ne peut pas DÉBORDER du bâtiment qui le porte. La règle est
+      // cross-entité et non un invariant (V3) parce qu'elle lit le SITE PARENT, hors de l'enregistrement.
+      //
+      // ⚠ DÉFENSIVE PAR CONSTRUCTION. `floors.location` n'est VOLONTAIREMENT pas déclaré `ref: "sites"` :
+      // le dépôt contient des `location` HISTORIQUES (slugs de la table LOCATIONS, cf. Store.siteLabel)
+      // sans enregistrement `sites` correspondant. Déclarer la FK ferait rejeter ces documents par
+      // l'intégrité référentielle (V2) — une rétro-invalidation massive, que la doctrine interdit. Un site
+      // introuvable rend donc la règle NON APPLICABLE, jamais une erreur.
+      //
+      // OPT-IN : sans taille déclarée sur le site, aucune vérification. Un document existant ne peut pas
+      // devenir invalide du fait de cette règle — c'est la condition posée par la doctrine.
+      //
+      // PORTÉE : la collection `floors` n'existe que pour les étages CONFIGURÉS ; un étage non configuré
+      // n'a pas d'enregistrement (FloorLayout.config lui rend un défaut virtuel à `id: null`). La
+      // contrainte ne porte donc que sur les étages configurés — c'est correct et voulu : on ne contraint
+      // que ce que l'utilisateur a effectivement déclaré.
+      (floor, fetch) => {
+        const site = floor.location ? fetch("sites", floor.location) : null;
+        if (!site || site.width_mm == null || site.depth_mm == null) return null;
+        // L'ANCRE fait partie de l'emprise : un plan ancré à 5 000 mm dans un bâtiment de 20 000 mm ne peut
+        // mesurer que 15 000 mm. Contrôler la seule dimension laisserait passer un plan poussé hors du
+        // bâtiment par son ancrage.
+        const axes = [
+          { dim: "width_mm", anchor: "anchor_x", limit: Number(site.width_mm), label: "largeur" },
+          { dim: "depth_mm", anchor: "anchor_y", limit: Number(site.depth_mm), label: "profondeur" },
+        ];
+        for (const axis of axes) {
+          const size = Number(floor[axis.dim]);
+          if (!Number.isFinite(size) || !Number.isFinite(axis.limit)) continue;   // plan sans dimension sur cet axe → rien à comparer
+          const anchor = Number(floor[axis.anchor]) || 0, end = anchor + size;
+          if (end > axis.limit) return { path: axis.dim, message: `Le plan d'étage déborde du bâtiment en ${axis.label} : ancre ${anchor} + ${axis.label} ${size} = ${end} mm, pour un bâtiment de ${axis.limit} mm.` };
+        }
+        return null;
+      },
+    ],
   },
   ipNetworks: {
     fields: SPEC_FIELDS.ipNetworks,
@@ -1163,6 +1275,23 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   sites: {
     fields: SPEC_FIELDS.sites,
+    invariants: [
+      // Les coordonnées vont PAR PAIRE : une latitude sans longitude (ou l'inverse) ne désigne aucun point,
+      // elle désigne un parallèle ou un méridien. Le rendu retomberait silencieusement sur le repli 5 km en
+      // laissant croire le site géolocalisé — on rejette donc la saisie à moitié faite plutôt que de l'ignorer.
+      { path: "lon", message: "Latitude et longitude vont ensemble : renseignez les deux, ou aucune des deux.", holds: (s) => (s.lat == null) === (s.lon == null) },
+      // Même raisonnement pour la TAILLE : une largeur sans profondeur (ou l'inverse) ne décrit aucune
+      // emprise. Le rendu retomberait silencieusement sur l'emprise déduite des plans d'étage en laissant
+      // croire le bâtiment dimensionné, et la CONTRAINTE de débordement ne s'appliquerait que sur un axe.
+      { path: "depth_mm", message: "Largeur et profondeur du bâtiment vont ensemble : renseignez les deux, ou aucune des deux.", holds: (s) => (s.width_mm == null) === (s.depth_mm == null) },
+    ],
+    // T13 / V5b : RÉTRÉCIR un site (ou lui déclarer une taille pour la première fois) peut faire déborder des
+    // plans d'étage déjà saisis → re-valider ses étages contre le NOUVEL état du bâtiment. Sans cela la
+    // contrainte ne tiendrait qu'à un bout : on refuserait l'étage trop grand, mais on laisserait
+    // silencieusement rapetisser le bâtiment sous ses propres étages.
+    dependents: [
+      { collection: "floors", fkField: "location" },
+    ],
   },
   vms: {
     // NB (audit de régularisation 2026-07-20) : `nics` (tableau d'OBJETS source Proxmox, normalisé par
@@ -1226,8 +1355,10 @@ export class DataValidator {
   /* ---- validation ---- */
   /** Valide un enregistrement (supposé déjà normalisé) contre la spec de sa collection. Renvoie la liste des
       erreurs (vide = valide). Sans spec → aucune erreur. Si `fetch` est fourni, ajoute l'INTÉGRITÉ RÉFÉRENTIELLE
-      (FK existantes — V2) et les règles CROSS-ENTITÉ (d'après les données de l'entité liée — V5). */
-  static validateRecord(collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: RecordFinder): ValidationError[] {
+      (FK existantes — V2) et les règles CROSS-ENTITÉ (d'après les données de l'entité liée — V5).
+      `collaborators` porte les modules partagés que ce fichier ne peut pas importer (cf. `ValidationCollaborators`) :
+      les règles qui en dépendent ÉCHOUENT FERMÉ s'il manque, jamais en silence. */
+  static validateRecord(collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: RecordFinder, collaborators?: ValidationCollaborators): ValidationError[] {
     const spec = COLLECTION_SPECS[collection];
     if (!spec) return [];
     const errors: ValidationError[] = [];
@@ -1238,23 +1369,41 @@ export class DataValidator {
     for (const [field, fieldSpec] of Object.entries(spec.fields)) {
       const value = record[field];
 
+      // `isEmpty` ABSORBE `null` (avec `undefined` et `""`) : passé ce point, `value` n'est plus jamais `null`.
+      // Une branche `if (value === null) { if (!fieldSpec.nullable) fail(…) }` a longtemps suivi ce bloc —
+      // INATTEIGNABLE, donc `nullable` n'a JAMAIS été vérifié à la validation (il ne gouverne que la
+      // normalisation, cf. `normalizeField`, et le TYPE dérivé `FieldValue`).
+      // ⚠ CONSÉQUENCE MESURÉE, laissée en l'état À DESSEIN — ce n'est pas un oubli : 20 champs ne sont ni
+      // `required`, ni `nullable`, ni pourvus d'un `default` (cables.name, racks.width_mm, racks.depth,
+      // ports.name, contacts.email…). Sur ceux-là un `null` EXPLICITE traverse normalisation ET validation,
+      // alors que leur type dérivé promet du non-null. Aucun enregistrement réel ou de démonstration n'est dans
+      // ce cas (0 sur les deux corpus, mesuré le 2026-07-28), mais une écriture API/import pourrait l'être.
+      // RÉTABLIR la règle est un CHANGEMENT DE COMPORTEMENT sur une porte d'écriture (à arbitrer, pas à glisser
+      // dans un nettoyage) : il faudrait tester `value === null` AVANT `isEmpty`. Le comportement actuel est
+      // verrouillé par un test explicite (`test-shared-validation.js`, « null sur champ non-nullable »), pour
+      // qu'un rétablissement soit un choix ASSUMÉ et non un effet de bord.
       if (DataValidator.isEmpty(value)) {
         if (fieldSpec.required) fail(field, "required", `Le champ « ${field} » est obligatoire.`);
         continue;   // vide non requis → rien d'autre à vérifier
       }
-      if (value === null) {
-        if (!fieldSpec.nullable) fail(field, "type", `Le champ « ${field} » ne peut pas être null.`);
-        continue;
-      }
       if (!DataValidator.matchesType(value, fieldSpec.type)) {
         fail(field, "type", `Le champ « ${field} » doit être de type ${fieldSpec.type}.`);
-        continue;   // mauvais type → enum/min/ref non pertinents
+        continue;   // mauvais type → enum/bornes/ref non pertinents
       }
       if (fieldSpec.enum && !fieldSpec.enum.includes(value as string)) {
         fail(field, "enum", `Valeur « ${value} » invalide pour « ${field} » (attendu : ${fieldSpec.enum.join(", ")}).`);
       }
       if (fieldSpec.min != null && typeof value === "number" && value < fieldSpec.min) {
         fail(field, "min", `Le champ « ${field} » doit être ≥ ${fieldSpec.min}.`);
+      }
+      // Borne HAUTE — miroir strict de `min` (même mécanisme `fail`, même inclusivité). Elle a longtemps été
+      // DÉCLARÉE sans être appliquée : `sites.lat`/`lon` portaient `max: 90` / `max: 180` alors que ni l'interface
+      // `FieldSpec` ni le moteur ne connaissaient `max` — une latitude de 200 était donc acceptée à l'écriture
+      // (API comprise). Une contrainte déclarée mais inerte est PIRE que pas de contrainte : elle se lit comme
+      // appliquée. Le défaut passait la compilation parce que `SPEC_FIELDS` est `as const` — d'où le `satisfies`
+      // posé sur ce bloc, qui fait désormais échouer `tsc` sur toute propriété de spec inconnue.
+      if (fieldSpec.max != null && typeof value === "number" && value > fieldSpec.max) {
+        fail(field, "max", `Le champ « ${field} » doit être ≤ ${fieldSpec.max}.`);
       }
       if (fieldSpec.format && typeof value === "string" && !DataValidator.matchesFormat(value, fieldSpec.format)) {
         const formatLabel = fieldSpec.format === "cidr" ? "un CIDR IPv4 (ex. 10.0.0.0/24)"
@@ -1279,14 +1428,14 @@ export class DataValidator {
     // règles CROSS-ENTITÉ (V5, si `fetch`) : dépendent des données d'une entité liée (ex. IP ∈ CIDR de son réseau).
     if (fetch) {
       for (const rule of spec.crossEntity || []) {
-        const violation = rule(record, fetch);
+        const violation = rule(record, fetch, collaborators);
         if (violation) fail(violation.path, "cross_entity", violation.message);
       }
     }
     // règles de PORTÉE (V6, si `find`) : unicité / non-chevauchement contre les pairs (ex. adresse IP unique).
     if (find) {
       for (const rule of spec.scope || []) {
-        const violation = rule(record, find, fetch);
+        const violation = rule(record, find, fetch, collaborators);
         if (violation) fail(violation.path, "scope", violation.message);
       }
     }
@@ -1295,9 +1444,9 @@ export class DataValidator {
 
   /** Normalise PUIS valide — l'enchaînement appliqué au serveur avant écriture. `fetch` (optionnel) active
       l'intégrité référentielle (V2) et les règles cross-entité (V5). */
-  static normalizeAndValidate(collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: RecordFinder): { record: Record<string, any>; errors: ValidationError[] } {
+  static normalizeAndValidate(collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: RecordFinder, collaborators?: ValidationCollaborators): { record: Record<string, any>; errors: ValidationError[] } {
     const normalized = DataValidator.normalizeRecord(collection, record);
-    return { record: normalized, errors: DataValidator.validateRecord(collection, normalized, fetch, find) };
+    return { record: normalized, errors: DataValidator.validateRecord(collection, normalized, fetch, find, collaborators) };
   }
 
   /** DÉPENDANCE INVERSE (V5b) : écrire `parentRecord` peut invalider ses ENFANTS (ex. réseau dont le `cidr` change
@@ -1305,7 +1454,7 @@ export class DataValidator {
       les enfants (`findChildren`) et re-joue LEURS règles cross-entité CONTRE LE NOUVEL ÉTAT du parent (pas encore
       persisté → on l'injecte via `fetch`). Renvoie les violations (rattachées à l'enfant fautif). Sur une création,
       l'id du parent est neuf → aucun enfant → no-op. */
-  static validateDependents(parentCollection: string, parentRecord: Record<string, any>, findChildren: ChildFinder, fetch: EntityFetcher): ValidationError[] {
+  static validateDependents(parentCollection: string, parentRecord: Record<string, any>, findChildren: ChildFinder, fetch: EntityFetcher, collaborators?: ValidationCollaborators): ValidationError[] {
     const spec = COLLECTION_SPECS[parentCollection];
     if (!spec || !spec.dependents || !parentRecord.id) return [];
     // le parent en cours d'écriture n'est pas encore persisté : on le superpose à l'état lu pour que les règles
@@ -1315,7 +1464,7 @@ export class DataValidator {
     const errors: ValidationError[] = [];
     for (const dependent of spec.dependents) {
       for (const child of findChildren(dependent.collection, dependent.fkField, parentRecord.id)) {
-        for (const error of DataValidator.validateRecord(dependent.collection, child, fetchWithNewParent)) {
+        for (const error of DataValidator.validateRecord(dependent.collection, child, fetchWithNewParent, undefined, collaborators)) {
           if (error.code === "cross_entity") errors.push({ ...error, message: error.message + ` — incohérent avec la modification de « ${parentCollection} ».` });
         }
       }
@@ -1393,7 +1542,9 @@ export class DataValidator {
     }
   }
 
-  /** Vrai si la valeur correspond bien au type déclaré (hors `null`, géré à part par `nullable`). */
+  /** Vrai si la valeur correspond bien au type déclaré. `null` n'arrive JAMAIS ici : il est absorbé en amont
+      par `isEmpty` (cf. la note du bloc de validation) — et NON « géré à part par `nullable` », comme
+      l'affirmait cette ligne du temps où une branche `value === null`, en réalité inatteignable, la suivait. */
   private static matchesType(value: unknown, type: FieldType): boolean {
     switch (type) {
       case "number": return typeof value === "number" && Number.isFinite(value);

@@ -20,6 +20,7 @@ import { TargetSearch } from "../core/TargetSearch";
 import { UserDirectory } from "../core/UserDirectory";   // annuaire client (résolution des auteurs d'audit — mode API)
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
 import { CertTargetMatch } from "../core/CertTargetMatch";   // moteur PUR du rapprochement certificat ↔ équipement/VM (calculé)
+import { VmLocate } from "../core/VmLocate";   // « Localiser » une VM = localiser son HÔTE (prédicat PUR, feature VM AMOVIBLE)
 import type { NetworkIdentity } from "../core/CertTargetMatch";
 import type { CertFicheHooks, CertFicheMatch } from "../views/CertFicheHooks";
 import type { CertTargetResolver } from "../views/CertsAdminView";
@@ -349,7 +350,17 @@ async function boot(): Promise<void> {
 
   // ---- onglets de LISTE (ListView paramétré par ListConfigs) ----
   type FormFn = (id: string | null, onSaved: () => void) => void;
-  interface TabOpts { title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; links?: string[]; icon?: string; onAdd?: () => void; onDel?: (id: string, reRender: () => void) => void; locate?: "equipment" | "rack" | "cable"; manage?: boolean; extraActions?: Array<{ label: string; onClick: (btn: HTMLButtonElement) => void; title?: string }>; }
+  interface TabOpts {
+    title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; links?: string[]; icon?: string;
+    onAdd?: () => void; onDel?: (id: string, reRender: () => void) => void; locate?: "equipment" | "rack" | "cable"; manage?: boolean;
+    /** Cible de « Localiser » quand la LIGNE n'EST PAS l'objet localisé : id de ligne → id de l'objet de type
+        `locate` à viser, ou `null` si cette ligne n'est pas localisable. Absent = la ligne est l'objet
+        (comportement historique de tous les autres onglets).
+        SEUL cas d'usage aujourd'hui : une VM n'a aucune existence dans la scène 3D — on localise son
+        ÉQUIPEMENT HÔTE (cf. `core/VmLocate`). */
+    locateTarget?: (id: string) => string | null;
+    extraActions?: Array<{ label: string; onClick: (btn: HTMLButtonElement) => void; title?: string }>;
+  }
   const addListTab = (name: string, label: string, configFn: (s: typeof store) => ListOptions, opts: TabOpts = {}) => {
     const cfg = configFn(store);
     const formFn = opts.form;
@@ -364,21 +375,32 @@ async function boot(): Promise<void> {
         if (!view) {
           const reRender = () => view!.render();
           // « Localiser en 3D » par ligne : le bouton n'est proposé que si la localisation peut ABOUTIR — mêmes
-          // prédicats que locateEquipment/locateRack/locateCable (équipement rattaché à une salle, baie posée dans
-          // une salle, câble avec au moins une extrémité en salle). Sinon le bouton n'aurait qu'un toast d'erreur
-          // (équipement d'inventaire pur, posé sur plan d'étage, baie non placée, câble en attente…).
-          const canLocate =
-            opts.locate === "equipment" ? (id: string) => !!store.equipmentDcId(id)
+          // prédicats que locateEquipment/locateRack/locateCable. Sinon le bouton n'aurait qu'un toast d'erreur
+          // (équipement d'inventaire pur, baie non placée, câble en attente…).
+          // La CIBLE est résolue AVANT le prédicat : sur un onglet dont la ligne n'est pas l'objet localisé
+          // (VMs → leur hôte), c'est l'objet VISÉ qui doit satisfaire le prédicat, jamais la ligne.
+          const locateTargetOf: (id: string) => string | null = opts.locateTarget || ((id: string) => id);
+          const isLocatable =
+            opts.locate === "equipment" ? (id: string) => store.equipmentLocatable(id)
             : opts.locate === "rack" ? (id: string) => { const rk: any = store.get("racks", id); return !!(rk && rk.datacenter_id); }
-            : opts.locate === "cable" ? (id: string) => !!store.cableDcId(id)
-            : undefined;
+            // CÂBLE : prédicat PARTAGÉ (`core/Locatable`) — et plus qu'un miroir, c'est la MÊME règle que
+            // consomme `DcInteract.locateCable` pour choisir l'extrémité qu'il cadre (doctrine §6.32). Il
+            // reconnaît une extrémité posée sur un ÉTAGE, que l'ancien `cableDcId` (retiré, §6.33)
+            // déclarait « non placée ».
+            : opts.locate === "cable" ? (id: string) => store.cableLocatable(id)
+            : null;
+          const canLocate = isLocatable ? (id: string) => { const target = locateTargetOf(id); return !!target && isLocatable(target); } : undefined;
           view = new ListView(store, container, {
             ...cfg,
             actions: VIEWER
               ? { view: true, locate: !!opts.locate, canLocate }   // viewer : consultation + localisation seulement (pas d'édition/clone/suppression)
               : { ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }), ...(opts.locate ? { locate: true, canLocate } : {}), ...(opts.manage ? { manage: true } : {}) },
             onAction: async (act, id) => {
-              if (act === "locate" && opts.locate) { shell.switchView("datacenter"); dcView.locate(opts.locate, id); dcView.setReturnAction(() => shell.switchView(name)); return; }
+              if (act === "locate" && opts.locate) {
+                const target = locateTargetOf(id);
+                if (!target) return;   // défense : `canLocate` interdit déjà de proposer l'action dans ce cas
+                shell.switchView("datacenter"); dcView.locate(opts.locate, target); dcView.setReturnAction(() => shell.switchView(name)); return;
+              }
               if (act === "manage" && cfg.collection === "racks") { Forms.rackContent(store, formHost, id, reRender); return; }   // ▦ Contenu : éditeur de montage des U
               if (act === "view") {
                 if (cfg.collection === "equipments") Forms.equipmentDetail(store, formHost, id, reRender);
@@ -443,10 +465,15 @@ async function boot(): Promise<void> {
   }
   // L'onglet VMs expose le lien « Clusters » vers son sous-onglet — MODE API uniquement (masqué en mode fichier/viewer).
   const vmLinks = (REST_MODE && vmSyncClient) ? ["clusters"] : undefined;
+  // « Localiser en 3D » sur une ligne de VM : une VM n'est PAS un objet de la scène — on localise son
+  // ÉQUIPEMENT HÔTE. Version SOBRE (choix utilisateur) : le prédicat PARTAGÉ `VmLocate.hostEquipmentId`
+  // rend `null` dès que la localisation ne peut pas aboutir (VM non rapprochée, hôte supprimé, hôte non
+  // localisable — dont le cas « posé sur un étage »), et le bouton n'apparaît alors pas du tout.
   addListTab("vms", I18n.t("tabs.vms.label"), ListConfigs.vms, {
     icon: Icons.VM,
     title: I18n.t("tabs.vms.title"), subtitle: I18n.t("tabs.vms.subtitle"),
     extraActions: VIEWER ? undefined : vmExtraActions, links: vmLinks,
+    locate: "equipment", locateTarget: (id) => VmLocate.hostEquipmentId(store.get("vms", id), store),
   });
   // Sous-onglet « Clusters » : vue PERSONNALISÉE (non-liste) enregistrée comme les vues Netmap/Datacenters
   // (shell.addView + classe dédiée à `.show()`), en `kind: "secondary"` rattachée à l'onglet VMs — on réutilise le

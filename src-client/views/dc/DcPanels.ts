@@ -6,7 +6,11 @@ import { Html } from "../../core/Html";
 import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
+// CONTENEUR SALLE : `origin()` donne le centre d'un contenu en local salle (position absente ⇒ demi-empreinte).
+import { PlacementFrame } from "../../geometry/PlacementFrame";
 import { FloorLayout } from "../../geometry/FloorLayout";
+import { PlacementContainers } from "../../../src-shared/PlacementContainers";
+import { SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM } from "../../geometry/SiteLayout";
 import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { Format } from "../../core/Format";
 import { Text } from "../../core/Text";
@@ -118,8 +122,12 @@ export abstract class DcPanels extends DcViews2D {
     const CAP = 6;
     let n = 0; for (const d of this.store.all("datacenters")) { if (n >= CAP) break; if (m(d.name, d.location)) { out.push({ kind: "room", id: d.id, label: d.name || I18n.t("lists.ph.room"), tag: I18n.t("lists.filter.room") }); n++; } }
     n = 0; for (const r of this.store.all("racks")) { if (n >= CAP) break; if (!r.datacenter_id) continue; if (m(r.name)) { out.push({ kind: "rack", id: r.id, label: r.name || I18n.t("lists.ph.rack"), tag: I18n.t("dc.panels.tagRack") }); n++; } }
-    n = 0; for (const e of this.store.all("equipments")) { if (n >= CAP) break; if (!this.store.equipmentDcId(e.id)) continue; if (m(e.name, e.type, e.brand, e.model)) { out.push({ kind: "equipment", id: e.id, label: e.name || I18n.t("lists.ph.equipment"), tag: I18n.t("dc.panels.tagEquip") }); n++; } }
-    n = 0; for (const c of this.store.all("cables")) { if (n >= CAP) break; const lab = this.cableLabelShort(c); if (m(c.name, lab) && (this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id))) { out.push({ kind: "cable", id: c.id, label: lab, tag: I18n.t("dc.panels.tagCable") }); n++; } }
+    // ÉQUIPEMENTS : prédicat PARTAGÉ (`core/Locatable`) — la recherche ne propose que ce que « Localiser »
+    // sait atteindre, y compris désormais un posé d'ÉTAGE (doctrine §6.27 puis §6.28).
+    n = 0; for (const e of this.store.all("equipments")) { if (n >= CAP) break; if (!this.store.equipmentLocatable(e.id)) continue; if (m(e.name, e.type, e.brand, e.model)) { out.push({ kind: "equipment", id: e.id, label: e.name || I18n.t("lists.ph.equipment"), tag: I18n.t("dc.panels.tagEquip") }); n++; } }
+    // CÂBLES : prédicat PARTAGÉ (`core/Locatable`) — la recherche ne propose que ce que « Localiser » sait
+    // atteindre, extrémité posée sur un ÉTAGE comprise (doctrine §6.32).
+    n = 0; for (const c of this.store.all("cables")) { if (n >= CAP) break; const lab = this.cableLabelShort(c); if (m(c.name, lab) && this.store.cableLocatable(c)) { out.push({ kind: "cable", id: c.id, label: lab, tag: I18n.t("dc.panels.tagCable") }); n++; } }
     n = 0; for (const w of this.store.all("waypoints")) { if (n >= CAP) break; if (!w.datacenter_id || !this.store.waypointIsPlaced(w)) continue; if (m(w.name)) { out.push({ kind: "waypoint", id: w.id, label: Waypoint.glyph(w) + " " + (w.name || I18n.t("dc.common.waypoint")), tag: I18n.t("dc.panels.tagWaypoint") }); n++; } }
     return out;
   }
@@ -129,23 +137,28 @@ export abstract class DcPanels extends DcViews2D {
     const dc = this.current(); if (!dc) return;
     this.hidden3dRacks = new Set(this.displayedDcIds(dc).flatMap((d) => this.store.racksOfDc(d)).map((r: any) => r.id)); this.hidden3dRacks.delete(id);
     const r: any = this.store.get("racks", id);
-    if (r) this.camTarget = { x: (r.dc_x != null ? r.dc_x : 0), y: (r.dc_y != null ? r.dc_y : 0), z: RackGeometry.physHeight(r) / 2 };
+    if (r) { const c = PlacementFrame.origin(RackGeometry.roomPlacement(r)); this.camTarget = { x: c.x, y: c.y, z: RackGeometry.physHeight(r) / 2 }; }   // baie sans position ⇒ demi-empreinte (là où elle est DESSINÉE)
     this.selRackId = id; this.scale = null; this.render();
   }
 
   /** Racks du pool (sans salle). */
   protected poolRacks(): any[] { return this.store.all("racks").filter((r: any) => !r.datacenter_id).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")); }
 
-  /** Première maille libre de la salle (placement auto d'une baie/équipement). */
+  /** Première maille libre de la salle (placement auto d'une baie/équipement). Les centres des baies déjà
+      posées passent par le CONTENEUR SALLE : une baie sans `dc_x`/`dc_y` occupe la maille où elle est
+      DESSINÉE (sa demi-empreinte), pas l'origine de la salle — sinon le placement auto empilait la nouvelle
+      baie sur elle. Centres calculés UNE fois (le balayage teste chaque maille contre chaque baie). */
   protected freeCell(dc: any): { x: number; y: number } {
     const cell = dc.cell_mm, placed = this.store.racksOfDc(dc.id);
-    const occupied = (x: number, y: number) => placed.some((r: any) => Math.abs((r.dc_x || 0) - x) < cell * 0.5 && Math.abs((r.dc_y || 0) - y) < cell * 0.5);
+    const centers = placed.map((r: any) => PlacementFrame.origin(RackGeometry.roomPlacement(r)));
+    const occupied = (x: number, y: number) => centers.some((c) => Math.abs(c.x - x) < cell * 0.5 && Math.abs(c.y - y) < cell * 0.5);
     for (let y = cell / 2; y <= dc.depth_mm; y += cell) for (let x = cell / 2; x <= dc.width_mm; x += cell) if (!occupied(x, y)) return { x, y };
     return { x: cell / 2, y: cell / 2 };
   }
 
-  /** Câble « inter-DC » : ses deux bouts résolvent dans des salles différentes. */
-  protected isInterDc(c: any): boolean { const a = this.store.cableEndDcId(c, "A"), b = this.store.cableEndDcId(c, "B"); return !!(a && b && a !== b); }
+  /** Câble « inter-DC » : ses deux bouts résolvent dans des CONTENEURS différents (deux salles, ou une
+      salle et un étage — comparaison structurelle, un étage n'ayant pas d'id, doctrine §6.31). */
+  protected isInterDc(c: any): boolean { const a = this.store.cableEndContainer(c, "A"), b = this.store.cableEndContainer(c, "B"); return !!(a && b && !PlacementContainers.same(a, b)); }
 
   protected cableLabelShort(c: any): string {
     if (c.name) return c.name;
@@ -160,7 +173,11 @@ export abstract class DcPanels extends DcViews2D {
     const add = (c: any) => { if (!seen.has(c.id)) { seen.add(c.id); out.push({ cable: c }); } };
     dcIds.forEach((id) => this.resolvedCables(id).forEach((rc) => add(rc.cable)));
     if (dcIds.length === 1) this.outgoingCableStubs(dcIds[0]).forEach((st) => add(st.cable));
-    else { const dset = new Set(dcIds); this.store.all("cables").forEach((c: any) => { const da = this.store.cableEndDcId(c, "A"), db = this.store.cableEndDcId(c, "B"); if ((da && dset.has(da)) || (db && dset.has(db))) add(c); }); }
+    // ⚠ La portée de cette carte se dit en CONTENEURS AFFICHÉS et non en salles (décision D3, doctrine
+    // §6.32) : un câble aboutissant sur un posé d'ÉTAGE est DESSINÉ dès que cet étage est visible, et une
+    // carte qui prétend piloter les câbles de la vue doit lister ceux qu'elle montre. La restriction aux
+    // salles datait de §6.27, quand la localisation elle-même s'y limitait.
+    else { this.store.all("cables").forEach((c: any) => { if (this.containerShown(this.store.cableEndContainer(c, "A"), dc) || this.containerShown(this.store.cableEndContainer(c, "B"), dc)) add(c); }); }
     return out;
   }
 
@@ -713,15 +730,17 @@ export abstract class DcPanels extends DcViews2D {
         this.btn("◎", () => delSel(ids()), I18n.t("dc.panels.eyeHideTitle", { what })),
       );
     };
-    // FAISCEAUX (trunks) dont une extrémité (patch) touche les salles affichées — mêmes ◉/◎ que les réseaux
+    // FAISCEAUX (trunks) dont une extrémité (patch) touche un CONTENEUR AFFICHÉ — mêmes ◉/◎ que les réseaux
     // (la sélection partage `selCables` : ids uniques toutes collections). Avant le retour anticipé : une salle
     // peut n'avoir AUCUN câble raccordable mais des trunks à piloter.
-    const shownDcIds = new Set(this.displayedDcIds(dc));
-    const trunkIds = () => this.store.all("cableBundles").filter((b: any) => {
-      const da = b.endpoint_a_equipment_id ? this.store.equipmentDcId(b.endpoint_a_equipment_id) : null;
-      const db = b.endpoint_b_equipment_id ? this.store.equipmentDcId(b.endpoint_b_equipment_id) : null;
-      return (da != null && shownDcIds.has(da)) || (db != null && shownDcIds.has(db));
-    }).map((b: any) => b.id);
+    // ⚠ DÉCISION D3 : l'appartenance à « ce qui est affiché » se dit en CONTENEURS, pas en ids de salles — un
+    // ÉTAGE n'a pas d'id (son identité est le couple bâtiment + étage), et un patch posé sur un étage affiché
+    // est aussi présent à l'écran qu'un patch d'une salle affichée. Le conteneur d'une extrémité se lit sur la
+    // CHAÎNE (`TrunkRouting.endpointContainer`, la MÊME source que le tracé), jamais sur le conteneur immédiat :
+    // celui d'un patch monté en baie est sa BAIE, et une liaison ne traverse pas les baies (§6.31).
+    const trunkIds = () => this.store.all("cableBundles").filter((b: any) =>
+      this.containerShown(this.trunks.endpointContainer(b, "A"), dc) || this.containerShown(this.trunks.endpointContainer(b, "B"), dc),
+    ).map((b: any) => b.id);
     if (trunkIds().length) {
       const row = document.createElement("div"); row.className = "dc-layer-row";
       const ttx = document.createElement("span"); ttx.className = "grow"; ttx.textContent = I18n.t("dc.panels.trunksLabel", { n: trunkIds().length });
@@ -755,8 +774,16 @@ export abstract class DcPanels extends DcViews2D {
     resolved.forEach((rc) => { const pa: any = this.store.get("ports", rc.cable.from_port_id), pb: any = this.store.get("ports", rc.cable.to_port_id); if (pa) eqIds.add(pa.equipment_id); if (pb) eqIds.add(pb.equipment_id); });
     const eqOpts = [...eqIds].map((id) => this.store.get("equipments", id)).filter(Boolean).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
     if (this._cableEqFilter && !eqIds.has(this._cableEqFilter)) this._cableEqFilter = "";
-    const eqSel = FormControls.select([{ value: "", label: I18n.t("dc.panels.allEquipments") }].concat(eqOpts.map((e: any) => ({ value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (multi ? " · " + this.store.dcName(this.store.equipmentDcId(e)) : "") }))), this._cableEqFilter);
-    eqSel.style.cssText = "width:100%;margin-top:8px;font-size:11px"; eqSel.onchange = () => { this._cableEqFilter = eqSel.value; this.render(); };
+    // Suffixe d'emplacement (mode multi-salles) : « Salle A », ou « Bât. X · ét. 1 » pour un posé d'étage
+    // (décision D4, doctrine §6.29). ⚠ PARITÉ — ce site n'avait AUCUNE garde de nullité : `dcName(null)`
+    // rendait « ? » pour un équipement sans salle. On conserve ce repli à l'identique en le demandant à la
+    // MÊME fonction plutôt qu'en écrivant « ? » en dur, qui figerait ici une valeur définie ailleurs.
+    const emplacementDe = (e: any) => this.store.equipmentContainerLabel(e) || this.store.dcName(null);
+    // Le filtre porte sur des ÉQUIPEMENTS (des entités) → sélecteur à RECHERCHE (principe n°14) : la
+    // liste grossit avec les équipements d'étage et ses libellés portent l'emplacement, un `<select>`
+    // n'y était plus praticable. Options et ordre inchangés.
+    const eqSel = FormControls.entityPicker([{ value: "", label: I18n.t("dc.panels.allEquipments") }].concat(eqOpts.map((e: any) => ({ value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (multi ? " · " + emplacementDe(e) : "") }))), this._cableEqFilter);
+    eqSel.style.marginTop = "8px"; eqSel.onchange = () => { this._cableEqFilter = eqSel.value; this.render(); };
     box.appendChild(eqSel);
     const search = document.createElement("input"); search.type = "text"; search.className = "search-input"; search.placeholder = I18n.t("dc.panels.filterList"); search.style.cssText = "width:100%;margin:6px 0"; search.value = this._cableSearch;
     search.oninput = () => { this._cableSearch = search.value; this.renderCableList(listWrap, resolved); };
@@ -878,6 +905,24 @@ export abstract class DcPanels extends DcViews2D {
       const colSel = FormControls.select([{ value: "face", label: I18n.t("dc.panels.byFace") }, { value: "group", label: I18n.t("dc.panels.byGroup") }, { value: "type", label: I18n.t("dc.panels.byType") }], this.colorMode);
       colSel.onchange = () => { this.colorMode = colSel.value as any; r3(); };
       colorRow.append(colTxt, colSel); box.appendChild(colorRow);
+      // ÉCHELLE INTER-SITES (doctrine `docs/placement.md` §6.9). Les distances entre bâtiments sont
+      // GÉOGRAPHIQUES, sans commune mesure avec un monde en millimètres : le curseur se lit « 1 km réel
+      // = N m dans le monde 3D » — l'unité de la doctrine, bien plus parlante qu'un facteur 1/100. La
+      // bascule LOGARITHMIQUE, juste à côté, rapproche des sites très éloignés qu'une échelle linéaire
+      // rendrait inexploitables (un site à 200 km projetterait le reste du monde hors du champ).
+      // Ce sont des réglages d'AFFICHAGE — ils ne touchent pas le document — mais ils déplacent la
+      // GÉOMÉTRIE du monde : d'où le rebuild complet, et le choix de ne le déclencher qu'au RELÂCHEMENT
+      // du curseur (`onChange`) et non à chaque cran — reconstruire la scène à chaque pixel gèlerait l'UI.
+      box.appendChild(this.slider(
+        I18n.t("dc.panels.sSiteScale"), this.siteScaleKm, SITE_SCALE_MIN_M_PER_KM, SITE_SCALE_MAX_M_PER_KM, 1,
+        (val) => I18n.t("dc.panels.sSiteScaleFmt", { m: Math.round(val) }),
+        (val) => { this.siteScaleKm = Math.round(val); },
+        () => { this.persistView(); r3(); },
+      ));
+      const logRow = document.createElement("div"); logRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px";
+      const logTxt = document.createElement("span"); logTxt.className = "grow"; logTxt.textContent = I18n.t("dc.panels.siteScaleMode");
+      const logTg = FormControls.toggle(I18n.t("dc.panels.siteScaleLog"), this.siteScaleLog, (val) => { this.siteScaleLog = val; this.persistView(); r3(); }, { title: I18n.t("dc.panels.siteScaleLogTip") });
+      logRow.append(logTxt, logTg); box.appendChild(logRow);
       box.appendChild(this.btn(I18n.t("dc.panels.recenterRoom"), () => { this.camTarget = null; this.hidden3dRacks.clear(); this.scale = null; if (this.useWebGL && this._three) this._three.recenter(); else this.render(); }));
     }
     return box;

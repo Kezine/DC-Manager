@@ -5,13 +5,16 @@
    ============================================================================= */
 
 /* ---- géométrie de base ---- */
-export const U_MM = 44.45;                    // hauteur d'un U (mm)
+/* Cotes GÉNÉRALES de baie : la source unique est `src-shared/RackConstants` (la validation partagée en
+   dépend autant que la géométrie du front). Elles étaient DÉCLARÉES ici et RÉPLIQUÉES là-bas ; le sens
+   de la dépendance suit désormais celui que les cotes d'étagère suivaient déjà (cf. plus bas).
+   ⚠ Les noms HISTORIQUES du front sont conservés par ALIAS : ce lot déduplique des VALEURS, il ne
+   renomme pas une API que des dizaines de fichiers importent. */
+export { U_MM, RACK_EAR_MM, RACK_EAR_STANDOFF_MM } from "../../src-shared/RackConstants";
+export { RACK_MOUNT_WIDTH_MM as RACK_MOUNT_WIDTH, RACK_DEPTH_DEFAULT_MM as RACK_DEPTH_DEFAULT } from "../../src-shared/RackConstants";
+import { U_MM } from "../../src-shared/RackConstants";   // utilisée plus bas (WALL_COL_MIN)
 export const RACK_WIDTH_DEFAULT = 600;        // largeur EXTÉRIEURE de rack par défaut (mm)
 export const RACK_MOUNT_MARGIN_DEFAULT = 50;  // marge par défaut (mm) — repli latéral ET vertical (≤ v108)
-export const RACK_MOUNT_WIDTH = 482.6;        // entraxe des rails 19″ (mm) = largeur zone de montage
-export const RACK_EAR_MM = 15;                // largeur d'une oreille de montage, par côté (mm)
-export const RACK_EAR_STANDOFF_MM = 3;        // épaisseur standard RÉSERVÉE aux oreilles DEVANT la cage : la façade de tout occupant (équipement ou pseudo) est posée à cette distance du plan de montage — les oreilles remplissent la réserve, dans la continuité de la face, sans collision avec les montants
-export const RACK_DEPTH_DEFAULT = 1000;       // profondeur EXTÉRIEURE par défaut (mm)
 export const RACK_DEPTHS = [600, 800, 1000, 1200];
 export const RACK_ORIENTATIONS = [0, 90, 180, 270];   // pas de 90° (sens horaire)
 /** Faces de baie (simple / double). Libellés i18n (résolus au rendu, cf. domaine `domain`). */
@@ -250,9 +253,10 @@ export const TRAY_TYPES: TrayTypeDef[] = [
   { id: "dual", labelKey: "domain.trayType.dual" },
   { id: "cantilever", labelKey: "domain.trayType.cantilever" },
 ];
-export const TRAY_DEPTH_DEFAULT_MM = 450;   // longueur de plateau par défaut d'une étagère en porte-à-faux (mm)
-export const TRAY_SHEET_RESERVE_MM = 5;     // réserve de hauteur INUTILISABLE au ras du plateau (tôle + renforts transversaux du tray)
-export const TRAY_GUSSET_CLEARANCE_MM = 4;  // garde LATÉRALE (mm) de chaque côté réservée aux renforts (porte-à-faux) : les équipements posés n'y empiètent pas
+/* Cotes PROPRES à l'étagère : elles vivent désormais dans `src-shared/TrayGeometry` (source unique
+   consommée à la fois par le rendu et par la validation partagée — cf. docs/placement.md §6.7) et sont
+   simplement RÉ-EXPORTÉES ici, pour que les consommateurs front gardent le même point d'accès. */
+export { TRAY_DEPTH_DEFAULT_MM, TRAY_SHEET_RESERVE_MM, TRAY_GUSSET_CLEARANCE_MM } from "../../src-shared/TrayGeometry";
 
 export const RACK_ITEM_KINDS: RackItemKindDef[] = [
   { id: "blank",     labelKey: "domain.rackItemKind.blank", icon: `<rect x="2" y="8" width="20" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="5.5" cy="12" r="1.1" fill="currentColor"/><circle cx="18.5" cy="12" r="1.1" fill="currentColor"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` },

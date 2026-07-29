@@ -3,7 +3,12 @@ import { Normalize } from "../../core/Normalize";
 import { RackGeometry } from "../../geometry/RackGeometry";
 import { RackDoorGeometry } from "../../geometry/RackDoorGeometry";
 import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
+// CONTENEUR SALLE : `origin()` donne le centre d'un contenu en local salle. Le repli « position absente ⇒
+// demi-empreinte » est la convention QUE CE DESSIN A FIXÉE (docs/placement.md §6.12) — il ne la réécrit plus,
+// il la LIT au même endroit que le cadrage caméra et la résolution des ports.
+import { PlacementFrame } from "../../geometry/PlacementFrame";
 import { FloorLayout } from "../../geometry/FloorLayout";
+import { PlacementContainers } from "../../../src-shared/PlacementContainers";
 import { Format } from "../../core/Format";
 import { Waypoint } from "../../models/Waypoint";
 import { PlacementLock } from "../../domain/PlacementLock";
@@ -68,7 +73,7 @@ export abstract class DcViews2D extends DcScene3D {
     {
       const onFloor = new Map<string, any>(); this.store.dcsOfFloor(loc, fl).forEach((d: any) => onFloor.set(d.id, d));
       const planOf = (dc: any, p: Vec3) => FloorLayout.roomLocalToPlan(dc, this.floor.roomPos(dc, cfg), p);
-      this.trunks.interDcTrunksFloor(onFloor, cfg, planOf).forEach((rt) => { if (this.trunkShown(rt)) this.drawTrunk2D(gRoot, { bundle: rt.bundle, pts: rt.pts, linePts: rt.pts }, rDot); });
+      this.trunks.interDcTrunksFloor(onFloor, cfg, PlacementContainers.floorOf(loc, fl), planOf).forEach((rt) => { if (this.trunkShown(rt)) this.drawTrunk2D(gRoot, { bundle: rt.bundle, pts: rt.pts, linePts: rt.pts }, rDot); });
     }
     // exits des salles de l'étage = points de connexion des câbles inter-DC
     if (this.showWaypoints) this.store.dcsOfFloor(loc, fl).forEach((d: any) => this.store.waypointsOfDc(d.id).forEach((wp: any) => { if (wp.wp_type === "exit" && this.store.waypointIsPlaced(wp)) gRoot.appendChild(this.floorExitNode(d, wp, cfg)); }));
@@ -83,26 +88,28 @@ export abstract class DcViews2D extends DcScene3D {
     this.uprightTexts();   // texte à l'endroit malgré la rotation/miroir de la vue
   }
 
-  /** Câbles inter-DC dont les DEUX bouts résolvent dans des salles de CET étage, en coordonnées PLAN :
-      port A → exits/OOB de la route → port B (réplique 2D de interDcRoutes via roomLocalToPlan / oobFloorPos). */
+  /** Câbles dont les DEUX bouts résolvent sur CET étage — dans une de ses salles, ou POSÉS À MÊME
+      l'étage —, en coordonnées PLAN : port A → exits/pins d'étage de la route → port B (réplique 2D
+      d'interDcRoutes via roomLocalToPlan / oobFloorPos). Décision D3 : l'étage dessiné est un conteneur
+      d'extrémité comme ses salles (doctrine §6.31). */
   protected interDcRoutesFloor(loc: string, fl: string, cfg: any): Array<{ cable: any; pts: Vec3[] }> {
     const onFloor = new Map<string, any>();
     this.store.dcsOfFloor(loc, fl).forEach((d: any) => onFloor.set(d.id, d));
     const planOf = (dc: any, p: Vec3) => FloorLayout.roomLocalToPlan(dc, this.floor.roomPos(dc, cfg), p);
+    const etage = PlacementContainers.floorOf(loc, fl);
     const out: Array<{ cable: any; pts: Vec3[] }> = [];
     this.store.all("cables").forEach((c: any) => {
       const r = this.store.cableRoute(c);
-      if (!r.valid || !r.hasExits || !r.dcA || !r.dcB) return;
-      const da = onFloor.get(r.dcA), db = onFloor.get(r.dcB);
-      if (!da || !db) return;   // au moins un bout hors de cet étage → non tracé ici
-      const a = this.resolver.resolvePort3D(c.from_port_id, r.dcA), b = this.resolver.resolvePort3D(c.to_port_id, r.dcB);
-      if (!a || !b) return;
-      const pts: Vec3[] = [planOf(da, { x: a.x, y: a.y, z: 0 })];
+      if (!r.valid || !r.hasExits) return;
+      const a = this.routing.planEndIn(onFloor, etage, r.containerA, planOf, (dcId) => this.resolver.resolvePort3D(c.from_port_id, dcId), () => this.routing.portOnFloorPlan(c.from_port_id, cfg));
+      const b = this.routing.planEndIn(onFloor, etage, r.containerB, planOf, (dcId) => this.resolver.resolvePort3D(c.to_port_id, dcId), () => this.routing.portOnFloorPlan(c.to_port_id, cfg));
+      if (!a || !b) return;   // au moins un bout hors de cet étage → non tracé ici
+      const pts: Vec3[] = [a];
       (r.steps || []).forEach((s: any) => {
         if (s.type === "floor") { const fp = FloorLayout.oobFloorPos(s.wp, cfg); pts.push({ x: fp.x, y: fp.y, z: 0 }); }
         else { const room = onFloor.get(s.wp.datacenter_id); if (room) { const al = this.resolver.waypointAnchor(s.wp); pts.push(planOf(room, { x: al.x, y: al.y, z: 0 })); } }
       });
-      pts.push(planOf(db, { x: b.x, y: b.y, z: 0 }));
+      pts.push(b);
       out.push({ cable: c, pts });
     });
     return out;
@@ -374,7 +381,7 @@ export abstract class DcViews2D extends DcScene3D {
       cavité comprise : les deux vues montrent désormais le MÊME débattement). Repère LOCAL de la baie. */
   protected doorSwingNode(r: any): SVGElement | null {
     const w = r.width_mm || RACK_WIDTH_DEFAULT, d = r.depth || RACK_DEPTH_DEFAULT;
-    const cx = (r.dc_x != null) ? r.dc_x : w / 2, cy = (r.dc_y != null) ? r.dc_y : d / 2, o = Normalize.rackOrientation(r.orientation);
+    const c = PlacementFrame.origin(RackGeometry.roomPlacement(r)), cx = c.x, cy = c.y, o = Normalize.rackOrientation(r.orientation);
     const grp = Dom.svg("g", { transform: `translate(${cx} ${cy}) rotate(${o})`, "pointer-events": "none" });
     let any = false;
     (["front", "rear"] as const).forEach((face) => {
@@ -395,7 +402,7 @@ export abstract class DcViews2D extends DcScene3D {
 
   protected rackNode(r: any): SVGElement {
     const w = r.width_mm || RACK_WIDTH_DEFAULT, d = r.depth || RACK_DEPTH_DEFAULT;
-    const cx = (r.dc_x != null) ? r.dc_x : w / 2, cy = (r.dc_y != null) ? r.dc_y : d / 2, o = Normalize.rackOrientation(r.orientation);
+    const c = PlacementFrame.origin(RackGeometry.roomPlacement(r)), cx = c.x, cy = c.y, o = Normalize.rackOrientation(r.orientation);
     // châssis OUVERT (has_caps=false) : vu de dessus, le TOIT est absent → corps quasi transparent (on voit le
     // sol au travers) + contour tireté. Attribut PHYSIQUE (parité avec le rendu fantôme 3D), pas un toggle de vue.
     const grp = Dom.svg("g", { class: "dc-rack" + (this.selRackId === r.id ? " sel" : "") + (r.has_caps === false ? " capless" : ""), transform: `translate(${cx} ${cy}) rotate(${o})`, "data-rack": r.id });
@@ -410,7 +417,7 @@ export abstract class DcViews2D extends DcScene3D {
 
   protected equipNode(e: any): SVGElement {
     const b = FreeEquipGeometry.box(e), o = Normalize.rackOrientation(e.dc_orientation);
-    const cx = (e.dc_x != null) ? e.dc_x : b.w / 2, cy = (e.dc_y != null) ? e.dc_y : b.d / 2;
+    const c = PlacementFrame.origin(FreeEquipGeometry.roomPlacement(e)), cx = c.x, cy = c.y;
     const grp = Dom.svg("g", { class: "dc-equip" + (this.selEquipId === e.id ? " sel" : ""), transform: `translate(${cx} ${cy}) rotate(${o})`, "data-equip": e.id });
     grp.appendChild(Dom.svg("rect", { class: "dc-equip-body", x: -b.w / 2, y: -b.d / 2, width: b.w, height: b.d, rx: Math.min(b.w, b.d) * 0.04 }));
     grp.appendChild(Dom.svg("rect", { class: "dc-equip-face", x: -b.w / 2, y: -b.d / 2, width: b.w, height: Math.max(15, b.d * 0.1) }));   // liseré = face AVANT (−Y)

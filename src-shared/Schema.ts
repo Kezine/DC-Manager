@@ -6,8 +6,16 @@
    Désormais la LISTE canonique des collections, les champs tableau, la normalisation de
    recherche et la taille de page vivent ICI, et les deux côtés s'y réfèrent.
 
-   Contrainte `shared/` : fichier AUTO-SUFFISANT (aucun import relatif) pour compiler à la
-   fois sous le front (résolution bundler) et le serveur (NodeNext, extensions `.js`).
+   Portée `shared/` : TS PUR (ni DOM ni Node), compilé des DEUX côtés — front (résolution
+   *bundler*) et serveur (NodeNext). Ce fichier n'importe rien : c'est un CONSTAT, plus une
+   contrainte. L'auto-suffisance de `src-shared/` est LEVÉE (cf. `CLAUDE.md` § « Code partagé
+   front/back ») — un import relatif vers un autre fichier partagé est AUTORISÉ, à une
+   condition IMPÉRATIVE : écrire le spécificateur avec l'extension `.js`
+   (`import { X } from "./Foo.js"` pour un fichier `Foo.ts`). NodeNext l'EXIGE côté serveur ;
+   l'omettre compile côté front puis CASSE le build serveur.
+   ⚠ Donc : ne JAMAIS dupliquer ici une règle qui vit déjà dans un autre fichier partagé au
+   motif de « rester auto-suffisant » — c'est exactement la dette que les lots de
+   déduplication (`TrayGeometry`, `RackDepthPolicy`) ont eu à résorber.
    ============================================================================ */
 
 /** Schéma des données (membres statiques) — l'API serveur et la couche données front en dépendent. */

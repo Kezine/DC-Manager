@@ -1,7 +1,7 @@
 /* Tests modules — entités, Store (CRUD, cascade, undo, routes, spares, sites…), helpers core.
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, WebglHostVisibility, OptionSearch, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Entités : normalisation au constructeur", async () => {
@@ -98,6 +98,30 @@ module.exports = async () => {
     ck.eq(s.get("ports", p2.id), null, "port 2 supprimé (cascade)");
     ck.eq(s.get("cables", cab.id), null, "câble supprimé (cascade, dédup)");
   }
+  {
+    /* CASCADE RÉCURSIVE de bout en bout, à travers l'EXÉCUTEUR du mode fichier (Store.remove) :
+       un breakout IMBRIQUÉ (trunk → lane → sous-lane) doit partir en ENTIER. Avant la récursion, la
+       règle portée par `ports` n'était rejouée sur aucune lane supprimée : la sous-lane survivait,
+       orpheline, avec son câble (docs/placement.md §6.16). */
+    const s = await makeStore();
+    const eq = await s.create("equipments", { name: "sw-breakout" });
+    const peer = await s.create("equipments", { name: "peer" });
+    const farA = await s.create("ports", { equipment_id: peer.id, name: "far-a" });
+    const farB = await s.create("ports", { equipment_id: peer.id, name: "far-b" });   // un port ne porte qu'UN câble
+    const trunk = await s.create("ports", { equipment_id: eq.id, name: "Trunk" });
+    const lane = await s.create("ports", { equipment_id: eq.id, name: "Trunk/1", parent_port_id: trunk.id, lane: 1 });
+    const sub = await s.create("ports", { equipment_id: eq.id, name: "Trunk/1/1", parent_port_id: lane.id, lane: 1 });
+    const cLane = await s.create("cables", { from_port_id: lane.id, to_port_id: farA.id });
+    const cSub = await s.create("cables", { from_port_id: sub.id, to_port_id: farB.id });
+    await s.remove("ports", trunk.id);
+    ck.eq(s.get("ports", trunk.id), null, "breakout : trunk supprimé");
+    ck.eq(s.get("ports", lane.id), null, "breakout : lane supprimée (1er niveau)");
+    ck.eq(s.get("ports", sub.id), null, "breakout IMBRIQUÉ : sous-lane supprimée (récursion)");
+    ck.eq(s.get("cables", cLane.id), null, "breakout : câble de la lane supprimé");
+    ck.eq(s.get("cables", cSub.id), null, "breakout IMBRIQUÉ : câble de la sous-lane supprimé (récursion)");
+    ck(!!s.get("ports", farA.id), "breakout : le port distant SURVIT (rien au-delà de la chaîne)");
+    ck(!!s.get("equipments", peer.id), "breakout : l'équipement distant SURVIT (le rayon d'action reste borné)");
+  }
   });
 
   await section("Store : rechargement granulaire (P2 — reloadCollections / reloadMeta)", async () => {
@@ -193,9 +217,9 @@ module.exports = async () => {
     // clone qui aurait GARDÉ la position de l'original serait REJETÉ (chevauchement V6e).
     const fetch = (coll, id) => s.get(coll, id) || null;
     const find = (coll, field, value) => s.findByField(coll, field, value);
-    ck.eq(Validation.DataValidator.validateRecord("equipments", c2.toJSON(), fetch, find).length, 0, "clone posé : conforme (validation partagée, autorité serveur)");
+    ck.eq(Validation.DataValidator.validateRecord("equipments", c2.toJSON(), fetch, find, VALIDATION_COLLABORATORS).length, 0, "clone posé : conforme (validation partagée, autorité serveur)");
     const overlapping = Object.assign({}, c2.toJSON(), { placement_mode: "tray", tray_item_id: tray.id, tray_x: 10, tray_y: 10 });
-    ck(Validation.DataValidator.validateRecord("equipments", overlapping, fetch, find).some((e) => /[Cc]hevauche/.test(e.message)), "contre-preuve : même position que l'original → rejet V6e (le serveur refuserait)");
+    ck(Validation.DataValidator.validateRecord("equipments", overlapping, fetch, find, VALIDATION_COLLABORATORS).some((e) => /[Cc]hevauche/.test(e.message)), "contre-preuve : même position que l'original → rejet V6e (le serveur refuserait)");
     // CLONE GÉNÉRIQUE (cloneSimple) : passe désormais par la validation → un DOUBLON en violation de portée est
     // REFUSÉ localement (plus de « copie locale appliquée mais refusée par le serveur »). Brosse au même U → V6c.
     const brush = await s.create("waypoints", { kind: "brush", wp_type: "datacenter", datacenter_id: dc.id, rack_id: rk2.id, rack_u: 20, u_height: 2, depth_mm: 100 });
@@ -232,6 +256,154 @@ module.exports = async () => {
     ]);
     ck.eq(nmove, 2, "updateBatch conscient du lot : repositionnement croisé accepté (pas de faux chevauchement)");
     ck(s.get("equipments", eqL.id).tray_x === 120 && s.get("equipments", eqR.id).tray_x === 250, "updateBatch : les deux positions appliquées");
+  }
+  });
+
+  await section("Store : pose sur étagère refusée par le VRAI chemin d'écriture (géométrie partagée injectée)", async () => {
+  {
+    // La géométrie d'étagère est un COLLABORATEUR injecté dans la validation partagée (le fichier
+    // `src-shared/DataValidation` ne peut pas l'importer — cf. docs/placement.md §6.7). On le prouve ICI
+    // par le VRAI chemin d'écriture du Store, et non par un `validateRecord` appelé à la main avec un
+    // collaborateur fabriqué pour le test : c'est le Store qui doit l'injecter, pas le test.
+    const s = await makeStore();
+    const dc = await s.create("datacenters", { name: "DC" });
+    const rack = await s.create("racks", { name: "RK", datacenter_id: dc.id, dc_x: 500, dc_y: 500, depth: 1000, cage_depth_mm: 900, sides: "dual" });
+    const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", tray_type: "cantilever", u: 10, u_height: 3, tray_u: 1, depth_mm: 400 });
+    const pose = (props) => s.create("equipments", { dim_mode: "free", placement_mode: "tray", tray_item_id: tray.id, ...props });
+    // plateau porte-à-faux : 444,6 × 400 mm utilisables, 128,35 mm de hauteur libre (3 U − 5 mm de tôle)
+    const ok = await pose({ name: "tient", tray_x: 0, tray_y: 0, free_w_mm: 200, free_l_mm: 300, free_h_mm: 80 });
+    ck(!!ok, "équipement conforme → CRÉÉ (la géométrie injectée ne bloque pas ce qui tient)");
+    ck.eq(await pose({ name: "trop large", tray_x: 0, tray_y: 0, free_w_mm: 600, free_l_mm: 100, free_h_mm: 80 }), null, "empreinte 600 > plateau 444,6 → REFUSÉE à l'écriture");
+    ck.eq(await pose({ name: "trop haut", tray_x: 0, tray_y: 0, free_w_mm: 100, free_l_mm: 100, free_h_mm: 150 }), null, "hauteur 150 > 128,35 mm libres → REFUSÉE");
+    ck.eq(await pose({ name: "hors plateau", tray_x: 400, tray_y: 0, free_w_mm: 200, free_l_mm: 100, free_h_mm: 80 }), null, "position x = 400 + 200 de large → REFUSÉE (débord)");
+    ck.eq(await pose({ name: "chevauche", tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 }), null, "chevauche l'équipement déjà posé → REFUSÉE (V6e)");
+    ck.eq(s.equipmentsOnTray(tray.id).length, 1, "aucun refus n'a laissé de trace dans le cache local");
+    // ROTATION : la même empreinte, pivotée, cesse de tenir en largeur — le VERDICT suit ce qui est DESSINÉ.
+    ck(!!(await pose({ name: "profond droit", tray_x: 250, tray_y: 0, free_w_mm: 150, free_l_mm: 350, free_h_mm: 40 })), "150 × 350 à x = 250 → tient");
+    ck.eq(await pose({ name: "profond pivoté", tray_x: 250, tray_y: 0, free_w_mm: 150, free_l_mm: 350, free_h_mm: 40, dc_orientation: 90 }), null, "…la MÊME pivotée à 90° (350 de large) → REFUSÉE");
+  }
+  });
+
+  await section("PlacementContainers : chaîne d'attache — PARITÉ STRICTE avec la règle « salle » historique", async () => {
+  {
+    const { PlacementContainers } = SHARED("src-shared/PlacementContainers.js");
+    const s = await makeStore();
+    const fetch = (coll, id) => s.get(coll, id);
+
+    const dc = await s.create("datacenters", { name: "Salle A", location: "liege", floor: "0" });
+    const rack = await s.create("racks", { name: "R1", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dc.id, dc_x: 500, dc_y: 500 });
+    const rackPool = await s.create("racks", { name: "R-pool", width_mm: 600, depth: 1000, u_count: 42, location: "liege" });   // baie HORS salle
+    const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", side: "front", u: 10, u_height: 2 });
+
+    /* Un cas par MODE de placement, bords compris — c'est le jeu qui fait foi pour la migration.
+       `attendu` = la salle EXPLICITEMENT attendue, figée à la main d'après la règle HISTORIQUE
+       (`Store.equipmentDcId`, retiré au lot 7 / doctrine §6.33 : il projetait la chaîne sur son maillon
+       « salle »). On n'a JAMAIS écrit « === s.equipmentDcId(e) » — la comparaison aurait été
+       tautologique dès la délégation de cette méthode à la chaîne, et elle serait aujourd'hui
+       impossible. C'est bien ce jeu de constantes qui porte la parité, et il survit donc au retrait. */
+    const cases = [];
+    const add = async (label, attendu, payload) => { cases.push({ label, attendu, e: await s.create("equipments", Object.assign({ name: label }, payload)) }); };
+    await add("racké à un U", () => dc.id, { placement_mode: "rack", rack_id: rack.id, rack_u: 5 });
+    await add("pool de baie (rack_id SANS rack_u)", () => null, { placement_mode: "rack", rack_id: rack.id });
+    await add("marge latérale", () => dc.id, { placement_mode: "side", rack_id: rack.id });
+    await add("paroi", () => dc.id, { placement_mode: "wall", rack_id: rack.id });
+    await add("posé sur étagère", () => dc.id, { placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 });
+    await add("libre EN salle", () => dc.id, { placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 100, dc_y: 100 });
+    await add("libre NON placé", () => null, { placement_mode: "manual", dim_mode: "free" });
+    await add("posé sur un ÉTAGE", () => null, { placement_mode: "floor", location: "liege", floor: "1", floor_x: 200, floor_y: 300 });
+    await add("racké dans une baie HORS salle", () => null, { placement_mode: "rack", rack_id: rackPool.id, rack_u: 3 });
+
+    /* La RÈGLE HISTORIQUE, transcrite ICI et nulle part ailleurs (le dépôt ne la porte plus, §6.33) :
+       la chaîne d'attache PROJETÉE sur son maillon « salle ». Elle sert d'oracle de parité. */
+    const salleDeLaChaine = (eq) => { const r = PlacementContainers.chain(eq, fetch).find((c) => c.kind === "room"); return r ? r.id : null; };
+    /* La chaîne rend la salle ATTENDUE, mode par mode — et le point d'entrée VIVANT de l'application
+       (`equipmentNamedContainer`, RESTREINT à « salle » comme le font les trois chemins salle de
+       « Localiser ») rend exactement la même. C'est ce couple qui remplace l'ancienne comparaison entre
+       deux implémentations : une constante écrite à la main d'un côté, l'API réelle de l'autre. */
+    cases.forEach(({ label, attendu, e }) => {
+      ck.eq(salleDeLaChaine(e), attendu(), "salle attendue — " + label);
+      const k = s.equipmentNamedContainer(e);
+      ck.eq(k && k.kind === "room" ? k.id : null, attendu(), "Store.equipmentNamedContainer restreint à la salle — " + label);
+    });
+
+    // STRUCTURE de la chaîne : une étagère remonte étagère → baie → salle → étage → bâtiment.
+    const byLabel = (l) => cases.find((c) => c.label === l).e;
+    const kinds = (e) => JSON.stringify(PlacementContainers.chain(e, fetch).map((c) => c.kind));
+    ck.eq(kinds(byLabel("posé sur étagère")), JSON.stringify(["tray", "rack", "room", "floor", "building"]), "chaîne complète depuis une étagère");
+    // Une baie HORS salle n'est pas « nulle part » : elle est rattachée au BÂTIMENT — sans faire apparaître
+    // de salle, ce qui préserve la parité (cf. doctrine §6.3, disparition de l'état « non placé »).
+    ck.eq(kinds(byLabel("racké dans une baie HORS salle")), JSON.stringify(["rack", "building"]), "baie hors salle → bâtiment, aucune salle");
+    ck.eq(kinds(byLabel("posé sur un ÉTAGE")), JSON.stringify(["floor", "building"]), "étage → bâtiment, aucune salle");
+    ck.eq(kinds(byLabel("pool de baie (rack_id SANS rack_u)")), JSON.stringify([]), "pool de baie : aucun conteneur localisable");
+
+    // L'ÉTAGE est identifié par le COUPLE (bâtiment, étage), jamais par un id : un étage non configuré n'a
+    // pas d'enregistrement `floors`.
+    const fc = PlacementContainers.of(byLabel("posé sur un ÉTAGE"));
+    ck(fc && fc.kind === "floor" && fc.location === "liege" && fc.floor === "1", "étage = conteneur (bâtiment, étage)");
+    // Étage « 0 » (rez-de-chaussée) PRÉSERVÉ — la convention `String(x || "")` l'écraserait en chaîne vide.
+    const ground = PlacementContainers.of({ placement_mode: "floor", location: "liege", floor: 0 });
+    ck(ground && ground.floor === "0", "étage 0 préservé (et non écrasé en chaîne vide)");
+
+    // Égalité STRUCTURELLE (pas d'id composite à comparer).
+    ck(PlacementContainers.same(fc, { kind: "floor", location: "liege", floor: "1" }), "same() : mêmes bâtiment+étage");
+    ck(!PlacementContainers.same(fc, { kind: "floor", location: "liege", floor: "2" }), "same() : étages différents");
+    ck(!PlacementContainers.same(fc, { kind: "room", id: "liege" }), "same() : natures différentes");
+
+    // Chaîne BORNÉE (garde défensive contre une donnée cyclique — la hiérarchie saine décroît toujours).
+    cases.forEach(({ label, e }) => ck(PlacementContainers.chain(e, fetch).length <= PlacementContainers.MAX_DEPTH, "chaîne bornée — " + label));
+    // Référence PENDANTE : une étagère dont la baie a disparu ne doit rien inventer.
+    ck.eq(salleDeLaChaine({ placement_mode: "tray", tray_item_id: "inexistant" }), null, "étagère fantôme → aucune salle");
+
+    /* ================= LA CLÉ GÉNÉRALISÉE — `Store.equipmentContainer` & co (lot 1 du câblage d'étage)
+       Le trio `*Container` rend le conteneur IMMÉDIAT, là où le trio `*DcId` PROJETTE la chaîne sur son
+       maillon « salle » et jette le reste. Les attentes ci-dessous sont EXPLICITES (le conteneur voulu,
+       écrit à la main) et non « === PlacementContainers.of(e) », qui serait tautologique — `Store` y
+       délègue. ================= */
+    const conteneurAttendu = {
+      "racké à un U": { kind: "rack", id: rack.id },
+      "pool de baie (rack_id SANS rack_u)": null,
+      "marge latérale": { kind: "rack", id: rack.id },
+      "paroi": { kind: "rack", id: rack.id },
+      "posé sur étagère": { kind: "tray", id: tray.id },
+      "libre EN salle": { kind: "room", id: dc.id },
+      "libre NON placé": null,
+      "posé sur un ÉTAGE": { kind: "floor", location: "liege", floor: "1" },
+      "racké dans une baie HORS salle": { kind: "rack", id: rackPool.id },
+    };
+    cases.forEach(({ label, e }) => {
+      ck.eq(JSON.stringify(s.equipmentContainer(e)), JSON.stringify(conteneurAttendu[label]), "conteneur immédiat attendu — " + label);
+    });
+
+    /* CE QUE LA GÉNÉRALISATION CHANGE, et c'est TOUT le sujet du chantier : deux placements ont un
+       conteneur parfaitement valide alors que la clé « salle » les déclare introuvables. C'est la
+       raison unique pour laquelle un équipement d'étage n'est pas câblable (doctrine §6.4). */
+    const gagnes = cases.filter(({ attendu, e }) => attendu() === null && s.equipmentContainer(e) !== null).map((c) => c.label);
+    ck.eq(JSON.stringify(gagnes.sort()), JSON.stringify(["posé sur un ÉTAGE", "racké dans une baie HORS salle"]),
+      "EXACTEMENT deux placements deviennent localisables : l'étage et la baie hors salle");
+    // …et RIEN ne se perd dans l'autre sens : tout ce qui avait une salle garde un conteneur.
+    const perdus = cases.filter(({ attendu, e }) => attendu() !== null && s.equipmentContainer(e) === null);
+    ck.eq(perdus.length, 0, "aucun placement localisable aujourd'hui ne devient introuvable");
+
+    // PORT et CÂBLE : mêmes règles, même priorité A-puis-B que l'historique `cableDcId` (le cadrage d'un
+    // câble à deux bouts placés ne devait pas se déplacer en généralisant les appelants — il ne l'a pas fait).
+    const eqEtage = byLabel("posé sur un ÉTAGE"), eqSalle = byLabel("libre EN salle");
+    const pEtage = await s.create("ports", { equipment_id: eqEtage.id, name: "p-etage" });
+    const pSalle = await s.create("ports", { equipment_id: eqSalle.id, name: "p-salle" });
+    ck.eq(JSON.stringify(s.portContainer(pEtage.id)), JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "portContainer : port d'un équipement d'ÉTAGE (là où l'historique portDcId rendait null)");
+    ck.eq(salleDeLaChaine(eqEtage), null, "…alors que sa chaîne ne traverse AUCUNE salle : c'est tout ce que voyait l'ancienne clé, et c'était le blocage");
+    ck.eq(JSON.stringify(s.portContainer(pSalle.id)), JSON.stringify({ kind: "room", id: dc.id }), "portContainer : port d'un équipement de salle");
+    ck.eq(s.portContainer("inexistant"), null, "portContainer : port inconnu → null (tolérant)");
+
+    const cab = await s.create("cables", { name: "c1", from_port_id: pEtage.id, to_port_id: pSalle.id });
+    ck.eq(JSON.stringify(s.cableContainer(cab)), JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "cableContainer : PREMIÈRE extrémité localisable (A), comme le faisait cableDcId");
+    // ⚠ Deux ports NEUFS : la règle de portée V6b n'autorise qu'UN câble par port — réutiliser les
+    // précédents ferait REFUSER la création, et `create` rend alors `null` en silence (cf. `FormSave`).
+    const pEtage2 = await s.create("ports", { equipment_id: eqEtage.id, name: "p-etage-2" });
+    const pSalle2 = await s.create("ports", { equipment_id: eqSalle.id, name: "p-salle-2" });
+    const cabInverse = await s.create("cables", { name: "c2", from_port_id: pSalle2.id, to_port_id: pEtage2.id });
+    ck.eq(JSON.stringify(s.cableContainer(cabInverse)), JSON.stringify({ kind: "room", id: dc.id }), "cableContainer : priorité A-puis-B RESPECTÉE (l'ordre des bouts décide)");
+    ck.eq(s.cableContainer({ from_port_id: null, to_port_id: null }), null, "cableContainer : aucun bout placé → null");
+    ck.eq(s.cableContainer("inexistant"), null, "cableContainer : câble inconnu → null (tolérant)");
   }
   });
 
@@ -299,19 +471,23 @@ module.exports = async () => {
     // deux salles SANS exits → invalide
     r = s.cableRoute({ from_port_id: pA1, to_port_id: pB1, waypoint_ids: [] });
     ck(!r.valid, "ports dans deux salles sans exits → invalide");
-    // route inter-salles exitA → OOB → exitB → valide, startDc/endDc
+    // route inter-conteneurs exitA → pin d'étage → exitB → valide, conteneurs de départ/arrivée
     r = s.cableRoute({ from_port_id: pA1, to_port_id: pB1, waypoint_ids: [exitA.id, oob.id, exitB.id] });
-    ck(r.valid && r.hasExits, "exit A → OOB → exit B → valide, hasExits");
-    ck.eq(r.startDc, dcA.id, "route : startDc = Salle A");
-    ck.eq(r.endDc, dcB.id, "route : endDc = Salle B");
-    // OOB hors d'un tronçon exit → invalide
+    ck(r.valid && r.hasExits, "exit A → pin d'étage → exit B → valide, hasExits");
+    ck.eq(JSON.stringify(r.startContainer), JSON.stringify({ kind: "room", id: dcA.id }), "route : conteneur de DÉPART = Salle A");
+    ck.eq(JSON.stringify(r.endContainer), JSON.stringify({ kind: "room", id: dcB.id }), "route : conteneur d'ARRIVÉE = Salle B");
+    /* ⚠ CHANGEMENT DE GRAMMAIRE VOULU (doctrine §6.31, décisions D2/D3). Un pin d'étage n'est plus refusé
+       faute d'exit PRÉCÉDENT : il NOMME l'étage sur lequel la route se trouve, et une route peut donc
+       commencer ET finir sur un étage. L'ancienne grammaire rendait `floor_outside` sur ce cas. */
     r = s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [oob.id] });
-    ck(!r.valid, "OOB hors d'une paire d'exits → invalide");
+    ck(r.valid, "pin d'étage SEUL → VALIDE (l'ancienne grammaire refusait par floor_outside)");
+    ck.eq(JSON.stringify(r.endContainer), JSON.stringify({ kind: "floor", location: "", floor: "1" }), "…et la route ARRIVE sur cet étage (conteneur = couple bâtiment+étage)");
     // exit non appairé → invalide
     r = s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [exitA.id] });
     ck(!r.valid, "exit non appairé → invalide");
     // -- CODES STABLES d'erreur + helpers (les appelants réagissent au code, PAS au libellé) --
-    ck.eq(s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [oob.id] }).errors[0].code, "floor_outside", "code : pin d'étage hors tronçon → floor_outside");
+    // `floor_outside` SUBSISTE, avec un sens resserré : un pin d'étage À L'INTÉRIEUR d'une salle.
+    ck.eq(s.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [dcWpA.id, oob.id] }).errors[0].code, "floor_outside", "code : pin d'étage À L'INTÉRIEUR d'une salle → floor_outside");
     ck.eq(r.errors.some((e) => e.code === "exit_unpaired"), true, "code : exit seul → exit_unpaired");
     // routeHasRoomBreak : waypoint de salle APRÈS l'exit de sa salle (exit terminal) → rupture de cohérence
     ck.eq(s.routeHasRoomBreak({ from_port_id: null, to_port_id: null, waypoint_ids: [exitA.id, dcWpA.id] }), true, "routeHasRoomBreak : wp de salle après son exit → true");
@@ -328,7 +504,7 @@ module.exports = async () => {
     ck.eq(s.cableMaxStatus({ from_port_id: pA1, to_port_id: null, cable_type_id: null, waypoint_ids: [] }), "brouillon", "cableMaxStatus(incomplet) → brouillon");
     // contrainte de salle d'un bout
     const k = s.cableSideConstraint({ from_port_id: null, to_port_id: pB1, waypoint_ids: [exitA.id, oob.id, exitB.id] }, "A");
-    ck.eq(k.dcId, dcA.id, "cableSideConstraint(A) impose la salle de départ");
+    ck.eq(JSON.stringify(k.container), JSON.stringify({ kind: "room", id: dcA.id }), "cableSideConstraint(A) impose le CONTENEUR de départ");
 
     // faisceaux : occupation du pool de fibres — piochée par les PORTS de patch (source UNIQUE des brins)
     const ct = s.all("cableTypes")[0];
@@ -375,29 +551,43 @@ module.exports = async () => {
     // #9 — cache de déduction invalidé à la mutation : changer le réseau du port change le résultat.
     await s.update("ports", pMulti.id, { network_ids: [netN.id], network_id: netN.id });
     ck.eq(s.cablePrimaryNetworkId(jm), netN.id, "#9 : cache réseau invalidé après mutation d'un port");
-    // equipmentDcId via baie hôte
+    /* SALLE d'un contenu = son conteneur de CHAÎNE restreint à « salle », l'expression exacte qu'emploient
+       les trois chemins salle de « Localiser » depuis le retrait du trio `*DcId` (doctrine §6.33). */
+    const salleDe = (eqOrId) => { const k = s.equipmentNamedContainer(eqOrId); return k && k.kind === "room" ? k.id : null; };
+    const salleDuPort = (pid) => { const p = s.get("ports", pid); return p ? salleDe(p.equipment_id) : null; };
+    // salle via baie hôte
     const eqInA = s.get("ports", pA1) ? s.get("equipments", s.get("ports", pA1).equipment_id) : null;
-    ck.eq(s.equipmentDcId(eqInA.id), dcA.id, "equipmentDcId(équipement racké) → salle de la baie");
-    // equipmentDcId via ÉTAGÈRE (tray) : posé sur une étagère d une baie placée → salle de la baie hôte.
+    ck.eq(salleDe(eqInA.id), dcA.id, "salle d'un équipement racké → salle de la baie");
+    // salle via ÉTAGÈRE (tray) : posé sur une étagère d une baie placée → salle de la baie hôte.
     // Bug corrigé : le placement tray retombait à null (« non placé »), bloquant un câble vers ce posé à « planifié ».
     const rkTray = await s.create("racks", { name: "RTray", u_count: 42, datacenter_id: dcA.id, dc_x: 500, dc_y: 500 });
     const trayIt = await s.create("rackItems", { rack_id: rkTray.id, kind: "tray", tray_type: "cantilever", u: 10, u_height: 3, tray_u: 1, depth_mm: 400 });
     const eqOnTray = await s.create("equipments", { name: "surEtagere", dim_mode: "free", placement_mode: "tray", tray_item_id: trayIt.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 });
-    ck.eq(s.equipmentDcId(eqOnTray.id), dcA.id, "equipmentDcId(posé sur étagère) → salle de la baie hôte (bug tray corrigé)");
+    ck.eq(salleDe(eqOnTray.id), dcA.id, "salle d'un posé sur étagère → salle de la baie hôte (bug tray corrigé)");
 
     // contrainte de placement (câblage) : un équipement LIBRE câblé intra-salle vers pA1 (Salle A)
     const eqX = await s.create("equipments", { name: "X" });
     const pX = (await s.create("ports", { equipment_id: eqX.id, name: "pX" })).id;
     const lien = await s.create("cables", { name: "lien", from_port_id: pX, to_port_id: pA1 });
-    // portDcId / cableDcId : résolveurs PARTAGÉS des boutons « Localiser en 3D » (parité locatePort/locateCable
-    // de la vue 3D) — à ce stade eqX est encore NON PLACÉ (il n'est mis en baie que plus bas).
-    ck.eq(s.portDcId(pA1), dcA.id, "portDcId : port d'un équipement racké → salle de la baie");
-    ck.eq(s.portDcId(pX), null, "portDcId : port d'un équipement non placé → null");
-    ck.eq(s.cableDcId(lien.id), dcA.id, "cableDcId : une extrémité localisable suffit → sa salle");
-    ck.eq(s.cableDcId(jm), null, "cableDcId : aucune extrémité en salle → null (bouton Localiser masqué)");
+    /* SALLE d'un PORT / d'une LIAISON : ce que résolvaient les anciens `portDcId`/`cableDcId`, résolveurs
+       partagés des boutons « Localiser en 3D » (parité locatePort/locateCable de la vue 3D). Ils sont
+       RETIRÉS (§6.33) ; leurs verdicts restent verrouillés ici, contre des salles écrites à la main.
+       À ce stade eqX est encore NON PLACÉ (il n'est mis en baie que plus bas). */
+    ck.eq(salleDuPort(pA1), dcA.id, "salle d'un port d'équipement racké → salle de la baie");
+    ck.eq(salleDuPort(pX), null, "salle d'un port d'équipement non placé → null");
+    ck.eq(salleDuPort(lien.from_port_id) || salleDuPort(lien.to_port_id), dcA.id, "liaison : une extrémité localisable suffit → sa salle (priorité A puis B)");
+    ck.eq(salleDuPort(jm.from_port_id) || salleDuPort(jm.to_port_id), null, "liaison : aucune extrémité en salle → null (bouton Localiser masqué)");
+    /* PARITÉ du chemin CONTENEUR sur une liaison de SALLE (§6.32) : le prédicat et l'extrémité retenue
+       reproduisent exactement le verdict historique — désormais épinglé à des constantes, l'ancienne
+       fonction n'étant plus là pour servir d'oracle vivant (§6.33). */
+    ck.eq(s.cableLocatable(lien.id), true, "cableLocatable : même verdict que l'ancien `!!cableDcId` sur une liaison de salle");
+    ck.eq(s.cableLocatableEnd(lien.id), pA1, "cableLocatableEnd : l'extrémité RETENUE est la première localisable — pX n'est pas placé, c'est donc pA1");
+    ck.eq(salleDuPort(s.cableLocatableEnd(lien.id)), dcA.id, "…et la salle qu'elle désigne est bien la Salle A, celle que cadrait `cableDcId` : le cadrage ne bouge pas");
+    ck.eq(s.cableLocatable(jm), false, "cableLocatable : aucune extrémité atteignable → false (parité `!!cableDcId`)");
+    ck.eq(s.cableLocatableEnd(jm), null, "…et aucune extrémité retenue");
     ck.eq(s.equipmentPlacementBlockedReason(eqX.id, dcA.id), null, "blockedReason : pose dans la salle câblée → autorisée");
     ck(typeof s.equipmentPlacementBlockedReason(eqX.id, dcB.id) === "string", "blockedReason : pose dans une AUTRE salle → bloquée");
-    ck(s.equipmentRequiredDcs(eqX.id).has(dcA.id), "equipmentRequiredDcs : contraint à la Salle A");
+    ck(s.equipmentRequiredContainers(eqX.id).some((x) => x.container.kind === "room" && x.container.id === dcA.id), "equipmentRequiredContainers : contraint à la Salle A");
     // applyCableBreaks : deux bouts dans des salles différentes SANS exits → câble cassé (bout distant déconnecté)
     const eqY = await s.create("equipments", { name: "Y", placement_mode: "rack", rack_id: rkB.id, rack_u: 5 });
     const pY = (await s.create("ports", { equipment_id: eqY.id, name: "pY" })).id;
@@ -409,6 +599,139 @@ module.exports = async () => {
     ck.eq(n, 1, "applyCableBreaks : 1 câble cassé");
     const brk2 = s.get("cables", brk.id);
     ck(brk2.status === "casse" && brk2.to_port_id === null, "applyCableBreaks : statut « cassé » + bout distant déconnecté");
+  }
+  });
+
+  await section("Grammaire de route : l'automate parle CONTENEURS (§6.31 — parité figée sur HEAD)", async () => {
+  {
+    /* Lot 5 du chantier « câblage des équipements d'étage » (décisions D2/D3/D4). L'automate tenait un
+       booléen `outside` refermé par un SECOND exit ; il tient maintenant un CONTENEUR, et un pin d'étage
+       ferme le tronçon en NOMMANT l'étage atteint. Deux familles d'assertions cohabitent ici :
+
+       — PARITÉ : les valeurs marquées « (HEAD) » ont été MESURÉES sur l'analyseur d'avant bascule,
+         régénéré depuis git (`git show HEAD:src-client/store/CableRouteAnalyzer.ts`, compilé à part) sur
+         EXACTEMENT cette scène, puis écrites EN DUR. Elles ne comparent donc pas la fonction à elle-même
+         (piège du lot 2 du chantier conteneur) : elles disent ce que l'analyse VALAIT, et doit valoir.
+         Le banc complet (66 420 analyses, 6 400 sans aucun étage, 0 divergence) a servi à établir qu'AUCUN
+         autre cas ne bouge ; ces cas-ci en sont les représentants figés.
+       — CHANGEMENTS VOULUS : marqués « (NOUVEAU) », avec l'ancien verdict rappelé en commentaire. */
+    const s = await makeStore();
+    const dcA = await s.create("datacenters", { name: "Salle A", location: "liege", floor: "1" });
+    const dcB = await s.create("datacenters", { name: "Salle B", location: "liege", floor: "1" });
+    const rkA = await s.create("racks", { name: "RA", u_count: 42, datacenter_id: dcA.id, dc_x: 500, dc_y: 500 });
+    const rkB = await s.create("racks", { name: "RB", u_count: 42, datacenter_id: dcB.id, dc_x: 500, dc_y: 500 });
+    const mk = async (nom, patch) => { const e = await s.create("equipments", Object.assign({ name: nom }, patch)); return { e, p: (await s.create("ports", { equipment_id: e.id, name: "p" + nom })).id }; };
+    const A = await mk("A", { placement_mode: "rack", rack_id: rkA.id, rack_u: 1 });
+    const A2 = await mk("A2", { placement_mode: "rack", rack_id: rkA.id, rack_u: 2 });
+    const B = await mk("B", { placement_mode: "rack", rack_id: rkB.id, rack_u: 1 });
+    const F1 = await mk("F1", { placement_mode: "floor", location: "liege", floor: "1", floor_x: 1000, floor_y: 1000 });
+    const F1b = await mk("F1b", { placement_mode: "floor", location: "liege", floor: "1", floor_x: 3000, floor_y: 1000 });
+    const F2 = await mk("F2", { placement_mode: "floor", location: "liege", floor: "2", floor_x: 1000, floor_y: 1000 });
+    const exA = await s.create("waypoints", { name: "sortieA", wp_type: "exit", datacenter_id: dcA.id, dc_x: 0, dc_y: 0 });
+    const exB = await s.create("waypoints", { name: "sortieB", wp_type: "exit", datacenter_id: dcB.id, dc_x: 0, dc_y: 0 });
+    const pin1 = await s.create("waypoints", { name: "gaine1", wp_type: "oob", location: "liege", floor: "1", floor_x: 2000, floor_y: 2000 });
+    const pin2 = await s.create("waypoints", { name: "gaine2", wp_type: "oob", location: "liege", floor: "2", floor_x: 2000, floor_y: 2000 });
+    const wpA = await s.create("waypoints", { name: "ptA", wp_type: "datacenter", datacenter_id: dcA.id, dc_x: 600, dc_y: 600 });
+
+    const salle = (d) => ({ kind: "room", id: d.id });
+    const etage = (f) => PlacementContainers.floorOf("liege", f);
+    const route = (fa, fb, wps) => s.cableRoute({ id: "sonde", from_port_id: fa, to_port_id: fb, waypoint_ids: wps });
+    const codes = (r) => r.errors.map((e) => e.code).join(",");
+    const bilan = (r) => JSON.stringify([codes(r), r.valid, r.hasExits, r.startContainer, r.endContainer, r.containerA, r.containerB]);
+    const attendu = (c, valid, hasExits, start, end, ca, cb) => JSON.stringify([c, valid, hasExits, start, end, ca, cb]);
+
+    /* ---------- PARITÉ (valeurs mesurées sur HEAD, écrites en dur) ---------- */
+    ck.eq(bilan(route(A.p, A2.p, [])), attendu("", true, false, null, null, salle(dcA), salle(dcA)),
+      "(HEAD) intra-salle sans waypoint : valide, sans exit, deux bouts en Salle A");
+    ck.eq(bilan(route(A.p, B.p, [exA.id, exB.id])), attendu("", true, true, salle(dcA), salle(dcB), salle(dcA), salle(dcB)),
+      "(HEAD) salle A → salle B par deux exits : valide, départ et arrivée déduits");
+    ck.eq(bilan(route(A.p, B.p, [exA.id, pin1.id, exB.id])), attendu("", true, true, salle(dcA), salle(dcB), salle(dcA), salle(dcB)),
+      "(HEAD) salle A → pin d'étage → salle B : le pin ne change ni le départ ni l'arrivée");
+    ck.eq(bilan(route(A.p, B.p, [])), attendu("ports_split", false, false, null, null, salle(dcA), salle(dcB)),
+      "(HEAD) deux salles sans exit → ports_split");
+    ck.eq(bilan(route(A.p, null, [exA.id])), attendu("exit_unpaired", false, true, salle(dcA), null, salle(dcA), null),
+      "(HEAD) exit seul → exit_unpaired (la route quitte sans arriver)");
+    ck.eq(codes(route(null, null, [exA.id, wpA.id])), "room_wp_outside,exit_unpaired",
+      "(HEAD) waypoint de salle APRÈS son exit → room_wp_outside + exit_unpaired");
+    ck.eq(codes(route(null, null, [wpA.id, pin1.id])), "floor_outside",
+      "(HEAD) pin d'étage à l'INTÉRIEUR d'une salle → floor_outside (seul cas où le code subsiste)");
+    ck.eq(codes(route(null, null, [exA.id, exA.id])), "exit_reentry",
+      "(HEAD) ré-entrée par l'exit de la salle quittée → exit_reentry SEUL (le second exit referme bien le tronçon)");
+    ck.eq(codes(route(null, null, [wpA.id, exB.id])), "exit_wrong_room,exit_unpaired",
+      "(HEAD) exit d'une AUTRE salle que le segment courant → exit_wrong_room");
+    ck.eq(s.cableRouteSummary(route(A.p, B.p, [exA.id, exB.id])), "⏏ Salle A → ⏏ Salle B",
+      "(HEAD) résumé d'une route entre deux salles : inchangé au caractère près");
+    /* Le résumé est devenu une CHAÎNE DE CONTENEURS ; le piège `same(null, null) === false` y mordrait.
+       Deux waypoints flottants ne franchissent aucune frontière : le résumé reste VIDE, comme sur HEAD. */
+    const flotA = await s.create("waypoints", { name: "flottant1" });
+    const flotB = await s.create("waypoints", { name: "flottant2" });
+    ck.eq(s.cableRouteSummary(route(null, null, [flotA.id, flotB.id])), "",
+      "(HEAD) deux waypoints NON POSÉS d'affilée : aucune étape au résumé (deux absences ne font pas une transition)");
+    ck.eq(codes(route(null, null, [flotA.id, flotB.id])), "unplaced,unplaced", "(HEAD) …et chacun est signalé « non posé »");
+
+    /* ---------- CHANGEMENTS VOULUS ---------- */
+    // (NOUVEAU) LE CAS DU LOT : une baie sort de sa salle et ARRIVE sur un étage. HEAD : exit_unpaired.
+    const versEtage = route(A.p, F1.p, [exA.id, pin1.id]);
+    ck.eq(bilan(versEtage), attendu("", true, true, salle(dcA), etage("1"), salle(dcA), etage("1")),
+      "(NOUVEAU) salle A → pin d'étage : VALIDE, la route ARRIVE sur l'étage (HEAD : exit_unpaired)");
+    ck.eq(s.cableContextValid({ from_port_id: A.p, to_port_id: F1.p, waypoint_ids: [exA.id, pin1.id] }), true,
+      "(NOUVEAU) …et le câble baie → posé d'étage est jugé COHÉRENT (HEAD : invalide → cassé au déplacement)");
+    // (NOUVEAU) symétrique : une route peut COMMENCER sur un étage. HEAD : floor_outside + exit_unpaired.
+    ck.eq(bilan(route(F1.p, A.p, [pin1.id, exA.id])), attendu("", true, true, etage("1"), salle(dcA), etage("1"), salle(dcA)),
+      "(NOUVEAU) pin d'étage → exit : la route COMMENCE sur l'étage (HEAD : floor_outside)");
+    // (NOUVEAU) un pin d'étage SEUL décrit une route entièrement sur cet étage. HEAD : floor_outside.
+    ck.eq(bilan(route(F1.p, F1b.p, [pin1.id])), attendu("", true, false, etage("1"), etage("1"), etage("1"), etage("1")),
+      "(NOUVEAU) pin d'étage seul entre deux posés du même étage : valide, sans exit");
+    // D2 — MÊME conteneur ⇒ aucune sortie exigée ; conteneurs DIFFÉRENTS ⇒ sortie exigée. Aucune branche
+    // propre à l'étage : c'est la règle des salles, avec « conteneur » à la place de « salle ».
+    ck.eq(codes(route(F1.p, F1b.p, [])), "",
+      "(D2) deux posés du MÊME étage, aucun waypoint → valide (comme deux équipements d'une même salle)");
+    ck.eq(codes(route(F1.p, F2.p, [])), "ports_split",
+      "(D2) deux posés d'étages DIFFÉRENTS, aucun waypoint → ports_split (HEAD : accepté — c'était un TROU)");
+    ck.eq(s.cableContextValid({ from_port_id: F1.p, to_port_id: F2.p, waypoint_ids: [] }), false,
+      "(D2) …et `cableContextValid` l'exige aussi : le trou « au moins l'un est une salle » est refermé");
+    ck.eq(s.cableContextValid({ from_port_id: F1.p, to_port_id: F1b.p, waypoint_ids: [] }), true,
+      "(D2) même étage ⇒ aucune exigence de sortie");
+    // Le port doit être DANS le conteneur d'arrivée — la vérification suit l'étage comme elle suivait la salle.
+    ck.eq(codes(route(A.p, F2.p, [exA.id, pin1.id])), "portB_room",
+      "port B sur l'étage 2 alors que la route arrive à l'étage 1 → portB_room");
+    ck.eq(codes(route(A.p, F2.p, [exA.id, pin2.id])), "",
+      "…et la même route menée au BON étage est valide");
+    // CONSÉQUENCE ASSUMÉE de la grammaire : l'étage d'arrivée doit être NOMMÉ. Sans pin, la route quitte
+    // la salle sans dire où elle va — elle reste donc incomplète, exactement comme avant.
+    ck.eq(codes(route(A.p, F1.p, [exA.id])), "exit_unpaired",
+      "salle → étage SANS pin d'étage : la route ne nomme aucune arrivée → exit_unpaired (inchangé)");
+
+    /* ---------- D4 : le mot JUSTE selon le conteneur ---------- */
+    const msg = (r, code) => (r.errors.find((e) => e.code === code) || {}).message || "";
+    const msgB = msg(route(A.p, F2.p, [exA.id, pin1.id]), "portB_room");
+    ck(msgB.indexOf("étage") >= 0 && msgB.indexOf("salle") < 0, "(D4) arrivée sur un ÉTAGE : le message dit « étage », pas « salle »");
+    const msgBSalle = msg(route(A.p, F1.p, [exA.id, exB.id]), "portB_room");
+    ck(msgBSalle.indexOf("salle") >= 0, "(D4) arrivée dans une SALLE : le message dit « salle » (libellé historique)");
+    ck(msgB.indexOf("analysis.") < 0 && msgBSalle.indexOf("analysis.") < 0, "les messages sont TRADUITS (aucune clé i18n brute ne fuit)");
+    ck(codes(route(F1.p, F2.p, [])) === "ports_split" && msg(route(F1.p, F2.p, []), "ports_split").indexOf("emplacements") >= 0,
+      "(D4) deux ÉTAGES : « emplacements » ; deux salles gardent le mot « salles »");
+    ck(msg(route(A.p, B.p, []), "ports_split").indexOf("salles") >= 0, "(D4) deux SALLES : le message historique, mot pour mot");
+
+    /* ---------- contrainte de placement : elle peut désormais désigner un ÉTAGE ---------- */
+    const libre = await s.create("equipments", { name: "Libre" });
+    const pLibre = (await s.create("ports", { equipment_id: libre.id, name: "pL" })).id;
+    await s.create("cables", { name: "vers-etage", from_port_id: pLibre, to_port_id: F1.p, waypoint_ids: [pin1.id] });
+    const req = s.equipmentRequiredContainers(libre.id);
+    ck.eq(JSON.stringify(req.map((x) => x.container)), JSON.stringify([etage("1")]), "equipmentRequiredContainers : contrainte vers un ÉTAGE (l'ancienne Map par id de salle ne savait pas l'exprimer)");
+    const why = s.equipmentPlacementBlockedReason(libre.id, dcA.id);
+    ck(typeof why === "string" && why.indexOf("analysis.") < 0, "…et poser cet équipement dans une salle est BLOQUÉ, avec un motif traduit");
+
+    /* ---------- l'identité d'un étage : le couple, jamais une chaîne encodée ---------- */
+    ck.eq(PlacementContainers.same(PlacementContainers.floorOf("liege", 0), PlacementContainers.floorOf("liege", "")), false,
+      "floorOf : le rez-de-chaussée (0) et l'étage VIDE restent DEUX conteneurs distincts (piège `String(x || \"\")`)");
+    ck.eq(PlacementContainers.same(PlacementContainers.floorOf("liege", 1), PlacementContainers.floorOf("liege", "1")), true,
+      "floorOf : nombre et chaîne désignent le MÊME étage");
+    ck.eq(PlacementContainers.same(PlacementContainers.floorOf("liege", "1"), PlacementContainers.floorOf("namur", "1")), false,
+      "floorOf : même numéro d'étage dans deux BÂTIMENTS ≠ même conteneur");
+    ck.eq(PlacementContainers.same(null, null), false, "same(null, null) = false : deux absences ne sont pas un même endroit");
+    ck.eq(PlacementContainers.sameOrNone(null, null), true, "sameOrNone(null, null) = true : deux absences ne constituent pas une TRANSITION");
+    ck.eq(PlacementContainers.sameOrNone(salle(dcA), null), false, "sameOrNone : une absence suivie d'un conteneur EST une transition");
   }
   });
 
@@ -893,6 +1216,571 @@ module.exports = async () => {
     ck.eq(VmClusterFormat.memGo(4096, null), "4,0 Go", "memGo : total absent → utilisé seul");
     ck.eq(VmClusterFormat.memGo(null, 16384), "? / 16,0 Go", "memGo : utilisé absent mais total présent");
     ck.eq(VmClusterFormat.memGo(null, null), "—", "memGo : tout absent → —");
+  }
+  });
+
+  await section("VmStatus : état d'une VM (statut + orphelinat) — SOURCE UNIQUE des trois anciens sites", async () => {
+  {
+    // La règle « orphelinat prime, running vert, stopped neutre, le reste tel quel » était RÉÉCRITE dans
+    // `ListConfigs.vms`, `DetailForms.vmDetail` et `VmHostTip`. Les attentes ci-dessous sont EXPLICITES et
+    // byte-exactes — dérivées de l'ANCIEN code REGÉNÉRÉ depuis git (`git show HEAD:…`), jamais retranscrit
+    // de mémoire, et posées comme attentes littérales plutôt que comparées à la nouvelle fonction (sinon
+    // elles compareraient une fonction à elle-même et resteraient vertes sans rien prouver).
+    const vm = (status, orphan) => ({ status, orphan: !!orphan });
+
+    // ---- PARITÉ EXACTE avec les pastilles de l'ancien LISTING (sans `title`).
+    ck.eq(VmStatus.pills(vm("running")), '<span class="pill" style="border-color:var(--ok);color:var(--ok)">running</span>', "listing : running → pastille verte, à l'octet près");
+    ck.eq(VmStatus.pills(vm("stopped")), '<span class="pill" style="border-color:var(--fg-dimmer);color:var(--fg-dim)">stopped</span>', "listing : stopped → bordure neutre + texte --fg-dim (les DEUX variables diffèrent, c'est voulu)");
+    ck.eq(VmStatus.pills(vm("paused")), '<span class="pill">paused</span>', "listing : statut inconnu → pastille nue, mot du provider TEL QUEL");
+    ck.eq(VmStatus.pills(vm("")), '<span style="color:var(--fg-dimmer)">—</span>', "listing : aucun statut → tiret discret (identique à `dim(\"—\")` et à `DetailForms.MUTED`)");
+    ck.eq(VmStatus.pills(vm("running", true)), '<span class="pill" style="border-color:var(--err);color:var(--err)">orpheline</span> <span class="pill" style="border-color:var(--ok);color:var(--ok)">running</span>', "listing : orpheline EN TÊTE + statut conservé (espace séparatrice comprise)");
+
+    // ---- PARITÉ EXACTE avec la FICHE : même sortie, plus l'infobulle sur la seule pastille « orpheline ».
+    ck.eq(VmStatus.pills(vm("running"), "Disparue à la dernière synchronisation"), VmStatus.pills(vm("running")), "fiche : VM non orpheline → le `title` ne change RIEN (aucune pastille où le poser)");
+    ck.eq(VmStatus.pills(vm("stopped", true), "Disparue à la dernière synchronisation"), '<span class="pill" style="border-color:var(--err);color:var(--err)" title="Disparue à la dernière synchronisation">orpheline</span> <span class="pill" style="border-color:var(--fg-dimmer);color:var(--fg-dim)">stopped</span>', "fiche : orpheline + `title` → attribut posé APRÈS le style, comme avant");
+
+    // ---- CLASSIFICATION : ensemble fermé, l'orphelinat est une dimension INDÉPENDANTE du statut.
+    ck.eq(VmStatus.kindOf(vm("running")), "running", "kindOf : running");
+    ck.eq(VmStatus.kindOf(vm("stopped")), "stopped", "kindOf : stopped");
+    ck.eq(VmStatus.kindOf(vm("paused")), "other", "kindOf : statut présent mais inconnu → 'other'");
+    ck.eq(VmStatus.kindOf(vm("")), "none", "kindOf : statut absent → 'none' (≠ 'other')");
+    ck.eq(VmStatus.kindOf(vm("running", true)), "running", "kindOf : l'orphelinat ne CONTAMINE pas la classification du statut");
+
+    // ---- COULEURS de la bulle : 3 seulement, l'orphelinat prime (parité `VmHostTip.swatchColor` d'origine).
+    ck.eq(VmStatus.swatchColor(vm("running")), "var(--ok)", "swatchColor : running → --ok");
+    ck.eq(VmStatus.swatchColor(vm("stopped")), "var(--fg-dimmer)", "swatchColor : stopped → neutre (la bulle n'a pas la nuance du listing)");
+    ck.eq(VmStatus.swatchColor(vm("running", true)), "var(--err)", "swatchColor : orpheline PRIME sur running");
+    ck.eq(VmHostTip.swatchColor(vm("running", true)), VmStatus.swatchColor(vm("running", true)), "VmHostTip.swatchColor DÉLÈGUE (API conservée pour ses appelants 2D/3D)");
+
+    // ---- TRI : orphelines groupées à part, puis alphabétique — parité avec `(v.orphan ? "1_" : "0_") + (v.status || "")`.
+    ck.eq(VmStatus.sortKey(vm("running")), "0_running", "sortKey : non orpheline → préfixe '0_'");
+    ck.eq(VmStatus.sortKey(vm("running", true)), "1_running", "sortKey : orpheline → préfixe '1_' (groupées en fin de tri croissant)");
+    ck.eq(VmStatus.sortKey(vm("")), "0_", "sortKey : sans statut → préfixe seul");
+
+    // ---- RECHERCHE : le mot « orpheline » était écrit EN DUR en français dans `ListConfigs.searchFields`.
+    // Il passe par le catalogue → en interface anglaise, « orphan » (le mot AFFICHÉ) devient cherchable.
+    ck.eq(VmStatus.searchTerms(vm("running", true)).join("|"), "running|orpheline", "searchTerms : statut + mot LOCALISÉ (catalogue fr)");
+    ck.eq(VmStatus.searchTerms(vm("running")).join("|"), "running|", "searchTerms : non orpheline → terme vide (le champ de recherche les ignore)");
+
+    // ---- ÉCHAPPEMENT : `status` est une donnée SOURCE d'un cluster tiers, posée en innerHTML.
+    ck.eq(VmStatus.pills(vm("<img src=x onerror=alert(1)>")), '<span class="pill">&lt;img src=x onerror=alert(1)&gt;</span>', "statut hostile → ÉCHAPPÉ (aucune balise ne sort d'ici)");
+    ck(VmStatus.pills(vm("\"><script>")).indexOf("<script>") < 0, "évasion d'attribut → neutralisée");
+
+    // ---- CONVERGENCE ASSUMÉE au regroupement : le statut est désormais ROGNÉ partout. Avant, le listing et
+    // la fiche comparaient la chaîne BRUTE — « running » espacé y tombait dans « inconnu » (pastille nue)
+    // alors que la bulle le montrait vert. Aucun provider n'émet ça ; l'incohérence n'avait pas à survivre.
+    ck.eq(VmStatus.raw({ status: "  running  " }), "running", "raw : statut rogné");
+    ck.eq(VmStatus.kindOf({ status: "  running  " }), "running", "statut espacé → running aux TROIS endroits (était 'other' au listing et à la fiche)");
+
+    // ---- TOLÉRANCE : les enregistrements viennent d'une synchro tierce, rien n'est présumé présent.
+    ck.eq(VmStatus.kindOf(null), "none", "entrée null → 'none', aucune exception");
+    ck.eq(VmStatus.kindOf(undefined), "none", "entrée undefined → 'none'");
+    ck.eq(VmStatus.kindOf({}), "none", "objet sans statut → 'none'");
+    ck.eq(VmStatus.kindOf({ status: 42 }), "none", "statut non-chaîne → 'none' (jamais coercé)");
+    ck.eq(VmStatus.isOrphan({ orphan: "oui" }), true, "orphan truthy non booléen → normalisé en booléen");
+  }
+  });
+
+  await section("VmHostTip : bloc « VMs hébergées » de la bulle d'équipement (tri, bornage, échappement)", async () => {
+  {
+    // Fabrique de pastille INJECTÉE — l'appelant réel passe `DcInteract.tipSwatch` ; ici un marqueur
+    // reconnaissable qui laisse la COULEUR visible dans la sortie (c'est elle qu'on veut vérifier).
+    const sw = (color) => "[SW:" + color + "]";
+    const vm = (name, status, orphan) => ({ name, status, orphan: !!orphan });
+
+    // --- AUCUNE VM → AUCUNE ligne : la bulle d'un équipement sans VM doit rester STRICTEMENT inchangée
+    //     (pas de section vide, pas de « 0 VM »). C'est l'exigence n°1 du lot. ---
+    ck.eq(VmHostTip.rows([], sw).length, 0, "rows : liste vide → aucune ligne (bulle inchangée)");
+    ck.eq(VmHostTip.rows(null, sw).length, 0, "rows : null → aucune ligne (tolérant)");
+    ck.eq(VmHostTip.rows(undefined, sw).length, 0, "rows : undefined → aucune ligne (tolérant)");
+    ck.eq(VmHostTip.rows("pas un tableau", sw).length, 0, "rows : entrée non-tableau → aucune ligne (tolérant)");
+    ck.eq(VmHostTip.rows([null, undefined], sw).length, 0, "rows : que des trous → aucune ligne");
+
+    // --- UNE VM : ligne de TÊTE (compte, singulier) + une ligne par VM ---
+    const one = VmHostTip.rows([vm("srv-web-01", "running")], sw);
+    ck.eq(one.length, 2, "rows : 1 VM → 2 lignes (tête + VM)");
+    ck.eq(one[0], "1 VM hébergée", "rows : ligne de tête au SINGULIER (catalogue fr)");
+    ck.eq(one[1], "[SW:var(--ok)]srv-web-01 <span style=\"color:var(--fg-dimmer)\">· running</span>", "rows : pastille injectée + nom + statut BRUT");
+
+    // --- TRI par nom, STABLE : l'ordre d'entrée ne doit jamais transparaître dans la bulle ---
+    const sorted = VmHostTip.rows([vm("zeta", "running"), vm("alpha", "running"), vm("Mid", "running")], sw);
+    ck.eq(sorted[0], "3 VMs hébergées", "rows : ligne de tête au PLURIEL (3 VMs)");
+    ck(sorted[1].indexOf("alpha") >= 0 && sorted[2].indexOf("Mid") >= 0 && sorted[3].indexOf("zeta") >= 0, "rows : VMs triées par nom (alpha < Mid < zeta)");
+
+    // --- STATUTS : pastille par ensemble FERMÉ de couleurs, mot du provider affiché TEL QUEL ---
+    const stopped = VmHostTip.rows([vm("s1", "stopped")], sw);
+    ck.eq(stopped[1], "[SW:var(--fg-dimmer)]s1 <span style=\"color:var(--fg-dimmer)\">· stopped</span>", "rows : stopped → pastille neutre + mot brut");
+    const unknown = VmHostTip.rows([vm("s2", "paused")], sw);
+    ck.eq(unknown[1], "[SW:var(--fg-dimmer)]s2 <span style=\"color:var(--fg-dimmer)\">· paused</span>", "rows : statut INCONNU toléré, affiché tel quel (releases Proxmox)");
+    const noStatus = VmHostTip.rows([vm("s3", "")], sw);
+    ck.eq(noStatus[1], "[SW:var(--fg-dimmer)]s3", "rows : statut absent → nom seul (pas de suffixe vide)");
+    const orphan = VmHostTip.rows([vm("s4", "running", true)], sw);
+    ck.eq(orphan[1], "[SW:var(--err)]s4 <span style=\"color:var(--fg-dimmer)\">· orpheline · running</span>", "rows : orpheline PRIME sur le statut (pastille rouge + mention en tête du suffixe)");
+    ck.eq(VmHostTip.swatchColor({ status: "running" }), "var(--ok)", "swatchColor : running → var(--ok)");
+    ck.eq(VmHostTip.swatchColor({ status: "running", orphan: true }), "var(--err)", "swatchColor : orpheline prime sur running");
+    ck.eq(VmHostTip.swatchColor({}), "var(--fg-dimmer)", "swatchColor : sans statut → neutre");
+
+    // --- NOM absent → placeholder de listing (« (VM) »), jamais une ligne muette ---
+    ck.eq(VmHostTip.rows([{ status: "running" }], sw)[1], "[SW:var(--ok)](VM) <span style=\"color:var(--fg-dimmer)\">· running</span>", "rows : nom absent → placeholder « (VM) »");
+    ck.eq(VmHostTip.rows([vm("  espace  ", "")], sw)[1], "[SW:var(--fg-dimmer)]espace", "rows : nom rogné (trim)");
+
+    // --- BORNAGE : au-delà de la limite, une dernière ligne porte le RESTE ; la tête garde le TOTAL ---
+    const five = [vm("a", "running"), vm("b", "running"), vm("c", "running"), vm("d", "running"), vm("e", "running")];
+    const capped = VmHostTip.rows(five, sw, 3);
+    ck.eq(capped.length, 5, "bornage : limite 3 sur 5 VMs → 5 lignes (tête + 3 noms + reste)");
+    ck.eq(capped[0], "5 VMs hébergées", "bornage : la ligne de tête porte le TOTAL, pas le nombre affiché");
+    ck.eq(capped[4], "<span style=\"color:var(--fg-dimmer)\">… et 2 autres</span>", "bornage : ligne de reste « … et 2 autres »");
+    ck(capped[1].indexOf("a") >= 0 && capped[3].indexOf("c") >= 0, "bornage : ce sont les 3 PREMIÈRES du tri qui sont nommées");
+    const capped1 = VmHostTip.rows(five, sw, 4);
+    ck.eq(capped1[5], "<span style=\"color:var(--fg-dimmer)\">… et 1 autre</span>", "bornage : reste au SINGULIER (« … et 1 autre »)");
+    ck.eq(VmHostTip.rows(five, sw, 5).length, 6, "bornage : limite = total → aucune ligne de reste");
+    ck.eq(VmHostTip.rows(five, sw, 9).length, 6, "bornage : limite > total → aucune ligne de reste");
+    ck.eq(VmHostTip.rows(five, sw, 0).length, 3, "bornage : limite < 1 ramenée à 1 (tête + 1 nom + reste)");
+
+    // --- LIMITE PAR DÉFAUT : valeur EN DUR (le seul endroit à retoucher pour rallonger la bulle) ---
+    ck.eq(VmHostTip.MAX_LISTED, 8, "MAX_LISTED : borne d'affichage par défaut = 8");
+    const nine = [];
+    for (let i = 1; i <= 9; i++) nine.push(vm("vm-" + i, "running"));
+    const byDefault = VmHostTip.rows(nine, sw);
+    ck.eq(byDefault.length, 10, "défaut : 9 VMs → tête + 8 noms + reste = 10 lignes");
+    ck.eq(byDefault[9], "<span style=\"color:var(--fg-dimmer)\">… et 1 autre</span>", "défaut : la 9e VM bascule dans le reste");
+
+    // --- ÉCHAPPEMENT — LE point à ne pas rater : un nom et un statut de VM sont des données SOURCE
+    //     (cluster tiers) posées en innerHTML par `showTip`. Aucune balise ne doit pouvoir naître. ---
+    const hostile = VmHostTip.rows([{ name: '<img src=x onerror="alert(1)">', status: "<b>run</b>" }], sw);
+    ck.eq(hostile[1].indexOf("<img"), -1, "échappement : aucun <img ne survit dans la ligne");
+    ck.eq(hostile[1].indexOf("<b>"), -1, "échappement : aucune balise <b> ne naît d'un STATUT hostile");
+    ck(hostile[1].indexOf("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;") >= 0, "échappement : le nom hostile est rendu en ENTITÉS (lisible, inerte)");
+    ck(hostile[1].indexOf("&lt;b&gt;run&lt;/b&gt;") >= 0, "échappement : le statut hostile est rendu en ENTITÉS");
+    // Sortie de l'attribut `style` par une apostrophe/guillemet : impossible, la couleur ne vient JAMAIS
+    // de la donnée (ensemble fermé de constantes) et le nom est échappé avant d'y arriver.
+    const quoted = VmHostTip.rows([{ name: '" onmouseover="alert(1)', status: "running" }], sw);
+    ck.eq(quoted[1].indexOf('" onmouseover='), -1, "échappement : un guillemet du nom ne peut pas ouvrir un attribut");
+    ck(quoted[1].indexOf("&quot; onmouseover=&quot;alert(1)") >= 0, "échappement : guillemets du nom convertis en entités");
+    ck.eq(quoted[1].indexOf("[SW:var(--ok)]"), 0, "pastille : couleur issue de constantes internes, jamais de la donnée");
+  }
+  });
+
+  await section("Store.vmsOfHost : VMs hébergées par un équipement (index host_equipment_id)", async () => {
+  {
+    const s = await makeStore();
+    const host = await s.create("equipments", { name: "hyperviseur-1" });
+    const other = await s.create("equipments", { name: "hyperviseur-2" });
+    const v1 = await s.create("vms", { name: "web", ext_id: "c/100", host_equipment_id: host.id });
+    await s.create("vms", { name: "db", ext_id: "c/101", host_equipment_id: other.id });
+    await s.create("vms", { name: "sans-hote", ext_id: "c/102" });
+
+    ck.eq(s.vmsOfHost(host.id).length, 1, "vmsOfHost : 1 VM hébergée par l'hôte");
+    ck.eq(s.vmsOfHost(host.id)[0].id, v1.id, "vmsOfHost : c'est bien la VM rattachée");
+    ck.eq(s.vmsOfHost(other.id).length, 1, "vmsOfHost : l'autre hôte a la sienne (pas de fuite entre hôtes)");
+    ck.eq(s.vmsOfHost("inconnu").length, 0, "vmsOfHost : équipement sans VM → [] (donc bulle inchangée)");
+    // L'index SECONDAIRE est ce qui rend la lecture bon marché au survol : sans lui, `_byFk` retomberait
+    // en balayage de la collection à CHAQUE mouvement de souris.
+    ck(s._fk.vms && s._fk.vms.has("host_equipment_id"), "vmsOfHost : le champ est bien INDEXÉ (pas de balayage)");
+    // Cascade : supprimer l'hôte DÉTACHE la VM (elle n'est pas supprimée) → elle sort de la bulle.
+    await s.remove("equipments", host.id);
+    ck.eq(s.vmsOfHost(host.id).length, 0, "vmsOfHost : hôte supprimé → plus aucune VM hébergée (VM détachée, pas supprimée)");
+    ck.eq(s.get("vms", v1.id).host_equipment_id, null, "cascade : la VM survit, host_equipment_id détaché");
+  }
+  });
+
+  await section("Locatable : la règle « cet objet est-il LOCALISABLE ? », écrite UNE fois", async () => {
+  {
+    /* La règle NUE, éprouvée sur des chaînes de conteneurs construites à la main : deux branches, et le
+       piège central du lot est la SECONDE. `!!equipmentContainer(x)` — « a-t-il un conteneur ? » — serait
+       un prédicat FAUX : une baie hors salle en fournit un, et un posé d'ÉTAGE d'un bâtiment sans salle
+       aussi, alors que ni l'un ni l'autre n'est atteignable par la vue. Cf. `docs/placement.md` §6.28. */
+    const bâtimentsPeuplés = new Set(["liege"]);
+    const scope = { get: () => null, roomsOfBuilding: (loc) => (bâtimentsPeuplés.has(loc) ? [{ id: "dc-1" }] : []) };
+
+    ck.eq(Locatable.ofChain([], scope), false, "chaîne VIDE (pool, inventaire pur) → NON localisable");
+    ck.eq(Locatable.ofChain([{ kind: "room", id: "dc-1" }], scope), true, "salle en tête → localisable");
+    ck.eq(Locatable.ofChain([{ kind: "rack", id: "r1" }, { kind: "room", id: "dc-1" }, { kind: "floor", location: "liege", floor: "0" }], scope), true,
+      "baie POSÉE en salle : la salle est PLUS LOIN dans la chaîne, et compte quand même");
+    ck.eq(Locatable.ofChain([{ kind: "tray", id: "t1" }, { kind: "rack", id: "r1" }, { kind: "building", location: "liege" }], scope), false,
+      "étagère d'une baie HORS salle : la chaîne existe mais ne traverse AUCUNE salle → NON localisable");
+    ck.eq(Locatable.ofChain([{ kind: "rack", id: "r1" }, { kind: "building", location: "liege" }], scope), false,
+      "baie hors salle : un CONTENEUR ne suffit pas — c'est tout l'écart avec `!!equipmentContainer`");
+    // La branche ÉTAGE : elle DÉPEND du modèle (le bâtiment a-t-il une salle ?), pas du seul conteneur.
+    ck.eq(Locatable.ofChain([{ kind: "floor", location: "liege", floor: "1" }, { kind: "building", location: "liege" }], scope), true,
+      "posé d'étage, bâtiment AYANT une salle → localisable (la portée peut l'atteindre)");
+    ck.eq(Locatable.ofChain([{ kind: "floor", location: "namur", floor: "0" }, { kind: "building", location: "namur" }], scope), false,
+      "posé d'étage, bâtiment SANS salle → NON localisable (la portée s'exprime en salles — l'action REFUSE)");
+    ck.eq(Locatable.ofChain([{ kind: "building", location: "liege" }], scope), false,
+      "conteneur BÂTIMENT seul (jamais produit aujourd'hui) → NON localisable : rien de plus fin à viser");
+
+    /* TOLÉRANCE des deux adaptateurs (mêmes contrats que les anciens `equipmentDcId`/`portDcId`, RETIRÉS
+       au lot 7 / §6.33 : id OU enregistrement, et référence pendante rendue `false` plutôt que levée).
+       Les mentions de ce trio, ici et dans les messages ci-dessous, sont HISTORIQUES : elles disent d'où
+       vient la règle, elles ne désignent plus rien qu'on puisse aller lire. */
+    const docs = { equipments: { "eq-1": { id: "eq-1", placement_mode: "manual", dim_mode: "free", dc_id: "dc-1" } }, ports: { "p-1": { id: "p-1", equipment_id: "eq-1" }, "p-orph": { id: "p-orph", equipment_id: "eq-disparu" } } };
+    const store = { get: (coll, id) => (docs[coll] ? (docs[coll][id] || null) : null), roomsOfBuilding: () => [] };
+    ck.eq(Locatable.equipment("eq-1", store), true, "équipement par ID → lu dans le store");
+    ck.eq(Locatable.equipment(docs.equipments["eq-1"], store), true, "équipement par ENREGISTREMENT → aucune relecture (parité `equipmentDcId`)");
+    ck.eq(Locatable.equipment("eq-disparu", store), false, "équipement inexistant → false (et non une exception)");
+    ck.eq(Locatable.equipment(null, store), false, "équipement null → false (tolérant)");
+    ck.eq(Locatable.port("p-1", store), true, "port → règle de son ÉQUIPEMENT porteur");
+    ck.eq(Locatable.port("p-orph", store), false, "port dont l'équipement a disparu → false");
+    ck.eq(Locatable.port(null, store), false, "port null → false (tolérant)");
+
+    /* ---- LIAISONS (câbles) : `cableEnd` est LA RÈGLE, `cable` n'en est que le constat (§6.32) ----
+       Ce qu'on cadre, ce n'est pas « le câble » (il n'a pas de placement) mais UNE de ses extrémités.
+       Écrire le prédicat ailleurs que le choix de cette extrémité, c'est rouvrir le bouton MORT (D6).
+       La priorité « A puis B » est héritée de l'ancien `cableDcId` (RETIRÉ, §6.33) : les messages qui le
+       citent ci-dessous rappellent cette filiation, ils ne renvoient plus à du code existant. */
+    const dEq = {
+      "eq-salle": { id: "eq-salle", placement_mode: "manual", dim_mode: "free", dc_id: "dc-1" },
+      "eq-salle2": { id: "eq-salle2", placement_mode: "manual", dim_mode: "free", dc_id: "dc-2" },
+      "eq-etage": { id: "eq-etage", placement_mode: "floor", dim_mode: "free", location: "liege", floor: "1" },
+      "eq-etage-nu": { id: "eq-etage-nu", placement_mode: "floor", dim_mode: "free", location: "namur", floor: "0" },
+      "eq-hors-salle": { id: "eq-hors-salle", placement_mode: "rack", rack_id: "rk-nu", rack_u: 3 },
+      "eq-rien": { id: "eq-rien", placement_mode: "manual", dim_mode: "free" },
+    };
+    const dPorts = {}; Object.keys(dEq).forEach((k) => { dPorts["p-" + k] = { id: "p-" + k, equipment_id: k }; });
+    const dCables = {
+      "c-salle-salle": { id: "c-salle-salle", from_port_id: "p-eq-salle", to_port_id: "p-eq-salle2" },
+      "c-rien-salle": { id: "c-rien-salle", from_port_id: "p-eq-rien", to_port_id: "p-eq-salle2" },
+      "c-horsSalle-salle": { id: "c-horsSalle-salle", from_port_id: "p-eq-hors-salle", to_port_id: "p-eq-salle2" },
+      "c-etage-rien": { id: "c-etage-rien", from_port_id: "p-eq-etage", to_port_id: "p-eq-rien" },
+      "c-salle-etage": { id: "c-salle-etage", from_port_id: "p-eq-salle", to_port_id: "p-eq-etage" },
+      "c-etageNu-salle": { id: "c-etageNu-salle", from_port_id: "p-eq-etage-nu", to_port_id: "p-eq-salle2" },
+      "c-rien-rien": { id: "c-rien-rien", from_port_id: "p-eq-rien", to_port_id: null },
+      "c-vide": { id: "c-vide", from_port_id: null, to_port_id: null },
+    };
+    const bancs = { equipments: dEq, ports: dPorts, cables: dCables, racks: { "rk-nu": { id: "rk-nu", location: "liege" } } };
+    const sL = { get: (coll, id) => (bancs[coll] ? (bancs[coll][id] || null) : null), roomsOfBuilding: (loc) => (bâtimentsPeuplés.has(loc) ? [{ id: "dc-1" }] : []) };
+
+    ck.eq(Locatable.cableEnd("c-salle-salle", sL), "p-eq-salle", "deux bouts placés → l'extrémité A est RETENUE (priorité historique de `cableDcId`)");
+    ck.eq(Locatable.cableEnd("c-rien-salle", sL), "p-eq-salle2", "bout A non placé → on passe à B, on ne s'arrête pas dessus");
+    ck.eq(Locatable.cableEnd("c-horsSalle-salle", sL), "p-eq-salle2",
+      "bout A dans une baie HORS SALLE : il a un CONTENEUR mais n'est pas atteignable → B retenu (parité stricte avec `cableDcId`)");
+    ck.eq(Locatable.cableEnd("c-etage-rien", sL), "p-eq-etage", "bout A posé sur un ÉTAGE atteignable → retenu (l'ancien rendait null : bouton caché)");
+    ck.eq(Locatable.cableEnd("c-salle-etage", sL), "p-eq-salle", "salle en A, étage en B → A reste retenu : la généralisation ne DÉPLACE pas un cadrage existant");
+    ck.eq(Locatable.cableEnd("c-etageNu-salle", sL), "p-eq-salle2", "étage d'un bâtiment SANS salle en A → non atteignable, B retenu");
+    ck.eq(Locatable.cableEnd("c-rien-rien", sL), null, "aucun bout atteignable → aucune extrémité");
+    ck.eq(Locatable.cableEnd("c-vide", sL), null, "câble sans aucun port → aucune extrémité (et non une exception)");
+    ck.eq(Locatable.cableEnd("c-inexistant", sL), null, "câble inconnu → null (tolérant)");
+    ck.eq(Locatable.cableEnd(dCables["c-salle-salle"], sL), "p-eq-salle", "liaison par ENREGISTREMENT → aucune relecture (parité `cableDcId`)");
+
+    /* Le PRÉDICAT : attente ÉCRITE cas par cas (colonne 2), PUIS l'équivalence avec la règle (colonne
+       « existe-t-il une extrémité retenue ? »). Les deux, et pas seulement la seconde : épinglée à la
+       règle seule, l'assertion resterait verte si `cable` était réécrit à l'identique DE TRAVERS. */
+    const attentes = [
+      ["c-salle-salle", true], ["c-rien-salle", true], ["c-horsSalle-salle", true],
+      ["c-etage-rien", true],       // ⚠ NOUVEAU : `!!cableDcId` rendait false — bouton caché sur un câble atteignable
+      ["c-salle-etage", true], ["c-etageNu-salle", true],
+      ["c-rien-rien", false], ["c-vide", false],
+    ];
+    let cablesVus = 0;
+    for (const [id, attendu] of attentes) {
+      cablesVus++;
+      ck.eq(Locatable.cable(id, sL), attendu, `prédicat de liaison — ${id}`);
+      ck.eq(Locatable.cable(id, sL), Locatable.cableEnd(id, sL) !== null,
+        `…et il est le CONSTAT de la règle, pas une seconde écriture — ${id}`);
+    }
+    ck.eq(cablesVus, 8, "les huit liaisons du banc ont bien été jouées (garde anti-boucle vide)");
+  }
+  });
+
+  await section("ContainerLabel : « comment s'appelle l'endroit de cet objet ? » — le mot JUSTE selon le conteneur", async () => {
+  {
+    /* ---- 1. LA RÈGLE NUE, sur des chaînes construites à la main ----
+       Trois branches : salle DE LA CHAÎNE (pas conteneur immédiat), étage EN TÊTE, sinon rien. */
+    ck.eq(ContainerLabel.namedOfChain([]), null, "chaîne VIDE (pool, inventaire pur) → aucun conteneur à nommer");
+    ck.eq(JSON.stringify(ContainerLabel.namedOfChain([{ kind: "room", id: "dc-1" }])), JSON.stringify({ kind: "room", id: "dc-1" }), "salle en tête → c'est elle");
+    // LE point du module : le conteneur IMMÉDIAT d'un serveur monté est sa BAIE, et l'utilisateur veut
+    // pourtant lire « Salle A ». Rendre le conteneur immédiat serait une RÉGRESSION déguisée.
+    ck.eq(JSON.stringify(ContainerLabel.namedOfChain([{ kind: "rack", id: "r1" }, { kind: "room", id: "dc-1" }, { kind: "floor", location: "liege", floor: "0" }])),
+      JSON.stringify({ kind: "room", id: "dc-1" }), "baie POSÉE en salle : c'est la SALLE qu'on nomme, pas la baie ni l'étage plus loin");
+    ck.eq(JSON.stringify(ContainerLabel.namedOfChain([{ kind: "tray", id: "t1" }, { kind: "rack", id: "r1" }, { kind: "room", id: "dc-1" }, { kind: "floor", location: "liege", floor: "0" }])),
+      JSON.stringify({ kind: "room", id: "dc-1" }), "posé sur étagère (TROIS conteneurs emboîtés) : toujours la SALLE");
+    ck.eq(JSON.stringify(ContainerLabel.namedOfChain([{ kind: "floor", location: "liege", floor: "1" }, { kind: "building", location: "liege" }])),
+      JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "posé d'ÉTAGE : l'étage IMMÉDIAT est le conteneur nommé");
+    ck.eq(ContainerLabel.namedOfChain([{ kind: "rack", id: "r1" }, { kind: "building", location: "liege" }]), null,
+      "baie HORS salle : rien de nommable — parité EXACTE avec l'ancien `equipmentDcId` (arbitrage §6.29, pas un oubli)");
+    ck.eq(ContainerLabel.namedOfChain([{ kind: "tray", id: "t1" }, { kind: "rack", id: "r1" }, { kind: "building", location: "liege" }]), null,
+      "étagère d'une baie hors salle : rien de nommable non plus");
+
+    /* ---- 2. LE LIBELLÉ, sur un store STUB (les replis de `dcName` sont HÉRITÉS, pas recopiés) ---- */
+    const stub = {
+      get: () => null,
+      dcName: (id) => (id === "dc-1" ? "Salle A" : (id === "dc-nue" ? "(salle)" : "?")),
+      siteLabel: (id) => (id === "liege" ? "Bât. Liège" : id),
+    };
+    ck.eq(ContainerLabel.label(null, stub), null, "libellé d'AUCUN conteneur → null (le repli d'absence appartient à l'appelant)");
+    ck.eq(ContainerLabel.label({ kind: "room", id: "dc-1" }, stub), "Salle A", "SALLE → exactement ce que `dcName` rendait");
+    ck.eq(ContainerLabel.label({ kind: "room", id: "dc-nue" }, stub), "(salle)", "SALLE sans nom → repli « (salle) » HÉRITÉ de `dcName`, non recopié ici");
+    ck.eq(ContainerLabel.label({ kind: "room", id: "zzz" }, stub), "?", "SALLE introuvable → repli « ? » hérité de `dcName`");
+    ck.eq(ContainerLabel.label({ kind: "floor", location: "liege", floor: "1" }, stub), "Bât. Liège · ét. 1", "ÉTAGE → « bâtiment · étage » (l'identité d'un étage EST ce couple)");
+    // ⚠ LE REZ-DE-CHAUSSÉE DOIT S'AFFICHER. Mesure du lot, contre-intuitive : le piège `String(x || "")`
+    // du dépôt ne mord PAS sur ce calcul-ci (une sonde de mutation l'a prouvé — le repli `isFinite ? : 0`
+    // ramène l'un et l'autre à 0). Il mord sur la CLÉ, pas sur l'affichage ; ces deux attentes verrouillent
+    // donc le RENDU, et c'est `countLabel` qui verrouille la distinction des clés « 0 » / « ».
+    ck.eq(ContainerLabel.label({ kind: "floor", location: "liege", floor: "0" }, stub), "Bât. Liège · ét. 0", "ÉTAGE 0 (rez-de-chaussée) → « ét. 0 », ni « ét. » ni disparu");
+    ck.eq(ContainerLabel.label({ kind: "floor", location: "liege", floor: "" }, stub), "Bât. Liège · ét. 0", "ÉTAGE vide → niveau 0 (convention unique de l'app)");
+    ck.eq(ContainerLabel.label({ kind: "floor", location: "liege", floor: "-1" }, stub), "Bât. Liège · ét. -1", "ÉTAGE négatif (sous-sol) → conservé");
+    ck.eq(ContainerLabel.label({ kind: "floor", location: "namur", floor: "2" }, stub), "namur · ét. 2", "ÉTAGE d'un site sans entité → `siteLabel` replie sur l'id, comme partout");
+    ck.eq(ContainerLabel.label({ kind: "rack", id: "r1" }, stub), null, "BAIE en conteneur nommé : jamais produit par la règle, et rien à nommer si on l'y force");
+    ck.eq(ContainerLabel.label({ kind: "building", location: "liege" }, stub), null, "BÂTIMENT : idem — nommer un bâtiment changerait des libellés existants (§6.29)");
+
+    /* ---- 3. ANTI-DIVERGENCE de la normalisation d'étage ----
+       `ContainerLabel.floorNumber` DUPLIQUE `FloorLayout.floorNum` (inversion de couche core → geometry
+       refusée). Une duplication acceptée doit être VERROUILLÉE, sinon elle diverge en silence. */
+    ["0", "1", "-1", "", "2.5", "  3  ", "sous-sol", null, undefined, 0, 4, -2].forEach((v) => {
+      ck.eq(ContainerLabel.floorNumber(v), FloorLayout.floorNum(v), "floorNumber ≡ FloorLayout.floorNum sur " + JSON.stringify(v));
+    });
+
+    /* ---- 4. INTÉGRATION sur un VRAI Store : un cas par MODE DE PLACEMENT ----
+       Deux mesures par cas, comparées ENTRE ELLES : le libellé NOUVEAU, et l'expression HISTORIQUE
+       (`dc ? dcName(dc) : null`) régénérée telle quelle. Une attente EN DUR accompagne chacune — sans
+       elle, une dérive SIMULTANÉE des deux côtés passerait au vert (leçon du lot précédent). */
+    const s = await makeStore();
+    const site = await s.create("sites", { name: "Bât. Liège" });
+    const dc = await s.create("datacenters", { name: "Salle A", location: site.id, floor: "0" });
+    const rack = await s.create("racks", { name: "R1", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dc.id, dc_x: 500, dc_y: 500 });
+    const rackHorsSalle = await s.create("racks", { name: "R-pool", width_mm: 600, depth: 1000, u_count: 42, location: site.id });
+    const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", side: "front", u: 10, u_height: 2 });
+    /* Expression HISTORIQUE, telle qu'elle était écrite dans les six sites migrés (cf. `git show`) :
+       `dcName(equipmentDcId(x))`. `Store.equipmentDcId` étant RETIRÉ (§6.33), sa projection est
+       transcrite ici — et DÉLIBÉRÉMENT depuis `PlacementContainers.chain`, PAS depuis
+       `equipmentNamedContainer` : ce dernier passe par `ContainerLabel.namedOfChain`, c'est-à-dire par
+       la fonction MÊME que cette section éprouve. L'oracle serait alors une comparaison de la règle
+       avec elle-même, verte quoi qu'il arrive. */
+    const salleHistorique = (e) => { const r = PlacementContainers.chain(e, (coll, id) => s.get(coll, id)).find((c) => c.kind === "room"); return r ? r.id : null; };
+    const ancien = (e) => { const d = salleHistorique(e); return d ? s.dcName(d) : null; };
+
+    let k = 0;
+    const cas = async (libelle, placement, attendu, memeQuAvant) => {
+      const eq = await s.create("equipments", Object.assign({ name: "eq-" + (++k) }, placement));
+      ck.eq(s.equipmentContainerLabel(eq.id), attendu, "libellé — " + libelle);
+      // La comparaison des DEUX MESURES : c'est elle qui prouve qu'on n'a rien déplacé (ou qu'on l'a
+      // déplacé EXPRÈS pour le seul mode `floor`).
+      if (memeQuAvant) ck.eq(s.equipmentContainerLabel(eq.id), ancien(eq), "PARITÉ avec l'expression historique — " + libelle);
+      else ck(s.equipmentContainerLabel(eq.id) !== ancien(eq), "DIVERGENCE VOULUE de l'expression historique — " + libelle);
+      return eq;
+    };
+    await cas("monté en baie (rack + rack_u)", { placement_mode: "rack", rack_id: rack.id, rack_u: 5 }, "Salle A", true);
+    await cas("libre positionné en salle", { placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 100, dc_y: 100 }, "Salle A", true);
+    await cas("en marge latérale d'une baie", { placement_mode: "side", rack_id: rack.id }, "Salle A", true);
+    await cas("en paroi d'une baie", { placement_mode: "wall", rack_id: rack.id }, "Salle A", true);
+    await cas("posé sur une étagère", { placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 }, "Salle A", true);
+    await cas("libre SANS salle (inventaire pur)", { placement_mode: "manual", dim_mode: "free" }, null, true);
+    await cas("en POOL d'une baie (rack_id SANS rack_u)", { placement_mode: "rack", rack_id: rack.id }, null, true);
+    await cas("monté dans une baie HORS salle", { placement_mode: "rack", rack_id: rackHorsSalle.id, rack_u: 3 }, null, true);
+    // ⚠ LE SEUL CHANGEMENT DE COMPORTEMENT DU LOT, et il est le BUT : ces deux-là s'annonçaient
+    // « non placé » alors qu'ils sont posés sur un étage parfaitement identifié (décision D4).
+    await cas("posé sur un ÉTAGE (ét. 1)", { placement_mode: "floor", location: site.id, floor: "1", floor_x: 200, floor_y: 300 }, "Bât. Liège · ét. 1", false);
+    await cas("posé sur un ÉTAGE au REZ-DE-CHAUSSÉE (ét. 0)", { placement_mode: "floor", location: site.id, floor: "0", floor_x: 10, floor_y: 20 }, "Bât. Liège · ét. 0", false);
+    // Un posé d'étage d'un bâtiment SANS AUCUNE SALLE se NOMME quand même : nommer n'est pas localiser.
+    // C'est la frontière avec `Locatable`, et elle se vérifie en mesurant les DEUX sur le MÊME objet.
+    const orphelin = await s.create("equipments", { name: "eq-namur", placement_mode: "floor", location: "namur", floor: "3", floor_x: 5, floor_y: 5 });
+    ck.eq(s.equipmentContainerLabel(orphelin.id), "namur · ét. 3", "posé d'étage d'un bâtiment SANS salle → NOMMÉ malgré tout");
+    ck.eq(s.equipmentLocatable(orphelin.id), false, "…et pourtant NON localisable : `ContainerLabel` et `Locatable` répondent à DEUX questions");
+
+    // Tolérances (mêmes contrats que l'ancien `equipmentDcId`) + point d'entrée « conteneur » du mini-graphe.
+    ck.eq(s.equipmentContainerLabel("eq-disparu"), null, "équipement inexistant → null (et non une exception)");
+    ck.eq(s.equipmentContainerLabel(null), null, "équipement null → null (tolérant)");
+    ck.eq(s.containerLabel(null), null, "containerLabel(null) → null");
+    ck.eq(JSON.stringify(s.equipmentNamedContainer(orphelin.id)), JSON.stringify({ kind: "floor", location: "namur", floor: "3" }),
+      "equipmentNamedContainer : le CONTENEUR lui-même (ce que consomme le mini-graphe de tracé)");
+  }
+  });
+
+  await section("WebglHostVisibility : l'hôte 3D visible SEULEMENT en 3D-WebGL AVEC une salle (dette n°7)", async () => {
+  {
+    /* La règle NUE, table de vérité complète. Ce verrou est le SEUL possible : `DcBase.render()` sort
+       d'emblée sur `typeof document === "undefined"` (Node sans DOM), donc la décision devait sortir
+       dans un module PUR pour être testable — c'est tout l'objet de la dette n°7. */
+    const V = WebglHostVisibility;
+    // LE cas fautif que corrige la dette n°7 : 3D-WebGL mais AUCUNE salle → hôte MASQUÉ (avant, le canevas
+    // du document précédent restait affiché sous le message « Aucune salle »).
+    ck.eq(V.visible("3d", true, false), false, "3D-WebGL SANS salle → MASQUÉ (le correctif ; c'est ce cas qui rougit si on retire `hasRoom`)");
+    // Cas nominal, INCHANGÉ : une 3D-WebGL avec une salle montre bien son canevas.
+    ck.eq(V.visible("3d", true, true), true, "3D-WebGL AVEC salle → VISIBLE (comportement nominal préservé)");
+    // Moteur legacy SVG (useWebGL = false) : l'hôte Three est démonté ailleurs, jamais montré.
+    ck.eq(V.visible("3d", false, true), false, "3D LEGACY (SVG) → hôte WebGL MASQUÉ, salle ou pas");
+    ck.eq(V.visible("3d", false, false), false, "3D LEGACY sans salle → MASQUÉ");
+    // Vue Dessus (2D SVG) : jamais l'hôte WebGL, quelle que soit la présence de salle.
+    ck.eq(V.visible("top", true, true), false, "vue DESSUS → MASQUÉ (rendu 2D SVG)");
+    ck.eq(V.visible("top", true, false), false, "vue DESSUS sans salle → MASQUÉ");
+    // Vue Étage (« floor ») : rendu 2D également ; c'est pourquoi l'étage cible n'ENTRE PAS dans la règle
+    // (la « Vue étage 3D » empilée est une vue « 3d » avec multiDc, pas la vue « floor »). Cette branche
+    // n'était PAS touchée par le bug — la ligne `view === "3d"` la masquait déjà — et le reste vérifié.
+    ck.eq(V.visible("floor", true, true), false, "vue ÉTAGE (2D) → MASQUÉ même avec une salle (l'étage cible n'est pas un paramètre)");
+    ck.eq(V.visible("floor", true, false), false, "vue ÉTAGE sans salle → MASQUÉ");
+  }
+  });
+
+  await section("OptionSearch : le sélecteur d'entité à RECHERCHE filtre sans jamais RECLASSER (dette n°8)", async () => {
+  {
+    /* Ce que ce verrou protège : la bascule `<select>` → sélecteur à recherche ne doit changer NI les
+       options proposées, NI leur ORDRE, NI leurs libellés, NI leur état `disabled`. Les fonctions qui
+       CONSTRUISENT ces listes (`CableForms.eqOpts`/`portOpts`/`patchEndpointOpts`) n'ont pas bougé d'une
+       ligne — le diff sur elles est VIDE, ce qui est la meilleure preuve possible de parité de la RÈGLE.
+       Reste à verrouiller le CONTRÔLE, c'est-à-dire ce module : c'est la SEULE logique nouvelle du lot.
+       `render()` et les nœuds DOM ne sont pas testables ici (Node sans DOM), d'où l'extraction. */
+    const norm = SharedSchema.normSearch;
+    const ids = (list) => list.map((o) => o.value).join(",");
+
+    /* Liste TÉMOIN calquée sur la sortie réelle de `CableForms.portOpts` : option de TÊTE (valeur vide),
+       ports libres triés alphabétiquement, puis les OCCUPÉS rejetés en FIN de liste, `disabled` et
+       nommant le câble qui les occupe (doctrine §6.29). L'accent d'« Éth1 » et le libellé de brin de
+       trunk sont là exprès : ils éprouvent la normalisation et le cas breakout. */
+    const ports = [
+      { value: "", label: "— Choisir le port —" },
+      { value: "p-a", label: "Eth0 · RJ45 · Uplink" },
+      { value: "p-b", label: "Éth1 · RJ45 · Accès" },
+      { value: "p-c", label: "SFP1 · LC · Accès · brin de TRUNK-1" },
+      { value: "p-z", label: "Eth9 · RJ45 · Accès — occupé par SW-1 : Gi0/1", disabled: true },
+    ];
+
+    // --- 1. Saisie VIDE = parcourir la liste entière, comme on déroulait un <select> ---
+    const tout = OptionSearch.filter(ports, "", { normalize: norm });
+    ck.eq(ids(tout.shown), "p-a,p-b,p-c,p-z", "saisie vide → TOUTES les options, dans l'ordre d'entrée (l'option de TÊTE exclue : c'est un état, pas une entité)");
+    ck.eq(tout.hidden, 0, "saisie vide sous le plafond → rien de masqué");
+    ck.eq(tout.shown.map((o) => (o.disabled ? "1" : "0")).join(""), "0001", "l'état `disabled` TRAVERSE le filtre : le port occupé reste VISIBLE (parité <option disabled>)");
+    ck.eq(tout.shown[3].label, "Eth9 · RJ45 · Accès — occupé par SW-1 : Gi0/1", "…et son libellé nomme toujours le câble qui l'occupe, au caractère près");
+    ck.eq(ids(OptionSearch.filter(ports, "   ", { normalize: norm }).shown), "p-a,p-b,p-c,p-z", "saisie BLANCHE = saisie vide (la requête est trimée)");
+
+    // --- 2. AUCUN reclassement : divergence VOULUE avec TargetSearch (« préfixe d'abord ») ---
+    //     Cas discriminant : « e » est un PRÉFIXE de p-a/p-b/p-z et une simple INCLUSION dans p-c
+    //     (« …brin de TRUNK-1 »). Un classement préfixe-d'abord rendrait p-a,p-b,p-z,p-c — ce qui
+    //     remonterait un port OCCUPÉ avant un port LIBRE, en détruisant la règle de tri de portOpts.
+    ck.eq(ids(OptionSearch.filter(ports, "e", { normalize: norm }).shown), "p-a,p-b,p-c,p-z", "ordre d'ENTRÉE conservé — un classement « préfixe d'abord » aurait remonté le port occupé (p-z) avant p-c");
+    ck.eq(ids(OptionSearch.filter(ports, "eth", { normalize: norm }).shown), "p-a,p-b,p-z", "« eth » → les 3 ports Ethernet, occupé compris, dans l'ordre de la liste");
+    ck.eq(ids(OptionSearch.filter(ports, "ETH0", { normalize: norm }).shown), "p-a", "casse ignorée (normSearch)");
+    ck.eq(ids(OptionSearch.filter(ports, "eth1", { normalize: norm }).shown), "p-b", "accents ignorés : « eth1 » atteint « Éth1 »");
+    ck.eq(ids(OptionSearch.filter(ports, "  eth0 ", { normalize: norm }).shown), "p-a", "espaces de bord ignorés");
+    ck.eq(ids(OptionSearch.filter(ports, "trunk", { normalize: norm }).shown), "p-c", "le libellé de BREAKOUT (brin de trunk) est cherchable");
+    ck.eq(ids(OptionSearch.filter(ports, "occupé", { normalize: norm }).shown), "p-z", "la mention d'occupation est cherchable (elle fait partie du libellé)");
+    ck.eq(ids(OptionSearch.filter(ports, "zzz", { normalize: norm }).shown), "", "aucune correspondance → aucun résultat");
+
+    // --- 3. TRONCATURE : bornée mais ANNONCÉE (taire le surplus ferait croire à une entité absente) ---
+    const borne = OptionSearch.filter(ports, "", { normalize: norm, limit: 2 });
+    ck.eq(ids(borne.shown), "p-a,p-b", "plafond 2 → les 2 PREMIÈRES, l'ordre décide (jamais un échantillon)");
+    ck.eq(borne.hidden, 2, "…et le surplus est COMPTÉ (2 masqués)");
+    ck.eq(OptionSearch.filter(ports, "eth", { normalize: norm, limit: 1 }).hidden, 2, "`hidden` compte les CORRESPONDANCES écartées par le plafond, pas les options écartées par le filtre");
+    ck.eq(OptionSearch.filter(ports, "", { normalize: norm, limit: 0 }).shown.length, 0, "plafond 0 → rien d'affiché");
+    ck.eq(OptionSearch.filter(ports, "", { normalize: norm, limit: 0 }).hidden, 4, "…mais les 4 sont annoncés masqués");
+    ck.eq(OptionSearch.filter(ports, "", { normalize: norm, limit: 99 }).hidden, 0, "plafond au-dessus du besoin → rien de masqué");
+    ck.eq(OptionSearch.DEFAULT_LIMIT, 50, "plafond par DÉFAUT = 50 (borne de coût d'AFFICHAGE, pas préférence de pertinence)");
+
+    // --- 4. Libellés de l'ÉTAT (ce qu'un <select> fermé montrait) ---
+    ck.eq(OptionSearch.placeholderLabel(ports), "— Choisir le port —", "libellé de l'état vide = celui de l'option de tête");
+    ck.eq(OptionSearch.placeholderLabel([{ value: "a", label: "A" }]), "", "aucune option de tête → libellé vide (l'appelant repliera)");
+    ck.eq(OptionSearch.labelOf(ports, "p-c"), "SFP1 · LC · Accès · brin de TRUNK-1", "libellé de la valeur courante");
+    ck.eq(OptionSearch.labelOf(ports, ""), null, "valeur vide → PAS de libellé de valeur (c'est l'état vide, cf. placeholderLabel)");
+    ck.eq(OptionSearch.labelOf(ports, null), null, "valeur nulle → null");
+    ck.eq(OptionSearch.labelOf(ports, "disparu"), null, "valeur absente de la liste → null");
+
+    // --- 5. « Y a-t-il quelque chose à chercher ? » — les deux listes DÉGÉNÉRÉES de portOpts ---
+    ck.eq(OptionSearch.selectableCount(ports), 4, "4 options réellement proposables (les `disabled` comptent : elles ont vocation à être VUES)");
+    ck.eq(OptionSearch.selectableCount([{ value: "", label: "Choisir un équipement d'abord" }]), 0, "liste réduite à son option de tête → rien à chercher (le champ cède la place au libellé)");
+    ck.eq(OptionSearch.selectableCount([]), 0, "liste vide → rien à chercher");
+
+    // --- 6. PARITÉ des règles de VALEUR avec un <select> repeuplé (attentes EXPLICITES, pas une
+    //     comparaison de la fonction à elle-même) : ce sont exactement les cas que traversent
+    //     `refresh()`, `swapEnds()` et `selEqX.onchange` dans CableForms. ---
+    ck.eq(OptionSearch.resolveValue(ports, undefined), "", "valeur NON fournie → valeur de la 1re option, comme un <select> qui sélectionne son premier <option>");
+    ck.eq(OptionSearch.resolveValue(ports, null), "", "valeur nulle → idem (fillSelect ne pose la valeur que si elle n'est pas nulle)");
+    ck.eq(OptionSearch.resolveValue([{ value: "a", label: "A" }, { value: "b", label: "B" }], undefined), "a", "sans option de tête, « pas de valeur » retient bien la PREMIÈRE option (et non \"\")");
+    ck.eq(OptionSearch.resolveValue(ports, "p-b"), "p-b", "valeur présente → conservée (c'est ce qui protège la saisie à chaque refresh)");
+    ck.eq(OptionSearch.resolveValue(ports, "p-z"), "p-z", "valeur présente mais `disabled` → CONSERVÉE : poser une valeur par programme marche aussi sur un <select> désactivé (seul l'utilisateur ne peut pas la choisir)");
+    ck.eq(OptionSearch.resolveValue(ports, "disparu"), "", "valeur ABSENTE → \"\", comme `select.value = \"inconnu\"` qui laisse selectedIndex à -1 — c'est pourquoi `keepId` existe");
+    ck.eq(OptionSearch.resolveValue([], "p-a"), "", "liste vide → \"\"");
+    ck.eq(OptionSearch.resolveValue([], undefined), "", "liste vide sans valeur → \"\" (aucune 1re option à retenir)");
+
+    // --- 7. Le SUFFIXE D'EMPLACEMENT est cherchable — c'est le gain concret du lot (doctrine §6.29/§6.31) :
+    //     ces libellés se sont allongés et un <select> natif ne s'y filtre au clavier que par PRÉFIXE. ---
+    const equipements = [
+      { value: "", label: "— Choisir l'équipement —" },
+      { value: "e-1", label: "SW-CORE-01 · Salle A" },
+      { value: "e-2", label: "Onduleur nord · Bât. B · ét. 1" },
+      { value: "e-3", label: "SW-ACCES-02 · Salle A" },
+    ];
+    ck.eq(ids(OptionSearch.filter(equipements, "salle a", { normalize: norm }).shown), "e-1,e-3", "chercher « salle a » atteint les équipements PAR LEUR EMPLACEMENT (impossible avec un <select>)");
+    ck.eq(ids(OptionSearch.filter(equipements, "bat. b", { normalize: norm }).shown), "e-2", "« bat. b » (sans accent) atteint « Bât. B » — un posé d'ÉTAGE se cherche comme les autres");
+    ck.eq(ids(OptionSearch.filter(equipements, "acces", { normalize: norm }).shown), "e-3", "et le nom reste cherchable en MILIEU de libellé");
+  }
+  });
+
+  await section("VmLocate : « Localiser » une VM vise son HÔTE — et SEULEMENT s'il est localisable (version sobre)", async () => {
+  {
+    // --- Partie 1 : TOLÉRANCE et référence PENDANTE, sur un store STUB (aucune donnée réelle nécessaire).
+    //     Le store stub compte ses lectures : on vérifie aussi qu'une VM sans hôte ne coûte AUCUNE lecture
+    //     (le prédicat est évalué par LIGNE de listing, à chaque re-rendu). ---
+    let lectures = 0;
+    const stub = (equipments, localisable) => ({
+      get: (coll, id) => { lectures++; return coll === "equipments" ? (equipments[id] || null) : null; },
+      equipmentLocatable: (eq) => (eq ? localisable(eq) : false),
+    });
+    const vide = stub({}, () => false);
+    ck.eq(VmLocate.hostEquipmentId(null, vide), null, "VM null → null (tolérant)");
+    ck.eq(VmLocate.hostEquipmentId(undefined, vide), null, "VM undefined → null (tolérant)");
+    ck.eq(VmLocate.hostEquipmentId({}, vide), null, "VM sans host_equipment_id → null (hôte ABSENT)");
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: null }, vide), null, "host_equipment_id null → null");
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "" }, vide), null, "host_equipment_id vide → null");
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "   " }, vide), null, "host_equipment_id blanc → null (trimé)");
+    ck.eq(lectures, 0, "VM sans hôte : AUCUNE lecture du store (le prédicat est évalué par ligne de listing)");
+    // Référence PENDANTE : la synchro POSE ce champ, rien ne garantit que l'équipement survit (import, écriture
+    // d'API tierce…). La cascade le détache quand la suppression passe par l'app, pas dans les autres cas.
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "eq-disparu" }, vide), null, "hôte INEXISTANT dans le document → null (référence pendante)");
+    ck.eq(lectures, 1, "hôte inexistant : une seule lecture, et on s'arrête là");
+    // Hôte présent et localisable → l'ID DE L'HÔTE est rendu (pas un booléen, pas l'id de la VM).
+    const peuple = stub({ "eq-1": { id: "eq-1" } }, () => true);
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "eq-1" }, peuple), "eq-1", "hôte présent et localisable → id de l'HÔTE");
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "  eq-1  " }, peuple), "eq-1", "id d'hôte trimé avant lecture ET en sortie");
+    // L'AUTORITÉ est `equipmentLocatable` : le même hôte, non localisable, ne donne rien.
+    const horsSalle = stub({ "eq-1": { id: "eq-1" } }, () => false);
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "eq-1" }, horsSalle), null, "hôte présent mais equipmentLocatable → false ⇒ AUCUN bouton");
+
+    // --- Partie 2 : INTÉGRATION sur un vrai Store, un cas par MODE DE PLACEMENT de l'hôte. C'est la partie
+    //     qui fait foi : elle traverse `Store.equipmentLocatable` → `Locatable` → `PlacementContainers`. ---
+    const s = await makeStore();
+    const dc = await s.create("datacenters", { name: "Salle A", location: "liege", floor: "0" });
+    const rack = await s.create("racks", { name: "R1", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dc.id, dc_x: 500, dc_y: 500 });
+    const rackHorsSalle = await s.create("racks", { name: "R-pool", width_mm: 600, depth: 1000, u_count: 42, location: "liege" });
+    const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", side: "front", u: 10, u_height: 2 });
+
+    let n = 0;
+    /** Crée un hôte dans le mode voulu + une VM qui le désigne, et vérifie la cible attendue (EN DUR). */
+    const cas = async (label, placement, localisable) => {
+      const eq = await s.create("equipments", Object.assign({ name: "hote-" + (++n) }, placement));
+      const vm = await s.create("vms", { name: "vm-" + n, ext_id: "c/" + (200 + n), host_equipment_id: eq.id });
+      ck.eq(VmLocate.hostEquipmentId(s.get("vms", vm.id), s), localisable ? eq.id : null, "hôte " + label + (localisable ? " → localisable (id de l'hôte)" : " → NON localisable (aucun bouton)"));
+      return eq;
+    };
+    await cas("monté en baie (rack + rack_u), baie posée en salle", { placement_mode: "rack", rack_id: rack.id, rack_u: 5 }, true);
+    await cas("libre POSITIONNÉ en salle (dc_id)", { placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 100, dc_y: 100 }, true);
+    await cas("en marge latérale d'une baie en salle", { placement_mode: "side", rack_id: rack.id }, true);
+    await cas("en paroi d'une baie en salle", { placement_mode: "wall", rack_id: rack.id }, true);
+    await cas("posé sur une étagère d'une baie en salle", { placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 }, true);
+    await cas("libre SANS position (inventaire pur)", { placement_mode: "manual", dim_mode: "free" }, false);
+    await cas("en POOL d'une baie (rack_id SANS rack_u)", { placement_mode: "rack", rack_id: rack.id }, false);
+    await cas("monté dans une baie HORS salle", { placement_mode: "rack", rack_id: rackHorsSalle.id, rack_u: 3 }, false);
+    // ⚠ ÉTAGE — CHANGEMENT DE COMPORTEMENT (doctrine §6.27 puis §6.28). Ce cas attendait `false` : le
+    // prédicat était `equipmentDcId` (retiré depuis, §6.33), qui rendait `null` pour un posé d'étage.
+    // « Localiser » sait désormais le
+    // cadrer en MONDE, donc la VM qu'il héberge devient localisable — À CONDITION que son bâtiment ait au
+    // moins une salle (la portée d'affichage s'exprime en salles). Ici `dc` est une salle du bâtiment
+    // « liege », d'où `true` ; le cas SANS salle est vérifié juste après.
+    await cas("posé sur un ÉTAGE d'un bâtiment AYANT une salle", { placement_mode: "floor", location: "liege", floor: "1", floor_x: 200, floor_y: 300 }, true);
+    await cas("posé sur un ÉTAGE d'un bâtiment SANS AUCUNE salle", { placement_mode: "floor", location: "namur", floor: "0", floor_x: 200, floor_y: 300 }, false);
+
+    // Une VM SANS hôte, sur un vrai store : rien à viser (cas le plus fréquent avant le 1er rapprochement).
+    const orpheline = await s.create("vms", { name: "vm-sans-hote", ext_id: "c/999" });
+    ck.eq(VmLocate.hostEquipmentId(s.get("vms", orpheline.id), s), null, "VM jamais rapprochée à un équipement → null");
+    // DISCRIMINATION : deux VMs sur des hôtes différents ne se confondent pas (le module lit bien SA VM).
+    const eqA = await s.create("equipments", { name: "hyp-A", placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 1, dc_y: 1 });
+    const eqB = await s.create("equipments", { name: "hyp-B", placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 2, dc_y: 2 });
+    const vmA = await s.create("vms", { name: "vm-A", ext_id: "c/900", host_equipment_id: eqA.id });
+    const vmB = await s.create("vms", { name: "vm-B", ext_id: "c/901", host_equipment_id: eqB.id });
+    ck.eq(VmLocate.hostEquipmentId(s.get("vms", vmA.id), s), eqA.id, "discrimination : vm-A vise hyp-A");
+    ck.eq(VmLocate.hostEquipmentId(s.get("vms", vmB.id), s), eqB.id, "discrimination : vm-B vise hyp-B");
+    // Un hôte qui SORT de sa salle rend la VM non localisable sans que la VM ait bougé (le prédicat se
+    // recalcule à chaque rendu, il n'est jamais mémorisé).
+    await s.update("equipments", eqA.id, { dc_id: null });
+    ck.eq(VmLocate.hostEquipmentId(s.get("vms", vmA.id), s), null, "hôte DÉPLACÉ hors salle → la VM cesse d'être localisable");
   }
   });
 

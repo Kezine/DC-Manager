@@ -15,8 +15,17 @@ import {
   CABLE_STATUS_DRAFT, CABLE_STATUS_DEFAULT_NEW
 } from "../../domain/constants";
 import { FormUi } from "./shared";
+import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import type { FormHost } from "./shared";
+import { PlacementContainers } from "../../../src-shared/PlacementContainers";
+import type { PlacementContainer } from "../../../src-shared/PlacementContainers";
 import { EquipmentForms } from "./EquipmentForms";
+
+/** Contrainte de placement imposée à un bout de câble par la route : les conteneurs ACCEPTABLES
+    (`null` = aucune contrainte), ou « seuls les équipements sans conteneur » quand la route est en
+    chantier. Remplace le couple `{ dcIds, onlyUnplaced }` : un id de salle ne pouvait pas désigner un
+    étage (doctrine §6.31). */
+interface ContrainteConteneur { containers: PlacementContainer[] | null; onlyUnplaced: boolean }
 
 export class CableForms extends EquipmentForms {
 
@@ -69,7 +78,7 @@ export class CableForms extends EquipmentForms {
           description: descI.value.trim(),
         };
         if (live.check(payload).length) return false;   // label requis (surligné)
-        if (net) await store.update("networks", net.id, payload); else await store.create("networks", payload);
+        if (!await FormSave.record(store, "networks", net && net.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(net ? I18n.t("cable.net.updated") : I18n.t("cable.net.created")); onSaved?.(); return true;
       },
     });
@@ -81,20 +90,24 @@ export class CableForms extends EquipmentForms {
     const nameI = FormControls.text(cable ? cable.name : "", I18n.t("cable.cable.namePlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("cable.cable.nameField"), nameI));
 
-    // ---- options d'équipement (contrainte famille + salle) / de port (famille + occupation) ----
-    const eqOpts = (fam: string | null, keepEqId: string | null, dcConstraint: any) => {
+    // ---- options d'équipement (contrainte famille + CONTENEUR) / de port (famille + occupation) ----
+    // Le FILTRE compare aux conteneurs imposés par la route — salles ET étages depuis la généralisation de
+    // la grammaire (doctrine §6.31) —, par comparaison STRUCTURELLE : un étage n'a pas d'id.
+    const eqOpts = (fam: string | null, keepEqId: string | null, contrainte: ContrainteConteneur | null) => {
       let eqs = store.all("equipments").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
       if (fam) eqs = eqs.filter((e: any) => e.id === keepEqId || store.portsOf(e.id).some((p: any) => !store.isBreakoutParent(p) && store.portFamily(p) === fam));
-      const allowed = dcConstraint ? (Array.isArray(dcConstraint.dcIds) ? dcConstraint.dcIds.filter(Boolean) : (dcConstraint.dcId ? [dcConstraint.dcId] : null)) : null;
-      if (dcConstraint && (allowed || dcConstraint.onlyUnplaced)) {
+      const autorises = contrainte ? contrainte.containers : null;
+      if (contrainte && (autorises || contrainte.onlyUnplaced)) {
         eqs = eqs.filter((e: any) => {
           if (e.id === keepEqId) return true;
-          const dc = store.equipmentDcId(e);
-          if (dcConstraint.onlyUnplaced) return !dc;
-          return !dc || !allowed || allowed.includes(dc);
+          const c = store.equipmentNamedContainer(e);
+          if (contrainte.onlyUnplaced) return !c;
+          return !c || !autorises || autorises.some((a) => PlacementContainers.same(a, c));
         });
       }
-      return [{ value: "", label: I18n.t("cable.cable.pickEquip") }].concat(eqs.map((e: any) => { const dc = store.equipmentDcId(e); return { value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (dc ? " · " + store.dcName(dc) : "") }; }));
+      // Le SUFFIXE d'emplacement nomme le conteneur (salle, ou « Bât. X · ét. 1 » pour un posé d'étage —
+      // décision D4, doctrine §6.29).
+      return [{ value: "", label: I18n.t("cable.cable.pickEquip") }].concat(eqs.map((e: any) => { const emplacement = store.equipmentContainerLabel(e); return { value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (emplacement ? " · " + emplacement : "") }; }));
     };
     const portOpts = (eqId: string, selectedPortId: string | null, fam: string | null) => {
       if (!eqId) return [{ value: "", label: I18n.t("cable.cable.pickEquipFirst") }];
@@ -121,8 +134,8 @@ export class CableForms extends EquipmentForms {
       if (opts.assignPortId) {
         const pp: any = store.get("ports", opts.assignPortId);
         if (pp) {
-          const missA = !cable.from_port_id, missB = !cable.to_port_id, dcP = store.equipmentDcId(pp.equipment_id);
-          const fits = (side: "A" | "B") => { const k = store.cableSideConstraint(cable, side); return k.onlyUnplaced ? !dcP : (!k.dcId || !dcP || k.dcId === dcP); };
+          const missA = !cable.from_port_id, missB = !cable.to_port_id, cP = store.equipmentNamedContainer(pp.equipment_id);
+          const fits = (side: "A" | "B") => { const k = store.cableSideConstraint(cable, side); return k.onlyUnplaced ? !cP : (!k.container || !cP || PlacementContainers.same(k.container, cP)); };
           let side: "A" | "B" | null = null;
           if (missA && missB) side = fits("A") ? "A" : (fits("B") ? "B" : "A");
           else if (missA) side = "A"; else if (missB) side = "B";
@@ -136,8 +149,11 @@ export class CableForms extends EquipmentForms {
     const initPortA = cable ? (cable.from_port_id || preA || "") : (preA || "");
     const initPortB = cable ? (cable.to_port_id || preB || "") : (preB || "");
 
-    const selEqA = FormControls.select(eqOpts(null, eqA, null), eqA);
-    const selPortA = FormControls.select(portOpts(eqA, initPortA || null, null), initPortA);
+    // ÉQUIPEMENT et PORT sont des ENTITÉS : leur sélection passe par le sélecteur À RECHERCHE
+    // (principe n°14), et non par un `<select>` qui ne se filtre au clavier que par PRÉFIXE. Les
+    // listes ci-dessus (`eqOpts`/`portOpts`) sont INCHANGÉES — le contrôle change, pas la règle.
+    const selEqA = FormControls.entityPicker(eqOpts(null, eqA, null), eqA);
+    const selPortA = FormControls.entityPicker(portOpts(eqA, initPortA || null, null), initPortA);
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("cable.cable.equipA"), selEqA), FormControls.fieldRow(I18n.t("cable.cable.portA"), selPortA)));
     // INVERSION A ⇄ B : bouton-icône DISCRET, centré entre les deux rangées symétriques. Il permute équipements
     // ET ports du BROUILLON (aucune écriture store avant Enregistrer). Le clic est câblé plus bas (`swapEnds`),
@@ -145,8 +161,8 @@ export class CableForms extends EquipmentForms {
     const swapBtn = IconButton.build({ icon: Icons.SWAP, label: I18n.t("cable.cable.swapEnds") });
     const swapRow = document.createElement("div"); swapRow.style.cssText = "display:flex;justify-content:center;margin:-2px 0 2px;";
     swapRow.appendChild(swapBtn); root.appendChild(swapRow);
-    const selEqB = FormControls.select(eqOpts(null, eqB, null), eqB);
-    const selPortB = FormControls.select(portOpts(eqB, initPortB || null, null), initPortB);
+    const selEqB = FormControls.entityPicker(eqOpts(null, eqB, null), eqB);
+    const selPortB = FormControls.entityPicker(portOpts(eqB, initPortB || null, null), initPortB);
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("cable.cable.equipB"), selEqB), FormControls.fieldRow(I18n.t("cable.cable.portB"), selPortB)));
 
     const selType = FormControls.select([{ value: "", label: I18n.t("cable.common.pickCableType") }], cable ? (cable.cable_type_id || "") : "");
@@ -250,24 +266,26 @@ export class CableForms extends EquipmentForms {
     const cableTypeFamily = (ctId: string) => { const ct: any = ctId ? store.get("cableTypes", ctId) : null; return ct ? ct.family : null; };
     const constraintFor = (end: "A" | "B") => { const other = end === "A" ? selPortB.value : selPortA.value; return familyOf(other) || cableTypeFamily(selType.value) || null; };
     const typeFilterFamily = () => familyOf(selPortA.value) || familyOf(selPortB.value) || null;
-    const endDcOf = (end: "A" | "B") => { const pid = end === "A" ? selPortA.value : selPortB.value; if (pid) { const p: any = store.get("ports", pid); if (p) return store.equipmentDcId(p.equipment_id); } const eid = end === "A" ? selEqA.value : selEqB.value; return eid ? store.equipmentDcId(eid) : null; };
-    const routeRooms = () => { const r = store.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: wpState.ids }); if (!r.valid) return null; if (!r.hasExits) return { intra: true, rooms: [] as string[] }; return { intra: false, rooms: [r.startDc, r.endDc].filter(Boolean) as string[] }; };
-    const dcConstraintFor = (end: "A" | "B") => {
-      const rr = routeRooms();
-      if (!rr) return { dcIds: [] as string[], onlyUnplaced: true };
-      const otherRoom = endDcOf(end === "A" ? "B" : "A");
-      if (rr.intra) return otherRoom ? { dcIds: [otherRoom], onlyUnplaced: false } : { dcIds: null as any, onlyUnplaced: false };
-      let allowed = [...new Set(rr.rooms)];
-      if (allowed.length > 1 && otherRoom && allowed.includes(otherRoom)) allowed = allowed.filter((d) => d !== otherRoom);
-      return { dcIds: allowed, onlyUnplaced: false };
+    const endContainerOf = (end: "A" | "B") => { const pid = end === "A" ? selPortA.value : selPortB.value; if (pid) { const p: any = store.get("ports", pid); if (p) return store.equipmentNamedContainer(p.equipment_id); } const eid = end === "A" ? selEqA.value : selEqB.value; return eid ? store.equipmentNamedContainer(eid) : null; };
+    const routeConteneurs = () => { const r = store.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: wpState.ids }); if (!r.valid) return null; if (!r.hasExits) return { intra: true, conteneurs: [] as PlacementContainer[] }; return { intra: false, conteneurs: [r.startContainer, r.endContainer].filter(Boolean) as PlacementContainer[] }; };
+    const contrainteFor = (end: "A" | "B"): ContrainteConteneur => {
+      const rr = routeConteneurs();
+      if (!rr) return { containers: [], onlyUnplaced: true };
+      const autre = endContainerOf(end === "A" ? "B" : "A");
+      if (rr.intra) return autre ? { containers: [autre], onlyUnplaced: false } : { containers: null, onlyUnplaced: false };
+      // Dédoublonnage STRUCTUREL (un `Set` ne saurait pas qu'un étage est un couple), puis on retire le
+      // conteneur DÉJÀ occupé par l'autre bout quand il en reste un autre à proposer — logique inchangée.
+      let autorises = rr.conteneurs.filter((c, i, arr) => arr.findIndex((x) => PlacementContainers.same(x, c)) === i);
+      if (autorises.length > 1 && autre && autorises.some((c) => PlacementContainers.same(c, autre))) autorises = autorises.filter((c) => !PlacementContainers.same(c, autre));
+      return { containers: autorises, onlyUnplaced: false };
     };
     const orientEnds = (fromP: string | null, toP: string | null): [string | null, string | null] => {
       const r = store.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: wpState.ids });
-      if (!r.valid || !r.hasExits || !r.startDc || !r.endDc || r.startDc === r.endDc) return [fromP, toP];
-      const roomOf = (pid: string | null) => { if (!pid) return null; const p: any = store.get("ports", pid); return p ? store.equipmentDcId(p.equipment_id) : null; };
-      const rf = roomOf(fromP), rt = roomOf(toP);
-      const fromWrong = rf && rf === r.endDc && rf !== r.startDc;
-      const toWrong = rt && rt === r.startDc && rt !== r.endDc;
+      if (!r.valid || !r.hasExits || !r.startContainer || !r.endContainer || PlacementContainers.same(r.startContainer, r.endContainer)) return [fromP, toP];
+      const conteneurDe = (pid: string | null) => { if (!pid) return null; const p: any = store.get("ports", pid); return p ? store.equipmentNamedContainer(p.equipment_id) : null; };
+      const cf = conteneurDe(fromP), ct = conteneurDe(toP);
+      const fromWrong = !!cf && PlacementContainers.same(cf, r.endContainer) && !PlacementContainers.same(cf, r.startContainer);
+      const toWrong = !!ct && PlacementContainers.same(ct, r.startContainer) && !PlacementContainers.same(ct, r.endContainer);
       return (fromWrong || toWrong) ? [toP, fromP] : [fromP, toP];
     };
     const rebuildTypeSelect = () => {
@@ -287,11 +305,11 @@ export class CableForms extends EquipmentForms {
     };
     const refresh = () => {
       rebuildTypeSelect();
-      FormUi.setOptions(selEqA, eqOpts(constraintFor("A"), selEqA.value, dcConstraintFor("A")), selEqA.value);
-      FormUi.setOptions(selEqB, eqOpts(constraintFor("B"), selEqB.value, dcConstraintFor("B")), selEqB.value);
+      selEqA.setOptions(eqOpts(constraintFor("A"), selEqA.value, contrainteFor("A")), selEqA.value);
+      selEqB.setOptions(eqOpts(constraintFor("B"), selEqB.value, contrainteFor("B")), selEqB.value);
       const pa = selPortA.value, pb = selPortB.value;
-      FormUi.setOptions(selPortA, portOpts(selEqA.value, pa, constraintFor("A")), pa);
-      FormUi.setOptions(selPortB, portOpts(selEqB.value, pb, constraintFor("B")), pb);
+      selPortA.setOptions(portOpts(selEqA.value, pa, constraintFor("A")), pa);
+      selPortB.setOptions(portOpts(selEqB.value, pb, constraintFor("B")), pb);
     };
     const curDraft = () => ({ from_port_id: selPortA.value || null, to_port_id: selPortB.value || null, cable_type_id: selType.value || null, waypoint_ids: wpState.ids });
     const updateHint = (max: string) => {
@@ -313,8 +331,8 @@ export class CableForms extends EquipmentForms {
       updateHint(max);
     };
 
-    selEqA.onchange = () => { FormUi.setOptions(selPortA, portOpts(selEqA.value, null, constraintFor("A"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
-    selEqB.onchange = () => { FormUi.setOptions(selPortB, portOpts(selEqB.value, null, constraintFor("B"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
+    selEqA.onchange = () => { selPortA.setOptions(portOpts(selEqA.value, null, constraintFor("A"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
+    selEqB.onchange = () => { selPortB.setOptions(portOpts(selEqB.value, null, constraintFor("B"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
     selPortA.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
     selPortB.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
     selType.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
@@ -328,10 +346,10 @@ export class CableForms extends EquipmentForms {
     // simplement le bout rempli vers l'autre (les valeurs "" restent sélectionnables). Aucune écriture store.
     const swapEnds = () => {
       const aEq = selEqA.value, aPort = selPortA.value, bEq = selEqB.value, bPort = selPortB.value;
-      FormUi.setOptions(selEqA, eqOpts(null, bEq, null), bEq);
-      FormUi.setOptions(selEqB, eqOpts(null, aEq, null), aEq);
-      FormUi.setOptions(selPortA, portOpts(bEq, bPort || null, null), bPort);
-      FormUi.setOptions(selPortB, portOpts(aEq, aPort || null, null), aPort);
+      selEqA.setOptions(eqOpts(null, bEq, null), bEq);
+      selEqB.setOptions(eqOpts(null, aEq, null), aEq);
+      selPortA.setOptions(portOpts(bEq, bPort || null, null), bPort);
+      selPortB.setOptions(portOpts(aEq, aPort || null, null), aPort);
       refresh(); syncRoute(); syncStatus(true); renderNets();
     };
     swapBtn.onclick = swapEnds;
@@ -420,12 +438,13 @@ export class CableForms extends EquipmentForms {
         store.all("equipments")
           .filter((e: any) => (e.type === "patch_panel" || (keepId && e.id === keepId)) && e.id !== excludeId)
           .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))
-          .map((e: any) => { const dc = store.equipmentDcId(e); return { value: e.id, label: (e.name || I18n.t("cable.bundle.equipment")) + (dc ? " · " + store.dcName(dc) : "") + (e.type === "patch_panel" ? "" : I18n.t("cable.bundle.notPatch")) }; }));
-    const epaI = FormControls.select(patchEndpointOpts(initEpB, initEpA), initEpA);
-    const epbI = FormControls.select(patchEndpointOpts(initEpA, initEpB), initEpB);
+          .map((e: any) => { const emplacement = store.equipmentContainerLabel(e); return { value: e.id, label: (e.name || I18n.t("cable.bundle.equipment")) + (emplacement ? " · " + emplacement : "") + (e.type === "patch_panel" ? "" : I18n.t("cable.bundle.notPatch")) }; }));
+    // Extrémités = des ENTITÉS (des patchs) → sélecteur à recherche (principe n°14), liste inchangée.
+    const epaI = FormControls.entityPicker(patchEndpointOpts(initEpB, initEpA), initEpA);
+    const epbI = FormControls.entityPicker(patchEndpointOpts(initEpA, initEpB), initEpB);
     const refreshEndpointOpts = () => {
-      FormUi.setOptions(epaI, patchEndpointOpts(epbI.value, initEpA), epaI.value);
-      FormUi.setOptions(epbI, patchEndpointOpts(epaI.value, initEpB), epbI.value);
+      epaI.setOptions(patchEndpointOpts(epbI.value, initEpA), epaI.value);
+      epbI.setOptions(patchEndpointOpts(epaI.value, initEpB), epbI.value);
     };
     epaI.onchange = refreshEndpointOpts; epbI.onchange = refreshEndpointOpts;
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("cable.bundle.endpointAField"), epaI, I18n.t("cable.bundle.endpointAHint")), FormControls.fieldRow(I18n.t("cable.bundle.endpointBField"), epbI, I18n.t("cable.bundle.endpointBHint"))));

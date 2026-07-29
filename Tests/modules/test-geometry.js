@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, PivotBounds, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -70,6 +70,94 @@ module.exports = async () => {
     ck.eq(Math.round(p6.x), 1000, "clampPivot : box derrière la caméra → sol clampé (aucun exit négatif retenu)");
     // AABB nulle (aucune salle) → sol renvoyé inchangé (comportement historique).
     ck.eq(JSON.stringify(PivotBounds.clampPivot({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, g1, null)), JSON.stringify(g1), "clampPivot : AABB nulle → sol inchangé (pas de bornage)");
+  }
+  });
+
+  /* ============================================================================================
+     PIVOT D'ORBITE EN « VUE ÉTAGE » — la boîte devient une VRAIE boîte 3D, et son enveloppe
+     devient celle des BÂTIMENTS. Cf. docs/placement.md §6.21.
+
+     Le bug : `pivotAabb` était l'union des SALLES affichées, en XY seul. En Vue étage, le monde
+     regardé est le BÂTIMENT (voire plusieurs sites), et le repli du pivot tombait sur un plan
+     z = 0 INFINI que rien ne dessine — d'où un pivot ramené de force dans l'emprise de la salle
+     active, et une hauteur de pivot quittant le monde par le haut ou par le bas.
+
+     ⚠ Les valeurs ci-dessous sont dérivées À LA MAIN (méthode du slab), jamais lues dans la
+     sortie de l'implémentation. Le contraste boîte 3D ⇄ boîte XY seule est SYSTÉMATIQUE : il
+     prouve d'un même geste que le bornage en Z travaille ET que le chemin historique (repère
+     SALLE, parois infinies en Z) est conservé au micron.
+     ============================================================================================ */
+  await section("PivotBounds : BOÎTE 3D (bornage en Z) + bornes monde des bandes de bâtiment", async () => {
+  {
+    const j = (p) => JSON.stringify(p);
+    // MÊME emprise XY, seule la contrainte en Z diffère → tout écart observé vient d'elle.
+    const box3 = { minX: 0, maxX: 1000, minY: 0, maxY: 1000, minZ: 0, maxZ: 600 };
+    const boxXY = { minX: 0, maxX: 1000, minY: 0, maxY: 1000 };            // bornes en Z ABSENTES = parois infinies
+    const boxInf = { minX: 0, maxX: 1000, minY: 0, maxY: 1000, minZ: -Infinity, maxZ: Infinity };   // même chose, écrite explicitement
+
+    // ---- (A) rayon PLONGEANT : sans bornage en Z la sortie passe SOUS le plancher du monde ----
+    const oA = { x: -500, y: 500, z: 1000 }, dA = { x: 1, y: 0, z: -1 };
+    const a3 = PivotBounds.clampPivot(oA, dA, null, box3);
+    ck.eq(a3.x, 500, "boîte 3D : rayon plongeant → sortie par le PLANCHER (x = 500)");
+    ck.eq(a3.y, 500, "boîte 3D : y conservé sur la sortie");
+    ck.eq(a3.z, 0, "boîte 3D : la sortie est POSÉE sur le plancher du monde (z = 0)");
+    const aXY = PivotBounds.clampPivot(oA, dA, null, boxXY);
+    ck.eq(aXY.x, 1000, "boîte XY seule : la sortie va jusqu'au mur LOINTAIN (x = 1000)");
+    ck.eq(aXY.z, -500, "boîte XY seule : …et le pivot part 500 mm SOUS le monde (le défaut corrigé)");
+
+    // ---- (B) rayon MONTANT : le plafond du monde borne, au lieu de laisser filer vers le ciel ----
+    const oB = { x: 500, y: 500, z: 100 }, dB = { x: 0.2, y: 0, z: 1 };
+    const b3 = PivotBounds.clampPivot(oB, dB, null, box3);
+    ck.eq(b3.x, 600, "boîte 3D : rayon montant → sortie par le PLAFOND (x = 600)");
+    ck.eq(b3.z, 600, "boîte 3D : la sortie est plaquée au sommet du monde (z = maxZ)");
+    const bXY = PivotBounds.clampPivot(oB, dB, null, boxXY);
+    ck.eq(bXY.z, 2600, "boîte XY seule : le pivot montait à 2 600 mm, très au-dessus du monde");
+
+    // ---- (C) rayon VERTICAL : le cas où la boîte XY seule n'a AUCUNE sortie finie ----
+    const oC = { x: 500, y: 500, z: 1000 }, dC = { x: 0, y: 0, z: -1 };
+    ck.eq(PivotBounds.clampPivot(oC, dC, null, boxXY), null, "boîte XY seule : rayon vertical inscrit dans le slab → aucune sortie (null)");
+    ck.eq(j(PivotBounds.clampPivot(oC, dC, null, box3)), j({ x: 500, y: 500, z: 0 }), "boîte 3D : le rayon vertical SORT enfin — par le plancher");
+
+    // ---- (D) « dans la boîte » compte désormais le Z : un sol SOUS le monde n'est plus accepté tel quel ----
+    const solBas = { x: 500, y: 500, z: -50 };
+    ck.eq(j(PivotBounds.clampPivot(oC, dC, solBas, boxXY)), j(solBas), "boîte XY seule : un sol à z = −50 est « dans la boîte » (Z non borné) → inchangé");
+    ck.eq(j(PivotBounds.clampPivot(oC, dC, solBas, box3)), j({ x: 500, y: 500, z: 0 }), "boîte 3D : ce même sol est HORS boîte → ramené dans le monde");
+
+    // ---- (E) rabat au bord sur les TROIS axes (règle 3 : le rayon rate la boîte) ----
+    const oE = { x: -500, y: 5000, z: 1000 }, dE = { x: 1, y: 0, z: 0 };   // y = 5 000 : parallèle et hors slab → aucune traversée
+    ck.eq(j(PivotBounds.clampPivot(oE, dE, { x: 3000, y: 5000, z: -800 }, box3)), j({ x: 1000, y: 1000, z: 0 }), "boîte 3D : rabat au bord en X, en Y ET en Z (par le bas)");
+    ck.eq(j(PivotBounds.clampPivot(oE, dE, { x: 3000, y: 5000, z: 5000 }, box3)), j({ x: 1000, y: 1000, z: 600 }), "boîte 3D : rabat au bord en Z par le HAUT (plafond du monde)");
+    ck.eq(j(PivotBounds.clampPivot(oE, dE, { x: 3000, y: 5000, z: -800 }, boxXY)), j({ x: 1000, y: 1000, z: -800 }), "boîte XY seule : le z est TRANSPORTÉ, jamais rabattu (comportement historique)");
+
+    // ---- (F) bornes en Z ABSENTES ≡ bornes INFINIES : l'absence a bien le sens documenté ----
+    ck.eq(j(PivotBounds.clampPivot(oA, dA, null, boxXY)), j(PivotBounds.clampPivot(oA, dA, null, boxInf)), "bornes Z absentes ≡ ±Infinity (rayon plongeant)");
+    ck.eq(j(PivotBounds.clampPivot(oE, dE, { x: 3000, y: 5000, z: -800 }, boxXY)), j(PivotBounds.clampPivot(oE, dE, { x: 3000, y: 5000, z: -800 }, boxInf)), "bornes Z absentes ≡ ±Infinity (rabat au bord)");
+    ck.eq(PivotBounds.clampPivot(oC, dC, null, boxXY), PivotBounds.clampPivot(oC, dC, null, boxInf), "bornes Z absentes ≡ ±Infinity (aucune sortie finie)");
+
+    // ---- (G) worldBounds : union des BANDES de bâtiment (alignées aux axes) × hauteur du monde ----
+    const bandes = [
+      { loc: "a", x0: 0, x1: 20000, y0: 0, y1: 15000 },
+      { loc: "b", x0: 50000, x1: 62000, y0: -3000, y1: 9000 },
+    ];
+    ck.eq(j(PivotBounds.worldBounds(bandes, 18000)), j({ minX: 0, maxX: 62000, minY: -3000, maxY: 15000, minZ: 0, maxZ: 18000 }), "worldBounds : union des deux bandes + hauteur du monde");
+    ck.eq(PivotBounds.worldBounds([], 5000), null, "worldBounds : aucune bande → null (bornage désactivé)");
+    ck.eq(j(PivotBounds.worldBounds([{ loc: "z", x0: 100, x1: 50, y0: 10, y1: 0 }], -5)), j({ minX: 50, maxX: 100, minY: 0, maxY: 10, minZ: 0, maxZ: 0 }), "worldBounds : bornes remises dans l'ordre + monde de hauteur nulle jamais INVERSÉ");
+
+    // ---- (H) repère SALLE : `unionAabb` ne borne TOUJOURS que X et Y (mono-salle inchangée) ----
+    const salle = PivotBounds.unionAabb([PivotBounds.rectCorners(3000, 2000, 0, 6000, 4000)]);
+    ck.eq(j(salle), j({ minX: 0, maxX: 6000, minY: 0, maxY: 4000 }), "unionAabb : boîte de la salle, sans aucune borne en Z");
+    ck.eq("minZ" in salle, false, "unionAabb : minZ ABSENT (parois infinies — le repère salle n'a pas de plafond)");
+    ck.eq("maxZ" in salle, false, "unionAabb : maxZ ABSENT");
+
+    // ---- (I) le SYMPTÔME de l'utilisateur, sur un même rayon : salle vs bâtiment ----
+    // Salle de 6 × 4 m ancrée en (1 000 ; 1 000) dans un bâtiment de 20 × 15 m et 18 m de haut ;
+    // caméra à 10 m à l'ouest, à la hauteur du toit, plongeant d'une demi-unité par unité parcourue.
+    const salleBox = { minX: 1000, maxX: 7000, minY: 1000, maxY: 5000 };
+    const mondeBox = { minX: 0, maxX: 20000, minY: 0, maxY: 15000, minZ: 0, maxZ: 18000 };
+    const oI = { x: -10000, y: 3000, z: 18000 }, dI = { x: 1, y: 0, z: -0.5 };
+    const solI = { x: 26000, y: 3000, z: 0 };   // le rayon atteint z = 0 à 26 m : DEHORS, d'où le repli borné
+    ck.eq(j(PivotBounds.clampPivot(oI, dI, solI, salleBox)), j({ x: 7000, y: 3000, z: 9500 }), "AVANT : le pivot est ramené au mur de la SALLE (x = 7 000)");
+    ck.eq(j(PivotBounds.clampPivot(oI, dI, solI, mondeBox)), j({ x: 20000, y: 3000, z: 3000 }), "APRÈS : le pivot atteint le bord du BÂTIMENT (x = 20 000), à une hauteur du monde");
   }
   });
 
@@ -212,7 +300,12 @@ module.exports = async () => {
   await section("RouteGraphLayout : mini-graphe de tracé (pur)", async () => {
   {
     const G = ROUTE_GRAPH;
-    const N = (roomId, extra = {}) => Object.assign({ roomId, roomLabel: roomId || "", z: null }, extra);
+    /* ⚠ Le nœud porte désormais un CONTENEUR et non un id de salle (doctrine §6.29) : un id ne peut pas
+       désigner un ÉTAGE, dont l'identité est le couple (bâtiment, étage). Le constructeur ci-dessous
+       garde la même ERGONOMIE (`N("A")` = salle A) pour que les attentes historiques restent lisibles
+       telles quelles — ce qu'on migre est la CLÉ, pas ce que le layout produit. */
+    const N = (room, extra = {}) => Object.assign({ container: room ? { kind: "room", id: room } : null, roomLabel: room || "", z: null }, extra);
+    const NF = (loc, fl, extra = {}) => Object.assign({ container: { kind: "floor", location: loc, floor: fl }, roomLabel: loc + " · ét. " + fl, z: null }, extra);
     // trajet type : patch A → chemin bas → exit A → pin d'étage → exit B → chemin haut → patch B
     const nodes = [
       N("A", { endpoint: true }), N("A", { z: -80 }), N("A", { z: -80 }),
@@ -271,6 +364,70 @@ module.exports = async () => {
     ck(Math.abs(kA - kB) < 1e-9, "profil multi-étage : échelle z COMMUNE à tous les étages");
     ck(pf.floors[1].x1 >= pf.xs[5] + G.EP_W / 2, "profil multi-étage : l'extrémité à étage hérité compte dans l'emprise de SON étage");
     ck(pf.floors[0].x1 < pf.floors[1].x0, "profil multi-étage : emprises d'étages disjointes (dalles séparées à l'écran)");
+
+    /* ---- CLÉ DE REGROUPEMENT GÉNÉRALISÉE : salle OU ÉTAGE (doctrine §6.29) ----
+       Le layout ne compare plus deux ids mais deux CONTENEURS (`PlacementContainers.same`). Trois
+       propriétés à prouver : (a) un conteneur ÉTAGE se groupe comme une salle ; (b) deux étages du
+       MÊME numéro dans des bâtiments DIFFÉRENTS ne se confondent pas — un id n'aurait pas pu les
+       distinguer, c'est la raison d'être du couple ; (c) le cas `null`/`null` conserve le comportement
+       historique (aucune transition entre deux nœuds sans conteneur). */
+    const surEtage = [NF("liege", "1", { endpoint: true }), NF("liege", "1", { z: 0 }), NF("liege", "1", { endpoint: true })];
+    const chE = RouteGraphLayout.chain(surEtage);
+    ck.eq(chE.bands.length, 1, "conteneur ÉTAGE : une bande, comme une salle (le layout ne connaît plus la nature)");
+    ck.eq(chE.bands[0].from + "-" + chE.bands[0].to, "0-2", "conteneur ÉTAGE : la bande couvre les 3 nœuds du même étage");
+    ck.eq(chE.bands[0].label, "liege · ét. 1", "conteneur ÉTAGE : la bande porte le libellé résolu par l'appelant");
+    ck.eq(chE.xs[1] - chE.xs[0], G.GAP_EP, "conteneur ÉTAGE : aucune respiration DANS le même étage");
+
+    const deuxBatiments = [NF("liege", "1", { endpoint: true }), NF("namur", "1", { endpoint: true })];
+    const chB = RouteGraphLayout.chain(deuxBatiments);
+    ck.eq(chB.bands.length, 2, "MÊME numéro d'étage, bâtiments DIFFÉRENTS → deux bandes (l'identité est le COUPLE)");
+    ck.eq(chB.xs[1] - chB.xs[0], G.GAP_EP + G.GAP_ROOM, "MÊME numéro d'étage, bâtiments différents → respiration de changement");
+    const memeEtage = RouteGraphLayout.chain([NF("liege", "1", { endpoint: true }), NF("liege", "1", { endpoint: true })]);
+    ck.eq(memeEtage.xs[1] - memeEtage.xs[0], G.GAP_EP, "DISCRIMINATION : le même couple ne déclenche PAS de respiration");
+    const etageDifferent = RouteGraphLayout.chain([NF("liege", "1", { endpoint: true }), NF("liege", "2", { endpoint: true })]);
+    ck.eq(etageDifferent.xs[1] - etageDifferent.xs[0], G.GAP_EP + G.GAP_ROOM, "MÊME bâtiment, étages différents → respiration de changement");
+
+    /* (c) LE PIÈGE : `PlacementContainers.same(null, null)` rend `false`. Une bascule naïve aurait
+       inséré ici une respiration et un séparateur là où le code historique (`null !== null` → faux)
+       n'en mettait aucun — sur des documents EXISTANTS (deux waypoints non posés à la suite). */
+    ck.eq(RouteGraphLayout.sameContainer(null, null), true, "sameContainer(null, null) = VRAI — deux nœuds hors conteneur ne font pas une TRANSITION");
+    ck.eq(RouteGraphLayout.sameContainer(null, { kind: "room", id: "A" }), false, "sameContainer : absence vs salle → transition");
+    ck.eq(RouteGraphLayout.sameContainer({ kind: "room", id: "A" }, { kind: "room", id: "A" }), true, "sameContainer : même salle → aucune transition");
+    const horsConteneur = [N("A", { endpoint: true }), N(null, { z: 0 }), N(null, { z: 0 }), N("A", { endpoint: true })];
+    const chN = RouteGraphLayout.chain(horsConteneur);
+    ck.eq(chN.xs[2] - chN.xs[1], G.GAP_WP, "deux nœuds SANS conteneur à la suite : écart NU, aucune respiration (parité historique)");
+    ck.eq(RouteGraphLayout.profile(horsConteneur).separators.length, 2, "deux nœuds SANS conteneur : 2 séparateurs (entrée/sortie), pas 3");
+    ck.eq(chN.bands.length, 2, "deux nœuds SANS conteneur : la bande est coupée, et pas fusionnée au retour");
+  }
+  });
+
+  await section("RouteMiniGraph.countLabel : compter des CONTENEURS distincts, et les nommer juste (§6.29)", async () => {
+  {
+    /* LE seul vrai site d'ÉGALITÉ du chantier « câblage des équipements d'étage ». Il comptait
+       `new Set(nodes.map(n => n.roomId))` : un `Set` d'ids ne peut PAS représenter un étage, dont
+       l'identité est le couple (bâtiment, étage). D'où `PlacementContainers.same`, appliqué deux à deux. */
+    const R = (id) => ({ container: { kind: "room", id } });
+    const F = (loc, fl) => ({ container: { kind: "floor", location: loc, floor: fl } });
+    const RIEN = { container: null };
+
+    // --- PARITÉ : tant que la route ne traverse que des SALLES, le message historique est INCHANGÉ,
+    //     au caractère près (attente écrite EN DUR, pas dérivée du code).
+    ck.eq(RouteMiniGraph.countLabel([R("a"), R("a"), R("b")], 3), "3 étape(s) · 2 salle(s)", "deux salles distinctes → message HISTORIQUE, mot « salle(s) »");
+    ck.eq(RouteMiniGraph.countLabel([R("a"), R("a"), R("a")], 1), "1 étape(s) · 1 salle(s)", "une seule salle, répétée → comptée UNE fois");
+    ck.eq(RouteMiniGraph.countLabel([RIEN, RIEN], 2), "2 étape(s) · 0 salle(s)", "aucun conteneur → 0, et le mot « salle(s) » (rien ne dit qu'un étage est en jeu)");
+    ck.eq(RouteMiniGraph.countLabel([R("a"), RIEN, R("a")], 2), "2 étape(s) · 1 salle(s)", "un tronçon hors conteneur ne crée PAS une salle de plus");
+
+    // --- LE MOT JUSTE (décision D4) : dès qu'un ÉTAGE est traversé, « salle(s) » serait FAUX.
+    ck.eq(RouteMiniGraph.countLabel([R("a"), F("liege", "1")], 2), "2 étape(s) · 2 emplacement(s)", "salle + étage → le mot bascule sur « emplacement(s) »");
+    ck.eq(RouteMiniGraph.countLabel([F("liege", "1"), F("liege", "1")], 0), "0 étape(s) · 1 emplacement(s)", "deux fois le MÊME étage → compté une fois");
+
+    // --- CE QU'UN `Set` D'IDS N'AURAIT PAS PU FAIRE : distinguer deux étages de même NUMÉRO dans des
+    //     bâtiments différents, et confondre deux étages différents d'un même bâtiment.
+    ck.eq(RouteMiniGraph.countLabel([F("liege", "1"), F("namur", "1")], 2), "2 étape(s) · 2 emplacement(s)", "même numéro d'étage, bâtiments DIFFÉRENTS → DEUX emplacements");
+    ck.eq(RouteMiniGraph.countLabel([F("liege", "1"), F("liege", "2")], 2), "2 étape(s) · 2 emplacement(s)", "même bâtiment, étages DIFFÉRENTS → deux emplacements");
+    // Le rez-de-chaussée n'est pas l'absence d'étage : « 0 » et « » sont DEUX clés distinctes ici (la
+    // normalisation d'affichage les rapproche, la clé de placement ne les confond pas).
+    ck.eq(RouteMiniGraph.countLabel([F("liege", "0"), F("liege", "0")], 1), "1 étape(s) · 1 emplacement(s)", "rez-de-chaussée : « 0 » est une clé comme une autre, pas un vide");
   }
   });
 
@@ -488,6 +645,30 @@ module.exports = async () => {
     const fr = r3.resolvePort3D(fp.id, dc.id);
     ck(fr && isFinite(fr.x) && isFinite(fr.z), "resolvePort3D(libre) → point fini");
     ck(fr && fr.n && (Math.abs(fr.n.x) + Math.abs(fr.n.y) + Math.abs(fr.n.z)) > 0, "resolvePort3D(libre) → normale non nulle");
+    // CONTENEUR SANS SALLE (équipement posé sur un ÉTAGE — cf. docs/placement.md §1 symptôme 3). `resolvePort3D`
+    // ne sait pas le résoudre : `resolvePortWorld3D` compose depuis l'ORIGINE MONDE du conteneur. ÉQUIVALENCE —
+    // le même équipement doit retomber au MÊME point que posé en salle, simplement DÉCALÉ de cette origine.
+    // C'est la meilleure preuve que la chaîne est correcte : les deux chemins partagent le point LOCAL et la
+    // normale, seule la provenance de l'origine change.
+    const atO = r3.resolvePortWorld3D(fp.id, 800, 800, 0);
+    ck(atO && Math.abs(atO.x - fr.x) < 1e-6 && Math.abs(atO.y - fr.y) < 1e-6 && Math.abs(atO.z - fr.z) < 1e-6,
+      "resolvePortWorld3D : origine (800,800,0) ≡ même équipement posé en salle en (800,800)");
+    ck(atO && Math.abs(atO.n.x - fr.n.x) < 1e-12 && Math.abs(atO.n.y - fr.n.y) < 1e-12 && Math.abs(atO.n.z - fr.n.z) < 1e-12,
+      "resolvePortWorld3D : la NORMALE est la même qu'en salle (le conteneur ne tourne pas)");
+    ck.eq(atO ? atO.rackId : "absent", null, "resolvePortWorld3D : aucune baie hôte (le conteneur est l'étage)");
+    const atLvl = r3.resolvePortWorld3D(fp.id, 800, 800, 4000);
+    ck(atLvl && Math.abs(atLvl.z - (fr.z + 4000)) < 1e-6, "socle de niveau 4000 mm → port monté d'exactement 4000 mm");
+    ck(atLvl && Math.abs(atLvl.x - fr.x) < 1e-9 && Math.abs(atLvl.y - fr.y) < 1e-9, "socle de niveau : X et Y INCHANGÉS (translation verticale pure)");
+    // PIÈGE VERROUILLÉ : `worldOriginZ` ne porte QUE le socle du conteneur ; la hauteur propre `dc_z` est
+    // ajoutée par le résolveur (elle est déjà dans le point LOCAL). Elle ne doit donc jamais être comptée
+    // deux fois quand socle ET hauteur propre sont tous deux non nuls.
+    await s.update("equipments", fe.id, { dc_z: 250 });
+    const frZ = r3.resolvePort3D(fp.id, dc.id), atZ = r3.resolvePortWorld3D(fp.id, 800, 800, 4000);
+    ck(frZ && atZ && Math.abs(atZ.z - (frZ.z + 4000)) < 1e-6, "dc_z (250) comptée UNE seule fois en plus du socle");
+    ck(atZ && Math.abs(atZ.z - (4000 + 250 + 50)) < 1e-6, "dc_z comptée une fois : z = socle 4000 + dc_z 250 + demi-hauteur 50");
+    await s.update("equipments", fe.id, { dc_z: 0 });
+    ck.eq(r3.resolvePortWorld3D(p.id, 0, 0, 0), null, "resolvePortWorld3D : équipement RACKÉ (dim_mode « u ») → null");
+    ck.eq(r3.resolvePortWorld3D("port-inexistant", 0, 0, 0), null, "resolvePortWorld3D : port inconnu → null");
     // side
     const rk2 = await s.create("racks", { name: "R2", width_mm: 800, depth: 1000, u_count: 42, allow_side_front: true, datacenter_id: dc.id, dc_x: 2000, dc_y: 2000 });
     const se = await s.create("equipments", { name: "PDU", placement_mode: "side", dim_mode: "free", rack_id: rk2.id, side_face: "front", side_lr: "left", side_u: 5, free_w_mm: 60, free_h_mm: 150, free_l_mm: 300 });
@@ -500,6 +681,620 @@ module.exports = async () => {
     const wp = await s.create("ports", { equipment_id: we.id, name: "wp", face_x: 0.5, face_y: 0.5 });
     const wr = r3.resolvePort3D(wp.id, dc.id);
     ck(wr && isFinite(wr.x) && isFinite(wr.z), "resolvePort3D(wall) → point fini");
+  }
+  });
+
+  /* ============================================================================================
+     REPÈRE D'UN CONTENU PLACÉ (docs/placement.md §3 règle 1, §6.1) — le conteneur place ses contenus :
+     les BAIES comme les ÉQUIPEMENTS LIBRES, qui sont l'un et l'autre « un objet posé avec une position
+     et un lacet ». Le module s'appelait `RackFrame` (conteneur BAIE) tant qu'il n'y avait qu'un seul
+     contenu de cette forme, puis `RoomFrame` quand le mode libre a fourni la DEUXIÈME occurrence — le
+     moment d'extraire (§4.3), pas avant. Il est devenu `PlacementFrame` à la TROISIÈME (l'équipement
+     posé sur un ÉTAGE, §6.20), une fois constaté qu'AUCUN champ de la salle n'entrait dans son calcul :
+     il ne lit que ceux du CONTENU (§6.22).
+     ⚠ Ces attentes sont EXPLICITES (valeurs EN DUR), volontairement : comparer les branches de
+     `resolveFaceAnchor3D` au conteneur auquel elles délèguent désormais ne prouverait plus rien et
+     resterait VERT (piège du lot 2, cf. doctrine §4.1). La parité avec l'ancien chemin a été prouvée
+     À PART, sur 149 040 comparaisons d'hôtes POSITIONNÉS (0 divergence, écart max 0 — bit pour bit) et
+     72 576 comparaisons de waypoints (idem) ; ce qui est figé ICI, ce sont des coordonnées dérivées à
+     la main du modèle, pas la sortie d'une implémentation.
+     ============================================================================================ */
+  await section("PlacementFrame : le repère d'un contenu compose rotation PUIS translation (valeurs en dur)", async () => {
+  {
+    const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
+    // placement DÉCLARÉ d'un contenu : position (nullable) + lacet + demi-empreinte de repli.
+    const pl = (x, y, yawDeg, halfW, halfD) => ({ x, y, yawDeg, halfW, halfD: (halfD == null) ? halfW : halfD });
+
+    // ---- repère : lacet CARDINAL + origine, dérivés des SEULS champs déclarés par le contenu
+    const b0 = PlacementFrame.basis(pl(100, 200, 0, 300, 500));
+    ck.eq(b0.cos, 1, "basis(0°) : cosinus = 1"); ck.eq(b0.sin, 0, "basis(0°) : sinus = 0");
+    ck.eq(b0.originX, 100, "basis : origine X = position déclarée"); ck.eq(b0.originY, 200, "basis : origine Y = position déclarée");
+    // ⚠ CORRECTION de ce lot (arbitrage tranché) : un contenu SANS position est posé à RAS DU COIN de la
+    // salle, donc à sa DEMI-EMPREINTE — convention que suivaient déjà les DEUX vues qui dessinent et la
+    // géométrie des waypoints. La résolution des ports repliait, elle, sur 0 : elle plaçait les ports une
+    // demi-empreinte à côté de la baie affichée. C'est la RÉSOLUTION qui s'aligne sur le RENDU.
+    const bNul = PlacementFrame.basis(pl(null, null, 0, 300, 500));
+    ck.eq(bNul.originX, 300, "basis : contenu NON positionné → origine X = demi-LARGEUR (ras du coin)");
+    ck.eq(bNul.originY, 500, "basis : contenu NON positionné → origine Y = demi-PROFONDEUR");
+    // les deux axes sont INDÉPENDANTS : une saisie à moitié faite ne fait retomber QUE l'axe manquant.
+    const bMix = PlacementFrame.basis(pl(700, null, 0, 300, 500));
+    ck.eq(bMix.originX, 700, "basis : X saisi → X conservé"); ck.eq(bMix.originY, 500, "basis : Y absent → demi-profondeur");
+    ck.eq(PlacementFrame.basis(pl(0, 0, 0, 300, 500)).originX, 0, "basis : X = 0 SAISI n'est pas « absent » (0 ≠ null)");
+    // angles NON cardinaux : `Normalize.rackOrientation` les ramène à 0 — le port doit suivre la coque dessinée.
+    ck.eq(PlacementFrame.basis(pl(0, 0, 45, 0)).sin, 0, "basis(45°) : angle non cardinal ramené à 0");
+    ck.eq(PlacementFrame.basis(pl(0, 0, 450, 0)).sin, 1, "basis(450°) : replié sur 90°");
+
+    // ---- POINT : rotation par le lacet, PUIS translation à l'origine du contenu
+    const p0 = PlacementFrame.composePoint(b0, { x: 10, y: 20, z: 30 });
+    ck.eq(p0.x, 110, "composePoint(0°) : x = origine + x local"); ck.eq(p0.y, 220, "composePoint(0°) : y = origine + y local");
+    ck.eq(p0.z, 30, "composePoint : le lacet ne touche JAMAIS Z");
+    const p90 = PlacementFrame.composePoint(PlacementFrame.basis(pl(0, 0, 90, 0)), { x: 10, y: 20, z: 30 });
+    near(p90.x, -20, "composePoint(90°) : (10, 20) → (−20, 10) [x]"); near(p90.y, 10, "composePoint(90°) : … [y]");
+    const p180 = PlacementFrame.composePoint(PlacementFrame.basis(pl(1000, 2000, 180, 0)), { x: 10, y: 20, z: 30 });
+    near(p180.x, 990, "composePoint(180°) : demi-tour puis translation [x]"); near(p180.y, 1980, "composePoint(180°) : … [y]");
+    const p270 = PlacementFrame.composePoint(PlacementFrame.basis(pl(0, 0, 270, 0)), { x: 10, y: 20, z: 30 });
+    near(p270.x, 20, "composePoint(270°) : (10, 20) → (20, −10) [x]"); near(p270.y, -10, "composePoint(270°) : … [y]");
+
+    // ---- DIRECTION : rotation SEULE. C'est LA distinction que chaque branche réécrivait à la main —
+    // translater une normale la rendrait non unitaire et enverrait le connecteur 3D à l'autre bout de la salle.
+    const dLoin = PlacementFrame.composeDir(PlacementFrame.basis(pl(9999, -4242, 0, 0)), { x: 0, y: -1 });
+    ck.eq(dLoin.x, 0, "composeDir : normale NON translatée par l'origine [x]");
+    ck.eq(dLoin.y, -1, "composeDir : normale NON translatée par l'origine [y]");
+    ck.eq(dLoin.z, 0, "composeDir : direction sans composante verticale → z = 0");
+    const d90 = PlacementFrame.composeDir(PlacementFrame.basis(pl(500, 500, 90, 0)), { x: 0, y: -1 });
+    near(d90.x, 1, "composeDir(90°) : façade (0, −1) → (1, 0) [x]"); near(d90.y, 0, "composeDir(90°) : … [y]");
+    for (const o of [0, 90, 180, 270]) {
+      const d = PlacementFrame.composeDir(PlacementFrame.basis(pl(1234, 5678, o, 0)), { x: 0, y: -1 });
+      ck(Math.abs(Math.hypot(d.x, d.y) - 1) < 1e-12, "composeDir(" + o + "°) : normale reste UNITAIRE");
+    }
+    // GÉNÉRALISATION apportée par le mode libre : une face peut être HORIZONTALE (dessus/dessous d'un
+    // équipement libre). Le lacet est un lacet PUR : il laisse la composante verticale intacte.
+    for (const o of [0, 90, 180, 270]) {
+      const dv = PlacementFrame.composeDir(PlacementFrame.basis(pl(1234, 5678, o, 0)), { x: 0, y: 0, z: 1 });
+      ck.eq(dv.z, 1, "composeDir(" + o + "°) : normale VERTICALE inchangée par le lacet [z]");
+      ck(Math.abs(dv.x) < 1e-12 && Math.abs(dv.y) < 1e-12, "composeDir(" + o + "°) : … et sans composante horizontale");
+    }
+
+    // ---- place : les deux d'un coup (ce que consomment les CINQ modes de placement)
+    const placed = PlacementFrame.place(pl(1000, 2000, 90, 300, 500), { x: 10, y: 20, z: 30 }, { x: 0, y: -1 });
+    near(placed.x, 980, "place(90°) : point tourné PUIS translaté [x]");
+    near(placed.y, 2010, "place(90°) : … [y]");
+    ck.eq(placed.z, 30, "place : Z inchangé");
+    near(placed.n.x, 1, "place(90°) : normale tournée SANS translation [x]");
+    near(placed.n.y, 0, "place(90°) : … [y]");
+    // « à ras du coin », vu du contenu : la façade d'une boîte 600 × 1000 non positionnée tombe SUR le mur.
+    const auCoin = PlacementFrame.place(pl(null, null, 0, 300, 500), { x: 0, y: -500, z: 0 }, { x: 0, y: -1 });
+    ck.eq(auCoin.x, 300, "place(sans position) : centre à la demi-largeur du coin [x]");
+    ck.eq(auCoin.y, 0, "place(sans position) : la FAÇADE tombe exactement sur le mur y = 0");
+
+    // ---- origin : le CENTRE d'un contenu en local salle = son point local (0, 0) placé par la salle.
+    // C'est la lecture dont ont besoin le cadrage caméra, l'outil de positionnement, le placement
+    // automatique et les deux vues qui dessinent — pour qu'AUCUN d'eux ne recopie la règle de repli.
+    const o0 = PlacementFrame.origin(pl(1200, 800, 0, 300, 500));
+    ck.eq(o0.x, 1200, "origin : position déclarée [x]"); ck.eq(o0.y, 800, "origin : position déclarée [y]");
+    const oNul = PlacementFrame.origin(pl(null, null, 0, 300, 500));
+    ck.eq(oNul.x, 300, "origin : contenu NON positionné → demi-LARGEUR"); ck.eq(oNul.y, 500, "origin : … demi-PROFONDEUR");
+    // ⚠ le repli n'est PAS permuté par le lacet (contrairement à `halfExtents`) : c'est la convention du
+    // DESSIN, et c'est ce qui distingue `origin` du repli sur les demi-extents orientés que portait
+    // `DcInteract.posScene` — à 90°, les deux ne donnent PAS le même point.
+    for (const yaw of [0, 90, 180, 270]) {
+      const oo = PlacementFrame.origin(pl(null, null, yaw, 300, 500));
+      ck(oo.x === 300 && oo.y === 500, "origin(" + yaw + "°) : le repli ne PERMUTE pas largeur/profondeur");
+    }
+    for (const yaw of [0, 90, 180, 270]) {
+      const oo = PlacementFrame.origin(pl(1200, 800, yaw, 300, 500));
+      ck(oo.x === 1200 && oo.y === 800, "origin(" + yaw + "°) : le lacet ne DÉPLACE pas l'origine, il tourne autour");
+    }
+    // cohérence stricte avec `composePoint` : l'origine EST l'image du point local (0, 0).
+    const viaPoint = PlacementFrame.composePoint(PlacementFrame.basis(pl(null, null, 90, 300, 500)), { x: 0, y: 0, z: 0 });
+    ck(viaPoint.x === oNul.x && viaPoint.y === oNul.y, "origin === composePoint(0, 0) : une seule et même règle");
+  }
+  });
+
+  /* ============================================================================================
+     BORNE §6.6 — VERROU MÉCANIQUE. `PlacementFrame` ne doit connaître NI étage, NI bâtiment, NI site,
+     NI layout. SOUS la salle, la transformée d'un contenu est INTRINSÈQUE (déductible des seuls champs
+     de l'enregistrement, donc composable ici) ; AU-DESSUS, elle est une DÉCISION DE LAYOUT qui dépend
+     de l'ENSEMBLE AFFICHÉ. L'y faire entrer ferait dépendre la position d'un port de ce qui est à
+     l'écran — l'inverse exact de §6.8 — et produirait un repère qui prétend remonter seul au monde.
+     ⚠ POURQUOI CE VERROU EXISTE MAINTENANT, ET PAS AVANT : le NOM faisait le travail. « Rack » puis
+     « Room » bornaient la portée, et personne n'aurait songé à verser une transformée d'étage dans un
+     module nommé d'après la salle. `PlacementFrame` (§6.22) est EXACT — le calcul ne lit que les champs
+     du CONTENU — mais il n'interdit plus rien : il INVITE à y verser tout le placement. La borne est
+     donc portée par l'en-tête du module ET par ceci, exactement comme §6.19 l'a fait pour l'isolement
+     de `src-shared/` : une règle qu'aucune machine ne tient finit toujours par ne plus être tenue.
+     Le détecteur d'imports est celui du harnais (`TsImports.specifiersOf`) ; sa DISCRIMINATION (douze
+     formes vues, commentaires et chaînes littérales ignorés) est prouvée dans test-shared-validation.js
+     et vaut donc pour ce verrou-ci aussi.
+     ============================================================================================ */
+  await section("PlacementFrame : BORNE §6.6 — le repère n'importe NI layout NI vue (verrou)", async () => {
+  {
+    const fs = require("fs");
+    const source = path.join(__dirname, "..", "..", "src-client", "geometry", "PlacementFrame.ts");
+
+    /* LISTE BLANCHE, pas liste noire. Un simple refus par motif raterait le layout atteint
+       INDIRECTEMENT — par le barrel `./index`, par un module qui le ré-exporte, par un voisin neutre
+       aujourd'hui et porteur demain (le même effet TRANSITIF que §6.19 décrit pour `src-shared/`).
+       Ajouter une entrée ici doit rester un ACTE, relu comme tel : si l'import se défend, c'est la
+       doctrine §6.6 qu'il faut rouvrir d'abord — pas cette liste. */
+    const AUTORISES = new Set(["../core/Normalize"]);
+    // Motifs cités uniquement pour DIRE POURQUOI un refus tombe : ils n'élargissent ni ne restreignent
+    // la règle, qui reste « tout ce qui n'est pas sur la liste blanche est refusé ».
+    const PORTE_LE_LAYOUT = /(FloorLayout|SiteLayout|MultiLayout|PivotBounds|CameraFraming)/;
+    const PORTE_UNE_VUE = /(^|\/)(views|app|store|data|sync|ui)(\/|$)/;
+
+    const violationsDe = (texte, nom, autorises = AUTORISES) => {
+      const refus = [];
+      for (const [spec, ligne] of TsImports.specifiersOf(texte, nom)) {
+        if (autorises.has(spec)) continue;
+        const ou = nom + ":" + ligne + ' → "' + spec + '"';
+        if (PORTE_LE_LAYOUT.test(spec)) refus.push(ou + " — PORTE LE LAYOUT (§6.6 : au-dessus de la salle, la transformée dépend de l'ensemble AFFICHÉ)");
+        else if (PORTE_UNE_VUE.test(spec)) refus.push(ou + " — module de VUE / d'ÉTAT : ce repère est une géométrie PURE");
+        else refus.push(ou + " — hors LISTE BLANCHE (cf. la borne en tête de PlacementFrame.ts)");
+      }
+      return refus;
+    };
+
+    // -- le VERROU proprement dit, sur la SOURCE réelle (jamais le compilé : c'est le spécificateur ÉCRIT
+    //    qu'on contrôle, cf. §6.19) --
+    const texte = fs.readFileSync(source, "utf8");
+    ck(/export class PlacementFrame/.test(texte), "BORNE : la source lue est bien celle de PlacementFrame (anti-vacuité)");
+    const vus = TsImports.specifiersOf(texte, "PlacementFrame.ts");
+    ck(vus.has("../core/Normalize"), "BORNE : le détecteur lit des imports RÉELS — vus : " + ([...vus.keys()].join(", ") || "AUCUN"));
+    ck.eq(violationsDe(texte, "PlacementFrame.ts").join("  |  "), "",
+      "PlacementFrame : BORNE §6.6 — aucun import de layout, de vue, ni hors liste blanche");
+
+    // -- preuve que le verrou MORD : sondes SYNTHÉTIQUES, la source réelle n'est jamais modifiée --
+    ck(violationsDe('import { FloorLayout } from "./FloorLayout";', "sonde.ts").join("").includes("PORTE LE LAYOUT"),
+      "BORNE : un import de `FloorLayout` est REFUSÉ, et le motif nomme la raison");
+    ck.eq(violationsDe('import { SiteLayout } from "./SiteLayout";', "sonde.ts").length, 1, "BORNE : `SiteLayout` REFUSÉ");
+    ck(violationsDe('import { DcBase } from "../views/dc/DcBase";', "sonde.ts").join("").includes("VUE"),
+      "BORNE : un import de module de VUE est REFUSÉ");
+    ck.eq(violationsDe('const m = import("./FloorLayout");', "sonde.ts").length, 1,
+      "BORNE : un import DYNAMIQUE ne contourne pas le verrou");
+    ck.eq(violationsDe('import { Normalize } from "../core/Normalize";', "sonde.ts").length, 0,
+      "BORNE : l'import LÉGITIME de la liste blanche PASSE (le verrou n'est pas un refus aveugle)");
+
+    /* -- MÊME BORNE pour `TrayFrame` (§6.23). Le conteneur ÉTAGÈRE est un cran plus bas dans la même
+       chaîne : sa transformée est INTRINSÈQUE au même titre, et il court le même risque de se voir
+       verser du layout ou de la vue « puisqu'il place des choses ». La liste blanche y est encore plus
+       étroite — un seul TYPE, celui du rectangle qu'il transporte. Le verrou est le même code : ce qui
+       s'ajoute est une liste blanche, pas un second détecteur (principe n°3). */
+    const sourceTray = path.join(__dirname, "..", "..", "src-client", "geometry", "TrayFrame.ts");
+    const texteTray = fs.readFileSync(sourceTray, "utf8");
+    const AUTORISES_TRAY = new Set(["../../src-shared/TrayGeometry"]);
+    ck(/export class TrayFrame/.test(texteTray), "BORNE : la source lue est bien celle de TrayFrame (anti-vacuité)");
+    const vusTray = TsImports.specifiersOf(texteTray, "TrayFrame.ts");
+    ck(vusTray.has("../../src-shared/TrayGeometry"), "BORNE : le détecteur lit des imports RÉELS dans TrayFrame — vus : " + ([...vusTray.keys()].join(", ") || "AUCUN"));
+    ck.eq(violationsDe(texteTray, "TrayFrame.ts", AUTORISES_TRAY).join("  |  "), "",
+      "TrayFrame : BORNE §6.6 — aucun import de layout, de vue, ni hors liste blanche");
+    ck.eq(violationsDe('import { RackGeometry } from "./RackGeometry";', "sonde.ts", AUTORISES_TRAY).length, 1,
+      "BORNE TrayFrame : même `RackGeometry` est REFUSÉ — le conteneur REÇOIT son placement, il ne le calcule pas (et l'importer BOUCLERAIT)");
+  }
+  });
+
+  await section("Placement DÉCLARÉ : la baie et l'équipement libre disent au conteneur ce qu'il doit savoir", async () => {
+  {
+    const { FreeEquipGeometry } = D("geometry/FreeEquipGeometry.js");
+    // Le paramétrage d'ATTACHE reste propre à chaque contenu ; ce qui monte au conteneur est UNIQUEMENT
+    // « position + lacet + demi-empreinte de repli » (doctrine §6.2, interface COMMUNE mais ÉTROITE).
+    const pRack = RackGeometry.roomPlacement({ orientation: 90, dc_x: 1200, dc_y: 800, width_mm: 600, depth: 1000 });
+    ck.eq(pRack.x, 1200, "roomPlacement(baie) : x = dc_x"); ck.eq(pRack.y, 800, "roomPlacement(baie) : y = dc_y");
+    ck.eq(pRack.yawDeg, 90, "roomPlacement(baie) : lacet = `orientation`");
+    ck.eq(pRack.halfW, 300, "roomPlacement(baie) : demi-largeur"); ck.eq(pRack.halfD, 500, "roomPlacement(baie) : demi-profondeur");
+    const pRackNu = RackGeometry.roomPlacement({});
+    ck.eq(pRackNu.x, null, "roomPlacement(baie) : position absente → null (le conteneur décide du repli)");
+    ck.eq(pRackNu.y, null, "roomPlacement(baie) : … [y]");
+    ck.eq(pRackNu.halfW, 300, "roomPlacement(baie) : sans cote → RACK_WIDTH_DEFAULT / 2");
+    ck.eq(pRackNu.halfD, 500, "roomPlacement(baie) : sans cote → RACK_DEPTH_DEFAULT / 2");
+    // ⚠ la demi-empreinte de repli n'est PAS permutée par le lacet — parité avec le DESSIN, qui pose une
+    // baie sans position à (width/2, depth/2) quelle que soit son orientation.
+    ck.eq(RackGeometry.roomPlacement({ orientation: 90, width_mm: 600, depth: 1000 }).halfW, 300, "roomPlacement(baie 90°) : demi-empreinte NON permutée [W]");
+    ck.eq(RackGeometry.roomPlacement({ orientation: 90, width_mm: 600, depth: 1000 }).halfD, 500, "roomPlacement(baie 90°) : … [D]");
+
+    const pFree = FreeEquipGeometry.roomPlacement({ dc_orientation: 180, dc_x: 5, dc_y: 6, free_w_mm: 200, free_l_mm: 300 });
+    ck.eq(pFree.x, 5, "roomPlacement(libre) : x = dc_x"); ck.eq(pFree.y, 6, "roomPlacement(libre) : y = dc_y");
+    ck.eq(pFree.yawDeg, 180, "roomPlacement(libre) : lacet = `dc_orientation` (PAS `orientation`)");
+    ck.eq(pFree.halfW, 100, "roomPlacement(libre) : demi-empreinte en X"); ck.eq(pFree.halfD, 150, "roomPlacement(libre) : … en Y");
+    const pFreeNu = FreeEquipGeometry.roomPlacement({});
+    ck.eq(pFreeNu.x, null, "roomPlacement(libre) : position absente → null");
+    ck.eq(pFreeNu.halfW, 200, "roomPlacement(libre) : sans cote → EQUIP_FREE_DEFAULT_MM / 2");
+
+    // ---- ce que l'équipement libre produit LOCALEMENT (il ne compose plus rien lui-même)
+    const eq = { free_w_mm: 200, free_l_mm: 300, free_h_mm: 100, dc_z: 40 };
+    const lo = FreeEquipGeometry.portLocal(eq, { face_x: 0.25, face_y: 0.5, face_side: "front" });
+    ck.eq(lo.x, -50, "portLocal(front) : x = (face_x − 0,5) × largeur");
+    ck.eq(lo.y, -150, "portLocal(front) : y = −demi-profondeur (la façade est en −Y local)");
+    ck.eq(lo.z, 90, "portLocal : z part de dc_z (40) + moitié de la hauteur");
+    const loC = FreeEquipGeometry.portLocal(eq, { face_x: null, face_y: null, face_side: "front" });
+    ck.eq(loC.x, 0, "portLocal : fraction absente → CENTRE de la face [x]"); ck.eq(loC.z, 90, "portLocal : … [z]");
+    const n = (f) => FreeEquipGeometry.faceNormalLocal(f);
+    ck.eq(JSON.stringify(n("front")), JSON.stringify({ x: 0, y: -1, z: 0 }), "faceNormalLocal(front) → −Y local");
+    ck.eq(JSON.stringify(n("rear")), JSON.stringify({ x: 0, y: 1, z: 0 }), "faceNormalLocal(rear) → +Y local");
+    ck.eq(JSON.stringify(n("left")), JSON.stringify({ x: -1, y: 0, z: 0 }), "faceNormalLocal(left) → −X local");
+    ck.eq(JSON.stringify(n("right")), JSON.stringify({ x: 1, y: 0, z: 0 }), "faceNormalLocal(right) → +X local");
+    ck.eq(JSON.stringify(n("top")), JSON.stringify({ x: 0, y: 0, z: 1 }), "faceNormalLocal(top) → VERTICALE +Z");
+    ck.eq(JSON.stringify(n("bottom")), JSON.stringify({ x: 0, y: 0, z: -1 }), "faceNormalLocal(bottom) → VERTICALE −Z");
+    ck.eq(JSON.stringify(n("truc")), JSON.stringify({ x: 0, y: -1, z: 0 }), "faceNormalLocal(face inconnue) → avant (repli du registre)");
+  }
+  });
+
+  await section("Resolver3D : le mode LIBRE est hébergé par la SALLE et délègue au conteneur (points en dur)", async () => {
+  {
+    const s = await makeStore();
+    const r3 = new Resolver3D(s);
+    const dc = await s.create("datacenters", { name: "DC" });
+    const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
+    const anchor = (eq, geo) => r3.resolveFaceAnchor3D(eq, geo, dc.id);
+
+    // boîte 200 (X) × 300 (Y) × 100 (Z), posée à 300 mm du sol, centrée en (4000, 2500).
+    const eq = await s.create("equipments", { name: "BOX", dim_mode: "free", dc_id: dc.id, dc_x: 4000, dc_y: 2500, dc_z: 300, dc_orientation: 0, free_w_mm: 200, free_l_mm: 300, free_h_mm: 100 });
+    const aF = anchor(eq, { face_x: 0.25, face_y: 0.5, face_side: "front" });
+    near(aF.x, 3950, "libre/0° : x = dc_x − 50 (face_x sur la largeur du boîtier)");
+    near(aF.y, 2350, "libre/0° : y = dc_y − 150 (la façade est en −Y local)");
+    near(aF.z, 350, "libre/0° : z = dc_z + moitié de la hauteur");
+    near(aF.n.x, 0, "libre/0° : normale = façade (−Y) [x]"); near(aF.n.y, -1, "libre/0° : … [y]");
+    ck.eq(aF.n.z, 0, "libre : face verticale → normale horizontale");
+    ck.eq(aF.rackId, null, "libre : AUCUNE baie hôte (le conteneur est la salle)");
+
+    // quart de tour : le MÊME point local, tourné par le lacet PROPRE de l'équipement (dc_orientation).
+    await s.update("equipments", eq.id, { dc_orientation: 90 });
+    const aF90 = anchor(eq, { face_x: 0.25, face_y: 0.5, face_side: "front" });
+    near(aF90.x, 4150, "libre/90° : x = dc_x − y local"); near(aF90.y, 2450, "libre/90° : y = dc_y + x local");
+    near(aF90.z, 350, "libre/90° : Z insensible au lacet");
+    near(aF90.n.x, 1, "libre/90° : la façade regarde +X");
+
+    // face du DESSUS : le seul mode dont la normale est VERTICALE — elle traverse le lacet inchangée.
+    await s.update("equipments", eq.id, { dc_orientation: 0 });
+    const aT = anchor(eq, { face_x: 0.25, face_y: 0.5, face_side: "top" });
+    near(aT.x, 3950, "libre/dessus : x = dc_x − 50"); near(aT.y, 2500, "libre/dessus : y = dc_y (face_y au milieu de la profondeur)");
+    near(aT.z, 400, "libre/dessus : z = dc_z + hauteur (sommet)");
+    ck.eq(aT.n.z, 1, "libre/dessus : normale VERTICALE +Z");
+    await s.update("equipments", eq.id, { dc_orientation: 270 });
+    ck.eq(anchor(eq, { face_x: 0.25, face_y: 0.5, face_side: "top" }).n.z, 1, "libre/dessus à 270° : la normale verticale ne tourne PAS");
+    await s.update("equipments", eq.id, { dc_orientation: 0 });
+
+    // face GAUCHE : convention photographique (fx court de l'arrière vers l'avant vu de gauche).
+    const aL = anchor(eq, { face_x: 0.25, face_y: 0.5, face_side: "left" });
+    near(aL.x, 3900, "libre/gauche : x = dc_x − demi-largeur"); near(aL.y, 2575, "libre/gauche : y = dc_y + 75");
+    near(aL.n.x, -1, "libre/gauche : normale −X");
+
+    // non placé → non résolu (la salle ne place que ce qu'elle sait situer)
+    await s.update("equipments", eq.id, { dc_y: null });
+    ck.eq(anchor(eq, { face_x: 0.5, face_y: 0.5, face_side: "front" }), null, "libre sans position → null (le repli de demi-empreinte ne s'applique PAS ici)");
+    await s.update("equipments", eq.id, { dc_y: 2500 });
+    ck.eq(r3.resolveFaceAnchor3D(eq, { face_x: 0.5, face_y: 0.5, face_side: "front" }, "autre-dc"), null, "libre : salle ≠ dc_id → null");
+  }
+  });
+
+  await section("CORRECTION : un contenu SANS position est posé à RAS DU COIN — ports et brosses enfin d'accord", async () => {
+  {
+    const s = await makeStore();
+    const r3 = new Resolver3D(s);
+    const dc = await s.create("datacenters", { name: "DC" });
+    const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
+
+    // Baie 600 × 1000 SANS dc_x/dc_y. Le dessin (2D et 3D) l'a toujours posée en (300, 500) ; la
+    // résolution des ports la posait, elle, en (0, 0) — un port et une brosse de LA MÊME baie n'étaient
+    // donc pas dans le même repère. Ce lot aligne la résolution sur le dessin.
+    // AVANT ce lot, le port avant tombait en (0, −503) ; il tombe désormais en (300, −3).
+    const nu = await s.create("racks", { name: "NU", width_mm: 600, depth: 1000, u_count: 42, vmargin_mm: 0, orientation: 0, datacenter_id: dc.id });
+    const eq = await s.create("equipments", { name: "SW", placement_mode: "rack", rack_id: nu.id, rack_u: 1, u_height: 1, rack_side: "front" });
+    const aNu = r3.resolveFaceAnchor3D(eq, { face_x: 0.5, face_y: 0.5, face_side: "front" }, dc.id);
+    near(aNu.x, 300, "baie non positionnée : port centré sur la DEMI-LARGEUR (et non 0)");
+    near(aNu.y, -3, "baie non positionnée : façade à 500 − 503 du coin (et non −503)");
+    const brNu = r3.brushGeom({ kind: "brush", rack_id: nu.id, rack_u: 1, u_height: 1, depth_mm: 100 });
+    near(brNu.cx, 300, "brosse : origine INCHANGÉE par ce lot (elle repliait déjà sur la demi-empreinte)");
+    near(brNu.cy, 500, "brosse : … [y]");
+    near(brNu.e0.x, 300, "brosse : entrée alignée sur l'axe de la baie");
+    near(brNu.e0.y, 2, "brosse : entrée à 2 mm derrière la façade");
+
+    // LA preuve de l'unification : sur une baie POSITIONNÉE, les mêmes écarts relatifs. Port et brosse
+    // partagent enfin UNE origine — c'est ce que la divergence d'origine rendait faux.
+    const po = await s.create("racks", { name: "PO", width_mm: 600, depth: 1000, u_count: 42, vmargin_mm: 0, orientation: 0, datacenter_id: dc.id, dc_x: 5000, dc_y: 3000 });
+    const eqPo = await s.create("equipments", { name: "SW2", placement_mode: "rack", rack_id: po.id, rack_u: 1, u_height: 1, rack_side: "front" });
+    const aPo = r3.resolveFaceAnchor3D(eqPo, { face_x: 0.5, face_y: 0.5, face_side: "front" }, dc.id);
+    const brPo = r3.brushGeom({ kind: "brush", rack_id: po.id, rack_u: 1, u_height: 1, depth_mm: 100 });
+    near(aNu.x - brNu.e0.x, aPo.x - brPo.e0.x, "port ↔ brosse : MÊME écart, baie positionnée ou non [x]");
+    near(aNu.y - brNu.e0.y, aPo.y - brPo.e0.y, "port ↔ brosse : MÊME écart, baie positionnée ou non [y]");
+    near(aPo.x, 5000, "baie positionnée : port inchangé par ce lot [x]");
+    near(aPo.y, 2497, "baie positionnée : port inchangé par ce lot [y]");
+
+    // Le champ de sortie des pins s'appelait `world` alors qu'il rend du LOCAL SALLE : renommé `roomPoint`.
+    // `waypointAnchor` en est le consommateur — s'il avait été oublié, il rendrait `undefined` ici.
+    const sideAnchor = r3.waypointAnchor({ kind: "point", rack_id: nu.id, side_lr: "left", side_face: "front", side_col: 0, side_u: 3 });
+    ck(sideAnchor && isFinite(sideAnchor.x) && isFinite(sideAnchor.z), "waypointAnchor(pin latéral) suit le renommage `world` → `roomPoint`");
+    const capAnchor = r3.waypointAnchor({ kind: "point", rack_id: nu.id, cap_face: "floor", cap_cx: 0, cap_cy: 0 });
+    ck(capAnchor && isFinite(capAnchor.x), "waypointAnchor(pin de capot) suit le renommage");
+    ck.eq(capAnchor.z, 0, "pin de capot au SOL → z = 0");
+  }
+  });
+
+  await section("Resolver3D : les 4 modes hébergés par une BAIE délèguent au conteneur (points en dur)", async () => {
+  {
+    const s = await makeStore();
+    const r3 = new Resolver3D(s);
+    const dc = await s.create("datacenters", { name: "DC" });
+    const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
+    const anchor = (eq, geo) => r3.resolveFaceAnchor3D(eq, geo, dc.id);
+
+    // ---- mode `rack` : baie 600 × 1000, marges nulles → cage = 1000, uBaseZ = 0, montants à ±500.
+    // port avant d'un boîtier monté en façade : 500 (montant) + 3 (réserve d'oreilles) devant le centre,
+    // soit y local = −503 ; face_x 0,25 sur un corps de 452,6 mm → x local = −113,15 ;
+    // z = (rack_u−1 + (1−face_y)·u_height) · 44,45 = (4 + 0,25·2) · 44,45 = 200,025.
+    const rk = await s.create("racks", { name: "R", width_mm: 600, depth: 1000, u_count: 42, vmargin_mm: 0, orientation: 0, datacenter_id: dc.id, dc_x: 5000, dc_y: 3000 });
+    const eqR = await s.create("equipments", { name: "SW", placement_mode: "rack", rack_id: rk.id, rack_u: 5, u_height: 2, rack_side: "front" });
+    const aR = anchor(eqR, { face_x: 0.25, face_y: 0.75, face_side: "front" });
+    near(aR.x, 4886.85, "rack/0° : x = dc_x − 113,15 (face_x sur le corps 19″)");
+    near(aR.y, 2497, "rack/0° : y = dc_y − 503 (montant avant + réserve d'oreilles)");
+    near(aR.z, 200.025, "rack/0° : z = (U−1 + zf·u_height) · 44,45");
+    near(aR.n.x, 0, "rack/0° : normale = façade (−Y) [x]"); near(aR.n.y, -1, "rack/0° : … [y]");
+    ck.eq(aR.n.z, 0, "rack : normale horizontale"); ck.eq(aR.rackId, rk.id, "rack : baie hôte exposée");
+    // demi-tour : le MÊME point local, tourné. C'est le conteneur qui tourne, pas la branche.
+    await s.update("racks", rk.id, { orientation: 180 });
+    const aR180 = anchor(eqR, { face_x: 0.25, face_y: 0.75, face_side: "front" });
+    near(aR180.x, 5113.15, "rack/180° : x = dc_x + 113,15 (demi-tour)");
+    near(aR180.y, 3503, "rack/180° : y = dc_y + 503");
+    near(aR180.z, 200.025, "rack/180° : Z insensible au lacet");
+    near(aR180.n.y, 1, "rack/180° : la façade regarde +Y");
+    await s.update("racks", rk.id, { orientation: 0 });
+
+    // ---- mode `side` : baie 800 × 1000 → marge latérale (800 − 482,6)/2 = 158,7, deux colonnes de
+    // (158,7 − 8)/2 = 75,35. Colonne 0 à DROITE, calée au montant : x local ∈ [249,3 ; 309,3].
+    // Profondeur : façade à −500, boîte posée 4 mm derrière → y local = −496. z = (side_u−1)·44,45 = 88,9.
+    const rkS = await s.create("racks", { name: "RS", width_mm: 800, depth: 1000, u_count: 42, vmargin_mm: 0, orientation: 0, allow_side_front: true, datacenter_id: dc.id, dc_x: 0, dc_y: 0 });
+    const eqS = await s.create("equipments", { name: "PDU", placement_mode: "side", dim_mode: "free", rack_id: rkS.id, side_face: "front", side_lr: "right", side_col: 0, side_snap: "post", side_u: 3, free_w_mm: 60, free_h_mm: 100, free_l_mm: 200 });
+    const aS = anchor(eqS, { face_x: 0, face_y: 1, face_side: "front" });
+    near(aS.x, 249.3, "side/0° : x = bord INTÉRIEUR de la colonne (face_x = 0)");
+    near(aS.y, -496, "side/0° : y = façade + 4 mm de jeu");
+    near(aS.z, 88.9, "side/0° : z = base du U (face_y = 1 → bas de la boîte)");
+    near(aS.n.y, -1, "side/0° : normale = façade de la BAIE, pas de la boîte");
+    // quart de tour : (x, y) local → (−y, x). Le seul changement est le repère, pas la boîte.
+    await s.update("racks", rkS.id, { orientation: 90 });
+    const aS90 = anchor(eqS, { face_x: 0, face_y: 1, face_side: "front" });
+    near(aS90.x, 496, "side/90° : x = −y local"); near(aS90.y, 249.3, "side/90° : y = x local");
+    near(aS90.z, 88.9, "side/90° : Z insensible au lacet");
+    near(aS90.n.x, 1, "side/90° : la façade regarde +X");
+
+    // ---- mode `wall` : baie 600 × 1200, marge avant 200, cage 700. Paroi GAUCHE (x local = −300),
+    // orientation « center » → la boîte s'enfonce de 100 mm vers +X ; sa normale sortante est +X, donc
+    // face_x court le long de Y : y local = −600 + 0,5 · 80 = −560. z = 88,9 + 100 (face_y = 0 → haut).
+    const rkW = await s.create("racks", { name: "RW", width_mm: 600, depth: 1200, u_count: 42, vmargin_mm: 0, front_margin_mm: 200, cage_depth_mm: 700, orientation: 0, allow_side_front: true, datacenter_id: dc.id, dc_x: 0, dc_y: 0 });
+    const eqW = await s.create("equipments", { name: "WALL", placement_mode: "wall", dim_mode: "free", rack_id: rkW.id, wall_lr: "left", wall_margin: "front", wall_col: 0, wall_u: 3, wall_orient: "center", free_w_mm: 80, free_h_mm: 100, free_l_mm: 100 });
+    const aW = anchor(eqW, { face_x: 0.5, face_y: 0, face_side: "front" });
+    near(aW.x, -200, "wall/0° : x = paroi gauche + enfoncement (normale +X)");
+    near(aW.y, -560, "wall/0° : y = milieu de la colonne murale");
+    near(aW.z, 188.9, "wall/0° : z = sommet de la boîte (face_y = 0)");
+    near(aW.n.x, 1, "wall/0° : normale portée par la BOÎTE (+X), pas par la façade de la baie");
+    near(aW.n.y, 0, "wall/0° : … [y]");
+
+    // ---- mode `tray` : plateau « dual » sur une baie 600 × 1000 → longueur = cage + 2 × 3 = 1006,
+    // plateau plein de 452,6 de large (donc x local ∈ [−226,3 ; 226,3]), plancher utile à
+    // (u−1)·44,45 + 5 = 93,9. Équipement 100 × 200 × 40 posé en (0, 0) : face avant à y local −503.
+    const rkT = await s.create("racks", { name: "RT", width_mm: 600, depth: 1000, u_count: 42, vmargin_mm: 0, orientation: 0, datacenter_id: dc.id, dc_x: 0, dc_y: 0 });
+    const tray = await s.create("rackItems", { rack_id: rkT.id, kind: "tray", tray_type: "dual", side: "front", u: 3, u_height: 2, tray_u: 1 });
+    const eqT = await s.create("equipments", { name: "BOX", placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, tray_x: 0, tray_y: 0, free_w_mm: 100, free_l_mm: 200, free_h_mm: 40 });
+    const aT = anchor(eqT, { face_x: 0.5, face_y: 0.5, face_side: "front" });
+    near(aT.x, -176.3, "tray/0° : x = bord gauche du plateau + moitié de l'empreinte");
+    near(aT.y, -503, "tray/0° : y = plan de façade du plateau");
+    near(aT.z, 113.9, "tray/0° : z = plancher utile + moitié de la hauteur posée");
+    near(aT.n.y, -1, "tray/0° : port avant d'une étagère avant → normale vers la façade");
+    // port ARRIÈRE d'un posé sur étagère AVANT : la boîte sort par son autre face, la baie ne bouge pas.
+    const aTr = anchor(eqT, { face_x: 0.5, face_y: 0.5, face_side: "rear" });
+    near(aTr.y, -303, "tray : port arrière → face opposée de l'empreinte (−503 + 200)");
+    near(aTr.n.y, 1, "tray : port arrière → normale opposée");
+
+    // ---- le repère de SORTIE est LOCAL SALLE, pas monde : la résolution ne connaît ni l'étage, ni le
+    // bâtiment (§6.6 — au-dessus de la salle la transformée relève du layout, cf. FloorLayout).
+    await s.update("datacenters", dc.id, { location: "site-b", floor: 7 });
+    const aApres = anchor(eqR, { face_x: 0.25, face_y: 0.75, face_side: "front" });
+    near(aApres.x, 4886.85, "changer d'étage/bâtiment ne déplace PAS le point (repère LOCAL SALLE)");
+    near(aApres.y, 2497, "… [y]");
+  }
+  });
+
+  /* ============================================================================================
+     CONTENEUR SANS SALLE — les PORTS d'un équipement posé sur un ÉTAGE
+     (`docs/placement.md` §1 symptôme 3, §6.6, §6.20).
+
+     C'est le cas que la doctrine désigne comme IMPOSSIBLE à écrire dans le moule des cinq
+     branches de `resolveFaceAnchor3D` : elles exigent toutes un `dcId`, et un équipement d'étage
+     n'a pas de salle. `resolvePortWorld3D` en est le pendant SANS SALLE ; il rend du MONDE parce
+     que son conteneur n'a pas de transformée intrinsèque à composer (§6.6) — il la REÇOIT.
+
+     ⚠ Attentes EXPLICITES (valeurs EN DUR) dérivées À LA MAIN du modèle, jamais de la sortie d'une
+     implémentation : l'équivalence avec le chemin de salle est vérifiée EN PLUS, jamais À LA PLACE.
+     Un test purement relatif resterait vert si les DEUX chemins dérivaient ensemble (piège du lot 2,
+     cf. §4.1) ; c'est la valeur absolue qui attrape ça, et la relative qui dit l'intention.
+
+     Boîte de référence : 200 (largeur) × 400 (profondeur) × 300 (hauteur), posée à `dc_z` = 250 mm
+     au-dessus du sol de son étage. Port AVANT à (face_x 0,25 ; face_y 0,5), donc en local
+     (−50 ; −200 ; 250 + 150 = 400) — origine au centre de l'empreinte, façade en −Y.
+     ============================================================================================ */
+  await section("Resolver3D.resolvePortWorld3D : ports d'un équipement d'ÉTAGE (valeurs en dur)", async () => {
+  {
+    const s = await makeStore();
+    const r3 = new Resolver3D(s);
+    const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
+    const OX = 1500, OY = -700, OZ = 3200;   // origine MONDE du conteneur (bande de bâtiment + ancrage du plan ; Z du niveau)
+
+    const eqF = await s.create("equipments", {
+      name: "ONDULEUR", placement_mode: "floor", dim_mode: "free",
+      location: "site-a", floor: "1", floor_x: 5000, floor_y: 3000,
+      dc_z: 250, dc_orientation: 0, free_w_mm: 200, free_l_mm: 400, free_h_mm: 300,
+    });
+    const pF = await s.create("ports", { equipment_id: eqF.id, name: "in", face_x: 0.25, face_y: 0.5, face_side: "front" });
+    const at = (ox, oy, oz) => r3.resolvePortWorld3D(pF.id, ox, oy, oz) || { x: null, y: null, z: null, n: { x: null, y: null, z: null }, rackId: "absent" };
+
+    // ---- POINT + NORMALE aux QUATRE lacets cardinaux, valeurs en dur ----
+    // Le lacet tourne le point local AUTOUR du centre de l'empreinte, puis on translate à l'origine du
+    // conteneur. À 90°, le local (−50 ; −200) devient (+200 ; −50) : la façade regarde l'EST.
+    const ATTENDU = {
+      0:   { x: 1450, y: -900, n: [0, -1] },
+      90:  { x: 1700, y: -750, n: [1, 0] },
+      180: { x: 1550, y: -500, n: [0, 1] },
+      270: { x: 1300, y: -650, n: [-1, 0] },
+    };
+    for (const deg of [0, 90, 180, 270]) {
+      await s.update("equipments", eqF.id, { dc_orientation: deg });
+      const w = at(OX, OY, OZ), exp = ATTENDU[deg];
+      ck(w.x != null, "lacet " + deg + "° : port RÉSOLU (non null)");
+      near(w.x, exp.x, "lacet " + deg + "° : x monde");
+      near(w.y, exp.y, "lacet " + deg + "° : y monde");
+      near(w.z, 3600, "lacet " + deg + "° : z monde = socle 3200 + dc_z 250 + demi-hauteur 150");
+      near(w.n.x, exp.n[0], "lacet " + deg + "° : normale x (lacet PROPRE seul — le conteneur ne tourne pas)");
+      near(w.n.y, exp.n[1], "lacet " + deg + "° : normale y");
+      near(w.n.z, 0, "lacet " + deg + "° : normale z nulle (face VERTICALE)");
+      // ---- CONTENEUR = pure TRANSLATION : poser le même équipement à une autre origine décale ses ports
+      // d'EXACTEMENT ce vecteur, quel que soit le lacet. C'est l'invariant dont dépend tout le placement
+      // d'étage (bande de bâtiment en X/Y, niveau en Z — aucune rotation de conteneur nulle part).
+      const w0 = at(0, 0, 0);
+      near(w.x - w0.x, OX, "lacet " + deg + "° : translation pure — dx");
+      near(w.y - w0.y, OY, "lacet " + deg + "° : translation pure — dy");
+      near(w.z - w0.z, OZ, "lacet " + deg + "° : translation pure — dz");
+      near(w.n.x - w0.n.x, 0, "lacet " + deg + "° : l'origine du conteneur ne touche PAS la normale [x]");
+      near(w.n.y - w0.n.y, 0, "lacet " + deg + "° : … [y]");
+    }
+
+    // ---- PIÈGE DU `dc_z` COMPTÉ DEUX FOIS : `worldOriginZ` ne porte QUE le socle du conteneur ----
+    // La hauteur propre est DÉJÀ dans le point local (portLocal part de `dc_z`) : la compter aussi dans
+    // l'origine ferait monter le port de 250 mm de trop, exactement au-dessus de la boîte dessinée.
+    await s.update("equipments", eqF.id, { dc_orientation: 0 });
+    near(at(OX, OY, OZ).z, OZ + 250 + 150, "dc_z comptée UNE fois : z = socle + dc_z + demi-hauteur");
+    ck(Math.abs(at(OX, OY, OZ).z - (OZ + 2 * 250 + 150)) > 1, "dc_z n'est PAS comptée deux fois (le z double serait 3850)");
+    await s.update("equipments", eqF.id, { dc_z: 0 });
+    near(at(OX, OY, OZ).z, OZ + 150, "dc_z = 0 : z = socle + demi-hauteur");
+    await s.update("equipments", eqF.id, { dc_z: 1000 });
+    near(at(OX, OY, OZ).z, OZ + 1000 + 150, "dc_z portée à 1000 : z monte d'exactement 750 de plus");
+    await s.update("equipments", eqF.id, { dc_z: 250 });
+    // Le socle, lui, ne touche QUE le z.
+    near(at(OX, OY, OZ + 5000).z - at(OX, OY, OZ).z, 5000, "socle + 5000 → z + 5000, ni plus ni moins");
+    near(at(OX, OY, OZ + 5000).x, at(OX, OY, OZ).x, "socle : x inchangé");
+
+    // ---- FACE HORIZONTALE : la normale VERTICALE traverse le lacet inchangée ----
+    const pTop = await s.create("ports", { equipment_id: eqF.id, name: "top", face_x: 0.25, face_y: 0.5, face_side: "top" });
+    for (const deg of [0, 90, 180, 270]) {
+      await s.update("equipments", eqF.id, { dc_orientation: deg });
+      const t = r3.resolvePortWorld3D(pTop.id, OX, OY, OZ);
+      ck(t && Math.abs(t.n.z - 1) < 1e-12 && Math.abs(t.n.x) < 1e-9 && Math.abs(t.n.y) < 1e-9,
+        "face DESSUS au lacet " + deg + "° : normale strictement verticale (+Z)");
+      ck(t && Math.abs(t.z - (OZ + 250 + 300)) < 1e-9, "face DESSUS au lacet " + deg + "° : z = socle + dc_z + hauteur (sommet)");
+    }
+    await s.update("equipments", eqF.id, { dc_orientation: 90 });
+    const tW = r3.resolvePortWorld3D(pTop.id, OX, OY, OZ);
+    near(tW.x, 1500, "dessus/90° : x monde (le local (−50 ; 0) tourné donne (0 ; −50))");
+    near(tW.y, -750, "dessus/90° : y monde");
+    await s.update("equipments", eqF.id, { dc_orientation: 0 });
+
+    // ---- BREAKOUT : une lane émerge du connecteur du TRUNK (règle de `resolvePort3D`, reprise ici) ----
+    // C'est la correction que la version INLINÉE dans la vue n'avait pas : elle résolvait la lane sur SES
+    // propres fractions de face, donc à un endroit où aucun connecteur n'est dessiné.
+    const pTrunk = await s.create("ports", { equipment_id: eqF.id, name: "trunk", face_x: 0.75, face_y: 0.25, face_side: "front" });
+    const pLane = await s.create("ports", { equipment_id: eqF.id, name: "lane-1", parent_port_id: pTrunk.id, face_x: 0.1, face_y: 0.9, face_side: "front" });
+    const wTrunk = r3.resolvePortWorld3D(pTrunk.id, OX, OY, OZ), wLane = r3.resolvePortWorld3D(pLane.id, OX, OY, OZ);
+    near(wTrunk.x, 1550, "trunk (face_x 0,75) : x monde");
+    near(wTrunk.y, -900, "trunk : y monde (façade en −Y, lacet 0°)");
+    near(wTrunk.z, 3675, "trunk (face_y 0,25) : z monde = 3200 + 250 + 0,75 × 300");
+    ck(wLane && Math.abs(wLane.x - wTrunk.x) < 1e-12 && Math.abs(wLane.y - wTrunk.y) < 1e-12 && Math.abs(wLane.z - wTrunk.z) < 1e-12,
+      "BREAKOUT : la lane émerge du connecteur du TRUNK, pas de ses propres fractions de face");
+    // discrimination : ses fractions PROPRES donneraient un autre point — le test ci-dessus n'est pas trivial.
+    const pSolo = await s.create("ports", { equipment_id: eqF.id, name: "solo", face_x: 0.1, face_y: 0.9, face_side: "front" });
+    const wSolo = r3.resolvePortWorld3D(pSolo.id, OX, OY, OZ);
+    ck(Math.abs(wSolo.x - wTrunk.x) > 1 && Math.abs(wSolo.z - wTrunk.z) > 1, "discrimination : un port aux MÊMES fractions mais SANS parent tombe ailleurs");
+
+    // ---- ÉQUIVALENCE salle ⇄ étage : même boîte, même port, origines égales ⇒ MÊME point ----
+    // La preuve que la chaîne est correcte : les deux chemins partagent le point LOCAL et la normale ;
+    // seule la PROVENANCE de l'origine change (déclarée dans l'enregistrement / fournie par le layout).
+    const dcE = await s.create("datacenters", { name: "DC-jumeau", width_mm: 20000, depth_mm: 15000 });
+    const eqR = await s.create("equipments", {
+      name: "ONDULEUR-jumeau", dim_mode: "free", dc_id: dcE.id, dc_x: 5000, dc_y: 3000,
+      dc_z: 250, dc_orientation: 0, free_w_mm: 200, free_l_mm: 400, free_h_mm: 300,
+    });
+    const pR = await s.create("ports", { equipment_id: eqR.id, name: "in", face_x: 0.25, face_y: 0.5, face_side: "front" });
+    for (const deg of [0, 90, 180, 270]) {
+      await s.update("equipments", eqF.id, { dc_orientation: deg });
+      await s.update("equipments", eqR.id, { dc_orientation: deg });
+      const salle = r3.resolvePort3D(pR.id, dcE.id), etage = r3.resolvePortWorld3D(pF.id, 5000, 3000, 0);
+      ck(salle && etage, "équivalence " + deg + "° : les deux chemins résolvent");
+      near(etage.x, salle.x, "équivalence " + deg + "° : x identique à l'équipement posé EN SALLE");
+      near(etage.y, salle.y, "équivalence " + deg + "° : y identique");
+      near(etage.z, salle.z, "équivalence " + deg + "° : z identique (socle nul)");
+      near(etage.n.x, salle.n.x, "équivalence " + deg + "° : normale identique [x]");
+      near(etage.n.y, salle.n.y, "équivalence " + deg + "° : … [y]");
+      // socle non nul : le MÊME point, décalé d'EXACTEMENT le socle, et sur le seul axe Z.
+      const haut = r3.resolvePortWorld3D(pF.id, 5000, 3000, 6000);
+      near(haut.z - salle.z, 6000, "équivalence " + deg + "° : socle 6000 → décalage vertical EXACT");
+      near(haut.x - salle.x, 0, "équivalence " + deg + "° : socle → aucun décalage horizontal [x]");
+      near(haut.y - salle.y, 0, "équivalence " + deg + "° : … [y]");
+    }
+    await s.update("equipments", eqF.id, { dc_orientation: 0 });
+
+    // ---- REFUS : ce résolveur ne connaît que la boîte 6 faces ----
+    const rk = await s.create("racks", { name: "R", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dcE.id, dc_x: 500, dc_y: 500 });
+    const eqU = await s.create("equipments", { name: "SW", placement_mode: "rack", rack_id: rk.id, rack_u: 10 });
+    const pU = await s.create("ports", { equipment_id: eqU.id, name: "p", face_x: 0.3, face_y: 0.4, face_side: "front" });
+    ck.eq(r3.resolvePortWorld3D(pU.id, 0, 0, 0), null, "équipement RACKÉ (dim_mode « u ») → null : pas de boîte 6 faces");
+    const orphelin = await s.create("ports", { name: "sans équipement", face_x: 0.5, face_y: 0.5 });
+    ck.eq(r3.resolvePortWorld3D(orphelin.id, 0, 0, 0), null, "port sans équipement → null");
+    ck.eq(r3.resolvePortWorld3D("inconnu", 0, 0, 0), null, "port inconnu → null");
+  }
+  });
+
+  /* ============================================================================================
+     CHAÎNE COMPLÈTE — ce que la VUE pousse au résolveur. Le rendu 3D n'a aucune couverture
+     automatique, mais `DatacenterView` s'instancie en HEADLESS : `webglCtx().floorDecor` rend un
+     descripteur PUR, donc on peut verrouiller les nombres que `DcThreeScene` passe ensuite à
+     `resolvePortWorld3D`. C'est là que le piège du `dc_z` se joue VRAIMENT : le descripteur ne
+     porte QUE le socle du niveau, la hauteur propre étant ajoutée par la géométrie.
+     ============================================================================================ */
+  await section("Chaîne étage → port : le descripteur pousse le SOCLE, le résolveur ajoute la hauteur propre", async () => {
+  {
+    const s = await makeStore();
+    const r3 = new Resolver3D(s);
+    const near = (a, b, name) => ck(Math.abs(a - b) < 1e-9, name + "  (attendu " + b + ", obtenu " + a + ")");
+    // Site UNIQUE et sans GPS → posé à l'origine du monde (parité stricte avec le rangement historique).
+    // Hauteur d'étage FORCÉE à 4 000 mm pour que les Z de niveaux soient ronds : 4 000 + 2 000 d'écart
+    // inter-niveaux (DC_GAP_DEFAULT) → l'étage 1 a son socle à 6 000 mm.
+    const site = await s.create("sites", { name: "Alpha" });
+    await s.create("floors", { location: site.id, floor: "0", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000 });
+    await s.create("floors", { location: site.id, floor: "1", width_mm: 20000, depth_mm: 15000, cell_mm: 600, height_mm: 4000 });
+    const dc = await s.create("datacenters", { name: "Salle 0", location: site.id, floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 1000, floor_y: 1000 });
+    const eqF = await s.create("equipments", {
+      name: "ONDULEUR", placement_mode: "floor", dim_mode: "free",
+      location: site.id, floor: "1", floor_x: 5000, floor_y: 3000,
+      dc_z: 250, dc_orientation: 90, free_w_mm: 200, free_l_mm: 400, free_h_mm: 300,
+    });
+    const pF = await s.create("ports", { equipment_id: eqF.id, name: "in", face_x: 0.25, face_y: 0.5, face_side: "front" });
+
+    const dv = new DatacenterView(s, {}, {});   // garde headless
+    dv.view = "3d"; dv.useWebGL = true; dv.dcId = dc.id; dv.multiDc = true;
+    dv.visibleDcIds = new Set([dc.id]);
+    const fd = dv.webglCtx().floorDecor;
+
+    ck.eq(fd.equips.length, 1, "l'équipement d'étage est transmis au moteur 3D");
+    const fe = fd.equips[0];
+    ck.eq(fe.id, eqF.id, "descripteur : l'équipement attendu");
+    ck.eq(fe.x, 5000, "descripteur : x monde = origine du site + ancrage du plan + floor_x");
+    ck.eq(fe.y, 3000, "descripteur : y monde = … + floor_y");
+    ck.eq(fe.baseZ, 6000, "descripteur : baseZ = SOCLE du niveau 1 (4 000 de hauteur + 2 000 d'écart)");
+    ck(!("z" in fe), "descripteur : AUCUN champ z — le socle seul est transmis, la hauteur propre est ajoutée en aval");
+    ck.eq(fe.baseZ, 6000, "descripteur : baseZ n'inclut PAS dc_z (6 250 signalerait le double comptage)");
+
+    // Ce que `DcThreeScene.buildFloorDecor` fait ensuite, à l'identique.
+    const w = r3.resolvePortWorld3D(pF.id, fe.x, fe.y, fe.baseZ);
+    ck(w, "chaîne complète : le port de l'équipement d'étage est résolu");
+    near(w.x, 5200, "chaîne complète : x = 5000 + 200 (local (−50 ; −200) tourné de 90°)");
+    near(w.y, 2950, "chaîne complète : y = 3000 − 50");
+    near(w.z, 6400, "chaîne complète : z = socle 6000 + dc_z 250 + demi-hauteur 150");
+    near(w.n.x, 1, "chaîne complète : façade tournée vers l'EST au lacet 90°");
+    near(w.n.y, 0, "chaîne complète : … [y]");
+
+    // La boîte DESSINÉE et le PORT partent du même socle : `buildEquipBox` pose son groupe sur `baseZ`
+    // puis sa boîte sur `box().z`, exactement la somme que le résolveur compose. Le port est donc à
+    // mi-hauteur de la boîte, jamais 250 mm au-dessus d'elle.
+    const bas = fe.baseZ + 250, haut = fe.baseZ + 250 + 300;
+    ck(w.z > bas && w.z < haut, "le port tombe DANS la hauteur de la boîte dessinée (socle + dc_z … + hauteur)");
+    near(w.z, (bas + haut) / 2, "port à face_y 0,5 → exactement à mi-hauteur de la boîte");
   }
   });
 
@@ -639,6 +1434,80 @@ module.exports = async () => {
   }
   });
 
+  await section("SiteLayout : position des sites (GPS optionnel, repli 5 km, échelle d'affichage)", async () => {
+  {
+    const near = (a, b, tol, msg) => ck(Math.abs(a - b) <= tol, msg + "  (attendu ≈ " + b + ", obtenu " + a + ")");
+    // ---- REPLI DÉTERMINISTE : sans coordonnées, chaque site est posé à 5 km du PRÉCÉDENT, dans l'ordre
+    // de la COLLECTION (et non par tri : l'ordre d'insertion est le fait du modèle, cf. doctrine §6.9).
+    const trois = SiteLayout.realPositions([{ id: "s1" }, { id: "s2" }, { id: "s3" }]);
+    ck.eq(JSON.stringify(trois.map((p) => p.x)), JSON.stringify([0, 5000, 10000]), "repli : 0 / 5 km / 10 km vers l'est");
+    ck(trois.every((p) => p.y === 0), "repli : chaîne alignée (y = 0)");
+    ck(trois.every((p) => p.fromGps === false), "repli : aucune position marquée GPS");
+    ck.eq(SITE_FALLBACK_STEP_M, 5000, "le pas de repli est bien de 5 km");
+    const ordre = SiteLayout.realPositions([{ id: "zoulou" }, { id: "alpha" }]);
+    ck(ordre[0].location === "zoulou" && ordre[0].x === 0, "repli : ordre de COLLECTION respecté (pas d'ordre alphabétique)");
+    // ---- PROJECTION : le repère s'ancre sur le PREMIER site géolocalisé.
+    const equateur = SiteLayout.realPositions([{ id: "o", lat: 0, lon: 0 }, { id: "e", lat: 0, lon: 1 }]);
+    ck(equateur[0].x === 0 && equateur[0].y === 0, "projection : le site de référence est à l'origine");
+    near(equateur[1].x, 111194.9, 5, "projection : 1° de longitude à l'équateur ≈ 111,19 km à l'EST (x > 0)");
+    near(equateur[1].y, 0, 1e-6, "projection : même latitude → y inchangé");
+    // NORD = -y : sur une vue en plan, le haut de l'écran est le nord (les plans d'étage ont un y qui
+    // croît vers le bas). Un site plus au NORD doit donc avoir un y PLUS PETIT — pas l'inverse.
+    const nord = SiteLayout.realPositions([{ id: "sud", lat: 50, lon: 5 }, { id: "nord", lat: 51, lon: 5 }]);
+    ck(nord[1].y < nord[0].y, "projection : site plus au NORD → y plus petit (nord = -y)");
+    near(nord[1].y, -111194.9, 5, "projection : 1° de latitude ≈ 111,19 km");
+    // resserrement des méridiens avec la latitude : 1° de longitude à 60° N ≈ la moitié de l'équateur.
+    const haut = SiteLayout.realPositions([{ id: "a", lat: 60, lon: 0 }, { id: "b", lat: 60, lon: 1 }]);
+    near(haut[1].x, 111194.9 * Math.cos(60 * Math.PI / 180), 5, "projection : cos(latitude) appliqué à la longitude");
+    // ANTIMÉRIDIEN : deux sites de part et d'autre du 180ᵉ sont VOISINS (2°), pas aux antipodes (358°).
+    const meridien = SiteLayout.realPositions([{ id: "a", lat: 0, lon: 179 }, { id: "b", lat: 0, lon: -179 }]);
+    near(meridien[1].x, 2 * 111194.9, 20, "projection : Δlongitude ramenée dans [-180, 180] (antiméridien)");
+    // ---- MIXTE : un site sans coordonnées suit le PRÉCÉDENT, que celui-ci soit géolocalisé ou non.
+    const mixte = SiteLayout.realPositions([{ id: "gps", lat: 50, lon: 5 }, { id: "sans" }]);
+    ck(mixte[0].fromGps === true && mixte[1].fromGps === false, "mixte : le marqueur fromGps distingue les deux origines");
+    ck.eq(mixte[1].x - mixte[0].x, 5000, "mixte : le site sans coordonnées est à 5 km à l'est du site GPS");
+    ck.eq(mixte[1].y, mixte[0].y, "mixte : …et à la même latitude apparente");
+    // ---- COORDONNÉES INEXPLOITABLES → traitées comme ABSENTES (repli), jamais comme (0,0).
+    ck.eq(SiteLayout.gpsOf({ id: "x", lat: 50 }), null, "gpsOf : latitude seule → null (le couple est indissociable)");
+    ck.eq(SiteLayout.gpsOf({ id: "x", lat: 91, lon: 5 }), null, "gpsOf : latitude hors bornes → null");
+    ck.eq(SiteLayout.gpsOf({ id: "x", lat: 50, lon: 181 }), null, "gpsOf : longitude hors bornes → null");
+    ck(SiteLayout.gpsOf({ id: "x", lat: 0, lon: 0 }) != null, "gpsOf : (0, 0) est une position VALIDE (golfe de Guinée), pas une absence");
+    const partiel = SiteLayout.realPositions([{ id: "a", lat: 50, lon: 5 }, { id: "b", lat: 51 }]);
+    ck.eq(partiel[1].x - partiel[0].x, 5000, "saisie partielle → repli 5 km (et non une projection fantaisiste)");
+    // ---- ÉCHELLE : réglage d'AFFICHAGE. « 1 km réel = N m monde » → mm_monde = m_réels × N.
+    ck.eq(SITE_SCALE_DEFAULT_M_PER_KM, 10, "échelle par défaut : 1 km réel = 10 m monde (facteur 1/100)");
+    const w1 = SiteLayout.compress(SiteLayout.realPositions([{ id: "a" }, { id: "b" }]), null);
+    ck.eq(w1[1].x - w1[0].x, 50000, "échelle par défaut : le repli de 5 km fait 50 000 mm (50 m)");
+    const w2 = SiteLayout.compress(SiteLayout.realPositions([{ id: "a" }, { id: "b" }]), { metresPerKm: 20, log: false });
+    ck.eq(w2[1].x - w2[0].x, 100000, "échelle ×2 : 5 km → 100 000 mm");
+    // Bornage : une échelle absente/nulle/aberrante ne doit jamais confondre les sites à l'origine.
+    ck(SiteLayout.normalizeScale(null).metresPerKm === 10, "normalizeScale : réglage absent → défaut");
+    ck(SiteLayout.normalizeScale({ metresPerKm: 0, log: false }).metresPerKm >= 1, "normalizeScale : 0 borné (sinon tous les sites confondus)");
+    ck(SiteLayout.normalizeScale({ metresPerKm: 1e9, log: false }).metresPerKm <= 200, "normalizeScale : valeur démesurée bornée");
+    ck(SiteLayout.normalizeScale({ metresPerKm: NaN, log: false }).metresPerKm === 10, "normalizeScale : NaN → défaut");
+    // ---- NORMALISATION : le monde commence à l'origine ; le cas MONO-SITE y retombe exactement, ce qui
+    // garantit la PARITÉ STRICTE avec le rangement historique (bâtiment unique posé en x = 0).
+    const solo = SiteLayout.compress(SiteLayout.realPositions([{ id: "seul", lat: 50.6, lon: 5.57 }]), null);
+    ck(solo.length === 1 && solo[0].x === 0 && solo[0].y === 0, "mono-site géolocalisé → (0, 0) : parité stricte avec l'historique");
+    const sud = SiteLayout.compress(SiteLayout.realPositions([{ id: "n", lat: 51, lon: 5 }, { id: "s", lat: 50, lon: 5 }]), null);
+    ck(Math.min(...sud.map((p) => p.x)) === 0 && Math.min(...sud.map((p) => p.y)) === 0, "normalisation : min x = min y = 0");
+    ck(sud[0].y < sud[1].y, "normalisation : l'ORDRE nord/sud est préservé par la translation");
+    // ---- MODE LOGARITHMIQUE : comprime les grandes distances, conserve directions et ordre.
+    const lin = SiteLayout.compress(SiteLayout.realPositions([{ id: "a", lat: 0, lon: 0 }, { id: "b", lat: 0, lon: 5 }]), { metresPerKm: 10, log: false });
+    const lg = SiteLayout.compress(SiteLayout.realPositions([{ id: "a", lat: 0, lon: 0 }, { id: "b", lat: 0, lon: 5 }]), { metresPerKm: 10, log: true });
+    ck(lg[1].x - lg[0].x < lin[1].x - lin[0].x, "log : 556 km comprimés par rapport au linéaire");
+    ck(lg[1].x > lg[0].x, "log : direction (est) conservée");
+    const lgOrdre = SiteLayout.compress(SiteLayout.realPositions([{ id: "a" }, { id: "b" }, { id: "c" }]), { metresPerKm: 10, log: true });
+    ck(lgOrdre[0].x < lgOrdre[1].x && lgOrdre[1].x < lgOrdre[2].x, "log : ordre des sites préservé");
+    ck(Math.min(...lgOrdre.map((p) => p.x)) === 0, "log : normalisation appliquée aussi en logarithmique");
+    // ---- carte de consommation
+    const carte = SiteLayout.worldPositions([{ id: "a" }, { id: "b" }], ["legacy"], null);
+    ck(carte.get("a").x === 0 && carte.get("b").x === 50000 && carte.get("legacy").x === 100000, "worldPositions : sites puis locations historiques, à la suite");
+    ck.eq(carte.get("inconnu"), undefined, "worldPositions : une location hors modèle n'a PAS de position par défaut");
+    ck.eq(JSON.stringify(SiteLayout.compress([], null)), "[]", "compress : modèle vide → aucune position (pas de NaN)");
+  }
+  });
+
   await section("FloorLayout : disposition multi-salles (étages empilés, bâtiments côte à côte)", async () => {
   {
     const s = await makeStore();
@@ -675,6 +1544,22 @@ module.exports = async () => {
     const m2 = fl.multiLayout(null, { visibleDcIds: new Set([dcA.id, dcC.id]) });
     ck.eq(m2.buildings.length, 2, "multiLayout : 2 bâtiments côte à côte");
     ck(m2.buildings[1].x0 >= m2.buildings[0].x1, "multiLayout : bâtiments non chevauchants (x croissant)");
+    // §6.8 de docs/placement.md — le REPÈRE se dérive du MODÈLE DÉCLARÉ, jamais de l'ensemble AFFICHÉ :
+    // réduire la portée (jusqu'à masquer un bâtiment entier) ne doit RIEN déplacer. C'est l'invariant que
+    // ce lot installe, et il n'existait pas avant : la disposition était calculée sur les salles affichées.
+    const large = fl.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcB.id, dcC.id]) });
+    const etroit = fl.multiLayout(dcA, { visibleDcIds: new Set([dcA.id]) });
+    ck.eq(JSON.stringify(etroit.buildings), JSON.stringify(large.buildings), "portée réduite → bandes de bâtiment INCHANGÉES (un site masqué garde sa place)");
+    ck.eq(JSON.stringify(etroit.levelZs), JSON.stringify(large.levelZs), "portée réduite → altitudes de niveau INCHANGÉES");
+    const offA = (mm) => JSON.stringify(mm.rooms.find((x) => x.dc.id === dcA.id).off);
+    ck.eq(offA(etroit), offA(large), "portée réduite → la salle encore affichée ne BOUGE pas");
+    // L'ordre des bâtiments ne dépend plus de la salle ACTIVE (c'est la caméra qui se déplace, pas le monde).
+    const depuisA = fl.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcC.id]) });
+    const depuisC = fl.multiLayout(dcC, { visibleDcIds: new Set([dcA.id, dcC.id]) });
+    ck.eq(JSON.stringify(depuisC.buildings), JSON.stringify(depuisA.buildings), "ordre des bâtiments STABLE, indépendant de la salle active");
+    // …mais la PORTÉE reste pleinement effective sur ce qui est DESSINÉ (repère ⊥ portée).
+    ck(etroit.rooms.length === 1 && large.rooms.length === 3, "la portée filtre bien les salles DESSINÉES");
+    ck(etroit.floorPlanes.length < large.floorPlanes.length, "la portée filtre bien les plans d'étage DESSINÉS");
     // décor (5c.16.3) : plans d'étage (un par bâtiment × étage) + position monde d'un OOB
     ck(m.floorPlanes.length >= 2, "multiLayout : ≥ 2 plans d'étage (Liège ét.0 + ét.1)");
     const fpA = m.floorPlanes.find((fp) => fp.floor === "0"); ck(!!fpA && fpA.off.z === 0, "floorPlane ét.0 → z = 0");
@@ -690,6 +1575,325 @@ module.exports = async () => {
     const fe = { placement_mode: "floor", location: "liege", floor: "1", floor_x: 500, floor_y: 700, dc_z: 1000 };
     const ew = fl.equipFloorWorld(m3, fe);
     ck(isFinite(ew.x) && isFinite(ew.y) && Math.abs(ew.z - (FloorLayout.levelZ(m3, 1) + 1000)) < 1e-6, "equipFloorWorld : base = niveau étage + dc_z");
+    // ORIGINE du repère PROPRE du posé (source unique du décor 3D ET du cadrage « Localiser ») : même x/y
+    // que ci-dessus, mais un Z qui ne porte QUE le SOCLE. C'est la frontière exacte du piège du `dc_z` :
+    // l'origine l'ignore, `equipFloorWorld` (et le résolveur de ports) l'ajoute — une seule fois chacun.
+    const fo = fl.equipFloorOrigin(m3, fe);
+    ck(fo.x === ew.x && fo.y === ew.y, "equipFloorOrigin : mêmes x/y que equipFloorWorld (une seule règle de position sur le plan)");
+    ck.eq(fo.baseZ, FloorLayout.levelZ(m3, 1), "equipFloorOrigin : baseZ = SOCLE du niveau, SANS la hauteur propre");
+    // Tolérance : le socle de ce niveau n'est pas un nombre rond (hauteur de contenu = 42 × 44,45 mm),
+    // l'écart mesuré porte donc l'erreur d'arrondi de la somme — pas celle de la règle.
+    ck(Math.abs((ew.z - fo.baseZ) - 1000) < 1e-6, "equipFloorWorld = origine + dc_z : la hauteur propre est ajoutée UNE fois, et là seulement");
+    ck(!("z" in fo), "equipFloorOrigin : aucun champ `z` — le nom `baseZ` interdit de le confondre avec une altitude d'objet");
+    // Un posé NON localisé retombe au CENTRE de son plan, comme il est DESSINÉ (parité `floorEquipPos`).
+    // Mesuré par ÉCART avec le posé localisé ci-dessus (même bâtiment, même étage) : l'origine du bâtiment
+    // et l'ancrage du plan s'annulent, l'attente ne dépend donc que du modèle.
+    const cfg1 = fl.config("liege", "1");
+    const foAuto = fl.equipFloorOrigin(m3, { placement_mode: "floor", location: "liege", floor: "1" });
+    ck.eq(foAuto.x - fo.x, cfg1.width_mm / 2 - 500, "equipFloorOrigin(non localisé) : x = centre du plan (écart au posé en floor_x 500)");
+    ck.eq(foAuto.y - fo.y, cfg1.depth_mm / 2 - 700, "equipFloorOrigin(non localisé) : y = centre du plan (écart au posé en floor_y 700)");
+    ck.eq(foAuto.baseZ, fo.baseZ, "equipFloorOrigin(non localisé) : même socle — seule la position sur le plan diffère");
+  }
+  // ---- NIVEAU SITE (doctrine §6.9) : la position d'un bâtiment se dérive du SITE (GPS, sinon repli à
+  // 5 km), et non plus d'un rangement par largeur cumulée. Les attentes ci-dessous sont EXPLICITES — pas
+  // une comparaison de l'ancien chemin au nouveau : au lot 2, un test de parité était devenu tautologique
+  // au moment même de la bascule et serait resté vert sans plus rien prouver (méthode, doctrine §4.1).
+  {
+    const s = await makeStore();
+    const fl = new FloorLayout(s);
+    const near = (a, b, tol, msg) => ck(Math.abs(a - b) <= tol, msg + "  (attendu ≈ " + b + ", obtenu " + a + ")");
+    const liege = await s.create("sites", { name: "Liège" });
+    const dc1 = await s.create("datacenters", { name: "R1", location: liege.id, floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 0, floor_y: 0 });
+    // MONO-SITE : le cas de très loin le plus courant doit retomber EXACTEMENT sur l'origine — c'est la
+    // parité stricte avec le rangement historique, et la garantie qu'aucun document existant ne bouge.
+    const mono = fl.multiLayout(dc1, { visibleDcIds: new Set([dc1.id]) });
+    ck(mono.buildings.length === 1 && mono.buildings[0].x0 === 0 && mono.buildings[0].y0 === 0, "mono-site : bâtiment à l'origine (parité stricte avec l'historique)");
+    // DEUX SITES sans coordonnées : le repli de 5 km, à l'échelle par défaut, vaut 50 000 mm.
+    const herstal = await s.create("sites", { name: "Herstal" });
+    const dc2 = await s.create("datacenters", { name: "R2", location: herstal.id, floor: "0", width_mm: 6000, depth_mm: 4000, floor_x: 0, floor_y: 0 });
+    const repli = fl.multiLayout(null, {});
+    const bL = repli.buildings.find((b) => b.loc === liege.id), bH = repli.buildings.find((b) => b.loc === herstal.id);
+    ck.eq(bH.x0 - bL.x0, 50000, "deux sites sans GPS : origines distantes de 50 000 mm (5 km au 1/100)");
+    ck.eq(bH.y0, bL.y0, "deux sites sans GPS : chaîne de repli alignée en y");
+    ck(bL.x1 > bL.x0 && bL.y1 > bL.y0, "la bande de bâtiment garde une emprise (x1/y1 = origine + plan d'étage)");
+    // COORDONNÉES RENSEIGNÉES : la position réelle remplace le repli. Herstal est au nord-est de Liège,
+    // à ≈ 3,5 km — donc PLUS PRÈS que les 5 km du repli, et décalée en y (ce que l'ancien modèle à une
+    // seule dimension ne pouvait pas exprimer).
+    await s.update("sites", liege.id, { lat: 50.6326, lon: 5.5797 });
+    await s.update("sites", herstal.id, { lat: 50.6634, lon: 5.6303 });
+    const gps = fl.multiLayout(null, {});
+    const gL = gps.buildings.find((b) => b.loc === liege.id), gH = gps.buildings.find((b) => b.loc === herstal.id);
+    ck(gH.x0 > gL.x0, "GPS : Herstal à l'EST de Liège (x plus grand)");
+    ck(gH.y0 < gL.y0, "GPS : Herstal au NORD de Liège (y plus petit — nord = -y)");
+    ck(Math.hypot(gH.x0 - gL.x0, gH.y0 - gL.y0) < 50000, "GPS : la distance réelle (≈ 3,5 km) remplace bien le repli de 5 km");
+    ck(Math.min(gL.x0, gH.x0) === 0 && Math.min(gL.y0, gH.y0) === 0, "GPS : le monde reste ancré à l'origine (normalisation)");
+    // ÉCHELLE = réglage d'AFFICHAGE : elle change les écarts, jamais l'ordre ni les directions.
+    const x2 = fl.multiLayout(null, { siteScale: { metresPerKm: 20, log: false } });
+    const x2L = x2.buildings.find((b) => b.loc === liege.id), x2H = x2.buildings.find((b) => b.loc === herstal.id);
+    near(x2H.x0 - x2L.x0, 2 * (gH.x0 - gL.x0), 1e-6, "échelle ×2 : l'écart entre bâtiments double");
+    near(x2H.y0 - x2L.y0, 2 * (gH.y0 - gL.y0), 1e-6, "échelle ×2 : l'écart en y double aussi");
+    ck.eq(x2L.x1 - x2L.x0, gL.x1 - gL.x0, "échelle ×2 : l'EMPRISE d'un bâtiment ne change pas (elle est en mm réels)");
+    // §6.8 — masquer retire du DESSIN, jamais du REPÈRE : les bandes ne bougent pas avec la portée.
+    const portee = fl.multiLayout(dc1, { visibleDcIds: new Set([dc1.id]) });
+    ck.eq(JSON.stringify(portee.buildings), JSON.stringify(fl.multiLayout(dc1, { visibleDcIds: new Set([dc1.id, dc2.id]) }).buildings), "portée réduite → bandes de bâtiment INCHANGÉES");
+    // Un site sans aucun étage ni salle est un fait du MODÈLE (il occupe un rang dans la chaîne de repli)
+    // mais n'a rien à dessiner : aucune bande émise.
+    const seraing = await s.create("sites", { name: "Seraing" });
+    ck(!fl.multiLayout(null, {}).buildings.some((b) => b.loc === seraing.id), "site sans étage ni salle → aucune bande de bâtiment émise");
+    // Le contenu POSÉ SUR UN ÉTAGE suit l'origine de son bâtiment en X **et** en Y. Ne lire que `x0`
+    // repliait silencieusement tous les bâtiments sur la même bande — d'où ces deux attentes séparées.
+    const eqFloor = { placement_mode: "floor", location: herstal.id, floor: "0", floor_x: 500, floor_y: 700, dc_z: 0 };
+    const wEq = fl.equipFloorWorld(gps, eqFloor);
+    ck.eq(wEq.x, gH.x0 + 500, "equipFloorWorld : x mesuré depuis l'origine du bâtiment (x0)");
+    ck.eq(wEq.y, gH.y0 + 700, "equipFloorWorld : y mesuré depuis l'origine du bâtiment (y0)");
+    const oobH = await s.create("waypoints", { wp_type: "oob", location: herstal.id, floor: "0", floor_x: 300, floor_y: 400, dc_z: 2000 });
+    const wOob = fl.oobWorld(gps, oobH);
+    ck.eq(wOob.x, gH.x0 + 300, "oobWorld : x mesuré depuis l'origine du bâtiment (x0)");
+    ck.eq(wOob.y, gH.y0 + 400, "oobWorld : y mesuré depuis l'origine du bâtiment (y0)");
+  }
+  // ---- TAILLE DÉCLARÉE du bâtiment (doctrine §6.8, dernier paragraphe). Le bâtiment n'avait pas de
+  // dimension propre : il épousait son plus grand plan d'étage. Déclarée, la taille FAIT l'emprise ;
+  // absente, l'emprise reste DÉDUITE, à parité stricte avec l'historique. Attentes EXPLICITES (valeurs
+  // écrites en dur) et non une comparaison du nouveau chemin à l'ancien — un tel test resterait vert
+  // en ne prouvant plus rien au moment même de la bascule (doctrine §4.1, piège vécu au lot 2).
+  {
+    const s = await makeStore();
+    const fl = new FloorLayout(s);
+    const ans = await s.create("sites", { name: "Ans" });
+    // Étage CONFIGURÉ 6000 × 4000, ancré à (1000, 500) → emprise DÉDUITE attendue : 7000 × 4500.
+    await s.create("floors", { location: ans.id, floor: "0", width_mm: 6000, depth_mm: 4000, anchor_x: 1000, anchor_y: 500 });
+    await s.create("datacenters", { name: "S", location: ans.id, floor: "0", width_mm: 3000, depth_mm: 2000, floor_x: 0, floor_y: 0 });
+    const bandeDe = (m) => m.buildings.find((b) => b.loc === ans.id);
+    const deduit = bandeDe(fl.multiLayout(null, {}));
+    ck.eq(deduit.x1 - deduit.x0, 7000, "SANS taille déclarée : emprise = plan d'étage + ancre (6000 + 1000) — comportement HISTORIQUE conservé");
+    ck.eq(deduit.y1 - deduit.y0, 4500, "SANS taille déclarée : profondeur = 4000 + 500");
+    // Taille DÉCLARÉE : c'est ELLE qui fait l'emprise — le bâtiment cesse d'épouser son plan d'étage.
+    await s.update("sites", ans.id, { width_mm: 20000, depth_mm: 10000 });
+    const declaree = fl.multiLayout(null, {});
+    const bDecl = bandeDe(declaree);
+    ck.eq(bDecl.x1 - bDecl.x0, 20000, "taille DÉCLARÉE : la largeur de la bande vaut la largeur déclarée");
+    ck.eq(bDecl.y1 - bDecl.y0, 10000, "taille DÉCLARÉE : la profondeur de la bande vaut la profondeur déclarée");
+    ck.eq(bDecl.x0, deduit.x0, "taille DÉCLARÉE : l'ORIGINE du bâtiment (position du site) ne bouge pas");
+    ck.eq(declaree.totalW, 20000, "taille DÉCLARÉE : l'étendue du monde (cadrage caméra) suit la bande déclarée");
+    ck.eq(declaree.maxD, 10000, "taille DÉCLARÉE : la profondeur du monde suit aussi");
+    // Les plans d'étage, eux, gardent leur propre taille : la déclaration borne le bâtiment, elle ne
+    // redimensionne rien de ce qu'il contient.
+    const plan = declaree.floorPlanes.find((fp) => fp.loc === ans.id);
+    ck(plan.cfg.width_mm === 6000 && plan.cfg.depth_mm === 4000, "taille DÉCLARÉE : le plan d'étage garde SA taille (le bâtiment le borne, il ne le redimensionne pas)");
+    // Une DEMI-dimension est refusée à l'écriture (couple indissociable) : l'emprise ne peut donc jamais
+    // se calculer sur une moitié de taille — la géométrie n'a pas à s'en défendre, la validation le fait.
+    await s.update("sites", ans.id, { depth_mm: null });
+    const apresRefus = bandeDe(fl.multiLayout(null, {}));
+    ck.eq(apresRefus.x1 - apresRefus.x0, 20000, "demi-dimension REFUSÉE à l'écriture → l'emprise déclarée reste inchangée");
+  }
+  });
+
+  await section("FloorLayout : le conteneur SALLE sait tourner une NORMALE (roomDirToWorld / roomEndToWorld — §6.30)", async () => {
+  {
+    // Aucun layout ici, et c'est VOULU : le `RoomPlacement` est écrit À LA MAIN, donc toutes les valeurs
+    // attendues plus bas se dérivent du modèle au crayon (centre de salle (3000 ; 2000), origine monde
+    // (10000 ; 20000 ; 3000)) au lieu d'être recopiées d'une exécution. Ce sont des ATTENTES, pas des
+    // empreintes. La composition avec le layout, elle, est vérifiée dans la section `worldLine` suivante.
+    const approx = (a, b, name, eps) => ck(Math.abs(a - b) <= (eps || 1e-9), name + "  (attendu ≈" + b + ", obtenu " + a + ")");
+    const salle = (deg) => ({ dc: { width_mm: 6000, depth_mm: 4000 }, off: { x: 10000, y: 20000, z: 3000 }, o: deg * Math.PI / 180, level: 0 });
+    const local = { x: 1500, y: 500, z: 700 };            // → écart au centre : (−1500 ; −1500)
+    const normaleAvant = { x: 0, y: -1, z: 0 };           // normale sortante d'une FAÇADE (−Y local)
+    // Point : le lacet de la salle fait tourner l'écart au centre autour de `off`.
+    const ptAttendu = { 0: [8500, 18500], 90: [11500, 18500], 180: [11500, 21500], 270: [8500, 21500] };
+    // Normale : ROTATION SEULE — jamais de translation, jamais d'origine de salle.
+    const nAttendue = { 0: [0, -1], 90: [1, 0], 180: [0, 1], 270: [-1, 0] };
+    [0, 90, 180, 270].forEach((deg) => {
+      const room = salle(deg);
+      const bout = FloorLayout.roomEndToWorld(room, { x: local.x, y: local.y, z: local.z, n: normaleAvant });
+      approx(bout.x, ptAttendu[deg][0], "roomEndToWorld " + deg + "° : x MONDE");
+      approx(bout.y, ptAttendu[deg][1], "roomEndToWorld " + deg + "° : y MONDE");
+      approx(bout.z, 3700, "roomEndToWorld " + deg + "° : z = z local + socle du niveau");
+      approx(bout.n.x, nAttendue[deg][0], "roomDirToWorld " + deg + "° : normale x");
+      approx(bout.n.y, nAttendue[deg][1], "roomDirToWorld " + deg + "° : normale y");
+      // ⚠ LE VERROU QUI MORD sur la faute la plus probable : une normale TRANSLATÉE par l'origine de la
+      // salle reste « plausible » (elle pointe encore quelque part) mais mesure des milliers de mm. Sa
+      // NORME est donc le contrôle décisif, bien plus que ses composantes prises une à une.
+      approx(Math.hypot(bout.n.x, bout.n.y, bout.n.z), 1, "roomDirToWorld " + deg + "° : la normale reste UNITAIRE (aucune translation)");
+      approx(bout.n.z, 0, "roomDirToWorld " + deg + "° : un lacet ne bascule jamais une normale (z inchangé)");
+      // ÉQUIVALENCE des deux mesures : le composite ne doit pas dériver de la primitive POINT dont il est
+      // fait. Épinglé à ses seules constantes, il pourrait s'en écarter sans que rien ne rougisse.
+      const pt = FloorLayout.roomToWorld(room, local);
+      ck(bout.x === pt.x && bout.y === pt.y && bout.z === pt.z, "roomEndToWorld " + deg + "° : le POINT est EXACTEMENT celui de roomToWorld (une seule transformée)");
+    });
+    // Normale VERTICALE (face du dessus d'un équipement libre) : insensible au lacet, aux quatre orientations.
+    [0, 90, 180, 270].forEach((deg) => {
+      const n = FloorLayout.roomEndToWorld(salle(deg), { x: local.x, y: local.y, z: local.z, n: { x: 0, y: 0, z: 1 } }).n;
+      approx(Math.hypot(n.x, n.y), 0, "roomDirToWorld " + deg + "° : normale VERTICALE non tournée (composantes horizontales nulles)");
+      approx(n.z, 1, "roomDirToWorld " + deg + "° : normale VERTICALE conservée");
+    });
+    // Bout SANS normale → `n` nul (le tracé se passe alors d'amorce ⊥) : comportement conservé du traceur.
+    ck.eq(FloorLayout.roomEndToWorld(salle(0), { x: 1, y: 2, z: 3 }).n, null, "roomEndToWorld : bout sans normale → n = null");
+    ck.eq(FloorLayout.roomEndToWorld(salle(0), { x: 1, y: 2, z: 3, n: null }).n, null, "roomEndToWorld : normale explicitement nulle → n = null");
+    // DISCRIMINATION (anti-vacuité) : sans elle, les assertions ci-dessus passeraient aussi si la
+    // transformée était l'identité. Elle prouve que « local » et « monde » sont bien deux repères.
+    const l = FloorLayout.roomEndToWorld(salle(90), { x: local.x, y: local.y, z: local.z, n: normaleAvant });
+    ck(Math.hypot(l.x - local.x, l.y - local.y, l.z - local.z) > 1000, "roomEndToWorld : le point MONDE diffère franchement du point LOCAL (le détecteur n'est pas vide)");
+  }
+  });
+
+  await section("CableRouting.worldLine : les BOUTS entrent DÉJÀ EN MONDE (§6.30 — parité figée sur HEAD)", async () => {
+  {
+    /* Lot 4 du chantier « câblage des équipements d'étage » (décision D1). `worldLine` recevait deux bouts
+       en LOCAL SALLE plus la transformée de LEUR salle ; elle reçoit des `WorldEnd`. Ce lot est un REFACTOR
+       À COMPORTEMENT CONSTANT : les valeurs figées ci-dessous ont été mesurées sur le code RÉGÉNÉRÉ DEPUIS
+       GIT (`git show HEAD:src-client/geometry/CableRouting.ts`, avant bascule) sur EXACTEMENT cette scène,
+       puis écrites EN DUR. Elles ne comparent donc pas la fonction à elle-même (piège du lot 2 du chantier
+       conteneur) : elles disent ce que le tracé VALAIT avant, et il doit continuer de le valoir. */
+    const s = await makeStore();
+    const dcA = await s.create("datacenters", { name: "A", width_mm: 6000, depth_mm: 4000, location: "", floor: "0", floor_x: 0, floor_y: 0, floor_orientation: 90 });
+    const dcB = await s.create("datacenters", { name: "B", width_mm: 5000, depth_mm: 7000, location: "", floor: "1", floor_x: 2000, floor_y: 1000, floor_orientation: 180 });
+    const rkA = await s.create("racks", { name: "RA", u_count: 42, datacenter_id: dcA.id, dc_x: 1200, dc_y: 900, orientation: 0 });
+    const rkB = await s.create("racks", { name: "RB", u_count: 42, datacenter_id: dcB.id, dc_x: 2500, dc_y: 3000, orientation: 270 });
+    const eqA = await s.create("equipments", { name: "EA", placement_mode: "rack", rack_id: rkA.id, rack_u: 5 });
+    const eqB = await s.create("equipments", { name: "EB", placement_mode: "rack", rack_id: rkB.id, rack_u: 9 });
+    const pA = (await s.create("ports", { equipment_id: eqA.id, name: "pa", face_x: 0.3, face_y: 0.7, face_side: "front" })).id;
+    const pB = (await s.create("ports", { equipment_id: eqB.id, name: "pb", face_x: 0.6, face_y: 0.2, face_side: "front" })).id;
+    const exA = await s.create("waypoints", { wp_type: "exit", datacenter_id: dcA.id, dc_x: 100, dc_y: 200 });
+    const exB = await s.create("waypoints", { wp_type: "exit", datacenter_id: dcB.id, dc_x: 300, dc_y: 400 });
+    await s.create("cables", { name: "inter", from_port_id: pA, to_port_id: pB, waypoint_ids: [exA.id, exB.id] });
+    const paA = await s.create("equipments", { name: "PA", type: "patch_panel", placement_mode: "rack", rack_id: rkA.id, rack_u: 20 });
+    const paB = await s.create("equipments", { name: "PB", type: "patch_panel", placement_mode: "rack", rack_id: rkB.id, rack_u: 22 });
+    await s.create("cableBundles", { name: "T", endpoint_a_equipment_id: paA.id, endpoint_b_equipment_id: paB.id, waypoint_ids: [exA.id, exB.id] });
+
+    const floor = new FloorLayout(s), resolver = new Resolver3D(s);
+    const routing = new CableRouting(s, resolver, floor), trunks = new TrunkRouting(s, resolver, routing);
+    const m = floor.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcB.id]) });
+    const route = routing.interDcRoutes(m, true)[0], trunk = trunks.interDcTrunks(m, true)[0];
+    ck(!!route && !!trunk, "scène : 1 câble ET 1 faisceau inter-salles tracés");
+
+    const memePoint = (p, q) => p && q && p.x === q.x && p.y === q.y && p.z === q.z;
+    const memeTrace = (obtenus, attendus, quoi) => {
+      ck.eq(obtenus.length, attendus.length, quoi + " : nombre de points du tracé");
+      ck(obtenus.every((p, i) => memePoint(p, attendus[i])), quoi + " : TOUS les points identiques à la valeur d'avant bascule");
+    };
+    // ---- VALEURS FIGÉES (mesurées sur le code d'avant bascule, régénéré par `git show HEAD:`) ----
+    memeTrace(route.linePts, [
+      { x: 3603, y: 1109.48, z: 241.135 },      // bout A monde
+      { x: 3623, y: 1109.48, z: 241.135 },      // amorce ⊥ de 20 mm — c'est ELLE qui atteste de la NORMALE monde
+      { x: 3800, y: 100, z: 2400 },             // exit salle A
+      { x: 6700, y: 7600, z: 6266.9 },          // exit salle B (autre étage → z du niveau 1)
+      { x: 5023, y: 5045.26, z: 4308.06 },      // amorce ⊥ du bout B
+      { x: 5003, y: 5045.26, z: 4308.06 },      // bout B monde
+    ], "câble inter-salles");
+    ck.eq(JSON.stringify(Array.from(route.straight)), JSON.stringify([0, 4]), "câble : segments DROITS inchangés");
+    ck.eq(JSON.stringify(Array.from(route.stubAt)), JSON.stringify([1, 4]), "câble : indices d'AMORCE inchangés");
+    memeTrace(route.pts, [
+      { x: 3603, y: 1109.48, z: 241.135 }, { x: 3800, y: 100, z: 2400 },
+      { x: 6700, y: 7600, z: 6266.9 }, { x: 5003, y: 5045.26, z: 4308.06 },
+    ], "câble : pastilles (pts)");
+    memeTrace(trunk.linePts, [
+      { x: 2603, y: 1200, z: 916.7750000000001 },
+      { x: 2583, y: 1200, z: 916.7750000000001 },
+      { x: 3800, y: 100, z: 2400 },
+      { x: 6700, y: 7600, z: 6266.9 },
+      { x: 3983, y: 5000, z: 4872.575 },
+      { x: 4003, y: 5000, z: 4872.575 },
+    ], "faisceau inter-salles");
+    ck.eq(JSON.stringify(Array.from(trunk.straight)), JSON.stringify([0, 4]), "faisceau : segments DROITS inchangés");
+    ck.eq(JSON.stringify(Array.from(trunk.stubAt)), JSON.stringify([1, 4]), "faisceau : indices d'AMORCE inchangés");
+    // MÉCANIQUE UNIQUE câbles ⇄ faisceaux : les deux passent par le MÊME `worldLine`, donc les points de
+    // PASSAGE d'une même route sont les mêmes objets géométriques. Une bascule qui n'aurait migré qu'un
+    // des deux appelants romprait cette égalité.
+    ck(memePoint(route.linePts[2], trunk.linePts[2]) && memePoint(route.linePts[3], trunk.linePts[3]), "worldLine PARTAGÉ : câble et faisceau traversent les MÊMES points de passage");
+
+    // ---- ÉQUIVALENCE : le tracé monde et la résolution locale racontent la même chose ----
+    // Le bout A du tracé doit valoir l'image du port LOCAL par `roomToWorld` — la primitive de point que ce
+    // lot n'a PAS touchée. C'est le contrôle qui prouve que le repère n'a pas glissé, indépendamment des
+    // constantes ci-dessus (deux MESURES comparées entre elles, pas chacune à un nombre écrit à la main).
+    const roomA = m.rooms.find((x) => x.dc.id === dcA.id), roomB = m.rooms.find((x) => x.dc.id === dcB.id);
+    const locA = resolver.resolvePort3D(pA, dcA.id), locB = resolver.resolvePort3D(pB, dcB.id);
+    ck(memePoint(route.linePts[0], FloorLayout.roomToWorld(roomA, locA)), "bout A : le tracé part EXACTEMENT du port local porté au monde par SA salle");
+    ck(memePoint(route.linePts[5], FloorLayout.roomToWorld(roomB, locB)), "bout B : idem pour l'autre salle (chaque bout par SON conteneur)");
+    // La NORMALE monde attendue est écrite ici avec la formule que portait HEAD (différence de deux images
+    // par `roomToWorld`) : l'expression a quitté le traceur, l'ATTENTE la garde.
+    const w0 = FloorLayout.roomToWorld(roomA, locA);
+    const w1 = FloorLayout.roomToWorld(roomA, { x: locA.x + locA.n.x, y: locA.y + locA.n.y, z: locA.z + locA.n.z });
+    const nHead = { x: w1.x - w0.x, y: w1.y - w0.y, z: w1.z - w0.z };
+    const nBout = FloorLayout.roomEndToWorld(roomA, locA).n;
+    ck(memePoint(nBout, nHead), "normale MONDE du bout A : identique AU BIT près à la formule d'avant bascule");
+    // …et cette normale est bien celle que le TRACÉ a employée : l'amorce de 20 mm part dans sa direction.
+    const u = Math.hypot(nHead.x, nHead.y, nHead.z);
+    const amorce = { x: route.linePts[0].x + nHead.x / u * 20, y: route.linePts[0].y + nHead.y / u * 20, z: route.linePts[0].z + nHead.z / u * 20 };
+    ck(Math.hypot(route.linePts[1].x - amorce.x, route.linePts[1].y - amorce.y, route.linePts[1].z - amorce.z) < 1e-9, "amorce ⊥ : 20 mm le long de la normale MONDE du bout");
+
+    // ---- DISCRIMINATION du REPÈRE (ce que le type `WorldEnd` empêche à la compilation) ----
+    // Le typage refuse désormais un point LOCAL là où `worldLine` attend du MONDE ; à l'exécution les types
+    // sont effacés, donc on peut MESURER ce que coûterait la confusion. Sans cet écart, le marqueur de
+    // repère garderait quelque chose d'inoffensif — et ne mériterait pas son coût.
+    const enLocal = routing.worldLine(m, new Map(m.rooms.map((r) => [r.dc.id, r])), locA, locB, s.cableRoute(s.all("cables")[0]).steps, "sonde", true);
+    ck(Math.hypot(enLocal.linePts[0].x - route.linePts[0].x, enLocal.linePts[0].y - route.linePts[0].y, enLocal.linePts[0].z - route.linePts[0].z) > 1000, "repère : un bout LOCAL passé au tracé déplacerait le câble de plus d'un mètre (le marqueur `WorldEnd` garde un écart RÉEL)");
+  }
+  });
+
+  await section("Tracé : un câble BAIE → ÉQUIPEMENT D'ÉTAGE est enfin DESSINÉ (§6.31, décision D3)", async () => {
+  {
+    /* Lot 5 du chantier « câblage des équipements d'étage ». §6.30 avait retiré la dépendance « salle » du
+       TRACEUR sans rien débloquer : `interDcRoutes` se fermait toujours sur `r.dcA`/`r.dcB`, que l'analyseur
+       n'exprimait qu'en salles. La grammaire parlant conteneurs, la garde lit `containerA`/`containerB` et
+       le bout d'étage est porté au monde par SON conteneur. C'est la mesure qui prouve la LIVRAISON. */
+    const s = await makeStore();
+    const site = await s.create("sites", { name: "Liège" });
+    const dcA = await s.create("datacenters", { name: "A", width_mm: 6000, depth_mm: 4000, location: site.id, floor: "1", floor_x: 0, floor_y: 0 });
+    const rkA = await s.create("racks", { name: "RA", u_count: 42, datacenter_id: dcA.id, dc_x: 1200, dc_y: 900, orientation: 0 });
+    const eqA = await s.create("equipments", { name: "EA", placement_mode: "rack", rack_id: rkA.id, rack_u: 5 });
+    const pA = (await s.create("ports", { equipment_id: eqA.id, name: "pa", face_x: 0.3, face_y: 0.7, face_side: "front" })).id;
+    // POSÉ D'ÉTAGE : même bâtiment, même étage que la salle → son plan d'étage est émis par le layout.
+    const eqF = await s.create("equipments", { name: "EF", placement_mode: "floor", location: site.id, floor: "1", floor_x: 3000, floor_y: 2500, dc_z: 250, width_mm: 400, height_mm: 300, depth_mm: 200 });
+    const pF = (await s.create("ports", { equipment_id: eqF.id, name: "pf", face_x: 0.5, face_y: 0.5, face_side: "front" })).id;
+    const exA = await s.create("waypoints", { name: "sortieA", wp_type: "exit", datacenter_id: dcA.id, dc_x: 100, dc_y: 200 });
+    const pin = await s.create("waypoints", { name: "gaine", wp_type: "oob", location: site.id, floor: "1", floor_x: 2500, floor_y: 2500 });
+    const cable = await s.create("cables", { name: "baie→étage", from_port_id: pA, to_port_id: pF, waypoint_ids: [exA.id, pin.id] });
+
+    const floor = new FloorLayout(s), resolver = new Resolver3D(s);
+    const routing = new CableRouting(s, resolver, floor);
+    const m = floor.multiLayout(dcA, { visibleDcIds: new Set([dcA.id]) });
+
+    const r = s.cableRoute(cable);
+    ck(r.valid && r.hasExits, "grammaire : la route baie → pin d'étage est VALIDE avec sortie");
+    ck.eq(JSON.stringify(r.containerB), JSON.stringify(PlacementContainers.floorOf(site.id, "1")), "…et son bout B est le conteneur ÉTAGE");
+
+    const traces = routing.interDcRoutes(m, true);
+    ck.eq(traces.length, 1, "interDcRoutes : le câble baie → posé d'étage est TRACÉ (avant ce lot : aucun)");
+    const t = traces[0];
+    ck(t.linePts.length >= 4 && t.linePts.every((p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z)), "…points monde finis, amorces comprises");
+    /* ÉQUIVALENCE (deux mesures comparées entre elles, pas à une constante) : le bout d'étage du tracé doit
+       valoir EXACTEMENT le port résolu en monde depuis l'origine du posé — la source unique §6.27. */
+    const o = floor.equipFloorOrigin(m, s.get("equipments", eqF.id));
+    const attendu = resolver.resolvePortWorld3D(pF, o.x, o.y, o.baseZ);
+    const dernier = t.linePts[t.linePts.length - 1];
+    ck(dernier.x === attendu.x && dernier.y === attendu.y && dernier.z === attendu.z, "bout d'étage : le tracé finit EXACTEMENT sur le port résolu en monde (origine = equipFloorOrigin)");
+    // …et le bout de SALLE reste porté par la transformée de sa salle (rien n'a bougé de ce côté).
+    const roomA = m.rooms.find((x) => x.dc.id === dcA.id), locA = resolver.resolvePort3D(pA, dcA.id);
+    const w0 = FloorLayout.roomToWorld(roomA, locA);
+    ck(t.linePts[0].x === w0.x && t.linePts[0].y === w0.y && t.linePts[0].z === w0.z, "bout de salle : inchangé — chaque bout est porté par SON conteneur");
+
+    /* D3 — un ÉTAGE est un conteneur AFFICHABLE : masqué, le câble disparaît, comme pour une salle. Un
+       bâtiment dont aucune salle n'est affichée ne voit pas son plan d'étage émis (filtre `shownFloors`). */
+    const site2 = await s.create("sites", { name: "Namur" });
+    const eqF2 = await s.create("equipments", { name: "EF2", placement_mode: "floor", location: site2.id, floor: "0", floor_x: 1000, floor_y: 1000, width_mm: 400, height_mm: 300, depth_mm: 200 });
+    const pF2 = (await s.create("ports", { equipment_id: eqF2.id, name: "pf2", face_x: 0.5, face_y: 0.5, face_side: "front" })).id;
+    const pin2 = await s.create("waypoints", { name: "gaine2", wp_type: "oob", location: site2.id, floor: "0", floor_x: 900, floor_y: 900 });
+    const eqA2 = await s.create("equipments", { name: "EA2", placement_mode: "rack", rack_id: rkA.id, rack_u: 9 });
+    const pA2 = (await s.create("ports", { equipment_id: eqA2.id, name: "pa2", face_x: 0.3, face_y: 0.7, face_side: "front" })).id;
+    await s.create("cables", { name: "baie→autre bâtiment", from_port_id: pA2, to_port_id: pF2, waypoint_ids: [exA.id, pin2.id] });
+    const rHors = s.cableRoute(s.get("cables", s.all("cables").find((c) => c.name === "baie→autre bâtiment").id));
+    ck(rHors.valid && rHors.hasExits, "route vers un posé d'un AUTRE bâtiment : grammaticalement valide");
+    const m2 = floor.multiLayout(dcA, { visibleDcIds: new Set([dcA.id]) });
+    ck.eq(FloorLayout.floorShown(m2, site2.id, "0"), false, "portée : l'étage de l'autre bâtiment n'est PAS affiché (aucune salle ne l'y fait entrer)");
+    ck.eq(routing.interDcRoutes(m2, true).length, 1, "D3 : seul le câble dont l'étage est AFFICHÉ est tracé — l'autre disparaît, comme pour une salle masquée");
+    ck.eq(FloorLayout.floorShown(m2, site.id, "1"), true, "…et l'étage de la salle affichée, lui, est bien émis");
+    /* La garde OUVRE aussi bien qu'elle FERME : une salle du second bâtiment entre dans la portée, son plan
+       d'étage est émis, et le câble apparaît. Deux mesures comparées entre elles (« affiché ? » ⇄ « tracé ? »)
+       plutôt qu'un seul décompte épinglé à une constante. */
+    const dcN = await s.create("datacenters", { name: "N", width_mm: 3000, depth_mm: 3000, location: site2.id, floor: "0", floor_x: 0, floor_y: 0 });
+    const m3 = floor.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcN.id]) });
+    ck.eq(FloorLayout.floorShown(m3, site2.id, "0"), true, "portée élargie : l'étage de l'autre bâtiment devient AFFICHÉ");
+    ck.eq(routing.interDcRoutes(m3, true).length, 2, "…et le second câble est alors tracé (la garde ouvre comme elle ferme)");
   }
   });
 
@@ -974,6 +2178,207 @@ module.exports = async () => {
   }
   });
 
+  await section("TrayFrame : l'ÉTAGÈRE est un CONTENEUR — plateau → baie (doctrine §6.23)", async () => {
+  {
+    // Le transport plateau → baie était écrit à la main dans `RackGeometry.trayEquipBoxLocal`, et la règle
+    // « une étagère arrière retourne ses contenus » RE-DÉRIVÉE dans QUATRE sites (`RackGeometry`,
+    // `Resolver3D`, `DcThreeScene.buildRackTrays` et `.buildRackPorts`). Les attentes ci-dessous sont
+    // EXPLICITES — dérivées du modèle à la main — et non une comparaison à l'ancienne fonction : celle-ci
+    // n'existe plus, la comparer à elle-même resterait verte sans rien prouver (doctrine §4.1).
+    // La parité a été prouvée AVANT bascule contre l'ancien corps RÉGÉNÉRÉ depuis git : 2 488 320 cas /
+    // 22 394 880 comparaisons BIT POUR BIT ; sur un balayage de valeurs délibérément non représentables,
+    // seules les bornes HAUTES x1/y1 bougent, d'au plus 1,14·10⁻¹³ mm (ré-association d'une somme
+    // flottante — l'ancien code faisait `x1 = x0 + largeur`, le conteneur transporte la borne elle-même).
+
+    // Repère PLATEAU → repère BAIE : translation, plus ROTATION DE 180° si l'étagère est arrière —
+    // les DEUX axes se retournent ensemble (décision utilisateur, §6.24). Plateau utilisable large de
+    // 100 : l'origine d'une étagère arrière est donc son bord DROIT, à −100 + 100 = 0.
+    const avant = { originX: -100, originY: -400, dir: 1, plankZ: 50 };
+    const arriere = { originX: 0, originY: 400, dir: -1, plankZ: 50 };
+    const rect = { x0: 10, x1: 60, y0: 5, y1: 35 };
+
+    const rAv = TrayFrame.rectToRack(avant, rect);
+    ck(rAv.x0 === -90 && rAv.x1 === -40, "étagère AVANT : x translaté du bord utilisable (−100 + 10 / + 60)");
+    ck(rAv.y0 === -395 && rAv.y1 === -365, "étagère AVANT : les profondeurs s'enfoncent vers les +Y depuis la face");
+
+    const rAr = TrayFrame.rectToRack(arriere, rect);
+    ck(rAr.x0 === -60 && rAr.x1 === -10, "étagère ARRIÈRE : x RETOURNÉ aussi — c'est une ROTATION, pas une réflexion");
+    ck(rAr.y0 === 365 && rAr.y1 === 395, "étagère ARRIÈRE : profondeurs vers les −Y depuis la face arrière");
+    ck(rAr.y0 <= rAr.y1 && rAr.x0 <= rAr.x1, "bornes RÉORDONNÉES : la rotation échange les coins, les appelants attendent x0 ≤ x1 / y0 ≤ y1");
+    ck((rAv.y1 - rAv.y0) === (rAr.y1 - rAr.y0) && (rAv.x1 - rAv.x0) === (rAr.x1 - rAr.x0), "tourner ne DÉFORME pas : mêmes cotes des deux côtés");
+    // C'EST une rotation : les deux images sont symétriques par rapport au CENTRE du plateau (−50, …).
+    ck(((rAv.x0 + rAr.x1) / 2) === -50 && ((rAv.x1 + rAr.x0) / 2) === -50, "les deux images sont symétriques par rapport au CENTRE du plateau (signature d'un demi-tour)");
+
+    // Le lacet d'un contenu s'ADDITIONNE à celui de son étagère — ce qui n'aurait aucun sens avec une
+    // réflexion, et c'est précisément ce qui rend la chaîne composable jusqu'aux ports.
+    ck.eq(TrayFrame.contentYawDeg(avant, 0), 0, "contentYawDeg : étagère avant → lacet propre inchangé");
+    ck.eq(TrayFrame.contentYawDeg(avant, 90), 90, "contentYawDeg : … quel que soit le lacet");
+    ck.eq(TrayFrame.contentYawDeg(arriere, 0), 180, "contentYawDeg : étagère ARRIÈRE → demi-tour ajouté");
+    ck.eq(TrayFrame.contentYawDeg(arriere, 90), 270, "contentYawDeg : les deux lacets s'ADDITIONNENT");
+    ck.eq(TrayFrame.contentYawDeg(avant, null), 0, "contentYawDeg : lacet absent → 0 (tolérant)");
+    ck.eq(TrayFrame.facesFront(avant), true, "facesFront : étagère avant");
+    ck.eq(TrayFrame.facesFront(arriere), false, "facesFront : étagère arrière");
+
+    // `trayPlacementInRack` DÉRIVE ce placement de la boîte de l'étagère — pendant exact de `roomPlacement`.
+    const rk = { u_count: 42, depth: 1000, cage_depth_mm: 900, front_margin_mm: 50, width_mm: 600 };
+    const tAv = { u: 10, u_height: 3, tray_u: 1, tray_type: "cantilever", depth_mm: 400, side: "front" };
+    const tAr = Object.assign({}, tAv, { side: "rear" });
+    const bAv = RackGeometry.trayBoxLocal(rk, tAv), pAv = RackGeometry.trayPlacementInRack(rk, tAv);
+    const bAr = RackGeometry.trayBoxLocal(rk, tAr), pAr = RackGeometry.trayPlacementInRack(rk, tAr);
+    const largeurUtile = TrayGeometry.plank(RackGeometry.cageDepth(rk), tAv).W;
+    ck(pAv.dir === 1 && pAr.dir === -1, "trayPlacementInRack : le SENS des DEUX axes vient de la face de montage");
+    ck(Math.abs(pAv.originY - bAv.y0) < 1e-12, "trayPlacementInRack AVANT : l'origine des profondeurs est le bord AVANT du plateau");
+    ck(Math.abs(pAr.originY - bAr.y1) < 1e-12, "trayPlacementInRack ARRIÈRE : l'origine est le bord ARRIÈRE");
+    ck(Math.abs(pAv.originX - (bAv.x0 + bAv.xInset)) < 1e-12, "trayPlacementInRack AVANT : origine = bord utilisable GAUCHE (garde des renforts déjà déduite)");
+    ck(Math.abs(pAr.originX - (bAr.x0 + bAr.xInset + largeurUtile)) < 1e-12, "trayPlacementInRack ARRIÈRE : origine = bord utilisable DROIT — `tray_x` se compte depuis la gauche de QUI REGARDE");
+    ck(Math.abs(pAv.plankZ - bAv.z0) < 1e-12, "trayPlacementInRack : les posés reposent sur le DESSUS du plateau");
+
+    // Le posé d'une étagère ARRIÈRE est bien RETOURNÉ — les DEUX axes (rotation, §6.24).
+    const eq0 = { free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, dc_orientation: 0, tray_x: 0, tray_y: 0 };
+    const posAv = RackGeometry.trayEquipBoxLocal(rk, tAv, eq0);
+    const posAr = RackGeometry.trayEquipBoxLocal(rk, tAr, eq0);
+    ck(Math.abs(posAv.y0 - bAv.y0) < 1e-9, "posé sur étagère AVANT, tray_y = 0 → collé au bord AVANT du plateau");
+    ck(Math.abs(posAr.y1 - bAr.y1) < 1e-9, "posé sur étagère ARRIÈRE, tray_y = 0 → collé au bord ARRIÈRE (retourné)");
+    ck(Math.abs(posAv.x0 - (bAv.x0 + bAv.xInset)) < 1e-9, "posé AVANT, tray_x = 0 → collé au bord GAUCHE de la baie");
+    ck(Math.abs(posAr.x1 - (bAr.x0 + bAr.xInset + largeurUtile)) < 1e-9, "posé ARRIÈRE, tray_x = 0 → collé au bord DROIT de la baie (= sa gauche, vue de derrière)");
+    ck(Math.abs((posAv.x1 - posAv.x0) - (posAr.x1 - posAr.x0)) < 1e-12, "posé : mêmes cotes des deux côtés");
+
+    /* ---- La boîte DESSINÉE et la boîte RAPPORTÉE décrivent le MÊME solide ----
+       `DcThreeScene` ne dessine plus l'enveloppe rendue par `trayEquipBoxLocal` : il pose un boîtier
+       de cotes PROPRES (w × d) au centre déclaré par `trayContentPlacementInRack`, TOURNÉ de son lacet
+       effectif. Les deux descriptions doivent coïncider, sinon la coque et les connecteurs divergent —
+       exactement la divergence que §6.24 a corrigée. Ce verrou l'empêche de revenir, et il est le seul
+       moyen de tester du RENDU sans moteur 3D : on compare ses ENTRÉES à la géométrie de référence.
+       ⚠ PORTÉE EXACTE DE CE VERROU, mesurée par sonde et non supposée : il MORD sur 4 des 8 cas si le
+       rendu ignore le lacet (les 90°/270°, qui permutent l'enveloppe), mais il est AVEUGLE à une erreur
+       de DEMI-TOUR — une rotation de 180° laisse une enveloppe alignée sur les axes inchangée. Le
+       demi-tour est couvert ailleurs, par les NORMALES de la section « le lacet propre d'un posé
+       atteint ses ports » (avant et arrière y sont exactement opposées). Les deux ensemble couvrent les
+       quatre orientations ; ni l'un ni l'autre ne suffirait, et le croire serait la fausse sécurité que
+       §6.19 nomme. */
+    for (const t of [tAv, tAr]) {
+      for (const ori of [0, 90, 180, 270]) {
+        const e = { free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, dc_orientation: ori, tray_x: 20, tray_y: 30 };
+        const rapportee = RackGeometry.trayEquipBoxLocal(rk, t, e);
+        const dessinee = RackGeometry.trayContentPlacementInRack(rk, t, e);
+        // enveloppe de la boîte DESSINÉE : cotes propres, permutées par le lacet EFFECTIF (0/180 → non).
+        const yaw = ((dessinee.yawDeg % 360) + 360) % 360;
+        const tourne = (yaw === 90 || yaw === 270);
+        const demiX = (tourne ? 300 : 200) / 2, demiY = (tourne ? 200 : 300) / 2;
+        const quoi = " [étagère " + t.side + ", " + ori + "°]";
+        ck(Math.abs((dessinee.x - demiX) - rapportee.x0) < 1e-9 && Math.abs((dessinee.x + demiX) - rapportee.x1) < 1e-9,
+          "boîte dessinée ≡ boîte rapportée en X" + quoi);
+        ck(Math.abs((dessinee.y - demiY) - rapportee.y0) < 1e-9 && Math.abs((dessinee.y + demiY) - rapportee.y1) < 1e-9,
+          "boîte dessinée ≡ boîte rapportée en Y" + quoi);
+      }
+    }
+  }
+  });
+
+  await section("Montages MARGE / PAROI : la coque DESSINÉE regarde là où sortent les ports (§6.25)", async () => {
+  {
+    /* Les modes `side` et `wall` étaient dessinés en boîtes NUES (ni nom, ni image, ni repère
+       d'orientation) alors que leurs ports étaient résolus. Les faire passer par le rendu COMMUN des
+       boîtiers demande de leur donner un LACET — et c'est là qu'on peut se tromper sans que rien ne le
+       dise. Ce test croise DEUX chemins indépendants : le lacet déduit par `mountedContentPlacementInRack`
+       (rendu) et la normale rendue par `Resolver3D` (ports). S'ils divergent, la coque tourne le dos à
+       ses propres connecteurs — exactement le défaut que §6.24 vient de corriger pour les étagères.
+       ⚠ Les deux vérifications MORDENT, mesuré par sonde et non supposé : lacet forcé à 0 → 20 cas sur
+       32 en échec ; cotes non permutées à 90°/270° → 8 sur 32. */
+    const s = await makeStore();
+    const dc = await s.create("datacenters", { name: "S", width_mm: 5000, depth_mm: 5000 });
+    const rack = await s.create("racks", { name: "R", datacenter_id: dc.id, dc_x: 0, dc_y: 0, orientation: 0,
+      u_count: 42, depth: 1200, width_mm: 800, cage_depth_mm: 700, front_margin_mm: 200, allow_side_front: true, allow_side_rear: true });
+    const rk = s.get("racks", rack.id), r = new Resolver3D(s);
+    const GEO = { face_side: "front", face_x: 0.5, face_y: 0.5 };
+    const arr = (v) => Math.round(v * 1000) / 1000;
+
+    let cas = 0, facadeOk = 0, enveloppeOk = 0, lacets = new Set();
+    const essai = async (rec, label) => {
+      const e = await s.create("equipments", Object.assign({ dim_mode: "free", rack_id: rack.id, free_w_mm: 60, free_l_mm: 300, free_h_mm: 150 }, rec));
+      ck(!!e, "montage créé : " + label);
+      if (!e) return;
+      cas++;
+      const m = RackGeometry.mountedContentPlacementInRack(rk, e);
+      const b = (e.placement_mode === "wall") ? RackGeometry.wallEquipBoxLocal(rk, e) : RackGeometry.sideEquipBoxLocal(rk, e);
+      lacets.add(m.yawDeg);
+      // ① la FAÇADE dessinée (façade locale −Y tournée du lacet) ≡ la normale du port RÉSOLU
+      const yaw = m.yawDeg * Math.PI / 180;
+      const p = r.resolveFaceAnchor3D(e, GEO, dc.id);
+      if (p && arr(Math.sin(yaw)) === arr(p.n.x) && arr(-Math.cos(yaw)) === arr(p.n.y)) facadeOk++;
+      // ② l'ENVELOPPE dessinée (cotes propres, permutées par un quart de tour) ≡ celle rapportée
+      const tourne = (m.yawDeg === 90 || m.yawDeg === 270);
+      const ex = tourne ? m.box.d : m.box.w, ey = tourne ? m.box.w : m.box.d;
+      if (Math.abs((m.x - ex / 2) - b.x0) < 1e-9 && Math.abs((m.x + ex / 2) - b.x1) < 1e-9
+        && Math.abs((m.y - ey / 2) - b.y0) < 1e-9 && Math.abs((m.y + ey / 2) - b.y1) < 1e-9) enveloppeOk++;
+      // ③ la base Z dessinée est celle de la boîte (le boîtier ne flotte pas au-dessus de son montage)
+      ck(Math.abs(m.baseZ - b.z0) < 1e-9 && Math.abs(m.box.h - (b.z1 - b.z0)) < 1e-9, "base et hauteur dessinées ≡ rapportées : " + label);
+    };
+
+    let i = 0;
+    for (const face of ["front", "rear"]) for (const lr of ["left", "right"]) for (const col of [0, 1]) for (const snap of ["wall", "inner"]) {
+      await essai({ name: "S" + (i++), placement_mode: "side", side_face: face, side_lr: lr, side_col: col, side_snap: snap, side_u: 5 },
+        "side " + face + "/" + lr + "/col" + col + "/" + snap);
+    }
+    for (const lr of ["left", "right"]) for (const mg of ["front", "rear"]) for (const or of ["center", "facade"]) for (const col of [0, 1]) {
+      await essai({ name: "W" + (i++), placement_mode: "wall", wall_lr: lr, wall_margin: mg, wall_orient: or, wall_col: col, wall_u: 5 },
+        "wall " + lr + "/" + mg + "/" + or + "/col" + col);
+    }
+
+    ck.eq(cas, 32, "les 32 configurations de montage sont couvertes (16 marge × 16 paroi)");
+    ck.eq(facadeOk, cas, "la FAÇADE dessinée regarde EXACTEMENT là où sort le port résolu, sur les 32 cas");
+    ck.eq(enveloppeOk, cas, "l'ENVELOPPE dessinée est EXACTEMENT celle rapportée par la géométrie de baie (cotes BORNÉES, pas déclarées)");
+    // anti-vacuité : si toutes les configurations donnaient le même lacet, ① passerait sans rien prouver.
+    ck(lacets.size >= 3, "les configurations produisent des lacets VARIÉS (obtenus : " + [...lacets].sort((a, b) => a - b).join("°, ") + "°) — le test ne compare pas un cas unique à lui-même");
+  }
+  });
+
+  await section("Resolver3D : le lacet PROPRE d'un posé atteint enfin ses ports (§6.24 — défaut CONFIRMÉ par sonde)", async () => {
+  {
+    /* DÉFAUT MESURÉ AVANT CORRECTION : la branche `tray` interpolait sur les seules faces ±Y de la
+       boîte, sans jamais lire `dc_orientation`. Sonde : les QUATRE orientations rendaient la MÊME
+       normale (0, −1), là où le même boîtier en mode LIBRE en rend quatre distinctes. Ce n'était donc
+       pas un défaut des seuls 90°/270° (empreinte permutée) : 180° l'était aussi, et de la façon la
+       plus nette — boîte identique, façade inversée, port immobile. La correction fait passer le
+       lacet par `PlacementFrame`, à qui cette composition appartient. */
+    const s = await makeStore();
+    const dc = await s.create("datacenters", { name: "S", width_mm: 5000, depth_mm: 5000 });
+    const rack = await s.create("racks", { name: "R", datacenter_id: dc.id, dc_x: 0, dc_y: 0, orientation: 0,
+      u_count: 42, depth: 1000, width_mm: 600, cage_depth_mm: 900, front_margin_mm: 50 });
+    const r = new Resolver3D(s);
+    const GEO = { face_side: "front", face_x: 0.5, face_y: 0.5 };
+    const arr = (v) => Math.round(v * 100) / 100;
+
+    // Une étagère PAR CAS : deux posés au même endroit d'un même plateau se CHEVAUCHENT, et la
+    // validation les refuse silencieusement (`create` rend null) — piège rencontré en écrivant la
+    // sonde, consigné ici pour qu'on ne le redécouvre pas.
+    const normalesDe = async (side, u0) => {
+      const out = [];
+      for (const [i, ori] of [0, 90, 180, 270].entries()) {
+        const t = await s.create("rackItems", { rack_id: rack.id, kind: "tray", u: u0 + i * 4, u_height: 3, tray_u: 1, tray_type: "dual", side });
+        const eq = await s.create("equipments", { name: side + ori, placement_mode: "tray", dim_mode: "free",
+          tray_item_id: t.id, free_w_mm: 200, free_l_mm: 400, free_h_mm: 80, dc_orientation: ori, tray_x: 0, tray_y: 0 });
+        const p = eq && r.resolveFaceAnchor3D(eq, GEO, dc.id);
+        out.push(p ? arr(p.n.x) + "," + arr(p.n.y) : "NULL");
+      }
+      return out;
+    };
+
+    const nAvant = await normalesDe("front", 3);
+    ck.eq(nAvant.join(" | "), "0,-1 | 1,0 | 0,1 | -1,0",
+      "étagère AVANT : la façade d'un posé suit son lacet — 4 normales, une par orientation (avant correction : (0,−1) partout)");
+    ck.eq(new Set(nAvant).size, 4, "les 4 normales sont DISTINCTES (anti-vacuité : c'est exactement ce qui manquait)");
+
+    const nArriere = await normalesDe("rear", 23);
+    ck.eq(nArriere.join(" | "), "0,1 | -1,0 | 0,-1 | 1,0",
+      "étagère ARRIÈRE : les mêmes, RETOURNÉES d'un demi-tour — les deux lacets se composent");
+    for (let i = 0; i < 4; i++) {
+      const [ax, ay] = nAvant[i].split(",").map(Number), [bx, by] = nArriere[i].split(",").map(Number);
+      ck(ax === -bx && ay === -by, "orientation " + [0, 90, 180, 270][i] + "° : avant et arrière exactement OPPOSÉES (demi-tour, pas réflexion)");
+    }
+  }
+  });
+
   await section("RackGeometry : tray (étagère) — longueur effective + boîte utile", async () => {
   {
     const rack = { u_count: 42, depth: 1000, cage_depth_mm: 900, front_margin_mm: 50, width_mm: 600 };
@@ -1146,6 +2551,62 @@ module.exports = async () => {
       const n = OUT[face], dot = cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2];
       ck(dot > 0, "non miroir " + face + " : (droite × haut) orienté comme la normale sortante");
     });
+  }
+  });
+
+  /* ============================================================================================
+     CameraFraming — la RÈGLE DE CADRAGE de « Localiser », désormais nommée et exprimée en TAUX
+     DE REMPLISSAGE. L'ancienne (`Math.max(400, extent * 0.7 + 200)`) faisait dépendre ce taux de
+     la TAILLE de l'objet : 62 % pour une baie de 2 m, 48 % pour 600 mm, 25 % pour 200 mm. Les
+     attentes ci-dessous sont EN DUR, dérivées à la main de la règle voulue (90 %, plancher à une
+     largeur de baie), jamais de la sortie d'une implémentation.
+     ============================================================================================ */
+  await section("CameraFraming : taux de remplissage à 90 %, limite de zoom, monotonie, aspect", async () => {
+  {
+    const half = (e, a) => CameraFraming.halfExtentFor(e, a);
+    const taux = (e, a) => e / (2 * half(e, a));   // fraction de la HAUTEUR de vue occupée par l'objet
+
+    // ---- constantes NOMMÉES (la valeur visée est une décision, pas un nombre noyé dans une formule) ----
+    ck.eq(CameraFraming.FILL_RATIO, 0.9, "FILL_RATIO : 90 % de la vue, demandé explicitement");
+    ck.eq(CameraFraming.MIN_FRAMED_EXTENT_MM, 600, "MIN_FRAMED_EXTENT_MM : limite de zoom = une largeur de baie standard (600 mm)");
+    ck.eq(CameraFraming.FOCUS_ELEVATION_RAD, Math.PI / 9, "FOCUS_ELEVATION_RAD : caméra légèrement plongeante (20°)");
+
+    // ---- le taux visé est ATTEINT, quelle que soit la taille (c'est tout l'enjeu du lot) ----
+    ck.eq(half(2000), 1111.111111111111, "baie de 2 000 mm : demi-étendue = 2000 / 1,8");
+    ck(Math.abs(taux(2000) - 0.9) < 1e-12, "objet de 2 000 mm : 90 % de la vue");
+    ck(Math.abs(taux(667) - 0.9) < 1e-12, "objet de 667 mm : 90 % — le taux ne dépend PLUS de la taille");
+    ck(Math.abs(taux(12000) - 0.9) < 1e-12, "objet de 12 000 mm : 90 % (l'ancienne règle plafonnait à 71,4 %)");
+    ck.eq(half(2222.2222222222226), 1234.5679012345681, "demi-étendue = extent / (2 × 0,9), sans rembourrage constant");
+
+    // ---- LIMITE DE ZOOM : sous 600 mm d'objet, on cadre 600 mm de monde et pas moins ----
+    ck.eq(half(100), 300, "boîtier de 100 mm : plancher — 600 mm de monde cadré (et non 111)");
+    ck.eq(half(0), 300, "étendue nulle (donnée absente) : plancher, jamais une vue dégénérée");
+    ck.eq(half(-500), 300, "étendue négative (saisie absurde) : plancher, pas de demi-étendue négative");
+    ck(Math.abs(taux(100) - 1 / 6) < 1e-12, "boîtier de 100 mm : 16,7 % de la vue — visible, mais on garde le contexte");
+    ck.eq(half(540), 300, "540 mm (= 600 × 0,9) : DERNIÈRE taille encore bornée par le plancher");
+    ck(half(541) > 300, "541 mm : au-delà du plancher, la règle des 90 % reprend la main");
+    ck(CameraFraming.MIN_FRAMED_EXTENT_MM / U_MM > 13, "la limite de zoom laisse voir plus de 13 U — un 1U localisé garde ~6 U de contexte de part et d'autre");
+
+    // ---- MONOTONIE : un objet plus grand n'est JAMAIS cadré plus serré ----
+    let mono = true, prec = -1;
+    for (let e = 0; e <= 6000; e += 25) { const h = half(e); if (h < prec - 1e-9) mono = false; prec = h; }
+    ck(mono, "monotonie : la demi-étendue cadrée ne DÉCROÎT jamais quand l'objet grandit");
+    ck(half(3000) > half(1000) && half(1000) > half(700), "monotonie STRICTE au-dessus du plancher");
+
+    // ---- ÉTENDUE CADRABLE d'un objet = sa plus grande cote (l'angle de vue n'est pas connu du cadrage) ----
+    ck.eq(CameraFraming.objectExtent(600, 1000, 2000), 2000, "objectExtent(baie 42U) : la hauteur domine");
+    ck.eq(CameraFraming.objectExtent(600, 600, 400), 600, "objectExtent(baie murale 6U) : la LARGEUR domine — l'ancien cadrage sur la seule hauteur l'ignorait");
+    ck.eq(CameraFraming.objectExtent(2000, 1000, 900), 2000, "objectExtent : objet large et bas → sa largeur");
+    ck.eq(CameraFraming.objectExtent(0, null, undefined), 0, "objectExtent : cotes absentes → 0 (le plancher prendra le relais)");
+
+    // ---- ASPECT : en PAYSAGE la hauteur borne (aucun effet) ; en PORTRAIT c'est la largeur ----
+    ck.eq(half(2000, 1.6), half(2000), "aspect 1,6 (paysage) : sans effet — la hauteur est la dimension qui borne");
+    ck.eq(half(2000, 1), half(2000), "aspect 1 (carré) : sans effet");
+    ck.eq(half(2000, 0.5), 2 * half(2000), "aspect 0,5 (portrait) : le cadrage double pour que l'objet tienne EN LARGEUR");
+    ck.eq(half(2000, 0), half(2000), "aspect nul/absurde (canevas non mesurable) : repli sur le cadrage paysage");
+    // en portrait, l'objet occupe bien 90 % de la LARGEUR de vue (= aspect × hauteur de vue)
+    const hp = half(2000, 0.5), largeurVue = 0.5 * 2 * hp;
+    ck(Math.abs(2000 / largeurVue - 0.9) < 1e-12, "portrait : la promesse « 90 % de la vue » vaut aussi en largeur");
   }
   });
 

@@ -1,7 +1,7 @@
 /* Tests modules — code PARTAGÉ front/back (schéma, normalisation, validation, cascade).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("shared : DataValidation — champs d'audit (created_by/updated_by/dates) préservés au round-trip", async () => {
@@ -167,6 +167,274 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : Cascade.plan RÉCURSIVE (point fixe, anti-cycle, détachements réduits)", async () => {
+  {
+    /* Le plan REJOUE la règle de chaque entité qu'il marque pour suppression, jusqu'au point fixe
+       (docs/placement.md §6.16). Ces attentes sont EN DUR : elles ne comparent aucune implémentation à
+       une autre (une parité serait tautologique — la cascade non récursive n'existe plus). */
+    const mk = () => ({
+      equipments: [{ id: "E1", name: "sw" }, { id: "E2", name: "peer" }],
+      // Chaîne PROFONDE : trunk → lane → sous-lane → sous-sous-lane. L2 n'a PAS d'equipment_id
+      // (cas produit par une écriture d'API tierce) : sans récursion, elle survivait à E1.
+      ports: [
+        { id: "T", equipment_id: "E1", aggregate_id: "A1" },
+        { id: "L1", equipment_id: "E1", parent_port_id: "T" },
+        { id: "L2", parent_port_id: "T" },
+        { id: "L2a", parent_port_id: "L2" },
+        { id: "L2b", parent_port_id: "L2a" },
+        // Port d'un AUTRE équipement rattaché au MÊME agrégat (anomalie de données) : l'agrégat étant
+        // supprimé avec E1, sa FK doit être détachée — c'est la récursion qui atteint cette règle.
+        { id: "X", equipment_id: "E2", aggregate_id: "A1" },
+      ],
+      aggregates: [{ id: "A1", equipment_id: "E1" }],
+      cables: [
+        { id: "cT", from_port_id: "T", to_port_id: "X" },
+        { id: "cL1", from_port_id: "L1", to_port_id: "X" },
+        { id: "cL2", from_port_id: "L2", to_port_id: "X" },
+        { id: "cL2a", from_port_id: "L2a", to_port_id: "X" },
+        { id: "cL2b", from_port_id: "L2b", to_port_id: "X" },
+      ],
+    });
+    const finderOf = (db) => (coll, field, value) => (db[coll] || []).filter((o) => {
+      const v = o[field];
+      return Array.isArray(v) ? v.includes(value) : v === value;
+    });
+    const fetcherOf = (db) => (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
+    const idsOf = (list, coll) => list.filter((d) => d.c === coll).map((d) => d.id).sort().join(",");
+
+    // -- 1) ÉQUIPEMENT : la chaîne entière part, y compris les lanes sans equipment_id et leurs câbles --
+    {
+      const db = mk(); const find = finderOf(db), fetch = fetcherOf(db);
+      const plan = Cascade.plan("equipments", "E1", find, fetch);
+      ck.eq(idsOf(plan.deletes, "ports"), "L1,L2,L2a,L2b,T", "récursion : équipement → trunk + lane + sous-lane + sous-sous-lane");
+      ck.eq(idsOf(plan.deletes, "cables"), "cL1,cL2,cL2a,cL2b,cT", "récursion : les câbles de TOUTE la chaîne de ports partent");
+      ck.eq(idsOf(plan.deletes, "aggregates"), "A1", "équipement : agrégat supprimé");
+      ck.eq(plan.deletes.length, 11, "équipement : 11 entités supprimées au total (5 ports + 5 câbles + 1 agrégat)");
+      // dédup : le plan est un ENSEMBLE, même si une entité est atteinte par plusieurs chemins.
+      ck.eq(new Set(plan.deletes.map((d) => d.c + "/" + d.id)).size, plan.deletes.length, "plan : aucune entité en double dans deletes");
+      // détachement de l'agrégat : le port SURVIVANT est détaché, les ports SUPPRIMÉS ne le sont pas.
+      ck.eq(plan.detaches.filter((d) => d.c === "ports" && d.key === "aggregate_id").map((d) => d.id).join(","), "X",
+        "agrégat supprimé : seul le port SURVIVANT est détaché (les ports supprimés ne le sont pas)");
+      ck.eq(plan.detaches.some((d) => d.c === "ports" && d.id === "T"), false, "détachement visant une entité SUPPRIMÉE : ÉCARTÉ (anti-résurrection)");
+      ck.eq(plan.deletes.some((d) => d.c === "equipments" && d.id === "E1"), false, "la CIBLE ne figure jamais dans son propre plan");
+    }
+
+    // -- 2) PORT : un breakout IMBRIQUÉ part en entier (l'ancien plan s'arrêtait au 1er niveau de lanes) --
+    {
+      const db = mk(); const find = finderOf(db), fetch = fetcherOf(db);
+      const plan = Cascade.plan("ports", "T", find, fetch);
+      ck.eq(idsOf(plan.deletes, "ports"), "L1,L2,L2a,L2b", "récursion : port trunk → lanes ET sous-lanes (breakout imbriqué)");
+      ck.eq(idsOf(plan.deletes, "cables"), "cL1,cL2,cL2a,cL2b,cT", "récursion : câbles du trunk ET de toutes ses lanes");
+      ck.eq(plan.deletes.length, 9, "port trunk : 9 entités supprimées (4 lanes + 5 câbles)");
+      const sub = Cascade.plan("ports", "L2", find, fetch);
+      ck.eq(idsOf(sub.deletes, "ports"), "L2a,L2b", "récursion : depuis une lane, le sous-breakout part aussi");
+      ck.eq(sub.deletes.length, 5, "lane L2 : 5 entités supprimées (2 sous-lanes + 3 câbles)");
+    }
+
+    // -- 3) ANTI-CYCLE : un cycle de références TERMINE et ne double aucune entité --
+    {
+      const db = {
+        // cycle à 3 : Y1 ← Y3 ← Y2 ← Y1 (chaque port est le parent du suivant)
+        ports: [{ id: "Y1", parent_port_id: "Y2" }, { id: "Y2", parent_port_id: "Y3" }, { id: "Y3", parent_port_id: "Y1" },
+          { id: "Z", parent_port_id: "Z" }],
+        cables: [{ id: "cY", from_port_id: "Y2", to_port_id: "Y3" }, { id: "cZ", from_port_id: "Z", to_port_id: "Z" }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const cyc = Cascade.plan("ports", "Y1", find, fetch);
+      ck.eq(idsOf(cyc.deletes, "ports"), "Y2,Y3", "anti-cycle : cycle à 3 → les 2 AUTRES ports, une seule fois chacun");
+      ck.eq(cyc.deletes.some((d) => d.id === "Y1"), false, "anti-cycle : la cible ne se re-supprime pas via le cycle");
+      ck.eq(idsOf(cyc.deletes, "cables"), "cY", "anti-cycle : le câble du cycle est supprimé une seule fois");
+      ck.eq(cyc.deletes.length, 3, "anti-cycle : plan de 3 entités, terminaison prouvée");
+      const self = Cascade.plan("ports", "Z", find, fetch);
+      ck.eq(self.deletes.length, 1, "anti-cycle : port parent DE LUI-MÊME → seul son câble part (le port est la cible)");
+      ck.eq(idsOf(self.deletes, "cables"), "cZ", "anti-cycle : boucle sur soi → aucune boucle infinie");
+    }
+
+    // -- 4) POINT FIXE sur une chaîne LONGUE (terminaison + coût linéaire) --
+    {
+      const N = 60;
+      const ports = [{ id: "c0" }];
+      for (let i = 1; i < N; i++) ports.push({ id: "c" + i, parent_port_id: "c" + (i - 1) });
+      const db = { ports, cables: [] };
+      const chain = Cascade.plan("ports", "c0", finderOf(db), fetcherOf(db));
+      ck.eq(chain.deletes.length, N - 1, "point fixe : chaîne de 60 ports → 59 suppressions (la cible exclue)");
+      ck.eq(chain.deletes[chain.deletes.length - 1].id, "c" + (N - 1), "point fixe : le DERNIER maillon de la chaîne est atteint");
+    }
+
+    // -- 5) DÉTACHEMENTS RÉDUITS : un seul par (collection, id, clé), valeur FINALE composée --
+    {
+      const db = {
+        racks: [{ id: "R" }],
+        // trois brosses montées dans la baie, toutes sur la MÊME route de câble
+        waypoints: [{ id: "B1", kind: "brush", rack_id: "R" }, { id: "B2", kind: "brush", rack_id: "R" }, { id: "B3", kind: "brush", rack_id: "R" }],
+        cables: [{ id: "CW", waypoint_ids: ["B1", "W", "B2", "B3"] }],
+        cableBundles: [{ id: "BU", waypoint_ids: ["B3", "B1"] }],
+        rackItems: [{ id: "RI", rack_id: "R" }],
+        equipments: [{ id: "EG", tray_item_id: "RI", placement_mode: "tray", tray_x: 10, tray_y: 20 }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const plan = Cascade.plan("racks", "R", find, fetch);
+      ck.eq(idsOf(plan.deletes, "waypoints"), "B1,B2,B3", "baie : les 3 brosses montées sont supprimées");
+      ck.eq(idsOf(plan.deletes, "rackItems"), "RI", "baie : l'étagère est supprimée");
+      const cw = plan.detaches.filter((d) => d.c === "cables" && d.id === "CW" && d.key === "waypoint_ids");
+      ck.eq(cw.length, 1, "route : UN SEUL détachement waypoint_ids par câble (réduction par clé)");
+      ck.eq(JSON.stringify(cw[0] && cw[0].value), JSON.stringify(["W"]), "route : les TROIS brosses retirées d'un coup (composition, pas dernier-gagne)");
+      const bu = plan.detaches.filter((d) => d.c === "cableBundles" && d.id === "BU" && d.key === "waypoint_ids");
+      ck.eq(bu.length, 1, "route de faisceau : un seul détachement waypoint_ids");
+      ck.eq(JSON.stringify(bu[0] && bu[0].value), JSON.stringify([]), "route de faisceau : les 2 brosses retirées d'un coup");
+      // étagère supprimée par récursion → son hôte redevient « non placé » (4 clés, une entrée chacune)
+      const guest = plan.detaches.filter((d) => d.c === "equipments" && d.id === "EG");
+      ck.eq(guest.length, 4, "étagère supprimée par la baie : 4 détachements sur l'équipement posé (pas de doublon)");
+      ck.eq((guest.find((d) => d.key === "placement_mode") || {}).value, "manual", "équipement posé : replacé en « manual »");
+      ck.eq((guest.find((d) => d.key === "tray_item_id") || {}).value, null, "équipement posé : tray_item_id détaché");
+    }
+
+    // -- 6) Une entité déjà supprimée par un autre chemin n'est ni re-supprimée ni détachée --
+    {
+      const db = {
+        equipments: [{ id: "E" }],
+        ports: [{ id: "PA", equipment_id: "E" }, { id: "PB", equipment_id: "E" }],
+        // un câble entre DEUX ports du même équipement est atteint par les deux ports
+        cables: [{ id: "CC", from_port_id: "PA", to_port_id: "PB" }],
+      };
+      const plan = Cascade.plan("equipments", "E", finderOf(db), fetcherOf(db));
+      ck.eq(plan.deletes.filter((d) => d.c === "cables").length, 1, "dédup : câble atteint par ses DEUX ports → une seule suppression");
+      ck.eq(plan.deletes.length, 3, "dédup : 2 ports + 1 câble");
+    }
+  }
+  });
+
+  await section("shared : Cascade.planMany (plan MULTI-RACINES d'un LOT — composition, dédup, anti-résurrection)", async () => {
+  {
+    /* UN SEUL plan pour tout un lot de suppressions (docs/placement.md §6.17). Les garanties du moteur
+       (composition des retraits de LISTE, anti-cycle, écart des détachements sur entité supprimée) sont
+       portées par des accumulateurs valables dans la portée d'UN appel : elles ne valaient donc PAS entre
+       deux appels. Attentes EN DUR — comparer `planMany` à `planMany` (ou à `plan`, qui lui délègue
+       désormais) serait tautologique. */
+    const finderOf = (db) => (coll, field, value) => (db[coll] || []).filter((o) => {
+      const v = o[field];
+      return Array.isArray(v) ? v.includes(value) : v === value;
+    });
+    const fetcherOf = (db) => (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
+    const idsOf = (list, coll) => list.filter((d) => d.c === coll).map((d) => d.id).sort().join(",");
+    const valueOf = (list, coll, id, key) => {
+      const hits = list.filter((d) => d.c === coll && d.id === id && d.key === key);
+      return { count: hits.length, value: hits.length ? hits[hits.length - 1].value : undefined };
+    };
+
+    // -- 1) LE cas décisif : DEUX waypoints d'une même route, supprimés dans le MÊME lot --
+    {
+      const db = {
+        waypoints: [{ id: "w1" }, { id: "w2" }, { id: "w3" }],
+        cables: [{ id: "CW", waypoint_ids: ["w1", "garde", "w2", "w3"] }],
+        cableBundles: [{ id: "BU", waypoint_ids: ["w2", "w1"] }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const two = Cascade.planMany([{ collection: "waypoints", id: "w1" }, { collection: "waypoints", id: "w2" }], find, fetch);
+      const cw = valueOf(two.detaches, "cables", "CW", "waypoint_ids");
+      ck.eq(cw.count, 1, "lot de 2 waypoints : UN SEUL détachement waypoint_ids sur le câble");
+      ck.eq(JSON.stringify(cw.value), JSON.stringify(["garde", "w3"]), "lot de 2 waypoints : les DEUX sont retirés de la route (composition INTER-CIBLES)");
+      const bu = valueOf(two.detaches, "cableBundles", "BU", "waypoint_ids");
+      ck.eq(JSON.stringify(bu.value), JSON.stringify([]), "lot de 2 waypoints : la route du faisceau perd les deux aussi");
+      const three = Cascade.planMany([{ collection: "waypoints", id: "w1" }, { collection: "waypoints", id: "w2" }, { collection: "waypoints", id: "w3" }], find, fetch);
+      ck.eq(JSON.stringify(valueOf(three.detaches, "cables", "CW", "waypoint_ids").value), JSON.stringify(["garde"]),
+        "lot de 3 waypoints : les TROIS retirés, seul le waypoint épargné subsiste");
+      ck.eq(three.deletes.length, 0, "lot de waypoints : aucune suppression en cascade (les cibles sont exclues)");
+    }
+
+    // -- 2) DEUX groupes d'un même équipement : la liste ET le primaire se composent --
+    {
+      const db = {
+        groups: [{ id: "g1" }, { id: "g2" }, { id: "g3" }],
+        equipments: [{ id: "E", group_id: "g1", group_ids: ["g1", "g2", "g3"] }],
+        vms: [{ id: "V", group_id: "g2", group_ids: ["g1", "g2"] }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const two = Cascade.planMany([{ collection: "groups", id: "g1" }, { collection: "groups", id: "g2" }], find, fetch);
+      ck.eq(JSON.stringify(valueOf(two.detaches, "equipments", "E", "group_ids").value), JSON.stringify(["g3"]),
+        "lot de 2 groupes : les DEUX retirés de group_ids de l'équipement");
+      ck.eq(valueOf(two.detaches, "equipments", "E", "group_id").value, "g3", "lot de 2 groupes : primaire repointé sur le SEUL groupe survivant");
+      ck.eq(JSON.stringify(valueOf(two.detaches, "vms", "V", "group_ids").value), JSON.stringify([]), "lot de 2 groupes : la VM membre est nettoyée pareillement");
+      ck.eq(valueOf(two.detaches, "vms", "V", "group_id").value, null, "lot de 2 groupes : primaire de la VM effacé (aucun groupe restant)");
+      const all = Cascade.planMany([{ collection: "groups", id: "g1" }, { collection: "groups", id: "g2" }, { collection: "groups", id: "g3" }], find, fetch);
+      ck.eq(JSON.stringify(valueOf(all.detaches, "equipments", "E", "group_ids").value), JSON.stringify([]), "lot de 3 groupes : group_ids vidé");
+      ck.eq(valueOf(all.detaches, "equipments", "E", "group_id").value, null, "lot de 3 groupes : primaire effacé");
+    }
+
+    // -- 3) DEUX réseaux d'un même port (et d'un même câble legacy) : idem --
+    {
+      const db = {
+        networks: [{ id: "n1" }, { id: "n2" }, { id: "n3" }],
+        ports: [{ id: "P", network_id: "n1", network_ids: ["n1", "n2", "n3"] }],
+        cables: [{ id: "C", network_id: "n2", network_ids: ["n1", "n2"] }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const two = Cascade.planMany([{ collection: "networks", id: "n1" }, { collection: "networks", id: "n2" }], find, fetch);
+      ck.eq(JSON.stringify(valueOf(two.detaches, "ports", "P", "network_ids").value), JSON.stringify(["n3"]),
+        "lot de 2 réseaux : les DEUX retirés de network_ids du port terminal");
+      ck.eq(valueOf(two.detaches, "ports", "P", "network_id").value, "n3", "lot de 2 réseaux : principal du port repointé sur le survivant");
+      ck.eq(JSON.stringify(valueOf(two.detaches, "cables", "C", "network_ids").value), JSON.stringify([]), "lot de 2 réseaux : le câble legacy est nettoyé des deux");
+      ck.eq(valueOf(two.detaches, "cables", "C", "network_id").value, null, "lot de 2 réseaux : principal du câble effacé");
+    }
+
+    // -- 4) DÉDUPLICATION à l'échelle du LOT : une cible du lot n'est jamais re-supprimée par la cascade d'une autre --
+    {
+      const db = {
+        equipments: [{ id: "E" }],
+        ports: [{ id: "PA", equipment_id: "E" }, { id: "PB", equipment_id: "E" }],
+        cables: [{ id: "CC", from_port_id: "PA", to_port_id: "PB" }],
+        aggregates: [{ id: "AG", equipment_id: "E" }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const plan = Cascade.planMany([{ collection: "equipments", id: "E" }, { collection: "ports", id: "PA" }], find, fetch);
+      ck.eq(idsOf(plan.deletes, "ports"), "PB", "lot équipement + un de ses ports : le port CIBLE n'est pas re-supprimé, l'autre l'est");
+      ck.eq(idsOf(plan.deletes, "cables"), "CC", "lot équipement + un de ses ports : le câble partagé n'est supprimé qu'une fois");
+      ck.eq(plan.deletes.length, 3, "lot équipement + un de ses ports : 3 suppressions (PB + CC + AG)");
+      ck.eq(new Set(plan.deletes.map((d) => d.c + "/" + d.id)).size, plan.deletes.length, "lot : aucune entité en double dans deletes");
+    }
+
+    // -- 5) ANTI-RÉSURRECTION à l'échelle du LOT : un détachement visant une CIBLE du lot est écarté PAR LE PLAN --
+    {
+      const db = {
+        aggregates: [{ id: "AG" }],
+        // X est rattaché à l'agrégat ET supprimé par le même lot : le détacher produirait un update
+        // sur une ligne supprimée (RESSUSCITANTE côté API), Y survit et doit bien être détaché.
+        ports: [{ id: "X", aggregate_id: "AG" }, { id: "Y", aggregate_id: "AG" }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const plan = Cascade.planMany([{ collection: "aggregates", id: "AG" }, { collection: "ports", id: "X" }], find, fetch);
+      ck.eq(plan.detaches.filter((d) => d.c === "ports").map((d) => d.id).join(","), "Y",
+        "lot : le détachement visant une CIBLE du lot est écarté, celui du port survivant est conservé");
+      ck.eq(plan.detaches.some((d) => d.id === "X"), false, "lot : aucune trace de détachement sur une cible du lot");
+    }
+
+    // -- 6) `plan()` = ENVELOPPE à une racine : attentes EN DUR, identiques à celles d'une racine unique --
+    {
+      const db = {
+        racks: [{ id: "R" }],
+        waypoints: [{ id: "b1", kind: "brush", rack_id: "R" }, { id: "b2", kind: "brush", rack_id: "R" }],
+        cables: [{ id: "CR", waypoint_ids: ["b1", "b2", "hors"] }],
+        rackItems: [{ id: "RI", rack_id: "R" }],
+        equipments: [{ id: "EQ", rack_id: "R", placement_mode: "rack" }],
+      };
+      const find = finderOf(db), fetch = fetcherOf(db);
+      const single = Cascade.planMany([{ collection: "racks", id: "R" }], find, fetch);
+      ck.eq(idsOf(single.deletes, "waypoints"), "b1,b2", "une seule racine : les 2 brosses de la baie sont supprimées");
+      ck.eq(idsOf(single.deletes, "rackItems"), "RI", "une seule racine : l'étagère est supprimée");
+      ck.eq(single.deletes.length, 3, "une seule racine : 3 suppressions");
+      ck.eq(JSON.stringify(valueOf(single.detaches, "cables", "CR", "waypoint_ids").value), JSON.stringify(["hors"]),
+        "une seule racine : la composition RÉCURSIVE (2 brosses) est intacte");
+      ck.eq(valueOf(single.detaches, "equipments", "EQ", "placement_mode").value, "manual", "une seule racine : l'équipement de la baie repasse en manuel");
+    }
+
+    // -- 7) Lot VIDE : plan vide (aucune racine à développer) --
+    {
+      const empty = Cascade.planMany([], finderOf({}), fetcherOf({}));
+      ck.eq(empty.deletes.length + empty.detaches.length, 0, "lot vide → plan vide");
+    }
+  }
+  });
+
   await section("shared : schéma PARTAGÉ (garde anti-divergence front ⇄ back)", async () => {
   {
     // La liste canonique de shared/Schema DOIT correspondre EXACTEMENT aux classes du registre front (même ordre).
@@ -198,6 +466,98 @@ module.exports = async () => {
     ck.eq(SharedSchema.isImageMime("text/html"), false, "isImageMime(text/html) = false");
     ck.eq(SharedSchema.isImageMime(null), false, "isImageMime(null) = false");
     ck.eq(SharedSchema.PAGE_SIZE_ALL >= 1e9, true, "PAGE_SIZE_ALL couvre un document complet (pas de plafond serveur — décision actée)");
+  }
+  });
+
+  await section("shared : ISOLEMENT du dossier — aucun import hors de src-shared/ (verrou PERMANENT)", async () => {
+  {
+    /* DEUX RÈGLES DISTINCTES gouvernent les imports de `src-shared/` ; la formulation historique
+       « fichier auto-suffisant » les CONFONDAIT (cf. `CLAUDE.md` § « Code partagé front/back ») :
+
+         (1) ISOLEMENT DU DOSSIER — PERMANENT, et c'est CETTE section qui le verrouille. Un fichier
+             partagé n'importe RIEN hors de `src-shared/` : ni `src-client/`, ni `src-server/`, ni
+             aucun paquet npm / module natif Node. Aucune configuration ne lèvera la règle : importer
+             du client ferait embarquer du DOM dans le build SERVEUR, importer du serveur ferait
+             embarquer du Node dans le FRONT — et de façon TRANSITIVE, donc INVISIBLE à la relecture
+             (le module importé peut être pur aujourd'hui et cesser de l'être demain, sans que
+             personne n'ait touché à `src-shared/`). La règle « TS PUR » de `CLAUDE.md` ne parle, elle,
+             que du CONTENU d'un fichier : on peut la respecter à la lettre en violant celle-ci.
+         (2) IMPORTS ENTRE FICHIERS PARTAGÉS — AUTORISÉS depuis le lot 7 (`resolve.extensionAlias` de
+             `webpack.config.js`, cf. docs/placement.md §6.7), à condition IMPÉRATIVE de porter
+             l'extension `.js` : NodeNext l'exige côté serveur, l'omettre compile côté front et CASSE
+             le build serveur. Vérifié ici aussi, faute de quoi la seule forme légale resterait une
+             convention non tenue.
+
+       Le verrou lit les SOURCES `.ts`, jamais le compilé : c'est le spécificateur ÉCRIT par le
+       contributeur qu'on contrôle (le compilé, lui, a déjà résolu les alias). */
+    const fs = require("fs");
+    const sharedDir = path.join(__dirname, "..", "..", "src-shared");
+
+    /* Le DÉTECTEUR d'imports vit dans le harnais (`TsImports.specifiersOf`) : la BORNE §6.6 de
+       `PlacementFrame` (test-geometry.js, doctrine §6.22) s'en sert aussi, et le dupliquer serait
+       exactement la faute que ces verrous existent pour prévenir (principe n°3). Le contrôle de
+       DISCRIMINATION ci-dessous reste ICI, et couvre donc les DEUX verrous. */
+    const moduleSpecifiersOf = (text, fileName) => TsImports.specifiersOf(text, fileName);
+
+    // -- contrôle de DISCRIMINATION : le détecteur voit-il VRAIMENT chaque forme, et RIEN d'autre ? --
+    // Sans lui, le verrou passerait au vert en ne détectant rien du tout — le pire des états.
+    {
+      const sonde = [
+        'import { A } from "./A.js";',
+        'import "./B.js";',
+        'import type { C } from "./C.js";',
+        'import type D from "./D.js";',
+        'export { E } from "./E.js";',
+        'export * from "./F.js";',
+        'export * as G from "./G.js";',
+        'export type { H } from "./H.js";',
+        'const i = import("./I.js");',
+        'import J = require("./J.js");',
+        'const k = require("./K.js");',
+        'import {\n  L,\n  M\n} from "./L.js";',
+        '// import { Faux } from "../src-client/nope.js";',
+        '/* import { Faux2 } from "../src-server/nope2.js"; */',
+        'const s = "import { Faux3 } from \\"paquet-npm\\"";',
+      ].join("\n");
+      const vus = moduleSpecifiersOf(sonde, "sonde.ts");
+      const formes = { "./A.js": "import … from", "./B.js": 'import "x" (effet de bord)', "./C.js": "import type { … } from", "./D.js": "import type X from", "./E.js": "export { … } from", "./F.js": "export * from", "./G.js": "export * as N from (RATÉE par preProcessFile seul)", "./H.js": "export type { … } from", "./I.js": "import() dynamique", "./J.js": "import X = require()", "./K.js": "require()", "./L.js": "import multi-lignes" };
+      for (const [spec, forme] of Object.entries(formes)) ck(vus.has(spec), "détecteur d'imports : forme COUVERTE — " + forme);
+      ck.eq([...vus.keys()].filter((s) => s.includes("nope") || s === "paquet-npm").join(","), "",
+        "détecteur d'imports : commentaires et chaînes littérales IGNORÉS (aucun faux positif)");
+    }
+
+    // -- le VERROU proprement dit, sur les sources RÉELLES --
+    // Parcours RÉCURSIF : `src-shared/` est plat aujourd'hui, la règle doit tenir s'il cesse de l'être.
+    const sourcesPartagees = [];
+    (function collecte(dir) {
+      for (const entree of fs.readdirSync(dir, { withFileTypes: true })) {
+        const chemin = path.join(dir, entree.name);
+        if (entree.isDirectory()) collecte(chemin);
+        else if (entree.name.endsWith(".ts")) sourcesPartagees.push(chemin);
+      }
+    })(sharedDir);
+    sourcesPartagees.sort();
+    ck(sourcesPartagees.length >= 5, "src-shared/ : les sources .ts sont bien atteintes (" + sourcesPartagees.length + " fichiers lus)");
+
+    const violations = [];
+    const importsInternes = [];
+    for (const chemin of sourcesPartagees) {
+      const nom = path.relative(sharedDir, chemin).split(path.sep).join("/");
+      for (const [spec, ligne] of moduleSpecifiersOf(fs.readFileSync(chemin, "utf8"), nom)) {
+        const ou = nom + ":" + ligne + ' → "' + spec + '"';
+        if (path.isAbsolute(spec) || /^[A-Za-z]:[\\/]/.test(spec)) { violations.push(ou + " — chemin ABSOLU"); continue; }
+        if (!spec.startsWith("./") && !spec.startsWith("../")) { violations.push(ou + " — spécificateur NON relatif (paquet npm ou module natif Node)"); continue; }
+        const cible = path.resolve(path.dirname(chemin), spec);
+        if (cible !== sharedDir && !cible.startsWith(sharedDir + path.sep)) { violations.push(ou + " — SORT de src-shared/"); continue; }
+        // Import INTERNE légal (règle 2) : l'extension `.js` reste IMPÉRATIVE.
+        if (!spec.endsWith(".js")) violations.push(ou + " — import interne SANS extension `.js` (NodeNext l'exige : compile côté front, CASSE le build serveur)");
+        else importsInternes.push(nom + " → " + spec);
+      }
+    }
+    ck.eq(violations.join("  |  "), "",
+      "src-shared/ : ISOLEMENT — aucun import hors du dossier (règle PERMANENTE, cf. CLAUDE.md § « Code partagé front/back »)");
+    // Anti-vacuité : le verrou doit avoir VU des imports réels, sinon il pourrait « passer » sur des fichiers vides.
+    ck(importsInternes.length >= 1, "src-shared/ : le verrou lit des sources RÉELLES — imports internes vus : " + (importsInternes.join(", ") || "AUCUN"));
   }
   });
 
@@ -361,7 +721,7 @@ module.exports = async () => {
     const db = { racks: [rack], rackItems: [tray, { id: "B1", kind: "blank", rack_id: "R1" }], equipments: [], waypoints: [], cables: [], cableBundles: [] };
     const find = (coll, field, value) => (db[coll] || []).filter((o) => o[field] === value);
     const fetch = (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
-    const V = (rec) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find);
+    const V = (rec) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find, VALIDATION_COLLABORATORS);
     const base = { id: "E1", name: "posé", type: "other", placement_mode: "tray", tray_item_id: "T1", dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, tray_x: 0, tray_y: 0, dc_orientation: 0 };
     ck.eq(V(base).length, 0, "posé valide (80 ≤ 3 U − 5 mm de tôle) → 0 erreur");
     ck(V(Object.assign({}, base, { tray_item_id: null })).some((x) => x.path === "tray_item_id"), "T1c : mode tray sans étagère → erreur");
@@ -384,6 +744,225 @@ module.exports = async () => {
     const p2 = Cascade.plan("racks", "R1", find, fetch);
     ck(p2.deletes.some((d) => d.c === "rackItems" && d.id === "T1"), "cascade baie : l'étagère est supprimée");
     ck(p2.detaches.some((d) => d.c === "equipments" && d.id === "E9" && d.key === "tray_item_id"), "cascade baie : le posé est détaché (transitif)");
+  }
+  });
+
+  await section("shared : TrayGeometry — géométrie d'étagère, SOURCE UNIQUE (attentes explicites)", async () => {
+  {
+    // Ces attentes sont des valeurs EN DUR, jamais une comparaison entre deux implémentations : depuis que
+    // RackGeometry.tray* DÉLÈGUE à ce module, comparer les deux ne prouverait plus rien (cf. le piège du lot 2).
+    const CAGE = 900;   // profondeur de cage passée en NOMBRE (le module ignore la politique de baie)
+
+    // -- longueur du plateau --
+    ck.eq(TrayGeometry.plankLength(CAGE, { tray_type: "dual", depth_mm: 300 }), 906, "dual : façade à façade = cage + 2 × réserve d'oreilles (depth_mm ignoré)");
+    ck.eq(TrayGeometry.plankLength(CAGE, { tray_type: "cantilever", depth_mm: 400 }), 400, "porte-à-faux : depth_mm");
+    ck.eq(TrayGeometry.plankLength(CAGE, { tray_type: "cantilever", depth_mm: 2000 }), 900, "porte-à-faux : borné à la cage");
+    ck.eq(TrayGeometry.plankLength(CAGE, { tray_type: "cantilever", depth_mm: 10 }), 50, "porte-à-faux : plancher de 50 mm");
+    ck.eq(TrayGeometry.plankLength(CAGE, { tray_type: "cantilever", depth_mm: null }), 450, "porte-à-faux : défaut TRAY_DEPTH_DEFAULT_MM");
+
+    // -- plateau utile --
+    ck.eq(TrayGeometry.fullWidth(), 452.6, "largeur PLEINE = corps 19″ (482,6 − 2 × 15)");
+    ck.eq(TrayGeometry.gussetInset({ tray_type: "cantilever" }), 4, "porte-à-faux : garde latérale des renforts");
+    ck.eq(TrayGeometry.gussetInset({ tray_type: "dual" }), 0, "dual : aucune garde latérale");
+    const dual = TrayGeometry.plank(CAGE, { tray_type: "dual", u_height: 3 });
+    ck.eq(dual.W, 452.6, "dual : largeur utilisable = largeur pleine");
+    ck.eq(dual.L, 906, "dual : longueur = 906");
+    ck(Math.abs(dual.availH - 128.35) < 1e-9, "hauteur libre = 3 U − 5 mm de tôle = 128,35 mm (tray_u n'exclut RIEN)");
+    const cant = TrayGeometry.plank(CAGE, { tray_type: "cantilever", u_height: 3, depth_mm: 400, tray_u: 3 });
+    ck.eq(cant.W, 444.6, "porte-à-faux : largeur utilisable = 452,6 − 2 × 4");
+    ck.eq(cant.L, 400, "porte-à-faux : longueur = depth_mm");
+    ck(Math.abs(cant.availH - 128.35) < 1e-9, "hauteur libre INDÉPENDANTE de tray_u (3 U réservés, structure de 3 U)");
+    ck(Math.abs(TrayGeometry.plank(CAGE, { tray_type: "dual", u_height: 0 }).availH - 39.45) < 1e-9, "u_height absent/0 → 1 U planché (39,45 mm)");
+
+    // -- empreinte (orientation) --
+    const eq = { free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, dc_orientation: 0 };
+    ck.eq(JSON.stringify(TrayGeometry.footprint(eq)), JSON.stringify({ w: 200, d: 300, h: 80, rotated: false }), "empreinte 0° : largeur × longueur");
+    ck.eq(JSON.stringify(TrayGeometry.footprint({ ...eq, dc_orientation: 90 })), JSON.stringify({ w: 300, d: 200, h: 80, rotated: true }), "empreinte 90° : PERMUTÉE (rotated)");
+    ck.eq(JSON.stringify(TrayGeometry.footprint({ ...eq, dc_orientation: 270 })), JSON.stringify({ w: 300, d: 200, h: 80, rotated: true }), "empreinte 270° : permutée");
+    ck.eq(TrayGeometry.footprint({ ...eq, dc_orientation: 180 }).rotated, false, "empreinte 180° : NON permutée");
+    ck.eq(TrayGeometry.footprint({ ...eq, dc_orientation: -90 }).rotated, true, "angle négatif ramené dans [0, 360[");
+    ck.eq(TrayGeometry.footprint({ ...eq, dc_orientation: 450 }).rotated, true, "angle > 360 ramené dans [0, 360[");
+    ck.eq(TrayGeometry.footprint({ ...eq, dc_orientation: 45 }).rotated, false, "angle hors 90/270 : aucune permutation");
+    // TRONCATURE à l'entier : sémantique du DOMAINE (Normalize.rackOrientation), donc du RENDU. La validation
+    // partagée l'ignorait (elle testait l'angle flottant) et pouvait valider une empreinte AUTRE que la dessinée.
+    ck.eq(TrayGeometry.footprint({ ...eq, dc_orientation: 90.5 }).rotated, true, "angle non entier TRONQUÉ (90,5 → 90) — parité avec le rendu");
+    ck.eq(JSON.stringify(TrayGeometry.footprint({})), JSON.stringify({ w: 200, d: 200, h: 100, rotated: false }), "dimensions absentes → défauts prudents 200 × 200 × 100");
+
+    // -- position au plateau --
+    ck.eq(JSON.stringify(TrayGeometry.box({ ...eq, tray_x: 10, tray_y: 10 }, cant)), JSON.stringify({ x0: 10, x1: 210, y0: 10, y1: 310 }), "position saisie : rect au plateau");
+    const centre = TrayGeometry.box(eq, cant);   // (444,6 − 200) / 2 = 122,3 en flottant → comparaison à tolérance
+    ck(Math.abs(centre.x0 - 122.3) < 1e-9 && Math.abs(centre.x1 - 322.3) < 1e-9, "position absente → CENTRÉ en largeur (122,3 mm)");
+    ck.eq(centre.y0, 50, "position absente → CENTRÉ en profondeur ((400 − 300) / 2)");
+    ck.eq(centre.y1, 350, "…rect refermé sur l'empreinte");
+    ck.eq(TrayGeometry.box({ ...eq, free_w_mm: 600, tray_x: null }, cant).x0, 0, "empreinte plus large que le plateau → centrage borné à 0");
+    ck.eq(TrayGeometry.box({ ...eq, tray_x: "10" }, cant).x1, 210, "position en CHAÎNE coercée en nombre (pas de concaténation)");
+
+    // -- chevauchement (tolérance de 0,5 mm) --
+    const r = (x0, x1, y0, y1) => ({ x0, x1, y0, y1 });
+    ck.eq(TrayGeometry.overlap(r(0, 100, 0, 100), r(100, 200, 0, 100)), false, "bord à bord → pas de chevauchement");
+    ck.eq(TrayGeometry.overlap(r(0, 100, 0, 100), r(99.6, 200, 0, 100)), false, "recouvrement de 0,4 mm → toléré");
+    ck.eq(TrayGeometry.overlap(r(0, 100, 0, 100), r(99, 200, 0, 100)), true, "recouvrement de 1 mm → chevauchement");
+    ck.eq(TrayGeometry.overlap(r(0, 100, 0, 100), r(50, 150, 200, 300)), false, "décalés en profondeur → pas de chevauchement");
+
+    // -- verdict de tenue --
+    ck.eq(TrayGeometry.fitProblem({ ...eq, tray_x: 0, tray_y: 0 }, cant), null, "200 × 300 × 80 sur 444,6 × 400 (128,35 utiles) → tient");
+    ck.eq(TrayGeometry.fitProblem({ ...eq, free_h_mm: 150, tray_x: 0, tray_y: 0 }, cant).code, "too_high", "150 mm > 128,35 mm utiles → too_high");
+    ck.eq(TrayGeometry.fitProblem({ ...eq, free_h_mm: 128, tray_x: 0, tray_y: 0 }, cant), null, "128 mm ≤ 128,35 mm → tient (inclusif)");
+    ck.eq(TrayGeometry.fitProblem({ ...eq, free_w_mm: 600, tray_x: 0, tray_y: 0 }, cant).code, "footprint", "empreinte 600 > plateau 444,6 → footprint (indépendant de la position)");
+    ck.eq(TrayGeometry.fitProblem({ ...eq, free_l_mm: 900, tray_x: 0, tray_y: 0 }, cant).code, "footprint", "empreinte trop PROFONDE → footprint");
+    const over = TrayGeometry.fitProblem({ ...eq, tray_x: 400, tray_y: 0 }, cant);
+    ck.eq(over.code, "over_width", "à x = 400, 200 mm de large sort du plateau → over_width");
+    ck.eq(over.reached, 600, "over_width : cote atteinte = 600 mm");
+    ck.eq(over.at, 400, "over_width : position = 400 mm");
+    const deep = TrayGeometry.fitProblem({ ...eq, tray_x: 0, tray_y: 300 }, cant);
+    ck.eq(deep.code, "over_depth", "à y = 300, 300 mm de profond sort du plateau → over_depth");
+    ck.eq(deep.reached, 600, "over_depth : cote atteinte = 600 mm");
+    ck.eq(TrayGeometry.fitProblem({ ...eq, dc_orientation: 90, tray_x: 200, tray_y: 0 }, cant).code, "over_width", "rotation 90° : l'empreinte permutée (300 de large) déborde à x = 200");
+
+    /* -- cotes GÉNÉRALES de baie : la RÉPLIQUE est SUPPRIMÉE, elles ont une source unique.
+       ⚠ Les anciennes assertions d'anti-divergence (`TRAY_U_MM === C.U_MM`) sont devenues TAUTOLOGIQUES
+       le jour de la bascule : les deux noms désignent désormais le MÊME binding, l'égalité ne pouvait
+       plus échouer. Elles sont donc remplacées par des attentes EXPLICITES sur les VALEURS (recette de
+       la doctrine §4.1) — seules capables de détecter qu'une cote a été changée par erreur — plus une
+       vérification que le front RÉ-EXPORTE bien la source unique au lieu de la redéclarer. */
+    const C = D("domain/constants.js");
+    const RC = SHARED("src-shared/RackConstants.js");
+    ck.eq(RC.U_MM, 44.45, "cote 19″ : hauteur d'un U (mm)");
+    ck.eq(RC.RACK_MOUNT_WIDTH_MM, 482.6, "cote 19″ : entraxe des rails (mm)");
+    ck.eq(RC.RACK_EAR_MM, 15, "cote 19″ : largeur d'une oreille, par côté (mm)");
+    ck.eq(RC.RACK_EAR_STANDOFF_MM, 3, "cote 19″ : réserve d'oreilles devant la cage (mm)");
+    ck.eq(RC.RACK_DEPTH_DEFAULT_MM, 1000, "cote de baie : profondeur extérieure par défaut (mm)");
+    // le front RÉ-EXPORTE (noms historiques conservés par alias) — plus aucune valeur écrite deux fois.
+    ck.eq(C.U_MM, RC.U_MM, "front : `U_MM` ré-exporté depuis la source unique");
+    ck.eq(C.RACK_MOUNT_WIDTH, RC.RACK_MOUNT_WIDTH_MM, "front : `RACK_MOUNT_WIDTH` = alias de `RACK_MOUNT_WIDTH_MM`");
+    ck.eq(C.RACK_EAR_MM, RC.RACK_EAR_MM, "front : `RACK_EAR_MM` ré-exporté");
+    ck.eq(C.RACK_EAR_STANDOFF_MM, RC.RACK_EAR_STANDOFF_MM, "front : `RACK_EAR_STANDOFF_MM` ré-exporté");
+    ck.eq(C.RACK_DEPTH_DEFAULT, RC.RACK_DEPTH_DEFAULT_MM, "front : `RACK_DEPTH_DEFAULT` = alias de `RACK_DEPTH_DEFAULT_MM`");
+    // et les noms préfixés `TRAY_*` — qui n'avaient rien de propre à une étagère — ont DISPARU.
+    ck.eq(TrayGeom.TRAY_U_MM, undefined, "les alias `TRAY_*` des cotes GÉNÉRALES ont disparu (elles ne sont pas propres à l'étagère)");
+    ck.eq(TrayGeom.TRAY_MOUNT_WIDTH_MM, undefined, "… idem pour l'entraxe");
+    ck(TrayGeom.TRAY_DEPTH_DEFAULT_MM != null, "…mais les cotes VRAIMENT propres à l'étagère restent publiées ici (anti-vacuité)");
+    // les cotes PROPRES à l'étagère, elles, ne sont plus répliquées : le front les RÉ-EXPORTE d'ici.
+    ck.eq(C.TRAY_DEPTH_DEFAULT_MM, TrayGeom.TRAY_DEPTH_DEFAULT_MM, "cote d'étagère : le front ré-exporte la valeur PARTAGÉE (450)");
+    ck.eq(C.TRAY_SHEET_RESERVE_MM, TrayGeom.TRAY_SHEET_RESERVE_MM, "cote d'étagère : réserve de tôle ré-exportée (5)");
+    ck.eq(C.TRAY_GUSSET_CLEARANCE_MM, TrayGeom.TRAY_GUSSET_CLEARANCE_MM, "cote d'étagère : garde des renforts ré-exportée (4)");
+  }
+  });
+
+  /* ============================================================================================
+     POLITIQUE DE PROFONDEUR DE BAIE — source UNIQUE (`src-shared/RackDepthPolicy`), consommée par
+     la VALIDATION (qui l'IMPORTE) et par le RENDU (`RackGeometry`, qui délègue).
+
+     ⚠ Ces attentes sont EN DUR, jamais une comparaison entre les deux implémentations : elles n'en
+     font plus qu'une, la comparaison serait tautologique (doctrine §4.1). La parité a été prouvée
+     À PART, avant la bascule, sur 444 528 comparaisons contre l'ancien code relu depuis git —
+     ZÉRO divergence avec l'ancienne VALIDATION, et exactement 26 460 avec l'ancien FRONT, toutes
+     dans les deux familles ARBITRÉES ci-dessous (§6.14).
+     ============================================================================================ */
+  await section("shared : politique de PROFONDEUR de baie — source unique, et ses deux CORRECTIONS", async () => {
+  {
+    const P = RackDepthPolicy;
+
+    // -- profondeur extérieure : 0 et l'absence retombent sur le défaut --
+    ck.eq(P.outerDepth({ depth: 800 }), 800, "profondeur extérieure : valeur déclarée");
+    ck.eq(P.outerDepth({}), 1000, "profondeur extérieure : absente → défaut 1000");
+    ck.eq(P.outerDepth({ depth: 0 }), 1000, "profondeur extérieure : 0 → défaut (une baie plate n'a pas de sens)");
+
+    // -- cage : non déclarée = toute la profondeur --
+    ck.eq(P.cage({ depth: 1000 }), 1000, "cage non déclarée → profondeur extérieure");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 900 }), 900, "cage déclarée → valeur déclarée");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 899.7 }), 899, "cage : troncature à l'entier (| 0)");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: "" }), 1000, "cage : saisie vide → profondeur extérieure");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: -5 }), 1000, "cage : valeur négative → profondeur extérieure");
+
+    // ⚠ CORRECTION n°1 (arbitrage §6.14) : la cage est BORNÉE à la profondeur extérieure. Le front ne
+    // bornait PAS — il dessinait donc une cage débordant de son propre châssis, et injectait cette valeur
+    // non bornée dans la géométrie de plateau. Une cage ne peut pas être plus profonde que le châssis.
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 1200 }), 1000, "CORRECTION : cage DÉBORDANTE ramenée à la profondeur (1200 → 1000)");
+    ck.eq(P.cage({ cage_depth_mm: 1200 }), 1000, "CORRECTION : bornée aussi quand la profondeur est le DÉFAUT");
+    ck.eq(P.cage({ depth: 600, cage_depth_mm: 1000 }), 600, "CORRECTION : bornée sur une baie peu profonde");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 1000 }), 1000, "cage PILE à la profondeur : inchangée (borne inclusive)");
+
+    // ⚠ CORRECTION n°2 : plus de plancher à 1. Une cage sub-millimétrique vaut 0 (ce que disait déjà la
+    // validation) et non 1 (ce que rendait le front) — un `Math.max(1, …)` sur une valeur déjà tronquée.
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 0.5 }), 0, "CORRECTION : cage de 0,5 mm → 0 (et non 1)");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 1.4 }), 1, "cage de 1,4 mm → 1 (troncature, pas plancher)");
+    ck.eq(P.cage({ depth: 1000, cage_depth_mm: 0 }), 1000, "cage à 0 → non déclarée → profondeur extérieure");
+
+    // -- marges : la marge avant est bornée par ce que la cage laisse ; l'arrière est le reste --
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 900 }), 0, "marge avant non saisie → 0");
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: 50 }), 50, "marge avant saisie → valeur");
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: 500 }), 100, "marge avant BORNÉE : la cage doit tenir (1000 − 900)");
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: "" }), 0, "marge avant : saisie vide ≠ 0 saisi → 0");
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: -20 }), 0, "marge avant : négative → 0");
+    ck.eq(P.rearMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: 50 }), 50, "marge arrière = 1000 − cage 900 − avant 50");
+    ck.eq(P.rearMargin({ depth: 1000, cage_depth_mm: 900 }), 100, "marge arrière = tout le reste quand l'avant est nul");
+    ck.eq(P.rearMargin({ depth: 1000 }), 0, "cage pleine profondeur → aucune marge arrière");
+    // conséquence de la CORRECTION n°1 : une cage débordante ne produit plus de marge négative masquée.
+    ck.eq(P.frontMargin({ depth: 1000, cage_depth_mm: 1200, front_margin_mm: 50 }), 0, "cage débordante : plus aucune place pour une marge avant");
+    ck.eq(P.rearMargin({ depth: 1000, cage_depth_mm: 1200 }), 0, "cage débordante : marge arrière nulle (jamais négative)");
+
+    // -- portes : cavité d'une porte CREUSE, et présence d'au moins une porte --
+    ck.eq(P.doorExtra({ door_front: { enabled: true, hollow: true, hollow_mm: 60 } }, "front"), 60, "porte creuse → cavité utile");
+    ck.eq(P.doorExtra({ door_front: { enabled: true, hollow: true, hollow_mm: 60 } }, "rear"), 0, "la cavité est lue FACE PAR FACE");
+    ck.eq(P.doorExtra({ door_front: { enabled: false, hollow: true, hollow_mm: 60 } }, "front"), 0, "porte DÉSACTIVÉE → aucune cavité");
+    ck.eq(P.doorExtra({ door_front: { enabled: true, hollow_mm: 60 } }, "front"), 0, "porte pleine (non creuse) → aucune cavité");
+    ck.eq(P.doorExtra({ door_front: { enabled: true, hollow: true, hollow_mm: -3 } }, "front"), 0, "cavité négative → 0");
+    ck.eq(P.doorExtra({}, "front"), 0, "aucune porte → aucune cavité");
+    ck.eq(P.hasDoor({}), false, "aucune porte → hasDoor faux");
+    ck.eq(P.hasDoor({ door_front: { enabled: false } }), false, "porte désactivée → hasDoor faux");
+    ck.eq(P.hasDoor({ door_rear: { enabled: true } }), true, "porte ARRIÈRE activée suffit");
+    ck.eq(P.door({ door_rear: { enabled: true } }, "rear").enabled, true, "door() rend l'enregistrement de la face demandée");
+
+    // -- la constante n'est plus RÉPLIQUÉE : ce module la RÉ-EXPORTE depuis `RackConstants`, où elle
+    //    est vérifiée par sa VALEUR (l'ancienne comparaison front ⇄ partagé serait tautologique).
+    //    Ce qui est éprouvé ICI est que la POLITIQUE de profondeur continue de la publier et de s'en
+    //    servir comme repli — c'est son comportement, pas l'égalité de deux noms.
+    ck.eq(RackDepthPol.RACK_DEPTH_DEFAULT_MM, 1000, "la politique publie toujours la profondeur par défaut (1000 mm)");
+    ck.eq(RackDepthPol.RackDepthPolicy.outerDepth({}), 1000, "…et s'en sert de repli quand la baie n'en déclare pas");
+    ck.eq(RackDepthPol.RackDepthPolicy.outerDepth({ depth: 0 }), 1000, "…y compris pour une profondeur NULLE (qui n'a pas de sens)");
+
+    // -- le RENDU délègue : `RackGeometry` n'est plus qu'un alias (mêmes signatures, mêmes valeurs) --
+    ck.eq(RackGeometry.cageDepth({ depth: 1000, cage_depth_mm: 1200 }), 1000, "RackGeometry.cageDepth : borne désormais, comme la validation");
+    ck.eq(RackGeometry.cageDepth({ depth: 1000, cage_depth_mm: 0.5 }), 0, "RackGeometry.cageDepth : plus de plancher à 1");
+    ck.eq(RackGeometry.frontMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: 500 }), 100, "RackGeometry.frontMargin délègue");
+    ck.eq(RackGeometry.rearMargin({ depth: 1000, cage_depth_mm: 900, front_margin_mm: 50 }), 50, "RackGeometry.rearMargin délègue");
+    ck.eq(RackGeometry.hasDoor({ door_rear: { enabled: true } }), true, "RackGeometry.hasDoor délègue");
+    ck.eq(RackGeometry.doorExtraDepth({ door_front: { enabled: true, hollow: true, hollow_mm: 60 } }, "front"), 60, "RackGeometry.doorExtraDepth délègue");
+
+    // -- effet AVAL de la correction n°1 : le plateau d'une étagère ne peut plus dépasser le châssis --
+    // (la cage non bornée était injectée telle quelle dans `TrayGeometry.plank`, cf. §6.7.)
+    const trayDual = { kind: "tray", tray_type: "dual", u_height: 2, tray_u: 1 };
+    ck.eq(RackGeometry.trayLength({ depth: 1000, cage_depth_mm: 1200 }, trayDual), 1006, "plateau « dual » : cage BORNÉE 1000 + 2 × 3 mm d'oreilles (et non 1206)");
+    ck.eq(RackGeometry.trayLength({ depth: 1000, cage_depth_mm: 900 }, trayDual), 906, "plateau « dual » : cas normal inchangé (900 + 6)");
+    const trayCant = { kind: "tray", tray_type: "cantilever", u_height: 2, tray_u: 1, depth_mm: 1100 };
+    ck.eq(RackGeometry.trayLength({ depth: 1000, cage_depth_mm: 1200 }, trayCant), 1000, "plateau en porte-à-faux : borné à la cage BORNÉE (1000)");
+  }
+  });
+
+  await section("shared : géométrie d'étagère INJECTÉE — la validation échoue FERMÉ si le collaborateur manque", async () => {
+  {
+    // `src-shared/DataValidation` REÇOIT `src-shared/TrayGeometry` au lieu de l'importer — par CHOIX de
+    // découplage désormais, plus par impossibilité technique (cf. §6.14 : la politique de profondeur, elle,
+    // est bel et bien IMPORTÉE). Le risque de ce patron est qu'un appelant l'oublie et que la règle s'arrête
+    // EN SILENCE — c'est exactement le défaut du `FieldSpec.max` déclaré mais inerte. On vérifie donc que
+    // l'omission REFUSE au lieu de laisser passer.
+    const rack = { id: "R1", name: "R", u_count: 42, depth: 1000, cage_depth_mm: 900, sides: "dual" };
+    const tray = { id: "T1", kind: "tray", rack_id: "R1", u: 10, u_height: 3, tray_u: 1, tray_type: "cantilever", depth_mm: 400, side: "front" };
+    const db = { racks: [rack], rackItems: [tray], equipments: [] };
+    const find = (coll, field, value) => (db[coll] || []).filter((o) => o[field] === value);
+    const fetch = (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
+    const eq = { id: "E1", name: "posé", type: "other", placement_mode: "tray", tray_item_id: "T1", dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, tray_x: 0, tray_y: 0, dc_orientation: 0 };
+    const V = (rec, collab) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find, collab);
+
+    ck.eq(V(eq, VALIDATION_COLLABORATORS).length, 0, "collaborateur injecté : équipement conforme → 0 erreur");
+    const muet = V(eq, undefined);
+    ck.eq(muet.length, 1, "collaborateur OUBLIÉ : l'écriture est REFUSÉE (jamais acceptée en silence)");
+    ck(!!muet[0] && muet[0].message.includes("trayGeometry"), "…avec un message qui NOMME le collaborateur manquant");
+    ck.eq(muet[0] && muet[0].path, "tray_item_id", "…rattaché au champ de l'étagère");
+    // le garde-fou ne se déclenche QUE là où la règle s'appliquerait : aucun bruit ailleurs.
+    ck.eq(V({ id: "E2", name: "racké", placement_mode: "rack", rack_id: "R1", rack_u: 5, u_height: 1 }, undefined).length, 0, "équipement NON posé : aucun faux refus sans collaborateur");
+    ck.eq(V({ ...eq, tray_item_id: "INCONNU" }, undefined).filter((e) => e.code !== "ref_missing").length, 0, "étagère introuvable : la règle ne s'applique pas → aucun faux refus");
   }
   });
 
@@ -496,6 +1075,157 @@ module.exports = async () => {
     const batchChildFinder = Validation.DataValidator.buildBatchChildFinder(persistedChildren, lot);
     const effective = batchChildFinder("ipAddresses", "network_id", "net1").map((c) => c.id).sort();
     ck.eq(JSON.stringify(effective), JSON.stringify(["a2"]), "batch-childFinder : a1 déplacé + a3 supprimé + a2 créé → {a2}");
+  }
+  });
+
+  await section("shared : T13 — taille de bâtiment DÉCLARÉE, contrainte de débordement des plans d'étage (doctrine §6.8)", async () => {
+  {
+    const DV = Validation.DataValidator;
+    // Deux sites : « s1 » DIMENSIONNÉ (20 m × 10 m), « s2 » sans taille déclarée.
+    const sites = { s1: { id: "s1", name: "Liège", width_mm: 20000, depth_mm: 10000 }, s2: { id: "s2", name: "Herstal" } };
+    const fetch = (coll, id) => (coll === "sites" ? (sites[id] || null) : null);
+    const floor = (over) => ({ id: "f1", location: "s1", floor: "0", width_mm: 6000, depth_mm: 4000, anchor_x: 0, anchor_y: 0, ...over });
+
+    // ---- OPT-IN : la contrainte ne s'applique QU'AUX bâtiments qu'on a choisi de dimensionner. C'est le
+    // verrou ANTI-RÉTRO-INVALIDATION exigé par la doctrine : ce lot ne doit rendre invalide aucun document.
+    ck.eq(DV.validateRecord("floors", floor({ location: "s2", width_mm: 999999, depth_mm: 999999 }), fetch).length, 0, "site SANS taille déclarée → plan de n'importe quelle dimension accepté (opt-in)");
+    // `location` HISTORIQUE (slug LOCATIONS, aucun enregistrement `sites`) : règle NON APPLICABLE. ⚠ C'est
+    // pour ce cas que `floors.location` n'est PAS déclaré `ref: "sites"` — la FK rejetterait ces documents.
+    ck.eq(DV.validateRecord("floors", floor({ location: "liege", width_mm: 999999, depth_mm: 999999 }), fetch).length, 0, "location HISTORIQUE sans enregistrement sites → aucune erreur (règle non applicable)");
+    ck.eq(DV.validateRecord("floors", floor({ location: "" }), fetch).length, 0, "location vide → aucune erreur");
+    ck.eq(DV.validateRecord("floors", floor({ width_mm: 999999 })).length, 0, "sans fetch → aucun contrôle cross-entité (parité avec les autres V5)");
+
+    // ---- Site DIMENSIONNÉ : ce qui TIENT passe, ce qui DÉBORDE est rejeté, sur le bon chemin.
+    ck.eq(DV.validateRecord("floors", floor(), fetch).length, 0, "plan 6000×4000 dans un bâtiment 20000×10000 → accepté");
+    ck.eq(DV.validateRecord("floors", floor({ width_mm: 20000, depth_mm: 10000 }), fetch).length, 0, "plan EXACTEMENT à la taille du bâtiment → accepté (borne inclusive)");
+    const tropLarge = DV.validateRecord("floors", floor({ width_mm: 20001 }), fetch);
+    ck.eq(tropLarge.length, 1, "plan plus LARGE que son bâtiment → 1 erreur");
+    ck.eq(tropLarge[0].code, "cross_entity", "débordement en largeur → code 'cross_entity'");
+    ck.eq(tropLarge[0].path, "width_mm", "débordement en largeur → path 'width_mm'");
+    const tropProfond = DV.validateRecord("floors", floor({ depth_mm: 10001 }), fetch);
+    ck.eq(tropProfond.length, 1, "plan plus PROFOND que son bâtiment → 1 erreur");
+    ck.eq(tropProfond[0].path, "depth_mm", "débordement en profondeur → path 'depth_mm'");
+
+    // ---- L'ANCRE fait partie de l'emprise : un plan qui tiendrait à l'origine déborde une fois ancré.
+    ck.eq(DV.validateRecord("floors", floor({ width_mm: 15000, anchor_x: 5000 }), fetch).length, 0, "ancre X 5000 + largeur 15000 = 20000 → tient EXACTEMENT");
+    ck.eq(DV.validateRecord("floors", floor({ width_mm: 15000, anchor_x: 5001 }), fetch)[0].path, "width_mm", "ancre X 5001 + largeur 15000 > 20000 → rejeté (l'ancre COMPTE)");
+    ck.eq(DV.validateRecord("floors", floor({ depth_mm: 8000, anchor_y: 2000 }), fetch).length, 0, "ancre Y 2000 + profondeur 8000 = 10000 → tient EXACTEMENT");
+    ck.eq(DV.validateRecord("floors", floor({ depth_mm: 8000, anchor_y: 2001 }), fetch)[0].path, "depth_mm", "ancre Y 2001 + profondeur 8000 > 10000 → rejeté");
+    // Le message CITE les valeurs en cause : une erreur muette n'aide personne à corriger sa saisie.
+    const msg = DV.validateRecord("floors", floor({ width_mm: 15000, anchor_x: 5001 }), fetch)[0].message;
+    ck(msg.indexOf("5001") >= 0 && msg.indexOf("15000") >= 0 && msg.indexOf("20000") >= 0, "le message cite l'ancre, la dimension du plan et la taille du bâtiment  (obtenu : " + msg + ")");
+
+    // ---- V5b : la contrainte tient AUX DEUX BOUTS. Rétrécir un bâtiment sous ses étages est refusé —
+    // sinon on interdirait l'étage trop grand tout en laissant silencieusement rapetisser le bâtiment.
+    const etages = [floor({ id: "f1", width_mm: 18000, depth_mm: 9000 })];
+    const findChildren = (coll, fk, pid) => (coll === "floors" && fk === "location" && pid === "s1") ? etages : [];
+    ck.eq(DV.validateDependents("sites", { id: "s1", width_mm: 20000, depth_mm: 10000 }, findChildren, fetch).length, 0, "V5b : bâtiment assez grand pour ses étages → 0 erreur");
+    const retreci = DV.validateDependents("sites", { id: "s1", width_mm: 12000, depth_mm: 10000 }, findChildren, fetch);
+    ck.eq(retreci.some((e) => e.code === "cross_entity" && e.collection === "floors" && e.id === "f1" && e.path === "width_mm"), true, "V5b : RÉTRÉCIR le bâtiment sous un étage existant → erreur sur l'étage");
+    ck.eq(DV.validateDependents("sites", { id: "s1", width_mm: null, depth_mm: null }, findChildren, fetch).length, 0, "V5b : RETIRER la taille déclarée libère la contrainte (opt-in dans les deux sens)");
+
+    // ---- COUPLE INDISSOCIABLE (invariant V3, même raisonnement que lat/lon) : une demi-dimension ne
+    // décrit aucune emprise — le rendu retomberait sur l'emprise déduite en laissant croire le bâtiment fixé.
+    const site = (over) => DV.normalizeRecord("sites", { id: "sX", name: "X", ...over });
+    ck.eq(DV.validateRecord("sites", site({ width_mm: 20000 })).some((e) => e.code === "invariant" && e.path === "depth_mm"), true, "site : largeur SEULE → invariant");
+    ck.eq(DV.validateRecord("sites", site({ depth_mm: 10000 })).some((e) => e.code === "invariant" && e.path === "depth_mm"), true, "site : profondeur SEULE → invariant");
+    ck.eq(DV.validateRecord("sites", site({ width_mm: 20000, depth_mm: 10000 })).length, 0, "site : couple COMPLET → 0 erreur");
+    ck.eq(DV.validateRecord("sites", site({})).length, 0, "site : aucune dimension → 0 erreur (optionnel)");
+    ck.eq(DV.validateRecord("sites", site({ width_mm: 0, depth_mm: 10000 })).some((e) => e.code === "min" && e.path === "width_mm"), true, "site : largeur 0 → 'min' (une dimension nulle n'est pas une emprise)");
+    const norm = site({});
+    ck(norm.width_mm === null && norm.depth_mm === null, "site : dimensions absentes → null à la normalisation");
+  }
+  });
+
+  await section("shared : borne HAUTE `FieldSpec.max` — appliquée par le moteur, INCLUSIVE (parité stricte avec `min`)", async () => {
+  {
+    const DV = Validation.DataValidator;
+    // RÉGRESSION CORRIGÉE : `sites.lat`/`lon` DÉCLARAIENT `max: 90` / `max: 180` alors que ni l'interface
+    // `FieldSpec` ni le moteur ne connaissaient `max` — la borne haute était INERTE. Une latitude de 200
+    // passait donc à l'écriture (API tierce comprise), et la contrainte se LISAIT pourtant comme appliquée.
+    // Ces tests la VERROUILLENT. ⚠ lat/lon étant INDISSOCIABLES (invariant porté par `lon`), chaque cas
+    // renseigne les DEUX coordonnées : sinon l'invariant du couple polluerait le décompte d'erreurs et on
+    // croirait éprouver la borne alors qu'on éprouverait l'appariement.
+    const site = (lat, lon) => DV.normalizeRecord("sites", { id: "sX", name: "X", lat, lon });
+
+    // ---- Le cas qui passait AVANT le correctif : au-delà de la borne → rejet, bon chemin, bon code.
+    const tropAuNord = DV.validateRecord("sites", site(91, 0));
+    ck.eq(tropAuNord.length, 1, "lat 91 → exactement 1 erreur (la borne haute, et rien d'autre)");
+    ck.eq(tropAuNord[0].path, "lat", "lat 91 → path 'lat'");
+    ck.eq(tropAuNord[0].code, "max", "lat 91 → code 'max'");
+    ck(tropAuNord[0].message.indexOf("≤ 90") >= 0, "lat 91 → le message CITE la borne dépassée (obtenu : " + tropAuNord[0].message + ")");
+    const tropALEst = DV.validateRecord("sites", site(0, 181));
+    ck.eq(tropALEst.length, 1, "lon 181 → exactement 1 erreur");
+    ck.eq(tropALEst[0].path, "lon", "lon 181 → path 'lon'");
+    ck.eq(tropALEst[0].code, "max", "lon 181 → code 'max'");
+
+    // ---- INCLUSIVITÉ : la valeur EXACTEMENT égale à la borne est LÉGITIME (±90 est un pôle, ±180 l'antiméridien),
+    // par parité avec `min` dont le moteur ne rejette que `value < min`.
+    ck.eq(DV.validateRecord("sites", site(90, 0)).length, 0, "lat 90 (borne EXACTE) → accepté : la borne haute est INCLUSIVE");
+    ck.eq(DV.validateRecord("sites", site(0, 180)).length, 0, "lon 180 (borne EXACTE) → accepté");
+    ck.eq(DV.validateRecord("sites", site(-90, -180)).length, 0, "lat -90 / lon -180 (bornes basses EXACTES) → accepté : `min` est inclusive de la même façon");
+    ck.eq(DV.validateRecord("sites", site(50.6326, 5.5797)).length, 0, "coordonnées ordinaires (Liège) → 0 erreur");
+
+    // ---- La borne BASSE reste active : le correctif AJOUTE `max`, il ne remplace pas `min`.
+    ck.eq(DV.validateRecord("sites", site(-91, 0))[0].code, "min", "lat -91 → code 'min' (borne basse intacte)");
+    ck.eq(DV.validateRecord("sites", site(0, -181))[0].code, "min", "lon -181 → code 'min'");
+
+    // ---- NULLABLE : un champ non renseigné ne déclenche AUCUNE borne (sinon la coordonnée deviendrait
+    // obligatoire de fait, ce que la doctrine `docs/placement.md` §6.9 interdit — le GPS est OPTIONNEL).
+    ck.eq(DV.validateRecord("sites", site(null, null)).length, 0, "lat/lon null → aucune borne déclenchée (champ nullable)");
+    const normalise = site(null, null);
+    ck(normalise.lat === null && normalise.lon === null, "lat/lon absents → null à la normalisation (inchangé)");
+
+    // ---- AUCUNE contrainte INVENTÉE ailleurs : `sites.lat`/`lon` sont les SEULS champs à déclarer un `max`
+    // (vérifié sur SPEC_FIELDS). Un champ à `min` seul ne se voit donc poser aucun plafond implicite —
+    // c'est la garantie de NON-RÉGRESSION du lot : activer `max` ne peut rétro-invalider aucun document.
+    ck.eq(DV.validateRecord("racks", { name: "R", u_count: 100000, width_mm: 600, depth: 1000 }).length, 0, "champ à `min` SEUL (racks.u_count) → aucune borne haute implicite");
+    ck.eq(DV.validateRecord("datacenters", { name: "X", width_mm: 9999999 }).length, 0, "champ à `min` SEUL (datacenters.width_mm) → aucun plafond inventé");
+  }
+  });
+
+  await section("shared : `nullable` n'est PAS vérifié à la validation — trou MESURÉ, verrouillé en l'état", async () => {
+  {
+    const DV = Validation.DataValidator;
+    // MÊME FAMILLE que la borne `max` ci-dessus — une propriété de spec qui se LIT comme appliquée sans l'être —
+    // mais l'arbitrage est INVERSE, et c'est le sujet de cette section. `max` a été ACTIVÉE (aucun document ne
+    // pouvait être rétro-invalidé) ; `nullable`, lui, reste INERTE À LA VALIDATION, parce que l'activer
+    // DURCIRAIT une porte d'écriture. Le moteur portait une branche `if (value === null) { if (!nullable) fail }`
+    // INATTEIGNABLE : `isEmpty` absorbe `null` et fait `continue` juste avant. Elle a été retirée ; ces tests
+    // remplacent le code mort par l'attente EXPLICITE du comportement réel, pour qu'un rétablissement futur soit
+    // un CHOIX (un test à réécrire) et non un effet de bord silencieux.
+
+    // ---- Le trou : `null` explicite sur un champ ni `required`, ni `nullable`, ni pourvu d'un `default`.
+    // `racks.width_mm` / `racks.depth` sont exactement ce cas (type "number", `min: 1`, rien d'autre).
+    const baie = (extra) => DV.validateRecord("racks", Object.assign({ id: "r1", name: "R", u_count: 42, width_mm: 600, depth: 1000 }, extra));
+    ck.eq(baie({}).length, 0, "baie complète → 0 erreur (témoin)");
+    ck.eq(baie({ width_mm: null }).length, 0, "width_mm null sur champ NON nullable → ACCEPTÉ (le trou, tel qu'il est aujourd'hui)");
+    ck.eq(baie({ depth: null }).length, 0, "depth null → accepté de la même façon");
+    ck.eq(DV.validateRecord("contacts", { id: "c1", name: "N", email: null }).length, 0, "contacts.email null → accepté (même cas, type string)");
+
+    // ---- Ce que `null` NE contourne PAS : `required` le rattrape, parce qu'il est testé DANS la branche `isEmpty`.
+    // C'est la raison pour laquelle le trou est resté sans conséquence — les champs qui comptent sont requis.
+    const sansNom = baie({ name: null });
+    ck.eq(sansNom.length, 1, "name null (champ REQUIS) → exactement 1 erreur");
+    ck.eq(sansNom[0].code, "required", "name null → code 'required' (et non 'type') : `isEmpty` traite null comme un vide");
+
+    // ---- `nullable` n'est pas pour autant décoratif : il gouverne la NORMALISATION et le type dérivé.
+    const normalisee = DV.normalizeRecord("racks", { id: "r1", name: "R", datacenter_id: undefined, width_mm: undefined });
+    ck(normalisee.datacenter_id === null, "champ nullable + default null → normalisé à null (rôle RÉEL de `nullable`)");
+    ck(normalisee.width_mm === undefined, "champ ni nullable ni pourvu d'un default → laissé TEL QUEL par la normalisation");
+
+    // ---- MESURE du rayon d'action, verrouillée : combien de champs sont dans ce cas. Si ce compte bouge, c'est
+    // qu'une spec a gagné (ou perdu) un champ exposé au trou → le relire et DÉCIDER, plutôt que de le découvrir
+    // en production. Mesuré à 20 le 2026-07-28, pour 0 enregistrement concerné dans les corpus réel et de démo.
+    const exposes = [];
+    for (const [collection, spec] of Object.entries(Validation.COLLECTION_SPECS)) {
+      for (const [field, fieldSpec] of Object.entries(spec.fields || {})) {
+        const aUnDefaut = Object.prototype.hasOwnProperty.call(fieldSpec, "default");
+        if (!fieldSpec.required && !fieldSpec.nullable && !aUnDefaut) exposes.push(collection + "." + field);
+      }
+    }
+    ck.eq(exposes.length, 20, "champs exposés au `null` silencieux (ni required, ni nullable, ni default) — compte VERROUILLÉ");
+    ck(exposes.indexOf("racks.width_mm") >= 0 && exposes.indexOf("contacts.email") >= 0, "les représentants testés ci-dessus font bien partie de l'ensemble mesuré");
   }
   });
 

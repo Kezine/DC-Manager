@@ -1,8 +1,26 @@
 import {
   RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_MOUNT_MARGIN_DEFAULT,
-  U_MM, SIDE_U_STEP, SIDE_POST_INSET, WALL_COL_MIN, TRAY_DEPTH_DEFAULT_MM, TRAY_SHEET_RESERVE_MM, TRAY_GUSSET_CLEARANCE_MM, RACK_EAR_MM, RACK_EAR_STANDOFF_MM,
+  U_MM, SIDE_U_STEP, SIDE_POST_INSET, WALL_COL_MIN, TRAY_SHEET_RESERVE_MM, RACK_EAR_MM, RACK_EAR_STANDOFF_MM,
 } from "../domain/constants";
 import { Normalize } from "../core/Normalize";
+// Géométrie de l'étagère : SOURCE UNIQUE partagée avec la validation (cf. docs/placement.md §6.7).
+// Les méthodes `tray*` ci-dessous n'en sont plus que l'adaptation au REPÈRE DE BAIE (elles gardent
+// leurs signatures : elles ont beaucoup de consommateurs — Resolver3D, DcInteract, DcThreeScene, formulaires).
+import { TrayGeometry } from "../../src-shared/TrayGeometry";
+import type { TrayFitProblem } from "../../src-shared/TrayGeometry";
+import { TrayFrame } from "./TrayFrame";
+import type { TrayPlacement } from "./TrayFrame";
+// POLITIQUE DE PROFONDEUR de baie : SOURCE UNIQUE partagée avec la validation (cf. docs/placement.md §6.14).
+// Les méthodes ci-dessous n'en sont plus que des ALIAS — signatures inchangées, elles ont beaucoup de
+// consommateurs (Resolver3D, DcThreeScene, DcViews2D, formulaires de baie et leurs tests).
+import { RackDepthPolicy } from "../../src-shared/RackDepthPolicy";
+// CONTENEUR SALLE : la baie lui DÉCLARE son placement (position + lacet + demi-empreinte de repli) ;
+// la composition « local baie → local salle » lui appartient (cf. docs/placement.md §6.1).
+import type { ContentPlacement } from "./PlacementFrame";
+// Un posé sur étagère est un boîtier LIBRE : ses cotes propres (et leurs défauts) se lisent là,
+// une seule fois — `TrayGeometry.footprint` lit déjà les mêmes champs pour l'empreinte au plateau.
+import { FreeEquipGeometry } from "./FreeEquipGeometry";
+import type { FreeBox } from "./FreeEquipGeometry";
 
 /** Demi-extents au sol d'une baie. */
 export interface HalfExtents { hx: number; hy: number; }
@@ -47,16 +65,11 @@ export class RackGeometry {
   static physHeight(rack: any): number { const min = RackGeometry.minHeight(rack); return (rack.height_mm != null && rack.height_mm > min) ? rack.height_mm : min; }
   /** Largeur mini = zone 19″ + 2 marges latérales (mm). */
   static minWidth(rack: any): number { return RACK_MOUNT_WIDTH + 2 * RackGeometry.lMargin(rack); }
-  /** Profondeur de cage (montants av↔ar, mm) ; null = profondeur extérieure. */
-  static cageDepth(rack: any): number { return (rack.cage_depth_mm != null && rack.cage_depth_mm > 0) ? Math.max(1, rack.cage_depth_mm | 0) : (rack.depth || RACK_DEPTH_DEFAULT); }
-  /** Profondeur mini = cage. */
-  static minDepth(rack: any): number { return RackGeometry.cageDepth(rack); }
+  /** Profondeur de cage (montants av↔ar, mm) ; non déclarée = profondeur extérieure, à laquelle elle est
+      aussi BORNÉE (une cage ne peut pas déborder de son châssis — cf. `RackDepthPolicy`, §6.14). */
+  static cageDepth(rack: any): number { return RackDepthPolicy.cage(rack); }
   /** Marge AVANT (façade → montants avant, mm), bornée pour que la cage tienne. */
-  static frontMargin(rack: any): number {
-    const d = rack.depth || RACK_DEPTH_DEFAULT, cage = Math.min(d, RackGeometry.cageDepth(rack));
-    const fm = (rack.front_margin_mm != null && rack.front_margin_mm !== "") ? Math.max(0, rack.front_margin_mm | 0) : 0;
-    return Math.min(fm, Math.max(0, d - cage));
-  }
+  static frontMargin(rack: any): number { return RackDepthPolicy.frontMargin(rack); }
   /** Largeur UTILE du corps 19″ (panneau − 2 oreilles standard) — largeur max d'un boîtier racké. */
   static mountBodyWidth(): number { return RACK_MOUNT_WIDTH - 2 * RACK_EAR_MM; }
   /** Largeur RÉELLE du boîtier d'un équipement U : `u_width_mm` (bornée au corps utile), sinon pleine largeur.
@@ -74,37 +87,28 @@ export class RackGeometry {
     return a === "left" ? -(full - w) / 2 : (a === "right" ? (full - w) / 2 : 0);
   }
   /** Porte d'une face (avant/arrière). */
-  static door(rack: any, face: string): any { return (face === "rear") ? rack.door_rear : rack.door_front; }
+  static door(rack: any, face: string): any { return RackDepthPolicy.door(rack, face); }
   /** Profondeur utile supplémentaire apportée par la cavité d'une porte creuse (0 sinon). */
-  static doorExtraDepth(rack: any, face: string): number { const d = RackGeometry.door(rack, face); return (d && d.enabled && d.hollow) ? Math.max(0, d.hollow_mm | 0) : 0; }
+  static doorExtraDepth(rack: any, face: string): number { return RackDepthPolicy.doorExtra(rack, face); }
   /** Vrai si la baie porte au moins une porte (avant ou arrière) activée. */
-  static hasDoor(rack: any): boolean { const f = RackGeometry.door(rack, "front"), r = RackGeometry.door(rack, "rear"); return !!((f && f.enabled) || (r && r.enabled)); }
-  /** Profondeur PHYSIQUE disponible pour un montage ancré au plan AVANT (montants en U / brosse) : du plan de
-      montage avant jusqu'à la face arrière (`profondeur − marge avant`) + cavités des portes av/ar. Marge de
-      sécurité NON retranchée (cf. RACK_DEPTH_SAFETY_MM côté formulaire). */
-  static frontMountAvailDepth(rack: any): number {
-    const d = rack.depth || RACK_DEPTH_DEFAULT;
-    return d - RackGeometry.frontMargin(rack) + RackGeometry.doorExtraDepth(rack, "front") + RackGeometry.doorExtraDepth(rack, "rear");
-  }
+  static hasDoor(rack: any): boolean { return RackDepthPolicy.hasDoor(rack); }
   /** Marge ARRIÈRE (montants arrière → face arrière, mm) — complément de la cage et de la marge avant. */
-  static rearMargin(rack: any): number {
-    const d = rack.depth || RACK_DEPTH_DEFAULT, cage = Math.min(d, RackGeometry.cageDepth(rack));
-    return Math.max(0, d - cage - RackGeometry.frontMargin(rack));
-  }
+  static rearMargin(rack: any): number { return RackDepthPolicy.rearMargin(rack); }
   /** Profondeur PHYSIQUE disponible pour un montage en U selon sa face d'ANCRAGE (avant/arrière) :
-      du plan de montage jusqu'à la face opposée + cavités des portes. Marge de sécurité NON retranchée
-      (cf. RACK_DEPTH_SAFETY_MM côté validation, appliquée derrière porte). Répliqué dans
-      shared/DataValidation (RackDepth) — parité à maintenir. */
+      du plan de montage jusqu'à la face opposée + cavités des portes. Marge de sécurité NON retranchée —
+      c'est ce qui distingue cette cote de `RackDepth.avail` (validation), qui compose les MÊMES primitives
+      partagées (`RackDepthPolicy`) puis retranche `RACK_DEPTH_SAFETY_MM` derrière une porte. Deux
+      politiques de PRUDENCE différentes sur une même géométrie, pas une duplication. */
   static mountAvailDepth(rack: any, side: string): number {
     const d = rack.depth || RACK_DEPTH_DEFAULT;
     const extras = RackGeometry.doorExtraDepth(rack, "front") + RackGeometry.doorExtraDepth(rack, "rear");
     return d - (side === "rear" ? RackGeometry.rearMargin(rack) : RackGeometry.frontMargin(rack)) + extras;
   }
   /** Profondeur PARTAGÉE par deux montages DOS À DOS au même U (baie double) : la cage + cavités —
-      la somme de leurs profondeurs ne doit pas la dépasser. */
+      la somme de leurs profondeurs ne doit pas la dépasser. (Marge de sécurité NON retranchée, cf.
+      `mountAvailDepth` ci-dessus.) */
   static sharedMountDepth(rack: any): number {
-    const d = rack.depth || RACK_DEPTH_DEFAULT, cage = Math.min(d, RackGeometry.cageDepth(rack));
-    return cage + RackGeometry.doorExtraDepth(rack, "front") + RackGeometry.doorExtraDepth(rack, "rear");
+    return RackGeometry.cageDepth(rack) + RackGeometry.doorExtraDepth(rack, "front") + RackGeometry.doorExtraDepth(rack, "rear");
   }
 
   /* ---- au sol ---- */
@@ -114,6 +118,24 @@ export class RackGeometry {
     const w = rack.width_mm || RACK_WIDTH_DEFAULT, d = rack.depth || RACK_DEPTH_DEFAULT;
     const o = Normalize.rackOrientation(rack.orientation);
     return (o === 90 || o === 270) ? { hx: d / 2, hy: w / 2 } : { hx: w / 2, hy: d / 2 };
+  }
+
+  /** Lecture du placement d'une BAIE dans sa salle, à donner à son CONTENEUR — la SALLE, dont
+      `PlacementFrame` compose le repère : c'est la seule chose que le conteneur ait besoin de savoir
+      d'elle (doctrine §6.2). Le nom des champs est PROPRE
+      à la baie (`orientation`, `width_mm`, `depth`) — d'où cette lecture ici plutôt que dans le conteneur,
+      qui n'a pas à connaître ses contenus un par un.
+      ⚠ La demi-empreinte de repli n'est PAS permutée par le lacet (contrairement à `halfExtents`) : c'est la
+      convention du dessin (`DcThreeScene.rackGroup`, `DcViews2D.rackNode`), qui pose une baie sans position
+      à `width/2`, `depth/2` quelle que soit son orientation. */
+  static roomPlacement(rack: any): ContentPlacement {
+    return {
+      x: (rack.dc_x != null) ? rack.dc_x : null,
+      y: (rack.dc_y != null) ? rack.dc_y : null,
+      yawDeg: rack.orientation,
+      halfW: (rack.width_mm || RACK_WIDTH_DEFAULT) / 2,
+      halfD: (rack.depth || RACK_DEPTH_DEFAULT) / 2,
+    };
   }
 
   /* ---- montants (occupation) ---- */
@@ -173,7 +195,7 @@ export class RackGeometry {
     const heightU = RackGeometry.sideEquipHeightU(e);
     const z0 = RackGeometry.uBaseZ(rack) + (Math.max(1, e.side_u | 0) - 1) * U_MM;
     const z1 = z0 + Math.max(U_MM, e.free_h_mm || heightU * U_MM);
-    const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2, cage = Math.min(d, RackGeometry.cageDepth(rack));
+    const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2, cage = RackGeometry.cageDepth(rack);
     const fm = RackGeometry.frontMargin(rack), fp = -hd + fm, rp = -hd + fm + cage;
     const len = Math.min(Math.max(20, e.free_l_mm || cage), cage - 8);
     const front = (e.side_face !== "rear");
@@ -182,15 +204,54 @@ export class RackGeometry {
     return { x0: xs[0], x1: xs[1], y0, y1, z0, z1, front, col, lr, heightU };
   }
 
-  /* ---- tray (étagère) ---- */
+  /** Placement, dans le repère de la BAIE, d'un équipement monté en MARGE LATÉRALE (`side`) ou en
+      PAROI (`wall`) — de quoi le faire dessiner par le rendu COMMUN des boîtiers (`buildEquipBox`),
+      au lieu des boîtes nues qui le représentaient sans nom ni image de façade (doctrine §6.25).
+
+      ⚠ DÉRIVÉ de la boîte existante, jamais re-calculé. Ces deux modes BORNENT les cotes déclarées
+      (largeur ramenée à la colonne, longueur à la cage moins 8 mm, hauteur plancher à 1 U) ; re-dériver
+      ces bornes ici les aurait DUPLIQUÉES, et un rendu nourri des cotes DÉCLARÉES aurait décalé la
+      coque de ses ports — qui sont résolus, eux, sur la boîte BORNÉE. On lit donc l'enveloppe, et on en
+      déduit centre, lacet et cotes.
+
+      Le LACET est celui qui amène la façade du boîtier (−Y local) sur la normale sortante de son
+      montage : `side` regarde toujours ±Y (0° ou 180°), `wall` peut regarder ±X (90° / 270°) quand il
+      est posé « en travers » de sa paroi — d'où la permutation des cotes dans ce cas. */
+  static mountedContentPlacementInRack(rack: any, e: any): { x: number; y: number; yawDeg: number; box: FreeBox; baseZ: number } {
+    const wall = e.placement_mode === "wall";
+    const b = wall ? RackGeometry.wallEquipBoxLocal(rack, e) : RackGeometry.sideEquipBoxLocal(rack, e);
+    // normale sortante : portée par la BOÎTE en paroi (gauche/droite ou fond de marge), déduite de la
+    // face de montage en marge — exactement la distinction que `Resolver3D` fait déjà entre ses deux
+    // branches, reprise ici pour que la coque regarde là où sortent les ports.
+    const n = wall ? b.n : { x: 0, y: b.front ? -1 : 1 };
+    const yawDeg = (n.x > 0) ? 90 : (n.x < 0) ? 270 : (n.y > 0) ? 180 : 0;
+    const etendueX = b.x1 - b.x0, etendueY = b.y1 - b.y0, tourne = (yawDeg === 90 || yawDeg === 270);
+    return {
+      x: (b.x0 + b.x1) / 2,
+      y: (b.y0 + b.y1) / 2,
+      yawDeg,
+      // cotes PROPRES du boîtier : l'enveloppe les permute quand il est tourné d'un quart de tour.
+      box: { w: tourne ? etendueY : etendueX, d: tourne ? etendueX : etendueY, h: b.z1 - b.z0, z: 0 },
+      baseZ: b.z0,
+    };
+  }
+
+  /* ---- tray (étagère) ----
+     La GÉOMÉTRIE du plateau vit dans `src-shared/TrayGeometry` (source unique consommée aussi par la
+     validation partagée). Ce qui reste ici est l'ADAPTATION au repère de baie : où le plateau se trouve
+     en (x, y, z) dans la baie, et de quelle profondeur de cage il dépend. Le PLATEAU utile de
+     `TrayGeometry` est exprimé, lui, dans le repère du plateau. Cf. docs/placement.md §6.7. */
+
+  /** Plateau UTILE de l'étagère (repère plateau) : largeur utilisable, longueur, hauteur libre au-dessus. */
+  private static trayPlank(rack: any, it: any) {
+    return TrayGeometry.plank(RackGeometry.cageDepth(rack), it);
+  }
 
   /** Longueur EFFECTIVE du plateau d'un tray : en "dual" (posée avant + arrière), de PLAN DE FAÇADE à
       PLAN DE FAÇADE (cage + les 2 réserves d'oreilles — le plateau déborde devant chaque rail comme la
       façade des équipements) ; en porte-à-faux, `depth_mm` (borné à la cage). */
   static trayLength(rack: any, it: any): number {
-    const cage = RackGeometry.cageDepth(rack);
-    if (it.tray_type !== "cantilever") return cage + 2 * RACK_EAR_STANDOFF_MM;
-    return Math.min(Math.max(50, it.depth_mm || TRAY_DEPTH_DEFAULT_MM), cage);
+    return TrayGeometry.plankLength(RackGeometry.cageDepth(rack), it);
   }
 
   /** Boîte LOCALE (repère baie) de l'espace UTILE d'un TRAY : le plateau est au BAS de la réservation
@@ -199,7 +260,7 @@ export class RackGeometry {
       TRAY_SHEET_RESERVE_MM, renforts transversaux) au plafond de la réservation (u_height). Sert au
       dessin 3D (espace réservé) et au CONTRÔLE DE PLACEMENT des équipements posés. */
   static trayBoxLocal(rack: any, it: any): any {
-    const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2, cage = Math.min(d, RackGeometry.cageDepth(rack));
+    const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2, cage = RackGeometry.cageDepth(rack);
     const fm = RackGeometry.frontMargin(rack), fp = -hd + fm, rp = -hd + fm + cage;
     const front = it.side !== "rear";
     const len = RackGeometry.trayLength(rack, it);
@@ -211,58 +272,106 @@ export class RackGeometry {
     const zBase = RackGeometry.uBaseZ(rack) + (u - 1) * U_MM;
     const z0 = zBase + TRAY_SHEET_RESERVE_MM;                          // plancher utile = plateau + réserve de tôle
     const zTop = RackGeometry.uBaseZ(rack) + (u - 1 + uh) * U_MM;      // plafond de la réservation
-    const hw = RACK_MOUNT_WIDTH / 2 - RACK_EAR_MM;   // plateau = LARGEUR DU CORPS 19″ (entre rails) — les OREILLES s'accrochent aux rails
+    const hw = TrayGeometry.fullWidth() / 2;   // plateau = LARGEUR DU CORPS 19″ (entre rails) — les OREILLES s'accrochent aux rails
     // garde LATÉRALE réservée aux renforts (porte-à-faux) : les équipements posés n'y empiètent pas ;
     // en « dual » (pas de renforts latéraux), aucune garde. `x0/x1` = plateau PLEIN (dessin), la zone
     // UTILISABLE de pose est [x0+xInset, x1−xInset] (cf. trayEquipBoxLocal / trayEquipFitsWhy).
-    const xInset = (it.tray_type === "cantilever") ? TRAY_GUSSET_CLEARANCE_MM : 0;
+    const xInset = TrayGeometry.gussetInset(it);
     return { x0: -hw, x1: hw, y0, y1, z0, z1: zTop, front, len, tu, zBase, xInset };
   }
 
   /** Empreinte au plateau d'un équipement LIBRE posé (mm) : l'orientation 90/270 permute largeur/longueur.
       Défauts prudents pour dimensions non renseignées (200×200×100). */
   static trayEquipFootprint(eq: any): { w: number; d: number; h: number } {
-    const fw = Math.max(1, eq.free_w_mm || 200), fl = Math.max(1, eq.free_l_mm || 200), fh = Math.max(1, eq.free_h_mm || 100);
-    const o = Normalize.rackOrientation(eq.dc_orientation);
-    return (o === 90 || o === 270) ? { w: fl, d: fw, h: fh } : { w: fw, d: fl, h: fh };
+    const { w, d, h } = TrayGeometry.footprint(eq);
+    return { w, d, h };
+  }
+
+  /** Placement DÉCLARÉ de l'ÉTAGÈRE dans sa baie — ce que le conteneur « étagère » doit savoir de
+      lui-même (cf. `TrayFrame`). Pendant EXACT de `roomPlacement` un cran plus bas dans la chaîne :
+      là, une baie déclare son placement dans sa salle ; ici, une étagère déclare le sien dans sa baie.
+      C'est ce qui permet à `TrayFrame` de ne connaître ni baie, ni enregistrement, ni face. */
+  static trayPlacementInRack(rack: any, tray: any): TrayPlacement {
+    const b = RackGeometry.trayBoxLocal(rack, tray);
+    const usableX0 = b.x0 + b.xInset, usableW = RackGeometry.trayPlank(rack, tray).W;
+    return {
+      // L'origine TOURNE avec l'étagère (rotation de 180°, cf. `TrayFrame` et doctrine §6.24) : bord
+      // utilisable GAUCHE pour une étagère avant, bord utilisable DROIT pour une arrière. `tray_x` se
+      // compte donc toujours depuis la gauche de QUI REGARDE l'étagère.
+      originX: b.front ? usableX0 : usableX0 + usableW,
+      // l'origine des profondeurs est la FACE DE MONTAGE : bord avant pour une étagère avant, bord
+      // arrière pour une étagère arrière — et les profondeurs s'y enfoncent en sens inverse.
+      originY: b.front ? b.y0 : b.y1,
+      dir: b.front ? 1 : -1,
+      plankZ: b.z0,
+    };
+  }
+
+  /** Placement, DANS LE REPÈRE DE LA BAIE, d'un équipement POSÉ sur une étagère — ce que le conteneur
+      SALLE puis le résolveur de ports ont besoin de savoir de lui. Deux conteneurs s'y composent :
+      l'ÉTAGÈRE situe le centre du posé et ajoute son éventuel demi-tour, le posé apporte son lacet
+      PROPRE (`dc_orientation`). C'est cette composition qui manquait : la résolution des ports
+      ignorait purement et simplement le lacet d'un posé (doctrine §6.24).
+      ⚠ Le CENTRE vient de la boîte `TrayGeometry.box`, qui est l'enveloppe alignée sur les axes du
+      posé DÉJÀ tourné (l'empreinte y est permutée à 90/270). Le centre d'une enveloppe alignée est
+      le centre de l'objet : c'est bien autour de lui que le lacet doit tourner. */
+  static trayContentPlacementInRack(rack: any, tray: any, eq: any): ContentPlacement {
+    const placement = RackGeometry.trayPlacementInRack(rack, tray);
+    const box = TrayGeometry.box(eq, RackGeometry.trayPlank(rack, tray));
+    const centre = TrayFrame.pointToRack(placement, { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 });
+    const bx = FreeEquipGeometry.box(eq);
+    return {
+      x: centre.x,
+      y: centre.y,
+      yawDeg: TrayFrame.contentYawDeg(placement, eq.dc_orientation),
+      // demi-empreinte NON permutée, comme partout ailleurs : elle ne sert que de repli à une position
+      // absente, cas qui ne peut pas se produire ici (le centre est toujours calculable).
+      halfW: bx.w / 2,
+      halfD: bx.d / 2,
+    };
   }
 
   /** Boîte LOCALE (repère baie) d'un équipement POSÉ sur une étagère : empreinte à (tray_x, tray_y) sur le
-      plateau (null = centré), posée sur son dessus. tray_y se mesure depuis la FACE DE MONTAGE de l'étagère. */
+      plateau (null = centré), posée sur son dessus. tray_y se mesure depuis la FACE DE MONTAGE de l'étagère.
+      = la boîte PLATEAU de `TrayGeometry.box`, que l'ÉTAGÈRE transporte dans le repère de sa baie
+      (`TrayFrame.rectToRack`). Le transport était écrit ici à la main ; il vit maintenant dans le
+      conteneur, avec les deux autres sites qui le re-dérivaient. Cf. docs/placement.md §6.23. */
   static trayEquipBoxLocal(rack: any, tray: any, eq: any): any {
-    const b = RackGeometry.trayBoxLocal(rack, tray);
-    const fp = RackGeometry.trayEquipFootprint(eq);
-    // zone UTILISABLE = plateau moins la garde des renforts de chaque côté (tray_x se mesure depuis ce bord)
-    const usableLeft = b.x0 + b.xInset, plankW = (b.x1 - b.x0) - 2 * b.xInset, plankL = Math.abs(b.y1 - b.y0);
-    const tx = (eq.tray_x != null) ? eq.tray_x : Math.max(0, (plankW - fp.w) / 2);
-    const ty = (eq.tray_y != null) ? eq.tray_y : Math.max(0, (plankL - fp.d) / 2);
-    const x0 = usableLeft + tx, x1 = x0 + fp.w;
-    // profondeur depuis la face de montage : avant → +Y depuis b.y0 ; arrière → −Y depuis b.y1
-    const y0 = b.front ? b.y0 + ty : b.y1 - ty - fp.d;
-    const y1 = y0 + fp.d;
-    return { x0, x1, y0, y1, z0: b.z0, z1: b.z0 + fp.h, w: fp.w, d: fp.d, h: fp.h, tx, ty };
+    const placement = RackGeometry.trayPlacementInRack(rack, tray);
+    const plank = RackGeometry.trayPlank(rack, tray);
+    const fp = TrayGeometry.footprint(eq);
+    const r = TrayFrame.rectToRack(placement, TrayGeometry.box(eq, plank));
+    return { x0: r.x0, x1: r.x1, y0: r.y0, y1: r.y1, z0: placement.plankZ, z1: placement.plankZ + fp.h, w: fp.w, d: fp.d, h: fp.h };
   }
 
-  /** L'équipement TIENT-il sur l'étagère (et sans chevaucher ses colocataires) ? null = oui, sinon la RAISON.
-      `others` = équipements déjà posés sur la MÊME étagère (« sauf moi-même » à charge de l'appelant).
-      Règles RÉPLIQUÉES dans shared/DataValidation (TrayFit) — parité à maintenir. */
+  /** L'équipement TIENT-il sur l'étagère (et sans chevaucher ses colocataires) ? null = oui, sinon la RAISON
+      (phrase d'aide à la saisie ; la validation partagée, elle, rend un champ + un message de formulaire —
+      MÊME verdict, deux présentations). `others` = équipements déjà posés sur la MÊME étagère
+      (« sauf moi-même » à charge de l'appelant). */
   static trayEquipFitsWhy(rack: any, tray: any, eq: any, others: any[] = []): string | null {
-    const b = RackGeometry.trayBoxLocal(rack, tray);
-    const fp = RackGeometry.trayEquipFootprint(eq);
-    const plankW = (b.x1 - b.x0) - 2 * b.xInset, plankL = Math.abs(b.y1 - b.y0), availH = b.z1 - b.z0;   // largeur UTILISABLE (hors garde renforts)
-    if (availH < 1) return "aucun espace réservé au-dessus du plateau (hauteur réservée = structure)";
-    if (fp.h > availH + 0.5) return "hauteur " + fp.h + " mm > " + Math.round(availH) + " mm réservés au-dessus du plateau";
-    if (fp.w > plankW + 0.5 || fp.d > plankL + 0.5) return "empreinte " + fp.w + " × " + fp.d + " mm > plateau " + Math.round(plankW) + " × " + Math.round(plankL) + " mm";
-    const me = RackGeometry.trayEquipBoxLocal(rack, tray, eq);
-    if (me.tx + fp.w > plankW + 0.5) return "dépasse le plateau en largeur (position " + Math.round(me.tx) + " mm)";
-    if (me.ty + fp.d > plankL + 0.5) return "dépasse le plateau en profondeur (position " + Math.round(me.ty) + " mm)";
-    for (const o of others) {
-      const ob = RackGeometry.trayEquipBoxLocal(rack, tray, o);
-      if (me.x0 < ob.x1 - 0.5 && ob.x0 < me.x1 - 0.5 && me.y0 < ob.y1 - 0.5 && ob.y0 < me.y1 - 0.5) {
-        return "chevauche « " + (o.name || "équipement") + " »";
-      }
+    const plank = RackGeometry.trayPlank(rack, tray);
+    const problem = TrayGeometry.fitProblem(eq, plank);
+    if (problem) return RackGeometry.trayFitReason(problem);
+    // chevauchement : boîtes exprimées dans le repère PLATEAU — commun à tous les colocataires,
+    // donc indépendant de la face et de l'orientation de la baie.
+    const me = TrayGeometry.box(eq, plank);
+    for (const other of others) {
+      if (TrayGeometry.overlap(me, TrayGeometry.box(other, plank))) return "chevauche « " + (other.name || "équipement") + " »";
     }
     return null;
+  }
+
+  /** Traduit un refus géométrique en phrase d'aide à la saisie (français, minuscule initiale : elle
+      s'insère dans un message plus large côté formulaires). */
+  private static trayFitReason(problem: TrayFitProblem): string {
+    const { footprint: fp, plank } = problem;
+    switch (problem.code) {
+      case "no_space": return "aucun espace réservé au-dessus du plateau (hauteur réservée = structure)";
+      case "too_high": return "hauteur " + fp.h + " mm > " + Math.round(plank.availH) + " mm réservés au-dessus du plateau";
+      case "footprint": return "empreinte " + fp.w + " × " + fp.d + " mm > plateau " + Math.round(plank.W) + " × " + Math.round(plank.L) + " mm";
+      case "over_width": return "dépasse le plateau en largeur (position " + Math.round(problem.at) + " mm)";
+      default: return "dépasse le plateau en profondeur (position " + Math.round(problem.at) + " mm)";
+    }
   }
 
   /** REFLOW UNIFORME : dispose `eqs` (dans l'ordre donné) CÔTE À CÔTE sur une seule rangée, centrés en
@@ -272,8 +381,7 @@ export class RackGeometry {
       ou null si l'ensemble NE TIENT PAS sur une rangée (largeur cumulée > plateau, un item trop profond/haut)
       → l'appelant retombe alors sur `trayFindSpot` (placement du seul nouvel item). */
   static trayArrange(rack: any, tray: any, eqs: any[]): Array<{ x: number; y: number }> | null {
-    const b = RackGeometry.trayBoxLocal(rack, tray);
-    const plankW = (b.x1 - b.x0) - 2 * b.xInset, plankL = Math.abs(b.y1 - b.y0), availH = b.z1 - b.z0;
+    const { W: plankW, L: plankL, availH } = RackGeometry.trayPlank(rack, tray);
     const fps = eqs.map((e) => RackGeometry.trayEquipFootprint(e));
     const totalW = fps.reduce((s, f) => s + f.w, 0);
     if (totalW > plankW + 0.5) return null;                                   // ne tient pas côte à côte
@@ -292,20 +400,14 @@ export class RackGeometry {
       profondeur) : balayage grille (gauche→droite puis façade→fond). Renvoie { x, y } (mm, repère plateau,
       tray_x depuis le bord utilisable / tray_y depuis la face) ou null si rien ne tient. */
   static trayFindSpot(rack: any, tray: any, eq: any, others: any[] = []): { x: number; y: number } | null {
-    const b = RackGeometry.trayBoxLocal(rack, tray);
+    const plank = RackGeometry.trayPlank(rack, tray);
+    const plankW = plank.W, plankL = plank.L;   // largeur UTILISABLE (hors garde renforts)
     const fp = RackGeometry.trayEquipFootprint(eq);
-    const plankW = (b.x1 - b.x0) - 2 * b.xInset, plankL = Math.abs(b.y1 - b.y0);   // largeur UTILISABLE (hors garde renforts)
-    if (fp.h > (b.z1 - b.z0) + 0.5 || fp.w > plankW + 0.5 || fp.d > plankL + 0.5) return null;   // ne tient pas
+    if (fp.h > plank.availH + 0.5 || fp.w > plankW + 0.5 || fp.d > plankL + 0.5) return null;   // ne tient pas
     // rangée CÔTE À CÔTE : l'équipement est centré en PROFONDEUR (comme ses colocataires en rangée).
     const y = Math.max(0, (plankL - fp.d) / 2), bandLo = y, bandHi = y + fp.d;
-    // emprises X (repère utilisable) des colocataires dont la bande de profondeur CHEVAUCHE la rangée.
-    const eff = (o: any) => {
-      const f = RackGeometry.trayEquipFootprint(o);
-      const tx = (o.tray_x != null) ? o.tray_x : Math.max(0, (plankW - f.w) / 2);
-      const ty = (o.tray_y != null) ? o.tray_y : Math.max(0, (plankL - f.d) / 2);
-      return { x0: tx, x1: tx + f.w, y0: ty, y1: ty + f.d };
-    };
-    const spans = others.map(eff).filter((r) => r.y0 < bandHi - 0.5 && bandLo < r.y1 - 0.5)
+    // emprises X (repère PLATEAU) des colocataires dont la bande de profondeur CHEVAUCHE la rangée.
+    const spans = others.map((o) => TrayGeometry.box(o, plank)).filter((r) => r.y0 < bandHi - 0.5 && bandLo < r.y1 - 0.5)
       .map((r) => [Math.max(0, r.x0), Math.min(plankW, r.x1)] as [number, number]).sort((a, b) => a[0] - b[0]);
     // plus GRAND intervalle libre ≥ largeur d'empreinte → équipement CENTRÉ dedans (place distribuée autour).
     let best: number | null = null, bestLen = -1, cursor = 0;
@@ -333,7 +435,7 @@ export class RackGeometry {
     const xs = (lr === "right") ? [colInner, colOuter] : [-colOuter, -colInner];
     const z0 = RackGeometry.uBaseZ(rack) + (Math.max(1, uTop | 0) - 1) * U_MM + 1, z1 = z0 + Math.max(1, heightU || SIDE_U_STEP) * U_MM - 2;
     const d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2;
-    const fm = RackGeometry.frontMargin(rack), cage = Math.min(d, RackGeometry.cageDepth(rack));
+    const fm = RackGeometry.frontMargin(rack), cage = RackGeometry.cageDepth(rack);
     const yPlane = (face === "rear") ? (-hd + fm + cage - 2) : (-hd + fm + 2);
     return { x0: xs[0], x1: xs[1], z0, z1, yPlane, front: face !== "rear" };
   }
@@ -342,7 +444,7 @@ export class RackGeometry {
 
   /** Profondeur de marge (mm) le long de laquelle on monte en paroi. */
   static marginDepth(rack: any, margin: string): number {
-    const d = rack.depth || RACK_DEPTH_DEFAULT, cage = Math.min(d, RackGeometry.cageDepth(rack)), fm = RackGeometry.frontMargin(rack);
+    const d = rack.depth || RACK_DEPTH_DEFAULT, cage = RackGeometry.cageDepth(rack), fm = RackGeometry.frontMargin(rack);
     return (margin === "rear") ? Math.max(0, d - fm - cage) : fm;
   }
   /** Montage en PAROI possible dans cette marge ? Profondeur ≥ 1U ET même AUTORISATION que le side-mount

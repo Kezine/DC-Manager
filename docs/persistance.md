@@ -66,6 +66,13 @@ P4 revalidation inverse) → chemin d'autant plus sollicité.
 finder itère l'ensemble, il n'a besoin ni du total ni d'un tri. Divise par 2 le nombre de requêtes par `find` vs
 `list()`. Sûr, sans changement de stockage, et il **survit tel quel** à une refonte relationnelle.
 
+La **cascade résiduelle** d'un `/transact` (`ApiRules.residualCascade`) calcule le lot ENTIER en **un seul** parcours
+de plan (`Cascade.planMany`) au lieu d'un par suppression — c'était d'abord une correction, mais aussi la fin d'un
+coût quadratique : une chaîne de 40 ports supprimée en un lot passait de 2 460 `find` à 120 (mesuré, cf.
+[`placement.md` §6.17](placement.md)). Sur le chemin `/transact` d'aujourd'hui le gain en `find` est nul — les
+lecteurs conscients du lot masquent déjà au plan les entités que le lot supprime — mais il se matérialise dès que
+l'instantané du client est périmé, c'est-à-dire le cas même pour lequel cette cascade existe.
+
 ## Direction si on retouche la DB : RELATIONNEL (pas JSONB)
 
 **Décision (2026-07-10)** : le jour où la couche DB est retouchée, migrer vers un **vrai modèle relationnel** (colonnes

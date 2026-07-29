@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { CAM_PRESETS } from "../shared";
 import { DcThreeBase } from "./DcThreeBase";
 import { PivotBounds } from "../../../geometry/PivotBounds";   // bornage du pivot aux murs virtuels des salles (repli sol infini)
+import { CameraFraming } from "../../../geometry/CameraFraming";   // règle de cadrage PURE (taux de remplissage, limite de zoom, plongée par défaut)
 import { Haptics } from "../../../core/Haptics";
 import { U_MM } from "../../../domain/constants";
 
@@ -86,7 +87,7 @@ export abstract class DcThreeCamera extends DcThreeBase {
     finally { rt.dispose(); this.request(); }
   }
 
-  /** « Localiser » : centre la caméra sur un point monde (mm) et cadre à ~`extent` (mm), en conservant l'angle.
+  /** « Localiser » : centre la caméra sur un point monde (mm) et cadre l'objet de taille `extent` (mm).
       Différé si la scène n'est pas encore construite (appliqué au prochain rendu, après le cadrage du build). */
   focusOn(p: { x: number; y: number; z: number }, extent: number, face?: { az: number; el: number } | null): void {
     this.pendingFocus = { p: { x: p.x, y: p.y, z: p.z }, extent: extent > 0 ? extent : 2000, face: face || null };
@@ -96,9 +97,17 @@ export abstract class DcThreeCamera extends DcThreeBase {
     const f = this.pendingFocus; if (!f || !this.content || !this.camera) return;   // scène pas prête → reste en attente
     this.pendingFocus = null;
     this.target.set(f.p.x, f.p.y, f.p.z);
-    this.baseHalf = Math.max(400, f.extent * 0.7 + 200);
+    // Cadrage délégué à la règle PURE : l'objet occupe `FILL_RATIO` de la vue, plancher = limite de zoom.
+    // L'aspect est lu ici (et pas dans la règle) parce que lui seul dépend du canevas ; en paysage il est inerte.
+    const hostEl = this.host_el, aspect = (hostEl && hostEl.clientHeight > 0) ? hostEl.clientWidth / hostEl.clientHeight : 1;
+    this.baseHalf = CameraFraming.halfExtentFor(f.extent, aspect);
     this.zoom = 1;
-    if (f.face) { this.az = f.face.az; this.el = f.face.el; }   // « se positionner en face » : oriente la caméra vers le front
+    // « Se positionner en face » GAGNE toujours : c'est une intention exprimée sur CET objet (sa façade), on ne
+    // la recouvre pas. Sans elle (câble, waypoint — des POINTS, sans façade), on garde l'azimut courant (« de quel
+    // côté je regarde » reste un choix de l'utilisateur) mais on impose la PLONGÉE par défaut : une caméra restée
+    // rasante ou au zénith rendrait la cible illisible, et rien dans ces cas-là ne dit quelle élévation il voulait.
+    if (f.face) { this.az = f.face.az; this.el = f.face.el; }
+    else this.el = CameraFraming.FOCUS_ELEVATION_RAD;
     this.framedDc = this.builtDc;   // marque comme cadré → un re-rendu (même salle) ne re-cadrera pas
     this.updateCamera(); this.request();
   }
@@ -110,7 +119,12 @@ export abstract class DcThreeCamera extends DcThreeBase {
     this._focusObjs.forEach((o) => this.setFocusHi(o, false));
     this._focusObjs = [];
     if (eqId || portId) {
-      [this.gRacks, this.gFree].forEach((g) => g && g.traverse((o: any) => {
+      // `gFloorDecor` compte AUSSI : les équipements posés sur un ÉTAGE y sont construits par le MÊME
+      // `buildEquipBox` que ceux d'une salle (donc même `pick.type === "occ"`) et leurs ports par le MÊME
+      // `addPortAt` (donc même `pick.type === "port"`). Cette traversée est le SEUL chemin qui les trouve —
+      // il n'y a pas d'objet visé par un raycast pour rattraper l'oubli, contrairement au survol. Sans ce
+      // troisième groupe, « Localiser » un posé d'étage cadrait la caméra sans rien allumer.
+      [this.gRacks, this.gFree, this.gFloorDecor].forEach((g) => g && g.traverse((o: any) => {
         const ud = o.userData; if (!ud) return;
         const p = ud.pick;
         if (eqId && ((p && p.type === "occ" && p.id === eqId) || ud.eqId === eqId)) this._focusObjs.push(o);   // équipement (+ ses plans d'image, tagués eqId)

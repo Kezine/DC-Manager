@@ -213,6 +213,9 @@ export const detail = {
     attached: "Address attached to the VM",
     hostSection: "Hosting host",
     openHost: "Open the host record",
+    // Tooltip of the VM sheet's "Locate in 3D" button: a VM has no existence in the scene, its host is
+    // what gets framed — the button label stays the one used by every "Locate" in the app.
+    locateHost: "Locate the hosting equipment in 3D",
     sourceNode: "Node (source)",
     notMatched: "not matched",
     localSection: "Local enrichments",

@@ -9,6 +9,11 @@ import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { RackGeometry } from "../../../geometry/RackGeometry";
 import { RackDoorGeometry } from "../../../geometry/RackDoorGeometry";
 import { FreeEquipGeometry } from "../../../geometry/FreeEquipGeometry";
+import type { FreeBox } from "../../../geometry/FreeEquipGeometry";
+// CONTENEUR SALLE : `origin()` = centre d'un contenu en local salle. Ce rendu a FIXÉ la convention
+// « position absente ⇒ demi-empreinte » (docs/placement.md §6.12) ; il la LIT désormais au lieu de la réécrire.
+import { PlacementFrame } from "../../../geometry/PlacementFrame";
+import { TrayFrame } from "../../../geometry/TrayFrame";
 import { RackLabelLayout } from "../../../geometry/RackLabelLayout";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
@@ -24,6 +29,7 @@ import type { Vec3 } from "../shared";
 import { DcThreeCamera } from "./DcThreeCamera";
 import { PivotBounds } from "../../../geometry/PivotBounds";   // bornage du pivot d'orbite aux murs virtuels des salles (géométrie pure)
 import { LABEL_STANDOFF_MM } from "./DcThreeBase";   // saillie anti z-fighting partagée (labels d'équipement + de baie)
+import { SceneLayoutSignature } from "./SceneLayoutSignature";   // signature de disposition + décision keep/roomDelta/rebuild (module PUR, testé)
 import type { DcThreeOptions, RoomDesc, SceneCtx, Theme } from "./DcThreeBase";
 
 export type { DcThreeOptions } from "./DcThreeBase";
@@ -111,10 +117,19 @@ export class DcThreeScene extends DcThreeCamera {
 
   protected roomsKey(): string { return this.rooms.map((r) => r.dcId).join(","); }
 
-  /** (Re)calcule `pivotAabb` = boîte englobante XY de l'UNION des salles affichées (leurs 4 coins monde, MÊME
-      transformée que `roomUnder`), lue par la caméra pour BORNER le pivot d'orbite aux murs virtuels. Aucune salle
-      → null (bornage désactivé). Cf. PivotBounds. */
+  /** (Re)calcule `pivotAabb`, la boîte qui BORNE le pivot d'orbite au repli « sol infini » (cf. PivotBounds).
+      Le choix de la boîte suit le REPÈRE de la vue, jamais le NOMBRE d'éléments affichés (docs/placement.md
+      §3 règle 2) :
+        - « Vue étage » → les BORNES MONDE portées par le décor d'étage (bandes de bâtiment × hauteur du monde,
+          donc une vraie boîte 3D) : le monde regardé est le bâtiment, pas la salle active ;
+        - sinon → l'union XY des salles affichées (leurs 4 coins monde, MÊME transformée que `roomUnder`),
+          comportement historique inchangé ; aucune salle → null (bornage désactivé).
+      DISCRIMINANT : la PRÉSENCE d'un décor d'étage. `DcBase.webglCtx` ne le pousse qu'en Vue étage et pose
+      `floorDecor = null` en salle unique — c'est donc une propriété du repère. Un comptage de salles mentirait :
+      la salle unique y est décrite comme un « multi » à UNE salle (piège du lot 8, doctrine §2). */
   protected recomputePivotAabb(): void {
+    const world = this.floorDecor ? this.floorDecor.world : null;
+    if (world) { this.pivotAabb = world; return; }
     this.pivotAabb = this.rooms.length
       ? PivotBounds.unionAabb(this.rooms.map((r) => PivotBounds.rectCorners(r.ox, r.oy, r.o, r.w, r.d)))
       : null;
@@ -330,7 +345,9 @@ export class DcThreeScene extends DcThreeCamera {
     this.scene3d.wallOccupants(r.id, null, null).forEach((e: any) => add(e.id, e.wall_margin !== "rear" ? "front" : "rear"));
     this.store.rackItemsOf(r.id).forEach((it: any) => {
       if (it.kind !== "tray" || it.u == null) return;
-      const eqSide = it.side !== "rear" ? "front" : "rear";
+      // même règle qu'au dessin des posés (`buildRackTrays`) : c'est l'ÉTAGÈRE qui dit de quel côté
+      // regardent ses contenus, donc de quel côté leurs ports se masquent avec la baie.
+      const eqSide = TrayFrame.facesFront(RackGeometry.trayPlacementInRack(r, it)) ? "front" : "rear";
       this.store.equipmentsOnTray(it.id).forEach((e: any) => add(e.id, eqSide));
     });
   }
@@ -340,6 +357,16 @@ export class DcThreeScene extends DcThreeCamera {
   protected addPort(group: THREE.Group, p: any, dcId: string, extra?: any): void {
     if (p.face_x == null || p.face_y == null) return;
     const pt: any = this.resolver.resolvePort3D(p.id, dcId); if (!pt) return;
+    this.addPortAt(group, p, pt, extra);
+  }
+
+  /** DESSIN d'un port à un point DÉJÀ RÉSOLU. Séparé de `addPort` parce que la RÉSOLUTION dépend du
+      CONTENEUR (salle : `resolvePort3D`, scopé par `dcId` ; étage : `resolvePortWorld3D`, composé depuis
+      l'origine monde du conteneur) alors que le DESSIN, lui, n'en dépend pas — cf. `docs/placement.md`
+      §3 règle 1. Les deux conteneurs partagent donc ce rendu au lieu d'en entretenir deux copies, et un
+      port d'étage se comporte comme un port de salle vis-à-vis des bascules d'affichage (couche « port »).
+      `pt` est exprimé dans le repère de `group`. */
+  protected addPortAt(group: THREE.Group, p: any, pt: any, extra?: any): void {
     const cab = this.store.cableOnPort(p.id);
     const col = cab ? this.cableColorHex(cab) : 0x8893a5;
     const csz = this.store.portConnectorSize(p);
@@ -410,13 +437,21 @@ export class DcThreeScene extends DcThreeCamera {
   }
 
   /** Applique de nouvelles options en NE reconstruisant que les catégories affectées (diff). Changement de
-      salle(s) / pas de scène → full build. Un toggle non câblé au moteur WebGL → aucune reconstruction. */
+      salle(s) / de DISPOSITION / pas de scène → full build. Un toggle non câblé au moteur WebGL → aucune
+      reconstruction. La décision structurelle est déléguée à `SceneLayoutSignature` (module PUR, testé) :
+      c'est là que vivent la signature de disposition et l'arbitrage keep/roomDelta/rebuild. */
   applyOptionsDiff(opts: DcThreeOptions, dcId: string | null, ctx?: SceneCtx): void {
     const old = this.opts; this.opts = opts;
     const multi = ctx ? ctx.multi : null;
     const newKey = (multi && multi.rooms.length) ? "M:" + multi.rooms.map((r) => r.dcId).join(",") : (dcId || "∅");
     const wasMulti = !!this.multiInfo;
     const curKey = wasMulti ? "M:" + this.roomsKey() : (this.builtDc || "∅");
+    // SIGNATURES de disposition — calculées AVANT la réaffectation des champs de contexte juste en dessous,
+    // sinon on comparerait la nouvelle disposition à ELLE-MÊME (`this.floorDecor` serait déjà la nouvelle).
+    // L'ensemble des identifiants de salles ne suffit pas : changer l'échelle inter-sites, le mode d'échelle
+    // ou le repère (« Vue étage ») déplace la géométrie SANS toucher à cet ensemble. Cf. SceneLayoutSignature.
+    const curLayout = wasMulti ? SceneLayoutSignature.of(this.rooms, this.floorDecor) : SceneLayoutSignature.none();
+    const newLayout = (multi && multi.rooms.length) ? SceneLayoutSignature.of(multi.rooms, ctx ? ctx.floorDecor : null) : SceneLayoutSignature.none();
     this.multiInfo = multi; this.extraCables = ctx ? ctx.extraCables : []; this.floorDecor = ctx ? ctx.floorDecor : null;   // FIX : sinon décor d'étage périmé sur bascule multi↔mono
     // données périmées (mutation intra-salle : occupant supprimé, etc.) → reconstruction COMPLÈTE, le diff par
     // catégorie ne couvre pas les changements de contenu d'une salle conservée (mêmes salles + mêmes options).
@@ -430,10 +465,10 @@ export class DcThreeScene extends DcThreeCamera {
     const eqColor = old.colorMode !== opts.colorMode;
     const cb = old.showAllCables !== opts.showAllCables || old.cableSplineK !== opts.cableSplineK || old.cablePortNormal !== opts.cablePortNormal || !this.sameSet(old.selCables, opts.selCables);   // cablesOnTop NON inclus : géré en place par setCablesOnTop (pas de reconstruction)
     // OPTIMISATION : multi→multi, seul l'ensemble des salles change (options inchangées) → delta de salles (pas de full rebuild).
-    if (this.content && wasMulti && multi && multi.rooms.length && curKey !== newKey && !(eqVis || eqColor || cb)) {
-      this.applyRoomDelta(multi.rooms); this.request(); return;
-    }
-    if (!this.content || curKey !== newKey) { this.build(dcId); this.request(); return; }
+    const deltaEligible = wasMulti && !!multi && multi.rooms.length > 0 && !(eqVis || eqColor || cb);
+    const action = SceneLayoutSignature.action({ ids: curKey, layout: curLayout }, { ids: newKey, layout: newLayout }, { hasContent: !!this.content, deltaEligible });
+    if (action === "roomDelta") { this.applyRoomDelta(multi!.rooms); this.request(); return; }
+    if (action === "rebuild") { this.build(dcId); this.request(); return; }
     if (eqVis) this.applyLayerVisibility(); if (eqColor) this.applyColorMode();   // visibilité / recoloration en place (jamais de rebuild)
     // équipements LIBRES masqués : ils sont SAUTÉS à la construction (pas de couche de visibilité) → reconstruire le
     // seul groupe des équipements libres (peu coûteux). Distinct de hiddenRacks (visibilité en place).
@@ -451,7 +486,7 @@ export class DcThreeScene extends DcThreeCamera {
   protected rackGroup(r: any): { group: THREE.Group; height: number } {
     const theme = this.theme;
     const w = r.width_mm || RACK_WIDTH_DEFAULT, d = r.depth || RACK_DEPTH_DEFAULT, H = RackGeometry.physHeight(r);
-    const cx = (r.dc_x != null) ? r.dc_x : w / 2, cy = (r.dc_y != null) ? r.dc_y : d / 2;
+    const c = PlacementFrame.origin(RackGeometry.roomPlacement(r)), cx = c.x, cy = c.y;
     const o = Normalize.rackOrientation(r.orientation) * Math.PI / 180;
     const group = new THREE.Group();
     group.position.set(cx, cy, 0);
@@ -490,7 +525,7 @@ export class DcThreeScene extends DcThreeCamera {
     // Convention du moteur SVG (rackInterior3D) : la face AVANT est en y = -hd (−Y).
     // La PROFONDEUR du caisson = mountSpanMm (idem SVG) → sa face extérieure rejoint exactement le port résolu.
     const baseZ = RackGeometry.uBaseZ(r), hd = d / 2;
-    const fmY = RackGeometry.frontMargin(r), cageY = Math.min(d, RackGeometry.cageDepth(r));
+    const fmY = RackGeometry.frontMargin(r), cageY = RackGeometry.cageDepth(r);
     const fpY = -hd + fmY, rpY = -hd + fmY + cageY;   // plan avant (−Y) · plan arrière (+Y)
     const frontExtra = RackGeometry.doorExtraDepth(r, "front"), rearExtra = RackGeometry.doorExtraDepth(r, "rear");
     const occ = this.scene3d.occupantsElev(r.id);
@@ -569,41 +604,45 @@ export class DcThreeScene extends DcThreeCamera {
       }
     });
 
-    // équipements montés en MARGE LATÉRALE (side) et en PAROI (wall) : boîtes pleines (dims libres).
-    this.scene3d.sideOccupants(r.id, null, null).forEach((e: any) => {
-      const eqSide = e.side_face !== "rear" ? "front" : "rear";
-      const b = RackGeometry.sideEquipBoxLocal(r, e);
-      this.localBox(group, b.x0, b.x1, b.y0, b.y1, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
-    });
-    this.scene3d.wallOccupants(r.id, null, null).forEach((e: any) => {
-      const eqSide = e.wall_margin !== "rear" ? "front" : "rear";
-      const b = RackGeometry.wallEquipBoxLocal(r, e);
-      this.localBox(group, b.x0, b.x1, b.y0, b.y1, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
-    });
-    // équipements POSÉS sur les étagères (tray) de la baie : boîtes pleines sur le plateau, cliquables — avec, comme
-    // les occupants U, le NOM sur les deux faces ±Y et l'IMAGE de façade front/rear. Même montage d'offsets que les
-    // occupants U (l.504-505 / 535-536) : label ET image reçoivent la coordonnée de face décalée de 0,5 mm
-    // (yLo − 0,5 / yHi + 0,5), et faceLabel ajoute EN PLUS sa propre saillie FACE_LABEL_STANDOFF_MM (0,5 mm) → le
-    // label finit à 1 mm, l'image à 0,5 mm : aucun z-fighting entre les deux.
+    /* équipements montés en MARGE LATÉRALE (side) et en PAROI (wall).
+       Ils étaient dessinés en boîtes NUES : ni nom, ni image de façade, ni repère d'orientation, alors
+       que leurs ports étaient bel et bien résolus — des connecteurs sur un volume gris anonyme. Ils
+       passent maintenant par le rendu COMMUN des boîtiers (§6.25), qui leur apporte les trois.
+       ⚠ La boîte est FOURNIE, pas déduite : ces deux modes BORNENT les cotes déclarées (largeur à leur
+       colonne, longueur à la cage) et c'est la boîte BORNÉE que les ports utilisent. Dessiner les cotes
+       déclarées ferait glisser la coque hors de ses propres connecteurs. */
+    const buildMounted = (e: any, eqSide: string) => {
+      const m = RackGeometry.mountedContentPlacementInRack(r, e);
+      this.buildEquipBox(group, e, m.x, m.y, m.baseZ, { yawDeg: m.yawDeg, elevation: 0, extra: { eqSide }, box: m.box });
+    };
+    this.scene3d.sideOccupants(r.id, null, null).forEach((e: any) => buildMounted(e, e.side_face !== "rear" ? "front" : "rear"));
+    this.scene3d.wallOccupants(r.id, null, null).forEach((e: any) => buildMounted(e, e.wall_margin !== "rear" ? "front" : "rear"));
+    /* équipements POSÉS sur les étagères (tray) de la baie.
+       Un posé n'est rien d'autre qu'un BOÎTIER LIBRE juché sur un plateau : il passe donc par le MÊME
+       `buildEquipBox` que les équipements libres d'une salle et que ceux d'un étage (principe n°3), au
+       lieu du rendu parallèle qui vivait ici.
+       ⚠ CE QUE ÇA CORRIGE (§6.24) : l'ancien rendu dessinait l'ENVELOPPE alignée sur les axes et plaquait
+       l'image de façade sur ses faces ±Y, sans jamais consulter `dc_orientation`. Un posé tourné était donc
+       dessiné droit alors que ses ports, eux, suivent désormais son lacet — la boîte et les connecteurs
+       auraient divergé. Ici la boîte est TOURNÉE du même lacet effectif que la résolution
+       (`trayContentPlacementInRack`), et ses UV de face dérivent de `FreeEquipGeometry.faceFraction`, la source
+       de vérité qui place aussi les ports : image et connecteurs coïncident par CONSTRUCTION, sur les
+       six faces et plus seulement sur deux. */
     this.store.rackItemsOf(r.id).forEach((it: any) => {
       if (it.kind !== "tray" || it.u == null) return;
-      const eqSide = it.side !== "rear" ? "front" : "rear";
+      // C'est l'ÉTAGÈRE qui sait vers où regardent ses contenus (`TrayFrame`) : cette vue relisait
+      // `it.side` pour le re-déduire, comme le résolveur de ports et la géométrie de baie le faisaient
+      // chacun de son côté. Calculé UNE fois par étagère, pas par équipement posé.
+      const trayPlacementInRack = RackGeometry.trayPlacementInRack(r, it);
+      // le côté de MASQUAGE reste celui de l'ÉTAGÈRE, jamais le lacet du posé : « masquer l'avant »
+      // parle de la face de baie qu'on regarde, pas de l'orientation d'un boîtier.
+      const eqSide = TrayFrame.facesFront(trayPlacementInRack) ? "front" : "rear";
       this.store.equipmentsOnTray(it.id).forEach((e: any) => {
-        const b = RackGeometry.trayEquipBoxLocal(r, it, e);
-        const yLo = Math.min(b.y0, b.y1), yHi = Math.max(b.y0, b.y1);
-        this.localBox(group, b.x0, b.x1, yLo, yHi, b.z0, b.z1, this.occColor({ kind: "eq", id: e.id }), { type: "occ", kind: "eq", id: e.id }, { eqSide });
-        const bw = b.x1 - b.x0, bh = b.z1 - b.z0;
-        const xc = (b.x0 + b.x1) / 2, zc = (b.z0 + b.z1) / 2;
-        const front = it.side !== "rear";   // étagère côté avant → la FACE AVANT du device regarde −Y
-        if (e.name) {
-          this.faceLabel(group, e.name, xc, yLo - 0.5, zc, bw * 0.94, bh * 0.9, true, { eqSide });    // face −Y (avant)
-          this.faceLabel(group, e.name, xc, yHi + 0.5, zc, bw * 0.94, bh * 0.9, false, { eqSide });   // face +Y (arrière)
-        }
-        // Équipement LIBRE sur étagère : pas d'oreilles 19″ → largeur = corps, aucun trim.
-        const imgLo = this.host.faceImageUrl?.(e.id, front ? "front" : "rear");
-        const imgHi = this.host.faceImageUrl?.(e.id, front ? "rear" : "front");
-        if (imgLo) this.faceImagePlane(group, imgLo.url, xc, yLo - 0.5, zc, bw, bh, true, { layer: "faceImage", eqSide, eqId: e.id });
-        if (imgHi) this.faceImagePlane(group, imgHi.url, xc, yHi + 0.5, zc, bw, bh, false, { layer: "faceImage", eqSide, eqId: e.id });
+        const posed = RackGeometry.trayContentPlacementInRack(r, it, e);
+        // socle = le DESSUS DU PLATEAU (et non `dc_z` : un posé repose sur son étagère) — même base Z
+        // que celle donnée à `faceLocal` par le résolveur de ports.
+        this.buildEquipBox(group, e, posed.x as number, posed.y as number, trayPlacementInRack.plankZ,
+          { yawDeg: posed.yawDeg, elevation: 0, extra: { eqSide } });
       });
     });
 
@@ -1134,11 +1173,31 @@ export class DcThreeScene extends DcThreeCamera {
       repère d'orientation, même libellé — seule l'ORIGINE change (principe n°3, plutôt qu'un second rendu
       parallèle qui aurait divergé). La hauteur propre de l'équipement (`box().z` = `dc_z`) reste appliquée en
       LOCAL, donc `originZ` ne porte que le socle (0 en salle, Z du niveau sur un étage).
-      Les PORTS restent à la charge de l'appelant : ils ne se résolvent que dans une salle (Resolver3D est
-      scopé par dcId), un équipement d'étage n'en a donc pas. */
-  protected buildEquipBox(root: THREE.Group, e: any, cx: number, cy: number, originZ: number): void {
-    const b = FreeEquipGeometry.box(e);
-    const o = Normalize.rackOrientation(e.dc_orientation) * Math.PI / 180;
+      Les PORTS restent à la charge de l'appelant, parce que leur RÉSOLUTION dépend du conteneur alors que
+      cette boîte n'en dépend pas : en salle `resolvePort3D` (scopé par `dcId`), sur un étage
+      `resolvePortWorld3D` (composé depuis l'origine monde du conteneur). Les deux appellent ensuite le
+      MÊME `addPortAt`.
+
+      `opts` ouvre ce rendu à un TROISIÈME conteneur, l'ÉTAGÈRE (§6.24), sans le dupliquer :
+      • `yawDeg` — lacet EFFECTIF dans le repère du parent, quand il ne se lit pas sur l'équipement seul.
+        Sur une étagère il vaut `dc_orientation` PLUS le demi-tour éventuel de l'étagère
+        (`TrayFrame.contentYawDeg`) : c'est ce qui fait coïncider la boîte DESSINÉE avec les ports RÉSOLUS,
+        les deux composant désormais le même lacet.
+      • `elevation` — hauteur propre au-dessus de `originZ`, quand `dc_z` ne s'applique pas. Un posé
+        REPOSE sur son plateau : son élévation est nulle, son socle est le plateau.
+      • `extra` — userData de couche/côté (`eqSide`) à tamponner sur tous les meshes produits, pour que
+        le posé se masque avec la face de baie qui le porte (`hideAv`/`hideAr`).
+      • `box` — cotes DESSINÉES, quand elles ne sont pas les cotes déclarées. Les montages en MARGE et
+        en PAROI (§6.25) BORNENT la largeur à leur colonne et la longueur à la cage : c'est cette boîte
+        bornée que les ports utilisent, donc la seule qu'on ait le droit de dessiner. Les UV de face en
+        dérivent aussi (`faceFractionIn`), sans quoi l'image glisserait sur la coque. */
+  protected buildEquipBox(root: THREE.Group, e: any, cx: number, cy: number, originZ: number,
+                          opts?: { yawDeg?: number; elevation?: number; extra?: any; box?: FreeBox }): void {
+    const b = (opts && opts.box) ? opts.box : FreeEquipGeometry.box(e);
+    const yawDeg = (opts && opts.yawDeg != null) ? opts.yawDeg : e.dc_orientation;
+    const elevation = (opts && opts.elevation != null) ? opts.elevation : b.z;
+    const extra = opts && opts.extra;
+    const o = Normalize.rackOrientation(yawDeg) * Math.PI / 180;
     const color = this.occColor({ kind: "eq", id: e.id });
     const grp = new THREE.Group(); grp.position.set(cx, cy, originZ); grp.rotation.z = o; root.add(grp);
     const geo = new THREE.BoxGeometry(b.w, b.d, b.h);
@@ -1154,7 +1213,7 @@ export class DcThreeScene extends DcThreeCamera {
       for (let i = 0; i < pos.count; i++) {
         const face = FACE_BY_MAT[Math.floor(i / 4)];
         // géométrie centrée (z ∈ [−h/2, +h/2]) → repère faceLocal (base z0 = 0, z ∈ [0, h])
-        const f = FreeEquipGeometry.faceFraction(e, face, pos.getX(i), pos.getY(i), pos.getZ(i) + b.h / 2, 0);
+        const f = FreeEquipGeometry.faceFractionIn(b, face, pos.getX(i), pos.getY(i), pos.getZ(i) + b.h / 2, 0);
         uv.setXY(i, f.fx, 1 - f.fy);   // uv.y = 1 ↔ HAUT de l'image (flipY par défaut du TextureLoader)
       }
       uv.needsUpdate = true;
@@ -1168,15 +1227,15 @@ export class DcThreeScene extends DcThreeCamera {
       return new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 });
     });
     const mesh = new THREE.Mesh(geo, mats);
-    mesh.position.set(0, 0, b.z + b.h / 2);
-    mesh.userData = { pick: { type: "occ", kind: "eq", id: e.id } };   // même traitement que les occupants (détail + survol)
+    mesh.position.set(0, 0, elevation + b.h / 2);
+    mesh.userData = Object.assign({ pick: { type: "occ", kind: "eq", id: e.id } }, extra);   // même traitement que les occupants (détail + survol)
     grp.add(mesh);
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
-    edges.position.copy(mesh.position); grp.add(edges);
+    edges.position.copy(mesh.position); if (extra) edges.userData = Object.assign({}, extra); grp.add(edges);
     // Mise en évidence de la FACE AVANT (−Y local) : ses 4 ARÊTES à l'accent → repère d'orientation. INUTILE quand une
     // image de face avant est posée (elle indique déjà l'avant). Couche "orient" (basculable via showOrientMarks).
     if (!hasFrontImg) {
-      const hw = b.w / 2, yF = -b.d / 2 - 1, z0 = b.z, z1 = b.z + b.h;   // yF : 1 mm en saillie → pas de z-fighting avec les arêtes noires
+      const hw = b.w / 2, yF = -b.d / 2 - 1, z0 = elevation, z1 = elevation + b.h;   // yF : 1 mm en saillie → pas de z-fighting avec les arêtes noires
       const fg = new THREE.BufferGeometry();
       fg.setAttribute("position", new THREE.Float32BufferAttribute([
         -hw, yF, z0, hw, yF, z0,   // arête basse
@@ -1185,13 +1244,13 @@ export class DcThreeScene extends DcThreeCamera {
         hw, yF, z0, hw, yF, z1,    // arête droite
       ], 3));
       const frontEdges = new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: this.theme.front }));
-      frontEdges.userData = { layer: "orient" };
+      frontEdges.userData = Object.assign({ layer: "orient" }, extra);
       grp.add(frontEdges);
     }
     // nom posé à plat SUR la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild. On passe
     // la face elle-même (−b.d/2) : la saillie anti z-fighting (1 mm EN SAILLIE devant la face) est désormais bakée
     // par faceLabel le long de la normale. (Auparavant −b.d/2 + 1 posait le label 1 mm À L'INTÉRIEUR — mauvais sens.)
-    if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2, b.z + b.h / 2, b.w * 0.9, b.h * 0.9, true);
+    if (e.name) this.faceLabel(grp, e.name, 0, -b.d / 2, elevation + b.h / 2, b.w * 0.9, b.h * 0.9, true, extra);
   }
 
   /** Humanoïde procédural (~1,75 m) = repère d'échelle. Primitives Three.js (autonome, hors-ligne) ; posé debout
@@ -1328,7 +1387,10 @@ export class DcThreeScene extends DcThreeCamera {
 
 
   /** Décor MULTI-SALLES (repère monde) : plans d'étage (rect + grille + bord de réf + cases bloquées),
-      OOB (anneau + mât), étiquettes étage/bâtiment (sprites) + séparateurs. Données pré-calculées par DcBase. */
+      OOB (anneau + mât), équipements posés, étiquettes étage/bâtiment (sprites). Données pré-calculées
+      par DcBase. Le plan SÉPARATEUR vertical entre bâtiments a été retiré : décor hérité du rangement
+      linéaire des sites, il n'avait plus de sens une fois les bâtiments répartis en DEUX dimensions
+      par leur position réelle (doctrine §6.9), où il coupait le monde à un endroit arbitraire. */
   protected buildFloorDecor(root: THREE.Group): void {
     const fd = this.floorDecor, theme = this.theme; if (!fd) return;
     fd.planes.forEach((fp) => {
@@ -1365,26 +1427,21 @@ export class DcThreeScene extends DcThreeCamera {
       if (this.opts.hiddenEquips && this.opts.hiddenEquips.has(fe.id)) return;
       const e: any = this.store.get("equipments", fe.id); if (!e) return;
       this.buildEquipBox(root, e, fe.x, fe.y, fe.baseZ);
+      // PORTS de l'équipement d'étage. `resolvePort3D` ne peut PAS les résoudre (scopé par SALLE, un
+      // équipement d'étage n'en a pas) : on passe par le pendant SANS SALLE du résolveur, qui compose la
+      // chaîne conteneur → face et rend du MONDE — le repère de `root` pour ce décor. La vue ne calcule
+      // donc AUCUNE transformée elle-même (docs/placement.md §3 règle 4). `fe.baseZ` ne porte que le socle
+      // du niveau : la hauteur propre (`dc_z`) est ajoutée par le résolveur, comme la boîte l'ajoute au
+      // dessin — d'où une seule et même convention des deux côtés.
+      this.store.portsOf(e.id).forEach((p: any) => {
+        if (p.face_x == null || p.face_y == null) return;   // même garde que `addPort` (port sans position de face)
+        const pt = this.resolver.resolvePortWorld3D(p.id, fe.x, fe.y, fe.baseZ);
+        if (pt) this.addPortAt(root, p, pt);
+      });
     });
-    fd.levels.forEach((l) => this.addLabelSprite(root, l.label, l.x, l.y, l.z));
-    fd.buildings.forEach((b) => {
-      this.addLabelSprite(root, b.label, b.x, b.y, b.z);
-      if (b.sepX != null) this.buildBuildingSep(root, b.sepX, fd.maxD, fd.topZ);
-    });
-  }
-
-  /** Séparateur inter-bâtiment : plan vertical translucide ACCENT + contour POINTILLÉ accent — réplique du
-      `.dc-bldg-sep` SVG de référence (fill accent ~0.04, stroke accent dash 10/7). */
-  protected buildBuildingSep(root: THREE.Group, x: number, maxD: number, topZ: number): void {
-    const col = this.theme.front;
-    const fg = new THREE.BufferGeometry();
-    fg.setAttribute("position", new THREE.Float32BufferAttribute([x, 0, 0, x, maxD, 0, x, maxD, topZ, x, 0, topZ], 3));
-    fg.setIndex([0, 1, 2, 0, 2, 3]);
-    const plane = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.05, side: THREE.DoubleSide, depthWrite: false }));
-    root.add(plane);
-    const loop = [new THREE.Vector3(x, 0, 0), new THREE.Vector3(x, maxD, 0), new THREE.Vector3(x, maxD, topZ), new THREE.Vector3(x, 0, topZ), new THREE.Vector3(x, 0, 0)];
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(loop), new THREE.LineDashedMaterial({ color: col, transparent: true, opacity: 0.7, depthWrite: false, dashSize: 600, gapSize: 420 }));
-    line.computeLineDistances(); root.add(line);
+    // Étiquettes d'ÉTAGE : une par plan dessiné, donc répétées sur chaque site (cf. `FloorDecor.floorLabels`).
+    fd.floorLabels.forEach((l) => this.addLabelSprite(root, l.label, l.x, l.y, l.z));
+    fd.buildings.forEach((b) => this.addLabelSprite(root, b.label, b.x, b.y, b.z));
   }
 
   /** Étiquette texte en BILLBOARD (sprite face caméra), au-dessus de tout (depthTest off). */
@@ -1516,6 +1573,11 @@ export class DcThreeScene extends DcThreeCamera {
     // on évite les groupes de CÂBLES (couleurs réseau, indépendantes du thème).
     [this.gDecor, this.gRacks, this.gFree, this.gWaypoints, this.gFloorDecor].forEach((grp) => grp && grp.traverse((o: any) => { const m = o.material; if (!m) return; (Array.isArray(m) ? m : [m]).forEach(apply); }));
     this.theme = neu;
+    // Le marqueur de PIVOT n'est PAS un matériau remappable : c'est un sprite TEXTURÉ, posé sous `scene`
+    // (donc hors des groupes parcourus ci-dessus), et sa couleur vit dans les pixels de la texture. On le
+    // rejoue explicitement — APRÈS l'affectation du nouveau thème, dont `pivotTexture()` dérive sa clé de
+    // cache. Sans cet appel, il resterait à l'ancienne encre jusqu'à la prochaine manipulation de caméra.
+    this.updatePivot();
     this.request();
   }
 

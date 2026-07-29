@@ -28,8 +28,8 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
    identifiable et est (ou pourra être) réutilisé/testé séparément, il sort dans un
    module dédié — on ne l'empile PAS dans un fichier/une classe déjà gros (« monolithe »).
    Le couplage à un contexte (vue, store, serveur…) passe par une **interface/des
-   paramètres injectés** (cf. `PositioningTool` ↔ `PositioningHost`, ou les modules
-   `src-shared/` auto-suffisants), pas par des imports en dur. Vaut PARTOUT : front, back,
+   paramètres injectés** (cf. `PositioningTool` ↔ `PositioningHost`, ou `PowerAnalysis`
+   qui REÇOIT son store), pas par des imports en dur. Vaut PARTOUT : front, back,
    géométrie, vues, données — pas seulement la vue Datacenter.
 3. **Favoriser la RÉUTILISATION plutôt que la duplication.** Avant de copier une
    règle, une constante ou un type, se demander où il devrait vivre UNE seule fois.
@@ -104,6 +104,15 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
       pattern **`SearchPop`** (recherche-popover UNIFIÉE sur TOUS les éléments, le **clic** sur un
       résultat sélectionne/lie), comme la vue 3D et la page Certificats — **pas** un `<select>` par
       famille suivi d'une liste. La recherche traverse l'ensemble des éléments, pas une famille à la fois.
+      Dans un **FORMULAIRE**, où le champ doit AFFICHER sa valeur, ne pas gréer `SearchPop` à la main :
+      utiliser **`FormControls.entityPicker(options, value)`** (`ui/EntityPicker`), qui le compose et y
+      ajoute la valeur courante, l'effacement et l'état vide. Il prend **exactement la même liste
+      d'options que `select(...)`** — donc la règle métier qui la construit (filtre par famille,
+      contrainte de conteneur, options `disabled`, tri, `keepId`…) ne bouge PAS : on remplace le
+      contrôle, jamais la règle. Le filtrage par la saisie et les règles de valeur sont, eux, dans le
+      module pur `core/OptionSearch` (testé). ⚠ **Distinguer entité et ÉNUMÉRATION** : un statut, une
+      famille, une orientation, un mode de placement restent des `<select>` — `entityPicker` est pour
+      les objets du modèle, dont la liste est longue, croissante et à libellés composés.
     Ces primitives portent le thème, l'accessibilité et le comportement clavier ; les réimplémenter
     diverge silencieusement du reste de l'app (dette repérée sur la feature `interventions/`, à résorber).
 
@@ -129,7 +138,7 @@ src-shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) �
   Schema.ts     #   liste canonique des collections + champs tableau + normSearch + page size
   DocumentChangeset.ts #   type + helpers du changeset (rechargement granulaire)
   DataValidation.ts #   normalisation + validation des enregistrements (spec déclarative par collection)
-  Cascade.ts    #   cascade de suppression (intégrité référentielle en DELETE) — Store (fichier) + serveur (API)
+  Cascade.ts    #   cascade de suppression RÉCURSIVE et MULTI-RACINES (intégrité référentielle en DELETE) — Store (fichier) + serveur (API/transact)
   PowerAnalysis.ts #   moteur d'analyse énergie (graphe source→sink, charges, warnings codes+params) — store injecté par interface
 docs/           # documentation d'architecture (voir index)
 Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compilés
@@ -250,9 +259,73 @@ moteur métier pur, découplé du store (interface injectée) et de la présenta
 **Contraintes techniques** (deux builds différents) :
 - `src-shared/` ne contient que du **TS PUR** : aucun accès au DOM (front) ni à Node (back).
 - Chaque côté COMPILE la source partagée : le front via son `include` (résolution
-  *bundler*, imports SANS extension) ; le serveur via son `include` (NodeNext, imports
-  AVEC extension `.js`). Pour rester compatible des deux, **les fichiers de `src-shared/`
-  sont auto-suffisants** (pas d'import relatif entre eux) — on évite ainsi le conflit
-  d'extensions de module. Une dépendance entre concepts partagés se passe par
-  **injection** (paramètre) plutôt que par import.
+  *bundler*) ; le serveur via son `include` (NodeNext). Les imports depuis `src-client/`
+  vers `src-shared/` s'écrivent SANS extension, comme partout dans le front.
+
+> ⚠️ **DEUX RÈGLES DISTINCTES gouvernent les imports de `src-shared/`, et elles ne sont pas de
+> même nature.** La formulation historique — « les fichiers de `src-shared/` sont
+> **auto-suffisants** » — les CONFONDAIT en une seule phrase, justifiant la première (permanente)
+> par la contrainte de build de la seconde (un simple réglage webpack). Quand cette contrainte est
+> tombée, la phrase entière a paru tomber avec elle. C'est ce mélange qui a fait durer une
+> duplication inutile pendant cinq lots.
+
+**(1) ISOLEMENT DU DOSSIER — règle PERMANENTE.** Un fichier de `src-shared/` n'importe **RIEN hors
+de `src-shared/`** : ni `src-client/`, ni `src-server/`, ni aucun **paquet npm** ou module natif
+Node. Aucune configuration ne la lèvera, parce qu'elle n'est pas un artefact de build mais la
+raison d'être du dossier : importer du client ferait embarquer du **DOM** dans le build SERVEUR,
+importer du serveur ferait embarquer du **Node** dans le FRONT, et un paquet npm n'est pas garanti
+présent des deux côtés. Surtout, l'effet est **TRANSITIF**, donc **invisible à la relecture** : le
+module importé peut être pur *aujourd'hui* et cesser de l'être demain — la violation apparaîtrait
+sans que personne n'ait touché à `src-shared/`. C'est la **raison de fond** de tout ce qui précède ;
+la règle « TS PUR » ci-dessus ne parle, elle, que du **contenu** d'un fichier, et on peut la
+respecter à la lettre en violant celle-ci.
+- ✅ **Vérifiée MÉCANIQUEMENT** (plus seulement affirmée) par la section
+  *« shared : ISOLEMENT du dossier »* de `Tests/modules/test-shared-validation.js` : elle relit les
+  **SOURCES** `src-shared/**/*.ts` — pas le compilé, car c'est le spécificateur ÉCRIT qu'on contrôle —
+  et échoue en **nommant le fichier, la ligne et le spécificateur** fautifs. Elle couvre toutes les
+  formes (`import … from`, `import "x"`, `import type`, `export … from`, `export * as N from`,
+  `import()` dynamique, `require`) via le **parseur TypeScript**, donc sans faux positif sur les
+  commentaires — ces fichiers documentent leurs propres imports en prose. Un contrôle de
+  discrimination, dans la même section, prouve que le détecteur voit bien chacune de ces formes.
+
+**(2) IMPORTS ENTRE FICHIERS PARTAGÉS — AUTORISÉS** (levés au lot 7, cf. `docs/placement.md` §6.7).
+Artefact de build, et non règle de conception : c'était un défaut de configuration webpack, mesuré
+puis corrigé.
+- ✅ **Un import relatif ENTRE fichiers de `src-shared/` est AUTORISÉ** — à une condition
+  IMPÉRATIVE : le spécificateur porte l'extension **`.js`**, `import { X } from "./Foo.js"`
+  pour un fichier `Foo.ts`. C'est la SEULE forme que les trois chaînes acceptent :
+  **NodeNext l'EXIGE** (le serveur émet du JS, le spécificateur doit désigner le fichier
+  ÉMIS), la résolution *bundler* l'accepte, et webpack l'accepte grâce à l'alias ci-dessous.
+  Un import SANS extension entre fichiers partagés compile côté front puis **casse le build
+  serveur** — c'est la faute à ne pas commettre. La même section de test que la règle (1)
+  **vérifie aussi cette extension** : une convention non tenue par une machine finit toujours
+  par ne plus être tenue.
+- ⚠ **Pourquoi l'extension, EXACTEMENT** (mesuré le 2026-07-27, pas déduit — cette section a
+  longtemps affirmé le contraire sans l'avoir testé). Un import relatif `./Foo.js` entre
+  fichiers partagés est accepté par **`tsc` des DEUX côtés** (TypeScript 5.9 ramène le
+  spécificateur `.js` sur le `.ts`, en résolution *bundler* comme en NodeNext). Le seul
+  point de rupture était **webpack** : sa résolution AJOUTE les extensions au lieu de les
+  substituer (`Can't resolve './Foo.js'` — il essaie `./Foo.js`, `./Foo.js.ts`,
+  `./Foo.js.js`). D'où le `resolve.extensionAlias: { ".js": [".ts", ".js"] }` de
+  `webpack.config.js`, qui lui apprend à résoudre un spécificateur `.js` sur le `.ts`
+  correspondant. **Ne pas retirer cette ligne** : les trois chaînes en dépendent.
+- L'**injection** d'un concept partagé dans un autre (paramètre plutôt qu'import) reste un
+  patron légitime, mais elle relève désormais du **choix de conception**, plus de la
+  contrainte de build : `PowerAnalysis` reçoit son store et `DataValidation` reçoit
+  `TrayGeometry` (`ValidationCollaborators`) parce que ça découple, pas parce que l'import
+  serait impossible.
+- ⚠ **LES DEUX PATRONS COEXISTENT dans `DataValidation.ts`, et c'est VOULU** — ne pas
+  uniformiser à la volée. `RackDepthPolicy` (politique de profondeur de baie) y est
+  **IMPORTÉ** (`import { RackDepthPolicy } from "./RackDepthPolicy.js"`) : rien ne demande de
+  le découpler, et lui appliquer l'injection aurait coûté onze points d'appel et un garde-fou
+  d'échec fermé pour un bénéfice nul. `TrayGeometry` (géométrie d'étagère) y reste **INJECTÉ**
+  parce que le découplage se défend sur son propre mérite — son retrait est un lot à part,
+  possible et non demandé. L'un se lit à l'import, l'autre au point d'appel.
+- ⚠ **Une doc qui dit « auto-suffisant » fait DUPLIQUER.** Le seul vrai danger de la
+  contrainte périmée n'est pas qu'elle vieillisse : c'est qu'un contributeur y renonce à un
+  import légitime et **réécrive la règle sur place** — la dette exacte que les déduplications
+  `TrayGeometry` / `RackDepthPolicy` ont eu à résorber. Si un en-tête ou un commentaire
+  affirme encore l'auto-suffisance, c'est un **bug** (principe n°13) : le corriger. Le mot est
+  d'ailleurs à BANNIR même pour dire vrai : il désigne indistinctement la règle (1) et la
+  règle (2). Écrire laquelle des deux on invoque.
 - Le serveur émet désormais sous `dist/src-server/src/` (cf. `package.json` `start`).

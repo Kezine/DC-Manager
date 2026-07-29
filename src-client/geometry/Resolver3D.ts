@@ -1,19 +1,26 @@
 import type { Store } from "../store";
 import { RackGeometry } from "./RackGeometry";
+// REPÈRE D'UN CONTENU PLACÉ : la composition « point local d'un contenu → repère de l'origine fournie »
+// lui appartient (docs/placement.md §3 règle 1, §6.1 et §6.22). Les branches ci-dessous — baies ET
+// équipements libres — ne produisent plus que leur point/normale LOCAUX.
+import { PlacementFrame } from "./PlacementFrame";
 import { FreeEquipGeometry } from "./FreeEquipGeometry";
 import { Depths } from "../registries/Depths";
-import { Normalize } from "../core/Normalize";
 import {
-  RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, RACK_EAR_STANDOFF_MM,
+  RACK_DEPTH_DEFAULT, RACK_MOUNT_WIDTH, RACK_EAR_MM, RACK_EAR_STANDOFF_MM,
   U_MM, SIDE_U_STEP, BRUSH_PADDING_MM, CONDUIT_W_DEFAULT, CONDUIT_H_DEFAULT,
 } from "../domain/constants";
 
-/** Vecteur monde (mm). */
+/** Vecteur du repère LOCAL SALLE (mm) — cf. la note de repère en tête de la classe. */
 export interface Vec3 { x: number; y: number; z: number; }
 /** Dimensions UTILES de la section d'un conduit (marge d'exclusion déduite). */
 export interface ConduitDims { usableW: number; usableH: number; kind: "segment" | "brush" | "pin"; }
 
-/** Point 3D résolu d'un port : monde (mm) + normale sortante + baie hôte. */
+/** Point 3D résolu d'un port : (mm) + normale sortante + baie hôte.
+    ⚠ REPÈRE : celui qu'annonce la MÉTHODE qui l'a produit — LOCAL SALLE pour `resolvePort3D` et tout ce qui
+    passe par `resolveFaceAnchor3D` (le cas général), MONDE pour `resolvePortWorld3D` (contenu placé sur un
+    conteneur SANS salle). Le type ne peut pas porter cette distinction sans se dédoubler pour rien : les deux
+    portent exactement les mêmes champs, et c'est le point d'appel qui sait d'où il vient (cf. l'en-tête). */
 export interface Port3D { x: number; y: number; z: number; rackId: string | null; n: { x: number; y: number; z: number }; }
 
 /** Position sur une FACE d'équipement (fraction 0..1 de la largeur/hauteur + face) — sous-ensemble des champs
@@ -28,8 +35,29 @@ export const TRUNK_UPLINK_GEO: FaceGeo = { face_x: 0.5, face_y: 0.5, face_side: 
 
 /* =============================================================================
    Résolution 3D contre le STORE vivant (dépendance injectée) :
-     - resolvePort3D : point monde d'un port (rack / side / wall / libre) ;
+     - resolvePort3D : point d'un port (rack / side / wall / tray / libre) ;
      - géométrie des waypoints (ancre, points de passage) et des pins/brosses.
+
+   ⚠ REPÈRE DE SORTIE : **LOCAL SALLE**, jamais monde — pour tout ce que ce
+   fichier résout À L'INTÉRIEUR d'une salle (points, normales, offsets de
+   conduit). Les docstrings annonçaient « monde », ce qui était FAUX : dette
+   nommée par la doctrine (`docs/placement.md` §3 règle 5), corrigée ici. Et ce
+   n'est pas un défaut à réparer, c'est le repère CORRECT (§6.6) : au-dessus de la
+   salle il n'existe aucune transformée intrinsèque à appliquer — la position
+   d'une salle dans son étage, d'un étage dans son bâtiment et d'un bâtiment dans
+   le monde relève du LAYOUT, qui dépend de l'ensemble affiché et vit dans
+   `FloorLayout` (`roomToWorld`, `multiLayout`). Un consommateur qui veut du monde
+   compose donc lui-même ce dernier maillon.
+
+   ⚠ UNE SEULE EXCEPTION, ET SON NOM LE DIT : `resolvePortWorld3D` rend du MONDE.
+   Elle résout un contenu placé sur un conteneur SANS SALLE (un équipement posé
+   sur un ÉTAGE), donc un cas où « local salle » n'a aucun sens — c'est le cas que
+   §1 symptôme 3 désigne comme impossible à écrire dans le moule des cinq branches.
+   Elle ne CALCULE pas la transformée du conteneur (elle relève du layout, §6.6) :
+   elle la REÇOIT, sous forme d'origine monde. L'asymétrie des deux repères de
+   sortie est donc voulue, et elle est ANNONCÉE dans les deux noms — c'est
+   exactement ce qu'exige §3 règle 5, dont ce fichier avait été le contre-exemple.
+
    La machinerie de RÉPARTITION conduit (offsets dans la section) vit désormais ici
    (`waypointConduitDims`/`conduitGrid`/`conduitCell`/`conduitCablesOf`/`conduitBasis`/
    `conduitOffsetFor`) : elle produit l'offset monde qu'on passe à `waypointPassPoints`
@@ -38,7 +66,7 @@ export const TRUNK_UPLINK_GEO: FaceGeo = { face_x: 0.5, face_y: 0.5, face_side: 
 export class Resolver3D {
   constructor(private store: Store) {}
 
-  /** Résout un port en point 3D monde, ou null s'il n'est pas placé dans `dcId`. */
+  /** Résout un port en point 3D (LOCAL SALLE), ou null s'il n'est pas placé dans `dcId`. */
   resolvePort3D(portId: string, dcId: string): Port3D | null {
     const s = this.store;
     const port = s.get("ports", portId); if (!port) return null;
@@ -48,6 +76,70 @@ export class Resolver3D {
     return this.resolveFaceAnchor3D(eq, geo, dcId);
   }
 
+  /** Résout un port porté par un contenu placé DIRECTEMENT sur un conteneur SANS SALLE — aujourd'hui un
+      équipement posé sur un ÉTAGE (`placement_mode: "floor"`). C'est le PENDANT de `resolvePort3D`, qui ne
+      sait travailler qu'À L'INTÉRIEUR d'une salle : ses cinq branches exigent toutes un `dcId` et rendent
+      null sans lui. La doctrine désigne précisément ce cas (`docs/placement.md` §1, symptôme 3) : « la
+      sixième branche (étage) est IMPOSSIBLE à écrire dans ce moule, parce que son hôte n'est pas une salle ».
+
+      ⚠ REPÈRE DE SORTIE : **MONDE** — d'où le `World` du nom (§3 règle 5 : le repère d'un point résolu doit
+      être EXPLICITE, y compris quand il diffère de celui de ses voisins). Le contrat est exactement : origine
+      MONDE en entrée ⇒ point MONDE en sortie. Ce n'est pas une entorse à l'en-tête du fichier mais sa
+      conséquence : au-dessus de la salle il n'existe aucune transformée INTRINSÈQUE à composer (§6.6), la
+      position d'un étage relevant du LAYOUT. Le conteneur ne peut donc pas se calculer ici — il se FOURNIT,
+      par son origine monde (`FloorLayout.equipFloorWorld` pour x/y, `FloorLayout.levelZ` pour z).
+
+      ⚠ `worldOriginZ` ne porte QUE le socle du CONTENEUR (Z du niveau). La hauteur propre de l'équipement
+      (`dc_z`) est déjà comprise dans le point local rendu par `FreeEquipGeometry.portLocal` — elle est donc
+      ajoutée ICI, et une seule fois. Même convention que `DcThreeScene.buildEquipBox`, qui pose son groupe
+      sur le socle et sa boîte sur `box().z` : c'est ce qui interdit de compter `dc_z` deux fois entre
+      l'appelant et la géométrie (piège verrouillé par test).
+
+      ⚠ La NORMALE ne subit AUCUNE rotation de conteneur : bâtiment et étage sont de pures TRANSLATIONS
+      (position du site, ancrage du plan, Z du niveau) — re-vérifié après l'arrivée de la position et de la
+      taille déclarée des sites, dont la spec ne porte toujours aucune orientation. Seul le lacet PROPRE de
+      l'équipement (`dc_orientation`) tourne. À revoir si un conteneur acquiert un jour une orientation. */
+  resolvePortWorld3D(portId: string, worldOriginX: number, worldOriginY: number, worldOriginZ: number): Port3D | null {
+    const s = this.store;
+    const port = s.get("ports", portId); if (!port) return null;
+    // BREAKOUT : une lane émerge du connecteur du TRUNK — MÊME règle que `resolvePort3D`. C'est tout
+    // l'intérêt d'un résolveur partagé : la version qui composait cette chaîne dans la vue avait oublié
+    // cette règle, et rien ne l'aurait signalé.
+    const geo = port.parent_port_id ? (s.get("ports", port.parent_port_id) || port) : port;
+    const eq = s.get("equipments", port.equipment_id); if (!eq) return null;
+    return this.resolveFaceAnchorWorld3D(eq, geo, worldOriginX, worldOriginY, worldOriginZ);
+  }
+
+  /** Résout le PORT UPLINK virtuel d'un faisceau sur un patch posé DIRECTEMENT sur un conteneur SANS
+      SALLE — pendant MONDE de `resolveTrunkUplink3D`, exactement comme `resolvePortWorld3D` l'est de
+      `resolvePort3D`. Le doublet existe des deux côtés pour que faisceaux et câbles restent traités par la
+      MÊME mécanique (docs/faisceaux.md : parité stricte), y compris sur un étage (doctrine §6.31). */
+  resolveTrunkUplinkWorld3D(equipmentId: string | null, worldOriginX: number, worldOriginY: number, worldOriginZ: number): Port3D | null {
+    const eq = equipmentId ? this.store.get("equipments", equipmentId) : null; if (!eq) return null;
+    return this.resolveFaceAnchorWorld3D(eq, TRUNK_UPLINK_GEO, worldOriginX, worldOriginY, worldOriginZ);
+  }
+
+  /** Point MONDE d'une position de FACE sur un contenu placé sur un conteneur SANS SALLE — mécanique
+      UNIQUE partagée par les ports persistés et l'uplink virtuel d'un faisceau, miroir exact de
+      `resolveFaceAnchor3D` pour le chemin d'étage. */
+  private resolveFaceAnchorWorld3D(eq: any, geo: FaceGeo | any, worldOriginX: number, worldOriginY: number, worldOriginZ: number): Port3D | null {
+    if (eq.dim_mode !== "free") return null;   // seul un dimensionnement LIBRE porte une boîte 6 faces
+    // COMPOSITION : lacet PROPRE du contenu, PUIS translation à l'origine de son conteneur. C'est
+    // exactement ce que compose `PlacementFrame` — on le RÉUTILISE plutôt que de réécrire ici une n-ième
+    // « rotation de l'hôte puis translation », ce que §3 règle 1 désigne comme la signature d'un conteneur
+    // manquant. Ce qui change n'est PAS la composition mais la PROVENANCE de l'origine : un contenu de
+    // salle la DÉCLARE (`dc_x`/`dc_y`), un contenu d'étage la reçoit du LAYOUT (§6.6). `PlacementFrame`
+    // compose donc dans le repère de l'origine qu'on lui donne — d'où du monde ici.
+    // ⚠ `halfW`/`halfD` sont INERTES : ils ne servent que de REPLI quand la position manque, or l'origine
+    // du conteneur est toujours fournie. Ils valent 0 pour dire « aucun repli à faire », pas une demi-taille.
+    const p = PlacementFrame.place(
+      { x: worldOriginX, y: worldOriginY, yawDeg: eq.dc_orientation, halfW: 0, halfD: 0 },
+      FreeEquipGeometry.portLocal(eq, geo),
+      FreeEquipGeometry.faceNormalLocal(geo.face_side),
+    );
+    return { x: p.x, y: p.y, z: p.z + worldOriginZ, rackId: null, n: p.n };
+  }
+
   /** Résout le PORT UPLINK virtuel d'un faisceau sur son équipement d'extrémité (patch) : centre de la face
       arrière par défaut (cf. TRUNK_UPLINK_GEO). null si l'équipement n'est pas placé dans `dcId`. */
   resolveTrunkUplink3D(equipmentId: string | null, dcId: string): Port3D | null {
@@ -55,8 +147,16 @@ export class Resolver3D {
     return this.resolveFaceAnchor3D(eq, TRUNK_UPLINK_GEO, dcId);
   }
 
-  /** Point 3D monde d'une position de FACE (`geo`) sur un équipement — mécanique UNIQUE partagée par les ports
-      persistés (resolvePort3D) et les points virtuels (uplink de faisceau). null si non placé dans `dcId`. */
+  /** Point 3D (LOCAL SALLE) d'une position de FACE (`geo`) sur un équipement — mécanique UNIQUE partagée par
+      les ports persistés (resolvePort3D) et les points virtuels (uplink de faisceau). null si non placé
+      dans `dcId`.
+
+      Les CINQ modes ne calculent plus que leur point d'ancrage et leur normale dans le repère LOCAL de
+      leur hôte — la BAIE pour `side`/`tray`/`wall`/`rack`, l'ÉQUIPEMENT lui-même pour le mode libre
+      (`manual`) ; c'est `PlacementFrame` qui les amène au repère de la salle, une baie et un équipement
+      libre étant l'un comme l'autre un objet posé dans une salle avec position et lacet. Ce
+      qui reste propre à chaque mode est son paramétrage d'ATTACHE (colonne de marge, plateau, paroi,
+      index U + face de montage, face du boîtier) — hors interface commune, cf. doctrine §6.2. */
   resolveFaceAnchor3D(eq: any, geo: FaceGeo | any, dcId: string): Port3D | null {
     const s = this.store;
 
@@ -65,30 +165,37 @@ export class Resolver3D {
       const b = RackGeometry.sideEquipBoxLocal(rack, eq);
       const xMin = Math.min(b.x0, b.x1), xMax = Math.max(b.x0, b.x1), yMin = Math.min(b.y0, b.y1), yMax = Math.max(b.y0, b.y1);
       const fx = (geo.face_x != null) ? geo.face_x : 0.5, fy = (geo.face_y != null) ? geo.face_y : 0.5;
+      const sgn = b.front ? -1 : 1;   // −Y local = façade de la baie
       const xl = xMin + fx * (xMax - xMin);
       const yl = b.front ? yMin : yMax;
       const zl = b.z0 + (1 - fy) * (b.z1 - b.z0);
-      const o = Normalize.rackOrientation(rack.orientation) * Math.PI / 180, co = Math.cos(o), so = Math.sin(o);
-      const cx = (rack.dc_x != null) ? rack.dc_x : 0, cy = (rack.dc_y != null) ? rack.dc_y : 0;
-      const sgn = b.front ? -1 : 1;
-      return { x: cx + xl * co - yl * so, y: cy + xl * so + yl * co, z: zl, rackId: rack.id, n: { x: -sgn * so, y: sgn * co, z: 0 } };
+      const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: 0, y: sgn });
+      return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
     }
     if (eq.placement_mode === "tray" && eq.tray_item_id) {
-      // POSÉ SUR UNE ÉTAGÈRE : boîte locale sur le plateau (baie dérivée de l'étagère). Le port sort sur la
-      // face de la boîte tournée vers la façade (face_side "front") ou le fond ("rear") de la baie hôte.
+      // POSÉ SUR UNE ÉTAGÈRE : la seule chaîne à TROIS conteneurs emboîtés, chacun dans son rôle.
+      // L'ÉTAGÈRE situe le posé dans sa baie et lui ajoute son demi-tour éventuel
+      // (`RackGeometry.trayContentPlacementInRack` via `TrayFrame`) ; le POSÉ produit le point et la normale
+      // LOCAUX de sa face, exactement comme un équipement libre — c'est le MÊME `FreeEquipGeometry`,
+      // un posé sur plateau n'étant rien d'autre qu'un boîtier libre juché plus haut ; la BAIE amène
+      // enfin le tout au repère de la salle.
+      //
+      // ⚠ CORRECTION (§6.24) : cette branche interpolait auparavant sur les seules faces ±Y de la
+      // boîte, sans jamais consulter `dc_orientation`. Un posé tourné avait donc TOUS ses ports
+      // résolus comme s'il ne l'était pas — mesuré : une seule normale pour les quatre orientations,
+      // là où le mode libre en donne quatre. Le lacet passe désormais par `PlacementFrame`, à qui
+      // cette composition appartient. Effet de bord voulu : les faces HORIZONTALES (dessus/dessous)
+      // d'un posé deviennent résolvables, comme elles le sont déjà en mode libre.
       const tray = s.get("rackItems", eq.tray_item_id); if (!tray || !tray.rack_id) return null;
       const rack = s.get("racks", tray.rack_id); if (!rack || rack.datacenter_id !== dcId) return null;
-      const b = RackGeometry.trayEquipBoxLocal(rack, tray, eq);
-      const xMin = Math.min(b.x0, b.x1), xMax = Math.max(b.x0, b.x1), yMin = Math.min(b.y0, b.y1), yMax = Math.max(b.y0, b.y1);
+      const plankZ = RackGeometry.trayPlacementInRack(rack, tray).plankZ;
       const fx = (geo.face_x != null) ? geo.face_x : 0.5, fy = (geo.face_y != null) ? geo.face_y : 0.5;
-      const trayFront = tray.side !== "rear", portFront = geo.face_side !== "rear";
-      const sgn = (portFront === trayFront) ? -1 : 1;   // −Y local = façade de la baie
-      const xl = xMin + fx * (xMax - xMin);
-      const yl = (sgn < 0) ? yMin : yMax;
-      const zl = b.z0 + (1 - fy) * (b.z1 - b.z0);
-      const o = Normalize.rackOrientation(rack.orientation) * Math.PI / 180, co = Math.cos(o), so = Math.sin(o);
-      const cx = (rack.dc_x != null) ? rack.dc_x : 0, cy = (rack.dc_y != null) ? rack.dc_y : 0;
-      return { x: cx + xl * co - yl * so, y: cy + xl * so + yl * co, z: zl, rackId: rack.id, n: { x: -sgn * so, y: sgn * co, z: 0 } };
+      // base Z = le DESSUS DU PLATEAU, et non `dc_z` : un posé repose sur son étagère.
+      const face = FreeEquipGeometry.faceLocal(eq, geo.face_side, fx, fy, plankZ);
+      const inRack = PlacementFrame.place(RackGeometry.trayContentPlacementInRack(rack, tray, eq),
+        { x: face.lx, y: face.ly, z: face.lz }, FreeEquipGeometry.faceNormalLocal(geo.face_side));
+      const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: inRack.x, y: inRack.y, z: inRack.z }, inRack.n);
+      return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
     }
     if (eq.placement_mode === "wall" && eq.rack_id) {
       const rack = s.get("racks", eq.rack_id); if (!rack || rack.datacenter_id !== dcId) return null;
@@ -99,26 +206,25 @@ export class Resolver3D {
       if (b.n.x !== 0) { xl = (b.n.x > 0) ? xMax : xMin; yl = yMin + fx * (yMax - yMin); }
       else { yl = (b.n.y > 0) ? yMax : yMin; xl = xMin + fx * (xMax - xMin); }
       const zl = b.z0 + (1 - fy) * (b.z1 - b.z0);
-      const o = Normalize.rackOrientation(rack.orientation) * Math.PI / 180, co = Math.cos(o), so = Math.sin(o);
-      const cx = (rack.dc_x != null) ? rack.dc_x : 0, cy = (rack.dc_y != null) ? rack.dc_y : 0;
-      const nx = b.n.x, ny = b.n.y;
-      return { x: cx + xl * co - yl * so, y: cy + xl * so + yl * co, z: zl, rackId: rack.id, n: { x: nx * co - ny * so, y: nx * so + ny * co, z: 0 } };
+      // seul mode BAIE dont la normale locale est portée par la BOÎTE (paroi gauche/droite ou fond de marge).
+      const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: b.n.x, y: b.n.y });
+      return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
     }
     if (eq.dim_mode === "free") {
+      // MODE LIBRE : l'hôte n'est pas une baie mais la SALLE elle-même. L'équipement produit son point et sa
+      // normale LOCAUX (boîte 6 faces) ; le conteneur applique son lacet propre (`dc_orientation`) et sa
+      // position. Seule face à pouvoir être HORIZONTALE (dessus/dessous) — d'où une normale à 3 composantes.
       if (eq.dc_id !== dcId || eq.dc_x == null || eq.dc_y == null) return null;
-      const w = FreeEquipGeometry.portWorld(eq, geo);
-      return { x: w.x, y: w.y, z: w.z, rackId: null, n: FreeEquipGeometry.portNormal(eq, geo) };
+      const p = PlacementFrame.place(FreeEquipGeometry.roomPlacement(eq), FreeEquipGeometry.portLocal(eq, geo), FreeEquipGeometry.faceNormalLocal(geo.face_side));
+      return { x: p.x, y: p.y, z: p.z, rackId: null, n: p.n };
     }
     if (eq.placement_mode !== "rack" || !eq.rack_id || eq.rack_u == null) return null;
     const rack = s.get("racks", eq.rack_id); if (!rack || rack.datacenter_id !== dcId) return null;
-    const o = Normalize.rackOrientation(rack.orientation) * Math.PI / 180;
-    const fx = Math.sin(o), fy = -Math.cos(o);
-    const wx = Math.cos(o), wy = Math.sin(o);
     const mountFront = eq.rack_side !== "rear";
     const portFront = geo.face_side !== "rear";
     const emergesFront = mountFront ? portFront : !portFront;
     const dDepth = rack.depth || RACK_DEPTH_DEFAULT, halfD = dDepth / 2;
-    const fm = RackGeometry.frontMargin(rack), cageD = Math.min(dDepth, RackGeometry.cageDepth(rack));
+    const fm = RackGeometry.frontMargin(rack), cageD = RackGeometry.cageDepth(rack);
     const frontPostOff = halfD - fm, rearPostOff = halfD - fm - cageD;
     const span = Depths.mountSpanMm(eq, cageD);
     // FAÇADE DEVANT LA CAGE : la face de montage est posée RACK_EAR_STANDOFF_MM devant le plan des
@@ -132,17 +238,19 @@ export class Resolver3D {
     // face_x couvre la largeur RÉELLE du boîtier (rétréci si u_width_mm), au décalage PHYSIQUE de son
     // alignement (u_align) — parité avec le caisson 3D (DcThreeScene) et l'éditeur de façade.
     const lateral = RackGeometry.eqBodyOffsetX(eq) + latSign * (((geo.face_x != null) ? geo.face_x : 0.5) - 0.5) * RackGeometry.eqBodyWidth(eq);
-    const cx = (rack.dc_x != null) ? rack.dc_x : 0, cy = (rack.dc_y != null) ? rack.dc_y : 0;
     const uh = Math.max(1, eq.u_height | 0 || 1);
     const zf = (geo.face_y != null) ? (1 - geo.face_y) : 0.5;
     const ns = emergesFront ? 1 : -1;
-    return {
-      x: cx + off * fx + wx * lateral,
-      y: cy + off * fy + wy * lateral,
-      z: RackGeometry.uBaseZ(rack) + ((eq.rack_u - 1) + zf * uh) * U_MM,
-      rackId: rack.id,
-      n: { x: ns * fx, y: ns * fy, z: 0 },
-    };
+    // ⚠ `off` se mesure vers la FAÇADE de la baie, donc vers les −Y LOCAUX (et `lateral` le long de +X) :
+    // d'où le signe. Cette branche composait la même rotation que les trois autres, mais écrite sur la base
+    // (avant, largeur) plutôt qu'en (cosinus, sinus) — deux notations d'UNE mécanique, ce que la
+    // délégation au conteneur rend enfin visible.
+    const p = PlacementFrame.place(
+      RackGeometry.roomPlacement(rack),
+      { x: lateral, y: -off, z: RackGeometry.uBaseZ(rack) + ((eq.rack_u - 1) + zf * uh) * U_MM },
+      { x: 0, y: -ns },
+    );
+    return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
   }
 
   /* ---- waypoints ---- */
@@ -153,14 +261,14 @@ export class Resolver3D {
   /** Point représentatif (pin = le point ; segment = milieu ; brush = milieu de traversée). */
   waypointAnchor(wp: any): { x: number; y: number; z: number } {
     if (wp.kind === "brush") { const g = this.brushGeom(wp); if (g) return { x: (g.e0.x + g.e1.x) / 2, y: (g.e0.y + g.e1.y) / 2, z: g.zc }; }
-    if (wp.kind === "point" && wp.rack_id && wp.side_lr != null) { const g = this.sidePinGeom(wp); if (g) return g.world; }
-    if (wp.kind === "point" && wp.rack_id && wp.cap_face) { const g = this.capPinGeom(wp); if (g) return g.world; }
+    if (wp.kind === "point" && wp.rack_id && wp.side_lr != null) { const g = this.sidePinGeom(wp); if (g) return g.roomPoint; }
+    if (wp.kind === "point" && wp.rack_id && wp.cap_face) { const g = this.capPinGeom(wp); if (g) return g.roomPoint; }
     if (wp.kind === "segment" && wp.dc_x2 != null) return { x: (wp.dc_x + wp.dc_x2) / 2, y: (wp.dc_y + wp.dc_y2) / 2, z: wp.dc_z || 0 };
     return { x: wp.dc_x, y: wp.dc_y, z: wp.dc_z || 0 };
   }
 
   /** Points de passage RÉELS d'un câble sur un waypoint (orientation min-détour pour
-      segment/brush). `off` (vecteur monde) décale les points (répartition conduit). */
+      segment/brush). `off` (vecteur LOCAL SALLE) décale les points (répartition conduit). */
   waypointPassPoints(wp: any, prev: any, next: any, off: any): Array<{ x: number; y: number; z: number }> {
     const ao = off ? (p: any) => ({ x: p.x + off.x, y: p.y + off.y, z: p.z + off.z }) : (p: any) => p;
     if (wp.kind === "brush") {
@@ -176,30 +284,41 @@ export class Resolver3D {
     return (d(prev, e0) + d(e1, next) <= d(prev, e1) + d(e0, next)) ? [ao(e0), ao(e1)] : [ao(e1), ao(e0)];
   }
 
-  /* ---- géométrie des pins / brosses (repère monde de la baie hôte) ---- */
+  /* ---- géométrie des pins / brosses (points d'une baie hôte, rendus en LOCAL SALLE) ----
+
+     ✅ MIGRÉES au conteneur. Elles recomposaient la transformée de baie à la main, et le lot précédent les
+     avait laissées de côté pour une raison précise : elles employaient l'AUTRE convention d'origine pour
+     une baie non positionnée (`dc_x`/`dc_y` absents = DEMI-EMPREINTE, quand les modes d'attache repliaient
+     sur 0). Cette divergence est désormais ARBITRÉE en faveur de la demi-empreinte — celle du dessin, cf.
+     l'en-tête de `PlacementFrame` —, donc les unifier ne déplace plus rien : ces trois méthodes passent par le
+     conteneur SANS changer d'un micron ce qu'elles rendaient. Ce sont les MODES D'ATTACHE qui se sont
+     alignés sur elles, et non l'inverse.
+
+     Le champ de sortie s'appelait `world` par héritage, alors qu'il rend du LOCAL SALLE : renommé
+     `roomPoint` (doctrine §3 règle 5 — un repère résolu doit être EXPLICITE). */
 
   /** Brosse de brassage (conduit contraint à une baie). null si non résolue. */
   brushGeom(wp: any): any {
     const s = this.store;
     if (wp.kind !== "brush" || !wp.rack_id) return null;
     const rack = s.get("racks", wp.rack_id); if (!rack) return null;
-    const o = Normalize.rackOrientation(rack.orientation) * Math.PI / 180, co = Math.cos(o), so = Math.sin(o);
-    const w = rack.width_mm || RACK_WIDTH_DEFAULT, d = rack.depth || RACK_DEPTH_DEFAULT, hd = d / 2;
-    const cx = (rack.dc_x != null) ? rack.dc_x : w / 2, cy = (rack.dc_y != null) ? rack.dc_y : d / 2;
+    const basis = PlacementFrame.basis(RackGeometry.roomPlacement(rack));
+    const hd = (rack.depth || RACK_DEPTH_DEFAULT) / 2;
     const u0 = Math.max(1, wp.rack_u | 0), uh = Math.max(1, wp.u_height | 0);
     const z0 = RackGeometry.uBaseZ(rack) + (u0 - 1) * U_MM, z1 = z0 + uh * U_MM, zc = (z0 + z1) / 2;
     const depth = Math.min(Math.max(1, wp.depth_mm || 100), RackGeometry.cageDepth(rack));
     const fm = RackGeometry.frontMargin(rack);
-    const toW = (lx: number, ly: number, lz: number) => ({ x: cx + lx * co - ly * so, y: cy + lx * so + ly * co, z: lz });
-    const e0 = toW(0, -hd + fm + 2, zc), e1 = toW(0, -hd + fm + 2 + depth, zc);
-    const right = { x: co, y: so, z: 0 }, up = { x: 0, y: 0, z: 1 };
+    const toRoom = (lx: number, ly: number, lz: number) => PlacementFrame.composePoint(basis, { x: lx, y: ly, z: lz });
+    const e0 = toRoom(0, -hd + fm + 2, zc), e1 = toRoom(0, -hd + fm + 2 + depth, zc);
+    // section de la brosse : sa largeur suit l'axe +X LOCAL de la baie (une DIRECTION, donc tournée SEULE).
+    const right = PlacementFrame.composeDir(basis, { x: 1, y: 0 }), up = { x: 0, y: 0, z: 1 };
     const bodyHW = RACK_MOUNT_WIDTH / 2 - RACK_EAR_MM;
-    return { rack, o, co, so, cx, cy, hd, e0, e1, right, up, z0, z1, zc, depth,
+    return { rack, co: basis.cos, so: basis.sin, cx: basis.originX, cy: basis.originY, hd, e0, e1, right, up, z0, z1, zc, depth,
       halfW: bodyHW, usableW: Math.max(0, 2 * bodyHW - 2 * BRUSH_PADDING_MM),
       usableH: Math.max(0, uh * U_MM - 2 * BRUSH_PADDING_MM), dcId: rack.datacenter_id };
   }
 
-  /** Pin monté en marge latérale : centre du slot (bande SIDE_U_STEP) en monde. null sinon. */
+  /** Pin monté en marge latérale : centre du slot (bande SIDE_U_STEP) en LOCAL SALLE. null sinon. */
   sidePinGeom(wp: any): any {
     const s = this.store;
     if (wp.kind !== "point" || !wp.rack_id || wp.side_lr == null) return null;
@@ -208,10 +327,8 @@ export class Resolver3D {
     const col = (wp.side_col === 1) ? 1 : 0, uTop = Math.max(1, wp.side_u | 0);
     const b = RackGeometry.sideSlotBoxLocal(rack, face, lr, col, uTop, SIDE_U_STEP);
     const lx = (Math.min(b.x0, b.x1) + Math.max(b.x0, b.x1)) / 2, lz = (b.z0 + b.z1) / 2, ly = b.yPlane;
-    const o = Normalize.rackOrientation(rack.orientation) * Math.PI / 180, co = Math.cos(o), so = Math.sin(o);
-    const cx = (rack.dc_x != null) ? rack.dc_x : (rack.width_mm || RACK_WIDTH_DEFAULT) / 2;
-    const cy = (rack.dc_y != null) ? rack.dc_y : (rack.depth || RACK_DEPTH_DEFAULT) / 2;
-    return { rack, face, lr, col, uTop, dcId: rack.datacenter_id, world: { x: cx + lx * co - ly * so, y: cy + lx * so + ly * co, z: lz } };
+    const roomPoint = PlacementFrame.composePoint(PlacementFrame.basis(RackGeometry.roomPlacement(rack)), { x: lx, y: ly, z: lz });
+    return { rack, face, lr, col, uTop, dcId: rack.datacenter_id, roomPoint };
   }
 
   /** Pin monté sur un capot : centre de la cellule sur le plan du capot. null sinon. */
@@ -221,11 +338,8 @@ export class Resolver3D {
     const rack = s.get("racks", wp.rack_id); if (!rack) return null;
     const c = RackGeometry.capCellLocalCenter(rack, wp.cap_cx | 0, wp.cap_cy | 0);
     const z = (wp.cap_face === "floor") ? 0 : RackGeometry.physHeight(rack);
-    const o = Normalize.rackOrientation(rack.orientation) * Math.PI / 180, co = Math.cos(o), so = Math.sin(o);
-    const cx = (rack.dc_x != null) ? rack.dc_x : (rack.width_mm || RACK_WIDTH_DEFAULT) / 2;
-    const cy = (rack.dc_y != null) ? rack.dc_y : (rack.depth || RACK_DEPTH_DEFAULT) / 2;
-    return { rack, face: wp.cap_face, cx: wp.cap_cx | 0, cy: wp.cap_cy | 0, dcId: rack.datacenter_id,
-      world: { x: cx + c.lx * co - c.ly * so, y: cy + c.lx * so + c.ly * co, z } };
+    const roomPoint = PlacementFrame.composePoint(PlacementFrame.basis(RackGeometry.roomPlacement(rack)), { x: c.lx, y: c.ly, z });
+    return { rack, face: wp.cap_face, cx: wp.cap_cx | 0, cy: wp.cap_cy | 0, dcId: rack.datacenter_id, roomPoint };
   }
 
   /* ---- répartition conduit (offsets dans la section) ---- */
@@ -271,7 +385,7 @@ export class Resolver3D {
   }
 
   /** Base orthonormée (right, up) de la SECTION d'un conduit : segment → ⊥ horizontale + verticale ;
-      pin → plan ⊥ au FLUX (prev→next) ; brush → repère monde de la baie. */
+      pin → plan ⊥ au FLUX (prev→next) ; brush → repère de la baie hôte (tourné par son lacet). */
   conduitBasis(w: any, prev: Vec3, next: Vec3): { right: Vec3; up: Vec3 } {
     if (w.kind === "brush") { const g = this.brushGeom(w); if (g) return { right: g.right, up: g.up }; }
     if (w.kind === "segment" && w.dc_x2 != null) {
@@ -287,7 +401,8 @@ export class Resolver3D {
     return { right, up };
   }
 
-  /** Offset MONDE (mm) d'un câble dans la section du conduit `w` (null si pas un conduit / 1 seul câble / non routé). */
+  /** Offset (mm, repère LOCAL SALLE) d'un câble dans la section du conduit `w` (null si pas un conduit /
+      1 seul câble / non routé). */
   conduitOffsetFor(w: any, cableId: string, prev: Vec3, next: Vec3): Vec3 | null {
     const dims = this.waypointConduitDims(w); if (!dims) return null;
     const ids = this.conduitCablesOf(w.id), n = ids.length, i = ids.indexOf(cableId);

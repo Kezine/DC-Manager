@@ -37,6 +37,7 @@ import {
   PORT_DIRECTIONS, POE_CLASSES
 } from "../../domain/constants";
 import { FormUi, ORIENT_OPTS } from "./shared";
+import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
 import { FaceEditor } from "./FaceEditor";
@@ -147,12 +148,14 @@ export class EquipmentForms extends FormBase {
     const dP = document.createElement("div"); dP.className = "section-divider"; dP.textContent = I18n.t("equipment.detail.portsSection", { count: ports.length }); root.appendChild(dP);
     if (ports.length) {
       const tw = document.createElement("div"); tw.className = "table-wrap";
+      // Colonne « 3D » : bouton « Localiser » par port, sous le prédicat PARTAGÉ `store.portLocatable`
+      // (miroir des refus de `DcInteract.locatePort`, cf. `core/Locatable`).
       const rows = ports.map((p: any) => {
         const pt: any = store.get("portTypes", p.port_type_id), ag: any = p.aggregate_id ? store.get("aggregates", p.aggregate_id) : null;
         let bk = "";
         if (store.isBreakoutParent(p)) bk = ` <span class="pill">${I18n.t("equipment.detail.trunkPill", { n: store.breakoutLanes(p.id).length })}</span>`;
         else if (p.parent_port_id) { const par: any = store.get("ports", p.parent_port_id); bk = ` <span class="pill">${I18n.t("equipment.detail.lanePill", { lane: p.lane || "?", trunk: Html.escape(par ? (par.name || I18n.t("equipment.detail.trunkWord")) : I18n.t("equipment.detail.trunkWord")) })}</span>`; }
-        return `<tr><td class="cell-name">${Html.escape(p.name || I18n.t("equipment.common.portParen"))}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : `<span style="color:var(--err)">${I18n.t("equipment.detail.typeUnknown")}</span>`}</td><td><span class="pill ${PortRoles.pillClass(p.role)}">${PortRoles.isPoe(p.role) ? Icons.POE_BOLT : ""}${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || I18n.t("equipment.detail.aggFallback")) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate && store.portDcId(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-locate="${p.id}" title="${I18n.t("equipment.detail.locatePort")}" aria-label="${I18n.t("equipment.detail.locatePort")}">${Icons.LOCATE}</button>` : ""}</td></tr>`;
+        return `<tr><td class="cell-name">${Html.escape(p.name || I18n.t("equipment.common.portParen"))}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : `<span style="color:var(--err)">${I18n.t("equipment.detail.typeUnknown")}</span>`}</td><td><span class="pill ${PortRoles.pillClass(p.role)}">${PortRoles.isPoe(p.role) ? Icons.POE_BOLT : ""}${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || I18n.t("equipment.detail.aggFallback")) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate && store.portLocatable(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-locate="${p.id}" title="${I18n.t("equipment.detail.locatePort")}" aria-label="${I18n.t("equipment.detail.locatePort")}">${Icons.LOCATE}</button>` : ""}</td></tr>`;
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("equipment.detail.colPort")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("equipment.detail.colRole")}</th><th>${I18n.t("equipment.detail.colAgg")}</th><th style="text-align:right;">${I18n.t("equipment.detail.col3d")}</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
@@ -184,10 +187,10 @@ export class EquipmentForms extends FormBase {
 
     // Modifier → formulaire d'édition (remplace la fiche par la modale d'édition)
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    // « Localiser en 3D » seulement si l'équipement est RATTACHÉ à une salle (même prédicat que locateEquipment :
-    // `store.equipmentDcId`) — un équipement d'inventaire pur, posé sur plan d'étage ou dans une baie non placée
-    // n'aurait qu'un toast d'erreur (parité avec le listing, cf. ListActions.canLocate).
-    if (host.locate && store.equipmentDcId(eq.id)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); actions.appendChild(locBtn); }
+    // « Localiser en 3D » seulement si l'équipement est LOCALISABLE (prédicat PARTAGÉ `store.equipmentLocatable`,
+    // miroir des refus de locateEquipment) — un équipement d'inventaire pur ou dans une baie non placée n'aurait
+    // qu'un toast d'erreur (parité avec le listing, cf. ListActions.canLocate).
+    if (host.locate && store.equipmentLocatable(eq.id)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) {   // viewer : pas de bouton « Modifier »
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = I18n.t("lists.chrome.rowEdit");
       editBtn.onclick = () => this.equipment(store, host, eq.id, onChanged);
@@ -355,7 +358,7 @@ export class EquipmentForms extends FormBase {
       onSave: async () => {
         const payload = { label: labelI.value.trim(), type: typeI.value || GroupTypes.DEFAULT, color: color || null, description: descI.value.trim() };
         if (live.check(payload).length) return false;   // label requis (surligné)
-        if (grp) await store.update("groups", grp.id, payload); else await store.create("groups", payload);
+        if (!await FormSave.record(store, "groups", grp && grp.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(grp ? I18n.t("equipment.group.updated") : I18n.t("equipment.group.created")); onSaved?.(); return true;
       },
     });
@@ -485,7 +488,7 @@ export class EquipmentForms extends FormBase {
           // autre
           specs: type === "other" ? specsI.value.trim() : "",
         };
-        if (sp) await store.update("spares", sp.id, payload); else await store.create("spares", payload);
+        if (!await FormSave.record(store, "spares", sp && sp.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(sp ? I18n.t("equipment.spare.updated") : I18n.t("equipment.spare.created")); onSaved?.(); return true;
       },
     });

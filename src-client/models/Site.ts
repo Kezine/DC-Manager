@@ -11,11 +11,25 @@ export class Site extends Entity implements Records.Site {
   name: string;
   /** Adresse postale (texte libre). */
   address: string;
+  /** Latitude / longitude (degrés décimaux, WGS84) — OPTIONNELLES, et indissociables (invariant de spec).
+      Elles portent la position RÉELLE du site, d'où la vue 3D dérive la place de son bâtiment ; absentes,
+      le site est posé à 5 km du précédent. Cf. `docs/placement.md` §6.9 et `geometry/SiteLayout`. */
+  lat: number | null;
+  lon: number | null;
+  /** Taille DÉCLARÉE du bâtiment (mm) — OPTIONNELLE, et indissociable (invariant de spec). Renseignée,
+      elle FAIT l'emprise du bâtiment en 3D (au lieu de la déduire du plus grand plan d'étage) et devient
+      une CONTRAINTE : aucun plan d'étage ne peut en déborder. Cf. `docs/placement.md` §6.8. */
+  width_mm: number | null;
+  depth_mm: number | null;
 
   constructor(p: Props = {}) {
     super(p);
     this.name = p.name || "";
     this.address = p.address || "";
+    this.lat = p.lat == null ? null : Number(p.lat);
+    this.lon = p.lon == null ? null : Number(p.lon);
+    this.width_mm = p.width_mm == null ? null : Number(p.width_mm);
+    this.depth_mm = p.depth_mm == null ? null : Number(p.depth_mm);
     // `description` est porté par Entity.
   }
 }

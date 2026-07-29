@@ -1,5 +1,6 @@
 import { DataValidator } from "../../../src-shared/DataValidation";
-import type { ValidationError, EntityFetcher, RecordFinder } from "../../../src-shared/DataValidation";
+import type { ValidationError, EntityFetcher, RecordFinder, ValidationCollaborators } from "../../../src-shared/DataValidation";
+import { TrayGeometry } from "../../../src-shared/TrayGeometry";
 import { OverlayA11y } from "../../ui/OverlayA11y";
 
 /* ============================================================================
@@ -21,6 +22,12 @@ import { OverlayA11y } from "../../ui/OverlayA11y";
    disparaît (`clear` / `clearOnInput`).
    ============================================================================ */
 export class LiveValidation {
+  /** Modules partagés injectés dans la validation (cf. `ValidationCollaborators`) : `src-shared/DataValidation`
+      ne peut pas les importer, tout appelant hors de `src-shared/` le peut. Posés ICI plutôt qu'au constructeur
+      de chaque formulaire : ils ne dépendent d'aucun contexte de saisie, et un formulaire ne doit pas pouvoir
+      les oublier — le surlignage live resterait alors muet là où le Store, lui, refuserait. */
+  private static readonly COLLABORATORS: ValidationCollaborators = { trayGeometry: TrayGeometry };
+
   constructor(
     private readonly collection: string,
     /** chemin de validation → contrôle DOM (input/select/wrapper situé dans une rangée `.form-field`). */
@@ -33,7 +40,7 @@ export class LiveValidation {
       pose le focus sur le 1er champ en erreur, renvoie les erreurs. */
   check(record: Record<string, any>): ValidationError[] {
     this.clear();
-    const errors = DataValidator.validateRecord(this.collection, record, this.fetch, this.find);
+    const errors = DataValidator.validateRecord(this.collection, record, this.fetch, this.find, LiveValidation.COLLABORATORS);
     let firstControl: HTMLElement | null = null;
     for (const error of errors) {
       const row = this.rowOf(error.path);

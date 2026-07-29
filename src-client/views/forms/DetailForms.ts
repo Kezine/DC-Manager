@@ -21,6 +21,9 @@ import type { FormHost } from "./shared";
 import { IpamForms } from "./IpamForms";
 import { VmNetMapping } from "../../core/VmNetMapping";
 import { VmIpMatch } from "../../core/VmIpMatch";
+import { VmLocate } from "../../core/VmLocate";   // « Localiser » une VM = localiser son HÔTE (prédicat PUR partagé avec le listing)
+import { VmStatus } from "../../core/VmStatus";
+import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »   // pastilles statut/orphelinat — règle unique partagée avec le listing et la bulle
 import { VmForms } from "./VmForms";
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
@@ -135,7 +138,9 @@ export class DetailForms extends IpamForms {
       const p: any = pid ? store.get("ports", pid) : null;
       if (!p) return null;
       const eq: any = store.get("equipments", p.equipment_id);
-      return { label: eq ? (eq.name || "?") : "?", sub: I18n.t("detail.cable.portSub", { name: p.name || "?" }), dcId: store.equipmentDcId(p.equipment_id) };
+      // CONTENEUR NOMMÉ (salle traversée, sinon étage immédiat) et non plus un id de salle : le
+      // mini-graphe en tire à la fois le libellé de la bande, le niveau et le regroupement (§6.29).
+      return { label: eq ? (eq.name || "?") : "?", sub: I18n.t("detail.cable.portSub", { name: p.name || "?" }), container: store.equipmentNamedContainer(p.equipment_id) };
     };
     root.appendChild(RouteMiniGraph.render(store, store.cableRoute(c), {
       endpointA: epFromPort(c.from_port_id),
@@ -147,9 +152,11 @@ export class DetailForms extends IpamForms {
     AuditLine.attach(root, c, host.userDirectory);   // « Créé/Modifié par » (mode API)
 
     // actions : Localiser en 3D + Modifier (mêmes conventions que equipment/rackDetail)
-    // « Localiser » seulement si une extrémité au moins se résout en salle (même prédicat que locateCable).
+    // « Localiser » seulement si une extrémité au moins est ATTEIGNABLE par la vue — prédicat PARTAGÉ
+    // (`core/Locatable`), qui est aussi la règle par laquelle `locateCable` choisit l'extrémité à cadrer
+    // (doctrine §6.32). Une extrémité posée sur un ÉTAGE compte désormais, comme partout ailleurs.
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (host.locate && store.cableDcId(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
+    if (host.locate && store.cableLocatable(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = () => this.cable(store, host, id, onChanged); actions.appendChild(b); }
     root.appendChild(actions);
     host.openModal({ title: I18n.t("detail.cable.title"), subtitle: Html.escape(c.name || ""), body: root, hideFooter: true, wide: true });
@@ -188,7 +195,7 @@ export class DetailForms extends IpamForms {
     const epSpec = (eqId: string | null): RouteEndpointSpec | null => {
       const eq: any = eqId ? store.get("equipments", eqId) : null;
       if (!eq) return null;
-      return { label: eq.name || I18n.t("detail.bundle.patchFallback"), sub: I18n.t("detail.bundle.endpointPatch"), dcId: store.equipmentDcId(eq.id) };
+      return { label: eq.name || I18n.t("detail.bundle.patchFallback"), sub: I18n.t("detail.bundle.endpointPatch"), container: store.equipmentNamedContainer(eq.id) };
     };
     root.appendChild(RouteMiniGraph.render(store, r, {
       endpointA: epSpec(b.endpoint_a_equipment_id),
@@ -202,7 +209,9 @@ export class DetailForms extends IpamForms {
     const rows = ports.map((p: any) => {
       const eq: any = store.get("equipments", p.equipment_id);
       const strands = [p.strand_a, p.strand_b].filter((s) => s != null).join(" · ");
-      const loc = host.locate && store.portDcId(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-loc="${p.id}" title="${I18n.t("detail.common.locatePort")}" aria-label="${I18n.t("detail.common.locatePort")}">${Icons.LOCATE}</button>` : "";
+      // Prédicat PARTAGÉ (`core/Locatable`, miroir des refus de `DcInteract.locatePort`) — même règle que la
+      // colonne « 3D » de la fiche équipement et que le panneau de recherche.
+      const loc = host.locate && store.portLocatable(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-loc="${p.id}" title="${I18n.t("detail.common.locatePort")}" aria-label="${I18n.t("detail.common.locatePort")}">${Icons.LOCATE}</button>` : "";
       return [`${Html.escape(eq ? (eq.name || "?") : "?")} <span style="color:var(--fg-dimmer)">:</span> ${Html.escape(p.name || I18n.t("detail.common.port"))}`, `<span style="font-family:var(--mono)">${strands || "—"}</span>`, `<span class="cell-actions">${loc}</span>`];
     });
     const tw = this.tbl(root, [I18n.t("detail.bundle.colPatchPort"), I18n.t("detail.bundle.colFibers"), ""], rows, I18n.t("detail.bundle.strandsEmpty"));
@@ -540,13 +549,9 @@ export class DetailForms extends IpamForms {
     const root = document.createElement("div");
 
     // -- IDENTITÉ SOURCE (lecture seule) --
-    // Statut : pastille sémantique (running=ok, stopped=neutre, autre valeur affichée telle quelle — tolérance
-    // aux releases Proxmox) ; une VM ORPHELINE (disparue au dernier sync) prime avec une pastille d'erreur EN TÊTE.
-    const s = String(vm.status || "");
-    const statusPill = (s === "running") ? `<span class="pill" style="border-color:var(--ok);color:var(--ok)">running</span>`
-      : (s === "stopped") ? `<span class="pill" style="border-color:var(--fg-dimmer);color:var(--fg-dim)">stopped</span>`
-      : s ? `<span class="pill">${Html.escape(s)}</span>` : this.MUTED;
-    const orphanPill = vm.orphan ? `<span class="pill" style="border-color:var(--err);color:var(--err)" title="${I18n.t("detail.vm.orphanTitle")}">${I18n.t("lists.ph.orphan")}</span> ` : "";
+    // Statut : règle unique dans `core/VmStatus`, partagée avec le LISTING VMs et la bulle d'équipement.
+    // La fiche a la place d'EXPLIQUER l'orphelinat → elle passe l'infobulle que le listing omet.
+    const statusHtml = VmStatus.pills(vm, I18n.t("detail.vm.orphanTitle"));
     // RAM : Mo → lisible (Go dès 1024 Mo, avec le détail en Mo) ; disque déjà en Go côté source.
     const ramHtml = vm.ram_mb != null
       ? (vm.ram_mb >= 1024
@@ -557,7 +562,7 @@ export class DetailForms extends IpamForms {
     root.appendChild(this.grid([
       [I18n.t("lists.col.name"), Html.escape(vm.name || I18n.t("lists.ph.vm"))],
       [I18n.t("lists.col.type"), vm.vm_type ? `<span class="pill">${Html.escape(vm.vm_type)}</span>` : this.MUTED],
-      [I18n.t("lists.col.status"), orphanPill + statusPill],
+      [I18n.t("lists.col.status"), statusHtml],
       [I18n.t("detail.vm.vcpu"), vm.cpu != null ? `<span class="pill">${vm.cpu}</span>` : this.MUTED],
       [I18n.t("detail.vm.memory"), ramHtml],
       [I18n.t("detail.vm.disk"), vm.disk_gb != null ? `${vm.disk_gb} Go` : this.MUTED],
@@ -656,7 +661,7 @@ export class DetailForms extends IpamForms {
             }
             // Patch MINIMAL passé au store (comme les autres écritures de fiche) : la validation PARTAGÉE fusionne et
             // vérifie l'invariant d'exclusivité. On vide `equipment_id` pour respecter la bascule côté équipement.
-            await store.update("ipAddresses", addrId, { vm_id: id, equipment_id: null });
+            if (!await FormSave.record(store, "ipAddresses", addrId, { vm_id: id, equipment_id: null })) return; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
             Notify.toast(I18n.t("detail.vm.attached"));
             onChanged?.();                                   // rafraîchit la liste/vue d'origine
             this.vmDetail(store, host, id, onChanged);       // re-rendu de la fiche (l'adresse passe en « liées »)
@@ -731,6 +736,18 @@ export class DetailForms extends IpamForms {
         Notify.toast(I18n.t("detail.vm.deleted"));
       };
       actions.appendChild(delBtn);
+    }
+    // « Localiser en 3D » — MÊME chemin que la fiche équipement (bouton ghost + Icons.LOCATE + host.locate),
+    // à une traduction près : une VM n'existe pas dans la scène, on vise donc son ÉQUIPEMENT HÔTE. Le prédicat
+    // et la cible viennent du module PARTAGÉ avec le listing (`VmLocate`) — aucune règle réécrite ici. Version
+    // SOBRE : rien à localiser (VM non rapprochée, hôte supprimé, hôte non localisable) ⇒ AUCUN bouton.
+    const hostToLocate = host.locate ? VmLocate.hostEquipmentId(vm, store) : null;
+    if (hostToLocate) {
+      const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost";
+      locBtn.title = I18n.t("detail.vm.locateHost");   // le libellé dit « Localiser », le tooltip dit SUR QUOI
+      locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`;
+      locBtn.onclick = () => host.locate!("equipment", hostToLocate, () => this.vmDetail(store, host, id, onChanged));
+      actions.appendChild(locBtn);
     }
     if (!this.isViewer()) {
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary";
