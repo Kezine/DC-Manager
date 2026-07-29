@@ -151,6 +151,11 @@ export class DetailForms extends IpamForms {
 
     // actions : Localiser en 3D + Modifier (mêmes conventions que equipment/rackDetail)
     // « Localiser » seulement si une extrémité au moins se résout en salle (même prédicat que locateCable).
+    // ⚠ LE CÂBLE RESTE SUR LA CLÉ « SALLE » alors que l'ÉQUIPEMENT et le PORT sont passés au prédicat
+    // CONTENEUR — ce n'est PAS un oubli. `DcInteract.locateCable` cadre par `resolvePort3D`, scopé par salle,
+    // et n'a aucune branche pour un conteneur d'étage : afficher ce bouton pour un câble dont les deux
+    // extrémités sont des posés d'étage ne rendrait qu'un toast (bouton MORT, interdit par la décision D6 du
+    // chantier « câblage des équipements d'étage »). Ce prédicat se migrera AVEC son action.
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
     if (host.locate && store.cableDcId(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = () => this.cable(store, host, id, onChanged); actions.appendChild(b); }
@@ -205,7 +210,9 @@ export class DetailForms extends IpamForms {
     const rows = ports.map((p: any) => {
       const eq: any = store.get("equipments", p.equipment_id);
       const strands = [p.strand_a, p.strand_b].filter((s) => s != null).join(" · ");
-      const loc = host.locate && store.portDcId(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-loc="${p.id}" title="${I18n.t("detail.common.locatePort")}" aria-label="${I18n.t("detail.common.locatePort")}">${Icons.LOCATE}</button>` : "";
+      // Prédicat PARTAGÉ (`core/Locatable`, miroir des refus de `DcInteract.locatePort`) — même règle que la
+      // colonne « 3D » de la fiche équipement et que le panneau de recherche.
+      const loc = host.locate && store.portLocatable(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-loc="${p.id}" title="${I18n.t("detail.common.locatePort")}" aria-label="${I18n.t("detail.common.locatePort")}">${Icons.LOCATE}</button>` : "";
       return [`${Html.escape(eq ? (eq.name || "?") : "?")} <span style="color:var(--fg-dimmer)">:</span> ${Html.escape(p.name || I18n.t("detail.common.port"))}`, `<span style="font-family:var(--mono)">${strands || "—"}</span>`, `<span class="cell-actions">${loc}</span>`];
     });
     const tw = this.tbl(root, [I18n.t("detail.bundle.colPatchPort"), I18n.t("detail.bundle.colFibers"), ""], rows, I18n.t("detail.bundle.strandsEmpty"));

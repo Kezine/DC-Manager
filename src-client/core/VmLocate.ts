@@ -21,27 +21,37 @@
         la synchro pose ce champ, rien ne garantit que l'équipement survit) ;
      3. cet équipement est RÉELLEMENT localisable.
 
-   AUTORITÉ DE LA CONDITION 3 — `Store.equipmentDcId`, et rien d'autre. C'est le
-   prédicat qui fait foi dans toute l'application (listing des équipements, fiche
-   équipement, recherche de la vue Datacenter) ; il DÉLÈGUE depuis le lot 2 à la
-   chaîne de conteneurs `src-shared/PlacementContainers`. On ne le réimplémente
-   surtout pas ici : une deuxième règle de localisabilité divergerait au premier
-   mode de placement ajouté.
-   Ce qu'il rend, mode par mode (verrouillé par les tests de `PlacementContainers`) :
-     - monté en baie (`rack` + `rack_u`) posée en salle . . . . la salle  → localisable
-     - libre POSITIONNÉ en salle (`dc_id`) . . . . . . . . . . . la salle  → localisable
-     - marge/paroi (`side`/`wall`) d'une baie en salle . . . . . la salle  → localisable
-     - posé sur une étagère d'une baie en salle  . . . . . . . . la salle  → localisable
-     - libre SANS `dc_id` (inventaire pur) . . . . . . . . . . . `null`    → NON localisable
-     - « pool » d'une baie (`rack_id` SANS `rack_u`) . . . . . . `null`    → NON localisable
-     - baie hôte elle-même HORS salle . . . . . . . . . . . . . `null`    → NON localisable
-     - posé sur un ÉTAGE (`placement_mode: "floor"`)  . . . . . `null`    → NON localisable
+   AUTORITÉ DE LA CONDITION 3 — `Store.equipmentLocatable`, et rien d'autre. C'est
+   le prédicat qui fait foi dans toute l'application (listing des équipements,
+   fiche équipement, tableau des ports, contenu d'une baie, recherche de la vue
+   Datacenter) ; il DÉLÈGUE à `core/Locatable`, seule écriture de la règle. On ne
+   la réimplémente surtout pas ici : une deuxième règle de localisabilité
+   divergerait au premier mode de placement ajouté — c'est exactement ce qui
+   s'était produit avec les sept copies de `!!equipmentDcId(x)`.
+   Ce qu'il rend, mode par mode (verrouillé par le test d'ÉQUIVALENCE de
+   `core/Locatable` : prédicat vrai ⟺ « Localiser » programme une cible caméra) :
+     - monté en baie (`rack` + `rack_u`) posée en salle . . . . . . . localisable
+     - libre POSITIONNÉ en salle (`dc_id`) . . . . . . . . . . . . . localisable
+     - marge/paroi (`side`/`wall`) d'une baie en salle . . . . . . . localisable
+     - posé sur une étagère d'une baie en salle  . . . . . . . . . . localisable
+     - posé sur un ÉTAGE, bâtiment ayant AU MOINS UNE SALLE  . . . . localisable
+     - posé sur un ÉTAGE, bâtiment SANS AUCUNE SALLE  . . . . . NON localisable
+     - libre SANS `dc_id` (inventaire pur) . . . . . . . . . . . NON localisable
+     - « pool » d'une baie (`rack_id` SANS `rack_u`) . . . . . . NON localisable
+     - baie hôte elle-même HORS salle . . . . . . . . . . . . . NON localisable
 
-   ⚠ LE CAS ÉTAGE REND `null` PAR CONCEPTION, ce n'est pas un défaut à corriger
-   ici : un équipement d'étage n'est dans aucune salle, et la vue « Localiser »
-   ne sait viser qu'une salle. En version sobre, le bouton ne s'affiche alors pas.
-   Le rendre localisable (et câblable) est un chantier À PART, cadré dans
-   `docs/placement.md` §6.4.
+   ⚠ LE CAS ÉTAGE A CHANGÉ (doctrine `docs/placement.md` §6.27 puis §6.28). Cet
+   en-tête affirmait qu'il rendait `null` « PAR CONCEPTION » et qu'il n'y avait là
+   rien à corriger : c'était vrai tant que « Localiser » ne savait viser qu'une
+   salle. `DcInteract` cadre désormais un posé d'étage en MONDE, donc le bouton
+   s'affiche — et une VM hébergée sur un équipement d'étage devient localisable.
+   Reste NON localisable le posé d'un bâtiment SANS AUCUNE SALLE : la portée
+   d'affichage s'exprime en salles, l'action refuse, le bouton reste caché.
+
+   ⚠ Ne pas confondre les numérotations de lots : le « lot 2 » que citait cet
+   en-tête était celui du chantier CONTENEUR DE PLACEMENT (la délégation de
+   `equipmentDcId` à `src-shared/PlacementContainers`), sans rapport avec le lot 2
+   du chantier « câblage des équipements d'étage » qui a écrit ces lignes.
 
    FEATURE VM AMOVIBLE : supprimer l'inventaire VM = supprimer ce fichier + le
    `locateTarget` de l'onglet VMs (`app/main.ts`) + le bouton de `DetailForms.vmDetail`
@@ -60,8 +70,10 @@ export interface VmLocateVm {
 export interface VmLocateStore {
   /** Lecture d'un enregistrement par collection ; `null` si absent. */
   get(collection: string, id: string | null | undefined): any;
-  /** Salle (datacenter_id) d'un équipement — `null` = non localisable. Autorité unique (cf. en-tête). */
-  equipmentDcId(eqOrId: any): string | null;
+  /** L'équipement est-il localisable en 3D ? Autorité unique (cf. en-tête) — ce module ne sait PAS, et ne
+      doit pas savoir, ce qui rend un équipement localisable ; il traduit seulement « localiser une VM » en
+      « localiser son hôte ». L'interface reste donc à DEUX méthodes, exactement ce qu'il lit. */
+  equipmentLocatable(eqOrId: any): boolean;
 }
 
 export class VmLocate {
@@ -77,8 +89,8 @@ export class VmLocate {
     if (!hostId) return null;                                  // 1. VM jamais rapprochée à un équipement
     const host = store.get("equipments", hostId);
     if (!host) return null;                                    // 2. référence PENDANTE (hôte supprimé du document)
-    // 3. localisable ? On passe l'ENREGISTREMENT déjà lu (et non l'id) : `equipmentDcId` accepte les deux,
-    //    et cela évite une seconde lecture d'index à chaque ligne du listing.
-    return store.equipmentDcId(host) ? hostId : null;
+    // 3. localisable ? On passe l'ENREGISTREMENT déjà lu (et non l'id) : `equipmentLocatable` accepte les
+    //    deux, et cela évite une seconde lecture d'index à chaque ligne du listing.
+    return store.equipmentLocatable(host) ? hostId : null;
   }
 }

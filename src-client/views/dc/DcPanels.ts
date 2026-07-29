@@ -121,7 +121,13 @@ export abstract class DcPanels extends DcViews2D {
     const CAP = 6;
     let n = 0; for (const d of this.store.all("datacenters")) { if (n >= CAP) break; if (m(d.name, d.location)) { out.push({ kind: "room", id: d.id, label: d.name || I18n.t("lists.ph.room"), tag: I18n.t("lists.filter.room") }); n++; } }
     n = 0; for (const r of this.store.all("racks")) { if (n >= CAP) break; if (!r.datacenter_id) continue; if (m(r.name)) { out.push({ kind: "rack", id: r.id, label: r.name || I18n.t("lists.ph.rack"), tag: I18n.t("dc.panels.tagRack") }); n++; } }
-    n = 0; for (const e of this.store.all("equipments")) { if (n >= CAP) break; if (!this.store.equipmentDcId(e.id)) continue; if (m(e.name, e.type, e.brand, e.model)) { out.push({ kind: "equipment", id: e.id, label: e.name || I18n.t("lists.ph.equipment"), tag: I18n.t("dc.panels.tagEquip") }); n++; } }
+    // ÉQUIPEMENTS : prédicat PARTAGÉ (`core/Locatable`) — la recherche ne propose que ce que « Localiser »
+    // sait atteindre, y compris désormais un posé d'ÉTAGE (doctrine §6.27 puis §6.28).
+    n = 0; for (const e of this.store.all("equipments")) { if (n >= CAP) break; if (!this.store.equipmentLocatable(e.id)) continue; if (m(e.name, e.type, e.brand, e.model)) { out.push({ kind: "equipment", id: e.id, label: e.name || I18n.t("lists.ph.equipment"), tag: I18n.t("dc.panels.tagEquip") }); n++; } }
+    // ⚠ CÂBLES : la clé « salle » est CONSERVÉE, délibérément. `locateCable` cadre par `resolvePort3D`
+    // (scopé par salle) et n'a aucune branche pour un conteneur d'étage : proposer ici un câble entre deux
+    // posés d'étage ne rendrait qu'un toast — le bouton MORT qu'interdit la décision D6 du chantier
+    // « câblage des équipements d'étage ». Cette ligne se migrera AVEC son action.
     n = 0; for (const c of this.store.all("cables")) { if (n >= CAP) break; const lab = this.cableLabelShort(c); if (m(c.name, lab) && (this.portDcId(c.from_port_id) || this.portDcId(c.to_port_id))) { out.push({ kind: "cable", id: c.id, label: lab, tag: I18n.t("dc.panels.tagCable") }); n++; } }
     n = 0; for (const w of this.store.all("waypoints")) { if (n >= CAP) break; if (!w.datacenter_id || !this.store.waypointIsPlaced(w)) continue; if (m(w.name)) { out.push({ kind: "waypoint", id: w.id, label: Waypoint.glyph(w) + " " + (w.name || I18n.t("dc.common.waypoint")), tag: I18n.t("dc.panels.tagWaypoint") }); n++; } }
     return out;

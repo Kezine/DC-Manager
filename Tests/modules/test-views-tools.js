@@ -1695,4 +1695,103 @@ module.exports = async () => {
     ck.eq(dv.view, "top", "…la vue courante n'est pas non plus basculée pour rien");
   }
   });
+
+  /* ============================================================================================
+     ÉQUIVALENCE prédicat ⟺ action — le verrou qui rend un BOUTON MORT structurellement impossible.
+     Cf. docs/placement.md §6.28, et la décision D6 du chantier « câblage des équipements d'étage ».
+
+     POURQUOI CE TEST EXISTE. `core/Locatable` se dit « MIROIR des refus de DcInteract.locateEquipment /
+     locatePort ». Un miroir n'est pas une intention : c'est une propriété, et elle se VÉRIFIE. Les tests
+     de `Locatable` (test-core-store.js) éprouvent la RÈGLE ; ceux-ci éprouvent qu'elle correspond, mode
+     de placement par mode de placement, à ce que l'action fait RÉELLEMENT. Sans cette section, les deux
+     côtés peuvent dériver sans qu'aucun test ne rougisse — exactement la panne que le lot corrige (le
+     prédicat historique `!!equipmentDcId` cachait le bouton d'un posé d'étage que l'action sait viser).
+
+     CONVENTION DE MESURE : « l'action aboutit » = elle programme une cible caméra (`_focusTarget`). Un
+     refus passe par `Notify.toast`, qui exige un DOM absent du harnais et LÈVE donc — l'exception est
+     rattrapée et vaut refus. Les deux signaux (cible posée / exception) sont redondants par construction
+     et sont vérifiés ENSEMBLE plus bas, si bien qu'une divergence entre eux ferait rougir aussi.
+     ============================================================================================ */
+  await section("« Localiser » : le PRÉDICAT des boutons est le miroir EXACT de l'action (anti-bouton mort)", async () => {
+  {
+    const s = await makeStore();
+    // Bâtiment « liege » : une salle → sa Vue étage est atteignable. Bâtiment « namur » : AUCUNE salle.
+    const dc = await s.create("datacenters", { name: "Salle A", location: "liege", floor: "0", width_mm: 8000, depth_mm: 6000, floor_x: 1000, floor_y: 1000 });
+    await s.create("floors", { location: "liege", floor: "1", width_mm: 20000, depth_mm: 15000, cell_mm: 600 });
+    await s.create("floors", { location: "namur", floor: "0", width_mm: 12000, depth_mm: 9000, cell_mm: 600 });
+    const rack = await s.create("racks", { name: "R1", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dc.id, dc_x: 1000, dc_y: 1000 });
+    const rackNu = await s.create("racks", { name: "R-hors-salle", width_mm: 600, depth: 1000, u_count: 42, location: "liege" });
+    const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", tray_type: "cantilever", u: 10, u_height: 3, tray_u: 1, depth_mm: 400 });
+    const libre = { dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 150 };
+    // ⚠ Cotes RÉDUITES pour les posés sur ÉTAGÈRE : la validation BORNE un posé au volume utile au-dessus
+    // du plateau (`tray_u: 1` sur une étagère de 3 U ⇒ ~2 U de garde), et un boîtier de 150 mm y est REFUSÉ.
+    // `create` rend alors `null` SANS lever — d'où aussi la garde `ck(eq, …)` de la boucle : sans elle, une
+    // fixture refusée se présente comme un défaut de logique (`Cannot read properties of null`).
+    const libreEtagere = { dim_mode: "free", free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 };
+
+    // Un cas par MODE DE PLACEMENT, plus les trois « presque placés » qui piègent (pool, baie hors salle,
+    // inventaire pur) et les DEUX faces de la branche étage. L'attente écrite ici est celle du PRÉDICAT ;
+    // l'équivalence avec l'action est mesurée ensuite, elle n'est pas supposée.
+    const cas = [
+      ["monté en baie posée en salle", { placement_mode: "rack", rack_id: rack.id, rack_u: 5, u_height: 1 }, true],
+      ["libre POSITIONNÉ en salle", { placement_mode: "manual", ...libre, dc_id: dc.id, dc_x: 2000, dc_y: 1500 }, true],
+      ["libre en salle SANS position (repli demi-empreinte, §6.13)", { placement_mode: "manual", ...libre, dc_id: dc.id }, true],
+      ["monté en MARGE d'une baie en salle", { placement_mode: "side", ...libre, rack_id: rack.id, rack_side_pos: "left" }, true],
+      ["monté en PAROI d'une baie en salle", { placement_mode: "wall", ...libre, rack_id: rack.id }, true],
+      ["posé sur une ÉTAGÈRE d'une baie en salle", { placement_mode: "tray", ...libreEtagere, tray_item_id: tray.id, tray_x: 10, tray_y: 10 }, true],
+      ["posé sur un ÉTAGE d'un bâtiment AYANT une salle", { placement_mode: "floor", ...libre, location: "liege", floor: "1", floor_x: 3000, floor_y: 2000 }, true],
+      ["posé sur un ÉTAGE d'un bâtiment SANS salle", { placement_mode: "floor", ...libre, location: "namur", floor: "0", floor_x: 3000, floor_y: 2000 }, false],
+      ["libre SANS dc_id (inventaire pur)", { placement_mode: "manual", ...libre }, false],
+      ["en POOL d'une baie (rack_id SANS rack_u)", { placement_mode: "rack", rack_id: rack.id }, false],
+      ["monté dans une baie HORS salle", { placement_mode: "rack", rack_id: rackNu.id, rack_u: 3 }, false],
+      ["posé sur une étagère d'une baie HORS salle", { placement_mode: "tray", ...libreEtagere, tray_item_id: (await s.create("rackItems", { rack_id: rackNu.id, kind: "tray", tray_type: "cantilever", u: 10, u_height: 3, tray_u: 1, depth_mm: 400 })).id, tray_x: 10, tray_y: 10 }, false],
+    ];
+
+    let vus = 0;
+    for (const [nom, props, attendu] of cas) {
+      const eq = await s.create("equipments", { name: "eq-" + (++vus), ...props });
+      // La validation peut REFUSER une fixture et rendre `null` sans lever : on le dit ICI, sinon l'échec
+      // se présente plus bas comme un défaut du prédicat (piège rencontré en écrivant cette section).
+      ck(eq, `fixture créée — ${nom} (un null ici = enregistrement REFUSÉ par la validation, pas un défaut du prédicat)`);
+      if (!eq) continue;
+      const port = await s.create("ports", { equipment_id: eq.id, name: "p", face_x: 0.5, face_y: 0.5, face_side: "front" });
+      const dv = new DatacenterView(s, {}, {});   // vue NEUVE par cas : ni portée ni isolement hérités du cas précédent
+      dv.dcId = dc.id;
+
+      // 1. le prédicat dit ce qu'on attend de lui
+      const propose = s.equipmentLocatable(eq.id);
+      ck.eq(propose, attendu, `prédicat — ${nom}`);
+      ck.eq(s.portLocatable(port.id), attendu, `prédicat (port) — ${nom} : un port suit son équipement porteur`);
+
+      // 2. …et l'ACTION fait exactement cela.
+      dv._focusTarget = null;
+      let leve = false;
+      try { dv.locateEquipment(eq.id); } catch (_) { leve = true; }
+      const aAbouti = dv._focusTarget !== null;
+      ck.eq(aAbouti, attendu, `action — ${nom} : « Localiser » programme une cible caméra`);
+      // 3. L'ÉQUIVALENCE elle-même, énoncée entre les DEUX MESURES et non contre la constante ci-dessus.
+      //    ⚠ La distinction n'est pas cosmétique : épinglés chacun à `attendu`, les deux côtés se
+      //    surveillent déjà — mais une dérive SIMULTANÉE (quelqu'un « corrige » l'attente en même temps
+      //    que le code) passerait au vert. Comparer les deux mesures entre elles ferme ce trou, et c'est
+      //    la propriété que `core/Locatable` REVENDIQUE dans son en-tête (« miroir des refus »).
+      ck.eq(aAbouti, propose, `ÉQUIVALENCE — ${nom} : bouton proposé ⟺ « Localiser » aboutit`);
+      ck.eq(leve, !attendu, `…et le refus passe bien par le toast (signal redondant, il ne doit pas diverger de la cible)`);
+    }
+    ck.eq(vus, 12, "les douze cas ont bien été joués (garde anti-boucle vide : une liste tronquée passerait sinon au vert)");
+
+    /* ⚠ ÉCART CONNU, NOMMÉ ET VERROUILLÉ ICI — il n'est PAS une exception à l'équivalence ci-dessus, qui
+       porte sur `locateEquipment`. Pour les PORTS, un libre rattaché à une salle mais SANS `dc_x`/`dc_y`
+       est jugé localisable (son équipement l'est) alors que `Resolver3D` refuse de résoudre ses ports
+       (garde `dc_x == null`) et que la scène ne le dessine pas. Le bouton « Localiser » d'un tel port
+       n'ouvre donc qu'un toast. C'est ANTÉRIEUR au lot (`portDcId` se comportait à l'identique) et 0
+       occurrence dans les deux corpus ; on le VERROUILLE pour qu'il soit constaté et non redécouvert. */
+    const sansPos = await s.create("equipments", { name: "libre-sans-position", placement_mode: "manual", ...libre, dc_id: dc.id });
+    const portSansPos = await s.create("ports", { equipment_id: sansPos.id, name: "p", face_x: 0.5, face_y: 0.5, face_side: "front" });
+    ck.eq(s.portLocatable(portSansPos.id), true, "écart connu : le port d'un libre NON positionné est jugé localisable…");
+    const dv2 = new DatacenterView(s, {}, {}); dv2.dcId = dc.id; dv2._focusTarget = null;
+    let leve2 = false;
+    try { dv2.locatePort(portSansPos.id); } catch (_) { leve2 = true; }
+    ck(leve2 && dv2._focusTarget === null, "…alors que `locatePort` REFUSE (port non résolu en 3D) — écart PRÉ-EXISTANT, hors périmètre du lot");
+  }
+  });
 };

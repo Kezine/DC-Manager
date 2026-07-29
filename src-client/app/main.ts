@@ -375,15 +375,19 @@ async function boot(): Promise<void> {
         if (!view) {
           const reRender = () => view!.render();
           // « Localiser en 3D » par ligne : le bouton n'est proposé que si la localisation peut ABOUTIR — mêmes
-          // prédicats que locateEquipment/locateRack/locateCable (équipement rattaché à une salle, baie posée dans
-          // une salle, câble avec au moins une extrémité en salle). Sinon le bouton n'aurait qu'un toast d'erreur
-          // (équipement d'inventaire pur, posé sur plan d'étage, baie non placée, câble en attente…).
+          // prédicats que locateEquipment/locateRack/locateCable. Sinon le bouton n'aurait qu'un toast d'erreur
+          // (équipement d'inventaire pur, baie non placée, câble en attente…).
           // La CIBLE est résolue AVANT le prédicat : sur un onglet dont la ligne n'est pas l'objet localisé
           // (VMs → leur hôte), c'est l'objet VISÉ qui doit satisfaire le prédicat, jamais la ligne.
           const locateTargetOf: (id: string) => string | null = opts.locateTarget || ((id: string) => id);
           const isLocatable =
-            opts.locate === "equipment" ? (id: string) => !!store.equipmentDcId(id)
+            opts.locate === "equipment" ? (id: string) => store.equipmentLocatable(id)
             : opts.locate === "rack" ? (id: string) => { const rk: any = store.get("racks", id); return !!(rk && rk.datacenter_id); }
+            // ⚠ LE CÂBLE RESTE SUR LA CLÉ « SALLE », DÉLIBÉRÉMENT — ce n'est PAS un oubli. `DcInteract.locateCable`
+            // n'a AUCUNE branche pour un conteneur d'étage : il cadre par `resolvePort3D`, scopé par salle. Migrer
+            // ce prédicat vers `cableContainer` afficherait le bouton d'un câble dont les deux extrémités sont des
+            // posés d'étage, et le clic ne rendrait qu'un toast — le bouton MORT que la décision D6 du chantier
+            // « câblage des équipements d'étage » interdit. Il se migrera avec son action (lot `worldLine`).
             : opts.locate === "cable" ? (id: string) => !!store.cableDcId(id)
             : null;
           const canLocate = isLocatable ? (id: string) => { const target = locateTargetOf(id); return !!target && isLocatable(target); } : undefined;

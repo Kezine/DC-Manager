@@ -11,6 +11,7 @@ import { Waypoint } from "../models/Waypoint";
 import { PortRoles } from "../registries/PortRoles";
 import { Id } from "../core/Id";
 import { Text } from "../core/Text";
+import { Locatable } from "../core/Locatable";
 import { I18n } from "../i18n/I18n";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT, LOCATIONS, RACK_DEPTH_DEFAULT } from "../domain/constants";
 import { Depths } from "../registries/Depths";
@@ -645,8 +646,14 @@ export class Store {
   sitesSorted(): any[] { return this.all("sites").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")); }
   /** Libellé d'un site : nom de l'entité → libellé legacy (LOCATIONS) → id. */
   siteLabel(id: string): string { if (!id) return "—"; const s: any = this.get("sites", id); if (s) return s.name || id; const l = LOCATIONS.find((x) => x.id === id); return l ? l.label : id; }
+  /** Salles d'un BÂTIMENT (site), tous étages confondus. Question du MODÈLE qui décide aussi d'une question
+      de VUE : la PORTÉE d'affichage de la Vue étage s'exprime en salles (`visibleDcIds`), donc un bâtiment
+      sans aucune salle ne peut pas entrer dans la scène. `DcInteract.scopeFloorBuilding` (qui élargit la
+      portée) et `core/Locatable` (qui décide d'afficher le bouton « Localiser ») posent tous deux CETTE
+      question — d'où une seule requête, ici, plutôt que deux filtres jumeaux qui divergeraient. */
+  roomsOfBuilding(location: string | null): any[] { return this.all("datacenters").filter((d) => (d.location || "") === (location || "")); }
   /** Salles d'un étage (location + floor). */
-  dcsOfFloor(location: string | null, floor: any): any[] { const f = String(floor != null ? floor : ""); return this.all("datacenters").filter((d) => (d.location || "") === (location || "") && String(d.floor || "") === f); }
+  dcsOfFloor(location: string | null, floor: any): any[] { const f = String(floor != null ? floor : ""); return this.roomsOfBuilding(location).filter((d) => String(d.floor || "") === f); }
   /** Waypoints hors-salle (OOB). */
   /** Pins d'ÉTAGE (ex-OOB) : pins hors salle rattachés à un bâtiment/étage. */
   oobWaypoints(): any[] { return this.all("waypoints").filter((w) => Waypoint.isFloorLevel(w)); }
@@ -790,6 +797,23 @@ export class Store {
     if (!c) return null;
     return this.portContainer(c.from_port_id) || this.portContainer(c.to_port_id);
   }
+
+  /* ---- placement : « cet objet est-il LOCALISABLE ? » (véracité des boutons « Localiser ») ----
+
+     ⚠ CE N'EST PAS `!!equipmentContainer(x)`. Un contenu peut avoir un conteneur parfaitement valide et
+     rester injoignable par la vue : une baie HORS SALLE en donne un (`kind: "rack"`) sans qu'aucune salle
+     n'apparaisse dans sa chaîne, et un posé d'ÉTAGE d'un bâtiment SANS SALLE en donne un que la portée
+     d'affichage — exprimée en salles — ne peut pas atteindre. La règle vit donc UNE FOIS, dans
+     `core/Locatable`, dont ces deux méthodes ne sont que le point d'entrée depuis le store (même patron
+     que `equipmentDcId` → `PlacementContainers`). */
+
+  /** L'équipement est-il localisable en 3D ? Prédicat des boutons « Localiser » — MIROIR des refus de
+      `DcInteract.locateEquipment` (verrouillé par un test d'équivalence). Généralise `!!equipmentDcId`,
+      qui cachait le bouton d'un posé d'ÉTAGE alors que l'action aboutit (doctrine §6.27 puis §6.28). */
+  equipmentLocatable(eqOrId: any): boolean { return Locatable.equipment(eqOrId, this); }
+
+  /** Le PORT est-il localisable en 3D ? Même règle que son équipement porteur. Généralise `!!portDcId`. */
+  portLocatable(portId: string | null): boolean { return Locatable.port(portId, this); }
 
   /* ---- faisceaux (trunks) : pool de fibres pioché par les PORTS des patchs d'extrémité ---- */
 

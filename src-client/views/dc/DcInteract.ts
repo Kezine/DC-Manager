@@ -1024,9 +1024,14 @@ export abstract class DcInteract extends DcPanels {
       ⚠ LIMITE ASSUMÉE : un bâtiment SANS AUCUNE salle n'a aucun moyen d'entrer dans cette portée — elle
       s'exprime en salles. Le contenu d'un tel bâtiment reste donc non affichable, et l'appelant le DIT au
       lieu de viser le vide. Lever cette limite demande une portée exprimée en BÂTIMENTS (option de
-      `multiLayout` + réglage de vue persisté + contrôle pour en sortir) : un lot à part. */
+      `multiLayout` + réglage de vue persisté + contrôle pour en sortir) : un lot à part.
+
+      ⚠ La question « ce bâtiment a-t-il une salle ? » est posée par `Store.roomsOfBuilding`, et NON par un
+      filtre écrit ici : `core/Locatable` — qui décide d'AFFICHER le bouton « Localiser » — pose la même, et
+      deux filtres jumeaux finiraient par diverger, c'est-à-dire par rouvrir le bouton mort que ce refus
+      ferme. Une seule requête, donc, et les deux répondent ensemble par construction. */
   protected scopeFloorBuilding(location: string): boolean {
-    const rooms = this.store.all("datacenters").filter((d: any) => (d.location || "") === location);
+    const rooms = this.store.roomsOfBuilding(location);
     if (!rooms.length) return false;
     rooms.forEach((d: any) => this.visibleDcIds.add(d.id));
     return true;

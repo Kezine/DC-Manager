@@ -298,11 +298,15 @@ export class RackForms extends CableForms {
     const dE = document.createElement("div"); dE.className = "section-divider"; dE.textContent = I18n.t("rack.rackDetail.equipsSection", { count: eqs.length }); root.appendChild(dE);
     if (eqs.length) {
       const tw = document.createElement("div"); tw.className = "table-wrap";
+      // Bouton « Localiser » par ligne, sous le prédicat PARTAGÉ `store.equipmentLocatable` (`core/Locatable`).
+      // ⚠ Aucun posé d'ÉTAGE ne peut figurer dans ce tableau (il liste le contenu d'une BAIE) : la migration
+      // n'y change donc STRICTEMENT RIEN. Elle est faite pour que la règle reste écrite au même endroit —
+      // c'est la divergence entre copies d'un même prédicat qui a produit le défaut que ce lot corrige.
       const rows = eqs.map((e: any) => {
         const uPos = (e.placement_mode === "rack" && e.rack_u != null)
           ? ("U" + e.rack_u + ((e.u_height || 1) > 1 ? "–U" + (e.rack_u + (e.u_height || 1) - 1) : ""))
           : (e.placement_mode === "side" ? I18n.t("rack.rackDetail.uSide") : e.placement_mode === "wall" ? I18n.t("rack.rackDetail.uWall") : "—");
-        return `<tr><td class="cell-name">${Html.escape(e.name || I18n.t("lists.ph.equipment"))}</td><td><span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span></td><td style="font-family:var(--mono)">${Html.escape(uPos)}</td><td class="cell-actions">${host.locate && store.equipmentDcId(e) ? `<button class="btn btn-ghost btn-sm icon-action" data-eq-loc="${e.id}" title="${I18n.t("lists.chrome.rowLocate")}" aria-label="${I18n.t("lists.chrome.rowLocate")}">${Icons.LOCATE}</button>` : ""}<button class="btn btn-ghost btn-sm icon-action" data-eq-view="${e.id}" title="${I18n.t("lists.chrome.rowView")}" aria-label="${I18n.t("lists.chrome.rowView")}">${Icons.INFO}</button></td></tr>`;
+        return `<tr><td class="cell-name">${Html.escape(e.name || I18n.t("lists.ph.equipment"))}</td><td><span class="pill">${Html.escape(EquipmentTypes.label(e.type))}</span></td><td style="font-family:var(--mono)">${Html.escape(uPos)}</td><td class="cell-actions">${host.locate && store.equipmentLocatable(e) ? `<button class="btn btn-ghost btn-sm icon-action" data-eq-loc="${e.id}" title="${I18n.t("lists.chrome.rowLocate")}" aria-label="${I18n.t("lists.chrome.rowLocate")}">${Icons.LOCATE}</button>` : ""}<button class="btn btn-ghost btn-sm icon-action" data-eq-view="${e.id}" title="${I18n.t("lists.chrome.rowView")}" aria-label="${I18n.t("lists.chrome.rowView")}">${Icons.INFO}</button></td></tr>`;
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("lists.col.equipment")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("rack.rackDetail.colU")}</th><th style="text-align:right;">${I18n.t("lists.chrome.actions")}</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);

@@ -1796,6 +1796,61 @@ dessiné » alors que la caméra le vise ; garde du bâtiment sans salle retiré
 **Non couvert par les tests, à juger À L'ŒIL** : la surbrillance ambre elle-même et le confort du cadrage
 (`DcThreeCamera` importe THREE, hors de portée du harnais), et le toast de refus (il exige un DOM).
 
+### 6.28 Le PRÉDICAT des boutons « Localiser » est écrit UNE fois — **IMPLÉMENTÉ**
+
+§6.27 a rendu l'ACTION possible pour un contenu d'étage ; ce lot ouvre le BOUTON qui la déclenche. L'ordre
+n'est pas un confort de découpage, c'est la décision **D6** du chantier : ouvrir le bouton d'abord aurait
+livré un **bouton mort**.
+
+**Le défaut de fond n'était pas le mot « salle », c'était la DUPLICATION.** Sept sites écrivaient la même
+question sous la forme `!!store.equipmentDcId(x)` — listings (`app/main.ts`), fiche équipement, tableau des
+ports, fiche faisceau, contenu d'une baie, panneau de recherche 3D, « Localiser une VM ». Sept copies d'une
+règle qui ne demandait qu'à diverger, et qui ont divergé : l'action a appris l'étage en §6.27, les sept
+gardes ne l'ont pas su. La règle vit désormais **une seule fois**, dans `src-client/core/Locatable` (classe
+PURE, store injecté par interface étroite — patron `PowerAnalysis`/`VmLocate`), exposée par
+`Store.equipmentLocatable` / `portLocatable`.
+
+**⚠ LE PRÉDICAT N'EST PAS `!!equipmentContainer(x)`, et c'est le cœur du lot.** Avoir un conteneur ne rend
+pas atteignable. Deux contre-exemples **mesurés**, tous deux porteurs d'une chaîne parfaitement valide :
+
+- une **baie HORS SALLE** produit un conteneur `kind: "rack"` dont la chaîne ne traverse aucune salle ;
+- un **posé d'ÉTAGE d'un bâtiment SANS AUCUNE SALLE** produit un conteneur `kind: "floor"` que la PORTÉE
+  d'affichage — exprimée en salles (`visibleDcIds`) — ne peut pas faire entrer dans la scène (limite §6.27).
+
+D'où la règle en deux branches : *la chaîne traverse une salle* **OU** *le conteneur immédiat est un étage
+dont le bâtiment a au moins une salle*. La seconde condition interroge `Store.roomsOfBuilding`, **la même
+requête** que `DcInteract.scopeFloorBuilding` emploie pour élargir la portée — pas deux filtres jumeaux, sinon
+ils divergeraient, c'est-à-dire rouvriraient le bouton mort qu'ils ferment. Le jour où la portée s'exprimera
+en bâtiments, les deux cesseront de refuser **ensemble**, par construction.
+
+**Le verrou : un test d'ÉQUIVALENCE, pas deux attentes parallèles.** Douze cas — un par mode de placement,
+plus pool / baie hors salle / inventaire pur / les deux faces de la branche étage — mesurent le prédicat
+**et** l'action (« `locateEquipment` programme-t-il une cible caméra ? »), puis comparent **les deux mesures
+entre elles**. ⚠ La nuance est le test lui-même : épinglés chacun à une constante écrite à la main, les deux
+côtés se surveillent déjà, mais une dérive **simultanée** (on « corrige » l'attente en même temps que le code)
+passerait au vert. C'est la propriété que `Locatable` revendique — « miroir des refus » — donc c'est elle
+qu'on écrit. Sonde de mutation : garde d'étage neutralisée → **5 FAIL** sur quatre couches (règle nue, prédicat
+du store, `VmLocate`, et l'équivalence elle-même) ; avec l'assertion contre constante seule, la même mutation
+n'en donnait que 4 — l'équivalence restait muette.
+
+**⚠ LES CÂBLES RESTENT SUR LA CLÉ « SALLE », DÉLIBÉRÉMENT** (trois sites : `app/main.ts`, `DetailForms`,
+panneau de recherche). Ce n'est pas un oubli : `DcInteract.locateCable` cadre par `resolvePort3D`, **scopé par
+salle**, et n'a aucune branche pour un conteneur d'étage. Migrer ces gardes afficherait le bouton d'un câble
+dont les deux extrémités sont des posés d'étage, et le clic ne rendrait qu'un toast — exactement le bouton
+mort que D6 interdit. **Un prédicat ne se migre qu'avec son action** : celui-là suivra le lot `worldLine`.
+
+**CHANGEMENTS DE COMPORTEMENT, tous voulus** : le bouton « Localiser » apparaît désormais pour un équipement
+posé sur un étage (fiche, listing, tableau de ports, recherche 3D) et pour **une VM hébergée par un tel
+équipement** ; l'en-tête de `VmLocate` affirmait le contraire « PAR CONCEPTION » — il est corrigé, et le test
+qui figeait `false` pour ce cas attend maintenant `true`. Zéro effet sur les corpus (aucun `floor`).
+
+**ÉCART CONNU, NOMMÉ ET VERROUILLÉ — pas refermé** : un équipement libre rattaché à une salle mais SANS
+`dc_x`/`dc_y` est jugé localisable (l'action replie sur la demi-empreinte, §6.13), alors que `Resolver3D`
+refuse de résoudre ses PORTS et que la scène ne le dessine pas — le bouton « Localiser » d'un tel PORT n'ouvre
+donc qu'un toast. C'est **antérieur** au lot (`portDcId` se comportait à l'identique) et sans occurrence dans
+les deux corpus ; on le verrouille par un test pour qu'il soit constaté et non redécouvert. Le refermer
+demande de trancher où l'on dessine un libre non positionné — hors périmètre.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |

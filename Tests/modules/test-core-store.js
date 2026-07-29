@@ -1,7 +1,7 @@
 /* Tests modules — entités, Store (CRUD, cascade, undo, routes, spares, sites…), helpers core.
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Entités : normalisation au constructeur", async () => {
@@ -1226,17 +1226,56 @@ module.exports = async () => {
   }
   });
 
+  await section("Locatable : la règle « cet objet est-il LOCALISABLE ? », écrite UNE fois", async () => {
+  {
+    /* La règle NUE, éprouvée sur des chaînes de conteneurs construites à la main : deux branches, et le
+       piège central du lot est la SECONDE. `!!equipmentContainer(x)` — « a-t-il un conteneur ? » — serait
+       un prédicat FAUX : une baie hors salle en fournit un, et un posé d'ÉTAGE d'un bâtiment sans salle
+       aussi, alors que ni l'un ni l'autre n'est atteignable par la vue. Cf. `docs/placement.md` §6.28. */
+    const bâtimentsPeuplés = new Set(["liege"]);
+    const scope = { get: () => null, roomsOfBuilding: (loc) => (bâtimentsPeuplés.has(loc) ? [{ id: "dc-1" }] : []) };
+
+    ck.eq(Locatable.ofChain([], scope), false, "chaîne VIDE (pool, inventaire pur) → NON localisable");
+    ck.eq(Locatable.ofChain([{ kind: "room", id: "dc-1" }], scope), true, "salle en tête → localisable");
+    ck.eq(Locatable.ofChain([{ kind: "rack", id: "r1" }, { kind: "room", id: "dc-1" }, { kind: "floor", location: "liege", floor: "0" }], scope), true,
+      "baie POSÉE en salle : la salle est PLUS LOIN dans la chaîne, et compte quand même");
+    ck.eq(Locatable.ofChain([{ kind: "tray", id: "t1" }, { kind: "rack", id: "r1" }, { kind: "building", location: "liege" }], scope), false,
+      "étagère d'une baie HORS salle : la chaîne existe mais ne traverse AUCUNE salle → NON localisable");
+    ck.eq(Locatable.ofChain([{ kind: "rack", id: "r1" }, { kind: "building", location: "liege" }], scope), false,
+      "baie hors salle : un CONTENEUR ne suffit pas — c'est tout l'écart avec `!!equipmentContainer`");
+    // La branche ÉTAGE : elle DÉPEND du modèle (le bâtiment a-t-il une salle ?), pas du seul conteneur.
+    ck.eq(Locatable.ofChain([{ kind: "floor", location: "liege", floor: "1" }, { kind: "building", location: "liege" }], scope), true,
+      "posé d'étage, bâtiment AYANT une salle → localisable (la portée peut l'atteindre)");
+    ck.eq(Locatable.ofChain([{ kind: "floor", location: "namur", floor: "0" }, { kind: "building", location: "namur" }], scope), false,
+      "posé d'étage, bâtiment SANS salle → NON localisable (la portée s'exprime en salles — l'action REFUSE)");
+    ck.eq(Locatable.ofChain([{ kind: "building", location: "liege" }], scope), false,
+      "conteneur BÂTIMENT seul (jamais produit aujourd'hui) → NON localisable : rien de plus fin à viser");
+
+    /* TOLÉRANCE des deux adaptateurs (mêmes contrats que `equipmentDcId`/`portDcId` : id OU enregistrement,
+       et référence pendante rendue `false` plutôt que levée). */
+    const docs = { equipments: { "eq-1": { id: "eq-1", placement_mode: "manual", dim_mode: "free", dc_id: "dc-1" } }, ports: { "p-1": { id: "p-1", equipment_id: "eq-1" }, "p-orph": { id: "p-orph", equipment_id: "eq-disparu" } } };
+    const store = { get: (coll, id) => (docs[coll] ? (docs[coll][id] || null) : null), roomsOfBuilding: () => [] };
+    ck.eq(Locatable.equipment("eq-1", store), true, "équipement par ID → lu dans le store");
+    ck.eq(Locatable.equipment(docs.equipments["eq-1"], store), true, "équipement par ENREGISTREMENT → aucune relecture (parité `equipmentDcId`)");
+    ck.eq(Locatable.equipment("eq-disparu", store), false, "équipement inexistant → false (et non une exception)");
+    ck.eq(Locatable.equipment(null, store), false, "équipement null → false (tolérant)");
+    ck.eq(Locatable.port("p-1", store), true, "port → règle de son ÉQUIPEMENT porteur");
+    ck.eq(Locatable.port("p-orph", store), false, "port dont l'équipement a disparu → false");
+    ck.eq(Locatable.port(null, store), false, "port null → false (tolérant)");
+  }
+  });
+
   await section("VmLocate : « Localiser » une VM vise son HÔTE — et SEULEMENT s'il est localisable (version sobre)", async () => {
   {
     // --- Partie 1 : TOLÉRANCE et référence PENDANTE, sur un store STUB (aucune donnée réelle nécessaire).
     //     Le store stub compte ses lectures : on vérifie aussi qu'une VM sans hôte ne coûte AUCUNE lecture
     //     (le prédicat est évalué par LIGNE de listing, à chaque re-rendu). ---
     let lectures = 0;
-    const stub = (equipments, dcOf) => ({
+    const stub = (equipments, localisable) => ({
       get: (coll, id) => { lectures++; return coll === "equipments" ? (equipments[id] || null) : null; },
-      equipmentDcId: (eq) => (eq ? dcOf(eq) : null),
+      equipmentLocatable: (eq) => (eq ? localisable(eq) : false),
     });
-    const vide = stub({}, () => null);
+    const vide = stub({}, () => false);
     ck.eq(VmLocate.hostEquipmentId(null, vide), null, "VM null → null (tolérant)");
     ck.eq(VmLocate.hostEquipmentId(undefined, vide), null, "VM undefined → null (tolérant)");
     ck.eq(VmLocate.hostEquipmentId({}, vide), null, "VM sans host_equipment_id → null (hôte ABSENT)");
@@ -1249,15 +1288,15 @@ module.exports = async () => {
     ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "eq-disparu" }, vide), null, "hôte INEXISTANT dans le document → null (référence pendante)");
     ck.eq(lectures, 1, "hôte inexistant : une seule lecture, et on s'arrête là");
     // Hôte présent et localisable → l'ID DE L'HÔTE est rendu (pas un booléen, pas l'id de la VM).
-    const peuple = stub({ "eq-1": { id: "eq-1" } }, () => "dc-x");
+    const peuple = stub({ "eq-1": { id: "eq-1" } }, () => true);
     ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "eq-1" }, peuple), "eq-1", "hôte présent et localisable → id de l'HÔTE");
     ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "  eq-1  " }, peuple), "eq-1", "id d'hôte trimé avant lecture ET en sortie");
-    // L'AUTORITÉ est `equipmentDcId` : le même hôte, non localisable, ne donne rien.
-    const horsSalle = stub({ "eq-1": { id: "eq-1" } }, () => null);
-    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "eq-1" }, horsSalle), null, "hôte présent mais equipmentDcId → null ⇒ AUCUN bouton");
+    // L'AUTORITÉ est `equipmentLocatable` : le même hôte, non localisable, ne donne rien.
+    const horsSalle = stub({ "eq-1": { id: "eq-1" } }, () => false);
+    ck.eq(VmLocate.hostEquipmentId({ host_equipment_id: "eq-1" }, horsSalle), null, "hôte présent mais equipmentLocatable → false ⇒ AUCUN bouton");
 
     // --- Partie 2 : INTÉGRATION sur un vrai Store, un cas par MODE DE PLACEMENT de l'hôte. C'est la partie
-    //     qui fait foi : elle traverse `Store.equipmentDcId` → `PlacementContainers`, l'autorité réelle. ---
+    //     qui fait foi : elle traverse `Store.equipmentLocatable` → `Locatable` → `PlacementContainers`. ---
     const s = await makeStore();
     const dc = await s.create("datacenters", { name: "Salle A", location: "liege", floor: "0" });
     const rack = await s.create("racks", { name: "R1", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dc.id, dc_x: 500, dc_y: 500 });
@@ -1280,9 +1319,13 @@ module.exports = async () => {
     await cas("libre SANS position (inventaire pur)", { placement_mode: "manual", dim_mode: "free" }, false);
     await cas("en POOL d'une baie (rack_id SANS rack_u)", { placement_mode: "rack", rack_id: rack.id }, false);
     await cas("monté dans une baie HORS salle", { placement_mode: "rack", rack_id: rackHorsSalle.id, rack_u: 3 }, false);
-    // ⚠ ÉTAGE : `equipmentDcId` rend `null` PAR CONCEPTION (un équipement d'étage n'est dans aucune salle).
-    // En version SOBRE, le bouton n'apparaît donc pas. Ce n'est PAS un défaut à corriger ici — cf. VmLocate.
-    await cas("posé sur un ÉTAGE (placement_mode « floor »)", { placement_mode: "floor", location: "liege", floor: "1", floor_x: 200, floor_y: 300 }, false);
+    // ⚠ ÉTAGE — CHANGEMENT DE COMPORTEMENT (doctrine §6.27 puis §6.28). Ce cas attendait `false` : le
+    // prédicat était `equipmentDcId`, qui rend `null` pour un posé d'étage. « Localiser » sait désormais le
+    // cadrer en MONDE, donc la VM qu'il héberge devient localisable — À CONDITION que son bâtiment ait au
+    // moins une salle (la portée d'affichage s'exprime en salles). Ici `dc` est une salle du bâtiment
+    // « liege », d'où `true` ; le cas SANS salle est vérifié juste après.
+    await cas("posé sur un ÉTAGE d'un bâtiment AYANT une salle", { placement_mode: "floor", location: "liege", floor: "1", floor_x: 200, floor_y: 300 }, true);
+    await cas("posé sur un ÉTAGE d'un bâtiment SANS AUCUNE salle", { placement_mode: "floor", location: "namur", floor: "0", floor_x: 200, floor_y: 300 }, false);
 
     // Une VM SANS hôte, sur un vrai store : rien à viser (cas le plus fréquent avant le 1er rapprochement).
     const orpheline = await s.create("vms", { name: "vm-sans-hote", ext_id: "c/999" });
