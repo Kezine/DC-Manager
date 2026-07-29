@@ -292,7 +292,6 @@ export abstract class DcBase {
     if (container.kind === "room") return this.displayedDcIds(dc).includes(container.id);
     if (container.kind !== "floor") return false;
     if (this.view !== "3d" || !this.multiDc) return false;
-    if (this.view !== "3d" || !this.multiDc) return false;
     return FloorLayout.floorShown(this.currentMultiLayout(), container.location, container.floor);
   }
 
