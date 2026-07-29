@@ -1,7 +1,11 @@
 import { Html } from "../core/Html";
 import { I18n } from "../i18n/I18n";
+import { EntityPicker } from "./EntityPicker";
+import type { EntityPickerElement } from "./EntityPicker";
 
 export interface SelectOption { value: string; label: string; disabled?: boolean; group?: string; }
+/** Réglages du sélecteur d'entité à recherche (cf. `ui/EntityPicker`). */
+export interface EntityPickerOpts { limit?: number; }
 export interface NumberOpts { min?: number | string; max?: number | string; step?: number | string; placeholder?: string; }
 /** Option d'un contrôle segmenté (`.rm-toggle`). `icon` = SVG de CONFIANCE (constante `ui/Icons`), jamais une donnée. */
 export interface SegOption { value: string; label?: string; icon?: string; title?: string; disabled?: boolean; }
@@ -81,6 +85,16 @@ export class FormControls {
       } else sel.appendChild(opt);
     });
     if (value != null) sel.value = value;
+  }
+
+  /** Sélecteur d'ENTITÉ à CHAMP DE RECHERCHE — à employer partout où les options désignent des
+      OBJETS DU MODÈLE (un équipement, un port, un patch) plutôt qu'une énumération fermée (un
+      statut, une famille, une orientation), conformément au principe n°14. Prend EXACTEMENT la même
+      liste d'options que `select(...)` : la règle métier qui la construit n'a pas à changer.
+      L'élément rendu expose `.value`, `setOptions(...)`, `focus()` et l'événement `change` — cf.
+      `ui/EntityPicker`, où vivent le rendu et l'arbitrage de conception. */
+  static entityPicker(options: SelectOption[], value?: string | null, opts: EntityPickerOpts = {}): EntityPickerElement {
+    return EntityPicker.build({ options, value, limit: opts.limit });
   }
 
   /** Bascule (toggle) : pilule + témoin ● + teinte (via .toggle-pill), distincte du bouton

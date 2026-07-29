@@ -55,6 +55,10 @@ export const ui = {
     placeholder: "Search…",
     remove: "Remove",
   },
+  entityPicker: {
+    clear: "Clear the selection",
+    searchPlaceholder: "Search…",
+  },
   autocomplete: {
     create: "+ Create",
     overflow_one: "+ {{count}} hidden result — refine the search",

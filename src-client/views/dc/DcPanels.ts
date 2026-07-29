@@ -779,8 +779,11 @@ export abstract class DcPanels extends DcViews2D {
     // rendait « ? » pour un équipement sans salle. On conserve ce repli à l'identique en le demandant à la
     // MÊME fonction plutôt qu'en écrivant « ? » en dur, qui figerait ici une valeur définie ailleurs.
     const emplacementDe = (e: any) => this.store.equipmentContainerLabel(e) || this.store.dcName(null);
-    const eqSel = FormControls.select([{ value: "", label: I18n.t("dc.panels.allEquipments") }].concat(eqOpts.map((e: any) => ({ value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (multi ? " · " + emplacementDe(e) : "") }))), this._cableEqFilter);
-    eqSel.style.cssText = "width:100%;margin-top:8px;font-size:11px"; eqSel.onchange = () => { this._cableEqFilter = eqSel.value; this.render(); };
+    // Le filtre porte sur des ÉQUIPEMENTS (des entités) → sélecteur à RECHERCHE (principe n°14) : la
+    // liste grossit avec les équipements d'étage et ses libellés portent l'emplacement, un `<select>`
+    // n'y était plus praticable. Options et ordre inchangés.
+    const eqSel = FormControls.entityPicker([{ value: "", label: I18n.t("dc.panels.allEquipments") }].concat(eqOpts.map((e: any) => ({ value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (multi ? " · " + emplacementDe(e) : "") }))), this._cableEqFilter);
+    eqSel.style.marginTop = "8px"; eqSel.onchange = () => { this._cableEqFilter = eqSel.value; this.render(); };
     box.appendChild(eqSel);
     const search = document.createElement("input"); search.type = "text"; search.className = "search-input"; search.placeholder = I18n.t("dc.panels.filterList"); search.style.cssText = "width:100%;margin:6px 0"; search.value = this._cableSearch;
     search.oninput = () => { this._cableSearch = search.value; this.renderCableList(listWrap, resolved); };

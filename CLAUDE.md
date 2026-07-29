@@ -104,6 +104,15 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
       pattern **`SearchPop`** (recherche-popover UNIFIÉE sur TOUS les éléments, le **clic** sur un
       résultat sélectionne/lie), comme la vue 3D et la page Certificats — **pas** un `<select>` par
       famille suivi d'une liste. La recherche traverse l'ensemble des éléments, pas une famille à la fois.
+      Dans un **FORMULAIRE**, où le champ doit AFFICHER sa valeur, ne pas gréer `SearchPop` à la main :
+      utiliser **`FormControls.entityPicker(options, value)`** (`ui/EntityPicker`), qui le compose et y
+      ajoute la valeur courante, l'effacement et l'état vide. Il prend **exactement la même liste
+      d'options que `select(...)`** — donc la règle métier qui la construit (filtre par famille,
+      contrainte de conteneur, options `disabled`, tri, `keepId`…) ne bouge PAS : on remplace le
+      contrôle, jamais la règle. Le filtrage par la saisie et les règles de valeur sont, eux, dans le
+      module pur `core/OptionSearch` (testé). ⚠ **Distinguer entité et ÉNUMÉRATION** : un statut, une
+      famille, une orientation, un mode de placement restent des `<select>` — `entityPicker` est pour
+      les objets du modèle, dont la liste est longue, croissante et à libellés composés.
     Ces primitives portent le thème, l'accessibilité et le comportement clavier ; les réimplémenter
     diverge silencieusement du reste de l'app (dette repérée sur la feature `interventions/`, à résorber).
 

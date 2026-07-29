@@ -149,8 +149,11 @@ export class CableForms extends EquipmentForms {
     const initPortA = cable ? (cable.from_port_id || preA || "") : (preA || "");
     const initPortB = cable ? (cable.to_port_id || preB || "") : (preB || "");
 
-    const selEqA = FormControls.select(eqOpts(null, eqA, null), eqA);
-    const selPortA = FormControls.select(portOpts(eqA, initPortA || null, null), initPortA);
+    // ÉQUIPEMENT et PORT sont des ENTITÉS : leur sélection passe par le sélecteur À RECHERCHE
+    // (principe n°14), et non par un `<select>` qui ne se filtre au clavier que par PRÉFIXE. Les
+    // listes ci-dessus (`eqOpts`/`portOpts`) sont INCHANGÉES — le contrôle change, pas la règle.
+    const selEqA = FormControls.entityPicker(eqOpts(null, eqA, null), eqA);
+    const selPortA = FormControls.entityPicker(portOpts(eqA, initPortA || null, null), initPortA);
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("cable.cable.equipA"), selEqA), FormControls.fieldRow(I18n.t("cable.cable.portA"), selPortA)));
     // INVERSION A ⇄ B : bouton-icône DISCRET, centré entre les deux rangées symétriques. Il permute équipements
     // ET ports du BROUILLON (aucune écriture store avant Enregistrer). Le clic est câblé plus bas (`swapEnds`),
@@ -158,8 +161,8 @@ export class CableForms extends EquipmentForms {
     const swapBtn = IconButton.build({ icon: Icons.SWAP, label: I18n.t("cable.cable.swapEnds") });
     const swapRow = document.createElement("div"); swapRow.style.cssText = "display:flex;justify-content:center;margin:-2px 0 2px;";
     swapRow.appendChild(swapBtn); root.appendChild(swapRow);
-    const selEqB = FormControls.select(eqOpts(null, eqB, null), eqB);
-    const selPortB = FormControls.select(portOpts(eqB, initPortB || null, null), initPortB);
+    const selEqB = FormControls.entityPicker(eqOpts(null, eqB, null), eqB);
+    const selPortB = FormControls.entityPicker(portOpts(eqB, initPortB || null, null), initPortB);
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("cable.cable.equipB"), selEqB), FormControls.fieldRow(I18n.t("cable.cable.portB"), selPortB)));
 
     const selType = FormControls.select([{ value: "", label: I18n.t("cable.common.pickCableType") }], cable ? (cable.cable_type_id || "") : "");
@@ -302,11 +305,11 @@ export class CableForms extends EquipmentForms {
     };
     const refresh = () => {
       rebuildTypeSelect();
-      FormUi.setOptions(selEqA, eqOpts(constraintFor("A"), selEqA.value, contrainteFor("A")), selEqA.value);
-      FormUi.setOptions(selEqB, eqOpts(constraintFor("B"), selEqB.value, contrainteFor("B")), selEqB.value);
+      selEqA.setOptions(eqOpts(constraintFor("A"), selEqA.value, contrainteFor("A")), selEqA.value);
+      selEqB.setOptions(eqOpts(constraintFor("B"), selEqB.value, contrainteFor("B")), selEqB.value);
       const pa = selPortA.value, pb = selPortB.value;
-      FormUi.setOptions(selPortA, portOpts(selEqA.value, pa, constraintFor("A")), pa);
-      FormUi.setOptions(selPortB, portOpts(selEqB.value, pb, constraintFor("B")), pb);
+      selPortA.setOptions(portOpts(selEqA.value, pa, constraintFor("A")), pa);
+      selPortB.setOptions(portOpts(selEqB.value, pb, constraintFor("B")), pb);
     };
     const curDraft = () => ({ from_port_id: selPortA.value || null, to_port_id: selPortB.value || null, cable_type_id: selType.value || null, waypoint_ids: wpState.ids });
     const updateHint = (max: string) => {
@@ -328,8 +331,8 @@ export class CableForms extends EquipmentForms {
       updateHint(max);
     };
 
-    selEqA.onchange = () => { FormUi.setOptions(selPortA, portOpts(selEqA.value, null, constraintFor("A"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
-    selEqB.onchange = () => { FormUi.setOptions(selPortB, portOpts(selEqB.value, null, constraintFor("B"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
+    selEqA.onchange = () => { selPortA.setOptions(portOpts(selEqA.value, null, constraintFor("A"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
+    selEqB.onchange = () => { selPortB.setOptions(portOpts(selEqB.value, null, constraintFor("B"))); refresh(); syncRoute(); syncStatus(false); renderNets(); };
     selPortA.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
     selPortB.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
     selType.onchange = () => { refresh(); syncRoute(); syncStatus(true); renderNets(); };
@@ -343,10 +346,10 @@ export class CableForms extends EquipmentForms {
     // simplement le bout rempli vers l'autre (les valeurs "" restent sélectionnables). Aucune écriture store.
     const swapEnds = () => {
       const aEq = selEqA.value, aPort = selPortA.value, bEq = selEqB.value, bPort = selPortB.value;
-      FormUi.setOptions(selEqA, eqOpts(null, bEq, null), bEq);
-      FormUi.setOptions(selEqB, eqOpts(null, aEq, null), aEq);
-      FormUi.setOptions(selPortA, portOpts(bEq, bPort || null, null), bPort);
-      FormUi.setOptions(selPortB, portOpts(aEq, aPort || null, null), aPort);
+      selEqA.setOptions(eqOpts(null, bEq, null), bEq);
+      selEqB.setOptions(eqOpts(null, aEq, null), aEq);
+      selPortA.setOptions(portOpts(bEq, bPort || null, null), bPort);
+      selPortB.setOptions(portOpts(aEq, aPort || null, null), aPort);
       refresh(); syncRoute(); syncStatus(true); renderNets();
     };
     swapBtn.onclick = swapEnds;
@@ -436,11 +439,12 @@ export class CableForms extends EquipmentForms {
           .filter((e: any) => (e.type === "patch_panel" || (keepId && e.id === keepId)) && e.id !== excludeId)
           .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))
           .map((e: any) => { const emplacement = store.equipmentContainerLabel(e); return { value: e.id, label: (e.name || I18n.t("cable.bundle.equipment")) + (emplacement ? " · " + emplacement : "") + (e.type === "patch_panel" ? "" : I18n.t("cable.bundle.notPatch")) }; }));
-    const epaI = FormControls.select(patchEndpointOpts(initEpB, initEpA), initEpA);
-    const epbI = FormControls.select(patchEndpointOpts(initEpA, initEpB), initEpB);
+    // Extrémités = des ENTITÉS (des patchs) → sélecteur à recherche (principe n°14), liste inchangée.
+    const epaI = FormControls.entityPicker(patchEndpointOpts(initEpB, initEpA), initEpA);
+    const epbI = FormControls.entityPicker(patchEndpointOpts(initEpA, initEpB), initEpB);
     const refreshEndpointOpts = () => {
-      FormUi.setOptions(epaI, patchEndpointOpts(epbI.value, initEpA), epaI.value);
-      FormUi.setOptions(epbI, patchEndpointOpts(epaI.value, initEpB), epbI.value);
+      epaI.setOptions(patchEndpointOpts(epbI.value, initEpA), epaI.value);
+      epbI.setOptions(patchEndpointOpts(epaI.value, initEpB), epbI.value);
     };
     epaI.onchange = refreshEndpointOpts; epbI.onchange = refreshEndpointOpts;
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("cable.bundle.endpointAField"), epaI, I18n.t("cable.bundle.endpointAHint")), FormControls.fieldRow(I18n.t("cable.bundle.endpointBField"), epbI, I18n.t("cable.bundle.endpointBHint"))));

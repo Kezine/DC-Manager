@@ -1,7 +1,7 @@
 /* Tests modules — entités, Store (CRUD, cascade, undo, routes, spares, sites…), helpers core.
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, WebglHostVisibility, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, WebglHostVisibility, OptionSearch, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Entités : normalisation au constructeur", async () => {
@@ -1608,6 +1608,99 @@ module.exports = async () => {
     // n'était PAS touchée par le bug — la ligne `view === "3d"` la masquait déjà — et le reste vérifié.
     ck.eq(V.visible("floor", true, true), false, "vue ÉTAGE (2D) → MASQUÉ même avec une salle (l'étage cible n'est pas un paramètre)");
     ck.eq(V.visible("floor", true, false), false, "vue ÉTAGE sans salle → MASQUÉ");
+  }
+  });
+
+  await section("OptionSearch : le sélecteur d'entité à RECHERCHE filtre sans jamais RECLASSER (dette n°8)", async () => {
+  {
+    /* Ce que ce verrou protège : la bascule `<select>` → sélecteur à recherche ne doit changer NI les
+       options proposées, NI leur ORDRE, NI leurs libellés, NI leur état `disabled`. Les fonctions qui
+       CONSTRUISENT ces listes (`CableForms.eqOpts`/`portOpts`/`patchEndpointOpts`) n'ont pas bougé d'une
+       ligne — le diff sur elles est VIDE, ce qui est la meilleure preuve possible de parité de la RÈGLE.
+       Reste à verrouiller le CONTRÔLE, c'est-à-dire ce module : c'est la SEULE logique nouvelle du lot.
+       `render()` et les nœuds DOM ne sont pas testables ici (Node sans DOM), d'où l'extraction. */
+    const norm = SharedSchema.normSearch;
+    const ids = (list) => list.map((o) => o.value).join(",");
+
+    /* Liste TÉMOIN calquée sur la sortie réelle de `CableForms.portOpts` : option de TÊTE (valeur vide),
+       ports libres triés alphabétiquement, puis les OCCUPÉS rejetés en FIN de liste, `disabled` et
+       nommant le câble qui les occupe (doctrine §6.29). L'accent d'« Éth1 » et le libellé de brin de
+       trunk sont là exprès : ils éprouvent la normalisation et le cas breakout. */
+    const ports = [
+      { value: "", label: "— Choisir le port —" },
+      { value: "p-a", label: "Eth0 · RJ45 · Uplink" },
+      { value: "p-b", label: "Éth1 · RJ45 · Accès" },
+      { value: "p-c", label: "SFP1 · LC · Accès · brin de TRUNK-1" },
+      { value: "p-z", label: "Eth9 · RJ45 · Accès — occupé par SW-1 : Gi0/1", disabled: true },
+    ];
+
+    // --- 1. Saisie VIDE = parcourir la liste entière, comme on déroulait un <select> ---
+    const tout = OptionSearch.filter(ports, "", { normalize: norm });
+    ck.eq(ids(tout.shown), "p-a,p-b,p-c,p-z", "saisie vide → TOUTES les options, dans l'ordre d'entrée (l'option de TÊTE exclue : c'est un état, pas une entité)");
+    ck.eq(tout.hidden, 0, "saisie vide sous le plafond → rien de masqué");
+    ck.eq(tout.shown.map((o) => (o.disabled ? "1" : "0")).join(""), "0001", "l'état `disabled` TRAVERSE le filtre : le port occupé reste VISIBLE (parité <option disabled>)");
+    ck.eq(tout.shown[3].label, "Eth9 · RJ45 · Accès — occupé par SW-1 : Gi0/1", "…et son libellé nomme toujours le câble qui l'occupe, au caractère près");
+    ck.eq(ids(OptionSearch.filter(ports, "   ", { normalize: norm }).shown), "p-a,p-b,p-c,p-z", "saisie BLANCHE = saisie vide (la requête est trimée)");
+
+    // --- 2. AUCUN reclassement : divergence VOULUE avec TargetSearch (« préfixe d'abord ») ---
+    //     Cas discriminant : « e » est un PRÉFIXE de p-a/p-b/p-z et une simple INCLUSION dans p-c
+    //     (« …brin de TRUNK-1 »). Un classement préfixe-d'abord rendrait p-a,p-b,p-z,p-c — ce qui
+    //     remonterait un port OCCUPÉ avant un port LIBRE, en détruisant la règle de tri de portOpts.
+    ck.eq(ids(OptionSearch.filter(ports, "e", { normalize: norm }).shown), "p-a,p-b,p-c,p-z", "ordre d'ENTRÉE conservé — un classement « préfixe d'abord » aurait remonté le port occupé (p-z) avant p-c");
+    ck.eq(ids(OptionSearch.filter(ports, "eth", { normalize: norm }).shown), "p-a,p-b,p-z", "« eth » → les 3 ports Ethernet, occupé compris, dans l'ordre de la liste");
+    ck.eq(ids(OptionSearch.filter(ports, "ETH0", { normalize: norm }).shown), "p-a", "casse ignorée (normSearch)");
+    ck.eq(ids(OptionSearch.filter(ports, "eth1", { normalize: norm }).shown), "p-b", "accents ignorés : « eth1 » atteint « Éth1 »");
+    ck.eq(ids(OptionSearch.filter(ports, "  eth0 ", { normalize: norm }).shown), "p-a", "espaces de bord ignorés");
+    ck.eq(ids(OptionSearch.filter(ports, "trunk", { normalize: norm }).shown), "p-c", "le libellé de BREAKOUT (brin de trunk) est cherchable");
+    ck.eq(ids(OptionSearch.filter(ports, "occupé", { normalize: norm }).shown), "p-z", "la mention d'occupation est cherchable (elle fait partie du libellé)");
+    ck.eq(ids(OptionSearch.filter(ports, "zzz", { normalize: norm }).shown), "", "aucune correspondance → aucun résultat");
+
+    // --- 3. TRONCATURE : bornée mais ANNONCÉE (taire le surplus ferait croire à une entité absente) ---
+    const borne = OptionSearch.filter(ports, "", { normalize: norm, limit: 2 });
+    ck.eq(ids(borne.shown), "p-a,p-b", "plafond 2 → les 2 PREMIÈRES, l'ordre décide (jamais un échantillon)");
+    ck.eq(borne.hidden, 2, "…et le surplus est COMPTÉ (2 masqués)");
+    ck.eq(OptionSearch.filter(ports, "eth", { normalize: norm, limit: 1 }).hidden, 2, "`hidden` compte les CORRESPONDANCES écartées par le plafond, pas les options écartées par le filtre");
+    ck.eq(OptionSearch.filter(ports, "", { normalize: norm, limit: 0 }).shown.length, 0, "plafond 0 → rien d'affiché");
+    ck.eq(OptionSearch.filter(ports, "", { normalize: norm, limit: 0 }).hidden, 4, "…mais les 4 sont annoncés masqués");
+    ck.eq(OptionSearch.filter(ports, "", { normalize: norm, limit: 99 }).hidden, 0, "plafond au-dessus du besoin → rien de masqué");
+    ck.eq(OptionSearch.DEFAULT_LIMIT, 50, "plafond par DÉFAUT = 50 (borne de coût d'AFFICHAGE, pas préférence de pertinence)");
+
+    // --- 4. Libellés de l'ÉTAT (ce qu'un <select> fermé montrait) ---
+    ck.eq(OptionSearch.placeholderLabel(ports), "— Choisir le port —", "libellé de l'état vide = celui de l'option de tête");
+    ck.eq(OptionSearch.placeholderLabel([{ value: "a", label: "A" }]), "", "aucune option de tête → libellé vide (l'appelant repliera)");
+    ck.eq(OptionSearch.labelOf(ports, "p-c"), "SFP1 · LC · Accès · brin de TRUNK-1", "libellé de la valeur courante");
+    ck.eq(OptionSearch.labelOf(ports, ""), null, "valeur vide → PAS de libellé de valeur (c'est l'état vide, cf. placeholderLabel)");
+    ck.eq(OptionSearch.labelOf(ports, null), null, "valeur nulle → null");
+    ck.eq(OptionSearch.labelOf(ports, "disparu"), null, "valeur absente de la liste → null");
+
+    // --- 5. « Y a-t-il quelque chose à chercher ? » — les deux listes DÉGÉNÉRÉES de portOpts ---
+    ck.eq(OptionSearch.selectableCount(ports), 4, "4 options réellement proposables (les `disabled` comptent : elles ont vocation à être VUES)");
+    ck.eq(OptionSearch.selectableCount([{ value: "", label: "Choisir un équipement d'abord" }]), 0, "liste réduite à son option de tête → rien à chercher (le champ cède la place au libellé)");
+    ck.eq(OptionSearch.selectableCount([]), 0, "liste vide → rien à chercher");
+
+    // --- 6. PARITÉ des règles de VALEUR avec un <select> repeuplé (attentes EXPLICITES, pas une
+    //     comparaison de la fonction à elle-même) : ce sont exactement les cas que traversent
+    //     `refresh()`, `swapEnds()` et `selEqX.onchange` dans CableForms. ---
+    ck.eq(OptionSearch.resolveValue(ports, undefined), "", "valeur NON fournie → valeur de la 1re option, comme un <select> qui sélectionne son premier <option>");
+    ck.eq(OptionSearch.resolveValue(ports, null), "", "valeur nulle → idem (fillSelect ne pose la valeur que si elle n'est pas nulle)");
+    ck.eq(OptionSearch.resolveValue([{ value: "a", label: "A" }, { value: "b", label: "B" }], undefined), "a", "sans option de tête, « pas de valeur » retient bien la PREMIÈRE option (et non \"\")");
+    ck.eq(OptionSearch.resolveValue(ports, "p-b"), "p-b", "valeur présente → conservée (c'est ce qui protège la saisie à chaque refresh)");
+    ck.eq(OptionSearch.resolveValue(ports, "p-z"), "p-z", "valeur présente mais `disabled` → CONSERVÉE : poser une valeur par programme marche aussi sur un <select> désactivé (seul l'utilisateur ne peut pas la choisir)");
+    ck.eq(OptionSearch.resolveValue(ports, "disparu"), "", "valeur ABSENTE → \"\", comme `select.value = \"inconnu\"` qui laisse selectedIndex à -1 — c'est pourquoi `keepId` existe");
+    ck.eq(OptionSearch.resolveValue([], "p-a"), "", "liste vide → \"\"");
+    ck.eq(OptionSearch.resolveValue([], undefined), "", "liste vide sans valeur → \"\" (aucune 1re option à retenir)");
+
+    // --- 7. Le SUFFIXE D'EMPLACEMENT est cherchable — c'est le gain concret du lot (doctrine §6.29/§6.31) :
+    //     ces libellés se sont allongés et un <select> natif ne s'y filtre au clavier que par PRÉFIXE. ---
+    const equipements = [
+      { value: "", label: "— Choisir l'équipement —" },
+      { value: "e-1", label: "SW-CORE-01 · Salle A" },
+      { value: "e-2", label: "Onduleur nord · Bât. B · ét. 1" },
+      { value: "e-3", label: "SW-ACCES-02 · Salle A" },
+    ];
+    ck.eq(ids(OptionSearch.filter(equipements, "salle a", { normalize: norm }).shown), "e-1,e-3", "chercher « salle a » atteint les équipements PAR LEUR EMPLACEMENT (impossible avec un <select>)");
+    ck.eq(ids(OptionSearch.filter(equipements, "bat. b", { normalize: norm }).shown), "e-2", "« bat. b » (sans accent) atteint « Bât. B » — un posé d'ÉTAGE se cherche comme les autres");
+    ck.eq(ids(OptionSearch.filter(equipements, "acces", { normalize: norm }).shown), "e-3", "et le nom reste cherchable en MILIEU de libellé");
   }
   });
 
