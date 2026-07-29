@@ -616,6 +616,13 @@ const SPEC_FIELDS = {
       // verrou « champs exposés au null silencieux » de `test-shared-validation.js` — il a mordu à l'écriture
       // de ce champ. On ne monte pas le compte verrouillé : on retire l'exposition.
       description:  { type: "string", default: "" },
+      // GROUPES (champs LOCAUX) : PARITÉ STRICTE avec les specs equipments et vms — primaire `group_id`
+      // ⊂ `group_ids` (TOUS les groupes), FK contrôlées (V2), détachées en cascade. ⚠ C'est la TROISIÈME
+      // collection porteuse de groupes : le `custom` de `Cascade.groups` ÉNUMÈRE les collections à balayer,
+      // il DOIT donc la connaître — un oubli laisserait des ids de groupe fantômes (le piège a déjà mordu
+      // une fois pour `vms`). Un test DÉRIVE la liste attendue de cette spec et la confronte à la cascade.
+      group_id:     { type: "string", nullable: true, default: null, ref: "groups" },
+      group_ids:    { type: "string[]", default: [], ref: "groups" },
   },
   networks: {
       label:         { type: "string", required: true },
@@ -1070,10 +1077,16 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   subEquipments: {
     fields: SPEC_FIELDS.subEquipments,
-    // Aucun invariant ni règle cross-entité pour l'instant : `equipment_id` est déjà couvert par `required`
-    // (V1) et par l'intégrité référentielle `ref` (V2). La règle d'APPARTENANCE d'un port à un
-    // sous-équipement de SON équipement viendra avec `ports.sub_equipment_id` (lot 4, cf. le cadrage §8.2) —
-    // elle n'a pas de sens tant que le champ n'existe pas.
+    // `equipment_id` est déjà couvert par `required` (V1) et par l'intégrité référentielle `ref` (V2).
+    // La règle d'APPARTENANCE d'un port à un sous-équipement de SON équipement viendra avec
+    // `ports.sub_equipment_id` (lot 4, cf. le cadrage §8.2) — elle n'a pas de sens tant que le champ n'existe pas.
+    invariants: [
+      // Parité equipments (T1d) / vms : le groupe primaire doit être MEMBRE de group_ids. La cascade groups
+      // repointe le primaire en cohérence ; l'invariant garantit qu'aucune écriture (API/import) ne casse la
+      // relation. ⚠ Troisième copie de la même règle : duplication ASSUMÉE (une par collection porteuse),
+      // pas un oubli de factorisation — c'est le choix déjà fait entre equipments et vms.
+      { path: "group_id", message: "Le groupe primaire doit faire partie des groupes du sous-équipement.", holds: (se) => !se.group_id || (Array.isArray(se.group_ids) && se.group_ids.includes(se.group_id)) },
+    ],
   },
   networks: {
     fields: SPEC_FIELDS.networks,

@@ -167,6 +167,31 @@ module.exports = async () => {
     ck.eq(JSON.stringify((e4g2.find((d) => d.key === "group_ids") || {}).value), JSON.stringify([]), "groupe LEGACY : E4 (group_id seul) → group_ids vidé");
     ck.eq((e4g2.find((d) => d.key === "group_id") || {}).value, null, "groupe LEGACY : primaire de E4 effacé (null)");
 
+    // -- 🚨 VERROU du piège n°1 : la cascade `groups` ÉNUMÈRE à la main les collections porteuses de
+    //    groupes, et l'oubli a déjà eu lieu une fois (`vms`). On ne vérifie donc pas une liste écrite ici
+    //    (elle se périmerait pareil) : on la DÉRIVE de la spec de validation — toute collection déclarant
+    //    `group_ids: { ref: "groups" }` DOIT être balayée — puis on la confronte au plan RÉELLEMENT produit.
+    //    Ajouter une 4ᵉ collection porteuse de groupes sans toucher à Cascade fera rougir ce test, en la nommant.
+    const groupBearing = Object.entries(Validation.COLLECTION_SPECS)
+      .filter(([, spec]) => spec.fields.group_ids && spec.fields.group_ids.ref === "groups")
+      .map(([collection]) => collection).sort();
+    ck.eq(JSON.stringify(groupBearing), JSON.stringify(["equipments", "subEquipments", "vms"]),
+      "groupes : collections porteuses dérivées de la spec (témoin — si ça change, la cascade doit suivre)");
+    for (const collection of groupBearing) {
+      // un membre de G1 dans CETTE collection, fabriqué à la volée : le test ne dépend pas du jeu de données.
+      const probe = { [collection]: [{ id: "M_" + collection, group_id: "G1", group_ids: ["G1", "G2"] }] };
+      const probeFind = (coll, field, value) => (probe[coll] || db[coll] || []).filter((o) => {
+        const v = o[field];
+        return Array.isArray(v) ? v.includes(value) : v === value;
+      });
+      const plan = Cascade.plan("groups", "G1", probeFind, fetch);
+      const det = plan.detaches.filter((d) => d.c === collection && d.id === "M_" + collection);
+      ck.eq(JSON.stringify((det.find((d) => d.key === "group_ids") || {}).value), JSON.stringify(["G2"]),
+        "groupes : « " + collection + " » est BALAYÉE par la cascade (group_ids nettoyé)");
+      ck.eq((det.find((d) => d.key === "group_id") || {}).value, "G2",
+        "groupes : « " + collection + " » — primaire repointé");
+    }
+
     // -- collection sans règle de cascade : plan vide --
     const noop = Cascade.plan("floors", "F1", find, fetch);
     ck.eq(noop.deletes.length + noop.detaches.length, 0, "collection sans règle → plan vide");
@@ -1611,6 +1636,16 @@ module.exports = async () => {
       Object.entries(spec.fields).filter(([, f]) => f.ref === "subEquipments").map(([field]) => coll + "." + field));
     ck.eq(JSON.stringify(refsToSelf), JSON.stringify([]), "sous-équip. : aucune FK ne le vise encore (ports.sub_equipment_id = lot 4)");
     ck.eq(Object.values(Validation.COLLECTION_SPECS.subEquipments.fields).some((f) => f.ref === "subEquipments"), false, "sous-équip. : AUCUNE FK auto-référente (hiérarchie plate, pas de garde anti-cycle à écrire)");
+
+    // GROUPES (lot 2) — PARITÉ STRICTE avec equipments/vms : primaire ⊂ group_ids (T1d), 3ᵉ copie de la règle.
+    ck.eq(errs({ ...ok, group_id: "G1", group_ids: ["G1", "G2"] }).length, 0, "sous-équip. : primaire membre de group_ids → valide");
+    ck.eq(errs({ ...ok, group_id: "G1", group_ids: ["G2"] }).some((e) => e.path === "group_id" && e.code === "invariant"), true, "sous-équip. : primaire ABSENT de group_ids → invariant (parité T1d)");
+    ck.eq(errs({ ...ok, group_id: null, group_ids: [] }).length, 0, "sous-équip. : aucun groupe → valide (les groupes sont facultatifs)");
+    // La CLASSE tient l'invariant d'elle-même : primaire semé dans group_ids, EN TÊTE, dédupliqué (parité Vm).
+    const SubCls = EntityRegistry.classOf("subEquipments");
+    ck.eq(JSON.stringify(new SubCls({ ...ok, group_id: "G1" }).group_ids), JSON.stringify(["G1"]), "sous-équip. : classe — primaire semé dans group_ids");
+    ck.eq(JSON.stringify(new SubCls({ ...ok, group_id: "G1", group_ids: ["G2", "G1"] }).group_ids), JSON.stringify(["G1", "G2"]), "sous-équip. : classe — primaire remis EN TÊTE, sans doublon");
+    ck.eq(Validation.DataValidator.validateRecord("subEquipments", new SubCls({ ...ok, group_id: "G1", group_ids: ["G2"] }).toJSON()).length, 0, "sous-équip. : classe — l'entité construite satisfait T1d même sur une entrée incohérente");
   }
   });
 

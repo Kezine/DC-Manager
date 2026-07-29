@@ -18,6 +18,10 @@ export class SubEquipment extends Entity implements Records.SubEquipment {
   equipment_id: string;
   /** Description libre. */
   description: string;
+  /** FK → groups : groupe PRIMAIRE (parité Equipment / Vm). `null` = aucun. TOUJOURS ∈ `group_ids`. */
+  group_id: string | null;
+  /** FK[] → groups : TOUS les groupes (primaire + secondaires) — parité Equipment / Vm. */
+  group_ids: string[];
 
   constructor(p: Props = {}) {
     super(p);
@@ -26,5 +30,14 @@ export class SubEquipment extends Entity implements Records.SubEquipment {
     this.name = (p.name || "").trim();
     this.equipment_id = p.equipment_id || "";
     this.description = p.description || "";
+    // GROUPES : parité STRICTE avec Equipment et Vm — le primaire est TOUJOURS membre de group_ids
+    // (invariant partagé), en TÊTE de liste. Pas de migration legacy à prévoir ici (la collection est
+    // neuve, aucun enregistrement ne peut porter `group_id` seul), mais on garde la MÊME forme : c'est
+    // elle qui garantit l'invariant, et diverger « parce que ce cas ne peut pas arriver » est le genre
+    // d'écart qui rend deux specs jumelles subtilement différentes.
+    this.group_id = p.group_id || null;
+    let gids: string[] = Array.isArray(p.group_ids) ? p.group_ids.filter((x: any) => typeof x === "string" && x) : [];
+    if (this.group_id) gids = [this.group_id, ...gids.filter((x) => x !== this.group_id)];
+    this.group_ids = [...new Set(gids)];
   }
 }

@@ -208,11 +208,17 @@ export class Cascade {
     },
     groups: {
       // multi-groupes : retire l'id de `group_ids` et repointe le groupe PRIMAIRE (modèle networks/network_ids),
-      // sur les ÉQUIPEMENTS **ET** les VMS (même modèle de groupes — sans le second balayage, supprimer un
-      // groupe laisserait des ids fantômes dans vms.group_ids/group_id).
+      // sur TOUTES les collections porteuses de groupes — sans un de ces balayages, supprimer un groupe
+      // laisserait des ids fantômes dans les `group_ids`/`group_id` de la collection oubliée.
+      // 🚨 CETTE LISTE EST ÉNUMÉRÉE À LA MAIN, et c'est le piège n°1 de cette règle : il a déjà mordu une
+      // fois (oubli de `vms`). Toute collection qui déclare `group_ids: { ref: "groups" }` dans
+      // `DataValidation` DOIT figurer ici. On ne la dérive pas de la spec pour garder ce fichier SANS
+      // dépendance (cf. l'en-tête) ; c'est donc un TEST qui dérive la liste attendue de la spec et la
+      // confronte au plan réellement produit — un ajout oublié rougit, en nommant la collection.
       custom: (find, _fetch, id, _deletes, detaches) => {
         Cascade.detachGroupFromMembers(find, "equipments", id, detaches);
         Cascade.detachGroupFromMembers(find, "vms", id, detaches);
+        Cascade.detachGroupFromMembers(find, "subEquipments", id, detaches);
       },
     },
     racks: {
