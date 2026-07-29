@@ -12,6 +12,7 @@ import { PortRoles } from "../registries/PortRoles";
 import { Id } from "../core/Id";
 import { Text } from "../core/Text";
 import { Locatable } from "../core/Locatable";
+import { ContainerLabel } from "../core/ContainerLabel";
 import { I18n } from "../i18n/I18n";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT, LOCATIONS, RACK_DEPTH_DEFAULT } from "../domain/constants";
 import { Depths } from "../registries/Depths";
@@ -814,6 +815,26 @@ export class Store {
 
   /** Le PORT est-il localisable en 3D ? Même règle que son équipement porteur. Généralise `!!portDcId`. */
   portLocatable(portId: string | null): boolean { return Locatable.port(portId, this); }
+
+  /* ---- placement : « comment s'appelle l'endroit de cet objet ? » (LIBELLÉS) ----
+
+     ⚠ ENCORE UNE AUTRE QUESTION que les deux blocs précédents, et c'est pourquoi c'est un TROISIÈME
+     module. `equipmentContainer` rend le conteneur IMMÉDIAT (une baie, une étagère) ; `equipmentLocatable`
+     dit si la VUE 3D peut le montrer. Nommer, c'est lire la CHAÎNE : le conteneur immédiat d'un serveur
+     monté est sa baie, mais l'utilisateur veut lire « Salle A » — ce que `dcName(equipmentDcId(x))`
+     affichait. La règle vit UNE FOIS dans `core/ContainerLabel` (doctrine §6.29). */
+
+  /** Conteneur NOMMÉ d'un équipement : la SALLE de sa chaîne, sinon l'ÉTAGE immédiat, sinon null.
+      Généralise `equipmentDcId` du côté de l'AFFICHAGE (l'ancien ne savait rendre qu'une salle). */
+  equipmentNamedContainer(eqOrId: any): PlacementContainer | null { return ContainerLabel.ofEquipment(eqOrId, this); }
+
+  /** Libellé d'un conteneur nommé (« Salle A », « Bât. X · ét. 1 »), null s'il n'y a rien à nommer.
+      Les replis d'absence restent chez l'appelant — ils diffèrent d'un site à l'autre (« non placé »,
+      « ? », suffixe vide), et les uniformiser changerait des libellés existants. */
+  containerLabel(container: PlacementContainer | null): string | null { return ContainerLabel.label(container, this); }
+
+  /** Raccourci des sites qui n'ont qu'un équipement en main. Remplace `dcName(equipmentDcId(x))`. */
+  equipmentContainerLabel(eqOrId: any): string | null { return ContainerLabel.ofEquipmentLabel(eqOrId, this); }
 
   /* ---- faisceaux (trunks) : pool de fibres pioché par les PORTS des patchs d'extrémité ---- */
 

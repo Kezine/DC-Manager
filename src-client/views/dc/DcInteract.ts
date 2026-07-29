@@ -187,8 +187,10 @@ export abstract class DcInteract extends DcPanels {
     const endLabel = (eqId: string | null) => {
       const eq: any = eqId ? this.store.get("equipments", eqId) : null;
       if (!eq) return I18n.t("dc.interact.notPlaced");
-      const dc = this.store.equipmentDcId(eq);
-      return (eq.name || I18n.t("dc.interact.patchPh")) + (dc ? " · " + this.store.dcName(dc) : I18n.t("dc.interact.notPlacedShort"));
+      // « non placé » n'est vrai que si l'objet n'a AUCUN conteneur nommable : un patch posé sur un
+      // ÉTAGE est placé, et se nomme (décision D4, doctrine §6.29). Le libellé d'une salle est inchangé.
+      const emplacement = this.store.equipmentContainerLabel(eq);
+      return (eq.name || I18n.t("dc.interact.patchPh")) + (emplacement ? " · " + emplacement : I18n.t("dc.interact.notPlacedShort"));
     };
     rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.endAPrefix"))}<b>${Html.escape(endLabel(bundle.endpoint_a_equipment_id))}</b>`));
     rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.endBPrefix"))}<b>${Html.escape(endLabel(bundle.endpoint_b_equipment_id))}</b>`));

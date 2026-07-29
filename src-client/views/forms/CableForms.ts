@@ -95,7 +95,10 @@ export class CableForms extends EquipmentForms {
           return !dc || !allowed || allowed.includes(dc);
         });
       }
-      return [{ value: "", label: I18n.t("cable.cable.pickEquip") }].concat(eqs.map((e: any) => { const dc = store.equipmentDcId(e); return { value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (dc ? " · " + store.dcName(dc) : "") }; }));
+      // ⚠ Le SUFFIXE d'emplacement nomme le conteneur (salle, ou « Bât. X · ét. 1 » pour un posé d'étage —
+      // décision D4, doctrine §6.29) ; le FILTRE ci-dessus, lui, reste sur la clé « salle » : il compare aux
+      // salles imposées par la route, et ne se migrera qu'avec la grammaire de route (lot 5 du chantier).
+      return [{ value: "", label: I18n.t("cable.cable.pickEquip") }].concat(eqs.map((e: any) => { const emplacement = store.equipmentContainerLabel(e); return { value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (emplacement ? " · " + emplacement : "") }; }));
     };
     const portOpts = (eqId: string, selectedPortId: string | null, fam: string | null) => {
       if (!eqId) return [{ value: "", label: I18n.t("cable.cable.pickEquipFirst") }];
@@ -421,7 +424,7 @@ export class CableForms extends EquipmentForms {
         store.all("equipments")
           .filter((e: any) => (e.type === "patch_panel" || (keepId && e.id === keepId)) && e.id !== excludeId)
           .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))
-          .map((e: any) => { const dc = store.equipmentDcId(e); return { value: e.id, label: (e.name || I18n.t("cable.bundle.equipment")) + (dc ? " · " + store.dcName(dc) : "") + (e.type === "patch_panel" ? "" : I18n.t("cable.bundle.notPatch")) }; }));
+          .map((e: any) => { const emplacement = store.equipmentContainerLabel(e); return { value: e.id, label: (e.name || I18n.t("cable.bundle.equipment")) + (emplacement ? " · " + emplacement : "") + (e.type === "patch_panel" ? "" : I18n.t("cable.bundle.notPatch")) }; }));
     const epaI = FormControls.select(patchEndpointOpts(initEpB, initEpA), initEpA);
     const epbI = FormControls.select(patchEndpointOpts(initEpA, initEpB), initEpB);
     const refreshEndpointOpts = () => {

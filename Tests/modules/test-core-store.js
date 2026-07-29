@@ -1,7 +1,7 @@
 /* Tests modules — entités, Store (CRUD, cascade, undo, routes, spares, sites…), helpers core.
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Entités : normalisation au constructeur", async () => {
@@ -1262,6 +1262,104 @@ module.exports = async () => {
     ck.eq(Locatable.port("p-1", store), true, "port → règle de son ÉQUIPEMENT porteur");
     ck.eq(Locatable.port("p-orph", store), false, "port dont l'équipement a disparu → false");
     ck.eq(Locatable.port(null, store), false, "port null → false (tolérant)");
+  }
+  });
+
+  await section("ContainerLabel : « comment s'appelle l'endroit de cet objet ? » — le mot JUSTE selon le conteneur", async () => {
+  {
+    /* ---- 1. LA RÈGLE NUE, sur des chaînes construites à la main ----
+       Trois branches : salle DE LA CHAÎNE (pas conteneur immédiat), étage EN TÊTE, sinon rien. */
+    ck.eq(ContainerLabel.namedOfChain([]), null, "chaîne VIDE (pool, inventaire pur) → aucun conteneur à nommer");
+    ck.eq(JSON.stringify(ContainerLabel.namedOfChain([{ kind: "room", id: "dc-1" }])), JSON.stringify({ kind: "room", id: "dc-1" }), "salle en tête → c'est elle");
+    // LE point du module : le conteneur IMMÉDIAT d'un serveur monté est sa BAIE, et l'utilisateur veut
+    // pourtant lire « Salle A ». Rendre le conteneur immédiat serait une RÉGRESSION déguisée.
+    ck.eq(JSON.stringify(ContainerLabel.namedOfChain([{ kind: "rack", id: "r1" }, { kind: "room", id: "dc-1" }, { kind: "floor", location: "liege", floor: "0" }])),
+      JSON.stringify({ kind: "room", id: "dc-1" }), "baie POSÉE en salle : c'est la SALLE qu'on nomme, pas la baie ni l'étage plus loin");
+    ck.eq(JSON.stringify(ContainerLabel.namedOfChain([{ kind: "tray", id: "t1" }, { kind: "rack", id: "r1" }, { kind: "room", id: "dc-1" }, { kind: "floor", location: "liege", floor: "0" }])),
+      JSON.stringify({ kind: "room", id: "dc-1" }), "posé sur étagère (TROIS conteneurs emboîtés) : toujours la SALLE");
+    ck.eq(JSON.stringify(ContainerLabel.namedOfChain([{ kind: "floor", location: "liege", floor: "1" }, { kind: "building", location: "liege" }])),
+      JSON.stringify({ kind: "floor", location: "liege", floor: "1" }), "posé d'ÉTAGE : l'étage IMMÉDIAT est le conteneur nommé");
+    ck.eq(ContainerLabel.namedOfChain([{ kind: "rack", id: "r1" }, { kind: "building", location: "liege" }]), null,
+      "baie HORS salle : rien de nommable — parité EXACTE avec `equipmentDcId` (arbitrage §6.29, pas un oubli)");
+    ck.eq(ContainerLabel.namedOfChain([{ kind: "tray", id: "t1" }, { kind: "rack", id: "r1" }, { kind: "building", location: "liege" }]), null,
+      "étagère d'une baie hors salle : rien de nommable non plus");
+
+    /* ---- 2. LE LIBELLÉ, sur un store STUB (les replis de `dcName` sont HÉRITÉS, pas recopiés) ---- */
+    const stub = {
+      get: () => null,
+      dcName: (id) => (id === "dc-1" ? "Salle A" : (id === "dc-nue" ? "(salle)" : "?")),
+      siteLabel: (id) => (id === "liege" ? "Bât. Liège" : id),
+    };
+    ck.eq(ContainerLabel.label(null, stub), null, "libellé d'AUCUN conteneur → null (le repli d'absence appartient à l'appelant)");
+    ck.eq(ContainerLabel.label({ kind: "room", id: "dc-1" }, stub), "Salle A", "SALLE → exactement ce que `dcName` rendait");
+    ck.eq(ContainerLabel.label({ kind: "room", id: "dc-nue" }, stub), "(salle)", "SALLE sans nom → repli « (salle) » HÉRITÉ de `dcName`, non recopié ici");
+    ck.eq(ContainerLabel.label({ kind: "room", id: "zzz" }, stub), "?", "SALLE introuvable → repli « ? » hérité de `dcName`");
+    ck.eq(ContainerLabel.label({ kind: "floor", location: "liege", floor: "1" }, stub), "Bât. Liège · ét. 1", "ÉTAGE → « bâtiment · étage » (l'identité d'un étage EST ce couple)");
+    // ⚠ LE REZ-DE-CHAUSSÉE DOIT S'AFFICHER. Mesure du lot, contre-intuitive : le piège `String(x || "")`
+    // du dépôt ne mord PAS sur ce calcul-ci (une sonde de mutation l'a prouvé — le repli `isFinite ? : 0`
+    // ramène l'un et l'autre à 0). Il mord sur la CLÉ, pas sur l'affichage ; ces deux attentes verrouillent
+    // donc le RENDU, et c'est `countLabel` qui verrouille la distinction des clés « 0 » / « ».
+    ck.eq(ContainerLabel.label({ kind: "floor", location: "liege", floor: "0" }, stub), "Bât. Liège · ét. 0", "ÉTAGE 0 (rez-de-chaussée) → « ét. 0 », ni « ét. » ni disparu");
+    ck.eq(ContainerLabel.label({ kind: "floor", location: "liege", floor: "" }, stub), "Bât. Liège · ét. 0", "ÉTAGE vide → niveau 0 (convention unique de l'app)");
+    ck.eq(ContainerLabel.label({ kind: "floor", location: "liege", floor: "-1" }, stub), "Bât. Liège · ét. -1", "ÉTAGE négatif (sous-sol) → conservé");
+    ck.eq(ContainerLabel.label({ kind: "floor", location: "namur", floor: "2" }, stub), "namur · ét. 2", "ÉTAGE d'un site sans entité → `siteLabel` replie sur l'id, comme partout");
+    ck.eq(ContainerLabel.label({ kind: "rack", id: "r1" }, stub), null, "BAIE en conteneur nommé : jamais produit par la règle, et rien à nommer si on l'y force");
+    ck.eq(ContainerLabel.label({ kind: "building", location: "liege" }, stub), null, "BÂTIMENT : idem — nommer un bâtiment changerait des libellés existants (§6.29)");
+
+    /* ---- 3. ANTI-DIVERGENCE de la normalisation d'étage ----
+       `ContainerLabel.floorNumber` DUPLIQUE `FloorLayout.floorNum` (inversion de couche core → geometry
+       refusée). Une duplication acceptée doit être VERROUILLÉE, sinon elle diverge en silence. */
+    ["0", "1", "-1", "", "2.5", "  3  ", "sous-sol", null, undefined, 0, 4, -2].forEach((v) => {
+      ck.eq(ContainerLabel.floorNumber(v), FloorLayout.floorNum(v), "floorNumber ≡ FloorLayout.floorNum sur " + JSON.stringify(v));
+    });
+
+    /* ---- 4. INTÉGRATION sur un VRAI Store : un cas par MODE DE PLACEMENT ----
+       Deux mesures par cas, comparées ENTRE ELLES : le libellé NOUVEAU, et l'expression HISTORIQUE
+       (`dc ? dcName(dc) : null`) régénérée telle quelle. Une attente EN DUR accompagne chacune — sans
+       elle, une dérive SIMULTANÉE des deux côtés passerait au vert (leçon du lot précédent). */
+    const s = await makeStore();
+    const site = await s.create("sites", { name: "Bât. Liège" });
+    const dc = await s.create("datacenters", { name: "Salle A", location: site.id, floor: "0" });
+    const rack = await s.create("racks", { name: "R1", width_mm: 600, depth: 1000, u_count: 42, datacenter_id: dc.id, dc_x: 500, dc_y: 500 });
+    const rackHorsSalle = await s.create("racks", { name: "R-pool", width_mm: 600, depth: 1000, u_count: 42, location: site.id });
+    const tray = await s.create("rackItems", { rack_id: rack.id, kind: "tray", side: "front", u: 10, u_height: 2 });
+    // Expression HISTORIQUE, telle qu'elle était écrite dans les six sites migrés (cf. `git show`).
+    const ancien = (e) => { const d = s.equipmentDcId(e); return d ? s.dcName(d) : null; };
+
+    let k = 0;
+    const cas = async (libelle, placement, attendu, memeQuAvant) => {
+      const eq = await s.create("equipments", Object.assign({ name: "eq-" + (++k) }, placement));
+      ck.eq(s.equipmentContainerLabel(eq.id), attendu, "libellé — " + libelle);
+      // La comparaison des DEUX MESURES : c'est elle qui prouve qu'on n'a rien déplacé (ou qu'on l'a
+      // déplacé EXPRÈS pour le seul mode `floor`).
+      if (memeQuAvant) ck.eq(s.equipmentContainerLabel(eq.id), ancien(eq), "PARITÉ avec l'expression historique — " + libelle);
+      else ck(s.equipmentContainerLabel(eq.id) !== ancien(eq), "DIVERGENCE VOULUE de l'expression historique — " + libelle);
+      return eq;
+    };
+    await cas("monté en baie (rack + rack_u)", { placement_mode: "rack", rack_id: rack.id, rack_u: 5 }, "Salle A", true);
+    await cas("libre positionné en salle", { placement_mode: "manual", dim_mode: "free", dc_id: dc.id, dc_x: 100, dc_y: 100 }, "Salle A", true);
+    await cas("en marge latérale d'une baie", { placement_mode: "side", rack_id: rack.id }, "Salle A", true);
+    await cas("en paroi d'une baie", { placement_mode: "wall", rack_id: rack.id }, "Salle A", true);
+    await cas("posé sur une étagère", { placement_mode: "tray", dim_mode: "free", tray_item_id: tray.id, tray_x: 10, tray_y: 10, free_w_mm: 100, free_l_mm: 100, free_h_mm: 40 }, "Salle A", true);
+    await cas("libre SANS salle (inventaire pur)", { placement_mode: "manual", dim_mode: "free" }, null, true);
+    await cas("en POOL d'une baie (rack_id SANS rack_u)", { placement_mode: "rack", rack_id: rack.id }, null, true);
+    await cas("monté dans une baie HORS salle", { placement_mode: "rack", rack_id: rackHorsSalle.id, rack_u: 3 }, null, true);
+    // ⚠ LE SEUL CHANGEMENT DE COMPORTEMENT DU LOT, et il est le BUT : ces deux-là s'annonçaient
+    // « non placé » alors qu'ils sont posés sur un étage parfaitement identifié (décision D4).
+    await cas("posé sur un ÉTAGE (ét. 1)", { placement_mode: "floor", location: site.id, floor: "1", floor_x: 200, floor_y: 300 }, "Bât. Liège · ét. 1", false);
+    await cas("posé sur un ÉTAGE au REZ-DE-CHAUSSÉE (ét. 0)", { placement_mode: "floor", location: site.id, floor: "0", floor_x: 10, floor_y: 20 }, "Bât. Liège · ét. 0", false);
+    // Un posé d'étage d'un bâtiment SANS AUCUNE SALLE se NOMME quand même : nommer n'est pas localiser.
+    // C'est la frontière avec `Locatable`, et elle se vérifie en mesurant les DEUX sur le MÊME objet.
+    const orphelin = await s.create("equipments", { name: "eq-namur", placement_mode: "floor", location: "namur", floor: "3", floor_x: 5, floor_y: 5 });
+    ck.eq(s.equipmentContainerLabel(orphelin.id), "namur · ét. 3", "posé d'étage d'un bâtiment SANS salle → NOMMÉ malgré tout");
+    ck.eq(s.equipmentLocatable(orphelin.id), false, "…et pourtant NON localisable : `ContainerLabel` et `Locatable` répondent à DEUX questions");
+
+    // Tolérances (mêmes contrats que `equipmentDcId`) + point d'entrée « conteneur » du mini-graphe.
+    ck.eq(s.equipmentContainerLabel("eq-disparu"), null, "équipement inexistant → null (et non une exception)");
+    ck.eq(s.equipmentContainerLabel(null), null, "équipement null → null (tolérant)");
+    ck.eq(s.containerLabel(null), null, "containerLabel(null) → null");
+    ck.eq(JSON.stringify(s.equipmentNamedContainer(orphelin.id)), JSON.stringify({ kind: "floor", location: "namur", floor: "3" }),
+      "equipmentNamedContainer : le CONTENEUR lui-même (ce que consomme le mini-graphe de tracé)");
   }
   });
 

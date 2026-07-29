@@ -1851,6 +1851,105 @@ donc qu'un toast. C'est **antérieur** au lot (`portDcId` se comportait à l'ide
 les deux corpus ; on le verrouille par un test pour qu'il soit constaté et non redécouvert. Le refermer
 demande de trancher où l'on dessine un libre non positionné — hors périmètre.
 
+### 6.29 Les LIBELLÉS nomment le conteneur — « salle » ou « étage », le mot JUSTE — **IMPLÉMENTÉ**
+
+Application de la décision **D4** du chantier « câblage des équipements d'étage ». §6.27 a rendu l'ACTION
+possible, §6.28 a ouvert son BOUTON ; ce lot fait dire la VÉRITÉ aux textes. Six sites annonçaient « non
+placé » (ou rien du tout) pour un équipement posé sur un ÉTAGE, alors qu'il est placé et que son
+emplacement porte un nom : bulle d'un faisceau (`DcInteract`), sélecteur d'équipement du panneau câbles
+(`DcPanels`), sélecteurs d'équipement et d'extrémité des formulaires (`CableForms`), et les deux
+extrémités du mini-graphe de tracé (`DetailForms` → `RouteMiniGraph`).
+
+**La règle vit UNE fois, dans `src-client/core/ContainerLabel`** (classe PURE, store injecté par interface
+étroite — patron `PowerAnalysis`/`VmLocate`/`Locatable`), exposée par `Store.equipmentContainerLabel` /
+`equipmentNamedContainer` / `containerLabel`. Trois branches : *la chaîne traverse une SALLE* → on nomme
+la salle ; *le conteneur IMMÉDIAT est un ÉTAGE* → « Bât. X · ét. 1 » ; sinon → `null`, l'appelant décidant
+de son repli.
+
+**⚠ LA PREMIÈRE BRANCHE SE LIT SUR LA CHAÎNE, PAS SUR LE CONTENEUR IMMÉDIAT — c'est le cœur du lot.** Le
+conteneur immédiat d'un serveur monté est sa BAIE, celui d'un boîtier posé son ÉTAGÈRE ; ce que
+l'utilisateur veut lire reste « Salle A », exactement ce que `dcName(equipmentDcId(x))` affichait. Rendre
+le conteneur immédiat aurait produit un nom de baie là où il y avait un nom de salle : une **régression
+déguisée en généralisation**. Même distinction qu'en §6.28, et c'est pourquoi le module n'est PAS
+`!!equipmentContainer(x)` transposé.
+
+**⚠ TROIS QUESTIONS, TROIS MODULES, aucun drapeau.** `equipmentContainer` rend le conteneur immédiat ;
+`Locatable` dit si la vue 3D peut MONTRER l'objet ; `ContainerLabel` dit comment son endroit s'APPELLE.
+Elles divergent pour de vrai : un posé d'étage d'un bâtiment SANS AUCUNE SALLE **se nomme** (« Bât. Namur ·
+ét. 3 ») et n'est **pas localisable** (la portée d'affichage s'exprime en salles, limite §6.27). Un test
+mesure les deux sur le MÊME objet pour que la frontière soit constatée et non redécouverte.
+
+**Le mini-graphe de tracé change de CLÉ, et c'est le seul changement de type du lot.** `RouteEndpointSpec`
+portait un `dcId: string | null` ; il porte désormais un `container`. Un id ne peut pas désigner un étage
+(identité = couple, pas d'enregistrement obligatoire), et l'extrémité alimentait TROIS consommateurs à
+partir de ce champ : le libellé de bande, le NIVEAU du mode profil (`d.floor` d'une salle — un conteneur
+étage, lui, EST son étage) et le regroupement. Dans la foulée, `RouteGraphNode.roomId` devient
+`container` : le layout pur compare des conteneurs (`PlacementContainers.same`) au lieu de deux chaînes.
+
+**⚠ LE PIÈGE `same(null, null) === false` SE RÈGLE DANS `RouteGraphLayout.sameContainer`, une fois.** Ce
+verdict est JUSTE — deux objets non placés ne sont pas « au même endroit » — mais la question posée par le
+layout n'est pas celle-là : c'est « y a-t-il une TRANSITION entre ces deux nœuds ? ». Deux nœuds hors
+conteneur consécutifs n'en constituent pas une, et l'ancien `a.roomId !== b.roomId` répondait déjà cela.
+S'en remettre à `same` seul aurait inséré une respiration horizontale ET un séparateur de profil **entre
+deux waypoints non posés de documents EXISTANTS** — le changement silencieux que le lot s'interdit. C'est
+l'erreur de classement n°2 du cadrage (`null === null` → « même salle ») rencontrée pour de vrai.
+
+**Le DÉCOMPTE du mini-graphe est le SEUL vrai site d'égalité de tout le chantier** — le cadrage en
+annonçait six. Les cinq autres ont été relevés un par un et sont autre chose : `DcPanels` (bouts de
+faisceau) teste une **APPARTENANCE** à l'ensemble des salles AFFICHÉES, `TrunkRouting.endpointDcId` est une
+**clé de PORTÉE** (tous deux → lot 4) ; `CableForms.endDcOf`, `roomOf` et la garde `k.dcId === dcP`
+comparent aux salles **produites par l'analyseur de route** (→ lot 5, avec la grammaire). Le décompte,
+lui, comptait `new Set(nodes.map(n => n.roomId))` : un `Set` d'ids ne peut pas représenter un étage, d'où
+`PlacementContainers.same` appliqué deux à deux.
+
+**Décisions prises À L'IMPLÉMENTATION**, avec ce qui a été écarté :
+
+- **Le mot du décompte BASCULE, il ne se réécrit pas.** Tant que la route ne traverse que des salles, le
+  message historique (« n étape(s) · m salle(s) ») est le bon mot et reste **au caractère près** ; dès
+  qu'un ÉTAGE apparaît, une seconde clé prend le relais (« emplacement(s) » / « location(s) »). Écarté :
+  remplacer « salle(s) » par un mot neutre partout — ç'aurait changé un libellé sur tous les documents
+  existants pour un cas qui n'existe nulle part. D4 dit « le mot juste selon le cas » ; c'est bien DEUX cas.
+- **Une baie HORS SALLE n'est toujours PAS nommée**, alors que sa chaîne connaît son bâtiment. Nommer ce
+  bâtiment serait plus vrai, mais changerait un libellé EXISTANT — hors du mandat d'un lot prospectif.
+  Arbitrage nommé, verrouillé par test, à rouvrir sur demande.
+- **Un PIN D'ÉTAGE reste sans conteneur**, donc coupe la bande comme avant. Lui donner le sien ferait
+  APPARAÎTRE une bande sur des documents existants. Ce lot ne touche qu'aux EXTRÉMITÉS (les seules à
+  passer par `RouteEndpointSpec`) ; les points de PASSAGE se généralisent avec la grammaire (lot 5). ⚠
+  Conséquence assumée : une extrémité d'étage aura sa bande, un pin du même étage n'en aura pas.
+- **`ContainerLabel.floorNumber` DUPLIQUE `FloorLayout.floorNum`**, et c'est un choix : l'importer ferait
+  dépendre `core/` de `geometry/` (qui importe déjà `core/Normalize`) pour une normalisation d'une ligne.
+  La duplication est **verrouillée par un test d'anti-divergence** valeur par valeur, comme les constantes
+  de baie répliquées.
+- **Les replis d'ABSENCE restent chez les appelants**, parce qu'ils diffèrent : `DcInteract` affiche « ·
+  non placé », `CableForms` n'affiche rien, et `DcPanels` n'avait AUCUNE garde — `dcName(null)` y rendait
+  « ? ». Ce dernier est préservé en redemandant la valeur à `dcName(null)` plutôt qu'en figeant « ? » ici.
+
+**⚠ MESURE CONTRE-INTUITIVE, à ne pas re-supposer** : le piège `String(f || "")` du dépôt (qui écrase le
+rez-de-chaussée) **ne mord PAS** sur la normalisation d'AFFICHAGE. Sonde de mutation : 0 FAIL, et 0
+divergence sur 16 valeurs — parce que le repli `isFinite ? : 0` ramène de toute façon toute valeur fausse à
+0. Le piège mord en AMONT, sur la **clé** du conteneur (`PlacementContainers.floorKey`), là où « 0 » et « »
+doivent rester deux étages DISTINCTS. Ne pas prendre ce garde-fou-ci pour une protection : ce n'en est pas
+une, et c'est le décompte (`countLabel`) qui verrouille la distinction des clés.
+
+**Sondes de mutation** : conteneur IMMÉDIAT nommé au lieu de la salle de la chaîne → **12 FAIL** (4 sur la
+règle nue, 8 en intégration dont 4 sur l'équivalence avec l'expression historique) ; cas `null`/`null`
+retiré de `sameContainer` → **3 FAIL** sur trois couches (règle, respiration, séparateurs) ; repli
+`isFinite` retiré de `floorNumber` → **5 FAIL** (rendu + anti-divergence sur 4 valeurs) ; branche ÉTAGE de
+D4 neutralisée → **10 FAIL**, dont les deux assertions de **divergence VOULUE** — sans elles, seules les
+constantes auraient parlé ; décompte ramené à un `Set` d'ids → **2 FAIL**, exactement les deux cas qu'un id
+ne peut pas exprimer (même numéro d'étage dans deux bâtiments, deux étages d'un même bâtiment) ; bascule du
+mot D4 supprimée → **5 FAIL**.
+
+**INVARIANT VÉRIFIÉ, pas supposé** : aucun libellé existant ne bouge. Les DEUX corpus ont été rejoués —
+expression historique (`dc ? dcName(dc) : null`) contre expression nouvelle, objet par objet : **48
+équipements et 572 ports, 0 divergence**. Cohérent avec la mesure d'ouverture du chantier (aucun
+`placement_mode: "floor"` nulle part), et c'est bien ce qu'il fallait établir plutôt que de le déduire.
+
+**Non couvert par les tests, à juger À L'ŒIL** : la LONGUEUR du libellé d'étage dans les sélecteurs et la
+bulle (« Bât. X · ét. 1 » est plus long qu'un nom de salle, et le mini-graphe TRONQUE ses libellés de
+bande), et le choix du mot « emplacement(s) » dans le décompte. Rien de tout cela n'apparaît tant qu'aucun
+équipement d'étage n'existe.
+
 ## 7. État de la convergence
 
 | Mode | Conteneur hôte | Repère résolu | Ports | État |

@@ -138,7 +138,9 @@ export class DetailForms extends IpamForms {
       const p: any = pid ? store.get("ports", pid) : null;
       if (!p) return null;
       const eq: any = store.get("equipments", p.equipment_id);
-      return { label: eq ? (eq.name || "?") : "?", sub: I18n.t("detail.cable.portSub", { name: p.name || "?" }), dcId: store.equipmentDcId(p.equipment_id) };
+      // CONTENEUR NOMMÉ (salle traversée, sinon étage immédiat) et non plus un id de salle : le
+      // mini-graphe en tire à la fois le libellé de la bande, le niveau et le regroupement (§6.29).
+      return { label: eq ? (eq.name || "?") : "?", sub: I18n.t("detail.cable.portSub", { name: p.name || "?" }), container: store.equipmentNamedContainer(p.equipment_id) };
     };
     root.appendChild(RouteMiniGraph.render(store, store.cableRoute(c), {
       endpointA: epFromPort(c.from_port_id),
@@ -196,7 +198,7 @@ export class DetailForms extends IpamForms {
     const epSpec = (eqId: string | null): RouteEndpointSpec | null => {
       const eq: any = eqId ? store.get("equipments", eqId) : null;
       if (!eq) return null;
-      return { label: eq.name || I18n.t("detail.bundle.patchFallback"), sub: I18n.t("detail.bundle.endpointPatch"), dcId: store.equipmentDcId(eq.id) };
+      return { label: eq.name || I18n.t("detail.bundle.patchFallback"), sub: I18n.t("detail.bundle.endpointPatch"), container: store.equipmentNamedContainer(eq.id) };
     };
     root.appendChild(RouteMiniGraph.render(store, r, {
       endpointA: epSpec(b.endpoint_a_equipment_id),

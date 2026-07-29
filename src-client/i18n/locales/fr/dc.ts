@@ -42,12 +42,17 @@ export const dc = {
     cableCount_one: "{{count}} câble",
     cableCount_other: "{{count}} câbles",
     floorShort: "ét. {{n}}",
+    /* Nom d'un conteneur ÉTAGE : son identité EST le couple (bâtiment, étage), le libellé aussi. */
+    floorInSite: "{{site}} · {{floor}}",
   },
   routeMini: {
     empty: "Aucun tracé à afficher (extrémités non posées).",
     modeChain: "Chaîne",
     modeProfile: "Profil",
     stepsRooms: "{{steps}} étape(s) · {{rooms}} salle(s)",
+    /* Variante employée dès qu'un ÉTAGE est traversé : « salle(s) » serait alors FAUX (décision D4 —
+       le message nomme ce que l'utilisateur voit). Le mot couvre les deux natures sans jargon. */
+    stepsPlaces: "{{steps}} étape(s) · {{places}} emplacement(s)",
     notPlacedSuffix: " (non posé)",
     floorPin: "pin d'étage · {{floor}}",
     roomExit: "sortie de salle",

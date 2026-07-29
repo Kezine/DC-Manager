@@ -768,7 +768,12 @@ export abstract class DcPanels extends DcViews2D {
     resolved.forEach((rc) => { const pa: any = this.store.get("ports", rc.cable.from_port_id), pb: any = this.store.get("ports", rc.cable.to_port_id); if (pa) eqIds.add(pa.equipment_id); if (pb) eqIds.add(pb.equipment_id); });
     const eqOpts = [...eqIds].map((id) => this.store.get("equipments", id)).filter(Boolean).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
     if (this._cableEqFilter && !eqIds.has(this._cableEqFilter)) this._cableEqFilter = "";
-    const eqSel = FormControls.select([{ value: "", label: I18n.t("dc.panels.allEquipments") }].concat(eqOpts.map((e: any) => ({ value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (multi ? " · " + this.store.dcName(this.store.equipmentDcId(e)) : "") }))), this._cableEqFilter);
+    // Suffixe d'emplacement (mode multi-salles) : « Salle A », ou « Bât. X · ét. 1 » pour un posé d'étage
+    // (décision D4, doctrine §6.29). ⚠ PARITÉ — ce site n'avait AUCUNE garde de nullité : `dcName(null)`
+    // rendait « ? » pour un équipement sans salle. On conserve ce repli à l'identique en le demandant à la
+    // MÊME fonction plutôt qu'en écrivant « ? » en dur, qui figerait ici une valeur définie ailleurs.
+    const emplacementDe = (e: any) => this.store.equipmentContainerLabel(e) || this.store.dcName(null);
+    const eqSel = FormControls.select([{ value: "", label: I18n.t("dc.panels.allEquipments") }].concat(eqOpts.map((e: any) => ({ value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (multi ? " · " + emplacementDe(e) : "") }))), this._cableEqFilter);
     eqSel.style.cssText = "width:100%;margin-top:8px;font-size:11px"; eqSel.onchange = () => { this._cableEqFilter = eqSel.value; this.render(); };
     box.appendChild(eqSel);
     const search = document.createElement("input"); search.type = "text"; search.className = "search-input"; search.placeholder = I18n.t("dc.panels.filterList"); search.style.cssText = "width:100%;margin:6px 0"; search.value = this._cableSearch;

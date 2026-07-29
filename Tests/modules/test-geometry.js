@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -300,7 +300,12 @@ module.exports = async () => {
   await section("RouteGraphLayout : mini-graphe de tracé (pur)", async () => {
   {
     const G = ROUTE_GRAPH;
-    const N = (roomId, extra = {}) => Object.assign({ roomId, roomLabel: roomId || "", z: null }, extra);
+    /* ⚠ Le nœud porte désormais un CONTENEUR et non un id de salle (doctrine §6.29) : un id ne peut pas
+       désigner un ÉTAGE, dont l'identité est le couple (bâtiment, étage). Le constructeur ci-dessous
+       garde la même ERGONOMIE (`N("A")` = salle A) pour que les attentes historiques restent lisibles
+       telles quelles — ce qu'on migre est la CLÉ, pas ce que le layout produit. */
+    const N = (room, extra = {}) => Object.assign({ container: room ? { kind: "room", id: room } : null, roomLabel: room || "", z: null }, extra);
+    const NF = (loc, fl, extra = {}) => Object.assign({ container: { kind: "floor", location: loc, floor: fl }, roomLabel: loc + " · ét. " + fl, z: null }, extra);
     // trajet type : patch A → chemin bas → exit A → pin d'étage → exit B → chemin haut → patch B
     const nodes = [
       N("A", { endpoint: true }), N("A", { z: -80 }), N("A", { z: -80 }),
@@ -359,6 +364,70 @@ module.exports = async () => {
     ck(Math.abs(kA - kB) < 1e-9, "profil multi-étage : échelle z COMMUNE à tous les étages");
     ck(pf.floors[1].x1 >= pf.xs[5] + G.EP_W / 2, "profil multi-étage : l'extrémité à étage hérité compte dans l'emprise de SON étage");
     ck(pf.floors[0].x1 < pf.floors[1].x0, "profil multi-étage : emprises d'étages disjointes (dalles séparées à l'écran)");
+
+    /* ---- CLÉ DE REGROUPEMENT GÉNÉRALISÉE : salle OU ÉTAGE (doctrine §6.29) ----
+       Le layout ne compare plus deux ids mais deux CONTENEURS (`PlacementContainers.same`). Trois
+       propriétés à prouver : (a) un conteneur ÉTAGE se groupe comme une salle ; (b) deux étages du
+       MÊME numéro dans des bâtiments DIFFÉRENTS ne se confondent pas — un id n'aurait pas pu les
+       distinguer, c'est la raison d'être du couple ; (c) le cas `null`/`null` conserve le comportement
+       historique (aucune transition entre deux nœuds sans conteneur). */
+    const surEtage = [NF("liege", "1", { endpoint: true }), NF("liege", "1", { z: 0 }), NF("liege", "1", { endpoint: true })];
+    const chE = RouteGraphLayout.chain(surEtage);
+    ck.eq(chE.bands.length, 1, "conteneur ÉTAGE : une bande, comme une salle (le layout ne connaît plus la nature)");
+    ck.eq(chE.bands[0].from + "-" + chE.bands[0].to, "0-2", "conteneur ÉTAGE : la bande couvre les 3 nœuds du même étage");
+    ck.eq(chE.bands[0].label, "liege · ét. 1", "conteneur ÉTAGE : la bande porte le libellé résolu par l'appelant");
+    ck.eq(chE.xs[1] - chE.xs[0], G.GAP_EP, "conteneur ÉTAGE : aucune respiration DANS le même étage");
+
+    const deuxBatiments = [NF("liege", "1", { endpoint: true }), NF("namur", "1", { endpoint: true })];
+    const chB = RouteGraphLayout.chain(deuxBatiments);
+    ck.eq(chB.bands.length, 2, "MÊME numéro d'étage, bâtiments DIFFÉRENTS → deux bandes (l'identité est le COUPLE)");
+    ck.eq(chB.xs[1] - chB.xs[0], G.GAP_EP + G.GAP_ROOM, "MÊME numéro d'étage, bâtiments différents → respiration de changement");
+    const memeEtage = RouteGraphLayout.chain([NF("liege", "1", { endpoint: true }), NF("liege", "1", { endpoint: true })]);
+    ck.eq(memeEtage.xs[1] - memeEtage.xs[0], G.GAP_EP, "DISCRIMINATION : le même couple ne déclenche PAS de respiration");
+    const etageDifferent = RouteGraphLayout.chain([NF("liege", "1", { endpoint: true }), NF("liege", "2", { endpoint: true })]);
+    ck.eq(etageDifferent.xs[1] - etageDifferent.xs[0], G.GAP_EP + G.GAP_ROOM, "MÊME bâtiment, étages différents → respiration de changement");
+
+    /* (c) LE PIÈGE : `PlacementContainers.same(null, null)` rend `false`. Une bascule naïve aurait
+       inséré ici une respiration et un séparateur là où le code historique (`null !== null` → faux)
+       n'en mettait aucun — sur des documents EXISTANTS (deux waypoints non posés à la suite). */
+    ck.eq(RouteGraphLayout.sameContainer(null, null), true, "sameContainer(null, null) = VRAI — deux nœuds hors conteneur ne font pas une TRANSITION");
+    ck.eq(RouteGraphLayout.sameContainer(null, { kind: "room", id: "A" }), false, "sameContainer : absence vs salle → transition");
+    ck.eq(RouteGraphLayout.sameContainer({ kind: "room", id: "A" }, { kind: "room", id: "A" }), true, "sameContainer : même salle → aucune transition");
+    const horsConteneur = [N("A", { endpoint: true }), N(null, { z: 0 }), N(null, { z: 0 }), N("A", { endpoint: true })];
+    const chN = RouteGraphLayout.chain(horsConteneur);
+    ck.eq(chN.xs[2] - chN.xs[1], G.GAP_WP, "deux nœuds SANS conteneur à la suite : écart NU, aucune respiration (parité historique)");
+    ck.eq(RouteGraphLayout.profile(horsConteneur).separators.length, 2, "deux nœuds SANS conteneur : 2 séparateurs (entrée/sortie), pas 3");
+    ck.eq(chN.bands.length, 2, "deux nœuds SANS conteneur : la bande est coupée, et pas fusionnée au retour");
+  }
+  });
+
+  await section("RouteMiniGraph.countLabel : compter des CONTENEURS distincts, et les nommer juste (§6.29)", async () => {
+  {
+    /* LE seul vrai site d'ÉGALITÉ du chantier « câblage des équipements d'étage ». Il comptait
+       `new Set(nodes.map(n => n.roomId))` : un `Set` d'ids ne peut PAS représenter un étage, dont
+       l'identité est le couple (bâtiment, étage). D'où `PlacementContainers.same`, appliqué deux à deux. */
+    const R = (id) => ({ container: { kind: "room", id } });
+    const F = (loc, fl) => ({ container: { kind: "floor", location: loc, floor: fl } });
+    const RIEN = { container: null };
+
+    // --- PARITÉ : tant que la route ne traverse que des SALLES, le message historique est INCHANGÉ,
+    //     au caractère près (attente écrite EN DUR, pas dérivée du code).
+    ck.eq(RouteMiniGraph.countLabel([R("a"), R("a"), R("b")], 3), "3 étape(s) · 2 salle(s)", "deux salles distinctes → message HISTORIQUE, mot « salle(s) »");
+    ck.eq(RouteMiniGraph.countLabel([R("a"), R("a"), R("a")], 1), "1 étape(s) · 1 salle(s)", "une seule salle, répétée → comptée UNE fois");
+    ck.eq(RouteMiniGraph.countLabel([RIEN, RIEN], 2), "2 étape(s) · 0 salle(s)", "aucun conteneur → 0, et le mot « salle(s) » (rien ne dit qu'un étage est en jeu)");
+    ck.eq(RouteMiniGraph.countLabel([R("a"), RIEN, R("a")], 2), "2 étape(s) · 1 salle(s)", "un tronçon hors conteneur ne crée PAS une salle de plus");
+
+    // --- LE MOT JUSTE (décision D4) : dès qu'un ÉTAGE est traversé, « salle(s) » serait FAUX.
+    ck.eq(RouteMiniGraph.countLabel([R("a"), F("liege", "1")], 2), "2 étape(s) · 2 emplacement(s)", "salle + étage → le mot bascule sur « emplacement(s) »");
+    ck.eq(RouteMiniGraph.countLabel([F("liege", "1"), F("liege", "1")], 0), "0 étape(s) · 1 emplacement(s)", "deux fois le MÊME étage → compté une fois");
+
+    // --- CE QU'UN `Set` D'IDS N'AURAIT PAS PU FAIRE : distinguer deux étages de même NUMÉRO dans des
+    //     bâtiments différents, et confondre deux étages différents d'un même bâtiment.
+    ck.eq(RouteMiniGraph.countLabel([F("liege", "1"), F("namur", "1")], 2), "2 étape(s) · 2 emplacement(s)", "même numéro d'étage, bâtiments DIFFÉRENTS → DEUX emplacements");
+    ck.eq(RouteMiniGraph.countLabel([F("liege", "1"), F("liege", "2")], 2), "2 étape(s) · 2 emplacement(s)", "même bâtiment, étages DIFFÉRENTS → deux emplacements");
+    // Le rez-de-chaussée n'est pas l'absence d'étage : « 0 » et « » sont DEUX clés distinctes ici (la
+    // normalisation d'affichage les rapproche, la clé de placement ne les confond pas).
+    ck.eq(RouteMiniGraph.countLabel([F("liege", "0"), F("liege", "0")], 1), "1 étape(s) · 1 emplacement(s)", "rez-de-chaussée : « 0 » est une clé comme une autre, pas un vide");
   }
   });
 

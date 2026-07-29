@@ -3,6 +3,9 @@ import type { RouteAnalysis } from "../store/CableRouteAnalyzer";
 import { Dom } from "../ui/Dom";
 import { Waypoint } from "../models/Waypoint";
 import { RouteGraphLayout, RouteGraphNode, ROUTE_GRAPH } from "../geometry/RouteGraphLayout";
+import { ContainerLabel } from "../core/ContainerLabel";
+import { PlacementContainers } from "../../src-shared/PlacementContainers";
+import type { PlacementContainer } from "../../src-shared/PlacementContainers";
 import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
@@ -14,12 +17,16 @@ import { I18n } from "../i18n/I18n";
    `Dom.svg`, classes `.gnode`/`.gedge`, tirets par statut, atténuation au survol).
 
    Deux lectures basculables quand la route a des waypoints :
-   - CHAÎNE  : topologie salle → salle (bandes de fond par salle) ;
+   - CHAÎNE  : topologie conteneur → conteneur (bandes de fond par conteneur) ;
    - PROFIL  : hauteur `dc_z` en ordonnée (dalle, faux-plancher, chemins hauts).
    ============================================================================= */
 
-/** Extrémité affichée (résolue par l'appelant : équipement de patch OU équipement:port). */
-export interface RouteEndpointSpec { label: string; sub: string; dcId: string | null }
+/** Extrémité affichée (résolue par l'appelant : équipement de patch OU équipement:port).
+    ⚠ `dcId: string | null` est devenu `container` (doctrine §6.29) : un id de salle ne pouvait pas
+    désigner un ÉTAGE, dont l'identité est le couple (bâtiment, étage). L'appelant fournit le conteneur
+    NOMMÉ de l'extrémité (`Store.equipmentNamedContainer`) ; le libellé, le niveau et le regroupement en
+    sont TOUS les trois dérivés ici — l'appelant n'a plus à répondre trois fois à la même question. */
+export interface RouteEndpointSpec { label: string; sub: string; container: PlacementContainer | null }
 
 export interface RouteMiniGraphOptions {
   endpointA?: RouteEndpointSpec | null;
@@ -74,8 +81,7 @@ export class RouteMiniGraph {
       toggle.appendChild(mkBtn("chain", I18n.t("dc.routeMini.modeChain"))); toggle.appendChild(mkBtn("profile", I18n.t("dc.routeMini.modeProfile")));
       head.appendChild(toggle);
       const count = document.createElement("span"); count.className = "form-hint";
-      const rooms = new Set(nodes.map((n) => n.roomId).filter(Boolean)).size;
-      count.textContent = I18n.t("dc.routeMini.stepsRooms", { steps: route.steps.length, rooms });
+      count.textContent = this.countLabel(nodes, route.steps.length);
       head.appendChild(count);
       wrap.appendChild(head);
     }
@@ -96,17 +102,21 @@ export class RouteMiniGraph {
 
   private static buildNodes(store: Store, route: RouteAnalysis, opts: RouteMiniGraphOptions): RmNode[] {
     const nodes: RmNode[] = [];
-    // étage d'une salle (dc.floor, convention floorLabel : vide/libre → 0 ; salle inconnue → null)
-    const levelOfDc = (dcId: string | null): number | null => {
-      const d: any = dcId ? store.get("datacenters", dcId) : null;
-      if (!d) return null;
-      const n = parseFloat(d.floor); return isFinite(n) ? n : 0;
+    /* Niveau (étage numérique) d'un CONTENEUR — l'ordonnée du mode profil s'empile par niveau.
+       Une SALLE porte son étage sur son enregistrement ; un conteneur ÉTAGE, lui, EST son étage, il n'y
+       a plus de salle à interroger (doctrine §6.4). null = niveau inconnu, hérité du voisin au layout. */
+    const levelOf = (container: PlacementContainer | null): number | null => {
+      if (!container) return null;
+      if (container.kind === "floor") return ContainerLabel.floorNumber(container.floor);
+      if (container.kind !== "room") return null;
+      const d: any = store.get("datacenters", container.id);
+      return d ? ContainerLabel.floorNumber(d.floor) : null;
     };
     const pushEndpoint = (spec: RouteEndpointSpec | null | undefined) => {
       if (!spec) return;
       nodes.push({
-        endpoint: true, roomId: spec.dcId, roomLabel: spec.dcId ? store.dcName(spec.dcId) : "",
-        z: null, level: levelOfDc(spec.dcId), glyph: "", label: spec.label, sub: spec.sub,
+        endpoint: true, container: spec.container, roomLabel: store.containerLabel(spec.container) || "",
+        z: null, level: levelOf(spec.container), glyph: "", label: spec.label, sub: spec.sub,
       });
     };
     pushEndpoint(opts.endpointA);
@@ -114,11 +124,16 @@ export class RouteMiniGraph {
       const wp = s.wp, floor = s.type === "floor";
       const placed = floor || !!wp.datacenter_id;
       const pinLevel = parseFloat(wp.floor);   // pin d'étage : son étage propre (même convention)
+      /* ⚠ Un PIN D'ÉTAGE reste SANS conteneur, et c'est délibéré : il coupe la bande comme avant. Lui
+         donner son conteneur étage ferait APPARAÎTRE une bande sur des documents existants, alors que ce
+         lot ne touche qu'aux EXTRÉMITÉS (les seules à passer par `RouteEndpointSpec`). Les points de
+         PASSAGE se généralisent avec la grammaire de route — lot 5 du chantier. */
+      const container: PlacementContainer | null = (!floor && wp.datacenter_id) ? { kind: "room", id: String(wp.datacenter_id) } : null;
       nodes.push({
-        roomId: floor ? null : (wp.datacenter_id || null),
-        roomLabel: (!floor && wp.datacenter_id) ? store.dcName(wp.datacenter_id) : "",
+        container,
+        roomLabel: store.containerLabel(container) || "",
         z: (wp.dc_z != null && isFinite(wp.dc_z)) ? wp.dc_z : null,
-        level: floor ? (isFinite(pinLevel) ? pinLevel : 0) : levelOfDc(wp.datacenter_id || null),
+        level: floor ? (isFinite(pinLevel) ? pinLevel : 0) : levelOf(container),
         glyph: Waypoint.glyph(wp),
         label: wp.name || (floor ? Waypoint.floorLabel(wp) : I18n.t("dc.common.waypoint")),
         sub: this.stepSub(wp, s.type) + (placed ? "" : I18n.t("dc.routeMini.notPlacedSuffix")),
@@ -126,6 +141,23 @@ export class RouteMiniGraph {
     });
     pushEndpoint(opts.endpointB);
     return nodes;
+  }
+
+  /** Décompte des conteneurs DISTINCTS traversés + le mot juste pour les nommer (décision D4).
+      ⚠ Un `Set` d'ids ne convient PLUS : un étage n'a pas d'id, son identité est le couple
+      (bâtiment, étage) — d'où la comparaison STRUCTURELLE `PlacementContainers.same`, appliquée deux à
+      deux. C'est le seul vrai site d'ÉGALITÉ de tout le chantier (les autres comparent à une salle
+      produite par l'analyseur de route, ou testent une APPARTENANCE à l'ensemble affiché).
+
+      PUBLIQUE à dessein : c'est la seule règle MÉTIER de ce fichier (tout le reste y est du SVG), et
+      elle se prouve sans DOM — le harnais l'éprouve sur des nœuds construits à la main. */
+  static countLabel(nodes: Array<{ container: PlacementContainer | null }>, steps: number): string {
+    const distincts: PlacementContainer[] = [];
+    nodes.forEach((n) => { if (n.container && !distincts.some((c) => PlacementContainers.same(c, n.container))) distincts.push(n.container); });
+    // Tant que la route ne traverse que des salles, le message HISTORIQUE est le bon mot — il ne bouge pas.
+    return distincts.some((c) => c.kind !== "room")
+      ? I18n.t("dc.routeMini.stepsPlaces", { steps, places: distincts.length })
+      : I18n.t("dc.routeMini.stepsRooms", { steps, rooms: distincts.length });
   }
 
   /** Libellé de type d'une étape (tooltip + lisibilité du glyphe). */
