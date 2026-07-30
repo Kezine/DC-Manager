@@ -35,19 +35,11 @@ export class GlobalSearchPalette {
   static open(store: Store, host: FormHost): void {
     const corpus = GlobalSearchSources.build(store);   // snapshot — cf. en-tête
     const root = document.createElement("div");
-    // Hauteur MINIMALE stable : sans elle, la modale s'ouvre à la hauteur d'un champ + une ligne d'aide,
-    // puis SAUTE à chaque frappe quand la liste apparaît/disparaît. On réserve l'espace des résultats
-    // d'emblée — même plafond que la liste (cf. SearchPop inlineResults) + le champ et l'aide.
-    root.style.minHeight = "min(56vh, 520px)";
 
     const pop = new SearchPop({
       placeholder: I18n.t("search.placeholder"),
-      grow: true,           // barre pleine largeur, loupe intégrée — même vocabulaire que les listings
-      minChars: 2,          // pas d'inondation au focus : une palette n'est pas un sélecteur à parcourir
-      // EN FLUX, pas en popover : le corps de la modale ROGNAIT le popover absolu (overflow) — c'est le
-      // piège annoncé au handover pour `.dc-side`, rencontré ici en premier. Ici les résultats ne sont
-      // pas une liste déroulante par-dessus un formulaire : ils SONT le contenu de la palette.
-      inlineResults: true,
+      grow: true,      // barre pleine largeur, loupe intégrée — même vocabulaire que les listings
+      minChars: 2,     // pas d'inondation au focus : une palette n'est pas un sélecteur à parcourir
       fetch: (query) => {
         const families = GlobalSearch.rank(corpus, query, {
           normalize: Schema.normSearch,

@@ -67,22 +67,11 @@ export interface SearchPopOptions {
       de contrôle unifiée, avec la loupe INTÉGRÉE (`Icons.SEARCH`) — même vocabulaire que la recherche des
       ListView. Défaut false : rendu compact d'origine (sélecteur d'entité en modale, etc.). */
   grow?: boolean;
-  /** Résultats EN FLUX (dans la mise en page, sous le champ) au lieu du popover flottant. Pour les hôtes
-      dont l'overflow ROGNERAIT un popover absolu — la palette de recherche globale dans la modale en est
-      le cas fondateur (le handover l'annonçait déjà pour `.dc-side`). La liste garde sa classe (items,
-      survol, ascenseur) mais quitte le positionnement absolu ; elle est alors SŒUR du champ dans un
-      conteneur colonne, pas son enfant (en mode `grow` le champ est un « pill » flex : un enfant statique
-      y serait couché dans la rangée). Styles posés EN LIGNE — même précédent que les items `disabled` :
-      on ne rouvre pas `dc-manager.css` (BOM + double-encodage, retouche au niveau octets) pour un mode. */
-  inlineResults?: boolean;
 }
 
 export class SearchPop {
-  /** Conteneur positionné (contexte du popover absolu) : input + bouton ✕ [+ popover, hors mode inline]. */
+  /** Conteneur positionné (contexte du popover absolu) : input + bouton ✕ + popover. */
   private readonly wrap: HTMLElement;
-  /** Élément RACINE rendu (`element`) : `wrap` en mode popover ; en mode `inlineResults`, un conteneur
-      COLONNE {wrap, liste} — la liste vit à côté du champ, pas dedans (cf. l'option). */
-  private readonly root: HTMLElement;
   private readonly input: HTMLInputElement;
   private readonly pop: HTMLElement;
   /** Garde de fraîcheur : ignore la réponse d'une saisie devancée par une plus récente. */
@@ -150,27 +139,14 @@ export class SearchPop {
     if (grow) {
       const icon = document.createElement("span"); icon.className = "lc-search-ic";
       icon.setAttribute("aria-hidden", "true"); icon.innerHTML = Icons.SEARCH;
-      this.wrap.append(icon, this.input, clear);
+      this.wrap.append(icon, this.input, clear, this.pop);
     } else {
-      this.wrap.append(this.input, clear);
-    }
-    if (opts.inlineResults === true) {
-      // EN FLUX : la liste quitte le positionnement absolu et devient SŒUR du champ dans un conteneur
-      // colonne (cf. l'option). Largeur libérée (le popover est bridé à 380 px pour une toolbar), hauteur
-      // relevée mais BORNÉE : la liste garde SON ascenseur, le champ reste visible pendant qu'on défile —
-      // laisser défiler la modale entière ferait sortir le champ de l'écran. L'ombre portée tombe (une
-      // liste en flux n'est pas « au-dessus » du contenu, elle EST le contenu).
-      this.pop.style.cssText = "position:static;min-width:0;max-width:none;box-shadow:none;margin-top:8px;max-height:min(56vh, 520px)";
-      this.root = document.createElement("div");
-      this.root.append(this.wrap, this.pop);
-    } else {
-      this.wrap.appendChild(this.pop);   // popover ABSOLU historique, ancré au conteneur (position:relative)
-      this.root = this.wrap;
+      this.wrap.append(this.input, clear, this.pop);
     }
   }
 
-  /** Conteneur à insérer chez l'hôte (champ + ✕ + liste — flottante, ou en flux si `inlineResults`). */
-  get element(): HTMLElement { return this.root; }
+  /** Conteneur à insérer dans une toolbar (input + bouton ✕ + popover). */
+  get element(): HTMLElement { return this.wrap; }
 
   /** Vide le champ et ferme le popover (invalide toute réponse en vol). */
   reset(): void {
