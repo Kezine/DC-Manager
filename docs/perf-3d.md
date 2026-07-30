@@ -23,6 +23,19 @@
     quand la baie est masquée individuellement.
   - **`hidden3dRacks`** (masquage de baie) : couche `rackId` — le groupe de baie (et ses ports, hors groupe) bascule
     en visibilité. Le moteur WebGL construit TOUTES les baies (le filtrage est en visibilité, pas au build).
+  - **`showFaceImages`** : DEUX mécanismes selon le chemin de rendu, même geste instantané. Montés en U : images =
+    PLANS séparés (couche `faceImage`) → visibilité classique. Boîtes 6 faces (`buildEquipBox` — libre en salle,
+    étage, étagère, marge, paroi) : l'image est un **MATÉRIAU** de la BoxGeometry, rien à masquer — chaque boîte à
+    image porte donc DEUX jeux de matériaux (`userData.faceImageSwap` : `avec` images / `sans` corps coloré ; les
+    faces sans image PARTAGENT la même instance) et `applyLayerVisibility` **ÉCHANGE le jeu actif**. La décision
+    (jeu actif + repère d'orientation) vit dans `FaceImagePolicy` (module PUR, testé en Node — même démarche que
+    `SceneLayoutSignature`). Le jeu « avec » garde ses textures même débranché (le chargement async y aboutit hors
+    écran ; cache `imgTexCache` inchangé) ; `applyColorMode` recolore les DEUX jeux (sinon le jeu débranché
+    réafficherait l'ancien mode couleur) ; `disposeObjectResources` (DcThreeBase) libère AUSSI le jeu débranché
+    (sinon fuite GPU à chaque reconstruction). Le REPÈRE D'ORIENTATION (4 arêtes accent de la face avant) est
+    désormais TOUJOURS construit : visible si `showOrientMarks` ET (pas d'image avant OU images masquées) — sans
+    cette règle, une boîte à image avant perdrait TOUT repère quand la bascule masque son image
+    (tag `frontImageAsMarker`, arbitré par `layerVisible`).
   - **`colorMode`** : recoloration **en place** (`applyColorMode`), pas de rebuild.
   - `applyOptionsDiff` route : `eqRebuild` (= showRackSides) → `rebuildRacks/Free` ; `eqVis` → `applyLayerVisibility` ;
     `eqColor` → `applyColorMode` ; `cb` → `rebuildCables`.

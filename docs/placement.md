@@ -1643,9 +1643,12 @@ appliqué au bout : le lot ne corrige pas deux chemins, il en retire un.
 
 ⚠ **Deux comportements VISIBLES changent** — conséquence de l'alignement sur le rendu des équipements
 libres, pas d'un choix propre à l'étagère : le nom d'un posé n'est plus écrit sur les DEUX faces ±Y mais
-sur sa PROPRE façade ; et son image de façade n'obéit plus à la bascule « images de façade », qui n'a
-jamais agi sur les équipements libres (l'image y est un MATÉRIAU de la boîte, pas un plan taggé). À
-juger à l'œil.
+sur sa PROPRE façade ; et son image de façade n'obéissait plus à la bascule « images de façade », qui
+n'avait jamais agi sur les équipements libres (l'image y est un MATÉRIAU de la boîte, pas un plan taggé).
+À juger à l'œil. **Cette seconde dette est REFERMÉE depuis** : la bascule ÉCHANGE désormais le jeu de
+matériaux des boîtes 6 faces (`faceImageSwap`, décision dans `FaceImagePolicy` — module PUR testé) au
+lieu de masquer des plans, et gouverne donc les CINQ modes servis par `buildEquipBox` comme les montés
+en U. Détail du mécanisme : `docs/perf-3d.md`, entrée `showFaceImages`.
 
 **Ce que le verrou de cohérence couvre, exactement** : un test compare la boîte que le rendu DESSINE
 (cotes propres + lacet effectif) à celle que `trayEquipBoxLocal` RAPPORTE, sur les 8 combinaisons. Sondé,

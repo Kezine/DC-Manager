@@ -1,7 +1,7 @@
 /* Tests modules — vues & outils pilotés par hôte injecté (Graph/Datacenter, outils 2D/3D, images).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, FormSave, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, PivotBounds, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, FormSave, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, FaceImagePolicy, PivotBounds, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("FormSave : un formulaire n'annonce JAMAIS un succès que le Store a REFUSÉ", async () => {
@@ -1070,6 +1070,49 @@ module.exports = async () => {
     ck.eq(SceneLayoutSignature.action(A, A2, { hasContent: true, deltaEligible: true }), "rebuild", "action : MÊMES salles, disposition différente → rebuild (le bug corrigé)");
     ck.eq(SceneLayoutSignature.action(A, { ...A }, { hasContent: true, deltaEligible: true }), "keep", "action : rien n'a changé → keep (aucune reconstruction)");
     ck.eq(SceneLayoutSignature.action(A, { ...A }, { hasContent: true, deltaEligible: false }), "keep", "action : rien n'a changé, delta inapplicable → keep");
+  });
+
+  /* ==========================================================================
+     BASCULE « IMAGES DE FAÇADE » sur les BOÎTES 6 FACES (FaceImagePolicy).
+     Elle n'agissait QUE sur les montés en U (images = PLANS masquables) ; sur
+     les cinq modes servis par `buildEquipBox` (libre salle, étage, étagère,
+     marge, paroi) l'image est un MATÉRIAU — rien à masquer, bascule sans effet
+     (dette consignée à docs/placement.md §6.24). Le correctif ÉCHANGE le jeu de
+     matériaux (avec/sans) au lieu de masquer. Le moteur WebGL n'étant pas
+     chargeable en Node (THREE), la DÉCISION est extraite dans un module PUR —
+     même démarche que SceneLayoutSignature ci-dessus — et c'est ELLE qu'on
+     verrouille : `buildEquipBox` la consulte au build, `applyLayerVisibility`
+     à chaque bascule, `layerVisible` pour le repère d'orientation. Le swap
+     effectif des meshes, lui, reste à valider À L'ŒIL.
+     ========================================================================== */
+  await section("FaceImagePolicy : la bascule « Images de façade » gouverne AUSSI les boîtes 6 faces", async () => {
+    // Jeux OPAQUES : le module ne les ouvre jamais (aucun THREE) — n'importe quelle valeur fait foi.
+    const avec = ["jeu texturé"], sans = ["jeu uni"];
+    const swap = { avec, sans };
+
+    // ---- choix du jeu ACTIF : au BUILD (état courant de l'option) comme à la BASCULE (même source)
+    ck.eq(FaceImagePolicy.materials(swap, true), avec, "bascule ON → jeu AVEC images (matériaux texturés)");
+    ck.eq(FaceImagePolicy.materials(swap, false), sans, "bascule OFF → jeu SANS images : une scène CONSTRUITE bascule éteinte sort UNIE");
+    // le swap ne fabrique RIEN : mêmes INSTANCES à chaque lecture — les textures chargées (async) dans le
+    // jeu débranché réapparaissent telles quelles quand on rebascule, sans rechargement ni double instance.
+    ck.eq(FaceImagePolicy.materials(swap, true), FaceImagePolicy.materials(swap, true), "OFF→ON : l'instance d'ORIGINE revient (échange, pas reconstruction)");
+
+    // ---- repère d'orientation (4 arêtes accent de la face avant) : matrice COMPLÈTE
+    //      orient × image avant × bascule. Règle : visible si « repères » actifs ET que l'image d'avant
+    //      ne fait pas déjà le travail (absente, OU masquée par la bascule). Les arêtes étant désormais
+    //      TOUJOURS construites, cette décision est la SEULE chose qui les affiche ou non.
+    const matrice = [
+      // [showOrientMarks, frontImageAsMarker, showFaceImages, attendu, libellé]
+      [true, false, false, true, "repères ON · pas d'image avant · images OFF → arêtes VISIBLES"],
+      [true, false, true, true, "repères ON · pas d'image avant · images ON → arêtes VISIBLES (rien ne les remplace)"],
+      [true, true, false, true, "repères ON · image avant MASQUÉE par la bascule → arêtes VISIBLES (sinon plus AUCUN repère : le piège du lot)"],
+      [true, true, true, false, "repères ON · image avant AFFICHÉE → arêtes MASQUÉES (l'image indique déjà l'avant)"],
+      [false, false, false, false, "repères OFF → jamais d'arêtes (pas d'image, images OFF)"],
+      [false, false, true, false, "repères OFF → jamais d'arêtes (pas d'image, images ON)"],
+      [false, true, false, false, "repères OFF → jamais d'arêtes, même image masquée"],
+      [false, true, true, false, "repères OFF → jamais d'arêtes, même image affichée"],
+    ];
+    matrice.forEach(([orient, marqueur, images, attendu, libelle]) => ck.eq(FaceImagePolicy.orientEdgesVisible(orient, marqueur, images), attendu, libelle));
   });
 
   await section("DatacenterView : les réglages de vue qui DÉPLACENT la géométrie invalident la scène 3D", async () => {

@@ -139,7 +139,13 @@ export abstract class DcThreeCamera extends DcThreeBase {
   protected setFocusHi(mesh: THREE.Object3D | null, on: boolean): void {
     if (!mesh) return;
     const HI = 0xf5a623;
-    const m = (mesh as any).material as any; if (!m) return;
+    // Boîte à SWAP « Images de façade » : surligner/restaurer l'UNION des DEUX jeux de matériaux, jamais
+    // `mesh.material` — le jeu actif peut être ÉCHANGÉ entre l'application et la restauration (bascule de
+    // l'option pendant une surbrillance « Localiser », persistante par nature). Indexer l'union, STABLE par
+    // construction, rend les deux opérations indépendantes de la bascule : sans ça, le jeu débranché
+    // garderait la teinte ambre et la réafficherait au retour des images. Les instances PARTAGÉES entre
+    // jeux (faces sans image) y figurent deux fois : même valeur écrite/restaurée deux fois, sans effet.
+    const m = this.highlightMaterials(mesh); if (!m) return;
     if (Array.isArray(m)) {
       const HIC = 0xffce8a;   // teinte ambre pour les faces texturées (MeshBasic sans emissive)
       if (on) {
@@ -165,6 +171,17 @@ export abstract class DcThreeCamera extends DcThreeBase {
       if ((mesh as any).userData._focEmi != null && m.emissive) { m.emissive.setHex((mesh as any).userData._focEmi); (mesh as any).userData._focEmi = null; }
       if ((mesh as any).userData._focCol != null && m.color) { m.color.setHex((mesh as any).userData._focCol); (mesh as any).userData._focCol = null; }
     }
+  }
+
+  /** Matériaux sur lesquels une SURBRILLANCE (survol/focus) s'applique et se restaure. En général
+      `mesh.material` ; pour une boîte à swap « Images de façade » (`userData.faceImageSwap`, cf.
+      DcThreeScene.buildEquipBox), l'UNION `avec + sans` : la comptabilité save/restore (`_emiArr`…)
+      indexe ce tableau, qui doit donc être IDENTIQUE entre l'application et la restauration — or
+      `mesh.material` change à chaque bascule de l'option. L'union est stable, couvre le jeu débranché
+      (qui reviendra à l'écran tel quel), et son ORDRE est déterministe par construction. */
+  protected highlightMaterials(mesh: THREE.Object3D): any {
+    const ud = (mesh as any).userData, swap = ud && ud.faceImageSwap;
+    return swap ? swap.avec.concat(swap.sans) : (mesh as any).material;
   }
 
   /** Recentre le PIVOT d'orbite sur le point de scène au CENTRE de l'écran (1re surface, sinon plan du sol). Ce point
@@ -938,7 +955,9 @@ export abstract class DcThreeCamera extends DcThreeBase {
 
   protected setHover(mesh: THREE.Object3D | null, on: boolean): void {
     if (!mesh) return;
-    const m = (mesh as any).material as any; if (!m) return;
+    // même détour que `setFocusHi` : sur une boîte à swap « Images de façade », l'union des deux jeux
+    // (stable) remplace `mesh.material` (échangeable pendant la surbrillance) — cf. highlightMaterials.
+    const m = this.highlightMaterials(mesh); if (!m) return;
     // Couleurs de surbrillance : accent BLEU par défaut ; surchargées par `_hoverColor` (mode routage → vert
     // « ok », parité avec le CSS 2D `.dc-routing …:hover`). La restauration (off) relit les valeurs SAUVÉES,
     // indépendantes de la couleur appliquée.

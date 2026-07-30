@@ -322,20 +322,28 @@ export abstract class DcThreeBase {
     if (this.content && this.scene) this.scene.remove(this.content);
     // NB : on ne libère PAS les textures (`material.map`) ici — elles sont détenues par `texCache` et
     // réutilisées d'un rebuild à l'autre (libérées seulement au `dispose` final).
-    this.content?.traverse((o: any) => {
-      if (o.geometry) o.geometry.dispose();
-      if (o.material) { const m = o.material; (Array.isArray(m) ? m : [m]).forEach((mm: any) => { if (o.userData && o.userData.ownTex && mm.map) mm.map.dispose(); mm.dispose && mm.dispose(); }); }
-    });
+    this.content?.traverse((o: any) => this.disposeObjectResources(o));
     this.content = null;
   }
 
   /** Vide un groupe et libère la géométrie/les matériaux de ses enfants (textures détenues par texCache). */
   protected disposeGroup(g: THREE.Group): void {
-    g.traverse((o: any) => {
-      if (o.geometry) o.geometry.dispose();
-      if (o.material) { const m = o.material; (Array.isArray(m) ? m : [m]).forEach((mm: any) => { if (o.userData && o.userData.ownTex && mm.map) mm.map.dispose(); mm.dispose && mm.dispose(); }); }
-    });
+    g.traverse((o: any) => this.disposeObjectResources(o));
     g.clear();
+  }
+
+  /** Libère géométrie + matériaux d'UN objet du graphe (corps commun de disposeContent/disposeGroup).
+      Y COMPRIS le jeu de matériaux DÉBRANCHÉ du swap « Images de façade » (`userData.faceImageSwap`,
+      cf. DcThreeScene.buildEquipBox) : `o.material` ne référence que le jeu ACTIF — sans ce détour,
+      l'autre jeu fuirait ses ressources GPU à chaque reconstruction. Les instances PARTAGÉES entre les
+      deux jeux (faces sans image) sont libérées deux fois : `dispose()` est sans effet la seconde fois.
+      Les TEXTURES, elles, restent détenues par `imgTexCache`/`texCache` (réutilisées de rebuild en
+      rebuild) — seule exception `ownTex` (clone recadré propre au mesh), libérée avec lui. */
+  private disposeObjectResources(o: any): void {
+    if (o.geometry) o.geometry.dispose();
+    const swap = o.userData && o.userData.faceImageSwap;
+    const sets: any[] = swap ? [swap.avec, swap.sans] : (o.material ? [o.material] : []);
+    sets.forEach((m: any) => (Array.isArray(m) ? m : [m]).forEach((mm: any) => { if (o.userData && o.userData.ownTex && mm.map) mm.map.dispose(); mm.dispose && mm.dispose(); }));
   }
 
   protected resize(): void {

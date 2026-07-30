@@ -30,6 +30,7 @@ import { DcThreeCamera } from "./DcThreeCamera";
 import { PivotBounds } from "../../../geometry/PivotBounds";   // bornage du pivot d'orbite aux murs virtuels des salles (géométrie pure)
 import { LABEL_STANDOFF_MM } from "./DcThreeBase";   // saillie anti z-fighting partagée (labels d'équipement + de baie)
 import { SceneLayoutSignature } from "./SceneLayoutSignature";   // signature de disposition + décision keep/roomDelta/rebuild (module PUR, testé)
+import { FaceImagePolicy } from "./FaceImagePolicy";   // bascule « Images de façade » sur les boîtes 6 faces : jeu de matériaux actif + repère d'orientation (module PUR, testé)
 import type { DcThreeOptions, RoomDesc, SceneCtx, Theme } from "./DcThreeBase";
 
 export type { DcThreeOptions } from "./DcThreeBase";
@@ -407,22 +408,45 @@ export class DcThreeScene extends DcThreeCamera {
       // numéro d'U sur les emplacements LIBRES : visible seulement si les emplacements libres ET les noms d'équipement sont affichés.
       slotlabel: !!o.showPlaceholders && !!o.showEqNames };
     let v = true;
-    if (u.layer && u.layer in on) v = on[u.layer];
+    if (u.layer === "orient") {
+      // Repère d'orientation : quand l'image AVANT de la boîte sert déjà de repère (`frontImageAsMarker`,
+      // posé par buildEquipBox), les arêtes accent ne s'affichent que si la bascule « Images de façade »
+      // MASQUE cette image — affichées ensemble, elles feraient doublon ; masquées ensemble, la boîte
+      // n'aurait plus AUCUN repère. La matrice (orient × image avant × bascule) vit dans FaceImagePolicy
+      // (module PUR) — la même source que le swap de matériaux, testée en Node.
+      v = FaceImagePolicy.orientEdgesVisible(on.orient, !!u.frontImageAsMarker, on.faceImage);
+    } else if (u.layer && u.layer in on) v = on[u.layer];
     if (v && u.eqSide) v = u.eqSide === "rear" ? !o.hideRearEq : !o.hideFrontEq;
     return v;
   }
 
   /** Applique la visibilité des couches taguées (ports/noms/portes/débattement/emplacements/images de façade)
-      et des côtés (hideAv/Ar) — sans reconstruction ; le picking ignore déjà les meshes masqués. */
+      et des côtés (hideAv/Ar) — sans reconstruction ; le picking ignore déjà les meshes masqués.
+      Applique AUSSI la bascule « Images de façade » aux boîtes 6 faces (`userData.faceImageSwap`) : leurs
+      images sont des MATÉRIAUX, pas des plans masquables — la bascule ÉCHANGE donc le jeu actif (avec/sans),
+      même geste instantané que la visibilité, cf. buildEquipBox. */
   protected applyLayerVisibility(): void {
-    [this.gRacks, this.gFree, this.gWaypoints, this.gFloorDecor, this.gDecor].forEach((g) => g && g.traverse((o: any) => { const u = o.userData; if (u && (u.layer || u.eqSide || u.rackId)) o.visible = this.layerVisible(u); }));
+    const showFaceImages = !!this.opts.showFaceImages;
+    [this.gRacks, this.gFree, this.gWaypoints, this.gFloorDecor, this.gDecor].forEach((g) => g && g.traverse((o: any) => {
+      const u = o.userData; if (!u) return;
+      if (u.layer || u.eqSide || u.rackId) o.visible = this.layerVisible(u);
+      if (u.faceImageSwap) {
+        const mats = FaceImagePolicy.materials(u.faceImageSwap, showFaceImages);
+        if (o.material !== mats) o.material = mats;   // swap sans rebuild ; les matériaux existent déjà (compilés au 1er rendu)
+      }
+    }));
   }
 
   /** Recolore EN PLACE les occupants selon `colorMode` (face/groupe/type) — sans reconstruction. */
   protected applyColorMode(): void {
     [this.gRacks, this.gFree].forEach((g) => g && g.traverse((o: any) => {
       const p = o.userData && o.userData.pick; if (!(p && p.type === "occ")) return;
-      const col = this.occColor({ kind: p.kind, id: p.id }), m: any = (o as any).material;
+      const col = this.occColor({ kind: p.kind, id: p.id });
+      // Boîte à SWAP (bascule « Images de façade ») : recolorer les DEUX jeux, pas seulement `o.material` —
+      // sinon le jeu DÉBRANCHÉ garderait les couleurs de l'ANCIEN mode et les réafficherait à la prochaine
+      // bascule. Les instances PARTAGÉES entre jeux (faces sans image) sont recolorées deux fois : sans effet.
+      const swap = o.userData.faceImageSwap;
+      const m: any = swap ? swap.avec.concat(swap.sans) : (o as any).material;
       // multi-matériaux (boîte d'équip. libre à 6 faces) : recolorer chaque face SANS image (les texturées gardent
       // leur blanc pour afficher l'image fidèlement). Mono-matériau (occupant de baie) : recolorer si pas de texture.
       if (Array.isArray(m)) m.forEach((x: any) => { if (x && x.color && !x.map) x.color.setHex(col); });
@@ -459,7 +483,8 @@ export class DcThreeScene extends DcThreeCamera {
     if (old.showPivot !== opts.showPivot) { this.updatePivot(); this.request(); }   // centre de rotation : simple (dé)masquage, aucun rebuild
     // TOUS les toggles d'affichage sont en VISIBILITÉ (couches taguées, toujours construites) — AUCUN rebuild :
     // ports, noms, portes, débattement, emplacements, images, masquage av/ar, conduits, waypoints, grilles, repères,
-    // capots/parois (rackshell) et masquage de baies (hidden3dRacks).
+    // capots/parois (rackshell) et masquage de baies (hidden3dRacks). Cas particulier des IMAGES sur les boîtes
+    // 6 faces : matériaux (pas des plans) → applyLayerVisibility ÉCHANGE le jeu actif (faceImageSwap), même coût.
     const eqVis = old.showPorts !== opts.showPorts || old.showEqNames !== opts.showEqNames || old.showDoors !== opts.showDoors || old.showDoorSwing !== opts.showDoorSwing || old.hideFrontEq !== opts.hideFrontEq || old.hideRearEq !== opts.hideRearEq || old.showPlaceholders !== opts.showPlaceholders || old.showFaceImages !== opts.showFaceImages || old.showConduits !== opts.showConduits || old.showWaypoints !== opts.showWaypoints || old.showFloorGrid !== opts.showFloorGrid || old.showOrientMarks !== opts.showOrientMarks || old.showRackSides !== opts.showRackSides || old.showRackNames !== opts.showRackNames || !this.sameSet(old.hiddenRacks, opts.hiddenRacks);
     // baies — RECOLORATION en place (mode couleur) : aucun rebuild.
     const eqColor = old.colorMode !== opts.colorMode;
@@ -1203,6 +1228,12 @@ export class DcThreeScene extends DcThreeCamera {
     const geo = new THREE.BoxGeometry(b.w, b.d, b.h);
     // 6 matériaux (un par face de la BoxGeometry) : image de façade si présente (non éclairée, couleurs vraies),
     // sinon le corps coloré/éclairé. Ordre BoxGeometry : +X,−X,+Y,−Y,+Z,−Z ↔ droite/gauche/arrière/AVANT(−Y)/dessus/dessous.
+    // La bascule « Images de façade » doit agir ICI AUSSI (parité avec les montés en U, où les images sont des
+    // PLANS masquables) : un matériau ne se masque pas, il s'ÉCHANGE — la boîte porte donc DEUX jeux complets
+    // (`avec` images / `sans` = corps coloré partout) et `applyLayerVisibility` échange le jeu actif sans rebuild
+    // (userData.faceImageSwap, décision : FaceImagePolicy). Les faces SANS image PARTAGENT la même instance dans
+    // les deux jeux (recoloration/libération cohérentes) ; le jeu « avec » garde ses matériaux texturés même
+    // débranché — la texture async (applyFaceTexture, avec cache) y aboutit hors écran, sans double instance.
     const FACE_BY_MAT = ["right", "left", "rear", "front", "top", "bottom"];
     // UVs REMAPPÉES pour notre monde Z-UP : BoxGeometry suppose Y-up → l'image d'ARRIÈRE (et dessus/dessous)
     // sortait à 180°, gauche/droite à ±90°. On dérive chaque UV de l'INVERSE de faceLocal (la source de vérité
@@ -1218,23 +1249,35 @@ export class DcThreeScene extends DcThreeCamera {
       }
       uv.needsUpdate = true;
     }
-    let hasFrontImg = false;
-    const mats = FACE_BY_MAT.map((face) => {
+    let hasFrontImg = false, hasAnyImg = false;
+    const matsAvec: any[] = [], matsSans: any[] = [];
+    FACE_BY_MAT.forEach((face) => {
       const img = this.host.faceImageUrl?.(e.id, face);
       const has = !!(img && img.url);
       if (face === "front") hasFrontImg = has;
-      if (has) { const m = new THREE.MeshBasicMaterial({ color: 0xffffff }); this.applyFaceTexture(m, img!.url); return m; }
-      return new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 });
+      const plain = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 });
+      if (has) { hasAnyImg = true; const m = new THREE.MeshBasicMaterial({ color: 0xffffff }); this.applyFaceTexture(m, img!.url); matsAvec.push(m); }
+      else matsAvec.push(plain);   // pas d'image → instance PARTAGÉE avec le jeu « sans »
+      matsSans.push(plain);
     });
-    const mesh = new THREE.Mesh(geo, mats);
+    // Sans la moindre image, un seul jeu suffit : pas de swap à porter (rien à échanger), pas de userData inutile.
+    const swap = hasAnyImg ? { avec: matsAvec, sans: matsSans } : null;
+    // Le jeu ACTIF suit l'état COURANT de la bascule dès le build : une scène construite bascule éteinte doit
+    // sortir UNIE (applyLayerVisibility referait le même choix juste après — même source, FaceImagePolicy —
+    // mais un mesh ne doit jamais naître faux, cf. CLAUDE.md « Rendu 3D »).
+    const mesh = new THREE.Mesh(geo, swap ? FaceImagePolicy.materials(swap, !!this.opts.showFaceImages) : matsSans);
     mesh.position.set(0, 0, elevation + b.h / 2);
-    mesh.userData = Object.assign({ pick: { type: "occ", kind: "eq", id: e.id } }, extra);   // même traitement que les occupants (détail + survol)
+    mesh.userData = Object.assign({ pick: { type: "occ", kind: "eq", id: e.id } }, extra, swap ? { faceImageSwap: swap } : null);   // même traitement que les occupants (détail + survol)
     grp.add(mesh);
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
     edges.position.copy(mesh.position); if (extra) edges.userData = Object.assign({}, extra); grp.add(edges);
-    // Mise en évidence de la FACE AVANT (−Y local) : ses 4 ARÊTES à l'accent → repère d'orientation. INUTILE quand une
-    // image de face avant est posée (elle indique déjà l'avant). Couche "orient" (basculable via showOrientMarks).
-    if (!hasFrontImg) {
+    // Mise en évidence de la FACE AVANT (−Y local) : ses 4 ARÊTES à l'accent → repère d'orientation, couche
+    // "orient" (showOrientMarks). TOUJOURS construites — même quand une image de face avant est posée : l'image
+    // indique l'avant tant qu'elle est AFFICHÉE, mais la bascule « Images de façade » peut la masquer (swap
+    // ci-dessus) et la boîte perdrait alors tout repère. Le tag `frontImageAsMarker` confie l'arbitrage à la
+    // passe de visibilité : visibles si « repères » actifs ET (pas d'image avant OU images masquées) —
+    // cf. FaceImagePolicy.orientEdgesVisible, dont les tests verrouillent la matrice.
+    {
       const hw = b.w / 2, yF = -b.d / 2 - 1, z0 = elevation, z1 = elevation + b.h;   // yF : 1 mm en saillie → pas de z-fighting avec les arêtes noires
       const fg = new THREE.BufferGeometry();
       fg.setAttribute("position", new THREE.Float32BufferAttribute([
@@ -1244,7 +1287,7 @@ export class DcThreeScene extends DcThreeCamera {
         hw, yF, z0, hw, yF, z1,    // arête droite
       ], 3));
       const frontEdges = new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: this.theme.front }));
-      frontEdges.userData = Object.assign({ layer: "orient" }, extra);
+      frontEdges.userData = Object.assign({ layer: "orient" }, hasFrontImg ? { frontImageAsMarker: true } : null, extra);
       grp.add(frontEdges);
     }
     // nom posé à plat SUR la face avant (−Y local) — couche "name" basculable (showEqNames) sans rebuild. On passe
