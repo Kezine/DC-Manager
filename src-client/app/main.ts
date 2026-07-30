@@ -12,6 +12,7 @@ import { RuntimeConfigLoader } from "./RuntimeConfig";
 import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
 import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
 import { FormBase } from "../views/forms/FormBase";
+import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
@@ -19,6 +20,8 @@ import { Html } from "../core/Html";
 import { TargetSearch } from "../core/TargetSearch";
 import { UserDirectory } from "../core/UserDirectory";   // annuaire client (résolution des auteurs d'audit — mode API)
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
+import { CertsFormat } from "../core/CertsFormat";   // libellés/échéances des certs — famille externe de la recherche globale
+import type { InterventionRecord } from "../views/forms/InterventionsClient";   // cache des enregistrements pour l'ouverture depuis la palette
 import { CertTargetMatch } from "../core/CertTargetMatch";   // moteur PUR du rapprochement certificat ↔ équipement/VM (calculé)
 import { VmLocate } from "../core/VmLocate";   // « Localiser » une VM = localiser son HÔTE (prédicat PUR, feature VM AMOVIBLE)
 import type { NetworkIdentity } from "../core/CertTargetMatch";
@@ -136,6 +139,89 @@ async function boot(): Promise<void> {
 
   const modal = new Modal();
   const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
+  // RECHERCHE GLOBALE (modale dédiée) — UNE instance, UNE implémentation pour les DEUX chemins
+  // (déclencheur topbar + Ctrl+K). Garde d'overlay = le pattern des raccourcis undo/redo (sélecteurs
+  // DOM) : `Modal.open()` REMPLACE le contenu sans confirmation (mécanisme voulu des fiches chaînées),
+  // donc ouvrir la palette pendant qu'un FORMULAIRE est en cours mènerait à écraser sa saisie au premier
+  // résultat cliqué. Ignorée aussi sur l'accueil (aucun document → corpus vide). ⚠ Son overlay à elle
+  // (`.gs-overlay`) n'est PAS dans le sélecteur de garde : Ctrl+K palette ouverte = FERMER (toggle).
+  // « Localiser » depuis un résultat : MÊME flux que l'action des listes (switch vue Datacenter +
+  // `dcView.locate` + bouton « ← Retour » vers la vue quittée). `shell.current` est capturé AVANT le
+  // switch ; s'il n'y a pas de vue quittée (déjà sur le Datacenter), pas d'action de retour.
+  const globalSearch = new GlobalSearchPalette(store, formHost, (kind, id) => {
+    const cameFrom = shell.current;
+    shell.switchView("datacenter");
+    dcView.locate(kind, id);
+    dcView.setReturnAction(cameFrom && cameFrom !== "datacenter" ? () => shell.switchView(cameFrom) : null);
+  }, [
+    // ACTIONS de la palette (portée « > ») — le POINT UNIQUE où elles se déclarent. Chaque `run` rejoue
+    // un geste EXISTANT de l'app (formulaire de création, bascule du shell, export), jamais une logique
+    // propre : la palette est un raccourci vers ce qui existe, pas un second chemin d'écriture.
+    // ⚠ Fermetures sur `shell`/`shellHost` déclarés PLUS BAS : légal (exécution au clic, bien après le
+    // boot) — même montage que `onLocate` ci-dessus. VIEWER : les créations passent par openModal, que
+    // `Modal.editLocked` neutralise déjà — l'action devient un no-op silencieux, cohérent avec le mode.
+    { id: "new-equipment", label: I18n.t("search.action.newEquipment"), sub: I18n.t("search.action.newEquipmentSub"), terms: ["add", "ajouter", "créer"], run: () => Forms.equipment(store, formHost, null, () => shell.refreshActive()) },
+    { id: "new-rack", label: I18n.t("search.action.newRack"), sub: I18n.t("search.action.newRackSub"), terms: ["add", "ajouter", "créer", "baie"], run: () => Forms.rack(store, formHost, null, () => shell.refreshActive()) },
+    { id: "new-cable", label: I18n.t("search.action.newCable"), sub: I18n.t("search.action.newCableSub"), terms: ["add", "ajouter", "créer"], run: () => Forms.cable(store, formHost, null, () => shell.refreshActive()) },
+    { id: "goto-datacenter", label: I18n.t("search.action.gotoDatacenter"), sub: I18n.t("search.action.gotoDatacenterSub"), terms: ["3d", "plan", "salle", "vue"], run: () => shell.switchView("datacenter") },
+    { id: "toggle-theme", label: I18n.t("search.action.toggleTheme"), sub: I18n.t("search.action.toggleThemeSub"), terms: ["dark", "light", "sombre", "clair", "thème"], run: () => shellHost.onToggleTheme?.() },
+    { id: "export-json", label: I18n.t("search.action.exportJson"), sub: I18n.t("search.action.exportJsonSub"), terms: ["download", "télécharger", "sauvegarde"], run: () => shellHost.onExportJson?.() },
+  ], REST_MODE ? [
+    // FAMILLES EXTERNES de la palette (mode API seulement — leurs bases vivent côté serveur).
+    // Les fermetures visent des `let` assignés PLUS BAS (certsView, interventionsView) : légal,
+    // `fetch`/`open` ne s'exécutent qu'à l'usage — même montage que `onLocate` ci-dessus.
+    {
+      kind: "__certs", scopeId: "certs", icon: Icons.CERT_LIST, prefix: "cert:",
+      // `list()` = l'arbre COMPLET (la page Certificats le charge déjà ainsi — pas de pagination à gérer).
+      fetch: async () => (await certsClient!.list()).map((c) => ({
+        kind: "__certs", id: c.id,
+        label: c.label || c.subject || "?",
+        sub: [CertsFormat.kindLabel(c.kind), c.key_algo].filter(Boolean).join(" · "),
+        path: c.subject && c.subject !== c.label ? c.subject : "",
+        terms: [c.serial, c.fingerprint, c.comment],
+        // révoqué PRIME sur l'échéance (un cert révoqué « encore valide 300 j » n'est pas vert).
+        pill: c.revoked_at ? { text: I18n.t("certs.status.revoked"), tone: "err" as const }
+          : { text: CertsFormat.expiryLabel(c.not_after), tone: (["ok", "warn", "err"] as const).find((t) => t === CertsFormat.expiryClass(c.not_after)) || ("" as const) },
+      })),
+      // MÊME chemin que « ouvrir un cert depuis une fiche » (certFicheHooks.openCert, plus bas) :
+      // bascule d'onglet + focus arborescent — focusCert ATTEND le chargement d'activation.
+      open: (id) => { shell.switchView("certificats"); void certsView.focusCert(id); },
+    },
+    {
+      kind: "__interventions", scopeId: "interventions", icon: Icons.INTERVENTION, prefix: "int:",
+      // Listing paginé serveur : UNE page large (500 ≫ tout parc réel d'interventions), et les
+      // enregistrements sont GARDÉS (interventionSearchCache) — `open` en a besoin, la modale de
+      // détail prend l'enregistrement, pas un id (il n'existe pas de GET /interventions/:id).
+      fetch: async () => {
+        const page = await interventionsClient!.listPage({ pageSize: 500 });
+        interventionSearchCache.clear();
+        return page.interventions.map((it) => {
+          interventionSearchCache.set(it.id, it);
+          const tone = InterventionsFormat.statusClass(it.status);
+          return {
+            kind: "__interventions", id: it.id,
+            label: it.title || InterventionsFormat.shortId(it.id),
+            sub: [I18n.t(InterventionsFormat.kindLabelKey(it.kind)), I18n.t(InterventionsFormat.priorityLabelKey(it.priority))].join(" · "),
+            path: it.jira_ref || "",
+            terms: [it.description, it.jira_ref, InterventionsFormat.shortId(it.id)],
+            pill: { text: I18n.t(InterventionsFormat.statusLabelKey(it.status)), tone: (tone === "ok" || tone === "warn" || tone === "err") ? tone : ("" as const) },
+          };
+        });
+      },
+      open: (id) => {
+        shell.switchView("interventions");
+        const record = interventionSearchCache.get(id);
+        if (record) interventionsView.openDetail(record);
+      },
+    },
+  ] : []);
+  /** Enregistrements d'interventions du DERNIER chargement de la palette — `open` en a besoin (cf. ci-dessus). */
+  const interventionSearchCache = new Map<string, InterventionRecord>();
+  const openGlobalSearch = (): void => {
+    if (globalSearch.isOpen()) { globalSearch.close(); return; }
+    if (document.querySelector(".modal-overlay.open, .dialog-overlay") || document.body.classList.contains("welcome-active")) return;
+    globalSearch.open();
+  };
   // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
   // backend d'images selon le mode : IndexedDB (fichier, + compagnon .nmfb) · endpoints blob (REST). Cf. P2.
   const imageBackend = REST_MODE ? new RestImageBackend(API_BASE_URL) : new IdbImageBackend();
@@ -267,6 +353,7 @@ async function boot(): Promise<void> {
     onSaveAs: () => { void files.doSaveAs(); },
     onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
     onRedo: () => { void doRedo(); },
+    onGlobalSearch: () => openGlobalSearch(),   // loupe topbar — même implémentation (et même garde) que Ctrl+K
     onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); shell.setTheme(prefs.theme); dcView.onThemeChanged(); },
     onUiScale: (value) => { prefs.uiScale = value; applyUiScale(prefs.uiScale); shell.setUiScale(prefs.uiScale); },
     onModalFullscreen: (on) => { prefs.modalFullscreen = on; applyModalFullscreen(prefs.modalFullscreen); shell.setModalFullscreen(prefs.modalFullscreen); },   // une modale DÉJÀ ouverte s'adapte par le CSS seul
@@ -1016,6 +1103,20 @@ async function boot(): Promise<void> {
     e.preventDefault();
     const redo = (k === "y") || (k === "z" && e.shiftKey);
     void (redo ? doRedo() : doUndo());   // timeline unifiée (modèle + images)
+  });
+
+  // raccourci clavier RECHERCHE GLOBALE (Ctrl/Cmd+F — arbitrage utilisateur : le geste « chercher »
+  // universel, au prix de la recherche NATIVE du navigateur dans l'app). `preventDefault` APRÈS la
+  // garde, contrairement au pattern Ctrl+K envisagé d'abord : quand la palette REFUSE d'agir (modale
+  // ou dialogue ouvert, écran d'accueil), Ctrl+F retombe sur le « rechercher dans la page » du
+  // navigateur — chercher du texte dans une LONGUE fiche ouverte reste possible, et c'est cohérent :
+  // la palette cherche des OBJETS, le navigateur cherche du TEXTE.
+  document.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    if (e.key.toLowerCase() !== "f") return;
+    if (!globalSearch.isOpen() && (document.querySelector(".modal-overlay.open, .dialog-overlay") || document.body.classList.contains("welcome-active"))) return;
+    e.preventDefault();
+    openGlobalSearch();
   });
 
   applyAutosave();        // initialise l'état auto-save + le popover

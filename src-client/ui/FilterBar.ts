@@ -41,8 +41,14 @@ export interface FilterBarDimension {
 }
 
 export class FilterBar {
-  /** Groupe « + Filtre » + chips actifs, inséré par la vue APRÈS la recherche. */
-  readonly filtersElement: HTMLElement;
+  /** Bouton « + Filtre » (+ son menu popover) — inséré par la vue AVANT la recherche (revue
+      2026-07-30 : le bouton ouvre un choix de critères, il précède la zone qu'il qualifie). */
+  readonly addElement: HTMLElement;
+  /** Rangée des CHIPS actifs — pleine largeur, À LA LIGNE sous la barre (`.lc-chips-row`,
+      `flex-basis: 100%` dans le `.list-chrome` en wrap ; masquée à vide via `:empty`). Avant la
+      revue, chips et bouton partageaient un conteneur inséré APRÈS la recherche : les chips
+      s'inséraient AU MILIEU de la barre et poussaient tout le reste. */
+  readonly chipsElement: HTMLElement;
   /** Bouton « Réinitialiser » — la vue le positionne À DROITE de sa barre ; visibilité gérée ici. */
   readonly resetElement: HTMLButtonElement;
 
@@ -63,9 +69,6 @@ export class FilterBar {
     this.onChange = onChange;
     FilterBar.ensureWired();
 
-    this.filtersElement = document.createElement("div");
-    this.filtersElement.className = "lc-filters";
-
     // -- Bouton « + Filtre » + menu de choix de dimension (popover) --
     const pop = document.createElement("div"); pop.className = "lc-addfilter";
     this.addBtn = document.createElement("button");
@@ -79,8 +82,8 @@ export class FilterBar {
     this.addBtn.onclick = (e) => { e.stopPropagation(); this.toggleMenu(); };
     pop.append(this.addBtn, this.menuEl);
 
-    // -- Chips actifs --
-    this.chipsEl = document.createElement("div"); this.chipsEl.className = "lc-chips";
+    // -- Chips actifs (rangée pleine largeur, cf. chipsElement) --
+    this.chipsEl = document.createElement("div"); this.chipsEl.className = "lc-chips lc-chips-row";
 
     // -- Réinitialiser (positionné à droite par la vue) --
     this.resetElement = document.createElement("button");
@@ -88,7 +91,8 @@ export class FilterBar {
     this.resetElement.textContent = I18n.t("lists.chrome.filterReset");
     this.resetElement.onclick = () => this.resetAll();
 
-    this.filtersElement.append(pop, this.chipsEl);
+    this.addElement = pop;
+    this.chipsElement = this.chipsEl;
     this.buildMenu();
     this.syncChips();
   }

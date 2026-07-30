@@ -378,12 +378,14 @@ export class CertsAdminView {
   private buildToolbar(): HTMLElement {
     const bar = document.createElement("div"); bar.className = "list-chrome";
 
+    // Filtres « Type » (= famille de racine) + « État » (cycle de vie) — le bouton « + Filtre » DEVANT
+    // la recherche, les chips actifs sur LEUR RANGÉE en fin de barre (revue 2026-07-30, parité ListView).
+    this.buildFilters();
+    bar.appendChild(this.filterBar!.addElement);
+
     // Recherche : visible MÊME verrouillée — elle ne lit que des métadonnées (aucune opération de clé). Filtre
     // l'arbre CLIENT en gardant les ancêtres + surligne le terme (aucun réseau).
     bar.appendChild(this.searchBox());
-
-    // Filtres « Type » (= famille de racine, sélection UNIQUE) + « État » (cycle de vie, sélection UNIQUE) → chips.
-    bar.appendChild(this.buildFilters());
 
     const right = document.createElement("div"); right.className = "lc-right";
     // PÉRIMÈTRE (point D) : les boutons de CRÉATION gardent VOLONTAIREMENT le gate global `unlocked` — la modale
@@ -410,6 +412,7 @@ export class CertsAdminView {
     right.appendChild(this.buildVaultButton());
 
     bar.appendChild(right);
+    bar.appendChild(this.filterBar!.chipsElement);   // rangée des chips, À LA LIGNE (dernier enfant du wrap)
     return bar;
   }
 
@@ -418,7 +421,7 @@ export class CertsAdminView {
       filtre les lignes, ancêtres gardés). Les deux dimensions sont `single` : un Set 0/1 fait autorité et se
       reporte dans `this.filter` à chaque changement, puis `refreshTree()` (repeint CLIENT, sans réseau).
       Reconstruite à chaque rendu complet ; préservée sur refreshTree (un panneau ouvert reste ouvert). */
-  private buildFilters(): HTMLElement {
+  private buildFilters(): void {
     // Familles = kind de la racine (le libellé est résolu par CertsFormat.kindLabel — après I18n.init()).
     const familyItems: MultiItem[] = FAMILY_FILTER_IDS.map((id) => ({ id, label: CertsFormat.kindLabel(id) }));
     const familySet = new Set<string>(this.filter.family ? [this.filter.family] : []);
@@ -434,7 +437,6 @@ export class CertsAdminView {
       this.session.touch();
       this.refreshTree();
     });
-    return this.filterBar.filtersElement;
   }
 
   /* --------------------------------------------------------------------------

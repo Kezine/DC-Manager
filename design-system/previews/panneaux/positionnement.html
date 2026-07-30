@@ -1927,8 +1927,7 @@
   .list-chrome .lc-reset {
     height: var(--control-h); box-sizing: border-box;
   }
-  .list-chrome .lc-filters { min-height: var(--control-h); }
-  .list-chrome .lc-right .btn { display: inline-flex; align-items: center; }
+  .list-chrome  .list-chrome .lc-right .btn { display: inline-flex; align-items: center; }
   .lc-filters-host, .lc-reset-host { display: contents; }   /* hôtes transparents : la FilterBar participe au flex de la barre */
 
   /* -- Recherche : loupe intégrée + champ sans bordure propre (le conteneur EST la boîte) -- */
@@ -1986,6 +1985,12 @@
 
   /* -- Chips de filtre actif (un par valeur) : pastille accentuée, croix de retrait (inspirée de .loc-pill/.chip) -- */
   .lc-chips { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  /* rangee de CHIPS a la ligne (revue 2026-07-30) : pleine largeur dans le .list-chrome en wrap,
+     masquee a vide (pas de gouttiere quand aucun filtre n'est actif). L'hote (ListView) est
+     transparent au layout (display: contents) : c'est la rangee qui participe au flex. */
+  .lc-chips-row { flex-basis: 100%; min-width: 0; }
+  .lc-chips-row:empty { display: none; }
+  .lc-chips-host { display: contents; }
   .filter-chip {
     display: inline-flex; align-items: center; gap: 6px; max-width: 280px;
     padding: 3px 5px 3px 10px; border-radius: var(--radius-pill);
@@ -2485,6 +2490,105 @@
     .list-body tbody td.cell-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; padding-top: 10px; }
     /* Ligne vide : reste une carte simple centrée (aucun data-label → pas de ::before). */
     .list-body tbody tr.empty-row td { text-align: center; border-bottom: none; }
+  }
+
+  /* ============================================================================
+     RECHERCHE GLOBALE (modale dediee, Ctrl+F) - views/GlobalSearchPalette.
+     Adaptee de la maquette POC 2026-07-30, aux variables du theme (aucune
+     couleur en dur). Namespace .gs-* : ne JAMAIS
+     employer .modal-overlay ici - la garde clavier du bootstrap et la modale
+     de l'app raisonnent sur ce selecteur. z-index 240 : au-dessus de la modale
+     standard (200), sous les dialogues (300). */
+
+  /* -- badge clavier (rangee de saisie + pied de la palette) -- */
+  .gs-kbd { display: inline-flex; align-items: center; gap: 2px; padding: 1px 6px; border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; background: var(--bg-3); color: var(--fg-dim); font-size: 10px; font-family: var(--mono); white-space: nowrap; }
+
+  /* -- overlay + panneau -- */
+  .gs-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(2px); z-index: 240; display: none; align-items: flex-start; justify-content: center; padding: clamp(12px, 8vh, 96px) 16px 16px; }
+  .gs-overlay.open { display: flex; }
+  .gsearch { width: 100%; max-width: 760px; max-height: min(76vh, 660px); background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 24px 70px rgba(0,0,0,0.55); display: flex; flex-direction: column; overflow: hidden; animation: gs-slide-up 0.16s ease; }
+  @keyframes gs-slide-up { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  /* -- rangee de saisie -- */
+  .gs-input-row { display: flex; align-items: center; gap: 11px; padding: 0 14px; height: 56px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+  .gs-lens { display: inline-flex; flex: none; }
+  .gs-lens svg { width: 19px; height: 19px; color: var(--accent); }
+  .gs-input { flex: 1; min-width: 0; background: transparent; border: none; color: var(--fg); font-family: var(--mono); font-size: 16px; padding: 0; }
+  .gs-input:focus { outline: none; }
+  .gs-input::placeholder { color: var(--fg-dimmer); }
+  .gs-clear { display: none; background: transparent; border: 1px solid var(--line-2); border-radius: 4px; color: var(--fg-dim); width: 26px; height: 26px; align-items: center; justify-content: center; cursor: pointer; flex: none; padding: 0; }
+  .gs-clear.show { display: flex; }
+  .gs-clear:hover { color: var(--fg); border-color: var(--fg); }
+  .gs-clear svg { width: 13px; height: 13px; }
+
+  /* -- portees : pastilles en WRAP (demande utilisateur 2026-07-30) - avec les familles externes
+     et les actions on atteint 10 pastilles, le defilement horizontal masque de la maquette en
+     CACHAIT ; deux rangees se voient, une rangee tronquee non. -- */
+  .gs-scopes { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 14px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+  .gs-scope { display: inline-flex; align-items: center; gap: 7px; flex: none; height: 30px; padding: 0 11px; background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--radius-pill); color: var(--fg-dim); font-size: 11px; font-family: var(--mono); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; white-space: nowrap; }
+  .gs-scope:hover { color: var(--fg); border-color: var(--fg-dim); }
+  .gs-scope.active { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--accent-text); }
+  .gs-scope svg { width: 14px; height: 14px; }
+  .gs-scope .gs-n { font-variant-numeric: tabular-nums; color: var(--fg-dimmer); border-left: 1px solid var(--line-2); padding-left: 7px; margin-left: 1px; }
+  .gs-scope.active .gs-n { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+  /* -- resultats : groupes par famille + rangees -- */
+  .gs-results { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 0 8px; }
+  .gs-group { padding: 10px 15px 5px; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-dimmer); display: flex; align-items: center; gap: 8px; }
+  .gs-group::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .gs-res { display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px 15px; background: transparent; border: none; border-left: 2px solid transparent; color: var(--fg); cursor: pointer; text-align: left; min-height: 44px; font-family: var(--mono); }
+  .gs-res:hover { background: var(--bg-3); }
+  .gs-res.sel { background: color-mix(in srgb, var(--accent) 13%, transparent); border-left-color: var(--accent); }
+  .gs-res-ic { flex: none; width: 28px; height: 28px; border-radius: 5px; display: flex; align-items: center; justify-content: center; background: var(--bg-3); color: var(--fg-dim); }
+  .gs-res-ic svg { width: 15px; height: 15px; }
+  /* teinte d'icone PAR PORTEE (la famille se lit au groupe ; la couleur donne le reflexe visuel) */
+  .gs-res[data-gscope="equip"] .gs-res-ic { color: var(--info); background: color-mix(in srgb, var(--info) 15%, transparent); }
+  .gs-res[data-gscope="places"] .gs-res-ic { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+  .gs-res[data-gscope="cables"] .gs-res-ic { color: var(--role-data); background: color-mix(in srgb, var(--role-data) 15%, transparent); }
+  .gs-res[data-gscope="network"] .gs-res-ic { color: var(--role-mgmt); background: color-mix(in srgb, var(--role-mgmt) 15%, transparent); }
+  .gs-res[data-gscope="vms"] .gs-res-ic { color: var(--role-poe); background: color-mix(in srgb, var(--role-poe) 15%, transparent); }
+  .gs-res[data-gscope="inventory"] .gs-res-ic { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+  .gs-res[data-gscope="certs"] .gs-res-ic { color: var(--role-poe); background: color-mix(in srgb, var(--role-poe) 15%, transparent); }
+  .gs-res[data-gscope="interventions"] .gs-res-ic { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+  .gs-res[data-gscope="actions"] .gs-res-ic { color: var(--accent-text); background: transparent; border: 1px dashed var(--line-2); }
+  .gs-res-main { flex: 1; min-width: 0; }
+  .gs-res-t { display: block; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gs-res-s { font-size: 11px; color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; margin-top: 1px; }
+  .gs-sep { color: var(--fg-dimmer); }
+  .gs-res-meta { flex: none; display: flex; align-items: center; gap: 7px; }
+  .gs-pill { display: inline-block; padding: 1px 8px; border-radius: var(--radius-pill); font-size: 10px; background: var(--bg-3); border: 1px solid var(--line-2); color: var(--fg-dim); white-space: nowrap; }
+  .gs-pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  .gs-pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .gs-pill.err { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); background: color-mix(in srgb, var(--err) 12%, transparent); }
+  /* Localiser : visible au SURVOL / a la selection seulement (une rangee au repos reste calme) */
+  .gs-locate { display: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; background: transparent; border: 1px solid var(--line-2); border-radius: 4px; color: var(--fg-dim); cursor: pointer; flex: none; }
+  .gs-res:hover .gs-locate, .gs-res.sel .gs-locate { display: flex; }
+  .gs-locate:hover { color: var(--accent-text); border-color: var(--accent); }
+  .gs-locate svg { width: 14px; height: 14px; }
+  .gs-res-enter { display: none; flex: none; }
+  .gs-res.sel .gs-res-enter { display: inline-flex; }
+  .gsearch mark { background: color-mix(in srgb, var(--accent) 38%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
+
+  /* -- etats accueil / aucun resultat -- */
+  .gs-empty { padding: 26px 20px 30px; text-align: center; font-family: var(--sans); color: var(--fg-dim); }
+  .gs-empty > svg { width: 32px; height: 32px; color: var(--fg-dimmer); margin-bottom: 10px; }
+  .gs-empty-t { color: var(--fg); font-weight: 600; margin-bottom: 4px; }
+  .gs-empty-s { font-size: 12.5px; max-width: 44ch; margin: 0 auto; }
+  .gs-welcome { padding-top: 14px; }
+  .gs-tips { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin-top: 16px; }
+  .gs-tip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid var(--line-2); border-radius: var(--radius-pill); background: var(--bg); font-family: var(--mono); font-size: 11px; color: var(--fg-dim); cursor: pointer; }
+  .gs-tip:hover { border-color: var(--accent); color: var(--accent-text); }
+  .gs-tip b { color: var(--accent-text); font-weight: 600; }
+
+  /* -- pied : raccourcis + compte -- */
+  .gs-foot { flex: 0 0 auto; display: flex; align-items: center; gap: 14px; padding: 9px 15px; border-top: 1px solid var(--line); background: var(--bg-3); font-size: 10.5px; color: var(--fg-dimmer); letter-spacing: 0.04em; flex-wrap: wrap; font-family: var(--mono); }
+  .gs-f { display: inline-flex; align-items: center; gap: 6px; }
+  .gs-spacer { flex: 1; }
+
+  /* -- mobile : palette plein ecran, declencheur reduit a la loupe -- */
+  @media (max-width: 640px) {
+    .gs-overlay { padding: 0; align-items: stretch; }
+    .gsearch { max-width: none; max-height: none; height: 100dvh; border: none; border-radius: 0; }
   }
 
 

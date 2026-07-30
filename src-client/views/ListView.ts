@@ -79,7 +79,8 @@ export class ListView {
   private _searchEl!: HTMLInputElement;
   private _sortSelEl!: HTMLSelectElement;   // sélecteur de CRITÈRE de tri EN BARRE (état partagé avec les en-têtes)
   private _sortDirEl!: HTMLButtonElement;   // bouton de SENS dédié (▲/▼) — bascule asc/desc
-  private _filtersHostEl!: HTMLElement;   // hôte du groupe « + Filtre » + chips (rempli selon les colonnes filtrables)
+  private _filtersHostEl!: HTMLElement;   // hôte du bouton « + Filtre » (DEVANT la recherche — revue 2026-07-30)
+  private _chipsHostEl!: HTMLElement;     // hôte de la RANGÉE de chips (à la ligne, fin de barre, display:contents)
   private _resetHostEl!: HTMLElement;      // hôte du bouton « Réinitialiser » (cluster de droite)
   private _filterBar: FilterBar | null = null;
   private _bodyEl!: HTMLElement;
@@ -201,7 +202,14 @@ export class ListView {
     this.container.innerHTML = "";
     const chrome = document.createElement("div"); chrome.className = "list-chrome";
 
-    // Recherche EN PREMIER (action n°1), extensible : loupe intégrée + champ normalisé, à la hauteur unifiée.
+    // « + Filtre » DEVANT la recherche (revue 2026-07-30 — le bouton ouvre un choix de critères, il
+    // précède la zone qu'il qualifie) ; les CHIPS actifs, eux, vivent sur LEUR PROPRE RANGÉE en fin de
+    // barre (cf. _chipsHostEl) — avant, bouton et chips partageaient un conteneur inséré après le tri,
+    // et chaque chip ajouté poussait le cluster de droite.
+    this._filtersHostEl = document.createElement("div"); this._filtersHostEl.className = "lc-filters-host";
+    chrome.appendChild(this._filtersHostEl);
+
+    // Recherche ensuite, extensible : loupe intégrée + champ normalisé, à la hauteur unifiée.
     const search = document.createElement("div"); search.className = "lc-search";
     const icon = document.createElement("span"); icon.className = "lc-search-ic"; icon.setAttribute("aria-hidden", "true"); icon.innerHTML = Icons.SEARCH;
     this._searchEl = document.createElement("input"); this._searchEl.type = "search"; this._searchEl.className = "search-input";
@@ -227,10 +235,6 @@ export class ListView {
     sortGroup.append(sortLbl, this._sortSelEl, this._sortDirEl);
     chrome.appendChild(sortGroup);
 
-    // Hôte des filtres (« + Filtre » + chips actifs) — (re)peuplé par _ensureToolbar selon les colonnes filtrables.
-    this._filtersHostEl = document.createElement("div"); this._filtersHostEl.className = "lc-filters-host";
-    chrome.appendChild(this._filtersHostEl);
-
     // Cluster de DROITE (poussé par CSS) : bascule Compact, bouton de création, puis « Réinitialiser » (le plus à droite).
     const right = document.createElement("div"); right.className = "lc-right";
     // bascule COMPACT : bascule booléenne → .toggle-pill (pilule + témoin + teinte) via la factory. La factory
@@ -246,6 +250,11 @@ export class ListView {
     this._resetHostEl = document.createElement("div"); this._resetHostEl.className = "lc-reset-host";
     right.appendChild(this._resetHostEl);
     chrome.appendChild(right);
+    // Hôte de la RANGÉE DE CHIPS, DERNIER enfant du chrome (flex en wrap) : `display: contents` — l'hôte
+    // est transparent pour le layout, c'est la rangée elle-même (`.lc-chips-row`, flex-basis 100 %) qui
+    // passe à la ligne, et `:empty` la masque sans laisser de gouttière quand aucun filtre n'est actif.
+    this._chipsHostEl = document.createElement("div"); this._chipsHostEl.className = "lc-chips-host";
+    chrome.appendChild(this._chipsHostEl);
     this.container.appendChild(chrome);
 
     this._bodyEl = document.createElement("div"); this._bodyEl.className = "list-body";
@@ -265,7 +274,7 @@ export class ListView {
     const sig = filterCols.map((c) => (c.filter!.options() || []).map((o) => o.id).join(",")).join("|");
     if (this._toolbarSig === sig && this._filterBar) return;
     this._toolbarSig = sig;
-    if (!filterCols.length) { this._filtersHostEl.replaceChildren(); this._resetHostEl.replaceChildren(); this._filterBar = null; return; }
+    if (!filterCols.length) { this._filtersHostEl.replaceChildren(); this._chipsHostEl.replaceChildren(); this._resetHostEl.replaceChildren(); this._filterBar = null; return; }
     const dims: FilterBarDimension[] = filterCols.map((c) => {
       const key = this._colKey(c);
       if (!this.filterState[key]) this.filterState[key] = new Set();
@@ -276,7 +285,8 @@ export class ListView {
       return { key, label: c.filter!.label || c.head, options: items.slice(), selected: set };
     });
     this._filterBar = new FilterBar(dims, () => { this.page = 1; this.render(); });
-    this._filtersHostEl.replaceChildren(this._filterBar.filtersElement);
+    this._filtersHostEl.replaceChildren(this._filterBar.addElement);
+    this._chipsHostEl.replaceChildren(this._filterBar.chipsElement);
     this._resetHostEl.replaceChildren(this._filterBar.resetElement);
   }
 
