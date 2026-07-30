@@ -39,6 +39,13 @@ export interface GlobalSearchItem {
   /** Termes de recherche NON affichés (les `searchFields` du listing). Valeurs brutes :
       la normalisation et le filtrage des null/vides sont l'affaire de ce module. */
   terms: readonly unknown[];
+  /** Pastille d'ÉTAT (statut de câble, VM, occupation d'une baie…) — AFFICHAGE SEUL, jamais
+      cherchée : « ok » ou « 29/42 U » matcherait des requêtes qui ne visent pas cet objet (testé). */
+  pill?: { text: string; tone: "" | "ok" | "warn" | "err" };
+  /** Cible « Localiser en 3D » si l'objet (ou son porteur) est LOCALISABLE — résolue au build du
+      corpus par les prédicats partagés (`core/Locatable` & co.) : jamais de bouton qui répond par un
+      toast d'erreur (asymétrie prédicat ⇄ action). Absent = pas de bouton. */
+  locate?: { kind: "equipment" | "rack" | "cable"; id: string };
 }
 
 /** Options du classement (tout injecté). */

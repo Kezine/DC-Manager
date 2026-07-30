@@ -68,7 +68,11 @@ export class GlobalSearchPalette {
   /** Écouteur clavier DOCUMENT, posé à l'ouverture et retiré à la fermeture (jamais résident). */
   private readonly onKeydown = (e: KeyboardEvent): void => this.handleKey(e);
 
-  constructor(private readonly store: Store, private readonly host: FormHost) {}
+  /** `onLocate` (facultatif) : « Localiser en 3D » un résultat — câblé par le bootstrap sur le même
+      flux que les listes (switch vue Datacenter + `dcView.locate` + action de retour). Absent = les
+      boutons Localiser ne sont pas rendus (mode visualiseur sans 3D, tests headless). */
+  constructor(private readonly store: Store, private readonly host: FormHost,
+    private readonly onLocate?: (kind: "equipment" | "rack" | "cable", id: string) => void) {}
 
   isOpen(): boolean { return !!this.overlay && this.overlay.classList.contains("open"); }
   toggle(): void { this.isOpen() ? this.close() : this.open(); }
@@ -143,6 +147,13 @@ export class GlobalSearchPalette {
     });
     this.resultsEl.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
+      // « Localiser » AVANT la rangée : le bouton est DANS la rangée, le test de rangée l'avalerait.
+      const locate = target.closest(".gs-locate[data-i]") as HTMLElement | null;
+      if (locate && this.onLocate) {
+        const item = this.rows[+locate.dataset.i!];
+        if (item && item.locate) { this.recordRecent({ kind: item.kind, id: item.id }); this.close(); this.onLocate(item.locate.kind, item.locate.id); }
+        return;
+      }
       const row = target.closest(".gs-res[data-i]") as HTMLElement | null;
       if (row) { this.activate(this.rows[+row.dataset.i!]); return; }
       const tip = target.closest(".gs-tip[data-prefix]") as HTMLElement | null;
@@ -230,19 +241,27 @@ export class GlobalSearchPalette {
     this.paintSelection();
   }
 
-  /** Une rangée de résultat — titre/sous-ligne/chemin SURLIGNÉS, icône de la portée de sa famille. */
+  /** Une rangée de résultat — titre/sous-ligne/chemin SURLIGNÉS, icône de la portée de sa famille,
+      pastille d'état, bouton « Localiser » si la cible est localisable ET le câblage fourni.
+      ⚠ `<div role="option">`, PAS un `<button>` : la rangée CONTIENT désormais un bouton (Localiser),
+      et un bouton dans un bouton est du HTML invalide (le navigateur éjecte l'intérieur). Le clavier
+      ne perd rien : ↑/↓/Entrée vivent sur le CHAMP (pattern listbox), jamais sur les rangées. */
   private rowHtml(item: GlobalSearchItem, index: number, query: string): string {
     const scopeId = GlobalSearchSources.scopeOf(item.kind);
     const icon = GlobalSearchSources.SCOPES.find((s) => s.id === scopeId)?.icon || Icons.SEARCH;
     const subBits = [this.highlight(item.sub || "", query), this.highlight(item.path || "", query)].filter(Boolean);
-    return `<button type="button" class="gs-res" data-i="${index}" data-gscope="${Html.escape(scopeId)}" role="option" aria-selected="false">
+    const pill = item.pill ? `<span class="gs-pill${item.pill.tone ? " " + item.pill.tone : ""}">${Html.escape(item.pill.text)}</span>` : "";
+    const locate = (item.locate && this.onLocate)
+      ? `<button type="button" class="gs-locate" data-i="${index}" title="${Html.escape(I18n.t("lists.chrome.rowLocate"))}" aria-label="${Html.escape(I18n.t("lists.chrome.rowLocate"))}">${Icons.LOCATE}</button>`
+      : "";
+    return `<div class="gs-res" data-i="${index}" data-gscope="${Html.escape(scopeId)}" role="option" aria-selected="false">
       <span class="gs-res-ic">${icon}</span>
       <span class="gs-res-main">
         <span class="gs-res-t">${this.highlight(item.label, query)}</span>
         ${subBits.length ? `<span class="gs-res-s">${subBits.join(`<span class="gs-sep">·</span>`)}</span>` : ""}
       </span>
-      <span class="gs-res-enter gs-kbd">↵</span>
-    </button>`;
+      <span class="gs-res-meta">${pill}${locate}<span class="gs-res-enter gs-kbd">↵</span></span>
+    </div>`;
   }
 
   /** Texte ÉCHAPPÉ avec le fragment trouvé en <mark> ("" si texte vide). L'échappement se fait par

@@ -33,6 +33,11 @@ import { ListConfigs } from "./ListConfigs";
 import { Icons } from "../ui/Icons";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { GroupTypes } from "../domain/GroupTypes";
+import { CableStatuses } from "../domain/CableStatuses";
+import { SpareStatuses } from "../domain/SpareStatuses";
+import { VmStatus } from "../core/VmStatus";
+import { VmLocate } from "../core/VmLocate";
+import { RackScene } from "../geometry/RackScene";
 import { I18n } from "../i18n/I18n";
 import type { GlobalSearchItem } from "../core/GlobalSearch";
 
@@ -46,6 +51,11 @@ interface FamilySource {
   path?: (record: any, store: Store) => string;
   /** Termes non affichés. Par défaut : les `searchFields` du listing homonyme. */
   terms?: (record: any, store: Store) => unknown[];
+  /** Pastille d'ÉTAT (affichage seul, jamais cherchée — cf. GlobalSearchItem.pill). null = rien. */
+  pill?: (record: any, store: Store) => GlobalSearchItem["pill"] | null;
+  /** Cible « Localiser » — null si l'objet (ou son porteur) n'est PAS localisable : le corpus est
+      GARDÉ par les prédicats partagés, la modale ne teste rien (pas de bouton → toast). */
+  locate?: (record: any, store: Store) => GlobalSearchItem["locate"] | null;
 }
 
 /** Une PORTÉE de recherche : un filtre (pastille) + son préfixe de saisie + ses familles. */
@@ -106,6 +116,14 @@ export class GlobalSearchSources {
     return [store.siteLabel(e.location || ""), e.floor, e.room].filter((x) => x && x !== "—").join(" · ");
   }
 
+  /** U OCCUPÉS d'une baie (équipements rackés + pseudo-items + brosses, faces confondues) — via
+      `RackScene.occupants`, la source unique de l'occupation. Compte les U distincts, pas les faces. */
+  private static rackUsedU(store: Store, rackId: string): number {
+    const used = new Set<number>();
+    new RackScene(store).occupants(rackId).forEach((_info, key) => used.add(parseInt(key, 10)));
+    return used.size;
+  }
+
   /** « équipement : port » en texte (extrémité de câble) — pendant TEXTE du `portRef` HTML des fiches. */
   private static portRefText(store: Store, portId: string | null): string {
     const port: any = portId ? store.get("ports", portId) : null;
@@ -122,19 +140,26 @@ export class GlobalSearchSources {
       label: (e) => e.name || I18n.t("lists.ph.equipment"),
       sub: (e) => [EquipmentTypes.label(e.type), [e.brand, e.model].filter(Boolean).join(" ")].filter(Boolean).join(" · "),
       path: (e, store) => GlobalSearchSources.equipmentPath(store, e),
+      locate: (e, store) => store.equipmentLocatable(e.id) ? { kind: "equipment", id: e.id } : null,
     },
     // Sous-équipement : le CHEMIN nomme le maître (+ repère) — sans onglet (D2), c'est ici que ce
     // lien se lit ; le nom du maître reste aussi dans les TERMES (chercher la librairie remonte ses drives).
+    // « Localiser » un sous-équipement = localiser SON MAÎTRE (il n'a pas d'existence physique propre —
+    // c'est la définition même de la collection, et le même geste que « Localiser » une VM → son hôte).
     subEquipments: {
       label: (se) => se.name || I18n.t("subEquipment.fallback"),
       sub: (se) => [se.brand, se.model, se.serial].filter(Boolean).join(" · "),
       path: (se, store) => { const master: any = store.get("equipments", se.equipment_id); return (master ? (master.name || "?") : I18n.t("subEquipment.masterMissing")) + (se.slot ? " › " + se.slot : ""); },
       terms: (se, store) => { const master: any = store.get("equipments", se.equipment_id); return [se.name, se.serial, se.slot, se.brand, se.model, se.description, master && master.name]; },
+      locate: (se, store) => se.equipment_id && store.equipmentLocatable(se.equipment_id) ? { kind: "equipment", id: se.equipment_id } : null,
     },
     racks: {
       label: (r) => r.name || I18n.t("lists.ph.rack"),
       sub: (r) => (r.u_count || 42) + " U",
       path: (r, store) => { const dc: any = r.datacenter_id ? store.get("datacenters", r.datacenter_id) : null; return dc ? (dc.name || "?") : ""; },
+      // occupation « n/N U » — la maquette l'affichait, et c'est l'info qu'on cherche le plus sur une baie.
+      pill: (r, store) => { const used = GlobalSearchSources.rackUsedU(store, r.id); return { text: used + "/" + (r.u_count || 42) + " U", tone: "" }; },
+      locate: (r) => r.datacenter_id ? { kind: "rack", id: r.id } : null,   // même prédicat que les listes (main.ts)
     },
     datacenters: {
       label: (d) => d.name || I18n.t("lists.ph.room"),
@@ -146,6 +171,9 @@ export class GlobalSearchSources {
       label: (c) => c.name || I18n.t("lists.ph.cable"),
       sub: (c, store) => { const ct: any = c.cable_type_id ? store.get("cableTypes", c.cable_type_id) : null; return ct ? (ct.name || "") : ""; },
       path: (c, store) => (c.from_port_id || c.to_port_id) ? GlobalSearchSources.portRefText(store, c.from_port_id) + " ↔ " + GlobalSearchSources.portRefText(store, c.to_port_id) : "",
+      // tons par STATUT : cassé = rouge, à remplacer = orange, câblé = vert ; brouillon/planifié = neutre.
+      pill: (c) => ({ text: CableStatuses.label(c.status), tone: c.status === "casse" ? "err" : c.status === "a-remplacer" ? "warn" : c.status === "cable" ? "ok" : "" }),
+      locate: (c, store) => store.cableLocatable(c) ? { kind: "cable", id: c.id } : null,
     },
     cableBundles: {
       label: (b) => b.name || I18n.t("lists.ph.bundle"),
@@ -161,11 +189,17 @@ export class GlobalSearchSources {
     dhcpRanges: { label: (r) => (r.start_ip || "?") + " – " + (r.end_ip || "?") },
     vms: {
       label: (v) => v.name || "?",
-      sub: (v, store) => { const host: any = v.host_equipment_id ? store.get("equipments", v.host_equipment_id) : null; return [v.status, host && host.name].filter(Boolean).join(" · "); },
+      sub: (v, store) => { const host: any = v.host_equipment_id ? store.get("equipments", v.host_equipment_id) : null; return host && host.name ? host.name : ""; },
+      // le STATUT quitte la sous-ligne pour la pastille — source unique `core/VmStatus` (running = ok,
+      // orpheline = err — l'orphelinat PRIME : une VM qui tourne sans hôte connu est d'abord un problème).
+      pill: (v) => { const kind = VmStatus.kindOf(v); const raw = VmStatus.raw(v); if (!raw && !VmStatus.isOrphan(v)) return null; return { text: raw || I18n.t("lists.ph.orphan"), tone: VmStatus.isOrphan(v) ? "err" : kind === "running" ? "ok" : "" }; },
+      // « Localiser » une VM = son HÔTE (même règle que les listes : VmLocate + prédicat partagé).
+      locate: (v, store) => { const host = VmLocate.hostEquipmentId(v, store); return host && store.equipmentLocatable(host) ? { kind: "equipment", id: host } : null; },
     },
     spares: {
       label: (s) => (s.displayName ? s.displayName() : s.name) || s.serial || "?",
       sub: (s) => (s.techSummary ? s.techSummary() : "") || s.serial || "",
+      pill: (s) => s.status ? { text: SpareStatuses.label(s.status), tone: "" } : null,
     },
     groups: { label: (g) => g.label || I18n.t("lists.ph.group"), sub: (g) => GroupTypes.label(g.type) },
     contacts: { label: (c) => c.name || "?", sub: (c) => [c.email, c.phone].filter(Boolean).join(" · ") },
@@ -193,6 +227,8 @@ export class GlobalSearchSources {
           sub: source.sub ? source.sub(record, store) || undefined : undefined,
           path: source.path ? source.path(record, store) || undefined : undefined,
           terms: source.terms ? source.terms(record, store) : (searchFields ? searchFields(record) : []),
+          pill: source.pill ? source.pill(record, store) || undefined : undefined,
+          locate: source.locate ? source.locate(record, store) || undefined : undefined,
         });
       }
     }

@@ -1838,6 +1838,46 @@ module.exports = async () => {
     const ranked = GlobalSearch.rank(GlobalSearchSources.build(s), "drive lto", { normalize: SharedSchema.normSearch, kindOrder: GlobalSearchSources.FAMILY_ORDER });
     ck.eq(ranked.map((g) => g.kind).join(","), "subEquipments,equipments", "« drive lto » → le drive (LIBELLÉ, 80) devant la librairie (TERME, 30) — pertinence d'abord");
     ck.eq(ranked[0].items[0].id, drv.id, "le drive matche par son libellé (palier préfixe)");
+
+    // --- 5. PASTILLES d'état (affichage seul) + cibles « Localiser » gardées par les PRÉDICATS. ---
+    // pastille de CÂBLE : statut + ton (cassé = err, câblé = ok, planifié = neutre).
+    // ⚠ SES PROPRES ports : pA/pB portent déjà CBL-1, et un port n'accepte qu'UN câble — réutiliser
+    // les mêmes faisait REFUSER la création (null) et crasher la suite (leçon : toujours des données neuves).
+    const pC = await s.create("ports", { name: "FC-2", equipment_id: lib.id });
+    const pD = await s.create("ports", { name: "Gi0/2", equipment_id: sw.id });
+    const casse = await s.create("cables", { name: "CBL-HS", from_port_id: pC.id, to_port_id: pD.id, status: "casse" });
+    const corpus2 = GlobalSearchSources.build(s);
+    const of2 = (kind, id) => corpus2.find((x) => x.kind === kind && x.id === id);
+    ck.eq(of2("cables", casse.id).pill.tone, "err", "pastille câble : statut « cassé » → ton err");
+    // ⚠ mesuré, pas supposé : un câble créé SANS statut reçoit le défaut LEGACY « cable » (déjà câblé),
+    // pas « planifie » — c'est le formulaire qui pose « planifie » à la création, pas le modèle.
+    ck.eq(of2("cables", cab.id).pill.tone, "ok", "pastille câble : sans statut explicite → legacy « câblé » → ton ok");
+    // (le forçage « brouillon si incomplet » est une règle du FORMULAIRE — en création brute, même sans
+    // ports, le modèle pose le legacy « cable » : d'où un statut EXPLICITE pour couvrir le ton neutre)
+    const draft = await s.create("cables", { name: "CBL-DRAFT", status: "planifie" });
+    ck.eq(GlobalSearchSources.build(s).find((x) => x.kind === "cables" && x.id === draft.id).pill.tone, "", "pastille câble : « planifié » → ton neutre");
+    // ⚠ la pastille n'est JAMAIS cherchée : un câble dont SEULE la pastille matcherait ne sort pas
+    const pillText = of2("cables", casse.id).pill.text;
+    ck(pillText.length > 0, "témoin : la pastille a bien un texte (le test suivant n'est pas vacant)");
+    const hitByPill = GlobalSearch.rank([{ kind: "cables", id: "x", label: "aaa", terms: [], pill: { text: pillText, tone: "err" } }], pillText, { normalize: SharedSchema.normSearch, kindOrder: [] });
+    ck.eq(hitByPill.length, 0, "la PASTILLE n'est pas un terme de recherche (affichage seul)");
+    // pastille de BAIE : occupation « n/N U » (RackScene = source unique de l'occupation)
+    const dc1 = await s.create("datacenters", { name: "Salle A" });
+    const rk = await s.create("racks", { name: "B12", u_count: 42, datacenter_id: dc1.id });
+    await s.create("equipments", { name: "srv-u", rack_id: rk.id, placement_mode: "rack", dim_mode: "u", rack_u: 10, u_height: 2 });
+    const rkItem = GlobalSearchSources.build(s).find((x) => x.kind === "racks" && x.id === rk.id);
+    ck.eq(rkItem.pill.text, "2/42 U", "pastille baie : U occupés / U totaux (via RackScene.occupants)");
+    // « Localiser » : GARDÉ par les prédicats partagés — jamais de bouton qui mène à un toast
+    ck.eq(rkItem.locate && rkItem.locate.kind, "rack", "baie EN SALLE → cible Localiser");
+    const poolRack = await s.create("racks", { name: "B-pool" });   // sans salle → non localisable
+    ck.eq(GlobalSearchSources.build(s).find((x) => x.kind === "racks" && x.id === poolRack.id).locate, undefined, "baie SANS salle → PAS de cible Localiser (même prédicat que les listes)");
+    ck.eq(of2("equipments", lib.id).locate, undefined, "équipement NON localisable (manual sans lieu) → pas de cible");
+    // sous-équipement : « Localiser » = SON MAÎTRE (pas d'existence physique propre), gardé pareil
+    ck.eq(of2("subEquipments", drv.id).locate, undefined, "sous-équipement d'un maître non localisable → pas de cible");
+    const drv2 = await s.create("subEquipments", { name: "Drive rk", equipment_id: (await s.create("equipments", { name: "eq-en-baie", rack_id: rk.id, placement_mode: "rack", dim_mode: "u", rack_u: 20 })).id });
+    const drv2Item = GlobalSearchSources.build(s).find((x) => x.kind === "subEquipments" && x.id === drv2.id);
+    ck.eq(drv2Item.locate && drv2Item.locate.kind, "equipment", "sous-équipement d'un maître EN BAIE → Localiser vise le MAÎTRE (kind equipment)");
+    ck.eq(drv2Item.locate && drv2Item.locate.id === drv2.equipment_id, true, "…et la cible est l'id du maître, pas celui du drive");
   }
   });
 

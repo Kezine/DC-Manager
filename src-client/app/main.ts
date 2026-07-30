@@ -143,7 +143,15 @@ async function boot(): Promise<void> {
   // donc ouvrir la palette pendant qu'un FORMULAIRE est en cours mènerait à écraser sa saisie au premier
   // résultat cliqué. Ignorée aussi sur l'accueil (aucun document → corpus vide). ⚠ Son overlay à elle
   // (`.gs-overlay`) n'est PAS dans le sélecteur de garde : Ctrl+K palette ouverte = FERMER (toggle).
-  const globalSearch = new GlobalSearchPalette(store, formHost);
+  // « Localiser » depuis un résultat : MÊME flux que l'action des listes (switch vue Datacenter +
+  // `dcView.locate` + bouton « ← Retour » vers la vue quittée). `shell.current` est capturé AVANT le
+  // switch ; s'il n'y a pas de vue quittée (déjà sur le Datacenter), pas d'action de retour.
+  const globalSearch = new GlobalSearchPalette(store, formHost, (kind, id) => {
+    const cameFrom = shell.current;
+    shell.switchView("datacenter");
+    dcView.locate(kind, id);
+    dcView.setReturnAction(cameFrom && cameFrom !== "datacenter" ? () => shell.switchView(cameFrom) : null);
+  });
   const openGlobalSearch = (): void => {
     if (globalSearch.isOpen()) { globalSearch.close(); return; }
     if (document.querySelector(".modal-overlay.open, .dialog-overlay") || document.body.classList.contains("welcome-active")) return;
