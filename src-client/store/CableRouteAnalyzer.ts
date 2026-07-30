@@ -78,14 +78,19 @@ export type RouteErrorCode =
   | "exit_unpaired"     // exit ouvrant un tronçon jamais refermé (aucun conteneur atteint ensuite)
   | "portA_room"        // port A hors du conteneur où la route commence
   | "portB_room"        // port B hors du conteneur où la route finit
-  | "ports_split";      // deux bouts dans deux conteneurs sans exits pour les relier
+  | "ports_split"       // deux bouts dans deux conteneurs sans exits pour les relier
+  | "endpoints_split"   // FAISCEAU : deux extrémités dans deux conteneurs sans exits (miroir de ports_split)
+  | "endpoint_route_mismatch"; // FAISCEAU : extrémités alignées sur la route ni à l'endroit ni à l'envers
 export interface RouteError { code: RouteErrorCode; message: string }
 /** Sous-ensemble « EXIT TERMINAL » (cohérence de salle) : un exit ferme sa salle → tout waypoint/exit de salle
     mal placé ensuite viole la route. Sert à refuser l'ajout d'un waypoint au fil de l'eau (UI routage + formulaire). */
 export const ROUTE_ROOM_BREAK_CODES: ReadonlySet<RouteErrorCode> = new Set<RouteErrorCode>(["room_wp_outside", "wrong_room", "exit_wrong_room", "exit_reentry"]);
 /** Erreurs STRUCTURELLES (grammaire des tronçons) = ruptures de salle + pin d'étage mal posé + exit non
     appairé. Elles interdisent l'enregistrement MÊME en brouillon (route mal formée), contrairement aux erreurs
-    d'INCOMPLÉTUDE (ports/bouts pas encore posés) qui restent tolérées en brouillon. Sur-ensemble des « room break ». */
+    d'INCOMPLÉTUDE (ports/bouts pas encore posés) qui restent tolérées en brouillon. Sur-ensemble des « room break ».
+    ⚠ Les codes de FAISCEAU (`endpoints_split`/`endpoint_route_mismatch`, cf. `bundleRoute`) n'y entrent PAS,
+    délibérément : ce sont des incohérences de DONNÉES complétables plus tard (extrémités à reposer, route à
+    corriger), pas une route mal formée — les y ajouter empêcherait d'enregistrer un faisceau en cours de saisie. */
 export const ROUTE_STRUCTURAL_CODES: ReadonlySet<RouteErrorCode> = new Set<RouteErrorCode>([...ROUTE_ROOM_BREAK_CODES, "floor_outside", "exit_unpaired"]);
 
 /** Une ÉTAPE de la route : le waypoint, son type ("datacenter" | "exit" | "floor") et le CONTENEUR qu'il
@@ -113,6 +118,12 @@ export interface RouteAnalysis {
   containerA: PlacementContainer | null;
   containerB: PlacementContainer | null;
 }
+
+/** Analyse de la route d'un FAISCEAU (cf. bundleRoute) : l'analyse du pseudo-câble, PLUS le SENS
+    d'alignement des extrémités sur la route — "aligned" (extrémité A au départ), "swapped" (route saisie
+    à l'envers, TOLÉRÉE — le rendu inverse les bouts), ou null (extrémité absente/non localisable, ou
+    incohérence — auquel cas une erreur `endpoint_route_mismatch` l'explique). */
+export interface BundleRouteAnalysis extends RouteAnalysis { sens: "aligned" | "swapped" | null }
 
 /** ÉTAT de l'automate — ce qui remplace le booléen `outside` (cf. en-tête).
 
@@ -261,6 +272,59 @@ export class CableRouteAnalyzer {
       err("ports_split", I18n.t(deuxSalles ? "analysis.route.portsSplitRooms" : "analysis.route.portsSplitPlaces"));
     }
     return { steps, errors, valid: !errors.length, hasExits: parcours.exits > 0, startContainer, endContainer, containerA, containerB };
+  }
+
+  /** Analyse de la route d'un FAISCEAU (`cableBundles`) : la grammaire du pseudo-câble + la COHÉRENCE de
+      ses extrémités (`endpoint_a/b_equipment_id` — des patchs, pas des ports).
+
+      POURQUOI ICI ET PAS DANS LE RENDU. Un faisceau n'a pas de ports : le rendu (`TrunkRouting`) analysait
+      sa route via un pseudo-câble SANS bouts — `portA_room`/`portB_room`/`ports_split` ne pouvaient donc
+      JAMAIS se déclencher — puis vérifiait LUI-MÊME l'alignement extrémités ⇄ route et, en cas
+      d'incohérence, ne traçait RIEN, silencieusement. Incident réel (corpus SONUMA) : un faisceau dont le
+      1er waypoint sortait d'une salle ne contenant AUCUNE extrémité était invisible en 2D/3D, sans le
+      moindre message nulle part. Le verdict vit désormais ICI (source unique) ; le rendu le CONSOMME
+      (`sens`), le formulaire faisceau l'AFFICHE (hint de route).
+
+      — `containerA`/`containerB` : conteneurs des extrémités (`equipmentNamedContainer` — la salle de la
+        chaîne, sinon l'étage) ; ils REMPLACENT les null que le pseudo-câble sans ports rendait ;
+      — `sens` : cf. `BundleRouteAnalysis` — la tolérance d'inversion est une PARITÉ avec le rendu
+        historique (`interDcTrunks` la pratiquait déjà), on ne la retire pas ;
+      — `endpoints_split` : miroir EXACT de `ports_split`, appliqué aux extrémités — aucun doublon
+        possible, le pseudo-câble n'ayant pas de ports pour déclencher l'original ;
+      — `endpoint_route_mismatch` : la route a des exits et nomme départ/arrivée, mais les extrémités ne
+        s'y alignent NI à l'endroit NI à l'envers. Le message NOMME les conteneurs (les quatre à deux
+        extrémités posées, les trois à une seule) — c'est lui qui aurait révélé l'incident.
+      ⚠ Ces deux codes n'entrent ni dans ROUTE_STRUCTURAL_CODES ni dans ROUTE_ROOM_BREAK_CODES (cf. leur
+      en-tête) : erreurs de COHÉRENCE complétables, pas de grammaire — un brouillon reste enregistrable. */
+  bundleRoute(bundle: any): BundleRouteAnalysis {
+    const r = this.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: bundle.waypoint_ids || [] });
+    const cA = bundle.endpoint_a_equipment_id ? this.s.equipmentNamedContainer(bundle.endpoint_a_equipment_id) : null;
+    const cB = bundle.endpoint_b_equipment_id ? this.s.equipmentNamedContainer(bundle.endpoint_b_equipment_id) : null;
+    const errors = r.errors.slice();
+    /* SENS : `same` rend false dès qu'un terme manque → « aligned »/« swapped » exigent d'eux-mêmes les
+       DEUX extrémités posées ET un départ/arrivée nommés, sans garde supplémentaire. */
+    const aligned = PlacementContainers.same(cA, r.startContainer) && PlacementContainers.same(cB, r.endContainer);
+    const swapped = !aligned && PlacementContainers.same(cB, r.startContainer) && PlacementContainers.same(cA, r.endContainer);
+    const sens: BundleRouteAnalysis["sens"] = aligned ? "aligned" : (swapped ? "swapped" : null);
+    // Miroir de `ports_split` (même condition, mêmes mots — D4 : « salles » quand c'en sont deux).
+    if (!r.hasExits && cA && cB && !PlacementContainers.same(cA, cB)) {
+      const deuxSalles = cA.kind === "room" && cB.kind === "room";
+      errors.push({ code: "endpoints_split", message: I18n.t(deuxSalles ? "analysis.route.endpointsSplitRooms" : "analysis.route.endpointsSplitPlaces") });
+    }
+    // Route à exits, départ et arrivée NOMMÉS : les extrémités posées doivent s'y aligner (un sens ou l'autre).
+    if (r.hasExits && r.startContainer && r.endContainer) {
+      const start = this.conteneurNom(r.startContainer), end = this.conteneurNom(r.endContainer);
+      if (cA && cB) {
+        if (!sens) errors.push({ code: "endpoint_route_mismatch", message: I18n.t("analysis.route.endpointRouteMismatch", { start, end, a: this.conteneurNom(cA), b: this.conteneurNom(cB) }) });
+      } else if (cA || cB) {
+        // Une SEULE extrémité posée : elle peut encore tenir l'un ou l'autre bout (route à compléter) —
+        // erreur seulement si elle ne matche NI le départ NI l'arrivée.
+        const seule = (cA || cB) as PlacementContainer;
+        if (!PlacementContainers.same(seule, r.startContainer) && !PlacementContainers.same(seule, r.endContainer))
+          errors.push({ code: "endpoint_route_mismatch", message: I18n.t("analysis.route.endpointRouteMismatchOne", { start, end, name: this.conteneurNom(seule) }) });
+      }
+    }
+    return { ...r, errors, valid: !errors.length, containerA: cA, containerB: cB, sens };
   }
 
   /** La route contient-elle une violation de COHÉRENCE DE SALLE (« exit terminal ») ? Testé sur les CODES stables. */

@@ -747,6 +747,72 @@ module.exports = async () => {
   }
   });
 
+  await section("Store : bundleRoute — cohérence extrémités ⇄ route des FAISCEAUX", async () => {
+  {
+    /* Un faisceau n'a pas de ports : le pseudo-câble qu'analysait le rendu ne pouvait JAMAIS déclencher
+       `ports_split`/`portA_room`/`portB_room`, et l'alignement extrémités ⇄ route se vérifiait DANS le
+       rendu — qui, en cas d'incohérence, ne traçait rien, silencieusement (incident réel : faisceau
+       invisible, aucun message). `bundleRoute` est désormais la SOURCE UNIQUE de ce verdict :
+       le rendu consomme `sens`, le formulaire affiche les erreurs. Cf. docs/faisceaux.md §3.1. */
+    const s = await makeStore();
+    const dcA = await s.create("datacenters", { name: "Salle A" });
+    const dcB = await s.create("datacenters", { name: "Salle B" });
+    const dcC = await s.create("datacenters", { name: "Salle C" });
+    const rkA = await s.create("racks", { name: "RA", u_count: 42, datacenter_id: dcA.id, dc_x: 500, dc_y: 500 });
+    const rkB = await s.create("racks", { name: "RB", u_count: 42, datacenter_id: dcB.id, dc_x: 500, dc_y: 500 });
+    const patchA = await s.create("equipments", { name: "PatchA", type: "patch_panel", placement_mode: "rack", rack_id: rkA.id, rack_u: 1 });
+    const patchB = await s.create("equipments", { name: "PatchB", type: "patch_panel", placement_mode: "rack", rack_id: rkB.id, rack_u: 1 });
+    const patchPool = await s.create("equipments", { name: "PatchPool", type: "patch_panel" });   // volontairement NON placé
+    const exA = await s.create("waypoints", { name: "sortieA", wp_type: "exit", datacenter_id: dcA.id, dc_x: 0, dc_y: 0 });
+    const exB = await s.create("waypoints", { name: "sortieB", wp_type: "exit", datacenter_id: dcB.id, dc_x: 0, dc_y: 0 });
+    const exC = await s.create("waypoints", { name: "sortieC", wp_type: "exit", datacenter_id: dcC.id, dc_x: 0, dc_y: 0 });
+
+    const analyse = (epA, epB, wps) => s.bundleRoute({ endpoint_a_equipment_id: epA, endpoint_b_equipment_id: epB, waypoint_ids: wps });
+    const codes = (r) => r.errors.map((e) => e.code).join(",");
+
+    // (a) route alignée sur les extrémités → RAS
+    let r = analyse(patchA.id, patchB.id, [exA.id, exB.id]);
+    ck(r.valid && r.sens === "aligned" && !r.errors.length, "(a) route alignée → valide, sens « aligned », 0 erreur");
+    ck.eq(JSON.stringify(r.containerA), JSON.stringify({ kind: "room", id: dcA.id }), "(a) containerA = conteneur du patch A (le pseudo-câble sans ports rendait null)");
+    ck.eq(JSON.stringify(r.containerB), JSON.stringify({ kind: "room", id: dcB.id }), "(a) containerB = conteneur du patch B");
+    // (b) route saisie à l'envers : TOLÉRÉE (parité rendu historique), le sens le dit
+    r = analyse(patchA.id, patchB.id, [exB.id, exA.id]);
+    ck(r.valid && r.sens === "swapped", "(b) route à l'envers → valide, sens « swapped » (tolérance conservée)");
+    // (c) LE CAS DE L'INCIDENT : extrémités en salles A et B, route exit(C) → exit(B)
+    r = analyse(patchA.id, patchB.id, [exC.id, exB.id]);
+    ck(!r.valid && r.sens === null && codes(r) === "endpoint_route_mismatch",
+      "(c) INCIDENT : route salle C → salle B vs extrémités A/B → endpoint_route_mismatch, valid=false, sens=null");
+    const mc = r.errors[0].message;
+    ck(["Salle A", "Salle B", "Salle C"].every((n) => mc.indexOf(n) >= 0) && mc.indexOf("analysis.") < 0,
+      "(c) …le message NOMME les conteneurs (celui qui aurait révélé l'incident), traduit");
+    // (d) endpoints_split : deux patchs dans deux salles, route sans exit (miroir de ports_split)
+    r = analyse(patchA.id, patchB.id, []);
+    ck(!r.valid && codes(r) === "endpoints_split" && r.sens === null, "(d) 2 extrémités / 2 salles, aucune sortie → endpoints_split");
+    ck(r.errors[0].message.indexOf("salles") >= 0, "(d) …deux SALLES : le message emploie le mot juste (D4, parité portsSplitRooms)");
+    // (e) une SEULE extrémité posée : elle peut tenir l'un OU l'autre bout de la route
+    ck(analyse(patchA.id, null, [exA.id, exB.id]).valid, "(e) extrémité unique qui matche le DÉPART → aucune erreur");
+    ck(analyse(patchA.id, null, [exB.id, exA.id]).valid, "(e) extrémité unique qui matche l'ARRIVÉE → aucune erreur (inversion tolérée)");
+    r = analyse(patchA.id, null, [exB.id, exC.id]);
+    ck(!r.valid && codes(r) === "endpoint_route_mismatch", "(e) extrémité unique qui ne matche NI départ NI arrivée → endpoint_route_mismatch");
+    ck(["Salle A", "Salle B", "Salle C"].every((n) => r.errors[0].message.indexOf(n) >= 0), "(e) …message adapté : les TROIS conteneurs sont nommés");
+    // (e') extrémité présente mais NON LOCALISABLE (pool) : rien à juger — comme une extrémité absente
+    r = analyse(patchA.id, patchPool.id, [exA.id, exB.id]);
+    ck(r.valid && r.sens === null, "(e') extrémité au pool (non localisable) → aucune erreur nouvelle, sens null (le rendu ne trace pas, faute de pose)");
+    // (f) extrémités ABSENTES (création en cours) : aucun nouveau code
+    r = analyse(null, null, [exA.id, exB.id]);
+    ck(r.valid && r.sens === null && !r.errors.length, "(f) extrémités absentes → aucun nouveau code (brouillon en cours de saisie)");
+    // les erreurs de GRAMMAIRE du pseudo-câble restent dans le verdict (bundleRoute les ENGLOBE)
+    r = analyse(patchA.id, patchB.id, [exA.id]);
+    ck(!r.valid && r.errors.some((e) => e.code === "exit_unpaired"), "grammaire : exit non appairé remonte tel quel dans bundleRoute");
+    // (g) INVARIANT : les codes de faisceau ne sont NI structurels NI room-break — ils n'empêchent pas
+    // d'enregistrer un brouillon (le formulaire ne bloque au save que ROUTE_STRUCTURAL_CODES).
+    const { ROUTE_STRUCTURAL_CODES, ROUTE_ROOM_BREAK_CODES } = D("store/CableRouteAnalyzer.js");
+    ["endpoints_split", "endpoint_route_mismatch"].forEach((c) => {
+      ck(!ROUTE_STRUCTURAL_CODES.has(c) && !ROUTE_ROOM_BREAK_CODES.has(c), "(g) « " + c + " » n'appartient ni à ROUTE_STRUCTURAL_CODES ni à ROUTE_ROOM_BREAK_CODES");
+    });
+  }
+  });
+
   await section("Validation : régressions audit (unicité de brin par extrémité · P4 revalidation inverse)", async () => {
   {
     const s = await makeStore();

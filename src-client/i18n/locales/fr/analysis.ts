@@ -35,6 +35,13 @@ export const analysis = {
     portBFloor: "le port B n'est pas sur l'étage où la route finit",
     portsSplitRooms: "ports dans deux salles différentes — la route doit sortir par un exit de chaque salle",
     portsSplitPlaces: "ports dans deux emplacements différents — la route doit sortir par un exit",
+    /* FAISCEAUX (`bundleRoute`) : cohérence extrémités ⇄ route. Les deux premiers sont le miroir de
+       portsSplit* (mêmes mots, appliqués aux extrémités) ; les deux suivants NOMMENT les conteneurs —
+       c'est le message qui aurait révélé l'incident du faisceau invisible (cf. docs/faisceaux.md §3.1). */
+    endpointsSplitRooms: "extrémités du faisceau dans deux salles différentes — la route doit sortir par un exit de chaque salle",
+    endpointsSplitPlaces: "extrémités du faisceau dans deux emplacements différents — la route doit sortir par un exit",
+    endpointRouteMismatch: "la route relie « {{start}} » à « {{end}} », mais les extrémités du faisceau sont dans « {{a}} » et « {{b}} »",
+    endpointRouteMismatchOne: "la route relie « {{start}} » à « {{end}} », mais l'extrémité posée du faisceau est dans « {{name}} »",
     blockedManyRooms: "câblé vers plusieurs salles à la fois ({{names}}) — re-routez ou détachez un câble",
     blockedManyPlaces: "câblé vers plusieurs emplacements à la fois ({{names}}) — re-routez ou détachez un câble",
     blockedOne: "câblé vers « {{name}} » — re-routez le câble (exits) ou détachez-le",

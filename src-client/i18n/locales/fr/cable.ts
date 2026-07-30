@@ -128,6 +128,12 @@ export const cable = {
     noWpUsable: "Aucun waypoint utilisable (créez des exits / pins d'étage en vue Datacenter).",
     routeField: "Route du trunk",
     routeHint: "Exits (par paires) + pins d'étage. Cochés = ajoutés en fin de trajet — porte le tracé 2D/3D.",
+    // hint de route vivant (parité formulaire câble) — verdict de `store.bundleRoute` (extrémités ⇄ route)
+    routeNoWp: "Aucun point de passage — le faisceau reste dans son conteneur.",
+    routeErrPrefix: "⚠ {{message}} — pour relier deux salles : ⏏ exit → (◎ pin d'étage…) → ⏏ exit.",
+    routeOk: "Route : {{summary}} ✓",
+    routeErr: "Route : {{summary}}⚠ {{message}}",
+    routeInvalid: "Route invalide : {{message}}",
     orderField: "Ordre du trajet",
     occupancy: "{{used}} brin(s) pioché(s) (ports de patch) sur {{capacity}}{{suffix}}",
     occupancyReduce: ". Réduire le nb de brins sous le n° max pioché ({{max}}) est refusé.",

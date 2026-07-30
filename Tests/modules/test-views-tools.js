@@ -307,6 +307,17 @@ module.exports = async () => {
     // route saisie « à l'envers » (extrémité A dans la salle d'ARRIVÉE de la route) → bouts inversés, tracé quand même
     await s.create("cableBundles", { name: "T-swap", endpoint_a_equipment_id: patchC.id, endpoint_b_equipment_id: patchB.id, waypoint_ids: [exit1.id, exit2.id] });
     ck.eq(dv.trunks.interDcTrunks(mInter, false).length, 2, "trunks.interDcTrunks : extrémités inversées vs sens de route → tolérées");
+    /* ROUTE INCOHÉRENTE avec les extrémités (le cas de l'INCIDENT) : extrémités posées en DC et DC2, route
+       qui SORT d'une TROISIÈME salle → plus AUCUN tracé, STUB COMPRIS. Avant, le verdict vivait dans le
+       rendu : `interDcTrunks` ne traçait rien (déjà), mais `outgoingTrunkStubs` dessinait un demi-tracé
+       dans la salle de l'extrémité qui matchait l'ARRIVÉE de la route — silencieusement. `bundleRoute`
+       (source unique) invalide désormais la route entière ; le formulaire faisceau porte le message. */
+    const dc3 = await s.create("datacenters", { name: "DC3" });
+    const exit3 = await s.create("waypoints", { wp_type: "exit", datacenter_id: dc3.id, dc_x: 0, dc_y: 0 });
+    const tBad = await s.create("cableBundles", { name: "T-incident", endpoint_a_equipment_id: patchA.id, endpoint_b_equipment_id: patchC.id, waypoint_ids: [exit3.id, exit2.id] });
+    ck.eq(s.bundleRoute(tBad).sens, null, "bundleRoute : route DC3 → DC2 vs extrémités DC/DC2 → sens null (endpoint_route_mismatch)");
+    ck.eq(dv.trunks.interDcTrunks(mInter, false).filter((t) => t.bundle.id === tBad.id).length, 0, "interDcTrunks : faisceau incohérent NON tracé");
+    ck.eq(dv.outgoingTrunkStubs(dc2.id).filter((t) => t.bundle.id === tBad.id).length, 0, "outgoingTrunkStubs : plus de demi-tracé dans la salle de l'extrémité qui matchait l'arrivée");
     // plan d'ÉTAGE : mêmes faisceaux inter-DC en coordonnées plan (projection injectée par la vue)
     {
       const flLayout = new FloorLayout(s);

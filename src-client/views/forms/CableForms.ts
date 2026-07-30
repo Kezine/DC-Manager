@@ -445,6 +445,7 @@ export class CableForms extends EquipmentForms {
     const refreshEndpointOpts = () => {
       epaI.setOptions(patchEndpointOpts(epbI.value, initEpA), epaI.value);
       epbI.setOptions(patchEndpointOpts(epaI.value, initEpB), epbI.value);
+      syncBundleRoute();   // changer une extrémité change le verdict extrémités ⇄ route (déclaré plus bas ; n'est appelé qu'aux événements)
     };
     epaI.onchange = refreshEndpointOpts; epbI.onchange = refreshEndpointOpts;
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("cable.bundle.endpointAField"), epaI, I18n.t("cable.bundle.endpointAHint")), FormControls.fieldRow(I18n.t("cable.bundle.endpointBField"), epbI, I18n.t("cable.bundle.endpointBHint"))));
@@ -462,13 +463,33 @@ export class CableForms extends EquipmentForms {
     const wpBoxes = document.createElement("div"); wpBoxes.style.cssText = "display:flex;flex-wrap:wrap;gap:6px 14px;margin:2px 0;";
     const orderBox = document.createElement("div");
     const wpLab = (wp: any) => Waypoint.glyph(wp) + " " + (wp.name || I18n.t("cable.common.waypoint")) + " · " + (Waypoint.isFloorLevel(wp) ? Waypoint.floorLabel(wp) : (store.waypointIsPlaced(wp) ? store.dcName(wp.datacenter_id) : I18n.t("cable.common.notPlaced")));
+    // RETOUR DE ROUTE VIVANT (parité `syncRoute` du formulaire câble) : le faisceau n'affichait AUCUN
+    // verdict — une route incohérente avec les extrémités ne se voyait qu'en 2D/3D… par un tracé ABSENT
+    // (incident réel : 1er waypoint sortant d'une salle sans extrémité → faisceau invisible, zéro message).
+    // La source du verdict est UNIQUE : `store.bundleRoute` (grammaire + extrémités, inversion tolérée) —
+    // la MÊME analyse que celle qui décide du tracé (`TrunkRouting.trunkRoute`).
+    const routeHint = document.createElement("div"); routeHint.className = "form-hint";
+    const syncBundleRoute = () => {
+      routeHint.classList.remove("err");
+      const r = store.bundleRoute({ endpoint_a_equipment_id: epaI.value || null, endpoint_b_equipment_id: epbI.value || null, waypoint_ids: wpState.ids });
+      if (!wpState.ids.length) {
+        // Sans waypoint, seule l'incohérence d'extrémités (`endpoints_split`) peut survenir : le message
+        // pédagogique rappelle alors la grammaire (exits par paires), comme côté câble.
+        routeHint.textContent = r.valid ? I18n.t("cable.bundle.routeNoWp") : I18n.t("cable.bundle.routeErrPrefix", { message: r.errors[0].message });
+        if (!r.valid) routeHint.classList.add("err");
+        return;
+      }
+      const sum = store.cableRouteSummary(r);
+      if (r.valid) routeHint.textContent = I18n.t("cable.bundle.routeOk", { summary: sum });
+      else { routeHint.textContent = I18n.t("cable.bundle.routeErr", { summary: (sum ? sum + " — " : ""), message: r.errors[0].message }); routeHint.classList.add("err"); }
+    };
     const renderOrder = () => {
       orderBox.innerHTML = "";
       wpState.ids.forEach((wid: string, i: number) => {
         const wp: any = store.get("waypoints", wid); if (!wp) return;
         const r = document.createElement("div"); r.style.cssText = "display:flex;align-items:center;gap:6px;margin:2px 0;font-size:12px;";
         const n = document.createElement("span"); n.className = "pill"; n.textContent = String(i + 1); const tx = document.createElement("span"); tx.className = "grow"; tx.textContent = wpLab(wp);
-        const mk = (s: string, d: number) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = s; b.disabled = (d < 0 && i === 0) || (d > 0 && i === wpState.ids.length - 1); b.onclick = () => { const j = i + d; wpState.ids.splice(i, 1); wpState.ids.splice(j, 0, wid); renderOrder(); }; return b; };
+        const mk = (s: string, d: number) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = s; b.disabled = (d < 0 && i === 0) || (d > 0 && i === wpState.ids.length - 1); b.onclick = () => { const j = i + d; wpState.ids.splice(i, 1); wpState.ids.splice(j, 0, wid); renderOrder(); syncBundleRoute(); }; return b; };
         r.append(n, tx, mk("↑", -1), mk("↓", 1)); orderBox.appendChild(r);
       });
     };
@@ -481,12 +502,13 @@ export class CableForms extends EquipmentForms {
           if (store.routeHasRoomBreak({ from_port_id: null, to_port_id: null, waypoint_ids: [...wpState.ids, wp.id] })) { cb.checked = false; Notify.toast(I18n.t("cable.bundle.exitTerminal"), "err"); return; }
           if (!wpState.ids.includes(wp.id)) wpState.ids.push(wp.id);
         } else wpState.ids = wpState.ids.filter((x: string) => x !== wp.id);
-        renderOrder();
+        renderOrder(); syncBundleRoute();
       };
       const tx = document.createElement("span"); tx.textContent = wpLab(wp); lab.append(cb, tx); wpBoxes.appendChild(lab);
     });
     root.appendChild(FormControls.fieldRow(I18n.t("cable.bundle.routeField"), wpBoxes, I18n.t("cable.bundle.routeHint")));
-    root.appendChild(FormControls.fieldRow(I18n.t("cable.bundle.orderField"), orderBox)); renderOrder();
+    root.appendChild(routeHint);   // le verdict de route, SOUS le champ route (même position que côté câble)
+    root.appendChild(FormControls.fieldRow(I18n.t("cable.bundle.orderField"), orderBox)); renderOrder(); syncBundleRoute();
     const descI = FormControls.textArea(bnd ? bnd.description : "");
     root.appendChild(FormControls.fieldRow(I18n.t("cable.common.description"), descI));
     if (bnd) { const oc = store.bundleOccupancy(bnd.id); const maxStrand = store.maxUsedStrandOfBundle(bnd.id); const info = document.createElement("div"); info.className = "form-hint"; const suffix = maxStrand ? I18n.t("cable.bundle.occupancyReduce", { max: maxStrand }) : I18n.t("cable.bundle.occupancyEnd"); info.textContent = I18n.t("cable.bundle.occupancy", { used: oc.used, capacity: oc.capacity, suffix }); root.appendChild(info); }
@@ -506,6 +528,14 @@ export class CableForms extends EquipmentForms {
         // Refuser la réduction sous le NUMÉRO MAX de brin pioché (pas le simple compte : un port peut piocher le
         // brin 24 seul → used=1 mais on ne peut pas réduire à 12 sans laisser un brin hors plage).
         if (bnd) { const maxStrand = store.maxUsedStrandOfBundle(bnd.id); if (fc < maxStrand) { Notify.toast(I18n.t("cable.bundle.strandBelow", { fc, max: maxStrand }), "err"); return false; } }
+        // COHÉRENCE DE ROUTE (parité câble) : une route STRUCTURELLEMENT mal formée (exit non appairé,
+        // rupture de salle, pin d'étage en salle) n'est pas enregistrable. Les erreurs d'EXTRÉMITÉS
+        // (`endpoints_split`/`endpoint_route_mismatch`), elles, restent enregistrables : ce sont des
+        // données complétables plus tard — le hint de route les signale déjà.
+        if (wpState.ids.length) {
+          const bad = store.routeStructuralError({ from_port_id: null, to_port_id: null, waypoint_ids: wpState.ids });
+          if (bad) { Notify.toast(I18n.t("cable.bundle.routeInvalid", { message: bad.message }), "err"); return false; }
+        }
         const lenV = parseFloat(String(lenI.value));
         const payload = { name, cable_type_id: typeI.value || null, fiber_count: fc, waypoint_ids: wpState.ids.slice(), length_m: (isFinite(lenV) && lenV >= 0) ? lenV : null, endpoint_a_equipment_id: epaI.value || null, endpoint_b_equipment_id: epbI.value || null, description: descI.value.trim() };
         // T10/T11 (extrémités) surlignés PAR CHAMP avant d'écrire — même validation que le Store/serveur.

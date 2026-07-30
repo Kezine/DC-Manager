@@ -45,9 +45,10 @@ Service pur parallèle à `CableRouting` (mêmes trois cas, parité complète av
 
 **Réutilisation** (aucune duplication de mécanique) :
 
-- la **grammaire de route** (exits par paires, pins d'étage) vient de l'analyseur du Store : le service
-  interroge `store.cableRoute` sur un **pseudo-câble** portant la route du trunk (`waypoint_ids`) —
-  l'absence de ports évite les erreurs de bouts ;
+- l'**analyse de route** vient de l'analyseur du Store : `store.bundleRoute` = grammaire du
+  pseudo-câble (exits par paires, pins d'étage — un faisceau n'a pas de ports) **+ cohérence des
+  extrémités** (cf. § 3.1) ; le pseudo-câble ne sert plus qu'aux helpers de câble qui lisent
+  `waypoint_ids` (`store.cableWaypointsIn`, répartition en conduit) ;
 - la **polyligne** (amorces ⊥, conduits, spline) vient de `CableRouting` injecté : helpers extraits
   `viaPoints` / `stubLineIn` / `worldLine`, partagés câbles ⇄ faisceaux ;
 - dans un **conduit**, le faisceau occupe un **slot de répartition** comme un câble
@@ -55,7 +56,34 @@ Service pur parallèle à `CableRouting` (mêmes trois cas, parité complète av
   les brins piochés par ports ne sont pas dessinés, le trunk est LA ligne visible — centré, il
   chevaucherait un câble voisin ;
 - une route saisie « à l'envers » (extrémité A dans la salle d'arrivée) est **tolérée** en inversant les
-  bouts (le formulaire faisceau n'oriente pas la route comme le fait `orientEnds` côté câble).
+  bouts (le formulaire faisceau n'oriente pas la route comme le fait `orientEnds` côté câble) — le
+  verdict vient du champ `sens` de `bundleRoute` (« aligned » / « swapped »), plus d'un calcul local.
+
+### 3.1 Cohérence extrémités ⇄ route — `store.bundleRoute` (source unique du verdict)
+
+Un faisceau n'a pas de ports : l'analyse du pseudo-câble ne pouvait déclencher NI `portA_room`/
+`portB_room` NI `ports_split`, et l'alignement extrémités ⇄ route se vérifiait DANS le rendu — qui, en
+cas d'incohérence, ne traçait rien, **silencieusement** (incident réel, corpus SONUMA 2026-07-30 : un
+faisceau dont le 1er waypoint sortait d'une salle ne contenant AUCUNE extrémité était invisible en
+2D/3D, sans le moindre message). Le verdict vit désormais dans `CableRouteAnalyzer.bundleRoute(bundle)`
+(pure lecture, testé) :
+
+- `containerA`/`containerB` = conteneurs des **patchs** (`equipmentNamedContainer` — la salle de la
+  chaîne, sinon l'étage), remplaçant les `null` du pseudo-câble sans ports ;
+- `sens` = « aligned » · « swapped » (route à l'envers, tolérée) · `null` (extrémité absente/non
+  localisable, ou incohérence) ;
+- erreurs à **codes stables** : `endpoints_split` (miroir exact de `ports_split`, appliqué aux
+  extrémités) et `endpoint_route_mismatch` (route à exits dont ni l'endroit ni l'envers ne desservent
+  les extrémités posées — le message **nomme les conteneurs**, c'est lui qui aurait révélé l'incident) ;
+- ces codes ne sont **ni structurels ni « room break »** : un brouillon reste enregistrable. Le
+  formulaire faisceau AFFICHE le verdict (hint de route vivant, parité `syncRoute` du câble) et ne
+  bloque au save que les erreurs STRUCTURELLES (`routeStructuralError`), comme le câble.
+
+**Conséquence rendu (voulue, parité câbles)** : `TrunkRouting.trunkRoute` délègue à `bundleRoute` et
+`r.valid` intègre ces erreurs → une route incohérente avec ses extrémités ne trace plus **rien**, y
+compris le stub « s'arrête au mur » (`outgoingTrunkStubs`) qui se dessinait auparavant dans la salle de
+l'extrémité qui matchait l'arrivée de la route. Le signal vit dans le formulaire, plus dans un tracé
+fantôme.
 
 ## 4. Style & comportement — « comme un câble, plus épais »
 
@@ -80,6 +108,7 @@ Service pur parallèle à `CableRouting` (mêmes trois cas, parité complète av
 
 - `Tests/modules/test-geometry.js` — uplink (centre face arrière, parité port persisté, garde-fous null) ;
 - `Tests/modules/test-views-tools.js` — tracés (intra / non posé / stub / inter-DC monde / plan d'étage /
-  route inversée / visibilité partagée) ;
-- `Tests/modules/test-shared-validation.js` + `test-core-store.js` — T10/T11 + dépendance inverse ;
+  route inversée / visibilité partagée / route incohérente NON tracée, stub compris) ;
+- `Tests/modules/test-shared-validation.js` + `test-core-store.js` — T10/T11 + dépendance inverse +
+  cohérence extrémités ⇄ route (`bundleRoute` : sens, `endpoints_split`, `endpoint_route_mismatch`) ;
 - `Tests/modules/test-sync.js` — carte d'impact.

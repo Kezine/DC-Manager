@@ -24,7 +24,7 @@ import { TrayGeometry } from "../../src-shared/TrayGeometry";
 import { PlacementContainers } from "../../src-shared/PlacementContainers";
 import type { PlacementContainer } from "../../src-shared/PlacementContainers";
 import { CableRouteAnalyzer as RouteAnalyzerImpl } from "./CableRouteAnalyzer";
-import type { RouteError as RouteErrorT, RouteAnalysis as RouteAnalysisT } from "./CableRouteAnalyzer";
+import type { RouteError as RouteErrorT, RouteAnalysis as RouteAnalysisT, BundleRouteAnalysis as BundleRouteAnalysisT } from "./CableRouteAnalyzer";
 
 const COLLECTIONS = EntityRegistry.COLLECTIONS;
 const ENTITY_CLASSES = EntityRegistry.CLASSES;
@@ -1024,6 +1024,8 @@ export class Store {
   cableEndContainer(cable: any, side: "A" | "B"): PlacementContainer | null { return this.routes.cableEndContainer(cable, side); }
   /** Analyse de la route (grammaire + cohérence des bouts posés) — cf. CableRouteAnalyzer.cableRoute. */
   cableRoute(cable: any): RouteAnalysisT { return this.routes.cableRoute(cable); }
+  /** Analyse de la route d'un FAISCEAU : grammaire + cohérence des EXTRÉMITÉS (sens aligné/inversé) — cf. CableRouteAnalyzer.bundleRoute. */
+  bundleRoute(bundle: any): BundleRouteAnalysisT { return this.routes.bundleRoute(bundle); }
   /** Violation de COHÉRENCE DE SALLE (« exit terminal ») ? — cf. CableRouteAnalyzer. */
   routeHasRoomBreak(cable: any): boolean { return this.routes.routeHasRoomBreak(cable); }
   /** Première erreur STRUCTURELLE de route, ou null — cf. CableRouteAnalyzer. */
