@@ -14,6 +14,9 @@ export const subEquipment = {
   titleEdit: "Edit sub-equipment",
   created: "Sub-equipment created",
   updated: "Sub-equipment updated",
+  deleted: "Sub-equipment deleted",
+  deleteConfirmTitle: "Delete this sub-equipment?",
+  deleteConfirmMsg: "Permanently delete “{{name}}”? The parent's ports assigned to it will be detached (they remain on the equipment), not deleted.",
 
   master: "Parent equipment",
   masterMissing: "Parent equipment not found",

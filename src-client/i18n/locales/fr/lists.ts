@@ -33,6 +33,7 @@ export const lists = {
     rowView: "Détails",
     rowManage: "Contenu (montage des U)",
     rowEdit: "Modifier",
+    rowDelete: "Supprimer",
     rowMore: "Plus d'actions",
     rowLocate: "Localiser en 3D",
     rowDownload: "Télécharger",

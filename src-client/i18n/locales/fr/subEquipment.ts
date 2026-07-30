@@ -17,6 +17,9 @@ export const subEquipment = {
   titleEdit: "Modifier le sous-équipement",
   created: "Sous-équipement créé",
   updated: "Sous-équipement mis à jour",
+  deleted: "Sous-équipement supprimé",
+  deleteConfirmTitle: "Supprimer ce sous-équipement ?",
+  deleteConfirmMsg: "Supprimer définitivement « {{name}} » ? Les ports du maître qui lui sont assignés seront détachés (ils restent sur l'équipement), pas supprimés.",
 
   master: "Équipement maître",
   masterMissing: "Équipement maître introuvable",

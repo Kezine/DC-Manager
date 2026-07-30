@@ -27,6 +27,7 @@ export const lists = {
     rowView: "Details",
     rowManage: "Contents (U mounting)",
     rowEdit: "Edit",
+    rowDelete: "Delete",
     rowMore: "More actions",
     rowLocate: "Locate in 3D",
     rowDownload: "Download",

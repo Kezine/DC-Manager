@@ -25,6 +25,7 @@ import { Html } from "../../core/Html";
 import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
 import { Notify } from "../../ui/Notify";
+import { Dialog } from "../../ui/Dialog";
 import { FormControls } from "../../ui/FormControls";
 import { ChipsInput, ChipItem } from "../../ui/ChipsInput";
 import { FieldFacet } from "../../core/FieldFacet";
@@ -212,14 +213,44 @@ export class SubEquipmentForms extends FormBase {
       title.appendChild(add);
     }
     root.appendChild(title);
+    // Modifier/Supprimer masqués en mode visualiseur — MÊME garde que le bouton d'en-tête « + Ajouter » ci-dessus
+    // (principe n°10 : la fiche reste consultable, mais aucune écriture n'est offerte). Le bouton fiche, lui,
+    // reste toujours affiché : c'est le seul moyen d'ATTEINDRE un sous-équipement (décision D2, pas d'onglet dédié).
+    const viewer = this.isViewer();
     const tw = this.tbl(root, [I18n.t("lists.col.name"), I18n.t("subEquipment.slot"), I18n.t("lists.col.characteristics"), ""], rows.map((se: any) => {
       const view = `<button class="btn btn-ghost btn-sm icon-action" data-se-view="${Html.escape(se.id)}" title="${I18n.t("lists.chrome.rowView")}" aria-label="${I18n.t("lists.chrome.rowView")}">${Icons.INFO}</button>`;
+      const edit = viewer ? "" : `<button class="btn btn-ghost btn-sm icon-action" data-se-edit="${Html.escape(se.id)}" title="${I18n.t("lists.chrome.rowEdit")}" aria-label="${I18n.t("lists.chrome.rowEdit")}">${Icons.EDIT}</button>`;
+      const del = viewer ? "" : `<button class="btn btn-sm icon-action btn-danger" data-se-del="${Html.escape(se.id)}" title="${I18n.t("lists.chrome.rowDelete")}" aria-label="${I18n.t("lists.chrome.rowDelete")}">${Icons.DELETE}</button>`;
       const tech = this.techSummary(se);
       return [Html.escape(this.label(se)), se.slot ? Html.escape(se.slot) : '<span style="color:var(--fg-dimmer)">—</span>',
-        tech ? Html.escape(tech) : '<span style="color:var(--fg-dimmer)">—</span>', `<span class="cell-actions">${view}</span>`];
+        tech ? Html.escape(tech) : '<span style="color:var(--fg-dimmer)">—</span>', `<span class="cell-actions">${view}${edit}${del}</span>`];
     }), I18n.t("subEquipment.sectionEmpty"));
     tw?.querySelectorAll("[data-se-view]").forEach((el) => {
       (el as HTMLElement).onclick = () => this.detail(store, host, (el as HTMLElement).dataset.seView!, opts.reopen);
+    });
+    tw?.querySelectorAll("[data-se-edit]").forEach((el) => {
+      (el as HTMLElement).onclick = () => {
+        const se: any = store.get("subEquipments", (el as HTMLElement).dataset.seEdit!);
+        if (se) this.form(store, host, se.equipment_id, se.id, opts.reopen);
+      };
+    });
+    tw?.querySelectorAll("[data-se-del]").forEach((el) => {
+      (el as HTMLElement).onclick = async () => {
+        const se: any = store.get("subEquipments", (el as HTMLElement).dataset.seDel!);
+        if (!se) return;
+        const ok = await Dialog.confirm({
+          title: I18n.t("subEquipment.deleteConfirmTitle"),
+          message: I18n.t("subEquipment.deleteConfirmMsg", { name: this.label(se) }),
+          confirmLabel: I18n.t("ui.action.delete"), danger: true,
+        });
+        if (!ok) return;
+        // La cascade PARTAGÉE (src-shared/Cascade.ts, règle `subEquipments`) DÉTACHE les ports du maître
+        // assignés à ce sous-équipement — elle ne les supprime pas. Le dialogue de confirmation le rappelle
+        // explicitement pour éviter de faire croire à une perte de câblage.
+        await store.remove("subEquipments", se.id);
+        host.setDirty?.(true); Notify.toast(I18n.t("subEquipment.deleted"));
+        opts.reopen();
+      };
     });
   }
 }
