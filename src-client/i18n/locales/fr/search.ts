@@ -22,6 +22,7 @@ export const search = {
     network: "Réseau & IP",
     vms: "VMs",
     inventory: "Inventaire",
+    actions: "Actions",
   },
 
   family: {
@@ -43,6 +44,21 @@ export const search = {
     contacts: "Contacts",
     cableTypes: "Types de câble",
     portTypes: "Types de port",
+  },
+
+  action: {
+    newEquipment: "Ajouter un équipement",
+    newEquipmentSub: "Ouvre le formulaire de création",
+    newRack: "Ajouter une baie",
+    newRackSub: "Ouvre le formulaire de création",
+    newCable: "Ajouter un câble",
+    newCableSub: "Ouvre le formulaire de création",
+    gotoDatacenter: "Vue Datacenter",
+    gotoDatacenterSub: "Plans de salle et 3D",
+    toggleTheme: "Basculer le thème",
+    toggleThemeSub: "Sombre ⇄ clair",
+    exportJson: "Exporter le document en JSON",
+    exportJsonSub: "Téléchargement autonome",
   },
 
   recents: "Consultés récemment",

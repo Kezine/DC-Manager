@@ -17,6 +17,7 @@ export const search = {
     network: "Network & IP",
     vms: "VMs",
     inventory: "Inventory",
+    actions: "Actions",
   },
 
   family: {
@@ -38,6 +39,21 @@ export const search = {
     contacts: "Contacts",
     cableTypes: "Cable types",
     portTypes: "Port types",
+  },
+
+  action: {
+    newEquipment: "Add an equipment",
+    newEquipmentSub: "Opens the creation form",
+    newRack: "Add a rack",
+    newRackSub: "Opens the creation form",
+    newCable: "Add a cable",
+    newCableSub: "Opens the creation form",
+    gotoDatacenter: "Datacenter view",
+    gotoDatacenterSub: "Room plans and 3D",
+    toggleTheme: "Toggle theme",
+    toggleThemeSub: "Dark ⇄ light",
+    exportJson: "Export document as JSON",
+    exportJsonSub: "Standalone download",
   },
 
   recents: "Recently viewed",

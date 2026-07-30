@@ -151,7 +151,20 @@ async function boot(): Promise<void> {
     shell.switchView("datacenter");
     dcView.locate(kind, id);
     dcView.setReturnAction(cameFrom && cameFrom !== "datacenter" ? () => shell.switchView(cameFrom) : null);
-  });
+  }, [
+    // ACTIONS de la palette (portée « > ») — le POINT UNIQUE où elles se déclarent. Chaque `run` rejoue
+    // un geste EXISTANT de l'app (formulaire de création, bascule du shell, export), jamais une logique
+    // propre : la palette est un raccourci vers ce qui existe, pas un second chemin d'écriture.
+    // ⚠ Fermetures sur `shell`/`shellHost` déclarés PLUS BAS : légal (exécution au clic, bien après le
+    // boot) — même montage que `onLocate` ci-dessus. VIEWER : les créations passent par openModal, que
+    // `Modal.editLocked` neutralise déjà — l'action devient un no-op silencieux, cohérent avec le mode.
+    { id: "new-equipment", label: I18n.t("search.action.newEquipment"), sub: I18n.t("search.action.newEquipmentSub"), terms: ["add", "ajouter", "créer"], run: () => Forms.equipment(store, formHost, null, () => shell.refreshActive()) },
+    { id: "new-rack", label: I18n.t("search.action.newRack"), sub: I18n.t("search.action.newRackSub"), terms: ["add", "ajouter", "créer", "baie"], run: () => Forms.rack(store, formHost, null, () => shell.refreshActive()) },
+    { id: "new-cable", label: I18n.t("search.action.newCable"), sub: I18n.t("search.action.newCableSub"), terms: ["add", "ajouter", "créer"], run: () => Forms.cable(store, formHost, null, () => shell.refreshActive()) },
+    { id: "goto-datacenter", label: I18n.t("search.action.gotoDatacenter"), sub: I18n.t("search.action.gotoDatacenterSub"), terms: ["3d", "plan", "salle", "vue"], run: () => shell.switchView("datacenter") },
+    { id: "toggle-theme", label: I18n.t("search.action.toggleTheme"), sub: I18n.t("search.action.toggleThemeSub"), terms: ["dark", "light", "sombre", "clair", "thème"], run: () => shellHost.onToggleTheme?.() },
+    { id: "export-json", label: I18n.t("search.action.exportJson"), sub: I18n.t("search.action.exportJsonSub"), terms: ["download", "télécharger", "sauvegarde"], run: () => shellHost.onExportJson?.() },
+  ]);
   const openGlobalSearch = (): void => {
     if (globalSearch.isOpen()) { globalSearch.close(); return; }
     if (document.querySelector(".modal-overlay.open, .dialog-overlay") || document.body.classList.contains("welcome-active")) return;

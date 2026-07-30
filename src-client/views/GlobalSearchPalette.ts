@@ -23,11 +23,18 @@
      d'entrée unique des fiches) — la fiche s'ouvre dans la modale STANDARD,
      les deux overlays ne coexistent jamais.
 
+   Elle porte AUSSI la portée « ACTIONS » (préfixe « > », maquette) : des
+   COMMANDES injectées par le bootstrap (créer un équipement, basculer le thème…)
+   fondues au même corpus — même score, mêmes groupes, mêmes comptes ; seule
+   l'ACTIVATION diverge (une action s'EXÉCUTE, elle ne s'ouvre pas). Famille
+   synthétique `__actions`, HORS de l'invariant corpus ≡ fiches (entités seules).
+
    CE QU'ELLE NE FAIT PAS, à dessein :
-   - elle ne LOCALISE jamais (la vue Datacenter garde ce verbe et sa recherche) ;
-   - pas de portées Certificats / Interventions / Actions (maquette) en v1 :
-     données API paginées hors du Store — chantier à part, la structure de
-     portées les accueillera.
+   - le geste PRIMAIRE d'un résultat d'entité reste la FICHE — « Localiser » est
+     un bouton secondaire gardé par les prédicats, la vue Datacenter garde sa
+     propre recherche ;
+   - pas de portées Certificats / Interventions (maquette) en v1 : données API
+     paginées hors du Store — chantier à part, la structure les accueillera.
 
    Le CORPUS est un SNAPSHOT pris à l'ouverture (volumes réels : des centaines) ;
    une écriture concurrente pendant que la palette est ouverte n'est pas
@@ -45,6 +52,23 @@ import { I18n } from "../i18n/I18n";
 
 /** Entrée de l'historique « consultés récemment » (localStorage). */
 interface RecentEntry { kind: string; id: string; }
+
+/** Une ACTION de la palette (portée « Actions », préfixe « > ») : un libellé cherchable + un effet.
+    Injectées par le bootstrap — la palette ne connaît AUCUNE action, comme elle ne connaît pas la 3D. */
+export interface SearchAction {
+  id: string;
+  label: string;
+  /** Sous-ligne descriptive (facultative), cherchable au palier 30 comme celle des entités. */
+  sub?: string;
+  /** Termes annexes (synonymes : « thème », « dark »…). */
+  terms?: readonly unknown[];
+  run: () => void;
+}
+
+/** Famille SYNTHÉTIQUE des actions. ⚠ PAS une collection : elle vit HORS de `GlobalSearchSources`
+    (dont l'invariant corpus ≡ fiches ouvrables ne concerne que les ENTITÉS) — une action ne
+    s'« ouvre » pas, elle S'EXÉCUTE. D'où le préfixe « __ » : impossible à confondre avec une collection. */
+const ACTIONS_KIND = "__actions";
 
 export class GlobalSearchPalette {
   /** Clé localStorage des consultations récentes — préférence PAR NAVIGATEUR, comme
@@ -70,16 +94,29 @@ export class GlobalSearchPalette {
 
   /** `onLocate` (facultatif) : « Localiser en 3D » un résultat — câblé par le bootstrap sur le même
       flux que les listes (switch vue Datacenter + `dcView.locate` + action de retour). Absent = les
-      boutons Localiser ne sont pas rendus (mode visualiseur sans 3D, tests headless). */
+      boutons Localiser ne sont pas rendus (mode visualiseur sans 3D, tests headless).
+      `actions` (facultatif) : les commandes de la portée « Actions » (préfixe « > ») — injectées,
+      la palette n'en connaît aucune. Absent/vide = ni portée ni pastille Actions. */
   constructor(private readonly store: Store, private readonly host: FormHost,
-    private readonly onLocate?: (kind: "equipment" | "rack" | "cable", id: string) => void) {}
+    private readonly onLocate?: (kind: "equipment" | "rack" | "cable", id: string) => void,
+    private readonly actions: readonly SearchAction[] = []) {}
+
+  /** Portée d'une famille, actions comprises — le seul endroit où la famille synthétique se mappe. */
+  private static scopeOfKind(kind: string): string {
+    return kind === ACTIONS_KIND ? "actions" : GlobalSearchSources.scopeOf(kind);
+  }
 
   isOpen(): boolean { return !!this.overlay && this.overlay.classList.contains("open"); }
   toggle(): void { this.isOpen() ? this.close() : this.open(); }
 
   open(): void {
     if (!this.overlay) this.buildDom();
-    this.corpus = GlobalSearchSources.build(this.store);   // snapshot — cf. en-tête
+    // snapshot des ENTITÉS + les ACTIONS injectées, fondues au même corpus : le score, les groupes et
+    // les comptes les traitent comme n'importe quelle famille — seule l'ACTIVATION diverge (run, pas fiche).
+    this.corpus = [
+      ...GlobalSearchSources.build(this.store),
+      ...this.actions.map((a) => ({ kind: ACTIONS_KIND, id: a.id, label: a.label, sub: a.sub, terms: a.terms || [] })),
+    ];
     this.scope = "all"; this.sel = 0; this.input.value = "";
     this.restoreFocus = (document.activeElement as HTMLElement) || null;
     this.overlay!.classList.add("open");
@@ -185,7 +222,7 @@ export class GlobalSearchPalette {
       // Tab CYCLE les portées (maquette) — il ne quitte pas la palette : le seul autre focus utile est
       // le champ lui-même, et Maj+Tab remonte le cycle.
       e.preventDefault();
-      const ids = ["all", ...GlobalSearchSources.SCOPES.map((s) => s.id)];
+      const ids = ["all", ...GlobalSearchSources.SCOPES.map((s) => s.id), ...(this.actions.length ? ["actions"] : [])];
       const at = ids.indexOf(this.scope);
       this.scope = ids[(at + (e.shiftKey ? -1 : 1) + ids.length) % ids.length];
       this.sel = 0; this.render();
@@ -203,7 +240,9 @@ export class GlobalSearchPalette {
   private render(): void {
     const raw = this.input.value.trim();
     // Préfixe de portée saisi (« eq:sw-01 ») : il ACTIVE la portée et disparaît de la requête.
-    const parsed = GlobalSearch.parsePrefix(raw, GlobalSearchSources.prefixes());
+    // « > » (maquette) s'ajoute aux préfixes des portées d'entités — seulement si des actions existent.
+    const prefixes = this.actions.length ? { ...GlobalSearchSources.prefixes(), ">": "actions" } : GlobalSearchSources.prefixes();
+    const parsed = GlobalSearch.parsePrefix(raw, prefixes);
     if (parsed.scope) this.scope = parsed.scope;
     const query = parsed.query;
     this.clearBtn.classList.toggle("show", raw.length > 0);
@@ -218,8 +257,8 @@ export class GlobalSearchPalette {
       return;
     }
 
-    const groups = GlobalSearch.rank(this.corpus, query, { normalize: Schema.normSearch, kindOrder: GlobalSearchSources.FAMILY_ORDER })
-      .filter((g) => this.scope === "all" || GlobalSearchSources.scopeOf(g.kind) === this.scope);
+    const groups = GlobalSearch.rank(this.corpus, query, { normalize: Schema.normSearch, kindOrder: [...GlobalSearchSources.FAMILY_ORDER, ACTIONS_KIND] })
+      .filter((g) => this.scope === "all" || GlobalSearchPalette.scopeOfKind(g.kind) === this.scope);
     this.rows = groups.flatMap((g) => g.items);
     if (this.sel >= this.rows.length) this.sel = 0;
 
@@ -247,8 +286,8 @@ export class GlobalSearchPalette {
       et un bouton dans un bouton est du HTML invalide (le navigateur éjecte l'intérieur). Le clavier
       ne perd rien : ↑/↓/Entrée vivent sur le CHAMP (pattern listbox), jamais sur les rangées. */
   private rowHtml(item: GlobalSearchItem, index: number, query: string): string {
-    const scopeId = GlobalSearchSources.scopeOf(item.kind);
-    const icon = GlobalSearchSources.SCOPES.find((s) => s.id === scopeId)?.icon || Icons.SEARCH;
+    const scopeId = GlobalSearchPalette.scopeOfKind(item.kind);
+    const icon = item.kind === ACTIONS_KIND ? Icons.COMMAND : (GlobalSearchSources.SCOPES.find((s) => s.id === scopeId)?.icon || Icons.SEARCH);
     const subBits = [this.highlight(item.sub || "", query), this.highlight(item.path || "", query)].filter(Boolean);
     const pill = item.pill ? `<span class="gs-pill${item.pill.tone ? " " + item.pill.tone : ""}">${Html.escape(item.pill.text)}</span>` : "";
     const locate = (item.locate && this.onLocate)
@@ -281,7 +320,8 @@ export class GlobalSearchPalette {
     const pill = (id: string, icon: string, label: string, n: number): string =>
       `<button type="button" class="gs-scope${this.scope === id ? " active" : ""}" data-scope="${id}" role="tab" aria-selected="${this.scope === id}">${icon}${Html.escape(label)}<span class="gs-n">${n}</span></button>`;
     this.scopesEl.innerHTML = pill("all", "", I18n.t("search.scope.all"), total)
-      + GlobalSearchSources.SCOPES.map((s) => pill(s.id, s.icon, I18n.t("search.scope." + s.id), countOf(s))).join("");
+      + GlobalSearchSources.SCOPES.map((s) => pill(s.id, s.icon, I18n.t("search.scope." + s.id), countOf(s))).join("")
+      + (this.actions.length ? pill("actions", Icons.COMMAND, I18n.t("search.scope.actions"), byKind[ACTIONS_KIND] || 0) : "");
   }
 
   /** Accueil : consultés récemment (résolus contre le corpus — les disparus sont écartés) + préfixes. */
@@ -303,7 +343,8 @@ export class GlobalSearchPalette {
     }
     html += `<div class="gs-empty gs-welcome"><div class="gs-empty-s">${Html.escape(I18n.t("search.welcome"))}</div>
       <div class="gs-tips">${GlobalSearchSources.SCOPES.map((s) =>
-        `<button type="button" class="gs-tip" data-prefix="${Html.escape(s.prefix)}"><b>${Html.escape(s.prefix)}</b> ${Html.escape(I18n.t("search.scope." + s.id))}</button>`).join("")}
+        `<button type="button" class="gs-tip" data-prefix="${Html.escape(s.prefix)}"><b>${Html.escape(s.prefix)}</b> ${Html.escape(I18n.t("search.scope." + s.id))}</button>`).join("")}${this.actions.length
+        ? `<button type="button" class="gs-tip" data-prefix="&gt;"><b>&gt;</b> ${Html.escape(I18n.t("search.scope.actions"))}</button>` : ""}
       </div></div>`;
     return html;
   }
@@ -324,6 +365,14 @@ export class GlobalSearchPalette {
 
   private activate(item: GlobalSearchItem | undefined): void {
     if (!item) return;
+    if (item.kind === ACTIONS_KIND) {
+      // Une action S'EXÉCUTE — pas de fiche, et pas de « récents » (on ne CONSULTE pas une action ;
+      // l'y mettre ferait en plus échouer sa résolution au prochain accueil si les actions changent).
+      const action = this.actions.find((a) => a.id === item.id);
+      this.close();
+      action?.run();
+      return;
+    }
     this.recordRecent({ kind: item.kind, id: item.id });
     this.close();
     // `detail` rend false pour une collection sans fiche — IMPOSSIBLE ici par construction

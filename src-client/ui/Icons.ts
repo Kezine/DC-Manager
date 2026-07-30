@@ -231,6 +231,9 @@ export class Icons {
   /** Netmap / graphe : nœuds reliés par des arêtes. */
   static readonly GRAPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="8" r="2"/><circle cx="11" cy="18" r="2"/><path d="M6.8 6.9 9.4 16.2M17.2 9.4 12.6 16.4M6.9 6.4 17.1 7.7"/></svg>';
 
+  /** ACTION de la recherche globale (invite de commande : chevron + tiret) — portée « Actions ». */
+  static readonly COMMAND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
+
   /** Datacenter / salle : baies alignées d'une salle serveur. */
   static readonly DATACENTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/><path d="M5 8h3M16 8h3M5 12h3M16 12h3M5 16h3M16 16h3"/></svg>';
 
