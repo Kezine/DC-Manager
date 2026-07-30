@@ -2134,8 +2134,11 @@
   .gnode-vm text.vm-badge-txt { fill: var(--bg); font-family: var(--mono); }
   .gnode-vm text.vm-sub { fill: var(--fg-dim); }
   /* réseau logique : cartouche à coins TRÈS arrondis, teinté par la couleur du réseau (--net-col posée en ligne).
-     Spécificité choisie pour battre `.gnode rect` sans écraser la sélection/surlignage (`.gnode-net.selected …`). */
-  .gnode-net rect.net-body { fill: var(--net-col, var(--line-2)); fill-opacity: 0.16; stroke: var(--net-col, var(--line-2)); stroke-width: 1.5; }
+     Spécificité choisie pour battre `.gnode rect` sans écraser la sélection/surlignage (`.gnode-net.selected …`).
+     Fond OPAQUE (teinte 16 % PRÉ-MÉLANGÉE au fond du stage via color-mix, PAS un fill-opacity) : les arêtes
+     VM→réseau, dessinées dans la couche SOUS les nœuds, disparaissent derrière le cartouche au lieu de le
+     traverser — elles semblent ainsi se connecter à sa périphérie. */
+  .gnode-net rect.net-body { fill: color-mix(in srgb, var(--net-col, var(--line-2)) 16%, var(--bg-2)); stroke: var(--net-col, var(--line-2)); stroke-width: 1.5; }
   .gnode-net.selected rect.net-body, .gnode-net.highlight rect.net-body { stroke: var(--accent); stroke-width: 2.5; }
   .gnode-net text.net-label { fill: var(--net-col, var(--fg)); }
 
