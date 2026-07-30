@@ -269,7 +269,9 @@ class RackOccupancy {
     // rackItem : un TRAY pleine profondeur (type "dual") occupe les 2 faces ; cantilever/blank → sa seule face de montage.
     // Parité avec RackGeometry.mountSides (front) — à maintenir ensemble.
     if (collection === "rackItems") return (record.kind === "tray" && record.tray_type !== "cantilever") ? ["front", "rear"] : [record.side === "rear" ? "rear" : "front"];
-    if (collection === "waypoints") return ["front", "rear"];                     // brosse → pleine profondeur
+    // brosse : ancrée au plan de montage AVANT (elle s'étend de depth_mm vers l'arrière, cf. Resolver3D.brushGeom) ;
+    // la face ARRIÈRE n'est bloquée que par la PROFONDEUR (règle V6d-brosse, RackDepth ci-dessous), comme entre équipements.
+    if (collection === "waypoints") return ["front"];
     // locks_u fait foi ; l'enum legacy « full » n'implique les 2 faces QUE pré-migration (depth_mm absent).
     // Parité avec RackGeometry.mountLocksU (front) — à maintenir ensemble.
     const locksU = record.locks_u === true || (record.depth_mm == null && record.depth === "full");
@@ -368,6 +370,12 @@ class RackDepth {
     const frac: Record<string, number> = { full: 1, half: 0.5, quarter: 0.25 };
     return Math.round((frac[record.depth] != null ? frac[record.depth] : 1) * RackDepthPolicy.cage(rack));
   }
+  /** Profondeur d'une BROSSE (waypoint kind "brush"). ⚠ Défaut 100 EN PARITÉ avec le constructeur
+      client (`src-client/models/Waypoint.ts`, champ `depth_mm`) — à maintenir ensemble : un record
+      venu d'une interface tierce sans `depth_mm` doit être jugé comme le client le dessinerait. */
+  private static brushDepth(waypoint: Record<string, any>): number {
+    return waypoint.depth_mm != null ? Math.max(1, waypoint.depth_mm | 0) : 100;
+  }
 
   /** T2c (cross-entité) : un équipement racké (migré) doit TENIR dans la profondeur dispo de sa baie. */
   static fits(eq: Record<string, any>, fetch: EntityFetcher): { path: string; message: string } | null {
@@ -396,6 +404,42 @@ class RackDepth {
       const oTop = other.rack_u | 0, oHeight = Math.max(1, (other.u_height | 0) || 1);
       if (oTop + oHeight <= top || top + height <= oTop) continue;                 // aucun U commun
       const sum = Math.max(1, eq.depth_mm | 0) + RackDepth.effDepth(other, rack);
+      if (sum > limit) return { path: "depth_mm", message: `Dos-à-dos trop profond avec « ${other.name || other.id} » : ${sum} mm cumulés > ${Math.round(limit)} mm d'espace partagé dans la baie.` };
+    }
+    // V6d-brosse : une brosse est ancrée au plan de montage AVANT et n'occupe QUE cette face
+    // (RackOccupancy.sides) — un équipement ARRIÈRE au même U ne la collisionne donc plus (V6c) et c'est
+    // CETTE arithmétique qui protège l'espace, exactement comme entre deux équipements dos à dos. Un
+    // équipement côté FRONT au même U reste couvert par la collision de cellule `U:front` (V6c), et un
+    // verrouillant (`locks_u`) est sorti en tête de fonction — couvert par V6c aussi.
+    if (side === "rear") {
+      for (const waypoint of find("waypoints", "rack_id", eq.rack_id)) {
+        if (waypoint.kind !== "brush" || waypoint.rack_u == null) continue;
+        const wTop = Math.max(1, waypoint.rack_u | 0), wHeight = Math.max(1, waypoint.u_height | 0);
+        if (wTop + wHeight <= top || top + height <= wTop) continue;                // aucun U commun
+        const sum = Math.max(1, eq.depth_mm | 0) + RackDepth.brushDepth(waypoint);
+        if (sum > limit) return { path: "depth_mm", message: `Dos-à-dos trop profond avec la brosse « ${waypoint.name || waypoint.id} » : ${sum} mm cumulés > ${Math.round(limit)} mm d'espace partagé dans la baie.` };
+      }
+    }
+    return null;
+  }
+
+  /** V6d-brosse (portée, SYMÉTRIQUE de l'extension ci-dessus) : jouée quand on ÉDITE la brosse — la somme
+      brosse (ancrée à l'avant) + équipement monté ARRIÈRE au même U ne doit pas dépasser l'espace partagé.
+      Un équipement verrouillant (`locks_u`, ou legacy « full » non migré) occupe les DEUX faces : la
+      collision de cellule V6c couvre déjà ce cas, on ne le re-juge pas ici. */
+  static brushBackToBack(wp: Record<string, any>, find: RecordFinder, fetch?: EntityFetcher): { path: string; message: string } | null {
+    if (wp.kind !== "brush" || !wp.rack_id || !fetch) return null;
+    const rack = fetch("racks", wp.rack_id);
+    if (!rack || rack.sides !== "dual") return null;                               // baie simple face : pas de dos-à-dos possible
+    const top = Math.max(1, wp.rack_u | 0), height = Math.max(1, wp.u_height | 0);
+    const limit = RackDepth.shared(rack);
+    for (const other of find("equipments", "rack_id", wp.rack_id)) {
+      if (other.placement_mode !== "rack" || other.rack_u == null) continue;
+      const oLocks = other.locks_u === true || (other.depth_mm == null && other.depth === "full");
+      if (oLocks || (other.rack_side === "rear" ? "rear" : "front") !== "rear") continue;   // front / verrouillant → couvert par V6c
+      const oTop = other.rack_u | 0, oHeight = Math.max(1, (other.u_height | 0) || 1);
+      if (oTop + oHeight <= top || top + height <= oTop) continue;                 // aucun U commun
+      const sum = RackDepth.brushDepth(wp) + RackDepth.effDepth(other, rack);      // effDepth ESTIME les legacy (fraction de cage)
       if (sum > limit) return { path: "depth_mm", message: `Dos-à-dos trop profond avec « ${other.name || other.id} » : ${sum} mm cumulés > ${Math.round(limit)} mm d'espace partagé dans la baie.` };
     }
     return null;
@@ -1206,8 +1250,13 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
         return (rack && rack.has_caps === false) ? { path: "cap_face", message: "Cette baie est sans capots : aucun waypoint ne peut être posé sur son toit." } : null;
       },
     ],
-    // V6c : une brosse ne doit pas collisionner d'autres occupants de la baie.
-    scope: [(wp, find, fetch) => RackOccupancy.collision(wp, "waypoints", find, fetch)],
+    // V6c : une brosse ne doit pas collisionner d'autres occupants de la baie (face AVANT seule).
+    // V6d-brosse : la profondeur de la brosse + un montage ARRIÈRE au même U ≤ espace partagé (symétrique
+    // de l'extension jouée quand on édite l'ÉQUIPEMENT — cf. RackDepth.backToBack).
+    scope: [
+      (wp, find, fetch) => RackOccupancy.collision(wp, "waypoints", find, fetch),
+      (wp, find, fetch) => RackDepth.brushBackToBack(wp, find, fetch),
+    ],
   },
   floors: {
     fields: SPEC_FIELDS.floors,

@@ -48,9 +48,11 @@ export class RackScene {
     });
     s.all("waypoints").forEach((w: any) => {
       if (w.kind === "brush" && w.rack_id === rackId && w.id !== opts.exceptBrushId) {
-        const sides = rack.sides === "dual" ? ["front", "rear"] : ["front"];
-        put(Math.max(1, w.rack_u | 0), Math.max(1, w.u_height | 0), sides,
-          { kind: "brush", id: w.id, label: w.name || "(brosse)", color: null, top: Math.max(1, w.rack_u | 0), height: Math.max(1, w.u_height | 0), side: "front", depth: "full" });
+        // brosse : face AVANT seule (ancrée au plan de montage avant — parité RackOccupancy.sides, validation
+        // partagée) ; l'arrière n'est protégé que par l'arithmétique de PROFONDEUR (V6d-brosse). `depth_mm`
+        // alimente le sous-libellé de la grille U (FormBase.mountDepthLabel) : « 100 mm » et non « Full-depth ».
+        put(Math.max(1, w.rack_u | 0), Math.max(1, w.u_height | 0), ["front"],
+          { kind: "brush", id: w.id, label: w.name || "(brosse)", color: null, top: Math.max(1, w.rack_u | 0), height: Math.max(1, w.u_height | 0), side: "front", depth: "none", depth_mm: w.depth_mm });
       }
     });
     return occ;

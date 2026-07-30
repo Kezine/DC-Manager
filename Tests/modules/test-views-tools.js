@@ -386,6 +386,14 @@ module.exports = async () => {
     const scn = new RackScene(s); const occB = scn.occupants(rk.id);
     ck(occB.has("20:front") && occB.has("21:front"), "brosse : occupe ses U (20–21 front)");
     ck.eq(scn.occupants(rk.id, { exceptBrushId: s.all("waypoints").find((w) => w.kind === "brush").id }).has("20:front"), false, "brosse : exclue via exceptBrushId");
+    // baie DOUBLE : la brosse est ancrée au plan de montage AVANT et n'occupe QUE cette face — l'assertion
+    // sur `rk` (simple face) ne prouverait rien, l'arrière y est libre par construction.
+    const rkDual = await s.create("racks", { name: "R-dual", u_count: 42, sides: "dual", datacenter_id: dc.id });
+    await s.create("waypoints", { wp_type: "datacenter", kind: "brush", datacenter_id: dc.id, rack_id: rkDual.id, rack_u: 20, u_height: 2 });
+    const occD = scn.occupants(rkDual.id);
+    ck(occD.has("20:front") && occD.has("21:front"), "brosse (baie double) : occupe ses U côté AVANT");
+    ck.eq(occD.has("20:rear"), false, "brosse : la face ARRIÈRE reste libre — profondeur gérée par V6d");
+    ck.eq(occD.get("20:front").depth_mm, 100, "brosse : depth_mm exposé à la grille U (« 100 mm », plus « Full-depth »)");
     ck.eq(JSON.stringify(dv.rackHalfExtents({ width_mm: 600, depth: 1000, orientation: 0 })), JSON.stringify({ hx: 300, hy: 500 }), "rackHalfExtents 0° → (w/2, d/2)");
     ck.eq(JSON.stringify(dv.rackHalfExtents({ width_mm: 600, depth: 1000, orientation: 90 })), JSON.stringify({ hx: 500, hy: 300 }), "rackHalfExtents 90° → (d/2, w/2)");
     // recherche + visibilité câble (panneaux de contrôle)

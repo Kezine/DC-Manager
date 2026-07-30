@@ -21,7 +21,8 @@ export class Waypoint extends Entity implements Records.Waypoint {
   rack_u: number;
   /** Brush : hauteur en U. */
   u_height: number;
-  /** Brush : profondeur de passage (mm). */
+  /** Brush : profondeur de passage (mm). ⚠ Défaut 100 EN PARITÉ avec la validation partagée
+      (`src-shared/DataValidation.ts`, `RackDepth.brushDepth`) — à maintenir ensemble. */
   depth_mm: number;
   /** Pin monté en marge latérale : face av/ar. null = pas un pin de marge. */
   side_face: string | null;

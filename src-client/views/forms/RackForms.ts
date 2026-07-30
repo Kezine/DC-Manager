@@ -688,7 +688,7 @@ export class RackForms extends CableForms {
         if (isBrush) {
           const rk: any = store.get("racks", wp.rack_id);
           const uh = Math.max(1, parseInt(bheightI!.value, 10) || 1);
-          const sides = (rk && rk.sides === "dual") ? ["front", "rear"] : ["front"];
+          const sides = ["front"];   // brosse = face AVANT seule (parité RackOccupancy.sides / RackScene.occupants) ; l'arrière est protégé par la profondeur (V6d-brosse)
           if (rk && !RackGeometry.canPlace(rk, Math.max(1, wp.rack_u | 0), uh, sides, scene.occupants(wp.rack_id, { exceptBrushId: wp.id }))) { Notify.toast(I18n.t("rack.waypoint.heightNoFit"), "err"); return false; }
           const depth = Math.max(1, parseInt(bdepthI!.value, 10) || 100);
           if (brushHasDoor && depth > brushMaxDepth) { Notify.toast(I18n.t("rack.waypoint.depthOverDoor", { max: Math.round(brushMaxDepth), avail: Math.round(brushAvail), safety: RACK_DEPTH_SAFETY_MM }), "err"); return false; }
@@ -827,7 +827,7 @@ export class RackForms extends CableForms {
     const selEq = () => store.get("equipments", eqI.value);
     const effMount = () => { const eq = selEq(); return isEq() ? { depth: (eq ? eq.depth : "full"), depth_mm: (eq ? eq.depth_mm : null), side, locks_u: (eq ? RackGeometry.mountLocksU(eq) : false) } : { side, isItem: true }; };
     const effHeight = () => { const eq = selEq(); return isEq() ? (eq ? Math.max(1, eq.u_height || 1) : 1) : Math.max(1, parseInt(pheightI.value, 10) || 1); };
-    const brushSides = () => (rack.sides === "dual") ? ["front", "rear"] : ["front"];
+    const brushSides = () => ["front"];   // brosse = face AVANT seule (parité RackOccupancy.sides / RackScene.occupants) ; l'arrière est protégé par la profondeur (V6d-brosse)
     const syncVis = () => {
       const e = isEq(), b = isBrush(), t = isTray();
       eqRow.style.display = e ? "" : "none"; labelRow.style.display = e ? "none" : ""; prow.style.display = e ? "none" : ""; bdepthRow.style.display = b ? "" : "none";

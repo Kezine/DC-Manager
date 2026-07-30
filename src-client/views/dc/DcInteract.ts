@@ -115,7 +115,9 @@ export abstract class DcInteract extends DcPanels {
     const nPorts = this.store.portsOf(e.id).length;
     const rows = [this.tipRow(`<b>${Html.escape(EquipmentTypes.label(e.type))}</b>${e.brand || e.model ? " · " + Html.escape([e.brand, e.model].filter(Boolean).join(" ")) : ""}`)];
     if (e.serial) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.serialPrefix"))}<b>${Html.escape(e.serial)}</b>`));
-    if (e.rack_u != null) { const uh = Math.max(1, e.u_height | 0 || 1); rows.push(this.tipRow(`U${e.rack_u}${uh > 1 ? "–U" + (e.rack_u + uh - 1) : ""} · ${Html.escape(Depths.label(e.depth || "full"))}`)); }
+    // profondeur en MM (`Depths.mountLabel`) : `Store._migrateDepths` garantit `depth_mm` sur tout équipement
+    // chargé — lire l'enum legacy affichait « Full-depth » sur des équipements bien plus courts.
+    if (e.rack_u != null) { const uh = Math.max(1, e.u_height | 0 || 1); rows.push(this.tipRow(`U${e.rack_u}${uh > 1 ? "–U" + (e.rack_u + uh - 1) : ""} · ${Html.escape(Depths.mountLabel(e))}`)); }
     if (rk) rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.rackPrefix"))}<b>${Html.escape(rk.name || I18n.t("lists.ph.rack"))}</b>${rk.row ? " · " + Html.escape(rk.row) : ""}`));
     // groupes : primaire (couleur héritée) + secondaires — un swatch par groupe membre.
     this.store.equipmentGroupIds(e).forEach((gid: string) => { const g: any = this.store.get("groups", gid); if (g) rows.push(this.tipRow(`${this.tipSwatch(g.color)}${Html.escape(g.label || "")}`)); });
@@ -205,11 +207,18 @@ export abstract class DcInteract extends DcPanels {
     return `<div class="tt-title">${Html.escape(bundle.name || I18n.t("lists.ph.bundle"))}</div>` + rows.join("");
   }
 
-  /** Tooltip d'un waypoint (type, forme/étage, hauteur, nb de câbles affectés). */
+  /** Tooltip d'un waypoint (type, forme/étage, plage d'U + profondeur pour une brosse, hauteur sinon,
+      nb de câbles affectés). */
   protected wpTipHtml(wp: any): string {
     const n = this.store.cablesOfWaypoint(wp.id).length, floorLvl = Waypoint.isFloorLevel(wp);
     const kindLbl = Waypoint.typeOf(wp) === "exit" ? I18n.t("dc.interact.wpExit") : floorLvl ? I18n.t("dc.interact.wpFloorPin") : (wp.kind === "segment" ? I18n.t("dc.interact.wpPath") : wp.kind === "brush" ? I18n.t("dc.interact.wpBrush") : I18n.t("dc.interact.wpRoomPin"));
-    const where = floorLvl ? Html.escape(Waypoint.floorLabel(wp)) : Html.escape(I18n.t("dc.interact.heightMm", { mm: wp.dc_z || 0 }));
+    // BROSSE : « Hauteur : {dc_z} mm » n'a aucun sens (son z DÉRIVE de rack_u) — on affiche la plage d'U +
+    // la profondeur, au MÊME format que le tooltip d'équipement (equipmentTipHtml). Le constructeur garantit
+    // `depth_mm` → `Depths.mountLabel` rend « 100 mm ». Les autres formes gardent leur ligne de hauteur.
+    const brushU0 = Math.max(1, wp.rack_u | 0), brushUh = Math.max(1, wp.u_height | 0);
+    const where = floorLvl ? Html.escape(Waypoint.floorLabel(wp))
+      : wp.kind === "brush" ? Html.escape(`U${brushU0}${brushUh > 1 ? "–U" + (brushU0 + brushUh - 1) : ""} · ${Depths.mountLabel(wp)}`)
+      : Html.escape(I18n.t("dc.interact.heightMm", { mm: wp.dc_z || 0 }));
     return `<div class="tt-title">${Waypoint.glyph(wp)} ${Html.escape(wp.name || I18n.t("dc.common.waypoint"))}</div>`
       + this.tipRow(`<b>${Html.escape(kindLbl)}</b>`)
       + this.tipRow(where)

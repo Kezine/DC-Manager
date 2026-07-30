@@ -722,7 +722,7 @@ module.exports = async () => {
   {
     // Baie 1000 mm, cage 900, marge avant 50 → dispo ancrage avant = 950 ; espace partagé = cage 900.
     const rack = { id: "R1", name: "R", u_count: 42, depth: 1000, cage_depth_mm: 900, front_margin_mm: 50, sides: "dual" };
-    const db = { racks: [rack], equipments: [] };
+    const db = { racks: [rack], equipments: [], waypoints: [] };
     const find = (coll, field, value) => (db[coll] || []).filter((o) => o[field] === value);
     const fetch = (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
     const V = (rec) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find);
@@ -742,6 +742,24 @@ module.exports = async () => {
     // l'OPPOSÉ legacy (half sans depth_mm) est ESTIMÉ à sa fraction de cage (0,5 × 900 = 450)
     db.equipments[0] = { ...db.equipments[0], depth_mm: null, depth: "half" };
     ck(V({ ...base, depth_mm: 500, locks_u: false }).some((x) => x.message && x.message.includes("Dos-à-dos")), "V6d : opposé legacy half estimé 450 → 500+450 > 900 → erreur");
+
+    // -- V6d-BROSSE : la brosse (ancrée au plan de montage AVANT) n'occupe plus la face arrière (V6c) —
+    // c'est la PROFONDEUR qui protège l'espace, dans les DEUX sens (édition de l'équipement / de la brosse).
+    db.waypoints.push({ id: "WB", kind: "brush", rack_id: "R1", rack_u: 20, u_height: 1, depth_mm: 100, name: "Brosse-20" });
+    ck.eq(V({ ...base, rack_u: 20, rack_side: "rear", depth_mm: 800, locks_u: false }).length, 0, "V6d-brosse : équipement REAR 800 + brosse 100 = 900 ≤ 900 partagés → OK");
+    ck(V({ ...base, rack_u: 20, rack_side: "rear", depth_mm: 801, locks_u: false }).some((x) => x.path === "depth_mm" && x.message.includes("Brosse-20")), "V6d-brosse : 801+100 > 900 → erreur dos-à-dos NOMMANT la brosse");
+    ck.eq(V({ ...base, rack_u: 21, rack_side: "rear", depth_mm: 801, locks_u: false }).length, 0, "V6d-brosse : U disjoints → pas de conflit");
+    // SYMÉTRIQUE (édition de la BROSSE) : équipement REAR au même U → la somme est jugée sur la brosse.
+    const VW = (rec) => Validation.DataValidator.validateRecord("waypoints", rec, fetch, find);
+    db.equipments.push({ id: "E30", name: "arrière-30", placement_mode: "rack", rack_id: "R1", rack_u: 30, u_height: 1, rack_side: "rear", depth_mm: 750, locks_u: false });
+    ck(VW({ id: "WB2", kind: "brush", rack_id: "R1", rack_u: 30, u_height: 1, depth_mm: 200, name: "B30" }).some((x) => x.path === "depth_mm" && x.message.includes("arrière-30")), "brushBackToBack : 200+750 > 900 → erreur nommant l'équipement");
+    ck.eq(VW({ id: "WB2", kind: "brush", rack_id: "R1", rack_u: 30, u_height: 1, depth_mm: 150, name: "B30" }).length, 0, "brushBackToBack : 150+750 = 900 ≤ 900 → OK");
+    // brosse SANS depth_mm → défaut 100 (PARITÉ avec le constructeur client Waypoint) : les deux bornes
+    // ENCADRENT le défaut à 100 exactement (800 passe → ≤ 100 ; 801 refuse → ≥ 100).
+    db.equipments[db.equipments.length - 1].depth_mm = 800;
+    ck.eq(VW({ id: "WB3", kind: "brush", rack_id: "R1", rack_u: 30, u_height: 1 }).length, 0, "brushBackToBack : sans depth_mm, défaut+800 ≤ 900 → défaut ≤ 100");
+    db.equipments[db.equipments.length - 1].depth_mm = 801;
+    ck(VW({ id: "WB3", kind: "brush", rack_id: "R1", rack_u: 30, u_height: 1 }).some((x) => x.path === "depth_mm"), "brushBackToBack : sans depth_mm, défaut+801 > 900 → défaut ≥ 100 (= 100 exactement)");
   }
   });
 
@@ -1399,6 +1417,12 @@ module.exports = async () => {
     ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 5, u_height: 1, depth: "half", rack_side: "rear" }, fetch, findI).some((e) => e.code === "scope"), true, "V6c : tray pleine profondeur occupe AUSSI la face REAR → collision");
     occ.item[0].tray_type = "cantilever";
     ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 5, u_height: 1, depth: "half", rack_side: "rear" }, fetch, findI).length, 0, "V6c : tray cantilever (front) → face REAR libre");
+    // BROSSE : ancrée au plan de montage AVANT → n'occupe QUE la face front. L'arrière n'est bloqué que
+    // par la PROFONDEUR (V6d-brosse, testé dans la section T2c/V6d) — plus par une collision de cellule.
+    occ.wp = [{ id: "WB", kind: "brush", rack_id: "RK", rack_u: 7, u_height: 2, name: "B7" }];
+    const findW = (c, f, v) => (c === "waypoints" && f === "rack_id" && v === "RK") ? occ.wp : findI(c, f, v);
+    ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 7, u_height: 1, depth: "half", rack_side: "front" }, fetch, findW).some((e) => e.code === "scope"), true, "V6c : brosse @U7 → collision face FRONT");
+    ck.eq(DV.validateRecord("equipments", { id: "EX", name: "x", placement_mode: "rack", rack_id: "RK", rack_u: 7, u_height: 1, depth: "half", rack_side: "rear" }, fetch, findW).length, 0, "V6c : brosse = face AVANT seule → face REAR libre (plus de collision)");
   }
   });
 

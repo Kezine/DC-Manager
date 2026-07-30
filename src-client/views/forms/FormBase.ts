@@ -504,5 +504,7 @@ export class FormBase {
       bâtiment+étage, étages existants exclus) ; `opts.onPicked(loc, fl)` = navigation après création. */
 
   protected static faceLabel(id: string): string { const f = RACK_FACES.find((x) => x.id === id); return f ? I18n.t(f.labelKey) : (id || "—"); }
-  protected static mountDepthLabel(e: any): string { return (e && e.depth_mm != null) ? (e.depth_mm + " mm") : Depths.label((e && e.depth) || "full"); }
+  /** Libellé de profondeur d'un montage — DÉLÈGUE à `Depths.mountLabel` (principe n°3 : le corps
+      dupliquait exactement le registre ; la méthode reste pour ses nombreux appelants). */
+  protected static mountDepthLabel(e: any): string { return Depths.mountLabel(e); }
 }
