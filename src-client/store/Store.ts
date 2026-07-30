@@ -10,6 +10,7 @@ import { CableType } from "../models/CableType";
 import { Waypoint } from "../models/Waypoint";
 import { PortRoles } from "../registries/PortRoles";
 import { Id } from "../core/Id";
+import { PatchDiff } from "../core/PatchDiff";
 import { Text } from "../core/Text";
 import { Locatable } from "../core/Locatable";
 import { ContainerLabel } from "../core/ContainerLabel";
@@ -453,6 +454,14 @@ export class Store {
     const obj = this.get(collection, id);
     if (!obj) return null;
     const normalizedPatch = this._normalizePatch(collection, obj, patch);
+    // COURT-CIRCUIT no-op : patch sans effet → aucune écriture (ni PUT/SSE, ni touch, ni validation —
+    // rien n'est écrit, l'état stocké n'est pas re-jugé ; un enregistrement legacy invalide reste éditable
+    // « à blanc »). Sans lui, chaque « Enregistrer » de formulaire non modifié ré-émettait tous les champs à
+    // l'identique : un PUT + broadcast SSE par enregistrement intact (l'équipement ET chacun de ses ports),
+    // et `touch()` polluait `updated_date`. NB : la migration en mémoire `_migrateDepths` comptait sur la
+    // « persistance à la prochaine édition » — un save à blanc ne la persiste donc plus ; assumé : elle est
+    // idempotente et rejouée à chaque chargement.
+    if (!PatchDiff.changes(obj.toJSON(), normalizedPatch)) return obj;
     // valide le RÉSULTAT fusionné AVANT de muter (abort propre, aucune mutation partielle si invalide).
     if (!this.accepts(collection, { ...obj.toJSON(), ...normalizedPatch })) return null;
     this._applyPatch(collection, obj, normalizedPatch);

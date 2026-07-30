@@ -85,6 +85,51 @@ module.exports = async () => {
   }
   });
 
+  await section("PatchDiff : égalité profonde + champs techniques ignorés (module pur)", async () => {
+  {
+    const { PatchDiff } = D("core/PatchDiff.js");
+    // -- same : égalité PROFONDE --
+    ck(PatchDiff.same(["a"], ["a"]), "same : tableaux identiques → égaux");
+    ck(!PatchDiff.same(["a", "b"], ["b", "a"]), "same : tableaux ORDONNÉS — ordre différent → différents");
+    ck(!PatchDiff.same(["a"], ["a", "b"]), "same : longueurs différentes → différents");
+    ck(PatchDiff.same({ a: { b: [1, 2] } }, { a: { b: [1, 2] } }), "same : objets imbriqués égaux (récursif)");
+    ck(!PatchDiff.same({ a: 1 }, { a: 1, b: 2 }), "same : clé en plus → différents");
+    ck(!PatchDiff.same(null, "x"), "same : null vs valeur → différents");
+    ck(!PatchDiff.same(null, undefined), "same : null vs undefined → DIFFÉRENTS (repli sûr : on écrit)");
+    ck(PatchDiff.same(null, null), "same : null vs null → égaux");
+    // -- changes : les champs techniques n'emportent JAMAIS la décision --
+    ck(!PatchDiff.changes({ name: "x", updated_date: "2026-01-01" }, { name: "x", updated_date: "2026-02-02", created_by: "u1" }),
+      "changes : updated_date/created_by ignorés → patch sans effet");
+    ck(PatchDiff.changes({ name: "x" }, { name: "y" }), "changes : valeur modifiée → changeant");
+    ck(PatchDiff.changes({ name: "x" }, { name: "x", extra: 1 }), "changes : champ INCONNU du current → changeant (repli sûr)");
+    ck(!PatchDiff.changes({ name: "x", tags: ["a", "b"] }, { tags: ["a", "b"] }), "changes : tableau identique → sans effet");
+  }
+  });
+
+  await section("Store.update : court-circuit no-op (patch identique → AUCUNE écriture)", async () => {
+  {
+    /* Un save de formulaire SANS modification ré-émet tous les champs à l'identique : sans le
+       court-circuit, chaque « Enregistrer » émettait un PUT (+ SSE en mode API) par enregistrement
+       intact, et touch() polluait updated_date. On espionne l'adaptateur pour PROUVER l'absence d'écriture. */
+    const s = await makeStore();
+    const g = await s.create("groups", { label: "G" });
+    const eq = await s.create("equipments", { name: "sw", type: "switch", group_id: g.id, group_ids: [g.id] });
+    const dateBefore = s.get("equipments", eq.id).updated_date;
+    const orig = s.adapter.updateOne.bind(s.adapter);
+    let writes = 0;
+    s.adapter.updateOne = (...a) => { writes++; return orig(...a); };
+    // patch STRICTEMENT identique aux valeurs stockées (y compris un champ TABLEAU) → aucune écriture
+    const unchanged = await s.update("equipments", eq.id, { name: "sw", type: "switch", group_ids: [g.id] });
+    ck(!!unchanged, "no-op : retour truthy (succès pour les appelants, qui testent la nullité)");
+    ck.eq(writes, 0, "no-op : AUCUNE écriture adaptateur (ni PUT ni SSE)");
+    ck.eq(s.get("equipments", eq.id).updated_date, dateBefore, "no-op : updated_date INCHANGÉ (pas de touch)");
+    // vrai changement → l'écriture repart
+    const changed = await s.update("equipments", eq.id, { name: "sw-2" });
+    ck(!!changed && changed.name === "sw-2", "changement réel : patch appliqué");
+    ck.eq(writes, 1, "changement réel : 1 écriture adaptateur");
+  }
+  });
+
   await section("Store : cascade de suppression", async () => {
   {
     const s = await makeStore();
