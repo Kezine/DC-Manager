@@ -184,9 +184,10 @@ export class Shell {
       const b = document.createElement("button"); b.type = "button"; b.className = "icon-btn"; b.title = title;
       b.appendChild(svgIcon(paths)); if (onClick) b.onclick = onClick; return b;
     };
-    // RECHERCHE GLOBALE : première de la rangée — c'est une action de LECTURE sur le document courant,
-    // avant les actions de fichier. Le raccourci (Ctrl+K) est annoncé dans le tooltip ; il est enregistré
-    // par le bootstrap, pas ici (la garde « pas par-dessus une modale » vit à côté de la modale).
+    // RECHERCHE GLOBALE : la LOUPE seule (arbitrage utilisateur 2026-07-30 — pas le déclencheur-champ
+    // large de la maquette : dans une topbar déjà dense, un faux champ prend la place des onglets et
+    // LAISSE CROIRE qu'on peut y taper). Première de la rangée — action de LECTURE, avant les actions
+    // de fichier. Le raccourci (Ctrl+F, annoncé dans le tooltip) est enregistré par le bootstrap.
     actions.appendChild(iconBtn(I18n.t("shell.topbar.globalSearch"), '<circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/>', () => this.host.onGlobalSearch?.()));
     // Nouveau / Ouvrir : utiles dans LES DEUX modes (fichier → fichier ; API → document serveur). Toujours visibles.
     this.newBtn = iconBtn(I18n.t("shell.topbar.new"), '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>', () => this.host.onNew?.());

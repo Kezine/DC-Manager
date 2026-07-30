@@ -137,13 +137,17 @@ async function boot(): Promise<void> {
 
   const modal = new Modal();
   const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
-  // RECHERCHE GLOBALE (palette) — UNE implémentation pour les DEUX chemins (loupe topbar + Ctrl+K).
-  // Garde d'overlay = le pattern des raccourcis undo/redo (sélecteurs DOM) : `Modal.open()` REMPLACE le
-  // contenu sans confirmation (mécanisme voulu des fiches chaînées), donc ouvrir la palette par-dessus un
-  // FORMULAIRE en cours écraserait la saisie. Ignorée aussi sur l'accueil (aucun document → corpus vide).
+  // RECHERCHE GLOBALE (modale dédiée) — UNE instance, UNE implémentation pour les DEUX chemins
+  // (déclencheur topbar + Ctrl+K). Garde d'overlay = le pattern des raccourcis undo/redo (sélecteurs
+  // DOM) : `Modal.open()` REMPLACE le contenu sans confirmation (mécanisme voulu des fiches chaînées),
+  // donc ouvrir la palette pendant qu'un FORMULAIRE est en cours mènerait à écraser sa saisie au premier
+  // résultat cliqué. Ignorée aussi sur l'accueil (aucun document → corpus vide). ⚠ Son overlay à elle
+  // (`.gs-overlay`) n'est PAS dans le sélecteur de garde : Ctrl+K palette ouverte = FERMER (toggle).
+  const globalSearch = new GlobalSearchPalette(store, formHost);
   const openGlobalSearch = (): void => {
+    if (globalSearch.isOpen()) { globalSearch.close(); return; }
     if (document.querySelector(".modal-overlay.open, .dialog-overlay") || document.body.classList.contains("welcome-active")) return;
-    GlobalSearchPalette.open(store, formHost);
+    globalSearch.open();
   };
   // bibliothèque d'images de façade (hors modèle : IndexedDB + miroir mémoire)
   // backend d'images selon le mode : IndexedDB (fichier, + compagnon .nmfb) · endpoints blob (REST). Cf. P2.
@@ -1028,13 +1032,16 @@ async function boot(): Promise<void> {
     void (redo ? doRedo() : doUndo());   // timeline unifiée (modèle + images)
   });
 
-  // raccourci clavier RECHERCHE GLOBALE (Ctrl/Cmd+K) — la garde d'overlay vit dans `openGlobalSearch`
-  // (partagée avec la loupe topbar). `preventDefault` AVANT la garde : même quand la palette refuse de
-  // s'ouvrir (modale en cours), Ctrl+K ne doit pas partir au NAVIGATEUR (Firefox : focus de la barre de
-  // recherche) — un raccourci qui tantôt agit dans l'app et tantôt sort de la page serait déroutant.
+  // raccourci clavier RECHERCHE GLOBALE (Ctrl/Cmd+F — arbitrage utilisateur : le geste « chercher »
+  // universel, au prix de la recherche NATIVE du navigateur dans l'app). `preventDefault` APRÈS la
+  // garde, contrairement au pattern Ctrl+K envisagé d'abord : quand la palette REFUSE d'agir (modale
+  // ou dialogue ouvert, écran d'accueil), Ctrl+F retombe sur le « rechercher dans la page » du
+  // navigateur — chercher du texte dans une LONGUE fiche ouverte reste possible, et c'est cohérent :
+  // la palette cherche des OBJETS, le navigateur cherche du TEXTE.
   document.addEventListener("keydown", (e) => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
-    if (e.key.toLowerCase() !== "k") return;
+    if (e.key.toLowerCase() !== "f") return;
+    if (!globalSearch.isOpen() && (document.querySelector(".modal-overlay.open, .dialog-overlay") || document.body.classList.contains("welcome-active"))) return;
     e.preventDefault();
     openGlobalSearch();
   });

@@ -1716,61 +1716,69 @@ module.exports = async () => {
   }
   });
 
-  await section("GlobalSearch : classement PUR de la palette (niveaux de pertinence, plafond ANNONCÉ, ordre des familles)", async () => {
+  await section("GlobalSearch : logique PURE de la modale (paliers de score, groupes par pertinence, préfixes, surlignage)", async () => {
   {
     const norm = SharedSchema.normSearch;
     const ORDER = ["equipments", "cables", "vms"];
-    const it = (kind, id, label, terms = []) => ({ kind, id, label, terms });
-    const ids = (families) => families.map((f) => f.kind + ":" + f.items.map((x) => x.id).join(",")).join(" | ");
+    const it = (kind, id, label, extra = {}) => ({ kind, id, label, terms: [], ...extra });
+    const ids = (groups) => groups.map((g) => g.kind + ":" + g.items.map((x) => x.id).join(",")).join(" | ");
 
-    // --- 1. NIVEAUX DE PERTINENCE, dans une même famille : préfixe > contenu > termes annexes seuls. ---
-    const corpus = [
-      it("equipments", "e-mid", "Core-SW-1"),                              // « sw » au MILIEU du libellé
-      it("equipments", "e-pre", "SW-ACCES"),                               // libellé COMMENÇANT par « sw »
-      it("equipments", "e-term", "Onduleur nord", ["ref SW-999", null]),   // « sw » seulement dans un TERME
-      it("equipments", "e-none", "Baie brassage", ["rien ici"]),           // ne matche pas
-    ];
-    let r = GlobalSearch.rank(corpus, "sw", { normalize: norm, familyOrder: ORDER });
-    ck.eq(ids(r), "equipments:e-pre,e-mid,e-term", "pertinence : préfixe de libellé > libellé contient > terme annexe seul");
-    // à pertinence égale : alphabétique du libellé normalisé (déterministe, indépendant de l'ordre d'entrée)
-    r = GlobalSearch.rank([it("vms", "v2", "srv-b"), it("vms", "v1", "srv-a")], "srv", { normalize: norm, familyOrder: ORDER });
-    ck.eq(ids(r), "vms:v1,v2", "égalité de pertinence → tri alphabétique du libellé (pas l'ordre d'entrée)");
+    // --- 1. PALIERS DE SCORE (la sémantique de la maquette) : 100 exact > 80 préfixe > 60 contient > 30 reste. ---
+    ck.eq(GlobalSearch.score(it("e", "1", "sw-01"), "sw-01", norm), 100, "score : libellé EXACT → 100");
+    ck.eq(GlobalSearch.score(it("e", "1", "SW-01-b"), "sw-01", norm), 80, "score : libellé PRÉFIXE → 80 (casse ignorée)");
+    ck.eq(GlobalSearch.score(it("e", "1", "Core-SW-01"), "sw-01", norm), 60, "score : libellé CONTIENT → 60");
+    ck.eq(GlobalSearch.score(it("e", "1", "Onduleur", { sub: "réf SW-01" }), "sw-01", norm), 30, "score : seule la SOUS-LIGNE contient → 30");
+    ck.eq(GlobalSearch.score(it("e", "1", "Onduleur", { path: "B12 · SW-01" }), "sw-01", norm), 30, "score : seul le CHEMIN contient → 30");
+    ck.eq(GlobalSearch.score(it("e", "1", "Onduleur", { terms: [null, "SN-SW-01"] }), "sw-01", norm), 30, "score : seul un TERME contient → 30 (null toléré)");
+    ck.eq(GlobalSearch.score(it("e", "1", "Onduleur"), "sw-01", norm), 0, "score : rien ne matche → 0");
+    ck.eq(GlobalSearch.score(it("e", "1", "Rocade Étage"), "etage", norm), 60, "score : accents ignorés (normalisation partagée)");
+    ck.eq(GlobalSearch.score(it("v", "1", "srv", { terms: [8443] }), "8443", norm), 30, "score : terme NUMÉRIQUE cherchable (valeurs brutes des searchFields)");
 
-    // --- 2. INSENSIBILITÉ casse/accents — c'est la normalisation INJECTÉE (Schema.normSearch) qui la porte. ---
-    r = GlobalSearch.rank([it("cables", "c1", "Rocade Étage")], "etage", { normalize: norm, familyOrder: ORDER });
-    ck.eq(r.length && r[0].items[0].id, "c1", "« etage » atteint « Étage » (accents/casse : normalisation partagée)");
+    // --- 2. GROUPES par famille, JAMAIS entrelacés, ordonnés par leur MEILLEUR score. ---
+    let r = GlobalSearch.rank([
+      it("cables", "c-exact", "sw"),                 // 100 → le groupe câbles passe DEVANT
+      it("equipments", "e-mid", "Core-SW-1"),        // 60
+      it("equipments", "e-pre", "SW-ACCES"),         // 80
+      it("vms", "v-term", "web", { terms: ["sw"] }), // 30
+    ], "sw", { normalize: norm, kindOrder: ORDER });
+    ck.eq(ids(r), "cables:c-exact | equipments:e-pre,e-mid | vms:v-term",
+      "groupes : ordonnés par MEILLEUR score (câbles 100 avant équipements 80), items par score puis alphabétique");
+    // à meilleur score ÉGAL : le départage est l'ordre canonique injecté, pas l'ordre d'arrivée
+    r = GlobalSearch.rank([it("vms", "v", "xx-1"), it("equipments", "e", "xx-2")], "xx", { normalize: norm, kindOrder: ORDER });
+    ck.eq(r.map((g) => g.kind).join(","), "equipments,vms", "égalité de meilleur score → ordre canonique (equipments avant vms)");
+    // famille INCONNUE de l'ordre : après les connues (défensif — le corpus ne peut pas casser l'affichage)
+    r = GlobalSearch.rank([it("zeta", "z", "xx"), it("equipments", "e", "xx")], "xx", { normalize: norm, kindOrder: ORDER });
+    ck.eq(r.map((g) => g.kind).join(","), "equipments,zeta", "famille hors ordre canonique → APRÈS les connues, pas perdue");
+    // égalité de score DANS un groupe : alphabétique du libellé normalisé (déterministe)
+    r = GlobalSearch.rank([it("vms", "v2", "srv-b"), it("vms", "v1", "srv-a")], "srv", { normalize: norm, kindOrder: ORDER });
+    ck.eq(ids(r), "vms:v1,v2", "égalité dans un groupe → tri alphabétique du libellé (pas l'ordre d'entrée)");
+    // requête vide : aucun résultat (l'accueil de la modale prend le relais)
+    ck.eq(GlobalSearch.rank([it("e", "1", "x")], "", { normalize: norm, kindOrder: ORDER }).length, 0, "requête vide → []");
 
-    // --- 3. PLAFOND PAR FAMILLE, et troncature COMPTÉE (jamais muette). ---
-    const beaucoup = Array.from({ length: 8 }, (_, i) => it("equipments", "e" + i, "sw-" + i));
-    r = GlobalSearch.rank(beaucoup, "sw", { normalize: norm, familyOrder: ORDER, perFamilyCap: 5 });
-    ck.eq(r[0].items.length, 5, "plafond par famille : 5 retenus");
-    ck.eq(r[0].hidden, 3, "…et 3 MASQUÉS, comptés (la vue les annonce, elle ne les tait pas)");
-    ck.eq(GlobalSearch.rank(beaucoup, "sw", { normalize: norm, familyOrder: ORDER })[0].items.length, 5, "plafond par défaut = 5");
+    // --- 3. COMPTES par famille (les pastilles de portée) — score > 0 seulement. ---
+    const corpus = [it("equipments", "e1", "sw-a"), it("equipments", "e2", "sw-b"), it("cables", "c1", "xx", { terms: ["sw"] }), it("vms", "v1", "web")];
+    ck.eq(JSON.stringify(GlobalSearch.countByKind(corpus, "sw", norm)), JSON.stringify({ equipments: 2, cables: 1 }), "countByKind : par famille, palier 30 inclus, familles muettes absentes");
+    ck.eq(JSON.stringify(GlobalSearch.countByKind(corpus, "", norm)), "{}", "countByKind : requête vide → {}");
 
-    // --- 4. ORDRE DES FAMILLES : le canonique injecté, PAS l'ordre d'arrivée du corpus. ---
-    r = GlobalSearch.rank([it("vms", "v", "xx"), it("equipments", "e", "xx"), it("cables", "c", "xx")], "xx", { normalize: norm, familyOrder: ORDER });
-    ck.eq(r.map((f) => f.kind).join(","), "equipments,cables,vms", "familles rendues dans l'ordre CANONIQUE (equipments avant cables avant vms)");
-    // famille INCONNUE de l'ordre : rendue APRÈS les connues (défensif — le corpus ne peut pas casser l'affichage)
-    r = GlobalSearch.rank([it("zeta", "z", "xx"), it("equipments", "e", "xx")], "xx", { normalize: norm, familyOrder: ORDER });
-    ck.eq(r.map((f) => f.kind).join(","), "equipments,zeta", "famille hors ordre canonique → APRÈS les connues, pas perdue");
+    // --- 4. PRÉFIXES de portée : « eq:sw-01 » → portée + requête débarrassée. ---
+    const PREFIXES = { "eq:": "equip", "cb:": "cables" };
+    ck.eq(JSON.stringify(GlobalSearch.parsePrefix("eq:sw-01", PREFIXES)), JSON.stringify({ scope: "equip", query: "sw-01" }), "parsePrefix : préfixe reconnu → portée + requête sans lui");
+    ck.eq(JSON.stringify(GlobalSearch.parsePrefix("EQ:  sw", PREFIXES)), JSON.stringify({ scope: "equip", query: "sw" }), "parsePrefix : casse ignorée, espaces après le préfixe mangés");
+    ck.eq(JSON.stringify(GlobalSearch.parsePrefix("sw-01", PREFIXES)), JSON.stringify({ scope: null, query: "sw-01" }), "parsePrefix : sans préfixe → portée null, requête intacte");
+    ck.eq(JSON.stringify(GlobalSearch.parsePrefix("cb:", PREFIXES)), JSON.stringify({ scope: "cables", query: "" }), "parsePrefix : préfixe seul → portée active, requête vide (état « parcourir la portée »)");
 
-    // --- 5. REQUÊTE VIDE (ou blanche) : AUCUN résultat — on n'inonde pas la palette à l'ouverture. ---
-    ck.eq(GlobalSearch.rank(corpus, "", { normalize: norm, familyOrder: ORDER }).length, 0, "requête vide → []");
-    ck.eq(GlobalSearch.rank(corpus, "   ", { normalize: norm, familyOrder: ORDER }).length, 0, "requête blanche → [] (la normalisation absorbe les espaces ? non : normSearch les garde — mais « rien ne matche » suffit)");
-    // NB : normSearch ne trime PAS — «   » ne matche simplement rien ; le seuil minChars de la vue fait le reste.
-
-    // --- 6. Termes annexes : null/undefined tolérés, et un terme NUMÉRIQUE se cherche aussi (les
-    //     searchFields des listings rendent des valeurs brutes, pas des chaînes). ---
-    r = GlobalSearch.rank([it("vms", "v", "srv", [null, undefined, 8443])], "8443", { normalize: norm, familyOrder: ORDER });
-    ck.eq(r.length && r[0].items[0].id, "v", "terme numérique (port 8443) cherchable — valeurs brutes des searchFields");
+    // --- 5. SURLIGNAGE : position du fragment dans le texte ORIGINAL (pour le <mark> du rendu). ---
+    ck.eq(JSON.stringify(GlobalSearch.matchRange("Core-SW-01", "sw", norm)), JSON.stringify({ start: 5, end: 7 }), "matchRange : indices sur l'original (casse ignorée)");
+    ck.eq(GlobalSearch.matchRange("Onduleur", "sw", norm), null, "matchRange : absent → null (pas de <mark>)");
+    ck.eq(JSON.stringify(GlobalSearch.matchRange("Rocade Étage", "etage", norm)), JSON.stringify({ start: 7, end: 12 }), "matchRange : accent composé (NFC) → indices exacts (l'approximation documentée ne mord que sur du décomposé)");
   }
   });
 
-  await section("GlobalSearchSources : le corpus de la palette — invariants d'OUVRABILITÉ et libellés", async () => {
+  await section("GlobalSearchSources : corpus + PORTÉES de la modale — invariants d'OUVRABILITÉ et habillage", async () => {
   {
     // --- 1. L'INVARIANT du chantier : corpus ⇄ fiches, ÉGALITÉ des deux ensembles.
     //     ⊆ : un résultat qui ne s'ouvre pas serait un clic sans effet (asymétrie prédicat ⇄ action).
-    //     ⊇ : une fiche sans entrée au corpus est une collection INTROUVABLE à la palette. ---
+    //     ⊇ : une fiche sans entrée au corpus est une collection INTROUVABLE à la modale. ---
     const families = GlobalSearchSources.families().slice().sort();
     const openable = DetailForms.DETAIL_COLLECTIONS.slice().sort();
     ck.eq(JSON.stringify(families), JSON.stringify(openable), "corpus ≡ fiches ouvrables (égalité stricte, dans les deux sens)");
@@ -1781,36 +1789,55 @@ module.exports = async () => {
       "ipAddresses", "dhcpRanges", "datacenters", "sites", "groups", "floors", "spares", "contacts",
       "vms", "cableTypes", "portTypes",
     ]), "DETAIL_COLLECTIONS = la liste exacte de l'ancien switch (bascule prouvée par attentes explicites)");
-    // toutes les familles sont de VRAIES collections, et l'ordre canonique d'affichage les couvre TOUTES
     families.forEach((f) => ck(EntityRegistry.COLLECTIONS.includes(f), "famille « " + f + " » = collection réelle du modèle"));
-    ck.eq(JSON.stringify(GlobalSearchSources.FAMILY_ORDER.slice().sort()), JSON.stringify(families), "FAMILY_ORDER couvre exactement les familles (aucune ne retombe dans le repli « inconnues »)");
-    // chaque famille a son libellé i18n (le repli i18next = la clé elle-même : le détecter suffit)
+
+    // --- 2. PORTÉES : partition EXACTE des familles (chacune dans UNE portée), préfixes uniques,
+    //     i18n complète — portées ET familles. ---
+    const scoped = GlobalSearchSources.SCOPES.flatMap((s) => s.kinds);
+    ck.eq(scoped.length, new Set(scoped).size, "portées : aucune famille dans DEUX portées");
+    ck.eq(JSON.stringify(scoped.slice().sort()), JSON.stringify(families), "portées : chaque famille du corpus est dans EXACTEMENT une portée");
+    ck.eq(JSON.stringify(GlobalSearchSources.FAMILY_ORDER), JSON.stringify(scoped), "FAMILY_ORDER = l'ordre des portées déplié (une seule source d'ordre)");
+    const prefixes = GlobalSearchSources.SCOPES.map((s) => s.prefix);
+    ck.eq(prefixes.length, new Set(prefixes).size, "portées : préfixes de saisie UNIQUES");
+    prefixes.forEach((p) => ck(/^[a-z]+:$/.test(p), "préfixe « " + p + " » : minuscules + « : » (saisissable, sans ambiguïté avec une requête)"));
+    ck.eq(GlobalSearchSources.scopeOf("subEquipments"), "equip", "scopeOf : un sous-équipement est dans la portée Équipements");
+    ck.eq(GlobalSearchSources.scopeOf("inconnu"), "", "scopeOf : famille inconnue → \"\" (défensif)");
     const { I18n } = D("i18n/I18n.js");
     families.forEach((f) => ck(I18n.t("search.family." + f) !== "search.family." + f, "libellé i18n présent pour la famille « " + f + " »"));
+    ["all", ...GlobalSearchSources.SCOPES.map((s) => s.id)].forEach((id) => ck(I18n.t("search.scope." + id) !== "search.scope." + id, "libellé i18n présent pour la portée « " + id + " »"));
+    GlobalSearchSources.SCOPES.forEach((s) => ck(typeof s.icon === "string" && s.icon.includes("<svg"), "portée « " + s.id + " » : icône SVG du registre"));
 
-    // --- 2. Le CORPUS sur un store réel : libellés, et TERMES hérités des listings (source unique). ---
+    // --- 3. Le CORPUS sur un store réel : habillage (sub/path) et TERMES hérités des listings. ---
     const s = await makeStore();
-    const lib = await s.create("equipments", { name: "Librairie SL3000", serial: "SN-LIB-1" });
+    const lib = await s.create("equipments", { name: "Librairie SL3000", serial: "SN-LIB-1", type: "other" });
     const drv = await s.create("subEquipments", { name: "Drive LTO-8 n°2", equipment_id: lib.id, serial: "SN-DRV-7", slot: "Étagère A / 3" });
     const corpus = GlobalSearchSources.build(s);
     const of = (kind, id) => corpus.find((x) => x.kind === kind && x.id === id);
     ck.eq(of("equipments", lib.id).label, "Librairie SL3000", "libellé équipement = son nom");
-    // le libellé d'un SOUS-ÉQUIPEMENT nomme son MAÎTRE — sans onglet (D2), c'est ICI que ce lien se lit
-    ck.eq(of("subEquipments", drv.id).label, "Drive LTO-8 n°2 — Librairie SL3000", "libellé sous-équipement : « drive — maître »");
-    // termes : l'équipement HÉRITE des searchFields du listing (le n° de série y est — et depuis le lot 6,
-    // les noms de ses drives aussi) ; le sous-équipement porte les siens (série, repère, nom du maître)
+    // le CHEMIN d'un SOUS-ÉQUIPEMENT nomme son MAÎTRE (+ repère) — sans onglet (D2), c'est ICI que ce lien se lit
+    ck.eq(of("subEquipments", drv.id).label, "Drive LTO-8 n°2", "libellé sous-équipement = son nom (le maître est au CHEMIN, plus dans le libellé)");
+    ck.eq(of("subEquipments", drv.id).path, "Librairie SL3000 › Étagère A / 3", "chemin sous-équipement : « maître › repère »");
+    ck.eq(of("subEquipments", drv.id).sub, "SN-DRV-7", "sous-ligne sous-équipement : l'identité matérielle présente (ici la série seule)");
+    // termes : l'équipement HÉRITE des searchFields du listing ; le sous-équipement porte les siens
     const normAll = (terms) => terms.filter((t) => t != null).map((t) => SharedSchema.normSearch(t)).join(" ");
     ck(normAll(of("equipments", lib.id).terms).includes("sn-lib-1"), "termes équipement : n° de série (via searchFields du listing)");
     ck(normAll(of("equipments", lib.id).terms).includes("drive lto-8"), "termes équipement : le NOM de son drive (lot 6, hérité du listing)");
-    ck(normAll(of("subEquipments", drv.id).terms).includes("sn-drv-7"), "termes sous-équipement : son n° de série");
     ck(normAll(of("subEquipments", drv.id).terms).includes("librairie"), "termes sous-équipement : le nom de son MAÎTRE (chercher la librairie remonte aussi ses drives)");
-    // le corpus ne contient RIEN d'inouvre-able (ports, agrégats… n'ont pas de fiche → pas d'entrée)
+    // habillage d'un CÂBLE : extrémités « équipement : port » en TEXTE (jamais de HTML dans le corpus)
+    const pA = await s.create("ports", { name: "FC-1", equipment_id: lib.id });
+    const sw = await s.create("equipments", { name: "SW-1" });
+    const pB = await s.create("ports", { name: "Gi0/1", equipment_id: sw.id });
+    const cab = await s.create("cables", { name: "CBL-1", from_port_id: pA.id, to_port_id: pB.id });
+    const cabItem = GlobalSearchSources.build(s).find((x) => x.kind === "cables" && x.id === cab.id);
+    ck.eq(cabItem.path, "Librairie SL3000 : FC-1 ↔ SW-1 : Gi0/1", "chemin câble : extrémités en texte brut");
+    ck.eq(/[<>]/.test((cabItem.sub || "") + cabItem.path + cabItem.label), false, "corpus : AUCUN HTML (le surlignage/échappement est l'affaire de la modale)");
+    // le corpus ne contient RIEN d'inouvre-able
     ck.eq(corpus.some((x) => x.kind === "ports" || x.kind === "aggregates" || x.kind === "waypoints" || x.kind === "rackItems"), false, "ports/agrégats/waypoints/rackItems : PAS au corpus (pas de fiche)");
 
-    // --- 3. Bout à bout corpus → classement : chercher le drive remonte drive ET librairie, familles ordonnées. ---
-    const ranked = GlobalSearch.rank(corpus, "drive lto", { normalize: SharedSchema.normSearch, familyOrder: GlobalSearchSources.FAMILY_ORDER });
-    ck.eq(ranked.map((f) => f.kind).join(","), "equipments,subEquipments", "« drive lto » → la librairie (par TERME) et le drive (par LIBELLÉ), dans l'ordre canonique");
-    ck.eq(ranked.find((f) => f.kind === "subEquipments").items[0].id, drv.id, "le drive matche par son LIBELLÉ (niveau préfixe)");
+    // --- 4. Bout à bout corpus → classement : chercher le drive remonte drive ET librairie. ---
+    const ranked = GlobalSearch.rank(GlobalSearchSources.build(s), "drive lto", { normalize: SharedSchema.normSearch, kindOrder: GlobalSearchSources.FAMILY_ORDER });
+    ck.eq(ranked.map((g) => g.kind).join(","), "subEquipments,equipments", "« drive lto » → le drive (LIBELLÉ, 80) devant la librairie (TERME, 30) — pertinence d'abord");
+    ck.eq(ranked[0].items[0].id, drv.id, "le drive matche par son libellé (palier préfixe)");
   }
   });
 
