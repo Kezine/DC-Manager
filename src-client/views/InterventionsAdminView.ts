@@ -569,6 +569,11 @@ export class InterventionsAdminView {
       bouton « Modifier » bascule vers la modale d'ÉDITION (openModal remplace le contenu, fermer-puis-ouvrir).
       L'`item` du listing porte déjà TOUS les champs (liste et détail partagent la même forme serveur) — aucune
       relecture réseau nécessaire. */
+  /** Ouvre la modale de DÉTAIL d'une intervention DEPUIS L'EXTÉRIEUR de la vue (recherche globale) —
+      l'appelant fournit l'enregistrement qu'il a déjà chargé (le listing de la palette). Indépendant de
+      l'état de la page : `detailModal` ne lit que l'enregistrement reçu et les hooks injectés. */
+  openDetail(item: InterventionRecord): void { this.detailModal(item); }
+
   private detailModal(item: InterventionRecord): void {
     const root = document.createElement("div");
 

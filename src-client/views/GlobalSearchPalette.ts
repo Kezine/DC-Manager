@@ -29,12 +29,16 @@
    l'ACTIVATION diverge (une action s'EXÉCUTE, elle ne s'ouvre pas). Famille
    synthétique `__actions`, HORS de l'invariant corpus ≡ fiches (entités seules).
 
+   Et des familles EXTERNES au Store (Certificats, Interventions — bases API
+   séparées) : items chargés en ASYNCHRONE après l'ouverture (la palette ne
+   bloque jamais sur le réseau, garde de génération contre les réponses
+   périmées), ouverts par LEUR chemin (bascule d'onglet + focus) — injectées
+   par le bootstrap, absentes hors mode API.
+
    CE QU'ELLE NE FAIT PAS, à dessein :
    - le geste PRIMAIRE d'un résultat d'entité reste la FICHE — « Localiser » est
      un bouton secondaire gardé par les prédicats, la vue Datacenter garde sa
-     propre recherche ;
-   - pas de portées Certificats / Interventions (maquette) en v1 : données API
-     paginées hors du Store — chantier à part, la structure les accueillera.
+     propre recherche.
 
    Le CORPUS est un SNAPSHOT pris à l'ouverture (volumes réels : des centaines) ;
    une écriture concurrente pendant que la palette est ouverte n'est pas
@@ -63,6 +67,26 @@ export interface SearchAction {
   /** Termes annexes (synonymes : « thème », « dark »…). */
   terms?: readonly unknown[];
   run: () => void;
+}
+
+/** Une famille EXTERNE au Store (certificats, interventions — bases API séparées, paginées) : ses
+    items arrivent en ASYNCHRONE après l'ouverture, ses résultats s'OUVRENT par son propre chemin
+    (bascule d'onglet + focus), jamais par `Forms.detail`. Injectée par le bootstrap — absente hors
+    mode API. `kind` est SYNTHÉTIQUE (préfixe « __ ») : hors de l'invariant corpus ≡ fiches, comme
+    les actions. */
+export interface ExternalSearchFamily {
+  /** Famille synthétique des items (« __certs ») — le fournisseur remplit `kind` avec elle. */
+  kind: string;
+  /** Id de PORTÉE (pastille + i18n `search.scope.<id>` + teinte CSS `data-gscope`). */
+  scopeId: string;
+  /** SVG du registre `Icons`. */
+  icon: string;
+  /** Préfixe saisissable (« cert: »). */
+  prefix: string;
+  /** Charge les items (appelé à CHAQUE ouverture de la palette — les données vivent côté serveur). */
+  fetch: () => Promise<GlobalSearchItem[]>;
+  /** Ouvre un résultat (bascule d'onglet + focus) — la palette est déjà fermée à l'appel. */
+  open: (id: string) => void;
 }
 
 /** Famille SYNTHÉTIQUE des actions. ⚠ PAS une collection : elle vit HORS de `GlobalSearchSources`
@@ -99,11 +123,25 @@ export class GlobalSearchPalette {
       la palette n'en connaît aucune. Absent/vide = ni portée ni pastille Actions. */
   constructor(private readonly store: Store, private readonly host: FormHost,
     private readonly onLocate?: (kind: "equipment" | "rack" | "cable", id: string) => void,
-    private readonly actions: readonly SearchAction[] = []) {}
+    private readonly actions: readonly SearchAction[] = [],
+    private readonly externals: readonly ExternalSearchFamily[] = []) {}
 
-  /** Portée d'une famille, actions comprises — le seul endroit où la famille synthétique se mappe. */
-  private static scopeOfKind(kind: string): string {
-    return kind === ACTIONS_KIND ? "actions" : GlobalSearchSources.scopeOf(kind);
+  /** Génération d'ouverture : les réponses ASYNC des familles externes arrivées APRÈS une fermeture
+      (ou une réouverture) sont jetées — même rôle que le StaleGate de SearchPop, à l'échelle de la modale. */
+  private openGeneration = 0;
+
+  /** Portée d'une famille, familles synthétiques comprises — le SEUL endroit où elles se mappent. */
+  private scopeOfKind(kind: string): string {
+    if (kind === ACTIONS_KIND) return "actions";
+    const external = this.externals.find((x) => x.kind === kind);
+    return external ? external.scopeId : GlobalSearchSources.scopeOf(kind);
+  }
+
+  /** Libellé d'EN-TÊTE de groupe : famille d'entités → `search.family.*` ; famille SYNTHÉTIQUE
+      (actions, externes) → le libellé de SA PORTÉE. ⚠ Corrige un défaut du lot précédent : l'en-tête
+      des actions cherchait `search.family.__actions`, clé inexistante → la CLÉ BRUTE s'affichait. */
+  private familyLabel(kind: string): string {
+    return kind.startsWith("__") ? I18n.t("search.scope." + this.scopeOfKind(kind)) : I18n.t("search.family." + kind);
   }
 
   isOpen(): boolean { return !!this.overlay && this.overlay.classList.contains("open"); }
@@ -124,10 +162,23 @@ export class GlobalSearchPalette {
     document.addEventListener("keydown", this.onKeydown, true);
     this.render();
     setTimeout(() => this.input.focus(), 20);
+    // Familles EXTERNES (API) : chargées en ASYNCHRONE après le premier rendu — la palette s'ouvre
+    // sans attendre le réseau. À l'arrivée : fusion au corpus + re-rendu (comptes, accueil, résultats
+    // courants). Garde de génération : une réponse arrivée après fermeture/réouverture est JETÉE.
+    // Échec réseau : SILENCIEUX (la famille est simplement absente) — parité SearchPop.
+    const generation = ++this.openGeneration;
+    for (const external of this.externals) {
+      external.fetch().then((items) => {
+        if (generation !== this.openGeneration || !this.isOpen()) return;
+        this.corpus.push(...items);
+        this.render();
+      }).catch(() => { /* famille absente — jamais bloquant */ });
+    }
   }
 
   close(): void {
     if (!this.isOpen()) return;
+    this.openGeneration++;   // invalide les réponses externes encore en vol
     this.overlay!.classList.remove("open");
     OverlayA11y.unlockScroll();
     document.removeEventListener("keydown", this.onKeydown, true);
@@ -222,7 +273,7 @@ export class GlobalSearchPalette {
       // Tab CYCLE les portées (maquette) — il ne quitte pas la palette : le seul autre focus utile est
       // le champ lui-même, et Maj+Tab remonte le cycle.
       e.preventDefault();
-      const ids = ["all", ...GlobalSearchSources.SCOPES.map((s) => s.id), ...(this.actions.length ? ["actions"] : [])];
+      const ids = ["all", ...GlobalSearchSources.SCOPES.map((s) => s.id), ...this.externals.map((x) => x.scopeId), ...(this.actions.length ? ["actions"] : [])];
       const at = ids.indexOf(this.scope);
       this.scope = ids[(at + (e.shiftKey ? -1 : 1) + ids.length) % ids.length];
       this.sel = 0; this.render();
@@ -241,7 +292,9 @@ export class GlobalSearchPalette {
     const raw = this.input.value.trim();
     // Préfixe de portée saisi (« eq:sw-01 ») : il ACTIVE la portée et disparaît de la requête.
     // « > » (maquette) s'ajoute aux préfixes des portées d'entités — seulement si des actions existent.
-    const prefixes = this.actions.length ? { ...GlobalSearchSources.prefixes(), ">": "actions" } : GlobalSearchSources.prefixes();
+    const prefixes: Record<string, string> = GlobalSearchSources.prefixes();
+    for (const external of this.externals) prefixes[external.prefix] = external.scopeId;
+    if (this.actions.length) prefixes[">"] = "actions";
     const parsed = GlobalSearch.parsePrefix(raw, prefixes);
     if (parsed.scope) this.scope = parsed.scope;
     const query = parsed.query;
@@ -257,8 +310,8 @@ export class GlobalSearchPalette {
       return;
     }
 
-    const groups = GlobalSearch.rank(this.corpus, query, { normalize: Schema.normSearch, kindOrder: [...GlobalSearchSources.FAMILY_ORDER, ACTIONS_KIND] })
-      .filter((g) => this.scope === "all" || GlobalSearchPalette.scopeOfKind(g.kind) === this.scope);
+    const groups = GlobalSearch.rank(this.corpus, query, { normalize: Schema.normSearch, kindOrder: [...GlobalSearchSources.FAMILY_ORDER, ...this.externals.map((x) => x.kind), ACTIONS_KIND] })
+      .filter((g) => this.scope === "all" || this.scopeOfKind(g.kind) === this.scope);
     this.rows = groups.flatMap((g) => g.items);
     if (this.sel >= this.rows.length) this.sel = 0;
 
@@ -272,7 +325,7 @@ export class GlobalSearchPalette {
 
     let html = ""; let at = 0;
     for (const group of groups) {
-      html += `<div class="gs-group">${Html.escape(I18n.t("search.family." + group.kind))}</div>`;
+      html += `<div class="gs-group">${Html.escape(this.familyLabel(group.kind))}</div>`;
       for (const item of group.items) { html += this.rowHtml(item, at, query); at++; }
     }
     this.resultsEl.innerHTML = html;
@@ -286,8 +339,10 @@ export class GlobalSearchPalette {
       et un bouton dans un bouton est du HTML invalide (le navigateur éjecte l'intérieur). Le clavier
       ne perd rien : ↑/↓/Entrée vivent sur le CHAMP (pattern listbox), jamais sur les rangées. */
   private rowHtml(item: GlobalSearchItem, index: number, query: string): string {
-    const scopeId = GlobalSearchPalette.scopeOfKind(item.kind);
-    const icon = item.kind === ACTIONS_KIND ? Icons.COMMAND : (GlobalSearchSources.SCOPES.find((s) => s.id === scopeId)?.icon || Icons.SEARCH);
+    const scopeId = this.scopeOfKind(item.kind);
+    const icon = item.kind === ACTIONS_KIND ? Icons.COMMAND
+      : (this.externals.find((x) => x.kind === item.kind)?.icon
+        || GlobalSearchSources.SCOPES.find((s) => s.id === scopeId)?.icon || Icons.SEARCH);
     const subBits = [this.highlight(item.sub || "", query), this.highlight(item.path || "", query)].filter(Boolean);
     const pill = item.pill ? `<span class="gs-pill${item.pill.tone ? " " + item.pill.tone : ""}">${Html.escape(item.pill.text)}</span>` : "";
     const locate = (item.locate && this.onLocate)
@@ -321,6 +376,7 @@ export class GlobalSearchPalette {
       `<button type="button" class="gs-scope${this.scope === id ? " active" : ""}" data-scope="${id}" role="tab" aria-selected="${this.scope === id}">${icon}${Html.escape(label)}<span class="gs-n">${n}</span></button>`;
     this.scopesEl.innerHTML = pill("all", "", I18n.t("search.scope.all"), total)
       + GlobalSearchSources.SCOPES.map((s) => pill(s.id, s.icon, I18n.t("search.scope." + s.id), countOf(s))).join("")
+      + this.externals.map((x) => pill(x.scopeId, x.icon, I18n.t("search.scope." + x.scopeId), byKind[x.kind] || 0)).join("")
       + (this.actions.length ? pill("actions", Icons.COMMAND, I18n.t("search.scope.actions"), byKind[ACTIONS_KIND] || 0) : "");
   }
 
@@ -333,8 +389,9 @@ export class GlobalSearchPalette {
     if (recents.length) {
       html += `<div class="gs-group">${Html.escape(I18n.t("search.recents"))}</div>`;
       html += recents.map((item) => {
-        const scopeId = GlobalSearchSources.scopeOf(item.kind);
-        const icon = GlobalSearchSources.SCOPES.find((s) => s.id === scopeId)?.icon || Icons.SEARCH;
+        const scopeId = this.scopeOfKind(item.kind);
+        const icon = this.externals.find((x) => x.kind === item.kind)?.icon
+          || GlobalSearchSources.SCOPES.find((s) => s.id === scopeId)?.icon || Icons.SEARCH;
         return `<button type="button" class="gs-res" data-recent="${Html.escape(item.kind + ":" + item.id)}" data-gscope="${Html.escape(scopeId)}">
           <span class="gs-res-ic">${icon}</span>
           <span class="gs-res-main"><span class="gs-res-t">${Html.escape(item.label)}</span>${item.sub || item.path ? `<span class="gs-res-s">${Html.escape([item.sub, item.path].filter(Boolean).join(" · "))}</span>` : ""}</span>
@@ -343,7 +400,8 @@ export class GlobalSearchPalette {
     }
     html += `<div class="gs-empty gs-welcome"><div class="gs-empty-s">${Html.escape(I18n.t("search.welcome"))}</div>
       <div class="gs-tips">${GlobalSearchSources.SCOPES.map((s) =>
-        `<button type="button" class="gs-tip" data-prefix="${Html.escape(s.prefix)}"><b>${Html.escape(s.prefix)}</b> ${Html.escape(I18n.t("search.scope." + s.id))}</button>`).join("")}${this.actions.length
+        `<button type="button" class="gs-tip" data-prefix="${Html.escape(s.prefix)}"><b>${Html.escape(s.prefix)}</b> ${Html.escape(I18n.t("search.scope." + s.id))}</button>`).join("")}${this.externals.map((x) =>
+        `<button type="button" class="gs-tip" data-prefix="${Html.escape(x.prefix)}"><b>${Html.escape(x.prefix)}</b> ${Html.escape(I18n.t("search.scope." + x.scopeId))}</button>`).join("")}${this.actions.length
         ? `<button type="button" class="gs-tip" data-prefix="&gt;"><b>&gt;</b> ${Html.escape(I18n.t("search.scope.actions"))}</button>` : ""}
       </div></div>`;
     return html;
@@ -375,6 +433,9 @@ export class GlobalSearchPalette {
     }
     this.recordRecent({ kind: item.kind, id: item.id });
     this.close();
+    // Famille EXTERNE : son propre chemin d'ouverture (bascule d'onglet + focus) — jamais Forms.detail.
+    const external = this.externals.find((x) => x.kind === item.kind);
+    if (external) { external.open(item.id); return; }
     // `detail` rend false pour une collection sans fiche — IMPOSSIBLE ici par construction
     // (invariant familles ≡ DETAIL_COLLECTIONS, testé), donc pas de repli à écrire.
     Forms.detail(this.store, this.host, item.kind, item.id);

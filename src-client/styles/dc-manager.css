@@ -2508,9 +2508,10 @@
   .gs-clear:hover { color: var(--fg); border-color: var(--fg); }
   .gs-clear svg { width: 13px; height: 13px; }
 
-  /* -- portees : rangee de pastilles defilante (masque de fondu a droite) -- */
-  .gs-scopes { display: flex; gap: 6px; padding: 9px 14px; border-bottom: 1px solid var(--line); overflow-x: auto; flex: 0 0 auto; scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
-  .gs-scopes::-webkit-scrollbar { display: none; }
+  /* -- portees : pastilles en WRAP (demande utilisateur 2026-07-30) - avec les familles externes
+     et les actions on atteint 10 pastilles, le defilement horizontal masque de la maquette en
+     CACHAIT ; deux rangees se voient, une rangee tronquee non. -- */
+  .gs-scopes { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 14px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
   .gs-scope { display: inline-flex; align-items: center; gap: 7px; flex: none; height: 30px; padding: 0 11px; background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--radius-pill); color: var(--fg-dim); font-size: 11px; font-family: var(--mono); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; white-space: nowrap; }
   .gs-scope:hover { color: var(--fg); border-color: var(--fg-dim); }
   .gs-scope.active { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--accent-text); }
@@ -2534,6 +2535,8 @@
   .gs-res[data-gscope="network"] .gs-res-ic { color: var(--role-mgmt); background: color-mix(in srgb, var(--role-mgmt) 15%, transparent); }
   .gs-res[data-gscope="vms"] .gs-res-ic { color: var(--role-poe); background: color-mix(in srgb, var(--role-poe) 15%, transparent); }
   .gs-res[data-gscope="inventory"] .gs-res-ic { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+  .gs-res[data-gscope="certs"] .gs-res-ic { color: var(--role-poe); background: color-mix(in srgb, var(--role-poe) 15%, transparent); }
+  .gs-res[data-gscope="interventions"] .gs-res-ic { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
   .gs-res[data-gscope="actions"] .gs-res-ic { color: var(--accent-text); background: transparent; border: 1px dashed var(--line-2); }
   .gs-res-main { flex: 1; min-width: 0; }
   .gs-res-t { display: block; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

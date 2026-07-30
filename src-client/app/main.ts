@@ -20,6 +20,8 @@ import { Html } from "../core/Html";
 import { TargetSearch } from "../core/TargetSearch";
 import { UserDirectory } from "../core/UserDirectory";   // annuaire client (résolution des auteurs d'audit — mode API)
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
+import { CertsFormat } from "../core/CertsFormat";   // libellés/échéances des certs — famille externe de la recherche globale
+import type { InterventionRecord } from "../views/forms/InterventionsClient";   // cache des enregistrements pour l'ouverture depuis la palette
 import { CertTargetMatch } from "../core/CertTargetMatch";   // moteur PUR du rapprochement certificat ↔ équipement/VM (calculé)
 import { VmLocate } from "../core/VmLocate";   // « Localiser » une VM = localiser son HÔTE (prédicat PUR, feature VM AMOVIBLE)
 import type { NetworkIdentity } from "../core/CertTargetMatch";
@@ -164,7 +166,57 @@ async function boot(): Promise<void> {
     { id: "goto-datacenter", label: I18n.t("search.action.gotoDatacenter"), sub: I18n.t("search.action.gotoDatacenterSub"), terms: ["3d", "plan", "salle", "vue"], run: () => shell.switchView("datacenter") },
     { id: "toggle-theme", label: I18n.t("search.action.toggleTheme"), sub: I18n.t("search.action.toggleThemeSub"), terms: ["dark", "light", "sombre", "clair", "thème"], run: () => shellHost.onToggleTheme?.() },
     { id: "export-json", label: I18n.t("search.action.exportJson"), sub: I18n.t("search.action.exportJsonSub"), terms: ["download", "télécharger", "sauvegarde"], run: () => shellHost.onExportJson?.() },
-  ]);
+  ], REST_MODE ? [
+    // FAMILLES EXTERNES de la palette (mode API seulement — leurs bases vivent côté serveur).
+    // Les fermetures visent des `let` assignés PLUS BAS (certsView, interventionsView) : légal,
+    // `fetch`/`open` ne s'exécutent qu'à l'usage — même montage que `onLocate` ci-dessus.
+    {
+      kind: "__certs", scopeId: "certs", icon: Icons.CERT_LIST, prefix: "cert:",
+      // `list()` = l'arbre COMPLET (la page Certificats le charge déjà ainsi — pas de pagination à gérer).
+      fetch: async () => (await certsClient!.list()).map((c) => ({
+        kind: "__certs", id: c.id,
+        label: c.label || c.subject || "?",
+        sub: [CertsFormat.kindLabel(c.kind), c.key_algo].filter(Boolean).join(" · "),
+        path: c.subject && c.subject !== c.label ? c.subject : "",
+        terms: [c.serial, c.fingerprint, c.comment],
+        // révoqué PRIME sur l'échéance (un cert révoqué « encore valide 300 j » n'est pas vert).
+        pill: c.revoked_at ? { text: I18n.t("certs.status.revoked"), tone: "err" as const }
+          : { text: CertsFormat.expiryLabel(c.not_after), tone: (["ok", "warn", "err"] as const).find((t) => t === CertsFormat.expiryClass(c.not_after)) || ("" as const) },
+      })),
+      // MÊME chemin que « ouvrir un cert depuis une fiche » (certFicheHooks.openCert, plus bas) :
+      // bascule d'onglet + focus arborescent — focusCert ATTEND le chargement d'activation.
+      open: (id) => { shell.switchView("certificats"); void certsView.focusCert(id); },
+    },
+    {
+      kind: "__interventions", scopeId: "interventions", icon: Icons.INTERVENTION, prefix: "int:",
+      // Listing paginé serveur : UNE page large (500 ≫ tout parc réel d'interventions), et les
+      // enregistrements sont GARDÉS (interventionSearchCache) — `open` en a besoin, la modale de
+      // détail prend l'enregistrement, pas un id (il n'existe pas de GET /interventions/:id).
+      fetch: async () => {
+        const page = await interventionsClient!.listPage({ pageSize: 500 });
+        interventionSearchCache.clear();
+        return page.interventions.map((it) => {
+          interventionSearchCache.set(it.id, it);
+          const tone = InterventionsFormat.statusClass(it.status);
+          return {
+            kind: "__interventions", id: it.id,
+            label: it.title || InterventionsFormat.shortId(it.id),
+            sub: [I18n.t(InterventionsFormat.kindLabelKey(it.kind)), I18n.t(InterventionsFormat.priorityLabelKey(it.priority))].join(" · "),
+            path: it.jira_ref || "",
+            terms: [it.description, it.jira_ref, InterventionsFormat.shortId(it.id)],
+            pill: { text: I18n.t(InterventionsFormat.statusLabelKey(it.status)), tone: (tone === "ok" || tone === "warn" || tone === "err") ? tone : ("" as const) },
+          };
+        });
+      },
+      open: (id) => {
+        shell.switchView("interventions");
+        const record = interventionSearchCache.get(id);
+        if (record) interventionsView.openDetail(record);
+      },
+    },
+  ] : []);
+  /** Enregistrements d'interventions du DERNIER chargement de la palette — `open` en a besoin (cf. ci-dessus). */
+  const interventionSearchCache = new Map<string, InterventionRecord>();
   const openGlobalSearch = (): void => {
     if (globalSearch.isOpen()) { globalSearch.close(); return; }
     if (document.querySelector(".modal-overlay.open, .dialog-overlay") || document.body.classList.contains("welcome-active")) return;

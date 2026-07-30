@@ -22,6 +22,8 @@ export const search = {
     network: "Réseau & IP",
     vms: "VMs",
     inventory: "Inventaire",
+    certs: "Certificats",
+    interventions: "Interventions",
     actions: "Actions",
   },
 
