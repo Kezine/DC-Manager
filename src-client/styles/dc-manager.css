@@ -1919,8 +1919,7 @@
   .list-chrome .lc-reset {
     height: var(--control-h); box-sizing: border-box;
   }
-  .list-chrome .lc-filters { min-height: var(--control-h); }
-  .list-chrome .lc-right .btn { display: inline-flex; align-items: center; }
+  .list-chrome  .list-chrome .lc-right .btn { display: inline-flex; align-items: center; }
   .lc-filters-host, .lc-reset-host { display: contents; }   /* hôtes transparents : la FilterBar participe au flex de la barre */
 
   /* -- Recherche : loupe intégrée + champ sans bordure propre (le conteneur EST la boîte) -- */
@@ -1978,6 +1977,12 @@
 
   /* -- Chips de filtre actif (un par valeur) : pastille accentuée, croix de retrait (inspirée de .loc-pill/.chip) -- */
   .lc-chips { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  /* rangee de CHIPS a la ligne (revue 2026-07-30) : pleine largeur dans le .list-chrome en wrap,
+     masquee a vide (pas de gouttiere quand aucun filtre n'est actif). L'hote (ListView) est
+     transparent au layout (display: contents) : c'est la rangee qui participe au flex. */
+  .lc-chips-row { flex-basis: 100%; min-width: 0; }
+  .lc-chips-row:empty { display: none; }
+  .lc-chips-host { display: contents; }
   .filter-chip {
     display: inline-flex; align-items: center; gap: 6px; max-width: 280px;
     padding: 3px 5px 3px 10px; border-radius: var(--radius-pill);

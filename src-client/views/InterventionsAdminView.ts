@@ -225,6 +225,16 @@ export class InterventionsAdminView {
     const st = this.state;
     const bar = document.createElement("div"); bar.className = "list-chrome";
 
+    // Filtres Type/Statut/Priorité (répétables) — construits AVANT la barre : le bouton « + Filtre »
+    // se place DEVANT la recherche, et les chips actifs sur LEUR RANGÉE en fin de barre (revue
+    // 2026-07-30, même disposition que ListView).
+    this.filterBar = new FilterBar([
+      { key: "kinds", label: I18n.t("interventions.filter.type"), options: InterventionsAdminView.slugItems(InterventionsFormat.KIND_SLUGS, (s) => InterventionsFormat.kindLabelKey(s)), selected: st.kinds },
+      { key: "statuses", label: I18n.t("interventions.filter.status"), options: InterventionsAdminView.slugItems(InterventionsFormat.STATUS_SLUGS, (s) => InterventionsFormat.statusLabelKey(s)), selected: st.statuses },
+      { key: "priorities", label: I18n.t("interventions.filter.priority"), options: InterventionsAdminView.slugItems(InterventionsFormat.PRIORITY_SLUGS, (s) => InterventionsFormat.priorityLabelKey(s)), selected: st.priorities },
+    ], () => { st.page = 1; void this.refreshBody(); });
+    bar.appendChild(this.filterBar.addElement);
+
     // Recherche NORMALISÉE (classe `.search-input`, loupe intégrée) ; l'anti-rebond + la requête serveur restent
     // propres à cette page paginée.
     const search = document.createElement("div"); search.className = "lc-search";
@@ -239,14 +249,6 @@ export class InterventionsAdminView {
     search.append(icon, input);
     bar.appendChild(search);
 
-    // Filtres Type/Statut/Priorité (répétables) → chips + « + Filtre » (vocabulaire commun à tous les listings).
-    this.filterBar = new FilterBar([
-      { key: "kinds", label: I18n.t("interventions.filter.type"), options: InterventionsAdminView.slugItems(InterventionsFormat.KIND_SLUGS, (s) => InterventionsFormat.kindLabelKey(s)), selected: st.kinds },
-      { key: "statuses", label: I18n.t("interventions.filter.status"), options: InterventionsAdminView.slugItems(InterventionsFormat.STATUS_SLUGS, (s) => InterventionsFormat.statusLabelKey(s)), selected: st.statuses },
-      { key: "priorities", label: I18n.t("interventions.filter.priority"), options: InterventionsAdminView.slugItems(InterventionsFormat.PRIORITY_SLUGS, (s) => InterventionsFormat.priorityLabelKey(s)), selected: st.priorities },
-    ], () => { st.page = 1; void this.refreshBody(); });
-    bar.appendChild(this.filterBar.filtersElement);
-
     const right = document.createElement("div"); right.className = "lc-right";
     right.append(
       this.actionButton(I18n.t("interventions.action.addIncident"), "", () => this.interventionModal(null, "incident"), "btn-primary"),
@@ -255,6 +257,7 @@ export class InterventionsAdminView {
     );
     right.appendChild(this.filterBar.resetElement);
     bar.appendChild(right);
+    bar.appendChild(this.filterBar.chipsElement);   // rangée des chips, À LA LIGNE (dernier enfant du wrap)
     return bar;
   }
 
