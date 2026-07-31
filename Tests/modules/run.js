@@ -16,6 +16,7 @@ const DOMAINS = [
   "./test-core-store.js",        // entités + Store + helpers core
   "./test-geometry.js",          // géométrie pure
   "./test-views-tools.js",       // vues & outils (hôtes injectés)
+  "./test-route-eligibility.js", // éditeur de route : éligibilité d'un waypoint + erreur → étape (core/RouteEligibility)
   "./test-ui-modalstack.js",     // primitives UI : politique de la PILE de modales (core/ModalStack)
   "./test-sync.js",              // rechargement granulaire REST
   "./test-shared-validation.js", // code partagé front/back
