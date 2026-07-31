@@ -131,7 +131,9 @@ src-client/            # FRONT (navigateur) — TS compilé par webpack
   app/          #   main.ts (bootstrap), Shell, état de sauvegarde
 src-server/src/ # BACK (Node, ESM/NodeNext) — TS compilé par tsc
   api.ts        #   couche HTTP (Express) : routes + verrou optimiste + SSE
-  db.ts         #   Repository SQLite (better-sqlite3)
+  db.ts         #   contrat du dépôt (RepositoryContract) + Repository blob LEGACY (parité L3, retrait L5)
+  RelationalRepository.ts # dépôt RELATIONNEL de production (schéma dérivé de la spec, cf. docs/persistance.md)
+  LegacyMigration.ts      # migration blob → relationnel au premier accès d'un document (backup .bak)
   documents.ts  #   registre multi-documents + révisions
   live.ts       #   bus SSE (notifications de changement)
 src-shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) — schéma, types, validation

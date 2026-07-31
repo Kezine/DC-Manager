@@ -12,6 +12,14 @@ export interface SqliteDb {
 export type SqliteCtor = new (file: string) => SqliteDb;
 
 export type Rec = Record<string, any>;
+
+/** CONTRAT du dépôt d'un document : la SURFACE PUBLIQUE de `Repository` (bascule L4 migration DB).
+    `Pick<Repository, keyof Repository>` ne retient que les membres publics — la CLASSE `Repository`,
+    elle, est un type NOMINAL à cause de ses membres privés : `RelationalRepository` (qui implémente
+    la même surface, garde compilée `assertRepositoryParity`) ne lui serait JAMAIS assignable.
+    `documents.ts`/`api.ts` consomment CE contrat ; la classe blob ci-dessous ne survit que pour la
+    preuve de parité (tests L3) et disparaît au lot L5. */
+export type RepositoryContract = Pick<Repository, keyof Repository>;
 export interface Snapshot { meta?: Rec; [collection: string]: any }
 export interface Tx {
   creates?: { collection: string; record: Rec }[];

@@ -4,13 +4,16 @@
    Réimplémente la MÊME surface publique que `Repository` (db.ts, modèle blob
    JSON) sur le schéma relationnel GÉNÉRÉ par `src-shared/RelationalSchema`
    (lot L2 de la migration DB — cadrage
-   `.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`). Cette
-   classe N'EST PAS BRANCHÉE : `api.ts`/`documents.ts` consomment toujours le
-   `Repository` blob — la bascule du chemin de production et la migration des
-   documents existants sont le lot L4. La compatibilité STRUCTURELLE avec le
-   contrat est verrouillée à la compilation par `assertRepositoryParity` (bas de
-   fichier) et la parité de COMPORTEMENT sera prouvée corpus contre corpus au
-   lot L3.
+   `.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`). Depuis la
+   BASCULE L4, cette classe EST le chemin de production : `DocumentStore.repo()`
+   l'ouvre (après migration des fichiers legacy par `LegacyMigration`) et
+   `api.ts`/`documents.ts` la consomment par le TYPE de contrat
+   `RepositoryContract` (db.ts — la surface publique de `Repository`, seule
+   forme à laquelle une AUTRE classe est assignable). La compatibilité
+   STRUCTURELLE avec le contrat est verrouillée à la compilation par
+   `assertRepositoryParity` (bas de fichier) et la parité de COMPORTEMENT est
+   PROUVÉE corpus contre corpus par le lot L3 (test-relational-parity.js) —
+   le `Repository` blob ne survit que pour cette preuve, jusqu'au lot L5.
 
    ── Le CONTRAT des colonnes strictes (ce qui change vs le blob) ─────────────
    • ÉCRITURE : seules les colonnes DÉRIVÉES de la spec (`COLLECTION_SPECS`,
@@ -91,6 +94,14 @@ export class RelationalRepository {
     // Tables HORS migration (cadrage §1) — DDL repris à l'IDENTIQUE de db.ts.
     db.exec(`CREATE TABLE IF NOT EXISTS meta (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL)`);
     db.exec(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, meta TEXT NOT NULL, blob BLOB, bytes INTEGER NOT NULL DEFAULT 0)`);
+    return new RelationalRepository(db);
+  }
+
+  /** Enveloppe un handle DÉJÀ OUVERT — SANS pragma ni DDL (l'appelant les gère). Point d'entrée de la
+      MIGRATION legacy (`LegacyMigration`, lot L4) : l'upsert relationnel (sérialisation par type de spec,
+      colonne `search`, `updated_rev`) doit s'exécuter DANS la transaction de migration, sur le MÊME handle
+      que les RENAME/DDL — le dupliquer là-bas ferait diverger deux mappings de colonnes en silence. */
+  static onOpenHandle(db: SqliteDb): RelationalRepository {
     return new RelationalRepository(db);
   }
 

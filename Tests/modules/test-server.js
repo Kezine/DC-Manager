@@ -354,7 +354,10 @@ module.exports = async () => {
     ck.eq(restored.created_date, "2020-01-01T00:00:00.000Z", "snapshot : created_date d'audit restauré verbatim");
     repo.close();
 
-    // -- DocumentStore : cycle de vie complet SUR DISQUE (fix Windows : close() avant suppression) --
+    // -- DocumentStore : cycle de vie complet SUR DISQUE (fix Windows : close() avant suppression).
+    //    ⚠ Depuis la bascule L4, repo() ouvre le dépôt RELATIONNEL (les assertions blob ci-dessus, elles,
+    //    testent db.js DIRECTEMENT — valides tant que le blob sert de filet de parité, jusqu'à L5) ;
+    //    la migration legacy et la preuve de bascule ont leur fichier dédié : test-legacy-migration.js. --
     const fs = require("fs"), os = require("os");
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-docs-"));
     const { DocumentStore } = SERVER("documents.js");
@@ -364,7 +367,9 @@ module.exports = async () => {
     ck(fs.existsSync(path.join(dir, created.id + ".db")), "create : fichier SQLite matérialisé sur disque");
     const rev = docs.markChanged(created.id);
     ck.eq(docs.getRev(created.id), rev, "markChanged : rev incrémentée et relue");
-    docs.repo(created.id).upsert("racks", { id: "r1" }, rev);   // ouvre le handle → le cas Windows EBUSY sans close()
+    // `name` fourni : depuis la bascule L4, repo() rend l'implémentation RELATIONNELLE — `racks.name` est
+    // une colonne NOT NULL (spec `required`), un record sans nom serait REJETÉ par SQLite (le blob avalait).
+    docs.repo(created.id).upsert("racks", { id: "r1", name: "Baie EBUSY" }, rev);   // ouvre le handle → le cas Windows EBUSY sans close()
     docs.setDefaultDocId(created.id);
     ck.eq(docs.delete(created.id), true, "delete : accepté");
     ck(!fs.existsSync(path.join(dir, created.id + ".db")), "delete : fichier .db SUPPRIMÉ du disque (handle fermé AVANT rmSync — fix Windows)");

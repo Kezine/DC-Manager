@@ -3,6 +3,14 @@
 > Décrit COMMENT le serveur REST (`src-server/`) stocke et interroge les données, POURQUOI ce modèle, et la direction
 > retenue si on retouche la couche DB. Complément de [`validation.md`](validation.md) : l'intégrité vit dans la
 > validation partagée, pas dans le schéma SQL.
+>
+> ⚠ **ÉTAT (bascule L4, 2026-07-31) : le serveur TOURNE désormais sur le schéma RELATIONNEL.**
+> `DocumentStore.repo()` ouvre `RelationalRepository` (les fichiers legacy sont migrés à la première
+> ouverture — backup `.pre-relationnel.bak`, cf. `src-server/RUN.md` et `LegacyMigration.ts`), et
+> `api.ts`/`documents.ts` consomment le TYPE de contrat `RepositoryContract` (db.ts). Le modèle blob
+> décrit ci-dessous est donc l'état D'AVANT-bascule : sa classe `Repository` (db.ts) ne survit que
+> comme référence de la preuve de parité (tests L3) et disparaît au lot L5 — la RÉÉCRITURE de ce
+> document (le relationnel comme état nominal) est prévue au même lot.
 
 ## Le modèle : un document JSON par enregistrement
 
@@ -91,7 +99,7 @@ typées + vraies FK), PAS des rustines sur le blob.
   `src-shared/RelationalSchema`** (source unique front ↔ back : le générateur ci-dessous en tire les index, le client le
   RÉ-EXPORTE via `src-client/data/config.ts`).
 
-### Générateur de DDL relationnel (existe — PAS encore branché)
+### Générateur de DDL relationnel (BRANCHÉ depuis la bascule L4)
 
 Le module partagé **`src-shared/RelationalSchema`** DÉRIVE le schéma cible de la spec (`COLLECTION_SPECS`), pour ne
 JAMAIS l'écrire à la main. Il expose `tableDdl(collection)`, `indexDdls(collection)` et `allDdl()`. Une table par
@@ -106,7 +114,7 @@ cascade métier multi-bases de `src-shared/Cascade` et l'ordre libre des lots `t
 **DEFAULT SQL** sur les colonnes de spec (D3 — les défauts vivent dans la normalisation partagée, `search`/`updated_rev`
 exceptés). L'index est le gain ; l'intégrité reste applicative.
 
-### Repository relationnel (existe — PAS branché non plus)
+### Repository relationnel (EN PRODUCTION depuis la bascule L4)
 
 **`src-server/src/RelationalRepository.ts`** (lot L2) implémente le contrat COMPLET de `Repository` sur ce schéma
 généré : même surface publique (garde structurelle compilée `assertRepositoryParity` en bas de fichier), mêmes
@@ -128,8 +136,15 @@ meta/images repris à l'identique — hors migration). Ses contrats PROPRES, ceu
 - **`explainFindBy`** (seule méthode hors contrat, diagnostic) rejoue l'`EXPLAIN QUERY PLAN` du SQL exact de
   `findBy` : `SEARCH … USING INDEX idx_…` sur le chemin chaud (prouvé par test, contre-épreuve SCAN incluse).
 
-⚠ **Le serveur ne l'utilise PAS ENCORE** : `db.ts` (blob) reste le chemin de production. La **parité corpus contre
-corpus est PROUVÉE (lot L3)** : corpus de démo par les tests (`Tests/modules/test-relational-parity.js`, comparateur
-canonique partagé `parity-comparator.js` — lecture, écritures, divergences de contrat ENCODÉES comme attendues) et
-corpus réel par une sonde hors dépôt (0 divergence) ; reste la bascule + la migration des documents legacy (backup
-`.bak`, blob→colonnes au boot) au lot L4 — cf. cadrage `.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`.
+✅ **BASCULÉ (lot L4)** : `DocumentStore.repo()` ouvre cette implémentation — le client ne voit rien (même contrat
+REST), `api.ts`/`documents.ts` la consomment par le type `RepositoryContract` (la surface publique de `Repository`,
+seule forme à laquelle une autre classe est nominalement assignable). Les documents LEGACY sont migrés à leur
+première ouverture par **`LegacyMigration`** : backup `.pre-relationnel.bak` (handle fermé + checkpoint AVANT copie,
+jamais écrasé s'il préexiste), puis blob→colonnes en UNE transaction (chaque record passé par
+`DataValidator.normalizeRecord` — les défauts sont posés, les legacy `face_image*` purgés — et `updated_rev`
+préservée par record) ; un échec ANNULE EN BLOC (fichier resté lisible en legacy) avec une erreur qui NOMME le record
+fautif — procédure d'exploitation dans `src-server/RUN.md`. La **parité corpus contre corpus est PROUVÉE (lot L3)** :
+corpus de démo par les tests (`Tests/modules/test-relational-parity.js`, comparateur canonique partagé
+`parity-comparator.js` — lecture, écritures, divergences de contrat ENCODÉES comme attendues) et corpus réel par une
+sonde hors dépôt (0 divergence). Reste le lot L5 : retrait du chemin blob (`db.ts` + tests de parité) et réécriture
+de ce document — cf. cadrage `.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`.

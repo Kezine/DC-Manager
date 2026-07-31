@@ -109,6 +109,32 @@ docker volume ls                  # liste les volumes (cherche *dc-manager-data)
 docker compose down -v            # ⚠️ SUPPRIME le volume → repart de zéro (perte des documents)
 ```
 
+### Migration automatique blob → relationnel (2026-07, une fois par document)
+
+Les documents créés avant la migration DB relationnelle stockaient chaque enregistrement en
+**blob JSON** (colonne `data`). Depuis la bascule, le serveur travaille sur un **schéma relationnel
+typé** (une colonne par champ, index sur les clés étrangères) et **migre chaque fichier legacy
+automatiquement, à sa première ouverture** (en pratique : au premier accès après la mise à jour).
+Aucune action requise. Déroulé, pour chaque document legacy détecté :
+
+1. **Sauvegarde d'abord** : copie du fichier en **`<doc>.db.pre-relationnel.bak`** (handle fermé,
+   `-wal` rapatrié → le `.bak` est auto-suffisant). Un `.bak` déjà présent n'est **jamais écrasé**
+   (avertissement dans les logs). Ces `.bak` peuvent être supprimés à la main une fois la migration
+   validée — le serveur n'y touche plus.
+2. **Migration en une transaction** : chaque enregistrement est relu, normalisé (défauts posés) et
+   réinséré en colonnes ; la révision par entité (`updated_rev`, verrou optimiste) est préservée ;
+   la méta du document et les images ne bougent pas. Une ligne `INFO` au log récapitule (nombre de
+   records, chemin du backup, durée).
+3. **En cas d'échec** (enregistrement invalide — ex. champ obligatoire absent) : la transaction est
+   **annulée en bloc**, le fichier **reste lisible à l'ancien format**, rien n'est perdu, et l'erreur
+   au log **nomme le record fautif** (`collection/id` + cause SQL). Marche à suivre : corriger le
+   record nommé dans le fichier legacy (cf. § *Éditer une base à la main*, serveur arrêté) puis
+   rouvrir le document — ou restaurer le `.bak` et demander de l'aide avec le message d'erreur.
+
+> 💡 Ceinture-bretelles : avant une mise à jour qui embarque cette migration, faire un **export
+> snapshot JSON** de chaque document depuis l'app (menu documents) — c'est un second filet,
+> indépendant du `.bak`.
+
 Inspecter le contenu du volume dans le conteneur :
 ```bash
 docker compose exec dc-manager ls -la /data/documents
