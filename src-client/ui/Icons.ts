@@ -74,6 +74,13 @@ export class Icons {
   /** Fermer / annuler / retirer une ligne (remplace `✕`) : croix. */
   static readonly CLOSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
 
+  /** REVENIR au niveau précédent : flèche vers la gauche. Intention DISTINCTE de CLOSE — dans une
+      PILE de modales, la croix vide la file entière tandis que cette flèche remonte d'UN cran (elle
+      joue exactement le rôle d'« Annuler », garde « modifications non enregistrées » comprise).
+      ⚠ Ne PAS l'employer pour un retour de NAVIGATION (le « Retour » de la vue 3D après un
+      « Localiser ») : ce geste-là ne dépile rien, il rejoue une action mémorisée. */
+  static readonly BACK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="12" x2="5" y2="12"/><path d="M11 6l-6 6 6 6"/></svg>';
+
   /** Importer (remplace `📥`) : flèche entrant dans un bac. */
   static readonly IMPORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 8l5-5 5 5"/><path d="M12 3v12"/></svg>';
 

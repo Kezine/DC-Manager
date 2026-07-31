@@ -53,7 +53,7 @@ import type {
 /** Source des cibles liables (équipements/VMs/spares) — interface hôte INJECTÉE (la vue ne connaît pas le
     Store). `labelOf` résout le libellé d'un lien existant (null = cible disparue → « introuvable » côté UI,
     orphelin toléré) ; `search` alimente la SÉLECTION unifiée (SearchPop) de l'éditeur de liens ;
-    `openTargetDetail` ouvre la fiche de la cible avec retour-auto (aller-retour). */
+    `openTargetDetail` ouvre la fiche de la cible PAR-DESSUS le détail d'intervention (pile de modales). */
 export interface InterventionTargetSource {
   /** Libellé d'une cible précise, ou null si elle n'existe plus dans le document (orphelin). */
   labelOf(kind: string, id: string): string | null;
@@ -61,10 +61,10 @@ export interface InterventionTargetSource {
       candidats {kind,id,label} déjà TRIÉS par pertinence (préfixe avant inclusion) et BORNÉS. `excluded` =
       clés « kind:id » des cibles déjà liées, écartées des résultats (dédup). Insensible casse/accents. */
   search(query: string, excluded?: ReadonlySet<string>): Array<{ kind: string; id: string; label: string }>;
-  /** Ouvre la FICHE DE DÉTAIL existante d'une cible (equipment/vm/spare). `onClosed` est rappelé à la
-      FERMETURE de cette fiche (quelle qu'en soit la cause) → retour-auto à la modale de détail de
-      l'intervention (l'app n'a qu'un overlay de modale, sans empilement). */
-  openTargetDetail(kind: string, id: string, onClosed: () => void): void;
+  /** Ouvre la FICHE DE DÉTAIL existante d'une cible (equipment/vm/spare). Elle s'EMPILE sur le détail
+      d'intervention, qui reste vivant dessous : le retour est structurel (Annuler / ← / Retour arrière
+      dépilent), plus besoin d'un rappel de fermeture pour le rejouer. */
+  openTargetDetail(kind: string, id: string): void;
 }
 
 /** État d'un listing (mémoire d'instance — PAS de sessionStorage : les volumes vivent côté serveur, l'état
@@ -562,14 +562,14 @@ export class InterventionsAdminView {
   }
 
   /* --------------------------------------------------------------------------
-     Modale de DÉTAIL (consultation) + aller-retour vers les fiches liées
+     Modale de DÉTAIL (consultation) + fiches liées EMPILÉES par-dessus
      -------------------------------------------------------------------------- */
 
   /** Modale de CONSULTATION d'une intervention (hideFooter) : badges (nature/priorité/statut), fenêtre
       planifiée, référence Jira, description rendue en MARKDOWN, audit, et la liste des objets liés (icône de
       famille + libellé + badge ; orphelin « introuvable » grisé, NON cliquable). Un CLIC sur un objet lié
-      existant ouvre sa fiche de détail PUIS revient ICI à la fermeture (aller-retour — overlay unique). Le
-      bouton « Modifier » bascule vers la modale d'ÉDITION (openModal remplace le contenu, fermer-puis-ouvrir).
+      existant EMPILE sa fiche de détail par-dessus ; ce détail reste vivant dessous et reparaît au dépilement.
+      Le bouton « Modifier » EMPILE de même la modale d'ÉDITION.
       L'`item` du listing porte déjà TOUS les champs (liste et détail partagent la même forme serveur) — aucune
       relecture réseau nécessaire. */
   /** Ouvre la modale de DÉTAIL d'une intervention DEPUIS L'EXTÉRIEUR de la vue (recherche globale) —
@@ -612,17 +612,23 @@ export class InterventionsAdminView {
       }).catch(() => { /* auteurs non critiques */ });
     }
 
-    // « Modifier » : bascule vers la modale d'ÉDITION. openModal étant un overlay UNIQUE, l'ouvrir REMPLACE ce
-    // détail (fermer-puis-ouvrir implicite) ; inutile de fermer d'abord.
+    // « Modifier » : EMPILE la modale d'ÉDITION par-dessus ce détail, qui reste vivant dessous. Enregistrer
+    // ou Annuler dépile et redonne ce détail — reconstruit par son `onResume` (ci-dessous), donc à jour.
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
     actions.appendChild(this.actionButton(I18n.t("interventions.rowAction.edit"), "", () => this.interventionModal(item, item.kind), "btn-primary"));
     root.appendChild(actions);
 
-    this.host.openModal({ title: I18n.t("interventions.detail.title"), subtitle: Html.escape(item.title), body: root, hideFooter: true, wide: true });
+    this.host.openModal({
+      title: I18n.t("interventions.detail.title"), subtitle: Html.escape(item.title), body: root, hideFooter: true, wide: true,
+      // Retour au premier plan → fiche RECONSTRUITE. On repart de l'enregistrement RECHARGÉ (`afterWrite`
+      // rafraîchit `items` après toute écriture) plutôt que de l'objet capturé, qui serait resté d'avant
+      // l'édition ; repli sur l'objet capturé si l'item n'est plus dans la page courante.
+      onResume: () => this.detailModal(this.items.find((it) => it.id === item.id) || item),
+    });
   }
 
   /** Liste ÉLÉGANTE des objets liés (modale de détail) : icône de famille + libellé + badge de famille. Une
-      cible existante est CLIQUABLE (ouvre sa fiche, retour-auto ici à la fermeture — aller-retour) ; une cible
+      cible existante est CLIQUABLE (sa fiche s'EMPILE ; ce détail reparaît au dépilement) ; une cible
       disparue s'affiche « introuvable » grisée et NON cliquable (orphelin toléré). */
   private detailLinksList(item: InterventionRecord): HTMLElement {
     const wrap = document.createElement("div");
@@ -638,8 +644,9 @@ export class InterventionsAdminView {
       const text = document.createElement("span");
       if (resolved !== null) {
         const link = document.createElement("a"); link.href = "#"; link.textContent = resolved; link.style.cursor = "pointer";
-        // Aller-retour mémorisé : ouvre la fiche de la cible ; à SA fermeture, on rouvre CE détail.
-        link.onclick = (e) => { e.preventDefault(); this.targets.openTargetDetail(l.target_kind, l.target_id, () => this.detailModal(item)); };
+        // La fiche de la cible s'EMPILE : ce détail reste vivant dessous et se rafraîchit tout seul au
+        // retour (cf. l'`onResume` de `detailModal`).
+        link.onclick = (e) => { e.preventDefault(); this.targets.openTargetDetail(l.target_kind, l.target_id); };
         text.appendChild(link);
       } else {
         text.textContent = I18n.t("interventions.target.unknown"); text.style.color = "var(--fg-dimmer)";

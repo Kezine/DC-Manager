@@ -1439,7 +1439,11 @@
   .modal-title span { color: var(--accent-text); }   /* titre de modale (accent) → --accent-text */
   .modal-subtitle { font-size: 10px; letter-spacing: 0.06em; color: var(--fg-dimmer); font-weight: 400; }
   .modal-subtitle:empty { display: none; }
-  .modal-close {
+  /* Groupe d'actions d'en-tête [← ✕] : `.modal-header` est en `justify-content: space-between`, donc
+     un DEUXIÈME bouton posé à sa racine serait renvoyé au MILIEU de la barre. Les deux boutons vivent
+     donc dans ce conteneur, qui reste l'unique élément « de droite ». */
+  .modal-header-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .modal-close, .modal-back {
     background: transparent;
     border: 1px solid var(--line-2);
     color: var(--fg-dim);
@@ -1451,7 +1455,7 @@
     padding: 0;
     flex: 0 0 auto;
   }
-  .modal-close:hover { color: var(--fg); border-color: var(--fg); }
+  .modal-close:hover, .modal-back:hover { color: var(--fg); border-color: var(--fg); }
   .modal-body { padding: 20px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .modal-footer {
     padding: 14px 20px;

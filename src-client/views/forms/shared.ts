@@ -62,9 +62,17 @@ export class FormUi {
 export interface FormHost {
   openModal(opts: ModalOptions): void;
   setDirty?(v: boolean): void;
-  /** Ferme la modale/fiche courante. Utile quand une action DEPUIS une fiche détruit l'entité affichée
-      (ex. purge d'une VM orpheline dans `DetailForms.vmDetail`) : la fiche n'a plus rien à montrer. */
+  /** Ferme le NIVEAU courant de la pile de modales (revient donc au précédent s'il y en a un). Utile
+      quand une action DEPUIS une fiche détruit l'entité affichée (ex. purge d'une VM orpheline dans
+      `DetailForms.vmDetail`) : la fiche n'a plus rien à montrer. */
   closeModal?(): void;
+  /** Redemande à la modale COURANTE de se reconstruire EN PLACE (elle rejoue l'`onResume` déclaré à
+      son ouverture). À utiliser quand une action déclenchée DEPUIS une fiche la rend périmée sans
+      pour autant dépiler quoi que ce soit : éditeur de façade (un `Dialog`, pas un niveau de pile),
+      suppression d'une ligne de sous-équipement, rattachement d'une adresse IP…
+      ⚠ NE PAS ré-appeler la fiche elle-même pour ça : depuis que `Modal` est une PILE, une
+      ré-ouverture EMPILE un niveau de plus au lieu de remplacer le contenu affiché. */
+  refreshModal?(): void;
   /** « Localiser » : ferme la modale, bascule en vue 3D et centre la caméra sur l'objet.
       `returnAction` (optionnel) = ce qu'exécute le bouton « Retour » de la vue 3D (ex. rouvrir la fiche). */
   locate?(kind: "equipment" | "rack" | "cable" | "port", id: string, returnAction?: () => void): void;

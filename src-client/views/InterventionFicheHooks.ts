@@ -7,9 +7,9 @@
 
    `countOpen`  : nombre d'interventions OUVERTES liées à une cible (badge de fiche, chargé async).
    `declareFor` : déclare une intervention DEPUIS la fiche — NAVIGUE vers l'onglet « Interventions » et ouvre
-                  la modale de création PRÉ-LIÉE à la cible (l'appelant ferme d'abord la fiche courante — la
-                  modale de l'app est un overlay UNIQUE, pas d'empilement). `label` = libellé lisible de la
-                  cible (contexte affiché dans la modale de création). */
+                  la modale de création PRÉ-LIÉE à la cible (l'appelant DÉPILE d'abord la fiche courante :
+                  on change de VUE, elle n'a plus lieu d'être — cf. InterventionFicheRow). `label` = libellé
+                  lisible de la cible (contexte affiché dans la modale de création). */
 export interface InterventionFicheHooks {
   countOpen(kind: string, id: string): Promise<number>;
   declareFor(kind: string, id: string, label: string): void;

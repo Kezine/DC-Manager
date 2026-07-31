@@ -331,7 +331,12 @@ export class RackForms extends CableForms {
     }
     root.appendChild(actions);
 
-    host.openModal({ title: I18n.t("rack.rackDetail.title"), subtitle: Html.escape(rk.name || ""), body: root, hideFooter: true, wide: true });
+    // `onResume` : la fiche se RECONSTRUIT quand elle revient au premier plan (formulaire d'édition, modale
+    // « contenu » ou fiche d'équipement dépilés) — elle lit l'objet `rk` capturé à l'ouverture, donc figé.
+    host.openModal({
+      title: I18n.t("rack.rackDetail.title"), subtitle: Html.escape(rk.name || ""), body: root, hideFooter: true, wide: true,
+      onResume: () => this.rackDetail(store, host, rk.id, onChanged),
+    });
   }
 
   /** MODALE « CONTENU » d'une baie (réplique modulaire de `openRackContent` du monolithe v170) : éditeur
@@ -368,8 +373,10 @@ export class RackForms extends CableForms {
       host.setDirty?.(true); render();
     };
     const done = () => { host.setDirty?.(true); render(); onChanged?.(); };
-    // nom d'équipement CLIQUABLE → sa fiche (au retour, on rouvre le contenu de baie s'il a été modifié).
-    const openEq = (eqId: string) => EquipmentForms.equipmentDetail(store, host, eqId, () => this.rackContent(store, host, id, onChanged));
+    // nom d'équipement CLIQUABLE → sa fiche, EMPILÉE par-dessus : cette modale reste vivante dessous et se
+    // reconstruit au retour (son `onResume`). On transmet donc l'`onChanged` du contexte (rafraîchir la vue
+    // d'origine), et non une ré-ouverture du contenu de baie — qui EMPILERAIT un doublon.
+    const openEq = (eqId: string) => EquipmentForms.equipmentDetail(store, host, eqId, onChanged);
     const clickableName = (e: any): HTMLElement => {
       const s = document.createElement("span");
       s.textContent = e.name || I18n.t("lists.ph.noName");
@@ -451,7 +458,14 @@ export class RackForms extends CableForms {
     };
 
     render();
-    host.openModal({ title: I18n.t("rack.rackContent.title", { name: Html.escape(rack.name || I18n.t("rack.common.rackWord")) }), subtitle: I18n.t("rack.rackContent.subtitle"), body: root, hideFooter: true, wide: true });
+    // `onResume` : la modale « contenu » se reconstruit quand elle revient au premier plan (une fiche
+    // d'équipement, ou le formulaire d'édition ouvert depuis elle, vient d'être dépilé) — le montage a pu
+    // changer entre-temps. Son `render()` interne, lui, couvre les mutations faites SUR PLACE.
+    host.openModal({
+      title: I18n.t("rack.rackContent.title", { name: Html.escape(rack.name || I18n.t("rack.common.rackWord")) }),
+      subtitle: I18n.t("rack.rackContent.subtitle"), body: root, hideFooter: true, wide: true,
+      onResume: () => this.rackContent(store, host, id, onChanged),
+    });
   }
 
   /** SITE (bâtiment) — niveau racine de la hiérarchie physique : nom · adresse · description.

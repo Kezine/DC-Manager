@@ -42,6 +42,19 @@ import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {aute
    Placée en fin de chaîne (IpamForms ← DetailForms ← Forms) : `this` résout vers
    `Forms`, donc l'accès aux formulaires d'ÉDITION (this.network, this.cableBundle,
    this.datacenter…) et aux autres fiches (this.equipmentDetail…) est direct.
+
+   RETOUR AU PREMIER PLAN — chaque fiche déclare `onResume` = SA PROPRE
+   reconstruction (règle UNIFORME, aucune exception). Depuis que `Modal` est une
+   PILE, ouvrir une fiche liée ou un formulaire d'édition EMPILE : la fiche reste
+   vivante dessous et reparaît telle quelle au dépilement — donc PÉRIMÉE si le
+   niveau du dessus a écrit. `onResume` la reconstruit depuis le store, ce qui est
+   gratuit et sans risque (une fiche est en lecture seule : il n'y a aucune saisie
+   à préserver). C'est l'INVERSION du vieux montage : ce n'est plus la modale
+   ouverte qui doit savoir rouvrir celle du dessous (`onClose: reopen`), c'est
+   chaque niveau qui déclare comment se remettre à jour.
+   ⚠ Pour rafraîchir une fiche SANS dépiler (mutation faite depuis la fiche
+   elle-même, ou via un `Dialog` empilé par-dessus) : `host.refreshModal?.()`.
+   La RÉ-APPELER empilerait un doublon au lieu de remplacer le contenu.
    ============================================================================= */
 export class DetailForms extends IpamForms {
   private static readonly MUTED = `<span style="color:var(--fg-dimmer)">—</span>`;
@@ -154,7 +167,7 @@ export class DetailForms extends IpamForms {
     if (host.locate && store.cableLocatable(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = () => this.cable(store, host, id, onChanged); actions.appendChild(b); }
     root.appendChild(actions);
-    host.openModal({ title: I18n.t("detail.cable.title"), subtitle: Html.escape(c.name || ""), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.cable.title"), subtitle: Html.escape(c.name || ""), body: root, onResume: () => this.cableDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- FAISCEAU (trunk) ---- */
@@ -214,7 +227,7 @@ export class DetailForms extends IpamForms {
 
     AuditLine.attach(root, b, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.cableBundle(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.bundle.title"), subtitle: Html.escape(b.name || ""), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.bundle.title"), subtitle: Html.escape(b.name || ""), body: root, onResume: () => this.cableBundleDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- RÉSEAU (logique) ---- */
@@ -261,7 +274,7 @@ export class DetailForms extends IpamForms {
 
     AuditLine.attach(root, n, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.network(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.network.title"), subtitle: Html.escape(n.label || ""), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.network.title"), subtitle: Html.escape(n.label || ""), body: root, onResume: () => this.networkDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- RÉSEAU IP (IPAM) ---- */
@@ -312,7 +325,7 @@ export class DetailForms extends IpamForms {
 
     AuditLine.attach(root, ipn, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.ipNetwork(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.ipNet.title"), subtitle: Html.escape(ipn.label || ipn.cidr || ""), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.ipNet.title"), subtitle: Html.escape(ipn.label || ipn.cidr || ""), body: root, onResume: () => this.ipNetworkDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- ADRESSE IP ---- */
@@ -343,7 +356,7 @@ export class DetailForms extends IpamForms {
     root.appendChild(this.grid(pairs));
     AuditLine.attach(root, a, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.ipAddress(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.ipAddr.title"), subtitle: Html.escape(a.address || ""), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.ipAddr.title"), subtitle: Html.escape(a.address || ""), body: root, onResume: () => this.ipAddressDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- PLAGE DHCP ---- */
@@ -365,7 +378,7 @@ export class DetailForms extends IpamForms {
     ]));
     AuditLine.attach(root, rg, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.dhcpRange(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.dhcp.title"), subtitle: ipn ? Html.escape(ipn.label || ipn.cidr || "") : "", body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.dhcp.title"), subtitle: ipn ? Html.escape(ipn.label || ipn.cidr || "") : "", body: root, onResume: () => this.dhcpRangeDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- SALLE (datacenter) ---- */
@@ -402,7 +415,7 @@ export class DetailForms extends IpamForms {
 
     AuditLine.attach(root, dc, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.datacenter(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.dc.title"), subtitle: Html.escape(dc.name || ""), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.dc.title"), subtitle: Html.escape(dc.name || ""), body: root, onResume: () => this.datacenterDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- SITE (bâtiment) ---- */
@@ -430,7 +443,7 @@ export class DetailForms extends IpamForms {
     tw?.querySelectorAll("[data-dc-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.datacenterDetail(store, host, (el as HTMLElement).dataset.dcView!, onChanged); });
     AuditLine.attach(root, site, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.site(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.site.title"), subtitle: Html.escape(site.name || ""), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.site.title"), subtitle: Html.escape(site.name || ""), body: root, onResume: () => this.siteDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- GROUPE ---- */
@@ -457,10 +470,10 @@ export class DetailForms extends IpamForms {
     // fonctionnalité existerait sans se voir. Section MASQUÉE s'il n'y en a aucun (cas de tous les documents
     // actuels) : on n'ajoute pas un bloc vide à une fiche déjà dense.
     const subEqs = store.subEquipmentsOfGroup(id);
-    if (subEqs.length) SubEquipmentForms.attachSection(store, host, root, subEqs, { reopen: () => this.groupDetail(store, host, id, onChanged) });
+    if (subEqs.length) SubEquipmentForms.attachSection(store, host, root, subEqs);
     AuditLine.attach(root, g, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.group(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.group.title"), subtitle: Html.escape(g.label || ""), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.group.title"), subtitle: Html.escape(g.label || ""), body: root, onResume: () => this.groupDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- ÉTAGE ---- */
@@ -488,7 +501,7 @@ export class DetailForms extends IpamForms {
     tw?.querySelectorAll("[data-dc-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.datacenterDetail(store, host, (el as HTMLElement).dataset.dcView!, onChanged); });
     AuditLine.attach(root, f, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.floor(store, host, f.location || "", String(f.floor || ""), {}));
-    host.openModal({ title: I18n.t("detail.floor.title"), subtitle: Html.escape(I18n.t("detail.floor.subtitle", { site: store.siteLabel(f.location || ""), floor: f.floor || "" })), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.floor.title"), subtitle: Html.escape(I18n.t("detail.floor.subtitle", { site: store.siteLabel(f.location || ""), floor: f.floor || "" })), body: root, onResume: () => this.floorDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- SPARE (pièce de rechange) ---- */
@@ -518,7 +531,7 @@ export class DetailForms extends IpamForms {
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "spare", id, label: (sp.displayName ? sp.displayName() : (sp.name || "")) }, () => host.closeModal?.());
     AuditLine.attach(root, sp, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.spare(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.spare.title"), subtitle: Html.escape(sp.displayName ? sp.displayName() : (sp.name || "")), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.spare.title"), subtitle: Html.escape(sp.displayName ? sp.displayName() : (sp.name || "")), body: root, onResume: () => this.spareDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- CONTACT (destinataire de notifications) ---- */
@@ -536,7 +549,7 @@ export class DetailForms extends IpamForms {
     ]));
     AuditLine.attach(root, c, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.contact(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.contact.title"), subtitle: Html.escape(c.name || ""), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.contact.title"), subtitle: Html.escape(c.name || ""), body: root, onResume: () => this.contactDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- VM (équipement virtuel — feature amovible) ---- */
@@ -608,7 +621,9 @@ export class DetailForms extends IpamForms {
         `<span class="cell-actions"><button class="btn btn-ghost btn-sm icon-action" data-addr-view="${a.id}" title="${I18n.t("detail.vm.openAddr")}" aria-label="${I18n.t("detail.vm.openAddr")}">${Icons.INFO}</button></span>`,
       ];
     }), I18n.t("detail.vm.linkedEmpty"));
-    twAddr?.querySelectorAll("[data-addr-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.ipAddressDetail(store, host, (el as HTMLElement).dataset.addrView!, () => this.vmDetail(store, host, id, onChanged)); });
+    // La fiche d'adresse s'EMPILE ; CETTE fiche VM reste dessous et se reconstruit au retour (son `onResume`).
+    // On lui passe donc l'`onChanged` du contexte (rafraîchir la liste derrière), pas une ré-ouverture de VM.
+    twAddr?.querySelectorAll("[data-addr-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.ipAddressDetail(store, host, (el as HTMLElement).dataset.addrView!, onChanged); });
 
     // -- Rapprochements SUGGÉRÉS (IPAM informatif — cf. docs/vm-proxmox.md) : adresses IPAM EXISTANTES dont la valeur
     //    correspond à une IP constatée d'une vNIC, sans rattachement automatique. Bloc réservé au NON-viewer et
@@ -665,7 +680,9 @@ export class DetailForms extends IpamForms {
             if (!await FormSave.record(store, "ipAddresses", addrId, { vm_id: id, equipment_id: null })) return; // refusé par le Store (toast rouge) : ne rien annoncer, garder la saisie
             Notify.toast(I18n.t("detail.vm.attached"));
             onChanged?.();                                   // rafraîchit la liste/vue d'origine
-            this.vmDetail(store, host, id, onChanged);       // re-rendu de la fiche (l'adresse passe en « liées »)
+            // Re-rendu de CETTE fiche (l'adresse passe en « liées ») : la mutation vient de la fiche elle-même,
+            // rien n'est dépilé → on redemande sa reconstruction EN PLACE. La ré-appeler EMPILERAIT un doublon.
+            host.refreshModal?.();
           };
         });
       }
@@ -676,18 +693,14 @@ export class DetailForms extends IpamForms {
     const hostEq: any = vm.host_equipment_id ? store.get("equipments", vm.host_equipment_id) : null;
     if (hostEq) {
       // Fiche de l'hôte ouverte par un bouton-ICÔNE (Icons.INFO, principe n°14) posé SUR LA MÊME LIGNE que la valeur
-      // « Équipement » — comme l'icône « ouvrir l'adresse » des IP liées plus haut. Aller-retour FAÇON INTERVENTIONS
-      // (cf. app/main.ts openTargetDetail) : on ENVELOPPE le FormHost pour injecter un onClose GÉNÉRIQUE qui rouvre
-      // CETTE fiche VM à TOUTE fermeture de la fiche équipement (pas seulement en cas de modification).
+      // « Équipement » — comme l'icône « ouvrir l'adresse » des IP liées plus haut. Elle s'EMPILE simplement :
+      // CETTE fiche VM reste vivante dessous et se reconstruit au retour (son `onResume`). L'hôte enveloppant qui
+      // injectait un `onClose` de retour dans TOUTE ouverture a donc disparu — le retour n'est plus émulé.
       const hostGrid = this.grid([[I18n.t("lists.col.equipment"),
         `${Html.escape(hostEq.name || "?")} ${EntityViz.equipmentLocationShort(store, hostEq)} `
         + IconButton.html({ icon: Icons.INFO, label: I18n.t("detail.vm.openHost"), act: "open-host" })]]);
       const openBtn = hostGrid.querySelector('[data-act="open-host"]') as HTMLElement | null;
-      if (openBtn) openBtn.onclick = () => {
-        const reopenVm = () => this.vmDetail(store, host, id, onChanged);
-        const wrappedHost: FormHost = { ...host, openModal: (o) => host.openModal({ ...o, onClose: reopenVm }) };
-        this.equipmentDetail(store, wrappedHost, hostEq.id, onChanged);
-      };
+      if (openBtn) openBtn.onclick = () => this.equipmentDetail(store, host, hostEq.id, onChanged);
       root.appendChild(hostGrid);
     } else {
       root.appendChild(this.grid([[I18n.t("detail.vm.sourceNode"), vm.host_node ? `${Html.escape(vm.host_node)} <span class="pill" style="border-color:var(--warn);color:var(--warn)">${I18n.t("detail.vm.notMatched")}</span>` : this.MUTED]]));
@@ -756,7 +769,7 @@ export class DetailForms extends IpamForms {
       actions.appendChild(editBtn);
     }
     root.appendChild(actions);
-    host.openModal({ title: I18n.t("detail.vm.title"), subtitle: Html.escape(vm.name || ""), body: root, hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.vm.title"), subtitle: Html.escape(vm.name || ""), body: root, onResume: () => this.vmDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- TYPE DE CÂBLE (catalogue, lecture seule) ---- */
@@ -772,7 +785,7 @@ export class DetailForms extends IpamForms {
       [I18n.t("detail.cableType.nature"), `<span class="pill">${t.kind === "power" ? I18n.t("detail.common.power") : I18n.t("detail.common.data")}</span>`],
       [I18n.t("detail.cableType.count"), used ? `<span class="pill">${used}</span>` : this.MUTED],
     ]));
-    host.openModal({ title: I18n.t("detail.cableType.title"), subtitle: Html.escape(t.name || ""), body: root, hideFooter: true });
+    host.openModal({ title: I18n.t("detail.cableType.title"), subtitle: Html.escape(t.name || ""), body: root, onResume: () => this.cableTypeDetail(store, host, id), hideFooter: true });
   }
 
   /* ---- TYPE DE PORT (catalogue, lecture seule) ---- */
@@ -790,6 +803,6 @@ export class DetailForms extends IpamForms {
       [I18n.t("detail.cableType.nature"), `<span class="pill">${t.kind === "power" ? I18n.t("detail.common.power") : I18n.t("detail.common.data")}</span>`],
       [I18n.t("detail.portType.count"), used ? `<span class="pill">${used}</span>` : this.MUTED],
     ]));
-    host.openModal({ title: I18n.t("detail.portType.title"), subtitle: Html.escape(t.name || ""), body: root, hideFooter: true });
+    host.openModal({ title: I18n.t("detail.portType.title"), subtitle: Html.escape(t.name || ""), body: root, onResume: () => this.portTypeDetail(store, host, id), hideFooter: true });
   }
 }

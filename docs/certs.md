@@ -703,7 +703,7 @@ Révocation manuelle → dialogue demandant un **code standard X.509** (`Revocat
 `privilegeWithdrawn`) + une **note libre**, encodés en `revocation_reason` (`<code>: <note>`). Un
 renouvellement pose **`superseded`** automatiquement. La révocation d'un root reste marquée
 « Révoqué » (libellé uniforme — outil interne sans CRL, cf. « Limites assumées »). Le **commentaire**
-libre s'édite depuis la fiche (aller-retour) ; la fiche affiche commentaire, raison et lignée.
+libre s'édite depuis la fiche (l'éditeur s'EMPILE dessus) ; la fiche affiche commentaire, raison et lignée.
 
 ## Routes REST
 
@@ -872,7 +872,7 @@ Feature **AMOVIBLE** (cf. « Suppression » plus bas).
   (warn/err). Un clic ferme la fiche et bascule sur l'onglet Certificats focalisé (`CertFicheHooks.openCert` →
   `CertsAdminView.focusCert`).
 - **Listing certs (arbre)** : colonne « Cible(s) » — un bouton-icône INFO par
-  équipement/VM rapproché (aller-retour vers sa fiche, patron `openTargetDetail`) + une pastille « ambigu »
+  équipement/VM rapproché (sa fiche s'EMPILE, patron `openTargetDetail`) + une pastille « ambigu »
   si plusieurs cibles distinctes sont rapprochées. Résolveur `CertTargetResolver` injecté par `main.ts`.
 
 **Le moteur** — `src-client/core/CertTargetMatch.ts` (PUR, testé `Tests/modules/test-rapprochement-certs.js`),

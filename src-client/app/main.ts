@@ -138,12 +138,12 @@ async function boot(): Promise<void> {
   const handleStore = new HandleStore();
 
   const modal = new Modal();
-  const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
+  const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), refreshModal: () => modal.refresh(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
   // RECHERCHE GLOBALE (modale dédiée) — UNE instance, UNE implémentation pour les DEUX chemins
   // (déclencheur topbar + Ctrl+K). Garde d'overlay = le pattern des raccourcis undo/redo (sélecteurs
-  // DOM) : `Modal.open()` REMPLACE le contenu sans confirmation (mécanisme voulu des fiches chaînées),
-  // donc ouvrir la palette pendant qu'un FORMULAIRE est en cours mènerait à écraser sa saisie au premier
-  // résultat cliqué. Ignorée aussi sur l'accueil (aucun document → corpus vide). ⚠ Son overlay à elle
+  // DOM) : la palette est un geste de NAVIGATION GLOBALE, pas un niveau de la pile de modales — son
+  // « Localiser » VIDE la file (`closeAll`), donc l'ouvrir par-dessus un formulaire en cours mènerait
+  // à jeter la saisie au premier résultat cliqué. Ignorée aussi sur l'accueil (corpus vide). ⚠ Son overlay à elle
   // (`.gs-overlay`) n'est PAS dans le sélecteur de garde : Ctrl+K palette ouverte = FERMER (toggle).
   // « Localiser » depuis un résultat : MÊME flux que l'action des listes (switch vue Datacenter +
   // `dcView.locate` + bouton « ← Retour » vers la vue quittée). `shell.current` est capturé AVANT le
@@ -676,7 +676,10 @@ async function boot(): Promise<void> {
   // dcView existe désormais : une mutation d'image invalide la scène 3D (rebuild au prochain rendu de la vue DC).
   onImageMutated = () => dcView.invalidate3D();
   // « Localiser » depuis une fiche (modale) : ferme la modale, bascule en 3D, centre la caméra ; « Retour » rouvre la fiche.
-  formHost.locate = (kind, id, ret) => { modal.close(); shell.switchView("datacenter"); dcView.locate(kind, id); dcView.setReturnAction(ret || null); };
+  // ⚠ `closeAll` et non `close` : le geste QUITTE les modales pour aller voir la scène. Une fiche atteinte
+  // depuis une autre (intervention → cible, contenu de baie → équipement) laisserait sinon les niveaux
+  // inférieurs affichés PAR-DESSUS la vue 3D qu'on vient justement d'aller regarder.
+  formHost.locate = (kind, id, ret) => { modal.closeAll(); shell.switchView("datacenter"); dcView.locate(kind, id); dcView.setReturnAction(ret || null); };
 
   // === SOUS-VUES (atteintes par les liens d'en-tête ; surlignent leur onglet parent) ===
   addListTab("groupes", I18n.t("tabs.groupes.label"), ListConfigs.groups, {
@@ -851,11 +854,11 @@ async function boot(): Promise<void> {
       return TargetSearch.rank(items, query, { normalize: Schema.normSearch, limit: 12, excluded });
     },
     // Ouvre la FICHE DE DÉTAIL existante de la cible (equipment/vm/spare) via la machinerie des fiches. Le
-    // retour-auto à la modale de détail de l'intervention passe par l'option GÉNÉRIQUE onClose d'openModal
-    // (appelée à TOUTE fermeture) : un hôte enveloppant l'injecte dans l'ouverture de la fiche (overlay UNIQUE).
-    openTargetDetail: (kind, id, onClosed) => {
-      const wrappedHost: FormHost = { ...formHost, openModal: (o) => modal.open({ ...o, onClose: onClosed }) };
-      Forms.detail(store, wrappedHost, targetCollection(kind), id, () => shell.refreshActive());
+    // retour à la modale d'intervention est STRUCTUREL depuis que `Modal` est une PILE : la fiche s'EMPILE
+    // par-dessus et le détail d'intervention reste vivant dessous (il se rafraîchit tout seul, via son
+    // propre `onResume`). L'hôte enveloppant qui injectait un `onClose` de retour a donc disparu.
+    openTargetDetail: (kind, id) => {
+      Forms.detail(store, formHost, targetCollection(kind), id, () => shell.refreshActive());
     },
   };
   let interventionsView: InterventionsAdminView;
@@ -895,8 +898,8 @@ async function boot(): Promise<void> {
   // INTÉGRATION « FICHES » (badge + déclaration depuis équipement/VM/spare) : hooks injectés dans les fiches
   // via FormHost (contrat découplé — les formulaires n'importent NI la vue NI le client interventions). null
   // hors mode API → aucune rangée « Interventions » dans les fiches. `declareFor` FERME la fiche courante
-  // (fait par InterventionFicheRow) PUIS navigue vers l'onglet et ouvre la modale de création pré-liée (la
-  // modale de l'app est un overlay UNIQUE, pas d'empilement — cf. Modal).
+  // (fait par InterventionFicheRow) PUIS navigue vers l'onglet et ouvre la modale de création pré-liée : on
+  // CHANGE DE VUE, la fiche d'où l'on part n'a donc plus lieu d'être — ce n'est pas un empilement.
   const interventionHooks: InterventionFicheHooks | null = interventionsClient ? {
     countOpen: async (kind, id) => { const map = await interventionsClient.counts([{ kind, id }]); return map[kind + ":" + id] || 0; },
     declareFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openCreateFor(kind, id, label); },
@@ -984,7 +987,7 @@ async function boot(): Promise<void> {
 
   // Rapprochement DEPUIS une fiche (rangée « Certificats TLS ») : hooks injectés via FormHost (contrat découplé —
   // les fiches n'importent NI la vue NI le client certs). null hors mode API → aucune rangée. `openCert` bascule
-  // sur l'onglet Certificats focalisé (la fiche est fermée AVANT par CertFicheRow — overlay unique).
+  // sur l'onglet Certificats focalisé (la fiche est fermée AVANT par CertFicheRow — on change de VUE).
   const certHooks: CertFicheHooks | null = certsClient ? {
     certsForTarget: async (kind, id) => {
       const identity = buildNetworkIdentity(kind, id);
@@ -1004,9 +1007,10 @@ async function boot(): Promise<void> {
   if (certsClient) {
     const targetResolver: CertTargetResolver = {
       targetsForCert: (cert) => CertTargetMatch.targetsForCert(cert, allNetworkIdentities()).map(({ id }) => ({ kind: id.kind, id: id.id, label: id.name || id.id })),
-      openTarget: (ref, onClosed) => {
-        const wrappedHost: FormHost = { ...formHost, openModal: (o) => modal.open({ ...o, onClose: onClosed }) };
-        Forms.detail(store, wrappedHost, ref.kind === "vm" ? "vms" : "equipments", ref.id, () => shell.refreshActive());
+      // Même montage que `openTargetDetail` ci-dessus : la fiche s'EMPILE sur ce qui est affiché, le retour
+      // est structurel (pop) — plus d'hôte enveloppant à `onClose`.
+      openTarget: (ref) => {
+        Forms.detail(store, formHost, ref.kind === "vm" ? "vms" : "equipments", ref.id, () => shell.refreshActive());
       },
     };
     certsView.setTargetResolver(targetResolver);

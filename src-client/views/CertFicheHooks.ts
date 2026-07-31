@@ -9,7 +9,7 @@
    Le rapprochement est CALCULÉ (jamais persisté) : `certsForTarget` interroge le moteur pur `CertTargetMatch`
    sur les certificats leaf-tls NON révoqués du document (les révoqués sont d'office écartés → toutes les
    correspondances rendues sont valables). `openCert` NAVIGUE vers l'onglet « Certificats » focalisé sur le
-   certificat (l'appelant ferme d'abord la fiche courante — overlay UNIQUE, cf. InterventionFicheRow). */
+   certificat (l'appelant ferme d'abord la fiche courante : on CHANGE DE VUE, cf. InterventionFicheRow). */
 import type { CertMatchVia } from "../core/CertTargetMatch";
 
 /** Une piste de rapprochement affichée en puce dans la fiche (dns/cn/wildcard/ip, « constatée » si IP vNIC seule). */
@@ -32,6 +32,6 @@ export interface CertFicheMatch {
 export interface CertFicheHooks {
   /** Certificats leaf-tls (non révoqués) du document rapprochant la cible — chargé en async par la rangée. */
   certsForTarget(kind: "equipment" | "vm", id: string): Promise<CertFicheMatch[]>;
-  /** Ouvre l'onglet « Certificats » focalisé sur `certId` (l'appelant ferme la fiche AVANT — overlay unique). */
+  /** Ouvre l'onglet « Certificats » focalisé sur `certId` (l'appelant ferme la fiche AVANT : changement de VUE). */
   openCert(certId: string): void;
 }

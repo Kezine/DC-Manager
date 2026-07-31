@@ -114,7 +114,10 @@ export class SubEquipmentForms extends FormBase {
     tw.querySelectorAll("[data-master-view]").forEach((el) => {
       (el as HTMLElement).onclick = () => EquipmentForms.equipmentDetail(store, host, (el as HTMLElement).dataset.masterView!, onChanged);
     });
-    host.openModal({ title: I18n.t("subEquipment.detailTitle"), subtitle: Html.escape(this.label(se)), body: root, hideFooter: true, wide: true });
+    host.openModal({
+      title: I18n.t("subEquipment.detailTitle"), subtitle: Html.escape(this.label(se)), body: root, hideFooter: true, wide: true,
+      onResume: () => this.detail(store, host, id, onChanged),   // retour au premier plan (édition dépilée) → fiche reconstruite depuis le store
+    });
   }
 
   /** Formulaire de création / d'édition, en MODALE (principe n°11).
@@ -200,8 +203,14 @@ export class SubEquipmentForms extends FormBase {
   }
 
   /** Section « Sous-équipements » d'une fiche (maître ou groupe) : tableau + bouton de création facultatif.
-      Mutualisée parce qu'elle est rendue à DEUX endroits, avec les mêmes colonnes et le même rebond. */
-  static attachSection(store: Store, host: FormHost, root: HTMLElement, rows: any[], opts: { addTo?: string; reopen: () => void }): void {
+      Mutualisée parce qu'elle est rendue à DEUX endroits, avec les mêmes colonnes et le même rebond.
+
+      ⚠ Cette section ne sait RIEN de la fiche qui l'héberge, et n'a plus à le savoir : depuis que `Modal`
+      est une PILE, ouvrir une fiche ou un formulaire de sous-équipement EMPILE, et le retour (Enregistrer /
+      Annuler / ←) redonne la fiche hôte, reconstruite par son propre `onResume`. L'ancien rappel `reopen`,
+      que chaque hôte devait fournir pour se faire rouvrir, a donc disparu. Seule la SUPPRESSION en ligne
+      demande encore un geste explicite (`host.refreshModal`) : elle ne dépile rien. */
+  static attachSection(store: Store, host: FormHost, root: HTMLElement, rows: any[], opts: { addTo?: string } = {}): void {
     const title = document.createElement("div"); title.className = "section-divider";
     title.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px";
     const label = document.createElement("span"); label.textContent = I18n.t("subEquipment.section", { count: rows.length });
@@ -209,7 +218,7 @@ export class SubEquipmentForms extends FormBase {
     if (opts.addTo && !this.isViewer()) {
       const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-ghost btn-sm";
       add.textContent = I18n.t("subEquipment.add");
-      add.onclick = () => this.form(store, host, opts.addTo!, null, opts.reopen);
+      add.onclick = () => this.form(store, host, opts.addTo!, null);
       title.appendChild(add);
     }
     root.appendChild(title);
@@ -226,12 +235,12 @@ export class SubEquipmentForms extends FormBase {
         tech ? Html.escape(tech) : '<span style="color:var(--fg-dimmer)">—</span>', `<span class="cell-actions">${view}${edit}${del}</span>`];
     }), I18n.t("subEquipment.sectionEmpty"));
     tw?.querySelectorAll("[data-se-view]").forEach((el) => {
-      (el as HTMLElement).onclick = () => this.detail(store, host, (el as HTMLElement).dataset.seView!, opts.reopen);
+      (el as HTMLElement).onclick = () => this.detail(store, host, (el as HTMLElement).dataset.seView!);
     });
     tw?.querySelectorAll("[data-se-edit]").forEach((el) => {
       (el as HTMLElement).onclick = () => {
         const se: any = store.get("subEquipments", (el as HTMLElement).dataset.seEdit!);
-        if (se) this.form(store, host, se.equipment_id, se.id, opts.reopen);
+        if (se) this.form(store, host, se.equipment_id, se.id);
       };
     });
     tw?.querySelectorAll("[data-se-del]").forEach((el) => {
@@ -249,7 +258,9 @@ export class SubEquipmentForms extends FormBase {
         // explicitement pour éviter de faire croire à une perte de câblage.
         await store.remove("subEquipments", se.id);
         host.setDirty?.(true); Notify.toast(I18n.t("subEquipment.deleted"));
-        opts.reopen();
+        // La suppression a lieu DANS la fiche hôte : rien n'est dépilé, donc rien ne déclenche son
+        // `onResume`. On lui redemande de se reconstruire EN PLACE pour que la ligne disparaisse.
+        host.refreshModal?.();
       };
     });
   }

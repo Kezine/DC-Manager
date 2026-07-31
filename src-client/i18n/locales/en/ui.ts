@@ -9,6 +9,7 @@ export const ui = {
     save: "Save",
     delete: "Delete",
     close: "Close",
+    back: "Back",
   },
   zoom: {
     out: "Zoom out",
@@ -21,6 +22,7 @@ export const ui = {
     confirmCloseMessage: "The unsaved changes in this form will be lost.",
     confirmCloseConfirm: "Close",
     confirmCloseCancel: "Keep editing",
+    editingToast: "You are editing « {{title}} »…",
   },
   dialog: {
     confirmTitle: "Confirmation",

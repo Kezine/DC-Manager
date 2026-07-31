@@ -273,13 +273,14 @@ interventions sont propres au document).
   (nature/priorité/statut), fenêtre planifiée, référence Jira, **description rendue en MARKDOWN** (`core/
   Markdown`/micromark, défauts sûrs), audit (créé/modifié par-le), et la **liste des objets liés** (icône de
   famille + libellé + badge ; orphelin « introuvable » grisé, NON cliquable). Un CLIC sur un objet lié
-  **existant** ouvre sa **fiche de détail** (equipmentDetail/vmDetail/spareDetail/SubEquipmentForms.detail) puis **revient
-  automatiquement** à cette modale à la fermeture de la fiche — **aller-retour** mémorisé. Mécanique :
-  `InterventionTargetSource.openTargetDetail(kind, id, onClosed)` (implémenté dans `main.ts` sur la
-  machinerie des fiches) ouvre la fiche via un hôte enveloppant qui injecte l'option **`onClose` d'`openModal`**
-  (rappel GÉNÉRIQUE de fermeture ajouté à `ui/Modal`, appelé à TOUTE cause) — l'app n'ayant qu'un overlay de
-  modale (sans empilement). Un bouton **« Modifier »** bascule vers la modale d'ÉDITION (openModal remplace le
-  contenu : fermer-puis-ouvrir).
+  **existant** ouvre sa **fiche de détail** (equipmentDetail/vmDetail/spareDetail/SubEquipmentForms.detail),
+  **EMPILÉE** par-dessus : ce détail reste vivant dessous et reparaît au dépilement (Annuler / ← Retour /
+  Retour arrière). Mécanique : `InterventionTargetSource.openTargetDetail(kind, id)` (implémenté dans
+  `main.ts` sur la machinerie des fiches) ouvre simplement la fiche — `ui/Modal` étant une **PILE**, le
+  retour est STRUCTUREL. La fraîcheur au retour est assurée par l'option **`onResume`** que la modale de
+  détail déclare à sa propre ouverture (elle se reconstruit sur l'enregistrement rechargué). L'hôte
+  enveloppant qui injectait un `onClose` de retour a disparu. Un bouton **« Modifier »** EMPILE de même la
+  modale d'ÉDITION.
 - **Lien Jira** : la base d'URL vient de `GET …/interventions/meta` (`JIRA_BASE_URL`), chargée **une seule
   fois** au premier rendu. `InterventionsFormat.jiraUrl(base, ref)` fabrique le lien (référence déjà URL →
   telle quelle ; base absente → référence en texte brut). Aucun appel à Jira.
@@ -301,8 +302,9 @@ spare, et y **voir d'un coup d'œil** les interventions ouvertes.
   `views/InterventionFicheHooks.ts`), injecté via **`FormHost.interventionHooks`** et implémenté dans
   `main.ts`. La rangée elle-même est un helper PARTAGÉ `views/forms/InterventionFicheRow.ts` (une seule
   implémentation pour les trois fiches).
-- **Modale dans modale.** La modale de l'app est un **overlay UNIQUE** (pas d'empilement — cf. `ui/Modal`).
-  Le bouton **FERME donc d'abord** la fiche courante (`host.closeModal`), **PUIS** `declareFor` **navigue**
+- **Changement de VUE, pas empilement.** `declareFor` quitte la page courante : la fiche d'où l'on part
+  n'a donc plus lieu d'être. Le bouton **FERME d'abord** la fiche courante (`host.closeModal`, qui dépile
+  un niveau de la pile de `ui/Modal`), **PUIS** `declareFor` **navigue**
   vers l'onglet « Interventions » (`shell.switchView`) et ouvre la **modale de création PRÉ-LIÉE** à la cible
   (`InterventionsAdminView.openCreateFor` — nature « intervention », lien pré-ajouté, cible en sous-titre).
 - **Mode fichier / hors API.** `interventionHooks` est **null** → `InterventionFicheRow.attach` est un **no-op**
@@ -361,8 +363,8 @@ l'importe jamais).
    de `CLAUDE.md`, la ligne `JIRA_BASE_URL` de `README.md` §4 et de `src-server/RUN.md` §6.
 5. **Ce qui RESTE (indépendant du module)** :
    - les **extensions de primitives UI RÉUTILISABLES** faites pour cette page (principe n°14) : les modes
-     `date-time`/`time` de `FormControls.date`, l'option **`onClose`** d'`ui/Modal` (rappel de fermeture
-     générique), les icônes `PLAY`/`EQUIPMENT`/`VM`/`SPARE` du registre `Icons`. Ce sont des primitives
+     `date-time`/`time` de `FormControls.date`, l'option **`onClose`** d'`ui/Modal` (rappel générique
+     « ce niveau a disparu »), les icônes `PLAY`/`EQUIPMENT`/`VM`/`SPARE` du registre `Icons`. Ce sont des primitives
      partagées, PAS du code spécifique aux interventions — elles restent en place ;
    - le helper **`RequestAuthor`** de `api.ts` — désormais utilisé par le cœur (notif live) ;
      il PRÉEXISTE à la feature (extrait de `writerInfo`) et n'a aucun lien avec elle ;

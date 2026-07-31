@@ -15,6 +15,7 @@ export const ui = {
     save: "Enregistrer",
     delete: "Supprimer",
     close: "Fermer",
+    back: "Retour",
   },
   zoom: {
     out: "Dézoomer",
@@ -27,6 +28,7 @@ export const ui = {
     confirmCloseMessage: "Les modifications non enregistrées de ce formulaire seront perdues.",
     confirmCloseConfirm: "Fermer",
     confirmCloseCancel: "Continuer l'édition",
+    editingToast: "Vous éditez « {{title}} »…",
   },
   dialog: {
     confirmTitle: "Confirmation",

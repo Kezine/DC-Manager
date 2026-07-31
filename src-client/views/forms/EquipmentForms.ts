@@ -125,9 +125,11 @@ export class EquipmentForms extends FormBase {
     if (!this.isViewer()) {   // viewer (lecture seule) : pas d'édition de façade
       const editFaceBtn = document.createElement("button"); editFaceBtn.type = "button"; editFaceBtn.className = "btn btn-ghost btn-sm"; editFaceBtn.textContent = I18n.t("equipment.detail.editFace");
       // onSaved : l'éditeur écrit dans le store (pas de brouillon ici) puis on RECONSTRUIT la fiche détail —
-      // ses aperçus de façade lisent l'objet `eq` capturé à l'ouverture, donc figés sans ce re-rendu (même
-      // mécanique que les callbacks « localiser » ci-dessous).
-      editFaceBtn.onclick = () => FaceEditor.open(store, host, eq.id, { onSaved: () => this.equipmentDetail(store, host, eq.id, onChanged) });
+      // ses aperçus de façade lisent l'objet `eq` capturé à l'ouverture, donc figés sans ce re-rendu.
+      // ⚠ L'éditeur de façade est un `Dialog` empilé PAR-DESSUS la modale, pas un niveau de la pile : rien
+      // n'est dépilé à sa sortie, donc rien ne déclenche l'`onResume` de la fiche. On le redemande
+      // explicitement — ré-appeler `equipmentDetail` EMPILERAIT un doublon au lieu de remplacer.
+      editFaceBtn.onclick = () => FaceEditor.open(store, host, eq.id, { onSaved: () => host.refreshModal?.() });
       dFbtns.appendChild(editFaceBtn);
     }
     root.appendChild(dF);
@@ -181,9 +183,7 @@ export class EquipmentForms extends FormBase {
     // SOUS-ÉQUIPEMENTS : contenu LOGIQUE de cet équipement (drives d'une librairie, cartes d'un châssis).
     // Section TOUJOURS rendue, même vide, contrairement aux spares : c'est ici qu'on en CRÉE un (« + … »),
     // et l'absence de la section rendrait la fonctionnalité inatteignable sur un équipement neuf.
-    SubEquipmentForms.attachSection(store, host, root, store.subEquipmentsOf(eq.id), {
-      addTo: eq.id, reopen: () => this.equipmentDetail(store, host, eq.id, onChanged),
-    });
+    SubEquipmentForms.attachSection(store, host, root, store.subEquipmentsOf(eq.id), { addTo: eq.id });
 
     // spares (pièces de rechange) affectés à cet équipement
     const spares = store.sparesOfEquipment(eq.id);
@@ -210,7 +210,12 @@ export class EquipmentForms extends FormBase {
     }
     root.appendChild(actions);
 
-    host.openModal({ title: I18n.t("equipment.detail.title"), subtitle: Html.escape(eq.name || ""), body: root, hideFooter: true, wide: true });
+    // `onResume` : au retour au premier plan (formulaire d'édition, fiche liée ou sous-équipement dépilés),
+    // la fiche se RECONSTRUIT depuis le store — elle lit l'objet `eq` capturé à l'ouverture, donc figé.
+    host.openModal({
+      title: I18n.t("equipment.detail.title"), subtitle: Html.escape(eq.name || ""), body: root, hideFooter: true, wide: true,
+      onResume: () => this.equipmentDetail(store, host, eq.id, onChanged),
+    });
   }
 
   /** Éditeur de capot (toit/sol) : grille SVG au pas 1U, multi-sélection au glisser. Les cellules

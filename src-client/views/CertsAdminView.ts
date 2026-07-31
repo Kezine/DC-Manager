@@ -113,12 +113,12 @@ export interface CertTargetRef {
 }
 
 /** Résolveur INJECTÉ par main.ts (feature AMOVIBLE) : rapproche un certificat de cibles réseau (calculé, jamais
-    persisté — cf. CertTargetMatch) et sait OUVRIR la fiche d'une cible avec retour-auto. null hors mode API →
-    aucun indicateur « cible » dans le listing. `targetsForCert` reçoit l'item de ligne (déjà porteur de
-    sans/subject) → aucun appel réseau. `openTarget` réutilise le patron openTargetDetail (overlay unique). */
+    persisté — cf. CertTargetMatch) et sait OUVRIR la fiche d'une cible. null hors mode API → aucun indicateur
+    « cible » dans le listing. `targetsForCert` reçoit l'item de ligne (déjà porteur de sans/subject) → aucun
+    appel réseau. `openTarget` réutilise le patron openTargetDetail (la fiche s'EMPILE sur la pile de modales). */
 export interface CertTargetResolver {
   targetsForCert(cert: CertificateListItem): CertTargetRef[];
-  openTarget(ref: CertTargetRef, onClosed: () => void): void;
+  openTarget(ref: CertTargetRef): void;
 }
 
 export class CertsAdminView {
@@ -516,10 +516,13 @@ export class CertsAdminView {
 
   /** Modale du COFFRE de certificat — remplace l'ancien panneau persistant (gain de place : la vue n'affiche
       plus qu'un bouton dans la barre de contrôles). Selon l'état PKI : contexte non sécurisé (info seule),
-      PKI vierge (→ initialisation), ou verrouillée (saisie de la phrase). `reopen` (aller-retour) : à la
-      fermeture — donc après un déverrouillage réussi comme après une annulation — rouvre la modale d'origine.
-      Utilisé par le bouton « Déverrouiller » d'une modale d'export pour Y REVENIR une fois le coffre ouvert. */
-  private unlockModal(reopen?: () => void): void {
+      PKI vierge (→ initialisation), ou verrouillée (saisie de la phrase).
+      `popOnUnlock` : cette modale a été EMPILÉE depuis une autre (le bouton « Déverrouiller » d'un export)
+      → un déverrouillage réussi la DÉPILE pour redonner tout de suite la modale d'origine, qui se reconstruit
+      avec les exports de clé désormais disponibles (son `onResume`). Sans ce drapeau (ouverture depuis la
+      barre d'outils), la modale RESTE ouverte et sa liste se rafraîchit : c'est l'écran de gestion
+      multi-coffres, on doit pouvoir en déverrouiller un second dans la foulée. */
+  private unlockModal(popOnUnlock = false): void {
     const state = this.pkiState;
     if (!state) return;
 
@@ -530,14 +533,14 @@ export class CertsAdminView {
       const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.cssText = "white-space:pre-line;color:var(--warn)";
       hint.textContent = I18n.t("certs.admin.lock.insecureHint");
       box.appendChild(hint);
-      this.host.openModal({ title: I18n.t("certs.admin.lock.insecureTitle"), body: box, hideFooter: true, onClose: reopen });
+      this.host.openModal({ title: I18n.t("certs.admin.lock.insecureTitle"), body: box, hideFooter: true });
       return;
     }
 
     // PKI VIERGE → DIRECTEMENT le formulaire d'initialisation (qui porte sa propre explication). L'ancienne
     // modale intermédiaire (« PKI non initialisée » + bouton) doublonnait le geste. Défensif : ce chemin n'est
-    // plus atteint depuis la toolbar (buildVaultButton ouvre initModal en direct) ; `reopen` est sans objet
-    // (les flux d'aller-retour — export — supposent des certificats, donc une PKI initialisée).
+    // plus atteint depuis la toolbar (buildVaultButton ouvre initModal en direct) ; `popOnUnlock` est sans
+    // objet (les flux empilés — export — supposent des certificats, donc une PKI initialisée).
     if (state.initialized !== true) {
       this.initModal();
       return;
@@ -546,8 +549,8 @@ export class CertsAdminView {
     // PKI INITIALISÉE → LISTE des coffres avec leur état (ouvert/verrouillé) et l'action correspondante. Un seul
     // coffre (cas courant) → une seule ligne, comportement quasi identique à l'ancien panneau (phrase + bouton).
     // Plusieurs coffres → gestion fine (déverrouiller l'un, re-verrouiller l'autre). La modale reste OUVERTE après
-    // chaque action (re-rendu de la liste en place) SAUF en aller-retour (`reopen`) où un déverrouillage réussi
-    // referme pour revenir directement à la modale d'origine (parité UX de l'ancien flux d'export).
+    // chaque action (re-rendu de la liste en place) SAUF quand elle a été EMPILÉE (`popOnUnlock`), où un
+    // déverrouillage réussi la dépile pour redonner directement la modale d'origine.
     const root = document.createElement("div");
     const hint = document.createElement("div"); hint.className = "form-hint"; hint.style.marginBottom = "10px";
     hint.textContent = I18n.t("certs.admin.lock.unlockHint");
@@ -589,7 +592,7 @@ export class CertsAdminView {
             void this.attemptUnlockVault(vault.vault_id, input.value, errBox).then((ok) => {
               if (!ok) return;
               this.render();                              // la barre de contrôles reflète le nouvel état du coffre
-              if (reopen) this.host.closeModal?.();       // aller-retour (export) : on revient directement à la modale d'origine
+              if (popOnUnlock) this.host.closeModal?.();  // empilée depuis un export : on DÉPILE, la modale d'origine reparaît d'elle-même
               else renderList();                          // gestion multi-coffres : la liste reste ouverte, rafraîchie
             });
           };
@@ -609,7 +612,7 @@ export class CertsAdminView {
     };
     renderList();
     root.append(hint, listBox, errBox);
-    this.host.openModal({ title: I18n.t("certs.admin.lock.unlockTitle"), body: root, hideFooter: true, onClose: reopen });
+    this.host.openModal({ title: I18n.t("certs.admin.lock.unlockTitle"), body: root, hideFooter: true });
     setTimeout(() => firstInput.el?.focus(), 30);
   }
 
@@ -880,8 +883,8 @@ export class CertsAdminView {
     return Icons.CERTIFICATE;
   }
 
-  /** Cellule « Cible(s) » : le NOM de chaque équipement/VM RAPPROCHÉ, cliquable (ouvre sa fiche de détail —
-      aller-retour, patron openTargetDetail), précédé d'une petite icône de famille (équipement/VM) pour le
+  /** Cellule « Cible(s) » : le NOM de chaque équipement/VM RAPPROCHÉ, cliquable (ouvre sa fiche de détail,
+      EMPILÉE — patron openTargetDetail), précédé d'une petite icône de famille (équipement/VM) pour le
       contexte + pastille discrète « ambigu » si plusieurs cibles distinctes ; rien si aucune (ou hors mode API :
       `targetResolver` null). Rapprochement CALCULÉ (CertTargetMatch), jamais persisté. */
   private targetCell(item: CertificateListItem): HTMLElement {
@@ -902,7 +905,7 @@ export class CertsAdminView {
       icon.innerHTML = ref.kind === "vm" ? Icons.VM : Icons.EQUIPMENT;   // icône de famille = repère visuel, pas l'action
       const name = document.createElement("span"); name.textContent = label;
       link.append(icon, name);
-      link.onclick = (e) => { e.preventDefault(); resolver.openTarget(ref, () => { /* retour : le listing reste affiché */ }); };
+      link.onclick = (e) => { e.preventDefault(); resolver.openTarget(ref); };
       wrap.appendChild(link);
     }
     if (refs.length > 1) {   // AMBIGUÏTÉ : plusieurs cibles distinctes → pastille discrète (liste en infobulle)
@@ -1032,7 +1035,7 @@ export class CertsAdminView {
   /** Modale d'INFO (lecture seule) : métadonnées d'un certificat/clé pour consultation + copie (sujet, émetteur
       EN CLAIR, numéro de série, empreinte, émission/échéance, algo, SAN, dates). N'expose AUCUN secret
       (`key_enc` jamais chargé — l'item de listing suffit). Disponible même coffre VERROUILLÉ (rien à déchiffrer). */
-  private infoModal(item: CertificateListItem, reopen?: () => void): void {
+  private infoModal(item: CertificateListItem): void {
     const root = document.createElement("div");
     const grid = document.createElement("div");
     grid.style.cssText = "display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;align-items:baseline";
@@ -1090,25 +1093,28 @@ export class CertsAdminView {
       add(I18n.t("certs.admin.listing.revoked"), Html.escape(Format.dateTime(item.revoked_at)));
       add(I18n.t("certs.admin.info.revocationReason"), Html.escape(CertsAdminView.revocationReasonText(item.revocation_reason)));
     }
-    // Lignée : lien vers le certificat d'ORIGINE (aller-retour — sa fiche revient ICI à sa fermeture). L'original
-    // peut être hors de la page courante → on le charge à la demande (getOne). Orphelin toléré (repli sur l'id).
+    // Lignée : lien vers le certificat d'ORIGINE — sa fiche s'EMPILE sur celle-ci, qui reparaît au retour.
+    // L'original peut être hors de la page courante → on le charge à la demande (getOne). Orphelin toléré.
     if (item.renewed_from) {
       const link = document.createElement("a"); link.href = "#"; link.style.cursor = "pointer";
       link.textContent = I18n.t("certs.admin.info.viewOriginal");
-      link.onclick = (e) => { e.preventDefault(); void this.openCertInfoById(item.renewed_from!, () => this.infoModal(item)); };
+      link.onclick = (e) => { e.preventDefault(); void this.openCertInfoById(item.renewed_from!); };
       addNode(I18n.t("certs.admin.info.renewedFrom"), link);
     }
     if (item.cross_signed_pem) add(I18n.t("certs.admin.info.crossSigned"), I18n.t("certs.admin.info.crossSignedYes"));
     add(I18n.t("certs.admin.info.comment"), item.comment ? Html.escape(item.comment) : "—");
     add(I18n.t("certs.admin.info.created"), Html.escape(Format.dateTime(item.created_date)));
     add(I18n.t("certs.admin.info.updated"), Html.escape(Format.dateTime(item.updated_date)));
-    // Édition du commentaire depuis la fiche (aller-retour : la fiche revient à la fermeture de l'éditeur).
+    // Édition du commentaire : l'éditeur s'EMPILE sur cette fiche, qui reparaît (reconstruite) à sa sortie.
     const acts = document.createElement("div"); acts.style.cssText = "margin-top:14px;display:flex;justify-content:flex-end";
-    acts.appendChild(this.actionButton(I18n.t("certs.admin.meta.edit"), I18n.t("certs.admin.meta.editTitle"), () => this.metadataModal(item, () => this.infoModal(item, reopen))));
+    acts.appendChild(this.actionButton(I18n.t("certs.admin.meta.edit"), I18n.t("certs.admin.meta.editTitle"), () => this.metadataModal(item)));
     root.append(grid, acts);
-    // `reopen` (aller-retour) : présent quand cette fiche a été ouverte DEPUIS une autre (lignée) → on y revient
-    // à la fermeture. Absent pour une ouverture directe (onClose null).
-    this.host.openModal({ title: I18n.t("certs.admin.info.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true, onClose: reopen });
+    this.host.openModal({
+      title: I18n.t("certs.admin.info.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true,
+      // Retour au premier plan → fiche RECONSTRUITE : `metadataModal` écrit label/commentaire DANS l'objet
+      // capturé, cette relecture les fait donc apparaître sans nouvel appel réseau.
+      onResume: () => this.infoModal(item),
+    });
   }
 
   /** Libellé lisible d'une raison de révocation stockée (code normé + note). Statique/pur côté données ;
@@ -1121,23 +1127,24 @@ export class CertsAdminView {
   }
 
   /** Ouvre la fiche INFO d'un certificat par son id (lignée). Charge ses métadonnées (getOne, aucun secret
-      requis pour la fiche), puis affiche AVEC aller-retour (`reopen` = fiche d'origine à la fermeture).
-      Certificat introuvable (original supprimé — orphelin toléré) → toast neutre, on rouvre la fiche d'origine. */
-  private async openCertInfoById(id: string, reopen: () => void): Promise<void> {
+      requis pour la fiche), puis l'EMPILE sur la fiche courante — qui reste vivante dessous, donc rien à
+      « rouvrir ». Certificat introuvable (original supprimé — orphelin toléré) → toast neutre et RIEN de
+      plus : on reste simplement sur la fiche d'où le lien a été cliqué. */
+  private async openCertInfoById(id: string): Promise<void> {
     try {
       const detail = await this.client!.getOne(id);
-      this.infoModal(detail, reopen);
+      this.infoModal(detail);
     } catch (_) {
       Notify.toast(I18n.t("certs.admin.info.originalGone"), "warn");
-      reopen();
     }
   }
 
   /** Éditeur des MÉTADONNÉES d'un certificat (LABEL d'affichage + COMMENTAIRE libre) — modale standard (principe
       n°11). Le label est modifiable APRÈS génération (il peut différer du CN, lequel vit dans le SUJET du certificat
       et n'est PAS modifiable). Enregistre via une mise à jour de métadonnées (metadataInput → save, key_enc conservé).
-      `reopen` = aller-retour vers la fiche d'origine à la fermeture (appelé depuis la fiche INFO). */
-  private metadataModal(item: CertificateListItem, reopen?: () => void): void {
+      EMPILÉE sur la fiche INFO d'où elle est ouverte : Enregistrer comme Annuler la dépilent et redonnent
+      cette fiche, qui se reconstruit (son `onResume`) sur l'objet capturé mis à jour ci-dessous. */
+  private metadataModal(item: CertificateListItem): void {
     const root = document.createElement("div");
     const labelI = FormControls.text(item.label || "", I18n.t("certs.admin.common.labelPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.common.labelField"), labelI, I18n.t("certs.admin.meta.labelHint")));
@@ -1145,7 +1152,7 @@ export class CertsAdminView {
     root.appendChild(FormControls.fieldRow(I18n.t("certs.admin.info.comment"), ta, I18n.t("certs.admin.comment.hint")));
     const errBox = this.errBox(); root.appendChild(errBox);
     this.host.openModal({
-      title: I18n.t("certs.admin.meta.title"), subtitle: Html.escape(item.label), body: root, onClose: reopen,
+      title: I18n.t("certs.admin.meta.title"), subtitle: Html.escape(item.label), body: root,
       onSave: async () => {
         errBox.style.display = "none";
         this.session.touch();
@@ -1154,7 +1161,7 @@ export class CertsAdminView {
         try {
           const comment = ta.value.trim() === "" ? null : ta.value.trim();
           await this.client!.save(item.id, CertsAdminView.metadataInput(item, { label, comment }));
-          item.label = label; item.comment = comment;   // objet capturé mis à jour → la fiche rouverte (aller-retour) montre les nouvelles valeurs
+          item.label = label; item.comment = comment;   // objet capturé mis à jour → la fiche du dessous, reconstruite au retour, montre les nouvelles valeurs
           Notify.toast(I18n.t("certs.admin.meta.toast"), "ok");
           await this.refreshBody();
           return true;
@@ -2595,14 +2602,15 @@ export class CertsAdminView {
     let all: CertExportRecord[];
     try { all = (await this.client!.list()).map((c) => CertsAdminView.toExportRecord(c)); }
     catch (e) { this.actionError(e); return; }
-    this.openExportModal(item, all);   // construction/ouverture SYNCHRONE → ré-ouverture sans réseau (aller-retour)
+    this.openExportModal(item, all);   // construction/ouverture SYNCHRONE → reconstruction sans réseau (`onResume`)
   }
 
   /** Construit ET ouvre la modale d'export d'un objet (`all` déjà chargé → SYNCHRONE). Les artefacts sont
       présentés en TABLEAU (grille 2 colonnes) : le LIBELLÉ à gauche, les BOUTONS d'action à droite, chaque ligne
-      soulignée d'un filet — séparation claire de « quoi » et « comment ». Afficher un artefact TEXTE ouvre une
-      visualisation qui REVIENT ICI à sa fermeture (aller-retour, overlay unique → on passe la ré-ouverture
-      `() => this.openExportModal(item, all)`). Extraite d'exportModal pour rendre cette ré-ouverture synchrone. */
+      soulignée d'un filet — séparation claire de « quoi » et « comment ». Afficher un artefact TEXTE, ou aller
+      déverrouiller le coffre, EMPILE une modale par-dessus celle-ci ; elle reste vivante dessous et se
+      RECONSTRUIT au retour (`onResume`), ce qui fait apparaître les exports de clé une fois le coffre ouvert.
+      Extraite d'exportModal pour que cette reconstruction soit SYNCHRONE (aucun appel réseau à rejouer). */
   private openExportModal(item: CertificateListItem, all: CertExportRecord[]): void {
     const rec = CertsAdminView.toExportRecord(item);
     const root = document.createElement("div");
@@ -2648,7 +2656,7 @@ export class CertsAdminView {
 
     // Artefact TEXTE (PEM / ligne OpenSSH) : libellé (col 1) + « Télécharger (⬇) » et « Afficher (👁) » (col 2).
     // L'AFFICHAGE rend le contenu EN CLAIR à l'écran pour copier-coller (besoin courant) ET REVIENT à cette modale
-    // à sa fermeture (aller-retour). Opération SENSIBLE : une clé privée (`sensitive`) exige une confirmation à
+    // à son dépilement (elle s'EMPILE dessus). Opération SENSIBLE : une clé privée (`sensitive`) exige une confirmation à
     // l'affichage ; une clé privée de ROOT CA exige une confirmation TEXTUELLE (re-saisie d'une phrase) à
     // l'affichage ET au téléchargement — cf. confirmRevealPrivateKey.
     const addTextArtifact = (label: string, produce: () => Promise<ExportArtifact>, opts: { sensitive?: boolean } = {}): void => {
@@ -2667,7 +2675,7 @@ export class CertsAdminView {
         this.session.touch();
         try {
           if (opts.sensitive && !(await this.confirmRevealPrivateKey(item))) return;   // toute clé privée : confirmation (racine → textuelle)
-          this.displayArtifact(label, await produce(), () => this.openExportModal(item, all));   // retour ICI à la fermeture
+          this.displayArtifact(label, await produce());   // EMPILÉE : cette modale d'export reste dessous et reparaît au retour
         } catch (e) { Notify.toast(CertsAdminView.errText(e), "err"); }
       } }));
       addGridRow(labelCell(label), acts);
@@ -2717,17 +2725,20 @@ export class CertsAdminView {
     }
 
     if (!list.children.length) { const n = document.createElement("div"); n.className = "form-hint"; n.textContent = I18n.t("certs.admin.export.empty"); root.appendChild(n); }
-    // Coffre verrouillé ET des exports le REQUIÈRENT (clé privée) → ouvre la modale du coffre avec ALLER-RETOUR :
-    // une fois déverrouillé (ou à la fermeture), on REVIENT à CETTE modale d'export, désormais avec les exports
-    // de clé disponibles (`reopen` = ré-ouverture synchrone de l'export).
+    // Coffre verrouillé ET des exports le REQUIÈRENT (clé privée) → EMPILE la modale du coffre. Un
+    // déverrouillage réussi la dépile (`popOnUnlock`) et cette modale d'export se RECONSTRUIT au retour,
+    // désormais avec les exports de clé disponibles.
     if (hasLocked) {
       const unlock = document.createElement("button");
       unlock.type = "button"; unlock.className = "btn btn-ghost btn-sm"; unlock.style.marginTop = "12px";
       unlock.textContent = I18n.t("certs.admin.export.unlockVault"); unlock.title = I18n.t("certs.admin.export.unlockVaultTitle");
-      unlock.onclick = () => this.unlockModal(() => this.openExportModal(item, all));
+      unlock.onclick = () => this.unlockModal(true);
       root.appendChild(unlock);
     }
-    this.host.openModal({ title: I18n.t("certs.admin.export.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true });
+    this.host.openModal({
+      title: I18n.t("certs.admin.export.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true,
+      onResume: () => this.openExportModal(item, all),   // reconstruction SYNCHRONE (aucun réseau) : l'état du coffre a pu changer au-dessus
+    });
   }
 
   /** PKCS#12 : la passphrase est demandée EN MODALE et JAMAIS stockée. */
@@ -2972,8 +2983,9 @@ export class CertsAdminView {
   }
 
   /** Affiche le contenu d'un artefact TEXTE EN CLAIR (zone en lecture seule + « Copier ») pour copier-coller.
-      Un artefact BINAIRE (PKCS#12) n'est pas affichable → toast. Remplace la modale courante (overlay UNIQUE de l'app). */
-  private displayArtifact(title: string, artifact: ExportArtifact, reopen?: () => void): void {
+      Un artefact BINAIRE (PKCS#12) n'est pas affichable → toast. S'EMPILE sur la modale d'export d'où elle
+      est ouverte : celle-ci reste vivante dessous et reparaît dès qu'on revient (← / Annuler / Échap). */
+  private displayArtifact(title: string, artifact: ExportArtifact): void {
     if (typeof artifact.content !== "string") { Notify.toast(I18n.t("certs.admin.export.notDisplayable"), "warn"); return; }
     const content = artifact.content;
     const root = document.createElement("div");
@@ -2989,10 +3001,9 @@ export class CertsAdminView {
     ta.style.cssText = "width:100%;min-height:300px;box-sizing:border-box;font-family:var(--mono);font-size:12px;white-space:pre;overflow:auto;resize:vertical;background:var(--bg);color:var(--fg);border:1px solid var(--line-2);border-radius:var(--radius-pill);padding:10px";
     ta.onclick = () => ta.select();
     root.append(bar, ta);
-    // Aller-retour (overlay UNIQUE) : à la FERMETURE de cette visualisation (croix / Échap / clic hors-modale),
-    // on rouvre la modale d'export d'où elle a été ouverte (`reopen`), au lieu de tout fermer. `onClose` couvre
-    // TOUTE cause de fermeture (cf. Modal.onClose) — c'est exactement le signal « je reviens en arrière ».
-    this.host.openModal({ title: I18n.t("certs.admin.export.displayTitle"), subtitle: Html.escape(title), body: root, hideFooter: true, wide: true, onClose: reopen });
+    // Aucun rappel de retour : la modale d'export est CONSERVÉE VIVANTE sous celle-ci (pile de modales) et
+    // reparaît au dépilement. ⚠ Le ✕ / Échap, eux, ferment la file ENTIÈRE — c'est le geste demandé.
+    this.host.openModal({ title: I18n.t("certs.admin.export.displayTitle"), subtitle: Html.escape(title), body: root, hideFooter: true, wide: true });
   }
 
   /** Confirmation avant de RÉVÉLER une clé privée (afficher en clair OU télécharger). Une clé de CA RACINE

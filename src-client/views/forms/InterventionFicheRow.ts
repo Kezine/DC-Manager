@@ -8,9 +8,10 @@ import type { InterventionFicheHooks } from "../InterventionFicheHooks";
    Ne connaît que le contrat `InterventionFicheHooks` (injecté) — aucun import de la vue ni du client
    interventions. No-op si `hooks` est null (mode fichier / hors API → rien ne s'affiche dans les fiches).
 
-   MODALE DANS MODALE : la fiche est DÉJÀ dans la modale UNIQUE de l'app. Le bouton FERME donc d'abord la
-   fiche courante (`close`, ici sans perte : les fiches détail sont en lecture seule) PUIS délègue à
-   `declareFor` (navigation + modale de création pré-liée). */
+   DÉCLARER = CHANGER DE VUE : le bouton FERME d'abord la fiche courante (`close` — un POP de la pile de
+   modales, sans perte : les fiches détail sont en lecture seule) PUIS délègue à `declareFor` (navigation
+   vers l'onglet Interventions + modale de création pré-liée). Si la fiche était EMPILÉE sur une autre
+   modale, celle-ci redevient visible sous la modale de création — comportement de pile assumé. */
 export class InterventionFicheRow {
   /** Ajoute la rangée à `root`. @param close  ferme la fiche courante (typiquement `() => host.closeModal?.()`). */
   static attach(

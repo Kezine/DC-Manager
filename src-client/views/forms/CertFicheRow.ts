@@ -9,9 +9,9 @@ import type { CertFicheHooks, CertFicheMatch, CertFicheVia } from "../CertFicheH
    Ne connaît que le contrat `CertFicheHooks` (injecté) — aucun import de la vue ni du client certs. No-op si
    `hooks` est null (mode fichier / hors API → rien ne s'affiche). Calque d'`InterventionFicheRow`.
 
-   NAVIGATION : un clic sur un certificat FERME d'abord la fiche courante (`close`, sans perte : les fiches détail
-   sont en lecture seule) PUIS délègue à `openCert` (bascule vers l'onglet « Certificats » focalisé). La modale de
-   l'app est un overlay UNIQUE — pas d'empilement. */
+   NAVIGATION : un clic sur un certificat FERME d'abord la fiche courante (`close` — un POP de la pile de
+   modales, sans perte : les fiches détail sont en lecture seule) PUIS délègue à `openCert` (bascule vers
+   l'onglet « Certificats » focalisé) : on change de VUE, la fiche n'a plus lieu d'être. */
 export class CertFicheRow {
   /** Ajoute la rangée à `root`. @param close ferme la fiche courante (typiquement `() => host.closeModal?.()`). */
   static attach(
