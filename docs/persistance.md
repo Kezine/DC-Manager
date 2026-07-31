@@ -87,5 +87,25 @@ typées + vraies FK), PAS des rustines sur le blob.
   modèle JSON qu'on veut défaire → rustine jetable, pas un investissement.
 - **Cible = relationnel.** L'intégrité étant DÉJÀ dans `src-shared/DataValidation`, passer à des colonnes + FK **rapatrie**
   ces invariants au niveau DB sans réinventer la logique. Chantier = schéma par collection + migration des blobs `data`
-  + réécriture de `whereClause`/finder. Colonnes à indexer = les FK déjà listées dans `INDEX_SPEC` (front,
-  `src-client/store/Store.ts`) — à **remonter dans `src-shared/`** pour une source unique front↔back.
+  + réécriture de `whereClause`/finder. Colonnes à indexer = les FK listées dans `INDEX_SPEC`, désormais **remonté dans
+  `src-shared/RelationalSchema`** (source unique front ↔ back : le générateur ci-dessous en tire les index, le client le
+  RÉ-EXPORTE via `src-client/data/config.ts`).
+
+### Générateur de DDL relationnel (existe — PAS encore branché)
+
+Le module partagé **`src-shared/RelationalSchema`** DÉRIVE le schéma cible de la spec (`COLLECTION_SPECS`), pour ne
+JAMAIS l'écrire à la main. Il expose `tableDdl(collection)`, `indexDdls(collection)` et `allDdl()`. Une table par
+collection : `id TEXT PRIMARY KEY` + les champs de la spec (dans l'ordre de déclaration) + les 4 colonnes d'audit +
+`search TEXT NOT NULL DEFAULT ''` + `updated_rev INTEGER NOT NULL DEFAULT 0`. Affinités : `string`→TEXT,
+`number`→NUMERIC (pas REAL), `boolean`→INTEGER, `string[]`/`json`→TEXT (JSON sérialisé). `NOT NULL` uniquement sur les
+champs `required`.
+
+Ce qu'il n'émet **volontairement PAS**, et pourquoi (décisions du cadrage) : aucune **clé étrangère SQL** (D2b — la
+cascade métier multi-bases de `src-shared/Cascade` et l'ordre libre des lots `transact` la doubleraient) ; aucun **CHECK
+/ enum / min / max** en SQL (D6 — les règles de valeur restent l'autorité UNIQUE de la validation partagée) ; aucun
+**DEFAULT SQL** sur les colonnes de spec (D3 — les défauts vivent dans la normalisation partagée, `search`/`updated_rev`
+exceptés). L'index est le gain ; l'intégrité reste applicative.
+
+⚠ **Le serveur ne l'utilise PAS ENCORE** : `db.ts` stocke toujours le blob `data`. Le branchement (Repository
+relationnel, migration des blobs, `EXPLAIN QUERY PLAN`) est le lot L2 — cf. cadrage
+`.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`.
