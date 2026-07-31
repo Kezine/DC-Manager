@@ -12,6 +12,9 @@
     // Modules SERVEUR testables sans Express (tests dans Tests/modules/run.js, driver SQLite injecté) :
     // ApiRules (règles pures de la couche HTTP), Repository/db et DocumentStore (+ constants/logger transitifs).
     "src-server/src/ApiRules.ts", "src-server/src/db.ts", "src-server/src/documents.ts",
+    // Repository RELATIONNEL (lot L2 migration DB) — NON branché en prod : testé avec better-sqlite3
+    // RÉEL en :memory: (le shim des tests blob ne parle pas ce SQL).
+    "src-server/src/RelationalRepository.ts",
     // Module `vm/` AMOVIBLE — parsing Proxmox PUR (aucun réseau/Node) : testé en isolation
     // (fixtures JSON → VmRecord). Seul ce fichier est émis dans dist-test/ ; VmProvider.ts n'est
     // qu'un import de TYPES (erased), pas de dépendance runtime.

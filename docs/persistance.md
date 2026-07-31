@@ -106,6 +106,28 @@ cascade métier multi-bases de `src-shared/Cascade` et l'ordre libre des lots `t
 **DEFAULT SQL** sur les colonnes de spec (D3 — les défauts vivent dans la normalisation partagée, `search`/`updated_rev`
 exceptés). L'index est le gain ; l'intégrité reste applicative.
 
-⚠ **Le serveur ne l'utilise PAS ENCORE** : `db.ts` stocke toujours le blob `data`. Le branchement (Repository
-relationnel, migration des blobs, `EXPLAIN QUERY PLAN`) est le lot L2 — cf. cadrage
-`.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`.
+### Repository relationnel (existe — PAS branché non plus)
+
+**`src-server/src/RelationalRepository.ts`** (lot L2) implémente le contrat COMPLET de `Repository` sur ce schéma
+généré : même surface publique (garde structurelle compilée `assertRepositoryParity` en bas de fichier), mêmes
+mécaniques (`transact` deletes→updates→creates atomique, snapshot Q7 verbatim, verrou `updated_rev`, maintenance,
+meta/images repris à l'identique — hors migration). Ses contrats PROPRES, ceux des colonnes strictes :
+
+- **Clés inconnues IGNORÉES à l'écriture** : seules les colonnes dérivées de la spec (+ `id` + audit) sont
+  persistées — la spec étant COMPLÈTE (régularisation D3a), aucun champ légitime n'est perdu ; les legacy
+  `equipments.face_image`/`face_image_rear` disparaissent à l'écriture (purge L4 voulue).
+- **Reconstruction NORMALISÉE à la lecture** : chaque champ de la spec présent et re-typé (INTEGER 0/1 → booléen,
+  TEXT JSON → tableau/objet, NULL SQL → null) ; `id` + audit inclus seulement si non-NULL (pas de clés null
+  inventées) ; `search`/`updated_rev` (opérationnelles) jamais dans le record.
+- **Parité `whereClause`** : égalité textuelle, sentinelle `"null"`, appartenance `json_each` sur les champs
+  tableaux — MAIS l'égalité sur colonne TEXT est DIRECTE (`"col" = ?`) : c'est la condition du `USING INDEX`, un
+  `CAST` transformerait la colonne en expression et forcerait le SCAN (mesuré). Le `CAST AS TEXT` du blob est
+  conservé sur les seules colonnes numériques/booléennes (parité stricte : booléen filtré `"1"`/`"0"`). Un champ
+  de filtre INCONNU de la spec ne rend AUCUNE ligne (`1=0`) — le « match tout » accidentel du blob sur la
+  sentinelle d'un champ inconnu n'est pas reconduit (aucun émetteur réel, mesure L0 §3.3).
+- **`explainFindBy`** (seule méthode hors contrat, diagnostic) rejoue l'`EXPLAIN QUERY PLAN` du SQL exact de
+  `findBy` : `SEARCH … USING INDEX idx_…` sur le chemin chaud (prouvé par test, contre-épreuve SCAN incluse).
+
+⚠ **Le serveur ne l'utilise PAS ENCORE** : `db.ts` (blob) reste le chemin de production. La parité corpus contre
+corpus des deux implémentations est le lot L3 ; la bascule + la migration des documents legacy (backup `.bak`,
+blob→colonnes au boot) le lot L4 — cf. cadrage `.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`.
