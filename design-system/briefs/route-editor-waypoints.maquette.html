@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DC Manager — Éditeur de route (waypoints) · maquette</title>
+<style>
+:root{
+  --bg:#0a0a0a;--bg-2:#111111;--bg-3:#161616;--line:#222222;--line-2:#2d2d2d;
+  --fg:#e8e8e8;--fg-dim:#9a9aa2;--fg-dimmer:#555555;
+  --accent-fill:oklch(0.67 0.19 46);--accent:oklch(0.72 0.175 50);--accent-text:oklch(0.80 0.15 62);--accent-2:#ffaa00;
+  --ok:oklch(0.76 0.15 152);--warn:oklch(0.82 0.14 88);--err:oklch(0.66 0.19 27);--info:oklch(0.72 0.12 240);
+  --focus:var(--accent-text);--radius-pill:5px;--control-h:36px;--grid-size:24px;
+  --mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+html[data-theme="light"]{
+  --bg:#f4f4f1;--bg-2:#ffffff;--bg-3:#ebebe6;--line:#d6d6d0;--line-2:#b8b8b0;
+  --fg:#0a0a0a;--fg-dim:#555555;--fg-dimmer:#888888;
+  --accent-fill:oklch(0.57 0.18 42);--accent:oklch(0.58 0.17 45);--accent-text:oklch(0.55 0.18 45);--accent-2:#aa6600;
+  --ok:oklch(0.52 0.14 152);--warn:oklch(0.58 0.13 78);--err:oklch(0.53 0.19 27);--info:oklch(0.50 0.15 250);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.4;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:var(--grid-size) var(--grid-size);background-position:-1px -1px}
+html[data-theme="light"] body{background-image:linear-gradient(rgba(0,0,0,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,.045) 1px,transparent 1px)}
+.wrap{max-width:1120px;margin:0 auto;padding:32px 24px 120px}
+a{color:var(--accent-text);text-decoration:none}
+a:hover{text-decoration:underline}
+.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:28px;flex-wrap:wrap}
+.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-text)}
+h1{font-size:22px;letter-spacing:.01em;margin:4px 0 0}
+.lede{font-family:var(--sans);color:var(--fg-dim);max-width:66ch;margin:10px 0 0;line-height:1.55}
+.theme-btn{background:var(--bg-2);color:var(--fg);border:1px solid var(--line-2);padding:8px 14px;font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+.theme-btn:hover{border-color:var(--fg)}
+section{margin-top:46px}
+.sec-h{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line-2);padding-bottom:8px;margin-bottom:18px;flex-wrap:wrap}
+.sec-n{font-size:11px;color:var(--accent-text);letter-spacing:.1em}
+.sec-t{font-size:14px;letter-spacing:.08em;text-transform:uppercase}
+.note{font-family:var(--sans);color:var(--fg-dim);font-size:12.5px;line-height:1.6;max-width:74ch;margin:0 0 16px;text-wrap:pretty}
+.note b{color:var(--fg);font-weight:600}
+.state-tag{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dimmer);border:1px solid var(--line-2);border-radius:3px;padding:1px 6px;margin-left:auto}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:24px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+
+/* primitives */
+.btn{background:var(--bg-2);color:var(--fg);border:1px solid var(--line-2);padding:8px 16px;font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:8px}
+.btn:hover{border-color:var(--fg);background:var(--bg-3)}
+.btn-sm{padding:4px 10px;font-size:10px;letter-spacing:.08em}
+.btn-primary{background:var(--accent-fill);color:#000;border-color:var(--accent-fill);font-weight:600}
+.btn-ghost{background:transparent}
+.btn:focus-visible,.step:focus-visible,.wp-item:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:var(--radius-pill);border:1px solid var(--line-2);background:var(--bg-3);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dim);white-space:nowrap}
+.pill.num{padding:2px 6px;min-width:22px;justify-content:center;font-variant-numeric:tabular-nums;color:var(--fg-dim)}
+.pill.ctn{text-transform:none;letter-spacing:.02em}
+.pill.err{border-color:var(--err);color:var(--err);background:color-mix(in srgb,var(--err) 12%,transparent)}
+.pill.warn{border-color:var(--warn);color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent)}
+.pill.ok{border-color:var(--ok);color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.form-hint{font-family:var(--sans);font-size:11.5px;color:var(--fg-dimmer);margin-top:8px;line-height:1.5}
+.form-hint.err{color:var(--err)}
+.form-hint.ok{color:var(--ok)}
+.inp{width:100%;height:var(--control-h);background:var(--bg);border:1px solid var(--line-2);color:var(--fg);font-family:var(--mono);font-size:13px;padding:0 10px;outline:none;transition:border-color .15s}
+.inp:focus{border-color:var(--accent)}
+
+/* champ route */
+.field-label{display:flex;align-items:center;gap:10px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dim);margin-bottom:7px}
+.field-label .sp{flex:1}
+.route{border:1px solid var(--line);background:var(--bg-2);border-radius:8px;overflow:hidden}
+.anchor{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-3);font-size:12px}
+.anchor .tag{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dimmer);flex:none;width:52px}
+.anchor .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.anchor .sp{flex:1}
+.anchor.a{border-bottom:1px solid var(--line-2)}
+.anchor.b{border-top:1px solid var(--line-2)}
+.anchor.alert{background:color-mix(in srgb,var(--err) 13%,var(--bg-3));box-shadow:inset 3px 0 0 var(--err)}
+.anchor.alert .tag{color:var(--err)}
+.anchor-msg{font-family:var(--sans);font-size:11.5px;color:var(--err);padding:0 12px 10px 74px;background:color-mix(in srgb,var(--err) 13%,var(--bg-3));box-shadow:inset 3px 0 0 var(--err);display:flex;gap:12px;align-items:center;flex-wrap:wrap;line-height:1.5}
+
+.steps{padding:6px 0;position:relative}
+.ctn-band{display:flex;align-items:center;gap:8px;padding:7px 12px 4px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dimmer)}
+.ctn-band::after{content:"";flex:1;height:1px;background:var(--line)}
+.ctn-band.transit{color:var(--warn)}
+.ctn-band.transit::after{background:repeating-linear-gradient(90deg,var(--warn) 0 4px,transparent 4px 9px);opacity:.6}
+.step{display:flex;align-items:center;gap:9px;padding:8px 12px 8px 8px;position:relative;background:var(--bg-2)}
+.step+.step{border-top:1px solid var(--line)}
+.step:hover{background:var(--bg-3)}
+.grip{width:22px;height:32px;display:flex;align-items:center;justify-content:center;color:var(--fg-dimmer);cursor:grab;flex:none;letter-spacing:-2px;font-size:14px;border-radius:4px}
+.grip:hover{color:var(--fg);background:var(--line)}
+.glyph{width:22px;text-align:center;font-size:15px;flex:none;color:var(--fg-dim)}
+.glyph.exit{color:var(--accent);font-size:16px}
+.glyph.pin{color:var(--info)}
+.step .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.step .ctn{color:var(--fg-dimmer);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.step .sp{flex:1;min-width:8px}
+.step .acts{display:flex;gap:2px;flex:none}
+.ia{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid transparent;color:var(--fg-dimmer);font-family:var(--mono);font-size:13px;cursor:pointer;border-radius:4px}
+.ia:hover{color:var(--fg);border-color:var(--line-2);background:var(--bg-2)}
+.ia.danger:hover{color:var(--err);border-color:var(--err)}
+.step.err{box-shadow:inset 3px 0 0 var(--err);background:color-mix(in srgb,var(--err) 8%,var(--bg-2))}
+.step-msg{font-family:var(--sans);font-size:11.5px;color:var(--err);padding:0 12px 9px 61px;background:color-mix(in srgb,var(--err) 8%,var(--bg-2));box-shadow:inset 3px 0 0 var(--err);line-height:1.5}
+.step.ghosted{opacity:.5}
+.step.ghosted .nm{text-decoration:line-through;text-decoration-color:var(--fg-dimmer)}
+.transit{display:flex;align-items:center;gap:10px;margin:2px 12px 2px 19px;padding:9px 12px;border:1px dashed var(--warn);border-radius:6px;background:color-mix(in srgb,var(--warn) 8%,transparent);color:var(--warn);font-size:11px;letter-spacing:.04em}
+.transit .l{font-family:var(--sans);color:var(--fg-dim);letter-spacing:0}
+.addrow{display:flex;align-items:center;gap:8px;padding:7px 12px 9px}
+.add-btn{flex:1;justify-content:center;border-style:dashed;color:var(--fg-dim);min-height:36px}
+.add-btn:hover{color:var(--accent-text);border-color:var(--accent)}
+.insert{height:0;position:relative;overflow:visible}
+.insert button{position:absolute;left:50%;top:-11px;transform:translateX(-50%);width:22px;height:22px;border-radius:50%;border:1px solid var(--line-2);background:var(--bg-3);color:var(--fg-dim);font-size:13px;line-height:1;cursor:pointer;opacity:0;transition:opacity .12s;display:flex;align-items:center;justify-content:center;z-index:2}
+.steps:hover .insert button{opacity:1}
+.insert button:hover{border-color:var(--accent);color:var(--accent-text)}
+.route-empty{font-family:var(--sans);color:var(--fg-dimmer);font-size:12px;padding:16px 12px 4px;text-align:center}
+.foot{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--line-2);background:var(--bg-3);flex-wrap:wrap}
+.foot .sum{font-family:var(--mono);font-size:11.5px;color:var(--fg-dim);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.foot .sp{flex:1}
+
+/* popover d'ajout */
+.pop{width:392px;max-width:100%;border:1px solid var(--line-2);background:var(--bg-2);border-radius:8px;box-shadow:0 18px 44px rgba(0,0,0,.55);overflow:hidden}
+html[data-theme="light"] .pop{box-shadow:0 18px 44px rgba(0,0,0,.18)}
+.pop-search{display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--line-2);background:var(--bg-3)}
+.pop-search input{flex:1;background:transparent;border:none;outline:none;color:var(--fg);font-family:var(--mono);font-size:13px;min-width:0}
+.pop-search .k{font-size:9.5px;color:var(--fg-dimmer);border:1px solid var(--line-2);border-radius:3px;padding:1px 5px;flex:none}
+.pop-list{max-height:340px;overflow:auto}
+.grp{display:flex;align-items:center;gap:8px;padding:9px 12px 5px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dimmer);position:sticky;top:0;background:var(--bg-2)}
+.grp .why{color:var(--accent-text);letter-spacing:.04em;text-transform:none;font-size:10px}
+.grp::after{content:"";flex:1;height:1px;background:var(--line)}
+.wp-item{display:flex;align-items:center;gap:9px;padding:8px 12px;cursor:pointer;border:none;background:transparent;width:100%;text-align:left;font-family:var(--mono);font-size:12.5px;color:var(--fg);min-height:38px}
+.wp-item:hover,.wp-item.on{background:var(--bg-3)}
+.wp-item.on{box-shadow:inset 2px 0 0 var(--accent)}
+.wp-item .t{color:var(--fg-dimmer);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;margin-left:auto;flex:none}
+.wp-item.is-exit{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.wp-item.is-exit .nm{color:var(--accent-text)}
+.wp-item.off{cursor:not-allowed;color:var(--fg-dimmer)}
+.wp-item.off .glyph{opacity:.5}
+.wp-item.off:hover{background:transparent}
+.wp-reason{font-family:var(--sans);font-size:10.5px;color:var(--fg-dimmer);padding:0 12px 8px 42px;line-height:1.45;font-style:italic}
+.pop-foot{padding:8px 12px;border-top:1px solid var(--line-2);background:var(--bg-3);font-family:var(--sans);font-size:11px;color:var(--fg-dimmer)}
+
+/* démo interactive */
+.demo-stage{position:relative;display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+.demo-stage>div{flex:1 1 400px;min-width:0}
+.dragging{opacity:.4}
+.drop-ph{height:40px;margin:2px 12px;border:1px dashed var(--accent);border-radius:6px;background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.card{border:1px solid var(--line);background:var(--bg-2);border-radius:8px;padding:16px 18px}
+.card h4{margin:0 0 8px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dim);font-weight:400}
+.card p{font-family:var(--sans);font-size:12px;color:var(--fg-dim);margin:0;line-height:1.55}
+.cols3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:11.5px;color:var(--fg-dim);margin-bottom:18px}
+.legend span b{color:var(--fg);font-weight:400;margin-right:5px;font-size:14px}
+.phone{width:360px;max-width:100%;border:1px solid var(--line-2);border-radius:10px;background:var(--bg);padding:12px;box-shadow:0 12px 32px rgba(0,0,0,.4)}
+html[data-theme="light"] .phone{box-shadow:0 12px 32px rgba(0,0,0,.12)}
+.phone .step{flex-wrap:wrap;padding:10px 10px 10px 6px}
+.phone .step .nm{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.phone .step .sp{display:none}
+.phone .step .acts{margin-left:auto}
+.phone .step .ctn{flex-basis:100%;order:9;padding-left:53px;margin-top:2px;font-size:10.5px}
+.phone .grip,.phone .ia{width:40px;height:40px}
+.phone .glyph{width:26px}
+@media(pointer:coarse){.ia,.grip{width:44px;height:44px}}
+.old{border:1px solid var(--line);border-radius:8px;background:var(--bg-2);padding:14px;font-size:11.5px;color:var(--fg-dim)}
+.old .cloud{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 12px}
+.chk{border:1px solid var(--line-2);border-radius:var(--radius-pill);padding:3px 8px;font-size:10.5px;color:var(--fg-dim);background:var(--bg-3)}
+.chk.on{border-color:var(--accent);color:var(--accent-text)}
+.old .ord{display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--line)}
+.metric{display:flex;gap:24px;flex-wrap:wrap;margin-top:14px}
+.metric div{font-size:11px;color:var(--fg-dimmer)}
+.metric b{display:block;font-size:19px;color:var(--fg);font-weight:400;margin-bottom:2px}
+.metric b.good{color:var(--ok)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Carton · route-editor-waypoints</div>
+    <h1>Éditeur de ROUTE — chaîne de waypoints</h1>
+    <p class="lede">Une seule représentation : la route <b>EST</b> une séquence, elle s'édite comme une chaîne ordonnée entre deux ancres. Le nuage de cases + la liste ↑/↓ disparaissent ; la grammaire (transit, exits, pins d'étage) devient visible, et chaque erreur se rattache à son étape. Même composant pour le câble et le faisceau.</p>
+  </div>
+  <button class="theme-btn" id="tt">Thème clair</button>
+</div>
+
+<div class="legend">
+  <span><b>◆</b> point</span><span><b>▬</b> segment</span><span><b>▦</b> brosse</span>
+  <span><b style="color:var(--accent)">⏏</b> exit — articulation</span><span><b style="color:var(--info)">◎</b> pin d'étage</span>
+</div>
+
+<section>
+  <div class="sec-h"><span class="sec-n">01</span><span class="sec-t">Le remplacement</span><span class="state-tag">livrable §8.4</span></div>
+  <p class="note">Les <b>trois champs</b> actuels (« Points de passage » + hint de route + « Ordre des points ») fusionnent en <b>un seul</b>. À 3 étapes, la chaîne tient dans <b>moins de place</b> que le seul nuage de cases — et le nuage grossit avec le document, la chaîne avec la route.</p>
+  <div class="grid2">
+    <div>
+      <div class="field-label">Avant — 3 champs, 2 représentations</div>
+      <div class="old">
+        <div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dimmer)">Points de passage · 14</div>
+        <div class="cloud"><span class="chk">◆ Sortie Tableau Elc</span><span class="chk">◆ Power WP 2</span><span class="chk">◎ WP étage</span><span class="chk">▬ WP-10</span><span class="chk on">▦ Brosse 3</span><span class="chk">▦ Brosse 8</span><span class="chk">▦ Brosse 1</span><span class="chk">▦ Brosse 5</span><span class="chk">▦ Brosse 9</span><span class="chk on">⏏ SortieGenerique</span><span class="chk on">⏏ SortieGeneriqueArchive</span><span class="chk">⏏ Sortie Nord</span><span class="chk">⏏ Sortie Tech</span><span class="chk">◆ Power WP 4</span></div>
+        <div style="font-family:var(--sans);font-size:11px;color:var(--fg-dimmer);margin-bottom:10px">◆ DC - LG274 → ⏏ DC - LG274 → ⏏ Local Archive</div>
+        <div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dimmer)">Ordre des points</div>
+        <div class="ord"><span class="pill num">1</span>▦ Brosse 3<span style="flex:1"></span><span class="ia">↑</span><span class="ia">↓</span></div>
+        <div class="ord"><span class="pill num">2</span>⏏ SortieGenerique<span style="flex:1"></span><span class="ia">↑</span><span class="ia">↓</span></div>
+        <div class="ord"><span class="pill num">3</span>⏏ SortieGeneriqueArchive<span style="flex:1"></span><span class="ia">↑</span><span class="ia">↓</span></div>
+      </div>
+      <div class="metric"><div><b>~420 px</b>de hauteur</div><div><b>14</b>cases à balayer</div><div><b>2</b>listes à synchroniser</div></div>
+    </div>
+    <div>
+      <div class="field-label">Après — un champ « Route »<span class="sp"></span><span class="pill ok">valide</span></div>
+      <div class="route">
+        <div class="anchor a"><span class="tag">Bout A</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="steps">
+          <div class="ctn-band">DC - LG274</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph">▦</span><span class="nm">Brosse 3</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="insert"><button title="Insérer ici">+</button></div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph exit">⏏</span><span class="nm">SortieGenerique</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="ctn-band">Local Archive</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">3</span><span class="glyph exit">⏏</span><span class="nm">SortieGeneriqueArchive</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Ajouter une étape…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">Patch Fibre · port 12</span><span class="sp"></span><span class="pill ctn">Local Archive</span></div>
+        <div class="foot"><span class="pill ok">Route valide</span><span class="sum">▦ DC - LG274 → ⏏ DC - LG274 → ⏏ Local Archive</span></div>
+      </div>
+      <div class="metric"><div><b class="good">~300 px</b>de hauteur</div><div><b class="good">3</b>lignes à lire</div><div><b class="good">1</b>représentation</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">02</span><span class="sec-t">Anatomie</span></div>
+  <div class="cols3">
+    <div class="card"><h4>Ancres</h4><p>Les bouts A et B encadrent la liste, non éditables ici, chacun avec <b>son conteneur</b>. C'est le repère qui manquait : on voit d'où part et où arrive le câble avant de lire la route.</p></div>
+    <div class="card"><h4>Bandeaux de conteneur</h4><p>Un liseré discret par tronçon (salle, étage, transit) — la route se lit comme le résumé texte actuel, mais navigable. Pas de carte lourde : la modale est déjà dense.</p></div>
+    <div class="card"><h4>Étape</h4><p>Poignée ⋮⋮ (glisser-déposer) · n° · glyphe · nom · actions ↑ ↓ × en repli clavier et tactile. Les exits sont teintés <b>accent</b> : ce sont les articulations.</p></div>
+    <div class="card"><h4>Transit</h4><p>Après un ⏏, un bloc pointillé « transit » matérialise l'état de l'automate. <code>exit_unpaired</code> n'est plus une erreur au save mais un <b>état visible</b> en cours d'édition.</p></div>
+    <div class="card"><h4>Erreur sur l'étape</h4><p>Liseré <b>--err</b> + message court sous l'étape fautive. Le pied ne garde que la synthèse (« Route valide » / « 2 problèmes »).</p></div>
+    <div class="card"><h4>Ajout</h4><p>« + Ajouter une étape » en fin de chaîne ; un « + » discret apparaît entre deux étapes au survol pour l'insertion au milieu (la brosse oubliée avant l'exit).</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">03</span><span class="sec-t">États de la chaîne</span><span class="state-tag">§6.1 – 6.7</span></div>
+  <div class="grid2">
+
+    <div>
+      <div class="field-label">6.1 — Route vide (intra-baie)</div>
+      <div class="route">
+        <div class="anchor a"><span class="tag">Bout A</span><span class="nm">SW-CORE-01 · Gi1/0/24</span><span class="sp"></span><span class="pill ctn">Baie R12 · DC - LG274</span></div>
+        <div class="steps">
+          <div class="route-empty">Aucun point de passage — tracé direct entre les deux bouts.</div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Ajouter une étape…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">PATCH-R12 · port 8</span><span class="sp"></span><span class="pill ctn">Baie R12 · DC - LG274</span></div>
+        <div class="foot"><span class="pill ok">Valide</span><span class="sum">Les deux bouts sont dans la même baie — aucune sortie requise.</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="field-label">6.2 — Intra-salle, sans exit</div>
+      <div class="route">
+        <div class="anchor a"><span class="tag">Bout A</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="steps">
+          <div class="ctn-band">DC - LG274</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph">▦</span><span class="nm">Brosse 3</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph">▬</span><span class="nm">WP-10</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">3</span><span class="glyph">◆</span><span class="nm">Sortie Tableau Elc</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Ajouter une étape…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">Onduleur A · sortie 2</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="foot"><span class="pill ok">Route valide</span><span class="sum">▦ → ▬ → ◆ · DC - LG274</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="field-label">6.3 — Inter-salles nominal</div>
+      <div class="route">
+        <div class="anchor a"><span class="tag">Bout A</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="steps">
+          <div class="ctn-band">DC - LG274</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph">▦</span><span class="nm">Brosse 3</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph exit">⏏</span><span class="nm">SortieGenerique</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="ctn-band">Local Archive</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">3</span><span class="glyph exit">⏏</span><span class="nm">SortieGeneriqueArchive</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Ajouter une étape…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">Patch Fibre · port 12</span><span class="sp"></span><span class="pill ctn">Local Archive</span></div>
+        <div class="foot"><span class="pill ok">Route valide</span><span class="sum">▦ DC - LG274 → ⏏ DC - LG274 → ⏏ Local Archive</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="field-label">6.4 — Inter-salles via étage</div>
+      <div class="route">
+        <div class="anchor a"><span class="tag">Bout A</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="steps">
+          <div class="ctn-band">DC - LG274</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph exit">⏏</span><span class="nm">SortieGenerique</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="ctn-band">Bât. Nord · ét. 2</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph pin">◎</span><span class="nm">WP étage</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="ctn-band">Local Technique</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">3</span><span class="glyph exit">⏏</span><span class="nm">Sortie Tech</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Ajouter une étape…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">PDU-T3 · prise 6</span><span class="sp"></span><span class="pill ctn">Local Technique</span></div>
+        <div class="foot"><span class="pill ok">Route valide</span><span class="sum">⏏ DC - LG274 → ◎ ét. 2 → ⏏ Local Technique</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="field-label">6.5 — Transit ouvert <span class="sp"></span><span class="pill warn">exit_unpaired</span></div>
+      <div class="route">
+        <div class="anchor a"><span class="tag">Bout A</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="steps">
+          <div class="ctn-band">DC - LG274</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph">▦</span><span class="nm">Brosse 3</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph exit">⏏</span><span class="nm">SortieGenerique</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="ctn-band transit">Transit</div>
+          <div class="transit"><span>⇢</span><span class="l">Hors salle — en attente d'arrivée : l'exit d'une autre salle, ou un pin d'étage.</span></div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn" style="border-color:var(--warn);color:var(--warn)">+ Refermer le tronçon…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">Patch Fibre · port 12</span><span class="sp"></span><span class="pill ctn">Local Archive</span></div>
+        <div class="foot"><span class="pill warn">1 problème</span><span class="sum" style="color:var(--warn)">Il manque l'exit de « Local Archive » pour rejoindre le bout B.</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="field-label">6.6 — Erreur rattachée à l'étape <span class="sp"></span><span class="pill err">exit_reentry</span></div>
+      <div class="route">
+        <div class="anchor a"><span class="tag">Bout A</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="steps">
+          <div class="ctn-band">DC - LG274</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph exit">⏏</span><span class="nm">SortieGenerique</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="ctn-band transit">Transit</div>
+          <div class="step err"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph">▬</span><span class="nm">WP-10</span><span class="sp"></span><span class="pill err">wrong_room</span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step-msg">La route a quitté « DC - LG274 » : on ne peut pas y revenir. Attendu ici : l'exit d'une autre salle, ou un pin d'étage.</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">3</span><span class="glyph exit">⏏</span><span class="nm">SortieGeneriqueArchive</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Ajouter une étape…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">Patch Fibre · port 12</span><span class="sp"></span><span class="pill ctn">Local Archive</span></div>
+        <div class="foot"><span class="pill err">1 problème</span><span class="sum">Étape 2 — voir le détail ci-dessus.</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="margin-top:24px" class="grid2">
+    <div>
+      <div class="field-label">6.7 — Incohérence de bout <span class="sp"></span><span class="pill err">portA_room</span></div>
+      <p class="note" style="margin-bottom:10px">L'incident SONUMA : une route partant d'une salle qui ne contient <b>aucune</b> extrémité — silencieusement non dessinée en 2D/3D. L'alerte se pose sur <b>l'ancre</b>, avec les conteneurs nommés.</p>
+      <div class="route">
+        <div class="anchor a alert"><span class="tag">Bout A</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill err">DC - LG274</span></div>
+        <div class="anchor-msg"><span>La route relie « Local Archive » à « Local Technique », mais le bout A est dans « DC - LG274 ».</span></div>
+        <div class="steps">
+          <div class="ctn-band">Local Archive</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph exit">⏏</span><span class="nm">SortieGeneriqueArchive</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="ctn-band">Local Technique</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph exit">⏏</span><span class="nm">Sortie Tech</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Ajouter une étape…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">Patch Fibre · port 12</span><span class="sp"></span><span class="pill ctn">Local Archive</span></div>
+        <div class="foot"><span class="pill err">1 problème</span><span class="sum">Le bout A n'est desservi par aucune étape.</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="field-label">6.7b — Cas « route à l'envers » → action, pas erreur</div>
+      <p class="note" style="margin-bottom:10px">Quand le bout A est dans le conteneur d'<b>arrivée</b> de la route, le moteur tolère déjà l'inversion au rendu : on propose l'action plutôt qu'un blocage.</p>
+      <div class="route">
+        <div class="anchor a alert"><span class="tag">Bout A</span><span class="nm">Patch Fibre · port 12</span><span class="sp"></span><span class="pill warn">Local Archive</span></div>
+        <div class="anchor-msg"><span>La route va de « DC - LG274 » vers « Local Archive » — vos bouts sont dans l'autre sens.</span><button class="btn btn-sm" style="border-color:var(--warn);color:var(--warn)">⇅ Inverser la route</button></div>
+        <div class="steps">
+          <div class="ctn-band">DC - LG274</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph">▦</span><span class="nm">Brosse 3</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph exit">⏏</span><span class="nm">SortieGenerique</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="ctn-band">Local Archive</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">3</span><span class="glyph exit">⏏</span><span class="nm">SortieGeneriqueArchive</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Ajouter une étape…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="foot"><span class="pill warn">Sens à confirmer</span><span class="sum">Un clic sur « Inverser la route » rend la route valide.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">04</span><span class="sec-t">Popover d'ajout</span><span class="state-tag">§6.8</span></div>
+  <p class="note">Pattern <b>SearchPop / entityPicker</b> — jamais un nuage de cases. Groupé par <b>conteneur</b> (la question réelle est « par où je passe »), les groupes triés par pertinence : ① conteneur courant de la route, ② conteneurs des bouts, ③ le reste. Les items impossibles sont <b>grisés avec leur motif</b> — la règle s'apprend en lisant, plus par toast de refus après coup.</p>
+  <div class="demo-stage">
+    <div style="flex:0 0 auto">
+      <div class="field-label">État « en transit » — après l'exit de DC - LG274</div>
+      <div class="pop">
+        <div class="pop-search"><span style="color:var(--fg-dimmer)">⌕</span><input type="text" placeholder="Rechercher un waypoint…" aria-label="Rechercher un waypoint"><span class="k">ESC</span></div>
+        <div class="pop-list">
+          <div class="grp">Local Archive <span class="why">· conteneur du bout B</span></div>
+          <button class="wp-item is-exit on"><span class="glyph exit">⏏</span><span class="nm">SortieGeneriqueArchive</span><span class="t">exit</span></button>
+          <button class="wp-item off"><span class="glyph">▦</span><span class="nm">Brosse 8</span><span class="t">brosse</span></button>
+          <div class="wp-reason">La route est en transit — il faut d'abord entrer par l'exit de la salle.</div>
+          <div class="grp">Bât. Nord · ét. 2 <span class="why">· étage traversé</span></div>
+          <button class="wp-item"><span class="glyph pin">◎</span><span class="nm">WP étage</span><span class="t">pin</span></button>
+          <div class="grp">DC - LG274 <span class="why">· salle quittée</span></div>
+          <button class="wp-item off"><span class="glyph exit">⏏</span><span class="nm">SortieGenerique</span><span class="t">exit</span></button>
+          <div class="wp-reason">Déjà utilisé — re-rentrer dans la salle quittée est refusé (exit_reentry).</div>
+          <button class="wp-item off"><span class="glyph">▬</span><span class="nm">WP-10</span><span class="t">segment</span></button>
+          <div class="wp-reason">La route a quitté DC - LG274.</div>
+          <div class="grp">Local Technique</div>
+          <button class="wp-item is-exit"><span class="glyph exit">⏏</span><span class="nm">Sortie Tech</span><span class="t">exit</span></button>
+          <button class="wp-item off"><span class="glyph">◆</span><span class="nm">Power WP 4</span><span class="t">non posé</span></button>
+          <div class="wp-reason">Waypoint non posé dans une salle — inutilisable tant qu'il n'est pas placé.</div>
+        </div>
+        <div class="pop-foot">↑ ↓ pour naviguer · <b>Entrée</b> pour ajouter en fin de route · <b>Maj+Entrée</b> pour ajouter et rouvrir</div>
+      </div>
+    </div>
+    <div style="flex:1 1 320px">
+      <div class="cols3" style="grid-template-columns:1fr">
+        <div class="card"><h4>Pertinence, pas alphabet</h4><p>L'ordre des groupes suit l'état de l'automate. Sur le corpus réel (14 waypoints, 4 salles), la bonne cible est dans les <b>2 premiers items</b> au lieu d'être noyée dans un nuage trié par type.</p></div>
+        <div class="card"><h4>Exits saillants</h4><p>Fond accent léger + nom en <b>--accent-text</b> : les articulations se repèrent au coup d'œil, sans les extraire dans un groupe séparé (ce qui casserait le groupement par conteneur).</p></div>
+        <div class="card"><h4>Grisé ≠ caché</h4><p>Les items impossibles restent visibles avec leur motif : l'utilisateur apprend la grammaire. Ils sont <code>aria-disabled</code>, atteignables au clavier, non activables.</p></div>
+        <div class="card"><h4>Recherche</h4><p>Filtre sur nom + conteneur + type ; les groupes vides disparaissent. Le champ est le champ de recherche normalisé de l'app.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">05</span><span class="sec-t">Micro-interactions</span><span class="state-tag">§8.3 · démo vivante</span></div>
+  <p class="note">Chaîne <b>manipulable</b> ci-dessous : glissez une poignée ⋮⋮ pour réordonner, survolez entre deux étapes pour le « + » d'insertion, ou cliquez « Ajouter une étape ». Le clavier fait tout aussi : ↑ ↓ déplacent, × supprime.</p>
+  <div class="demo-stage">
+    <div style="flex:0 1 520px">
+      <div class="field-label">Route <span class="sp"></span><span class="pill" id="dstate">3 étapes</span></div>
+      <div class="route">
+        <div class="anchor a"><span class="tag">Bout A</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="steps" id="dsteps"></div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">Patch Fibre · port 12</span><span class="sp"></span><span class="pill ctn">Local Archive</span></div>
+        <div class="foot"><span class="pill" id="dbadge">Route valide</span><span class="sum" id="dsum"></span></div>
+      </div>
+      <div id="dpop" style="display:none;margin-top:10px"></div>
+    </div>
+    <div style="flex:1 1 300px">
+      <div class="cols3" style="grid-template-columns:1fr">
+        <div class="card"><h4>Glisser-déposer</h4><p>Curseur <code>grabbing</code>, ligne d'origine à 40 %, <b>placeholder accent pointillé</b> à la position de dépôt. Les bandeaux de conteneur et les numéros se recalculent au relâché — la validation aussi, en direct.</p></div>
+        <div class="card"><h4>Insertion au milieu</h4><p>Le « + » n'apparaît qu'au survol de la chaîne (pas de bruit permanent) ; il ouvre le même popover, positionné sur l'interstice. Cible ≥ 22 px, portée à 44 px en pointeur grossier.</p></div>
+        <div class="card"><h4>Transitions</h4><p>150–200 ms sur l'entrée/sortie d'étape et le liseré d'erreur ; aucune animation sur la validation elle-même (elle doit se lire instantanément). <code>prefers-reduced-motion</code> respecté.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">06</span><span class="sec-t">Longue route &amp; waypoint non posé</span><span class="state-tag">§6.9 · §6.10</span></div>
+  <div class="grid2">
+    <div>
+      <div class="field-label">6.10 — 7 étapes, 3 conteneurs</div>
+      <div class="route">
+        <div class="anchor a"><span class="tag">Bout A</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="steps">
+          <div class="ctn-band">DC - LG274</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph">▦</span><span class="nm">Brosse 3</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph">▬</span><span class="nm">WP-10</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">3</span><span class="glyph exit">⏏</span><span class="nm">SortieGenerique</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="ctn-band">Bât. Nord · ét. 2</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">4</span><span class="glyph pin">◎</span><span class="nm">WP étage</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="ctn-band">Local Technique</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">5</span><span class="glyph exit">⏏</span><span class="nm">Sortie Tech</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">6</span><span class="glyph">▦</span><span class="nm">Brosse 1</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">7</span><span class="glyph exit">⏏</span><span class="nm">Sortie Nord</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Ajouter une étape…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">PDU-T3 · prise 6</span><span class="sp"></span><span class="pill ctn">Local Archive</span></div>
+        <div class="foot"><span class="pill ok">Route valide</span><span class="sum">4 tronçons · 3 conteneurs</span></div>
+      </div>
+      <p class="form-hint">Au-delà de ~8 étapes, la liste défile dans un conteneur à hauteur max (≈ 340 px) : les bandeaux de conteneur restent <b>collants</b> en haut du défilement, les ancres et le pied restent visibles.</p>
+    </div>
+    <div>
+      <div class="field-label">6.9 — Waypoint non posé (historique)</div>
+      <div class="route">
+        <div class="anchor a"><span class="tag">Bout A</span><span class="nm">GPFS21 · port 3</span><span class="sp"></span><span class="pill ctn">DC - LG274</span></div>
+        <div class="steps">
+          <div class="ctn-band">DC - LG274</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph">▦</span><span class="nm">Brosse 3</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step ghosted"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph">◆</span><span class="nm">Power WP 4</span><span class="sp"></span><span class="pill">non posé</span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="step-msg" style="color:var(--fg-dim);background:transparent;box-shadow:none">Ce waypoint n'est placé dans aucune salle : il est ignoré au tracé. Posez-le dans la vue 2D, ou retirez-le de la route.</div>
+          <div class="step"><span class="grip">⋮⋮</span><span class="pill num">3</span><span class="glyph exit">⏏</span><span class="nm">SortieGenerique</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span></div>
+          <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Ajouter une étape…</button></div>
+        </div>
+        <div class="anchor b"><span class="tag">Bout B</span><span class="nm">Patch Fibre · port 12</span><span class="sp"></span><span class="pill ctn">Local Archive</span></div>
+        <div class="foot"><span class="pill warn">1 avertissement</span><span class="sum">Étape 2 ignorée au tracé.</span></div>
+      </div>
+      <div class="card" style="margin-top:16px"><h4>Parité câble / faisceau</h4><p>Le composant est strictement <b>le même</b> : seules les ancres changent — ports d'équipement pour un câble, patchs pour un faisceau (<code>equipmentNamedContainer</code>). Le faisceau hérite donc du résumé, des erreurs par étape et de la validation extrémités ⇄ route qui lui manquaient totalement.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">07</span><span class="sec-t">Responsive &lt; 560 px</span><span class="state-tag">§6.11</span></div>
+  <div class="demo-stage">
+    <div style="flex:0 0 auto">
+      <div class="phone">
+        <div class="field-label">Route</div>
+        <div class="route">
+          <div class="anchor a"><span class="tag">A</span><span class="nm">GPFS21 · p3</span><span class="sp"></span><span class="pill ctn">LG274</span></div>
+          <div class="steps">
+            <div class="ctn-band">DC - LG274</div>
+            <div class="step"><span class="grip">⋮⋮</span><span class="pill num">1</span><span class="glyph">▦</span><span class="nm">Brosse 3 · rangée B</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span><span class="ctn">DC - LG274</span></div>
+            <div class="step"><span class="grip">⋮⋮</span><span class="pill num">2</span><span class="glyph exit">⏏</span><span class="nm">SortieGenerique</span><span class="sp"></span><span class="acts"><button class="ia">↑</button><button class="ia">↓</button><button class="ia danger">×</button></span><span class="ctn">DC - LG274 · exit</span></div>
+            <div class="ctn-band transit">Transit</div>
+            <div class="transit"><span>⇢</span><span class="l">En attente d'arrivée.</span></div>
+            <div class="addrow"><button class="btn btn-sm btn-ghost add-btn">+ Étape</button></div>
+          </div>
+          <div class="anchor b"><span class="tag">B</span><span class="nm">Patch Fibre · p12</span><span class="sp"></span><span class="pill ctn">Archive</span></div>
+          <div class="foot"><span class="pill warn">1 problème</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="flex:1 1 320px">
+      <div class="cols3" style="grid-template-columns:1fr">
+        <div class="card"><h4>Empilement</h4><p>Le conteneur passe sous le nom quand la ligne déborde ; aucun scroll horizontal, jamais. Les noms longs sont tronqués par ellipse, jamais coupés en deux lignes dans la colonne.</p></div>
+        <div class="card"><h4>Cibles tactiles</h4><p><code>@media (pointer:coarse)</code> : poignée et boutons-icône passent à <b>44 × 44 px</b>, l'espacement inter-cibles à 8 px. Le glisser-déposer reste possible mais ↑ ↓ sont la voie principale sur mobile.</p></div>
+        <div class="card"><h4>Popover plein écran</h4><p>Sous 560 px, le popover devient une feuille plein écran : recherche en haut sous le pouce, liste défilante, « Annuler » en tête. Même contenu, même tri.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">08</span><span class="sec-t">Intégration &amp; suites</span></div>
+  <div class="cols3">
+    <div class="card"><h4>Dans la modale Câble</h4><p>La chaîne occupe l'emplacement des 3 champs supprimés, pleine largeur, sous les bouts / type / réseau / statut. À route vide elle fait <b>~110 px</b> (deux ancres + ligne vide + pied), contre ~420 px pour l'existant à 14 waypoints.</p></div>
+    <div class="card"><h4>Ce qui reste à trancher</h4><p>① Faut-il replier la chaîne quand la route est valide et longue (« 7 étapes · voir ») ? ② Le clic sur une étape doit-il surligner le waypoint dans la vue 2D si elle est ouverte ? ③ Un bouton « Router depuis la vue » qui bascule sur RouteTool.</p></div>
+    <div class="card"><h4>Accessibilité</h4><p>Liste en <code>role="list"</code>, chaque étape focusable ; réordonnancement clavier annoncé en <code>aria-live</code> (« Brosse 3, étape 2 sur 3 »). Erreurs liées par <code>aria-describedby</code> à leur étape. Contraste AA vérifié sur les deux thèmes.</p></div>
+  </div>
+</section>
+</div>
+
+<script>
+document.getElementById('tt').onclick=e=>{const h=document.documentElement,l=h.dataset.theme==='light';h.dataset.theme=l?'dark':'light';e.target.textContent=l?'Thème clair':'Thème sombre'};
+
+/* ---- démo vivante ---- */
+const CAT={brosse:'▦',point:'◆',segment:'▬',exit:'⏏',pin:'◎'};
+const POOL=[
+ {id:'b3',n:'Brosse 3',t:'brosse',c:'DC - LG274'},
+ {id:'b8',n:'Brosse 8',t:'brosse',c:'Local Archive'},
+ {id:'w10',n:'WP-10',t:'segment',c:'DC - LG274'},
+ {id:'ste',n:'Sortie Tableau Elc',t:'point',c:'DC - LG274'},
+ {id:'sg',n:'SortieGenerique',t:'exit',c:'DC - LG274'},
+ {id:'sga',n:'SortieGeneriqueArchive',t:'exit',c:'Local Archive'},
+ {id:'pe',n:'WP étage',t:'pin',c:'Bât. Nord · ét. 2'}
+];
+let route=['b3','sg','sga'];
+const A='DC - LG274',B='Local Archive';
+const wp=id=>POOL.find(w=>w.id===id);
+const stepsEl=document.getElementById('dsteps');
+let insertAt=null;
+
+function analyse(){
+  let cur=A,transit=false,errs=[];
+  route.forEach((id,i)=>{const w=wp(id);
+    if(w.t==='exit'){ if(transit){ if(w.c===cur) errs.push([i,'exit_reentry','Re-rentrer dans la salle quittée est refusé.']); cur=w.c; transit=true; } else { if(w.c!==cur) errs.push([i,'exit_wrong_room','Exit d\'une autre salle que « '+cur+' ».']); cur=w.c; transit=true; } }
+    else if(w.t==='pin'){ if(!transit) errs.push([i,'pin_in_room','Un pin d\'étage ne peut pas être à l\'intérieur d\'une salle.']); else {cur=w.c;transit=false;} }
+    else { if(transit) errs.push([i,'wrong_room','La route a quitté « '+cur+' ».']); else if(w.c!==cur) errs.push([i,'wrong_room','Waypoint hors de « '+cur+' ».']); }
+  });
+  return {errs,transit,cur};
+}
+function render(){
+  const {errs,transit,cur}=analyse();
+  const open=transit&&cur!==B;
+  let html='',last=null;
+  route.forEach((id,i)=>{
+    const w=wp(id),e=errs.find(x=>x[0]===i);
+    if(i>0)html+='<div class="insert"><button data-ins="'+i+'" title="Insérer ici">+</button></div>';
+    if(w.c!==last){html+='<div class="ctn-band">'+w.c+'</div>';last=w.c}
+    html+='<div class="step'+(e?' err':'')+'" draggable="true" data-i="'+i+'" tabindex="0"><span class="grip">⋮⋮</span><span class="pill num">'+(i+1)+'</span><span class="glyph '+(w.t==='exit'?'exit':w.t==='pin'?'pin':'')+'">'+CAT[w.t]+'</span><span class="nm">'+w.n+'</span><span class="sp"></span>'+(e?'<span class="pill err">'+e[1]+'</span>':'')+'<span class="acts"><button class="ia" data-up="'+i+'" title="Monter">↑</button><button class="ia" data-dn="'+i+'" title="Descendre">↓</button><button class="ia danger" data-rm="'+i+'" title="Retirer">×</button></span></div>';
+    if(e)html+='<div class="step-msg">'+e[2]+'</div>';
+  });
+  if(!route.length)html+='<div class="route-empty">Aucun point de passage — tracé direct.</div>';
+  if(open&&!errs.length)html+='<div class="ctn-band transit">Transit</div><div class="transit"><span>⇢</span><span class="l">En attente d\'arrivée : exit d\'une autre salle, ou pin d\'étage.</span></div>';
+  html+='<div class="addrow"><button class="btn btn-sm btn-ghost add-btn" data-add="1">+ Ajouter une étape…</button></div>';
+  stepsEl.innerHTML=html;
+  const bad=errs.length;
+  const badge=document.getElementById('dbadge');
+  badge.className='pill '+(bad?'err':open?'warn':'ok');
+  badge.textContent=bad?bad+' problème'+(bad>1?'s':''):open?'Transit ouvert':'Route valide';
+  document.getElementById('dsum').textContent=route.map(id=>CAT[wp(id).t]+' '+wp(id).c).join(' → ')||'—';
+  document.getElementById('dstate').textContent=route.length+' étape'+(route.length>1?'s':'');
+}
+function popover(){
+  const {transit,cur}=analyse();
+  const groups=[...new Set(POOL.map(w=>w.c))].sort((a,b)=>(a===cur?-2:a===B?-1:0)-(b===cur?-2:b===B?-1:0));
+  let h='<div class="pop"><div class="pop-search"><span style="color:var(--fg-dimmer)">⌕</span><input id="pq" type="text" placeholder="Rechercher un waypoint…" aria-label="Rechercher"><span class="k">ESC</span></div><div class="pop-list">';
+  groups.forEach(g=>{
+    const why=g===cur&&!transit?' <span class="why">· conteneur courant</span>':g===B?' <span class="why">· conteneur du bout B</span>':'';
+    h+='<div class="grp">'+g+why+'</div>';
+    POOL.filter(w=>w.c===g&&!route.includes(w.id)).forEach(w=>{
+      let off=null;
+      if(transit){ if(w.t==='exit'&&w.c===cur)off='Re-rentrer dans la salle quittée est refusé.'; else if(w.t!=='exit'&&w.t!=='pin')off='La route est en transit — entrez d\'abord par un exit.'; }
+      else { if(w.c!==cur)off='Hors de « '+cur+' » — sortez d\'abord par un exit.'; else if(w.t==='pin')off='Un pin d\'étage ne peut pas être dans une salle.'; }
+      h+='<button class="wp-item'+(w.t==='exit'?' is-exit':'')+(off?' off':'')+'"'+(off?' aria-disabled="true"':' data-pick="'+w.id+'"')+'><span class="glyph '+(w.t==='exit'?'exit':w.t==='pin'?'pin':'')+'">'+CAT[w.t]+'</span><span class="nm">'+w.n+'</span><span class="t">'+w.t+'</span></button>';
+      if(off)h+='<div class="wp-reason">'+off+'</div>';
+    });
+  });
+  h+='</div><div class="pop-foot">Entrée pour ajouter · ESC pour fermer</div></div>';
+  const p=document.getElementById('dpop');p.innerHTML=h;p.style.display='block';
+  const q=document.getElementById('pq');q.focus();
+  q.oninput=()=>{const v=q.value.toLowerCase();p.querySelectorAll('.wp-item').forEach(b=>{b.style.display=b.textContent.toLowerCase().includes(v)?'':'none'})};
+}
+document.getElementById('dpop').addEventListener('click',e=>{
+  const b=e.target.closest('[data-pick]');if(!b)return;
+  const at=insertAt===null?route.length:insertAt;route.splice(at,0,b.dataset.pick);
+  document.getElementById('dpop').style.display='none';insertAt=null;render();
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.getElementById('dpop').style.display='none';insertAt=null}});
+stepsEl.addEventListener('click',e=>{
+  const t=e.target.closest('button');if(!t)return;
+  const d=t.dataset;
+  if(d.rm!==undefined){route.splice(+d.rm,1);render()}
+  else if(d.up!==undefined&&+d.up>0){const i=+d.up;[route[i-1],route[i]]=[route[i],route[i-1]];render()}
+  else if(d.dn!==undefined&&+d.dn<route.length-1){const i=+d.dn;[route[i+1],route[i]]=[route[i],route[i+1]];render()}
+  else if(d.ins!==undefined){insertAt=+d.ins;popover()}
+  else if(d.add!==undefined){insertAt=null;popover()}
+});
+let dragI=null;
+stepsEl.addEventListener('dragstart',e=>{const s=e.target.closest('.step');if(!s)return;dragI=+s.dataset.i;s.classList.add('dragging');e.dataTransfer.effectAllowed='move'});
+stepsEl.addEventListener('dragend',()=>{dragI=null;render()});
+stepsEl.addEventListener('dragover',e=>{e.preventDefault();const s=e.target.closest('.step');if(!s||dragI===null)return;const j=+s.dataset.i;if(j===dragI)return;const it=route.splice(dragI,1)[0];route.splice(j,0,it);dragI=j;render();const n=stepsEl.querySelector('[data-i="'+j+'"]');if(n)n.classList.add('dragging')});
+render();
+</script>
+</body>
+</html>
