@@ -902,7 +902,15 @@ async function boot(): Promise<void> {
   // CHANGE DE VUE, la fiche d'où l'on part n'a donc plus lieu d'être — ce n'est pas un empilement.
   const interventionHooks: InterventionFicheHooks | null = interventionsClient ? {
     countOpen: async (kind, id) => { const map = await interventionsClient.counts([{ kind, id }]); return map[kind + ":" + id] || 0; },
+    // Mini-listing « n dernières » de la cible : listing paginé FILTRÉ (targets) + tri activité récente (défaut
+    // serveur), projeté sur le type LOCAL du contrat (on ne fait pas fuiter InterventionRecord dans les fiches).
+    latestFor: async (kind, id, n) => {
+      const page = await interventionsClient.listPage({ pageSize: n, targets: [{ kind, id }], sort: "updated_date", dir: "desc" });
+      return page.interventions.map((it) => ({ id: it.id, title: it.title, status: it.status, priority: it.priority, updated_date: it.updated_date }));
+    },
     declareFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openCreateFor(kind, id, label); },
+    // Phase 1 : « Afficher plus » ouvre la vue SANS filtre (la phase 2 posera le filtre de cible à l'arrivée).
+    openList: () => { shell.switchView("interventions"); },
   } : null;
   formHost.interventionHooks = interventionHooks;
 

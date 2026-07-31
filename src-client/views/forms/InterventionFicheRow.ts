@@ -1,9 +1,12 @@
 import { I18n } from "../../i18n/I18n";
-import type { InterventionFicheHooks } from "../InterventionFicheHooks";
+import { Format } from "../../core/Format";
+import { InterventionsFormat, type BadgeClass } from "../../core/InterventionsFormat";
+import type { InterventionFicheHooks, InterventionFicheItem } from "../InterventionFicheHooks";
 
 /* Rangée « Interventions » DISCRÈTE d'une fiche (détail équipement/VM/spare) : badge « N ouverte(s) »
    (chargé en async, SILENCIEUX en cas d'échec réseau — jamais bloquant) + bouton « Déclarer une
-   intervention ». Helper PARTAGÉ par les trois fiches (principe n°3 : une seule implémentation).
+   intervention » + un MINI-LISTING des dernières interventions de la cible et un bouton « Afficher plus ».
+   Helper PARTAGÉ par les quatre fiches (principe n°3 : une seule implémentation).
 
    Ne connaît que le contrat `InterventionFicheHooks` (injecté) — aucun import de la vue ni du client
    interventions. No-op si `hooks` est null (mode fichier / hors API → rien ne s'affiche dans les fiches).
@@ -11,8 +14,16 @@ import type { InterventionFicheHooks } from "../InterventionFicheHooks";
    DÉCLARER = CHANGER DE VUE : le bouton FERME d'abord la fiche courante (`close` — un POP de la pile de
    modales, sans perte : les fiches détail sont en lecture seule) PUIS délègue à `declareFor` (navigation
    vers l'onglet Interventions + modale de création pré-liée). Si la fiche était EMPILÉE sur une autre
-   modale, celle-ci redevient visible sous la modale de création — comportement de pile assumé. */
+   modale, celle-ci redevient visible sous la modale de création — comportement de pile assumé.
+
+   MINI-LISTING (« N dernières », TOUTES — pas seulement les ouvertes ; tri activité récente côté serveur) :
+   chargé en async comme le badge, SILENCIEUX en échec réseau (rien ne s'affiche) et rien non plus si 0
+   intervention. Chaque ligne est INFORMATIVE (non cliquable en phase 1 — la cliquabilité viendra avec la
+   pile de modales : push de la fiche d'intervention par-dessus la fiche courante). « Afficher plus » suit
+   EXACTEMENT la même séquence que « Déclarer » (close puis openList) : c'est un CHANGEMENT DE VUE. */
 export class InterventionFicheRow {
+  /** Nombre de dernières interventions listées sous le badge (D2/D3 : les plus récemment actives, toutes). */
+  private static readonly LATEST_COUNT = 3;
   /** Ajoute la rangée à `root`. @param close  ferme la fiche courante (typiquement `() => host.closeModal?.()`). */
   static attach(
     root: HTMLElement,
@@ -55,5 +66,65 @@ export class InterventionFicheRow {
         mute();
       }
     }).catch(() => { badge.textContent = "—"; mute(); });
+
+    // MINI-LISTING + « Afficher plus » : conteneurs créés VIDES (rien de visible tant que rien n'est chargé),
+    // remplis par le chargement async ci-dessous. Le bouton reste masqué jusqu'à ≥ 1 intervention.
+    const list = document.createElement("div");
+    list.style.cssText = "display:flex;flex-direction:column;gap:4px;margin:0 0 8px";
+    root.appendChild(list);
+
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button"; moreBtn.className = "btn btn-ghost btn-sm";
+    moreBtn.textContent = I18n.t("interventions.fiche.showMore");
+    moreBtn.style.display = "none";   // apparaît seulement s'il y a au moins une intervention à montrer
+    // « Afficher plus » = CHANGER DE VUE, comme « Déclarer » : on ferme la fiche (pop) PUIS on ouvre la vue
+    // Interventions (phase 1 : sans filtre — la phase 2 posera le filtre de cible à l'arrivée).
+    moreBtn.onclick = () => { close(); hooks.openList(); };
+    root.appendChild(moreBtn);
+
+    // Chargement ASYNCHRONE, non bloquant : en échec réseau OU si aucune intervention, on ne montre RIEN
+    // (le bloc reste réduit au badge + « Déclarer »). Jamais d'erreur remontée à l'utilisateur.
+    hooks.latestFor(target.kind, target.id, InterventionFicheRow.LATEST_COUNT).then((items) => {
+      if (!items.length) return;
+      for (const item of items) list.appendChild(InterventionFicheRow.line(item));
+      moreBtn.style.display = "";
+    }).catch(() => { /* silencieux : le mini-listing est un confort, jamais bloquant */ });
+  }
+
+  /** Une ligne INFORMATIVE du mini-listing (NON cliquable en phase 1 — cf. en-tête). Réutilise les helpers
+      de formatage partagés (principe n°14) : `Format.dateTime` pour la date, et les CLÉS i18n + classes de
+      badge d'`InterventionsFormat` pour statut/priorité — aucun re-formatage maison. */
+  private static line(item: InterventionFicheItem): HTMLElement {
+    const line = document.createElement("div");
+    line.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px";
+
+    const date = document.createElement("span");
+    date.style.cssText = "font-family:var(--mono);color:var(--fg-dim);white-space:nowrap";
+    date.textContent = Format.dateTime(item.updated_date);
+
+    const title = document.createElement("span");
+    title.style.cssText = "flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    title.textContent = item.title;
+    title.title = item.title;   // titre complet en survol (la ligne peut être tronquée)
+
+    line.append(
+      date, title,
+      InterventionFicheRow.pill(I18n.t(InterventionsFormat.statusLabelKey(item.status)), InterventionsFormat.statusClass(item.status)),
+      InterventionFicheRow.pill(I18n.t(InterventionsFormat.priorityLabelKey(item.priority)), InterventionsFormat.priorityClass(item.priority)),
+    );
+    return line;
+  }
+
+  /** Pastille sémantique (mêmes couleurs que la vue Interventions/Notifications/Certs — BadgeClass → variable
+      CSS). Duplication ASSUMÉE de ce petit mapping (déjà répliqué dans ces vues, cf. leur `badge`) : la LOGIQUE
+      de la classe, elle, reste unique dans `InterventionsFormat.statusClass`/`priorityClass`. */
+  private static pill(text: string, cls: BadgeClass): HTMLElement {
+    const span = document.createElement("span");
+    span.className = "pill"; span.textContent = text;
+    if (cls === "ok") { span.style.borderColor = "var(--ok)"; span.style.color = "var(--ok)"; }
+    else if (cls === "err") { span.style.borderColor = "var(--err)"; span.style.color = "var(--err)"; }
+    else if (cls === "warn") { span.style.borderColor = "var(--warn)"; span.style.color = "var(--warn)"; }
+    else if (cls === "dim") { span.style.borderColor = "var(--fg-dimmer)"; span.style.color = "var(--fg-dim)"; }
+    return span;
   }
 }

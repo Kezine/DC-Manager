@@ -67,6 +67,9 @@ export interface InterventionsListParams {
   kinds?: string[];
   statuses?: string[];
   priorities?: string[];
+  /** Filtre par CIBLE liée (couples (kind, id)) → paramètres `target` RÉPÉTÉS « <kind>:<id> » (MÊME syntaxe
+      que `counts`). Le serveur garde les interventions liées à au moins une cible (EXISTS sur les liens). */
+  targets?: Array<{ kind: string; id: string }>;
   sort?: string;
   dir?: "asc" | "desc";
 }
@@ -180,6 +183,7 @@ export class InterventionsClient {
     for (const kind of params.kinds || []) if (kind) sp.append("kind", kind);           // répétable
     for (const status of params.statuses || []) if (status) sp.append("status", status); // répétable
     for (const priority of params.priorities || []) if (priority) sp.append("priority", priority); // répétable
+    for (const t of params.targets || []) if (t && t.kind && t.id) sp.append("target", t.kind + ":" + t.id); // répétable « <kind>:<id> » (parité `counts`)
     const qs = sp.toString();
     return qs ? "?" + qs : "";
   }

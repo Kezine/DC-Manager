@@ -79,6 +79,14 @@ module.exports = async () => {
     ck(q.indexOf(",") < 0 && q.indexOf("%2C") < 0, "kinds : aucune virgule (répétition, jamais « kind=a,b »)");
     ck(q.indexOf("status=declared") >= 0 && q.indexOf("priority=high") >= 0 && q.indexOf("priority=critical") >= 0, "statuses/priorities répétés de la même façon");
     ck.eq(InterventionsClient.buildQuery({ query: "a b", sort: "priority", dir: "desc" }), "?query=a+b&sort=priority&dir=desc", "query encodée (espace → +) + sort/dir");
+    // Filtre par CIBLE (targets) : paramètres `target` RÉPÉTÉS « <kind>:<id> », jamais concaténés ; omis si vide/absent.
+    ck.eq(InterventionsClient.buildQuery({ targets: [] }), "", "targets vide → aucun paramètre");
+    const qt = InterventionsClient.buildQuery({ targets: [{ kind: "equipment", id: "sw-01" }, { kind: "vm", id: "v9" }] });
+    ck(qt.indexOf("target=equipment%3Asw-01") >= 0 && qt.indexOf("target=vm%3Av9") >= 0, "targets → paramètres target= RÉPÉTÉS « kind:id » (: encodé %3A)");
+    ck(qt.split("target=").length - 1 === 2, "targets : deux paramètres target distincts (répétition, jamais concaténés)");
+    ck.eq(InterventionsClient.buildQuery({ targets: [{ kind: "", id: "x" }, { kind: "vm", id: "" }] }), "", "targets aux couples incomplets (kind ou id vide) → ignorés");
+    ck.eq(InterventionsClient.buildQuery({ pageSize: 3, targets: [{ kind: "equipment", id: "e1" }], sort: "updated_date", dir: "desc" }),
+      "?pageSize=3&sort=updated_date&dir=desc&target=equipment%3Ae1", "combinaison mini-listing fiche (pageSize + tri + cible unique)");
   });
 
   await section("Interventions : TargetSearch.rank — pertinence (préfixe avant inclusion), accents, plafond, dédup", async () => {

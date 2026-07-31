@@ -63,6 +63,9 @@ export interface InterventionsListOpts {
   kinds?: string[];
   statuses?: string[];
   priorities?: string[];
+  /** Filtre par CIBLE liée (couples (kind, id)) : ne garde que les interventions liées à AU MOINS UNE de ces
+      cibles (EXISTS sur intervention_links). Sert le bloc « 3 dernières » des fiches (mêmes cibles que /counts). */
+  targets?: Array<{ kind: string; id: string }>;
   sort?: "title" | "status" | "priority" | "planned_start" | "created_date" | "updated_date";
   dir?: "asc" | "desc";
 }
@@ -392,7 +395,36 @@ export class InterventionsDb {
     InterventionsDb.inClause("kind", opts.kinds, clauses, params);
     InterventionsDb.inClause("status", opts.statuses, clauses, params);
     InterventionsDb.inClause("priority", opts.priorities, clauses, params);
+    InterventionsDb.targetsClause(opts.targets, clauses, params);
     return { sql: clauses.length ? " AND " + clauses.join(" AND ") : "", params };
+  }
+
+  /** Ajoute un filtre par CIBLE liée : garde les interventions ayant AU MOINS UN lien vers l'une des cibles
+      demandées. Même MOTIF et même BORNE que `countOpenForTargets` (OR de couples, lisible, cibles malformées
+      ignorées / dédupliquées / plafonnées à 100 clauses — validation souple, anti-abus), mais exprimé en
+      EXISTS corrélé (on FILTRE le listing, on ne COMPTE pas). ⚠ La sous-requête corrèle sur la table EXTÉRIEURE
+      `interventions` NON aliasée (le listing fait `FROM interventions WHERE …`) — d'où `interventions.doc_id` /
+      `interventions.id` en toutes lettres, l'alias `l` étant réservé aux liens. */
+  private static targetsClause(targets: InterventionsListOpts["targets"], clauses: string[], params: Record<string, unknown>): void {
+    const seen = new Set<string>();
+    const clean: Array<{ kind: string; id: string }> = [];
+    for (const t of targets || []) {
+      const kind = t && typeof t.kind === "string" ? t.kind.trim() : "";
+      const id = t && typeof t.id === "string" ? t.id.trim() : "";
+      if (kind === "" || id === "") continue;               // cible malformée → ignorée (souple)
+      const key = kind + ":" + id;
+      if (seen.has(key)) continue;                          // déduplication
+      seen.add(key);
+      clean.push({ kind, id });
+      if (clean.length >= 100) break;                       // plafond anti-abus (≤ 100 clauses)
+    }
+    if (!clean.length) return;
+    const pairs = clean.map((_, i) => "(l.target_kind = @tk" + i + " AND l.target_id = @ti" + i + ")").join(" OR ");
+    clean.forEach((t, i) => { params["tk" + i] = t.kind; params["ti" + i] = t.id; });
+    clauses.push(
+      "EXISTS (SELECT 1 FROM intervention_links l WHERE l.doc_id = interventions.doc_id " +
+      "AND l.intervention_id = interventions.id AND (" + pairs + "))",
+    );
   }
 
   /** Ajoute un filtre `col IN (…)` répétable si des valeurs (non vides) sont fournies. */

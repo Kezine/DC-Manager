@@ -118,6 +118,13 @@ inconnue est **ignorée**, jamais de 400) :
 - `query` : recherche normalisée (`normSearch`) sur la colonne `search` (titre + description +
   réf. Jira), **insensible à la casse et aux accents** ;
 - `kind` / `status` / `priority` : filtres **RÉPÉTABLES** (`IN`) ;
+- `target` : filtre par **CIBLE liée**, **RÉPÉTABLE** au format `<kind>:<id>` (MÊME syntaxe que
+  `/counts`) — ne garde que les interventions liées à **au moins une** des cibles, via un
+  `EXISTS (SELECT 1 FROM intervention_links l WHERE l.doc_id = interventions.doc_id AND
+  l.intervention_id = interventions.id AND (<OR de couples (kind, id)>))`. MÊME motif et même borne
+  que `countOpenForTargets` (OR de couples ; cibles malformées ignorées, dédupliquées, plafonnées à
+  100 — validation SOUPLE). Sert le bloc **« 3 dernières » des fiches** (une cible + `sort=updated_date` ;
+  cf. `InterventionFicheHooks.latestFor`) ;
 - `sort` : `title` | `status` | `priority` | `planned_start` | `created_date` |
   `updated_date` ; `dir` : `asc` | `desc`. **Tri STABLE** (`id` en dernier critère).
 
@@ -223,8 +230,8 @@ le cœur (notif live) et ce module (principe n°3 — aucune duplication de la r
 | `core/InterventionsFormat.ts` | Logique **PURE** (aucun DOM, aucune dépendance i18n — testée en isolation) : `kindLabelKey`/`statusLabelKey`/`priorityLabelKey`/`targetKindLabelKey` renvoient des **CLÉS** i18n (la vue appelle `I18n.t` dessus, le module reste pur) ; `priorityRank`/`priorityClass`/`statusClass` (rang & couleur de badge) ; `jiraUrl` (référence Jira → lien, jointures de `/`) ; `formatWindow` ; `shortId`. Porte les slugs MIROIRS des énumérations serveur. |
 | `core/TargetSearch.ts` | Logique **PURE** de la SÉLECTION unifiée des cibles liables (équipements + VMs + spares CONFONDUS) : `rank(items, query, opts)` filtre/classe/borne les candidats — **préfixe avant simple inclusion**, plafond (déf. 12), **dédup des cibles déjà liées** (`excluded`), normalisation **INJECTÉE** (le cœur passe `Schema.normSearch` — insensibilité casse/accents). Testé en isolation (`test-interventions.js`). |
 | `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition/**détail**, éditeur de liens **via SearchPop**, transitions rapides, actions par ligne en **boutons-icône** (principe n°14). Déclare l'interface hôte `InterventionTargetSource` (`labelOf`/`search`/`openTargetDetail` — cibles injectées, la vue ne touche JAMAIS le Store) ; `openCreateFor(kind, id)` ouvre une création PRÉ-LIÉE (déclaration depuis une fiche). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
-| `views/InterventionFicheHooks.ts` | **Contrat d'intégration « fiches »** `InterventionFicheHooks { countOpen; declareFor }` (injecté via `FormHost.interventionHooks`, implémenté dans `main.ts`) — permet aux fiches détail d'afficher le badge et de déclarer SANS importer la vue ni le client (découplage principe n°2). |
-| `views/forms/InterventionFicheRow.ts` | Helper DOM PARTAGÉ (une seule implémentation pour les 3 fiches) : rangée « Interventions » (badge async + bouton « Déclarer »). No-op si `hooks` null. Ne connaît que le contrat. |
+| `views/InterventionFicheHooks.ts` | **Contrat d'intégration « fiches »** `InterventionFicheHooks { countOpen; latestFor; declareFor; openList }` + type LOCAL `InterventionFicheItem` (injecté via `FormHost.interventionHooks`, implémenté dans `main.ts`) — permet aux fiches détail d'afficher le badge, le mini-listing « 3 dernières » et de déclarer/ouvrir la vue SANS importer la vue ni le client (découplage principe n°2). |
+| `views/forms/InterventionFicheRow.ts` | Helper DOM PARTAGÉ (une seule implémentation pour les 4 fiches) : rangée « Interventions » (badge async + « Déclarer » + mini-listing « 3 dernières » async + « Afficher plus »). No-op si `hooks` null. Ne connaît que le contrat ; réutilise `Format`/`InterventionsFormat` pour dates/badges. |
 
 **Branchement client** : `main.ts` enregistre l'onglet principal « Interventions » (`shell.addView`, JUSTE AVANT « Certificats »), crée `InterventionsClient` en mode API seulement (null sinon → « mode API requis »), et injecte l'implémentation de `InterventionTargetSource` construite sur le Store. Les familles liables y sont déclarées dans **UNE table unique** (`TARGET_FAMILIES` : `equipments`/`vms`/`spares`/`subEquipments`) qui pilote la résolution de collection, le libellé de repli ET la recherche — elle a remplacé trois chaînes de ternaires dont le défaut silencieux était « spare » : ajouter une famille = une entrée, un slug inconnu s'affiche « introuvable » au lieu de se résoudre en spare.
 
@@ -297,12 +304,22 @@ spare, et y **voir d'un coup d'œil** les interventions ouvertes.
   en création). La rangée porte un **badge** « N ouverte(s) » (chargé en **async**, `warn` si N > 0, discret
   sinon ; **silencieux et non bloquant** en cas d'échec réseau → « — ») et un bouton **« Déclarer une
   intervention »**.
+- **Mini-listing « 3 dernières » + « Afficher plus »** (bloc enrichi). Sous le badge, un mini-listing des **3
+  dernières** interventions de la cible — **TOUTES** (pas seulement les ouvertes ; le statut est visible sur
+  chaque ligne), triées **`updated_date desc`** (activité récente, défaut du listing). Chargé en **async**
+  comme le badge, **silencieux** en échec réseau et **rien** si 0 intervention (le bloc reste réduit au badge
+  + « Déclarer »). Chaque ligne — date courte (`Format.dateTime`) + titre + pastilles **statut**/**priorité**
+  (mêmes clés i18n et classes de badge qu'`InterventionsFormat`) — est **INFORMATIVE, non cliquable en
+  phase 1** (la cliquabilité viendra avec la pile de modales). Sous le listing, un bouton **« Afficher plus »**
+  (présent dès ≥ 1 intervention) qui, comme « Déclarer », **FERME la fiche PUIS** ouvre la vue « Interventions ».
+  Le filtrage repose sur le paramètre `target` du listing (une cible ; cf. `latestFor` au contrat). **Phase 1 :
+  la vue s'ouvre SANS filtre** ; la phase 2 posera le filtre de cible à l'arrivée (chip retirable).
 - **Découplage** (principe n°2). Les fiches n'importent **NI la vue NI le client** interventions : elles ne
-  connaissent que le contrat `InterventionFicheHooks { countOpen; declareFor }` (fichier
-  `views/InterventionFicheHooks.ts`), injecté via **`FormHost.interventionHooks`** et implémenté dans
-  `main.ts`. La rangée elle-même est un helper PARTAGÉ `views/forms/InterventionFicheRow.ts` (une seule
-  implémentation pour les trois fiches).
-- **Changement de VUE, pas empilement.** `declareFor` quitte la page courante : la fiche d'où l'on part
+  connaissent que le contrat `InterventionFicheHooks { countOpen; latestFor; declareFor; openList }` (fichier
+  `views/InterventionFicheHooks.ts`, avec le type LOCAL `InterventionFicheItem` — jamais `InterventionRecord`),
+  injecté via **`FormHost.interventionHooks`** et implémenté dans `main.ts`. La rangée elle-même est un helper
+  PARTAGÉ `views/forms/InterventionFicheRow.ts` (une seule implémentation pour les quatre fiches).
+- **Changement de VUE, pas empilement.** `declareFor` (et `openList`) quitte la page courante : la fiche d'où l'on part
   n'a donc plus lieu d'être. Le bouton **FERME d'abord** la fiche courante (`host.closeModal`, qui dépile
   un niveau de la pile de `ui/Modal`), **PUIS** `declareFor` **navigue**
   vers l'onglet « Interventions » (`shell.switchView`) et ouvre la **modale de création PRÉ-LIÉE** à la cible

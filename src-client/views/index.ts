@@ -24,6 +24,6 @@ export { InterventionsAdminView } from "./InterventionsAdminView";
 export type { InterventionTargetSource } from "./InterventionsAdminView";
 export { InterventionsClient } from "./forms/InterventionsClient";
 // Intégration « fiches » (badge + déclaration depuis équipement/VM/spare) — contrat découplé injecté via FormHost.
-export type { InterventionFicheHooks } from "./InterventionFicheHooks";
+export type { InterventionFicheHooks, InterventionFicheItem } from "./InterventionFicheHooks";
 export { DatacenterView } from "./DatacenterView";
 export type { DatacenterHost } from "./DatacenterView";

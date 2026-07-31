@@ -126,9 +126,7 @@ export class InterventionsModule {
     router.get("/counts", (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const q: any = (req.query && typeof req.query === "object") ? req.query : {};
-      const raw = q.target === undefined ? [] : (Array.isArray(q.target) ? q.target : [q.target]);
-      const targets = raw.map((s: unknown) => InterventionsModule.parseTarget(s)).filter((t: any): t is { kind: string; id: string } => t !== null);
-      res.json({ counts: ctx.db.countOpenForTargets(ctx.docId, targets) });
+      res.json({ counts: ctx.db.countOpenForTargets(ctx.docId, InterventionsModule.parseTargets(q.target)) });
     });
 
     router.get("/:id", (req, res) => {
@@ -192,6 +190,14 @@ export class InterventionsModule {
     return (kind === "" || id === "") ? null : { kind, id };
   }
 
+  /** Analyse un paramètre `target` RÉPÉTABLE (« <kind>:<id> ») : normalise en tableau (un seul → [un],
+      absent → []), parse chaque couple et écarte les malformés (validation souple). Partagé par la route
+      /counts (comptes) et le listing (filtre par cible) — même syntaxe d'API, une seule règle de parsing. */
+  private static parseTargets(raw: unknown): Array<{ kind: string; id: string }> {
+    const arr = raw === undefined ? [] : (Array.isArray(raw) ? raw : [raw]);
+    return arr.map((s: unknown) => InterventionsModule.parseTarget(s)).filter((t): t is { kind: string; id: string } => t !== null);
+  }
+
   private static readonly LIST_SORTS = ["title", "status", "priority", "planned_start", "created_date", "updated_date"];
 
   /** Lecture SOUPLE des query params de listing (jamais de 400 : toute valeur inconnue est IGNORÉE et
@@ -204,6 +210,8 @@ export class InterventionsModule {
       const kept = arr.map((v: unknown) => String(v)).filter((v: string) => allowed.includes(v));
       return kept.length ? kept : undefined;
     };
+    // Filtre par cible : MÊME parsing/syntaxe que /counts (paramètre `target` répétable « <kind>:<id> »).
+    const targets = InterventionsModule.parseTargets(q.target);
     return {
       page: int(q.page),
       pageSize: int(q.pageSize),
@@ -211,6 +219,7 @@ export class InterventionsModule {
       kinds: enumList(q.kind, INTERVENTION_KINDS),
       statuses: enumList(q.status, INTERVENTION_STATUSES),
       priorities: enumList(q.priority, INTERVENTION_PRIORITIES),
+      targets: targets.length ? targets : undefined,
       sort: InterventionsModule.LIST_SORTS.includes(String(q.sort)) ? (q.sort as InterventionsListOpts["sort"]) : undefined,
       dir: (q.dir === "asc" || q.dir === "desc") ? q.dir : undefined,
     };

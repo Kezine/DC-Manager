@@ -37,6 +37,7 @@ export const interventions = {
     declare: "Declare an intervention",
     openCount: "{{n}} open",
     none: "None open",
+    showMore: "Show more",
   },
   col: {
     title: "Title",

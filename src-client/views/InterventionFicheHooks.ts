@@ -6,11 +6,33 @@
    dans `main.ts` + ce fichier, sans toucher aux fiches (elles voient alors `interventionHooks` à null → rien).
 
    `countOpen`  : nombre d'interventions OUVERTES liées à une cible (badge de fiche, chargé async).
+   `latestFor`  : les `n` dernières interventions liées à une cible (TOUTES, pas seulement les ouvertes ;
+                  tri « activité récente » côté serveur), pour le mini-listing de la fiche — chargé async
+                  comme le badge. Renvoie le type LOCAL `InterventionFicheItem` (voir plus bas), JAMAIS le
+                  `InterventionRecord` du client : le contrat reste le SEUL point de contact fiches ⇄ vue.
    `declareFor` : déclare une intervention DEPUIS la fiche — NAVIGUE vers l'onglet « Interventions » et ouvre
                   la modale de création PRÉ-LIÉE à la cible (l'appelant DÉPILE d'abord la fiche courante :
                   on change de VUE, elle n'a plus lieu d'être — cf. InterventionFicheRow). `label` = libellé
-                  lisible de la cible (contexte affiché dans la modale de création). */
+                  lisible de la cible (contexte affiché dans la modale de création).
+   `openList`   : ouvre la VUE « Interventions » SANS filtre (bouton « Afficher plus » du bloc fiche, phase 1).
+                  ⚠ Phase 2 le remplacera par un `openListFor(kind, id, label)` qui POSE le filtre de cible à
+                  l'arrivée — d'où le nom neutre : ne pas y ajouter le filtre ici. */
+
+/** Item MINIMAL d'intervention exposé aux fiches (mini-listing « 3 dernières »). Type LOCAL au contrat —
+    surtout PAS `InterventionRecord` (client) : le découplage fiches ↛ vue/client est la raison d'être de ce
+    fichier, on ne fait donc transiter que les champs affichés. Miroir partiel, duplication assumée. */
+export interface InterventionFicheItem {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  /** Date de dernière activité (ISO) — sert la date courte affichée en tête de ligne. */
+  updated_date: string;
+}
+
 export interface InterventionFicheHooks {
   countOpen(kind: string, id: string): Promise<number>;
+  latestFor(kind: string, id: string, n: number): Promise<InterventionFicheItem[]>;
   declareFor(kind: string, id: string, label: string): void;
+  openList(): void;
 }
