@@ -1854,6 +1854,37 @@
     border-radius: var(--radius-pill); padding: 1px 6px;
   }
 
+  /* extensions du SearchPop (lot L3 editeur de route, ui/SearchPop.ts) — en-tetes de GROUPE,
+     MOTIF sous un item grise, pied d'aide epingle, mode PORTAIL. Toutes optionnelles : les
+     consommateurs historiques ne les emploient pas et ne changent pas d'un pixel. */
+  .dc-search-grp {
+    display: flex; align-items: center; gap: 8px; padding: 8px 8px 4px;
+    font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-dimmer);
+    position: sticky; top: 0; background: var(--bg-2); z-index: 1;   /* colle en tete du defilement (scrollport = boite de padding : 0 = bord interieur) */
+  }
+  .dc-search-grp::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .dc-search-grp-why { color: var(--accent-text); letter-spacing: 0.04em; text-transform: none; font-size: 10px; flex: none; }
+  .dc-search-reason {
+    padding: 0 8px 7px 30px; font-family: var(--sans); font-size: 10.5px; line-height: 1.45;
+    color: var(--fg-dimmer); font-style: italic;
+  }
+  .dc-search-foot {
+    position: sticky; bottom: 0; background: var(--bg-2); z-index: 1;
+    padding: 7px 8px; margin-top: 4px; border-top: 1px solid var(--line);
+    font-family: var(--sans); font-size: 10.5px; color: var(--fg-dimmer);
+  }
+  /* mode PORTAIL : le popover ouvert est un enfant de <body> en position:fixed (coordonnees posees
+     en ligne par SearchPop.portalPosition) — il echappe ainsi aux conteneurs qui ROGNENT (corps
+     defilant d'une modale, liste a max-height). z-index au-dessus de l'overlay de modale (200). */
+  .dc-pop-portal { position: fixed; z-index: 300; }
+  /* sous 560px, le popover portail s'etale en QUASI-FEUILLE : pleine largeur, liste plus haute
+     (maquette route §07). Limite assumee : le CHAMP de recherche reste dans le formulaire — une
+     vraie feuille plein ecran a recherche integree demanderait de deplacer l'input, hors de portee
+     d'une media query. `left` en !important : la coordonnee calculee est posee en ligne. */
+  @media (max-width: 560px) {
+    .dc-pop-portal { left: 8px !important; right: 8px; width: auto; min-width: 0; max-width: none; max-height: 60vh; }
+  }
+
   /* v78 â€” barre de tri/filtres au-dessus d'un listing */
   .list-toolbar {
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
@@ -2601,6 +2632,168 @@
     .gsearch { max-width: none; max-height: none; height: 100dvh; border: none; border-radius: 0; }
   }
 
+  /* ============ EDITEUR DE ROUTE EN CHAINE (.rc-*) ============
+     `views/forms/RouteChainEditor.ts` — la route d'un cable/faisceau editee comme une CHAINE
+     ordonnee entre deux ancres. Adapte de la maquette `design-system/briefs/
+     route-editor-waypoints.maquette.html` (memes tokens, classes prefixees `rc-` et pastilles
+     `.pill` de l'app reutilisees). Remplace le nuage de cases + la liste « Ordre des points ».
+     Le glisser-deposer (poignee + primitive ui/DragList), les bandeaux collants, l'interstice
+     d'insertion et le responsive tactile vivent dans le bloc « CONFORT L3/L4 » en fin de fichier. */
+  .rc { border: 1px solid var(--line); background: var(--bg-2); border-radius: 8px; overflow: hidden; }
+
+  /* -- ancres A/B : non editables ici, chacune avec son conteneur -- */
+  .rc-anchor { display: flex; align-items: center; gap: 10px; padding: 9px 11px; background: var(--bg-3); font-size: 12px; }
+  .rc-anchor.a { border-bottom: 1px solid var(--line-2); }
+  .rc-anchor.b { border-top: 1px solid var(--line-2); }
+  .rc-anchor-tag { flex: none; width: 76px; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-dimmer); }
+  .rc-anchor-nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .rc-sp { flex: 1; min-width: 8px; }
+  .rc-anchor.alert { background: color-mix(in srgb, var(--err) 13%, var(--bg-3)); box-shadow: inset 3px 0 0 var(--err); }
+  .rc-anchor.alert .rc-anchor-tag { color: var(--err); }
+  .rc-anchor-msg {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 0 11px 9px 87px; font-family: var(--sans); font-size: 11.5px; line-height: 1.5; color: var(--err);
+    background: color-mix(in srgb, var(--err) 13%, var(--bg-3)); box-shadow: inset 3px 0 0 var(--err);
+  }
+  .rc-swap { flex: none; border-color: var(--warn); color: var(--warn); }
+  .rc-swap:hover { border-color: var(--warn); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .rc-ctn-pill { text-transform: none; letter-spacing: 0.02em; }
+  .rc-ctn-pill.rc-alert { border-color: var(--err); color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+
+  /* -- corps : bandeaux de conteneur + etapes. `max-height` = le defilement retenu (decision D1 :
+        pas de repli ; la piste « N etapes - voir » est notee dans l'en-tete du composant). -- */
+  .rc-steps { padding: 5px 0; max-height: 340px; overflow-y: auto; }
+  .rc-band {
+    display: flex; align-items: center; gap: 8px; padding: 7px 11px 4px;
+    font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-dimmer);
+  }
+  .rc-band::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .rc-band.transit { color: var(--warn); }
+  .rc-band.transit::after { background: repeating-linear-gradient(90deg, var(--warn) 0 4px, transparent 4px 9px); opacity: 0.6; }
+
+  .rc-step { display: flex; align-items: center; gap: 8px; padding: 6px 11px; background: var(--bg-2); }
+  .rc-step + .rc-step { border-top: 1px solid var(--line); }
+  .rc-step:hover { background: var(--bg-3); }
+  .rc-num { padding: 2px 6px; min-width: 22px; justify-content: center; font-variant-numeric: tabular-nums; }
+  .rc-glyph { flex: none; width: 20px; text-align: center; font-size: 14px; color: var(--fg-dim); }
+  .rc-glyph.exit { color: var(--accent); font-size: 15px; }   /* les exits sont les ARTICULATIONS de la route */
+  .rc-glyph.pin { color: var(--info); }   /* pin d'etage : teinte info, comme la maquette */
+  .rc-nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+  .rc-ctn { flex: none; max-width: 42%; font-size: 11px; color: var(--fg-dimmer); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rc-acts { flex: none; display: flex; gap: 2px; }
+  .rc-step.err { box-shadow: inset 3px 0 0 var(--err); background: color-mix(in srgb, var(--err) 8%, var(--bg-2)); }
+  .rc-step.ghosted { opacity: 0.6; }
+  .rc-step.ghosted .rc-nm { text-decoration: line-through; text-decoration-color: var(--fg-dimmer); }
+  .rc-warn { border-color: var(--warn); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  /* message SOUS l'etape fautive ; `.soft` = avertissement (waypoint non pose, ignore au trace).
+     Retrait gauche = aligne sous le NOM de l'etape (poignee 22 + num + glyphe + gaps, lot L4). */
+  .rc-step-msg {
+    padding: 0 11px 8px 88px; font-family: var(--sans); font-size: 11.5px; line-height: 1.5; color: var(--err);
+    background: color-mix(in srgb, var(--err) 8%, var(--bg-2)); box-shadow: inset 3px 0 0 var(--err);
+  }
+  .rc-step-msg.soft { color: var(--fg-dim); background: transparent; box-shadow: none; }
+
+  /* -- transit : l'etat `exit_unpaired` rendu VISIBLE (bloc pointille) plutot qu'erreur au save -- */
+  .rc-transit {
+    display: flex; align-items: center; gap: 10px; margin: 2px 11px; padding: 8px 11px;
+    border: 1px dashed var(--warn); border-radius: 6px; background: color-mix(in srgb, var(--warn) 8%, transparent);
+    color: var(--warn); font-size: 11px;
+  }
+  .rc-transit-ic { flex: none; font-size: 13px; }
+  .rc-transit-l { font-family: var(--sans); color: var(--fg-dim); line-height: 1.45; }
+
+  /* -- « + Ajouter une etape » : cede la place au SearchPop de l'app (principe n°14) -- */
+  .rc-addrow { display: flex; align-items: center; gap: 8px; padding: 6px 11px 8px; }
+  .rc-add { flex: 1; justify-content: center; border-style: dashed; color: var(--fg-dim); min-height: 34px; }
+  .rc-add:hover { color: var(--accent-text); border-color: var(--accent); }
+  .rc-add.warn { border-color: var(--warn); color: var(--warn); }
+  .rc-addrow .dc-search-pop { min-width: 260px; }
+  .rc-empty { padding: 14px 11px 2px; text-align: center; font-family: var(--sans); font-size: 12px; color: var(--fg-dimmer); }
+
+  /* -- pied : pastille d'etat + synthese (le detail vit sur les etapes) -- */
+  .rc-foot {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 11px; border-top: 1px solid var(--line-2); background: var(--bg-3);
+  }
+  .rc-badge.ok { border-color: var(--ok); color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  .rc-badge.warn { border-color: var(--warn); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .rc-badge.err { border-color: var(--err); color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+  .rc-sum { min-width: 0; flex: 1; font-size: 11.5px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ============ EDITEUR DE ROUTE — CONFORT L3/L4 ============
+     Poignee de glisser-deposer, interstice d'insertion, bandeaux collants, transitions et
+     responsive tactile (maquette route-editor §05-§07). Les classes `dl-*` appartiennent a la
+     primitive GENERIQUE `ui/DragList` (reutilisable hors route) ; les `rc-*` a l'editeur. */
+
+  /* -- poignee ⋮⋮ (decorative, aria-hidden — le clavier passe par ↑/↓). touch-action:none est
+        INDISPENSABLE : sans lui, le tactile DEFILE au lieu de glisser (Pointer Events captures). -- */
+  .rc-grip {
+    flex: none; width: 22px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+    color: var(--fg-dimmer); cursor: grab; border-radius: 4px; touch-action: none;
+  }
+  .rc-grip:hover { color: var(--fg); background: var(--line); }
+  .rc-grip svg { width: 14px; height: 14px; display: block; }
+
+  /* -- etat « glisser en cours » (ui/DragList) : curseur partout (le pointeur est CAPTURE par la
+        poignee), ligne d'origine attenuee, placeholder pointille accent a la position de depot. -- */
+  body.dl-grabbing, body.dl-grabbing * { cursor: grabbing !important; }
+  .dl-origin { opacity: 0.4; }
+  .dl-placeholder {
+    margin: 2px 11px; border: 1px dashed var(--accent); border-radius: 6px;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+
+  /* -- interstice « + » (insertion AU MILIEU) : hauteur nulle, bouton revele au survol de la chaine
+        ou au focus clavier (pas de bruit permanent — maquette §05) ; ouvert, il loge le champ de
+        recherche comme la rangee d'ajout de fin. -- */
+  .rc-insert { height: 0; position: relative; overflow: visible; z-index: 3; }
+  .rc-insert-btn {
+    position: absolute; left: 50%; top: -11px; transform: translateX(-50%);
+    width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line-2);
+    background: var(--bg-3); color: var(--fg-dim); cursor: pointer; padding: 0;
+    display: flex; align-items: center; justify-content: center; opacity: 0;
+  }
+  .rc-insert-btn svg { width: 12px; height: 12px; display: block; }
+  .rc-steps:hover .rc-insert-btn, .rc-insert-btn:focus-visible, .rc-insert.open .rc-insert-btn { opacity: 1; }
+  .rc-insert-btn:hover { border-color: var(--accent); color: var(--accent-text); }
+  .rc-insert.open { height: auto; padding: 6px 11px; }
+
+  /* -- bandeaux COLLANTS dans le defilement (maquette §06) : le troncon courant reste lisible en
+        tete de la zone visible (scrollport = boite de padding de .rc-steps : top 0 = bord interieur). -- */
+  .rc-band { position: sticky; top: 0; background: var(--bg-2); z-index: 2; }
+
+  /* -- popover d'ajout : exits SAILLANTS quand ils sont PROPOSABLES (fond accent leger + nom
+        accentue — maquette §04, classe posee via `itemClass` de SearchPop). -- */
+  .dc-search-item.rc-pop-exit { background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--accent-text); }
+
+  /* -- transitions d'ENTREE (150-200 ms) : etape NOUVELLE et erreur qui APPARAIT seulement — les
+        classes sont posees par le composant sur le seul neuf, JAMAIS sur la validation elle-meme
+        (elle doit se lire instantanement). La SORTIE d'etape n'est pas animable : chaque rendu
+        remplace le DOM entier (replaceChildren). prefers-reduced-motion coupe tout. -- */
+  @media (prefers-reduced-motion: no-preference) {
+    .rc-step.enter, .rc-step-msg.enter { animation: rcStepIn 0.18s ease; }
+    .rc-step.err-in { animation: rcErrIn 0.2s ease; }
+    .rc-insert-btn { transition: opacity 0.15s; }
+    @keyframes rcStepIn { from { opacity: 0; transform: translateY(-4px); } }
+    @keyframes rcErrIn { from { box-shadow: inset 0 0 0 var(--err); background: var(--bg-2); } }
+  }
+
+  /* -- responsive < 560px (maquette §07) : le conteneur d'etape passe SOUS le nom quand la ligne
+        deborde — jamais de scroll horizontal ; les noms restent ellipses sur UNE ligne. -- */
+  @media (max-width: 560px) {
+    .rc-step { flex-wrap: wrap; }
+    .rc-ctn { flex-basis: 100%; order: 9; max-width: none; padding-left: 62px; margin-top: 2px; font-size: 10.5px; }
+  }
+
+  /* -- cibles TACTILES ≥ 44px : MEME declencheur que le bloc « CIBLES TACTILES » plus haut
+        (@media (hover: none), la convention de l'app — il grossit DEJA les .icon-action des actions
+        d'etape a 44px et les espace de 8px, rien a redire ici). Ici : la poignee, et le « + »
+        d'interstice rendu TOUJOURS visible (pas de survol sur tactile). -- */
+  @media (hover: none) {
+    .rc-grip { width: 44px; height: 44px; }
+    .rc-insert-btn { width: 44px; height: 44px; top: -22px; opacity: 1; }
+  }
+
 
   /* ===================== HABILLAGE GALERIE (design-system) ===================== */
   .ds-page { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 20px 22px 60px; }
@@ -2866,6 +3059,15 @@
         </div>
       </div>
       <div class="ds-ico-cell">
+        <div class="ds-ico-name">GRIP</div>
+        <div class="ds-ico-renders">
+          <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></span>
+          <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></span>
+        </div>
+      </div>
+      <div class="ds-ico-cell">
         <div class="ds-ico-name">GROUP</div>
         <div class="ds-ico-renders">
           <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="8" y="13" width="8" height="8" rx="1.5"/></svg></span>
@@ -2998,6 +3200,24 @@
           <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></span>
+        </div>
+      </div>
+      <div class="ds-ico-cell">
+        <div class="ds-ico-name">MOVE_DOWN</div>
+        <div class="ds-ico-renders">
+          <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><path d="M6 13l6 6 6-6"/></svg></span>
+          <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><path d="M6 13l6 6 6-6"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><path d="M6 13l6 6 6-6"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><path d="M6 13l6 6 6-6"/></svg></span>
+        </div>
+      </div>
+      <div class="ds-ico-cell">
+        <div class="ds-ico-name">MOVE_UP</div>
+        <div class="ds-ico-renders">
+          <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><path d="M6 11l6-6 6 6"/></svg></span>
+          <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><path d="M6 11l6-6 6 6"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><path d="M6 11l6-6 6 6"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><path d="M6 11l6-6 6 6"/></svg></span>
         </div>
       </div>
       <div class="ds-ico-cell">
