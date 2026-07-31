@@ -138,7 +138,9 @@ async function boot(): Promise<void> {
   const handleStore = new HandleStore();
 
   const modal = new Modal();
-  const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), refreshModal: () => modal.refresh(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
+  // `markDirty` : garde « modifications non enregistrées » du NIVEAU de modale, pour les éditeurs SANS
+  // champ de saisie (la chaîne de route) que l'instantané de `Modal` ne peut pas voir bouger.
+  const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), refreshModal: () => modal.refresh(), markDirty: () => modal.markDirty(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
   // RECHERCHE GLOBALE (modale dédiée) — UNE instance, UNE implémentation pour les DEUX chemins
   // (déclencheur topbar + Ctrl+K). Garde d'overlay = le pattern des raccourcis undo/redo (sélecteurs
   // DOM) : la palette est un geste de NAVIGATION GLOBALE, pas un niveau de la pile de modales — son

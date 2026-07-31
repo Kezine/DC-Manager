@@ -101,6 +101,13 @@ export class Icons {
       d'IMPORT/EXPORT (transfert vers/depuis un bac). */
   static readonly SWAP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"/><path d="M4 7l3-3 3 3"/><path d="M17 20V4"/><path d="M14 17l3 3 3-3"/></svg>';
 
+  /** DÉPLACER UN ÉLÉMENT D'UN CRAN dans une liste ORDONNÉE (étape de route plus tôt / plus tard sur le
+      trajet) : flèche pleine hauteur. Intention distincte de SWAP (permuter DEUX valeurs nommées) et de
+      BACK (dépiler un niveau de modale). Ces deux icônes REMPLACENT les glyphes `↑`/`↓` posés en dur dans
+      les boutons de réordonnancement — un bouton d'action porte une icône du registre (principe n°14). */
+  static readonly MOVE_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><path d="M6 11l6-6 6 6"/></svg>';
+  static readonly MOVE_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><path d="M6 13l6 6 6-6"/></svg>';
+
   /* ------------------------------------------------------------------------
      ÉTAT / MÉTADONNÉES — verrou, défaut (étoile), identité.
      ------------------------------------------------------------------------ */

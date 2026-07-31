@@ -62,6 +62,18 @@ export class FormUi {
 export interface FormHost {
   openModal(opts: ModalOptions): void;
   setDirty?(v: boolean): void;
+  /** Signale au NIVEAU DE MODALE courant qu'il porte une modification non enregistrée (relais de
+      `Modal.markDirty`). À ne pas confondre avec `setDirty`, qui parle du DOCUMENT (état de
+      sauvegarde de l'application) : celui-ci ne parle que de la garde « modifications non
+      enregistrées » posée quand on ferme ou dépile la modale.
+
+      POURQUOI CE CANAL EXISTE. `Modal` détecte la saisie en comparant un INSTANTANÉ des
+      `input`/`select`/`textarea` du corps. Un éditeur qui n'a AUCUN champ — la chaîne de route,
+      qui n'est que des boutons — est donc totalement invisible à cette détection : on pouvait
+      remanier toute une route puis fermer la modale sans la moindre confirmation. L'ancien nuage
+      de CASES À COCHER, lui, y était visible ; le drapeau manuel rétablit la garde que la refonte
+      aurait sinon supprimée. `Modal.markDirty` existait mais n'avait aucun appelant. */
+  markDirty?(): void;
   /** Ferme le NIVEAU courant de la pile de modales (revient donc au précédent s'il y en a un). Utile
       quand une action DEPUIS une fiche détruit l'entité affichée (ex. purge d'une VM orpheline dans
       `DetailForms.vmDetail`) : la fiche n'a plus rien à montrer. */

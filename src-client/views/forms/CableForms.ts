@@ -20,6 +20,9 @@ import type { FormHost } from "./shared";
 import { PlacementContainers } from "../../../src-shared/PlacementContainers";
 import type { PlacementContainer } from "../../../src-shared/PlacementContainers";
 import { EquipmentForms } from "./EquipmentForms";
+import { RouteChainEditor } from "./RouteChainEditor";   // la ROUTE comme chaîne ordonnée — MÊME composant câble ⇄ faisceau
+import type { RouteChainCandidate, RouteChainStep } from "./RouteChainEditor";
+import type { RouteCandidateType } from "../../core/RouteEligibility";
 
 /** Contrainte de placement imposée à un bout de câble par la route : les conteneurs ACCEPTABLES
     (`null` = aucune contrainte), ou « seuls les équipements sans conteneur » quand la route est en
@@ -84,6 +87,64 @@ export class CableForms extends EquipmentForms {
     });
     setTimeout(() => labelI.focus(), 30);
   }
+  /* ---- ADAPTATEURS de l'éditeur de ROUTE (partagés par les formulaires CÂBLE et FAISCEAU) ----
+
+     `RouteChainEditor` ne connaît ni le store ni le modèle : ces trois méthodes sont tout ce qui les
+     relie. Elles vivent ici, à côté des deux seuls appelants, plutôt que dans le composant — l'y
+     mettre y ferait entrer un import de `Store`, exactement ce que son interface hôte évite. */
+
+  /** Libellé d'une ANCRE de câble : « équipement · port », l'équipement seul si le port n'est pas
+      encore choisi, vide si rien ne l'est (l'éditeur affiche alors son propre repli). */
+  private static portAnchorLabel(store: Store, portId: string, eqId: string): string {
+    const port: any = portId ? store.get("ports", portId) : null;
+    const eq: any = store.get("equipments", port ? port.equipment_id : (eqId || null));
+    if (!eq) return "";
+    const nom = eq.name || I18n.t("lists.ph.noName");
+    return port ? (nom + " · " + (port.name || I18n.t("cable.cable.port"))) : nom;
+  }
+
+  /** Libellé d'une ANCRE de faisceau : le nom du patch d'extrémité (vide si non renseigné). */
+  private static equipAnchorLabel(store: Store, equipmentId: string): string {
+    const eq: any = equipmentId ? store.get("equipments", equipmentId) : null;
+    return eq ? (eq.name || I18n.t("cable.bundle.equipment")) : "";
+  }
+
+  /** TOUS les waypoints du document, décrits pour l'éligibilité et pour l'affichage.
+
+      ⚠ CONTENEUR, TYPE et POSE sont LUS SUR LA GRAMMAIRE, pas recalculés : une analyse portant sur ce
+      SEUL waypoint rend exactement ce que l'automate dira de lui (`steps[0].container`/`.type`, et
+      l'erreur `unplaced` s'il n'est pas posé). Les recopier ici — « pin d'étage ⇒ conteneur étage,
+      sinon la salle de rattachement » — aurait dupliqué `CableRouteAnalyzer.waypointContainer`, avec
+      la garantie de le voir diverger : c'est très exactement la dette que la doctrine (§6.7) décrit.
+      Le coût est une analyse d'UNE étape par waypoint, payée à l'ouverture du popover.
+
+      ⚠ Les waypoints NON POSÉS sont désormais LISTÉS (grisés, motif à l'appui) au lieu d'être
+      masqués comme dans l'ancien nuage : « grisé ≠ caché » — on apprend la règle en lisant. */
+  private static routeCandidates(store: Store): RouteChainCandidate[] {
+    return store.all("waypoints").slice()
+      .map((wp: any) => {
+        const sonde = store.cableRoute({ from_port_id: null, to_port_id: null, waypoint_ids: [wp.id] });
+        const step = sonde.steps[0];
+        return {
+          id: wp.id,
+          container: step ? step.container : null,
+          type: (step ? step.type : "datacenter") as RouteCandidateType,
+          placed: !sonde.errors.some((e) => e.code === "unplaced"),
+          glyph: Waypoint.glyph(wp),
+          name: wp.name || I18n.t("cable.common.waypoint"),
+        };
+      })
+      // Ordre d'ENTRÉE = conteneur puis nom. Le classement par PERTINENCE (et la remontée des exits)
+      // est ensuite l'affaire de `RouteEligibility`, qui préserve cet ordre à pertinence égale.
+      .sort((a, b) => (store.containerLabel(a.container) || "").localeCompare(store.containerLabel(b.container) || "") || a.name.localeCompare(b.name));
+  }
+
+  /** Habillage d'une ÉTAPE (glyphe + nom) ; null pour un id qui ne résout aucun waypoint. */
+  private static describeWaypoint(store: Store, waypointId: string): RouteChainStep | null {
+    const wp: any = store.get("waypoints", waypointId);
+    return wp ? { glyph: Waypoint.glyph(wp), name: wp.name || I18n.t("cable.common.waypoint") } : null;
+  }
+
   static cable(store: Store, host: FormHost, id: string | null, onSaved?: () => void, opts: any = {}): void {
     const cable: any = id ? store.get("cables", id) : null;
     const root = document.createElement("div");
@@ -186,74 +247,38 @@ export class CableForms extends EquipmentForms {
     };
     root.appendChild(FormControls.fieldRow(I18n.t("cable.cable.netField"), netInfo, I18n.t("cable.cable.netFieldHint")));
 
-    // ---- points de passage : waypoints ORDONNÉS A→B (grammaire exit/OOB) ----
+    // ---- ROUTE : waypoints ORDONNÉS A→B, édités comme une CHAÎNE (views/forms/RouteChainEditor) ----
+    // A REMPLACÉ les trois champs historiques — nuage de cases groupé par TYPE, hint de route texte,
+    // liste « Ordre des points » — qui disaient la même chose deux fois (sélection d'un côté, ordre de
+    // l'autre) alors qu'une route EST une séquence. Le BROUILLON, lui, ne bouge pas d'un octet :
+    // `wpState.ids` reste le tableau que lit `onSave`, et le composant se contente de le remplacer.
     const wpState = { ids: cable ? (cable.waypoint_ids || []).slice() : ((opts.waypointIds || []).slice()) };
-    const WP_CAT_ORDER = ["point", "floor", "segment", "brush", "exit"];
-    const WP_CAT_LABEL: Record<string, string> = { point: I18n.t("cable.cable.wpCatPoint"), floor: I18n.t("cable.cable.wpCatFloor"), segment: I18n.t("cable.cable.wpCatSegment"), brush: I18n.t("cable.cable.wpCatBrush"), exit: I18n.t("cable.cable.wpCatExit") };
-    const wpCatKey = (wp: any) => Waypoint.typeOf(wp) === "exit" ? "exit" : Waypoint.isFloorLevel(wp) ? "floor" : (wp.kind === "segment" ? "segment" : wp.kind === "brush" ? "brush" : "point");
-    const wpLabel = (wp: any) => Waypoint.glyph(wp) + " " + (wp.name || I18n.t("cable.common.waypoint")) + " · " + (Waypoint.isFloorLevel(wp) ? Waypoint.floorLabel(wp) : (store.waypointIsPlaced(wp) ? store.dcName(wp.datacenter_id) : I18n.t("cable.common.notPlaced")));
-    const wpAll = store.all("waypoints")
-      .filter((wp: any) => Waypoint.isFloorLevel(wp) || store.waypointIsPlaced(wp) || wpState.ids.includes(wp.id))
-      .sort((a: any, b: any) => { const ta = Waypoint.isFloorLevel(a) ? 1 : 0, tb = Waypoint.isFloorLevel(b) ? 1 : 0; if (ta !== tb) return ta - tb; const da = ta ? Waypoint.floorLabel(a) : store.dcName(a.datacenter_id); const db = tb ? Waypoint.floorLabel(b) : store.dcName(b.datacenter_id); return da.localeCompare(db) || (a.name || "").localeCompare(b.name || ""); });
-    const wpRouteHint = document.createElement("div"); wpRouteHint.className = "form-hint";
-    const wpBoxes = document.createElement("div"); wpBoxes.style.cssText = "display:flex;flex-direction:column;gap:6px;margin:2px 0;";
-    const wpOrderBox = document.createElement("div"); wpOrderBox.style.cssText = "display:flex;flex-direction:column;gap:4px;margin:2px 0;";
-    const wpField = FormControls.fieldRow(I18n.t("cable.cable.wpField"), wpBoxes, I18n.t("cable.cable.wpHint"));
-    const wpOrderField = FormControls.fieldRow(I18n.t("cable.cable.orderField"), wpOrderBox, I18n.t("cable.cable.orderHint"));
-
-    const syncRoute = () => {
-      wpRouteHint.classList.remove("err");
-      const r = store.cableRoute({ from_port_id: selPortA.value || null, to_port_id: selPortB.value || null, waypoint_ids: wpState.ids });
-      if (!wpState.ids.length) {
-        wpRouteHint.textContent = r.valid ? I18n.t("cable.cable.routeNoWp") : I18n.t("cable.cable.routeErrPrefix", { message: r.errors[0].message });
-        if (!r.valid) wpRouteHint.classList.add("err");
-        return;
-      }
-      const sum = store.cableRouteSummary(r);
-      if (r.valid) wpRouteHint.textContent = I18n.t("cable.cable.routeOk", { summary: sum });
-      else { wpRouteHint.textContent = I18n.t("cable.cable.routeErr", { summary: (sum ? sum + " — " : ""), message: r.errors[0].message }); wpRouteHint.classList.add("err"); }
-    };
-    const syncWpOrder = () => {
-      wpOrderBox.innerHTML = "";
-      wpOrderField.style.display = wpState.ids.length < 2 ? "none" : "";
-      if (wpState.ids.length < 2) return;
-      wpState.ids.forEach((wid: string, i: number) => {
-        const wp: any = store.get("waypoints", wid); if (!wp) return;
-        const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:6px;font-size:12px;";
-        const num = document.createElement("span"); num.className = "pill"; num.textContent = String(i + 1);
-        const tx = document.createElement("span"); tx.style.cssText = "flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"; tx.textContent = wpLabel(wp);
-        const mk = (sym: string, d: number, title: string) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = sym; b.title = title; b.disabled = (d < 0 && i === 0) || (d > 0 && i === wpState.ids.length - 1); b.onclick = () => { const j = i + d; wpState.ids.splice(i, 1); wpState.ids.splice(j, 0, wid); syncWpOrder(); syncRoute(); refresh(); syncStatus(true); }; return b; };
-        row.append(num, tx, mk("↑", -1, I18n.t("cable.cable.moveEarlier")), mk("↓", +1, I18n.t("cable.cable.moveLater")));
-        wpOrderBox.appendChild(row);
-      });
-    };
-    const mkWpCheckbox = (wp: any) => {
-      const lab = document.createElement("label"); lab.style.cssText = "display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;";
-      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = wpState.ids.includes(wp.id);
-      cb.onchange = () => {
-        if (cb.checked) {
-          // EXIT TERMINAL : refuse d'ajouter un waypoint de salle après l'exit de cette salle (le câble doit sortir).
-          if (store.routeHasRoomBreak({ from_port_id: null, to_port_id: null, waypoint_ids: [...wpState.ids, wp.id] })) { cb.checked = false; Notify.toast(I18n.t("cable.cable.exitTerminalRoom"), "err"); return; }
-          if (!wpState.ids.includes(wp.id)) wpState.ids.push(wp.id);
-        } else wpState.ids = wpState.ids.filter((x: string) => x !== wp.id);
-        syncWpOrder(); syncRoute(); refresh(); syncStatus(true);
-      };
-      const tx = document.createElement("span"); tx.textContent = wpLabel(wp); lab.append(cb, tx); return lab;
-    };
-    if (!wpAll.length) { const h = document.createElement("span"); h.className = "form-hint"; h.textContent = I18n.t("cable.cable.noWpUsable"); wpBoxes.appendChild(h); }
-    else {
-      const byCat: Record<string, any[]> = {}; wpAll.forEach((wp: any) => { const k = wpCatKey(wp); (byCat[k] = byCat[k] || []).push(wp); });
-      WP_CAT_ORDER.forEach((k) => {
-        const list = byCat[k]; if (!list || !list.length) return;
-        const grp = document.createElement("div");
-        const hd = document.createElement("div"); hd.className = "form-hint"; hd.style.cssText = "font-weight:600;color:var(--fg);margin:2px 0 1px;"; hd.textContent = WP_CAT_LABEL[k] + " (" + list.length + ")";
-        grp.appendChild(hd);
-        const row = document.createElement("div"); row.style.cssText = "display:flex;flex-wrap:wrap;gap:6px 14px;";
-        list.forEach((wp: any) => row.appendChild(mkWpCheckbox(wp)));
-        grp.appendChild(row); wpBoxes.appendChild(grp);
-      });
-    }
-    root.appendChild(wpField); root.appendChild(wpRouteHint); root.appendChild(wpOrderField);
+    // RELAIS DIFFÉRÉS : le composant est construit ICI (sa place dans le formulaire est ici) mais ses
+    // collaborateurs — `refresh`, `syncStatus`, `endContainerOf`, `swapEnds` — ne sont déclarés que plus
+    // bas. Aucun n'est appelé avant le premier `wpChain.render()`, joué en fin de construction avec le
+    // reste des synchronisations. Le composant ne se peint donc PAS dans son constructeur (cf. son
+    // en-tête) : c'est ce qui rend cet ordre tenable sans dupliquer du câblage.
+    let swapEndsRelay = () => { /* câblé plus bas, avec `swapEnds` */ };
+    const wpChain = new RouteChainEditor({
+      ids: () => wpState.ids,
+      setIds: (next) => { wpState.ids = next; },
+      analyze: (ids) => store.cableRoute({ from_port_id: selPortA.value || null, to_port_id: selPortB.value || null, waypoint_ids: ids }),
+      summary: (analysis) => store.cableRouteSummary(analysis),
+      containerLabel: (container) => store.containerLabel(container),
+      anchorA: () => ({ tag: I18n.t("cable.route.anchorTagA"), subject: I18n.t("cable.route.anchorSubjectA"), label: CableForms.portAnchorLabel(store, selPortA.value, selEqA.value), container: endContainerOf("A") }),
+      anchorB: () => ({ tag: I18n.t("cable.route.anchorTagB"), subject: I18n.t("cable.route.anchorSubjectB"), label: CableForms.portAnchorLabel(store, selPortB.value, selEqB.value), container: endContainerOf("B") }),
+      candidates: () => CableForms.routeCandidates(store),
+      describe: (id) => CableForms.describeWaypoint(store, id),
+      swapEnds: () => { swapEndsRelay(); },
+      // La chaîne n'a AUCUN champ : sans ce signal, l'instantané de la modale ne verrait RIEN changer
+      // et laisserait fermer sur une route remaniée, sans confirmation (cf. `FormHost.markDirty`).
+      // On ne re-peint PAS la chaîne ici : le composant le fait lui-même juste après ce rappel.
+      changed: () => { host.markDirty?.(); refresh(); syncStatus(true); },
+    });
+    /** Re-peint la chaîne — la route est inchangée, mais les ANCRES (donc leurs alertes) dépendent des
+        ports choisis. A remplacé l'ancien hint texte `syncRoute`, dont il garde le nom et les sites d'appel. */
+    const syncRoute = () => { wpChain.render(); };
+    root.appendChild(FormControls.fieldRow(I18n.t("cable.route.field"), wpChain.element, I18n.t("cable.route.fieldHint")));
 
     const statusSel = FormControls.select(CableStatuses.ALL.map((s) => ({ value: s.id, label: I18n.t(s.labelKey) })), cable ? cable.status : CABLE_STATUS_DEFAULT_NEW);
     root.appendChild(FormControls.fieldRow(I18n.t("cable.cable.statusField"), statusSel, I18n.t("cable.cable.statusHint")));
@@ -353,8 +378,11 @@ export class CableForms extends EquipmentForms {
       refresh(); syncRoute(); syncStatus(true); renderNets();
     };
     swapBtn.onclick = swapEnds;
+    // L'action « Inverser » proposée SUR L'ANCRE par la chaîne est EXACTEMENT celle du bouton ⇅ du
+    // formulaire : une seule implémentation, donc aucun risque que les deux divergent.
+    swapEndsRelay = () => { host.markDirty?.(); swapEnds(); };
 
-    refresh(); syncWpOrder(); renderNets(); syncRoute(); syncStatus(false);
+    refresh(); renderNets(); syncRoute(); syncStatus(false);
 
     // validation live (invariant câble partagé : un port ne se relie pas à lui-même) — surligne le port B.
     // `name` mappé pour que l'unicité V6h (règle de PORTÉE) puisse surligner le champ si l'autorité la signale.
@@ -456,59 +484,46 @@ export class CableForms extends EquipmentForms {
     const lenI = FormControls.number((bnd && bnd.length_m != null) ? bnd.length_m : "", { min: 0, step: 0.1, placeholder: I18n.t("cable.bundle.lenPlaceholder") });
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("cable.bundle.fiberField"), typeI, I18n.t("cable.bundle.fiberHint")), FormControls.fieldRow(I18n.t("cable.bundle.strandField"), fcI, I18n.t("cable.bundle.strandHint")), FormControls.fieldRow(I18n.t("cable.bundle.lenField"), lenI, I18n.t("cable.bundle.lenHint"))));
 
-    // route PARTAGÉE (ordonnée) — picker compact (exits/OOB)
+    // ---- ROUTE PARTAGÉE : le MÊME composant que le formulaire câble (carton §4.5, décision D6) ----
+    // A REMPLACÉ le nuage de cases PLAT + le hint texte + la liste « Ordre du trajet ». Le faisceau
+    // hérite d'un coup de ce qui lui manquait : les erreurs rattachées à LEUR étape, l'état « transit »
+    // visible, les ancres en alerte et l'action d'inversion. Seules les ANCRES diffèrent du câble —
+    // des patchs plutôt que des ports —, et c'est tout ce que ce bloc a de spécifique.
     const wpState = { ids: bnd ? (bnd.waypoint_ids || []).slice() : [] as string[] };
-    const wpAll = store.all("waypoints").filter((wp: any) => Waypoint.isFloorLevel(wp) || store.waypointIsPlaced(wp) || wpState.ids.includes(wp.id))
-      .sort((a: any, b: any) => ((Waypoint.isFloorLevel(a) ? 1 : 0) - (Waypoint.isFloorLevel(b) ? 1 : 0)) || (a.name || "").localeCompare(b.name || ""));
-    const wpBoxes = document.createElement("div"); wpBoxes.style.cssText = "display:flex;flex-wrap:wrap;gap:6px 14px;margin:2px 0;";
-    const orderBox = document.createElement("div");
-    const wpLab = (wp: any) => Waypoint.glyph(wp) + " " + (wp.name || I18n.t("cable.common.waypoint")) + " · " + (Waypoint.isFloorLevel(wp) ? Waypoint.floorLabel(wp) : (store.waypointIsPlaced(wp) ? store.dcName(wp.datacenter_id) : I18n.t("cable.common.notPlaced")));
-    // RETOUR DE ROUTE VIVANT (parité `syncRoute` du formulaire câble) : le faisceau n'affichait AUCUN
-    // verdict — une route incohérente avec les extrémités ne se voyait qu'en 2D/3D… par un tracé ABSENT
-    // (incident réel : 1er waypoint sortant d'une salle sans extrémité → faisceau invisible, zéro message).
-    // La source du verdict est UNIQUE : `store.bundleRoute` (grammaire + extrémités, inversion tolérée) —
-    // la MÊME analyse que celle qui décide du tracé (`TrunkRouting.trunkRoute`).
-    const routeHint = document.createElement("div"); routeHint.className = "form-hint";
-    const syncBundleRoute = () => {
-      routeHint.classList.remove("err");
-      const r = store.bundleRoute({ endpoint_a_equipment_id: epaI.value || null, endpoint_b_equipment_id: epbI.value || null, waypoint_ids: wpState.ids });
-      if (!wpState.ids.length) {
-        // Sans waypoint, seule l'incohérence d'extrémités (`endpoints_split`) peut survenir : le message
-        // pédagogique rappelle alors la grammaire (exits par paires), comme côté câble.
-        routeHint.textContent = r.valid ? I18n.t("cable.bundle.routeNoWp") : I18n.t("cable.bundle.routeErrPrefix", { message: r.errors[0].message });
-        if (!r.valid) routeHint.classList.add("err");
-        return;
-      }
-      const sum = store.cableRouteSummary(r);
-      if (r.valid) routeHint.textContent = I18n.t("cable.bundle.routeOk", { summary: sum });
-      else { routeHint.textContent = I18n.t("cable.bundle.routeErr", { summary: (sum ? sum + " — " : ""), message: r.errors[0].message }); routeHint.classList.add("err"); }
+    /** ÉCHANGE DES EXTRÉMITÉS — l'équivalent faisceau du bouton ⇅ du câble (le formulaire faisceau n'en
+        avait pas). Les deux sélecteurs s'EXCLUENT l'un l'autre (règle T10) : on repeuple donc les deux
+        listes avec les valeurs croisées avant de les poser, sinon la valeur entrante serait absente de
+        sa propre liste et retomberait à vide. */
+    // ⚠ On NE rejoue PAS `refreshEndpointOpts` derrière : il repeuple avec `initEpA`/`initEpB` comme
+    // `keepId` (les valeurs STOCKÉES), ce qui ferait retomber à vide une extrémité NON patch tout juste
+    // échangée (donnée d'avant la règle T11, délibérément conservée dans SON select).
+    const swapEndpoints = () => {
+      const a = epaI.value, b = epbI.value;
+      epaI.setOptions(patchEndpointOpts(a, b), b);
+      epbI.setOptions(patchEndpointOpts(b, a), a);
+      host.markDirty?.();
+      syncBundleRoute();
     };
-    const renderOrder = () => {
-      orderBox.innerHTML = "";
-      wpState.ids.forEach((wid: string, i: number) => {
-        const wp: any = store.get("waypoints", wid); if (!wp) return;
-        const r = document.createElement("div"); r.style.cssText = "display:flex;align-items:center;gap:6px;margin:2px 0;font-size:12px;";
-        const n = document.createElement("span"); n.className = "pill"; n.textContent = String(i + 1); const tx = document.createElement("span"); tx.className = "grow"; tx.textContent = wpLab(wp);
-        const mk = (s: string, d: number) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost btn-sm"; b.textContent = s; b.disabled = (d < 0 && i === 0) || (d > 0 && i === wpState.ids.length - 1); b.onclick = () => { const j = i + d; wpState.ids.splice(i, 1); wpState.ids.splice(j, 0, wid); renderOrder(); syncBundleRoute(); }; return b; };
-        r.append(n, tx, mk("↑", -1), mk("↓", 1)); orderBox.appendChild(r);
-      });
-    };
-    if (!wpAll.length) { const h = document.createElement("span"); h.className = "form-hint"; h.textContent = I18n.t("cable.bundle.noWpUsable"); wpBoxes.appendChild(h); }
-    else wpAll.forEach((wp: any) => {
-      const lab = document.createElement("label"); lab.style.cssText = "display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;";
-      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = wpState.ids.includes(wp.id);
-      cb.onchange = () => {
-        if (cb.checked) {   // EXIT TERMINAL : refuse un waypoint de salle après l'exit de cette salle
-          if (store.routeHasRoomBreak({ from_port_id: null, to_port_id: null, waypoint_ids: [...wpState.ids, wp.id] })) { cb.checked = false; Notify.toast(I18n.t("cable.bundle.exitTerminal"), "err"); return; }
-          if (!wpState.ids.includes(wp.id)) wpState.ids.push(wp.id);
-        } else wpState.ids = wpState.ids.filter((x: string) => x !== wp.id);
-        renderOrder(); syncBundleRoute();
-      };
-      const tx = document.createElement("span"); tx.textContent = wpLab(wp); lab.append(cb, tx); wpBoxes.appendChild(lab);
+    const wpChain = new RouteChainEditor({
+      ids: () => wpState.ids,
+      setIds: (next) => { wpState.ids = next; },
+      // La source du verdict reste UNIQUE : `store.bundleRoute` (grammaire + cohérence des EXTRÉMITÉS,
+      // inversion tolérée) — la MÊME analyse que celle qui décide du tracé (`TrunkRouting.trunkRoute`).
+      analyze: (ids) => store.bundleRoute({ endpoint_a_equipment_id: epaI.value || null, endpoint_b_equipment_id: epbI.value || null, waypoint_ids: ids }),
+      summary: (analysis) => store.cableRouteSummary(analysis),
+      containerLabel: (container) => store.containerLabel(container),
+      anchorA: () => ({ tag: I18n.t("cable.route.endpointTagA"), subject: I18n.t("cable.route.endpointSubjectA"), label: CableForms.equipAnchorLabel(store, epaI.value), container: epaI.value ? store.equipmentNamedContainer(epaI.value) : null }),
+      anchorB: () => ({ tag: I18n.t("cable.route.endpointTagB"), subject: I18n.t("cable.route.endpointSubjectB"), label: CableForms.equipAnchorLabel(store, epbI.value), container: epbI.value ? store.equipmentNamedContainer(epbI.value) : null }),
+      candidates: () => CableForms.routeCandidates(store),
+      describe: (id) => CableForms.describeWaypoint(store, id),
+      swapEnds: swapEndpoints,
+      changed: () => { host.markDirty?.(); },
     });
-    root.appendChild(FormControls.fieldRow(I18n.t("cable.bundle.routeField"), wpBoxes, I18n.t("cable.bundle.routeHint")));
-    root.appendChild(routeHint);   // le verdict de route, SOUS le champ route (même position que côté câble)
-    root.appendChild(FormControls.fieldRow(I18n.t("cable.bundle.orderField"), orderBox)); renderOrder(); syncBundleRoute();
+    /** Re-peint la chaîne : la route n'a pas bougé, mais les ANCRES (donc leurs alertes) dépendent des
+        extrémités choisies. A remplacé l'ancien hint texte, dont il garde le nom et les sites d'appel. */
+    const syncBundleRoute = () => { wpChain.render(); };
+    root.appendChild(FormControls.fieldRow(I18n.t("cable.route.field"), wpChain.element, I18n.t("cable.route.fieldHint")));
+    syncBundleRoute();
     const descI = FormControls.textArea(bnd ? bnd.description : "");
     root.appendChild(FormControls.fieldRow(I18n.t("cable.common.description"), descI));
     if (bnd) { const oc = store.bundleOccupancy(bnd.id); const maxStrand = store.maxUsedStrandOfBundle(bnd.id); const info = document.createElement("div"); info.className = "form-hint"; const suffix = maxStrand ? I18n.t("cable.bundle.occupancyReduce", { max: maxStrand }) : I18n.t("cable.bundle.occupancyEnd"); info.textContent = I18n.t("cable.bundle.occupancy", { used: oc.used, capacity: oc.capacity, suffix }); root.appendChild(info); }

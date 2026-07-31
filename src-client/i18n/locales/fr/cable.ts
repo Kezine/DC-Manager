@@ -1,7 +1,10 @@
 /* ============================================================================
    Domaine `cable` — FRANÇAIS. Formulaires CÂBLAGE (`views/forms/CableForms.ts`) :
    réseaux logiques/power (`net`), câbles point à point (`cable`), faisceaux/
-   trunks (`bundle`) ; `common` = fragments partagés par ces trois formulaires.
+   trunks (`bundle`) ; `common` = fragments partagés par ces trois formulaires ;
+   `route` = l'ÉDITEUR DE ROUTE EN CHAÎNE (`views/forms/RouteChainEditor.ts`),
+   partagé MOT POUR MOT par le câble et le faisceau — seules les ancres diffèrent,
+   et elles sont paramétrées (`anchorTag*`/`anchorSubject*`).
    Agrégé par `../fr.ts`. Voir docs/i18n.md.
 
    Les `{{message}}` proviennent du moteur de route/validation (Store) et ne sont
@@ -69,23 +72,6 @@ export const cable = {
     netDeduced: "Réseau déduit : {{list}}{{suffix}}",
     netField: "Réseau",
     netFieldHint: "Déduit des ports terminaux (source unique). S'assigne sur les ports, pas sur le câble.",
-    wpCatPoint: "◆ Pins de salle",
-    wpCatFloor: "◎ Pins d'étage",
-    wpCatSegment: "▬ Chemins de câbles",
-    wpCatBrush: "▦ Brosses de brassage",
-    wpCatExit: "⏏ Exits",
-    wpField: "Points de passage",
-    wpHint: "Cochés = ajoutés en fin de trajet. ◆ pin de salle · ▬ chemin · ▦ brosse · ⏏ exit (par paires entre salles) · ◎ pin d'étage (hors salles).",
-    orderField: "Ordre du trajet (A → B)",
-    orderHint: "Réordonnez les points de passage le long du câble.",
-    routeNoWp: "Aucun point de passage — le câble reste dans sa salle.",
-    routeErrPrefix: "⚠ {{message}} — pour relier deux salles : ⏏ exit → (◎ pin d'étage…) → ⏏ exit.",
-    routeOk: "Route : {{summary}} ✓",
-    routeErr: "Route : {{summary}}⚠ {{message}}",
-    moveEarlier: "Plus tôt sur le trajet",
-    moveLater: "Plus tard sur le trajet",
-    exitTerminalRoom: "Un exit est TERMINAL pour sa salle — le câble doit sortir avant tout autre waypoint de salle.",
-    noWpUsable: "Aucun waypoint utilisable (vue Datacenter ; un waypoint de salle doit être POSÉ).",
     statusField: "Statut",
     statusHint: "« Brouillon » tant que l'assignation est incomplète OU la route invalide ; « Câblé » exige les 2 bouts posés.",
     selfLoop: "Un câble ne peut pas relier un port à lui-même.",
@@ -111,7 +97,6 @@ export const cable = {
     nameField: "Nom du faisceau",
     nameHint: "Label porté sur le tracé (les brins l'affichent).",
     lenPlaceholder: "ex. 25",
-    exitTerminal: "Un exit est TERMINAL pour sa salle — le câble doit sortir.",
     endpointNone: "— extrémité (patch) —",
     equipment: "(équipement)",
     notPatch: " · NON patch !",
@@ -125,16 +110,7 @@ export const cable = {
     strandHint: "Capacité (plafond).",
     lenField: "Longueur (m)",
     lenHint: "Longueur du trunk.",
-    noWpUsable: "Aucun waypoint utilisable (créez des exits / pins d'étage en vue Datacenter).",
-    routeField: "Route du trunk",
-    routeHint: "Exits (par paires) + pins d'étage. Cochés = ajoutés en fin de trajet — porte le tracé 2D/3D.",
-    // hint de route vivant (parité formulaire câble) — verdict de `store.bundleRoute` (extrémités ⇄ route)
-    routeNoWp: "Aucun point de passage — le faisceau reste dans son conteneur.",
-    routeErrPrefix: "⚠ {{message}} — pour relier deux salles : ⏏ exit → (◎ pin d'étage…) → ⏏ exit.",
-    routeOk: "Route : {{summary}} ✓",
-    routeErr: "Route : {{summary}}⚠ {{message}}",
     routeInvalid: "Route invalide : {{message}}",
-    orderField: "Ordre du trajet",
     occupancy: "{{used}} brin(s) pioché(s) (ports de patch) sur {{capacity}}{{suffix}}",
     occupancyReduce: ". Réduire le nb de brins sous le n° max pioché ({{max}}) est refusé.",
     occupancyEnd: ".",
@@ -145,5 +121,61 @@ export const cable = {
     saveFailed: "Le faisceau n'a pas pu être enregistré (voir les erreurs).",
     updated: "Faisceau mis à jour",
     created: "Faisceau créé",
+  },
+  /* ÉDITEUR DE ROUTE EN CHAÎNE — `views/forms/RouteChainEditor.ts`, partagé câble ⇄ faisceau.
+     A REMPLACÉ les trois champs du câble (nuage « Points de passage » groupé par TYPE, hint de
+     route, liste « Ordre des points ») et les deux du faisceau. Les clés correspondantes ont été
+     retirées avec eux (décision D5 du cadrage : la purge se fait DANS le lot de bascule, pour ne
+     jamais laisser vivre deux interfaces de route en parallèle).
+     Les `reason*` traduisent les CODES de `core/RouteEligibility` (module pur : il ne produit que
+     des codes, jamais de français) ; ils s'affichent sur les propositions GRISÉES du popover
+     d'ajout — l'utilisateur apprend la grammaire en lisant, au lieu de la découvrir par un toast
+     de refus après coup. */
+  route: {
+    field: "Route",
+    fieldHint: "◆ pin de salle · ▬ chemin de câbles · ▦ brosse · ⏏ exit (sortie de salle, par paires) · ◎ pin d'étage (hors salles).",
+    anchorTagA: "Bout A",
+    anchorTagB: "Bout B",
+    anchorSubjectA: "le bout A",
+    anchorSubjectB: "le bout B",
+    endpointTagA: "Extrémité A",
+    endpointTagB: "Extrémité B",
+    endpointSubjectA: "l'extrémité A",
+    endpointSubjectB: "l'extrémité B",
+    anchorEmpty: "— non renseigné —",
+    containerNone: "—",
+    empty: "Aucun point de passage — tracé direct entre les deux bouts.",
+    directHint: "Les deux bouts sont dans le même conteneur — aucune sortie requise.",
+    transitBand: "Transit",
+    transitBandFrom: "Transit — hors « {{name}} »",
+    transitHint: "Hors salle — en attente d'arrivée : l'exit d'une AUTRE salle, ou un pin d'étage.",
+    addStep: "Ajouter une étape…",
+    closeSegment: "Refermer le tronçon…",
+    searchPlaceholder: "Rechercher un waypoint…",
+    moveEarlier: "Plus tôt sur le trajet",
+    moveLater: "Plus tard sur le trajet",
+    removeStep: "Retirer cette étape de la route",
+    notPlacedMsg: "Ce waypoint n'est placé dans aucune salle : il est IGNORÉ au tracé. Posez-le dans la vue Datacenter, ou retirez-le de la route.",
+    valid: "Route valide",
+    transitOpen: "Transit ouvert",
+    sensToConfirm: "Sens à confirmer",
+    problems: "{{n}} problème(s)",
+    warnings: "{{n}} avertissement(s)",
+    stepPrefix: "Étape {{n}} — {{message}}",
+    suggestMissingExit: "Il manque l'exit de « {{name}} » pour rejoindre {{anchor}}.",
+    anchorMismatch: "La route relie « {{start}} » à « {{end}} », mais {{anchor}} est dans « {{name}} ».",
+    reversed: "La route va de « {{start}} » vers « {{end}} » — vos bouts sont dans l'autre sens.",
+    reversedFoot: "Inverser les extrémités A ⇄ B rend la route valide.",
+    swapAction: "Inverser les extrémités A ⇄ B",
+    reasonAlreadyInRoute: "déjà dans la route",
+    reasonUnplaced: "non posé dans une salle — inutilisable tant qu'il n'est pas placé",
+    reasonFloorPinInRoom: "un pin d'étage ne peut pas être à l'intérieur d'une salle",
+    reasonInTransit: "la route est en transit — il faut d'abord entrer par l'exit d'une salle, ou un pin d'étage",
+    reasonRoomWpOnFloor: "la route est sur un étage — un waypoint de salle n'y a pas sa place",
+    reasonWrongRoom: "hors du conteneur courant — sortez d'abord par un exit",
+    reasonExitWrongRoom: "exit d'une autre salle que celle où la route se trouve",
+    reasonExitReentry: "re-rentrer dans la salle quittée est refusé",
+    reasonBreaksRoute: "rendrait fautive une étape suivante de la route",
+    reasonInvalidHere: "impossible à cette position",
   },
 } as const;

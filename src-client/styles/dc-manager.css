@@ -2592,3 +2592,89 @@
     .gs-overlay { padding: 0; align-items: stretch; }
     .gsearch { max-width: none; max-height: none; height: 100dvh; border: none; border-radius: 0; }
   }
+
+  /* ============ EDITEUR DE ROUTE EN CHAINE (.rc-*) ============
+     `views/forms/RouteChainEditor.ts` — la route d'un cable/faisceau editee comme une CHAINE
+     ordonnee entre deux ancres. Adapte de la maquette `design-system/briefs/
+     route-editor-waypoints.maquette.html` (memes tokens, classes prefixees `rc-` et pastilles
+     `.pill` de l'app reutilisees). Remplace le nuage de cases + la liste « Ordre des points ».
+     Le glisser-deposer, les bandeaux collants et le responsive tactile relevent du lot L4. */
+  .rc { border: 1px solid var(--line); background: var(--bg-2); border-radius: 8px; overflow: hidden; }
+
+  /* -- ancres A/B : non editables ici, chacune avec son conteneur -- */
+  .rc-anchor { display: flex; align-items: center; gap: 10px; padding: 9px 11px; background: var(--bg-3); font-size: 12px; }
+  .rc-anchor.a { border-bottom: 1px solid var(--line-2); }
+  .rc-anchor.b { border-top: 1px solid var(--line-2); }
+  .rc-anchor-tag { flex: none; width: 76px; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-dimmer); }
+  .rc-anchor-nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .rc-sp { flex: 1; min-width: 8px; }
+  .rc-anchor.alert { background: color-mix(in srgb, var(--err) 13%, var(--bg-3)); box-shadow: inset 3px 0 0 var(--err); }
+  .rc-anchor.alert .rc-anchor-tag { color: var(--err); }
+  .rc-anchor-msg {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 0 11px 9px 87px; font-family: var(--sans); font-size: 11.5px; line-height: 1.5; color: var(--err);
+    background: color-mix(in srgb, var(--err) 13%, var(--bg-3)); box-shadow: inset 3px 0 0 var(--err);
+  }
+  .rc-swap { flex: none; border-color: var(--warn); color: var(--warn); }
+  .rc-swap:hover { border-color: var(--warn); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .rc-ctn-pill { text-transform: none; letter-spacing: 0.02em; }
+  .rc-ctn-pill.rc-alert { border-color: var(--err); color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+
+  /* -- corps : bandeaux de conteneur + etapes. `max-height` = le defilement retenu (decision D1 :
+        pas de repli ; la piste « N etapes - voir » est notee dans l'en-tete du composant). -- */
+  .rc-steps { padding: 5px 0; max-height: 340px; overflow-y: auto; }
+  .rc-band {
+    display: flex; align-items: center; gap: 8px; padding: 7px 11px 4px;
+    font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-dimmer);
+  }
+  .rc-band::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .rc-band.transit { color: var(--warn); }
+  .rc-band.transit::after { background: repeating-linear-gradient(90deg, var(--warn) 0 4px, transparent 4px 9px); opacity: 0.6; }
+
+  .rc-step { display: flex; align-items: center; gap: 8px; padding: 6px 11px; background: var(--bg-2); }
+  .rc-step + .rc-step { border-top: 1px solid var(--line); }
+  .rc-step:hover { background: var(--bg-3); }
+  .rc-num { padding: 2px 6px; min-width: 22px; justify-content: center; font-variant-numeric: tabular-nums; }
+  .rc-glyph { flex: none; width: 20px; text-align: center; font-size: 14px; color: var(--fg-dim); }
+  .rc-glyph.exit { color: var(--accent); font-size: 15px; }   /* les exits sont les ARTICULATIONS de la route */
+  .rc-glyph.pin { color: var(--info); }   /* pin d'etage : teinte info, comme la maquette */
+  .rc-nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+  .rc-ctn { flex: none; max-width: 42%; font-size: 11px; color: var(--fg-dimmer); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rc-acts { flex: none; display: flex; gap: 2px; }
+  .rc-step.err { box-shadow: inset 3px 0 0 var(--err); background: color-mix(in srgb, var(--err) 8%, var(--bg-2)); }
+  .rc-step.ghosted { opacity: 0.6; }
+  .rc-step.ghosted .rc-nm { text-decoration: line-through; text-decoration-color: var(--fg-dimmer); }
+  .rc-warn { border-color: var(--warn); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  /* message SOUS l'etape fautive ; `.soft` = avertissement (waypoint non pose, ignore au trace) */
+  .rc-step-msg {
+    padding: 0 11px 8px 58px; font-family: var(--sans); font-size: 11.5px; line-height: 1.5; color: var(--err);
+    background: color-mix(in srgb, var(--err) 8%, var(--bg-2)); box-shadow: inset 3px 0 0 var(--err);
+  }
+  .rc-step-msg.soft { color: var(--fg-dim); background: transparent; box-shadow: none; }
+
+  /* -- transit : l'etat `exit_unpaired` rendu VISIBLE (bloc pointille) plutot qu'erreur au save -- */
+  .rc-transit {
+    display: flex; align-items: center; gap: 10px; margin: 2px 11px; padding: 8px 11px;
+    border: 1px dashed var(--warn); border-radius: 6px; background: color-mix(in srgb, var(--warn) 8%, transparent);
+    color: var(--warn); font-size: 11px;
+  }
+  .rc-transit-ic { flex: none; font-size: 13px; }
+  .rc-transit-l { font-family: var(--sans); color: var(--fg-dim); line-height: 1.45; }
+
+  /* -- « + Ajouter une etape » : cede la place au SearchPop de l'app (principe n°14) -- */
+  .rc-addrow { display: flex; align-items: center; gap: 8px; padding: 6px 11px 8px; }
+  .rc-add { flex: 1; justify-content: center; border-style: dashed; color: var(--fg-dim); min-height: 34px; }
+  .rc-add:hover { color: var(--accent-text); border-color: var(--accent); }
+  .rc-add.warn { border-color: var(--warn); color: var(--warn); }
+  .rc-addrow .dc-search-pop { min-width: 260px; }
+  .rc-empty { padding: 14px 11px 2px; text-align: center; font-family: var(--sans); font-size: 12px; color: var(--fg-dimmer); }
+
+  /* -- pied : pastille d'etat + synthese (le detail vit sur les etapes) -- */
+  .rc-foot {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 11px; border-top: 1px solid var(--line-2); background: var(--bg-3);
+  }
+  .rc-badge.ok { border-color: var(--ok); color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  .rc-badge.warn { border-color: var(--warn); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .rc-badge.err { border-color: var(--err); color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+  .rc-sum { min-width: 0; flex: 1; font-size: 11.5px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

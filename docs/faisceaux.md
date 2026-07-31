@@ -58,6 +58,8 @@ Service pur parallèle à `CableRouting` (mêmes trois cas, parité complète av
 - une route saisie « à l'envers » (extrémité A dans la salle d'arrivée) est **tolérée** en inversant les
   bouts (le formulaire faisceau n'oriente pas la route comme le fait `orientEnds` côté câble) — le
   verdict vient du champ `sens` de `bundleRoute` (« aligned » / « swapped »), plus d'un calcul local.
+  L'ÉDITEUR de route en propose désormais la CORRECTION (« Inverser les extrémités A ⇄ B ») sur l'ancre
+  en alerte, plutôt que de laisser l'utilisateur deviner (cf. § 3.2).
 
 ### 3.1 Cohérence extrémités ⇄ route — `store.bundleRoute` (source unique du verdict)
 
@@ -76,14 +78,39 @@ faisceau dont le 1er waypoint sortait d'une salle ne contenant AUCUNE extrémit�
   extrémités) et `endpoint_route_mismatch` (route à exits dont ni l'endroit ni l'envers ne desservent
   les extrémités posées — le message **nomme les conteneurs**, c'est lui qui aurait révélé l'incident) ;
 - ces codes ne sont **ni structurels ni « room break »** : un brouillon reste enregistrable. Le
-  formulaire faisceau AFFICHE le verdict (hint de route vivant, parité `syncRoute` du câble) et ne
-  bloque au save que les erreurs STRUCTURELLES (`routeStructuralError`), comme le câble.
+  formulaire faisceau AFFICHE le verdict (cf. § 3.2) et ne bloque au save que les erreurs
+  STRUCTURELLES (`routeStructuralError`), comme le câble.
 
 **Conséquence rendu (voulue, parité câbles)** : `TrunkRouting.trunkRoute` délègue à `bundleRoute` et
 `r.valid` intègre ces erreurs → une route incohérente avec ses extrémités ne trace plus **rien**, y
 compris le stub « s'arrête au mur » (`outgoingTrunkStubs`) qui se dessinait auparavant dans la salle de
 l'extrémité qui matchait l'arrivée de la route. Le signal vit dans le formulaire, plus dans un tracé
 fantôme.
+
+### 3.2 L'ÉDITEUR de route — une CHAÎNE, le même pour le câble et le faisceau
+
+Depuis le 2026-07-31, la route ne s'édite plus par un **nuage de cases à cocher** doublé d'une liste
+« Ordre du trajet » : les deux formulaires (`CableForms.cable` et `CableForms.cableBundle`) partagent le
+composant **`views/forms/RouteChainEditor`**, qui affiche la route comme une **chaîne ordonnée** entre
+deux **ancres**. Seules les ancres diffèrent — des **ports** pour un câble, des **patchs** pour un
+faisceau (`equipmentNamedContainer`) —, et elles sont fournies par l'hôte : le composant n'importe ni le
+store ni les formulaires (interface `RouteChainHost`).
+
+Ce que le faisceau y gagne, et qui lui manquait totalement : chaque erreur rattachée à **SON étape**,
+l'état « transit » (`exit_unpaired`) rendu **visible** en cours d'édition au lieu d'être découvert au
+save, les **ancres en alerte** quand la route ne les dessert pas, et l'action **« Inverser les
+extrémités A ⇄ B »** sur le cas « route à l'envers ».
+
+- **La grammaire n'est pas réécrite** : `core/RouteEligibility` (pur, testé) la CONSOMME. Il rend, pour
+  une position d'insertion, la liste des waypoints **utilisables** et le **motif** (code stable) des
+  autres — affichés grisés dans le popover d'ajout (`ui/SearchPop`), « grisé ≠ caché ».
+- **Rattachement erreur → étape** : `RouteAnalysis.errors` ne porte pas d'index. Il se déduit du fait
+  que l'automate est un **pli à gauche** et qu'une étape pousse au plus UNE erreur de grammaire : en
+  analysant les **préfixes** successifs, l'étape qui fait croître le compte porte la dernière erreur
+  (`RouteEligibility.stepReports`, qui rend aussi l'état de l'automate APRÈS chaque étape — d'où les
+  bandeaux de conteneur et le bandeau « Transit »).
+- Spec de fond : `design-system/briefs/route-editor-waypoints.md` ; référence visuelle :
+  `design-system/briefs/route-editor-waypoints.maquette.html`.
 
 ## 4. Style & comportement — « comme un câble, plus épais »
 
