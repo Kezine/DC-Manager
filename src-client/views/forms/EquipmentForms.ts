@@ -197,23 +197,23 @@ export class EquipmentForms extends FormBase {
 
     AuditLine.attach(root, eq, host.userDirectory);   // « Créé/Modifié par » (mode API)
 
-    // Modifier → formulaire d'édition (remplace la fiche par la modale d'édition)
-    const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
+    // Modifier → formulaire d'édition (remplace la fiche par la modale d'édition). Actions dans le PIED FIXE
+    // de la modale (footerActions) plutôt qu'au bas du corps défilant.
+    const footerActions: HTMLElement[] = [];
     // « Localiser en 3D » seulement si l'équipement est LOCALISABLE (prédicat PARTAGÉ `store.equipmentLocatable`,
     // miroir des refus de locateEquipment) — un équipement d'inventaire pur ou dans une baie non placée n'aurait
     // qu'un toast d'erreur (parité avec le listing, cf. ListActions.canLocate).
-    if (host.locate && store.equipmentLocatable(eq.id)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); actions.appendChild(locBtn); }
+    if (host.locate && store.equipmentLocatable(eq.id)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); footerActions.push(locBtn); }
     if (!this.isViewer()) {   // viewer : pas de bouton « Modifier »
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = I18n.t("lists.chrome.rowEdit");
       editBtn.onclick = () => this.equipment(store, host, eq.id, onChanged);
-      actions.appendChild(editBtn);
+      footerActions.push(editBtn);
     }
-    root.appendChild(actions);
 
     // `onResume` : au retour au premier plan (formulaire d'édition, fiche liée ou sous-équipement dépilés),
     // la fiche se RECONSTRUIT depuis le store — elle lit l'objet `eq` capturé à l'ouverture, donc figé.
     host.openModal({
-      title: I18n.t("equipment.detail.title"), subtitle: Html.escape(eq.name || ""), body: root, hideFooter: true, wide: true,
+      title: I18n.t("equipment.detail.title"), subtitle: Html.escape(eq.name || ""), body: root, footerActions, hideFooter: true, wide: true,
       stackKey: "detail:equipments/" + eq.id,
       onResume: () => this.equipmentDetail(store, host, eq.id, onChanged),
     });

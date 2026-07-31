@@ -1474,6 +1474,9 @@
     background: var(--bg-3);
     flex: 0 0 auto;
   }
+  /* Actions de FICHE dans le pied (footerActions) : groupées à gauche d'Annuler/Enregistrer. Le pied garde
+     son justify-content:flex-end — une fiche n'ayant que ce slot, ses boutons restent alignés à droite. */
+  .modal-footer-slot { display: flex; align-items: center; gap: 8px; }
 
   /* ============ MODALE PLEIN ÉCRAN — préférence DESKTOP (Réglages ▸ Apparence) ============
      Quand l'utilisateur active « Modales en plein écran », `data-modal-fs` est posé sur <html>

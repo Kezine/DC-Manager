@@ -142,11 +142,13 @@ export class FormBase {
     tw.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     root.appendChild(tw); return tw;
   }
-  /** Pied de fiche : « Modifier » (si un éditeur est fourni et hors mode visualiseur). */
-  protected static footer(root: HTMLElement, edit?: () => void): void {
-    const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (edit && !this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = edit; actions.appendChild(b); }
-    root.appendChild(actions);
+  /** Actions du PIED d'une fiche : bouton « Modifier » (si un éditeur est fourni et hors mode visualiseur).
+      RETOURNE les boutons à passer à `openModal({ footerActions })` — plutôt que de les appendre au bas du
+      corps DÉFILANT — pour qu'ils vivent dans le pied FIXE, toujours visible sur une fiche longue. Tableau
+      VIDE en mode visualiseur (aucune édition) : le pied reste alors masqué, la fiche n'ayant aucune action. */
+  protected static footer(edit?: () => void): HTMLElement[] {
+    if (edit && !this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = edit; return [b]; }
+    return [];
   }
   /** Bits de localisation d'un équipement (hérités du rack / de la salle, ou saisis). */
   protected static equipLocationBits(store: Store, e: any): string[] {

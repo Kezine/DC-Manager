@@ -41,6 +41,13 @@ export interface ModalOptions {
       (ex. `detail:equipments/42`, `rack-content:7`, `intervention:3`, `cert:9`). */
   stackKey?: string;
   hideFooter?: boolean;
+  /** Boutons d'ACTION posés dans le PIED de la modale — destinés aux FICHES (`hideFooter`). Pourquoi le
+      pied plutôt que le bas du corps : le pied est FIXE (`flex:0 0 auto`, il ne défile pas avec le corps),
+      donc les actions d'une fiche longue (« Modifier », « Localiser »…) restent toujours accessibles sans
+      dérouler jusqu'en bas. Une fiche n'a ni « Enregistrer » ni « Annuler » (l'en-tête porte déjà ← et ✕),
+      son pied n'est donc QUE ces actions. Une édition qui en fournirait AUSSI les verrait à GAUCHE
+      d'Annuler/Enregistrer (toléré, non recherché). Conservés au push/pop comme `body` (cf. ModalLevel). */
+  footerActions?: HTMLElement[];
   saveLabel?: string;
   confirmClose?: boolean;
   wide?: boolean;
@@ -64,6 +71,9 @@ interface ModalLevel extends ModalStackEntry {
   titleText: string;
   subtitleHtml: string;
   bodyEl: HTMLElement;
+  /** Boutons d'action du PIED (fiches) — DOM CONSERVÉ au push/pop comme `bodyEl` : détachés du slot quand un
+      niveau les recouvre, ré-attachés au retour. Tableau vide pour une édition ordinaire. */
+  footerActions: HTMLElement[];
   hideFooter: boolean;
   wide: boolean;
   saveLabel: string;
@@ -121,6 +131,12 @@ interface ModalLevel extends ModalStackEntry {
    fiches en fournissent un (reconstruction depuis le store) ; les formulaires
    non — leur saisie doit survivre.
 
+   PIED DES FICHES (2026-07-31) : une FICHE (`hideFooter`) n'a ni « Enregistrer »
+   ni « Annuler » — l'en-tête porte déjà ← et ✕. Ses boutons d'action
+   (« Modifier », « Localiser »…) ne vivent plus au bas du corps DÉFILANT mais
+   dans le PIED FIXE, via `footerActions` : ils restent visibles sans dérouler la
+   fiche. Le pied ne reste MASQUÉ que pour une fiche SANS action (workflow certs).
+
    ACCESSIBILITÉ (socle partagé avec Dialog, cf. ui/OverlayA11y) :
      - la boîte porte `role="dialog"` + `aria-modal="true"` + `aria-labelledby`
        vers l'ID du titre ; les boutons ← et ✕ ont un `aria-label` localisé ;
@@ -143,8 +159,12 @@ export class Modal {
   private elSubtitle!: HTMLElement;
   private elBody!: HTMLElement;
   private elFooter!: HTMLElement;
+  /** Réceptacle des `footerActions` d'une fiche, à GAUCHE d'Annuler/Enregistrer dans le pied. */
+  private elFooterSlot!: HTMLElement;
   private elBox!: HTMLElement;
   private btnSave!: HTMLButtonElement;
+  /** Bouton « Annuler » — propre à l'ÉDITION, masqué sur une fiche (son pied = ses actions seules). */
+  private btnCancel!: HTMLButtonElement;
   private btnBack!: HTMLButtonElement;
   /** LA pile : politique dans `core/ModalStack` (pure, testée), état DOM ici. */
   private readonly stack = new ModalStack<ModalLevel>();
@@ -173,6 +193,7 @@ export class Modal {
         </div>
         <div class="modal-body"></div>
         <div class="modal-footer">
+          <div class="modal-footer-slot"></div>
           <button type="button" class="btn btn-ghost modal-cancel">${I18n.t("ui.action.cancel")}</button>
           <button type="button" class="btn btn-primary modal-save">${I18n.t("ui.action.save")}</button>
         </div>
@@ -184,7 +205,9 @@ export class Modal {
     this.elSubtitle = overlay.querySelector(".modal-subtitle") as HTMLElement;
     this.elBody = overlay.querySelector(".modal-body") as HTMLElement;
     this.elFooter = overlay.querySelector(".modal-footer") as HTMLElement;
+    this.elFooterSlot = overlay.querySelector(".modal-footer-slot") as HTMLElement;
     this.btnSave = overlay.querySelector(".modal-save") as HTMLButtonElement;
+    this.btnCancel = overlay.querySelector(".modal-cancel") as HTMLButtonElement;
     this.btnBack = overlay.querySelector(".modal-back") as HTMLButtonElement;
     // Rôles ARIA : boîte = dialogue modal, nommée par son titre (ID stable généré une fois).
     const titleId = OverlayA11y.nextId("dcm-modal-title");
@@ -197,7 +220,7 @@ export class Modal {
     // (décision D2) : une fiche n'a pas de pied, donc pas d'« Annuler » — sans lui, elle n'offrirait
     // aucun retour visible.
     this.btnBack.onclick = () => { void this.requestPop(); };
-    (overlay.querySelector(".modal-cancel") as HTMLElement).onclick = () => { void this.requestPop(); };
+    this.btnCancel.onclick = () => { void this.requestPop(); };
     (overlay.querySelector(".modal-close") as HTMLElement).onclick = () => { void this.requestCloseAll(); };
     let down = false;
     overlay.addEventListener("mousedown", (e) => { down = (e.button === 0 && e.target === overlay); });
@@ -265,7 +288,15 @@ export class Modal {
     this.elTitle.textContent = level.titleText || "—";
     this.elSubtitle.innerHTML = level.subtitleHtml;
     this.elBody.replaceChildren(level.bodyEl);   // détache le corps du niveau précédent SANS le détruire
-    this.elFooter.style.display = level.hideFooter ? "none" : "flex";
+    // Pied : réceptacle des actions de FICHE (détache celles du niveau précédent SANS les détruire, comme le
+    // corps). Le pied est VISIBLE dès qu'il porte quelque chose — les boutons Annuler/Enregistrer d'une
+    // ÉDITION, ou les `footerActions` d'une fiche. Il ne reste masqué que si les deux manquent (fiche sans
+    // action, ex. workflow certs). Annuler/Enregistrer sont propres à l'édition → masqués sur une fiche.
+    this.elFooterSlot.replaceChildren(...level.footerActions);
+    const hasFooterActions = level.footerActions.length > 0;
+    this.elFooter.style.display = (!level.hideFooter || hasFooterActions) ? "flex" : "none";
+    this.btnCancel.style.display = level.hideFooter ? "none" : "";
+    this.btnSave.style.display = level.hideFooter ? "none" : "";
     this.elBox.classList.toggle("wide", level.wide);
     this.btnSave.textContent = level.saveLabel;
     this.btnSave.disabled = false;
@@ -287,7 +318,7 @@ export class Modal {
   }
 
   open(opts: ModalOptions): void {
-    const { title, subtitle, body, onSave, onCancel, onClose, onResume, stackKey, hideFooter, saveLabel, confirmClose, wide, onReady } = opts;
+    const { title, subtitle, body, onSave, onCancel, onClose, onResume, stackKey, hideFooter, footerActions, saveLabel, confirmClose, wide, onReady } = opts;
     if (this.editLocked && !hideFooter) return;   // viewer : bloque l'édition
     // Un `open` déclenché PENDANT le `onResume` d'un niveau le REMPLACE (il se reconstruit sur
     // place) au lieu d'en empiler un de plus. Le drapeau est CONSOMMÉ ici : un second `open` dans le
@@ -332,6 +363,7 @@ export class Modal {
     const level: ModalLevel = {
       kind, title: "", stackKey, titleText: title || "—", subtitleHtml: subtitle || "",
       bodyEl: body,
+      footerActions: Array.isArray(footerActions) ? footerActions : [],
       hideFooter: !!hideFooter, wide: !!wide, saveLabel: saveLabel || I18n.t("ui.action.save"),
       confirmClose: (typeof confirmClose === "boolean") ? confirmClose : (typeof onSave === "function"),
       dirty: false, snapshot: Modal._snapshotOf(body),

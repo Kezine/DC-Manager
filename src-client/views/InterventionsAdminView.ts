@@ -653,7 +653,7 @@ export class InterventionsAdminView {
   private detailModal(item: InterventionRecord): void {
     this.host.openModal({
       title: I18n.t("interventions.detail.title"), subtitle: Html.escape(item.title), body: this.detailBody(item),
-      hideFooter: true, wide: true,
+      footerActions: this.editFooterActions(() => item), hideFooter: true, wide: true,
       stackKey: "intervention:" + item.id,
       // Retour au premier plan → fiche RECONSTRUITE. On repart de l'enregistrement RECHARGÉ (`afterWrite`
       // rafraîchit `items` après toute écriture) plutôt que de l'objet capturé, qui serait resté d'avant
@@ -701,7 +701,8 @@ export class InterventionsAdminView {
     const openLevel = (): void => {
       this.host.openModal({
         title: I18n.t("interventions.detail.title"), subtitle: Html.escape(current.title), body: shell,
-        hideFooter: true, wide: true,
+        // Le bouton lit `current` au CLIC (getter) → toujours la version refetchée, jamais l'objet initial.
+        footerActions: this.editFooterActions(() => current), hideFooter: true, wide: true,
         stackKey: "intervention:" + current.id,
         onResume: () => { openLevel(); void refetch(); },   // synchrone : données en main ; asynchrone : vérité serveur
       });
@@ -713,8 +714,9 @@ export class InterventionsAdminView {
       `detailModalById` depuis une fiche) : badges (nature/priorité/statut), fenêtre planifiée, référence
       Jira, description rendue en MARKDOWN, audit, la liste des objets liés (icône de famille + libellé +
       badge ; orphelin « introuvable » grisé, NON cliquable — un CLIC sur un objet lié existant EMPILE sa
-      fiche par-dessus) et le bouton « Modifier » (EMPILE la modale d'ÉDITION). Reconstruit à neuf à chaque
-      (ré)ouverture — jamais muté. */
+      fiche par-dessus). Le bouton « Modifier » ne fait PLUS partie de ce corps défilant : il vit dans le PIED
+      FIXE de la modale (footerActions, cf. `editFooterActions`). Reconstruit à neuf à chaque (ré)ouverture —
+      jamais muté. */
   private detailBody(item: InterventionRecord): HTMLElement {
     const root = document.createElement("div");
 
@@ -750,12 +752,17 @@ export class InterventionsAdminView {
       }).catch(() => { /* auteurs non critiques */ });
     }
 
-    // « Modifier » : EMPILE la modale d'ÉDITION par-dessus ce détail, qui reste vivant dessous. Enregistrer
-    // ou Annuler dépile et redonne ce détail — reconstruit par l'`onResume` du niveau, donc à jour.
-    const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    actions.appendChild(this.actionButton(I18n.t("interventions.rowAction.edit"), "", () => this.interventionModal(item, item.kind), "btn-primary"));
-    root.appendChild(actions);
     return root;
+  }
+
+  /** Bouton « Modifier » du PIED de la fiche (footerActions) — hors du corps DÉFILANT `detailBody`, donc
+      toujours visible. Il EMPILE la modale d'ÉDITION par-dessus ce détail, qui reste vivant dessous ;
+      Enregistrer ou Annuler dépile et redonne ce détail (reconstruit par l'`onResume` du niveau, donc à
+      jour). Le record est lu par un GETTER au moment du clic : l'ouverture PAR ID (`detailModalById`)
+      remplace son enregistrement au refetch, et le bouton, construit une fois, doit alors éditer la version
+      COURANTE — pas l'objet initial, périmé. */
+  private editFooterActions(getItem: () => InterventionRecord): HTMLElement[] {
+    return [this.actionButton(I18n.t("interventions.rowAction.edit"), "", () => { const it = getItem(); this.interventionModal(it, it.kind); }, "btn-primary")];
   }
 
   /** Liste ÉLÉGANTE des objets liés (modale de détail) : icône de famille + libellé + badge de famille. Une

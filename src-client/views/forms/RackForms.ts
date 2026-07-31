@@ -316,25 +316,25 @@ export class RackForms extends CableForms {
 
     AuditLine.attach(root, rk, host.userDirectory);   // « Créé/Modifié par » (mode API)
 
-    // actions : Localiser en 3D + Gérer le contenu + Modifier
-    // « Localiser » seulement si la baie est POSÉE dans une salle (même prédicat que locateRack) — sinon toast d'erreur.
-    const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
-    if (host.locate && rk.datacenter_id) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("rack", rk.id, () => this.rackDetail(store, host, rk.id, onChanged)); actions.appendChild(locBtn); }
+    // actions : Localiser en 3D + Gérer le contenu + Modifier — dans le PIED FIXE (footerActions), plus au
+    // bas du corps défilant. « Localiser » seulement si la baie est POSÉE dans une salle (même prédicat que
+    // locateRack) — sinon toast d'erreur.
+    const footerActions: HTMLElement[] = [];
+    if (host.locate && rk.datacenter_id) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("rack", rk.id, () => this.rackDetail(store, host, rk.id, onChanged)); footerActions.push(locBtn); }
     if (!this.isViewer()) {   // viewer : pas d'édition
       const contentBtn = document.createElement("button"); contentBtn.type = "button"; contentBtn.className = "btn btn-ghost"; contentBtn.textContent = I18n.t("rack.rackDetail.contentBtn");
       contentBtn.title = I18n.t("rack.rackDetail.contentTitle");
       contentBtn.onclick = () => this.rackContent(store, host, rk.id, onChanged);
-      actions.appendChild(contentBtn);
+      footerActions.push(contentBtn);
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = I18n.t("lists.chrome.rowEdit");
       editBtn.onclick = () => this.rack(store, host, rk.id, onChanged);
-      actions.appendChild(editBtn);
+      footerActions.push(editBtn);
     }
-    root.appendChild(actions);
 
     // `onResume` : la fiche se RECONSTRUIT quand elle revient au premier plan (formulaire d'édition, modale
     // « contenu » ou fiche d'équipement dépilés) — elle lit l'objet `rk` capturé à l'ouverture, donc figé.
     host.openModal({
-      title: I18n.t("rack.rackDetail.title"), subtitle: Html.escape(rk.name || ""), body: root, hideFooter: true, wide: true,
+      title: I18n.t("rack.rackDetail.title"), subtitle: Html.escape(rk.name || ""), body: root, footerActions, hideFooter: true, wide: true,
       stackKey: "detail:racks/" + rk.id,
       onResume: () => this.rackDetail(store, host, rk.id, onChanged),
     });

@@ -3,7 +3,8 @@
      jiraInline / auditText) : bandeau de badges (.pill teinté en ligne, cf. InterventionsFormat.priorityClass
      / statusClass), rangées de CONSULTATION .form-field (label + valeur en lecture seule), description en
      MARKDOWN (.md-body, micromark), liste des objets liés (icône de famille .gi + lien + badge de famille),
-     référence Jira (lien mono). Pied = « Modifier » (bouton primaire). La modale s'ouvre en hideFooter/wide.
+     référence Jira (lien mono). Pied FIXE (.modal-footer > .modal-footer-slot, via footerActions) = « Modifier »
+     (bouton primaire), hors du corps défilant. La modale s'ouvre en hideFooter/wide (Annuler/Enregistrer masqués).
      Libellés = catalogues interventions.* / detail.*. APERÇU STATIQUE : sortie de son overlay plein écran. -->
 <section class="ds-section">
   <h2>Modale de détail d'intervention (lecture)</h2>
@@ -76,8 +77,9 @@
           <label>Modifié par</label>
           <div>Jean Martin · 18/07/2026 21:55</div>
         </div>
-
-        <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-slot">
           <button type="button" class="btn btn-primary btn-sm">Modifier</button>
         </div>
       </div>

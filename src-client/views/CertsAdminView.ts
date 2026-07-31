@@ -1106,11 +1106,11 @@ export class CertsAdminView {
     add(I18n.t("certs.admin.info.created"), Html.escape(Format.dateTime(item.created_date)));
     add(I18n.t("certs.admin.info.updated"), Html.escape(Format.dateTime(item.updated_date)));
     // Édition du commentaire : l'éditeur s'EMPILE sur cette fiche, qui reparaît (reconstruite) à sa sortie.
-    const acts = document.createElement("div"); acts.style.cssText = "margin-top:14px;display:flex;justify-content:flex-end";
-    acts.appendChild(this.actionButton(I18n.t("certs.admin.meta.edit"), I18n.t("certs.admin.meta.editTitle"), () => this.metadataModal(item)));
-    root.append(grid, acts);
+    // Bouton dans le PIED FIXE de la modale (footerActions) plutôt qu'au bas du corps défilant.
+    root.append(grid);
+    const footerActions = [this.actionButton(I18n.t("certs.admin.meta.edit"), I18n.t("certs.admin.meta.editTitle"), () => this.metadataModal(item))];
     this.host.openModal({
-      title: I18n.t("certs.admin.info.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true,
+      title: I18n.t("certs.admin.info.title"), subtitle: Html.escape(item.label), body: root, footerActions, hideFooter: true,
       stackKey: "cert:" + item.id,
       // Retour au premier plan → fiche RECONSTRUITE : `metadataModal` écrit label/commentaire DANS l'objet
       // capturé, cette relecture les fait donc apparaître sans nouvel appel réseau.

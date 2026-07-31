@@ -4,8 +4,9 @@
      .cell-name / .cell-actions avec IconButton .icon-action LOCATE), .pill / .role-* / .loc-pill.
      La ligne d'audit vient de src-client/views/forms/AuditLine.ts (.audit-line, « Créé/Modifié par
      {auteur} le {date} », mode API). Le pied est celui de la fiche : « Localiser en 3D » (ghost,
-     icône préfixée .gi) + « Modifier » (primaire) — la fiche s'ouvre en Modal hideFooter (le pied de
-     modale est masqué, les actions vivent dans le corps).
+     icône préfixée .gi) + « Modifier » (primaire). La fiche s'ouvre en Modal hideFooter : Annuler/
+     Enregistrer sont masqués, mais ses actions vivent désormais dans le PIED FIXE de la modale
+     (.modal-footer > .modal-footer-slot, via footerActions) — plus dans le corps défilant.
      APERÇU STATIQUE : la modale est sortie de son overlay plein écran. -->
 <section class="ds-section">
   <h2>Modale de fiche détail (lecture)</h2>
@@ -77,13 +78,14 @@
         </div>
 
         <div class="audit-line">Créé par Marie Dupont le 12/03/2024 09:14 · Modifié par Jean Martin le 05/07/2026 16:32</div>
-
-        <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-slot">
           <button type="button" class="btn btn-ghost"><span class="gi">{{ICON:LOCATE}}</span>Localiser en 3D</button>
           <button type="button" class="btn btn-primary">Modifier</button>
         </div>
       </div>
     </div>
   </div>
-  <p class="ds-note">Les boutons d'action de la table sont des boutons-icône (<code>.icon-action</code>, <code>aria-label</code> + <code>title</code> obligatoires, cf. <code>IconButton</code>). Le pied « Localiser en 3D » préfixe l'icône via <code>.gi</code> (icône dans un libellé). La ligne d'audit est discrète et estompée.</p>
+  <p class="ds-note">Les boutons d'action de la table sont des boutons-icône (<code>.icon-action</code>, <code>aria-label</code> + <code>title</code> obligatoires, cf. <code>IconButton</code>). Les actions de la fiche vivent dans le <code>.modal-footer</code> FIXE (via <code>.modal-footer-slot</code>) : toujours visibles, sans défiler jusqu'au bas d'une fiche longue. « Localiser en 3D » préfixe l'icône via <code>.gi</code> (icône dans un libellé). La ligne d'audit est discrète et estompée.</p>
 </section>

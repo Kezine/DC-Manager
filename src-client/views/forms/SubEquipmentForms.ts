@@ -109,13 +109,13 @@ export class SubEquipmentForms extends FormBase {
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "sub_equipment", id: se.id, label: se.name || "" }, () => host.closeModal?.());
 
     AuditLine.attach(root, se, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    this.footer(root, () => this.form(store, host, se.equipment_id, se.id, onChanged));
+    const footerActions = this.footer(() => this.form(store, host, se.equipment_id, se.id, onChanged));
     const tw = root;
     tw.querySelectorAll("[data-master-view]").forEach((el) => {
       (el as HTMLElement).onclick = () => EquipmentForms.equipmentDetail(store, host, (el as HTMLElement).dataset.masterView!, onChanged);
     });
     host.openModal({
-      title: I18n.t("subEquipment.detailTitle"), subtitle: Html.escape(this.label(se)), body: root, hideFooter: true, wide: true,
+      title: I18n.t("subEquipment.detailTitle"), subtitle: Html.escape(this.label(se)), body: root, footerActions, hideFooter: true, wide: true,
       stackKey: "detail:subEquipments/" + id,
       onResume: () => this.detail(store, host, id, onChanged),   // retour au premier plan (édition dépilée) → fiche reconstruite depuis le store
     });
