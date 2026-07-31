@@ -38,6 +38,8 @@ export const interventions = {
     openCount: "{{n}} ouverte(s)",
     none: "Aucune ouverte",
     showMore: "Afficher plus",
+    // Info-bulle des lignes du mini-listing (cliquables : la fiche de détail s'EMPILE sur la modale courante).
+    openDetail: "Ouvrir l'intervention",
   },
   col: {
     title: "Titre",
@@ -115,6 +117,8 @@ export const interventions = {
     started: "Intervention démarrée",
     closed: "Intervention close",
     linkExists: "Cet objet est déjà lié.",
+    // Ouverture/rafraîchissement PAR ID depuis une fiche : l'intervention n'existe plus côté serveur.
+    notFound: "Intervention introuvable — elle a peut-être été supprimée.",
   },
   error: {
     titleRequired: "Le titre est requis.",

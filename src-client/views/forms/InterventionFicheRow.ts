@@ -18,10 +18,11 @@ import type { InterventionFicheHooks, InterventionFicheItem } from "../Intervent
 
    MINI-LISTING (« N dernières », TOUTES — pas seulement les ouvertes ; tri activité récente côté serveur) :
    chargé en async comme le badge, SILENCIEUX en échec réseau (rien ne s'affiche) et rien non plus si 0
-   intervention. Chaque ligne est INFORMATIVE (non cliquable en phase 1 — la cliquabilité viendra avec la
-   pile de modales : push de la fiche d'intervention par-dessus la fiche courante). « Afficher plus » suit
-   EXACTEMENT la même séquence que « Déclarer » (close puis openListFor) : c'est un CHANGEMENT DE VUE, la
-   vue Interventions s'ouvrant FILTRÉE sur la cible (chip retirable). */
+   intervention. Chaque ligne est CLIQUABLE (D1 du cadrage, levé par la pile de modales) : un clic EMPILE la
+   fiche de détail de l'intervention PAR-DESSUS la fiche courante (`hooks.openDetail`) — AUCUN changement de
+   vue, AUCUNE fermeture, ← Retour / Retour arrière ramènent à la fiche de l'objet. « Afficher plus » suit,
+   lui, EXACTEMENT la même séquence que « Déclarer » (close puis openListFor) : c'est un CHANGEMENT DE VUE,
+   la vue Interventions s'ouvrant FILTRÉE sur la cible (chip retirable). */
 export class InterventionFicheRow {
   /** Nombre de dernières interventions listées sous le badge (D2/D3 : les plus récemment actives, toutes). */
   private static readonly LATEST_COUNT = 3;
@@ -87,17 +88,29 @@ export class InterventionFicheRow {
     // (le bloc reste réduit au badge + « Déclarer »). Jamais d'erreur remontée à l'utilisateur.
     hooks.latestFor(target.kind, target.id, InterventionFicheRow.LATEST_COUNT).then((items) => {
       if (!items.length) return;
-      for (const item of items) list.appendChild(InterventionFicheRow.line(item));
+      for (const item of items) list.appendChild(InterventionFicheRow.line(item, () => hooks.openDetail(item.id)));
       moreBtn.style.display = "";
     }).catch(() => { /* silencieux : le mini-listing est un confort, jamais bloquant */ });
   }
 
-  /** Une ligne INFORMATIVE du mini-listing (NON cliquable en phase 1 — cf. en-tête). Réutilise les helpers
-      de formatage partagés (principe n°14) : `Format.dateTime` pour la date, et les CLÉS i18n + classes de
-      badge d'`InterventionsFormat` pour statut/priorité — aucun re-formatage maison. */
-  private static line(item: InterventionFicheItem): HTMLElement {
+  /** Une ligne CLIQUABLE du mini-listing : bouton ACCESSIBLE (role="button" + tabindex + Entrée/Espace —
+      même facture que le nom cliquable des grilles de baie, cf. `FormBase.rackFrontGrid`/`cellInner`) qui
+      EMPILE la fiche de détail de l'intervention (`open`) par-dessus la fiche courante — la pile de modales
+      rend le retour structurel, on ne ferme donc RIEN (cf. en-tête). Réutilise les helpers de formatage
+      partagés (principe n°14) : `Format.dateTime` pour la date, et les CLÉS i18n + classes de badge
+      d'`InterventionsFormat` pour statut/priorité — aucun re-formatage maison. */
+  private static line(item: InterventionFicheItem, open: () => void): HTMLElement {
     const line = document.createElement("div");
-    line.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px";
+    // Marges négatives : le liseré de survol dépasse du texte SANS décaler l'alignement avec le badge.
+    line.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;cursor:pointer;border-radius:4px;padding:2px 4px;margin:0 -4px";
+    line.setAttribute("role", "button"); line.tabIndex = 0;
+    line.title = I18n.t("interventions.fiche.openDetail");
+    const activate = (ev: Event): void => { ev.preventDefault(); open(); };
+    line.onclick = activate;
+    line.onkeydown = (e: KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") activate(e); };
+    // Survol DISCRET (indice de cliquabilité) — inline comme le reste de la ligne, pas de classe dédiée.
+    line.onmouseenter = () => { line.style.background = "var(--bg-2)"; };
+    line.onmouseleave = () => { line.style.background = ""; };
 
     const date = document.createElement("span");
     date.style.cssText = "font-family:var(--mono);color:var(--fg-dim);white-space:nowrap";

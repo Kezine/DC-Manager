@@ -908,6 +908,11 @@ async function boot(): Promise<void> {
       const page = await interventionsClient.listPage({ pageSize: n, targets: [{ kind, id }], sort: "updated_date", dir: "desc" });
       return page.interventions.map((it) => ({ id: it.id, title: it.title, status: it.status, priority: it.priority, updated_date: it.updated_date }));
     },
+    // Clic sur une LIGNE du mini-listing : la fiche de détail de l'intervention s'EMPILE par-dessus la
+    // fiche courante — PREMIER hook SANS `switchView` (c'est tout l'intérêt de la pile de modales, D1 levé) :
+    // on ne quitte ni la vue ni la fiche, ← Retour ramène à l'objet. La vue relit l'intervention par id
+    // (fraîcheur ; introuvable → toast, rien ne s'ouvre).
+    openDetail: (id) => interventionsView.openDetailById(id),
     declareFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openCreateFor(kind, id, label); },
     // « Afficher plus » ouvre la vue FILTRÉE sur la cible (chip retirable posée à l'arrivée) — même montage
     // que `declareFor` : on change de VUE puis on pose le filtre.

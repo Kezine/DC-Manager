@@ -38,6 +38,8 @@ export const interventions = {
     openCount: "{{n}} open",
     none: "None open",
     showMore: "Show more",
+    // Tooltip of the mini-listing rows (clickable: the detail modal STACKS on top of the current one).
+    openDetail: "Open the intervention",
   },
   col: {
     title: "Title",
@@ -115,6 +117,8 @@ export const interventions = {
     started: "Intervention started",
     closed: "Intervention closed",
     linkExists: "This object is already linked.",
+    // Open/refresh BY ID from a fiche: the intervention no longer exists server-side.
+    notFound: "Intervention not found — it may have been deleted.",
   },
   error: {
     titleRequired: "Title is required.",

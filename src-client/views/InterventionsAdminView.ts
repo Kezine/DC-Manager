@@ -620,19 +620,102 @@ export class InterventionsAdminView {
      Modale de DÉTAIL (consultation) + fiches liées EMPILÉES par-dessus
      -------------------------------------------------------------------------- */
 
-  /** Modale de CONSULTATION d'une intervention (hideFooter) : badges (nature/priorité/statut), fenêtre
-      planifiée, référence Jira, description rendue en MARKDOWN, audit, et la liste des objets liés (icône de
-      famille + libellé + badge ; orphelin « introuvable » grisé, NON cliquable). Un CLIC sur un objet lié
-      existant EMPILE sa fiche de détail par-dessus ; ce détail reste vivant dessous et reparaît au dépilement.
-      Le bouton « Modifier » EMPILE de même la modale d'ÉDITION.
-      L'`item` du listing porte déjà TOUS les champs (liste et détail partagent la même forme serveur) — aucune
-      relecture réseau nécessaire. */
   /** Ouvre la modale de DÉTAIL d'une intervention DEPUIS L'EXTÉRIEUR de la vue (recherche globale) —
       l'appelant fournit l'enregistrement qu'il a déjà chargé (le listing de la palette). Indépendant de
       l'état de la page : `detailModal` ne lit que l'enregistrement reçu et les hooks injectés. */
   openDetail(item: InterventionRecord): void { this.detailModal(item); }
 
+  /** Ouvre la modale de DÉTAIL d'une intervention PAR SON ID (mini-listing « Interventions » des fiches,
+      hook `openDetail` du contrat) : elle s'EMPILE sur la modale courante — aucun changement de vue, le
+      retour est structurel (pile de modales). L'enregistrement est RELU du serveur (l'appelant n'a que
+      l'id) ; introuvable (supprimée entre-temps) → toast, rien ne s'ouvre.
+      ⚠ TOUJOURS un toast en erreur, jamais le bandeau d'`actionError` : cette entrée est appelée depuis
+      une fiche, la vue n'est pas forcément affichée — un bandeau 503 peint dans un conteneur CACHÉ ne
+      serait vu de personne. */
+  openDetailById(id: string): void {
+    if (!this.client) return;
+    void (async () => {
+      try {
+        await this.ensureMeta();   // base Jira : le détail rend son lien même si la page n'a jamais été affichée
+        this.detailModalById(await this.client!.getOne(id));
+      } catch (e) {
+        if (e instanceof InterventionsError && e.status === 404) Notify.toast(I18n.t("interventions.toast.notFound"), "info");
+        else Notify.toast(InterventionsAdminView.errText(e), "err");
+      }
+    })();
+  }
+
+  /** Modale de CONSULTATION ouverte DEPUIS LE LISTING. L'`item` de la page porte déjà TOUS les champs
+      (liste et détail partagent la même forme serveur) — aucune relecture réseau nécessaire ici : la
+      fraîcheur au retour d'une édition vient de `this.items`, que `afterWrite` vient de recharger
+      (repli sur l'objet capturé si l'item a quitté la page courante). L'entrée PAR ID des fiches, où
+      `this.items` peut être vide/périmé, passe par `detailModalById` (refetch). */
   private detailModal(item: InterventionRecord): void {
+    this.host.openModal({
+      title: I18n.t("interventions.detail.title"), subtitle: Html.escape(item.title), body: this.detailBody(item),
+      hideFooter: true, wide: true,
+      stackKey: "intervention:" + item.id,
+      // Retour au premier plan → fiche RECONSTRUITE. On repart de l'enregistrement RECHARGÉ (`afterWrite`
+      // rafraîchit `items` après toute écriture) plutôt que de l'objet capturé, qui serait resté d'avant
+      // l'édition ; repli sur l'objet capturé si l'item n'est plus dans la page courante.
+      onResume: () => this.detailModal(this.items.find((it) => it.id === item.id) || item),
+    });
+  }
+
+  /** Modale de CONSULTATION ouverte PAR ID (depuis une fiche — la vue n'est pas active). Même corps que
+      `detailModal`, mais la FRAÎCHEUR au retour d'une édition vient d'un REFETCH par id : ici `this.items`
+      (la page du LISTING) peut être vide ou refléter d'autres filtres — le repli de `detailModal` sur
+      l'objet capturé montrerait les valeurs d'AVANT l'édition.
+      MÉCANIQUE (l'`onResume` de la pile est SYNCHRONE, le refetch ne l'est pas) : le corps vit dans un
+      CONTENEUR STABLE (`shell`). Au retour au premier plan, l'`onResume` ré-ouvre SYNCHRONEMENT le niveau
+      avec les données déjà en main (remplacement — l'affichage ne saute pas), puis le refetch REMPLACE le
+      CONTENU du conteneur quand la vérité serveur arrive. On ne rappelle JAMAIS `openModal` depuis le
+      rappel asynchrone : la dédup `stackKey` y jetterait les niveaux empilés entre-temps PAR-DESSUS (une
+      saisie en cours, une fiche visitée). Seule exception, INDIRECTE : si le TITRE a changé (il vit dans
+      le SOUS-TITRE du niveau, pas dans le corps), on demande à la modale de rejouer l'`onResume` du niveau
+      COURANT (`refreshModal`) — si c'est le nôtre, il se ré-ouvre avec le titre frais puis re-vérifie
+      (convergent : la re-vérification ne trouve plus d'écart) ; si l'utilisateur a déjà empilé autre chose,
+      le sommet se reconstruit sans dommage et NOTRE sous-titre se corrigera à son propre retour au premier
+      plan (l'`onResume` rejoue à chaque résurgence). */
+  private detailModalById(initial: InterventionRecord): void {
+    let current = initial;
+    const shell = document.createElement("div");
+    shell.appendChild(this.detailBody(current));
+    const refetch = async (): Promise<void> => {
+      try {
+        const fresh = await this.client!.getOne(current.id);
+        if (JSON.stringify(fresh) === JSON.stringify(current)) return;   // point fixe : rien de neuf, rien à repeindre
+        const titleChanged = fresh.title !== current.title;
+        current = fresh;
+        shell.replaceChildren(this.detailBody(fresh));
+        if (titleChanged) this.host.refreshModal?.();   // sous-titre du NIVEAU (cf. doc ci-dessus)
+      } catch (e) {
+        if (e instanceof InterventionsError && e.status === 404) {
+          // Supprimée pendant l'édition/la consultation : plus rien à montrer — toast + retrait du niveau.
+          Notify.toast(I18n.t("interventions.toast.notFound"), "info");
+          this.host.closeModal?.();
+        }
+        // Autre erreur (réseau…) : on conserve le contenu déjà affiché — le détail reste consultable.
+      }
+    };
+    const openLevel = (): void => {
+      this.host.openModal({
+        title: I18n.t("interventions.detail.title"), subtitle: Html.escape(current.title), body: shell,
+        hideFooter: true, wide: true,
+        stackKey: "intervention:" + current.id,
+        onResume: () => { openLevel(); void refetch(); },   // synchrone : données en main ; asynchrone : vérité serveur
+      });
+    };
+    openLevel();
+  }
+
+  /** Corps de la fiche de détail — PARTAGÉ par les deux ouvertures (`detailModal` depuis le listing,
+      `detailModalById` depuis une fiche) : badges (nature/priorité/statut), fenêtre planifiée, référence
+      Jira, description rendue en MARKDOWN, audit, la liste des objets liés (icône de famille + libellé +
+      badge ; orphelin « introuvable » grisé, NON cliquable — un CLIC sur un objet lié existant EMPILE sa
+      fiche par-dessus) et le bouton « Modifier » (EMPILE la modale d'ÉDITION). Reconstruit à neuf à chaque
+      (ré)ouverture — jamais muté. */
+  private detailBody(item: InterventionRecord): HTMLElement {
     const root = document.createElement("div");
 
     const badges = document.createElement("div"); badges.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px";
@@ -668,19 +751,11 @@ export class InterventionsAdminView {
     }
 
     // « Modifier » : EMPILE la modale d'ÉDITION par-dessus ce détail, qui reste vivant dessous. Enregistrer
-    // ou Annuler dépile et redonne ce détail — reconstruit par son `onResume` (ci-dessous), donc à jour.
+    // ou Annuler dépile et redonne ce détail — reconstruit par l'`onResume` du niveau, donc à jour.
     const actions = document.createElement("div"); actions.style.cssText = "margin-top:16px;display:flex;justify-content:flex-end;gap:8px";
     actions.appendChild(this.actionButton(I18n.t("interventions.rowAction.edit"), "", () => this.interventionModal(item, item.kind), "btn-primary"));
     root.appendChild(actions);
-
-    this.host.openModal({
-      title: I18n.t("interventions.detail.title"), subtitle: Html.escape(item.title), body: root, hideFooter: true, wide: true,
-      stackKey: "intervention:" + item.id,
-      // Retour au premier plan → fiche RECONSTRUITE. On repart de l'enregistrement RECHARGÉ (`afterWrite`
-      // rafraîchit `items` après toute écriture) plutôt que de l'objet capturé, qui serait resté d'avant
-      // l'édition ; repli sur l'objet capturé si l'item n'est plus dans la page courante.
-      onResume: () => this.detailModal(this.items.find((it) => it.id === item.id) || item),
-    });
+    return root;
   }
 
   /** Liste ÉLÉGANTE des objets liés (modale de détail) : icône de famille + libellé + badge de famille. Une

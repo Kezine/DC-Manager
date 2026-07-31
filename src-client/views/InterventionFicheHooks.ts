@@ -10,6 +10,11 @@
                   tri « activité récente » côté serveur), pour le mini-listing de la fiche — chargé async
                   comme le badge. Renvoie le type LOCAL `InterventionFicheItem` (voir plus bas), JAMAIS le
                   `InterventionRecord` du client : le contrat reste le SEUL point de contact fiches ⇄ vue.
+   `openDetail` : ouvre (EMPILE) la fiche de détail d'une intervention PAR-DESSUS la modale courante (clic sur
+                  une ligne du mini-listing). PREMIER hook du contrat qui EMPILE au lieu de naviguer : la pile
+                  de modales (2026-07-30) a levé la réserve D1 du cadrage (« la cliquabilité viendra avec la
+                  pile ») — on ne change PAS de vue et on ne ferme RIEN, ← Retour / Retour arrière ramènent à
+                  la fiche de l'objet, ✕ ferme la file.
    `declareFor` : déclare une intervention DEPUIS la fiche — NAVIGUE vers l'onglet « Interventions » et ouvre
                   la modale de création PRÉ-LIÉE à la cible (l'appelant DÉPILE d'abord la fiche courante :
                   on change de VUE, elle n'a plus lieu d'être — cf. InterventionFicheRow). `label` = libellé
@@ -34,6 +39,9 @@ export interface InterventionFicheItem {
 export interface InterventionFicheHooks {
   countOpen(kind: string, id: string): Promise<number>;
   latestFor(kind: string, id: string, n: number): Promise<InterventionFicheItem[]>;
+  /** Ouvre (EMPILE) la fiche de détail de l'intervention par-dessus la modale courante ; ne change PAS de
+      vue et ne ferme rien (cf. en-tête — D1 levé par la pile de modales, le retour est structurel). */
+  openDetail(interventionId: string): void;
   declareFor(kind: string, id: string, label: string): void;
   openListFor(kind: string, id: string, label: string): void;
 }
