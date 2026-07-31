@@ -2671,7 +2671,10 @@
           <div class="modal-title">Changer la phrase maître</div>
           <div class="modal-subtitle"></div>
         </div></div>
-        <button type="button" class="modal-close" aria-label="Fermer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+        <div class="modal-header-actions">
+          <button type="button" class="modal-back" aria-label="Retour"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="12" x2="5" y2="12"/><path d="M11 6l-6 6 6 6"/></svg></button>
+          <button type="button" class="modal-close" aria-label="Fermer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+        </div>
       </div>
       <div class="modal-body">
         <div class="form-hint" style="margin-bottom:10px">Change la phrase qui protège la clé maître. Les clés privées déjà stockées ne sont PAS re-chiffrées (elles restent lisibles) : seule l'enveloppe de la clé maître est ré-emballée avec la nouvelle phrase. Les artefacts déjà exportés (PKCS#12, ZIP protégés…) conservent leur ancienne protection propre.</div>
