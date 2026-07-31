@@ -1443,7 +1443,10 @@
      un DEUXIÈME bouton posé à sa racine serait renvoyé au MILIEU de la barre. Les deux boutons vivent
      donc dans ce conteneur, qui reste l'unique élément « de droite ». */
   .modal-header-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-  .modal-close, .modal-back {
+  /* `.modal-fs` = RACCOURCI d'ergonomie (2026-07-31), PROBABLEMENT TEMPORAIRE : bascule « Modales en plein
+     écran » dans l'en-tête, MÊME facture que ← / ✕. Le RETIRER = supprimer `.modal-fs` de ces trois blocs
+     (base, hover, masquage responsive) et le bouton côté Modal.ts — rien d'autre. */
+  .modal-close, .modal-back, .modal-fs {
     background: transparent;
     border: 1px solid var(--line-2);
     color: var(--fg-dim);
@@ -1455,7 +1458,9 @@
     padding: 0;
     flex: 0 0 auto;
   }
-  .modal-close:hover, .modal-back:hover { color: var(--fg); border-color: var(--fg); }
+  .modal-close:hover, .modal-back:hover, .modal-fs:hover { color: var(--fg); border-color: var(--fg); }
+  /* État ACTIF du raccourci (plein écran en cours) : cadre plein pour le distinguer d'un coup d'œil. */
+  .modal-fs[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
   .modal-body { padding: 20px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .modal-footer {
     padding: 14px 20px;
@@ -2433,6 +2438,9 @@
       height: 100vh; height: 100dvh; max-height: none;
       border: none; border-radius: 0;
     }
+    /* Le RACCOURCI plein écran (`.modal-fs`) n'a AUCUN sens ici : sous ce breakpoint le plein écran est
+       DÉJÀ forcé (bloc ci-dessus), la bascule mentirait. On la masque. (Raccourci temporaire — cf. Modal.ts.) */
+    .modal-fs { display: none; }
   }
 
   /* ============ FORMULAIRES EN MODALE — passage 1 COLONNE (< 640px) ============

@@ -417,6 +417,13 @@ async function boot(): Promise<void> {
 
   const shell = new Shell(root, shellHost);
 
+  // RACCOURCI d'ergonomie (2026-07-31), PROBABLEMENT TEMPORAIRE — pose l'accroche qui fait apparaître, dans
+  // l'en-tête des modales, une bascule « Modales en plein écran ». On NE duplique PAS le chemin d'écriture :
+  // `toggle()` rejoue EXACTEMENT le geste du toggle des Réglages (`onModalFullscreen`), qui écrit la pref,
+  // l'applique en direct et resynchronise la bascule du panneau Réglages. `active()` relit l'état global.
+  // Le RETIRER = supprimer ce bloc + le bouton `.modal-fs` dans Modal, rien d'autre (cf. Modal.fullscreenShortcut).
+  modal.fullscreenShortcut = { active: () => prefs.modalFullscreen, toggle: () => shellHost.onModalFullscreen?.(!prefs.modalFullscreen) };
+
   // ---- fiche détail générique (lecture seule) ----
   const openDetail = (coll: string, id: string) => {
     const o: any = store.get(coll, id);

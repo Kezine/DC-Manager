@@ -154,6 +154,17 @@ export class Modal {
   /** Mode visualiseur : bloque les modales d'ÉDITION (laisse passer les fiches hideFooter). */
   editLocked = false;
 
+  /** RACCOURCI d'ergonomie (2026-07-31), PROBABLEMENT TEMPORAIRE — expose dans l'en-tête des modales une
+      bascule qui pilote la MÊME préférence « Modales en plein écran » que Réglages ▸ Apparence. Point
+      d'accroche posé par `main.ts` (comme `editLocked`) pour que `Modal` n'importe PAS `Prefs` : `active()`
+      relit l'état GLOBAL de la préférence, `toggle()` emprunte l'UNIQUE chemin d'écriture — celui du toggle
+      des Réglages (écrit la pref + applique en direct + resynchronise la bascule des Réglages). Tant qu'aucune
+      accroche n'est posée, le bouton NE SE REND PAS (robustesse + tests headless). Le RETIRER = supprimer ce
+      champ, le bouton `.modal-fs` (markup dans `_build` + `_syncFullscreenButton` appelé par `_show`) et sa
+      règle CSS `.modal-fs` — RIEN d'autre. PAS de parité design-system : la galerie documente l'UI STABLE,
+      pas un raccourci temporaire. */
+  fullscreenShortcut: { active: () => boolean; toggle: () => void } | null = null;
+
   private overlay!: HTMLElement;
   private elTitle!: HTMLElement;
   private elSubtitle!: HTMLElement;
@@ -166,6 +177,8 @@ export class Modal {
   /** Bouton « Annuler » — propre à l'ÉDITION, masqué sur une fiche (son pied = ses actions seules). */
   private btnCancel!: HTMLButtonElement;
   private btnBack!: HTMLButtonElement;
+  /** Bouton du RACCOURCI plein écran (cf. `fullscreenShortcut`) — masqué tant qu'aucune accroche n'est posée. */
+  private btnFs!: HTMLButtonElement;
   /** LA pile : politique dans `core/ModalStack` (pure, testée), état DOM ici. */
   private readonly stack = new ModalStack<ModalLevel>();
   /** Verrou de défilement pris + déclencheur mémorisé ? (armé à la 1re ouverture, rendu à la dernière.) */
@@ -187,6 +200,7 @@ export class Modal {
             <div class="modal-title"></div><div class="modal-subtitle"></div>
           </div></div>
           <div class="modal-header-actions">
+            <button type="button" class="modal-fs" aria-label="${I18n.t("shell.settings.modalFs")}" title="${I18n.t("shell.settings.modalFs")}" aria-pressed="false">${Icons.FULLSCREEN}</button>
             <button type="button" class="modal-back" aria-label="${I18n.t("ui.action.back")}">${Icons.BACK}</button>
             <button type="button" class="modal-close" aria-label="${I18n.t("ui.action.close")}">${Icons.CLOSE}</button>
           </div>
@@ -209,6 +223,7 @@ export class Modal {
     this.btnSave = overlay.querySelector(".modal-save") as HTMLButtonElement;
     this.btnCancel = overlay.querySelector(".modal-cancel") as HTMLButtonElement;
     this.btnBack = overlay.querySelector(".modal-back") as HTMLButtonElement;
+    this.btnFs = overlay.querySelector(".modal-fs") as HTMLButtonElement;
     // Rôles ARIA : boîte = dialogue modal, nommée par son titre (ID stable généré une fois).
     const titleId = OverlayA11y.nextId("dcm-modal-title");
     this.elTitle.id = titleId;
@@ -221,6 +236,9 @@ export class Modal {
     // aucun retour visible.
     this.btnBack.onclick = () => { void this.requestPop(); };
     this.btnCancel.onclick = () => { void this.requestPop(); };
+    // RACCOURCI plein écran : bascule la préférence GLOBALE via l'accroche (même chemin que Réglages), puis
+    // RELIT l'état (aria-pressed) — la préférence est globale, pas d'état local qui divergerait.
+    this.btnFs.onclick = () => { const sc = this.fullscreenShortcut; if (!sc) return; sc.toggle(); this._syncFullscreenButton(); };
     (overlay.querySelector(".modal-close") as HTMLElement).onclick = () => { void this.requestCloseAll(); };
     let down = false;
     overlay.addEventListener("mousedown", (e) => { down = (e.button === 0 && e.target === overlay); });
@@ -315,6 +333,18 @@ export class Modal {
     // ou « Annuler » à profondeur 1, où revenir revient à fermer.
     const previous = this.stack.at(this.stack.depth() - 2);
     this.btnBack.title = previous ? previous.title : I18n.t("ui.action.cancel");
+    this._syncFullscreenButton();
+  }
+
+  /** Reflète le RACCOURCI plein écran à chaque peinture d'un niveau : bouton MASQUÉ tant qu'aucune accroche
+      n'est posée (tests headless, robustesse) ; sinon `aria-pressed` relit l'état GLOBAL de la préférence
+      (jamais d'état local qui divergerait — le toggle des Réglages peut l'avoir changé entre-temps). Le
+      masquage SOUS 760px est porté par le CSS (le plein écran y est déjà FORCÉ, la bascule mentirait) :
+      on n'y touche pas ici, `display:""` laisse la règle média décider. */
+  private _syncFullscreenButton(): void {
+    const sc = this.fullscreenShortcut;
+    this.btnFs.style.display = sc ? "" : "none";
+    if (sc) this.btnFs.setAttribute("aria-pressed", sc.active() ? "true" : "false");
   }
 
   open(opts: ModalOptions): void {
