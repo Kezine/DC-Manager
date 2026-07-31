@@ -18,6 +18,7 @@ const DOMAINS = [
   "./test-views-tools.js",       // vues & outils (hôtes injectés)
   "./test-route-eligibility.js", // éditeur de route : éligibilité d'un waypoint + erreur → étape (core/RouteEligibility)
   "./test-ui-modalstack.js",     // primitives UI : politique de la PILE de modales (core/ModalStack)
+  "./test-ui-draglist.js",       // primitives UI : glisser-déposer de liste (ui/DragList — seule la décision de dépôt est pure)
   "./test-sync.js",              // rechargement granulaire REST
   "./test-shared-validation.js", // code partagé front/back
   "./test-i18n.js",              // localisation : complétude des catalogues fr ⇄ en

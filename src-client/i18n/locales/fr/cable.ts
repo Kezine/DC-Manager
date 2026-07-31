@@ -151,7 +151,17 @@ export const cable = {
     transitHint: "Hors salle — en attente d'arrivée : l'exit d'une AUTRE salle, ou un pin d'étage.",
     addStep: "Ajouter une étape…",
     closeSegment: "Refermer le tronçon…",
+    insertHere: "Insérer une étape ici",
     searchPlaceholder: "Rechercher un waypoint…",
+    /* Popover d'ajout GROUPÉ (lot L3) : en-têtes par conteneur + indice de pertinence. Les phrases
+       `rel*` reçoivent les SUJETS d'ancre (« le bout A » / « l'extrémité A ») — mêmes clés pour le
+       câble et le faisceau. `groupNoContainer` = groupe des waypoints sans rien de localisable. */
+    groupNoContainer: "Sans conteneur",
+    relCurrent: "· conteneur courant de la route",
+    relLeft: "· conteneur quitté — retour refusé",
+    relEndpoint: "· {{anchor}} est ici",
+    relEndpoints: "· {{a}} et {{b}} sont ici",
+    popFootHint: "↑ ↓ pour naviguer · Entrée pour ajouter · Maj+Entrée pour ajouter et rouvrir",
     moveEarlier: "Plus tôt sur le trajet",
     moveLater: "Plus tard sur le trajet",
     removeStep: "Retirer cette étape de la route",

@@ -138,7 +138,17 @@ export const cable = {
     transitHint: "Outside any room — waiting for an arrival: the exit of ANOTHER room, or a floor pin.",
     addStep: "Add a step…",
     closeSegment: "Close the segment…",
+    insertHere: "Insert a step here",
     searchPlaceholder: "Search a waypoint…",
+    /* Grouped add popover (lot L3): one header per container + relevance hint. The `rel*` phrases
+       receive the anchor SUBJECTS ("end A" / "endpoint A") — same keys for cable and bundle.
+       `groupNoContainer` = group of waypoints with nothing locatable. */
+    groupNoContainer: "No container",
+    relCurrent: "· current container of the route",
+    relLeft: "· container just left — no return",
+    relEndpoint: "· {{anchor}} is here",
+    relEndpoints: "· {{a}} and {{b}} are here",
+    popFootHint: "↑ ↓ to navigate · Enter to add · Shift+Enter to add and reopen",
     moveEarlier: "Earlier on the path",
     moveLater: "Later on the path",
     removeStep: "Remove this step from the route",

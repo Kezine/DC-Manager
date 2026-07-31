@@ -35,16 +35,33 @@
    modale déjà dense — la piste retenue serait un REPLI de la chaîne quand elle
    est VALIDE et longue : une ligne « 7 étapes · voir » qui se déplie au clic.
    Volontairement NON implémenté : on ne replie pas ce qu'on n'a pas encore vu
-   déborder. Les BANDEAUX COLLANTS en tête du défilement, eux, relèvent du lot L4
-   (confort), au même titre que le glisser-déposer et le responsive tactile.
+   déborder. Les BANDEAUX, eux, sont COLLANTS dans le défilement (CSS sticky,
+   lot L4) : le conteneur courant reste lisible en tête de la zone visible.
+
+   LOTS L3/L4 (popover riche + confort) — livrés :
+     - le popover d'ajout GROUPE par conteneur (en-têtes + indice de pertinence,
+       motifs sous les items grisés — extensions GÉNÉRIQUES de `SearchPop`) et
+       s'accroche à <body> (mode portail) pour ne plus être ROGNÉ par le corps
+       défilant de la modale ni par la liste à max-height ;
+     - insertion AU MILIEU : un « + » d'interstice, visible au survol de la
+       chaîne, ouvre le MÊME popover alimenté par `plan(…, at)` ;
+     - Maj+Entrée (ou Maj+clic) = AJOUTER ET ROUVRIR — enchaîner les étapes sans
+       re-cliquer ; le pied du popover l'annonce ;
+     - glisser-déposer des étapes par la poignée ⋮⋮ (`ui/DragList`, primitive
+       générique) — le clavier ↑/↓ reste la voie accessible ;
+     - transitions d'ENTRÉE d'étape et de liseré d'erreur (classes `enter` /
+       `err-in`, posées sur les seules lignes NOUVELLES — un repeint n'anime pas
+       tout) ; la SORTIE d'étape, elle, n'est pas animable : le rendu remplace
+       le DOM entier (`replaceChildren`), la ligne disparaît avec lui.
    ============================================================================= */
 import { IconButton } from "../../ui/IconButton";
 import { Icons } from "../../ui/Icons";
 import { SearchPop } from "../../ui/SearchPop";
 import type { SearchPopResult } from "../../ui/SearchPop";
+import { DragList } from "../../ui/DragList";
 import { I18n } from "../../i18n/I18n";
 import { RouteEligibility } from "../../core/RouteEligibility";
-import type { RouteAnalyze, RouteBlockCode, RouteCandidate, RouteInsertState } from "../../core/RouteEligibility";
+import type { RouteAnalyze, RouteBlockCode, RouteCandidate, RouteGroupRelevance, RouteInsertState } from "../../core/RouteEligibility";
 import type { RouteAnalysis } from "../../store/CableRouteAnalyzer";
 import { PlacementContainers } from "../../../src-shared/PlacementContainers";
 import type { PlacementContainer } from "../../../src-shared/PlacementContainers";
@@ -108,6 +125,23 @@ export class RouteChainEditor {
   /** État initial de l'automate : une route VIDE n'est jamais en transit (aucun exit ne l'a ouverte). */
   private static readonly ETAT_INITIAL: RouteInsertState = { transit: false, container: null, left: null };
 
+  /** Ids des étapes du rendu PRÉCÉDENT (`null` au premier rendu). Support des transitions d'entrée :
+      seule une ligne NOUVELLE reçoit la classe `enter` — sans cette mémoire, chaque repeint (dont un
+      simple changement d'ancre) ferait clignoter TOUTE la chaîne. */
+  private previousStepIds: Set<string> | null = null;
+  /** Ids des étapes qui portaient une ERREUR au rendu précédent — même logique pour le liseré
+      (`err-in` : l'erreur qui APPARAÎT s'anime, celle qui persiste reste immobile). */
+  private previousErrorIds: Set<string> | null = null;
+  /** Position à ROUVRIR après « Maj+Entrée = ajouter et rouvrir » : `null` = fin de route, un nombre
+      = interstice (index dans les ids), `undefined` = rien. Consommée par `commit` APRÈS son propre
+      repeint — `changed()` peut en déclencher d'autres avant lui, et chaque rendu détruit le DOM du
+      picker : ouvrir trop tôt, c'est ouvrir un picker déjà mort. */
+  private reopenAt: number | null | undefined = undefined;
+  /** Les « ouvre-picker » du rendu COURANT, par position d'insertion (`"end"` = fin de route).
+      Reconstruits à chaque rendu — c'est ce qui permet à `commit` de rouvrir le popover au bon
+      endroit sur du DOM frais. */
+  private openers = new Map<number | "end", () => void>();
+
   /** ⚠ NE SE PEINT PAS À LA CONSTRUCTION — l'hôte appelle `render()` quand il est prêt.
       Un formulaire construit ses CHAMPS de haut en bas puis, seulement ensuite, ses fonctions de
       synchronisation (`refresh`, `syncStatus`, les contraintes de conteneur…). Or les rappels de
@@ -124,6 +158,7 @@ export class RouteChainEditor {
   /** Repeint TOUT. Appelé à chaque mutation de route, et par l'hôte quand les ANCRES changent
       (choix d'un port, d'un équipement, d'un patch) — l'alerte d'ancre en dépend. */
   render(): void {
+    this.openers = new Map();   // le DOM part, les ouvre-picker du rendu précédent avec lui
     const ids = this.host.ids();
     const analysis = this.host.analyze(ids);
     const reports = RouteEligibility.stepReports(ids, this.host.analyze);
@@ -215,6 +250,14 @@ export class RouteChainEditor {
       .filter((row): row is { id: string; index: number; step: RouteChainStep } => row.step != null);
     const count = Math.min(rows.length, analysis.steps.length, reports.length);
 
+    // MÉMOIRE DES RENDUS (transitions) : ce qui était là AVANT, pour ne faire entrer que le NEUF.
+    // Lue maintenant, remplacée en sortie — un premier rendu (`null`) n'anime rien : la chaîne qui
+    // s'ouvre avec le formulaire n'a pas à « arriver ».
+    const previousSteps = this.previousStepIds;
+    const previousErrors = this.previousErrorIds;
+    this.previousStepIds = new Set(rows.slice(0, count).map((row) => row.id));
+    this.previousErrorIds = new Set(rows.slice(0, count).filter((_, k) => reports[k] && reports[k].error).map((row) => row.id));
+
     if (!count) {
       const empty = document.createElement("div"); empty.className = "rc-empty";
       empty.textContent = I18n.t("cable.route.empty");
@@ -226,6 +269,11 @@ export class RouteChainEditor {
     const list = document.createElement("div"); list.setAttribute("role", "list");
     let derniere: DerniereBande = null;
     for (let k = 0; k < count; k++) {
+      // INTERSTICE « + » (insertion au milieu, maquette §05) : entre deux étapes seulement — la fin
+      // de route a déjà « + Ajouter une étape », le tout début s'obtient en insérant avant l'étape 1.
+      // Position d'insertion = l'index de la ligne VISÉE dans les ids (des ids pendants peuvent
+      // dormir entre deux lignes — même précaution que `moveRow`).
+      if (k > 0) list.appendChild(this.insertRow(rows[k].index));
       const before = k === 0 ? RouteChainEditor.ETAT_INITIAL : reports[k - 1].after;
       const after = reports[k].after;
       /* BANDEAU. Un tronçon ouvert par un exit et REFERMÉ par l'étape suivante ne mérite pas de
@@ -235,10 +283,22 @@ export class RouteChainEditor {
       if (before.transit && after.transit) derniere = this.pushTransitBand(list, derniere, before.left);
       else derniere = this.pushContainerBand(list, derniere, analysis.steps[k].container);
       const error = reports[k].error;
-      list.appendChild(this.stepRow(rows, k, analysis.steps[k].container, error ? error.code : null));
-      if (error) list.appendChild(RouteChainEditor.stepMessage(error.message, error.code === "unplaced"));
+      const isNew = previousSteps != null && !previousSteps.has(rows[k].id);
+      const errNew = error != null && previousErrors != null && !previousErrors.has(rows[k].id);
+      list.appendChild(this.stepRow(rows, k, analysis.steps[k].container, error ? error.code : null, isNew, errNew));
+      if (error) list.appendChild(RouteChainEditor.stepMessage(error.message, error.code === "unplaced", isNew || errNew));
     }
     box.appendChild(list);
+
+    // GLISSER-DÉPOSER (maquette §05) : la primitive est GÉNÉRIQUE (`ui/DragList`) — elle reçoit la
+    // liste, les sélecteurs et la dépose, et ne sait rien de la route. L'instance meurt avec le DOM
+    // de ce rendu (son seul écouteur au repos est délégué sur `list`) : rien à désabonner ici.
+    new DragList({
+      list,
+      itemSelector: ".rc-step",
+      handleSelector: ".rc-grip",
+      onReorder: (from, to) => this.moveRowTo(rows, from, to),
+    });
 
     // FIN DE ROUTE en transit : l'état devient VISIBLE (bandeau + bloc pointillé) au lieu d'être une
     // erreur découverte à l'enregistrement — c'est tout le propos de `exit_unpaired` (carton §4.3).
@@ -278,14 +338,31 @@ export class RouteChainEditor {
     k: number,
     container: PlacementContainer | null,
     errorCode: string | null,
+    isNew: boolean,
+    errNew: boolean,
   ): HTMLElement {
     const row = rows[k];
     // Un waypoint NON POSÉ n'est pas une faute de grammaire mais un AVERTISSEMENT : il est ignoré au
     // tracé (maquette 6.9). D'où une étape ATTÉNUÉE plutôt qu'un liseré rouge.
     const ghosted = errorCode === "unplaced";
     const el = document.createElement("div");
-    el.className = "rc-step" + (ghosted ? " ghosted" : (errorCode ? " err" : ""));
+    // `enter` / `err-in` : transitions d'ENTRÉE (nouvelle étape, erreur qui APPARAÎT) — les classes ne
+    // sont posées que sur le NEUF (cf. la mémoire de rendus dans stepsBox), et le CSS les neutralise
+    // sous `prefers-reduced-motion`.
+    el.className = "rc-step" + (ghosted ? " ghosted" : (errorCode ? " err" : ""))
+      + (isNew ? " enter" : "") + (errNew ? " err-in" : "");
     el.setAttribute("role", "listitem");
+
+    // POIGNÉE de glisser-déposer — DÉCORATIVE pour l'accessibilité (`aria-hidden`) : le
+    // réordonnancement CLAVIER passe par les boutons ↑/↓ ci-contre, qui portent nom accessible et
+    // état désactivé. Une poignée focusable sans sémantique de drag ne serait qu'un arrêt de
+    // tabulation muet. `touch-action: none` (CSS .rc-grip) : sans lui, le tactile défile au lieu de
+    // glisser (cf. l'en-tête de `ui/DragList`).
+    const grip = document.createElement("span");
+    grip.className = "rc-grip";
+    grip.setAttribute("aria-hidden", "true");
+    grip.innerHTML = Icons.GRIP;
+    el.appendChild(grip);
 
     const num = document.createElement("span"); num.className = "pill rc-num"; num.textContent = String(k + 1);
     const glyph = document.createElement("span");
@@ -318,10 +395,11 @@ export class RouteChainEditor {
   }
 
   /** Message SOUS l'étape fautive (carton §4.3). Le libellé vient de la GRAMMAIRE (déjà traduit) :
-      le reformuler ici en créerait une seconde version, vouée à diverger. */
-  private static stepMessage(message: string, soft: boolean): HTMLElement {
+      le reformuler ici en créerait une seconde version, vouée à diverger. `animate` = le message
+      accompagne une étape ou une erreur NOUVELLE (même transition d'entrée qu'elle). */
+  private static stepMessage(message: string, soft: boolean, animate: boolean): HTMLElement {
     const el = document.createElement("div");
-    el.className = "rc-step-msg" + (soft ? " soft" : "");
+    el.className = "rc-step-msg" + (soft ? " soft" : "") + (animate ? " enter" : "");
     el.textContent = soft ? I18n.t("cable.route.notPlacedMsg") : message;
     return el;
   }
@@ -341,6 +419,26 @@ export class RouteChainEditor {
     this.commit(ids);
   }
 
+  /** Dépose du GLISSER-DÉPOSER (`DragList.onReorder`) : la ligne visible `from` doit occuper l'index
+      visible `to`. Comme `moveRow`, on vise les LIGNES et non les index bruts — des ids pendants
+      peuvent dormir entre deux lignes, et doivent rester où ils dorment. */
+  private moveRowTo(rows: Array<{ id: string; index: number }>, from: number, to: number): void {
+    if (from === to || !rows[from]) return;
+    const ids = this.host.ids().slice();
+    const removedAt = rows[from].index;
+    const moved = ids.splice(removedAt, 1)[0];
+    // Les lignes RESTANTES, avec leur index recalé après le retrait : l'insertion se fait AVANT la
+    // ligne qui occupera la position `to`, ou après la dernière quand on dépose en fin.
+    const remaining = rows.filter((_, i) => i !== from);
+    const indexAfterRemoval = (idIndex: number) => (idIndex > removedAt ? idIndex - 1 : idIndex);
+    let position: number;
+    if (!remaining.length) position = ids.length;
+    else if (to >= remaining.length) position = indexAfterRemoval(remaining[remaining.length - 1].index) + 1;
+    else position = indexAfterRemoval(remaining[to].index);
+    ids.splice(position, 0, moved);
+    this.commit(ids);
+  }
+
   private removeRow(index: number): void {
     const ids = this.host.ids().slice();
     ids.splice(index, 1);
@@ -353,14 +451,22 @@ export class RouteChainEditor {
     this.host.setIds(ids);
     this.host.changed();
     this.render();
+    // « MAJ+ENTRÉE = ajouter et ROUVRIR » : consommé ICI, après le DERNIER repeint — `changed()` peut
+    // avoir re-rendu la chaîne (refresh/syncStatus du formulaire), et chaque rendu remplace le DOM du
+    // picker ; seul le rendu ci-dessus laisse des ouvre-picker vivants. L'interstice visé peut avoir
+    // disparu (insertion devenue fin de route) : on retombe alors sur l'ajout en fin.
+    const at = this.reopenAt;
+    this.reopenAt = undefined;
+    if (at !== undefined) {
+      const open = (at === null ? undefined : this.openers.get(at)) || this.openers.get("end");
+      if (open) open();
+    }
   }
 
   /* ------------------------------------------------------------ ajout (+) -- */
 
-  /** Rangée « + Ajouter une étape… ». Le bouton cède la place au SÉLECTEUR À RECHERCHE de l'app
-      (`SearchPop`, principe n°14) — jamais un nuage de cases. L'insertion se fait en FIN de route ;
-      l'insertion AU MILIEU (le « + » entre deux étapes) et les GROUPES par conteneur dans le popover
-      relèvent du lot L3. */
+  /** Rangée « + Ajouter une étape… » (insertion en FIN de route). Le bouton cède la place au
+      SÉLECTEUR À RECHERCHE de l'app (`SearchPop`, principe n°14) — jamais un nuage de cases. */
   private addRow(transit: boolean): HTMLElement {
     const row = document.createElement("div"); row.className = "rc-addrow";
     const button = document.createElement("button");
@@ -370,63 +476,132 @@ export class RouteChainEditor {
     // En transit, l'appel à l'action nomme ce qu'il reste à faire — la grammaire devient lisible
     // AVANT le refus, au lieu d'être découverte par un toast après coup (carton §2.3 mal n°4).
     button.appendChild(document.createTextNode(transit ? I18n.t("cable.route.closeSegment") : I18n.t("cable.route.addStep")));
+    row.appendChild(button);
+    this.wirePicker(row, button, null);
+    return row;
+  }
 
+  /** INTERSTICE « + » entre deux étapes : insertion AU MILIEU, à la position `at` des ids. Le bouton
+      n'apparaît qu'au SURVOL de la chaîne (CSS — pas de bruit permanent, maquette §05) et au focus
+      clavier ; il ouvre le MÊME popover que l'ajout en fin, alimenté par `plan(…, at)` — les motifs
+      `breaks_route` (l'insertion casserait une étape SUIVANTE) s'y affichent comme les autres. */
+  private insertRow(at: number): HTMLElement {
+    const row = document.createElement("div"); row.className = "rc-insert";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "rc-insert-btn";
+    button.innerHTML = Icons.PLUS;   // constante de confiance (ui/Icons)
+    button.setAttribute("aria-label", I18n.t("cable.route.insertHere"));
+    button.title = I18n.t("cable.route.insertHere");
+    row.appendChild(button);
+    this.wirePicker(row, button, at);
+    return row;
+  }
+
+  /** Grée le POPOVER D'AJOUT sur un conteneur : au clic, le bouton cède la place au champ de
+      recherche (`SearchPop` en mode PORTAIL — le corps de la modale ET la liste d'étapes défilent,
+      un popover absolu y serait ROGNÉ, cf. son en-tête) ; sortie sans sélection → le bouton revient.
+      Enregistre l'« ouvre-picker » de la position, support de « Maj+Entrée = ajouter et rouvrir ». */
+  private wirePicker(container: HTMLElement, button: HTMLElement, at: number | null): void {
     const pop = new SearchPop({
       placeholder: I18n.t("cable.route.searchPlaceholder"),
       minChars: 0,           // le contrôle doit se PARCOURIR sans taper (parité `entityPicker`)
       debounceMs: 0,         // source en mémoire : l'anti-rebond n'a rien à protéger
-      fetch: (query) => Promise.resolve(this.results(query)),
-      onPick: (result) => { this.commit(RouteEligibility.insertAt(this.host.ids(), String(result.id))); },
+      portal: true,
+      footHint: I18n.t("cable.route.popFootHint"),
+      fetch: (query) => Promise.resolve(this.results(query, at)),
+      onPick: (result, modifiers) => {
+        // Maj+Entrée / Maj+clic : mémorise la position à ROUVRIR — l'étape suivante s'insèrera juste
+        // APRÈS celle qu'on vient de poser (fin de route : on reste en fin). Consommé par `commit`.
+        if (modifiers && modifiers.shift) this.reopenAt = at == null ? null : at + 1;
+        this.commit(RouteEligibility.insertAt(this.host.ids(), String(result.id), at));
+      },
     });
     const picker = pop.element;
     picker.style.display = "none";
+    container.appendChild(picker);
 
-    button.onclick = () => {
+    const open = () => {
       button.style.display = "none";
       picker.style.display = "";
+      container.classList.add("open");   // l'interstice (hauteur 0) s'ouvre pour loger le champ
       pop.focus();
     };
+    button.onclick = open;
+    this.openers.set(at == null ? "end" : at, open);
+
     // Sortie du champ SANS sélection : on rend la place au bouton. Différé, pour laisser passer le
     // `mousedown` d'un résultat (que `SearchPop` traite avant le blur, cf. son en-tête).
     picker.addEventListener("focusout", () => {
       window.setTimeout(() => {
         if (picker.contains(document.activeElement)) return;
         picker.style.display = "none";
+        container.classList.remove("open");
         button.style.display = "";
       }, 180);
     });
-
-    row.append(button, picker);
-    return row;
   }
 
-  /** Les résultats du popover pour une saisie : la liste PLATE de `RouteEligibility`, déjà ordonnée
-      par PERTINENCE (① conteneur courant, ② conteneurs des bouts, ③ le reste, ④ la salle quittée),
-      filtrée sur le texte. Les candidats IMPOSSIBLES restent VISIBLES et `disabled`, motif compris :
-      « grisé ≠ caché », la règle s'apprend en lisant plutôt que par un toast de refus (maquette §04). */
-  private results(query: string): SearchPopResult[] {
+  /** Les résultats du popover pour une saisie : les GROUPES de `RouteEligibility.plan`, ordonnés par
+      PERTINENCE (① conteneur courant, ② conteneurs des bouts, ③ le reste, ④ la salle quittée),
+      rendus avec en-têtes (libellé du conteneur + indice de pertinence) — la question de
+      l'utilisateur est « par où je passe ? ». Les candidats IMPOSSIBLES restent VISIBLES, `disabled`,
+      leur MOTIF en ligne de dessous : « grisé ≠ caché », la règle s'apprend en lisant plutôt que par
+      un toast de refus (maquette §04). La recherche traverse nom ET conteneur : un groupe dont aucun
+      item ne correspond disparaît de lui-même (l'en-tête n'est peint qu'avec un premier item). */
+  private results(query: string, at: number | null): SearchPopResult[] {
     const ids = this.host.ids();
+    const anchorA = this.host.anchorA(), anchorB = this.host.anchorB();
     const plan = RouteEligibility.plan(this.host.candidates(), ids, this.host.analyze, {
-      a: this.host.anchorA().container,
-      b: this.host.anchorB().container,
-    });
+      a: anchorA.container,
+      b: anchorB.container,
+    }, at);
     const needle = String(query || "").trim().toLocaleLowerCase();
     const out: SearchPopResult[] = [];
-    plan.flat.forEach((verdict) => {
-      // `RouteEligibility` ne rend que le `RouteCandidate` qu'il a reçu — c'est-à-dire l'objet même
-      // que `candidates()` a fourni, donc un `RouteChainCandidate` complet (glyphe et nom compris).
-      const candidate = verdict.candidate as RouteChainCandidate;
-      const containerLabel = this.host.containerLabel(candidate.container);
-      let label = candidate.glyph + " " + candidate.name + (containerLabel ? " · " + containerLabel : "");
-      if (!needle || label.toLocaleLowerCase().indexOf(needle) >= 0) {
-        // Le motif est CONCATÉNÉ au libellé, et non posé à part : `SearchPop` recopie le libellé dans
-        // le `title` de l'item — le motif est donc lisible en ligne ET au survol, sans toucher au
-        // composant (les en-têtes de groupe et la ligne de motif dédiée sont le lot L3).
-        if (!verdict.usable && verdict.reason) label += " — " + RouteChainEditor.reasonLabel(verdict.reason);
-        out.push({ id: candidate.id, label, disabled: !verdict.usable, data: candidate });
-      }
+    plan.groups.forEach((group) => {
+      const groupLabel = this.host.containerLabel(group.container) || I18n.t("cable.route.groupNoContainer");
+      const groupHint = RouteChainEditor.relevanceHint(group.relevance, anchorA, anchorB);
+      group.items.forEach((verdict) => {
+        // `RouteEligibility` ne rend que le `RouteCandidate` qu'il a reçu — c'est-à-dire l'objet même
+        // que `candidates()` a fourni, donc un `RouteChainCandidate` complet (glyphe et nom compris).
+        const candidate = verdict.candidate as RouteChainCandidate;
+        const label = candidate.glyph + " " + candidate.name;
+        const containerLabel = this.host.containerLabel(candidate.container) || "";
+        if (needle && (label + " " + containerLabel).toLocaleLowerCase().indexOf(needle) < 0) return;
+        out.push({
+          id: candidate.id,
+          label,
+          group: groupLabel,
+          groupHint: groupHint || undefined,
+          disabled: !verdict.usable,
+          // Le motif du refus, en CLAIR sous l'item (extension `reason` de SearchPop, lot L3).
+          reason: (!verdict.usable && verdict.reason) ? RouteChainEditor.reasonLabel(verdict.reason) : undefined,
+          // EXITS SAILLANTS (maquette §04) — seulement PROPOSABLES : un exit refusé reste gris comme
+          // les autres refus (l'accent dirait « prends-moi » à un item qui ne se prend pas).
+          itemClass: (verdict.usable && candidate.type === "exit") ? "rc-pop-exit" : undefined,
+          data: candidate,
+        });
+      });
     });
     return out;
+  }
+
+  /** Indice de PERTINENCE d'un groupe (complément discret de l'en-tête). Les phrases emploient les
+      SUJETS d'ancre fournis par l'hôte — les mêmes mots pour le câble (« le bout A ») et le faisceau
+      (« l'extrémité A »), sans dupliquer de clé par formulaire. */
+  private static relevanceHint(
+    relevance: RouteGroupRelevance,
+    anchorA: RouteChainAnchor,
+    anchorB: RouteChainAnchor,
+  ): string | null {
+    switch (relevance) {
+      case "current": return I18n.t("cable.route.relCurrent");
+      case "left": return I18n.t("cable.route.relLeft");
+      case "endpointA": return I18n.t("cable.route.relEndpoint", { anchor: anchorA.subject });
+      case "endpointB": return I18n.t("cable.route.relEndpoint", { anchor: anchorB.subject });
+      case "endpoints": return I18n.t("cable.route.relEndpoints", { a: anchorA.subject, b: anchorB.subject });
+      default: return null;
+    }
   }
 
   /** Motif de refus (CODE stable de `RouteEligibility`) → phrase traduite. La table est EXHAUSTIVE

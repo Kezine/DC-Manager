@@ -100,7 +100,7 @@ export interface RouteAnchors {
     - `exit_wrong_room` : exit d'une autre salle que celle où la route se trouve ;
     - `exit_reentry` : re-rentrer dans la salle tout juste quittée ;
     - `breaks_route` : l'insertion AU MILIEU casserait une étape SUIVANTE (n'arrive jamais en fin
-      de route — donc jamais au lot L2, qui n'insère qu'en fin) ;
+      de route — seul le « + » d'interstice, qui insère au milieu, peut le rencontrer) ;
     - `invalid_here` : filet de sécurité — un code de grammaire non encore cartographié ici. */
 export type RouteBlockCode =
   | "already_in_route"
@@ -160,7 +160,8 @@ export interface RouteAddPlan {
   state: RouteInsertState;
   /** Groupes par conteneur, ordonnés par PERTINENCE (① courant, ② bouts, ③ reste, ④ salle quittée). */
   groups: RouteGroup[];
-  /** Concaténation des groupes — ce que consomme le popover PLAT du lot L2 (les groupes sont pour L3). */
+  /** Concaténation des groupes — la MÊME liste sans en-têtes. Le popover consomme `groups` depuis le
+      lot L3 ; la vue à plat reste pour les tests et tout consommateur sans en-têtes. */
   flat: RouteVerdict[];
 }
 
@@ -360,7 +361,7 @@ export class RouteEligibility {
     //    pas porter PLUS d'erreurs d'étape qu'avant.
     //    ⚠ Limite assumée : une insertion qui EFFACERAIT une erreur aval tout en en créant une autre
     //    passerait au travers du comptage. Elle ne peut de toute façon pas mentir sur l'étape
-    //    insérée (point 1), et le lot L2 n'insère qu'en FIN — donc ce chemin ne s'emprunte pas encore.
+    //    insérée (point 1). Ce chemin est EMPRUNTÉ depuis le lot L3 (le « + » d'interstice).
     if (tail.length) {
       const probe = analyze(head.concat([candidate.id], tail));
       if (RouteEligibility.stepErrorsOf(probe).length > baseErrorCount) {

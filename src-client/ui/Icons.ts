@@ -108,6 +108,12 @@ export class Icons {
   static readonly MOVE_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><path d="M6 11l6-6 6 6"/></svg>';
   static readonly MOVE_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><path d="M6 13l6 6 6-6"/></svg>';
 
+  /** SAISIR une ligne pour la GLISSER-DÉPOSER (poignée ⋮⋮ de `ui/DragList`) : deux colonnes de
+      points. Intention distincte de MORE (⋮ simple = menu d'actions) et de MOVE_UP/MOVE_DOWN
+      (déplacement d'UN cran au clavier). Purement DÉCORATIVE chez le consommateur (`aria-hidden` :
+      le réordonnancement accessible passe par les boutons ↑/↓, qui ont un nom). */
+  static readonly GRIP = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>';
+
   /* ------------------------------------------------------------------------
      ÉTAT / MÉTADONNÉES — verrou, défaut (étoile), identité.
      ------------------------------------------------------------------------ */
