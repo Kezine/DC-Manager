@@ -7,6 +7,8 @@ const { ck, section, ModalStack } = require("./harness.js");
 
 /** Entrée minimale : la pile n'exige que la NATURE et le LIBELLÉ (le reste est l'affaire de Modal). */
 const entry = (kind, title) => ({ kind, title });
+/** Entrée MUNIE d'une clé d'identité (D5) — ce que fournit une FICHE (jamais un formulaire). */
+const keyed = (kind, title, stackKey) => ({ kind, title, stackKey });
 
 module.exports = async () => {
   await section("ModalStack : pile vide, push/pop, sommet et profondeur", async () => {
@@ -116,6 +118,30 @@ module.exports = async () => {
     const seule = new ModalStack();
     seule.push(entry("edit", "Nouveau site"));
     ck.eq(seule.closeAllTarget().action, "closeAll", "édition SEULE (profondeur 1) → closeAll : « revenir » et « fermer » coïncident");
+  });
+
+  await section("ModalStack : D5 — `indexOfKey` (dédup des boucles de navigation)", async () => {
+    const pile = new ModalStack();
+    // Une entrée SANS clé (un formulaire) ne doit JAMAIS être reconnue — sinon on dédupliquerait
+    // une saisie, en l'écrasant.
+    pile.push(entry("edit", "Nouvel équipement"));
+    ck.eq(pile.indexOfKey("detail:equipments/42"), -1, "entrée sans clé : jamais matchée");
+    ck.eq(pile.indexOfKey(""), -1, "une clé vide ne matche pas une entrée sans clé");
+
+    pile.push(keyed("info", "Équipement — sw-01", "detail:equipments/42"));
+    pile.push(keyed("info", "Baie — R12", "detail:racks/7"));
+    ck.eq(pile.indexOfKey("detail:equipments/42"), 1, "clé PRÉSENTE : rend son index (0 = bas)");
+    ck.eq(pile.indexOfKey("detail:racks/7"), 2, "clé du sommet : son index");
+    ck.eq(pile.indexOfKey("detail:cables/9"), -1, "clé ABSENTE : -1");
+    ck.eq(pile.depth(), 3, "`indexOfKey` est un PRÉDICAT : il ne modifie jamais la pile");
+
+    // Doublon (ne devrait pas arriver, mais la règle est définie) : on rend la PLUS HAUTE, car c'est
+    // jusqu'à la visite la plus RÉCENTE qu'une redescente doit s'arrêter.
+    const doublon = new ModalStack();
+    doublon.push(keyed("info", "A (ancien)", "detail:equipments/42"));
+    doublon.push(keyed("info", "Baie", "detail:racks/7"));
+    doublon.push(keyed("info", "A (récent)", "detail:equipments/42"));
+    ck.eq(doublon.indexOfKey("detail:equipments/42"), 2, "doublon de clé : on rend la PLUS HAUTE (la plus récente)");
   });
 
   await section("ModalStack : la garde D9a et le refus D9b protègent la MÊME chose", async () => {

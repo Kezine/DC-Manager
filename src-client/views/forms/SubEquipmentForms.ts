@@ -116,6 +116,7 @@ export class SubEquipmentForms extends FormBase {
     });
     host.openModal({
       title: I18n.t("subEquipment.detailTitle"), subtitle: Html.escape(this.label(se)), body: root, hideFooter: true, wide: true,
+      stackKey: "detail:subEquipments/" + id,
       onResume: () => this.detail(store, host, id, onChanged),   // retour au premier plan (édition dépilée) → fiche reconstruite depuis le store
     });
   }

@@ -214,6 +214,7 @@ export class EquipmentForms extends FormBase {
     // la fiche se RECONSTRUIT depuis le store — elle lit l'objet `eq` capturé à l'ouverture, donc figé.
     host.openModal({
       title: I18n.t("equipment.detail.title"), subtitle: Html.escape(eq.name || ""), body: root, hideFooter: true, wide: true,
+      stackKey: "detail:equipments/" + eq.id,
       onResume: () => this.equipmentDetail(store, host, eq.id, onChanged),
     });
   }

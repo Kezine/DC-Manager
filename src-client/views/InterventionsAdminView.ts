@@ -620,6 +620,7 @@ export class InterventionsAdminView {
 
     this.host.openModal({
       title: I18n.t("interventions.detail.title"), subtitle: Html.escape(item.title), body: root, hideFooter: true, wide: true,
+      stackKey: "intervention:" + item.id,
       // Retour au premier plan → fiche RECONSTRUITE. On repart de l'enregistrement RECHARGÉ (`afterWrite`
       // rafraîchit `items` après toute écriture) plutôt que de l'objet capturé, qui serait resté d'avant
       // l'édition ; repli sur l'objet capturé si l'item n'est plus dans la page courante.

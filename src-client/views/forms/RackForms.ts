@@ -335,6 +335,7 @@ export class RackForms extends CableForms {
     // « contenu » ou fiche d'équipement dépilés) — elle lit l'objet `rk` capturé à l'ouverture, donc figé.
     host.openModal({
       title: I18n.t("rack.rackDetail.title"), subtitle: Html.escape(rk.name || ""), body: root, hideFooter: true, wide: true,
+      stackKey: "detail:racks/" + rk.id,
       onResume: () => this.rackDetail(store, host, rk.id, onChanged),
     });
   }
@@ -464,6 +465,9 @@ export class RackForms extends CableForms {
     host.openModal({
       title: I18n.t("rack.rackContent.title", { name: Html.escape(rack.name || I18n.t("rack.common.rackWord")) }),
       subtitle: I18n.t("rack.rackContent.subtitle"), body: root, hideFooter: true, wide: true,
+      // Clé DISTINCTE de la fiche baie (`detail:racks/`) : la modale « contenu » et la fiche d'identité
+      // de la même baie sont deux niveaux différents, aucun ne doit dédupliquer l'autre.
+      stackKey: "rack-content:" + id,
       onResume: () => this.rackContent(store, host, id, onChanged),
     });
   }

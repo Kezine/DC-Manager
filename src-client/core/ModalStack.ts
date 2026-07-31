@@ -30,6 +30,14 @@ export type ModalKind = "edit" | "info";
 export interface ModalStackEntry {
   kind: ModalKind;
   title: string;
+  /** Clé d'IDENTITÉ optionnelle du niveau (D5). Sa raison d'être : les BOUCLES de navigation. Une
+      fiche A qui ouvre une fiche liée B, laquelle rouvre A, empilerait un SECOND A — et le ← Retour
+      repasserait alors par B avant de retrouver le vieux A, une pile absurde. Munie d'une clé, la
+      seconde visite de A REDESCEND jusqu'à la première au lieu d'empiler (cf. `indexOfKey`).
+      SEULES LES FICHES en fournissent une : un FORMULAIRE ne doit JAMAIS être dédupliqué — écraser
+      un niveau de saisie perdrait la frappe en cours. On ne déduplique donc que ce qui est
+      reconstructible depuis le store (les fiches, via leur `onResume`). */
+  stackKey?: string;
 }
 
 /** Verdict d'un PUSH (règle D9b). Le refus porte le libellé de l'édition qui BLOQUE — sans lui,
@@ -74,6 +82,21 @@ export class ModalStack<E extends ModalStackEntry = ModalStackEntry> {
     const removed = this.entries.slice().reverse();
     this.entries.length = 0;
     return removed;
+  }
+
+  /** D5 — index (0 = BAS de la pile) de l'entrée portant la clé `key`, ou -1 si aucune ne la porte.
+      Sert la dédup des boucles : au push d'une fiche déjà présente, `Modal` REDESCEND jusqu'à cet
+      index au lieu d'empiler un doublon.
+      Une entrée SANS `stackKey` n'est JAMAIS reconnue (les formulaires, dépourvus de clé, restent
+      donc hors dédup — le garde `!== undefined` le rend explicite, `key` étant toujours une chaîne).
+      Si — cas qui ne devrait pas survenir — deux entrées portaient la même clé, on rend la PLUS
+      HAUTE : c'est jusqu'à la visite la plus récente qu'il faut redescendre, pas jusqu'à un vieux
+      doublon enfoui. D'où le parcours du SOMMET vers le bas. */
+  indexOfKey(key: string): number {
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      if (this.entries[i].stackKey !== undefined && this.entries[i].stackKey === key) return i;
+    }
+    return -1;
   }
 
   /** L'ÉDITION vivante de la pile, à n'importe quel niveau (null si aucune). L'invariant D9b —

@@ -167,7 +167,7 @@ export class DetailForms extends IpamForms {
     if (host.locate && store.cableLocatable(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); actions.appendChild(locBtn); }
     if (!this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = () => this.cable(store, host, id, onChanged); actions.appendChild(b); }
     root.appendChild(actions);
-    host.openModal({ title: I18n.t("detail.cable.title"), subtitle: Html.escape(c.name || ""), body: root, onResume: () => this.cableDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.cable.title"), subtitle: Html.escape(c.name || ""), body: root, stackKey: "detail:cables/" + id, onResume: () => this.cableDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- FAISCEAU (trunk) ---- */
@@ -227,7 +227,7 @@ export class DetailForms extends IpamForms {
 
     AuditLine.attach(root, b, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.cableBundle(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.bundle.title"), subtitle: Html.escape(b.name || ""), body: root, onResume: () => this.cableBundleDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.bundle.title"), subtitle: Html.escape(b.name || ""), body: root, stackKey: "detail:cableBundles/" + id, onResume: () => this.cableBundleDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- RÉSEAU (logique) ---- */
@@ -274,7 +274,7 @@ export class DetailForms extends IpamForms {
 
     AuditLine.attach(root, n, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.network(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.network.title"), subtitle: Html.escape(n.label || ""), body: root, onResume: () => this.networkDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.network.title"), subtitle: Html.escape(n.label || ""), body: root, stackKey: "detail:networks/" + id, onResume: () => this.networkDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- RÉSEAU IP (IPAM) ---- */
@@ -325,7 +325,7 @@ export class DetailForms extends IpamForms {
 
     AuditLine.attach(root, ipn, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.ipNetwork(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.ipNet.title"), subtitle: Html.escape(ipn.label || ipn.cidr || ""), body: root, onResume: () => this.ipNetworkDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.ipNet.title"), subtitle: Html.escape(ipn.label || ipn.cidr || ""), body: root, stackKey: "detail:ipNetworks/" + id, onResume: () => this.ipNetworkDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- ADRESSE IP ---- */
@@ -356,7 +356,7 @@ export class DetailForms extends IpamForms {
     root.appendChild(this.grid(pairs));
     AuditLine.attach(root, a, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.ipAddress(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.ipAddr.title"), subtitle: Html.escape(a.address || ""), body: root, onResume: () => this.ipAddressDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.ipAddr.title"), subtitle: Html.escape(a.address || ""), body: root, stackKey: "detail:ipAddresses/" + id, onResume: () => this.ipAddressDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- PLAGE DHCP ---- */
@@ -378,7 +378,7 @@ export class DetailForms extends IpamForms {
     ]));
     AuditLine.attach(root, rg, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.dhcpRange(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.dhcp.title"), subtitle: ipn ? Html.escape(ipn.label || ipn.cidr || "") : "", body: root, onResume: () => this.dhcpRangeDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.dhcp.title"), subtitle: ipn ? Html.escape(ipn.label || ipn.cidr || "") : "", body: root, stackKey: "detail:dhcpRanges/" + id, onResume: () => this.dhcpRangeDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- SALLE (datacenter) ---- */
@@ -415,7 +415,7 @@ export class DetailForms extends IpamForms {
 
     AuditLine.attach(root, dc, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.datacenter(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.dc.title"), subtitle: Html.escape(dc.name || ""), body: root, onResume: () => this.datacenterDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.dc.title"), subtitle: Html.escape(dc.name || ""), body: root, stackKey: "detail:datacenters/" + id, onResume: () => this.datacenterDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- SITE (bâtiment) ---- */
@@ -443,7 +443,7 @@ export class DetailForms extends IpamForms {
     tw?.querySelectorAll("[data-dc-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.datacenterDetail(store, host, (el as HTMLElement).dataset.dcView!, onChanged); });
     AuditLine.attach(root, site, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.site(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.site.title"), subtitle: Html.escape(site.name || ""), body: root, onResume: () => this.siteDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.site.title"), subtitle: Html.escape(site.name || ""), body: root, stackKey: "detail:sites/" + id, onResume: () => this.siteDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- GROUPE ---- */
@@ -473,7 +473,7 @@ export class DetailForms extends IpamForms {
     if (subEqs.length) SubEquipmentForms.attachSection(store, host, root, subEqs);
     AuditLine.attach(root, g, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.group(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.group.title"), subtitle: Html.escape(g.label || ""), body: root, onResume: () => this.groupDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.group.title"), subtitle: Html.escape(g.label || ""), body: root, stackKey: "detail:groups/" + id, onResume: () => this.groupDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- ÉTAGE ---- */
@@ -501,7 +501,7 @@ export class DetailForms extends IpamForms {
     tw?.querySelectorAll("[data-dc-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.datacenterDetail(store, host, (el as HTMLElement).dataset.dcView!, onChanged); });
     AuditLine.attach(root, f, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.floor(store, host, f.location || "", String(f.floor || ""), {}));
-    host.openModal({ title: I18n.t("detail.floor.title"), subtitle: Html.escape(I18n.t("detail.floor.subtitle", { site: store.siteLabel(f.location || ""), floor: f.floor || "" })), body: root, onResume: () => this.floorDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.floor.title"), subtitle: Html.escape(I18n.t("detail.floor.subtitle", { site: store.siteLabel(f.location || ""), floor: f.floor || "" })), body: root, stackKey: "detail:floors/" + id, onResume: () => this.floorDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- SPARE (pièce de rechange) ---- */
@@ -531,7 +531,7 @@ export class DetailForms extends IpamForms {
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "spare", id, label: (sp.displayName ? sp.displayName() : (sp.name || "")) }, () => host.closeModal?.());
     AuditLine.attach(root, sp, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.spare(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.spare.title"), subtitle: Html.escape(sp.displayName ? sp.displayName() : (sp.name || "")), body: root, onResume: () => this.spareDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.spare.title"), subtitle: Html.escape(sp.displayName ? sp.displayName() : (sp.name || "")), body: root, stackKey: "detail:spares/" + id, onResume: () => this.spareDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- CONTACT (destinataire de notifications) ---- */
@@ -549,7 +549,7 @@ export class DetailForms extends IpamForms {
     ]));
     AuditLine.attach(root, c, host.userDirectory);   // « Créé/Modifié par » (mode API)
     this.footer(root, () => this.contact(store, host, id, onChanged));
-    host.openModal({ title: I18n.t("detail.contact.title"), subtitle: Html.escape(c.name || ""), body: root, onResume: () => this.contactDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.contact.title"), subtitle: Html.escape(c.name || ""), body: root, stackKey: "detail:contacts/" + id, onResume: () => this.contactDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- VM (équipement virtuel — feature amovible) ---- */
@@ -769,7 +769,7 @@ export class DetailForms extends IpamForms {
       actions.appendChild(editBtn);
     }
     root.appendChild(actions);
-    host.openModal({ title: I18n.t("detail.vm.title"), subtitle: Html.escape(vm.name || ""), body: root, onResume: () => this.vmDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+    host.openModal({ title: I18n.t("detail.vm.title"), subtitle: Html.escape(vm.name || ""), body: root, stackKey: "detail:vms/" + id, onResume: () => this.vmDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- TYPE DE CÂBLE (catalogue, lecture seule) ---- */
@@ -785,7 +785,7 @@ export class DetailForms extends IpamForms {
       [I18n.t("detail.cableType.nature"), `<span class="pill">${t.kind === "power" ? I18n.t("detail.common.power") : I18n.t("detail.common.data")}</span>`],
       [I18n.t("detail.cableType.count"), used ? `<span class="pill">${used}</span>` : this.MUTED],
     ]));
-    host.openModal({ title: I18n.t("detail.cableType.title"), subtitle: Html.escape(t.name || ""), body: root, onResume: () => this.cableTypeDetail(store, host, id), hideFooter: true });
+    host.openModal({ title: I18n.t("detail.cableType.title"), subtitle: Html.escape(t.name || ""), body: root, stackKey: "detail:cableTypes/" + id, onResume: () => this.cableTypeDetail(store, host, id), hideFooter: true });
   }
 
   /* ---- TYPE DE PORT (catalogue, lecture seule) ---- */
@@ -803,6 +803,6 @@ export class DetailForms extends IpamForms {
       [I18n.t("detail.cableType.nature"), `<span class="pill">${t.kind === "power" ? I18n.t("detail.common.power") : I18n.t("detail.common.data")}</span>`],
       [I18n.t("detail.portType.count"), used ? `<span class="pill">${used}</span>` : this.MUTED],
     ]));
-    host.openModal({ title: I18n.t("detail.portType.title"), subtitle: Html.escape(t.name || ""), body: root, onResume: () => this.portTypeDetail(store, host, id), hideFooter: true });
+    host.openModal({ title: I18n.t("detail.portType.title"), subtitle: Html.escape(t.name || ""), body: root, stackKey: "detail:portTypes/" + id, onResume: () => this.portTypeDetail(store, host, id), hideFooter: true });
   }
 }

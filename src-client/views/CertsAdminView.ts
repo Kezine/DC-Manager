@@ -1111,6 +1111,7 @@ export class CertsAdminView {
     root.append(grid, acts);
     this.host.openModal({
       title: I18n.t("certs.admin.info.title"), subtitle: Html.escape(item.label), body: root, hideFooter: true,
+      stackKey: "cert:" + item.id,
       // Retour au premier plan → fiche RECONSTRUITE : `metadataModal` écrit label/commentaire DANS l'objet
       // capturé, cette relecture les fait donc apparaître sans nouvel appel réseau.
       onResume: () => this.infoModal(item),

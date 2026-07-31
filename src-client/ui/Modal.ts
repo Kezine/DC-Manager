@@ -33,6 +33,13 @@ export interface ModalOptions {
       LES FORMULAIRES N'EN FOURNISSENT PAS : leur DOM est conservé tel quel, donc la SAISIE en
       cours survit — c'est le défaut sain, on ne perd jamais de frappe par omission. */
   onResume?: () => void;
+  /** Clé d'IDENTITÉ du niveau, pour la dédup des BOUCLES de navigation (décision D5). Rouvrir une
+      fiche déjà présente dans la pile (fiche A → fiche liée B → A) REDESCEND jusqu'à elle au lieu
+      d'empiler un doublon — la profondeur revient à celle de la première visite, avec un contenu
+      neuf. FICHES SEULEMENT : un formulaire n'en fournit JAMAIS (dédupliquer écraserait la saisie
+      en cours). Schéma recommandé, stable et distinct par type de fiche : « <type>:<id> »
+      (ex. `detail:equipments/42`, `rack-content:7`, `intervention:3`, `cert:9`). */
+  stackKey?: string;
   hideFooter?: boolean;
   saveLabel?: string;
   confirmClose?: boolean;
@@ -52,6 +59,8 @@ interface ModalLevel extends ModalStackEntry {
   kind: ModalKind;
   /** Libellé AFFICHABLE du niveau (« Titre — sous-titre ») : toast D9 et info-bulle du ← Retour. */
   title: string;
+  /** Clé d'identité (fiches seulement) — dédup des boucles, cf. `ModalStack.indexOfKey` (D5). */
+  stackKey?: string;
   titleText: string;
   subtitleHtml: string;
   bodyEl: HTMLElement;
@@ -278,7 +287,7 @@ export class Modal {
   }
 
   open(opts: ModalOptions): void {
-    const { title, subtitle, body, onSave, onCancel, onClose, onResume, hideFooter, saveLabel, confirmClose, wide, onReady } = opts;
+    const { title, subtitle, body, onSave, onCancel, onClose, onResume, stackKey, hideFooter, saveLabel, confirmClose, wide, onReady } = opts;
     if (this.editLocked && !hideFooter) return;   // viewer : bloque l'édition
     // Un `open` déclenché PENDANT le `onResume` d'un niveau le REMPLACE (il se reconstruit sur
     // place) au lieu d'en empiler un de plus. Le drapeau est CONSOMMÉ ici : un second `open` dans le
@@ -289,6 +298,19 @@ export class Modal {
     // Nature du niveau : porter un `onSave`, c'est porter une SAISIE (règles D9). Une fiche
     // (`hideFooter`, lecture seule) est un `info`.
     const kind: ModalKind = (typeof onSave === "function") ? "edit" : "info";
+
+    // D5 — DÉDUP des boucles de navigation. Rouvrir une fiche DÉJÀ dans la pile (A → B → A) ne doit
+    // pas empiler un second A : on JETTE tout ce qui se trouve du sommet jusqu'à ce vieux A INCLUS,
+    // puis on empile un A NEUF ci-dessous. La profondeur revient ainsi à celle de la première visite,
+    // et le contenu affiché est le corps FRAIS que l'appelant vient de fournir (on ne restaure PAS le
+    // DOM du A jeté). Les niveaux jetés voient jouer leurs `onCancel`/`onClose` (`_discardTop(true)`),
+    // par parité avec le dépilement d'une fermeture totale. NON appliqué pendant un `replacing` : un
+    // `onResume` REMPLACE son propre niveau (même clé), il ne doit pas se dédupliquer lui-même.
+    if (!replacing && stackKey !== undefined) {
+      const looped = this.stack.indexOfKey(stackKey);
+      if (looped >= 0) while (this.stack.depth() > looped) this._discardTop(true);
+    }
+
     if (!replacing && this.stack.depth() > 0) {
       // D9b — REFUS d'une édition sur une édition vivante. On ne touche à RIEN : la pile reste telle
       // quelle, l'utilisateur reste où il est, et le toast lui dit ce qu'il doit finir ou annuler.
@@ -308,7 +330,7 @@ export class Modal {
     else { const covered = this.stack.top(); if (covered) covered.focusAtPush = (document.activeElement as HTMLElement) || null; }
 
     const level: ModalLevel = {
-      kind, title: "", titleText: title || "—", subtitleHtml: subtitle || "",
+      kind, title: "", stackKey, titleText: title || "—", subtitleHtml: subtitle || "",
       bodyEl: body,
       hideFooter: !!hideFooter, wide: !!wide, saveLabel: saveLabel || I18n.t("ui.action.save"),
       confirmClose: (typeof confirmClose === "boolean") ? confirmClose : (typeof onSave === "function"),
