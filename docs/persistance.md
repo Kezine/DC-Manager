@@ -33,7 +33,8 @@ Quatre champs d'audit vivent DANS le blob : `created_by` / `updated_by` (id cano
 `updated_*` sont rafraîchis à chaque écriture. **Exception** : `PUT /snapshot` (restauration) n'estampille PAS —
 l'audit du snapshot est restauré tel quel (arbitrage Q7). En **mode fichier** (aucune identité), les `_by` sont
 absents et les dates restent celles du client. Ces champs étant NON DÉCLARÉS dans `DataValidation`, ils traversent
-la normalisation/validation sans être retirés ni rejetés (specs partielles). La colonne promue `created_date` reçoit
+la normalisation/validation sans être retirés ni rejetés — c'est, avec deux legacy à purger, le SEUL passthrough restant
+depuis la régularisation D3a (spec COMPLÈTE, cf. `docs/validation.md` §10). La colonne promue `created_date` reçoit
 donc, en mode API, l'horodatage serveur.
 
 ## Pourquoi ce choix

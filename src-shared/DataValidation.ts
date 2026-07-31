@@ -71,7 +71,13 @@ export const SPARE_TYPE_IDS = ["hdd", "ssd", "transceiver", "other"] as const;
 export const SPARE_STATUS_IDS = ["available", "assigned", "decommissioned"] as const;
 
 /* ---- types de la spécification ---- */
-export type FieldType = "string" | "number" | "boolean" | "string[]";
+/** `json` = STRUCTURE non exprimable par les types scalaires (objet value-object ou tableau d'objets :
+    portes de baie/salle, vNICs). Sémantique MINIMALE et VOULUE ainsi (décision migration DB 2026-07-31) :
+    la normalisation laisse la valeur TELLE QUELLE (défaut posé si absente), la validation intrinsèque ne
+    vérifie que « c'est bien un objet/tableau, pas un scalaire » — le CONTENU reste validé par les
+    invariants (ex. `vms.nics`) et normalisé côté client (`Normalize.rackDoor`/`dcDoors`, `VmSync`).
+    Au DDL (générateur L1), un champ `json` devient une colonne TEXT JSON. */
+export type FieldType = "string" | "number" | "boolean" | "string[]" | "json";
 
 /** Règle déclarative pour UN champ d'une collection. */
 export interface FieldSpec {
@@ -111,18 +117,29 @@ type FieldTs<F> =
   F extends { type: "number" }   ? (F extends { nullable: true } ? number | null   : number)  :
   F extends { type: "boolean" }  ? (F extends { nullable: true } ? boolean | null  : boolean) :
   F extends { type: "string[]" } ? (F extends { nullable: true } ? string[] | null : string[]) :
+  // `json` → `unknown` (qui absorbe `| null`, pas de branche nullable) : le typage RICHE de ces structures
+  // reste côté client (`RackDoor`, `DcDoor`, `VmSync.VmNic`) — on ne partage pas les types métier du client,
+  // et `unknown` laisse les classes modèles déclarer le leur (`implements` reste satisfait).
+  F extends { type: "json" }     ? unknown :
   unknown;
 /** Forme d'un enregistrement NORMALISÉ dérivée d'un bloc de champs `as const`. Mutable (DTO d'échange) via `-readonly`. */
 export type RecordOf<Fields> = { -readonly [K in keyof Fields]: FieldTs<Fields[K]> };
 
-/** Spécification d'une collection : ses champs déclarés (partielle — seuls les champs porteurs de règles
-    sont listés ; les autres traversent) + invariants inter-champs (V3) + règles cross-entité (V5).
-    DOCTRINE (audit de régularisation 2026-07-20) : la traversée des champs non déclarés sert la COMPAT et
-    les champs SANS règle — pas le design. Tout champ d'IDENTITÉ ou porteur de sémantique DOIT être déclaré
-    (cas régularisé : `ipAddresses.hostname`). Passthrough INTENTIONNELS assumés : les champs d'AUDIT
-    `created_by`/`updated_by`/`created_date`/`updated_date` (posés/écrasés PAR LE SERVEUR via AuditStamp
-    APRÈS validation — les déclarer ici n'apporterait aucune règle côté client et leur traversée est
-    éprouvée par test) et `vms.nics` (tableau d'objets, validé par invariant — cf. spec vms). */
+/** Spécification d'une collection : ses champs déclarés + invariants inter-champs (V3) + règles
+    cross-entité (V5).
+    DOCTRINE (régularisation migration DB 2026-07-31, D3a — remplace la doctrine « spec partielle » de
+    l'audit 2026-07-20) : la spec est COMPLÈTE — TOUT champ réellement persisté d'une collection est
+    déclaré ici, parce que la future dérivation du DDL relationnel (colonnes strictes) PERDRAIT tout champ
+    non déclaré à l'écriture. Le mécanisme de traversée des champs inconnus subsiste (la normalisation ne
+    retire rien), mais il ne couvre plus QUE deux cas ASSUMÉS :
+    - les 4 champs d'AUDIT `created_by`/`updated_by`/`created_date`/`updated_date` : posés/écrasés PAR LE
+      SERVEUR (AuditStamp) APRÈS validation — les déclarer n'apporterait aucune règle côté client, leur
+      traversée est éprouvée par test, et le générateur DDL les pose en colonnes standard ;
+    - 2 champs LEGACY d'équipement, `face_image`/`face_image_rear` (ancêtres inline des FK `face_image_*_id`,
+      toujours null dans les corpus) : à PURGER à la migration L4, PAS à déclarer.
+    Un verrou de complétude (`Tests/modules/test-spec-completude.js`) confronte le corpus de démo à cette
+    spec : tout champ persisté hors de la liste fermée ci-dessus doit être déclaré, sinon le test échoue en
+    nommant collection + champ — un champ ne peut plus redevenir passthrough en silence. */
 export interface CollectionSpec {
   fields: Record<string, FieldSpec>;
   invariants?: Invariant[];
@@ -528,7 +545,68 @@ const SPEC_FIELDS = {
       // POE : équipement capable de PoE (déverrouille le rôle "poe") + budget POE TOTAL partagé (W).
       poe_device:      { type: "boolean", default: false },
       poe_budget_w:    { type: "number", nullable: true, default: null, min: 0 },
-      // NB : les FK face_image_* visent le magasin d'images (hors modèle) → pas de `ref` (collection non modélisée).
+      // FICHE D'INVENTAIRE (chaînes libres, vides par défaut — parité constructeur Equipment.ts).
+      brand:          { type: "string", default: "" },
+      model:          { type: "string", default: "" },
+      serial:         { type: "string", default: "" },
+      description:    { type: "string", default: "" },
+      // ADMINISTRATIF (achat / garantie / attribution) — dates ISO courtes en TEXTE (aucun tri/filtre serveur).
+      purchase_date:  { type: "string", default: "" },
+      po_ref:         { type: "string", default: "" },
+      warranty_end:   { type: "string", default: "" },
+      assigned_date:  { type: "string", default: "" },
+      assigned_to:    { type: "string", default: "" },
+      // MODE MANUEL (lieu libre) — chaînes héritables, vides par défaut (parité datacenters.location/floor/room).
+      location:       { type: "string", default: "" },
+      floor:          { type: "string", default: "" },
+      room:           { type: "string", default: "" },
+      // POSITION EN BAIE : U de bas (null = pool non placé — cf. T1) + face de montage. `rack_side` reprend
+      // l'enum partagé des côtés d'occupation (même ensemble que rackItems.side). LUS par la validation
+      // elle-même (T1/T2/V6c/V6d) — les déclarer était la condition de la dérivation DDL.
+      rack_u:         { type: "number", nullable: true, default: null },
+      rack_side:      { type: "string", enum: RACK_OCCUPANT_SIDES, default: "front" },
+      // PLACEMENT LIBRE EN SALLE (mode manual/dc) : centre au sol (mm), hauteur (NÉGATIF autorisé —
+      // sous-plancher), rotation 0/90/180/270 (contrainte exprimable : min 0 — cf. floor_orientation de salle).
+      dc_x:           { type: "number", nullable: true, default: null },
+      dc_y:           { type: "number", nullable: true, default: null },
+      dc_z:           { type: "number", default: 0 },
+      dc_orientation: { type: "number", min: 0, default: 0 },
+      // PLAN D'ÉTAGE (mode floor) : position sur le plan (mm). null = non localisé.
+      floor_x:        { type: "number", nullable: true, default: null },
+      floor_y:        { type: "number", nullable: true, default: null },
+      // MODE DE DIMENSIONNEMENT ("u" | "free") — champ DÉRIVÉ CÔTÉ CLIENT quand il manque (le constructeur
+      // Equipment.ts choisit d'après placement_mode) : le défaut "" signifie « non renseigné, le client
+      // dérive » — on ne fige PAS un mode ici (un défaut statique trahirait la dérivation conditionnelle).
+      // Pas d'enum : l'ensemble {"u","free"} n'existe pas en constante partagée (client seul).
+      dim_mode:       { type: "string", default: "" },
+      // DIMENSIONS LIBRES (mm) — boîtier hors baie. null = non renseigné (JAMAIS 0 : un défaut numérique
+      // inventerait une dimension).
+      free_l_mm:      { type: "number", nullable: true, default: null, min: 0 },
+      free_w_mm:      { type: "number", nullable: true, default: null, min: 0 },
+      free_h_mm:      { type: "number", nullable: true, default: null, min: 0 },
+      // MONTAGE SUR FLANC (mode side) — valeurs fermées CÔTÉ CLIENT seulement (pas de constante partagée →
+      // pas d'enum ici) ; défauts = parité stricte avec le constructeur Equipment.ts.
+      side_face:      { type: "string", default: "front" },
+      side_lr:        { type: "string", default: "left" },
+      side_u:         { type: "number", min: 1, default: 1 },
+      side_col:       { type: "number", min: 0, default: 0 },
+      side_snap:      { type: "string", default: "post" },
+      // MONTAGE PAROI (mode wall) — mêmes remarques que le flanc.
+      wall_lr:        { type: "string", default: "left" },
+      wall_margin:    { type: "string", default: "front" },
+      wall_u:         { type: "number", min: 1, default: 1 },
+      wall_col:       { type: "number", min: 0, default: 0 },
+      wall_orient:    { type: "string", default: "center" },
+      // IMAGES DE FAÇADE : FK vers la BIBLIOTHÈQUE d'images (magasin HORS modèle) → pas de `ref` (l'intégrité
+      // V2 ne connaît que les collections du modèle). Une par face (cf. Schema.EQUIPMENT_FACE_IMAGE_FIELDS).
+      face_image_id:        { type: "string", nullable: true, default: null },
+      face_image_rear_id:   { type: "string", nullable: true, default: null },
+      face_image_top_id:    { type: "string", nullable: true, default: null },
+      face_image_bottom_id: { type: "string", nullable: true, default: null },
+      face_image_left_id:   { type: "string", nullable: true, default: null },
+      face_image_right_id:  { type: "string", nullable: true, default: null },
+      // NB : `face_image`/`face_image_rear` (legacy inline, toujours null) restent VOLONTAIREMENT hors spec —
+      // à PURGER à la migration L4, pas à déclarer (cf. doctrine en tête de CollectionSpec).
   },
   cables: {
       // IDENTITÉ : nom du câble — trimé pour une unicité FIABLE (V6h, même raison que le nom d'équipement V6g).
@@ -542,12 +620,17 @@ const SPEC_FIELDS = {
       waypoint_ids:  { type: "string[]", default: [], ref: "waypoints" },
       length_m:      { type: "number", nullable: true, default: null, min: 0 },
       status:        { type: "string", required: true, enum: CABLE_STATUS_IDS, default: "brouillon" },
+      description:   { type: "string", default: "" },   // notes libres (héritées d'Entity, présentes sur toute collection)
       // NB : l'ancien mécanisme « câble-brin » (bundle_id/strand_no sur le câble) a été RETIRÉ — les brins d'un
       // faisceau sont piochés par les PORTS de patch (Port.bundle_id/strand_a/strand_b), source unique.
   },
   racks: {
       name:          { type: "string", required: true },
       location:      { type: "string", default: "" },
+      floor:         { type: "string", default: "" },
+      room:          { type: "string", default: "" },
+      row:           { type: "string", default: "" },      // rangée (libellé libre) — layers / groupement
+      description:   { type: "string", default: "" },
       u_count:       { type: "number", min: 1, default: 42 },
       width_mm:      { type: "number", min: 1 },
       depth:         { type: "number", min: 1 },
@@ -557,18 +640,56 @@ const SPEC_FIELDS = {
       datacenter_id: { type: "string", nullable: true, default: null, ref: "datacenters" },
       dc_x:          { type: "number", nullable: true, default: null },
       dc_y:          { type: "number", nullable: true, default: null },
+      // ORIENTATION au sol : valeurs métier 0/90/180/270 (cf. Normalize.rackOrientation) — même contrainte
+      // exprimable que datacenters.floor_orientation (l'enum de FieldSpec est textuel) : min 0.
+      orientation:   { type: "number", min: 0, default: 0 },
+      // GÉOMÉTRIE / MARGES (mm). ⚠ `lmargin_mm`/`vmargin_mm` ont un défaut CONDITIONNEL côté client (repli
+      // sur mount_margin_mm — Rack.ts) : on déclare null = « non renseigné, le client replie », JAMAIS un
+      // nombre inventé. `mount_margin_mm` a, lui, un défaut FIXE : 50 (= RACK_MOUNT_MARGIN_DEFAULT front —
+      // constante client inimportable ici, valeur répliquée, à maintenir ensemble).
+      mount_margin_mm:   { type: "number", min: 0, default: 50 },
+      lmargin_mm:        { type: "number", nullable: true, default: null, min: 0 },
+      vmargin_mm:        { type: "number", nullable: true, default: null, min: 0 },
+      vmargin_bottom_mm: { type: "number", nullable: true, default: null, min: 0 },   // null = identique à la haute
+      cage_depth_mm:     { type: "number", nullable: true, default: null, min: 1 },   // null = profondeur extérieure (RackDepthPolicy)
+      front_margin_mm:   { type: "number", min: 0, default: 0 },                      // 0 = montants au ras de la façade
+      height_mm:         { type: "number", nullable: true, default: null, min: 1 },   // null = hauteur mini dérivée
+      // SIDE-MOUNT autorisé sur les marges latérales (façade / arrière).
+      allow_side_front:  { type: "boolean", default: false },
+      allow_side_rear:   { type: "boolean", default: false },
+      // PORTES en saillie (value-objects — épaisseur, charnière, creuse) : structures `json`, null = pas de
+      // porte déclarée. Contenu normalisé côté client (Normalize.rackDoor) et lu null-safe par RackDepthPolicy.
+      door_front:        { type: "json", nullable: true, default: null },
+      door_rear:         { type: "json", nullable: true, default: null },
+      // CELLULES waypoint autorisées sur les capots (clés « cx,cy ») — string[] ORDINAIRES : PAS dans
+      // Schema.ARRAY_FIELDS (cette liste gouverne la sémantique des filtres `where`, personne ne filtre par cellule).
+      roof_cells:        { type: "string[]", default: [] },
+      floor_cells:       { type: "string[]", default: [] },
   },
   ports: {
       name:           { type: "string" },
+      description:    { type: "string", default: "" },
       equipment_id:   { type: "string", nullable: true, default: null, ref: "equipments" },
       port_type_id:   { type: "string", nullable: true, default: null, ref: "portTypes" },
+      // RÔLE du port ("data" | "power" | "poe") — LU par la validation (T12, T-POE1) et le tri client, donc
+      // colonne PERSISTÉE. Pas d'enum : la source de vérité PortRoles vit côté CLIENT (cf. la note T12
+      // ci-dessous — un fichier partagé ne peut pas l'importer) ; le défaut "data" est celui du constructeur
+      // Port.ts. La dérivation du rôle depuis le type de port reste un comportement CLIENT.
+      role:           { type: "string", default: "data" },
       parent_port_id: { type: "string", nullable: true, default: null, ref: "ports" },
+      // BREAKOUT : index de lane (1..N) sous le trunk parent. null = port normal. Champ réel du modèle
+      // (Port.ts), non peuplé dans les corpus — déclaré depuis le CODE (décision migration DB, arbitrage 2).
+      lane:           { type: "number", nullable: true, default: null },
       aggregate_id:   { type: "string", nullable: true, default: null, ref: "aggregates" },
       // SOUS-ÉQUIPEMENT DESSERVI par ce port (drive d'une librairie, carte d'un châssis). Le port reste celui du
       // MAÎTRE — c'est une ÉTIQUETTE de destination, pas un déplacement de connectique : le câble, le réseau
       // déduit, l'analyse énergie et le graphe sont INCHANGÉS. Même forme qu'`aggregate_id` juste au-dessus
       // (N ports → 1 sous-équipement), et même règle cross-entité d'appartenance (T2c).
       sub_equipment_id: { type: "string", nullable: true, default: null, ref: "subEquipments" },
+      // POSITION DE FAÇADE (normalisée 0..1 par le client) — LUE par l'invariant T1 (X et Y vont ensemble).
+      // Pas de bornes : le constructeur Port.ts ne clampe pas, on n'invente pas une contrainte.
+      face_x:         { type: "number", nullable: true, default: null },
+      face_y:         { type: "number", nullable: true, default: null },
       face_side:      { type: "string", enum: EQUIPMENT_FACE_IDS, default: "front" },
       // TERMINAISON DE FAISCEAU (ports de patch) : quel faisceau, quels brins physiques piochés.
       bundle_id:      { type: "string", nullable: true, default: null, ref: "cableBundles" },
@@ -589,6 +710,7 @@ const SPEC_FIELDS = {
   },
   aggregates: {
       name:         { type: "string" },
+      description:  { type: "string", default: "" },
       equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
   },
   // SOUS-ÉQUIPEMENT : contenu LOGIQUE d'un équipement maître (drive d'une librairie à bandes, carte d'un
@@ -632,20 +754,31 @@ const SPEC_FIELDS = {
   },
   networks: {
       label:         { type: "string", required: true },
+      description:   { type: "string", default: "" },
+      color:         { type: "string", nullable: true, default: null },   // couleur d'affichage des câbles — null = auto
       kind:          { type: "string", enum: DATA_OR_POWER, default: "data" },
+      // POWER uniquement : tension (V) et capacité max (A) du circuit. null = non renseigné.
+      voltage:       { type: "number", nullable: true, default: null, min: 0 },
+      max_amp:       { type: "number", nullable: true, default: null, min: 0 },
       power_source:  { type: "string", nullable: true, default: null, enum: POWER_SOURCES },
       ip_network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
   },
   groups: {
       label: { type: "string", required: true },
+      description: { type: "string", default: "" },
+      color: { type: "string", nullable: true, default: null },   // couleur partagée par les membres — null = auto
       type:  { type: "string", enum: GROUP_TYPE_IDS },
   },
   rackItems: {
       label:     { type: "string" },
+      description: { type: "string", default: "" },
       rack_id:   { type: "string", nullable: true, default: null, ref: "racks" },
+      u:         { type: "number", nullable: true, default: null },   // U de bas — null = non placé (parité equipments.rack_u)
       kind:      { type: "string", enum: RACK_ITEM_KIND_IDS, default: "blank" },
       side:      { type: "string", enum: RACK_OCCUPANT_SIDES, default: "front" },
       u_height:  { type: "number", min: 1, default: 1 },
+      // profondeur : TOUJOURS "none" (pseudo-équipement no-depth, le constructeur RackItem.ts l'écrit en dur).
+      depth:     { type: "string", default: "none" },
       // configuration TRAY (étagère) — sans effet pour les autres kinds
       tray_type: { type: "string", enum: TRAY_TYPE_IDS, default: "dual" },
       tray_u:    { type: "number", min: 1, default: 1 },
@@ -653,16 +786,30 @@ const SPEC_FIELDS = {
   },
   portTypes: {
       name:   { type: "string" },
+      description: { type: "string", default: "" },
+      // FAMILLE de compatibilité + CONNECTEUR physique + débit — chaînes libres. ⚠ Le connecteur a un défaut
+      // CONDITIONNEL côté client (repli sur `family` — PortType.ts) : "" = « non renseigné, le client replie ».
+      family:    { type: "string", default: "" },
+      connector: { type: "string", default: "" },
+      speed:     { type: "string", default: "" },
       kind:   { type: "string", enum: DATA_OR_POWER, default: "data" },
       duplex: { type: "boolean", default: false },
   },
   cableTypes: {
       name: { type: "string" },
+      description: { type: "string", default: "" },
+      family: { type: "string", default: "" },   // compatibilité (doit matcher la famille des 2 ports reliés)
+      medium: { type: "string", default: "" },   // médium physique (cuivre, fibre OM4, …)
       kind: { type: "string", enum: DATA_OR_POWER, default: "data" },
   },
   cableBundles: {
       name:                    { type: "string" },
+      description:             { type: "string", default: "" },
       cable_type_id:           { type: "string", nullable: true, default: null, ref: "cableTypes" },
+      // CAPACITÉ = nombre de brins — LUE par la validation (T6 : brin ≤ fiber_count). Défaut 12 en PARITÉ
+      // avec le constructeur client (CableBundle.ts) — à maintenir ensemble.
+      fiber_count:             { type: "number", min: 1, default: 12 },
+      length_m:                { type: "number", nullable: true, default: null, min: 0 },   // longueur du trunk (m) — parité cables.length_m
       waypoint_ids:            { type: "string[]", default: [], ref: "waypoints" },
       // 2 extrémités (des PATCHS — T11) où le trunk est terminé — cf. Port.bundle_id (affectation des brins).
       endpoint_a_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
@@ -695,20 +842,78 @@ const SPEC_FIELDS = {
       // HAUTEUR SOUS PLANCHER technique (mm) — le faux-plancher surélevé où posent les baies ; null = pas de plancher
       // technique. Consommée par le rendu 3D (dalle structurelle bleutée sous la salle — cf. DcThreeScene.buildUnderfloorSlab).
       underfloor_mm: { type: "number", nullable: true, default: null, min: 1 },
-      // PASSTHROUGH ASSUMÉS (non déclarés — cf. doctrine « Passthrough INTENTIONNELS » en tête de fichier) : `doors`
-      // (tableau d'OBJETS value-object — non exprimable par FieldType, normalisé par Normalize.dcDoors côté client) et
-      // `blocked_cells` (tableau de clés « cx,cy » de cellules inaccessibles, normalisé par Normalize.cellList).
+      description:   { type: "string", default: "" },
+      // PORTES de la salle (tableau d'OBJETS value-object) : structure `json` — la normalisation partagée la
+      // laisse telle quelle, le CONTENU reste normalisé par Normalize.dcDoors côté client (régularisé
+      // 2026-07-31 : c'était un passthrough assumé, la dérivation DDL exige la déclaration).
+      doors:         { type: "json", default: [] },
+      // CELLULES inaccessibles de la grille (clés « cx,cy ») — string[] ORDINAIRE, PAS dans Schema.ARRAY_FIELDS
+      // (liste des filtres `where` par appartenance, personne ne filtre par cellule). Contenu : Normalize.cellList.
+      blocked_cells: { type: "string[]", default: [] },
   },
   waypoints: {
       name:          { type: "string" },
+      description:   { type: "string", default: "" },
       kind:          { type: "string", enum: WAYPOINT_KINDS, default: "point" },
       wp_type:       { type: "string", enum: WAYPOINT_TYPES, default: "datacenter" },
       locked:        { type: "boolean", default: false },   // positionnement verrouillé (vues 2D/3D) — cf. PlacementLock
       rack_id:       { type: "string", nullable: true, default: null, ref: "racks" },
       datacenter_id: { type: "string", nullable: true, default: null, ref: "datacenters" },
+      // BROSSE (kind "brush") : U de départ, hauteur, profondeur de passage. Défauts en PARITÉ avec le
+      // constructeur Waypoint.ts — le 100 de depth_mm est AUSSI celui de RackDepth.brushDepth (V6d-brosse),
+      // déjà annoncé « à maintenir ensemble » : la spec rejoint cette parité au lieu de la laisser implicite.
+      rack_u:        { type: "number", min: 1, default: 1 },
+      u_height:      { type: "number", min: 1, default: 1 },
+      depth_mm:      { type: "number", min: 1, default: 100 },
+      // PIN DE MARGE latérale (side_*) — null = pas un pin de marge. Valeurs fermées côté CLIENT seulement
+      // (front/rear, left/right, colonne 0|1) : pas de constante partagée → pas d'enum ici.
+      side_face:     { type: "string", nullable: true, default: null },
+      side_lr:       { type: "string", nullable: true, default: null },
+      side_col:      { type: "number", nullable: true, default: null },
+      side_u:        { type: "number", nullable: true, default: null, min: 1 },
+      // PIN DE CAPOT ("roof" | "floor" — ensemble côté client) + cellule visée. null = pas un pin de capot.
+      cap_face:      { type: "string", nullable: true, default: null },
+      cap_cx:        { type: "number", nullable: true, default: null },
+      cap_cy:        { type: "number", nullable: true, default: null },
+      // POSITION EN SALLE (mm) : pin = (dc_x, dc_y) ; segment = 2 extrémités. null = pool (non posé).
+      dc_x:          { type: "number", nullable: true, default: null },
+      dc_y:          { type: "number", nullable: true, default: null },
+      dc_x2:         { type: "number", nullable: true, default: null },
+      dc_y2:         { type: "number", nullable: true, default: null },
+      // HAUTEUR (mm) — défaut CONDITIONNEL côté client (2400, mais 3000 pour un pin d'étage ex-OOB —
+      // Waypoint.ts) : null = « non renseignée, le client dérive ». Un défaut statique trahirait une branche.
+      dc_z:          { type: "number", nullable: true, default: null },
+      // SEGMENT : section du conduit (mm). Défauts fixes en parité avec le client (CONDUIT_W/H_DEFAULT,
+      // constantes front inimportables ici — valeurs répliquées, à maintenir ensemble).
+      width_mm:      { type: "number", min: 0, default: 300 },
+      height_mm:     { type: "number", min: 0, default: 100 },
+      // PIN : rayon de répartition des câbles (mm) + répartition activée.
+      radius:        { type: "number", min: 0, default: 0 },
+      spread:        { type: "boolean", default: false },
+      // PIN D'ÉTAGE (ex-OOB) : rattachement bâtiment/étage + position sur le plan. null = centré.
+      location:      { type: "string", default: "" },
+      floor:         { type: "string", default: "" },
+      floor_x:       { type: "number", nullable: true, default: null },
+      floor_y:       { type: "number", nullable: true, default: null },
   },
   floors: {
       location: { type: "string" },
+      floor:    { type: "string", default: "" },   // niveau (2e partie de la clé logique location+floor)
+      description: { type: "string", default: "" },
+      // PLAN DU BÂTIMENT (mm) : dimensions + maille. Défauts fixes en parité avec le constructeur Floor.ts
+      // (FLOOR_*_DEFAULT, constantes front inimportables ici — valeurs répliquées, à maintenir ensemble).
+      width_mm: { type: "number", min: 1, default: 20000 },
+      depth_mm: { type: "number", min: 1, default: 20000 },
+      cell_mm:  { type: "number", min: 1, default: 1000 },
+      // ANCRAGE du plan dans la pile 3D (mm) — LU par la contrainte T13 (débordement de bâtiment, qui
+      // traite déjà l'absence comme 0) ; défaut 0 = celui du constructeur client.
+      anchor_x: { type: "number", default: 0 },
+      anchor_y: { type: "number", default: 0 },
+      // HAUTEUR d'étage (mm) dans la pile 3D — 0 = auto (hauteur du contenu). DISTINCTE de
+      // datacenters.height_mm (plafond de salle).
+      height_mm: { type: "number", min: 0, default: 0 },
+      // CASES inaccessibles (clés « cx,cy ») — string[] ordinaire, hors ARRAY_FIELDS (cf. racks.roof_cells).
+      blocked_cells: { type: "string[]", default: [] },
   },
   ipNetworks: {
       label:          { type: "string", required: true },
@@ -716,6 +921,7 @@ const SPEC_FIELDS = {
       gateway:        { type: "string", nullable: true, default: null, format: "ipv4" },   // passerelle (∈ CIDR — invariant ci-dessous)
       dns_servers:    { type: "string[]", default: [] },                                    // résolveurs DNS (IPv4, HORS CIDR admis — cf. invariant)
       dhcp_server_id: { type: "string", nullable: true, default: null, ref: "equipments" }, // serveur DHCP du réseau (parité dhcpRanges.server_id)
+      description:    { type: "string", default: "" },
   },
   ipAddresses: {
       address:      { type: "string", required: true, format: "ipv4" },
@@ -730,18 +936,46 @@ const SPEC_FIELDS = {
       equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
       // rattachement à une VM (parité equipment_id) — FK contrôlée (V2) et détachée en cascade (Cascade.vms).
       vm_id:        { type: "string", nullable: true, default: null, ref: "vms" },
+      description:  { type: "string", default: "" },
   },
   dhcpRanges: {
       start_ip:   { type: "string", required: true, format: "ipv4" },
       end_ip:     { type: "string", required: true, format: "ipv4" },
       network_id: { type: "string", nullable: true, default: null, ref: "ipNetworks" },
       server_id:  { type: "string", nullable: true, default: null, ref: "equipments" },
+      description: { type: "string", default: "" },
   },
   spares: {
       name:                  { type: "string" },
       type:                  { type: "string", enum: SPARE_TYPE_IDS },
       status:                { type: "string", enum: SPARE_STATUS_IDS },
       assigned_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+      // FICHE (chaînes libres, vides par défaut — parité constructeur Spare.ts). `assigned_free` =
+      // attribution LIBRE (hors modèle), alternative à la FK ci-dessus.
+      brand:            { type: "string", default: "" },
+      model_pn:         { type: "string", default: "" },
+      serial:           { type: "string", default: "" },
+      assigned_free:    { type: "string", default: "" },
+      assigned_date:    { type: "string", default: "" },
+      purchase_date:    { type: "string", default: "" },
+      po_ref:           { type: "string", default: "" },
+      storage_location: { type: "string", default: "" },
+      comment:          { type: "string", default: "" },
+      description:      { type: "string", default: "" },
+      // DISQUE (HDD/SSD) : capacité + interface + facteur de forme + vitesse. L'unité "GB" est le défaut du
+      // constructeur client ; capacity_value/rpm SANS bornes (le client ne clampe pas — on n'invente rien).
+      capacity_value:   { type: "number", nullable: true, default: null },
+      capacity_unit:    { type: "string", default: "GB" },
+      interface:        { type: "string", default: "" },
+      form_factor:      { type: "string", default: "" },
+      rpm:              { type: "number", nullable: true, default: null },
+      // TRANSCEIVER : forme / débit / média / portée (textes libres).
+      tx_form:          { type: "string", default: "" },
+      tx_speed:         { type: "string", default: "" },
+      tx_media:         { type: "string", default: "" },
+      tx_reach:         { type: "string", default: "" },
+      // AUTRE : caractéristiques en texte libre.
+      specs:            { type: "string", default: "" },
   },
   sites: {
       name:    { type: "string", required: true },
@@ -761,6 +995,7 @@ const SPEC_FIELDS = {
       // INDISSOCIABLES (invariant ci-dessous), comme lat/lon : une demi-dimension ne décrit aucune emprise.
       width_mm: { type: "number", nullable: true, default: null, min: 1 },
       depth_mm: { type: "number", nullable: true, default: null, min: 1 },
+      description: { type: "string", default: "" },
   },
   vms: {
       name:              { type: "string", required: true },
@@ -769,6 +1004,25 @@ const SPEC_FIELDS = {
       vm_type:           { type: "string", default: "qemu" },
       status:            { type: "string", default: "" },
       provider_id:       { type: "string", default: "" },
+      // CHAMPS SOURCE restants (écrasés à chaque synchro — frontière et défauts : VmSync.normalizeSource,
+      // source de vérité PARTAGÉE). Déclarés depuis le CODE (la collection est vide dans les deux corpus —
+      // rapport L0, risque n°2) : en colonnes strictes, un champ non déclaré serait perdu.
+      ext_id:            { type: "string", default: "" },      // identité stable « provider/vmid » (clé de réconciliation)
+      description_src:   { type: "string", default: "" },      // notes côté PROVIDER (distinctes de `description`, locale)
+      host_node:         { type: "string", default: "" },      // nom du nœud hôte côté provider
+      cpu:               { type: "number", nullable: true, default: null, min: 0 },   // vCPU — null = non renseigné
+      ram_mb:            { type: "number", nullable: true, default: null, min: 0 },
+      disk_gb:           { type: "number", nullable: true, default: null, min: 0 },
+      tags_src:          { type: "string[]", default: [] },    // étiquettes Proxmox (∈ Schema.ARRAY_FIELDS — filtrables)
+      // vNICs EMBARQUÉES (tableau d'OBJETS — VmSync.VmNic) : structure `json`. Le CONTENU reste validé par
+      // l'invariant « IPv4 des vNIC » ci-dessous et normalisé par VmSync.normalizeNic (régularisé 2026-07-31 :
+      // c'était le passthrough intentionnel historique, la dérivation DDL exige la déclaration).
+      nics:              { type: "json", default: [] },
+      orphan:            { type: "boolean", default: false },  // disparue à la dernière synchro (jamais supprimée d'office)
+      last_sync:         { type: "string", default: "" },      // horodatage ISO de la dernière synchro
+      // CHAMPS LOCAUX (jamais touchés par la synchro) : note libre + hôte + groupes.
+      notes:             { type: "string", default: "" },
+      description:       { type: "string", default: "" },
       // hôte hébergeur (champ LOCAL) — FK vers un équipement, détachée en cascade (cf. Cascade.equipments).
       host_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
       // GROUPES (champs LOCAUX) : PARITÉ STRICTE avec la spec equipments — primaire `group_id` ⊂ `group_ids`
@@ -781,6 +1035,7 @@ const SPEC_FIELDS = {
       email: { type: "string", trim: true },                   // optionnel — format contrôlé en douceur (invariant)
       phone: { type: "string", trim: true },                   // optionnel — quasi libre (invariant)
       notes: { type: "string" },                               // notes libres (multi-lignes) — aucune contrainte
+      description: { type: "string", default: "" },            // héritée d'Entity (présente sur tout enregistrement)
   },
 } as const satisfies Record<string, Record<string, FieldSpec>>;
 
@@ -986,7 +1241,8 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     ],
   },
 
-  /* ---- collections ÉTENDUES — specs PARTIELLES : champs d'identité, énumérations, et surtout les FK (`ref`). ---- */
+  /* ---- collections ÉTENDUES — identité, énumérations, FK (`ref`), et depuis la régularisation D3a la
+     TOTALITÉ des champs persistés (cf. doctrine en tête de CollectionSpec). ---- */
   ports: {
     fields: SPEC_FIELDS.ports,
     invariants: [
@@ -1371,10 +1627,11 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     ],
   },
   vms: {
-    // NB (audit de régularisation 2026-07-20) : `nics` (tableau d'OBJETS source Proxmox, normalisé par
-    // VmSync.normalizeNic) n'est PAS déclarable champ-par-champ dans cette spec (FieldType ne couvre pas
-    // les tableaux d'objets) — sa validation vit dans l'INVARIANT « IPv4 des vNIC » ci-dessous. PASSTHROUGH
-    // INTENTIONNEL documenté, pas un oubli.
+    // NB : `nics` (tableau d'OBJETS source Proxmox, normalisé par VmSync.normalizeNic) est déclaré `json`
+    // depuis la régularisation 2026-07-31 (il était le passthrough intentionnel historique — l'audit
+    // 2026-07-20 ne pouvait pas l'exprimer, FieldType ne couvrait pas les tableaux d'objets). La déclaration
+    // ne valide que « c'est un tableau/objet » : le CONTENU reste validé par l'INVARIANT « IPv4 des vNIC »
+    // ci-dessous, inchangé.
     fields: SPEC_FIELDS.vms,
     invariants: [
       // Chaque IP d'une vNIC doit être une IPv4 valide : le moteur ne valide PAS élément par élément un tableau
@@ -1418,7 +1675,9 @@ export class DataValidator {
 
   /* ---- normalisation ---- */
   /** Renvoie une COPIE normalisée de `record` selon la spec de `collection`. Les champs non déclarés
-      traversent inchangés (specs partielles) ; sans spec, l'enregistrement est renvoyé tel quel. */
+      traversent inchangés — depuis la régularisation D3a (2026-07-31), seuls l'AUDIT serveur et les deux
+      legacy `equipments.face_image*` sont dans ce cas (cf. doctrine en tête de `CollectionSpec`) ; sans
+      spec, l'enregistrement est renvoyé tel quel. */
   static normalizeRecord(collection: string, record: Record<string, any>): Record<string, any> {
     const spec = COLLECTION_SPECS[collection];
     if (!spec) return { ...record };
@@ -1609,6 +1868,11 @@ export class DataValidator {
         return rawValue === true || rawValue === "true";
       case "string[]":
         return Array.isArray(rawValue) ? rawValue.filter((item) => typeof item === "string") : [];
+      case "json":
+        // STRUCTURE opaque (sémantique minimale VOULUE — cf. FieldType) : la valeur présente traverse TELLE
+        // QUELLE ; c'est la validation qui refusera un scalaire, et les invariants/normaliseurs client qui
+        // jugent le CONTENU. Ne pas « nettoyer » ici : la forme riche appartient au client.
+        return rawValue;
       case "string":
       default:
         // `trim` (opt-in par champ) : espaces de tête/queue retirés — une chaîne « tout espaces »
@@ -1625,6 +1889,9 @@ export class DataValidator {
       case "number": return typeof value === "number" && Number.isFinite(value);
       case "boolean": return typeof value === "boolean";
       case "string[]": return Array.isArray(value) && value.every((item) => typeof item === "string");
+      // `json` : objet OU tableau — on ne refuse que les SCALAIRES (le contenu relève des invariants).
+      // `null` n'arrive jamais ici (absorbé par `isEmpty`, comme pour tous les types).
+      case "json": return typeof value === "object" && value !== null;
       case "string": default: return typeof value === "string";
     }
   }

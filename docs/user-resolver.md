@@ -172,7 +172,8 @@ Toutes les écritures qui traversent `resolveRepo` sont estampillées AVANT `ups
 **cascade résiduelle**), et les **updates de CASCADE** d'un `DELETE` (détacher une FK = une modification
 de l'entité par l'auteur de la suppression → `updated_by`). Les champs d'audit sont NON DÉCLARÉS dans
 `src-shared/DataValidation` (pas nécessaire) : ils **traversent** la normalisation/validation sans être
-retirés ni rejetés (specs partielles), et sont écrits dans le blob `data`.
+retirés ni rejetés — passthrough ASSUMÉ, le seul restant avec deux legacy depuis la régularisation D3a
+(spec COMPLÈTE, cf. `docs/validation.md` §10) — et sont écrits dans le blob `data`.
 
 **Exception : la restauration de snapshot (`PUT /snapshot`) N'ESTAMPILLE PAS** (arbitrage Q7) —
 l'audit contenu dans le snapshot est restauré **tel quel** (fidélité historique). C'est le seul chemin
