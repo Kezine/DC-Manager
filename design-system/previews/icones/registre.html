@@ -1447,7 +1447,11 @@
   .modal-title span { color: var(--accent-text); }   /* titre de modale (accent) → --accent-text */
   .modal-subtitle { font-size: 10px; letter-spacing: 0.06em; color: var(--fg-dimmer); font-weight: 400; }
   .modal-subtitle:empty { display: none; }
-  .modal-close {
+  /* Groupe d'actions d'en-tête [← ✕] : `.modal-header` est en `justify-content: space-between`, donc
+     un DEUXIÈME bouton posé à sa racine serait renvoyé au MILIEU de la barre. Les deux boutons vivent
+     donc dans ce conteneur, qui reste l'unique élément « de droite ». */
+  .modal-header-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .modal-close, .modal-back {
     background: transparent;
     border: 1px solid var(--line-2);
     color: var(--fg-dim);
@@ -1459,7 +1463,7 @@
     padding: 0;
     flex: 0 0 auto;
   }
-  .modal-close:hover { color: var(--fg); border-color: var(--fg); }
+  .modal-close:hover, .modal-back:hover { color: var(--fg); border-color: var(--fg); }
   .modal-body { padding: 20px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .modal-footer {
     padding: 14px 20px;
@@ -2142,8 +2146,11 @@
   .gnode-vm text.vm-badge-txt { fill: var(--bg); font-family: var(--mono); }
   .gnode-vm text.vm-sub { fill: var(--fg-dim); }
   /* réseau logique : cartouche à coins TRÈS arrondis, teinté par la couleur du réseau (--net-col posée en ligne).
-     Spécificité choisie pour battre `.gnode rect` sans écraser la sélection/surlignage (`.gnode-net.selected …`). */
-  .gnode-net rect.net-body { fill: var(--net-col, var(--line-2)); fill-opacity: 0.16; stroke: var(--net-col, var(--line-2)); stroke-width: 1.5; }
+     Spécificité choisie pour battre `.gnode rect` sans écraser la sélection/surlignage (`.gnode-net.selected …`).
+     Fond OPAQUE (teinte 16 % PRÉ-MÉLANGÉE au fond du stage via color-mix, PAS un fill-opacity) : les arêtes
+     VM→réseau, dessinées dans la couche SOUS les nœuds, disparaissent derrière le cartouche au lieu de le
+     traverser — elles semblent ainsi se connecter à sa périphérie. */
+  .gnode-net rect.net-body { fill: color-mix(in srgb, var(--net-col, var(--line-2)) 16%, var(--bg-2)); stroke: var(--net-col, var(--line-2)); stroke-width: 1.5; }
   .gnode-net.selected rect.net-body, .gnode-net.highlight rect.net-body { stroke: var(--accent); stroke-width: 2.5; }
   .gnode-net text.net-label { fill: var(--net-col, var(--fg)); }
 
@@ -2664,6 +2671,15 @@
           <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><line x1="12" y1="7" x2="12" y2="21"/><path d="M5 13a7 7 0 0 0 14 0"/><line x1="5" y1="13" x2="8" y2="13"/><line x1="16" y1="13" x2="19" y2="13"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><line x1="12" y1="7" x2="12" y2="21"/><path d="M5 13a7 7 0 0 0 14 0"/><line x1="5" y1="13" x2="8" y2="13"/><line x1="16" y1="13" x2="19" y2="13"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><line x1="12" y1="7" x2="12" y2="21"/><path d="M5 13a7 7 0 0 0 14 0"/><line x1="5" y1="13" x2="8" y2="13"/><line x1="16" y1="13" x2="19" y2="13"/></svg></span>
+        </div>
+      </div>
+      <div class="ds-ico-cell">
+        <div class="ds-ico-name">BACK</div>
+        <div class="ds-ico-renders">
+          <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="12" x2="5" y2="12"/><path d="M11 6l-6 6 6 6"/></svg></span>
+          <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="12" x2="5" y2="12"/><path d="M11 6l-6 6 6 6"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="12" x2="5" y2="12"/><path d="M11 6l-6 6 6 6"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="12" x2="5" y2="12"/><path d="M11 6l-6 6 6 6"/></svg></span>
         </div>
       </div>
       <div class="ds-ico-cell">
