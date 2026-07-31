@@ -128,6 +128,8 @@ meta/images repris à l'identique — hors migration). Ses contrats PROPRES, ceu
 - **`explainFindBy`** (seule méthode hors contrat, diagnostic) rejoue l'`EXPLAIN QUERY PLAN` du SQL exact de
   `findBy` : `SEARCH … USING INDEX idx_…` sur le chemin chaud (prouvé par test, contre-épreuve SCAN incluse).
 
-⚠ **Le serveur ne l'utilise PAS ENCORE** : `db.ts` (blob) reste le chemin de production. La parité corpus contre
-corpus des deux implémentations est le lot L3 ; la bascule + la migration des documents legacy (backup `.bak`,
-blob→colonnes au boot) le lot L4 — cf. cadrage `.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`.
+⚠ **Le serveur ne l'utilise PAS ENCORE** : `db.ts` (blob) reste le chemin de production. La **parité corpus contre
+corpus est PROUVÉE (lot L3)** : corpus de démo par les tests (`Tests/modules/test-relational-parity.js`, comparateur
+canonique partagé `parity-comparator.js` — lecture, écritures, divergences de contrat ENCODÉES comme attendues) et
+corpus réel par une sonde hors dépôt (0 divergence) ; reste la bascule + la migration des documents legacy (backup
+`.bak`, blob→colonnes au boot) au lot L4 — cf. cadrage `.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`.

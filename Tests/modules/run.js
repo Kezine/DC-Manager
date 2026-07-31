@@ -25,6 +25,7 @@ const DOMAINS = [
   "./test-spec-completude.js",   // spec COMPLÈTE (D3a migration DB) : verrou corpus démo ⇄ SPEC_FIELDS + FieldType json + défauts sensibles
   "./test-relational-schema.js", // générateur DDL relationnel (L1 migration DB) : golden CREATE TABLE/INDEX dérivés de la spec + INDEX_SPEC partagé
   "./test-relational-repository.js", // Repository RELATIONNEL (L2 migration DB) : CRUD re-typé, whereClause colonnes, EXPLAIN USING INDEX (better-sqlite3 RÉEL)
+  "./test-relational-parity.js", // PARITÉ blob ⇄ relationnel (L3 migration DB) : comparateur canonique + corpus démo lecture/écriture, divergences ENCODÉES (better-sqlite3 RÉEL)
   "./test-i18n.js",              // localisation : complétude des catalogues fr ⇄ en
   "./test-certs.js",             // certificats : crypto client pure (PkiCrypto/PkiSession)
   "./test-rapprochement-certs.js", // rapprochement cert ↔ équipement/VM (HostnameMatch/CertSubject/CertTargetMatch, pur)
