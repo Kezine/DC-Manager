@@ -229,8 +229,8 @@ le cœur (notif live) et ce module (principe n°3 — aucune duplication de la r
 | `views/forms/InterventionsClient.ts` | **Client REST** du module + `InterventionsError` (code HTTP + `detail`). DTOs = **MIROIRS** commentés des formes serveur (duplication assumée, principe n°3 — préserve l'amovibilité). `listPage`/`meta`/`counts`/`getOne`/`save`/`remove` ; `buildQuery` PURE (filtres `kind`/`status`/`priority` **répétables**). ⚠ Routes **SCOPÉES PAR DOCUMENT** (`<dataBase>/interventions/…`, comme `CertsClient`). |
 | `core/InterventionsFormat.ts` | Logique **PURE** (aucun DOM, aucune dépendance i18n — testée en isolation) : `kindLabelKey`/`statusLabelKey`/`priorityLabelKey`/`targetKindLabelKey` renvoient des **CLÉS** i18n (la vue appelle `I18n.t` dessus, le module reste pur) ; `priorityRank`/`priorityClass`/`statusClass` (rang & couleur de badge) ; `jiraUrl` (référence Jira → lien, jointures de `/`) ; `formatWindow` ; `shortId`. Porte les slugs MIROIRS des énumérations serveur. |
 | `core/TargetSearch.ts` | Logique **PURE** de la SÉLECTION unifiée des cibles liables (équipements + VMs + spares CONFONDUS) : `rank(items, query, opts)` filtre/classe/borne les candidats — **préfixe avant simple inclusion**, plafond (déf. 12), **dédup des cibles déjà liées** (`excluded`), normalisation **INJECTÉE** (le cœur passe `Schema.normSearch` — insensibilité casse/accents). Testé en isolation (`test-interventions.js`). |
-| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition/**détail**, éditeur de liens **via SearchPop**, transitions rapides, actions par ligne en **boutons-icône** (principe n°14). Déclare l'interface hôte `InterventionTargetSource` (`labelOf`/`search`/`openTargetDetail` — cibles injectées, la vue ne touche JAMAIS le Store) ; `openCreateFor(kind, id)` ouvre une création PRÉ-LIÉE (déclaration depuis une fiche). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
-| `views/InterventionFicheHooks.ts` | **Contrat d'intégration « fiches »** `InterventionFicheHooks { countOpen; latestFor; declareFor; openList }` + type LOCAL `InterventionFicheItem` (injecté via `FormHost.interventionHooks`, implémenté dans `main.ts`) — permet aux fiches détail d'afficher le badge, le mini-listing « 3 dernières » et de déclarer/ouvrir la vue SANS importer la vue ni le client (découplage principe n°2). |
+| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition/**détail**, éditeur de liens **via SearchPop**, transitions rapides, actions par ligne en **boutons-icône** (principe n°14). Déclare l'interface hôte `InterventionTargetSource` (`labelOf`/`search`/`openTargetDetail` — cibles injectées, la vue ne touche JAMAIS le Store) ; `openCreateFor(kind, id)` ouvre une création PRÉ-LIÉE et `openListFor(kind, id, label)` pose le filtre par CIBLE (chip retirable) — tous deux appelés par navigation depuis une fiche. Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
+| `views/InterventionFicheHooks.ts` | **Contrat d'intégration « fiches »** `InterventionFicheHooks { countOpen; latestFor; declareFor; openListFor }` + type LOCAL `InterventionFicheItem` (injecté via `FormHost.interventionHooks`, implémenté dans `main.ts`) — permet aux fiches détail d'afficher le badge, le mini-listing « 3 dernières » et de déclarer/ouvrir la vue FILTRÉE sur la cible SANS importer la vue ni le client (découplage principe n°2). |
 | `views/forms/InterventionFicheRow.ts` | Helper DOM PARTAGÉ (une seule implémentation pour les 4 fiches) : rangée « Interventions » (badge async + « Déclarer » + mini-listing « 3 dernières » async + « Afficher plus »). No-op si `hooks` null. Ne connaît que le contrat ; réutilise `Format`/`InterventionsFormat` pour dates/badges. |
 
 **Branchement client** : `main.ts` enregistre l'onglet principal « Interventions » (`shell.addView`, JUSTE AVANT « Certificats »), crée `InterventionsClient` en mode API seulement (null sinon → « mode API requis »), et injecte l'implémentation de `InterventionTargetSource` construite sur le Store. Les familles liables y sont déclarées dans **UNE table unique** (`TARGET_FAMILIES` : `equipments`/`vms`/`spares`/`subEquipments`) qui pilote la résolution de collection, le libellé de repli ET la recherche — elle a remplacé trois chaînes de ternaires dont le défaut silencieux était « spare » : ajouter une famille = une entrée, un slug inconnu s'affiche « introuvable » au lieu de se résoudre en spare.
@@ -249,7 +249,9 @@ interventions sont propres au document).
 - **Listing PAGINÉ SERVEUR** (jamais de slice client, CSS des `ListView` : `.list-toolbar`/`.pagination`/
   `.sortable`/`.sort-ind`) : toolbar = champ de **recherche NORMALISÉ** (classe `.search-input`, même
   markup/thème que la recherche des listings — query, anti-rebond ~250 ms) + filtres **MultiSelect**
-  « Type »/« Statut »/« Priorité » (répétables) + « Réinit. filtres » ; **tri** par clic d'en-tête
+  « Type »/« Statut »/« Priorité » (répétables) + « Réinit. filtres », plus — quand on arrive par
+  « Afficher plus » d'une fiche — une **chip de CIBLE retirable** (« Cible : {label} ✕ », posée par navigation
+  seule, jamais saisie ici ; réutilise la primitive visuelle `.filter-chip` sans le modèle `FilterChips`) ; **tri** par clic d'en-tête
   (Titre/Priorité/Statut/Fenêtre) ; état de listing en mémoire d'instance (après écriture, la **page
   courante** est rechargée — clamp serveur si elle disparaît). Colonnes : **Titre** (CLIQUABLE → modale de
   détail), Type, **Priorité** (badge coloré par rang), **Statut** (badge), **Fenêtre planifiée**
@@ -311,15 +313,17 @@ spare, et y **voir d'un coup d'œil** les interventions ouvertes.
   + « Déclarer »). Chaque ligne — date courte (`Format.dateTime`) + titre + pastilles **statut**/**priorité**
   (mêmes clés i18n et classes de badge qu'`InterventionsFormat`) — est **INFORMATIVE, non cliquable en
   phase 1** (la cliquabilité viendra avec la pile de modales). Sous le listing, un bouton **« Afficher plus »**
-  (présent dès ≥ 1 intervention) qui, comme « Déclarer », **FERME la fiche PUIS** ouvre la vue « Interventions ».
-  Le filtrage repose sur le paramètre `target` du listing (une cible ; cf. `latestFor` au contrat). **Phase 1 :
-  la vue s'ouvre SANS filtre** ; la phase 2 posera le filtre de cible à l'arrivée (chip retirable).
+  (présent dès ≥ 1 intervention) qui, comme « Déclarer », **FERME la fiche PUIS** ouvre la vue « Interventions »
+  **FILTRÉE sur la cible** : `openListFor(kind, id, label)` pose le filtre de cible à l'arrivée, affiché par une
+  **chip retirable** (« Cible : {label} ✕ ») dans la barre de filtres. Le filtrage repose sur le paramètre
+  `target` du listing (une cible ; cf. `latestFor` au contrat). Poser ce filtre reste réservé à la
+  **navigation** — la barre ne propose PAS de le saisir à la main (différé).
 - **Découplage** (principe n°2). Les fiches n'importent **NI la vue NI le client** interventions : elles ne
-  connaissent que le contrat `InterventionFicheHooks { countOpen; latestFor; declareFor; openList }` (fichier
+  connaissent que le contrat `InterventionFicheHooks { countOpen; latestFor; declareFor; openListFor }` (fichier
   `views/InterventionFicheHooks.ts`, avec le type LOCAL `InterventionFicheItem` — jamais `InterventionRecord`),
   injecté via **`FormHost.interventionHooks`** et implémenté dans `main.ts`. La rangée elle-même est un helper
   PARTAGÉ `views/forms/InterventionFicheRow.ts` (une seule implémentation pour les quatre fiches).
-- **Changement de VUE, pas empilement.** `declareFor` (et `openList`) quitte la page courante : la fiche d'où l'on part
+- **Changement de VUE, pas empilement.** `declareFor` (et `openListFor`) quitte la page courante : la fiche d'où l'on part
   n'a donc plus lieu d'être. Le bouton **FERME d'abord** la fiche courante (`host.closeModal`, qui dépile
   un niveau de la pile de `ui/Modal`), **PUIS** `declareFor` **navigue**
   vers l'onglet « Interventions » (`shell.switchView`) et ouvre la **modale de création PRÉ-LIÉE** à la cible

@@ -78,6 +78,10 @@ interface ListingState {
   kinds: Set<string>;
   statuses: Set<string>;
   priorities: Set<string>;
+  /** Filtre par CIBLE liée (équipement/VM/spare) — posé UNIQUEMENT par navigation depuis une fiche
+      (« Afficher plus »), affiché en chip retirable. `label` sert la chip ; seul le couple {kind,id} part au
+      serveur. null = pas de filtre de cible (défaut ; la barre ne propose pas de le saisir, cf. L3 différé). */
+  target: { kind: string; id: string; label: string } | null;
 }
 
 export class InterventionsAdminView {
@@ -107,6 +111,9 @@ export class InterventionsAdminView {
   /** Barre de filtres unifiée (chips + « + Filtre » + Réinitialiser) — bâtie au rendu complet, PRÉSERVÉE sur
       refreshBody (un changement de filtre ne repeint que ses chips + le corps). */
   private filterBar: FilterBar | null = null;
+  /** Rangée d'accueil de la chip « Cible : … » (filtre par cible liée). Construite au rendu complet, rebâtie
+      seule par `renderTargetChip` quand le filtre change — masquée à vide (`.lc-chips-row:empty`). */
+  private targetChipHost: HTMLElement | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -257,8 +264,56 @@ export class InterventionsAdminView {
     );
     right.appendChild(this.filterBar.resetElement);
     bar.appendChild(right);
-    bar.appendChild(this.filterBar.chipsElement);   // rangée des chips, À LA LIGNE (dernier enfant du wrap)
+    // Chip du filtre par CIBLE (posé par navigation) : sa PROPRE rangée, à côté de celle des chips de
+    // dimension. Réutilise la primitive VISUELLE de chip (`.filter-chip`, comme FilterBar) — mais PAS le
+    // modèle `FilterChips`, qui énumère des OPTIONS fixes : une cible liée est une valeur LIBRE à libellé
+    // composé, sans liste d'options (arbitrage — cf. rapport). Le serveur/le client savent déjà filtrer (L1).
+    this.targetChipHost = document.createElement("div"); this.targetChipHost.className = "lc-chips lc-chips-row";
+    this.renderTargetChip();
+    bar.appendChild(this.targetChipHost);
+    bar.appendChild(this.filterBar.chipsElement);   // rangée des chips de dimension, À LA LIGNE (dernier enfant du wrap)
     return bar;
+  }
+
+  /** (Re)construit la chip « Cible : {label} » depuis l'état — vide si aucun filtre de cible n'est posé
+      (la rangée se masque alors via `.lc-chips-row:empty`). Son ✕ efface le filtre (`clearTarget`). */
+  private renderTargetChip(): void {
+    if (!this.targetChipHost) return;
+    this.targetChipHost.replaceChildren();
+    const t = this.state.target;
+    if (!t) return;
+    const chip = document.createElement("span"); chip.className = "filter-chip";
+    const label = document.createElement("span"); label.className = "filter-chip-lb";
+    label.textContent = I18n.t("interventions.filter.target", { label: t.label });
+    const x = document.createElement("button"); x.type = "button"; x.className = "filter-chip-x";
+    x.setAttribute("aria-label", I18n.t("interventions.filter.targetRemove", { label: t.label }));
+    x.innerHTML = Icons.CLOSE;
+    x.onclick = (e) => { e.stopPropagation(); this.clearTarget(); };
+    chip.append(label, x);
+    this.targetChipHost.appendChild(chip);
+  }
+
+  /** Efface le filtre de cible (✕ de la chip) : retire l'état, revient page 1, retire la chip et recharge le
+      CORPS seul (la toolbar est préservée — parité avec un changement de filtre de dimension). */
+  private clearTarget(): void {
+    this.state.target = null;
+    this.state.page = 1;
+    this.renderTargetChip();
+    void this.refreshBody();
+  }
+
+  /** Ouvre la vue FILTRÉE sur une cible (appelée par l'intégration « fiches » après navigation vers cet
+      onglet, bouton « Afficher plus »). Pose le filtre, revient page 1, puis (re)charge — `reload()` reconstruit
+      la barre, donc la chip. ⚠ Ordre d'arrivée par navigation (cf. `openCreateFor`) : main.ts appelle
+      `switchView` PUIS cette méthode ; `switchView` a pu lancer un `show()` → `reload()` concurrent. Si ce
+      dernier est encore en vol, `reload()` ici est bloqué par la garde — mais l'état `target` est déjà posé
+      AVANT que le `reload()` en vol n'atteigne `loadPage`/`render`, il le prend donc en compte : le filtre est
+      appliqué et la chip dessinée dans les deux cas. */
+  openListFor(kind: string, id: string, label: string): void {
+    if (!this.client) return;
+    this.state.target = { kind, id, label };
+    this.state.page = 1;
+    void this.reload();
   }
 
   /** Peint le CORPS (table + pagination) dans `bodyEl`. */
@@ -835,7 +890,7 @@ export class InterventionsAdminView {
   /** État de listing NEUF : page 1, taille par défaut, tri par date de modification décroissante (parité
       serveur), aucun filtre ni recherche. */
   private static defaultState(): ListingState {
-    return { page: 1, pageSize: PAGE_SIZE_DEFAULT, sort: "updated_date", dir: "desc", query: "", kinds: new Set(), statuses: new Set(), priorities: new Set() };
+    return { page: 1, pageSize: PAGE_SIZE_DEFAULT, sort: "updated_date", dir: "desc", query: "", kinds: new Set(), statuses: new Set(), priorities: new Set(), target: null };
   }
 
   /** Paramètres de listing (query string) dérivés d'un état. Filtres vides = omis. */
@@ -846,6 +901,8 @@ export class InterventionsAdminView {
       kinds: st.kinds.size ? [...st.kinds] : undefined,
       statuses: st.statuses.size ? [...st.statuses] : undefined,
       priorities: st.priorities.size ? [...st.priorities] : undefined,
+      // Filtre de cible → un seul couple {kind,id} (le libellé ne sert qu'à la chip, il ne part pas au serveur).
+      targets: st.target ? [{ kind: st.target.kind, id: st.target.id }] : undefined,
     };
   }
 

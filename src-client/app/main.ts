@@ -909,8 +909,9 @@ async function boot(): Promise<void> {
       return page.interventions.map((it) => ({ id: it.id, title: it.title, status: it.status, priority: it.priority, updated_date: it.updated_date }));
     },
     declareFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openCreateFor(kind, id, label); },
-    // Phase 1 : « Afficher plus » ouvre la vue SANS filtre (la phase 2 posera le filtre de cible à l'arrivée).
-    openList: () => { shell.switchView("interventions"); },
+    // « Afficher plus » ouvre la vue FILTRÉE sur la cible (chip retirable posée à l'arrivée) — même montage
+    // que `declareFor` : on change de VUE puis on pose le filtre.
+    openListFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openListFor(kind, id, label); },
   } : null;
   formHost.interventionHooks = interventionHooks;
 

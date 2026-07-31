@@ -14,9 +14,10 @@
                   la modale de création PRÉ-LIÉE à la cible (l'appelant DÉPILE d'abord la fiche courante :
                   on change de VUE, elle n'a plus lieu d'être — cf. InterventionFicheRow). `label` = libellé
                   lisible de la cible (contexte affiché dans la modale de création).
-   `openList`   : ouvre la VUE « Interventions » SANS filtre (bouton « Afficher plus » du bloc fiche, phase 1).
-                  ⚠ Phase 2 le remplacera par un `openListFor(kind, id, label)` qui POSE le filtre de cible à
-                  l'arrivée — d'où le nom neutre : ne pas y ajouter le filtre ici. */
+   `openListFor`: ouvre la VUE « Interventions » FILTRÉE sur la cible (bouton « Afficher plus » du bloc fiche).
+                  Le filtre est posé à l'arrivée (chip retirable dans la barre) — `label` = libellé lisible de
+                  la cible (affiché par la chip). Poser le filtre reste réservé à la navigation : la barre ne
+                  propose PAS de le saisir (différé). */
 
 /** Item MINIMAL d'intervention exposé aux fiches (mini-listing « 3 dernières »). Type LOCAL au contrat —
     surtout PAS `InterventionRecord` (client) : le découplage fiches ↛ vue/client est la raison d'être de ce
@@ -34,5 +35,5 @@ export interface InterventionFicheHooks {
   countOpen(kind: string, id: string): Promise<number>;
   latestFor(kind: string, id: string, n: number): Promise<InterventionFicheItem[]>;
   declareFor(kind: string, id: string, label: string): void;
-  openList(): void;
+  openListFor(kind: string, id: string, label: string): void;
 }

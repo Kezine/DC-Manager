@@ -56,6 +56,9 @@ export const interventions = {
     status: "Statut",
     priority: "Priorité",
     reset: "Réinit. filtres",
+    // Chip du filtre par CIBLE liée (posé par navigation depuis une fiche — jamais saisi dans la barre).
+    target: "Cible : {{label}}",
+    targetRemove: "Retirer le filtre de cible {{label}}",
   },
   search: {
     placeholder: "Rechercher (titre, description, réf. Jira)…",

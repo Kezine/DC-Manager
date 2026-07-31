@@ -20,7 +20,8 @@ import type { InterventionFicheHooks, InterventionFicheItem } from "../Intervent
    chargé en async comme le badge, SILENCIEUX en échec réseau (rien ne s'affiche) et rien non plus si 0
    intervention. Chaque ligne est INFORMATIVE (non cliquable en phase 1 — la cliquabilité viendra avec la
    pile de modales : push de la fiche d'intervention par-dessus la fiche courante). « Afficher plus » suit
-   EXACTEMENT la même séquence que « Déclarer » (close puis openList) : c'est un CHANGEMENT DE VUE. */
+   EXACTEMENT la même séquence que « Déclarer » (close puis openListFor) : c'est un CHANGEMENT DE VUE, la
+   vue Interventions s'ouvrant FILTRÉE sur la cible (chip retirable). */
 export class InterventionFicheRow {
   /** Nombre de dernières interventions listées sous le badge (D2/D3 : les plus récemment actives, toutes). */
   private static readonly LATEST_COUNT = 3;
@@ -78,8 +79,8 @@ export class InterventionFicheRow {
     moreBtn.textContent = I18n.t("interventions.fiche.showMore");
     moreBtn.style.display = "none";   // apparaît seulement s'il y a au moins une intervention à montrer
     // « Afficher plus » = CHANGER DE VUE, comme « Déclarer » : on ferme la fiche (pop) PUIS on ouvre la vue
-    // Interventions (phase 1 : sans filtre — la phase 2 posera le filtre de cible à l'arrivée).
-    moreBtn.onclick = () => { close(); hooks.openList(); };
+    // Interventions FILTRÉE sur la cible (elle a déjà son libellé — c'est celui de la fiche → chip retirable).
+    moreBtn.onclick = () => { close(); hooks.openListFor(target.kind, target.id, target.label); };
     root.appendChild(moreBtn);
 
     // Chargement ASYNCHRONE, non bloquant : en échec réseau OU si aucune intervention, on ne montre RIEN
