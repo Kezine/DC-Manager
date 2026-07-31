@@ -93,8 +93,6 @@ export interface RouteChainHost {
   /** Habillage d'une étape ; `null` pour un id qui ne résout aucun waypoint (ligne omise — parité
       avec l'ancien « Ordre des points », qui les sautait déjà silencieusement). */
   describe(waypointId: string): RouteChainStep | null;
-  /** L'action d'INVERSION proposée quand les ancres sont dans l'autre sens que la route. */
-  swapEnds(): void;
   /** « Ce niveau de modale a changé ». INDISPENSABLE : la chaîne n'a AUCUN champ de saisie, donc
       l'instantané de `Modal` (qui ne lit que `input`/`select`/`textarea`) ne verrait RIEN bouger et
       laisserait fermer la modale sans confirmation — alors que l'ancien nuage de CASES À COCHER,
@@ -184,11 +182,16 @@ export class RouteChainEditor {
       text.textContent = I18n.t("cable.route.reversed", { start, end });
       box.appendChild(text);
       // L'ACTION plutôt que le blocage : le moteur tolère déjà l'inversion au rendu (carton §4.4).
+      // ⚠ On inverse LA ROUTE (l'ordre des étapes), PAS les bouts (décision utilisateur 2026-07-31) :
+      // les bouts sont la vérité saisie — les permuter les fausserait et il faudrait reconstruire la
+      // chaîne à la main. L'inverse d'une route valide est valide : la grammaire est SYMÉTRIQUE (les
+      // tronçons se lisent dans les deux sens, exits et pins compris) — l'analyse re-jugera de toute
+      // façon le résultat au repeint. `commit` = le point unique (setIds + « modifié » + rendu).
       const action = document.createElement("button");
       action.type = "button"; action.className = "btn btn-sm rc-swap";
       IconButton.decorate(action, Icons.SWAP);
       action.appendChild(document.createTextNode(I18n.t("cable.route.swapAction")));
-      action.onclick = () => { this.host.swapEnds(); };
+      action.onclick = () => { this.commit(this.host.ids().slice().reverse()); };
       box.appendChild(action);
     } else {
       text.textContent = I18n.t("cable.route.anchorMismatch", {

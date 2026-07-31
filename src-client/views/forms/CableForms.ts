@@ -254,11 +254,10 @@ export class CableForms extends EquipmentForms {
     // `wpState.ids` reste le tableau que lit `onSave`, et le composant se contente de le remplacer.
     const wpState = { ids: cable ? (cable.waypoint_ids || []).slice() : ((opts.waypointIds || []).slice()) };
     // RELAIS DIFFÉRÉS : le composant est construit ICI (sa place dans le formulaire est ici) mais ses
-    // collaborateurs — `refresh`, `syncStatus`, `endContainerOf`, `swapEnds` — ne sont déclarés que plus
+    // collaborateurs — `refresh`, `syncStatus`, `endContainerOf` — ne sont déclarés que plus
     // bas. Aucun n'est appelé avant le premier `wpChain.render()`, joué en fin de construction avec le
     // reste des synchronisations. Le composant ne se peint donc PAS dans son constructeur (cf. son
     // en-tête) : c'est ce qui rend cet ordre tenable sans dupliquer du câblage.
-    let swapEndsRelay = () => { /* câblé plus bas, avec `swapEnds` */ };
     const wpChain = new RouteChainEditor({
       ids: () => wpState.ids,
       setIds: (next) => { wpState.ids = next; },
@@ -269,7 +268,6 @@ export class CableForms extends EquipmentForms {
       anchorB: () => ({ tag: I18n.t("cable.route.anchorTagB"), subject: I18n.t("cable.route.anchorSubjectB"), label: CableForms.portAnchorLabel(store, selPortB.value, selEqB.value), container: endContainerOf("B") }),
       candidates: () => CableForms.routeCandidates(store),
       describe: (id) => CableForms.describeWaypoint(store, id),
-      swapEnds: () => { swapEndsRelay(); },
       // La chaîne n'a AUCUN champ : sans ce signal, l'instantané de la modale ne verrait RIEN changer
       // et laisserait fermer sur une route remaniée, sans confirmation (cf. `FormHost.markDirty`).
       // On ne re-peint PAS la chaîne ici : le composant le fait lui-même juste après ce rappel.
@@ -378,9 +376,9 @@ export class CableForms extends EquipmentForms {
       refresh(); syncRoute(); syncStatus(true); renderNets();
     };
     swapBtn.onclick = swapEnds;
-    // L'action « Inverser » proposée SUR L'ANCRE par la chaîne est EXACTEMENT celle du bouton ⇅ du
-    // formulaire : une seule implémentation, donc aucun risque que les deux divergent.
-    swapEndsRelay = () => { host.markDirty?.(); swapEnds(); };
+    // NB : l'action « ⇅ Inverser la route » proposée SUR L'ANCRE par la chaîne est DISTINCTE de ce
+    // bouton-ci : elle inverse l'ORDRE DES ÉTAPES (les bouts sont la vérité saisie — décision
+    // utilisateur 2026-07-31), là où ce ⇅ permute les BOUTS. La chaîne la porte elle-même (commit).
 
     refresh(); renderNets(); syncRoute(); syncStatus(false);
 
@@ -490,20 +488,6 @@ export class CableForms extends EquipmentForms {
     // visible, les ancres en alerte et l'action d'inversion. Seules les ANCRES diffèrent du câble —
     // des patchs plutôt que des ports —, et c'est tout ce que ce bloc a de spécifique.
     const wpState = { ids: bnd ? (bnd.waypoint_ids || []).slice() : [] as string[] };
-    /** ÉCHANGE DES EXTRÉMITÉS — l'équivalent faisceau du bouton ⇅ du câble (le formulaire faisceau n'en
-        avait pas). Les deux sélecteurs s'EXCLUENT l'un l'autre (règle T10) : on repeuple donc les deux
-        listes avec les valeurs croisées avant de les poser, sinon la valeur entrante serait absente de
-        sa propre liste et retomberait à vide. */
-    // ⚠ On NE rejoue PAS `refreshEndpointOpts` derrière : il repeuple avec `initEpA`/`initEpB` comme
-    // `keepId` (les valeurs STOCKÉES), ce qui ferait retomber à vide une extrémité NON patch tout juste
-    // échangée (donnée d'avant la règle T11, délibérément conservée dans SON select).
-    const swapEndpoints = () => {
-      const a = epaI.value, b = epbI.value;
-      epaI.setOptions(patchEndpointOpts(a, b), b);
-      epbI.setOptions(patchEndpointOpts(b, a), a);
-      host.markDirty?.();
-      syncBundleRoute();
-    };
     const wpChain = new RouteChainEditor({
       ids: () => wpState.ids,
       setIds: (next) => { wpState.ids = next; },
@@ -516,7 +500,6 @@ export class CableForms extends EquipmentForms {
       anchorB: () => ({ tag: I18n.t("cable.route.endpointTagB"), subject: I18n.t("cable.route.endpointSubjectB"), label: CableForms.equipAnchorLabel(store, epbI.value), container: epbI.value ? store.equipmentNamedContainer(epbI.value) : null }),
       candidates: () => CableForms.routeCandidates(store),
       describe: (id) => CableForms.describeWaypoint(store, id),
-      swapEnds: swapEndpoints,
       changed: () => { host.markDirty?.(); },
     });
     /** Re-peint la chaîne : la route n'a pas bougé, mais les ANCRES (donc leurs alertes) dépendent des
