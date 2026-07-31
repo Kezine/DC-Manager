@@ -300,6 +300,13 @@ VALIDATION (règles T2d / V6e), avec ses sept constantes.
 > effet de bord à surveiller. Le raisonnement « il FAUT injecter » est mort ; l'injection, elle, se
 > défend encore sur ses propres mérites (découplage), et c'est à ce titre qu'elle est conservée.
 >
+> **Mise à jour — 2026-07-31 (sur demande) : l'injection de `TrayGeometry` a été RETIRÉE.**
+> `DataValidation.ts` l'IMPORTE désormais directement (`import { TrayGeometry } from "./TrayGeometry.js"`),
+> comme `RackDepthPolicy`. `ValidationCollaborators`, le port `TrayGeometryPort` et le garde-fou d'échec
+> fermé ont DISPARU. Motif : le point de substitution n'avait jamais servi (tous les appelants injectaient
+> la vraie géométrie) et chaque nouvel appelant devait penser à injecter sous peine d'échec fermé — plomberie
+> sans bénéfice. Le paragraphe ci-dessus est donc HISTORIQUE : le lot évoqué a été fait.
+>
 > ⚠ **Précision APPORTÉE EN §6.19 — « l'auto-suffisance n'est plus une règle » dit trop.** Ce qui est
 > levé, c'est le seul interdit d'importer un AUTRE FICHIER PARTAGÉ. L'interdit d'importer **hors de
 > `src-shared/`** (client, serveur, paquet npm), lui, est PERMANENT et n'a jamais dépendu d'une
@@ -801,8 +808,10 @@ toutes les gardes de saisie (`!= null`, chaîne vide, valeur négative, valeur e
   "./RackDepthPolicy.js"` — extension `.js` IMPÉRATIVE, NodeNext l'exige côté serveur. Écarté : reproduire
   le patron `ValidationCollaborators` — il n'a plus de justification technique, et il coûterait ici un
   garde-fou d'échec fermé et onze points d'injection pour un module que rien ne demande de découpler.
-  ⚠ **Les DEUX patrons coexistent donc dans le même fichier, et c'est assumé** : `TrayGeometry` reste
-  INJECTÉ (retrait possible, non demandé — lot à part). Les trois en-têtes concernés le disent.
+  ⚠ **Les DEUX patrons coexistaient donc dans le même fichier** : `TrayGeometry` restait INJECTÉ (retrait
+  alors possible, non demandé). ✅ **Mise à jour — 2026-07-31 : `TrayGeometry` est désormais IMPORTÉ lui
+  aussi** (injection retirée sur demande, import direct comme `RackDepthPolicy`) ; les deux collaborateurs
+  se lisent maintenant à l'import, plus aucun n'est injecté dans la validation.
 - **`RACK_DEPTH_DEFAULT_MM` reste une RÉPLIQUE**, comme `TRAY_U_MM` et consorts en §6.7, verrouillée par un
   test anti-divergence. La migrer reviendrait à migrer `src-client/domain/constants.ts` en entier — elle sert
   toute la géométrie de baie, pas seulement la profondeur.
@@ -2430,8 +2439,9 @@ du besoin — verrouillé par des tests anti-divergence).
   connaître comme « déjà dans le lot ».
 - `src-shared/TrayGeometry.ts` — géométrie de l'ÉTAGÈRE, SOURCE UNIQUE (plateau utile, empreinte, position,
   chevauchement, verdict de tenue) : consommée par le RENDU (`RackGeometry.tray*` délègue) et par la
-  VALIDATION (T2d/V6e), qui la reçoit en collaborateur INJECTÉ (`ValidationCollaborators`) — par choix de
-  découplage, plus par impossibilité d'import (§6.14).
+  VALIDATION (T2d/V6e), qui l'IMPORTE directement (`./TrayGeometry.js`), comme `RackDepthPolicy`. Elle était
+  auparavant reçue en collaborateur INJECTÉ (`ValidationCollaborators`) — injection retirée le 2026-07-31
+  sur demande, le point de substitution n'ayant jamais servi (cf. §6.7, mise à jour).
 - `src-shared/RackDepthPolicy.ts` — POLITIQUE DE PROFONDEUR de baie, SOURCE UNIQUE (§6.14) : `outerDepth`,
   `cage` (BORNÉE au châssis), `door`/`doorExtra`/`hasDoor`, `frontMargin`, `rearMargin`. Consommée par le
   RENDU (`RackGeometry` délègue) et par la VALIDATION (T2c/V6d), qui l'IMPORTE directement (`./…​.js`).

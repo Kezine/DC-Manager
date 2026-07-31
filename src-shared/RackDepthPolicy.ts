@@ -30,13 +30,12 @@
    (il dessine ce qui existe physiquement). Ce n'est donc pas une divergence, et
    elle reste chez chacun de ses deux consommateurs.
 
-   ⚠ DEUX PATRONS COEXISTENT dans `DataValidation.ts`, et c'est VOULU. Ce module
-   y est **IMPORTÉ directement** (l'auto-suffisance de `src-shared/` a été levée —
-   cf. `CLAUDE.md`, section « Code partagé ») ; `TrayGeometry`, lui, continue d'y
-   être **INJECTÉ** (`ValidationCollaborators`, avec garde-fou d'échec fermé). Le
-   patron d'injection n'est plus une nécessité technique, il se défend sur son seul
-   mérite de découplage — son retrait est un lot à part. Ne pas uniformiser à la
-   volée : l'un se lit à l'import, l'autre au point d'appel.
+   Ce module est **IMPORTÉ directement** par `DataValidation.ts` (l'auto-suffisance de
+   `src-shared/` a été levée — cf. `CLAUDE.md`, section « Code partagé »), tout comme
+   `TrayGeometry` depuis le 2026-07-31 : l'injection de ce dernier
+   (`ValidationCollaborators`, avec garde-fou d'échec fermé) a été retirée sur demande,
+   son point de substitution n'ayant jamais servi. Plus aucun collaborateur n'est injecté
+   dans la validation.
 
    ⚠ IMPORT ENTRE FICHIERS PARTAGÉS : le spécificateur DOIT porter l'extension
    `.js` (`import { RackDepthPolicy } from "./RackDepthPolicy.js"`). NodeNext

@@ -6,8 +6,7 @@ import { DocumentStore } from "./documents.js";
 import { Auth, type SsoResult } from "./auth.js";
 import { LiveBus } from "./live.js";
 import type { DocumentChangeset } from "../../src-shared/DocumentChangeset.js";   // type PARTAGÉ front ⇄ back (source unique)
-import { DataValidator, type ValidationError, type EntityFetcher, type ChildFinder, type ValidationCollaborators } from "../../src-shared/DataValidation.js";   // normalisation + validation PARTAGÉES
-import { TrayGeometry } from "../../src-shared/TrayGeometry.js";   // géométrie d'étagère : DataValidation ne peut pas l'importer, le serveur si (cf. docs/placement.md §6.7)
+import { DataValidator, type ValidationError, type EntityFetcher, type ChildFinder } from "../../src-shared/DataValidation.js";   // normalisation + validation PARTAGÉES
 import { Cascade } from "../../src-shared/Cascade.js";   // cascade de suppression PARTAGÉE (intégrité référentielle en DELETE)
 import { ApiRules } from "./ApiRules.js";             // règles PURES de la couche HTTP (verrou, changeset, lot) — testables sans Express
 import { AuditStamp } from "./AuditStamp.js";         // règles PURES d'estampillage « qui a écrit, quand » (created_by/updated_by + dates serveur)
@@ -60,11 +59,6 @@ export class Api {
 
   /** Plafond d'ids par appel à `GET /users/resolve` (anti-abus — parité avec les autres endpoints batch). */
   private static readonly USERS_RESOLVE_CAP = 200;
-
-  /** Modules partagés que `src-shared/DataValidation` ne peut pas importer et REÇOIT de son appelant
-      (cf. `ValidationCollaborators`). L'AUTORITÉ serveur doit les injecter partout où elle valide : sans eux
-      les règles concernées échouent FERMÉ (refus explicite), jamais en silence. */
-  private static readonly VALIDATION_COLLABORATORS: ValidationCollaborators = { trayGeometry: TrayGeometry };
 
   constructor(private readonly docs: DocumentStore, private readonly auth: Auth, private readonly live: LiveBus,
               private readonly resolver: UserResolver, private readonly extensions: ApiExtension[] = []) {}
@@ -288,7 +282,7 @@ export class Api {
     const errors: ValidationError[] = [];
     const acceptEntry = (entry: any) => {
       if (!entry || !entry.collection || !entry.record) return entry;
-      const { record, errors: entryErrors } = DataValidator.normalizeAndValidate(entry.collection, entry.record, fetch, childFinder, Api.VALIDATION_COLLABORATORS);
+      const { record, errors: entryErrors } = DataValidator.normalizeAndValidate(entry.collection, entry.record, fetch, childFinder);
       errors.push(...entryErrors);
       return { ...entry, record };
     };
@@ -297,7 +291,7 @@ export class Api {
     // V5b dans le lot : re-valider les ENFANTS des parents créés/modifiés (ex. un réseau dont le CIDR change),
     // avec un lecteur d'enfants CONSCIENT DU LOT (enfants créés/déplacés/supprimés dans ce même lot).
     for (const entry of [...creates, ...updates]) {
-      if (entry && entry.collection && entry.record) errors.push(...DataValidator.validateDependents(entry.collection, entry.record, childFinder, fetch, Api.VALIDATION_COLLABORATORS));
+      if (entry && entry.collection && entry.record) errors.push(...DataValidator.validateDependents(entry.collection, entry.record, childFinder, fetch));
     }
     if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return; }
     // CRÉATION STRICTE dans le lot (logique pure : ApiRules.createConflicts) : un `create` dont l'id existe DÉJÀ
@@ -369,13 +363,13 @@ export class Api {
     for (const c of Schema.COLLECTIONS) {
       if (!Array.isArray(snap[c])) continue;
       out[c] = snap[c].map((rec: any) => {
-        const { record, errors: errs } = DataValidator.normalizeAndValidate(c, rec || {}, fetch, find, Api.VALIDATION_COLLABORATORS);
+        const { record, errors: errs } = DataValidator.normalizeAndValidate(c, rec || {}, fetch, find);
         errors.push(...errs);
         return record;
       });
     }
     // V5b : cohérence enfants ⇄ parent AU SEIN du snapshot normalisé (ex. adresse ∈ CIDR de son réseau).
-    for (const c of Schema.COLLECTIONS) for (const rec of (out[c] || [])) errors.push(...DataValidator.validateDependents(c, rec, find, fetch, Api.VALIDATION_COLLABORATORS));
+    for (const c of Schema.COLLECTIONS) for (const rec of (out[c] || [])) errors.push(...DataValidator.validateDependents(c, rec, find, fetch));
     if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return; }
     // AUDIT : la restauration N'ESTAMPILLE PAS (arbitrage Q7) — l'audit contenu dans le snapshot est restauré
     // TEL QUEL (fidélité historique). C'est le SEUL chemin d'écriture qui ne passe pas par AuditStamp ; la
@@ -448,7 +442,7 @@ export class Api {
   }
 
   private accept(res: Response, collection: string, record: Record<string, any>, fetch?: EntityFetcher, find?: ChildFinder): Record<string, any> | null {
-    const { record: normalized, errors } = DataValidator.normalizeAndValidate(collection, record, fetch, find, Api.VALIDATION_COLLABORATORS);
+    const { record: normalized, errors } = DataValidator.normalizeAndValidate(collection, record, fetch, find);
     if (errors.length) { res.status(400).json({ error: "données invalides", errors }); return null; }
     return normalized;
   }
@@ -478,7 +472,7 @@ export class Api {
     const existing = this.repoOf(req).getOne(req.params.collection, req.params.id);
     const record = this.accept(res, req.params.collection, { ...(existing || {}), ...(req.body || {}), id: req.params.id }, this.repoFetcher(req), this.repoChildFinder(req)); if (!record) return;
     // V5b : si ce changement invalide des enfants (ex. CIDR d'un réseau → adresses hors sous-réseau), on rejette.
-    const dependentErrors = DataValidator.validateDependents(req.params.collection, record, this.repoChildFinder(req), this.repoFetcher(req), Api.VALIDATION_COLLABORATORS);
+    const dependentErrors = DataValidator.validateDependents(req.params.collection, record, this.repoChildFinder(req), this.repoFetcher(req));
     if (dependentErrors.length) { res.status(400).json({ error: "données invalides", errors: dependentErrors }); return; }
     // AUDIT posé PAR LE SERVEUR (mise à jour) : created_by/created_date REPRIS de l'existant (immuables),
     // updated_by/updated_date rafraîchis. Une valeur d'audit envoyée par le client est écrasée (cf. AuditStamp).

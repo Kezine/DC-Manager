@@ -181,18 +181,15 @@ const { PowerAnalysis } = SHARED("src-shared/PowerAnalysis.js");   // moteur én
 // bâtiment+étage) et de sa comparaison. Exposée au harnais depuis que la GRAMMAIRE DE ROUTE en parle
 // (doctrine §6.31) — les tests doivent pouvoir fabriquer un conteneur avec la seule clé correcte.
 const { PlacementContainers } = SHARED("src-shared/PlacementContainers.js");
-// Géométrie d'ÉTAGÈRE : source UNIQUE consommée par le rendu (RackGeometry) ET par la validation, qui la
-// reçoit en COLLABORATEUR INJECTÉ. ⚠ L'injection est un CHOIX CONSERVÉ, pas une contrainte : depuis le
-// lot 7, `DataValidation` POURRAIT l'importer (cf. `RackDepthPolicy` quatre lignes plus bas, qui le fait).
-// Cf. docs/placement.md §6.7.
+// Géométrie d'ÉTAGÈRE : source UNIQUE consommée par le rendu (RackGeometry) ET par la validation, qui
+// l'IMPORTE directement (l'auto-suffisance de src-shared/ est levée). L'injection par collaborateur a été
+// retirée le 2026-07-31. Cf. docs/placement.md §6.7. Exportée ici pour les tests de géométrie directs.
 const TrayGeom = SHARED("src-shared/TrayGeometry.js");
 const { TrayGeometry } = TrayGeom;
 // POLITIQUE DE PROFONDEUR de baie : source UNIQUE consommée par le rendu (RackGeometry délègue) ET par
 // la validation, qui l'IMPORTE directement (l'auto-suffisance de src-shared/ est levée). Cf. §6.14.
 const RackDepthPol = SHARED("src-shared/RackDepthPolicy.js");
 const { RackDepthPolicy } = RackDepthPol;
-/** Collaborateurs à passer à la validation dans les tests — MÊME injection que le Store et le serveur. */
-const VALIDATION_COLLABORATORS = { trayGeometry: TrayGeometry };
 const { Rack } = D("models/index.js");
 const { CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES } = D("domain/constants.js");
 
@@ -227,4 +224,4 @@ function summary() {
   process.exit(0);
 }
 
-module.exports = { ck, section, summary, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, FacePanelBands, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, FieldFacet, Ip, Markdown, RichTooltip, VmNetMapping, VmIpMatch, VmClusterFormat, FormSave, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, WebglHostVisibility, OptionSearch, ModalStack, GlobalSearch, GlobalSearchSources, DetailForms, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, FaceImagePolicy, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore };
+module.exports = { ck, section, summary, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, FacePanelBands, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, FieldFacet, Ip, Markdown, RichTooltip, VmNetMapping, VmIpMatch, VmClusterFormat, FormSave, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, WebglHostVisibility, OptionSearch, ModalStack, GlobalSearch, GlobalSearchSources, DetailForms, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, FaceImagePolicy, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore };

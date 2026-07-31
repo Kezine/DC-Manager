@@ -1,7 +1,7 @@
 /* Tests modules — code PARTAGÉ front/back (schéma, normalisation, validation, cascade).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("shared : DataValidation — champs d'audit (created_by/updated_by/dates) préservés au round-trip", async () => {
@@ -770,7 +770,7 @@ module.exports = async () => {
     const db = { racks: [rack], rackItems: [tray, { id: "B1", kind: "blank", rack_id: "R1" }], equipments: [], waypoints: [], cables: [], cableBundles: [] };
     const find = (coll, field, value) => (db[coll] || []).filter((o) => o[field] === value);
     const fetch = (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
-    const V = (rec) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find, VALIDATION_COLLABORATORS);
+    const V = (rec) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find);
     const base = { id: "E1", name: "posé", type: "other", placement_mode: "tray", tray_item_id: "T1", dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, tray_x: 0, tray_y: 0, dc_orientation: 0 };
     ck.eq(V(base).length, 0, "posé valide (80 ≤ 3 U − 5 mm de tôle) → 0 erreur");
     ck(V(Object.assign({}, base, { tray_item_id: null })).some((x) => x.path === "tray_item_id"), "T1c : mode tray sans étagère → erreur");
@@ -986,32 +986,6 @@ module.exports = async () => {
     ck.eq(RackGeometry.trayLength({ depth: 1000, cage_depth_mm: 900 }, trayDual), 906, "plateau « dual » : cas normal inchangé (900 + 6)");
     const trayCant = { kind: "tray", tray_type: "cantilever", u_height: 2, tray_u: 1, depth_mm: 1100 };
     ck.eq(RackGeometry.trayLength({ depth: 1000, cage_depth_mm: 1200 }, trayCant), 1000, "plateau en porte-à-faux : borné à la cage BORNÉE (1000)");
-  }
-  });
-
-  await section("shared : géométrie d'étagère INJECTÉE — la validation échoue FERMÉ si le collaborateur manque", async () => {
-  {
-    // `src-shared/DataValidation` REÇOIT `src-shared/TrayGeometry` au lieu de l'importer — par CHOIX de
-    // découplage désormais, plus par impossibilité technique (cf. §6.14 : la politique de profondeur, elle,
-    // est bel et bien IMPORTÉE). Le risque de ce patron est qu'un appelant l'oublie et que la règle s'arrête
-    // EN SILENCE — c'est exactement le défaut du `FieldSpec.max` déclaré mais inerte. On vérifie donc que
-    // l'omission REFUSE au lieu de laisser passer.
-    const rack = { id: "R1", name: "R", u_count: 42, depth: 1000, cage_depth_mm: 900, sides: "dual" };
-    const tray = { id: "T1", kind: "tray", rack_id: "R1", u: 10, u_height: 3, tray_u: 1, tray_type: "cantilever", depth_mm: 400, side: "front" };
-    const db = { racks: [rack], rackItems: [tray], equipments: [] };
-    const find = (coll, field, value) => (db[coll] || []).filter((o) => o[field] === value);
-    const fetch = (coll, id) => (db[coll] || []).find((o) => o.id === id) || null;
-    const eq = { id: "E1", name: "posé", type: "other", placement_mode: "tray", tray_item_id: "T1", dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 80, tray_x: 0, tray_y: 0, dc_orientation: 0 };
-    const V = (rec, collab) => Validation.DataValidator.validateRecord("equipments", rec, fetch, find, collab);
-
-    ck.eq(V(eq, VALIDATION_COLLABORATORS).length, 0, "collaborateur injecté : équipement conforme → 0 erreur");
-    const muet = V(eq, undefined);
-    ck.eq(muet.length, 1, "collaborateur OUBLIÉ : l'écriture est REFUSÉE (jamais acceptée en silence)");
-    ck(!!muet[0] && muet[0].message.includes("trayGeometry"), "…avec un message qui NOMME le collaborateur manquant");
-    ck.eq(muet[0] && muet[0].path, "tray_item_id", "…rattaché au champ de l'étagère");
-    // le garde-fou ne se déclenche QUE là où la règle s'appliquerait : aucun bruit ailleurs.
-    ck.eq(V({ id: "E2", name: "racké", placement_mode: "rack", rack_id: "R1", rack_u: 5, u_height: 1 }, undefined).length, 0, "équipement NON posé : aucun faux refus sans collaborateur");
-    ck.eq(V({ ...eq, tray_item_id: "INCONNU" }, undefined).filter((e) => e.code !== "ref_missing").length, 0, "étagère introuvable : la règle ne s'applique pas → aucun faux refus");
   }
   });
 
@@ -1699,7 +1673,7 @@ module.exports = async () => {
     const find = (coll, field, value) => (db[coll] || []).filter((o) => {
       const v = o[field]; return Array.isArray(v) ? v.includes(value) : v === value;
     });
-    const portErrs = (port) => V.validateRecord("ports", V.normalizeRecord("ports", port), fetch, find, VALIDATION_COLLABORATORS);
+    const portErrs = (port) => V.validateRecord("ports", V.normalizeRecord("ports", port), fetch, find);
 
     // T2c — le cas LÉGITIME, puis celui qui rend le modèle faux en silence si rien ne l'arrête.
     ck.eq(portErrs({ id: "P1", equipment_id: "E1", sub_equipment_id: "SE1" }).length, 0, "T2c : port et sous-équipement du MÊME équipement → valide");
@@ -1712,13 +1686,13 @@ module.exports = async () => {
     // 🚨 D10 — LE cas que T2c ne peut PAS attraper seule : c'est le SOUS-ÉQUIPEMENT qui déménage, le port n'est
     // pas touché. Sans le `dependents` de `subEquipments`, l'incohérence s'installerait en silence.
     const moved = { id: "SE1", name: "Drive 1", equipment_id: "E2" };   // le drive passe sous E2, son port reste sur E1
-    const deps = V.validateDependents("subEquipments", moved, find, fetch, VALIDATION_COLLABORATORS);
+    const deps = V.validateDependents("subEquipments", moved, find, fetch);
     ck.eq(deps.some((e) => e.collection === "ports" && e.path === "sub_equipment_id" && e.code === "cross_entity"), true,
       "D10 : déplacer un sous-équipement sous un AUTRE maître est REFUSÉ (ses ports redeviennent incohérents)");
     ck.eq(deps.length > 0 && deps.every((e) => /incohérent avec la modification/.test(e.message)), true,
       "D10 : le message dit que c'est la MODIFICATION du parent qui est en cause (pas le port)");
     // Témoin d'anti-vacuité : le même sous-équipement, NON déplacé, ne produit aucune erreur.
-    ck.eq(V.validateDependents("subEquipments", { id: "SE1", name: "Drive 1", equipment_id: "E1" }, find, fetch, VALIDATION_COLLABORATORS).length, 0,
+    ck.eq(V.validateDependents("subEquipments", { id: "SE1", name: "Drive 1", equipment_id: "E1" }, find, fetch).length, 0,
       "D10 : sous-équipement inchangé → aucun refus (le verrou n'est pas vacant)");
 
     // CASCADE : un sous-équipement supprimé DÉTACHE ses ports, il ne les supprime pas — le port est au maître.

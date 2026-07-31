@@ -310,17 +310,18 @@ puis corrigé.
   `webpack.config.js`, qui lui apprend à résoudre un spécificateur `.js` sur le `.ts`
   correspondant. **Ne pas retirer cette ligne** : les trois chaînes en dépendent.
 - L'**injection** d'un concept partagé dans un autre (paramètre plutôt qu'import) reste un
-  patron légitime, mais elle relève désormais du **choix de conception**, plus de la
-  contrainte de build : `PowerAnalysis` reçoit son store et `DataValidation` reçoit
-  `TrayGeometry` (`ValidationCollaborators`) parce que ça découple, pas parce que l'import
-  serait impossible.
-- ⚠ **LES DEUX PATRONS COEXISTENT dans `DataValidation.ts`, et c'est VOULU** — ne pas
-  uniformiser à la volée. `RackDepthPolicy` (politique de profondeur de baie) y est
-  **IMPORTÉ** (`import { RackDepthPolicy } from "./RackDepthPolicy.js"`) : rien ne demande de
-  le découpler, et lui appliquer l'injection aurait coûté onze points d'appel et un garde-fou
-  d'échec fermé pour un bénéfice nul. `TrayGeometry` (géométrie d'étagère) y reste **INJECTÉ**
-  parce que le découplage se défend sur son propre mérite — son retrait est un lot à part,
-  possible et non demandé. L'un se lit à l'import, l'autre au point d'appel.
+  patron légitime **quand elle se justifie**, mais elle relève désormais du **choix de
+  conception**, plus de la contrainte de build : `PowerAnalysis` reçoit son store parce que ça
+  découple, pas parce que l'import serait impossible.
+- ⚠ **Les deux collaborateurs partagés de `DataValidation.ts` sont désormais IMPORTÉS** —
+  `RackDepthPolicy` (politique de profondeur de baie) et `TrayGeometry` (géométrie d'étagère,
+  règles T2d/V6e) le sont tous deux (`import { X } from "./X.js"`). `TrayGeometry` était
+  auparavant **INJECTÉ** (`ValidationCollaborators`, garde-fou d'échec fermé), patron choisi à
+  l'époque où un fichier partagé ne pouvait rien importer ; l'injection a été retirée le
+  2026-07-31 (le point de substitution n'avait jamais servi — tous les appelants injectaient la
+  vraie géométrie — et chaque nouvel appelant devait penser à injecter sous peine d'échec fermé).
+  **Plus aucun collaborateur n'est injecté dans la validation.** Le patron d'injection reste
+  légitime ailleurs quand le découplage se défend sur son propre mérite (cf. `PowerAnalysis`).
 - ⚠ **Une doc qui dit « auto-suffisant » fait DUPLIQUER.** Le seul vrai danger de la
   contrainte périmée n'est pas qu'elle vieillisse : c'est qu'un contributeur y renonce à un
   import légitime et **réécrive la règle sur place** — la dette exacte que les déduplications

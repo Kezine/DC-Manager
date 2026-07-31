@@ -1,7 +1,7 @@
 /* Tests modules — entités, Store (CRUD, cascade, undo, routes, spares, sites…), helpers core.
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, WebglHostVisibility, OptionSearch, GlobalSearch, GlobalSearchSources, DetailForms, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, VALIDATION_COLLABORATORS, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FieldFacet, Ip, Markdown, VmNetMapping, VmIpMatch, VmClusterFormat, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, WebglHostVisibility, OptionSearch, GlobalSearch, GlobalSearchSources, DetailForms, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, Positioning, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Entités : normalisation au constructeur", async () => {
@@ -262,9 +262,9 @@ module.exports = async () => {
     // clone qui aurait GARDÉ la position de l'original serait REJETÉ (chevauchement V6e).
     const fetch = (coll, id) => s.get(coll, id) || null;
     const find = (coll, field, value) => s.findByField(coll, field, value);
-    ck.eq(Validation.DataValidator.validateRecord("equipments", c2.toJSON(), fetch, find, VALIDATION_COLLABORATORS).length, 0, "clone posé : conforme (validation partagée, autorité serveur)");
+    ck.eq(Validation.DataValidator.validateRecord("equipments", c2.toJSON(), fetch, find).length, 0, "clone posé : conforme (validation partagée, autorité serveur)");
     const overlapping = Object.assign({}, c2.toJSON(), { placement_mode: "tray", tray_item_id: tray.id, tray_x: 10, tray_y: 10 });
-    ck(Validation.DataValidator.validateRecord("equipments", overlapping, fetch, find, VALIDATION_COLLABORATORS).some((e) => /[Cc]hevauche/.test(e.message)), "contre-preuve : même position que l'original → rejet V6e (le serveur refuserait)");
+    ck(Validation.DataValidator.validateRecord("equipments", overlapping, fetch, find).some((e) => /[Cc]hevauche/.test(e.message)), "contre-preuve : même position que l'original → rejet V6e (le serveur refuserait)");
     // CLONE GÉNÉRIQUE (cloneSimple) : passe désormais par la validation → un DOUBLON en violation de portée est
     // REFUSÉ localement (plus de « copie locale appliquée mais refusée par le serveur »). Brosse au même U → V6c.
     const brush = await s.create("waypoints", { kind: "brush", wp_type: "datacenter", datacenter_id: dc.id, rack_id: rk2.id, rack_u: 20, u_height: 2, depth_mm: 100 });
@@ -316,12 +316,12 @@ module.exports = async () => {
   }
   });
 
-  await section("Store : pose sur étagère refusée par le VRAI chemin d'écriture (géométrie partagée injectée)", async () => {
+  await section("Store : pose sur étagère refusée par le VRAI chemin d'écriture (géométrie partagée importée)", async () => {
   {
-    // La géométrie d'étagère est un COLLABORATEUR injecté dans la validation partagée (le fichier
-    // `src-shared/DataValidation` ne peut pas l'importer — cf. docs/placement.md §6.7). On le prouve ICI
-    // par le VRAI chemin d'écriture du Store, et non par un `validateRecord` appelé à la main avec un
-    // collaborateur fabriqué pour le test : c'est le Store qui doit l'injecter, pas le test.
+    // La géométrie d'étagère est IMPORTÉE directement par la validation partagée (`src-shared/DataValidation`
+    // importe `src-shared/TrayGeometry` — cf. docs/placement.md §6.7). On le prouve ICI par le VRAI chemin
+    // d'écriture du Store, pas par un `validateRecord` appelé à la main : c'est le comportement de bout en
+    // bout qui compte.
     const s = await makeStore();
     const dc = await s.create("datacenters", { name: "DC" });
     const rack = await s.create("racks", { name: "RK", datacenter_id: dc.id, dc_x: 500, dc_y: 500, depth: 1000, cage_depth_mm: 900, sides: "dual" });
@@ -329,7 +329,7 @@ module.exports = async () => {
     const pose = (props) => s.create("equipments", { dim_mode: "free", placement_mode: "tray", tray_item_id: tray.id, ...props });
     // plateau porte-à-faux : 444,6 × 400 mm utilisables, 128,35 mm de hauteur libre (3 U − 5 mm de tôle)
     const ok = await pose({ name: "tient", tray_x: 0, tray_y: 0, free_w_mm: 200, free_l_mm: 300, free_h_mm: 80 });
-    ck(!!ok, "équipement conforme → CRÉÉ (la géométrie injectée ne bloque pas ce qui tient)");
+    ck(!!ok, "équipement conforme → CRÉÉ (la géométrie importée ne bloque pas ce qui tient)");
     ck.eq(await pose({ name: "trop large", tray_x: 0, tray_y: 0, free_w_mm: 600, free_l_mm: 100, free_h_mm: 80 }), null, "empreinte 600 > plateau 444,6 → REFUSÉE à l'écriture");
     ck.eq(await pose({ name: "trop haut", tray_x: 0, tray_y: 0, free_w_mm: 100, free_l_mm: 100, free_h_mm: 150 }), null, "hauteur 150 > 128,35 mm libres → REFUSÉE");
     ck.eq(await pose({ name: "hors plateau", tray_x: 400, tray_y: 0, free_w_mm: 200, free_l_mm: 100, free_h_mm: 80 }), null, "position x = 400 + 200 de large → REFUSÉE (débord)");

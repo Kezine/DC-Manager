@@ -20,8 +20,7 @@ import { Depths } from "../registries/Depths";
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
 import { Cascade, CascadeDelete, CascadeDetach } from "./cascadeSpec";
 import { DataValidator, PortStrands } from "../../src-shared/DataValidation";
-import type { ValidationError, EntityFetcher, ChildFinder, ValidationCollaborators } from "../../src-shared/DataValidation";
-import { TrayGeometry } from "../../src-shared/TrayGeometry";
+import type { ValidationError, EntityFetcher, ChildFinder } from "../../src-shared/DataValidation";
 import { PlacementContainers } from "../../src-shared/PlacementContainers";
 import type { PlacementContainer } from "../../src-shared/PlacementContainers";
 import { CableRouteAnalyzer as RouteAnalyzerImpl } from "./CableRouteAnalyzer";
@@ -401,10 +400,6 @@ export class Store {
      retour immédiat AVANT l'écriture réseau (le serveur reste l'autorité et re-valide). */
   /** Notifié quand une écriture est BLOQUÉE car non conforme (parité avec le rejet 400 serveur). */
   onInvalid: ((errors: ValidationError[]) => void) | null = null;
-  /** Modules partagés que `src-shared/DataValidation` ne peut pas importer lui-même et REÇOIT donc de son
-      appelant (cf. `ValidationCollaborators`, doctrine `docs/placement.md` §6.7). Sans eux, les règles
-      concernées échouent FERMÉ — les injecter ici est ce qui rend la validation d'étagère opérante. */
-  private static readonly VALIDATION_COLLABORATORS: ValidationCollaborators = { trayGeometry: TrayGeometry };
   /** Lecteur d'entité (intégrité référentielle V2 + cross-entité V5) adossé au cache hydraté. */
   private entityFetcher: EntityFetcher = (collection, id) => this.get(collection, id) || null;
   /** Recherche d'enregistrements par champ INDEXÉ (dépendance inverse V5b + portée V6) via les index secondaires. */
@@ -419,8 +414,8 @@ export class Store {
   /** Comme `accepts`, mais avec des lecteurs INJECTÉS (pour la validation CONSCIENTE DU LOT — cf. updateBatch,
       parité avec le `/transact` serveur : chaque op est validée contre l'état POST-lot). */
   private acceptsWith(collection: string, record: Record<string, any>, fetcher: EntityFetcher, finder: ChildFinder): boolean {
-    const errors = DataValidator.validateRecord(collection, record, fetcher, finder, Store.VALIDATION_COLLABORATORS);
-    if (!errors.length) errors.push(...DataValidator.validateDependents(collection, record, finder, fetcher, Store.VALIDATION_COLLABORATORS));
+    const errors = DataValidator.validateRecord(collection, record, fetcher, finder);
+    if (!errors.length) errors.push(...DataValidator.validateDependents(collection, record, finder, fetcher));
     if (errors.length) { this.onInvalid?.(errors); return false; }
     return true;
   }
