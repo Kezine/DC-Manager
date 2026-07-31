@@ -67,6 +67,7 @@ export const app = {
     busyConflict: "Version conflict — reloading…",
     busyUpdate: "Updating the document…",
     conflictToast: "Change refused: the document changed in the meantime. Data reloaded — redo your change.",
+    sessionExpired: "Session expired — please sign in again.",
     updated: "Document updated",
     by: " by {{name}}",
     byIp: " ({{ip}})",

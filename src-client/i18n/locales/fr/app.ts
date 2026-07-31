@@ -72,6 +72,7 @@ export const app = {
     busyConflict: "Conflit de version — rechargement…",
     busyUpdate: "Mise à jour du document…",
     conflictToast: "Modification refusée : le document a changé entre-temps. Données rechargées — refais ta modification.",
+    sessionExpired: "Session expirée — reconnectez-vous.",
     updated: "Document mis à jour",
     by: " par {{name}}",
     byIp: " ({{ip}})",

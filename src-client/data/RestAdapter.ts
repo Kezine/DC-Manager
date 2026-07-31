@@ -36,6 +36,8 @@ export class RestAdapter extends DataAdapter {
   set onConflict(fn: RestProtocol["onConflict"]) { this.protocol.onConflict = fn; }
   get onValidationError(): RestProtocol["onValidationError"] { return this.protocol.onValidationError; }
   set onValidationError(fn: RestProtocol["onValidationError"]) { this.protocol.onValidationError = fn; }
+  get onAuthExpired(): RestProtocol["onAuthExpired"] { return this.protocol.onAuthExpired; }
+  set onAuthExpired(fn: RestProtocol["onAuthExpired"]) { this.protocol.onAuthExpired = fn; }
 
   /** URL du flux SSE du document courant (ou "" si aucun document). */
   get eventsUrl(): string { return this.docId ? (this.apiRoot + "/documents/" + encodeURIComponent(this.docId) + "/events") : ""; }

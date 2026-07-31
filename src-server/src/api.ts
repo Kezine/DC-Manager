@@ -131,12 +131,21 @@ export class Api {
   /* -- auth (proxy SSO) : état de session, toujours accessible (le client adapte son UI) -- */
   private me: RequestHandler = async (req, res) => { res.json(await this.auth.validate(req)); };
 
-  /** Garde d'accès : session SSO valide + SUPER_ADMIN, sinon 403 (le client affiche « accès refusé »). */
+  /** Garde d'accès : session SSO valide + SUPER_ADMIN. Le refus est distingué par le code HTTP, car le
+      client AGIT différemment selon le cas :
+        - **401 « non authentifié »** quand `!r.logged` (session absente ou EXPIRÉE) → le client coupe la
+          session locale et RENVOIE au login. Sans cette distinction, une expiration en cours de session
+          se traduisait par un 403 indiscernable, donc en erreurs éparses sans jamais ramener à la connexion
+          (cf. RestDocumentController.sessionExpired côté client).
+        - **403 « accès refusé »** quand la session est VALIDE mais sans le droit SUPER_ADMIN → le client
+          reste sur l'écran « accès refusé » (pas de boucle de reconnexion : se reconnecter n'y changerait rien).
+      Le corps JSON portait DÉJÀ `logged`/`adminRight` — seul le CODE HTTP résumait mal les deux cas. */
   private requireAdmin: RequestHandler = async (req, res, next) => {
     const r = await this.auth.validate(req);
     (req as RepoRequest).authUser = r;   // réutilisé par resolveRepo (qui a écrit, pour le live)
     if (this.auth.isAuthorized(r)) { next(); return; }
-    res.status(403).json({ error: "accès refusé", logged: !!r.logged, adminRight: r.adminRight || "NONE" });
+    if (!r.logged) { res.status(401).json({ error: "non authentifié", logged: false, adminRight: r.adminRight || "NONE" }); return; }
+    res.status(403).json({ error: "accès refusé", logged: true, adminRight: r.adminRight || "NONE" });
   };
 
   /** Résolution BATCH d'utilisateurs par id canonique : `GET /users/resolve?id=…&id=…`.

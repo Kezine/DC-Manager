@@ -168,8 +168,13 @@ L'app **ne gère pas l'auth** : le serveur **proxifie le jeton** (cookie `COOKIE
 au SSO externe (`SSO_URL`) qui renvoie l'utilisateur
 (`logged`, `adminRight`, `expireDate`). Le résultat est **mis en cache** (clé =
 hash du cookie) tant que le cookie ne change pas et que `expireDate` n'est pas
-dépassée. **Accès autorisé uniquement si `logged` et `adminRight = "SUPER_ADMIN"`**
-(sinon `403` ; le client affiche « accès refusé »).
+dépassée. **Accès autorisé uniquement si `logged` et `adminRight = "SUPER_ADMIN"`.**
+Le refus est distingué par le **code HTTP**, car le client agit différemment :
+- **`401` (non authentifié)** quand la session est absente ou **EXPIRÉE** (`logged: false`) → le client
+  coupe la session locale et **renvoie au login** (une expiration en cours de session ne se traduit plus
+  en erreurs éparses, mais en un retour propre à l'écran de connexion) ;
+- **`403` (accès refusé)** quand la session est valide mais **sans le droit `SUPER_ADMIN`** → le client
+  reste sur l'écran « accès refusé » (se reconnecter n'y changerait rien).
 
 - **Mode dev** (offline, défaut du `docker-compose.yml`) : `SSO_URL=""` →
   utilisateur factice `dev` en SUPER_ADMIN, tout est autorisé.

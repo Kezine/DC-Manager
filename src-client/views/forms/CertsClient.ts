@@ -17,6 +17,7 @@
    côté navigateur) n'apparaît JAMAIS en liste — uniquement au GET UNITAIRE (getOne). Le serveur ne
    le déchiffre pas ; il ne stocke que des métadonnées et des blobs opaques. La passphrase maître et
    les clés déchiffrées ne transitent JAMAIS par ce client. */
+import { SessionExpiry } from "../../core/SessionExpiry";   // signale un 401 (session SSO expirée) → retour au login (idempotent)
 
 /** Une entrée SubjectAltName (ordre = position en DB) — dns/ip/email (X.509) ou principal (SSH). */
 export interface CertSan {
@@ -352,6 +353,7 @@ export class CertsClient {
     let json: any = null;
     try { json = text ? JSON.parse(text) : null; } catch (_) { json = null; }
     if (!res.ok) {
+      if (res.status === 401) SessionExpiry.report(401);   // session expirée → retour au login (idempotent) ; le throw typé reste (catch locaux inchangés)
       const message = (json && typeof json.error === "string") ? json.error : ("HTTP " + res.status);
       const detail = (json && typeof json.detail === "string") ? json.detail
         : (json && Array.isArray(json.issues)) ? (json.issues as unknown[]).map(String).join("\n")

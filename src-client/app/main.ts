@@ -31,6 +31,7 @@ import type { CertificateListItem } from "../views/forms/CertsClient";
 import { Schema } from "../../src-shared/Schema";
 import { Download } from "../core/Download";
 import { Prefs } from "../core/Prefs";
+import { SessionExpiry } from "../core/SessionExpiry";   // verrou idempotent « session expirée → retour au login » (mode API)
 import { Log } from "../core/Log";
 import { I18n } from "../i18n/I18n";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD } from "../domain/constants";
@@ -293,11 +294,17 @@ async function boot(): Promise<void> {
       invalidate3D: () => dcView.invalidate3D(),
       setUser: (user) => shell.setUser(user),
       showAccessDenied: (opts) => shell.showAccessDenied(opts),
+      // Session expirée (401) : ferme toute la pile de modales avant de basculer sur l'écran d'accueil (même
+      // instance `modal` que formHost.locate) — sinon fiches/formulaires resteraient par-dessus le login.
+      closeAllModals: () => modal.closeAll(),
       // Écriture d'un AUTRE client dans un module (interventions/certs) : recompte les pastilles concernées,
       // throttlé (cf. scheduleModulesRecount, défini plus bas ; appelé seulement après le boot, via SSE).
       onModulesChanged: (modules) => scheduleModulesRecount(modules),
     },
   }) : null;
+  // 401 (session SSO absente/EXPIRÉE) sur une requête → UNE action idempotente : retour au login. Installé APRÈS
+  // la construction (référence `rest`), mode REST uniquement (le mode fichier n'a pas de session).
+  if (rest) SessionExpiry.install(() => rest.sessionExpired());
 
   // Validation PARTAGÉE côté client (Store) : SEUL garde-fou en mode fichier, retour immédiat en mode API.
   store.onInvalid = (errors) => {

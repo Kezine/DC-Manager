@@ -11,6 +11,7 @@
    pipeline — MÊME base d'URL scopée au document, MÊMES en-têtes/auth, MÊMES cookies SSO —
    via une petite dépendance injectée (`VmRestContext`) que `RestAdapter` satisfait
    structurellement (aucun import du cœur ici → module testable et découplé). */
+import { SessionExpiry } from "../../core/SessionExpiry";   // signale un 401 (session SSO expirée) → retour au login (idempotent)
 
 /** Compteurs d'une passe de synchro (miroir de `VmSyncCounts`, serveur). */
 export interface VmSyncCounts { created: number; updated: number; orphaned: number; unchanged: number }
@@ -224,6 +225,7 @@ export class VmSyncClient {
     let json: any = null;
     try { json = text ? JSON.parse(text) : null; } catch (_) { json = null; }
     if (!res.ok) {
+      if (res.status === 401) SessionExpiry.report(401);   // session expirée → retour au login (idempotent) ; le throw typé reste (catch locaux inchangés)
       const message = (json && typeof json.error === "string") ? json.error : ("HTTP " + res.status);
       // 503 config → `detail` (chaîne) ; 400 validation → `issues` (messages FRANÇAIS du serveur) agrégés
       // en `detail` (une ligne par issue) pour rester dans la forme code+detail de VmSyncError.

@@ -1,6 +1,7 @@
 import { Id } from "../core/Id";
 import { Download } from "../core/Download";
 import { ImageBackend, IdbImageBackend } from "./ImageBackend";
+import { SessionExpiry } from "../core/SessionExpiry";   // signale un 401 (session SSO expirée) → retour au login (idempotent)
 
 /* =============================================================================
    STOCKAGE DES IMAGES DE FAÇADE — DISSOCIÉ DU MODÈLE (réplique OO du `imageStore`).
@@ -201,7 +202,7 @@ export class ImageStore {
     const recs = await this.getAll();
     for (const r of recs) {
       if (!r.blob && r.url) {
-        try { const res = await fetch(r.url, { credentials: "include" }); if (res.ok) { r.blob = await res.blob(); if (!r.type) r.type = r.blob.type; } }
+        try { const res = await fetch(r.url, { credentials: "include" }); if (res.status === 401) SessionExpiry.report(401); if (res.ok) { r.blob = await res.blob(); if (!r.type) r.type = r.blob.type; } }
         catch (_) { /* binaire illisible → l'image sera absente du bundle (manifeste cohérent : bytes = 0) */ }
       }
     }

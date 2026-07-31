@@ -18,6 +18,7 @@
 
    INVARIANT DE SÉCURITÉ : aucune réponse ne porte de jeton — `has_token` en signale seulement la
    présence ; le jeton ne part EN CLAIR qu'à l'ENVOI (champ `token`) et seulement s'il est (re)saisi. */
+import { SessionExpiry } from "../../core/SessionExpiry";   // signale un 401 (session SSO expirée) → retour au login (idempotent)
 
 /** Canal configuré tel que LISTÉ (GET /notify/instances) — miroir de `NotifierInstanceItem`
     (NotifyDb.ts). SANS jeton : `has_token` signale seulement qu'un jeton est stocké (l'UI affiche
@@ -276,6 +277,7 @@ export class NotifyClient {
     let json: any = null;
     try { json = text ? JSON.parse(text) : null; } catch (_) { json = null; }
     if (!res.ok) {
+      if (res.status === 401) SessionExpiry.report(401);   // session expirée → retour au login (idempotent) ; le throw typé reste (catch locaux inchangés)
       const message = (json && typeof json.error === "string") ? json.error : ("HTTP " + res.status);
       const detail = (json && typeof json.detail === "string") ? json.detail
         : (json && Array.isArray(json.issues)) ? (json.issues as unknown[]).map(String).join("\n")

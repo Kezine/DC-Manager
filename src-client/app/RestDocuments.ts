@@ -23,6 +23,7 @@ import type { DocumentChangeset } from "../sync";
 import { EntityRegistry } from "../models";
 import { Log } from "../core/Log";
 import { I18n } from "../i18n/I18n";
+import { SessionExpiry } from "../core/SessionExpiry";
 
 const W = window as any;
 
@@ -41,6 +42,9 @@ export interface RestDocumentsHost {
   setUser(user: any): void;
   /** Écran « accès refusé » (auth SSO non autorisée) avec bouton Réessayer. */
   showAccessDenied(opts: { connected: boolean; user: string; onRetry: () => void; loginUrl: string }): void;
+  /** Ferme TOUTES les modales de la pile (retour au login sur session expirée : sinon les fiches/formulaires
+      resteraient affichés PAR-DESSUS l'écran d'accueil). Câblé sur `modal.closeAll()` (main.ts). */
+  closeAllModals(): void;
   /** Un AUTRE client a écrit dans un MODULE (interventions/certs) — marqueur `changeset.modules`. À traiter en
       rafraîchissant les PASTILLES d'onglet concernées (comptages), throttlé côté hôte. AUCUN rechargement de
       collections (bases séparées, hors révision du document cœur). Optionnel (null → événement ignoré). */
@@ -82,6 +86,9 @@ export class RestDocumentController {
     this.injectedLoginUrl = deps.injectedLoginUrl; this.host = deps.host;
     // 409 (verrou optimiste serveur) sur une de nos écritures → recharge + notifie (PAS de rejeu : le serveur fait autorité).
     this.adapter.onConflict = () => { void this.reload({ conflict: true }); };
+    // 401 (session SSO absente/EXPIRÉE) sur une de nos requêtes → retour au login. Passe par SessionExpiry pour
+    // l'IDEMPOTENCE : une rafale de 401 (fetches en vol) ne déclenche qu'UNE seule fois sessionExpired().
+    this.adapter.onAuthExpired = () => { SessionExpiry.report(401); };
     // 400 (validation PARTAGÉE serveur) : notre écriture OPTIMISTE a déjà muté le cache local, mais le serveur l'a
     // REFUSÉE → on RECHARGE (comme le 409) pour restaurer l'état serveur, sinon l'UI garderait un changement
     // inexistant côté serveur (divergence). Ne devrait quasi jamais arriver pour une écriture passée par la
@@ -98,6 +105,32 @@ export class RestDocumentController {
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", () => { if (!document.hidden && this.pendingChangeset) this.scheduleReload(); });
     }
+  }
+
+  /** Session SSO ABSENTE ou EXPIRÉE (HTTP 401 sur une requête) : ACTION unique de retour au login. Appelée
+      via `SessionExpiry` (installé dans main.ts), donc GARANTIE idempotente — une rafale de 401 (fetches en
+      vol) ne l'exécute qu'une fois. L'ORDRE compte :
+        1) le TOAST d'abord — le cadrage EXIGE de ne pas perdre silencieusement une saisie : l'utilisateur voit
+           « Session expirée » AVANT que quoi que ce soit ne se ferme ;
+        2) on coupe le flux SSE et les timers de reload (+ purge le changeset en attente) → aucun rechargement
+           posthume ne partira après la bascule au login ;
+        3) on ferme TOUTE la pile de modales (sinon fiches/formulaires resteraient par-dessus l'écran d'accueil) ;
+        4) on efface la pastille utilisateur puis on affiche l'écran d'accueil en état « non connecté »
+           (boutons Connexion / Réessayer — comportement existant de Shell.showAccessDenied, inchangé).
+      On NE vide PAS le store : l'overlay d'accueil couvre l'app ; un re-bootstrap réussi (Réessayer/Connexion)
+      rouvre le dernier document et recharge tout (flux existant). */
+  sessionExpired(): void {
+    Notify.toast(I18n.t("app.rest.sessionExpired"), "err");
+    if (this.events) { this.events.close(); this.events = null; }
+    clearTimeout(this.reloadTO);
+    this.pendingChangeset = null;
+    this.host.closeAllModals();
+    this.host.setUser(null);
+    this.host.showAccessDenied({
+      connected: false, user: "",
+      onRetry: () => { void this.bootstrap(); },
+      loginUrl: (this.prefs.loginUrl && this.prefs.loginUrl.trim()) || this.injectedLoginUrl,   // même construction qu'au bootstrap
+    });
   }
 
   /** Recharge le document courant depuis le serveur. `changeset` (SSE) cible la reconstruction (3D sautée si aucune
@@ -362,6 +395,9 @@ export class RestDocumentController {
       this.host.showAccessDenied({ connected: !!(me && me.logged), user: who, onRetry: () => { void this.bootstrap(); }, loginUrl: (this.prefs.loginUrl && this.prefs.loginUrl.trim()) || this.injectedLoginUrl });
       return;   // n'ouvre aucun document tant que l'accès n'est pas autorisé
     }
+    // Session VALIDE re-constatée → ré-arme le verrou d'expiration : une future coupure 401 pourra de nouveau
+    // ramener au login (sans ce reset, un premier retour-login « collerait » et bloquerait les suivants).
+    SessionExpiry.reset();
     let docs: any[] = []; try { docs = await this.adapter.listDocuments(); } catch { /* serveur injoignable */ }
     const exists = (id: string | null | undefined) => !!id && docs.some((d) => d.id === id);
     // 1) dernier doc ouvert (s'il n'a pas été supprimé entre-temps)

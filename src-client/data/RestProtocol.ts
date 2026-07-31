@@ -28,6 +28,12 @@ export class RestProtocol {
   /** Données refusées par le serveur (HTTP 400, validation PARTAGÉE) : le serveur fait autorité et a rejeté
       l'écriture. Le hôte (main.ts) notifie l'utilisateur. `errors` = liste `{ collection, path, code, message }`. */
   onValidationError: ((errors: Array<{ collection: string; path: string; code: string; message: string }>) => void) | null = null;
+  /** Session SSO absente/EXPIRÉE (HTTP 401, garde serveur `requireAdmin`) : notre requête a été refusée faute
+      d'authentification (le SSO a expiré en cours de session). Le hôte (main.ts → SessionExpiry) coupe la session
+      locale et RENVOIE au login. ⚠ On notifie PUIS on `throw` (JAMAIS de retour null, contrairement aux 409/400) :
+      un `load()` nullifié produirait un snapshot VIDE qui ÉCRASERAIT le store par du vide. Le throw préserve la
+      sémantique des appelants (leurs catch locaux jouent ; l'écran bascule au login de toute façon). */
+  onAuthExpired: (() => void) | null = null;
 
   /** En-têtes d'une ÉCRITURE : la révision de base que le serveur compare aux entités visées (verrou optimiste). */
   writeHeaders(): Record<string, string> { return { "X-Base-Rev": String(this.docRev) }; }
@@ -46,6 +52,10 @@ export class RestProtocol {
       let info: any = null; try { info = JSON.parse(await res.text()); } catch (_) { /* corps absent/illisible */ }
       if (info && Array.isArray(info.errors)) { this.onValidationError?.(info.errors); return null; }   // erreurs structurées → notifiées, pas de throw
       throw new Error("HTTP 400 sur " + method + " " + path + (info && info.error ? " : " + info.error : ""));
+    }
+    if (res.status === 401) {   // session absente/expirée : on notifie le hôte (retour au login) PUIS on throw (jamais null → n'écrase pas le store)
+      this.onAuthExpired?.();
+      throw new Error("HTTP 401 sur " + method + " " + path);
     }
     if (!res.ok) throw new Error("HTTP " + res.status + " sur " + method + " " + path);
     if (res.status === 204) return null;

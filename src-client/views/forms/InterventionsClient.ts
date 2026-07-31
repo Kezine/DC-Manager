@@ -13,6 +13,7 @@
    (src-server). Duplication ASSUMÉE (principe n°3) : c'est la FORME d'une réponse réseau, pas une règle
    métier partageable — la garder ici évite de faire dépendre le cœur front d'un type serveur et préserve
    l'amovibilité. Toute évolution des routes/DTO serveur se répercute ICI (et réciproquement). */
+import { SessionExpiry } from "../../core/SessionExpiry";   // signale un 401 (session SSO expirée) → retour au login (idempotent)
 
 /** Lien vers une cible du document (couple opaque — aucune FK côté serveur, orphelins tolérés).
     Miroir de `InterventionLink` (InterventionsDb.ts). */
@@ -207,6 +208,7 @@ export class InterventionsClient {
     let json: any = null;
     try { json = text ? JSON.parse(text) : null; } catch (_) { json = null; }
     if (!res.ok) {
+      if (res.status === 401) SessionExpiry.report(401);   // session expirée → retour au login (idempotent) ; le throw typé reste (catch locaux inchangés)
       const message = (json && typeof json.error === "string") ? json.error : ("HTTP " + res.status);
       const detail = (json && typeof json.detail === "string") ? json.detail
         : (json && Array.isArray(json.issues)) ? (json.issues as unknown[]).map(String).join("\n")

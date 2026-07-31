@@ -1,4 +1,5 @@
 import type { ImageRec } from "./ImageStore";
+import { SessionExpiry } from "../core/SessionExpiry";   // signale un 401 (session SSO expirée) → retour au login (idempotent)
 
 /* =============================================================================
    BACKEND de persistance des images de façade — normalise l'accès aux blobs
@@ -58,6 +59,7 @@ export class RestImageBackend implements ImageBackend {
 
   async getAll(): Promise<ImageRec[]> {
     const res = await fetch(this.baseUrl + "/images", { credentials: "include" });
+    if (res.status === 401) SessionExpiry.report(401);   // session expirée → retour au login (idempotent) ; le throw reste
     if (!res.ok) throw new Error("HTTP " + res.status + " sur GET /images");
     const list = (await res.json()) || [];
     // métadonnées seules : blob null, url = endpoint serveur (chargé à l'affichage par le navigateur).
@@ -67,6 +69,7 @@ export class RestImageBackend implements ImageBackend {
   async getRaw(id: string): Promise<ImageRec | null> {
     const meta = await fetch(this.baseUrl + "/images/" + encodeURIComponent(id), { credentials: "include" });
     if (meta.status === 404) return null;
+    if (meta.status === 401) SessionExpiry.report(401);   // session expirée → retour au login (idempotent) ; le throw reste
     if (!meta.ok) throw new Error("HTTP " + meta.status + " sur GET /images/" + id);
     const m = await meta.json();
     const br = await fetch(this.blobUrl(id), { credentials: "include" });
@@ -78,10 +81,12 @@ export class RestImageBackend implements ImageBackend {
     fd.append("meta", JSON.stringify({ id: rec.id, name: rec.name || "", u_height: rec.u_height || 1, face: rec.face, with_ears: rec.with_ears !== false, description: rec.description || "", type: rec.type || (rec.blob && rec.blob.type) || "" }));
     if (rec.blob) fd.append("blob", rec.blob, rec.name || rec.id);
     const res = await fetch(this.baseUrl + "/images/" + encodeURIComponent(rec.id), { method: "PUT", credentials: "include", body: fd });
+    if (res.status === 401) SessionExpiry.report(401);   // session expirée → retour au login (idempotent) ; le throw reste
     if (!res.ok) throw new Error("HTTP " + res.status + " sur PUT /images/" + rec.id);
   }
   async del(id: string): Promise<void> {
     const res = await fetch(this.baseUrl + "/images/" + encodeURIComponent(id), { method: "DELETE", credentials: "include" });
+    if (res.status === 401) SessionExpiry.report(401);   // session expirée → retour au login (idempotent) ; le throw reste
     if (!res.ok && res.status !== 404) throw new Error("HTTP " + res.status + " sur DELETE /images/" + id);
   }
   async clear(): Promise<void> {

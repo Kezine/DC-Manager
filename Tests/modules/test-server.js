@@ -408,6 +408,24 @@ module.exports = async () => {
     ck(threw404, "404 non toléré → throw");
     ck.eq(await p.interpret(resp(204), "PUT", "/meta"), null, "204 → null (pas de corps)");
     ck.eq((await p.interpret(resp(200, { body: '{"a":1}' }), "GET", "/x")).a, 1, "200 → corps JSON parsé");
+    // 401 (session ABSENTE/EXPIRÉE — garde serveur) : on notifie onAuthExpired PUIS on THROW (jamais null,
+    // contrairement aux 409/400 : un load() nullifié écraserait le store par un snapshot vide). Un 401 ne
+    // passe NI par onConflict NI par onValidationError.
+    let authExpired = 0, sawConflict = false, sawValErr = false;
+    p.onAuthExpired = () => { authExpired++; };
+    p.onConflict = () => { sawConflict = true; };
+    p.onValidationError = () => { sawValErr = true; };
+    let threw401 = false;
+    try { await p.interpret(resp(401, { body: JSON.stringify({ error: "non authentifié", logged: false }) }), "GET", "/racks"); }
+    catch (e) { threw401 = /HTTP 401/.test(e.message); }
+    ck(threw401, "401 → throw (jamais null : sinon un load() nullifié écraserait le store par du vide)");
+    ck.eq(authExpired, 1, "401 → onAuthExpired notifié une fois");
+    ck(!sawConflict && !sawValErr, "401 ne passe NI par onConflict NI par onValidationError");
+    // 401 SANS callback installé → throw quand même (le retour au login ne remplace pas la sémantique d'erreur).
+    const p2 = new RestProtocol();
+    let threw401b = false;
+    try { await p2.interpret(resp(401, { body: "" }), "GET", "/meta"); } catch (e) { threw401b = /HTTP 401/.test(e.message); }
+    ck(threw401b, "401 sans onAuthExpired → throw quand même (no-op sûr)");
   }
   });
 
