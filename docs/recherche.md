@@ -1,8 +1,9 @@
-# Recherche globale — palette Ctrl+K, termes partagés, exécution double
+# Recherche — palette Ctrl+K, listings serveur-pilotés, termes partagés
 
-Architecture de la **recherche globale** de DC Manager : la palette (Ctrl+K / loupe topbar), le module
-partagé des termes, la route serveur transverse et la répartition local ⇄ serveur des deux modes de
-données. Chantier « recherche partagée / chargement dynamique » (lots 1-2, 2026-08-02).
+Architecture de la **recherche** de DC Manager : la palette globale (Ctrl+K / loupe topbar), la recherche
+et les filtres des **listings**, le module partagé des termes, les routes serveur et la répartition
+local ⇄ serveur des deux modes de données. Chantier « recherche partagée / chargement dynamique »
+(lots 1-3, 2026-08-02).
 
 ## Vue d'ensemble
 
@@ -25,18 +26,27 @@ données. Chantier « recherche partagée / chargement dynamique » (lots 1-2, 2
 Les **termes cherchables** des deux chemins sortent du même module : **`src-shared/SearchTerms.ts`**.
 C'est lui qui calcule la colonne `search` du serveur (à l'écriture, cf. `docs/persistance.md`) ET les
 termes du corpus local (à l'ouverture de la palette) — la parité des deux modes est **par
-construction**, pas par discipline.
+construction**, pas par discipline. Depuis le lot 3, la **recherche des LISTINGS** boit à la même
+source (cf. « Listings serveur-pilotés » plus bas) : une seule définition de « quel texte trouve cet
+enregistrement » pour toute l'application.
 
 ## Les composants
 
 | Composant | Rôle |
 |---|---|
 | `src-shared/SearchTerms.ts` | SOURCE UNIQUE de « quel texte trouve un enregistrement » : dérivés par lien/enfants, catalogues fr+en, compositions tapables, requêtes inverses d'invalidation, `SEARCH_VERSION`. |
+| `src-client/core/RecordSearch.ts` | ADAPTATEUR client du module partagé : forme canonique du record (`toJSON`), forme LISTE (`termsOf`, pour le scoring de la palette) et forme TEXTE (`textOf` — littéralement le contenu de la colonne `search`, pour les listings). |
+| `src-client/core/RecordSearchIndex.ts` | Index MÉMOÏSÉ des textes cherchables d'un listing + `filter(collection, rows, query)` ≡ le `LIKE` serveur. Mesures et politique d'invalidation en tête du fichier. |
 | `src-client/core/GlobalSearch.ts` | Scoring PUR : paliers 100 (libellé exact) / 80 (préfixe) / 60 (contient) / 30 (sub/path/termes), groupes par famille jamais entrelacés, comptes, préfixes de portée, surlignage. |
-| `src-client/views/GlobalSearchSources.ts` | Corpus et portées : habillage par famille (label/sub/path/pill/locate), termes via le module partagé, `build` (corpus local), `dressRecords` (records serveur), invariant corpus ≡ fiches. |
+| `src-client/views/GlobalSearchSources.ts` | Corpus et portées : habillage par famille (label/sub/path/pill/locate), termes via `RecordSearch`, `build` (corpus local), `dressRecords` (records serveur), invariant corpus ≡ fiches. |
 | `src-client/views/GlobalSearchPalette.ts` | La modale : portées/préfixes, clavier, récents, actions, familles externes, et l'orchestration serveur-pilotée du mode API (debounce, abort, repli). |
+| `src-client/core/ListRowEngine.ts` | MOTEUR de lignes des listings : décision local ⇄ serveur, debounce, abort, repli, anti-boucle d'échec. Source INJECTÉE (`ListRowSource`). |
+| `src-client/core/StoreListRowSource.ts` | La source concrète : `local()` = cache hydraté + `RecordSearchIndex`, `remote()` = lecteur serveur injecté (`RemoteListReader`), traduction de la cible en `where` ou restriction cliente. |
+| `src-client/views/ListTargets.ts` | Descripteurs du **filtre CIBLE unifié** par listing (recherche des candidats, libellés, badge, `where`/`restrict`). |
+| `src-client/ui/FilterBar.ts` + `core/FilterChips.ts` | Dimension « à RECHERCHE » (SearchPop au lieu d'un multiselect) et chips à valeur LIBRE. |
 | `src-server/src/RelationalRepository.searchAll` | Recherche transverse : un LIKE sur la colonne `search` par collection, plafond par collection, troncature signalée. |
-| `GET /api/documents/:docId/search` | La route (api.ts) — même garde que toute lecture du document (session SSO + SUPER_ADMIN). |
+| `src-server/src/RelationalRepository.list` | Listing d'UNE collection : LIKE sur `search` + `where` de colonnes + pagination — la route que consomment les listings serveur-pilotés. |
+| `GET /api/documents/:docId/search` | La route transverse (api.ts) — même garde que toute lecture du document (session SSO + SUPER_ADMIN). |
 
 ## Exécution DOUBLE (principe n°15)
 
@@ -90,6 +100,107 @@ Un copier-coller de la chaîne complète ne matche donc que côté client (habil
 — le backfill à l'ouverture (`PRAGMA user_version`, cf. `docs/persistance.md`) met les documents
 existants à niveau tout seul.
 
+## Listings serveur-pilotés (lot 3)
+
+Les listings du cœur (`views/ListView`, tous les onglets adossés à une collection du document) ne lisent
+plus `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
+
+```
+   saisie / filtre CIBLE
+            │
+            ▼
+     ListRowEngine.rows(request)          request = { collection, query, target }
+       │                     │
+       │ requête INACTIVE    │ requête ACTIVE (recherche saisie OU cible)
+       ▼                     ▼
+   source.local()      source.remote()  ─── null (mode fichier / cible à 2 sauts sans saisie)
+   Store.all + index         │                └→ on reste sur local()
+   (jamais de réseau)        ▼
+                    GET …/<collection>?q=…&<where>   (debounce 200 ms + AbortController)
+                             │  échec → repli LOCAL + console.warn, JAMAIS re-programmé
+                             ▼
+                     Store.list → entités absorbées → repeint
+```
+
+### Ce qui a changé, et pourquoi
+
+- **La recherche d'un listing utilise le moteur PARTAGÉ**, dans les DEUX modes. Le texte cherché d'une
+  ligne est `RecordSearch.textOf(...)` — c'est-à-dire, mot pour mot, le contenu de la colonne `search`
+  que le serveur a calculé pour ce même enregistrement. **Conséquence assumée** (même bascule que la
+  palette au lot 2) : l'assiette s'élargit du relevé trié d'hier au « tout champ propre + dérivés ». Un
+  équipement se trouve désormais par le nom de **sa baie**, d'un de ses **sous-équipements**, par
+  « U12 » ou « 42 U ». C'est le comportement de la palette, appliqué aux listes.
+- **`ListConfigs.searchFields` a disparu**, sauf **une** exception documentée : la **bibliothèque
+  d'images de façade**. Sa source est CUSTOM (`ImageStore`, hors collections du document, donc hors
+  spec partagée) et ses enregistrements portent la **data URL complète** de l'image — qui n'a rien à
+  faire dans un texte cherchable. Ce listing garde donc son relevé explicite (`ListOptions.searchFields`).
+- **Bascule serveur sur requête ACTIVE seulement.** Sans recherche ni cible, le document est hydraté :
+  re-tirer la liste complète serait du gaspillage pur. Avec une requête active et en mode API, la liste
+  vient du serveur (anti-rebond 200 ms — la même constante que la palette —, annulation de la requête
+  devancée, **repli local silencieux** en cas d'échec). En mode FICHIER, aucun réseau n'existe :
+  `remote()` rend `null` et le moteur reste local (principe n°15).
+- **Le listing ne blanchit jamais** : pendant l'anti-rebond et le vol, ce sont les lignes LOCALES,
+  filtrées avec la même assiette, qui s'affichent.
+- **Anti-boucle** : un échec serveur est mémorisé POUR SA REQUÊTE. Sans ça, le rendu de repli
+  reprogrammerait aussitôt la même requête, indéfiniment. Une requête *différente* reste tentée.
+
+### Limites v1 (assumées)
+
+- **Le TRI et la PAGINATION restent CLIENT**, sur les lignes reçues : les accesseurs de tri d'un listing
+  sont des fonctions arbitraires, souvent dérivées (occupation d'une baie, longueur d'un câble, chemin
+  d'un équipement) — il n'y a pas de colonne SQL en face. Le jeu serveur est donc **plafonné**
+  (`StoreListRowSource.REMOTE_LIMIT` = **500** lignes, même esprit que la page de 500 des interventions
+  et que le cap par collection de la recherche transverse). Au-delà, l'utilisateur affine sa requête.
+- Aucune **pagination serveur** n'est exposée dans l'UI des listings en v1.
+
+### Coût de la recherche locale et mémoïsation
+
+Calculer le texte cherchable d'une ligne n'est pas gratuit (sérialisation de toutes les valeurs propres
++ suivi des liens/enfants de la spec). Mesuré sur un corpus synthétique d'équipements rackés (Node 24) :
+
+| corpus | une passe COMPLÈTE | 10 filtres sur l'index |
+|---|---|---|
+| 2 000 | ~23 ms | ~8 ms (0,8 ms/frappe) |
+| 10 000 | ~106 ms | ~35 ms (3,5 ms/frappe) |
+
+D'où l'**index mémoïsé** (`RecordSearchIndex`) : le prix est payé une fois par session de recherche, la
+frappe devient ~30× moins chère. L'**invalidation** est volontairement GROSSIÈRE — le texte d'une ligne
+dépend d'AUTRES enregistrements (renommer une baie change celui de tous ses équipements), aucune
+invalidation fine n'y serait fiable. Deux déclencheurs : tout rendu qui **n'est pas** une simple frappe
+(`ListView.render()` sans `typing`), et `Store.onChange` (filet pour les écritures venues d'ailleurs :
+SSE, autre onglet). Un index périmé, c'est une recherche qui ment : dans le doute, on jette.
+
+## Filtre CIBLE unifié (dimension « à RECHERCHE »)
+
+Un listing peut être filtré par une **entité du modèle** plutôt que par une valeur d'énumération : « les
+adresses IP de SW-Coeur », « les câbles de SW-Coeur », « les interventions de cette VM ». La liste des
+cibles est longue, croissante et à libellés composés → le contrôle est un **`SearchPop`**, jamais un
+`<select>` par famille (principe n°14, même règle que `FormControls.entityPicker`).
+
+- **`FilterBarDimension.search`** transforme une dimension en dimension « à recherche » : le menu
+  « + Filtre » y met un `SearchPop` alimenté par une source **injectée par la vue**. Choisir **remplace**
+  (MONO-cible en v1 ; la forme — un `Set` + des chips — supporte déjà le multiple) et **referme** le menu.
+- La chip produite est une chip **normale** (`FilterChips`), retirée par son ✕ **et** par « Réinitialiser ».
+  Nouveauté du modèle pur : une dimension `search` porte des valeurs **LIBRES** — elle n'a pas d'options,
+  donc ni ordre de référence (l'ordre devient celui de la sélection) ni libellé à y lire (il vient de
+  l'accesseur `valueLabel` de `build`), et la **purge « option disparue » ne s'y applique pas**. Le
+  libellé est résolu **à chaque rendu** : un renommage suit tout seul, une cible supprimée retombe sur
+  « (supprimé) » sans effacer le filtre — l'utilisateur voit ce qui vide sa liste.
+- **Convention de valeur** : `« <kind>:<id> »`, la MÊME que les liens d'intervention
+  (`core/TargetSearch.key`/`parse`) — un seul encodage dans toute l'app.
+
+### Les trois vues branchées, et leur asymétrie
+
+| Listing | Familles cherchées | Chemin du filtre |
+|---|---|---|
+| **Adresses IP** | équipements **+** VMs (confondues) | `where` **SERVEUR** (`{ equipment_id }` / `{ vm_id }`) ; le « OU » porte sur la famille de la cible choisie, pas sur une requête OR |
+| **Câbles** | équipements | **CLIENT** : le rattachement passe par les **ports** (câble → port → équipement), **2 sauts** qu'aucune égalité de colonne n'exprime. En mode API, le serveur ne sert que la recherche et la cible taille **ensuite** les lignes reçues ; sans saisie, rien ne part sur le réseau (le cache suffit) |
+| **Interventions** | équipements, VMs, spares, sous-équipements | **SERVEUR** (paramètre `targets` déjà existant, cf. `docs/interventions.md`) — leur listing était DÉJÀ paginé serveur, seule la dimension y a été branchée |
+
+Cette **asymétrie est assumée** : le jour où le serveur saura joindre les ports, seul le `where` des
+câbles change — `restrict` reste de toute façon le chemin du mode fichier. Les **certificats** ne sont
+pas branchés en v1 (base serveur séparée, client à part).
+
 ## Invariants testés
 
 - **corpus ≡ fiches ouvrables** (`GlobalSearchSources.families()` ⇄ `DetailForms.DETAIL_COLLECTIONS`,
@@ -98,10 +209,23 @@ existants à niveau tout seul.
   la duplication assumée ne peut pas dériver en silence.
 - Parité n°15 : « orphan »/« hard drive » trouvables en locale fr sur le corpus LOCAL
   (test-core-store.js) ; colonne serveur : goldens searchAll + backfill v1→v2.
+- **Parité listing fichier ⇄ serveur** (test-list-rows.js) : sur un même mini-corpus, `RecordSearchIndex`
+  et `RelationalRepository.list(collection, {query})` rendent les **mêmes ids** sur 15 requêtes golden
+  (dérivés par lien, par enfants, compositions, catalogues, 2 sauts, casse, requête sans résultat).
+  Le rognage de la requête en fait partie : `normSearch` ne rogne PAS, seul le `trim()` explicite des
+  deux côtés évite qu'une saisie blanche diverge.
+- **Une seule définition** : tout terme du corpus de la PALETTE est présent dans le texte cherché du
+  LISTING (les deux formes de `RecordSearch` couvrent le même contenu).
+- **Moteur de lignes** : requête active/inactive, bascule serveur, affichage local pendant le vol,
+  repli sur échec **sans reprogrammation**, annulation de la requête devancée, `reset`.
+- **Filtre CIBLE** : chips à valeur libre (conservées sans options, repli sur l'identifiant),
+  `TargetSearch.parse` (inverse de `key`, id à deux-points préservé), `where` IP ⇄ restriction câbles à
+  2 sauts sur un VRAI Store, famille inconnue → **aucune** ligne (jamais « toutes »).
 
 ## Pointeurs
 
 - `docs/persistance.md` § « La colonne `search` ENRICHIE » — écriture/invalidation/backfill serveur.
+- `docs/interventions.md` § « Filtre par CIBLE » — l'absorption de la chip de navigation par la dimension.
 - `.notes/toDos/chargement-dynamique-document-cadrage-2026-08-02.md` — cadrage du chantier (non versionné).
-- Lots suivants : listings serveur-pilotés (lot 3) et pickers (lot 4) réutiliseront `searchAll`/`list`
-  et le patron habillage-client de `dressRecords`.
+- Lot suivant : les **pickers** (lot 4) réutiliseront `list`/`searchAll`, le patron
+  debounce/abort/repli du `ListRowEngine` et les descripteurs de `ListTargets`.

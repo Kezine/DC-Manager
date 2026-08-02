@@ -19,6 +19,7 @@ import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
 import { Html } from "../core/Html";
 import { TargetSearch } from "../core/TargetSearch";
+import type { RemoteListReader } from "../core/StoreListRowSource";   // lecteur SERVEUR des listings (mode API — lot 3)
 import { UserDirectory } from "../core/UserDirectory";   // annuaire client (résolution des auteurs d'audit — mode API)
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
 import { CertsFormat } from "../core/CertsFormat";   // libellés/échéances des certs — famille externe de la recherche globale
@@ -71,6 +72,16 @@ const adapter = REST_MODE
   ? new RestAdapter({ baseUrl: API_BASE_URL })
   : new BrowserStorageAdapter({ persistent: false, onUndoable: noteUndoable });
 const store = new Store(adapter);
+// LECTEUR SERVEUR des listings (lot 3 « listings serveur-pilotés », cf. docs/recherche.md) — mode API
+// SEULEMENT. Injecté dans chaque `ListView` : une requête ACTIVE (recherche saisie, ou filtre de cible
+// traduisible en `where`) est alors servie par le SERVEUR (colonne `search` enrichie), avec anti-rebond,
+// annulation et repli local. null en mode fichier/viewer → les listings restent 100 % locaux, sans jamais
+// toucher au réseau (principe n°15). `Store.list` absorbe les lignes reçues : ce sont des entités du Store,
+// donc les colonnes (rendus, tris, liens) fonctionnent à l'identique.
+const listRemoteReader: RemoteListReader | null = REST_MODE ? {
+  list: async (collection, { query, where, limit, signal }) =>
+    (await store.list(collection, { query, where, pageSize: limit, signal })).rows,
+} : null;
 // Client de synchro VM (feature AMOVIBLE) — mode API SEULEMENT (null en mode fichier/viewer → boutons masqués).
 // `adapter` est ici un RestAdapter (garanti par REST_MODE) ; il satisfait `VmRestContext` (dataBase/docId/headers/clientId publics).
 const vmSyncClient = REST_MODE ? new VmSyncClient(adapter as RestAdapter) : null;
@@ -501,6 +512,7 @@ async function boot(): Promise<void> {
           const canLocate = isLocatable ? (id: string) => { const target = locateTargetOf(id); return !!target && isLocatable(target); } : undefined;
           view = new ListView(store, container, {
             ...cfg,
+            remoteList: listRemoteReader,   // mode API : recherche/filtres serveur-pilotés (null en mode fichier)
             actions: VIEWER
               ? { view: true, locate: !!opts.locate, canLocate }   // viewer : consultation + localisation seulement (pas d'édition/clone/suppression)
               : { ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }), ...(opts.locate ? { locate: true, canLocate } : {}), ...(opts.manage ? { manage: true } : {}) },
@@ -937,8 +949,10 @@ async function boot(): Promise<void> {
     openDetail: (id) => interventionsView.openDetailById(id),
     declareFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openCreateFor(kind, id, label); },
     // « Afficher plus » ouvre la vue FILTRÉE sur la cible (chip retirable posée à l'arrivée) — même montage
-    // que `declareFor` : on change de VUE puis on pose le filtre.
-    openListFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openListFor(kind, id, label); },
+    // que `declareFor` : on change de VUE puis on pose le filtre. Le LIBELLÉ du hook n'est plus transmis
+    // depuis le lot 3 : la chip le résout elle-même à chaque rendu (dimension « à recherche »), ce qui la
+    // garde juste après un renommage et lui donne un rendu « introuvable » si la cible disparaît.
+    openListFor: (kind, id) => { shell.switchView("interventions"); interventionsView.openListFor(kind, id); },
   } : null;
   formHost.interventionHooks = interventionHooks;
 

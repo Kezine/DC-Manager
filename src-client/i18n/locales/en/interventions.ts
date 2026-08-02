@@ -58,9 +58,10 @@ export const interventions = {
     status: "Status",
     priority: "Priority",
     reset: "Reset filters",
-    // Chip of the linked-TARGET filter (set by navigation from a fiche — never typed in the bar).
-    target: "Target: {{label}}",
-    targetRemove: "Remove target filter {{label}}",
+    // Searchable dimension of the linked-TARGET filter (lot 3): set either by navigation from a fiche
+    // ("Show more") or by hand in "+ Filter" — same state, same chip.
+    targetLabel: "Target",
+    targetPlaceholder: "Equipment, VM, spare…",
   },
   search: {
     placeholder: "Search (title, description, Jira ref)…",

@@ -3,6 +3,7 @@ import { Format } from "../core/Format";
 import { Markdown } from "../core/Markdown";
 import { I18n } from "../i18n/I18n";
 import { InterventionsFormat, type BadgeClass } from "../core/InterventionsFormat";
+import { TargetSearch } from "../core/TargetSearch";
 import { FormControls, type SelectOption } from "../ui/FormControls";
 import { type MultiItem } from "../ui/MultiSelect";
 import { FilterBar } from "../ui/FilterBar";
@@ -78,10 +79,11 @@ interface ListingState {
   kinds: Set<string>;
   statuses: Set<string>;
   priorities: Set<string>;
-  /** Filtre par CIBLE liée (équipement/VM/spare) — posé UNIQUEMENT par navigation depuis une fiche
-      (« Afficher plus »), affiché en chip retirable. `label` sert la chip ; seul le couple {kind,id} part au
-      serveur. null = pas de filtre de cible (défaut ; la barre ne propose pas de le saisir, cf. L3 différé). */
-  target: { kind: string; id: string; label: string } | null;
+  /** Filtre par CIBLE liée (équipement/VM/spare/sous-équipement) — clés « kind:id » (`core/TargetSearch`),
+      MONO-valeur en v1. DEUX points d'entrée pour le MÊME état depuis le lot 3 : la navigation depuis une
+      fiche (« Afficher plus » → `openListFor`) et la dimension « à RECHERCHE » de la barre de filtres.
+      Vide = aucun filtre de cible. */
+  targets: Set<string>;
 }
 
 export class InterventionsAdminView {
@@ -111,9 +113,6 @@ export class InterventionsAdminView {
   /** Barre de filtres unifiée (chips + « + Filtre » + Réinitialiser) — bâtie au rendu complet, PRÉSERVÉE sur
       refreshBody (un changement de filtre ne repeint que ses chips + le corps). */
   private filterBar: FilterBar | null = null;
-  /** Rangée d'accueil de la chip « Cible : … » (filtre par cible liée). Construite au rendu complet, rebâtie
-      seule par `renderTargetChip` quand le filtre change — masquée à vide (`.lc-chips-row:empty`). */
-  private targetChipHost: HTMLElement | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -239,6 +238,7 @@ export class InterventionsAdminView {
       { key: "kinds", label: I18n.t("interventions.filter.type"), options: InterventionsAdminView.slugItems(InterventionsFormat.KIND_SLUGS, (s) => InterventionsFormat.kindLabelKey(s)), selected: st.kinds },
       { key: "statuses", label: I18n.t("interventions.filter.status"), options: InterventionsAdminView.slugItems(InterventionsFormat.STATUS_SLUGS, (s) => InterventionsFormat.statusLabelKey(s)), selected: st.statuses },
       { key: "priorities", label: I18n.t("interventions.filter.priority"), options: InterventionsAdminView.slugItems(InterventionsFormat.PRIORITY_SLUGS, (s) => InterventionsFormat.priorityLabelKey(s)), selected: st.priorities },
+      this.targetDimension(st),   // CIBLE liée : dimension « à RECHERCHE » (lot 3) — même état que la navigation
     ], () => { st.page = 1; void this.refreshBody(); });
     bar.appendChild(this.filterBar.addElement);
 
@@ -264,54 +264,49 @@ export class InterventionsAdminView {
     );
     right.appendChild(this.filterBar.resetElement);
     bar.appendChild(right);
-    // Chip du filtre par CIBLE (posé par navigation) : sa PROPRE rangée, à côté de celle des chips de
-    // dimension. Réutilise la primitive VISUELLE de chip (`.filter-chip`, comme FilterBar) — mais PAS le
-    // modèle `FilterChips`, qui énumère des OPTIONS fixes : une cible liée est une valeur LIBRE à libellé
-    // composé, sans liste d'options (arbitrage — cf. rapport). Le serveur/le client savent déjà filtrer (L1).
-    this.targetChipHost = document.createElement("div"); this.targetChipHost.className = "lc-chips lc-chips-row";
-    this.renderTargetChip();
-    bar.appendChild(this.targetChipHost);
-    bar.appendChild(this.filterBar.chipsElement);   // rangée des chips de dimension, À LA LIGNE (dernier enfant du wrap)
+    bar.appendChild(this.filterBar.chipsElement);   // rangée des chips (dimensions ET cible), À LA LIGNE
     return bar;
   }
 
-  /** (Re)construit la chip « Cible : {label} » depuis l'état — vide si aucun filtre de cible n'est posé
-      (la rangée se masque alors via `.lc-chips-row:empty`). Son ✕ efface le filtre (`clearTarget`). */
-  private renderTargetChip(): void {
-    if (!this.targetChipHost) return;
-    this.targetChipHost.replaceChildren();
-    const t = this.state.target;
-    if (!t) return;
-    const chip = document.createElement("span"); chip.className = "filter-chip";
-    const label = document.createElement("span"); label.className = "filter-chip-lb";
-    label.textContent = I18n.t("interventions.filter.target", { label: t.label });
-    const x = document.createElement("button"); x.type = "button"; x.className = "filter-chip-x";
-    x.setAttribute("aria-label", I18n.t("interventions.filter.targetRemove", { label: t.label }));
-    x.innerHTML = Icons.CLOSE;
-    x.onclick = (e) => { e.stopPropagation(); this.clearTarget(); };
-    chip.append(label, x);
-    this.targetChipHost.appendChild(chip);
-  }
-
-  /** Efface le filtre de cible (✕ de la chip) : retire l'état, revient page 1, retire la chip et recharge le
-      CORPS seul (la toolbar est préservée — parité avec un changement de filtre de dimension). */
-  private clearTarget(): void {
-    this.state.target = null;
-    this.state.page = 1;
-    this.renderTargetChip();
-    void this.refreshBody();
+  /** Dimension « à RECHERCHE » du filtre par CIBLE liée (lot 3) — le SearchPop y réutilise la MÊME source
+      injectée que l'éditeur de liens (`this.targets.search`), donc la même pertinence et le même badge de
+      famille. ABSORPTION : la chip posée par navigation (« Afficher plus » depuis une fiche) et celle
+      posée à la main ici sont désormais LA MÊME — un seul état, un seul rendu, un seul ✕ (auparavant la
+      chip de cible avait sa rangée, sa primitive et son code de retrait à part). Le libellé est résolu à
+      chaque rendu (`labelOf`) : une cible supprimée devient « introuvable » sans effacer le filtre. */
+  private targetDimension(st: ListingState) {
+    return {
+      key: "target",
+      label: I18n.t("interventions.filter.targetLabel"),
+      options: [],
+      selected: st.targets,
+      search: {
+        placeholder: I18n.t("interventions.filter.targetPlaceholder"),
+        fetch: (query: string): SearchPopResult[] => this.targets.search(query).map((r) => ({
+          id: TargetSearch.key(r.kind, r.id), label: r.label,
+          tag: I18n.t(InterventionsFormat.targetKindLabelKey(r.kind)),
+        })),
+        labelOf: (valueId: string) => {
+          const target = TargetSearch.parse(valueId);
+          const label = target ? this.targets.labelOf(target.kind, target.id) : null;
+          return label !== null ? label : I18n.t("interventions.target.unknown");
+        },
+      },
+    };
   }
 
   /** Ouvre la vue FILTRÉE sur une cible (appelée par l'intégration « fiches » après navigation vers cet
-      onglet, bouton « Afficher plus »). Pose le filtre, revient page 1, puis (re)charge — `reload()` reconstruit
-      la barre, donc la chip. ⚠ Ordre d'arrivée par navigation (cf. `openCreateFor`) : main.ts appelle
-      `switchView` PUIS cette méthode ; `switchView` a pu lancer un `show()` → `reload()` concurrent. Si ce
-      dernier est encore en vol, `reload()` ici est bloqué par la garde — mais l'état `target` est déjà posé
-      AVANT que le `reload()` en vol n'atteigne `loadPage`/`render`, il le prend donc en compte : le filtre est
-      appliqué et la chip dessinée dans les deux cas. */
-  openListFor(kind: string, id: string, label: string): void {
+      onglet, bouton « Afficher plus »). Pose le filtre — la MÊME valeur que la dimension « à recherche »
+      de la barre poserait —, revient page 1, puis (re)charge : `reload()` reconstruit la barre, donc la chip.
+      ⚠ Ordre d'arrivée par navigation (cf. `openCreateFor`) : main.ts appelle `switchView` PUIS cette
+      méthode ; `switchView` a pu lancer un `show()` → `reload()` concurrent. Si ce dernier est encore en vol,
+      `reload()` ici est bloqué par la garde — mais l'état de cible est déjà posé AVANT que le `reload()` en
+      vol n'atteigne `loadPage`/`render`, il le prend donc en compte : le filtre est appliqué et la chip
+      dessinée dans les deux cas. */
+  openListFor(kind: string, id: string): void {
     if (!this.client) return;
-    this.state.target = { kind, id, label };
+    this.state.targets.clear();   // MONO-cible v1 : la navigation REMPLACE la cible courante
+    this.state.targets.add(TargetSearch.key(kind, id));
     this.state.page = 1;
     void this.reload();
   }
@@ -972,7 +967,7 @@ export class InterventionsAdminView {
   /** État de listing NEUF : page 1, taille par défaut, tri par date de modification décroissante (parité
       serveur), aucun filtre ni recherche. */
   private static defaultState(): ListingState {
-    return { page: 1, pageSize: PAGE_SIZE_DEFAULT, sort: "updated_date", dir: "desc", query: "", kinds: new Set(), statuses: new Set(), priorities: new Set(), target: null };
+    return { page: 1, pageSize: PAGE_SIZE_DEFAULT, sort: "updated_date", dir: "desc", query: "", kinds: new Set(), statuses: new Set(), priorities: new Set(), targets: new Set() };
   }
 
   /** Paramètres de listing (query string) dérivés d'un état. Filtres vides = omis. */
@@ -983,9 +978,16 @@ export class InterventionsAdminView {
       kinds: st.kinds.size ? [...st.kinds] : undefined,
       statuses: st.statuses.size ? [...st.statuses] : undefined,
       priorities: st.priorities.size ? [...st.priorities] : undefined,
-      // Filtre de cible → un seul couple {kind,id} (le libellé ne sert qu'à la chip, il ne part pas au serveur).
-      targets: st.target ? [{ kind: st.target.kind, id: st.target.id }] : undefined,
+      targets: InterventionsAdminView.targetPairs(st.targets),
     };
+  }
+
+  /** Couples {kind,id} du filtre de CIBLE (le serveur les attend décodés) — `undefined` si aucun filtre.
+      Une clé illisible est ÉCARTÉE plutôt qu'envoyée : la valeur d'une dimension « à recherche » est libre,
+      donc jamais présumée saine (état d'une version antérieure, saisie exotique). */
+  private static targetPairs(keys: ReadonlySet<string>): Array<{ kind: string; id: string }> | undefined {
+    const pairs = [...keys].map((key) => TargetSearch.parse(key)).filter((t): t is { kind: string; id: string } => t !== null);
+    return pairs.length ? pairs : undefined;
   }
 
   /** Corps PUT complet depuis un enregistrement (SANS les champs d'audit — le serveur les pose). */

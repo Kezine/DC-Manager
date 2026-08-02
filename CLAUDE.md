@@ -216,10 +216,14 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   inter-bases — orphelins tolérés ; audit posé SERVEUR via helper partagé `RequestAuthor`, `closed_date`
   auto, listing paginé SQL à tris sémantiques, veilleur `intervention-reminder` paliers 24 h/1 h/heure H,
   Jira = simple référence via `JIRA_BASE_URL`, limites v1 et script de suppression). Lot CLIENT à venir.
-- [`recherche.md`](docs/recherche.md) — **recherche globale** (palette Ctrl+K, scoring client à paliers,
-  termes PARTAGÉS `src-shared/SearchTerms` — exécution DOUBLE n°15 : corpus local en mode fichier,
-  route transverse `GET …/search` serveur-pilotée en mode API avec debounce/abort/repli, caps assumés,
-  compositions tapables et limites).
+- [`recherche.md`](docs/recherche.md) — **recherche** (palette Ctrl+K, scoring client à paliers, termes
+  PARTAGÉS `src-shared/SearchTerms` — exécution DOUBLE n°15 : corpus local en mode fichier, route
+  transverse `GET …/search` serveur-pilotée en mode API avec debounce/abort/repli, caps assumés,
+  compositions tapables et limites ; **LISTINGS serveur-pilotés** : moteur de lignes à source injectée
+  `core/ListRowEngine`/`StoreListRowSource`, recherche sur la MÊME assiette que la colonne serveur
+  (`core/RecordSearch` + index mémoïsé), tri/pagination restés CLIENT, plafond du jeu serveur ;
+  **filtre CIBLE unifié** — dimension `FilterBar` « à recherche » (SearchPop), chips à valeur libre,
+  `where` serveur ⇄ restriction cliente à 2 sauts).
 - [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
   catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).

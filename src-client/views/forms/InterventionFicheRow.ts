@@ -80,8 +80,9 @@ export class InterventionFicheRow {
     moreBtn.textContent = I18n.t("interventions.fiche.showMore");
     moreBtn.style.display = "none";   // apparaît seulement s'il y a au moins une intervention à montrer
     // « Afficher plus » = CHANGER DE VUE, comme « Déclarer » : on ferme la fiche (pop) PUIS on ouvre la vue
-    // Interventions FILTRÉE sur la cible (elle a déjà son libellé — c'est celui de la fiche → chip retirable).
-    moreBtn.onclick = () => { close(); hooks.openListFor(target.kind, target.id, target.label); };
+    // Interventions FILTRÉE sur la cible. Le LIBELLÉ n'est plus transmis : la chip de la barre le résout
+    // elle-même à chaque rendu (dimension « Cible » — cf. InterventionFicheHooks).
+    moreBtn.onclick = () => { close(); hooks.openListFor(target.kind, target.id); };
     root.appendChild(moreBtn);
 
     // Chargement ASYNCHRONE, non bloquant : en échec réseau OU si aucune intervention, on ne montre RIEN

@@ -16,6 +16,12 @@ export interface ChipDimension {
   key: string;
   label: string;
   options: ReadonlyArray<{ id: string; label: string }>;
+  /** Dimension « à RECHERCHE » (filtre CIBLE unifié du lot 3, cf. `ui/FilterBar`) : sa valeur est LIBRE
+      — une entité choisie par un `SearchPop`, pas une option d'une liste fixe. Deux conséquences ici :
+      `options` est vide et ne peut donc pas ordonner les chips (l'ordre devient celui de la sélection),
+      et le LIBELLÉ de la valeur ne peut pas y être lu — il vient de l'accesseur `valueLabel` de `build`.
+      Corollaire : la purge « option disparue » NE S'APPLIQUE PAS (aucune option de référence). */
+  search?: boolean;
 }
 
 /** Un chip = une VALEUR sélectionnée d'une dimension, prêt à afficher et à retirer.
@@ -41,15 +47,36 @@ export class FilterChips {
   /** Construit la liste ORDONNÉE des chips à partir des dimensions et d'un accès à l'état sélectionné
       (`selected(dimKey)` renvoie l'ensemble des ids cochés de la dimension). Ordre déterministe :
       dimensions dans l'ordre reçu, puis valeurs dans l'ordre des OPTIONS de la dimension. Une valeur
-      cochée qui ne figure PLUS dans les options (option disparue) est IGNORÉE — aucun chip fantôme. */
+      cochée qui ne figure PLUS dans les options (option disparue) est IGNORÉE — aucun chip fantôme.
+
+      `valueLabel` (facultatif) résout le libellé d'une valeur LIBRE, celle des dimensions « à
+      RECHERCHE » (`ChipDimension.search`) : elles n'ont pas d'options où le lire. Il est appelé À
+      CHAQUE construction, donc jamais mémorisé : renommer l'entité ciblée met la chip à jour toute
+      seule, et une entité SUPPRIMÉE (accesseur qui rend "" ou undefined) retombe sur son identifiant
+      plutôt que de faire disparaître un filtre pourtant actif. */
   static build(
     dims: ReadonlyArray<ChipDimension>,
     selected: (dimKey: string) => ReadonlySet<string> | undefined,
+    valueLabel?: (dimKey: string, valueId: string) => string | null | undefined,
   ): FilterChip[] {
     const chips: FilterChip[] = [];
     for (const dim of dims) {
       const set = selected(dim.key);
       if (!set || set.size === 0) continue;
+      if (dim.search) {
+        // Valeurs LIBRES : l'ordre de référence est celui de la SÉLECTION (aucune option ne l'ordonne).
+        for (const valueId of set) {
+          const label = valueLabel ? valueLabel(dim.key, valueId) : null;
+          chips.push({
+            dimKey: dim.key,
+            dimLabel: dim.label,
+            valueId,
+            valueLabel: label || valueId,
+            key: FilterChips.keyOf(dim.key, valueId),
+          });
+        }
+        continue;
+      }
       for (const opt of dim.options) {
         if (!set.has(opt.id)) continue;   // itère les OPTIONS (ordre stable) et non le Set (ordre d'insertion)
         chips.push({
@@ -74,6 +101,7 @@ export class FilterChips {
     for (const dim of dims) {
       const set = selected(dim.key);
       if (!set || set.size === 0) continue;
+      if (dim.search) { n += set.size; continue; }   // valeurs libres : toutes comptent (aucune purge d'option)
       for (const opt of dim.options) if (set.has(opt.id)) n++;
     }
     return n;

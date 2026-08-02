@@ -31,6 +31,10 @@ export interface ListOptions {
   pageSize?: number;
   query?: string;
   where?: Where;
+  /** ANNULATION par l'appelant (listings serveur-pilotés : la frappe suivante abandonne la requête en
+      vol — même patron que `RestAdapter.searchAll`). Ignoré par les adaptateurs locaux, qui ne font
+      aucune E/S réseau. */
+  signal?: AbortSignal;
 }
 export interface ListResult {
   rows: RawRecord[];

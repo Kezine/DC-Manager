@@ -1,5 +1,6 @@
 import { MultiSelect, type MultiItem } from "./MultiSelect";
 import { FormControls } from "./FormControls";
+import { SearchPop, type SearchPopResult } from "./SearchPop";
 import { Icons } from "./Icons";
 import { Html } from "../core/Html";
 import { I18n } from "../i18n/I18n";
@@ -15,7 +16,10 @@ import { FilterChips, type ChipDimension, type FilterChip } from "../core/Filter
        EXISTANT de la dimension (principe n°14 : on RÉUTILISE le composant maison,
        on n'en réinvente pas un) ; une dimension à sélection UNIQUE (ex. l'état des
        certificats, que le serveur n'accepte qu'en un exemplaire) tombe sur un
-       `<select>` maison ;
+       `<select>` maison ; une dimension « à RECHERCHE » (filtre CIBLE unifié du
+       lot 3 : « les câbles de SW-Coeur ») tombe, elle, sur un `SearchPop` — la
+       liste des entités est longue, croissante et à libellés composés, donc jamais
+       un `<select>` (même règle que `FormControls.entityPicker`) ;
      • un bouton « Réinitialiser », masqué quand aucun filtre n'est actif, que la vue
        positionne À DROITE de sa barre.
 
@@ -30,14 +34,33 @@ import { FilterChips, type ChipDimension, type FilterChip } from "../core/Filter
    la vue les lit ensuite pour bâtir sa requête. Une dimension `single` garde 0 ou 1 valeur.
    ============================================================================= */
 
+/** Contrôle d'une dimension « à RECHERCHE » : la valeur n'est pas choisie dans une liste fixe mais
+    CHERCHÉE (entités du modèle). Tout est INJECTÉ par la vue — la barre ignore d'où viennent les
+    candidats (Store local, serveur…) et ce que la valeur signifie. MONO-VALEUR en v1 : choisir
+    remplace (forme volontairement extensible — le Set et les chips supportent déjà le multiple). */
+export interface FilterBarSearchDimension {
+  /** Repli du champ de recherche. */
+  placeholder: string;
+  /** Candidats d'une saisie — déjà triés/bornés par la vue. Peut être synchrone (corpus local). */
+  fetch: (query: string) => Promise<SearchPopResult[]> | SearchPopResult[];
+  /** Libellé d'AFFICHAGE d'une valeur choisie (chip), résolu à CHAQUE rendu — jamais persisté :
+      l'entité peut avoir été renommée, ou supprimée (rendre null → la chip retombe sur l'identifiant). */
+  labelOf: (valueId: string) => string | null;
+  /** Caractères minimaux avant de chercher — défaut 1 (le corpus est local, une lettre suffit). */
+  minChars?: number;
+}
+
 /** Dimension présentée par la barre : valeurs possibles + Set sélectionné (muté en place).
-    `single` → sélection UNIQUE (choisir une valeur remplace la précédente). */
+    `single` → sélection UNIQUE (choisir une valeur remplace la précédente).
+    `search` → dimension « à RECHERCHE » (cf. `FilterBarSearchDimension`) : `options` reste vide, les
+    valeurs sont LIBRES et les chips lisent leur libellé via `search.labelOf`. */
 export interface FilterBarDimension {
   key: string;
   label: string;
   options: MultiItem[];
   selected: Set<string>;
   single?: boolean;
+  search?: FilterBarSearchDimension;
 }
 
 export class FilterBar {
@@ -103,9 +126,35 @@ export class FilterBar {
     this.menuEl.replaceChildren();
     this.singleSelects.clear();
     for (const dim of this.dims) {
-      if (dim.single) this.menuEl.appendChild(this.buildSingle(dim));
+      if (dim.search) this.menuEl.appendChild(this.buildSearch(dim));
+      else if (dim.single) this.menuEl.appendChild(this.buildSingle(dim));
       else this.menuEl.appendChild(MultiSelect.build(dim.label, dim.options, dim.selected, () => this.valueChanged()));
     }
+  }
+
+  /** Dimension « à RECHERCHE » : libellé + `SearchPop` (principe n°14). Le CLIC sur un résultat POSE
+      le filtre — mono-valeur en v1 (on remplace) — et REFERME le menu : le geste est terminé, le laisser
+      ouvert masquerait la chip qui vient d'apparaître. Rendu COMPACT du SearchPop (pas `grow`) : dans
+      ce menu en colonne, un champ extensible prendrait sa base flex en HAUTEUR. */
+  private buildSearch(dim: FilterBarDimension): HTMLElement {
+    // Même enveloppe visuelle que la dimension à sélection unique (`.lc-single` : libellé + contrôle sur
+    // une rangée) — aucune CSS nouvelle : le SearchPop compact porte déjà son propre style.
+    const wrap = document.createElement("div"); wrap.className = "lc-single";
+    const lab = document.createElement("span"); lab.className = "lc-single-lb"; lab.textContent = dim.label;
+    const source = dim.search!;
+    const pop = new SearchPop({
+      placeholder: source.placeholder,
+      minChars: source.minChars != null ? source.minChars : 1,
+      fetch: (query) => Promise.resolve(source.fetch(query)),
+      onPick: (result) => {
+        dim.selected.clear();               // MONO-valeur v1 : la nouvelle cible remplace la précédente
+        dim.selected.add(result.id);
+        FilterBar.closeAllMenus();
+        this.valueChanged();
+      },
+    });
+    wrap.append(lab, pop.element);
+    return wrap;
   }
 
   /** Dimension à sélection UNIQUE : libellé + `<select>` (« Tous » = aucun filtre). Choisir remplace la
@@ -141,7 +190,12 @@ export class FilterBar {
       les `<select>` uniques. Sûr pendant un menu ouvert / un changement de valeur (ne touche pas au menu). */
   syncChips(): void {
     const chipDims = this.chipDimensions();
-    const chips = FilterChips.build(chipDims, (k) => this.dimByKey(k)?.selected);
+    const chips = FilterChips.build(
+      chipDims,
+      (k) => this.dimByKey(k)?.selected,
+      // Libellé d'une valeur LIBRE (dimension à recherche) : résolu ICI, à chaque rendu — cf. FilterChips.build.
+      (k, valueId) => this.dimByKey(k)?.search?.labelOf(valueId),
+    );
     this.chipsEl.replaceChildren(...chips.map((c) => this.chipEl(c)));
     this.resetElement.style.display = chips.length ? "" : "none";
     for (const [key, sel] of this.singleSelects) sel.value = [...(this.dimByKey(key)?.selected || [])][0] || "";
@@ -194,7 +248,7 @@ export class FilterBar {
   }
 
   private chipDimensions(): ChipDimension[] {
-    return this.dims.map((d) => ({ key: d.key, label: d.label, options: d.options }));
+    return this.dims.map((d) => ({ key: d.key, label: d.label, options: d.options, search: !!d.search }));
   }
 
   private static ensureWired(): void {

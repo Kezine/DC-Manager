@@ -127,6 +127,13 @@ export const lists = {
   filter: {
     room: "Salle",
     server: "Serveur",
+    // Dimension CIBLE « à recherche » des listings (filtre par entité — cf. views/ListTargets).
+    carrier: "Porteur",
+    carrierPlaceholder: "Équipement ou VM…",
+    equipmentPlaceholder: "Rechercher un équipement…",
+    targetEquipment: "Équip.",
+    targetVm: "VM",
+    targetMissing: "(supprimé)",
   },
   opt: {
     dataFilter: "Data",

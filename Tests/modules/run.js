@@ -26,6 +26,7 @@ const DOMAINS = [
   "./test-relational-schema.js", // générateur DDL relationnel (L1 migration DB) : golden CREATE TABLE/INDEX dérivés de la spec + INDEX_SPEC partagé
   "./test-relational-repository.js", // Repository RELATIONNEL (L2 migration DB) : CRUD re-typé, whereClause colonnes, EXPLAIN USING INDEX (better-sqlite3 RÉEL)
   "./test-search-terms.js",      // termes de recherche PARTAGÉS (lot 1 recherche) : golden terms/inverses, colonne search enrichie + invalidation + backfill (better-sqlite3 RÉEL), HydrationStats
+  "./test-list-rows.js",         // listings SERVEUR-PILOTÉS (lot 3 recherche) : moteur de lignes local/serveur, parité fichier ⇄ serveur (better-sqlite3 RÉEL), filtre CIBLE unifié
   "./test-legacy-migration.js",  // BASCULE + migration legacy (L4 migration DB) : backup .bak, normalisation, abort nommé, DocumentStore relationnel (better-sqlite3 RÉEL, fichiers temp)
   "./test-i18n.js",              // localisation : complétude des catalogues fr ⇄ en
   "./test-certs.js",             // certificats : crypto client pure (PkiCrypto/PkiSession)

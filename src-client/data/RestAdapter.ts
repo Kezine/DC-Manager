@@ -105,11 +105,12 @@ export class RestAdapter extends DataAdapter {
   async loadMeta(): Promise<Record<string, any>> { return this.docId ? ((await this._send("GET", "/meta")) || {}) : {}; }
 
   /* ---- lectures granulaires ---- */
-  async list(collection: string, { page = 1, pageSize = PAGE_SIZE_DEFAULT, query = "", where = null }: ListOptions = {}): Promise<ListResult> {
+  async list(collection: string, { page = 1, pageSize = PAGE_SIZE_DEFAULT, query = "", where = null, signal }: ListOptions = {}): Promise<ListResult> {
     const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     if (query && query.trim()) qs.set("q", query.trim());
     if (where) Object.keys(where).forEach((f) => qs.set(f, where[f] === null || where[f] === undefined ? "null" : String(where[f])));
-    const res = await this._send("GET", "/" + collection + "?" + qs.toString());
+    // `signal` : listings serveur-pilotés — la frappe suivante ABANDONNE la requête en vol (cf. searchAll).
+    const res = await this._send("GET", "/" + collection + "?" + qs.toString(), undefined, { signal });
     if (Array.isArray(res)) {
       const total = res.length, pages = Math.max(1, Math.ceil(total / pageSize));
       const p = Math.min(Math.max(1, page), pages);

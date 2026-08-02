@@ -58,9 +58,10 @@ export const interventions = {
     status: "Statut",
     priority: "Priorité",
     reset: "Réinit. filtres",
-    // Chip du filtre par CIBLE liée (posé par navigation depuis une fiche — jamais saisi dans la barre).
-    target: "Cible : {{label}}",
-    targetRemove: "Retirer le filtre de cible {{label}}",
+    // Dimension « à RECHERCHE » du filtre par CIBLE liée (lot 3) : posée soit par navigation depuis une
+    // fiche (« Afficher plus »), soit à la main dans « + Filtre » — même état, même chip.
+    targetLabel: "Cible",
+    targetPlaceholder: "Équipement, VM, spare…",
   },
   search: {
     placeholder: "Rechercher (titre, description, réf. Jira)…",

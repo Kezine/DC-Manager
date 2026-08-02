@@ -13,15 +13,16 @@
       pas de fiche → pas au corpus (v2 : les résoudre sur leur porteur).
 
    2. TERMES : « quel texte trouve cet objet » vient du module PARTAGÉ
-      `src-shared/SearchTerms` (lot 2 recherche partagée) — valeurs PROPRES du
+      `src-shared/SearchTerms`, via l'adaptateur client `core/RecordSearch`
+      (lot 2 recherche partagée, factorisé au lot 3) — valeurs PROPRES du
       record + `SearchTerms.termsOf` (dérivés par lien/enfants + catalogues
       fr/en + compositions tapables), avec les lecteurs du Store injectés
       (`get`/`findByField`). C'est la MÊME spec que la colonne `search` du
       serveur : parité des deux modes PAR CONSTRUCTION (principe n°15 — un
       utilisateur fr trouve « orphan » en mode fichier aussi). Historique : les
       termes venaient des `searchFields` de `ListConfigs` — dérivations ad hoc
-      dupliquées, résorbées par le module partagé (les listings, eux, gardent
-      leurs `searchFields` : leur recherche locale est hors de ce périmètre).
+      dupliquées, résorbées par le module partagé ; au lot 3 les LISTINGS les
+      ont perdus à leur tour et cherchent la même assiette que cette palette.
 
    L'HABILLAGE d'un résultat (sub = détails, path = chemin métier) est propre à
    la modale — les listings n'ont pas cette notion : une fonction par famille,
@@ -48,7 +49,7 @@ import { VmLocate } from "../core/VmLocate";
 import { RackScene } from "../geometry/RackScene";
 import { I18n } from "../i18n/I18n";
 import type { GlobalSearchItem } from "../core/GlobalSearch";
-import { SearchTerms } from "../../src-shared/SearchTerms";
+import { RecordSearch } from "../core/RecordSearch";
 import type { EntityFetcher, ChildFinder } from "../../src-shared/DataValidation";
 
 /** Descripteur d'une famille cherchable : l'HABILLAGE du résultat (les TERMES, eux, viennent du
@@ -222,16 +223,14 @@ export class GlobalSearchSources {
   static families(): string[] { return Object.keys(GlobalSearchSources.SOURCES); }
 
   /** TERMES cherchables d'un record (palier 30) — la PARITÉ avec la colonne `search` serveur, par
-      construction (principe n°15) : valeurs PROPRES (tableaux étalés — même effet que leur jointure
-      par espaces côté serveur, à la recherche de PAIRES adjacentes près, assumé) + les dérivés/
-      catalogues/compositions du module PARTAGÉ `SearchTerms`, avec les lecteurs du Store. `toJSON()`
-      quand il existe (instances du Store) : la forme DONNÉES canonique, celle que le serveur voit. */
+      construction (principe n°15). DÉLÉGUÉ au module `core/RecordSearch` depuis le lot 3 : la palette
+      et les LISTINGS y lisent désormais la même assiette (valeurs propres étalées + dérivés/catalogues/
+      compositions du module PARTAGÉ `SearchTerms`, lecteurs du Store injectés) — deux surfaces, une
+      seule définition de « quel texte trouve cet objet ». */
   private static termsOf(store: Store, collection: string, record: any): unknown[] {
-    const json: Record<string, any> = typeof record.toJSON === "function" ? record.toJSON() : record;
     const fetch: EntityFetcher = (c, id) => store.get(c, id);
     const find: ChildFinder = (c, field, value) => store.findByField(c, field, value);
-    const own = Object.values(json).flatMap((value) => (Array.isArray(value) ? value : [value]));
-    return [...own, ...SearchTerms.termsOf(collection, json, fetch, find)];
+    return RecordSearch.termsOf(collection, record, fetch, find);
   }
 
   /** Habille UN record en item de corpus — le cœur commun de `build` (corpus local complet) et de
