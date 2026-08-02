@@ -29,9 +29,11 @@
       qui disparaît au lot L5), puis pour chaque record :
       `JSON.parse(data)` → `DataValidator.normalizeRecord` (pose les DÉFAUTS —
       un blob peut dater d'AVANT les migrations en mémoire du client, cadrage
-      §6 : jamais une copie colonne à colonne) → upsert RELATIONNEL avec
-      `updated_rev` PRÉSERVÉE record par record (sinon le verrou optimiste par
-      entité repartirait de zéro), enfin `DROP TABLE …__legacy`. La
+      §6 : jamais une copie colonne à colonne) → upsert RELATIONNEL **BRUT**
+      (`upsertRaw` : colonne `search` pauvre — l'ENRICHISSEMENT vient du
+      backfill à l'ouverture qui suit, cf. le commentaire au point d'appel)
+      avec `updated_rev` PRÉSERVÉE record par record (sinon le verrou optimiste
+      par entité repartirait de zéro), enfin `DROP TABLE …__legacy`. La
       normalisation PRÉSERVE id/audit/clés inconnues, et l'upsert relationnel
       IGNORE les clés hors spec — c'est LA purge (voulue) des legacy
       `equipments.face_image`/`face_image_rear`. `meta` et `images` sont HORS
@@ -117,7 +119,12 @@ export class LegacyMigration {
           for (const row of rows) {
             try {
               const record = DataValidator.normalizeRecord(collection, JSON.parse(String(row.data)));
-              writer.upsert(collection, record, (row.updated_rev as number) | 0);
+              // upsert BRUT (colonne `search` = valeurs propres) et non l'upsert ENRICHI : à cet instant les
+              // collections pas encore migrées ont TOUJOURS le schéma blob — le calcul des termes dérivés y
+              // ferait des `findBy` sur des colonnes inexistantes (« no such column »). `user_version` reste
+              // à 0 → l'ouverture qui suit (DocumentStore.repo → RelationalRepository.open) enrichit tout le
+              // document en une transaction (backfill search-v1) — cf. RelationalRepository.upsertRaw.
+              writer.upsertRaw(collection, record, (row.updated_rev as number) | 0);
             } catch (cause) {
               // L'erreur SQL ne nomme que la COLONNE (ex. « NOT NULL constraint failed: equipments.name ») :
               // on y accole collection/id du record FAUTIF — c'est ce que l'exploitant doit corriger.

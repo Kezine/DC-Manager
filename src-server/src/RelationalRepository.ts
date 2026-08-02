@@ -53,8 +53,35 @@
        "42.0" ne matche pas un 42 (comparaison de textes, pas de nombres).
 
    La preuve du gain d'index est instrumentée par `explainFindBy` (EXPLAIN
-   QUERY PLAN du SQL EXACT de `findBy`) — seule méthode publique AJOUTÉE au
-   contrat (diagnostic, consommée par les tests et le bilan L4).
+   QUERY PLAN du SQL EXACT de `findBy`) — méthode publique HORS contrat
+   (diagnostic, consommée par les tests et le bilan L4), comme `upsertRaw`
+   (réservée à la migration legacy, cf. plus bas).
+
+   ── La colonne `search` ENRICHIE + son INVALIDATION (lot 1 recherche partagée) ─
+   Depuis le lot 1 du chantier recherche/chargement (cadrage
+   `.notes/toDos/chargement-dynamique-document-cadrage-2026-08-02.md` §4bis), la
+   colonne `search` ne porte plus SEULEMENT les valeurs propres du record : elle
+   est calculée par le module PARTAGÉ `src-shared/SearchTerms` (valeurs propres —
+   parité stricte avec l'historique `Object.values` — + termes DÉRIVÉS par lien :
+   nom de la baie d'un équipement, « équipement : port » des deux bouts d'un
+   câble… + termes de CATALOGUE fr/en). Les lecteurs injectés sont `getOne`/
+   `findBy` sur CE handle (principe n°15 : même logique, autre transport côté
+   Store client).
+   L'INVALIDATION est le nœud : renommer une baie doit re-calculer la colonne
+   `search` de ses équipements. Après CHAQUE écriture (upsert, delete, transact,
+   replaceSnapshot), un POST-PASS — dans la MÊME transaction — exécute les
+   requêtes INVERSES dérivées de la même spec (`SearchTerms.dependentQueries`)
+   et réécrit la colonne des dépendants par `UPDATE … SET search = ?` SEUL :
+   JAMAIS `updated_rev` (aucun faux conflit 409, aucun rechargement SSE induit —
+   la recherche est un DÉRIVÉ, pas une édition). AMPLIFICATION BORNÉE : les
+   dépendants sont retrouvés par les FK INDEXÉES d'INDEX_SPEC (renommer une baie
+   de 40 équipements = 1 findBy indexé + 40 UPDATE par clé primaire, même
+   transaction) ; seules exceptions, RARES par nature : renommer un SITE
+   (`location` non indexé sur equipments/datacenters → scan) ou un GROUPE
+   (`group_ids` TEXT JSON → json_each) — un scan par renommage de site/groupe,
+   assumé. Le BACKFILL des documents antérieurs (colonne « pauvre ») est fait à
+   l'ouverture, gardé par `PRAGMA user_version` (< SEARCH_VERSION → recalcul
+   complet en une transaction + marqueur). Cf. docs/persistance.md.
 
    Les tables `meta` (1 ligne JSON) et `images` (blobs) sont HORS migration
    (cadrage §1) : DDL et mécanique repris à l'IDENTIQUE de `db.ts`.
@@ -62,11 +89,17 @@
 
 import { Schema } from "./constants.js";
 import { RelationalSchema } from "../../src-shared/RelationalSchema.js";
-import { COLLECTION_SPECS, type FieldSpec } from "../../src-shared/DataValidation.js";
+import { COLLECTION_SPECS, type FieldSpec, type EntityFetcher, type ChildFinder } from "../../src-shared/DataValidation.js";
+import { SearchTerms, type DependentQuery } from "../../src-shared/SearchTerms.js";
 import type {
   RepositoryContract, SqliteCtor, SqliteDb, SqliteStatement,
   Rec, Snapshot, Tx, ListOpts, ListResult, ImageMeta,
 } from "./db.js";
+import type { Logger } from "./logger.js";
+
+/** Une écriture (upsert ou delete) vue par le post-pass d'invalidation : la collection/id touché et
+    les versions avant/après (nécessaires aux dérivations par ENFANTS — cf. SearchTerms). */
+interface SearchWriteEvent { collection: string; id: string; oldRecord: Rec | null; newRecord: Rec | null }
 
 /** Accès aux données sur schéma RELATIONNEL : une table par collection à colonnes typées dérivées de la
     spec (+ meta + images). Implémente `RepositoryContract` — cf. l'en-tête pour les décisions du schéma. */
@@ -79,13 +112,22 @@ export class RelationalRepository implements RepositoryContract {
   /** Requêtes d'upsert PRÉPARÉES, une par collection (dérivées de la spec au premier upsert puis mises en
       cache : le chemin d'écriture chaud — /transact, snapshot — ne re-prépare jamais un INSERT à ~60 colonnes). */
   private readonly upsertStatements = new Map<string, SqliteStatement>();
+  /** Requêtes de rafraîchissement de la colonne `search` PRÉPARÉES (post-pass d'invalidation + backfill).
+      `UPDATE … SET search = ?` SEUL — ne touche JAMAIS `updated_rev` (cf. en-tête). */
+  private readonly searchUpdateStatements = new Map<string, SqliteStatement>();
+
+  /* Lecteurs INJECTÉS dans le module partagé SearchTerms (principe n°15 : la même logique synchrone,
+     adossée ici au handle SQLite — le Store client lui passera `get`/`_byFk` au lot 2). */
+  private readonly fetchReader: EntityFetcher = (collection, id) => this.getOne(collection, id);
+  private readonly findReader: ChildFinder = (collection, field, value) => this.findBy(collection, field, value);
 
   private constructor(private readonly db: SqliteDb) {}
 
   /** Ouvre/initialise la base. `Database` est INJECTÉ (better-sqlite3 en prod, réel aussi en test — le shim
       des tests blob ne parle pas ce SQL). Le schéma vient INTÉGRALEMENT de `RelationalSchema.allDdl()` :
-      cette classe ne fabrique AUCUN DDL de collection elle-même (meta/images exceptées, hors migration). */
-  static open(file: string, Database: SqliteCtor): RelationalRepository {
+      cette classe ne fabrique AUCUN DDL de collection elle-même (meta/images exceptées, hors migration).
+      `log` (optionnel — `DocumentStore` passe le sien) trace le backfill de la colonne `search`. */
+  static open(file: string, Database: SqliteCtor, log?: Logger): RelationalRepository {
     const db = new Database(file);
     // Mêmes réglages d'exploitation que le blob (audit 2026-07) : WAL + anti-SQLITE_BUSY + NORMAL (sûr en WAL).
     db.pragma("journal_mode = WAL");
@@ -95,7 +137,9 @@ export class RelationalRepository implements RepositoryContract {
     // Tables HORS migration (cadrage §1) — DDL repris à l'IDENTIQUE de db.ts.
     db.exec(`CREATE TABLE IF NOT EXISTS meta (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL)`);
     db.exec(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, meta TEXT NOT NULL, blob BLOB, bytes INTEGER NOT NULL DEFAULT 0)`);
-    return new RelationalRepository(db);
+    const repo = new RelationalRepository(db);
+    repo.backfillSearchIfNeeded(log);   // documents antérieurs à l'enrichissement (colonne « pauvre ») → recalcul one-shot
+    return repo;
   }
 
   /** Enveloppe un handle DÉJÀ OUVERT — SANS pragma ni DDL (l'appelant les gère). Point d'entrée de la
@@ -154,16 +198,6 @@ export class RelationalRepository implements RepositoryContract {
     return record;
   }
 
-  /** Texte de recherche normalisé alimentant la colonne `search` (recherche LIKE) : `Object.values` du
-      record ENTRANT (clés inconnues incluses — elles participent au plein-texte), `Schema.normSearch`
-      partout, tableaux joints par espace. Recalculé à CHAQUE upsert (le `search` n'est jamais relu dans le
-      record). */
-  private searchText(rec: Rec): string {
-    return Object.values(rec || {})
-      .map((v) => (Array.isArray(v) ? v.map((x) => Schema.normSearch(x)).join(" ") : Schema.normSearch(v)))
-      .join(" ");
-  }
-
   /* ---- écritures (CRUD unitaire ET /transact) ---- */
 
   /** INSERT … ON CONFLICT(id) DO UPDATE préparé pour `collection`, DÉRIVÉ de la spec (colonnes dans l'ordre
@@ -180,25 +214,171 @@ export class RelationalRepository implements RepositoryContract {
     return statement;
   }
 
-  /** `rev` = révision du document portée par cette écriture → estampillée sur `updated_rev` (verrou
-      optimiste par entité, cf. `conflicts`). 0 = écriture non versionnée (import/seed) — comme le blob.
-      Les 4 champs d'audit viennent DU RECORD (posés par AuditStamp côté api) ; absents → NULL. Toute clé
-      hors spec/audit/id est IGNORÉE (contrat des colonnes strictes, cf. en-tête). */
-  upsert(collection: string, record: Rec, rev = 0): void {
-    if (!Schema.isCollection(collection)) throw new Error("collection inconnue: " + collection);
-    if (!record || !record.id) throw new Error("record sans id");
+  /** Écriture BRUTE d'une ligne (l'INSERT … ON CONFLICT préparé, valeur de `search` fournie par
+      l'appelant) — le socle commun des trois chemins : upsert enrichi, `upsertRaw` (migration) et
+      snapshot. Toute clé hors spec/audit/id est IGNORÉE (contrat des colonnes strictes, cf. en-tête). */
+  private writeRow(collection: string, record: Rec, rev: number, searchValue: string): void {
     const fields = COLLECTION_SPECS[collection].fields;
     const values: unknown[] = [record.id];
     for (const [field, spec] of Object.entries(fields)) values.push(RelationalRepository.toColumn(spec, record[field]));
     for (const audit of RelationalRepository.AUDIT_COLUMNS) values.push(record[audit] == null ? null : record[audit]);
-    values.push(this.searchText(record));   // recalculée à CHAQUE upsert (parité blob)
+    values.push(searchValue);
     values.push(rev);
     this.upsertStatementFor(collection).run(...values);
   }
 
-  delete(collection: string, id: string): void {
+  /** Upsert ENRICHI d'une ligne + capture de l'événement pour le post-pass d'invalidation : la colonne
+      `search` est calculée par le module partagé (valeurs propres + dérivés + catalogues), et l'ancien
+      record n'est relu QUE si la collection contribue aux termes d'un PARENT (`needsPreviousRecord` —
+      un sous-équipement déplacé doit rafraîchir ses DEUX maîtres ; inutile de payer un SELECT ailleurs). */
+  private upsertRow(collection: string, record: Rec, rev: number): SearchWriteEvent {
     if (!Schema.isCollection(collection)) throw new Error("collection inconnue: " + collection);
+    if (!record || !record.id) throw new Error("record sans id");
+    const oldRecord = SearchTerms.needsPreviousRecord(collection) ? this.getOne(collection, String(record.id)) : null;
+    this.writeRow(collection, record, rev, SearchTerms.searchText(collection, record, this.fetchReader, this.findReader));
+    return { collection, id: String(record.id), oldRecord, newRecord: record };
+  }
+
+  /** Suppression d'une ligne + capture de l'événement (les dépendants d'un record SUPPRIMÉ doivent
+      perdre ses termes — mêmes requêtes inverses qu'une écriture). */
+  private deleteRow(collection: string, id: string): SearchWriteEvent {
+    if (!Schema.isCollection(collection)) throw new Error("collection inconnue: " + collection);
+    const oldRecord = SearchTerms.needsPreviousRecord(collection) ? this.getOne(collection, id) : null;
     this.db.prepare(`DELETE FROM ${RelationalRepository.quote(collection)} WHERE id = ?`).run(id);
+    return { collection, id, oldRecord, newRecord: null };
+  }
+
+  /** `rev` = révision du document portée par cette écriture → estampillée sur `updated_rev` (verrou
+      optimiste par entité, cf. `conflicts`). 0 = écriture non versionnée (import/seed) — comme le blob.
+      Les 4 champs d'audit viennent DU RECORD (posés par AuditStamp côté api) ; absents → NULL.
+      ÉCRITURE + post-pass d'invalidation `search` dans la MÊME transaction (imbriquée en SAVEPOINT si
+      un appelant a déjà ouvert la sienne — better-sqlite3 gère l'imbrication). */
+  upsert(collection: string, record: Rec, rev = 0): void {
+    this.db.transaction(() => {
+      const event = this.upsertRow(collection, record, rev);
+      this.refreshDependents([event]);
+    })();
+  }
+
+  /** Upsert BRUT (HORS contrat — réservé à `LegacyMigration`) : colonne `search` = valeurs PROPRES
+      seules, AUCUN post-pass. Pendant la migration d'un fichier legacy, les collections sont converties
+      UNE PAR UNE : les tables pas encore migrées ont toujours leur schéma blob (`data`), et un
+      `findBy(…, "equipment_id", …)` du calcul enrichi y CASSERAIT (« no such column »). La migration
+      laisse donc `user_version` à 0 → l'ouverture qui SUIT (DocumentStore.repo → open) enrichit tout
+      le document en une transaction (backfill) — un seul mécanisme, à un moment où le schéma est sain. */
+  upsertRaw(collection: string, record: Rec, rev = 0): void {
+    if (!Schema.isCollection(collection)) throw new Error("collection inconnue: " + collection);
+    if (!record || !record.id) throw new Error("record sans id");
+    this.writeRow(collection, record, rev, SearchTerms.ownText(record));
+  }
+
+  delete(collection: string, id: string): void {
+    this.db.transaction(() => {
+      const event = this.deleteRow(collection, id);
+      this.refreshDependents([event]);
+    })();
+  }
+
+  /* ---- invalidation de la colonne `search` (post-pass — cf. en-tête) ---- */
+
+  /** `UPDATE "<collection>" SET search = ? WHERE id = ?` préparé (cache par collection). SEULE la
+      colonne `search` : ne JAMAIS y ajouter `updated_rev` (faux 409 + rechargements SSE — cf. en-tête). */
+  private searchUpdateFor(collection: string): SqliteStatement {
+    const cached = this.searchUpdateStatements.get(collection);
+    if (cached) return cached;
+    const statement = this.db.prepare(`UPDATE ${RelationalRepository.quote(collection)} SET search = ? WHERE id = ?`);
+    this.searchUpdateStatements.set(collection, statement);
+    return statement;
+  }
+
+  /** Recalcule la colonne `search` d'UN record depuis l'état COURANT de la base (no-op s'il a disparu —
+      un dépendant peut avoir été supprimé dans le même lot). */
+  private refreshSearchOf(collection: string, id: string): void {
+    const record = this.getOne(collection, id);
+    if (!record) return;
+    this.searchUpdateFor(collection).run(SearchTerms.searchText(collection, record, this.fetchReader, this.findReader), id);
+  }
+
+  /** POST-PASS d'invalidation : exécute les requêtes INVERSES (dérivées de la spec partagée) de chaque
+      écriture du lot et recalcule la colonne `search` des dépendants — cibles DÉDUPLIQUÉES (un lot qui
+      renomme une baie ET un de ses équipements ne recalcule chaque dépendant qu'une fois). Court APRÈS
+      toutes les écritures d'un `transact` : c'est ce qui rend l'ordre INTRA-LOT indifférent (créer une
+      baie + un équipement qui la référence, dans n'importe quel ordre → l'équipement ressort cherchable
+      par le nom de la baie, car le post-pass du CREATE de la baie le recalcule une fois la baie posée). */
+  private refreshDependents(events: SearchWriteEvent[]): void {
+    const queries = new Map<string, DependentQuery>();
+    for (const event of events) {
+      for (const query of SearchTerms.dependentQueries(event.collection, event.id, event.oldRecord, event.newRecord)) {
+        queries.set(query.collection + " " + query.field + " " + query.value + " " + (query.then ? query.then.collection + "/" + query.then.field : ""), query);
+      }
+    }
+    if (!queries.size) return;
+    const targets = new Map<string, { collection: string; id: string }>();
+    const addTarget = (collection: string, id: unknown): void => {
+      if (id == null || id === "") return;
+      targets.set(collection + "/" + id, { collection, id: String(id) });
+    };
+    for (const query of queries.values()) {
+      const rows = this.findBy(query.collection, query.field, query.value);
+      if (query.then) {
+        // chaîne inverse d'un lien à 2 sauts : les rows sont l'ÉTAPE (les ports d'un équipement écrit),
+        // les dépendants sont au bout (les câbles branchés à ces ports).
+        for (const row of rows) for (const dependent of this.findBy(query.then.collection, query.then.field, String(row.id))) addTarget(query.then.collection, dependent.id);
+      } else {
+        for (const row of rows) addTarget(query.collection, row.id);
+      }
+    }
+    for (const target of targets.values()) this.refreshSearchOf(target.collection, target.id);
+  }
+
+  /** Recalcule la colonne `search` de TOUS les records (backfill à l'ouverture + seconde passe du
+      snapshot). ⚠ `PRAGMA table_info` d'abord : dans un contexte PARTIEL (transaction de migration d'un
+      fichier legacy qui ne connaissait pas encore telle collection), une table peut manquer — 0 colonne
+      → on saute au lieu de casser. Renvoie le nombre de records recalculés. */
+  private refreshAllSearch(): number {
+    let refreshed = 0;
+    for (const collection of Schema.COLLECTIONS) {
+      const columns = this.db.prepare(`PRAGMA table_info(${RelationalRepository.quote(collection)})`).all();
+      if (!columns.length) continue;
+      const update = this.searchUpdateFor(collection);
+      for (const row of this.db.prepare(`SELECT * FROM ${RelationalRepository.quote(collection)}`).all()) {
+        const record = this.rebuild(collection, row);
+        if (row.id != null) record.id = row.id;   // rebuild n'inclut l'id que non-NULL — toujours vrai ici (PK)
+        update.run(SearchTerms.searchText(collection, record, this.fetchReader, this.findReader), row.id);
+        refreshed++;
+      }
+    }
+    return refreshed;
+  }
+
+  /** BACKFILL à l'ouverture : un document dont le marqueur `PRAGMA user_version` est antérieur à
+      `SearchTerms.SEARCH_VERSION` a une colonne `search` calculée avec une spec plus pauvre (0 = valeurs
+      propres seules — documents d'avant l'enrichissement, ET documents fraîchement migrés du legacy,
+      cf. `upsertRaw`) → recalcul COMPLET + marqueur, en UNE transaction (le PRAGMA est transactionnel :
+      un échec ne laisse jamais un marqueur posé sur des colonnes à moitié recalculées). Idempotent : la
+      réouverture voit le marqueur et ne refait rien. Base NEUVE : 0 record recalculé, marqueur posé sans
+      bruit (on ne logue que le vrai backfill). */
+  private backfillSearchIfNeeded(log?: Logger): void {
+    if (this.userVersion() >= SearchTerms.SEARCH_VERSION) return;
+    const startedAt = Date.now();
+    let refreshed = 0;
+    this.db.transaction(() => {
+      refreshed = this.refreshAllSearch();
+      this.db.pragma("user_version = " + SearchTerms.SEARCH_VERSION);
+    })();
+    if (log && refreshed) {
+      log.info("colonne `search` enrichie (backfill search-v" + SearchTerms.SEARCH_VERSION + ")",
+        refreshed + " record(s)", (Date.now() - startedAt) + " ms");
+    }
+  }
+
+  /** `PRAGMA user_version` du fichier (0 si jamais posé). better-sqlite3 renvoie `[{ user_version: n }]` ;
+      lecture défensive (le contrat SqliteDb type `pragma` en `unknown`). */
+  private userVersion(): number {
+    const raw = this.db.pragma("user_version");
+    const row: any = Array.isArray(raw) ? raw[0] : raw;
+    if (row && typeof row.user_version === "number") return row.user_version;
+    return Number(row) || 0;
   }
 
   /** VERROU OPTIMISTE (par entité) — mécanique et sémantique IDENTIQUES au blob : parmi `targets`, renvoie
@@ -294,7 +474,7 @@ export class RelationalRepository implements RepositoryContract {
     return this.db.prepare(this.findBySql(collection, w.sql)).all(...w.args).map((row) => this.rebuild(collection, row));
   }
 
-  /** DIAGNOSTIC (seule méthode publique HORS `RepositoryContract`) : lignes `detail` de l'EXPLAIN QUERY PLAN
+  /** DIAGNOSTIC (méthode publique HORS `RepositoryContract`, comme `upsertRaw`) : lignes `detail` de l'EXPLAIN QUERY PLAN
       du SQL EXACT de `findBy` — la PREUVE mesurable du gain d'index (`SEARCH … USING INDEX idx_…`), consommée
       par les tests de la migration DB. */
   explainFindBy(collection: string, field: string, value: string): string[] {
@@ -307,24 +487,32 @@ export class RelationalRepository implements RepositoryContract {
   getMeta(): Rec { const row = this.db.prepare(`SELECT data FROM meta WHERE id = 1`).get(); return row ? JSON.parse(row.data) : {}; }
   setMeta(meta: Rec): void { this.db.prepare(`INSERT INTO meta (id, data) VALUES (1, @d) ON CONFLICT(id) DO UPDATE SET data = @d`).run({ d: JSON.stringify(meta || {}) }); }
 
-  /* ---- lot atomique (POST /transact) — ordre deletes → updates → creates → meta, UNE transaction ---- */
+  /* ---- lot atomique (POST /transact) — ordre deletes → updates → creates → meta, UNE transaction.
+     Le post-pass d'invalidation `search` court APRÈS toutes les écritures (événements accumulés) :
+     l'ordre INTRA-LOT des creates est indifférent pour la recherche (cf. refreshDependents). ---- */
   transact({ creates = [], updates = [], deletes = [], meta }: Tx = {}, rev = 0): void {
     this.db.transaction(() => {
-      for (const d of deletes) this.delete(d.collection, d.id);
-      for (const u of updates) this.upsert(u.collection, u.record, rev);
-      for (const c of creates) this.upsert(c.collection, c.record, rev);
+      const events: SearchWriteEvent[] = [];
+      for (const d of deletes) events.push(this.deleteRow(d.collection, d.id));
+      for (const u of updates) events.push(this.upsertRow(u.collection, u.record, rev));
+      for (const c of creates) events.push(this.upsertRow(c.collection, c.record, rev));
       if (meta) this.setMeta(meta);
+      this.refreshDependents(events);
     })();
   }
 
-  /* ---- import complet (PUT /snapshot) : DELETE all + réinsert, audit restauré VERBATIM (Q7) ---- */
+  /* ---- import complet (PUT /snapshot) : DELETE all + réinsert, audit restauré VERBATIM (Q7).
+     Écritures BRUTES puis recalcul de TOUTES les colonnes `search` en SECONDE PASSE (même transaction) :
+     l'ordre des collections d'un snapshot est arbitraire (les racks arrivent APRÈS les équipements qui
+     les référencent), calculer les dérivés à l'insertion serait à la fois faux et payé deux fois. ---- */
   replaceSnapshot(snapshot: Snapshot, rev = 0): void {
     this.db.transaction(() => {
       for (const c of Schema.COLLECTIONS) {
         this.db.prepare(`DELETE FROM ${RelationalRepository.quote(c)}`).run();
-        for (const rec of (snapshot[c] || [])) this.upsert(c, rec, rev);
+        for (const rec of (snapshot[c] || [])) this.upsertRaw(c, rec, rev);
       }
       if (snapshot.meta) this.setMeta(snapshot.meta);
+      this.refreshAllSearch();
     })();
   }
 

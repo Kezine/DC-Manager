@@ -24,6 +24,7 @@ import { EntityRegistry } from "../models";
 import { Log } from "../core/Log";
 import { I18n } from "../i18n/I18n";
 import { SessionExpiry } from "../core/SessionExpiry";
+import { HydrationStats } from "../core/HydrationStats";
 
 const W = window as any;
 
@@ -224,13 +225,31 @@ export class RestDocumentController {
     } catch (e) { this.flog("SSE indisponible", e); }
   }
 
+  /** INSTRUMENTATION du boot (volet A du cadrage chargement-dynamique, décisions D1/D3 2026-08-02) :
+      une ligne de relevé par hydratation complète — records/collection, taille approx., durée — via le
+      `Log` maison (scope `boot`, visible avec la préférence « Logs de débogage »). Le DÉPASSEMENT des
+      seuils D3 (payload > 5 Mo OU durée > 1 s), lui, sort en `console.warn` NON gaté : c'est l'alerte
+      qui doit se voir sans flag — elle signifie « ouvrir le chantier hydratation partielle (option C) ». */
+  private reportHydration(durationMs: number): void {
+    const report = HydrationStats.measure(this.store.data, durationMs);
+    Log.d("boot", "hydratation REST :", HydrationStats.line(report));
+    if (report.overPayload || report.overDuration) {
+      console.warn("[dcmanager] hydratation au-delà des seuils D3 du cadrage chargement-dynamique"
+        + " (payload > " + HydrationStats.formatBytes(HydrationStats.PAYLOAD_WARN_BYTES)
+        + " OU durée > " + HydrationStats.DURATION_WARN_MS + " ms) — envisager les vues serveur-pilotées / l'hydratation partielle"
+        + " (.notes/toDos/chargement-dynamique-document-cadrage-2026-08-02.md) : " + HydrationStats.line(report));
+    }
+  }
+
   /** Ouvre un document serveur : scope l'adapter + le backend d'images, recharge données & images. */
   async openDocument(docId: string, name?: string): Promise<void> {
     this.adapter.setDocument(docId);
     this.setImagesBase(this.adapter.dataBase);
     this.docId = docId;
     this.prefs.lastRestDocId = docId;              // mémorise le DERNIER doc ouvert → rouvert au prochain lancement (cf. bootstrap)
+    const hydrationStart = Date.now();
     await this.store.init();                       // charge les collections du document
+    this.reportHydration(Date.now() - hydrationStart);   // instrumentation du boot (cf. reportHydration)
     if (name) this.store.meta.docName = this.store.meta.docName || name;
     await this.imageStore.reloadFromBackend();     // miroir d'images du document
     this.host.resetUndo();
