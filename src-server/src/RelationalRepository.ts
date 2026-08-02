@@ -1,21 +1,22 @@
 /* ============================================================================
-   REPOSITORY RELATIONNEL — implémentation COLONNES du contrat `Repository`.
+   REPOSITORY RELATIONNEL — implémentation COLONNES du contrat `RepositoryContract`.
 
-   Réimplémente la MÊME surface publique que `Repository` (db.ts, modèle blob
-   JSON) sur le schéma relationnel GÉNÉRÉ par `src-shared/RelationalSchema`
-   (lot L2 de la migration DB — cadrage
-   `.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`). Depuis la
-   BASCULE L4, cette classe EST le chemin de production : `DocumentStore.repo()`
-   l'ouvre (après migration des fichiers legacy par `LegacyMigration`) et
-   `api.ts`/`documents.ts` la consomment par le TYPE de contrat
-   `RepositoryContract` (db.ts — la surface publique de `Repository`, seule
-   forme à laquelle une AUTRE classe est assignable). La compatibilité
-   STRUCTURELLE avec le contrat est verrouillée à la compilation par
-   `assertRepositoryParity` (bas de fichier) et la parité de COMPORTEMENT est
-   PROUVÉE corpus contre corpus par le lot L3 (test-relational-parity.js) —
-   le `Repository` blob ne survit que pour cette preuve, jusqu'au lot L5.
+   Implémente `RepositoryContract` (db.ts) sur le schéma relationnel GÉNÉRÉ par
+   `src-shared/RelationalSchema` (migration DB — cadrage
+   `.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`). C'est le
+   SEUL chemin de production : `DocumentStore.repo()` l'ouvre (après migration
+   des fichiers legacy par `LegacyMigration`) et `api.ts`/`documents.ts` la
+   consomment par le TYPE de contrat `RepositoryContract`. Le `implements`
+   ci-dessous fait du COMPILATEUR le garde de conformité de la surface.
 
-   ── Le CONTRAT des colonnes strictes (ce qui change vs le blob) ─────────────
+   Historique : le modèle blob JSON (`Repository`, ex-db.ts) a précédé cette
+   implémentation. Sa parité de COMPORTEMENT a été PROUVÉE corpus contre corpus
+   (lot L3) AVANT son retrait (lot L5). Le « contrat des colonnes strictes »
+   décrit ci-dessous se lit donc comme les décisions PROPRES à ce schéma, non
+   plus comme un « diff » d'un modèle disparu — les mentions du blob qui
+   subsistent renvoient à cet historique (détail dans git / docs/persistance.md).
+
+   ── Le CONTRAT des colonnes strictes ───────────────────────────────────────
    • ÉCRITURE : seules les colonnes DÉRIVÉES de la spec (`COLLECTION_SPECS`,
      ordre du DDL) + `id` + les 4 colonnes d'audit sont persistées. Toute clé
      INCONNUE du record (hors spec, hors audit, hors id) est SILENCIEUSEMENT
@@ -63,13 +64,13 @@ import { Schema } from "./constants.js";
 import { RelationalSchema } from "../../src-shared/RelationalSchema.js";
 import { COLLECTION_SPECS, type FieldSpec } from "../../src-shared/DataValidation.js";
 import type {
-  Repository, SqliteCtor, SqliteDb, SqliteStatement,
+  RepositoryContract, SqliteCtor, SqliteDb, SqliteStatement,
   Rec, Snapshot, Tx, ListOpts, ListResult, ImageMeta,
 } from "./db.js";
 
 /** Accès aux données sur schéma RELATIONNEL : une table par collection à colonnes typées dérivées de la
-    spec (+ meta + images). Même contrat public que `Repository` — cf. l'en-tête pour ce qui diffère. */
-export class RelationalRepository {
+    spec (+ meta + images). Implémente `RepositoryContract` — cf. l'en-tête pour les décisions du schéma. */
+export class RelationalRepository implements RepositoryContract {
   /** Colonnes d'AUDIT, dans l'ordre du DDL. ⚠ Duplication ASSUMÉE de `RelationalSchema.AUDIT_COLUMNS`
       (privée là-bas — ce lot ne retouche pas src-shared/, figé par L1) : toute divergence casserait
       immédiatement l'upsert (colonnes introuvables), le couple est donc verrouillé par les tests. */
@@ -153,10 +154,10 @@ export class RelationalRepository {
     return record;
   }
 
-  /** Texte de recherche normalisé — PARITÉ STRICTE avec `Repository.searchText` (db.ts, intouché par ce
-      lot) : `Object.values` du record ENTRANT (clés inconnues incluses — elles nourrissaient déjà la
-      colonne du blob), `Schema.normSearch` partout, tableaux joints par espace. Duplication assumée le
-      temps de la cohabitation des deux implémentations ; le blob disparaît au lot L4. */
+  /** Texte de recherche normalisé alimentant la colonne `search` (recherche LIKE) : `Object.values` du
+      record ENTRANT (clés inconnues incluses — elles participent au plein-texte), `Schema.normSearch`
+      partout, tableaux joints par espace. Recalculé à CHAQUE upsert (le `search` n'est jamais relu dans le
+      record). */
   private searchText(rec: Rec): string {
     return Object.values(rec || {})
       .map((v) => (Array.isArray(v) ? v.map((x) => Schema.normSearch(x)).join(" ") : Schema.normSearch(v)))
@@ -293,9 +294,9 @@ export class RelationalRepository {
     return this.db.prepare(this.findBySql(collection, w.sql)).all(...w.args).map((row) => this.rebuild(collection, row));
   }
 
-  /** DIAGNOSTIC (seule méthode hors contrat `Repository`) : lignes `detail` de l'EXPLAIN QUERY PLAN du SQL
-      EXACT de `findBy` — la PREUVE mesurable du gain d'index (`SEARCH … USING INDEX idx_…`), consommée par
-      les tests du lot L2 et le bilan de bascule L4. */
+  /** DIAGNOSTIC (seule méthode publique HORS `RepositoryContract`) : lignes `detail` de l'EXPLAIN QUERY PLAN
+      du SQL EXACT de `findBy` — la PREUVE mesurable du gain d'index (`SEARCH … USING INDEX idx_…`), consommée
+      par les tests de la migration DB. */
   explainFindBy(collection: string, field: string, value: string): string[] {
     if (!Schema.isCollection(collection)) return [];
     const w = this.whereClause(collection, { [field]: value });
@@ -379,12 +380,4 @@ export class RelationalRepository {
       .run({ id, meta: JSON.stringify({ ...meta, id, rev }), blob: b, bytes });
   }
   deleteImage(id: string): void { this.db.prepare("DELETE FROM images WHERE id = ?").run(id); }
-}
-
-/** GARDE de compatibilité STRUCTURELLE, purement compile-time (jamais appelée) : si `RelationalRepository`
-    perd ou dévie une méthode PUBLIQUE du contrat `Repository`, cette fonction cesse de compiler —
-    `Pick<Repository, keyof Repository>` ne retient que la surface publique (les membres privés du blob,
-    incomparables entre classes, en sont exclus). La bascule L4 repose sur cette équivalence. */
-export function assertRepositoryParity(repository: RelationalRepository): Pick<Repository, keyof Repository> {
-  return repository;
 }
