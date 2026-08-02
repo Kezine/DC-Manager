@@ -117,10 +117,16 @@ hors du chemin chaud de validation.
 
 ## La colonne `search` ENRICHIE : termes dérivés partagés (`src-shared/SearchTerms`)
 
+> L'architecture COMPLÈTE de la recherche (palette Ctrl+K, scoring client, route transverse
+> `GET …/search`, exécution double n°15) est décrite dans **`docs/recherche.md`** — cette section ne
+> couvre que le versant PERSISTANCE : le contenu de la colonne, son invalidation et son backfill.
+
 Depuis le lot 1 du chantier recherche/chargement (2026-08-02), la colonne `search` n'est plus un simple
 `Object.values` du record : elle est calculée par le module PARTAGÉ **`src-shared/SearchTerms.ts`** —
 `searchText(collection, record, fetch, find)` = valeurs PROPRES (parité stricte avec l'historique : aucun terme
-d'hier n'est perdu, l'enrichissement AJOUTE) + termes **DÉRIVÉS PAR LIEN** + termes de **CATALOGUE traduits**.
+d'hier n'est perdu, l'enrichissement AJOUTE) + termes **DÉRIVÉS PAR LIEN** + termes de **CATALOGUE traduits** +
+**COMPOSITIONS tapables** (search-v2 : « U12 », « ét. N »/« fl. N », « 42 U », « 12 brins », « marque modèle »,
+capacités/rpm — cf. `docs/recherche.md` pour le périmètre exact et ses limites assumées).
 
 - **La spec est un RELEVÉ, pas une invention** : `SEARCH_SPECS` reprend les dérivations que le CLIENT effectue déjà
   (`GlobalSearchSources` : habillage sub/path cherché au palier 30 ; `ListConfigs.searchFields`). Ex. : équipement →
@@ -130,8 +136,8 @@ d'hier n'est perdu, l'enrichissement AJOUTE) + termes **DÉRIVÉS PAR LIEN** + t
   cherchées → jamais de terme.
 - **Exécution DOUBLE par construction** (principe n°15) : `termsOf`/`searchText` sont SYNCHRONES à lecteurs INJECTÉS
   (les contrats `EntityFetcher`/`ChildFinder` de la validation). Le serveur passe `getOne`/`findBy` du dépôt ; le
-  Store client (mode fichier) passera `get`/`_byFk` (lot 2) — parité des termes entre les deux modes garantie par le
-  module unique.
+  corpus LOCAL de la palette (mode fichier) passe `get`/`findByField` du Store depuis le lot 2
+  (`GlobalSearchSources`) — parité des termes entre les deux modes garantie par le module unique.
 - **CATALOGUES fr+en** (`SEARCH_CATALOGS`) : le serveur ignore la langue de l'utilisateur → la colonne porte les DEUX
   (un spare `hdd` se trouve par « disque dur » ET « hard drive »). Seuls les catalogues RÉELLEMENT cherchés y sont
   (types d'équipement/groupe/spare, orphelinat VM). La duplication avec les locales client est ASSUMÉE et VERROUILLÉE

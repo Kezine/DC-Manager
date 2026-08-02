@@ -64,9 +64,9 @@
    est calculée par le module PARTAGÉ `src-shared/SearchTerms` (valeurs propres —
    parité stricte avec l'historique `Object.values` — + termes DÉRIVÉS par lien :
    nom de la baie d'un équipement, « équipement : port » des deux bouts d'un
-   câble… + termes de CATALOGUE fr/en). Les lecteurs injectés sont `getOne`/
-   `findBy` sur CE handle (principe n°15 : même logique, autre transport côté
-   Store client).
+   câble… + termes de CATALOGUE fr/en + COMPOSITIONS tapables depuis search-v2).
+   Les lecteurs injectés sont `getOne`/`findBy` sur CE handle (principe n°15 :
+   même logique, autre transport côté Store client — cf. docs/recherche.md).
    L'INVALIDATION est le nœud : renommer une baie doit re-calculer la colonne
    `search` de ses équipements. Après CHAQUE écriture (upsert, delete, transact,
    replaceSnapshot), un POST-PASS — dans la MÊME transaction — exécute les
@@ -93,7 +93,7 @@ import { COLLECTION_SPECS, type FieldSpec, type EntityFetcher, type ChildFinder 
 import { SearchTerms, type DependentQuery } from "../../src-shared/SearchTerms.js";
 import type {
   RepositoryContract, SqliteCtor, SqliteDb, SqliteStatement,
-  Rec, Snapshot, Tx, ListOpts, ListResult, ImageMeta,
+  Rec, Snapshot, Tx, ListOpts, ListResult, ImageMeta, SearchAllOpts, SearchAllResult,
 } from "./db.js";
 import type { Logger } from "./logger.js";
 
@@ -117,7 +117,8 @@ export class RelationalRepository implements RepositoryContract {
   private readonly searchUpdateStatements = new Map<string, SqliteStatement>();
 
   /* Lecteurs INJECTÉS dans le module partagé SearchTerms (principe n°15 : la même logique synchrone,
-     adossée ici au handle SQLite — le Store client lui passera `get`/`_byFk` au lot 2). */
+     adossée ici au handle SQLite — le corpus local de la palette passe, lui, `get`/`findByField` du
+     Store depuis le lot 2, cf. GlobalSearchSources). */
   private readonly fetchReader: EntityFetcher = (collection, id) => this.getOne(collection, id);
   private readonly findReader: ChildFinder = (collection, field, value) => this.findBy(collection, field, value);
 
@@ -472,6 +473,36 @@ export class RelationalRepository implements RepositoryContract {
     if (!Schema.isCollection(collection)) return [];
     const w = this.whereClause(collection, { [field]: value });
     return this.db.prepare(this.findBySql(collection, w.sql)).all(...w.args).map((row) => this.rebuild(collection, row));
+  }
+
+  /** Plafond PAR COLLECTION de la recherche transverse (`searchAll`). CAP ASSUMÉ v1 (même esprit que la
+      page de 500 des interventions) : la palette classe côté client, au-delà de 40 résultats PAR famille
+      l'utilisateur affine sa requête plutôt que de défiler — le dépassement est signalé par `truncated`
+      (LIMIT cap+1 : la ligne excédentaire dit « tronqué » sans payer un COUNT(*)). */
+  static readonly SEARCH_ALL_LIMIT = 40;
+
+  /** Recherche GLOBALE transverse (contrat — palette Ctrl+K en mode API, cf. docs/recherche.md) : un
+      LIKE sur la colonne `search` PAR collection ciblée, MÊME normalisation de la requête que `list`
+      (`Schema.normSearch` sur la saisie rognée), tri stable identique à `list` (created_date, id — le
+      CLASSEMENT par pertinence reste client), plafond par collection ci-dessus. `collections` absent →
+      toutes ; noms inconnus IGNORÉS (défensif — la route relaie une liste venue du client). Collections
+      sans résultat OMISES de la réponse (payload lean). */
+  searchAll(query: string, { collections = null, perCollectionLimit = RelationalRepository.SEARCH_ALL_LIMIT }: SearchAllOpts = {}): SearchAllResult {
+    const results: Record<string, Rec[]> = {};
+    const truncated: string[] = [];
+    const needle = Schema.normSearch(String(query || "").trim());
+    if (!needle) return { results, truncated };
+    const targets = (collections && collections.length ? collections : Schema.COLLECTIONS).filter((c) => Schema.isCollection(c));
+    const cap = Math.max(1, perCollectionLimit | 0);
+    for (const collection of targets) {
+      const rows = this.db.prepare(
+        `SELECT * FROM ${RelationalRepository.quote(collection)} WHERE search LIKE ? ORDER BY created_date ASC, id ASC LIMIT ?`,
+      ).all("%" + needle + "%", cap + 1);
+      if (!rows.length) continue;
+      if (rows.length > cap) { truncated.push(collection); rows.length = cap; }
+      results[collection] = rows.map((row) => this.rebuild(collection, row));
+    }
+    return { results, truncated };
   }
 
   /** DIAGNOSTIC (méthode publique HORS `RepositoryContract`, comme `upsertRaw`) : lignes `detail` de l'EXPLAIN QUERY PLAN

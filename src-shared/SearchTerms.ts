@@ -22,9 +22,10 @@
    comme la validation V2/V5/V6 :
    - le SERVEUR (mode API, la NORME) passe `RelationalRepository.getOne`/`findBy`
      et matérialise le résultat dans la colonne `search` à chaque écriture ;
-   - le CLIENT (mode fichier) passera `Store.get`/`_byFk` (lot 2) et obtient les
-     MÊMES termes sur son corpus local — parité des deux modes par construction,
-     seul le TRANSPORT diffère.
+   - le CLIENT (mode fichier) passe `Store.get`/`findByField` (lot 2 —
+     `GlobalSearchSources`) et obtient les MÊMES termes sur son corpus local —
+     parité des deux modes par construction, seul le TRANSPORT diffère.
+     Architecture complète : docs/recherche.md.
 
    ── Dépendances INVERSES : une seule vérité ─────────────────────────────────
    `dependentQueries` DÉRIVE l'invalidation de la MÊME spec (jamais une seconde
@@ -59,7 +60,11 @@ import type { EntityFetcher, ChildFinder } from "./DataValidation.js";
    ⚠ Ces chaînes DUPLIQUENT les libellés des locales client (`i18n/locales/{fr,en}/domain.ts`,
    `lists.ph.orphan`) — duplication ASSUMÉE et VERROUILLÉE par test (test-search-terms.js : chaque
    libellé d'affichage fr/en doit apparaître dans les termes) : l'AFFICHAGE reste client/I18n, seule
-   la donnée « termes cherchables » est partagée. Libellés identiques fr/en déclarés UNE fois. */
+   la donnée « termes cherchables » est partagée. Libellés identiques fr/en déclarés UNE fois.
+   Depuis search-v2 s'ajoutent les PRÉFIXES/UNITÉS des COMPOSITIONS localisées (cf. `own` des specs) :
+   « ét. 2 »/« fl. 2 » (libellé des étages, chemin des salles) et « 12 brins »/« 12 strands » (sous-
+   ligne des faisceaux) — mêmes règles de verrouillage sur les locales (`detail.common.floorAbbrev`,
+   `search.sub.strands`). */
 export const SEARCH_CATALOGS = {
   /** domain.equipmentType (fr+en) — cherché par `ListConfigs.equipments.searchFields` + sub de la palette. */
   equipmentType: {
@@ -79,6 +84,13 @@ export const SEARCH_CATALOGS = {
   } as Readonly<Record<string, readonly string[]>>,
   /** lists.ph.orphan (fr+en) — versé par `VmStatus.searchTerms` quand la VM est orpheline. */
   vmOrphan: ["orpheline", "orphan"] as readonly string[],
+  /** detail.common.floorAbbrev (fr « ét. {{floor}} », en « fl. {{floor}} ») — PRÉFIXES de la
+      composition « ét. N » : libellé même des étages (GlobalSearchSources.floors.label) et chemin
+      des salles (datacenters.path). Composés avec la valeur du champ `floor` par les `own`. */
+  floorAbbrev: ["ét.", "fl."] as readonly string[],
+  /** search.sub.strands (fr « brins », en « strands ») — UNITÉ de la composition « 12 brins » de la
+      sous-ligne des faisceaux (GlobalSearchSources.cableBundles.sub), composée avec `fiber_count`. */
+  strands: ["brins", "strands"] as readonly string[],
 };
 
 /* ---- formes de la spec déclarative ---- */
@@ -117,10 +129,18 @@ interface TermCatalog {
   fallback?: string;
 }
 
-/** Spec de recherche d'UNE collection. `own` couvre les termes PROPRES enfouis dans une structure
-    JSON que la sérialisation brute de la colonne ne voit pas (cf. le cas `vms.nics` ci-dessous) —
-    une fonction, comme les invariants de COLLECTION_SPECS (donnée du record seul, pas de lecteur :
-    aucune dépendance inverse à en dériver). */
+/** Spec de recherche d'UNE collection. `own` couvre les termes PROPRES que la sérialisation brute
+    de la colonne ne voit pas — une fonction, comme les invariants de COLLECTION_SPECS (donnée du
+    record seul, pas de lecteur : aucune dépendance inverse à en dériver). Deux familles de cas :
+    - champs ENFOUIS dans une structure JSON (cf. `vms.nics` : la colonne brute n'en tire que
+      « [object Object] ») ;
+    - COMPOSITIONS TAPABLES (search-v2) : chaînes que le client COMPOSE dans son habillage cherché
+      (« U12 » du chemin d'un équipement, « ét. 2 » du libellé d'un étage, « 42 U », « 12 brins »,
+      « Dell R740 »…) — un utilisateur les tape telles quelles, la colonne doit donc les porter
+      telles quelles. ⚠ Périmètre = le RELEVÉ client, notations qu'un humain TAPE (espace ou
+      notation compacte) ; les assemblages purement typographiques (« – », « ↔ », « équipement :
+      port », joints « · ») sont ASSUMÉS non répliqués — leurs termes constitutifs matchent
+      individuellement, personne ne tape le séparateur (cf. docs/recherche.md). */
 interface CollectionSearchSpec {
   links?: readonly TermLink[];
   children?: readonly TermChildren[];
@@ -151,6 +171,16 @@ const SEARCH_SPECS: Readonly<Record<string, CollectionSearchSpec>> = {
     // ListConfigs.equipments) : les noms ET séries des sous-équipements sont des termes du maître.
     children: [{ collection: "subEquipments", fkField: "equipment_id", contributes: ["name", "serial"] }],
     catalogs: [{ field: "type", terms: SEARCH_CATALOGS.equipmentType, fallback: "other" }],
+    // COMPOSITIONS tapables (search-v2) : « U12 » (le chemin de la palette compose « <baie> · U12 »
+    // pour un équipement posé en baie — mêmes conditions que GlobalSearchSources.equipmentPath, à
+    // l'existence du rack près : `own` n'a pas de lecteur, une FK cassée sur-matcherait marginalement,
+    // V2 s'en occupe) et « marque modèle » (sub de la palette : « Dell R740 » se tape d'un trait).
+    own: (e) => {
+      const out: string[] = [];
+      if ((e.placement_mode === "rack" || e.placement_mode === "side" || e.placement_mode === "wall") && e.rack_id && e.rack_u) out.push("U" + e.rack_u);
+      if (e.brand && e.model) out.push(e.brand + " " + e.model);
+      return out;
+    },
   },
   subEquipments: {
     // le nom du MAÎTRE (terme dérogatoire de GlobalSearchSources.subEquipments.terms + son `path`).
@@ -159,15 +189,24 @@ const SEARCH_SPECS: Readonly<Record<string, CollectionSearchSpec>> = {
   racks: {
     // le chemin de la palette nomme la SALLE (GlobalSearchSources.racks.path).
     links: [{ field: "datacenter_id", target: "datacenters", contributes: ["name"] }],
+    // « 42 U » : la sous-ligne de la palette (GlobalSearchSources.racks.sub) — défaut 42 REPRODUIT
+    // (le client compose `(u_count || 42) + " U"`, une baie sans u_count s'affiche et se cherche « 42 U »).
+    own: (r) => [(r.u_count || 42) + " U"],
   },
   datacenters: {
     // le chemin de la palette nomme le SITE (siteLabel — lien par le CHAMP `location`).
     links: [{ field: "location", target: "sites", contributes: ["name"] }],
+    // « ét. 2 »/« fl. 2 » : le chemin de la palette compose floorAbbrev quand `floor` est renseigné
+    // (GlobalSearchSources.datacenters.path) — les DEUX langues, comme les catalogues.
+    own: (d) => (d.floor ? SEARCH_CATALOGS.floorAbbrev.map((abbrev) => abbrev + " " + d.floor) : []),
   },
   floors: {
     // le LIBELLÉ même d'un étage est « site · ét. N » (GlobalSearchSources.floors.label +
     // ListConfigs.floors.searchFields via siteLabel) — le nom du site est constitutif.
     links: [{ field: "location", target: "sites", contributes: ["name"] }],
+    // « ét. 2 »/« fl. 2 » : la composition EST le libellé de l'étage (paliers 60/80 côté client, pas
+    // seulement le 30) — les DEUX langues. `floor` peut être "0" (rez) : on compose dès que non vide.
+    own: (f) => (f.floor != null && f.floor !== "" ? SEARCH_CATALOGS.floorAbbrev.map((abbrev) => abbrev + " " + f.floor) : []),
   },
   cables: {
     links: [
@@ -184,6 +223,9 @@ const SEARCH_SPECS: Readonly<Record<string, CollectionSearchSpec>> = {
       { field: "endpoint_a_equipment_id", target: "equipments", contributes: ["name"] },
       { field: "endpoint_b_equipment_id", target: "equipments", contributes: ["name"] },
     ],
+    // « 12 brins »/« 12 strands » : la sous-ligne de la palette (GlobalSearchSources.cableBundles.sub,
+    // localisée `search.sub.strands`) — composée seulement si `fiber_count` est renseigné, comme au client.
+    own: (b) => (b.fiber_count ? SEARCH_CATALOGS.strands.map((unit) => b.fiber_count + " " + unit) : []),
   },
   ipAddresses: {
     // sub de la palette : le porteur de l'adresse — équipement OU VM (GlobalSearchSources.ipAddresses.sub).
@@ -205,6 +247,19 @@ const SEARCH_SPECS: Readonly<Record<string, CollectionSearchSpec>> = {
     // « Attribué à » (assignedTo de ListConfigs.spares) — l'attribution LIBRE `assigned_free` est propre.
     links: [{ field: "assigned_equipment_id", target: "equipments", contributes: ["name"] }],
     catalogs: [{ field: "type", terms: SEARCH_CATALOGS.spareType }],
+    // COMPOSITIONS tapables de la désignation dérivée (Spare.displayName/techSummary, cherchées par
+    // ListConfigs.spares.searchFields ET par le label/sub de la palette) : « marque référence »
+    // (join espace de displayName), « 4 TB » (capacité des disques — mêmes conditions que
+    // techSummary : types hdd/ssd seuls) et « 7200 rpm » (hdd seul). Les joints « · » du résumé
+    // technique ne sont pas répliqués (séparateur non tapable — cf. le commentaire de `own`).
+    own: (s) => {
+      const out: string[] = [];
+      if (s.brand && s.model_pn) out.push(s.brand + " " + s.model_pn);
+      const disk = s.type === "hdd" || s.type === "ssd";   // SPARE_DISK_TYPES du client (Spare.isDisk)
+      if (disk && s.capacity_value != null && s.capacity_unit) out.push(s.capacity_value + " " + s.capacity_unit);
+      if (s.type === "hdd" && s.rpm) out.push(s.rpm + " rpm");
+      return out;
+    },
   },
   groups: {
     // GroupTypes.label cherché par ListConfigs.groups.searchFields (+ sub de la palette).
@@ -226,9 +281,12 @@ export interface DependentQuery {
 /** Moteur des termes de recherche partagés (méthodes statiques — cf. CLAUDE.md principe n°2). */
 export class SearchTerms {
   /** Version de la SPEC de recherche, estampillée sur le fichier document (`PRAGMA user_version`).
-      0 = colonne `search` « pauvre » (valeurs propres seules, pré-enrichissement) ; 1 = search-v1.
-      À INCRÉMENTER à chaque évolution de la spec (cf. en-tête). */
-  static readonly SEARCH_VERSION = 1;
+      0 = colonne `search` « pauvre » (valeurs propres seules, pré-enrichissement) ; 1 = search-v1
+      (dérivés par lien/enfants + catalogues fr/en) ; 2 = search-v2 (COMPOSITIONS tapables : « U12 »,
+      « ét. N »/« fl. N », « 42 U », « 12 brins », « marque modèle », capacités/rpm des spares).
+      À INCRÉMENTER à chaque évolution de la spec (cf. en-tête) — le backfill à l'ouverture met les
+      documents existants à niveau tout seul. */
+  static readonly SEARCH_VERSION = 2;
 
   /** Collections dont l'écriture exige de connaître l'enregistrement PRÉCÉDENT pour invalider
       (dérivations par ENFANTS : un sous-équipement DÉPLACÉ d'un maître à l'autre doit rafraîchir

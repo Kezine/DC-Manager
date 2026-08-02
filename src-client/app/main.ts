@@ -13,6 +13,7 @@ import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmPro
 import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
 import { FormBase } from "../views/forms/FormBase";
 import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
+import { GlobalSearchSources } from "../views/GlobalSearchSources";   // familles à fiche = périmètre envoyé à la recherche transverse serveur (mode API)
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
@@ -217,7 +218,12 @@ async function boot(): Promise<void> {
         if (record) interventionsView.openDetail(record);
       },
     },
-  ] : []);
+  ] : [],
+  // RECHERCHE SERVEUR-PILOTÉE (mode API seulement — lot 2 recherche partagée) : la palette interroge la
+  // route transverse `GET …/search` en un aller-retour, restreinte à ses familles À FICHE (inutile de
+  // scanner ports/agrégats côté serveur : le corpus ne saurait pas les habiller). En mode FICHIER,
+  // undefined → la palette reste 100 % locale (principe n°15, jamais de réseau).
+  REST_MODE ? { search: async (q: string, signal: AbortSignal) => (await (adapter as RestAdapter).searchAll(q, { collections: GlobalSearchSources.families(), signal })).results } : undefined);
   /** Enregistrements d'interventions du DERNIER chargement de la palette — `open` en a besoin (cf. ci-dessus). */
   const interventionSearchCache = new Map<string, InterventionRecord>();
   const openGlobalSearch = (): void => {

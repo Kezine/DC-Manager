@@ -140,7 +140,7 @@ src-shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) �
   Schema.ts     #   liste canonique des collections + champs tableau + normSearch + page size
   DocumentChangeset.ts #   type + helpers du changeset (rechargement granulaire)
   DataValidation.ts #   normalisation + validation des enregistrements (spec déclarative par collection)
-  SearchTerms.ts #   termes de recherche DÉRIVÉS (spec par collection, lecteurs injectés) + requêtes inverses d'invalidation + catalogues fr/en
+  SearchTerms.ts #   termes de recherche DÉRIVÉS (spec par collection, lecteurs injectés) + requêtes inverses d'invalidation + catalogues fr/en + compositions tapables (cf. docs/recherche.md)
   Cascade.ts    #   cascade de suppression RÉCURSIVE et MULTI-RACINES (intégrité référentielle en DELETE) — Store (fichier) + serveur (API/transact)
   PowerAnalysis.ts #   moteur d'analyse énergie (graphe source→sink, charges, warnings codes+params) — store injecté par interface
 docs/           # documentation d'architecture (voir index)
@@ -216,6 +216,10 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   inter-bases — orphelins tolérés ; audit posé SERVEUR via helper partagé `RequestAuthor`, `closed_date`
   auto, listing paginé SQL à tris sémantiques, veilleur `intervention-reminder` paliers 24 h/1 h/heure H,
   Jira = simple référence via `JIRA_BASE_URL`, limites v1 et script de suppression). Lot CLIENT à venir.
+- [`recherche.md`](docs/recherche.md) — **recherche globale** (palette Ctrl+K, scoring client à paliers,
+  termes PARTAGÉS `src-shared/SearchTerms` — exécution DOUBLE n°15 : corpus local en mode fichier,
+  route transverse `GET …/search` serveur-pilotée en mode API avec debounce/abort/repli, caps assumés,
+  compositions tapables et limites).
 - [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
   catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).

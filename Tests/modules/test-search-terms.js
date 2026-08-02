@@ -12,6 +12,12 @@
       transact intra-lot (ordre des creates indifférent), delete, replaceSnapshot en seconde passe, et
       BACKFILL `PRAGMA user_version` (document « pauvre » enrichi à l'ouverture, idempotent).
    3. INSTRUMENTATION du boot (core/HydrationStats, volet A du cadrage) : comptes/taille/durée + seuils D3.
+   LOT 2 (recherche serveur-pilotée, docs/recherche.md) s'y ajoute :
+   4. COMPOSITIONS tapables search-v2 (« U12 », « ét. N »/« fl. N », « 42 U », « brins/strands »,
+      « marque modèle », capacités/rpm) — goldens + verrous des préfixes/unités sur les locales ;
+   5. `searchAll` (recherche TRANSVERSE en un appel : multi-collections, normalisation, cap par
+      collection + troncature signalée, périmètre `collections`, requête vide) ;
+   6. BACKFILL v1 → v2 (fichier réel : le bump de SEARCH_VERSION rattrape les documents search-v1).
    Harnais et assertions : harness.js. */
 "use strict";
 const fs = require("fs");
@@ -134,8 +140,11 @@ module.exports = async () => {
     ck.eq(termsOf("contacts", rec("contacts", "co-1")).length, 0, "contact : AUCUN terme dérivé (le relevé n'en montre pas — spec absente)");
     ck.eq(termsOf("ports", rec("ports", "p-1")).length, 0, "port : aucun terme dérivé (les ports ne sont pas cherchables en palette)");
 
-    // -- cible ABSENTE : silence (l'intégrité référentielle V2 s'en occupe, pas la recherche). --
-    ck.eq(termsOf("racks", { id: "rk-x", name: "Orpheline", datacenter_id: "dc-fantome" }).length, 0, "lien vers une cible ABSENTE : aucun terme, aucune erreur");
+    // -- cible ABSENTE : silence (l'intégrité référentielle V2 s'en occupe, pas la recherche).
+    //    Depuis search-v2 la baie porte toujours sa composition « 42 U » (own, sans lecteur) — on
+    //    vérifie donc qu'aucun terme NE VIENT DU LIEN, pas l'absence totale. --
+    ck.eq(termsOf("racks", { id: "rk-x", name: "Orpheline", datacenter_id: "dc-fantome" }).filter((t) => t !== "42 U").length, 0,
+      "lien vers une cible ABSENTE : aucun terme de lien, aucune erreur (seule la composition « 42 U » de v2 demeure)");
   }
   });
 
@@ -177,6 +186,61 @@ module.exports = async () => {
     const orphanTerms = SEARCH_CATALOGS.vmOrphan.map(norm);
     ck(orphanTerms.includes(norm(frLists.ph.orphan)) && orphanTerms.includes(norm(enLists.ph.orphan)),
       "catalogue vmOrphan : « orpheline » (fr) ET « orphan » (en) — lists.ph.orphan des deux locales");
+  }
+  });
+
+  await section("shared : SearchTerms — COMPOSITIONS tapables (search-v2) + verrous des préfixes/unités sur les locales", async () => {
+  {
+    // -- Le lot 2 réplique les chaînes COMPOSÉES que le client CHERCHE déjà (habillage de la palette,
+    //    désignations dérivées des spares) : notations qu'un humain TAPE — « U12 », « ét. 2 », « 42 U »,
+    //    « 12 brins », « Dell R740 », capacités/rpm. Les assemblages typographiques (« – », « ↔ »,
+    //    « équipement : port », joints « · ») restent ASSUMÉS non répliqués (cf. docs/recherche.md). --
+    ck.eq(SearchTerms.SEARCH_VERSION, 2, "SEARCH_VERSION = 2 (les compositions sont une évolution de spec → bump, backfill à l'ouverture)");
+
+    // équipement posé en baie : « U12 » (conditions du path client : placement rack/side/wall + rack_id + rack_u).
+    ck(termsOf("equipments", rec("equipments", "eq-rack")).includes("U12"), "equipment racké (rack_u 12) : « U12 » est un terme — la position se tape telle quelle");
+    ck(!termsOf("equipments", rec("equipments", "eq-libre")).some((t) => /^U\d/.test(t)), "equipment SANS baie : aucun terme « U… » (la composition suit les conditions du chemin client)");
+    // marque + modèle d'un trait (sub de la palette « Dell R740 ») — seulement si les DEUX sont présents.
+    ck(termsOf("equipments", { id: "e-bm", type: "server", brand: "Dell", model: "R740" }).includes("Dell R740"), "equipment : « marque modèle » composé (Dell R740 se tape d'un trait)");
+    ck(!termsOf("equipments", { id: "e-b", type: "server", brand: "Dell" }).some((t) => t.startsWith("Dell ")), "equipment : marque SEULE → pas de composition (la valeur propre suffit)");
+
+    // baie : « 42 U » avec le DÉFAUT du client reproduit (sub de la palette : (u_count || 42) + " U").
+    ck(termsOf("racks", rec("racks", "rk-1")).includes("42 U"), "baie sans u_count : « 42 U » (défaut client reproduit)");
+    ck(termsOf("racks", { id: "rk-47", name: "B", u_count: 47 }).includes("47 U"), "baie 47 U : « 47 U »");
+
+    // étages/salles : « ét. N » ET « fl. N » (les DEUX langues, comme les catalogues).
+    const tFloor = termsOf("floors", rec("floors", "fl-1"));
+    ck(tFloor.includes("ét. 2") && tFloor.includes("fl. 2"), "étage : « ét. 2 » (fr) ET « fl. 2 » (en) — le libellé même de l'étage");
+    const tDc = termsOf("datacenters", rec("datacenters", "dc-1"));
+    ck(tDc.includes("ét. 2") && tDc.includes("fl. 2"), "salle avec étage : « ét. 2 »/« fl. 2 » (chemin de la palette)");
+    ck(!termsOf("datacenters", { id: "dc-x", name: "Salle sans étage" }).some((t) => /^(ét\.|fl\.)/.test(t)), "salle SANS étage : aucune composition d'étage");
+
+    // faisceau : « 24 brins »/« 24 strands » (sous-ligne localisée de la palette).
+    const tBundle = termsOf("cableBundles", { id: "bd-x", name: "T", fiber_count: 24 });
+    ck(tBundle.includes("24 brins") && tBundle.includes("24 strands"), "faisceau : « 24 brins » (fr) ET « 24 strands » (en)");
+    ck(!termsOf("cableBundles", rec("cableBundles", "bd-1")).some((t) => /brins|strands/.test(t)), "faisceau SANS fiber_count : aucune composition (le client n'affiche rien non plus)");
+
+    // spares : désignation dérivée (Spare.displayName/techSummary) — mêmes CONDITIONS que le client.
+    const disk = { id: "sp-d", type: "hdd", brand: "WD", model_pn: "Red 4", capacity_value: 4, capacity_unit: "TB", rpm: 5400 };
+    const tDisk = termsOf("spares", disk);
+    ck(tDisk.includes("WD Red 4"), "spare : « marque référence » composé (join espace de displayName)");
+    ck(tDisk.includes("4 TB"), "spare hdd : capacité « 4 TB » composée (techSummary, types disque seuls)");
+    ck(tDisk.includes("5400 rpm"), "spare hdd : « 5400 rpm » composé");
+    ck(termsOf("spares", { ...disk, id: "sp-s", type: "ssd", rpm: null }).includes("4 TB"), "spare ssd : capacité composée aussi (SPARE_DISK_TYPES)");
+    ck(!termsOf("spares", { id: "sp-t", type: "transceiver", capacity_value: 4, capacity_unit: "TB" }).includes("4 TB"),
+      "spare transceiver : PAS de composition capacité (techSummary ne la compose que pour les disques)");
+
+    // -- VERROUS sur les locales : les préfixes/unités DUPLIQUENT les libellés client — même règle que
+    //    les catalogues (la duplication assumée ne peut pas dériver en silence). --
+    const frDetail = D("i18n/locales/fr/detail.js").detail, enDetail = D("i18n/locales/en/detail.js").detail;
+    const frSearch = D("i18n/locales/fr/search.js").search, enSearch = D("i18n/locales/en/search.js").search;
+    const rendered = (template, floor) => template.replace("{{floor}}", floor);
+    ck(SEARCH_CATALOGS.floorAbbrev.map((a) => norm(a + " 2")).includes(norm(rendered(frDetail.common.floorAbbrev, "2"))),
+      "floorAbbrev : la composition reproduit le rendu FR de detail.common.floorAbbrev (« ét. 2 »)");
+    ck(SEARCH_CATALOGS.floorAbbrev.map((a) => norm(a + " 2")).includes(norm(rendered(enDetail.common.floorAbbrev, "2"))),
+      "floorAbbrev : … et le rendu EN (« fl. 2 »)");
+    ck(SEARCH_CATALOGS.strands.map(norm).includes(norm(frSearch.sub.strands)) && SEARCH_CATALOGS.strands.map(norm).includes(norm(enSearch.sub.strands)),
+      "strands : les unités couvrent search.sub.strands des DEUX locales (« brins », « strands »)");
   }
   });
 
@@ -351,6 +415,82 @@ module.exports = async () => {
     }
 
     function revOfFile(r, collection, id) { return r.db.prepare(`SELECT updated_rev FROM "${collection}" WHERE id = ?`).get(id).updated_rev; }
+  }
+  });
+
+  await section("Serveur : searchAll — recherche TRANSVERSE en un appel (LIKE par collection, cap + troncature, périmètre)", async () => {
+  {
+    if (!requireSqlite()) return;
+    const { RelationalRepository } = SERVER("RelationalRepository.js");
+    const repo = RelationalRepository.open(":memory:", SQLITE);
+    const seed = (collection, records) => records.forEach((r) => repo.upsert(collection, r, 1));
+    seed("racks", CORPUS.racks); seed("rackItems", CORPUS.rackItems); seed("datacenters", CORPUS.datacenters);
+    seed("sites", CORPUS.sites); seed("equipments", CORPUS.equipments); seed("subEquipments", CORPUS.subEquipments);
+    seed("ports", CORPUS.ports); seed("cables", CORPUS.cables); seed("cableBundles", CORPUS.cableBundles);
+    seed("cableTypes", CORPUS.cableTypes); seed("vms", CORPUS.vms); seed("spares", CORPUS.spares);
+    seed("contacts", CORPUS.contacts);
+
+    // -- MULTI-COLLECTIONS en UN appel : « sw-coeur » touche l'équipement (propre), le câble (2 sauts),
+    //    la VM hébergée, le spare attribué, le faisceau, le sous-équipement (terme maître). --
+    const all = repo.searchAll("SW-COEUR");   // casse volontairement différente du seed « SW-Coeur » (normalisation partagée)
+    ck.eq((all.results.equipments || []).map((r) => r.id).join(","), "eq-rack", "searchAll : l'équipement par son nom propre");
+    ck.eq((all.results.cables || []).map((r) => r.id).join(","), "cb-1", "searchAll : le câble par l'équipement d'un bout (colonne enrichie, 2 sauts)");
+    ck.eq((all.results.vms || []).map((r) => r.id).join(","), "vm-1", "searchAll : la VM par son hôte");
+    ck.eq((all.results.subEquipments || []).map((r) => r.id).join(","), "se-1", "searchAll : le sous-équipement par son maître");
+    ck(!("contacts" in all.results), "searchAll : collection MUETTE omise de la réponse (payload lean)");
+    ck.eq(all.truncated.length, 0, "searchAll : aucun plafond atteint sur ce corpus");
+    const sample = (all.results.equipments || [])[0] || {};
+    ck(!("search" in sample) && !("updated_rev" in sample), "searchAll : records REBUILDÉS (colonnes opérationnelles jamais dans le record)");
+
+    // -- NORMALISATION de la requête (même règle que list) : casse + accents. --
+    ck.eq((repo.searchAll("BAIE b01").results.equipments || []).map((r) => r.id).sort().join(","), "eq-rack,eq-tray",
+      "searchAll : requête normalisée (casse/accents) — les DEUX équipements de la baie, direct et étagère");
+
+    // -- CAP par collection + indicateur de troncature (LIMIT cap+1, sans COUNT). --
+    const capped = repo.searchAll("baie b01", { perCollectionLimit: 1 });
+    ck.eq((capped.results.equipments || []).length, 1, "searchAll : plafond PAR COLLECTION respecté");
+    ck(capped.truncated.includes("equipments"), "searchAll : la collection TRONQUÉE est signalée (cap assumé v1)");
+    ck.eq(RelationalRepository.SEARCH_ALL_LIMIT, 40, "searchAll : plafond par défaut = constante nommée (40)");
+
+    // -- PÉRIMÈTRE `collections` : restreint, noms inconnus ignorés (défensif — liste venue du client). --
+    const scoped = repo.searchAll("sw-coeur", { collections: ["cables", "nimporte-quoi"] });
+    ck.eq(Object.keys(scoped.results).join(","), "cables", "searchAll : périmètre restreint aux collections demandées (inconnues ignorées)");
+
+    // -- Requête VIDE/blanche : aucun résultat, aucun scan. --
+    ck.eq(Object.keys(repo.searchAll("").results).length, 0, "searchAll : requête vide → rien");
+    ck.eq(Object.keys(repo.searchAll("   ").results).length, 0, "searchAll : requête blanche → rien");
+    repo.close();
+  }
+  });
+
+  await section("Serveur : backfill search-v1 → search-v2 (fichier réel — le bump de version rattrape les documents)", async () => {
+  {
+    if (!requireSqlite()) return;
+    const { RelationalRepository } = SERVER("RelationalRepository.js");
+    const { SearchTerms: SharedSearchTerms } = SHARED("src-shared/SearchTerms.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-searchv2-"));
+    const file = path.join(dir, "doc.db");
+    try {
+      // Fixture « document v1 » : colonnes calculées SANS les compositions (upsertRaw = valeurs propres
+      // seules — un vrai document v1 aurait AUSSI les dérivés, mais le déclencheur testé est le MARQUEUR,
+      // pas le contenu) + `user_version = 1` posé à la main.
+      const writer = RelationalRepository.open(file, SQLITE);
+      writer.upsertRaw("racks", { id: "rk-v2", name: "Baie V2", u_count: 47 }, 9);
+      writer.upsertRaw("equipments", { id: "eq-v2", name: "Srv-V2", type: "server", placement_mode: "rack", rack_id: "rk-v2", rack_u: 12 }, 9);
+      writer.db.pragma("user_version = 1");
+      ck.eq(writer.list("equipments", { query: "u12" }).total, 0, "fixture : « u12 » introuvable (colonne sans les compositions v2)");
+      writer.close();
+
+      // Réouverture : marqueur 1 < SEARCH_VERSION 2 → recalcul COMPLET, compositions cherchables.
+      const reopened = RelationalRepository.open(file, SQLITE);
+      ck.eq(reopened.list("equipments", { query: "u12" }).rows.map((r) => r.id).join(","), "eq-v2",
+        "backfill v1→v2 : « u12 » trouve l'équipement après réouverture (le bump seul a tout mis à niveau)");
+      ck.eq(reopened.list("racks", { query: "47 u" }).rows.map((r) => r.id).join(","), "rk-v2", "backfill v1→v2 : « 47 U » trouve la baie");
+      ck.eq(reopened.db.pragma("user_version")[0].user_version, SharedSearchTerms.SEARCH_VERSION, "backfill v1→v2 : marqueur porté à search-v2");
+      reopened.close();
+    } finally {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* Windows : fichier encore verrouillé — répertoire temp, sans conséquence */ }
+    }
   }
   });
 

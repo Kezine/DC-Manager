@@ -43,6 +43,20 @@
    Le CORPUS est un SNAPSHOT pris à l'ouverture (volumes réels : des centaines) ;
    une écriture concurrente pendant que la palette est ouverte n'est pas
    reflétée — assumé, elle vit quelques secondes.
+
+   MODE API : recherche SERVEUR-PILOTÉE (lot 2 recherche partagée). Quand un
+   `RemoteSearchProvider` est injecté (bootstrap, mode REST seulement), chaque
+   saisie interroge la route transverse `GET …/search` en UN aller-retour
+   (debounce REMOTE_DEBOUNCE_MS + AbortController sur la requête précédente) ;
+   les records reçus sont HABILLÉS par `GlobalSearchSources.dressRecords` (les
+   lookups liés marchent : le document reste hydraté) puis CLASSÉS par le
+   scoring client (`GlobalSearch.rank` — pas de ranking serveur en v1, décision
+   de cadrage). Le corpus LOCAL reste construit : il est l'affichage pendant le
+   debounce/vol ET le REPLI si le serveur échoue (log console, jamais bloquant).
+   ⚠ Cap serveur ASSUMÉ v1 : ~SEARCH_ALL_LIMIT résultats PAR collection (même
+   esprit que la page de 500 des interventions) — au-delà, affiner la requête.
+   En mode FICHIER, aucun provider n'est injecté : la palette ne touche JAMAIS
+   au réseau (principe n°15 — même logique de termes, via le module partagé).
    ============================================================================= */
 import type { Store } from "../store";
 import { GlobalSearch, type GlobalSearchItem } from "../core/GlobalSearch";
@@ -89,6 +103,15 @@ export interface ExternalSearchFamily {
   open: (id: string) => void;
 }
 
+/** Fournisseur de recherche SERVEUR (mode API seulement — injecté par le bootstrap) : la requête
+    BRUTE (préfixe de portée déjà retiré) → records par collection, en UN aller-retour (route
+    transverse `GET …/search`, cf. docs/recherche.md). `signal` : l'annulation de la requête
+    précédente quand la saisie a avancé (AbortController). Absent = mode FICHIER : la palette ne
+    touche jamais au réseau (principe n°15). */
+export interface RemoteSearchProvider {
+  search(query: string, signal: AbortSignal): Promise<Record<string, Record<string, any>[]>>;
+}
+
 /** Famille SYNTHÉTIQUE des actions. ⚠ PAS une collection : elle vit HORS de `GlobalSearchSources`
     (dont l'invariant corpus ≡ fiches ouvrables ne concerne que les ENTITÉS) — une action ne
     s'« ouvre » pas, elle S'EXÉCUTE. D'où le préfixe « __ » : impossible à confondre avec une collection. */
@@ -120,11 +143,62 @@ export class GlobalSearchPalette {
       flux que les listes (switch vue Datacenter + `dcView.locate` + action de retour). Absent = les
       boutons Localiser ne sont pas rendus (mode visualiseur sans 3D, tests headless).
       `actions` (facultatif) : les commandes de la portée « Actions » (préfixe « > ») — injectées,
-      la palette n'en connaît aucune. Absent/vide = ni portée ni pastille Actions. */
+      la palette n'en connaît aucune. Absent/vide = ni portée ni pastille Actions.
+      `remote` (facultatif) : la recherche SERVEUR-PILOTÉE du mode API (cf. en-tête) — absent en
+      mode fichier, la palette reste 100 % locale. */
   constructor(private readonly store: Store, private readonly host: FormHost,
     private readonly onLocate?: (kind: "equipment" | "rack" | "cable", id: string) => void,
     private readonly actions: readonly SearchAction[] = [],
-    private readonly externals: readonly ExternalSearchFamily[] = []) {}
+    private readonly externals: readonly ExternalSearchFamily[] = [],
+    private readonly remote?: RemoteSearchProvider) {}
+
+  /* ---- recherche SERVEUR-PILOTÉE (mode API — cf. en-tête) ---- */
+
+  /** Debounce de la saisie avant l'aller-retour serveur : assez court pour rester « instantané »,
+      assez long pour ne pas tirer une requête par frappe d'un dactylographe. */
+  private static readonly REMOTE_DEBOUNCE_MS = 200;
+  /** Items serveur HABILLÉS de la dernière réponse — null tant qu'aucune réponse ne couvre la saisie. */
+  private remoteItems: GlobalSearchItem[] | null = null;
+  /** La requête (préfixe retiré) que `remoteItems` couvre — comparée à la saisie courante au rendu. */
+  private remoteFor = "";
+  private remoteTimer: number | null = null;
+  private remoteAbort: AbortController | null = null;
+
+  /** Programme l'interrogation serveur pour `query` (debounce ; no-op si la réponse courante la couvre déjà). */
+  private scheduleRemote(query: string): void {
+    if (this.remoteFor === query && this.remoteItems) return;
+    if (this.remoteTimer != null) window.clearTimeout(this.remoteTimer);
+    this.remoteTimer = window.setTimeout(() => { this.remoteTimer = null; this.fetchRemote(query); }, GlobalSearchPalette.REMOTE_DEBOUNCE_MS);
+  }
+
+  /** Tire la requête serveur : ANNULE la précédente (AbortController), habille + re-rend à l'arrivée.
+      Garde de génération (comme les familles externes) : une réponse arrivée après fermeture/réouverture
+      est jetée. Échec (réseau, 5xx…) → REPLI silencieux sur le corpus local, avec un log — la palette
+      ne casse jamais (le document est hydraté, le chemin local existe toujours). */
+  private fetchRemote(query: string): void {
+    if (this.remoteAbort) this.remoteAbort.abort();
+    const abort = new AbortController();
+    this.remoteAbort = abort;
+    const generation = this.openGeneration;
+    this.remote!.search(query, abort.signal).then((byCollection) => {
+      if (generation !== this.openGeneration || !this.isOpen() || abort.signal.aborted) return;
+      this.remoteItems = GlobalSearchSources.dressRecords(this.store, byCollection);
+      this.remoteFor = query;
+      this.render();
+    }).catch((error) => {
+      if (abort.signal.aborted || generation !== this.openGeneration) return;
+      this.remoteItems = null; this.remoteFor = "";
+      // trace de diagnostic volontaire — le repli est ASSUMÉ, aucune UI d'erreur (la palette affiche le local)
+      console.warn("[recherche globale] serveur indisponible, repli sur le corpus local :", error);
+    });
+  }
+
+  /** Coupe toute activité serveur en vol (fermeture / réouverture). */
+  private resetRemote(): void {
+    if (this.remoteTimer != null) { window.clearTimeout(this.remoteTimer); this.remoteTimer = null; }
+    if (this.remoteAbort) { this.remoteAbort.abort(); this.remoteAbort = null; }
+    this.remoteItems = null; this.remoteFor = "";
+  }
 
   /** Génération d'ouverture : les réponses ASYNC des familles externes arrivées APRÈS une fermeture
       (ou une réouverture) sont jetées — même rôle que le StaleGate de SearchPop, à l'échelle de la modale. */
@@ -156,6 +230,7 @@ export class GlobalSearchPalette {
       ...this.actions.map((a) => ({ kind: ACTIONS_KIND, id: a.id, label: a.label, sub: a.sub, terms: a.terms || [] })),
     ];
     this.scope = "all"; this.sel = 0; this.input.value = "";
+    this.resetRemote();   // état serveur NEUF à chaque ouverture (aucune réponse d'une session passée)
     this.restoreFocus = (document.activeElement as HTMLElement) || null;
     this.overlay!.classList.add("open");
     OverlayA11y.lockScroll();
@@ -179,6 +254,7 @@ export class GlobalSearchPalette {
   close(): void {
     if (!this.isOpen()) return;
     this.openGeneration++;   // invalide les réponses externes encore en vol
+    this.resetRemote();      // coupe debounce + requête serveur en vol (rien ne survit à la fermeture)
     this.overlay!.classList.remove("open");
     OverlayA11y.unlockScroll();
     document.removeEventListener("keydown", this.onKeydown, true);
@@ -300,7 +376,19 @@ export class GlobalSearchPalette {
     const query = parsed.query;
     this.clearBtn.classList.toggle("show", raw.length > 0);
 
-    this.renderScopes(query);
+    // MODE API (provider injecté) : toute saisie NON VIDE programme l'aller-retour serveur (debounce +
+    // abort) — même seuil que le rendu local, qui cherche dès le premier caractère. Tant que la réponse
+    // ne couvre pas la saisie COURANTE (debounce, vol, échec), le corpus LOCAL affiche : la palette ne
+    // « blanchit » jamais en tapant. Quand elle la couvre, les items serveur REMPLACENT les ENTITÉS du
+    // classement ; les familles SYNTHÉTIQUES (« __ » : actions, certs, interventions) gardent leur
+    // mécanique propre — elles ne sont pas des collections du document.
+    if (this.remote && Schema.normSearch(query)) this.scheduleRemote(query);
+    const useRemote = !!(this.remote && this.remoteItems && this.remoteFor === query);
+    const pool = useRemote
+      ? [...this.remoteItems!, ...this.corpus.filter((x) => x.kind.startsWith("__"))]
+      : this.corpus;
+
+    this.renderScopes(pool, query);
 
     // État d'ACCUEIL : ni requête ni portée — récents + astuces, jamais « tout le corpus ».
     if (!Schema.normSearch(query) && this.scope === "all") {
@@ -310,7 +398,7 @@ export class GlobalSearchPalette {
       return;
     }
 
-    const groups = GlobalSearch.rank(this.corpus, query, { normalize: Schema.normSearch, kindOrder: [...GlobalSearchSources.FAMILY_ORDER, ...this.externals.map((x) => x.kind), ACTIONS_KIND] })
+    const groups = GlobalSearch.rank(pool, query, { normalize: Schema.normSearch, kindOrder: [...GlobalSearchSources.FAMILY_ORDER, ...this.externals.map((x) => x.kind), ACTIONS_KIND] })
       .filter((g) => this.scope === "all" || this.scopeOfKind(g.kind) === this.scope);
     this.rows = groups.flatMap((g) => g.items);
     if (this.sel >= this.rows.length) this.sel = 0;
@@ -367,9 +455,11 @@ export class GlobalSearchPalette {
     return Html.escape(text.slice(0, match.start)) + "<mark>" + Html.escape(text.slice(match.start, match.end)) + "</mark>" + Html.escape(text.slice(match.end));
   }
 
-  /** Pastilles de portée : « Tout » + une par portée, avec le COMPTE de ce qu'elle offrirait. */
-  private renderScopes(query: string): void {
-    const byKind = GlobalSearch.countByKind(this.corpus, query, Schema.normSearch);
+  /** Pastilles de portée : « Tout » + une par portée, avec le COMPTE de ce qu'elle offrirait.
+      `pool` = les items réellement classés (corpus local, ou items serveur en mode API) — les comptes
+      et la liste disent la même chose. */
+  private renderScopes(pool: readonly GlobalSearchItem[], query: string): void {
+    const byKind = GlobalSearch.countByKind(pool, query, Schema.normSearch);
     const countOf = (scope: SearchScopeLike): number => scope.kinds.reduce((n, k) => n + (byKind[k] || 0), 0);
     const total = Object.values(byKind).reduce((a, b) => a + b, 0);
     const pill = (id: string, icon: string, label: string, n: number): string =>
