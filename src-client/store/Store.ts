@@ -60,6 +60,8 @@ export interface ListStoreOptions {
   filter?: ((o: any) => boolean) | null;
   /** Champs de recherche explicites (sinon toutes les valeurs sérialisées). */
   searchFields?: any[] | null;
+  /** ANNULATION de la requête (listings serveur-pilotés) — transmise à l'adaptateur. */
+  signal?: AbortSignal;
 }
 
 /* =============================================================================
@@ -359,7 +361,7 @@ export class Store {
 
   /* list paginé + filtré — DÉLÉGUÉ à l'adapter (chemin legacy `filter`/`searchFields`
      résolu côté client sur le cache). */
-  async list(collection: string, { page = 1, pageSize = PAGE_SIZE_DEFAULT, query = "", where = null, filter = null, searchFields = null }: ListStoreOptions = {}): Promise<any> {
+  async list(collection: string, { page = 1, pageSize = PAGE_SIZE_DEFAULT, query = "", where = null, filter = null, searchFields = null, signal }: ListStoreOptions = {}): Promise<any> {
     if (filter || searchFields) {
       let rows = this.data[collection].slice();
       if (filter) rows = rows.filter(filter);
@@ -376,7 +378,7 @@ export class Store {
       const p = Math.min(Math.max(1, page), pages);
       return { rows: rows.slice((p - 1) * pageSize, p * pageSize), total, page: p, pages, pageSize };
     }
-    const res = await this.adapter.list(collection, { page, pageSize, query, where });
+    const res = await this.adapter.list(collection, { page, pageSize, query, where, signal });
     return Object.assign({}, res, { rows: res.rows.map((r) => this._absorbRecord(collection, r)).filter(Boolean) });
   }
 

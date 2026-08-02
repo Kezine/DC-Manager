@@ -12,14 +12,24 @@
       familles ≡ DETAIL_COLLECTIONS. Ports, agrégats, waypoints, rackItems :
       pas de fiche → pas au corpus (v2 : les résoudre sur leur porteur).
 
-   2. TERMES : « quel texte trouve cet objet » est DÉJÀ défini par les
-      `searchFields` de `ListConfigs`, et maintenu là — on les RÉUTILISE, on ne
-      les redéclare pas. Seul `subEquipments` (sans onglet, décision D2) porte
-      les siens ici.
+   2. TERMES : « quel texte trouve cet objet » vient du module PARTAGÉ
+      `src-shared/SearchTerms`, via l'adaptateur client `core/RecordSearch`
+      (lot 2 recherche partagée, factorisé au lot 3) — valeurs PROPRES du
+      record + `SearchTerms.termsOf` (dérivés par lien/enfants + catalogues
+      fr/en + compositions tapables), avec les lecteurs du Store injectés
+      (`get`/`findByField`). C'est la MÊME spec que la colonne `search` du
+      serveur : parité des deux modes PAR CONSTRUCTION (principe n°15 — un
+      utilisateur fr trouve « orphan » en mode fichier aussi). Historique : les
+      termes venaient des `searchFields` de `ListConfigs` — dérivations ad hoc
+      dupliquées, résorbées par le module partagé ; au lot 3 les LISTINGS les
+      ont perdus à leur tour et cherchent la même assiette que cette palette.
 
    L'HABILLAGE d'un résultat (sub = détails, path = chemin métier) est propre à
    la modale — les listings n'ont pas cette notion : une fonction par famille,
    en TEXTE BRUT (le surlignage <mark> est posé par la modale, jamais ici).
+   `dressRecords` habille des records REÇUS DU SERVEUR (mode API serveur-piloté,
+   cf. GlobalSearchPalette) avec les MÊMES fonctions — l'instance LOCALE du
+   Store est préférée quand elle existe (habillage riche : displayName…).
 
    Les PORTÉES (pastilles de filtre + préfixes « eq: », « cb: »…) regroupent
    les 18 familles en 6 filtres maniables — chaque famille appartient à
@@ -29,7 +39,6 @@
    les brancher est un chantier à part, la structure de portées les accueillera.
    ============================================================================= */
 import type { Store } from "../store";
-import { ListConfigs } from "./ListConfigs";
 import { Icons } from "../ui/Icons";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { GroupTypes } from "../domain/GroupTypes";
@@ -40,8 +49,11 @@ import { VmLocate } from "../core/VmLocate";
 import { RackScene } from "../geometry/RackScene";
 import { I18n } from "../i18n/I18n";
 import type { GlobalSearchItem } from "../core/GlobalSearch";
+import { RecordSearch } from "../core/RecordSearch";
+import type { EntityFetcher, ChildFinder } from "../../src-shared/DataValidation";
 
-/** Descripteur d'une famille cherchable : habillage du résultat + termes dérogatoires. */
+/** Descripteur d'une famille cherchable : l'HABILLAGE du résultat (les TERMES, eux, viennent du
+    module partagé `SearchTerms` — cf. en-tête, règle 2). */
 interface FamilySource {
   /** Titre du résultat (concis — le groupe et l'icône portent déjà la famille). */
   label: (record: any, store: Store) => string;
@@ -49,8 +61,6 @@ interface FamilySource {
   sub?: (record: any, store: Store) => string;
   /** Chemin MÉTIER : localisation, extrémités… Texte brut, "" = rien. */
   path?: (record: any, store: Store) => string;
-  /** Termes non affichés. Par défaut : les `searchFields` du listing homonyme. */
-  terms?: (record: any, store: Store) => unknown[];
   /** Pastille d'ÉTAT (affichage seul, jamais cherchée — cf. GlobalSearchItem.pill). null = rien. */
   pill?: (record: any, store: Store) => GlobalSearchItem["pill"] | null;
   /** Cible « Localiser » — null si l'objet (ou son porteur) n'est PAS localisable : le corpus est
@@ -143,14 +153,14 @@ export class GlobalSearchSources {
       locate: (e, store) => store.equipmentLocatable(e.id) ? { kind: "equipment", id: e.id } : null,
     },
     // Sous-équipement : le CHEMIN nomme le maître (+ repère) — sans onglet (D2), c'est ici que ce
-    // lien se lit ; le nom du maître reste aussi dans les TERMES (chercher la librairie remonte ses drives).
+    // lien se lit ; le nom du maître reste aussi dans les TERMES (chercher la librairie remonte ses
+    // drives — dérivation `subEquipments` de SearchTerms, plus un terme dérogatoire local).
     // « Localiser » un sous-équipement = localiser SON MAÎTRE (il n'a pas d'existence physique propre —
     // c'est la définition même de la collection, et le même geste que « Localiser » une VM → son hôte).
     subEquipments: {
       label: (se) => se.name || I18n.t("subEquipment.fallback"),
       sub: (se) => [se.brand, se.model, se.serial].filter(Boolean).join(" · "),
       path: (se, store) => { const master: any = store.get("equipments", se.equipment_id); return (master ? (master.name || "?") : I18n.t("subEquipment.masterMissing")) + (se.slot ? " › " + se.slot : ""); },
-      terms: (se, store) => { const master: any = store.get("equipments", se.equipment_id); return [se.name, se.serial, se.slot, se.brand, se.model, se.description, master && master.name]; },
       locate: (se, store) => se.equipment_id && store.equipmentLocatable(se.equipment_id) ? { kind: "equipment", id: se.equipment_id } : null,
     },
     racks: {
@@ -207,29 +217,66 @@ export class GlobalSearchSources {
     portTypes: { label: (t) => t.name || "?", sub: (t) => t.family || "" },
   };
 
-  /** Familles cherchables (clés de SOURCES) — exposées pour les tests d'invariant. */
+  /** Familles cherchables (clés de SOURCES) — exposées pour les tests d'invariant, et envoyées au
+      serveur comme périmètre de la recherche transverse (mode API : inutile de LIKE les collections
+      sans fiche — ports, agrégats… — qui ne pourraient pas s'habiller ici). */
   static families(): string[] { return Object.keys(GlobalSearchSources.SOURCES); }
+
+  /** TERMES cherchables d'un record (palier 30) — la PARITÉ avec la colonne `search` serveur, par
+      construction (principe n°15). DÉLÉGUÉ au module `core/RecordSearch` depuis le lot 3 : la palette
+      et les LISTINGS y lisent désormais la même assiette (valeurs propres étalées + dérivés/catalogues/
+      compositions du module PARTAGÉ `SearchTerms`, lecteurs du Store injectés) — deux surfaces, une
+      seule définition de « quel texte trouve cet objet ». */
+  private static termsOf(store: Store, collection: string, record: any): unknown[] {
+    const fetch: EntityFetcher = (c, id) => store.get(c, id);
+    const find: ChildFinder = (c, field, value) => store.findByField(c, field, value);
+    return RecordSearch.termsOf(collection, record, fetch, find);
+  }
+
+  /** Habille UN record en item de corpus — le cœur commun de `build` (corpus local complet) et de
+      `dressRecords` (résultats serveur du mode API). `record` : instance du Store OU record brut
+      (les fonctions d'habillage sont tolérantes — cf. spares `displayName?`). */
+  static itemOf(store: Store, collection: string, record: any): GlobalSearchItem | null {
+    const source = GlobalSearchSources.SOURCES[collection];
+    if (!source || !record || !record.id) return null;
+    return {
+      kind: collection,
+      id: record.id,
+      label: source.label(record, store),
+      sub: source.sub ? source.sub(record, store) || undefined : undefined,
+      path: source.path ? source.path(record, store) || undefined : undefined,
+      terms: GlobalSearchSources.termsOf(store, collection, record),
+      pill: source.pill ? source.pill(record, store) || undefined : undefined,
+      locate: source.locate ? source.locate(record, store) || undefined : undefined,
+    };
+  }
 
   /** Construit le corpus COMPLET — un snapshot, à l'ouverture de la modale (volumes réels : des
       centaines — re-filtrer ce tableau à chaque frappe est trivial, le reconstruire non). */
   static build(store: Store): GlobalSearchItem[] {
     const out: GlobalSearchItem[] = [];
-    for (const [collection, source] of Object.entries(GlobalSearchSources.SOURCES)) {
-      // Termes par défaut = les `searchFields` du listing homonyme (source unique, cf. en-tête).
-      const config = (ListConfigs as any)[collection];
-      const searchFields: ((r: any) => unknown[]) | null =
-        source.terms ? null : (config ? config(store).searchFields || null : null);
+    for (const collection of Object.keys(GlobalSearchSources.SOURCES)) {
       for (const record of store.all(collection)) {
-        out.push({
-          kind: collection,
-          id: record.id,
-          label: source.label(record, store),
-          sub: source.sub ? source.sub(record, store) || undefined : undefined,
-          path: source.path ? source.path(record, store) || undefined : undefined,
-          terms: source.terms ? source.terms(record, store) : (searchFields ? searchFields(record) : []),
-          pill: source.pill ? source.pill(record, store) || undefined : undefined,
-          locate: source.locate ? source.locate(record, store) || undefined : undefined,
-        });
+        const item = GlobalSearchSources.itemOf(store, collection, record);
+        if (item) out.push(item);
+      }
+    }
+    return out;
+  }
+
+  /** Habille des records REÇUS DU SERVEUR (recherche transverse du mode API — cf. GlobalSearchPalette).
+      L'instance LOCALE du Store est PRÉFÉRÉE quand elle existe (habillage riche — displayName des
+      spares — et cohérence avec le corpus local) ; un record inconnu localement (écriture concurrente
+      pas encore synchronisée) est habillé BRUT — dégradé mais fonctionnel. Les collections inconnues
+      des SOURCES sont ignorées (le serveur est générique, le corpus ne connaît que les familles à fiche). */
+  static dressRecords(store: Store, recordsByCollection: Record<string, Record<string, any>[]>): GlobalSearchItem[] {
+    const out: GlobalSearchItem[] = [];
+    for (const [collection, records] of Object.entries(recordsByCollection || {})) {
+      if (!GlobalSearchSources.SOURCES[collection]) continue;
+      for (const record of records || []) {
+        if (!record || !record.id) continue;
+        const item = GlobalSearchSources.itemOf(store, collection, store.get(collection, record.id) || record);
+        if (item) out.push(item);
       }
     }
     return out;

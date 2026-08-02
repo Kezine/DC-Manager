@@ -121,6 +121,13 @@ export const lists = {
   filter: {
     room: "Room",
     server: "Server",
+    // Searchable TARGET dimension of the listings (filter by entity — see views/ListTargets).
+    carrier: "Carrier",
+    carrierPlaceholder: "Equipment or VM…",
+    equipmentPlaceholder: "Search an equipment…",
+    targetEquipment: "Equip.",
+    targetVm: "VM",
+    targetMissing: "(deleted)",
   },
   opt: {
     dataFilter: "Data",

@@ -20,9 +20,10 @@
                   on change de VUE, elle n'a plus lieu d'être — cf. InterventionFicheRow). `label` = libellé
                   lisible de la cible (contexte affiché dans la modale de création).
    `openListFor`: ouvre la VUE « Interventions » FILTRÉE sur la cible (bouton « Afficher plus » du bloc fiche).
-                  Le filtre est posé à l'arrivée (chip retirable dans la barre) — `label` = libellé lisible de
-                  la cible (affiché par la chip). Poser le filtre reste réservé à la navigation : la barre ne
-                  propose PAS de le saisir (différé). */
+                  Le filtre est posé à l'arrivée (chip retirable dans la barre). ⚠ AUCUN libellé n'est transmis
+                  depuis le lot 3 : la chip est celle de la dimension « Cible » de la barre, qui RÉSOUT le
+                  libellé à chaque rendu (renommage suivi tout seul, cible disparue rendue « introuvable »).
+                  Poser ce filtre n'est plus réservé à la navigation — la barre le propose aussi. */
 
 /** Item MINIMAL d'intervention exposé aux fiches (mini-listing « 3 dernières »). Type LOCAL au contrat —
     surtout PAS `InterventionRecord` (client) : le découplage fiches ↛ vue/client est la raison d'être de ce
@@ -43,5 +44,5 @@ export interface InterventionFicheHooks {
       vue et ne ferme rien (cf. en-tête — D1 levé par la pile de modales, le retour est structurel). */
   openDetail(interventionId: string): void;
   declareFor(kind: string, id: string, label: string): void;
-  openListFor(kind: string, id: string, label: string): void;
+  openListFor(kind: string, id: string): void;
 }

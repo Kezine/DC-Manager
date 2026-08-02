@@ -101,9 +101,9 @@ que du TYPE de contrat, jamais d'une classe concrète, de sorte que le choix d'i
   `COUNT(*)`, SANS `ORDER BY`, SANS pagination — le finder itère l'ensemble, il n'a besoin ni du total ni d'un tri.
   C'est le chemin CHAUD (un save de port déclenche plusieurs `find` V6/dependents ; un save d'équipement écrit P
   ports). Le SQL exact est factorisé (`findBySql`) pour que la preuve porte sur ce qui s'exécute vraiment.
-- **`explainFindBy`** (seule méthode publique HORS `RepositoryContract`, diagnostic) rejoue l'`EXPLAIN QUERY PLAN` du
-  SQL EXACT de `findBy` : la preuve mesurable du `SEARCH … USING INDEX idx_…` sur le chemin chaud (test dédié, avec
-  contre-épreuve SCAN quand la colonne n'est pas indexée).
+- **`explainFindBy`** (méthode publique HORS `RepositoryContract`, diagnostic — comme `upsertRaw`, cf. migration)
+  rejoue l'`EXPLAIN QUERY PLAN` du SQL EXACT de `findBy` : la preuve mesurable du `SEARCH … USING INDEX idx_…` sur le
+  chemin chaud (test dédié, avec contre-épreuve SCAN quand la colonne n'est pas indexée).
 
 Les mécaniques communes (verrou optimiste `updated_rev`, `/transact` deletes→updates→creates atomique, snapshot Q7
 verbatim, maintenance) sont couvertes par `test-relational-repository.js` (better-sqlite3 RÉEL).
@@ -112,9 +112,56 @@ verbatim, maintenance) sont couvertes par `test-relational-repository.js` (bette
 
 `getOne(collection, id)` (V2/V5) = lookup sur la CLÉ PRIMAIRE → rapide ; les `find` du chemin chaud tapent désormais
 un INDEX (le gain visé). Restent deux coûts assumés : la LISTE paginée fait un `COUNT(*)` sur le filtre (nécessaire au
-`total` de la pagination), et la recherche plein-texte est un `search LIKE '%…%'` (dénormalisé à l'écriture par
-`searchText`, `Schema.normSearch` sur toutes les valeurs) — non sargeable, donc un scan, mais hors du chemin chaud de
-validation.
+`total` de la pagination), et la recherche plein-texte est un `search LIKE '%…%'` — non sargeable, donc un scan, mais
+hors du chemin chaud de validation.
+
+## La colonne `search` ENRICHIE : termes dérivés partagés (`src-shared/SearchTerms`)
+
+> L'architecture COMPLÈTE de la recherche (palette Ctrl+K, scoring client, route transverse
+> `GET …/search`, exécution double n°15) est décrite dans **`docs/recherche.md`** — cette section ne
+> couvre que le versant PERSISTANCE : le contenu de la colonne, son invalidation et son backfill.
+
+Depuis le lot 1 du chantier recherche/chargement (2026-08-02), la colonne `search` n'est plus un simple
+`Object.values` du record : elle est calculée par le module PARTAGÉ **`src-shared/SearchTerms.ts`** —
+`searchText(collection, record, fetch, find)` = valeurs PROPRES (parité stricte avec l'historique : aucun terme
+d'hier n'est perdu, l'enrichissement AJOUTE) + termes **DÉRIVÉS PAR LIEN** + termes de **CATALOGUE traduits** +
+**COMPOSITIONS tapables** (search-v2 : « U12 », « ét. N »/« fl. N », « 42 U », « 12 brins », « marque modèle »,
+capacités/rpm — cf. `docs/recherche.md` pour le périmètre exact et ses limites assumées).
+
+- **La spec est un RELEVÉ, pas une invention** : `SEARCH_SPECS` reprend les dérivations que le CLIENT effectue déjà
+  (`GlobalSearchSources` : habillage sub/path cherché au palier 30 ; `ListConfigs.searchFields`). Ex. : équipement →
+  nom de sa baie (directe OU via son étagère, 2 sauts) / salle / site (lien par le CHAMP `location`) / labels de
+  groupes / noms+séries de ses sous-équipements ; câble → type + « équipement : port » des DEUX bouts (2 sauts) ;
+  VM → hôte + « orpheline »/« orphan » + IPs des vNIC ; etc. Les PASTILLES (statuts, occupation) ne sont jamais
+  cherchées → jamais de terme.
+- **Exécution DOUBLE par construction** (principe n°15) : `termsOf`/`searchText` sont SYNCHRONES à lecteurs INJECTÉS
+  (les contrats `EntityFetcher`/`ChildFinder` de la validation). Le serveur passe `getOne`/`findBy` du dépôt ; le
+  corpus LOCAL de la palette (mode fichier) passe `get`/`findByField` du Store depuis le lot 2
+  (`GlobalSearchSources`) — parité des termes entre les deux modes garantie par le module unique.
+- **CATALOGUES fr+en** (`SEARCH_CATALOGS`) : le serveur ignore la langue de l'utilisateur → la colonne porte les DEUX
+  (un spare `hdd` se trouve par « disque dur » ET « hard drive »). Seuls les catalogues RÉELLEMENT cherchés y sont
+  (types d'équipement/groupe/spare, orphelinat VM). La duplication avec les locales client est ASSUMÉE et VERROUILLÉE
+  par test (`test-search-terms.js` : chaque libellé d'affichage fr/en doit apparaître dans les termes partagés).
+- **INVALIDATION** : les dépendances INVERSES sont DÉRIVÉES de la même spec (`SearchTerms.dependentQueries` — jamais
+  une seconde table). Après CHAQUE écriture (upsert, delete, `/transact`, snapshot), un **post-pass dans la MÊME
+  transaction** retrouve les dépendants par les FK INDEXÉES (chaînes à 2 sauts comprises : écrire un équipement →
+  ports par `equipment_id` → câbles par `from/to_port_id`) et réécrit leur colonne par **`UPDATE … SET search = ?`
+  SEUL**. Ce que ça N'AFFECTE PAS : `updated_rev` (aucun faux conflit 409), donc ni le verrou optimiste ni les
+  rechargements SSE — la recherche est un DÉRIVÉ, pas une édition. Amplification bornée : renommer une baie de
+  40 équipements = 1 `findBy` indexé + 40 UPDATE par clé primaire ; seuls les renommages de SITE (`location` non
+  indexé sur equipments/datacenters) et de GROUPE (`group_ids` TEXT JSON) coûtent un scan — rares par nature, assumé.
+  Dans un `/transact`, le post-pass court APRÈS toutes les écritures : l'ordre INTRA-LOT des creates est indifférent
+  (créer une baie + un équipement qui la référence, dans n'importe quel ordre → équipement cherchable par le nom de
+  la baie). `replaceSnapshot` écrit BRUT puis recalcule TOUT en seconde passe (même transaction).
+- **BACKFILL `PRAGMA user_version`** : les documents antérieurs ont une colonne « pauvre » (valeurs propres seules).
+  Le marqueur de version vit AU NIVEAU FICHIER (`user_version` : 0 = pré-enrichissement, `SearchTerms.SEARCH_VERSION`
+  = spec courante) ; à l'ouverture (`RelationalRepository.open`), un marqueur en retard déclenche le recalcul de
+  TOUTES les colonnes `search` en UNE transaction + pose du marqueur (une ligne de log info), idempotent à la
+  réouverture. ⚠ Toute évolution de `SEARCH_SPECS`/`SEARCH_CATALOGS` doit INCRÉMENTER `SEARCH_VERSION`.
+- **`upsertRaw`** (méthode publique HORS contrat, réservée) : écriture à colonne `search` PAUVRE, sans post-pass —
+  utilisée par `LegacyMigration` (pendant la migration, les collections pas encore converties ont toujours le schéma
+  blob : les `findBy` du calcul enrichi y casseraient) et par la seconde passe du snapshot. Un document fraîchement
+  migré garde `user_version` 0 → l'ouverture qui suit l'enrichit par le backfill (un seul mécanisme).
 
 ## La migration legacy : `LegacyMigration`
 
@@ -132,9 +179,11 @@ pratique le boot du serveur pour les documents actifs).
 - **Migration en UNE transaction** : par collection, `ALTER TABLE … RENAME TO …__legacy`, DDL neuf
   (`RelationalSchema`), lecture SQL BRUTE de `id, data, updated_rev` (aucune dépendance à une classe de dépôt), puis
   pour chaque record `JSON.parse(data)` → `DataValidator.normalizeRecord` (pose les DÉFAUTS — un blob peut dater
-  d'AVANT les migrations en mémoire du client) → upsert relationnel avec `updated_rev` **préservée record par record**
-  (sinon le verrou optimiste repartirait de zéro), enfin `DROP TABLE …__legacy`. La normalisation préserve
-  id/audit/clés inconnues, l'upsert relationnel ignore les clés hors spec — c'est là la purge des legacy `face_image*`.
+  d'AVANT les migrations en mémoire du client) → upsert relationnel **BRUT** (`upsertRaw` : colonne `search` pauvre,
+  enrichie par le backfill à l'ouverture qui suit — cf. § « La colonne `search` ENRICHIE ») avec `updated_rev`
+  **préservée record par record** (sinon le verrou optimiste repartirait de zéro), enfin `DROP TABLE …__legacy`. La
+  normalisation préserve id/audit/clés inconnues, l'upsert relationnel ignore les clés hors spec — c'est là la purge
+  des legacy `face_image*`.
 - **Échec** : toute exception d'un record est ENRICHIE de `collection/id` du fautif (l'erreur SQL brute ne nomme que la
   colonne) et la transaction s'annule EN BLOC — le fichier reste LISIBLE en legacy, le `.bak` est là. Marche à suivre
   d'exploitation : [`src-server/RUN.md`](../src-server/RUN.md).

@@ -100,6 +100,7 @@ export class Api {
     data.put("/images/:id", this.upload.single("blob"), this.putImage);
     data.delete("/images/:id", this.deleteImage);
     data.post("/maintenance", this.maintenance);   // AVANT /:collection (sinon « maintenance » serait une collection)
+    data.get("/search", this.searchAll);           // AVANT /:collection aussi — recherche TRANSVERSE (palette Ctrl+K, cf. docs/recherche.md)
     data.get("/:collection", this.list);
     data.get("/:collection/:id", this.getOne);
     data.post("/:collection", this.create);
@@ -424,6 +425,18 @@ export class Api {
     const r = this.docs.maintenance((req.params as any).docId);
     if (!r) { res.status(404).json({ error: "document inconnu" }); return; }
     res.json(r);
+  };
+
+  /** Recherche GLOBALE transverse (`GET …/search?q=…&collections=a,b`) : UN aller-retour pour la palette
+      Ctrl+K en mode API — jamais ~20 `list()` par frappe. Même garde d'accès que toute lecture du document
+      (`requireAdmin` global + `resolveRepo`), délégation au dépôt (`searchAll` : LIKE par collection sur la
+      colonne `search`, plafond par collection SEARCH_ALL_LIMIT signalé par `truncated` — cap assumé v1).
+      `collections` (CSV, facultatif) restreint la recherche — les noms inconnus sont ignorés par le dépôt.
+      Cf. docs/recherche.md. */
+  private searchAll: RequestHandler = (req, res) => {
+    const q = req.query as Record<string, any>;
+    const collections = q.collections ? String(q.collections).split(",").filter(Boolean) : null;
+    res.json(this.repoOf(req).searchAll(String(q.q || ""), { collections }));
   };
 
   /* -- CRUD générique par collection -- */

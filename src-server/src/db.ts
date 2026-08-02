@@ -20,6 +20,12 @@ export interface Tx {
 }
 export interface ListOpts { page?: number; pageSize?: number; query?: string; where?: Rec | null; ids?: string[] | null }
 export interface ListResult { rows: Rec[]; total: number; page: number; pages: number; pageSize: number }
+/** Options de la recherche TRANSVERSE (`searchAll`) : restreindre aux `collections` données (null/vide = toutes),
+    plafond par collection (défaut : `RelationalRepository.SEARCH_ALL_LIMIT`). */
+export interface SearchAllOpts { collections?: string[] | null; perCollectionLimit?: number }
+/** Résultat de `searchAll` : records par collection (collections MUETTES omises — payload lean) + les collections
+    dont la liste a été TRONQUÉE au plafond (l'appelant peut le signaler ; la palette v1 l'assume silencieusement). */
+export interface SearchAllResult { results: Record<string, Rec[]>; truncated: string[] }
 export interface ImageMeta { id: string; name?: string; u_height?: number; face?: string; with_ears?: boolean; description?: string; type?: string; bytes?: number }
 
 /** CONTRAT du dépôt d'un document : la SURFACE PUBLIQUE que doit offrir toute implémentation de la
@@ -66,6 +72,13 @@ export interface RepositoryContract {
       l'ensemble, il n'a besoin ni du total ni d'un tri. Chemin CHAUD (un save de port déclenche plusieurs
       `find` V6/dependents), d'où l'indexation dédiée côté relationnel (cf. docs/persistance.md). */
   findBy(collection: string, field: string, value: string): Rec[];
+
+  /** Recherche GLOBALE transverse (palette Ctrl+K en mode API — `GET …/search`, cf. docs/recherche.md) :
+      UN LIKE sur la colonne `search` PAR collection (même normalisation de la requête que `list`), plafonné
+      PAR COLLECTION (`SEARCH_ALL_LIMIT` — cap ASSUMÉ v1, signalé par `truncated`), SANS `COUNT(*)`.
+      Requête vide/blanche → aucun résultat. Le CLASSEMENT reste client (décision de cadrage : pas de
+      ranking serveur en v1). */
+  searchAll(query: string, opts?: SearchAllOpts): SearchAllResult;
 
   /* ---- meta ---- */
   /** Le sac `meta` du document (objet JSON libre), ou `{}` s'il est absent. */

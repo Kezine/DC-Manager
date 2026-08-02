@@ -153,6 +153,7 @@ src-shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) �
   Schema.ts     #   liste canonique des collections + champs tableau + normSearch + page size
   DocumentChangeset.ts #   type + helpers du changeset (rechargement granulaire)
   DataValidation.ts #   normalisation + validation des enregistrements (spec déclarative par collection)
+  SearchTerms.ts #   termes de recherche DÉRIVÉS (spec par collection, lecteurs injectés) + requêtes inverses d'invalidation + catalogues fr/en + compositions tapables (cf. docs/recherche.md)
   Cascade.ts    #   cascade de suppression RÉCURSIVE et MULTI-RACINES (intégrité référentielle en DELETE) — Store (fichier) + serveur (API/transact)
   PowerAnalysis.ts #   moteur d'analyse énergie (graphe source→sink, charges, warnings codes+params) — store injecté par interface
 docs/           # documentation d'architecture (voir index)
@@ -205,7 +206,9 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   tables à colonnes DÉRIVÉES de la spec via `RelationalSchema`, `INDEX_SPEC` partagé front⇄back, ce que
   le schéma n'impose PAS — FK/CHECK/DEFAULT restent dans la validation/normalisation partagées ;
   dépôt `RelationalRepository` (contrat des colonnes strictes), migration des documents legacy au boot
-  (`LegacyMigration`, backup `.pre-relationnel.bak`), `meta`/`images` hors migration).
+  (`LegacyMigration`, backup `.pre-relationnel.bak`), `meta`/`images` hors migration ; **colonne `search`
+  ENRICHIE** — termes dérivés/catalogues fr+en du module partagé `SearchTerms`, invalidation par FK
+  indexées SANS toucher `updated_rev`, backfill `PRAGMA user_version`).
 - [`vm-proxmox.md`](docs/vm-proxmox.md) — **inventaire VM Proxmox** (module serveur AMOVIBLE `vm/`,
   pivot `VmRecord`, réconciliation source/locaux, providers PAR document dans `vm-providers.db`
   chiffrée (clé `DCMANAGER_SECRETS_KEY` requise), mapping bridge/tag → réseau, script de suppression,
@@ -226,6 +229,14 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   inter-bases — orphelins tolérés ; audit posé SERVEUR via helper partagé `RequestAuthor`, `closed_date`
   auto, listing paginé SQL à tris sémantiques, veilleur `intervention-reminder` paliers 24 h/1 h/heure H,
   Jira = simple référence via `JIRA_BASE_URL`, limites v1 et script de suppression). Lot CLIENT à venir.
+- [`recherche.md`](docs/recherche.md) — **recherche** (palette Ctrl+K, scoring client à paliers, termes
+  PARTAGÉS `src-shared/SearchTerms` — exécution DOUBLE n°15 : corpus local en mode fichier, route
+  transverse `GET …/search` serveur-pilotée en mode API avec debounce/abort/repli, caps assumés,
+  compositions tapables et limites ; **LISTINGS serveur-pilotés** : moteur de lignes à source injectée
+  `core/ListRowEngine`/`StoreListRowSource`, recherche sur la MÊME assiette que la colonne serveur
+  (`core/RecordSearch` + index mémoïsé), tri/pagination restés CLIENT, plafond du jeu serveur ;
+  **filtre CIBLE unifié** — dimension `FilterBar` « à recherche » (SearchPop), chips à valeur libre,
+  `where` serveur ⇄ restriction cliente à 2 sauts).
 - [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
   catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).

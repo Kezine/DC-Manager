@@ -14,6 +14,8 @@ import { SpareStatuses } from "../domain/SpareStatuses";
 import { RackScene } from "../geometry/RackScene";
 import { FloorLayout } from "../geometry/FloorLayout";
 import { EntityViz } from "./EntityViz";
+import { ListTargets } from "./ListTargets";
+import type { EntitySearchReader } from "../core/EntityCandidates";
 import type { ListOptions } from "./ListView";
 
 const dim = (s: string) => `<span style="color:var(--fg-dimmer)">${s}</span>`;
@@ -36,8 +38,9 @@ export class ListConfigs {
       // ⚠ Les NOMS (et séries) des SOUS-ÉQUIPEMENTS font partie des termes de recherche du MAÎTRE : sans onglet
       // dédié (décision D2), c'est LE moyen de retrouver un drive — taper « Drive LTO » fait ressortir la
       // librairie, d'où l'on ouvre sa fiche. Ce n'est pas une recherche DE sous-équipements (elle n'existe
-      // pas) : c'est la librairie qui matche.
-      searchFields: (e) => { const gl = store.equipmentGroupIds(e).map((gid: string) => { const g: any = store.get("groups", gid); return g && g.label; }).filter(Boolean); const se = store.subEquipmentsOf(e.id).flatMap((s: any) => [s.name, s.serial]); return [e.name, e.type, EquipmentTypes.label(e.type), e.brand, e.model, e.serial, ...gl, ...se, e.description]; },
+      // pas) : c'est la librairie qui matche. Cette dérivation (et toutes les autres : baie, groupes, type,
+      // « U12 », « marque modèle »…) vit désormais dans la spec PARTAGÉE `src-shared/SearchTerms` — le relevé
+      // `searchFields` qui la redisait ici a disparu au lot 3 (cf. l'en-tête de `ListView`).
       columns: [
         { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (e) => e.name, render: (e) => Html.escape(e.name || I18n.t("lists.ph.noName")) },
         {
@@ -69,7 +72,6 @@ export class ListConfigs {
       collection: "networks",
       defaultSort: { key: "label", dir: "asc" },
       emptyText: I18n.t("lists.empty.networks"),
-      searchFields: (n) => [n.label, n.description],
       columns: [
         { head: I18n.t("lists.col.color"), render: (n) => (n.color ? `<span class="swatch-dot" style="background:${n.color}"></span>` : dim("—")) },
         { head: I18n.t("lists.col.label"), cls: "cell-name", sortKey: "label", sort: (n) => n.label, render: (n) => Html.escape(n.label || I18n.t("lists.ph.noLabel")) },
@@ -89,7 +91,6 @@ export class ListConfigs {
       collection: "groups",
       defaultSort: { key: "label", dir: "asc" },
       emptyText: I18n.t("lists.empty.groups"),
-      searchFields: (g) => [g.label, g.description, GroupTypes.label(g.type)],
       columns: [
         { head: I18n.t("lists.col.color"), render: (g) => (g.color ? `<span class="swatch-dot" style="background:${g.color}"></span>` : dim("—")) },
         { head: I18n.t("lists.col.label"), cls: "cell-name", sortKey: "label", sort: (g) => g.label, render: (g) => Html.escape(g.label || I18n.t("lists.ph.noLabel")) },
@@ -110,6 +111,10 @@ export class ListConfigs {
       collection: "faceImages",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.faceImages"),
+      // ⚠ SEUL listing à garder un relevé `searchFields` EXPLICITE, et c'est voulu : sa source est CUSTOM
+      // (`ImageStore`, hors collections du document) — la spec partagée `SearchTerms` ne la connaît pas, et
+      // ses enregistrements portent la data URL COMPLÈTE de l'image (`FaceImage.data`), qui n'a rien à faire
+      // dans un texte cherchable. Cf. `ListOptions.searchFields`.
       // « autre » = image de face LIBRE (équipement non-rack) : la hauteur en U n'a pas de sens → on ne l'affiche pas.
       searchFields: (o) => [o.name, faceLbl(o.face), o.face === "autre" ? "libre" : (o.u_height || 1) + "U", o.description],
       columns: [
@@ -126,12 +131,15 @@ export class ListConfigs {
     };
   }
 
-  static cables(store: Store): ListOptions {
+  static cables(store: Store, entitySearch: EntitySearchReader | null = null): ListOptions {
     return {
       collection: "cables",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.cables"),
-      searchFields: (c) => [c.name, c.description],
+      // Filtre CIBLE : « les câbles de cet ÉQUIPEMENT ». Le rattachement passe par ses PORTS (2 sauts) —
+      // restriction CLIENTE, asymétrie assumée v1 (cf. `views/ListTargets` et docs/recherche.md). La
+      // recherche de CANDIDATS, elle, est serveur-pilotée en mode API (`entitySearch`), locale en fichier.
+      targetFilter: ListTargets.cableEquipment(store, entitySearch),
       columns: [
         { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (c) => c.name, render: (c) => Html.escape(c.name || I18n.t("lists.ph.cable")) },
         { head: I18n.t("lists.col.type"), render: (c) => { const t: any = c.cable_type_id && store.get("cableTypes", c.cable_type_id); return t ? `<span class="pill">${Html.escape(t.name)}</span>` : dim("—"); } },
@@ -156,7 +164,6 @@ export class ListConfigs {
       collection: "cableBundles",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.cableBundles"),
-      searchFields: (b) => [b.name, b.description],
       columns: [
         { head: I18n.t("lists.col.name"), cls: "cell-name", sortKey: "name", sort: (b) => b.name, render: (b) => Html.escape(b.name || I18n.t("lists.ph.bundle")) },
         { head: I18n.t("lists.col.type"), render: (b) => { const t: any = b.cable_type_id && store.get("cableTypes", b.cable_type_id); return t ? `<span class="pill">${Html.escape(t.name)}</span>` : dim("—"); } },
@@ -174,7 +181,6 @@ export class ListConfigs {
       collection: "datacenters",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.datacenters"),
-      searchFields: (d) => [d.name, d.room],
       columns: [
         { head: I18n.t("lists.col.name"), cls: "cell-name", sortKey: "name", sort: (d) => d.name, render: (d) => Html.escape(d.name || I18n.t("lists.ph.room")) },
         { head: I18n.t("lists.col.dimensions"), render: (d) => (d.width_mm / 1000).toFixed(1) + " × " + (d.depth_mm / 1000).toFixed(1) + " m" },
@@ -191,7 +197,6 @@ export class ListConfigs {
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.sites"),
       actions: { view: false, edit: true, clone: false, del: true },
-      searchFields: (s) => [s.name, s.address],
       columns: [
         { head: I18n.t("lists.col.name"), cls: "cell-name", sortKey: "name", sort: (s) => s.name, render: (s) => Html.escape(s.name || I18n.t("lists.ph.site")) },
         { head: I18n.t("lists.col.address"), render: (s) => (s.address ? Html.escape(s.address) : dim("—")) },
@@ -209,7 +214,6 @@ export class ListConfigs {
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.contacts"),
       actions: { view: true, edit: true, clone: false, del: true },   // clone sans objet pour un destinataire unique
-      searchFields: (c) => [c.name, c.email, c.phone, c.notes],
       columns: [
         { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (c) => c.name, render: (c) => Html.escape(c.name || I18n.t("lists.ph.contact")) },
         { head: I18n.t("lists.col.email"), sortKey: "email", sort: (c) => c.email || "", render: (c) => (c.email ? Html.escape(c.email) : dim("—")) },
@@ -226,7 +230,6 @@ export class ListConfigs {
       defaultSort: { key: "loc", dir: "asc" },
       emptyText: I18n.t("lists.empty.floors"),
       actions: { view: false, edit: true, clone: false, del: true },
-      searchFields: (f) => [store.siteLabel(f.location), String(f.floor)],
       columns: [
         { head: I18n.t("lists.col.building"), cls: "cell-name", sortKey: "loc", sort: (f) => store.siteLabel(f.location), render: (f) => Html.escape(store.siteLabel(f.location)) },
         { head: I18n.t("lists.col.floor"), sortKey: "fl", sort: (f) => FloorLayout.floorNum(String(f.floor || "")), render: (f) => I18n.t("lists.ph.floorLabel", { n: (f.floor != null && f.floor !== "" ? f.floor : "0") }) },
@@ -242,7 +245,6 @@ export class ListConfigs {
       collection: "racks",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.racks"),
-      searchFields: (r) => [r.name, r.room, r.description],
       columns: [
         { head: I18n.t("lists.col.name"), cls: "cell-name", sortKey: "name", sort: (r) => r.name, render: (r) => Html.escape(r.name || I18n.t("lists.ph.rack")) },
         {
@@ -270,7 +272,6 @@ export class ListConfigs {
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.portTypes"),
       actions: { view: true },
-      searchFields: (t) => [t.name, t.family, t.connector, t.speed, t.description],
       columns: [
         { head: I18n.t("lists.col.name"), cls: "cell-name", sortKey: "name", sort: (t) => t.name, render: (t) => Html.escape(t.name) },
         {
@@ -297,7 +298,6 @@ export class ListConfigs {
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.cableTypes"),
       actions: { view: true },
-      searchFields: (t) => [t.name, t.family, t.medium, t.description],
       columns: [
         { head: I18n.t("lists.col.name"), cls: "cell-name", sortKey: "name", sort: (t) => t.name, render: (t) => Html.escape(t.name) },
         {
@@ -320,7 +320,6 @@ export class ListConfigs {
       collection: "ipNetworks",
       defaultSort: { key: "label", dir: "asc" },
       emptyText: I18n.t("lists.empty.ipNetworks"),
-      searchFields: (n) => [n.label, n.cidr, n.description],
       columns: [
         { head: I18n.t("lists.col.label"), cls: "cell-name", sortKey: "label", sort: (n) => n.label, render: (n) => Html.escape(n.label || I18n.t("lists.ph.noLabel")) },
         { head: "CIDR", sortKey: "cidr", sort: (n) => n.cidr, render: (n) => (n.cidr ? `<code>${Html.escape(n.cidr)}</code>` : dim("—")) },
@@ -332,12 +331,15 @@ export class ListConfigs {
     };
   }
 
-  static ipAddresses(store: Store): ListOptions {
+  static ipAddresses(store: Store, entitySearch: EntitySearchReader | null = null): ListOptions {
     return {
       collection: "ipAddresses",
       defaultSort: { key: "address", dir: "asc" },
       emptyText: I18n.t("lists.empty.ipAddresses"),
-      searchFields: (a) => [a.address, a.hostname, a.description],
+      // Filtre CIBLE : « les adresses de ce PORTEUR » — équipement OU VM, familles confondues dans UNE
+      // recherche (principe n°14). Le lien est une colonne → le filtre part au serveur en `where`. La
+      // recherche de CANDIDATS, elle, est serveur-pilotée en mode API (`entitySearch`), locale en fichier.
+      targetFilter: ListTargets.ipCarrier(store, entitySearch),
       columns: [
         { head: I18n.t("lists.col.address"), essential: true, cls: "cell-name", sortKey: "address", sort: (a) => { const v = Ip.toInt(a.address); return v != null ? v : a.address; }, render: (a) => `<code>${Html.escape(a.address || "—")}</code>` },
         {
@@ -361,7 +363,6 @@ export class ListConfigs {
       collection: "dhcpRanges",
       defaultSort: { key: "__created__", dir: "asc" },
       emptyText: I18n.t("lists.empty.dhcpRanges"),
-      searchFields: (d) => [d.start_ip, d.end_ip, d.description],
       columns: [
         { head: I18n.t("lists.col.range"), essential: true, cls: "cell-name", sort: (d) => { const v = Ip.toInt(d.start_ip); return v != null ? v : (d.start_ip || ""); }, render: (d) => `<code>${Html.escape(d.start_ip || "?")}</code> → <code>${Html.escape(d.end_ip || "?")}</code>` },
         {
@@ -428,7 +429,6 @@ export class ListConfigs {
       collection: "spares",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.spares"),
-      searchFields: (o) => [o.displayName ? o.displayName() : o.name, o.brand, o.model_pn, o.serial, SpareTypes.label(o.type), o.techSummary ? o.techSummary() : "", o.storage_location, o.po_ref, assignedTo(o), o.comment],
       columns: [
         { head: I18n.t("lists.col.designation"), essential: true, cls: "cell-name", sortKey: "name", sort: (o) => (o.displayName ? o.displayName() : (o.name || "")), render: (o) => Html.escape(o.displayName ? o.displayName() : (o.name || I18n.t("lists.ph.spare"))) + (o.serial ? " " + dim("· SN " + Html.escape(o.serial)) : "") },
         {
@@ -490,8 +490,6 @@ export class ListConfigs {
       defaultSort: { key: "name", dir: "asc" },
       actions: { view: true },   // lecture seule : alimentée par la synchro (ni + créer, ni éditer/cloner/supprimer en v1)
       emptyText: I18n.t("lists.empty.vms"),
-      // Recherche plein texte : nom, type, statut (+ « orpheline »), hôte résolu ET nom de nœud brut, IPs, tags, notes.
-      searchFields: (v) => [v.name, v.vm_type, ...VmStatus.searchTerms(v), hostText(v), v.host_node, ...vmIps(v), ...(v.tags_src || []), v.description_src, v.notes],
       columns: [
         { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (v) => v.name, render: (v) => Html.escape(v.name || I18n.t("lists.ph.vm")) },
         {

@@ -57,18 +57,21 @@ export class RestAdapter extends DataAdapter {
     this.dataBase = this.docId ? (this.apiRoot + "/documents/" + encodeURIComponent(this.docId)) : this.apiRoot;
   }
 
-  private async _req(base: string, method: string, path: string, body?: any, { allow404 = false }: { allow404?: boolean } = {}): Promise<any> {
+  private async _req(base: string, method: string, path: string, body?: any, { allow404 = false, signal }: { allow404?: boolean; signal?: AbortSignal } = {}): Promise<any> {
     const isWrite = method !== "GET";
     const res = await fetch(base + path, {
       // X-Base-Rev : révision sur laquelle s'appuie cette écriture → le serveur la compare aux entités visées (verrou optimiste).
       method, headers: { ...this.headers, "X-Client-Id": this.clientId, ...(isWrite ? this.protocol.writeHeaders() : {}) },
       credentials: "include",   // SSO : on transmet les cookies de session (l'app NE gère PAS l'auth — le SSO valide)
       body: body === undefined ? undefined : JSON.stringify(body),
+      // Annulation par l'appelant (recherche transverse debouncée : la frappe suivante ABANDONNE la
+      // requête en vol) — fetch rejette alors avec AbortError, que l'appelant distingue d'un échec réel.
+      signal,
     });
     // Interprétation (X-Doc-Rev, 409, 400 structuré, 404 toléré, 204, JSON) : déléguée au protocole pur.
     return this.protocol.interpret({ status: res.status, ok: res.ok, header: (n) => res.headers.get(n), text: () => res.text() }, method, path, { allow404 });
   }
-  private _send(method: string, path: string, body?: any, opts?: { allow404?: boolean }): Promise<any> { return this._req(this.dataBase, method, path, body, opts); }
+  private _send(method: string, path: string, body?: any, opts?: { allow404?: boolean; signal?: AbortSignal }): Promise<any> { return this._req(this.dataBase, method, path, body, opts); }
   private _root(method: string, path: string, body?: any, opts?: { allow404?: boolean }): Promise<any> { return this._req(this.apiRoot, method, path, body, opts); }
 
   /* ---- registre des DOCUMENTS (non scopé) ---- */
@@ -102,11 +105,12 @@ export class RestAdapter extends DataAdapter {
   async loadMeta(): Promise<Record<string, any>> { return this.docId ? ((await this._send("GET", "/meta")) || {}) : {}; }
 
   /* ---- lectures granulaires ---- */
-  async list(collection: string, { page = 1, pageSize = PAGE_SIZE_DEFAULT, query = "", where = null }: ListOptions = {}): Promise<ListResult> {
+  async list(collection: string, { page = 1, pageSize = PAGE_SIZE_DEFAULT, query = "", where = null, signal }: ListOptions = {}): Promise<ListResult> {
     const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     if (query && query.trim()) qs.set("q", query.trim());
     if (where) Object.keys(where).forEach((f) => qs.set(f, where[f] === null || where[f] === undefined ? "null" : String(where[f])));
-    const res = await this._send("GET", "/" + collection + "?" + qs.toString());
+    // `signal` : listings serveur-pilotés — la frappe suivante ABANDONNE la requête en vol (cf. searchAll).
+    const res = await this._send("GET", "/" + collection + "?" + qs.toString(), undefined, { signal });
     if (Array.isArray(res)) {
       const total = res.length, pages = Math.max(1, Math.ceil(total / pageSize));
       const p = Math.min(Math.max(1, page), pages);
@@ -127,6 +131,17 @@ export class RestAdapter extends DataAdapter {
   async findBy(collection: string, field: string, value: any): Promise<RawRecord[]> {
     const v = (value === null || value === undefined) ? "null" : String(value);
     return this.rows(await this._send("GET", "/" + collection + "?pageSize=" + PAGE_SIZE_ALL + "&" + encodeURIComponent(field) + "=" + encodeURIComponent(v)));
+  }
+  /** Recherche GLOBALE transverse du document courant (`GET …/search` — palette Ctrl+K, cf.
+      docs/recherche.md) : UN aller-retour → records par collection, plafonnés PAR collection côté
+      serveur (`truncated` liste celles qui l'ont été — cap assumé v1). `collections` restreint le
+      périmètre (la palette envoie ses familles à fiche) ; `signal` annule la requête quand la saisie
+      a avancé (AbortController — fetch rejette en AbortError). */
+  async searchAll(query: string, { collections = null, signal }: { collections?: string[] | null; signal?: AbortSignal } = {}): Promise<{ results: Record<string, RawRecord[]>; truncated: string[] }> {
+    const qs = new URLSearchParams({ q: query });
+    if (collections && collections.length) qs.set("collections", collections.join(","));
+    const res = await this._send("GET", "/search?" + qs.toString(), undefined, { signal });
+    return { results: (res && res.results) || {}, truncated: (res && res.truncated) || [] };
   }
 
   /* ---- écritures unitaires (appels directs, sans passer par le lot) ---- */

@@ -2,13 +2,20 @@ import type { Store } from "../store";
 import { Html } from "../core/Html";
 import { Text } from "../core/Text";
 import { Sort } from "../core/Sort";
+import { TargetSearch } from "../core/TargetSearch";
+import { RecordSearchIndex } from "../core/RecordSearchIndex";
+import { ListRowEngine, type ListRowTarget } from "../core/ListRowEngine";
+import { StoreListRowSource, type RemoteListReader } from "../core/StoreListRowSource";
+import { EntityCandidateSource } from "../core/EntityCandidates";
 import { FormControls } from "../ui/FormControls";
 import { FilterBar, type FilterBarDimension } from "../ui/FilterBar";
+import type { SearchPopResult } from "../ui/SearchPop";
 import { Icons } from "../ui/Icons";
 import { IconButton } from "../ui/IconButton";
 import { RowMenu } from "../ui/RowMenu";
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from "../data/config";
 import { I18n } from "../i18n/I18n";
+import type { ListTargetFilter } from "./ListTargets";
 
 export interface FilterOption { id: string; label: string; color?: string | null; }
 export interface ListColumn {
@@ -33,10 +40,21 @@ export interface ListActions {
 export interface ListOptions {
   collection: string;
   columns: ListColumn[];
+  /** Champs cherchés — RÉSERVÉ aux sources CUSTOM (`items`, hors collections du document). Les listings
+      adossés au Store n'en ont plus : leur recherche passe par le moteur PARTAGÉ (`core/RecordSearch`,
+      la MÊME assiette que la colonne `search` du serveur). Une source custom, elle, n'a aucune spec
+      partagée — et la bibliothèque d'images porte une data URL entière (`FaceImage.data`) qui n'a rien
+      à faire dans un texte cherchable : le relevé explicite reste la bonne réponse pour elle. */
   searchFields?: (o: any) => any[];
   emptyText?: string;
   defaultSort?: { key: string; dir: "asc" | "desc" };
   items?: () => any[];          // source CUSTOM (hors store)
+  /** Dimension CIBLE « à recherche » de ce listing (filtre par entité : « les câbles de SW-Coeur ») —
+      absente = pas de filtre par cible. Ignorée sur une source CUSTOM (aucune entité du modèle). */
+  targetFilter?: ListTargetFilter;
+  /** Lecteur SERVEUR (mode API seulement, injecté par le bootstrap) : présent, la recherche et les
+      filtres serveur-mappables interrogent le serveur ; absent = mode FICHIER, jamais de réseau. */
+  remoteList?: RemoteListReader | null;
   actions?: ListActions;
   onAction?: (act: string, id: string) => void;
   /** Ouvre la fiche d'une AUTRE entité référencée DANS une cellule (élément `data-open-col`/`data-open-id`), ex.
@@ -51,14 +69,39 @@ export interface ListOptions {
    ListView — table générique : tri (colonnes + dates), filtres multi-sélection,
    recherche, pagination. État (tri/filtres/recherche) PERSISTÉ en session.
    Réplique OO de la classe ListController du monolithe ; paramétrée par colonnes.
+
+   D'OÙ VIENNENT LES LIGNES (lot 3 « recherche partagée ») : plus du `store.all()`
+   direct, mais d'un MOTEUR à source injectée (`core/ListRowEngine`) —
+     • la RECHERCHE passe par le moteur PARTAGÉ (`core/RecordSearch`, mémoïsé par
+       `core/RecordSearchIndex`) : l'assiette cherchée est EXACTEMENT celle de la
+       colonne `search` du serveur, donc les deux modes répondent la même chose
+       par construction (et non plus le relevé ad hoc des `searchFields`, plus
+       pauvre et divergent) ;
+     • en mode API, une requête ACTIVE (recherche saisie ou cible serveur-mappable)
+       est servie par le SERVEUR, avec anti-rebond + annulation + repli local ;
+       sans requête active, le cache hydraté suffit et rien ne part sur le réseau ;
+     • en mode FICHIER, aucun réseau n'existe : le moteur reste local (n°15).
+   Le TRI et la PAGINATION restent CLIENT (limite v1 documentée : le jeu serveur
+   est plafonné, cf. `StoreListRowSource.REMOTE_LIMIT`).
    ============================================================================= */
 export class ListView {
-  private store: Store;
+  /** Clé de la dimension CIBLE dans l'état de filtres. Préfixe « __ » : impossible à confondre avec
+      une clé de colonne (`sortKey` ou « col<i> »), y compris dans l'état persisté en session. */
+  private static readonly TARGET_DIM_KEY = "__target__";
+
+  // ⚠ Le Store n'est PLUS un champ : depuis le lot 3, la vue ne lit jamais les collections elle-même —
+  // elle passe par le moteur de lignes, dont la SOURCE est injectée (`core/StoreListRowSource`). Le
+  // constructeur ne s'en sert donc que pour CÂBLER ce moteur, l'index de recherche et l'invalidation.
   private container: HTMLElement;
   private collection: string;
   private columns: ListColumn[];
   private items: (() => any[]) | null;
   private searchFields?: (o: any) => any[];
+  private targetFilter: ListTargetFilter | null;
+  /** Index MÉMOÏSÉ des textes cherchables (mode fichier ET affichage local du mode API). */
+  private readonly searchIndex: RecordSearchIndex;
+  /** Moteur de lignes (source injectée : cache local / serveur) — absent sur une source CUSTOM. */
+  private readonly rowEngine: ListRowEngine | null;
   private emptyText: string;
   private actions: ListActions;
   private onAction?: (act: string, id: string) => void;
@@ -86,12 +129,24 @@ export class ListView {
   private _bodyEl!: HTMLElement;
 
   constructor(store: Store, container: HTMLElement, opts: ListOptions) {
-    this.store = store;
     this.container = container;
     this.collection = opts.collection;
     this.columns = opts.columns;
     this.items = opts.items || null;
     this.searchFields = opts.searchFields;
+    // Source CUSTOM (`items`) : aucune entité du modèle derrière les lignes → ni cible, ni moteur.
+    this.targetFilter = (!this.items && opts.targetFilter) ? opts.targetFilter : null;
+    this.searchIndex = new RecordSearchIndex(
+      (collection, id) => store.get(collection, id),
+      (collection, field, value) => store.findByField(collection, field, value),
+    );
+    this.rowEngine = this.items ? null : new ListRowEngine(
+      new StoreListRowSource(store, this.searchIndex, this.targetFilter, opts.remoteList || null),
+      () => this.render({ typing: true }),   // réponse serveur : on repeint SANS jeter l'index (rien n'a muté)
+    );
+    // Filet d'invalidation : une écriture qui ne repasse pas par ce listing (SSE, autre onglet) rendrait
+    // l'index périmé — et un index périmé, c'est une recherche qui ment (cf. RecordSearchIndex).
+    store.onChange(() => this.searchIndex.invalidate());
     this.emptyText = opts.emptyText || I18n.t("lists.chrome.empty");
     this.actions = opts.actions || { view: true, edit: true, clone: true, del: true };
     this.onAction = opts.onAction;
@@ -165,12 +220,38 @@ export class ListView {
     }
   }
 
-  render(): void {
-    let all = this.items ? this.items() : this.store.all(this.collection);
-    if (this.searchFields && this.query.trim()) {
-      const q = Text.normSearch(this.query);
-      all = all.filter((o) => this.searchFields!(o).some((v) => Text.normSearch(v).includes(q)));
+  /** CIBLE filtrée (dimension « à recherche »), ou null. La valeur persistée est une clé « kind:id »
+      qu'on ne présume jamais saine (état de session d'une version antérieure, entité disparue). */
+  private _targetValue(): ListRowTarget | null {
+    if (!this.targetFilter) return null;
+    const set = this.filterState[ListView.TARGET_DIM_KEY];
+    if (!set || !set.size) return null;
+    return TargetSearch.parse([...set][0]);
+  }
+
+  /** Lignes BRUTES du listing (avant filtres de colonne, tri et pagination).
+      - source CUSTOM (`items`, hors collections du document) : chemin HISTORIQUE inchangé — relevé
+        `searchFields` explicite, jamais le moteur partagé (cf. `ListOptions.searchFields`) ;
+      - collection du document : le MOTEUR décide local ⇄ serveur (cf. l'en-tête de la classe). */
+  private _collectRows(): any[] {
+    if (!this.rowEngine) {
+      let rows = this.items ? this.items() : [];
+      if (this.searchFields && this.query.trim()) {
+        const q = Text.normSearch(this.query);
+        rows = rows.filter((o) => this.searchFields!(o).some((v) => Text.normSearch(v).includes(q)));
+      }
+      return rows;
     }
+    return this.rowEngine.rows({ collection: this.collection, query: this.query, target: this._targetValue() });
+  }
+
+  /** Repeint le listing. `typing` = ce rendu ne vient QUE d'une frappe (ou de l'arrivée d'une réponse
+      serveur) : rien n'a muté dans le document, l'index de recherche mémoïsé est donc CONSERVÉ — c'est
+      lui qui rend la frappe ~30× moins chère (mesure en tête de `RecordSearchIndex`). Tout autre appel
+      (tri, filtre, page, re-rendu externe après écriture) le jette : dans le doute, on recalcule. */
+  render(options?: { typing?: boolean }): void {
+    if (!options || !options.typing) this.searchIndex.invalidate();
+    let all = this._collectRows();
     this.columns.filter((c) => c.filter).forEach((c) => {
       const set = this.filterState[this._colKey(c)];
       if (!set || !set.size) return;
@@ -262,7 +343,8 @@ export class ListView {
 
     this._searchEl.value = this.query;
     let t: any;
-    this._searchEl.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { this.query = this._searchEl.value; this.page = 1; this.render(); }, 180); });
+    // `typing: true` — une frappe ne mute rien : l'index de recherche mémoïsé survit (cf. render()).
+    this._searchEl.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { this.query = this._searchEl.value; this.page = 1; this.render({ typing: true }); }, 180); });
     this._scaffold = true; this._toolbarSig = null; this._filterBar = null;
   }
 
@@ -274,7 +356,7 @@ export class ListView {
     const sig = filterCols.map((c) => (c.filter!.options() || []).map((o) => o.id).join(",")).join("|");
     if (this._toolbarSig === sig && this._filterBar) return;
     this._toolbarSig = sig;
-    if (!filterCols.length) { this._filtersHostEl.replaceChildren(); this._chipsHostEl.replaceChildren(); this._resetHostEl.replaceChildren(); this._filterBar = null; return; }
+    if (!filterCols.length && !this.targetFilter) { this._filtersHostEl.replaceChildren(); this._chipsHostEl.replaceChildren(); this._resetHostEl.replaceChildren(); this._filterBar = null; return; }
     const dims: FilterBarDimension[] = filterCols.map((c) => {
       const key = this._colKey(c);
       if (!this.filterState[key]) this.filterState[key] = new Set();
@@ -284,10 +366,42 @@ export class ListView {
       [...set].forEach((id) => { if (!valid.has(id)) set.delete(id); });   // purge des valeurs disparues (parité historique)
       return { key, label: c.filter!.label || c.head, options: items.slice(), selected: set };
     });
+    const targetDim = this._targetDimension();
+    if (targetDim) dims.push(targetDim);   // la CIBLE en dernier : les critères d'énumération restent en tête du menu
     this._filterBar = new FilterBar(dims, () => { this.page = 1; this.render(); });
     this._filtersHostEl.replaceChildren(this._filterBar.addElement);
     this._chipsHostEl.replaceChildren(this._filterBar.chipsElement);
     this._resetHostEl.replaceChildren(this._filterBar.resetElement);
+  }
+
+  /** Dimension CIBLE « à recherche » de la barre de filtres (null si ce listing n'en déclare pas).
+      Contrairement aux dimensions d'énumération, ses valeurs sont LIBRES : aucune purge « option
+      disparue » ne s'y applique — une cible supprimée garde sa chip, dont le libellé retombe sur
+      « (supprimé) », pour que l'utilisateur VOIE le filtre qui vide sa liste et puisse le retirer. */
+  private _targetDimension(): FilterBarDimension | null {
+    const filter = this.targetFilter;
+    if (!filter) return null;
+    if (!this.filterState[ListView.TARGET_DIM_KEY]) this.filterState[ListView.TARGET_DIM_KEY] = new Set();
+    return {
+      key: ListView.TARGET_DIM_KEY,
+      label: filter.label,
+      options: [],
+      selected: this.filterState[ListView.TARGET_DIM_KEY],
+      search: {
+        placeholder: filter.placeholder,
+        // La recherche est ASYNCHRONE (serveur-pilotée en mode API, locale en mode fichier) : on habille
+        // les candidats À L'ARRIVÉE. Le SearchPop de la barre porte l'anti-rebond + le StaleGate.
+        fetch: (query) => filter.search(query).then((items) => items.map((item): SearchPopResult => ({
+          id: TargetSearch.key(item.kind, item.id), label: item.label, tag: filter.tagOf(item.kind) || undefined,
+        }))),
+        debounceMs: EntityCandidateSource.DEBOUNCE_MS,   // même tempo que la palette / les listings serveur-pilotés
+        labelOf: (valueId) => {
+          const target = TargetSearch.parse(valueId);
+          const label = target ? filter.labelOf(target.kind, target.id) : null;
+          return label !== null ? label : I18n.t("lists.filter.targetMissing");
+        },
+      },
+    };
   }
 
   /** Actions de ligne RÉDUITES à 3 boutons : Détails · Modifier · « plus d'actions » (menu overflow

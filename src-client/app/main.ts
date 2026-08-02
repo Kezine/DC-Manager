@@ -13,11 +13,13 @@ import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmPro
 import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
 import { FormBase } from "../views/forms/FormBase";
 import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
+import { GlobalSearchSources } from "../views/GlobalSearchSources";   // familles à fiche = périmètre envoyé à la recherche transverse serveur (mode API)
 import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
 import { Html } from "../core/Html";
-import { TargetSearch } from "../core/TargetSearch";
+import type { RemoteListReader } from "../core/StoreListRowSource";   // lecteur SERVEUR des listings (mode API — lot 3)
+import { EntityCandidateSource, type EntitySearchReader, type EntityCandidateFamily } from "../core/EntityCandidates";   // candidats d'entités serveur-pilotés (mode API — lot 4)
 import { UserDirectory } from "../core/UserDirectory";   // annuaire client (résolution des auteurs d'audit — mode API)
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
 import { CertsFormat } from "../core/CertsFormat";   // libellés/échéances des certs — famille externe de la recherche globale
@@ -28,7 +30,6 @@ import type { NetworkIdentity } from "../core/CertTargetMatch";
 import type { CertFicheHooks, CertFicheMatch } from "../views/CertFicheHooks";
 import type { CertTargetResolver } from "../views/CertsAdminView";
 import type { CertificateListItem } from "../views/forms/CertsClient";
-import { Schema } from "../../src-shared/Schema";
 import { Download } from "../core/Download";
 import { Prefs } from "../core/Prefs";
 import { SessionExpiry } from "../core/SessionExpiry";   // verrou idempotent « session expirée → retour au login » (mode API)
@@ -70,6 +71,25 @@ const adapter = REST_MODE
   ? new RestAdapter({ baseUrl: API_BASE_URL })
   : new BrowserStorageAdapter({ persistent: false, onUndoable: noteUndoable });
 const store = new Store(adapter);
+// LECTEUR SERVEUR des listings (lot 3 « listings serveur-pilotés », cf. docs/recherche.md) — mode API
+// SEULEMENT. Injecté dans chaque `ListView` : une requête ACTIVE (recherche saisie, ou filtre de cible
+// traduisible en `where`) est alors servie par le SERVEUR (colonne `search` enrichie), avec anti-rebond,
+// annulation et repli local. null en mode fichier/viewer → les listings restent 100 % locaux, sans jamais
+// toucher au réseau (principe n°15). `Store.list` absorbe les lignes reçues : ce sont des entités du Store,
+// donc les colonnes (rendus, tris, liens) fonctionnent à l'identique.
+const listRemoteReader: RemoteListReader | null = REST_MODE ? {
+  list: async (collection, { query, where, limit, signal }) =>
+    (await store.list(collection, { query, where, pageSize: limit, signal })).rows,
+} : null;
+// LECTEUR SERVEUR des CANDIDATS d'entités (lot 4) — mode API SEULEMENT. La recherche transverse
+// `GET …/search` restreinte aux collections des familles → records par collection, en UN aller-retour.
+// Injecté dans `EntityCandidateSource` (éditeur de liens d'intervention + filtres CIBLE des listings) :
+// en mode API, les candidats viennent du SERVEUR (au-delà du corpus chargé) ; null en mode fichier/viewer
+// → les sources restent 100 % locales, sans jamais toucher au réseau (principe n°15). Même route que la
+// palette globale, mais les collections VARIENT selon les familles du point de recherche (d'où le paramètre).
+const entitySearchReader: EntitySearchReader | null = REST_MODE ? {
+  search: async (query, collections, signal) => (await (adapter as RestAdapter).searchAll(query, { collections, signal })).results,
+} : null;
 // Client de synchro VM (feature AMOVIBLE) — mode API SEULEMENT (null en mode fichier/viewer → boutons masqués).
 // `adapter` est ici un RestAdapter (garanti par REST_MODE) ; il satisfait `VmRestContext` (dataBase/docId/headers/clientId publics).
 const vmSyncClient = REST_MODE ? new VmSyncClient(adapter as RestAdapter) : null;
@@ -217,7 +237,12 @@ async function boot(): Promise<void> {
         if (record) interventionsView.openDetail(record);
       },
     },
-  ] : []);
+  ] : [],
+  // RECHERCHE SERVEUR-PILOTÉE (mode API seulement — lot 2 recherche partagée) : la palette interroge la
+  // route transverse `GET …/search` en un aller-retour, restreinte à ses familles À FICHE (inutile de
+  // scanner ports/agrégats côté serveur : le corpus ne saurait pas les habiller). En mode FICHIER,
+  // undefined → la palette reste 100 % locale (principe n°15, jamais de réseau).
+  REST_MODE ? { search: async (q: string, signal: AbortSignal) => (await (adapter as RestAdapter).searchAll(q, { collections: GlobalSearchSources.families(), signal })).results } : undefined);
   /** Enregistrements d'interventions du DERNIER chargement de la palette — `open` en a besoin (cf. ci-dessus). */
   const interventionSearchCache = new Map<string, InterventionRecord>();
   const openGlobalSearch = (): void => {
@@ -495,6 +520,7 @@ async function boot(): Promise<void> {
           const canLocate = isLocatable ? (id: string) => { const target = locateTargetOf(id); return !!target && isLocatable(target); } : undefined;
           view = new ListView(store, container, {
             ...cfg,
+            remoteList: listRemoteReader,   // mode API : recherche/filtres serveur-pilotés (null en mode fichier)
             actions: VIEWER
               ? { view: true, locate: !!opts.locate, canLocate }   // viewer : consultation + localisation seulement (pas d'édition/clone/suppression)
               : { ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }), ...(opts.locate ? { locate: true, canLocate } : {}), ...(opts.manage ? { manage: true } : {}) },
@@ -605,7 +631,7 @@ async function boot(): Promise<void> {
     subtitle: I18n.t("tabs.racks.subtitle"),
     form: (id, done) => Forms.rack(store, formHost, id, done), addLabel: I18n.t("app.add.rack"), locate: "rack", manage: true,
   });
-  addListTab("cables", I18n.t("tabs.cables.label"), ListConfigs.cables, {
+  addListTab("cables", I18n.t("tabs.cables.label"), (s) => ListConfigs.cables(s, entitySearchReader), {
     icon: Icons.CABLE,
     subtitle: I18n.t("tabs.cables.subtitle"),
     form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: I18n.t("app.add.cable"),
@@ -614,7 +640,7 @@ async function boot(): Promise<void> {
   // IPAM : la page PRINCIPALE de l'onglet est la liste des ADRESSES IP ; les réseaux (sous-réseaux) et les plages
   // DHCP sont des sous-onglets. Le titre/soustitre réutilisent les libellés « adresses » ; ceux « IPAM — Réseaux IP »
   // partent au sous-onglet ipnetworks.
-  addListTab("ipam", I18n.t("tabs.ipam.label"), ListConfigs.ipAddresses, {
+  addListTab("ipam", I18n.t("tabs.ipam.label"), (s) => ListConfigs.ipAddresses(s, entitySearchReader), {
     icon: Icons.IPAM,
     title: I18n.t("tabs.ipaddresses.title"), subtitle: I18n.t("tabs.ipaddresses.subtitle"),
     form: (id, done) => Forms.ipAddress(store, formHost, id, done), addLabel: I18n.t("app.add.ipAddress"),
@@ -858,17 +884,17 @@ async function boot(): Promise<void> {
     const family = TARGET_FAMILIES[kind];
     return family ? family.collection : "";   // slug inconnu → collection vide : `store.get("")` rend null, la cible s'affiche « introuvable »
   };
+  // Source de CANDIDATS des cibles liables (double mode, lot 4) — familles DÉRIVÉES de TARGET_FAMILIES
+  // (plus de tableau parallèle à garder en phase), règle de nommage = `targetLabel` (spare → displayName…).
+  // En mode API, les candidats viennent du SERVEUR (recherche transverse, au-delà du corpus chargé) avec
+  // anti-rebond/annulation/repli ; en mode fichier, du cache LOCAL (`entitySearchReader` null). Le tri de
+  // pertinence, le plafond et la dédup (cibles déjà liées) restent délégués au module pur `TargetSearch`.
+  const interventionCandidateFamilies: EntityCandidateFamily[] = Object.entries(TARGET_FAMILIES)
+    .map(([kind, family]) => ({ kind, collection: family.collection, label: (r: any) => targetLabel(kind, r) }));
+  const interventionCandidates = new EntityCandidateSource(store, interventionCandidateFamilies, entitySearchReader);
   const interventionTargets: InterventionTargetSource = {
     labelOf: (kind, id) => { const r: any = store.get(targetCollection(kind), id); return r ? targetLabel(kind, r) : null; },
-    // Recherche UNIFIÉE des cibles liables : concatène les 3 familles en items {kind,id,label} puis délègue le
-    // tri de pertinence (préfixe avant inclusion), le plafond et la dédup (cibles déjà liées) au module pur
-    // TargetSearch, avec la normalisation PARTAGÉE Schema.normSearch (insensibilité casse/accents).
-    search: (query, excluded) => {
-      // La liste des familles DÉRIVE de TARGET_FAMILIES : plus de tableau parallèle à garder en phase.
-      const items = Object.entries(TARGET_FAMILIES).flatMap(([kind, family]) =>
-        store.all(family.collection).map((r: any) => ({ kind, id: r.id, label: targetLabel(kind, r) })));
-      return TargetSearch.rank(items, query, { normalize: Schema.normSearch, limit: 12, excluded });
-    },
+    search: (query, excluded) => interventionCandidates.fetch(query, excluded),
     // Ouvre la FICHE DE DÉTAIL existante de la cible (equipment/vm/spare) via la machinerie des fiches. Le
     // retour à la modale d'intervention est STRUCTUREL depuis que `Modal` est une PILE : la fiche s'EMPILE
     // par-dessus et le détail d'intervention reste vivant dessous (il se rafraîchit tout seul, via son
@@ -931,8 +957,10 @@ async function boot(): Promise<void> {
     openDetail: (id) => interventionsView.openDetailById(id),
     declareFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openCreateFor(kind, id, label); },
     // « Afficher plus » ouvre la vue FILTRÉE sur la cible (chip retirable posée à l'arrivée) — même montage
-    // que `declareFor` : on change de VUE puis on pose le filtre.
-    openListFor: (kind, id, label) => { shell.switchView("interventions"); interventionsView.openListFor(kind, id, label); },
+    // que `declareFor` : on change de VUE puis on pose le filtre. Le LIBELLÉ du hook n'est plus transmis
+    // depuis le lot 3 : la chip le résout elle-même à chaque rendu (dimension « à recherche »), ce qui la
+    // garde juste après un renommage et lui donne un rendu « introuvable » si la cible disparaît.
+    openListFor: (kind, id) => { shell.switchView("interventions"); interventionsView.openListFor(kind, id); },
   } : null;
   formHost.interventionHooks = interventionHooks;
 

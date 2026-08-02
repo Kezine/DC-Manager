@@ -1380,10 +1380,10 @@ module.exports = async () => {
     ck.eq(VmStatus.sortKey(vm("running", true)), "1_running", "sortKey : orpheline → préfixe '1_' (groupées en fin de tri croissant)");
     ck.eq(VmStatus.sortKey(vm("")), "0_", "sortKey : sans statut → préfixe seul");
 
-    // ---- RECHERCHE : le mot « orpheline » était écrit EN DUR en français dans `ListConfigs.searchFields`.
-    // Il passe par le catalogue → en interface anglaise, « orphan » (le mot AFFICHÉ) devient cherchable.
-    ck.eq(VmStatus.searchTerms(vm("running", true)).join("|"), "running|orpheline", "searchTerms : statut + mot LOCALISÉ (catalogue fr)");
-    ck.eq(VmStatus.searchTerms(vm("running")).join("|"), "running|", "searchTerms : non orpheline → terme vide (le champ de recherche les ignore)");
+    // ---- RECHERCHE : `VmStatus.searchTerms` a été RETIRÉ au lot 4 (aucun consommateur depuis que les
+    // listings boivent à la spec PARTAGÉE). La cherchabilité de « orphan »/« orpheline » (fr+en) est
+    // désormais couverte par le catalogue `vmOrphan` de `src-shared/SearchTerms` — cf. l'invariant n°15
+    // « golden n°15 : orphan (EN) trouve la VM orpheline en locale FR » dans la section GlobalSearchSources.
 
     // ---- ÉCHAPPEMENT : `status` est une donnée SOURCE d'un cluster tiers, posée en innerHTML.
     ck.eq(VmStatus.pills(vm("<img src=x onerror=alert(1)>")), '<span class="pill">&lt;img src=x onerror=alert(1)&gt;</span>', "statut hostile → ÉCHAPPÉ (aucune balise ne sort d'ici)");
@@ -1929,11 +1929,12 @@ module.exports = async () => {
     ck.eq(of("subEquipments", drv.id).label, "Drive LTO-8 n°2", "libellé sous-équipement = son nom (le maître est au CHEMIN, plus dans le libellé)");
     ck.eq(of("subEquipments", drv.id).path, "Librairie SL3000 › Étagère A / 3", "chemin sous-équipement : « maître › repère »");
     ck.eq(of("subEquipments", drv.id).sub, "SN-DRV-7", "sous-ligne sous-équipement : l'identité matérielle présente (ici la série seule)");
-    // termes : l'équipement HÉRITE des searchFields du listing ; le sous-équipement porte les siens
+    // termes : depuis le lot 2 recherche partagée, valeurs PROPRES + module PARTAGÉ SearchTerms
+    // (même spec que la colonne `search` serveur — parité n°15, cf. la section dédiée plus bas)
     const normAll = (terms) => terms.filter((t) => t != null).map((t) => SharedSchema.normSearch(t)).join(" ");
-    ck(normAll(of("equipments", lib.id).terms).includes("sn-lib-1"), "termes équipement : n° de série (via searchFields du listing)");
-    ck(normAll(of("equipments", lib.id).terms).includes("drive lto-8"), "termes équipement : le NOM de son drive (lot 6, hérité du listing)");
-    ck(normAll(of("subEquipments", drv.id).terms).includes("librairie"), "termes sous-équipement : le nom de son MAÎTRE (chercher la librairie remonte aussi ses drives)");
+    ck(normAll(of("equipments", lib.id).terms).includes("sn-lib-1"), "termes équipement : n° de série (valeur PROPRE du record)");
+    ck(normAll(of("equipments", lib.id).terms).includes("drive lto-8"), "termes équipement : le NOM de son drive (dérivation par ENFANTS du module partagé — décision D2)");
+    ck(normAll(of("subEquipments", drv.id).terms).includes("librairie"), "termes sous-équipement : le nom de son MAÎTRE (lien du module partagé — chercher la librairie remonte aussi ses drives)");
     // habillage d'un CÂBLE : extrémités « équipement : port » en TEXTE (jamais de HTML dans le corpus)
     const pA = await s.create("ports", { name: "FC-1", equipment_id: lib.id });
     const sw = await s.create("equipments", { name: "SW-1" });
@@ -1989,6 +1990,55 @@ module.exports = async () => {
     const drv2Item = GlobalSearchSources.build(s).find((x) => x.kind === "subEquipments" && x.id === drv2.id);
     ck.eq(drv2Item.locate && drv2Item.locate.kind, "equipment", "sous-équipement d'un maître EN BAIE → Localiser vise le MAÎTRE (kind equipment)");
     ck.eq(drv2Item.locate && drv2Item.locate.id === drv2.equipment_id, true, "…et la cible est l'id du maître, pas celui du drive");
+  }
+  });
+
+  await section("GlobalSearchSources : termes PARTAGÉS (parité fichier ⇄ serveur, n°15) + habillage des records serveur", async () => {
+  {
+    // --- 1. PARITÉ des termes (lot 2 recherche partagée) : le corpus LOCAL passe par le module
+    //     partagé SearchTerms → les catalogues fr+en sont cherchables dans les DEUX langues en mode
+    //     fichier aussi, exactement comme la colonne `search` du serveur. La locale du harnais est
+    //     « fr » : trouver les termes ANGLAIS prouve que la source n'est plus l'I18n courante
+    //     (les dérivations ad hoc résorbées — VmStatus.searchTerms retiré au lot 4, SpareTypes.label…). ---
+    const s = await makeStore();
+    const norm = SharedSchema.normSearch;
+    const hit = (query, kind, id) => GlobalSearch
+      .rank(GlobalSearchSources.build(s), query, { normalize: norm, kindOrder: GlobalSearchSources.FAMILY_ORDER })
+      .some((g) => g.kind === kind && g.items.some((x) => x.id === id));
+    const vmOrpheline = await s.create("vms", { name: "vm-fantome", orphan: true, status: "running" });
+    ck(hit("orphan", "vms", vmOrpheline.id), "🎯 golden n°15 : « orphan » (EN) trouve la VM orpheline en locale FR (catalogue partagé, plus l'I18n courante)");
+    ck(hit("orpheline", "vms", vmOrpheline.id), "…et « orpheline » (FR) aussi — les DEUX langues, comme la colonne serveur");
+    const hdd = await s.create("spares", { name: "Disque nas", type: "hdd", capacity_value: 4, capacity_unit: "TB", rpm: 7200 });
+    ck(hit("hard drive", "spares", hdd.id), "golden n°15 : « hard drive » (EN) trouve le spare hdd en locale FR (catalogue spareType partagé)");
+    // compositions TAPABLES (search-v2) — mêmes termes que la colonne serveur, par le même module
+    ck(hit("4 tb", "spares", hdd.id), "composition « 4 TB » : capacité du disque cherchable d'un trait (Spare.techSummary répliqué)");
+    ck(hit("7200 rpm", "spares", hdd.id), "composition « 7200 rpm » : cherchable d'un trait");
+    const dc = await s.create("datacenters", { name: "Salle P", location: (await s.create("sites", { name: "Site P" })).id });
+    const rack = await s.create("racks", { name: "BX-9", datacenter_id: dc.id, u_count: 47 });
+    const srv = await s.create("equipments", { name: "srv-compo", brand: "Dell", model: "R740", rack_id: rack.id, placement_mode: "rack", dim_mode: "u", rack_u: 12, u_height: 1 });
+    ck(hit("u12", "equipments", srv.id), "composition « U12 » : la position en baie se tape telle quelle (own partagé — en plus du path habillé)");
+    ck(hit("dell r740", "equipments", srv.id), "composition « marque modèle » : « dell r740 » d'un trait");
+    ck(hit("47 u", "racks", rack.id), "composition « 47 U » : la taille de la baie se tape telle quelle");
+    const floor = await s.create("floors", { location: dc.location, floor: "3" });
+    ck(hit("et. 3", "floors", floor.id), "composition « ét. 3 » : le libellé même d'un étage (préfixe FR, accents normalisés)");
+    ck(hit("fl. 3", "floors", floor.id), "composition « fl. 3 » : préfixe EN aussi (le corpus local ignore la langue, comme le serveur)");
+
+    // --- 2. HABILLAGE de records SERVEUR (mode API serveur-piloté — GlobalSearchPalette) :
+    //     dressRecords préfère l'INSTANCE LOCALE (habillage riche), tolère un record BRUT inconnu
+    //     du Store (écriture concurrente), ignore les collections sans fiche. ---
+    const dressed = GlobalSearchSources.dressRecords(s, {
+      equipments: [{ id: srv.id }],                                       // connu localement → instance du Store
+      spares: [{ id: "sp-etranger", type: "ssd", serial: "SN-REMOTE" }],  // inconnu localement → habillé BRUT
+      ports: [{ id: "p-x", name: "eth9" }],                               // pas de fiche → ignoré
+      fantomes: [{ id: "z" }],                                            // collection inconnue → ignorée
+    });
+    ck.eq(dressed.length, 2, "dressRecords : familles à fiche seulement (ports/collections inconnues écartés)");
+    const dSrv = dressed.find((x) => x.kind === "equipments");
+    ck.eq(dSrv && dSrv.label, "srv-compo", "dressRecords : record CONNU → habillé depuis l'instance LOCALE (même rendu que le corpus)");
+    ck.eq(dSrv && dSrv.path, "BX-9 · U12", "dressRecords : le chemin (lookups liés) marche — le document est hydraté");
+    const dSpare = dressed.find((x) => x.kind === "spares");
+    ck.eq(dSpare && dSpare.label, "SN-REMOTE", "dressRecords : record INCONNU du Store → habillé BRUT (dégradé mais fonctionnel : displayName absent → repli serial)");
+    ck.eq(GlobalSearchSources.itemOf(s, "aggregates", { id: "a1" }), null, "itemOf : famille hors corpus → null (défensif)");
   }
   });
 

@@ -122,7 +122,7 @@ export class DocumentStore {
     if (!r) {
       const file = path.join(this.dir, id + ".db");
       LegacyMigration.migrateIfLegacy(file, this.Database, this.log);
-      r = RelationalRepository.open(file, this.Database);
+      r = RelationalRepository.open(file, this.Database, this.log);   // log : trace le backfill éventuel de la colonne `search`
       this.repos.set(id, r);
       this.log.debug("dépôt ouvert", id);
     }

@@ -30,8 +30,18 @@ export interface TargetSearchOptions {
 
 export class TargetSearch {
   /** Clé d'identité d'une cible (couple famille+id) — MÊME convention que les liens d'intervention
-      (« <kind>:<id> ») : c'est elle que la vue met dans `excluded` pour la dédup. */
+      (« <kind>:<id> ») : c'est elle que la vue met dans `excluded` pour la dédup, et celle que le filtre
+      CIBLE unifié des listings (lot 3) stocke comme valeur de sa dimension « à recherche ». */
   static key(kind: string, id: string): string { return kind + ":" + id; }
+
+  /** Décodage d'une clé « <kind>:<id> » → { kind, id }, ou null si la forme n'y est pas (valeur venue
+      d'un état persisté, donc jamais présumée saine). Le SÉPARATEUR est le PREMIER « : » : un id
+      contenant lui-même des deux-points reste intact (l'inverse exact de `key`). */
+  static parse(key: string): { kind: string; id: string } | null {
+    const at = (key || "").indexOf(":");
+    if (at <= 0 || at === key.length - 1) return null;
+    return { kind: key.slice(0, at), id: key.slice(at + 1) };
+  }
 
   /** Filtre, classe et borne les candidats pour une requête :
       - requête vide (après normalisation) → AUCUN résultat (on n'inonde pas le popover au focus) ;

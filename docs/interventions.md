@@ -229,7 +229,7 @@ le cœur (notif live) et ce module (principe n°3 — aucune duplication de la r
 | `views/forms/InterventionsClient.ts` | **Client REST** du module + `InterventionsError` (code HTTP + `detail`). DTOs = **MIROIRS** commentés des formes serveur (duplication assumée, principe n°3 — préserve l'amovibilité). `listPage`/`meta`/`counts`/`getOne`/`save`/`remove` ; `buildQuery` PURE (filtres `kind`/`status`/`priority` **répétables**). ⚠ Routes **SCOPÉES PAR DOCUMENT** (`<dataBase>/interventions/…`, comme `CertsClient`). |
 | `core/InterventionsFormat.ts` | Logique **PURE** (aucun DOM, aucune dépendance i18n — testée en isolation) : `kindLabelKey`/`statusLabelKey`/`priorityLabelKey`/`targetKindLabelKey` renvoient des **CLÉS** i18n (la vue appelle `I18n.t` dessus, le module reste pur) ; `priorityRank`/`priorityClass`/`statusClass` (rang & couleur de badge) ; `jiraUrl` (référence Jira → lien, jointures de `/`) ; `formatWindow` ; `shortId`. Porte les slugs MIROIRS des énumérations serveur. |
 | `core/TargetSearch.ts` | Logique **PURE** de la SÉLECTION unifiée des cibles liables (équipements + VMs + spares CONFONDUS) : `rank(items, query, opts)` filtre/classe/borne les candidats — **préfixe avant simple inclusion**, plafond (déf. 12), **dédup des cibles déjà liées** (`excluded`), normalisation **INJECTÉE** (le cœur passe `Schema.normSearch` — insensibilité casse/accents). Testé en isolation (`test-interventions.js`). |
-| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition/**détail**, éditeur de liens **via SearchPop**, transitions rapides, actions par ligne en **boutons-icône** (principe n°14). Déclare l'interface hôte `InterventionTargetSource` (`labelOf`/`search`/`openTargetDetail` — cibles injectées, la vue ne touche JAMAIS le Store) ; `openCreateFor(kind, id)` ouvre une création PRÉ-LIÉE et `openListFor(kind, id, label)` pose le filtre par CIBLE (chip retirable) — tous deux appelés par navigation depuis une fiche ; `openDetailById(id)` EMPILE la fiche de détail par-dessus la modale courante SANS changer de vue (mini-listing des fiches — l'intervention est RELUE du serveur, et l'`onResume` du niveau REFETCHE par id : `this.items` peut être vide/périmé quand la vue n'est pas active). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
+| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition/**détail**, éditeur de liens **via SearchPop**, transitions rapides, actions par ligne en **boutons-icône** (principe n°14). Déclare l'interface hôte `InterventionTargetSource` (`labelOf`/`search`/`openTargetDetail` — cibles injectées, la vue ne touche JAMAIS le Store) ; `openCreateFor(kind, id)` ouvre une création PRÉ-LIÉE et `openListFor(kind, id)` pose le filtre par CIBLE (même état que la dimension « Cible » de la barre, cf. plus bas) — tous deux appelés par navigation depuis une fiche ; `openDetailById(id)` EMPILE la fiche de détail par-dessus la modale courante SANS changer de vue (mini-listing des fiches — l'intervention est RELUE du serveur, et l'`onResume` du niveau REFETCHE par id : `this.items` peut être vide/périmé quand la vue n'est pas active). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
 | `views/InterventionFicheHooks.ts` | **Contrat d'intégration « fiches »** `InterventionFicheHooks { countOpen; latestFor; openDetail; declareFor; openListFor }` + type LOCAL `InterventionFicheItem` (injecté via `FormHost.interventionHooks`, implémenté dans `main.ts`) — permet aux fiches détail d'afficher le badge, le mini-listing « 3 dernières » (lignes CLIQUABLES : `openDetail` EMPILE la fiche de détail, seul hook SANS navigation) et de déclarer/ouvrir la vue FILTRÉE sur la cible SANS importer la vue ni le client (découplage principe n°2). |
 | `views/forms/InterventionFicheRow.ts` | Helper DOM PARTAGÉ (une seule implémentation pour les 4 fiches) : rangée « Interventions » (badge async + « Déclarer » + mini-listing « 3 dernières » async à lignes CLIQUABLES — `role="button"`, Entrée/Espace — + « Afficher plus »). No-op si `hooks` null. Ne connaît que le contrat ; réutilise `Format`/`InterventionsFormat` pour dates/badges. |
 
@@ -249,14 +249,26 @@ interventions sont propres au document).
 - **Listing PAGINÉ SERVEUR** (jamais de slice client, CSS des `ListView` : `.list-toolbar`/`.pagination`/
   `.sortable`/`.sort-ind`) : toolbar = champ de **recherche NORMALISÉ** (classe `.search-input`, même
   markup/thème que la recherche des listings — query, anti-rebond ~250 ms) + filtres **MultiSelect**
-  « Type »/« Statut »/« Priorité » (répétables) + « Réinit. filtres », plus — quand on arrive par
-  « Afficher plus » d'une fiche — une **chip de CIBLE retirable** (« Cible : {label} ✕ », posée par navigation
-  seule, jamais saisie ici ; réutilise la primitive visuelle `.filter-chip` sans le modèle `FilterChips`) ; **tri** par clic d'en-tête
+  « Type »/« Statut »/« Priorité » (répétables) + une dimension **« Cible » À RECHERCHE** + « Réinit. filtres » ;
+  **tri** par clic d'en-tête
   (Titre/Priorité/Statut/Fenêtre) ; état de listing en mémoire d'instance (après écriture, la **page
   courante** est rechargée — clamp serveur si elle disparaît). Colonnes : **Titre** (CLIQUABLE → modale de
   détail), Type, **Priorité** (badge coloré par rang), **Statut** (badge), **Fenêtre planifiée**
   (`formatWindow`, vide sinon), **Liens** (compte + détail en survol), **Jira** (lien cliquable via `jiraUrl`
   + `meta` chargée UNE fois ; texte brut si pas de base), **Créé par**, Actions.
+- **Filtre par CIBLE — dimension « à RECHERCHE » (lot 3 « recherche partagée »)**. Le filtre par objet lié
+  (équipement / VM / spare / sous-équipement) est une **dimension ordinaire de la `FilterBar`**, dont le
+  contrôle est un **`SearchPop`** au lieu d'un multiselect (principe n°14 : la liste des cibles est longue,
+  croissante et à libellés composés). Il est alimenté par la **MÊME source injectée** que l'éditeur de liens
+  (`InterventionTargetSource.search`) — même pertinence, même badge de famille. **DEUX points d'entrée, UN
+  seul état** (`ListingState.targets`, clés `« kind:id »` de `core/TargetSearch`, **mono-cible** en v1) :
+  la navigation depuis une fiche (« Afficher plus » → `openListFor`) et la saisie à la main dans « + Filtre ».
+  La chip résultante est une chip **normale** (`FilterChips`, « Cible : SW-Coeur ✕ »), retirée par son ✕ **et**
+  par « Réinitialiser ». Son libellé est **résolu à chaque rendu** (`labelOf`), jamais mémorisé : un
+  renommage se reflète tout seul, et une cible supprimée devient « (introuvable) » sans effacer le filtre —
+  l'utilisateur voit ce qui vide sa liste. ⚠ **Absorption** : avant le lot 3, cette chip avait sa propre
+  rangée, sa propre primitive visuelle et son propre code de retrait, hors du modèle `FilterChips` ; c'est
+  ce doublon qui a disparu (`FilterChips` sait désormais porter une valeur **libre**, cf. docs/recherche.md).
 - **Actions par ligne — boutons-ICÔNE** (registre `Icons` + `IconButton`, principe n°14 ; aria-label +
   tooltip i18n) : **Détails** (`INFO`, ouvre la modale de consultation), **Modifier** (`EDIT`, modale),
   **Démarrer** (`PLAY`, declared/planned → `in_progress`), **Clore** (`CHECK`, `in_progress` → `closed`),
@@ -319,10 +331,10 @@ spare, et y **voir d'un coup d'œil** les interventions ouvertes.
   édition l'`onResume` du niveau **refetche par id** — les valeurs affichées sont FRAÎCHES même quand la vue
   Interventions n'est pas active). Sous le listing, un bouton **« Afficher plus »**
   (présent dès ≥ 1 intervention) qui, comme « Déclarer », **FERME la fiche PUIS** ouvre la vue « Interventions »
-  **FILTRÉE sur la cible** : `openListFor(kind, id, label)` pose le filtre de cible à l'arrivée, affiché par une
-  **chip retirable** (« Cible : {label} ✕ ») dans la barre de filtres. Le filtrage repose sur le paramètre
-  `target` du listing (une cible ; cf. `latestFor` au contrat). Poser ce filtre reste réservé à la
-  **navigation** — la barre ne propose PAS de le saisir à la main (différé).
+  **FILTRÉE sur la cible** : `openListFor(kind, id)` pose la MÊME valeur que la dimension « Cible » de la barre
+  poserait, affichée par une **chip retirable** (« Cible : {label} ✕ »). Le filtrage repose sur le paramètre
+  `target` du listing (une cible ; cf. `latestFor` au contrat). Depuis le lot 3, poser ce filtre n'est plus
+  réservé à la navigation : la barre le propose aussi (cf. « Filtre par CIBLE » ci-dessus).
 - **Découplage** (principe n°2). Les fiches n'importent **NI la vue NI le client** interventions : elles ne
   connaissent que le contrat `InterventionFicheHooks { countOpen; latestFor; declareFor; openListFor }` (fichier
   `views/InterventionFicheHooks.ts`, avec le type LOCAL `InterventionFicheItem` — jamais `InterventionRecord`),
