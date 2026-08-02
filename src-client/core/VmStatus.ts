@@ -103,12 +103,11 @@ export class VmStatus {
     return (VmStatus.isOrphan(vm) ? "1_" : "0_") + VmStatus.raw(vm);
   }
 
-  /** Termes à verser dans la recherche plein texte : le statut brut, et le mot « orpheline » LOCALISÉ.
-      ⚠ Ce mot était écrit EN DUR en français dans `ListConfigs` : en interface anglaise, chercher
-      « orphan » — le mot que l'utilisateur voit dans la pastille — ne remontait rien. */
-  static searchTerms(vm: VmStatusVm | null | undefined): string[] {
-    return [VmStatus.raw(vm), VmStatus.isOrphan(vm) ? I18n.t("lists.ph.orphan") : ""];
-  }
+  // ⚠ `searchTerms` (statut brut + mot « orpheline » localisé) a été RETIRÉ au lot 4 : plus aucun
+  // consommateur depuis que les listings ont perdu leurs `searchFields` (lot 3) et boivent à la spec
+  // PARTAGÉE `src-shared/SearchTerms` (catalogue `vmOrphan` fr+en — « orphan » reste cherchable dans les
+  // deux langues, en mode fichier comme serveur, cf. docs/recherche.md et l'invariant n°15 testé).
+  // L'AFFICHAGE des statuts VM (pastilles ci-dessous) n'a PAS bougé.
 
   /** Pastille de STATUT seule — HTML SÛR. Reprend le style de `kindPill` (classe `.pill` + variables
       sémantiques du thème). Sans statut : le tiret discret, pas une pastille vide. */

@@ -48,6 +48,10 @@ export interface FilterBarSearchDimension {
   labelOf: (valueId: string) => string | null;
   /** Caractères minimaux avant de chercher — défaut 1 (le corpus est local, une lettre suffit). */
   minChars?: number;
+  /** Anti-rebond du SearchPop (ms) — absent = défaut du composant. Les dimensions serveur-pilotées
+      (recherche de CANDIDATS d'entités en mode API) posent `EntityCandidateSource.DEBOUNCE_MS` pour
+      réagir au MÊME tempo que la palette et les listings. */
+  debounceMs?: number;
 }
 
 /** Dimension présentée par la barre : valeurs possibles + Set sélectionné (muté en place).
@@ -145,6 +149,7 @@ export class FilterBar {
     const pop = new SearchPop({
       placeholder: source.placeholder,
       minChars: source.minChars != null ? source.minChars : 1,
+      ...(source.debounceMs != null ? { debounceMs: source.debounceMs } : {}),
       fetch: (query) => Promise.resolve(source.fetch(query)),
       onPick: (result) => {
         dim.selected.clear();               // MONO-valeur v1 : la nouvelle cible remplace la précédente

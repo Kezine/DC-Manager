@@ -4,6 +4,7 @@ import { Markdown } from "../core/Markdown";
 import { I18n } from "../i18n/I18n";
 import { InterventionsFormat, type BadgeClass } from "../core/InterventionsFormat";
 import { TargetSearch } from "../core/TargetSearch";
+import { EntityCandidateSource } from "../core/EntityCandidates";
 import { FormControls, type SelectOption } from "../ui/FormControls";
 import { type MultiItem } from "../ui/MultiSelect";
 import { FilterBar } from "../ui/FilterBar";
@@ -60,8 +61,10 @@ export interface InterventionTargetSource {
   labelOf(kind: string, id: string): string | null;
   /** Recherche UNIFIÉE sur TOUTES les familles liables (équipements + VMs + spares CONFONDUS) : renvoie des
       candidats {kind,id,label} déjà TRIÉS par pertinence (préfixe avant inclusion) et BORNÉS. `excluded` =
-      clés « kind:id » des cibles déjà liées, écartées des résultats (dédup). Insensible casse/accents. */
-  search(query: string, excluded?: ReadonlySet<string>): Array<{ kind: string; id: string; label: string }>;
+      clés « kind:id » des cibles déjà liées, écartées des résultats (dédup). Insensible casse/accents.
+      ASYNCHRONE (norme n°15) : mode API → candidats SERVEUR (au-delà du corpus chargé) ; mode fichier →
+      candidats LOCAUX (promesse résolue). Cf. `core/EntityCandidateSource`. */
+  search(query: string, excluded?: ReadonlySet<string>): Promise<Array<{ kind: string; id: string; label: string }>>;
   /** Ouvre la FICHE DE DÉTAIL existante d'une cible (equipment/vm/spare). Elle s'EMPILE sur le détail
       d'intervention, qui reste vivant dessous : le retour est structurel (Annuler / ← / Retour arrière
       dépilent), plus besoin d'un rappel de fermeture pour le rejouer. */
@@ -282,10 +285,12 @@ export class InterventionsAdminView {
       selected: st.targets,
       search: {
         placeholder: I18n.t("interventions.filter.targetPlaceholder"),
-        fetch: (query: string): SearchPopResult[] => this.targets.search(query).map((r) => ({
+        // ASYNCHRONE (serveur-pilotée en mode API, locale en mode fichier) : on habille À L'ARRIVÉE.
+        fetch: (query: string): Promise<SearchPopResult[]> => this.targets.search(query).then((rs) => rs.map((r) => ({
           id: TargetSearch.key(r.kind, r.id), label: r.label,
           tag: I18n.t(InterventionsFormat.targetKindLabelKey(r.kind)),
-        })),
+        }))),
+        debounceMs: EntityCandidateSource.DEBOUNCE_MS,   // même tempo que la palette / les listings serveur-pilotés
         labelOf: (valueId: string) => {
           const target = TargetSearch.parse(valueId);
           const label = target ? this.targets.labelOf(target.kind, target.id) : null;
@@ -590,10 +595,12 @@ export class InterventionsAdminView {
     const pop = new SearchPop({
       placeholder: I18n.t("interventions.modal.linksSearchPlaceholder"),
       minChars: 1,
+      debounceMs: EntityCandidateSource.DEBOUNCE_MS,   // même tempo que la palette / les listings serveur-pilotés
       fetch: (query) => {
+        // La dédup est calculée à CHAQUE frappe sur l'état COURANT de `links`, puis les candidats
+        // (serveur en mode API, locaux en mode fichier) sont habillés à l'arrivée.
         const excluded = new Set(links.map((l) => l.target_kind + ":" + l.target_id));
-        const results = this.targets.search(query, excluded);
-        return Promise.resolve(results.map((r): SearchPopResult => ({
+        return this.targets.search(query, excluded).then((results) => results.map((r): SearchPopResult => ({
           id: r.kind + ":" + r.id, label: r.label,
           tag: I18n.t(InterventionsFormat.targetKindLabelKey(r.kind)), data: r,
         })));

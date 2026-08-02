@@ -435,11 +435,13 @@ module.exports = async () => {
     await store.create("equipments", { name: "Routeur-Bord", type: "other" });
     const vm = await store.create("vms", { name: "srv-web" });
 
+    // `search` est ASYNCHRONE depuis le lot 4 (serveur-pilotée en mode API ; ici, reader null → LOCAL,
+    // promesse résolue) : on AWAIT. Le comportement des candidats est verrouillé, en propre, par test-entity-candidates.js.
     const carrier = ListTargets.ipCarrier(store);
-    const found = carrier.search("sw");
+    const found = await carrier.search("sw");
     ck.eq(found.length, 1, "ipCarrier : la recherche traverse les familles et borne (une seule correspondance ici)");
     ck.eq(found[0].kind + "/" + found[0].label, "equipment/SW-Coeur", "ipCarrier : candidat {kind,label}");
-    const both = carrier.search("r");
+    const both = await carrier.search("r");
     ck(both.some((r) => r.kind === "vm") && both.some((r) => r.kind === "equipment"),
       "ipCarrier : équipements ET VMs dans LA MÊME liste (principe n°14 — pas un select par famille)");
     ck.eq(carrier.labelOf("equipment", sw.id), "SW-Coeur", "ipCarrier : libellé d'une cible existante");
@@ -447,13 +449,13 @@ module.exports = async () => {
     ck.eq(carrier.labelOf("equipment", "disparu"), null, "ipCarrier : cible disparue → null (la chip affiche « (supprimé) »)");
     ck.eq(carrier.labelOf("inconnu", sw.id), null, "ipCarrier : famille hors périmètre → null");
     ck(carrier.tagOf("equipment") !== "" && carrier.tagOf("vm") !== "", "ipCarrier : badge de FAMILLE (deux familles confondues → il faut les distinguer)");
-    ck.eq(carrier.search("   ").length, 0, "recherche vide → aucun candidat (on n'inonde pas le popover)");
-    ck(carrier.search("x".repeat(3)).length === 0, "recherche sans correspondance → aucun candidat");
+    ck.eq((await carrier.search("   ")).length, 0, "recherche vide → aucun candidat (on n'inonde pas le popover)");
+    ck((await carrier.search("x".repeat(3))).length === 0, "recherche sans correspondance → aucun candidat");
 
     const cables = ListTargets.cableEquipment(store);
     ck.eq(cables.tagOf("equipment"), "", "cableEquipment : famille UNIQUE → aucun badge (il n'apprendrait rien)");
-    ck.eq(cables.search("srv-web").length, 0, "cableEquipment : les VMs ne sont PAS candidates (un câble n'aboutit pas sur une VM)");
-    ck.eq(cables.search("sw")[0].id, sw.id, "cableEquipment : l'équipement, lui, est candidat");
+    ck.eq((await cables.search("srv-web")).length, 0, "cableEquipment : les VMs ne sont PAS candidates (un câble n'aboutit pas sur une VM)");
+    ck.eq((await cables.search("sw"))[0].id, sw.id, "cableEquipment : l'équipement, lui, est candidat");
     ck.eq(ListTargets.SEARCH_LIMIT, 12, "plafond de candidats = constante nommée (parité éditeur de liens d'intervention)");
   }
   });

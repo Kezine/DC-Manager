@@ -20,9 +20,9 @@
    seul encodage dans toute l'app.
    ============================================================================= */
 import type { Store } from "../store";
-import { Schema } from "../../src-shared/Schema";
-import { TargetSearch, type TargetSearchItem } from "../core/TargetSearch";
+import { type TargetSearchItem } from "../core/TargetSearch";
 import type { ListTargetResolver } from "../core/StoreListRowSource";
+import { EntityCandidates, EntityCandidateSource, type EntityCandidateFamily, type EntitySearchReader } from "../core/EntityCandidates";
 import { I18n } from "../i18n/I18n";
 
 /** Descripteur COMPLET d'une dimension CIBLE : l'habillage (libellés, badge, recherche) + le contrat
@@ -32,8 +32,10 @@ export interface ListTargetFilter extends ListTargetResolver {
   label: string;
   /** Repli du champ de recherche du SearchPop. */
   placeholder: string;
-  /** Candidats d'une saisie — familles CONFONDUES, déjà triés par pertinence et bornés. */
-  search(query: string): TargetSearchItem[];
+  /** Candidats d'une saisie — familles CONFONDUES, déjà triés par pertinence et bornés. ASYNCHRONE
+      (norme n°15) : en mode API, ils viennent du SERVEUR (recherche transverse, au-delà du corpus
+      chargé) ; en mode fichier, du cache LOCAL (promesse résolue). Cf. `core/EntityCandidateSource`. */
+  search(query: string): Promise<TargetSearchItem[]>;
   /** Libellé d'AFFICHAGE d'une cible choisie (chip) — null si elle a disparu du document. */
   labelOf(kind: string, id: string): string | null;
   /** Badge de FAMILLE d'un résultat (`tag` du SearchPop) — "" pour n'en afficher aucun. */
@@ -52,20 +54,23 @@ interface TargetFamily {
 
 export class ListTargets {
   /** Nombre maximal de candidats proposés au SearchPop — même plafond que l'éditeur de liens
-      d'intervention (au-delà, on affine la saisie plutôt que de dérouler une liste illisible). */
-  static readonly SEARCH_LIMIT = 12;
+      d'intervention (au-delà, on affine la saisie plutôt que de dérouler une liste illisible).
+      CENTRALISÉ dans `core/EntityCandidates` depuis que la source de candidats est partagée (lot 4). */
+  static readonly SEARCH_LIMIT = EntityCandidates.SEARCH_LIMIT;
 
   private static readonly EQUIPMENT: TargetFamily = { kind: "equipment", collection: "equipments", fallbackKey: "lists.ph.equipment", tagKey: "lists.filter.targetEquipment" };
   private static readonly VM: TargetFamily = { kind: "vm", collection: "vms", fallbackKey: "lists.ph.vm", tagKey: "lists.filter.targetVm" };
 
   /** PORTEUR d'une adresse IP : équipement OU VM. Le lien est une simple colonne (`equipment_id` /
-      `vm_id`) → le filtre part au SERVEUR en `where` ; le mode fichier applique le même test en mémoire. */
-  static ipCarrier(store: Store): ListTargetFilter {
+      `vm_id`) → le filtre part au SERVEUR en `where` ; le mode fichier applique le même test en mémoire.
+      `reader` (mode API) alimente la recherche de CANDIDATS serveur-pilotée ; null = mode fichier. */
+  static ipCarrier(store: Store, reader: EntitySearchReader | null = null): ListTargetFilter {
     const families = [ListTargets.EQUIPMENT, ListTargets.VM];
+    const source = new EntityCandidateSource(store, ListTargets.candidateFamilies(families), reader, ListTargets.SEARCH_LIMIT);
     return {
       label: I18n.t("lists.filter.carrier"),
       placeholder: I18n.t("lists.filter.carrierPlaceholder"),
-      search: (query) => ListTargets.candidates(store, families, query),
+      search: (query) => source.fetch(query),
       labelOf: (kind, id) => ListTargets.labelOf(store, families, kind, id),
       tagOf: (kind) => ListTargets.tagOf(families, kind),
       where: (kind, id) => (kind === "equipment" ? { equipment_id: id } : kind === "vm" ? { vm_id: id } : null),
@@ -81,13 +86,15 @@ export class ListTargets {
 
   /** ÉQUIPEMENT d'un câble : le rattachement passe par ses PORTS (câble → port → équipement), deux
       SAUTS qu'aucune égalité de colonne n'exprime → `where` toujours null, restriction CLIENTE via
-      les index du Store (`cablesOfEquipment`). Asymétrie assumée v1, cf. docs/recherche.md. */
-  static cableEquipment(store: Store): ListTargetFilter {
+      les index du Store (`cablesOfEquipment`). Asymétrie assumée v1, cf. docs/recherche.md.
+      `reader` (mode API) alimente la recherche de CANDIDATS serveur-pilotée ; null = mode fichier. */
+  static cableEquipment(store: Store, reader: EntitySearchReader | null = null): ListTargetFilter {
     const families = [ListTargets.EQUIPMENT];
+    const source = new EntityCandidateSource(store, ListTargets.candidateFamilies(families), reader, ListTargets.SEARCH_LIMIT);
     return {
       label: I18n.t("lists.col.equipment"),
       placeholder: I18n.t("lists.filter.equipmentPlaceholder"),
-      search: (query) => ListTargets.candidates(store, families, query),
+      search: (query) => source.fetch(query),
       labelOf: (kind, id) => ListTargets.labelOf(store, families, kind, id),
       tagOf: () => "",   // famille UNIQUE : un badge répété à chaque ligne n'apprendrait rien
       where: () => null,
@@ -103,12 +110,12 @@ export class ListTargets {
 
   /* ---- helpers communs ---- */
 
-  /** Candidats {kind,id,label} d'une saisie, familles confondues : classement (préfixe avant inclusion),
-      plafond et normalisation PARTAGÉE délégués au module pur `TargetSearch`. */
-  private static candidates(store: Store, families: readonly TargetFamily[], query: string): TargetSearchItem[] {
-    const items = families.flatMap((family) => store.all(family.collection)
-      .map((record: any) => ({ kind: family.kind, id: record.id, label: ListTargets.nameOf(record, family) })));
-    return TargetSearch.rank(items, query, { normalize: Schema.normSearch, limit: ListTargets.SEARCH_LIMIT });
+  /** Adapte les familles locales (`TargetFamily`) en familles de la source PARTAGÉE (`EntityCandidateFamily`) :
+      la RÈGLE DE NOMMAGE (`nameOf` = `name` sinon repli localisé) devient la fonction `label` injectée. */
+  private static candidateFamilies(families: readonly TargetFamily[]): EntityCandidateFamily[] {
+    return families.map((family) => ({
+      kind: family.kind, collection: family.collection, label: (record: any) => ListTargets.nameOf(record, family),
+    }));
   }
 
   /** Libellé d'une cible EXISTANTE, ou null si elle a disparu (chip « supprimé », jamais une erreur). */

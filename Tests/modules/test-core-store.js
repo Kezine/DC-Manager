@@ -1380,10 +1380,10 @@ module.exports = async () => {
     ck.eq(VmStatus.sortKey(vm("running", true)), "1_running", "sortKey : orpheline → préfixe '1_' (groupées en fin de tri croissant)");
     ck.eq(VmStatus.sortKey(vm("")), "0_", "sortKey : sans statut → préfixe seul");
 
-    // ---- RECHERCHE : le mot « orpheline » était écrit EN DUR en français dans `ListConfigs.searchFields`.
-    // Il passe par le catalogue → en interface anglaise, « orphan » (le mot AFFICHÉ) devient cherchable.
-    ck.eq(VmStatus.searchTerms(vm("running", true)).join("|"), "running|orpheline", "searchTerms : statut + mot LOCALISÉ (catalogue fr)");
-    ck.eq(VmStatus.searchTerms(vm("running")).join("|"), "running|", "searchTerms : non orpheline → terme vide (le champ de recherche les ignore)");
+    // ---- RECHERCHE : `VmStatus.searchTerms` a été RETIRÉ au lot 4 (aucun consommateur depuis que les
+    // listings boivent à la spec PARTAGÉE). La cherchabilité de « orphan »/« orpheline » (fr+en) est
+    // désormais couverte par le catalogue `vmOrphan` de `src-shared/SearchTerms` — cf. l'invariant n°15
+    // « golden n°15 : orphan (EN) trouve la VM orpheline en locale FR » dans la section GlobalSearchSources.
 
     // ---- ÉCHAPPEMENT : `status` est une donnée SOURCE d'un cluster tiers, posée en innerHTML.
     ck.eq(VmStatus.pills(vm("<img src=x onerror=alert(1)>")), '<span class="pill">&lt;img src=x onerror=alert(1)&gt;</span>', "statut hostile → ÉCHAPPÉ (aucune balise ne sort d'ici)");
@@ -1999,7 +1999,7 @@ module.exports = async () => {
     //     partagé SearchTerms → les catalogues fr+en sont cherchables dans les DEUX langues en mode
     //     fichier aussi, exactement comme la colonne `search` du serveur. La locale du harnais est
     //     « fr » : trouver les termes ANGLAIS prouve que la source n'est plus l'I18n courante
-    //     (VmStatus.searchTerms / SpareTypes.label — les dérivations ad hoc résorbées). ---
+    //     (les dérivations ad hoc résorbées — VmStatus.searchTerms retiré au lot 4, SpareTypes.label…). ---
     const s = await makeStore();
     const norm = SharedSchema.normSearch;
     const hit = (query, kind, id) => GlobalSearch

@@ -6,6 +6,7 @@ import { TargetSearch } from "../core/TargetSearch";
 import { RecordSearchIndex } from "../core/RecordSearchIndex";
 import { ListRowEngine, type ListRowTarget } from "../core/ListRowEngine";
 import { StoreListRowSource, type RemoteListReader } from "../core/StoreListRowSource";
+import { EntityCandidateSource } from "../core/EntityCandidates";
 import { FormControls } from "../ui/FormControls";
 import { FilterBar, type FilterBarDimension } from "../ui/FilterBar";
 import type { SearchPopResult } from "../ui/SearchPop";
@@ -388,9 +389,12 @@ export class ListView {
       selected: this.filterState[ListView.TARGET_DIM_KEY],
       search: {
         placeholder: filter.placeholder,
-        fetch: (query) => filter.search(query).map((item): SearchPopResult => ({
+        // La recherche est ASYNCHRONE (serveur-pilotée en mode API, locale en mode fichier) : on habille
+        // les candidats À L'ARRIVÉE. Le SearchPop de la barre porte l'anti-rebond + le StaleGate.
+        fetch: (query) => filter.search(query).then((items) => items.map((item): SearchPopResult => ({
           id: TargetSearch.key(item.kind, item.id), label: item.label, tag: filter.tagOf(item.kind) || undefined,
-        })),
+        }))),
+        debounceMs: EntityCandidateSource.DEBOUNCE_MS,   // même tempo que la palette / les listings serveur-pilotés
         labelOf: (valueId) => {
           const target = TargetSearch.parse(valueId);
           const label = target ? filter.labelOf(target.kind, target.id) : null;

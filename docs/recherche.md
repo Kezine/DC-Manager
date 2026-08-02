@@ -3,7 +3,7 @@
 Architecture de la **recherche** de DC Manager : la palette globale (Ctrl+K / loupe topbar), la recherche
 et les filtres des **listings**, le module partagé des termes, les routes serveur et la répartition
 local ⇄ serveur des deux modes de données. Chantier « recherche partagée / chargement dynamique »
-(lots 1-3, 2026-08-02).
+(lots 1-4, 2026-08-02).
 
 ## Vue d'ensemble
 
@@ -43,6 +43,7 @@ enregistrement » pour toute l'application.
 | `src-client/core/ListRowEngine.ts` | MOTEUR de lignes des listings : décision local ⇄ serveur, debounce, abort, repli, anti-boucle d'échec. Source INJECTÉE (`ListRowSource`). |
 | `src-client/core/StoreListRowSource.ts` | La source concrète : `local()` = cache hydraté + `RecordSearchIndex`, `remote()` = lecteur serveur injecté (`RemoteListReader`), traduction de la cible en `where` ou restriction cliente. |
 | `src-client/views/ListTargets.ts` | Descripteurs du **filtre CIBLE unifié** par listing (recherche des candidats, libellés, badge, `where`/`restrict`). |
+| `src-client/core/EntityCandidates.ts` | SOURCE de candidats d'entités PARTAGÉE (lot 4) : `EntityCandidates` (pur — `local`/`fromRecords`, re-classés par `TargetSearch`) + `EntityCandidateSource` (orchestration DOUBLE MODE : annulation + repli ; anti-rebond/StaleGate portés par le SearchPop). |
 | `src-client/ui/FilterBar.ts` + `core/FilterChips.ts` | Dimension « à RECHERCHE » (SearchPop au lieu d'un multiselect) et chips à valeur LIBRE. |
 | `src-server/src/RelationalRepository.searchAll` | Recherche transverse : un LIKE sur la colonne `search` par collection, plafond par collection, troncature signalée. |
 | `src-server/src/RelationalRepository.list` | Listing d'UNE collection : LIKE sur `search` + `where` de colonnes + pagination — la route que consomment les listings serveur-pilotés. |
@@ -201,6 +202,78 @@ Cette **asymétrie est assumée** : le jour où le serveur saura joindre les por
 câbles change — `restrict` reste de toute façon le chemin du mode fichier. Les **certificats** ne sont
 pas branchés en v1 (base serveur séparée, client à part).
 
+## Pickers et recherches d'entités (lot 4)
+
+Les recherches d'ENTITÉS derrière les `SearchPop` transverses — l'éditeur de LIENS d'intervention et les
+dimensions « à recherche » du **filtre CIBLE** des listings — sont désormais **serveur-pilotées en mode
+API**, tout en restant **100 % locales en mode fichier** (principe n°15). Une seule source répond à la
+question « quels candidats {kind, id, label} pour cette saisie, dans ces familles ? ».
+
+```
+   saisie (SearchPop : anti-rebond 200 ms + StaleGate)
+            │
+            ▼
+   EntityCandidateSource.fetch(query, excluded?)
+       │                         │
+       │ mode FICHIER            │ mode API (lecteur EntitySearchReader injecté)
+       │ (reader null)           ▼
+       ▼                 GET …/search?collections=<familles>   (annulation de la requête devancée)
+   EntityCandidates.local          │  échec réel → REPLI local + console.warn
+   (Store.all + rank)              ▼
+                          EntityCandidates.fromRecords
+                          (record → instance LOCALE du Store préférée, sinon brut)
+            └──────────────┬───────────────┘
+                           ▼
+                 TargetSearch.rank (CLASSEMENT client : préfixe > inclusion, alpha, plafond, dédup)
+```
+
+- **`core/EntityCandidates`** — le cœur PUR (statique, testable headless) : `local` (cache du Store) et
+  `fromRecords` (records serveur → candidats), tous deux re-classés par `TargetSearch.rank`. Le serveur
+  **FILTRE** (LIKE sur `search`), le client **CLASSE** — donc le classement est le **MÊME dans les deux
+  modes** (cohérence par construction). En mode API, le libellé vient de l'**instance LOCALE du Store**
+  quand elle existe (patron `GlobalSearchSources.dressRecords`), sinon du record brut (dégradé mais
+  fonctionnel — écriture concurrente pas encore synchronisée).
+- **`core/EntityCandidateSource`** — l'orchestration DOUBLE MODE réutilisable : une instance par point de
+  recherche (elle porte son `AbortController`). L'**anti-rebond** et le **StaleGate** (fraîcheur) sont
+  portés par le `SearchPop` appelant ; l'**annulation** de la requête devancée et le **REPLI local** sur
+  échec réel vivent ici. Une annulation n'est pas un échec (on laisse filer le rejet, le StaleGate
+  tranche) : retomber sur le local serait un rendu concurrent.
+- **Pourquoi ne PAS empiler `ListRowEngine`** : son modèle est « lignes locales synchrones + repeinture
+  async via rappel » (un listing qui se re-rend). Un `SearchPop` est piloté par un `fetch` qui rend une
+  PROMESSE et porte DÉJÀ anti-rebond + StaleGate. Le branchement le plus simple qui ne duplique rien =
+  le `fetch` du SearchPop + `EntityCandidateSource` pour l'annulation/repli.
+- **Branchements** : `views/ListTargets` (`ipCarrier`/`cableEquipment`, filtres IP & câbles) et
+  `interventionTargets` (main.ts, éditeur de liens). Comportement **identique en mode fichier** (mêmes
+  candidats, même ordre — verrouillé par golden dans `test-entity-candidates.js`) ; en mode API, les
+  candidats viennent du serveur, **au-delà du corpus chargé** (préparation de l'hydratation partielle).
+- **Rythme & plafond** (aucun réglage inventé) : anti-rebond `EntityCandidateSource.DEBOUNCE_MS` =
+  `ListRowEngine.REMOTE_DEBOUNCE_MS` (200 ms, le tempo de la palette et des listings) ; plafond de
+  candidats `EntityCandidates.SEARCH_LIMIT` = 12 (l'ancien `ListTargets.SEARCH_LIMIT`, centralisé).
+
+### Ce qui reste CLIENT, et pourquoi (`EntityPicker` / `OptionSearch`)
+
+Les **sélecteurs d'entité des FORMULAIRES** (`ui/EntityPicker` composé par `FormControls.entityPicker`,
+filtrage `core/OptionSearch`) **ne bougent PAS**. Leurs options ne sont pas une recherche transverse : ce
+sont des **RÈGLES MÉTIER par formulaire** (filtre par famille de port, contrainte de conteneur, options
+`disabled` nommant le câble qui occupe un port, breakout, suffixe d'emplacement, tri des occupés en fin,
+`keepId`) calculées sur le **corpus HYDRATÉ**. Le principe n°14 est explicite : on remplace le *contrôle*,
+jamais la *règle*. Tant que le document reste **entièrement chargé**, ces règles s'appliquent sur un
+corpus complet — les brancher sur le serveur n'aurait pas de sens (le serveur ne connaît pas la contrainte
+de conteneur d'un formulaire donné).
+
+⚠ **Re-cadrage à prévoir pour l'option C (hydratation PARTIELLE).** Le jour où le document ne sera plus
+entièrement en mémoire, ces règles devront être re-cadrées : la **résolution des contraintes** (quels
+ports d'un équipement, quels conteneurs compatibles…) devra se faire **côté serveur ou à la demande**, car
+le corpus local ne suffira plus à les évaluer. C'est un **constat**, pas un chantier d'aujourd'hui — la
+source `EntityCandidateSource` prépare déjà le versant « recherche transverse » de cette bascule.
+
+### Nettoyage `VmStatus.searchTerms`
+
+Retiré au lot 4 : plus aucun consommateur depuis que les listings ont perdu leurs `searchFields` (lot 3).
+La cherchabilité de « orpheline »/« orphan » (fr **et** en) est portée par le catalogue `vmOrphan` du
+module partagé `src-shared/SearchTerms` (invariant n°15 testé). L'**affichage** des statuts VM
+(pastilles) n'a pas bougé.
+
 ## Invariants testés
 
 - **corpus ≡ fiches ouvrables** (`GlobalSearchSources.families()` ⇄ `DetailForms.DETAIL_COLLECTIONS`,
@@ -227,5 +300,6 @@ pas branchés en v1 (base serveur séparée, client à part).
 - `docs/persistance.md` § « La colonne `search` ENRICHIE » — écriture/invalidation/backfill serveur.
 - `docs/interventions.md` § « Filtre par CIBLE » — l'absorption de la chip de navigation par la dimension.
 - `.notes/toDos/chargement-dynamique-document-cadrage-2026-08-02.md` — cadrage du chantier (non versionné).
-- Lot suivant : les **pickers** (lot 4) réutiliseront `list`/`searchAll`, le patron
-  debounce/abort/repli du `ListRowEngine` et les descripteurs de `ListTargets`.
+- § « Pickers et recherches d'entités (lot 4) » ci-dessus — la source double mode `EntityCandidates` /
+  `EntityCandidateSource`, ce qui reste client (`EntityPicker`/`OptionSearch`) et le re-cadrage prévu
+  pour l'hydratation partielle (option C).

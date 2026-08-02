@@ -18,8 +18,8 @@ import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
 import { Html } from "../core/Html";
-import { TargetSearch } from "../core/TargetSearch";
 import type { RemoteListReader } from "../core/StoreListRowSource";   // lecteur SERVEUR des listings (mode API — lot 3)
+import { EntityCandidateSource, type EntitySearchReader, type EntityCandidateFamily } from "../core/EntityCandidates";   // candidats d'entités serveur-pilotés (mode API — lot 4)
 import { UserDirectory } from "../core/UserDirectory";   // annuaire client (résolution des auteurs d'audit — mode API)
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
 import { CertsFormat } from "../core/CertsFormat";   // libellés/échéances des certs — famille externe de la recherche globale
@@ -30,7 +30,6 @@ import type { NetworkIdentity } from "../core/CertTargetMatch";
 import type { CertFicheHooks, CertFicheMatch } from "../views/CertFicheHooks";
 import type { CertTargetResolver } from "../views/CertsAdminView";
 import type { CertificateListItem } from "../views/forms/CertsClient";
-import { Schema } from "../../src-shared/Schema";
 import { Download } from "../core/Download";
 import { Prefs } from "../core/Prefs";
 import { SessionExpiry } from "../core/SessionExpiry";   // verrou idempotent « session expirée → retour au login » (mode API)
@@ -81,6 +80,15 @@ const store = new Store(adapter);
 const listRemoteReader: RemoteListReader | null = REST_MODE ? {
   list: async (collection, { query, where, limit, signal }) =>
     (await store.list(collection, { query, where, pageSize: limit, signal })).rows,
+} : null;
+// LECTEUR SERVEUR des CANDIDATS d'entités (lot 4) — mode API SEULEMENT. La recherche transverse
+// `GET …/search` restreinte aux collections des familles → records par collection, en UN aller-retour.
+// Injecté dans `EntityCandidateSource` (éditeur de liens d'intervention + filtres CIBLE des listings) :
+// en mode API, les candidats viennent du SERVEUR (au-delà du corpus chargé) ; null en mode fichier/viewer
+// → les sources restent 100 % locales, sans jamais toucher au réseau (principe n°15). Même route que la
+// palette globale, mais les collections VARIENT selon les familles du point de recherche (d'où le paramètre).
+const entitySearchReader: EntitySearchReader | null = REST_MODE ? {
+  search: async (query, collections, signal) => (await (adapter as RestAdapter).searchAll(query, { collections, signal })).results,
 } : null;
 // Client de synchro VM (feature AMOVIBLE) — mode API SEULEMENT (null en mode fichier/viewer → boutons masqués).
 // `adapter` est ici un RestAdapter (garanti par REST_MODE) ; il satisfait `VmRestContext` (dataBase/docId/headers/clientId publics).
@@ -623,7 +631,7 @@ async function boot(): Promise<void> {
     subtitle: I18n.t("tabs.racks.subtitle"),
     form: (id, done) => Forms.rack(store, formHost, id, done), addLabel: I18n.t("app.add.rack"), locate: "rack", manage: true,
   });
-  addListTab("cables", I18n.t("tabs.cables.label"), ListConfigs.cables, {
+  addListTab("cables", I18n.t("tabs.cables.label"), (s) => ListConfigs.cables(s, entitySearchReader), {
     icon: Icons.CABLE,
     subtitle: I18n.t("tabs.cables.subtitle"),
     form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: I18n.t("app.add.cable"),
@@ -632,7 +640,7 @@ async function boot(): Promise<void> {
   // IPAM : la page PRINCIPALE de l'onglet est la liste des ADRESSES IP ; les réseaux (sous-réseaux) et les plages
   // DHCP sont des sous-onglets. Le titre/soustitre réutilisent les libellés « adresses » ; ceux « IPAM — Réseaux IP »
   // partent au sous-onglet ipnetworks.
-  addListTab("ipam", I18n.t("tabs.ipam.label"), ListConfigs.ipAddresses, {
+  addListTab("ipam", I18n.t("tabs.ipam.label"), (s) => ListConfigs.ipAddresses(s, entitySearchReader), {
     icon: Icons.IPAM,
     title: I18n.t("tabs.ipaddresses.title"), subtitle: I18n.t("tabs.ipaddresses.subtitle"),
     form: (id, done) => Forms.ipAddress(store, formHost, id, done), addLabel: I18n.t("app.add.ipAddress"),
@@ -876,17 +884,17 @@ async function boot(): Promise<void> {
     const family = TARGET_FAMILIES[kind];
     return family ? family.collection : "";   // slug inconnu → collection vide : `store.get("")` rend null, la cible s'affiche « introuvable »
   };
+  // Source de CANDIDATS des cibles liables (double mode, lot 4) — familles DÉRIVÉES de TARGET_FAMILIES
+  // (plus de tableau parallèle à garder en phase), règle de nommage = `targetLabel` (spare → displayName…).
+  // En mode API, les candidats viennent du SERVEUR (recherche transverse, au-delà du corpus chargé) avec
+  // anti-rebond/annulation/repli ; en mode fichier, du cache LOCAL (`entitySearchReader` null). Le tri de
+  // pertinence, le plafond et la dédup (cibles déjà liées) restent délégués au module pur `TargetSearch`.
+  const interventionCandidateFamilies: EntityCandidateFamily[] = Object.entries(TARGET_FAMILIES)
+    .map(([kind, family]) => ({ kind, collection: family.collection, label: (r: any) => targetLabel(kind, r) }));
+  const interventionCandidates = new EntityCandidateSource(store, interventionCandidateFamilies, entitySearchReader);
   const interventionTargets: InterventionTargetSource = {
     labelOf: (kind, id) => { const r: any = store.get(targetCollection(kind), id); return r ? targetLabel(kind, r) : null; },
-    // Recherche UNIFIÉE des cibles liables : concatène les 3 familles en items {kind,id,label} puis délègue le
-    // tri de pertinence (préfixe avant inclusion), le plafond et la dédup (cibles déjà liées) au module pur
-    // TargetSearch, avec la normalisation PARTAGÉE Schema.normSearch (insensibilité casse/accents).
-    search: (query, excluded) => {
-      // La liste des familles DÉRIVE de TARGET_FAMILIES : plus de tableau parallèle à garder en phase.
-      const items = Object.entries(TARGET_FAMILIES).flatMap(([kind, family]) =>
-        store.all(family.collection).map((r: any) => ({ kind, id: r.id, label: targetLabel(kind, r) })));
-      return TargetSearch.rank(items, query, { normalize: Schema.normSearch, limit: 12, excluded });
-    },
+    search: (query, excluded) => interventionCandidates.fetch(query, excluded),
     // Ouvre la FICHE DE DÉTAIL existante de la cible (equipment/vm/spare) via la machinerie des fiches. Le
     // retour à la modale d'intervention est STRUCTUREL depuis que `Modal` est une PILE : la fiche s'EMPILE
     // par-dessus et le détail d'intervention reste vivant dessous (il se rafraîchit tout seul, via son

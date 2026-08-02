@@ -15,6 +15,7 @@ import { RackScene } from "../geometry/RackScene";
 import { FloorLayout } from "../geometry/FloorLayout";
 import { EntityViz } from "./EntityViz";
 import { ListTargets } from "./ListTargets";
+import type { EntitySearchReader } from "../core/EntityCandidates";
 import type { ListOptions } from "./ListView";
 
 const dim = (s: string) => `<span style="color:var(--fg-dimmer)">${s}</span>`;
@@ -130,14 +131,15 @@ export class ListConfigs {
     };
   }
 
-  static cables(store: Store): ListOptions {
+  static cables(store: Store, entitySearch: EntitySearchReader | null = null): ListOptions {
     return {
       collection: "cables",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.cables"),
       // Filtre CIBLE : « les câbles de cet ÉQUIPEMENT ». Le rattachement passe par ses PORTS (2 sauts) —
-      // restriction CLIENTE, asymétrie assumée v1 (cf. `views/ListTargets` et docs/recherche.md).
-      targetFilter: ListTargets.cableEquipment(store),
+      // restriction CLIENTE, asymétrie assumée v1 (cf. `views/ListTargets` et docs/recherche.md). La
+      // recherche de CANDIDATS, elle, est serveur-pilotée en mode API (`entitySearch`), locale en fichier.
+      targetFilter: ListTargets.cableEquipment(store, entitySearch),
       columns: [
         { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (c) => c.name, render: (c) => Html.escape(c.name || I18n.t("lists.ph.cable")) },
         { head: I18n.t("lists.col.type"), render: (c) => { const t: any = c.cable_type_id && store.get("cableTypes", c.cable_type_id); return t ? `<span class="pill">${Html.escape(t.name)}</span>` : dim("—"); } },
@@ -329,14 +331,15 @@ export class ListConfigs {
     };
   }
 
-  static ipAddresses(store: Store): ListOptions {
+  static ipAddresses(store: Store, entitySearch: EntitySearchReader | null = null): ListOptions {
     return {
       collection: "ipAddresses",
       defaultSort: { key: "address", dir: "asc" },
       emptyText: I18n.t("lists.empty.ipAddresses"),
       // Filtre CIBLE : « les adresses de ce PORTEUR » — équipement OU VM, familles confondues dans UNE
-      // recherche (principe n°14). Le lien est une colonne → le filtre part au serveur en `where`.
-      targetFilter: ListTargets.ipCarrier(store),
+      // recherche (principe n°14). Le lien est une colonne → le filtre part au serveur en `where`. La
+      // recherche de CANDIDATS, elle, est serveur-pilotée en mode API (`entitySearch`), locale en fichier.
+      targetFilter: ListTargets.ipCarrier(store, entitySearch),
       columns: [
         { head: I18n.t("lists.col.address"), essential: true, cls: "cell-name", sortKey: "address", sort: (a) => { const v = Ip.toInt(a.address); return v != null ? v : a.address; }, render: (a) => `<code>${Html.escape(a.address || "—")}</code>` },
         {
