@@ -1,16 +1,20 @@
 import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
-import { Repository, type SqliteCtor, type SqliteDb } from "./db.js";
+import { type RepositoryContract, type SqliteCtor, type SqliteDb } from "./db.js";
+import { RelationalRepository } from "./RelationalRepository.js";
+import { LegacyMigration } from "./LegacyMigration.js";
 import { Logger } from "./logger.js";
 
 export interface DocMeta { id: string; name: string; created_date: string; updated_date: string; rev?: number; locked?: boolean }
 
-/** Multi-DOCUMENTS : un registre (registry.db) + un fichier SQLite (Repository) PAR document.
-    Chaque document est un workspace isolé. Driver injecté (better-sqlite3 / shim de test). */
+/** Multi-DOCUMENTS : un registre (registry.db) + un fichier SQLite (dépôt) PAR document.
+    Chaque document est un workspace isolé. Driver injecté (better-sqlite3 / réel en test).
+    Depuis la bascule L4 (migration DB), le dépôt ouvert est `RelationalRepository` — les fichiers
+    LEGACY (blob) sont migrés à la première ouverture par `LegacyMigration` (backup `.bak` inclus). */
 export class DocumentStore {
   private readonly registry: SqliteDb;
-  private readonly repos = new Map<string, Repository>();
+  private readonly repos = new Map<string, RepositoryContract>();
 
   constructor(private readonly dir: string, private readonly Database: SqliteCtor, private readonly log: Logger = new Logger("error")) {
     fs.mkdirSync(dir, { recursive: true });
@@ -107,11 +111,21 @@ export class DocumentStore {
     this.log.info("document supprimé", id);
     return true;
   }
-  /** Repository du document (ouvert à la demande, mis en cache), ou null si le document n'existe pas. */
-  repo(id: string): Repository | null {
+  /** Dépôt du document (ouvert à la demande, mis en cache), ou null si le document n'existe pas.
+      Ouverture RELATIONNELLE (bascule L4) précédée de la migration des fichiers LEGACY : un fichier blob
+      est d'abord sauvegardé (`.pre-relationnel.bak`) puis migré EN UNE transaction — un échec de migration
+      LÈVE (le document reste lisible en legacy, cf. `LegacyMigration` et RUN.md), il n'ouvre jamais un
+      dépôt à moitié migré. Base neuve/absente : la migration est un no-op, le fichier naît relationnel. */
+  repo(id: string): RepositoryContract | null {
     if (!this.get(id)) return null;
     let r = this.repos.get(id);
-    if (!r) { r = Repository.open(path.join(this.dir, id + ".db"), this.Database); this.repos.set(id, r); this.log.debug("dépôt ouvert", id); }
+    if (!r) {
+      const file = path.join(this.dir, id + ".db");
+      LegacyMigration.migrateIfLegacy(file, this.Database, this.log);
+      r = RelationalRepository.open(file, this.Database);
+      this.repos.set(id, r);
+      this.log.debug("dépôt ouvert", id);
+    }
     return r;
   }
 

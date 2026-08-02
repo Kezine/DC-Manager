@@ -16,26 +16,15 @@ export const HISTORY_MAX = 50;
 /** Sentinel « valeur vide » des index secondaires. */
 export const IDX_NULL = "∅";
 
-/* INDEX SECONDAIRES — champs d'égalité indexés par collection. Spec PARTAGÉ :
-   - l'adapter local indexe les ENREGISTREMENTS persistés (findBy/list sans scan) ;
-   - le Store indexera les ENTITÉS hydratées (helpers métier en O(1)).
-   Un champ tableau (ex. cables.network_ids) est indexé élément par élément ;
-   les valeurs vides tombent sous IDX_NULL → findBy(coll, champ, null) répond
-   « éléments non rattachés » sans parcourir la collection. */
-export const INDEX_SPEC: Record<string, string[]> = {
-  equipments: ["group_id", "group_ids", "rack_id", "dc_id", "tray_item_id", "face_image_id", "face_image_rear_id", "face_image_top_id", "face_image_bottom_id", "face_image_left_id", "face_image_right_id"],
-  ports:       ["equipment_id", "parent_port_id", "port_type_id", "aggregate_id", "sub_equipment_id", "bundle_id", "network_id", "network_ids"],
-  cables:      ["from_port_id", "to_port_id", "cable_type_id", "network_id", "network_ids", "waypoint_ids"],
-  cableBundles: ["cable_type_id", "waypoint_ids", "endpoint_a_equipment_id", "endpoint_b_equipment_id"],
-  aggregates:  ["equipment_id"],
-  subEquipments: ["equipment_id", "group_id", "group_ids"],   // cascade du maître + des groupes ; liste par équipement (parité aggregates/vms)
-  racks:       ["datacenter_id"],
-  rackItems:   ["rack_id"],
-  waypoints:   ["datacenter_id", "rack_id"],
-  floors:      ["location"],
-  ipAddresses: ["network_id", "equipment_id", "vm_id", "address"],   // vm_id indexé : la cascade vms détache par ce champ
-  dhcpRanges:  ["network_id", "server_id"],
-  networks:    ["ip_network_id"],
-  spares:      ["assigned_equipment_id"],
-  vms:         ["host_equipment_id", "group_id", "group_ids"],   // cascades hôte + groupes (parité spares/equipments)
-};
+/* INDEX SECONDAIRES — champs d'égalité indexés par collection. La liste vit désormais dans le module
+   PARTAGÉ `src-shared/RelationalSchema` (SOURCE UNIQUE front ⇄ back : le générateur de DDL relationnel en
+   dérive les CREATE INDEX serveur, le client la RÉ-EXPORTE ici). Même pattern que `Schema` / `RackConstants`.
+   Consommée côté client par `FieldIndex` : l'adapter local indexe les enregistrements persistés (findBy/list
+   sans scan) et le Store indexe les entités hydratées (helpers métier en O(1)) ; un champ NON listé retombe
+   en scan (`Store._byFk`), jamais en erreur. Un champ tableau (ex. cables.network_ids) est indexé élément par
+   élément ; les valeurs vides tombent sous IDX_NULL → findBy(coll, champ, null) répond « éléments non
+   rattachés » sans parcourir la collection.
+   ⚠ Contenu révisé à la remontée (mesure L0 §3.4) : + equipments.name / cables.name (scans d'unicité V6g/V6h,
+   accélérés aussi côté client en mode fichier) ; − les 6 face_image_*_id et cableBundles.cable_type_id (index
+   morts, jamais interrogés). Import SANS extension (résolution bundler du front). */
+export { INDEX_SPEC } from "../../src-shared/RelationalSchema";

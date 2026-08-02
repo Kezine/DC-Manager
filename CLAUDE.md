@@ -144,7 +144,9 @@ src-client/            # FRONT (navigateur) — TS compilé par webpack
   app/          #   main.ts (bootstrap), Shell, état de sauvegarde
 src-server/src/ # BACK (Node, ESM/NodeNext) — TS compilé par tsc
   api.ts        #   couche HTTP (Express) : routes + verrou optimiste + SSE
-  db.ts         #   Repository SQLite (better-sqlite3)
+  db.ts         #   types partagés du dépôt (driver SQLite, Rec, Tx, ListResult…) + contrat du dépôt (interface RepositoryContract)
+  RelationalRepository.ts # dépôt RELATIONNEL de production (schéma dérivé de la spec, cf. docs/persistance.md)
+  LegacyMigration.ts      # migration blob → relationnel au premier accès d'un document (backup .bak)
   documents.ts  #   registre multi-documents + révisions
   live.ts       #   bus SSE (notifications de changement)
 src-shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) — schéma, types, validation
@@ -199,9 +201,11 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 - [`redressement-perspective.md`](docs/redressement-perspective.md) — **correction de
   perspective & assemblage des images de façade** (géométrie pure `Homography`/`ImageStitch`
   + modales `PerspectiveEditor`/`StitchEditor`, branchements dans le flux d'import, téléchargement).
-- [`persistance.md`](docs/persistance.md) — **persistance serveur** (modèle *document* JSON sur SQLite,
-  intégrité déportée dans la validation, coût des `find` par champ = full scan, `findBy` lean, direction
-  RELATIONNELLE si on retouche la DB — pas JSONB).
+- [`persistance.md`](docs/persistance.md) — **persistance serveur** (modèle RELATIONNEL sur SQLite :
+  tables à colonnes DÉRIVÉES de la spec via `RelationalSchema`, `INDEX_SPEC` partagé front⇄back, ce que
+  le schéma n'impose PAS — FK/CHECK/DEFAULT restent dans la validation/normalisation partagées ;
+  dépôt `RelationalRepository` (contrat des colonnes strictes), migration des documents legacy au boot
+  (`LegacyMigration`, backup `.pre-relationnel.bak`), `meta`/`images` hors migration).
 - [`vm-proxmox.md`](docs/vm-proxmox.md) — **inventaire VM Proxmox** (module serveur AMOVIBLE `vm/`,
   pivot `VmRecord`, réconciliation source/locaux, providers PAR document dans `vm-providers.db`
   chiffrée (clé `DCMANAGER_SECRETS_KEY` requise), mapping bridge/tag → réseau, script de suppression,

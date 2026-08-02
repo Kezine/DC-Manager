@@ -20,9 +20,9 @@ points : **UI** (retour immédiat) et **serveur** (autorité : refus `400`).
 1. **Normalisation** — met l'enregistrement en forme canonique AVANT stockage : coercition
    de type (`"42"` → `42`), valeurs par défaut (`u_count` → 42), `null`-isation des vides.
    Idempotente. C'est elle qui rend une autre interface « propre » sans qu'elle connaisse
-   toutes les conventions. (En V1 les specs sont PARTIELLES : seuls les champs déclarés sont
-   normalisés, les autres traversent — la suppression des champs inconnus attendra des specs
-   complètes.)
+   toutes les conventions. (Depuis la régularisation D3a — 2026-07-31 — les specs sont
+   COMPLÈTES : tout champ persisté est déclaré et donc normalisé ; seuls l'AUDIT serveur et
+   deux legacy traversent encore, cf. §10.)
 2. **Validation** — vérifie l'enregistrement normalisé et renvoie des erreurs. Ne mute pas.
 
 Le serveur fait `record = normalize(...)` puis `errors = validate(record)` → si erreurs, `400`.
@@ -48,7 +48,7 @@ Une `CollectionSpec` décrit les champs d'une collection :
 
 ```ts
 FieldSpec = {
-  type: "string" | "number" | "boolean" | "string[]",
+  type: "string" | "number" | "boolean" | "string[]" | "json",
   required?: boolean,     // absent/"" interdit
   nullable?: boolean,     // null autorisé (FK optionnelle…)
   default?: unknown,      // valeur posée par la normalisation si absent
@@ -60,6 +60,15 @@ FieldSpec = {
 }
 CollectionSpec = { fields: Record<string, FieldSpec> }   // + invariants[] en V3
 ```
+
+> **`type: "json"`** (régularisation D3a, 2026-07-31) : une STRUCTURE non exprimable par les types
+> scalaires — objet value-object ou tableau d'objets (`racks.door_front`/`door_rear`,
+> `datacenters.doors`, `vms.nics`). Sémantique volontairement MINIMALE : la normalisation laisse la
+> valeur telle quelle (défaut posé si absente), la validation intrinsèque ne vérifie que
+> présence/null (`required`/`nullable`) et « objet ou tableau, pas un scalaire ». Le CONTENU reste
+> validé par les invariants (ex. « IPv4 des vNIC ») et normalisé côté client (`Normalize.rackDoor`,
+> `Normalize.dcDoors`, `VmSync.normalizeNic`). Au DDL relationnel (générateur L1), un champ `json`
+> devient une colonne TEXT JSON (décision D1b du cadrage migration DB).
 
 Le **déclaratif** couvre l'essentiel ; les rares règles inter-champs deviennent des
 fonctions pures (`invariants`) en V3. Les enums (`CABLE_STATUSES`, `EQUIP_DEPTHS`…) sont
@@ -148,11 +157,12 @@ ValidationError = { collection, id?, path, code, message }
 | **T13** | **taille de bâtiment déclarée** (`sites.width_mm`/`depth_mm`, mm, OPTIONNELS et indissociables — invariant, même patron que `lat`/`lon`). Cross-entité sur `floors` : un plan d'étage ne peut pas DÉBORDER de son bâtiment (`anchor + dimension ≤ taille du site`, sur les deux axes) ; `dependents` sur `sites` → `floors` par `location` pour que RÉTRÉCIR un bâtiment re-valide ses étages (la contrainte tient aux DEUX bouts). **OPT-IN** : sans taille déclarée, aucune vérification — aucun document existant ne peut devenir invalide. ⚠ `floors.location` reste une CHAÎNE (jamais `ref: "sites"`) : le dépôt contient des `location` historiques sans enregistrement `sites`, que la FK ferait rejeter (V2) ; la règle est donc défensive — site introuvable ⇒ non applicable. Cf. `docs/placement.md` §6.8 | ✅ |
 
 Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
-FK, tableaux). **Couverture : TOUTES les collections** — chacune a une spec (partielle —
-identité + énumérations + clés étrangères). Un test d'invariant vérifie que (a) toutes les
-collections sont couvertes, et (b) l'entité par défaut de chaque constructeur front satisfait
-sa spec (aucune sur-contrainte). Les enums repris du domaine sont gardés alignés par des tests
-anti-divergence.
+FK, tableaux). **Couverture : TOUTES les collections, et TOUS leurs champs persistés** (spec
+COMPLÈTE depuis la régularisation D3a — cf. §10). Un test d'invariant vérifie que (a) toutes
+les collections sont couvertes, et (b) l'entité par défaut de chaque constructeur front
+satisfait sa spec (aucune sur-contrainte) ; le verrou de complétude
+(`Tests/modules/test-spec-completude.js`) vérifie (c) qu'aucun champ du corpus de démo n'est
+hors spec. Les enums repris du domaine sont gardés alignés par des tests anti-divergence.
 
 > ⚠ Cette phrase a longtemps annoncé « les **19** collections » alors que le modèle en comptait
 > déjà 21 : un COMPTE écrit à la main dans une doc se périme au premier ajout, en silence, et
@@ -312,37 +322,65 @@ Commencer par **V6a** (unicité d'adresse — net, sûr, réutilise tout l'exist
 Laisser **V6c** au Store (`rackPlacementBlockedReason`) tant qu'il n'y a pas de besoin
 multi-client / interface tierce sur le placement en baie.
 
-## 10. Champs déclarés vs traversée — doctrine (audit de régularisation 2026-07-20)
+## 10. Champs déclarés vs traversée — doctrine (régularisation D3a, 2026-07-31)
 
-Les specs sont **partielles** : seuls les champs porteurs de règles sont déclarés, les autres
-**traversent** la normalisation et la validation sans être ni retirés ni rejetés. Un audit
-(modèles clients ⇄ formulaires ⇄ specs) a précisé la doctrine :
+La spec est **COMPLÈTE** : **tout champ réellement persisté** d'une collection est déclaré dans
+`SPEC_FIELDS`. C'est la condition de la **dérivation du DDL relationnel** (chantier migration DB,
+décision D3a) : en colonnes strictes, un champ non déclaré serait **perdu à l'écriture** — et la
+mesure L0 avait montré que des champs lus par la validation elle-même (`equipments.rack_u`/`rack_side`,
+`ports.role`/`face_x`/`face_y`, `floors.anchor_x`/`anchor_y`, `cableBundles.fiber_count`) étaient
+alors hors spec. Le mécanisme de traversée des champs inconnus subsiste (la normalisation ne retire
+rien, la validation ne rejette pas l'inconnu), mais il ne couvre plus que **deux cas assumés** :
 
-- **La traversée sert la COMPATIBILITÉ et les champs sans règle — pas le design.** Tout champ
-  d''IDENTITÉ ou porteur de sémantique métier DOIT être déclaré dans la spec de sa collection.
-- **Régularisé puis DURCI** : `ipAddresses.hostname` (saisi dans les formulaires IPAM, affiché en
-  liste et en fiche, base des rapprochements par nom d''hôte) est déclaré
-  `{ type: "string", trim: true, format: "hostname" }`. Le format `hostname` (nouveau, RFC 1123 :
+- les champs d'**AUDIT** `created_by` / `updated_by` / `created_date` / `updated_date` : posés et
+  écrasés PAR LE SERVEUR (`AuditStamp`) APRÈS la validation — les déclarer n'apporterait aucune
+  règle côté client ; leur traversée est éprouvée par un test dédié, et le générateur DDL (L1) les
+  pose en colonnes standard ;
+- deux champs **LEGACY** d'équipement, `face_image` / `face_image_rear` (ancêtres inline des FK
+  `face_image_*_id`, toujours null dans les corpus) : à **PURGER** à la migration L4, pas à déclarer.
+
+Cette complétude est **verrouillée par un test** (`Tests/modules/test-spec-completude.js`) : chaque
+clé de chaque enregistrement du corpus de démo versionné doit être déclarée, aux exceptions de la
+liste fermée ci-dessus (+ `id`, clé primaire posée par le générateur) — l'échec NOMME collection et
+champ. Un futur champ ne peut plus redevenir passthrough en silence.
+
+Règles de déclaration tenues lors de la régularisation (à maintenir pour tout NOUVEAU champ) :
+
+- **Défauts et nullabilité : rien d'inventé.** La source de vérité des défauts est le
+  **constructeur du modèle client** (les classes `implements Records.X`) ; quand le défaut client
+  est CONDITIONNEL (ex. `equipments.dim_mode` dérivé du mode de placement, `waypoints.dc_z`,
+  `racks.lmargin_mm` replié sur `mount_margin_mm`), la spec déclare `null`/`""` = « non renseigné,
+  le client dérive » plutôt qu'une valeur figée. Un champ géométrique absent reste `null` — jamais
+  transformé en 0 (un équipement « téléporté à l'origine » serait une corruption silencieuse).
+- **Aucun `required` nouveau** (rétro-invaliderait des documents) ; `min`/`max` seulement quand la
+  borne est déjà tenue par construction (clamp du constructeur client) et vérifiée sans violation
+  sur les corpus.
+- **`enum` seulement si l'ensemble fermé existe comme constante PARTAGÉE** (ex. `rack_side` reprend
+  `RACK_OCCUPANT_SIDES`). Un ensemble fermé côté client seulement (rôles de port, `dim_mode`,
+  `side_*`/`wall_*`) reste déclaré `string` — la doc du champ le signale.
+- Les `*_cells` (`blocked_cells`, `roof_cells`, `floor_cells`) sont des **`string[]` ordinaires**,
+  **hors `Schema.ARRAY_FIELDS`** : cette liste gouverne la sémantique des filtres `where`
+  (appartenance), pas l'inventaire des tableaux.
+- `ports.role` et `equipments.dim_mode` sont **dérivés côté client** mais lus par la validation →
+  colonnes persistées ; la dérivation reste un comportement client (documenté dans la spec).
+
+Historique (audits précédents, conservé pour la traçabilité) :
+
+- **Régularisé puis DURCI (2026-07-20)** : `ipAddresses.hostname` (saisi dans les formulaires IPAM,
+  affiché en liste et en fiche, base des rapprochements par nom d'hôte) est déclaré
+  `{ type: "string", trim: true, format: "hostname" }`. Le format `hostname` (RFC 1123 :
   labels alphanumériques + tirets, 1–63 car., pas de tiret en tête/queue, total ≤ 253, insensible
   à la casse, nom court OU FQDN) est STRICT : une valeur mal formée (espaces, `_`, accents,
-  ponctuation) est rejetée (400 serveur / erreur UI). Reste **optionnel** (une IP peut n''avoir
-  aucun nom d''hôte) ; le durcissement a été décidé après confirmation qu''aucune donnée existante
-  n''était en conflit — pas de rétro-compat conservée à dessein.
-- **Passthrough INTENTIONNELS assumés** (documentés dans `DataValidation.ts`) :
-  - les champs d''AUDIT `created_by` / `updated_by` / `created_date` / `updated_date` : posés et
-    écrasés PAR LE SERVEUR (`AuditStamp`) APRÈS la validation — les déclarer n''apporterait
-    aucune règle côté client ; leur traversée est éprouvée par un test dédié ;
-  - `vms.nics` : tableau d''OBJETS (non exprimable par `FieldType`), validé par l''invariant
-    « IPv4 des vNIC » de la spec `vms`.
-  - `datacenters.doors` et `datacenters.blocked_cells` : tableaux (portes value-object /
-    clés de cellule « cx,cy »), normalisés côté client par `Normalize.dcDoors` / `Normalize.cellList`.
-- **Régularisation `datacenters` (2026-07)** : la spec ne déclarait que `name` ; tous les autres champs de salle
-  (dimensions `width_mm`/`depth_mm`/`cell_mm`, localisation `location`/`floor`/`room`, placement d''étage
-  `floor_x`/`floor_y`/`floor_orientation`) traversaient sans règle. Ils sont désormais **DÉCLARÉS** (types, défauts
-  alignés sur le formulaire de salle, `floor_orientation` borné à `min 0` faute d''enum numérique). Ajout de deux
-  champs de HAUTEUR nullables : `height_mm` (plafond de la salle, usage futur — distinct de `floors.height_mm`,
-  hauteur d''étage) et `underfloor_mm` (plancher technique surélevé, consommé par le rendu 3D). `doors` /
-  `blocked_cells` restent des passthrough assumés (cf. ci-dessus).
+  ponctuation) est rejetée (400 serveur / erreur UI). Reste **optionnel** (une IP peut n'avoir
+  aucun nom d'hôte) ; le durcissement a été décidé après confirmation qu'aucune donnée existante
+  n'était en conflit — pas de rétro-compat conservée à dessein.
+- **Régularisation `datacenters` (2026-07)** : la spec ne déclarait que `name` ; les dimensions,
+  la localisation et le placement d'étage ont été déclarés (défauts alignés sur le formulaire de
+  salle, `floor_orientation` borné à `min 0` faute d'enum numérique), plus deux hauteurs nullables
+  (`height_mm`, `underfloor_mm`). `doors` / `blocked_cells`, alors passthrough assumés, sont
+  déclarés depuis D3a (`json` / `string[]`).
+- Les passthrough intentionnels historiques (`vms.nics`, `datacenters.doors`/`blocked_cells`) sont
+  tous déclarés depuis D3a — `nics` et `doors` via le type `json` (cf. §4).
 
 ## 11. Collaborateurs partagés (modules que la validation IMPORTE)
 

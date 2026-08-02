@@ -144,7 +144,7 @@ module.exports = async () => {
     }
   }
 
-  /* ============ SERVEUR : Repository + DocumentStore (SQLite RÉEL) ============ */
+  /* ============ SERVEUR : DocumentStore (SQLite RÉEL) ============ */
   });
 
   await section("Serveur : ApiRules — lot MULTI-SUPPRESSIONS, cascade résiduelle en UN SEUL plan", async () => {
@@ -285,7 +285,7 @@ module.exports = async () => {
   }
   });
 
-  await section("Serveur : Repository / DocumentStore (better-sqlite3 réel)", async () => {
+  await section("Serveur : DocumentStore — cycle de vie sur disque (better-sqlite3 réel)", async () => {
   let SqliteDatabase = null;
   // PROBE complet (require + ouverture) : le module peut être présent mais son BINAIRE NATIF absent ou compilé
   // pour un autre Node (bindings introuvables) — dans les deux cas on SAUTE avec un avertissement visible.
@@ -297,64 +297,10 @@ module.exports = async () => {
   if (!SqliteDatabase) {
     console.log("  ⚠ SAUTÉ : better-sqlite3 indisponible — `npm ci` (ou `npm rebuild better-sqlite3`) dans src-server/ pour couvrir le serveur. La CI les exécute.");
   } else {
-    const { Repository } = SERVER("db.js");
-    const repo = Repository.open(":memory:", SqliteDatabase);
-    // -- aller-retour + verrou optimiste par entité (updated_rev) --
-    repo.upsert("racks", { id: "r1", name: "Baie 1" }, 3);
-    ck.eq(repo.getOne("racks", "r1").name, "Baie 1", "upsert/getOne : aller-retour JSON");
-    ck.eq(repo.conflicts([{ collection: "racks", id: "r1" }], 2).length, 1, "conflicts : écrite en rev 3 > baseRev 2 → CONFLIT (409)");
-    ck.eq(repo.conflicts([{ collection: "racks", id: "r1" }], 3).length, 0, "conflicts : baseRev 3 (à jour) → pas de conflit");
-    ck.eq(repo.conflicts([{ collection: "racks", id: "absent" }], 0).length, 0, "conflicts : entité absente (création / déjà supprimée) → pas de conflit");
-    ck.eq(repo.conflicts([{ collection: "PAS_UNE_TABLE", id: "r1" }], 0).length, 0, "conflicts : collection hors liste blanche ignorée");
-    repo.upsert("racks", { id: "r1", name: "Baie 1b" }, 5);
-    ck.eq(repo.conflicts([{ collection: "racks", id: "r1" }], 4).length, 1, "conflicts : ré-écriture → updated_rev ré-estampillée (rev 5 > baseRev 4)");
-    // -- transact : ordre deletes → updates → creates, atomicité --
-    repo.upsert("ports", { id: "p1", name: "old" }, 1);
-    repo.transact({ deletes: [{ collection: "ports", id: "p1" }], creates: [{ collection: "ports", record: { id: "p2" } }] }, 6);
-    ck.eq(repo.getOne("ports", "p1"), null, "transact : delete appliqué");
-    ck(!!repo.getOne("ports", "p2"), "transact : create appliqué");
-    repo.upsert("cables", { id: "c1" }, 1);
-    repo.transact({ deletes: [{ collection: "cables", id: "c1" }], updates: [{ collection: "cables", record: { id: "c1", note: "res" } }] }, 7);
-    ck(!!repo.getOne("cables", "c1"), "transact : update APRÈS delete ressuscite l'enregistrement (upsert) — d'où la garde d'ApiRules");
-    repo.upsert("racks", { id: "r2" }, 1);
-    let batchThrew = false;
-    try { repo.transact({ deletes: [{ collection: "racks", id: "r2" }, { collection: "NIMPORTE", id: "x" }] }, 8); } catch (_) { batchThrew = true; }
-    ck(batchThrew && !!repo.getOne("racks", "r2"), "transact : entrée invalide → TOUT le lot rejeté (transaction SQLite, r2 intact)");
-    // -- list / where : égalité JSON + appartenance à un champ tableau (json_each) --
-    repo.upsert("cables", { id: "c2", network_ids: ["n1", "n2"], network_id: "n1" }, 1);
-    ck.eq(repo.list("cables", { where: { network_ids: "n2" } }).rows.length, 1, "list where : appartenance à un champ tableau");
-    ck.eq(repo.list("cables", { where: { network_id: "n1" } }).rows.length, 1, "list where : égalité sur champ scalaire");
-    // -- findBy : finder LEAN de la validation (V5b/V6), MÊMES lignes que list().where mais sans COUNT/tri/pagination --
-    ck.eq(repo.findBy("cables", "network_id", "n1").length, 1, "findBy : égalité scalaire (parité list where)");
-    ck.eq(repo.findBy("cables", "network_ids", "n2").length, 1, "findBy : appartenance à un champ tableau (parité list where)");
-    ck.eq(repo.findBy("cables", "network_id", "zzz").length, 0, "findBy : aucune correspondance → []");
-    ck.eq(repo.findBy("NIMPORTE", "x", "y").length, 0, "findBy : collection inconnue → []");
-    // -- maintenance : PURGE des images orphelines (référencées par AUCUN équipement) + VACUUM --
-    repo.putImage("imgA", { name: "utilisée", type: "image/png" }, Buffer.from([1, 2, 3]));
-    repo.putImage("imgB", { name: "orpheline", type: "image/png" }, Buffer.from([4, 5, 6]));
-    repo.upsert("equipments", { id: "e1", name: "sw", face_image_id: "imgA" }, 1);
-    const mnt = repo.maintenance();
-    ck.eq(mnt.purgedImages, 1, "maintenance : 1 image orpheline purgée");
-    ck(!!repo.getImageMeta("imgA"), "maintenance : l'image RÉFÉRENCÉE (face_image_id) est conservée");
-    ck.eq(repo.getImageMeta("imgB"), null, "maintenance : l'image orpheline est supprimée");
-    ck.eq(repo.maintenance().purgedImages, 0, "maintenance : re-run → plus rien à purger (idempotent)");
-    // -- rev d'image : jeton de cache-busting — bumpé à CHAQUE nouveau blob (même taille incluse), pas en méta seule --
-    repo.upsert("equipments", { id: "e2", name: "sw2", face_image_id: "imgR" }, 1);   // référencée (survivra aux maintenances)
-    repo.putImage("imgR", { name: "v1", type: "image/png" }, Buffer.from([1, 2]));
-    ck.eq(repo.getImageMeta("imgR").rev, 1, "putImage : rev = 1 à la création");
-    repo.putImage("imgR", { name: "v1 renommée", type: "image/png" }, null);
-    ck.eq(repo.getImageMeta("imgR").rev, 1, "putImage : édition de MÉTA seule → rev inchangée");
-    repo.putImage("imgR", { name: "v2", type: "image/png" }, Buffer.from([3, 4]));   // nouveau blob de MÊME taille
-    ck.eq(repo.getImageMeta("imgR").rev, 2, "putImage : nouveau blob (même taille) → rev incrémentée (l'ancien jeton bytes ne le voyait pas)");
-    // -- SNAPSHOT (restore) : l'audit contenu est restauré VERBATIM (arbitrage Q7 — pas de ré-estampillage serveur).
-    //    Le blob stocke le record ENTIER (replaceSnapshot), donc created_by/updated_by survivent tels quels. --
-    repo.replaceSnapshot({ equipments: [{ id: "au1", name: "audité", created_by: "u-alice", updated_by: "u-bob", created_date: "2020-01-01T00:00:00.000Z", updated_date: "2021-01-01T00:00:00.000Z" }] }, 9);
-    const restored = repo.getOne("equipments", "au1");
-    ck(restored.created_by === "u-alice" && restored.updated_by === "u-bob", "snapshot : audit created_by/updated_by restauré VERBATIM (Q7 — pas de ré-estampillage)");
-    ck.eq(restored.created_date, "2020-01-01T00:00:00.000Z", "snapshot : created_date d'audit restauré verbatim");
-    repo.close();
-
-    // -- DocumentStore : cycle de vie complet SUR DISQUE (fix Windows : close() avant suppression) --
+    // -- DocumentStore : cycle de vie complet SUR DISQUE (fix Windows : close() avant suppression).
+    //    repo() ouvre le dépôt RELATIONNEL de production (RelationalRepository — CRUD, whereClause, verrou
+    //    optimiste et images sont couverts par test-relational-repository.js ; la migration legacy et la
+    //    preuve de bascule par test-legacy-migration.js). Ici on ne teste que le CYCLE DE VIE du store. --
     const fs = require("fs"), os = require("os");
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-docs-"));
     const { DocumentStore } = SERVER("documents.js");
@@ -364,7 +310,9 @@ module.exports = async () => {
     ck(fs.existsSync(path.join(dir, created.id + ".db")), "create : fichier SQLite matérialisé sur disque");
     const rev = docs.markChanged(created.id);
     ck.eq(docs.getRev(created.id), rev, "markChanged : rev incrémentée et relue");
-    docs.repo(created.id).upsert("racks", { id: "r1" }, rev);   // ouvre le handle → le cas Windows EBUSY sans close()
+    // `name` fourni : depuis la bascule L4, repo() rend l'implémentation RELATIONNELLE — `racks.name` est
+    // une colonne NOT NULL (spec `required`), un record sans nom serait REJETÉ par SQLite (le blob avalait).
+    docs.repo(created.id).upsert("racks", { id: "r1", name: "Baie EBUSY" }, rev);   // ouvre le handle → le cas Windows EBUSY sans close()
     docs.setDefaultDocId(created.id);
     ck.eq(docs.delete(created.id), true, "delete : accepté");
     ck(!fs.existsSync(path.join(dir, created.id + ".db")), "delete : fichier .db SUPPRIMÉ du disque (handle fermé AVANT rmSync — fix Windows)");

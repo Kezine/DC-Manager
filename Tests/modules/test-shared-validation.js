@@ -647,7 +647,7 @@ module.exports = async () => {
     ck.eq(Validation.DataValidator.validateRecord("equipments", { name: "sw", type: "switch", depth: "full", placement_mode: "manual", u_height: 1, inventory_only: false, group_id: "G9", group_ids: ["G1", "G2"] }).some((e) => e.path === "group_id" && e.code === "invariant"),
       true, "invariant groupe : primaire HORS group_ids → erreur sur group_id");
     const passthrough = Validation.DataValidator.normalizeRecord("spares", { whatever: 7 });
-    ck.eq(passthrough.whatever, 7, "normalize : collection SANS spec → traversée inchangée");
+    ck.eq(passthrough.whatever, 7, "normalize : champ INCONNU de la spec → traversé inchangé (mécanisme qui porte l'audit)");
     // VERROU DE PLACEMENT (`locked`) : booléen défaut false + coercition "true"→true, sur les 3 collections concernées.
     ["racks", "equipments", "waypoints"].forEach((coll) => {
       ck.eq(Validation.DataValidator.normalizeRecord(coll, { name: "X" }).locked, false, "normalize " + coll + " : locked défaut → false");
@@ -657,7 +657,7 @@ module.exports = async () => {
   }
   });
 
-  await section("shared : salle (datacenters) — dimensions déclarées + hauteurs nullables + passthrough doors", async () => {
+  await section("shared : salle (datacenters) — dimensions déclarées + hauteurs nullables + doors (json)", async () => {
   {
     const V = Validation.DataValidator;
     // DÉFAUTS posés par la normalisation quand le champ est ABSENT (une écriture tierce peut omettre les dimensions).
@@ -679,9 +679,12 @@ module.exports = async () => {
     // BORNE min ≥ 1 : 0 est refusé (dimension et hauteur sous plancher).
     ck(V.validateRecord("datacenters", { name: "X", underfloor_mm: 0 }).some((e) => e.path === "underfloor_mm" && e.code === "min"), "validate datacenters : underfloor_mm 0 → erreur 'min'");
     ck(V.validateRecord("datacenters", { name: "X", width_mm: 0 }).some((e) => e.path === "width_mm" && e.code === "min"), "validate datacenters : width_mm 0 → erreur 'min'");
-    // PASSTHROUGH assumé : `doors` (tableau d'OBJETS) traversé INCHANGÉ par la normalisation (non déclaré).
+    // `doors` (tableau d'OBJETS) : déclaré `json` depuis la régularisation D3a — la valeur PRÉSENTE traverse
+    // toujours INCHANGÉE (sémantique minimale du type), le CONTENU restant normalisé par Normalize.dcDoors
+    // côté client ; l'ABSENCE, elle, reçoit désormais le défaut [] (parité constructeur Datacenter.ts).
     const doors = [{ id: "d1", wall: "top", offset_mm: 100 }];
-    ck.eq(JSON.stringify(V.normalizeRecord("datacenters", { name: "X", doors }).doors), JSON.stringify(doors), "normalize datacenters : doors (objets) traversés inchangés (passthrough)");
+    ck.eq(JSON.stringify(V.normalizeRecord("datacenters", { name: "X", doors }).doors), JSON.stringify(doors), "normalize datacenters : doors (objets) traversés inchangés (type json)");
+    ck.eq(JSON.stringify(V.normalizeRecord("datacenters", { name: "X" }).doors), "[]", "normalize datacenters : doors absent → [] (défaut posé — plus un passthrough)");
   }
   });
 
@@ -697,7 +700,7 @@ module.exports = async () => {
     ck.eq(badType.some((x) => x.path === "u_count" && x.code === "type"), true, "validate : u_count non numérique → erreur 'type'");
     const belowMin = Validation.DataValidator.validateRecord("racks", { name: "R", u_count: 0 });
     ck.eq(belowMin.some((x) => x.path === "u_count" && x.code === "min"), true, "validate : u_count 0 → erreur 'min'");
-    ck.eq(Validation.DataValidator.validateRecord("spares", { anything: true }).length, 0, "validate : collection sans spec → 0 erreur");
+    ck.eq(Validation.DataValidator.validateRecord("spares", { anything: true }).length, 0, "validate : champ INCONNU de la spec → jamais rejeté (l'audit en dépend)");
     // enchaînement serveur : normalise PUIS valide
     const nv = Validation.DataValidator.normalizeAndValidate("racks", { name: "R", u_count: "42" });
     ck.eq(nv.errors.length, 0, "normalizeAndValidate : '42' normalisé → valide");

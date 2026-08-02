@@ -1,7 +1,7 @@
 import express, { type Router, type RequestHandler, type Request, type Response } from "express";
 import multer from "multer";
 import { Schema } from "./constants.js";
-import { type Repository, type Rec, type ListOpts } from "./db.js";
+import { type RepositoryContract, type Rec, type ListOpts } from "./db.js";   // le CONTRAT (surface publique) — l'implémentation servie est relationnelle depuis la bascule L4
 import { DocumentStore } from "./documents.js";
 import { Auth, type SsoResult } from "./auth.js";
 import { LiveBus } from "./live.js";
@@ -13,10 +13,10 @@ import { AuditStamp } from "./AuditStamp.js";         // règles PURES d'estampi
 import { UserProfiles } from "./users/UserProfiles.js";   // logique PURE de l'annuaire (clé canonique, caviardage, parsing d'ids)
 import type { UserResolver } from "./users/UserResolver.js";   // contrat de résolution d'utilisateurs (service CORE injecté)
 
-/** Requête dont le Repository du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`).
+/** Requête dont le dépôt du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`).
     `changeset` : périmètre SSE, posé par défaut par `resolveRepo` et ÉLARGISSABLE par un handler (ex. la cascade
     de suppression touche plusieurs collections) — la publication live le lit au moment du `finish`. */
-type RepoRequest = Request & { repo?: Repository; authUser?: SsoResult; docRev?: number; changeset?: DocumentChangeset };
+type RepoRequest = Request & { repo?: RepositoryContract; authUser?: SsoResult; docRev?: number; changeset?: DocumentChangeset };
 
 /** Point d'EXTENSION générique de l'API : routeur additionnel monté sous la même garde d'accès
     (requireAdmin), déclaré par un module OPTIONNEL (ex. `vm/`) et câblé au bootstrap (index.ts).
@@ -109,7 +109,7 @@ export class Api {
     return r;
   }
 
-  private repoOf(req: Request): Repository { return (req as RepoRequest).repo!; }
+  private repoOf(req: Request): RepositoryContract { return (req as RepoRequest).repo!; }
   /** Révision portée par l'écriture courante (posée par `resolveRepo`) → estampillée sur les lignes (`updated_rev`). */
   private revOf(req: Request): number { return (req as RepoRequest).docRev || 0; }
   /** Id CANONIQUE de l'auteur de l'écriture courante — estampillé en audit `created_by`/`updated_by`
