@@ -115,6 +115,19 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
       les objets du modèle, dont la liste est longue, croissante et à libellés composés.
     Ces primitives portent le thème, l'accessibilité et le comportement clavier ; les réimplémenter
     diverge silencieusement du reste de l'app (dette repérée sur la feature `interventions/`, à résorber).
+15. **Toute fonctionnalité est PENSÉE pour le mode LOCAL (fichier).** L'app a deux modes — fichier
+    local et API serveur — et le mode fichier n'est PAS un sous-produit : une nouvelle fonction se
+    conçoit pour marcher SANS serveur. Si elle n'est PAS pertinente en local, cet écart se JUSTIFIE
+    et se DOCUMENTE explicitement (section « Mode local » de son `docs/*.md`) — jamais implicite.
+    Corollaire pour les logiques de DONNÉES (recherche, filtres, comptages…) : la NORME du mode API
+    est l'exécution ASYNCHRONE côté serveur, mais le module doit TOUJOURS offrir une exécution
+    SYNCHRONE sur les données locales (mode fichier) — d'où la forme maison : logique partagée
+    (`src-shared/`, lecteur injecté), le serveur ET le Store client la consomment chacun dans son mode.
+    Exceptions documentées à ce jour : **PKI/certificats** (crypto navigateur = contexte sécurisé
+    localhost/HTTPS + coffres serveur), **contacts/notifications** (le service de notification est
+    serveur), **VMs** (synchro côté serveur ; évolution prévue : un provider « Manuel » pour créer une
+    VM à la main). ⚠ Écart CONNU à résorber : les **interventions** n'existent qu'en mode API alors que
+    rien ne l'impose — chantier à venir (cf. `.notes/toDos/`).
 
 ## Structure du projet
 

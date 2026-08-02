@@ -524,3 +524,12 @@ fichiers dédiés ci-dessus).
    du CRUD DB ; les clés inconnues sont déjà tolérées).
 4. `ext_id` : choisir une identité STABLE côté provider (équivalent de
    `cluster/vmid`) — c'est la clé de réconciliation.
+
+## Mode local (fichier) — principe n°15
+
+**Non disponible en mode fichier AUJOURD'HUI — écart assumé et documenté** (principe n°15 de
+`CLAUDE.md`) : l'inventaire est produit par la SYNCHRO côté serveur (jetons chiffrés au repos,
+appels Proxmox). ⚠ **Évolution PRÉVUE** (décision utilisateur 2026-08-02) : un provider
+**« Manuel »** permettant de créer/éditer une VM à la main — ce chemin-là devra fonctionner
+AUSSI en mode fichier (`vms` est une collection du DOCUMENT ; seule la synchro est serveur).
+Cadrage à venir : `.notes/toDos/vms-provider-manuel-todo-2026-08-02.md`.

@@ -423,3 +423,11 @@ l'importe jamais ; côté client tout vit dans les fichiers dédiés ci-dessous)
      reste que `contacts` dedans, il continue de fonctionner (ajuster ses `children`) ;
    - l'interface `ProblemReporter` dans `vm/VmSyncService.ts` — **optionnelle**, inerte
      sans pont ; on peut la laisser (le producteur ne signale simplement plus rien).
+
+## Mode local (fichier) — principe n°15
+
+**Non pertinent en mode fichier — écart ASSUMÉ et documenté** (principe n°15 de `CLAUDE.md`) :
+remettre des notifications exige un service qui TOURNE en continu (canaux, anti-spam, rappels,
+veilleurs) — c'est le serveur, par nature. Le carnet **`contacts`** (collection du document)
+existe techniquement dans les deux modes, mais sa raison d'être est le routage des
+notifications : sans serveur, il est inerte — écart assumé au même titre.

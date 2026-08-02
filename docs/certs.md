@@ -1050,3 +1050,11 @@ jamais ; côté client tout vit dans les fichiers dédiés ci-dessous).
      simplement, les autres producteurs et abonnements sont intacts ;
    - le **`SecretBox` serveur** — coffre PARTAGÉ par `vm/`/`notify/`, jamais utilisé par
      `certs/` (rien à chiffrer côté serveur) ; il reste, sans lien avec cette feature.
+
+## Mode local (fichier) — principe n°15
+
+**Non disponible en mode fichier — écart ASSUMÉ et documenté** (principe n°15 de `CLAUDE.md`).
+Deux raisons de FOND, pas d'implémentation : la crypto navigateur (WebCrypto `subtle`) n'existe
+qu'en **contexte sécurisé** (localhost ou HTTPS), alors que le mode fichier doit marcher partout ;
+et le modèle zéro-connaissance repose sur des coffres et blobs **serveur** (`certs.db`) — il n'a
+pas d'équivalent local. La page Certificats n'a donc de sens qu'en mode API.

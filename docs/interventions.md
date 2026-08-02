@@ -398,3 +398,12 @@ l'importe jamais).
      disparaît simplement, les autres producteurs et abonnements sont intacts ;
    - la variable **`JIRA_BASE_URL`**, si elle a été ajoutée au `docker-compose.yml`, peut y
      être retirée (elle n'est plus lue par personne).
+
+## Mode local (fichier) — principe n°15
+
+⚠ **ÉCART CONNU, À RÉSORBER** (décision utilisateur 2026-08-02, principe n°15 de `CLAUDE.md`) :
+rien dans le MÉTIER des interventions n'exige un serveur — la v1 est API-seulement (base
+`interventions.db`, listing SQL) par choix d'implémentation, pas par nature. Un chantier
+« interventions en mode local » est à cadrer (`.notes/toDos/interventions-mode-local-todo-2026-08-02.md`) :
+persistance locale à définir, parité listing/tri/filtres/fiches ; seuls les RAPPELS
+(producteur `intervention-reminder`) restent légitimement serveur.
