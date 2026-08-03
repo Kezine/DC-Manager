@@ -1,10 +1,10 @@
-<!-- @dsCard group="Modales" name="Fiche détail" subtitle="modale hideFooter : grille clé/valeur, section, table .table-wrap à boutons-icône, ligne d'audit, pied Localiser + Modifier" -->
+<!-- @dsCard group="Listing" name="Filtre à recherche (cible)" subtitle="menu « + Filtre », dimension « Porteur » (SearchPop), chip de valeur libre — ÉTAT ACTUEL (refonte à l'étude, cf. briefs/filtre-cible-porteur.md)" -->
 <!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DC Manager — DS · Fiche détail</title>
+<title>DC Manager — DS · Filtre à recherche (cible)</title>
 <style>
 /* DC Manager — styles extraits du monolithe v172 (bloc <style>, verbatim). */
   /* ============ FONTES EMBARQUÉES — IBM Plex Sans (PROSE) ============
@@ -2856,99 +2856,67 @@
 <button type="button" id="ds-theme-toggle" class="ds-theme-toggle" aria-label="Basculer le thème clair / sombre" title="Basculer le thème"></button>
 <div class="ds-page">
   <header class="ds-card-head">
-    <div class="ds-card-group">Modales</div>
-    <div class="ds-card-title">Fiche détail</div>
-    <div class="ds-card-sub">modale hideFooter : grille clé/valeur, section, table .table-wrap à boutons-icône, ligne d'audit, pied Localiser + Modifier</div>
+    <div class="ds-card-group">Listing</div>
+    <div class="ds-card-title">Filtre à recherche (cible)</div>
+    <div class="ds-card-sub">menu « + Filtre », dimension « Porteur » (SearchPop), chip de valeur libre — ÉTAT ACTUEL (refonte à l'étude, cf. briefs/filtre-cible-porteur.md)</div>
   </header>
-<!-- DÉRIVÉ de src-client/views/forms/EquipmentForms.ts (equipmentDetail) et DetailForms.ts :
-     .detail-grid > .dt/.dd (FormBase.dt/dd), .section-divider, .table-wrap > table (cellules
-     .cell-name / .cell-actions avec IconButton .icon-action LOCATE), .pill / .role-* / .loc-pill.
-     La ligne d'audit vient de src-client/views/forms/AuditLine.ts (.audit-line, « Créé/Modifié par
-     {auteur} le {date} », mode API). Le pied est celui de la fiche : « Localiser en 3D » (ghost,
-     icône préfixée .gi) + « Modifier » (primaire). La fiche s'ouvre en Modal hideFooter : Annuler/
-     Enregistrer sont masqués, mais ses actions vivent désormais dans le PIED FIXE de la modale
-     (.modal-footer > .modal-footer-slot, via footerActions) — plus dans le corps défilant.
-     APERÇU STATIQUE : la modale est sortie de son overlay plein écran. -->
+<!-- DÉRIVÉ de src-client/ui/FilterBar.ts (buildSearch : .lc-addfilter + .lc-addfilter-menu,
+     dimension à recherche = .lc-single + SearchPop COMPACT — wrapper et input à styles EN LIGNE,
+     reproduits verbatim de SearchPop.ts:157/162) et de src-client/core/FilterChips.ts (chips à
+     VALEUR LIBRE : libellé résolu à chaque rendu). La dimension « Porteur » (views/ListTargets.
+     ipCarrier, lot 3-4 recherche partagée) cherche équipements ET VMs — badges .dc-search-tag.
+     ⚠ ÉTAT ACTUEL documenté tel quel : le popover de résultats (~380 px) DÉBORDE du menu
+     (min-width 200 px) — tension signalée à la livraison du lot 3, refonte à l'étude dans
+     briefs/filtre-cible-porteur.md (déclencheur fermé façon .multi-trigger, input au lieu de la
+     liste). Le menu et le popover sont montrés OUVERTS en STATIQUE (normalement au clic). -->
 <section class="ds-section">
-  <h2>Modale de fiche détail (lecture)</h2>
-  <p class="ds-note">Fiche RICHE en lecture d'une entité (Modal <code>hideFooter</code>, <code>wide</code>) : elle résout les liens (noms au lieu d'ids), agrège les entités liées et propose « Localiser » + « Modifier ». Grille clé/valeur, intercalaires de section, tables compactes.</p>
-  <div class="ds-demo">
-    <div class="modal wide" style="margin:0 auto;">
-      <div class="modal-header">
-        <div class="modal-header-left"><div class="modal-titles">
-          <div class="modal-title">Détail de l'équipement</div>
-          <div class="modal-subtitle">core-sw-01</div>
-        </div></div>
-        <div class="modal-header-actions">
-          <button type="button" class="modal-back" aria-label="Retour"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="12" x2="5" y2="12"/><path d="M11 6l-6 6 6 6"/></svg></button>
-          <button type="button" class="modal-close" aria-label="Fermer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
-        </div>
+  <h2>Menu « + Filtre » avec la dimension à recherche « Porteur » (état actuel)</h2>
+  <div class="lc-addfilter">
+    <button type="button" class="lc-addfilter-btn" aria-haspopup="menu" aria-expanded="true"><span class="lc-addfilter-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>Filtre</button>
+    <div class="lc-addfilter-menu open" style="position:static;">
+      <!-- dimension à OPTIONS FIXES (MultiSelect FERMÉ) — le voisinage que la refonte veut égaler -->
+      <div class="multi-pop">
+        <button type="button" class="multi-trigger">Réseau <span class="count-badge">Tous</span></button>
       </div>
-      <div class="modal-body">
-        <div class="detail-grid">
-          <div class="dt">Nom</div><div class="dd">core-sw-01</div>
-          <div class="dt">Type</div><div class="dd"><span class="pill">Switch</span></div>
-          <div class="dt">Marque</div><div class="dd">Cisco</div>
-          <div class="dt">Modèle</div><div class="dd">Catalyst 9300</div>
-          <div class="dt">N° de série</div><div class="dd">FCW2245A1BC</div>
-          <div class="dt">Groupe</div><div class="dd"><span class="pill colored-pill" style="--pill-bg:#4ade80;--pill-fg:#0b1220;--pill-border:#4ade80;" title="Groupe primaire">Cœur réseau</span></div>
-          <div class="dt">Dimensions</div><div class="dd"><span class="pill">U</span> 1 U · Standard (1000 mm)</div>
-          <div class="dt">Emplacement</div><div class="dd"><span class="pill">Rack</span> RACK-A-03 · U12 · Standard</div>
-          <div class="dt">Lieu</div><div class="dd"><span class="loc-pill">Bât. Principal · Étage 0 · Salle A · RACK-A-03</span></div>
-          <div class="dt">Description</div><div class="dd">Switch d'accès de l'étage 0.</div>
-          <div class="dt">Créé</div><div class="dd">12/03/2024 09:14</div>
-          <div class="dt">Modifié</div><div class="dd">05/07/2026 16:32</div>
-        </div>
-
-        <div class="section-divider">Ports (3)</div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Port</th>
-                <th>Type</th>
-                <th>Rôle</th>
-                <th>Agrégat</th>
-                <th style="text-align:right;">3D</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td class="cell-name">Gi1/0/1</td>
-                <td>RJ45 <span style="color:var(--fg-dimmer)">· cuivre</span></td>
-                <td><span class="pill role-data">Données</span></td>
-                <td><span style="color:var(--fg-dimmer)">—</span></td>
-                <td class="cell-actions"><button type="button" class="btn btn-ghost btn-sm icon-action" title="Localiser le port en 3D" aria-label="Localiser le port en 3D"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg></button></td>
-              </tr>
-              <tr>
-                <td class="cell-name">Gi1/0/2</td>
-                <td>RJ45 <span style="color:var(--fg-dimmer)">· cuivre</span></td>
-                <td><span class="pill role-data">Données</span></td>
-                <td>lag-uplink</td>
-                <td class="cell-actions"><button type="button" class="btn btn-ghost btn-sm icon-action" title="Localiser le port en 3D" aria-label="Localiser le port en 3D"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg></button></td>
-              </tr>
-              <tr>
-                <td class="cell-name">mgmt0</td>
-                <td>RJ45 <span style="color:var(--fg-dimmer)">· cuivre</span></td>
-                <td><span class="pill role-mgmt">Management</span></td>
-                <td><span style="color:var(--fg-dimmer)">—</span></td>
-                <td class="cell-actions"><button type="button" class="btn btn-ghost btn-sm icon-action" title="Localiser le port en 3D" aria-label="Localiser le port en 3D"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg></button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="audit-line">Créé par Marie Dupont le 12/03/2024 09:14 · Modifié par Jean Martin le 05/07/2026 16:32</div>
-      </div>
-      <div class="modal-footer">
-        <div class="modal-footer-slot">
-          <button type="button" class="btn btn-ghost"><span class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg></span>Localiser en 3D</button>
-          <button type="button" class="btn btn-primary">Modifier</button>
+      <!-- dimension à RECHERCHE (lot 3) : libellé + SearchPop COMPACT (styles en ligne = verbatim SearchPop.ts) -->
+      <div class="lc-single">
+        <span class="lc-single-lb">Porteur</span>
+        <div style="position:relative;display:flex;align-items:center;gap:4px">
+          <input type="text" class="search-input" placeholder="Équipement ou VM…" value="sw" style="min-width:220px;max-width:320px;padding:6px 10px;flex:none">
+          <button type="button" class="btn btn-ghost btn-sm" aria-label="Effacer la recherche" title="Effacer la recherche"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+          <div class="dc-search-pop open" style="position:static;top:auto;left:auto;margin-top:4px;min-width:0;max-width:340px">
+            <div class="dc-search-item"><span class="dc-search-tag">Équipement</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">SW-Coeur</span></div>
+            <div class="dc-search-item"><span class="dc-search-tag">Équipement</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">SW-Acces-B12</span></div>
+            <div class="dc-search-item"><span class="dc-search-tag">VM</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">srv-sw-monitor</span></div>
+          </div>
         </div>
       </div>
     </div>
   </div>
-  <p class="ds-note">Les boutons d'action de la table sont des boutons-icône (<code>.icon-action</code>, <code>aria-label</code> + <code>title</code> obligatoires, cf. <code>IconButton</code>). Les actions de la fiche vivent dans le <code>.modal-footer</code> FIXE (via <code>.modal-footer-slot</code>) : toujours visibles, sans défiler jusqu'au bas d'une fiche longue. « Localiser en 3D » préfixe l'icône via <code>.gi</code> (icône dans un libellé). La ligne d'audit est discrète et estompée.</p>
+  <p class="ds-note">Miroir de <code>FilterBar.buildSearch</code> : la dimension « à recherche » est un
+    <code>.lc-single</code> (libellé + <code>SearchPop</code> COMPACT) posé DANS le menu
+    <code>.lc-addfilter-menu</code>, à côté des dimensions à options fixes (<code>.multi-trigger</code>).
+    Le clic sur un résultat POSE le filtre (mono-valeur v1 : remplace) et referme le menu.
+    ⚠ Tension documentée : le popover de résultats déborde du menu (~380 px vs 200 px) — c'est l'état
+    ACTUEL, la refonte est à l'étude (<code>briefs/filtre-cible-porteur.md</code>).</p>
+</section>
+
+<section class="ds-section">
+  <h2>Chip de valeur LIBRE posée + réinitialisation</h2>
+  <div class="lc-chips lc-chips-row">
+    <span class="filter-chip">
+      <span class="filter-chip-lb">Porteur : SW-Coeur</span>
+      <button type="button" class="filter-chip-x" aria-label="Retirer le filtre Porteur : SW-Coeur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+    </span>
+  </div>
+  <div style="margin-top:8px">
+    <button type="button" class="lc-reset btn btn-ghost btn-sm">Réinit. filtres</button>
+  </div>
+  <p class="ds-note">La chip d'une dimension à recherche affiche « dimension : valeur »
+    (<code>lists.chrome.filterChip</code>) avec le libellé RÉSOLU À CHAQUE RENDU
+    (<code>FilterChips.build</code> + <code>labelOf</code>) : renommer l'entité met la chip à jour,
+    une entité supprimée retombe sur son identifiant — le filtre actif ne disparaît jamais en silence.
+    « Réinit. filtres » retire aussi cette chip, comme n'importe quelle dimension.</p>
 </section>
 
 </div>

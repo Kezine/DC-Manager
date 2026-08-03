@@ -1,0 +1,59 @@
+<!-- @dsCard group="Listing" name="Filtre à recherche (cible)" subtitle="menu « + Filtre », dimension « Porteur » (SearchPop), chip de valeur libre — ÉTAT ACTUEL (refonte à l'étude, cf. briefs/filtre-cible-porteur.md)" -->
+<!-- DÉRIVÉ de src-client/ui/FilterBar.ts (buildSearch : .lc-addfilter + .lc-addfilter-menu,
+     dimension à recherche = .lc-single + SearchPop COMPACT — wrapper et input à styles EN LIGNE,
+     reproduits verbatim de SearchPop.ts:157/162) et de src-client/core/FilterChips.ts (chips à
+     VALEUR LIBRE : libellé résolu à chaque rendu). La dimension « Porteur » (views/ListTargets.
+     ipCarrier, lot 3-4 recherche partagée) cherche équipements ET VMs — badges .dc-search-tag.
+     ⚠ ÉTAT ACTUEL documenté tel quel : le popover de résultats (~380 px) DÉBORDE du menu
+     (min-width 200 px) — tension signalée à la livraison du lot 3, refonte à l'étude dans
+     briefs/filtre-cible-porteur.md (déclencheur fermé façon .multi-trigger, input au lieu de la
+     liste). Le menu et le popover sont montrés OUVERTS en STATIQUE (normalement au clic). -->
+<section class="ds-section">
+  <h2>Menu « + Filtre » avec la dimension à recherche « Porteur » (état actuel)</h2>
+  <div class="lc-addfilter">
+    <button type="button" class="lc-addfilter-btn" aria-haspopup="menu" aria-expanded="true"><span class="lc-addfilter-ic" aria-hidden="true">{{ICON:PLUS}}</span>Filtre</button>
+    <div class="lc-addfilter-menu open" style="position:static;">
+      <!-- dimension à OPTIONS FIXES (MultiSelect FERMÉ) — le voisinage que la refonte veut égaler -->
+      <div class="multi-pop">
+        <button type="button" class="multi-trigger">Réseau <span class="count-badge">Tous</span></button>
+      </div>
+      <!-- dimension à RECHERCHE (lot 3) : libellé + SearchPop COMPACT (styles en ligne = verbatim SearchPop.ts) -->
+      <div class="lc-single">
+        <span class="lc-single-lb">Porteur</span>
+        <div style="position:relative;display:flex;align-items:center;gap:4px">
+          <input type="text" class="search-input" placeholder="Équipement ou VM…" value="sw" style="min-width:220px;max-width:320px;padding:6px 10px;flex:none">
+          <button type="button" class="btn btn-ghost btn-sm" aria-label="Effacer la recherche" title="Effacer la recherche">{{ICON:CLOSE}}</button>
+          <div class="dc-search-pop open" style="position:static;top:auto;left:auto;margin-top:4px;min-width:0;max-width:340px">
+            <div class="dc-search-item"><span class="dc-search-tag">Équipement</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">SW-Coeur</span></div>
+            <div class="dc-search-item"><span class="dc-search-tag">Équipement</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">SW-Acces-B12</span></div>
+            <div class="dc-search-item"><span class="dc-search-tag">VM</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">srv-sw-monitor</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Miroir de <code>FilterBar.buildSearch</code> : la dimension « à recherche » est un
+    <code>.lc-single</code> (libellé + <code>SearchPop</code> COMPACT) posé DANS le menu
+    <code>.lc-addfilter-menu</code>, à côté des dimensions à options fixes (<code>.multi-trigger</code>).
+    Le clic sur un résultat POSE le filtre (mono-valeur v1 : remplace) et referme le menu.
+    ⚠ Tension documentée : le popover de résultats déborde du menu (~380 px vs 200 px) — c'est l'état
+    ACTUEL, la refonte est à l'étude (<code>briefs/filtre-cible-porteur.md</code>).</p>
+</section>
+
+<section class="ds-section">
+  <h2>Chip de valeur LIBRE posée + réinitialisation</h2>
+  <div class="lc-chips lc-chips-row">
+    <span class="filter-chip">
+      <span class="filter-chip-lb">Porteur : SW-Coeur</span>
+      <button type="button" class="filter-chip-x" aria-label="Retirer le filtre Porteur : SW-Coeur">{{ICON:CLOSE}}</button>
+    </span>
+  </div>
+  <div style="margin-top:8px">
+    <button type="button" class="lc-reset btn btn-ghost btn-sm">Réinit. filtres</button>
+  </div>
+  <p class="ds-note">La chip d'une dimension à recherche affiche « dimension : valeur »
+    (<code>lists.chrome.filterChip</code>) avec le libellé RÉSOLU À CHAQUE RENDU
+    (<code>FilterChips.build</code> + <code>labelOf</code>) : renommer l'entité met la chip à jour,
+    une entité supprimée retombe sur son identifiant — le filtre actif ne disparaît jamais en silence.
+    « Réinit. filtres » retire aussi cette chip, comme n'importe quelle dimension.</p>
+</section>
