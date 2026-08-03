@@ -135,7 +135,8 @@ export class DetailForms extends IpamForms {
       [I18n.t("detail.cable.networks"), netsHtml],
       [I18n.t("lists.col.status"), `<span class="pill ${st ? st.cls : ""}">${Html.escape(CableStatuses.label(c.status))}</span>`],
       [I18n.t("lists.col.length"), c.length_m != null ? `${c.length_m} m` : this.MUTED],
-      [I18n.t("lists.col.description"), c.description ? Html.escape(c.description) : this.MUTED],
+      // Description LIBRE (multiligne) : rendue en MARKDOWN dans un conteneur `.md-body` (défauts micromark sûrs, cf. core/Markdown).
+      [I18n.t("lists.col.description"), c.description ? `<div class="md-body">${Markdown.render(c.description)}</div>` : this.MUTED],
       [I18n.t("detail.common.created"), Html.escape(Format.dateTime(c.created_date))],
       [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(c.updated_date))],
     ]));
@@ -189,7 +190,7 @@ export class DetailForms extends IpamForms {
       [I18n.t("detail.bundle.endpointA"), endLabel(b.endpoint_a_equipment_id)],
       [I18n.t("detail.bundle.endpointB"), endLabel(b.endpoint_b_equipment_id)],
       [I18n.t("lists.col.length"), b.length_m != null ? `${b.length_m} m` : this.MUTED],
-      [I18n.t("lists.col.description"), b.description ? Html.escape(b.description) : this.MUTED],
+      [I18n.t("lists.col.description"), b.description ? `<div class="md-body">${Markdown.render(b.description)}</div>` : this.MUTED],
       [I18n.t("detail.common.created"), Html.escape(Format.dateTime(b.created_date))],
       [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(b.updated_date))],
     ]));
@@ -249,7 +250,7 @@ export class DetailForms extends IpamForms {
       const ipn: any = n.ip_network_id ? store.get("ipNetworks", n.ip_network_id) : null;
       pairs.push([I18n.t("lists.col.ipNetwork"), ipn ? Html.escape(Ip.short(ipn)) : `<span style="color:var(--fg-dimmer)">${I18n.t("detail.network.purelyLogical")}</span>`]);
     }
-    pairs.push([I18n.t("lists.col.description"), n.description ? Html.escape(n.description) : this.MUTED]);
+    pairs.push([I18n.t("lists.col.description"), n.description ? `<div class="md-body">${Markdown.render(n.description)}</div>` : this.MUTED]);
     pairs.push([I18n.t("detail.common.created"), Html.escape(Format.dateTime(n.created_date))]);
     pairs.push([I18n.t("detail.common.updated"), Html.escape(Format.dateTime(n.updated_date))]);
     root.appendChild(this.grid(pairs));
@@ -488,7 +489,7 @@ export class DetailForms extends IpamForms {
       [I18n.t("lists.col.dimensions"), `${f.width_mm} × ${f.depth_mm} mm <span style="color:var(--fg-dimmer)">${I18n.t("detail.common.lxd")}</span> · ${I18n.t("detail.common.mesh", { cell: f.cell_mm })}`],
       [I18n.t("lists.col.height"), f.height_mm ? `${f.height_mm} mm` : `<span style="color:var(--fg-dimmer)">${I18n.t("detail.floor.autoHeight")}</span>`],
       [I18n.t("detail.floor.floorPins"), oob.length ? `<span class="pill">${oob.length}</span>` : this.MUTED],
-      [I18n.t("lists.col.description"), f.description ? Html.escape(f.description) : this.MUTED],
+      [I18n.t("lists.col.description"), f.description ? `<div class="md-body">${Markdown.render(f.description)}</div>` : this.MUTED],
       [I18n.t("detail.common.created"), Html.escape(Format.dateTime(f.created_date))],
       [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(f.updated_date))],
     ]));
@@ -522,7 +523,7 @@ export class DetailForms extends IpamForms {
       [I18n.t("detail.spare.assignment"), assignHtml],
       [I18n.t("lists.col.storage"), sp.storage_location ? Html.escape(sp.storage_location) : this.MUTED],
       [I18n.t("lists.col.purchase"), [sp.purchase_date ? Html.escape(sp.purchase_date) : null, sp.po_ref ? I18n.t("detail.common.poRef", { ref: Html.escape(sp.po_ref) }) : null].filter(Boolean).join(" · ") || this.MUTED],
-      [I18n.t("detail.spare.comment"), sp.comment ? Html.escape(sp.comment) : this.MUTED],
+      [I18n.t("detail.spare.comment"), sp.comment ? `<div class="md-body">${Markdown.render(sp.comment)}</div>` : this.MUTED],
       [I18n.t("detail.common.created"), Html.escape(Format.dateTime(sp.created_date))],
       [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(sp.updated_date))],
     ]));
@@ -542,7 +543,7 @@ export class DetailForms extends IpamForms {
       [I18n.t("lists.col.name"), Html.escape(c.name || I18n.t("lists.ph.contact"))],
       [I18n.t("lists.col.email"), c.email ? Html.escape(c.email) : this.MUTED],
       [I18n.t("lists.col.phone"), c.phone ? Html.escape(c.phone) : this.MUTED],
-      [I18n.t("lists.col.notes"), c.notes ? Html.escape(c.notes) : this.MUTED],
+      [I18n.t("lists.col.notes"), c.notes ? `<div class="md-body">${Markdown.render(c.notes)}</div>` : this.MUTED],
       [I18n.t("detail.common.created"), Html.escape(Format.dateTime(c.created_date))],
       [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(c.updated_date))],
     ]));
@@ -717,7 +718,7 @@ export class DetailForms extends IpamForms {
       [grpPills.length > 1 ? I18n.t("detail.common.groups") : I18n.t("lists.col.group"), grpPills.length ? grpPills.join(" ") : this.MUTED],
       // Description LOCALE retirée du modèle d'édition (les notes suffisent) → plus affichée ; la description
       // remontée par le provider (description_src, en markdown) reste dans l'identité source ci-dessus.
-      [I18n.t("lists.col.notes"), vm.notes ? Html.escape(vm.notes) : this.MUTED],
+      [I18n.t("lists.col.notes"), vm.notes ? `<div class="md-body">${Markdown.render(vm.notes)}</div>` : this.MUTED],
       [I18n.t("detail.common.created"), Html.escape(Format.dateTime(vm.created_date))],
       [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(vm.updated_date))],
     ]));

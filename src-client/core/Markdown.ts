@@ -21,6 +21,15 @@ import { micromark } from "micromark";
    La sortie est donc directement injectable en `innerHTML` SANS passe
    d'assainissement supplémentaire. Ne PAS passer d'options à micromark depuis
    ici sans réévaluer cet invariant (ce serait rouvrir une surface XSS).
+
+   SURFACES CONSOMMATRICES (le HTML rendu est déposé dans un conteneur `.md-body`) :
+   les FICHES DE DÉTAIL (modales d'info, lecture seule) rendent en markdown leurs
+   champs texte libre multiligne — description (équipements, baies, sous-équipements,
+   câbles, faisceaux, réseaux, étages), commentaire (pièces détachées), notes (VMs,
+   contacts) et description remontée par le provider (VMs) — via
+   `views/forms/{DetailForms,EquipmentForms,RackForms,SubEquipmentForms}.ts` ; ainsi
+   que la description d'intervention (`views/InterventionsAdminView.ts`). Les
+   FORMULAIRES d'édition, eux, restent en `<textarea>` brut (pas d'aperçu).
    ============================================================================= */
 export class Markdown {
   /** Rend un texte markdown en HTML SÛR (défauts micromark). Entrée nulle/vide → "". */

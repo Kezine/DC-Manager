@@ -22,6 +22,7 @@
 import type { Store } from "../../store";
 import { Icons } from "../../ui/Icons";
 import { Html } from "../../core/Html";
+import { Markdown } from "../../core/Markdown";   // rendu MARKDOWN du champ description de la FICHE (défauts sûrs, cf. core/Markdown)
 import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
 import { Notify } from "../../ui/Notify";
@@ -77,7 +78,8 @@ export class SubEquipmentForms extends FormBase {
     const tech = this.techSummary(se);
     if (tech) pairs.push([I18n.t("subEquipment.hardware"), Html.escape(tech)]);
     pairs.push([groups.length > 1 ? I18n.t("detail.common.groups") : I18n.t("lists.col.group"), groupCell]);
-    pairs.push([I18n.t("lists.col.description"), se.description ? Html.escape(se.description) : "—"]);
+    // Description LIBRE (multiligne) : rendue en MARKDOWN dans un conteneur dédié `.md-body` (défauts micromark sûrs, cf. core/Markdown).
+    pairs.push([I18n.t("lists.col.description"), se.description ? `<div class="md-body">${Markdown.render(se.description)}</div>` : "—"]);
     pairs.push([I18n.t("detail.common.created"), Html.escape(Format.dateTime(se.created_date))]);
     pairs.push([I18n.t("detail.common.updated"), Html.escape(Format.dateTime(se.updated_date))]);
     root.appendChild(this.grid(pairs));

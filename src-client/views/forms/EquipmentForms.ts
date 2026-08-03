@@ -14,6 +14,7 @@ import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { ContextMenu } from "../../ui/ContextMenu";
 import { Html } from "../../core/Html";
+import { Markdown } from "../../core/Markdown";   // rendu MARKDOWN des champs texte libre des FICHES (défauts sûrs, cf. core/Markdown)
 import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (annuaire, mode API)
@@ -88,7 +89,9 @@ export class EquipmentForms extends FormBase {
     add(I18n.t("lists.col.location"), placeHtml);
     const locBits = this.equipLocationBits(store, eq);
     add(I18n.t("equipment.common.place"), locBits.length ? `<span class="loc-pill">${Html.escape(locBits.join(" · "))}</span>` : `<span style="color:var(--fg-dimmer)">${I18n.t("equipment.detail.notSet")}</span>`);
-    add(I18n.t("lists.col.description"), eq.description ? Html.escape(eq.description) : "—");
+    // Description LIBRE (multiligne) : rendue en MARKDOWN dans un conteneur dédié `.md-body` — le HTML produit
+    // par micromark est neutralisé/filtré (défauts sûrs), donc injectable en innerHTML sans passe d'assainissement.
+    add(I18n.t("lists.col.description"), eq.description ? `<div class="md-body">${Markdown.render(eq.description)}</div>` : "—");
     add(I18n.t("equipment.common.created"), Html.escape(Format.dateTime(eq.created_date)));
     add(I18n.t("equipment.common.updated"), Html.escape(Format.dateTime(eq.updated_date)));
     root.appendChild(grid);

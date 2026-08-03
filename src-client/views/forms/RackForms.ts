@@ -4,6 +4,7 @@ import { FormControls } from "../../ui/FormControls";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
+import { Markdown } from "../../core/Markdown";   // rendu MARKDOWN des champs texte libre des FICHES (défauts sûrs, cf. core/Markdown)
 import { Format } from "../../core/Format";
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (annuaire, mode API)
 import { LiveValidation } from "./LiveValidation";
@@ -288,7 +289,8 @@ export class RackForms extends CableForms {
     add(I18n.t("rack.rackDetail.doors"), doors.length ? doors.map((d) => `<span class="pill">${d}</span>`).join(" ") : `<span style="color:var(--fg-dimmer)">${I18n.t("rack.rackDetail.noneF")}</span>`);
     const free = scene.freeUInfo(rk.id);
     add(I18n.t("rack.rackDetail.occupation"), `<span class="pill">${I18n.t("rack.rackDetail.occCount", { n: scene.occupancyCount(rk.id) })}</span> · <span class="pill">${I18n.t("rack.rackDetail.uFree", { n: free.free })}</span> · <span class="pill">${I18n.t("rack.rackDetail.uContig", { n: free.contig })}</span> <span style="color:var(--fg-dimmer)">${I18n.t("rack.rackDetail.uTotal", { total: free.total })}</span>`);
-    add(I18n.t("lists.col.description"), rk.description ? Html.escape(rk.description) : "—");
+    // Description LIBRE (multiligne) : rendue en MARKDOWN dans un conteneur dédié `.md-body` (défauts micromark sûrs, cf. core/Markdown).
+    add(I18n.t("lists.col.description"), rk.description ? `<div class="md-body">${Markdown.render(rk.description)}</div>` : "—");
     add(I18n.t("rack.common.created"), Html.escape(Format.dateTime(rk.created_date)));
     add(I18n.t("rack.common.updated"), Html.escape(Format.dateTime(rk.updated_date)));
     root.appendChild(grid);

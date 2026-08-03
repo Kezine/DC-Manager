@@ -1516,6 +1516,16 @@
   .detail-grid { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; font-size: 12px; }
   .detail-grid .dt { color: var(--fg-dim); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; padding-top: 2px; }
   .detail-grid .dd { color: var(--fg); word-break: break-word; }
+  /* Rendu MARKDOWN des champs texte libre des fiches (description/commentaire/notes) : le conteneur `.md-body`
+     reçoit la sortie de core/Markdown (micromark). Réglage MINIMAL et SCOPÉ — pas un thème typographique complet :
+     on NEUTRALISE la marge externe des premier/dernier blocs (sinon la marge par défaut d'un <p> désaxe la valeur
+     dans la ligne libellé/valeur du `.detail-grid`), on RESSERRE l'interligne des blocs internes pour tenir dans
+     une grille compacte, et on garde un retrait de liste lisible. Hérite de la couleur/police du contexte (deux
+     thèmes) : aucune couleur codée en dur ici. */
+  .md-body > :first-child { margin-top: 0; }
+  .md-body > :last-child { margin-bottom: 0; }
+  .md-body p, .md-body ul, .md-body ol, .md-body pre, .md-body blockquote, .md-body h1, .md-body h2, .md-body h3 { margin: 0.4em 0; }
+  .md-body ul, .md-body ol { padding-left: 1.4em; }
   /* Ligne d'audit DISCRÈTE des fiches (« Créé/Modifié par … le … », cf. AuditLine) : petite, estompée, en retrait. */
   .audit-line { margin-top: 14px; font-size: 10px; color: var(--fg-dimmer); letter-spacing: 0.03em; }
 
@@ -2923,7 +2933,8 @@
     <div class="ds-card-sub">modale hideFooter : grille clé/valeur, section, table .table-wrap à boutons-icône, ligne d'audit, pied Localiser + Modifier</div>
   </header>
 <!-- DÉRIVÉ de src-client/views/forms/EquipmentForms.ts (equipmentDetail) et DetailForms.ts :
-     .detail-grid > .dt/.dd (FormBase.dt/dd), .section-divider, .table-wrap > table (cellules
+     .detail-grid > .dt/.dd (FormBase.dt/dd), le champ Description en .md-body (rendu MARKDOWN des
+     champs texte libre des fiches, cf. src-client/core/Markdown.ts), .section-divider, .table-wrap > table (cellules
      .cell-name / .cell-actions avec IconButton .icon-action LOCATE), .pill / .role-* / .loc-pill.
      La ligne d'audit vient de src-client/views/forms/AuditLine.ts (.audit-line, « Créé/Modifié par
      {auteur} le {date} », mode API). Le pied est celui de la fiche : « Localiser en 3D » (ghost,
@@ -2957,7 +2968,13 @@
           <div class="dt">Dimensions</div><div class="dd"><span class="pill">U</span> 1 U · Standard (1000 mm)</div>
           <div class="dt">Emplacement</div><div class="dd"><span class="pill">Rack</span> RACK-A-03 · U12 · Standard</div>
           <div class="dt">Lieu</div><div class="dd"><span class="loc-pill">Bât. Principal · Étage 0 · Salle A · RACK-A-03</span></div>
-          <div class="dt">Description</div><div class="dd">Switch d'accès de l'étage 0.</div>
+          <div class="dt">Description</div><div class="dd"><div class="md-body">
+            <p>Switch d'accès de l'étage 0. Rendu <strong>MARKDOWN</strong> (cf. <code>core/Markdown</code>, défauts micromark sûrs).</p>
+            <ul>
+              <li>2 uplinks agrégés vers le cœur réseau</li>
+              <li>Alimentation PoE budget 370 W</li>
+            </ul>
+          </div></div>
           <div class="dt">Créé</div><div class="dd">12/03/2024 09:14</div>
           <div class="dt">Modifié</div><div class="dd">05/07/2026 16:32</div>
         </div>

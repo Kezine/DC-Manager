@@ -1,6 +1,7 @@
 <!-- @dsCard group="Modales" name="Fiche détail" subtitle="modale hideFooter : grille clé/valeur, section, table .table-wrap à boutons-icône, ligne d'audit, pied Localiser + Modifier" -->
 <!-- DÉRIVÉ de src-client/views/forms/EquipmentForms.ts (equipmentDetail) et DetailForms.ts :
-     .detail-grid > .dt/.dd (FormBase.dt/dd), .section-divider, .table-wrap > table (cellules
+     .detail-grid > .dt/.dd (FormBase.dt/dd), le champ Description en .md-body (rendu MARKDOWN des
+     champs texte libre des fiches, cf. src-client/core/Markdown.ts), .section-divider, .table-wrap > table (cellules
      .cell-name / .cell-actions avec IconButton .icon-action LOCATE), .pill / .role-* / .loc-pill.
      La ligne d'audit vient de src-client/views/forms/AuditLine.ts (.audit-line, « Créé/Modifié par
      {auteur} le {date} », mode API). Le pied est celui de la fiche : « Localiser en 3D » (ghost,
@@ -34,7 +35,13 @@
           <div class="dt">Dimensions</div><div class="dd"><span class="pill">U</span> 1 U · Standard (1000 mm)</div>
           <div class="dt">Emplacement</div><div class="dd"><span class="pill">Rack</span> RACK-A-03 · U12 · Standard</div>
           <div class="dt">Lieu</div><div class="dd"><span class="loc-pill">Bât. Principal · Étage 0 · Salle A · RACK-A-03</span></div>
-          <div class="dt">Description</div><div class="dd">Switch d'accès de l'étage 0.</div>
+          <div class="dt">Description</div><div class="dd"><div class="md-body">
+            <p>Switch d'accès de l'étage 0. Rendu <strong>MARKDOWN</strong> (cf. <code>core/Markdown</code>, défauts micromark sûrs).</p>
+            <ul>
+              <li>2 uplinks agrégés vers le cœur réseau</li>
+              <li>Alimentation PoE budget 370 W</li>
+            </ul>
+          </div></div>
           <div class="dt">Créé</div><div class="dd">12/03/2024 09:14</div>
           <div class="dt">Modifié</div><div class="dd">05/07/2026 16:32</div>
         </div>
