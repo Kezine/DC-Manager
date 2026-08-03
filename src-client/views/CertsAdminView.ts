@@ -1,4 +1,5 @@
 import { Html } from "../core/Html";
+import { Markdown } from "../core/Markdown";   // rendu MARKDOWN du commentaire de la fiche certificat (défauts sûrs, cf. core/Markdown)
 import { Format } from "../core/Format";
 import { CertsFormat, type CertLifecycle } from "../core/CertsFormat";
 import { CertTree, type CertTreeNode } from "../core/CertTree";
@@ -1102,7 +1103,9 @@ export class CertsAdminView {
       addNode(I18n.t("certs.admin.info.renewedFrom"), link);
     }
     if (item.cross_signed_pem) add(I18n.t("certs.admin.info.crossSigned"), I18n.t("certs.admin.info.crossSignedYes"));
-    add(I18n.t("certs.admin.info.comment"), item.comment ? Html.escape(item.comment) : "—");
+    // Commentaire LIBRE (multiligne) : rendu en MARKDOWN dans un conteneur `.md-body` — même pattern que les
+    // fiches du document (défauts micromark sûrs, injectable en innerHTML, cf. core/Markdown).
+    add(I18n.t("certs.admin.info.comment"), item.comment ? `<div class="md-body">${Markdown.render(item.comment)}</div>` : "—");
     add(I18n.t("certs.admin.info.created"), Html.escape(Format.dateTime(item.created_date)));
     add(I18n.t("certs.admin.info.updated"), Html.escape(Format.dateTime(item.updated_date)));
     // Édition du commentaire : l'éditeur s'EMPILE sur cette fiche, qui reparaît (reconstruite) à sa sortie.

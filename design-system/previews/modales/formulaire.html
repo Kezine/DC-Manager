@@ -849,7 +849,9 @@
   .date-ctrl-btn.date-ctrl-icon { width: 34px; }
   .date-ctrl-btn.date-ctrl-text { padding: 0 10px; font-size: 10px; letter-spacing: 0.06em; }
   .date-ctrl-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; fill: none; }
-  .form-field textarea { resize: vertical; min-height: 64px; line-height: 1.5; }
+  /* min-height 96px (64 × 1,5 — demande utilisateur 2026-08-03) : les champs description/commentaire/notes
+     accueillent désormais du MARKDOWN multiligne (cf. .md-body), l'aire de saisie par défaut suit. */
+  .form-field textarea { resize: vertical; min-height: 96px; line-height: 1.5; }
   .form-hint { font-size: 10px; color: var(--fg-dimmer); margin-top: 4px; letter-spacing: 0.03em; font-family: var(--sans); }   /* aide de formulaire (prose) → --sans */
   .form-hint.warn { color: var(--warn); }
   .form-hint.err { color: var(--err); }
