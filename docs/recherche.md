@@ -299,6 +299,17 @@ La cherchabilité de « orpheline »/« orphan » (fr **et** en) est portée par
 module partagé `src-shared/SearchTerms` (invariant n°15 testé). L'**affichage** des statuts VM
 (pastilles) n'a pas bougé.
 
+### Clients wifi (search-v3)
+
+La collection `wifiClients` (cf. `docs/wifi-unifi.md`) est entrée dans la spec partagée le 2026-08-03,
+d'où le passage de `SEARCH_VERSION` à **3** (le backfill à l'ouverture met les documents à niveau).
+Elle apporte : un dérivé par LIEN (le nom du **point d'accès** rapproché, `ap_equipment_id` →
+`equipments.name`) et le catalogue `wifiDisconnected` — **« déconnecté »/« disconnected »**, le pendant
+wifi de `vmOrphan` (MÊME mécanique `orphan`, autre vocabulaire : côté wifi, disparaître de l'inventaire
+est ordinaire). Tout le reste (nom, MAC, IP, SSID, type, nom d'AP brut) est une **colonne plate** déjà
+couverte par `ownText` — d'où l'absence de `own` pour cette collection. Côté palette, elle a sa propre
+**portée « wifi: »** : un client wifi n'est ni un sous-réseau ni une adresse, c'est un objet de présence.
+
 ## Invariants testés
 
 - **corpus ≡ fiches ouvrables** (`GlobalSearchSources.families()` ⇄ `DetailForms.DETAIL_COLLECTIONS`,
