@@ -481,6 +481,10 @@ async function boot(): Promise<void> {
   interface TabOpts {
     title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; links?: string[]; icon?: string;
     onAdd?: () => void; onDel?: (id: string, reRender: () => void) => void; locate?: "equipment" | "rack" | "cable"; manage?: boolean;
+    /** Supprime le bouton « + créer » de l'en-tête TOUT EN gardant l'édition en ligne. Sans lui, fournir `form`
+        (pour l'action « éditer ») ferait apparaître un « + » par défaut. Cas d'usage : le listing des
+        sous-équipements, où la création n'existe pas (le maître fournit `equipment_id`, cf. cadrage lot C). */
+    noAdd?: boolean;
     /** Cible de « Localiser » quand la LIGNE n'EST PAS l'objet localisé : id de ligne → id de l'objet de type
         `locate` à viser, ou `null` si cette ligne n'est pas localisable. Absent = la ligne est l'objet
         (comportement historique de tous les autres onglets).
@@ -498,7 +502,7 @@ async function boot(): Promise<void> {
       icon: opts.icon,   // icône d'onglet (barre desktop = icône seule ; menus = icône + libellé)
       extraActions: opts.extraActions,   // boutons secondaires d'en-tête (ex. « Réseaux virtuels… » sur l'onglet VMs)
       count: () => store.all(cfg.collection).length,
-      addLabel: VIEWER ? undefined : opts.addLabel, onAdd: VIEWER ? undefined : (opts.onAdd || (formFn ? () => formFn(null, () => shell.refreshActive()) : undefined)),   // viewer : pas de création
+      addLabel: (VIEWER || opts.noAdd) ? undefined : opts.addLabel, onAdd: (VIEWER || opts.noAdd) ? undefined : (opts.onAdd || (formFn ? () => formFn(null, () => shell.refreshActive()) : undefined)),   // viewer / noAdd : pas de création
       onShow: () => {
         if (!view) {
           const reRender = () => view!.render();
@@ -569,7 +573,7 @@ async function boot(): Promise<void> {
     icon: Icons.EQUIPMENT,
     subtitle: I18n.t("tabs.equipements.subtitle"),
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: I18n.t("app.add.equipment"),
-    links: ["groupes", "faceimages", "spares"], locate: "equipment",
+    links: ["groupes", "faceimages", "spares", "sousequipements"], locate: "equipment",
   });
   // VMs : onglet de PREMIER NIVEAU (à côté d'Équipements) — ALIMENTÉ PAR LA SYNCHRO (Proxmox…). Pas de
   // `form`/`addLabel` : AUCUN bouton « + créer » en v1 (liste en lecture seule, cf. ListConfigs.vms `actions: view`) ;
@@ -733,6 +737,21 @@ async function boot(): Promise<void> {
     icon: Icons.SPARE,
     subtitle: I18n.t("tabs.spares.subtitle"),
     form: (id, done) => Forms.spare(store, formHost, id, done), addLabel: I18n.t("app.add.spare"), kind: "secondary", parent: "equipements",
+  });
+  // Sous-équipements : vue SECONDAIRE d'Équipements (D2 revue le 2026-08-03, lot C). PAS de bouton « + »
+  // (`noAdd` — la création reste sur la fiche du maître, qui fournit `equipment_id`), mais l'ÉDITION en ligne
+  // marche : `form` rappelle `Forms.subEquipment` en lisant `equipment_id` sur le record. Fiche/clone/suppression
+  // sont génériques (clone duplique `equipment_id`, comportement voulu). Pas de `locate` : un sous-équipement
+  // n'a aucune existence physique propre (doctrine du chantier d'origine).
+  addListTab("sousequipements", I18n.t("tabs.sousequipements.label"), (s) => ListConfigs.subEquipments(s, entitySearchReader), {
+    icon: Icons.EQUIPMENT,
+    title: I18n.t("tabs.sousequipements.title"), subtitle: I18n.t("tabs.sousequipements.subtitle"),
+    kind: "secondary", parent: "equipements", noAdd: true,
+    form: (id, done) => {
+      if (!id) return;   // création absente de ce listing (le « + » est neutralisé par noAdd)
+      const se: any = store.get("subEquipments", id);
+      if (se) Forms.subEquipment(store, formHost, se.equipment_id, id, done);
+    },
   });
   // Images de façade : bibliothèque hors modèle (ImageStore) → câblage dédié (CRUD via imageStore)
   {

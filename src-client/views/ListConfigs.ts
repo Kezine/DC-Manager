@@ -35,10 +35,12 @@ export class ListConfigs {
       collection: "equipments",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.equipments"),
-      // ⚠ Les NOMS (et séries) des SOUS-ÉQUIPEMENTS font partie des termes de recherche du MAÎTRE : sans onglet
-      // dédié (décision D2), c'est LE moyen de retrouver un drive — taper « Drive LTO » fait ressortir la
-      // librairie, d'où l'on ouvre sa fiche. Ce n'est pas une recherche DE sous-équipements (elle n'existe
-      // pas) : c'est la librairie qui matche. Cette dérivation (et toutes les autres : baie, groupes, type,
+      // ⚠ Les NOMS (et séries) des SOUS-ÉQUIPEMENTS font partie des termes de recherche du MAÎTRE : taper
+      // « Drive LTO » fait ressortir la librairie, d'où l'on ouvre sa fiche. Ce n'est pas une recherche DE
+      // sous-équipements sur CE listing : c'est la librairie qui matche. Un listing DÉDIÉ des sous-équipements
+      // existe désormais (D2 revue le 2026-08-03, `ListConfigs.subEquipments`, onglet secondaire d'Équipements),
+      // mais il ne change rien ici — le terme dérivé reste le chemin naturel depuis l'onglet Équipements.
+      // Cette dérivation (et toutes les autres : baie, groupes, type,
       // « U12 », « marque modèle »…) vit désormais dans la spec PARTAGÉE `src-shared/SearchTerms` — le relevé
       // `searchFields` qui la redisait ici a disparu au lot 3 (cf. l'en-tête de `ListView`).
       columns: [
@@ -63,6 +65,49 @@ export class ListConfigs {
         // quasi-totalité des équipements) pour ne pas ajouter une colonne de « 0 » à une table déjà large.
         { head: I18n.t("lists.col.subEquipments"), cls: "cell-num", sort: (e) => store.subEquipmentsOf(e.id).length, render: (e) => { const n = store.subEquipmentsOf(e.id).length; return n ? `<span class="pill">${n}</span>` : dim("—"); } },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (e) => e.description || "", render: descCell },
+      ],
+    };
+  }
+
+  /** Listing des SOUS-ÉQUIPEMENTS — vue SECONDAIRE de l'onglet Équipements (D2 REVUE le 2026-08-03, lot C
+      du cadrage `sous-equipements-achat-garantie-listing`). Pas de bouton « + » : la création reste sur la
+      fiche du maître (qui fournit `equipment_id`, doctrine du chantier d'origine) — cf. le câblage `addListTab`
+      sans `onAdd` dans `main.ts`. Le filtrage PAR MAÎTRE passe par la dimension CIBLE (`targetFilter` →
+      `ListTargets.subEquipmentMaster`, `where` serveur indexé) et non par un filtre-colonne : on n'ajoute pas
+      un doublon dimension/filtre-colonne (l'arbitrage `ipAddresses` sur cette coexistence est encore ouvert). */
+  static subEquipments(store: Store, entitySearch: EntitySearchReader | null = null): ListOptions {
+    return {
+      collection: "subEquipments",
+      defaultSort: { key: "name", dir: "asc" },
+      emptyText: I18n.t("lists.empty.subEquipments"),
+      // Filtre CIBLE : « les sous-équipements de CET équipement maître ». Le lien est une colonne
+      // (`equipment_id`) → le filtre part au SERVEUR en `where` (1 saut, indexé) ; le mode fichier applique
+      // le même test en mémoire. Recherche de CANDIDATS serveur-pilotée en mode API (`entitySearch`), locale en fichier.
+      targetFilter: ListTargets.subEquipmentMaster(store, entitySearch),
+      columns: [
+        { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (se) => se.name, render: (se) => Html.escape(se.name || I18n.t("subEquipment.fallback")) },
+        {
+          // Maître : pas de filtre-COLONNE ici (le filtrage par maître passe par la dimension CIBLE ci-dessus).
+          head: I18n.t("subEquipment.master"), essential: true, sortKey: "master",
+          sort: (se) => { const e: any = se.equipment_id && store.get("equipments", se.equipment_id); return e ? (e.name || "") : ""; },
+          render: (se) => { const e: any = se.equipment_id && store.get("equipments", se.equipment_id); return e ? Html.escape(e.name || I18n.t("lists.ph.equipment")) : dim("—"); },
+        },
+        { head: I18n.t("subEquipment.slot"), sortKey: "slot", sort: (se) => se.slot || "", render: (se) => (se.slot ? Html.escape(se.slot) : dim("—")) },
+        // Caractéristiques (marque · modèle · s/n) : PARITÉ avec `SubEquipmentForms.techSummary` — join inliné
+        // plutôt qu'importer tout le module de formulaires (cross-import EquipmentForms) pour une jointure d'une
+        // ligne. ⚠ Garder les deux en phase si la composition change.
+        { head: I18n.t("lists.col.characteristics"), render: (se) => { const t = [se.brand, se.model, se.serial].map((v: string) => (v || "").trim()).filter(Boolean).join(" · "); return t ? Html.escape(t) : dim("—"); } },
+        {
+          head: I18n.t("lists.col.group"), sortKey: "group",
+          sort: (se) => { const g: any = se.group_id && store.get("groups", se.group_id); return g ? (g.label || "") : ""; },   // tri sur le PRIMAIRE
+          render: (se) => { const gs: any[] = store.groupIdsOf(se).map((gid: string) => store.get("groups", gid)).filter(Boolean); return gs.length ? gs.map((g: any) => swatch(g.color) + Html.escape(g.label || I18n.t("lists.ph.group"))).join(" ") : dim("—"); },
+          // filtre par APPARTENANCE (primaire OU secondaire) — valueOf renvoie un tableau, comme la colonne Groupe des équipements.
+          filter: { label: I18n.t("lists.col.group"), options: () => store.all("groups").map((g: any) => ({ id: g.id, label: g.label || I18n.t("lists.ph.group") })), valueOf: (se) => store.groupIdsOf(se) },
+        },
+        // Achat / Garantie : dates ISO courtes (tri lexicographique = tri chronologique, contrat existant) — gabarit `spares`.
+        { head: I18n.t("lists.col.purchase"), cls: "cell-num", sortKey: "purchase", sort: (se) => se.purchase_date || "", render: (se) => (se.purchase_date ? Html.escape(se.purchase_date) : dim("—")) },
+        { head: I18n.t("lists.col.warranty"), cls: "cell-num", sortKey: "warranty", sort: (se) => se.warranty_end || "", render: (se) => (se.warranty_end ? Html.escape(se.warranty_end) : dim("—")) },
+        { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (se) => se.description || "", render: descCell },
       ],
     };
   }

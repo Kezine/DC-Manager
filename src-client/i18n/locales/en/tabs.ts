@@ -46,6 +46,11 @@ export const tabs = {
     label: "Spares",
     subtitle: "Inventory of spare parts (HDD · SSD · transceiver · other): per-unit tracking, status, assignment.",
   },
+  sousequipements: {
+    label: "Sub-equipment",
+    title: "Sub-equipment",
+    subtitle: "Logical content of equipment (drives of a library, cards of a chassis). Created from the master's detail sheet: filter by master equipment or by group, sort by purchase / warranty.",
+  },
   faceimages: {
     label: "Faceplate images",
     subtitle: "Library of faceplate images (JPEG/PNG/WebP) shared by reference. Stored outside the document (IndexedDB).",

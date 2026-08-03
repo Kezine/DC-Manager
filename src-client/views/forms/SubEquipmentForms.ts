@@ -15,10 +15,12 @@
    c'est le même montage que `FaceEditor` ⇄ `EquipmentForms`, et il tient parce que l'usage
    est DIFFÉRÉ (dans des callbacks), jamais à l'initialisation du module.
 
-   ⚠ Pas d'onglet de listing (décision D2, à ce jour) : on n'atteint un sous-équipement que par son
-   maître ou par une recherche. La FICHE est donc le point d'entrée — et c'est elle qui rend
-   la collection ouvrable par `openTargetDetail` (liens d'intervention, à venir). Un onglet dédié
-   est prévu au lot C du cadrage 2026-08-03 (`sous-equipements-achat-garantie-listing-cadrage-2026-08-03.md`).
+   Un onglet de listing DÉDIÉ existe depuis le 2026-08-03 (D2 REVUE, lot C du cadrage
+   `sous-equipements-achat-garantie-listing`) : vue secondaire d'Équipements (`ListConfigs.subEquipments`),
+   filtres groupe + cible maître. La FICHE reste un point d'entrée à part entière (recherche globale, liens
+   d'intervention via `openTargetDetail`, section du maître) et le SEUL moyen de CRÉER un sous-équipement —
+   le listing n'a pas de bouton « + » en v1 (le maître fournit `equipment_id`). L'ÉDITION depuis une ligne du
+   listing rappelle `form(...)` en lisant `equipment_id` sur le record.
    ============================================================================= */
 import type { Store } from "../../store";
 import { Icons } from "../../ui/Icons";
@@ -245,7 +247,7 @@ export class SubEquipmentForms extends FormBase {
     root.appendChild(title);
     // Modifier/Supprimer masqués en mode visualiseur — MÊME garde que le bouton d'en-tête « + Ajouter » ci-dessus
     // (principe n°10 : la fiche reste consultable, mais aucune écriture n'est offerte). Le bouton fiche, lui,
-    // reste toujours affiché : c'est le seul moyen d'ATTEINDRE un sous-équipement (décision D2, pas d'onglet dédié).
+    // reste toujours affiché : c'est le point d'entrée DEPUIS la fiche du maître (le listing dédié, D2 revue, est un autre chemin).
     const viewer = this.isViewer();
     const tw = this.tbl(root, [I18n.t("lists.col.name"), I18n.t("subEquipment.slot"), I18n.t("lists.col.characteristics"), ""], rows.map((se: any) => {
       const view = `<button class="btn btn-ghost btn-sm icon-action" data-se-view="${Html.escape(se.id)}" title="${I18n.t("lists.chrome.rowView")}" aria-label="${I18n.t("lists.chrome.rowView")}">${Icons.INFO}</button>`;

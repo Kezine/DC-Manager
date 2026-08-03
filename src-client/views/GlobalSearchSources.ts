@@ -152,9 +152,10 @@ export class GlobalSearchSources {
       path: (e, store) => GlobalSearchSources.equipmentPath(store, e),
       locate: (e, store) => store.equipmentLocatable(e.id) ? { kind: "equipment", id: e.id } : null,
     },
-    // Sous-équipement : le CHEMIN nomme le maître (+ repère) — sans onglet (D2), c'est ici que ce
-    // lien se lit ; le nom du maître reste aussi dans les TERMES (chercher la librairie remonte ses
-    // drives — dérivation `subEquipments` de SearchTerms, plus un terme dérogatoire local).
+    // Sous-équipement : le CHEMIN nomme le maître (+ repère) ; le nom du maître reste aussi dans les
+    // TERMES (chercher la librairie remonte ses drives — dérivation `subEquipments` de SearchTerms, plus un
+    // terme dérogatoire local). Un listing dédié existe depuis le 2026-08-03 (D2 revue), mais la palette est
+    // INCHANGÉE : « ouvrir » un résultat sous-équipement montre toujours sa FICHE, jamais le listing.
     // « Localiser » un sous-équipement = localiser SON MAÎTRE (il n'a pas d'existence physique propre —
     // c'est la définition même de la collection, et le même geste que « Localiser » une VM → son hôte).
     subEquipments: {

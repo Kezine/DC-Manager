@@ -117,6 +117,7 @@ export const lists = {
     assignedTo: "Affecté à",
     storage: "Stockage",
     purchase: "Achat",
+    warranty: "Garantie",   // tête de colonne COURTE (≠ `equipment.field.warrantyEnd` « Fin de garantie », trop long)
     host: "Hôte",
     tags: "Tags",
     hostname: "Hostname",
@@ -140,6 +141,7 @@ export const lists = {
     dhcpRanges: "Aucune plage DHCP.",
     spares: "Aucune pièce de rechange. Ajoutez-en une avec « + Spare » (HDD, SSD, transceiver, autre…).",
     vms: "Aucune VM. Les équipements virtuels sont alimentés par la synchronisation d'un cluster de management (Proxmox).",
+    subEquipments: "Aucun sous-équipement. Un sous-équipement se crée depuis la fiche de son équipement maître (pas de bouton « + » ici, v1).",
   },
   filter: {
     room: "Salle",
@@ -147,6 +149,7 @@ export const lists = {
     // Dimension CIBLE « à recherche » des listings (filtre par entité — cf. views/ListTargets).
     carrier: "Porteur",
     carrierPlaceholder: "Équipement ou VM…",
+    master: "Équipement (maître)",   // dimension cible du listing des sous-équipements (famille UNIQUE : équipement)
     equipmentPlaceholder: "Rechercher un équipement…",
     targetEquipment: "Équip.",
     targetVm: "VM",

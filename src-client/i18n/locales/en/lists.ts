@@ -111,6 +111,7 @@ export const lists = {
     assignedTo: "Assigned to",
     storage: "Storage",
     purchase: "Purchase",
+    warranty: "Warranty",   // SHORT column head (≠ `equipment.field.warrantyEnd` "Warranty end", too long)
     host: "Host",
     tags: "Tags",
     hostname: "Hostname",
@@ -134,6 +135,7 @@ export const lists = {
     dhcpRanges: "No DHCP range.",
     spares: "No spare part. Add one with « + Spare » (HDD, SSD, transceiver, other…).",
     vms: "No VM. Virtual machines are fed by the synchronisation of a management cluster (Proxmox).",
+    subEquipments: "No sub-equipment. A sub-equipment is created from its master equipment's detail sheet (no « + » button here in v1).",
   },
   filter: {
     room: "Room",
@@ -141,6 +143,7 @@ export const lists = {
     // Searchable TARGET dimension of the listings (filter by entity — see views/ListTargets).
     carrier: "Carrier",
     carrierPlaceholder: "Equipment or VM…",
+    master: "Equipment (master)",   // target dimension of the sub-equipment listing (SINGLE family: equipment)
     equipmentPlaceholder: "Search an equipment…",
     targetEquipment: "Equip.",
     targetVm: "VM",

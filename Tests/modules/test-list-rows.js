@@ -359,6 +359,8 @@ module.exports = async () => {
       ["equipments", "SW-COEUR", "eq-rack"],                  // valeur propre, casse différente
       ["equipments", "salle nord", "eq-libre"],               // salle libre
       ["equipments", "switch", "eq-rack"],                    // catalogue de type
+      ["subEquipments", "drive lto-9", "se-1"],               // sous-équipement par son NOM propre
+      ["subEquipments", "sn-777", "se-1"],                    // … et par son NUMÉRO DE SÉRIE (ownText)
       ["cables", "sw-coeur", "cb-1"],                         // 2 sauts (port → équipement)
       ["cables", "gi1/0/1", "cb-1"],                          // nom de port
       ["vms", "orphan", "vm-1"],                              // catalogue fr+en
@@ -488,6 +490,17 @@ module.exports = async () => {
     ck.eq((await cables.search("srv-web")).length, 0, "cableEquipment : les VMs ne sont PAS candidates (un câble n'aboutit pas sur une VM)");
     ck.eq((await cables.search("sw"))[0].id, sw.id, "cableEquipment : l'équipement, lui, est candidat");
     ck.eq(ListTargets.SEARCH_LIMIT, 12, "plafond de candidats = constante nommée (parité éditeur de liens d'intervention)");
+
+    // -- subEquipmentMaster : le cas SIMPLE (1 saut, `equipment_id` colonne indexée → where MAPPABLE) — à
+    //    opposer à cableEquipment (2 sauts, restriction cliente). Famille UNIQUE (jamais une VM). --
+    const master = ListTargets.subEquipmentMaster(store);
+    ck.eq(JSON.stringify(master.where("equipment", sw.id)), JSON.stringify({ equipment_id: sw.id }), "subEquipmentMaster : cible ÉQUIPEMENT → where { equipment_id } (le serveur filtre, 1 saut indexé)");
+    ck.eq(master.where("vm", "x"), null, "subEquipmentMaster : famille hors périmètre → where null");
+    ck.eq(master.tagOf("equipment"), "", "subEquipmentMaster : famille UNIQUE → aucun badge");
+    ck.eq((await master.search("srv-web")).length, 0, "subEquipmentMaster : les VMs ne sont PAS candidates (un sous-équipement n'appartient qu'à un équipement)");
+    ck.eq((await master.search("sw"))[0].id, sw.id, "subEquipmentMaster : l'équipement est candidat");
+    ck.eq(master.restrict([{ id: "a", equipment_id: sw.id }, { id: "b", equipment_id: "autre" }], "equipment", sw.id).map((r) => r.id).join(","), "a", "subEquipmentMaster : restriction cliente par equipment_id (mode fichier)");
+    ck.eq(master.restrict([{ id: "a", equipment_id: sw.id }], "vm", sw.id).length, 0, "subEquipmentMaster : famille inconnue → 0 ligne (jamais « toutes »)");
   }
   });
 

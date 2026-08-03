@@ -84,6 +84,32 @@ export class ListTargets {
     };
   }
 
+  /** ÉQUIPEMENT MAÎTRE d'un sous-équipement : le rattachement est une simple colonne (`equipment_id`) →
+      le filtre part au SERVEUR en `where` (UN saut, colonne INDEXÉE — INDEX_SPEC.subEquipments) ; le mode
+      fichier applique le même test en mémoire. Famille UNIQUE (un sous-équipement n'appartient qu'à un
+      équipement, jamais à une VM) : `tagOf` rend "" comme `cableEquipment` — un badge répété à chaque ligne
+      n'apprendrait rien. C'est le cas SIMPLE du chantier « filtre cible unifié » (à comparer à `cableEquipment`,
+      2 sauts) : aucune asymétrie client, `where` toujours mappable.
+      `reader` (mode API) alimente la recherche de CANDIDATS serveur-pilotée ; null = mode fichier. */
+  static subEquipmentMaster(store: Store, reader: EntitySearchReader | null = null): ListTargetFilter {
+    const families = [ListTargets.EQUIPMENT];
+    const source = new EntityCandidateSource(store, ListTargets.candidateFamilies(families), reader, ListTargets.SEARCH_LIMIT);
+    return {
+      label: I18n.t("lists.filter.master"),
+      placeholder: I18n.t("lists.filter.equipmentPlaceholder"),
+      search: (query) => source.fetch(query),
+      labelOf: (kind, id) => ListTargets.labelOf(store, families, kind, id),
+      tagOf: () => "",   // famille UNIQUE : un badge répété à chaque ligne n'apprendrait rien
+      where: (kind, id) => (kind === "equipment" ? { equipment_id: id } : null),
+      restrict: (rows, kind, id) => {
+        // Famille inconnue → AUCUNE ligne (jamais « toutes ») : un slug non prévu ne doit pas se lire
+        // comme « pas de filtre » — l'utilisateur verrait un filtre posé sans effet.
+        if (kind !== "equipment") return [];
+        return rows.filter((row) => row && row.equipment_id === id);
+      },
+    };
+  }
+
   /** ÉQUIPEMENT d'un câble : le rattachement passe par ses PORTS (câble → port → équipement), deux
       SAUTS qu'aucune égalité de colonne n'exprime → `where` toujours null, restriction CLIENTE via
       les index du Store (`cablesOfEquipment`). Asymétrie assumée v1, cf. docs/recherche.md.

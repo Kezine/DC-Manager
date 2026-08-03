@@ -47,6 +47,11 @@ export const tabs = {
     label: "Spares",
     subtitle: "Inventaire de pièces de rechange (HDD · SSD · transceiver · autre) : suivi unitaire, statut, attribution.",
   },
+  sousequipements: {
+    label: "Sous-équipements",
+    title: "Sous-équipements",
+    subtitle: "Contenu logique des équipements (drives d'une librairie, cartes d'un châssis). Se crée depuis la fiche du maître : filtrez par équipement maître ou par groupe, triez par achat / garantie.",
+  },
   faceimages: {
     label: "Images de façade",
     subtitle: "Bibliothèque d'images de façade (JPEG/PNG/WebP) partagées par référence. Stockées hors document (IndexedDB).",
