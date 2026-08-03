@@ -173,7 +173,7 @@ module.exports = async () => {
 
   await section("shared : RelationalSchema — INDEX (liste exacte, pas d'index sur string[]/json, ré-export client)", async () => {
   {
-    // Liste ATTENDUE des CREATE INDEX de allDdl(), dans l'ordre de Schema.COLLECTIONS (table puis index).
+    // Liste ATTENDUE des CREATE INDEX de allIndexDdls(), dans l'ordre de Schema.COLLECTIONS.
     // = INDEX_SPEC amendé (L0 §3.4), moins les champs string[]/json (non indexables utilement).
     const expectedIndexes = [
       'CREATE INDEX IF NOT EXISTS "idx_equipments_name" ON "equipments" ("name")',
@@ -214,8 +214,14 @@ module.exports = async () => {
       'CREATE INDEX IF NOT EXISTS "idx_vms_host_equipment_id" ON "vms" ("host_equipment_id")',
       'CREATE INDEX IF NOT EXISTS "idx_vms_group_id" ON "vms" ("group_id")',
     ];
-    const allIndexes = RelationalSchema.allDdl().filter((s) => s.startsWith("CREATE INDEX"));
+    const allIndexes = RelationalSchema.allIndexDdls();
     ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (37 index, ordre COLLECTIONS)");
+    // Et la phase TABLES ne contient QUE des CREATE TABLE, une par collection (le phasage tables → index
+    // est la condition de l'évolution additive — cf. test-relational-evolution.js).
+    const allTables = RelationalSchema.allTableDdls();
+    ck.eq(allTables.length, SharedSchema.COLLECTIONS.length, "phases : allTableDdls → une table par collection");
+    ck(allTables.every((s) => s.startsWith("CREATE TABLE IF NOT EXISTS")), "phases : allTableDdls ne contient QUE des CREATE TABLE");
+    ck(allIndexes.every((s) => s.startsWith("CREATE INDEX IF NOT EXISTS")), "phases : allIndexDdls ne contient QUE des CREATE INDEX");
 
     // GOLDEN indexDdls par collection (représentatives).
     ck.eq(JSON.stringify(RelationalSchema.indexDdls("racks")), JSON.stringify(['CREATE INDEX IF NOT EXISTS "idx_racks_datacenter_id" ON "racks" ("datacenter_id")']), "index : racks → 1 (datacenter_id)");

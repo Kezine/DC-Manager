@@ -8,8 +8,9 @@
 ## Le modèle : une table à colonnes par collection
 
 Le schéma cible n'est **jamais écrit à la main** : le module partagé **`src-shared/RelationalSchema`** le DÉRIVE de la
-spec déclarative (`COLLECTION_SPECS` de `DataValidation.ts`). Il expose `tableDdl(collection)`, `indexDdls(collection)`
-et `allDdl()`, consommés côté serveur par `RelationalRepository.open` (qui n'émet AUCUN DDL de collection lui-même).
+spec déclarative (`COLLECTION_SPECS` de `DataValidation.ts`). Il expose `tableDdl(collection)` / `indexDdls(collection)`
+(et leurs agrégats `allTableDdls()` / `allIndexDdls()`, en DEUX phases — cf. « Évolution du schéma »), consommés côté
+serveur par `RelationalRepository.open` (qui n'émet AUCUN DDL de collection lui-même).
 
 Chaque collection est **une table** de la forme (`tableDdl`) :
 
@@ -71,6 +72,46 @@ Quatre champs d'audit vivent dans des colonnes : `created_by` / `updated_by` (id
 snapshot est restauré tel quel (arbitrage Q7). En **mode fichier** (aucune identité), les `_by` sont absents et les
 dates restent celles du client — le dépôt ne fait alors apparaître AUCUNE colonne d'audit null dans le record relu.
 Ces champs sont NON déclarés dans la spec (passthrough assumé) mais sont des colonnes standard du schéma cible.
+
+## Évolution du schéma : ADDITIVE, à l'ouverture
+
+**Ajouter un champ à la spec suffit : la colonne suit à l'ouverture du document.** `CREATE TABLE IF NOT EXISTS` est un
+no-op sur une base existante — sans mécanisme dédié, la première évolution de spec rendrait toute base relationnelle
+déjà créée inécrivable (l'upsert préparé dérive ses colonnes de la spec → `table X has no column named Y` → 400
+systématique), voire INOUVRABLE si le champ entre aussi dans `INDEX_SPEC` (`CREATE INDEX` → `no such column`).
+
+`RelationalRepository.open` exécute donc le DDL en **trois temps, dans un ordre impératif** :
+**tables** (`allTableDdls`) → **colonnes de spec manquantes** (`ensureSpecColumns`) → **index** (`allIndexDdls`) —
+l'index d'un champ nouvellement indexé doit trouver sa colonne. Le diff `PRAGMA table_info` ⇄ spec est produit par la
+primitive PURE **`RelationalSchema.missingColumns(collection, colonnesExistantes)`** (même source de dérivation que
+`tableDdl` : l'objet `fields` de la spec, même affinité de type, identifiants quotés). Pour chaque colonne manquante,
+en **une transaction** pour toute la passe :
+
+- **`ALTER TABLE … ADD COLUMN`** avec l'affinité du DDL neuf mais **SANS `NOT NULL`** (SQLite l'interdit sans DEFAULT
+  sur une table peuplée, et le DEFAULT SQL est banni de ce schéma) ;
+- **backfill du DÉFAUT de spec** : `UPDATE … SET col = ? WHERE col IS NULL`, valeur sérialisée EXACTEMENT comme à
+  l'écriture (`toColumn` : boolean default `true` → `1`, string default `""` → `''`, tableau default `[]` → `'[]'`) —
+  sans lui, la relecture rendrait `null` là où le mode fichier rend le défaut (divergence de parité). Un champ
+  `nullable`/default `null` — ou historique, sans défaut — ne backfille RIEN : NULL est déjà la valeur correcte ;
+- **`updated_rev` et les 4 colonnes d'audit INTACTS** par construction (l'UPDATE ne nomme que la colonne neuve) — même
+  discipline que le backfill `search` : ni faux conflit 409, ni rechargement SSE induit ;
+- un **log INFO par colonne ajoutée** (`collection.colonne`).
+
+**Idempotent PAR CONSTRUCTION** : le diff pragma ⇄ spec est vide au run suivant — **pas de SCHEMA_VERSION** (le diff
+EST le marqueur, comme les `ensureColumn` des bases de modules `users.db`/`notify.db`/`certs.db`…). Une base NEUVE
+n'émet aucun ALTER (les tables naissent complètes). Les tables `meta`/`images` (hors spec) ne sont pas concernées.
+
+**Ce que le mécanisme ne couvre PAS** (assumé, documenté) :
+
+- un **nouveau champ `required`** sur une collection existante : la colonne est ajoutée quand même (sans `NOT NULL`) et
+  son défaut backfillé s'il en a un, avec un **WARN** explicite — la contrainte de nullité n'est portée que par les
+  tables NEUVES, et on n'INVENTE pas de valeurs pour les lignes existantes (migration à la main si le métier l'exige).
+  La validation partagée reste de toute façon l'autorité (D2b) ;
+- le **retrait** ou le **re-typage** d'un champ : hors périmètre. Une colonne ORPHELINE (présente en base, absente de
+  la spec) est ignorée sans danger — l'upsert et le `rebuild`, dérivés de la spec, ne la nomment jamais.
+
+Preuves : `Tests/modules/test-relational-evolution.js` (fixture « base d'avant » amputée en SQL brut, backfill des
+défauts par type, ordre tables → colonnes → index via un champ indexé, idempotence, base neuve inchangée).
 
 ## Le dépôt : `RelationalRepository`
 

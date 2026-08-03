@@ -125,22 +125,81 @@ export class RelationalRepository implements RepositoryContract {
   private constructor(private readonly db: SqliteDb) {}
 
   /** Ouvre/initialise la base. `Database` est INJECTÉ (better-sqlite3 en prod, réel aussi en test — le shim
-      des tests blob ne parle pas ce SQL). Le schéma vient INTÉGRALEMENT de `RelationalSchema.allDdl()` :
+      des tests blob ne parle pas ce SQL). Le schéma vient INTÉGRALEMENT de `RelationalSchema` :
       cette classe ne fabrique AUCUN DDL de collection elle-même (meta/images exceptées, hors migration).
-      `log` (optionnel — `DocumentStore` passe le sien) trace le backfill de la colonne `search`. */
+      `log` (optionnel — `DocumentStore` passe le sien) trace l'évolution du schéma et le backfill `search`. */
   static open(file: string, Database: SqliteCtor, log?: Logger): RelationalRepository {
     const db = new Database(file);
     // Mêmes réglages d'exploitation que le blob (audit 2026-07) : WAL + anti-SQLITE_BUSY + NORMAL (sûr en WAL).
     db.pragma("journal_mode = WAL");
     db.pragma("busy_timeout = 5000");
     db.pragma("synchronous = NORMAL");
-    for (const ddl of RelationalSchema.allDdl()) db.exec(ddl);
+    // DDL en TROIS temps, et l'ordre est IMPÉRATIF : tables (CREATE IF NOT EXISTS — no-op sur une base
+    // existante), puis colonnes de spec MANQUANTES (évolution ADDITIVE : une base créée par une spec plus
+    // ancienne rattrape les champs ajoutés depuis), puis index — le CREATE INDEX d'un champ nouvellement
+    // indexé lèverait « no such column » s'il précédait l'ALTER qui crée sa colonne.
+    for (const ddl of RelationalSchema.allTableDdls()) db.exec(ddl);
+    const repo = new RelationalRepository(db);
+    repo.ensureSpecColumns(log);
+    for (const ddl of RelationalSchema.allIndexDdls()) db.exec(ddl);
     // Tables HORS migration (cadrage §1) — DDL repris à l'IDENTIQUE de db.ts.
     db.exec(`CREATE TABLE IF NOT EXISTS meta (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL)`);
     db.exec(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, meta TEXT NOT NULL, blob BLOB, bytes INTEGER NOT NULL DEFAULT 0)`);
-    const repo = new RelationalRepository(db);
     repo.backfillSearchIfNeeded(log);   // documents antérieurs à l'enrichissement (colonne « pauvre ») → recalcul one-shot
     return repo;
+  }
+
+  /** ÉVOLUTION ADDITIVE du schéma à l'ouverture : diff `PRAGMA table_info` ⇄ champs de spec par collection
+      (le diff PUR vit dans `RelationalSchema.missingColumns` — même dérivation que le DDL neuf), puis, en
+      UNE transaction, pour chaque colonne manquante :
+      - `ALTER TABLE … ADD COLUMN` (même affinité de type que `tableDdl`, SANS `NOT NULL` — SQLite
+        l'interdit sans DEFAULT sur une table peuplée, cf. missingColumns) ;
+      - BACKFILL du DÉFAUT de spec : `UPDATE … SET col = ? WHERE col IS NULL`, valeur sérialisée par
+        `toColumn` EXACTEMENT comme à l'écriture (boolean default true → 1, string default "" → '',
+        string[]/json default [] → '[]') — sans lui, la relecture rendrait null là où le mode fichier rend
+        le défaut (divergence de parité). Champs `nullable`/default null et champs historiques sans défaut :
+        rien à faire, NULL est déjà la valeur correcte (parité avec le comportement blob).
+      `updated_rev` et les 4 colonnes d'audit sont INTACTS par construction (l'UPDATE ne nomme que la
+      colonne neuve) — même discipline que le backfill `search` : une évolution de schéma n'est pas une
+      édition, elle ne doit provoquer ni faux 409 ni rechargement SSE.
+      IDEMPOTENT PAR CONSTRUCTION : le diff est vide au run suivant — pas de marqueur de version, comme les
+      `ensureColumn` des bases de modules (UsersDb, NotifyDb, CertsDb…). Un log INFO par colonne ajoutée ;
+      un champ nouveau `required` est ajouté SANS sa contrainte, avec un WARN explicite (seules les tables
+      NEUVES portent son NOT NULL — la validation partagée reste l'autorité, D2b).
+      ⚠ Doit courir ENTRE le DDL des tables et celui des index (cf. `open`). Les tables `meta`/`images`
+      (hors spec) ne sont pas concernées. Limites : docs/persistance.md § « Évolution du schéma ». */
+  private ensureSpecColumns(log?: Logger): void {
+    // Collecte du diff AVANT d'ouvrir la transaction : le chemin courant (base à jour) ne paie qu'un
+    // PRAGMA par collection et ressort sans rien écrire ni journaliser.
+    const additions: Array<{ collection: string; field: string; spec: FieldSpec; ddl: string }> = [];
+    for (const collection of Schema.COLLECTIONS) {
+      const existing = this.db.prepare(`PRAGMA table_info(${RelationalRepository.quote(collection)})`)
+        .all().map((row) => String(row.name));
+      if (!existing.length) continue;   // défensif : table absente (open vient de les créer — jamais ici en pratique)
+      for (const missing of RelationalSchema.missingColumns(collection, existing)) {
+        additions.push({ collection, field: missing.field, spec: COLLECTION_SPECS[collection].fields[missing.field] as FieldSpec, ddl: missing.ddl });
+      }
+    }
+    if (!additions.length) return;
+    this.db.transaction(() => {
+      for (const addition of additions) {
+        this.db.exec(addition.ddl);
+        const specDefault = addition.spec.default;
+        // ⚠ Comparaison à undefined/null, PAS de truthiness : un défaut 0 ou false doit être backfillé.
+        if (specDefault !== undefined && specDefault !== null) {
+          this.db.prepare(
+            `UPDATE ${RelationalRepository.quote(addition.collection)} SET ${RelationalRepository.quote(addition.field)} = ? ` +
+            `WHERE ${RelationalRepository.quote(addition.field)} IS NULL`,
+          ).run(RelationalRepository.toColumn(addition.spec, specDefault));
+        }
+        if (log) {
+          log.info("schéma : colonne de spec ajoutée (évolution additive)", addition.collection + "." + addition.field);
+          if (addition.spec.required) {
+            log.warn("schéma : champ requis ajouté SANS contrainte NOT NULL (SQLite l'interdit sans DEFAULT sur une table peuplée) — seules les tables NEUVES la portent, la validation partagée reste l'autorité", addition.collection + "." + addition.field);
+          }
+        }
+      }
+    })();
   }
 
   /** Enveloppe un handle DÉJÀ OUVERT — SANS pragma ni DDL (l'appelant les gère). Point d'entrée de la

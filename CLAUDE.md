@@ -205,7 +205,9 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 - [`persistance.md`](docs/persistance.md) — **persistance serveur** (modèle RELATIONNEL sur SQLite :
   tables à colonnes DÉRIVÉES de la spec via `RelationalSchema`, `INDEX_SPEC` partagé front⇄back, ce que
   le schéma n'impose PAS — FK/CHECK/DEFAULT restent dans la validation/normalisation partagées ;
-  dépôt `RelationalRepository` (contrat des colonnes strictes), migration des documents legacy au boot
+  **évolution ADDITIVE du schéma** — un champ ajouté à la spec devient colonne à l'ouverture, défaut
+  backfillé, ordre tables→colonnes→index, idempotent sans marqueur ; dépôt `RelationalRepository`
+  (contrat des colonnes strictes), migration des documents legacy au boot
   (`LegacyMigration`, backup `.pre-relationnel.bak`), `meta`/`images` hors migration ; **colonne `search`
   ENRICHIE** — termes dérivés/catalogues fr+en du module partagé `SearchTerms`, invalidation par FK
   indexées SANS toucher `updated_rev`, backfill `PRAGMA user_version`).

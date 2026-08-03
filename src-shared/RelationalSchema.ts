@@ -38,10 +38,21 @@
    NULL — y compris les champs historiques sans `required`/`nullable`/`default` :
    NULL est le choix qui n'invente rien (cadrage §3).
 
+   ── Évolution ADDITIVE du schéma ───────────────────────────────────────────────
+   `CREATE TABLE IF NOT EXISTS` est un no-op sur une base existante : quand la spec
+   GAGNE un champ, la table déjà créée ne le rattrape pas seule. `missingColumns`
+   produit les `ALTER TABLE … ADD COLUMN` du diff colonnes existantes ⇄ spec ; le
+   DDL est donc exposé en DEUX phases (`allTableDdls` / `allIndexDdls`) pour que
+   l'ouverture intercale ces ALTER ENTRE tables et index (un index sur un champ
+   ajouté doit trouver sa colonne). Exécution, backfill des défauts et limites :
+   `RelationalRepository.ensureSpecColumns` + docs/persistance.md § « Évolution du
+   schéma ».
+
    Ce module est PUR (aucun DOM, aucun Node) : il ne fait que produire des CHAÎNES.
-   PERSONNE ne le branche encore — le Repository relationnel qui l'exécute est le
-   lot L2. ⚠ Import interne partagé : extension `.js` IMPÉRATIVE (NodeNext l'exige
-   côté serveur — cf. CLAUDE.md § « Code partagé front/back »).
+   Leur exécution vit dans le Repository relationnel (`RelationalRepository.open`)
+   et la migration legacy (`LegacyMigration`). ⚠ Import interne partagé : extension
+   `.js` IMPÉRATIVE (NodeNext l'exige côté serveur — cf. CLAUDE.md § « Code partagé
+   front/back »).
    ============================================================================ */
 
 import { COLLECTION_SPECS, FieldSpec, FieldType } from "./DataValidation.js";
@@ -146,12 +157,49 @@ export class RelationalSchema {
     return out;
   }
 
-  /** L'ENSEMBLE du DDL, dans l'ordre de `Schema.COLLECTIONS` : pour chaque collection, sa table PUIS ses index. */
-  static allDdl(): string[] {
+  /** Le DDL des TABLES, dans l'ordre de `Schema.COLLECTIONS`. Séparé du DDL des INDEX (l'ancien `allDdl`
+      monolithique entremêlait les deux) parce que l'ouverture d'une base EXISTANTE doit intercaler un
+      temps entre eux : tables → colonnes de spec MANQUANTES (`missingColumns`, évolution additive) →
+      index — sinon le `CREATE INDEX` d'un champ ajouté à la spec lèverait « no such column » avant
+      l'`ALTER TABLE` qui crée sa colonne. */
+  static allTableDdls(): string[] {
+    return Schema.COLLECTIONS.map((collection) => RelationalSchema.tableDdl(collection));
+  }
+
+  /** Le DDL de TOUS les index, dans l'ordre de `Schema.COLLECTIONS` (cf. `allTableDdls` pour le phasage
+      tables → colonnes manquantes → index). */
+  static allIndexDdls(): string[] {
     const out: string[] = [];
-    for (const collection of Schema.COLLECTIONS) {
-      out.push(RelationalSchema.tableDdl(collection));
-      out.push(...RelationalSchema.indexDdls(collection));
+    for (const collection of Schema.COLLECTIONS) out.push(...RelationalSchema.indexDdls(collection));
+    return out;
+  }
+
+  /** ÉVOLUTION ADDITIVE du schéma : pour une table EXISTANTE dont on donne les colonnes actuelles
+      (`PRAGMA table_info`), rend les `ALTER TABLE … ADD COLUMN` des champs de spec MANQUANTS — MÊME
+      source de dérivation que `tableDdl` (l'objet `fields` de la spec, même affinité `sqlType`, mêmes
+      identifiants quotés), jamais une seconde liste qui pourrait dériver.
+      ⚠ SANS `NOT NULL`, même pour un champ `required` : SQLite interdit `ADD COLUMN … NOT NULL` sans
+      DEFAULT sur une table peuplée, et le DEFAULT SQL est banni de ce schéma (cf. en-tête). La contrainte
+      de nullité d'un NOUVEAU champ requis n'est donc portée que par les tables NEUVES — assumé : la
+      validation partagée reste l'autorité de toute façon (D2b), et l'appelant journalise l'écart.
+      Périmètre : les champs de SPEC uniquement — id/audit/`search`/`updated_rev` sont dans le DDL depuis
+      le premier schéma relationnel (L1), ils ne peuvent pas manquer. Une colonne ORPHELINE (présente en
+      base, absente de la spec) est IGNORÉE : l'upsert dérivé de la spec ne la nomme jamais, elle est
+      inoffensive. Fonction PURE (elle ne fait que produire des chaînes) : le diff pragma ⇄ spec est
+      testable sans base — l'exécution vit dans `RelationalRepository` (ensureSpecColumns). */
+  static missingColumns(collection: string, existingColumns: readonly string[]): Array<{ field: string; ddl: string }> {
+    const spec = COLLECTION_SPECS[collection];
+    if (!spec) throw new Error("collection inconnue: " + collection);
+    const existing = new Set(existingColumns);
+    const out: Array<{ field: string; ddl: string }> = [];
+    for (const field of Object.keys(spec.fields)) {
+      if (existing.has(field)) continue;
+      const fieldSpec = spec.fields[field] as FieldSpec;
+      out.push({
+        field,
+        ddl: "ALTER TABLE " + RelationalSchema.quote(collection) + " ADD COLUMN " +
+             RelationalSchema.quote(field) + " " + RelationalSchema.sqlType(fieldSpec.type),
+      });
     }
     return out;
   }
