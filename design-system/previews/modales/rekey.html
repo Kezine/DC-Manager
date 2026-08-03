@@ -1878,6 +1878,68 @@
     padding: 7px 8px; margin-top: 4px; border-top: 1px solid var(--line);
     font-family: var(--sans); font-size: 10.5px; color: var(--fg-dimmer);
   }
+  /* item NON selectionnable (parite <option disabled>) — classe posee par SearchPop.renderResults.
+     Historiquement un style EN LIGNE (pour ne pas rouvrir ce fichier) ; passe en CLASSE a la refonte
+     du filtre cible, qui doit pouvoir SURCLASSER l'estompe (item « deja pris » accentue .is-on,
+     regle scopee .tf-list plus bas). Memes declarations que l'ancien style en ligne. */
+  .dc-search-item.dc-search-off { opacity: 0.5; cursor: default; }
+  .dc-search-item.dc-search-off:hover { background: transparent; }
+  /* mention epinglee en FIN de rangee d'un item (SearchPopResult.tail — ex. « deja pris ») */
+  .dc-search-tail { flex: none; font-size: 10px; color: var(--accent-text); }
+
+  /* ===== filtre CIBLE unifie : declencheur ferme + panneau (refonte 2026-08-03) =====
+     Classes tf-* reprises de la maquette validee design-system/briefs/filtre-cible-porteur-maquette
+     (§2/§3/§5/§6/§10). La dimension « a recherche » du menu « + Filtre » est un declencheur
+     .multi-trigger comme les autres ; son panneau .tf-panel (320 px) est PORTE sur <body>
+     (classe .dc-pop-portal, piste A de la maquette) et ancre au declencheur par
+     SearchPop.portalPlace. ⚠ Ce bloc doit PRECEDER les regles .dc-pop-portal ci-dessous :
+     a specificite egale, la cascade doit donner position:fixed et la quasi-feuille mobile
+     (width:auto) au portail. Themes : tokens uniquement, aucune couleur en dur. */
+  .tf-pop { position: relative; display: inline-flex; }
+  /* declencheur : le NOM d'une cible s'ellipse au lieu de pousser la colonne du menu (maquette §2) */
+  .tf-pop .multi-trigger { max-width: 240px; }
+  .tf-pop .multi-trigger .count-badge { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* coque du panneau : PAS de position propre — elle vient de .dc-pop-portal + coordonnees en ligne */
+  .tf-panel {
+    width: 320px; background: var(--bg-2); border: 1px solid var(--line-2);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+    overflow-y: auto;   /* sous 560px le portail borne a 60vh : le panneau defile au lieu de rogner */
+    display: none;
+  }
+  .tf-panel.open { display: block; }
+  .tf-sec { padding: 8px 9px; }
+  .tf-sec + .tf-sec { border-top: 1px solid var(--line); }
+  .tf-lb { display: flex; align-items: center; gap: 8px; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-dimmer); margin-bottom: 6px; }
+  .tf-lb::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  /* valeur courante (« on voit ce qu'on remplace ») : badge de famille + nom + ✕ — esprit EntityPicker */
+  .tf-cur { display: flex; align-items: center; gap: 8px; padding: 4px 5px 4px 6px; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: var(--radius-pill); font-size: 12px; }
+  .tf-cur + .tf-cur { margin-top: 4px; }
+  .tf-cur-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tf-cur-x { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; border: none; border-radius: 50%; background: transparent; color: var(--fg-dim); cursor: pointer; }
+  .tf-cur-x:hover { color: var(--err); background: color-mix(in srgb, var(--err) 16%, transparent); }
+  .tf-cur-x svg { width: 12px; height: 12px; }
+  /* champ : loupe + input NU (l'ecrin est la rangee — l'input du SearchPop heberge n'a pas .search-input) */
+  .tf-field { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px; background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--radius-pill); }
+  .tf-field:focus-within { border-color: var(--accent); }
+  .tf-lens { display: inline-flex; flex: none; color: var(--fg-dim); }
+  .tf-lens svg { width: 14px; height: 14px; }
+  .tf-field input { flex: 1; min-width: 0; border: none; background: transparent; color: var(--fg); font-family: var(--mono); font-size: 12px; padding: 0; outline: none; }
+  .tf-field input::placeholder { color: var(--fg-dimmer); }
+  /* liste de resultats : rangees .dc-search-item du SearchPop, surlignage clavier a barre d'accent */
+  .tf-list { max-height: 236px; overflow-y: auto; padding: 2px 0; }
+  .tf-list .dc-search-item[aria-selected="true"] { background: var(--bg-3); box-shadow: inset 2px 0 0 var(--accent); }
+  .tf-list .dc-search-item.is-on { color: var(--accent-text); opacity: 1; }   /* « deja pris » : accentue, PAS estompe (surclasse .dc-search-off) */
+  .tf-list .dc-search-item .dc-search-lb { flex: 1; min-width: 0; }   /* le libelle pousse la mention de fin a droite */
+  .tf-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 9px; border-top: 1px solid var(--line); font-family: var(--sans); font-size: 10.5px; color: var(--fg-dimmer); }
+  .tf-kbd { font-family: var(--mono); font-size: 10px; border: 1px solid var(--line-2); border-radius: 3px; padding: 0 4px; color: var(--fg-dim); }
+  .tf-empty { padding: 16px 10px; text-align: center; font-family: var(--sans); font-size: 11.5px; color: var(--fg-dim); }
+  /* squelette de chargement (reponse en vol, StaleGate) : rangees badge+nom animees */
+  .tf-skel { display: flex; align-items: center; gap: 8px; padding: 7px 8px; }
+  .tf-skel i { display: block; height: 11px; border-radius: 3px; background: linear-gradient(90deg, var(--bg-3), var(--line-2), var(--bg-3)); background-size: 200% 100%; animation: tfSk 1.2s linear infinite; }
+  .tf-skel i.t { width: 46px; flex: none; }
+  .tf-skel i.n { flex: 1; }
+  @keyframes tfSk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
   /* mode PORTAIL : le popover ouvert est un enfant de <body> en position:fixed (coordonnees posees
      en ligne par SearchPop.portalPosition) — il echappe ainsi aux conteneurs qui ROGNENT (corps
      defilant d'une modale, liste a max-height). z-index au-dessus de l'overlay de modale (200). */

@@ -10,8 +10,9 @@
    3. PARITÉ FICHIER ⇄ SERVEUR (better-sqlite3 RÉEL) : sur un même mini-corpus, la recherche d'un
       listing en mode fichier et le `list(collection, {query})` du serveur rendent les MÊMES ids.
    4. FILTRE CIBLE unifié : `FilterChips` étendu (dimension « à recherche », valeurs libres, reset),
-      `TargetSearch.parse`, et les descripteurs `ListTargets` (where IP serveur ⇄ restriction câbles
-      à 2 sauts) sur un VRAI Store.
+      `TargetSearch.parse`, les descripteurs `ListTargets` (where IP serveur ⇄ restriction câbles
+      à 2 sauts) sur un VRAI Store, et `TargetFilterDisplay` (badge du déclencheur fermé +
+      placeholder du panneau — refonte 2026-08-03, maquette filtre-cible-porteur).
    Harnais et assertions : harness.js. */
 "use strict";
 const { ck, section, path, D, SHARED, SERVER, SharedSchema, FilterChips, GlobalSearchSources, makeStore } = require("./harness.js");
@@ -425,6 +426,36 @@ module.exports = async () => {
     state.__target__.clear();
     ck.eq(FilterChips.build(dims, sel(state), labelOf).length, 1, "cible retirée → il ne reste que les chips de dimension");
     ck.eq(FilterChips.count(dims, sel({})), 0, "état vide → 0 chip (bouton « Réinitialiser » masqué)");
+  }
+  });
+
+  await section("Filtre CIBLE : TargetFilterDisplay — badge du déclencheur fermé + placeholder du panneau", async () => {
+  {
+    // Refonte 2026-08-03 (maquette filtre-cible-porteur §2/§10) : la dimension « à recherche » est un
+    // déclencheur FERMÉ ; son badge et le placeholder du panneau sortent de ce module PUR (l'i18n et
+    // le DOM restent dans ui/FilterBar).
+    const { TargetFilterDisplay } = D("core/TargetFilterDisplay.js");
+    const labels = { "equipment:eq-1": "SW-Coeur" };
+    const labelOf = (valueId) => labels[valueId] || null;
+
+    // -- Badge : (Tous) / NOM / compteur — la logique sait DÉJÀ le multi (borne v1 ailleurs). --
+    ck.eq(TargetFilterDisplay.badge([], labelOf).kind, "all", "badge : aucune cible → (Tous), parité MultiSelect vide");
+    const one = TargetFilterDisplay.badge(["equipment:eq-1"], labelOf);
+    ck.eq(one.kind + "/" + one.label, "name/SW-Coeur", "badge : UNE cible → le NOM de l'entité (résolu à chaque rendu)");
+    const gone = TargetFilterDisplay.badge(["vm:vm-9"], labelOf);
+    ck.eq(gone.kind + "/" + gone.label, "name/vm:vm-9",
+      "badge : libellé introuvable → repli sur l'identifiant (parité chips — jamais un badge vide pour un filtre actif)");
+    ck.eq(TargetFilterDisplay.badge(["a:1"], () => "").label, "a:1", "badge : libellé VIDE → même repli");
+    const two = TargetFilterDisplay.badge(["a:1", "b:2"], labelOf);
+    ck.eq(two.kind + "/" + two.count, "count/2", "🎯 badge : 2 cibles et plus → le COMPTEUR (multi OR anticipé, maquette §2)");
+
+    // -- Placeholder : dimension / « Remplacer par… » (mono) / « Ajouter… » (multi). --
+    ck.eq(TargetFilterDisplay.placeholder(0, 1), "dimension", "placeholder : rien de posé → celui de la dimension");
+    ck.eq(TargetFilterDisplay.placeholder(1, 1), "replace", "placeholder : mono avec cible → « Remplacer par… » (choisir remplace)");
+    ck.eq(TargetFilterDisplay.placeholder(0, 4), "dimension", "placeholder : multi SANS cible → celui de la dimension aussi");
+    ck.eq(TargetFilterDisplay.placeholder(1, 4), "add",
+      "placeholder : multi avec cible → « Ajouter… » (lever la borne v1 suffit, rien d'autre à changer)");
+    ck.eq(TargetFilterDisplay.placeholder(3, 4), "add", "placeholder : multi, plusieurs cibles → « Ajouter… »");
   }
   });
 

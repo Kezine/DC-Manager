@@ -58,6 +58,16 @@ import { I18n } from "../i18n/I18n";
        re-parqué dans le champ à la fermeture (il meurt donc avec lui).
    La navigation clavier SAUTE en-têtes, motifs et pied : seuls les items vivent
    dans `itemNodes`/`current`, le reste est `role="presentation"`.
+
+   MODE HÉBERGÉ (`host`, refonte du filtre CIBLE 2026-08-03 — maquette
+   design-system/briefs/filtre-cible-porteur-maquette §3/§10) : le champ et la
+   liste se rendent DANS des conteneurs FOURNIS par l'hôte (le panneau du
+   déclencheur de ui/FilterBar) au lieu du couple « champ nu + popover
+   flottant ». TOUTE la mécanique reste ici — anti-rebond, StaleGate, clavier
+   ↑↓/↵/Échap, ARIA combobox, rendu des items — l'hôte ne peint que son
+   HABILLAGE d'états (invite, squelette, vide, pied) au fil des rappels
+   `onState` : zéro logique de recherche dupliquée (principe n°14). Extension
+   RÉTROCOMPATIBLE : sans `host`, rien ne change d'un pixel.
    ============================================================================= */
 
 /** Un résultat affichable : identifiant, libellé (ellipsé si trop long), badge (`tag`),
@@ -84,12 +94,36 @@ export interface SearchPopResult {
   /** Classe CSS ADDITIONNELLE de l'item (ex. `rc-pop-exit` : exits saillants de l'éditeur de
       route). Une classe et non un style : la teinte reste dans le CSS, thème compris. */
   itemClass?: string;
+  /** MENTION épinglée en FIN de rangée (classe `.dc-search-tail`) : un ÉTAT court lisible d'un coup
+      d'œil — ex. « déjà pris » du filtre cible (maquette filtre-cible §4). L'explication LONGUE d'un
+      refus passe, elle, par `reason` (ligne dédiée sous l'item) : deux registres, deux champs. */
+  tail?: string;
 }
 
 /** MODIFICATEURS du geste de sélection (clic ou Entrée). `shift` porte « ajouter et ROUVRIR »
     (Maj+Entrée / Maj+clic) chez les consommateurs qui enchaînent les ajouts — le composant ne fait
     que TRANSMETTRE le geste, l'interprétation appartient au `onPick`. */
 export interface SearchPopPickModifiers { shift: boolean }
+
+/** États annoncés à l'HÔTE du mode hébergé : repos (rien à montrer — invite), chargement (fetch en
+    vol — squelette), vide (aucun résultat pour la saisie), résultats (la liste est peinte). */
+export type SearchPopHostState = "idle" | "loading" | "empty" | "results";
+
+/** Conteneurs de l'HÔTE du mode hébergé (cf. bloc d'en-tête « MODE HÉBERGÉ »). */
+export interface SearchPopHost {
+  /** Conteneur du CHAMP : l'input s'y INSÈRE (l'hôte y a déjà posé sa loupe). L'input n'y reçoit ni
+      la classe `.search-input` ni les styles compacts : l'écrin visuel (bordure, hauteur, focus)
+      appartient à l'hôte (`.tf-field` + `.tf-field input` côté CSS). Pas de bouton ✕ non plus —
+      l'effacement d'une valeur POSÉE appartient au panneau (rangée `.tf-cur-x`), pas au champ. */
+  field: HTMLElement;
+  /** Conteneur de la LISTE : il DEVIENT la listbox (rôle, id, contenu, `aria-controls` du champ) —
+      le popover flottant n'existe pas dans ce mode ; la VISIBILITÉ de ce conteneur est pilotée par
+      l'hôte au fil des états (`onState`), jamais par la classe `.open`. */
+  list: HTMLElement;
+  /** Rappel d'ÉTAT à chaque transition. `count` = nombre de résultats affichés (sert au pied
+      « plafond atteint » de l'hôte). */
+  onState?: (state: SearchPopHostState, query: string, count: number) => void;
+}
 
 /** Options d'un SearchPop — tout est injecté (le composant est agnostique de la donnée). */
 export interface SearchPopOptions {
@@ -115,6 +149,10 @@ export interface SearchPopOptions {
       rogne (corps défilant d'une modale, liste à max-height). Défaut false : popover absolu dans le
       champ, comportement historique. */
   portal?: boolean;
+  /** Mode HÉBERGÉ : champ et liste rendus DANS les conteneurs de l'hôte (cf. `SearchPopHost` et le
+      bloc d'en-tête). Exclusif de `portal` : le conteneur hôte (panneau du filtre cible) est
+      LUI-MÊME un portail — la liste, en flux dedans, n'a rien à fuir. */
+  host?: SearchPopHost;
 }
 
 export class SearchPop {
@@ -141,37 +179,62 @@ export class SearchPop {
   private readonly domId: string;
   /** Mode PORTAIL (cf. SearchPopOptions.portal). */
   private readonly portal: boolean;
+  /** Mode HÉBERGÉ (cf. SearchPopOptions.host) — null = comportement historique. */
+  private readonly host: SearchPopHost | null;
 
   constructor(private readonly opts: SearchPopOptions) {
     this.debounceMs = opts.debounceMs ?? 180;
     this.minChars = opts.minChars ?? 2;
-    this.portal = opts.portal === true;
+    this.host = opts.host ?? null;
+    // Portail et mode hébergé s'EXCLUENT (cf. SearchPopOptions.host) : l'hôte prime.
+    this.portal = opts.portal === true && !this.host;
     this.domId = OverlayA11y.nextId("searchpop");
 
-    const grow = opts.grow === true;
-    this.wrap = document.createElement("div");
-    // position:relative : ancre le popover absolu au conteneur (indépendant de la toolbar hôte).
-    // Mode `grow` (barre de listing) : la classe `.lc-searchpop` porte la loupe, la bordure et la hauteur
-    // de contrôle unifiée ; le champ y est extensible et sans bordure propre (box = le conteneur).
-    if (grow) this.wrap.className = "lc-searchpop";
-    else this.wrap.style.cssText = "position:relative;display:flex;align-items:center;gap:4px";
-
     this.input = document.createElement("input");
-    this.input.type = "text"; this.input.className = "search-input";
+    this.input.type = "text";
     this.input.placeholder = opts.placeholder;
-    if (!grow) this.input.style.cssText = "min-width:220px;max-width:320px;padding:6px 10px;flex:none";
 
-    const clear = document.createElement("button");
-    clear.type = "button"; clear.className = "btn btn-ghost btn-sm";
-    clear.innerHTML = Icons.CLOSE; clear.title = I18n.t("ui.search.clear");
-    clear.setAttribute("aria-label", I18n.t("ui.search.clear"));   // une icône seule n'a pas de nom accessible
-    clear.onclick = () => this.reset();
+    if (this.host) {
+      // -- MODE HÉBERGÉ : aucun wrap propre, aucun bouton ✕, aucun popover — champ et liste vivent
+      // dans les conteneurs de l'HÔTE. L'input reste NU (ni `.search-input` ni styles compacts) :
+      // l'écrin visuel est celui de l'hôte (`.tf-field`). `wrap` = le conteneur du champ, pour que
+      // les gardes d'ancrage (`wrap.isConnected`) restent vraies partout.
+      this.wrap = this.host.field;
+      this.pop = this.host.list;
+      this.wrap.appendChild(this.input);
+    } else {
+      const grow = opts.grow === true;
+      this.wrap = document.createElement("div");
+      // position:relative : ancre le popover absolu au conteneur (indépendant de la toolbar hôte).
+      // Mode `grow` (barre de listing) : la classe `.lc-searchpop` porte la loupe, la bordure et la hauteur
+      // de contrôle unifiée ; le champ y est extensible et sans bordure propre (box = le conteneur).
+      if (grow) this.wrap.className = "lc-searchpop";
+      else this.wrap.style.cssText = "position:relative;display:flex;align-items:center;gap:4px";
 
-    this.pop = document.createElement("div"); this.pop.className = "dc-search-pop";
-    // La classe portail porte position:fixed + z-index AU-DESSUS de l'overlay de modale (le popover
-    // sera un enfant direct de <body> le temps d'être ouvert) ; les coordonnées, elles, sont posées
-    // en ligne par `portalPosition` à chaque ouverture/défilement.
-    if (this.portal) this.pop.classList.add("dc-pop-portal");
+      this.input.className = "search-input";
+      if (!grow) this.input.style.cssText = "min-width:220px;max-width:320px;padding:6px 10px;flex:none";
+
+      const clear = document.createElement("button");
+      clear.type = "button"; clear.className = "btn btn-ghost btn-sm";
+      clear.innerHTML = Icons.CLOSE; clear.title = I18n.t("ui.search.clear");
+      clear.setAttribute("aria-label", I18n.t("ui.search.clear"));   // une icône seule n'a pas de nom accessible
+      clear.onclick = () => this.reset();
+
+      this.pop = document.createElement("div"); this.pop.className = "dc-search-pop";
+      // La classe portail porte position:fixed + z-index AU-DESSUS de l'overlay de modale (le popover
+      // sera un enfant direct de <body> le temps d'être ouvert) ; les coordonnées, elles, sont posées
+      // en ligne par `portalPosition` à chaque ouverture/défilement.
+      if (this.portal) this.pop.classList.add("dc-pop-portal");
+
+      // Loupe INTÉGRÉE en tête (mode barre de listing) — repère visuel, non focusable (aria-hidden).
+      if (grow) {
+        const icon = document.createElement("span"); icon.className = "lc-search-ic";
+        icon.setAttribute("aria-hidden", "true"); icon.innerHTML = Icons.SEARCH;
+        this.wrap.append(icon, this.input, clear, this.pop);
+      } else {
+        this.wrap.append(this.input, clear, this.pop);
+      }
+    }
 
     // ARIA de COMBOBOX : le couple champ + liste déroulante n'a de sens pour un lecteur d'écran que
     // s'il est ANNONCÉ comme tel. `aria-label` double le placeholder, qui n'est PAS un nom accessible
@@ -187,20 +250,14 @@ export class SearchPop {
     this.input.oninput = () => this.onInput();
     this.input.onfocus = () => { if (this.input.value.trim().length >= this.minChars) this.schedule(); };
     // Blur DIFFÉRÉ : laisser passer le `mousedown` d'un item (qui déclenche la sélection avant le blur).
-    this.input.onblur = () => { window.setTimeout(() => this.hide(), 150); };
+    // PAS en mode hébergé : la vie du panneau hôte est pilotée par LUI (clic extérieur, Échap) — un
+    // hide() au blur viderait la liste dès qu'on clique un ✕ de valeur courante dans le panneau.
+    if (!this.host) this.input.onblur = () => { window.setTimeout(() => this.hide(), 150); };
     this.input.onkeydown = (e) => this.onKey(e);
-
-    // Loupe INTÉGRÉE en tête (mode barre de listing) — repère visuel, non focusable (aria-hidden).
-    if (grow) {
-      const icon = document.createElement("span"); icon.className = "lc-search-ic";
-      icon.setAttribute("aria-hidden", "true"); icon.innerHTML = Icons.SEARCH;
-      this.wrap.append(icon, this.input, clear, this.pop);
-    } else {
-      this.wrap.append(this.input, clear, this.pop);
-    }
   }
 
-  /** Conteneur à insérer dans une toolbar (input + bouton ✕ + popover). */
+  /** Conteneur à insérer dans une toolbar (input + bouton ✕ + popover). ⚠ Mode HÉBERGÉ : ne PAS
+      l'insérer — champ et liste vivent déjà dans les conteneurs de l'hôte. */
   get element(): HTMLElement { return this.wrap; }
 
   /** Vide le champ et ferme le popover (invalide toute réponse en vol). */
@@ -222,6 +279,15 @@ export class SearchPop {
     this.input.setAttribute("aria-label", text);
   }
 
+  /** RELANCE la recherche courante (si la saisie atteint le minimum ; sinon, retour au repos).
+      Sert à l'hôte du mode hébergé dont la DÉCORATION des résultats dépend d'un état EXTERNE au
+      composant — ex. la mention « déjà pris » du filtre cible après le retrait d'une valeur : les
+      items affichés ont été décorés au fetch, seul un nouveau fetch les remet d'aplomb. */
+  refresh(): void {
+    if (this.input.value.trim().length >= this.minChars) this.schedule();
+    else this.hide();
+  }
+
   /** Ferme le popover, annule l'anti-rebond en cours et périme les réponses en vol. */
   private hide(): void {
     this.gate.bump();
@@ -235,13 +301,25 @@ export class SearchPop {
       this.pop.style.top = ""; this.pop.style.left = "";
       this.wrap.appendChild(this.pop);
     }
-    this.pop.classList.remove("open");
+    if (!this.host) this.pop.classList.remove("open");
+    this.clearResults();
+    this.notifyHost("idle");
+  }
+
+  /** Vide la liste et l'état ARIA associé — partagé entre `hide` et le rendu « aucun résultat » du
+      mode hébergé, où une liste vide n'est PAS une fermeture (l'hôte affiche son état « vide »). */
+  private clearResults(): void {
     this.pop.innerHTML = "";
     this.current = [];
     this.itemNodes = [];
     this.activeIndex = -1;
     this.input.setAttribute("aria-expanded", "false");
     this.input.removeAttribute("aria-activedescendant");
+  }
+
+  /** Annonce un ÉTAT à l'hôte (mode hébergé seulement — no-op sinon). */
+  private notifyHost(state: SearchPopHostState): void {
+    if (this.host && this.host.onState) this.host.onState(state, this.input.value.trim(), this.current.length);
   }
 
   private onInput(): void {
@@ -259,6 +337,9 @@ export class SearchPop {
   private async run(): Promise<void> {
     const q = this.input.value.trim();
     if (q.length < this.minChars) { this.hide(); return; }
+    // Mode hébergé : la requête PART — l'hôte peut montrer son squelette (il choisit de garder les
+    // résultats déjà affichés s'il y en a : « ne blanchit jamais », parité listings).
+    this.notifyHost("loading");
     const token = this.gate.begin();
     let results: SearchPopResult[];
     // Échec silencieux : un champ de recherche ne doit pas bloquer l'UI ni afficher d'erreur intrusive.
@@ -274,7 +355,10 @@ export class SearchPop {
     this.itemNodes = [];
     this.activeIndex = -1;
     if (!results.length) {
-      this.hide();   // en mode portail, il faut AUSSI re-parquer le popover et couper le suivi
+      // Mode hébergé : « aucun résultat » n'est PAS une fermeture — l'hôte peint son état vide (qui
+      // CITE la saisie). Le popover flottant, lui, n'a rien à montrer et se ferme (historique).
+      if (this.host) { this.clearResults(); this.notifyHost("empty"); }
+      else this.hide();   // en mode portail, il faut AUSSI re-parquer le popover et couper le suivi
       return;
     }
     // Groupe du résultat PRÉCÉDENT : un en-tête se peint quand il change (les groupes vides ont
@@ -304,17 +388,28 @@ export class SearchPop {
       item.setAttribute("role", "option");
       item.title = r.label;   // le libellé est ELLIPSÉ dans un popover de 380 px : le texte entier reste lisible au survol
       if (r.tag) { const tag = document.createElement("span"); tag.className = "dc-search-tag"; tag.textContent = r.tag; item.appendChild(tag); }
-      const lab = document.createElement("span"); lab.textContent = r.label;
+      // Classe `dc-search-lb` : accroche de MISE EN PAGE des hôtes (le panneau du filtre cible étire
+      // le libellé pour épingler la mention de fin à droite — règle scopée `.tf-list`) ; aucun style
+      // global n'y est attaché, l'ellipse reste portée par le style en ligne historique.
+      const lab = document.createElement("span"); lab.className = "dc-search-lb"; lab.textContent = r.label;
       lab.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
       item.appendChild(lab);
+      // Mention ÉPINGLÉE en fin de rangée (ex. « déjà pris » du filtre cible) — un état court, pas
+      // une explication (l'explication d'un refus passe par `reason`, ligne dédiée sous l'item).
+      if (r.tail) {
+        const tail = document.createElement("span"); tail.className = "dc-search-tail";
+        tail.textContent = r.tail;
+        item.appendChild(tail);
+      }
       if (r.disabled) {
-        // NON sélectionnable : ni `onmousedown`, ni rang atteignable au clavier. Le style est posé EN
-        // LIGNE et non par une classe : une déclaration en ligne l'emporte sur `.dc-search-item:hover`
-        // (qui, sinon, ferait paraître l'item cliquable au survol) — et le CSS partagé avec la
-        // recherche 3D reste INCHANGÉ, ce qui évite de rouvrir `dc-manager.css` (BOM + commentaires
-        // double-encodés : toute retouche s'y fait au niveau octets).
+        // NON sélectionnable : ni `onmousedown`, ni rang atteignable au clavier. Le style passe par la
+        // classe `.dc-search-off` (opacité + hover neutralisé) — HISTORIQUEMENT posé en ligne pour ne
+        // pas rouvrir `dc-manager.css` ; la refonte du filtre cible a rouvert le fichier ET exige de
+        // pouvoir SURCLASSER l'estompe (item « déjà pris » accentué `.is-on`, maquette §4), chose
+        // impossible face à un style en ligne. Mêmes déclarations, pixel pour pixel, pour les
+        // consommateurs historiques (EntityPicker, éditeur de route).
         item.setAttribute("aria-disabled", "true");
-        item.style.cssText = "opacity:0.5;cursor:default;background:transparent";
+        item.classList.add("dc-search-off");
       } else {
         // mousedown (et non click) : se déclenche AVANT le blur du champ, comme la recherche 3D.
         // Maj+clic transmet le modificateur — même contrat que Maj+Entrée (cf. onKey).
@@ -337,13 +432,16 @@ export class SearchPop {
       foot.textContent = this.opts.footHint;
       this.pop.appendChild(foot);
     }
-    this.pop.classList.add("open");
+    // Mode hébergé : la visibilité du conteneur hôte est pilotée par l'hôte (onState) — la classe
+    // `.open` n'appartient qu'au popover flottant.
+    if (!this.host) this.pop.classList.add("open");
     if (this.portal) this.openPortal();
     this.input.setAttribute("aria-expanded", "true");
     // Actif par DÉFAUT = premier résultat sélectionnable. C'est ce qui préserve à l'identique
     // l'ancien contrat « Entrée = 1er résultat » tant qu'aucun résultat n'est `disabled` et
     // qu'aucune flèche n'a été pressée.
     this.setActive(this.nextSelectable(-1, +1));
+    this.notifyHost("results");
   }
 
   /* ------------------------------------------------------------ mode portail -- */
@@ -368,22 +466,28 @@ export class SearchPop {
     this.portalPosition();
   };
 
-  /** Coordonnées viewport du popover : sous le champ, borné aux bords de l'écran, BASCULÉ au-dessus
-      quand la place manque dessous et qu'il y en a davantage dessus. Mesure APRÈS insertion dans le
-      DOM (offsetHeight réel, la hauteur dépend du nombre de résultats). */
-  private portalPosition(): void {
-    const anchor = this.wrap.getBoundingClientRect();
+  /** POSITIONNEMENT PARTAGÉ d'un élément porté sur `<body>` (`.dc-pop-portal`) sous une ANCRE :
+      sous elle, borné aux bords de l'écran, BASCULÉ au-dessus quand la place manque dessous et
+      qu'il y en a davantage dessus. Mesure APRÈS insertion dans le DOM (offsetHeight réel — la
+      hauteur dépend du contenu). STATIQUE et public : le PANNEAU du filtre cible (ui/FilterBar)
+      ancre sa coque `.tf-panel` au déclencheur avec la MÊME règle (maquette filtre-cible §5,
+      « aucun code de positionnement nouveau »). */
+  static portalPlace(anchor: HTMLElement, portal: HTMLElement): void {
+    const rect = anchor.getBoundingClientRect();
     const gap = 4;   // même écart que le popover absolu historique (top: calc(100% + 4px))
-    const popHeight = this.pop.offsetHeight;
-    let top = anchor.bottom + gap;
-    if (top + popHeight > window.innerHeight && anchor.top - gap - popHeight >= 0) {
-      top = anchor.top - gap - popHeight;
+    const portalHeight = portal.offsetHeight;
+    let top = rect.bottom + gap;
+    if (top + portalHeight > window.innerHeight && rect.top - gap - portalHeight >= 0) {
+      top = rect.top - gap - portalHeight;
     }
-    const popWidth = this.pop.offsetWidth;
-    const left = Math.max(8, Math.min(anchor.left, window.innerWidth - popWidth - 8));
-    this.pop.style.top = Math.round(top) + "px";
-    this.pop.style.left = Math.round(left) + "px";
+    const portalWidth = portal.offsetWidth;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - portalWidth - 8));
+    portal.style.top = Math.round(top) + "px";
+    portal.style.left = Math.round(left) + "px";
   }
+
+  /** Coordonnées viewport du popover portail de CETTE instance (délègue à la règle partagée). */
+  private portalPosition(): void { SearchPop.portalPlace(this.wrap, this.pop); }
 
   /** Rang du prochain résultat SÉLECTIONNABLE à partir de `from` dans la direction `step`
       (+1 bas, -1 haut). Sans bouclage (on s'arrête aux extrémités, comme `ui/Autocomplete`) ;
@@ -401,7 +505,7 @@ export class SearchPop {
   private setActive(index: number): void {
     this.activeIndex = index;
     this.itemNodes.forEach((node, i) => {
-      if (this.current[i] && this.current[i].disabled) return;   // item grisé : son style en ligne ne se touche pas
+      if (this.current[i] && this.current[i].disabled) return;   // item grisé : jamais surligné (il n'est pas une cible d'Entrée)
       const on = i === index;
       node.style.background = on ? "var(--bg-3)" : "";
       if (on) node.setAttribute("aria-selected", "true"); else node.removeAttribute("aria-selected");

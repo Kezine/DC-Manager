@@ -400,6 +400,12 @@ export class ListView {
           const label = target ? filter.labelOf(target.kind, target.id) : null;
           return label !== null ? label : I18n.t("lists.filter.targetMissing");
         },
+        // Badge de FAMILLE de la valeur posée (rangée « valeur courante » du panneau) — même
+        // résolution que le `tag` des candidats ; "" pour une famille unique (aucune pastille).
+        tagOf: (valueId) => {
+          const target = TargetSearch.parse(valueId);
+          return target ? filter.tagOf(target.kind) : "";
+        },
       },
     };
   }

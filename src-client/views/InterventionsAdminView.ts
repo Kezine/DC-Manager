@@ -296,6 +296,12 @@ export class InterventionsAdminView {
           const label = target ? this.targets.labelOf(target.kind, target.id) : null;
           return label !== null ? label : I18n.t("interventions.target.unknown");
         },
+        // Badge de FAMILLE de la valeur posée (rangée « valeur courante » du panneau) — même
+        // résolution que le `tag` des candidats ci-dessus.
+        tagOf: (valueId: string) => {
+          const target = TargetSearch.parse(valueId);
+          return target ? I18n.t(InterventionsFormat.targetKindLabelKey(target.kind)) : "";
+        },
       },
     };
   }

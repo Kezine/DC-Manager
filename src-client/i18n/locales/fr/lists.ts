@@ -38,6 +38,23 @@ export const lists = {
     rowLocate: "Localiser en 3D",
     rowDownload: "Télécharger",
     rowClone: "Cloner",
+    // Panneau du filtre CIBLE « à recherche » (déclencheur fermé + panneau-portail, refonte
+    // 2026-08-03 — ui/FilterBar.openSearchPanel). Le badge « Tous » du déclencheur vient de
+    // ui.multiselect.all (parité MultiSelect) ; le nom et le compteur n'ont pas de clé.
+    targetPanelLabel: "Filtre {{dim}}",
+    targetSelected_one: "Cible",
+    targetSelected_other: "Cibles · {{count}}",
+    targetRemove: "Retirer {{value}}",
+    targetReplace: "Remplacer par…",
+    targetAdd: "Ajouter…",
+    targetTaken: "déjà pris",
+    targetIdle: "Tapez pour chercher une cible.",
+    targetNoResult: "Aucune cible ne correspond à « {{q}} ».",
+    targetCapped: "{{count}} premiers résultats — affinez la saisie.",
+    targetKeyBrowse: "parcourir",
+    targetKeyPick: "choisir",
+    targetKeyEsc: "Échap",
+    targetKeyClose: "fermer",
   },
   col: {
     name: "Nom",

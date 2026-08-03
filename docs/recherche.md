@@ -44,7 +44,7 @@ enregistrement » pour toute l'application.
 | `src-client/core/StoreListRowSource.ts` | La source concrète : `local()` = cache hydraté + `RecordSearchIndex`, `remote()` = lecteur serveur injecté (`RemoteListReader`), traduction de la cible en `where` ou restriction cliente. |
 | `src-client/views/ListTargets.ts` | Descripteurs du **filtre CIBLE unifié** par listing (recherche des candidats, libellés, badge, `where`/`restrict`). |
 | `src-client/core/EntityCandidates.ts` | SOURCE de candidats d'entités PARTAGÉE (lot 4) : `EntityCandidates` (pur — `local`/`fromRecords`, re-classés par `TargetSearch`) + `EntityCandidateSource` (orchestration DOUBLE MODE : annulation + repli ; anti-rebond/StaleGate portés par le SearchPop). |
-| `src-client/ui/FilterBar.ts` + `core/FilterChips.ts` | Dimension « à RECHERCHE » (SearchPop au lieu d'un multiselect) et chips à valeur LIBRE. |
+| `src-client/ui/FilterBar.ts` + `core/FilterChips.ts` + `core/TargetFilterDisplay.ts` | Dimension « à RECHERCHE » : déclencheur FERMÉ + panneau-portail à `SearchPop` HÉBERGÉ, chips à valeur LIBRE, badge/placeholder résolus par le module pur `TargetFilterDisplay`. |
 | `src-server/src/RelationalRepository.searchAll` | Recherche transverse : un LIKE sur la colonne `search` par collection, plafond par collection, troncature signalée. |
 | `src-server/src/RelationalRepository.list` | Listing d'UNE collection : LIKE sur `search` + `where` de colonnes + pagination — la route que consomment les listings serveur-pilotés. |
 | `GET /api/documents/:docId/search` | La route transverse (api.ts) — même garde que toute lecture du document (session SSO + SUPER_ADMIN). |
@@ -178,9 +178,34 @@ adresses IP de SW-Coeur », « les câbles de SW-Coeur », « les interventions 
 cibles est longue, croissante et à libellés composés → le contrôle est un **`SearchPop`**, jamais un
 `<select>` par famille (principe n°14, même règle que `FormControls.entityPicker`).
 
-- **`FilterBarDimension.search`** transforme une dimension en dimension « à recherche » : le menu
-  « + Filtre » y met un `SearchPop` alimenté par une source **injectée par la vue**. Choisir **remplace**
-  (MONO-cible en v1 ; la forme — un `Set` + des chips — supporte déjà le multiple) et **referme** le menu.
+- **`FilterBarDimension.search`** transforme une dimension en dimension « à recherche ». Depuis la
+  refonte du 2026-08-03 (maquette validée `design-system/briefs/filtre-cible-porteur-maquette.html`,
+  réponse au carton `filtre-cible-porteur.md`), elle se présente comme un **déclencheur FERMÉ** au même
+  langage que les autres dimensions (`.multi-trigger` + `.count-badge`, `aria-haspopup="dialog"`) — et
+  non plus comme un champ nu posé dans le menu. Le **badge** reflète la sélection : `(Tous)` sans cible,
+  le **NOM** de l'entité (ellipsé, résolu à chaque rendu — repli sur l'identifiant si elle disparaît) à
+  une cible, le **compteur** à 2+ (multi OR, v2). La règle badge/placeholder vit dans le module **pur**
+  `core/TargetFilterDisplay` (testé) ; l'i18n et le DOM restent dans `FilterBar`.
+- **Le panneau** (`.tf-panel`, 320 px) s'ouvre en **PORTAIL** sur `<body>` (`.dc-pop-portal`), ancré au
+  déclencheur par la règle **partagée** `SearchPop.portalPlace` (retournement haut/bas, recadrage
+  viewport, quasi-feuille mobile héritée). C'est la **résolution de la tension historique** : le popover
+  de résultats (~380 px) débordait du menu « + Filtre » (200 px) ; désormais le menu ne change pas d'un
+  pixel et le panneau déborde **volontairement et proprement** (piste A de la maquette). Contenu, dans
+  l'ordre : section « valeur courante » facultative (badge de famille + nom + ✕ — **le ✕ vide le filtre
+  SANS fermer le panneau**), champ de recherche, liste de candidats, pied (aides clavier, mention du
+  plafond `EntityCandidates.SEARCH_LIMIT`). États d'habillage : invite au repos, **squelette** pendant le
+  vol (seulement sur liste vide — des résultats affichés ne blanchissent jamais), « aucun résultat »
+  citant la saisie.
+- Le champ et la liste sont un **`SearchPop` en mode HÉBERGÉ** (option `host` — extension
+  rétrocompatible) : ils se rendent DANS le panneau, mais l'anti-rebond, le `StaleGate`, le clavier
+  ↑↓/↵/Échap et l'ARIA combobox restent dans le composant (principe n°14 — zéro logique dupliquée) ; le
+  panneau ne peint que l'habillage d'états via le rappel `onState`. Un candidat **déjà pris** reste
+  visible, accentué (« déjà pris »), non cliquable — dès le mono, la cible courante s'annonce.
+- Choisir **remplace** (MONO-cible en v1, borne `FilterBar.SEARCH_MAX_TARGETS` = 1 ; la forme — un `Set`
+  + des chips + le compteur du badge — supporte déjà le multiple : lever la borne basculera le
+  placeholder sur « Ajouter… ») et **ferme panneau + menu** (le geste est terminé). **Échap** ferme le
+  panneau seul et **rend le focus au déclencheur** ; un clic extérieur ferme panneau ET menu (le panneau
+  est intégré à la mécanique `FilterBar.closeAllMenus`).
 - La chip produite est une chip **normale** (`FilterChips`), retirée par son ✕ **et** par « Réinitialiser ».
   Nouveauté du modèle pur : une dimension `search` porte des valeurs **LIBRES** — elle n'a pas d'options,
   donc ni ordre de référence (l'ordre devient celui de la sélection) ni libellé à y lire (il vient de

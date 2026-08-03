@@ -1,47 +1,113 @@
-<!-- @dsCard group="Listing" name="Filtre à recherche (cible)" subtitle="menu « + Filtre », dimension « Porteur » (SearchPop), chip de valeur libre — ÉTAT ACTUEL (refonte à l'étude, cf. briefs/filtre-cible-porteur.md)" -->
-<!-- DÉRIVÉ de src-client/ui/FilterBar.ts (buildSearch : .lc-addfilter + .lc-addfilter-menu,
-     dimension à recherche = .lc-single + SearchPop COMPACT — wrapper et input à styles EN LIGNE,
-     reproduits verbatim de SearchPop.ts:157/162) et de src-client/core/FilterChips.ts (chips à
-     VALEUR LIBRE : libellé résolu à chaque rendu). La dimension « Porteur » (views/ListTargets.
-     ipCarrier, lot 3-4 recherche partagée) cherche équipements ET VMs — badges .dc-search-tag.
-     ⚠ ÉTAT ACTUEL documenté tel quel : le popover de résultats (~380 px) DÉBORDE du menu
-     (min-width 200 px) — tension signalée à la livraison du lot 3, refonte à l'étude dans
-     briefs/filtre-cible-porteur.md (déclencheur fermé façon .multi-trigger, input au lieu de la
-     liste). Le menu et le popover sont montrés OUVERTS en STATIQUE (normalement au clic). -->
+<!-- @dsCard group="Listing" name="Filtre à recherche (cible)" subtitle="menu « + Filtre », déclencheur fermé + panneau (SearchPop hébergé), états, chip de valeur libre — refonte 2026-08-03" -->
+<!-- DÉRIVÉ de src-client/ui/FilterBar.ts (buildSearch : déclencheur .multi-trigger + .count-badge ;
+     openSearchPanel : panneau .tf-panel porté sur <body> en .dc-pop-portal, ancré au déclencheur par
+     SearchPop.portalPlace) et de src-client/ui/SearchPop.ts (mode HÉBERGÉ : champ + liste rendus dans
+     le panneau, items .dc-search-item + .dc-search-lb + .dc-search-tail). ORIGINE : maquette Claude
+     Design RAPATRIÉE briefs/filtre-cible-porteur-maquette.html (réponse au carton
+     briefs/filtre-cible-porteur.md — piste A retenue §5, décisions §10), implémentée le 2026-08-03.
+     L'ANCIEN état (champ nu .lc-single + SearchPop compact débordant du menu) n'existe plus.
+     Panneau montré OUVERT en STATIQUE (.tf-panel.open sans .dc-pop-portal : en flux — dans l'app il
+     est positionné en fixed sous le déclencheur, retournement/recadrage compris). -->
 <section class="ds-section">
-  <h2>Menu « + Filtre » avec la dimension à recherche « Porteur » (état actuel)</h2>
+  <h2>Déclencheur fermé — un seul langage dans le menu « + Filtre »</h2>
   <div class="lc-addfilter">
     <button type="button" class="lc-addfilter-btn" aria-haspopup="menu" aria-expanded="true"><span class="lc-addfilter-ic" aria-hidden="true">{{ICON:PLUS}}</span>Filtre</button>
     <div class="lc-addfilter-menu open" style="position:static;">
-      <!-- dimension à OPTIONS FIXES (MultiSelect FERMÉ) — le voisinage que la refonte veut égaler -->
+      <!-- dimension à OPTIONS FIXES (MultiSelect FERMÉ) — le voisinage que la refonte égale -->
       <div class="multi-pop">
         <button type="button" class="multi-trigger">Réseau <span class="count-badge">Tous</span></button>
       </div>
-      <!-- dimension à RECHERCHE (lot 3) : libellé + SearchPop COMPACT (styles en ligne = verbatim SearchPop.ts) -->
-      <div class="lc-single">
-        <span class="lc-single-lb">Porteur</span>
-        <div style="position:relative;display:flex;align-items:center;gap:4px">
-          <input type="text" class="search-input" placeholder="Équipement ou VM…" value="sw" style="min-width:220px;max-width:320px;padding:6px 10px;flex:none">
-          <button type="button" class="btn btn-ghost btn-sm" aria-label="Effacer la recherche" title="Effacer la recherche">{{ICON:CLOSE}}</button>
-          <div class="dc-search-pop open" style="position:static;top:auto;left:auto;margin-top:4px;min-width:0;max-width:340px">
-            <div class="dc-search-item"><span class="dc-search-tag">Équipement</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">SW-Coeur</span></div>
-            <div class="dc-search-item"><span class="dc-search-tag">Équipement</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">SW-Acces-B12</span></div>
-            <div class="dc-search-item"><span class="dc-search-tag">VM</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">srv-sw-monitor</span></div>
-          </div>
-        </div>
+      <!-- dimension à RECHERCHE : même .multi-trigger, aria-haspopup="dialog" (un panneau s'ouvre, pas une liste cochable) -->
+      <div class="tf-pop">
+        <button type="button" class="multi-trigger" aria-haspopup="dialog" aria-expanded="false">Porteur <span class="count-badge">Tous</span></button>
       </div>
     </div>
   </div>
-  <p class="ds-note">Miroir de <code>FilterBar.buildSearch</code> : la dimension « à recherche » est un
-    <code>.lc-single</code> (libellé + <code>SearchPop</code> COMPACT) posé DANS le menu
-    <code>.lc-addfilter-menu</code>, à côté des dimensions à options fixes (<code>.multi-trigger</code>).
-    Le clic sur un résultat POSE le filtre (mono-valeur v1 : remplace) et referme le menu.
-    ⚠ Tension documentée : le popover de résultats déborde du menu (~380 px vs 200 px) — c'est l'état
-    ACTUEL, la refonte est à l'étude (<code>briefs/filtre-cible-porteur.md</code>).</p>
+  <div class="ds-row" style="margin-top:14px">
+    <div class="tf-pop"><button type="button" class="multi-trigger" aria-haspopup="dialog" aria-expanded="false">Porteur <span class="count-badge">SW-Coeur</span></button></div>
+    <div class="tf-pop"><button type="button" class="multi-trigger" aria-haspopup="dialog" aria-expanded="false">Porteur <span class="count-badge">srv-sw-monitor-longue-vm</span></button></div>
+    <div class="tf-pop"><button type="button" class="multi-trigger" aria-haspopup="dialog" aria-expanded="false">Porteur <span class="count-badge">2</span></button></div>
+  </div>
+  <p class="ds-note">Badge résolu par le module pur <code>core/TargetFilterDisplay</code> (testé) :
+    <code>(Tous)</code> sans cible ; le <b>NOM</b> de l'entité à une cible (ellipsé —
+    <code>.tf-pop .multi-trigger</code> borne la largeur, le nom ne pousse pas la colonne du menu) ;
+    le <b>compteur</b> à 2+ (multi OR, v2 — la logique le sait déjà, la borne v1 est à 1).
+    <code>aria-haspopup="dialog"</code> : ce déclencheur ouvre un panneau, pas une liste cochable.</p>
 </section>
 
 <section class="ds-section">
-  <h2>Chip de valeur LIBRE posée + réinitialisation</h2>
+  <h2>Panneau ouvert — valeur courante, champ (SearchPop hébergé), liste, pied</h2>
+  <div class="tf-panel open">
+    <div class="tf-sec">
+      <div class="tf-lb">Cible</div>
+      <div class="tf-cur"><span class="dc-search-tag">Équip.</span><span class="tf-cur-nm">SW-Coeur</span><button type="button" class="tf-cur-x" aria-label="Retirer SW-Coeur">{{ICON:CLOSE}}</button></div>
+    </div>
+    <div class="tf-sec">
+      <div class="tf-field"><span class="tf-lens" aria-hidden="true">{{ICON:SEARCH}}</span><input type="text" placeholder="Remplacer par…" value="sw" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-label="Remplacer par…"></div>
+    </div>
+    <div class="tf-list" role="listbox">
+      <div class="dc-search-item is-on" role="option" aria-disabled="true"><span class="dc-search-tag">Équip.</span><span class="dc-search-lb">SW-Coeur</span><span class="dc-search-tail">déjà pris</span></div>
+      <div class="dc-search-item" role="option" aria-selected="true"><span class="dc-search-tag">Équip.</span><span class="dc-search-lb">SW-Acces-B12</span></div>
+      <div class="dc-search-item" role="option"><span class="dc-search-tag">Équip.</span><span class="dc-search-lb">SW-Acces-B07</span></div>
+      <div class="dc-search-item" role="option"><span class="dc-search-tag">VM</span><span class="dc-search-lb">srv-sw-monitor</span></div>
+    </div>
+    <div class="tf-foot"><span><span class="tf-kbd">↑↓</span> parcourir <span class="tf-kbd">↵</span> choisir <span class="tf-kbd">Échap</span> fermer</span></div>
+  </div>
+  <p class="ds-note">Coque <code>.tf-panel</code> (320 px) portée sur <code>&lt;body&gt;</code>
+    (<code>.dc-pop-portal</code>) et ancrée au déclencheur par <code>SearchPop.portalPlace</code> — le
+    menu « + Filtre » garde ses 200 px, le panneau déborde volontairement et proprement (piste A de la
+    maquette). Le <code>SearchPop</code> est <b>HÉBERGÉ</b> : champ et liste se rendent DANS le panneau,
+    l'anti-rebond, le <code>StaleGate</code>, le clavier et l'ARIA combobox restent dans le composant.
+    La <b>valeur courante</b> s'affiche au-dessus du champ avec son ✕ (esprit <code>EntityPicker</code>) :
+    le ✕ vide le filtre SANS fermer le panneau ; <b>choisir</b> remplace (mono v1) et ferme panneau + menu.
+    Un candidat déjà pris reste visible, accentué (<code>.is-on</code> + mention
+    <code>.dc-search-tail</code> « déjà pris »), non cliquable. Surlignage clavier =
+    <code>[aria-selected="true"]</code> (barre d'accent). Sous 560 px, le panneau hérite de la
+    quasi-feuille <code>.dc-pop-portal</code> — le champ voyage AVEC lui.</p>
+</section>
+
+<section class="ds-section">
+  <h2>États du panneau</h2>
+  <div class="ds-row" style="align-items:flex-start">
+    <div>
+      <div class="ds-variant-title">Au repos (invite)</div>
+      <div class="tf-panel open">
+        <div class="tf-sec"><div class="tf-field"><span class="tf-lens" aria-hidden="true">{{ICON:SEARCH}}</span><input type="text" placeholder="Équipement ou VM…" aria-label="Équipement ou VM…"></div></div>
+        <div class="tf-empty">Tapez pour chercher une cible.</div>
+      </div>
+    </div>
+    <div>
+      <div class="ds-variant-title">Chargement (squelette)</div>
+      <div class="tf-panel open">
+        <div class="tf-sec"><div class="tf-field"><span class="tf-lens" aria-hidden="true">{{ICON:SEARCH}}</span><input type="text" value="sw-a" aria-label="Équipement ou VM…"></div></div>
+        <div class="tf-list"><div class="tf-skel"><i class="t"></i><i class="n"></i></div><div class="tf-skel"><i class="t"></i><i class="n"></i></div><div class="tf-skel"><i class="t"></i><i class="n"></i></div></div>
+      </div>
+    </div>
+    <div>
+      <div class="ds-variant-title">Aucun résultat</div>
+      <div class="tf-panel open">
+        <div class="tf-sec"><div class="tf-field"><span class="tf-lens" aria-hidden="true">{{ICON:SEARCH}}</span><input type="text" value="zzz" aria-label="Équipement ou VM…"></div></div>
+        <div class="tf-empty">Aucune cible ne correspond à « zzz ».</div>
+      </div>
+    </div>
+    <div>
+      <div class="ds-variant-title">Plafond atteint</div>
+      <div class="tf-panel open">
+        <div class="tf-sec"><div class="tf-field"><span class="tf-lens" aria-hidden="true">{{ICON:SEARCH}}</span><input type="text" value="s" aria-label="Équipement ou VM…"></div></div>
+        <div class="tf-list"><div class="dc-search-item"><span class="dc-search-tag">Équip.</span><span class="dc-search-lb">SW-Coeur</span></div><div class="dc-search-item"><span class="dc-search-tag">VM</span><span class="dc-search-lb">srv-sw-monitor</span></div></div>
+        <div class="tf-foot"><span>12 premiers résultats — affinez la saisie.</span></div>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note">Les états d'HABILLAGE (invite <code>.tf-empty</code>, squelette
+    <code>.tf-skel</code>, vide citant la saisie, pied « plafond ») sont peints par le panneau au fil
+    des rappels d'état du SearchPop hébergé (<code>onState</code>). Le squelette ne s'affiche que sur
+    liste vide : des résultats déjà affichés restent visibles pendant le vol (« ne blanchit jamais »,
+    parité listings). Le plafond = <code>EntityCandidates.SEARCH_LIMIT</code> (12).</p>
+</section>
+
+<section class="ds-section">
+  <h2>Chip de valeur LIBRE posée + réinitialisation — inchangées</h2>
   <div class="lc-chips lc-chips-row">
     <span class="filter-chip">
       <span class="filter-chip-lb">Porteur : SW-Coeur</span>
@@ -55,5 +121,6 @@
     (<code>lists.chrome.filterChip</code>) avec le libellé RÉSOLU À CHAQUE RENDU
     (<code>FilterChips.build</code> + <code>labelOf</code>) : renommer l'entité met la chip à jour,
     une entité supprimée retombe sur son identifiant — le filtre actif ne disparaît jamais en silence.
+    Retirer la dernière chip remet le badge du déclencheur à <code>(Tous)</code>.
     « Réinit. filtres » retire aussi cette chip, comme n'importe quelle dimension.</p>
 </section>
