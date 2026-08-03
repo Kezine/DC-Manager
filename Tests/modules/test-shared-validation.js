@@ -1651,6 +1651,24 @@ module.exports = async () => {
     // ⚠ Le repère est un TEXTE, jamais une coordonnée : aucune contrainte de format, aucune borne.
     ck.eq(errs({ ...ok, slot: "n'importe quoi / 3 · B" }).length, 0, "sous-équip. : repère = texte LIBRE (aucun format imposé)");
 
+    // ADMINISTRATIF (achat / garantie) — D5(c) 2026-08-03 : revirement de la décision d'origine, les 3 champs
+    // rejoignent enfin la spec (l'attribution, elle, reste hors-jeu — cf. le verrou d'absences ci-dessus,
+    // volontairement NON étendu à purchase_date/po_ref/warranty_end).
+    ["purchase_date", "po_ref", "warranty_end"].forEach((field) => {
+      ck.eq(fields.includes(field), true, "sous-équip. : « " + field + " » présent dans la spec depuis D5(c)");
+      ck.eq(Validation.COLLECTION_SPECS.subEquipments.fields[field].default, "", "sous-équip. : « " + field + " » a un défaut \"\" (verrou null silencieux)");
+      ck.eq(!!Validation.COLLECTION_SPECS.subEquipments.fields[field].required, false, "sous-équip. : « " + field + " » n'est PAS requis");
+    });
+    ck.eq(errs({ ...ok, purchase_date: "2026-01-15", po_ref: "BDC-42", warranty_end: "2029-01-15" }).length, 0, "sous-équip. : achat/BDC/garantie renseignés → valides");
+    ["purchase_date", "po_ref", "warranty_end"].forEach((field) => {
+      ck.eq(V.normalizeRecord("subEquipments", { ...ok, [field]: null })[field], "", "sous-équip. : « " + field + " » null → \"\" (pas de null silencieux)");
+    });
+    // Un record qui ne porte PAS ces champs du tout (pas même `undefined`) doit normaliser vers "" — c'est le
+    // scénario du round-trip d'un enregistrement écrit AVANT D5(c) (ou du mode fichier legacy).
+    ck.eq(V.normalizeRecord("subEquipments", { name: "x", equipment_id: "E1" }).purchase_date, "", "sous-équip. : achat ABSENT du record → \"\" à la normalisation");
+    ck.eq(V.normalizeRecord("subEquipments", { name: "x", equipment_id: "E1" }).po_ref, "", "sous-équip. : BDC ABSENT du record → \"\" à la normalisation");
+    ck.eq(V.normalizeRecord("subEquipments", { name: "x", equipment_id: "E1" }).warranty_end, "", "sous-équip. : garantie ABSENTE du record → \"\" à la normalisation");
+
     // GROUPES (lot 2) — PARITÉ STRICTE avec equipments/vms : primaire ⊂ group_ids (T1d), 3ᵉ copie de la règle.
     ck.eq(errs({ ...ok, group_id: "G1", group_ids: ["G1", "G2"] }).length, 0, "sous-équip. : primaire membre de group_ids → valide");
     ck.eq(errs({ ...ok, group_id: "G1", group_ids: ["G2"] }).some((e) => e.path === "group_id" && e.code === "invariant"), true, "sous-équip. : primaire ABSENT de group_ids → invariant (parité T1d)");

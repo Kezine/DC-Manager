@@ -22,6 +22,12 @@ export class SubEquipment extends Entity implements Records.SubEquipment {
   model: string;
   /** Numéro de série — souvent la raison même d'inventorier un sous-équipement (SAV, RMA, garantie). */
   serial: string;
+  /** Date d'achat (chaîne ISO courte, tri lexicographique = tri chronologique) — D5(c) 2026-08-03. */
+  purchase_date: string;
+  /** Référence du bon de commande — D5(c) 2026-08-03. */
+  po_ref: string;
+  /** Fin de garantie (chaîne ISO courte) — D5(c) 2026-08-03. */
+  warranty_end: string;
   /** Repère dans le maître, TEXTE LIBRE (« Étagère A / baie 3 »). ⚠ Étiquette, jamais une coordonnée :
       un sous-équipement n'a aucun placement (cf. la spec partagée). */
   slot: string;
@@ -41,6 +47,9 @@ export class SubEquipment extends Entity implements Records.SubEquipment {
     this.brand = p.brand || "";
     this.model = p.model || "";
     this.serial = p.serial || "";
+    this.purchase_date = p.purchase_date || "";
+    this.po_ref = p.po_ref || "";
+    this.warranty_end = p.warranty_end || "";
     this.slot = (p.slot || "").trim();
     this.description = p.description || "";
     // GROUPES : parité STRICTE avec Equipment et Vm — le primaire est TOUJOURS membre de group_ids

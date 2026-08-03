@@ -719,7 +719,10 @@ const SPEC_FIELDS = {
   // ni champ d'attribution, ni placement, ni dimension, ni port propre. Ces absences ne sont pas des oublis :
   // elles sont la RAISON d'être d'une collection séparée plutôt qu'un drapeau sur `equipments` — un champ
   // absent n'a besoin d'être neutralisé nulle part, alors qu'un drapeau doit être testé par chaque
-  // consommateur (cf. `inventory_only`, vérifié À LA MAIN dans 6 sites).
+  // consommateur (cf. `inventory_only`, vérifié À LA MAIN dans 6 sites). ⚠ L'ACHAT/GARANTIE, eux, ne sont
+  // PLUS de cette liste d'absences depuis D5(c) (décision utilisateur 2026-08-03, cf. cadrage
+  // `sous-equipements-achat-garantie-listing-cadrage-2026-08-03.md`) : ils sont déclarés plus bas, juste
+  // après `serial`. Seule l'ATTRIBUTION (assigned_to/assigned_date) reste interdite (C2).
   // ⚠ Hiérarchie PLATE, un seul niveau (arbitrage utilisateur) : AUCUNE FK vers `subEquipments` elle-même —
   // ni ici, ni ailleurs. D'où l'absence de garde anti-cycle : il ne peut pas y avoir de cycle.
   subEquipments: {
@@ -729,11 +732,18 @@ const SPEC_FIELDS = {
       // nullable par héritage historique et non par décision ; ne pas « harmoniser » les deux.
       equipment_id: { type: "string", required: true, ref: "equipments" },
       // IDENTITÉ MATÉRIELLE (D5) : le NUMÉRO DE SÉRIE est souvent la raison même d'inventorier un drive
-      // (SAV, RMA, garantie constructeur). ⚠ Les champs d'ACHAT et de GARANTIE sont VOLONTAIREMENT absents :
-      // sans onglet de listing (D2), des dates qu'on ne peut ni trier ni filtrer seraient de la saisie morte.
+      // (SAV, RMA, garantie constructeur).
       brand:        { type: "string", default: "" },
       model:        { type: "string", default: "" },
       serial:       { type: "string", default: "" },
+      // ADMINISTRATIF (achat / garantie) — D5(c), décision utilisateur du 2026-08-03 : la décision d'origine
+      // (D5, 2026-07-29) écartait ces champs faute d'onglet de listing pour les trier/filtrer ; l'onglet arrive
+      // au lot C du même cadrage, ce qui lève l'objection. Dates ISO courtes en TEXTE (le tri lexicographique
+      // EST le tri chronologique, même contrat que sur `equipments`) — PAS d'attribution (C2 : `assigned_to`/
+      // `assigned_date` restent hors de cette spec, volontairement, cf. verrou de test dédié).
+      purchase_date: { type: "string", default: "" },
+      po_ref:        { type: "string", default: "" },
+      warranty_end:  { type: "string", default: "" },
       // REPÈRE dans le maître (D6) : TEXTE LIBRE (« Étagère A / baie 3 »), jamais une coordonnée. C'est une
       // ÉTIQUETTE, pas une géométrie — la contrainte « aucun placement » tient. Ne pas le transformer en
       // index numérique contraint : ce serait rouvrir la porte que la collection séparée referme.

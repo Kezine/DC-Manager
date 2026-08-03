@@ -15,9 +15,10 @@
    c'est le même montage que `FaceEditor` ⇄ `EquipmentForms`, et il tient parce que l'usage
    est DIFFÉRÉ (dans des callbacks), jamais à l'initialisation du module.
 
-   ⚠ Pas d'onglet de listing (décision D2) : on n'atteint un sous-équipement que par son
+   ⚠ Pas d'onglet de listing (décision D2, à ce jour) : on n'atteint un sous-équipement que par son
    maître ou par une recherche. La FICHE est donc le point d'entrée — et c'est elle qui rend
-   la collection ouvrable par `openTargetDetail` (liens d'intervention, à venir).
+   la collection ouvrable par `openTargetDetail` (liens d'intervention, à venir). Un onglet dédié
+   est prévu au lot C du cadrage 2026-08-03 (`sous-equipements-achat-garantie-listing-cadrage-2026-08-03.md`).
    ============================================================================= */
 import type { Store } from "../../store";
 import { Icons } from "../../ui/Icons";
@@ -39,6 +40,7 @@ import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration
 import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import { FormBase } from "./FormBase";
 import { EquipmentForms } from "./EquipmentForms";   // rebond vers la fiche du MAÎTRE (usage différé, cf. en-tête)
+import { FormUi } from "./shared";   // séparateur de section (bloc « Administratif », décalqué d'EquipmentForms)
 import type { FormHost } from "./shared";
 
 export class SubEquipmentForms extends FormBase {
@@ -77,6 +79,11 @@ export class SubEquipmentForms extends FormBase {
     if (se.slot) pairs.push([I18n.t("subEquipment.slot"), Html.escape(se.slot)]);
     const tech = this.techSummary(se);
     if (tech) pairs.push([I18n.t("subEquipment.hardware"), Html.escape(tech)]);
+    // ADMINISTRATIF (achat / garantie) — D5(c) 2026-08-03, décalqué d'`EquipmentForms.equipmentDetail`.
+    // Deux lignes CONDITIONNELLES (masquées si rien à montrer) : la date d'achat et la référence du bon de
+    // commande partagent une ligne (comme sur `equipments`), la fin de garantie a la sienne.
+    if (se.purchase_date || se.po_ref) pairs.push([I18n.t("lists.col.purchase"), [se.purchase_date ? Html.escape(se.purchase_date) : null, se.po_ref ? I18n.t("detail.common.poRef", { ref: Html.escape(se.po_ref) }) : null].filter(Boolean).join(" · ")]);
+    if (se.warranty_end) pairs.push([I18n.t("equipment.field.warrantyEnd"), Html.escape(se.warranty_end)]);
     pairs.push([groups.length > 1 ? I18n.t("detail.common.groups") : I18n.t("lists.col.group"), groupCell]);
     // Description LIBRE (multiligne) : rendue en MARKDOWN dans un conteneur dédié `.md-body` (défauts micromark sûrs, cf. core/Markdown).
     pairs.push([I18n.t("lists.col.description"), se.description ? `<div class="md-body">${Markdown.render(se.description)}</div>` : "—"]);
@@ -149,6 +156,16 @@ export class SubEquipmentForms extends FormBase {
     const serialI = FormControls.text(se ? se.serial : "", I18n.t("subEquipment.serialPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("equipment.field.serial"), serialI));
 
+    // ADMINISTRATIF (achat / garantie) — D5(c) 2026-08-03, décalqué d'`EquipmentForms.form` (~L560-565).
+    // `FormControls.date` = primitive maison OBLIGATOIRE pour les dates (principe n°14), jamais un
+    // `<input type="date">` brut. Clés i18n RÉUTILISÉES depuis `equipment.field.*` (principe n°3) : les
+    // libellés sont identiques, pas de doublon `subEquipment.*`.
+    root.appendChild(FormUi.divider(I18n.t("equipment.field.admin")));
+    const purchaseI = FormControls.date(se ? se.purchase_date : "");
+    const warrantyI = FormControls.date(se ? se.warranty_end : "");
+    const poI = FormControls.text(se ? se.po_ref : "", I18n.t("equipment.field.poPlaceholder"));
+    root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("equipment.field.purchaseDate"), purchaseI), FormControls.fieldRow(I18n.t("equipment.field.warrantyEnd"), warrantyI), FormControls.fieldRow(I18n.t("equipment.field.poRef"), poI)));
+
     // GROUPES : primaire (single) + secondaires (multi) — MÊME dispositif que le formulaire d'équipement.
     // ⚠ `<select>` pour le primaire : c'est une liste d'ENTITÉS mais courte et déjà traitée ainsi côté
     // équipement ; changer de contrôle ici et pas là créerait une incohérence (principe n°14).
@@ -194,6 +211,7 @@ export class SubEquipmentForms extends FormBase {
         const payload = {
           name: nameI.value.trim(), equipment_id: equipmentId,
           slot: slotI.value.trim(), brand: brandI.value.trim(), model: modelI.value.trim(), serial: serialI.value.trim(),
+          purchase_date: (purchaseI as any).value || "", warranty_end: (warrantyI as any).value || "", po_ref: poI.value.trim(),
           group_id: primaryGroup, group_ids: groupIds, description: descI.value.trim(),
         };
         if (live.check(payload).length) return false;   // nom requis (surligné)
