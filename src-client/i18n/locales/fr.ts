@@ -38,10 +38,11 @@ import { detail } from "./fr/detail";
 import { face } from "./fr/face";
 import { dc } from "./fr/dc";
 import { vm } from "./fr/vm";
+import { wifi } from "./fr/wifi";
 import { notify } from "./fr/notify";
 import { certs } from "./fr/certs";
 import { analysis } from "./fr/analysis";
 import { subEquipment } from "./fr/subEquipment";
 import { search } from "./fr/search";
 
-export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, notify, certs, analysis, subEquipment, search } as const;
+export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, wifi, notify, certs, analysis, subEquipment, search } as const;

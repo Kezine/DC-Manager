@@ -3,6 +3,9 @@ import { Icons } from "../ui/Icons";
 import { Html } from "../core/Html";
 import { Ip } from "../core/Ip";
 import { VmStatus } from "../core/VmStatus";
+import { WifiStatus } from "../core/WifiStatus";   // présence + type d'un client wifi (feature AMOVIBLE)
+import { WifiClient } from "../models/WifiClient";   // libellé « nom sinon MAC » — règle unique partagée fiche/palette
+import { Format } from "../core/Format";
 import { I18n } from "../i18n/I18n";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { EquipFaces } from "../registries/EquipFaces";
@@ -559,6 +562,69 @@ export class ListConfigs {
           // filtre par APPARTENANCE (la VM porte le tag) — valueOf renvoie un tableau, comme la colonne Groupe des équipements.
           filter: { label: I18n.t("lists.col.tags"), options: tagOptions, valueOf: (v) => v.tags_src || [] },
         },
+      ],
+    };
+  }
+
+  /** CLIENTS WIFI — collection ALIMENTÉE PAR LA SYNCHRO d'un contrôleur (UniFi en 1re
+      implémentation ; la marque n'est qu'un adaptateur serveur, cf. docs/wifi-unifi.md).
+      Liste en LECTURE (`actions: { view: true }` + aucun `form` sur l'onglet) : les clients
+      viennent de la synchro, l'enrichissement des champs LOCAUX (notes) passe par la fiche.
+      ⚠ Le champ `orphan` s'AFFICHE « déconnecté » (décision D2 : l'API ne liste que les clients
+      connectés — partir est ordinaire). La règle de présence vit dans `core/WifiStatus`, partagée
+      avec la fiche : on ne la réécrit pas ici. */
+  static wifiClients(store: Store): ListOptions {
+    // Point d'accès : nom de l'équipement RÉSOLU (ap_equipment_id, rapproché au sync) sinon le nom
+    // d'AP BRUT du contrôleur (ap_name) — informatif tant que le rapprochement par nom n'a pas eu lieu.
+    const apText = (c: any): string => {
+      const e: any = c.ap_equipment_id && store.get("equipments", c.ap_equipment_id);
+      if (e) return e.name || I18n.t("lists.ph.equipment");
+      return c.ap_name || "";
+    };
+    // Options de FILTRE calculées à la volée sur les clients DU DOCUMENT (dynamiques : elles suivent
+    // la synchro — le mécanisme de filtres réévalue `options()` à chaque re-rendu). Même patron que
+    // les filtres « Hôte »/« Tags » du listing VMs : la correspondance porte sur la MÊME valeur que
+    // l'affichage, donc filtre et colonne ne peuvent pas se contredire.
+    const distinct = (valueOf: (c: any) => string) => (): { id: string; label: string }[] => {
+      const s = new Set<string>();
+      store.all("wifiClients").forEach((c: any) => { const v = valueOf(c); if (v) s.add(v); });
+      return [...s].sort().map((v) => ({ id: v, label: v }));
+    };
+    return {
+      collection: "wifiClients",
+      defaultSort: { key: "name", dir: "asc" },
+      actions: { view: true },   // lecture seule : alimentée par la synchro (ni + créer, ni éditer/cloner/supprimer)
+      emptyText: I18n.t("lists.empty.wifiClients"),
+      columns: [
+        // Nom : repli sur la MAC (un client sans hostname est le cas NOMINAL) — règle UNIQUE
+        // `WifiClient.displayName`, partagée avec la fiche et la palette de recherche.
+        {
+          head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name",
+          sort: (c) => WifiClient.displayName(c),
+          render: (c) => { const label = WifiClient.displayName(c); return label ? Html.escape(label) : dim(I18n.t("lists.ph.noName")); },
+        },
+        // Type de raccordement + pastille « déconnecté » (la présence est l'info dominante).
+        {
+          head: I18n.t("lists.col.type"), essential: true, sortKey: "type",
+          sort: (c) => WifiStatus.sortKey(c) + "_" + WifiStatus.rawType(c),
+          render: (c) => WifiStatus.pills(c),
+          filter: { label: I18n.t("lists.col.type"), options: distinct((c) => WifiStatus.rawType(c)), valueOf: (c) => WifiStatus.rawType(c) },
+        },
+        { head: "IP", essential: true, sortKey: "ip", sort: (c) => Ip.toInt(c.ip) || 0, render: (c) => (c.ip ? `<code>${Html.escape(c.ip)}</code>` : dim("—")) },
+        { head: "MAC", sortKey: "mac", sort: (c) => c.mac || "", render: (c) => (c.mac ? `<code>${Html.escape(c.mac)}</code>` : dim("—")) },
+        {
+          head: I18n.t("lists.col.ssid"), sortKey: "ssid", sort: (c) => c.ssid || "",
+          render: (c) => (c.ssid ? `<span class="pill">${Html.escape(c.ssid)}</span>` : dim("—")),
+          filter: { label: I18n.t("lists.col.ssid"), options: distinct((c) => c.ssid || ""), valueOf: (c) => c.ssid || "" },
+        },
+        {
+          head: I18n.t("lists.col.accessPoint"), essential: true, sortKey: "ap", sort: (c) => apText(c),
+          render: (c) => { const t = apText(c); return t ? Html.escape(t) : dim("—"); },
+          filter: { label: I18n.t("lists.col.accessPoint"), options: distinct(apText), valueOf: (c) => apText(c) },
+        },
+        // Connecté depuis : horodatage ISO trié LEXICOGRAPHIQUEMENT (= chronologiquement, contrat
+        // existant des colonnes de date du dépôt) et rendu localisé.
+        { head: I18n.t("lists.col.connectedSince"), cls: "cell-num", sortKey: "since", sort: (c) => c.connected_since || "", render: (c) => (c.connected_since ? Html.escape(Format.dateTime(c.connected_since)) : dim("—")) },
       ],
     };
   }

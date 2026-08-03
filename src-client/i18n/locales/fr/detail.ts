@@ -68,6 +68,7 @@ export const detail = {
     spare: "Pièce introuvable",
     contact: "Contact introuvable",
     vm: "VM introuvable",
+    wifiClient: "Client wifi introuvable",
     type: "Type introuvable",
   },
   cable: {
@@ -182,6 +183,22 @@ export const detail = {
   },
   contact: {
     title: "Détail du contact",
+  },
+  /* Fiche d'un CLIENT WIFI (feature amovible). ⚠ Le vocabulaire dit « déconnecté », jamais
+     « orphelin » : côté wifi, disparaître de l'inventaire est ordinaire (cf. core/WifiStatus). */
+  wifi: {
+    title: "Client wifi",
+    nameFallback: "(aucun nom remonté — identifié par sa MAC)",
+    disconnectedTitle: "Absent du dernier inventaire du contrôleur — l'enregistrement est conservé et reviendra à sa prochaine connexion",
+    lastSync: "Dernière synchro",
+    providerId: "Identité source",
+    apSection: "Point d'accès",
+    openAp: "Ouvrir la fiche du point d'accès",
+    sourceAp: "Point d'accès (source)",
+    apMac: "MAC du point d'accès",
+    notMatched: "non rapproché",
+    localSection: "Enrichissements locaux",
+    locateAp: "Localiser le point d'accès (le client lui-même n'est pas dans la scène)",
   },
   vm: {
     orphanTitle: "Disparue à la dernière synchronisation",

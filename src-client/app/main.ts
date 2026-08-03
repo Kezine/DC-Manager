@@ -9,7 +9,7 @@ import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
 import { RuntimeConfigLoader } from "./RuntimeConfig";
-import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
+import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, WifiForms, WifiProvidersForm, WifiSyncClient, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
 import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
 import { FormBase } from "../views/forms/FormBase";
 import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
@@ -26,6 +26,7 @@ import { CertsFormat } from "../core/CertsFormat";   // libellés/échéances de
 import type { InterventionRecord } from "../views/forms/InterventionsClient";   // cache des enregistrements pour l'ouverture depuis la palette
 import { CertTargetMatch } from "../core/CertTargetMatch";   // moteur PUR du rapprochement certificat ↔ équipement/VM (calculé)
 import { VmLocate } from "../core/VmLocate";   // « Localiser » une VM = localiser son HÔTE (prédicat PUR, feature VM AMOVIBLE)
+import { WifiLocate } from "../core/WifiLocate";   // « Localiser » un client wifi = localiser son AP (prédicat PUR, feature WIFI AMOVIBLE)
 import type { NetworkIdentity } from "../core/CertTargetMatch";
 import type { CertFicheHooks, CertFicheMatch } from "../views/CertFicheHooks";
 import type { CertTargetResolver } from "../views/CertsAdminView";
@@ -93,6 +94,9 @@ const entitySearchReader: EntitySearchReader | null = REST_MODE ? {
 // Client de synchro VM (feature AMOVIBLE) — mode API SEULEMENT (null en mode fichier/viewer → boutons masqués).
 // `adapter` est ici un RestAdapter (garanti par REST_MODE) ; il satisfait `VmRestContext` (dataBase/docId/headers/clientId publics).
 const vmSyncClient = REST_MODE ? new VmSyncClient(adapter as RestAdapter) : null;
+// Client de synchro des CLIENTS WIFI (feature AMOVIBLE) — mode API SEULEMENT, même montage que le client VM
+// (le RestAdapter satisfait `WifiRestContext` ; routes SCOPÉES PAR DOCUMENT, `<dataBase>/wifi`).
+const wifiSyncClient = REST_MODE ? new WifiSyncClient(adapter as RestAdapter) : null;
 // Client du service de notifications (feature notify/ AMOVIBLE) — mode API SEULEMENT (null en mode fichier/viewer :
 // la page admin affiche alors un message d'indisponibilité). Le RestAdapter satisfait `NotifyRestContext` (apiRoot/
 // docId/headers/clientId publics) ; les routes notify sont GLOBALES (`<apiRoot>/notify`, non scopées par document).
@@ -630,6 +634,29 @@ async function boot(): Promise<void> {
       openEquipmentDetail: (id) => Forms.equipmentDetail(store, formHost, id, () => shell.refreshActive()),
     });
   }
+  // CLIENTS WIFI : onglet de PREMIER NIVEAU, LECTURE SEULE — alimenté par la synchro d'un contrôleur
+  // (UniFi en 1re implémentation ; la marque n'est qu'un adaptateur serveur, cf. docs/wifi-unifi.md).
+  // Pas de `form`/`addLabel` : AUCUN bouton « + créer » (cf. ListConfigs.wifiClients `actions: view`) ;
+  // les enrichissements locaux (description/notes) se font depuis la fiche. Actions d'en-tête (feature
+  // amovible), MODE API SEULEMENT — masquées en mode fichier, où il n'y a aucun serveur à interroger :
+  //  - « Synchroniser » : lance une passe sur tous les providers du document ;
+  //  - « Providers… » : CRUD des contrôleurs (hors VIEWER — c'est de la configuration).
+  const wifiExtraActions: NonNullable<TabOpts["extraActions"]> = [];
+  if (REST_MODE && wifiSyncClient) {
+    const client = wifiSyncClient;   // const → non-null capturé dans les closures (garde REST_MODE ci-dessus)
+    wifiExtraActions.push({ label: I18n.t("app.wifi.sync"), title: I18n.t("app.wifi.syncTitle"), onClick: (btn) => { void WifiForms.sync(client, btn); } });
+    if (!VIEWER) wifiExtraActions.push({ label: I18n.t("app.wifi.providers"), title: I18n.t("app.wifi.providersTitle"), onClick: () => WifiProvidersForm.open(formHost, client, () => shell.refreshActive()) });
+  }
+  // « Localiser en 3D » sur une ligne : un client wifi n'est PAS un objet de la scène — on localise
+  // son POINT D'ACCÈS. Version SOBRE (comme les VMs) : le prédicat PARTAGÉ `WifiLocate.apEquipmentId`
+  // rend `null` dès que la localisation ne peut pas aboutir (client non rapproché, AP supprimé, AP non
+  // localisable), et le bouton n'apparaît alors pas du tout.
+  addListTab("wifi", I18n.t("tabs.wifi.label"), ListConfigs.wifiClients, {
+    icon: Icons.WIFI,
+    title: I18n.t("tabs.wifi.title"), subtitle: I18n.t("tabs.wifi.subtitle"),
+    extraActions: wifiExtraActions.length ? wifiExtraActions : undefined,
+    locate: "equipment", locateTarget: (id) => WifiLocate.apEquipmentId(store.get("wifiClients", id), store),
+  });
   addListTab("racks", I18n.t("tabs.racks.label"), ListConfigs.racks, {
     icon: Icons.RACK_CONTENT,
     subtitle: I18n.t("tabs.racks.subtitle"),

@@ -150,6 +150,12 @@ export const app = {
     refresh: "Refresh",
     refreshTitle: "Reload the clusters status (GET /vm/status)",
   },
+  wifi: {
+    sync: "Synchronise",
+    syncTitle: "Synchronise the Wi-Fi client inventory from the controllers configured for this document",
+    providers: "Providers…",
+    providersTitle: "Configure the synchronisation controllers (console, API key, site, interval)",
+  },
   faces: {
     import: "Import images…",
     importTitle: "Load a .nmfb image library — OVERWRITES the current library; the faces of the affected equipment will need re-assigning",

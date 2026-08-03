@@ -155,6 +155,12 @@ export const app = {
     refresh: "Actualiser",
     refreshTitle: "Recharger l'état des clusters (GET /vm/status)",
   },
+  wifi: {
+    sync: "Synchroniser",
+    syncTitle: "Synchroniser l'inventaire des clients wifi depuis les contrôleurs configurés pour ce document",
+    providers: "Providers…",
+    providersTitle: "Configurer les contrôleurs de synchronisation (console, clé d'API, site, intervalle)",
+  },
   faces: {
     import: "Importer des images…",
     importTitle: "Charger une bibliothèque d'images .nmfb — ÉCRASE la bibliothèque actuelle ; les faces des équipements concernés seront à ré-assigner",

@@ -61,6 +61,7 @@ export const detail = {
     spare: "Spare not found",
     contact: "Contact not found",
     vm: "VM not found",
+    wifiClient: "Wi-Fi client not found",
     type: "Type not found",
   },
   cable: {
@@ -175,6 +176,22 @@ export const detail = {
   },
   contact: {
     title: "Contact details",
+  },
+  /* Wi-Fi CLIENT record (removable feature). ⚠ The wording says “disconnected”, never “orphan”:
+     on Wi-Fi, disappearing from the inventory is ordinary (cf. core/WifiStatus). */
+  wifi: {
+    title: "Wi-Fi client",
+    nameFallback: "(no name reported — identified by its MAC)",
+    disconnectedTitle: "Missing from the controller's last inventory — the record is kept and will return on the next connection",
+    lastSync: "Last sync",
+    providerId: "Source identity",
+    apSection: "Access point",
+    openAp: "Open the access point record",
+    sourceAp: "Access point (source)",
+    apMac: "Access point MAC",
+    notMatched: "not matched",
+    localSection: "Local enrichments",
+    locateAp: "Locate the access point (the client itself is not in the scene)",
   },
   vm: {
     orphanTitle: "Disappeared at the last synchronisation",

@@ -182,6 +182,11 @@ export class Icons {
   /** Réseau IP (remplace `🌐`) : globe méridiens. */
   static readonly NETWORK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.5 4 5.7 4 9s-1.4 6.5-4 9c-2.6-2.5-4-5.7-4-9s1.4-6.5 4-9z"/></svg>';
 
+  /** Wifi : trois arcs + point d'émission — onglet « Wifi » (clients synchronisés) et portée de
+      recherche associée. Le trait est celui du reste du registre (2 px, bouts arrondis) pour
+      rester homogène en barre d'onglets. */
+  static readonly WIFI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.5a15 15 0 0 1 19 0"/><path d="M5.5 12.2a10.5 10.5 0 0 1 13 0"/><path d="M8.5 15.9a6 6 0 0 1 7 0"/><line x1="12" y1="19.5" x2="12.01" y2="19.5"/></svg>';
+
   /* ------------------------------------------------------------------------
      FAMILLES d'objets liables (interventions) — icône de FAMILLE (pas de TYPE) :
      un équipement, une VM ou un spare, indépendamment de son type précis. Vivent

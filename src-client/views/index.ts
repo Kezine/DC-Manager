@@ -10,6 +10,10 @@ export type { FormHost } from "./Forms";
 export { VmForms } from "./forms/VmForms";
 export { VmProvidersForm } from "./forms/VmProvidersForm";
 export { VmSyncClient } from "./forms/VmSyncClient";
+// Formulaires de la feature CLIENTS WIFI (AMOVIBLE) — hors chaîne `Forms`, branchés directement.
+export { WifiForms } from "./forms/WifiForms";
+export { WifiProvidersForm } from "./forms/WifiProvidersForm";
+export { WifiSyncClient } from "./forms/WifiSyncClient";
 // Sous-onglet « Clusters » de la feature VM (AMOVIBLE, mode API) — vue dédiée détachable.
 export { VmClustersView } from "./VmClustersView";
 export type { VmClustersHost } from "./VmClustersView";

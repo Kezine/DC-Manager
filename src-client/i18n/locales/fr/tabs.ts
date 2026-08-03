@@ -18,6 +18,11 @@ export const tabs = {
     label: "Clusters",
     subtitle: "État par provider des clusters synchronisés (nœuds, métriques, quorum) et de la synchronisation.",
   },
+  wifi: {
+    label: "Wifi",
+    title: "Clients wifi",
+    subtitle: "Clients connectés aux points d'accès, alimentés par la synchronisation d'un contrôleur. Champs source en lecture ; les enrichissements locaux se font depuis la fiche. Un client absent du dernier inventaire est marqué « déconnecté », jamais supprimé.",
+  },
   racks: {
     label: "Racks",
     subtitle: "Baies : emplacement, taille (U), profondeur, faces, portes et capots. « ▦ Contenu » pour monter les équipements dans les U.",
