@@ -213,9 +213,13 @@ module.exports = async () => {
       'CREATE INDEX IF NOT EXISTS "idx_spares_assigned_equipment_id" ON "spares" ("assigned_equipment_id")',
       'CREATE INDEX IF NOT EXISTS "idx_vms_host_equipment_id" ON "vms" ("host_equipment_id")',
       'CREATE INDEX IF NOT EXISTS "idx_vms_group_id" ON "vms" ("group_id")',
+      // wifiClients (chantier provider wifi) : `provider_id` est le chemin CHAUD de la synchro
+      // (findBy à chaque passe) et `ap_equipment_id` la FK que la cascade `equipments` détache.
+      'CREATE INDEX IF NOT EXISTS "idx_wifiClients_provider_id" ON "wifiClients" ("provider_id")',
+      'CREATE INDEX IF NOT EXISTS "idx_wifiClients_ap_equipment_id" ON "wifiClients" ("ap_equipment_id")',
     ];
     const allIndexes = RelationalSchema.allIndexDdls();
-    ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (37 index, ordre COLLECTIONS)");
+    ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (39 index, ordre COLLECTIONS)");
     // Et la phase TABLES ne contient QUE des CREATE TABLE, une par collection (le phasage tables → index
     // est la condition de l'évolution additive — cf. test-relational-evolution.js).
     const allTables = RelationalSchema.allTableDdls();

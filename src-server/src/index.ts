@@ -10,6 +10,7 @@ import { Logger } from "./logger.js";
 import { UsersDb } from "./users/UsersDb.js";   // snapshot de l'annuaire (users.db) — service CORE
 import { AuthCacheUserResolver } from "./users/AuthCacheUserResolver.js";   // impl v1 de l'annuaire (cache d'auth + snapshot)
 import { VmModule } from "./vm/VmModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de vm/
+import { WifiModule } from "./wifi/WifiModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de wifi/
 import { NotifyModule } from "./notify/NotifyModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de notify/
 import { CertsModule } from "./certs/CertsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de certs/
 import { InterventionsModule } from "./interventions/InterventionsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de interventions/
@@ -57,6 +58,15 @@ const notify = NotifyModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database a
 // le module est inactif, faute de clé).
 const vm = VmModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("vm"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
+// Inventaire des CLIENTS WIFI (contrôleur UniFi en 1re implémentation — la marque n'est qu'un adaptateur,
+// cf. docs/wifi-unifi.md § « Ajouter un provider d'une autre marque ») : providers PAR DOCUMENT, dans
+// DOCS_DIR/wifi-providers.db (même driver better-sqlite3 injecté que DocumentStore). Prérequis IDENTIQUE
+// à vm/ et notify/ : DCMANAGER_SECRETS_KEY (SecretBox PARTAGÉ — une seule clé d'infrastructure, c'est VOULU) ;
+// absente → module inactif (toutes les routes en 503 actionnable, cf. WifiModule).
+// PONT vers notify (typage STRUCTUREL — wifi/ n'importe RIEN de notify/, les deux features restent
+// amovibles) : chaque échec de synchro persistant est signalé (raise), chaque retour à la normale le clôt.
+const wifi = WifiModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("wifi"),
+  problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
 // Certificats (PKI interne, ZÉRO-CONNAISSANCE : crypto côté navigateur, le serveur ne stocke que des
 // métadonnées + blobs chiffrés client — aucune clé d'environnement requise, cf. CertsModule).
 // PONT vers notify (typage structurel, comme vm) : le veilleur d'échéances signale cert-expiry
@@ -69,8 +79,9 @@ const certs = CertsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Databa
 // dès qu'un objet démarre/se clôt/s'annule ou est supprimé.
 const interventions = InterventionsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("interventions"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
-new Server({ docs, auth, live, resolver: userResolver, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), notify.extension(), certs.extension(), interventions.extension()] }).listen(PORT);
+new Server({ docs, auth, live, resolver: userResolver, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension()] }).listen(PORT);
 vm.start();   // synchros périodiques (interval_sec > 0) — après l'écoute : le serveur répond pendant une 1re synchro lente
+wifi.start();   // synchros périodiques des clients wifi — même raison que vm.start()
 notify.start();   // timer de rappels (tick 60 s, unref) — après l'écoute, comme vm
 certs.start();    // suivi d'échéances (passe immédiate + tick horaire, unref)
 interventions.start();   // veilleur de rappels (passe immédiate + tick 5 min, unref)
@@ -81,8 +92,9 @@ interventions.start();   // veilleur de rappels (passe immédiate + tick 5 min, 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     log.info("signal reçu, arrêt propre", sig);
-    // Modules optionnels d'abord (timers + bases dédiées vm-providers.db / notify.db), cœur ensuite.
+    // Modules optionnels d'abord (timers + bases dédiées vm-providers.db / wifi-providers.db / notify.db), cœur ensuite.
     try { vm.stop(); } catch (e) { log.warn("vm.stop a échoué", (e as any) && (e as any).message); }
+    try { wifi.stop(); } catch (e) { log.warn("wifi.stop a échoué", (e as any) && (e as any).message); }
     try { notify.stop(); } catch (e) { log.warn("notify.stop a échoué", (e as any) && (e as any).message); }
     try { certs.stop(); } catch (e) { log.warn("certs.stop a échoué", (e as any) && (e as any).message); }
     try { interventions.stop(); } catch (e) { log.warn("interventions.stop a échoué", (e as any) && (e as any).message); }

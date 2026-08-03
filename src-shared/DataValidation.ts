@@ -1040,6 +1040,38 @@ const SPEC_FIELDS = {
       group_id:          { type: "string", nullable: true, default: null, ref: "groups" },
       group_ids:         { type: "string[]", default: [], ref: "groups" },
   },
+  wifiClients: {
+      // CLIENT WIFI vu par un contrôleur (UniFi en 1re implémentation — la marque n'est QU'un
+      // adaptateur, cf. cadrage D9). Frontière SOURCE/LOCAUX : `src-shared/WifiSync.ts`, source de
+      // vérité PARTAGÉE des défauts ci-dessous (une divergence produirait de faux deltas de synchro).
+      // ⚠ TOUS les champs texte portent `default: ""` — jamais de `null` silencieux : en colonnes
+      // strictes, un champ non normalisé laisserait un NULL que ni l'UI ni la recherche ne savent lire.
+      // `name` n'est PAS `required` (contrairement à `vms.name`) : un client sans hostname est le cas
+      // NOMINAL côté wifi — l'UI replie l'affichage sur la MAC (cf. ListConfigs.wifiClients).
+      name:            { type: "string", default: "" },
+      // client_type TOLÉRANT : PAS de contrainte `enum` — « wireless »/« wired » côté UniFi, mais une
+      // autre marque nommera autrement ; une valeur inconnue est ACCEPTÉE telle quelle (parité vms.status).
+      client_type:     { type: "string", default: "" },
+      provider_id:     { type: "string", default: "" },   // instance d'adaptateur d'origine (multi-contrôleurs)
+      ext_id:          { type: "string", default: "" },   // identité stable côté contrôleur (clé de réconciliation)
+      mac:             { type: "string", default: "" },
+      ip:              { type: "string", default: "" },   // bail CONSTATÉ — informatif (aucune écriture IPAM, cadrage §5)
+      ssid:            { type: "string", default: "" },
+      ap_mac:          { type: "string", default: "" },
+      ap_name:         { type: "string", default: "" },   // nom du point d'accès côté contrôleur (base du rapprochement D4)
+      connected_since: { type: "string", default: "" },   // ISO — distingue un RETOUR d'une présence continue
+      // « orphelin » = DÉCONNECTÉ (décision D2) : l'API ne liste que les clients CONNECTÉS, disparaître
+      // est quotidien. Mécanique identique aux VMs (patch, jamais de delete), seul le LIBELLÉ UI diffère.
+      orphan:          { type: "boolean", default: false },
+      last_sync:       { type: "string", default: "" },
+      // CHAMPS LOCAUX (jamais touchés par la synchro) : note libre + description héritée d'Entity.
+      // PAS de groupes en v1 (décision D1 : n'ouvre pas un 4ᵉ balayage du `custom` de Cascade.groups).
+      notes:           { type: "string", default: "" },
+      description:     { type: "string", default: "" },
+      // Point d'accès rapproché — champ DÉRIVÉ par la synchro (nom d'équipement ⇄ ap_name, D4),
+      // FK vers un équipement, détachée en cascade (cf. Cascade.equipments) — parité vms.host_equipment_id.
+      ap_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+  },
   contacts: {
       name:  { type: "string", required: true, trim: true },   // identité du contact — trimée (fiabilise le libellé)
       email: { type: "string", trim: true },                   // optionnel — format contrôlé en douceur (invariant)
@@ -1076,6 +1108,7 @@ export namespace Records {
   export type Spare      = RecordOf<typeof SPEC_FIELDS.spares>;
   export type Site       = RecordOf<typeof SPEC_FIELDS.sites>;
   export type Vm         = RecordOf<typeof SPEC_FIELDS.vms>;
+  export type WifiClient = RecordOf<typeof SPEC_FIELDS.wifiClients>;
   export type Contact    = RecordOf<typeof SPEC_FIELDS.contacts>;
 }
 
@@ -1652,6 +1685,17 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       // primaire en cohérence ; l'invariant garantit qu'aucune écriture (API/import) ne casse la relation.
       { path: "group_id", message: "Le groupe primaire doit faire partie des groupes de la VM.", holds: (vm) => !vm.group_id || (Array.isArray(vm.group_ids) && vm.group_ids.includes(vm.group_id)) },
     ],
+  },
+  wifiClients: {
+    // CLIENTS WIFI synchronisés depuis un contrôleur (collection AMOVIBLE, comme `vms`). AUCUN invariant
+    // inter-champs : tous les champs source sont des chaînes TOLÉRANTES (le pivot isole l'app des
+    // marques — cf. cadrage D9) et il n'y a NI groupes (D1) NI structure `json` à contraindre. La seule
+    // règle référentielle est le `ref: "equipments"` d'`ap_equipment_id`, portée par V2 (déclarative).
+    // On n'ajoute PAS d'invariant « ip est une IPv4 » : l'adresse vient d'un tiers, elle est INFORMATIVE
+    // (aucune écriture IPAM), et refuser une IPv6 ou une valeur exotique ferait ÉCHOUER la synchro entière
+    // (`normalizeAndValidate` refuse le lot en bloc) pour une donnée d'affichage — le contraire de la
+    // tolérance exigée par le cadrage.
+    fields: SPEC_FIELDS.wifiClients,
   },
   contacts: {
     // Carnet de destinataires des NOTIFICATIONS (email/sms), tenu PAR DOCUMENT — cf. Contact.ts / cadrage

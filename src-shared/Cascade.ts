@@ -159,9 +159,12 @@ export class Cascade {
       // détache aussi les 2 extrémités de faisceau qui pointaient cet équipement (patch supprimé → trunk demi-terminé).
       // détache aussi les VMs HÉBERGÉES par cet équipement (host_equipment_id → null) : le lien est LÉGER (la VM
       // survit, juste « sans hôte connu »), jamais une suppression.
+      // détache aussi les CLIENTS WIFI rattachés à cet équipement (ap_equipment_id → null) : MIROIR EXACT
+      // du détachement des VMs ci-dessus — le lien est LÉGER (le client survit, juste « AP non rapproché »),
+      // et la synchro le RE-RÉSOUDRA d'elle-même si un équipement homonyme réapparaît (champ DÉRIVÉ, D4).
       detach: [{ coll: "ipAddresses", fk: "equipment_id" }, { coll: "dhcpRanges", fk: "server_id" }, { coll: "ipNetworks", fk: "dhcp_server_id" },
         { coll: "cableBundles", fk: "endpoint_a_equipment_id" }, { coll: "cableBundles", fk: "endpoint_b_equipment_id" },
-        { coll: "vms", fk: "host_equipment_id" }],
+        { coll: "vms", fk: "host_equipment_id" }, { coll: "wifiClients", fk: "ap_equipment_id" }],
       // Les CÂBLES branchés sur les ports de l'équipement ne sont PLUS listés ici : la suppression des ports
       // (règle `delete` ci-dessus) rejoue la règle `ports`, qui les emporte — y compris ceux des lanes.
       custom: (find, fetch, id, _deletes, detaches) => {
@@ -268,6 +271,14 @@ export class Cascade {
     // supprimer — le lien IPAM est LÉGER (parité stricte avec equipments.detach ipAddresses/equipment_id : l'adresse
     // survit, juste « non attribuée »), jamais une suppression. Reste sans `delete` (rien à supprimer en cascade).
     vms: { delete: [], detach: [{ coll: "ipAddresses", fk: "vm_id" }] },
+    // CLIENT WIFI (collection AMOVIBLE) : RIEN ne pointe vers un client wifi dans le document — ni FK de
+    // spec, ni champ libre. Supprimer un client n'entraîne donc AUCUN effet : pas de suppression enfant,
+    // pas de détachement. La règle est déclarée VIDE plutôt qu'omise, à dessein : une collection ABSENTE
+    // de cette table est indiscernable d'un oubli à la relecture, alors qu'une entrée vide COMMENTÉE dit
+    // « examiné, rien à faire » (le `{ delete: [] }` de `vms` a exactement la même intention).
+    // ⚠ L'autre sens du lien — supprimer un ÉQUIPEMENT → détacher `wifiClients.ap_equipment_id` — vit,
+    // lui, dans la règle `equipments` ci-dessus (c'est l'équipement qui est supprimé, pas le client).
+    wifiClients: { delete: [], detach: [] },
   };
 
   /** DÉTACHE les équipements POSÉS sur l'étagère `trayId` (placement_mode "tray") : retour « non placé »
