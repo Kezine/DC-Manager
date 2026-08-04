@@ -195,7 +195,10 @@ module.exports = async () => {
     //    désignations dérivées des spares) : notations qu'un humain TAPE — « U12 », « ét. 2 », « 42 U »,
     //    « 12 brins », « Dell R740 », capacités/rpm. Les assemblages typographiques (« – », « ↔ »,
     //    « équipement : port », joints « · ») restent ASSUMÉS non répliqués (cf. docs/recherche.md). --
-    ck.eq(SearchTerms.SEARCH_VERSION, 2, "SEARCH_VERSION = 2 (les compositions sont une évolution de spec → bump, backfill à l'ouverture)");
+    // ⚠ Attente EXPLICITE (jamais dérivée du module) : le marqueur de version est le déclencheur du
+    // backfill, une valeur figée par erreur laisserait les documents existants sur une spec périmée.
+    // v3 = ajout de la collection `wifiClients` à la spec (chantier provider wifi, 2026-08-03).
+    ck.eq(SearchTerms.SEARCH_VERSION, 3, "SEARCH_VERSION = 3 (compositions v2 + collection wifiClients v3 — toute évolution de spec bumpe, le backfill fait le reste)");
 
     // équipement posé en baie : « U12 » (conditions du path client : placement rack/side/wall + rack_id + rack_u).
     ck(termsOf("equipments", rec("equipments", "eq-rack")).includes("U12"), "equipment racké (rack_u 12) : « U12 » est un terme — la position se tape telle quelle");

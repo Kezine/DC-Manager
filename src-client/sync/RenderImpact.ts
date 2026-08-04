@@ -51,6 +51,11 @@ export const COLLECTION_THREE_IMPACT: Record<string, ThreeImpact> = {
   // construit au SURVOL depuis le store — ce n'est pas de la géométrie reconstruite.
   subEquipments: "none",
   vms:          "none",      // équipements virtuels (VMs) — sous-onglet liste/fiche, jamais rendus en 3D
+  // Clients wifi : `none` n'est pas ici un classement PRUDENT mais une propriété du modèle — la
+  // collection n'a ni placement, ni dimension, ni port, donc AUCUN mesh, label ou texture ne peut
+  // en dépendre. Le POINT D'ACCÈS, lui, est un `equipments` ordinaire (déjà `geometry`) : le
+  // rattachement `ap_equipment_id` ne change RIEN au dessin de l'AP.
+  wifiClients:  "none",
   contacts:     "none",      // carnet de destinataires des notifications (email/sms) — vue liste, jamais dessiné
 };
 

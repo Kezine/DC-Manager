@@ -91,6 +91,11 @@ export const SEARCH_CATALOGS = {
   /** search.sub.strands (fr « brins », en « strands ») — UNITÉ de la composition « 12 brins » de la
       sous-ligne des faisceaux (GlobalSearchSources.cableBundles.sub), composée avec `fiber_count`. */
   strands: ["brins", "strands"] as readonly string[],
+  /** lists.ph.disconnected (fr+en) — versé par la spec `wifiClients` quand le client est « orphelin ».
+      MÊME mécanique que `vmOrphan`, LIBELLÉ différent : côté wifi, disparaître de l'inventaire n'est pas
+      un incident mais une DÉCONNEXION ordinaire (décision D2 du cadrage). Duplication des libellés client
+      ASSUMÉE et VERROUILLÉE par test, comme tous les catalogues ci-dessus. */
+  wifiDisconnected: ["déconnecté", "disconnected"] as readonly string[],
 };
 
 /* ---- formes de la spec déclarative ---- */
@@ -243,6 +248,18 @@ const SEARCH_SPECS: Readonly<Record<string, CollectionSearchSpec>> = {
     own: (vm) => (Array.isArray(vm.nics) ? vm.nics : [])
       .flatMap((nic: any) => (nic && Array.isArray(nic.ips) ? nic.ips : [])),
   },
+  wifiClients: {
+    // le POINT D'ACCÈS résolu (colonne « AP » de ListConfigs.wifiClients + path de la palette) ;
+    // `ap_name`/`ap_mac` bruts sont, eux, des champs PROPRES déjà couverts par `ownText`.
+    links: [{ field: "ap_equipment_id", target: "equipments", contributes: ["name"] }],
+    // « déconnecté »/« disconnected » : MÊME mécanique que l'orphelinat des VMs, autre LIBELLÉ (décision
+    // D2 — l'API ne liste que les clients CONNECTÉS, disparaître n'est pas un incident). Le serveur ignore
+    // la langue de l'utilisateur : la colonne porte les DEUX.
+    catalogs: [{ field: "orphan", terms: { "true": SEARCH_CATALOGS.wifiDisconnected } }],
+    // AUCUN `own` : tout le reste (nom, MAC, IP, SSID, type, nom d'AP…) est une colonne PLATE du record,
+    // donc déjà couverte par `ownText` — rien n'est enfoui dans une structure, rien n'est composé par
+    // l'habillage client (le repli « nom vide → MAC » AFFICHE la MAC, qui est déjà un terme propre).
+  },
   spares: {
     // « Attribué à » (assignedTo de ListConfigs.spares) — l'attribution LIBRE `assigned_free` est propre.
     links: [{ field: "assigned_equipment_id", target: "equipments", contributes: ["name"] }],
@@ -283,10 +300,14 @@ export class SearchTerms {
   /** Version de la SPEC de recherche, estampillée sur le fichier document (`PRAGMA user_version`).
       0 = colonne `search` « pauvre » (valeurs propres seules, pré-enrichissement) ; 1 = search-v1
       (dérivés par lien/enfants + catalogues fr/en) ; 2 = search-v2 (COMPOSITIONS tapables : « U12 »,
-      « ét. N »/« fl. N », « 42 U », « 12 brins », « marque modèle », capacités/rpm des spares).
+      « ét. N »/« fl. N », « 42 U », « 12 brins », « marque modèle », capacités/rpm des spares) ;
+      3 = search-v3 (collection `wifiClients` : AP résolu par lien + catalogue « déconnecté » fr/en).
       À INCRÉMENTER à chaque évolution de la spec (cf. en-tête) — le backfill à l'ouverture met les
-      documents existants à niveau tout seul. */
-  static readonly SEARCH_VERSION = 2;
+      documents existants à niveau tout seul. ⚠ Un ajout de collection COMPTE comme une évolution de
+      spec : sans bump, les documents déjà ouverts garderaient une colonne `search` calculée sans elle
+      (ici l'effet serait mince — la collection est neuve donc vide — mais la doctrine ne se négocie pas
+      au cas par cas, sinon on ne sait plus ce que vaut le marqueur). */
+  static readonly SEARCH_VERSION = 3;
 
   /** Collections dont l'écriture exige de connaître l'enregistrement PRÉCÉDENT pour invalider
       (dérivations par ENFANTS : un sous-équipement DÉPLACÉ d'un maître à l'autre doit rafraîchir

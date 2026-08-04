@@ -93,6 +93,13 @@ export const INDEX_SPEC: Record<string, string[]> = {
   networks:      ["ip_network_id"],
   spares:        ["assigned_equipment_id"],
   vms:           ["host_equipment_id", "group_id", "group_ids"],   // cascades hôte + groupes
+  // CLIENTS WIFI : `provider_id` est le chemin CHAUD de la synchro (`WifiReconcile` réconcilie le
+  // périmètre d'UN provider, retrouvé par `repo.findBy("wifiClients","provider_id",…)` à CHAQUE passe —
+  // c'est exactement l'usage que la migration relationnelle vise à indexer) ; `ap_equipment_id` est la FK
+  // que la cascade `equipments` détache. ⚠ ÉCART VOLONTAIRE avec `vms`, qui n'indexe PAS son `provider_id`
+  // alors que sa synchro fait le même `findBy` : asymétrie CONSTATÉE, non reproduite ici (l'aligner côté
+  // vms est un ajustement à part, hors périmètre de ce chantier).
+  wifiClients:   ["provider_id", "ap_equipment_id"],
 };
 
 /** GÉNÉRATEUR de DDL relationnel (méthodes statiques — cf. CLAUDE.md). Toutes les chaînes émises quotent

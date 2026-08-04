@@ -31,9 +31,9 @@
    cf. GlobalSearchPalette) avec les MÊMES fonctions — l'instance LOCALE du
    Store est préférée quand elle existe (habillage riche : displayName…).
 
-   Les PORTÉES (pastilles de filtre + préfixes « eq: », « cb: »…) regroupent
-   les 18 familles en 6 filtres maniables — chaque famille appartient à
-   EXACTEMENT une portée (invariant testé). ⚠ Certificats, interventions et
+   Les PORTÉES (pastilles de filtre + préfixes « eq: », « cb: », « wifi: »…)
+   regroupent les 19 familles en 7 filtres maniables — chaque famille appartient
+   à EXACTEMENT une portée (invariant testé). ⚠ Certificats, interventions et
    ACTIONS (présents dans la maquette) ne sont PAS des portées v1 : leurs
    données vivent dans des bases serveur séparées (API seulement, paginées) —
    les brancher est un chantier à part, la structure de portées les accueillera.
@@ -46,6 +46,9 @@ import { CableStatuses } from "../domain/CableStatuses";
 import { SpareStatuses } from "../domain/SpareStatuses";
 import { VmStatus } from "../core/VmStatus";
 import { VmLocate } from "../core/VmLocate";
+import { WifiStatus } from "../core/WifiStatus";   // présence/type d'un client wifi (feature AMOVIBLE)
+import { WifiLocate } from "../core/WifiLocate";   // « Localiser » un client wifi = localiser son AP
+import { WifiClient } from "../models/WifiClient";   // libellé « nom sinon MAC » — règle unique
 import { RackScene } from "../geometry/RackScene";
 import { I18n } from "../i18n/I18n";
 import type { GlobalSearchItem } from "../core/GlobalSearch";
@@ -88,6 +91,10 @@ export class GlobalSearchSources {
     { id: "cables", icon: Icons.CABLE, prefix: "cb:", kinds: ["cables", "cableBundles"] },
     { id: "network", icon: Icons.IPAM, prefix: "ip:", kinds: ["networks", "ipNetworks", "ipAddresses", "dhcpRanges"] },
     { id: "vms", icon: Icons.VM, prefix: "vm:", kinds: ["vms"] },
+    // Portée DÉDIÉE plutôt qu'un rattachement à « Réseau & IP » : un client wifi n'est ni un
+    // sous-réseau ni une adresse — c'est un objet de PRÉSENCE (qui est connecté, où, depuis quand),
+    // et le préfixe « wifi: » est ce qu'un exploitant tape spontanément.
+    { id: "wifi", icon: Icons.WIFI, prefix: "wifi:", kinds: ["wifiClients"] },
     { id: "inventory", icon: Icons.SPARE, prefix: "inv:", kinds: ["spares", "groups", "contacts", "cableTypes", "portTypes"] },
   ];
 
@@ -206,6 +213,22 @@ export class GlobalSearchSources {
       pill: (v) => { const kind = VmStatus.kindOf(v); const raw = VmStatus.raw(v); if (!raw && !VmStatus.isOrphan(v)) return null; return { text: raw || I18n.t("lists.ph.orphan"), tone: VmStatus.isOrphan(v) ? "err" : kind === "running" ? "ok" : "" }; },
       // « Localiser » une VM = son HÔTE (même règle que les listes : VmLocate + prédicat partagé).
       locate: (v, store) => { const host = VmLocate.hostEquipmentId(v, store); return host && store.equipmentLocatable(host) ? { kind: "equipment", id: host } : null; },
+    },
+    // CLIENT WIFI (feature amovible) : le libellé replie sur la MAC quand le contrôleur ne remonte
+    // aucun nom — cas NOMINAL, d'où la règle UNIQUE `WifiClient.displayName` partagée avec le
+    // listing et la fiche. Sous-ligne : SSID et IP, les deux identifiants qu'on tape pour retrouver
+    // un client. Chemin : le POINT D'ACCÈS résolu, sinon le nom d'AP brut du contrôleur.
+    wifiClients: {
+      label: (c) => WifiClient.displayName(c) || "?",
+      sub: (c) => [c.ssid, c.ip].filter(Boolean).join(" · "),
+      path: (c, store) => { const ap: any = c.ap_equipment_id ? store.get("equipments", c.ap_equipment_id) : null; return (ap && ap.name) || c.ap_name || ""; },
+      // Pastille de PRÉSENCE : « déconnecté » en avertissement (et non en erreur — un client parti
+      // est ordinaire côté wifi, cf. core/WifiStatus) ; connecté → le type de raccordement, neutre.
+      pill: (c) => (WifiStatus.isDisconnected(c)
+        ? { text: I18n.t("lists.ph.disconnected"), tone: "warn" }
+        : (WifiStatus.rawType(c) ? { text: WifiStatus.rawType(c), tone: "" } : null)),
+      // « Localiser » un client wifi = son POINT D'ACCÈS (même règle que le listing : WifiLocate).
+      locate: (c, store) => { const ap = WifiLocate.apEquipmentId(c, store); return ap ? { kind: "equipment", id: ap } : null; },
     },
     spares: {
       label: (s) => (s.displayName ? s.displayName() : s.name) || s.serial || "?",

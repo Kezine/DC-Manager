@@ -20,6 +20,7 @@ import { DhcpRange } from "./DhcpRange";
 import { Spare } from "./Spare";
 import { Site } from "./Site";
 import { Vm } from "./Vm";
+import { WifiClient } from "./WifiClient";
 import { Contact } from "./Contact";
 
 type EntityCtor = new (p?: Props) => Entity;
@@ -51,6 +52,9 @@ const CLASSES_TYPED = {
   spares: Spare,
   sites: Site,
   vms: Vm,
+  // ⚠ L'ORDRE de cette table est COMPARÉ à `Schema.COLLECTIONS` par un test d'invariant : toute
+  // insertion doit se faire AU MÊME ENDROIT des deux côtés (ici, après `vms`).
+  wifiClients: WifiClient,
   contacts: Contact,
 };
 const CLASSES: Record<string, EntityCtor> = CLASSES_TYPED;   // vue « indexable par chaîne » (entrées non fiables)

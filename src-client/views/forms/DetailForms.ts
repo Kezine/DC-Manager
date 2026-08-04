@@ -25,6 +25,10 @@ import { VmLocate } from "../../core/VmLocate";   // « Localiser » une VM = lo
 import { VmStatus } from "../../core/VmStatus";
 import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »   // pastilles statut/orphelinat — règle unique partagée avec le listing et la bulle
 import { VmForms } from "./VmForms";
+import { WifiStatus } from "../../core/WifiStatus";   // présence/type d'un client wifi — règle unique partagée avec le listing
+import { WifiLocate } from "../../core/WifiLocate";   // « Localiser » un client wifi = localiser son POINT D'ACCÈS
+import { WifiClient } from "../../models/WifiClient";   // libellé « nom sinon MAC » — règle unique
+import { WifiForms } from "./WifiForms";   // édition des champs LOCAUX (feature wifi AMOVIBLE)
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
 import { SubEquipmentForms } from "./SubEquipmentForms";   // fiche + formulaire des sous-équipements (hors chaîne d'héritage, cf. son en-tête)
@@ -96,6 +100,7 @@ export class DetailForms extends IpamForms {
     spares: (s, h, i, c) => DetailForms.spareDetail(s, h, i, c),
     contacts: (s, h, i, c) => DetailForms.contactDetail(s, h, i, c),
     vms: (s, h, i, c) => DetailForms.vmDetail(s, h, i, c),
+    wifiClients: (s, h, i, c) => DetailForms.wifiClientDetail(s, h, i, c),
     cableTypes: (s, h, i) => DetailForms.cableTypeDetail(s, h, i),
     portTypes: (s, h, i) => DetailForms.portTypeDetail(s, h, i),
   };
@@ -770,6 +775,90 @@ export class DetailForms extends IpamForms {
       footerActions.push(editBtn);
     }
     host.openModal({ title: I18n.t("detail.vm.title"), subtitle: Html.escape(vm.name || ""), body: root, footerActions, stackKey: "detail:vms/" + id, onResume: () => this.vmDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+  }
+
+  /* ---- CLIENT WIFI (feature amovible) ---- */
+  /** Fiche détail d'un client wifi. Volontairement SIMPLE (décision D6 : pas d'équivalent de la
+      richesse de la fiche VM en v1) mais bâtie sur le MÊME patron : IDENTITÉ SOURCE (alimentée par
+      la synchro, lecture seule) séparée des ENRICHISSEMENTS LOCAUX (édités via `WifiForms.edit`,
+      jamais écrasés par la synchro — cf. src-shared/WifiSync). Résout le POINT D'ACCÈS rapproché
+      vers sa fiche équipement, et propose « Localiser » (= localiser l'AP, cf. core/WifiLocate). */
+  static wifiClientDetail(store: Store, host: FormHost, id: string, onChanged?: () => void): void {
+    const client: any = store.get("wifiClients", id);
+    if (!client) { Notify.toast(I18n.t("detail.nf.wifiClient"), "err"); return; }
+    const root = document.createElement("div");
+    const label = WifiClient.displayName(client) || I18n.t("lists.ph.wifiClient");
+
+    // -- IDENTITÉ SOURCE (lecture seule). La fiche a la place d'EXPLIQUER la déconnexion → elle
+    //    passe l'infobulle que le listing omet (colonne étroite, pastille répétée). --
+    const mono = (value: string) => `<span style="font-family:var(--mono)">${Html.escape(value)}</span>`;
+    root.appendChild(this.grid([
+      [I18n.t("lists.col.name"), client.name ? Html.escape(client.name) : `${this.MUTED} <span style="color:var(--fg-dimmer)">${Html.escape(I18n.t("detail.wifi.nameFallback"))}</span>`],
+      [I18n.t("lists.col.type"), WifiStatus.pills(client, I18n.t("detail.wifi.disconnectedTitle"))],
+      ["MAC", client.mac ? mono(client.mac) : this.MUTED],
+      ["IP", client.ip ? `<code>${Html.escape(client.ip)}</code>` : this.MUTED],
+      [I18n.t("lists.col.ssid"), client.ssid ? `<span class="pill">${Html.escape(client.ssid)}</span>` : this.MUTED],
+      [I18n.t("lists.col.connectedSince"), client.connected_since ? Html.escape(Format.dateTime(client.connected_since)) : this.MUTED],
+      [I18n.t("detail.wifi.lastSync"), Html.escape(Format.dateTime(client.last_sync))],
+      [I18n.t("detail.wifi.providerId"), client.ext_id
+        ? `<span style="font-family:var(--mono);color:var(--fg-dim)">${Html.escape(client.ext_id)}</span>${client.provider_id ? ` <span style="color:var(--fg-dimmer)">· ${Html.escape(client.provider_id)}</span>` : ""}`
+        : this.MUTED],
+    ]));
+
+    // -- POINT D'ACCÈS : lien vers la fiche équipement si rapproché ; sinon nom d'AP source BRUT
+    //    « non rapproché ». Même montage que l'hôte d'une VM (bouton-icône sur la ligne de valeur,
+    //    la fiche liée s'EMPILE et celle-ci se reconstruit au dépilement via son `onResume`). --
+    this.sect(root, I18n.t("detail.wifi.apSection"));
+    const apEq: any = client.ap_equipment_id ? store.get("equipments", client.ap_equipment_id) : null;
+    if (apEq) {
+      const apGrid = this.grid([[I18n.t("lists.col.equipment"),
+        `${Html.escape(apEq.name || "?")} ${EntityViz.equipmentLocationShort(store, apEq)} `
+        + IconButton.html({ icon: Icons.INFO, label: I18n.t("detail.wifi.openAp"), act: "open-ap" })]]);
+      const openBtn = apGrid.querySelector('[data-act="open-ap"]') as HTMLElement | null;
+      if (openBtn) openBtn.onclick = () => this.equipmentDetail(store, host, apEq.id, onChanged);
+      root.appendChild(apGrid);
+    } else {
+      root.appendChild(this.grid([
+        [I18n.t("detail.wifi.sourceAp"), client.ap_name
+          ? `${Html.escape(client.ap_name)} <span class="pill" style="border-color:var(--warn);color:var(--warn)">${I18n.t("detail.wifi.notMatched")}</span>`
+          : this.MUTED],
+        [I18n.t("detail.wifi.apMac"), client.ap_mac ? mono(client.ap_mac) : this.MUTED],
+      ]));
+    }
+
+    // -- ENRICHISSEMENTS LOCAUX (édités séparément, jamais écrasés par la synchro). --
+    this.sect(root, I18n.t("detail.wifi.localSection"));
+    root.appendChild(this.grid([
+      [I18n.t("lists.col.description"), client.description ? `<div class="md-body">${Markdown.render(client.description)}</div>` : this.MUTED],
+      [I18n.t("lists.col.notes"), client.notes ? `<div class="md-body">${Markdown.render(client.notes)}</div>` : this.MUTED],
+      [I18n.t("detail.common.created"), Html.escape(Format.dateTime(client.created_date))],
+      [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(client.updated_date))],
+    ]));
+    AuditLine.attach(root, client, host.userDirectory);   // « Créé/Modifié par » (mode API)
+
+    // Pied d'actions : « Localiser » (= l'AP) + « Modifier » (champs LOCAUX). PAS de suppression,
+    // même pour un client déconnecté — contrairement aux VMs orphelines : un client wifi revient
+    // dès qu'il se reconnecte (c'est le sens même de la décision D2), une purge manuelle n'aurait
+    // donc pas la portée qu'elle a côté VM et détruirait les notes pour rien.
+    const footerActions: HTMLElement[] = [];
+    const apToLocate = host.locate ? WifiLocate.apEquipmentId(client, store) : null;
+    if (apToLocate) {
+      const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost";
+      locBtn.title = I18n.t("detail.wifi.locateAp");   // le libellé dit « Localiser », le tooltip dit SUR QUOI
+      locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`;
+      locBtn.onclick = () => host.locate!("equipment", apToLocate, () => this.wifiClientDetail(store, host, id, onChanged));
+      footerActions.push(locBtn);
+    }
+    if (!this.isViewer()) {
+      const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary";
+      editBtn.textContent = I18n.t("lists.chrome.rowEdit"); editBtn.onclick = () => WifiForms.edit(store, host, id, onChanged);
+      footerActions.push(editBtn);
+    }
+    host.openModal({
+      title: I18n.t("detail.wifi.title"), subtitle: Html.escape(label), body: root, footerActions,
+      stackKey: "detail:wifiClients/" + id, onResume: () => this.wifiClientDetail(store, host, id, onChanged),
+      hideFooter: true, wide: true,
+    });
   }
 
   /* ---- TYPE DE CÂBLE (catalogue, lecture seule) ---- */

@@ -126,8 +126,11 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
     Exceptions documentées à ce jour : **PKI/certificats** (crypto navigateur = contexte sécurisé
     localhost/HTTPS + coffres serveur), **contacts/notifications** (le service de notification est
     serveur), **VMs** (synchro côté serveur ; évolution prévue : un provider « Manuel » pour créer une
-    VM à la main). ⚠ Écart CONNU à résorber : les **interventions** n'existent qu'en mode API alors que
-    rien ne l'impose — chantier à venir (cf. `.notes/toDos/`).
+    VM à la main), **clients wifi** (même exception que les VMs, et pour la même raison : la synchro
+    interroge un contrôleur tiers avec un secret chiffré au repos — la collection `wifiClients` reste,
+    elle, entièrement lisible/cherchable/enrichissable en mode fichier, cf. `docs/wifi-unifi.md`
+    § « Mode local »). ⚠ Écart CONNU à résorber : les **interventions** n'existent qu'en mode API alors
+    que rien ne l'impose — chantier à venir (cf. `.notes/toDos/`).
 
 ## Structure du projet
 
@@ -215,6 +218,12 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   pivot `VmRecord`, réconciliation source/locaux, providers PAR document dans `vm-providers.db`
   chiffrée (clé `DCMANAGER_SECRETS_KEY` requise), mapping bridge/tag → réseau, script de suppression,
   procédure d'ajout d'un provider).
+- [`wifi-unifi.md`](docs/wifi-unifi.md) — **inventaire des CLIENTS WIFI** (module serveur AMOVIBLE `wifi/`,
+  pivot `WifiClientRecord` et contrat d'adaptateur AGNOSTIQUES de la marque — UniFi n'est que la 1re
+  implémentation, ajout d'une marque en 4 points ; réconciliation source/locaux, « orphelin » = DÉCONNECTÉ,
+  AP dérivé du nom d'équipement, providers PAR document dans `wifi-providers.db` chiffrée (clé
+  `DCMANAGER_SECRETS_KEY` partagée avec vm/notify), transport `node:https` + pagination, ce qui est SUPPOSÉ
+  de l'API UniFi et comment le valider, script de suppression).
 - [`notifications.md`](docs/notifications.md) — **service de notifications** (module serveur AMOVIBLE
   `notify/`, alertes persistantes anti-spam `raise`/`resolve`, moteur pur `NotifyEngine`, schéma
   `notify.db` à 5 tables, routage par abonnements, webhooks, coffre `SecretBox` partagé, producteurs

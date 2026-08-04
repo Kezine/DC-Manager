@@ -23,10 +23,11 @@ import { detail } from "./en/detail";
 import { face } from "./en/face";
 import { dc } from "./en/dc";
 import { vm } from "./en/vm";
+import { wifi } from "./en/wifi";
 import { notify } from "./en/notify";
 import { certs } from "./en/certs";
 import { analysis } from "./en/analysis";
 import { subEquipment } from "./en/subEquipment";
 import { search } from "./en/search";
 
-export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, notify, certs, analysis, subEquipment, search } as const;
+export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, wifi, notify, certs, analysis, subEquipment, search } as const;

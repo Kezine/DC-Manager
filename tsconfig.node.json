@@ -41,6 +41,31 @@
     // Enrichissement PUR des statuts (réinjecte les providers au jeton indéchiffrable, exclus par
     // providersFor, comme statuts en erreur) — logique sans DB/réseau, testée en isolation.
     "src-server/src/vm/VmStatusEnrichment.ts",
+    // Module `wifi/` AMOVIBLE (clients wifi synchronisés depuis un contrôleur — UniFi en 1re
+    // implémentation, la marque n'étant qu'un adaptateur derrière `kind`, cf. docs/wifi-unifi.md).
+    // Décodage UniFi PUR (fixtures JSON → WifiClientRecord) + logique de PAGINATION pure (premier
+    // précédent de pagination sortante du dépôt) : testés en isolation, sans réseau.
+    "src-server/src/wifi/UnifiParse.ts",
+    // Client HTTPS UniFi : seules ses parties PURES sont sollicitées en test (trustOptions —
+    // hiérarchie épinglage/CA/système — et explainNetworkError) ; `node:https` est compilé mais
+    // jamais appelé, exactement comme PveHttp côté vm/.
+    "src-server/src/wifi/UnifiHttp.ts",
+    // Adaptateur UniFi — l'ORCHESTRATION (résolution de site, index des AP au mieux, pagination,
+    // filtre filaire) est testée avec un client HTTP stub (`UnifiJsonClient` injecté).
+    "src-server/src/wifi/UnifiAdapter.ts",
+    // Validation PAR PROVIDER (classe PURE) : champs COMMUNS + branche d'options par `kind` —
+    // c'est le point d'extension « nouvelle marque » côté validation, donc testé pour lui-même.
+    "src-server/src/wifi/WifiProviderConfigValidate.ts",
+    // Stockage DB des providers (wifi-providers.db, jetons chiffrés via SecretBox, table UNIQUE) :
+    // CRUD + lecture pour la synchro ; testé avec better-sqlite3 RÉEL (driver injecté).
+    "src-server/src/wifi/WifiProviderConfigDb.ts",
+    // Moteur de réconciliation PUR (inventaire pivot → ops create/update/déconnexion) — dépendances
+    // injectées (résolution d'AP, id, horloge) ; la frontière source/locaux vient de src-shared/WifiSync.
+    "src-server/src/wifi/WifiReconcile.ts",
+    // Moteur de SYNCHRO (adaptateur → réconciliation → écriture transactionnelle + SSE) — sans
+    // Express : testé avec DocumentStore réel + stub d'inventaire. Les routes (WifiModule.ts,
+    // Express) restent HORS test, comme api.ts et VmModule.
+    "src-server/src/wifi/WifiSyncService.ts",
     // Coffre à secrets serveur PARTAGÉ (AES-256-GCM, node:crypto) des secrets stockés en DB
     // (jetons providers VM, jetons webhooks notify) — testé en isolation (aller-retour, clé
     // différente, altération, format inconnu, repli d'environnement legacy).

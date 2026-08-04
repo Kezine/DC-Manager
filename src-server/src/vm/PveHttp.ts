@@ -90,7 +90,13 @@ export class PveHttp {
       (`{ checkServerIdentity: tls.checkServerIdentity, ...options }`) et ferait échouer la validation
       interne de tls.connect — ERR_INTERNAL_ASSERTION opaque en Node 20, ERR_INVALID_ARG_TYPE en 24
       (bug constaté en prod le 2026-07-13, reproduit hors ligne sur les deux versions). D'où un
-      fragment dont la clé est ABSENTE hors épinglage, plutôt que posée à `undefined`. */
+      fragment dont la clé est ABSENTE hors épinglage, plutôt que posée à `undefined`.
+
+      ⚠ JUMEAU ASSUMÉ : `wifi/UnifiHttp.trustOptions` est une RECOPIE de cette méthode (mêmes trois
+      niveaux, même piège `checkServerIdentity`). La duplication est le prix de l'AMOVIBILITÉ des deux
+      modules — chacun doit pouvoir être supprimé en retirant SON dossier et une ligne de bootstrap, ce
+      qu'un fichier commun interdirait (il resterait orphelin). ➜ Toute correction de sécurité ici doit
+      être répercutée là-bas, et réciproquement (signalé des DEUX côtés, principe n°3). */
   static trustOptions(pinnedFp: string | null, caPem: string | null): {
     rejectUnauthorized: boolean;
     ca?: string;

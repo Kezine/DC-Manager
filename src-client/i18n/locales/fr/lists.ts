@@ -64,6 +64,9 @@ export const lists = {
     ports: "Ports",
     aggregates: "Agrégats",
     subEquipments: "Sous-équip.",
+    ssid: "SSID",
+    accessPoint: "Point d'accès",
+    connectedSince: "Connecté depuis",
     description: "Description",
     color: "Couleur",
     label: "Label",
@@ -141,6 +144,7 @@ export const lists = {
     dhcpRanges: "Aucune plage DHCP.",
     spares: "Aucune pièce de rechange. Ajoutez-en une avec « + Spare » (HDD, SSD, transceiver, autre…).",
     vms: "Aucune VM. Les équipements virtuels sont alimentés par la synchronisation d'un cluster de management (Proxmox).",
+    wifiClients: "Aucun client wifi. Les clients sont alimentés par la synchronisation d'un contrôleur wifi (onglet Wifi → « Providers… », mode API).",
     subEquipments: "Aucun sous-équipement. Un sous-équipement se crée depuis la fiche de son équipement maître (pas de bouton « + » ici, v1).",
   },
   filter: {
@@ -186,6 +190,11 @@ export const lists = {
     freeAddr: "— libre —",
     notDesignated: "— non désigné —",
     orphan: "orpheline",
+    // Pendant WIFI de « orpheline » : MÊME mécanique (absent du dernier inventaire), autre SENS —
+    // un client wifi qui part est ordinaire, pas un incident (cf. core/WifiStatus, décision D2).
+    // ⚠ VERROUILLÉ par test contre le catalogue partagé `SEARCH_CATALOGS.wifiDisconnected`.
+    disconnected: "déconnecté",
+    wifiClient: "(client wifi)",
     floorLabel: "Étage {{n}}",
     addrCount: "{{count}} adr.",
     points_one: "{{count}} point",

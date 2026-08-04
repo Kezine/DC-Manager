@@ -58,6 +58,9 @@ export const lists = {
     ports: "Ports",
     aggregates: "Aggregates",
     subEquipments: "Sub-equip.",
+    ssid: "SSID",
+    accessPoint: "Access point",
+    connectedSince: "Connected since",
     description: "Description",
     color: "Colour",
     label: "Label",
@@ -135,6 +138,7 @@ export const lists = {
     dhcpRanges: "No DHCP range.",
     spares: "No spare part. Add one with « + Spare » (HDD, SSD, transceiver, other…).",
     vms: "No VM. Virtual machines are fed by the synchronisation of a management cluster (Proxmox).",
+    wifiClients: "No Wi-Fi client. Clients are fed by the synchronisation of a Wi-Fi controller (Wi-Fi tab → “Providers…”, API mode).",
     subEquipments: "No sub-equipment. A sub-equipment is created from its master equipment's detail sheet (no « + » button here in v1).",
   },
   filter: {
@@ -180,6 +184,11 @@ export const lists = {
     freeAddr: "— free —",
     notDesignated: "— none —",
     orphan: "orphan",
+    // Wi-Fi counterpart of « orphan »: SAME mechanics (missing from the last inventory), different
+    // MEANING — a Wi-Fi client leaving is ordinary, not an incident (cf. core/WifiStatus, D2).
+    // ⚠ LOCKED by test against the shared catalogue `SEARCH_CATALOGS.wifiDisconnected`.
+    disconnected: "disconnected",
+    wifiClient: "(Wi-Fi client)",
     floorLabel: "Floor {{n}}",
     addrCount: "{{count}} addr.",
     points_one: "{{count}} point",

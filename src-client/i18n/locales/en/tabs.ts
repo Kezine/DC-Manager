@@ -17,6 +17,11 @@ export const tabs = {
     label: "Clusters",
     subtitle: "Per-provider status of the synchronised clusters (nodes, metrics, quorum) and of synchronisation.",
   },
+  wifi: {
+    label: "Wi-Fi",
+    title: "Wi-Fi clients",
+    subtitle: "Clients connected to the access points, fed by synchronisation with a controller. Source fields are read-only; local enrichments are made from the record. A client missing from the last inventory is flagged “disconnected”, never deleted.",
+  },
   racks: {
     label: "Racks",
     subtitle: "Racks: location, size (U), depth, faces, doors and covers. Use « ▦ Contents » to mount equipment into the U slots.",

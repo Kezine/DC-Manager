@@ -35,6 +35,7 @@ const DOMAINS = [
   "./test-rapprochement-certs.js", // rapprochement cert ↔ équipement/VM (HostnameMatch/CertSubject/CertTargetMatch, pur)
   "./test-interventions.js",     // interventions : logique cliente pure (InterventionsFormat, buildQuery)
   "./test-users.js",             // annuaire utilisateurs serveur (UserProfiles pur, resolver + snapshot SQLite)
+  "./test-wifi.js",              // feature CLIENTS WIFI (module serveur amovible `wifi/`) : frontière partagée, décodage UniFi pur + pagination, adaptateur (stub), validation par marque, stockage chiffré (better-sqlite3 RÉEL), réconciliation, synchro bout en bout, invariants d'agnosticisme de marque (D9)
   "./test-server.js",            // serveur (ApiRules, SQLite réel, protocole REST)
 ];
 
