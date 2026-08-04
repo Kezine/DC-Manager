@@ -63,6 +63,29 @@ location /dc-manager/ {
 location = /dc-manager { return 308 /dc-manager/; }
 ```
 
+**Apache (mod_proxy)** — vécu sur déploiement réel (2026-08-04) :
+```apache
+# Redirection slash final (cf. §4) :
+RedirectMatch 308 ^/dc-manager$ /dc-manager/
+
+<Location /dc-manager/>
+    # ⚠ `timeout` DOIT dépasser le heartbeat SSE de 30 s (cf. §5) : un flux SSE est MUET entre
+    # deux battements, et Apache coupe une connexion muette au bout de `timeout` secondes —
+    # à 15 s, le flux …/events meurt AVANT le premier ping (symptôme navigateur :
+    # ERR_INCOMPLETE_CHUNKED_ENCODING sur un statut 200, reconnexions EventSource en boucle).
+    ProxyPass         http://backend:3000/ flushpackets=on connectiontimeout=5 timeout=120
+    ProxyPassReverse  http://backend:3000/
+    # Conseillé (robustesse, cf. §4) — annonce le préfixe à l'app (nécessite mod_headers) :
+    RequestHeader set X-Forwarded-Prefix "/dc-manager"
+</Location>
+```
+⚠ **`timeout` est un réglage du WORKER** (la ligne `ProxyPass`), pas un réglage par requête :
+un `SetEnv` dans un `<LocationMatch>` dédié au SSE ne peut PAS l'augmenter localement — le
+`LocationMatch` hérite du worker du `<Location>` parent. Soit on monte le `timeout` du worker
+partagé (comme ci-dessus — un appel API pendu attendra 120 s au lieu de 15, cas rare), soit on
+crée un worker DISTINCT pour le SSE (`ProxyPassMatch` avec son propre `timeout`), plus délicat.
+`flushpackets=on` tient lieu d'anti-buffering (équivalent du `proxy_buffering off` nginx).
+
 
 
 ## 4. Le piège du slash final
@@ -99,8 +122,9 @@ Il faut AUSSI une **connexion longue** (le SSE reste ouvert) : `proxy_http_versi
 toutes les 30 s, ce qui garde le flux vivant). Ces directives figurent dans l'exemple du §3.
 
 **Autres proxies** : Traefik et Caddy **ne bufferisent pas** par défaut (Caddy active même un
-flush immédiat pour `text/event-stream`) → SSE OK sans réglage. Apache (`mod_proxy`) : désactiver
-le buffering du flux ; HAProxy : streaming par défaut, OK.
+flush immédiat pour `text/event-stream`) → SSE OK sans réglage. Apache (`mod_proxy`) :
+`flushpackets=on` + **`timeout` du worker > 30 s** (le heartbeat serveur — cf. l'exemple Apache
+du §3 et son piège « worker vs par-requête ») ; HAProxy : streaming par défaut, OK.
 
 ## 6. Service worker & PWA
 
