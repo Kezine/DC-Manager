@@ -77,6 +77,11 @@ export class UnifiAdapter implements WifiProviderAdapter {
       dépassement est un SYMPTÔME, pas un cas nominal, et il est journalisé comme tel. */
   static readonly MAX_PAGES = 200;
 
+  /** PLAFOND d'entrées énumérées dans le message « site introuvable » (cf. `siteNotFoundMessage`).
+      Un MSP peut administrer des dizaines de sites sur une même console : une liste illimitée
+      noierait le champ VRAIMENT en cause (celui que l'utilisateur doit corriger) dans le bruit. */
+  static readonly MAX_SITES_IN_ERROR = 10;
+
   constructor(
     readonly config: WifiProviderConfig,
     private readonly http: UnifiJsonClient,
@@ -112,16 +117,16 @@ export class UnifiAdapter implements WifiProviderAdapter {
         return { ok: true, kind: this.kind, version: null, supported: false,
           message: "console joignable, mais AUCUN site remonté — vérifiez les droits de la clé d'API" };
       }
-      const siteId = UnifiParse.findSiteId(sites, options.site);
+      const siteId = UnifiAdapter.resolveSite(sites, options.site);
       if (siteId) {
         return { ok: true, kind: this.kind, version: null, supported: true,
           message: "console joignable — site « " + options.site + " » résolu (" + sites.length + " site(s) au total)" };
       }
       // Site introuvable : la connexion EST bonne, c'est la configuration qui ne l'est pas.
-      // On le dit franchement plutôt que de laisser croire à une panne réseau.
+      // On le dit franchement plutôt que de laisser croire à une panne réseau, et on ÉNUMÈRE les
+      // sites disponibles (cf. siteNotFoundMessage) pour que l'utilisateur corrige sans deviner.
       return { ok: true, kind: this.kind, version: null, supported: false,
-        message: "console joignable, mais le site « " + options.site + " » est INTROUVABLE parmi les "
-          + sites.length + " site(s) — corrigez le champ « Site » (identifiant ou nom exact)" };
+        message: "console joignable, mais " + UnifiAdapter.siteNotFoundMessage(options.site, sites) };
     } catch (e) {
       return { ok: false, kind: this.kind, version: null, supported: false, message: e instanceof Error ? e.message : String(e) };
     } finally {
@@ -135,18 +140,14 @@ export class UnifiAdapter implements WifiProviderAdapter {
   async inventory(): Promise<WifiInventory> {
     const options = this.options();
     try {
-      // 1) SITE : résolution par identifiant OU nom. REPLI « console mono-site » : quand la valeur
-      //    configurée est le nom HISTORIQUE « default » et qu'aucun site ne s'appelle ainsi, on
-      //    prend le PREMIER site — l'API d'intégration nomme les sites par UUID, et « default »
-      //    est le réglage par DÉFAUT du formulaire : refuser ici ferait échouer toute première
-      //    configuration sans que l'utilisateur comprenne pourquoi. Tout AUTRE libellé non résolu
-      //    est, lui, une ERREUR franche (l'utilisateur a saisi quelque chose d'intentionnel).
+      // 1) SITE : résolution par identifiant OU nom, via `resolveSite` — le MÊME point de
+      //    résolution que `test()` (cf. son commentaire pour le repli « console mono-site »).
+      //    Tout libellé non résolu (hors repli) est une ERREUR franche, énumérant les sites
+      //    disponibles (cf. siteNotFoundMessage) pour que l'utilisateur corrige sans deviner.
       const sites = await this.fetchAll(UnifiAdapter.PATH_SITES);
-      let siteId = UnifiParse.findSiteId(sites, options.site);
-      if (!siteId && options.site === "default") siteId = UnifiParse.firstSiteId(sites);
+      const siteId = UnifiAdapter.resolveSite(sites, options.site);
       if (!siteId) {
-        throw new Error("UniFi : site « " + options.site + " » introuvable sur la console ("
-          + sites.length + " site(s) remonté(s)) — corrigez le champ « Site » du provider");
+        throw new Error("UniFi : " + UnifiAdapter.siteNotFoundMessage(options.site, sites));
       }
 
       // 2) PÉRIPHÉRIQUES : index id → nom/MAC d'AP. AU MIEUX — un échec (droits partiels sur cette
@@ -177,6 +178,43 @@ export class UnifiAdapter implements WifiProviderAdapter {
   /* --------------------------------------------------------------------------
      Helpers privés
      -------------------------------------------------------------------------- */
+
+  /** Résout le SITE configuré (id OU nom) parmi la liste de sites de la console — UNIQUE point
+      de résolution, appelé À LA FOIS par `test()` et `inventory()` (ils étaient auparavant
+      DIVERGENTS : `test()` n'appliquait pas le repli ci-dessous, et pouvait donc rapporter
+      « site introuvable » pour une config que `inventory()` aurait résolue avec succès).
+
+      REPLI « console mono-site » : quand la valeur configurée est le nom HISTORIQUE « default »
+      et qu'aucun site ne s'appelle ainsi, on prend le PREMIER site — l'API d'intégration nomme
+      les sites par UUID, et « default » est le réglage par DÉFAUT du formulaire : refuser ici
+      ferait échouer toute première configuration sans que l'utilisateur comprenne pourquoi.
+      Tout AUTRE libellé non résolu est, lui, une ERREUR franche (l'utilisateur a saisi quelque
+      chose d'intentionnel) — rend `null`, à charge de l'appelant de construire le message
+      (cf. `siteNotFoundMessage`). */
+  private static resolveSite(sites: any[], wanted: string): string | null {
+    const siteId = UnifiParse.findSiteId(sites, wanted);
+    if (siteId) return siteId;
+    if (wanted === "default") return UnifiParse.firstSiteId(sites);
+    return null;
+  }
+
+  /** Message ACTIONNABLE pour un site configuré NON résolu (`resolveSite` a rendu `null`) :
+      constat + ÉNUMÉRATION des sites disponibles (nom et identifiant — l'un des deux peut
+      servir dans le champ « Site »), plafonnée à `MAX_SITES_IN_ERROR` (un MSP peut administrer
+      des dizaines de sites). Sans cette énumération, l'utilisateur doit DEVINER l'identifiant ou
+      le nom exact d'un site qu'il ne peut voir que dans la console UniFi elle-même.
+      UNIQUE point d'écriture, partagé par `test()` (préfixe « console joignable, mais ») et
+      `inventory()` (préfixe « UniFi : », convention des erreurs de ce module). */
+  private static siteNotFoundMessage(wanted: string, sites: any[]): string {
+    const summaries = UnifiParse.siteSummaries(sites);
+    const shown = summaries.slice(0, UnifiAdapter.MAX_SITES_IN_ERROR)
+      .map((s) => s.name ? "« " + s.name + " » (id " + s.id + ")" : "id " + s.id)
+      .join(", ");
+    const hidden = summaries.length - UnifiAdapter.MAX_SITES_IN_ERROR;
+    const enumeration = shown === "" ? "" : " — sites disponibles : " + shown + (hidden > 0 ? ", … et " + hidden + " autres" : "");
+    return "le site « " + wanted + " » est INTROUVABLE parmi les " + sites.length + " site(s)"
+      + enumeration + " — corrigez le champ « Site » (identifiant ou nom exact)";
+  }
 
   /** Lit une ressource PAGINÉE en entier et rend ses éléments concaténés.
       La DÉCISION de continuer est PURE (`UnifiParse.nextOffset`, testée en isolation) ; ici ne

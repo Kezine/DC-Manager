@@ -228,7 +228,9 @@ et le décodeur est correct sur les deux conventions plutôt que sur une seule s
 2. configurer un provider (URL, clé, site) et cliquer **« Tester la connexion »** :
    - `404` → la base d'API est différente (console « Network Application » autonome :
      essayer sans le préfixe `/proxy/network`) ;
-   - « site INTROUVABLE » → renseigner l'identifiant exact du site ;
+   - « site INTROUVABLE » → le message ÉNUMÈRE les sites disponibles de la console (nom et
+     identifiant, plafonné à `UnifiAdapter.MAX_SITES_IN_ERROR`) : recopier l'un des deux dans
+     le champ « Site » plutôt que le deviner ;
    - `401/403` → droits de la clé ;
 3. lancer une **synchro manuelle** et vérifier dans le listing : nom (ou MAC), IP, SSID,
    type, AP, « connecté depuis ». Un champ systématiquement vide = un alias à corriger dans

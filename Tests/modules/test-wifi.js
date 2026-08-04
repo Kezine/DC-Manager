@@ -201,6 +201,14 @@ module.exports = async () => {
     ck.eq(UnifiParse.findSiteId([], "default"), null, "findSiteId : liste vide → null");
     ck.eq(UnifiParse.firstSiteId(sites), "s-uuid-1", "firstSiteId : premier site exploitable");
     ck.eq(UnifiParse.firstSiteId([{ name: "sans id" }]), null, "firstSiteId : aucun id exploitable → null");
+
+    // siteSummaries : résumés id+nom — matière de l'ÉNUMÉRATION du message « site introuvable ».
+    const summaries = UnifiParse.siteSummaries(sites);
+    ck.eq(summaries.length, 2, "siteSummaries : un résumé par site exploitable");
+    ck(summaries[0].id === "s-uuid-1" && summaries[0].name === "Default", "siteSummaries : id + nom du premier site");
+    ck(summaries[1].id === "s-uuid-2" && summaries[1].name === "Annexe", "siteSummaries : id + nom du second site");
+    ck.eq(UnifiParse.siteSummaries([{ name: "sans id" }]).length, 0, "siteSummaries : site SANS id exploitable → écarté (rien à proposer pour le champ « Site »)");
+    ck.eq(UnifiParse.siteSummaries([{ id: "s-x" }])[0].name, null, "siteSummaries : nom absent → null (l'id restera affichable seul)");
   }
   });
 
@@ -300,10 +308,12 @@ module.exports = async () => {
     ck(threw, "inventory : échec de la liste des CLIENTS → rejet (la synchro journalise et conserve l'état)");
     ck.eq(failing.disposed, 1, "inventory : dispose() appelé MÊME en cas d'échec (finally)");
 
-    // SITE introuvable et NON « default » → erreur franche (l'utilisateur a saisi quelque chose).
+    // SITE introuvable et NON « default » → erreur franche (l'utilisateur a saisi quelque chose),
+    // qui ÉNUMÈRE le(s) site(s) disponibles (nom + id) pour corriger sans deviner.
     let siteErr = null;
     try { await new UnifiAdapter({ ...CFG, options: { site: "annexe", include_wired: false } }, mkUnifiStub(routes)).inventory(); } catch (e) { siteErr = e; }
-    ck(siteErr && /annexe/.test(siteErr.message) && /introuvable/.test(siteErr.message), "inventory : site nommé introuvable → erreur EXPLICITE citant la valeur saisie");
+    ck(siteErr && /annexe/.test(siteErr.message) && /introuvable/i.test(siteErr.message), "inventory : site nommé introuvable → erreur EXPLICITE citant la valeur saisie");
+    ck(siteErr && /« Default » \(id s-1\)/.test(siteErr.message), "inventory : … et ÉNUMÉRANT le site disponible (nom + id)");
 
     // SITE « default » non trouvé par son nom → repli sur le PREMIER site (l'API nomme par UUID).
     const uuidOnly = { ...routes, [SITES]: { data: [{ id: "s-9", name: "Siège" }], totalCount: 1 },
@@ -373,6 +383,29 @@ module.exports = async () => {
     const noSite = await new UnifiAdapter({ ...CFG, options: { site: "absent", include_wired: false } }, mkUnifiStub({ [UnifiAdapter.PATH_SITES]: { data: [{ id: "s-1", name: "Default" }] } })).test();
     ck(noSite.ok === true && noSite.supported === false && /INTROUVABLE/.test(noSite.message),
       "test : connexion OK mais site introuvable → ok:true, supported:false (c'est la CONFIG qui est en cause, pas le réseau)");
+    ck(/« Default » \(id s-1\)/.test(noSite.message), "test : … et le message ÉNUMÈRE le site disponible (nom + id), sans que l'utilisateur ait à deviner");
+
+    // -- ÉNUMÉRATION : cas nominal, 2 sites disponibles → le message cite les DEUX (nom + id). --
+    const twoSites = await new UnifiAdapter({ ...CFG, options: { site: "inconnu", include_wired: false } },
+      mkUnifiStub({ [UnifiAdapter.PATH_SITES]: { data: [{ id: "s-1", name: "Default" }, { id: "s-2", name: "Annexe" }] } })).test();
+    ck(/« Default » \(id s-1\)/.test(twoSites.message) && /« Annexe » \(id s-2\)/.test(twoSites.message),
+      "test : site introuvable parmi 2 → le message énumère les DEUX sites (nom + id)");
+
+    // -- PLAFOND : au-delà de MAX_SITES_IN_ERROR, la liste s'arrête et signale le reste. --
+    const manySites = new Array(UnifiAdapter.MAX_SITES_IN_ERROR + 3).fill(0).map((_, i) => ({ id: "s-" + i, name: "Site " + i }));
+    const overflow = await new UnifiAdapter({ ...CFG, options: { site: "inconnu", include_wired: false } },
+      mkUnifiStub({ [UnifiAdapter.PATH_SITES]: { data: manySites } })).test();
+    ck(/… et 3 autres/.test(overflow.message), "test : au-delà du plafond → « … et N autres »");
+    ck.eq((overflow.message.match(/\(id s-/g) || []).length, UnifiAdapter.MAX_SITES_IN_ERROR,
+      "test : pas plus de MAX_SITES_IN_ERROR entrées énumérées (un MSP peut avoir des dizaines de sites)");
+
+    // -- NOM VIDE : un site sans nom exploitable → l'id apparaît SEUL (pas de guillemets vides). --
+    const noName = await new UnifiAdapter({ ...CFG, options: { site: "inconnu", include_wired: false } },
+      mkUnifiStub({ [UnifiAdapter.PATH_SITES]: { data: [{ id: "s-7" }] } })).test();
+    // Capture UNIQUEMENT le segment d'énumération (entre « sites disponibles : » et le tiret
+    // suivant) — pas la suite du message, qui recite « Site » ENTRE GUILLEMETS (nom du champ).
+    const enumMatch = /sites disponibles : ([^—]*)—/.exec(noName.message);
+    ck(enumMatch !== null && /id s-7/.test(enumMatch[1]) && !/«/.test(enumMatch[1]), "test : site sans nom → l'id seul est énuméré, sans guillemets vides");
 
     const empty = await new UnifiAdapter(CFG, mkUnifiStub({ [UnifiAdapter.PATH_SITES]: { data: [] } })).test();
     ck(empty.ok === true && empty.supported === false && /droits/.test(empty.message), "test : aucun site remonté → piste des droits de la clé");

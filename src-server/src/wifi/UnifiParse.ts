@@ -60,6 +60,12 @@ const DEVICE_ALIASES = {
   mac: ["macAddress", "mac"],
 } as const;
 
+/** Alias du NOM d'un site (liste `sites`) — POINT UNIQUE, partagé par `findSiteId` (résolution)
+    et `siteSummaries` (énumération dans un message d'erreur) : les deux doivent voir le MÊME nom
+    pour un même site, sans quoi le message d'erreur pourrait citer un libellé que la résolution
+    elle-même ne reconnaîtrait pas. */
+const SITE_NAME_ALIASES = ["name", "displayName", "description", "internalReference"] as const;
+
 /** Une PAGE de réponse paginée, décodée : les éléments + ce qu'on sait du total. */
 export interface UnifiPage {
   /** Éléments de la page (jamais null — tableau vide si la forme est inattendue). */
@@ -130,7 +136,7 @@ export class UnifiParse {
     for (const site of sites) {
       if (!site || typeof site !== "object") continue;
       const id = UnifiParse.firstString(site, DEVICE_ALIASES.id);
-      const name = UnifiParse.firstString(site, ["name", "displayName", "description", "internalReference"]);
+      const name = UnifiParse.firstString(site, SITE_NAME_ALIASES);
       if ((id && id.toLowerCase() === key) || (name && name.trim().toLowerCase() === key)) return id;
     }
     return null;
@@ -145,6 +151,22 @@ export class UnifiParse {
       if (id) return id;
     }
     return null;
+  }
+
+  /** Résumés (id + nom) de TOUS les sites exploitables de la console — sert à ÉNUMÉRER les
+      sites disponibles dans le message d'erreur quand le site configuré n'est pas résolu
+      (cf. `UnifiAdapter.siteNotFoundMessage`), pour que l'utilisateur corrige sans deviner.
+      Un site SANS id exploitable est écarté : rien à lui proposer pour le champ « Site »
+      (qui accepte id OU nom — sans id il ne resterait qu'un nom, potentiellement absent aussi). */
+  static siteSummaries(sites: any[]): { id: string; name: string | null }[] {
+    const out: { id: string; name: string | null }[] = [];
+    for (const site of sites) {
+      if (!site || typeof site !== "object") continue;
+      const id = UnifiParse.firstString(site, DEVICE_ALIASES.id);
+      if (!id) continue;
+      out.push({ id, name: UnifiParse.firstString(site, SITE_NAME_ALIASES) });
+    }
+    return out;
   }
 
   /* --------------------------------------------------------------------------
