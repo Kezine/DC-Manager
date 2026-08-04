@@ -377,6 +377,38 @@ module.exports = async () => {
   }
   });
 
+  await section("RestAdapter.replaceAll : no-op SANS document (plus de PUT /snapshot docless au boot), PUT scopé une fois le document posé", async () => {
+  {
+    // Diagnostic prod (pile réelle : _req ← _send ← replaceAll ← _persistAll ← Store.init()) : au boot REST,
+    // AVANT tout setDocument(), load() docless renvoie { meta: {} } (truthy) → _hydrate()/syncCatalogs() peuple
+    // les catalogues sur un store VIDE → _persistAll() appelle CE replaceAll → PUT sur dataBase qui, sans docId,
+    // retombe sur apiRoot → PUT /api/snapshot → 404 serveur (la route n'existe que scopée /documents/:docId/snapshot),
+    // à CHAQUE chargement de l'app. On espionne le transport (fetch monkey-patché, sans réseau réel) pour vérifier
+    // que la garde supprime bien ce tir ET laisse passer le cas légitime (document posé) — sonde de discrimination :
+    // sans la garde, la première assertion mord ; si la garde bloquait tout, la seconde mordrait.
+    const { RestAdapter } = D("data/RestAdapter.js");
+    const calls = [];
+    const realFetch = global.fetch;
+    global.fetch = async (url, init) => {
+      calls.push({ url: String(url), method: init && init.method });
+      return { status: 204, ok: true, headers: { get: () => null }, text: async () => "" };
+    };
+    try {
+      const adapter = new RestAdapter({ baseUrl: "http://test.local/api" });
+      const resultDocless = await adapter.replaceAll({ meta: {} });
+      ck.eq(resultDocless, null, "replaceAll SANS document (boot REST) → résout à null (no-op)");
+      ck.eq(calls.length, 0, "replaceAll SANS document → AUCUNE requête réseau (plus de PUT /api/snapshot docless)");
+      adapter.setDocument("doc1");   // flux réel : RestDocuments.setDocument() puis store.init() re-scopé
+      await adapter.replaceAll({ meta: {} });
+      ck.eq(calls.length, 1, "replaceAll AVEC document → une requête émise (la garde ne bloque PAS le cas légitime)");
+      ck.eq(calls[0].method, "PUT", "replaceAll AVEC document → méthode PUT");
+      ck(calls[0].url.includes("/documents/doc1/snapshot"), "replaceAll AVEC document → PUT scopé sous /documents/<id>/snapshot");
+    } finally {
+      global.fetch = realFetch;
+    }
+  }
+  });
+
   /* ============ SERVEUR : ProxmoxParse (parsing Proxmox PUR, module vm/ amovible) ============ */
 
   await section("Serveur : ProxmoxParse.parseNetString — chaîne d'interface (QEMU/LXC, tolérance)", async () => {

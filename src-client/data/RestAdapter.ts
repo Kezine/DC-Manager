@@ -171,7 +171,19 @@ export class RestAdapter extends DataAdapter {
     if (!this.docId) return null;
     return this._send("POST", "/maintenance");
   }
-  async replaceAll(state: Snapshot): Promise<unknown> { return this._send("PUT", "/snapshot", state); }
+  /* SANS document scopé (au boot REST, avant tout `setDocument()`) → no-op, comme `load()`/`loadMeta()`/
+     `maintenance()` : parité de garde. Sans elle, `Store.init()` hydrate depuis un `load()` docless
+     (`{ meta: {} }`), `syncCatalogs()` peuple les catalogues sur un store VIDE, et `_persistAll()`
+     déclenche CE `replaceAll` — donc un `PUT /snapshot` sur `dataBase` qui retombe sur `apiRoot`
+     (aucun document dans l'URL) → 404 serveur (la route n'existe que scopée
+     `/documents/:docId/snapshot`), constaté en production à CHAQUE chargement de l'app. Le chargement
+     RÉEL du document (`RestDocuments.setDocument()` puis `store.init()`) persiste, lui, correctement
+     une fois le scope posé — cette garde évite seulement le tir docless, et le risque latent de
+     pousser un snapshot quasi vide si une route docless existait un jour. */
+  async replaceAll(state: Snapshot): Promise<unknown> {
+    if (!this.docId) return null;
+    return this._send("PUT", "/snapshot", state);
+  }
 
   /* Utilisateur courant — proxifié au SSO par le backend. Renvoie l'objet user, ou null si non connecté / erreur.
      L'app ne gère PAS l'auth : c'est le SSO qui valide. */
