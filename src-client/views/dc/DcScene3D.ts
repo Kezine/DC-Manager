@@ -56,15 +56,28 @@ export abstract class DcScene3D extends DcCamera {
 
   /** Tracé d'un câble (mécanique UNIQUE ports + conduits) : segments de `straight` tracés DROITS (`L`) ; aux points
       d'`stubAt` (amorces ⊥), la courbe adjacente reçoit une TANGENTE IMPOSÉE = sens de leur segment droit (continuité
-      G1 : la courbe part/arrive dans l'axe puis s'incurve, aucun « kink »). Autres points : Catmull-Rom (`cableSplineK`). */
+      G1 : la courbe part/arrive dans l'axe puis s'incurve, aucun « kink »). Autres points : selon le STYLE sélectionné
+      (`cableCurveStyle`) — spline uniforme historique, spline centripète ou cordes arrondies (`cableSplineK`). */
   protected cablePath(P: Array<{ h: number; v: number }>, straight?: Set<number>, stubAt?: Set<number>): string {
     if (!P || P.length < 2) return "";
     const M = "M" + P[0].h + "," + P[0].v;
     if (P.length === 2) return M + " L" + P[1].h + "," + P[1].v;
-    // TANGENTES PARTAGÉES avec l'échantillonnage 3D (CableSpline.controls) : UN seul calcul d'amorces ⟂ et
-    // de Catmull-Rom pour les DEUX moteurs — toute évolution du routage vaut partout, sans divergence
-    // visuelle 2D/3D. Ici il ne reste que la sérialisation en path SVG.
-    const ctrls = CableSpline.controls(P.map((p) => [p.h, p.v]), straight, this.cableSplineK, stubAt);
+    const pts = P.map((p) => [p.h, p.v]);
+    // Style « CORDES ARRONDIES » : séquence de primitives PARTAGÉE avec l'échantillonnage 3D
+    // (CableSpline.fillets) — droites sérialisées en `L`, congés (Bézier d'arc) en `C`.
+    if (this.cableCurveStyle === "fillet") {
+      let d = M;
+      for (const pr of CableSpline.fillets(pts, straight, this.cableSplineK, stubAt))
+        d += pr.kind === "line" ? " L" + pr.q[0] + "," + pr.q[1]
+          : " C" + pr.c1[0] + "," + pr.c1[1] + " " + pr.c2[0] + "," + pr.c2[1] + " " + pr.q[0] + "," + pr.q[1];
+      return d;
+    }
+    // TANGENTES PARTAGÉES avec l'échantillonnage 3D (CableSpline.controls / controlsCentripetal) : UN seul
+    // calcul d'amorces ⟂ et de Catmull-Rom pour les DEUX moteurs — toute évolution du routage vaut partout,
+    // sans divergence visuelle 2D/3D. Ici il ne reste que la sérialisation en path SVG.
+    const ctrls = this.cableCurveStyle === "centripetal"
+      ? CableSpline.controlsCentripetal(pts, straight, this.cableSplineK, stubAt)
+      : CableSpline.controls(pts, straight, this.cableSplineK, stubAt);
     let d = M;
     for (let i = 0; i < P.length - 1; i++) {
       const c = ctrls[i];

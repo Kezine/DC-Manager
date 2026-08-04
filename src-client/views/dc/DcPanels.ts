@@ -897,6 +897,16 @@ export abstract class DcPanels extends DcViews2D {
     // TOUTES les vues. On met à jour la scène WebGL EN DIRECT (setCableSpline/setMarkerScale, pour la vue 3D et le retour
     // ultérieur), ET on re-dessine le SVG quand on est EN 2D — sinon le 2D n'était mis à jour qu'après un aller-retour 3D.
     box.appendChild(this.slider(I18n.t("dc.panels.sCableSpline"), this.cableSplineK, 0, 0.32, 0.01, (val) => val.toFixed(2), (val) => { this.cableSplineK = val; if (this.useWebGL && this._three) { this._three.setCableSpline(val); this.persistView(); } if (this.view !== "3d") redraw(); }));
+    // STYLE de tracé des câbles (partagé 2D ⇄ 3D et câbles ⇄ faisceaux, cf. geometry/CableSpline) : même voie
+    // rapide que le slider d'arrondi (setCableCurveStyle ne reconstruit que les câbles), exposé dans TOUTES les
+    // vues — le slider ci-dessus pilote les TROIS styles (tension des splines, rayon max des congés).
+    {
+      const styleRow = document.createElement("div"); styleRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px";
+      const styleTxt = document.createElement("span"); styleTxt.className = "grow"; styleTxt.textContent = I18n.t("dc.panels.cableStyle");
+      const styleSel = FormControls.select([{ value: "spline", label: I18n.t("dc.panels.cableStyleSpline") }, { value: "centripetal", label: I18n.t("dc.panels.cableStyleCentripetal") }, { value: "fillet", label: I18n.t("dc.panels.cableStyleFillet") }], this.cableCurveStyle);
+      styleSel.onchange = () => { this.cableCurveStyle = styleSel.value as any; if (this.useWebGL && this._three) { this._three.setCableCurveStyle(this.cableCurveStyle); this.persistView(); } if (this.view !== "3d") redraw(); };
+      styleRow.append(styleTxt, styleSel); box.appendChild(styleRow);
+    }
     box.appendChild(this.slider(I18n.t("dc.panels.sMarkerSize"), this.markerScale, 0.25, 1.75, 0.05, (val) => Math.round(val * 100) + " %", (val) => { this.markerScale = val; if (this.useWebGL && this._three) { this._three.setMarkerScale(val); this.persistView(); } if (this.view !== "3d") redraw(); }));
     // Réglages PROPRES à la 3D (coloration du volume, recentrage caméra) — sans objet en 2D.
     if (v === "3d") {

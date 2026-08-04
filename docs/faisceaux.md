@@ -127,7 +127,10 @@ extrémités A ⇄ B »** sur le cas « route à l'envers ».
   (proximité au rayon) mais **clic → formulaire FAISCEAU** (`host.openCableBundleForm`), tooltip
   `bundleTipHtml`, menu contextuel `bundleCtx` (éditer · supprimer · sélection du trunk et de ses brins).
 - **2D** : `drawTrunk2D` réutilise `cablePath` (mêmes splines/amorces), zone de clic large
-  (`.dc-cable-hit`), survol/menu identiques aux câbles.
+  (`.dc-cable-hit`), survol/menu identiques aux câbles. Le **STYLE de courbe** (sélecteur « Style des
+  câbles » : spline uniforme · spline centripète · cordes arrondies, cf. `geometry/CableSpline`) est lui
+  aussi partagé câbles ⇄ faisceaux **par construction** — 2D `cablePath` et 3D `emitCableTube` sont les
+  mêmes chemins de code pour les deux, aucun code dédié aux trunks.
 - **Impact SSE** : `cableBundles → "geometry"` dans `RenderImpact` (le tracé est dessiné — un changement
   de faisceau reconstruit la scène).
 

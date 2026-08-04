@@ -21,6 +21,7 @@ import { FloorLayout } from "../../../geometry/FloorLayout";
 // transporte, la couche caméra la consomme — une seule définition pour les deux (principe n°3).
 import type { PivotAabb } from "../../../geometry/PivotBounds";
 import { PivotMarker } from "./PivotMarker";   // style + tracé PURS du marqueur de centre de rotation (thème, halo, cache)
+import type { CableCurveStyle } from "../../../geometry/CableSpline";
 import type { DatacenterHost } from "../shared";
 
 /** Labels À PLAT (noms d'équipement ET de baie) : réglages PARTAGÉS entre couches (principe n°3, réutilisés par
@@ -83,7 +84,8 @@ export interface DcThreeOptions {
   showFigure: boolean;        // personnage d'échelle (repère personnel, vue seule)
   figure: { dcX: number; dcY: number; orient: number; floorX: number; floorY: number } | null;
   showWaypoints: boolean; showConduits: boolean;
-  cableSplineK: number;   // tension du spline cardinal des câbles (1/6 ≈ défaut)
+  cableSplineK: number;   // tension du spline cardinal des câbles (1/6 ≈ défaut) — pilote aussi le rayon max des congés (style « fillet »)
+  cableCurveStyle: CableCurveStyle;   // style de tracé des câbles/faisceaux : spline uniforme · spline centripète · cordes arrondies (défaut)
   cablePortNormal: boolean;   // sortie ⊥ des ports : amorce droite de 20 mm le long de la normale avant l'arrondi
   showEqNames: boolean;   // noms d'équipement posés à plat sur la face
   showRackSides: boolean; // capots/parois : true = coque OPAQUE (baie fermée) · false = translucide (on voit dedans)
@@ -175,7 +177,7 @@ export abstract class DcThreeBase {
   protected frameArgs: [number, number, number, number, number, number] | null = null;   // derniers args de cadrage
 
   // options d'affichage (poussées par DcBase ; défauts = tout visible)
-  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), hiddenEquips: new Set(), showFigure: false, figure: null, showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cablePortNormal: false, showEqNames: true, showRackSides: false, showRackNames: true, showPorts: true, showDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, markerRealSize: false, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
+  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), hiddenEquips: new Set(), showFigure: false, figure: null, showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cableCurveStyle: "fillet", cablePortNormal: false, showEqNames: true, showRackSides: false, showRackNames: true, showPorts: true, showDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, markerRealSize: false, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
   protected _pivot: THREE.Sprite | null = null;   // marqueur du centre de rotation (sprite billboard, taille écran constante)
   // FOCUS « Localiser » : cible caméra demandée par la vue (centre + emprise). Appliquée juste avant le rendu,
   // donc APRÈS le cadrage par défaut d'un éventuel (re)build → le focus prime. En attente tant que la scène n'est pas prête.

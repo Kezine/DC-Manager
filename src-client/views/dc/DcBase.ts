@@ -26,8 +26,8 @@ import type { MeasureHost } from "./MeasureTool";
 import { RouteTool } from "./RouteTool";
 import type { RouteHost } from "./RouteTool";
 import { U_MM } from "../../domain/constants";
-import { CABLE_SPLINE_K, CAM_PRESETS } from "./shared";
-import type { Vec3, DatacenterHost } from "./shared";
+import { CABLE_SPLINE_K, CABLE_CURVE_STYLE_DEFAULT, CAM_PRESETS } from "./shared";
+import type { Vec3, DatacenterHost, CableCurveStyle } from "./shared";
 import type { PlacementContainer } from "../../../src-shared/PlacementContainers";
 // SPIKE : moteur 3D WebGL parallèle — importé DYNAMIQUEMENT (webpackMode "eager" → reste inliné single-file ;
 // et la chaîne require() CJS du harnais de test ne charge pas ses dépendances ESM-only comme Line2).
@@ -89,7 +89,8 @@ export abstract class DcBase {
   showFigure = false;
   figure: { dcX: number; dcY: number; orient: number; floorX: number; floorY: number } | null = null;
   colorMode: "face" | "group" | "type" = "face";   // coloration des équipements 3D
-  cableSplineK = CABLE_SPLINE_K;         // arrondi des câbles (slider)
+  cableSplineK = CABLE_SPLINE_K;         // arrondi des câbles (slider — tension des splines ET rayon max des congés)
+  cableCurveStyle: CableCurveStyle = CABLE_CURVE_STYLE_DEFAULT;   // style de tracé des câbles (<select> : spline uniforme historique · spline centripète · cordes arrondies)
   markerScale = 1;                       // taille des marqueurs de waypoint + connecteurs de port (slider, 1 = défaut/milieu)
   markerRealSize = false;                // marqueurs en taille RÉELLE (monde : waypoint 5 cm, pastille ⌀ 1 cm à 100 %) — false = taille écran constante
   // ÉCHELLE INTER-SITES (doctrine `docs/placement.md` §6.9) — réglage d'AFFICHAGE, jamais une donnée du
@@ -526,7 +527,7 @@ export abstract class DcBase {
   /** Options d'affichage poussées au moteur WebGL (sous-ensemble implémenté ; le reste est sans effet). */
   protected webglOptions(): any {
     // COPIE de selCables : applyOptionsDiff compare old vs new ; une même référence (mutée) masquerait le changement.
-    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), hiddenEquips: new Set(this.hidden3dEquips), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showRackNames: this.showRackNames, showPorts: this.showPorts, showDoors: this.showDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, markerRealSize: this.markerRealSize, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, showFigure: this.showFigure, figure: this.figure ? { ...this.figure } : null };
+    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), hiddenEquips: new Set(this.hidden3dEquips), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cableCurveStyle: this.cableCurveStyle, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showRackNames: this.showRackNames, showPorts: this.showPorts, showDoors: this.showDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, markerRealSize: this.markerRealSize, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, showFigure: this.showFigure, figure: this.figure ? { ...this.figure } : null };
   }
 
   /** Personnage d'échelle : garantit une position (centre de la salle courante / de l'étage) au 1er affichage. */
@@ -801,7 +802,7 @@ export abstract class DcBase {
   private writeViewState(): void {
     if (this._restoredKey == null) return;
     try {
-      const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], hidden3dEquips: [...this.hidden3dEquips], figure: this.figure, colorMode: this.colorMode, cableSplineK: this.cableSplineK, markerScale: this.markerScale, siteScaleKm: this.siteScaleKm, siteScaleLog: this.siteScaleLog, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
+      const o: any = { view: this.view, dcId: this.dcId, az: this.az, el: this.el, scale: this.scale, tx: this.tx, ty: this.ty, camTarget: this.camTarget, hidden3dRacks: [...this.hidden3dRacks], hidden3dEquips: [...this.hidden3dEquips], figure: this.figure, colorMode: this.colorMode, cableSplineK: this.cableSplineK, cableCurveStyle: this.cableCurveStyle, markerScale: this.markerScale, siteScaleKm: this.siteScaleKm, siteScaleLog: this.siteScaleLog, multiDc: this.multiDc, visibleDcIds: [...this.visibleDcIds], visibleSites: [...this.visibleSites], floorTarget: this.floorTarget };
       DcBase.TOGGLE_KEYS.forEach((k) => { o[k] = (this as any)[k]; });
       window.localStorage.setItem(this.viewStateKey(), JSON.stringify(o));
     } catch (_) { /* quota / indispo → ignoré */ }
@@ -817,7 +818,7 @@ export abstract class DcBase {
     this.hideFrontEq = false; this.hideRearEq = false; this.showPlaceholders = true; this.showRackSides = true; this.showRackNames = true; this.showPorts = true; this.showEqNames = true; this.showAllCables = true; this.showWaypoints = true; this.showConduits = true;
     this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showDoorSwing = false; this.showFloorGrid = true; this.cablePortNormal = false;
     this.useWebGL = true; this.webglPerspective = false; this.cablesOnTop = true;   // WebGL = unique moteur 3D ; projection/cables-on-top restaurés depuis TOGGLE_KEYS
-    this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.markerScale = 1; this.markerRealSize = false;
+    this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.cableCurveStyle = CABLE_CURVE_STYLE_DEFAULT; this.markerScale = 1; this.markerRealSize = false;
     this.siteScaleKm = SITE_SCALE_DEFAULT_M_PER_KM; this.siteScaleLog = false;
     this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set();
     this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeTool.state = null; this.measureTool.state = null;
@@ -826,6 +827,8 @@ export abstract class DcBase {
     // toggles persistés
     DcBase.TOGGLE_KEYS.forEach((k) => { if (typeof o[k] === "boolean") (this as any)[k] = o[k]; });
     if (o.colorMode === "face" || o.colorMode === "group" || o.colorMode === "type") this.colorMode = o.colorMode;
+    // enum VALIDÉE (patron colorMode) : valeur absente ou inconnue → défaut « cordes arrondies »
+    if (o.cableCurveStyle === "spline" || o.cableCurveStyle === "centripetal" || o.cableCurveStyle === "fillet") this.cableCurveStyle = o.cableCurveStyle;
     if (typeof o.cableSplineK === "number") this.cableSplineK = Math.max(0, Math.min(0.32, o.cableSplineK));
     if (typeof o.markerScale === "number") this.markerScale = Math.max(0.25, Math.min(1.75, o.markerScale));
     if (typeof o.siteScaleKm === "number") this.siteScaleKm = Math.max(SITE_SCALE_MIN_M_PER_KM, Math.min(SITE_SCALE_MAX_M_PER_KM, o.siteScaleKm));

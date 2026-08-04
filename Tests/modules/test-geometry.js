@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, FacePanelBands, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, FacePanelBands, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, FILLET_RADIUS_PER_K_MM, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -2138,6 +2138,121 @@ module.exports = async () => {
     const line = CableSpline.sample(P3, new Set([0]), k, new Set([1]));
     const justAfter = line[2];   // 1er point de la courbe après le point d'amorce
     ck(Math.abs(justAfter.x) < 2, "parité 3D : la courbe part de l'amorce le long de l'axe (x ≈ 0)");
+  }
+  });
+
+  await section("CableSpline.controlsCentripetal : spline centripète (bornée là où l'uniforme déborde)", async () => {
+  {
+    const k = 1 / 6;
+    // ESPACEMENT INÉGAL (segment long PUIS court, colinéaires) : la cause exacte de l'« inertie ».
+    // L'UNIFORME projette le point de contrôle du segment court AU-DELÀ du point suivant (c1.x = 1000 +
+    // 1050·k = 1175 > 1050) ; le CENTRIPÈTE (nœuds en racine des distances) reste borné — l'assertion
+    // DISCRIMINE les deux algorithmes sur les mêmes points.
+    const P = [[0, 0], [1000, 0], [1050, 0]];
+    const unif = CableSpline.controls(P, new Set(), k);
+    const cent = CableSpline.controlsCentripetal(P, new Set(), k);
+    ck(!!unif[1] && unif[1].c1[0] > 1050, "uniforme : contrôle projeté AU-DELÀ du point suivant (déborde)");
+    ck(!!cent[1] && cent[1].c1[0] < 1050, "centripète : contrôle borné AVANT le point suivant");
+    ck(!!cent[1] && cent[1].c1[0] > 1000, "centripète : contrôle bien DANS le segment (pas dégénéré)");
+    // à espacement ÉGAL, le centripète REJOINT l'uniforme (gain 6k ⇒ poignées (P[i+1]−P[i−1])·k identiques)
+    const PE = [[0, 0], [100, 0], [200, 0], [300, 0]];
+    const ue = CableSpline.controls(PE, new Set(), k), ce = CableSpline.controlsCentripetal(PE, new Set(), k);
+    ck(!!ce[1] && Math.abs(ce[1].c1[0] - ue[1].c1[0]) < 1e-9 && Math.abs(ce[1].c2[0] - ue[1].c2[0]) < 1e-9,
+      "espacement égal : centripète ≡ uniforme (même sémantique du slider k)");
+    // k = 0 → poignées nulles : contrôles CONFONDUS avec les extrémités (cordes droites)
+    const c0 = CableSpline.controlsCentripetal([[0, 0], [100, 0], [150, 80]], new Set(), 0);
+    ck(!!c0[0] && Math.abs(c0[0].c1[0]) < 1e-9 && Math.abs(c0[0].c2[0] - 100) < 1e-9, "k = 0 : cordes droites (poignées nulles)");
+    // respect de `straight` : segment droit → null (chorde), comme l'uniforme
+    ck.eq(CableSpline.controlsCentripetal(P, new Set([0]), k)[0], null, "segment droit → pas de contrôles (chorde)");
+    // amorce ⟂ : tangente IMPOSÉE le long du segment droit adjacent (même logique que l'uniforme)
+    const P2 = [[0, 0], [0, 20], [150, 220]];
+    const c2 = CableSpline.controlsCentripetal(P2, new Set([0]), k, new Set([1]));
+    ck(!!c2[1] && Math.abs(c2[1].c1[0] - 0) < 1e-9 && c2[1].c1[1] > 20, "amorce : C1 part le long de l'axe du segment droit (x inchangé)");
+    // PARITÉ 2D/3D : dimension-agnostique — mêmes contrôles x/y en 2D ([x,y]) et en 3D ([x,y,0])
+    const P2d = [[0, 0], [1000, 0], [1040, 40]];
+    const P3d = [[0, 0, 0], [1000, 0, 0], [1040, 40, 0]];
+    const a2 = CableSpline.controlsCentripetal(P2d, new Set(), k), a3 = CableSpline.controlsCentripetal(P3d, new Set(), k);
+    ck(!!a2[1] && !!a3[1] && Math.abs(a2[1].c1[0] - a3[1].c1[0]) < 1e-9 && Math.abs(a2[1].c1[1] - a3[1].c1[1]) < 1e-9,
+      "parité 2D/3D : mêmes contrôles quel que soit le nombre de dimensions");
+    // échantillonnage : colinéaires → la courbe reste sur l'axe ; extrémités EXACTES
+    const A = { x: 0, y: 0, z: 0 }, B = { x: 100, y: 0, z: 0 };
+    const col = CableSpline.sampleStyle("centripetal", [A, { x: 30, y: 0, z: 0 }, B], new Set(), k);
+    ck(col.every((p) => Math.abs(p.y) < 1e-6 && Math.abs(p.z) < 1e-6), "sampleStyle centripète : points alignés → courbe sur l'axe");
+    ck.eq(JSON.stringify(col[0]), JSON.stringify(A), "sampleStyle centripète : commence exactement à P0");
+    const colLast = col[col.length - 1];
+    ck(Math.abs(colLast.x - 100) < 1e-6 && Math.abs(colLast.y) < 1e-6, "sampleStyle centripète : finit exactement à P1");
+    // le DISPATCHER "spline" délègue à sample() historique : sorties STRICTEMENT identiques (garde du refactor densify)
+    const Pz = [A, { x: 0, y: 20, z: 0 }, { x: 150, y: 220, z: 0 }];
+    ck.eq(JSON.stringify(CableSpline.sampleStyle("spline", Pz, new Set([0]), k, new Set([1]))),
+      JSON.stringify(CableSpline.sample(Pz, new Set([0]), k, new Set([1]))), "sampleStyle('spline') ≡ sample() (bit-identique)");
+  }
+  });
+
+  await section("CableSpline.fillets : cordes arrondies (congés bornés, conduits droits, amorces ⊥)", async () => {
+  {
+    const k = 1 / 6, rMaxDefault = k * FILLET_RADIUS_PER_K_MM;   // = 150 mm au k par défaut
+    const corners = (prims) => prims.filter((p) => p.kind === "corner");
+    // 2 points → une seule droite, extrémités EXACTES
+    const two = CableSpline.fillets([[0, 0], [100, 50]], new Set(), k);
+    ck.eq(two.length, 1, "2 points → une seule primitive");
+    ck(two[0].kind === "line" && two[0].p[0] === 0 && two[0].q[0] === 100 && two[0].q[1] === 50, "2 points → droite exacte P0→P1");
+    // COLINÉAIRE → aucune primitive coin (rien à arrondir)
+    ck.eq(corners(CableSpline.fillets([[0, 0], [50, 0], [100, 0]], new Set(), k)).length, 0, "colinéaire → aucun congé");
+    // k = 0 → cordes PURES : aucun coin, l'échantillonnage rend exactement la polyligne
+    const zig = [{ x: 0, y: 0, z: 0 }, { x: 1000, y: 0, z: 0 }, { x: 1000, y: 1000, z: 0 }];
+    const s0 = CableSpline.sampleFillet(zig, new Set(), 0);
+    ck.eq(JSON.stringify(s0), JSON.stringify(zig), "k = 0 → polyligne en cordes pures (parité avec les splines)");
+    // RAYON : longs segments → r = r_max = k·FILLET_RADIUS_PER_K_MM ; segments courts → r réduit (45 % du plus court)
+    const long = corners(CableSpline.fillets([[0, 0], [1000, 0], [1000, 1000]], new Set(), k));
+    ck.eq(long.length, 1, "coin à angle droit → un congé");
+    ck(Math.abs(long[0].r - rMaxDefault) < 1e-9, "longs segments : r = r_max (k·" + FILLET_RADIUS_PER_K_MM + " = " + rMaxDefault + " mm)");
+    const short = corners(CableSpline.fillets([[0, 0], [100, 0], [100, 100]], new Set(), k));
+    ck(!!short[0] && Math.abs(short[0].r - 45) < 1e-9, "segments courts : r clampé à 45 % du plus court (45 mm)");
+    // PAS DE CHEVAUCHEMENT sur un segment court PARTAGÉ par deux congés (45 % + 45 % < 100 %)
+    const uShape = CableSpline.fillets([[0, 0], [1000, 0], [1000, 100], [0, 100]], new Set(), k);
+    const cs = corners(uShape);
+    ck.eq(cs.length, 2, "deux coins successifs → deux congés");
+    ck(cs[0].q[1] < cs[1].p[1], "congés voisins d'un segment court : jamais de chevauchement (fin du 1er avant début du 2e)");
+    // EXTRÉMITÉS exactes de l'échantillonnage + points de tangence PRÉSENTS (parité path SVG ⇄ polyligne 3D :
+    // les deux rendus consomment les MÊMES primitives, dont les bornes se retrouvent exactement dans les échantillons)
+    const sf = CableSpline.sampleFillet(zig, new Set(), k);
+    ck.eq(JSON.stringify(sf[0]), JSON.stringify(zig[0]), "sampleFillet : commence exactement à P0");
+    ck.eq(JSON.stringify(sf[sf.length - 1]), JSON.stringify(zig[2]), "sampleFillet : finit exactement à Pn");
+    const prims = CableSpline.fillets(zig.map((p) => [p.x, p.y, p.z]), new Set(), k);
+    const c1 = corners(prims)[0];
+    ck(sf.some((p) => p.x === c1.p[0] && p.y === c1.p[1]) && sf.some((p) => p.x === c1.q[0] && p.y === c1.q[1]),
+      "échantillons cohérents aux extrémités de chaque primitive (début/fin d'arc présents)");
+    // QUALITÉ de l'approximation d'arc : à angle droit, le milieu de la Bézier est à ~r du centre du cercle
+    // (poignées (4/3)·tan(θ/4)·r — erreur radiale < 0,03 % : on tolère 0,2 %)
+    const ctr = { x: 1000 - c1.r, y: c1.r };   // centre du congé du zig (coin en (1000,0), entrant +x, sortant +y)
+    const mid = { x: 0.125 * c1.p[0] + 0.375 * c1.c1[0] + 0.375 * c1.c2[0] + 0.125 * c1.q[0], y: 0.125 * c1.p[1] + 0.375 * c1.c1[1] + 0.375 * c1.c2[1] + 0.125 * c1.q[1] };
+    ck(Math.abs(Math.hypot(mid.x - ctr.x, mid.y - ctr.y) - c1.r) < c1.r * 0.002, "congé ≈ arc de cercle (milieu de Bézier à ~r du centre)");
+    // PARITÉ 2D/3D : dimension-agnostique — mêmes primitives x/y en 2D ([x,y]) et en 3D ([x,y,0])
+    const f2 = CableSpline.fillets([[0, 0], [1000, 0], [1000, 1000]], new Set(), k);
+    const f3 = CableSpline.fillets([[0, 0, 0], [1000, 0, 0], [1000, 1000, 0]], new Set(), k);
+    const c2d = corners(f2)[0], c3d = corners(f3)[0];
+    ck(Math.abs(c2d.p[0] - c3d.p[0]) < 1e-9 && Math.abs(c2d.c1[1] - c3d.c1[1]) < 1e-9 && Math.abs(c2d.q[1] - c3d.q[1]) < 1e-9,
+      "parité 2D/3D : mêmes primitives quel que soit le nombre de dimensions");
+    // CONDUITS (`straight`) : jamais entamés — pas de congé à leurs coins, corps droit EXACT
+    const cond = CableSpline.fillets([[0, 0], [500, 0], [500, 500], [1000, 500]], new Set([1]), k);
+    ck.eq(corners(cond).length, 0, "conduit sans amorce : aucun congé à ses coins (corps jamais entamé)");
+    const body = cond.find((p) => p.kind === "line" && p.p[0] === 500 && p.p[1] === 0);
+    ck(!!body && body.q[0] === 500 && body.q[1] === 500, "corps de conduit : chorde droite EXACTE (extrémités intactes)");
+    // AMORCE ⟂ (`stubAt`) : congé À LA JONCTION, recul ≤ 45 % de l'amorce → l'axe ⟂ au port est préservé
+    const stub = CableSpline.fillets([[0, 0], [0, 20], [150, 220]], new Set([0]), k, new Set([1]));
+    const sc = corners(stub)[0];
+    ck(!!sc, "amorce : le congé existe à la jonction (le point stub n'est pas un coin franc)");
+    ck(!!sc && Math.abs(sc.p[0]) < 1e-9 && sc.p[1] >= 20 - 0.45 * 20 - 1e-9, "amorce : l'arc démarre SUR l'axe ⟂, recul ≤ 45 % des 20 mm");
+    ck(stub[0].kind === "line" && stub[0].p[0] === 0 && stub[0].p[1] === 0 && Math.abs(stub[0].q[0]) < 1e-9,
+      "amorce : la sortie du port reste une droite le long de l'axe ⟂");
+    // PERF : MOINS d'échantillons que le spline sur le même jeu de points (le bénéfice affirmé, prouvé)
+    const P4 = [{ x: 0, y: 0, z: 0 }, { x: 1000, y: 0, z: 0 }, { x: 1000, y: 1000, z: 0 }, { x: 2000, y: 1000, z: 0 }];
+    const nFillet = CableSpline.sampleFillet(P4, new Set(), k).length;
+    const nSpline = CableSpline.sample(P4, new Set(), k).length;
+    ck(nFillet < nSpline, "fillet : moins d'échantillons que le spline (" + nFillet + " < " + nSpline + ")");
+    // dispatcher 3D : sampleStyle("fillet") ≡ sampleFillet
+    ck.eq(JSON.stringify(CableSpline.sampleStyle("fillet", P4, new Set(), k)), JSON.stringify(CableSpline.sampleFillet(P4, new Set(), k)),
+      "sampleStyle('fillet') ≡ sampleFillet()");
   }
   });
 

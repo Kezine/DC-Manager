@@ -1,11 +1,16 @@
 /* Constantes et types PARTAGÉS par les couches de la vue Datacenter (extraits de l'ancien
    DatacenterView.ts monolithique). Importés par DcBase et toutes les classes filles. */
+import type { CableCurveStyle } from "../../geometry/CableSpline";
 
 export const DC_DOT_PX = 5;                 // rayon écran (px) des pastilles de câble
 export const DC_BOLT_PX = 10;               // demi-taille écran (px) d'un éclair ⚡ d'énergie sur un câble (vue Dessus — parité BOLT_PX 3D)
 export const WP_HIT_PX = 14;                // rayon écran (px) des zones de clic/glisser des waypoints (vue Dessus)
 export const CABLE_PORT_STUB_MM = 20;       // longueur du stub de sortie ⊥ des ports (cablePortNormal)
 export const CABLE_SPLINE_K = 1 / 6;        // tension Catmull-Rom (arrondi des câbles routés)
+// Style de tracé des câbles par DÉFAUT (décision 2026-08-04) : « cordes arrondies » — zéro « inertie »
+// après un waypoint, par construction (cf. geometry/CableSpline). Les splines restent sélectionnables.
+export const CABLE_CURVE_STYLE_DEFAULT: CableCurveStyle = "fillet";
+export type { CableCurveStyle };
 
 export const CAM_PRESETS: Record<string, [number, number]> = {
   iso: [-0.62, 0.46], top: [0, Math.PI / 2], front: [0, 0], back: [Math.PI, 0], side: [Math.PI / 2, 0],

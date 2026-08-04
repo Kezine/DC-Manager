@@ -77,7 +77,11 @@
 - **Cache de textures d'images de façade** (`imgTexCache`, par URL) : réutilisées synchroniquement d'un build à
   l'autre (plus de rechargement TextureLoader à chaque reconstruction), élaguées après chaque build COMPLET
   (`pruneFaceTextureCache` : toute URL non reposée par ce build est libérée) + libération au `dispose` final.
-- **Réglages en place sans rebuild** : `setCablesOnTop`, `setMarkerScale`, `setCullDistance`, `setCableSpline`.
+- **Réglages en place sans rebuild** : `setCablesOnTop`, `setMarkerScale`, `setCullDistance`, `setCableSpline`,
+  `setCableCurveStyle` (le STYLE de tracé — spline uniforme / centripète / cordes arrondies — ne reconstruit que
+  les câbles, coalescé rAF comme la tension). NB perf : le style « cordes arrondies » (défaut) échantillonne
+  BEAUCOUP moins de points que les splines (les droites ne coûtent que leurs extrémités, ~1 pt / 5 mm sur les
+  seuls congés — cf. `geometry/CableSpline.sampleFillet`) → rebuild des câbles moins cher.
 - **Picking restreint aux CIBLES utiles + throttle rAF** (`rayHits`/`onHover`) : le survol n'intersecte plus toute
   la scène (les arêtes `EdgesGeometry` se testent segment PAR segment, pure perte : tous les consommateurs ne
   lisent que `userData.pick`) mais une collecte élaguée par visibilité des seuls objets pickables ; et `mousemove`

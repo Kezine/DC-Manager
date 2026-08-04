@@ -18,6 +18,7 @@ import { RackLabelLayout } from "../../../geometry/RackLabelLayout";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
 import type { DoorPt } from "../../../geometry/DoorGeometry";
 import { CableSpline } from "../../../geometry/CableSpline";
+import type { CableCurveStyle } from "../../../geometry/CableSpline";
 import { Measure } from "../../../geometry/Measure";
 import { Color } from "../../../core/Color";
 import { Normalize } from "../../../core/Normalize";
@@ -488,7 +489,7 @@ export class DcThreeScene extends DcThreeCamera {
     const eqVis = old.showPorts !== opts.showPorts || old.showEqNames !== opts.showEqNames || old.showDoors !== opts.showDoors || old.showDoorSwing !== opts.showDoorSwing || old.hideFrontEq !== opts.hideFrontEq || old.hideRearEq !== opts.hideRearEq || old.showPlaceholders !== opts.showPlaceholders || old.showFaceImages !== opts.showFaceImages || old.showConduits !== opts.showConduits || old.showWaypoints !== opts.showWaypoints || old.showFloorGrid !== opts.showFloorGrid || old.showOrientMarks !== opts.showOrientMarks || old.showRackSides !== opts.showRackSides || old.showRackNames !== opts.showRackNames || !this.sameSet(old.hiddenRacks, opts.hiddenRacks);
     // baies — RECOLORATION en place (mode couleur) : aucun rebuild.
     const eqColor = old.colorMode !== opts.colorMode;
-    const cb = old.showAllCables !== opts.showAllCables || old.cableSplineK !== opts.cableSplineK || old.cablePortNormal !== opts.cablePortNormal || !this.sameSet(old.selCables, opts.selCables);   // cablesOnTop NON inclus : géré en place par setCablesOnTop (pas de reconstruction)
+    const cb = old.showAllCables !== opts.showAllCables || old.cableSplineK !== opts.cableSplineK || old.cableCurveStyle !== opts.cableCurveStyle || old.cablePortNormal !== opts.cablePortNormal || !this.sameSet(old.selCables, opts.selCables);   // cablesOnTop NON inclus : géré en place par setCablesOnTop (pas de reconstruction)
     // OPTIMISATION : multi→multi, seul l'ensemble des salles change (options inchangées) → delta de salles (pas de full rebuild).
     const deltaEligible = wasMulti && !!multi && multi.rooms.length > 0 && !(eqVis || eqColor || cb);
     const action = SceneLayoutSignature.action({ ids: curKey, layout: curLayout }, { ids: newKey, layout: newLayout }, { hasContent: !!this.content, deltaEligible });
@@ -1523,7 +1524,9 @@ export class DcThreeScene extends DcThreeCamera {
     if (!line || line.length < 2) return;
     const pickType = style ? style.pickType : "cable";
     const pxNorm = style ? style.px : CABLE_PX, pxSel = style ? style.pxSel : CABLE_PX_SEL;
-    const dense = CableSpline.sample(line, straight, this.opts.cableSplineK, stubAt);
+    // échantillonnage selon le STYLE sélectionné (spline uniforme / centripète / cordes arrondies) —
+    // même module pur que le path SVG 2D, donc parité visuelle 2D ⇄ 3D par construction.
+    const dense = CableSpline.sampleStyle(this.opts.cableCurveStyle, line, straight, this.opts.cableSplineK, stubAt);
     // dédoublonne les points coïncidents (segments de longueur nulle inutiles)
     const pl = dense.filter((v, i) => { if (i === 0) return true; const q = dense[i - 1]; return (v.x - q.x) ** 2 + (v.y - q.y) ** 2 + (v.z - q.z) ** 2 > 0.25; });
     if (pl.length < 2) return;
@@ -1580,6 +1583,20 @@ export class DcThreeScene extends DcThreeCamera {
       slider d'arrondi, sans régénérer baies / occupants / textures de noms (coûteux). */
   setCableSpline(k: number): void {
     this.opts.cableSplineK = k;
+    if (this.cableRaf) return;
+    this.cableRaf = requestAnimationFrame(() => {
+      this.cableRaf = 0;
+      if (!this.cablesGroup) return;
+      this.rebuildCables();
+      this.request();
+    });
+  }
+
+  /** Change le STYLE de tracé des câbles (spline uniforme / centripète / cordes arrondies) et reconstruit
+      UNIQUEMENT les câbles (coalescé sur une frame) — même voie rapide que `setCableSpline`, pour le
+      <select> « Style des câbles » du panneau, sans régénérer baies / occupants / textures (coûteux). */
+  setCableCurveStyle(style: CableCurveStyle): void {
+    this.opts.cableCurveStyle = style;
     if (this.cableRaf) return;
     this.cableRaf = requestAnimationFrame(() => {
       this.cableRaf = 0;
