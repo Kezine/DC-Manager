@@ -51,13 +51,14 @@ export class UnifiAdapter implements WifiProviderAdapter {
 
   /* --------------------------------------------------------------------------
      CHEMINS D'API — L'UNIQUE POINT du code qui les connaît.
-     ⚠ À VALIDER SUR CONSOLE RÉELLE au déploiement (l'implémentation n'a pas eu accès
-     à un contrôleur — cf. docs/wifi-unifi.md § « Déploiement »). Base attendue de
-     l'API d'INTÉGRATION officielle d'une console UniFi OS :
+     ✅ VALIDÉ sur console réelle le 2026-08-04 (UniFi Network 10.4.57 sous UniFi OS
+     Server auto-hébergé, console SONUMA) : base, endpoints sites/clients/devices et
+     pagination répondent comme attendu — cf. docs/wifi-unifi.md § « API UniFi —
+     VALIDÉ sur console réelle / limites ». Base de l'API d'INTÉGRATION officielle :
         https://<console>/proxy/network/integration/v1/…
-     Une console « Network Application » autonome (hors UniFi OS) peut exposer la même
-     API SANS le préfixe `/proxy/network` : si le test de connexion rend un 404, c'est
-     le premier réglage à vérifier. Corriger ICI, en un seul endroit.
+     ⚠ Reste vrai : une console d'une AUTRE forme (hébergement/gamme différents) peut
+     exposer la même API SANS le préfixe `/proxy/network` — si le test de connexion
+     rend un 404, c'est le premier réglage à vérifier. Corriger ICI, en un seul endroit.
      -------------------------------------------------------------------------- */
   static readonly API_BASE = "/proxy/network/integration/v1";
   /** Liste des sites de la console (paginée). */
