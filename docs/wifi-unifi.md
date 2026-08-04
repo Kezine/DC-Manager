@@ -201,28 +201,80 @@ Toutes sous la garde d'accès de l'API, scopées par document. `404` si le docum
 Après **chaque** écriture CRUD, les timers périodiques sont **ré-armés** : la configuration
 prend effet à chaud, sans redémarrage.
 
-## Ce qui est SUPPOSÉ de l'API UniFi (à valider sur console réelle)
+## API UniFi — VALIDÉ sur console réelle / limites
 
-⚠ **L'implémentation n'a pas eu accès à une console UniFi.** La mécanique (tolérance,
-pagination, dédoublonnage, filtre) est testée ; les **chemins** et les **noms de champs**
-sont des hypothèses documentées, rassemblées en **un seul endroit** du code pour être
-corrigées d'un geste.
+✅ **Validé le 2026-08-04** sur une console réelle : **UniFi Network 10.4.57**, **UniFi OS
+Server** auto-hébergé (console SONUMA). L'implémentation avait été écrite **sans** accès à un
+contrôleur (les noms de champs étaient des hypothèses documentées, cf. historique) ; cette
+sonde confirme la mécanique ET les noms de champs — ce tableau n'est donc plus une liste
+d'hypothèses « à valider », mais un **constat**, toujours rassemblé en un seul endroit du code
+pour rester corrigeable d'un geste si une future version de l'API change.
 
-| Élément | Supposé | Où le corriger |
+| Élément | Constaté | Où c'est décodé |
 |---|---|---|
 | Base d'API | `/proxy/network/integration/v1` | `UnifiAdapter.API_BASE` |
-| Sites | `…/sites` | `UnifiAdapter.PATH_SITES` |
+| Sites | `…/sites` — réponse `{ offset, limit, count, totalCount, data }` | `UnifiAdapter.PATH_SITES` |
 | Périphériques | `…/sites/{siteId}/devices` | `UnifiAdapter.pathDevices` |
-| Clients | `…/sites/{siteId}/clients` | `UnifiAdapter.pathClients` |
-| Pagination | `?offset=&limit=`, réponse `{ data, offset, totalCount }` | `UnifiParse.page` / `nextOffset` |
+| Clients | `…/sites/{siteId}/clients` — la **fiche détail** (`GET …/clients/{clientId}`) renvoie **exactement le même objet** que la liste | `UnifiAdapter.pathClients` |
+| Pagination | `?offset=&limit=`, réponse `{ data, offset, totalCount }` (+ `limit`/`count`, ignorés) | `UnifiParse.page` / `nextOffset` |
 | Authentification | en-tête `X-API-KEY` (clé statique) | `UnifiHttp.AUTH_HEADER` |
-| Champs d'un client | `macAddress`, `ipAddress`, `type`, `ssid`, `apName`/`uplinkDeviceId`, `connectedAt`… | `FIELD_ALIASES` de `UnifiParse.ts` |
+| Champs d'un client | `id`, `type` (`WIRELESS`/`WIRED`), `name`, `macAddress`, `ipAddress`, `connectedAt` (ISO **sans** millisecondes), `uplinkDeviceId`, `access.type` (ignoré — hors pivot) | `FIELD_ALIASES` de `UnifiParse.ts` |
+| Champs d'un périphérique | `id`, `macAddress`, `ipAddress`, `name`, `model`, `state`, `firmwareVersion`… (seuls `id`/`name`/`macAddress` sont consommés) | `DEVICE_ALIASES` de `UnifiParse.ts` |
+| Résolution de l'AP d'un client | par `uplinkDeviceId` → index des périphériques (le client ne porte pas le nom de son AP directement) | `UnifiParse.deviceIndex` / `clientRecord` |
+| Site — `internalReference` | un site porte À LA FOIS un `name` lisible (« Sonuma ») **et** une `internalReference` stable (« default » — la valeur par défaut du champ « Site » du formulaire) : la résolution reconnaît maintenant les DEUX, indépendamment (cf. § ci-dessous) | `SITE_INTERNAL_REF_ALIASES` de `UnifiParse.ts` |
 
-Les noms de champs sont acceptés par **alias** (nomenclature camelCase de l'API
-d'intégration **et** orthographes historiques) — c'est un choix : quelques lignes de plus,
-et le décodeur est correct sur les deux conventions plutôt que sur une seule supposition.
+Les noms de champs restent acceptés par **alias** (nomenclature camelCase de l'API
+d'intégration **et** orthographes historiques d'écosystème) — un choix conservé même après
+validation : il ne coûte que quelques lignes et couvre une éventuelle console « Network
+Application » autonome dont le vocabulaire diffère légèrement.
 
-**Procédure de validation au déploiement** (à faire une fois, sur une console réelle) :
+### Résolution de site par `internalReference` (corrigé le 2026-08-04)
+
+Un site UniFi réel peut porter à la fois un **nom d'affichage** (`name: "Sonuma"`, ce que
+l'administrateur voit dans la console) et une **référence interne stable** (`internalReference:
+"default"`, précisément la valeur par défaut du champ « Site » du formulaire de provider,
+cf. tableau plus haut). Avant cette correction, `internalReference` était déjà listée comme
+alias de *nom* (`SITE_NAME_ALIASES`) mais n'était en pratique **jamais consultée** dès qu'un
+`name` existait : la résolution ne retient qu'un seul nom par site (le premier alias présent),
+et « Sonuma » ne matche évidemment pas « default ». Sur la console SONUMA, la config par défaut
+ne se résolvait donc QUE via le repli « console mono-site » de `UnifiAdapter.resolveSite`
+(qui prend le premier site quand la valeur configurée vaut littéralement `"default"`) — un
+repli correct par coïncidence sur une console à un seul site, mais qui masquait le problème et
+aurait échoué sur une console **multi-site**.
+
+`findSiteId` teste maintenant l'`internalReference` comme un **critère de correspondance
+INDÉPENDANT** de l'id et du nom (`SITE_INTERNAL_REF_ALIASES`, constante séparée de
+`SITE_NAME_ALIASES`) : un champ « Site » configuré à `default` se résout donc **directement**
+sur le site dont l'`internalReference` vaut `default`, sans dépendre du repli mono-site.
+`siteSummaries` (l'énumération du message « site introuvable ») n'a **pas changé** : le libellé
+affiché reste `name` en priorité (« Sonuma »), l'`internalReference` n'y sert que de dernier
+repli d'affichage quand aucun nom n'est renseigné — cohérent avec ce que voit l'administrateur
+dans la console.
+
+### ⚠ Limite mesurée — le SSID n'est PAS exposé
+
+Constat mesuré, pas un problème d'alias : **l'API d'intégration officielle ne sert le SSID nulle
+part**, ni dans la liste des clients ni dans la fiche détail (`GET …/clients/{clientId}` rend
+exactement le même objet, sans champ SSID caché). Conséquence :
+
+- la colonne **SSID reste vide** pour tous les clients d'un provider UniFi — `UnifiParse` ne
+  peut pas décoder ce qu'elle ne reçoit jamais ;
+- le champ `ssid` du pivot `WifiClientRecord` **n'est pas retiré** pour autant : il reste au
+  contrat commun (multi-marques, décision D9) — une autre marque, ou une future version de
+  l'API UniFi, peut le servir ;
+- `FIELD_ALIASES.ssid` reste le **point unique** où brancher le champ si l'Integration API
+  l'ajoute un jour.
+
+**Piste documentée, SANS implémentation** (décision à prendre par l'utilisateur avant tout
+code) : le SSID existe côté contrôleur et est visible dans l'**API privée** de la console
+(celle qu'utilise l'interface web UniFi elle-même, non documentée/non stable, hors du contrat
+« API d'intégration officielle » retenu par ce module — cf. non-buts en tête de ce document :
+« aucun usage de l'API privée UniFi »). Un enrichissement complémentaire par cette API privée
+resterait un module strictement SÉPARÉ (`unifi-legacy` ou équivalent), à ne construire que si
+le besoin d'exploitation se confirme : elle n'est pas versionnée, peut changer sans préavis
+d'une release à l'autre, et sort du modèle de confiance (clé d'API scoping) du reste du module.
+
+### Procédure de re-validation (si une future version d'API dévie)
 
 1. créer une clé d'API **en lecture seule** dans la console ;
 2. configurer un provider (URL, clé, site) et cliquer **« Tester la connexion »** :
@@ -232,11 +284,11 @@ et le décodeur est correct sur les deux conventions plutôt que sur une seule s
      identifiant, plafonné à `UnifiAdapter.MAX_SITES_IN_ERROR`) : recopier l'un des deux dans
      le champ « Site » plutôt que le deviner ;
    - `401/403` → droits de la clé ;
-3. lancer une **synchro manuelle** et vérifier dans le listing : nom (ou MAC), IP, SSID,
-   type, AP, « connecté depuis ». Un champ systématiquement vide = un alias à corriger dans
-   `FIELD_ALIASES` ;
+3. lancer une **synchro manuelle** et vérifier dans le listing : nom (ou MAC), IP, type, AP,
+   « connecté depuis » (le SSID restera vide, cf. limite ci-dessus). Un champ systématiquement
+   vide = un alias à corriger dans `FIELD_ALIASES` ;
 4. vérifier le volume : si le total plafonne à `MAX_PAGES × PAGE_SIZE`, la pagination de la
-   console ne se comporte pas comme supposé (cf. `UnifiParse.nextOffset`).
+   console ne se comporte pas comme constaté (cf. `UnifiParse.nextOffset`).
 
 ## Transport HTTPS et confiance TLS
 

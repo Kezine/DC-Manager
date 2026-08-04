@@ -222,8 +222,9 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   pivot `WifiClientRecord` et contrat d'adaptateur AGNOSTIQUES de la marque — UniFi n'est que la 1re
   implémentation, ajout d'une marque en 4 points ; réconciliation source/locaux, « orphelin » = DÉCONNECTÉ,
   AP dérivé du nom d'équipement, providers PAR document dans `wifi-providers.db` chiffrée (clé
-  `DCMANAGER_SECRETS_KEY` partagée avec vm/notify), transport `node:https` + pagination, ce qui est SUPPOSÉ
-  de l'API UniFi et comment le valider, script de suppression).
+  `DCMANAGER_SECRETS_KEY` partagée avec vm/notify), transport `node:https` + pagination, API UniFi
+  VALIDÉE sur console réelle le 2026-08-04 (limite mesurée : le SSID n'est pas exposé par le contrat
+  officiel), script de suppression).
 - [`notifications.md`](docs/notifications.md) — **service de notifications** (module serveur AMOVIBLE
   `notify/`, alertes persistantes anti-spam `raise`/`resolve`, moteur pur `NotifyEngine`, schéma
   `notify.db` à 5 tables, routage par abonnements, webhooks, coffre `SecretBox` partagé, producteurs

@@ -202,6 +202,25 @@ module.exports = async () => {
     ck.eq(UnifiParse.firstSiteId(sites), "s-uuid-1", "firstSiteId : premier site exploitable");
     ck.eq(UnifiParse.firstSiteId([{ name: "sans id" }]), null, "firstSiteId : aucun id exploitable → null");
 
+    // -- internalReference : critère de résolution INDÉPENDANT du nom affiché — constaté sur
+    //    console RÉELLE le 2026-08-04 (UniFi Network 10.4.57) : un site porte À LA FOIS un nom
+    //    lisible (`name: "Sonuma"`) ET une référence stable (`internalReference: "default"`, la
+    //    valeur par défaut du champ « Site » du formulaire). DEUX sites dans la fixture : un seul
+    //    site ne permettrait pas de distinguer une résolution CORRECTE d'un repli « premier site »
+    //    qui tomberait juste par coïncidence. --
+    const realSites = [
+      { id: "88f7af54-98f8-306a-a1c7-c9349722b1f6", internalReference: "default", name: "Sonuma" },
+      { id: "s-annexe-uuid", internalReference: "annexe", name: "Annexe" },
+    ];
+    ck.eq(UnifiParse.findSiteId(realSites, "default"), "88f7af54-98f8-306a-a1c7-c9349722b1f6",
+      "findSiteId : résout DIRECTEMENT par internalReference quand le name affiché (« Sonuma ») ne matche PAS « default »");
+    ck.eq(UnifiParse.findSiteId(realSites, "annexe"), "s-annexe-uuid",
+      "findSiteId : internalReference d'un AUTRE site de la même liste, correctement distingué");
+    ck.eq(UnifiParse.findSiteId(realSites, "Sonuma"), "88f7af54-98f8-306a-a1c7-c9349722b1f6",
+      "findSiteId : résolution par NOM — AUCUNE régression (name reste prioritaire pour l'affichage)");
+    ck.eq(UnifiParse.findSiteId(realSites, "88f7af54-98f8-306a-a1c7-c9349722b1f6"), "88f7af54-98f8-306a-a1c7-c9349722b1f6",
+      "findSiteId : résolution par ID — AUCUNE régression");
+
     // siteSummaries : résumés id+nom — matière de l'ÉNUMÉRATION du message « site introuvable ».
     const summaries = UnifiParse.siteSummaries(sites);
     ck.eq(summaries.length, 2, "siteSummaries : un résumé par site exploitable");
@@ -321,6 +340,23 @@ module.exports = async () => {
       [UnifiAdapter.pathClients("s-9")]: { data: [{ macAddress: "BB:01", type: "wireless" }] } };
     const fallback = await new UnifiAdapter(CFG, mkUnifiStub(uuidOnly)).inventory();
     ck.eq(fallback.clients.length, 1, "inventory : « default » non résolu par nom → repli sur le PREMIER site (première configuration possible)");
+
+    // -- FIXTURE À LA FORME RÉELLE (console SONUMA, UniFi Network 10.4.57, 2026-08-04) : enveloppe
+    //    de pagination complète { offset, limit, count, totalCount, data }, site à `internalReference`
+    //    « default » MAIS `name` « Sonuma » (ne matche PAS « default »). DEUX sites, le mauvais EN
+    //    PREMIER dans le tableau : si la résolution retombait, à tort, sur le repli « premier site »
+    //    plutôt que sur `internalReference`, l'inventaire échouerait (404 sur les sous-ressources du
+    //    mauvais site, aucune route stubée pour lui) — la réussite du test EST la preuve. --
+    const realShapeSites = {
+      ...routes,
+      [SITES]: { offset: 0, limit: 25, count: 2, totalCount: 2, data: [
+        { id: "s-annexe", internalReference: "annexe", name: "Annexe" },
+        { id: site, internalReference: "default", name: "Sonuma" },
+      ] },
+    };
+    const viaInternalRef = await new UnifiAdapter(CFG, mkUnifiStub(realShapeSites)).inventory();
+    ck.eq(viaInternalRef.clients.length, 1, "inventory : site « default » résolu par internalReference sur une fixture À LA FORME RÉELLE (pagination complète, name ≠ valeur cherchée, 2 sites — le repli mono-site n'a pas pu jouer)");
+    ck.eq(viaInternalRef.clients[0].ext_id, "AA:01", "inventory : … et c'est bien le BON site qui a été interrogé (clients du site « s-1 »)");
   }
   });
 

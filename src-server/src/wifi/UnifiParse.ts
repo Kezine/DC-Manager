@@ -15,17 +15,18 @@ import type { WifiClientRecord } from "./WifiProvider.js";
    document sous validation partagée — une exception de décodage ferait échouer la
    passe ENTIÈRE (et donc perdre l'inventaire) pour un seul client mal formé.
 
-   ── ⚠ CE QUI EST SUPPOSÉ, ET CE QUI EST VÉRIFIÉ ───────────────────────────────
-   L'implémentation N'A PAS EU accès à une console UniFi. Les NOMS DE CHAMPS
-   ci-dessous sont donc des HYPOTHÈSES documentées, pas des constats : ils suivent
-   la nomenclature camelCase de l'API d'intégration (`macAddress`, `ipAddress`,
-   `connectedAt`, `type`…) ET acceptent, par ALIAS, les orthographes historiques
-   (`mac`, `ip`, `hostname`, `essid`…) qu'on rencontre dans l'écosystème. Cette
-   tolérance par alias est un CHOIX : elle coûte quelques lignes et rend le module
-   correct sur les DEUX conventions plutôt que juste sur une supposition.
-   Ce qui EST vérifié : la mécanique (tolérance, pagination, dédoublonnage) —
-   couverte par les tests. Ce qui reste À VALIDER sur console réelle : la liste
-   d'alias effectivement servie. Procédure : `docs/wifi-unifi.md` § « Déploiement ».
+   ── ⚠ CE QUI ÉTAIT SUPPOSÉ, ET CE QUI EST VALIDÉ ──────────────────────────────
+   Écrit SANS accès à une console UniFi, les NOMS DE CHAMPS ci-dessous suivaient la
+   nomenclature camelCase de l'API d'intégration (`macAddress`, `ipAddress`,
+   `connectedAt`, `type`…) par HYPOTHÈSE — tout en acceptant, par ALIAS, les
+   orthographes historiques (`mac`, `ip`, `hostname`, `essid`…) de l'écosystème,
+   histoire d'être correct sur les DEUX conventions plutôt que sur une seule
+   supposition. **Validé le 2026-08-04** sur une console réelle (UniFi Network
+   10.4.57, UniFi OS Server) : tous les alias PRIMAIRES de champs clients/périphériques
+   sont confirmés, ainsi que la pagination (`{ data, offset, totalCount }`). Le SSID
+   n'est en revanche PAS servi par cette API (liste ET fiche détail) — ce n'est pas un
+   alias à corriger, la donnée est absente du contrat officiel. Détail, limite et piste
+   d'enrichissement : `docs/wifi-unifi.md`.
    ============================================================================= */
 
 /** ALIAS de champs acceptés, du plus PROBABLE au plus historique. UN SEUL point de
@@ -63,8 +64,24 @@ const DEVICE_ALIASES = {
 /** Alias du NOM d'un site (liste `sites`) — POINT UNIQUE, partagé par `findSiteId` (résolution)
     et `siteSummaries` (énumération dans un message d'erreur) : les deux doivent voir le MÊME nom
     pour un même site, sans quoi le message d'erreur pourrait citer un libellé que la résolution
-    elle-même ne reconnaîtrait pas. */
+    elle-même ne reconnaîtrait pas. `internalReference` y reste en DERNIER repli d'AFFICHAGE
+    (un site sans `name`/`displayName`/`description` montre au moins ça) — mais NE SUFFIT PAS à
+    la résolution : cf. `SITE_INTERNAL_REF_ALIASES` ci-dessous pour la raison. */
 const SITE_NAME_ALIASES = ["name", "displayName", "description", "internalReference"] as const;
+
+/** Alias de la RÉFÉRENCE INTERNE d'un site (`internalReference` de l'API d'intégration —
+    ex. « default »), constaté sur console réelle le 2026-08-04 : un site UniFi porte
+    SOUVENT les DEUX à la fois — un nom lisible pour l'opérateur (`name: "Sonuma"`) ET une
+    référence stable (`internalReference: "default"`), qui est justement la valeur par
+    défaut posée par le formulaire de provider (cf. `UnifiAdapter.options`).
+    ⚠ POURQUOI un alias SÉPARÉ de `SITE_NAME_ALIASES` plutôt qu'un ajout à sa liste : cette
+    liste répond à « le PREMIER alias présent gagne » (`firstString`, un seul nom retenu par
+    site) — si `internalReference` y était mélangé, il ne serait JAMAIS consulté dès qu'un
+    `name` existe (le cas RÉEL ci-dessus), alors que le champ « Site » configuré peut
+    précisément viser cette référence-là. `findSiteId` doit donc tester `internalReference`
+    comme un critère de correspondance INDÉPENDANT, en plus de l'id et du nom — pas comme un
+    simple repli d'affichage. */
+const SITE_INTERNAL_REF_ALIASES = ["internalReference"] as const;
 
 /** Une PAGE de réponse paginée, décodée : les éléments + ce qu'on sait du total. */
 export interface UnifiPage {
@@ -125,8 +142,11 @@ export class UnifiParse {
      -------------------------------------------------------------------------- */
 
   /** Trouve, dans une liste de sites décodée, celui qui correspond au libellé configuré :
-      correspondance sur l'`id` OU le `name` (insensible à la casse, trimée). Rend son ID
-      technique, ou `null` si aucun ne correspond.
+      correspondance sur l'`id`, le `name` (repli d'affichage compris) OU l'`internalReference`
+      (insensible à la casse, trimée) — trois critères INDÉPENDANTS, un site réel peut porter
+      les trois à la fois (ex. id UUID + `name: "Sonuma"` + `internalReference: "default"`,
+      constaté sur console réelle le 2026-08-04). Rend son ID technique, ou `null` si aucun
+      critère ne correspond.
       ⚠ Ne fait AUCUN repli sur « le premier site » : ce repli est une décision
       d'ORCHESTRATION (elle dépend de la config), elle vit dans l'adaptateur — ici on ne
       répond qu'à « ce libellé désigne-t-il un site de cette liste ? ». */
@@ -137,7 +157,10 @@ export class UnifiParse {
       if (!site || typeof site !== "object") continue;
       const id = UnifiParse.firstString(site, DEVICE_ALIASES.id);
       const name = UnifiParse.firstString(site, SITE_NAME_ALIASES);
-      if ((id && id.toLowerCase() === key) || (name && name.trim().toLowerCase() === key)) return id;
+      const internalRef = UnifiParse.firstString(site, SITE_INTERNAL_REF_ALIASES);
+      if ((id && id.toLowerCase() === key)
+        || (name && name.trim().toLowerCase() === key)
+        || (internalRef && internalRef.trim().toLowerCase() === key)) return id;
     }
     return null;
   }
