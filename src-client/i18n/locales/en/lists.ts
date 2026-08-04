@@ -115,6 +115,7 @@ export const lists = {
     storage: "Storage",
     purchase: "Purchase",
     warranty: "Warranty",   // SHORT column head (≠ `equipment.field.warrantyEnd` "Warranty end", too long)
+    ageWarranty: "Age / warranty",   // COMBINED column (purchase age · coloured warranty state) — cf. LifecycleFormat
     host: "Host",
     tags: "Tags",
     hostname: "Hostname",

@@ -28,6 +28,7 @@ import { Html } from "../../core/Html";
 import { Markdown } from "../../core/Markdown";   // rendu MARKDOWN du champ description de la FICHE (défauts sûrs, cf. core/Markdown)
 import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
+import { LifecycleFormat } from "../../core/LifecycleFormat";   // âge d'achat + état de garantie (mise en évidence en fiche) — parité EquipmentForms
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { FormControls } from "../../ui/FormControls";
@@ -84,8 +85,18 @@ export class SubEquipmentForms extends FormBase {
     // ADMINISTRATIF (achat / garantie) — D5(c) 2026-08-03, décalqué d'`EquipmentForms.equipmentDetail`.
     // Deux lignes CONDITIONNELLES (masquées si rien à montrer) : la date d'achat et la référence du bon de
     // commande partagent une ligne (comme sur `equipments`), la fin de garantie a la sienne.
-    if (se.purchase_date || se.po_ref) pairs.push([I18n.t("lists.col.purchase"), [se.purchase_date ? Html.escape(se.purchase_date) : null, se.po_ref ? I18n.t("detail.common.poRef", { ref: Html.escape(se.po_ref) }) : null].filter(Boolean).join(" · ")]);
-    if (se.warranty_end) pairs.push([I18n.t("equipment.field.warrantyEnd"), Html.escape(se.warranty_end)]);
+    // Achat + garantie ENRICHIS de l'âge / de l'état coloré — PARITÉ EXACTE avec `EquipmentForms.equipmentDetail`
+    // (LifecycleFormat, `now` réel ; mappage statut → couleur identique à la colonne d'échéance des certificats).
+    if (se.purchase_date || se.po_ref) {
+      const base = [se.purchase_date ? Html.escape(se.purchase_date) : null, se.po_ref ? I18n.t("detail.common.poRef", { ref: Html.escape(se.po_ref) }) : null].filter(Boolean).join(" · ");
+      const age = se.purchase_date ? LifecycleFormat.age(se.purchase_date, new Date()) : null;
+      pairs.push([I18n.t("lists.col.purchase"), base + (age ? ` — ${Html.escape(age)}` : "")]);
+    }
+    if (se.warranty_end) {
+      const w = LifecycleFormat.warranty(se.warranty_end, new Date());
+      const color = w ? (w.status === "ok" ? "var(--ok)" : w.status === "warn" ? "var(--warn)" : "var(--err)") : "";
+      pairs.push([I18n.t("equipment.field.warrantyEnd"), Html.escape(se.warranty_end) + (w ? ` — <span style="color:${color}">${Html.escape(w.label)}</span>` : "")]);
+    }
     pairs.push([groups.length > 1 ? I18n.t("detail.common.groups") : I18n.t("lists.col.group"), groupCell]);
     // Description LIBRE (multiligne) : rendue en MARKDOWN dans un conteneur dédié `.md-body` (défauts micromark sûrs, cf. core/Markdown).
     pairs.push([I18n.t("lists.col.description"), se.description ? `<div class="md-body">${Markdown.render(se.description)}</div>` : "—"]);

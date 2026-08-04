@@ -6,6 +6,7 @@ import { VmStatus } from "../core/VmStatus";
 import { WifiStatus } from "../core/WifiStatus";   // présence + type d'un client wifi (feature AMOVIBLE)
 import { WifiClient } from "../models/WifiClient";   // libellé « nom sinon MAC » — règle unique partagée fiche/palette
 import { Format } from "../core/Format";
+import { LifecycleFormat } from "../core/LifecycleFormat";   // âge d'achat + état de garantie (colonne combinée)
 import { I18n } from "../i18n/I18n";
 import { EquipmentTypes } from "../registries/EquipmentTypes";
 import { EquipFaces } from "../registries/EquipFaces";
@@ -27,6 +28,22 @@ const kindPill = (k: string) => (k === "power"
   ? '<span class="pill" style="border-color:var(--accent-2);color:var(--accent-2)"><span class="gi">' + Icons.POWER + '</span>' + I18n.t("lists.opt.kindPowerPill") + '</span>'
   : '<span class="pill">' + I18n.t("lists.opt.kindDataPill") + '</span>');
 const descCell = (o: any) => (o.description ? Html.escape(String(o.description).slice(0, 80)) : dim("—"));
+// Cellule COMBINÉE « Âge / garantie » : âge (depuis `purchase_date`) · état de garantie coloré (depuis
+// `warranty_end`), séparés par « · », compacts sur une ligne. La partie garantie porte la couleur SÉMANTIQUE
+// de son statut (ok/warn/err), comme la colonne d'échéance des certificats (CertsAdminView) ; « dim » si rien.
+// Factorisée entre les listings Équipements et Sous-équipements (mêmes champs). `now` = maintenant réel.
+const ageWarrantyCell = (o: any): string => {
+  const now = new Date();
+  const parts: string[] = [];
+  const age = o.purchase_date ? LifecycleFormat.age(o.purchase_date, now) : null;
+  if (age) parts.push(Html.escape(age));
+  const w = o.warranty_end ? LifecycleFormat.warranty(o.warranty_end, now) : null;
+  if (w) {
+    const color = w.status === "ok" ? "var(--ok)" : w.status === "warn" ? "var(--warn)" : "var(--err)";
+    parts.push(`<span style="color:${color}">${Html.escape(w.label)}</span>`);
+  }
+  return parts.length ? parts.join(" · ") : dim("—");
+};
 
 /* Configurations de colonnes par collection (paramètrent ListView). Classe de méthodes
    statiques ; chaque méthode renvoie les options d'une liste. Le JEU de colonnes est aligné
@@ -67,6 +84,10 @@ export class ListConfigs {
         // Compte de SOUS-ÉQUIPEMENTS — même forme que la colonne Agrégats. Estompé à zéro (le cas de la
         // quasi-totalité des équipements) pour ne pas ajouter une colonne de « 0 » à une table déjà large.
         { head: I18n.t("lists.col.subEquipments"), cls: "cell-num", sort: (e) => store.subEquipmentsOf(e.id).length, render: (e) => { const n = store.subEquipmentsOf(e.id).length; return n ? `<span class="pill">${n}</span>` : dim("—"); } },
+        // Âge / garantie (colonne COMBINÉE, non essentielle) : l'onglet Équipements n'avait aucune colonne datée.
+        // Tri par `warranty_end` — l'axe ACTIONNABLE (« quels équipements hors garantie » ; croissant = expirées
+        // en tête). L'âge est AFFICHÉ mais non triable (le filtre par état viendra au volet 2, hors périmètre ici).
+        { head: I18n.t("lists.col.ageWarranty"), sortKey: "warranty", sort: (e) => e.warranty_end || "", render: ageWarrantyCell },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (e) => e.description || "", render: descCell },
       ],
     };
@@ -107,9 +128,10 @@ export class ListConfigs {
           // filtre par APPARTENANCE (primaire OU secondaire) — valueOf renvoie un tableau, comme la colonne Groupe des équipements.
           filter: { label: I18n.t("lists.col.group"), options: () => store.all("groups").map((g: any) => ({ id: g.id, label: g.label || I18n.t("lists.ph.group") })), valueOf: (se) => store.groupIdsOf(se) },
         },
-        // Achat / Garantie : dates ISO courtes (tri lexicographique = tri chronologique, contrat existant) — gabarit `spares`.
-        { head: I18n.t("lists.col.purchase"), cls: "cell-num", sortKey: "purchase", sort: (se) => se.purchase_date || "", render: (se) => (se.purchase_date ? Html.escape(se.purchase_date) : dim("—")) },
-        { head: I18n.t("lists.col.warranty"), cls: "cell-num", sortKey: "warranty", sort: (se) => se.warranty_end || "", render: (se) => (se.warranty_end ? Html.escape(se.warranty_end) : dim("—")) },
+        // Âge / garantie (colonne COMBINÉE) : REMPLACE les deux ex-colonnes « Achat »/« Garantie » brutes
+        // (densité ; les dates brutes restent lisibles en fiche). Tri par `warranty_end` — l'axe ACTIONNABLE
+        // (croissant = expirées en tête) ; l'âge est affiché mais non triable (filtre → volet 2, hors périmètre).
+        { head: I18n.t("lists.col.ageWarranty"), sortKey: "warranty", sort: (se) => se.warranty_end || "", render: ageWarrantyCell },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (se) => se.description || "", render: descCell },
       ],
     };

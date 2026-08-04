@@ -121,6 +121,7 @@ export const lists = {
     storage: "Stockage",
     purchase: "Achat",
     warranty: "Garantie",   // tête de colonne COURTE (≠ `equipment.field.warrantyEnd` « Fin de garantie », trop long)
+    ageWarranty: "Âge / garantie",   // colonne COMBINÉE (âge d'achat · état de garantie coloré) — cf. LifecycleFormat
     host: "Hôte",
     tags: "Tags",
     hostname: "Hostname",

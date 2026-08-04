@@ -31,6 +31,20 @@ export const detail = {
     yes: "Oui",
     no: "Non",
   },
+  // CYCLE DE VIE matériel (core/LifecycleFormat) : formulation de l'ÂGE (date d'achat) et de l'ÉTAT de
+  // garantie (date de fin), partagée par les FICHES et la colonne combinée des LISTINGS. Unités à pluriel
+  // i18next (`count`) ; « mois » est invariant en français. `{{d}}` = durée déjà composée (« 2 mois »…).
+  lifecycle: {
+    years_one: "{{count}} an",
+    years_other: "{{count}} ans",
+    months_one: "{{count}} mois",
+    months_other: "{{count}} mois",
+    days_one: "{{count}} jour",
+    days_other: "{{count}} jours",
+    expiresIn: "expire dans {{d}}",
+    expiresToday: "expire aujourd'hui",
+    expiredSince: "expirée depuis {{d}}",
+  },
   // Ligne d'audit DISCRÈTE des fiches détail (« Créé/Modifié par {auteur} le {date} », cf. AuditLine, mode API).
   // Variantes selon les champs présents : par+date, par seul, date seule.
   audit: {

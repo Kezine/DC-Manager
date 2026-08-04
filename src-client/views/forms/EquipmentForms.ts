@@ -17,6 +17,7 @@ import { Html } from "../../core/Html";
 import { Markdown } from "../../core/Markdown";   // rendu MARKDOWN des champs texte libre des FICHES (défauts sûrs, cf. core/Markdown)
 import { Color } from "../../core/Color";
 import { Format } from "../../core/Format";
+import { LifecycleFormat } from "../../core/LifecycleFormat";   // âge d'achat + état de garantie (mise en évidence en fiche)
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (annuaire, mode API)
 import { GroupTypes } from "../../domain/GroupTypes";
 import { SpareTypes } from "../../domain/SpareTypes";
@@ -71,8 +72,20 @@ export class EquipmentForms extends FormBase {
     add(grpPills.length > 1 ? I18n.t("equipment.detail.groups") : I18n.t("lists.col.group"), grpPills.length ? grpPills.join(" ") : "—");
     if (EquipmentTypes.hasPowerCapacity(eq.type)) add(I18n.t("equipment.detail.maxCapacity"), eq.pdu_max_a != null ? `<span class="pill">${eq.pdu_max_a} A</span>` : "—");
     if (EquipmentTypes.consumes(eq.type) && (eq.power_nominal_w != null || eq.power_max_w != null)) add(I18n.t("equipment.detail.consumption"), [eq.power_nominal_w != null ? I18n.t("equipment.detail.wNom", { w: eq.power_nominal_w }) : null, eq.power_max_w != null ? I18n.t("equipment.detail.wMax", { w: eq.power_max_w }) : null].filter(Boolean).join(" · ") || "—");
-    if (eq.purchase_date || eq.po_ref) add(I18n.t("lists.col.purchase"), [eq.purchase_date ? Html.escape(eq.purchase_date) : null, eq.po_ref ? I18n.t("equipment.detail.poRef", { ref: Html.escape(eq.po_ref) }) : null].filter(Boolean).join(" · ") || "—");
-    if (eq.warranty_end) add(I18n.t("equipment.field.warrantyEnd"), Html.escape(eq.warranty_end));
+    // Achat : date brute (+ BC) ENRICHIE de l'ÂGE calculé (« 2023-05-10 · BC X — 3 ans 2 mois »). L'âge met en
+    // évidence l'ancienneté du matériel sans masquer la date d'origine (LifecycleFormat, `now` = maintenant réel).
+    if (eq.purchase_date || eq.po_ref) {
+      const base = [eq.purchase_date ? Html.escape(eq.purchase_date) : null, eq.po_ref ? I18n.t("equipment.detail.poRef", { ref: Html.escape(eq.po_ref) }) : null].filter(Boolean).join(" · ") || "—";
+      const age = eq.purchase_date ? LifecycleFormat.age(eq.purchase_date, new Date()) : null;
+      add(I18n.t("lists.col.purchase"), base + (age ? ` — ${Html.escape(age)}` : ""));
+    }
+    // Fin de garantie : date brute + ÉTAT COLORÉ (« expirée depuis 7 mois » en rouge, « expire dans 2 mois » en
+    // orange…). Même mappage statut → couleur que la colonne d'échéance des certificats (cf. CertsAdminView).
+    if (eq.warranty_end) {
+      const w = LifecycleFormat.warranty(eq.warranty_end, new Date());
+      const color = w ? (w.status === "ok" ? "var(--ok)" : w.status === "warn" ? "var(--warn)" : "var(--err)") : "";
+      add(I18n.t("equipment.field.warrantyEnd"), Html.escape(eq.warranty_end) + (w ? ` — <span style="color:${color}">${Html.escape(w.label)}</span>` : ""));
+    }
     if (eq.assigned_to || eq.assigned_date) add(I18n.t("equipment.field.assignedTo"), [eq.assigned_to ? Html.escape(eq.assigned_to) : null, eq.assigned_date ? I18n.t("equipment.detail.onDate", { date: Html.escape(eq.assigned_date) }) : null].filter(Boolean).join(" · ") || "—");
     const dimHtml = eq.dim_mode === "free"
       ? `<span class="pill">${I18n.t("equipment.detail.dimFree")}</span> ${eq.free_l_mm != null ? eq.free_l_mm : "?"} × ${eq.free_w_mm != null ? eq.free_w_mm : "?"} × ${eq.free_h_mm != null ? eq.free_h_mm : "?"} mm <span style="color:var(--fg-dimmer)">${I18n.t("equipment.detail.lwh")}</span>`

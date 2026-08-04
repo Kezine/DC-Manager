@@ -25,6 +25,20 @@ export const detail = {
     yes: "Yes",
     no: "No",
   },
+  // Hardware LIFECYCLE (core/LifecycleFormat): wording of the AGE (purchase date) and warranty STATE (end
+  // date), shared by the detail cards and the combined LISTING column. Units use i18next plurals (`count`);
+  // `{{d}}` is an already-composed duration (« 2 months »…).
+  lifecycle: {
+    years_one: "{{count}} year",
+    years_other: "{{count}} years",
+    months_one: "{{count}} month",
+    months_other: "{{count}} months",
+    days_one: "{{count}} day",
+    days_other: "{{count}} days",
+    expiresIn: "expires in {{d}}",
+    expiresToday: "expires today",
+    expiredSince: "expired {{d}} ago",
+  },
   // Discreet audit line of the detail cards (« Created/Modified by {author} on {date} », cf. AuditLine, API mode).
   audit: {
     createdBy: "Created by {{author}} on {{date}}",
