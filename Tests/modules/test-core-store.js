@@ -1093,6 +1093,30 @@ module.exports = async () => {
   {
     ck.eq(Html.escape('<a b="c">&\''), "&lt;a b=&quot;c&quot;&gt;&amp;&#39;", "Html.escape : entités");
     ck.eq(Html.escape(null), "", "Html.escape(null) → \"\"");
+    // Html.mailtoLink : adresses mail cliquables (fiche + listing contacts).
+    {
+      // Adresse normale → lien mailto. Le href ENCODE l'adresse (le « @ » devient « %40 ») : cette assertion
+      // MORD si l'on retire `encodeURIComponent` (le href contiendrait alors un « @ » brut).
+      ck.eq(Html.mailtoLink("jean@exemple.fr"), '<a href="mailto:jean%40exemple.fr">jean@exemple.fr</a>', "mailtoLink : adresse normale → lien encodé");
+      // Caractères à échapper dans le texte visible : ni évasion d'attribut (pas de « \" » brut dans le href),
+      // ni HTML injecté dans le texte (« < » « & » échappés). L'adresse passe la garde (aucune espace, un « @ »).
+      const dirty = Html.mailtoLink('a"&<@b.c');
+      ck.eq(dirty, '<a href="mailto:a%22%26%3C%40b.c">a&quot;&amp;&lt;@b.c</a>', "mailtoLink : caractères spéciaux → attribut ET texte sûrs");
+      // Le contenu du href ne comporte AUCUN « \" » brut : l'attribut ne peut pas être évadé (percent-encodage puis échappement).
+      ck(/^mailto:[^"<>]*$/.test(dirty.slice(dirty.indexOf('="') + 2, dirty.indexOf('">'))), "mailtoLink : href non évadable");
+      // Injection d'en-têtes : un retour à la ligne fait ÉCHOUER la garde → l'adresse n'est PAS linkifiée
+      // (aucun « mailto: » ne peut donc porter le retour ligne dans un href). Mord si la garde est retirée
+      // (l'adresse deviendrait un lien). Le retour ligne subsiste dans le TEXTE échappé, ce qui est inoffensif.
+      const injected = Html.mailtoLink("a@b.c\r\nBcc:pirate@x.io");
+      ck(injected.indexOf("<a") === -1, "mailtoLink : retour ligne (injection d'en-tête) → PAS de lien");
+      ck(injected.indexOf("mailto:") === -1, "mailtoLink : retour ligne → aucun href mailto injectable");
+      // Chaîne vide et valeurs non plausibles → texte échappé, jamais de balise <a> (garde SOBRE).
+      ck.eq(Html.mailtoLink(""), "", "mailtoLink(vide) → \"\"");
+      ck.eq(Html.mailtoLink(null), "", "mailtoLink(null) → \"\"");
+      ck.eq(Html.mailtoLink("pas-un-email"), "pas-un-email", "mailtoLink : sans « @ » → texte, pas de lien");
+      ck.eq(Html.mailtoLink("a b@c.d"), "a b@c.d", "mailtoLink : espace → texte, pas de lien");
+      ck.eq(Html.mailtoLink("a@b@c"), "a@b@c", "mailtoLink : deux « @ » → texte, pas de lien");
+    }
     ck.eq(JSON.stringify(Color.hexToRgb("#ff8800")), JSON.stringify({ r: 255, g: 136, b: 0 }), "Color.hexToRgb(#ff8800)");
     ck.eq(Color.hexToRgb("xyz"), null, "Color.hexToRgb(invalide) → null");
     ck.eq(Color.cssToHex("#ff8800"), 0xff8800, "Color.cssToHex(#rrggbb)");

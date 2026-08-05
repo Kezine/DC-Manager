@@ -302,7 +302,7 @@ export class ListConfigs {
           filter: { label: I18n.t("lists.col.organization"), options: organizationOptions, valueOf: (c) => c.organization || "" },
         },
         { head: I18n.t("lists.col.position"), sortKey: "position", sort: (c) => c.position || "", render: (c) => (c.position ? Html.escape(c.position) : dim("—")) },
-        { head: I18n.t("lists.col.email"), sortKey: "email", sort: (c) => c.email || "", render: (c) => (c.email ? Html.escape(c.email) : dim("—")) },
+        { head: I18n.t("lists.col.email"), sortKey: "email", sort: (c) => c.email || "", render: (c) => (c.email ? Html.mailtoLink(c.email) : dim("—")) },
         { head: I18n.t("lists.col.phone"), render: (c) => (c.phone ? Html.escape(c.phone) : dim("—")) },
         { head: I18n.t("lists.col.notes"), cls: "cell-desc", sort: (c) => c.notes || "", render: (c) => (c.notes ? Html.escape(String(c.notes).slice(0, 80)) : dim("—")) },
       ],
