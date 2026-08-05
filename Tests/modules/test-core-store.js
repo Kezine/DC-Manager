@@ -1095,13 +1095,20 @@ module.exports = async () => {
     ck.eq(Html.escape(null), "", "Html.escape(null) → \"\"");
     // Html.mailtoLink : adresses mail cliquables (fiche + listing contacts).
     {
-      // Adresse normale → lien mailto. Le href ENCODE l'adresse (le « @ » devient « %40 ») : cette assertion
-      // MORD si l'on retire `encodeURIComponent` (le href contiendrait alors un « @ » brut).
-      ck.eq(Html.mailtoLink("jean@exemple.fr"), '<a href="mailto:jean%40exemple.fr">jean@exemple.fr</a>', "mailtoLink : adresse normale → lien encodé");
+      // Adresse normale → lien mailto. Le « @ » reste LITTÉRAL dans le href : c'est le séparateur de la
+      // grammaire mailto (RFC 6068), un « %40 » n'étant pas redécodé par tous les clients mail.
+      ck.eq(Html.mailtoLink("jean@exemple.fr"), '<a href="mailto:jean@exemple.fr">jean@exemple.fr</a>', "mailtoLink : adresse normale → « @ » littéral dans le href");
+      // …mais l'encodage EST bien appliqué au reste : le « + » (alias type gmail « user+tag@… ») devient
+      // « %2B ». Cette assertion MORD si l'on retire `encodeURIComponent` (un « + » brut se lit « espace »
+      // dans une URL), et la restitution du « @ » ne doit surtout PAS déborder sur d'autres caractères.
+      ck.eq(Html.mailtoLink("jean+devis@exemple.fr"), '<a href="mailto:jean%2Bdevis@exemple.fr">jean+devis@exemple.fr</a>', "mailtoLink : « + » encodé, « @ » littéral");
+      // Injection de CHAMPS d'en-tête : « ? » et « & » ouvriraient `?subject=`/`&bcc=` — ils doivent rester
+      // encodés (%3F / %26), sinon un contact malveillant pré-remplirait un mail à l'insu de l'utilisateur.
+      ck.eq(Html.mailtoLink("a?bcc=x&y@b.c"), '<a href="mailto:a%3Fbcc%3Dx%26y@b.c">a?bcc=x&amp;y@b.c</a>', "mailtoLink : « ? » et « & » encodés (pas de champs d'en-tête injectables)");
       // Caractères à échapper dans le texte visible : ni évasion d'attribut (pas de « \" » brut dans le href),
       // ni HTML injecté dans le texte (« < » « & » échappés). L'adresse passe la garde (aucune espace, un « @ »).
       const dirty = Html.mailtoLink('a"&<@b.c');
-      ck.eq(dirty, '<a href="mailto:a%22%26%3C%40b.c">a&quot;&amp;&lt;@b.c</a>', "mailtoLink : caractères spéciaux → attribut ET texte sûrs");
+      ck.eq(dirty, '<a href="mailto:a%22%26%3C@b.c">a&quot;&amp;&lt;@b.c</a>', "mailtoLink : caractères spéciaux → attribut ET texte sûrs");
       // Le contenu du href ne comporte AUCUN « \" » brut : l'attribut ne peut pas être évadé (percent-encodage puis échappement).
       ck(/^mailto:[^"<>]*$/.test(dirty.slice(dirty.indexOf('="') + 2, dirty.indexOf('">'))), "mailtoLink : href non évadable");
       // Injection d'en-têtes : un retour à la ligne fait ÉCHOUER la garde → l'adresse n'est PAS linkifiée

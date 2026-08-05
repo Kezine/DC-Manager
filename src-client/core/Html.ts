@@ -22,10 +22,15 @@ export class Html {
     const text = this.escape(value);   // texte VISIBLE = l'adresse telle quelle, seulement échappée
     if (!EMAIL_PLAUSIBLE.test(value)) return text;
     // DOUBLE protection de l'URL : d'abord `encodeURIComponent` neutralise les caractères dangereux dans le
-    // `mailto:` — notamment `%0A`/retours à la ligne, qui injecteraient des en-têtes dans certains clients
-    // mail — PUIS `escape` sécurise l'insertion en VALEUR D'ATTRIBUT. Pas de `target="_blank"` : un `mailto:`
-    // n'ouvre pas d'onglet (ce serait un onglet blanc parasite sur certains navigateurs).
-    const href = this.escape("mailto:" + encodeURIComponent(value));
+    // `mailto:` — notamment `?` et `&`, qui ouvriraient des champs d'en-tête (`?subject=`/`&bcc=`) — PUIS
+    // `escape` sécurise l'insertion en VALEUR D'ATTRIBUT. Pas de `target="_blank"` : un `mailto:` n'ouvre
+    // pas d'onglet (ce serait un onglet blanc parasite sur certains navigateurs).
+    // ⚠ Le « @ » est RESTITUÉ après encodage : dans la grammaire `mailto:` (RFC 6068) il SÉPARE partie
+    // locale et domaine, il n'est pas une donnée à encoder — un `%40` n'est pas redécodé par tous les
+    // clients mail, qui reçoivent alors un destinataire invalide (« jean%40exemple.fr »). C'est sûr ici :
+    // la garde ci-dessus a prouvé qu'il y a EXACTEMENT un « @ » et aucune espace, et les caractères
+    // réellement dangereux (`?`, `&`, retours à la ligne) restent encodés.
+    const href = this.escape("mailto:" + encodeURIComponent(value).replace(/%40/g, "@"));
     return `<a href="${href}">${text}</a>`;
   }
 }
