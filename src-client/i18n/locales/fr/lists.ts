@@ -92,6 +92,8 @@ export const lists = {
     rooms: "Salles",
     email: "E-mail",
     phone: "Téléphone",
+    organization: "Organisation",
+    position: "Poste",
     notes: "Notes",
     building: "Bâtiment",
     floor: "Étage",

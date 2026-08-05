@@ -277,8 +277,18 @@ export class ListConfigs {
   }
 
   /** Contacts — carnet de destinataires des NOTIFICATIONS (email/sms), référencés par le module notify.
-      Collection hors graphe réseau (jamais dessinée) : liste simple nom · e-mail · téléphone · notes. */
+      Collection hors graphe réseau (jamais dessinée) : liste nom · organisation · poste · e-mail ·
+      téléphone · notes. */
   static contacts(store: Store): ListOptions {
+    // Options de FILTRE « Organisation » : valeurs DISTINCTES et triées, calculées à la volée sur les
+    // contacts DU DOCUMENT (dynamiques — le mécanisme de filtres réévalue `options()` à chaque re-rendu,
+    // cf. ListView._ensureToolbar). Même patron que le filtre « Hôte » du listing VMs (`static vms` ci-dessus) :
+    // la correspondance porte sur la MÊME valeur que l'affichage, donc filtre et colonne ne peuvent pas se contredire.
+    const organizationOptions = (): { id: string; label: string }[] => {
+      const s = new Set<string>();
+      store.all("contacts").forEach((c: any) => { if (c.organization) s.add(c.organization); });
+      return [...s].sort().map((o) => ({ id: o, label: o }));
+    };
     return {
       collection: "contacts",
       defaultSort: { key: "name", dir: "asc" },
@@ -286,6 +296,12 @@ export class ListConfigs {
       actions: { view: true, edit: true, clone: false, del: true },   // clone sans objet pour un destinataire unique
       columns: [
         { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (c) => c.name, render: (c) => Html.escape(c.name || I18n.t("lists.ph.contact")) },
+        {
+          head: I18n.t("lists.col.organization"), sortKey: "organization", sort: (c) => c.organization || "",
+          render: (c) => (c.organization ? Html.escape(c.organization) : dim("—")),
+          filter: { label: I18n.t("lists.col.organization"), options: organizationOptions, valueOf: (c) => c.organization || "" },
+        },
+        { head: I18n.t("lists.col.position"), sortKey: "position", sort: (c) => c.position || "", render: (c) => (c.position ? Html.escape(c.position) : dim("—")) },
         { head: I18n.t("lists.col.email"), sortKey: "email", sort: (c) => c.email || "", render: (c) => (c.email ? Html.escape(c.email) : dim("—")) },
         { head: I18n.t("lists.col.phone"), render: (c) => (c.phone ? Html.escape(c.phone) : dim("—")) },
         { head: I18n.t("lists.col.notes"), cls: "cell-desc", sort: (c) => c.notes || "", render: (c) => (c.notes ? Html.escape(String(c.notes).slice(0, 80)) : dim("—")) },

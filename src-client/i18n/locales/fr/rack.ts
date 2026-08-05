@@ -168,6 +168,8 @@ export const rack = {
   },
   contact: {
     namePlaceholder: "ex. Astreinte réseau, J. Martin…",
+    organizationPlaceholder: "ex. Sonuma, prestataire externe…",
+    positionPlaceholder: "ex. Responsable infrastructure…",
     emailPlaceholder: "nom@exemple.test",
     emailHint: "Cible des notifications « email » (facultatif).",
     phonePlaceholder: "ex. +32 2 555 01 23",

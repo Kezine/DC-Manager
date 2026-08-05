@@ -86,6 +86,8 @@ export const lists = {
     rooms: "Rooms",
     email: "E-mail",
     phone: "Phone",
+    organization: "Organization",
+    position: "Position",
     notes: "Notes",
     building: "Building",
     floor: "Floor",

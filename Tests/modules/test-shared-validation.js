@@ -1750,6 +1750,19 @@ module.exports = async () => {
     ck.eq(norm.phone, "+32 2 555 01 23", "contacts : téléphone trimé");
     // AUCUNE FK déclarée → aucune cascade ne pointe vers contacts (plan de suppression vide, hors périmètre ici).
     ck.eq((Validation.COLLECTION_SPECS.contacts.fields.name.required === true), true, "contacts : spec — name requis déclaré");
+    // ORGANISATION / POSTE (2026-08-05) : identité saisie à la main, comme e-mail — trimées, optionnelles,
+    // `default: ""` OBLIGATOIRE (verrou « null silencieux » des tests, cf. autre section de ce fichier).
+    ck.eq(Validation.COLLECTION_SPECS.contacts.fields.organization.default, "", "contacts : organization — default '' (pas de null silencieux)");
+    ck.eq(Validation.COLLECTION_SPECS.contacts.fields.position.default, "", "contacts : position — default '' (pas de null silencieux)");
+    ck.eq(!!Validation.COLLECTION_SPECS.contacts.fields.organization.required, false, "contacts : organization — non requis");
+    ck.eq(!!Validation.COLLECTION_SPECS.contacts.fields.position.required, false, "contacts : position — non requis");
+    const normOrgPos = V.normalizeRecord("contacts", { name: "x", organization: "  Sonuma  ", position: "  Chef de projet  " });
+    ck.eq(normOrgPos.organization, "Sonuma", "contacts : organization trimée");
+    ck.eq(normOrgPos.position, "Chef de projet", "contacts : position trimée");
+    // Enregistrement SANS ces champs → normalisés au défaut "" (pas de null qui traverserait silencieusement).
+    const normAbsent = V.normalizeRecord("contacts", { name: "x" });
+    ck.eq(normAbsent.organization, "", "contacts : organization absente → normalisée à '' par défaut");
+    ck.eq(normAbsent.position, "", "contacts : position absente → normalisée à '' par défaut");
   }
   });
 

@@ -546,6 +546,10 @@ export class DetailForms extends IpamForms {
     const root = document.createElement("div");
     root.appendChild(this.grid([
       [I18n.t("lists.col.name"), Html.escape(c.name || I18n.t("lists.ph.contact"))],
+      // Organisation/poste : lignes CONDITIONNELLES (absentes plutôt que « — ») — l'un ou l'autre est
+      // couramment vide (un contact générique, une astreinte) et ne mérite pas une ligne muette de plus.
+      ...(c.organization ? [[I18n.t("lists.col.organization"), Html.escape(c.organization)] as [string, string]] : []),
+      ...(c.position ? [[I18n.t("lists.col.position"), Html.escape(c.position)] as [string, string]] : []),
       [I18n.t("lists.col.email"), c.email ? Html.escape(c.email) : this.MUTED],
       [I18n.t("lists.col.phone"), c.phone ? Html.escape(c.phone) : this.MUTED],
       [I18n.t("lists.col.notes"), c.notes ? `<div class="md-body">${Markdown.render(c.notes)}</div>` : this.MUTED],

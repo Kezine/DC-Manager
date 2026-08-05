@@ -161,6 +161,8 @@ export const rack = {
   },
   contact: {
     namePlaceholder: "e.g. Network on-call, J. Martin…",
+    organizationPlaceholder: "e.g. Sonuma, external vendor…",
+    positionPlaceholder: "e.g. Infrastructure manager…",
     emailPlaceholder: "name@example.test",
     emailHint: "Target of « email » notifications (optional).",
     phonePlaceholder: "e.g. +32 2 555 01 23",

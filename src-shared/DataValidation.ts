@@ -1076,6 +1076,9 @@ const SPEC_FIELDS = {
       name:  { type: "string", required: true, trim: true },   // identité du contact — trimée (fiabilise le libellé)
       email: { type: "string", trim: true },                   // optionnel — format contrôlé en douceur (invariant)
       phone: { type: "string", trim: true },                   // optionnel — quasi libre (invariant)
+      // Organisation/poste — identité SAISIE À LA MAIN (comme email), trimées, aucun format imposé.
+      organization: { type: "string", default: "", trim: true }, // organisation/société du contact — optionnel
+      position:     { type: "string", default: "", trim: true }, // intitulé de fonction du contact — optionnel
       notes: { type: "string" },                               // notes libres (multi-lignes) — aucune contrainte
       description: { type: "string", default: "" },            // héritée d'Entity (présente sur tout enregistrement)
   },

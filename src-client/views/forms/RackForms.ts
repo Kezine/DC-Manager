@@ -518,15 +518,20 @@ export class RackForms extends CableForms {
     setTimeout(() => nameI.focus(), 30);
   }
 
-  /** CONTACT — destinataire des NOTIFICATIONS (email/sms), tenu PAR DOCUMENT : nom (requis) · e-mail ·
-      téléphone · notes. Validation TOLÉRANTE (cf. spec `contacts` : e-mail/téléphone contrôlés « en douceur »,
-      jamais bloquants sur une saisie raisonnable). Placé ici, aux côtés du formulaire `site` (autre entité
-      « plate » simple) : le FORMULAIRE ne bouge pas ; seul son ONGLET a migré sous le groupe « Paramètres » (S6). */
+  /** CONTACT — destinataire des NOTIFICATIONS (email/sms), tenu PAR DOCUMENT : nom (requis) · organisation ·
+      poste · e-mail · téléphone · notes. Validation TOLÉRANTE (cf. spec `contacts` : e-mail/téléphone
+      contrôlés « en douceur », jamais bloquants sur une saisie raisonnable). Placé ici, aux côtés du
+      formulaire `site` (autre entité « plate » simple) : le FORMULAIRE ne bouge pas ; seul son ONGLET a
+      migré sous le groupe « Paramètres » (S6). */
   static contact(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
     const c: any = id ? store.get("contacts", id) : null;
     const root = document.createElement("div");
     const nameI = FormControls.text(c ? c.name : "", I18n.t("rack.contact.namePlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("lists.col.name"), nameI));
+    const organizationI = FormControls.text(c ? c.organization : "", I18n.t("rack.contact.organizationPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("lists.col.organization"), organizationI));
+    const positionI = FormControls.text(c ? c.position : "", I18n.t("rack.contact.positionPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("lists.col.position"), positionI));
     const emailI = FormControls.text(c ? c.email : "", I18n.t("rack.contact.emailPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("lists.col.email"), emailI, I18n.t("rack.contact.emailHint")));
     const phoneI = FormControls.text(c ? c.phone : "", I18n.t("rack.contact.phonePlaceholder"));
@@ -542,7 +547,7 @@ export class RackForms extends CableForms {
       subtitle: c ? Html.escape(c.name) : "",
       body: root,
       onSave: async () => {
-        const payload = { name: nameI.value.trim(), email: emailI.value.trim(), phone: phoneI.value.trim(), notes: notesI.value.trim() };
+        const payload = { name: nameI.value.trim(), organization: organizationI.value.trim(), position: positionI.value.trim(), email: emailI.value.trim(), phone: phoneI.value.trim(), notes: notesI.value.trim() };
         if (live.check(payload).length) return false;   // nom requis + e-mail/téléphone invalides (surlignés)
         if (!await FormSave.record(store, "contacts", c && c.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(c ? I18n.t("rack.contact.updated") : I18n.t("rack.contact.created")); onSaved?.(); return true;

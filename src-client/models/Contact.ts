@@ -15,6 +15,10 @@ export class Contact extends Entity implements Records.Contact {
   email: string;
   /** Numéro de téléphone (optionnel) — cible d'une notification « sms ». Texte quasi libre. */
   phone: string;
+  /** Organisation / société du contact (optionnelle). */
+  organization: string;
+  /** Intitulé de fonction (poste) du contact (optionnel). */
+  position: string;
   /** Notes libres (optionnelles). */
   notes: string;
 
@@ -23,6 +27,8 @@ export class Contact extends Entity implements Records.Contact {
     this.name = p.name || "";
     this.email = p.email || "";
     this.phone = p.phone || "";
+    this.organization = p.organization || "";
+    this.position = p.position || "";
     this.notes = p.notes || "";
   }
 }
